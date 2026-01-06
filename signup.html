@@ -48,7 +48,7 @@
 
       <div id="step-form" style="display:none;">
         <div class="text-center mb-4">
-          <h4 class="fw-bold">가입 신청서 📝</h4>
+          <h4 class="fw-bold">용인모두의햇빛협동조합 조합원 가입 신청서 📝</h4>
         </div>
 
         <form id="joinForm" onsubmit="handleFormSubmit(event, this)">
@@ -67,20 +67,28 @@
             </div>
 
             <div class="col-12">
+              <label class="form-label fw-bold small">이메일 (인증됨)</label>
+              <input type="text" id="verifiedEmail" class="form-control bg-light" readonly style="color:#666;">
+            </div>
+
+            <div class="col-12">
               <label class="form-label fw-bold small" id="lbl-id">주민등록번호</label>
               
               <div id="box-rrn" class="d-flex gap-2 align-items-center">
-                <input type="text" id="rrn1" maxlength="6" class="form-control text-center" placeholder="앞 6자리" oninput="onlyNum(this); autoMove(this,'rrn2',6); checkAgeLimit();">
+                <input type="text" id="rrn1" maxlength="6" class="form-control text-center" placeholder="앞 6자리" 
+                       oninput="onlyNum(this); autoMove(this,'rrn2',6); clearError();">
                 <span>-</span>
-                <input type="password" id="rrn2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" oninput="onlyNum(this); checkAgeLimit();">
+                <input type="password" id="rrn2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" 
+                       oninput="onlyNum(this); clearError();" 
+                       onblur="checkRRNFinal()">
               </div>
 
               <div id="box-biz" class="d-flex gap-2 align-items-center" style="display:none;">
-                <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" oninput="onlyNum(this); autoMove(this,'biz2',3);">
+                <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" oninput="onlyNum(this); autoMove(this,'biz2',3); clearError();">
                 <span>-</span>
-                <input type="text" id="biz2" maxlength="2" class="form-control text-center" placeholder="2자리" oninput="onlyNum(this); autoMove(this,'biz3',2);">
+                <input type="text" id="biz2" maxlength="2" class="form-control text-center" placeholder="2자리" oninput="onlyNum(this); autoMove(this,'biz3',2); clearError();">
                 <span>-</span>
-                <input type="text" id="biz3" maxlength="5" class="form-control text-center" placeholder="5자리" oninput="onlyNum(this); validateBizNo();">
+                <input type="text" id="biz3" maxlength="5" class="form-control text-center" placeholder="5자리" oninput="onlyNum(this); validateBizNo(); clearError();">
               </div>
               
               <div id="idError" class="text-danger small mt-2 fw-bold"></div>
@@ -93,7 +101,9 @@
               <div class="d-flex gap-2">
                 <input type="text" id="p1" value="010" class="form-control text-center" maxlength="3" oninput="onlyNum(this); autoMove(this,'p2',3);">
                 <input type="text" id="p2" class="form-control text-center" maxlength="4" oninput="onlyNum(this); autoMove(this,'p3',4);">
-                <input type="text" id="p3" class="form-control text-center" maxlength="4" oninput="onlyNum(this);">
+                <input type="text" id="p3" class="form-control text-center" maxlength="4" 
+                       oninput="onlyNum(this);" 
+                       onblur="checkPhoneDuplicateServer()">
               </div>
             </div>
 
@@ -152,8 +162,6 @@
 
           <button type="submit" id="btnSubmit" class="btn btn-success w-100 py-3 mt-4 rounded-4 fw-bold fs-5">가입 신청하기 ☀️</button>
         </form>
-        
-        <input type="hidden" id="verifiedEmail">
       </div>
 
     </div> 
@@ -198,7 +206,7 @@
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // [2] 약관 데이터
+    // [2] 약관 데이터 (유지)
     const termsData = {
       privacy: { 
         title: "개인정보 수집 및 활용 동의", 
@@ -214,7 +222,7 @@
       }
     };
 
-    // [3] UI 제어 함수
+    // [3] UI 제어 함수 (유지)
     function openSheet(id) {
       const overlay = document.getElementById(id);
       const sheet = overlay.querySelector('.bottom-sheet');
@@ -272,13 +280,19 @@
           document.getElementById('biz1').required = true; document.getElementById('biz3').required = true;
       }
       
-      document.getElementById('idError').innerText = "";
+      clearError(); // 타입 변경 시 에러 메시지 초기화
       syncAccountHolder();
     }
 
     // [5] 검증 및 유틸 함수
     function onlyNum(el) { el.value = el.value.replace(/[^0-9]/g, ''); }
     function autoMove(curr, next, len) { if(curr.value.length >= len) document.getElementById(next).focus(); }
+    
+    // [추가] 에러 메시지 초기화 (입력 시작하면 경고 문구 삭제)
+    function clearError() {
+      const errorDiv = document.getElementById('idError');
+      if (errorDiv) errorDiv.innerText = "";
+    }
     
     function syncAccountHolder() {
       document.getElementById('accountHolder').value = document.getElementById('userName').value;
@@ -293,30 +307,103 @@
       }
     }
 
-    // 주민번호 검증
-    function checkAgeLimit() {
-      var rrn1 = document.getElementById('rrn1').value;
-      var rrn2 = document.getElementById('rrn2').value;
-      var errorDiv = document.getElementById('idError');
-      if (rrn1.length < 6) return;
+    // =================================================================
+    // [수정] 주민등록번호 3중 검증 시스템 (유효성 -> 나이 -> 중복)
+    // 기존 checkAgeLimit()을 삭제하고 이 통합 로직으로 대체했습니다.
+    // =================================================================
+    
+    // 1. 수학적 유효성 검증 함수 (Helper)
+    function isValidRRN(front, back) {
+      const rrn = front + back;
+      if (!/^[0-9]{13}$/.test(rrn)) return false;
 
-      if (rrn2.length >= 1) {
-        var firstDigit = parseInt(rrn2.charAt(0));
-        var birthYearPrefix = (firstDigit === 1 || firstDigit === 2 || firstDigit === 5 || firstDigit === 6) ? 19 : 20;
-        var birthYear = parseInt(birthYearPrefix + rrn1.substring(0, 2));
-        var age = new Date().getFullYear() - birthYear;
-        
-        if (age < 19) {
-          alert("⛔ 미성년자는 가입할 수 없습니다.");
-          document.getElementById('rrn1').value = ""; document.getElementById('rrn2').value = "";
-          errorDiv.innerText = "미성년자 가입 제한";
-        } else {
-          errorDiv.innerText = "";
-        }
+      let sum = 0;
+      const multipliers = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5];
+
+      for (let i = 0; i < 12; i++) {
+        sum += parseInt(rrn.charAt(i)) * multipliers[i];
+      }
+      const remainder = (11 - (sum % 11)) % 10;
+      return remainder === parseInt(rrn.charAt(12));
+    }
+
+    // 2. 미성년자 판별 함수 (Helper)
+    function isMinor(front, back) {
+      const firstDigit = parseInt(back.charAt(0));
+      const prefix = (firstDigit === 1 || firstDigit === 2 || firstDigit === 5 || firstDigit === 6) ? 19 : 20;
+      
+      const birthYear = parseInt(prefix + front.substring(0, 2));
+      const birthMonth = parseInt(front.substring(2, 4)) - 1; 
+      const birthDay = parseInt(front.substring(4, 6));
+
+      const today = new Date();
+      let age = today.getFullYear() - birthYear;
+      
+      const m = today.getMonth() - birthMonth;
+      if (m < 0 || (m === 0 && today.getDate() < birthDay)) {
+        age--;
+      }
+      return age < 19; // 만 19세 미만이면 true
+    }
+
+    // 3. [메인] 주민번호 최종 검증 핸들러 (onblur에 연결)
+    async function checkRRNFinal() {
+      const r1Input = document.getElementById('rrn1');
+      const r2Input = document.getElementById('rrn2');
+      const errorDiv = document.getElementById('idError');
+      
+      const r1 = r1Input.value;
+      const r2 = r2Input.value;
+
+      // 입력 미완료 시 중단
+      if (!r1 || !r2 || r1.length !== 6 || r2.length !== 7) return;
+
+      // (1) 유효성 검사 (오타/가짜 번호 체크)
+      if (!isValidRRN(r1, r2)) {
+        alert("❌ 올바른 주민등록번호 형식이 아닙니다.");
+        r2Input.value = "";
+        r2Input.focus();
+        return;
+      }
+
+      // (2) 미성년자 검사 (가입 차단)
+      if (isMinor(r1, r2)) {
+        alert("⛔ 미성년자는 가입할 수 없습니다.");
+        r2Input.value = "";
+        errorDiv.innerText = "미성년자 가입 제한";
+        errorDiv.className = "text-danger small mt-2 fw-bold";
+        return;
+      }
+
+      // (3) 서버 중복 체크 (DB 조회)
+      // 단체 회원이면 체크 안 함
+      const typeRadio = document.querySelector('input[name="userType"]:checked');
+      if (typeRadio && typeRadio.value === '단체') return;
+
+      const fullRRN = r1 + "-" + r2; 
+      
+      // RPC 호출
+      const { data, error } = await _supabase.rpc('check_duplicate', { 
+        check_field: 'rrn', 
+        check_value: fullRRN 
+      });
+
+      if (data === true) {
+        alert("❌ 이미 가입된 주민등록번호입니다.");
+        r2Input.value = "";
+        r2Input.focus();
+        errorDiv.innerText = "이미 가입된 번호입니다.";
+        errorDiv.className = "text-danger small mt-2 fw-bold";
+      } else {
+        // 통과
+        errorDiv.innerText = "✅ 가입 가능한 번호입니다.";
+        errorDiv.className = "text-primary small mt-2 fw-bold";
       }
     }
 
+    // =================================================================
     // 사업자번호 검증
+    // =================================================================
     function validateBizNo() {
        var b1 = document.getElementById('biz1').value; var b2 = document.getElementById('biz2').value; var b3 = document.getElementById('biz3').value;
        var bizNo = b1 + b2 + b3;
@@ -329,8 +416,8 @@
        chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1)); 
        remander = (10 - (chkSum % 10)) % 10 ; 
        
-if (Math.floor(bizNo.charAt(9)) === remander) {
-          // [추가] 서버 중복 체크 로직
+       if (Math.floor(bizNo.charAt(9)) === remander) {
+          // 서버 중복 체크 로직
           const formattedBiz = b1 + "-" + b2 + "-" + b3;
           
           _supabase.rpc('check_duplicate', { 
@@ -342,14 +429,14 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
                 errorDiv.className = "text-danger small mt-2 fw-bold";
                 document.getElementById('orgNo').value = "";
              } else {
-                // 중복 아님 + 유효함
                 errorDiv.innerText = "✅ 유효한 사업자번호입니다.";
                 errorDiv.className = "text-primary small mt-2 fw-bold";
                 document.getElementById('orgNo').value = formattedBiz;
              }
           });
        } else {
-          errorDiv.innerText = "❌ 유효하지 않은 번호"; errorDiv.className = "text-danger small mt-2 fw-bold";
+          errorDiv.innerText = "❌ 유효하지 않은 사업자번호입니다."; 
+          errorDiv.className = "text-danger small mt-2 fw-bold";
           document.getElementById('orgNo').value = ""; 
        }
     }
@@ -387,15 +474,17 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
 
     // ★★★ [중요] 페이지 로드 시 가입 경로 판별 ★★★
     window.onload = async function() {
-      // 1. 초기 렌더링 수정 (개인/단체 겹침 방지)
       toggleType('개인'); 
 
-      // 2. 세션 확인
+      // 세션 확인
       const { data: { session } } = await _supabase.auth.getSession();
       if (session) {
         document.getElementById('step-gate').style.display = 'none';
         document.getElementById('step-form').style.display = 'block';
-        document.getElementById('verifiedEmail').value = session.user.email;
+        
+        // [수정] 이메일 항목에 값 넣고 보여주기
+        const emailInput = document.getElementById('verifiedEmail');
+        emailInput.value = session.user.email;
         
         // SNS 정보가 있는지 확인
         const meta = session.user.user_metadata;
@@ -426,7 +515,7 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
       if(type === '개인') {
         if(document.getElementById('rrn1').value.length < 6 || document.getElementById('rrn2').value.length < 1) 
           return alert("주민등록번호를 입력해주세요.");
-        fullID = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value; // 전체 번호 전송
+        fullID = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value; 
       } else {
         if(!document.getElementById('orgNo').value) 
           return alert("유효한 사업자번호를 입력해주세요.");
@@ -445,23 +534,21 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
 
       // 5. 가입 경로 및 SNS ID 판별
       const { data: { session } } = await _supabase.auth.getSession();
-      let joinPath = '홈페이지'; // 기본값
+      let joinPath = '홈페이지'; 
       let kakaoId = null;
       let naverId = null;
 
       if (session) {
-        // provider 확인 (kakao, google, email 등)
         const provider = session.user.app_metadata.provider;
         
         if (provider === 'kakao') {
             joinPath = '간편가입(카카오)';
-            // 카카오는 user.id (UUID)를 연결하거나, 필요하다면 meta의 provider_id를 사용
             kakaoId = session.user.id; 
         } else if (provider === 'naver') {
             joinPath = '간편가입(네이버)';
             naverId = session.user.id;
         } else {
-            joinPath = '일반가입(웹)'; // 매직링크 포함
+            joinPath = '일반가입(웹)'; 
         }
       }
 
@@ -471,17 +558,16 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
       const insertData = {
         name: document.getElementById('userName').value,
         member_type: type,
-        rrn_encrypted: fullID, // 암호화용 컬럼에 원본 전송 (DB 트리거 암호화 권장)
+        rrn_encrypted: fullID, 
         phone: document.getElementById('p1').value + "-" + document.getElementById('p2').value + "-" + document.getElementById('p3').value,
         email: document.getElementById('verifiedEmail').value,
         address: document.getElementById('roadAddress').value + " " + document.getElementById('detailAddress').value,
-        pledge_amount: Number(document.getElementById('money').value), // int8 변환
+        pledge_amount: Number(document.getElementById('money').value), 
         recommender: document.getElementById('recommender').value, 
         bank_name: bank,
         account_number: document.getElementById('accountNo').value,
         account_holder: document.getElementById('accountHolder').value,
         
-        // 추가 요청 사항 반영
         join_path: joinPath,
         kakao_id: kakaoId,
         naver_id: naverId,
@@ -501,9 +587,9 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
         document.getElementById('successModal').style.display = 'flex';
       }
     }
-   // [수정] 전화번호 중복 체크 (RPC 함수 사용)
+
+    // [수정] 전화번호 중복 체크 (RPC 함수 사용) - HTML에서 onblur로 연결됨
     async function checkPhoneDuplicateServer() {
-      // 단체 회원은 연락처 중복 체크 패스 (필요 시 삭제 가능)
       const type = document.querySelector('input[name="userType"]:checked').value;
       if (type === '단체') return;
 
@@ -514,34 +600,20 @@ if (Math.floor(bizNo.charAt(9)) === remander) {
 
       const fullPhone = p1 + "-" + p2 + "-" + p3;
       
-      // rpc('함수명', {파라미터})
       const { data, error } = await _supabase.rpc('check_duplicate', { 
         check_field: 'phone', 
         check_value: fullPhone 
       });
 
-      if (data === true) { // data가 true면 중복
+      if (data === true) { 
         alert("이미 가입된 연락처입니다.");
         document.getElementById('p3').value = "";
         document.getElementById('p3').focus();
       }
     }
-   // [수정] 계좌번호 중복 체크 (RPC 함수 사용)
-    async function checkAccountDuplicateServer() {
-      const acc = document.getElementById('accountNo').value;
-      if (!acc) return;
+    
+    // [수정] 계좌번호 중복 체크 함수 삭제됨 (사용자 요청)
 
-      const { data, error } = await _supabase.rpc('check_duplicate', { 
-        check_field: 'account', 
-        check_value: acc 
-      });
-
-      if (data === true) {
-        alert("이미 등록된 계좌번호입니다.");
-        document.getElementById('accountNo').value = "";
-        document.getElementById('accountNo').focus();
-      }
-    }
   </script>
 </body>
 </html>
