@@ -233,19 +233,27 @@
       overlay.style.display = 'block';
       setTimeout(() => { sheet.classList.add('show'); }, 10);
     }
-    function closeSheet(id) {
-      const overlay = document.getElementById(id);
-      const sheet = overlay.querySelector('.bottom-sheet');
-      sheet.classList.remove('show');
-      setTimeout(() => { overlay.style.display = 'none'; }, 300);
-    }
+function closeSheet(id) {
+  const overlay = document.getElementById(id);
+  const sheet = overlay.querySelector('.bottom-sheet');
+  sheet.classList.remove('show');
+  setTimeout(() => { overlay.style.display = 'none'; }, 300);
+
+  // 약관 시트가 닫힐 때 자동 체크 로직
+  if (id === 'sheet-terms' && currentTermType) {
+    const map = { 'privacy': 'agree1', 'purpose': 'agree2', 'risk': 'agree3' };
+    const boxId = map[currentTermType];
+    if (boxId) document.getElementById(boxId).checked = true;
+    currentTermType = null; // 초기화
+  }
+}
     
 function openTermSheet(type) {
-      currentTermType = type; // privacy, purpose, risk 중 하나 저장
-      document.getElementById('termTitle').innerText = termsData[type].title;
-      document.getElementById('termContent').innerHTML = termsData[type].content.replace(/\n/g, '<br>');
-      openSheet('sheet-terms');
-    }
+  currentTermType = type; // privacy, purpose, risk 중 하나
+  document.getElementById('termTitle').innerText = termsData[type].title;
+  document.getElementById('termContent').innerHTML = termsData[type].content.replace(/\n/g, '<br>');
+  openSheet('sheet-terms');
+}
     
     function openPostcodeSheet() {
       openSheet('sheet-postcode');
@@ -339,38 +347,38 @@ function toggleType(type) {
 
     // 사업자번호 검증 (원 코드 로직 복구)
 function validateBizNo() {
-       var b1 = document.getElementById('biz1').value;
-       var b2 = document.getElementById('biz2').value;
-       var b3 = document.getElementById('biz3').value;
-       var bizNo = b1 + b2 + b3;
-       if(bizNo.length < 10) return;
-       
-       // 국세청 알고리즘
-       var checkID = [1, 3, 7, 1, 3, 7, 1, 3, 5]; 
-       var i, chkSum=0, c2, remander; 
-       for (i=0; i<=7; i++) chkSum += checkID[i] * bizNo.charAt(i); 
-       c2 = "0" + (checkID[8] * bizNo.charAt(8)); c2 = c2.substring(c2.length - 2); 
-       chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1)); 
-       remander = (10 - (chkSum % 10)) % 10 ; 
-       
-       if (Math.floor(bizNo.charAt(9)) === remander) {
-          // 서버 중복 체크
-          _supabase.rpc('check_duplicate', { 
-             check_field: 'biz', check_value: b1 + "-" + b2 + "-" + b3 
-          }).then(({ data }) => {
-             if(data === true) {
-                setMsg('bizMsg', "❌ 이미 가입된 사업자번호입니다.", true);
-                document.getElementById('orgNo').value = "";
-             } else {
-                setMsg('bizMsg', "✅ 유효한 사업자번호입니다.", false);
-                document.getElementById('orgNo').value = b1 + "-" + b2 + "-" + b3;
-             }
-          });
-       } else { 
-          setMsg('bizMsg', "❌ 유효하지 않은 사업자번호입니다.", true);
-          document.getElementById('orgNo').value = ""; 
-       }
-    }
+   var b1 = document.getElementById('biz1').value;
+   var b2 = document.getElementById('biz2').value;
+   var b3 = document.getElementById('biz3').value;
+   var bizNo = b1 + b2 + b3;
+   if(bizNo.length < 10) return;
+   
+   // 국세청 알고리즘
+   var checkID = [1, 3, 7, 1, 3, 7, 1, 3, 5]; 
+   var i, chkSum=0, c2, remander; 
+   for (i=0; i<=7; i++) chkSum += checkID[i] * bizNo.charAt(i); 
+   c2 = "0" + (checkID[8] * bizNo.charAt(8)); c2 = c2.substring(c2.length - 2); 
+   chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1)); 
+   remander = (10 - (chkSum % 10)) % 10 ; 
+   
+   if (Math.floor(bizNo.charAt(9)) === remander) {
+      // 서버 중복 체크
+      _supabase.rpc('check_duplicate', { 
+         check_field: 'biz', check_value: b1 + "-" + b2 + "-" + b3 
+      }).then(({ data }) => {
+         if(data === true) {
+            setMsg('bizMsg', "❌ 이미 가입된 사업자번호입니다.", true);
+            document.getElementById('orgNo').value = "";
+         } else {
+            setMsg('bizMsg', "✅ 유효한 사업자번호입니다.", false);
+            document.getElementById('orgNo').value = b1 + "-" + b2 + "-" + b3;
+         }
+      });
+   } else { 
+      setMsg('bizMsg', "❌ 유효하지 않은 사업자번호입니다.", true);
+      document.getElementById('orgNo').value = ""; 
+   }
+}
     
     // [수정] 출자금 10만원 체크 복구
     function updateMoneyHint() {
@@ -425,85 +433,170 @@ function validateBizNo() {
     }
 
     // [7] 제출 로직
-    async function handleFormSubmit(e, form) {
-      e.preventDefault();
-      // 필수 입력값 검사 (HTML required 속성 활용)
-      const inputs = form.querySelectorAll('input[required], select[required]');
-      let isFirstError = true;
-      let hasError = false;
-      
-      inputs.forEach(input => {
-        // 체크박스 제외, 값 비었으면
-        if (input.type !== 'checkbox' && !input.value) {
-           input.classList.add('is-invalid-field'); // 빨간 테두리
-           hasError = true;
-           if(isFirstError) {
-             input.focus();
-             input.scrollIntoView({ behavior: 'smooth', block: 'center' }); // 해당 위치로 스크롤
-             isFirstError = false;
-           }
-        }
-        // 체크박스 체크 안됐으면
-        if (input.type === 'checkbox' && !input.checked) {
-           // 체크박스는 라벨 색상을 바꾸거나 알림 (여기선 심플하게 넘어감)
-           hasError = true; 
-        }
-      });
+// [수정] 제출 함수 (빈 값 체크 + DB 저장)
+async function handleFormSubmit(e, form) {
+  e.preventDefault();
+  
+  // 1. 빈 값 체크 및 빨간 테두리 표시
+  const inputs = form.querySelectorAll('input[required], select[required]');
+  let isFirstError = true;
+  let hasError = false;
 
-      if(hasError) return; // 전송 중단
-      const btn = document.getElementById('btnSubmit');
-      const type = document.querySelector('input[name="userType"]:checked').value;
-      
-      // 1. 식별번호 조립
-      let rrn = "";
-      if(type === '개인') {
-        if(document.getElementById('rrn1').value.length < 6 || document.getElementById('rrn2').value.length < 1) 
-          return alert("주민등록번호를 입력해주세요.");
-        rrn = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value[0] + "******";
-      } else {
-        if(!document.getElementById('orgNo').value) 
-          return alert("유효한 사업자번호를 입력해주세요.");
-        rrn = document.getElementById('orgNo').value;
-      }
-      
-      // 2. 은행 직접입력 처리
-      let bank = document.getElementById('bankName').value;
-      if(bank === '직접입력') {
-         bank = document.getElementById('bankDirectInput').value;
-         if(!bank) return alert("은행명을 입력해주세요.");
-      }
-      
-      // 3. 출자금 확인
-      if(document.getElementById('money').value < 100000) return alert("출자금은 최소 10만원 이상이어야 합니다.");
-
-      btn.disabled = true; btn.innerText = "저장 중...";
-
-      const insertData = {
-        name: document.getElementById('userName').value,
-        member_type: type,
-        rrn_display: rrn,
-        phone: document.getElementById('p1').value + "-" + document.getElementById('p2').value + "-" + document.getElementById('p3').value,
-        email: document.getElementById('verifiedEmail').value,
-        address: document.getElementById('roadAddress').value + " " + document.getElementById('detailAddress').value,
-        pledge_amount: Number(document.getElementById('money').value),
-        recommender: document.getElementById('recommender').value, 
-        bank_name: bank,
-        account_number: document.getElementById('accountNo').value,
-        account_holder: document.getElementById('accountHolder').value,
-        status: '정상',
-        join_path: '홈페이지',
-        payment_status: '미납',
-        is_agreed: true
-      };
-
-      const { error } = await _supabase.from('coop_members').insert([insertData]);
-      if(error) {
-        alert("저장 실패: " + error.message);
-        btn.disabled = false; btn.innerText = "가입 신청하기 ☀️";
-      } else {
-        document.getElementById('successModal').style.display = 'flex';
-      }
+  inputs.forEach(input => {
+    // 체크박스 제외하고 값이 비었으면
+    if (input.type !== 'checkbox' && !input.value) {
+       input.classList.add('is-invalid-field'); // 빨간 테두리 추가
+       hasError = true;
+       if(isFirstError) {
+         input.focus(); // 첫 번째 에러 항목으로 포커스
+         input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+         isFirstError = false;
+       }
     }
+  });
+
+  if(hasError) return; // 에러 있으면 멈춤
+
+  // 2. 데이터 준비 및 DB 전송 (기존 로직 유지)
+  const btn = document.getElementById('btnSubmit');
+  const type = document.querySelector('input[name="userType"]:checked').value;
+  
+  // 식별번호 조합
+  let fullID = "";
+  if(type === '개인') {
+    fullID = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value; 
+  } else {
+    fullID = document.getElementById('orgNo').value;
+    if(!fullID) return alert("사업자번호 중복 확인이 필요합니다."); // orgNo가 비었으면 방어
+  }
+  
+  // 은행 처리
+  let bank = document.getElementById('bankName').value;
+  if(bank === '직접입력') {
+     bank = document.getElementById('bankDirectInput').value;
+     if(!bank) return alert("은행명을 입력해주세요.");
+  }
+  
+  // 출자금 최종 확인
+  if(document.getElementById('money').value < 100000) return alert("출자금은 최소 10만원 이상이어야 합니다.");
+
+  // 가입 경로 파악
+  const { data: { session } } = await _supabase.auth.getSession();
+  let joinPath = '홈페이지'; 
+  let kakaoId = null; let naverId = null;
+
+  if (session) {
+    const provider = session.user.app_metadata.provider;
+    if (provider === 'kakao') { joinPath = '간편가입(카카오)'; kakaoId = session.user.id; } 
+    else if (provider === 'naver') { joinPath = '간편가입(네이버)'; naverId = session.user.id; } 
+    else { joinPath = '일반가입(웹)'; }
+  }
+
+  btn.disabled = true; btn.innerText = "저장 중...";
+
+  const insertData = {
+    name: document.getElementById('userName').value,
+    member_type: type,
+    rrn_encrypted: fullID, 
+    phone: document.getElementById('p1').value + "-" + document.getElementById('p2').value + "-" + document.getElementById('p3').value,
+    email: document.getElementById('verifiedEmail').value,
+    address: document.getElementById('roadAddress').value + " " + document.getElementById('detailAddress').value,
+    pledge_amount: Number(document.getElementById('money').value), 
+    recommender: document.getElementById('recommender').value, 
+    bank_name: bank,
+    account_number: document.getElementById('accountNo').value,
+    account_holder: document.getElementById('accountHolder').value,
+    join_path: joinPath, kakao_id: kakaoId, naver_id: naverId,
+    status: '정상', payment_status: '미납', is_agreed: true
+  };
+
+  const { error } = await _supabase.from('coop_members').insert([insertData]);
+  
+  if(error) {
+    console.error(error);
+    alert("저장 실패: " + error.message);
+    btn.disabled = false; btn.innerText = "가입 신청하기 ☀️";
+  } else {
+    document.getElementById('successModal').style.display = 'flex';
+  }
+}
+    // [신규] 메시지 표시 및 버튼 제어 헬퍼
+function setMsg(elId, text, isError) {
+  const el = document.getElementById(elId);
+  if(el) {
+    el.innerText = text;
+    el.className = isError ? "msg-box msg-error" : "msg-box msg-success";
+    el.style.display = 'block';
+  }
+  // 에러면 가입 버튼 비활성화
+  const btn = document.getElementById('btnSubmit');
+  if(isError) btn.disabled = true; 
+}
+
+// [신규] 메시지 초기화 및 버튼 활성화 (다시 입력 시 호출)
+function resetMsg(elId) {
+  const el = document.getElementById(elId);
+  if(el) {
+    el.innerText = "";
+    el.style.display = 'none';
+  }
+  document.getElementById('btnSubmit').disabled = false;
+}
+
+// [신규] 빨간 테두리 제거 (다시 입력 시 호출)
+function clearFieldWarning(el) {
+  el.classList.remove('is-invalid-field');
+}
+    // [신규/교체] 주민등록번호 3중 검증 (유효성 -> 나이 -> DB중복)
+async function checkRRNFinal() {
+  const r1 = document.getElementById('rrn1').value;
+  const r2 = document.getElementById('rrn2').value;
+  if (r1.length < 6 || r2.length < 7) return;
+
+  // 1. 유효성
+  if (!isValidRRN(r1, r2)) {
+     setMsg('rrnMsg', "❌ 유효하지 않은 주민등록번호입니다.", true);
+     return;
+  }
+  // 2. 미성년자
+  if (isMinor(r1, r2)) {
+     setMsg('rrnMsg', "⛔ 미성년자는 가입할 수 없습니다.", true);
+     return;
+  }
+
+  // 3. 중복 체크 (개인만)
+  const type = document.querySelector('input[name="userType"]:checked').value;
+  if (type === '단체') return;
+
+  const { data } = await _supabase.rpc('check_duplicate', { 
+    check_field: 'rrn', check_value: r1 + "-" + r2 
+  });
+
+  if (data === true) {
+    setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
+  } else {
+    setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
+  }
+}
+    async function checkPhoneDuplicateServer() {
+  const type = document.querySelector('input[name="userType"]:checked').value;
+  if (type === '단체') return;
+  
+  const p1 = document.getElementById('p1').value;
+  const p2 = document.getElementById('p2').value;
+  const p3 = document.getElementById('p3').value;
+  if(!p1 || !p2 || !p3) return;
+
+  const { data } = await _supabase.rpc('check_duplicate', { 
+    check_field: 'phone', check_value: p1 + "-" + p2 + "-" + p3 
+  });
+
+  if (data === true) {
+    setMsg('phoneMsg', "❌ 이미 가입된 연락처입니다.", true);
+  } else {
+    setMsg('phoneMsg', "✅ 사용 가능한 연락처입니다.", false);
+  }
+}
   </script>
 </body>
 </html>
