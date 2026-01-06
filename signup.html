@@ -39,13 +39,13 @@
           </div>
         </div>
 
-        <div id="email-gate-input" class="mt-4" style="display:none; animation: fadeIn 0.5s;">
-          <div class="input-group mb-2">
-            <input type="email" id="init-email" class="form-control" placeholder="이메일 주소를 입력해주세요" style="height:55px; border-radius:12px 0 0 12px;">
-            <button class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink" style="border-radius:0 12px 12px 0;">링크 발송</button>
-          </div>
-          <p id="mail-status" class="small"></p>
-        </div>
+<div id="email-gate-input" class="mt-4" style="display:none; animation: fadeIn 0.5s;">
+  <div class="input-group mb-2 email-gate-group">
+    <input type="email" id="init-email" class="form-control" placeholder="이메일 주소를 입력해주세요">
+    <button class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">링크 발송</button>
+  </div>
+  <p id="mail-status" class="small mt-2"></p>
+</div>
       </div>
 
       <div id="step-form" style="display:none;">
@@ -157,26 +157,45 @@
     // [화면 전환 로직]
     function showEmailInput() { document.getElementById('email-gate-input').style.display = 'block'; }
     
-    async function sendMagicLink() {
-      const email = document.getElementById('init-email').value;
-      if(!email) return alert('이메일을 입력해주세요.');
-      
-      const btn = document.getElementById('btnSendLink');
-      btn.disabled = true; btn.innerText = "발송중...";
+async function sendMagicLink() {
+  const emailInput = document.getElementById('init-email');
+  const btn = document.getElementById('btnSendLink');
+  const email = emailInput.value;
+  
+  // 1. 유효성 검사
+  if(!email) return alert('이메일을 입력해주세요.');
+  if(!email.includes('@')) return alert('올바른 이메일 형식이 아닙니다.');
+  
+  // 2. 버튼 잠금 (중복 클릭 방지)
+  btn.disabled = true; 
+  btn.innerText = "발송중...";
 
-      const { error } = await _supabase.auth.signInWithOtp({ 
-        email: email,
-        options: { emailRedirectTo: window.location.href } // 현재 페이지로 다시 돌아오게 함
-      });
+  // 3. Supabase 매직링크 발송
+  const { error } = await _supabase.auth.signInWithOtp({ 
+    email: email,
+    options: { emailRedirectTo: window.location.href }
+  });
 
-      if(error) {
-        alert("오류: " + error.message);
-        btn.disabled = false; btn.innerText = "링크 발송";
-      } else {
-        document.getElementById('mail-status').innerHTML = "<b>매직링크가 발송되었습니다!</b><br>메일함의 링크를 누르면 신청서가 나타납니다. 🕊️";
-        document.getElementById('mail-status').style.color = "blue";
-      }
-    }
+  if(error) {
+    alert("오류: " + error.message);
+    // 실패 시 다시 입력할 수 있게 풀어줌
+    btn.disabled = false; 
+    btn.innerText = "링크 발송";
+  } else {
+    // 4. [요청하신 기능] 성공 시 입력창 잠그기 (수정 불가)
+    emailInput.readOnly = true; // 입력 불가 상태로 변경
+    emailInput.style.backgroundColor = "#f0f0f0"; // 회색으로 변해서 잠긴 티 내기
+    
+    // 버튼 상태 변경
+    btn.innerText = "발송 완료";
+    // (선택) 버튼도 아예 못 누르게 하려면 아래 줄 유지, 다시 보내게 하려면 삭제
+    // btn.disabled = true; 
+
+    // 안내 메시지
+    document.getElementById('mail-status').innerHTML = "<b>🚀 매직링크가 발송되었습니다!</b><br>메일함을 확인하고 링크를 클릭해주세요.";
+    document.getElementById('mail-status').style.color = "blue";
+  }
+}
 
     // [인증 완료 확인 및 폼 로드]
     window.onload = async function() {
