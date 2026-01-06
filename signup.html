@@ -69,13 +69,23 @@
               <input type="text" id="userName" name="userName" class="form-control form-control-lg" placeholder="성함을 입력하세요" required oninput="syncAccountHolder()">
             </div>
 
-            <div class="col-12" id="idField">
+            <div class="col-12">
               <label class="form-label fw-bold" id="label-id">주민등록번호</label>
-              <div class="d-flex gap-2 align-items-center">
-                <input type="text" id="rrn1" maxlength="6" class="form-control" placeholder="앞 6자리" oninput="handleNumberOnly(this); autoMove(this, 'rrn2', 6); checkAgeLimit();">
+              
+              <div id="area-rrn" class="d-flex gap-2 align-items-center">
+                <input type="text" id="rrn1" maxlength="6" class="form-control text-center" placeholder="앞 6자리" oninput="handleNumberOnly(this); autoMove(this, 'rrn2', 6); checkAgeLimit();">
                 <span>-</span>
-                <input type="password" id="rrn2" maxlength="7" class="form-control" placeholder="뒤 7자리" oninput="handleNumberOnly(this); checkAgeLimit();">
+                <input type="password" id="rrn2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" oninput="handleNumberOnly(this); checkAgeLimit();">
               </div>
+
+              <div id="area-biz" class="d-flex gap-2 align-items-center" style="display:none;">
+                <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" oninput="handleNumberOnly(this); autoMove(this, 'biz2', 3);">
+                <span>-</span>
+                <input type="text" id="biz2" maxlength="2" class="form-control text-center" placeholder="2자리" oninput="handleNumberOnly(this); autoMove(this, 'biz3', 2);">
+                <span>-</span>
+                <input type="text" id="biz3" maxlength="5" class="form-control text-center" placeholder="5자리" oninput="handleNumberOnly(this);">
+              </div>
+              
               <div id="rrnError" class="text-danger small mt-1"></div>
             </div>
 
@@ -245,15 +255,32 @@ async function sendMagicLink() {
     }
 
     // [폼 제출 로직]
-    async function handleFormSubmit(e, form) {
+async function handleFormSubmit(e, form) {
       e.preventDefault();
       const btn = document.getElementById('btnSubmit');
+      
+      // 타입 확인
+      const userType = document.querySelector('input[name="userType"]:checked').value;
+      let rrnValue = "";
+
+      // 타입에 따라 식별번호 조립
+      if (userType === '개인') {
+         rrnValue = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value[0] + "******";
+      } else {
+         // 사업자번호 조립 (3-2-5)
+         const b1 = document.getElementById('biz1').value;
+         const b2 = document.getElementById('biz2').value;
+         const b3 = document.getElementById('biz3').value;
+         if(b1.length<3 || b2.length<2 || b3.length<5) return alert("사업자번호를 올바르게 입력해주세요.");
+         rrnValue = b1 + "-" + b2 + "-" + b3;
+      }
+
       btn.disabled = true; btn.innerText = "제출 중...";
 
       const insertData = {
         name: document.getElementById('userName').value,
-        member_type: document.querySelector('input[name="userType"]:checked').value,
-        rrn_display: document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value[0] + "******",
+        member_type: userType,
+        rrn_display: rrnValue, // 여기에 주민번호 또는 사업자번호가 들어감
         phone: document.getElementById('p1').value + "-" + document.getElementById('p2').value + "-" + document.getElementById('p3').value,
         email: document.getElementById('email').value,
         address: document.getElementById('roadAddress').value + " " + document.getElementById('detailAddress').value,
