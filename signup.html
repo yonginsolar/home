@@ -12,56 +12,34 @@
   
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <style>
-    /* 이 페이지에서만 쓸 미세 조정 CSS */
-    .input-group-text-btn {
-      border-radius: 0 15px 15px 0 !important;
-      z-index: 0;
-    }
-    .form-control-left {
-      border-radius: 15px 0 0 15px !important;
-    }
-    .term-link { cursor: pointer; text-decoration: underline; color: #555; }
-    .term-link:hover { color: #2e7d32; font-weight: bold; }
-    
-    /* 우편번호 검색창 정렬용 */
-    .postcode-group { display: flex; width: 100%; }
-    .postcode-group input { flex: 1; border-radius: 15px 0 0 15px !important; }
-    .postcode-group button { width: 100px; border-radius: 0 15px 15px 0 !important; }
-  </style>
 </head>
 
-<body style="background-color: #f6f9ff;">
+<body style="background-color: #f0f2f5;">
 
-  <div class="container">
-    <div class="signup-wrapper">
-      
-      <div id="step-gate" class="text-center">
+  <div class="mobile-view-container">
+    <div class="signup-content">
+
+      <div id="step-gate" class="text-center pt-5">
         <span class="step-emoji">☀️</span>
         <h2 style="font-family:'GmarketSans'; font-weight:700;">함께 지구를 구해요!</h2>
         <p class="text-muted mb-5">용인모두의햇빛협동조합 가입을 환영합니다 🌱</p>
         
-        <div class="row g-3 justify-content-center">
-          <div class="col-md-5">
-            <div class="gate-card" onclick="startKakaoSignup()">
-              <i class="bi bi-chat-fill" style="font-size:30px; color:#3c1e1e;"></i>
-              <h5 class="mt-3 fw-bold">카카오 가입</h5>
-              <p class="small text-muted mb-0">3초 만에 간편하게!</p>
+        <div class="d-grid gap-3">
+          <div class="gate-card" onclick="startKakaoSignup()">
+            <div class="d-flex align-items-center justify-content-center gap-2">
+              <i class="bi bi-chat-fill" style="color:#3c1e1e;"></i> <span>카카오로 3초 만에 시작</span>
             </div>
           </div>
-          <div class="col-md-5">
-            <div class="gate-card" onclick="showEmailInput()">
-              <i class="bi bi-envelope-paper-heart" style="font-size:30px; color:var(--color-primary);"></i>
-              <h5 class="mt-3 fw-bold">이메일 가입</h5>
-              <p class="small text-muted mb-0">매직링크로 안전하게!</p>
+          <div class="gate-card" onclick="showEmailInput()">
+            <div class="d-flex align-items-center justify-content-center gap-2">
+              <i class="bi bi-envelope-heart" style="color:var(--color-primary);"></i> <span>이메일로 시작하기</span>
             </div>
           </div>
         </div>
 
         <div id="email-gate-input" class="mt-4" style="display:none; animation: fadeIn 0.5s;">
-          <div class="input-group mb-2 email-gate-group justify-content-center">
-            <input type="email" id="init-email" class="form-control" placeholder="이메일 주소를 입력해주세요">
+          <div class="input-group mb-2 email-gate-group">
+            <input type="email" id="init-email" class="form-control" placeholder="이메일 주소 입력">
             <button class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">링크 발송</button>
           </div>
           <p id="mail-status" class="small mt-2"></p>
@@ -70,192 +48,329 @@
 
       <div id="step-form" style="display:none;">
         <div class="text-center mb-4">
-          <span class="step-emoji">📝</span>
-          <h3 class="fw-bold">신청서 작성</h3>
-          <p class="text-muted small">거의 다 왔어요! 정보를 입력해주세요.</p>
+          <h4 class="fw-bold">가입 신청서 📝</h4>
         </div>
 
         <form id="joinForm" onsubmit="handleFormSubmit(event, this)">
           
           <div class="btn-group w-100 mb-4" role="group">
-            <input type="radio" class="btn-check" name="userType" id="type-p" value="개인" checked onchange="toggleType('개인')">
-            <label class="btn btn-outline-success py-3" for="type-p">👤 개인</label>
-            
-            <input type="radio" class="btn-check" name="userType" id="type-o" value="단체" onchange="toggleType('단체')">
-            <label class="btn btn-outline-success py-3" for="type-o">🏢 단체</label>
+            <input type="radio" class="btn-check" name="userType" id="t-indi" value="개인" checked onchange="toggleType('개인')">
+            <label class="btn btn-outline-success" for="t-indi">👤 개인</label>
+            <input type="radio" class="btn-check" name="userType" id="t-org" value="단체" onchange="toggleType('단체')">
+            <label class="btn btn-outline-success" for="t-org">🏢 단체</label>
           </div>
 
           <div class="row g-3">
-            <div class="col-12" id="nameField">
-              <label class="form-label fw-bold" id="label-name">이름 (실명)</label>
-              <input type="text" id="userName" name="userName" class="form-control form-control-lg" placeholder="성함을 입력하세요" required oninput="syncAccountHolder()">
+            <div class="col-12">
+              <label class="form-label fw-bold small" id="lbl-name">이름 (실명)</label>
+              <input type="text" id="userName" class="form-control" placeholder="성함을 입력하세요" required oninput="syncAccountHolder()">
             </div>
 
             <div class="col-12">
-              <label class="form-label fw-bold" id="label-id">주민등록번호</label>
+              <label class="form-label fw-bold small" id="lbl-id">주민등록번호</label>
               
-              <div id="area-rrn" class="d-flex gap-2 align-items-center">
-                <input type="text" id="rrn1" maxlength="6" class="form-control text-center" placeholder="앞 6자리" oninput="handleNumberOnly(this); autoMove(this, 'rrn2', 6); checkAgeLimit();">
+              <div id="box-rrn" class="d-flex gap-2 align-items-center">
+                <input type="text" id="rrn1" maxlength="6" class="form-control text-center" placeholder="앞 6자리" oninput="onlyNum(this); autoMove(this,'rrn2',6); checkAgeLimit();">
                 <span>-</span>
-                <input type="password" id="rrn2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" oninput="handleNumberOnly(this); checkAgeLimit();">
+                <input type="password" id="rrn2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" oninput="onlyNum(this); checkAgeLimit();">
               </div>
 
-              <div id="area-biz" class="d-flex gap-2 align-items-center" style="display:none;">
-                <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" oninput="handleNumberOnly(this); autoMove(this, 'biz2', 3);">
+              <div id="box-biz" class="d-flex gap-2 align-items-center" style="display:none;">
+                <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" oninput="onlyNum(this); autoMove(this,'biz2',3);">
                 <span>-</span>
-                <input type="text" id="biz2" maxlength="2" class="form-control text-center" placeholder="2자리" oninput="handleNumberOnly(this); autoMove(this, 'biz3', 2);">
+                <input type="text" id="biz2" maxlength="2" class="form-control text-center" placeholder="2자리" oninput="onlyNum(this); autoMove(this,'biz3',2);">
                 <span>-</span>
-                <input type="text" id="biz3" maxlength="5" class="form-control text-center" placeholder="5자리" oninput="handleNumberOnly(this);">
+                <input type="text" id="biz3" maxlength="5" class="form-control text-center" placeholder="5자리" oninput="onlyNum(this); validateBizNo();">
               </div>
-              <div id="rrnError" class="text-danger small mt-1"></div>
+              <div id="idError" class="text-danger small mt-1" style="font-size:12px;"></div>
+              <input type="hidden" id="orgNo"> 
             </div>
 
             <div class="col-12">
-              <label class="form-label fw-bold">연락처 📱</label>
-              <div class="d-flex gap-2 align-items-center">
-                <input type="text" id="p1" maxlength="3" value="010" class="form-control text-center">
-                <span>-</span>
-                <input type="text" id="p2" maxlength="4" class="form-control text-center">
-                <span>-</span>
-                <input type="text" id="p3" maxlength="4" class="form-control text-center" onblur="checkPhoneDuplicateServer()">
+              <label class="form-label fw-bold small">연락처</label>
+              <div class="d-flex gap-2">
+                <input type="text" id="p1" value="010" class="form-control text-center" maxlength="3" oninput="onlyNum(this); autoMove(this,'p2',3);">
+                <input type="text" id="p2" class="form-control text-center" maxlength="4" oninput="onlyNum(this); autoMove(this,'p3',4);">
+                <input type="text" id="p3" class="form-control text-center" maxlength="4" oninput="onlyNum(this);">
               </div>
             </div>
 
             <div class="col-12">
-              <label class="form-label fw-bold">주소 🏠</label>
-              <div class="postcode-group mb-2">
-                <input type="text" id="postcode" class="form-control" placeholder="우편번호" readonly>
-                <button type="button" class="btn btn-secondary" onclick="execDaumPostcode()">검색</button>
+              <label class="form-label fw-bold small">주소</label>
+              <div class="input-group mb-2" onclick="openPostcodeSheet()" style="cursor:pointer;">
+                <input type="text" id="postcode" class="form-control bg-white" placeholder="우편번호 검색 >" readonly style="cursor:pointer;">
+                <button type="button" class="btn btn-secondary"><i class="bi bi-search"></i></button>
               </div>
-              <input type="text" id="roadAddress" class="form-control mb-2" readonly placeholder="도로명/지번 주소">
-              <input type="text" id="detailAddress" class="form-control" placeholder="상세주소를 입력해주세요" required>
+              <input type="text" id="roadAddress" class="form-control mb-2 bg-light" readonly>
+              <input type="text" id="detailAddress" class="form-control" placeholder="상세주소 입력">
             </div>
 
             <div class="col-12">
-              <label class="form-label fw-bold">인증된 이메일 ✅</label>
-              <input type="email" id="email" name="email" class="form-control bg-light" readonly>
+              <label class="form-label fw-bold small">추천인 (선택사항)</label>
+              <input type="text" id="recommender" class="form-control" placeholder="추천인 이름을 입력해주세요">
             </div>
 
             <div class="col-12">
-              <label class="form-label fw-bold">출자금 약정 💰</label>
-              <input type="number" id="money" name="money" class="form-control form-control-lg" placeholder="10만원 이상, 1만원 단위" min="100000" step="10000" oninput="updateMoneyHint()" required>
-              <div id="moneyHint" class="text-success small mt-1"></div>
+              <label class="form-label fw-bold small">출자금 약정 (10만원 이상, 1만원 단위)</label>
+              <input type="number" id="money" class="form-control" placeholder="숫자만 입력 (예: 100000)" min="100000" step="10000" oninput="updateMoneyHint()" required>
+              <div id="moneyHint" class="small mt-1" style="color:#666;"></div>
             </div>
 
-            <div class="col-12 bg-light p-3 rounded-4 mt-4">
-              <p class="fw-bold mb-3">배당금 받을 계좌 🏦</p>
-              <select id="bankName" name="bankName" class="form-select mb-2" required>
+            <div class="col-12 bg-light p-3 rounded-4 mt-2">
+              <label class="fw-bold small mb-2">배당금 계좌</label>
+              <select id="bankName" class="form-select mb-2" onchange="handleBankChange(this)" required>
                 <option value="" disabled selected>은행을 선택해주세요</option>
                 <option value="농협">농협</option><option value="국민">국민</option><option value="신한">신한</option><option value="우리">우리</option>
                 <option value="하나">하나</option><option value="기업">기업</option><option value="카카오뱅크">카카오뱅크</option><option value="토스뱅크">토스뱅크</option>
                 <option value="새마을">새마을</option><option value="신협">신협</option><option value="우체국">우체국</option><option value="SC제일">SC제일</option>
                 <option value="부산">부산</option><option value="대구">대구</option><option value="광주">광주</option><option value="전북">전북</option><option value="수협">수협</option>
+                <option value="직접입력">직접 입력</option>
               </select>
-              <input type="text" id="accountNo" name="accountNo" class="form-control mb-2" placeholder="계좌번호 (숫자만)" oninput="handleAccountInput(this)">
-              <input type="text" id="accountHolder" name="accountHolder" class="form-control" placeholder="예금주 (이름과 다르면 수정)" required>
+              <input type="text" id="bankDirectInput" class="form-control mb-2" placeholder="은행명 입력">
+              
+              <input type="text" id="accountNo" class="form-control mb-2" placeholder="계좌번호 (-없이 숫자만)" oninput="onlyNum(this)">
+              <input type="text" id="accountHolder" class="form-control" placeholder="예금주" required>
             </div>
           </div>
 
-          <div class="mt-4 p-3 border rounded-4 bg-white">
+          <div class="mt-4">
             <div class="form-check mb-2">
               <input class="form-check-input" type="checkbox" id="agree1" required>
-              <label class="form-check-label small" for="agree1">
-                <span class="term-link" onclick="showTerm(event, 'privacy')">[필수] 개인정보 수집 및 활용 동의</span>
-              </label>
+              <label class="form-check-label small" onclick="openTermSheet('privacy')"><u>[필수] 개인정보 수집 및 활용에 동의합니다.</u></label>
             </div>
             <div class="form-check mb-2">
               <input class="form-check-input" type="checkbox" id="agree2" required>
-              <label class="form-check-label small" for="agree2">
-                <span class="term-link" onclick="showTerm(event, 'purpose')">[필수] 조합 설립목적 동의 및 의무</span>
-              </label>
+              <label class="form-check-label small" onclick="openTermSheet('purpose')"><u>[필수] 조합의 설립목적에 동의하고 의무를 다하겠습니다.</u></label>
             </div>
             <div class="form-check mb-2">
               <input class="form-check-input" type="checkbox" id="agree3" required>
-              <label class="form-check-label small" for="agree3">
-                <span class="term-link" onclick="showTerm(event, 'risk')">[필수] 출자금 손실 위험 및 환급 제한 고지</span>
-              </label>
+              <label class="form-check-label small" onclick="openTermSheet('risk')"><u>[필수] 출자금 손실 위험 및 환급 제한 등에 동의합니다.</u></label>
             </div>
           </div>
 
-          <button type="submit" id="btnSubmit" class="btn-submit-main mt-4">가입 신청 완료하기 ☀️</button>
+          <button type="submit" id="btnSubmit" class="btn btn-success w-100 py-3 mt-4 rounded-4 fw-bold fs-5">가입 신청하기 ☀️</button>
         </form>
+        
+        <input type="hidden" id="verifiedEmail">
       </div>
 
+    </div> 
+  </div>
+
+  <div id="sheet-terms" class="bottom-sheet-overlay" onclick="closeSheet('sheet-terms')">
+    <div class="bottom-sheet" onclick="event.stopPropagation()">
+      <div class="sheet-header">
+        <span class="sheet-title" id="termTitle">약관 제목</span>
+        <button type="button" class="btn-close" onclick="closeSheet('sheet-terms')"></button>
+      </div>
+      <div id="termContent" style="white-space: pre-wrap; font-size: 13px; color: #555; line-height: 1.6;"></div>
     </div>
   </div>
 
-  <div id="popoverModal" class="custom-popover" onclick="this.classList.remove('show'); this.style.display='none';">
-    <div class="modal-content" onclick="event.stopPropagation()">
-      <div style="font-size:16px; font-weight:bold; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #eee;" id="popoverTitle">약관 내용</div>
-      <div class="alert-text small text-muted" id="popoverText" style="white-space: pre-wrap;"></div>
-      <div style="text-align:right; margin-top:15px;">
-        <button type="button" class="btn btn-sm btn-dark" onclick="document.getElementById('popoverModal').style.display='none';">닫기</button>
+  <div id="sheet-postcode" class="bottom-sheet-overlay" onclick="closeSheet('sheet-postcode')">
+    <div class="bottom-sheet" onclick="event.stopPropagation()" style="height: 70vh;">
+      <div class="sheet-header">
+        <span class="sheet-title">주소 검색</span>
+        <button type="button" class="btn-close" onclick="closeSheet('sheet-postcode')"></button>
       </div>
+      <div id="postcode-layer" style="width:100%; height:100%; -webkit-overflow-scrolling:touch;"></div>
     </div>
   </div>
 
   <div id="successModal" class="center-modal">
     <div class="modal-content">
       <div style="font-size:50px;">🎉</div>
-      <h3 class="fw-bold mt-3">반가워요, 조합원님!</h3>
-      <p class="text-muted small">가입 신청이 안전하게 접수되었습니다.<br>출자금 입금 후 정조합원이 되실 수 있습니다.</p>
+      <h3 class="fw-bold mt-3">가입 신청 완료</h3>
+      <p class="text-muted small">신청이 성공적으로 접수되었습니다.<br>출자금 입금 후 정조합원이 되실 수 있습니다.</p>
       <div class="p-3 bg-light rounded-3 text-start small mb-3">
-        🏦 <b>신협 131-022-855516</b><br>(용인모두의햇빛협동조합)
+        🏦 <b>신협 131-022-855516</b><br>(예금주: 용인모두의햇빛협동조합)
       </div>
-      <button class="btn btn-success w-100 py-3 rounded-3 fw-bold" onclick="location.href='index.html'">메인으로 돌아가기</button>
+      <button class="btn btn-success w-100" onclick="location.href='index.html'">홈으로 이동</button>
     </div>
   </div>
 
+
   <script>
-    // [1] 기본 설정
+    // [1] 슈퍼베이스 설정
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // [약관 데이터]
-    var termsData = {
-      privacy: { title: "개인정보 수집 및 활용 동의", content: "본인은「개인정보보호법」제15조 및 제17조에 따라 귀 기관이 개인정보를 수집·이용·제공 하는 것에 대하여 동의합니다.\n\n1. 수집 이용 목적: 조합원 관리 및 배당금 지급\n2. 수집 항목: 이름, 연락처, 주민번호, 주소, 계좌정보\n3. 보유 기간: 탈퇴 시까지" },
-      purpose: { title: "조합의 설립목적 동의", content: "본 조합은 시민참여형 태양광 발전소를 설립하고, 기후위기에 대응하며 지역사회에 기여함을 목적으로 합니다." },
-      risk: { title: "출자금 중요 고지", content: "1. 출자금은 예금자보호 대상이 아니며 원금 손실 가능성이 있습니다.\n2. 탈퇴 전 중도 환급이 제한될 수 있습니다.\n3. 배당은 경영 성과에 따라 달라질 수 있습니다." }
+    // [2] 약관 데이터 (선생님 원문 100% 복구)
+    const termsData = {
+      privacy: { 
+        title: "개인정보 수집 및 활용 동의", 
+        content: "본인은「개인정보보호법」제15조(수집·이용·제공) 및 제17조(개인정보의 제공) 제1항 제1호에 따라 귀 기관이 개인정보를 수집·이용·제공 하는 것에 대하여 동의합니다.\n\n1. 개인정보의 수집 이용 목적: (가칭)용인모두의햇빛협동조합의 설립 및 배당금 지급\n2. 수집하는 개인정보의 항목 : 이름, 휴대폰번호, 주민등록번호, 주소, 이메일 주소\n3. 개인정보의 보유 및 이용 기간: 개인정보의 수집·이용 목적 달성시까지, 또는 조합원이 자신의 개인정보제공의 동의를 철회한 때. 단, 관련 법령의 규정에 의하여 개인정보를 보유할 필요가 있는 경우, 해당 법령에서 정한 기간까지.\n\n* 수집된 고유식별정보(주민등록번호)는 암호화되어 안전하게 저장됩니다." 
+      },
+      purpose: { 
+        title: "조합의 설립목적 동의", 
+        content: "<b>제2조(목적)</b> 용인모두의햇빛협동조합(이하 ‘조합’이라 한다)은 자주적·자립적·자치적인 협동조합 활동을 통하여 시민참여형 태양광 발전소를 설립·운영하고, 햇빛을 닮아 모든 생명이 공평한 삶을 누릴 수 있도록 지역공동체를 중심으로 상호부조의 가치를 실천함으로써 기후위기에 대응하고, 에너지 전환을 실현하며, 취약계층에게 일자리와 사회서비스를 제공하는 등 지역사회에 기여함을 목적으로 한다." 
+      },
+      risk: { 
+        title: "출자금 및 배당 관련 중요 고지", 
+        content: "1. 출자금은 예금자보호 대상이 아니며 원금 손실 가능성이 있음을 확인했습니다.\n\n2. 탈퇴(또는 제명) 전 중도 환급이 제한될 수 있음을 확인했습니다.\n\n3. 환급은 결산 및 총회 승인 등 절차 후 가능하며 지연·분할 지급될 수 있음을 확인했습니다.\n\n4. 배당은 총회 의결 및 경영성과에 따라 결정되며 없을 수 있음을 확인했습니다." 
+      }
     };
 
-    // [2] 화면 전환 및 매직링크
+    // [3] UI 제어 함수
+    function openSheet(id) {
+      const overlay = document.getElementById(id);
+      const sheet = overlay.querySelector('.bottom-sheet');
+      overlay.style.display = 'block';
+      setTimeout(() => { sheet.classList.add('show'); }, 10);
+    }
+    function closeSheet(id) {
+      const overlay = document.getElementById(id);
+      const sheet = overlay.querySelector('.bottom-sheet');
+      sheet.classList.remove('show');
+      setTimeout(() => { overlay.style.display = 'none'; }, 300);
+    }
+    
+    function openTermSheet(type) {
+      document.getElementById('termTitle').innerText = termsData[type].title;
+      document.getElementById('termContent').innerHTML = termsData[type].content.replace(/\n/g, '<br>');
+      openSheet('sheet-terms');
+    }
+    
+    function openPostcodeSheet() {
+      openSheet('sheet-postcode');
+      const layer = document.getElementById('postcode-layer');
+      new daum.Postcode({
+        oncomplete: function(data) {
+          var addr = data.roadAddress;
+          if(data.buildingName) addr += " ("+data.buildingName+")";
+          document.getElementById('postcode').value = data.zonecode;
+          document.getElementById('roadAddress').value = addr;
+          closeSheet('sheet-postcode');
+          document.getElementById('detailAddress').focus();
+        },
+        width: '100%', height: '100%'
+      }).embed(layer);
+    }
+
+    // [4] 로직: 개인/단체 토글
+    function toggleType(type) {
+      const isInd = (type === '개인');
+      document.getElementById('lbl-name').innerText = isInd ? "이름 (실명)" : "단체명 (법인/고유명)";
+      document.getElementById('lbl-id').innerText = isInd ? "주민등록번호" : "사업자(고유)번호";
+      document.getElementById('userName').placeholder = isInd ? "성함을 입력하세요" : "단체명을 입력하세요";
+      
+      document.getElementById('box-rrn').style.display = isInd ? "flex" : "none";
+      document.getElementById('box-biz').style.display = isInd ? "none" : "flex";
+      
+      // 필수값 조정
+      if(isInd) {
+          document.getElementById('rrn1').required = true; document.getElementById('rrn2').required = true;
+          document.getElementById('biz1').required = false; document.getElementById('biz3').required = false;
+      } else {
+          document.getElementById('rrn1').required = false; document.getElementById('rrn2').required = false;
+          document.getElementById('biz1').required = true; document.getElementById('biz3').required = true;
+      }
+      syncAccountHolder();
+    }
+
+    // [5] 입력 검증 및 유틸
+    function onlyNum(el) { el.value = el.value.replace(/[^0-9]/g, ''); }
+    function autoMove(curr, next, len) { if(curr.value.length >= len) document.getElementById(next).focus(); }
+    
+    function syncAccountHolder() {
+      // 개인/단체 상관없이 이름 필드 값을 예금주로 복사
+      document.getElementById('accountHolder').value = document.getElementById('userName').value;
+    }
+
+    function handleBankChange(el) {
+      const directInput = document.getElementById('bankDirectInput');
+      if(el.value === '직접입력') {
+        directInput.style.display = 'block'; directInput.required = true; directInput.focus();
+      } else {
+        directInput.style.display = 'none'; directInput.required = false;
+      }
+    }
+
+    // 주민번호 나이 체크 (원 코드 복구)
+    function checkAgeLimit() {
+      var rrn1 = document.getElementById('rrn1').value; var rrn2 = document.getElementById('rrn2').value; 
+      if (rrn1.length === 6 && rrn2.length >= 1) {
+        var birthYearPrefix; var firstDigit = parseInt(rrn2.charAt(0));
+        if (firstDigit === 1 || firstDigit === 2 || firstDigit === 5 || firstDigit === 6) birthYearPrefix = 19;
+        else if (firstDigit === 3 || firstDigit === 4 || firstDigit === 7 || firstDigit === 8) birthYearPrefix = 20;
+        else return;
+        
+        var birthYear = parseInt(birthYearPrefix + rrn1.substring(0, 2));
+        var age = new Date().getFullYear() - birthYear;
+        // 단순 연도 계산으로 만 19세 체크 (약식)
+        if (age < 19) {
+          alert("⛔ 미성년자 가입 제한\n\n법정대리인의 동의가 필요합니다.");
+          document.getElementById('rrn1').value = ""; document.getElementById('rrn2').value = "";
+        }
+      }
+    }
+
+    // 사업자번호 검증 (원 코드 로직 복구)
+    function validateBizNo() {
+       var b1 = document.getElementById('biz1').value; var b2 = document.getElementById('biz2').value; var b3 = document.getElementById('biz3').value;
+       var bizNo = b1 + b2 + b3;
+       var errorDiv = document.getElementById('idError');
+       if(bizNo.length !== 10) { 
+           if(bizNo.length > 0) errorDiv.textContent = "사업자(고유)번호 10자리를 입력해주세요."; 
+           return; 
+       }
+       
+       var checkID = [1, 3, 7, 1, 3, 7, 1, 3, 5]; var i, chkSum=0, c2, remander; 
+       for (i=0; i<=7; i++) chkSum += checkID[i] * bizNo.charAt(i); 
+       c2 = "0" + (checkID[8] * bizNo.charAt(8)); c2 = c2.substring(c2.length - 2); 
+       chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1)); 
+       remander = (10 - (chkSum % 10)) % 10 ; 
+       
+       if (Math.floor(bizNo.charAt(9)) === remander) {
+          errorDiv.textContent = ""; 
+          document.getElementById('orgNo').value = b1 + "-" + b2 + "-" + b3;
+       } else { 
+          errorDiv.textContent = "유효하지 않은 사업자 번호입니다."; 
+          document.getElementById('orgNo').value = ""; 
+       }
+    }
+    
+    // [수정] 출자금 10만원 체크 복구
+    function updateMoneyHint() {
+       var v = document.getElementById('money').value;
+       var hint = document.getElementById('moneyHint');
+       if(v >= 100000 && v % 10000 === 0) {
+         hint.textContent = parseInt(v).toLocaleString() + '원 (' + (v/10000) + '구좌)';
+         hint.style.color = "green";
+       } else {
+         hint.textContent = '10만원 이상, 1만원 단위로 입력해주세요';
+         hint.style.color = "red";
+       }
+    }
+
+    // [6] 초기화 및 매직링크
     function showEmailInput() { document.getElementById('email-gate-input').style.display = 'block'; }
     
     async function sendMagicLink() {
-      const emailInput = document.getElementById('init-email');
-      const email = emailInput.value;
-      if(!email) return alert('이메일을 입력해주세요.');
-      
+      const email = document.getElementById('init-email').value;
+      if(!email) return alert('이메일을 입력하세요.');
       const btn = document.getElementById('btnSendLink');
       btn.disabled = true; btn.innerText = "발송중...";
-
+      
       const { error } = await _supabase.auth.signInWithOtp({ 
-        email: email,
-        options: { emailRedirectTo: window.location.href }
+        email: email, options: { emailRedirectTo: window.location.href } 
       });
-
-      if(error) {
-        alert("오류: " + error.message);
-        btn.disabled = false; btn.innerText = "링크 발송";
-      } else {
-        emailInput.readOnly = true; 
-        emailInput.style.backgroundColor = "#eee";
-        document.getElementById('mail-status').innerHTML = "<b>매직링크가 발송되었습니다!</b><br>메일함의 링크를 누르면 신청서가 나타납니다. 🕊️";
-        document.getElementById('mail-status').style.color = "blue";
+      
+      if(error) { alert(error.message); btn.disabled=false; btn.innerText="링크 발송"; }
+      else { 
+        document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 링크를 확인해주세요 📨"; 
         btn.innerText = "발송완료";
       }
     }
 
-    // [3] 초기 로드 (로그인 감지)
     window.onload = async function() {
       const { data: { session } } = await _supabase.auth.getSession();
       if (session) {
         document.getElementById('step-gate').style.display = 'none';
         document.getElementById('step-form').style.display = 'block';
-        document.getElementById('email').value = session.user.email;
+        document.getElementById('verifiedEmail').value = session.user.email;
         
-        // SNS 로그인 시 이름 자동 입력
         const meta = session.user.user_metadata;
         if(meta && meta.full_name) {
           document.getElementById('userName').value = meta.full_name;
@@ -263,103 +378,51 @@
         }
       }
     };
-
-    // [4] 개인/단체 전환 로직 (수정됨)
-    function toggleType(type) {
-      const isInd = (type === '개인');
-      document.getElementById('label-name').innerText = isInd ? "이름 (실명)" : "단체명 (법인/고유명)";
-      document.getElementById('label-id').innerText = isInd ? "주민등록번호" : "사업자(고유)번호";
-      document.getElementById('userName').placeholder = isInd ? "성함을 입력하세요" : "단체명을 입력하세요";
-
-      document.getElementById('area-rrn').style.display = isInd ? "flex" : "none";
-      document.getElementById('area-biz').style.display = isInd ? "none" : "flex";
-
-      // 예금주 동기화
-      syncAccountHolder();
-    }
-
-    // [5] 유틸리티 함수들
-    function handleNumberOnly(el) { el.value = el.value.replace(/[^0-9]/g, ''); }
-    function autoMove(c,n,l) { if(c.value.length>=l) document.getElementById(n).focus(); }
-    function updateMoneyHint() {
-      var v = document.getElementById('money').value;
-      document.getElementById('moneyHint').textContent = (v>=100000 && v%10000===0) ? parseInt(v).toLocaleString()+'원' : '10만원 이상, 1만원 단위';
-    }
     
-    // [수정] 예금주 동기화 함수
-    function syncAccountHolder() {
-      var t = document.querySelector('input[name="userType"]:checked').value;
-      // 개인/단체 여부 상관없이 userName 입력값을 예금주로 복사
-      var val = document.getElementById('userName').value;
-      document.getElementById('accountHolder').value = val;
-    }
-    
-    function handleAccountInput(el) { el.value = el.value.replace(/[^0-9]/g,''); }
-    
-    function checkAgeLimit() {
-      var r1 = document.getElementById('rrn1').value; var r2 = document.getElementById('rrn2').value;
-      if(r1.length===6 && r2.length>=1) {
-        var pre = (r2[0]==='1'||r2[0]==='2'||r2[0]==='5'||r2[0]==='6') ? 19 : 20;
-        var age = new Date().getFullYear() - (pre*100 + parseInt(r1.substring(0,2)));
-        if(age < 19) { alert("미성년자는 법정대리인 동의가 필요합니다."); document.getElementById('rrn1').value=""; document.getElementById('rrn2').value=""; }
-      }
+    async function startKakaoSignup() {
+      await _supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: window.location.href } });
     }
 
-    function execDaumPostcode() {
-      new daum.Postcode({
-        oncomplete: function(data) {
-          document.getElementById('postcode').value = data.zonecode;
-          document.getElementById('roadAddress').value = data.roadAddress;
-        }
-      }).open();
-    }
-
-    // [약관 팝업 보이기]
-    function showTerm(e, type) {
-      e.preventDefault(); e.stopPropagation(); // 체크박스 체크 방지하고 팝업만 띄움
-      var modal = document.getElementById('popoverModal');
-      document.getElementById('popoverTitle').textContent = termsData[type].title;
-      document.getElementById('popoverText').textContent = termsData[type].content;
-      
-      // 마우스 위치 근처에 띄우기 (모바일은 중앙)
-      if(window.innerWidth > 600) {
-        modal.style.display = 'block';
-        modal.querySelector('.modal-content').style.marginTop = (e.pageY - 200) + "px";
-        modal.querySelector('.modal-content').style.marginLeft = (e.pageX - 150) + "px";
-      } else {
-        modal.style.display = 'flex'; // 모바일 중앙 정렬
-      }
-    }
-
-    // [6] 폼 제출 (슈퍼베이스 연동 확인됨)
+    // [7] 제출 로직
     async function handleFormSubmit(e, form) {
       e.preventDefault();
       const btn = document.getElementById('btnSubmit');
+      const type = document.querySelector('input[name="userType"]:checked').value;
       
-      const userType = document.querySelector('input[name="userType"]:checked').value;
-      let rrnValue = "";
-
-      if (userType === '개인') {
-         rrnValue = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value[0] + "******";
+      // 1. 식별번호 조립
+      let rrn = "";
+      if(type === '개인') {
+        if(document.getElementById('rrn1').value.length < 6 || document.getElementById('rrn2').value.length < 1) 
+          return alert("주민등록번호를 입력해주세요.");
+        rrn = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value[0] + "******";
       } else {
-         const b1 = document.getElementById('biz1').value;
-         const b2 = document.getElementById('biz2').value;
-         const b3 = document.getElementById('biz3').value;
-         if(b1.length<3 || b2.length<2 || b3.length<5) return alert("사업자번호를 올바르게 입력해주세요.");
-         rrnValue = b1 + "-" + b2 + "-" + b3;
+        if(!document.getElementById('orgNo').value) 
+          return alert("유효한 사업자번호를 입력해주세요.");
+        rrn = document.getElementById('orgNo').value;
       }
+      
+      // 2. 은행 직접입력 처리
+      let bank = document.getElementById('bankName').value;
+      if(bank === '직접입력') {
+         bank = document.getElementById('bankDirectInput').value;
+         if(!bank) return alert("은행명을 입력해주세요.");
+      }
+      
+      // 3. 출자금 확인
+      if(document.getElementById('money').value < 100000) return alert("출자금은 최소 10만원 이상이어야 합니다.");
 
-      btn.disabled = true; btn.innerText = "제출 중...";
+      btn.disabled = true; btn.innerText = "저장 중...";
 
       const insertData = {
         name: document.getElementById('userName').value,
-        member_type: userType,
-        rrn_display: rrnValue,
+        member_type: type,
+        rrn_display: rrn,
         phone: document.getElementById('p1').value + "-" + document.getElementById('p2').value + "-" + document.getElementById('p3').value,
-        email: document.getElementById('email').value,
+        email: document.getElementById('verifiedEmail').value,
         address: document.getElementById('roadAddress').value + " " + document.getElementById('detailAddress').value,
         pledge_amount: Number(document.getElementById('money').value),
-        bank_name: document.getElementById('bankName').value,
+        recommender: document.getElementById('recommender').value, 
+        bank_name: bank,
         account_number: document.getElementById('accountNo').value,
         account_holder: document.getElementById('accountHolder').value,
         status: '정상',
@@ -370,15 +433,11 @@
 
       const { error } = await _supabase.from('coop_members').insert([insertData]);
       if(error) {
-        alert("제출 오류: " + error.message);
-        btn.disabled = false; btn.innerText = "가입 신청 완료하기 ☀️";
+        alert("저장 실패: " + error.message);
+        btn.disabled = false; btn.innerText = "가입 신청하기 ☀️";
       } else {
         document.getElementById('successModal').style.display = 'flex';
       }
-    }
-
-    async function startKakaoSignup() {
-      await _supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: window.location.href } });
     }
   </script>
 </body>
