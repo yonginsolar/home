@@ -419,21 +419,56 @@ function validateBizNo() {
       }
     }
 
+// [중요] 페이지 로드 및 로그인 상태 변경 감지
+    // 이메일 인증 후 돌아왔을 때 이 코드가 실행되어야 신청서 화면이 보입니다.
+    
+    // 1. 상태 감지 리스너 (로그인/로그아웃 이벤트가 발생하면 즉시 실행)
+    _supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || session) {
+        // 로그인 된 상태면 -> 신청서 화면 보여주기
+        showApplicationForm(session);
+      } else {
+        // 로그아웃 상태면 -> 초기 게이트 화면 보여주기
+        document.getElementById('step-gate').style.display = 'block';
+        document.getElementById('step-form').style.display = 'none';
+      }
+    });
+
+    // 2. 페이지 로드 시 1회 실행 (새로고침 했을 때 유지용)
     window.onload = async function() {
-      toggleType('개인');
+      // (1) UI 초기화 (개인/단체 겹침 방지)
+      toggleType('개인'); 
+
+      // (2) 세션 확인
       const { data: { session } } = await _supabase.auth.getSession();
       if (session) {
-        document.getElementById('step-gate').style.display = 'none';
-        document.getElementById('step-form').style.display = 'block';
-        document.getElementById('verifiedEmail').value = session.user.email;
-        
-        const meta = session.user.user_metadata;
-        if(meta && meta.full_name) {
-          document.getElementById('userName').value = meta.full_name;
-          syncAccountHolder();
-        }
+        showApplicationForm(session);
       }
     };
+
+    // [헬퍼] 신청서 화면으로 전환 및 데이터 채우기
+    function showApplicationForm(session) {
+      document.getElementById('step-gate').style.display = 'none';
+      document.getElementById('step-form').style.display = 'block';
+      
+      // 이메일 주소 채우기 (verifiedEmail 위치로)
+      const emailInput = document.getElementById('verifiedEmail');
+      if(emailInput) {
+        emailInput.value = session.user.email;
+      }
+      
+      // SNS 로그인(카카오 등)일 경우 이름 자동 채우기
+      const meta = session.user.user_metadata;
+      if(meta && meta.full_name) {
+        const nameInput = document.getElementById('userName');
+        // 값이 비어있을 때만 채워줌 (사용자가 수정 중일 수 있으니)
+        if(!nameInput.value) {
+          nameInput.value = meta.full_name;
+          // 이름 채워지면 예금주도 같이 채우기
+          if(typeof syncAccountHolder === 'function') syncAccountHolder();
+        }
+      }
+    }
     
     async function startKakaoSignup() {
       await _supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: window.location.href } });
