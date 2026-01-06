@@ -329,10 +329,26 @@
        chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1)); 
        remander = (10 - (chkSum % 10)) % 10 ; 
        
-       if (Math.floor(bizNo.charAt(9)) === remander) {
-          errorDiv.innerText = "✅ 유효한 사업자번호"; errorDiv.className = "text-primary small mt-2 fw-bold";
-          document.getElementById('orgNo').value = b1 + "-" + b2 + "-" + b3;
-       } else { 
+if (Math.floor(bizNo.charAt(9)) === remander) {
+          // [추가] 서버 중복 체크 로직
+          const formattedBiz = b1 + "-" + b2 + "-" + b3;
+          
+          _supabase.rpc('check_duplicate', { 
+             check_field: 'biz', 
+             check_value: formattedBiz 
+          }).then(({ data }) => {
+             if(data === true) {
+                errorDiv.innerText = "❌ 이미 가입된 사업자번호입니다.";
+                errorDiv.className = "text-danger small mt-2 fw-bold";
+                document.getElementById('orgNo').value = "";
+             } else {
+                // 중복 아님 + 유효함
+                errorDiv.innerText = "✅ 유효한 사업자번호입니다.";
+                errorDiv.className = "text-primary small mt-2 fw-bold";
+                document.getElementById('orgNo').value = formattedBiz;
+             }
+          });
+       } else {
           errorDiv.innerText = "❌ 유효하지 않은 번호"; errorDiv.className = "text-danger small mt-2 fw-bold";
           document.getElementById('orgNo').value = ""; 
        }
@@ -483,6 +499,47 @@
         btn.disabled = false; btn.innerText = "가입 신청하기 ☀️";
       } else {
         document.getElementById('successModal').style.display = 'flex';
+      }
+    }
+   // [수정] 전화번호 중복 체크 (RPC 함수 사용)
+    async function checkPhoneDuplicateServer() {
+      // 단체 회원은 연락처 중복 체크 패스 (필요 시 삭제 가능)
+      const type = document.querySelector('input[name="userType"]:checked').value;
+      if (type === '단체') return;
+
+      const p1 = document.getElementById('p1').value;
+      const p2 = document.getElementById('p2').value;
+      const p3 = document.getElementById('p3').value;
+      if(!p1 || !p2 || !p3) return;
+
+      const fullPhone = p1 + "-" + p2 + "-" + p3;
+      
+      // rpc('함수명', {파라미터})
+      const { data, error } = await _supabase.rpc('check_duplicate', { 
+        check_field: 'phone', 
+        check_value: fullPhone 
+      });
+
+      if (data === true) { // data가 true면 중복
+        alert("이미 가입된 연락처입니다.");
+        document.getElementById('p3').value = "";
+        document.getElementById('p3').focus();
+      }
+    }
+   // [수정] 계좌번호 중복 체크 (RPC 함수 사용)
+    async function checkAccountDuplicateServer() {
+      const acc = document.getElementById('accountNo').value;
+      if (!acc) return;
+
+      const { data, error } = await _supabase.rpc('check_duplicate', { 
+        check_field: 'account', 
+        check_value: acc 
+      });
+
+      if (data === true) {
+        alert("이미 등록된 계좌번호입니다.");
+        document.getElementById('accountNo').value = "";
+        document.getElementById('accountNo').focus();
       }
     }
   </script>
