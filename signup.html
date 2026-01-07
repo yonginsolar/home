@@ -66,10 +66,13 @@
     </div>
 
     <div class="row g-3">
-      <div class="col-12">
-        <label class="form-label fw-bold small" id="lbl-name">이름 (실명)</label>
-        <input type="text" id="userName" class="form-control" placeholder="성함을 입력하세요" required oninput="clearFieldWarning(this); syncAccountHolder()">
-      </div>
+<div class="col-12">
+  <label class="form-label fw-bold small" id="lbl-name">이름 (실명)</label>
+  <input type="text" id="userName" class="form-control" placeholder="성함을 입력하세요" required 
+         oninput="clearFieldWarning(this); syncAccountHolder(); resetMsg('nameMsg');" 
+         onblur="validateName()">
+  <div id="nameMsg" class="msg-box"></div>
+</div>
 
 <div class="col-12">
   <label class="form-label fw-bold small" id="lbl-id">주민등록번호</label>
@@ -144,6 +147,12 @@
     <option value="경남">경남</option><option value="제주">제주</option><option value="씨티">씨티</option><option value="케이뱅크">케이뱅크</option><option value="산림조합">산림조합</option><option value="저축은행">저축은행</option>
     <option value="직접입력">직접 입력</option>
   </select>
+  <input type="text" id="bankDirectInput" class="form-control mb-2" placeholder="은행명 입력" style="display:none;" oninput="clearFieldWarning(this)">
+
+<input type="text" id="accountNo" class="form-control mb-2" placeholder="계좌번호 (-없이 숫자만)" required 
+       oninput="onlyNum(this); clearFieldWarning(this)">
+<input type="text" id="accountHolder" class="form-control" placeholder="예금주" required 
+       oninput="clearFieldWarning(this)">
   </div>
 
     <div class="mt-4">
@@ -423,50 +432,35 @@ function validateBizNo() {
     // 이메일 인증 후 돌아왔을 때 이 코드가 실행되어야 신청서 화면이 보입니다.
     
     // 1. 상태 감지 리스너 (로그인/로그아웃 이벤트가 발생하면 즉시 실행)
+// [수정] 페이지 로드 및 인증 감지
     _supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' || session) {
-        // 로그인 된 상태면 -> 신청서 화면 보여주기
-        showApplicationForm(session);
-      } else {
-        // 로그아웃 상태면 -> 초기 게이트 화면 보여주기
-        document.getElementById('step-gate').style.display = 'block';
-        document.getElementById('step-form').style.display = 'none';
+        showApplicationForm(session); // 로그인 되자마자 화면 전환
       }
     });
 
-    // 2. 페이지 로드 시 1회 실행 (새로고침 했을 때 유지용)
     window.onload = async function() {
-      // (1) UI 초기화 (개인/단체 겹침 방지)
       toggleType('개인'); 
-
-      // (2) 세션 확인
       const { data: { session } } = await _supabase.auth.getSession();
       if (session) {
         showApplicationForm(session);
       }
     };
 
-    // [헬퍼] 신청서 화면으로 전환 및 데이터 채우기
     function showApplicationForm(session) {
       document.getElementById('step-gate').style.display = 'none';
       document.getElementById('step-form').style.display = 'block';
       
-      // 이메일 주소 채우기 (verifiedEmail 위치로)
       const emailInput = document.getElementById('verifiedEmail');
-      if(emailInput) {
-        emailInput.value = session.user.email;
-      }
+      if(emailInput) emailInput.value = session.user.email;
       
-      // SNS 로그인(카카오 등)일 경우 이름 자동 채우기
       const meta = session.user.user_metadata;
       if(meta && meta.full_name) {
-        const nameInput = document.getElementById('userName');
-        // 값이 비어있을 때만 채워줌 (사용자가 수정 중일 수 있으니)
-        if(!nameInput.value) {
-          nameInput.value = meta.full_name;
-          // 이름 채워지면 예금주도 같이 채우기
-          if(typeof syncAccountHolder === 'function') syncAccountHolder();
-        }
+         const nameInput = document.getElementById('userName');
+         if(!nameInput.value) {
+            nameInput.value = meta.full_name;
+            if(typeof syncAccountHolder === 'function') syncAccountHolder();
+         }
       }
     }
     
@@ -665,36 +659,55 @@ function clearFieldWarning(el) {
   el.classList.remove('is-invalid-field');
 }
     // [신규/교체] 주민등록번호 3중 검증 (유효성 -> 나이 -> DB중복)
+// [수정] 주민번호 통합 검증 (사업자번호 로직 구조 차용)
 async function checkRRNFinal() {
   const r1 = document.getElementById('rrn1').value;
   const r2 = document.getElementById('rrn2').value;
-  if (r1.length < 6 || r2.length < 7) return;
+  if (r1.length < 6 || r2.length < 7) return; // 다 안 썼으면 조용히 리턴
 
-  // 1. 유효성
-  if (!isValidRRN(r1, r2)) {
+  // 1. 유효성 검사 (공식 알고리즘 내장)
+  const rrn = r1 + r2;
+  const multipliers = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4, 5];
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += parseInt(rrn.charAt(i)) * multipliers[i];
+  const remainder = (11 - (sum % 11)) % 10;
+  
+  if (remainder !== parseInt(rrn.charAt(12))) {
      setMsg('rrnMsg', "❌ 유효하지 않은 주민등록번호입니다.", true);
      return;
   }
-  // 2. 미성년자
-  if (isMinor(r1, r2)) {
+
+  // 2. 미성년자 검사
+  const firstDigit = parseInt(r2.charAt(0));
+  const prefix = (firstDigit === 1 || firstDigit === 2 || firstDigit === 5 || firstDigit === 6) ? 19 : 20;
+  const birthYear = parseInt(prefix + r1.substring(0, 2));
+  const today = new Date();
+  let age = today.getFullYear() - birthYear;
+  // 생일 지났는지 체크 (단순화)
+  if (today.getFullYear() > birthYear + 19) { /* 성인 */ } 
+  else if (age < 19) {
      setMsg('rrnMsg', "⛔ 미성년자는 가입할 수 없습니다.", true);
      return;
   }
 
-  // 3. 중복 체크 (개인만)
+  // 3. 서버 중복 체크 (RPC)
   const type = document.querySelector('input[name="userType"]:checked').value;
-  if (type === '단체') return;
+  if (type === '단체') return; // 단체면 패스
 
-  const { data } = await _supabase.rpc('check_duplicate', { 
-    check_field: 'rrn', check_value: r1 + "-" + r2 
+  // 사업자번호 로직과 똑같이 then() 구조 사용
+  _supabase.rpc('check_duplicate', { 
+    check_field: 'rrn', 
+    check_value: r1 + "-" + r2 
+  }).then(({ data, error }) => {
+    if (data === true) {
+      setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
+      document.getElementById('rrn2').value = ""; // 입력값 지우기
+    } else {
+      setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
+    }
   });
-
-  if (data === true) {
-    setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
-  } else {
-    setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
-  }
 }
+    
     async function checkPhoneDuplicateServer() {
   const type = document.querySelector('input[name="userType"]:checked').value;
   if (type === '단체') return;
@@ -712,6 +725,19 @@ async function checkRRNFinal() {
     setMsg('phoneMsg', "❌ 이미 가입된 연락처입니다.", true);
   } else {
     setMsg('phoneMsg', "✅ 사용 가능한 연락처입니다.", false);
+  }
+}
+    function validateName() {
+  const nameInput = document.getElementById('userName');
+  const val = nameInput.value.trim();
+  if(!val) return; // 비어있으면 패스
+
+  if(val.length < 2) {
+    setMsg('nameMsg', "❌ 2글자 이상 입력해주세요.", true);
+    nameInput.classList.add('is-invalid-field'); // 빨간 테두리도 같이
+  } else {
+    setMsg('nameMsg', "✅ 확인되었습니다.", false);
+    nameInput.classList.remove('is-invalid-field');
   }
 }
   </script>
