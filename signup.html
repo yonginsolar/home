@@ -769,28 +769,57 @@ async function checkRRNFinal() {
   }
 }
     // [신규 추가] 법인등록번호 중복 검사
-function validateCorpNo() {
-    const c1 = document.getElementById('corp1').value;
-    const c2 = document.getElementById('corp2').value;
-    
-    // 1. 길이 체크 (6자리 + 7자리 = 13자리)
-    if(c1.length < 6 || c2.length < 7) return; 
-
-    // 2. 서버 중복 체크 (RPC call)
-    // 아까 SQL에 추가한 'corp_no' 필드를 검사합니다.
-    _supabase.rpc('check_duplicate', { 
-        check_field: 'corp_no', 
-        check_value: c1 + "-" + c2 
-    }).then(({ data, error }) => {
-        if(data === true) {
-            setMsg('corpMsg', "❌ 이미 가입된 법인등록번호입니다.", true);
-            document.getElementById('finalCorpNo').value = ""; // 저장 못하게 비움
-        } else {
-            setMsg('corpMsg', "✅ 사용 가능한 법인번호입니다.", false);
-            document.getElementById('finalCorpNo').value = c1 + "-" + c2; // 값 저장
+// [신규 추가] 법인등록번호 유효성 공식 검사 (오타 방지용)
+    function checkCorpNoChecksum(value) {
+        if (!value || value.length !== 13) return false;
+        
+        // 문자열을 숫자로 변환
+        const arr = value.split('').map(Number);
+        let sum = 0;
+        
+        // 공식: 1, 2, 1, 2... 순서대로 곱해서 합산 (앞 12자리)
+        for (let i = 0; i < 12; i++) {
+            const weight = (i % 2 === 0) ? 1 : 2;
+            sum += arr[i] * weight;
         }
-    });
-}
+        
+        // 나머지 계산
+        const result = (10 - (sum % 10)) % 10;
+        
+        // 계산된 결과가 13번째 자리(마지막 숫자)와 같아야 함
+        return result === arr[12];
+    }
+
+    // [수정] 법인등록번호 검증 (공식 검사 -> 서버 중복 검사)
+    function validateCorpNo() {
+        const c1 = document.getElementById('corp1').value;
+        const c2 = document.getElementById('corp2').value;
+        const fullCorpNo = c1 + c2;
+        
+        // 1. 길이 체크
+        if(c1.length < 6 || c2.length < 7) return; 
+
+        // 2. [추가됨] 유효성 공식 체크 (Checksum)
+        if (!checkCorpNoChecksum(fullCorpNo)) {
+             setMsg('corpMsg', "❌ 유효하지 않은 법인등록번호입니다. (오타 확인)", true);
+             document.getElementById('finalCorpNo').value = ""; // 저장 방지
+             return; // 공식 틀리면 서버로 보내지도 않고 여기서 끝냄
+        }
+
+        // 3. 서버 중복 체크 (RPC call) - 공식이 통과된 경우에만 실행
+        _supabase.rpc('check_duplicate', { 
+            check_field: 'corp_no', 
+            check_value: c1 + "-" + c2 
+        }).then(({ data, error }) => {
+            if(data === true) {
+                setMsg('corpMsg', "❌ 이미 가입된 법인등록번호입니다.", true);
+                document.getElementById('finalCorpNo').value = ""; // 저장 못하게 비움
+            } else {
+                setMsg('corpMsg', "✅ 사용 가능한 법인번호입니다.", false);
+                document.getElementById('finalCorpNo').value = c1 + "-" + c2; // 값 저장
+            }
+        });
+    }
   </script>
 </body>
 </html>
