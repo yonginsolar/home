@@ -85,22 +85,17 @@
             oninput="onlyNum(this); resetMsg('rrnMsg'); clearFieldWarning(this);" 
             onblur="checkRRNFinal()">
   </div>
-<div id="box-rrn" class="d-flex gap-2 align-items-center">
-  </div>
-
-<div id="box-corp" class="d-flex gap-2 align-items-center mb-2" style="display:none;">
+  <div id="box-corp" class="d-flex gap-2 align-items-center mb-2" style="display:none;">
     <input type="text" id="corp1" maxlength="6" class="form-control text-center" placeholder="법인번호 앞 6자리" required 
             oninput="onlyNum(this); autoMove(this,'corp2',6); resetMsg('corpMsg'); clearFieldWarning(this);">
     <span>-</span>
     <input type="text" id="corp2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" required 
             oninput="onlyNum(this); resetMsg('corpMsg'); clearFieldWarning(this);" 
-            onblur="validateCorpNo()"> </div>
-
+            onblur="validateCorpNo()"> 
+</div>
 <div id="corpMsg" class="msg-box" style="display:none;"></div>
 <input type="hidden" id="finalCorpNo"> 
 
-<div id="box-biz" class="d-flex gap-2 align-items-center" style="display:none;">
-   </div>
 <div id="box-biz" class="d-flex gap-2 align-items-center" style="display:none;">
     <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" required 
             oninput="onlyNum(this); autoMove(this,'biz2',3); resetMsg('bizMsg'); clearFieldWarning(this);">
@@ -301,12 +296,12 @@ function toggleType(type) {
       document.getElementById('userName').placeholder = isInd ? "성함을 입력하세요" : "단체명을 입력하세요";
       
       const boxRRN = document.getElementById('box-rrn');
-      const boxCorp = document.getElementById('box-corp'); // ★ 추가
+      const boxCorp = document.getElementById('box-corp'); // ★ 추가된 제어
       const boxBiz = document.getElementById('box-biz');
       
       // 메시지 박스도 토글
       const rrnMsg = document.getElementById('rrnMsg');
-      const corpMsg = document.getElementById('corpMsg'); // ★ 추가
+      const corpMsg = document.getElementById('corpMsg'); // ★ 추가된 제어
       const bizMsg = document.getElementById('bizMsg');
 
       if(isInd) {
@@ -327,8 +322,7 @@ function toggleType(type) {
           rrnMsg.style.display = 'none';
           corpMsg.style.display = 'block'; // ★ 보임
           bizMsg.style.display = 'block';
-
-        
+          
           document.getElementById('rrn1').required = false; document.getElementById('rrn2').required = false;
           document.getElementById('corp1').required = true; document.getElementById('corp2').required = true;
           document.getElementById('biz1').required = true; document.getElementById('biz3').required = true;
@@ -546,7 +540,8 @@ async function handleFormSubmit(e, form) {
     if (!finalCorp || finalCorp.length < 13) { 
         setError(document.getElementById('corp1'));
         setError(document.getElementById('corp2'));
-  }
+    }
+  } // <--- [★중요] 여기서 if(단체) 괄호를 닫아야 합니다! (기존 코드 오류 수정됨)
 
   // 3-3. 전화번호 길이 체크 (p2 3글자, p3 4글자 미만)
   const p2 = document.getElementById('p2');
@@ -570,7 +565,8 @@ async function handleFormSubmit(e, form) {
       }, { once: true });
     }
   });
-  }}
+  // } <--- 이 이상한 위치에 있던 괄호 삭제함
+
   // ---------------------------------------------------------
   // 2. [에러 처리] 하나라도 걸리면 멈추고 이동
   // ---------------------------------------------------------
@@ -598,8 +594,8 @@ async function handleFormSubmit(e, form) {
   // 은행 처리 (직접입력 vs 선택)
   let bank = document.getElementById('bankName').value;
   if(bank === '직접입력') {
-     bank = document.getElementById('bankDirectInput').value;
-     if(!bank) { setError(document.getElementById('bankDirectInput')); return; }
+      bank = document.getElementById('bankDirectInput').value;
+      if(!bank) { setError(document.getElementById('bankDirectInput')); return; }
   }
   
   // 출자금 최종 값 확인
@@ -630,6 +626,7 @@ async function handleFormSubmit(e, form) {
     name: nameInput.value,
     member_type: userType,
     rrn_encrypted: fullID, 
+    // ★ [추가] 법인등록번호 (개인이면 null, 단체면 값 들어감)
     corp_number: (userType === '단체') ? document.getElementById('finalCorpNo').value : null,
     phone: document.getElementById('p1').value + "-" + p2.value + "-" + p3.value,
     email: document.getElementById('verifiedEmail').value,
@@ -704,8 +701,8 @@ async function checkRRNFinal() {
   const remainder = (11 - (sum % 11)) % 10;
   
   if (remainder !== parseInt(rrn.charAt(12))) {
-     setMsg('rrnMsg', "❌ 유효하지 않은 주민등록번호입니다.", true);
-     return;
+      setMsg('rrnMsg', "❌ 유효하지 않은 주민등록번호입니다.", true);
+      return;
   }
 
   // 2. 미성년자 검사
@@ -717,8 +714,8 @@ async function checkRRNFinal() {
   // 생일 지났는지 체크 (단순화)
   if (today.getFullYear() > birthYear + 19) { /* 성인 */ } 
   else if (age < 19) {
-     setMsg('rrnMsg', "⛔ 미성년자는 가입할 수 없습니다.", true);
-     return;
+      setMsg('rrnMsg', "⛔ 미성년자는 가입할 수 없습니다.", true);
+      return;
   }
 
   // 3. 서버 중복 체크 (RPC)
