@@ -1002,30 +1002,28 @@
 
     // [1] 통계 데이터
 // [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
+// [1] 통계 데이터 (업그레이드 버전)
     async function fetchStats() {
-      // 기존의 .from() 방식은 보안(RLS) 때문에 0이 나옵니다.
-      // 따라서 .rpc()를 사용하여 서버에서 미리 계산된 합계만 가져옵니다.
+      // 방금 수정한 SQL 함수를 호출합니다.
       const { data: stats, error } = await _client.rpc('get_public_stats');
 
       if (error) {
-        console.error("통계 불러오기 실패:", error);
+        console.error("통계 로드 에러:", error);
         return;
       }
 
       if (stats) {
-        // 1. 전체 조합원 수 연결 (HTML ID: stat-total-members)
+        // 1. 전체 조합원 수 (239명 등)
         updateCounter('stat-total-members', stats.count);
 
-        // 2. 총 출자금 연결 (HTML ID: stat-total-amount)
+        // 2. 총 출자금 (ref_members 합계)
         updateCounter('stat-total-amount', stats.amount);
 
-        // (참고) 현재 'get_public_stats' 함수는 전체 합계만 가져오도록 설정되어 있습니다.
-        // 개인/단체 상세 숫자는 현재 0으로 두거나, 추후 SQL 수정이 필요합니다.
-        // 에러가 나지 않도록 빈 값(-) 처리해 둡니다.
-        const indEl = document.getElementById('stat-ind-members');
-        const grpEl = document.getElementById('stat-grp-members');
-        if(indEl) indEl.innerText = '-'; 
-        if(grpEl) grpEl.innerText = '-'; 
+        // 3. 개인 조합원 수 (이제 '-' 대신 실제 숫자가 뜹니다)
+        updateCounter('stat-ind-members', stats.ind_count);
+
+        // 4. 단체 조합원 수
+        updateCounter('stat-grp-members', stats.grp_count);
       }
     }
 
