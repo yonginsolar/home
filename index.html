@@ -924,6 +924,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <script>
+    let g_total_amount = 0;
     /* =================================================================
        1. 디자인/애니메이션 초기화 (AOS, Counter, Scroll)
        ================================================================= */
@@ -957,14 +958,22 @@
     }
 
     // 수익률 계산기
+// [수정] 수익률 계산 (만원 단위 기준)
     function calculateYield() {
-      const rangeValue = document.getElementById('investmentRange').value;
-      document.getElementById('displayAmount').innerText = Number(rangeValue).toLocaleString() + "만원";
+      const slider = document.getElementById('investmentRange');
+      if(!slider) return;
+
+      const rangeValue = Number(slider.value); // 슬라이더 값 (단위: 만원)
       
-      const principal = rangeValue * 10000;
-      const annualYield = principal * 0.05; 
+      // 화면 표시: "10만원", "1,500만원" 등
+      document.getElementById('displayAmount').innerText = rangeValue.toLocaleString() + "만원";
+      
+      // 실제 계산 (원 단위로 변환)
+      const principal = rangeValue * 10000; 
+      const annualYield = principal * 0.05; // 연 5%
       const monthlyYield = annualYield / 12;
 
+      // 결과 표시
       document.getElementById('displayYield').innerText = Math.floor(annualYield).toLocaleString() + "원";
       document.getElementById('displayMonthly').innerText = Math.floor(monthlyYield).toLocaleString();
     }
@@ -1008,25 +1017,23 @@ async function fetchStats() {
       const { data: stats, error } = await _client.rpc('get_public_stats');
 
       if (stats) {
-        // (1) 전역 변수에 총액 저장 (계산기 한도 설정용)
+        // 전역 변수에 저장
         g_total_amount = stats.amount || 0;
 
-        // (2) HTML에 숫자 박아넣기 (콤마 설정 포함)
+        // 숫자와 콤마 설정 (HTML 속성에 값 주입)
         updateCounter('stat-total-members', stats.count);
         updateCounter('stat-total-amount', stats.amount);
         updateCounter('stat-ind-members', stats.ind_count);
         updateCounter('stat-grp-members', stats.grp_count);
 
-        // (3) ★ 핵심: 데이터가 다 준비된 뒤에 애니메이션 시작!
+        // ★ [수정됨] end: 100 삭제. 이제 HTML에 적힌 진짜 숫자로 작동함.
         new PureCounter({
             selector: '.purecounter', 
-            start: 0, 
-            end: 100, 
             duration: 1, 
             separator: true // 콤마 켜기
         });
 
-        // (4) 계산기 범위 설정 (총액의 30%)
+        // 계산기 범위 설정 실행
         setupCalculator(g_total_amount);
       }
     }
@@ -1192,6 +1199,25 @@ async function fetchStats() {
         el.setAttribute('data-purecounter-duration', 1);
         el.setAttribute('data-purecounter-separator', 'true'); // ★ 콤마 켜기
       }
+    }
+    // [추가할 함수] 계산기 초기 설정 (최소 10만원 ~ 최대 30%)
+    function setupCalculator(totalAmount) {
+        const slider = document.getElementById('investmentRange');
+        if(!slider) return;
+
+        // 단위: 만원 (1 = 1만원)
+        // 최소: 10만원
+        // 최대: 총 출자금의 30% (데이터가 없으면 기본 5000만원)
+        const maxLimitWon = totalAmount > 0 ? (totalAmount * 0.3) : 50000000;
+        const maxLimitMan = Math.floor(maxLimitWon / 10000); 
+
+        slider.min = 10;        // 최소 10만원
+        slider.max = maxLimitMan; 
+        slider.step = 1;        // 1만원 단위로 조절
+        slider.value = 10;      // 시작값 10만원
+
+        // UI 업데이트
+        calculateYield();
     }
   </script>
 </body>
