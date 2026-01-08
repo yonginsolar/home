@@ -1169,18 +1169,61 @@ async function fetchStats() {
     }
 
     // [보조 함수] 연혁 아이템 HTML 생성기 (코드 중복 방지)
+// [보조 함수] 연혁 아이템 HTML 생성기 (스마트 포맷팅 적용)
     function createHistoryItemHtml(doc) {
+        // ★ 여기서 텍스트를 HTML로 예쁘게 변환합니다.
+        const formattedContent = formatTextToHtml(doc.content);
+
         return `
           <div class="col-lg-8 offset-lg-2" data-aos="fade-up"> 
             <div class="timeline-item">
               <div class="timeline-date">${doc.event_date.replaceAll('-','.')}</div>
               <div class="timeline-content">
                 <h4>${doc.title}</h4>
-                ${doc.content ? `<p>${doc.content}</p>` : ''}
+                ${formattedContent ? `<div class="text-muted">${formattedContent}</div>` : ''}
               </div>
             </div>
           </div>
         `;
+    }
+
+    // [신규 함수] 텍스트 -> HTML 변환기
+    // 1. 엔터는 <br>로 바꿈
+    // 2. '-'나 '•'로 시작하면 목록(li)으로 바꿈
+    function formatTextToHtml(text) {
+        if (!text) return '';
+        
+        const lines = text.split('\n'); // 줄 단위로 쪼개기
+        let html = '';
+        let inList = false; // 현재 목록을 만들고 있는지 체크
+
+        lines.forEach(line => {
+            line = line.trim();
+            
+            // '-' 또는 '•'로 시작하면 목록으로 간주
+            if (line.startsWith('-') || line.startsWith('•')) {
+                if (!inList) {
+                    html += '<ul class="mb-0 ps-3">'; // 리스트 시작
+                    inList = true;
+                }
+                // 앞의 특수문자 빼고 내용만 넣기
+                html += `<li>${line.substring(1).trim()}</li>`;
+            } else {
+                // 목록이 끝났으면 닫아줌
+                if (inList) {
+                    html += '</ul>';
+                    inList = false;
+                }
+                
+                // 빈 줄이 아니면 출력 (엔터 처리)
+                if (line !== '') {
+                   html += `${line}<br>`;
+                }
+            }
+        });
+
+        if (inList) html += '</ul>'; // 마지막에 리스트가 열려있으면 닫음
+        return html;
     }
 
     // [기능 함수] 더 보기 버튼 클릭 시 실행
