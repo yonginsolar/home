@@ -123,7 +123,7 @@
               </div>
               
               <div class="mt-3" style="font-size: 16px; opacity: 0.9; background: rgba(0,0,0,0.2); display:inline-block; padding: 5px 20px; border-radius: 50px;">
-                개인 <strong id="stat-ind-members">0</strong>명 &middot; 
+                개인 <strong id="stat-ind-members">0</strong>명  
                 단체 <strong id="stat-grp-members">0</strong>곳
               </div>
             </div>
@@ -1068,61 +1068,62 @@ async function fetchStats() {
 
     // [2] 발전소 현황
 // [1] 발전소 현황 (Portfolio) - "운영중"인 것만 표시
+// [수정] 발전소 현황 (Portfolio + Progress 통합 호출)
     async function fetchPlants() {
+        // 1. 모든 발전소 데이터 가져오기
         const { data } = await _client.from('site_power_plants').select('*').order('display_order');
-        if(!data) return;
+        
+        if(!data) return; // 데이터 없으면 중단
 
-        // ★ 필터링: '운영중'인 것만 골라냄
+        // 2. [Portfolio 섹션] 그리기 (운영중인 것만)
         const operatingPlants = data.filter(p => p.status === '운영중');
+        const pfContainer = document.getElementById('portfolio-container');
         
-        // --- (기존 포트폴리오 렌더링 코드 유지) ---
-        const container = document.getElementById('portfolio-container');
-        if(!container) return;
-        
-        let html = '';
-        operatingPlants.forEach(p => {
-             html += `
-              <div class="col-lg-4 col-md-6 portfolio-item filter-app">
-                <div class="portfolio-wrap">
-                  <img src="assets/img/portfolio/portfolio-1.jpg" class="img-fluid" alt="">
-                  <div class="portfolio-info">
-                    <h4>${p.name}</h4>
-                    <p>${p.capacity}kW | ${p.status}</p>
-                    <div class="portfolio-links">
-                      <a href="${p.monitor_url || '#'}" target="_blank" title="모니터링"><i class="bx bx-link"></i></a>
+        if(pfContainer) {
+            let pfHtml = '';
+            operatingPlants.forEach(p => {
+                 pfHtml += `
+                  <div class="col-lg-4 col-md-6 portfolio-item filter-app">
+                    <div class="portfolio-wrap">
+                      <img src="assets/img/portfolio/portfolio-1.jpg" class="img-fluid" alt="">
+                      <div class="portfolio-info">
+                        <h4>${p.name}</h4>
+                        <p>${p.capacity}kW | ${p.status}</p>
+                        <div class="portfolio-links">
+                          <a href="${p.monitor_url || '#'}" target="_blank" title="모니터링"><i class="bx bx-link"></i></a>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </div>`;
-        });
-        container.innerHTML = html;
+                  </div>`;
+            });
+            pfContainer.innerHTML = pfHtml;
+        }
 
-        // ★ 여기서 Progress 함수도 같이 실행 (데이터 한번에 가져왔으니 넘겨줘도 되지만, 깔끔하게 별도 호출)
-        // 위에서 가져온 전체 data를 넘겨줘서 재활용합니다.
-        renderProgressSection(data);
+        // 3. [Progress 섹션] 그리기 호출 ★ (이게 핵심입니다!)
         renderProgressSection(data);
     }
 
-    // [2] 건립 현황 (Progress) - "공사중/준비중"인 것만 표시
+    // [수정] 건립 현황 (Progress) 그리기 함수
     function renderProgressSection(allPlants) {
-        // ★ 필터링: '운영중'이 아닌 것들 (공사중, 준비중)
+        // '운영중'이 아닌 것들 (공사중, 준비중)만 골라냄
         const inProgressPlants = allPlants.filter(p => p.status !== '운영중');
         
         const section = document.getElementById('progress');
         const container = document.getElementById('progress-container');
         
-        // 공사중인 게 없으면 섹션을 통째로 숨김
+        if (!section || !container) return; // HTML에 태그가 없으면 중단
+
+        // 공사중인 게 하나도 없으면? -> 섹션을 숨김
         if (inProgressPlants.length === 0) {
             section.style.display = 'none';
             return;
         }
 
-        // 공사중인 게 있으면 섹션 보임
+        // 공사중인 게 있으면? -> 섹션을 보여줌 (display: none을 걷어냄)
         section.style.display = 'block';
         
         let html = '';
         inProgressPlants.forEach(p => {
-            // 진행률 (DB에 값이 없으면 0)
             const rate = p.progress_rate || 0;
             
             html += `
@@ -1146,6 +1147,9 @@ async function fetchStats() {
             </div>`;
         });
         container.innerHTML = html;
+        
+        // [중요] 섹션이 갑자기 나타났으니 높이 계산 다시 하라고 AOS에 신호 보냄
+        setTimeout(() => AOS.refresh(), 100);
     }
 
     // [3] 연혁
