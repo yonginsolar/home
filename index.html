@@ -992,8 +992,9 @@
 
     // 페이지 로드 완료 시 실행
     document.addEventListener('DOMContentLoaded', async () => {
-      await fetchStats();       
-      await fetchPlants();      
+      await fetchStats();  
+    // 발전소 현황 불러오는 함수 주석처리 
+    //  await fetchPlants();      
       await fetchHistory();     
       await fetchPartners();    
       await fetchNotices();     
@@ -1003,27 +1004,30 @@
     // [1] 통계 데이터
 // [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
 // [1] 통계 데이터 (업그레이드 버전)
-    async function fetchStats() {
-      // 방금 수정한 SQL 함수를 호출합니다.
+async function fetchStats() {
       const { data: stats, error } = await _client.rpc('get_public_stats');
 
-      if (error) {
-        console.error("통계 로드 에러:", error);
-        return;
-      }
-
       if (stats) {
-        // 1. 전체 조합원 수 (239명 등)
+        // (1) 전역 변수에 총액 저장 (계산기 한도 설정용)
+        g_total_amount = stats.amount || 0;
+
+        // (2) HTML에 숫자 박아넣기 (콤마 설정 포함)
         updateCounter('stat-total-members', stats.count);
-
-        // 2. 총 출자금 (ref_members 합계)
         updateCounter('stat-total-amount', stats.amount);
-
-        // 3. 개인 조합원 수 (이제 '-' 대신 실제 숫자가 뜹니다)
         updateCounter('stat-ind-members', stats.ind_count);
-
-        // 4. 단체 조합원 수
         updateCounter('stat-grp-members', stats.grp_count);
+
+        // (3) ★ 핵심: 데이터가 다 준비된 뒤에 애니메이션 시작!
+        new PureCounter({
+            selector: '.purecounter', 
+            start: 0, 
+            end: 100, 
+            duration: 1, 
+            separator: true // 콤마 켜기
+        });
+
+        // (4) 계산기 범위 설정 (총액의 30%)
+        setupCalculator(g_total_amount);
       }
     }
 
@@ -1175,15 +1179,18 @@
     }
 
 // [보조 함수] 숫자 애니메이션 및 쉼표 찍기
+// [헬퍼 함수] 숫자 업데이트 + 콤마 설정
     function updateCounter(id, target) {
       const el = document.getElementById(id);
       if(el) {
-        // 1. 애니메이션 엔진에게는 '숫자 원본(콤마 없음)'을 줍니다.
-        el.setAttribute('data-purecounter-end', target);
-
-        // 2. 사람 눈에 보이는 글자는 '쉼표(,)를 찍어서' 보여줍니다.
-        // toLocaleString() 함수가 자동으로 1000 -> 1,000 으로 바꿔줍니다.
+        // 1. 일단 콤마 찍어서 화면에 보여줌 (애니메이션 로딩 전 깜빡임 방지)
         el.innerText = Number(target).toLocaleString();
+        
+        // 2. 애니메이션 라이브러리용 설정
+        el.setAttribute('data-purecounter-start', 0);
+        el.setAttribute('data-purecounter-end', target);
+        el.setAttribute('data-purecounter-duration', 1);
+        el.setAttribute('data-purecounter-separator', 'true'); // ★ 콤마 켜기
       }
     }
   </script>
