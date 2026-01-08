@@ -1004,15 +1004,46 @@
     const _client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // 페이지 로드 완료 시 실행
-    document.addEventListener('DOMContentLoaded', async () => {
-      await fetchStats();  
-    // 발전소 현황 불러오는 함수 주석처리 
-    //  await fetchPlants();      
+document.addEventListener('DOMContentLoaded', async () => {
+      // 0. [신규] 섹션 관리자 호출 (가장 먼저 실행해서 없는 건 지워버림)
+      await manageSections();
+
+      // 1. 나머지 데이터 로드
+      await fetchStats(); 
+      await fetchPlants(); // -> manageSections가 알아서 처리하므로 주석 유지해도 됨
       await fetchHistory();     
       await fetchPartners();    
       await fetchNotices();     
       await fetchFaqs();        
     });
+
+    // [신규 기능] DB 설정에 따라 섹션과 메뉴를 끄고 켜는 함수
+    async function manageSections() {
+        const { data: sections, error } = await _client.from('site_sections').select('*');
+        
+        if (error || !sections) return;
+
+        sections.forEach(sec => {
+            // DB에서 is_visible이 false(거짓)인 경우
+            if (sec.is_visible === false) {
+                
+                // 1. 본문 섹션 숨기기
+                const sectionEl = document.getElementById(sec.id);
+                if (sectionEl) {
+                    sectionEl.style.display = 'none'; // 아예 안 보이게 처리
+                }
+
+                // 2. 헤더 메뉴 숨기기 (국장님 요청 사항)
+                // href="#about" 같은 링크를 찾아서 그 부모(li)를 숨김
+                const navLink = document.querySelector(`a[href="#${sec.id}"]`);
+                if (navLink) {
+                    // <li> 태그를 찾아서 숨겨야 줄바꿈 등이 안 깨짐
+                    const navItem = navLink.closest('li'); 
+                    if (navItem) navItem.style.display = 'none';
+                }
+            }
+        });
+    }
 
     // [1] 통계 데이터
 // [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
