@@ -1,48 +1,58 @@
-// footer.js - 푸터 및 약관 모달 통합 관리
+// footer.js
 document.addEventListener("DOMContentLoaded", function() {
     
-    // 1. 푸터 HTML (링크가 모달을 가리키도록 수정됨)
+    // 1. 푸터 HTML
     const footerHtml = `
     <div class="footer-top">
       <div class="container">
         <div class="row">
+          
           <div class="col-lg-3 col-md-6 footer-contact">
             <h3>용인모두의햇빛협동조합</h3>
-            <p>햇빛은 누구에게나 공평합니다.<br>시민의 힘으로 만드는<br>깨끗한 에너지 세상.</p>
+            <p>
+              햇빛은 누구에게나 공평합니다.<br>
+              시민의 힘으로 만드는<br>
+              깨끗한 에너지 세상.
+            </p>
           </div>
+
           <div class="col-lg-2 col-md-6 footer-links">
             <h4>바로가기</h4>
             <ul>
-              <li><i class="bi bi-chevron-right"></i> <a href="index.html#hero">홈</a></li>
-              <li><i class="bi bi-chevron-right"></i> <a href="index.html#about">조합 소개</a></li>
-              <li><i class="bi bi-chevron-right"></i> <a href="index.html#progress">발전 현황</a></li>
-              <li><i class="bi bi-chevron-right"></i> <a href="index.html#contact">문의하기</a></li>
+              <li><a href="index.html#hero">홈</a></li>
+              <li><a href="index.html#about">조합 소개</a></li>
+              <li><a href="index.html#progress">발전 현황</a></li>
+              <li><a href="index.html#contact">문의하기</a></li>
             </ul>
           </div>
+
           <div class="col-lg-3 col-md-6 footer-links">
             <h4>정보 및 정책</h4>
             <ul>
-              <li><i class="bi bi-chevron-right"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
-              <li><i class="bi bi-chevron-right"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#privacyModal">개인정보처리방침</a></li>
-              <li><i class="bi bi-chevron-right"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#patchNoteModal">패치노트</a></li>
+              <li><a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
+              <li><a href="#" data-bs-toggle="modal" data-bs-target="#privacyModal">개인정보처리방침</a></li>
+              <li><a href="#" data-bs-toggle="modal" data-bs-target="#patchNoteModal">패치노트</a></li>
             </ul>
           </div>
+
           <div class="col-lg-4 col-md-6 footer-newsletter">
             <h4>Contact Us</h4>
-            <p>궁금한 점이 있으신가요? 언제든 연락주세요.</p>
-            <div style="color:#fff; font-size:14px; line-height:2;">
-              <i class="bi bi-geo-alt me-2" style="color:var(--color-secondary)"></i> 경기 용인시 처인구 남사읍 상동로 28<br>
-              <i class="bi bi-envelope me-2" style="color:var(--color-secondary)"></i> yonginsolar@gmail.com<br>
-              <i class="bi bi-phone me-2" style="color:var(--color-secondary)"></i> 010-2513-5736 (사무국)<br>
-              <i class="bi bi-bank me-2" style="color:var(--color-secondary)"></i> 신협 131-022-855516 용인모두의햇빛협동조합
+            <p class="mb-3">궁금한 점이 있으신가요? 언제든 연락주세요.</p>
+            <div style="color:#ddd; font-size:14px; line-height:1.8;">
+              경기 용인시 처인구 남사읍 상동로 28<br>
+              yonginsolar@gmail.com<br>
+              010-2513-5736 (사무국)<br>
+              신협 131-022-855516 용인모두의햇빛협동조합
             </div>
           </div>
+
         </div>
       </div>
     </div>
+
     <div class="container d-md-flex py-4">
-      <div class="me-md-auto text-center text-md-start">
-        <div class="copyright">
+      <div class="me-md-auto text-center text-md-start w-100">
+        <div class="copyright text-center">
           &copy; Copyright <strong><span>용인모두의햇빛협동조합</span></strong>. All Rights Reserved
         </div>
       </div>
