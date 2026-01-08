@@ -260,7 +260,7 @@
             </div>
             <p style="font-size:1.1rem;">
               조합원이 되어 출자금을 납입하면, 발전 수익을 배당금으로 돌려드립니다.<br>
-              <small class="text-muted">* 예상 수익률 연 5% 기준 (변동 가능)</small>
+              <small class="text-muted">* 예상 수익률 연 5% 기준 (변동 가능/세전 기준)<br>조합 결산에 따라 지급하지 않을 수 있습니다.</small>
             </p>
           </div>
           
@@ -268,18 +268,21 @@
             <label for="investmentRange" class="form-label fw-bold">출자금 입력</label>
             <input type="range" class="form-range" min="100" max="5000" step="100" id="investmentRange" value="100" oninput="calculateYield()">
             
-            <div class="d-flex justify-content-between mb-3">
-              <span>100만원</span>
-              <span id="displayAmount" class="fw-bold fs-4 text-success">100만원</span>
-              <span>5,000만원</span>
+<div class="d-flex justify-content-between mb-3">
+              <span>10만원</span> <span id="displayAmount" class="fw-bold fs-4 text-success">10만원</span>
+              <span id="displayMaxLimit">5,000만원</span>
             </div>
 
             <hr>
 
-            <div class="text-center mt-4">
-              <h4>매년 예상 배당금</h4>
+<div class="text-center mt-4">
+              <h4>매년 예상 배당금 <small class="text-muted" style="font-size:0.6em;">(세전)</small></h4>
               <h2 id="displayYield" style="color:var(--color-secondary); font-weight:800; font-family:'GmarketSans', sans-serif;">50,000원</h2>
               <p class="text-muted small">매월 약 <span id="displayMonthly">4,160</span>원</p>
+              
+              <p class="text-muted" style="font-size: 0.8rem; margin-top: 10px;">
+                * 예시 수익률 기준이며, 배당소득세(15.4%) 및 지방소득세가 포함된 세전 금액입니다.
+              </p>
             </div>
             
             <div class="text-center mt-4">
@@ -970,7 +973,7 @@
       
       // 실제 계산 (원 단위로 변환)
       const principal = rangeValue * 10000; 
-      const annualYield = principal * 0.05; // 연 5%
+      const annualYield = principal * 0.05; // 연 5% 나중에 수정할 부분 (principal * 0.05) * 0.846; (100% - 15.4% = 84.6%)
       const monthlyYield = annualYield / 12;
 
       // 결과 표시
@@ -1201,22 +1204,41 @@ async function fetchStats() {
       }
     }
     // [추가할 함수] 계산기 초기 설정 (최소 10만원 ~ 최대 30%)
+// [수정] 계산기 초기 설정 (최소 10만원 ~ 최대 30%)
+// [수정] 계산기 초기 설정 (자동 확장 + 억 단위 표시)
     function setupCalculator(totalAmount) {
         const slider = document.getElementById('investmentRange');
+        const maxLabel = document.getElementById('displayMaxLimit'); 
+        
         if(!slider) return;
 
-        // 단위: 만원 (1 = 1만원)
-        // 최소: 10만원
-        // 최대: 총 출자금의 30% (데이터가 없으면 기본 5000만원)
+        // 1. 최대 한도 계산 (총액의 30%, 데이터 없으면 기본 5,000만원)
+        // 국장님 말씀대로 총액이 커지면 이 금액도 무제한으로 커집니다.
         const maxLimitWon = totalAmount > 0 ? (totalAmount * 0.3) : 50000000;
+        
+        // 2. 만원 단위로 변환 (슬라이더 내부용)
         const maxLimitMan = Math.floor(maxLimitWon / 10000); 
 
+        // 3. 슬라이더 설정
         slider.min = 10;        // 최소 10만원
         slider.max = maxLimitMan; 
-        slider.step = 1;        // 1만원 단위로 조절
+        slider.step = 1;        // 1만원 단위
         slider.value = 10;      // 시작값 10만원
 
-        // UI 업데이트
+        // 4. 화면 오른쪽 끝 숫자 표시 (억 단위 처리)
+        if(maxLabel) {
+            // 1억 미만이면 '5,000만원'
+            // 1억 이상이면 '3억 5,000만원' 처럼 보이게 처리
+            if (maxLimitWon >= 100000000) {
+                const eok = Math.floor(maxLimitWon / 100000000);
+                const man = Math.floor((maxLimitWon % 100000000) / 10000);
+                maxLabel.innerText = `${eok}억 ${man > 0 ? man.toLocaleString() : ''}만원`; // 예: 30억 5,000만원
+            } else {
+                maxLabel.innerText = Number(maxLimitMan).toLocaleString() + "만원";
+            }
+        }
+
+        // 5. UI 업데이트 실행
         calculateYield();
     }
   </script>
