@@ -1001,22 +1001,31 @@
     });
 
     // [1] 통계 데이터
+// [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
     async function fetchStats() {
-      const { data: members } = await _client.from('coop_members').select('member_type');
-      if (members) {
-        const total = members.length;
-        const ind = members.filter(m => m.member_type === '개인').length;
-        const grp = members.filter(m => m.member_type === '단체').length;
+      // 기존의 .from() 방식은 보안(RLS) 때문에 0이 나옵니다.
+      // 따라서 .rpc()를 사용하여 서버에서 미리 계산된 합계만 가져옵니다.
+      const { data: stats, error } = await _client.rpc('get_public_stats');
 
-        updateCounter('stat-total-members', total);
-        if(document.getElementById('stat-ind-members')) document.getElementById('stat-ind-members').innerText = ind;
-        if(document.getElementById('stat-grp-members')) document.getElementById('stat-grp-members').innerText = grp;
+      if (error) {
+        console.error("통계 불러오기 실패:", error);
+        return;
       }
 
-      const { data: payments } = await _client.from('view_member_payments_total').select('total_amount');
-      if (payments) {
-        const totalMoney = payments.reduce((sum, row) => sum + (row.total_amount || 0), 0);
-        updateCounter('stat-total-amount', totalMoney);
+      if (stats) {
+        // 1. 전체 조합원 수 연결 (HTML ID: stat-total-members)
+        updateCounter('stat-total-members', stats.count);
+
+        // 2. 총 출자금 연결 (HTML ID: stat-total-amount)
+        updateCounter('stat-total-amount', stats.amount);
+
+        // (참고) 현재 'get_public_stats' 함수는 전체 합계만 가져오도록 설정되어 있습니다.
+        // 개인/단체 상세 숫자는 현재 0으로 두거나, 추후 SQL 수정이 필요합니다.
+        // 에러가 나지 않도록 빈 값(-) 처리해 둡니다.
+        const indEl = document.getElementById('stat-ind-members');
+        const grpEl = document.getElementById('stat-grp-members');
+        if(indEl) indEl.innerText = '-'; 
+        if(grpEl) grpEl.innerText = '-'; 
       }
     }
 
