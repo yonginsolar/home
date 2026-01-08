@@ -1004,22 +1004,25 @@
 
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
-      // 0. 섹션 관리 (여기서 발전소 섹션 등이 숨겨짐 -> 높이 변경 발생!)
+      // 1. 섹션 관리 (여기서 화면 구성을 바꿈 -> 높이 변경 발생)
       await manageSections();
       
-      // ★ [핵심] 섹션이 사라져서 페이지가 짧아졌으니, 애니메이션 위치를 즉시 다시 계산하라고 명령
+      // 2. 1차 재측량 (섹션 숨긴 직후 바로 반영)
       AOS.refresh(); 
 
-      // 1. 데이터 로드
+      // 3. 데이터 로드 (글자들이 채워짐 -> 높이 미세하게 변경)
       await fetchStats(); 
       await fetchPlants();    
       await fetchHistory();     
       await fetchPartners();    
       await fetchNotices();     
       await fetchFaqs();        
-      
-      // ★ [안전장치] 이미지나 데이터가 늦게 떠서 높이가 또 바뀔 수 있으니 0.5초 뒤에 한 번 더 계산
-      setTimeout(() => AOS.refresh(), 500); 
+    });
+
+    // ★ [핵심 추가] 사진까지 다 뜨고 나서 "최종 재측량"
+    // (이걸 넣어야 인터넷 느린 곳에서도 정확하게 작동합니다)
+    window.addEventListener('load', () => {
+        AOS.refresh();
     });
 
     // [신규 기능] DB 설정에 따라 섹션과 메뉴를 끄고 켜는 함수
@@ -1114,13 +1117,19 @@ async function fetchStats() {
     }
 
     // [3] 연혁
+// [3] 연혁 (수정됨: 심부름꾼 함수 호출 방식)
     async function fetchHistory() {
-      const { data: docs } = await _client.from('site_documents')
-        .select('*')
-        .eq('category', 'history')
-        .order('event_date', { ascending: false });
-
       const container = document.getElementById('history-container');
+      if(!container) return;
+
+      // ★ 여기가 핵심: 테이블을 직접 뒤지지 않고, 함수(get_public_history)를 호출합니다.
+      const { data: docs, error } = await _client.rpc('get_public_history');
+      
+      if (error) {
+        console.error('연혁 로딩 실패:', error);
+        return;
+      }
+      
       if (!docs || docs.length === 0) {
         container.innerHTML = '<div class="text-center text-muted py-3">등록된 연혁이 없습니다.</div>';
         return;
@@ -1141,6 +1150,9 @@ async function fetchStats() {
         `;
       });
       container.innerHTML = html;
+      
+      // 높이가 변했으니 애니메이션 위치 다시 계산
+      setTimeout(() => AOS.refresh(), 500);
     }
 
     // [4] 협력단체 (아까 누락되었던 부분 추가)
