@@ -282,8 +282,85 @@
             currentCardBody = null; // 카드 닫힘 처리
         }
     }
+// ★ [핵심] 텍스트 분석 및 디자인 분리 (업그레이드 버전)
+    function renderCards(text, containerId) {
+        const container = document.getElementById(containerId);
+        if (!text) {
+            container.innerHTML = '<div class="text-center py-5">내용이 없습니다.</div>';
+            return;
+        }
 
-    function textToHtml(str) { return str ? str.replace(/\n/g, '<br>') : ''; }
+        // 1. "제N조" 단위로 덩어리 나누기
+        // (줄바꿈 뒤에 '제 숫자 조'가 오면 자름)
+        const parts = text.split(/(\n|^)(?=제\s*\d+\s*조)/g);
+        
+        let html = '';
+        
+        parts.forEach(part => {
+            const trimmed = part.trim();
+            if (!trimmed) return;
+
+            // 2. 제목과 내용 분리하기
+            // "제3조(조합의 책무)" 처럼 괄호가 닫히는 부분이나, 줄바꿈을 찾음
+            let title = '';
+            let body = '';
+
+            // 로직: '제'로 시작하면 제목을 추출 시도
+            if (trimmed.startsWith('제')) {
+                // 줄바꿈이 있는 경우 (가장 이상적)
+                const firstBreak = trimmed.indexOf('\n');
+                
+                if (firstBreak > -1) {
+                    title = trimmed.substring(0, firstBreak).trim();
+                    body = trimmed.substring(firstBreak).trim();
+                } 
+                // 줄바꿈이 없는 경우 (ex: "제3조 내용이 바로 시작됨") -> 강제로 나눔
+                else {
+                    // ')' 괄호가 닫히거나, '조' 뒤에 공백이 있으면 거기를 기준으로 나눔
+                    const match = trimmed.match(/^(제\s*\d+\s*조.*?\)|제\s*\d+\s*조)\s*/); 
+                    if (match) {
+                        title = match[0].trim();
+                        body = trimmed.substring(match[0].length).trim();
+                    } else {
+                        // 패턴 못 찾으면 전체를 제목으로 (안전장치)
+                        title = trimmed;
+                    }
+                }
+            } else {
+                // '제N조'가 아닌 서문이나 부칙
+                title = ''; 
+                body = trimmed;
+            }
+
+            // 3. HTML 생성
+            if (title) {
+                html += `
+                <div class="article-card searchable-item">
+                    <span class="article-title">${title}</span>
+                    <div class="article-content">${textToHtml(body)}</div>
+                </div>`;
+            } else {
+                // 제목 없는 덩어리 (서문 등)
+                html += `
+                <div class="article-card searchable-item">
+                    <div class="article-content">${textToHtml(body)}</div>
+                </div>`;
+            }
+        });
+
+        container.innerHTML = html;
+    }
+
+    // [보조] 줄바꿈 -> <br>, 번호 -> 리스트 변환 (더 예쁘게)
+    function textToHtml(str) {
+        if (!str) return '';
+        let converted = str.replace(/\n/g, '<br>');
+        
+        // (선택사항) '1.', '2.', '①' 등으로 시작하면 보기 좋게 들여쓰기 효과
+        // 여기서는 심플하게 줄바꿈만 처리해도 충분합니다.
+        return converted;
+    }
+
 
     // 검색 기능
     function filterContent() {
