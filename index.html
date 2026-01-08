@@ -1122,27 +1122,56 @@ async function fetchStats() {
 
     // [3] 연혁
 // [3] 연혁 (수정됨: 심부름꾼 함수 호출 방식)
+// [3] 연혁 (더 보기 기능 적용)
     async function fetchHistory() {
       const container = document.getElementById('history-container');
       if(!container) return;
 
-      // ★ 여기가 핵심: 테이블을 직접 뒤지지 않고, 함수(get_public_history)를 호출합니다.
+      // 1. 데이터 가져오기
       const { data: docs, error } = await _client.rpc('get_public_history');
       
-      if (error) {
-        console.error('연혁 로딩 실패:', error);
+      if (error || !docs || docs.length === 0) {
+        container.innerHTML = '<div class="col-12 text-center text-muted py-3">등록된 연혁이 없습니다.</div>';
         return;
       }
       
-      if (!docs || docs.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted py-3">등록된 연혁이 없습니다.</div>';
-        return;
-      }
+      // 2. 보여줄 개수 설정 (기본 3개)
+      const INITIAL_SHOW = 3;
+      const visibleDocs = docs.slice(0, INITIAL_SHOW); // 앞의 3개
+      const hiddenDocs = docs.slice(INITIAL_SHOW);     // 나머지 전부
       
       let html = '';
-      docs.forEach(doc => {
+
+      // 3-1. [기본 노출] 앞의 3개 렌더링
+      visibleDocs.forEach(doc => {
+        html += createHistoryItemHtml(doc);
+      });
+
+      // 3-2. [숨김 영역] 나머지가 있다면 숨겨진 박스에 담기
+      if (hiddenDocs.length > 0) {
+        html += `<div id="history-hidden-area" style="display:none;">`;
+        hiddenDocs.forEach(doc => {
+            html += createHistoryItemHtml(doc);
+        });
+        html += `</div>`;
+
+        // 3-3. [더 보기 버튼] 추가
         html += `
-          <div class="col-lg-8 offset-lg-2"> 
+            <div id="history-more-btn" class="text-center mt-4">
+                <button class="btn btn-outline-secondary rounded-pill px-4" onclick="toggleHistoryMore()">
+                    연혁 더 보기 <i class="bi bi-chevron-down ms-1"></i>
+                </button>
+            </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // [보조 함수] 연혁 아이템 HTML 생성기 (코드 중복 방지)
+    function createHistoryItemHtml(doc) {
+        return `
+          <div class="col-lg-8 offset-lg-2" data-aos="fade-up"> 
             <div class="timeline-item">
               <div class="timeline-date">${doc.event_date.replaceAll('-','.')}</div>
               <div class="timeline-content">
@@ -1152,11 +1181,25 @@ async function fetchStats() {
             </div>
           </div>
         `;
-      });
-      container.innerHTML = html;
-      
-      // 높이가 변했으니 애니메이션 위치 다시 계산
-      setTimeout(() => AOS.refresh(), 500);
+    }
+
+    // [기능 함수] 더 보기 버튼 클릭 시 실행
+    function toggleHistoryMore() {
+        // 숨겨진 영역을 보여줌
+        const hiddenArea = document.getElementById('history-hidden-area');
+        if(hiddenArea) {
+            hiddenArea.style.display = 'block';
+            
+            // 자연스럽게 나타나도록 애니메이션 효과 (선택사항)
+            hiddenArea.style.animation = 'fadeIn 0.5s';
+        }
+
+        // 버튼은 이제 필요 없으니 숨김
+        const btn = document.getElementById('history-more-btn');
+        if(btn) btn.style.display = 'none';
+
+        // ★ 화면 길이가 늘어났으니 AOS(스크롤 애니메이션) 위치 재계산
+        setTimeout(() => AOS.refresh(), 100);
     }
 
     // [4] 협력단체 (아까 누락되었던 부분 추가)
