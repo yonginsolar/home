@@ -1105,6 +1105,7 @@ async function fetchStats() {
 
     // [수정] 건립 현황 (Progress) 그리기 함수
 // [수정] 건립 현황 그리기 (디자인 업그레이드 & 단계별 표시)
+// [수정] 건립 현황 그리기 (국장님 요청 디자인 + 단계별 활성화)
     function renderProgressSection(allPlants) {
         const inProgressPlants = allPlants.filter(p => p.status !== '운영중');
         const section = document.getElementById('progress');
@@ -1122,45 +1123,59 @@ async function fetchStats() {
         let html = '';
         inProgressPlants.forEach(p => {
             const rate = p.progress_rate || 0;
+            const img = p.image_url || 'https://via.placeholder.com/800x400?text=No+Image';
             
-            // 단계별 활성화 로직 (0~100을 5단계로 나눔)
-            // active: 이미 지나간 단계, current: 현재 단계
+            // 단계 계산
             const s1 = rate >= 0 ? 'active' : '';   const c1 = (rate >= 0 && rate < 20) ? 'current' : '';
             const s2 = rate >= 20 ? 'active' : '';  const c2 = (rate >= 20 && rate < 40) ? 'current' : '';
             const s3 = rate >= 40 ? 'active' : '';  const c3 = (rate >= 40 && rate < 60) ? 'current' : '';
             const s4 = rate >= 60 ? 'active' : '';  const c4 = (rate >= 60 && rate < 80) ? 'current' : '';
             const s5 = rate >= 80 ? 'active' : '';  const c5 = (rate >= 80) ? 'current' : '';
 
-            // 현재 상태 텍스트 구하기
+            // 상태 텍스트
             let statusText = "건립 추진 중";
             if(c1) statusText = "조합 설립 및 초기 준비";
-            if(c2) statusText = "발전소 부지 선정 중";
-            if(c3) statusText = "인허가 절차 진행 중";
-            if(c4) statusText = "발전소 착공 및 공사 중";
-            if(c5) statusText = "완공 및 설비 점검 중";
+            else if(c2) statusText = "발전소 부지 선정 중";
+            else if(c3) statusText = "인허가 절차 진행 중";
+            else if(c4) statusText = "발전소 착공 및 공사 중";
+            else if(c5) statusText = "완공 및 설비 점검 중";
 
             html += `
             <div class="col-lg-8 col-md-10 mb-5" data-aos="fade-up">
                 <div class="count-box" style="padding: 30px; background: #fff; box-shadow: 0 0 30px rgba(0,0,0,0.08); border-radius: 8px;">
-                  <div class="d-flex align-items-center mb-3">
-                      <i class="bi bi-lightning-charge-fill text-warning fs-2 me-3"></i>
-                      <div>
-                          <h3 style="font-weight: 700; font-size: 1.5rem; margin:0;">${p.name}</h3>
-                          <span class="badge bg-secondary">${p.status}</span> <span class="text-muted small ms-1">${p.capacity}kW</span>
+                  
+                  <div class="row align-items-center">
+                      <div class="col-md-5 mb-3 mb-md-0">
+                          <div style="height:200px; border-radius:8px; overflow:hidden; border:1px solid #eee;">
+                              <img src="${img}" style="width:100%; height:100%; object-fit:cover;">
+                          </div>
+                      </div>
+                      <div class="col-md-7">
+                          <div class="d-flex align-items-center mb-2">
+                              <span class="badge bg-warning text-dark me-2">${p.status}</span>
+                              <h3 style="font-weight: 700; font-size: 1.5rem; margin:0;">${p.name}</h3>
+                          </div>
+                          
+                          <ul class="list-unstyled text-muted small mb-3">
+                              <li><i class="bi bi-geo-alt me-1"></i> 위치: ${p.location || '미정'}</li>
+                              <li><i class="bi bi-aspect-ratio me-1"></i> 면적: ${p.area || '-'}</li>
+                              <li><i class="bi bi-lightning-charge me-1"></i> 용량: ${p.capacity}kW</li>
+                              <li><i class="bi bi-calendar-check me-1"></i> 준공: ${p.completion_date || '미정'}</li>
+                          </ul>
+
+                          <p class="mb-2 fw-bold text-dark" style="font-size:1.1rem;">${statusText}</p>
+                          
+                          <div class="progress" style="height: 25px; border-radius: 15px; background-color: #f1f3f5;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" 
+                                 style="width: ${rate}%; font-size: 14px; font-weight:bold;" 
+                                 aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100">
+                                 진행률 ${rate}%
+                            </div>
+                          </div>
                       </div>
                   </div>
-                  
-                  <p class="mt-2 mb-4 fw-bold text-dark" style="font-size:1.1rem;">"${statusText}"</p>
-                  
-                  <div class="progress" style="height: 30px; border-radius: 15px; background-color: #f1f3f5;">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" 
-                         style="width: ${rate}%; font-size: 15px; font-weight:bold;" 
-                         aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100">
-                         ${rate}%
-                    </div>
-                  </div>
 
-                  <div class="d-flex justify-content-between step-container">
+                  <div class="d-flex justify-content-between step-container mt-4">
                     <div class="step-item ${s1} ${c1}">조합설립</div>
                     <div class="step-item ${s2} ${c2}">부지선정</div>
                     <div class="step-item ${s3} ${c3}">인허가</div> 
