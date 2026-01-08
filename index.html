@@ -1389,44 +1389,57 @@ async function fetchStats() {
 
     // [신규] About 섹션 데이터 로드
 // [수정] About 섹션 데이터 로드 (전체 HTML 허용 모드)
+// [수정] About 섹션 데이터 로드 (샘플 강제 삭제 버전)
     async function fetchAbout() {
+        // DB에서 데이터 가져오기
         const { data } = await _client.from('site_about').select('*').single();
-        if(!data) return; 
+        
+        // 데이터가 아예 없으면? -> 섹션 전체를 숨기거나 빈 껍데기로 둠 (샘플 안 보여줌)
+        const defaultData = data || { title:'', subtitle:'', content:'', list_items:'', image_url:'' };
 
         // 1. 이미지 교체
         const imgEl = document.getElementById('about-img-src');
-        if(imgEl && data.image_url) imgEl.src = data.image_url;
-
-        // 2. 텍스트 교체 (innerHTML 사용 -> 태그 적용됨)
-        // 제목
-        const titleEl = document.getElementById('about-title');
-        if(titleEl) titleEl.innerHTML = data.title;
-
-        // 부제목
-        const subEl = document.getElementById('about-subtitle');
-        if(subEl) subEl.innerHTML = data.subtitle;
-
-        // 본문
-        const contentEl = document.getElementById('about-content');
-        if(contentEl) contentEl.innerHTML = data.content;
-
-        // 3. 리스트 (스마트 처리)
-        // 사용자가 <li> 태그를 직접 썼으면 그대로 쓰고, 아니면 자동으로 아이콘을 붙여줌
-        const listEl = document.getElementById('about-list');
-        if(listEl && data.list_items) {
-            if (data.list_items.includes('<li')) {
-                // HTML로 직접 작성한 경우 (커스텀 아이콘 등)
-                listEl.innerHTML = data.list_items;
+        if(imgEl) {
+            if(defaultData.image_url) {
+                imgEl.src = defaultData.image_url;
+                imgEl.style.display = 'block';
             } else {
-                // 그냥 글자만 적은 경우 (기본 아이콘 자동 부착)
-                let html = '';
-                const items = data.list_items.split('\n');
-                items.forEach(item => {
-                    if(item.trim()) {
-                        html += `<li><i class="bi bi-check2-all"></i> ${item.trim()}</li>`;
-                    }
-                });
-                listEl.innerHTML = html;
+                imgEl.style.display = 'none'; // 이미지 없으면 숨김
+            }
+        }
+
+        // 2. 텍스트 교체 (내용 없으면 빈칸 처리)
+        const titleEl = document.getElementById('about-title');
+        if(titleEl) titleEl.innerHTML = defaultData.title || ''; // 제목 없으면 공란
+
+        const subEl = document.getElementById('about-subtitle');
+        if(subEl) subEl.innerHTML = defaultData.subtitle || ''; 
+
+        const contentEl = document.getElementById('about-content');
+        if(contentEl) contentEl.innerHTML = defaultData.content || '';
+
+        // 3. 리스트 (가장 문제였던 부분!)
+        const listEl = document.getElementById('about-list');
+        if(listEl) {
+            if (!defaultData.list_items) {
+                // ★ DB에 리스트 내용이 없으면? -> 아예 태그를 비워버림 (주황색 체크 사라짐)
+                listEl.innerHTML = ''; 
+                listEl.style.display = 'none'; // 공간도 차지하지 않게 숨김
+            } else {
+                listEl.style.display = 'block'; // 내용이 있을 때만 보임
+                
+                if (defaultData.list_items.includes('<li')) {
+                    listEl.innerHTML = defaultData.list_items;
+                } else {
+                    let html = '';
+                    const items = defaultData.list_items.split('\n');
+                    items.forEach(item => {
+                        if(item.trim()) {
+                            html += `<li><i class="bi bi-check2-all"></i> ${item.trim()}</li>`;
+                        }
+                    });
+                    listEl.innerHTML = html;
+                }
             }
         }
     }
