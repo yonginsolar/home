@@ -158,38 +158,16 @@
 
 
 
-<section id="progress" class="counts">
+<section id="progress" class="services section-bg" style="display:none;">
       <div class="container" data-aos="fade-up">
 
         <div class="section-title">
           <h2>Progress</h2>
-          <p>제1호 발전소 <span>건립 현황</span></p>
+          <p>발전소 <span>건립 현황</span></p>
         </div>
 
-        <div class="row no-gutters justify-content-center">
-          <div class="col-lg-8 col-md-10 d-md-flex align-items-md-stretch">
-            <div class="count-box">
-              <i class="bi bi-lightning-charge-fill"></i>
-              <h3>제1호 발전소 건립 추진 중</h3>
-              <p class="mt-2">현재 부지 선정 및 인허가 절차를 준비하고 있습니다.</p>
-              
-<div class="progress" style="height: 30px;">
-                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
-                     style="width: 0%; font-size:16px; transition: width 1.5s ease-in-out;" 
-                     aria-valuenow="30" aria-valuemin="0" aria-valuemax="100">
-                     추진율 30%
-                </div>
-              </div>
-<div class="d-flex justify-content-between step-container">
-                <div class="step-item active">조합설립</div>
-                <div class="step-item active current">부지선정</div>
-                <div class="step-item">인허가</div> 
-                <div class="step-item">착공</div>
-                <div class="step-item">완공</div>
-              </div>
+        <div class="row justify-content-center" id="progress-container">
             </div>
-          </div>
-        </div>
 
       </div>
     </section>
@@ -1091,38 +1069,84 @@ async function fetchStats() {
     }
 
     // [2] 발전소 현황
+// [1] 발전소 현황 (Portfolio) - "운영중"인 것만 표시
     async function fetchPlants() {
-      const { data: plants } = await _client.from('site_power_plants').select('*').order('display_order');
-      const container = document.getElementById('power-plants-container');
-      
-      if (!plants || plants.length === 0) {
-        container.innerHTML = '<div class="col-12 text-center py-4">등록된 발전소가 없습니다.</div>';
-        return;
-      }
-      
-      let html = '';
-      plants.forEach(plant => {
-        const badgeClass = plant.status === '운영중' ? 'bg-success' : (plant.status === '공사중' ? 'bg-warning text-dark' : 'bg-secondary');
-        html += `
-          <div class="col-lg-4 col-md-6 d-flex align-items-stretch mb-4" data-aos="zoom-in">
-            <div class="card border-0 shadow-sm w-100">
-               <div style="height:200px; background:#eee; display:flex; align-items:center; justify-content:center; overflow:hidden;">
-                  ${plant.monitor_url ? `<img src="${plant.monitor_url}" style="width:100%; height:100%; object-fit:cover;">` : '<i class="bi bi-image fs-1 text-muted"></i>'}
-               </div>
-               <div class="card-body">
-                 <span class="badge ${badgeClass} mb-2">${plant.status}</span>
-                 <h5 class="card-title fw-bold">${plant.name}</h5>
-                 <p class="card-text text-muted small">${plant.location || '위치 정보 없음'}</p>
-                 <div class="d-flex justify-content-between align-items-center mt-3">
-                   <span class="fw-bold">${plant.capacity} kW</span>
-                   ${plant.monitor_url ? `<a href="${plant.monitor_url}" target="_blank" class="btn btn-outline-primary btn-sm">현황보기</a>` : ''}
-                 </div>
-               </div>
-            </div>
-          </div>
-        `;
-      });
-      container.innerHTML = html;
+        const { data } = await _client.from('site_power_plants').select('*').order('display_order');
+        if(!data) return;
+
+        // ★ 필터링: '운영중'인 것만 골라냄
+        const operatingPlants = data.filter(p => p.status === '운영중');
+        
+        // --- (기존 포트폴리오 렌더링 코드 유지) ---
+        const container = document.getElementById('portfolio-container');
+        if(!container) return;
+        
+        let html = '';
+        operatingPlants.forEach(p => {
+             html += `
+              <div class="col-lg-4 col-md-6 portfolio-item filter-app">
+                <div class="portfolio-wrap">
+                  <img src="assets/img/portfolio/portfolio-1.jpg" class="img-fluid" alt="">
+                  <div class="portfolio-info">
+                    <h4>${p.name}</h4>
+                    <p>${p.capacity}kW | ${p.status}</p>
+                    <div class="portfolio-links">
+                      <a href="${p.monitor_url || '#'}" target="_blank" title="모니터링"><i class="bx bx-link"></i></a>
+                    </div>
+                  </div>
+                </div>
+              </div>`;
+        });
+        container.innerHTML = html;
+
+        // ★ 여기서 Progress 함수도 같이 실행 (데이터 한번에 가져왔으니 넘겨줘도 되지만, 깔끔하게 별도 호출)
+        // 위에서 가져온 전체 data를 넘겨줘서 재활용합니다.
+        renderProgressSection(data);
+    }
+
+    // [2] 건립 현황 (Progress) - "공사중/준비중"인 것만 표시
+    function renderProgressSection(allPlants) {
+        // ★ 필터링: '운영중'이 아닌 것들 (공사중, 준비중)
+        const inProgressPlants = allPlants.filter(p => p.status !== '운영중');
+        
+        const section = document.getElementById('progress');
+        const container = document.getElementById('progress-container');
+        
+        // 공사중인 게 없으면 섹션을 통째로 숨김
+        if (inProgressPlants.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+
+        // 공사중인 게 있으면 섹션 보임
+        section.style.display = 'block';
+        
+        let html = '';
+        inProgressPlants.forEach(p => {
+            // 진행률 (DB에 값이 없으면 0)
+            const rate = p.progress_rate || 0;
+            
+            html += `
+            <div class="col-lg-8 col-md-10 mb-4" data-aos="zoom-in" data-aos-delay="100">
+                <div class="icon-box p-4" style="background:white; border-radius:10px; box-shadow: 0 5px 25px rgba(0,0,0,0.05);">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h4 class="mb-0 fw-bold" style="color:#2c3e50;">${p.name} <span class="badge bg-warning text-dark ms-2" style="font-size:0.6em;">${p.status}</span></h4>
+                        <span class="fw-bold text-primary fs-5">${rate}%</span>
+                    </div>
+                    <p class="text-muted mb-3 small">설비용량: ${p.capacity}kW</p>
+                    
+                    <div class="progress" style="height: 25px; border-radius:15px; background-color:#e9ecef;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                             role="progressbar" 
+                             style="width: ${rate}%" 
+                             aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100">
+                             ${rate > 5 ? rate + '%' : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        });
+        container.innerHTML = html;
     }
 
     // [3] 연혁
