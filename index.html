@@ -1027,7 +1027,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       await fetchHistory();     
       await fetchPartners();    
       await fetchNotices();     
-      await fetchFaqs();        
+      await fetchFaqs();
+      await fetchAbout();  // 소개 관련 불러오기
     });
 
     // ★ [핵심 추가] 사진까지 다 뜨고 나서 "최종 재측량"
@@ -1386,6 +1387,40 @@ async function fetchStats() {
 
         // 5. UI 업데이트 실행
         calculateYield();
+    }
+    // DOMContentLoaded 안에 추가: await fetchAbout();
+
+    // [신규] About 섹션 데이터 로드
+    async function fetchAbout() {
+        const { data } = await _client.from('site_about').select('*').single();
+        if(!data) return; // 데이터 없으면 HTML 기본값 유지
+
+        // 텍스트 교체
+        const titleEl = document.getElementById('about-title');
+        if(titleEl) titleEl.innerText = data.title;
+
+        const subEl = document.getElementById('about-subtitle');
+        if(subEl) subEl.innerText = data.subtitle;
+
+        const contentEl = document.getElementById('about-content');
+        if(contentEl) contentEl.innerText = data.content;
+
+        // 이미지 교체
+        const imgEl = document.getElementById('about-img-src');
+        if(imgEl && data.image_url) imgEl.src = data.image_url;
+
+        // 리스트(<ul>) 교체
+        const listEl = document.getElementById('about-list');
+        if(listEl && data.list_items) {
+            let html = '';
+            const items = data.list_items.split('\n'); // 엔터로 구분
+            items.forEach(item => {
+                if(item.trim()) {
+                    html += `<li><i class="bi bi-check2-all"></i> ${item.trim()}</li>`;
+                }
+            });
+            listEl.innerHTML = html;
+        }
     }
   </script>
 </body>
