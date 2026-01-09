@@ -347,16 +347,22 @@
   </div>
 </section>
 
-        <section id="faq" class="faq section-bg" style="background:#f6f9fe;">
-      <div class="container" data-aos="fade-up">
-        <div class="section-title">
-          <h2>F.A.Q</h2>
-          <p>자주 묻는 <span>질문</span></p>
-        </div>
+<section id="faq" class="faq section-bg" style="background-color: #f6f9ff;">
+  <div class="container" data-aos="fade-up">
 
-        <div id="faqlist">
-      </div>
-    </section>
+    <div class="section-title">
+      <h2>F.A.Q</h2>
+      <p>자주 묻는 <span>질문</span></p>
+    </div>
+
+    <ul class="faq-list" id="faq-list-container">
+       <div class="text-center py-5">
+           <div class="spinner-border text-success" role="status"></div>
+       </div>
+    </ul>
+
+  </div>
+</section>
 
     <section id="contact" class="contact">
       <div class="container" data-aos="fade-up">
@@ -970,34 +976,6 @@ async function fetchStats() {
       list.innerHTML = html;
     }
 
-    // [6] FAQ (아까 누락되었던 부분 추가)
-    async function fetchFaqs() {
-        const { data: faqs } = await _client.from('site_faqs').select('*').order('display_order');
-        const container = document.getElementById('faqlist');
-        if(!faqs || faqs.length === 0) {
-            container.innerHTML = '<div class="text-center py-3">등록된 질문이 없습니다.</div>';
-            return;
-        }
-
-        let html = '';
-        faqs.forEach((faq, idx) => {
-            html += `
-              <div class="accordion-item">
-                <h2 class="accordion-header">
-                  <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faq-content-${idx}">
-                    Q. ${faq.question}
-                  </button>
-                </h2>
-                <div id="faq-content-${idx}" class="accordion-collapse collapse" data-bs-parent="#faqlist">
-                  <div class="accordion-body">
-                    ${faq.answer}
-                  </div>
-                </div>
-              </div>
-            `;
-        });
-        container.innerHTML = html;
-    }
 
 // [보조 함수] 숫자 애니메이션 및 쉼표 찍기
 // [헬퍼 함수] 숫자 업데이트 + 콤마 설정
@@ -1212,6 +1190,71 @@ async function fetchStats() {
         }
 
         new bootstrap.Modal(document.getElementById('partnerDetailModal')).show();
+    }
+    // =================================================================
+    // [기능] FAQ 데이터 로드 (카드형 아코디언)
+    // =================================================================
+    async function fetchFaqs() {
+       const container = document.getElementById('faq-list-container');
+       if(!container) return;
+
+       // 1. DB에서 공개된(is_visible=true) FAQ만 가져오기
+       const { data: faqs, error } = await _client
+           .from('site_faqs')
+           .select('*')
+           .eq('is_visible', true)
+           .order('display_order', { ascending: true });
+
+       if (error || !faqs || faqs.length === 0) {
+           container.innerHTML = '<div class="text-center text-muted py-5">등록된 질문이 없습니다.</div>';
+           return;
+       }
+
+       let html = '';
+       
+       // 2. 카드 HTML 생성 (Bootstrap Collapse 활용)
+       faqs.forEach((f, index) => {
+           // 줄바꿈 처리 (\n -> <br>)
+           const answerHtml = f.answer ? f.answer.replace(/\n/g, '<br>') : '';
+           
+           html += `
+            <li data-aos="fade-up" data-aos-delay="${index * 100}">
+                <div class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${f.id}" aria-expanded="false" onclick="toggleFaqCard(this)">
+                    <div class="d-flex align-items-center">
+                        <span class="q-icon">Q.</span>
+                        <span>[${f.category}] ${f.question}</span>
+                    </div>
+                    <i class="bi bi-chevron-down toggle-icon"></i>
+                </div>
+
+                <div id="faq-content-${f.id}" class="collapse answer-block" data-bs-parent="#faq-list-container">
+                    <p class="mb-0 mt-2">
+                        ${answerHtml}
+                    </p>
+                </div>
+            </li>
+           `;
+       });
+       
+       container.innerHTML = html;
+    }
+
+    // [보조] 클릭 시 카드 스타일 활성화 (테두리 색상 등 변경)
+    function toggleFaqCard(element) {
+        // 모든 리스트의 active 클래스 제거 (하나만 열리게 할 경우)
+        const allItems = document.querySelectorAll('.faq-list li');
+        const parentLi = element.parentElement;
+
+        // 이미 열려있는 걸 눌렀는지 확인
+        const wasActive = parentLi.classList.contains('active');
+
+        // 일단 다 닫는 스타일로 초기화
+        allItems.forEach(li => li.classList.remove('active'));
+
+        // 방금 누른 게 닫혀있던 거라면 -> 활성화 (열림)
+        if (!wasActive) {
+            parentLi.classList.add('active');
+        }
     }
   </script>
 </body>
