@@ -465,7 +465,34 @@
     </div>
   </div>
 
+<div class="modal fade" id="partnerDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content text-center border-0 shadow-lg">
+      <div class="modal-header border-0 pb-0">
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body pb-4 pt-0">
+        
+        <div class="mb-4 d-flex align-items-center justify-content-center" style="height: 100px;">
+            <img id="pt-modal-logo" src="" alt="Logo" class="img-fluid" style="max-height: 100%; max-width: 80%; display:none;">
+            <h2 id="pt-modal-text-logo" class="fw-bold text-dark m-0" style="display:none;"></h2>
+        </div>
 
+        <h3 id="pt-modal-name" class="fw-bold mb-2" style="font-family:'GmarketSans';"></h3>
+        
+        <p id="pt-modal-desc" class="text-muted mb-4 px-3" style="word-break: keep-all;"></p>
+
+        <div id="pt-modal-badges" class="d-flex flex-wrap justify-content-center gap-2 mb-4">
+            </div>
+
+        <a id="pt-modal-link" href="#" target="_blank" class="btn btn-outline-dark rounded-pill px-4" style="display:none;">
+            홈페이지 방문 <i class="bi bi-box-arrow-up-right ms-1"></i>
+        </a>
+
+      </div>
+    </div>
+  </div>
+</div>
 
 
 
@@ -479,6 +506,14 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <script>
+
+    // =================================================================
+    // [4] 협력단체 (Partners) - 뱃지 시스템 연동 버전
+    // =================================================================
+    
+    let g_partners_list = []; // 파트너 데이터 기억용
+    let g_badge_def = [];     // 뱃지 정의(이름, 아이콘 등) 기억용
+    
     let g_total_amount = 0;
     /* =================================================================
        1. 디자인/애니메이션 초기화 (AOS, Counter, Scroll)
@@ -898,26 +933,47 @@ async function fetchStats() {
     }
 
     // [4] 협력단체 (아까 누락되었던 부분 추가)
-    async function fetchPartners() {
-       const { data: partners } = await _client.from('site_partners').select('*').order('display_order');
+async function fetchPartners() {
        const container = document.getElementById('partners-container');
-       if(!partners || partners.length === 0) {
-           container.innerHTML = '<div class="text-center w-100 py-3 small text-muted">등록된 단체가 없습니다.</div>';
+       if(!container) return;
+
+       // 1. 뱃지 정보 먼저 가져오기 (매칭을 위해)
+       const { data: badges } = await _client.from('site_badges').select('*');
+       g_badge_def = badges || [];
+
+       // 2. 파트너 데이터 가져오기 (승인된 것만, 순서대로)
+       const { data: partners, error } = await _client
+           .from('site_partners')
+           .select('*')
+           .eq('status', 'active') // ★ 중요: 승인된(active) 파트너만 노출
+           .order('display_order', { ascending: true });
+
+       if (error || !partners || partners.length === 0) {
+           container.innerHTML = '<div class="col-12 text-center py-5 text-muted small">현재 등록된 협력 단체가 없습니다.</div>';
            return;
        }
 
+       g_partners_list = partners; // 전역 변수에 저장 (모달 띄울 때 씀)
        let html = '';
+       
        partners.forEach(p => {
+           // 이미지가 있으면 <img>, 없으면 텍스트 표시
+           const content = p.logo_url 
+               ? `<img src="${p.logo_url}" class="img-fluid" alt="${p.name}">` 
+               : `<span class="partner-text">${p.name}</span>`;
+
+           // ★ 클릭 시 모달 오픈 함수 호출 (openPartnerDetail)
            html += `
             <div class="col-lg-3 col-md-4 col-6">
-                <div class="client-logo" style="padding: 20px; border-right:1px solid #eee; border-bottom:1px solid #eee; text-align:center; height:100px; display:flex; align-items:center; justify-content:center;">
-                  ${ p.link_url ? `<a href="${p.link_url}" target="_blank" style="text-decoration:none; color:inherit;">` : '' }
-                    ${ p.logo_url ? `<img src="${p.logo_url}" class="img-fluid" style="max-height:60px;">` : `<span style="font-weight:bold; color:#666;">${p.name}</span>` }
-                  ${ p.link_url ? `</a>` : '' }
+                <div class="client-logo" onclick="openPartnerDetail('${p.id}')" style="cursor:pointer;">
+                    <div class="d-flex justify-content-center align-items-center w-100 h-100">
+                        ${content}
+                    </div>
                 </div>
             </div>
            `;
        });
+       
        container.innerHTML = html;
     }
 
@@ -1088,6 +1144,59 @@ async function fetchStats() {
                 }
             }
         }
+    }
+    // [신규] 파트너 상세 모달 열기
+    function openPartnerDetail(id) {
+        // 1. 클릭한 파트너 찾기
+        const p = g_partners_list.find(item => item.id == id);
+        if(!p) return;
+
+        // 2. 데이터 바인딩 (로고, 이름, 설명)
+        const imgEl = document.getElementById('pt-modal-logo');
+        const txtEl = document.getElementById('pt-modal-text-logo');
+        
+        if(p.logo_url) {
+            imgEl.src = p.logo_url; imgEl.style.display = 'block';
+            txtEl.style.display = 'none';
+        } else {
+            imgEl.style.display = 'none';
+            txtEl.innerText = p.name; txtEl.style.display = 'block';
+        }
+
+        document.getElementById('pt-modal-name').innerText = p.name;
+        document.getElementById('pt-modal-desc').innerText = p.description || '용인모두의햇빛협동조합과 함께하는 든든한 파트너입니다.';
+
+        // 3. ★ 뱃지 그리기 (DB에 있는 뱃지 정보와 매칭)
+        const badgeContainer = document.getElementById('pt-modal-badges');
+        badgeContainer.innerHTML = ''; // 초기화
+
+        if(p.badges && p.badges.length > 0) {
+            p.badges.forEach(bCode => {
+                // 저장해둔 뱃지 정의에서 찾기
+                const bDef = g_badge_def.find(def => def.code === bCode);
+                if(bDef) {
+                    // 뱃지 디자인 (아이콘 + 이름 + 툴팁설명)
+                    badgeContainer.innerHTML += `
+                        <span class="badge bg-${bDef.color} bg-opacity-10 text-${bDef.color} border border-${bDef.color} px-3 py-2 rounded-pill" 
+                              title="${bDef.description || ''}" style="font-size:0.9rem;">
+                            ${bDef.icon || ''} ${bDef.name}
+                        </span>
+                    `;
+                }
+            });
+        }
+
+        // 4. 링크 버튼 처리
+        const linkBtn = document.getElementById('pt-modal-link');
+        if(p.link_url) {
+            linkBtn.href = p.link_url;
+            linkBtn.style.display = 'inline-block';
+        } else {
+            linkBtn.style.display = 'none';
+        }
+
+        // 5. 모달 띄우기
+        new bootstrap.Modal(document.getElementById('partnerDetailModal')).show();
     }
   </script>
 </body>
