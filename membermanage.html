@@ -1,370 +1,666 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>조합원 관리 | 용인모두의햇빛협동조합</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>조합원 관리 - 용인모두의햇빛협동조합</title>
+  
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" rel="stylesheet">
+  <link href="https://webfontworld.github.io/gmarket/GmarketSans.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <link href="style.css" rel="stylesheet">
+  
+  <style>
+    /* [기본 설정] 폰트 및 바디 */
+    body {
+        font-family: 'Pretendard', sans-serif;
+        background-color: #f8f9fa;
+        padding-top: 80px; /* 헤더 높이만큼 띄움 */
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+    }
+
+    /* [헤더] 규정집 스타일 그대로 적용 (검은색) */
+    #header {
+        background-color: #000;
+        padding: 15px 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .logo h1 a {
+        font-family: 'GmarketSans', sans-serif;
+        font-weight: 700;
+        font-size: 20px;
+        text-decoration: none;
+        color: #fff !important;
+    }
+    .header-link {
+        color: #fff;
+        text-decoration: none;
+        margin-left: 20px;
+        font-size: 1.2rem;
+        cursor: pointer;
+        transition: 0.3s;
+    }
+    .header-link:hover { color: #ff9800; }
+
+    /* [푸터] 하단 고정 및 스타일 */
+    #footer {
+        margin-top: auto;
+        background: #111; /* 배경색 강제 지정 (CSS 로드 전 깨짐 방지) */
+        color: #fff;
+    }
+
+    /* [로그인 섹션] 카드 스타일 */
+    .signup-wrapper {
+        background: #fff;
+        padding: 40px 30px;
+        border-radius: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+        max-width: 500px;
+        margin: 40px auto;
+        border: 1px solid #eee;
+    }
+    .form-title {
+        font-family: 'GmarketSans';
+        font-weight: 700;
+        text-align: center;
+        margin-bottom: 30px;
+        color: #333;
+    }
     
-    <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" rel="stylesheet">
-    <link href="https://webfontworld.github.io/gmarket/GmarketSans.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    /* [대시보드] 카드 박스 */
+    .dashboard-card {
+        background: #fff;
+        border-radius: 15px;
+        padding: 25px;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+        border: 1px solid #f0f0f0;
+        height: 100%;
+    }
+    .count-icon {
+        font-size: 2.5rem;
+        color: #2E7D32;
+        margin-bottom: 10px;
+    }
+    .count-title {
+        color: #666;
+        font-size: 0.9rem;
+        margin-bottom: 5px;
+    }
+    .count-val {
+        font-family: 'GmarketSans';
+        font-weight: 700;
+        font-size: 1.5rem;
+        color: #333;
+    }
+
+    /* [타임라인] 활동 내역 스타일 (필수 복구) */
+    .timeline-item {
+        padding: 0 0 20px 20px;
+        border-left: 2px solid #e0e0e0;
+        position: relative;
+    }
+    .timeline-item::before {
+        content: "";
+        position: absolute;
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        left: -7px; top: 5px;
+        background: #fff;
+        border: 2px solid #2E7D32;
+    }
+    .timeline-date {
+        font-size: 0.8rem;
+        color: #999;
+        margin-bottom: 3px;
+    }
+    .timeline-content h5 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 0;
+        color: #333;
+    }
+    .timeline-content p {
+        font-size: 0.9rem;
+        color: #666;
+        margin: 0;
+    }
+
+    /* [메뉴 탭] 버튼 스타일 */
+    .menu-btn {
+        width: 100%;
+        text-align: left;
+        padding: 15px;
+        margin-bottom: 10px;
+        border: 1px solid #eee;
+        background: #fff;
+        border-radius: 10px;
+        font-weight: 600;
+        color: #555;
+        transition: all 0.2s;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .menu-btn:hover {
+        background: #f8f9fa;
+        border-color: #2E7D32;
+        color: #2E7D32;
+    }
+    .menu-btn.active {
+        background: #2E7D32;
+        color: #fff;
+        border-color: #2E7D32;
+    }
+    .menu-icon { font-size: 1.2rem; margin-right: 10px; }
+
+    /* 로딩 오버레이 */
+    #loadingOverlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(255,255,255,0.95);
+        z-index: 9999;
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
     
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    
-    <link rel="stylesheet" href="style.css">
-
-    <style>
-        /* [디자인 수정] 요청하신 헤더/푸터 스타일 적용 */
-        
-        /* 1. 헤더 (검은색 배경, 흰색 글씨) */
-        #header {
-            background-color: #000; /* 완전 검정 */
-            padding: 15px 0;
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            z-index: 1000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        #header .container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 20px;
-        }
-
-        .logo h1 { margin: 0; line-height: 1; }
-        .logo h1 a {
-            color: #fff;
-            text-decoration: none;
-            font-family: 'GmarketSans', sans-serif; /* 지마켓 산스 */
-            font-weight: 700;
-            font-size: 20px;
-        }
-
-        /* 헤더 우측 아이콘 버튼들 */
-        .header-icons a {
-            color: #fff;
-            font-size: 1.5rem; /* fs-4 */
-            margin-left: 1rem; /* me-3 */
-            text-decoration: none;
-            transition: 0.3s;
-            cursor: pointer;
-        }
-        .header-icons a:hover { color: #ff9800; }
-
-        /* 2. 푸터 (footer.js 로드 위치 확보) */
-        #footer {
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            /* footer.js 내부 스타일을 따르되 위치 고정 */
-        }
-
-        /* 3. 본문 레이아웃 보정 */
-        body {
-            font-family: 'Pretendard', sans-serif;
-            background-color: #f8f9fa;
-            padding-top: 80px; /* 헤더 높이만큼 띄움 */
-        }
-
-        /* 기타 유틸리티 */
-        .hidden { display: none !important; }
-        
-        /* 로딩 오버레이 */
-        #loadingOverlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255,255,255,0.95); z-index: 9999;
-            display: none; flex-direction: column; justify-content: center; align-items: center;
-        }
-        .spinner {
-            width: 40px; height: 40px; border: 4px solid #eee;
-            border-top: 4px solid #2E7D32; border-radius: 50%; animation: spin 1s linear infinite;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        /* 카드 박스 스타일 */
-        .signup-wrapper {
-            background: #fff; padding: 40px 20px; border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-            max-width: 500px; margin: 40px auto;
-        }
-        .card-box {
-            background: #fff; padding: 30px; border-radius: 12px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.05); border: 1px solid #eee;
-        }
-    </style>
+    /* 유틸리티 */
+    .hidden { display: none !important; }
+    .text-green { color: #2E7D32 !important; }
+  </style>
 </head>
+
 <body>
 
-    <header id="header">
-        <div class="container">
-            <div class="logo">
-                <h1><a href="index.html">용인모두의햇빛협동조합</a></h1>
+  <header id="header" class="fixed-top">
+    <div class="container d-flex align-items-center justify-content-between">
+      
+      <div class="logo">
+        <h1><a href="index.html">용인모두의햇빛협동조합</a></h1>
+      </div>
+
+      <div class="d-flex align-items-center">
+          <a href="index.html" class="header-link" title="메인으로 이동">
+              <i class="bi bi-house-door"></i>
+          </a>
+          <a href="#" onclick="logout()" id="headerLogoutBtn" class="header-link hidden" title="로그아웃">
+              <i class="bi bi-box-arrow-right"></i>
+          </a>
+      </div>
+
+    </div>
+  </header>
+
+  <div id="loadingOverlay">
+      <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;"></div>
+      <div class="mt-3 fw-bold text-secondary" id="loadingMsg">잠시만 기다려주세요</div>
+  </div>
+
+  <main class="container py-4">
+    
+    <div id="loginSection">
+        <div class="signup-wrapper">
+            <h2 class="form-title">조합원 공간</h2>
+            
+            <div class="alert alert-light border d-flex align-items-center" role="alert">
+                <i class="bi bi-info-circle-fill text-success fs-4 me-3"></i>
+                <div>
+                    가입 시 등록한 <b>이메일</b>을 입력해주세요.<br>
+                    <small class="text-muted">입력하신 메일로 로그인 링크를 보내드립니다.</small>
+                </div>
             </div>
 
-            <div class="header-icons d-flex align-items-center">
-                <a href="index.html" title="메인으로 이동">
-                    <i class="bi bi-house-door"></i>
-                </a>
-                <a href="#" onclick="logout()" id="headerLogoutBtn" style="display:none;" title="로그아웃">
-                    <i class="bi bi-box-arrow-right"></i>
-                </a>
+            <div class="mb-3">
+                <label class="form-label fw-bold small text-secondary">이메일 주소</label>
+                <div class="input-group">
+                    <input type="email" id="emailInput" class="form-control form-control-lg" placeholder="example@email.com" onkeyup="if(event.key==='Enter') sendMagicLink()">
+                    <button class="btn btn-dark" type="button" onclick="sendMagicLink()">링크 받기</button>
+                </div>
+            </div>
+
+            <div id="sentMsgBox" class="text-center hidden mt-4 p-4 bg-light rounded">
+                <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
+                <h4 class="fw-bold mt-2">메일함을 확인해주세요!</h4>
+                <p class="text-muted mb-3">
+                    <span id="targetEmail" class="fw-bold text-dark"></span>(으)로<br>
+                    로그인 링크가 발송되었습니다.
+                </p>
+                <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">이메일 다시 입력하기</button>
+            </div>
+
+            <div class="mt-4 pt-4 border-top">
+                <button class="btn btn-warning w-100 fw-bold py-3" onclick="startKakaoLogin()">
+                    <i class="bi bi-chat-fill me-2"></i> 카카오로 바로 시작하기
+                </button>
+                <div class="text-center mt-2">
+                    <small class="text-muted">(기존에 카카오를 연동한 조합원만 가능합니다)</small>
+                </div>
             </div>
         </div>
-    </header>
-
-    <div id="loadingOverlay">
-        <div class="spinner"></div>
-        <div style="margin-top:15px; font-weight:bold; color:#555;" id="loadingMsg">잠시만 기다려주세요</div>
     </div>
 
-    <main class="container py-4" style="min-height: 80vh;">
+    <div id="dashboardSection" class="hidden">
         
-        <div id="loginSection">
-            <div class="signup-wrapper">
-                <h2 style="text-align: center; font-family:'GmarketSans'; margin-bottom:30px;">조합원 로그인</h2>
-                
-                <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom: 20px; font-size:14px; color:#555;">
-                    <i class="bi bi-envelope-check"></i> 가입 시 등록한 <b>이메일 주소</b>를 입력해주세요.<br>
-                    입력하신 이메일로 <b>로그인 링크</b>를 보내드립니다.
-                </div>
+        <div class="mb-4">
+            <h2 class="fw-bold" style="font-family:'GmarketSans';">나의 조합원 정보</h2>
+            <p class="text-muted">안녕하세요, <span id="welcomeName" class="fw-bold text-dark"></span> 조합원님!</p>
+        </div>
 
-                <div class="d-flex" style="gap:5px; margin-bottom:10px;">
-                    <input type="email" id="emailInput" class="form-control" style="padding:12px; width:100%; border:1px solid #ddd; border-radius:8px;" placeholder="example@email.com" onkeyup="if(event.key==='Enter') sendMagicLink()">
-                    <button onclick="sendMagicLink()" style="background:#333; color:#fff; border:none; padding:0 20px; border-radius:8px; white-space:nowrap;">링크 받기</button>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6 col-lg-4">
+                <div class="dashboard-card text-center">
+                    <i class="bi bi-person-badge count-icon"></i>
+                    <div class="count-title">조합원 번호</div>
+                    <div class="count-val" id="sumId">-</div>
+                    <div class="small text-muted mt-1" id="sumEmail">-</div>
                 </div>
-
-                <div id="sentMsgBox" class="hidden" style="margin-top: 20px; text-align: center;">
-                    <div style="font-size: 50px;">📧</div>
-                    <h3 style="font-size:18px; font-weight:bold; margin:10px 0;">메일을 확인해주세요!</h3>
-                    <p style="color:#666; font-size:14px;">
-                        <span id="targetEmail" style="color:#2E7D32; font-weight:bold;"></span>(으)로<br>
-                        로그인 링크가 발송되었습니다.<br>
-                        메일함의 <b>[Log in]</b> 버튼을 눌러주세요.
-                    </p>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="dashboard-card text-center">
+                    <i class="bi bi-piggy-bank count-icon"></i>
+                    <div class="count-title">총 납입 출자금</div>
+                    <div class="count-val text-green" id="sumTotal">0원</div>
+                </div>
+            </div>
+            <div class="col-md-12 col-lg-4">
+                <div class="dashboard-card text-center d-flex flex-column justify-content-center align-items-center">
+                   <div class="count-title mb-2">계좌 정보 (환급/배당)</div>
+                   <div class="fw-bold fs-5" id="sumBank">등록된 계좌 없음</div>
+                   <small class="text-muted mt-1">변경은 사무국으로 문의해주세요</small>
                 </div>
             </div>
         </div>
 
-        <div id="dashboardSection" class="hidden">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 style="margin:0; font-family:'GmarketSans'; font-size:24px;">나의 조합원 정보</h2>
-            </div>
-
-            <div class="row" style="display:flex; gap:15px; flex-wrap:wrap; margin-bottom:30px;">
-                <div class="card-box" style="flex:1; min-width:280px; text-align:center;">
-                    <i class="bi bi-person-circle" style="font-size:40px; color:#2E7D32;"></i>
-                    <h3 id="sumName" style="margin:10px 0;">-</h3>
-                    <p class="text-muted mb-0">조합원 번호: <span id="sumId">-</span></p>
-                </div>
-                <div class="card-box" style="flex:1; min-width:280px; text-align:center;">
-                    <i class="bi bi-piggy-bank" style="font-size:40px; color:#2E7D32;"></i>
-                    <h3 id="sumTotal" style="margin:10px 0;">0원</h3>
-                    <p class="text-muted mb-0">총 납입 출자금</p>
-                </div>
-            </div>
-
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:20px;">
-                <div class="card-box">
-                    <h4 style="font-family:'GmarketSans'; border-bottom:2px solid #eee; padding-bottom:10px; margin-bottom:20px;">업무 신청</h4>
+        <div class="row g-4">
+            <div class="col-lg-5">
+                <div class="dashboard-card">
+                    <h5 class="fw-bold mb-3 border-bottom pb-2"><i class="bi bi-pencil-square me-2"></i>업무 신청</h5>
                     
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px;">
-                        <button onclick="toggleTab('extra')" class="menu-btn" style="padding:10px; border:1px solid #ddd; background:#fff; border-radius:5px;">추가 출자</button>
-                        <button onclick="toggleTab('reduction')" class="menu-btn" style="padding:10px; border:1px solid #ddd; background:#fff; border-radius:5px;">감자 신청</button>
-                        <button onclick="toggleTab('withdraw')" class="menu-btn" style="padding:10px; border:1px solid #ddd; background:#fff; border-radius:5px;">탈퇴 신청</button>
-                        <button onclick="downloadCert()" class="menu-btn" style="padding:10px; border:1px solid #2E7D32; color:#2E7D32; background:#fff; border-radius:5px; font-weight:bold;">증명서</button>
+                    <div class="d-grid gap-2">
+                        <button class="menu-btn" onclick="toggleTab('extra', this)">
+                            <span><i class="bi bi-plus-circle menu-icon"></i>추가 출자</span> <i class="bi bi-chevron-right"></i>
+                        </button>
+                        <button class="menu-btn" onclick="toggleTab('reduction', this)">
+                            <span><i class="bi bi-dash-circle menu-icon"></i>감자 신청</span> <i class="bi bi-chevron-right"></i>
+                        </button>
+                        <button class="menu-btn" onclick="toggleTab('withdraw', this)">
+                            <span><i class="bi bi-box-arrow-left menu-icon"></i>탈퇴 신청</span> <i class="bi bi-chevron-right"></i>
+                        </button>
+                        <button class="menu-btn" onclick="toggleTab('cert', this)">
+                            <span><i class="bi bi-file-earmark-pdf menu-icon"></i>증명서 발급</span> <i class="bi bi-chevron-right"></i>
+                        </button>
                     </div>
 
-                    <div id="tabContent" style="background:#f9f9f9; padding:15px; border-radius:10px;">
-                        <div id="tabPlaceholder" class="text-center text-muted">메뉴를 선택해주세요.</div>
+                    <div id="actionArea" class="mt-4 bg-light p-3 rounded">
+                        <div id="tabPlaceholder" class="text-center text-muted small py-3">
+                            위 메뉴를 선택하시면<br>신청 양식이 표시됩니다.
+                        </div>
 
                         <div id="tabExtra" class="hidden">
-                            <h6>추가 출자 신청</h6>
-                            <input type="number" id="exAmount" class="form-control mb-2" style="width:100%; padding:8px;" placeholder="금액 입력 (원)">
-                            <button onclick="submitApplication('extra')" style="width:100%; background:#2E7D32; color:white; border:none; padding:10px; border-radius:5px;">신청하기</button>
+                            <h6 class="fw-bold mb-3">추가 출자 신청</h6>
+                            <div class="mb-3">
+                                <label class="form-label small">약정 금액 (1만원 단위)</label>
+                                <input type="number" id="exAmount" class="form-control" placeholder="금액 입력" step="10000">
+                            </div>
+                            <button class="btn btn-success w-100 fw-bold" onclick="submitApplication('extra')">신청하기</button>
                         </div>
+
                         <div id="tabReduction" class="hidden">
-                            <h6>감자 신청</h6>
-                            <input type="number" id="redAmount" class="form-control mb-2" style="width:100%; padding:8px;" placeholder="환급 요청액">
-                            <button onclick="submitApplication('reduction')" style="width:100%; background:#2E7D32; color:white; border:none; padding:10px; border-radius:5px;">신청하기</button>
+                            <h6 class="fw-bold mb-3">감자 신청</h6>
+                            <div class="alert alert-warning small py-2">
+                                <i class="bi bi-bank me-1"></i> 등록된 계좌로 환급됩니다.
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small">환급 요청액</label>
+                                <input type="number" id="redAmount" class="form-control" placeholder="금액 입력">
+                            </div>
+                            <button class="btn btn-success w-100 fw-bold" onclick="submitApplication('reduction')">신청하기</button>
                         </div>
+
                         <div id="tabWithdraw" class="hidden">
-                            <h6 style="color:red;">탈퇴 신청</h6>
-                            <textarea id="wdReason" class="form-control mb-2" style="width:100%; padding:8px;" placeholder="사유 입력"></textarea>
-                            <button onclick="submitApplication('withdraw')" style="width:100%; background:#333; color:white; border:none; padding:10px; border-radius:5px;">신청하기</button>
+                            <h6 class="fw-bold text-danger mb-3">탈퇴 신청</h6>
+                            <div class="alert alert-danger small py-2">
+                                <b>정말 탈퇴하시겠습니까?</b><br>총회 승인 후 환급됩니다.
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small">탈퇴 사유</label>
+                                <textarea id="wdReason" class="form-control" rows="3" placeholder="사유를 입력해주세요"></textarea>
+                            </div>
+                            <button class="btn btn-dark w-100 fw-bold" onclick="submitApplication('withdraw')">탈퇴 신청</button>
+                        </div>
+
+                        <div id="tabCert" class="hidden text-center py-3">
+                            <i class="bi bi-file-pdf text-danger" style="font-size: 3rem;"></i>
+                            <h6 class="fw-bold mt-2">출자 증명서</h6>
+                            <p class="small text-muted">현재 납입된 출자금을 기준으로<br>PDF 증명서를 생성합니다.</p>
+                            <button class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert()">
+                                <i class="bi bi-download me-2"></i>다운로드
+                            </button>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <div class="card-box">
-                    <h4 style="font-family:'GmarketSans'; border-bottom:2px solid #eee; padding-bottom:10px; margin-bottom:20px;">최근 활동</h4>
-                    <div id="timelineList">
-                        <p class="text-center text-muted">로딩 중...</p>
+            <div class="col-lg-7">
+                <div class="dashboard-card">
+                    <h5 class="fw-bold mb-4 border-bottom pb-2"><i class="bi bi-clock-history me-2"></i>최근 활동 내역</h5>
+                    <div id="timelineList" style="max-height: 500px; overflow-y: auto;">
+                        <p class="text-center text-muted py-5">내역을 불러오는 중...</p>
                     </div>
                 </div>
             </div>
         </div>
-    </main>
+    </div>
+  </main>
 
-    <footer id="footer"></footer>
-    <script src="footer.js"></script>
+  <footer id="footer"></footer>
 
-    <script>
-        // =========================================================================
-        // Supabase 설정
-        // =========================================================================
-        const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
-        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="footer.js"></script>
 
-        let curMem = null;
+  <script>
+    // =========================================================================
+    // 1. Supabase 설정 (사용자 제공 키 적용)
+    // =========================================================================
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+    
+    let _supabase = null;
+    let curMem = null; // 조합원 정보
+    let curAuth = null; // 인증 정보
 
-        // 로딩 UI 제어
-        function showLoading(show, msg) {
-            document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
-            if(msg) document.getElementById('loadingMsg').innerText = msg;
+    // 초기화 시도
+    try {
+        _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    } catch (e) {
+        console.error("Supabase Init Error", e);
+        alert("시스템 연결 오류");
+    }
+
+    // 로딩 UI 제어
+    function showLoading(show, msg) {
+        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+        if(msg) document.getElementById('loadingMsg').innerText = msg;
+    }
+
+    // 초기 로드: 세션 확인
+    window.addEventListener('DOMContentLoaded', async () => {
+        if(!_supabase) return;
+        
+        // URL에 포함된 토큰으로 세션 복구
+        const { data: { session } } = await _supabase.auth.getSession();
+        
+        if (session) {
+            handleLoginSuccess(session.user);
         }
+    });
 
-        // 초기화
-        window.addEventListener('DOMContentLoaded', async () => {
-            const { data: { session } } = await _supabase.auth.getSession();
-            if (session) {
-                handleLoginSuccess(session.user);
+    // =========================================================================
+    // 2. 로그인 로직 (매직링크)
+    // =========================================================================
+    async function sendMagicLink() {
+        if(!_supabase) return;
+        const email = document.getElementById('emailInput').value.trim();
+        if(!email.includes('@')) return alert('올바른 이메일 형식이 아닙니다.');
+
+        showLoading(true, '인증 메일 발송 중...');
+        
+        // ★ emailRedirectTo: 현재 페이지로 다시 돌아오도록 설정
+        const { error } = await _supabase.auth.signInWithOtp({
+            email: email,
+            options: { 
+                shouldCreateUser: false, // 기존 회원만
+                emailRedirectTo: window.location.href 
             }
         });
 
-        // 1. 매직링크 발송
-        async function sendMagicLink() {
-            const email = document.getElementById('emailInput').value.trim();
-            if(!email.includes('@')) return alert('올바른 이메일을 입력하세요.');
+        showLoading(false);
 
-            showLoading(true, '인증 메일 발송 중...');
+        if(error) {
+            // 사용자 미등록 에러 처리
+            if(error.message.includes('Signups not allowed') || error.message.includes('User not found')) {
+                alert('등록되지 않은 이메일입니다.\n조합 가입 시 등록한 이메일을 입력해주세요.');
+            } else {
+                alert('오류 발생: ' + error.message);
+            }
+        } else {
+            // 성공 UI
+            document.getElementById('sentMsgBox').classList.remove('hidden');
+            document.getElementById('targetEmail').innerText = email;
+            // 입력창 비활성화
+            document.getElementById('emailInput').disabled = true;
+        }
+    }
+
+    async function startKakaoLogin() {
+        const { error } = await _supabase.auth.signInWithOAuth({
+            provider: 'kakao',
+            options: { redirectTo: window.location.href }
+        });
+        if(error) alert('카카오 로그인 오류: ' + error.message);
+    }
+
+    function logout() {
+        if(confirm('로그아웃 하시겠습니까?')) {
+            _supabase.auth.signOut().then(() => location.reload());
+        }
+    }
+
+    // =========================================================================
+    // 3. 데이터 로드 및 대시보드 렌더링
+    // =========================================================================
+    async function handleLoginSuccess(user) {
+        curAuth = user;
+        showLoading(true, '조합원 정보 확인 중...');
+        
+        // 헤더 로그아웃 버튼 표시
+        document.getElementById('headerLogoutBtn').classList.remove('hidden');
+
+        // 1. DB 매핑 (RPC 호출) - 이메일 기반 매칭
+        const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
+
+        // 매칭 실패 처리
+        if (claimErr || (!claimRes.success && claimRes.message === 'not_found')) {
+            showLoading(false);
+            await _supabase.auth.signOut();
+            alert('로그인한 이메일과 일치하는 조합원 정보가 없습니다.\n(가입 시 등록된 이메일인지 확인해주세요.)');
+            return;
+        }
+
+        // 2. 데이터 조회
+        await loadDashboardData(user.id);
+    }
+
+    async function loadDashboardData(uuid) {
+        try {
+            // [A] 내 정보 (coop_members)
+            const { data: member, error: memErr } = await _supabase
+                .from('coop_members')
+                .select('*')
+                .eq('id', uuid)
+                .single();
             
-            // ★ 중요: 현재 페이지로 리다이렉트 설정
-            const { error } = await _supabase.auth.signInWithOtp({
-                email: email,
-                options: { 
-                    shouldCreateUser: false, 
-                    emailRedirectTo: window.location.href 
-                }
-            });
+            if(memErr) throw memErr;
+            curMem = member;
 
+            // [B] 신청 내역 (coop_applications)
+            const { data: apps } = await _supabase
+                .from('coop_applications')
+                .select('*')
+                .eq('member_uid', uuid)
+                .order('created_at', { ascending: false });
+
+            // [C] 입금 내역 (ref_members)
+            const { data: ledger } = await _supabase
+                .from('ref_members')
+                .select('*')
+                .eq('member_id', curMem.member_id)
+                .order('deposit_date', { ascending: false });
+
+            // 렌더링 실행
+            renderDashboard(member, apps || [], ledger || []);
             showLoading(false);
 
-            if(error) {
-                alert('오류: ' + error.message);
-            } else {
-                document.getElementById('sentMsgBox').classList.remove('hidden');
-                document.getElementById('targetEmail').innerText = email;
-            }
+        } catch (e) {
+            console.error(e);
+            showLoading(false);
+            alert('데이터를 불러오는 중 오류가 발생했습니다: ' + e.message);
         }
+    }
 
-        // 2. 로그인 성공 후 데이터 로드
-        async function handleLoginSuccess(user) {
-            showLoading(true, '조합원 정보 확인 중...');
-            document.getElementById('headerLogoutBtn').style.display = 'block'; // 헤더 로그아웃 버튼 표시
+    function renderDashboard(member, apps, ledger) {
+        // 화면 전환
+        document.getElementById('loginSection').classList.add('hidden');
+        document.getElementById('dashboardSection').classList.remove('hidden');
 
-            // RPC 호출 (수정된 claim_member_profile 함수가 필요함)
-            const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
-
-            if (claimErr || (!claimRes.success && claimRes.message === 'not_found')) {
-                showLoading(false);
-                await _supabase.auth.signOut();
-                alert('로그인한 이메일과 일치하는 조합원 정보가 없습니다.\n(가입 시 등록된 이메일인지 확인해주세요.)');
-                return;
-            }
-
-            // 데이터 조회 및 화면 전환
-            await loadDashboard(user.id);
-        }
-
-        async function loadDashboard(uuid) {
-            try {
-                // 내 정보 조회
-                const { data: member } = await _supabase.from('coop_members').select('*').eq('id', uuid).single();
-                curMem = member;
-
-                // 화면 렌더링
-                document.getElementById('loginSection').classList.add('hidden');
-                document.getElementById('dashboardSection').classList.remove('hidden');
-
-                document.getElementById('sumName').innerText = member.name;
-                document.getElementById('sumId').innerText = member.member_id;
-                document.getElementById('sumTotal').innerText = (member.pledge_amount || 0).toLocaleString() + '원';
-
-                // 내역 조회 (예시)
-                const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid);
-                renderTimeline(apps || []);
-
-                showLoading(false);
-            } catch (e) {
-                console.error(e);
-                showLoading(false);
-                alert('데이터 로드 실패');
-            }
-        }
-
-        function renderTimeline(list) {
-            const el = document.getElementById('timelineList');
-            if(list.length === 0) {
-                el.innerHTML = '<p class="text-center text-muted">최근 활동 내역이 없습니다.</p>';
-                return;
-            }
-            let html = '';
-            list.forEach(item => {
-                html += `<div style="padding:10px; border-bottom:1px solid #f0f0f0;">
-                    <span style="font-weight:bold;">${item.type}</span> 
-                    <span style="float:right;">${Number(item.amount).toLocaleString()}원</span>
-                    <div style="font-size:12px; color:#888;">${item.created_at.substring(0,10)} - ${item.status}</div>
-                </div>`;
-            });
-            el.innerHTML = html;
-        }
-
-        // 탭 기능
-        function toggleTab(type) {
-            document.getElementById('tabPlaceholder').classList.add('hidden');
-            ['tabExtra', 'tabReduction', 'tabWithdraw'].forEach(id => document.getElementById(id).classList.add('hidden'));
-            
-            const target = document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1));
-            if(target) target.classList.remove('hidden');
-        }
-
-        async function submitApplication(type) {
-            let amount = 0;
-            if(type === 'extra') amount = document.getElementById('exAmount').value;
-            if(type === 'reduction') amount = document.getElementById('redAmount').value;
-            
-            if(!confirm('신청하시겠습니까?')) return;
-            
-            const { error } = await _supabase.from('coop_applications').insert({
-                member_uid: curMem.id,
-                member_id: curMem.member_id,
-                name: curMem.name,
-                type: type,
-                amount: amount || 0
-            });
-
-            if(error) alert('실패: ' + error.message);
-            else {
-                alert('신청되었습니다.');
-                loadDashboard(curMem.id);
-            }
-        }
+        // 기본 정보
+        document.getElementById('welcomeName').innerText = member.name;
+        document.getElementById('sumId').innerText = member.member_id;
+        document.getElementById('sumEmail').innerText = member.email;
+        document.getElementById('sumTotal').innerText = (member.pledge_amount || 0).toLocaleString() + '원';
         
-        function downloadCert() {
-            alert('PDF 다운로드 기능 준비중');
+        // 은행 정보 (암호화 여부에 따라 평문인 bank_name만 표시하거나 처리)
+        const bankText = member.bank_name ? `${member.bank_name} (계좌 있음)` : '미등록 계좌';
+        document.getElementById('sumBank').innerText = bankText;
+
+        // 타임라인 렌더링
+        renderTimeline(ledger, apps);
+    }
+
+    function renderTimeline(ledger, apps) {
+        const list = document.getElementById('timelineList');
+        let html = '';
+
+        if(ledger.length === 0 && apps.length === 0) {
+            list.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-inbox fs-1"></i><br>최근 활동 내역이 없습니다.</div>';
+            return;
         }
 
-        function logout() {
-            if(confirm('로그아웃 하시겠습니까?')) {
-                _supabase.auth.signOut().then(() => location.reload());
-            }
+        // 1. 입금 내역 (Ledger)
+        ledger.forEach(item => {
+            html += `
+            <div class="timeline-item">
+                <div class="timeline-date">${item.deposit_date ? item.deposit_date.substring(0,10) : '날짜 미상'}</div>
+                <div class="timeline-content">
+                    <h5>입금 확인</h5>
+                    <p class="text-success fw-bold">+${Number(item.amount).toLocaleString()}원</p>
+                    <p class="small text-muted">${item.note || '출자금'}</p>
+                </div>
+            </div>`;
+        });
+
+        // 2. 신청 내역 (Apps)
+        apps.forEach(app => {
+            let statusBadge = '';
+            if(app.status === 'pending') statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
+            else if(app.status === 'approved') statusBadge = '<span class="badge bg-success">승인됨</span>';
+            else statusBadge = '<span class="badge bg-secondary">종료</span>';
+
+            let typeName = { 'extra': '추가출자', 'reduction': '감자', 'withdraw': '탈퇴' }[app.type] || app.type;
+
+            html += `
+            <div class="timeline-item" style="border-left-color: #ff9800;">
+                <div class="timeline-date">${app.created_at.substring(0,10)}</div>
+                <div class="timeline-content">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5>[신청] ${typeName}</h5>
+                        ${statusBadge}
+                    </div>
+                    <p>${Number(app.amount).toLocaleString()}원</p>
+                </div>
+            </div>`;
+        });
+
+        list.innerHTML = html;
+    }
+
+    // =========================================================================
+    // 4. 탭 및 신청 기능
+    // =========================================================================
+    function toggleTab(type, btn) {
+        // 모든 탭 숨기기
+        document.getElementById('tabPlaceholder').classList.add('hidden');
+        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => {
+            document.getElementById(id).classList.add('hidden');
+        });
+        
+        // 버튼 활성화 스타일
+        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
+        if(btn) btn.classList.add('active');
+
+        // 해당 탭 보이기
+        const target = document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1));
+        if(target) target.classList.remove('hidden');
+    }
+
+    async function submitApplication(type) {
+        let amount = 0, reason = '';
+
+        if(type === 'extra') {
+            amount = document.getElementById('exAmount').value;
+            if(!amount || amount < 10000) return alert('1만원 이상 입력해주세요.');
+        } else if(type === 'reduction') {
+            amount = document.getElementById('redAmount').value;
+            if(!amount) return alert('금액을 입력해주세요.');
+        } else if(type === 'withdraw') {
+            reason = document.getElementById('wdReason').value;
+            if(!reason) return alert('탈퇴 사유를 입력해주세요.');
         }
-    </script>
+
+        if(!confirm('정말 신청하시겠습니까?')) return;
+
+        showLoading(true, '신청서 제출 중...');
+
+        const { error } = await _supabase.from('coop_applications').insert({
+            member_uid: curMem.id,
+            member_id: curMem.member_id,
+            name: curMem.name,
+            type: type,
+            amount: amount || 0,
+            reason: reason,
+            status: 'pending' // DB default가 있지만 명시
+        });
+
+        showLoading(false);
+
+        if(error) {
+            alert('신청 실패: ' + error.message);
+        } else {
+            alert('성공적으로 신청되었습니다.');
+            // 입력창 초기화 및 리로드
+            document.getElementById('exAmount').value = '';
+            document.getElementById('redAmount').value = '';
+            document.getElementById('wdReason').value = '';
+            loadDashboardData(curMem.id); // 대시보드 새로고침
+        }
+    }
+
+    // PDF 다운로드 (jspdf)
+    function downloadCert() {
+        if(!window.jspdf) return alert('PDF 생성 모듈 오류');
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // [주의] 한글 폰트가 없으므로 영어로 출력하거나 이미지를 사용해야 함
+        // 실제 운영 시엔 addFileToVFS로 폰트(base64)를 로드해야 함
+        doc.setFontSize(20);
+        doc.text("Certificate of Contribution", 105, 30, { align: "center" });
+        doc.setFontSize(12);
+        doc.text(`Name: ${curMem.name} (Korean font required)`, 20, 50);
+        doc.text(`ID: ${curMem.member_id}`, 20, 60);
+        doc.text(`Total Amount: ${Number(curMem.pledge_amount||0).toLocaleString()} KRW`, 20, 70);
+        doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 80);
+        
+        doc.save(`출자증서_${curMem.member_id}.pdf`);
+    }
+
+  </script>
 </body>
 </html>
