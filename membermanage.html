@@ -7,7 +7,6 @@
     
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
     <link href="https://webfontworld.github.io/gmarket/GmarketSans.css" rel="stylesheet">
-    
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -16,14 +15,13 @@
     <link rel="stylesheet" href="style.css">
 
     <style>
-        /* 대시보드 전용 추가 스타일 (style.css와 충돌 없이 레이아웃 잡기 위함) */
+        /* 대시보드 전용 추가 스타일 */
         .dashboard-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 20px;
             margin-bottom: 40px;
         }
-        
         .card-box {
             background: #fff;
             padding: 30px;
@@ -31,15 +29,12 @@
             box-shadow: 0 5px 20px rgba(0,0,0,0.05);
             border: 1px solid #eee;
         }
-
         .menu-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
             margin-top: 20px;
         }
-
-        /* 탭 버튼 스타일 */
         .menu-btn {
             padding: 15px;
             border: 1px solid #eee;
@@ -60,8 +55,6 @@
             color: #fff;
             border-color: var(--color-primary);
         }
-
-        /* 로딩 오버레이 */
         #loadingOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(255,255,255,0.9);
@@ -79,8 +72,6 @@
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        /* 숨김 클래스 */
         .hidden { display: none !important; }
     </style>
 </head>
@@ -256,35 +247,19 @@
                 <div class="right-col">
                     <div class="card-box">
                         <h3 style="font-family:'GmarketSans'; font-size:18px; font-weight:bold; margin-bottom:20px;">📅 최근 활동 내역</h3>
-                        
                         <div id="timelineList">
                             <div style="text-align:center; color:#999; padding:20px;">내역을 불러오는 중...</div>
                         </div>
-
                     </div>
                 </div>
             </div>
-
         </div>
 
     </main>
 
-    <footer id="footer">
-        <div class="footer-top">
-            <div class="container">
-                <div class="row">
-                    <div class="col-lg-4 col-md-6">
-                        <h3>용인모두의햇빛<span>.</span></h3>
-                        <p>
-                            경기도 용인시 처인구 <br>
-                            문의: 010-2513-5736<br>
-                            이메일: yonginsolar@gmail.com
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </footer>
+    <footer id="footer"></footer>
+    <script src="footer.js"></script>
+
 
     <div id="alertModal" class="center-modal">
         <div class="modal-content">
@@ -295,20 +270,36 @@
     </div>
 
 <script>
+
     // =========================================================================
-    // 1. 설정 및 초기화
+    // ⚠️ 중요: 아래 값들을 실제 Supabase 설정값으로 꼭 바꾸세요! ⚠️
+    // Supabase 대시보드 -> Project Settings -> API 에서 복사
     // =========================================================================
-    const SUPABASE_URL = '여기에_SUPABASE_URL_입력'; 
-    const SUPABASE_KEY = '여기에_SUPABASE_ANON_KEY_입력';
-    const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
+
+    
+    // [중요] 초기화는 반드시 여기서 되어야 합니다.
+    // URL이 유효하지 않으면 여기서 스크립트가 멈춥니다.
+    let _supabase = null;
+    try {
+        _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        console.log("Supabase Client initialized");
+    } catch (e) {
+        console.error("Supabase 초기화 실패: URL 설정을 확인하세요.", e);
+        alert("시스템 설정 오류: Supabase URL을 확인해주세요.");
+    }
 
     let curMem = null;  
     let curAuth = null; 
     let timerInterval = null;
 
     function showLoading(show, msg) {
-        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
-        if(msg) document.getElementById('loadingMsg').innerText = msg;
+        const el = document.getElementById('loadingOverlay');
+        if(el) {
+            el.style.display = show ? 'flex' : 'none';
+            if(msg) document.getElementById('loadingMsg').innerText = msg;
+        }
     }
 
     function showAlert(msg) {
@@ -318,18 +309,20 @@
 
     // 초기 로드 시 세션 체크
     window.addEventListener('DOMContentLoaded', async () => {
+        if(!_supabase) return; // 초기화 실패 시 중단
+
         const { data: { session } } = await _supabase.auth.getSession();
         if (session) {
             handleLoginSuccess(session.user);
-        } else {
-            // 미로그인 상태면 아무것도 안 함 (로그인 화면 유지)
         }
     });
 
     // =========================================================================
-    // 2. 이메일 로그인 로직 (Magic Link / OTP)
+    // 2. 이메일 로그인 로직
     // =========================================================================
     async function requestAuth() {
+        if(!_supabase) return showAlert("서버 연결 설정 오류입니다.");
+
         const email = document.getElementById('emailInput').value.trim();
         if(!email || !email.includes('@')) return showAlert('올바른 이메일 주소를 입력해주세요.');
 
@@ -337,7 +330,7 @@
 
         const { error } = await _supabase.auth.signInWithOtp({
             email: email,
-            options: { shouldCreateUser: false } // 기존 회원만 로그인 가능
+            options: { shouldCreateUser: false } // 가입된 사람만
         });
 
         showLoading(false);
@@ -353,12 +346,14 @@
             document.getElementById('emailInput').readOnly = true;
             document.getElementById('btnSendAuth').innerText = '재전송';
             document.getElementById('authInputBox').classList.remove('hidden');
-            startTimer(300); // 5분 타이머
+            startTimer(300); 
             document.getElementById('authCode').focus();
         }
     }
 
     async function verifyAuth() {
+        if(!_supabase) return;
+
         const email = document.getElementById('emailInput').value.trim();
         const code = document.getElementById('authCode').value.trim();
         if(code.length < 6) return showAlert('인증번호 6자리를 입력해주세요.');
@@ -377,8 +372,8 @@
         }
     }
 
-    // 카카오 로그인
     async function startKakaoLogin() {
+        if(!_supabase) return;
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
             options: { redirectTo: window.location.href }
@@ -396,16 +391,18 @@
             minutes = minutes < 10 ? "0" + minutes : minutes;
             seconds = seconds < 10 ? "0" + seconds : seconds;
 
-            document.getElementById('timer').textContent = minutes + ":" + seconds;
+            const timerEl = document.getElementById('timer');
+            if(timerEl) timerEl.textContent = minutes + ":" + seconds;
 
             if (--timer < 0) {
                 clearInterval(timerInterval);
-                document.getElementById('timer').textContent = "시간 초과";
+                if(timerEl) timerEl.textContent = "시간 초과";
             }
         }, 1000);
     }
 
     function logout() {
+        if(!_supabase) return;
         if(confirm('로그아웃 하시겠습니까?')) {
             _supabase.auth.signOut().then(() => location.reload());
         }
@@ -415,6 +412,7 @@
     // 3. 데이터 로드 및 렌더링
     // =========================================================================
     async function handleLoginSuccess(user) {
+        if(!_supabase) return;
         curAuth = user;
         showLoading(true, '정보를 불러오는 중...');
 
@@ -470,22 +468,18 @@
     }
 
     function renderDashboard(member, apps, ledger) {
-        // 화면 전환
         document.getElementById('loginSection').classList.add('hidden');
         document.getElementById('dashboardSection').classList.remove('hidden');
 
-        // 기본 정보 채우기
         document.getElementById('sumName').innerText = member.name;
         document.getElementById('sumId').innerText = member.member_id;
         document.getElementById('sumEmail').innerText = member.email;
         document.getElementById('sumTotal').innerText = (member.pledge_amount || 0).toLocaleString() + '원';
 
-        // 은행 정보 표시
         const bankStr = member.bank_name ? `${member.bank_name} (계좌있음)` : '계좌 미등록';
         document.getElementById('bankInfoRed').innerText = bankStr;
         document.getElementById('bankInfoWd').innerText = bankStr;
 
-        // 타임라인 렌더링 (Timeline CSS 적용)
         renderTimeline(ledger, apps);
     }
 
@@ -493,16 +487,12 @@
         const list = document.getElementById('timelineList');
         let html = '';
 
-        // 두 데이터를 합쳐서 날짜순 정렬 (단순 예시)
-        // 실제로는 VO 객체로 만들어서 정렬하는 게 좋음
-        // 여기서는 입금 내역(Ledger) 위주로 보여주고, 신청 내역은 텍스트로 추가
-        
         if(ledger.length === 0 && apps.length === 0) {
             list.innerHTML = '<div style="text-align:center; color:#999;">활동 내역이 없습니다.</div>';
             return;
         }
 
-        // 입금 내역 렌더링
+        // 입금 내역
         ledger.forEach(item => {
             html += `
             <div class="timeline-item">
@@ -514,7 +504,7 @@
             </div>`;
         });
         
-        // 신청 내역 렌더링 (진행중인 것)
+        // 신청 내역
         apps.forEach(app => {
             let statusColor = app.status === 'pending' ? '#ff9800' : '#4caf50';
             let statusText = app.status === 'pending' ? '검토중' : '처리됨';
@@ -533,9 +523,7 @@
         list.innerHTML = html;
     }
 
-    // =========================================================================
-    // 4. 탭 및 신청 기능
-    // =========================================================================
+    // 탭 및 기능 로직
     function toggleTab(type, btn) {
         document.getElementById('tabPlaceholder').classList.add('hidden');
         ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => {
@@ -548,6 +536,7 @@
     }
 
     async function submitApplication(type) {
+        if(!_supabase) return;
         let amount = 0, reason = '';
         if(type === 'extra') {
             amount = document.getElementById('exAmount').value;
@@ -595,7 +584,6 @@
         doc.save('certificate.pdf');
     }
 
-    // 모바일 네비게이션 토글 (style.css 로직 대응)
     const mobileNavToggle = document.querySelector('.mobile-nav-toggle');
     const navbarMobile = document.querySelector('.navbar-mobile');
     if (mobileNavToggle) {
