@@ -468,9 +468,9 @@
     // =========================================================================
     // 2. 로그인 & 데이터 로드
     // =========================================================================
-    async function sendMagicLink() {
+async function sendMagicLink() {
         const email = document.getElementById('emailInput').value.trim();
-        if(!email.includes('@')) return alert('올바른 이메일 주소를 입력해주세요.');
+        if(!email.includes('@')) return showModal('올바른 이메일 주소를 입력해주세요.'); // alert -> showModal
         
         showLoading(true, '인증 메일 발송 중...');
         const { error } = await _supabase.auth.signInWithOtp({
@@ -479,65 +479,46 @@
         });
         showLoading(false);
 
-        if(error) alert('오류: ' + error.message);
+        if(error) showModal('오류: ' + error.message); // alert -> showModal
         else {
             document.getElementById('sentMsgBox').classList.remove('hidden');
             document.getElementById('targetEmail').innerText = email;
         }
     }
 
-    async function handleLoginSuccess(user) {
+async function handleLoginSuccess(user) {
         curAuth = user;
         showLoading(true, '정보 확인 중...');
         document.getElementById('headerLogoutBtn').classList.remove('hidden');
 
-        // 매핑 확인
         const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
         if (claimErr || (!claimRes.success && claimRes.message === 'not_found')) {
             await _supabase.auth.signOut();
             showLoading(false);
-            return alert('조합원 정보를 찾을 수 없습니다.');
+            return showModal('조합원 정보를 찾을 수 없습니다.'); // alert -> showModal
         }
-
-        // 데이터 로드
         await loadDashboardData(user.id);
     }
 
     async function loadDashboardData(uuid) {
         try {
-            // [1] 내 정보 (VIEW 사용)
-            const { data: member, error: memErr } = await _supabase
-                .from('view_member_list')
-                .select('*')
-                .eq('id', uuid)
-                .single();
-            
+            const { data: member, error: memErr } = await _supabase.from('view_member_list').select('*').eq('id', uuid).single();
             if(memErr) throw memErr;
             curMem = member;
 
-            // [2] 신청 내역
-            const { data: apps } = await _supabase
-                .from('coop_applications')
-                .select('*')
-                .eq('member_uid', uuid)
-                .order('created_at', { ascending: false });
-
-            // [3] 입금 내역
-            const { data: ledger } = await _supabase
-                .from('ref_members')
-                .select('*')
-                .eq('member_id', curMem.member_id)
-                .order('deposit_date', { ascending: false });
+            const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
+            const { data: ledger } = await _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
 
             renderDashboard(member, apps || [], ledger || []);
             showLoading(false);
-
         } catch (e) {
             console.error(e);
             showLoading(false);
-            alert('데이터 로드 실패: ' + e.message);
+            showModal('데이터 로드 실패: ' + e.message); // alert -> showModal
         }
     }
+
+
 
     // =========================================================================
     // 3. 렌더링 & 내 정보 수정 (toggleEditMode 포함)
@@ -651,17 +632,15 @@
     }
 
 async function cancelApp(appId) {
-        // [수정] confirm -> showConfirmModal 사용
+        // confirm -> showConfirmModal
         showConfirmModal('신청을 취소하시겠습니까?', async function() {
             showLoading(true);
-            
             const { error } = await _supabase
                 .from('coop_applications')
                 .update({ status: 'cancelled' })
                 .eq('id', appId);
 
             showLoading(false);
-            
             if(error) showModal('취소 실패: ' + error.message);
             else {
                 showModal('취소되었습니다.');
@@ -671,136 +650,142 @@ async function cancelApp(appId) {
     }
 
     // 신청 로직 (Submit)
-    async function submitApplication(type) {
+async function submitApplication(type) {
         let amount = 0, reason = '';
         const totalCap = Number(curMem.total_capital || 0);
 
         if(type === 'extra') {
             amount = Number(document.getElementById('exAmount').value);
-            if(amount < 10000) return alert('1만원 이상 입력해주세요.');
+            if(amount < 10000) return showModal('1만원 이상 입력해주세요.');
         } 
         else if(type === 'reduction') {
             amount = Number(document.getElementById('redAmount').value);
-            if(amount <= 0) return alert('금액을 입력해주세요.');
-            if(totalCap - amount < 100000) return alert(`최소 10만원 이상 유지해야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
-            if(!document.getElementById('checkRedAgree').checked) return alert('동의 항목에 체크해주세요.');
+            if(amount <= 0) return showModal('금액을 입력해주세요.');
+            if(totalCap - amount < 100000) return showModal(`잔액 10만원 이상 유지해야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
+            if(!document.getElementById('checkRedAgree').checked) return showModal('안내 사항에 동의해주세요.');
         } 
         else if(type === 'withdraw') {
             reason = document.getElementById('wdReason').value;
-            if(!reason) return alert('사유를 입력해주세요.');
-            if(!document.getElementById('checkWdAgree').checked) return alert('동의 항목에 체크해주세요.');
+            if(!reason) return showModal('사유를 입력해주세요.');
+            if(!document.getElementById('checkWdAgree').checked) return showModal('동의 항목에 체크해주세요.');
         }
 
-        if(!confirm('신청하시겠습니까?')) return;
-        showLoading(true);
+        // confirm -> showConfirmModal
+        showConfirmModal('신청서를 제출하시겠습니까?', async function() {
+            showLoading(true);
+            const { error } = await _supabase.from('coop_applications').insert({
+                member_uid: curAuth.id,
+                member_id: curMem.member_id,
+                name: curMem.name,
+                type: type,
+                amount: amount,
+                reason: reason,
+                status: 'pending'
+            });
 
-        const { error } = await _supabase.from('coop_applications').insert({
-            member_uid: curAuth.id,
-            member_id: curMem.member_id,
-            name: curMem.name,
-            type: type,
-            amount: amount,
-            reason: reason,
-            status: 'pending'
+            showLoading(false);
+            if(error) showModal('오류: ' + error.message);
+            else {
+                showModal('신청되었습니다.');
+                // 초기화
+                document.getElementById('exAmount').value = '';
+                document.getElementById('redAmount').value = '';
+                document.getElementById('wdReason').value = '';
+                if(document.getElementById('checkRedAgree')) document.getElementById('checkRedAgree').checked = false;
+                if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgree').checked = false;
+                
+                loadDashboardData(curAuth.id);
+            }
         });
-
-        showLoading(false);
-        if(error) alert('오류: ' + error.message);
-        else {
-            alert('신청되었습니다.');
-            document.getElementById('exAmount').value = '';
-            document.getElementById('redAmount').value = '';
-            document.getElementById('wdReason').value = '';
-            loadDashboardData(curAuth.id);
-        }
     }
 
 // [수정] 프로필 저장 (주소 합치기 + 모달 확인)
 async function saveProfile() {
-    showConfirmModal('정보를 수정하시겠습니까?', async function() {
-        showLoading(true, '저장 중...');
+        // confirm -> showConfirmModal
+        showConfirmModal('정보를 수정하시겠습니까?', async function() {
+            showLoading(true, '저장 중...');
 
-        const phone = document.getElementById('editPhone').value;
-        
-        // 주소 합치기 (메인 + 상세)
-        const mainAddr = document.getElementById('editAddrMain').value;
-        const detailAddr = document.getElementById('editAddrDetail').value;
-        const fullAddr = (mainAddr + ' ' + detailAddr).trim();
+            const phone = document.getElementById('editPhone').value;
+            const mainAddr = document.getElementById('editAddrMain').value;
+            const detailAddr = document.getElementById('editAddrDetail').value;
+            const fullAddr = (mainAddr + ' ' + detailAddr).trim();
+            const bank = document.getElementById('editBankName').value;
+            const accNo = document.getElementById('editAccountNo').value;
+            const holder = document.getElementById('editHolder').value;
 
-        const bank = document.getElementById('editBankName').value;
-        const accNo = document.getElementById('editAccountNo').value;
-        const holder = document.getElementById('editHolder').value;
+            const { error } = await _supabase.rpc('update_my_profile', {
+                p_phone: phone,
+                p_address: fullAddr,
+                p_bank_name: bank,
+                p_account_number: accNo,
+                p_account_holder: holder
+            });
 
-        const { error } = await _supabase.rpc('update_my_profile', {
-            p_phone: phone,
-            p_address: fullAddr,
-            p_bank_name: bank,
-            p_account_number: accNo,
-            p_account_holder: holder
+            showLoading(false);
+            if (error) showModal('수정 실패: ' + error.message); // alert -> showModal
+            else {
+                showModal('수정되었습니다.'); // alert -> showModal
+                toggleEditMode(false);
+            }
         });
-
-        showLoading(false);
-        if (error) showModal('수정 실패: ' + error.message);
-        else {
-            showModal('수정되었습니다.');
-            toggleEditMode(false);
-        }
-    });
-}
+    }
 
 // [수정] 탭 전환 (감자 한도 체크 로직 포함)
 function toggleTab(type, btn) {
-    document.getElementById('tabPlaceholder').classList.add('hidden');
-    ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => document.getElementById(id).classList.add('hidden'));
-    document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
-    if(btn) btn.classList.add('active');
-    document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
+        document.getElementById('tabPlaceholder').classList.add('hidden');
+        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => document.getElementById(id).classList.add('hidden'));
+        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
+        if(btn) btn.classList.add('active');
+        document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
 
-    // 감자 한도 체크
-    if(type === 'reduction') {
-        const total = Number(curMem.total_capital || 0);
-        const limit = total - 100000;
-        const display = document.getElementById('redLimitDisplay');
-        const input = document.getElementById('redAmount');
-        
-        if(limit <= 0) {
-            display.innerText = "현재 감자 신청 불가 (잔액 부족)";
-            input.disabled = true;
-            input.placeholder = "신청 불가";
-        } else {
-            display.innerText = `최대 신청 가능: ${limit.toLocaleString()}원`;
-            input.disabled = false;
-            input.placeholder = `최대 ${limit.toLocaleString()}`;
-            input.oninput = function() {
-                if(Number(this.value) > limit) {
-                    this.value = limit;
-                    showModal(`최대 ${limit.toLocaleString()}원까지만 가능합니다.`);
-                }
-            };
+        if(type === 'reduction') {
+            const total = Number(curMem.total_capital || 0);
+            const limit = total - 100000;
+            const display = document.getElementById('redLimitDisplay');
+            const input = document.getElementById('redAmount');
+            
+            if(limit <= 0) {
+                display.innerText = "현재 감자 신청 불가 (잔액 부족)";
+                input.disabled = true;
+                input.placeholder = "신청 불가";
+            } else {
+                display.innerText = `최대 신청 가능: ${limit.toLocaleString()}원`;
+                input.disabled = false;
+                input.placeholder = `최대 ${limit.toLocaleString()}`;
+                
+                input.oninput = function() {
+                    if(Number(this.value) > limit) {
+                        this.value = limit;
+                        showModal(`최대 ${limit.toLocaleString()}원까지만 가능합니다.`); // alert -> showModal
+                    }
+                };
+            }
         }
     }
-}
 
-    // PDF 다운로드
-    async function downloadCert() {
+async function downloadCert() {
         if(!curMem) return;
         showLoading(true, '증서 발급 중...');
         try {
-            const { data: payments } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
-            const totalAmount = payments ? payments.reduce((a,c)=>a+Number(c.amount),0) : 0;
-            if(totalAmount===0) { showLoading(false); return alert('납입 내역이 없습니다.'); }
+            const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
+            const total = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
+            if(total===0) { showLoading(false); return showModal('납입 내역 없음'); } // alert -> showModal
 
-            const { data: certRes } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: totalAmount });
+            const { data: cert } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: total });
             const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
-            const chairman = info ? info.value : "김민호";
-
-            await generateContributionCert(curMem, totalAmount, certRes.cert_number, chairman, _supabase);
+            
+            await generateContributionCert(curMem, total, cert.cert_number, info?info.value:"김민호", _supabase);
             showLoading(false);
-        } catch(e) { console.error(e); showLoading(false); alert('오류 발생'); }
+        } catch(e) { console.error(e); showLoading(false); showModal('오류 발생'); } // alert -> showModal
     }
 
-    function logout() { if(confirm('로그아웃?')) _supabase.auth.signOut().then(()=>location.reload()); }
-    function startKakaoLogin() { alert('카카오 설정 필요'); }
+    function logout() { 
+        showConfirmModal('로그아웃 하시겠습니까?', () => {
+            _supabase.auth.signOut().then(() => location.reload());
+        }); 
+    }
+
+    function startKakaoLogin() { showModal('카카오 연동 준비중'); } // alert -> showModal
     
     // [헬퍼] 안전한 값 설정
     function setText(id, txt) { const el=document.getElementById(id); if(el) el.innerText = txt || '-'; }
