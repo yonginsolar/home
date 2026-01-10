@@ -145,14 +145,14 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         const signText = `용인모두의햇빛협동조합 이사장  ${chairmanName}`;
         doc.text(signText, 105, msgY + 55, { align: "center" });
 
-        // [직인] 위치 수정 (위로 35px ≈ 10mm 올림) 5mm 내림
+        // [직인] 위치 수정 (위로 35px ≈ 10mm 올림) 8px 내림
         if (sealDataUrl) {
             // 이사장 이름(msgY+55) 기준으로 배치
             // 기존(+48)에서 10mm 올려서 (+38)
             // 서명 텍스트 끝부분에 겹치게
             const signWidth = doc.getTextWidth(signText);
             const sealX = 105 + (signWidth / 2) - 15; // 이름 끝부분 안쪽으로 살짝 들어오게
-            const sealY = msgY + 42; 
+            const sealY = msgY + 40; 
             
             doc.addImage(sealDataUrl, 'PNG', sealX, sealY, 24, 24);
         }
