@@ -13,6 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="cert_generator.js"></script>
+  <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 
   <link href="style.css" rel="stylesheet">
   
@@ -280,13 +281,19 @@
                     <input type="text" id="editPhone" class="readonly-text" readonly>
                 </div>
 
-                <div class="col-12">
-                    <label class="small text-muted">주소</label>
-                    <div class="input-group">
-                        <input type="text" id="editAddress" class="readonly-text" readonly>
-                        <button class="btn btn-outline-secondary edit-mode-only" style="display:none;" onclick="execDaumPostcode()">주소 검색</button>
-                    </div>
-                </div>
+<div class="col-12">
+    <label class="small text-muted">주소</label>
+    
+    <div id="viewAddressBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;"></div>
+    
+    <div id="editAddressBox" class="addr-edit-group">
+        <div class="input-group mb-1">
+            <input type="text" id="editAddrMain" class="form-control" placeholder="주소 검색" readonly onclick="execDaumPostcode()">
+            <button class="btn btn-secondary" type="button" onclick="execDaumPostcode()">검색</button>
+        </div>
+        <input type="text" id="editAddrDetail" class="form-control" placeholder="상세 주소를 입력하세요">
+    </div>
+</div>
 
                 <div class="col-12 border-top pt-2 mt-2">
                     <label class="small text-success fw-bold">환급/배당 계좌</label>
@@ -359,10 +366,11 @@
                         <div id="tabReduction" class="hidden">
                             <h6 class="fw-bold mb-3">감자 신청</h6>
                             <div class="alert alert-warning small py-2"><i class="bi bi-exclamation-triangle me-1"></i> 최소 10만원 이상의 출자금은 유지해야 합니다.</div>
-                            <div class="mb-3">
-                                <label class="form-label small">환급 요청액</label>
-                                <input type="number" id="redAmount" class="form-control" placeholder="금액 입력">
-                            </div>
+ <div class="mb-3">
+    <label class="form-label small">환급 요청액</label>
+    <input type="number" id="redAmount" class="form-control" placeholder="금액 입력">
+    <span id="redLimitDisplay" class="limit-text"></span>
+</div>
                             <div class="form-check mb-3">
                                 <input class="form-check-input" type="checkbox" id="checkRedAgree">
                                 <label class="form-check-label small" for="checkRedAgree">
@@ -411,6 +419,17 @@
   </main>
 
   <footer id="footer"></footer>
+
+  <div id="customModalOverlay" class="custom-modal-overlay">
+    <div class="custom-modal-box">
+        <div style="font-size: 2rem; margin-bottom: 10px;">📢</div>
+        <p id="customModalMsg" style="white-space: pre-wrap; margin-bottom: 20px; font-weight: 500; font-size: 1.1rem; color:#333;"></p>
+        <div class="custom-modal-btn-group">
+            <button id="btnModalNo" class="btn-modal btn-modal-no" onclick="closeCustomModal()">취소</button>
+            <button id="btnModalYes" class="btn-modal btn-modal-yes">확인</button>
+        </div>
+    </div>
+</div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="footer.js"></script>
@@ -551,64 +570,9 @@
         renderTimeline(ledger, apps);
     }
 
-    // [누락되었던 함수 복구] 수정 모드 토글
-    function toggleEditMode(isEdit) {
-        const inputs = document.querySelectorAll('.readonly-text, .editable-input');
-        const editOnly = document.querySelectorAll('.edit-mode-only');
-        
-        if (isEdit) {
-            document.getElementById('btnEditProfile').classList.add('hidden');
-            document.getElementById('btnSaveProfile').classList.remove('hidden');
-            document.getElementById('btnCancelEdit').classList.remove('hidden');
-            
-            inputs.forEach(el => {
-                el.readOnly = false;
-                el.classList.add('editable-input');
-                el.classList.remove('readonly-text');
-            });
-            editOnly.forEach(el => el.style.display = 'inline-block');
-        } else {
-            // 취소 시 리로드
-            loadDashboardData(curAuth.id);
-            document.getElementById('btnEditProfile').classList.remove('hidden');
-            document.getElementById('btnSaveProfile').classList.add('hidden');
-            document.getElementById('btnCancelEdit').classList.add('hidden');
-            
-            inputs.forEach(el => {
-                el.readOnly = true;
-                el.classList.remove('editable-input');
-                el.classList.add('readonly-text');
-            });
-            editOnly.forEach(el => el.style.display = 'none');
-        }
-    }
 
-    async function saveProfile() {
-        if(!confirm('정보를 수정하시겠습니까?')) return;
-        showLoading(true, '저장 중...');
 
-        const phone = document.getElementById('editPhone').value;
-        const addr = document.getElementById('editAddress').value;
-        const bank = document.getElementById('editBankName').value;
-        const accNo = document.getElementById('editAccountNo').value;
-        const holder = document.getElementById('editHolder').value;
 
-        const { error } = await _supabase.rpc('update_my_profile', {
-            p_phone: phone,
-            p_address: addr,
-            p_bank_name: bank,
-            p_account_number: accNo,
-            p_account_holder: holder
-        });
-
-        if (error) {
-            showLoading(false);
-            alert('수정 실패: ' + error.message);
-        } else {
-            alert('수정되었습니다.');
-            toggleEditMode(false);
-        }
-    }
 
     // [헬퍼] 생년월일 포맷팅
     function formatBirthDate(rrn) {
@@ -746,14 +710,71 @@
         }
     }
 
-    // 탭 및 유틸
-    function toggleTab(type, btn) {
-        document.getElementById('tabPlaceholder').classList.add('hidden');
-        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => document.getElementById(id).classList.add('hidden'));
-        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
-        if(btn) btn.classList.add('active');
-        document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
+// [수정] 프로필 저장 (주소 합치기 + 모달 확인)
+async function saveProfile() {
+    showConfirmModal('정보를 수정하시겠습니까?', async function() {
+        showLoading(true, '저장 중...');
+
+        const phone = document.getElementById('editPhone').value;
+        
+        // 주소 합치기 (메인 + 상세)
+        const mainAddr = document.getElementById('editAddrMain').value;
+        const detailAddr = document.getElementById('editAddrDetail').value;
+        const fullAddr = (mainAddr + ' ' + detailAddr).trim();
+
+        const bank = document.getElementById('editBankName').value;
+        const accNo = document.getElementById('editAccountNo').value;
+        const holder = document.getElementById('editHolder').value;
+
+        const { error } = await _supabase.rpc('update_my_profile', {
+            p_phone: phone,
+            p_address: fullAddr,
+            p_bank_name: bank,
+            p_account_number: accNo,
+            p_account_holder: holder
+        });
+
+        showLoading(false);
+        if (error) showModal('수정 실패: ' + error.message);
+        else {
+            showModal('수정되었습니다.');
+            toggleEditMode(false);
+        }
+    });
+}
+
+// [수정] 탭 전환 (감자 한도 체크 로직 포함)
+function toggleTab(type, btn) {
+    document.getElementById('tabPlaceholder').classList.add('hidden');
+    ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
+    if(btn) btn.classList.add('active');
+    document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
+
+    // 감자 한도 체크
+    if(type === 'reduction') {
+        const total = Number(curMem.total_capital || 0);
+        const limit = total - 100000;
+        const display = document.getElementById('redLimitDisplay');
+        const input = document.getElementById('redAmount');
+        
+        if(limit <= 0) {
+            display.innerText = "현재 감자 신청 불가 (잔액 부족)";
+            input.disabled = true;
+            input.placeholder = "신청 불가";
+        } else {
+            display.innerText = `최대 신청 가능: ${limit.toLocaleString()}원`;
+            input.disabled = false;
+            input.placeholder = `최대 ${limit.toLocaleString()}`;
+            input.oninput = function() {
+                if(Number(this.value) > limit) {
+                    this.value = limit;
+                    showModal(`최대 ${limit.toLocaleString()}원까지만 가능합니다.`);
+                }
+            };
+        }
     }
+}
 
     // PDF 다운로드
     async function downloadCert() {
@@ -780,22 +801,206 @@
     function setText(id, txt) { const el=document.getElementById(id); if(el) el.innerText = txt || '-'; }
     function setVal(id, val) { const el=document.getElementById(id); if(el) el.value = val || ''; }
 
-    // 주소찾기
+    function closeDaumPostcode() { document.getElementById('layer').style.display = 'none'; }
+
+   // [추가] 모달 제어 함수
+function showModal(msg) {
+    document.getElementById('customModalMsg').innerText = msg;
+    document.getElementById('btnModalNo').style.display = 'none'; // 취소버튼 숨김
+    document.getElementById('btnModalYes').onclick = closeCustomModal;
+    document.getElementById('customModalOverlay').style.display = 'flex';
+}
+
+function showConfirmModal(msg, yesCallback) {
+    document.getElementById('customModalMsg').innerText = msg;
+    document.getElementById('btnModalNo').style.display = 'block'; // 취소버튼 보임
+    document.getElementById('customModalOverlay').style.display = 'flex';
+    document.getElementById('btnModalYes').onclick = function() {
+        closeCustomModal();
+        if(yesCallback) yesCallback();
+    };
+}
+
+function closeCustomModal() {
+    document.getElementById('customModalOverlay').style.display = 'none';
+}
+
+   // =========================================================================
+    // [1] 렌더링 함수 (주소창 초기값 세팅 포함)
+    // =========================================================================
+    function renderDashboard(member, apps, ledger) {
+        // 섹션 전환
+        document.getElementById('loginSection').classList.add('hidden');
+        document.getElementById('dashboardSection').classList.remove('hidden');
+
+        // 1. 기본 정보 표시
+        const infoName = document.getElementById('infoName');
+        const infoBirth = document.getElementById('infoBirth');
+        const infoEmail = document.getElementById('infoEmail');
+        
+        if (infoName) infoName.innerText = member.name || '-';
+        if (infoBirth) infoBirth.innerText = formatBirthDate(member.rrn_display);
+        if (infoEmail) infoEmail.innerText = curAuth.email || '-';
+        
+        // 2. 수정 폼 초기값 설정
+        if (document.getElementById('editPhone')) document.getElementById('editPhone').value = member.phone || '';
+        if (document.getElementById('editBankName')) document.getElementById('editBankName').value = member.bank_name || '';
+        if (document.getElementById('editAccountNo')) document.getElementById('editAccountNo').value = member.account_number || '';
+        if (document.getElementById('editHolder')) document.getElementById('editHolder').value = member.account_holder || '';
+
+        // ★ [주소 처리] 핵심 로직
+        // (A) 보기 모드용: 전체 주소 표시
+        const viewAddr = document.getElementById('viewAddressBox');
+        if (viewAddr) viewAddr.innerText = member.address || '-';
+
+        // (B) 수정 모드용: DB에 저장된 주소를 일단 '메인 주소창'에 다 넣음
+        if (document.getElementById('editAddrMain')) document.getElementById('editAddrMain').value = member.address || '';
+        if (document.getElementById('editAddrDetail')) document.getElementById('editAddrDetail').value = ''; // 상세는 비워둠
+
+        // 3. 상단 요약 정보
+        if (document.getElementById('sumId')) document.getElementById('sumId').innerText = member.member_id || '-';
+        
+        const sumTotal = document.getElementById('sumTotal');
+        if (sumTotal) sumTotal.innerText = Number(member.total_capital || 0).toLocaleString() + '원';
+        
+        const sumBank = document.getElementById('sumBank');
+        if (sumBank) sumBank.innerText = member.bank_name ? `${member.bank_name} (계좌 있음)` : '미등록';
+
+        // 4. 타임라인 렌더링
+        renderTimeline(ledger, apps);
+    }
+
+    // =========================================================================
+    // [2] 수정 모드 토글 (주소창 1단 ↔ 2단 전환 포함)
+    // =========================================================================
+    function toggleEditMode(isEdit) {
+        // 제어할 요소들 선택
+        const inputs = document.querySelectorAll('.readonly-text'); // 일반 텍스트박스
+        const editOnly = document.querySelectorAll('.edit-mode-only'); // 수정 때만 보이는 안내문구
+        
+        const viewAddrBox = document.getElementById('viewAddressBox'); // 주소 1줄(보기)
+        const editAddrBox = document.getElementById('editAddressBox'); // 주소 2줄(수정)
+
+        const btnEdit = document.getElementById('btnEditProfile');
+        const btnSave = document.getElementById('btnSaveProfile');
+        const btnCancel = document.getElementById('btnCancelEdit');
+
+        if (isEdit) {
+            // [수정 모드 진입]
+            btnEdit.classList.add('hidden');
+            btnSave.classList.remove('hidden');
+            btnCancel.classList.remove('hidden');
+            
+            // 일반 인풋 활성화
+            inputs.forEach(el => {
+                el.readOnly = false;
+                el.classList.add('editable-input');
+                el.classList.remove('readonly-text');
+            });
+
+            // ★ 주소창 전환: 보기 숨김 -> 수정(2단) 보임
+            if(viewAddrBox) viewAddrBox.style.display = 'none';
+            if(editAddrBox) editAddrBox.style.display = 'block';
+
+            editOnly.forEach(el => el.classList.remove('hidden'));
+
+        } else {
+            // [수정 취소/종료] -> 원래대로 복구
+            // 데이터 원복을 위해 대시보드 리로드
+            loadDashboardData(curAuth.id);
+            
+            btnEdit.classList.remove('hidden');
+            btnSave.classList.add('hidden');
+            btnCancel.classList.add('hidden');
+            
+            // 일반 인풋 비활성화
+            inputs.forEach(el => {
+                el.readOnly = true;
+                el.classList.remove('editable-input');
+                el.classList.add('readonly-text');
+            });
+
+            // ★ 주소창 전환: 수정 숨김 -> 보기 보임
+            if(viewAddrBox) viewAddrBox.style.display = 'block';
+            if(editAddrBox) editAddrBox.style.display = 'none';
+
+            editOnly.forEach(el => el.classList.add('hidden'));
+        }
+    }
+
+    // =========================================================================
+    // [3] 다음 주소 찾기 (검색 결과를 2단 주소창에 분배)
+    // =========================================================================
     function execDaumPostcode() {
-        var layer = document.getElementById('layer');
+        var element_layer = document.getElementById('layer');
+
         new daum.Postcode({
             oncomplete: function(data) {
-                var addr = data.userSelectedType === 'R' ? data.roadAddress : data.jibunAddress;
-                if(data.buildingName) addr += ' (' + data.buildingName + ')';
-                document.getElementById('editAddress').value = addr;
-                layer.style.display = 'none';
-            }, width:'100%', height:'100%'
-        }).embed(layer);
-        layer.style.display = 'block';
-        // 레이어 위치 조정 로직 생략 (단순화)
-        layer.style.top = '100px'; layer.style.left = '50%'; layer.style.marginLeft = '-150px';
+                // 검색 결과 항목을 조합
+                var addr = ''; // 주소 변수
+                var extraAddr = ''; // 참고항목 변수
+
+                // 사용자가 선택한 주소 타입에 따라 해당 주소 값을 가져온다.
+                if (data.userSelectedType === 'R') { // 도로명 주소
+                    addr = data.roadAddress;
+                } else { // 지번 주소
+                    addr = data.jibunAddress;
+                }
+
+                // 건물명이 있고 공동주택일 경우 추가
+                if(data.userSelectedType === 'R'){
+                    if(data.bname !== '' && /[동|로|가]$/g.test(data.bname)){
+                        extraAddr += data.bname;
+                    }
+                    if(data.buildingName !== '' && data.apartment === 'Y'){
+                        extraAddr += (extraAddr !== '' ? ', ' + data.buildingName : data.buildingName);
+                    }
+                    if(extraAddr !== ''){
+                        addr += ' (' + extraAddr + ')';
+                    }
+                }
+
+                // ★ 값 넣기: 검색된 주소는 메인 창에, 커서는 상세 주소창으로
+                document.getElementById('editAddrMain').value = addr;
+                document.getElementById('editAddrDetail').value = ''; // 상세주소 초기화
+                document.getElementById('editAddrDetail').focus();    // 상세주소로 포커스 이동
+
+                // 레이어 닫기
+                element_layer.style.display = 'none';
+            },
+            width : '100%',
+            height : '100%',
+            maxSuggestItems : 5
+        }).embed(element_layer);
+
+        // 레이어 보이기
+        element_layer.style.display = 'block';
+
+        // 레이어 위치 조정 (화면 중앙)
+        initLayerPosition();
     }
-    function closeDaumPostcode() { document.getElementById('layer').style.display = 'none'; }
+
+    // (보조) 레이어 위치 잡는 함수
+    function initLayerPosition(){
+        var element_layer = document.getElementById('layer');
+        var width = 300; 
+        var height = 400;
+        var borderWidth = 5;
+
+        // 위에서 선언한 값들을 실제 element에 넣음
+        element_layer.style.width = width + 'px';
+        element_layer.style.height = height + 'px';
+        element_layer.style.border = borderWidth + 'px solid';
+        
+        // 실행되는 순간의 화면 너비와 높이 값을 가져와서 중앙에 뜰 수 있도록 위치를 계산
+        element_layer.style.left = (((window.innerWidth || document.documentElement.clientWidth) - width)/2 - borderWidth) + 'px';
+        element_layer.style.top = (((window.innerHeight || document.documentElement.clientHeight) - height)/2 - borderWidth) + 'px';
+    }
+
+    // (보조) 닫기 버튼용 함수
+    function closeDaumPostcode() {
+        document.getElementById('layer').style.display = 'none';
+    }
 </script>
 </body>
 </html>
