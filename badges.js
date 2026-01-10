@@ -88,3 +88,55 @@ const Badges = {
         }
     }
 };
+/* badges.js 기존 코드 아래에 추가하세요 */
+
+// 3. [공통] 모든 뱃지 정의 가져오기 (캐싱 지원)
+// 관리자 페이지와 사용자 페이지 모두에서 뱃지 목록이 필요할 때 사용
+Badges.getAll = async function(supabase) {
+    const { data, error } = await supabase
+        .from('site_badges')
+        .select('*')
+        .order('display_order', { ascending: true });
+    
+    if (error) {
+        console.error("뱃지 로딩 실패:", error);
+        return [];
+    }
+    return data;
+};
+
+// 4. [공통] 뱃지 알약(Pill) HTML 생성
+// 파트너 목록이나 멤버 목록에서 '작은 뱃지 아이콘'을 그릴 때 사용
+Badges.renderPill = function(badge) {
+    if (!badge) return '';
+    return `<span class="badge bg-${badge.color} me-1 fw-normal" title="${badge.description || ''}">
+        ${badge.icon || ''} ${badge.name}
+    </span>`;
+};
+
+// 5. [공통] 뱃지 선택 체크박스 렌더링
+// 파트너 등록 모달 등에서 뱃지를 선택할 때 사용
+Badges.renderCheckboxes = function(containerId, allBadges, selectedCodes = []) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = '';
+    if (!allBadges || allBadges.length === 0) {
+        container.innerHTML = '<span class="small text-muted">등록된 뱃지가 없습니다.</span>';
+        return;
+    }
+
+    // Set으로 변환하여 검색 속도 향상
+    const selectedSet = new Set(selectedCodes || []);
+
+    let html = '';
+    allBadges.forEach(b => {
+        const isChecked = selectedSet.has(b.code) ? 'checked' : '';
+        html += `
+        <div class="form-check form-check-inline m-0 mb-1" title="${b.description || ''}">
+            <input class="form-check-input" type="checkbox" id="badge-chk-${b.code}" value="${b.code}" ${isChecked}>
+            <label class="form-check-label small" for="badge-chk-${b.code}">${b.icon || ''} ${b.name}</label>
+        </div>`;
+    });
+    container.innerHTML = html;
+};
