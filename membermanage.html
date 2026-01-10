@@ -343,20 +343,58 @@
 </div>
 
 
+<div class="dashboard-card mb-4" id="profileCard">
+        </div>
 
+    <div class="row g-3 mb-4" id="assetSummaryRow">
+        </div>
+  <div class="row g-4 mb-4">
+        </div>
 
 <div class="dashboard-card mb-4">
-    <div class="d-flex border-bottom mb-3">
-        <button class="board-tab-btn active" onclick="loadBoard('notice', this)">공지사항</button>
-        <button class="board-tab-btn" onclick="loadBoard('free', this)">자유게시판</button>
-        <button class="board-tab-btn hidden" id="tabExec" onclick="loadBoard('executive', this)">임원게시판</button>
-        <button class="board-tab-btn hidden" id="tabElec" onclick="loadBoard('election', this)">선관위</button>
-    </div>
-    <div class="d-flex justify-content-end mb-2">
-        <button class="btn btn-sm btn-outline-secondary hidden" id="btnWritePost" onclick="openWriteModal()">글쓰기</button>
-    </div>
-    <div id="boardList" style="min-height: 200px;">
+        <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+            <div class="d-flex gap-2">
+                <button class="board-tab-btn active" onclick="loadBoard('notice', this)">공지사항</button>
+                <button class="board-tab-btn" onclick="loadBoard('free', this)">자유게시판</button>
+                <button class="board-tab-btn hidden" id="tabExec" onclick="loadBoard('executive', this)">임원</button>
+                <button class="board-tab-btn hidden" id="tabElec" onclick="loadBoard('election', this)">선관위</button>
+            </div>
+            <button class="btn btn-sm btn-dark hidden" id="btnWritePost" onclick="openWriteModal()">
+                <i class="bi bi-pencil-square"></i> 글쓰기
+            </button>
         </div>
+        <div id="boardList" style="min-height: 200px;">
+            </div>
+    </div>
+  <div class="dashboard-card mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="fw-bold m-0"><i class="bi bi-people-fill me-2"></i>가족/직원 계정 관리</h5>
+            <button class="btn btn-sm btn-outline-secondary" onclick="openAddFamilyModal()">+ 추가</button>
+        </div>
+        <div id="familyListArea">
+            <p class="text-muted small text-center py-3">등록된 구성원이 없습니다.</p>
+        </div>
+    </div>
+</div>
+
+<div id="writeModalOverlay" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="text-align:left; max-width:500px;">
+        <h5 class="fw-bold mb-3">게시글 작성</h5>
+        <div class="mb-2">
+            <input type="text" id="writeTitle" class="form-control" placeholder="제목">
+        </div>
+        <div class="mb-2">
+            <textarea id="writeContent" class="form-control" rows="5" placeholder="내용을 입력하세요"></textarea>
+        </div>
+        <div class="mb-3">
+            <label class="small text-muted">첨부파일 (URL 입력)</label>
+            <input type="text" id="writeFile" class="form-control form-control-sm" placeholder="https://...">
+        </div>
+        <div class="custom-modal-btn-group">
+            <button class="btn-modal btn-modal-no" onclick="document.getElementById('writeModalOverlay').style.display='none'">취소</button>
+            <button class="btn-modal btn-modal-yes" onclick="submitPost()">등록</button>
+        </div>
+    </div>
 </div>
 
 <div id="familyModalOverlay" class="custom-modal-overlay">
@@ -1205,26 +1243,62 @@ function toggleEditMode(isEdit) {
     // ==========================================
     let currentBoardCat = 'notice';
 
+
+
+// ==========================================
+    // [게시판 로직] 공지사항(Notices) vs 게시판(Boards) 분기 처리
+    // ==========================================
+    let currentBoardCat = 'notice';
+
     async function loadBoard(category, btn) {
         currentBoardCat = category;
         
-        // 탭 활성화 UI 처리
+        // 1. 탭 UI 활성화
         if(btn) {
             document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         }
 
+        // 2. 글쓰기 버튼 노출 여부 (공지는 관리자만 가능하므로 일단 숨김, 자유게시판은 노출)
+        const btnWrite = document.getElementById('btnWritePost');
+        if(category === 'free' || category === 'executive' || category === 'election') {
+            btnWrite.classList.remove('hidden');
+        } else {
+            btnWrite.classList.add('hidden'); // 공지사항 탭에서는 글쓰기 버튼 숨김
+        }
+
         const listArea = document.getElementById('boardList');
         listArea.innerHTML = '<div class="text-center py-5 text-muted">로딩중...</div>';
 
-        const { data: posts, error } = await _supabase
-            .from('coop_boards')
-            .select('*')
-            .eq('category', category)
-            .order('created_at', { ascending: false });
+        let posts = [];
+        let error = null;
+
+        // ★ [핵심] 카테고리에 따라 다른 테이블 조회
+        if (category === 'notice') {
+            // 공지사항 테이블 (coop_notices)
+            // 필요한 컬럼: id, title, created_at, content, file_urls
+            const res = await _supabase
+                .from('coop_notices')
+                .select('*')
+                .eq('status', 'published') // 게시된 것만
+                .eq('category', 'general') // 혹은 카테고리 무관하게
+                .order('created_at', { ascending: false });
+            posts = res.data;
+            error = res.error;
+        } else {
+            // 일반/임원 게시판 테이블 (coop_boards)
+            const res = await _supabase
+                .from('coop_boards')
+                .select('*')
+                .eq('category', category)
+                .order('created_at', { ascending: false });
+            posts = res.data;
+            error = res.error;
+        }
 
         if(error) {
-            listArea.innerHTML = '<div class="text-center py-3 text-danger">권한이 없거나 오류가 발생했습니다.</div>';
+            console.error(error);
+            listArea.innerHTML = '<div class="text-center py-3 text-danger">목록을 불러올 수 없습니다.</div>';
             return;
         }
 
@@ -1233,36 +1307,88 @@ function toggleEditMode(isEdit) {
             return;
         }
 
+        // 리스트 렌더링
         let html = '';
         posts.forEach(p => {
-            const date = p.created_at.substring(0,10);
+            const date = p.created_at ? p.created_at.substring(0,10) : '';
+            // 공지사항은 file_urls, 일반게시판은 files 칼럼 사용 (호환 처리)
+            const fileCount = (p.file_urls?.length || p.files?.length || 0);
+            const fileIcon = fileCount > 0 ? '<i class="bi bi-paperclip ms-1 text-muted"></i>' : '';
+
             html += `
-            <div class="board-list-item" onclick="viewPost(${p.id})">
+            <div class="board-list-item" onclick="viewPost(${p.id}, '${category}')">
                 <div class="d-flex justify-content-between">
-                    <span class="fw-bold text-dark">${p.title}</span>
-                    <small class="text-muted">${date}</small>
+                    <span class="fw-bold text-dark text-truncate">${p.title} ${fileIcon}</span>
+                    <small class="text-muted" style="min-width: 80px; text-align: right;">${date}</small>
                 </div>
-                <div class="small text-secondary text-truncate">${p.content}</div>
+                <div class="small text-secondary text-truncate mt-1">${p.content.replace(/<[^>]*>?/gm, '')}</div>
             </div>`;
         });
         listArea.innerHTML = html;
     }
 
-    async function viewPost(id) {
-        const { data: post } = await _supabase.from('coop_boards').select('*').eq('id', id).single();
+    // [글쓰기] 모달 열기
+    function openWriteModal() {
+        document.getElementById('writeTitle').value = '';
+        document.getElementById('writeContent').value = '';
+        document.getElementById('writeFile').value = '';
+        document.getElementById('writeModalOverlay').style.display = 'flex';
+    }
+
+    // [글쓰기] 등록 (자유/임원 게시판용)
+    async function submitPost() {
+        const title = document.getElementById('writeTitle').value;
+        const content = document.getElementById('writeContent').value;
+        const fileUrl = document.getElementById('writeFile').value; // 임시 파일 URL 입력
+
+        if(!title || !content) return showModal('제목과 내용을 입력해주세요.');
+
+        showConfirmModal('게시글을 등록하시겠습니까?', async () => {
+            showLoading(true);
+            
+            // 파일 배열 처리
+            const files = fileUrl ? [fileUrl] : [];
+
+            const { error } = await _supabase.from('coop_boards').insert({
+                category: currentBoardCat, // 현재 보고 있는 탭의 카테고리 (free, executive 등)
+                title: title,
+                content: content,
+                files: files,
+                author_name: curMem.name // 작성자 이름 기록
+            });
+
+            showLoading(false);
+            if(error) showModal('등록 실패: ' + error.message);
+            else {
+                showModal('등록되었습니다.');
+                document.getElementById('writeModalOverlay').style.display = 'none';
+                loadBoard(currentBoardCat); // 목록 갱신
+            }
+        });
+    }
+
+    // [글보기] 상세 조회 (테이블 분기 처리 포함)
+    async function viewPost(id, category) {
+        const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
+        
+        const { data: post } = await _supabase.from(tableName).select('*').eq('id', id).single();
         if(!post) return;
 
         document.getElementById('viewTitle').innerText = post.title;
-        document.getElementById('viewAuthor').innerText = post.author_name || '관리자';
+        // 공지는 author_name이 없을 수 있으므로 처리
+        document.getElementById('viewAuthor').innerText = post.author_name || '관리자'; 
         document.getElementById('viewDate').innerText = post.created_at.substring(0,16).replace('T', ' ');
         document.getElementById('viewContent').innerText = post.content;
         
-        // 첨부파일 처리 (JSON 배열)
+        // 첨부파일 처리 (호환성)
+        const files = post.file_urls || post.files || [];
         const fileArea = document.getElementById('viewFiles');
         fileArea.innerHTML = '';
-        if(post.files && post.files.length > 0) {
-            post.files.forEach((f, idx) => {
-                fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2"><i class="bi bi-paperclip"></i> 첨부파일 ${idx+1}</a>`;
+        
+        if(files.length > 0) {
+            files.forEach((f, idx) => {
+                // 다운로드 링크 생성
+                fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2"><i class="bi bi-download"></i> 첨부파일 ${idx+1}</a>`;
             });
         }
 
