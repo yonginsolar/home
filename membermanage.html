@@ -1,191 +1,296 @@
 <!DOCTYPE html>
 <html lang="ko">
-  <head>
+<head>
     <meta charset="UTF-8">
-    <base target="_top">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>조합원 관리 시스템</title>
+    <title>조합원 관리 | 용인모두의햇빛협동조합</title>
     
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <link href="https://webfontworld.github.io/gmarket/GmarketSans.css" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     
     <link rel="stylesheet" href="style.css">
+
     <style>
-        /* 추가 스타일 */
+        /* 대시보드 전용 추가 스타일 (style.css와 충돌 없이 레이아웃 잡기 위함) */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        
+        .card-box {
+            background: #fff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+            border: 1px solid #eee;
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        /* 탭 버튼 스타일 */
+        .menu-btn {
+            padding: 15px;
+            border: 1px solid #eee;
+            background: #fff;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.3s;
+            color: #555;
+        }
+        .menu-btn:hover {
+            background: #f8f9fa;
+            color: var(--color-primary);
+            border-color: var(--color-primary);
+        }
+        .menu-btn.active {
+            background: var(--color-primary);
+            color: #fff;
+            border-color: var(--color-primary);
+        }
+
+        /* 로딩 오버레이 */
+        #loadingOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9);
+            z-index: 10000;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid #eee;
+            border-top: 4px solid var(--color-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* 숨김 클래스 */
         .hidden { display: none !important; }
-        .loading-text { margin-top:10px; font-weight:bold; color:#555; }
     </style>
-  </head>
-  <body>
+</head>
+<body>
+
+    <header id="header" class="fixed-top">
+        <div class="container d-flex align-items-center justify-content-between">
+            <div class="logo">
+                <h1><a href="index.html">용인모두의햇빛</a></h1>
+            </div>
+            <nav id="navbar" class="navbar">
+                <ul>
+                    <li><a class="nav-link" href="index.html">홈</a></li>
+                    <li><a class="nav-link active" href="#">조합원 공간</a></li>
+                </ul>
+                <i class="bi bi-list mobile-nav-toggle"></i>
+            </nav>
+        </div>
+    </header>
+
+    <div class="navbar-mobile">
+        <ul>
+            <li><a href="index.html">홈으로</a></li>
+            <li><a href="#" onclick="logout()">로그아웃</a></li>
+        </ul>
+        <i class="bi bi-x mobile-nav-toggle"></i>
+    </div>
+
     <div id="loadingOverlay">
         <div class="spinner"></div>
-        <div id="loadingMsg" class="loading-text">잠시만 기다려주세요</div>
+        <div style="margin-top:15px; font-weight:bold; color:#555;" id="loadingMsg">잠시만 기다려주세요</div>
     </div>
-    
-    <div id="layer"><div style="cursor:pointer;position:absolute;right:0;top:0;width:40px;height:40px;background:#333;color:white;text-align:center;line-height:40px;" onclick="document.getElementById('layer').style.display='none'">×</div></div>
 
-    <div class="container">
-      
-      <div id="loginSection">
-          <div style="background:#e3f2fd; color:#1565c0; padding:20px; border-radius:12px; margin-bottom:20px; font-size:14px; line-height:1.5;">
-            <b>👋 안녕하세요, 조합원님!</b><br>
-            시스템 이전으로 인해 <b>최초 1회 본인 인증(이메일)</b>이 필요합니다.<br><br>
-            문의: 사무국장 김민호 010-2513-5736
-          </div>
-          
-          <div class="section-card">
-            <label>조합원 번호 (확인용)</label>
-            <div class="box-row">
-              <input type="text" id="memberIdInput" placeholder="예: 2025-01-0001" oninput="handleMemberIdInput(this)" onkeyup="if(event.key==='Enter') handleSearch()">
-              <button class="btn-main" id="btnSearch" style="width:auto; padding:12px 20px;" onclick="handleSearch()">조회</button>
-            </div>
-            <div style="font-size:11px; color:#888; margin-top:4px;">숫자만 입력하면 자동으로 변환됩니다.</div>
-
-            <div id="emailAuthArea" class="hidden" style="margin-top:20px; border-top:1px dashed #eee; padding-top:20px;">
-              <label>등록된 이메일 확인</label>
-              <div class="box-row" style="background:#f8f9fa; padding:10px; border-radius:8px; border:1px solid #eee;">
-                <input type="text" id="emailDisplay" placeholder="이메일 입력" style="background:transparent; border:none; padding:0; color:#333; flex:1; font-weight:bold;">
-                <button class="btn-sub" id="btnSendAuth" onclick="requestAuth()">인증번호 받기</button>
-              </div>
-              
-              <div id="authInputBox" class="hidden" style="margin-top:15px;">
-                <div class="box-row">
-                  <input type="text" id="authCode" placeholder="인증번호 6자리" style="text-align:center; letter-spacing:3px;" onkeyup="if(event.key==='Enter') verifyAuth()">
-                  <button class="btn-main" style="width:80px;" onclick="verifyAuth()">로그인</button>
+    <main id="main" style="padding-top: 100px; padding-bottom: 60px; min-height: 80vh; background:#fcfcfc;">
+        
+        <div id="loginSection" class="container">
+            <div class="signup-wrapper" style="max-width: 500px;">
+                <h2 class="form-title" style="text-align: center;">조합원 로그인</h2>
+                
+                <div class="info-box" style="margin-bottom: 30px;">
+                    <div class="info-text">가입 시 등록한 <b>이메일 주소</b>를 입력해주세요.</div>
+                    <div class="info-text">이메일로 <b>인증번호(6자리)</b>가 발송됩니다.</div>
                 </div>
-                <div style="color:red; font-size:12px; margin-top:5px;" id="loginMsg"></div>
-              </div>
-            </div>
 
-            <div style="margin-top:30px; border-top:1px solid #eee; padding-top:20px;">
-                <button class="btn-kakao" onclick="startKakaoLogin()">
-                    <svg viewBox="0 0 32 32" width="20" height="20" style="vertical-align:middle; margin-right:5px;"><path d="M16 4C9.922 4 5 8.014 5 12.964c0 3.197 2.067 6.007 5.223 7.575-.246.914-.888 3.321-.916 3.496-.046.302.109.432.288.432.124 0 .201-.034.303-.099 3.498-2.31 5.093-3.414 5.263-3.525.55.082 1.115.122 1.688.122 6.078 0 11-4.014 11-8.964S22.078 4 16 4z" fill="#000000"></path></svg>
-                    카카오로 로그인 (연동된 경우)
-                </button>
-            </div>
-          </div>
-      </div>
+                <div class="email-gate-group">
+                    <input type="email" id="emailInput" class="form-control" placeholder="example@email.com" onkeyup="if(event.key==='Enter') requestAuth()">
+                    <button class="btn btn-dark" id="btnSendAuth" onclick="requestAuth()">인증요청</button>
+                </div>
 
-      <div id="dashboardSection" class="hidden">
-          <div class="top-util-bar">
-              <button class="btn-logout" onclick="logout()">로그아웃</button>
-          </div>
+                <div id="authInputBox" class="hidden" style="margin-top: 20px; animation: modalPop 0.3s ease-out;">
+                    <label style="font-weight:bold; font-size:14px; margin-bottom:5px; display:block;">인증번호 입력</label>
+                    <div class="input-group">
+                        <div class="split-box">
+                            <input type="text" id="authCode" placeholder="123456" style="text-align:center; letter-spacing: 5px; font-weight:bold; font-size:18px;" maxlength="6">
+                        </div>
+                    </div>
+                    <button class="btn-submit-main" onclick="verifyAuth()">로그인 확인</button>
+                    <div id="timer" style="text-align:center; margin-top:10px; color:#dc3545; font-weight:bold;">05:00</div>
+                </div>
 
-          <div class="section-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:18px; font-weight:bold;">내 정보</span>
-                <button class="btn-sub" style="padding:4px 8px; font-size:11px;" onclick="refresh()">↻ 새로고침</button>
-              </div>
+                <div style="margin-top: 40px; border-top: 1px solid #eee; padding-top: 30px;">
+                    <button class="btn-kakao" onclick="startKakaoLogin()">
+                        <i class="bi bi-chat-fill" style="margin-right:8px;"></i> 카카오로 시작하기
+                    </button>
+                    <div style="text-align:center; font-size:12px; color:#888; margin-top:10px;">
+                        (기존 회원이 카카오를 연동한 경우에만 가능합니다)
+                    </div>
+                </div>
             </div>
+        </div>
+
+        <div id="dashboardSection" class="container hidden">
             
-            <div class="summary-box">
-              <div id="birthdayBanner" style="display:none; background:#fff3cd; color:#856404; padding:10px; border-radius:5px; margin-bottom:10px; text-align:center;"></div>
-
-              <div class="summary-row"><span>이름</span><span id="sumName"></span></div>
-              <div class="summary-row"><span>번호</span><span id="sumId"></span></div>
-              <div class="summary-row"><span>이메일</span><span id="sumEmail"></span></div>
-              <div class="summary-row"><span>연락처</span><span id="sumPhone"></span></div>
-              <div class="summary-row"><span>주소</span><span id="sumAddr" style="max-width:200px; text-align:right;"></span></div>
-              <div class="summary-row" style="margin-top:10px; border-top:1px dashed #ddd; padding-top:5px;">
-                <span>배당/환급 계좌</span>
-                <span id="sumAccount" style="color:#1967d2;"></span>
-              </div>
-              <div style="font-size:11px; color:#999; text-align:right; margin-top:2px;">(계좌 정보 수정은 사무국 문의)</div>
-            </div>
-            
-            <div class="summary-box" style="margin-top:15px; background:#e8f0fe; border-color:#d2e3fc;">
-              <div class="summary-row">
-                <span style="color:#1967d2;">총 납부 출자금</span>
-                <span id="sumTotal" style="color:#1967d2; font-size:16px; font-weight:bold;"></span>
-              </div>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="form-title" style="margin:0;">나의 조합원 정보</h2>
+                <button class="btn-edit" onclick="logout()">로그아웃</button>
             </div>
 
-            <div class="summary-box" id="pendingAppsBox" style="display:none; margin-top:15px; background:#fff8e1; border-color:#ffe0b2;">
-                <div style="font-weight:bold; color:#e65100; margin-bottom:5px;">⏳ 처리 중인 신청 내역</div>
-                <div id="pendingAppsList"></div>
+            <section class="counts" style="padding: 0 0 30px 0;">
+                <div class="row no-gutters">
+                    <div class="col-lg-4 col-md-6 d-md-flex align-items-md-stretch">
+                        <div class="count-box">
+                            <i class="bi bi-person"></i>
+                            <span id="sumName">-</span>
+                            <p>조합원명</p>
+                            <div style="margin-top:10px; font-weight:bold; color:#555;" id="sumId"></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6 d-md-flex align-items-md-stretch">
+                        <div class="count-box">
+                            <i class="bi bi-cash-coin"></i>
+                            <span id="sumTotal">0원</span>
+                            <p>총 납입 출자금</p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6 d-md-flex align-items-md-stretch">
+                        <div class="count-box">
+                            <i class="bi bi-check-circle"></i>
+                            <span id="sumStatus" style="color:var(--color-primary); font-size:24px;">정상 (활동중)</span>
+                            <p>회원 상태</p>
+                            <div style="font-size:13px; margin-top:5px; color:#888;" id="sumEmail"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="dashboard-grid">
+                <div class="left-col">
+                    <div class="card-box">
+                        <h3 style="font-family:'GmarketSans'; font-size:18px; font-weight:bold;">📌 업무 신청</h3>
+                        <div class="menu-grid">
+                            <button class="menu-btn" onclick="toggleTab('extra', this)">추가 출자</button>
+                            <button class="menu-btn" onclick="toggleTab('reduction', this)">감자 신청</button>
+                            <button class="menu-btn" onclick="toggleTab('withdraw', this)">탈퇴 신청</button>
+                            <button class="menu-btn" onclick="toggleTab('cert', this)" style="color:var(--color-primary);">증명서 발급</button>
+                        </div>
+                        
+                        <div id="actionArea" style="margin-top:20px; border-top:1px dashed #ddd; padding-top:20px;">
+                            <div id="tabPlaceholder" style="text-align:center; color:#999; font-size:14px;">
+                                위 메뉴를 선택해주세요.
+                            </div>
+
+                            <div id="tabExtra" class="hidden">
+                                <h4 class="sheet-title">추가 출자 신청</h4>
+                                <div class="info-box" style="margin:10px 0;">입금 전 신청서를 작성해주세요.</div>
+                                <div class="input-group">
+                                    <label>약정 금액 (1만원 단위)</label>
+                                    <input type="number" id="exAmount" class="form-control" placeholder="금액 입력" step="10000">
+                                </div>
+                                <button class="btn-submit-main" onclick="submitApplication('extra')">신청하기</button>
+                            </div>
+
+                            <div id="tabReduction" class="hidden">
+                                <h4 class="sheet-title">감자 신청</h4>
+                                <div class="info-box" style="background:#fff3e0; border-color:#ff9800;">
+                                    등록된 계좌로 환급됩니다.<br>
+                                    <b id="bankInfoRed" style="color:#e65100;"></b>
+                                </div>
+                                <div class="input-group">
+                                    <label>환급 요청액</label>
+                                    <input type="number" id="redAmount" class="form-control" placeholder="금액 입력" step="10000">
+                                </div>
+                                <button class="btn-submit-main" onclick="submitApplication('reduction')">신청하기</button>
+                            </div>
+
+                            <div id="tabWithdraw" class="hidden">
+                                <h4 class="sheet-title" style="color:#dc3545;">탈퇴 신청</h4>
+                                <div class="info-box" style="background:#ffebee; border-color:#ef5350;">
+                                    <b>정말 탈퇴하시겠습니까?</b><br>
+                                    환급 계좌: <span id="bankInfoWd"></span>
+                                </div>
+                                <div class="input-group">
+                                    <label>탈퇴 사유</label>
+                                    <textarea id="wdReason" class="form-control" style="height:80px; width:100%; padding:10px; border-radius:8px; border:1px solid #ddd;"></textarea>
+                                </div>
+                                <button class="btn-submit-main" style="background:#333;" onclick="submitApplication('withdraw')">탈퇴 신청</button>
+                            </div>
+
+                            <div id="tabCert" class="hidden">
+                                <h4 class="sheet-title">출자 증명서 발급</h4>
+                                <div style="text-align:center; padding:20px;">
+                                    <i class="bi bi-file-earmark-pdf" style="font-size:40px; color:var(--color-primary);"></i>
+                                    <p style="margin-top:10px; font-size:14px; color:#666;">
+                                        현재 납입된 출자금을 기준으로<br>증명서(PDF)를 생성합니다.
+                                    </p>
+                                    <button class="btn-submit-main" onclick="downloadCert()">다운로드</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-col">
+                    <div class="card-box">
+                        <h3 style="font-family:'GmarketSans'; font-size:18px; font-weight:bold; margin-bottom:20px;">📅 최근 활동 내역</h3>
+                        
+                        <div id="timelineList">
+                            <div style="text-align:center; color:#999; padding:20px;">내역을 불러오는 중...</div>
+                        </div>
+
+                    </div>
+                </div>
             </div>
 
-            <div class="summary-box" style="background:#fff; border:1px solid #eee; margin-top:15px;">
-              <div style="font-weight:bold; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">입금 및 처리 내역</div>
-              <div id="depositList" style="font-size:13px; color:#555; max-height:200px; overflow-y:auto;"></div>
-            </div>
-          </div>
+        </div>
 
-          <div class="menu-grid">
-            <button class="menu-btn" onclick="toggleTab('extra', this)">추가 출자</button>
-            <button class="menu-btn" onclick="toggleTab('reduction', this)">감자 신청</button>
-            <button class="menu-btn" onclick="toggleTab('withdraw', this)">탈퇴 신청</button>
-            <button class="menu-btn" onclick="toggleTab('cert', this)" style="color:var(--primary-color);">🖨️ 증명서</button>
-          </div>
+    </main>
 
-          <div id="tabExtra" class="section-card hidden">
-            <h3>추가 출자 신청</h3>
-            <div class="notice-box">
-               💡 <b>입금 전 신청 필수!</b><br>
-               입금자 식별을 위해 반드시 신청서를 작성해주세요.
+    <footer id="footer">
+        <div class="footer-top">
+            <div class="container">
+                <div class="row">
+                    <div class="col-lg-4 col-md-6">
+                        <h3>용인모두의햇빛<span>.</span></h3>
+                        <p>
+                            경기도 용인시 처인구 <br>
+                            문의: 010-2513-5736<br>
+                            이메일: yonginsolar@gmail.com
+                        </p>
+                    </div>
+                </div>
             </div>
-            
-            <div class="input-group"><label>입금 예정 금액 (1만원 단위)</label>
-              <input type="number" id="exAmount" step="10000" min="0" oninput="handleAmountInput(this)">
-              <div id="exHint" style="font-size:12px; color:#666; margin-top:4px;"></div>
-            </div>
-            
-            <button class="btn-main" onclick="submitApplication('extra')">신청하기</button>
-          </div>
+        </div>
+    </footer>
 
-          <div id="tabReduction" class="section-card hidden">
-            <h3>감자 신청</h3>
-            <div class="notice-box" style="background:#fff3e0; color:#e65100;">
-                ※ 등록된 배당 계좌로 입금됩니다.<br>
-                (<span class="my-bank-display" style="font-weight:bold;"></span>)
-            </div>
-            <div class="input-group"><label>환급 요청 금액</label>
-              <input type="number" id="redAmount" step="10000" min="0" oninput="handleAmountInput(this)">
-              <div id="redHint" style="font-size:12px; color:#666; margin-top:4px;"></div>
-            </div>
-            <div class="check-item">
-              <input type="checkbox" id="redAgree"> 
-              <label for="redAgree">감자는 다음년도 총회 승인 후 처리됨을 확인합니다.</label>
-            </div>
-            <button class="btn-main" onclick="submitApplication('reduction')">신청하기</button>
-          </div>
-
-          <div id="tabWithdraw" class="section-card hidden">
-            <h3>탈퇴 신청</h3>
-            <div class="notice-box" style="background:#ffebee; color:#c62828;">
-                ⚠️ <b>정말 탈퇴하시겠습니까?</b><br>
-                납입한 출자금은 다음년도 총회 승인 후<br>
-                등록된 계좌(<span class="my-bank-display"></span>)로 환급됩니다.
-            </div>
-            <div class="input-group"><label>탈퇴 사유</label><textarea id="wdReason" placeholder="사유를 입력해주세요."></textarea></div>
-            <div class="check-item">
-              <input type="checkbox" id="wdAgree"> 
-              <label for="wdAgree">정관에 따른 탈퇴 절차 및 환급 규정을 확인하였습니다.</label>
-            </div>
-            <button class="btn-main" onclick="submitApplication('withdraw')">신청하기</button>
-          </div>
-
-          <div id="tabCert" class="section-card hidden">
-            <h3>증명서 발급</h3>
-            <div class="notice-box">
-               📄 <b>출자 증서 발급</b><br>
-               현재 납입된 출자금 기준으로 증명서를 생성합니다.
-            </div>
-            <button class="btn-main" onclick="downloadCert()">PDF 다운로드</button>
-          </div>
-          
-          <div class="footer-contact">
-              문의 : 사무국장 김민호 010-2513-5736
-          </div>
-      </div>
-    </div>
-
-    <div id="alertModal" class="modal">
-        <div class="modal-content" style="text-align:center;">
-            <div id="alertMsg" style="margin-bottom:15px; white-space:pre-wrap;"></div>
-            <button class="btn-main" onclick="document.getElementById('alertModal').style.display='none'">확인</button>
+    <div id="alertModal" class="center-modal">
+        <div class="modal-content">
+            <div style="font-size:40px; margin-bottom:10px;">📢</div>
+            <div id="alertMsg" style="font-weight:bold; margin-bottom:20px; white-space:pre-wrap;"></div>
+            <button class="btn-submit-main" onclick="document.getElementById('alertModal').style.display='none'">확인</button>
         </div>
     </div>
 
@@ -193,15 +298,14 @@
     // =========================================================================
     // 1. 설정 및 초기화
     // =========================================================================
-    // ★ 주의: Supabase 프로젝트 설정값 입력 필수
-    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
+    const SUPABASE_URL = '여기에_SUPABASE_URL_입력'; 
+    const SUPABASE_KEY = '여기에_SUPABASE_ANON_KEY_입력';
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    let curMem = null;  // DB에서 가져온 조합원 정보 (coop_members)
-    let curAuth = null; // Supabase Auth 정보
+    let curMem = null;  
+    let curAuth = null; 
+    let timerInterval = null;
 
-    // 로딩바 제어
     function showLoading(show, msg) {
         document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
         if(msg) document.getElementById('loadingMsg').innerText = msg;
@@ -212,65 +316,54 @@
         document.getElementById('alertModal').style.display = 'flex';
     }
 
-    // 페이지 로드 시 세션 확인
+    // 초기 로드 시 세션 체크
     window.addEventListener('DOMContentLoaded', async () => {
         const { data: { session } } = await _supabase.auth.getSession();
         if (session) {
             handleLoginSuccess(session.user);
         } else {
-            document.getElementById('loginSection').classList.remove('hidden');
+            // 미로그인 상태면 아무것도 안 함 (로그인 화면 유지)
         }
     });
 
     // =========================================================================
-    // 2. 인증 및 로그인 로직 (이메일 OTP -> 매핑)
+    // 2. 이메일 로그인 로직 (Magic Link / OTP)
     // =========================================================================
-    
-    // [A] 조회 버튼 (UX 유지용, 실제 로직은 바로 이메일 입력 유도)
-    function handleSearch() {
-        const idInput = document.getElementById('memberIdInput').value;
-        if(!idInput) return showAlert('조합원 번호를 입력하세요.');
-        
-        // UX: 번호를 입력하면 이메일 입력창을 열어줌
-        document.getElementById('emailAuthArea').classList.remove('hidden');
-        document.getElementById('emailDisplay').focus();
-    }
-
-    // [B] 인증번호 발송 (Supabase Magic Link/OTP)
     async function requestAuth() {
-        const email = document.getElementById('emailDisplay').value.trim();
-        if(!email || !email.includes('@')) return showAlert('올바른 이메일을 입력하세요.');
+        const email = document.getElementById('emailInput').value.trim();
+        if(!email || !email.includes('@')) return showAlert('올바른 이메일 주소를 입력해주세요.');
 
         showLoading(true, '인증번호 발송 중...');
-        
+
         const { error } = await _supabase.auth.signInWithOtp({
             email: email,
-            options: { shouldCreateUser: false } // 기존에 등록된 이메일만 허용 (보안)
+            options: { shouldCreateUser: false } // 기존 회원만 로그인 가능
         });
 
         showLoading(false);
 
         if(error) {
-            // 사용자가 없어서 에러가 난 경우 처리
-            if(error.message.includes('Signups not allowed') || error.message.includes('User not found')) {
-                showAlert('등록되지 않은 이메일입니다.\n사무국에 문의해주세요.');
+            if(error.message.includes('Signups not allowed') || error.message.includes('not found')) {
+                showAlert('등록되지 않은 이메일입니다.\n가입 시 사용한 이메일을 입력해주세요.');
             } else {
-                showAlert('오류: ' + error.message);
+                showAlert('오류 발생: ' + error.message);
             }
         } else {
-            document.getElementById('authInputBox').classList.remove('hidden');
+            // UI 변경
+            document.getElementById('emailInput').readOnly = true;
             document.getElementById('btnSendAuth').innerText = '재전송';
-            showAlert('인증번호(6자리)가 이메일로 발송되었습니다.');
+            document.getElementById('authInputBox').classList.remove('hidden');
+            startTimer(300); // 5분 타이머
+            document.getElementById('authCode').focus();
         }
     }
 
-    // [C] 인증번호 검증 (로그인 처리)
     async function verifyAuth() {
-        const email = document.getElementById('emailDisplay').value.trim();
+        const email = document.getElementById('emailInput').value.trim();
         const code = document.getElementById('authCode').value.trim();
-        if(code.length < 6) return showAlert('인증번호를 입력하세요.');
+        if(code.length < 6) return showAlert('인증번호 6자리를 입력해주세요.');
 
-        showLoading(true, '로그인 중...');
+        showLoading(true, '로그인 확인 중...');
 
         const { data, error } = await _supabase.auth.verifyOtp({
             email: email, token: code, type: 'email'
@@ -278,22 +371,38 @@
 
         if(error) {
             showLoading(false);
-            document.getElementById('loginMsg').innerText = '인증 실패: ' + error.message;
+            showAlert('인증 실패: ' + error.message);
         } else {
-            // 성공 시 DB 매핑 및 데이터 로드 진입
             handleLoginSuccess(data.user);
         }
     }
 
-    // [D] 카카오 로그인 (Supabase OAuth)
+    // 카카오 로그인
     async function startKakaoLogin() {
-        const { data, error } = await _supabase.auth.signInWithOAuth({
+        const { error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
-            options: {
-                redirectTo: window.location.href // 현재 페이지로 복귀
-            }
+            options: { redirectTo: window.location.href }
         });
         if(error) showAlert('카카오 로그인 오류: ' + error.message);
+    }
+
+    function startTimer(duration) {
+        let timer = duration, minutes, seconds;
+        clearInterval(timerInterval);
+        timerInterval = setInterval(function () {
+            minutes = parseInt(timer / 60, 10);
+            seconds = parseInt(timer % 60, 10);
+
+            minutes = minutes < 10 ? "0" + minutes : minutes;
+            seconds = seconds < 10 ? "0" + seconds : seconds;
+
+            document.getElementById('timer').textContent = minutes + ":" + seconds;
+
+            if (--timer < 0) {
+                clearInterval(timerInterval);
+                document.getElementById('timer').textContent = "시간 초과";
+            }
+        }, 1000);
     }
 
     function logout() {
@@ -303,61 +412,51 @@
     }
 
     // =========================================================================
-    // 3. 데이터 로드 및 대시보드 (핵심 로직)
+    // 3. 데이터 로드 및 렌더링
     // =========================================================================
     async function handleLoginSuccess(user) {
         curAuth = user;
-        
-        // 1. DB 매핑 (SQL에서 만든 claim_member_profile 함수 호출)
-        // 이메일이 일치하면 coop_members.id를 현재 UUID로 업데이트함
+        showLoading(true, '정보를 불러오는 중...');
+
+        // 1. DB 매핑 (기존에 만든 claim_member_profile 함수 호출)
         const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
         
-        if (claimErr) {
+        if (claimErr || (!claimRes.success && claimRes.message === 'not_found')) {
             showLoading(false);
-            console.error(claimErr);
-            showAlert('시스템 오류: 매핑 함수 호출 실패');
-            return;
-        }
-        
-        if (!claimRes.success && claimRes.message === 'not_found') {
-            showLoading(false);
-            // 매핑 실패 시: 로그인 풀고 안내
             await _supabase.auth.signOut();
-            showAlert('해당 이메일로 등록된 조합원 정보를 찾을 수 없습니다.\n가입 시 등록한 이메일인지 확인해주세요.');
+            showAlert('해당 이메일과 일치하는 조합원 정보가 없습니다.\n사무국에 문의해주세요.');
             return;
         }
 
-        // 2. 데이터 로드
-        await refresh();
+        // 2. 데이터 조회
+        await refreshDashboard();
     }
 
-    async function refresh() {
-        showLoading(true, '정보를 불러오는 중...');
+    async function refreshDashboard() {
         try {
             const myUuid = curAuth.id;
 
-            // [1] 내 정보 조회 (coop_members)
+            // [1] 내 정보
             const { data: member, error: memErr } = await _supabase
                 .from('coop_members')
                 .select('*')
                 .eq('id', myUuid)
                 .single();
-
             if(memErr) throw memErr;
             curMem = member;
 
-            // [2] 신청 내역 조회 (coop_applications)
-            const { data: apps, error: appErr } = await _supabase
+            // [2] 신청 내역
+            const { data: apps } = await _supabase
                 .from('coop_applications')
                 .select('*')
                 .eq('member_uid', myUuid)
                 .order('created_at', { ascending: false });
 
-            // [3] 입금 내역 조회 (ref_members) - member_id(문자열)로 조회
-            const { data: ledger, error: ledErr } = await _supabase
+            // [3] 입금 내역 (Timeline용)
+            const { data: ledger } = await _supabase
                 .from('ref_members')
                 .select('*')
-                .eq('member_id', curMem.member_id) // 2025-01-xxxx
+                .eq('member_id', curMem.member_id)
                 .order('deposit_date', { ascending: false });
 
             renderDashboard(member, apps || [], ledger || []);
@@ -370,195 +469,143 @@
         }
     }
 
-    // =========================================================================
-    // 4. 화면 렌더링
-    // =========================================================================
     function renderDashboard(member, apps, ledger) {
+        // 화면 전환
         document.getElementById('loginSection').classList.add('hidden');
         document.getElementById('dashboardSection').classList.remove('hidden');
 
-        // 기본 정보
+        // 기본 정보 채우기
         document.getElementById('sumName').innerText = member.name;
         document.getElementById('sumId').innerText = member.member_id;
         document.getElementById('sumEmail').innerText = member.email;
-        document.getElementById('sumPhone').innerText = member.phone || '-';
-        document.getElementById('sumAddr').innerText = member.address || '-';
-        
-        // 계좌 정보 (암호화된 경우 마스킹 처리 필요하나, 여기선 평문 bank_name 사용 예시)
-        // 실제로는 bank_name만 평문이고 account_number는 암호문일 수 있음
-        const bankStr = member.bank_name ? `${member.bank_name} (계좌 등록됨)` : '(미등록)';
-        document.getElementById('sumAccount').innerText = bankStr;
-        
-        // 은행명 표시 (신청 탭 안내용)
-        document.querySelectorAll('.my-bank-display').forEach(el => el.innerText = bankStr);
+        document.getElementById('sumTotal').innerText = (member.pledge_amount || 0).toLocaleString() + '원';
 
-        // 총 출자금
-        const total = member.pledge_amount || 0; // 혹은 total_amount 칼럼
-        document.getElementById('sumTotal').innerText = total.toLocaleString() + '원';
+        // 은행 정보 표시
+        const bankStr = member.bank_name ? `${member.bank_name} (계좌있음)` : '계좌 미등록';
+        document.getElementById('bankInfoRed').innerText = bankStr;
+        document.getElementById('bankInfoWd').innerText = bankStr;
+
+        // 타임라인 렌더링 (Timeline CSS 적용)
+        renderTimeline(ledger, apps);
+    }
+
+    function renderTimeline(ledger, apps) {
+        const list = document.getElementById('timelineList');
+        let html = '';
+
+        // 두 데이터를 합쳐서 날짜순 정렬 (단순 예시)
+        // 실제로는 VO 객체로 만들어서 정렬하는 게 좋음
+        // 여기서는 입금 내역(Ledger) 위주로 보여주고, 신청 내역은 텍스트로 추가
+        
+        if(ledger.length === 0 && apps.length === 0) {
+            list.innerHTML = '<div style="text-align:center; color:#999;">활동 내역이 없습니다.</div>';
+            return;
+        }
 
         // 입금 내역 렌더링
-        const depositBox = document.getElementById('depositList');
-        if(ledger.length === 0) {
-            depositBox.innerHTML = '<div style="padding:10px; text-align:center;">내역이 없습니다.</div>';
-        } else {
-            let html = '<table style="width:100%; border-collapse:collapse;">';
-            ledger.forEach(row => {
-                // ref_members 구조에 따라 필드명 조정 필요 (여기선 deposit_date, amount 가정)
-                html += `<tr style="border-bottom:1px solid #f0f0f0;">
-                    <td style="padding:8px;">${row.deposit_date ? row.deposit_date.substring(0,10) : '-'}</td>
-                    <td style="padding:8px; text-align:right;">${Number(row.amount||0).toLocaleString()}원</td>
-                </tr>`;
-            });
-            html += '</table>';
-            depositBox.innerHTML = html;
-        }
+        ledger.forEach(item => {
+            html += `
+            <div class="timeline-item">
+                <div class="timeline-date">${item.deposit_date ? item.deposit_date.substring(0,10) : '날짜미상'}</div>
+                <div class="timeline-content">
+                    <h4>입금 확인</h4>
+                    <p>${Number(item.amount).toLocaleString()}원 (${item.note || '출자금'})</p>
+                </div>
+            </div>`;
+        });
+        
+        // 신청 내역 렌더링 (진행중인 것)
+        apps.forEach(app => {
+            let statusColor = app.status === 'pending' ? '#ff9800' : '#4caf50';
+            let statusText = app.status === 'pending' ? '검토중' : '처리됨';
+            let typeText = app.type === 'extra' ? '추가출자' : (app.type === 'reduction' ? '감자' : '탈퇴');
 
-        // 진행 중인 신청 내역 렌더링
-        const pendingApps = apps.filter(a => a.status === 'pending');
-        const pendingBox = document.getElementById('pendingAppsBox');
-        if(pendingApps.length > 0) {
-            pendingBox.style.display = 'block';
-            let html = '';
-            pendingApps.forEach(app => {
-                let typeName = app.type === 'extra' ? '추가출자' : (app.type === 'reduction' ? '감자' : '탈퇴');
-                html += `<div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
-                    <span>[${typeName}] ${app.amount > 0 ? Number(app.amount).toLocaleString()+'원' : ''}</span>
-                    <span style="color:#e65100;">검토중</span>
-                </div>`;
-            });
-            document.getElementById('pendingAppsList').innerHTML = html;
-        } else {
-            pendingBox.style.display = 'none';
-        }
+            html += `
+            <div class="timeline-item" style="border-left-color: ${statusColor};">
+                <div class="timeline-date">${app.created_at.substring(0,10)}</div>
+                <div class="timeline-content">
+                    <h4 style="color:${statusColor}">[신청] ${typeText}</h4>
+                    <p>${Number(app.amount).toLocaleString()}원 - ${statusText}</p>
+                </div>
+            </div>`;
+        });
 
-        // 생일 배너 (주민번호 파싱)
-        if(member.rrn_display) {
-            // 840914-1******
-            const mm = member.rrn_display.substring(2,4);
-            const dd = member.rrn_display.substring(4,6);
-            const today = new Date();
-            if((today.getMonth()+1) == mm && today.getDate() == dd) {
-                document.getElementById('birthdayBanner').innerHTML = "🎉 <b>생일 축하드려요!</b><br>오늘도 빛나는 하루 되세요 🎂";
-                document.getElementById('birthdayBanner').style.display = 'block';
-            }
-        }
+        list.innerHTML = html;
     }
 
     // =========================================================================
-    // 5. 신청 로직 (통합 테이블 Insert)
-    // =========================================================================
-    async function submitApplication(type) {
-        let amount = 0;
-        let reason = '';
-
-        // 유효성 검사
-        if(type === 'extra') {
-            amount = document.getElementById('exAmount').value;
-            if(!amount || amount < 10000) return showAlert('1만원 이상 입력해주세요.');
-        } else if(type === 'reduction') {
-            amount = document.getElementById('redAmount').value;
-            if(!amount || amount <= 0) return showAlert('금액을 입력해주세요.');
-            if(!document.getElementById('redAgree').checked) return showAlert('동의가 필요합니다.');
-        } else if(type === 'withdraw') {
-            reason = document.getElementById('wdReason').value;
-            if(!reason) return showAlert('탈퇴 사유를 입력해주세요.');
-            if(!document.getElementById('wdAgree').checked) return showAlert('동의가 필요합니다.');
-        }
-
-        if(!confirm('신청하시겠습니까?')) return;
-
-        showLoading(true, '신청서 제출 중...');
-
-        const { error } = await _supabase
-            .from('coop_applications')
-            .insert({
-                member_uid: curAuth.id,
-                member_id: curMem.member_id,
-                name: curMem.name,
-                type: type,
-                amount: amount || 0,
-                reason: reason,
-                status: 'pending' // SQL default가 있지만 명시
-            });
-
-        showLoading(false);
-        if(error) {
-            showAlert('신청 실패: ' + error.message);
-        } else {
-            showAlert('성공적으로 신청되었습니다.');
-            // 입력창 초기화
-            document.getElementById('exAmount').value = '';
-            document.getElementById('redAmount').value = '';
-            document.getElementById('wdReason').value = '';
-            // 탭 닫고 새로고침
-            refresh();
-        }
-    }
-
-    // =========================================================================
-    // 6. PDF 증명서 (클라이언트 생성)
-    // =========================================================================
-    async function downloadCert() {
-        if(!window.jspdf) return showAlert('PDF 모듈 로드 실패');
-        if(!curMem) return;
-
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-
-        // [중요] 한글 폰트 적용
-        // jsPDF는 기본적으로 한글을 지원하지 않습니다. 
-        // addFont로 .ttf 파일을 base64로 변환한 문자열을 등록해야 합니다.
-        // 현재는 예시로 영어로 출력하거나, 별도의 폰트 로드 로직이 필요합니다.
-        
-        // doc.addFileToVFS('Malgun.ttf', '여기에_엄청_긴_BASE64_문자열');
-        // doc.addFont('Malgun.ttf', 'Malgun', 'normal');
-        // doc.setFont('Malgun'); 
-
-        // 임시: 한글 깨짐 방지를 위해 영어로 표기하거나 이미지를 사용해야 함.
-        // 여기서는 데이터 매핑 로직만 보여드립니다.
-        
-        doc.setFontSize(20);
-        doc.text("Certificate of Contribution", 105, 30, { align: "center" });
-        
-        doc.setFontSize(12);
-        doc.text(`Name: ${curMem.name} (Korean text requires font)`, 20, 50);
-        doc.text(`Member ID: ${curMem.member_id}`, 20, 60);
-        doc.text(`Total Amount: ${Number(curMem.pledge_amount||0).toLocaleString()} KRW`, 20, 70);
-        doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 80);
-
-        doc.save(`출자증서_${curMem.member_id}.pdf`);
-    }
-
-    // =========================================================================
-    // 7. 유틸리티 함수
+    // 4. 탭 및 신청 기능
     // =========================================================================
     function toggleTab(type, btn) {
-        // 모든 탭 숨기기
+        document.getElementById('tabPlaceholder').classList.add('hidden');
         ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => {
             document.getElementById(id).classList.add('hidden');
         });
-        // 탭 버튼 활성화 상태 제거
-        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active')); // CSS에 .active 추가 필요
+        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
+
+        document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
+        btn.classList.add('active');
+    }
+
+    async function submitApplication(type) {
+        let amount = 0, reason = '';
+        if(type === 'extra') {
+            amount = document.getElementById('exAmount').value;
+            if(!amount || amount < 10000) return showAlert('1만원 이상 입력하세요.');
+        } else if(type === 'reduction') {
+            amount = document.getElementById('redAmount').value;
+            if(!amount) return showAlert('금액을 입력하세요.');
+        } else if(type === 'withdraw') {
+            reason = document.getElementById('wdReason').value;
+            if(!reason) return showAlert('사유를 입력하세요.');
+        }
+
+        if(!confirm('신청하시겠습니까?')) return;
+        showLoading(true);
+
+        const { error } = await _supabase.from('coop_applications').insert({
+            member_uid: curAuth.id,
+            member_id: curMem.member_id,
+            name: curMem.name,
+            type: type,
+            amount: amount || 0,
+            reason: reason
+        });
+
+        showLoading(false);
+        if(error) showAlert('실패: ' + error.message);
+        else {
+            showAlert('신청되었습니다.');
+            refreshDashboard();
+        }
+    }
+
+    function downloadCert() {
+        if(!window.jspdf) return showAlert('PDF 모듈 오류');
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
         
-        // 선택 탭 보이기
-        const targetId = 'tab' + type.charAt(0).toUpperCase() + type.slice(1);
-        document.getElementById(targetId).classList.remove('hidden');
-        if(btn) btn.classList.add('active'); // 스타일링 필요
+        doc.setFontSize(20);
+        doc.text("Certificate", 105, 30, { align: "center" });
+        doc.setFontSize(12);
+        doc.text(`Name: ${curMem.name}`, 20, 50);
+        doc.text(`ID: ${curMem.member_id}`, 20, 60);
+        doc.text(`Amount: ${curMem.pledge_amount} KRW`, 20, 70);
+        
+        doc.save('certificate.pdf');
     }
 
-    function handleMemberIdInput(el) {
-        var v = el.value.replace(/[^0-9]/g, '');
-        if (v.length > 4 && v.length <= 6) { v = v.slice(0,4) + '-' + v.slice(4); } 
-        else if (v.length > 6) { v = v.slice(0,4) + '-' + v.slice(4,6) + '-' + v.slice(6,10); }
-        el.value = v;
+    // 모바일 네비게이션 토글 (style.css 로직 대응)
+    const mobileNavToggle = document.querySelector('.mobile-nav-toggle');
+    const navbarMobile = document.querySelector('.navbar-mobile');
+    if (mobileNavToggle) {
+        mobileNavToggle.addEventListener('click', function(e) {
+            navbarMobile.classList.toggle('active');
+            this.classList.toggle('bi-list');
+            this.classList.toggle('bi-x');
+        });
     }
 
-    function handleAmountInput(el) {
-        let v = Number(el.value);
-        let hintId = el.id === 'exAmount' ? 'exHint' : 'redHint';
-        let hintText = v >= 10000 ? v.toLocaleString() + '원' : '';
-        document.getElementById(hintId).textContent = hintText;
-    }
 </script>
 </body>
 </html>
