@@ -14,6 +14,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="cert_generator.js"></script>
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 
   <link href="style.css" rel="stylesheet">
   
@@ -337,6 +338,91 @@
             </div>
         </div>
 
+<div id="birthdayBanner" onclick="fireConfetti()">
+    🎉 <span id="birthdayMsgName"></span>님, 생일을 진심으로 축하합니다! (클릭하면 폭죽이 터져요!) 🎂
+</div>
+
+<div class="row g-3 mb-4" id="assetSummaryRow">
+    <div class="col-6 col-md-3">
+        <div class="dashboard-card text-center p-3">
+            <small class="text-muted d-block mb-1">조합원 번호</small>
+            <div class="fw-bold fs-5" id="sumId">-</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="dashboard-card text-center p-3">
+            <small class="text-muted d-block mb-1">출자금</small>
+            <div class="fw-bold fs-5 text-green" id="sumTotal">0원</div>
+        </div>
+    </div>
+    </div>
+
+<div class="dashboard-card mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold m-0"><i class="bi bi-people-fill me-2"></i>가족/직원 계정 관리</h5>
+        <button class="btn btn-sm btn-dark" onclick="openAddFamilyModal()">+ 구성원 추가</button>
+    </div>
+    <div id="familyListArea">
+        <p class="text-muted small text-center py-3">등록된 구성원이 없습니다.</p>
+    </div>
+</div>
+
+<div class="dashboard-card mb-4">
+    <div class="d-flex border-bottom mb-3">
+        <button class="board-tab-btn active" onclick="loadBoard('notice', this)">공지사항</button>
+        <button class="board-tab-btn" onclick="loadBoard('free', this)">자유게시판</button>
+        <button class="board-tab-btn hidden" id="tabExec" onclick="loadBoard('executive', this)">임원게시판</button>
+        <button class="board-tab-btn hidden" id="tabElec" onclick="loadBoard('election', this)">선관위</button>
+    </div>
+    <div class="d-flex justify-content-end mb-2">
+        <button class="btn btn-sm btn-outline-secondary hidden" id="btnWritePost" onclick="openWriteModal()">글쓰기</button>
+    </div>
+    <div id="boardList" style="min-height: 200px;">
+        </div>
+</div>
+
+<div id="familyModalOverlay" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="text-align:left;">
+        <h5 class="fw-bold mb-3 text-center">구성원 추가</h5>
+        <div class="mb-2">
+            <label class="small text-muted">이름</label>
+            <input type="text" id="famName" class="form-control">
+        </div>
+        <div class="mb-2">
+            <label class="small text-muted">주민등록번호 (앞6자리+뒤1자리)</label>
+            <div class="d-flex align-items-center gap-2">
+                <input type="text" id="famRrn1" class="form-control" maxlength="6" placeholder="생년월일">
+                <span>-</span>
+                <input type="text" id="famRrn2" class="form-control" maxlength="1" placeholder="성별코드">
+                <span>******</span>
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="small text-muted">전화번호</label>
+            <input type="text" id="famPhone" class="form-control" placeholder="010-0000-0000">
+        </div>
+        <div class="custom-modal-btn-group">
+            <button class="btn-modal btn-modal-no" onclick="document.getElementById('familyModalOverlay').style.display='none'">취소</button>
+            <button class="btn-modal btn-modal-yes" onclick="submitFamily()">등록</button>
+        </div>
+    </div>
+</div>
+
+<div id="boardViewModal" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="text-align:left; max-width: 600px;">
+        <h5 id="viewTitle" class="fw-bold mb-2"></h5>
+        <div class="text-muted small mb-3 border-bottom pb-2">
+            <span id="viewAuthor"></span> · <span id="viewDate"></span>
+        </div>
+        <div id="viewContent" style="min-height: 100px; white-space: pre-wrap;"></div>
+        <div id="viewFiles" class="mt-3 pt-3 border-top"></div>
+        <div class="text-center mt-4">
+            <button class="btn-modal btn-modal-no" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>
+        </div>
+    </div>
+</div>
+  
+
   
         <div class="row g-4">
             <div class="col-lg-5">
@@ -500,21 +586,38 @@ async function handleLoginSuccess(user) {
         await loadDashboardData(user.id);
     }
 
-    async function loadDashboardData(uuid) {
+async function loadDashboardData(uuid) {
         try {
-            const { data: member, error: memErr } = await _supabase.from('view_member_list').select('*').eq('id', uuid).single();
-            if(memErr) throw memErr;
-            curMem = member;
-
+            // [1] 내 정보 & 자산 (새로 만든 VIEW 사용)
+            const { data: assets, error: assetErr } = await _supabase.from('view_my_assets').select('*').eq('member_uid', uuid).single();
+            if(assetErr) throw assetErr;
+            
+            // 기존 curMem 호환성을 위해 view_member_list도 한번 호출 (정보수정 등 상세정보용)
+            const { data: member } = await _supabase.from('view_member_list').select('*').eq('id', uuid).single();
+            curMem = member; 
+            
+            // [2] 신청 내역 & 입금 내역 (기존 동일)
             const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
             const { data: ledger } = await _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
 
-            renderDashboard(member, apps || [], ledger || []);
+            // [3] 임원 여부 확인 (게시판 권한용)
+            const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
+            const myRoles = officials ? officials.map(r => r.category) : [];
+
+            // 렌더링 실행
+            renderDashboard(member, apps || [], ledger || [], assets, myRoles);
+            
+            // 추가 기능 실행
+            checkBirthday(member.rrn_display, member.name);
+            loadFamilyList(uuid);
+            loadBoard('notice'); // 기본 공지사항 로드
+
             showLoading(false);
+
         } catch (e) {
             console.error(e);
             showLoading(false);
-            showModal('데이터 로드 실패: ' + e.message); // alert -> showModal
+            showModal('데이터 로드 실패: ' + e.message);
         }
     }
 
@@ -523,33 +626,58 @@ async function handleLoginSuccess(user) {
     // =========================================================================
     // 3. 렌더링 & 내 정보 수정 (toggleEditMode 포함)
     // =========================================================================
-    function renderDashboard(member, apps, ledger) {
+function renderDashboard(member, apps, ledger, assets, myRoles) {
         document.getElementById('loginSection').classList.add('hidden');
         document.getElementById('dashboardSection').classList.remove('hidden');
 
-        // 1. 기본 정보
+        // 1. 기본 정보 (기존 동일)
         setText('infoName', member.name);
-        // 생년월일 포맷팅 (840914 -> 1984년 9월 14일)
         setText('infoBirth', formatBirthDate(member.rrn_display));
         setText('infoEmail', curAuth.email);
-        
-        // 2. 수정 폼 초기값
         setVal('editPhone', member.phone);
-        setVal('editAddress', member.address);
         setVal('editBankName', member.bank_name);
-        setVal('editAccountNo', member.account_number); // 마스킹된 값
+        setVal('editAccountNo', member.account_number);
         setVal('editHolder', member.account_holder);
+        setText('viewAddressBox', member.address);
+        setVal('editAddrMain', member.address); 
+        setVal('editAddrDetail', '');
 
-        // 3. 요약 정보
+        // 2. 자산 현황 카드 (동적 생성)
+        const assetRow = document.getElementById('assetSummaryRow');
+        // 기본 2개(번호, 출자금)는 유지하고 추가 자산만 붙임
+        // 초기화: 앞 2개 div만 남기고 나머지 삭제
+        while(assetRow.children.length > 2) { assetRow.removeChild(assetRow.lastChild); }
+
+        // 값 매핑
         setText('sumId', member.member_id);
-        // 총 납입금 (뷰의 total_capital 사용)
-        setText('sumTotal', Number(member.total_capital || 0).toLocaleString() + '원');
-        
-        // 은행 정보 표시
-        const bankText = member.bank_name ? `${member.bank_name} (계좌 있음)` : '미등록 계좌';
-        setText('sumBank', bankText);
+        setText('sumTotal', Number(assets.total_capital).toLocaleString() + '원');
 
+        // (A) 기부금 (있을 때만)
+        if(assets.total_donation > 0) addAssetCard(assetRow, '기부금', assets.total_donation);
+        // (B) 배당금 (출자+이용고 합계, 있을 때만)
+        const totalDiv = (assets.dividend_capital || 0) + (assets.dividend_usage || 0);
+        if(totalDiv > 0) addAssetCard(assetRow, '배당금(출자+이용)', totalDiv);
+        // (C) 포인트 (있을 때만)
+        if(assets.current_points > 0) addAssetCard(assetRow, '포인트', assets.current_points, 'P');
+
+        // 3. 게시판 탭 권한 처리
+        if(myRoles.includes('executive')) document.getElementById('tabExec').classList.remove('hidden');
+        if(myRoles.includes('election_comm')) document.getElementById('tabElec').classList.remove('hidden');
+
+        // 4. 타임라인 (기존 동일)
         renderTimeline(ledger, apps);
+    }
+
+    // [헬퍼] 자산 카드 추가
+    function addAssetCard(row, title, val, unit='원') {
+        const col = document.createElement('div');
+        col.className = 'col-6 col-md-3';
+        col.innerHTML = `
+            <div class="dashboard-card text-center p-3">
+                <small class="text-muted d-block mb-1">${title}</small>
+                <div class="fw-bold fs-5 text-primary">${Number(val).toLocaleString()}${unit}</div>
+            </div>`;
+        row.appendChild(col);
     }
 
 
@@ -986,6 +1114,171 @@ function toggleEditMode(isEdit) {
     // (보조) 닫기 버튼용 함수
     function closeDaumPostcode() {
         document.getElementById('layer').style.display = 'none';
+    }
+
+   // ==========================================
+    // [추가] 1. 생일 축하 로직
+    // ==========================================
+    function checkBirthday(rrn, name) {
+        if(!rrn || rrn.length < 4) return;
+        const today = new Date();
+        const mm = String(today.getMonth()+1).padStart(2,'0');
+        const dd = String(today.getDate()).padStart(2,'0');
+        const userBirthMMDD = rrn.substring(2, 6); // 주민번호 3~6번째 (MMDD)
+
+        if(userBirthMMDD === mm + dd) {
+            // 세션 스토리지 체크 (새로고침 시 계속 터지는 것 방지)
+            if(!sessionStorage.getItem('birthdayShown')) {
+                fireConfetti();
+                sessionStorage.setItem('birthdayShown', 'true');
+            }
+            const banner = document.getElementById('birthdayBanner');
+            document.getElementById('birthdayMsgName').innerText = name;
+            banner.style.display = 'block';
+        }
+    }
+    function fireConfetti() {
+        if(window.confetti) {
+            confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+        }
+    }
+
+    // ==========================================
+    // [추가] 2. 가족/직원 관리
+    // ==========================================
+    function openAddFamilyModal() {
+        document.getElementById('familyModalOverlay').style.display = 'flex';
+        // 부모 연락처 자동 입력 (편의성)
+        document.getElementById('famPhone').value = curMem.phone || '';
+    }
+
+    async function loadFamilyList(managerUid) {
+        // manager_id가 내 UUID인 멤버 조회
+        const { data: fams } = await _supabase
+            .from('coop_members')
+            .select('*')
+            .eq('manager_id', managerUid);
+        
+        const area = document.getElementById('familyListArea');
+        if(!fams || fams.length === 0) {
+            area.innerHTML = '<p class="text-muted small text-center py-3">등록된 구성원이 없습니다.</p>';
+            return;
+        }
+
+        let html = '<ul class="list-group list-group-flush">';
+        fams.forEach(f => {
+            html += `
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <span class="fw-bold">${f.name}</span>
+                    <small class="text-muted ms-2">${f.member_id || '승인 대기중'}</small>
+                </div>
+                <span class="badge bg-light text-dark border">${f.join_category}</span>
+            </li>`;
+        });
+        html += '</ul>';
+        area.innerHTML = html;
+    }
+
+    async function submitFamily() {
+        const name = document.getElementById('famName').value;
+        const rrn1 = document.getElementById('famRrn1').value;
+        const rrn2 = document.getElementById('famRrn2').value;
+        const phone = document.getElementById('famPhone').value;
+
+        if(!name || rrn1.length !== 6 || rrn2.length !== 1) return showModal('정보를 올바르게 입력해주세요.');
+
+        showConfirmModal(`${name}님을 구성원으로 등록하시겠습니까?`, async () => {
+            showLoading(true);
+            
+            // 부모 정보 복사 + 필수값 설정
+            const { error } = await _supabase.from('coop_members').insert({
+                manager_id: curAuth.id, // 부모 UUID 연결
+                name: name,
+                rrn_display: `${rrn1}-${rrn2}******`, // 마스킹 저장
+                phone: phone,
+                address: curMem.address, // 주소는 부모와 동일하다고 가정
+                join_category: '가족', // 또는 단체면 '직원' (UI에서 선택하게 하거나 자동처리)
+                status: 'active' // 즉시 활성화 (또는 pending)
+            });
+
+            showLoading(false);
+            if(error) showModal('등록 실패: ' + error.message);
+            else {
+                showModal('등록되었습니다.');
+                document.getElementById('familyModalOverlay').style.display = 'none';
+                loadFamilyList(curAuth.id);
+            }
+        });
+    }
+
+    // ==========================================
+    // [추가] 3. 게시판 로직
+    // ==========================================
+    let currentBoardCat = 'notice';
+
+    async function loadBoard(category, btn) {
+        currentBoardCat = category;
+        
+        // 탭 활성화 UI 처리
+        if(btn) {
+            document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        const listArea = document.getElementById('boardList');
+        listArea.innerHTML = '<div class="text-center py-5 text-muted">로딩중...</div>';
+
+        const { data: posts, error } = await _supabase
+            .from('coop_boards')
+            .select('*')
+            .eq('category', category)
+            .order('created_at', { ascending: false });
+
+        if(error) {
+            listArea.innerHTML = '<div class="text-center py-3 text-danger">권한이 없거나 오류가 발생했습니다.</div>';
+            return;
+        }
+
+        if(!posts || posts.length === 0) {
+            listArea.innerHTML = '<div class="text-center py-5 text-muted">등록된 글이 없습니다.</div>';
+            return;
+        }
+
+        let html = '';
+        posts.forEach(p => {
+            const date = p.created_at.substring(0,10);
+            html += `
+            <div class="board-list-item" onclick="viewPost(${p.id})">
+                <div class="d-flex justify-content-between">
+                    <span class="fw-bold text-dark">${p.title}</span>
+                    <small class="text-muted">${date}</small>
+                </div>
+                <div class="small text-secondary text-truncate">${p.content}</div>
+            </div>`;
+        });
+        listArea.innerHTML = html;
+    }
+
+    async function viewPost(id) {
+        const { data: post } = await _supabase.from('coop_boards').select('*').eq('id', id).single();
+        if(!post) return;
+
+        document.getElementById('viewTitle').innerText = post.title;
+        document.getElementById('viewAuthor').innerText = post.author_name || '관리자';
+        document.getElementById('viewDate').innerText = post.created_at.substring(0,16).replace('T', ' ');
+        document.getElementById('viewContent').innerText = post.content;
+        
+        // 첨부파일 처리 (JSON 배열)
+        const fileArea = document.getElementById('viewFiles');
+        fileArea.innerHTML = '';
+        if(post.files && post.files.length > 0) {
+            post.files.forEach((f, idx) => {
+                fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2"><i class="bi bi-paperclip"></i> 첨부파일 ${idx+1}</a>`;
+            });
+        }
+
+        document.getElementById('boardViewModal').style.display = 'flex';
     }
 </script>
 </body>
