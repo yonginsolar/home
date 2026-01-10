@@ -646,21 +646,20 @@
     // 7. [업그레이드] 출자증서 PDF 생성 (직인 + 한글폰트 + 디자인)
     // =========================================================================
 // [수정된 PDF 다운로드 함수]
+// [수정된 PDF 다운로드 함수]
     async function downloadCert() {
         if (!curMem) return alert('조합원 정보가 없습니다.');
         
-        showLoading(true, '데이터 집계 중...');
+        showLoading(true, '증서 발급 중...');
 
         try {
-            // 1. ref_members에서 내 출자금(amount) 모두 더하기
+            // 1. 출자금 합계 계산
             const { data: payments, error: payErr } = await _supabase
                 .from('ref_members')
                 .select('amount')
-                .eq('member_id', curMem.member_id); // 2025-24-xxxx
+                .eq('member_id', curMem.member_id);
 
             if (payErr) throw payErr;
-
-            // 합계 계산 (reduce)
             const totalAmount = payments.reduce((acc, curr) => acc + Number(curr.amount), 0);
 
             if (totalAmount === 0) {
@@ -668,26 +667,31 @@
                 return alert("납입된 출자금 내역이 없습니다.");
             }
 
-            // 2. 이사장 이름 가져오기 (ref_company_info)
-            const { data: companyInfo, error: comErr } = await _supabase
+            // 2. [핵심] 증서 번호 발급 (RPC 호출)
+            const { data: certRes, error: certErr } = await _supabase.rpc('issue_certificate', {
+                p_member_id: curMem.member_id,
+                p_amount: totalAmount
+            });
+
+            if (certErr) throw certErr;
+            
+            // 3. 이사장 이름 가져오기
+            const { data: companyInfo } = await _supabase
                 .from('ref_company_info')
                 .select('value')
                 .eq('key', 'chairman_name')
                 .single();
-            
-            // 기본값 설정 (DB에 없으면 김민호)
             const chairmanName = (companyInfo && companyInfo.value) ? companyInfo.value : "김민호";
 
-            // 3. 모듈 함수 호출 (PDF 생성)
-            // (조합원정보, 총액, 이사장명, Supabase클라이언트)
-            await generateContributionCert(curMem, totalAmount, chairmanName, _supabase);
+            // 4. 생성 모듈 호출 (증서번호 certRes.cert_number 전달)
+            await generateContributionCert(curMem, totalAmount, certRes.cert_number, chairmanName, _supabase);
             
             showLoading(false);
 
         } catch (e) {
             console.error(e);
             showLoading(false);
-            alert("증명서 데이터 조회 실패: " + e.message);
+            alert("처리 중 오류가 발생했습니다: " + e.message);
         }
     }
 
