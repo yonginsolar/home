@@ -286,13 +286,12 @@
     
     <div id="viewAddressBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;"></div>
     
-    <div id="editAddressBox" class="addr-edit-group">
-        <div class="input-group mb-1">
-            <input type="text" id="editAddrMain" class="form-control" placeholder="주소 검색" readonly onclick="execDaumPostcode()">
-            <button class="btn btn-secondary" type="button" onclick="execDaumPostcode()">검색</button>
-        </div>
-        <input type="text" id="editAddrDetail" class="form-control" placeholder="상세 주소를 입력하세요">
+<div id="editAddressBox" class="addr-edit-group">
+    <div class="d-flex gap-2 mb-2"> <input type="text" id="editAddrMain" class="form-control" placeholder="주소 검색 버튼을 누르세요" readonly onclick="execDaumPostcode()" style="background-color:#fff;">
+        <button class="btn btn-secondary" type="button" onclick="execDaumPostcode()" style="white-space:nowrap;">주소 검색</button>
     </div>
+    <input type="text" id="editAddrDetail" class="form-control" placeholder="상세 주소를 입력하세요">
+</div>
 </div>
 
                 <div class="col-12 border-top pt-2 mt-2">
@@ -430,7 +429,9 @@
         </div>
     </div>
 </div>
-
+<div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
+  <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" onclick="closeDaumPostcode()" alt="닫기 버튼">
+</div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="footer.js"></script>
 
@@ -649,20 +650,24 @@
         list.innerHTML = html;
     }
 
-    async function cancelApp(appId) {
-        if(!confirm('신청을 취소하시겠습니까?')) return;
-        showLoading(true);
-        const { error } = await _supabase
-            .from('coop_applications')
-            .update({ status: 'cancelled' })
-            .eq('id', appId);
+async function cancelApp(appId) {
+        // [수정] confirm -> showConfirmModal 사용
+        showConfirmModal('신청을 취소하시겠습니까?', async function() {
+            showLoading(true);
+            
+            const { error } = await _supabase
+                .from('coop_applications')
+                .update({ status: 'cancelled' })
+                .eq('id', appId);
 
-        showLoading(false);
-        if(error) alert('취소 실패: ' + error.message);
-        else {
-            alert('취소되었습니다.');
-            loadDashboardData(curAuth.id);
-        }
+            showLoading(false);
+            
+            if(error) showModal('취소 실패: ' + error.message);
+            else {
+                showModal('취소되었습니다.');
+                loadDashboardData(curAuth.id);
+            }
+        });
     }
 
     // 신청 로직 (Submit)
@@ -873,57 +878,53 @@ function closeCustomModal() {
     // =========================================================================
     // [2] 수정 모드 토글 (주소창 1단 ↔ 2단 전환 포함)
     // =========================================================================
-    function toggleEditMode(isEdit) {
-        // 제어할 요소들 선택
-        const inputs = document.querySelectorAll('.readonly-text'); // 일반 텍스트박스
-        const editOnly = document.querySelectorAll('.edit-mode-only'); // 수정 때만 보이는 안내문구
+function toggleEditMode(isEdit) {
+        const inputs = document.querySelectorAll('.readonly-text');
+        const editOnly = document.querySelectorAll('.edit-mode-only'); 
         
-        const viewAddrBox = document.getElementById('viewAddressBox'); // 주소 1줄(보기)
-        const editAddrBox = document.getElementById('editAddressBox'); // 주소 2줄(수정)
+        const viewAddr = document.getElementById('viewAddressBox');
+        const editAddr = document.getElementById('editAddressBox');
 
-        const btnEdit = document.getElementById('btnEditProfile');
-        const btnSave = document.getElementById('btnSaveProfile');
-        const btnCancel = document.getElementById('btnCancelEdit');
+        // 계좌번호 입력창 요소
+        const accInput = document.getElementById('editAccountNo');
 
         if (isEdit) {
-            // [수정 모드 진입]
-            btnEdit.classList.add('hidden');
-            btnSave.classList.remove('hidden');
-            btnCancel.classList.remove('hidden');
+            document.getElementById('btnEditProfile').classList.add('hidden');
+            document.getElementById('btnSaveProfile').classList.remove('hidden');
+            document.getElementById('btnCancelEdit').classList.remove('hidden');
             
-            // 일반 인풋 활성화
             inputs.forEach(el => {
                 el.readOnly = false;
                 el.classList.add('editable-input');
                 el.classList.remove('readonly-text');
             });
 
-            // ★ 주소창 전환: 보기 숨김 -> 수정(2단) 보임
-            if(viewAddrBox) viewAddrBox.style.display = 'none';
-            if(editAddrBox) editAddrBox.style.display = 'block';
+            // [추가] 계좌번호 UX 개선: 수정 모드 진입 시 마스킹된 값 비우기
+            // 사용자가 "아, 새로 입력해야 하는구나"라고 직관적으로 알게 함
+            accInput.value = ''; 
+            accInput.placeholder = '변경 시에만 입력하세요 (기존 유지)';
 
+            // 주소창 전환
+            viewAddr.style.display = 'none';
+            editAddr.style.display = 'block';
             editOnly.forEach(el => el.classList.remove('hidden'));
 
         } else {
-            // [수정 취소/종료] -> 원래대로 복구
-            // 데이터 원복을 위해 대시보드 리로드
+            // 취소 시 데이터 원복 (리로드)
             loadDashboardData(curAuth.id);
             
-            btnEdit.classList.remove('hidden');
-            btnSave.classList.add('hidden');
-            btnCancel.classList.add('hidden');
+            document.getElementById('btnEditProfile').classList.remove('hidden');
+            document.getElementById('btnSaveProfile').classList.add('hidden');
+            document.getElementById('btnCancelEdit').classList.add('hidden');
             
-            // 일반 인풋 비활성화
             inputs.forEach(el => {
                 el.readOnly = true;
                 el.classList.remove('editable-input');
                 el.classList.add('readonly-text');
             });
 
-            // ★ 주소창 전환: 수정 숨김 -> 보기 보임
-            if(viewAddrBox) viewAddrBox.style.display = 'block';
-            if(editAddrBox) editAddrBox.style.display = 'none';
-
+            viewAddr.style.display = 'block';
+            editAddr.style.display = 'none';
             editOnly.forEach(el => el.classList.add('hidden'));
         }
     }
