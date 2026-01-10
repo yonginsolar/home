@@ -539,22 +539,48 @@
         }
     }
 
+// [헬퍼] 안전하게 텍스트 넣기 (ID가 없으면 에러 내지 않고 넘어감)
+    function setText(id, text) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.innerText = text || '-';
+        } else {
+            console.warn(`[주의] HTML에 '${id}'라는 ID를 가진 태그가 없습니다.`);
+        }
+    }
+
+    // [수정] 렌더링 함수 (안전장치 추가됨)
     function renderDashboard(member, apps, ledger) {
-        // 화면 전환
-        document.getElementById('loginSection').classList.add('hidden');
-        document.getElementById('dashboardSection').classList.remove('hidden');
+        // 섹션 전환
+        const loginSec = document.getElementById('loginSection');
+        const dashSec = document.getElementById('dashboardSection');
+        if(loginSec) loginSec.classList.add('hidden');
+        if(dashSec) dashSec.classList.remove('hidden');
 
-        // 기본 정보
-        document.getElementById('welcomeName').innerText = member.name;
-        document.getElementById('sumId').innerText = member.member_id;
-        document.getElementById('sumEmail').innerText = member.email;
-        document.getElementById('sumTotal').innerText = (member.pledge_amount || 0).toLocaleString() + '원';
+        // 1. 기본 정보 표시 (setText 함수 사용으로 에러 방지)
+        setText('infoName', member.name);
+        setText('infoBirth', member.rrn_display ? member.rrn_display.substring(0,6) : '-');
         
-        // 은행 정보 (암호화 여부에 따라 평문인 bank_name만 표시하거나 처리)
-        const bankText = member.bank_name ? `${member.bank_name} (계좌 있음)` : '미등록 계좌';
-        document.getElementById('sumBank').innerText = bankText;
+        // 이메일은 Auth 정보에서 가져옴
+        if(curAuth && curAuth.email) setText('infoEmail', curAuth.email);
+        else setText('infoEmail', '-');
+        
+        // 2. 수정 폼 초기값 설정 (input은 value 속성이라 별도 처리)
+        if(document.getElementById('editPhone')) document.getElementById('editPhone').value = member.phone || '';
+        if(document.getElementById('editAddress')) document.getElementById('editAddress').value = member.address || '';
+        if(document.getElementById('editBankName')) document.getElementById('editBankName').value = member.bank_name || '';
+        if(document.getElementById('editAccountNo')) document.getElementById('editAccountNo').value = member.account_number || ''; // 마스킹된 값
+        if(document.getElementById('editHolder')) document.getElementById('editHolder').value = member.account_holder || '';
 
-        // 타임라인 렌더링
+        // 3. 상단 카운터 (요약 정보)
+        setText('sumId', member.member_id);
+        setText('sumTotal', Number(member.total_capital || 0).toLocaleString() + '원');
+        
+        // 4. 은행 정보 표시
+        const bankText = member.bank_name ? `${member.bank_name} (계좌 있음)` : '미등록 계좌';
+        setText('sumBank', bankText);
+
+        // 5. 타임라인 렌더링
         renderTimeline(ledger, apps);
     }
 
