@@ -97,7 +97,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
 
         // [메인 금액] 일금 일십만 원정
         doc.setFontSize(20);
-        const moneyText = `일금 ${numberToKorean(totalAmount)} 원정 (₩${totalAmount.toLocaleString()})`;
+        const moneyText = `일금${numberToKorean(totalAmount)}원정 (₩${totalAmount.toLocaleString()})`;
         doc.text(moneyText, 105, 80, { align: "center" });
         
         // 금액 밑줄
@@ -152,7 +152,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             // 서명 텍스트 끝부분에 겹치게
             const signWidth = doc.getTextWidth(signText);
             const sealX = 105 + (signWidth / 2) - 15; // 이름 끝부분 안쪽으로 살짝 들어오게
-            const sealY = msgY + 38; 
+            const sealY = msgY + 28; 
             
             doc.addImage(sealDataUrl, 'PNG', sealX, sealY, 24, 24);
         }
