@@ -415,18 +415,17 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="footer.js"></script>
 
-  <script>
+ <script>
     // =========================================================================
-    // 1. Supabase 설정 (사용자 제공 키 적용)
+    // 1. Supabase 설정
     // =========================================================================
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
     
     let _supabase = null;
-    let curMem = null; // 조합원 정보
-    let curAuth = null; // 인증 정보
+    let curMem = null;
+    let curAuth = null;
 
-    // 초기화 시도
     try {
         _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     } catch (e) {
@@ -434,105 +433,61 @@
         alert("시스템 연결 오류");
     }
 
-    // 로딩 UI 제어
     function showLoading(show, msg) {
         document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
         if(msg) document.getElementById('loadingMsg').innerText = msg;
     }
 
-    // 초기 로드: 세션 확인
+    // 초기화
     window.addEventListener('DOMContentLoaded', async () => {
         if(!_supabase) return;
-        
-        // URL에 포함된 토큰으로 세션 복구
         const { data: { session } } = await _supabase.auth.getSession();
-        
-        if (session) {
-            handleLoginSuccess(session.user);
-        }
+        if (session) handleLoginSuccess(session.user);
     });
 
     // =========================================================================
-    // 2. 로그인 로직 (매직링크)
+    // 2. 로그인 & 데이터 로드
     // =========================================================================
     async function sendMagicLink() {
-        if(!_supabase) return;
         const email = document.getElementById('emailInput').value.trim();
-        if(!email.includes('@')) return alert('올바른 이메일 형식이 아닙니다.');
-
-        showLoading(true, '인증 메일 발송 중...');
+        if(!email.includes('@')) return alert('올바른 이메일 주소를 입력해주세요.');
         
-        // ★ emailRedirectTo: 현재 페이지로 다시 돌아오도록 설정
+        showLoading(true, '인증 메일 발송 중...');
         const { error } = await _supabase.auth.signInWithOtp({
             email: email,
-            options: { 
-                shouldCreateUser: false, // 기존 회원만
-                emailRedirectTo: window.location.href 
-            }
+            options: { shouldCreateUser: false, emailRedirectTo: window.location.href }
         });
-
         showLoading(false);
 
-        if(error) {
-            // 사용자 미등록 에러 처리
-            if(error.message.includes('Signups not allowed') || error.message.includes('User not found')) {
-                alert('등록되지 않은 이메일입니다.\n조합 가입 시 등록한 이메일을 입력해주세요.');
-            } else {
-                alert('오류 발생: ' + error.message);
-            }
-        } else {
-            // 성공 UI
+        if(error) alert('오류: ' + error.message);
+        else {
             document.getElementById('sentMsgBox').classList.remove('hidden');
             document.getElementById('targetEmail').innerText = email;
-            // 입력창 비활성화
-            document.getElementById('emailInput').disabled = true;
         }
     }
 
-    async function startKakaoLogin() {
-        const { error } = await _supabase.auth.signInWithOAuth({
-            provider: 'kakao',
-            options: { redirectTo: window.location.href }
-        });
-        if(error) alert('카카오 로그인 오류: ' + error.message);
-    }
-
-    function logout() {
-        if(confirm('로그아웃 하시겠습니까?')) {
-            _supabase.auth.signOut().then(() => location.reload());
-        }
-    }
-
-    // =========================================================================
-    // 3. 데이터 로드 및 대시보드 렌더링
-    // =========================================================================
     async function handleLoginSuccess(user) {
         curAuth = user;
-        showLoading(true, '조합원 정보 확인 중...');
-        
-        // 헤더 로그아웃 버튼 표시
+        showLoading(true, '정보 확인 중...');
         document.getElementById('headerLogoutBtn').classList.remove('hidden');
 
-        // 1. DB 매핑 (RPC 호출) - 이메일 기반 매칭
+        // 매핑 확인
         const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
-
-        // 매칭 실패 처리
         if (claimErr || (!claimRes.success && claimRes.message === 'not_found')) {
-            showLoading(false);
             await _supabase.auth.signOut();
-            alert('로그인한 이메일과 일치하는 조합원 정보가 없습니다.\n(가입 시 등록된 이메일인지 확인해주세요.)');
-            return;
+            showLoading(false);
+            return alert('조합원 정보를 찾을 수 없습니다.');
         }
 
-        // 2. 데이터 조회
+        // 데이터 로드
         await loadDashboardData(user.id);
     }
 
     async function loadDashboardData(uuid) {
         try {
-            // [A] 내 정보 (coop_members)
+            // [1] 내 정보 (VIEW 사용)
             const { data: member, error: memErr } = await _supabase
-                .from('coop_members')
+                .from('view_member_list')
                 .select('*')
                 .eq('id', uuid)
                 .single();
@@ -540,77 +495,142 @@
             if(memErr) throw memErr;
             curMem = member;
 
-            // [B] 신청 내역 (coop_applications)
+            // [2] 신청 내역
             const { data: apps } = await _supabase
                 .from('coop_applications')
                 .select('*')
                 .eq('member_uid', uuid)
                 .order('created_at', { ascending: false });
 
-            // [C] 입금 내역 (ref_members)
+            // [3] 입금 내역
             const { data: ledger } = await _supabase
                 .from('ref_members')
                 .select('*')
                 .eq('member_id', curMem.member_id)
                 .order('deposit_date', { ascending: false });
 
-            // 렌더링 실행
             renderDashboard(member, apps || [], ledger || []);
             showLoading(false);
 
         } catch (e) {
             console.error(e);
             showLoading(false);
-            alert('데이터를 불러오는 중 오류가 발생했습니다: ' + e.message);
+            alert('데이터 로드 실패: ' + e.message);
         }
     }
 
-// [헬퍼] 안전하게 텍스트 넣기 (ID가 없으면 에러 내지 않고 넘어감)
-    function setText(id, text) {
-        const el = document.getElementById(id);
-        if (el) {
-            el.innerText = text || '-';
-        } else {
-            console.warn(`[주의] HTML에 '${id}'라는 ID를 가진 태그가 없습니다.`);
-        }
-    }
-
-    // [수정] 렌더링 함수 (안전장치 추가됨)
+    // =========================================================================
+    // 3. 렌더링 & 내 정보 수정 (toggleEditMode 포함)
+    // =========================================================================
     function renderDashboard(member, apps, ledger) {
-        // 섹션 전환
-        const loginSec = document.getElementById('loginSection');
-        const dashSec = document.getElementById('dashboardSection');
-        if(loginSec) loginSec.classList.add('hidden');
-        if(dashSec) dashSec.classList.remove('hidden');
+        document.getElementById('loginSection').classList.add('hidden');
+        document.getElementById('dashboardSection').classList.remove('hidden');
 
-        // 1. 기본 정보 표시 (setText 함수 사용으로 에러 방지)
+        // 1. 기본 정보
         setText('infoName', member.name);
-        setText('infoBirth', member.rrn_display ? member.rrn_display.substring(0,6) : '-');
+        // 생년월일 포맷팅 (840914 -> 1984년 9월 14일)
+        setText('infoBirth', formatBirthDate(member.rrn_display));
+        setText('infoEmail', curAuth.email);
         
-        // 이메일은 Auth 정보에서 가져옴
-        if(curAuth && curAuth.email) setText('infoEmail', curAuth.email);
-        else setText('infoEmail', '-');
-        
-        // 2. 수정 폼 초기값 설정 (input은 value 속성이라 별도 처리)
-        if(document.getElementById('editPhone')) document.getElementById('editPhone').value = member.phone || '';
-        if(document.getElementById('editAddress')) document.getElementById('editAddress').value = member.address || '';
-        if(document.getElementById('editBankName')) document.getElementById('editBankName').value = member.bank_name || '';
-        if(document.getElementById('editAccountNo')) document.getElementById('editAccountNo').value = member.account_number || ''; // 마스킹된 값
-        if(document.getElementById('editHolder')) document.getElementById('editHolder').value = member.account_holder || '';
+        // 2. 수정 폼 초기값
+        setVal('editPhone', member.phone);
+        setVal('editAddress', member.address);
+        setVal('editBankName', member.bank_name);
+        setVal('editAccountNo', member.account_number); // 마스킹된 값
+        setVal('editHolder', member.account_holder);
 
-        // 3. 상단 카운터 (요약 정보)
+        // 3. 요약 정보
         setText('sumId', member.member_id);
+        // 총 납입금 (뷰의 total_capital 사용)
         setText('sumTotal', Number(member.total_capital || 0).toLocaleString() + '원');
         
-        // 4. 은행 정보 표시
+        // 은행 정보 표시
         const bankText = member.bank_name ? `${member.bank_name} (계좌 있음)` : '미등록 계좌';
         setText('sumBank', bankText);
 
-        // 5. 타임라인 렌더링
         renderTimeline(ledger, apps);
     }
 
-function renderTimeline(ledger, apps) {
+    // [누락되었던 함수 복구] 수정 모드 토글
+    function toggleEditMode(isEdit) {
+        const inputs = document.querySelectorAll('.readonly-text, .editable-input');
+        const editOnly = document.querySelectorAll('.edit-mode-only');
+        
+        if (isEdit) {
+            document.getElementById('btnEditProfile').classList.add('hidden');
+            document.getElementById('btnSaveProfile').classList.remove('hidden');
+            document.getElementById('btnCancelEdit').classList.remove('hidden');
+            
+            inputs.forEach(el => {
+                el.readOnly = false;
+                el.classList.add('editable-input');
+                el.classList.remove('readonly-text');
+            });
+            editOnly.forEach(el => el.style.display = 'inline-block');
+        } else {
+            // 취소 시 리로드
+            loadDashboardData(curAuth.id);
+            document.getElementById('btnEditProfile').classList.remove('hidden');
+            document.getElementById('btnSaveProfile').classList.add('hidden');
+            document.getElementById('btnCancelEdit').classList.add('hidden');
+            
+            inputs.forEach(el => {
+                el.readOnly = true;
+                el.classList.remove('editable-input');
+                el.classList.add('readonly-text');
+            });
+            editOnly.forEach(el => el.style.display = 'none');
+        }
+    }
+
+    async function saveProfile() {
+        if(!confirm('정보를 수정하시겠습니까?')) return;
+        showLoading(true, '저장 중...');
+
+        const phone = document.getElementById('editPhone').value;
+        const addr = document.getElementById('editAddress').value;
+        const bank = document.getElementById('editBankName').value;
+        const accNo = document.getElementById('editAccountNo').value;
+        const holder = document.getElementById('editHolder').value;
+
+        const { error } = await _supabase.rpc('update_my_profile', {
+            p_phone: phone,
+            p_address: addr,
+            p_bank_name: bank,
+            p_account_number: accNo,
+            p_account_holder: holder
+        });
+
+        if (error) {
+            showLoading(false);
+            alert('수정 실패: ' + error.message);
+        } else {
+            alert('수정되었습니다.');
+            toggleEditMode(false);
+        }
+    }
+
+    // [헬퍼] 생년월일 포맷팅
+    function formatBirthDate(rrn) {
+        if (!rrn || rrn.length < 6) return '-';
+        const yy = rrn.substring(0, 2);
+        const mm = rrn.substring(2, 4);
+        const dd = rrn.substring(4, 6);
+        
+        // 성별 코드 확인 (없으면 1900년대로 가정)
+        let prefix = '19';
+        if (rrn.includes('-')) {
+            const gender = rrn.split('-')[1].charAt(0);
+            if (gender === '3' || gender === '4') prefix = '20';
+        }
+        
+        return `${prefix}${yy}년 ${Number(mm)}월 ${Number(dd)}일`;
+    }
+
+    // =========================================================================
+    // 4. 신청 및 타임라인
+    // =========================================================================
+    function renderTimeline(ledger, apps) {
         const list = document.getElementById('timelineList');
         let html = '';
 
@@ -619,7 +639,6 @@ function renderTimeline(ledger, apps) {
             return;
         }
 
-        // 1. 입금 내역 (확정된 사실)
         ledger.forEach(item => {
             html += `
             <div class="timeline-item">
@@ -631,16 +650,13 @@ function renderTimeline(ledger, apps) {
             </div>`;
         });
 
-        // 2. 신청 내역 (진행상황 표시)
         const typeMap = { 'extra': '추가출자', 'reduction': '감자', 'withdraw': '탈퇴' };
-        
         apps.forEach(app => {
             let statusBadge = '';
-            let actionBtn = ''; // 취소 버튼용
+            let actionBtn = '';
 
             if(app.status === 'pending') {
                 statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
-                // [기능] 대기중일 때만 취소 버튼 활성화
                 actionBtn = `<button class="btn btn-sm btn-outline-danger ms-2" style="font-size:0.7rem; padding:2px 6px;" onclick="cancelApp(${app.id})">취소</button>`;
             } else if(app.status === 'approved') {
                 statusBadge = '<span class="badge bg-success">승인됨</span>';
@@ -650,19 +666,18 @@ function renderTimeline(ledger, apps) {
                 statusBadge = '<span class="badge bg-danger">반려됨</span>';
             }
 
-            let typeName = typeMap[app.type] || app.type;
-
             html += `
             <div class="timeline-item" style="border-left-color: #ff9800;">
                 <div class="timeline-date">${app.created_at.substring(0,10)}</div>
                 <div class="timeline-content">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <span class="fw-bold">[신청] ${typeName}</span>
+                            <span class="fw-bold">[신청] ${typeMap[app.type]}</span>
                             ${statusBadge}
                         </div>
-                        ${actionBtn} </div>
-                    <p>${Number(app.amount).toLocaleString()}원 ${app.reason ? '('+app.reason+')' : ''}</p>
+                        ${actionBtn}
+                    </div>
+                    <p>${Number(app.amount).toLocaleString()}원</p>
                 </div>
             </div>`;
         });
@@ -670,28 +685,26 @@ function renderTimeline(ledger, apps) {
         list.innerHTML = html;
     }
 
-    // =========================================================================
-    // 4. 탭 및 신청 기능
-    // =========================================================================
-    function toggleTab(type, btn) {
-        // 모든 탭 숨기기
-        document.getElementById('tabPlaceholder').classList.add('hidden');
-        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => {
-            document.getElementById(id).classList.add('hidden');
-        });
-        
-        // 버튼 활성화 스타일
-        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
-        if(btn) btn.classList.add('active');
+    async function cancelApp(appId) {
+        if(!confirm('신청을 취소하시겠습니까?')) return;
+        showLoading(true);
+        const { error } = await _supabase
+            .from('coop_applications')
+            .update({ status: 'cancelled' })
+            .eq('id', appId);
 
-        // 해당 탭 보이기
-        const target = document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1));
-        if(target) target.classList.remove('hidden');
+        showLoading(false);
+        if(error) alert('취소 실패: ' + error.message);
+        else {
+            alert('취소되었습니다.');
+            loadDashboardData(curAuth.id);
+        }
     }
 
-async function submitApplication(type) {
+    // 신청 로직 (Submit)
+    async function submitApplication(type) {
         let amount = 0, reason = '';
-        const totalCap = Number(curMem.total_capital || 0); // 뷰에서 가져온 총액
+        const totalCap = Number(curMem.total_capital || 0);
 
         if(type === 'extra') {
             amount = Number(document.getElementById('exAmount').value);
@@ -700,22 +713,16 @@ async function submitApplication(type) {
         else if(type === 'reduction') {
             amount = Number(document.getElementById('redAmount').value);
             if(amount <= 0) return alert('금액을 입력해주세요.');
-            
-            // [제약] 잔액 10만원 미만 불가
-            if(totalCap - amount < 100000) {
-                return alert(`감자 후 출자금이 최소 10만원 이상이어야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
-            }
-            // [제약] 동의 체크 확인
-            if(!document.getElementById('checkRedAgree').checked) return alert('안내 사항에 동의해주세요.');
+            if(totalCap - amount < 100000) return alert(`최소 10만원 이상 유지해야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
+            if(!document.getElementById('checkRedAgree').checked) return alert('동의 항목에 체크해주세요.');
         } 
         else if(type === 'withdraw') {
             reason = document.getElementById('wdReason').value;
-            if(!reason) return alert('탈퇴 사유를 입력해주세요.');
-            // [제약] 동의 체크 확인
-            if(!document.getElementById('checkWdAgree').checked) return alert('탈퇴 안내 사항에 동의해주세요.');
+            if(!reason) return alert('사유를 입력해주세요.');
+            if(!document.getElementById('checkWdAgree').checked) return alert('동의 항목에 체크해주세요.');
         }
 
-        if(!confirm('신청서를 제출하시겠습니까?')) return;
+        if(!confirm('신청하시겠습니까?')) return;
         showLoading(true);
 
         const { error } = await _supabase.from('coop_applications').insert({
@@ -732,116 +739,63 @@ async function submitApplication(type) {
         if(error) alert('오류: ' + error.message);
         else {
             alert('신청되었습니다.');
-            // 입력창 초기화
             document.getElementById('exAmount').value = '';
             document.getElementById('redAmount').value = '';
             document.getElementById('wdReason').value = '';
-            if(document.getElementById('checkRedAgree')) document.getElementById('checkRedAgree').checked = false;
-            if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgree').checked = false;
-            
-            loadDashboardData(curAuth.id); // 목록 갱신
+            loadDashboardData(curAuth.id);
         }
     }
-// =========================================================================
-    // 7. [업그레이드] 출자증서 PDF 생성 (직인 + 한글폰트 + 디자인)
-    // =========================================================================
 
-async function downloadCert() {
-        if (!curMem) return alert('조합원 정보가 없습니다.');
-        
+    // 탭 및 유틸
+    function toggleTab(type, btn) {
+        document.getElementById('tabPlaceholder').classList.add('hidden');
+        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => document.getElementById(id).classList.add('hidden'));
+        document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
+        if(btn) btn.classList.add('active');
+        document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
+    }
+
+    // PDF 다운로드
+    async function downloadCert() {
+        if(!curMem) return;
         showLoading(true, '증서 발급 중...');
-
         try {
-            // 1. 실제 납입금 합계 계산 (ref_members 기준)
-            const { data: payments, error: payErr } = await _supabase
-                .from('ref_members')
-                .select('amount')
-                .eq('member_id', curMem.member_id);
+            const { data: payments } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
+            const totalAmount = payments ? payments.reduce((a,c)=>a+Number(c.amount),0) : 0;
+            if(totalAmount===0) { showLoading(false); return alert('납입 내역이 없습니다.'); }
 
-            if (payErr) throw payErr;
-            const totalAmount = payments.reduce((acc, curr) => acc + Number(curr.amount), 0);
+            const { data: certRes } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: totalAmount });
+            const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
+            const chairman = info ? info.value : "김민호";
 
-            if (totalAmount === 0) {
-                showLoading(false);
-                return alert("납입된 출자금 내역이 없습니다.");
-            }
-
-            // 2. 증서 번호 발급 (RPC 호출: 중복 방지 로직 포함)
-            const { data: certRes, error: certErr } = await _supabase.rpc('issue_certificate', {
-                p_member_id: curMem.member_id,
-                p_amount: totalAmount
-            });
-
-            if (certErr) throw certErr;
-            
-            // 3. 이사장 이름 조회 (없으면 기본값)
-            const { data: companyInfo } = await _supabase
-                .from('ref_company_info')
-                .select('value')
-                .eq('key', 'chairman_name')
-                .single();
-            const chairmanName = (companyInfo && companyInfo.value) ? companyInfo.value : "김민호";
-
-            // 4. 생성 모듈 호출 (cert_generator.js)
-            // 인자: 회원정보, 총액, 증서번호, 이사장명, Supabase클라이언트
-            await generateContributionCert(curMem, totalAmount, certRes.cert_number, chairmanName, _supabase);
-            
+            await generateContributionCert(curMem, totalAmount, certRes.cert_number, chairman, _supabase);
             showLoading(false);
-
-        } catch (e) {
-            console.error(e);
-            showLoading(false);
-            alert("처리 중 오류가 발생했습니다: " + e.message);
-        }
+        } catch(e) { console.error(e); showLoading(false); alert('오류 발생'); }
     }
 
-    async function cancelApp(appId) {
-        if(!confirm('신청을 취소하시겠습니까?')) return;
-        showLoading(true);
-        
-        // 내 신청건 중 'pending' 상태인 것만 취소 가능 (RLS로도 보호됨)
-        const { error } = await _supabase
-            .from('coop_applications')
-            .update({ status: 'cancelled' })
-            .eq('id', appId);
+    function logout() { if(confirm('로그아웃?')) _supabase.auth.signOut().then(()=>location.reload()); }
+    function startKakaoLogin() { alert('카카오 설정 필요'); }
+    
+    // [헬퍼] 안전한 값 설정
+    function setText(id, txt) { const el=document.getElementById(id); if(el) el.innerText = txt || '-'; }
+    function setVal(id, val) { const el=document.getElementById(id); if(el) el.value = val || ''; }
 
-        showLoading(false);
-        if(error) alert('취소 실패: ' + error.message);
-        else {
-            alert('취소되었습니다.');
-            loadDashboardData(curAuth.id); // 목록 갱신
-        }
+    // 주소찾기
+    function execDaumPostcode() {
+        var layer = document.getElementById('layer');
+        new daum.Postcode({
+            oncomplete: function(data) {
+                var addr = data.userSelectedType === 'R' ? data.roadAddress : data.jibunAddress;
+                if(data.buildingName) addr += ' (' + data.buildingName + ')';
+                document.getElementById('editAddress').value = addr;
+                layer.style.display = 'none';
+            }, width:'100%', height:'100%'
+        }).embed(layer);
+        layer.style.display = 'block';
+        // 레이어 위치 조정 로직 생략 (단순화)
+        layer.style.top = '100px'; layer.style.left = '50%'; layer.style.marginLeft = '-150px';
     }
-
-    async function saveProfile() {
-        if(!confirm('정보를 수정하시겠습니까?')) return;
-        showLoading(true, '저장 중...');
-
-        const phone = document.getElementById('editPhone').value;
-        const addr = document.getElementById('editAddress').value;
-        const bank = document.getElementById('editBankName').value;
-        const accNo = document.getElementById('editAccountNo').value;
-        const holder = document.getElementById('editHolder').value;
-
-        // DB 함수(RPC) 호출: 서버에서 마스킹 여부 판단 후 암호화 저장
-        const { error } = await _supabase.rpc('update_my_profile', {
-            p_phone: phone,
-            p_address: addr,
-            p_bank_name: bank,
-            p_account_number: accNo, // 마스킹된 값이 갈 수도 있고, 새 값이 갈 수도 있음
-            p_account_holder: holder
-        });
-
-        if (error) {
-            showLoading(false);
-            alert('수정 실패: ' + error.message);
-        } else {
-            alert('수정되었습니다.');
-            toggleEditMode(false); // 조회 모드로 복귀
-        }
-    }
-
-
-  </script>
+    function closeDaumPostcode() { document.getElementById('layer').style.display = 'none'; }
+</script>
 </body>
 </html>
