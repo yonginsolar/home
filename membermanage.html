@@ -257,16 +257,24 @@
         <div id="birthdayBanner" onclick="fireConfetti()">
             🎉 <span id="birthdayMsgName"></span>님, 생일을 진심으로 축하합니다! (클릭하면 폭죽이 터져요!) 🎂
         </div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center">
+        <h5 class="fw-bold m-0 me-2"><i class="bi bi-person-lines-fill me-2"></i>내 정보</h5>
+        
+        <div class="dropdown hidden" id="profileSwitcher">
+            <button class="btn btn-sm btn-outline-primary dropdown-toggle fw-bold" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-arrow-repeat"></i> <span id="currentProfileName">나(개인)</span>
+            </button>
+            <ul class="dropdown-menu shadow" id="profileListMenu">
+                </ul>
+        </div>
+    </div>
 
-        <div class="dashboard-card mb-4" id="profileCard">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="fw-bold m-0"><i class="bi bi-person-lines-fill me-2"></i>내 정보</h5>
-                <div>
-                    <button class="btn btn-sm btn-outline-secondary" id="btnEditProfile" onclick="toggleEditMode(true)">정보 수정</button>
-                    <button class="btn btn-sm btn-success hidden" id="btnSaveProfile" onclick="saveProfile()">저장</button>
-                    <button class="btn btn-sm btn-light hidden" id="btnCancelEdit" onclick="toggleEditMode(false)">취소</button>
-                </div>
-            </div>
+    <div>
+        <button class="btn btn-sm btn-outline-secondary" id="btnEditProfile" onclick="toggleEditMode(true)">정보 수정</button>
+        <button class="btn btn-sm btn-success hidden" id="btnSaveProfile" onclick="saveProfile()">저장</button>
+        <button class="btn btn-sm btn-light hidden" id="btnCancelEdit" onclick="toggleEditMode(false)">취소</button>
+    </div>
             
             <div class="row g-3">
                 <div class="col-md-6">
@@ -625,8 +633,10 @@ async function loadDashboardData(uuid) {
             checkBirthday(member.rrn_display, member.name);
             loadFamilyList(uuid);
             loadBoard('notice'); // 기본 공지사항 로드
-
+            loadManagedProfiles(curAuth.id);
+  
             showLoading(false);
+          
 
         } catch (e) {
             console.error(e);
@@ -1389,6 +1399,72 @@ function toggleEditMode(isEdit) {
 
         document.getElementById('boardViewModal').style.display = 'flex';
     }
+   // ==========================================
+// [신규 기능] 프로필 전환 (Context Switching)
+// ==========================================
+
+// 1. 관리 가능한 프로필 목록 로드 및 UI 생성
+async function loadManagedProfiles(myAuthId) {
+    const switcher = document.getElementById('profileSwitcher');
+    const menu = document.getElementById('profileListMenu');
+    
+    // (1) 본인 계정 정보 가져오기 (이름 확인용)
+    const { data: me } = await _supabase.from('coop_members').select('id, name, member_type').eq('id', myAuthId).single();
+    
+    // (2) 내가 관리자인 계정들 가져오기 (단체 등)
+    const { data: subProfiles } = await _supabase
+        .from('coop_members')
+        .select('id, name, member_type')
+        .eq('manager_id', myAuthId); // manager_id가 나인 경우
+
+    // 관리할 계정이 없으면 스위처 숨김
+    if (!subProfiles || subProfiles.length === 0) {
+        switcher.classList.add('hidden');
+        return;
+    }
+
+    // (3) 리스트 만들기: [나] + [관리 계정들]
+    menu.innerHTML = '';
+    const allProfiles = [me, ...subProfiles]; // 배열 합치기
+
+    allProfiles.forEach(p => {
+        if(!p) return;
+        const isMe = p.id === myAuthId;
+        const badge = p.member_type === '단체' ? '<span class="badge bg-info ms-1">단체</span>' : '';
+        const activeClass = (curMem && curMem.id === p.id) ? 'active' : ''; // 현재 보고 있는 프로필 표시
+
+        menu.innerHTML += `
+            <li>
+                <button class="dropdown-item d-flex justify-content-between align-items-center ${activeClass}" onclick="switchProfile('${p.id}', '${p.name}')">
+                    <span>${p.name} ${isMe ? '(나)' : ''}</span>
+                    ${badge}
+                </button>
+            </li>`;
+    });
+
+    // 버튼 텍스트 업데이트
+    const currentName = curMem ? curMem.name : '프로필 선택';
+    document.getElementById('currentProfileName').innerText = currentName;
+    
+    // 스위처 노출
+    switcher.classList.remove('hidden');
+}
+
+// 2. 프로필 전환 실행
+async function switchProfile(targetUuid, targetName) {
+    if(curMem && curMem.id === targetUuid) return; // 이미 선택된 프로필이면 무시
+
+    showLoading(true, `${targetName} 님으로 전환 중...`);
+    
+    // ★ 핵심: 로그아웃 없이, 데이터 로드 함수만 대상 UUID로 다시 호출
+    // curAuth(로그인된 정보)는 유지되고, curMem(화면 데이터)만 교체됨
+    await loadDashboardData(targetUuid);
+    
+    // 스위처 UI 다시 그리기 (Active 상태 변경을 위해)
+    await loadManagedProfiles(curAuth.id);
+    
+    showModal(`'${targetName}' 계정으로 전환되었습니다.\n이제 이 명의로 활동합니다.`);
+}
 </script>
 </body>
 </html>
