@@ -1354,6 +1354,7 @@ async function submitNewChild() {
 }
 
 // 4. [탭2] 연결 대상 검색
+// [수정] 연결 대상 검색 (RPC 사용, 문법 에러 수정됨)
 async function searchTargetMember() {
     const keyword = document.getElementById('searchConnectInput').value.trim();
     if(keyword.length < 2) return showModal('검색어를 2글자 이상 입력하세요.');
@@ -1361,28 +1362,38 @@ async function searchTargetMember() {
     const area = document.getElementById('connectResultArea');
     area.innerHTML = '<p class="text-center text-muted small py-3">검색 중...</p>';
 
-    // 이름, 이메일, 멤버ID로 검색
+    // 1. RPC 호출 (체이닝 없이 단독 실행)
     const { data: list, error } = await _supabase.rpc('search_profiles_for_connect', { keyword: keyword });
-        .from('coop_members')
-        .select('id, name, email, member_id, member_type')
-        .or(`name.ilike.%${keyword}%,email.ilike.%${keyword}%,member_id.ilike.%${keyword}%`)
-        .neq('id', curMem.id) // 나 자신 제외
-        .limit(5);
+
+    if (error) {
+        console.error(error);
+        area.innerHTML = '<p class="text-center text-danger small py-3">검색 중 오류가 발생했습니다.</p>';
+        return;
+    }
 
     area.innerHTML = '';
-    if(!list || list.length === 0) {
+    
+    // 2. 나 자신 제외 필터링 (JS에서 처리)
+    // (curMem이 로드된 상태여야 함)
+    const myId = curMem ? curMem.id : null;
+    const filteredList = list ? list.filter(m => m.id !== myId) : [];
+
+    if(filteredList.length === 0) {
         area.innerHTML = '<p class="text-center text-muted small py-3">검색 결과가 없습니다.</p>';
         return;
     }
 
     let html = '<ul class="list-group list-group-flush small">';
-    list.forEach(m => {
+    filteredList.forEach(m => {
         const typeBadge = m.member_type === '단체' ? '<span class="badge bg-info">단체</span>' : '<span class="badge bg-secondary">개인</span>';
+        // 이메일 마스킹 (선택 사항)
+        const emailDisplay = m.email || '이메일 없음';
+        
         html += `
             <li class="list-group-item d-flex justify-content-between align-items-center p-2">
                 <div>
                     ${typeBadge} <b>${m.name}</b>
-                    <br><span class="text-muted x-small">${m.email || '이메일 없음'}</span>
+                    <br><span class="text-muted x-small">${emailDisplay}</span>
                 </div>
                 <button class="btn btn-sm btn-outline-primary" onclick="requestConnect('${m.id}', '${m.name}')">
                     연결 신청
