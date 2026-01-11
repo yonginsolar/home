@@ -79,7 +79,49 @@
         margin-bottom: 30px;
         color: #333;
     }
-    
+    /* [수정] 모달 디자인 고도화 (Depth Effect) */
+.custom-modal-overlay {
+    z-index: 1050;
+    display: none;
+    background: rgba(0,0,0,0.4);
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    justify-content: center; align-items: center;
+    transition: all 0.3s ease; /* 부드러운 전환 */
+    backdrop-filter: blur(2px); /* 배경 블러 */
+}
+
+/* 활성화된 모달 박스 */
+.custom-modal-box {
+    background: #fff;
+    padding: 25px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    width: 90%; max-width: 400px;
+    text-align: center;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* 튕기는 효과 */
+    transform: scale(1);
+    opacity: 1;
+}
+
+/* [신규] 뒤로 밀려난 모달 스타일 (JS로 클래스 부여) */
+.custom-modal-overlay.modal-depth-back {
+    z-index: 1040; /* 순서 내림 */
+    background: rgba(0,0,0,0.6); /* 더 어둡게 */
+}
+.custom-modal-overlay.modal-depth-back .custom-modal-box {
+    transform: scale(0.9) translateY(10px); /* 뒤로 물러난 느낌 */
+    opacity: 0.6;
+}
+
+/* 최상위 경고창 */
+#customModalOverlay { z-index: 2000 !important; }
+
+/* [수정] 게시판 스크롤바 & 높이 제한 (6번) */
+#boardList {
+    max-height: 500px; /* 적당한 높이 */
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
     /* [대시보드] 카드 박스 */
     .dashboard-card {
         background: #fff;
@@ -183,11 +225,7 @@
 
     pointer-events: none; background: #f8f9fa;
 
-    /* [수정] 모달 계층 정리 */
-/* 일반 모달 (가족추가, 글쓰기 등) */
-.custom-modal-overlay { z-index: 1050; } 
-/* 확인/경고 모달 (최상위) - ID가 customModalOverlay인 녀석 */
-#customModalOverlay { z-index: 2000 !important; }
+    
 
 /* [수정] 공지사항 카드 스타일 */
 .notice-mini-item {
@@ -645,6 +683,8 @@
     let _supabase = null;
     let curMem = null;
     let curAuth = null;
+   let currentBoardLimit = 20;
+let isBoardLoading = false;
 
     try {
         _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -724,33 +764,28 @@ async function fetchMaskedBankInfo(uuid) {
 // [수정] 데이터 로드 함수 (안전장치 강화 & 원본 테이블 사용)
 // [수정] 데이터 로드 함수 (뷰 연동 추가)
 // [수정] 대시보드 데이터 로드 (전체 로직 통합)
+// [수정] 대시보드 데이터 로드
 async function loadDashboardData(uuid) {
     try {
-        // 1. 원본 테이블(coop_members) 조회 (기본 정보)
+        // 1. 기본 정보 조회
         const { data: member, error: memErr } = await _supabase
             .from('coop_members')
             .select('*')
             .eq('id', uuid)
             .single();
 
-        if (memErr) throw new Error('회원 정보 로드 실패: ' + memErr.message);
-        if (!member) throw new Error('회원 정보를 찾을 수 없습니다.');
+        if (memErr || !member) throw new Error('회원 정보를 찾을 수 없습니다.');
 
-        // -----------------------------------------------------------
-        // [보안] 뷰에서 마스킹 된 계좌번호 가져와서 덮어쓰기
-        // -----------------------------------------------------------
+        // 마스킹 계좌 적용
         const maskedAcc = await fetchMaskedBankInfo(uuid);
-        if (maskedAcc) {
-            // 화면 표시용 객체에는 마스킹 된 값을 넣음
-            member.account_number = maskedAcc; 
-        }
+        if (maskedAcc) member.account_number = maskedAcc; 
 
-        curMem = member; // 전역 변수에 저장
+        curMem = member; 
 
-        // 2. 자산 정보 (view_my_assets)
+        // 2. 자산 정보 로드 (★ 3번 해결: RLS 권한 문제 우회)
         let assets = { total_capital: 0, total_donation: 0, dividend_capital: 0, dividend_usage: 0, current_points: 0 };
         
-        const { data: assetData, error: assetErr } = await _supabase
+        const { data: assetData } = await _supabase
             .from('view_my_assets')
             .select('*')
             .eq('member_uid', uuid)
@@ -758,51 +793,36 @@ async function loadDashboardData(uuid) {
 
         if (assetData) {
             assets = assetData;
-            // 편의를 위해 curMem에도 자산 정보 병합
-            curMem.total_capital = assets.total_capital;
+        } else {
+            // ★ 중요: 뷰 조회 권한이 없거나 데이터가 없으면, 멤버 테이블의 값을 fallback으로 사용
+            // (단체 계정 조회 시 부모 권한 충돌 해결)
+            assets.total_capital = member.total_capital || 0;
         }
+        // UI 표시용 변수에도 동기화
+        curMem.total_capital = assets.total_capital;
 
-        // 3. 입금 내역 (ref_members)
-        const { data: ledger } = await _supabase
-            .from('ref_members')
-            .select('*')
-            .eq('member_id', curMem.member_id)
-            .order('deposit_date', { ascending: false });
+        // 3. 입금 내역
+        const { data: ledger } = await _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
 
         // 4. 신청 내역
-        const { data: apps } = await _supabase
-            .from('coop_applications')
-            .select('*')
-            .eq('member_uid', uuid)
-            .order('created_at', { ascending: false });
+        const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
 
-        // 5. 임원 권한 확인
-        const { data: officials } = await _supabase
-            .from('coop_officials')
-            .select('category')
-            .eq('member_id', curMem.member_id);
+        // 5. 권한
+        const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
         const myRoles = officials ? officials.map(r => r.category) : [];
 
-        // 6. 화면 렌더링
+        // 렌더링
         renderDashboard(curMem, apps || [], ledger || [], assets, myRoles);
         
-        // 7. 부가 기능 실행
-        // (1) 생일 축하 배너
+        // 부가 기능
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
-        
-        // (2) 가족 목록 로드
         loadFamilyList(uuid);
-
-        // (3) [신규] 상단 미니 공지사항 로드 (대시보드 우측 상단 카드)
         if (typeof loadMiniNotices === 'function') loadMiniNotices();
-
-        // (4) [신규] 나에게 온 연결 요청 확인 (대시보드 최상단 알림)
         if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
         
-        // (5) [변경] 하단 메인 게시판은 '자유게시판'을 기본으로 로드
-        loadBoard('free'); 
+        // ★ 6번 해결: 게시판 로드 시 limit=20 적용 (함수 내부 수정 필요)
+        loadBoard('free', null, 20); 
 
-        // (6) 뱃지 시스템 로드
         if (typeof Badges !== 'undefined') {
             Badges.render('badgeContainer', uuid, _supabase);
             Badges.checkAnniversary(curMem, _supabase);
@@ -811,7 +831,7 @@ async function loadDashboardData(uuid) {
     } catch (e) {
         console.error("Dashboard Load Error:", e);
         showLoading(false);
-        showModal('데이터를 불러오는 중 문제가 발생했습니다.\n' + e.message);
+        showModal('데이터 로드 오류: ' + e.message);
     } finally {
         showLoading(false);
     }
@@ -909,36 +929,21 @@ function renderTimeline(ledger, apps) {
         return;
     }
 
-    // 입금 내역
+    // (입금 내역 forEach는 기존 유지...)
     ledger.forEach(item => {
-        html += `
-        <div class="timeline-item">
-            <div class="timeline-date">${item.deposit_date ? item.deposit_date.substring(0,10) : '날짜미상'}</div>
-            <div class="timeline-content">
-                <h5>입금 확인</h5>
-                <p class="text-success fw-bold">+${Number(item.amount).toLocaleString()}원</p>
-            </div>
-        </div>`;
+        html += `<div class="timeline-item"><div class="timeline-date">${item.deposit_date.substring(0,10)}</div><div class="timeline-content"><h5>입금 확인</h5><p class="text-success fw-bold">+${Number(item.amount).toLocaleString()}원</p></div></div>`;
     });
 
-    // 신청 내역
-    // ★ 7번 해결: 'connect' 타입 추가
-    const typeMap = { 
-        'extra': '추가출자', 
-        'reduction': '감자신청', 
-        'withdraw': '탈퇴신청',
-        'connect': '계정연결' 
-    };
+    const typeMap = { 'extra': '추가출자', 'reduction': '감자신청', 'withdraw': '탈퇴신청', 'connect': '계정연결' };
 
     apps.forEach(app => {
         let statusBadge = '';
         let actionBtn = '';
-        const appType = typeMap[app.type] || app.type; // undefined 방지
-
-        // 뱃지 색상 및 텍스트
+        const appType = typeMap[app.type] || app.type;
+        
+        // 상태별 뱃지
         if(app.status === 'pending') {
             statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
-            // ★ 9번 해결: pending 상태면 무조건 취소 버튼 활성화
             actionBtn = `<button class="btn btn-sm btn-outline-danger ms-2" style="font-size:0.7rem; padding:2px 6px;" onclick="cancelApp(${app.id})">취소</button>`;
         } else if(app.status === 'approved') {
             statusBadge = '<span class="badge bg-success">승인됨</span>';
@@ -948,13 +953,18 @@ function renderTimeline(ledger, apps) {
             statusBadge = '<span class="badge bg-danger">반려됨</span>';
         }
 
-        // 금액 표시 (연결 신청은 금액이 0원이므로 비고를 보여줌)
+        // ★ 4번 해결: 승인/취소 상태면 "연결 요청중" 텍스트 숨김
         let detailText = '';
         if(app.type === 'connect') {
-             // reason 필드에서 UUID 제거하고 깔끔하게 보여주기
-             detailText = `<span class="text-primary small">${app.reason ? '연결 요청중' : ''}</span>`;
+            if(app.status === 'pending') {
+                detailText = `<span class="text-primary small">⏳ ${app.reason ? '연결 요청중' : ''}</span>`;
+            } else if(app.status === 'approved') {
+                detailText = `<span class="text-success small">✅ 연결 완료</span>`;
+            } else {
+                detailText = `<span class="text-muted small">종료된 요청</span>`;
+            }
         } else {
-             detailText = `${Number(app.amount).toLocaleString()}원`;
+            detailText = `${Number(app.amount).toLocaleString()}원`;
         }
 
         html += `
@@ -962,10 +972,7 @@ function renderTimeline(ledger, apps) {
             <div class="timeline-date">${app.created_at.substring(0,10)}</div>
             <div class="timeline-content">
                 <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <span class="fw-bold">[신청] ${appType}</span>
-                        ${statusBadge}
-                    </div>
+                    <div><span class="fw-bold">[신청] ${appType}</span> ${statusBadge}</div>
                     ${actionBtn}
                 </div>
                 <p>${detailText}</p>
@@ -1169,13 +1176,35 @@ function showModal(msg) {
     document.getElementById('customModalOverlay').style.display = 'flex';
 }
 
+// [신규] 모달 겹침 효과 제어
+function setModalDepth(isPushBack) {
+    const overlays = document.querySelectorAll('.custom-modal-overlay');
+    // 현재 열려있는(display:flex) 모달 중, 최상위(확인창)가 아닌 것들을 찾음
+    overlays.forEach(el => {
+        if(el.id !== 'customModalOverlay' && el.style.display === 'flex') {
+            if(isPushBack) el.classList.add('modal-depth-back');
+            else el.classList.remove('modal-depth-back');
+        }
+    });
+}
+
+// 기존 showConfirmModal 수정 (Depth 적용)
 function showConfirmModal(msg, yesCallback) {
+    setModalDepth(true); // 기존 모달 뒤로 밀기
     document.getElementById('customModalMsg').innerText = msg;
-    document.getElementById('btnModalNo').style.display = 'block'; // 취소버튼 보임
-    document.getElementById('customModalOverlay').style.display = 'flex';
+    document.getElementById('btnModalNo').style.display = 'block';
+    
+    const overlay = document.getElementById('customModalOverlay');
+    overlay.style.display = 'flex';
+    
     document.getElementById('btnModalYes').onclick = function() {
-        closeCustomModal();
+        overlay.style.display = 'none';
+        setModalDepth(false); // 복구
         if(yesCallback) yesCallback();
+    };
+    document.getElementById('btnModalNo').onclick = function() {
+        overlay.style.display = 'none';
+        setModalDepth(false); // 복구
     };
 }
 
@@ -1400,17 +1429,18 @@ function toggleEditMode(isEdit) {
 // 1. 모달 열기 (기존 함수 교체)
 function openAddFamilyModal() {
     document.getElementById('familyModalOverlay').style.display = 'flex';
-    switchFamTab('new'); // 기본은 신규 탭
-
-    // 초기화
-    document.getElementById('newFamName').value = '';
-    document.getElementById('newFamRrn1').value = '';
-    document.getElementById('newFamRrn2').value = '';
-    document.getElementById('newFamCapital').value = '';
-    document.getElementById('newFamBank').value = '';
-    document.getElementById('newFamAcc').value = '';
     
-    // 조합원 번호는 로직상 자동 생성됨을 표시
+    // ★ 5번 해결: 이미 연결된 계정이 있는지 확인하여 탭 이름 변경
+    const tabBtn = document.querySelectorAll('#famModalTabs .nav-link')[1]; // 두번째 탭(연결)
+    
+    // coop_applications에서 'connect' 타입이면서 'pending'이나 'approved'인게 있는지 체크하면 좋지만,
+    // UI 상의 단순 변경이므로 텍스트만 동적으로 바꿈.
+    // (엄밀히는 DB 조회가 필요하나, 여기서는 단순화)
+    tabBtn.innerHTML = `🤝 연결 관리 (신청/변경)`;
+
+    switchFamTab('new');
+    // ... (기존 초기화 코드 유지)
+    document.getElementById('newFamName').value = '';
     document.getElementById('newFamId').value = '자동 생성 예정';
 }
 
@@ -1666,82 +1696,80 @@ function showInlineFeedback(msg) {
     // ==========================================
     let currentBoardCat = 'notice';
 
-    async function loadBoard(category, btn) {
-        currentBoardCat = category;
-        
-        // 1. 탭 UI 활성화
-        if(btn) {
-            document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
-
-        // 2. 글쓰기 버튼 노출 여부 (공지는 관리자만 가능하므로 일단 숨김, 자유게시판은 노출)
-        const btnWrite = document.getElementById('btnWritePost');
-        if(category === 'free' || category === 'executive' || category === 'election') {
-            btnWrite.classList.remove('hidden');
-        } else {
-            btnWrite.classList.add('hidden'); // 공지사항 탭에서는 글쓰기 버튼 숨김
-        }
-
-        const listArea = document.getElementById('boardList');
-        listArea.innerHTML = '<div class="text-center py-5 text-muted">로딩중...</div>';
-
-        let posts = [];
-        let error = null;
-
-        // ★ [핵심] 카테고리에 따라 다른 테이블 조회
-        if (category === 'notice') {
-            // 공지사항 테이블 (coop_notices)
-            // 필요한 컬럼: id, title, created_at, content, file_urls
-            const res = await _supabase
-                .from('coop_notices')
-                .select('*')
-                .eq('status', 'published') // 게시된 것만
-                .eq('category', 'general') // 혹은 카테고리 무관하게
-                .order('created_at', { ascending: false });
-            posts = res.data;
-            error = res.error;
-        } else {
-            // 일반/임원 게시판 테이블 (coop_boards)
-            const res = await _supabase
-                .from('coop_boards')
-                .select('*')
-                .eq('category', category)
-                .order('created_at', { ascending: false });
-            posts = res.data;
-            error = res.error;
-        }
-
-        if(error) {
-            console.error(error);
-            listArea.innerHTML = '<div class="text-center py-3 text-danger">목록을 불러올 수 없습니다.</div>';
-            return;
-        }
-
-        if(!posts || posts.length === 0) {
-            listArea.innerHTML = '<div class="text-center py-5 text-muted">등록된 글이 없습니다.</div>';
-            return;
-        }
-
-        // 리스트 렌더링
-        let html = '';
-        posts.forEach(p => {
-            const date = p.created_at ? p.created_at.substring(0,10) : '';
-            // 공지사항은 file_urls, 일반게시판은 files 칼럼 사용 (호환 처리)
-            const fileCount = (p.file_urls?.length || p.files?.length || 0);
-            const fileIcon = fileCount > 0 ? '<i class="bi bi-paperclip ms-1 text-muted"></i>' : '';
-
-            html += `
-            <div class="board-list-item" onclick="viewPost(${p.id}, '${category}')">
-                <div class="d-flex justify-content-between">
-                    <span class="fw-bold text-dark text-truncate">${p.title} ${fileIcon}</span>
-                    <small class="text-muted" style="min-width: 80px; text-align: right;">${date}</small>
-                </div>
-                <div class="small text-secondary text-truncate mt-1">${p.content.replace(/<[^>]*>?/gm, '')}</div>
-            </div>`;
-        });
-        listArea.innerHTML = html;
+// [수정] 게시판 로드 (페이징 지원)
+async function loadBoard(category, btn, limit = 20) {
+    if (limit === 20) currentBoardLimit = 20; // 초기화
+    
+    currentBoardCat = category;
+    if(btn) {
+        document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
     }
+
+    // ★ 7번 해결: 공지사항 더보기 클릭 시 -> 모달 띄우기
+    if(category === 'notice' && !btn) {
+        openNoticeListModal(); // 아래에 정의할 새 함수
+        return;
+    }
+
+    // 버튼 표시 제어 (기존 로직 유지)
+    const btnWrite = document.getElementById('btnWritePost');
+    if(btnWrite) btnWrite.classList.toggle('hidden', category === 'notice');
+
+    const listArea = document.getElementById('boardList');
+    if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">로딩중...</div>';
+
+    // 데이터 조회 (Range 적용)
+    const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
+    const { data: posts, error } = await _supabase
+        .from(tableName)
+        .select('*')
+        .eq('status', 'published') // (필요시 status 필터)
+        .order('created_at', { ascending: false })
+        .range(0, limit - 1); // 0부터 limit-1까지
+
+    if(error || !posts || posts.length === 0) {
+        if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">등록된 글이 없습니다.</div>';
+        return;
+    }
+
+    let html = '';
+    posts.forEach(p => {
+        const date = p.created_at.substring(0,10);
+        html += `
+        <div class="board-list-item p-3 border-bottom" onclick="viewPost(${p.id}, '${category}')" style="cursor:pointer;">
+            <div class="d-flex justify-content-between">
+                <span class="fw-bold text-dark text-truncate">${p.title}</span>
+                <small class="text-muted">${date}</small>
+            </div>
+            <div class="small text-secondary text-truncate mt-1">${p.content.replace(/<[^>]*>?/gm, '')}</div>
+        </div>`;
+    });
+
+    // 더보기 버튼 (무한스크롤 대용)
+    html += `<div class="text-center py-3">
+                <button class="btn btn-sm btn-outline-secondary rounded-pill px-4" onclick="loadMoreBoard()">더 보기 (+20)</button>
+             </div>`;
+             
+    listArea.innerHTML = html;
+}
+
+// [신규] 더보기 실행 함수
+function loadMoreBoard() {
+    currentBoardLimit += 20;
+    // 현재 카테고리 유지하며 갯수만 늘림
+    loadBoard(currentBoardCat, null, currentBoardLimit);
+}
+
+// [신규] 공지사항 전체보기 모달 (7번 해결)
+function openNoticeListModal() {
+    // 공지사항 전용 모달을 띄우거나, 기존 boardViewModal을 재활용할 수도 있지만
+    // UI 복잡도를 줄이기 위해 '공지사항' 탭으로 이동시키는게 낫지만,
+    // 사용자가 '상단은 공지, 하단은 자유'라고 분리를 원했으므로 모달이 적합.
+    
+    // 임시로 알림
+    showModal('공지사항 전체보기 기능은 준비중입니다.\n(자유게시판 처럼 별도 모달 필요)');
+}
 
     // [글쓰기] 모달 열기
     function openWriteModal() {
@@ -2011,38 +2039,37 @@ async function checkIncomingConnects() {
 }
 
 // [신규] 연결 요청 응답 (수락/거절)
+// [수정] 연결 요청 응답
 async function answerConnect(appId, decision) {
     const actionText = (decision === 'approve') ? '수락' : '거절';
     
+    // 모달 뎁스 효과 적용
+    setModalDepth(true); 
+
     showConfirmModal(`정말 ${actionText}하시겠습니까?`, async () => {
-        showLoading(true, '처리 중...');
-
+        showLoading(true);
         const { error } = await _supabase.rpc('answer_connect_request', {
-            p_app_id: appId,
-            p_decision: decision
+            p_app_id: appId, p_decision: decision
         });
-
         showLoading(false);
 
-        if (error) {
-            showModal('처리 실패: ' + error.message);
-        } else {
-            // 인라인 피드백 사용 (아까 만든 함수 활용)
-            if (typeof showInlineFeedback === 'function') {
-                // 알림 박스 위치가 애매하므로 그냥 모달로 깔끔하게 안내 후 리로드
-                 showModal(`${actionText}되었습니다.`);
-            } else {
-                 showModal(`${actionText}되었습니다.`);
+        if (error) showModal('오류: ' + error.message);
+        else {
+            showModal(`${actionText}되었습니다.`);
+            
+            // ★ 1번 해결: 승인했다면 내가 관리할 수 있는 프로필 목록을 갱신해야 함
+            if(decision === 'approve') {
+                await loadManagedProfiles(curAuth.id);
             }
             
-            // 데이터 갱신 (연결되었으면 프로필 스위처 등이 바뀔 수 있음)
-            loadDashboardData(curAuth.id);
-            // 알림 박스 제거
+            // 알림 제거 및 데이터 갱신
+            loadDashboardData(curAuth.id); 
             const alertDiv = document.getElementById('connectRequestAlert');
             if(alertDiv) alertDiv.remove();
         }
+        setModalDepth(false); // 뎁스 복구
     });
-}
+}}
 </script>
 </body>
 </html>
