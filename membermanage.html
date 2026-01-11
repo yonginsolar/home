@@ -846,26 +846,25 @@ function toggleContactInput() {
     }
 }
 
-// [수정] 수동 매칭 실행 함수 (선택된 값 가져오기)
+// [수정] 수동 매칭 실행 함수 (Alert 제거 -> showModal 적용)
 async function tryManualLink() {
     const name = document.getElementById('manualName').value.trim();
     const isPhone = document.getElementById('typePhone').checked;
     
     let contact = '';
     
+    // [유효성 검사] alert 대신 showModal 사용
     if (isPhone) {
-        // 전화번호에서 하이픈 제거하고 숫자만 전송 (DB 매칭용)
-        // 화면에는 010-1234-1234로 보이지만, 실제 전송은 01012341234 (또는 DB 포맷에 맞게)
-        // 아까 만든 manual_claim_member SQL은 하이픈 있어도 되고 없어도 되게 만들었으므로 그대로 보내도 됨.
         contact = document.getElementById('manualPhone').value.trim();
-        if (contact.length < 12) return alert("전화번호를 올바르게 입력해주세요.");
+        if (contact.length < 12) return showModal("전화번호를 올바르게 입력해주세요.\n(숫자만 입력하면 됩니다)");
     } else {
         contact = document.getElementById('manualEmail').value.trim();
-        if (!contact.includes('@')) return alert("올바른 이메일 형식이 아닙니다.");
+        if (!contact.includes('@')) return showModal("올바른 이메일 형식이 아닙니다.");
     }
 
-    if (!name) return alert("이름을 입력해주세요.");
+    if (!name) return showModal("이름을 입력해주세요.");
 
+    // 로딩 시작
     showLoading(true, '조합원 명부 검색 중...');
 
     // 수동 매칭 RPC 호출
@@ -877,21 +876,29 @@ async function tryManualLink() {
     showLoading(false);
 
     if (error) {
-        // SQL 오류
-        alert("오류 발생: " + error.message);
+        showModal("오류 발생: " + error.message);
     } else if (data.success) {
-        // 성공
-        alert("반갑습니다! 정보를 찾았습니다.\n계정이 연결되었습니다.");
+        // [성공] 모달 닫고 -> 환영 메시지 모달 띄움 -> 확인 누르면 대시보드 로드
         document.getElementById('manualMatchModal').style.display = 'none';
+        
+        // ★ 환영 알럿을 모달로 변경
+        // showConfirmModal을 응용해서 '확인' 버튼만 있는 환영창으로 씀
+        // (또는 showModal을 쓰고 콜백이 필요하면 커스텀해야 하지만, 
+        //  여기서는 showModal 후 바로 로드해도 사용자가 인지함)
+        
+        showModal("🎉 반갑습니다! 정보를 찾았습니다.\n계정이 성공적으로 연결되었습니다.");
+        
+        // 연결됐으니 대시보드 로드 (모달 뒤에서 로드됨)
         document.getElementById('headerLogoutBtn').classList.remove('hidden');
         await loadDashboardData(curAuth.id);
+        
     } else {
-        // 실패
-        alert("일치하는 정보가 없습니다.\n입력하신 정보가 명부와 다를 수 있습니다.");
+        // [실패]
+        showModal("일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.");
     }
 }
 
-// [신규] 수동 매칭 포기 (로그아웃 및 문의 안내)
+// [수정] 수동 매칭 포기 (Alert 제거)
 async function manualMatchFail() {
     await _supabase.auth.signOut();
     document.getElementById('manualMatchModal').style.display = 'none';
