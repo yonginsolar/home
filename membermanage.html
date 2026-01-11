@@ -703,6 +703,7 @@ async function fetchMaskedBankInfo(uuid) {
 }
 // [수정] 데이터 로드 함수 (안전장치 강화 & 원본 테이블 사용)
 // [수정] 데이터 로드 함수 (뷰 연동 추가)
+// [수정] 대시보드 데이터 로드 (전체 로직 통합)
 async function loadDashboardData(uuid) {
     try {
         // 1. 원본 테이블(coop_members) 조회 (기본 정보)
@@ -716,14 +717,13 @@ async function loadDashboardData(uuid) {
         if (!member) throw new Error('회원 정보를 찾을 수 없습니다.');
 
         // -----------------------------------------------------------
-        // [변경 포인트] 뷰에서 마스킹 된 계좌번호 가져와서 덮어쓰기
+        // [보안] 뷰에서 마스킹 된 계좌번호 가져와서 덮어쓰기
         // -----------------------------------------------------------
         const maskedAcc = await fetchMaskedBankInfo(uuid);
         if (maskedAcc) {
-            // 원본(날것) 데이터를 마스킹 된 데이터로 교체 (화면 표시용)
+            // 화면 표시용 객체에는 마스킹 된 값을 넣음
             member.account_number = maskedAcc; 
         }
-        // -----------------------------------------------------------
 
         curMem = member; // 전역 변수에 저장
 
@@ -738,6 +738,7 @@ async function loadDashboardData(uuid) {
 
         if (assetData) {
             assets = assetData;
+            // 편의를 위해 curMem에도 자산 정보 병합
             curMem.total_capital = assets.total_capital;
         }
 
@@ -766,14 +767,22 @@ async function loadDashboardData(uuid) {
         renderDashboard(curMem, apps || [], ledger || [], assets, myRoles);
         
         // 7. 부가 기능 실행
+        // (1) 생일 축하 배너
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
         
+        // (2) 가족 목록 로드
         loadFamilyList(uuid);
-// [변경] 상단 카드엔 공지사항 3개
-        loadMiniNotices(); 
-        // [변경] 하단 메인 게시판은 '자유게시판'을 기본으로 로드
-        loadBoard('free');
 
+        // (3) [신규] 상단 미니 공지사항 로드 (대시보드 우측 상단 카드)
+        if (typeof loadMiniNotices === 'function') loadMiniNotices();
+
+        // (4) [신규] 나에게 온 연결 요청 확인 (대시보드 최상단 알림)
+        if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
+        
+        // (5) [변경] 하단 메인 게시판은 '자유게시판'을 기본으로 로드
+        loadBoard('free'); 
+
+        // (6) 뱃지 시스템 로드
         if (typeof Badges !== 'undefined') {
             Badges.render('badgeContainer', uuid, _supabase);
             Badges.checkAnniversary(curMem, _supabase);
@@ -1900,6 +1909,84 @@ async function loadMiniNotices() {
         console.error(e);
         listArea.innerHTML = '<p class="text-center text-danger small">로드 실패</p>';
     }
+}
+   // [신규] 나에게 온 연결 요청 확인 및 렌더링
+async function checkIncomingConnects() {
+    // 1. RPC 호출
+    const { data: requests, error } = await _supabase.rpc('get_my_pending_connects');
+    
+    // 알림을 띄울 위치 (공지사항 카드 위인 'dashboardSection'의 맨 앞, 혹은 'assetSummaryRow' 위)
+    // 여기서는 가장 눈에 띄게 대시보드 섹션의 최상단(생일 배너 아래)에 넣겠습니다.
+    const container = document.getElementById('dashboardSection');
+    const existingAlert = document.getElementById('connectRequestAlert');
+    if(existingAlert) existingAlert.remove(); // 중복 방지
+
+    if (error || !requests || requests.length === 0) return;
+
+    // 2. 알림 UI 생성
+    const alertDiv = document.createElement('div');
+    alertDiv.id = 'connectRequestAlert';
+    alertDiv.className = 'alert alert-primary border-primary d-flex flex-column gap-2 mb-4 shadow-sm';
+    alertDiv.style.backgroundColor = '#e3f2fd'; // 눈에 띄는 하늘색 배경
+
+    let html = `<div class="d-flex align-items-center text-primary fw-bold">
+                    <i class="bi bi-link-45deg fs-3 me-2"></i>
+                    계정 연결 요청이 도착했습니다!
+                </div>`;
+
+    requests.forEach(req => {
+        html += `
+            <div class="bg-white p-3 rounded border d-flex justify-content-between align-items-center">
+                <div>
+                    <span class="fw-bold text-dark">${req.requester_name}</span> 님이
+                    <br><small class="text-muted">내 계정을 관리하길 원합니다.</small>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-danger" onclick="answerConnect(${req.app_id}, 'reject')">거절</button>
+                    <button class="btn btn-sm btn-primary fw-bold" onclick="answerConnect(${req.app_id}, 'approve')">수락</button>
+                </div>
+            </div>`;
+    });
+
+    alertDiv.innerHTML = html;
+
+    // 3. 생일 배너 바로 다음, 혹은 대시보드 최상단에 삽입
+    const refNode = document.getElementById('birthdayBanner').nextSibling;
+    container.insertBefore(alertDiv, refNode);
+}
+
+// [신규] 연결 요청 응답 (수락/거절)
+async function answerConnect(appId, decision) {
+    const actionText = (decision === 'approve') ? '수락' : '거절';
+    
+    showConfirmModal(`정말 ${actionText}하시겠습니까?`, async () => {
+        showLoading(true, '처리 중...');
+
+        const { error } = await _supabase.rpc('answer_connect_request', {
+            p_app_id: appId,
+            p_decision: decision
+        });
+
+        showLoading(false);
+
+        if (error) {
+            showModal('처리 실패: ' + error.message);
+        } else {
+            // 인라인 피드백 사용 (아까 만든 함수 활용)
+            if (typeof showInlineFeedback === 'function') {
+                // 알림 박스 위치가 애매하므로 그냥 모달로 깔끔하게 안내 후 리로드
+                 showModal(`${actionText}되었습니다.`);
+            } else {
+                 showModal(`${actionText}되었습니다.`);
+            }
+            
+            // 데이터 갱신 (연결되었으면 프로필 스위처 등이 바뀔 수 있음)
+            loadDashboardData(curAuth.id);
+            // 알림 박스 제거
+            const alertDiv = document.getElementById('connectRequestAlert');
+            if(alertDiv) alertDiv.remove();
+        }
+    });
 }
 </script>
 </body>
