@@ -698,24 +698,56 @@ let isBoardLoading = false;
         if(msg) document.getElementById('loadingMsg').innerText = msg;
     }
 
-    // 초기화
-    window.addEventListener('DOMContentLoaded', async () => {
-        if(!_supabase) return;
-        const { data: { session } } = await _supabase.auth.getSession();
-        if (session) handleLoginSuccess(session.user);
+// [수정 1] 초기화 로직: 보안 강화 및 화면 겹침 원천 차단
+window.addEventListener('DOMContentLoaded', async () => {
+    // 1. [방어적 코딩] 시작하자마자 모든 화면 강제 숨김
+    const loginSection = document.getElementById('loginSection');
+    const dashboardSection = document.getElementById('dashboardSection');
+    
+    loginSection.style.display = 'none';
+    dashboardSection.style.display = 'none';
+    
+    // 로딩바 표시
+    if (typeof showLoading === 'function') showLoading(true, '시스템 보안 확인 중...');
+
+    // 2. Supabase 연결 체크
+    if(!_supabase) {
+        if (typeof showLoading === 'function') showLoading(false);
+        alert("시스템 오류: DB 연결 실패");
+        return;
+    }
+
+    // 3. [핵심] 실시간 인증 상태 감지 (getSession보다 안전함)
+    _supabase.auth.onAuthStateChange((event, session) => {
+        if (typeof showLoading === 'function') showLoading(false);
+
+        if (session) {
+            // 로그인 상태 -> 대시보드 진입 시도
+            // (화면 노출은 handleLoginSuccess 내부에서 데이터 로드 성공 후 처리)
+            handleLoginSuccess(session.user);
+        } else {
+            // 비로그인 상태 -> 로그인 화면만 노출
+            console.log("인증 세션 없음: 로그인 화면 이동");
+            loginSection.style.display = 'block';
+            dashboardSection.style.display = 'none';
+        }
     });
+});
 
     // =========================================================================
     // 2. 로그인 & 데이터 로드
     // =========================================================================
+// [수정 2] 매직링크 발송: 기존 세션 클리어 로직 추가
 async function sendMagicLink() {
     const email = document.getElementById('emailInput').value.trim();
     if(!email.includes('@')) return showModal('올바른 이메일 주소를 입력해주세요.');
     
-    showLoading(true, '인증 메일 발송 중...');
+    showLoading(true, '보안 연결 초기화 및 메일 발송 중...');
     
-    // [수정됨] shouldCreateUser: true
-    // 이제 없는 이메일이면 '자동 가입' 처리되면서 -> DB 트리거가 발동 -> 데이터 매칭 성공
+    // 1. [핵심] 기존에 꼬여있을 수 있는 세션을 확실히 로그아웃 처리
+    await _supabase.auth.signOut();
+
+    // 2. 새로운 로그인 링크 발송
     const { error } = await _supabase.auth.signInWithOtp({
         email: email,
         options: { shouldCreateUser: true, emailRedirectTo: window.location.href }
@@ -761,31 +793,37 @@ async function fetchMaskedBankInfo(uuid) {
         return data ? data.account_number : null;
     } catch (e) { return null; }
 }
-// [수정] 데이터 로드 함수 (안전장치 강화 & 원본 테이블 사용)
-// [수정] 데이터 로드 함수 (뷰 연동 추가)
-// [수정] 대시보드 데이터 로드 (전체 로직 통합)
-// [수정] 대시보드 데이터 로드
+// [수정 3] 대시보드 데이터 로드: 인증 예외 처리 및 스키마 정합성 확보
 async function loadDashboardData(uuid) {
     try {
-        // 1. 기본 정보 조회
+        // 1. 멤버 기본 정보 조회
         const { data: member, error: memErr } = await _supabase
             .from('coop_members')
             .select('*')
             .eq('id', uuid)
             .single();
 
-        if (memErr || !member) throw new Error('회원 정보를 찾을 수 없습니다.');
+        // [보안] 조회 실패 시 인증 문제인지 확인
+        if (memErr || !member) {
+            console.error("멤버 조회 실패:", memErr);
+            // 인증 관련 에러(403 등)라면 즉시 로그아웃 처리
+            if (memErr && (memErr.code === 'PGRST301' || memErr.message.includes('Auth') || memErr.status === 403)) {
+                alert("보안을 위해 다시 로그인해주세요.");
+                logout(); 
+                return;
+            }
+            throw new Error('회원 정보를 불러올 수 없습니다.');
+        }
 
         // 마스킹 계좌 적용
         const maskedAcc = await fetchMaskedBankInfo(uuid);
         if (maskedAcc) member.account_number = maskedAcc; 
-
         curMem = member; 
 
-        // 2. 자산 정보 로드 (★ 3번 해결: RLS 권한 문제 우회)
+        // 2. 자산 정보 로드 (뷰 사용)
         let assets = { total_capital: 0, total_donation: 0, dividend_capital: 0, dividend_usage: 0, current_points: 0 };
         
-        const { data: assetData } = await _supabase
+        const { data: assetData, error: assetErr } = await _supabase
             .from('view_my_assets')
             .select('*')
             .eq('member_uid', uuid)
@@ -793,12 +831,10 @@ async function loadDashboardData(uuid) {
 
         if (assetData) {
             assets = assetData;
-        } else {
-            // ★ 중요: 뷰 조회 권한이 없거나 데이터가 없으면, 멤버 테이블의 값을 fallback으로 사용
-            // (단체 계정 조회 시 부모 권한 충돌 해결)
-            assets.total_capital = member.total_capital || 0;
-        }
-        // UI 표시용 변수에도 동기화
+        } 
+        // [수정] 테이블에 컬럼이 없다고 확인되었으므로, 뷰가 없으면 그냥 0원으로 둠 (추측성 코드 삭제)
+        
+        // UI 표시용 변수 동기화
         curMem.total_capital = assets.total_capital;
 
         // 3. 입금 내역
@@ -807,20 +843,20 @@ async function loadDashboardData(uuid) {
         // 4. 신청 내역
         const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
 
-        // 5. 권한
+        // 5. 권한 확인
         const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
         const myRoles = officials ? officials.map(r => r.category) : [];
 
-        // 렌더링
+        // 6. 렌더링 (화면 표시)
         renderDashboard(curMem, apps || [], ledger || [], assets, myRoles);
         
-        // 부가 기능
+        // 부가 기능 로드
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
-        loadFamilyList(uuid);
+        if (typeof loadFamilyList === 'function') loadFamilyList(uuid);
         if (typeof loadMiniNotices === 'function') loadMiniNotices();
         if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
         
-        // ★ 6번 해결: 게시판 로드 시 limit=20 적용 (함수 내부 수정 필요)
+        // 게시판 로드
         loadBoard('free', null, 20); 
 
         if (typeof Badges !== 'undefined') {
@@ -831,6 +867,7 @@ async function loadDashboardData(uuid) {
     } catch (e) {
         console.error("Dashboard Load Error:", e);
         showLoading(false);
+        // 치명적 에러 시 모달 표시
         showModal('데이터 로드 오류: ' + e.message);
     } finally {
         showLoading(false);
@@ -1696,9 +1733,9 @@ function showInlineFeedback(msg) {
     // ==========================================
     let currentBoardCat = 'notice';
 
-// [수정] 게시판 로드 (페이징 지원)
+// [수정 4] 게시판 로드: 없는 칼럼(status) 참조 제거로 400 에러 해결
 async function loadBoard(category, btn, limit = 20) {
-    if (limit === 20) currentBoardLimit = 20; // 초기화
+    if (limit === 20) currentBoardLimit = 20;
     
     currentBoardCat = category;
     if(btn) {
@@ -1706,29 +1743,30 @@ async function loadBoard(category, btn, limit = 20) {
         btn.classList.add('active');
     }
 
-    // ★ 7번 해결: 공지사항 더보기 클릭 시 -> 모달 띄우기
+    // 공지사항 로직 (기존 유지)
     if(category === 'notice' && !btn) {
-        openNoticeListModal(); // 아래에 정의할 새 함수
+        if(typeof openNoticeListModal === 'function') openNoticeListModal();
         return;
     }
 
-    // 버튼 표시 제어 (기존 로직 유지)
     const btnWrite = document.getElementById('btnWritePost');
     if(btnWrite) btnWrite.classList.toggle('hidden', category === 'notice');
 
     const listArea = document.getElementById('boardList');
     if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">로딩중...</div>';
 
-    // 데이터 조회 (Range 적용)
+    // 데이터 조회
     const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
+    
+    // [핵심 수정] .eq('status', 'published') 삭제됨 -> 모든 글 조회
     const { data: posts, error } = await _supabase
         .from(tableName)
         .select('*')
-        .eq('status', 'published') // (필요시 status 필터)
         .order('created_at', { ascending: false })
-        .range(0, limit - 1); // 0부터 limit-1까지
+        .range(0, limit - 1);
 
     if(error || !posts || posts.length === 0) {
+        if (error) console.error("게시판 로드 실패:", error); // 디버깅용 로그
         if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">등록된 글이 없습니다.</div>';
         return;
     }
@@ -1736,17 +1774,20 @@ async function loadBoard(category, btn, limit = 20) {
     let html = '';
     posts.forEach(p => {
         const date = p.created_at.substring(0,10);
+        // HTML 태그 제거 (보안)
+        const rawContent = p.content || '';
+        const safeContent = rawContent.replace(/<[^>]*>?/gm, '');
+
         html += `
         <div class="board-list-item p-3 border-bottom" onclick="viewPost(${p.id}, '${category}')" style="cursor:pointer;">
             <div class="d-flex justify-content-between">
                 <span class="fw-bold text-dark text-truncate">${p.title}</span>
                 <small class="text-muted">${date}</small>
             </div>
-            <div class="small text-secondary text-truncate mt-1">${p.content.replace(/<[^>]*>?/gm, '')}</div>
+            <div class="small text-secondary text-truncate mt-1">${safeContent}</div>
         </div>`;
     });
 
-    // 더보기 버튼 (무한스크롤 대용)
     html += `<div class="text-center py-3">
                 <button class="btn btn-sm btn-outline-secondary rounded-pill px-4" onclick="loadMoreBoard()">더 보기 (+20)</button>
              </div>`;
