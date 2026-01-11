@@ -655,16 +655,35 @@
         <h5 class="fw-bold mb-3">📢 조합원 찾기</h5>
         <p class="small text-muted mb-3">
             카카오 정보로 가입 정보를 찾지 못했습니다.<br>
-            기존에 등록한 <b>이름</b>과 <b>전화번호</b>를 입력해주세요.
+            기존에 등록한 <b>이름</b>과 <b>연락처</b>를 입력해주세요.
         </p>
         
         <div class="mb-3">
             <label class="form-label small fw-bold">이름</label>
             <input type="text" id="manualName" class="form-control" placeholder="홍길동">
         </div>
-        <div class="mb-4">
-            <label class="form-label small fw-bold">전화번호 (또는 이메일)</label>
-            <input type="text" id="manualContact" class="form-control" placeholder="010-1234-5678">
+
+        <div class="mb-2">
+            <label class="form-label small fw-bold d-block">찾을 정보 선택</label>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="contactType" id="typePhone" value="phone" checked onchange="toggleContactInput()">
+                <label class="form-check-label small" for="typePhone">전화번호</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="contactType" id="typeEmail" value="email" onchange="toggleContactInput()">
+                <label class="form-check-label small" for="typeEmail">이메일</label>
+            </div>
+        </div>
+
+        <div id="inputGroupPhone" class="mb-4">
+            <input type="tel" id="manualPhone" class="form-control" 
+                   placeholder="010-1234-5678" maxlength="13"
+                   oninput="autoHyphen(this)">
+            <div class="form-text x-small text-muted">숫자만 입력하면 자동으로 -가 붙습니다.</div>
+        </div>
+
+        <div id="inputGroupEmail" class="mb-4 hidden">
+            <input type="email" id="manualEmail" class="form-control" placeholder="example@email.com">
         </div>
 
         <div class="d-grid gap-2">
@@ -788,12 +807,64 @@ async function handleLoginSuccess(user) {
     await loadDashboardData(user.id);
 }
 
-// [신규] 수동 매칭 실행 함수
+// [신규] 전화번호 자동 하이픈 & 숫자 이외 차단
+function autoHyphen(target) {
+    // 1. 숫자만 남기기 (공백, 문자 제거)
+    let raw = target.value.replace(/[^0-9]/g, '');
+    
+    // 2. 01012341234 -> 010-1234-1234 포맷팅
+    let formatted = '';
+    if (raw.length < 4) {
+        formatted = raw;
+    } else if (raw.length < 7) {
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3);
+    } else if (raw.length < 11) {
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3, 3) + '-' + raw.substr(6);
+    } else {
+        // 11자리까지만 처리 (그 이상은 잘라냄)
+        raw = raw.substr(0, 11);
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3, 4) + '-' + raw.substr(7);
+    }
+    
+    target.value = formatted;
+}
+
+// [신규] 라디오 버튼에 따라 입력창 교체
+function toggleContactInput() {
+    const isPhone = document.getElementById('typePhone').checked;
+    const phoneGroup = document.getElementById('inputGroupPhone');
+    const emailGroup = document.getElementById('inputGroupEmail');
+
+    if (isPhone) {
+        phoneGroup.classList.remove('hidden');
+        emailGroup.classList.add('hidden');
+        document.getElementById('manualPhone').focus();
+    } else {
+        phoneGroup.classList.add('hidden');
+        emailGroup.classList.remove('hidden');
+        document.getElementById('manualEmail').focus();
+    }
+}
+
+// [수정] 수동 매칭 실행 함수 (선택된 값 가져오기)
 async function tryManualLink() {
     const name = document.getElementById('manualName').value.trim();
-    const contact = document.getElementById('manualContact').value.trim();
+    const isPhone = document.getElementById('typePhone').checked;
+    
+    let contact = '';
+    
+    if (isPhone) {
+        // 전화번호에서 하이픈 제거하고 숫자만 전송 (DB 매칭용)
+        // 화면에는 010-1234-1234로 보이지만, 실제 전송은 01012341234 (또는 DB 포맷에 맞게)
+        // 아까 만든 manual_claim_member SQL은 하이픈 있어도 되고 없어도 되게 만들었으므로 그대로 보내도 됨.
+        contact = document.getElementById('manualPhone').value.trim();
+        if (contact.length < 12) return alert("전화번호를 올바르게 입력해주세요.");
+    } else {
+        contact = document.getElementById('manualEmail').value.trim();
+        if (!contact.includes('@')) return alert("올바른 이메일 형식이 아닙니다.");
+    }
 
-    if (!name || !contact) return alert("이름과 연락처를 입력해주세요.");
+    if (!name) return alert("이름을 입력해주세요.");
 
     showLoading(true, '조합원 명부 검색 중...');
 
@@ -806,15 +877,17 @@ async function tryManualLink() {
     showLoading(false);
 
     if (error) {
+        // SQL 오류
         alert("오류 발생: " + error.message);
     } else if (data.success) {
+        // 성공
         alert("반갑습니다! 정보를 찾았습니다.\n계정이 연결되었습니다.");
         document.getElementById('manualMatchModal').style.display = 'none';
-        // 연결됐으니 대시보드 로드
         document.getElementById('headerLogoutBtn').classList.remove('hidden');
         await loadDashboardData(curAuth.id);
     } else {
-        alert("일치하는 정보가 없습니다.\n이름이나 전화번호를 다시 확인해주세요.");
+        // 실패
+        alert("일치하는 정보가 없습니다.\n입력하신 정보가 명부와 다를 수 있습니다.");
     }
 }
 
