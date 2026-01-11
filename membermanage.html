@@ -1173,7 +1173,35 @@ async function downloadCert() {
         }); 
     }
 
-    function startKakaoLogin() { showModal('카카오 연동 준비중'); } // alert -> showModal
+// [수정] 카카오 로그인 연동 함수
+async function startKakaoLogin() {
+    try {
+        // 1. 로딩 표시
+        showLoading(true, '카카오 로그인 페이지로 이동합니다...');
+
+        // 2. Supabase OAuth 로그인 시작
+        // (주의: 이 함수가 실행되면 카카오 인증 페이지로 화면이 이동합니다)
+        const { data, error } = await _supabase.auth.signInWithOAuth({
+            provider: 'kakao',
+            options: {
+                // 로그인 후 다시 돌아올 현재 페이지 주소
+                redirectTo: window.location.href, 
+                // 카카오로부터 추가 정보를 받아오고 싶다면 범위를 지정 (선택사항)
+                // scopes: 'profile_nickname profile_image account_email' 
+            }
+        });
+
+        // 3. 에러 처리 (성공 시엔 페이지가 이동되므로 아래 코드는 실행되지 않음)
+        if (error) {
+            throw error;
+        }
+        
+    } catch (e) {
+        console.error("Kakao Login Error:", e);
+        showLoading(false);
+        showModal('카카오 로그인 연결 실패:\n' + e.message);
+    }
+}
     
     // [헬퍼] 안전한 값 설정
     function setText(id, txt) { const el=document.getElementById(id); if(el) el.innerText = txt || '-'; }
