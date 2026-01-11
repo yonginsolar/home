@@ -650,6 +650,30 @@
     </div>
 </div>
 
+<div id="manualMatchModal" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="text-align: left;">
+        <h5 class="fw-bold mb-3">📢 조합원 찾기</h5>
+        <p class="small text-muted mb-3">
+            카카오 정보로 가입 정보를 찾지 못했습니다.<br>
+            기존에 등록한 <b>이름</b>과 <b>전화번호</b>를 입력해주세요.
+        </p>
+        
+        <div class="mb-3">
+            <label class="form-label small fw-bold">이름</label>
+            <input type="text" id="manualName" class="form-control" placeholder="홍길동">
+        </div>
+        <div class="mb-4">
+            <label class="form-label small fw-bold">전화번호 (또는 이메일)</label>
+            <input type="text" id="manualContact" class="form-control" placeholder="010-1234-5678">
+        </div>
+
+        <div class="d-grid gap-2">
+            <button class="btn btn-success fw-bold" onclick="tryManualLink()">내 정보 찾기 & 연결</button>
+            <button class="btn btn-light btn-sm text-secondary" onclick="manualMatchFail()">찾을 수 없나요? (문의하기)</button>
+        </div>
+    </div>
+</div>
+  
   
 <div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
   <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" onclick="closeDaumPostcode()" alt="닫기 버튼">
@@ -741,27 +765,64 @@ async function sendMagicLink() {
     }
 }
 
+// [수정] 로그인 성공 후 처리 (자동 실패 시 -> 수동 모달 띄움)
 async function handleLoginSuccess(user) {
     curAuth = user;
     showLoading(true, '정보 확인 중...');
-    document.getElementById('headerLogoutBtn').classList.remove('hidden');
-
+    
+    // 1. 자동 매칭 시도
     const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
     
-    // [수정 전] 무조건 '사무국 문의'라고 뜸
-    // if (claimErr || (!claimRes.success && claimRes.message === 'not_found')) { ... }
+    showLoading(false);
 
-    // [수정 후] SQL이 뱉어낸 '진짜 이유'를 화면에 띄움
+    // [핵심 변경] 실패했다고 바로 쫓아내지 않음!
     if (claimErr || !claimRes.success) {
-        await _supabase.auth.signOut();
-        showLoading(false);
-        
-        // ★ 여기가 핵심입니다. claimRes.message를 그대로 띄우세요.
-        const errorMsg = claimRes ? claimRes.message : (claimErr ? claimErr.message : '알 수 없는 오류');
-        return showModal('로그인 실패:\n' + errorMsg); 
+        console.log("자동 매칭 실패, 수동 매칭 모달 오픈");
+        // 로그아웃 하지 않고, 모달을 띄움
+        document.getElementById('manualMatchModal').style.display = 'flex';
+        return; 
     }
 
+    // 성공 시 대시보드 로드
+    document.getElementById('headerLogoutBtn').classList.remove('hidden');
     await loadDashboardData(user.id);
+}
+
+// [신규] 수동 매칭 실행 함수
+async function tryManualLink() {
+    const name = document.getElementById('manualName').value.trim();
+    const contact = document.getElementById('manualContact').value.trim();
+
+    if (!name || !contact) return alert("이름과 연락처를 입력해주세요.");
+
+    showLoading(true, '조합원 명부 검색 중...');
+
+    // 수동 매칭 RPC 호출
+    const { data, error } = await _supabase.rpc('manual_claim_member', {
+        p_name: name,
+        p_contact: contact
+    });
+
+    showLoading(false);
+
+    if (error) {
+        alert("오류 발생: " + error.message);
+    } else if (data.success) {
+        alert("반갑습니다! 정보를 찾았습니다.\n계정이 연결되었습니다.");
+        document.getElementById('manualMatchModal').style.display = 'none';
+        // 연결됐으니 대시보드 로드
+        document.getElementById('headerLogoutBtn').classList.remove('hidden');
+        await loadDashboardData(curAuth.id);
+    } else {
+        alert("일치하는 정보가 없습니다.\n이름이나 전화번호를 다시 확인해주세요.");
+    }
+}
+
+// [신규] 수동 매칭 포기 (로그아웃 및 문의 안내)
+async function manualMatchFail() {
+    await _supabase.auth.signOut();
+    document.getElementById('manualMatchModal').style.display = 'none';
+    showModal("가입 정보를 찾을 수 없습니다.\n사무국으로 문의해 주시기 바랍니다.");
 }
 
    // [신규] 뷰(view_member_list)에서 마스킹 된 계좌 정보만 조회하는 함수
@@ -1193,7 +1254,7 @@ async function startKakaoLogin() {
             options: {
                 redirectTo: 'https://yonginsolar.github.io/home/membermanage.html', // 아까 고친 고정 주소
                 // [핵심 추가] 카카오에게 전화번호(phone_number)와 이메일 권한을 요청함
-                scopes: 'account_email,phone_number' 
+                scopes: 'account_email phone_number' 
             }
         });
 
