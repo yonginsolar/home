@@ -659,11 +659,37 @@ async function handleLoginSuccess(user) {
         await loadDashboardData(user.id);
     }
 
+   // [신규] 뷰(view_member_list)에서 마스킹 된 계좌 정보만 조회하는 함수
+async function fetchMaskedBankInfo(uuid) {
+    try {
+        // 1. 뷰에서 account_number 칼럼 조회
+        // ★ 주의: 뷰(view)를 만들 때 UUID 칼럼 이름을 'id'로 했는지 'member_uid'로 했는지 확인 필요
+        // (보통 원본 테이블을 그대로 가져왔다면 'id'일 확률이 높습니다)
+        const { data, error } = await _supabase
+            .from('view_member_list') 
+            .select('account_number') 
+            .eq('id', uuid) 
+            .maybeSingle(); // 데이터가 없어도 에러 내지 않고 null 반환
+
+        if (error) {
+            // 뷰 권한 문제나 칼럼명 불일치 시 로그만 남기고 null 반환 (화면 멈춤 방지)
+            console.warn("뷰 조회 경고(마스킹 실패):", error.message);
+            return null;
+        }
+
+        // 2. 데이터가 있으면 계좌번호 반환, 없으면 null
+        return data ? data.account_number : null;
+
+    } catch (e) {
+        console.error("fetchMaskedBankInfo 시스템 에러:", e);
+        return null;
+    }
+}
 // [수정] 데이터 로드 함수 (안전장치 강화 & 원본 테이블 사용)
+// [수정] 데이터 로드 함수 (뷰 연동 추가)
 async function loadDashboardData(uuid) {
     try {
-        // 1. [핵심 변경] 뷰(view) 대신 원본 테이블(coop_members) 조회
-        // 이유: 뷰에서 UUID 칼럼(id) 인식이 안 되어 400 에러 발생함. 원본은 확실함.
+        // 1. 원본 테이블(coop_members) 조회 (기본 정보)
         const { data: member, error: memErr } = await _supabase
             .from('coop_members')
             .select('*')
@@ -673,10 +699,19 @@ async function loadDashboardData(uuid) {
         if (memErr) throw new Error('회원 정보 로드 실패: ' + memErr.message);
         if (!member) throw new Error('회원 정보를 찾을 수 없습니다.');
 
+        // -----------------------------------------------------------
+        // [변경 포인트] 뷰에서 마스킹 된 계좌번호 가져와서 덮어쓰기
+        // -----------------------------------------------------------
+        const maskedAcc = await fetchMaskedBankInfo(uuid);
+        if (maskedAcc) {
+            // 원본(날것) 데이터를 마스킹 된 데이터로 교체 (화면 표시용)
+            member.account_number = maskedAcc; 
+        }
+        // -----------------------------------------------------------
+
         curMem = member; // 전역 변수에 저장
 
         // 2. 자산 정보 (view_my_assets)
-        // 에러가 나도 화면이 멈추지 않도록 예외 처리(maybeSingle)
         let assets = { total_capital: 0, total_donation: 0, dividend_capital: 0, dividend_usage: 0, current_points: 0 };
         
         const { data: assetData, error: assetErr } = await _supabase
@@ -687,12 +722,10 @@ async function loadDashboardData(uuid) {
 
         if (assetData) {
             assets = assetData;
-            // 편의를 위해 curMem에도 자산 정보 병합
             curMem.total_capital = assets.total_capital;
         }
 
         // 3. 입금 내역 (ref_members)
-        // 이제 curMem이 확실히 있으므로 안전하게 호출 가능
         const { data: ledger } = await _supabase
             .from('ref_members')
             .select('*')
@@ -716,13 +749,12 @@ async function loadDashboardData(uuid) {
         // 6. 화면 렌더링
         renderDashboard(curMem, apps || [], ledger || [], assets, myRoles);
         
-        // 7. 부가 기능 실행 (에러 방지용 옵셔널 체이닝 적용)
+        // 7. 부가 기능 실행
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
         
         loadFamilyList(uuid);
-        loadBoard('notice'); // 기본 공지사항
+        loadBoard('notice'); 
 
-        // 뱃지 로드 (Badges 모듈이 로드되었는지 확인 후 실행)
         if (typeof Badges !== 'undefined') {
             Badges.render('badgeContainer', uuid, _supabase);
             Badges.checkAnniversary(curMem, _supabase);
@@ -731,7 +763,6 @@ async function loadDashboardData(uuid) {
     } catch (e) {
         console.error("Dashboard Load Error:", e);
         showLoading(false);
-        // 사용자에게는 친절한 메시지
         showModal('데이터를 불러오는 중 문제가 발생했습니다.\n' + e.message);
     } finally {
         showLoading(false);
