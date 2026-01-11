@@ -182,6 +182,22 @@
     .text-green { color: #2E7D32 !important; }
 
     pointer-events: none; background: #f8f9fa;
+
+    /* [수정] 모달 계층 정리 */
+/* 일반 모달 (가족추가, 글쓰기 등) */
+.custom-modal-overlay { z-index: 1050; } 
+/* 확인/경고 모달 (최상위) - ID가 customModalOverlay인 녀석 */
+#customModalOverlay { z-index: 2000 !important; }
+
+/* [수정] 공지사항 카드 스타일 */
+.notice-mini-item {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.notice-mini-item:last-child { border-bottom: none; }
+.notice-mini-item:hover { background-color: #f8f9fa; }
   </style>
 </head>
 
@@ -303,7 +319,7 @@
                     
                     <div id="viewAddressBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;"></div>
                     
-                    <div id="editAddressBox" class="addr-edit-group">
+                    <div id="editAddressBox" class="addr-edit-group" style="display:none;">>
                         <div class="d-flex gap-2 mb-2"> 
                             <input type="text" id="editAddrMain" class="form-control" placeholder="주소 검색 버튼을 누르세요" readonly onclick="execDaumPostcode()" style="background-color:#fff;">
                             <button class="btn btn-secondary" type="button" onclick="execDaumPostcode()" style="white-space:nowrap;">주소 검색</button>
@@ -345,13 +361,17 @@
                     <div class="count-val text-green" id="sumTotal" style="font-family: 'GmarketSans'; font-weight: 700; font-size: 1.5rem; color: #2E7D32;">0원</div>
                 </div>
             </div>
-            <div class="col-md-12 col-lg-4">
-                <div class="dashboard-card text-center d-flex flex-column justify-content-center align-items-center">
-                   <div class="count-title mb-2" style="color: #666; font-size: 0.9rem;">환급/배당 계좌</div>
-                   <div class="fw-bold fs-5" id="sumBank">등록된 계좌 없음</div>
-                   <small class="text-muted mt-1" style="font-size:0.8rem;">변경은 '정보 수정' 버튼 클릭</small>
-                </div>
-            </div>
+<div class="col-md-12 col-lg-4">
+    <div class="dashboard-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2 border-bottom pb-2">
+            <h6 class="fw-bold m-0 text-success"><i class="bi bi-megaphone-fill me-2"></i>최근 공지</h6>
+            <button class="btn btn-sm btn-light text-muted" onclick="loadBoard('notice')" style="font-size:0.75rem;">더보기</button>
+        </div>
+        <div id="miniNoticeList" style="min-height: 100px;">
+            <p class="text-center text-muted small py-3">로딩 중...</p>
+        </div>
+    </div>
+</div>
         </div>
 
       <div class="dashboard-card mb-4">
@@ -438,21 +458,17 @@
             </div>
         </div>
 
-        <div class="dashboard-card mb-4">
-            <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
-                <div class="d-flex gap-2">
-                    <button class="board-tab-btn active" onclick="loadBoard('notice', this)">공지사항</button>
-                    <button class="board-tab-btn" onclick="loadBoard('free', this)">자유게시판</button>
-                    <button class="board-tab-btn hidden" id="tabExec" onclick="loadBoard('executive', this)">임원</button>
-                    <button class="board-tab-btn hidden" id="tabElec" onclick="loadBoard('election', this)">선관위</button>
-                </div>
-                <button class="btn btn-sm btn-dark hidden" id="btnWritePost" onclick="openWriteModal()">
-                    <i class="bi bi-pencil-square"></i> 글쓰기
-                </button>
+<div class="dashboard-card mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+        <div class="d-flex gap-2 align-items-center">
+            <h5 class="fw-bold m-0"><i class="bi bi-chat-dots-fill me-2"></i>자유게시판</h5>
             </div>
-            <div id="boardList" style="min-height: 200px;">
-                </div>
-        </div>
+        <button class="btn btn-sm btn-dark" id="btnWritePost" onclick="openWriteModal()">
+            <i class="bi bi-pencil-square"></i> 글쓰기
+        </button>
+    </div>
+    <div id="boardList" style="min-height: 200px;"></div>
+</div>
 
         <div class="dashboard-card mb-4">
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -753,7 +769,10 @@ async function loadDashboardData(uuid) {
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
         
         loadFamilyList(uuid);
-        loadBoard('notice'); 
+// [변경] 상단 카드엔 공지사항 3개
+        loadMiniNotices(); 
+        // [변경] 하단 메인 게시판은 '자유게시판'을 기본으로 로드
+        loadBoard('free');
 
         if (typeof Badges !== 'undefined') {
             Badges.render('badgeContainer', uuid, _supabase);
@@ -1048,10 +1067,10 @@ const { data: pay } = await _supabase.from('ref_members').select('amount').eq('m
           const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
             if(total===0) { showLoading(false); return showModal('납입 내역 없음'); } // alert -> showModal
 
-            const { data: cert } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: total });
+            const { data: cert } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: finalTotal });
             const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
             
-            await generateContributionCert(curMem, total, cert.cert_number, info?info.value:"김민호", _supabase);
+            await generateContributionCert(curMem, total, cert.cert_number, info?info.value:"", _supabase);
             showLoading(false);
         } catch(e) { console.error(e); showLoading(false); showModal('오류 발생'); } // alert -> showModal
     }
@@ -1694,60 +1713,79 @@ function showInlineFeedback(msg) {
 
     // [글보기] 상세 조회 (테이블 분기 처리 포함)
 // [글보기] 상세 조회 및 버튼 권한 처리
+// [수정] 게시글 상세 보기 함수 (오류 방지 및 권한 처리 강화)
 async function viewPost(id, category) {
-    // 1. 카테고리에 따라 테이블 분기
+    // 1. 카테고리에 따른 테이블 선택
     const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
     
     // 2. 데이터 조회
-    const { data: post, error } = await _supabase.from(tableName).select('*').eq('id', id).single();
+    const { data: post, error } = await _supabase
+        .from(tableName)
+        .select('*')
+        .eq('id', id)
+        .single();
     
     if(error || !post) {
-        showModal('글을 불러오지 못했습니다.');
-        return;
+        console.error("글 로드 실패:", error);
+        return showModal('글을 불러오지 못했습니다.');
     }
 
-    // 3. 내용 채우기
-    document.getElementById('viewTitle').innerText = post.title || '제목 없음';
-    document.getElementById('viewAuthor').innerText = post.author_name || '익명'; 
-    document.getElementById('viewDate').innerText = post.created_at ? post.created_at.substring(0,16).replace('T', ' ') : '-';
-    // HTML 태그 제거하고 텍스트만 보여주거나, 필요 시 innerHTML 사용
-    document.getElementById('viewContent').innerText = post.content || '';
+    // [헬퍼] 요소가 있을 때만 텍스트를 넣는 내부 함수 (에러 방지용)
+    const safeSetText = (elId, text) => {
+        const el = document.getElementById(elId);
+        if(el) el.innerText = text || '';
+    };
+
+    // 3. 내용 바인딩
+    safeSetText('viewTitle', post.title);
+    safeSetText('viewAuthor', post.author_name || '익명');
+    
+    // 날짜 포맷팅 (YYYY-MM-DD HH:MM)
+    const dateStr = post.created_at ? post.created_at.substring(0,16).replace('T', ' ') : '-';
+    safeSetText('viewDate', dateStr);
+    
+    safeSetText('viewContent', post.content);
 
     // 4. 첨부파일 처리
+    // 공지사항은 file_urls, 일반게시판은 files 칼럼을 혼용할 수 있어 둘 다 체크
     const files = post.file_urls || post.files || [];
     const fileArea = document.getElementById('viewFiles');
-    fileArea.innerHTML = '';
     
-    if(files.length > 0) {
-        files.forEach((f, idx) => {
-            // 다운로드 버튼 생성
-            fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2 mb-2"><i class="bi bi-download"></i> 첨부파일 ${idx+1}</a>`;
-        });
+    if(fileArea) {
+        fileArea.innerHTML = ''; // 초기화
+        if(files.length > 0) {
+            files.forEach((f, idx) => {
+                fileArea.innerHTML += `
+                    <a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2 mb-2">
+                        <i class="bi bi-download"></i> 첨부파일 ${idx+1}
+                    </a>`;
+            });
+        }
     }
 
-    // 5. [수정/삭제] 버튼 권한 처리
-    // ★ 중요: DB의 작성자 ID 칼럼명이 'member_uid'가 아니라면 아래 post.member_uid를 실제 칼럼명(예: post.user_id)으로 바꿔야 합니다.
-    // curAuth는 현재 로그인한 사용자의 정보 객체입니다.
-    const dbColumnName = 'member_uid'; // ★ 여기를 DB 실제 칼럼명으로 수정하세요 (예: 'user_id')
-    const writerId = post[dbColumnName]; 
+    // 5. 버튼 권한 처리 (핵심 수정)
+    // ★ 역질문 답변 반영: 작성자 ID 칼럼은 'author_id'
+    const writerId = post.author_id; 
     
+    // curAuth(내정보)가 있고, 글쓴이 ID가 존재하며, 둘이 같을 때 -> 내 글
     const isMine = (curAuth && writerId && curAuth.id === writerId);
     
-    // 모달 하단 버튼 그룹 가져오기 (HTML에 id="viewBtnGroup"이 있는 div가 있어야 함)
-    // 없다면 모달의 footer 부분을 찾아서 innerHTML을 넣습니다.
+    // 모달 하단 버튼 영역 찾기
     const footer = document.querySelector('#boardViewModal .modal-footer') || document.getElementById('viewBtnGroup');
     
-    let btns = `<button class="btn btn-secondary" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>`;
+    if(footer) {
+        // 기본 닫기 버튼
+        let btns = `<button class="btn btn-secondary" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>`;
 
-    // 공지사항(notice)은 관리자만 수정하므로 제외, 일반 게시판이면서 내 글일 때만 버튼 노출
-    if (category !== 'notice' && isMine) {
-        btns += `
-            <button class="btn btn-warning ms-2" onclick="alert('수정 기능은 준비중입니다.')">수정</button>
-            <button class="btn btn-danger ms-2" onclick="deletePost('${post.id}')">삭제</button>
-        `;
+        // [조건] 공지사항이 아니고(notice는 관리자 영역), 내 글일 때만 수정/삭제 버튼 노출
+        if (category !== 'notice' && isMine) {
+            btns += `
+                <button class="btn btn-warning ms-2" onclick="showModal('수정 기능은 준비중입니다.')">수정</button>
+                <button class="btn btn-danger ms-2" onclick="deletePost('${post.id}')">삭제</button>
+            `;
+        }
+        footer.innerHTML = btns;
     }
-
-    if(footer) footer.innerHTML = btns;
 
     // 6. 모달 열기
     document.getElementById('boardViewModal').style.display = 'flex';
@@ -1829,6 +1867,39 @@ async function deletePost(id) {
             loadBoard(currentBoardCat); // 목록 갱신
         }
     });
+}
+   // [신규] 상단 미니 공지사항 로드
+async function loadMiniNotices() {
+    const listArea = document.getElementById('miniNoticeList');
+    try {
+        const { data: notices, error } = await _supabase
+            .from('coop_notices')
+            .select('id, title, created_at')
+            .eq('status', 'published')
+            .order('created_at', { ascending: false })
+            .limit(3); // 3개만
+
+        if (error) throw error;
+        
+        if (!notices || notices.length === 0) {
+            listArea.innerHTML = '<p class="text-center text-muted small py-3">공지사항이 없습니다.</p>';
+            return;
+        }
+
+        let html = '';
+        notices.forEach(n => {
+            const date = n.created_at.substring(5, 10); // MM-DD
+            html += `
+                <div class="notice-mini-item d-flex justify-content-between" onclick="viewPost(${n.id}, 'notice')">
+                    <span class="text-truncate" style="max-width: 70%;">${n.title}</span>
+                    <span class="text-muted small">${date}</span>
+                </div>`;
+        });
+        listArea.innerHTML = html;
+    } catch (e) {
+        console.error(e);
+        listArea.innerHTML = '<p class="text-center text-danger small">로드 실패</p>';
+    }
 }
 </script>
 </body>
