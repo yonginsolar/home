@@ -180,6 +180,8 @@
     /* 유틸리티 */
     .hidden { display: none !important; }
     .text-green { color: #2E7D32 !important; }
+
+    pointer-events: none; background: #f8f9fa;
   </style>
 </head>
 
@@ -528,15 +530,14 @@
                 </div>
             </div>
 
-            <div class="mb-2">
-                <label class="small text-muted fw-bold">주민등록번호 <span class="text-danger">*</span></label>
-                <div class="input-group input-group-sm">
-                    <input type="text" id="newFamRrn1" class="form-control" maxlength="6" placeholder="생년월일" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
-                    <span class="input-group-text">-</span>
-                    <input type="text" id="newFamRrn2" class="form-control" maxlength="1" placeholder="*" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
-                    <span class="input-group-text bg-white border-start-0">******</span>
-                </div>
-            </div>
+<div class="mb-2">
+    <label class="small text-muted fw-bold">주민등록번호 <span class="text-danger">*</span></label>
+    <div class="input-group input-group-sm">
+        <input type="text" id="newFamRrn1" class="form-control" maxlength="6" placeholder="생년월일(6)" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+        <span class="input-group-text">-</span>
+        <input type="password" id="newFamRrn2" class="form-control" maxlength="7" placeholder="뒷자리(7)" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+    </div>
+</div>
 
             <div class="mb-2">
                 <label class="small text-muted fw-bold">초기 출자금 (선택)</label>
@@ -1011,8 +1012,9 @@ async function downloadCert() {
         if(!curMem) return;
         showLoading(true, '증서 발급 중...');
         try {
-            const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
-            const total = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
+const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
+    const ledgerTotal = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
+          const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
             if(total===0) { showLoading(false); return showModal('납입 내역 없음'); } // alert -> showModal
 
             const { data: cert } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: total });
@@ -1360,7 +1362,7 @@ async function searchTargetMember() {
     area.innerHTML = '<p class="text-center text-muted small py-3">검색 중...</p>';
 
     // 이름, 이메일, 멤버ID로 검색
-    const { data: list, error } = await _supabase
+    const { data: list, error } = await _supabase.rpc('search_profiles_for_connect', { keyword: keyword });
         .from('coop_members')
         .select('id, name, email, member_id, member_type')
         .or(`name.ilike.%${keyword}%,email.ilike.%${keyword}%,member_id.ilike.%${keyword}%`)
@@ -1692,6 +1694,18 @@ async function switchProfile(targetUuid, targetName) {
     await loadManagedProfiles(curAuth.id);
     
     showModal(`'${targetName}' 계정으로 전환되었습니다.\n이제 이 명의로 활동합니다.`);
+}
+   // [추가] 삭제 함수
+async function deletePost(id) {
+    showConfirmModal('정말 삭제하시겠습니까?', async () => {
+        const { error } = await _supabase.from('coop_boards').delete().eq('id', id);
+        if(error) showModal('삭제 실패');
+        else {
+            showModal('삭제되었습니다.');
+            document.getElementById('boardViewModal').style.display = 'none';
+            loadBoard(currentBoardCat); // 목록 갱신
+        }
+    });
 }
 </script>
 </body>
