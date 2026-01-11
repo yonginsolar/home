@@ -1436,29 +1436,77 @@ async function searchTargetMember() {
 }
 
 // 5. [탭2] 연결 신청 (Propose) -> coop_applications 테이블 활용
+// [수정] 연결 신청 함수 (모달 닫기 -> 화면 스크롤 -> 인라인 메시지 표시)
 async function requestConnect(targetUuid, targetName) {
-    // 이미 연결된 상태인지 확인은 생략(어차피 승인제)
     
-    showConfirmModal(`'${targetName}' 님과 연결을 신청하시겠습니까?\n(상대방 또는 관리자가 승인해야 완료됩니다.)`, async () => {
+    // confirm 모달은 유지 (사용자 실수 방지)
+    showConfirmModal(`'${targetName}' 님과 연결을 신청하시겠습니까?`, async () => {
         showLoading(true);
 
         const { error } = await _supabase.from('coop_applications').insert({
-            member_uid: curAuth.id,   // 신청자(나)의 UUID
+            member_uid: curAuth.id,
             member_id: curMem.member_id,
             name: curMem.name,
-            type: 'connect',          // ★ 새로운 신청 타입 'connect'
-            reason: `Target: ${targetUuid}`, // 비고란에 대상 UUID 저장 (JSONB면 좋지만 텍스트 필드라 이렇게 활용)
+            type: 'connect', 
+            reason: `Target: ${targetUuid}`,
             amount: 0,
             status: 'pending'
         });
 
         showLoading(false);
-        if(error) showModal('신청 실패: ' + error.message);
-        else {
-            showModal('연결 신청이 완료되었습니다.\n관리자 검토 후 승인됩니다.');
+
+        if(error) {
+            showModal('신청 실패: ' + error.message);
+        } else {
+            // 1. 가족 모달 즉시 닫기
             document.getElementById('familyModalOverlay').style.display = 'none';
+            
+            // 2. 데이터 갱신 (비동기)
+            await loadDashboardData(curAuth.id);
+
+            // 3. [UX] 신청서 영역으로 부드럽게 스크롤 이동
+            const actionArea = document.getElementById('actionArea');
+            actionArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // 4. [UX] 신청서 상단에 성공 메시지 꽂기 (Alert 아님)
+            showInlineFeedback(`✅ '${targetName}' 님에게 연결 신청을 보냈습니다.`);
         }
     });
+}
+
+// [신규] 인라인 피드백 메시지 (알럿 아님, 디자인된 박스)
+function showInlineFeedback(msg) {
+    const area = document.getElementById('actionArea');
+    
+    // 기존에 떠있는 메시지가 있다면 제거 (중복 방지)
+    const oldMsg = document.getElementById('tempFeedbackMsg');
+    if(oldMsg) oldMsg.remove();
+
+    // 커스텀 메시지 박스 생성
+    const div = document.createElement('div');
+    div.id = 'tempFeedbackMsg';
+    // 스타일: 연한 초록 배경, 짙은 초록 글씨, 깔끔한 테두리
+    div.style.cssText = `
+        background-color: #f1f8e9; 
+        color: #2e7d32; 
+        padding: 15px; 
+        border-radius: 8px; 
+        margin-bottom: 20px; 
+        font-weight: 600; 
+        text-align: center; 
+        border: 1px solid #c5e1a5;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        animation: fadeIn 0.5s;
+    `;
+    div.innerHTML = msg;
+
+    // actionArea의 최상단(첫번째 자식)으로 삽입
+    area.prepend(div);
+
+    // 4초 후 자동 삭제 (Fade out 효과가 필요하면 CSS 추가 필요하지만, 기능적으로는 제거가 확실함)
+    setTimeout(() => {
+        if(div) div.remove();
+    }, 4000);
 }
 
     async function loadFamilyList(managerUid) {
