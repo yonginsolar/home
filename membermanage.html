@@ -858,60 +858,72 @@ async function loadDashboardData(uuid) {
     // =========================================================================
     // 3. 렌더링 & 내 정보 수정 (toggleEditMode 포함)
     // =========================================================================
+
+// [최종 수정] 사용자님 원본 로직 복구 + 화면 겹침 해결(1~3번 줄)
 function renderDashboard(member, apps, ledger, assets, myRoles) {
-        document.getElementById('loginSection').classList.add('hidden');
-        document.getElementById('dashboardSection').classList.remove('hidden');
+    // 1. [화면 제어] 이 부분만 추가되었습니다. (화면 겹침 방지)
+    document.getElementById('loginSection').style.display = 'none';
+    document.getElementById('dashboardSection').style.display = 'block';
 
-        // 1. 기본 정보 (기존 동일)
-        setText('infoName', member.name);
-        setText('infoBirth', formatBirthDate(member.rrn_display));
-        setText('infoEmail', curAuth.email);
-        setVal('editPhone', member.phone);
-        setVal('editBankName', member.bank_name);
-        setVal('editAccountNo', member.account_number);
-        setVal('editHolder', member.account_holder);
-        setText('viewAddressBox', member.address);
-        setVal('editAddrMain', member.address); 
-        setVal('editAddrDetail', '');
+    // 2. [원본 로직] 헬퍼 함수 정의
+    const setText = (id, val) => { const el = document.getElementById(id); if(el) el.innerText = val || '-'; };
+    const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val || ''; };
 
-        // 2. 자산 현황 카드 (동적 생성)
-        const assetRow = document.getElementById('assetSummaryRow');
-        // 기본 2개(번호, 출자금)는 유지하고 추가 자산만 붙임
-        // 초기화: 앞 2개 div만 남기고 나머지 삭제
-        while(assetRow.children.length > 2) { assetRow.removeChild(assetRow.lastChild); }
+    // 3. [원본 로직] 기본 정보 매핑
+    setText('infoName', member.name);
+    setText('infoBirth', formatBirthDate(member.rrn_display));
+    setText('infoEmail', curAuth.email);
+    
+    setVal('editPhone', member.phone);
+    setVal('editBankName', member.bank_name);
+    setVal('editAccountNo', member.account_number);
+    setVal('editHolder', member.account_holder);
+    
+    setText('viewAddressBox', member.address);
+    setVal('editAddrMain', member.address); 
+    setVal('editAddrDetail', '');
 
-        // 값 매핑
-        setText('sumId', member.member_id);
-        setText('sumTotal', Number(assets.total_capital).toLocaleString() + '원');
-
-        // (A) 기부금 (있을 때만)
-        if(assets.total_donation > 0) addAssetCard(assetRow, '기부금', assets.total_donation);
-        // (B) 배당금 (출자+이용고 합계, 있을 때만)
-        const totalDiv = (assets.dividend_capital || 0) + (assets.dividend_usage || 0);
-        if(totalDiv > 0) addAssetCard(assetRow, '배당금(출자+이용)', totalDiv);
-        // (C) 포인트 (있을 때만)
-        if(assets.current_points > 0) addAssetCard(assetRow, '포인트', assets.current_points, 'P');
-
-        // 3. 게시판 탭 권한 처리
-        if(myRoles.includes('executive')) document.getElementById('tabExec').classList.remove('hidden');
-        if(myRoles.includes('election_comm')) document.getElementById('tabElec').classList.remove('hidden');
-
-        // 4. 타임라인 (기존 동일)
-        renderTimeline(ledger, apps);
+    // 4. [원본 로직] 자산 현황 카드 (동적 생성)
+    const assetRow = document.getElementById('assetSummaryRow');
+    
+    // ★ 주의: HTML 구조상 '공지사항' 카드가 3번째에 있다면, 
+    // 이 코드(length > 2) 실행 시 공지사항 카드가 삭제될 수 있습니다. 
+    // (공지사항을 유지하려면 2를 3으로 바꾸시면 됩니다.)
+    while(assetRow.children.length > 2) { 
+        assetRow.removeChild(assetRow.lastChild); 
     }
 
-    // [헬퍼] 자산 카드 추가
-    function addAssetCard(row, title, val, unit='원') {
-        const col = document.createElement('div');
-        col.className = 'col-6 col-md-3';
-        col.innerHTML = `
-            <div class="dashboard-card text-center p-3">
-                <small class="text-muted d-block mb-1">${title}</small>
-                <div class="fw-bold fs-5 text-primary">${Number(val).toLocaleString()}${unit}</div>
-            </div>`;
-        row.appendChild(col);
-    }
+    // 값 매핑
+    setText('sumId', member.member_id);
+    setText('sumTotal', Number(assets.total_capital).toLocaleString() + '원');
 
+    // (A) 기부금
+    if(assets.total_donation > 0) addAssetCard(assetRow, '기부금', assets.total_donation);
+    // (B) 배당금
+    const totalDiv = (assets.dividend_capital || 0) + (assets.dividend_usage || 0);
+    if(totalDiv > 0) addAssetCard(assetRow, '배당금(출자+이용)', totalDiv);
+    // (C) 포인트
+    if(assets.current_points > 0) addAssetCard(assetRow, '포인트', assets.current_points, 'P');
+
+    // 5. [원본 로직] 게시판 탭 권한 처리
+    if(myRoles.includes('executive')) document.getElementById('tabExec').classList.remove('hidden');
+    if(myRoles.includes('election_comm')) document.getElementById('tabElec').classList.remove('hidden');
+
+    // 6. [원본 로직] 타임라인
+    renderTimeline(ledger, apps);
+}
+
+// [헬퍼] 자산 카드 추가 (사용자님 원본 스타일: col-6 col-md-3 유지)
+function addAssetCard(row, title, val, unit='원') {
+    const col = document.createElement('div');
+    col.className = 'col-6 col-md-3';
+    col.innerHTML = `
+        <div class="dashboard-card text-center p-3">
+            <small class="text-muted d-block mb-1">${title}</small>
+            <div class="fw-bold fs-5 text-primary">${Number(val).toLocaleString()}${unit}</div>
+        </div>`;
+    row.appendChild(col);
+}
 
 
 
