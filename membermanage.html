@@ -529,22 +529,26 @@
     // 2. 로그인 & 데이터 로드
     // =========================================================================
 async function sendMagicLink() {
-        const email = document.getElementById('emailInput').value.trim();
-        if(!email.includes('@')) return showModal('올바른 이메일 주소를 입력해주세요.'); // alert -> showModal
-        
-        showLoading(true, '인증 메일 발송 중...');
-        const { error } = await _supabase.auth.signInWithOtp({
-            email: email,
-            options: { shouldCreateUser: false, emailRedirectTo: window.location.href }
-        });
-        showLoading(false);
+    const email = document.getElementById('emailInput').value.trim();
+    if(!email.includes('@')) return showModal('올바른 이메일 주소를 입력해주세요.');
+    
+    showLoading(true, '인증 메일 발송 중...');
+    
+    // [수정됨] shouldCreateUser: true
+    // 이제 없는 이메일이면 '자동 가입' 처리되면서 -> DB 트리거가 발동 -> 데이터 매칭 성공
+    const { error } = await _supabase.auth.signInWithOtp({
+        email: email,
+        options: { shouldCreateUser: true, emailRedirectTo: window.location.href }
+    });
+    
+    showLoading(false);
 
-        if(error) showModal('오류: ' + error.message); // alert -> showModal
-        else {
-            document.getElementById('sentMsgBox').classList.remove('hidden');
-            document.getElementById('targetEmail').innerText = email;
-        }
+    if(error) showModal('오류: ' + error.message);
+    else {
+        document.getElementById('sentMsgBox').classList.remove('hidden');
+        document.getElementById('targetEmail').innerText = email;
     }
+}
 
 async function handleLoginSuccess(user) {
         curAuth = user;
