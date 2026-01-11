@@ -683,14 +683,9 @@ let isBoardLoading = false;
     }
 
 // [수정 1] 초기화 로직: 보안 강화 및 화면 겹침 원천 차단
+// [수정] 초기화 로직: 세션 상태에 따라 showOnly로 명확하게 분기
 window.addEventListener('DOMContentLoaded', async () => {
-    // 1. [방어적 코딩] 시작하자마자 모든 화면 강제 숨김
-    const loginSection = document.getElementById('loginSection');
-    const dashboardSection = document.getElementById('dashboardSection');
-    
-    
-    
-    // 로딩바 표시
+    // 1. 로딩바 표시 (HTML에 이미 hidden 클래스가 박혀있으므로 화면은 백지 상태임)
     if (typeof showLoading === 'function') showLoading(true, '시스템 보안 확인 중...');
 
     // 2. Supabase 연결 체크
@@ -700,19 +695,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    // 3. [핵심] 실시간 인증 상태 감지 (getSession보다 안전함)
+    // 3. 인증 상태 변경 감지
     _supabase.auth.onAuthStateChange((event, session) => {
+        // 로딩바 끄기 (결정 났음)
         if (typeof showLoading === 'function') showLoading(false);
 
         if (session) {
-            // 로그인 상태 -> 대시보드 진입 시도
-            // (화면 노출은 handleLoginSuccess 내부에서 데이터 로드 성공 후 처리)
+            // [로그인 상태] -> 데이터 로드 시작
+            // 주의: 여기서 바로 showOnly('dashboardSection') 하지 않음.
+            // 데이터가 텅 빈 화면이 보일 수 있으므로 loadDashboardData 완료 후 보여줌.
             handleLoginSuccess(session.user);
         } else {
-            // 비로그인 상태 -> 로그인 화면만 노출
+            // [비로그인 상태] -> 로그인 화면 즉시 노출
             console.log("인증 세션 없음: 로그인 화면 이동");
-            loginSection.style.display = 'block';
-            dashboardSection.style.display = 'none';
+            showOnly('loginSection'); 
         }
     });
 });
@@ -777,6 +773,7 @@ async function fetchMaskedBankInfo(uuid) {
     } catch (e) { return null; }
 }
 // [수정 3] 대시보드 데이터 로드: 인증 예외 처리 및 스키마 정합성 확보
+// [수정] 데이터 로드 완료 후 화면 노출
 async function loadDashboardData(uuid) {
     try {
         // 1. 멤버 기본 정보 조회
@@ -786,10 +783,8 @@ async function loadDashboardData(uuid) {
             .eq('id', uuid)
             .single();
 
-        // [보안] 조회 실패 시 인증 문제인지 확인
         if (memErr || !member) {
             console.error("멤버 조회 실패:", memErr);
-            // 인증 관련 에러(403 등)라면 즉시 로그아웃 처리
             if (memErr && (memErr.code === 'PGRST301' || memErr.message.includes('Auth') || memErr.status === 403)) {
                 alert("보안을 위해 다시 로그인해주세요.");
                 logout(); 
@@ -803,43 +798,31 @@ async function loadDashboardData(uuid) {
         if (maskedAcc) member.account_number = maskedAcc; 
         curMem = member; 
 
-        // 2. 자산 정보 로드 (뷰 사용)
+        // 2. 자산 정보 로드
         let assets = { total_capital: 0, total_donation: 0, dividend_capital: 0, dividend_usage: 0, current_points: 0 };
-        
-        const { data: assetData, error: assetErr } = await _supabase
+        const { data: assetData } = await _supabase
             .from('view_my_assets')
             .select('*')
             .eq('member_uid', uuid)
             .maybeSingle(); 
 
-        if (assetData) {
-            assets = assetData;
-        } 
-        // [수정] 테이블에 컬럼이 없다고 확인되었으므로, 뷰가 없으면 그냥 0원으로 둠 (추측성 코드 삭제)
-        
-        // UI 표시용 변수 동기화
+        if (assetData) assets = assetData;
         curMem.total_capital = assets.total_capital;
 
-        // 3. 입금 내역
+        // 3. 입금 및 신청 내역, 권한 로드
         const { data: ledger } = await _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
-
-        // 4. 신청 내역
         const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
-
-        // 5. 권한 확인
         const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
         const myRoles = officials ? officials.map(r => r.category) : [];
 
-        // 6. 렌더링 (화면 표시)
+        // 4. 렌더링 (데이터를 HTML에 꽂아넣기)
         renderDashboard(curMem, apps || [], ledger || [], assets, myRoles);
         
-        // 부가 기능 로드
+        // [부가 기능 로드]
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
         if (typeof loadFamilyList === 'function') loadFamilyList(uuid);
         if (typeof loadMiniNotices === 'function') loadMiniNotices();
         if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
-        
-        // 게시판 로드
         loadBoard('free', null, 20); 
 
         if (typeof Badges !== 'undefined') {
@@ -847,11 +830,15 @@ async function loadDashboardData(uuid) {
             Badges.checkAnniversary(curMem, _supabase);
         }
 
+        // [핵심 수정] 모든 데이터 세팅이 끝난 이 시점에 대시보드를 보여줌
+        showOnly('dashboardSection');
+
     } catch (e) {
         console.error("Dashboard Load Error:", e);
         showLoading(false);
-        // 치명적 에러 시 모달 표시
         showModal('데이터 로드 오류: ' + e.message);
+        // 에러 발생 시 로그인 화면으로 돌리거나 빈 화면 유지
+        showOnly('loginSection');
     } finally {
         showLoading(false);
     }
@@ -2049,11 +2036,23 @@ async function answerConnect(appId, decision) {
         setModalDepth(false); // 뎁스 복구
     });
 }
-   function showOnly(sectionId) {
-  const login = document.getElementById('loginSection');
-  const dash = document.getElementById('dashboardSection');
-  [login, dash].forEach(el => el.classList.add('hidden'));
-  document.getElementById(sectionId).classList.remove('hidden');
+// [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
+function showOnly(sectionId) {
+    // 제어할 대상 섹션 ID 목록 (명시적으로 지정하여 안전성 확보)
+    const sections = ['loginSection', 'dashboardSection'];
+
+    sections.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        if (id === sectionId) {
+            // [핵심] !important가 걸린 hidden 클래스를 '제거'해야만 화면이 보임
+            el.classList.remove('hidden'); 
+        } else {
+            // 보이면 안 되는 섹션은 hidden 클래스 '추가'
+            el.classList.add('hidden');
+        }
+    });
 }
 
 </script>
