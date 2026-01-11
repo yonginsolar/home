@@ -1603,32 +1603,65 @@ async function requestConnect(targetUuid, targetName) {
     }
 
     // [글보기] 상세 조회 (테이블 분기 처리 포함)
-    async function viewPost(id, category) {
-        const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
-        
-        const { data: post } = await _supabase.from(tableName).select('*').eq('id', id).single();
-        if(!post) return;
-
-        document.getElementById('viewTitle').innerText = post.title;
-        // 공지는 author_name이 없을 수 있으므로 처리
-        document.getElementById('viewAuthor').innerText = post.author_name || '관리자'; 
-        document.getElementById('viewDate').innerText = post.created_at.substring(0,16).replace('T', ' ');
-        document.getElementById('viewContent').innerText = post.content;
-        
-        // 첨부파일 처리 (호환성)
-        const files = post.file_urls || post.files || [];
-        const fileArea = document.getElementById('viewFiles');
-        fileArea.innerHTML = '';
-        
-        if(files.length > 0) {
-            files.forEach((f, idx) => {
-                // 다운로드 링크 생성
-                fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2"><i class="bi bi-download"></i> 첨부파일 ${idx+1}</a>`;
-            });
-        }
-
-        document.getElementById('boardViewModal').style.display = 'flex';
+// [글보기] 상세 조회 및 버튼 권한 처리
+async function viewPost(id, category) {
+    // 1. 카테고리에 따라 테이블 분기
+    const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
+    
+    // 2. 데이터 조회
+    const { data: post, error } = await _supabase.from(tableName).select('*').eq('id', id).single();
+    
+    if(error || !post) {
+        showModal('글을 불러오지 못했습니다.');
+        return;
     }
+
+    // 3. 내용 채우기
+    document.getElementById('viewTitle').innerText = post.title || '제목 없음';
+    document.getElementById('viewAuthor').innerText = post.author_name || '익명'; 
+    document.getElementById('viewDate').innerText = post.created_at ? post.created_at.substring(0,16).replace('T', ' ') : '-';
+    // HTML 태그 제거하고 텍스트만 보여주거나, 필요 시 innerHTML 사용
+    document.getElementById('viewContent').innerText = post.content || '';
+
+    // 4. 첨부파일 처리
+    const files = post.file_urls || post.files || [];
+    const fileArea = document.getElementById('viewFiles');
+    fileArea.innerHTML = '';
+    
+    if(files.length > 0) {
+        files.forEach((f, idx) => {
+            // 다운로드 버튼 생성
+            fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2 mb-2"><i class="bi bi-download"></i> 첨부파일 ${idx+1}</a>`;
+        });
+    }
+
+    // 5. [수정/삭제] 버튼 권한 처리
+    // ★ 중요: DB의 작성자 ID 칼럼명이 'member_uid'가 아니라면 아래 post.member_uid를 실제 칼럼명(예: post.user_id)으로 바꿔야 합니다.
+    // curAuth는 현재 로그인한 사용자의 정보 객체입니다.
+    const dbColumnName = 'member_uid'; // ★ 여기를 DB 실제 칼럼명으로 수정하세요 (예: 'user_id')
+    const writerId = post[dbColumnName]; 
+    
+    const isMine = (curAuth && writerId && curAuth.id === writerId);
+    
+    // 모달 하단 버튼 그룹 가져오기 (HTML에 id="viewBtnGroup"이 있는 div가 있어야 함)
+    // 없다면 모달의 footer 부분을 찾아서 innerHTML을 넣습니다.
+    const footer = document.querySelector('#boardViewModal .modal-footer') || document.getElementById('viewBtnGroup');
+    
+    let btns = `<button class="btn btn-secondary" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>`;
+
+    // 공지사항(notice)은 관리자만 수정하므로 제외, 일반 게시판이면서 내 글일 때만 버튼 노출
+    if (category !== 'notice' && isMine) {
+        btns += `
+            <button class="btn btn-warning ms-2" onclick="alert('수정 기능은 준비중입니다.')">수정</button>
+            <button class="btn btn-danger ms-2" onclick="deletePost('${post.id}')">삭제</button>
+        `;
+    }
+
+    if(footer) footer.innerHTML = btns;
+
+    // 6. 모달 열기
+    document.getElementById('boardViewModal').style.display = 'flex';
+}
    // ==========================================
 // [신규 기능] 프로필 전환 (Context Switching)
 // ==========================================
