@@ -599,6 +599,33 @@
     </div>
 </div>
 
+  <div id="boardViewModal" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="width: 90%; max-width: 600px; text-align: left;">
+        
+        <div class="post-view-header">
+            <h5 id="viewTitle" class="fw-bold m-0 text-break">제목 로딩중...</h5>
+            <div class="post-view-meta mt-2">
+                <span><i class="bi bi-person-circle me-1"></i><span id="viewAuthor">작성자</span></span>
+                <span id="viewDate">0000.00.00</span>
+            </div>
+        </div>
+
+        <div id="viewContent" class="post-view-content mb-3">
+            내용 로딩중...
+        </div>
+
+        <div id="viewFiles" class="mb-3 border-top pt-3"></div>
+
+        <div class="d-flex justify-content-between border-top pt-3">
+            <button class="btn btn-outline-secondary btn-sm" onclick="reportPost()">🚨 신고</button>
+            
+            <div id="viewBtnGroup">
+                <button class="btn btn-dark btn-sm" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
   
 <div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
   <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" onclick="closeDaumPostcode()" alt="닫기 버튼">
@@ -678,28 +705,19 @@ async function handleLoginSuccess(user) {
    // [신규] 뷰(view_member_list)에서 마스킹 된 계좌 정보만 조회하는 함수
 async function fetchMaskedBankInfo(uuid) {
     try {
-        // 1. 뷰에서 account_number 칼럼 조회
-        // ★ 주의: 뷰(view)를 만들 때 UUID 칼럼 이름을 'id'로 했는지 'member_uid'로 했는지 확인 필요
-        // (보통 원본 테이블을 그대로 가져왔다면 'id'일 확률이 높습니다)
+        // Step 1에서 뷰를 재정의했으므로 'id' 컬럼(UUID) 사용 가능
         const { data, error } = await _supabase
-            .from('view_member_list') 
-            .select('account_number') 
-            .eq('id', uuid) 
-            .maybeSingle(); // 데이터가 없어도 에러 내지 않고 null 반환
+            .from('view_member_list')
+            .select('account_number')
+            .eq('id', uuid)
+            .maybeSingle();
 
         if (error) {
-            // 뷰 권한 문제나 칼럼명 불일치 시 로그만 남기고 null 반환 (화면 멈춤 방지)
-            console.warn("뷰 조회 경고(마스킹 실패):", error.message);
+            console.warn("뷰 조회 경고:", error.message);
             return null;
         }
-
-        // 2. 데이터가 있으면 계좌번호 반환, 없으면 null
         return data ? data.account_number : null;
-
-    } catch (e) {
-        console.error("fetchMaskedBankInfo 시스템 에러:", e);
-        return null;
-    }
+    } catch (e) { return null; }
 }
 // [수정] 데이터 로드 함수 (안전장치 강화 & 원본 테이블 사용)
 // [수정] 데이터 로드 함수 (뷰 연동 추가)
@@ -880,60 +898,81 @@ function renderDashboard(member, apps, ledger, assets, myRoles) {
     // =========================================================================
     // 4. 신청 및 타임라인
     // =========================================================================
-    function renderTimeline(ledger, apps) {
-        const list = document.getElementById('timelineList');
-        let html = '';
+function renderTimeline(ledger, apps) {
+    const list = document.getElementById('timelineList');
+    let html = '';
 
-        if(ledger.length === 0 && apps.length === 0) {
-            list.innerHTML = '<div class="text-center text-muted py-5">내역이 없습니다.</div>';
-            return;
+    if(ledger.length === 0 && apps.length === 0) {
+        list.innerHTML = '<div class="text-center text-muted py-5">내역이 없습니다.</div>';
+        return;
+    }
+
+    // 입금 내역
+    ledger.forEach(item => {
+        html += `
+        <div class="timeline-item">
+            <div class="timeline-date">${item.deposit_date ? item.deposit_date.substring(0,10) : '날짜미상'}</div>
+            <div class="timeline-content">
+                <h5>입금 확인</h5>
+                <p class="text-success fw-bold">+${Number(item.amount).toLocaleString()}원</p>
+            </div>
+        </div>`;
+    });
+
+    // 신청 내역
+    // ★ 7번 해결: 'connect' 타입 추가
+    const typeMap = { 
+        'extra': '추가출자', 
+        'reduction': '감자신청', 
+        'withdraw': '탈퇴신청',
+        'connect': '계정연결' 
+    };
+
+    apps.forEach(app => {
+        let statusBadge = '';
+        let actionBtn = '';
+        const appType = typeMap[app.type] || app.type; // undefined 방지
+
+        // 뱃지 색상 및 텍스트
+        if(app.status === 'pending') {
+            statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
+            // ★ 9번 해결: pending 상태면 무조건 취소 버튼 활성화
+            actionBtn = `<button class="btn btn-sm btn-outline-danger ms-2" style="font-size:0.7rem; padding:2px 6px;" onclick="cancelApp(${app.id})">취소</button>`;
+        } else if(app.status === 'approved') {
+            statusBadge = '<span class="badge bg-success">승인됨</span>';
+        } else if(app.status === 'cancelled') {
+            statusBadge = '<span class="badge bg-secondary">취소됨</span>';
+        } else {
+            statusBadge = '<span class="badge bg-danger">반려됨</span>';
         }
 
-        ledger.forEach(item => {
-            html += `
-            <div class="timeline-item">
-                <div class="timeline-date">${item.deposit_date ? item.deposit_date.substring(0,10) : '날짜미상'}</div>
-                <div class="timeline-content">
-                    <h5>입금 확인</h5>
-                    <p class="text-success fw-bold">+${Number(item.amount).toLocaleString()}원</p>
-                </div>
-            </div>`;
-        });
+        // 금액 표시 (연결 신청은 금액이 0원이므로 비고를 보여줌)
+        let detailText = '';
+        if(app.type === 'connect') {
+             // reason 필드에서 UUID 제거하고 깔끔하게 보여주기
+             detailText = `<span class="text-primary small">${app.reason ? '연결 요청중' : ''}</span>`;
+        } else {
+             detailText = `${Number(app.amount).toLocaleString()}원`;
+        }
 
-        const typeMap = { 'extra': '추가출자', 'reduction': '감자', 'withdraw': '탈퇴' };
-        apps.forEach(app => {
-            let statusBadge = '';
-            let actionBtn = '';
-
-            if(app.status === 'pending') {
-                statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
-                actionBtn = `<button class="btn btn-sm btn-outline-danger ms-2" style="font-size:0.7rem; padding:2px 6px;" onclick="cancelApp(${app.id})">취소</button>`;
-            } else if(app.status === 'approved') {
-                statusBadge = '<span class="badge bg-success">승인됨</span>';
-            } else if(app.status === 'cancelled') {
-                statusBadge = '<span class="badge bg-secondary">취소됨</span>';
-            } else {
-                statusBadge = '<span class="badge bg-danger">반려됨</span>';
-            }
-
-            html += `
-            <div class="timeline-item" style="border-left-color: #ff9800;">
-                <div class="timeline-date">${app.created_at.substring(0,10)}</div>
-                <div class="timeline-content">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <span class="fw-bold">[신청] ${typeMap[app.type]}</span>
-                            ${statusBadge}
-                        </div>
-                        ${actionBtn}
+        html += `
+        <div class="timeline-item" style="border-left-color: #ff9800;">
+            <div class="timeline-date">${app.created_at.substring(0,10)}</div>
+            <div class="timeline-content">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="fw-bold">[신청] ${appType}</span>
+                        ${statusBadge}
                     </div>
-                    <p>${Number(app.amount).toLocaleString()}원</p>
+                    ${actionBtn}
                 </div>
-            </div>`;
-        });
+                <p>${detailText}</p>
+            </div>
+        </div>`;
+    });
 
-        list.innerHTML = html;
-    }
+    list.innerHTML = html;
+}
 
 async function cancelApp(appId) {
         // confirm -> showConfirmModal
@@ -1068,21 +1107,43 @@ function toggleTab(type, btn) {
     }
 
 async function downloadCert() {
-        if(!curMem) return;
-        showLoading(true, '증서 발급 중...');
-        try {
-const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
-    const ledgerTotal = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
-          const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
-            if(total===0) { showLoading(false); return showModal('납입 내역 없음'); } // alert -> showModal
+    if(!curMem) return;
+    showLoading(true, '증서 발급 중...');
+    
+    try {
+        // 1. 납입 총액 계산
+        const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
+        const ledgerTotal = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
+        
+        // 2. 최종 금액 (변수명 통일: finalTotal)
+        const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
+        
+        if(finalTotal === 0) { 
+            showLoading(false); 
+            return showModal('납입된 출자금이 없어 증명서를 발급할 수 없습니다.'); 
+        }
 
-            const { data: cert } = await _supabase.rpc('issue_certificate', { p_member_id: curMem.member_id, p_amount: finalTotal });
-            const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
-            
-            await generateContributionCert(curMem, total, cert.cert_number, info?info.value:"", _supabase);
-            showLoading(false);
-        } catch(e) { console.error(e); showLoading(false); showModal('오류 발생'); } // alert -> showModal
+        // 3. RPC 호출 (p_amount에 finalTotal 전달)
+        // coop_certificates 테이블에 insert 권한이 있어야 함
+        const { data: cert, error } = await _supabase.rpc('issue_certificate', { 
+            p_member_id: curMem.member_id, 
+            p_amount: finalTotal 
+        });
+
+        if (error) throw error;
+
+        // 4. PDF 생성 (cert_generator.js 활용)
+        const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
+        await generateContributionCert(curMem, finalTotal, cert.cert_number, info?info.value:"이사장", _supabase);
+        
+        showLoading(false);
+
+    } catch(e) { 
+        console.error(e); 
+        showLoading(false); 
+        showModal('증명서 발급 중 오류가 발생했습니다.\n' + (e.message || '')); 
     }
+}
 
     function logout() { 
         showConfirmModal('로그아웃 하시겠습니까?', () => {
@@ -1724,80 +1785,63 @@ function showInlineFeedback(msg) {
 // [글보기] 상세 조회 및 버튼 권한 처리
 // [수정] 게시글 상세 보기 함수 (오류 방지 및 권한 처리 강화)
 async function viewPost(id, category) {
-    // 1. 카테고리에 따른 테이블 선택
     const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
     
-    // 2. 데이터 조회
-    const { data: post, error } = await _supabase
-        .from(tableName)
-        .select('*')
-        .eq('id', id)
-        .single();
-    
-    if(error || !post) {
-        console.error("글 로드 실패:", error);
-        return showModal('글을 불러오지 못했습니다.');
-    }
+    // 1. 조회
+    const { data: post, error } = await _supabase.from(tableName).select('*').eq('id', id).single();
+    if(error || !post) return showModal('글을 불러오지 못했습니다.');
 
-    // [헬퍼] 요소가 있을 때만 텍스트를 넣는 내부 함수 (에러 방지용)
-    const safeSetText = (elId, text) => {
-        const el = document.getElementById(elId);
-        if(el) el.innerText = text || '';
-    };
-
-    // 3. 내용 바인딩
-    safeSetText('viewTitle', post.title);
-    safeSetText('viewAuthor', post.author_name || '익명');
+    // 2. 바인딩 (안전하게 ID 확인)
+    const setText = (id, val) => { const el = document.getElementById(id); if(el) el.innerText = val; };
     
-    // 날짜 포맷팅 (YYYY-MM-DD HH:MM)
-    const dateStr = post.created_at ? post.created_at.substring(0,16).replace('T', ' ') : '-';
-    safeSetText('viewDate', dateStr);
-    
-    safeSetText('viewContent', post.content);
+    setText('viewTitle', post.title);
+    setText('viewAuthor', post.author_name || '익명');
+    setText('viewDate', post.created_at ? post.created_at.substring(0,16).replace('T', ' ') : '-');
+    setText('viewContent', post.content || '');
 
-    // 4. 첨부파일 처리
-    // 공지사항은 file_urls, 일반게시판은 files 칼럼을 혼용할 수 있어 둘 다 체크
+    // 3. 첨부파일
     const files = post.file_urls || post.files || [];
     const fileArea = document.getElementById('viewFiles');
-    
     if(fileArea) {
-        fileArea.innerHTML = ''; // 초기화
-        if(files.length > 0) {
-            files.forEach((f, idx) => {
-                fileArea.innerHTML += `
-                    <a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2 mb-2">
-                        <i class="bi bi-download"></i> 첨부파일 ${idx+1}
-                    </a>`;
-            });
-        }
+        fileArea.innerHTML = '';
+        files.forEach((f, i) => {
+            fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2"><i class="bi bi-download"></i> 파일 ${i+1}</a>`;
+        });
     }
 
-    // 5. 버튼 권한 처리 (핵심 수정)
-    // ★ 역질문 답변 반영: 작성자 ID 칼럼은 'author_id'
-    const writerId = post.author_id; 
-    
-    // curAuth(내정보)가 있고, 글쓴이 ID가 존재하며, 둘이 같을 때 -> 내 글
+    // 4. 버튼 권한 (작성자 확인)
+    const writerId = post.author_id; // ★ DB 칼럼 확인 필요 (author_id)
     const isMine = (curAuth && writerId && curAuth.id === writerId);
     
-    // 모달 하단 버튼 영역 찾기
-    const footer = document.querySelector('#boardViewModal .modal-footer') || document.getElementById('viewBtnGroup');
-    
-    if(footer) {
-        // 기본 닫기 버튼
-        let btns = `<button class="btn btn-secondary" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>`;
+    // 현재 보고 있는 글 ID 전역 저장 (신고/삭제용)
+    window.currentPostId = id; 
 
-        // [조건] 공지사항이 아니고(notice는 관리자 영역), 내 글일 때만 수정/삭제 버튼 노출
-        if (category !== 'notice' && isMine) {
-            btns += `
-                <button class="btn btn-warning ms-2" onclick="showModal('수정 기능은 준비중입니다.')">수정</button>
-                <button class="btn btn-danger ms-2" onclick="deletePost('${post.id}')">삭제</button>
+    const btnGroup = document.getElementById('viewBtnGroup');
+    if(btnGroup) {
+        let html = `<button class="btn btn-dark btn-sm" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>`;
+        
+        // 공지사항 아니고 내 글이면 수정/삭제 노출
+        if(category !== 'notice' && isMine) {
+            html = `
+                <button class="btn btn-warning btn-sm me-1" onclick="showModal('수정 준비중')">수정</button>
+                <button class="btn btn-danger btn-sm me-1" onclick="deletePost('${post.id}')">삭제</button>
+                ${html}
             `;
         }
-        footer.innerHTML = btns;
+        btnGroup.innerHTML = html;
     }
 
-    // 6. 모달 열기
+    // 5. 모달 열기
     document.getElementById('boardViewModal').style.display = 'flex';
+}
+
+// [신규] 게시글 신고 함수
+function reportPost() {
+    showConfirmModal('이 게시글을 관리자에게 신고하시겠습니까?', () => {
+        // 실제 DB 로직은 추후 구현 (현재는 UI만 작동)
+        showModal('신고가 접수되었습니다.\n관리자가 검토 후 조치합니다.');
+        document.getElementById('boardViewModal').style.display = 'none';
+    });
 }
    // ==========================================
 // [신규 기능] 프로필 전환 (Context Switching)
@@ -1912,31 +1956,36 @@ async function loadMiniNotices() {
 }
    // [신규] 나에게 온 연결 요청 확인 및 렌더링
 async function checkIncomingConnects() {
-    // 1. RPC 호출
+    // 1. RPC 호출 (Step 1에서 수정한 함수)
     const { data: requests, error } = await _supabase.rpc('get_my_pending_connects');
     
-    // 알림을 띄울 위치 (공지사항 카드 위인 'dashboardSection'의 맨 앞, 혹은 'assetSummaryRow' 위)
-    // 여기서는 가장 눈에 띄게 대시보드 섹션의 최상단(생일 배너 아래)에 넣겠습니다.
+    // 2. 에러 및 데이터 체크
+    if (error) {
+        console.error("연결 요청 조회 실패:", error);
+        return;
+    }
+    // requests가 null이거나 빈 배열이면 종료
+    if (!requests || requests.length === 0) return;
+
+    // 3. 알림 UI 생성
     const container = document.getElementById('dashboardSection');
     const existingAlert = document.getElementById('connectRequestAlert');
-    if(existingAlert) existingAlert.remove(); // 중복 방지
+    if(existingAlert) existingAlert.remove();
 
-    if (error || !requests || requests.length === 0) return;
-
-    // 2. 알림 UI 생성
     const alertDiv = document.createElement('div');
     alertDiv.id = 'connectRequestAlert';
     alertDiv.className = 'alert alert-primary border-primary d-flex flex-column gap-2 mb-4 shadow-sm';
-    alertDiv.style.backgroundColor = '#e3f2fd'; // 눈에 띄는 하늘색 배경
+    alertDiv.style.backgroundColor = '#e3f2fd';
 
     let html = `<div class="d-flex align-items-center text-primary fw-bold">
                     <i class="bi bi-link-45deg fs-3 me-2"></i>
                     계정 연결 요청이 도착했습니다!
                 </div>`;
 
+    // JSON 배열 순회
     requests.forEach(req => {
         html += `
-            <div class="bg-white p-3 rounded border d-flex justify-content-between align-items-center">
+            <div class="bg-white p-3 rounded border d-flex justify-content-between align-items-center mt-2">
                 <div>
                     <span class="fw-bold text-dark">${req.requester_name}</span> 님이
                     <br><small class="text-muted">내 계정을 관리하길 원합니다.</small>
@@ -1950,9 +1999,13 @@ async function checkIncomingConnects() {
 
     alertDiv.innerHTML = html;
 
-    // 3. 생일 배너 바로 다음, 혹은 대시보드 최상단에 삽입
-    const refNode = document.getElementById('birthdayBanner').nextSibling;
-    container.insertBefore(alertDiv, refNode);
+    // 4. 삽입 위치: 생일 배너 다음
+    const banner = document.getElementById('birthdayBanner');
+    if(banner && banner.nextSibling) {
+        container.insertBefore(alertDiv, banner.nextSibling);
+    } else {
+        container.prepend(alertDiv);
+    }
 }
 
 // [신규] 연결 요청 응답 (수락/거절)
