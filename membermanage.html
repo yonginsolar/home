@@ -608,48 +608,84 @@ async function handleLoginSuccess(user) {
         await loadDashboardData(user.id);
     }
 
+// [수정] 데이터 로드 함수 (안전장치 강화 & 원본 테이블 사용)
 async function loadDashboardData(uuid) {
-        try {
-            // [1] 내 정보 & 자산 (새로 만든 VIEW 사용)
-            const { data: assets, error: assetErr } = await _supabase.from('view_my_assets').select('*').eq('member_uid', uuid).single();
-            if(assetErr) throw assetErr;
-            
-            // 기존 curMem 호환성을 위해 view_member_list도 한번 호출 (정보수정 등 상세정보용)
-            const { data: member } = await _supabase.from('view_member_list').select('*').eq('id', uuid).single();
-            curMem = member; 
-            
-            // [2] 신청 내역 & 입금 내역 (기존 동일)
-            const { data: apps } = await _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
-            const { data: ledger } = await _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
+    try {
+        // 1. [핵심 변경] 뷰(view) 대신 원본 테이블(coop_members) 조회
+        // 이유: 뷰에서 UUID 칼럼(id) 인식이 안 되어 400 에러 발생함. 원본은 확실함.
+        const { data: member, error: memErr } = await _supabase
+            .from('coop_members')
+            .select('*')
+            .eq('id', uuid)
+            .single();
 
-            // [3] 임원 여부 확인 (게시판 권한용)
-            const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
-            const myRoles = officials ? officials.map(r => r.category) : [];
+        if (memErr) throw new Error('회원 정보 로드 실패: ' + memErr.message);
+        if (!member) throw new Error('회원 정보를 찾을 수 없습니다.');
 
-            // 렌더링 실행
-            renderDashboard(member, apps || [], ledger || [], assets, myRoles);
-            
-            // 추가 기능 실행
-            checkBirthday(member.rrn_display, member.name);
-            loadFamilyList(uuid);
-            loadBoard('notice'); // 기본 공지사항 로드
-            loadManagedProfiles(curAuth.id);
-  
-            showLoading(false);
-          
+        curMem = member; // 전역 변수에 저장
 
-        } catch (e) {
-            console.error(e);
-            showLoading(false);
-            showModal('데이터 로드 실패: ' + e.message);
+        // 2. 자산 정보 (view_my_assets)
+        // 에러가 나도 화면이 멈추지 않도록 예외 처리(maybeSingle)
+        let assets = { total_capital: 0, total_donation: 0, dividend_capital: 0, dividend_usage: 0, current_points: 0 };
+        
+        const { data: assetData, error: assetErr } = await _supabase
+            .from('view_my_assets')
+            .select('*')
+            .eq('member_uid', uuid)
+            .maybeSingle(); 
+
+        if (assetData) {
+            assets = assetData;
+            // 편의를 위해 curMem에도 자산 정보 병합
+            curMem.total_capital = assets.total_capital;
         }
 
-  // [추가] 뱃지 렌더링 & N주년 체크
-Badges.render('badgeContainer', curAuth.id, _supabase);
-Badges.checkAnniversary(curMem, _supabase);
+        // 3. 입금 내역 (ref_members)
+        // 이제 curMem이 확실히 있으므로 안전하게 호출 가능
+        const { data: ledger } = await _supabase
+            .from('ref_members')
+            .select('*')
+            .eq('member_id', curMem.member_id)
+            .order('deposit_date', { ascending: false });
 
-showLoading(false);
+        // 4. 신청 내역
+        const { data: apps } = await _supabase
+            .from('coop_applications')
+            .select('*')
+            .eq('member_uid', uuid)
+            .order('created_at', { ascending: false });
+
+        // 5. 임원 권한 확인
+        const { data: officials } = await _supabase
+            .from('coop_officials')
+            .select('category')
+            .eq('member_id', curMem.member_id);
+        const myRoles = officials ? officials.map(r => r.category) : [];
+
+        // 6. 화면 렌더링
+        renderDashboard(curMem, apps || [], ledger || [], assets, myRoles);
+        
+        // 7. 부가 기능 실행 (에러 방지용 옵셔널 체이닝 적용)
+        if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
+        
+        loadFamilyList(uuid);
+        loadBoard('notice'); // 기본 공지사항
+
+        // 뱃지 로드 (Badges 모듈이 로드되었는지 확인 후 실행)
+        if (typeof Badges !== 'undefined') {
+            Badges.render('badgeContainer', uuid, _supabase);
+            Badges.checkAnniversary(curMem, _supabase);
+        }
+
+    } catch (e) {
+        console.error("Dashboard Load Error:", e);
+        showLoading(false);
+        // 사용자에게는 친절한 메시지
+        showModal('데이터를 불러오는 중 문제가 발생했습니다.\n' + e.message);
+    } finally {
+        showLoading(false);
     }
+}
 
 
 
