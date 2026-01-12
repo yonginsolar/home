@@ -1640,24 +1640,155 @@ function toggleEditMode(isEdit) {
 // [가족/단체 관리] 신규 생성 & 연결 신청 로직
 // ==========================================
 
-// 1. 모달 열기 (기존 함수 교체)
-function openAddFamilyModal() {
+// [수정] 모달 열기: 역할별 탭 제어 + 연결 상태 DB 조회 추가
+async function openAddFamilyModal() {
+    // 1. 기본 UI 초기화 (기존 유지)
     document.getElementById('familyModalOverlay').style.display = 'flex';
-    
-    // ★ 5번 해결: 이미 연결된 계정이 있는지 확인하여 탭 이름 변경
-    const tabBtn = document.querySelectorAll('#famModalTabs .nav-link')[1]; // 두번째 탭(연결)
-    
-    // coop_applications에서 'connect' 타입이면서 'pending'이나 'approved'인게 있는지 체크하면 좋지만,
-    // UI 상의 단순 변경이므로 텍스트만 동적으로 바꿈.
-    // (엄밀히는 DB 조회가 필요하나, 여기서는 단순화)
-    tabBtn.innerHTML = `🤝 연결 관리 (신청/변경)`;
-
-    switchFamTab('new');
-    // ... (기존 초기화 코드 유지)
     document.getElementById('newFamName').value = '';
     document.getElementById('newFamId').value = '자동 생성 예정';
+    
+    // 2. [추가] 탭 버튼 제어 (단체는 자녀 탭 숨김)
+    const tabNewBtn = document.querySelectorAll('#famModalTabs .nav-item')[0]; // 자녀 탭
+    const isGroup = (curMem.member_type === '단체' || curMem.member_type === 'organization');
+
+    if (isGroup) {
+        tabNewBtn.style.display = 'none'; // 자녀 탭 숨김
+        switchFamTab('connect');          // 강제로 '연결' 탭으로 이동
+    } else {
+        tabNewBtn.style.display = 'block'; // 개인은 자녀 탭 보임
+        switchFamTab('new');               // 기본은 '자녀' 탭
+    }
+
+    // 3. [추가] 연결 상태 확인 (비동기 로직)
+    // 연결 탭 영역에 로딩 표시
+    const connArea = document.getElementById('famTabConnect');
+    // 기존에 있던 검색창 대신 로딩바를 잠깐 띄웁니다.
+    connArea.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-success mb-2"></div><br><small>연결 정보를 확인 중입니다...</small></div>';
+
+    try {
+        let isConnected = false;
+        let targetInfo = null; // 연결된 상대방 정보 (이름, ID)
+
+        if (isGroup) {
+            // [단체 입장] 나를 관리하는 부모(manager_id)가 있는가?
+            if (curMem.manager_id) {
+                const { data: parent } = await _supabase.from('coop_members')
+                    .select('name').eq('id', curMem.manager_id).single();
+                
+                isConnected = true;
+                targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager_id };
+            }
+        } else {
+            // [개인 입장] 내가 관리하는 "단체"가 있는가? (1:1 원칙 체크)
+            const { data: group } = await _supabase.from('coop_members')
+                .select('id, name')
+                .eq('manager_id', curAuth.id)
+                .eq('member_type', '단체') // 단체만 체크 (자녀는 여러 명이어도 됨)
+                .maybeSingle(); // 하나라도 있으면 가져옴
+            
+            if (group) {
+                isConnected = true;
+                targetInfo = { name: group.name, id: group.id };
+            }
+        }
+
+        // 4. 상태에 따라 화면 그리기 (다음 함수 호출)
+        renderConnectTabUI(connArea, isConnected, targetInfo, isGroup);
+
+    } catch (e) {
+        console.error("Connection Check Error:", e);
+        connArea.innerHTML = '<div class="text-center text-danger py-3">정보 확인 실패<br>다시 시도해주세요.</div>';
+    }
 }
 
+// [신규] 연결 탭 UI 렌더링 (검색창 vs 해제화면 분기)
+function renderConnectTabUI(container, isConnected, targetInfo, amIGroup) {
+    if (isConnected) {
+        // [Case A] 이미 연결됨: 검색창 숨김 + 해제 버튼 노출
+        const msg = amIGroup 
+            ? `현재 <b>'${targetInfo.name}'</b> 님이<br>이 계정을 관리하고 있습니다.`
+            : `현재 <b>'${targetInfo.name}'</b> (단체)를<br>관리하고 있습니다.`;
+
+        container.innerHTML = `
+            <div class="text-center py-4 bg-light rounded border">
+                <div class="mb-3 text-success">
+                    <i class="bi bi-link-45deg" style="font-size: 3rem;"></i>
+                </div>
+                <h6 class="fw-bold mb-3">연결된 계정</h6>
+                <p class="text-muted mb-4 small">${msg}</p>
+                
+                <button class="btn btn-outline-danger btn-sm fw-bold px-4" onclick="disconnectRelation('${targetInfo.id}', ${amIGroup})">
+                    <i class="bi bi-x-circle me-1"></i> 연결 해제
+                </button>
+            </div>
+        `;
+    } else {
+        // [Case B] 연결 안 됨: 기존 검색창 UI 복원
+        const guideMsg = amIGroup 
+            ? '계정을 관리해줄 <b>대표자(개인)</b>를 찾으세요.' 
+            : '관리할 <b>단체 계정</b>을 연결하세요.';
+
+        container.innerHTML = `
+            <div class="alert alert-warning border small mb-3">
+                <i class="bi bi-info-circle-fill me-1"></i> ${guideMsg}
+            </div>
+
+            <div class="input-group mb-3">
+                <input type="text" id="searchConnectInput" class="form-control" placeholder="이름, 이메일, 사업자번호">
+                <button class="btn btn-dark" onclick="searchTargetMember()">검색</button>
+            </div>
+
+            <div id="connectResultArea" class="border rounded p-2 bg-white" style="height: 150px; overflow-y: auto;">
+                <p class="text-center text-muted small py-4">검색어를 입력하세요.</p>
+            </div>
+        `;
+    }
+}
+
+   // [신규] 연결 해제 로직 (개인/단체 공용)
+async function disconnectRelation(targetId, amIGroup) {
+    const confirmMsg = amIGroup 
+        ? "관리자 연결을 해제하시겠습니까?\n이제 스스로 계정을 관리해야 합니다." 
+        : "단체 관리를 종료하시겠습니까?";
+
+    // 기존 showConfirmModal 사용
+    showConfirmModal(confirmMsg, async () => {
+        showLoading(true, '해제 처리 중...');
+        
+        let error = null;
+
+        if (amIGroup) {
+            // [단체 입장] 내 머리 위의 manager_id 삭제
+            // (RLS 정책에 따라 자기 자신 업데이트는 보통 허용됨)
+            const { error: err } = await _supabase.from('coop_members')
+                .update({ manager_id: null })
+                .eq('id', curAuth.id); // 내 ID 기준
+            error = err;
+        } else {
+            // [개인 입장] 내가 관리하던 단체의 manager_id 삭제
+            const { error: err } = await _supabase.from('coop_members')
+                .update({ manager_id: null })
+                .eq('id', targetId); // 단체의 UUID 기준
+            error = err;
+        }
+
+        showLoading(false);
+
+        if (error) {
+            showModal('해제 실패: ' + error.message);
+        } else {
+            showModal('연결이 해제되었습니다.');
+            document.getElementById('familyModalOverlay').style.display = 'none'; // 모달 닫기
+            
+            // 데이터 갱신 (대시보드 및 프로필 목록)
+            await loadDashboardData(curAuth.id);
+            if (typeof loadManagedProfiles === 'function') {
+                await loadManagedProfiles(curAuth.id);
+            }
+        }
+    });
+}
+   
 // 2. 탭 전환
 function switchFamTab(tabName) {
     const tabNew = document.getElementById('famTabNew');
