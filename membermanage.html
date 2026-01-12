@@ -1020,33 +1020,36 @@ async function loadDashboardData(uuid) {
 
 // [최종 수정] 사용자님 원본 로직 복구 + 화면 겹침 해결(1~3번 줄)
 // [최종 수정] 단체 계정은 생년월일 표시 숨김 + 개인만 rrn_display로 표시
+// [수정] 사용자님 원본 로직 복구 + 이메일 표시 로직 개선 (DB 정보 우선)
 function renderDashboard(member, apps, ledger, assets, myRoles) {
     // [추가] 상태 배지 표시 (상단 노출)
     renderMemberStatusBadge(member?.status);
 
-    // 1) 단체 여부 판단 (member_type 컬럼 기준, 혹시 대비용으로 몇 가지 케이스 포함)
+    // 1) 단체 여부 판단
     const isOrg =
         member?.member_type === '단체' ||
         member?.member_type === 'organization' ||
         member?.join_category === '단체';
 
-    // 2) 생년월일 UI 박스(라벨 포함) 통째로 숨기기/보이기
+    // 2) 생년월일 UI 박스 제어
     const birthEl = document.getElementById('infoBirth');
     const birthBox = birthEl ? birthEl.closest('.col-md-6') : null;
 
     if (isOrg) {
-        // 단체: 생년월일 영역 숨김
+        // 단체: 생년월일 숨김
         if (birthBox) birthBox.classList.add('hidden');
-        setText('infoBirth', '-'); // 혹시라도 접근하는 곳 대비
+        setText('infoBirth', '-');
     } else {
-        // 개인: 생년월일 영역 표시 + 계산값 반영
+        // 개인: 생년월일 표시
         if (birthBox) birthBox.classList.remove('hidden');
         setText('infoBirth', formatBirthDate(member.rrn_display));
     }
 
-    // 3) [원본 로직] 기본 정보 매핑
+    // 3) [핵심 수정] 기본 정보 매핑
     setText('infoName', member.name);
-    setText('infoEmail', curAuth.email);
+    
+    // ★ 수정된 부분: DB에 저장된 이메일을 우선 표시하고, 없으면 로그인 이메일 표시
+    setText('infoEmail', member.email || curAuth.email);
 
     setVal('editPhone', member.phone);
     setVal('editBankName', member.bank_name);
@@ -1057,31 +1060,29 @@ function renderDashboard(member, apps, ledger, assets, myRoles) {
     setVal('editAddrMain', member.address);
     setVal('editAddrDetail', '');
 
-    // 4) [원본 로직] 자산 현황 카드 (동적 생성)
+    // 4) 자산 현황 카드 (동적 생성)
     const assetRow = document.getElementById('assetSummaryRow');
     while (assetRow.children.length > 3) {
         assetRow.removeChild(assetRow.lastChild);
     }
 
-    // 값 매핑
     setText('sumId', member.member_id);
     setText('sumTotal', Number(assets.total_capital).toLocaleString() + '원');
 
-    // (A) 기부금
     if (assets.total_donation > 0) addAssetCard(assetRow, '기부금', assets.total_donation);
-    // (B) 배당금
+    
     const totalDiv = (assets.dividend_capital || 0) + (assets.dividend_usage || 0);
     if (totalDiv > 0) addAssetCard(assetRow, '배당금(출자+이용)', totalDiv);
-    // (C) 포인트
+    
     if (assets.current_points > 0) addAssetCard(assetRow, '포인트', assets.current_points, 'P');
 
-    // 5) [원본 로직] 게시판 탭 권한 처리 (DOM 없을 때 에러 방지)
+    // 5) 게시판 탭 권한 처리
     const tabExec = document.getElementById('tabExec');
     const tabElec = document.getElementById('tabElec');
     if (myRoles.includes('executive') && tabExec) tabExec.classList.remove('hidden');
     if (myRoles.includes('election_comm') && tabElec) tabElec.classList.remove('hidden');
 
-    // 6) [원본 로직] 타임라인
+    // 6) 타임라인 렌더링
     renderTimeline(ledger, apps);
 }
 
