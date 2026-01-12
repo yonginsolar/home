@@ -297,6 +297,15 @@
         <div id="birthdayBanner" onclick="fireConfetti()">
             🎉 <span id="birthdayMsgName"></span>님, 생일을 진심으로 축하합니다! (클릭하면 폭죽이 터져요!) 🎂
         </div>
+
+      <!-- [추가] 조합원 상태 배지 (대시보드 상단) -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="small text-muted">
+    <i class="bi bi-info-circle me-1"></i> 상태
+  </div>
+  <span id="memberStatusBadge" class="badge rounded-pill bg-secondary">-</span>
+</div>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="d-flex align-items-center">
         <h5 class="fw-bold m-0 me-2"><i class="bi bi-person-lines-fill me-2"></i>내 정보</h5>
@@ -1003,6 +1012,9 @@ async function loadDashboardData(uuid) {
 // [최종 수정] 사용자님 원본 로직 복구 + 화면 겹침 해결(1~3번 줄)
 // [최종 수정] 단체 계정은 생년월일 표시 숨김 + 개인만 rrn_display로 표시
 function renderDashboard(member, apps, ledger, assets, myRoles) {
+    // [추가] 상태 배지 표시 (상단 노출)
+    renderMemberStatusBadge(member?.status);
+
     // 1) 단체 여부 판단 (member_type 컬럼 기준, 혹시 대비용으로 몇 가지 케이스 포함)
     const isOrg =
         member?.member_type === '단체' ||
@@ -1063,6 +1075,7 @@ function renderDashboard(member, apps, ledger, assets, myRoles) {
     // 6) [원본 로직] 타임라인
     renderTimeline(ledger, apps);
 }
+
 
 
 // [헬퍼] 자산 카드 추가 (사용자님 원본 스타일: col-6 col-md-3 유지)
@@ -2281,6 +2294,42 @@ function showOnly(sectionId) {
         }
     });
 }
+   // [신규] 조합원 상태 배지 렌더링 (노출만)
+// [신규] 조합원 상태 배지 렌더링 (노출만)
+function renderMemberStatusBadge(statusRaw) {
+    const el = document.getElementById('memberStatusBadge');
+    if (!el) return;
+
+    const raw = (statusRaw || '').toString().trim();
+    const lower = raw.toLowerCase();
+
+    // 표시 텍스트(영문/내부값이 와도 한국어로 보이게)
+    let label = raw || '미설정';
+
+    // 색상 클래스
+    let cls = 'badge rounded-pill bg-secondary';
+
+    // 정상(파랑)
+    if (raw === '정상' || lower === 'active' || lower === 'normal') {
+        cls = 'badge rounded-pill bg-primary';
+        label = '정상';
+    }
+    // 승인대기(노랑)
+    else if (raw === '승인대기' || lower === 'pending' || lower === 'approval_pending' || lower === 'waiting') {
+        cls = 'badge rounded-pill bg-warning text-dark';
+        label = '승인대기';
+    }
+    // 탈퇴/제명(빨강)
+    else if (raw === '탈퇴' || raw === '제명' || lower === 'withdrawn' || lower === 'expelled' || lower === 'removed') {
+        cls = 'badge rounded-pill bg-danger';
+        label = (raw === '제명' || lower === 'expelled' || lower === 'removed') ? '제명' : '탈퇴';
+    }
+
+    el.className = cls;
+    el.innerText = label;
+}
+
+
 
 </script>
 </body>
