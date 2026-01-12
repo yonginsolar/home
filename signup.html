@@ -14,6 +14,61 @@
   
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* [CSS 추가] 가입 완료 모달 스타일 */
+.center-modal {
+  display: none; /* 평소에는 숨김 */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.6); /* 배경 반투명 검정 */
+  z-index: 9999; /* 제일 위에 뜨도록 */
+  justify-content: center; /* 가로 중앙 정렬 */
+  align-items: center; /* 세로 중앙 정렬 */
+  backdrop-filter: blur(5px); /* 배경 흐림 효과 (선택사항) */
+  animation: fadeIn 0.3s ease-out;
+}
+
+.modal-content {
+  background: white;
+  padding: 40px 30px;
+  border-radius: 20px;
+  text-align: center;
+  width: 90%;
+  max-width: 400px; /* 너무 커지지 않게 제한 */
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+  transform: translateY(20px);
+  animation: slideUp 0.3s ease-out forwards;
+}
+
+/* 애니메이션 효과 */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* 모달 내부 카카오 버튼 스타일 */
+.kakao-link-btn {
+  display: block;
+  background-color: #FEE500;
+  color: #000;
+  text-decoration: none;
+  font-weight: bold;
+  padding: 12px;
+  border-radius: 12px;
+  margin-top: 15px;
+  margin-bottom: 10px;
+}
+  
+</style>
+  
 </head>
 
 <body style="background-color: #f0f2f5;">
@@ -474,28 +529,25 @@ function validateBizNo() {
     }
 
     // [7] 제출 로직
-// [수정] 제출 함수 (빈 값 체크 + DB 저장)
-    // [최종 수정] 제출 함수 (유효성 검증 + DB 저장)
 async function handleFormSubmit(e, form) {
   e.preventDefault();
 
   // ---------------------------------------------------------
-  // 1. [유효성 검증] 빈 값 및 로직 체크 (알럿 대신 빨간 테두리)
+  // 1. [유효성 검증] 빈 값 및 로직 체크 (기존 코드 유지)
   // ---------------------------------------------------------
   let hasError = false;
   let firstErrorInput = null;
 
   // (1) 에러 표시 헬퍼 함수
   const setError = (el) => {
-    el.classList.add('is-invalid-field'); // 빨간 테두리 클래스
+    el.classList.add('is-invalid-field'); 
     hasError = true;
     if (!firstErrorInput) firstErrorInput = el;
   };
 
   // (2) 화면에 보이는 필수 입력창(required) 빈 값 체크
-  // offsetParent !== null은 현재 '눈에 보이는' 요소만 골라내는 트릭입니다.
   const visibleInputs = Array.from(form.querySelectorAll('input[required], select[required]'))
-                             .filter(el => el.offsetParent !== null);
+                              .filter(el => el.offsetParent !== null);
   
   visibleInputs.forEach(input => {
     if (input.type !== 'checkbox' && !input.value.trim()) {
@@ -503,74 +555,128 @@ async function handleFormSubmit(e, form) {
     }
   });
 
-  // (3) 선생님이 요청하신 특정 로직 검증 (이름, 전화번호 길이 등)
+  // (3) 특정 로직 검증 (이름, 전화번호 길이 등)
   const userType = document.querySelector('input[name="userType"]:checked').value;
-  const nameInput = document.getElementById('userName'); // 개인:이름, 단체:단체명 공용
+  const nameInput = document.getElementById('userName'); 
   
   // 3-1. 이름/단체명 2글자 미만 체크
   if (nameInput.value.trim().length < 2) {
     setError(nameInput);
   }
 
-  // 3-2. 단체일 경우 사업자번호(10자리) 체크
+  // 3-2. 단체일 경우 사업자번호 및 법인번호 체크
   if (userType === '단체') {
     const orgNoVal = document.getElementById('orgNo').value;
     if (orgNoVal.length < 10) {
-      // orgNo는 hidden이므로, 눈에 보이는 입력창 3개를 빨갛게 만듭니다.
       setError(document.getElementById('biz1'));
       setError(document.getElementById('biz2'));
       setError(document.getElementById('biz3'));
     }
-    // B. ★ 법인번호 체크 추가
+    
+    // 법인번호 체크
     const finalCorp = document.getElementById('finalCorpNo').value;
-    // finalCorpNo에 값이 없으면(중복이거나 입력 안함), 입력창 빨갛게 표시
     if (!finalCorp || finalCorp.length < 13) { 
         setError(document.getElementById('corp1'));
         setError(document.getElementById('corp2'));
     }
-  } // <--- [★중요] 여기서 if(단체) 괄호를 닫아야 합니다! (기존 코드 오류 수정됨)
+  } 
 
-  // 3-3. 전화번호 길이 체크 (p2 3글자, p3 4글자 미만)
+  // 3-3. 전화번호 길이 체크
   const p2 = document.getElementById('p2');
   const p3 = document.getElementById('p3');
   if (p2.value.length < 3) setError(p2);
   if (p3.value.length < 4) setError(p3);
 
-  // (4) 약관 동의 체크 (체크 안 하면 라벨 빨갛게)
+  // (4) 약관 동의 체크
   const agrees = ['agree1', 'agree2', 'agree3'];
   agrees.forEach(id => {
     const chk = document.getElementById(id);
-    const label = chk.nextElementSibling; // 체크박스 옆 글자(Label)
+    const label = chk.nextElementSibling; 
     
     if(!chk.checked) {
       hasError = true;
-      label.classList.add('text-danger-label'); // 빨간 글씨
+      label.classList.add('text-danger-label'); 
       
-      // 체크하면 빨간색 바로 없어지게 이벤트 연결
       chk.addEventListener('change', function() {
         if(this.checked) label.classList.remove('text-danger-label');
       }, { once: true });
     }
   });
-  // } <--- 이 이상한 위치에 있던 괄호 삭제함
 
   // ---------------------------------------------------------
-  // 2. [에러 처리] 하나라도 걸리면 멈추고 이동
+  // 2. [에러 처리] 클라이언트 검증 실패 시 중단
   // ---------------------------------------------------------
   if(hasError) {
     if(firstErrorInput) {
       firstErrorInput.focus();
       firstErrorInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    return; // 전송 중단
+    return; 
+  }
+
+  // =========================================================
+  // ★ [추가된 부분] 2.5. 서버 최종 중복 확인 (Double Check)
+  // 버튼 누르는 순간에 서버에 한번 더 확인해서 "레이스 컨디션" 방지
+  // =========================================================
+  
+  // (1) 연락처 최종 검증
+  const finalPhone = document.getElementById('p1').value + "-" + p2.value + "-" + p3.value;
+  const { data: isPhoneDup } = await _supabase.rpc('check_duplicate', { 
+     check_field: 'phone', check_value: finalPhone 
+  });
+  
+  if (isPhoneDup) {
+      setMsg('phoneMsg', "❌ 이미 가입된 연락처입니다. (최종확인)", true);
+      document.getElementById('p3').focus();
+      return; // 여기서 전송 중단
+  }
+
+  // (2) 개인: 주민번호 최종 검증
+  if (userType === '개인') {
+      const rrnCheck = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value;
+      const { data: isRrnDup } = await _supabase.rpc('check_duplicate', { 
+         check_field: 'rrn', check_value: rrnCheck 
+      });
+      
+      if (isRrnDup) {
+          setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다. (최종확인)", true);
+          document.getElementById('rrn2').value = ""; // 입력값 지움
+          document.getElementById('rrn2').focus();
+          return; // 여기서 전송 중단
+      }
+  }
+
+  // (3) 단체: 사업자/법인번호 최종 검증
+  if (userType === '단체') {
+      // 사업자번호
+      const bizCheck = document.getElementById('orgNo').value;
+      const { data: isBizDup } = await _supabase.rpc('check_duplicate', { 
+         check_field: 'biz', check_value: bizCheck 
+      });
+      if (isBizDup) {
+          setMsg('bizMsg', "❌ 이미 가입된 사업자번호입니다.", true);
+          return;
+      }
+      
+      // 법인번호
+      const corpCheck = document.getElementById('finalCorpNo').value;
+      if(corpCheck) {
+          const { data: isCorpDup } = await _supabase.rpc('check_duplicate', { 
+             check_field: 'corp_no', check_value: corpCheck 
+          });
+          if (isCorpDup) {
+               setMsg('corpMsg', "❌ 이미 가입된 법인번호입니다.", true);
+               return;
+          }
+      }
   }
 
   // ---------------------------------------------------------
-  // 3. [데이터 준비] DB 전송 로직
+  // 3. [데이터 준비] DB 전송 로직 (기존 코드 유지)
   // ---------------------------------------------------------
   const btn = document.getElementById('btnSubmit');
   
-  // 식별번호 조합 (개인: 주민번호 / 단체: 사업자번호)
+  // 식별번호 조합
   let fullID = "";
   if(userType === '개인') {
     fullID = document.getElementById('rrn1').value + "-" + document.getElementById('rrn2').value; 
@@ -578,7 +684,7 @@ async function handleFormSubmit(e, form) {
     fullID = document.getElementById('orgNo').value;
   }
   
-  // 은행 처리 (직접입력 vs 선택)
+  // 은행 처리
   let bank = document.getElementById('bankName').value;
   if(bank === '직접입력') {
       bank = document.getElementById('bankDirectInput').value;
@@ -592,7 +698,7 @@ async function handleFormSubmit(e, form) {
     return;
   }
 
-  // 가입 경로 및 SNS ID 확인 (Supabase Session)
+  // 가입 경로 및 SNS ID 확인
   const { data: { session } } = await _supabase.auth.getSession();
   let joinPath = '홈페이지'; 
   let kakaoId = null; let naverId = null;
@@ -613,7 +719,6 @@ async function handleFormSubmit(e, form) {
     name: nameInput.value,
     member_type: userType,
     rrn_encrypted: fullID, 
-    // ★ [추가] 법인등록번호 (개인이면 null, 단체면 값 들어감)
     corp_number: (userType === '단체') ? document.getElementById('finalCorpNo').value : null,
     phone: document.getElementById('p1').value + "-" + p2.value + "-" + p3.value,
     email: document.getElementById('verifiedEmail').value,
@@ -638,7 +743,7 @@ async function handleFormSubmit(e, form) {
   
   if(error) {
     console.error(error);
-    alert("저장 실패: " + error.message); // 치명적 DB 에러는 알럿 허용 (또는 console)
+    alert("저장 실패: " + error.message);
     btn.disabled = false; 
     btn.innerText = "가입 신청하기 ☀️";
   } else {
