@@ -1100,68 +1100,106 @@ function addAssetCard(row, title, val, unit='원') {
     // =========================================================================
     // 4. 신청 및 타임라인
     // =========================================================================
+// [수정] 최근 활동 내역: "최신이 위"로 정렬해서 렌더링
 function renderTimeline(ledger, apps) {
     const list = document.getElementById('timelineList');
-    let html = '';
 
-    if(ledger.length === 0 && apps.length === 0) {
+    // 둘 다 비었으면 종료
+    if ((!ledger || ledger.length === 0) && (!apps || apps.length === 0)) {
         list.innerHTML = '<div class="text-center text-muted py-5">내역이 없습니다.</div>';
         return;
     }
 
-    // (입금 내역 forEach는 기존 유지...)
-    ledger.forEach(item => {
-        html += `<div class="timeline-item"><div class="timeline-date">${item.deposit_date.substring(0,10)}</div><div class="timeline-content"><h5>입금 확인</h5><p class="text-success fw-bold">+${Number(item.amount).toLocaleString()}원</p></div></div>`;
+    // 1) 입금/신청을 같은 포맷으로 합쳐서 "날짜 기준 내림차순" 정렬
+    const items = [];
+
+    (ledger || []).forEach(item => {
+        items.push({
+            kind: 'ledger',
+            ts: item.deposit_date ? new Date(item.deposit_date).getTime() : 0,
+            raw: item
+        });
     });
 
+    (apps || []).forEach(app => {
+        items.push({
+            kind: 'app',
+            ts: app.created_at ? new Date(app.created_at).getTime() : 0,
+            raw: app
+        });
+    });
+
+    // 최신이 위로
+    items.sort((a, b) => b.ts - a.ts);
+
+    // 2) 렌더링
+    let html = '';
     const typeMap = { 'extra': '추가출자', 'reduction': '감자신청', 'withdraw': '탈퇴신청', 'connect': '계정연결' };
 
-    apps.forEach(app => {
+    items.forEach(it => {
+        if (it.kind === 'ledger') {
+            const item = it.raw;
+            const date = item.deposit_date ? String(item.deposit_date).substring(0, 10) : '-';
+            html += `
+                <div class="timeline-item">
+                    <div class="timeline-date">${date}</div>
+                    <div class="timeline-content">
+                        <h5>입금 확인</h5>
+                        <p class="text-success fw-bold">+${Number(item.amount || 0).toLocaleString()}원</p>
+                    </div>
+                </div>`;
+            return;
+        }
+
+        // app
+        const app = it.raw;
+        const date = app.created_at ? String(app.created_at).substring(0, 10) : '-';
+        const appType = typeMap[app.type] || app.type;
+
         let statusBadge = '';
         let actionBtn = '';
-        const appType = typeMap[app.type] || app.type;
-        
-        // 상태별 뱃지
-        if(app.status === 'pending') {
+
+        if (app.status === 'pending') {
             statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
             actionBtn = `<button class="btn btn-sm btn-outline-danger ms-2" style="font-size:0.7rem; padding:2px 6px;" onclick="cancelApp(${app.id})">취소</button>`;
-        } else if(app.status === 'approved') {
+        } else if (app.status === 'approved') {
             statusBadge = '<span class="badge bg-success">승인됨</span>';
-        } else if(app.status === 'cancelled') {
+        } else if (app.status === 'cancelled') {
             statusBadge = '<span class="badge bg-secondary">취소됨</span>';
         } else {
             statusBadge = '<span class="badge bg-danger">반려됨</span>';
         }
 
-        // ★ 4번 해결: 승인/취소 상태면 "연결 요청중" 텍스트 숨김
+        // connect 타입 상세 텍스트 처리
         let detailText = '';
-        if(app.type === 'connect') {
-            if(app.status === 'pending') {
+        if (app.type === 'connect') {
+            if (app.status === 'pending') {
                 detailText = `<span class="text-primary small">⏳ ${app.reason ? '연결 요청중' : ''}</span>`;
-            } else if(app.status === 'approved') {
+            } else if (app.status === 'approved') {
                 detailText = `<span class="text-success small">✅ 연결 완료</span>`;
             } else {
                 detailText = `<span class="text-muted small">종료된 요청</span>`;
             }
         } else {
-            detailText = `${Number(app.amount).toLocaleString()}원`;
+            detailText = `${Number(app.amount || 0).toLocaleString()}원`;
         }
 
         html += `
-        <div class="timeline-item" style="border-left-color: #ff9800;">
-            <div class="timeline-date">${app.created_at.substring(0,10)}</div>
-            <div class="timeline-content">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div><span class="fw-bold">[신청] ${appType}</span> ${statusBadge}</div>
-                    ${actionBtn}
+            <div class="timeline-item" style="border-left-color: #ff9800;">
+                <div class="timeline-date">${date}</div>
+                <div class="timeline-content">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div><span class="fw-bold">[신청] ${appType}</span> ${statusBadge}</div>
+                        ${actionBtn}
+                    </div>
+                    <p>${detailText}</p>
                 </div>
-                <p>${detailText}</p>
-            </div>
-        </div>`;
+            </div>`;
     });
 
     list.innerHTML = html;
 }
+
 
 async function cancelApp(appId) {
         // confirm -> showConfirmModal
