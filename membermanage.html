@@ -340,10 +340,13 @@
                     <div class="fw-bold text-secondary" id="infoEmail">-</div>
                 </div>
 
-                <div class="col-md-6">
-                    <label class="small text-muted">전화번호</label>
-                    <input type="text" id="editPhone" class="readonly-text" readonly oninput="autoHyphen(this)" maxlength="13" placeholder="010-0000-0000">
-                </div>
+<div class="col-md-6"> <label class="small text-muted">전화번호</label>
+    
+    <div id="viewPhoneBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
+
+    <input type="text" id="editPhone" class="readonly-text" style="display:none;" 
+           oninput="autoHyphen(this)" maxlength="13" placeholder="010-0000-0000">
+</div>
 
                 <div class="col-12">
                     <label class="small text-muted">주소</label>
@@ -359,21 +362,25 @@
                     </div>
                 </div>
 
-                <div class="col-12 border-top pt-2 mt-2" >
-                    <label class="small text-success fw-bold">환급/배당 계좌</label>
-                    <div class="row g-2">
-                        <div class="col-4">
-                            <input type="text" id="editBankName" class="readonly-text" placeholder="은행명" readonly>
-                        </div>
-                        <div class="col-8" >
-                            <input type="text" id="editAccountNo" class="readonly-text" placeholder="계좌번호" readonly oninput="this.value = this.value.replace(/[^0-9]/g, '')">
-                        </div>
-                        <div class="col-12" >
-                            <input type="text" id="editHolder" class="readonly-text" placeholder="예금주" readonly>
-                        </div>
-                    </div>
-                    <small class="text-muted edit-mode-only" style="display:none; font-size:0.8rem;">* 계좌번호를 수정하지 않으면 기존 정보(마스킹)가 유지됩니다.</small>
-                </div>
+<div class="col-12 border-top pt-2 mt-2">
+    <label class="small text-success fw-bold">환급/배당 계좌</label>
+    
+    <div id="viewBankBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
+
+    <div id="editBankBox" class="row g-2" style="display:none;">
+        <div class="col-4">
+            <input type="text" id="editBankName" class="readonly-text" placeholder="은행명" readonly>
+        </div>
+        <div class="col-8">
+            <input type="text" id="editAccountNo" class="readonly-text" placeholder="계좌번호" readonly
+                   oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+        </div>
+        <div class="col-12">
+            <input type="text" id="editHolder" class="readonly-text" placeholder="예금주" readonly>
+        </div>
+        <small class="text-muted" style="font-size:0.8rem;">* 계좌번호를 수정하지 않으면 기존 정보가 유지됩니다.</small>
+    </div>
+</div>
 
         </div>
 
@@ -1094,10 +1101,13 @@ function renderDashboard(member, apps, ledger, assets, myRoles) {
     setVal('editBankName', member.bank_name);
     setVal('editAccountNo', member.account_number);
     setVal('editHolder', member.account_holder);
+  setText('viewPhoneBox', member.phone);
 
     setText('viewAddressBox', member.address);
     setVal('editAddrMain', member.address);
     setVal('editAddrDetail', '');
+  const bankText = (member.bank_name || '') + ' ' + (member.account_number || '') + ' (' + (member.account_holder || '') + ')';
+    setText('viewBankBox', bankText.trim() === '()' ? '-' : bankText); // 데이터 없으면 '-'
 
     // 4) 자산 현황 카드 (동적 생성)
     const assetRow = document.getElementById('assetSummaryRow');
@@ -1562,55 +1572,87 @@ function closeCustomModal() {
     // [2] 수정 모드 토글 (주소창 1단 ↔ 2단 전환 포함)
     // =========================================================================
 function toggleEditMode(isEdit) {
-        const inputs = document.querySelectorAll('.readonly-text');
-        const editOnly = document.querySelectorAll('.edit-mode-only'); 
+    // 1. 제어할 요소들 가져오기
+    const inputs = document.querySelectorAll('.readonly-text'); // input 태그들
+    
+    // 주소 관련
+    const viewAddr = document.getElementById('viewAddressBox');
+    const editAddr = document.getElementById('editAddressBox');
+    
+    // [추가] 전화번호 관련
+    const viewPhone = document.getElementById('viewPhoneBox');
+    const editPhone = document.getElementById('editPhone');
+
+    // [추가] 계좌번호 관련
+    const viewBank = document.getElementById('viewBankBox');
+    const editBank = document.getElementById('editBankBox');
+
+    // 계좌번호 입력창 (초기화용)
+    const accInput = document.getElementById('editAccountNo');
+
+    if (isEdit) {
+        // [수정 모드 진입]
         
-        const viewAddr = document.getElementById('viewAddressBox');
-        const editAddr = document.getElementById('editAddressBox');
+        // 버튼 제어
+        document.getElementById('btnEditProfile').classList.add('hidden');
+        document.getElementById('btnSaveProfile').classList.remove('hidden');
+        document.getElementById('btnCancelEdit').classList.remove('hidden');
+        
+        // Input 속성 변경 (입력 가능하게)
+        inputs.forEach(el => {
+            el.readOnly = false;
+            el.classList.add('editable-input');
+            el.classList.remove('readonly-text');
+        });
 
-        // 계좌번호 입력창 요소
-        const accInput = document.getElementById('editAccountNo');
+        // 계좌번호 UX (입력창 비우기)
+        accInput.value = ''; 
+        accInput.placeholder = '변경 시에만 입력하세요 (기존 유지)';
 
-        if (isEdit) {
-            document.getElementById('btnEditProfile').classList.add('hidden');
-            document.getElementById('btnSaveProfile').classList.remove('hidden');
-            document.getElementById('btnCancelEdit').classList.remove('hidden');
-            
-            inputs.forEach(el => {
-                el.readOnly = false;
-                el.classList.add('editable-input');
-                el.classList.remove('readonly-text');
-            });
+        // [핵심] 화면 전환 (View 숨김 -> Edit 보임)
+        viewAddr.style.display = 'none';
+        editAddr.style.display = 'block';
 
-            // [추가] 계좌번호 UX 개선: 수정 모드 진입 시 마스킹된 값 비우기
-            // 사용자가 "아, 새로 입력해야 하는구나"라고 직관적으로 알게 함
-            accInput.value = ''; 
-            accInput.placeholder = '변경 시에만 입력하세요 (기존 유지)';
+        viewPhone.style.display = 'none';
+        editPhone.style.display = 'block';
 
-            // 주소창 전환
-            viewAddr.style.display = 'none';
-            editAddr.style.display = 'block';
-            editOnly.forEach(el => el.classList.remove('hidden'));
+        viewBank.style.display = 'none';
+        editBank.style.display = 'flex'; // row 클래스이므로 flex 권장
 
-        } else {
-            // 취소 시 데이터 원복 (리로드)
-            loadDashboardData(curAuth.id);
-            
-            document.getElementById('btnEditProfile').classList.remove('hidden');
-            document.getElementById('btnSaveProfile').classList.add('hidden');
-            document.getElementById('btnCancelEdit').classList.add('hidden');
-            
-            inputs.forEach(el => {
-                el.readOnly = true;
-                el.classList.remove('editable-input');
-                el.classList.add('readonly-text');
-            });
+        // 상세주소 등 edit-mode-only 클래스 보이기
+        document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'block');
 
-            viewAddr.style.display = 'block';
-            editAddr.style.display = 'none';
-            editOnly.forEach(el => el.classList.add('hidden'));
-        }
+    } else {
+        // [취소 / 뷰 모드 복귀]
+        
+        // 데이터 원복 (리로드)
+        loadDashboardData(curAuth.id);
+        
+        // 버튼 제어
+        document.getElementById('btnEditProfile').classList.remove('hidden');
+        document.getElementById('btnSaveProfile').classList.add('hidden');
+        document.getElementById('btnCancelEdit').classList.add('hidden');
+        
+        // Input 속성 변경 (읽기 전용)
+        inputs.forEach(el => {
+            el.readOnly = true;
+            el.classList.remove('editable-input');
+            el.classList.add('readonly-text');
+        });
+
+        // [핵심] 화면 전환 (Edit 숨김 -> View 보임)
+        viewAddr.style.display = 'block';
+        editAddr.style.display = 'none';
+
+        viewPhone.style.display = 'block';
+        editPhone.style.display = 'none';
+
+        viewBank.style.display = 'block';
+        editBank.style.display = 'none';
+
+        document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'none');
     }
+}
 
     // =========================================================================
     // [3] 다음 주소 찾기 (검색 결과를 2단 주소창에 분배)
