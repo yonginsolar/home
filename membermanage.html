@@ -714,6 +714,32 @@
         </div>
     </div>
 </div>
+
+
+  <div id="noticeListModal" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="width: 90%; max-width: 500px; text-align: left; height: 80vh; display: flex; flex-direction: column;">
+        
+        <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+            <h5 class="fw-bold m-0"><i class="bi bi-megaphone-fill me-2 text-danger"></i>공지사항</h5>
+            <button type="button" class="btn-close" onclick="document.getElementById('noticeListModal').style.display='none'"></button>
+        </div>
+
+        <div class="mb-3">
+            <div class="input-group">
+                <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                <input type="text" id="noticeSearchInput" class="form-control" placeholder="검색어를 입력하세요 (예: 배당, 총회)" onkeyup="filterNoticeList()">
+            </div>
+        </div>
+
+        <div id="noticeListResult" style="flex: 1; overflow-y: auto; min-height: 0;">
+            <p class="text-center text-muted py-5">데이터 로딩 중...</p>
+        </div>
+
+        <div class="mt-3 text-end border-top pt-2">
+            <button class="btn btn-dark w-100" onclick="document.getElementById('noticeListModal').style.display='none'">닫기</button>
+        </div>
+    </div>
+</div>
   
   
 <div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
@@ -2121,15 +2147,7 @@ function loadMoreBoard() {
     loadBoard(currentBoardCat, null, currentBoardLimit);
 }
 
-// [신규] 공지사항 전체보기 모달 (7번 해결)
-function openNoticeListModal() {
-    // 공지사항 전용 모달을 띄우거나, 기존 boardViewModal을 재활용할 수도 있지만
-    // UI 복잡도를 줄이기 위해 '공지사항' 탭으로 이동시키는게 낫지만,
-    // 사용자가 '상단은 공지, 하단은 자유'라고 분리를 원했으므로 모달이 적합.
-    
-    // 임시로 알림
-    showModal('공지사항 전체보기 기능은 준비중입니다.\n(자유게시판 처럼 별도 모달 필요)');
-}
+
 
     // [글쓰기] 모달 열기
     function openWriteModal() {
@@ -2628,7 +2646,90 @@ async function executeChildJoin() {
         }
     }
 }
-   
+
+   // [전역 변수 추가] 공지사항 데이터 캐싱용 (스크립트 상단 변수 선언부에 두거나, 함수 근처에 두세요)
+let cachedNoticeList = [];
+
+// [수정] 공지사항 전체보기 모달 열기 (DB 조회 + 검색 초기화)
+async function openNoticeListModal() {
+    const modal = document.getElementById('noticeListModal');
+    const listArea = document.getElementById('noticeListResult');
+    const searchInput = document.getElementById('noticeSearchInput');
+
+    // 1. 모달 초기화 및 표시
+    searchInput.value = ''; // 검색창 비우기
+    listArea.innerHTML = '<div class="d-flex justify-content-center py-5"><div class="spinner-border text-danger" role="status"></div></div>';
+    modal.style.display = 'flex';
+
+    try {
+        // 2. 데이터 조회 (최신순 100개 제한)
+        // status 컬럼 필터 없이 모든 공지 조회 (Step 1 논리 적용)
+        const { data: notices, error } = await _supabase
+            .from('coop_notices')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        if (error) throw error;
+
+        // 3. 데이터 캐싱 및 렌더링
+        cachedNoticeList = notices || [];
+        renderNoticeItems(cachedNoticeList);
+
+    } catch (e) {
+        console.error(e);
+        listArea.innerHTML = `<div class="text-center text-danger py-4">
+            <i class="bi bi-exclamation-triangle mb-2 d-block fs-2"></i>
+            목록을 불러오지 못했습니다.<br><small>${e.message}</small>
+        </div>`;
+    }
+}
+
+// [신규] 검색어 필터링 함수 (onkeyup 이벤트 연결)
+function filterNoticeList() {
+    const keyword = document.getElementById('noticeSearchInput').value.toLowerCase().trim();
+    
+    // 캐시된 데이터에서 제목이나 내용에 키워드가 포함된 것만 필터링
+    const filtered = cachedNoticeList.filter(n => {
+        const title = (n.title || '').toLowerCase();
+        const content = (n.content || '').toLowerCase();
+        return title.includes(keyword) || content.includes(keyword);
+    });
+
+    renderNoticeItems(filtered);
+}
+
+// [신규] 리스트 렌더링 헬퍼 함수
+function renderNoticeItems(list) {
+    const listArea = document.getElementById('noticeListResult');
+    
+    if (!list || list.length === 0) {
+        listArea.innerHTML = '<div class="text-center text-muted py-5">검색 결과가 없습니다.</div>';
+        return;
+    }
+
+    let html = '<div class="list-group list-group-flush">';
+    list.forEach(n => {
+        const date = n.created_at ? n.created_at.substring(0, 10) : '-';
+        // HTML 태그 제거 (미리보기용)
+        const rawContent = n.content || '';
+        const safeContent = rawContent.replace(/<[^>]*>?/gm, '').substring(0, 50) + (rawContent.length > 50 ? '...' : '');
+
+        // 클릭 시 기존 viewPost 함수 호출 (카테고리 'notice' 전달)
+        // setModalDepth(true)를 추가하여 목록 모달을 뒤로 살짝 밀어주는 효과 적용
+        html += `
+            <button class="list-group-item list-group-item-action py-3" onclick="setModalDepth(true); viewPost(${n.id}, 'notice')">
+                <div class="d-flex w-100 justify-content-between mb-1">
+                    <h6 class="mb-1 fw-bold text-break">${n.title}</h6>
+                    <small class="text-muted text-nowrap ms-2">${date}</small>
+                </div>
+                <small class="text-secondary">${safeContent}</small>
+            </button>
+        `;
+    });
+    html += '</div>';
+    listArea.innerHTML = html;
+}
 
 </script>
 </body>
