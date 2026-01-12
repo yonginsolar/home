@@ -2095,34 +2095,42 @@ function reportPost() {
 // ==========================================
 
 // 1. 관리 가능한 프로필 목록 로드 및 UI 생성
+// [디버깅용] 관리 가능한 프로필 목록 로드 및 UI 생성
 async function loadManagedProfiles(myAuthId) {
     const switcher = document.getElementById('profileSwitcher');
     const menu = document.getElementById('profileListMenu');
     
-    // (1) 본인 계정 정보 가져오기 (이름 확인용)
-    const { data: me } = await _supabase.from('coop_members').select('id, name, member_type').eq('id', myAuthId).single();
-    
-    // (2) 내가 관리자인 계정들 가져오기 (단체 등)
-    const { data: subProfiles } = await _supabase
+    console.log("🔍 [Debug] 관리 프로필 조회 시작. 내 ID:", myAuthId);
+
+    // (1) 본인 계정 정보
+    const { data: me, error: errMe } = await _supabase.from('coop_members').select('id, name, member_type').eq('id', myAuthId).single();
+    if(errMe) console.error("❌ 내 정보 조회 실패:", errMe);
+
+    // (2) 내가 관리자인 계정들 가져오기 (manager_id가 나인 경우)
+    const { data: subProfiles, error: errSub } = await _supabase
         .from('coop_members')
         .select('id, name, member_type')
-        .eq('manager_id', myAuthId); // manager_id가 나인 경우
+        .eq('manager_id', myAuthId); // ★ 여기가 핵심
 
-    // 관리할 계정이 없으면 스위처 숨김
+    if(errSub) console.error("❌ 서브 계정 조회 에러:", errSub);
+    console.log("🔍 [Debug] 조회된 관리 계정 개수:", subProfiles ? subProfiles.length : 0);
+
+    // 관리할 계정이 없으면 스위처 숨김 (여기에 걸리는지 확인 필요)
     if (!subProfiles || subProfiles.length === 0) {
+        console.warn("⚠️ 관리할 계정이 0개라 드롭다운을 숨깁니다.");
         switcher.classList.add('hidden');
         return;
     }
 
-    // (3) 리스트 만들기: [나] + [관리 계정들]
+    // (3) 리스트 만들기
     menu.innerHTML = '';
-    const allProfiles = [me, ...subProfiles]; // 배열 합치기
+    const allProfiles = [me, ...subProfiles]; 
 
     allProfiles.forEach(p => {
         if(!p) return;
         const isMe = p.id === myAuthId;
         const badge = p.member_type === '단체' ? '<span class="badge bg-info ms-1">단체</span>' : '';
-        const activeClass = (curMem && curMem.id === p.id) ? 'active' : ''; // 현재 보고 있는 프로필 표시
+        const activeClass = (curMem && curMem.id === p.id) ? 'active' : ''; 
 
         menu.innerHTML += `
             <li>
@@ -2133,11 +2141,8 @@ async function loadManagedProfiles(myAuthId) {
             </li>`;
     });
 
-    // 버튼 텍스트 업데이트
-    const currentName = curMem ? curMem.name : '프로필 선택';
-    document.getElementById('currentProfileName').innerText = currentName;
-    
-    // 스위처 노출
+    // 스위처 노출 (hidden 클래스 제거)
+    console.log("✅ 드롭다운 메뉴 활성화 완료");
     switcher.classList.remove('hidden');
 }
 
