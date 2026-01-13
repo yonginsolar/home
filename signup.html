@@ -267,7 +267,7 @@
     </div>
   </div>
 
-  <div id="successModal" class="center-modal">
+<div id="successModal" class="center-modal">
     <div class="modal-content">
       <div style="font-size:50px;">🎉</div>
       <h3 class="fw-bold mt-3">가입 신청 완료</h3>
@@ -277,6 +277,16 @@
       </div>
       <div class="kakao-box"><a href="https://invite.kakao.com/tc/cLtR3LGLQX" target="_blank" class="kakao-link-btn">📢 카카오톡 팀채팅방 참여하기</a></div>
       <button class="btn btn-success w-100" onclick="location.href='index.html'">홈으로 이동</button>
+    </div>
+  </div>
+
+  <div id="failModal" class="center-modal">
+    <div class="modal-content">
+      <div style="font-size:50px;">❌</div>
+      <h3 class="fw-bold mt-3 text-danger">확인 필요</h3>
+      <p id="failModalMsg" class="text-muted mt-3" style="white-space: pre-line; word-break: keep-all;"></p>
+      
+      <button class="btn btn-dark w-100 mt-3" onclick="closeFailModal()">확인 및 수정하기</button>
     </div>
   </div>
 
@@ -528,44 +538,33 @@ function validateBizNo() {
       await _supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: window.location.href } });
     }
 
-    // [7] 제출 로직
+// [7] 제출 로직
 async function handleFormSubmit(e, form) {
   e.preventDefault();
 
   // =========================================================
-  // [추가] 성공/실패 공통 "결과 모달" 오픈 헬퍼
-  // - 기존 successModal을 그대로 활용
-  // - 모달 내부에 #resultModalMsg가 없으면 자동 생성해서 메시지 삽입
+  // [수정] 성공/실패 모달 분리 처리 로직 (HTML 구조 분리에 맞춤)
   // =========================================================
   const openResultModal = (message, isError = false) => {
-    const modal = document.getElementById('successModal');
-    if (!modal) {
-      // 모달이 없으면 최소 안전장치
-      alert(message);
-      return;
+    if (isError) {
+      // 1. 에러 상황: 실패 전용 모달(failModal)을 띄움
+      const failModal = document.getElementById('failModal');
+      const msgBox = document.getElementById('failModalMsg');
+      
+      if (failModal && msgBox) {
+        msgBox.textContent = message; 
+        failModal.style.display = 'flex'; // 실패 모달 보이기
+      } else {
+        alert(message); // 비상용
+      }
+    } else {
+      // 2. 성공 상황: 기존 성공 모달(successModal)을 띄움
+      // (내용은 HTML에 하드코딩 되어 있으므로 display만 켜면 됨)
+      const successModal = document.getElementById('successModal');
+      if (successModal) {
+        successModal.style.display = 'flex'; 
+      }
     }
-
-    modal.style.display = 'flex';
-    modal.dataset.result = isError ? 'error' : 'success';
-
-    // 메시지 박스 확보(없으면 생성)
-    let msgBox = modal.querySelector('#resultModalMsg');
-    if (!msgBox) {
-      msgBox = document.createElement('div');
-      msgBox.id = 'resultModalMsg';
-      msgBox.style.whiteSpace = 'pre-line';
-      msgBox.style.marginTop = '12px';
-
-      const target =
-        modal.querySelector('.modal-content') ||
-        modal.querySelector('.content') ||
-        modal.firstElementChild ||
-        modal;
-
-      target.appendChild(msgBox);
-    }
-
-    msgBox.textContent = message;
   };
 
   // ---------------------------------------------------------
@@ -653,9 +652,9 @@ async function handleFormSubmit(e, form) {
       firstErrorInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    // ★ 추가: 실패 모달 띄우기
+    // ★ 실패 모달 띄우기 (isError = true)
     openResultModal(
-      "❌ 입력값을 확인해 주세요.\n빨간 표시된 항목(필수/형식/약관동의)을 수정한 뒤 다시 시도해 주세요.",
+      "입력값을 확인해 주세요.\n빨간 표시된 항목(필수/형식/약관동의)을 수정한 뒤 다시 시도해 주세요.",
       true
     );
     return;
@@ -687,7 +686,7 @@ async function handleFormSubmit(e, form) {
     setMsg('phoneMsg', '❌ 이미 가입된 연락처입니다. (최종확인)', true);
     document.getElementById('p3').focus();
 
-    // ★ 추가: 실패 모달 띄우기
+    // ★ 실패 모달 띄우기
     openResultModal(
       "❌ 이미 가입된 연락처입니다.\n연락처를 수정한 뒤 다시 시도해 주세요.",
       true
@@ -721,7 +720,7 @@ async function handleFormSubmit(e, form) {
       document.getElementById('rrn2').value = '';
       document.getElementById('rrn2').focus();
 
-      // ★ 추가: 실패 모달 띄우기
+      // ★ 실패 모달 띄우기
       openResultModal(
         "❌ 이미 가입된 주민등록번호입니다.\n주민등록번호를 수정한 뒤 다시 시도해 주세요.",
         true
@@ -752,7 +751,7 @@ async function handleFormSubmit(e, form) {
     if (isBizDup) {
       setMsg('bizMsg', '❌ 이미 가입된 사업자번호입니다.', true);
 
-      // ★ 추가: 실패 모달 띄우기
+      // ★ 실패 모달 띄우기
       openResultModal(
         "❌ 이미 가입된 사업자번호입니다.\n사업자번호를 수정한 뒤 다시 시도해 주세요.",
         true
@@ -780,7 +779,7 @@ async function handleFormSubmit(e, form) {
       if (isCorpDup) {
         setMsg('corpMsg', '❌ 이미 가입된 법인번호입니다.', true);
 
-        // ★ 추가: 실패 모달 띄우기
+        // ★ 실패 모달 띄우기
         openResultModal(
           "❌ 이미 가입된 법인번호입니다.\n법인번호를 수정한 뒤 다시 시도해 주세요.",
           true
@@ -887,7 +886,7 @@ async function handleFormSubmit(e, form) {
   if (error) {
     console.error(error);
 
-    // ★ 변경: 실패해도 모달 띄우기
+    // ★ 변경: 실패해도 모달 띄우기 (실패 모달)
     openResultModal(
       "❌ 저장에 실패했습니다.\n" +
         "다시 시도해 주세요.\n\n" +
@@ -898,7 +897,7 @@ async function handleFormSubmit(e, form) {
     btn.disabled = false;
     btn.innerText = '가입 신청하기 ☀️';
   } else {
-    // 성공 시 모달 띄우기 (기존 유지 + 메시지도 넣어줌)
+    // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
     openResultModal(
       "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
       false
