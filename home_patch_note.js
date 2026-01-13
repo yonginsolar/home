@@ -4,6 +4,9 @@
  * 연결 테이블: sys_home_patch_note
  */
 
+// [중요] 기존 변수명(_client)을 이 파일에서 쓰는 이름(_supabase)으로 연결
+const _supabase = typeof _client !== 'undefined' ? _client : null;
+
 // 0. CSS 스타일 주입 (.hidden 클래스 처리)
 // 부트스트랩 5에는 hidden 클래스가 없으므로 강제로 스타일을 넣어줍니다.
 const style = document.createElement('style');
