@@ -395,7 +395,7 @@ document.addEventListener("DOMContentLoaded", function() {
     </div>
   </div>
 
-
+`;
 
     // 3. 화면에 HTML 주입
     // (1) 푸터 넣기
