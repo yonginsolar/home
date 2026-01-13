@@ -437,6 +437,7 @@
                         <button class="menu-btn" onclick="toggleTab('extra', this)"><span><i class="bi bi-plus-circle me-2"></i>추가 출자</span><i class="bi bi-chevron-right"></i></button>
                         <button class="menu-btn" onclick="toggleTab('reduction', this)"><span><i class="bi bi-dash-circle me-2"></i>감자 신청</span><i class="bi bi-chevron-right"></i></button>
                         <button class="menu-btn" onclick="toggleTab('withdraw', this)"><span><i class="bi bi-box-arrow-left me-2"></i>탈퇴 신청</span><i class="bi bi-chevron-right"></i></button>
+                        <button class="menu-btn hidden" id="menuBtnPartner" onclick="toggleTab('partner', this)"><span><i class="bi bi-shop-window me-2"></i>홈페이지 노출 신청</span><i class="bi bi-chevron-right"></i></button>
                         <button class="menu-btn" onclick="toggleTab('cert', this)"><span><i class="bi bi-file-earmark-pdf me-2"></i>증명서 발급</span><i class="bi bi-chevron-right"></i></button>
                     </div>
 
@@ -483,6 +484,44 @@
                             </div>
                             <button class="btn btn-dark w-100 fw-bold" onclick="submitApplication('withdraw')">탈퇴 신청</button>
                         </div>
+                      <div id="tabPartner" class="hidden">
+    <h6 class="fw-bold mb-3">협력 단체(파트너) 신청</h6>
+    
+    <div class="alert alert-light border small mb-3">
+        <i class="bi bi-info-circle-fill me-1"></i>
+        홈페이지 [함께하는 사람들] 섹션에 노출됩니다.<br>
+        (로고 권장 사이즈: 300x150px, 배경 투명)
+    </div>
+
+    <div class="mb-2">
+        <label class="small text-muted fw-bold">단체/기업명</label>
+        <input type="text" id="ptName" class="form-control form-control-sm" placeholder="예: (주)용인햇빛">
+    </div>
+
+    <div class="mb-2">
+        <label class="small text-muted fw-bold">한 줄 소개</label>
+        <input type="text" id="ptDesc" class="form-control form-control-sm" placeholder="예: 태양광 유지보수 전문 기업">
+    </div>
+
+    <div class="mb-2">
+        <label class="small text-muted fw-bold">홈페이지 링크</label>
+        <input type="text" id="ptLink" class="form-control form-control-sm" placeholder="https://...">
+    </div>
+
+    <div class="mb-3">
+        <label class="small text-muted fw-bold">로고 이미지</label>
+        <input type="file" id="ptLogoFile" class="form-control form-control-sm" accept="image/*">
+        <input type="hidden" id="ptLogoUrl"> <div id="ptLogoPreview" class="mt-2 p-2 border rounded text-center bg-light hidden">
+            <img src="" style="max-height: 80px; max-width: 100%;">
+        </div>
+    </div>
+
+    <div id="ptStatusMsg" class="mb-3 text-end small fw-bold"></div>
+
+    <button class="btn btn-primary w-100 fw-bold" onclick="submitPartnerApplication()">
+        <i class="bi bi-send-check me-1"></i>신청/수정 하기
+    </button>
+</div>
 
                         <div id="tabCert" class="hidden text-center py-3">
                             <h6 class="fw-bold">출자 증명서</h6>
@@ -1150,10 +1189,23 @@ function renderDashboard(member, apps, ledger, assets, myRoles) {
         // 단체: 생년월일 숨김
         if (birthBox) birthBox.classList.add('hidden');
         setText('infoBirth', '-');
+        
+        // [추가] 단체인 경우 파트너 신청 버튼 노출
+        const btnPartner = document.getElementById('menuBtnPartner');
+        if(btnPartner) {
+            btnPartner.classList.remove('hidden');
+            // 기존 데이터 로드 (수정 모드 대비)
+            loadPartnerInfo(member.member_id);
+        }
+
     } else {
         // 개인: 생년월일 표시
         if (birthBox) birthBox.classList.remove('hidden');
         setText('infoBirth', formatBirthDate(member.rrn_display));
+        
+        // 개인은 파트너 버튼 숨김 (혹시 모르니)
+        const btnPartner = document.getElementById('menuBtnPartner');
+        if(btnPartner) btnPartner.classList.add('hidden');
     }
 
     // 3) [핵심 수정] 기본 정보 매핑
@@ -1166,12 +1218,12 @@ function renderDashboard(member, apps, ledger, assets, myRoles) {
     setVal('editBankName', member.bank_name);
     setVal('editAccountNo', member.account_number);
     setVal('editHolder', member.account_holder);
-  setText('viewPhoneBox', member.phone);
+    setText('viewPhoneBox', member.phone);
 
     setText('viewAddressBox', member.address);
     setVal('editAddrMain', member.address);
     setVal('editAddrDetail', '');
-  const bankText = (member.bank_name || '') + ' ' + (member.account_number || '') + ' (' + (member.account_holder || '') + ')';
+    const bankText = (member.bank_name || '') + ' ' + (member.account_number || '') + ' (' + (member.account_holder || '') + ')';
     setText('viewBankBox', bankText.trim() === '()' ? '-' : bankText); // 데이터 없으면 '-'
 
     // 4) 자산 현황 카드 (동적 생성)
@@ -1481,10 +1533,18 @@ async function saveProfile() {
 // [수정] 탭 전환 (감자 한도 체크 로직 포함)
 function toggleTab(type, btn) {
         document.getElementById('tabPlaceholder').classList.add('hidden');
-        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert'].forEach(id => document.getElementById(id).classList.add('hidden'));
+        // [수정] tabPartner 추가
+        ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert', 'tabPartner'].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) el.classList.add('hidden');
+        });
+
         document.querySelectorAll('.menu-btn').forEach(b => b.classList.remove('active'));
         if(btn) btn.classList.add('active');
-        document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1)).classList.remove('hidden');
+        
+        const targetId = 'tab' + type.charAt(0).toUpperCase() + type.slice(1);
+        const targetEl = document.getElementById(targetId);
+        if(targetEl) targetEl.classList.remove('hidden');
 
         if(type === 'reduction') {
             const total = Number(curMem.total_capital || 0);
@@ -2931,6 +2991,108 @@ async function tryFindEmail() {
         setModalDepth(true);
         showModal('오류가 발생했습니다: ' + e.message);
     }
+}
+   // ==========================================
+// [신규] 파트너(협력단체) 신청 관련 함수
+// ==========================================
+
+// 1. 기존 파트너 정보 로드 (수정 시 편의성)
+async function loadPartnerInfo(memberId) {
+    if(!memberId) return;
+    
+    // 공개 조회가 가능하므로 public 테이블 조회
+    const { data, error } = await _supabase
+        .from('site_partners')
+        .select('*')
+        .eq('member_id', memberId)
+        .maybeSingle(); // 없어도 에러 아님
+    
+    if(data) {
+        document.getElementById('ptName').value = data.name || '';
+        document.getElementById('ptDesc').value = data.description || '';
+        document.getElementById('ptLink').value = data.link_url || '';
+        document.getElementById('ptLogoUrl').value = data.logo_url || '';
+        
+        // 로고 미리보기
+        if(data.logo_url) {
+            const prev = document.getElementById('ptLogoPreview');
+            prev.querySelector('img').src = data.logo_url;
+            prev.classList.remove('hidden');
+        }
+
+        // 상태 표시
+        const statusArea = document.getElementById('ptStatusMsg');
+        if(data.status === 'pending') {
+            statusArea.innerHTML = '<span class="text-warning">⏳ 승인 대기 중 (수정 가능)</span>';
+        } else if(data.status === 'active') {
+            statusArea.innerHTML = '<span class="text-success">✅ 승인됨 (수정 시 재심사)</span>';
+        } else {
+            statusArea.innerHTML = '';
+        }
+    }
+}
+
+// 2. 파트너 신청 제출 (이미지 업로드 -> RPC 호출)
+async function submitPartnerApplication() {
+    const name = document.getElementById('ptName').value.trim();
+    const desc = document.getElementById('ptDesc').value.trim();
+    const link = document.getElementById('ptLink').value.trim();
+    const fileInput = document.getElementById('ptLogoFile');
+    let logoUrl = document.getElementById('ptLogoUrl').value; // 기존 URL
+
+    if(!name || !desc) return showModal('단체명과 소개를 입력해주세요.');
+
+    showConfirmModal('협력 단체 신청(수정)을 제출하시겠습니까?', async () => {
+        showLoading(true, '처리 중...');
+
+        try {
+            // [A] 파일 업로드 (새 파일이 있는 경우만)
+            if(fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                const fileExt = file.name.split('.').pop();
+                // 파일명 난수화 (충돌 방지)
+                const fileName = `partners/${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+
+                // assets 버킷에 업로드
+                const { data: uploadData, error: uploadError } = await _supabase.storage
+                    .from('assets')
+                    .upload(fileName, file);
+
+                if(uploadError) throw uploadError;
+
+                // 공개 URL 획득
+                const { data: urlData } = _supabase.storage
+                    .from('assets')
+                    .getPublicUrl(fileName);
+                
+                logoUrl = urlData.publicUrl;
+            }
+
+            // [B] RPC 호출 (DB 저장)
+            const { data: result, error: rpcError } = await _supabase.rpc('request_partner_change', {
+                p_name: name,
+                p_description: desc,
+                p_link_url: link,
+                p_logo_url: logoUrl
+            });
+
+            if(rpcError) throw rpcError;
+
+            showLoading(false);
+
+            if(result.success) {
+                showModal(result.message); // RPC에서 리턴한 메시지 출력
+                loadPartnerInfo(curMem.member_id); // 화면 갱신
+            } else {
+                showModal('오류: ' + result.message);
+            }
+
+        } catch (e) {
+            showLoading(false);
+            console.error(e);
+            showModal('처리 중 오류가 발생했습니다.\n' + e.message);
+        }
+    });
 }
 
 </script>
