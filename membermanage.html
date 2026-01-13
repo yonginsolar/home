@@ -3032,8 +3032,15 @@ async function loadPartnerInfo(memberId) {
     }
 }
 
-// 2. 파트너 신청 제출 (이미지 업로드 -> RPC 호출)
+// 2. 파트너 신청 제출 (상태 체크 + 이미지 업로드 + RPC 호출)
 async function submitPartnerApplication() {
+    // [1] 권한 체크: '정상' 상태가 아니면 신청 차단 (B안 적용)
+    const myStatus = curMem.status || '';
+    if (myStatus !== '정상' && myStatus !== 'active') {
+        return showModal(`🚫 신청 불가\n\n현재 회원님의 상태는 '${myStatus}'입니다.\n출자금 납입 및 관리자 승인이 완료된\n'정상' 조합원만 파트너 신청이 가능합니다.`);
+    }
+
+    // [2] 입력값 확인
     const name = document.getElementById('ptName').value.trim();
     const desc = document.getElementById('ptDesc').value.trim();
     const link = document.getElementById('ptLink').value.trim();
@@ -3046,7 +3053,7 @@ async function submitPartnerApplication() {
         showLoading(true, '처리 중...');
 
         try {
-            // [A] 파일 업로드 (새 파일이 있는 경우만)
+            // [3] 파일 업로드 (새 파일이 있는 경우만)
             if(fileInput.files.length > 0) {
                 const file = fileInput.files[0];
                 const fileExt = file.name.split('.').pop();
@@ -3068,8 +3075,8 @@ async function submitPartnerApplication() {
                 logoUrl = urlData.publicUrl;
             }
 
-            // [B] RPC 호출 (DB 저장)
-            // ★ 수정됨: p_target_member_id에 현재 화면의 멤버ID(curMem.member_id)를 전달
+            // [4] RPC 호출 (DB 저장)
+            // p_target_member_id에 현재 보고 있는 프로필(curMem.member_id) 전달
             const { data: result, error: rpcError } = await _supabase.rpc('request_partner_change', {
                 p_target_member_id: curMem.member_id, 
                 p_name: name,
