@@ -263,13 +263,20 @@
                 </div>
             </div>
 
-            <div class="mb-3">
-                <label class="form-label fw-bold small text-secondary">이메일 주소</label>
-                <div class="input-group">
-                    <input type="email" id="emailInput" class="form-control form-control-lg" placeholder="example@email.com" onkeyup="if(event.key==='Enter') sendMagicLink()">
-                    <button class="btn btn-dark" type="button" onclick="sendMagicLink()">링크 받기</button>
-                </div>
-            </div>
+<div class="mb-3">
+    <label class="form-label fw-bold small text-secondary">이메일 주소</label>
+    <div class="input-group">
+        <input type="email" id="emailInput" class="form-control form-control-lg" placeholder="example@email.com" onkeyup="if(event.key==='Enter') sendMagicLink()">
+        <button class="btn btn-dark" type="button" onclick="sendMagicLink()">링크 받기</button>
+    </div>
+    
+    <div class="text-end mt-2">
+        <span class="small text-muted me-1">가입한 이메일이 기억나지 않나요?</span>
+        <a href="#" class="small fw-bold text-decoration-none text-success" onclick="openFindEmailModal()">
+            <i class="bi bi-search"></i> 이메일 찾기
+        </a>
+    </div>
+</div>
 
             <div id="sentMsgBox" class="text-center hidden mt-4 p-4 bg-light rounded">
                 <i class="bi bi-envelope-check text-success" style="font-size: 3rem;"></i>
@@ -536,6 +543,32 @@
     </div>
 </div>
 
+  <div id="findEmailModalOverlay" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="text-align:left; max-width:400px;">
+        <h5 class="fw-bold mb-3"><i class="bi bi-person-badge me-2"></i>이메일 찾기</h5>
+        <p class="small text-muted mb-4">
+            가입 시 등록한 <b>이름</b>과 <b>휴대폰 번호</b>를 입력해주세요.<br>
+            일치하는 정보가 있으면 이메일의 일부를 알려드립니다.
+        </p>
+        
+        <div class="mb-3">
+            <label class="form-label small fw-bold">이름</label>
+            <input type="text" id="findEmailName" class="form-control" placeholder="홍길동">
+        </div>
+
+        <div class="mb-4">
+            <label class="form-label small fw-bold">휴대폰 번호</label>
+            <input type="tel" id="findEmailPhone" class="form-control" 
+                   placeholder="010-0000-0000" maxlength="13" 
+                   oninput="autoHyphen(this)"> </div>
+
+        <div class="d-grid gap-2">
+            <button class="btn btn-success fw-bold" onclick="tryFindEmail()">이메일 확인</button>
+            <button class="btn btn-light btn-sm" onclick="document.getElementById('findEmailModalOverlay').style.display='none'">닫기</button>
+        </div>
+    </div>
+</div>
+
   <div id="writeModalOverlay" class="custom-modal-overlay">
     <div class="custom-modal-box" style="text-align:left; max-width:500px;">
         <h5 class="fw-bold mb-3">게시글 작성</h5>
@@ -775,6 +808,30 @@ let isBoardLoading = false;
         alert("시스템 연결 오류");
     }
 
+
+   // [신규] 친절한 에러 메시지 변환기
+function translateAuthError(errorMsg) {
+    if (!errorMsg) return '알 수 없는 오류가 발생했습니다.';
+    
+    const msg = errorMsg.toLowerCase();
+    
+    if (msg.includes('invalid login credentials') || msg.includes('user not found')) {
+        return '가입되지 않은 이메일이거나 정보가 올바르지 않습니다.';
+    }
+    if (msg.includes('rate limit') || msg.includes('too many requests')) {
+        return '너무 많은 요청이 감지되었습니다. 잠시 후(약 1분 뒤) 다시 시도해주세요.';
+    }
+    if (msg.includes('validation failed') || msg.includes('email')) {
+        return '이메일 주소 형식이 올바르지 않습니다. (예: user@example.com)';
+    }
+    if (msg.includes('security code')) {
+        return '보안 코드가 만료되었거나 틀렸습니다. 다시 로그인해주세요.';
+    }
+    
+    // 그 외 번역 안 된 에러는 원문 + 안내 표시
+    return '시스템 오류: ' + errorMsg + '\n(지속되면 사무국에 문의해주세요)';
+}
+   
     function showLoading(show, msg) {
         document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
         if(msg) document.getElementById('loadingMsg').innerText = msg;
@@ -814,25 +871,31 @@ window.addEventListener('DOMContentLoaded', async () => {
     // =========================================================================
     // 2. 로그인 & 데이터 로드
     // =========================================================================
-// [수정 2] 매직링크 발송: 기존 세션 클리어 로직 추가
+// [수정 2] 매직링크 발송: 에러 메시지 번역 적용
 async function sendMagicLink() {
     const email = document.getElementById('emailInput').value.trim();
-    if(!email.includes('@')) return showModal('올바른 이메일 주소를 입력해주세요.');
+    if(!email.includes('@')) return showModal('이메일 주소 형식이 올바르지 않습니다.\n(@가 포함되어야 합니다)');
     
     showLoading(true, '보안 연결 초기화 및 메일 발송 중...');
     
-    // 1. [핵심] 기존에 꼬여있을 수 있는 세션을 확실히 로그아웃 처리
+    // 1. 기존 세션 로그아웃
     await _supabase.auth.signOut();
 
-    // 2. 새로운 로그인 링크 발송
+    // 2. 로그인 링크 발송
     const { error } = await _supabase.auth.signInWithOtp({
         email: email,
-        options: { shouldCreateUser: true, emailRedirectTo: window.location.href }
+        options: { shouldCreateUser: false, emailRedirectTo: window.location.href } 
+        // 주의: shouldCreateUser: false로 설정하여 미가입자가 로그인 시도 시 에러가 나도록 유도할 수도 있습니다.
+        // 현재 정책(가입된 이메일만)에 맞게 false 권장. 만약 누구나 가입 가능하다면 true.
     });
     
     showLoading(false);
 
-    if(error) showModal('오류: ' + error.message);
+    if(error) {
+        // ★ 여기가 변경된 부분입니다.
+        const friendlyMsg = translateAuthError(error.message);
+        showModal(friendlyMsg);
+    }
     else {
         document.getElementById('sentMsgBox').classList.remove('hidden');
         document.getElementById('targetEmail').innerText = email;
@@ -2812,6 +2875,60 @@ function renderNoticeItems(list) {
     });
     html += '</div>';
     listArea.innerHTML = html;
+}
+
+   // [신규] 이메일 찾기 모달 열기
+function openFindEmailModal() {
+    // 입력창 초기화
+    document.getElementById('findEmailName').value = '';
+    document.getElementById('findEmailPhone').value = '';
+    document.getElementById('findEmailModalOverlay').style.display = 'flex';
+}
+
+// [신규] 이메일 찾기 실행
+async function tryFindEmail() {
+    const name = document.getElementById('findEmailName').value.trim();
+    const phone = document.getElementById('findEmailPhone').value.trim();
+
+    // 1. 유효성 검사 (전화번호 12자리 이상: 010-XXXX-XXXX)
+    if (!name || phone.length < 12) {
+        // 기존 알럿 대신 모달 사용 (depth 처리 적용)
+        setModalDepth(true); 
+        return showModal('이름과 휴대폰 번호를 정확히 입력해주세요.');
+    }
+
+    showLoading(true, '정보 확인 중...');
+
+    try {
+        // 2. RPC 호출 (보안 함수)
+        const { data, error } = await _supabase.rpc('find_member_email', {
+            p_name: name,
+            p_phone: phone
+        });
+
+        showLoading(false);
+
+        if (error) {
+            throw error;
+        }
+
+        // 3. 결과 처리
+        if (data && data.success) {
+            // 찾음
+            document.getElementById('findEmailModalOverlay').style.display = 'none';
+            showModal(`회원님의 이메일 주소 힌트입니다.\n\n📧 ${data.masked_email}\n\n위 주소로 다시 로그인해주세요.`);
+        } else {
+            // 못 찾음 (보안상 모호하게 메시지 처리)
+            setModalDepth(true);
+            showModal('일치하는 가입 정보를 찾을 수 없습니다.\n이름이나 전화번호를 확인해주세요.');
+        }
+
+    } catch (e) {
+        showLoading(false);
+        console.error(e);
+        setModalDepth(true);
+        showModal('오류가 발생했습니다: ' + e.message);
+    }
 }
 
 </script>
