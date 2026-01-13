@@ -31,7 +31,7 @@ document.addEventListener("DOMContentLoaded", function() {
             <ul>
               <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
               <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#privacyModal">개인정보처리방침</a></li>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#patchNoteModal">패치노트</a></li>
+              <li><i class="bi bi-chevron-right text-success"></i> <a href="#" onclick="openPatchModal(); return false;">패치노트</a></li>
             </ul>
           </div>
 
@@ -395,47 +395,7 @@ document.addEventListener("DOMContentLoaded", function() {
     </div>
   </div>
 
-  <div class="modal fade" id="patchNoteModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header" style="background:var(--color-primary); color:#fff;">
-          <h5 class="modal-title fw-bold"><i class="bi bi-tools"></i> 사이트 업데이트 내역</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body p-0">
-          <div class="list-group list-group-flush">
-            
-            <div class="list-group-item p-3">
-              <div class="d-flex w-100 justify-content-between">
-                <h6 class="mb-1 fw-bold text-success">v1.0.0 정식 오픈</h6>
-                <small class="text-muted">2026.01.05</small>
-              </div>
-              <p class="mb-1 small">용인모두의햇빛협동조합 공식 홈페이지가 오픈되었습니다.</p>
-              <ul class="small text-muted ps-3 mb-0">
-                <li>비밀번호 없는 간편 가입 시스템 적용</li>
-                <li>실시간 발전 현황 대시보드 구축</li>
-                <li>예상 배당금 계산기 기능 추가</li>
-              </ul>
-            </div>
 
-            <div class="list-group-item p-3 bg-light">
-              <div class="d-flex w-100 justify-content-between">
-                <h6 class="mb-1 fw-bold text-secondary">v0.9.0 베타 테스트</h6>
-                <small class="text-muted">2025.12.25</small>
-              </div>
-              <p class="mb-1 small">초기 디자인 및 기능 테스트 진행</p>
-            </div>
-
-          </div>
-        </div>
-        <div class="modal-footer">
-          <small class="text-muted me-auto">버그 제보: yonginsolar@gmail.com</small>
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-        </div>
-      </div>
-    </div>
-  </div>
-    `;
 
     // 3. 화면에 HTML 주입
     // (1) 푸터 넣기
