@@ -4,8 +4,6 @@
  * 연결 테이블: sys_home_patch_note
  */
 
-// [중요] 기존 변수명(_client)을 이 파일에서 쓰는 이름(_supabase)으로 연결
-const _supabase = typeof _client !== 'undefined' ? _client : null;
 
 // 0. CSS 스타일 주입 (.hidden 클래스 처리)
 // 부트스트랩 5에는 hidden 클래스가 없으므로 강제로 스타일을 넣어줍니다.
@@ -76,10 +74,10 @@ document.body.insertAdjacentHTML('beforeend', patchNoteModalHTML);
 
 // 1. 최신 버전 조회 (index.html 하단 표시용 - 필요 시 사용)
 async function loadCurrentVersion() {
-    if (typeof _supabase === 'undefined') return;
+    if (typeof _client === 'undefined') return;
 
     // 테이블명 변경: sys_home_patch_note
-    const { data, error } = await _supabase
+    const { data, error } = await _client
         .from('sys_home_patch_note')
         .select('version')
         .order('release_date', { ascending: false }) // 날짜 최신순
@@ -130,7 +128,7 @@ async function loadPatchList() {
     listEl.innerHTML = '<div class="p-4 text-center"><div class="spinner-border text-primary"></div></div>';
 
     // 테이블명 변경: sys_home_patch_note
-    const { data, error } = await _supabase
+    const { data, error } = await _client
         .from('sys_home_patch_note')
         .select('*')
         .order('release_date', { ascending: false })
@@ -189,7 +187,7 @@ async function savePatchNote() {
     if(!version || !title || !content) return alert("내용을 모두 입력해주세요.");
 
     // 테이블명 변경: sys_home_patch_note
-    const { error } = await _supabase.from('sys_home_patch_note').insert({
+    const { error } = await _client.from('sys_home_patch_note').insert({
         version: version,
         release_date: date,
         title: title,
@@ -219,7 +217,7 @@ async function deletePatchNote(id) {
     if(!confirm("이 패치 내역을 삭제하시겠습니까? (복구 불가)")) return;
     
     // 테이블명 변경: sys_home_patch_note
-    const { error } = await _supabase
+    const { error } = await _client
         .from('sys_home_patch_note')
         .delete()
         .eq('id', id);
