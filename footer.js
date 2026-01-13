@@ -31,7 +31,10 @@ document.addEventListener("DOMContentLoaded", function() {
             <ul>
               <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
               <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#privacyModal">개인정보처리방침</a></li>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="#" onclick="openPatchModal(); return false;">패치노트</a></li>
+              <li>
+  <i class="bi bi-chevron-right text-success"></i> 
+  <a href="javascript:void(0)" onclick="openPatchModal()">패치노트</a>
+</li>
             </ul>
           </div>
 
