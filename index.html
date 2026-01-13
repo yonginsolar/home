@@ -319,13 +319,13 @@
     </div>
 
     <div class="row">
-      
       <div class="col-lg-4 col-md-6 d-flex align-items-stretch" data-aos="zoom-in" data-aos-delay="100">
         <div class="icon-box w-100 text-center p-4 border rounded-3 d-flex flex-column justify-content-center">
           <div class="icon mb-3"><i class="bi bi-file-earmark-text fs-1 text-success"></i></div>
           <h4><a href="rules.html#pills-articles">정관 (Articles)</a></h4>
           <p class="mb-4">조합 운영의 기본 원칙을 담은 정관입니다.</p>
-          <div class="mt-auto"> <a href="rules.html#pills-articles" target="_blank" class="btn btn-outline-success rounded-pill px-4">
+          <div class="mt-auto">
+             <a href="rules.html#pills-articles" target="_blank" class="btn btn-outline-success rounded-pill px-4">
                <i class="bi bi-scroll"></i> 정관 전체보기
              </a>
           </div>
@@ -353,11 +353,6 @@
              <h4><a href="#">최근 공지사항</a></h4>
           </div>
 
-          <div class="input-group input-group-sm mb-3">
-            <input type="text" id="notice-search-input" class="form-control" placeholder="제목/내용 검색" onkeyup="filterNotices()">
-            <button class="btn btn-outline-secondary" type="button"><i class="bi bi-search"></i></button>
-          </div>
-
           <ul id="recent-notices-list" class="list-unstyled flex-grow-1 mb-0 text-start">
              <li class="text-center py-4 text-muted">
                  <div class="spinner-border spinner-border-sm text-success" role="status"></div>
@@ -365,10 +360,17 @@
              </li>
           </ul>
 
+          <div class="mt-3 text-center">
+             <button onclick="openNoticeSearchModal()" class="btn btn-sm btn-outline-secondary rounded-pill px-4">
+               더 보기 +
+             </button>
+          </div>
+
         </div>
       </div>
 
-    </div> </div>
+    </div>
+  </div>
 </section>
     
 
@@ -621,7 +623,56 @@
   </div>
 </div>
 
+<div class="modal fade" id="noticeSearchModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg"> <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold"><i class="bi bi-search me-2"></i>공지사항 검색</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        
+        <div class="input-group mb-3">
+          <input type="text" id="modal-search-input" class="form-control" placeholder="제목이나 내용을 입력하세요" onkeyup="filterNoticesInModal()">
+          <button class="btn btn-outline-secondary" type="button"><i class="bi bi-search"></i></button>
+        </div>
 
+        <div style="max-height: 400px; overflow-y: auto;">
+            <ul id="modal-notice-list" class="list-group list-group-flush">
+               </ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="noticeDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header" style="background-color: #f8f9fa;">
+        <h5 class="modal-title fw-bold" id="notice-read-title">제목</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="d-flex justify-content-between text-muted border-bottom pb-2 mb-4">
+            <span id="notice-read-cat" class="badge bg-dark">공지</span>
+            <small id="notice-read-date">202X.XX.XX</small>
+        </div>
+        <div id="notice-read-content" style="min-height: 200px; line-height: 1.8; color: #333;">
+           </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-dark" onclick="openNoticeSearchModal()">목록으로</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+  
 
   
   <script src="footer.js"></script>
@@ -812,36 +863,14 @@ async function fetchStats() {
 /* =================================================================
    전역 변수 선언 (데이터 보관용)
    ================================================================= */
-let g_notices_list = [];   // 검색 기능을 위해 공지사항 전체 데이터 저장
+
 let g_plants_list = [];    // 모달 연결을 위해 발전소 전체 데이터 저장
 
 /* =================================================================
    [기능 1] 공지사항 (Notices) - 검색 및 모달 구현
    ================================================================= */
 
-// 1. 공지사항 데이터 가져오기
-async function fetchNotices() {
-    // 검색 기능을 위해 넉넉하게 가져옵니다 (예: 최근 50개)
-    const { data: notices, error } = await _client.from('coop_notices')
-        .select('*')
-        .eq('status', 'published') // 게시된 것만
-        .order('created_at', { ascending: false })
-        .limit(50);
 
-    const listContainer = document.getElementById('recent-notices-list');
-    if (!listContainer) return;
-
-    if (error || !notices || notices.length === 0) {
-        listContainer.innerHTML = '<li class="text-muted small text-center">등록된 공지사항이 없습니다.</li>';
-        return;
-    }
-
-    // 전역 변수에 저장 (검색 필터링용)
-    g_notices_list = notices;
-
-    // 초기 렌더링 (전체 목록 표시, 혹은 상위 5개만 표시하려면 slice 사용)
-    renderNotices(g_notices_list.slice(0, 5)); 
-}
 
 // 2. 공지사항 화면 그리기 (검색 시 재사용됨)
 function renderNotices(dataList) {
@@ -893,23 +922,142 @@ function filterNotices() {
     renderNotices(filtered.length > 0 ? filtered : []); 
 }
 
-// 4. [상세 모달] 공지사항 클릭 시 호출
-function openNoticeDetail(id) {
-    // 저장된 데이터에서 해당 ID 찾기
-    const notice = g_notices_list.find(n => n.id === id);
-    if(!notice) return;
+/* =================================================================
+   [기능 1] 공지사항 (Notices) - 메인 노출 & 검색 모달 & 상세 모달
+   ================================================================= */
 
-    // 모달 내용 채우기
-    document.getElementById('notice-modal-title').innerText = notice.title;
-    document.getElementById('notice-modal-cat').innerText = notice.category || '일반';
-    document.getElementById('notice-modal-date').innerText = notice.created_at.split('T')[0];
+// 데이터 보관용 전역 변수
+let g_notices_list = []; 
+
+// 1. 공지사항 데이터 가져오기 (최초 1회 실행)
+async function fetchNotices() {
+    // 넉넉하게 50개 가져옴
+    const { data: notices, error } = await _client.from('coop_notices')
+        .select('*')
+        .eq('status', 'published')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+    const mainList = document.getElementById('recent-notices-list');
     
-    // 본문 줄바꿈 처리 (\n -> <br>)
-    const contentHtml = notice.content ? notice.content.replace(/\n/g, '<br>') : '내용이 없습니다.';
-    document.getElementById('notice-modal-content').innerHTML = contentHtml;
+    if (error || !notices || notices.length === 0) {
+        if(mainList) mainList.innerHTML = '<li class="text-muted small text-center">등록된 글이 없습니다.</li>';
+        return;
+    }
 
-    // 부트스트랩 모달 띄우기
-    new bootstrap.Modal(document.getElementById('noticeDetailModal')).show();
+    g_notices_list = notices;
+
+    // [메인 화면]에는 최신 5개만 그리기
+    renderMainNotices(notices.slice(0, 5));
+}
+
+// 2. 메인 화면 리스트 렌더링 (심플 버전)
+function renderMainNotices(items) {
+    const listEl = document.getElementById('recent-notices-list');
+    if(!listEl) return;
+
+    let html = '';
+    items.forEach(n => {
+        const badgeClass = n.category === '공지' ? 'bg-primary' : 'bg-secondary';
+        const dateStr = n.created_at.split('T')[0].replaceAll('-', '.');
+        
+        // 클릭하면 바로 '상세 읽기 모달' 오픈
+        html += `
+          <li class="mb-2 d-flex align-items-center border-bottom pb-2" style="cursor:pointer;" onclick="openNoticeDetail('${n.id}')">
+             <span class="badge ${badgeClass} me-2" style="flex-shrink:0; font-size:0.75rem;">${n.category}</span> 
+             <span class="text-dark text-truncate" style="flex-grow:1; max-width: 180px;">${n.title}</span>
+             <small class="text-muted ms-2" style="font-size:0.8rem;">${dateStr}</small>
+          </li>
+        `;
+    });
+    listEl.innerHTML = html;
+}
+
+// 3. [더 보기 버튼] 클릭 시 -> 검색 모달 열기
+function openNoticeSearchModal() {
+    // 1) 검색 모달 리스트에 전체 데이터 뿌리기
+    renderModalList(g_notices_list);
+    
+    // 2) 검색창 초기화
+    const input = document.getElementById('modal-search-input');
+    if(input) input.value = '';
+
+    // 3) 상세 모달이 열려있다면 닫고, 검색 모달 열기 (순서 중요)
+    // 부트스트랩 모달 인스턴스 가져오기
+    const detailEl = document.getElementById('noticeDetailModal');
+    const searchEl = document.getElementById('noticeSearchModal');
+    
+    const detailModal = bootstrap.Modal.getInstance(detailEl);
+    if(detailModal) detailModal.hide(); // 상세창 닫기
+
+    const searchModal = new bootstrap.Modal(searchEl);
+    searchModal.show(); // 검색창 열기
+}
+
+// 4. 검색 모달 내부 리스트 렌더링
+function renderModalList(items) {
+    const modalList = document.getElementById('modal-notice-list');
+    if(!modalList) return;
+
+    if(items.length === 0) {
+        modalList.innerHTML = '<div class="text-center py-3 text-muted">검색 결과가 없습니다.</div>';
+        return;
+    }
+
+    let html = '';
+    items.forEach(n => {
+        const dateStr = n.created_at.split('T')[0];
+        // 클릭 시 '상세 읽기 모달'로 이동
+        html += `
+          <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+              onclick="openNoticeDetail('${n.id}')" style="cursor:pointer;">
+             <div>
+                <span class="badge bg-light text-dark border me-1">${n.category}</span>
+                <span class="fw-bold text-dark">${n.title}</span>
+             </div>
+             <small class="text-muted">${dateStr}</small>
+          </li>
+        `;
+    });
+    modalList.innerHTML = html;
+}
+
+// 5. [검색 기능] 모달 내부에서 타이핑 할 때
+function filterNoticesInModal() {
+    const input = document.getElementById('modal-search-input');
+    const keyword = input.value.toLowerCase().trim();
+
+    const filtered = g_notices_list.filter(n => {
+        const t = n.title ? n.title.toLowerCase() : '';
+        const c = n.content ? n.content.toLowerCase() : '';
+        return t.includes(keyword) || c.includes(keyword);
+    });
+
+    renderModalList(filtered);
+}
+
+// 6. [상세 보기] 글 클릭 시 -> 상세 모달 오픈
+function openNoticeDetail(id) {
+    const n = g_notices_list.find(item => item.id === id);
+    if(!n) return;
+
+    // 1) 내용 채우기
+    document.getElementById('notice-read-title').innerText = n.title;
+    document.getElementById('notice-read-cat').innerText = n.category;
+    document.getElementById('notice-read-date').innerText = n.created_at.split('T')[0];
+    
+    // 줄바꿈 처리
+    const contentHtml = n.content ? n.content.replace(/\n/g, '<br>') : '';
+    document.getElementById('notice-read-content').innerHTML = contentHtml;
+
+    // 2) 검색 모달이 열려있으면 닫기 (중첩 방지)
+    const searchEl = document.getElementById('noticeSearchModal');
+    const searchModal = bootstrap.Modal.getInstance(searchEl);
+    if(searchModal) searchModal.hide();
+
+    // 3) 상세 모달 열기
+    const detailModal = new bootstrap.Modal(document.getElementById('noticeDetailModal'));
+    detailModal.show();
 }
 
 
