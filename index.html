@@ -336,14 +336,18 @@
             </div>
           </div>
 
-          <div class="col-lg-4 col-md-6 d-flex align-items-stretch mt-4 mt-lg-0" data-aos="zoom-in" data-aos-delay="300">
-            <div class="icon-box" style="width:100%; text-align:center; padding:30px; border:1px solid #eee; border-radius:10px;">
-              <div class="icon" style="margin-bottom:15px;"><i class="bi bi-megaphone fs-1 text-success"></i></div>
-              <h4><a href="#">최근 공지사항</a></h4>
-              <ul id="recent-notices-list" class="text-start mt-3" ...>
-   </ul>
-            </div>
-          </div>
+<div class="icon-box" style="width:100%; text-align:center; padding:30px; border:1px solid #eee; border-radius:10px;">
+  <div class="icon" style="margin-bottom:15px;"><i class="bi bi-megaphone fs-1 text-success"></i></div>
+  <h4><a href="#">최근 공지사항</a></h4>
+  
+  <div class="input-group input-group-sm mt-3 mb-3">
+    <input type="text" id="notice-search-input" class="form-control" placeholder="검색어를 입력하세요..." onkeyup="filterNotices()">
+    <button class="btn btn-outline-secondary" type="button"><i class="bi bi-search"></i></button>
+  </div>
+
+  <ul id="recent-notices-list" class="text-start mt-3 ps-0" style="list-style: none;">
+    </ul>
+</div>
         </div>
       </div>
     </section>
@@ -551,7 +555,52 @@
   </div>
 </div>
 
+<div class="modal fade" id="noticeDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg"> <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold" id="notice-modal-title">공지사항 제목</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between text-muted border-bottom pb-2 mb-3">
+            <span id="notice-modal-cat" class="badge bg-secondary">분류</span>
+            <small id="notice-modal-date">202X.XX.XX</small>
+        </div>
+        <div id="notice-modal-content" style="min-height: 200px; line-height: 1.6; word-break: keep-all;">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
 
+<div class="modal fade" id="plantDetailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold" id="plant-modal-title">발전소 이름</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3 rounded overflow-hidden" style="max-height: 250px;">
+             <img id="plant-modal-img" src="" class="w-100 h-100" style="object-fit:cover;" alt="발전소 전경">
+        </div>
+        
+        <ul class="list-group list-group-flush" id="plant-modal-info-list">
+           </ul>
+        
+        <div id="plant-modal-status-box" class="alert mt-3 text-center" role="alert">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a href="#" id="plant-modal-link" class="btn btn-success" target="_blank" style="display:none;">모니터링 보기</a>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 
 
@@ -741,31 +790,154 @@ async function fetchStats() {
       }
     }
 
-    // [2] 발전소 현황
-// [1] 발전소 현황 (Portfolio) - "운영중"인 것만 표시
-// [수정] 발전소 현황 (Portfolio + Progress 통합 호출)
-    async function fetchPlants() {
-        // 1. 모든 발전소 데이터 가져오기
-        const { data } = await _client.from('site_power_plants').select('*').order('display_order');
-        
-        if(!data) return; // 데이터 없으면 중단
+/* =================================================================
+   전역 변수 선언 (데이터 보관용)
+   ================================================================= */
+let g_notices_list = [];   // 검색 기능을 위해 공지사항 전체 데이터 저장
+let g_plants_list = [];    // 모달 연결을 위해 발전소 전체 데이터 저장
 
-        // 2. [Portfolio 섹션] 그리기 (운영중인 것만)
-        const operatingPlants = data.filter(p => p.status === '운영중');
-        const pfContainer = document.getElementById('portfolio-container');
+/* =================================================================
+   [기능 1] 공지사항 (Notices) - 검색 및 모달 구현
+   ================================================================= */
+
+// 1. 공지사항 데이터 가져오기
+async function fetchNotices() {
+    // 검색 기능을 위해 넉넉하게 가져옵니다 (예: 최근 50개)
+    const { data: notices, error } = await _client.from('coop_notices')
+        .select('*')
+        .eq('status', 'published') // 게시된 것만
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+    const listContainer = document.getElementById('recent-notices-list');
+    if (!listContainer) return;
+
+    if (error || !notices || notices.length === 0) {
+        listContainer.innerHTML = '<li class="text-muted small text-center">등록된 공지사항이 없습니다.</li>';
+        return;
+    }
+
+    // 전역 변수에 저장 (검색 필터링용)
+    g_notices_list = notices;
+
+    // 초기 렌더링 (전체 목록 표시, 혹은 상위 5개만 표시하려면 slice 사용)
+    renderNotices(g_notices_list.slice(0, 5)); 
+}
+
+// 2. 공지사항 화면 그리기 (검색 시 재사용됨)
+function renderNotices(dataList) {
+    const listContainer = document.getElementById('recent-notices-list');
+    if(!listContainer) return;
+
+    if(dataList.length === 0) {
+        listContainer.innerHTML = '<li class="text-muted small text-center py-3">검색 결과가 없습니다.</li>';
+        return;
+    }
+
+    let html = '';
+    dataList.forEach(n => {
+        // 카테고리별 뱃지 색상 구분
+        const badgeClass = n.category === '공지' ? 'bg-primary' : (n.category === '뉴스' ? 'bg-success' : 'bg-secondary');
+        const dateStr = n.created_at.split('T')[0].replaceAll('-', '.');
         
-        if(pfContainer) {
+        // ★ 핵심: onclick에 ID를 넘겨서 모달을 엽니다. (alert 제거됨)
+        html += `
+          <li class="mb-2 d-flex align-items-center border-bottom pb-2">
+             <span class="badge ${badgeClass} me-2" style="flex-shrink:0;">${n.category}</span> 
+             <a href="javascript:void(0);" class="text-dark text-decoration-none text-truncate" 
+                onclick="openNoticeDetail('${n.id}')" style="max-width: 60%; display:inline-block;">
+                ${n.title}
+             </a>
+             <small class="text-muted ms-auto">${dateStr}</small>
+          </li>
+        `;
+    });
+    listContainer.innerHTML = html;
+}
+
+// 3. [검색 기능] 키보드 입력 시 실시간 필터링
+function filterNotices() {
+    const input = document.getElementById('notice-search-input');
+    if(!input) return;
+
+    const keyword = input.value.toLowerCase().trim(); // 소문자로 변환하여 비교
+
+    // 제목(title) 또는 내용(content)에 검색어가 포함된 것만 필터링
+    const filtered = g_notices_list.filter(n => {
+        const titleMatch = n.title && n.title.toLowerCase().includes(keyword);
+        const contentMatch = n.content && n.content.toLowerCase().includes(keyword);
+        return titleMatch || contentMatch;
+    });
+
+    // 필터링된 결과로 다시 그리기 (최대 5개만 보여줄지, 전체 다 보여줄지는 선택)
+    // 검색 중일 때는 사용자가 결과를 찾고 싶어 하므로 개수 제한 없이 보여주는 것이 UX상 좋습니다.
+    renderNotices(filtered.length > 0 ? filtered : []); 
+}
+
+// 4. [상세 모달] 공지사항 클릭 시 호출
+function openNoticeDetail(id) {
+    // 저장된 데이터에서 해당 ID 찾기
+    const notice = g_notices_list.find(n => n.id === id);
+    if(!notice) return;
+
+    // 모달 내용 채우기
+    document.getElementById('notice-modal-title').innerText = notice.title;
+    document.getElementById('notice-modal-cat').innerText = notice.category || '일반';
+    document.getElementById('notice-modal-date').innerText = notice.created_at.split('T')[0];
+    
+    // 본문 줄바꿈 처리 (\n -> <br>)
+    const contentHtml = notice.content ? notice.content.replace(/\n/g, '<br>') : '내용이 없습니다.';
+    document.getElementById('notice-modal-content').innerHTML = contentHtml;
+
+    // 부트스트랩 모달 띄우기
+    new bootstrap.Modal(document.getElementById('noticeDetailModal')).show();
+}
+
+
+/* =================================================================
+   [기능 2] 발전소 (Power Plants) - 완전 동적화 & 단일 모달
+   ================================================================= */
+
+// 1. 발전소 데이터 로드 및 분배
+async function fetchPlants() {
+    const { data, error } = await _client.from('site_power_plants').select('*').order('display_order');
+    
+    if(error || !data) return;
+
+    // 전역 변수에 저장 (모달에서 쓰기 위함)
+    g_plants_list = data;
+
+    // 1) [Portfolio 섹션] - '운영중'인 발전소만 카드 형태로 표시
+    // HTML ID가 'power-plants-container' 인지 'portfolio-container' 인지 확인 필요.
+    // 사용자가 주신 HTML에는 id="power-plants-container"가 내부에 있습니다.
+    const pfContainer = document.getElementById('power-plants-container'); 
+    
+    if(pfContainer) {
+        const operatingPlants = data.filter(p => p.status === '운영중');
+        
+        if(operatingPlants.length === 0) {
+            pfContainer.innerHTML = '<div class="col-12 text-center py-5">현재 운영 중인 발전소가 없습니다.</div>';
+        } else {
             let pfHtml = '';
             operatingPlants.forEach(p => {
+                 // 이미지가 없으면 플레이스홀더 사용
+                 const imgUrl = p.image_url || 'https://via.placeholder.com/800x600?text=Solar+Plant';
+                 
                  pfHtml += `
-                  <div class="col-lg-4 col-md-6 portfolio-item filter-app">
-                    <div class="portfolio-wrap">
-                      <img src="assets/img/portfolio/portfolio-1.jpg" class="img-fluid" alt="">
-                      <div class="portfolio-info">
-                        <h4>${p.name}</h4>
-                        <p>${p.capacity}kW | ${p.status}</p>
-                        <div class="portfolio-links">
-                          <a href="${p.monitor_url || '#'}" target="_blank" title="모니터링"><i class="bx bx-link"></i></a>
+                  <div class="col-lg-4 col-md-6 portfolio-item mb-4" data-aos="fade-up">
+                    <div class="portfolio-wrap shadow-sm rounded overflow-hidden">
+                      <div style="height:250px; overflow:hidden;">
+                        <img src="${imgUrl}" class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${p.name}">
+                      </div>
+                      <div class="portfolio-info p-3 bg-white">
+                        <h4 class="fw-bold text-dark">${p.name}</h4>
+                        <p class="text-muted small mb-2">${p.capacity}kW | ${p.location || '용인시'}</p>
+                        
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <span class="badge bg-success">정상 가동 중</span>
+                            <button class="btn btn-sm btn-outline-primary rounded-pill" onclick="openPlantDetail('${p.id}')">
+                                <i class="bi bi-plus-lg"></i> 상세 정보
+                            </button>
                         </div>
                       </div>
                     </div>
@@ -773,10 +945,78 @@ async function fetchStats() {
             });
             pfContainer.innerHTML = pfHtml;
         }
+    }
 
-        // 3. [Progress 섹션] 그리기 호출 ★ (이게 핵심입니다!)
+    // 2) [Progress 섹션] - '건립 추진 중' 등 나머지 발전소 표시 (기존 함수 재사용)
+    // renderProgressSection 함수는 기존에 만드신 것을 그대로 둡니다.
+    // 단, 데이터가 g_plants_list에 있으므로 그대로 넘겨줍니다.
+    if(typeof renderProgressSection === 'function') {
         renderProgressSection(data);
     }
+}
+
+// 2. [상세 모달] 발전소 상세 정보 팝업
+function openPlantDetail(id) {
+    const p = g_plants_list.find(item => item.id === id);
+    if(!p) return;
+
+    // 1) 기본 정보 채우기
+    document.getElementById('plant-modal-title').innerText = p.name;
+    
+    const imgEl = document.getElementById('plant-modal-img');
+    imgEl.src = p.image_url || 'https://via.placeholder.com/800x400?text=No+Image';
+
+    // 2) 리스트 구성 (동적으로 생성)
+    const listContainer = document.getElementById('plant-modal-info-list');
+    let listHtml = `
+        <li class="list-group-item d-flex justify-content-between">
+          <span>설비 용량</span> <strong>${p.capacity} kW</strong>
+        </li>
+        <li class="list-group-item d-flex justify-content-between">
+          <span>위치</span> <span>${p.location || '-'}</span>
+        </li>
+        <li class="list-group-item d-flex justify-content-between">
+          <span>진행 상태</span> <strong class="text-primary">${p.status}</strong>
+        </li>
+    `;
+    
+    // 완공일이 있으면 추가
+    if(p.completion_date) {
+        listHtml += `
+        <li class="list-group-item d-flex justify-content-between">
+          <span>준공일(예정)</span> <strong>${p.completion_date}</strong>
+        </li>`;
+    }
+    listContainer.innerHTML = listHtml;
+
+    // 3) 상태 메시지 박스 및 버튼 처리
+    const statusBox = document.getElementById('plant-modal-status-box');
+    const linkBtn = document.getElementById('plant-modal-link');
+
+    if(p.status === '운영중') {
+        statusBox.className = "alert alert-success text-center";
+        statusBox.innerHTML = '<i class="bi bi-check-circle-fill"></i> 현재 정상적으로 전력을 생산하고 있습니다.';
+        
+        // 모니터링 링크가 있으면 버튼 활성화
+        if(p.monitor_url) {
+            linkBtn.href = p.monitor_url;
+            linkBtn.style.display = 'inline-block';
+            linkBtn.innerText = '실시간 발전량 모니터링';
+        } else {
+            linkBtn.style.display = 'none';
+        }
+    } else {
+        // 공사 중 등 다른 상태
+        statusBox.className = "alert alert-warning text-center";
+        const progressRate = p.progress_rate || 0;
+        statusBox.innerHTML = `<i class="bi bi-tools"></i> 현재 진행률 <strong>${progressRate}%</strong> 입니다.`;
+        
+        linkBtn.style.display = 'none'; // 공사 중엔 모니터링 없음
+    }
+
+    // 모달 띄우기
+    new bootstrap.Modal(document.getElementById('plantDetailModal')).show();
+}
 
     // [수정] 건립 현황 (Progress) 그리기 함수
 // [수정] 건립 현황 그리기 (디자인 업그레이드 & 단계별 표시)
@@ -991,34 +1231,7 @@ async function fetchStats() {
 
 
 
-    // [5] 공지사항
-    async function fetchNotices() {
-      const { data: notices } = await _client.from('coop_notices')
-        .select('*')
-        .eq('status', 'published')
-        .order('created_at', { ascending: false })
-        .limit(5);
 
-      const list = document.getElementById('recent-notices-list');
-      if (!notices || notices.length === 0) {
-        list.innerHTML = '<li class="text-muted small">등록된 공지사항이 없습니다.</li>';
-        return;
-      }
-      
-      let html = '';
-      notices.forEach(n => {
-        const badge = n.category === '공지' ? 'bg-primary' : 'bg-secondary';
-        const date = n.created_at.split('T')[0].replaceAll('-','.');
-        html += `
-          <li class="mb-2 d-flex align-items-center">
-             <span class="badge ${badge} me-2" style="flex-shrink:0;">${n.category}</span> 
-             <a href="#" class="text-dark text-decoration-none text-truncate" onclick="alert('${n.title}\\n\\n(상세보기 준비중)')">${n.title}</a>
-             <small class="text-muted ms-auto">${date}</small>
-          </li>
-        `;
-      });
-      list.innerHTML = html;
-    }
 
 
 // [보조 함수] 숫자 애니메이션 및 쉼표 찍기
