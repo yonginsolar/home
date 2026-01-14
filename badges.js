@@ -103,120 +103,100 @@ const Badges = {
     },
 
 // ============================================================
-    // 2. 뱃지 현황판 렌더링 (모바일 터치 툴팁 기능 추가됨)
+    // 2. 뱃지 현황판 렌더링 (정보창 표시 & 클릭 선택 방식)
     // ============================================================
     async render(containerId, memberUid, supabase) {
         const container = document.getElementById(containerId);
+        const infoBox = document.getElementById('selectedBadgeInfo'); // 정보창
         if (!container) return;
 
-        // [기존 로직 유지] 전체 뱃지 로드
+        // 전체 뱃지 로드
         const allBadges = await this.getAll(supabase);
         if (!allBadges.length) {
-            container.innerHTML = '<div class="text-muted small text-center">등록된 뱃지가 없습니다.</div>';
+            container.innerHTML = '<div class="text-muted small text-center w-100">등록된 뱃지가 없습니다.</div>';
             return;
         }
 
-        // [기존 로직 유지] 내 뱃지 로드
+        // 내 뱃지 로드
         const { data: myBadges, error } = await supabase
             .from("coop_member_badges")
             .select("badge_id, granted_at")
             .eq("member_uid", memberUid);
 
-        if (error) console.error("내 뱃지 조회 실패:", error);
-
-        // [기존 로직 유지] 매핑 최적화
         const myBadgeSet = new Set((myBadges ?? []).map(b => b.badge_id));
         const myBadgeMap = new Map((myBadges ?? []).map(b => [b.badge_id, b.granted_at]));
 
-        let html = ''; // flex 컨테이너는 HTML 파일에 이미 선언됨
+        let html = '';
         
         allBadges.forEach(badge => {
             const hasBadge = myBadgeSet.has(badge.id);
-            let tooltipText = "";
-            let grantedDateStr = "";
+            let dateStr = "";
+            let descStr = badge.description || "설명 없음";
             
-            // [기존 로직 유지] 텍스트 생성
             if (hasBadge) {
                 const d = this._utils.parseDate(myBadgeMap.get(badge.id));
-                grantedDateStr = d ? d.toLocaleDateString() : "";
-                tooltipText = `🎉 획득: ${grantedDateStr || "알 수 없음"}`;
+                dateStr = d ? d.toLocaleDateString() : "알 수 없음";
             } else {
-                tooltipText = `🔒 조건: ${badge.description || "비공개"}`;
+                descStr = "🔒 " + (badge.description || "미획득");
             }
 
-            // [기존 로직 유지] 스타일 결정
             const { bg, fg } = this._utils.resolveStyle(badge.color);
             const style = hasBadge
                 ? `background-color: ${bg}; color: ${fg}; box-shadow: 0 2px 5px rgba(0,0,0,0.2);`
                 : `background-color: #f0f0f0; color: #ccc; filter: grayscale(100%); opacity: 0.6;`;
 
-            // [수정된 부분] HTML 구조 변경: title 속성 대신 내부 div(custom-badge-tooltip) 추가
-            // 모바일 터치를 위해 pointer-events 등을 제어할 수 있는 구조로 변경
+            // 데이터 속성(dataset)에 정보 저장
             html += `
-                <div class="badge-item position-relative text-center p-2 rounded cursor-pointer user-select-none"
-                     style="width: 80px; min-width: 80px; ${style}"
-                     data-badge-id="${badge.id}">
+                <div class="badge-item text-center p-2 rounded cursor-pointer user-select-none"
+                     style="width: 80px; min-width: 80px; ${style} transition: transform 0.2s;"
+                     data-name="${this._utils.escapeAttr(badge.name)}"
+                     data-icon="${this._utils.escapeAttr(badge.icon || "🏅")}"
+                     data-has="${hasBadge}"
+                     data-date="${dateStr}"
+                     data-desc="${this._utils.escapeAttr(descStr)}"
+                     onclick="Badges.selectBadge(this)">
                     
                     <div style="font-size: 1.5rem;">${this._utils.escapeHtml(badge.icon || "🏅")}</div>
                     <div style="font-size: 0.7rem; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                         ${this._utils.escapeHtml(badge.name)}
                     </div>
-
-                    <div class="custom-badge-tooltip">
-                        ${this._utils.escapeHtml(tooltipText)}
-                    </div>
                 </div>`;
         });
 
         container.innerHTML = html;
+    },
 
-        // ---------------------------------------------------------
-        // [신규] 모바일 터치 이벤트 핸들러 (Touch & Dismiss Logic)
-        // ---------------------------------------------------------
+    // [신규] 뱃지 클릭 시 정보창 업데이트 함수
+    selectBadge(element) {
+        // 1. 기존 선택 해제
+        document.querySelectorAll('.badge-item').forEach(el => el.classList.remove('selected'));
         
-        // 1. 기존 리스너 제거 (중복 방지, 안전장치)
-        const oldHandler = container._badgeClickHandler;
-        if (oldHandler) container.removeEventListener('click', oldHandler);
+        // 2. 현재 선택 표시
+        element.classList.add('selected');
 
-        // 2. 새 리스너 정의 (이벤트 위임 방식)
-        const clickHandler = (e) => {
-            // 클릭된 요소가 뱃지(.badge-item)인지 확인
-            const item = e.target.closest('.badge-item');
-            
-            // 뱃지가 아니면 무시 (컨테이너 빈 공간 등) -> Global Dismiss가 처리함
-            if (!item) return;
+        // 3. 데이터 추출
+        const name = element.dataset.name;
+        const icon = element.dataset.icon;
+        const has = element.dataset.has === 'true';
+        const date = element.dataset.date;
+        const desc = element.dataset.desc;
+        const infoBox = document.getElementById('selectedBadgeInfo');
 
-            // 현재 뱃지의 상태 확인 (이미 켜져있는지)
-            const isActive = item.classList.contains('active');
-
-            // [Step 1] 다른 모든 뱃지의 active 끔 (하나만 켜기 위해)
-            container.querySelectorAll('.badge-item').forEach(el => el.classList.remove('active'));
-
-            // [Step 2] 아까 켜져있던 게 아니면, 지금 터치한 녀석만 켬 (토글 효과)
-            if (!isActive) {
-                item.classList.add('active');
-            }
-            
-            // 이벤트 전파 중단 (Global Dismiss 방지)
-            e.stopPropagation();
-        };
-
-        // 3. 리스너 부착
-        container.addEventListener('click', clickHandler);
-        container._badgeClickHandler = clickHandler;
-
-        // 4. [Global Dismiss] 화면 아무데나 누르면 툴팁 끄기
-        // (단, 뱃지 클릭 시에는 stopPropagation으로 여기 도달 안 함)
-        const globalDismiss = () => {
-            if(document.body.contains(container)) {
-                container.querySelectorAll('.badge-item').forEach(el => el.classList.remove('active'));
-            }
-        };
-        
-        // document에 리스너가 중복해서 쌓이지 않게 체크 (Badges 객체에 플래그 저장)
-        if (!Badges._globalDismissAttached) {
-            document.addEventListener('click', globalDismiss);
-            Badges._globalDismissAttached = true;
+        // 4. 정보창 내용 업데이트
+        if(has) {
+            infoBox.innerHTML = `
+                <div class="fs-1 mb-1">${icon}</div>
+                <h6 class="fw-bold text-dark">${name}</h6>
+                <div class="text-success small fw-bold mb-2">🎉 ${date} 획득</div>
+                <div class="text-secondary small">${desc}</div>
+            `;
+        } else {
+            infoBox.innerHTML = `
+                <div class="fs-1 mb-1 opacity-50">${icon}</div>
+                <h6 class="fw-bold text-muted">${name}</h6>
+                <div class="text-muted small mb-1">미획득</div>
+                <div class="text-secondary small bg-white p-2 rounded d-inline-block border">조건: ${desc.replace('🔒 ', '')}</div>
+            `;
         }
     },
 
