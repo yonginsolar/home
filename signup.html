@@ -290,7 +290,29 @@
     </div>
   </div>
 
+<div id="alreadyMemberModal" class="center-modal">
+  <div class="modal-content">
+    <div style="font-size:50px;">✋</div>
+    <h3 class="fw-bold mt-3">이미 가입된 조합원입니다</h3>
+    <p class="text-muted mt-3">
+      이미 조합원으로 가입되어 있습니다.<br>
+      조합원 관리 페이지로 이동하시겠습니까?
+    </p>
+    
+    <div class="d-grid gap-2 mt-4">
+      <button class="btn btn-primary fw-bold" onclick="location.href='membermanage.html'">
+        조합원 정보 보기
+      </button>
+      
+      <button class="btn btn-outline-secondary" onclick="handleLogoutAndReset()">
+        아니요, 로그아웃 할게요 (처음으로)
+      </button>
+    </div>
+  </div>
+</div>
 
+
+  
   <script>
     let currentTermType = null;
     // [1] 슈퍼베이스 설정
@@ -503,9 +525,16 @@ function validateBizNo() {
     
     // 1. 상태 감지 리스너 (로그인/로그아웃 이벤트가 발생하면 즉시 실행)
 // [수정] 페이지 로드 및 인증 감지
+// [중요] 페이지 로드 및 로그인 상태 변경 감지
+    // 이메일 인증 후 돌아왔을 때 이 코드가 실행되어야 신청서 화면이 보입니다.
+    
+    // 1. 상태 감지 리스너 (로그인/로그아웃 이벤트가 발생하면 즉시 실행)
+// [수정] 페이지 로드 및 인증 감지 -> 기존 회원 체크 로직 추가
     _supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' || session) {
-        showApplicationForm(session); // 로그인 되자마자 화면 전환
+        // 기존: showApplicationForm(session);
+        // 변경: 먼저 회원이 맞는지 명부를 확인합니다.
+        checkExistingMember(session); 
       }
     });
 
@@ -513,7 +542,9 @@ function validateBizNo() {
       toggleType('개인'); 
       const { data: { session } } = await _supabase.auth.getSession();
       if (session) {
-        showApplicationForm(session);
+        // 기존: showApplicationForm(session);
+        // 변경: 먼저 회원이 맞는지 명부를 확인합니다.
+        checkExistingMember(session);
       }
     };
 
@@ -1066,6 +1097,38 @@ async function checkRRNFinal() {
             }
         });
     }
+    // [신규 함수] 기존 회원 여부 확인 (Gatekeeper)
+async function checkExistingMember(session) {
+  // 1. DB에서 이메일이나 카카오ID(Supabase User ID)로 조회
+  //    (혹시 이메일이 변경되었을 수도 있으니 or 조건으로 둘 다 확인)
+  const { data, error } = await _supabase
+    .from('coop_members')
+    .select('id') // 존재 여부만 알면 되므로 id만 조회
+    .or(`email.eq.${session.user.email},kakao_id.eq.${session.user.id}`)
+    .maybeSingle(); // maybeSingle은 데이터가 없어도 에러가 나지 않고 data가 null이 됨
+
+  if (data) {
+    // [CASE A] 이미 가입된 회원 -> 안내 모달 띄움
+    // 신청서 화면(showApplicationForm)을 호출하지 않으므로 화면은 그대로 멈춰있고 모달만 뜸
+    const modal = document.getElementById('alreadyMemberModal');
+    if(modal) {
+        modal.style.display = 'flex';
+    }
+  } else {
+    // [CASE B] 명부에 없는 신규 회원 -> 신청서 화면 진입
+    showApplicationForm(session);
+  }
+}
+    // [신규 함수] 로그아웃 하고 뒤로가기 처리
+async function handleLogoutAndReset() {
+    // 1. Supabase 로그아웃
+    await _supabase.auth.signOut();
+    
+    // 2. 페이지 새로고침 (캐시 및 변수 초기화)
+    //    새로고침하면 다시 index.html 상태가 되거나, 
+    //    이 페이지의 초기 상태(로그인 전)로 돌아갑니다.
+    window.location.reload(); 
+}
   </script>
 </body>
 </html>
