@@ -1,8 +1,9 @@
 /**
- * 출자증서 PDF 생성 모듈 (Final Version)
+ * 출자증서 PDF 생성 모듈 (Final Version - Validated)
  * - 로고 원본 비율 유지 (워터마크)
  * - 금액 완전 한글화 (일금 일십만 원정)
  * - 도장 위치 상향 조정
+ * - [UPDATE] 개인/단체 구분 및 유효성 검사 추가
  */
 async function generateContributionCert(memberData, totalAmount, certNumber, chairmanName, supabaseClient) {
     if (!window.jspdf) {
@@ -11,6 +12,22 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
     }
 
     try {
+        // -----------------------------------------------------------
+        // [UPDATE] 0. 데이터 유효성 검사 (Validation)
+        // -----------------------------------------------------------
+        
+        // 1) 출자금 확인
+        if (!totalAmount || totalAmount <= 0) {
+            throw new Error("출자금이 확인되지 않습니다. 출자 내역을 다시 확인해주세요.");
+        }
+
+        // 2) 단체일 경우 법인등록번호 확인
+        // DB에 '단체'라고 저장되어 있다면 반드시 번호가 있어야 함
+        if (memberData.member_type === '단체' && !memberData.corp_number) {
+            throw new Error("단체의 '법인등록번호'가 확인되지 않습니다. 회원 정보를 수정해주세요.");
+        }
+
+
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4'); // A4 세로
 
@@ -75,14 +92,27 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         const today = new Date();
         const dateStr = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,'0')}월 ${String(today.getDate()).padStart(2,'0')}일`;
         
-        let birthStr = memberData.rrn_display || '';
-        if (birthStr.length >= 6) {
-            const yy = birthStr.substring(0, 2);
-            const mm = birthStr.substring(2, 4);
-            const dd = birthStr.substring(4, 6);
-            const gender = birthStr.includes('-') ? birthStr.split('-')[1].charAt(0) : '1';
-            const prefix = (gender === '3' || gender === '4') ? '20' : '19';
-            birthStr = `${prefix}${yy}년 ${mm}월 ${dd}일`;
+        // [UPDATE] 개인/단체 구분에 따른 라벨 및 값 설정
+        let displayLabel = "생 년 월 일"; // 기본값 (개인)
+        let displayValue = "";          // 표시될 값
+
+        if (memberData.member_type === '단체') {
+            // [CASE] 단체: 법인등록번호 사용
+            displayLabel = "법인등록번호";
+            displayValue = memberData.corp_number; // 위에서 유효성 검사 완료됨
+        } else {
+            // [CASE] 개인 (또는 기타): 기존 생년월일 로직 유지
+            displayLabel = "생 년 월 일";
+            let birthStr = memberData.rrn_display || '';
+            if (birthStr.length >= 6) {
+                const yy = birthStr.substring(0, 2);
+                const mm = birthStr.substring(2, 4);
+                const dd = birthStr.substring(4, 6);
+                const gender = birthStr.includes('-') ? birthStr.split('-')[1].charAt(0) : '1';
+                const prefix = (gender === '3' || gender === '4') ? '20' : '19';
+                birthStr = `${prefix}${yy}년 ${mm}월 ${dd}일`;
+            }
+            displayValue = birthStr;
         }
 
         const shares = Math.floor(totalAmount / 10000);
@@ -123,9 +153,12 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             doc.text(String(value), 80, yPos);
         };
 
+        // [UPDATE] 표 내용 채우기 (단체일 경우 성명->단체명, 생년월일->법인번호)
+        const nameLabel = memberData.member_type === '단체' ? "단   체   명" : "성        명";
+
         drawRow(0, "조합원 번호", memberData.member_id);
-        drawRow(1, "성        명", memberData.name);
-        drawRow(2, "생 년 월 일", birthStr);
+        drawRow(1, nameLabel, memberData.name);
+        drawRow(2, displayLabel, displayValue); // [UPDATE] 위에서 설정한 변수 사용
         drawRow(3, "가 입 연 월 일", memberData.join_date || '-');
         drawRow(4, "출 자 좌 수", `${shares.toLocaleString()} 좌 (1좌 10,000원)`);
         drawRow(5, "출 자 금 액", `${totalAmount.toLocaleString()} 원`);
@@ -162,6 +195,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
 
     } catch (e) {
         console.error(e);
+        // 에러 메시지를 명확히 보여줌
         alert("증명서 생성 실패: " + e.message);
     }
 }
