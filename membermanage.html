@@ -1063,7 +1063,7 @@ async function sendMagicLink() {
     }
 }
 
-// [수정] 로그인 성공 후 처리 (자동 실패 시 -> 수동 모달 띄움)
+// [수정] 로그인 성공 후 처리 (세션 스토리지를 확인하여 마지막 프로필 유지)
 async function handleLoginSuccess(user) {
     curAuth = user;
     showLoading(true, '정보 확인 중...');
@@ -1073,10 +1073,9 @@ async function handleLoginSuccess(user) {
     
     showLoading(false);
 
-    // [핵심 변경] 실패했다고 바로 쫓아내지 않음!
+    // 실패했다고 바로 쫓아내지 않음!
     if (claimErr || !claimRes.success) {
         console.log("자동 매칭 실패, 수동 매칭 모달 오픈");
-        // 로그아웃 하지 않고, 모달을 띄움
         document.getElementById('manualMatchModal').style.display = 'flex';
         return; 
     }
@@ -1084,12 +1083,15 @@ async function handleLoginSuccess(user) {
     // 성공 시 대시보드 로드
     document.getElementById('headerLogoutBtn').classList.remove('hidden');
     
-    // [1] 대시보드 데이터 우선 로드 (curMem 전역 변수가 여기서 세팅됨)
-    await loadDashboardData(user.id);
+    // [핵심 변경] 저장된 마지막 프로필이 있는지 확인
+    const lastProfileId = sessionStorage.getItem('lastActiveProfile');
+    // 저장된 게 있으면 그걸로, 없으면 로그인한 본인 ID(user.id)로 로드
+    const targetUuid = lastProfileId ? lastProfileId : user.id;
 
-    // [2] 관리 가능한 프로필(단체/가족) 목록 로드 (누락되었던 부분)
-    // -> 이 함수가 호출되어야 상단에 드롭다운(프로필 스위처)이 나타납니다.
-    // -> loadDashboardData 완료 후 호출해야 현재 프로필에 'Active' 체크가 가능합니다.
+    // [1] 대시보드 데이터 우선 로드
+    await loadDashboardData(targetUuid);
+
+    // [2] 관리 가능한 프로필(단체/가족) 목록 로드
     if (typeof loadManagedProfiles === 'function') {
         await loadManagedProfiles(user.id);
     }
@@ -1225,9 +1227,12 @@ async function fetchMaskedBankInfo(uuid) {
         return data ? data.account_number : null;
     } catch (e) { return null; }
 }
-// [수정] 대시보드 데이터 로드: 출자, 신청, 기부, 포인트, 배당 모두 조회
+// [수정] 대시보드 데이터 로드 (세션 스토리지 저장 기능 추가)
 async function loadDashboardData(uuid) {
     try {
+        // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
+        sessionStorage.setItem('lastActiveProfile', uuid);
+
         // 1. 멤버 기본 정보 조회
         const { data: member, error: memErr } = await _supabase
             .from('coop_members')
@@ -1250,41 +1255,36 @@ async function loadDashboardData(uuid) {
         if (maskedAcc) member.account_number = maskedAcc; 
         curMem = member; 
 
-        // 2. [변경] 모든 자산 데이터 병렬 조회 (Promise.all)
-        // member_id(text) 또는 member_uid(uuid) 중 테이블에 맞는 것 사용
+        // 2. 모든 자산 데이터 병렬 조회 (Promise.all)
         const pLedger = _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
         const pApps = _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
         
-        // 추가된 자산 조회
         const pDonations = _supabase.from('coop_donations').select('*').eq('member_uid', uuid).order('donation_date', { ascending: false });
         const pPoints = _supabase.from('coop_points').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
         const pDividends = _supabase.from('coop_dividends').select('*').eq('member_id', curMem.member_id).order('paid_at', { ascending: false });
 
         const [resLedger, resApps, resDonations, resPoints, resDividends] = await Promise.all([pLedger, pApps, pDonations, pPoints, pDividends]);
 
-        // 데이터 추출 (없으면 빈 배열)
         const ledger = resLedger.data || [];
         const apps = resApps.data || [];
         const donations = resDonations.data || [];
         const points = resPoints.data || [];
         const dividends = resDividends.data || [];
 
-        // 3. 자산 총계 계산 (카드 표시용)
+        // 3. 자산 총계 계산
         const assets = {
             total_capital: ledger.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
             total_donation: donations.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
             current_points: points.reduce((acc, cur) => acc + Number(cur.change_amount || 0), 0),
-            // 배당금: total_amount 합계 (세전 기준, 필요시 net_amount로 변경 가능)
             total_dividend: dividends.reduce((acc, cur) => acc + Number(cur.total_amount || 0), 0)
         };
-        curMem.total_capital = assets.total_capital; // 멤버 객체에도 업데이트
+        curMem.total_capital = assets.total_capital; 
 
         // 4. 권한 로드
         const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
         const myRoles = officials ? officials.map(r => r.category) : [];
 
-        // 5. 렌더링 호출 (모든 데이터 전달)
-        // 전역 변수 대신 인자로 전달하여 순수성 유지
+        // 5. 렌더링 호출
         renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles);
         
         // [부가 기능 로드]
@@ -1761,24 +1761,18 @@ async function submitApplication(type) {
     });
 }
 
-// [수정] 프로필 저장 (계좌번호 빈 값 처리, 유효성 검사, 스마트 새로고침 포함)
+// [수정] 프로필 저장 (classList 검증, 법인번호 알고리즘 검사 추가)
 async function saveProfile() {
-    // 1. 현재 보고 있는 프로필 ID (이 ID로 저장하고, 이 ID로 다시 로드함)
     const targetUuid = curMem.id; 
 
-    // 2. 공통 입력값 가져오기
     const phone = document.getElementById('editPhone').value.trim();
     const mainAddr = document.getElementById('editAddrMain').value;
     const detailAddr = document.getElementById('editAddrDetail').value;
     const fullAddr = (mainAddr + ' ' + detailAddr).trim();
     const bank = document.getElementById('editBankName').value;
-    
-    // [계좌번호] 수정 안 했으면 빈 값('')이 들어옴
     const accNo = document.getElementById('editAccountNo').value;
-    
     const holder = document.getElementById('editHolder').value;
 
-    // 3. 단체 전용 입력값 확인
     const isGroup = !document.getElementById('orgInfoGroup').classList.contains('hidden');
     let bizNo = null;
     let corpNo = null;
@@ -1787,14 +1781,15 @@ async function saveProfile() {
         bizNo = document.getElementById('editBizNo').value.trim();
         corpNo = document.getElementById('editCorpNo').value.trim();
         
-        // [검증 1] 현재 화면에 '빨간 에러 메시지'가 떠있는지 확인 (떠있으면 저장 차단)
-        const bizErrVisible = document.getElementById('bizNoError').style.display !== 'none';
-        const corpErrVisible = document.getElementById('corpNoError').style.display !== 'none';
+        // ★ [검증 1] 'hidden' 클래스가 없으면(=에러가 보이면) 저장 차단
+        // (주의: !contains('hidden') 이면 에러가 떠있다는 뜻입니다)
+        const bizErrVisible = !document.getElementById('bizNoError').classList.contains('hidden');
+        const corpErrVisible = !document.getElementById('corpNoError').classList.contains('hidden');
         
         if (bizErrVisible) return showModal('사업자등록번호가 올바르지 않습니다.\n빨간색 에러 메시지를 확인해주세요.');
         if (corpErrVisible) return showModal('법인등록번호가 올바르지 않습니다.\n빨간색 에러 메시지를 확인해주세요.');
         
-        // [검증 2] 값이 있을 때 형식 재확인 (이중 방어)
+        // [검증 2] 값 형식 재확인 (이중 방어: 법인번호 알고리즘 checkCorpID 추가)
         if (bizNo) {
             const rawBiz = bizNo.replace(/-/g, '');
             if(rawBiz.length !== 10 || !checkBizID(rawBiz)) {
@@ -1803,18 +1798,14 @@ async function saveProfile() {
         }
         if (corpNo) {
             const rawCorp = corpNo.replace(/-/g, '');
-            if(rawCorp.length !== 13) {
-                 return showModal('법인번호는 13자리여야 합니다.');
+            // 13자리가 아니거나, 공식이 틀리면 차단
+            if(rawCorp.length !== 13 || !checkCorpID(rawCorp)) {
+                 return showModal('유효하지 않은 법인등록번호입니다.');
             }
         }
     }
 
-    // 4. [검증] 전화번호 유효성 체크
-    if (phone.length < 12) {
-        return showModal('전화번호를 올바르게 입력해주세요.\n(예: 010-1234-5678)');
-    }
-
-    // 5. [검증] 전화번호 중복 체크 (DB 조회)
+    if (phone.length < 12) return showModal('전화번호를 올바르게 입력해주세요.');
     if (phone !== curMem.phone) {
         showLoading(true, '중복 검사 중...');
         try {
@@ -1822,27 +1813,18 @@ async function saveProfile() {
                 .from('coop_members')
                 .select('id')
                 .eq('phone', phone)
-                .neq('id', targetUuid) // 나는 제외
+                .neq('id', targetUuid)
                 .maybeSingle();
 
             showLoading(false);
-
-            if (checkErr) {
-                console.error(checkErr);
-                return showModal('중복 검사 중 오류가 발생했습니다.');
-            }
-
-            if (existing) {
-                return showModal('이미 등록된 전화번호입니다.\n다른 번호를 사용해주세요.');
-            }
-
+            if (checkErr) throw checkErr;
+            if (existing) return showModal('이미 등록된 전화번호입니다.');
         } catch (e) {
             showLoading(false);
             return showModal('오류 발생: ' + e.message);
         }
     }
 
-    // 6. 저장 진행 (RPC 호출)
     showConfirmModal('정보를 수정하시겠습니까?', async function() {
         showLoading(true, '저장 중...');
 
@@ -1851,7 +1833,7 @@ async function saveProfile() {
             p_phone: phone,
             p_address: fullAddr,
             p_bank_name: bank,
-            p_account_number: accNo, // 빈 값이면 SQL이 알아서 무시함
+            p_account_number: accNo,
             p_account_holder: holder,
             p_business_number: bizNo,
             p_corp_number: corpNo
@@ -1864,8 +1846,6 @@ async function saveProfile() {
         } else {
             showModal('수정되었습니다.');
             toggleEditMode(false);
-            
-            // ★ 핵심: 스마트 새로고침 호출 (화면 유지)
             reloadDashboard(); 
         }
     });
@@ -3437,10 +3417,12 @@ async function submitPartnerApplication() {
             container.scrollLeft += amount;
         }
     }
-// [신규] 사업자번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅 + 검증)
+// [수정] 사업자번호 핸들러 (CSS 충돌 해결: classList 제어 + 실시간 검증)
 function handleBizNoInput(target) {
-    // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김
-    document.getElementById('bizNoError').style.display = 'none';
+    const errBox = document.getElementById('bizNoError');
+    
+    // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김 (hidden 클래스 추가)
+    errBox.classList.add('hidden');
 
     // 2. 포맷팅 (000-00-00000)
     let raw = target.value.replace(/[^0-9]/g, '');
@@ -3452,18 +3434,21 @@ function handleBizNoInput(target) {
     }
     target.value = formatted;
 
-    // 3. [검증] 길이가 10자리가 되었을 때만 검사 (틀리면 그때 표시)
+    // 3. [검증] 길이가 10자리가 되었을 때만 검사
     if (raw.length === 10) {
         if (!checkBizID(raw)) {
-            document.getElementById('bizNoError').style.display = 'block';
+            // 유효하지 않으면 hidden 클래스 제거 -> 빨간 글씨 노출
+            errBox.classList.remove('hidden');
         }
     }
 }
 
-// [신규] 법인번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅 + 검증)
+// [수정] 법인번호 핸들러 (CSS 충돌 해결 + 공식 알고리즘 적용)
 function handleCorpNoInput(target) {
+    const errBox = document.getElementById('corpNoError');
+
     // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김
-    document.getElementById('corpNoError').style.display = 'none';
+    errBox.classList.add('hidden');
 
     // 2. 포맷팅 (000000-0000000)
     let raw = target.value.replace(/[^0-9]/g, '');
@@ -3473,16 +3458,19 @@ function handleCorpNoInput(target) {
     }
     target.value = formatted;
 
-    // 3. [검증] 13자리가 찼을 때 체크
+    // 3. [검증] 13자리가 찼을 때 검사
     if (raw.length === 13) {
-        document.getElementById('corpNoError').style.display = 'none';
+        if (!checkCorpID(raw)) {
+            // 공식이 틀리면 hidden 클래스 제거 -> 빨간 글씨 노출
+            errBox.classList.remove('hidden');
+        }
     } else if (raw.length > 13) {
-        // 너무 길면 에러 표시
-        document.getElementById('corpNoError').style.display = 'block';
+        // 너무 길어도 에러
+        errBox.classList.remove('hidden');
     }
 }
 
-// [신규] 국세청 사업자번호 검증 알고리즘
+// [기존 유지] 국세청 사업자번호 검증 알고리즘
 function checkBizID(bizID) {
     const checkID = [1, 3, 7, 1, 3, 7, 1, 3, 5];
     let i, chkSum = 0, c2, remander;
@@ -3494,6 +3482,26 @@ function checkBizID(bizID) {
     chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1));
     remander = (10 - (chkSum % 10)) % 10 ;
     return Math.floor(bizID.charAt(9)) === remander;
+}
+
+// [신규] 법인등록번호 검증 알고리즘 (대한민국 표준)
+function checkCorpID(corpID) {
+    const raw = corpID.replace(/-/g, '');
+    if (raw.length !== 13) return false;
+
+    let sum = 0;
+    // 가중치: 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2
+    const weights = [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2];
+
+    for (let i = 0; i < 12; i++) {
+        sum += parseInt(raw.charAt(i)) * weights[i];
+    }
+
+    const remainder = sum % 10;
+    const checkDigit = (10 - remainder) % 10;
+
+    // 마지막 13번째 자리와 계산된 검증비트 비교
+    return checkDigit === parseInt(raw.charAt(12));
 }
 
 </script>
