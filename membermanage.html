@@ -958,7 +958,7 @@ let isBoardLoading = false;
         alert("시스템 연결 오류");
     }
 
-   // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
+// [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
 async function reloadDashboard() {
     // 1. 보고 있던 계정(curMem)이 있으면 그 ID, 없으면 로그인 계정(curAuth) ID 사용
     const targetId = (curMem && curMem.id) ? curMem.id : (curAuth ? curAuth.id : null);
@@ -1761,10 +1761,12 @@ async function submitApplication(type) {
     });
 }
 
-// [수정] 프로필 저장 (스마트 새로고침 + 에러 검증)
+// [수정] 프로필 저장 (유효성 검사, 중복 체크, 스마트 새로고침 완벽 적용)
 async function saveProfile() {
-    const targetUuid = curMem.id; // 현재 보고 있는 ID
+    // 1. 현재 보고 있는 프로필 ID (이 ID로 저장하고, 이 ID로 다시 로드함)
+    const targetUuid = curMem.id; 
 
+    // 2. 공통 입력값 가져오기
     const phone = document.getElementById('editPhone').value.trim();
     const mainAddr = document.getElementById('editAddrMain').value;
     const detailAddr = document.getElementById('editAddrDetail').value;
@@ -1773,6 +1775,8 @@ async function saveProfile() {
     const accNo = document.getElementById('editAccountNo').value;
     const holder = document.getElementById('editHolder').value;
 
+    // 3. 단체 전용 입력값 확인
+    // (화면에 단체 정보 영역이 보이는지 클래스로 판단)
     const isGroup = !document.getElementById('orgInfoGroup').classList.contains('hidden');
     let bizNo = null;
     let corpNo = null;
@@ -1781,25 +1785,37 @@ async function saveProfile() {
         bizNo = document.getElementById('editBizNo').value.trim();
         corpNo = document.getElementById('editCorpNo').value.trim();
         
-        // [검증 1] 현재 화면에 빨간 글씨가 떠있는가?
-        const bizErr = document.getElementById('bizNoError').style.display !== 'none';
-        const corpErr = document.getElementById('corpNoError').style.display !== 'none';
+        // [검증 1] 현재 화면에 '빨간 에러 메시지'가 떠있는지 확인 (떠있으면 저장 차단)
+        const bizErrVisible = document.getElementById('bizNoError').style.display !== 'none';
+        const corpErrVisible = document.getElementById('corpNoError').style.display !== 'none';
         
-        if (bizErr) return showModal('사업자등록번호를 확인해주세요.');
-        if (corpErr) return showModal('법인등록번호를 확인해주세요.');
+        if (bizErrVisible) return showModal('사업자등록번호가 올바르지 않습니다.\n빨간색 에러 메시지를 확인해주세요.');
+        if (corpErrVisible) return showModal('법인등록번호가 올바르지 않습니다.\n빨간색 에러 메시지를 확인해주세요.');
         
-        // [검증 2] 값 존재 시 형식 재확인
+        // [검증 2] 값이 있을 때 형식 재확인 (이중 방어)
         if (bizNo) {
             const rawBiz = bizNo.replace(/-/g, '');
-            if(rawBiz.length !== 10 || !checkBizID(rawBiz)) return showModal('유효하지 않은 사업자번호입니다.');
+            // 10자리가 아니거나 국세청 알고리즘 통과 못하면 차단
+            if(rawBiz.length !== 10 || !checkBizID(rawBiz)) {
+                return showModal('유효하지 않은 사업자번호입니다.');
+            }
         }
         if (corpNo) {
             const rawCorp = corpNo.replace(/-/g, '');
-            if(rawCorp.length !== 13) return showModal('법인번호는 13자리여야 합니다.');
+            // 13자리가 아니면 차단
+            if(rawCorp.length !== 13) {
+                 return showModal('법인번호는 13자리여야 합니다.');
+            }
         }
     }
 
-    if (phone.length < 12) return showModal('전화번호를 올바르게 입력해주세요.');
+    // 4. [검증] 전화번호 유효성 체크
+    if (phone.length < 12) {
+        return showModal('전화번호를 올바르게 입력해주세요.\n(예: 010-1234-5678)');
+    }
+
+    // 5. [검증] 전화번호 중복 체크 (DB 조회)
+    // 입력한 번호가 내 기존 번호와 다를 때만 검사
     if (phone !== curMem.phone) {
         showLoading(true, '중복 검사 중...');
         try {
@@ -1807,21 +1823,31 @@ async function saveProfile() {
                 .from('coop_members')
                 .select('id')
                 .eq('phone', phone)
-                .neq('id', targetUuid)
+                .neq('id', targetUuid) // [중요] 나(수정 대상)는 제외하고 검색
                 .maybeSingle();
 
             showLoading(false);
-            if (checkErr) throw checkErr;
-            if (existing) return showModal('이미 등록된 전화번호입니다.');
+
+            if (checkErr) {
+                console.error(checkErr);
+                return showModal('중복 검사 중 오류가 발생했습니다.');
+            }
+
+            if (existing) {
+                return showModal('이미 등록된 전화번호입니다.\n다른 번호를 사용해주세요.');
+            }
+
         } catch (e) {
             showLoading(false);
             return showModal('오류 발생: ' + e.message);
         }
     }
 
+    // 6. 저장 진행 (RPC 호출)
     showConfirmModal('정보를 수정하시겠습니까?', async function() {
         showLoading(true, '저장 중...');
 
+        // update_my_profile 함수 호출 (파라미터 모두 전달)
         const { error } = await _supabase.rpc('update_my_profile', {
             p_target_id: targetUuid, 
             p_phone: phone,
@@ -1829,8 +1855,8 @@ async function saveProfile() {
             p_bank_name: bank,
             p_account_number: accNo,
             p_account_holder: holder,
-            p_business_number: bizNo,
-            p_corp_number: corpNo
+            p_business_number: bizNo, // 단체가 아니면 null
+            p_corp_number: corpNo     // 단체가 아니면 null
         });
 
         showLoading(false);
@@ -1840,7 +1866,8 @@ async function saveProfile() {
         } else {
             showModal('수정되었습니다.');
             toggleEditMode(false);
-            // ★ 핵심: 스마트 새로고침
+            
+            // ★ 핵심: 스마트 새로고침 호출 (개인 프로필로 튕김 방지)
             reloadDashboard(); 
         }
     });
@@ -3404,10 +3431,9 @@ async function submitPartnerApplication() {
             container.scrollLeft += amount;
         }
     }
-   // [신규] 사업자번호 입력 핸들러 (포맷팅 + 실시간 검증)
-// [신규] 사업자번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅)
+// [신규] 사업자번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅 + 검증)
 function handleBizNoInput(target) {
-    // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김 (방해 금지)
+    // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김
     document.getElementById('bizNoError').style.display = 'none';
 
     // 2. 포맷팅 (000-00-00000)
@@ -3420,7 +3446,7 @@ function handleBizNoInput(target) {
     }
     target.value = formatted;
 
-    // 3. [검증] 길이가 10자리가 되었을 때만 슬쩍 검사 (틀리면 그때 표시)
+    // 3. [검증] 길이가 10자리가 되었을 때만 검사 (틀리면 그때 표시)
     if (raw.length === 10) {
         if (!checkBizID(raw)) {
             document.getElementById('bizNoError').style.display = 'block';
@@ -3428,7 +3454,7 @@ function handleBizNoInput(target) {
     }
 }
 
-// [신규] 법인번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅)
+// [신규] 법인번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅 + 검증)
 function handleCorpNoInput(target) {
     // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김
     document.getElementById('corpNoError').style.display = 'none';
@@ -3441,11 +3467,11 @@ function handleCorpNoInput(target) {
     }
     target.value = formatted;
 
-    // 3. [검증] 13자리가 찼을 때 체크 (보통 법인번호는 13자리)
+    // 3. [검증] 13자리가 찼을 때 체크
     if (raw.length === 13) {
-        // 별도 알고리즘 없이 길이만 맞으면 OK로 간주 (필요시 알고리즘 추가 가능)
         document.getElementById('corpNoError').style.display = 'none';
     } else if (raw.length > 13) {
+        // 너무 길면 에러 표시
         document.getElementById('corpNoError').style.display = 'block';
     }
 }
