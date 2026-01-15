@@ -358,7 +358,7 @@
         🎉 <span id="birthdayMsgName"></span>님, 생일을 진심으로 축하합니다! (클릭하면 폭죽이 터져요!) 🎂
     </div>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
         <div class="small text-muted">
             <i class="bi bi-info-circle me-1"></i> 상태
         </div>
@@ -394,13 +394,30 @@
         
     <div class="row g-3 mb-4">
         <div class="col-md-6">
-            <label class="small text-muted">이름</label>
+            <label class="small text-muted">이름 (단체명)</label>
             <div class="fw-bold" id="infoName">-</div>
         </div>
-        <div class="col-md-6">
+
+        <div class="col-md-6" id="personalInfoGroup">
             <label class="small text-muted">생년월일</label>
             <div class="fw-bold" id="infoBirth">-</div>
         </div>
+
+        <div class="col-md-6 hidden" id="orgInfoGroup">
+            <div class="row g-2">
+                <div class="col-12">
+                    <label class="small text-muted">사업자등록번호</label>
+                    <div id="viewBizNoBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
+                    <input type="text" id="editBizNo" class="readonly-text" style="display:none;" maxlength="12" placeholder="000-00-00000" oninput="formatBizNo(this)">
+                </div>
+                <div class="col-12 mt-1">
+                    <label class="small text-muted">법인등록번호</label>
+                    <div id="viewCorpNoBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
+                    <input type="text" id="editCorpNo" class="readonly-text" style="display:none;" maxlength="14" placeholder="숫자만 입력" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                </div>
+            </div>
+        </div>
+
         <div class="col-md-6">
             <label class="small text-muted">이메일 (변경불가)</label>
             <div class="fw-bold text-secondary" id="infoEmail">-</div>
@@ -455,7 +472,7 @@
         </div>
     </div>
 
-<div class="dashboard-card mb-4">
+    <div class="dashboard-card mb-4">
         <h5 class="fw-bold mb-3 border-bottom pb-2">나의 뱃지 컬렉션</h5>
         
         <div class="badge-wrapper">
@@ -1057,7 +1074,22 @@ async function handleLoginSuccess(user) {
         await loadManagedProfiles(user.id);
     }
 }
-
+// [신규] 사업자등록번호 자동 하이픈 (000-00-00000)
+function formatBizNo(target) {
+    let raw = target.value.replace(/[^0-9]/g, '');
+    let formatted = '';
+    
+    // 3-2-5 자리 포맷 (총 10자리)
+    if(raw.length < 4) {
+        formatted = raw;
+    } else if(raw.length < 6) {
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3);
+    } else {
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3, 2) + '-' + raw.substr(5);
+    }
+    
+    target.value = formatted;
+}
 // [신규] 전화번호 자동 하이픈 & 숫자 이외 차단
 function autoHyphen(target) {
     // 1. 숫자만 남기기 (공백, 문자 제거)
@@ -1308,31 +1340,51 @@ function addAssetCard(row, title, val, unit='원') {
 // 전역 변수로 상세 내역 모달에서 쓸 데이터를 담아둡니다.
 let globalHistoryData = {}; 
 
-// [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합
+// [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
 function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles) {
     // 1. 기본 정보 매핑 (기존 유지)
     renderMemberStatusBadge(member?.status);
     setText('infoMemberId', member.member_id || '-'); // 상단으로 이동된 조합원 번호
     
-    // ... 생년월일, 이름, 이메일 등 기존 로직 유지 ...
-    const isOrg = member?.member_type === '단체' || member?.member_type === 'organization' || member?.join_category === '단체';
-    const birthBox = document.getElementById('infoBirth') ? document.getElementById('infoBirth').closest('.col-md-6') : null;
-    if (isOrg) {
-        if (birthBox) birthBox.classList.add('hidden');
-        setText('infoBirth', '-');
+    // [수정] 개인 vs 단체 정보 표시 분기 처리
+    const isGroup = (member.member_type === '단체'); // 단체 회원 여부 판단
+    const personalGroup = document.getElementById('personalInfoGroup'); // 개인용(생년월일)
+    const orgGroup = document.getElementById('orgInfoGroup');           // 단체용(사업자번호)
+
+    if (isGroup) {
+        // [단체] 생년월일 숨기고 사업자/법인번호 표시
+        if (personalGroup) personalGroup.classList.add('hidden');
+        if (orgGroup) orgGroup.classList.remove('hidden');
+
+        // DB에서 가져온 business_number, corp_number 값 표시
+        setText('viewBizNoBox', member.business_number || '-');
+        setVal('editBizNo', member.business_number); // 수정창에도 값 세팅
+
+        setText('viewCorpNoBox', member.corp_number || '-');
+        setVal('editCorpNo', member.corp_number);    // 수정창에도 값 세팅
+
+        // 파트너 신청 버튼 보이기
         const btnPartner = document.getElementById('menuBtnPartner');
         if(btnPartner) {
             btnPartner.classList.remove('hidden');
             loadPartnerInfo(member.member_id);
         }
     } else {
-        if (birthBox) birthBox.classList.remove('hidden');
+        // [개인] 사업자번호 숨기고 생년월일 표시
+        if (personalGroup) personalGroup.classList.remove('hidden');
+        if (orgGroup) orgGroup.classList.add('hidden');
+
         setText('infoBirth', formatBirthDate(member.rrn_display));
+        
+        // 파트너 신청 버튼 숨기기
         const btnPartner = document.getElementById('menuBtnPartner');
         if(btnPartner) btnPartner.classList.add('hidden');
     }
+
     setText('infoName', member.name);
     setText('infoEmail', member.email || curAuth.email);
+    
+    // 공통 필드들
     setVal('editPhone', member.phone);
     setVal('editBankName', member.bank_name);
     setVal('editAccountNo', member.account_number);
@@ -1688,10 +1740,9 @@ async function submitApplication(type) {
         });
     }
 
-// [수정] 프로필 저장 (주소 합치기 + 모달 확인)
-// [수정] 프로필 저장 (전화번호 중복 체크 및 유효성 검사 추가)
+// [수정] 프로필 저장 (전화번호 중복 체크 및 유효성 검사, 단체정보 저장 추가)
 async function saveProfile() {
-    // 1. 입력값 가져오기
+    // 1. 기본 입력값 가져오기
     const phone = document.getElementById('editPhone').value.trim();
     const mainAddr = document.getElementById('editAddrMain').value;
     const detailAddr = document.getElementById('editAddrDetail').value;
@@ -1700,23 +1751,33 @@ async function saveProfile() {
     const accNo = document.getElementById('editAccountNo').value; // 숫자만 들어옴 (HTML 제어)
     const holder = document.getElementById('editHolder').value;
 
+    // [신규] 단체 정보 가져오기
+    const isGroup = !document.getElementById('orgInfoGroup').classList.contains('hidden');
+    let bizNo = null;
+    let corpNo = null;
+
+    if (isGroup) {
+        bizNo = document.getElementById('editBizNo').value.trim();
+        corpNo = document.getElementById('editCorpNo').value.trim();
+        // 유효성 체크 (사업자번호 10자리 이상인지)
+        if (bizNo && bizNo.length < 10) return showModal('사업자등록번호 형식이 올바르지 않습니다.');
+    }
+
     // 2. [검증] 전화번호 유효성 체크
     if (phone.length < 12) {
         return showModal('전화번호를 올바르게 입력해주세요.\n(예: 010-1234-5678)');
     }
 
     // 3. [검증] 전화번호 중복 체크 (DB 조회)
-    // 설명: 내 현재 번호와 다르다면, 다른 사람이 쓰고 있는지 확인합니다.
     if (phone !== curMem.phone) {
         showLoading(true, '중복 검사 중...');
-        
         try {
             const { data: existing, error: checkErr } = await _supabase
                 .from('coop_members')
                 .select('id')
-                .eq('phone', phone)      // 입력한 번호와 같고
-                .neq('id', curAuth.id)   // 내 ID는 아닌 것 (나 자신 제외)
-                .maybeSingle();          // 하나라도 있으면 가져옴
+                .eq('phone', phone)      
+                .neq('id', curAuth.id)   
+                .maybeSingle();          
 
             showLoading(false);
 
@@ -1724,27 +1785,28 @@ async function saveProfile() {
                 console.error(checkErr);
                 return showModal('중복 검사 중 오류가 발생했습니다.');
             }
-
             if (existing) {
                 return showModal('이미 등록된 전화번호입니다.\n중복 가입은 불가능합니다.');
             }
-
         } catch (e) {
             showLoading(false);
             return showModal('시스템 오류: ' + e.message);
         }
     }
 
-    // 4. 저장 진행 (기존 로직)
+    // 4. 저장 진행 (RPC 호출)
     showConfirmModal('정보를 수정하시겠습니까?', async function() {
         showLoading(true, '저장 중...');
 
+        // [신규] update_my_profile RPC 호출 (파라미터 추가됨: business_number, corp_number)
         const { error } = await _supabase.rpc('update_my_profile', {
             p_phone: phone,
             p_address: fullAddr,
             p_bank_name: bank,
             p_account_number: accNo,
-            p_account_holder: holder
+            p_account_holder: holder,
+            p_business_number: bizNo, // 추가됨
+            p_corp_number: corpNo     // 추가됨
         });
 
         showLoading(false);
@@ -1923,9 +1985,7 @@ function closeCustomModal() {
     // =========================================================================
 
 
-    // =========================================================================
-    // [2] 수정 모드 토글 (주소창 1단 ↔ 2단 전환 포함)
-    // =========================================================================
+// [수정] 수정 모드 토글 (주소창 1단 ↔ 2단 전환 및 단체 정보창 제어)
 function toggleEditMode(isEdit) {
     // 1. 제어할 요소들 가져오기
     const inputs = document.querySelectorAll('.readonly-text'); // input 태그들
@@ -1934,13 +1994,22 @@ function toggleEditMode(isEdit) {
     const viewAddr = document.getElementById('viewAddressBox');
     const editAddr = document.getElementById('editAddressBox');
     
-    // [추가] 전화번호 관련
+    // 전화번호 관련
     const viewPhone = document.getElementById('viewPhoneBox');
     const editPhone = document.getElementById('editPhone');
 
-    // [추가] 계좌번호 관련
+    // 계좌번호 관련
     const viewBank = document.getElementById('viewBankBox');
     const editBank = document.getElementById('editBankBox');
+
+    // [신규] 단체 정보 관련 (사업자/법인)
+    const viewBiz = document.getElementById('viewBizNoBox');
+    const editBiz = document.getElementById('editBizNo');
+    const viewCorp = document.getElementById('viewCorpNoBox');
+    const editCorp = document.getElementById('editCorpNo');
+
+    // 현재 화면에 단체 영역이 보이는 상태인지 체크 (class hidden 여부)
+    const isGroupVisible = !document.getElementById('orgInfoGroup').classList.contains('hidden');
 
     // 계좌번호 입력창 (초기화용)
     const accInput = document.getElementById('editAccountNo');
@@ -1974,6 +2043,15 @@ function toggleEditMode(isEdit) {
         viewBank.style.display = 'none';
         editBank.style.display = 'flex'; // row 클래스이므로 flex 권장
 
+        // [신규] 단체일 경우에만 사업자/법인 번호 수정창 노출
+        if (isGroupVisible) {
+            viewBiz.style.display = 'none';
+            editBiz.style.display = 'block';
+            
+            viewCorp.style.display = 'none';
+            editCorp.style.display = 'block';
+        }
+
         // 상세주소 등 edit-mode-only 클래스 보이기
         document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'block');
 
@@ -2004,6 +2082,12 @@ function toggleEditMode(isEdit) {
 
         viewBank.style.display = 'block';
         editBank.style.display = 'none';
+
+        // [신규] 단체 정보도 원래대로 복귀
+        viewBiz.style.display = 'block';
+        editBiz.style.display = 'none';
+        viewCorp.style.display = 'block';
+        editCorp.style.display = 'none';
 
         document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'none');
     }
