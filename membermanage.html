@@ -438,17 +438,17 @@
             <input type="text" id="editPhone" class="readonly-text" style="display:none;" oninput="autoHyphen(this)" maxlength="13" placeholder="010-0000-0000">
         </div>
 
-        <div class="col-12">
-            <label class="small text-muted">주소</label>
-            <div id="viewAddressBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;"></div>
-            <div id="editAddressBox" class="addr-edit-group" style="display:none;">
-                <div class="d-flex gap-2 mb-2"> 
-                    <input type="text" id="editAddrMain" class="form-control" placeholder="주소 검색 버튼을 누르세요" readonly onclick="execDaumPostcode()" style="background-color:#fff;">
-                    <button class="btn btn-secondary" type="button" onclick="execDaumPostcode()" style="white-space:nowrap;">주소 검색</button>
-                </div>
-                <input type="text" id="editAddrDetail" class="form-control" placeholder="상세 주소를 입력하세요">
-            </div>
+<div class="col-12">
+    <label class="small text-muted">주소</label>
+    <div id="viewAddressBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;"></div>
+    <div id="editAddressBox" class="addr-edit-group" style="display:none;">
+        <div class="d-flex gap-2 mb-2"> 
+            <input type="text" id="editAddrMain" class="form-control" placeholder="주소 검색 버튼을 누르세요" readonly onclick="execDaumPostcode()" style="background-color:#fff;">
+            <button class="btn btn-secondary" type="button" onclick="execDaumPostcode()" style="white-space:nowrap;">주소 검색</button>
         </div>
+        <input type="text" id="editAddrDetail" class="form-control" placeholder="상세 주소를 입력하세요" style="display:none;">
+    </div>
+</div>
 
         <div class="col-12 border-top pt-2 mt-2">
             <label class="small text-success fw-bold">환급/배당 계좌</label>
@@ -2032,7 +2032,7 @@ function closeCustomModal() {
     // =========================================================================
 
 
-// [수정] 수정 모드 토글 (계좌번호 초기화 & 스마트 새로고침 적용)
+// [수정] 수정 모드 토글 (주소 상세창 숨김 처리 및 스마트 새로고침 유지)
 function toggleEditMode(isEdit) {
     const inputs = document.querySelectorAll('.readonly-text');
     const viewAddr = document.getElementById('viewAddressBox');
@@ -2047,11 +2047,13 @@ function toggleEditMode(isEdit) {
     const editCorp = document.getElementById('editCorpNo');
     const isGroupVisible = !document.getElementById('orgInfoGroup').classList.contains('hidden');
     
-    // 계좌번호 입력창 요소 가져오기
+    // 계좌번호 입력창
     const accInput = document.getElementById('editAccountNo');
+    // [신규] 상세 주소 입력창
+    const detailAddrInput = document.getElementById('editAddrDetail');
 
     if (isEdit) {
-        // [수정 모드 진입]
+        // [수정 모드]
         document.getElementById('btnEditProfile').classList.add('hidden');
         document.getElementById('btnSaveProfile').classList.remove('hidden');
         document.getElementById('btnCancelEdit').classList.remove('hidden');
@@ -2062,12 +2064,15 @@ function toggleEditMode(isEdit) {
             el.classList.remove('readonly-text');
         });
 
-        // ★ [핵심] 계좌번호 입력창 비우기 (빈 값 전략)
-        // 사용자가 아무것도 입력하지 않으면 빈 값('')이 되고, SQL이 이를 무시하고 기존 값을 유지함
+        // 계좌번호 초기화 (빈 값 전략)
         accInput.value = ''; 
         accInput.placeholder = '변경 시에만 입력하세요 (기존 정보 유지)';
         
-        // 화면 전환 로직
+        // ★ [핵심] 수정 모드 진입 시 상세주소창은 일단 숨김
+        // (주소를 안 바꿀 거면 굳이 상세창을 띄우지 않음. editAddrMain에 전체 주소가 있음)
+        detailAddrInput.style.display = 'none';
+
+        // 화면 전환
         viewAddr.style.display = 'none'; editAddr.style.display = 'block';
         viewPhone.style.display = 'none'; editPhone.style.display = 'block';
         viewBank.style.display = 'none'; editBank.style.display = 'flex';
@@ -2079,8 +2084,7 @@ function toggleEditMode(isEdit) {
         document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'block');
 
     } else {
-        // [취소 버튼 클릭]
-        // 스마트 새로고침: 현재 보고 있던 프로필(단체/개인)로 화면 복구
+        // [취소 버튼]
         reloadDashboard(); 
         
         document.getElementById('btnEditProfile').classList.remove('hidden');
@@ -2101,63 +2105,58 @@ function toggleEditMode(isEdit) {
         
         document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'none');
         
-        // 에러 메시지 초기화
         document.getElementById('bizNoError').style.display = 'none';
         document.getElementById('corpNoError').style.display = 'none';
     }
 }
 
-    // =========================================================================
-    // [3] 다음 주소 찾기 (검색 결과를 2단 주소창에 분배)
-    // =========================================================================
-    function execDaumPostcode() {
-        var element_layer = document.getElementById('layer');
+// [수정] 다음 주소 찾기 (검색 완료 시 상세주소창 노출)
+function execDaumPostcode() {
+    var element_layer = document.getElementById('layer');
 
-        new daum.Postcode({
-            oncomplete: function(data) {
-                // 검색 결과 항목을 조합
-                var addr = ''; // 주소 변수
-                var extraAddr = ''; // 참고항목 변수
+    new daum.Postcode({
+        oncomplete: function(data) {
+            var addr = ''; 
+            var extraAddr = ''; 
 
-                // 사용자가 선택한 주소 타입에 따라 해당 주소 값을 가져온다.
-                if (data.userSelectedType === 'R') { // 도로명 주소
-                    addr = data.roadAddress;
-                } else { // 지번 주소
-                    addr = data.jibunAddress;
+            if (data.userSelectedType === 'R') { 
+                addr = data.roadAddress;
+            } else { 
+                addr = data.jibunAddress;
+            }
+
+            if(data.userSelectedType === 'R'){
+                if(data.bname !== '' && /[동|로|가]$/g.test(data.bname)){
+                    extraAddr += data.bname;
                 }
-
-                // 건물명이 있고 공동주택일 경우 추가
-                if(data.userSelectedType === 'R'){
-                    if(data.bname !== '' && /[동|로|가]$/g.test(data.bname)){
-                        extraAddr += data.bname;
-                    }
-                    if(data.buildingName !== '' && data.apartment === 'Y'){
-                        extraAddr += (extraAddr !== '' ? ', ' + data.buildingName : data.buildingName);
-                    }
-                    if(extraAddr !== ''){
-                        addr += ' (' + extraAddr + ')';
-                    }
+                if(data.buildingName !== '' && data.apartment === 'Y'){
+                    extraAddr += (extraAddr !== '' ? ', ' + data.buildingName : data.buildingName);
                 }
+                if(extraAddr !== ''){
+                    addr += ' (' + extraAddr + ')';
+                }
+            }
 
-                // ★ 값 넣기: 검색된 주소는 메인 창에, 커서는 상세 주소창으로
-                document.getElementById('editAddrMain').value = addr;
-                document.getElementById('editAddrDetail').value = ''; // 상세주소 초기화
-                document.getElementById('editAddrDetail').focus();    // 상세주소로 포커스 이동
+            // 값 넣기
+            document.getElementById('editAddrMain').value = addr;
+            
+            // ★ [핵심] 검색이 완료되면 상세주소 입력창을 보여주고 포커스 이동
+            var detailInput = document.getElementById('editAddrDetail');
+            detailInput.style.display = 'block'; // 숨겨뒀던 창을 보여줌
+            detailInput.value = '';              // 기존 값 초기화
+            detailInput.focus();                 // 커서 이동
 
-                // 레이어 닫기
-                element_layer.style.display = 'none';
-            },
-            width : '100%',
-            height : '100%',
-            maxSuggestItems : 5
-        }).embed(element_layer);
+            // 레이어 닫기
+            element_layer.style.display = 'none';
+        },
+        width : '100%',
+        height : '100%',
+        maxSuggestItems : 5
+    }).embed(element_layer);
 
-        // 레이어 보이기
-        element_layer.style.display = 'block';
-
-        // 레이어 위치 조정 (화면 중앙)
-        initLayerPosition();
-    }
+    element_layer.style.display = 'block';
+    initLayerPosition();
+}
 
     // (보조) 레이어 위치 잡는 함수
     function initLayerPosition(){
