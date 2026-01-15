@@ -696,33 +696,36 @@ async function handleFormSubmit(e, form) {
   // =========================================================
 
   // (1) 연락처 최종 검증
-  const finalPhone =
-    document.getElementById('p1').value + '-' + p2.value + '-' + p3.value;
+  // [수정] 개인 회원일 때만 연락처 중복을 체크합니다. (단체는 허용)
+  if (userType === '개인') {
+      const finalPhone =
+        document.getElementById('p1').value + '-' + p2.value + '-' + p3.value;
 
-  const { data: isPhoneDup, error: phoneDupErr } = await _supabase.rpc(
-    'check_duplicate',
-    { check_field: 'phone', check_value: finalPhone }
-  );
+      const { data: isPhoneDup, error: phoneDupErr } = await _supabase.rpc(
+        'check_duplicate',
+        { check_field: 'phone', check_value: finalPhone }
+      );
 
-  if (phoneDupErr) {
-    console.error(phoneDupErr);
-    openResultModal(
-      "❌ 중복 확인(연락처) 중 오류가 발생했습니다.\n잠시 후 다시 시도해 주세요.",
-      true
-    );
-    return;
-  }
+      if (phoneDupErr) {
+        console.error(phoneDupErr);
+        openResultModal(
+          "❌ 중복 확인(연락처) 중 오류가 발생했습니다.\n잠시 후 다시 시도해 주세요.",
+          true
+        );
+        return;
+      }
 
-  if (isPhoneDup) {
-    setMsg('phoneMsg', '❌ 이미 가입된 연락처입니다. (최종확인)', true);
-    document.getElementById('p3').focus();
+      if (isPhoneDup) {
+        setMsg('phoneMsg', '❌ 이미 가입된 연락처입니다. (최종확인)', true);
+        document.getElementById('p3').focus();
 
-    // ★ 실패 모달 띄우기
-    openResultModal(
-      "❌ 이미 가입된 연락처입니다.\n연락처를 수정한 뒤 다시 시도해 주세요.",
-      true
-    );
-    return;
+        // ★ 실패 모달 띄우기
+        openResultModal(
+          "❌ 이미 가입된 연락처입니다.\n연락처를 수정한 뒤 다시 시도해 주세요.",
+          true
+        );
+        return;
+      }
   }
 
   // (2) 개인: 주민번호 최종 검증
