@@ -408,12 +408,21 @@
                 <div class="col-12">
                     <label class="small text-muted">사업자등록번호</label>
                     <div id="viewBizNoBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
-                    <input type="text" id="editBizNo" class="readonly-text" style="display:none;" maxlength="12" placeholder="000-00-00000" oninput="formatBizNo(this)">
+                    
+                    <input type="text" id="editBizNo" class="readonly-text" style="display:none;" maxlength="12" placeholder="숫자만 입력 (10자리)" oninput="handleBizNoInput(this)">
+                    <small id="bizNoError" class="text-danger fw-bold x-small hidden" style="display:none;">
+                        <i class="bi bi-exclamation-circle"></i> 유효하지 않은 사업자번호입니다.
+                    </small>
                 </div>
+
                 <div class="col-12 mt-1">
                     <label class="small text-muted">법인등록번호</label>
                     <div id="viewCorpNoBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
-                    <input type="text" id="editCorpNo" class="readonly-text" style="display:none;" maxlength="14" placeholder="숫자만 입력" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                    
+                    <input type="text" id="editCorpNo" class="readonly-text" style="display:none;" maxlength="14" placeholder="숫자만 입력 (13자리)" oninput="handleCorpNoInput(this)">
+                    <small id="corpNoError" class="text-danger fw-bold x-small hidden" style="display:none;">
+                        <i class="bi bi-exclamation-circle"></i> 법인번호 형식이 올바르지 않습니다 (13자리).
+                    </small>
                 </div>
             </div>
         </div>
@@ -949,6 +958,17 @@ let isBoardLoading = false;
         alert("시스템 연결 오류");
     }
 
+   // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
+async function reloadDashboard() {
+    // 1. 보고 있던 계정(curMem)이 있으면 그 ID, 없으면 로그인 계정(curAuth) ID 사용
+    const targetId = (curMem && curMem.id) ? curMem.id : (curAuth ? curAuth.id : null);
+    
+    if (targetId) {
+        await loadDashboardData(targetId);
+    } else {
+        location.reload(); // 최후의 수단 (아무 정보도 없으면 전체 새로고침)
+    }
+}
 
    // [신규] 친절한 에러 메시지 변환기
 function translateAuthError(errorMsg) {
@@ -1690,72 +1710,69 @@ async function cancelApp(appId) {
         });
     }
 
-    // 신청 로직 (Submit)
+// [수정] 신청 로직 (스마트 새로고침 적용)
 async function submitApplication(type) {
-        let amount = 0, reason = '';
-        const totalCap = Number(curMem.total_capital || 0);
+    let amount = 0, reason = '';
+    const totalCap = Number(curMem.total_capital || 0);
 
-        if(type === 'extra') {
-            amount = Number(document.getElementById('exAmount').value);
-            if(amount < 10000) return showModal('1만원 이상 입력해주세요.');
-        } 
-        else if(type === 'reduction') {
-            amount = Number(document.getElementById('redAmount').value);
-            if(amount <= 0) return showModal('금액을 입력해주세요.');
-            if(totalCap - amount < 100000) return showModal(`잔액 10만원 이상 유지해야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
-            if(!document.getElementById('checkRedAgree').checked) return showModal('안내 사항에 동의해주세요.');
-        } 
-        else if(type === 'withdraw') {
-            reason = document.getElementById('wdReason').value;
-            if(!reason) return showModal('사유를 입력해주세요.');
-            if(!document.getElementById('checkWdAgree').checked) return showModal('동의 항목에 체크해주세요.');
-        }
-
-        // confirm -> showConfirmModal
-        showConfirmModal('신청서를 제출하시겠습니까?', async function() {
-            showLoading(true);
-            const { error } = await _supabase.from('coop_applications').insert({
-                member_uid: curAuth.id,
-                member_id: curMem.member_id,
-                name: curMem.name,
-                type: type,
-                amount: amount,
-                reason: reason,
-                status: 'pending'
-            });
-
-            showLoading(false);
-            if(error) showModal('오류: ' + error.message);
-            else {
-                showModal('신청되었습니다.');
-                // 초기화
-                document.getElementById('exAmount').value = '';
-                document.getElementById('redAmount').value = '';
-                document.getElementById('wdReason').value = '';
-                if(document.getElementById('checkRedAgree')) document.getElementById('checkRedAgree').checked = false;
-                if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgree').checked = false;
-                
-                loadDashboardData(curAuth.id);
-            }
-        });
+    if(type === 'extra') {
+        amount = Number(document.getElementById('exAmount').value);
+        if(amount < 10000) return showModal('1만원 이상 입력해주세요.');
+    } 
+    else if(type === 'reduction') {
+        amount = Number(document.getElementById('redAmount').value);
+        if(amount <= 0) return showModal('금액을 입력해주세요.');
+        if(totalCap - amount < 100000) return showModal(`잔액 10만원 이상 유지해야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
+        if(!document.getElementById('checkRedAgree').checked) return showModal('안내 사항에 동의해주세요.');
+    } 
+    else if(type === 'withdraw') {
+        reason = document.getElementById('wdReason').value;
+        if(!reason) return showModal('사유를 입력해주세요.');
+        if(!document.getElementById('checkWdAgree').checked) return showModal('동의 항목에 체크해주세요.');
     }
 
-// [수정] 프로필 저장 함수 (Target ID 지정 및 단체/개인 구분 저장, 화면 유지 적용)
-async function saveProfile() {
-    // 1. 현재 보고 있는 프로필의 ID (개인이라면 내 ID, 단체라면 단체 ID)
-    // [핵심] curAuth.id(로그인한 사람)가 아니라 curMem.id(화면의 주인)를 잡아야 함
-    const targetUuid = curMem.id; 
+    showConfirmModal('신청서를 제출하시겠습니까?', async function() {
+        showLoading(true);
+        const { error } = await _supabase.from('coop_applications').insert({
+            member_uid: curAuth.id,
+            member_id: curMem.member_id,
+            name: curMem.name,
+            type: type,
+            amount: amount,
+            reason: reason,
+            status: 'pending'
+        });
 
-    // 2. 공통 입력값 가져오기
+        showLoading(false);
+        if(error) showModal('오류: ' + error.message);
+        else {
+            showModal('신청되었습니다.');
+            
+            // 초기화
+            document.getElementById('exAmount').value = '';
+            document.getElementById('redAmount').value = '';
+            document.getElementById('wdReason').value = '';
+            if(document.getElementById('checkRedAgree')) document.getElementById('checkRedAgree').checked = false;
+            if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgree').checked = false;
+            
+            // ★ 핵심: 스마트 새로고침
+            reloadDashboard();
+        }
+    });
+}
+
+// [수정] 프로필 저장 (스마트 새로고침 + 에러 검증)
+async function saveProfile() {
+    const targetUuid = curMem.id; // 현재 보고 있는 ID
+
     const phone = document.getElementById('editPhone').value.trim();
     const mainAddr = document.getElementById('editAddrMain').value;
     const detailAddr = document.getElementById('editAddrDetail').value;
-    const fullAddr = (mainAddr + ' ' + detailAddr).trim(); // 주소 합치기
+    const fullAddr = (mainAddr + ' ' + detailAddr).trim();
     const bank = document.getElementById('editBankName').value;
-    const accNo = document.getElementById('editAccountNo').value; // HTML에서 이미 숫자만 입력됨
+    const accNo = document.getElementById('editAccountNo').value;
     const holder = document.getElementById('editHolder').value;
 
-    // 3. 단체 전용 입력값 확인 (화면에 단체 영역이 보이는지 체크)
     const isGroup = !document.getElementById('orgInfoGroup').classList.contains('hidden');
     let bizNo = null;
     let corpNo = null;
@@ -1764,19 +1781,25 @@ async function saveProfile() {
         bizNo = document.getElementById('editBizNo').value.trim();
         corpNo = document.getElementById('editCorpNo').value.trim();
         
-        // [검증] 사업자번호 길이 체크
-        if (bizNo && bizNo.length < 10) {
-            return showModal('사업자등록번호 형식이 올바르지 않습니다. (10자리 이상)');
+        // [검증 1] 현재 화면에 빨간 글씨가 떠있는가?
+        const bizErr = document.getElementById('bizNoError').style.display !== 'none';
+        const corpErr = document.getElementById('corpNoError').style.display !== 'none';
+        
+        if (bizErr) return showModal('사업자등록번호를 확인해주세요.');
+        if (corpErr) return showModal('법인등록번호를 확인해주세요.');
+        
+        // [검증 2] 값 존재 시 형식 재확인
+        if (bizNo) {
+            const rawBiz = bizNo.replace(/-/g, '');
+            if(rawBiz.length !== 10 || !checkBizID(rawBiz)) return showModal('유효하지 않은 사업자번호입니다.');
+        }
+        if (corpNo) {
+            const rawCorp = corpNo.replace(/-/g, '');
+            if(rawCorp.length !== 13) return showModal('법인번호는 13자리여야 합니다.');
         }
     }
 
-    // 4. [검증] 전화번호 길이 체크
-    if (phone.length < 12) {
-        return showModal('전화번호를 올바르게 입력해주세요.\n(예: 010-1234-5678)');
-    }
-
-    // 5. [검증] 전화번호 중복 체크 (DB 조회)
-    // "입력한 번호가 현재 DB상의 내 번호와 다를 때만 검사"
+    if (phone.length < 12) return showModal('전화번호를 올바르게 입력해주세요.');
     if (phone !== curMem.phone) {
         showLoading(true, '중복 검사 중...');
         try {
@@ -1784,32 +1807,21 @@ async function saveProfile() {
                 .from('coop_members')
                 .select('id')
                 .eq('phone', phone)
-                .neq('id', targetUuid) // [중요] 수정 대상인 ID(나 또는 내 단체)는 제외하고 검색
+                .neq('id', targetUuid)
                 .maybeSingle();
 
             showLoading(false);
-
-            if (checkErr) {
-                console.error(checkErr);
-                return showModal('중복 검사 중 시스템 오류가 발생했습니다.');
-            }
-
-            if (existing) {
-                return showModal('이미 등록된 전화번호입니다.\n다른 번호를 입력해주세요.');
-            }
-
+            if (checkErr) throw checkErr;
+            if (existing) return showModal('이미 등록된 전화번호입니다.');
         } catch (e) {
             showLoading(false);
             return showModal('오류 발생: ' + e.message);
         }
     }
 
-    // 6. 저장 진행 (최종 컨펌)
     showConfirmModal('정보를 수정하시겠습니까?', async function() {
         showLoading(true, '저장 중...');
 
-        // [핵심 변경] update_my_profile RPC 호출
-        // p_target_id 파라미터에 targetUuid를 전달하여 "누구를 수정할지" 명시
         const { error } = await _supabase.rpc('update_my_profile', {
             p_target_id: targetUuid, 
             p_phone: phone,
@@ -1817,8 +1829,8 @@ async function saveProfile() {
             p_bank_name: bank,
             p_account_number: accNo,
             p_account_holder: holder,
-            p_business_number: bizNo, // 단체가 아니면 null 들어감
-            p_corp_number: corpNo     // 단체가 아니면 null 들어감
+            p_business_number: bizNo,
+            p_corp_number: corpNo
         });
 
         showLoading(false);
@@ -1828,10 +1840,8 @@ async function saveProfile() {
         } else {
             showModal('수정되었습니다.');
             toggleEditMode(false);
-            
-            // [핵심 변경] 데이터 리로드 시, 로그인한 사람(curAuth)이 아니라
-            // 방금 수정한 대상(targetUuid)을 로드해야 단체 화면이 유지됨
-            loadDashboardData(targetUuid); 
+            // ★ 핵심: 스마트 새로고침
+            reloadDashboard(); 
         }
     });
 }
@@ -1877,16 +1887,14 @@ function toggleTab(type, btn) {
         }
     }
 
+// [수정] 증명서 다운로드 (스마트 새로고침 적용 - 혹시라도 상태 갱신 필요 시)
 async function downloadCert() {
     if(!curMem) return;
     showLoading(true, '증서 발급 중...');
     
     try {
-        // 1. 납입 총액 계산
         const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
         const ledgerTotal = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
-        
-        // 2. 최종 금액 (변수명 통일: finalTotal)
         const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
         
         if(finalTotal === 0) { 
@@ -1894,8 +1902,6 @@ async function downloadCert() {
             return showModal('납입된 출자금이 없어 증명서를 발급할 수 없습니다.'); 
         }
 
-        // 3. RPC 호출 (p_amount에 finalTotal 전달)
-        // coop_certificates 테이블에 insert 권한이 있어야 함
         const { data: cert, error } = await _supabase.rpc('issue_certificate', { 
             p_member_id: curMem.member_id, 
             p_amount: finalTotal 
@@ -1903,11 +1909,13 @@ async function downloadCert() {
 
         if (error) throw error;
 
-        // 4. PDF 생성 (cert_generator.js 활용)
         const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
         await generateContributionCert(curMem, finalTotal, cert.cert_number, info?info.value:"이사장", _supabase);
         
         showLoading(false);
+        
+        // ★ 필요하다면 스마트 새로고침 (보통 다운로드는 화면 갱신 불필요하지만, 만약 발급 이력을 보여준다면 필요)
+        reloadDashboard();
 
     } catch(e) { 
         console.error(e); 
@@ -1999,111 +2007,69 @@ function closeCustomModal() {
     // =========================================================================
 
 
-// [수정] 수정 모드 토글 (주소창 1단 ↔ 2단 전환 및 단체 정보창 제어)
+// [수정] 수정 모드 토글 (취소 시 스마트 새로고침 적용)
 function toggleEditMode(isEdit) {
-    // 1. 제어할 요소들 가져오기
-    const inputs = document.querySelectorAll('.readonly-text'); // input 태그들
-    
-    // 주소 관련
+    const inputs = document.querySelectorAll('.readonly-text');
     const viewAddr = document.getElementById('viewAddressBox');
     const editAddr = document.getElementById('editAddressBox');
-    
-    // 전화번호 관련
     const viewPhone = document.getElementById('viewPhoneBox');
     const editPhone = document.getElementById('editPhone');
-
-    // 계좌번호 관련
     const viewBank = document.getElementById('viewBankBox');
     const editBank = document.getElementById('editBankBox');
-
-    // [신규] 단체 정보 관련 (사업자/법인)
     const viewBiz = document.getElementById('viewBizNoBox');
     const editBiz = document.getElementById('editBizNo');
     const viewCorp = document.getElementById('viewCorpNoBox');
     const editCorp = document.getElementById('editCorpNo');
-
-    // 현재 화면에 단체 영역이 보이는 상태인지 체크 (class hidden 여부)
     const isGroupVisible = !document.getElementById('orgInfoGroup').classList.contains('hidden');
 
-    // 계좌번호 입력창 (초기화용)
-    const accInput = document.getElementById('editAccountNo');
-
     if (isEdit) {
-        // [수정 모드 진입]
-        
-        // 버튼 제어
+        // [수정 모드]
         document.getElementById('btnEditProfile').classList.add('hidden');
         document.getElementById('btnSaveProfile').classList.remove('hidden');
         document.getElementById('btnCancelEdit').classList.remove('hidden');
         
-        // Input 속성 변경 (입력 가능하게)
         inputs.forEach(el => {
             el.readOnly = false;
             el.classList.add('editable-input');
             el.classList.remove('readonly-text');
         });
+        
+        viewAddr.style.display = 'none'; editAddr.style.display = 'block';
+        viewPhone.style.display = 'none'; editPhone.style.display = 'block';
+        viewBank.style.display = 'none'; editBank.style.display = 'flex';
 
-        // 계좌번호 UX (입력창 비우기)
-        accInput.value = ''; 
-        accInput.placeholder = '변경 시에만 입력하세요 (기존 유지)';
-
-        // [핵심] 화면 전환 (View 숨김 -> Edit 보임)
-        viewAddr.style.display = 'none';
-        editAddr.style.display = 'block';
-
-        viewPhone.style.display = 'none';
-        editPhone.style.display = 'block';
-
-        viewBank.style.display = 'none';
-        editBank.style.display = 'flex'; // row 클래스이므로 flex 권장
-
-        // [신규] 단체일 경우에만 사업자/법인 번호 수정창 노출
-        if (isGroupVisible) {
-            viewBiz.style.display = 'none';
-            editBiz.style.display = 'block';
-            
-            viewCorp.style.display = 'none';
-            editCorp.style.display = 'block';
+        if(isGroupVisible) {
+            viewBiz.style.display = 'none'; editBiz.style.display = 'block';
+            viewCorp.style.display = 'none'; editCorp.style.display = 'block';
         }
-
-        // 상세주소 등 edit-mode-only 클래스 보이기
         document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'block');
 
     } else {
-        // [취소 / 뷰 모드 복귀]
+        // [취소 버튼]
+        // ★ 핵심: 스마트 새로고침 (보고 있던 프로필 유지)
+        reloadDashboard(); 
         
-        // 데이터 원복 (리로드)
-        loadDashboardData(curAuth.id);
-        
-        // 버튼 제어
         document.getElementById('btnEditProfile').classList.remove('hidden');
         document.getElementById('btnSaveProfile').classList.add('hidden');
         document.getElementById('btnCancelEdit').classList.add('hidden');
         
-        // Input 속성 변경 (읽기 전용)
         inputs.forEach(el => {
             el.readOnly = true;
             el.classList.remove('editable-input');
             el.classList.add('readonly-text');
         });
-
-        // [핵심] 화면 전환 (Edit 숨김 -> View 보임)
-        viewAddr.style.display = 'block';
-        editAddr.style.display = 'none';
-
-        viewPhone.style.display = 'block';
-        editPhone.style.display = 'none';
-
-        viewBank.style.display = 'block';
-        editBank.style.display = 'none';
-
-        // [신규] 단체 정보도 원래대로 복귀
-        viewBiz.style.display = 'block';
-        editBiz.style.display = 'none';
-        viewCorp.style.display = 'block';
-        editCorp.style.display = 'none';
-
+        
+        viewAddr.style.display = 'block'; editAddr.style.display = 'none';
+        viewPhone.style.display = 'block'; editPhone.style.display = 'none';
+        viewBank.style.display = 'block'; editBank.style.display = 'none';
+        viewBiz.style.display = 'block'; editBiz.style.display = 'none';
+        viewCorp.style.display = 'block'; editCorp.style.display = 'none';
+        
         document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'none');
+        
+        // 에러 메시지 초기화
+        document.getElementById('bizNoError').style.display = 'none';
+        document.getElementById('corpNoError').style.display = 'none';
     }
 }
 
@@ -3438,6 +3404,65 @@ async function submitPartnerApplication() {
             container.scrollLeft += amount;
         }
     }
+   // [신규] 사업자번호 입력 핸들러 (포맷팅 + 실시간 검증)
+// [신규] 사업자번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅)
+function handleBizNoInput(target) {
+    // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김 (방해 금지)
+    document.getElementById('bizNoError').style.display = 'none';
+
+    // 2. 포맷팅 (000-00-00000)
+    let raw = target.value.replace(/[^0-9]/g, '');
+    let formatted = raw;
+    if(raw.length >= 4 && raw.length < 6) {
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3);
+    } else if(raw.length >= 6) {
+        formatted = raw.substr(0, 3) + '-' + raw.substr(3, 2) + '-' + raw.substr(5);
+    }
+    target.value = formatted;
+
+    // 3. [검증] 길이가 10자리가 되었을 때만 슬쩍 검사 (틀리면 그때 표시)
+    if (raw.length === 10) {
+        if (!checkBizID(raw)) {
+            document.getElementById('bizNoError').style.display = 'block';
+        }
+    }
+}
+
+// [신규] 법인번호 핸들러 (입력 즉시 에러 숨김 + 포맷팅)
+function handleCorpNoInput(target) {
+    // 1. [UX] 입력하는 순간 에러 메시지 무조건 숨김
+    document.getElementById('corpNoError').style.display = 'none';
+
+    // 2. 포맷팅 (000000-0000000)
+    let raw = target.value.replace(/[^0-9]/g, '');
+    let formatted = raw;
+    if(raw.length > 6) {
+        formatted = raw.substr(0, 6) + '-' + raw.substr(6);
+    }
+    target.value = formatted;
+
+    // 3. [검증] 13자리가 찼을 때 체크 (보통 법인번호는 13자리)
+    if (raw.length === 13) {
+        // 별도 알고리즘 없이 길이만 맞으면 OK로 간주 (필요시 알고리즘 추가 가능)
+        document.getElementById('corpNoError').style.display = 'none';
+    } else if (raw.length > 13) {
+        document.getElementById('corpNoError').style.display = 'block';
+    }
+}
+
+// [신규] 국세청 사업자번호 검증 알고리즘
+function checkBizID(bizID) {
+    const checkID = [1, 3, 7, 1, 3, 7, 1, 3, 5];
+    let i, chkSum = 0, c2, remander;
+    bizID = bizID.replace(/-/gi,'');
+    if(bizID.length !== 10) return false;
+    for (i = 0; i <= 7; i++) chkSum += checkID[i] * bizID.charAt(i);
+    c2 = "0" + (checkID[8] * bizID.charAt(8));
+    c2 = c2.substring(c2.length - 2, c2.length);
+    chkSum += Math.floor(c2.charAt(0)) + Math.floor(c2.charAt(1));
+    remander = (10 - (chkSum % 10)) % 10 ;
+    return Math.floor(bizID.charAt(9)) === remander;
+}
 
 </script>
 </body>
