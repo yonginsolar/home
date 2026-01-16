@@ -81,7 +81,7 @@
   </nav>
 
 <div class="d-flex align-items-center">
-        <a href="membermanage.html" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
+        <a href="javascript:void(0);" onclick="handleMainLogin()" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
         <a href="signup.html" class="get-started-btn scrollto">조합원 가입</a> 
   
     <i class="bi bi-list mobile-nav-toggle d-lg-none ms-3" onclick="toggleMobileMenu()"></i>
@@ -1681,6 +1681,43 @@ function openPlantDetail(id) {
             parentLi.classList.add('active');
         }
     }
+    // [신규 기능] 메인 로그인 버튼 클릭 시 라우팅 처리
+async function handleMainLogin() {
+    // 1. 현재 로그인 세션 확인
+    const { data: { session } } = await _client.auth.getSession();
+
+    // [CASE A] 로그인이 안 된 상태 -> 로그인 페이지로 이동
+    if (!session) {
+        // 로그인 페이지가 따로 있다면 login.html로, 
+        // 혹은 바로 관리 페이지로 보내서 그쪽에서 로그인을 유도할 수도 있습니다.
+        location.href = 'membermanage.html'; 
+        return;
+    }
+
+    // [CASE B, C] 로그인은 되어 있음 -> 정회원 명부 확인
+    // 이메일 또는 카카오ID로 조회
+    const { data: member, error } = await _client
+        .from('coop_members')
+        .select('id')
+        .or(`email.eq.${session.user.email},kakao_id.eq.${session.user.id}`)
+        .maybeSingle();
+
+    if (member) {
+        // [CASE B] 명부에 데이터 있음 -> 이미 가입된 조합원
+        location.href = 'membermanage.html'; 
+    } else {
+        // [CASE C] 인증은 됐는데 명부에 없음 -> 가입 신청서를 쓰다 만 사람
+        // 여기서 바로 가입 페이지(join.html)로 납치합니다.
+        if(confirm("가입 신청서 작성이 완료되지 않았습니다.\n작성 페이지로 이동하시겠습니까?")) {
+            location.href = 'join.html';
+        } else {
+            // 취소하면 로그아웃 처리하여 꼬임 방지
+            await _client.auth.signOut();
+            alert("로그아웃 되었습니다.");
+            location.reload();
+        }
+    }
+}
   </script>
 </body>
 </html>
