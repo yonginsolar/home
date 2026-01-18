@@ -62,13 +62,13 @@ document.addEventListener("DOMContentLoaded", function() {
           Designed by <a href="https://bootstrapmade.com/">BootstrapMade</a>
         </div>
       </div>
- 
+ <!--
       <div class="social-links text-center text-md-right pt-3 pt-md-0">
         <a href="#" class="facebook"><i class="bi bi-facebook"></i></a>
         <a href="#" class="instagram"><i class="bi bi-instagram"></i></a>
         <a href="#" class="youtube"><i class="bi bi-youtube"></i></a>
       </div> 
-
+-->
      </div>
     `;
 
