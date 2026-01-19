@@ -1032,7 +1032,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     // =========================================================================
     // 2. 로그인 & 데이터 로드
     // =========================================================================
-// [수정 2] 매직링크 발송: 에러 메시지 번역 적용
+// 기존 함수 -> 변경할 함수
+
 async function sendMagicLink() {
     const email = document.getElementById('emailInput').value.trim();
     if(!email.includes('@')) return showModal('이메일 주소 형식이 올바르지 않습니다.\n(@가 포함되어야 합니다)');
@@ -1045,15 +1046,19 @@ async function sendMagicLink() {
     // 2. 로그인 링크 발송
     const { error } = await _supabase.auth.signInWithOtp({
         email: email,
-        options: { shouldCreateUser: false, emailRedirectTo: window.location.href } 
-        // 주의: shouldCreateUser: false로 설정하여 미가입자가 로그인 시도 시 에러가 나도록 유도할 수도 있습니다.
-        // 현재 정책(가입된 이메일만)에 맞게 false 권장. 만약 누구나 가입 가능하다면 true.
+        options: { 
+            // [핵심 변경] false -> true 로 변경
+            // true: 계정이 없으면 새로 만들어서라도 메일을 보냄 (자동 가입)
+            shouldCreateUser: true, 
+            emailRedirectTo: window.location.href 
+        } 
     });
     
     showLoading(false);
 
     if(error) {
-        // ★ 여기가 변경된 부분입니다.
+        // 이제 'Signups not allowed' 에러는 발생하지 않을 것입니다.
+        // 다른 에러(예: API 제한, 이메일 형식 오류 등)만 처리
         const friendlyMsg = translateAuthError(error.message);
         showModal(friendlyMsg);
     }
