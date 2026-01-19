@@ -35,6 +35,17 @@
 .rules-field .rules-field-text:first-child { border-top-left-radius: 8px !important; border-bottom-left-radius: 8px !important; }
 .rules-field .btn:last-child { border-top-right-radius: 8px !important; border-bottom-right-radius: 8px !important; }
   }
+    /* [추가] 제n절 스타일링 */
+.section-title {
+    font-size: 1.2rem;     /* 챕터보다는 작게 */
+    font-weight: 700;      /* 굵게 */
+    color: #495057;        /* 진한 회색 */
+    margin-top: 30px;      /* 위쪽 여백 */
+    margin-bottom: 15px;   /* 아래쪽 여백 */
+    padding-left: 10px;    /* 텍스트 들여쓰기 */
+    border-left: 4px solid #adb5bd; /* 왼쪽에 회색 바를 두어 구분감 줌 */
+    background-color: transparent;
+}
 </style>
 </head>
 
@@ -242,7 +253,7 @@ function toggleSearch(e) {
         }
     }
 
-    function renderCards(text, containerId) {
+function renderCards(text, containerId) {
         const container = document.getElementById(containerId);
         if (!text) return;
 
@@ -251,28 +262,42 @@ function toggleSearch(e) {
         let buffer = ''; 
         let currentTitle = ''; 
 
-        const chapterPattern = /^제\s*\d+\s*장/; 
-        const addendaPattern = /^부\s*칙/;       
+        // [수정] 정규식 패턴 정의
+        const chapterPattern = /^제\s*\d+\s*장/;  // 제n장
+        const sectionPattern = /^제\s*\d+\s*절/;  // [추가] 제n절
+        const addendaPattern = /^부\s*칙/;        // 부칙
         
         lines.forEach(line => {
             const trimmed = line.trim();
             if(!trimmed) return;
 
+            // 1. [장] 감지
             if (chapterPattern.test(trimmed)) {
-                if (currentTitle || buffer) flushCard();
+                if (currentTitle || buffer) flushCard(); // 이전 내용 저장
                 html += `<div class="chapter-title searchable-item">${trimmed}</div>`;
                 return;
             }
 
+            // 2. [추가] [절] 감지 로직
+            if (sectionPattern.test(trimmed)) {
+                if (currentTitle || buffer) flushCard(); // 이전 내용 저장
+                // 절 제목을 위한 div 생성
+                html += `<div class="section-title searchable-item">${trimmed}</div>`;
+                return;
+            }
+
+            // 3. [부칙] 감지
             if (addendaPattern.test(trimmed)) {
                 if (currentTitle || buffer) flushCard();
                 html += `<div class="addenda-title searchable-item">${trimmed}</div>`;
                 return;
             }
 
+            // 4. [조] 감지 (기존 로직 유지)
             if (trimmed.startsWith('제') && trimmed.includes('조')) {
                 if (currentTitle || buffer) flushCard();
                 
+                // 조 제목과 본문 분리 로직
                 const splitIndex = trimmed.search(/(\(|\[|①|1\.|가\.)/);
                 if (splitIndex > -1) {
                     const parenEnd = trimmed.indexOf(')');
@@ -295,14 +320,17 @@ function toggleSearch(e) {
                 return;
             }
 
+            // 5. 일반 텍스트 (본문 누적)
             if (trimmed) {
                 buffer += (buffer ? '<br>' : '') + trimmed;
             }
         });
 
+        // 마지막 남은 내용 저장
         if (currentTitle || buffer) flushCard();
 
         function flushCard() {
+            // 원문자 줄바꿈 처리
             let formattedBody = buffer.replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)/g, '<br>$1');
             if(formattedBody.startsWith('<br>')) formattedBody = formattedBody.substring(4);
 
