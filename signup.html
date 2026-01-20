@@ -565,9 +565,24 @@ function validateBizNo() {
       }
     }
     
-    async function startKakaoSignup() {
-      await _supabase.auth.signInWithOAuth({ provider: 'kakao', options: { redirectTo: window.location.href } });
-    }
+// [코드 2] startKakaoSignup 함수 교체
+async function startKakaoSignup() {
+  await _supabase.auth.signInWithOAuth({ 
+    provider: 'kakao', 
+    options: { 
+      redirectTo: window.location.href,
+      // 가입 페이지니까 scopes는 당연히 있어야 함 (이미 있다고 하셨지만 확인차)
+      scopes: 'account_email profile_nickname', 
+      
+      // ★ [핵심] 이 줄을 꼭 추가하세요!
+      // 사용자가 이미 로그인되어 있어도, 강제로 다시 아이디/비번을 치게 만듭니다.
+      // 그래야 "scopes 없는 반쪽짜리 로그인" 기록을 덮어쓸 수 있습니다.
+      queryParams: {
+        prompt: 'login' 
+      }
+    } 
+  });
+}
 
 // [7] 제출 로직
 async function handleFormSubmit(e, form) {
@@ -1102,50 +1117,39 @@ async function checkRRNFinal() {
     }
     // [신규 함수] 기존 회원 여부 확인 (Gatekeeper)
 // [수정된 함수] 기존 회원 여부 확인 (안전장치 추가됨)
+// [코드 1] checkExistingMember 함수 교체
 async function checkExistingMember(session) {
   try {
     const email = session.user.email;
-    const authId = session.user.id; // Supabase User UUID (Kakao ID와 매핑됨)
-
-    // 1. 쿼리 필터 문자열을 안전하게 생성 (따옴표 추가 및 null 처리)
-    // 기본적으로 kakao_id(auth_id)는 반드시 체크
-    let filterString = `kakao_id.eq."${authId}"`;
-
-    // 이메일이 존재할 경우에만 OR 조건에 추가 (카카오에서 이메일 제공 안 할 수도 있음)
-    if (email) {
-      filterString += `,email.eq."${email}"`;
-    }
-
-    // 2. DB 조회
-    const { data, error } = await _supabase
-      .from('coop_members')
-      .select('id')
-      .or(filterString)
-      .maybeSingle();
-
-    // 3. DB 에러 발생 시 (예: RLS 권한 문제 등)
-    if (error) {
-      console.warn("회원 조회 중 에러 발생(신규 가입으로 간주):", error);
-      // 에러가 나도 멈추지 말고 신청서를 보여줍니다.
+    
+    // 이메일 없으면 바로 신청서 보여줌 (멈춤 방지)
+    if (!email) {
       showApplicationForm(session);
       return;
     }
 
-    // 4. 결과 처리
-    if (data) {
-      // [CASE A] 이미 가입된 회원 -> 안내 모달 띄움
-      const modal = document.getElementById('alreadyMemberModal');
-      if (modal) {
-        modal.style.display = 'flex';
-      }
-    } else {
-      // [CASE B] 명부에 없는 신규 회원 -> 신청서 화면 진입
+    // kakao_id 찾지 말고 이메일로만 안전하게 확인
+    const { data, error } = await _supabase
+      .from('coop_members')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) {
+      // DB 에러나도 무시하고 진행
+      console.warn("DB 에러(무시):", error.message);
       showApplicationForm(session);
+      return;
     }
 
+    if (data) {
+      const modal = document.getElementById('alreadyMemberModal');
+      if (modal) modal.style.display = 'flex';
+    } else {
+      showApplicationForm(session);
+    }
   } catch (err) {
-    // 5. 치명적인 스크립트 에러가 나도 신청서는 보여줌 (Fail-Safe)
-    console.error("스크립트 실행 중 치명적 오류:", err);
+    console.error("스크립트 에러(무시):", err);
     showApplicationForm(session);
   }
 }
