@@ -548,50 +548,75 @@ function validateBizNo() {
       }
     };
 
+// [코드 2] 가입 신청서 화면 렌더링 및 UI 제어
 function showApplicationForm(session) {
-  // 1. 화면 전환
+  // 1. 화면 전환 (게이트 숨김 -> 폼 표시)
   document.getElementById('step-gate').style.display = 'none';
   document.getElementById('step-form').style.display = 'block';
   
-  const meta = session.user.user_metadata || {};
+  const user = session.user;
+  const meta = user.user_metadata || {};
+  const provider = user.app_metadata.provider; // 'kakao', 'google', 'email' 등
 
-  // 2. 이메일 자동 입력 (HTML에서 readonly 상태 유지)
-  const emailInput = document.getElementById('verifiedEmail');
-  if(emailInput && session.user.email) {
-     emailInput.value = session.user.email;
+  // ============================================================
+  // [핵심 로직] 카카오 로그인 시 '단체' 가입 차단
+  // ============================================================
+  if (provider === 'kakao') {
+    // 1. '개인' 라디오 버튼 강제 선택
+    const radioIndi = document.getElementById('t-indi');
+    radioIndi.checked = true;
+    
+    // 2. '단체' 라디오 버튼 비활성화 (클릭 불가)
+    const radioOrg = document.getElementById('t-org');
+    radioOrg.disabled = true;
+    
+    // 3. UI 갱신 (주민번호 입력창 보이기, 사업자번호 숨기기)
+    toggleType('개인');
+
+    // (선택사항) 시각적 힌트: 라벨에 스타일 적용
+    const labelOrg = document.querySelector('label[for="t-org"]');
+    if(labelOrg) {
+        labelOrg.classList.remove('btn-outline-success');
+        labelOrg.classList.add('btn-outline-secondary'); // 회색으로 변경
+        labelOrg.innerText = "🏢 단체 (카카오 불가)";
+    }
+  } else {
+    // 카카오가 아니면 기본값 '개인' 세팅 (버튼은 둘 다 활성화)
+    toggleType('개인'); 
   }
 
-  // 3. 이름 자동 입력
+  // ============================================================
+  // [데이터 채우기] 기존 로직 유지
+  // ============================================================
+
+  // 1. 이메일 자동 입력
+  const emailInput = document.getElementById('verifiedEmail');
+  if(emailInput && user.email) {
+     emailInput.value = user.email;
+  }
+
+  // 2. 이름 자동 입력
   if(meta.full_name) {
      const nameInput = document.getElementById('userName');
      if(!nameInput.value) {
         nameInput.value = meta.full_name;
-        // 예금주 동기화 함수가 있다면 실행
         if(typeof syncAccountHolder === 'function') syncAccountHolder();
      }
   }
 
-  // 4. [핵심] 전화번호 파싱 로직 (만약 정보가 있다면)
-  // 카카오/Supabase는 보통 "+821012345678" 형태로 줍니다.
+  // 3. 전화번호 파싱 및 입력
   if (meta.phone_number) {
      let rawPhone = meta.phone_number;
-     
-     // (1) 숫자만 남기기 (정규식)
+     // 숫자만 남기기
      let cleanNum = rawPhone.replace(/[^0-9]/g, '');
+     // 국가코드 82 처리
+     if (cleanNum.startsWith('82')) cleanNum = '0' + cleanNum.substring(2);
 
-     // (2) 국가코드 82 처리 (+8210... -> 010...)
-     if (cleanNum.startsWith('82')) {
-        cleanNum = '0' + cleanNum.substring(2);
-     }
-
-     // (3) 한국 휴대폰 번호(11자리)라면 쪼개서 넣기
      if (cleanNum.length === 11) {
-        document.getElementById('p1').value = cleanNum.substring(0, 3); // 010
-        document.getElementById('p2').value = cleanNum.substring(3, 7); // 1234
-        document.getElementById('p3').value = cleanNum.substring(7, 11); // 5678
-     } 
-     // (옵션) 10자리 번호일 경우 (011, 017 등 구형 번호)
-     else if (cleanNum.length === 10) {
+        document.getElementById('p1').value = cleanNum.substring(0, 3);
+        document.getElementById('p2').value = cleanNum.substring(3, 7);
+        document.getElementById('p3').value = cleanNum.substring(7, 11);
+     } else if (cleanNum.length === 10) {
         document.getElementById('p1').value = cleanNum.substring(0, 3);
         document.getElementById('p2').value = cleanNum.substring(3, 6);
         document.getElementById('p3').value = cleanNum.substring(6, 10);
@@ -1153,20 +1178,18 @@ async function checkRRNFinal() {
             }
         });
     }
-    // [신규 함수] 기존 회원 여부 확인 (Gatekeeper)
-// [수정된 함수] 기존 회원 여부 확인 (안전장치 추가됨)
-// [코드 1] checkExistingMember 함수 교체
+// [코드 1] 기존 회원 여부 확인 (이메일 기준)
 async function checkExistingMember(session) {
   try {
     const email = session.user.email;
     
-    // 이메일 없으면 바로 신청서 보여줌 (멈춤 방지)
+    // 이메일 정보가 없으면 바로 가입 폼으로 (방어 코드)
     if (!email) {
       showApplicationForm(session);
       return;
     }
 
-    // kakao_id 찾지 말고 이메일로만 안전하게 확인
+    // coop_members 테이블에서 이메일 조회
     const { data, error } = await _supabase
       .from('coop_members')
       .select('id')
@@ -1174,20 +1197,24 @@ async function checkExistingMember(session) {
       .maybeSingle();
 
     if (error) {
-      // DB 에러나도 무시하고 진행
-      console.warn("DB 에러(무시):", error.message);
+      console.warn("DB 조회 중 오류(무시하고 진행):", error.message);
       showApplicationForm(session);
       return;
     }
 
+    // [Case A] 이미 가입된 이메일이 존재함
     if (data) {
+      // "이미 가입된 조합원입니다" 모달 띄우기
       const modal = document.getElementById('alreadyMemberModal');
       if (modal) modal.style.display = 'flex';
-    } else {
+    } 
+    // [Case B] DB에 없음 (신규 or 이메일 불일치 기존회원)
+    else {
       showApplicationForm(session);
     }
+
   } catch (err) {
-    console.error("스크립트 에러(무시):", err);
+    console.error("스크립트 에러:", err);
     showApplicationForm(session);
   }
 }
