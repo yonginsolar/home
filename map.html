@@ -7,9 +7,12 @@
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
-    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services"></script>
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KAKAO_JS_KEY&libraries=services"></script>
+
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KAKAO_JS_KEY&libraries=services&autoload=false"></script>
     
     <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    
 
     <style>
         /* 1. Reset & Base Layout */
@@ -131,12 +134,15 @@
         let clusterer;
         let currentOverlay = null;
 
-        // 1. 초기화 및 인증 체크
-        window.onload = async function() {
+// 1. 초기화 및 인증 체크 (수정됨)
+        window.onload = function() {
             if (!checkAuth()) return; // 인증 실패 시 중단
             
-            initMap();
-            await loadSuggestions();
+            // [핵심 변경] 카카오 맵이 완전히 로드된 후 실행하도록 대기
+            kakao.maps.load(async function() {
+                initMap(); // 지도를 먼저 그리고
+                await loadSuggestions(); // 그 위에 데이터를 뿌린다
+            });
         };
 
         // 2. 인증 방어 로직 (Defensive Auth)
@@ -150,16 +156,20 @@
             return true;
         }
 
-        // 3. 지도 초기화
+// 3. 지도 초기화
         function initMap() {
             const container = document.getElementById('map');
             const options = {
-                center: new kakao.maps.LatLng(37.241086, 127.177553), // 용인시청 부근 중심
-                level: 7 // 적당한 확대 레벨
+                center: new kakao.maps.LatLng(37.241086, 127.177553), // 용인시청
+                level: 7
             };
             map = new kakao.maps.Map(container, options);
             
-            // 지도 클릭 시 기존 오버레이 닫기 UX
+            // 지도 확대 축소 컨트롤 추가 (UX 개선)
+            const zoomControl = new kakao.maps.ZoomControl();
+            map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
+
+            // 지도 클릭 시 기존 오버레이 닫기
             kakao.maps.event.addListener(map, 'click', function() {
                 if(currentOverlay) currentOverlay.setMap(null);
             });
