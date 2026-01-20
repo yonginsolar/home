@@ -502,23 +502,53 @@ function validateBizNo() {
 
     // [6] 초기화 및 매직링크
     function showEmailInput() { document.getElementById('email-gate-input').style.display = 'block'; }
+
+// [수정] 성공/실패 모달 제어 함수 (전역 사용을 위해 함수로 분리)
+function openResultModal(message, isError = false) {
+  if (isError) {
+    // 1. 에러 상황: 실패 전용 모달(failModal)을 띄움
+    const failModal = document.getElementById('failModal');
+    const msgBox = document.getElementById('failModalMsg');
     
-    async function sendMagicLink() {
-      const email = document.getElementById('init-email').value;
-      if(!email) return alert('이메일을 입력하세요.');
-      const btn = document.getElementById('btnSendLink');
-      btn.disabled = true; btn.innerText = "발송중...";
-      
-      const { error } = await _supabase.auth.signInWithOtp({ 
-        email: email, options: { emailRedirectTo: window.location.href } 
-      });
-      
-      if(error) { alert(error.message); btn.disabled=false; btn.innerText="링크 발송"; }
-      else { 
-        document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 링크를 확인해주세요 📨"; 
-        btn.innerText = "발송완료";
-      }
+    if (failModal && msgBox) {
+      msgBox.textContent = message; 
+      failModal.style.display = 'flex'; // 실패 모달 보이기
+    } else {
+      // HTML에 모달이 없을 경우를 대비한 최후의 방어 수단
+      console.error("Modal not found:", message);
     }
+  } else {
+    // 2. 성공 상황: 기존 성공 모달(successModal)을 띄움
+    const successModal = document.getElementById('successModal');
+    if (successModal) {
+      successModal.style.display = 'flex'; 
+    }
+  }
+}
+    
+// [6] 초기화 및 매직링크
+async function sendMagicLink() {
+  const email = document.getElementById('init-email').value;
+  // [수정] alert -> 모달로 변경
+  if(!email) return openResultModal('이메일을 입력하세요.', true);
+  
+  const btn = document.getElementById('btnSendLink');
+  btn.disabled = true; btn.innerText = "발송중...";
+  
+  const { error } = await _supabase.auth.signInWithOtp({ 
+    email: email, options: { emailRedirectTo: window.location.href } 
+  });
+  
+  if(error) { 
+    // [수정] alert -> 모달로 변경
+    openResultModal(error.message, true); 
+    btn.disabled=false; btn.innerText="링크 발송"; 
+  }
+  else { 
+    document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 링크를 확인해주세요 📨"; 
+    btn.innerText = "발송완료";
+  }
+}
 
 // [중요] 페이지 로드 및 로그인 상태 변경 감지
     // 이메일 인증 후 돌아왔을 때 이 코드가 실행되어야 신청서 화면이 보입니다.
@@ -651,30 +681,7 @@ async function startKakaoSignup() {
 async function handleFormSubmit(e, form) {
   e.preventDefault();
 
-  // =========================================================
-  // [수정] 성공/실패 모달 분리 처리 로직 (HTML 구조 분리에 맞춤)
-  // =========================================================
-  const openResultModal = (message, isError = false) => {
-    if (isError) {
-      // 1. 에러 상황: 실패 전용 모달(failModal)을 띄움
-      const failModal = document.getElementById('failModal');
-      const msgBox = document.getElementById('failModalMsg');
-      
-      if (failModal && msgBox) {
-        msgBox.textContent = message; 
-        failModal.style.display = 'flex'; // 실패 모달 보이기
-      } else {
-        alert(message); // 비상용
-      }
-    } else {
-      // 2. 성공 상황: 기존 성공 모달(successModal)을 띄움
-      // (내용은 HTML에 하드코딩 되어 있으므로 display만 켜면 됨)
-      const successModal = document.getElementById('successModal');
-      if (successModal) {
-        successModal.style.display = 'flex'; 
-      }
-    }
-  };
+  // [수정] 내부에서 정의하던 openResultModal 제거함 (전역 함수 사용)
 
   // ---------------------------------------------------------
   // 1. [유효성 검증] 빈 값 및 로직 체크 (기존 코드 유지)
