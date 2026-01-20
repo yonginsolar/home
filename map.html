@@ -116,10 +116,12 @@
     <div id="customAlert" class="alert-modal">메시지 내용</div>
 
     <script>
+
         // 🔴 [설정 필요] Supabase 설정
        const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// [변경점] 변수명을 'supabase' -> 'sb'로 변경하여 충돌 방지
+        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         // 로컬 스토리지 키 확인 (사용자가 제공한 정보)
         const AUTH_KEY = 'sb-ifdqlwxgqgsvnawmhlfc-auth-token';
@@ -200,10 +202,8 @@
             if (!address || !lat) { showAlert("주소를 먼저 검색해주세요."); return; }
             if (!reason) { showAlert("추천 이유를 입력해주세요."); return; }
 
-            // [중요] coop_members 테이블에서 member_id 찾기
-            // 가정: coop_members 테이블에 email 컬럼이 있어서 매칭 가능함.
-            // 만약 email이 없다면 이 로직을 수정해야 함.
-            const { data: memberData, error: memberError } = await supabase
+            // [변경점] sb 변수 사용
+            const { data: memberData, error: memberError } = await sb
                 .from('coop_members')
                 .select('member_id')
                 .eq('email', userEmail)
@@ -217,8 +217,8 @@
 
             const writerId = memberData.member_id;
 
-            // DB Insert
-            const { error: insertError } = await supabase
+            // [변경점] sb 변수 사용
+            const { error: insertError } = await sb
                 .from('site_suggestions')
                 .insert([{
                     writer_id: writerId,
@@ -246,7 +246,8 @@
 
         // 6. 제안 불러오기 (DB Read & Render)
         async function loadSuggestions() {
-            const { data, error } = await supabase
+            // [변경점] sb 변수 사용
+            const { data, error } = await sb
                 .from('site_suggestions')
                 .select('*');
 
@@ -255,8 +256,6 @@
                 return;
             }
 
-            // 기존 마커 클리어 로직이 필요하다면 추가 (현재는 단순 추가)
-            
             data.forEach(item => {
                 const markerPosition = new kakao.maps.LatLng(item.latitude, item.longitude);
                 
