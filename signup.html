@@ -1101,24 +1101,51 @@ async function checkRRNFinal() {
         });
     }
     // [신규 함수] 기존 회원 여부 확인 (Gatekeeper)
+// [수정된 함수] 기존 회원 여부 확인 (안전장치 추가됨)
 async function checkExistingMember(session) {
-  // 1. DB에서 이메일이나 카카오ID(Supabase User ID)로 조회
-  //    (혹시 이메일이 변경되었을 수도 있으니 or 조건으로 둘 다 확인)
-  const { data, error } = await _supabase
-    .from('coop_members')
-    .select('id') // 존재 여부만 알면 되므로 id만 조회
-    .or(`email.eq.${session.user.email},kakao_id.eq.${session.user.id}`)
-    .maybeSingle(); // maybeSingle은 데이터가 없어도 에러가 나지 않고 data가 null이 됨
+  try {
+    const email = session.user.email;
+    const authId = session.user.id; // Supabase User UUID (Kakao ID와 매핑됨)
 
-  if (data) {
-    // [CASE A] 이미 가입된 회원 -> 안내 모달 띄움
-    // 신청서 화면(showApplicationForm)을 호출하지 않으므로 화면은 그대로 멈춰있고 모달만 뜸
-    const modal = document.getElementById('alreadyMemberModal');
-    if(modal) {
-        modal.style.display = 'flex';
+    // 1. 쿼리 필터 문자열을 안전하게 생성 (따옴표 추가 및 null 처리)
+    // 기본적으로 kakao_id(auth_id)는 반드시 체크
+    let filterString = `kakao_id.eq."${authId}"`;
+
+    // 이메일이 존재할 경우에만 OR 조건에 추가 (카카오에서 이메일 제공 안 할 수도 있음)
+    if (email) {
+      filterString += `,email.eq."${email}"`;
     }
-  } else {
-    // [CASE B] 명부에 없는 신규 회원 -> 신청서 화면 진입
+
+    // 2. DB 조회
+    const { data, error } = await _supabase
+      .from('coop_members')
+      .select('id')
+      .or(filterString)
+      .maybeSingle();
+
+    // 3. DB 에러 발생 시 (예: RLS 권한 문제 등)
+    if (error) {
+      console.warn("회원 조회 중 에러 발생(신규 가입으로 간주):", error);
+      // 에러가 나도 멈추지 말고 신청서를 보여줍니다.
+      showApplicationForm(session);
+      return;
+    }
+
+    // 4. 결과 처리
+    if (data) {
+      // [CASE A] 이미 가입된 회원 -> 안내 모달 띄움
+      const modal = document.getElementById('alreadyMemberModal');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+    } else {
+      // [CASE B] 명부에 없는 신규 회원 -> 신청서 화면 진입
+      showApplicationForm(session);
+    }
+
+  } catch (err) {
+    // 5. 치명적인 스크립트 에러가 나도 신청서는 보여줌 (Fail-Safe)
+    console.error("스크립트 실행 중 치명적 오류:", err);
     showApplicationForm(session);
   }
 }
