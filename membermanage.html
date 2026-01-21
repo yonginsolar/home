@@ -294,22 +294,31 @@
       <div class="logo">
         <h1><a href="index.html">용인모두의햇빛협동조합</a></h1>
       </div>
-<div style="display: flex; align-items: center; gap: 10px; margin-right: 15px;">
+<div style="margin-left: auto; display: flex; align-items: center; padding-right: 20px;">
+    
+    <select id="accountSwitcher" style="margin-right: 10px; padding: 5px; border-radius: 5px; border: 1px solid #ddd;">
+        <option value="personal" id="opt-personal" data-img="https://t1.kakaocdn.net/together_image/common/avatar/avatar.png">
+            나 (개인)
+        </option>
+        
+        <option value="group1" data-img="https://cdn-icons-png.flaticon.com/512/921/921347.png">
+            용인모두의햇빛 (단체)
+        </option>
+    </select>
+
     <img id="headerProfileImg" 
          src="https://t1.kakaocdn.net/together_image/common/avatar/avatar.png" 
          alt="프로필"
          style="
-            width: 32px; 
-            height: 32px; 
+            width: 35px; 
+            height: 35px; 
             border-radius: 50%; 
             object-fit: cover; 
-            border: 2px solid #555;
-            cursor: pointer;
+            border: 2px solid #ddd;
+            cursor: default; 
+            pointer-events: none; 
          "
-         onerror="this.src='https://t1.kakaocdn.net/together_image/common/avatar/avatar.png'"
-         onclick="alert('로그인된 계정: ' + (document.getElementById('headerUserName').innerText))">
-    
-    <span id="headerUserName" style="color: #fff; font-size: 14px; font-weight: 500;"></span>
+         onerror="this.src='https://t1.kakaocdn.net/together_image/common/avatar/avatar.png'">
 </div>
       <div class="d-flex align-items-center">
           <a href="index.html" class="header-link" title="메인으로 이동">
@@ -3594,7 +3603,105 @@ function checkCorpID(corpID) {
     // 마지막 13번째 자리와 계산된 검증비트 비교
     return checkDigit === parseInt(raw.charAt(12));
 }
+document.addEventListener('DOMContentLoaded', () => {
+    const switcher = document.getElementById('accountSwitcher');
+    const profileImg = document.getElementById('headerProfileImg');
 
+    // 1. 초기 로딩 시: 내 개인 계정 이미지(카카오)로 설정
+    // (Supabase에서 가져온 내 이미지를 '개인' 옵션에 업데이트하는 로직이 필요하다면 여기에 추가)
+    
+    // 2. [핵심] 선택 변경 시 이미지 즉시 교체 이벤트
+    if (switcher && profileImg) {
+        switcher.addEventListener('change', function() {
+            // 현재 선택된 옵션(<option>)을 가져옵니다.
+            const selectedOption = this.options[this.selectedIndex];
+            
+            // 그 옵션에 숨겨둔 이미지 주소(data-img)를 꺼냅니다.
+            const newImgUrl = selectedOption.dataset.img;
+
+            // 이미지가 있으면 교체합니다.
+            if (newImgUrl) {
+                profileImg.src = newImgUrl;
+            } else {
+                // 없으면 기본 이미지
+                profileImg.src = 'https://t1.kakaocdn.net/together_image/common/avatar/avatar.png';
+            }
+        });
+    }
+});
+
+// (기존 코드 연동) Supabase 로그인 후 내 이미지를 '개인' 옵션에 심어주는 코드
+async function updatePersonalProfileImage() {
+    const { data: { session } } = await _supabase.auth.getSession();
+    if (session?.user?.user_metadata?.avatar_url) {
+        const myUrl = session.user.user_metadata.avatar_url;
+        const switcher = document.getElementById('accountSwitcher');
+        
+        // '개인' 옵션을 찾아서 data-img를 업데이트합니다.
+        // value="personal"인 옵션을 찾는다고 가정
+        const personalOption = switcher.querySelector('option[value="personal"]');
+        if (personalOption) {
+            personalOption.dataset.img = myUrl;
+            
+            // 만약 현재 선택된 게 '개인'이라면 이미지도 바로 갱신
+            if (switcher.value === 'personal') {
+                document.getElementById('headerProfileImg').src = myUrl;
+            }
+        }
+    }
+}
+   // 페이지 로드 및 로그인 세션 확인 후 실행
+async function initHeaderProfile() {
+    const { data: { session } } = await _supabase.auth.getSession();
+    
+    // 1. 필요한 HTML 요소 가져오기
+    const switcher = document.getElementById('accountSwitcher');
+    const profileImg = document.getElementById('headerProfileImg');
+    const personalOption = document.getElementById('opt-personal');
+
+    if (session && session.user) {
+        const meta = session.user.user_metadata;
+        
+        // ---------------------------------------------------------
+        // [핵심] 로그인한 사람의 정보로 '개인' 옵션 덮어쓰기
+        // ---------------------------------------------------------
+        // 이름 가져오기 (없으면 이메일 앞자리)
+        const realName = meta.full_name || meta.name || session.user.email.split('@')[0];
+        
+        // 이미지 URL 가져오기 (없으면 기본값)
+        const realAvatar = meta.avatar_url || 'https://t1.kakaocdn.net/together_image/common/avatar/avatar.png';
+
+        // HTML 내용 수정 (하드코딩 제거됨)
+        personalOption.innerText = `${realName} (개인)`;
+        personalOption.dataset.img = realAvatar;
+
+        // ---------------------------------------------------------
+        // [초기화] 현재 선택된 모드에 맞춰 이미지 즉시 갱신
+        // ---------------------------------------------------------
+        if (switcher.value === 'personal') {
+            profileImg.src = realAvatar;
+        }
+    }
+
+    // 2. 선택 변경(Change) 이벤트 리스너 연결
+    // (사용자가 콤보박스를 바꿀 때마다 옆에 이미지를 바꿈)
+    if (switcher) {
+        switcher.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const newImgUrl = selectedOption.dataset.img;
+            
+            if (newImgUrl) {
+                profileImg.src = newImgUrl;
+            }
+        });
+    }
+}
+
+// 실행
+initHeaderProfile();
+
+// 페이지 로드 시 내 진짜 이미지 가져오기 실행
+updatePersonalProfileImage();
 </script>
 </body>
 </html>
