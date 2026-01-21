@@ -1968,22 +1968,33 @@ async function downloadCert() {
     }
 
 
-// [수정] 카카오 로그인 함수 (scopes 제거 -> 카카오 콘솔 설정에 위임)
+// membermanage 페이지의 스크립트 부분 교체
+
 async function startKakaoLogin() {
     try {
         showLoading(true, '카카오 로그인 페이지로 이동합니다...');
 
+        // 1. 돌아올 목적지를 저장 (관리자 페이지)
+        // 만약 현재 페이지가 관리자 페이지라면 window.location.href를 써도 되지만,
+        // 명시적으로 적는 것이 안전합니다.
+        const targetPage = 'https://yonginsolar.github.io/home/membermanage.html'; // 또는 현재 주소
+        localStorage.setItem('auth_destination', targetPage);
+
+        // 2. Supabase 로그인 시작 (목적지는 auth_callback.html로 고정)
+        // 도메인이 github.io라면 그에 맞춰서 경로를 잡아줍니다.
+        // 현재 페이지와 같은 경로에 auth_callback.html이 있다고 가정합니다.
+        // 만약 yonginsolar.kr 도메인을 쓴다면 window.location.origin + '/auth_callback.html' 추천
+        const callbackURL = 'https://yonginsolar.github.io/home/auth_callback.html'; 
+
         const { data, error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
             options: {
-                redirectTo: 'https://yonginsolar.github.io/home/membermanage.html',
-                // [수정] scopes 라인을 삭제합니다.
-                // 이유: 코드에서 명시하면 매번 동의 화면을 강제할 수 있습니다.
-                // 카카오 디벨로퍼스 > 동의항목 설정에서 '이메일', '전화번호'를 설정해주세요.
+                // [핵심] 여기서 membermanage로 바로 오면 안 됩니다. 콜백을 거쳐야 합니다.
+                redirectTo: callbackURL,
+                
+                // scopes는 카카오 설정에 위임하거나 필요시 추가
                 queryParams: {
-                    // (선택사항) 만약 위 방법으로도 해결되지 않으면 아래 주석을 해제하세요.
-                    // prompt: 'login' // 로그인 화면을 강제할 때
-                    // prompt: 'none'  // (주의) 동의가 안 되어 있으면 에러 발생 가능
+                    // prompt: 'login' // 필요시 주석 해제
                 }
             }
         });
