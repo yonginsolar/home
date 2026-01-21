@@ -286,6 +286,38 @@
 </head>
 
 <body>
+  <div id="user-profile-section" style="
+    background-color: #ffffff;
+    padding: 20px;
+    margin: 20px auto; /* 위아래 여백 20px, 좌우 중앙 정렬 */
+    width: 90%;
+    max-width: 400px; /* 너무 넓어지지 않게 제한 */
+    border-radius: 15px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05); /* 살짝 그림자 */
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+">
+    <img id="userProfileImg" 
+         src="https://t1.kakaocdn.net/together_image/common/avatar/avatar.png" 
+         alt="프로필 사진"
+         style="
+            width: 80px; 
+            height: 80px; 
+            border-radius: 50%; 
+            object-fit: cover; 
+            border: 3px solid #F7E600; /* 카카오 노란색 테두리 포인트 */
+            background-color: #eee;
+         "
+         onerror="this.src='https://t1.kakaocdn.net/together_image/common/avatar/avatar.png'">
+    
+    <div style="display: flex; flex-direction: column; gap: 2px;">
+        <h3 id="userNameDisplay" style="margin: 0; font-size: 1.2rem; color: #333;">조합원님</h3>
+        <span id="userEmailDisplay" style="font-size: 0.9rem; color: #888;">로그인 정보 확인 중...</span>
+    </div>
+</div>
 
   <header id="header" class="fixed-top">
     <div class="container d-flex align-items-center justify-content-between">
@@ -1967,6 +1999,34 @@ async function downloadCert() {
         }); 
     }
 
+   // 페이지 로드 후 실행될 로직 (Supabase 세션 확인 후)
+async function loadUserProfile() {
+    const { data: { session } } = await _supabase.auth.getSession();
+
+    if (session && session.user) {
+        const user = session.user;
+        const meta = user.user_metadata;
+
+        // 1. 프로필 사진 연결
+        const profileImg = document.getElementById('userProfileImg');
+        // 카카오 프로필(avatar_url)이 있으면 쓰고, 없으면 기본값 유지
+        if (meta.avatar_url) {
+            profileImg.src = meta.avatar_url;
+        }
+
+        // 2. 이름 연결 (full_name -> name -> 이메일 앞부분 순서로 우선순위)
+        const nameDisplay = document.getElementById('userNameDisplay');
+        const userName = meta.full_name || meta.name || user.email.split('@')[0];
+        nameDisplay.innerText = userName + ' 님';
+
+        // 3. 이메일 표시 (보너스)
+        const emailDisplay = document.getElementById('userEmailDisplay');
+        emailDisplay.innerText = user.email;
+    }
+}
+
+// 페이지 로드 시 즉시 실행
+loadUserProfile();
 
 // membermanage 페이지의 스크립트 부분 교체
 
