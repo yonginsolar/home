@@ -963,11 +963,45 @@ let isBoardLoading = false;
     try {
         _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
       window._client = _supabase;
+      handleManualSession();
     } catch (e) {
         console.error("Supabase Init Error", e);
         alert("시스템 연결 오류");
     }
 
+   // [신규] URL로 전달된 토큰을 낚아채서 세션 복구하기
+async function handleManualSession() {
+    const params = new URLSearchParams(window.location.search);
+    const accessToken = params.get('at');
+    const refreshToken = params.get('rt');
+
+    if (accessToken && refreshToken) {
+        console.log("URL에서 인증 토큰 발견! 세션 복구 시도...");
+        
+        // 1. 수동으로 세션 설정
+        const { data, error } = await _supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+        });
+
+        if (!error && data.session) {
+            console.log("세션 복구 성공!");
+            
+            // 2. URL에서 토큰 흔적 지우기 (보안 및 미관상)
+            // 현재 페이지 주소에서 파라미터만 싹 제거해서 주소창 업데이트
+            const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+            
+            // 3. (중요) 전역 변수 업데이트해주기
+            curAuth = data.session.user;
+            
+            // 4. 원래 로직 실행 (handleLoginSuccess 등 호출 필요하면 여기서 호출)
+            // 하지만 보통 아래쪽 onAuthStateChange가 이걸 감지하고 알아서 실행함.
+        } else {
+            console.error("세션 복구 실패:", error);
+        }
+    }
+}
 // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
 async function reloadDashboard() {
     // 1. 보고 있던 계정(curMem)이 있으면 그 ID, 없으면 로그인 계정(curAuth) ID 사용
