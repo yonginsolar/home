@@ -982,32 +982,35 @@ async function reloadDashboard() {
 
    // [신규] 친절한 에러 메시지 변환기
 // [수정] 에러 메시지 번역기 (시간 제한 에러 감지 기능 추가)
+// [수정] 더 똑똑해진 에러 번역기
 function translateAuthError(errorMsg) {
     if (!errorMsg) return '알 수 없는 오류가 발생했습니다.';
     
     const msg = errorMsg.toLowerCase();
     
-    // 1. Rate Limit (시간 제한) 에러 정밀 분석
-    if (msg.includes('security purposes') || msg.includes('after')) {
-        // 숫자만 추출 (예: "after 8 seconds" -> 8)
-        const seconds = msg.match(/\d+/); 
+    // 1. 발송 빈도 제한 (가장 흔한 원인)
+    // "security purposes", "after X seconds", "rate limit" 등이 포함되면 제한 걸림으로 판단
+    if (msg.includes('security purposes') || msg.includes('after') || msg.includes('rate limit')) {
+        const seconds = msg.match(/\d+/); // 초 단위 숫자 추출
         if (seconds) {
-            return `보안을 위해 메일 발송이 제한되었습니다.\n약 ${seconds[0]}초 뒤에 다시 시도해주세요.`;
+            return `메일 발송이 제한되었습니다.\n약 ${seconds[0]}초 뒤에 다시 시도해주세요.`;
         }
-        return '너무 많은 요청이 감지되었습니다. 1분 뒤 다시 시도해주세요.';
+        return '너무 많은 요청이 감지되었습니다. 잠시 후(약 1분 뒤) 다시 시도해주세요.';
     }
 
-    if (msg.includes('invalid login credentials') || msg.includes('user not found')) {
-        return '가입되지 않은 이메일이거나 정보가 올바르지 않습니다.';
-    }
-    if (msg.includes('validation failed') || msg.includes('email')) {
+    // 2. 진짜 이메일 형식 오류인 경우만 잡기
+    // "validation failed"나 "invalid email" 처럼 명확한 경우만 처리
+    if (msg.includes('validation failed') || msg.includes('invalid email')) {
         return '이메일 주소 형식이 올바르지 않습니다. (예: user@example.com)';
     }
-    if (msg.includes('security code')) {
+
+    // 3. 보안 코드/OTP 오류
+    if (msg.includes('token') || msg.includes('otp') || msg.includes('code')) {
         return '보안 코드가 만료되었거나 틀렸습니다. 다시 로그인해주세요.';
     }
-    
-    return '시스템 오류: ' + errorMsg + '\n(지속되면 사무국에 문의해주세요)';
+
+    // 4. 그 외 알 수 없는 오류는 원문 그대로 보여줘서 진짜 원인을 파악할 수 있게 함
+    return '시스템 오류: ' + errorMsg;
 }
    
     function showLoading(show, msg) {
