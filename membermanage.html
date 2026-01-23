@@ -2025,29 +2025,33 @@ loadUserProfile();
 
 // membermanage 페이지의 스크립트 부분 교체
 
+// [수정] startKakaoLogin 함수 교체
 async function startKakaoLogin() {
     try {
         showLoading(true, '카카오 로그인 페이지로 이동합니다...');
 
-        // 1. 돌아올 목적지를 저장 (관리자 페이지)
-        // 만약 현재 페이지가 관리자 페이지라면 window.location.href를 써도 되지만,
-        // 명시적으로 적는 것이 안전합니다.
-        const targetPage = 'https://yonginsolar.github.io/home/membermanage.html'; // 또는 현재 주소
-        localStorage.setItem('auth_destination', targetPage);
+        // 1. 돌아올 목적지 설정 (현재 보고 있는 페이지)
+        const nextTarget = window.location.href;
+        
+        // 백업용 (하위 호환성)
+        localStorage.setItem('auth_destination', nextTarget);
 
-        // 2. Supabase 로그인 시작 (목적지는 auth_callback.html로 고정)
-        // 도메인이 github.io라면 그에 맞춰서 경로를 잡아줍니다.
-        // 현재 페이지와 같은 경로에 auth_callback.html이 있다고 가정합니다.
-        // 만약 yonginsolar.kr 도메인을 쓴다면 window.location.origin + '/auth_callback.html' 추천
-        const callbackURL = 'https://yonginsolar.github.io/home/auth_callback.html'; 
+        // 2. 콜백 URL 생성 (핵심: ?next=... 파라미터 추가)
+        // 현재 페이지와 같은 폴더에 auth_callback.html이 있다고 가정하고 주소를 자동 생성합니다.
+        // 예: https://도메인/membermanage.html -> https://도메인/auth_callback.html
+        const baseUrl = window.location.href.replace('membermanage.html', 'auth_callback.html');
+        
+        // 최종 URL: .../auth_callback.html?next=https://.../membermanage.html
+        const redirectUrl = `${baseUrl}?next=${encodeURIComponent(nextTarget)}`;
 
+        // 3. Supabase 로그인 시작
         const { data, error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
             options: {
-                // [핵심] 여기서 membermanage로 바로 오면 안 됩니다. 콜백을 거쳐야 합니다.
-                redirectTo: callbackURL,
+                // 여기가 수정됨: 목적지가 포함된 URL을 넘겨야 함
+                redirectTo: redirectUrl,
                 
-                 scopes: 'account_email phone_number profile_nickname',
+                scopes: 'account_email phone_number profile_nickname',
                 queryParams: {
                     // prompt: 'login' // 필요시 주석 해제
                 }
