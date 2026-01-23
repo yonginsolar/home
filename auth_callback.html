@@ -44,67 +44,65 @@
 
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        async function handleAuth() {
+async function handleAuth() {
+    try {
+        const { data, error } = await _supabase.auth.getSession();
+        if (error) throw error;
+
+        if (data.session) {
+            const user = data.session.user;
+            
+            // --- [수정] 전화번호 로직을 독립된 try-catch로 격리 ---
             try {
-                // 1. 세션 확인
-                const { data, error } = await _supabase.auth.getSession();
-                if (error) throw error;
-
-                if (data.session) {
-                    const user = data.session.user;
-
-                    // ---------------------------------------------------------
-                    // [핵심 로직 추가] 카카오가 준 전화번호 강제 주입
-                    // ---------------------------------------------------------
-                    // 1. identities 배열 확인 (여기에 카카오 원본 데이터가 숨어있음)
-                    const kakaoIdentity = user.identities?.find(id => id.provider === 'kakao');
+                const kakaoIdentity = user.identities?.find(id => id.provider === 'kakao');
+                if (kakaoIdentity?.identity_data) {
+                    const rawPhone = kakaoIdentity.identity_data.phone_number || kakaoIdentity.identity_data.phone;
                     
-                    if (kakaoIdentity && kakaoIdentity.identity_data) {
-                        // 카카오는 보통 'phone_number' 또는 'kakao_account.phone_number'로 줍니다.
-                        // identity_data 안에 있는 모든 키를 뒤져서 전화번호처럼 생긴 걸 찾습니다.
-                        const rawPhone = kakaoIdentity.identity_data.phone_number || 
-                                         kakaoIdentity.identity_data.phone;
-
-                        // 만약 전화번호를 찾았고, 현재 메타데이터에 없다면 업데이트!
-                        if (rawPhone && !user.user_metadata.phone) {
-                            
-                            document.getElementById('message').innerText = '전화번호 동기화 중...';
-                            
-                            await _supabase.auth.updateUser({
-                                data: { phone: rawPhone } // 메타데이터에 'phone'으로 저장
-                            });
-                        }
+                    // 비동기지만, 너무 오래 걸리면 무시하도록 타임아웃을 걸거나
+                    // 에러가 나도 로그인은 진행되도록 함
+                    if (rawPhone && !user.user_metadata.phone) {
+                        // 사용자에게 메시지는 보여주되, 여기서 멈추지 않게 주의
+                        document.getElementById('message').innerText = '정보 동기화 중...';
+                        await _supabase.auth.updateUser({ data: { phone: rawPhone } });
                     }
-                    // ---------------------------------------------------------
-
-                    // 2. 목적지로 이동
-                    const dest = localStorage.getItem('auth_destination');
-                    document.getElementById('message').innerText = '인증 성공! 이동합니다...';
-                    
-                    if (dest) {
-                        localStorage.removeItem('auth_destination');
-                        window.location.href = dest; 
-                    } else {
-                        window.location.href = '/'; 
-                    }
-                } else {
-                    // 세션이 아직 안 잡혔으면 이벤트 대기
-                    _supabase.auth.onAuthStateChange(async (event, session) => {
-                        if (session) {
-                            // 여기도 위와 똑같은 전화번호 로직이 필요하지만, 
-                            // 보통 getSession에서 잡히므로 일단 생략하거나 복사해서 넣으면 더 안전함.
-                            const dest = localStorage.getItem('auth_destination');
-                            localStorage.removeItem('auth_destination');
-                            window.location.href = dest || '/';
-                        }
-                    });
                 }
-
-            } catch (err) {
-                console.error('Callback Error:', err);
-                document.getElementById('message').innerText = '오류가 발생했습니다: ' + err.message;
+            } catch (syncError) {
+                console.warn("전화번호 동기화 실패 (로그인은 계속 진행):", syncError);
+                // 여기서 에러가 나도 메인 로직은 죽지 않음
             }
+            // ----------------------------------------------------
+
+            // [중요] 위에서 무슨 일이 있어도 여긴 실행됨
+            goToDestination();
+
+        } else {
+            // 세션 없음 대기
+            _supabase.auth.onAuthStateChange((event, session) => {
+                if (session) {
+                    // 여기도 똑같이 처리 (함수로 분리하는 게 좋음)
+                    goToDestination();
+                }
+            });
         }
+
+    } catch (err) {
+        console.error('Fatal Auth Error:', err);
+        // [수정] 에러가 나도 3초 뒤에는 메인으로 보내버림 (무한 로딩 방지)
+        document.getElementById('message').innerText = '인증 중 오류가 발생했습니다. 메인으로 이동합니다.';
+        setTimeout(() => {
+            window.location.href = '/'; 
+        }, 3000);
+    }
+}
+
+function goToDestination() {
+    document.getElementById('message').innerText = '로그인 성공! 이동합니다...';
+    // 아까 말한 URL 파라미터 우선 확인 로직
+    const params = new URLSearchParams(window.location.search);
+    const dest = params.get('next') || localStorage.getItem('auth_destination') || '/';
+    localStorage.removeItem('auth_destination');
+    window.location.replace(dest);
+}
 
         handleAuth();
     </script>
