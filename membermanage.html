@@ -938,6 +938,34 @@
         </div>
     </div>
 </div>
+
+  <div id="modifyAppModal" class="custom-modal-overlay">
+    <div class="custom-modal-box" style="text-align:left; max-width:400px;">
+        <h5 class="fw-bold mb-3">신청 내용 수정</h5>
+        <input type="hidden" id="modAppId">
+        <input type="hidden" id="modAppType">
+
+        <div class="alert alert-warning x-small mb-3">
+            <i class="bi bi-exclamation-circle"></i> 아직 '검토중'인 내역만 수정 가능합니다.
+        </div>
+        
+        <div class="mb-3">
+            <label class="form-label small fw-bold" id="modLabelAmount">변경할 금액</label>
+            <input type="number" id="modAmount" class="form-control" placeholder="금액 입력">
+            <div id="modLimitMsg" class="form-text text-danger x-small hidden"></div>
+        </div>
+
+        <div class="mb-3 hidden">
+            <label class="form-label small fw-bold">사유</label>
+            <input type="text" id="modReason" class="form-control" placeholder="내용 입력">
+        </div>
+
+        <div class="d-grid gap-2">
+            <button class="btn btn-primary fw-bold" onclick="submitModifyApp()">수정 완료</button>
+            <button class="btn btn-light btn-sm" onclick="closeModifyModal()">취소</button>
+        </div>
+    </div>
+</div>
   
   
 <div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
@@ -1666,14 +1694,14 @@ function openHistoryModal(type) {
     document.getElementById('historyModalOverlay').style.display = 'flex';
 }
    
-// [수정] 통합 타임라인 렌더링
+// [수정된 버전] 통합 타임라인 렌더링 (수정/취소 버튼 로직 포함)
 function renderTimeline(ledger, apps, donations, points, dividends) {
     const list = document.getElementById('timelineList');
     const items = [];
 
-    // 1. 데이터 정규화 (모두 동일한 형태 {ts, type, html}로 변환)
-    
-    // (1) 출자금
+    // ---------------------------------------------------------
+    // 1. 출자금 (Ledger)
+    // ---------------------------------------------------------
     ledger.forEach(d => {
         items.push({
             ts: d.deposit_date ? new Date(d.deposit_date).getTime() : 0,
@@ -1689,12 +1717,41 @@ function renderTimeline(ledger, apps, donations, points, dividends) {
         });
     });
 
-    // (2) 신청 내역 (Apps)
+    // ---------------------------------------------------------
+    // 2. 신청 내역 (Apps) - ★ 수정/취소 버튼 핵심 로직
+    // ---------------------------------------------------------
     const appTypeMap = { 'extra': '추가출자', 'reduction': '감자신청', 'withdraw': '탈퇴신청', 'connect': '계정연결' };
+    
     apps.forEach(app => {
-        let statusBadge = app.status === 'approved' ? '<span class="badge bg-success">승인</span>' : 
-                          app.status === 'pending' ? '<span class="badge bg-warning text-dark">검토중</span>' : 
-                          '<span class="badge bg-secondary">종료</span>';
+        let statusBadge = '';
+        let actionBtns = '';
+
+        // (1) 상태 뱃지 결정
+        if (app.status === 'approved') {
+            statusBadge = '<span class="badge bg-success">승인</span>';
+        } else if (app.status === 'rejected') {
+            statusBadge = '<span class="badge bg-danger">반려</span>';
+        } else if (app.status === 'cancelled') {
+            statusBadge = '<span class="badge bg-secondary">취소됨</span>';
+        } else {
+            // Pending(검토중) 상태일 때만 버튼 로직 진입
+            statusBadge = '<span class="badge bg-warning text-dark">검토중</span>';
+            
+            // (2) 버튼 생성 로직
+            // 계정연결(connect)은 로직이 다르므로 제외
+            if (app.type !== 'connect') {
+                // 탈퇴(withdraw)는 수정 불가, 나머지는 가능
+                const canModify = (app.type !== 'withdraw'); 
+                
+                // 버튼 HTML 조립
+                actionBtns = `
+                <div class="mt-2 text-end">
+                    ${canModify ? `<button class="btn btn-sm btn-outline-primary py-0 px-2 me-1" style="font-size:0.8rem;" onclick="openModifyModal(${app.id}, '${app.type}', ${app.amount})">수정</button>` : ''}
+                    <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:0.8rem;" onclick="cancelApp(${app.id})">취소</button>
+                </div>`;
+            }
+        }
+
         items.push({
             ts: app.created_at ? new Date(app.created_at).getTime() : 0,
             dateStr: app.created_at ? app.created_at.substring(0,10) : '-',
@@ -1702,17 +1759,23 @@ function renderTimeline(ledger, apps, donations, points, dividends) {
                 <div class="timeline-item" style="border-left-color: #ff9800;">
                     <div class="timeline-date">${app.created_at ? app.created_at.substring(0,10) : '-'}</div>
                     <div class="timeline-content">
-                        <div class="d-flex justify-content-between">
+                        <div class="d-flex justify-content-between align-items-start">
                             <span class="fw-bold">[신청] ${appTypeMap[app.type] || app.type}</span>
                             ${statusBadge}
                         </div>
-                        <p class="small text-muted">${app.amount ? Number(app.amount).toLocaleString()+'원' : ''}</p>
+                        <p class="small text-muted mb-0 mt-1">
+                            ${app.amount > 0 ? Number(app.amount).toLocaleString()+'원' : ''} 
+                            ${app.reason ? '<br>사유: '+app.reason : ''}
+                        </p>
+                        ${actionBtns}
                     </div>
                 </div>`
         });
     });
 
-    // (3) 기부금
+    // ---------------------------------------------------------
+    // 3. 기부금 (Donations)
+    // ---------------------------------------------------------
     donations.forEach(d => {
         items.push({
             ts: d.donation_date ? new Date(d.donation_date).getTime() : 0,
@@ -1728,11 +1791,12 @@ function renderTimeline(ledger, apps, donations, points, dividends) {
         });
     });
 
-    // (4) 포인트
+    // ---------------------------------------------------------
+    // 4. 포인트 (Points)
+    // ---------------------------------------------------------
     points.forEach(p => {
         const isPlus = p.change_amount > 0;
         const color = isPlus ? '#FF9800' : '#757575';
-        const icon = isPlus ? 'bi-plus-circle' : 'bi-dash-circle';
         items.push({
             ts: p.created_at ? new Date(p.created_at).getTime() : 0,
             dateStr: p.created_at ? p.created_at.substring(0,10) : '-',
@@ -1747,7 +1811,9 @@ function renderTimeline(ledger, apps, donations, points, dividends) {
         });
     });
 
-    // (5) 배당금
+    // ---------------------------------------------------------
+    // 5. 배당금 (Dividends)
+    // ---------------------------------------------------------
     dividends.forEach(d => {
         items.push({
             ts: d.paid_at ? new Date(d.paid_at).getTime() : (d.created_at ? new Date(d.created_at).getTime() : 0),
@@ -1763,7 +1829,9 @@ function renderTimeline(ledger, apps, donations, points, dividends) {
         });
     });
 
-    // 2. 정렬 (최신순) & 렌더링
+    // ---------------------------------------------------------
+    // 6. 정렬 (최신순) 및 렌더링
+    // ---------------------------------------------------------
     items.sort((a, b) => b.ts - a.ts);
 
     if(items.length === 0) {
@@ -3647,6 +3715,66 @@ function checkCorpID(corpID) {
     return checkDigit === parseInt(raw.charAt(12));
 }
 
+   // [신규] 수정 모달 열기
+function openModifyModal(appId, type, currentAmount) {
+    const modal = document.getElementById('modifyAppModal');
+    
+    // 값 세팅
+    document.getElementById('modAppId').value = appId;
+    document.getElementById('modAppType').value = type;
+    document.getElementById('modAmount').value = currentAmount;
+    document.getElementById('modLimitMsg').classList.add('hidden');
+
+    // UI 세팅
+    const label = document.getElementById('modLabelAmount');
+    if(type === 'reduction') label.innerText = "변경할 환급 요청액 (감자)";
+    else label.innerText = "변경할 출자 금액";
+
+    modal.style.display = 'flex';
+}
+
+function closeModifyModal() {
+    document.getElementById('modifyAppModal').style.display = 'none';
+}
+
+// [신규] 수정 요청 제출 (RPC 호출)
+async function submitModifyApp() {
+    const appId = document.getElementById('modAppId').value;
+    const type = document.getElementById('modAppType').value;
+    const newAmount = Number(document.getElementById('modAmount').value);
+    
+    // 1. 기초 검증
+    if(newAmount <= 0) return alert('금액을 올바르게 입력해주세요.');
+
+    // 2. 실행
+    showConfirmModal('신청 내용을 수정하시겠습니까?', async () => {
+        showLoading(true, '수정 중...');
+        closeModifyModal(); // 모달 닫기
+
+        // RPC 호출
+        const { data, error } = await _supabase.rpc('modify_application', {
+            p_app_id: appId,
+            p_user_uid: curAuth.id, // 보안 확인용
+            p_new_amount: newAmount,
+            p_new_reason: null // 사유 수정은 UI가 복잡해지니 일단 null (기존 유지)
+        });
+
+        showLoading(false);
+
+        if(error) {
+            // DB에서 10만원 미만 등 에러가 발생하면 여기서 잡힘
+            // alert 대신 커스텀 모달 사용 권장
+            showModal('수정 실패:\n' + error.message);
+        } else {
+            showModal('성공적으로 수정되었습니다.');
+            reloadDashboard(); // 데이터 갱신
+        }
+    });
+}
+
+// [기존 유지/확인] 취소 기능
+// 기존 코드에 cancelApp 함수가 있었는데, 로직은 그대로 쓰셔도 됩니다.
+// 다만 status='cancelled'로 업데이트하는지 확인하세요.
 </script>
 </body>
 </html>
