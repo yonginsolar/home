@@ -54,12 +54,29 @@
             return dest;
         }
 
-        // [핵심 2] 무조건 이동 함수 (청소 후 이동)
+// [핵심 수정] 이동할 때 '로그인 토큰(Hash)'을 챙겨서 보냄
         function forceRedirect() {
-            document.getElementById('message').innerText = '이동합니다...';
+            document.getElementById('message').innerText = '로그인 정보를 전달합니다...';
             localStorage.removeItem('auth_destination');
-            const dest = getRedirectDestination();
-            window.location.replace(dest); // 히스토리 남기지 않고 이동
+            
+            let dest = getRedirectDestination();
+            
+            // ★ 여기가 중요: 현재 URL에 있는 토큰(#access_token=...)을 가져옴
+            const tokenHash = window.location.hash; 
+            
+            // 만약 토큰이 있다면, 이동할 목적지 뒤에 붙여줌
+            // 이렇게 하면 도착한 페이지(membermanage.html)가 이 토큰을 보고 로그인을 시킴
+            if (tokenHash && tokenHash.includes('access_token')) {
+                // 이미 dest에 #이 있으면 덮어쓰거나 주의해야 하지만, 보통은 없으므로 붙임
+                // dest가 '/' 일 수도 있으므로 처리
+                if (dest.endsWith('/')) dest = dest.slice(0, -1);
+                
+                // 목적지 URL 뒤에 토큰을 붙여서 이동
+                window.location.replace(dest + tokenHash);
+            } else {
+                // 토큰이 없으면 그냥 이동 (어쩔 수 없음)
+                window.location.replace(dest);
+            }
         }
 
         // [핵심 3] 전화번호 동기화 (실패해도 무시하고 진행 - Fire and Forget)
