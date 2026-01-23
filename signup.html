@@ -329,6 +329,34 @@
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    // [신규] URL로 배달된 토큰(at, rt)을 받아서 로그인 처리하는 함수
+async function handleManualSession() {
+    const params = new URLSearchParams(window.location.search);
+    const accessToken = params.get('at');
+    const refreshToken = params.get('rt');
+
+    if (accessToken && refreshToken) {
+        console.log("🎟️ 배달된 로그인 토큰 발견! 복구 시도...");
+        
+        // 1. 수동으로 세션 주입 (로그인 강제 실행)
+        const { data, error } = await _supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+        });
+
+        if (!error && data.session) {
+            console.log("✅ 로그인 복구 성공!");
+            
+            // 2. 주소창에서 토큰 흔적 지우기 (깔끔하게)
+            const cleanUrl = window.location.pathname; // 쿼리 파라미터 제거
+            window.history.replaceState({}, document.title, cleanUrl);
+            
+            // 3. (중요) 기존 로직 트리거
+            // onAuthStateChange가 돌겠지만, 확실하게 하기 위해 회원 체크 실행
+            checkExistingMember(data.session);
+        }
+    }
+}
     // [2] 약관 데이터 (선생님 원문 100% 복구)
     const termsData = {
       privacy: { 
@@ -582,6 +610,8 @@ _supabase.auth.onAuthStateChange((event, session) => {
 window.onload = function() {
     toggleType('개인'); 
     // 기존에 있던 getSession() 호출 코드는 삭제 (위 리스너가 대신함)
+  // [추가] 페이지가 열리자마자 "배달 온 토큰 있나요?" 하고 확인
+    handleManualSession();
 };
 
 // [코드 2] 가입 신청서 화면 렌더링 및 UI 제어
