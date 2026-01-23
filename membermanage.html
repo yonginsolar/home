@@ -981,16 +981,24 @@ async function reloadDashboard() {
 }
 
    // [신규] 친절한 에러 메시지 변환기
+// [수정] 에러 메시지 번역기 (시간 제한 에러 감지 기능 추가)
 function translateAuthError(errorMsg) {
     if (!errorMsg) return '알 수 없는 오류가 발생했습니다.';
     
     const msg = errorMsg.toLowerCase();
     
+    // 1. Rate Limit (시간 제한) 에러 정밀 분석
+    if (msg.includes('security purposes') || msg.includes('after')) {
+        // 숫자만 추출 (예: "after 8 seconds" -> 8)
+        const seconds = msg.match(/\d+/); 
+        if (seconds) {
+            return `보안을 위해 메일 발송이 제한되었습니다.\n약 ${seconds[0]}초 뒤에 다시 시도해주세요.`;
+        }
+        return '너무 많은 요청이 감지되었습니다. 1분 뒤 다시 시도해주세요.';
+    }
+
     if (msg.includes('invalid login credentials') || msg.includes('user not found')) {
         return '가입되지 않은 이메일이거나 정보가 올바르지 않습니다.';
-    }
-    if (msg.includes('rate limit') || msg.includes('too many requests')) {
-        return '너무 많은 요청이 감지되었습니다. 잠시 후(약 1분 뒤) 다시 시도해주세요.';
     }
     if (msg.includes('validation failed') || msg.includes('email')) {
         return '이메일 주소 형식이 올바르지 않습니다. (예: user@example.com)';
@@ -999,7 +1007,6 @@ function translateAuthError(errorMsg) {
         return '보안 코드가 만료되었거나 틀렸습니다. 다시 로그인해주세요.';
     }
     
-    // 그 외 번역 안 된 에러는 원문 + 안내 표시
     return '시스템 오류: ' + errorMsg + '\n(지속되면 사무국에 문의해주세요)';
 }
    
@@ -1044,10 +1051,18 @@ window.addEventListener('DOMContentLoaded', async () => {
     // =========================================================================
 // 기존 함수 -> 변경할 함수
 
+// [수정] 매직링크 발송 함수 (버튼 중복 클릭 방지 추가)
 async function sendMagicLink() {
-    const email = document.getElementById('emailInput').value.trim();
+    const emailInput = document.getElementById('emailInput');
+    const email = emailInput.value.trim();
+    // 버튼을 ID 없이 쿼리 셀렉터로 찾거나, HTML에 id="btnSendLink"를 추가하는 것이 좋지만
+    // 현재 구조에서는 형제 요소로 찾습니다.
+    const btn = emailInput.nextElementSibling; // input 바로 다음이 버튼임
+
     if(!email.includes('@')) return showModal('이메일 주소 형식이 올바르지 않습니다.\n(@가 포함되어야 합니다)');
     
+    // [방어 로직] 버튼 비활성화 및 로딩 표시
+    if(btn) btn.disabled = true; 
     showLoading(true, '보안 연결 초기화 및 메일 발송 중...');
     
     // 1. 기존 세션 로그아웃
@@ -1057,8 +1072,6 @@ async function sendMagicLink() {
     const { error } = await _supabase.auth.signInWithOtp({
         email: email,
         options: { 
-            // [핵심 변경] false -> true 로 변경
-            // true: 계정이 없으면 새로 만들어서라도 메일을 보냄 (자동 가입)
             shouldCreateUser: true, 
             emailRedirectTo: window.location.href 
         } 
@@ -1067,12 +1080,23 @@ async function sendMagicLink() {
     showLoading(false);
 
     if(error) {
-        // 이제 'Signups not allowed' 에러는 발생하지 않을 것입니다.
-        // 다른 에러(예: API 제한, 이메일 형식 오류 등)만 처리
+        // 에러 발생 시 버튼 다시 풀어줌 (사용자가 수정 후 다시 눌러야 하므로)
+        if(btn) btn.disabled = false;
+        
         const friendlyMsg = translateAuthError(error.message);
         showModal(friendlyMsg);
     }
     else {
+        // [성공] 성공 시에는 버튼을 계속 막아두거나, "발송됨"으로 텍스트 변경
+        if(btn) {
+            btn.innerText = "발송 완료";
+            // 60초 뒤에 다시 활성화 (선택 사항)
+            setTimeout(() => { 
+                btn.disabled = false; 
+                btn.innerText = "링크 받기";
+            }, 60000); 
+        }
+
         document.getElementById('sentMsgBox').classList.remove('hidden');
         document.getElementById('targetEmail').innerText = email;
     }
