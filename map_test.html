@@ -285,9 +285,9 @@ details[open] summary::after { content: '-'; }
         // 1. 데이터 로드 및 마커/리스트 처리 (Supabase)
         // ---------------------------------------------------------
  // [수정] 데이터 로드 로직
+// [수정 1] 데이터 로드 시 '좌표 없는 데이터' 원천 차단
 async function fetchAndRenderSuggestions() {
     try {
-        // 1. 전체 데이터 가져오기 (기본 최신순)
         const { data, error } = await sb
             .from('site_suggestions')
             .select('*')
@@ -295,19 +295,33 @@ async function fetchAndRenderSuggestions() {
 
         if (error) throw error;
         
-        allData = data || [];
+        // 🛡️ [방어 코드] 좌표(lat, lng)가 비어있거나 숫자가 아닌 쓰레기 데이터 필터링
+        allData = (data || []).filter(item => {
+            return item.latitude && item.longitude && !isNaN(item.latitude) && !isNaN(item.longitude);
+        });
         
-        // 지도 마커는 전체 데이터를 다 찍어줌
+        console.log(`총 ${data?.length}개 중 유효한 데이터 ${allData.length}개 로드됨`);
+
         renderMarkers(allData);
-        
-        // 리스트는 현재 선택된 탭('latest' or 'best' or 'all')에 맞춰 그림
-        // 초기 로딩은 'latest'로 가정
         renderList('latest'); 
 
     } catch (e) {
         console.error("Data Load Error:", e);
-        alert("데이터를 불러오는 중 오류가 발생했습니다.");
     }
+}
+
+// [수정 2] 지도 이동 시 좌표 유효성 재검사
+function moveToLocation(lat, lng) {
+    // 🛡️ [방어 코드] 좌표값이 유효한지 확인
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+        console.warn("이동할 좌표가 올바르지 않습니다:", lat, lng);
+        alert("위치 정보가 정확하지 않은 부지입니다.");
+        return;
+    }
+
+    const moveLatLon = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng)); // 숫자로 변환 보장
+    map.setLevel(4);
+    map.panTo(moveLatLon);
 }
 
         function renderMarkers(dataList) {
@@ -418,11 +432,7 @@ async function handleLike(id) {
             renderList(type);
         }
 
-        function moveToLocation(lat, lng) {
-            const moveLatLon = new kakao.maps.LatLng(lat, lng);
-            map.setLevel(4); // 확대
-            map.panTo(moveLatLon);
-        }
+
 
         // ---------------------------------------------------------
         // 2. 기후 레이어 로직 (WMS)
