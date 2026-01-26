@@ -206,6 +206,8 @@ details[open] summary::after { content: '-'; }
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         // [전역 변수] 생성된 WMS 레이어 객체들을 담아둘 저장소
 const wmsLayerObjects = {};
+        // [전역 변수] 레이어가 등록되었는지 추적하는 장부
+const registeredLayers = {};
         // 🔴 [Data Mapping] 확인된 실제 ID 적용
         const LAYER_MAP = {
             // [규제]
@@ -585,39 +587,53 @@ async function handleLike(id) {
                 panel.style.transform = 'translateY(80%)';
             }
         }
-// [수정된 로직] TileLayer 객체 직접 관리 방식
+// [수정된 로직] 카카오 정석 Tileset 방식 (안전장치 추가)
 function toggleLayer(key) {
     const checkbox = event.target;
     const layerId = LAYER_MAP[key]; // ID 매핑 가져오기
 
+    // ID 매핑이 없는 경우 중단
     if (!layerId) {
         console.error(`ID 매핑 오류: ${key}`);
+        checkbox.checked = false;
         return;
     }
 
-    // 1. 이미 생성된 레이어인지 확인
-    if (!wmsLayerObjects[key]) {
-        // 처음 켜는 레이어라면 새로 생성 (TileLayer 사용)
-        const newTileset = new kakao.maps.Tileset({
-            width: 256, height: 256,
-            getTile: function(x, y, z) {
-                return getWmsUrl(layerId, x, y, z);
-            }
-        });
+    // 카카오맵 타일셋 고유 키 생성 (예: 'SLOPE_15')
+    // 주의: 카카오 API는 등록된 키를 대문자로 관리하는 경향이 있어 대문자로 통일
+    const tilesetKey = key.toUpperCase(); 
 
-        // Tileset을 담은 Layer 생성 후 저장소에 보관
-        wmsLayerObjects[key] = new kakao.maps.TileLayer({
-            tileset: newTileset,
-            zIndex: 10, // 레이어 우선순위 (필요시 조정)
-            opacity: 1  // 투명도
-        });
-    }
-
-    // 2. 체크 상태에 따라 지도에 올리거나(setMap(map)) 내리기(setMap(null))
     if (checkbox.checked) {
-        wmsLayerObjects[key].setMap(map);
+        // 1. 아직 등록되지 않은 레이어라면 -> Tileset 생성 및 등록
+        if (!registeredLayers[tilesetKey]) {
+            // Tileset 생성
+            const newTileset = new kakao.maps.Tileset({
+                width: 256, height: 256,
+                getTile: function(x, y, z) {
+                    return getWmsUrl(layerId, x, y, z);
+                }
+            });
+
+            // 카카오 지도에 '이 이름으로 타일셋 등록해줘' 요청
+            kakao.maps.Tileset.add(tilesetKey, newTileset);
+            
+            // 장부에 '등록완료' 표시
+            registeredLayers[tilesetKey] = true;
+        }
+
+        // 2. 지도에 레이어 추가 (이제 MapTypeId에 확실히 존재함)
+        // 안전을 위해 한번 더 확인 후 실행
+        if (kakao.maps.MapTypeId[tilesetKey]) {
+            map.addOverlayMapTypeId(kakao.maps.MapTypeId[tilesetKey]);
+        } else {
+            console.error(`레이어 등록 실패: ${tilesetKey}`);
+        }
+
     } else {
-        wmsLayerObjects[key].setMap(null);
+        // 3. 체크 해제 시 레이어 제거
+        if (kakao.maps.MapTypeId[tilesetKey]) {
+            map.removeOverlayMapTypeId(kakao.maps.MapTypeId[tilesetKey]);
+        }
     }
 }
     </script>
