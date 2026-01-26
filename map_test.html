@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>경기 태양광 부지 분석 플랫폼 (Final Clean)</title>
+    <title>경기 태양광 부지 분석 플랫폼 (Fix)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services,clusterer&autoload=false"></script>
@@ -216,12 +216,10 @@
             clusterer = new kakao.maps.MarkerClusterer({
                 map: map, averageCenter: true, minLevel: 6
             });
-            
-            // [중요] 여기서는 defineWmsLayer를 호출하지 않습니다. (에러 원인 제거)
         }
 
         // ---------------------------------------------------------
-        // 3. WMS 레이어 로직 (통합 및 단순화)
+        // 3. WMS 레이어 로직 (에러 수정됨)
         // ---------------------------------------------------------
         function toggleLayer(key) {
             const checkbox = event.target;
@@ -229,7 +227,7 @@
 
             if (!layerId) { console.error("ID 매핑 오류"); return; }
             
-            // 카카오 맵타입 키는 대문자 사용
+            // 카카오 맵타입 키 (대문자)
             const tilesetKey = key.toUpperCase(); 
 
             if (checkbox.checked) {
@@ -239,26 +237,23 @@
                         width: 256, height: 256,
                         getTile: function(x, y, z) { return getWmsUrl(layerId, x, y, z); }
                     });
-                    
                     kakao.maps.Tileset.add(tilesetKey, newTileset);
                     registeredLayers[tilesetKey] = true;
                 }
 
-                // 2. 지도에 레이어 추가 (position 에러 방지용 방어 코드)
-                if(kakao.maps.MapTypeId[tilesetKey]) {
-                    map.addOverlayMapTypeId(kakao.maps.MapTypeId[tilesetKey]);
-                } else {
-                    console.error("레이어 등록 실패: MapTypeId 확인 필요", tilesetKey);
-                }
+                // [핵심 수정] 공식 장부(MapTypeId)에 없으면 우리 키(tilesetKey)를 바로 씁니다.
+                // 이렇게 하면 undefined를 넘기는 일이 없어집니다.
+                const typeId = kakao.maps.MapTypeId[tilesetKey] || tilesetKey;
+                map.addOverlayMapTypeId(typeId);
+
             } else {
                 // 3. 지도에서 제거
-                if(kakao.maps.MapTypeId[tilesetKey]) {
-                    map.removeOverlayMapTypeId(kakao.maps.MapTypeId[tilesetKey]);
-                }
+                const typeId = kakao.maps.MapTypeId[tilesetKey] || tilesetKey;
+                map.removeOverlayMapTypeId(typeId);
             }
         }
 
-        // URL 생성 함수 (단일 정의)
+        // URL 생성 함수 (누락된 부분 복구)
         function getWmsUrl(layerId, x, y, z) {
             const bbox = getTileBbox(x, y, z);
             return `https://climate.gg.go.kr/ols/api/geoserver/wms?` +
@@ -267,7 +262,7 @@
                    `WIDTH=256&HEIGHT=256&SRS=EPSG:3857`;
         }
 
-        // 좌표 변환 함수 (단일 정의)
+        // 좌표 변환 함수 (누락된 부분 복구)
         function getTileBbox(x, y, z) {
             const tileWidth = 256;
             const circumference = 40075016.68;
@@ -313,7 +308,6 @@
             const listEl = document.getElementById('suggestionList');
             listEl.innerHTML = '';
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            // 탭 활성화 시각적 처리 (생략 가능)
             
             let targetData = [...allData];
             if (type === 'latest') {
@@ -412,7 +406,7 @@
             if (!reason) { alert("이유를 입력해주세요."); return; }
 
             const user = await sb.auth.getUser();
-            const writerId = user.data.user?.id || 'd3a2417e-75f8-4062-8959-5778a48c6686'; // 임시 ID (로그인 로직 필요 시 수정)
+            const writerId = user.data.user?.id || 'd3a2417e-75f8-4062-8959-5778a48c6686';
 
             const { error } = await sb.from('site_suggestions').insert([{
                 writer_id: writerId, latitude: parseFloat(lat), longitude: parseFloat(lng),
