@@ -3,100 +3,169 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>태양광 발전소 부지 찾기 (기후 데이터 테스트)</title>
+    <title>태양광 발전소 부지 찾기 (Pro)</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services&autoload=false"></script>
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services,clusterer&autoload=false"></script>
     <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     
     <style>
-        /* 기존 스타일 유지 */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body, html { width: 100%; height: 100%; overflow: hidden; font-family: 'Pretendard', sans-serif; }
+        
+        /* [지도] */
         #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
 
-        /* [추가] 기후 정보 컨트롤러 & 범례 UI */
+        /* 🔴 [핵심] 기후 데이터(WMS) 색상 진하게 보정 (CSS 필터 트릭) */
+        /* 카카오맵 내부의 이미지 중 geoserver에서 오는 타일만 타겟팅하여 대비/채도 증가 */
+        #map div img[src*="geoserver"] {
+            filter: contrast(140%) saturate(160%) brightness(0.95) !important;
+        }
+
+        /* [UI] 메인 검색바 */
+        .main-search-container {
+            position: absolute; top: 20px; left: 20px; z-index: 20;
+            width: 320px; background: white; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; overflow: hidden;
+        }
+        .main-search-input {
+            flex: 1; border: none; padding: 12px 15px; font-size: 14px; outline: none;
+        }
+        .main-search-btn {
+            background: #2c3e50; color: white; border: none; width: 50px; cursor: pointer;
+        }
+
+        /* [UI] 우측 레이어 컨트롤 */
         .layer-control {
             position: absolute; top: 20px; right: 20px; z-index: 20;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 15px; border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            width: 200px;
+            background: rgba(255, 255, 255, 0.98); padding: 15px; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 220px;
         }
-        .layer-control h4 { margin: 0 0 10px; font-size: 14px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .layer-control h4 { margin: 0 0 10px; font-size: 14px; color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px; }
         .layer-item { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
-        .layer-item label { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .layer-item label { cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; }
+        
+        /* [UI] 범례 박스 */
         .legend-box {
-            margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 11px; color: #666;
-            display: none; /* 기본 숨김 */
+            margin-top: 10px; padding: 10px; background: #f1f3f5; border-radius: 6px; 
+            font-size: 11px; color: #555; display: none; line-height: 1.6;
         }
-        .legend-color { display: inline-block; width: 12px; height: 12px; margin-right: 5px; vertical-align: middle; }
+        .legend-row { display: flex; align-items: center; margin-bottom: 4px; }
+        .legend-color { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border-radius: 2px; }
 
-        /* 기존 UI 스타일 (FAB 등) */
+        /* [UI] 추천 목록 패널 (사이드바) */
+        .suggestion-panel {
+            position: absolute; bottom: 30px; left: 20px; z-index: 15;
+            width: 320px; background: white; border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            max-height: 50vh; display: flex; flex-direction: column;
+            transition: transform 0.3s ease;
+        }
+        .panel-header {
+            padding: 15px; border-bottom: 1px solid #eee; font-weight: bold; 
+            display: flex; justify-content: space-between; align-items: center; background: #f8f9fa; border-radius: 12px 12px 0 0;
+        }
+        .panel-tabs { display: flex; background: #eee; padding: 4px; margin: 10px 15px 0; border-radius: 6px; }
+        .tab-btn { flex: 1; border: none; background: transparent; padding: 6px; font-size: 12px; cursor: pointer; border-radius: 4px; }
+        .tab-btn.active { background: white; font-weight: bold; shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        
+        .panel-content { flex: 1; overflow-y: auto; padding: 10px; }
+        .place-item {
+            padding: 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s;
+        }
+        .place-item:hover { background: #f8f9fa; }
+        .place-item:last-child { border-bottom: none; }
+        .place-addr { font-size: 13px; font-weight: bold; color: #333; margin-bottom: 4px; }
+        .place-reason { font-size: 12px; color: #666; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+        /* FAB 버튼 */
         .fab-btn {
             position: absolute; bottom: 30px; right: 20px; z-index: 10;
-            background-color: #ffca28; color: #333;
-            width: 60px; height: 60px; border-radius: 50%;
+            background-color: #ffca28; color: #333; width: 56px; height: 56px; border-radius: 50%;
             border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center;
             transition: transform 0.2s;
         }
         .fab-btn:active { transform: scale(0.95); }
-        
-        /* 모달 등 나머지 스타일은 생략 없이 그대로 유지한다고 가정 */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 20; align-items: center; justify-content: center; }
-        .modal-content { background: white; width: 90%; max-width: 400px; padding: 20px; border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); position: relative; }
-        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+
+        /* 모달 스타일 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 30; align-items: center; justify-content: center; }
+        .modal-content { background: white; width: 90%; max-width: 400px; padding: 25px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); }
         .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 13px; color: #666; font-weight: bold; }
         .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
-        .form-group textarea { height: 80px; resize: none; }
         .btn-group { display: flex; gap: 10px; margin-top: 20px; }
         .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        .btn-cancel { background: #f0f0f0; color: #333; }
+        .btn-cancel { background: #f1f3f5; color: #333; }
         .btn-submit { background: #2c3e50; color: white; }
-        .alert-modal { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 12px 24px; border-radius: 50px; z-index: 100; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
     </style>
 </head>
 <body>
 
+    <div class="main-search-container">
+        <input type="text" class="main-search-input" id="mainSearchInput" placeholder="주소를 검색해서 위치 이동..." readonly onclick="searchAddressGlobal()">
+        <button class="main-search-btn" onclick="searchAddressGlobal()">🔍</button>
+    </div>
+
     <div id="map"></div>
 
     <div class="layer-control">
-        <h4>🗺️ 기후 정보 레이어</h4>
+        <h4>🗺️ 기후 분석 레이어</h4>
+        
         <div class="layer-item">
             <label>
-                <input type="checkbox" id="chkFlood" onchange="toggleLayer('flood')">
+                <input type="checkbox" id="chkFlood" onchange="toggleWmsLayer('flood')">
                 💧 침수 흔적 지도
             </label>
         </div>
-        <div id="legendFlood" class="legend-box">
-            <p><span class="legend-color" style="background:rgba(255,0,0,0.5); border:1px solid red;"></span>침수 이력 구간</p>
-            <p style="margin-top:4px; color:#999;">* 과거 침수 피해가 발생했던 지역입니다.</p>
+        <div id="legend_flood" class="legend-box">
+            <div class="legend-row">
+                <span class="legend-color" style="background:rgba(255,0,0,0.6); border:1px solid red;"></span>
+                <span>침수 이력 발생지</span>
+            </div>
+            <p style="margin-top:4px; color:#888;">* 붉은색 영역은 과거 침수 피해 지역입니다.</p>
+        </div>
+
+        <div class="layer-item" style="opacity: 0.5;">
+            <label title="API ID 확인 필요">
+                <input type="checkbox" disabled>
+                ☀️ 태양광 잠재량 (준비중)
+            </label>
         </div>
     </div>
 
-    <button class="fab-btn" onclick="openModal()" title="부지 추천하기">➕</button>
+    <div class="suggestion-panel">
+        <div class="panel-header">
+            <span>📍 추천 부지 목록</span>
+            <button onclick="togglePanel()" style="border:none; bg:none; cursor:pointer;">🔽</button>
+        </div>
+        <div class="panel-tabs">
+            <button class="tab-btn active" onclick="switchTab('latest')">최신 5건</button>
+            <button class="tab-btn" onclick="switchTab('all')">전체 보기</button>
+        </div>
+        <div id="suggestionList" class="panel-content">
+            <div style="text-align:center; padding:20px; color:#999;">로딩 중...</div>
+        </div>
+    </div>
 
+    <button class="fab-btn" onclick="openModal()" title="부지 등록">➕</button>
+    
     <div id="modalOverlay" class="modal-overlay">
         <div class="modal-content">
-            <div class="modal-header">☀️ 부지 추천하기</div>
-            <input type="hidden" id="lat">
-            <input type="hidden" id="lng">
+            <h3 style="margin-bottom:20px;">☀️ 부지 추천 등록</h3>
+            <input type="hidden" id="regLat"><input type="hidden" id="regLng">
+            
             <div class="form-group">
                 <label>주소</label>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="address" placeholder="주소 검색..." readonly onclick="searchAddress()">
-                    <button type="button" onclick="searchAddress()" style="padding: 0 10px; border-radius: 6px; border: 1px solid #ddd; background: #fff;">🔍</button>
-                </div>
+                <input type="text" id="regAddress" placeholder="클릭해서 주소 검색" readonly onclick="searchAddressForModal()">
             </div>
             <div class="form-group">
                 <label>추천 이유</label>
-                <textarea id="reason" placeholder="예: 햇빛이 하루 종일 잘 들어요."></textarea>
+                <textarea id="regReason" placeholder="예: 남향이라 햇빛이 잘 들고 평지입니다."></textarea>
             </div>
             <div class="form-group">
-                <label>특이 사항 (선택)</label>
-                <input type="text" id="note" placeholder="예: 주차장 지붕 활용 가능">
+                <label>특이 사항 (비고)</label>
+                <input type="text" id="regNote" placeholder="선택 사항">
             </div>
             <div class="btn-group">
                 <button class="btn btn-cancel" onclick="closeModal()">취소</button>
@@ -104,149 +173,296 @@
             </div>
         </div>
     </div>
-    <div id="customAlert" class="alert-modal">메시지 내용</div>
 
     <script>
-        // [설정] 본인의 경기 데이터 플랫폼 API 인증키를 입력하세요
+        // [설정] API 키 및 Supabase
         const GYEONGGI_API_KEY = 'YOUR_API_KEY_HERE'; 
-
-        // Supabase 설정 유지
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-        const AUTH_KEY = 'sb-ifdqlwxgqgsvnawmhlfc-auth-token';
 
         let map;
-        let floodLayer = null; // 침수 레이어 객체
+        let clusterer;
+        let markers = []; // 전체 마커 배열
+        let allData = []; // DB에서 가져온 전체 데이터
 
         window.onload = function() {
-            // 테스트를 위해 인증 체크 잠시 주석 처리 가능 (필요시 해제)
-            // if (!checkAuth()) return;
-            
             kakao.maps.load(async function() {
                 initMap();
-                // await loadSuggestions(); // 기존 데이터 로드는 잠시 대기
+                await fetchAndRenderSuggestions(); // 데이터 불러오기
             });
         };
-
-        function checkAuth() {
-            const sessionData = localStorage.getItem(AUTH_KEY);
-            if (!sessionData) {
-                showAlert("로그인이 필요한 서비스입니다.");
-                setTimeout(() => { window.location.href = 'index.html'; }, 1000);
-                return false;
-            }
-            return true;
-        }
 
         function initMap() {
             const container = document.getElementById('map');
             const options = {
                 center: new kakao.maps.LatLng(37.241086, 127.177553), // 용인시청
-                level: 7
+                level: 9 // 클러스터링을 위해 조금 넓게 시작
             };
             map = new kakao.maps.Map(container, options);
             
+            // 줌 컨트롤
             const zoomControl = new kakao.maps.ZoomControl();
             map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
 
-            // [핵심] WMS 레이어 생성 (Tileset)
-            createFloodLayer();
+            // [클러스터러 생성]
+            clusterer = new kakao.maps.MarkerClusterer({
+                map: map,
+                averageCenter: true, 
+                minLevel: 6,
+                disableClickZoom: false // 클릭 시 줌인
+            });
+
+            // WMS 레이어 정의 (타일셋 등록)
+            defineWmsLayer('flood', 'spggcee:tm_fldn_trce');
         }
 
-        // 🔴 [핵심 로직] 카카오맵용 WMS 타일셋 생성
-        function createFloodLayer() {
-            // 카카오 타일 좌표 -> WGS84(EPSG:3857) BBOX 변환 함수
-            // WMS 요청시 필요한 bounding box 좌표를 계산합니다.
-            const getTileBbox = (x, y, z) => {
-                const tileWidth = 256;
-                const circumference = 40075016.68; // 지구 둘레 (미터)
-                const originShift = circumference / 2.0;
+        // ---------------------------------------------------------
+        // 1. 데이터 로드 및 마커/리스트 처리 (Supabase)
+        // ---------------------------------------------------------
+        async function fetchAndRenderSuggestions() {
+            try {
+                // 'likes' 컬럼이 없으므로 최신순(created_at)으로 전체 데이터를 가져옵니다.
+                // 데이터 양이 아주 많지 않다고 가정하고 전체를 로드합니다.
+                const { data, error } = await sb
+                    .from('site_suggestions')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
                 
-                const initialResolution = circumference / tileWidth;
-                const resolution = initialResolution / Math.pow(2, z);
+                allData = data || [];
+                renderMarkers(allData);
+                renderList('latest'); // 초기 탭: 최신 5건
 
-                const minX = (x * tileWidth) * resolution - originShift;
-                const maxY = originShift - (y * tileWidth) * resolution;
-                const maxX = ((x + 1) * tileWidth) * resolution - originShift;
-                const minY = originShift - ((y + 1) * tileWidth) * resolution;
+            } catch (e) {
+                console.error("Data Load Error:", e);
+                alert("데이터를 불러오는 중 오류가 발생했습니다.");
+            }
+        }
 
-                return `${minX},${minY},${maxX},${maxY}`;
-            };
+        function renderMarkers(dataList) {
+            // 기존 클러스터러 초기화
+            clusterer.clear();
+            markers = [];
 
-            // 카카오 Tileset 생성
-            kakao.maps.Tileset.add('FLOOD_LAYER', new kakao.maps.Tileset({
-                width: 256,
-                height: 256,
+            dataList.forEach(item => {
+                const marker = new kakao.maps.Marker({
+                    position: new kakao.maps.LatLng(item.latitude, item.longitude)
+                });
+
+                // 마커 클릭 시 인포윈도우 or 지도 이동
+                kakao.maps.event.addListener(marker, 'click', function() {
+                    const content = `
+                        <div style="padding:5px; font-size:12px; width:150px;">
+                            <strong>${item.address_kr}</strong><br>
+                            ${item.reason ? item.reason.substring(0,20)+'...' : ''}
+                        </div>`;
+                    const infowindow = new kakao.maps.InfoWindow({ content: content, removable: true });
+                    infowindow.open(map, marker);
+                });
+
+                markers.push(marker);
+            });
+
+            // 클러스터러에 마커 일괄 추가
+            clusterer.addMarkers(markers);
+        }
+
+        // [리스트 UI 렌더링]
+        function renderList(type) {
+            const listEl = document.getElementById('suggestionList');
+            listEl.innerHTML = '';
+
+            let targetData = [];
+            if (type === 'latest') {
+                targetData = allData.slice(0, 5); // 최신 5개
+            } else {
+                targetData = allData; // 전체 보기
+            }
+
+            if (targetData.length === 0) {
+                listEl.innerHTML = '<div style="padding:15px; text-align:center; color:#999;">등록된 부지가 없습니다.</div>';
+                return;
+            }
+
+            targetData.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'place-item';
+                div.innerHTML = `
+                    <div class="place-addr">📍 ${item.address_kr}</div>
+                    <div class="place-reason">${item.reason || '내용 없음'}</div>
+                `;
+                div.onclick = () => moveToLocation(item.latitude, item.longitude);
+                listEl.appendChild(div);
+            });
+        }
+
+        function switchTab(type) {
+            // 탭 스타일 변경
+            const tabs = document.querySelectorAll('.tab-btn');
+            tabs.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // 리스트 다시 그리기
+            renderList(type);
+        }
+
+        function moveToLocation(lat, lng) {
+            const moveLatLon = new kakao.maps.LatLng(lat, lng);
+            map.setLevel(4); // 확대
+            map.panTo(moveLatLon);
+        }
+
+        // ---------------------------------------------------------
+        // 2. 기후 레이어 로직 (WMS)
+        // ---------------------------------------------------------
+        function defineWmsLayer(layerKey, layerId) {
+            kakao.maps.Tileset.add(layerKey.toUpperCase(), new kakao.maps.Tileset({
+                width: 256, height: 256,
                 getTile: function(x, y, z) {
                     const bbox = getTileBbox(x, y, z);
-                    
-                    // 경기 기후 플랫폼 WMS 요청 URL 조립
-                    // 레이어: spggcee:tm_fldn_trce (침수흔적지도)
-                    // 스타일: 기본값
-                    // 좌표계: EPSG:3857 (구글맵/웹표준)
                     return `https://climate.gg.go.kr/ols/api/geoserver/wms?` +
                            `apiKey=${GYEONGGI_API_KEY}&` +
                            `SERVICE=WMS&VERSION=1.1.0&REQUEST=GetMap&` +
                            `FORMAT=image/png&TRANSPARENT=true&` + 
-                           `LAYERS=spggcee:tm_fldn_trce&` +
+                           `LAYERS=${layerId}&` +
                            `BBOX=${bbox}&` +
                            `WIDTH=256&HEIGHT=256&` +
-                           `SRS=EPSG:3857`; // 중요: 좌표계 설정
+                           `SRS=EPSG:3857`;
                 }
             }));
         }
 
-        // [UI 로직] 레이어 켜고 끄기
-        function toggleLayer(type) {
-            const isChecked = document.getElementById('chkFlood').checked;
-            const legend = document.getElementById('legendFlood');
+        function toggleWmsLayer(type) {
+            const chk = document.getElementById('chk' + type.charAt(0).toUpperCase() + type.slice(1));
+            const legend = document.getElementById('legend_' + type);
+            const layerKey = type.toUpperCase(); // FLOOD
 
-            if (type === 'flood') {
-                if (isChecked) {
-                    map.addOverlayMapTypeId(kakao.maps.MapTypeId.FLOOD_LAYER);
-                    legend.style.display = 'block'; // 범례 표시
-                    showAlert("💧 침수 흔적 지도를 불러옵니다.");
-                } else {
-                    map.removeOverlayMapTypeId(kakao.maps.MapTypeId.FLOOD_LAYER);
-                    legend.style.display = 'none'; // 범례 숨김
-                }
+            if (chk.checked) {
+                map.addOverlayMapTypeId(kakao.maps.MapTypeId[layerKey]);
+                if(legend) legend.style.display = 'block';
+            } else {
+                map.removeOverlayMapTypeId(kakao.maps.MapTypeId[layerKey]);
+                if(legend) legend.style.display = 'none';
             }
         }
 
-        // 기존 UI 기능들 (모달, 검색 등)
-        function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
-        function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
-        
-        function showAlert(msg) {
-            const el = document.getElementById('customAlert');
-            el.innerText = msg;
-            el.style.display = 'block';
-            setTimeout(() => { el.style.display = 'none'; }, 3000);
-        }
+        // 타일 좌표 -> WGS84 BBOX 변환
+        const getTileBbox = (x, y, z) => {
+            const tileWidth = 256;
+            const circumference = 40075016.68;
+            const originShift = circumference / 2.0;
+            const initialResolution = circumference / tileWidth;
+            const resolution = initialResolution / Math.pow(2, z);
+            const minX = (x * tileWidth) * resolution - originShift;
+            const maxY = originShift - (y * tileWidth) * resolution;
+            const maxX = ((x + 1) * tileWidth) * resolution - originShift;
+            const minY = originShift - ((y + 1) * tileWidth) * resolution;
+            return `${minX},${minY},${maxX},${maxY}`;
+        };
 
-        function searchAddress() {
+        // ---------------------------------------------------------
+        // 3. 주소 검색 (메인 & 모달 분리)
+        // ---------------------------------------------------------
+        // A. 메인 화면용 검색
+        function searchAddressGlobal() {
             new daum.Postcode({
                 oncomplete: function(data) {
                     const addr = data.roadAddress || data.jibunAddress;
-                    document.getElementById('address').value = addr;
+                    document.getElementById('mainSearchInput').value = addr;
+                    
+                    // 주소 -> 좌표 변환
                     const geocoder = new kakao.maps.services.Geocoder();
                     geocoder.addressSearch(addr, function(result, status) {
                         if (status === kakao.maps.services.Status.OK) {
-                            document.getElementById('lat').value = result[0].y;
-                            document.getElementById('lng').value = result[0].x;
-                            
-                            // 검색된 위치로 지도 이동
-                            const moveLatLon = new kakao.maps.LatLng(result[0].y, result[0].x);
-                            map.setCenter(moveLatLon);
+                            moveToLocation(result[0].y, result[0].x);
                         }
                     });
                 }
             }).open();
         }
+
+        // B. 등록 모달용 검색
+        function searchAddressForModal() {
+            new daum.Postcode({
+                oncomplete: function(data) {
+                    const addr = data.roadAddress || data.jibunAddress;
+                    document.getElementById('regAddress').value = addr;
+                    
+                    const geocoder = new kakao.maps.services.Geocoder();
+                    geocoder.addressSearch(addr, function(result, status) {
+                        if (status === kakao.maps.services.Status.OK) {
+                            document.getElementById('regLat').value = result[0].y;
+                            document.getElementById('regLng').value = result[0].x;
+                        }
+                    });
+                }
+            }).open();
+        }
+
+        // ---------------------------------------------------------
+        // 4. 등록 로직
+        // ---------------------------------------------------------
+        function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
+        function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
+
+        async function submitSuggestion() {
+            const addr = document.getElementById('regAddress').value;
+            const lat = document.getElementById('regLat').value;
+            const lng = document.getElementById('regLng').value;
+            const reason = document.getElementById('regReason').value;
+            const note = document.getElementById('regNote').value;
+
+            // 유효성 검사
+            if (!addr || !lat) { alert("주소를 검색해주세요."); return; }
+            if (!reason) { alert("추천 이유를 입력해주세요."); return; }
+
+            // writer_id 처리 (로그인 기능이 없으면 임시 ID 사용 - 수정 필요 시 Auth 로직 연동)
+            // 현재 코드에는 세션 체크 로직이 주석처리 되어있으므로 임시로 처리하거나,
+            // 실제 사용 시엔 supabase.auth.getUser()의 id를 넣어야 합니다.
+            // 여기서는 writer_id 제약조건(FK) 때문에 실제 존재하는 member_id가 필요합니다.
+            // *테스트를 위해 예외처리: 이 부분은 실제 로그인된 유저 ID를 넣어야 작동합니다.*
+            const user = await sb.auth.getUser();
+            let writerId = user.data.user?.id;
+            
+            if(!writerId) {
+                alert("로그인이 필요합니다."); // 또는 테스트용 하드코딩 ID 사용
+                return;
+            }
+
+            const { error } = await sb.from('site_suggestions').insert([{
+                writer_id: writerId,
+                latitude: parseFloat(lat),
+                longitude: parseFloat(lng),
+                address_kr: addr,
+                reason: reason,
+                note: note
+            }]);
+
+            if (error) {
+                console.error(error);
+                alert("등록 실패: " + error.message);
+            } else {
+                alert("등록되었습니다!");
+                closeModal();
+                // 폼 초기화
+                document.getElementById('regAddress').value = '';
+                document.getElementById('regReason').value = '';
+                // 목록 갱신
+                fetchAndRenderSuggestions();
+            }
+        }
         
-        // (기존 submitSuggestion, loadSuggestions 등은 공간상 생략했으나 그대로 두시면 됩니다)
-        async function submitSuggestion() { /* 기존 로직 유지 */ }
+        function togglePanel() {
+            const panel = document.querySelector('.suggestion-panel');
+            // 간단한 토글 구현 (height 조절 등)
+            if(panel.style.transform === 'translateY(80%)') {
+                panel.style.transform = 'translateY(0)';
+            } else {
+                panel.style.transform = 'translateY(80%)';
+            }
+        }
     </script>
 </body>
 </html>
