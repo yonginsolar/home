@@ -152,30 +152,29 @@
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        /**
-         * [Database Schema & RPC Reference]
-         * 1. Table: public.site_suggestions
-         * - id (uuid, pk)
-         * - writer_id (text, fk)
-         * - latitude (float8)
-         * - longitude (float8)
-         * - address_kr (text)
-         * - reason (text)
-         * - note (text)
-         * - created_at (timestamptz)
-         * - like_count (int4, default 0)  <-- [중요] 추천수 정렬용 컬럼
-         *
-         * 2. RPC Function: increment_like
-         * -- 좋아요 동시성 제어를 위한 저장 프로시저
-         * create or replace function increment_like(row_id uuid)
-         * returns void language plpgsql as $$
-         * begin
-         * update public.site_suggestions
-         * set like_count = like_count + 1
-         * where id = row_id;
-         * end;
-         * $$;
-         */
+  // 기존: const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); 바로 아래
+
+/**
+ * ----------------------------------------------------------------------------------
+ * [Supabase Database Schema & RPC Reference]
+ * 이 코드가 정상 작동하기 위해 실행되어야 할 SQL 명세입니다.
+ * * 1. [Column 추가] 추천수(like_count) 저장용
+ * ALTER TABLE public.site_suggestions 
+ * ADD COLUMN like_count integer NOT NULL DEFAULT 0;
+ * * 2. [RPC 함수 생성] 동시성 제어를 위한 안전한 좋아요 증가 함수
+ * -- Supabase SQL Editor에서 실행 필요
+ * CREATE OR REPLACE FUNCTION increment_like(row_id uuid)
+ * RETURNS void
+ * LANGUAGE plpgsql
+ * AS $$
+ * BEGIN
+ * UPDATE public.site_suggestions
+ * SET like_count = like_count + 1
+ * WHERE id = row_id;
+ * END;
+ * $$;
+ * ----------------------------------------------------------------------------------
+ */
 
         const LAYER_MAP = {
             'slope_15': 'spggcee:rst_slope_15_ovr',
@@ -195,11 +194,17 @@
         let allData = []; // 전체 데이터 캐싱
         const activeLayers = {}; // 활성화된 WMS 레이어 관리
         let tempMarker = null; // 지도 클릭시 찍히는 핀
+        let kakaoGeocoder = null; // 카카오 주소변환 객체 담을 변수
 
-        window.onload = function() {
-            initMap();
-            fetchAndRenderSuggestions();
-        };
+window.onload = function() {
+    // [추가] 카카오 라이브러리 로드 후 Geocoder 객체 생성
+    kakao.maps.load(function() {
+        kakaoGeocoder = new kakao.maps.services.Geocoder();
+    });
+    
+    initMap();
+    fetchAndRenderSuggestions();
+};
 
         // ----------------------------------------------------------------------------------
         // 1. 지도 초기화 (Leaflet + VWorld 위성/하이브리드)
@@ -268,28 +273,31 @@
         // ----------------------------------------------------------------------------------
         // 2. 기후 레이어 토글 (Leaflet WMS)
         // ----------------------------------------------------------------------------------
-        function toggleLayer(key) {
-            const checkbox = event.target;
-            const layerId = LAYER_MAP[key];
+// 기존 함수 삭제 후 아래 코드로 교체
+function toggleLayer(key) {
+    const checkbox = event.target;
+    const layerId = LAYER_MAP[key];
 
-            if (checkbox.checked) {
-                const layer = L.tileLayer.wms('https://climate.gg.go.kr/ols/api/geoserver/wms?', {
-                    apiKey: GYEONGGI_API_KEY,
-                    layers: layerId,
-                    format: 'image/png',
-                    transparent: true,
-                    version: '1.1.0',
-                    className: 'wms-layer' // CSS 필터 적용
-                });
-                layer.addTo(map);
-                activeLayers[key] = layer;
-            } else {
-                if (activeLayers[key]) {
-                    map.removeLayer(activeLayers[key]);
-                    delete activeLayers[key];
-                }
-            }
+    if (checkbox.checked) {
+        // [수정됨] zIndex: 1000 옵션 추가하여 위성지도(기본 타일)보다 무조건 위에 표시
+        const layer = L.tileLayer.wms('https://climate.gg.go.kr/ols/api/geoserver/wms?', {
+            apiKey: GYEONGGI_API_KEY,
+            layers: layerId,
+            format: 'image/png',
+            transparent: true,
+            version: '1.1.0',
+            className: 'wms-layer', // CSS 필터용
+            zIndex: 1000 // 배경지도 위에 강제로 띄움
+        });
+        layer.addTo(map);
+        activeLayers[key] = layer;
+    } else {
+        if (activeLayers[key]) {
+            map.removeLayer(activeLayers[key]);
+            delete activeLayers[key];
         }
+    }
+}
 
         // ----------------------------------------------------------------------------------
         // 3. 데이터 로드 및 리스트/마커 렌더링 (복구된 로직)
@@ -409,22 +417,31 @@
         // ----------------------------------------------------------------------------------
         // 4. 주소 검색 및 등록 (하이브리드: Daum Postcode + OSM Geo)
         // ----------------------------------------------------------------------------------
-        function searchAddressGlobal() {
-            new daum.Postcode({
-                oncomplete: function(data) {
-                    const addr = data.roadAddress || data.jibunAddress;
-                    document.getElementById('mainSearchInput').value = addr;
-                    
-                    // OSM으로 좌표 찾아서 이동
-                    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}`)
-                        .then(res => res.json())
-                        .then(data => {
-                            if(data.length > 0) map.flyTo([data[0].lat, data[0].lon], 16);
-                            else alert("좌표를 찾을 수 없습니다.");
-                        });
-                }
-            }).open();
+// 기존 함수 삭제 후 아래 코드로 교체
+function searchAddressGlobal() {
+    new daum.Postcode({
+        oncomplete: function(data) {
+            const addr = data.roadAddress || data.jibunAddress;
+            document.getElementById('mainSearchInput').value = addr;
+            
+            // [수정됨] OSM 대신 카카오 Geocoder 사용
+            if (kakaoGeocoder) {
+                kakaoGeocoder.addressSearch(addr, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        const lat = result[0].y;
+                        const lng = result[0].x;
+                        // Leaflet 지도 이동 함수 사용 (flyTo)
+                        map.flyTo([lat, lng], 17);
+                    } else {
+                        alert("위치를 찾을 수 없습니다.");
+                    }
+                });
+            } else {
+                alert("주소 검색 도구 로딩 중입니다. 잠시 후 다시 시도해주세요.");
+            }
         }
+    }).open();
+}
 
         // 지도 클릭 -> 등록 모달 열기 헬퍼
         function openRegModalWithLoc(lat, lng, addr) {
@@ -435,23 +452,25 @@
         }
 
         // 모달 내 주소 검색
-        function searchAddressForModal() {
-            new daum.Postcode({
-                oncomplete: function(data) {
-                    const addr = data.roadAddress || data.jibunAddress;
-                    document.getElementById('regAddress').value = addr;
-                    // 좌표 변환해서 hidden input에 넣기
-                    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}`)
-                        .then(res => res.json())
-                        .then(data => {
-                            if(data.length > 0) {
-                                document.getElementById('regLat').value = data[0].lat;
-                                document.getElementById('regLng').value = data[0].lon;
-                            }
-                        });
-                }
-            }).open();
+// 기존 함수 삭제 후 아래 코드로 교체
+function searchAddressForModal() {
+    new daum.Postcode({
+        oncomplete: function(data) {
+            const addr = data.roadAddress || data.jibunAddress;
+            document.getElementById('regAddress').value = addr;
+            
+            // [수정됨] 카카오 Geocoder 사용
+            if (kakaoGeocoder) {
+                kakaoGeocoder.addressSearch(addr, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        document.getElementById('regLat').value = result[0].y;
+                        document.getElementById('regLng').value = result[0].x;
+                    }
+                });
+            }
         }
+    }).open();
+}
 
         function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
         function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
