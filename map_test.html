@@ -98,6 +98,15 @@
         .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
         .btn-cancel { background: #f1f3f5; color: #333; }
         .btn-submit { background: #2c3e50; color: white; }
+        /* 좋아요 버튼 스타일 */
+.btn-like {
+    background: #fff0f0; border: 1px solid #ffcccc; 
+    color: #ff4444; border-radius: 20px; 
+    padding: 5px 10px; font-size: 12px; cursor: pointer;
+    font-weight: bold; transition: all 0.2s;
+}
+.btn-like:hover { background: #ffe0e0; transform: scale(1.05); }
+.place-info { flex: 1; } /* 주소 영역이 남은 공간 차지 */
     </style>
 </head>
 <body>
@@ -139,10 +148,11 @@
             <span>📍 추천 부지 목록</span>
             <button onclick="togglePanel()" style="border:none; bg:none; cursor:pointer;">🔽</button>
         </div>
-        <div class="panel-tabs">
-            <button class="tab-btn active" onclick="switchTab('latest')">최신 5건</button>
-            <button class="tab-btn" onclick="switchTab('all')">전체 보기</button>
-        </div>
+<div class="panel-tabs">
+    <button class="tab-btn active" onclick="switchTab('latest')">최신순</button>
+    <button class="tab-btn" onclick="switchTab('best')">🔥 인기순</button> 
+    <button class="tab-btn" onclick="switchTab('all')">전체</button>
+</div>
         <div id="suggestionList" class="panel-content">
             <div style="text-align:center; padding:20px; color:#999;">로딩 중...</div>
         </div>
@@ -180,6 +190,27 @@
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        /**
+         * ----------------------------------------------------------------------------------
+         * [Supabase Database Schema & RPC Reference]
+         * 이 코드가 정상 작동하기 위해 실행되어야 할 SQL 명세입니다.
+         * * 1. [Column 추가] 추천수(like_count) 저장용
+         * ALTER TABLE public.site_suggestions 
+         * ADD COLUMN like_count integer NOT NULL DEFAULT 0;
+         * * 2. [RPC 함수 생성] 동시성 제어를 위한 안전한 좋아요 증가 함수
+         * -- Supabase SQL Editor에서 실행 필요
+         * CREATE OR REPLACE FUNCTION increment_like(row_id uuid)
+         * RETURNS void
+         * LANGUAGE plpgsql
+         * AS $$
+         * BEGIN
+         * UPDATE public.site_suggestions
+         * SET like_count = like_count + 1
+         * WHERE id = row_id;
+         * END;
+         * $$;
+         * ----------------------------------------------------------------------------------
+         */
 
         let map;
         let clusterer;
@@ -220,26 +251,31 @@
         // ---------------------------------------------------------
         // 1. 데이터 로드 및 마커/리스트 처리 (Supabase)
         // ---------------------------------------------------------
-        async function fetchAndRenderSuggestions() {
-            try {
-                // 'likes' 컬럼이 없으므로 최신순(created_at)으로 전체 데이터를 가져옵니다.
-                // 데이터 양이 아주 많지 않다고 가정하고 전체를 로드합니다.
-                const { data, error } = await sb
-                    .from('site_suggestions')
-                    .select('*')
-                    .order('created_at', { ascending: false });
+ // [수정] 데이터 로드 로직
+async function fetchAndRenderSuggestions() {
+    try {
+        // 1. 전체 데이터 가져오기 (기본 최신순)
+        const { data, error } = await sb
+            .from('site_suggestions')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-                if (error) throw error;
-                
-                allData = data || [];
-                renderMarkers(allData);
-                renderList('latest'); // 초기 탭: 최신 5건
+        if (error) throw error;
+        
+        allData = data || [];
+        
+        // 지도 마커는 전체 데이터를 다 찍어줌
+        renderMarkers(allData);
+        
+        // 리스트는 현재 선택된 탭('latest' or 'best' or 'all')에 맞춰 그림
+        // 초기 로딩은 'latest'로 가정
+        renderList('latest'); 
 
-            } catch (e) {
-                console.error("Data Load Error:", e);
-                alert("데이터를 불러오는 중 오류가 발생했습니다.");
-            }
-        }
+    } catch (e) {
+        console.error("Data Load Error:", e);
+        alert("데이터를 불러오는 중 오류가 발생했습니다.");
+    }
+}
 
         function renderMarkers(dataList) {
             // 기존 클러스터러 초기화
@@ -270,33 +306,74 @@
         }
 
         // [리스트 UI 렌더링]
-        function renderList(type) {
-            const listEl = document.getElementById('suggestionList');
-            listEl.innerHTML = '';
+// [수정] 리스트 렌더링 로직 (최다 추천순 로직 추가됨)
+function renderList(type) {
+    const listEl = document.getElementById('suggestionList');
+    listEl.innerHTML = '';
+    
+    // 탭 버튼 스타일 업데이트 (UI 부분은 기존 switchTab 함수 연동)
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    // (참고: 실제론 switchTab에서 class 제어하지만, 여기서 데이터 정렬을 수행)
 
-            let targetData = [];
-            if (type === 'latest') {
-                targetData = allData.slice(0, 5); // 최신 5개
-            } else {
-                targetData = allData; // 전체 보기
-            }
+    let targetData = [...allData]; // 원본 보호를 위해 복사
 
-            if (targetData.length === 0) {
-                listEl.innerHTML = '<div style="padding:15px; text-align:center; color:#999;">등록된 부지가 없습니다.</div>';
-                return;
-            }
+    if (type === 'latest') {
+        // 최신순 5개
+        targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        targetData = targetData.slice(0, 5);
+    } else if (type === 'best') {
+        // [NEW] 최다 추천순 5개 (like_count 내림차순)
+        targetData.sort((a, b) => b.like_count - a.like_count);
+        targetData = targetData.slice(0, 5);
+    } 
+    // type === 'all' 이면 전체 그대로
 
-            targetData.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'place-item';
-                div.innerHTML = `
-                    <div class="place-addr">📍 ${item.address_kr}</div>
-                    <div class="place-reason">${item.reason || '내용 없음'}</div>
-                `;
-                div.onclick = () => moveToLocation(item.latitude, item.longitude);
-                listEl.appendChild(div);
-            });
-        }
+    if (targetData.length === 0) {
+        listEl.innerHTML = '<div style="padding:15px; text-align:center; color:#999;">데이터가 없습니다.</div>';
+        return;
+    }
+
+    targetData.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'place-item';
+        // 좋아요 버튼에 stopPropagation을 걸어서, 버튼 누를 때 지도가 이동하지 않게 처리
+        div.innerHTML = `
+            <div class="place-info" onclick="moveToLocation(${item.latitude}, ${item.longitude})">
+                <div class="place-addr">📍 ${item.address_kr}</div>
+                <div class="place-reason">${item.reason || '내용 없음'}</div>
+            </div>
+            <div class="like-box">
+                <button class="btn-like" onclick="event.stopPropagation(); handleLike('${item.id}')">
+                    👍 ${item.like_count}
+                </button>
+            </div>
+        `;
+        
+        // CSS 스타일링을 위해 flex 구조로 조금 변경 필요 (아래 CSS 참고)
+        div.style.display = 'flex';
+        div.style.justifyContent = 'space-between';
+        div.style.alignItems = 'center';
+        
+        listEl.appendChild(div);
+    });
+}
+        // [신규] 좋아요 증가 함수
+async function handleLike(id) {
+    try {
+        // Supabase RPC(함수) 호출
+        const { error } = await sb.rpc('increment_like', { row_id: id });
+        
+        if (error) throw error;
+        
+        // 성공 시 데이터만 갱신 (화면 깜빡임 없이 숫자만 올리면 좋지만, 간단히 리로드)
+        // UX를 위해 "반영되었습니다" 알림은 생략하고 바로 갱신
+        await fetchAndRenderSuggestions(); 
+
+    } catch (e) {
+        console.error(e);
+        alert("오류가 발생했습니다.");
+    }
+}
 
         function switchTab(type) {
             // 탭 스타일 변경
