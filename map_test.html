@@ -3,10 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>경기 태양광 부지 분석 플랫폼 (Fix)</title>
+    <title>경기 태양광 부지 분석 (Leaflet Edition)</title>
     
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services,clusterer&autoload=false"></script>
     <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     
     <style>
@@ -14,38 +20,33 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body, html { width: 100%; height: 100%; overflow: hidden; font-family: 'Pretendard', sans-serif; }
         
-        /* [지도] */
         #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
         
         /* 🔴 [핵심] 기후 데이터 시인성 강화 */
-        #map div img[src*="geoserver"] { 
-            filter: saturate(1.8) contrast(1.2) brightness(0.95) !important; 
+        .leaflet-layer.wms-layer { 
+            filter: saturate(2) contrast(1.2) brightness(0.9); 
         }
 
         /* [UI] 검색창 */
         .search-box {
-            position: absolute; top: 20px; left: 20px; z-index: 20;
+            position: absolute; top: 20px; left: 20px; z-index: 1000;
             width: 340px; background: white; border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; padding: 12px;
             align-items: center;
         }
-        .search-input { 
-            border: none; outline: none; flex: 1; font-size: 15px; color: #333; 
-            cursor: pointer; background: transparent;
-        }
+        .search-input { border: none; outline: none; flex: 1; font-size: 15px; cursor: pointer; }
 
         /* [UI] 레이어 컨트롤러 */
         .layer-control {
-            position: absolute; top: 20px; right: 20px; z-index: 20;
+            position: absolute; top: 20px; right: 20px; z-index: 1000;
             background: rgba(255, 255, 255, 0.98); padding: 15px; border-radius: 10px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.15); width: 260px;
             max-height: 80vh; overflow-y: auto; border: 1px solid #eee;
         }
         .layer-control h4 { margin: 0 0 12px; font-size: 16px; font-weight: 700; border-bottom: 2px solid #222; padding-bottom: 8px; }
         
-        /* 아코디언 스타일 */
         details { margin-bottom: 8px; border-bottom: 1px solid #f0f0f0; padding-bottom: 8px; }
-        summary { cursor: pointer; font-weight: 600; font-size: 14px; color: #333; outline: none; margin-bottom: 5px; list-style: none; display: flex; justify-content: space-between; }
+        summary { cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 5px; list-style: none; display: flex; justify-content: space-between; }
         summary::after { content: '+'; }
         details[open] summary::after { content: '-'; }
 
@@ -53,15 +54,12 @@
         .layer-item label { cursor: pointer; display: flex; align-items: center; width: 100%; }
         .layer-item input { margin-right: 10px; transform: scale(1.1); accent-color: #2c3e50; }
 
-        /* 범례 칩 */
         .chip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
-        .chip-red { background: #ff4444; box-shadow: 0 0 2px red; }
-        .chip-blue { background: #4444ff; box-shadow: 0 0 2px blue; }
-        .chip-yell { background: #ffaa00; box-shadow: 0 0 2px orange; }
+        .chip-red { background: #ff4444; } .chip-blue { background: #4444ff; } .chip-yell { background: #ffaa00; }
 
-        /* [UI] 추천 목록 패널 & 버튼 */
+        /* [UI] 추천 패널 */
         .suggestion-panel {
-            position: absolute; bottom: 30px; left: 20px; z-index: 15;
+            position: absolute; bottom: 30px; left: 20px; z-index: 999;
             width: 320px; background: white; border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.2);
             max-height: 50vh; display: flex; flex-direction: column;
@@ -75,13 +73,11 @@
         
         .place-item { padding: 10px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
         .place-info { flex: 1; cursor: pointer; }
-        .place-addr { font-size: 13px; font-weight: bold; margin-bottom: 4px; }
-        .place-reason { font-size: 12px; color: #666; }
         .btn-like { background: #fff0f0; border: 1px solid #ffcccc; color: #ff4444; border-radius: 20px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-weight: bold; }
 
         /* FAB 버튼 & 모달 */
-        .fab-btn { position: absolute; bottom: 30px; right: 20px; z-index: 10; background-color: #2c3e50; color: white; width: 56px; height: 56px; border-radius: 50%; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 24px; cursor: pointer; }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 30; align-items: center; justify-content: center; }
+        .fab-btn { position: absolute; bottom: 30px; right: 20px; z-index: 1000; background-color: #2c3e50; color: white; width: 56px; height: 56px; border-radius: 50%; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 24px; cursor: pointer; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); z-index: 2000; align-items: center; justify-content: center; }
         .modal-content { background: white; width: 90%; max-width: 400px; padding: 25px; border-radius: 12px; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: bold; }
@@ -103,7 +99,6 @@
 
     <div class="layer-control">
         <h4>🗺️ 태양광 분석 레이어</h4>
-
         <details open>
             <summary>🚫 규제 요인 (설치 제한)</summary>
             <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('slope_15')"> 경사도 15도 이상</label></div>
@@ -113,13 +108,11 @@
             <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('water')"> 상수원 보호구역</label></div>
             <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('park')"> 국립공원</label></div>
         </details>
-
         <details>
             <summary>⚡ 발전소 현황</summary>
             <div class="layer-item"><label><span class="chip chip-blue"></span><input type="checkbox" onchange="toggleLayer('solar_status')"> 기설치 발전소</label></div>
             <div class="layer-item"><label><span class="chip chip-blue"></span><input type="checkbox" onchange="toggleLayer('solar_plan')"> 설치 예정지</label></div>
         </details>
-
         <details>
             <summary>☀️ 발전 잠재량</summary>
             <div class="layer-item"><label><span class="chip chip-yell"></span><input type="checkbox" onchange="toggleLayer('pot_tech_land')"> 기술적 잠재량 (지상)</label></div>
@@ -144,6 +137,7 @@
     </div>
 
     <button class="fab-btn" onclick="openModal()" title="부지 등록">➕</button>
+    
     <div id="modalOverlay" class="modal-overlay">
         <div class="modal-content">
             <h3 style="margin-bottom:20px;">☀️ 부지 추천 등록</h3>
@@ -168,9 +162,6 @@
     </div>
 
     <script>
-        // ---------------------------------------------------------
-        // 1. 설정 및 상수 정의
-        // ---------------------------------------------------------
         const GYEONGGI_API_KEY = 'bbfa1a53-a0d6-4328-bd4e-ae2e7bb63d06'; 
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
@@ -190,100 +181,65 @@
             'pot_market_land': 'spggcee:rst_mrkt_sunl_genqy_kier_grnd'
         };
 
-        // 전역 변수
+        // 전역 변수 (Leaflet)
         let map;
-        let clusterer;
-        let markers = [];
+        let clusterGroup;
         let allData = [];
-        const registeredLayers = {}; // 레이어 등록 상태 장부
+        const activeLayers = {}; // 활성화된 레이어 객체 저장
 
-        // ---------------------------------------------------------
-        // 2. 초기화 (지도 생성)
-        // ---------------------------------------------------------
+        // 1. 초기화
         window.onload = function() {
-            kakao.maps.load(async function() {
-                initMap();
-                await fetchAndRenderSuggestions();
-            });
+            initMap();
+            fetchAndRenderSuggestions();
         };
 
         function initMap() {
-            const container = document.getElementById('map');
-            const options = { center: new kakao.maps.LatLng(37.241086, 127.177553), level: 9 };
-            map = new kakao.maps.Map(container, options);
-            map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
+            // Leaflet 지도 생성 (좌표: 용인시청)
+            map = L.map('map').setView([37.241086, 127.177553], 12);
 
-            clusterer = new kakao.maps.MarkerClusterer({
-                map: map, averageCenter: true, minLevel: 6
-            });
+            // 배경 지도: OSM (OpenStreetMap) - 무료, API 키 불필요, 안정적
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // 클러스터 그룹 생성
+            clusterGroup = L.markerClusterGroup();
+            map.addLayer(clusterGroup);
         }
 
-        // ---------------------------------------------------------
-        // 3. WMS 레이어 로직 (에러 수정됨)
-        // ---------------------------------------------------------
+        // 2. [핵심] WMS 레이어 토글 (Leaflet은 이게 한 줄이면 끝납니다!)
         function toggleLayer(key) {
             const checkbox = event.target;
             const layerId = LAYER_MAP[key];
 
-            if (!layerId) { console.error("ID 매핑 오류"); return; }
-            
-            // 카카오 맵타입 키 (대문자)
-            const tilesetKey = key.toUpperCase(); 
-
             if (checkbox.checked) {
-                // 1. 등록된 적이 없으면 타일셋 생성 및 등록
-                if (!registeredLayers[tilesetKey]) {
-                    const newTileset = new kakao.maps.Tileset({
-                        width: 256, height: 256,
-                        getTile: function(x, y, z) { return getWmsUrl(layerId, x, y, z); }
-                    });
-                    kakao.maps.Tileset.add(tilesetKey, newTileset);
-                    registeredLayers[tilesetKey] = true;
-                }
+                // 레이어 생성
+                const layer = L.tileLayer.wms('https://climate.gg.go.kr/ols/api/geoserver/wms?', {
+                    apiKey: GYEONGGI_API_KEY,
+                    layers: layerId,
+                    format: 'image/png',
+                    transparent: true,
+                    version: '1.1.0',
+                    maxZoom: 20,
+                    className: 'wms-layer' // CSS 필터 적용용 클래스
+                });
 
-                // [핵심 수정] 공식 장부(MapTypeId)에 없으면 우리 키(tilesetKey)를 바로 씁니다.
-                // 이렇게 하면 undefined를 넘기는 일이 없어집니다.
-                const typeId = kakao.maps.MapTypeId[tilesetKey] || tilesetKey;
-                map.addOverlayMapTypeId(typeId);
-
+                layer.addTo(map);
+                activeLayers[key] = layer; // 저장
             } else {
-                // 3. 지도에서 제거
-                const typeId = kakao.maps.MapTypeId[tilesetKey] || tilesetKey;
-                map.removeOverlayMapTypeId(typeId);
+                // 레이어 제거
+                if (activeLayers[key]) {
+                    map.removeLayer(activeLayers[key]);
+                    delete activeLayers[key];
+                }
             }
         }
 
-        // URL 생성 함수 (누락된 부분 복구)
-        function getWmsUrl(layerId, x, y, z) {
-            const bbox = getTileBbox(x, y, z);
-            return `https://climate.gg.go.kr/ols/api/geoserver/wms?` +
-                   `apiKey=${GYEONGGI_API_KEY}&SERVICE=WMS&VERSION=1.1.0&REQUEST=GetMap&` +
-                   `FORMAT=image/png&TRANSPARENT=true&LAYERS=${layerId}&BBOX=${bbox}&` +
-                   `WIDTH=256&HEIGHT=256&SRS=EPSG:3857`;
-        }
-
-        // 좌표 변환 함수 (누락된 부분 복구)
-        function getTileBbox(x, y, z) {
-            const tileWidth = 256;
-            const circumference = 40075016.68;
-            const originShift = circumference / 2.0;
-            const initialResolution = circumference / tileWidth;
-            const resolution = initialResolution / Math.pow(2, z);
-            const minX = (x * tileWidth) * resolution - originShift;
-            const maxY = originShift - (y * tileWidth) * resolution;
-            const maxX = ((x + 1) * tileWidth) * resolution - originShift;
-            const minY = originShift - ((y + 1) * tileWidth) * resolution;
-            return `${minX},${minY},${maxX},${maxY}`;
-        };
-
-        // ---------------------------------------------------------
-        // 4. Supabase 데이터 로드 및 UI
-        // ---------------------------------------------------------
+        // 3. 데이터 로드 및 마커 (Leaflet 문법으로 변경)
         async function fetchAndRenderSuggestions() {
             try {
                 const { data, error } = await sb.from('site_suggestions').select('*').order('created_at', { ascending: false });
                 if (error) throw error;
-                // 유효성 검사
                 allData = (data || []).filter(item => item.latitude && item.longitude && !isNaN(item.latitude));
                 renderMarkers(allData);
                 renderList('latest');
@@ -291,19 +247,17 @@
         }
 
         function renderMarkers(dataList) {
-            clusterer.clear();
-            markers = [];
+            clusterGroup.clearLayers();
             dataList.forEach(item => {
-                const marker = new kakao.maps.Marker({ position: new kakao.maps.LatLng(item.latitude, item.longitude) });
-                kakao.maps.event.addListener(marker, 'click', function() {
-                    const content = `<div style="padding:5px; font-size:12px;">${item.address_kr}</div>`;
-                    new kakao.maps.InfoWindow({ content: content, removable: true }).open(map, marker);
-                });
-                markers.push(marker);
+                // Leaflet 마커 생성
+                const marker = L.marker([item.latitude, item.longitude]);
+                const popupContent = `<div style="padding:5px; font-size:12px;"><strong>${item.address_kr}</strong><br>${item.reason || ''}</div>`;
+                marker.bindPopup(popupContent);
+                clusterGroup.addLayer(marker);
             });
-            clusterer.addMarkers(markers);
         }
 
+        // 4. 리스트 및 UI 로직 (기존과 동일하되 지도 이동 함수만 변경)
         function renderList(type) {
             const listEl = document.getElementById('suggestionList');
             listEl.innerHTML = '';
@@ -348,25 +302,23 @@
             renderList(type);
         }
 
+        // [Leaflet] 지도 이동 함수
         function moveToLocation(lat, lng) {
             if(!lat || !lng) return;
-            map.setLevel(4);
-            map.panTo(new kakao.maps.LatLng(lat, lng));
+            map.flyTo([lat, lng], 16); // 부드러운 이동
         }
 
-        // ---------------------------------------------------------
-        // 5. 검색 및 등록 로직
-        // ---------------------------------------------------------
+        // 5. 검색 및 등록 (Daum Postcode는 그대로 사용, 좌표 변환 로직 제거 - 주소 API가 좌표도 줌? 아니면 별도 Geocoding?)
+        // Leaflet은 자체 Geocoding이 약하므로, Daum Postcode에서 주소만 받고
+        // 카카오 API 대신 'Nominatim(OpenStreetMap 검색)'을 사용하여 좌표를 따겠습니다. (무료)
+        
         function searchAddressGlobal() {
             new daum.Postcode({
                 oncomplete: function(data) {
                     const addr = data.roadAddress || data.jibunAddress;
                     document.getElementById('mainSearchInput').value = addr;
-                    const geocoder = new kakao.maps.services.Geocoder();
-                    geocoder.addressSearch(addr, function(result, status) {
-                        if (status === kakao.maps.services.Status.OK) {
-                            moveToLocation(result[0].y, result[0].x);
-                        }
+                    getCoordsFromAddress(addr, (lat, lng) => {
+                        moveToLocation(lat, lng);
                     });
                 }
             }).open();
@@ -377,15 +329,25 @@
                 oncomplete: function(data) {
                     const addr = data.roadAddress || data.jibunAddress;
                     document.getElementById('regAddress').value = addr;
-                    const geocoder = new kakao.maps.services.Geocoder();
-                    geocoder.addressSearch(addr, function(result, status) {
-                        if (status === kakao.maps.services.Status.OK) {
-                            document.getElementById('regLat').value = result[0].y;
-                            document.getElementById('regLng').value = result[0].x;
-                        }
+                    getCoordsFromAddress(addr, (lat, lng) => {
+                        document.getElementById('regLat').value = lat;
+                        document.getElementById('regLng').value = lng;
                     });
                 }
             }).open();
+        }
+
+        // [OSM Nominatim] 주소 -> 좌표 변환 (무료, 키 불필요)
+        function getCoordsFromAddress(address, callback) {
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.length > 0) {
+                        callback(data[0].lat, data[0].lon);
+                    } else {
+                        alert("위치를 찾을 수 없습니다.");
+                    }
+                });
         }
 
         function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
