@@ -204,6 +204,8 @@ details[open] summary::after { content: '-'; }
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // [전역 변수] 생성된 WMS 레이어 객체들을 담아둘 저장소
+const wmsLayerObjects = {};
         // 🔴 [Data Mapping] 확인된 실제 ID 적용
         const LAYER_MAP = {
             // [규제]
@@ -583,43 +585,39 @@ async function handleLike(id) {
                 panel.style.transform = 'translateY(80%)';
             }
         }
-        // [핵심 로직] 체크박스 클릭 시 WMS 레이어 ON/OFF 통합 함수
+// [수정된 로직] TileLayer 객체 직접 관리 방식
 function toggleLayer(key) {
     const checkbox = event.target;
-    const layerId = LAYER_MAP[key]; // 상단에서 정의한 ID 매핑 가져오기
+    const layerId = LAYER_MAP[key]; // ID 매핑 가져오기
 
     if (!layerId) {
         console.error(`ID 매핑 오류: ${key}`);
         return;
     }
 
-    // 카카오맵 타일셋 고유 키 생성 (예: SLOPE_15_LAYER)
-    const tilesetKey = key.toUpperCase() + '_LAYER';
+    // 1. 이미 생성된 레이어인지 확인
+    if (!wmsLayerObjects[key]) {
+        // 처음 켜는 레이어라면 새로 생성 (TileLayer 사용)
+        const newTileset = new kakao.maps.Tileset({
+            width: 256, height: 256,
+            getTile: function(x, y, z) {
+                return getWmsUrl(layerId, x, y, z);
+            }
+        });
 
+        // Tileset을 담은 Layer 생성 후 저장소에 보관
+        wmsLayerObjects[key] = new kakao.maps.TileLayer({
+            tileset: newTileset,
+            zIndex: 10, // 레이어 우선순위 (필요시 조정)
+            opacity: 1  // 투명도
+        });
+    }
+
+    // 2. 체크 상태에 따라 지도에 올리거나(setMap(map)) 내리기(setMap(null))
     if (checkbox.checked) {
-        // 타일셋이 아직 없으면 새로 정의 (최초 1회만 실행됨)
-        if (!kakao.maps.Tileset[tilesetKey]) {
-            kakao.maps.Tileset.add(tilesetKey, new kakao.maps.Tileset({
-                width: 256, height: 256,
-                getTile: function(x, y, z) {
-                    const bbox = getTileBbox(x, y, z);
-                    // 제공해주신 API 키 변수 사용
-                    return `https://climate.gg.go.kr/ols/api/geoserver/wms?` +
-                           `apiKey=${GYEONGGI_API_KEY}&` +
-                           `SERVICE=WMS&VERSION=1.1.0&REQUEST=GetMap&` +
-                           `FORMAT=image/png&TRANSPARENT=true&` + 
-                           `LAYERS=${layerId}&` +
-                           `BBOX=${bbox}&` +
-                           `WIDTH=256&HEIGHT=256&` +
-                           `SRS=EPSG:3857`;
-                }
-            }));
-        }
-        // 지도에 레이어 추가
-        map.addOverlayMapTypeId(kakao.maps.MapTypeId[tilesetKey]);
+        wmsLayerObjects[key].setMap(map);
     } else {
-        // 지도에서 레이어 제거
-        map.removeOverlayMapTypeId(kakao.maps.MapTypeId[tilesetKey]);
+        wmsLayerObjects[key].setMap(null);
     }
 }
     </script>
