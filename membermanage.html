@@ -1406,7 +1406,16 @@ async function loadDashboardData(uuid) {
         curMem.total_capital = assets.total_capital; 
 
         // 4. 권한 로드
-        const { data: officials } = await _supabase.from('coop_officials').select('category').eq('member_id', curMem.member_id);
+curMem.total_capital = assets.total_capital; 
+
+        // ▼▼▼ [확인] 선관위 권한 조회 로직 (SQL 대신 JS에서 처리하기 위해 조회) ▼▼▼
+        // coop_officials 테이블에서 내 아이디(member_id)로 category를 조회합니다.
+        const { data: officials } = await _supabase
+            .from('coop_officials')
+            .select('category')
+            .eq('member_id', curMem.member_id);
+            
+        // 결과 예시: ['election_comm', 'auditor'] 등
         const myRoles = officials ? officials.map(r => r.category) : [];
 
         // 5. 렌더링 호출
@@ -1483,7 +1492,71 @@ function addAssetCard(row, title, val, unit='원') {
     // =========================================================================
 
 // 전역 변수로 상세 내역 모달에서 쓸 데이터를 담아둡니다.
-let globalHistoryData = {}; 
+let globalHistoryData = {};  
+
+   // [수정] 선거 버튼 노출 여부 결정 함수 (DB 구조 반영)
+async function checkElectionVisibility(member, myRoles) {
+    const voteCard = document.getElementById('voteLinkCard');
+    if (!voteCard) return;
+
+    // 1. 관리자 여부 확인 (coop_members 테이블 -> role 컬럼)
+    const isAdmin = (member.role === 'admin');
+
+    // 2. 선관위 여부 확인 (coop_officials 테이블 -> category 컬럼)
+    // loadDashboardData에서 이미 조회된 myRoles 배열(['election_comm', ...])을 활용
+    const isCommittee = myRoles && myRoles.includes('election_comm');
+
+    // 관리자이거나 선관위라면 무조건 노출 (프리패스)
+    if (isAdmin || isCommittee) {
+        console.log("👑 관리자/선관위 권한 확인됨 -> 버튼 노출");
+        voteCard.classList.remove('hidden');
+        return;
+    }
+
+    // 3. 일반 조합원: 조건에 맞는 선거가 있는지 DB 조회
+    // 조건: 상태가 대기/투표중/일시정지/마감/결과공개 중 하나여야 함
+    const targetStatuses = ['READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED'];
+    
+    // DB 조회: status가 위 목록에 포함되는 선거의 날짜만 가져옴
+    const { data: elections, error } = await _supabase
+        .from('elections')
+        .select('start_at, end_at')
+        .in('status', targetStatuses);
+
+    if (error || !elections || elections.length === 0) {
+        voteCard.classList.add('hidden'); // 조건 맞는 선거 없음
+        return;
+    }
+
+    // 4. 날짜 정밀 체크 (JS로 계산)
+    const now = new Date();
+    let showButton = false;
+
+    for (let el of elections) {
+        // 날짜 데이터 유효성 체크
+        if (!el.start_at || !el.end_at) continue;
+
+        const startDate = new Date(el.start_at);
+        const endDate = new Date(el.end_at);
+        
+        // 종료일 + 14일 계산 (결과 확인 기간)
+        const extendedEndDate = new Date(endDate);
+        extendedEndDate.setDate(endDate.getDate() + 14);
+
+        // 오늘이 [시작일 ~ 종료일+14일] 사이에 있는가?
+        if (now >= startDate && now <= extendedEndDate) {
+            showButton = true;
+            break; // 하나라도 만족하면 즉시 노출
+        }
+    }
+
+    // 최종 결정
+    if (showButton) {
+        voteCard.classList.remove('hidden');
+    } else {
+        voteCard.classList.add('hidden');
+    }
+}
 
 // [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
 function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles) {
