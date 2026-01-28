@@ -3862,40 +3862,47 @@ async function submitModifyApp() {
 }
 
 // [수정된 버전] 선거 시스템 이동 함수
+// [수정] 선거 시스템 이동 함수 (서버 검증 추가)
     async function goToVoteSystem() {
         console.log("1. 🚀 선거 시스템 이동 시도...");
 
-        // 1. Supabase 클라이언트 찾기
-        // (let으로 선언된 _supabase 또는 window._client 사용)
         const client = (typeof _supabase !== 'undefined') ? _supabase : window._client;
 
         if (!client) {
-            console.error("❌ Supabase 클라이언트를 찾을 수 없습니다.");
-            alert("시스템 로딩 중입니다. 1초 뒤 다시 시도해주세요.");
+            alert("시스템 로딩 중입니다. 잠시 후 다시 시도해주세요.");
             return;
         }
 
-        // 2. 세션 정보 가져오기
-        console.log("2. 세션 조회 중...");
-        const { data } = await client.auth.getSession();
+        // [핵심 변경] getSession() 대신 getUser()를 사용하여 서버 유효성 검증
+        // getSession: 브라우저 캐시만 확인함 (빠르지만 폐기된 토큰 모름)
+        // getUser: 서버에 직접 물어봄 (확실함)
+        console.log("2. 서버에 세션 유효성 확인 중...");
         
-        if (!data || !data.session) {
-            console.warn("⚠️ 세션 없음. 로그인 필요.");
-            alert("로그인 정보가 만료되었습니다. 다시 로그인해주세요.");
+        const { data, error } = await client.auth.getUser();
+        
+        // 에러가 있거나 user 정보가 없으면 -> 이미 로그아웃된 상태임
+        if (error || !data || !data.user) {
+            console.warn("⚠️ 세션 만료됨 (서버 확인 결과). 강제 로그아웃 처리.");
+            
+            alert("보안을 위해 다시 로그인이 필요합니다.");
+            
+            // 로컬에 남은 껍데기 세션도 깔끔하게 지워줌
+            await client.auth.signOut(); 
             location.reload(); 
             return;
         }
 
-        // 3. 토큰 추출
-        console.log("3. 토큰 확보 완료");
-        const accessToken = data.session.access_token;
-        const refreshToken = data.session.refresh_token;
-
-        // 4. 이동 (URL 생성)
-        const targetUrl = `http://vote.yonginsolar.kr/vote_login.html?at=${accessToken}&rt=${refreshToken}`;
-        console.log("4. 이동 시작 ->", targetUrl);
+        // 3. 유효하다면 현재 세션 정보를 가져와서 토큰 추출
+        // (getUser는 user객체만 주므로, 토큰을 얻기 위해 getSession을 다시 호출해도 안전함)
+        const { data: sessionData } = await client.auth.getSession();
         
-        // 5. 실제 이동 실행
+        console.log("3. 유효한 토큰 확보 완료");
+        const accessToken = sessionData.session.access_token;
+        const refreshToken = sessionData.session.refresh_token;
+
+        // 4. 이동
+        const targetUrl = `http://vote.yonginsolar.kr/vote_login.html?at=${accessToken}&rt=${refreshToken}`;
+        
         window.location.href = targetUrl;
     }
 
