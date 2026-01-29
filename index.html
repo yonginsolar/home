@@ -475,7 +475,7 @@
 <footer id="footer"></footer>
 
   
-<div class="modal fade" id="partnerDetailModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="partnerDetailModal" tabindex="-1" >
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
       
@@ -513,7 +513,7 @@
 
 
 
-<div class="modal fade" id="plantDetailModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="plantDetailModal" tabindex="-1" >
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
@@ -564,7 +564,7 @@
   </div>
 </div>
 
-<div class="modal fade" id="noticeDetailModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="noticeDetailModal" tabindex="-1" >
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
       <div class="modal-header" style="background-color: #f8f9fa;">
@@ -955,43 +955,67 @@ function filterNoticesInModal() {
     renderModalList(filtered);
 }
 
-// 6. [상세 보기] 글 클릭 시 -> 상세 모달 오픈
+// 6. [상세 보기] 글 클릭 시 -> 상세 모달 오픈 (파일 다운로드 기능 추가됨)
 function openNoticeDetail(id) {
-    console.log("1. 클릭된 ID:", id, "Type:", typeof id); // [디버깅] 클릭한 ID 확인
+    console.log("1. 클릭된 ID:", id, "Type:", typeof id);
 
-    // ★ 수정 포인트: '===' 대신 '=='를 사용하여 숫자/문자 차이를 무시하고 비교
+    // ID 비교 (문자/숫자 호환)
     const n = g_notices_list.find(item => item.id == id);
     
     if(!n) {
-        console.error("2. 데이터를 찾을 수 없습니다. g_notices_list를 확인하세요:", g_notices_list);
-        alert("해당 공지사항의 데이터를 찾을 수 없습니다."); // 사용자에게 알림
+        alert("해당 공지사항의 데이터를 찾을 수 없습니다.");
         return;
     }
 
-    console.log("3. 찾은 데이터:", n); // [디버깅] 데이터 찾기 성공
-
-    // 1) 내용 채우기
+    // 1) 텍스트 내용 채우기
     document.getElementById('notice-read-title').innerText = n.title;
     document.getElementById('notice-read-cat').innerText = n.category;
     document.getElementById('notice-read-date').innerText = n.created_at.split('T')[0];
     
-    // 줄바꿈 처리
-    const contentHtml = n.content ? n.content.replace(/\n/g, '<br>') : '';
+    // 본문 줄바꿈 처리
+    let contentHtml = n.content ? n.content.replace(/\n/g, '<br>') : '';
+
+    // ============================================================
+    // ★ [추가된 부분] 첨부파일이 있으면 다운로드 링크 생성
+    // ============================================================
+    if (n.file_urls && Array.isArray(n.file_urls) && n.file_urls.length > 0) {
+        contentHtml += '<hr class="my-4" style="border-top: 1px dashed #bbb;">'; // 구분선
+        contentHtml += '<h6 class="fw-bold mb-3"><i class="bi bi-paperclip"></i> 첨부파일</h6>';
+        contentHtml += '<ul class="list-unstyled bg-light p-3 rounded">';
+        
+        n.file_urls.forEach(url => {
+            // URL에서 파일명만 추출 (한글 깨짐 방지 디코딩 포함)
+            // 예: .../assets/document.pdf -> document.pdf
+            let fileName = '첨부파일 다운로드';
+            try {
+                fileName = decodeURIComponent(url.split('/').pop());
+            } catch(e) { console.log(e); }
+
+            contentHtml += `
+                <li class="mb-2">
+                    <a href="${url}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center">
+                        <i class="bi bi-file-earmark-arrow-down fs-5 text-primary me-2"></i>
+                        <span class="text-decoration-underline">${fileName}</span>
+                    </a>
+                </li>
+            `;
+        });
+        contentHtml += '</ul>';
+    }
+    // ============================================================
+
+    // 최종 HTML 주입
     document.getElementById('notice-read-content').innerHTML = contentHtml;
 
-    // 2) 검색 모달이 열려있으면 닫기 (중첩 방지)
+    // 2) 모달 열기 로직
     const searchEl = document.getElementById('noticeSearchModal');
-    // bootstrap이 정의되어 있는지 안전하게 확인
     if (typeof bootstrap !== 'undefined') {
         const searchModal = bootstrap.Modal.getInstance(searchEl);
         if(searchModal) searchModal.hide();
 
-        // 3) 상세 모달 열기 (기존 인스턴스가 꼬였을 수 있으니 getOrCreateInstance 사용)
         const detailEl = document.getElementById('noticeDetailModal');
         const detailModal = bootstrap.Modal.getOrCreateInstance(detailEl);
         detailModal.show();
-    } else {
-        console.error("Bootstrap 라이브러리가 로드되지 않았습니다.");
     }
 }
 
