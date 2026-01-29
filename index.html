@@ -475,84 +475,6 @@
 <footer id="footer"></footer>
 
   
-<div class="modal fade" id="plantModal1" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title fw-bold">제1호 용인시민체육관 상세정보</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <ul class="list-group list-group-flush">
-            <li class="list-group-item d-flex justify-content-between">
-              <span>설비용량</span> <strong>98.5 kW</strong>
-            </li>
-            <li class="list-group-item d-flex justify-content-between">
-              <span>설치년도</span> <strong>2024년 12월</strong>
-            </li>
-            <li class="list-group-item d-flex justify-content-between">
-              <span>패널종류</span> <span>양면형 모듈 (한화솔루션)</span>
-            </li>
-            <li class="list-group-item d-flex justify-content-between">
-              <span>금일 발전시간</span> <strong class="text-success">4.2 시간</strong>
-            </li>
-          </ul>
-          <div class="alert alert-light mt-3 text-center" role="alert">
-            <i class="bi bi-check-circle-fill text-success"></i> 정상 가동 중입니다.
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="plantModal2" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title fw-bold">제2호 기흥도서관 진행상황</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p>현재 옥상 방수 공사 및 구조물 설치 작업이 진행 중입니다.</p>
-          <div class="progress mb-3" style="height: 20px;">
-            <div class="progress-bar bg-warning text-dark" role="progressbar" style="width: 60%">공정률 60%</div>
-          </div>
-          <ul class="list-group list-group-flush small">
-             <li class="list-group-item">2025.01 구조물 입고 완료</li>
-             <li class="list-group-item">2025.02 모듈 설치 예정</li>
-             <li class="list-group-item">2025.03 상업 운전 개시 목표</li>
-          </ul>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal fade" id="plantModal3" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title fw-bold">제3호 수지구청 상세계획</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p class="text-muted">현재 부지 사용 협의 단계입니다.</p>
-          <div class="alert alert-secondary text-center">
-             조합원 모집이 완료되면<br>정식으로 추진될 예정입니다.
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
 <div class="modal fade" id="partnerDetailModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
@@ -776,21 +698,24 @@
 
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
-      // 1. 섹션 관리 (여기서 화면 구성을 바꿈 -> 높이 변경 발생)
-      await manageSections();
-      
-      // 2. 1차 재측량 (섹션 숨긴 직후 바로 반영)
-      AOS.refresh(); 
+    // 1. 섹션 관리는 먼저 실행 (화면 레이아웃 잡기)
+    await manageSections(); 
+    AOS.refresh(); 
 
-      // 3. 데이터 로드 (글자들이 채워짐 -> 높이 미세하게 변경)
-      await fetchStats(); 
-      await fetchPlants();    
-      await fetchHistory();     
-      await fetchPartners();    
-      await fetchNotices();     
-      await fetchFaqs();
-      await fetchAbout();  // 소개 관련 불러오기
-    });
+    // 2. 데이터 로드: 병렬 처리 (동시에 출발!)
+    await Promise.all([
+        fetchStats(),
+        fetchPlants(),
+        fetchHistory(),
+        fetchPartners(),
+        fetchNotices(),
+        fetchFaqs(),
+        fetchAbout()
+    ]);
+
+    // 3. 모든 데이터가 다 들어온 뒤 최종 새로고침
+    AOS.refresh();
+});
 
     // ★ [핵심 추가] 사진까지 다 뜨고 나서 "최종 재측량"
     // (이걸 넣어야 인터넷 느린 곳에서도 정확하게 작동합니다)
