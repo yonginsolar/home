@@ -956,9 +956,9 @@ function filterNoticesInModal() {
     renderModalList(filtered);
 }
 
-// 6. [상세 보기] 글 클릭 시 -> 상세 모달 오픈 (파일 다운로드 기능 추가됨)
+// [업그레이드] 상세 보기 및 첨부파일 파싱 (파이프 || 트릭 적용)
 function openNoticeDetail(id) {
-    console.log("1. 클릭된 ID:", id, "Type:", typeof id);
+    console.log("1. 클릭된 ID:", id);
 
     // ID 비교 (문자/숫자 호환)
     const n = g_notices_list.find(item => item.id == id);
@@ -968,7 +968,7 @@ function openNoticeDetail(id) {
         return;
     }
 
-    // 1) 텍스트 내용 채우기
+    // 텍스트 내용 채우기
     document.getElementById('notice-read-title').innerText = n.title;
     document.getElementById('notice-read-cat').innerText = n.category;
     document.getElementById('notice-read-date').innerText = n.created_at.split('T')[0];
@@ -977,26 +977,36 @@ function openNoticeDetail(id) {
     let contentHtml = n.content ? n.content.replace(/\n/g, '<br>') : '';
 
     // ============================================================
-    // ★ [추가된 부분] 첨부파일이 있으면 다운로드 링크 생성
+    // ★ [핵심 수정] 파이프(||) 기호를 이용한 한글 이름 분리 로직
     // ============================================================
     if (n.file_urls && Array.isArray(n.file_urls) && n.file_urls.length > 0) {
-        contentHtml += '<hr class="my-4" style="border-top: 1px dashed #bbb;">'; // 구분선
+        contentHtml += '<hr class="my-4" style="border-top: 1px dashed #bbb;">';
         contentHtml += '<h6 class="fw-bold mb-3"><i class="bi bi-paperclip"></i> 첨부파일</h6>';
         contentHtml += '<ul class="list-unstyled bg-light p-3 rounded">';
         
-        n.file_urls.forEach(url => {
-            // URL에서 파일명만 추출 (한글 깨짐 방지 디코딩 포함)
-            // 예: .../assets/document.pdf -> document.pdf
-            let fileName = '첨부파일 다운로드';
-            try {
-                fileName = decodeURIComponent(url.split('/').pop());
-            } catch(e) { console.log(e); }
+        n.file_urls.forEach(rawString => {
+            let fileUrl = rawString;        // 실제 주소
+            let displayName = '';           // 화면에 보일 이름
+
+            // 1. 파이프 기호(||)가 있는지 검사
+            if (rawString.includes('||')) {
+                const parts = rawString.split('||');
+                fileUrl = parts[0].trim();          // 앞부분: 주소
+                displayName = parts[1].trim();      // 뒷부분: 한글 이름
+            } else {
+                // 2. 파이프가 없으면 기존 방식대로 URL에서 추출
+                try {
+                    displayName = decodeURIComponent(fileUrl.split('/').pop());
+                } catch(e) { 
+                    displayName = "첨부파일 다운로드"; 
+                }
+            }
 
             contentHtml += `
                 <li class="mb-2">
-                    <a href="${url}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center">
+                    <a href="${fileUrl}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center">
                         <i class="bi bi-file-earmark-arrow-down fs-5 text-primary me-2"></i>
-                        <span class="text-decoration-underline">${fileName}</span>
+                        <span class="text-decoration-underline">${displayName}</span>
                     </a>
                 </li>
             `;
@@ -1008,7 +1018,7 @@ function openNoticeDetail(id) {
     // 최종 HTML 주입
     document.getElementById('notice-read-content').innerHTML = contentHtml;
 
-    // 2) 모달 열기 로직
+    // 모달 열기 로직 (안전 장치 포함)
     const searchEl = document.getElementById('noticeSearchModal');
     if (typeof bootstrap !== 'undefined') {
         const searchModal = bootstrap.Modal.getInstance(searchEl);
