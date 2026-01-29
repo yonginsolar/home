@@ -144,6 +144,13 @@
         </div>
     </div>
 
+
+    <div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
+   <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" 
+        style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" 
+        onclick="closeDaumPostcode()" alt="닫기 버튼">
+</div>
+
     <script>
         // ----------------------------------------------------------------------------------
         // [설정 및 DB 명세서 복구]
@@ -418,31 +425,7 @@ function toggleLayer(key) {
         // ----------------------------------------------------------------------------------
         // 4. 주소 검색 및 등록 (하이브리드: Daum Postcode + OSM Geo)
         // ----------------------------------------------------------------------------------
-// 기존 함수 삭제 후 아래 코드로 교체
-function searchAddressGlobal() {
-    new daum.Postcode({
-        oncomplete: function(data) {
-            const addr = data.roadAddress || data.jibunAddress;
-            document.getElementById('mainSearchInput').value = addr;
-            
-            // [수정됨] OSM 대신 카카오 Geocoder 사용
-            if (kakaoGeocoder) {
-                kakaoGeocoder.addressSearch(addr, function(result, status) {
-                    if (status === kakao.maps.services.Status.OK) {
-                        const lat = result[0].y;
-                        const lng = result[0].x;
-                        // Leaflet 지도 이동 함수 사용 (flyTo)
-                        map.flyTo([lat, lng], 17);
-                    } else {
-                        alert("위치를 찾을 수 없습니다.");
-                    }
-                });
-            } else {
-                alert("주소 검색 도구 로딩 중입니다. 잠시 후 다시 시도해주세요.");
-            }
-        }
-    }).open();
-}
+
 
         // 지도 클릭 -> 등록 모달 열기 헬퍼
         function openRegModalWithLoc(lat, lng, addr) {
@@ -452,25 +435,89 @@ function searchAddressGlobal() {
             openModal();
         }
 
-        // 모달 내 주소 검색
-// 기존 함수 삭제 후 아래 코드로 교체
-function searchAddressForModal() {
+// ----------------------------------------------------------------------------------
+// [수정] 주소 검색 레이어 및 통합 로직
+// ----------------------------------------------------------------------------------
+var element_layer = document.getElementById('layer');
+
+function closeDaumPostcode() {
+    // iframe을 넣은 element를 안 보이게 한다.
+    element_layer.style.display = 'none';
+}
+
+/**
+ * 주소 검색 실행 함수
+ * @param {string} type - 'main' (메인검색창) 또는 'modal' (등록모달창) 구분
+ */
+function execDaumPostcode(type) {
     new daum.Postcode({
         oncomplete: function(data) {
-            const addr = data.roadAddress || data.jibunAddress;
-            document.getElementById('regAddress').value = addr;
-            
-            // [수정됨] 카카오 Geocoder 사용
+            var addr = data.roadAddress || data.jibunAddress; // 주소 변수
+
+            // 1. 타입에 따라 입력 필드 분기 처리
+            if (type === 'main') {
+                document.getElementById('mainSearchInput').value = addr;
+            } else if (type === 'modal') {
+                document.getElementById('regAddress').value = addr;
+            }
+
+            // 2. 카카오 Geocoder로 좌표 변환 및 지도 이동
             if (kakaoGeocoder) {
                 kakaoGeocoder.addressSearch(addr, function(result, status) {
                     if (status === kakao.maps.services.Status.OK) {
-                        document.getElementById('regLat').value = result[0].y;
-                        document.getElementById('regLng').value = result[0].x;
+                        var lat = result[0].y;
+                        var lng = result[0].x;
+
+                        if (type === 'main') {
+                            // 메인 검색이면 지도를 해당 위치로 이동
+                            map.flyTo([lat, lng], 17);
+                        } else if (type === 'modal') {
+                            // 등록 모달이면 hidden 값에 좌표 저장
+                            document.getElementById('regLat').value = lat;
+                            document.getElementById('regLng').value = lng;
+                        }
                     }
                 });
             }
-        }
-    }).open();
+
+            // 3. 검색 완료 후 레이어 닫기
+            element_layer.style.display = 'none';
+        },
+        width: '100%',
+        height: '100%',
+        maxSuggestItems: 5
+    }).embed(element_layer);
+
+    // 4. 레이어를 화면에 표시하고 위치 조정
+    element_layer.style.display = 'block';
+    initLayerPosition();
+}
+
+// 레이어 위치 조정 함수 (화면 중앙 정렬)
+function initLayerPosition() {
+    var width = 300; // 우편번호서비스가 들어갈 element의 width
+    var height = 400; // 우편번호서비스가 들어갈 element의 height
+    var borderWidth = 5; // 테두리 두께
+
+    // 위에서 선언한 값들을 실제 element에 넣는다.
+    element_layer.style.width = width + 'px';
+    element_layer.style.height = height + 'px';
+    element_layer.style.border = borderWidth + 'px solid #2c3e50';
+    element_layer.style.borderRadius = '10px';
+    element_layer.style.backgroundColor = '#fff';
+
+    // 실행되는 순간의 viewport 너비와 높이 값을 가져와서 중앙에 좌표를 계산한다.
+    element_layer.style.left = (((window.innerWidth || document.documentElement.clientWidth) - width) / 2 - borderWidth) + 'px';
+    element_layer.style.top = (((window.innerHeight || document.documentElement.clientHeight) - height) / 2 - borderWidth) + 'px';
+}
+
+// [연결] HTML onclick 이벤트와 매핑되는 래퍼 함수들
+function searchAddressGlobal() {
+    execDaumPostcode('main');
+}
+
+function searchAddressForModal() {
+    execDaumPostcode('modal');
 }
 
         function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
@@ -480,40 +527,58 @@ function searchAddressForModal() {
             p.style.transform = p.style.transform == 'translateY(80%)' ? 'translateY(0)' : 'translateY(80%)';
         }
 
-        async function submitSuggestion() {
-            const addr = document.getElementById('regAddress').value;
-            const lat = document.getElementById('regLat').value;
-            const lng = document.getElementById('regLng').value;
-            const reason = document.getElementById('regReason').value;
-            const note = document.getElementById('regNote').value;
-            
-            if(!lat) return alert("주소를 검색하거나 지도를 클릭하여 위치를 지정해주세요.");
-            if(!reason) return alert("추천 이유를 입력해주세요.");
+// ----------------------------------------------------------------------------------
+// [수정] 데이터 등록 함수 (세션 연동 포함)
+// ----------------------------------------------------------------------------------
+async function submitSuggestion() {
+    // 1. 입력값 검증
+    const addr = document.getElementById('regAddress').value;
+    const lat = document.getElementById('regLat').value;
+    const lng = document.getElementById('regLng').value;
+    const reason = document.getElementById('regReason').value;
+    const note = document.getElementById('regNote').value;
+    
+    if(!lat || !lng) return alert("주소를 검색하거나 지도를 클릭하여 위치를 지정해주세요.");
+    if(!reason) return alert("추천 이유를 입력해주세요.");
 
-            const user = await sb.auth.getUser();
-            const writerId = user.data.user?.id || 'd3a2417e-75f8-4062-8959-5778a48c6686'; // 임시 ID
+    try {
+        // 2. [핵심] 현재 로그인된 유저 정보 가져오기
+        const { data: { user } } = await sb.auth.getUser();
 
-            const { error } = await sb.from('site_suggestions').insert([{
-                writer_id: writerId,
-                latitude: parseFloat(lat),
-                longitude: parseFloat(lng),
-                address_kr: addr,
-                reason: reason,
-                note: note
-            }]);
-
-            if(error) {
-                console.error(error);
-                alert("등록 실패: " + error.message);
-            } else {
-                alert("등록 완료!");
-                closeModal();
-                // 폼 초기화
-                document.getElementById('regReason').value = '';
-                document.getElementById('regNote').value = '';
-                fetchAndRenderSuggestions(); // 목록 갱신
-            }
+        // 3. 비로그인 상태 체크
+        if (!user) {
+            alert("로그인 정보가 없습니다.\n'membermanage.html'에서 먼저 로그인 해주세요.");
+            return; // 저장 중단
         }
+
+        // 4. 데이터 저장 (실제 유저 ID 사용)
+        const { error } = await sb.from('site_suggestions').insert([{
+            writer_id: user.id, // Supabase Auth의 실제 UUID
+            latitude: parseFloat(lat),
+            longitude: parseFloat(lng),
+            address_kr: addr,
+            reason: reason,
+            note: note
+        }]);
+
+        if(error) {
+            console.error(error);
+            alert("등록 실패: " + error.message);
+        } else {
+            alert("등록 완료!");
+            closeModal();
+            // 폼 초기화
+            document.getElementById('regReason').value = '';
+            document.getElementById('regNote').value = '';
+            fetchAndRenderSuggestions(); // 목록 갱신
+        }
+
+    } catch (e) {
+        console.error(e);
+        alert("시스템 오류가 발생했습니다.");
+    }
+}
+// End of submitSuggestion
     </script>
 </body>
 </html>
