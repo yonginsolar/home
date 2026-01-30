@@ -211,6 +211,17 @@
     <span id="sysMsg">메시지 내용</span>
 </div>
 
+    <div id="confirmModal" class="modal-overlay" style="z-index: 10000;">
+    <div class="modal-content" style="max-width: 300px; text-align: center;">
+        <h3 style="margin-bottom:15px;">⚠️ 확인</h3>
+        <p id="confirmMsg" style="margin-bottom:20px; color:#666;">정말 삭제하시겠습니까?</p>
+        <div class="btn-group">
+            <button class="btn" style="background:#f1f3f5; color:#333;" onclick="closeConfirm(false)">취소</button>
+            <button class="btn" style="background:#e74c3c; color:white;" onclick="closeConfirm(true)">삭제</button>
+        </div>
+    </div>
+</div>
+
     <script>
         // ----------------------------------------------------------------------------------
         // [설정 및 DB 명세서 복구]
@@ -370,21 +381,6 @@ function toggleLayer(key) {
 
 
 
-        function renderMarkers(dataList) {
-            clusterGroup.clearLayers();
-            dataList.forEach(item => {
-                const marker = L.marker([item.latitude, item.longitude]);
-                const popupContent = `
-                    <div style="padding:5px; min-width:150px;">
-                        <h4 style="margin:0 0 5px 0;">${item.address_kr}</h4>
-                        <p style="margin:0; font-size:12px; color:#555;">${item.reason}</p>
-                        <p style="margin:5px 0 0 0; font-size:11px; color:#888;">👍 추천 ${item.like_count || 0}</p>
-                    </div>`;
-                marker.bindPopup(popupContent);
-                clusterGroup.addLayer(marker);
-            });
-        }
-
 
 
         // 탭 전환 함수
@@ -434,20 +430,54 @@ async function fetchAndRenderSuggestions() {
     }
 }
 
+
+
 // ----------------------------------------------------------------------------------
-// [수정] 리스트 렌더링 (수정/삭제 버튼 추가)
+// [수정] 1. 마커 렌더링 (비고(Note)가 있으면 팝업에 표시)
+// ----------------------------------------------------------------------------------
+function renderMarkers(dataList) {
+    clusterGroup.clearLayers();
+    dataList.forEach(item => {
+        const marker = L.marker([item.latitude, item.longitude]);
+        
+        // 비고 내용이 있으면 줄바꿈 후 표시, 없으면 빈 문자열
+        const noteHtml = item.note ? `<div style="margin-top:4px; color:#e67e22; font-size:11px;">※ ${item.note}</div>` : '';
+
+        const popupContent = `
+            <div style="padding:5px; min-width:160px;">
+                <h4 style="margin:0 0 5px 0; font-size:14px;">${item.address_kr}</h4>
+                <div style="font-size:12px; color:#555; margin-bottom:5px;">${item.reason}</div>
+                ${noteHtml} 
+                <div style="margin-top:6px; font-size:11px; color:#888; border-top:1px solid #eee; padding-top:4px;">
+                    👍 추천 ${item.like_count || 0} · 👤 ${item.coop_members?.name || '익명'}
+                </div>
+            </div>`;
+        
+        marker.bindPopup(popupContent);
+        clusterGroup.addLayer(marker);
+    });
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 2. 리스트 렌더링 (최신/인기순 5개 제한, 전체는 무제한)
 // ----------------------------------------------------------------------------------
 function renderList(type) {
     const listEl = document.getElementById('suggestionList');
     listEl.innerHTML = '';
+    
     let targetData = [...allData];
 
-    // 정렬 로직
     if (type === 'latest') {
+        // 최신순: 날짜 내림차순 -> 5개만 자름
         targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        targetData = targetData.slice(0, 5); 
     } else if (type === 'best') {
-        // [답변] 여기서 정렬하므로 좋아요 누르고 fetch 다시 하면 실시간으로 순위 바뀜
+        // 인기순: 좋아요 내림차순 -> 5개만 자름
         targetData.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
+        targetData = targetData.slice(0, 5);
+    } else {
+        // 전체(all): 날짜 내림차순 -> 제한 없음(전체 노출)
+        targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
 
     if (targetData.length === 0) {
@@ -459,11 +489,8 @@ function renderList(type) {
         const writerName = item.coop_members?.name || '익명';
         const heartIcon = item.isLikedByMe ? '❤️' : '🤍';
         const heartClass = item.isLikedByMe ? 'active' : '';
-        
-        // [핵심] 내가 쓴 글인지 확인
         const isMyPost = globalUserId && (globalUserId === item.writer_id);
         
-        // 수정/삭제 버튼 HTML 생성 (내 글일 때만 보임)
         const adminBtns = isMyPost ? `
             <div style="margin-top:8px; display:flex; gap:5px;">
                 <button onclick="event.stopPropagation(); editSuggestion('${item.id}')" 
@@ -490,7 +517,6 @@ function renderList(type) {
         `;
 
         div.onclick = (e) => {
-            // 버튼들 눌렀을 땐 지도 이동 안 함
             if(e.target.tagName !== 'BUTTON') {
                 moveToLocation(item.latitude, item.longitude, item.id);
             }
@@ -500,10 +526,36 @@ function renderList(type) {
 }
 
 // ----------------------------------------------------------------------------------
-// [신규] 삭제 함수
+// [신규] 3. 커스텀 컨펌 모달 로직 (Promise 사용)
+// ----------------------------------------------------------------------------------
+let confirmResolve = null; // 사용자의 선택(예/아니오)을 기다리는 변수
+
+function openConfirmModal(message) {
+    document.getElementById('confirmMsg').innerText = message;
+    document.getElementById('confirmModal').style.display = 'flex';
+    
+    // Promise를 반환하여, 사용자가 버튼을 누를 때까지 기다리게 함
+    return new Promise((resolve) => {
+        confirmResolve = resolve;
+    });
+}
+
+function closeConfirm(result) {
+    document.getElementById('confirmModal').style.display = 'none';
+    if (confirmResolve) {
+        confirmResolve(result); // true(삭제) 또는 false(취소) 반환
+        confirmResolve = null;
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 4. 삭제 함수 (커스텀 모달 적용)
 // ----------------------------------------------------------------------------------
 async function deleteSuggestion(id) {
-    if (!confirm("정말 이 추천 부지를 삭제하시겠습니까?")) return;
+    // [변경] 브라우저 confirm -> 커스텀 openConfirmModal 사용
+    const isConfirmed = await openConfirmModal("정말 이 추천 부지를 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다.");
+    
+    if (!isConfirmed) return; // 취소 누르면 중단
 
     try {
         const { error } = await sb.from('site_suggestions').delete().eq('id', id);
