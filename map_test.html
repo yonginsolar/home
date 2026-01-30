@@ -75,6 +75,58 @@
         
         /* 지도 컨트롤 위치 수정 */
         .leaflet-top.leaflet-right { top: 10px; right: 10px; }
+        /* [추가] 모바일 레이어 컨트롤 (평소엔 숨김) */
+@media (max-width: 768px) {
+    .layer-control {
+        transform: translateX(120%); /* 화면 밖으로 밀어둠 */
+        transition: transform 0.3s ease;
+        top: 60px; /* 검색창 아래 */
+        right: 10px;
+        max-height: 80vh;
+        z-index: 2000;
+    }
+    .layer-control.active {
+        transform: translateX(0); /* 활성화되면 나옴 */
+    }
+    /* 모바일용 레이어 토글 버튼 */
+    .btn-layer-toggle {
+        display: flex !important;
+    }
+}
+
+/* [추가] PC에서는 토글 버튼 숨김 */
+.btn-layer-toggle {
+    display: none;
+    position: absolute;
+    top: 80px;
+    right: 20px;
+    z-index: 1500;
+    width: 45px;
+    height: 45px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+}
+
+/* [추가] 시스템 알림 모달 (Alert 대체용) */
+.system-modal {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+    background: #333; color: white; padding: 12px 24px; border-radius: 50px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 9999;
+    opacity: 0; transition: all 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    font-size: 14px; font-weight: bold; display: flex; align-items: center; gap: 8px;
+}
+.system-modal.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+.system-modal.success { background: #2c3e50; }
+.system-modal.error { background: #e74c3c; }
+
+/* [기존 수정] 레이어 컨트롤 위치 조정 (버튼과 안 겹치게) */
+.layer-control { top: 70px; right: 10px; /* 기존 유지 */ }
     </style>
 </head>
 <body>
@@ -151,6 +203,13 @@
         onclick="closeDaumPostcode()" alt="닫기 버튼">
 </div>
 
+    <button class="btn-layer-toggle" onclick="toggleLayerControl()">🗺️</button>
+
+<div id="systemModal" class="system-modal">
+    <span id="sysIcon">✅</span>
+    <span id="sysMsg">메시지 내용</span>
+</div>
+
     <script>
         // ----------------------------------------------------------------------------------
         // [설정 및 DB 명세서 복구]
@@ -213,6 +272,7 @@ window.onload = function() {
     initMap();
     fetchAndRenderSuggestions();
 };
+        
 
         // ----------------------------------------------------------------------------------
         // 1. 지도 초기화 (Leaflet + VWorld 위성/하이브리드)
@@ -307,33 +367,7 @@ function toggleLayer(key) {
     }
 }
 
-        // ----------------------------------------------------------------------------------
-        // 3. 데이터 로드 및 리스트/마커 렌더링 (복구된 로직)
-        // ----------------------------------------------------------------------------------
-        async function fetchAndRenderSuggestions() {
-            try {
-                // 전체 데이터를 한 번에 가져옴
-                const { data, error } = await sb
-                    .from('site_suggestions')
-                    .select('*')
-                    .order('created_at', { ascending: false });
 
-                if (error) throw error;
-
-                // 유효성 검사 (좌표가 있는 것만)
-                allData = (data || []).filter(item => item.latitude && item.longitude);
-                
-                // 마커는 전체 데이터를 다 찍어줌 (클러스터링)
-                renderMarkers(allData);
-                
-                // 리스트는 현재 선택된 탭(기본: 최신순)에 맞춰 그림
-                renderList('latest'); 
-
-            } catch (e) {
-                console.error(e);
-                alert("데이터 로드 중 오류가 발생했습니다.");
-            }
-        }
 
         function renderMarkers(dataList) {
             clusterGroup.clearLayers();
@@ -350,54 +384,7 @@ function toggleLayer(key) {
             });
         }
 
-        // [복구] 리스트 렌더링 (탭별 정렬 로직 포함)
-        function renderList(type) {
-            const listEl = document.getElementById('suggestionList');
-            listEl.innerHTML = '';
-            
-            // 탭 스타일 업데이트
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            // 클릭된 탭 찾아서 active (여기선 텍스트로 찾지 않고 호출 시 UI 갱신은 switchTab에서 처리)
 
-            let targetData = [...allData]; // 원본 보존
-
-            if (type === 'latest') {
-                // 최신순 (이미 created_at desc로 왔지만 확실히)
-                targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-                targetData = targetData.slice(0, 5); // 5개만
-            } else if (type === 'best') {
-                // [인기순 복구] 좋아요(like_count) 내림차순
-                targetData.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
-                targetData = targetData.slice(0, 5); // 5개만
-            } 
-            // type === 'all' 이면 전체 그대로
-
-            if (targetData.length === 0) {
-                listEl.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">데이터가 없습니다.</div>';
-                return;
-            }
-
-            targetData.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'place-item';
-                div.innerHTML = `
-                    <div class="place-info">
-                        <div class="place-addr">📍 ${item.address_kr}</div>
-                        <div class="place-reason">${item.reason || '내용 없음'}</div>
-                    </div>
-                    <button class="btn-like" onclick="event.stopPropagation(); handleLike('${item.id}')">
-                        👍 ${item.like_count || 0}
-                    </button>
-                `;
-                // 클릭 시 지도 이동
-                div.onclick = (e) => {
-                    if(!e.target.classList.contains('btn-like')) {
-                        map.flyTo([item.latitude, item.longitude], 17); // 부드럽게 이동 및 확대
-                    }
-                };
-                listEl.appendChild(div);
-            });
-        }
 
         // 탭 전환 함수
         function switchTab(type) {
@@ -409,22 +396,199 @@ function toggleLayer(key) {
             renderList(type);
         }
 
-        // [복구] 좋아요 RPC 호출
-        async function handleLike(id) {
-            try {
-                const { error } = await sb.rpc('increment_like', { row_id: id });
-                if (error) throw error;
-                // 데이터 다시 불러와서 갱신 (좋아요 숫자 업데이트)
-                await fetchAndRenderSuggestions();
-            } catch (e) {
-                console.error(e);
-                alert("오류가 발생했습니다.");
-            }
-        }
+
 
         // ----------------------------------------------------------------------------------
         // 4. 주소 검색 및 등록 (하이브리드: Daum Postcode + OSM Geo)
         // ----------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------
+// [수정] 1. 데이터 로드 (작성자 이름 + 내 좋아요 여부 확인 포함)
+// ----------------------------------------------------------------------------------
+async function fetchAndRenderSuggestions() {
+    try {
+        // 현재 로그인 유저 확인 (내가 좋아요 눌렀는지 확인용)
+        const userRes = await sb.auth.getUser();
+        const currentUserId = userRes.data.user?.id;
+
+        // [핵심] 3단 조인 쿼리
+        // 1. site_suggestions (글)
+        // 2. coop_members (작성자 이름)
+        // 3. suggestion_likes (좋아요 기록)
+        const { data, error } = await sb
+            .from('site_suggestions')
+            .select(`
+                *,
+                coop_members ( name ),
+                suggestion_likes ( user_id )
+            `)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // 데이터 가공 (좋아요 여부 판단)
+        allData = (data || []).filter(item => item.latitude && item.longitude).map(item => {
+            // suggestion_likes 배열 안에 내 ID가 있는지 확인
+            const isLikedByMe = item.suggestion_likes?.some(like => like.user_id === currentUserId);
+            return { ...item, isLikedByMe };
+        });
+
+        renderMarkers(allData);
+        
+        // 현재 활성화된 탭 기준으로 리스트 갱신
+        const activeTab = document.querySelector('.tab-btn.active');
+        const tabType = activeTab ? activeTab.getAttribute('onclick').match(/'(.*?)'/)[1] : 'latest';
+        renderList(tabType);
+
+    } catch (e) {
+        console.error(e);
+        showSystemModal("데이터 로드 실패", "error");
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 2. 리스트 렌더링 (작성자 표시 + 클릭 시 지도 이동 UX)
+// ----------------------------------------------------------------------------------
+function renderList(type) {
+    const listEl = document.getElementById('suggestionList');
+    listEl.innerHTML = '';
+
+    let targetData = [...allData];
+
+    if (type === 'latest') {
+        targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    } else if (type === 'best') {
+        targetData.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
+    }
+
+    if (targetData.length === 0) {
+        listEl.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">데이터가 없습니다.</div>';
+        return;
+    }
+
+    targetData.forEach(item => {
+        // 작성자 이름 (없으면 '알 수 없음')
+        const writerName = item.coop_members?.name || '익명';
+        // 내가 좋아요 눌렀으면 하트 색칠
+        const heartIcon = item.isLikedByMe ? '❤️' : '🤍';
+        const heartClass = item.isLikedByMe ? 'active' : '';
+
+        const div = document.createElement('div');
+        div.className = 'place-item';
+        div.innerHTML = `
+            <div class="place-info">
+                <div class="place-addr">📍 ${item.address_kr}</div>
+                <div style="font-size:11px; color:#2c3e50; margin-bottom:4px;">
+                    <strong>👤 ${writerName}</strong>
+                </div>
+                <div class="place-reason">${item.reason || '내용 없음'}</div>
+            </div>
+            <button class="btn-like ${heartClass}" onclick="event.stopPropagation(); handleLike('${item.id}', ${item.isLikedByMe})">
+                ${heartIcon} ${item.like_count || 0}
+            </button>
+        `;
+
+        // [UX 개선] 리스트 클릭 -> 지도 이동 -> 팝업 자동 오픈
+        div.onclick = (e) => {
+            if(!e.target.classList.contains('btn-like')) {
+                moveToLocation(item.latitude, item.longitude, item.id);
+            }
+        };
+        listEl.appendChild(div);
+    });
+}
+
+// 지도 이동 및 팝업 열기 헬퍼 함수
+function moveToLocation(lat, lng, itemId) {
+    // 1. 지도 이동
+    map.flyTo([lat, lng], 17, { duration: 1.5 });
+
+    // 2. 해당 마커 찾아서 팝업 열기 (약간의 딜레이 후)
+    setTimeout(() => {
+        clusterGroup.eachLayer(layer => {
+            // 마커의 좌표가 일치하는지 확인 (정확도 고려)
+            const mLat = layer.getLatLng().lat;
+            const mLng = layer.getLatLng().lng;
+            if(Math.abs(mLat - lat) < 0.0001 && Math.abs(mLng - lng) < 0.0001) {
+                // 클러스터 내부에 있다면 펼치기
+                clusterGroup.zoomToShowLayer(layer, () => {
+                    layer.openPopup();
+                });
+            }
+        });
+    }, 1000); // 이동 시간 고려
+    
+    // 모바일이면 패널 닫기 (지도 보라고)
+    if(window.innerWidth <= 768) {
+        togglePanel(false); // 닫기 강제
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 3. 좋아요 토글 (1인 1회, DB Insert/Delete)
+// ----------------------------------------------------------------------------------
+async function handleLike(suggestionId, isCurrentlyLiked) {
+    // 로그인 체크
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) {
+        showSystemModal("로그인이 필요합니다.", "error");
+        return;
+    }
+
+    try {
+        if (isCurrentlyLiked) {
+            // 이미 좋아요 -> 취소 (Delete)
+            const { error } = await sb
+                .from('suggestion_likes')
+                .delete()
+                .match({ suggestion_id: suggestionId, user_id: user.id });
+            if(error) throw error;
+            showSystemModal("좋아요를 취소했습니다.", "success");
+        } else {
+            // 안 눌렀음 -> 추가 (Insert)
+            const { error } = await sb
+                .from('suggestion_likes')
+                .insert([{ suggestion_id: suggestionId, user_id: user.id }]);
+            if(error) throw error;
+            showSystemModal("이 부지를 추천했습니다!", "success");
+        }
+        
+        // 목록 갱신 (숫자 및 하트 업데이트)
+        fetchAndRenderSuggestions();
+
+    } catch (e) {
+        console.error(e);
+        showSystemModal("처리에 실패했습니다.", "error");
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [신규] 4. UI 유틸리티 (모바일 레이어 토글, 시스템 모달)
+// ----------------------------------------------------------------------------------
+// 모바일 레이어 패널 토글
+function toggleLayerControl() {
+    const el = document.querySelector('.layer-control');
+    el.classList.toggle('active');
+}
+
+// 시스템 알림 모달 (Alert 대체)
+function showSystemModal(msg, type = 'success') {
+    const modal = document.getElementById('systemModal');
+    const icon = document.getElementById('sysIcon');
+    const txt = document.getElementById('sysMsg');
+
+    modal.className = `system-modal ${type}`; // reset class
+    icon.innerText = type === 'success' ? '✅' : '⚠️';
+    txt.innerText = msg;
+
+    // Show
+    modal.classList.add('show');
+
+    // 3초 뒤 자동 사라짐
+    setTimeout(() => {
+        modal.classList.remove('show');
+    }, 3000);
+}
+
 
 
         // 지도 클릭 -> 등록 모달 열기 헬퍼
@@ -528,30 +692,37 @@ function searchAddressForModal() {
         }
 
 // ----------------------------------------------------------------------------------
-// [수정] 데이터 등록 함수 (세션 연동 포함)
+// [수정] 데이터 등록 함수 (세션 연동 + 모달 적용 + 중복 방어 Full Version)
 // ----------------------------------------------------------------------------------
 async function submitSuggestion() {
-    // 1. 입력값 검증
+    // 1. 입력값 가져오기
     const addr = document.getElementById('regAddress').value;
     const lat = document.getElementById('regLat').value;
     const lng = document.getElementById('regLng').value;
     const reason = document.getElementById('regReason').value;
     const note = document.getElementById('regNote').value;
     
-    if(!lat || !lng) return alert("주소를 검색하거나 지도를 클릭하여 위치를 지정해주세요.");
-    if(!reason) return alert("추천 이유를 입력해주세요.");
+    // 2. 입력값 검증 (Alert -> SystemModal로 변경)
+    if (!lat || !lng) {
+        showSystemModal("주소를 검색하거나 지도를 클릭하여 위치를 지정해주세요.", "error");
+        return;
+    }
+    if (!reason) {
+        showSystemModal("추천 이유를 입력해주세요.", "error");
+        return;
+    }
 
     try {
-        // 2. [핵심] 현재 로그인된 유저 정보 가져오기
+        // 3. 현재 로그인된 유저 정보 가져오기 (세션 확인)
         const { data: { user } } = await sb.auth.getUser();
 
-        // 3. 비로그인 상태 체크
+        // 4. 비로그인 상태 체크
         if (!user) {
-            alert("로그인 정보가 없습니다.\n'membermanage.html'에서 먼저 로그인 해주세요.");
+            showSystemModal("로그인 정보가 없습니다. 관리 페이지에서 먼저 로그인 해주세요.", "error");
             return; // 저장 중단
         }
 
-        // 4. 데이터 저장 (실제 유저 ID 사용)
+        // 5. 데이터 저장 시도 (실제 유저 ID 사용)
         const { error } = await sb.from('site_suggestions').insert([{
             writer_id: user.id, // Supabase Auth의 실제 UUID
             latitude: parseFloat(lat),
@@ -561,24 +732,37 @@ async function submitSuggestion() {
             note: note
         }]);
 
-        if(error) {
-            console.error(error);
-            alert("등록 실패: " + error.message);
-        } else {
-            alert("등록 완료!");
-            closeModal();
-            // 폼 초기화
-            document.getElementById('regReason').value = '';
-            document.getElementById('regNote').value = '';
-            fetchAndRenderSuggestions(); // 목록 갱신
-        }
+        // 6. 에러 핸들링 (throw를 통해 catch 블록으로 이동)
+        if (error) throw error;
+
+        // 7. 성공 처리
+        showSystemModal("부지 등록이 완료되었습니다!", "success");
+        closeModal(); // 등록창 닫기
+        
+        // 폼 초기화
+        document.getElementById('regReason').value = '';
+        document.getElementById('regNote').value = '';
+        
+        // 목록 갱신 (새로 등록된 글을 바로 보여주기 위함)
+        fetchAndRenderSuggestions();
 
     } catch (e) {
-        console.error(e);
-        alert("시스템 오류가 발생했습니다.");
+        console.error("등록 에러:", e);
+
+        // 8. 에러 유형별 사용자 안내
+        // code '23505'는 Unique Violation (중복 데이터)
+        // status 409는 Conflict
+        if (e.code === '23505' || e.status === 409) {
+            showSystemModal("이미 등록된 주소이거나, 중복된 부지입니다.", "error");
+        } else if (e.code === '23503') {
+            // FK Violation (혹시 모를 조합원 명부 누락 시)
+            showSystemModal("등록 권한이 없습니다. (조합원 명부 미등록)", "error");
+        } else {
+            // 그 외 일반적인 에러
+            showSystemModal("시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", "error");
+        }
     }
 }
-// End of submitSuggestion
     </script>
 </body>
 </html>
