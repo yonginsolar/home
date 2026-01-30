@@ -495,6 +495,24 @@
             </button>
         </div>
     </div>
+  </div> 
+
+    <div id="solarMapCard" class="dashboard-card mb-4 hidden" style="background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border: 1px solid #fed7aa;">
+        <div class="d-flex flex-column flex-sm-row justify-content-between align-items-center gap-3">
+            <div class="text-center text-sm-start">
+                <h5 class="fw-bold m-0" style="color: #c2410c;">
+                    <i class="bi bi-sun-fill me-2"></i>경기 태양광 부지 분석
+                </h5>
+                <p class="small text-secondary m-0 mt-1">
+                    기후/규제 데이터를 분석하여 최적의 발전소를 제안합니다.<br>
+                    <span class="badge bg-warning text-dark me-1">Beta</span>조합원 전용 서비스
+                </p>
+            </div>
+            <button onclick="goToSolarMap()" class="btn btn-warning fw-bold px-4 py-2 text-dark" style="white-space: nowrap; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);">
+                🗺️ 지도 열기
+            </button>
+        </div>
+    </div>
     <div class="dashboard-card mb-4 p-3" style="background-color: #f8f9fa; border:none;">
 
     <div class="dashboard-card mb-4 p-3" style="background-color: #f8f9fa; border:none;">
@@ -1423,6 +1441,7 @@ curMem.total_capital = assets.total_capital;
         
         // [부가 기능 로드]
         if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
+      checkSolarMapVisibility(myRoles);
         if (typeof loadFamilyList === 'function') loadFamilyList(uuid);
         if (typeof loadMiniNotices === 'function') loadMiniNotices();
         if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
@@ -3932,6 +3951,51 @@ async function submitModifyApp() {
 // [기존 유지/확인] 취소 기능
 // 기존 코드에 cancelApp 함수가 있었는데, 로직은 그대로 쓰셔도 됩니다.
 // 다만 status='cancelled'로 업데이트하는지 확인하세요.
+
+   // -----------------------------------------------------------------------------
+// [신규] 태양광 지도 버튼 노출 제어 (관리자 프리패스 기능 포함)
+// -----------------------------------------------------------------------------
+async function checkSolarMapVisibility(myRoles) {
+    const card = document.getElementById('solarMapCard');
+    if (!card) return;
+
+    try {
+        // 1. 관리자/임원 권한 확인 (관리자는 무조건 보임)
+        // loadDashboardData에서 조회한 myRoles 배열 활용
+        const isAdmin = (curMem.role === 'admin') || (curMem.status === '관리자'); 
+        const isExecutive = myRoles && (myRoles.includes('executive') || myRoles.includes('director') || myRoles.includes('admin'));
+
+        if (isAdmin || isExecutive) {
+            console.log("🌞 관리자 권한으로 태양광 메뉴 노출 (Test Mode)");
+            card.classList.remove('hidden');
+            return;
+        }
+
+        // 2. 일반 조합원: DB 스위치(ref_company_info) 확인
+        const { data } = await _supabase
+            .from('ref_company_info')
+            .select('value')
+            .eq('key', 'service_solar_map')
+            .single();
+
+        // 값이 'TRUE' 일 때만 공개
+        if (data && data.value.toUpperCase() === 'TRUE') {
+            card.classList.remove('hidden');
+        } else {
+            card.classList.add('hidden'); 
+        }
+
+    } catch (e) {
+        console.error("Solar Map Check Error:", e);
+        card.classList.add('hidden'); // 에러 나면 안전하게 숨김
+    }
+}
+
+// [신규] 지도 페이지 이동 함수
+function goToSolarMap() {
+    // 새 창으로 열기
+    window.open('map_test.html', '_blank'); 
+}
 </script>
 </body>
 </html>
