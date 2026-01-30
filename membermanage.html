@@ -3955,18 +3955,26 @@ async function submitModifyApp() {
    // -----------------------------------------------------------------------------
 // [신규] 태양광 지도 버튼 노출 제어 (관리자 프리패스 기능 포함)
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// [수정] 태양광 지도 버튼 노출 제어 (임원/관리자 정의 반영)
+// -----------------------------------------------------------------------------
 async function checkSolarMapVisibility(myRoles) {
     const card = document.getElementById('solarMapCard');
     if (!card) return;
 
     try {
-        // 1. 관리자/임원 권한 확인 (관리자는 무조건 보임)
-        // loadDashboardData에서 조회한 myRoles 배열 활용
-        const isAdmin = (curMem.role === 'admin') || (curMem.status === '관리자'); 
-        const isExecutive = myRoles && (myRoles.includes('executive') || myRoles.includes('director') || myRoles.includes('admin'));
+        // 1. 관리자/임원 권한 확인 (프리패스 조건)
+        
+        // 조건 A: coop_members 테이블의 role이 'admin'인가?
+        const isAdmin = (curMem && curMem.role === 'admin');
+        
+        // 조건 B: coop_officials 테이블(myRoles)에 'executive'가 포함되어 있는가?
+        // (loadDashboardData에서 member_id 텍스트 기준으로 이미 조인해왔음)
+        const isExecutive = myRoles && myRoles.includes('executive');
 
+        // 관리자거나 임원이면 -> DB 스위치 무시하고 무조건 노출
         if (isAdmin || isExecutive) {
-            console.log("🌞 관리자 권한으로 태양광 메뉴 노출 (Test Mode)");
+            console.log(`🌞 권한 확인됨 (Admin: ${isAdmin}, Exec: ${isExecutive}) -> 태양광 메뉴 노출`);
             card.classList.remove('hidden');
             return;
         }
@@ -3978,16 +3986,16 @@ async function checkSolarMapVisibility(myRoles) {
             .eq('key', 'service_solar_map')
             .single();
 
-        // 값이 'TRUE' 일 때만 공개
-        if (data && data.value.toUpperCase() === 'TRUE') {
+        // 값이 'TRUE' (대소문자 무관) 일 때만 공개
+        if (data && String(data.value).toUpperCase() === 'TRUE') {
             card.classList.remove('hidden');
         } else {
-            card.classList.add('hidden'); 
+            card.classList.add('hidden'); // 닫혀있으면 숨김
         }
 
     } catch (e) {
         console.error("Solar Map Check Error:", e);
-        card.classList.add('hidden'); // 에러 나면 안전하게 숨김
+        card.classList.add('hidden'); // 에러 시 안전하게 숨김
     }
 }
 
