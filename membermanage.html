@@ -683,7 +683,7 @@ NO. <span id="infoMemberId">-</span>
 
 </div>
 
-  </div> 
+
 <div id="historyModalOverlay" class="custom-modal-overlay">
 <div class="custom-modal-box" style="width: 95%; max-width: 500px; text-align: left; height: 70vh; display: flex; flex-direction: column;">
 <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
@@ -2226,49 +2226,57 @@ nameDisplay.innerText = userName;
 // 페이지 로드 시 즉시 실행
 loadUserProfile();
 
-// membermanage 페이지의 스크립트 부분 교체
-
-// [수정] startKakaoLogin 함수 교체
 async function startKakaoLogin() {
-try {
-showLoading(true, '카카오 로그인 페이지로 이동합니다...');
+    try {
+        showLoading(true, '카카오 로그인 페이지로 이동합니다...');
 
-// 1. 돌아올 목적지 설정 (현재 보고 있는 페이지)
-const nextTarget = window.location.href;
+        // 1. 돌아올 목적지 설정 (현재 보고 있는 페이지의 전체 URL)
+        const nextTarget = window.location.href;
 
-// 백업용 (하위 호환성)
-localStorage.setItem('auth_destination', nextTarget);
+        // [백업용] 로컬 스토리지 저장 (하위 호환성 유지)
+        localStorage.setItem('auth_destination', nextTarget);
 
-// 2. 콜백 URL 생성 (핵심: ?next=... 파라미터 추가)
-// 현재 페이지와 같은 폴더에 auth_callback.html이 있다고 가정하고 주소를 자동 생성합니다.
-// 예: https://도메인/membermanage.html -> https://도메인/auth_callback.html
-const baseUrl = window.location.href.replace('membermanage.html', 'auth_callback.html');
+        // 2. 콜백 URL 생성 로직 개선 (핵심 수정)
+        // 기존: window.location.href.replace('membermanage.html', 'auth_callback.html');
+        // 변경: 현재 URL의 '마지막 파일명' 부분을 무조건 'auth_callback.html'로 교체
+        // 예: .../index.html -> .../auth_callback.html
+        // 예: .../membermanage.html -> .../auth_callback.html
+        // 예: .../ (파일명 없는 경우) -> .../auth_callback.html
+        let baseUrl = window.location.href;
+        
+        if (baseUrl.endsWith('/')) {
+            // 파일명 없이 끝나는 경우 (예: https://site.com/)
+            baseUrl = baseUrl + 'auth_callback.html';
+        } else {
+            // 파일명이 있는 경우, 마지막 슬래시 이후를 교체
+            baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + 'auth_callback.html';
+        }
 
-// 최종 URL: .../auth_callback.html?next=https://.../membermanage.html
-const redirectUrl = `${baseUrl}?next=${encodeURIComponent(nextTarget)}`;
+        // 최종 Redirect URL 조립
+        const redirectUrl = `${baseUrl}?next=${encodeURIComponent(nextTarget)}`;
+        
+        console.log("🚀 카카오 리다이렉트 URL:", redirectUrl); // 디버깅용 로그
 
-// 3. Supabase 로그인 시작
-const { data, error } = await _supabase.auth.signInWithOAuth({
-provider: 'kakao',
-options: {
-// 여기가 수정됨: 목적지가 포함된 URL을 넘겨야 함
-redirectTo: redirectUrl,
+        // 3. Supabase 로그인 시작
+        const { data, error } = await _supabase.auth.signInWithOAuth({
+            provider: 'kakao',
+            options: {
+                redirectTo: redirectUrl,
+                scopes: 'account_email phone_number profile_nickname',
+                queryParams: {
+                    // prompt: 'login' // 필요시 주석 해제하여 매번 로그인 창 띄움
+                }
+            }
+        });
 
-scopes: 'account_email phone_number profile_nickname',
-queryParams: {
-// prompt: 'login' // 필요시 주석 해제
-}
-}
-});
+        if (error) throw error;
 
-if (error) throw error;
-
-} catch (e) {
-console.error("Kakao Login Error:", e);
-showLoading(false);
-showModal('카카오 로그인 연결 실패:\n' + e.message);
-}
-}
+    } catch (e) {
+        console.error("Kakao Login Error:", e);
+        showLoading(false);
+        showModal('카카오 로그인 연결 실패:\n' + e.message);
+    }
+} // End of startKakaoLogin
 
 // [헬퍼] 안전한 값 설정
 function setText(id, txt) { const el=document.getElementById(id); if(el) el.innerText = txt || '-'; }
