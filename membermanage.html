@@ -1122,37 +1122,53 @@ async function sendMagicLink() {
     }
 }
 
-// [수정] 로그인 성공 후 처리 (세션 스토리지를 확인하여 마지막 프로필 유지)
+// [수정] 로그인 성공 후 처리 (안전장치 강화 버전)
 async function handleLoginSuccess(user) {
-    curAuth = user;
-    showLoading(true, '정보 확인 중...');
-    
-    // 1. 자동 매칭 시도
-    const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
-    
-    showLoading(false);
-
-    // 실패했다고 바로 쫓아내지 않음!
-    if (claimErr || !claimRes.success) {
-        console.log("자동 매칭 실패, 수동 매칭 모달 오픈");
-        document.getElementById('manualMatchModal').style.display = 'flex';
-        return; 
+    // 이미 로딩 중인 상태가 아니라면 로딩 표시
+    const loader = document.getElementById('loadingOverlay');
+    if (loader && loader.style.display === 'none') {
+        showLoading(true, '정보 확인 중...');
     }
 
-    // 성공 시 대시보드 로드
-    document.getElementById('headerLogoutBtn').classList.remove('hidden');
-    
-    // [핵심 변경] 저장된 마지막 프로필이 있는지 확인
-    const lastProfileId = sessionStorage.getItem('lastActiveProfile');
-    // 저장된 게 있으면 그걸로, 없으면 로그인한 본인 ID(user.id)로 로드
-    const targetUuid = lastProfileId ? lastProfileId : user.id;
+    try {
+        curAuth = user;
 
-    // [1] 대시보드 데이터 우선 로드
-    await loadDashboardData(targetUuid);
+        // 1. 자동 매칭 시도 (RPC 호출)
+        const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
 
-    // [2] 관리 가능한 프로필(단체/가족) 목록 로드
-    if (typeof loadManagedProfiles === 'function') {
-        await loadManagedProfiles(user.id);
+        if (claimErr) throw claimErr;
+
+        // 실패했다면 수동 매칭 모달 띄우고 종료
+        if (!claimRes || !claimRes.success) {
+            console.log("자동 매칭 실패, 수동 매칭 모달 오픈");
+            // 로딩은 끄고 모달을 띄워야 함
+            showLoading(false); 
+            document.getElementById('manualMatchModal').style.display = 'flex';
+            return; 
+        }
+
+        // 성공 시 대시보드 로드 준비
+        document.getElementById('headerLogoutBtn').classList.remove('hidden');
+        
+        // 마지막 프로필 확인
+        const lastProfileId = sessionStorage.getItem('lastActiveProfile');
+        const targetUuid = lastProfileId ? lastProfileId : user.id;
+
+        // [1] 대시보드 데이터 로드
+        await loadDashboardData(targetUuid);
+
+        // [2] 관리 프로필 로드
+        if (typeof loadManagedProfiles === 'function') {
+            await loadManagedProfiles(user.id);
+        }
+
+    } catch (e) {
+        console.error("Login Process Error:", e);
+        // 에러가 났을 때만 알림 (조용히 넘어가야 할 수도 있음)
+        // showModal('정보를 불러오는 중 문제가 발생했습니다.');
+    } finally {
+        // ★ 핵심: 성공하든 실패하든 에러가 나든 무조건 로딩창을 끈다.
+        showLoading(false);
     }
 }
 // [신규] 사업자등록번호 자동 하이픈 (000-00-00000)
@@ -2191,10 +2207,9 @@ async function startKakaoLogin() {
     }
 }
 
-// =========================================================================
-// [수정] 초기화 - 해시 정리를 onAuthStateChange 이후로 이동
-// =========================================================================
+// [수정] 초기화 로직 (이벤트 중복 방지 및 뒤로가기 대응)
 window.addEventListener('DOMContentLoaded', async () => {
+    // 1. 초기 로딩바 표시
     showLoading(true, '시스템 보안 확인 중...');
 
     if(!_supabase) {
@@ -2203,26 +2218,37 @@ window.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    // ⭐ [핵심] 해시 정리를 하지 않음! Supabase가 먼저 읽게 놔둠
-    // (또는 onAuthStateChange 안에서 세션 확인 후 정리)
+    // 2. 현재 세션 상태 확인 (비동기)
+    // onAuthStateChange보다 먼저 실행되어 깜빡임 방지
+    const { data: { session } } = await _supabase.auth.getSession();
 
-    // Supabase가 자동으로 URL 해시를 처리
+    // 3. 인증 상태 변경 감지 리스너 등록
     _supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log('🔔 Auth Event:', event, session ? '✅ 세션 있음' : '❌ 세션 없음');
-        
-        // ⭐ [추가] 세션이 생성되면 그때 URL 정리
-        if (session && window.location.hash) {
-            console.log('🧹 세션 생성 완료, URL 해시 정리');
+        console.log(`🔔 Auth Event: ${event}`);
+
+        // URL 해시(#) 정리 (로그인 직후 URL 깔끔하게)
+        if (session && window.location.hash && window.location.hash.includes('access_token')) {
             window.history.replaceState(null, '', window.location.pathname);
         }
-        
-        showLoading(false);
 
         if (session) {
-            // 로그인 성공
+            // [최적화] 이미 데이터가 로드된 상태(curMem 존재)이고, 
+            // 이벤트가 단순히 토큰 갱신(TOKEN_REFRESHED)이나 세션 복구(INITIAL_SESSION)라면
+            // 무거운 로딩을 다시 하지 않도록 방어할 수 있음.
+            // 단, 'SIGNED_IN' 이벤트는 확실히 로드해야 함.
+            
+            if (curMem && (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+                console.log("✅ 이미 데이터가 로드되어 있어 스킵합니다.");
+                showLoading(false);
+                return;
+            }
+
+            // 로그인 프로세스 실행
             await handleLoginSuccess(session.user);
+        
         } else {
-            // 비로그인 상태
+            // 비로그인 상태: 로딩 끄고 로그인 화면 노출
+            showLoading(false);
             showOnly('loginSection'); 
         }
     });
