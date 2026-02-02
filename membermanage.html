@@ -1323,95 +1323,79 @@ async function fetchMaskedBankInfo(uuid) {
         return data ? data.account_number : null;
     } catch (e) { return null; }
 }
-// [디버깅용] 대시보드 데이터 로드 (DB 조회 구간별 로그)
+// [디버깅 최종] 비교 진단용 loadDashboardData
 async function loadDashboardData(uuid) {
-    console.log(`🕵️ [Debug-2] loadDashboardData 진입. UUID: ${uuid}`);
+    console.log(`🕵️ [Debug-3] loadDashboardData 진입. UUID: ${uuid}`);
     
     try {
-        sessionStorage.setItem('lastActiveProfile', uuid);
+        // [테스트 1] 아주 가벼운 테이블(ref_company_info) 조회 (DB 연결 확인용)
+        console.log("🚑 [Test-1] 가벼운 테이블(ref_company_info) 조회 시도...");
+        
+        const testStart = Date.now();
+        const { data: health, error: healthErr } = await _supabase
+            .from('ref_company_info')
+            .select('*')
+            .limit(1);
+            
+        const testEnd = Date.now();
+        
+        if (healthErr) {
+            console.error("☠️ [Test-1 실패] DB 연결 자체가 불가능합니다.", healthErr);
+            alert("DB 서버가 응답하지 않습니다. (프로젝트 일시정지됨?)");
+            return;
+        }
+        console.log(`✅ [Test-1 성공] DB 연결 정상 (소요시간: ${testEnd - testStart}ms)`);
 
-        // 1. 멤버 기본 정보 조회
-        console.log("🕵️ [Debug-2] 1. coop_members 조회 시작...");
-        const { data: member, error: memErr } = await _supabase
+
+        // [테스트 2] 문제의 coop_members 조회 (타임아웃 강제 적용)
+        console.log("🔥 [Test-2] coop_members 조회 시도 (3초 제한)...");
+        
+        // 쿼리 생성
+        const queryPromise = _supabase
             .from('coop_members')
             .select('*')
             .eq('id', uuid)
             .single();
 
-        if (memErr) {
-            console.error("🕵️ [Debug-2] ❌ 멤버 조회 에러:", memErr);
-            throw new Error('회원 정보를 불러올 수 없습니다: ' + memErr.message);
-        }
-        if (!member) {
-            console.error("🕵️ [Debug-2] ❌ 멤버 데이터가 null입니다.");
-            throw new Error('회원 정보가 존재하지 않습니다.');
-        }
-        console.log("🕵️ [Debug-2] ✅ 멤버 조회 성공:", member.name);
+        // 3초 타임아웃 프로미스
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('DB_READ_TIMEOUT')), 3000)
+        );
 
-        // 마스킹 계좌 적용
-        const maskedAcc = await fetchMaskedBankInfo(uuid);
-        if (maskedAcc) member.account_number = maskedAcc; 
-        curMem = member; 
+        try {
+            // 경주 시작
+            const { data: member, error: memErr } = await Promise.race([queryPromise, timeoutPromise]);
 
-        // 2. 자산 데이터 병렬 조회
-        console.log("🕵️ [Debug-2] 2. 자산 데이터(출자,기부 등) 병렬 조회 시작...");
-        
-        // Promise.all에 대한 에러 핸들링 강화
-        const results = await Promise.allSettled([
-            _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false }),
-            _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false }),
-            _supabase.from('coop_donations').select('*').eq('member_id', curMem.member_id).order('donation_date', { ascending: false }),
-            _supabase.from('coop_points').select('*').eq('member_uid', uuid).order('created_at', { ascending: false }),
-            _supabase.from('coop_dividends').select('*').eq('member_id', curMem.member_id).order('paid_at', { ascending: false })
-        ]);
+            if (memErr) throw memErr;
+            if (!member) throw new Error('데이터 없음');
 
-        console.log("🕵️ [Debug-2] ✅ 병렬 조회 완료. 결과 분석:", results);
+            console.log("✅ [Test-2 성공] coop_members 조회 성공:", member.name);
+            curMem = member; // 데이터 할당
 
-        // 결과 추출 (실패해도 빈 배열로 처리하여 멈춤 방지)
-        const ledger = results[0].status === 'fulfilled' ? (results[0].value.data || []) : [];
-        const apps = results[1].status === 'fulfilled' ? (results[1].value.data || []) : [];
-        const donations = results[2].status === 'fulfilled' ? (results[2].value.data || []) : [];
-        const points = results[3].status === 'fulfilled' ? (results[3].value.data || []) : [];
-        const dividends = results[4].status === 'fulfilled' ? (results[4].value.data || []) : [];
-
-        // 에러 로그 출력
-        results.forEach((res, idx) => {
-            if(res.status === 'rejected') console.error(`🕵️ [Debug-2] ❌ 데이터 조회 실패 [Index ${idx}]:`, res.reason);
-        });
-
-        // 3. 자산 총계 계산
-        console.log("🕵️ [Debug-2] 3. 자산 계산 시작...");
-        const assets = {
-            total_capital: ledger.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
-            total_donation: donations.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
-            current_points: points.reduce((acc, cur) => acc + Number(cur.change_amount || 0), 0),
-            total_dividend: dividends.reduce((acc, cur) => acc + Number(cur.total_amount || 0), 0)
-        };
-        curMem.total_capital = assets.total_capital; 
-
-        // 4. 권한 조회
-        console.log("🕵️ [Debug-2] 4. 권한(coop_officials) 조회 시작...");
-        const { data: officials, error: offErr } = await _supabase
-            .from('coop_officials')
-            .select('category')
-            .eq('member_id', curMem.member_id);
+        } catch (err) {
+            console.error("❌ [Test-2 실패] coop_members 조회 불가:", err);
             
-        if(offErr) console.warn("🕵️ [Debug-2] ⚠️ 권한 조회 실패 (무시 가능):", offErr);
-        
-        const myRoles = officials ? officials.map(r => r.category) : [];
+            if (err.message === 'DB_READ_TIMEOUT') {
+                showModal("🚨 [심각] DB가 'coop_members' 테이블 읽기를 거부하고 있습니다.\n(무한 로딩/데드락)");
+            } else {
+                showModal("DB 에러: " + err.message);
+            }
+            return; // 여기서 중단
+        }
 
-        // 5. 렌더링 호출
-        console.log("🕵️ [Debug-2] 5. renderDashboard 호출");
-        renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles);
+        // --- 이하 로직은 위 테스트가 통과해야 실행됨 ---
+        console.log("🚀 [Test-3] 나머지 자산 데이터 로드 시작...");
         
-        // [UI 노출]
-        console.log("🕵️ [Debug-2] 6. showOnly('dashboardSection') 실행");
+        // 마스킹 계좌 등 나머지 로직...
+        // (간소화를 위해 생략, Test-2가 통과하면 여기는 문제없음)
+        
+        const assets = { total_capital: 0, total_donation: 0, current_points: 0, total_dividend: 0 };
+        // 임시 렌더링 (화면이 뜨는지 확인 위해)
+        renderDashboard(curMem, [], [], [], [], [], assets, []);
         showOnly('dashboardSection');
 
     } catch (e) {
-        console.error("🕵️ [Debug-2] 💥 대시보드 로드 중 에러:", e);
-        showModal('데이터 로드 오류: ' + e.message);
-        showOnly('loginSection');
+        console.error("Debug-3 최종 에러:", e);
     } finally {
         showLoading(false);
     }
