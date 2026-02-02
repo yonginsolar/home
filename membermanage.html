@@ -1523,26 +1523,25 @@ async function checkElectionVisibility(member, myRoles) {
 
 // [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
 function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles) {
-    // 1. 기본 정보 매핑 (기존 유지)
+    // 1. 기본 정보 매핑
     renderMemberStatusBadge(member?.status);
-    setText('infoMemberId', member.member_id || '-'); // 상단으로 이동된 조합원 번호
+    setText('infoMemberId', member.member_id || '-');
     
     // [수정] 개인 vs 단체 정보 표시 분기 처리
-    const isGroup = (member.member_type === '단체'); // 단체 회원 여부 판단
-    const personalGroup = document.getElementById('personalInfoGroup'); // 개인용(생년월일)
-    const orgGroup = document.getElementById('orgInfoGroup');           // 단체용(사업자번호)
+    const isGroup = (member.member_type === '단체' || member.member_type === 'organization'); 
+    const personalGroup = document.getElementById('personalInfoGroup'); 
+    const orgGroup = document.getElementById('orgInfoGroup');           
 
     if (isGroup) {
         // [단체] 생년월일 숨기고 사업자/법인번호 표시
         if (personalGroup) personalGroup.classList.add('hidden');
         if (orgGroup) orgGroup.classList.remove('hidden');
 
-        // DB에서 가져온 business_number, corp_number 값 표시
         setText('viewBizNoBox', member.business_number || '-');
-        setVal('editBizNo', member.business_number); // 수정창에도 값 세팅
+        setVal('editBizNo', member.business_number); 
 
         setText('viewCorpNoBox', member.corp_number || '-');
-        setVal('editCorpNo', member.corp_number);    // 수정창에도 값 세팅
+        setVal('editCorpNo', member.corp_number);    
 
         // 파트너 신청 버튼 보이기
         const btnPartner = document.getElementById('menuBtnPartner');
@@ -1563,7 +1562,9 @@ function renderDashboard(member, apps, ledger, donations, points, dividends, ass
     }
 
     setText('infoName', member.name);
-    setText('infoEmail', member.email || curAuth.email);
+    // [방어코드] member.email이 없을 경우 curAuth.email 사용 전 확인
+    const safeEmail = member.email || (curAuth ? curAuth.email : '-');
+    setText('infoEmail', safeEmail);
     
     // 공통 필드들
     setVal('editPhone', member.phone);
@@ -1574,6 +1575,7 @@ function renderDashboard(member, apps, ledger, donations, points, dividends, ass
     setText('viewAddressBox', member.address);
     setVal('editAddrMain', member.address);
     setVal('editAddrDetail', '');
+    
     const bankText = (member.bank_name || '') + ' ' + (member.account_number || '') + ' (' + (member.account_holder || '') + ')';
     setText('viewBankBox', bankText.trim() === '()' ? '-' : bankText);
     
@@ -1583,21 +1585,18 @@ function renderDashboard(member, apps, ledger, donations, points, dividends, ass
     if (myRoles.includes('executive') && tabExec) tabExec.classList.remove('hidden');
     if (myRoles.includes('election_comm') && tabElec) tabElec.classList.remove('hidden');
 
-
     // ----------------------------------------------------
-    // [2] 자산 카드 동적 생성 (핵심 변경)
+    // [2] 자산 카드 동적 생성
     // ----------------------------------------------------
-    
     // 데이터 전역 저장 (모달용)
     globalHistoryData = { ledger, donations, points, dividends };
 
     const assetRow = document.getElementById('assetSummaryRow');
     assetRow.innerHTML = ''; // 초기화
 
-    // 활성 자산 목록 만들기 (금액이 0이 아니거나, 내역이 있으면 표시)
     const activeAssets = [];
 
-    // 1. 출자금 (항상 표시 권장)
+    // 1. 출자금 (항상 표시)
     activeAssets.push({ title: '총 납입 출자금', val: assets.total_capital, unit: '원', icon: 'bi-piggy-bank', color: '#2E7D32', type: 'ledger' });
 
     // 2. 기부금
@@ -1615,17 +1614,16 @@ function renderDashboard(member, apps, ledger, donations, points, dividends, ass
         activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
     }
 
-    // Grid 컬럼 계산 (1개면 12, 2개면 6, 3개면 4, 4개면 3)
+    // Grid 컬럼 계산
     const count = activeAssets.length;
     let colClass = 'col-12';
     if(count === 2) colClass = 'col-6';
-    else if(count === 3) colClass = 'col-md-4 col-6'; // 모바일은 2줄로
+    else if(count === 3) colClass = 'col-md-4 col-6';
     else if(count >= 4) colClass = 'col-md-3 col-6';
 
     activeAssets.forEach(item => {
         const div = document.createElement('div');
         div.className = colClass;
-        // 클릭 시 openHistoryModal 호출
         div.innerHTML = `
             <div class="dashboard-card text-center p-3 h-100" style="cursor:pointer; transition: transform 0.2s;" 
                  onclick="openHistoryModal('${item.type}')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
@@ -1640,10 +1638,11 @@ function renderDashboard(member, apps, ledger, donations, points, dividends, ass
     });
 
     // ----------------------------------------------------
-    // [3] 타임라인 렌더링 (통합)
+    // [3] 타임라인 렌더링
     // ----------------------------------------------------
     renderTimeline(ledger, apps, donations, points, dividends);
-}
+
+} // End of renderDashboard
 
 // [수정] 상세 내역 모달 (디자인 개선: 글자 확대, 여백 추가, 기부금 '구분' 제거)
 function openHistoryModal(type) {
@@ -2217,30 +2216,31 @@ window.addEventListener('DOMContentLoaded', async () => {
     // [안전장치 1] DB 클라이언트 로드 확인
     if (typeof _supabase === 'undefined' || !_supabase) {
         showLoading(false);
-        // showModal 함수가 아직 로드되지 않았을 수 있으므로 alert 사용 후 폴백
         alert("시스템 초기화 오류: DB 연결에 실패했습니다.\n네트워크를 확인하거나 새로고침 해주세요.");
         const loginSec = document.getElementById('loginSection');
-        if(loginSec) loginSec.classList.remove('hidden'); // 최소한 로그인 화면이라도 강제 노출
+        if(loginSec) loginSec.classList.remove('hidden');
         return;
     }
 
     // [안전장치 2] 초기 로딩 바 표시 (화이트 스크린 방지)
-    // 인증 상태를 확인하는 동안 사용자에게 피드백을 줍니다.
     showLoading(true, '시스템 연결 중...');
 
     // 2. Auth 상태 감지 (★ 유일한 데이터 로드 및 화면 제어 진입점)
     _supabase.auth.onAuthStateChange(async (event, session) => {
         console.log(`🔔 Auth Event: ${event}`);
 
-        // 2-1. URL 해시(#) 클린업 (로그인 직후 URL 정리)
+        // 2-1. URL 해시(#) 클린업
         if (session && window.location.hash && window.location.hash.includes('access_token')) {
             window.history.replaceState(null, '', window.location.pathname);
         }
 
         // 2-2. 상태에 따른 분기 처리
         if (session) {
-            // [Case A] 로그인 된 상태 (SIGNED_IN 등)
+            // [Case A] 로그인 된 상태
             
+            // 헤더 프로필 갱신 (별도 함수 호출)
+            updateHeaderProfile(session.user);
+
             // [중복 실행 방지] 이미 데이터가 메모리에 있다면 로드 건너뜀
             if (curMem && curMem.id) {
                 console.log("✅ 데이터가 이미 존재합니다. UI만 갱신합니다.");
@@ -2249,43 +2249,34 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
-            // [핵심] 데이터 로드 시작
+            // [핵심] 대시보드 데이터 로드
             try {
-                // 상단 헤더 프로필 업데이트 (별도 함수로 분리하여 안전하게 실행)
-                updateHeaderProfile(session.user);
-                
-                // 대시보드 데이터 로드 
-                // (내부에서 성공 시 showOnly('dashboardSection')을 호출함)
                 await handleLoginSuccess(session.user);
-
             } catch (e) {
                 console.error("❌ 데이터 로드 중 치명적 오류:", e);
                 showLoading(false);
                 showModal("데이터를 불러오는 중 문제가 발생했습니다.\n다시 로그인해주세요.");
-                showOnly('loginSection'); // 에러 시 로그인 화면으로 복귀
+                showOnly('loginSection');
             }
 
         } else {
-            // [Case B] 로그아웃 된 상태 (SIGNED_OUT)
+            // [Case B] 로그아웃 된 상태
             console.log("👋 로그아웃 상태입니다.");
             
             // 메모리 초기화
             curMem = null;
             curAuth = null;
             
-            // 화면 제어: 로딩 끄고 로그인 섹션 노출
+            // 화면 제어
             showLoading(false);
             showOnly('loginSection'); 
         }
     });
 });
 
-// 3. BFCache(뒤로가기) 대응 및 UI 복구 로직
-// (여기서는 통신을 하지 않고, 오직 '보여주기'만 담당합니다)
+// 3. BFCache(뒤로가기) 대응
 window.addEventListener('pageshow', (event) => {
-    console.log(`👁️ Page Show (persisted: ${event.persisted})`);
-
-    // 무조건 로딩 오버레이 끄기 (캐시된 로딩 화면이 남아있을 수 있음)
+    // 로딩 오버레이 끄기
     const loader = document.getElementById('loadingOverlay');
     if (loader) loader.style.display = 'none';
 
@@ -2293,17 +2284,13 @@ window.addEventListener('pageshow', (event) => {
     if (curMem && curMem.id) {
         showOnly('dashboardSection');
     } 
-    // 데이터가 없다면? 아무것도 하지 않습니다. 
-    // (위의 onAuthStateChange가 곧바로 실행되어 로그인 화면을 띄워줄 것이기 때문입니다.
-    // 여기서 설익게 로그인 화면을 띄우면 깜빡임이 발생할 수 있습니다.)
 });
 
-// 4. [신규] 헤더 프로필 갱신 헬퍼 함수 (안전한 실행 보장)
+// 4. [신규] 헤더 프로필 갱신 헬퍼 함수
 function updateHeaderProfile(user) {
     if (!user) return;
     const meta = user.user_metadata || {};
     
-    // HTML 요소가 존재하는지 확인 후 값 할당
     const profileImg = document.getElementById('headerProfileImg');
     if (profileImg && meta.avatar_url) {
         profileImg.src = meta.avatar_url;
@@ -2311,12 +2298,10 @@ function updateHeaderProfile(user) {
 
     const nameDisplay = document.getElementById('headerUserName');
     if (nameDisplay) {
-        // 이름이 없으면 이메일 앞부분 사용
         const userName = meta.full_name || meta.name || (user.email ? user.email.split('@')[0] : '조합원');
         nameDisplay.innerText = userName; 
     }
-}
-// End of initialization logic
+} // End of initialization logic
 
 
 // 2. 세션 체크 및 복구 전용 함수
@@ -4021,56 +4006,48 @@ async function submitModifyApp() {
         window.location.href = targetUrl;
     }
 
-// [기존 유지/확인] 취소 기능
-// 기존 코드에 cancelApp 함수가 있었는데, 로직은 그대로 쓰셔도 됩니다.
-// 다만 status='cancelled'로 업데이트하는지 확인하세요.
-
-   // -----------------------------------------------------------------------------
-// [신규] 태양광 지도 버튼 노출 제어 (관리자 프리패스 기능 포함)
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// [수정] 태양광 지도 버튼 노출 제어 (임원/관리자 정의 반영)
-// -----------------------------------------------------------------------------
+// [수정] 태양광 지도 버튼 노출 제어 (방어 로직 강화)
 async function checkSolarMapVisibility(myRoles) {
     const card = document.getElementById('solarMapCard');
     if (!card) return;
+    
+    // [방어 코드] 회원 정보가 로드되지 않았으면 실행 중지
+    if (!curMem) {
+        console.warn("checkSolarMapVisibility: 회원 정보(curMem)가 없습니다.");
+        card.classList.add('hidden');
+        return;
+    }
 
     try {
         // 1. 관리자/임원 권한 확인 (프리패스 조건)
-        
-        // 조건 A: coop_members 테이블의 role이 'admin'인가?
-        const isAdmin = (curMem && curMem.role === 'admin');
-        
-        // 조건 B: coop_officials 테이블(myRoles)에 'executive'가 포함되어 있는가?
-        // (loadDashboardData에서 member_id 텍스트 기준으로 이미 조인해왔음)
+        const isAdmin = (curMem.role === 'admin');
         const isExecutive = myRoles && myRoles.includes('executive');
 
         // 관리자거나 임원이면 -> DB 스위치 무시하고 무조건 노출
         if (isAdmin || isExecutive) {
-            console.log(`🌞 권한 확인됨 (Admin: ${isAdmin}, Exec: ${isExecutive}) -> 태양광 메뉴 노출`);
+            console.log(`🌞 권한 확인됨 -> 태양광 메뉴 노출`);
             card.classList.remove('hidden');
             return;
         }
 
-        // 2. 일반 조합원: DB 스위치(ref_company_info) 확인
+        // 2. 일반 조합원: DB 스위치 확인
         const { data } = await _supabase
             .from('ref_company_info')
             .select('value')
             .eq('key', 'service_solar_map')
             .single();
 
-        // 값이 'TRUE' (대소문자 무관) 일 때만 공개
         if (data && String(data.value).toUpperCase() === 'TRUE') {
             card.classList.remove('hidden');
         } else {
-            card.classList.add('hidden'); // 닫혀있으면 숨김
+            card.classList.add('hidden');
         }
 
     } catch (e) {
         console.error("Solar Map Check Error:", e);
-        card.classList.add('hidden'); // 에러 시 안전하게 숨김
+        card.classList.add('hidden');
     }
-}
+} // End of checkSolarMapVisibility
 
 // [신규] 지도 페이지 이동 함수
 function goToSolarMap() {
