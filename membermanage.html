@@ -1036,72 +1036,6 @@ function initSupabase() {
     return true;
 }
 
-// 2. 메인 진입점 (DOMContentLoaded)
-window.addEventListener('DOMContentLoaded', async () => {
-    console.log("🚀 앱 시작...");
-
-    // [1] 라이브러리 로드 대기 (CDN 지연 대비)
-    if (!window.supabase) {
-        console.log("⏳ 라이브러리 로딩 대기중...");
-        await new Promise(resolve => setTimeout(resolve, 500)); // 0.5초 대기
-    }
-
-    // [2] 초기화 실행
-    if (!initSupabase()) return;
-
-    // [3] 로딩 화면 표시
-    const loginSec = document.getElementById('loginSection');
-    const dashSec = document.getElementById('dashboardSection');
-    showLoading(true, '사용자 확인 중...');
-
-    // [4] 세션 상태 감지 및 라우팅
-    _supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log(`🔔 Auth Event: ${event}`);
-
-        if (session) {
-            // [A] 로그인 상태
-            console.log("👤 세션 발견:", session.user.email);
-            
-            // 중복 로드 방지
-            if (curMem && curMem.id) {
-                showLoading(false);
-                return;
-            }
-
-            try {
-                // 헤더 업데이트
-                updateHeaderProfile(session.user);
-                // 데이터 로드
-                await handleLoginSuccess(session.user);
-            } catch (e) {
-                console.error("데이터 로드 실패:", e);
-                // 에러나면 깔끔하게 로그아웃 시키고 로그인 화면으로
-                // _supabase.auth.signOut(); 
-                // location.reload();
-            }
-
-        } else {
-            // [B] 로그아웃 상태 (또는 세션 만료)
-            console.log("👋 세션 없음 (로그인 필요)");
-            
-            curMem = null;
-            curAuth = null;
-            
-            showLoading(false);
-            if(loginSec) loginSec.classList.remove('hidden');
-            if(dashSec) dashSec.classList.add('hidden');
-        }
-    });
-});
-
-    try {
-        _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      window._client = _supabase;
-    } catch (e) {
-        console.error("Supabase Init Error", e);
-        alert("시스템 연결 오류");
-    }
-
 
 // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
 async function reloadDashboard() {
@@ -2259,9 +2193,6 @@ async function loadUserProfile() {
     }
 }
 
-// 페이지 로드 시 즉시 실행
-loadUserProfile();
-
 // membermanage 페이지의 스크립트 부분 교체
 
 // =========================================================================
@@ -2293,66 +2224,6 @@ async function startKakaoLogin() {
     }
 }
 
-// [수정] 스크립트 초기화 및 진입점 로직 (Entry Point)
-// 기존 하단의 window.addEventListener 및 loadUserProfile 관련 코드를 모두 삭제하고 이 코드로 대체하세요.
-
-// 1. 메인 초기화 로직 (DOMContentLoaded)
-// [디버깅용] 초기화 로직 (기존 window.addEventListener 부분을 이걸로 교체)
-window.addEventListener('DOMContentLoaded', async () => {
-    console.log("🚩 [Step 1] DOMContentLoaded 이벤트 실행됨");
-
-    // 1. Supabase 객체 확인
-    if (typeof _supabase === 'undefined' || !_supabase) {
-        console.error("❌ [Critical] _supabase 객체가 없습니다. 스크립트 로드 순서를 확인하세요.");
-        alert("시스템 오류: DB 연결 실패");
-        return;
-    }
-    console.log("✅ [Step 2] _supabase 객체 확인 완료");
-
-    // 2. 필수 HTML 요소 확인
-    const loginSec = document.getElementById('loginSection');
-    const dashSec = document.getElementById('dashboardSection');
-    
-    if (!loginSec || !dashSec) {
-        console.error("❌ [Critical] 필수 HTML ID를 찾을 수 없습니다.", 
-            { loginSection: loginSec, dashboardSection: dashSec });
-        return;
-    }
-    console.log("✅ [Step 3] HTML 필수 요소 확인 완료 (loginSection, dashboardSection)");
-
-    // 3. Auth 상태 감지 리스너 등록
-    console.log("🚩 [Step 4] Auth 리스너 등록 시작");
-    
-    _supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log(`🔔 [Auth Event] 발생: ${event}`);
-        
-        if (session) {
-            console.log("👤 [User] 로그인 세션 발견:", session.user.email);
-            console.log("🚀 [Action] 데이터 로드 시작...");
-            
-            try {
-                // 헤더 업데이트
-                updateHeaderProfile(session.user);
-                
-                // 데이터 로드 호출
-                await handleLoginSuccess(session.user);
-                console.log("🎉 [Success] 데이터 로드 및 렌더링 완료");
-                
-                // 강제로 화면 전환 (CSS 체크)
-                loginSec.classList.add('hidden');
-                dashSec.classList.remove('hidden');
-                console.log("🖥️ [UI] 대시보드 화면 강제 노출 명령 실행됨");
-
-            } catch (e) {
-                console.error("💥 [Error] 데이터 로드 중 에러 발생:", e);
-            }
-        } else {
-            console.log("👋 [Logout] 세션 없음. 로그인 화면 표시");
-            loginSec.classList.remove('hidden');
-            dashSec.classList.add('hidden');
-        }
-    });
-});
 
 // 3. BFCache(뒤로가기) 대응
 window.addEventListener('pageshow', (event) => {
@@ -2384,28 +2255,6 @@ function updateHeaderProfile(user) {
 } // End of initialization logic
 
 
-// 2. 세션 체크 및 복구 전용 함수
-async function checkSessionAndReload() {
-    if(!_supabase) return;
-
-    // 세션 확인
-    const { data: { session }, error } = await _supabase.auth.getSession();
-
-    if (error || !session) {
-        // 세션 없으면 로그인 화면
-        console.log("❌ 세션 없음 -> 로그인 화면");
-        showOnly('loginSection');
-    } else {
-        // 세션 있으면 데이터 로드 시작
-        console.log("🔄 세션 있음 -> 데이터 로드 시작");
-        
-        // 여기서만 로딩바를 켬 (사용자가 인지해야 하므로)
-        showLoading(true, '정보를 갱신 중입니다...');
-        
-        // 로그인 성공 처리 함수 호출
-        await handleLoginSuccess(session.user);
-    }
-}
 
 
 
@@ -4134,6 +3983,61 @@ function goToSolarMap() {
     // 새 창으로 열기
     window.open('map_test.html', '_blank'); 
 }
+   // =========================================================================
+// [Final] 단일 진입점 (중복 실행 방지 Lock 적용됨)
+// =========================================================================
+window.isLoginProcessing = false; // 중복 방지 잠금장치
+
+window.addEventListener('DOMContentLoaded', async () => {
+    console.log("🚀 [System] 앱 구동 시작");
+
+    // 1. 라이브러리 로드 대기
+    if (!window.supabase) await new Promise(r => setTimeout(r, 500));
+
+    // 2. 초기화 (initSupabase 함수는 상단에 정의된 것 사용)
+    if (!initSupabase()) return;
+
+    // 3. Auth 상태 감지 (단 한 번만 등록)
+    _supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log(`🔔 Auth Event: ${event}`);
+
+        if (session) {
+            // ★ [핵심] 이미 로그인 처리 중이라면 무시 (무한루프 차단)
+            if (window.isLoginProcessing) {
+                console.warn("🚫 중복 로그인 이벤트 차단됨.");
+                return;
+            }
+            window.isLoginProcessing = true; // 잠금 걸기
+
+            try {
+                console.log("👤 세션 감지됨. 데이터 로드 시작.");
+                
+                // 헤더 갱신
+                updateHeaderProfile(session.user);
+                
+                // 데이터 로드 (타임아웃 적용된 버전)
+                await handleLoginSuccess(session.user);
+
+            } catch (e) {
+                console.error("메인 로직 에러:", e);
+                window.isLoginProcessing = false; // 에러 시 잠금 해제
+            }
+        } else {
+            // 로그아웃 상태
+            console.log("👋 로그아웃 상태");
+            window.isLoginProcessing = false; // 잠금 해제
+            
+            const loginSec = document.getElementById('loginSection');
+            const dashSec = document.getElementById('dashboardSection');
+            if(loginSec) loginSec.classList.remove('hidden');
+            if(dashSec) dashSec.classList.add('hidden');
+            
+            // 로딩바 끄기
+            const loader = document.getElementById('loadingOverlay');
+            if(loader) loader.style.display = 'none';
+        }
+    });
+});
 </script>
 </body>
 </html>
