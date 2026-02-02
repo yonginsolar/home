@@ -2207,9 +2207,45 @@ async function startKakaoLogin() {
     }
 }
 
-// [수정] 초기화 로직 (이벤트 중복 방지 및 뒤로가기 대응)
+// =========================================================================
+// [최종 수정] 초기화 및 네비게이션 복구 로직 (BFCache 대응)
+// =========================================================================
+
+// 1. 브라우저 뒤로가기/앞으로가기 감지 (BFCache 대응)
+window.addEventListener('pageshow', async (event) => {
+    // event.persisted: 페이지가 캐시에서 복원되었는지 여부
+    // window.performance...: 뒤로가기 네비게이션 타입 확인
+    const isBackNavigation = event.persisted || 
+                             (window.performance && window.performance.navigation.type === 2);
+
+    if (isBackNavigation) {
+        console.log("🔄 페이지가 캐시(뒤로가기)에서 복원되었습니다.");
+        
+        // 강제로 로딩 끄기 (혹시 켜져 있을까봐)
+        showLoading(false);
+
+        // 데이터가 날아갔을 수 있으므로 세션 재확인
+        const { data: { session } } = await _supabase.auth.getSession();
+        
+        if (session) {
+            // 세션은 있는데 화면에 데이터(curMem)가 없다면 다시 로드
+            if (!curMem) {
+                console.log("🔄 데이터 재로드 시도...");
+                await handleLoginSuccess(session.user);
+            } else {
+                // 이미 데이터가 있으면 대시보드 보여주기
+                showOnly('dashboardSection');
+            }
+        } else {
+            // 세션 없으면 로그인 화면
+            showOnly('loginSection');
+        }
+    }
+});
+
+// 2. 초기 로드 (새로고침, 첫 진입)
 window.addEventListener('DOMContentLoaded', async () => {
-    // 1. 초기 로딩바 표시
+    // 초기 로딩바 ON
     showLoading(true, '시스템 보안 확인 중...');
 
     if(!_supabase) {
@@ -2218,36 +2254,44 @@ window.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    // 2. 현재 세션 상태 확인 (비동기)
-    // onAuthStateChange보다 먼저 실행되어 깜빡임 방지
-    const { data: { session } } = await _supabase.auth.getSession();
+    // [중요] onAuthStateChange에만 의존하지 않고, 즉시 세션 상태를 1회 확인함
+    // (이벤트가 늦게 뜨거나 안 뜨는 경우 방지)
+    const { data: { session }, error } = await _supabase.auth.getSession();
 
-    // 3. 인증 상태 변경 감지 리스너 등록
-    _supabase.auth.onAuthStateChange(async (event, session) => {
+    if (error) {
+        console.error("Session Check Error:", error);
+        showLoading(false);
+        showOnly('loginSection');
+        return;
+    }
+
+    // 3. 인증 상태 리스너 등록
+    _supabase.auth.onAuthStateChange(async (event, currentSession) => {
         console.log(`🔔 Auth Event: ${event}`);
 
-        // URL 해시(#) 정리 (로그인 직후 URL 깔끔하게)
-        if (session && window.location.hash && window.location.hash.includes('access_token')) {
+        // URL 해시 정리
+        if (currentSession && window.location.hash && window.location.hash.includes('access_token')) {
             window.history.replaceState(null, '', window.location.pathname);
         }
 
-        if (session) {
-            // [최적화] 이미 데이터가 로드된 상태(curMem 존재)이고, 
-            // 이벤트가 단순히 토큰 갱신(TOKEN_REFRESHED)이나 세션 복구(INITIAL_SESSION)라면
-            // 무거운 로딩을 다시 하지 않도록 방어할 수 있음.
-            // 단, 'SIGNED_IN' 이벤트는 확실히 로드해야 함.
-            
+        if (currentSession) {
+            // [최적화] 이미 데이터가 로드된 상태라면 중복 로딩 방지
+            // TOKEN_REFRESHED: 토큰만 갱신됨 (데이터 로드 불필요)
+            // INITIAL_SESSION: 첫 진입 (위에서 getSession으로 체크했으므로 curMem이 있으면 패스)
             if (curMem && (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-                console.log("✅ 이미 데이터가 로드되어 있어 스킵합니다.");
+                console.log("✅ 데이터 상태 유지 중. 로딩 생략.");
                 showLoading(false);
                 return;
             }
 
-            // 로그인 프로세스 실행
-            await handleLoginSuccess(session.user);
+            // 로그인 프로세스 진입
+            // (이미 로딩바가 켜져 있어도 안전하게 처리됨)
+            await handleLoginSuccess(currentSession.user);
         
         } else {
-            // 비로그인 상태: 로딩 끄고 로그인 화면 노출
+            // 로그아웃 상태
+            curMem = null; // 메모리 초기화
+            curAuth = null;
             showLoading(false);
             showOnly('loginSection'); 
         }
