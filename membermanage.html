@@ -2212,64 +2212,59 @@ async function startKakaoLogin() {
 // 기존 하단의 window.addEventListener 및 loadUserProfile 관련 코드를 모두 삭제하고 이 코드로 대체하세요.
 
 // 1. 메인 초기화 로직 (DOMContentLoaded)
+// [디버깅용] 초기화 로직 (기존 window.addEventListener 부분을 이걸로 교체)
 window.addEventListener('DOMContentLoaded', async () => {
-    // [안전장치 1] DB 클라이언트 로드 확인
+    console.log("🚩 [Step 1] DOMContentLoaded 이벤트 실행됨");
+
+    // 1. Supabase 객체 확인
     if (typeof _supabase === 'undefined' || !_supabase) {
-        showLoading(false);
-        alert("시스템 초기화 오류: DB 연결에 실패했습니다.\n네트워크를 확인하거나 새로고침 해주세요.");
-        const loginSec = document.getElementById('loginSection');
-        if(loginSec) loginSec.classList.remove('hidden');
+        console.error("❌ [Critical] _supabase 객체가 없습니다. 스크립트 로드 순서를 확인하세요.");
+        alert("시스템 오류: DB 연결 실패");
         return;
     }
+    console.log("✅ [Step 2] _supabase 객체 확인 완료");
 
-    // [안전장치 2] 초기 로딩 바 표시 (화이트 스크린 방지)
-    showLoading(true, '시스템 연결 중...');
+    // 2. 필수 HTML 요소 확인
+    const loginSec = document.getElementById('loginSection');
+    const dashSec = document.getElementById('dashboardSection');
+    
+    if (!loginSec || !dashSec) {
+        console.error("❌ [Critical] 필수 HTML ID를 찾을 수 없습니다.", 
+            { loginSection: loginSec, dashboardSection: dashSec });
+        return;
+    }
+    console.log("✅ [Step 3] HTML 필수 요소 확인 완료 (loginSection, dashboardSection)");
 
-    // 2. Auth 상태 감지 (★ 유일한 데이터 로드 및 화면 제어 진입점)
+    // 3. Auth 상태 감지 리스너 등록
+    console.log("🚩 [Step 4] Auth 리스너 등록 시작");
+    
     _supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log(`🔔 Auth Event: ${event}`);
-
-        // 2-1. URL 해시(#) 클린업
-        if (session && window.location.hash && window.location.hash.includes('access_token')) {
-            window.history.replaceState(null, '', window.location.pathname);
-        }
-
-        // 2-2. 상태에 따른 분기 처리
+        console.log(`🔔 [Auth Event] 발생: ${event}`);
+        
         if (session) {
-            // [Case A] 로그인 된 상태
+            console.log("👤 [User] 로그인 세션 발견:", session.user.email);
+            console.log("🚀 [Action] 데이터 로드 시작...");
             
-            // 헤더 프로필 갱신 (별도 함수 호출)
-            updateHeaderProfile(session.user);
-
-            // [중복 실행 방지] 이미 데이터가 메모리에 있다면 로드 건너뜀
-            if (curMem && curMem.id) {
-                console.log("✅ 데이터가 이미 존재합니다. UI만 갱신합니다.");
-                showLoading(false);
-                showOnly('dashboardSection');
-                return;
-            }
-
-            // [핵심] 대시보드 데이터 로드
             try {
+                // 헤더 업데이트
+                updateHeaderProfile(session.user);
+                
+                // 데이터 로드 호출
                 await handleLoginSuccess(session.user);
-            } catch (e) {
-                console.error("❌ 데이터 로드 중 치명적 오류:", e);
-                showLoading(false);
-                showModal("데이터를 불러오는 중 문제가 발생했습니다.\n다시 로그인해주세요.");
-                showOnly('loginSection');
-            }
+                console.log("🎉 [Success] 데이터 로드 및 렌더링 완료");
+                
+                // 강제로 화면 전환 (CSS 체크)
+                loginSec.classList.add('hidden');
+                dashSec.classList.remove('hidden');
+                console.log("🖥️ [UI] 대시보드 화면 강제 노출 명령 실행됨");
 
+            } catch (e) {
+                console.error("💥 [Error] 데이터 로드 중 에러 발생:", e);
+            }
         } else {
-            // [Case B] 로그아웃 된 상태
-            console.log("👋 로그아웃 상태입니다.");
-            
-            // 메모리 초기화
-            curMem = null;
-            curAuth = null;
-            
-            // 화면 제어
-            showLoading(false);
-            showOnly('loginSection'); 
+            console.log("👋 [Logout] 세션 없음. 로그인 화면 표시");
+            loginSec.classList.remove('hidden');
+            dashSec.classList.add('hidden');
         }
     });
 });
