@@ -1008,7 +1008,6 @@ let isBoardLoading = false;
     try {
         _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
       window._client = _supabase;
-      handleManualSession();
     } catch (e) {
         console.error("Supabase Init Error", e);
         alert("시스템 연결 오류");
@@ -1064,37 +1063,6 @@ function translateAuthError(errorMsg) {
         document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
         if(msg) document.getElementById('loadingMsg').innerText = msg;
     }
-
-// [수정 1] 초기화 로직: 보안 강화 및 화면 겹침 원천 차단
-// [수정] 초기화 로직: 세션 상태에 따라 showOnly로 명확하게 분기
-window.addEventListener('DOMContentLoaded', async () => {
-    // 1. 로딩바 표시 (HTML에 이미 hidden 클래스가 박혀있으므로 화면은 백지 상태임)
-    if (typeof showLoading === 'function') showLoading(true, '시스템 보안 확인 중...');
-
-    // 2. Supabase 연결 체크
-    if(!_supabase) {
-        if (typeof showLoading === 'function') showLoading(false);
-        alert("시스템 오류: DB 연결 실패");
-        return;
-    }
-
-    // 3. 인증 상태 변경 감지
-    _supabase.auth.onAuthStateChange((event, session) => {
-        // 로딩바 끄기 (결정 났음)
-        if (typeof showLoading === 'function') showLoading(false);
-
-        if (session) {
-            // [로그인 상태] -> 데이터 로드 시작
-            // 주의: 여기서 바로 showOnly('dashboardSection') 하지 않음.
-            // 데이터가 텅 빈 화면이 보일 수 있으므로 loadDashboardData 완료 후 보여줌.
-            handleLoginSuccess(session.user);
-        } else {
-            // [비로그인 상태] -> 로그인 화면 즉시 노출
-            console.log("인증 세션 없음: 로그인 화면 이동");
-            showOnly('loginSection'); 
-        }
-    });
-});
 
     // =========================================================================
     // 2. 로그인 & 데이터 로드
