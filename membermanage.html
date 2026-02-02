@@ -1014,39 +1014,7 @@ let isBoardLoading = false;
         alert("시스템 연결 오류");
     }
 
-   // [신규] URL로 전달된 토큰을 낚아채서 세션 복구하기
-async function handleManualSession() {
-    const params = new URLSearchParams(window.location.search);
-    const accessToken = params.get('at');
-    const refreshToken = params.get('rt');
 
-    if (accessToken && refreshToken) {
-        console.log("URL에서 인증 토큰 발견! 세션 복구 시도...");
-        
-        // 1. 수동으로 세션 설정
-        const { data, error } = await _supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-        });
-
-        if (!error && data.session) {
-            console.log("세션 복구 성공!");
-            
-            // 2. URL에서 토큰 흔적 지우기 (보안 및 미관상)
-            // 현재 페이지 주소에서 파라미터만 싹 제거해서 주소창 업데이트
-            const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
-            
-            // 3. (중요) 전역 변수 업데이트해주기
-            curAuth = data.session.user;
-            
-            // 4. 원래 로직 실행 (handleLoginSuccess 등 호출 필요하면 여기서 호출)
-            // 하지만 보통 아래쪽 onAuthStateChange가 이걸 감지하고 알아서 실행함.
-        } else {
-            console.error("세션 복구 실패:", error);
-        }
-    }
-}
 // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
 async function reloadDashboard() {
     // 1. 보고 있던 계정(curMem)이 있으면 그 ID, 없으면 로그인 계정(curAuth) ID 사용
@@ -2226,47 +2194,80 @@ loadUserProfile();
 
 // membermanage 페이지의 스크립트 부분 교체
 
-// [수정] startKakaoLogin 함수 교체
+// =========================================================================
+// [수정] startKakaoLogin - 콜백 파일 없이 직접 처리
+// =========================================================================
 async function startKakaoLogin() {
     try {
         showLoading(true, '카카오 로그인 페이지로 이동합니다...');
 
-        // 1. 돌아올 목적지 설정 (현재 보고 있는 페이지)
-        const nextTarget = window.location.href;
-        
-        // 백업용 (하위 호환성)
-        localStorage.setItem('auth_destination', nextTarget);
+        // ⭐ 핵심: redirectTo를 현재 페이지 자체로 설정
+        const currentUrl = window.location.origin + window.location.pathname;
 
-        // 2. 콜백 URL 생성 (핵심: ?next=... 파라미터 추가)
-        // 현재 페이지와 같은 폴더에 auth_callback.html이 있다고 가정하고 주소를 자동 생성합니다.
-        // 예: https://도메인/membermanage.html -> https://도메인/auth_callback.html
-        const baseUrl = window.location.href.replace('membermanage.html', 'auth_callback.html');
-        
-        // 최종 URL: .../auth_callback.html?next=https://.../membermanage.html
-        const redirectUrl = `${baseUrl}?next=${encodeURIComponent(nextTarget)}`;
+        console.log('🔗 리다이렉트 URL:', currentUrl);
 
-        // 3. Supabase 로그인 시작
         const { data, error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
             options: {
-                // 여기가 수정됨: 목적지가 포함된 URL을 넘겨야 함
-                redirectTo: redirectUrl,
-                
-                scopes: 'account_email phone_number profile_nickname',
-                queryParams: {
-                    // prompt: 'login' // 필요시 주석 해제
-                }
+                redirectTo: currentUrl, // 📍 같은 페이지로 돌아옴
+                scopes: 'account_email phone_number profile_nickname'
             }
         });
 
         if (error) throw error;
         
     } catch (e) {
-        console.error("Kakao Login Error:", e);
+        console.error("❌ Kakao Login Error:", e);
         showLoading(false);
         showModal('카카오 로그인 연결 실패:\n' + e.message);
     }
 }
+
+// =========================================================================
+// [수정] 초기화 로직 - URL 해시 자동 처리
+// =========================================================================
+window.addEventListener('DOMContentLoaded', async () => {
+    showLoading(true, '시스템 보안 확인 중...');
+
+    if(!_supabase) {
+        showLoading(false);
+        alert("시스템 오류: DB 연결 실패");
+        return;
+    }
+
+    // ⭐ 카카오에서 돌아왔을 때 URL에 #access_token=... 이 붙어있음
+    // Supabase가 자동으로 처리하지만, 우리가 직접 감지할 수도 있음
+    
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const hasAuthHash = hashParams.has('access_token');
+
+    if (hasAuthHash) {
+        console.log('🔐 카카오 로그인 후 돌아옴 - 세션 처리 중...');
+        // URL 정리 (해시 제거)
+        window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    // 인증 상태 감지 (Supabase가 자동으로 URL 해시 처리함)
+    _supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('🔔 Auth Event:', event, session ? '세션 있음' : '세션 없음');
+        
+        showLoading(false);
+
+        if (session) {
+            // 로그인 성공
+            await handleLoginSuccess(session.user);
+        } else {
+            // 비로그인 상태
+            console.log("인증 세션 없음: 로그인 화면 이동");
+            showOnly('loginSection'); 
+        }
+    });
+});
+
+// =========================================================================
+// [삭제 가능] handleManualSession 함수 - 더 이상 필요 없음!
+// =========================================================================
+// async function handleManualSession() { ... } ← 삭제해도 됨
     
     // [헬퍼] 안전한 값 설정
     function setText(id, txt) { const el=document.getElementById(id); if(el) el.innerText = txt || '-'; }
