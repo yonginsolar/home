@@ -3,313 +3,951 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>태양광 발전소 부지 찾기 - 용인모두의햇빛</title>
+    <title>경기 태양광 부지 분석 (Full Version)</title>
     
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services"></script>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services&autoload=false"></script>
+    <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     
-    <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-    
-
     <style>
-        /* 1. Reset & Base Layout */
+        /* [스타일 복구] 기존 디자인 디테일 유지 */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body, html { width: 100%; height: 100%; overflow: hidden; font-family: 'Pretendard', sans-serif; }
-
-        /* 2. Map Container */
+        
         #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* 기후 데이터 시인성 강화 필터 */
+        .leaflet-layer.wms-layer { filter: saturate(2) contrast(1.2); }
 
-        /* 3. Floating Action Button (FAB) */
-        .fab-btn {
-            position: absolute; bottom: 30px; right: 20px; z-index: 10;
-            background-color: #ffca28; color: #333;
-            width: 60px; height: 60px; border-radius: 50%;
-            border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-            transition: transform 0.2s;
-        }
+        /* UI 박스 공통 스타일 */
+        .ui-box { background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 1000; position: absolute; }
+        
+        /* 검색창 */
+        .search-box { top: 20px; left: 20px; width: 340px; display: flex; padding: 12px; align-items: center; }
+        .search-input { border: none; outline: none; flex: 1; font-size: 15px; cursor: pointer; }
+
+        /* 레이어 컨트롤 (우측) */
+        .layer-control { top: 70px; right: 10px; width: 260px; max-height: 75vh; overflow-y: auto; padding: 15px; }
+        .layer-control h4 { margin: 0 0 12px; font-size: 15px; font-weight: 700; border-bottom: 2px solid #222; padding-bottom: 8px; }
+        
+        details { margin-bottom: 8px; border-bottom: 1px solid #f0f0f0; padding-bottom: 5px; }
+        summary { cursor: pointer; font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; justify-content: space-between; }
+        .layer-item { display: flex; align-items: center; margin-bottom: 6px; font-size: 13px; }
+        .layer-item label { cursor: pointer; display: flex; align-items: center; width: 100%; }
+        .layer-item input { margin-right: 8px; transform: scale(1.1); }
+        .chip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+        .chip-red { background: #ff4444; } .chip-blue { background: #4444ff; } .chip-yell { background: #ffaa00; }
+
+        /* 추천 목록 패널 (탭 기능 복구) */
+        .suggestion-panel { bottom: 30px; left: 20px; width: 340px; max-height: 55vh; display: flex; flex-direction: column; transition: transform 0.3s ease; }
+        .panel-header { padding: 15px; background: #f8f9fa; font-weight: bold; display: flex; justify-content: space-between; border-radius: 8px 8px 0 0; align-items: center; }
+        
+        .panel-tabs { display: flex; background: #eee; padding: 4px; margin: 0 10px 10px 10px; border-radius: 6px; }
+        .tab-btn { flex: 1; border: none; background: transparent; padding: 8px; font-size: 12px; cursor: pointer; border-radius: 4px; color: #666; }
+        .tab-btn.active { background: white; font-weight: bold; color: #333; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+        .panel-content { flex: 1; overflow-y: auto; padding: 0 10px 10px 10px; }
+        .place-item { padding: 12px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s; }
+        .place-item:hover { background: #f8f9fa; }
+        .place-info { flex: 1; margin-right: 10px; }
+        .place-addr { font-size: 13px; font-weight: bold; margin-bottom: 4px; color: #333; }
+        .place-reason { font-size: 12px; color: #666; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .btn-like { background: #fff0f0; border: 1px solid #ffcccc; color: #ff4444; border-radius: 12px; padding: 4px 8px; font-size: 11px; font-weight: bold; cursor: pointer; min-width: 45px; }
+        .btn-like:hover { background: #ffe0e0; }
+
+        /* FAB 및 모달 */
+        .fab-btn { position: absolute; bottom: 30px; right: 20px; z-index: 1000; background-color: #2c3e50; color: white; width: 60px; height: 60px; border-radius: 50%; border: none; font-size: 26px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.2s; }
         .fab-btn:active { transform: scale(0.95); }
-
-        /* 4. Modal Overlay (Input Form) */
-        .modal-overlay {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.6); z-index: 20;
-            align-items: center; justify-content: center;
-        }
-        .modal-content {
-            background: white; width: 90%; max-width: 400px; padding: 20px;
-            border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.2);
-            position: relative;
-        }
-        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
-        .form-group input, .form-group textarea {
-            width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
-        }
-        .form-group textarea { height: 80px; resize: none; }
-        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
-        .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        .btn-cancel { background: #f0f0f0; color: #333; }
+        
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 3000; align-items: center; justify-content: center; }
+        .modal-content { background: white; width: 90%; max-width: 420px; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .form-label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: bold; color: #555; }
+        .form-input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
+        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; }
         .btn-submit { background: #2c3e50; color: white; }
         
-        /* 5. Custom Alert Modal */
-        .alert-modal {
-            display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-            background: #333; color: white; padding: 12px 24px; border-radius: 50px;
-            z-index: 100; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
+        /* 지도 컨트롤 위치 수정 */
+        .leaflet-top.leaflet-right { top: 10px; right: 10px; }
+        /* [추가] 모바일 레이어 컨트롤 (평소엔 숨김) */
+@media (max-width: 768px) {
+    .layer-control {
+        transform: translateX(120%); /* 화면 밖으로 밀어둠 */
+        transition: transform 0.3s ease;
+        top: 60px; /* 검색창 아래 */
+        right: 10px;
+        max-height: 80vh;
+        z-index: 2000;
+    }
+    .layer-control.active {
+        transform: translateX(0); /* 활성화되면 나옴 */
+    }
+    /* 모바일용 레이어 토글 버튼 */
+    .btn-layer-toggle {
+        display: flex !important;
+    }
+}
 
-        /* 6. Custom Map Overlay (Info Window) */
-        .custom-overlay {
-            background: white; padding: 10px 15px; border-radius: 8px;
-            border: 1px solid #ddd; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            position: relative; bottom: 45px; min-width: 200px;
-        }
-        .custom-overlay h4 { margin: 0 0 5px; font-size: 15px; color: #2c3e50; }
-        .custom-overlay p { margin: 0; font-size: 13px; color: #666; line-height: 1.4; }
-        .custom-overlay .writer { font-size: 11px; color: #999; margin-top: 5px; display: block; }
-        .custom-overlay:after {
-            content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%);
-            border-width: 8px 6px 0; border-style: solid; border-color: white transparent; display: block;
-        }
+/* [추가] PC에서는 토글 버튼 숨김 */
+.btn-layer-toggle {
+    display: none;
+    position: absolute;
+    top: 80px;
+    right: 20px;
+    z-index: 2501;
+    width: 45px;
+    height: 45px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+}
+
+/* [추가] 시스템 알림 모달 (Alert 대체용) */
+.system-modal {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+    background: #333; color: white; padding: 12px 24px; border-radius: 50px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3); z-index: 9999;
+    opacity: 0; transition: all 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    font-size: 14px; font-weight: bold; display: flex; align-items: center; gap: 8px;
+}
+.system-modal.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+.system-modal.success { background: #2c3e50; }
+.system-modal.error { background: #e74c3c; }
+
+/* [기존 수정] 레이어 컨트롤 위치 조정 (버튼과 안 겹치게) */
+.layer-control { top: 70px; right: 10px; /* 기존 유지 */ }
     </style>
 </head>
 <body>
 
+    <div class="ui-box search-box">
+        <span style="font-size:18px; margin-right:10px;">🔍</span>
+        <input type="text" class="search-input" id="mainSearchInput" placeholder="주소 검색 (엔터) 또는 지도 클릭..." readonly onclick="searchAddressGlobal()">
+    </div>
+
     <div id="map"></div>
 
-    <button class="fab-btn" onclick="openModal()" title="부지 추천하기">➕</button>
+    <div class="ui-box layer-control">
+        <h4>🗺️ 기후/규제 분석 데이터</h4>
+        <details open><summary>🚫 규제 요인 (설치 제한)</summary>
+            <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('slope_15', this)"> 경사도 15도 이상</label></div>
+            <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('landslide', this)"> 산사태 1등급</label></div>
+            <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('eco_1', this)"> 생태자연도 1등급</label></div>
+            <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('cultural', this)"> 국가지정 문화재</label></div>
+            <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('water', this)"> 상수원 보호구역</label></div>
+            <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('park', this)"> 국립공원</label></div>
+        </details>
+        <details><summary>⚡ 발전소 현황</summary>
+            <div class="layer-item"><label><span class="chip chip-blue"></span><input type="checkbox" onchange="toggleLayer('solar_status', this)"> 기설치 발전소</label></div>
+            <div class="layer-item"><label><span class="chip chip-blue"></span><input type="checkbox" onchange="toggleLayer('solar_plan', this)"> 설치 예정지</label></div>
+        </details>
+        <details><summary>☀️ 발전 잠재량</summary>
+            <div class="layer-item"><label><span class="chip chip-yell"></span><input type="checkbox" onchange="toggleLayer('pot_tech_land', this)"> 기술적 잠재량 (지상)</label></div>
+            <div class="layer-item"><label><span class="chip chip-yell"></span><input type="checkbox" onchange="toggleLayer('pot_tech_roof', this)"> 기술적 잠재량 (옥상)</label></div>
+        </details>
+    </div>
+
+    <div class="ui-box suggestion-panel">
+        <div class="panel-header" onclick="togglePanel('header')">
+            <span>📍 추천 부지 목록</span>
+            <button onclick="togglePanel()" style="border:none; background:none; cursor:pointer; font-size:16px;">🔽</button>
+        </div>
+        <div class="panel-tabs">
+            <button class="tab-btn active" onclick="switchTab('latest', this)">최신순</button>
+            <button class="tab-btn" onclick="switchTab('best', this)">🔥 인기순</button> 
+            <button class="tab-btn" onclick="switchTab('all', this)">전체</button>
+        </div>
+        <div id="suggestionList" class="panel-content">
+            <div style="text-align:center; padding:20px; color:#999;">데이터를 불러오는 중...</div>
+        </div>
+    </div>
+
+    <button class="fab-btn" onclick="openModal()">➕</button>
 
     <div id="modalOverlay" class="modal-overlay">
         <div class="modal-content">
-            <div class="modal-header">☀️ 부지 추천하기</div>
+            <h3 style="margin-bottom:20px; font-weight:800;">☀️ 부지 추천 등록</h3>
+            <input type="hidden" id="regLat"><input type="hidden" id="regLng">
+            <input type="hidden" id="editTargetId">
             
-            <input type="hidden" id="lat">
-            <input type="hidden" id="lng">
-
-            <div class="form-group">
-                <label>주소 (검색 버튼을 눌러주세요)</label>
-                <div style="display: flex; gap: 5px;">
-                    <input type="text" id="address" placeholder="주소 검색..." readonly onclick="searchAddress()">
-                    <button type="button" onclick="searchAddress()" style="padding: 0 10px; border-radius: 6px; border: 1px solid #ddd; background: #fff;">🔍</button>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label>추천 이유</label>
-                <textarea id="reason" placeholder="예: 햇빛이 하루 종일 잘 들어요."></textarea>
-            </div>
-
-            <div class="form-group">
-                <label>특이 사항 (선택)</label>
-                <input type="text" id="note" placeholder="예: 주차장 지붕 활용 가능">
-            </div>
-
+            <label class="form-label">주소 (지도 클릭 시 자동 입력)</label>
+            <input type="text" class="form-input" id="regAddress" placeholder="주소를 검색하세요" readonly onclick="searchAddressForModal()">
+            
+            <label class="form-label">추천 이유</label>
+            <textarea class="form-input" id="regReason" rows="3" placeholder="예: 남향이라 햇빛이 잘 들고 진입로가 확보되어 있습니다."></textarea>
+            
+            <label class="form-label">비고 (선택)</label>
+            <input type="text" class="form-input" id="regNote" placeholder="특이사항 입력">
+            
             <div class="btn-group">
-                <button class="btn btn-cancel" onclick="closeModal()">취소</button>
+                <button class="btn" style="background:#f1f3f5; color:#333;" onclick="closeModal()">취소</button>
                 <button class="btn btn-submit" onclick="submitSuggestion()">등록하기</button>
             </div>
         </div>
     </div>
 
-    <div id="customAlert" class="alert-modal">메시지 내용</div>
+
+    <div id="layer" style="display:none;position:fixed;overflow:hidden;z-index:9999;-webkit-overflow-scrolling:touch;">
+   <img src="https://t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" 
+        style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" 
+        onclick="closeDaumPostcode()" alt="닫기 버튼">
+</div>
+
+    <button class="btn-layer-toggle" onclick="toggleLayerControl()">🗺️</button>
+
+<div id="systemModal" class="system-modal">
+    <span id="sysIcon">✅</span>
+    <span id="sysMsg">메시지 내용</span>
+</div>
+
+    <div id="confirmModal" class="modal-overlay" style="z-index: 10000;">
+    <div class="modal-content" style="max-width: 300px; text-align: center;">
+        <h3 style="margin-bottom:15px;">⚠️ 확인</h3>
+        <p id="confirmMsg" style="margin-bottom:20px; color:#666;">정말 삭제하시겠습니까?</p>
+        <div class="btn-group">
+            <button class="btn" style="background:#f1f3f5; color:#333;" onclick="closeConfirm(false)">취소</button>
+            <button class="btn" style="background:#e74c3c; color:white;" onclick="closeConfirm(true)">삭제</button>
+        </div>
+    </div>
+</div>
 
     <script>
-
-        // 🔴 [설정 필요] Supabase 설정
-       const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
-// [변경점] 변수명을 'supabase' -> 'sb'로 변경하여 충돌 방지
+        // ----------------------------------------------------------------------------------
+        // [설정 및 DB 명세서 복구]
+        // ----------------------------------------------------------------------------------
+        const GYEONGGI_API_KEY = 'bbfa1a53-a0d6-4328-bd4e-ae2e7bb63d06'; 
+        const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        // 로컬 스토리지 키 확인 (사용자가 제공한 정보)
-        const AUTH_KEY = 'sb-ifdqlwxgqgsvnawmhlfc-auth-token';
+  // 기존: const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); 바로 아래
 
-        // 전역 변수
-        let map;
-        let clusterer;
-        let currentOverlay = null;
+/**
+ * ----------------------------------------------------------------------------------
+ * [Supabase Database Schema & RPC Reference]
+ * 이 코드가 정상 작동하기 위해 실행되어야 할 SQL 명세입니다.
+ * * 1. [Column 추가] 추천수(like_count) 저장용
+ * ALTER TABLE public.site_suggestions 
+ * ADD COLUMN like_count integer NOT NULL DEFAULT 0;
+ * * 2. [RPC 함수 생성] 동시성 제어를 위한 안전한 좋아요 증가 함수
+ * -- Supabase SQL Editor에서 실행 필요
+ * CREATE OR REPLACE FUNCTION increment_like(row_id uuid)
+ * RETURNS void
+ * LANGUAGE plpgsql
+ * AS $$
+ * BEGIN
+ * UPDATE public.site_suggestions
+ * SET like_count = like_count + 1
+ * WHERE id = row_id;
+ * END;
+ * $$;
+ * * 3. [RPC 함수 생성] 안전한 좋아요 감소 함수
+ * -- Supabase SQL Editor에서 실행 필요
+ * CREATE OR REPLACE FUNCTION decrement_like(row_id uuid)
+ * RETURNS void
+ * LANGUAGE plpgsql
+ * AS $$
+ * BEGIN
+ * UPDATE public.site_suggestions
+ * SET like_count = GREATEST(like_count - 1, 0)
+ * WHERE id = row_id;
+ * END;
+ * $$;
+ * ----------------------------------------------------------------------------------
+ */
 
-// 1. 초기화 및 인증 체크 (수정됨)
-        window.onload = function() {
-            if (!checkAuth()) return; // 인증 실패 시 중단
-            
-            // [핵심 변경] 카카오 맵이 완전히 로드된 후 실행하도록 대기
-            kakao.maps.load(async function() {
-                initMap(); // 지도를 먼저 그리고
-                await loadSuggestions(); // 그 위에 데이터를 뿌린다
-            });
+        const LAYER_MAP = {
+            'slope_15': 'spggcee:rst_slope_15_ovr',
+            'landslide': 'spggcee:ldsld_grd1',
+            'eco_1': 'spggcee:eco1_mgmt_area',
+            'cultural': 'spggcee:national_cultural_property',
+            'water': 'spggcee:drinking_water_protection_area',
+            'park': 'spggcee:national_park',
+            'solar_status': 'spggcee:tm_sunl_fclt_pstn',
+            'solar_plan': 'spggcee:sunl_fclt_lcpmt',
+            'pot_tech_land': 'spggcee:rst_tech_sunl_genqy_kier_grnd',
+            'pot_tech_roof': 'spggcee:rst_tech_sunl_genqy_kier_bldg'
         };
 
-        // 2. 인증 방어 로직 (Defensive Auth)
-        function checkAuth() {
-            const sessionData = localStorage.getItem(AUTH_KEY);
-            if (!sessionData) {
-                showAlert("로그인이 필요한 서비스입니다.");
-                setTimeout(() => { window.location.href = 'index.html'; }, 1000);
-                return false;
-            }
-            return true;
+        // 전역 변수
+        let map, clusterGroup;
+        let allData = []; // 전체 데이터 캐싱
+        const activeLayers = {}; // 활성화된 WMS 레이어 관리
+        let tempMarker = null; // 지도 클릭시 찍히는 핀
+        let kakaoGeocoder = null; // 카카오 주소변환 객체 담을 변수
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
-// 3. 지도 초기화
-        function initMap() {
-            const container = document.getElementById('map');
-            const options = {
-                center: new kakao.maps.LatLng(37.241086, 127.177553), // 용인시청
-                level: 7
-            };
-            map = new kakao.maps.Map(container, options);
-            
-            // 지도 확대 축소 컨트롤 추가 (UX 개선)
-            const zoomControl = new kakao.maps.ZoomControl();
-            map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
-
-            // 지도 클릭 시 기존 오버레이 닫기
-            kakao.maps.event.addListener(map, 'click', function() {
-                if(currentOverlay) currentOverlay.setMap(null);
-            });
-        }
-
-        // 4. 주소 검색 (Daum Postcode)
-        function searchAddress() {
-            new daum.Postcode({
-                oncomplete: function(data) {
-                    const addr = data.roadAddress || data.jibunAddress;
-                    document.getElementById('address').value = addr;
-                    
-                    // 주소를 좌표로 변환
-                    const geocoder = new kakao.maps.services.Geocoder();
-                    geocoder.addressSearch(addr, function(result, status) {
-                        if (status === kakao.maps.services.Status.OK) {
-                            document.getElementById('lat').value = result[0].y;
-                            document.getElementById('lng').value = result[0].x;
-                        } else {
-                            showAlert("좌표를 찾을 수 없는 주소입니다.");
-                        }
-                    });
-                }
-            }).open();
-        }
-
-        // 5. 제안 등록 (DB Write)
-        async function submitSuggestion() {
-            const sessionRaw = localStorage.getItem(AUTH_KEY);
-            if(!sessionRaw) return;
-            const session = JSON.parse(sessionRaw);
-            const userEmail = session.user.email; // 로그인한 이메일 가져오기
-
-            const address = document.getElementById('address').value;
-            const lat = document.getElementById('lat').value;
-            const lng = document.getElementById('lng').value;
-            const reason = document.getElementById('reason').value;
-            const note = document.getElementById('note').value;
-
-            if (!address || !lat) { showAlert("주소를 먼저 검색해주세요."); return; }
-            if (!reason) { showAlert("추천 이유를 입력해주세요."); return; }
-
-            // [변경점] sb 변수 사용
-            const { data: memberData, error: memberError } = await sb
-                .from('coop_members')
-                .select('member_id')
-                .eq('email', userEmail)
-                .single();
-
-            if (memberError || !memberData) {
-                console.error("Member Match Error:", memberError);
-                showAlert("회원 정보를 찾을 수 없습니다. (DB 매칭 실패)");
-                return;
-            }
-
-            const writerId = memberData.member_id;
-
-            // [변경점] sb 변수 사용
-            const { error: insertError } = await sb
-                .from('site_suggestions')
-                .insert([{
-                    writer_id: writerId,
-                    address_kr: address,
-                    latitude: parseFloat(lat),
-                    longitude: parseFloat(lng),
-                    reason: reason,
-                    note: note
-                }]);
-
-            if (insertError) {
-                console.error(insertError);
-                showAlert("등록 중 오류가 발생했습니다.");
-            } else {
-                showAlert("성공적으로 등록되었습니다!");
-                closeModal();
-                loadSuggestions(); // 지도 새로고침
-                
-                // 입력폼 초기화
-                document.getElementById('address').value = '';
-                document.getElementById('reason').value = '';
-                document.getElementById('note').value = '';
-            }
-        }
-
-        // 6. 제안 불러오기 (DB Read & Render)
-        async function loadSuggestions() {
-            // [변경점] sb 변수 사용
-            const { data, error } = await sb
-                .from('site_suggestions')
-                .select('*');
-
-            if (error) {
-                console.error(error);
-                return;
-            }
-
-            data.forEach(item => {
-                const markerPosition = new kakao.maps.LatLng(item.latitude, item.longitude);
-                
-                // 마커 생성
-                const marker = new kakao.maps.Marker({
-                    position: markerPosition,
-                    map: map
-                });
-
-                // 커스텀 오버레이 내용
-                const content = `
-                    <div class="custom-overlay">
-                        <h4>☀️ 추천 부지</h4>
-                        <p><b>주소:</b> ${item.address_kr}</p>
-                        <p><b>이유:</b> ${item.reason}</p>
-                        ${item.note ? `<p><b>특이사항:</b> ${item.note}</p>` : ''}
-                        <span class="writer">제안자: ${item.writer_id}</span>
-                    </div>
-                `;
-
-                // 마커 클릭 이벤트
-                kakao.maps.event.addListener(marker, 'click', function() {
-                    if (currentOverlay) currentOverlay.setMap(null); // 다른 거 닫기
-                    
-                    const overlay = new kakao.maps.CustomOverlay({
-                        content: content,
-                        map: map,
-                        position: marker.getPosition()
-                    });
-                    
-                    currentOverlay = overlay;
-                    map.panTo(markerPosition); // 중심으로 이동
-                });
-            });
-        }
-
-        // UI 유틸리티
-        function openModal() { document.getElementById('modalOverlay').style.display = 'flex'; }
-        function closeModal() { document.getElementById('modalOverlay').style.display = 'none'; }
+window.onload = function() {
+    // [추가] 카카오 라이브러리 로드 후 Geocoder 객체 생성
+    kakao.maps.load(function() {
+        kakaoGeocoder = new kakao.maps.services.Geocoder();
+    });
+    
+    initMap();
+    fetchAndRenderSuggestions();
+};
         
-        function showAlert(msg) {
-            const el = document.getElementById('customAlert');
-            el.innerText = msg;
-            el.style.display = 'block';
-            setTimeout(() => { el.style.display = 'none'; }, 3000);
+
+        // ----------------------------------------------------------------------------------
+        // 1. 지도 초기화 (Leaflet + VWorld 위성/하이브리드)
+        // ----------------------------------------------------------------------------------
+        function initMap() {
+            // 브이월드 레이어 정의 (국토교통부 제공 무료 타일)
+            const vworldBase = L.tileLayer('https://xdworld.vworld.kr/2d/Base/service/{z}/{x}/{y}.png', {
+                maxZoom: 19, attribution: '© VWorld'
+            });
+            const vworldSat = L.tileLayer('https://xdworld.vworld.kr/2d/Satellite/service/{z}/{x}/{y}.jpeg', {
+                maxZoom: 19, attribution: '© VWorld'
+            });
+            const vworldHybrid = L.tileLayer('https://xdworld.vworld.kr/2d/Hybrid/service/{z}/{x}/{y}.png', {
+                maxZoom: 19, attribution: '© VWorld'
+            });
+
+            // 위성지도 그룹 (위성 + 하이브리드)
+            const satelliteGroup = L.layerGroup([vworldSat, vworldHybrid]);
+
+            // 지도 생성
+            map = L.map('map', {
+                center: [37.241086, 127.177553], // 용인시청 중심
+                zoom: 13,
+                layers: [vworldBase] // 기본: 일반 지도
+            });
+
+            // 우측 상단 배경지도 전환 컨트롤
+            const baseMaps = {
+                "일반 지도": vworldBase,
+                "위성 지도 (Skyview)": satelliteGroup
+            };
+            L.control.layers(baseMaps).addTo(map);
+
+            // 마커 클러스터 그룹 생성
+            clusterGroup = L.markerClusterGroup();
+            map.addLayer(clusterGroup);
+
+            // [이벤트] 지도 클릭 시 핀 찍기 및 주소 확인
+            map.on('click', async function(e) {
+                const { lat, lng } = e.latlng;
+                
+                if (tempMarker) map.removeLayer(tempMarker);
+                tempMarker = L.marker([lat, lng]).addTo(map).bindPopup("주소 확인 중...").openPopup();
+
+                try {
+                    // OSM Nominatim 역지오코딩 (무료)
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+                    const data = await res.json();
+                    const addr = data.display_name;
+                    
+                    const popupEl = document.createElement('div');
+                    popupEl.style.textAlign = 'center';
+                    popupEl.style.padding = '5px';
+
+                    const titleEl = document.createElement('strong');
+                    titleEl.textContent = '선택한 위치';
+
+                    const addrEl = document.createElement('span');
+                    addrEl.textContent = addr;
+
+                    const btnEl = document.createElement('button');
+                    btnEl.type = 'button';
+                    btnEl.textContent = '여기 등록하기';
+                    btnEl.style.marginTop = '8px';
+                    btnEl.style.padding = '5px 10px';
+                    btnEl.style.cursor = 'pointer';
+                    btnEl.style.background = '#2c3e50';
+                    btnEl.style.color = 'white';
+                    btnEl.style.border = 'none';
+                    btnEl.style.borderRadius = '4px';
+                    btnEl.addEventListener('click', () => openRegModalWithLoc(lat, lng, addr));
+
+                    popupEl.appendChild(titleEl);
+                    popupEl.appendChild(document.createElement('br'));
+                    popupEl.appendChild(addrEl);
+                    popupEl.appendChild(document.createElement('br'));
+                    popupEl.appendChild(btnEl);
+
+                    tempMarker.setPopupContent(popupEl);
+                } catch(err) {
+                    tempMarker.setPopupContent("주소를 가져올 수 없습니다.");
+                }
+            });
         }
+
+        // ----------------------------------------------------------------------------------
+        // 2. 기후 레이어 토글 (Leaflet WMS)
+        // ----------------------------------------------------------------------------------
+// 기존 함수 삭제 후 아래 코드로 교체
+function toggleLayer(key, checkbox) {
+    if (!checkbox) return;
+    const layerId = LAYER_MAP[key];
+
+    if (checkbox.checked) {
+        // [수정됨] zIndex: 1000 옵션 추가하여 위성지도(기본 타일)보다 무조건 위에 표시
+        const layer = L.tileLayer.wms('https://climate.gg.go.kr/ols/api/geoserver/wms?', {
+            apiKey: GYEONGGI_API_KEY,
+            layers: layerId,
+            format: 'image/png',
+            transparent: true,
+            version: '1.1.0',
+            className: 'wms-layer', // CSS 필터용
+            zIndex: 1000 // 배경지도 위에 강제로 띄움
+        });
+        layer.addTo(map);
+        activeLayers[key] = layer;
+    } else {
+        if (activeLayers[key]) {
+            map.removeLayer(activeLayers[key]);
+            delete activeLayers[key];
+        }
+    }
+}
+
+
+
+
+
+        // 탭 전환 함수
+        function switchTab(type, button) {
+            // 버튼 스타일 UI 갱신
+            const buttons = document.querySelectorAll('.panel-tabs .tab-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            if (button) {
+                button.classList.add('active'); // 클릭된 버튼 하이라이트
+            }
+
+            renderList(type);
+        }
+
+
+// 전역 변수로 현재 로그인한 유저 ID 저장 (효율성 위해)
+let globalUserId = null;
+
+// ----------------------------------------------------------------------------------
+// [수정] 데이터 로드 (유저 ID 전역 저장 추가)
+// ----------------------------------------------------------------------------------
+async function fetchAndRenderSuggestions() {
+    try {
+        const userRes = await sb.auth.getUser();
+        globalUserId = userRes.data.user?.id; // 전역 변수에 저장
+
+        const { data, error } = await sb
+            .from('site_suggestions')
+            .select(`*, coop_members(name), suggestion_likes(user_id)`)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        allData = (data || []).filter(item => item.latitude && item.longitude).map(item => {
+            const isLikedByMe = item.suggestion_likes?.some(like => like.user_id === globalUserId);
+            return { ...item, isLikedByMe };
+        });
+
+        renderMarkers(allData);
+        
+        // 현재 탭 상태 유지하며 리스트 갱신
+        const activeTab = document.querySelector('.tab-btn.active');
+        const tabType = activeTab ? activeTab.getAttribute('onclick').match(/'(.*?)'/)[1] : 'latest';
+        renderList(tabType);
+
+    } catch (e) {
+        console.error(e);
+        showSystemModal("데이터 로드 실패", "error");
+    }
+}
+
+
+
+// ----------------------------------------------------------------------------------
+// [수정] 1. 마커 렌더링 (비고(Note)가 있으면 팝업에 표시)
+// ----------------------------------------------------------------------------------
+function renderMarkers(dataList) {
+    clusterGroup.clearLayers();
+    dataList.forEach(item => {
+        const safeAddress = escapeHtml(item.address_kr);
+        const safeReason = escapeHtml(item.reason);
+        const safeNote = escapeHtml(item.note);
+        const safeWriter = escapeHtml(item.coop_members?.name || '익명');
+        const likeCount = Number(item.like_count || 0);
+        const marker = L.marker([item.latitude, item.longitude]);
+        
+        // 비고 내용이 있으면 줄바꿈 후 표시, 없으면 빈 문자열
+        const noteHtml = item.note ? `<div style="margin-top:4px; color:#e67e22; font-size:11px;">※ ${safeNote}</div>` : '';
+
+        const popupContent = `
+            <div style="padding:5px; min-width:160px;">
+                <h4 style="margin:0 0 5px 0; font-size:14px;">${safeAddress}</h4>
+                <div style="font-size:12px; color:#555; margin-bottom:5px;">${safeReason}</div>
+                ${noteHtml} 
+                <div style="margin-top:6px; font-size:11px; color:#888; border-top:1px solid #eee; padding-top:4px;">
+                    👍 추천 ${likeCount} · 👤 ${safeWriter}
+                </div>
+            </div>`;
+        
+        marker.bindPopup(popupContent);
+        clusterGroup.addLayer(marker);
+    });
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 2. 리스트 렌더링 (최신/인기순 5개 제한, 전체는 무제한)
+// ----------------------------------------------------------------------------------
+function renderList(type) {
+    const listEl = document.getElementById('suggestionList');
+    listEl.innerHTML = '';
+    
+    let targetData = [...allData];
+
+    if (type === 'latest') {
+        // 최신순: 날짜 내림차순 -> 5개만 자름
+        targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        targetData = targetData.slice(0, 5); 
+    } else if (type === 'best') {
+        // 인기순: 좋아요 내림차순 -> 5개만 자름
+        targetData.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
+        targetData = targetData.slice(0, 5);
+    } else {
+        // 전체(all): 날짜 내림차순 -> 제한 없음(전체 노출)
+        targetData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+
+    if (targetData.length === 0) {
+        listEl.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">데이터가 없습니다.</div>';
+        return;
+    }
+
+    targetData.forEach(item => {
+        const writerName = escapeHtml(item.coop_members?.name || '익명');
+        const safeAddress = escapeHtml(item.address_kr);
+        const safeReason = item.reason ? escapeHtml(item.reason) : '내용 없음';
+        const likeCount = Number(item.like_count || 0);
+        const safeId = JSON.stringify(String(item.id));
+        const heartIcon = item.isLikedByMe ? '❤️' : '🤍';
+        const heartClass = item.isLikedByMe ? 'active' : '';
+        const isMyPost = globalUserId && (globalUserId === item.writer_id);
+        
+        const adminBtns = isMyPost ? `
+            <div style="margin-top:8px; display:flex; gap:5px;">
+                <button onclick='editSuggestion(${safeId}, event)' 
+                    style="font-size:11px; padding:3px 8px; cursor:pointer; background:#eee; border:none; border-radius:4px;">수정</button>
+                <button onclick='deleteSuggestion(${safeId}, event)' 
+                    style="font-size:11px; padding:3px 8px; cursor:pointer; background:#ffe0e0; color:red; border:none; border-radius:4px;">삭제</button>
+            </div>
+        ` : '';
+
+        const div = document.createElement('div');
+        div.className = 'place-item';
+        div.innerHTML = `
+            <div class="place-info">
+                <div class="place-addr">📍 ${safeAddress}</div>
+                <div style="font-size:11px; color:#2c3e50; margin-bottom:4px;">
+                    <strong>👤 ${writerName}</strong>
+                </div>
+                <div class="place-reason">${safeReason}</div>
+                ${adminBtns} 
+            </div>
+            <button class="btn-like ${heartClass}" onclick='handleLike(${safeId}, ${item.isLikedByMe}, event)'>
+                ${heartIcon} ${likeCount}
+            </button>
+        `;
+
+        div.onclick = (e) => {
+            if(e.target.tagName !== 'BUTTON') {
+                moveToLocation(item.latitude, item.longitude, item.id);
+            }
+        };
+        listEl.appendChild(div);
+    });
+}
+
+// ----------------------------------------------------------------------------------
+// [신규] 3. 커스텀 컨펌 모달 로직 (Promise 사용)
+// ----------------------------------------------------------------------------------
+let confirmResolve = null; // 사용자의 선택(예/아니오)을 기다리는 변수
+
+function openConfirmModal(message) {
+    document.getElementById('confirmMsg').innerText = message;
+    document.getElementById('confirmModal').style.display = 'flex';
+    
+    // Promise를 반환하여, 사용자가 버튼을 누를 때까지 기다리게 함
+    return new Promise((resolve) => {
+        confirmResolve = resolve;
+    });
+}
+
+function closeConfirm(result) {
+    document.getElementById('confirmModal').style.display = 'none';
+    if (confirmResolve) {
+        confirmResolve(result); // true(삭제) 또는 false(취소) 반환
+        confirmResolve = null;
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 4. 삭제 함수 (커스텀 모달 적용)
+// ----------------------------------------------------------------------------------
+async function deleteSuggestion(id, evt) {
+    if (evt) evt.stopPropagation();
+    // [변경] 브라우저 confirm -> 커스텀 openConfirmModal 사용
+    const isConfirmed = await openConfirmModal("정말 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다.");
+    
+    if (!isConfirmed) return; // 취소 누르면 중단
+
+    try {
+        const { error } = await sb.from('site_suggestions').delete().eq('id', id);
+        if (error) throw error;
+        
+        showSystemModal("삭제되었습니다.", "success");
+        fetchAndRenderSuggestions();
+    } catch (e) {
+        console.error(e);
+        showSystemModal("삭제 권한이 없거나 오류가 발생했습니다.", "error");
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [신규] 수정 모드 진입 함수
+// ----------------------------------------------------------------------------------
+function editSuggestion(id, evt) {
+    if (evt) evt.stopPropagation();
+    // 데이터 찾기
+    const targetItem = allData.find(item => item.id === id);
+    if (!targetItem) return;
+
+    // 모달에 값 채워넣기
+    document.getElementById('editTargetId').value = targetItem.id; // 수정 대상 ID
+    document.getElementById('regAddress').value = targetItem.address_kr;
+    document.getElementById('regLat').value = targetItem.latitude;
+    document.getElementById('regLng').value = targetItem.longitude;
+    document.getElementById('regReason').value = targetItem.reason;
+    document.getElementById('regNote').value = targetItem.note || '';
+
+    // 버튼 텍스트 변경 등 UI 처리
+    const submitBtn = document.querySelector('.btn-submit');
+    submitBtn.innerText = "수정 완료";
+    
+    // 모달 열기
+    openModal();
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 모달 열기 (초기화 로직 포함)
+// ----------------------------------------------------------------------------------
+function openModal() {
+    document.getElementById('modalOverlay').style.display = 'flex';
+    // editTargetId 값이 비어있으면 "신규 등록" 상태로 간주
+    if(!document.getElementById('editTargetId').value) {
+         document.querySelector('.btn-submit').innerText = "등록하기";
+    }
+}
+
+// [수정] 모달 닫기 (데이터 초기화)
+function closeModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+    // 값 초기화
+    document.getElementById('editTargetId').value = ''; 
+    document.getElementById('regAddress').value = '';
+    document.getElementById('regLat').value = '';
+    document.getElementById('regLng').value = '';
+    document.getElementById('regReason').value = '';
+    document.getElementById('regNote').value = '';
+    document.querySelector('.btn-submit').innerText = "등록하기";
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 등록 및 수정 통합 함수
+// ----------------------------------------------------------------------------------
+async function submitSuggestion() {
+    const editId = document.getElementById('editTargetId').value; // 값이 있으면 수정 모드
+    
+    const addr = document.getElementById('regAddress').value;
+    const lat = document.getElementById('regLat').value;
+    const lng = document.getElementById('regLng').value;
+    const reason = document.getElementById('regReason').value;
+    const note = document.getElementById('regNote').value;
+    
+    if (!lat || !lng) {
+        showSystemModal("위치를 지정해주세요.", "error");
+        return;
+    }
+    if (!reason) {
+        showSystemModal("추천 이유를 입력해주세요.", "error");
+        return;
+    }
+
+    try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (!user) {
+            showSystemModal("로그인이 필요합니다.", "error");
+            return;
+        }
+
+        let error;
+
+        if (editId) {
+            // [수정 모드] Update 실행
+            const res = await sb.from('site_suggestions').update({
+                address_kr: addr,
+                latitude: parseFloat(lat),
+                longitude: parseFloat(lng),
+                reason: reason,
+                note: note
+            }).eq('id', editId).eq('writer_id', user.id); // 내 글인지 이중 체크
+            error = res.error;
+        } else {
+            // [신규 등록] Insert 실행
+            const res = await sb.from('site_suggestions').insert([{
+                writer_id: user.id,
+                latitude: parseFloat(lat),
+                longitude: parseFloat(lng),
+                address_kr: addr,
+                reason: reason,
+                note: note
+            }]);
+            error = res.error;
+        }
+
+        if (error) throw error;
+
+        showSystemModal(editId ? "수정되었습니다!" : "등록되었습니다!", "success");
+        closeModal();
+        fetchAndRenderSuggestions();
+
+    } catch (e) {
+        console.error(e);
+        if (e.code === '23505' || e.status === 409) {
+            showSystemModal("이미 등록된 주소입니다.", "error");
+        } else {
+            showSystemModal("오류가 발생했습니다.", "error");
+        }
+    }
+}
+
+// 지도 이동 및 팝업 열기 헬퍼 함수
+function moveToLocation(lat, lng, itemId) {
+    // 1. 지도 이동
+    map.flyTo([lat, lng], 17, { duration: 1.5 });
+
+    // 2. 해당 마커 찾아서 팝업 열기 (약간의 딜레이 후)
+    setTimeout(() => {
+        clusterGroup.eachLayer(layer => {
+            // 마커의 좌표가 일치하는지 확인 (정확도 고려)
+            const mLat = layer.getLatLng().lat;
+            const mLng = layer.getLatLng().lng;
+            if(Math.abs(mLat - lat) < 0.0001 && Math.abs(mLng - lng) < 0.0001) {
+                // 클러스터 내부에 있다면 펼치기
+                clusterGroup.zoomToShowLayer(layer, () => {
+                    layer.openPopup();
+                });
+            }
+        });
+    }, 1000); // 이동 시간 고려
+    
+    // 모바일이면 패널 닫기 (지도 보라고)
+    if(window.innerWidth <= 768) {
+        togglePanel(false); // 닫기 강제
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [수정] 3. 좋아요 토글 (1인 1회, DB Insert/Delete)
+// ----------------------------------------------------------------------------------
+async function handleLike(suggestionId, isCurrentlyLiked, evt) {
+    if (evt) evt.stopPropagation();
+    // 로그인 체크
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) {
+        showSystemModal("로그인이 필요합니다.", "error");
+        return;
+    }
+
+    try {
+        if (isCurrentlyLiked) {
+            // 이미 좋아요 -> 취소 (Delete)
+            const { error } = await sb
+                .from('suggestion_likes')
+                .delete()
+                .match({ suggestion_id: suggestionId, user_id: user.id });
+            if(error) throw error;
+            showSystemModal("좋아요를 취소했습니다.", "success");
+        } else {
+            // 안 눌렀음 -> 추가 (Insert)
+            const { error } = await sb
+                .from('suggestion_likes')
+                .insert([{ suggestion_id: suggestionId, user_id: user.id }]);
+            if(error) throw error;
+            showSystemModal("이 부지를 추천했습니다!", "success");
+        }
+        
+        // 목록 갱신 (숫자 및 하트 업데이트)
+        fetchAndRenderSuggestions();
+
+    } catch (e) {
+        console.error(e);
+        showSystemModal("처리에 실패했습니다.", "error");
+    }
+}
+
+// ----------------------------------------------------------------------------------
+// [신규] 4. UI 유틸리티 (모바일 레이어 토글, 시스템 모달)
+// ----------------------------------------------------------------------------------
+// 모바일 레이어 패널 토글
+function toggleLayerControl() {
+    const el = document.querySelector('.layer-control');
+    el.classList.toggle('active');
+}
+
+// 시스템 알림 모달 (Alert 대체)
+function showSystemModal(msg, type = 'success') {
+    const modal = document.getElementById('systemModal');
+    const icon = document.getElementById('sysIcon');
+    const txt = document.getElementById('sysMsg');
+
+    modal.className = `system-modal ${type}`; // reset class
+    icon.innerText = type === 'success' ? '✅' : '⚠️';
+    txt.innerText = msg;
+
+    // Show
+    modal.classList.add('show');
+
+    // 3초 뒤 자동 사라짐
+    setTimeout(() => {
+        modal.classList.remove('show');
+    }, 3000);
+}
+
+
+
+        // 지도 클릭 -> 등록 모달 열기 헬퍼
+        function openRegModalWithLoc(lat, lng, addr) {
+            document.getElementById('regLat').value = lat;
+            document.getElementById('regLng').value = lng;
+            document.getElementById('regAddress').value = addr;
+            openModal();
+        }
+
+// ----------------------------------------------------------------------------------
+// [수정] 주소 검색 레이어 및 통합 로직
+// ----------------------------------------------------------------------------------
+var element_layer = document.getElementById('layer');
+
+function closeDaumPostcode() {
+    // iframe을 넣은 element를 안 보이게 한다.
+    element_layer.style.display = 'none';
+}
+
+/**
+ * 주소 검색 실행 함수
+ * @param {string} type - 'main' (메인검색창) 또는 'modal' (등록모달창) 구분
+ */
+function execDaumPostcode(type) {
+    new daum.Postcode({
+        oncomplete: function(data) {
+            var addr = data.roadAddress || data.jibunAddress; // 주소 변수
+
+            // 1. 타입에 따라 입력 필드 분기 처리
+            if (type === 'main') {
+                document.getElementById('mainSearchInput').value = addr;
+            } else if (type === 'modal') {
+                document.getElementById('regAddress').value = addr;
+            }
+
+            // 2. 카카오 Geocoder로 좌표 변환 및 지도 이동
+            if (kakaoGeocoder) {
+                kakaoGeocoder.addressSearch(addr, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        var lat = result[0].y;
+                        var lng = result[0].x;
+
+                        if (type === 'main') {
+                            // 메인 검색이면 지도를 해당 위치로 이동
+                            map.flyTo([lat, lng], 17);
+                        } else if (type === 'modal') {
+                            // 등록 모달이면 hidden 값에 좌표 저장
+                            document.getElementById('regLat').value = lat;
+                            document.getElementById('regLng').value = lng;
+                        }
+                    }
+                });
+            }
+
+            // 3. 검색 완료 후 레이어 닫기
+            element_layer.style.display = 'none';
+        },
+        width: '100%',
+        height: '100%',
+        maxSuggestItems: 5
+    }).embed(element_layer);
+
+    // 4. 레이어를 화면에 표시하고 위치 조정
+    element_layer.style.display = 'block';
+    initLayerPosition();
+}
+
+// 레이어 위치 조정 함수 (화면 중앙 정렬)
+function initLayerPosition() {
+    var width = 300; // 우편번호서비스가 들어갈 element의 width
+    var height = 400; // 우편번호서비스가 들어갈 element의 height
+    var borderWidth = 5; // 테두리 두께
+
+    // 위에서 선언한 값들을 실제 element에 넣는다.
+    element_layer.style.width = width + 'px';
+    element_layer.style.height = height + 'px';
+    element_layer.style.border = borderWidth + 'px solid #2c3e50';
+    element_layer.style.borderRadius = '10px';
+    element_layer.style.backgroundColor = '#fff';
+
+    // 실행되는 순간의 viewport 너비와 높이 값을 가져와서 중앙에 좌표를 계산한다.
+    element_layer.style.left = (((window.innerWidth || document.documentElement.clientWidth) - width) / 2 - borderWidth) + 'px';
+    element_layer.style.top = (((window.innerHeight || document.documentElement.clientHeight) - height) / 2 - borderWidth) + 'px';
+}
+
+// [연결] HTML onclick 이벤트와 매핑되는 래퍼 함수들
+function searchAddressGlobal() {
+    execDaumPostcode('main');
+}
+
+function searchAddressForModal() {
+    execDaumPostcode('modal');
+}
+
+
+        function togglePanel(source) { 
+            const p = document.querySelector('.suggestion-panel');
+            const isMobile = window.innerWidth <= 768;
+            if (source === 'header' && !isMobile) return;
+
+            if (source === true) {
+                p.style.transform = 'translateY(0)';
+                return;
+            }
+            if (source === false) {
+                p.style.transform = 'translateY(80%)';
+                return;
+            }
+
+            const isClosed = p.style.transform === 'translateY(80%)';
+            p.style.transform = isClosed ? 'translateY(0)' : 'translateY(80%)';
+        }
+
+
     </script>
 </body>
 </html>
