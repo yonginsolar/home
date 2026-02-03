@@ -456,10 +456,8 @@ async function fetchAndRenderSuggestions() {
         if (error) throw error;
 
         allData = (data || []).filter(item => item.latitude && item.longitude).map(item => {
-            const likes = Array.isArray(item.suggestion_likes) ? item.suggestion_likes : [];
-            const isLikedByMe = likes.some(like => like.user_id === globalUserId);
-            const likeCount = likes.length;
-            return { ...item, isLikedByMe, like_count: likeCount };
+            const isLikedByMe = item.suggestion_likes?.some(like => like.user_id === globalUserId);
+            return { ...item, isLikedByMe };
         });
 
         renderMarkers(allData);
@@ -794,14 +792,7 @@ async function handleLike(suggestionId, isCurrentlyLiked, evt) {
             const { error } = await sb
                 .from('suggestion_likes')
                 .insert([{ suggestion_id: suggestionId, user_id: user.id }]);
-            if(error) {
-                if (error.code === '23505' || error.status === 409) {
-                    showSystemModal("이미 추천했습니다.", "error");
-                    fetchAndRenderSuggestions();
-                    return;
-                }
-                throw error;
-            }
+            if(error) throw error;
             showSystemModal("이 부지를 추천했습니다!", "success");
         }
         
