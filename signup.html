@@ -1067,6 +1067,27 @@ true
 btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
+    // ★★★ [추가] DB 저장 성공 후 알림톡 발송 ★★★
+  try {
+    const kakaoResponse = await _supabase.functions.invoke('send-welcome-kakao', {
+      body: {
+        name: nameInput.value,
+        phone: insertData.phone,
+        amount: Number(moneyVal)
+      }
+    });
+
+    // 알림톡 실패해도 가입은 성공한 것이므로 로그만 남김
+    if (kakaoResponse.error) {
+      console.error('알림톡 발송 실패:', kakaoResponse.error);
+    } else {
+      console.log('알림톡 발송 성공:', kakaoResponse.data);
+    }
+  } catch (kakaoError) {
+    // 알림톡 발송 중 에러 발생해도 무시 (가입은 이미 성공)
+    console.error('알림톡 발송 중 오류:', kakaoError);
+  }
+
 // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
 openResultModal(
 "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
