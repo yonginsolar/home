@@ -1067,12 +1067,10 @@ true
 btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
-    // ★★★ [추가] DB 저장 성공 후 알림톡 발송 ★★★
-      console.log('=== 알림톡 발송 시작 ===');
-  console.log('이름:', nameInput.value);
-  console.log('전화번호:', insertData.phone);
-  console.log('금액:', Number(moneyVal));
- try {
+  // ★★★ [수정] 에러 응답 본문 확인 ★★★
+  console.log('=== 알림톡 발송 시작 ===');
+  
+  try {
     const kakaoResponse = await _supabase.functions.invoke('send-welcome-kakao', {
       body: {
         name: nameInput.value,
@@ -1083,18 +1081,25 @@ btn.innerText = '가입 신청하기 ☀️';
 
     console.log('=== 알림톡 응답 ===', kakaoResponse);
 
+    // ★ 에러 시 응답 본문 읽기
     if (kakaoResponse.error) {
       console.error('❌ 알림톡 발송 실패:', kakaoResponse.error);
-      alert('알림톡 발송 실패: ' + JSON.stringify(kakaoResponse.error));
+      
+      // 응답 본문 확인
+      try {
+        const errorBody = await kakaoResponse.error.context.json();
+        console.error('에러 상세:', errorBody);
+        alert('알림톡 실패:\n' + JSON.stringify(errorBody, null, 2));
+      } catch (e) {
+        console.error('응답 본문 파싱 실패:', e);
+      }
     } else if (kakaoResponse.data?.success) {
       console.log('✅ 알림톡 발송 성공:', kakaoResponse.data);
-    } else {
-      console.warn('⚠️ 알림톡 응답 이상:', kakaoResponse.data);
     }
   } catch (kakaoError) {
-    console.error('❌ 알림톡 발송 중 예외 발생:', kakaoError);
-    alert('알림톡 오류: ' + kakaoError.message);
+    console.error('❌ 알림톡 발송 중 오류:', kakaoError);
   }
+
 
 // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
 openResultModal(
