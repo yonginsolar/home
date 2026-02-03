@@ -1068,7 +1068,11 @@ btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
     // ★★★ [추가] DB 저장 성공 후 알림톡 발송 ★★★
-  try {
+      console.log('=== 알림톡 발송 시작 ===');
+  console.log('이름:', nameInput.value);
+  console.log('전화번호:', insertData.phone);
+  console.log('금액:', Number(moneyVal));
+ try {
     const kakaoResponse = await _supabase.functions.invoke('send-welcome-kakao', {
       body: {
         name: nameInput.value,
@@ -1077,15 +1081,19 @@ btn.innerText = '가입 신청하기 ☀️';
       }
     });
 
-    // 알림톡 실패해도 가입은 성공한 것이므로 로그만 남김
+    console.log('=== 알림톡 응답 ===', kakaoResponse);
+
     if (kakaoResponse.error) {
-      console.error('알림톡 발송 실패:', kakaoResponse.error);
+      console.error('❌ 알림톡 발송 실패:', kakaoResponse.error);
+      alert('알림톡 발송 실패: ' + JSON.stringify(kakaoResponse.error));
+    } else if (kakaoResponse.data?.success) {
+      console.log('✅ 알림톡 발송 성공:', kakaoResponse.data);
     } else {
-      console.log('알림톡 발송 성공:', kakaoResponse.data);
+      console.warn('⚠️ 알림톡 응답 이상:', kakaoResponse.data);
     }
   } catch (kakaoError) {
-    // 알림톡 발송 중 에러 발생해도 무시 (가입은 이미 성공)
-    console.error('알림톡 발송 중 오류:', kakaoError);
+    console.error('❌ 알림톡 발송 중 예외 발생:', kakaoError);
+    alert('알림톡 오류: ' + kakaoError.message);
   }
 
 // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
