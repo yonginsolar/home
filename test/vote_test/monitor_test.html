@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>실시간 개표 상황실</title>
+    <link rel="stylesheet" href="style_test.css">
+    <style>
+        .dashboard-card { background: white; padding: 2rem; margin-bottom: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .progress-bg { background: #e5e7eb; height: 30px; border-radius: 15px; overflow: hidden; margin-top: 1rem; }
+        .progress-bar { background: var(--primary-color); height: 100%; width: 0%; transition: width 1s ease-in-out; display: flex; align-items: center; justify-content: flex-end; color: white; padding-right: 10px; font-weight: bold; }
+        
+        /* 결과 막대 그래프 */
+        .result-row { margin-bottom: 1rem; }
+        .result-bar-bg { background: #f3f4f6; height: 40px; border-radius: 4px; position: relative; margin-top: 5px; }
+        .result-bar-fill { background: #3b82f6; height: 100%; border-radius: 4px; opacity: 0.8; width: 0%; transition: width 1s; }
+        .result-text { position: absolute; top: 0; left: 10px; height: 100%; display: flex; align-items: center; font-weight: bold; color: #111; z-index: 10; }
+        .result-count { position: absolute; top: 0; right: 10px; height: 100%; display: flex; align-items: center; font-weight: bold; }
+        .winner .result-bar-fill { background: #ef4444; } /* 당선자 강조 */
+    </style>
+
+</head>
+<body style="display:block; padding: 2rem;">
+
+    <div style="max-width: 900px; margin: 0 auto;">
+        <header style="text-align: center; margin-bottom: 3rem;">
+            <h1>📊 실시간 투표 현황판</h1>
+            <h2 id="election-title" style="color:#666;">데이터 로딩중...</h2>
+            <div id="status-indicator" style="margin-top:1rem; font-weight:bold;"></div>
+        </header>
+
+        <div class="dashboard-card">
+            <h3>🗳️ 현재 투표율</h3>
+            <div class="progress-bg">
+                <div id="turnout-bar" class="progress-bar">0%</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:0.5rem; color:#666;">
+                <span>참여: <strong id="voted-count">0</strong>명</span>
+                <span>총원: <strong id="total-count">0</strong>명</span>
+            </div>
+        </div>
+
+        <div id="result-section" class="dashboard-card" style="display:none;">
+            <h3>🏆 개표 결과</h3>
+            <div id="result-container">
+                </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { AdminService } from './AdminService_test.js';
+        const service = new AdminService();
+        let electionId = null;
+
+        async function init() {
+            // 1. 선거 정보 로드
+            const election = await service.getElectionInfo();
+            if (!election) {
+                document.getElementById('election-title').innerText = "진행 중인 선거 없음";
+                return;
+            }
+
+            electionId = election.id;
+            document.getElementById('election-title').innerText = election.title;
+            
+            // 상태 표시
+            const statusEl = document.getElementById('status-indicator');
+            statusEl.innerText = `현재 상태: ${election.status}`;
+            
+            // 2. 투표율 업데이트 (즉시 실행)
+            updateTurnout();
+            
+            // 3. 결과 공개 상태라면 결과 로드
+            if (election.status === 'PUBLISHED') {
+                document.getElementById('result-section').style.display = 'block';
+                loadResults();
+            } else if (election.status === 'OPEN') {
+                // 투표 중이면 5초마다 투표율 갱신 (폴링)
+                setInterval(updateTurnout, 5000);
+            }
+        }
+
+        // 투표율 갱신
+        async function updateTurnout() {
+            if (!electionId) return;
+            const stats = await service.getTurnoutStats(electionId);
+            
+            document.getElementById('voted-count').innerText = stats.current;
+            document.getElementById('total-count').innerText = stats.total;
+            
+            const bar = document.getElementById('turnout-bar');
+            bar.style.width = `${stats.percent}%`;
+            bar.innerText = `${stats.percent}%`;
+        }
+
+        // 결과 로드 및 렌더링 (하드코딩된 로직 - 실제론 DB 집계 권장)
+        async function loadResults() {
+            const ballots = await service.getResults(electionId);
+            const container = document.getElementById('result-container');
+            
+            // 데이터 가공: 선거구별 -> 후보별 집계
+            const grouped = {}; // { 'A선거구': [ {name:'홍길동', count:10}, ... ] }
+
+            ballots.forEach(b => {
+                const districtName = b.districts.name;
+                if (!grouped[districtName]) grouped[districtName] = {};
+                
+                // 후보 이름 또는 찬/반 결정
+                let key = '';
+                let label = '';
+                
+                if (b.districts.vote_type === 'CANDIDATE') {
+                    key = b.candidate_id;
+                    label = b.candidates ? b.candidates.name : '무효';
+                } else {
+                    key = b.choice;
+                    label = b.choice === 'AGREE' ? '찬성' : (b.choice === 'DISAGREE' ? '반대' : '기권');
+                }
+
+                if (!grouped[districtName][key]) grouped[districtName][key] = { label, count: 0 };
+                grouped[districtName][key].count++;
+            });
+
+            // 렌더링
+            container.innerHTML = '';
+            for (const [district, candidates] of Object.entries(grouped)) {
+                const distDiv = document.createElement('div');
+                distDiv.innerHTML = `<h4 style="margin-top:2rem; border-bottom:2px solid #333; padding-bottom:0.5rem;">${district}</h4>`;
+                
+                // 정렬 (득표순)
+                const sorted = Object.values(candidates).sort((a, b) => b.count - a.count);
+                const maxVote = sorted[0].count; // 1등 득표수 (그래프 100% 기준)
+
+                sorted.forEach((c, index) => {
+                    // 단순 당선 로직: 1등에게 winner 클래스 (동점자 처리는 MVP 생략)
+                    const isWinner = index === 0; 
+                    const percent = ballots.length > 0 ? ((c.count / ballots.length) * 100 * 5) : 0; // 비율(시각용)
+                    // *주: 위 percent 계산은 전체 표 기준이라 시각적으로 작게 보일 수 있음. maxVote 기준으로 변경 권장.
+                    const widthPercent = (c.count / maxVote) * 100;
+
+                    distDiv.innerHTML += `
+                        <div class="result-row ${isWinner ? 'winner' : ''}">
+                            <div class="result-bar-bg">
+                                <div class="result-bar-fill" style="width: ${widthPercent}%"></div>
+                                <span class="result-text">${c.label} ${isWinner ? '🥇' : ''}</span>
+                                <span class="result-count">${c.count}표</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                container.appendChild(distDiv);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
