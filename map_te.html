@@ -458,7 +458,7 @@ async function fetchAndRenderSuggestions() {
         allData = (data || []).filter(item => item.latitude && item.longitude).map(item => {
             const likes = Array.isArray(item.suggestion_likes) ? item.suggestion_likes : [];
             const isLikedByMe = likes.some(like => like.user_id === globalUserId);
-            const likeCount = Math.max(Number(item.like_count || 0), likes.length);
+            const likeCount = likes.length;
             return { ...item, isLikedByMe, like_count: likeCount };
         });
 
@@ -565,7 +565,7 @@ function renderList(type) {
                 <div class="place-reason">${safeReason}</div>
                 ${adminBtns} 
             </div>
-            <button class="btn-like ${heartClass}" onclick='handleLike(${safeId}, ${item.isLikedByMe}, ${likeCount}, event)'>
+            <button class="btn-like ${heartClass}" onclick='handleLike(${safeId}, ${item.isLikedByMe}, event)'>
                 ${heartIcon} ${likeCount}
             </button>
         `;
@@ -771,19 +771,7 @@ function moveToLocation(lat, lng, itemId) {
 // ----------------------------------------------------------------------------------
 // [수정] 3. 좋아요 토글 (1인 1회, DB Insert/Delete)
 // ----------------------------------------------------------------------------------
-async function adjustLikeCount(suggestionId, delta, currentCount) {
-    const nextCount = Math.max(0, (currentCount || 0) + delta);
-    const rpcName = delta > 0 ? 'increment_like' : 'decrement_like';
-    const { error: rpcError } = await sb.rpc(rpcName, { row_id: suggestionId });
-    if (!rpcError) return;
-
-    await sb
-        .from('site_suggestions')
-        .update({ like_count: nextCount })
-        .eq('id', suggestionId);
-}
-
-async function handleLike(suggestionId, isCurrentlyLiked, currentCount, evt) {
+async function handleLike(suggestionId, isCurrentlyLiked, evt) {
     if (evt) evt.stopPropagation();
     // 로그인 체크
     const { data: { user } } = await sb.auth.getUser();
@@ -800,15 +788,20 @@ async function handleLike(suggestionId, isCurrentlyLiked, currentCount, evt) {
                 .delete()
                 .match({ suggestion_id: suggestionId, user_id: user.id });
             if(error) throw error;
-            await adjustLikeCount(suggestionId, -1, currentCount);
             showSystemModal("좋아요를 취소했습니다.", "success");
         } else {
             // 안 눌렀음 -> 추가 (Insert)
             const { error } = await sb
                 .from('suggestion_likes')
                 .insert([{ suggestion_id: suggestionId, user_id: user.id }]);
-            if(error) throw error;
-            await adjustLikeCount(suggestionId, 1, currentCount);
+            if(error) {
+                if (error.code === '23505' || error.status === 409) {
+                    showSystemModal("이미 추천했습니다.", "error");
+                    fetchAndRenderSuggestions();
+                    return;
+                }
+                throw error;
+            }
             showSystemModal("이 부지를 추천했습니다!", "success");
         }
         
