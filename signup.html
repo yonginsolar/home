@@ -1067,11 +1067,17 @@ true
 btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
-  // ★★★ [수정] 에러 응답 본문 확인 ★★★
+  // ===========================================
+  // 알림톡 발송 (Supabase Edge Function 호출)
+  // - 템플릿 검수 중엔 실패할 수 있으니 에러 본문을 최대한 뽑아봅니다.
+  // - 필요 없으면 아래 블록 전체를 주석 처리해도 됩니다.
+  // ===========================================
+
+  /* ✅ [알림톡 발송 코드 - 필요할 때 ON]
   console.log('=== 알림톡 발송 시작 ===');
-  
+
   try {
-    const kakaoResponse = await _supabase.functions.invoke('send-welcome-kakao', {
+    const { data, error } = await _supabase.functions.invoke('send-welcome-kakao', {
       body: {
         name: nameInput.value,
         phone: insertData.phone,
@@ -1079,34 +1085,56 @@ btn.innerText = '가입 신청하기 ☀️';
       }
     });
 
-    console.log('=== 알림톡 응답 ===', kakaoResponse);
+    console.log('=== 알림톡 응답(data) ===', data);
+    console.log('=== 알림톡 응답(error) ===', error);
 
-    // ★ 에러 시 응답 본문 읽기
-    if (kakaoResponse.error) {
-      console.error('❌ 알림톡 발송 실패:', kakaoResponse.error);
-      
-      // 응답 본문 확인
+    // 에러가 있으면 상세 본문까지 최대한 확인
+    if (error) {
+      console.error('❌ 알림톡 발송 실패:', error);
+
+      let detail = null;
+
       try {
-        const errorBody = await kakaoResponse.error.context.json();
-        console.error('에러 상세:', errorBody);
-        alert('알림톡 실패:\n' + JSON.stringify(errorBody, null, 2));
+        // error.context 는 Response 객체일 수 있음
+        if (error.context) {
+          const res = error.context;      // Response
+          const cloned = res.clone();     // body 1회성 보호
+          const ct = res.headers?.get?.('content-type') || '';
+
+          if (ct.includes('application/json')) {
+            detail = await cloned.json();
+          } else {
+            const text = await cloned.text();
+            // JSON 문자열로 올 수도 있어 한번 더 파싱 시도
+            try { detail = JSON.parse(text); } catch { detail = { raw: text }; }
+          }
+        } else {
+          detail = { message: error.message, name: error.name };
+        }
       } catch (e) {
-        console.error('응답 본문 파싱 실패:', e);
+        console.error('응답 본문 읽기 실패:', e);
+        detail = { message: error.message, name: error.name };
       }
-    } else if (kakaoResponse.data?.success) {
-      console.log('✅ 알림톡 발송 성공:', kakaoResponse.data);
+
+      console.error('에러 상세:', detail);
+      alert('알림톡 실패:\n' + JSON.stringify(detail, null, 2));
+    } else if (data?.success) {
+      console.log('✅ 알림톡 발송 성공:', data);
+    } else {
+      console.warn('⚠️ 알림톡 응답은 받았으나 success가 아닙니다:', data);
     }
   } catch (kakaoError) {
-    console.error('❌ 알림톡 발송 중 오류:', kakaoError);
+    console.error('❌ 알림톡 발송 중 예외:', kakaoError);
   }
+  */
 
-
-// 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
-openResultModal(
-"✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
-false
-);
+  // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
+  openResultModal(
+    "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
+    false
+  );
 }
+
 }
 
 // [신규] 메시지 표시 및 버튼 제어 헬퍼
