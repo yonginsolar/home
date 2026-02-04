@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!--
+Version: 2026-02-04
+Change: Stop URL token handoff and enforce redirect allowlist.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -22,12 +26,31 @@
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // 목적지 찾기
-        function getDest() {
-            const params = new URLSearchParams(window.location.search);
-            return params.get('next') || localStorage.getItem('auth_destination') || '/';
+        function normalizeDest(raw) {
+            const fallback = '/';
+            if (!raw) return fallback;
+            try {
+                const dest = new URL(raw, window.location.origin);
+                const allowOrigins = [
+                    window.location.origin,
+                    'https://www.yonginsolar.kr',
+                    'https://erp.yonginsolar.kr',
+                    'http://localhost:8000'
+                ];
+                if (!allowOrigins.includes(dest.origin)) return fallback;
+                return dest.href;
+            } catch (e) {
+                return fallback;
+            }
         }
 
-        // [핵심] 세션을 URL 파라미터로 변환해서 이동
+        function getDest() {
+            const params = new URLSearchParams(window.location.search);
+            const raw = params.get('next') || localStorage.getItem('auth_destination');
+            return normalizeDest(raw);
+        }
+
+        // [핵심] 세션은 동일 출처에 저장되므로 URL로 토큰을 전달하지 않음
         function redirectWithSession(session) {
             const dest = getDest();
             localStorage.removeItem('auth_destination'); // 청소
@@ -38,13 +61,8 @@
                 return;
             }
 
-            // ★ 토큰을 URL에 태웁니다 (at: access_token, rt: refresh_token)
-            // 목적지 URL이 이미 파라미터를 가지고 있는지 확인 (? 유무)
-            const separator = dest.includes('?') ? '&' : '?';
-            const finalUrl = `${dest}${separator}at=${session.access_token}&rt=${session.refresh_token}`;
-
             document.getElementById('message').innerText = '인증 완료! 이동합니다...';
-            window.location.replace(finalUrl);
+            window.location.replace(dest);
         }
 
         // 전화번호 업데이트 (실패해도 무시)
