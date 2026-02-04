@@ -1,9 +1,14 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.2
+Change: Preserve line breaks in candidate career/manifesto while keeping XSS-safe rendering.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>선거 포털</title>
+    <script>console.log('[Version] v1.0.2 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -248,6 +253,11 @@
     </div>
 
     <script type="module">
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+    }
        import { supabase } from './ElectionService.js';
 
     // ==========================================
@@ -322,6 +332,11 @@
 
             const age = getKoreanAge(c.birth_date);
             const safeAddress = formatAddress(c.address);
+            const safeName = escapeHtml(c.name || '');
+            const safeSymbol = escapeHtml(c.symbol || '-');
+            const safeAddressText = escapeHtml(safeAddress);
+            const safeCareer = escapeHtml(c.career || '등록된 경력이 없습니다.').replace(/\n/g, '<br>');
+            const safeManifesto = escapeHtml(c.manifesto || '등록된 공약이 없습니다.').replace(/\n/g, '<br>');
 
             const html = `
                 <div class="modal-cand-header">
@@ -331,8 +346,8 @@
                          onerror="this.src='${DEFAULT_PROFILE_IMG}'"
                          style="background-color: #f3f4f6;">
                     <div>
-                        <div style="font-size:0.9rem; color:#666; margin-bottom:4px;">기호 <span style="font-weight:bold; color:var(--primary); font-size:1.1rem;">${c.symbol || '-'}</span>번</div>
-                        <div style="font-size:1.4rem; font-weight:800;">${c.name}</div>
+                        <div style="font-size:0.9rem; color:#666; margin-bottom:4px;">기호 <span style="font-weight:bold; color:var(--primary); font-size:1.1rem;">${safeSymbol}</span>번</div>
+                        <div style="font-size:1.4rem; font-weight:800;">${safeName}</div>
                     </div>
                 </div>
                 <div class="modal-info-row">
@@ -341,14 +356,14 @@
                 </div>
                 <div class="modal-info-row">
                     <span class="modal-info-label">주소</span>
-                    <span class="modal-info-val">${safeAddress}</span>
+                    <span class="modal-info-val">${safeAddressText}</span>
                 </div>
                 <label class="modal-section-label">🎓 주요 경력</label>
-                <div class="modal-text-box">${c.career || '등록된 경력이 없습니다.'}</div>
+                <div class="modal-text-box">${safeCareer}</div>
                 
                 <div style="display:none;">
                     <label class="modal-section-label">📢 공약 및 출마의 변</label>
-                    <div class="modal-text-box" style="min-height:100px;">${c.manifesto || '등록된 공약이 없습니다.'}</div>
+                    <div class="modal-text-box" style="min-height:100px;">${safeManifesto}</div>
                 </div>
             `;
             document.getElementById('cand-detail-content').innerHTML = html;
@@ -717,6 +732,7 @@
                 if (el.status === 'OPEN') { badgeColor = '#16a34a'; statusText = '투표중'; }
                 else if (el.status === 'PUBLISHED' || el.status === 'ENDED') { badgeColor = '#2563eb'; statusText = '결과보기'; }
                 else if (el.status === 'CLOSED') { badgeColor = '#dc2626'; statusText = '마감됨'; }
+                const safeTitle = escapeHtml(el.title || '');
 
                 return `
                     <div style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer;" onclick="window.location.href='?id=${el.id}'">
@@ -724,7 +740,7 @@
                             <span style="background:${badgeColor}; color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem;">${statusText}</span>
                             <span style="font-size:0.8rem; color:#666;">${new Date(el.created_at).toLocaleDateString()}</span>
                         </div>
-                        <h3 style="margin:0 0 5px 0;">${el.title}</h3>
+                        <h3 style="margin:0 0 5px 0;">${safeTitle}</h3>
                         <p style="margin:0; font-size:0.85rem; color:#666;">${new Date(el.vote_start_at).toLocaleDateString()} ~ ${new Date(el.vote_end_at).toLocaleDateString()}</p>
                     </div>
                 `;
@@ -833,6 +849,9 @@ function renderCandidates(filterDistId) {
         // 선거구 명칭 매칭 (역시 문자열 변환 비교)
         const distInfo = allDistricts.find(d => String(d.id) === String(c.district_id));
         const distName = distInfo ? distInfo.name : '공통';
+        const safeName = escapeHtml(c.name || '');
+        const safeSymbol = escapeHtml(c.symbol || '-');
+        const safeDistName = escapeHtml(distName);
         
         // 이미지 경로 처리 (URL vs Storage Path)
         let photoSrc = DEFAULT_PROFILE_IMG;
@@ -853,16 +872,16 @@ function renderCandidates(filterDistId) {
                 <div class="cand-photo-wrapper">
                     <img src="${photoSrc}" 
                             class="cand-img-fit" 
-                            alt="${c.name}"
+                            alt="${safeName}"
                             onerror="this.src='${DEFAULT_PROFILE_IMG}'"
                             style="background-color: #f3f4f6;">
                 </div>
                 <div class="cand-info">
                     <div class="cand-top-row">
-                        <span class="cand-symbol">${c.symbol || '-'}</span>
-                        <span class="cand-dist-badge">${distName}</span>
+                        <span class="cand-symbol">${safeSymbol}</span>
+                        <span class="cand-dist-badge">${safeDistName}</span>
                     </div>
-                    <h3 class="cand-name">${c.name} <span class="cand-age">(${ageText})</span></h3>
+                    <h3 class="cand-name">${safeName} <span class="cand-age">(${ageText})</span></h3>
                     <div class="cand-cta">👉 상세 정보 보기</div>
                 </div>
             </div>

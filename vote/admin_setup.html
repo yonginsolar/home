@@ -1,8 +1,13 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.1
+Change: Escape dynamic fields in admin setup lists/modals to prevent XSS.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>선거 관리 대시보드</title>
+    <script>console.log('[Version] v1.0.1 | admin_setup.html');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
 <style>
@@ -353,6 +358,11 @@
     </div>
 
 <script type="module">
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
     import { AdminService } from './AdminService.js';
     import { supabase } from './ElectionService.js';
     
@@ -478,9 +488,11 @@
             const div = document.createElement('div');
             div.className = 'district-item';
             const badge = d.is_common ? '<span class="badge-common">비례/공통</span>' : '';
+            const safeName = escapeHtml(d.name);
+            const safeCode = escapeHtml(d.code);
             div.innerHTML = `
                 <div>
-                    <strong>${d.name}</strong> (${d.code}) ${badge}
+                    <strong>${safeName}</strong> (${safeCode}) ${badge}
                     <div style="font-size:0.85rem; color:#666; margin-top:4px;">
                         ${d.vote_type === 'CANDIDATE' ? '인물' : '찬반'} / ${d.quota}명 선출
                     </div>
@@ -539,12 +551,16 @@
             div.onclick = () => toggleSelection(m.id, 'source', div);
             
             // [A안] 주소 전체 노출 (줄바꿈 허용)
-            const addrFull = m.address || '<span style="color:#bbb">(주소 없음)</span>';
+            const addrText = m.address || '(주소 없음)';
+            const safeAddr = escapeHtml(addrText);
+            const safeName = escapeHtml(m.name);
+            const safeMemberId = escapeHtml(m.member_id);
+            const addrStyle = m.address ? '' : ' style="color:#bbb;"';
 
             div.innerHTML = `
                 <div class="member-info">
-                    <strong>${m.name}</strong> <small>(${m.member_id})</small>
-                    <span class="member-address">🏠 ${addrFull}</span>
+                    <strong>${safeName}</strong> <small>(${safeMemberId})</small>
+                    <span class="member-address"${addrStyle}>🏠 ${safeAddr}</span>
                 </div>
             `;
             container.appendChild(div);
@@ -763,9 +779,11 @@
             const div = document.createElement('div');
             div.className = `member-item ${selectedVoterIds.has(v.id) ? 'selected' : ''}`;
             div.onclick = () => toggleSelection(v.id, 'target', div);
+            const safeName = escapeHtml(v.member.name);
+            const safeMemberId = escapeHtml(v.member.member_id);
             div.innerHTML = `
                 <div class="member-info">
-                    <strong>${v.member.name}</strong> <small>(${v.member.member_id})</small>
+                    <strong>${safeName}</strong> <small>(${safeMemberId})</small>
                 </div>
             `;
             container.appendChild(div);
@@ -939,7 +957,7 @@ window.finishSetup = async () => {
         const btnBox = document.getElementById('common-alert-btns');
 
         // 메시지 줄바꿈 처리
-        msgBox.innerHTML = msg.replace(/\n/g, '<br>');
+    msgBox.innerHTML = escapeHtml(msg).replace(/\n/g, '<br>');
         
         // 확인 버튼 (중앙 정렬)
         btnBox.innerHTML = `<button onclick="document.getElementById('common-alert-modal').style.display='none'" class="btn-modal btn-confirm">확인</button>`;
@@ -953,7 +971,7 @@ window.finishSetup = async () => {
         const msgBox = document.getElementById('common-alert-msg');
         const btnBox = document.getElementById('common-alert-btns');
 
-        msgBox.innerHTML = msg.replace(/\n/g, '<br>');
+    msgBox.innerHTML = escapeHtml(msg).replace(/\n/g, '<br>');
         
         btnBox.innerHTML = '';
         
@@ -1064,7 +1082,9 @@ function addDistrictToListUI(id, name, code, quota, type) {
 
     // 내용 텍스트 래퍼
     const infoSpan = document.createElement('span');
-    infoSpan.innerHTML = `<strong>${name}</strong> (${code}) : ${quota}명 <small style='color:#888'>[${type === 'CANDIDATE' ? '인물' : '찬반'}]</small>`;
+    const safeName = escapeHtml(name);
+    const safeCode = escapeHtml(code);
+    infoSpan.innerHTML = `<strong>${safeName}</strong> (${safeCode}) : ${quota}명 <small style='color:#888'>[${type === 'CANDIDATE' ? '인물' : '찬반'}]</small>`;
     li.appendChild(infoSpan);
 
     // 버튼 그룹 래퍼
@@ -1198,11 +1218,13 @@ function clearDistrictInputs() {
                 // 날짜 포맷팅
                 const startStr = el.vote_start_at ? new Date(el.vote_start_at).toLocaleDateString() : '미정';
                 const endStr = el.vote_end_at ? new Date(el.vote_end_at).toLocaleDateString() : '미정';
+                const safeStatus = escapeHtml(el.status === 'DRAFT' ? '작성 중' : el.status);
+                const safeTitle = escapeHtml(el.title || '');
 
                 card.innerHTML = `
                     <div style="flex:1;">
-                        <span style="background:${badgeColor}; color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:bold;">${el.status === 'DRAFT' ? '작성 중' : el.status}</span>
-                        <h4 style="margin:8px 0 5px 0; font-size:1.1rem; color:#1f2937;">${el.title}</h4>
+                        <span style="background:${badgeColor}; color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:bold;">${safeStatus}</span>
+                        <h4 style="margin:8px 0 5px 0; font-size:1.1rem; color:#1f2937;">${safeTitle}</h4>
                         <span style="font-size:0.85rem; color:#666;">투표: ${startStr} ~ ${endStr}</span>
                     </div>
                     <div class="card-actions">
@@ -1220,8 +1242,9 @@ function clearDistrictInputs() {
                 const item = document.createElement('div');
                 item.className = 'timeline-item';
                 item.onclick = () => window.openHistoryModal(el);
+                const safeHistTitle = escapeHtml(el.title || '');
                 item.innerHTML = `<div class="timeline-date">${new Date(el.end_at).toLocaleDateString()} 종료</div>
-                    <div class="timeline-content"><h4>${el.title}</h4></div>`;
+                    <div class="timeline-content"><h4>${safeHistTitle}</h4></div>`;
                 timelineContainer.appendChild(item);
             }
         });

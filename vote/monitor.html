@@ -1,8 +1,13 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.1
+Change: Escape district/candidate labels in live monitor to prevent XSS.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>실시간 개표 상황실</title>
+    <script>console.log('[Version] v1.0.1 | monitor.html');</script>
     <link rel="stylesheet" href="style.css">
     <style>
         .dashboard-card { background: white; padding: 2rem; margin-bottom: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -47,6 +52,11 @@
     </div>
 
     <script type="module">
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[ch]));
+        }
         import { AdminService } from './AdminService.js';
         const service = new AdminService();
         let electionId = null;
@@ -124,7 +134,8 @@
             container.innerHTML = '';
             for (const [district, candidates] of Object.entries(grouped)) {
                 const distDiv = document.createElement('div');
-                distDiv.innerHTML = `<h4 style="margin-top:2rem; border-bottom:2px solid #333; padding-bottom:0.5rem;">${district}</h4>`;
+                const safeDistrict = escapeHtml(district);
+                distDiv.innerHTML = `<h4 style="margin-top:2rem; border-bottom:2px solid #333; padding-bottom:0.5rem;">${safeDistrict}</h4>`;
                 
                 // 정렬 (득표순)
                 const sorted = Object.values(candidates).sort((a, b) => b.count - a.count);
@@ -137,11 +148,12 @@
                     // *주: 위 percent 계산은 전체 표 기준이라 시각적으로 작게 보일 수 있음. maxVote 기준으로 변경 권장.
                     const widthPercent = (c.count / maxVote) * 100;
 
+                    const safeLabel = escapeHtml(c.label);
                     distDiv.innerHTML += `
                         <div class="result-row ${isWinner ? 'winner' : ''}">
                             <div class="result-bar-bg">
                                 <div class="result-bar-fill" style="width: ${widthPercent}%"></div>
-                                <span class="result-text">${c.label} ${isWinner ? '🥇' : ''}</span>
+                                <span class="result-text">${safeLabel} ${isWinner ? '🥇' : ''}</span>
                                 <span class="result-count">${c.count}표</span>
                             </div>
                         </div>

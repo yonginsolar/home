@@ -1,8 +1,13 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.1
+Change: Escape audit log details before rendering to prevent XSS.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
+    <script>console.log('[Version] v1.0.1 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -535,6 +540,18 @@
         </div>
     </div>
 <script type="module">
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
+function escapeJsString(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
+}
     import { AdminService } from './AdminService.js';
     import { supabase } from './ElectionService.js';
     
@@ -1595,6 +1612,9 @@ async function loadCandidates() {
         
         list.forEach(c => {
             const dName = cachedDistricts[c.district_id] || c.districts?.name || '-';
+            const safeDistrict = escapeHtml(dName);
+            const safeName = escapeHtml(c.name || '');
+            const safeSymbol = escapeHtml(c.symbol || '');
             
             // 상태별 뱃지 스타일
             let statusBadge = `<span class="status-badge" style="background:#999">${c.status}</span>`;
@@ -1604,15 +1624,15 @@ async function loadCandidates() {
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${dName}</td>
+                <td>${safeDistrict}</td>
                 <td>
                     <a href="#" onclick="openCandidateDetail('${c.id}'); return false;" 
                        style="font-weight:bold; color:var(--primary-blue); text-decoration:underline;">
-                       ${c.name}
+                       ${safeName}
                     </a>
                 </td>
                 <td>${statusBadge}</td>
-                <td>${c.status === 'APPROVED' ? `<input type="text" class="input-symbol" data-id="${c.id}" value="${c.symbol || ''}" style="width:50px; text-align:center;">` : '-'}</td>
+                <td>${c.status === 'APPROVED' ? `<input type="text" class="input-symbol" data-id="${c.id}" value="${safeSymbol}" style="width:50px; text-align:center;">` : '-'}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -1684,6 +1704,15 @@ async function loadCandidates() {
             // -----------------------------------------------------------
 
             // HTML 구성 (img 태그에 onerror 추가 및 배경색 스타일 추가)
+            const safeName = escapeHtml(c.name || '-');
+            const safeBirth = escapeHtml(c.birth_date || '-');
+            const safeContact = escapeHtml(c.contact || '-');
+            const safeAddress = escapeHtml(c.address || '-');
+            const safeCareer = escapeHtml(c.career || '내용 없음');
+            const safeManifesto = escapeHtml(c.manifesto || '내용 없음');
+            const safeReject = escapeHtml(c.rejection_reason || '사유 미기재');
+            const safeNameJs = escapeJsString(c.name || '');
+
             body.innerHTML = `
                 <div style="display:flex; gap:2rem; flex-wrap:wrap;">
                     <div style="flex:0 0 150px; text-align:center;">
@@ -1694,10 +1723,10 @@ async function loadCandidates() {
                     </div>
                     <div style="flex:1;">
                         <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666; width:80px;">성명</td><td style="font-weight:bold;">${c.name}</td></tr>
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">생년월일</td><td>${c.birth_date || '-'}</td></tr>
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">연락처</td><td>${c.contact || '-'}</td></tr>
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">주소</td><td>${c.address || '-'}</td></tr>
+                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666; width:80px;">성명</td><td style="font-weight:bold;">${safeName}</td></tr>
+                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">생년월일</td><td>${safeBirth}</td></tr>
+                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">연락처</td><td>${safeContact}</td></tr>
+                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">주소</td><td>${safeAddress}</td></tr>
                             <tr><td style="padding:8px; color:#666;">등록일</td><td>${new Date(c.created_at).toLocaleString()}</td></tr>
                         </table>
                     </div>
@@ -1705,17 +1734,17 @@ async function loadCandidates() {
 
                 <div style="margin-top:1.5rem;">
                     <label style="font-weight:bold; display:block; margin-bottom:5px;">대표 이력</label>
-                    <div style="background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap;">${c.career || '내용 없음'}</div>
+                    <div style="background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap;">${safeCareer}</div>
                 </div>
 
                 <div style="margin-top:1rem; display:none;">
                     <label style="font-weight:bold; display:block; margin-bottom:5px; display:none;">공약 및 출마의 변</label>
-                    <div style="background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap;">${c.manifesto || '내용 없음'}</div>
+                    <div style="background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap;">${safeManifesto}</div>
                 </div>
 
                 ${c.status === 'REJECTED' ? `
                     <div style="margin-top:1rem; padding:10px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; color:#dc2626;">
-                        <strong>⛔ 반려 사유:</strong> ${c.rejection_reason || '사유 미기재'}
+                        <strong>⛔ 반려 사유:</strong> ${safeReject}
                     </div>
                 ` : ''}
             `;
@@ -1723,16 +1752,16 @@ async function loadCandidates() {
             // 하단 버튼 구성 (상태에 따라 다르게)
             if (c.status === 'PENDING') {
                 actionArea.innerHTML = `
-                    <button onclick="confirmApprove('${c.id}', '${c.name}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
-                    <button onclick="openRejectModal('${c.id}', '${c.name}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
+                    <button onclick="confirmApprove('${c.id}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
+                    <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
                 `;
             } else if (c.status === 'APPROVED') {
                 actionArea.innerHTML = `
-                    <button onclick="openRejectModal('${c.id}', '${c.name}')" class="btn btn-danger" style="width:100%;">⛔ 승인 취소 및 반려</button>
+                    <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="width:100%;">⛔ 승인 취소 및 반려</button>
                 `;
             } else { // REJECTED
                 actionArea.innerHTML = `
-                    <button onclick="confirmApprove('${c.id}', '${c.name}')" class="btn btn-primary" style="width:100%;">🔄 재심사 (승인 처리)</button>
+                    <button onclick="confirmApprove('${c.id}', '${safeNameJs}')" class="btn btn-primary" style="width:100%;">🔄 재심사 (승인 처리)</button>
                 `;
             }
 
@@ -2036,7 +2065,8 @@ window.finalizeNomination = async () => {
         logs.forEach(log => {
             const div = document.createElement('div');
             div.className = 'log-entry';
-            div.innerHTML = `<span class="log-time">${new Date(log.created_at).toLocaleTimeString()}</span> <strong>${log.action_type}</strong> ${log.details}`;
+            const safeDetails = escapeHtml(log.details || '');
+            div.innerHTML = `<span class="log-time">${new Date(log.created_at).toLocaleTimeString()}</span> <strong>${log.action_type}</strong> ${safeDetails}`;
             container.appendChild(div);
         });
     };

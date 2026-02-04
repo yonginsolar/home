@@ -1,9 +1,14 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.2
+Change: Preserve line breaks in candidate career/manifesto while keeping XSS-safe rendering.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>용인모두의햇빛협동조합 조합원 투표소</title>
+    <script>console.log('[Version] v1.0.2 | vote.html');</script>
     <link rel="stylesheet" href="style.css">
    <style>
 /* =========================================
@@ -378,6 +383,11 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
     </div>
 
 <script type="module">
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
     import { ElectionService, supabase } from './ElectionService.js';
     // [신규] 기본 프로필 이미지 상수 (회색 사람 실루엣)
     const DEFAULT_PROFILE_IMG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzk5OTk5OSI+PHBhdGggZD0iTTEyIDEyYzIuMjEgMCA0LTEuNzkgNC00cy0xLjc5LTQtNC00LTQgMS43OS00IDQgMS43OSA0IDQgNHptMCAyYy0yLjY3IDAtOCAxLjM0LTggNHYyaDE2di0yYzAtMi42Ni01LjMzLTQtOC00eiIvPjwvc3ZnPg==";
@@ -579,16 +589,18 @@ function loadNextBallot() {
                 }
                 // -----------------------------------------------------------
 
+                const safeName = escapeHtml(cand.name || '');
+                const safeSymbol = escapeHtml(cand.symbol || '-');
                 // [카드 HTML 구조] - 공약 보기 버튼 삭제됨
                 card.innerHTML = `
                     <img src="${photoSrc}" 
                          class="candidate-img" 
-                         alt="${cand.name}"
+                         alt="${safeName}"
                          onerror="this.src='${DEFAULT_PROFILE_IMG}'"
                          style="background-color: #f3f4f6;">
                     <div class="card-content">
-                        <h3>${cand.name}</h3>
-                        <p>기호 ${cand.symbol || '-'}번</p>
+                        <h3>${safeName}</h3>
+                        <p>기호 ${safeSymbol}번</p>
                         </div>
                 `;
                 
@@ -833,6 +845,8 @@ voteBtn.addEventListener('click', () => {
         // 2. 데이터 가공
         const age = getKoreanAge(cand.birth_date);
         const shortAddress = formatAddress(cand.address);
+        const safeAddress = escapeHtml(shortAddress);
+        const safeCareer = escapeHtml(cand.career || '-').replace(/\n/g, '<br>');
 
         // 3. 내용 구성 (프로필 테이블 + 공약 카드)
         let contentHtml = '';
@@ -850,11 +864,11 @@ voteBtn.addEventListener('click', () => {
                 </tr>
                 <tr>
                     <th>주소</th>
-                    <td>${shortAddress}</td>
+                    <td>${safeAddress}</td>
                 </tr>
                 <tr>
                     <th>주요경력</th>
-                    <td>${cand.career ? cand.career.replace(/\n/g, '<br>') : '-'}</td>
+                    <td>${safeCareer}</td>
                 </tr>
             </table>
         `;
@@ -865,10 +879,12 @@ voteBtn.addEventListener('click', () => {
 
         if (manifestoText && (manifestoText.startsWith('http') || manifestoText.startsWith('/'))) {
              // 이미지인 경우
-             innerContent = `<img src="${manifestoText}" class="manifesto-img" alt="공약 이미지">`;
+             const safeUrl = encodeURI(manifestoText);
+             innerContent = `<img src="${safeUrl}" class="manifesto-img" alt="공약 이미지">`;
         } else {
              // 텍스트인 경우
-             innerContent = `<div class="manifesto-content-text">${manifestoText || "등록된 공약 내용이 없습니다."}</div>`;
+            const safeManifesto = escapeHtml(manifestoText || "등록된 공약 내용이 없습니다.").replace(/\n/g, '<br>');
+            innerContent = `<div class="manifesto-content-text">${safeManifesto}</div>`;
         }
 
         contentHtml += `
