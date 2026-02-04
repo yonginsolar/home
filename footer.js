@@ -1,6 +1,6 @@
 // footer.js
 document.addEventListener("DOMContentLoaded", function() {
-     
+    
     // 1. 푸터 HTML
     const footerHtml = `
     <div class="footer-top">
