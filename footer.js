@@ -19,10 +19,10 @@ document.addEventListener("DOMContentLoaded", function() {
           <div class="col-lg-2 col-md-6 footer-links">
         <h4>바로가기</h4>
             <ul>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="/index.html#hero">홈</a></li>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="/index.html#about">조합 소개</a></li>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="/index.html#progress">건립 현황</a></li>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="/index.html#contact">문의하기</a></li>
+              <li><i class="bi bi-chevron-right text-success"></i> <a href="index.html#hero">홈</a></li>
+              <li><i class="bi bi-chevron-right text-success"></i> <a href="index.html#about">조합 소개</a></li>
+              <li><i class="bi bi-chevron-right text-success"></i> <a href="index.html#progress">건립 현황</a></li>
+              <li><i class="bi bi-chevron-right text-success"></i> <a href="index.html#contact">문의하기</a></li>
             </ul>
           </div>
 

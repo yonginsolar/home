@@ -27,14 +27,24 @@
             return params.get('next') || localStorage.getItem('auth_destination') || '/';
         }
 
-        // [수정] 세션은 로컬 스토리지 기반으로 유지하고, URL로 토큰을 넘기지 않음
+        // [핵심] 세션을 URL 파라미터로 변환해서 이동
         function redirectWithSession(session) {
             const dest = getDest();
             localStorage.removeItem('auth_destination'); // 청소
-            document.getElementById('message').innerText = session
-                ? '인증 완료! 이동합니다...'
-                : '세션 정보를 확인할 수 없습니다. 이동합니다...';
-            window.location.replace(dest);
+
+            if (!session) {
+                // 세션이 없으면 그냥 이동 (실패 상황)
+                window.location.replace(dest);
+                return;
+            }
+
+            // ★ 토큰을 URL에 태웁니다 (at: access_token, rt: refresh_token)
+            // 목적지 URL이 이미 파라미터를 가지고 있는지 확인 (? 유무)
+            const separator = dest.includes('?') ? '&' : '?';
+            const finalUrl = `${dest}${separator}at=${session.access_token}&rt=${session.refresh_token}`;
+
+            document.getElementById('message').innerText = '인증 완료! 이동합니다...';
+            window.location.replace(finalUrl);
         }
 
         // 전화번호 업데이트 (실패해도 무시)
