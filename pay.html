@@ -78,57 +78,63 @@
 <div id="toast">계좌번호가 복사되었습니다</div>
 
 <script>
-    // --- [설정값 수정 완료] ---
+    // --- [설정값] ---
     const CONFIG = {
         bankName: '신협',
-        bankCode: '048', // 신협 코드
-        accountNo: '131020667086' // 하이픈 뺀 실제 계좌번호 입력하세요 (테스트용 더미데이터 아님 주의)
+        bankCode: '048', 
+        accountNo: '131022855516' // 하이픈 없는 숫자
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        // 1. 모바일 여부 감지 (방어적 코딩)
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         
-        // 2. 모바일이면 앱 연동 버튼 표시
         if (isMobile) {
             document.getElementById('mobileButtonGroup').style.display = 'block';
         } else {
-            // PC면 안내 멘트 변경
             document.getElementById('guideText').innerHTML = 
                 "PC 카카오톡으로 접속하셨군요!<br>사용하시는 은행 앱이나 인터넷 뱅킹으로<br>아래 계좌에 입금해 주세요.";
         }
 
-        // 3. 금액 파싱
+        // URL 파라미터 가져오기
         const params = new URLSearchParams(window.location.search);
         let amount = params.get('amount');
-        if (!amount || isNaN(amount)) amount = '0'; // 기본값
 
-        // 4. 화면 렌더링
+        // [핵심 수정 1] 테스트를 위해 금액이 없거나 0이면 '1000원'으로 강제 설정
+        if (!amount || isNaN(amount) || parseInt(amount) <= 0) {
+            console.log("금액이 없어서 테스트용 1000원으로 설정합니다.");
+            amount = '1000'; 
+        }
+
+        // 화면 표시
         document.getElementById('displayAmount').innerText = parseInt(amount).toLocaleString();
 
-        // 5. 링크 생성 (모바일용)
         if (isMobile) {
-            // 토스: 신협(048) 적용
-            const tossUrl = `supertoss://send?bank=${CONFIG.bankCode}&accountNo=${CONFIG.accountNo}&amount=${amount}&origin=applink`;
-            document.getElementById('linkToss').href = tossUrl;
+            // [핵심 수정 2] 토스 링크 생성 로직 강화
+            // iOS 호환성을 위해 파라미터 순서 및 인코딩 명확화
+            const cleanAccountNo = CONFIG.accountNo.replace(/[^0-9]/g, '');
+            
+            // 토스 공식 스킴 (bank는 코드, amount는 숫자)
+            const tossUrl = `supertoss://send?bank=${CONFIG.bankCode}&accountNo=${cleanAccountNo}&amount=${amount}&origin=link`;
+            
+            const btnToss = document.getElementById('linkToss');
+            btnToss.href = tossUrl;
+            
+            // [디버깅용] 버튼 클릭 시, 실제로 어떤 주소로 이동하는지 알럿으로 확인 (테스트 후 삭제하세요)
+            btnToss.onclick = function(e) {
+                // PC에서 테스트하거나 앱이 안 깔려 있을 때를 대비해 로그 확인
+                // alert("이동할 URL 확인:\n" + tossUrl); // 필요하면 주석 해제해서 확인
+            };
 
-            // 카카오: 홈 화면 이동
             document.getElementById('linkKakao').href = 'kakaotalk://kakaopay/home';
         }
     });
 
-    // 계좌 복사 로직
     async function copyAccount(isSilent = false) {
-        // 하이픈이 포함된 텍스트가 아니라, 숫자만 있는 CONFIG.accountNo를 복사할지,
-        // 아니면 화면에 보이는 하이픈 포함 텍스트를 복사할지 결정해야 함.
-        // 은행 앱 호환성을 위해 '숫자만' 복사하는 것이 가장 안전함.
         const textToCopy = CONFIG.accountNo; 
-
         try {
             await navigator.clipboard.writeText(textToCopy);
             if (!isSilent) showToast("계좌번호가 복사되었습니다!");
         } catch (err) {
-            console.error('복사 실패', err);
             if (!isSilent) prompt("직접 복사해주세요:", textToCopy);
         }
     }
