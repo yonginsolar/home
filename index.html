@@ -1,7 +1,12 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.1
+Change: About fetch limit(1), sanitize FAQ/notice, and replace alert with custom modal.
+-->
 <html lang="ko">
  
 <head>
+  <script>console.log('[Version] v1.0.1 | index.html');</script>
   <meta charset="utf-8">
   <meta content="width=device-width, initial-scale=1.0" name="viewport">
   <title>용인모두의햇빛협동조합</title>
@@ -696,6 +701,73 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
     window._client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // [보안] 간단 HTML 이스케이프 & URL 검증
+    function escapeHtml(value = '') {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function safeUrl(url) {
+        try {
+            const u = new URL(url, window.location.origin);
+            if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+        } catch (e) { void 0; }
+        return null;
+    }
+
+    const showAlert = window.showAlert || function(message) {
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(0,0,0,0.45)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '9999';
+
+        const box = document.createElement('div');
+        box.style.background = '#fff';
+        box.style.borderRadius = '10px';
+        box.style.maxWidth = '90%';
+        box.style.minWidth = '260px';
+        box.style.padding = '18px 20px';
+        box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+
+        const msg = document.createElement('div');
+        msg.style.whiteSpace = 'pre-line';
+        msg.style.color = '#111827';
+        msg.style.fontSize = '14px';
+        msg.style.lineHeight = '1.5';
+        msg.textContent = String(message ?? '');
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = '확인';
+        btn.style.marginTop = '14px';
+        btn.style.padding = '8px 16px';
+        btn.style.border = '1px solid #e5e7eb';
+        btn.style.borderRadius = '8px';
+        btn.style.background = '#111827';
+        btn.style.color = '#fff';
+        btn.style.cursor = 'pointer';
+
+        const close = () => overlay.remove();
+        btn.addEventListener('click', close);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) close();
+        });
+
+        box.appendChild(msg);
+        box.appendChild(btn);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+    };
+    window.showAlert = showAlert;
+
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
     // 1. 섹션 관리는 먼저 실행 (화면 레이아웃 잡기)
@@ -803,18 +875,20 @@ function renderNotices(dataList) {
     }
 
     let html = '';
-    dataList.forEach(n => {
-        // 카테고리별 뱃지 색상 구분
-        const badgeClass = n.category === '공지' ? 'bg-primary' : (n.category === '뉴스' ? 'bg-success' : 'bg-secondary');
-        const dateStr = n.created_at.split('T')[0].replaceAll('-', '.');
-        
-        // ★ 핵심: onclick에 ID를 넘겨서 모달을 엽니다. (alert 제거됨)
-        html += `
+        dataList.forEach(n => {
+            // 카테고리별 뱃지 색상 구분
+            const badgeClass = n.category === '공지' ? 'bg-primary' : (n.category === '뉴스' ? 'bg-success' : 'bg-secondary');
+            const dateStr = n.created_at.split('T')[0].replaceAll('-', '.');
+            const safeCategory = escapeHtml(n.category || '');
+            const safeTitle = escapeHtml(n.title || '');
+            
+            // ★ 핵심: onclick에 ID를 넘겨서 모달을 엽니다. (alert 제거됨)
+            html += `
           <li class="mb-2 d-flex align-items-center border-bottom pb-2">
-             <span class="badge ${badgeClass} me-2" style="flex-shrink:0;">${n.category}</span> 
+             <span class="badge ${badgeClass} me-2" style="flex-shrink:0;">${safeCategory}</span> 
              <a href="javascript:void(0);" class="text-dark text-decoration-none text-truncate" 
-                onclick="openNoticeDetail('${n.id}')" style="max-width: 60%; display:inline-block;">
-                ${n.title}
+                 onclick="openNoticeDetail('${n.id}')" style="max-width: 60%; display:inline-block;">
+                ${safeTitle}
              </a>
              <small class="text-muted ms-auto">${dateStr}</small>
           </li>
@@ -927,13 +1001,15 @@ function renderModalList(items) {
     let html = '';
     items.forEach(n => {
         const dateStr = n.created_at.split('T')[0];
+        const safeCategory = escapeHtml(n.category || '');
+        const safeTitle = escapeHtml(n.title || '');
         // 클릭 시 '상세 읽기 모달'로 이동
         html += `
           <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
               onclick="openNoticeDetail('${n.id}')" style="cursor:pointer;">
              <div>
-                <span class="badge bg-light text-dark border me-1">${n.category}</span>
-                <span class="fw-bold text-dark">${n.title}</span>
+                <span class="badge bg-light text-dark border me-1">${safeCategory}</span>
+                <span class="fw-bold text-dark">${safeTitle}</span>
              </div>
              <small class="text-muted">${dateStr}</small>
           </li>
@@ -963,7 +1039,7 @@ function openNoticeDetail(id) {
     const n = g_notices_list.find(item => item.id == id);
     
     if(!n) {
-        alert("해당 공지사항의 데이터를 찾을 수 없습니다.");
+        showAlert("해당 공지사항의 데이터를 찾을 수 없습니다.");
         return;
     }
 
@@ -972,8 +1048,9 @@ function openNoticeDetail(id) {
     document.getElementById('notice-read-cat').innerText = n.category;
     document.getElementById('notice-read-date').innerText = n.created_at.split('T')[0];
     
-    // 본문 줄바꿈 처리
-    let contentHtml = n.content ? n.content.replace(/\n/g, '<br>') : '';
+    // 본문 줄바꿈 처리 (안전 이스케이프)
+    const safeContent = escapeHtml(n.content || '');
+    let contentHtml = safeContent.replace(/\n/g, '<br>');
 
     // ============================================================
     // ★ [핵심] 영문 파일명 예쁘게 보여주기 로직
@@ -986,6 +1063,8 @@ function openNoticeDetail(id) {
         n.file_urls.forEach(url => {
             // 1. URL이 문자열인지 확인 (안전장치)
             if (typeof url !== 'string') return;
+            const safeLink = safeUrl(url);
+            if (!safeLink) return;
 
             // 2. 파일명 추출 (주소의 마지막 부분 가져오기)
             let fileName = url.split('/').pop();
@@ -996,12 +1075,13 @@ function openNoticeDetail(id) {
             // 4. [뷰티 포인트] 언더바(_)를 공백으로 바꿔서 사람이 읽기 편하게 만듦
             // 예: Yongin_Solar_Notice.pdf -> Yongin Solar Notice.pdf
             let displayName = fileName.replace(/_/g, ' ');
+            const safeDisplay = escapeHtml(displayName);
 
             contentHtml += `
                 <li class="mb-2">
-                    <a href="${url}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center">
+                    <a href="${safeLink}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center" rel="noopener noreferrer">
                         <i class="bi bi-file-earmark-arrow-down fs-5 text-primary me-2"></i>
-                        <span class="text-decoration-underline">${displayName}</span>
+                        <span class="text-decoration-underline">${safeDisplay}</span>
                     </a>
                 </li>
             `;
@@ -1426,8 +1506,11 @@ function openPlantDetail(id) {
 // [수정] About 섹션 데이터 로드 (샘플 강제 삭제 버전)
 // [수정] About 데이터 로드 (점 삭제 + 아이콘 강제 삭제 버전)
     async function fetchAbout() {
-        const { data } = await _client.from('site_about').select('*').single();
-        const defaultData = data || { title:'', subtitle:'', content:'', list_items:'', image_url:'' };
+        const { data, error } = await _client.from('site_about').select('*').limit(1);
+        if (error) return;
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row) return; // keep default static content if no data
+        const defaultData = row;
 
         // 1. 이미지
         const imgEl = document.getElementById('about-img-src');
@@ -1603,27 +1686,29 @@ function openPlantDetail(id) {
        
        // 2. 카드 HTML 생성 (Bootstrap Collapse 활용)
        faqs.forEach((f, index) => {
-           // 줄바꿈 처리 (\n -> <br>)
-           const answerHtml = f.answer ? f.answer.replace(/\n/g, '<br>') : '';
-           
-           html += `
-            <li data-aos="fade-up" data-aos-delay="${index * 100}">
-                <div class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${f.id}" aria-expanded="false" onclick="toggleFaqCard(this)">
-                    <div class="d-flex align-items-center">
-                        <span class="q-icon">Q.</span>
-                        <span>[${f.category}] ${f.question}</span>
-                    </div>
-                    <i class="bi bi-chevron-down toggle-icon"></i>
-                </div>
+            // 줄바꿈 처리 (\n -> <br>) + 이스케이프
+            const safeCategory = escapeHtml(f.category || '');
+            const safeQuestion = escapeHtml(f.question || '');
+            const answerHtml = escapeHtml(f.answer || '').replace(/\n/g, '<br>');
+            
+            html += `
+             <li data-aos="fade-up" data-aos-delay="${index * 100}">
+                 <div class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${f.id}" aria-expanded="false" onclick="toggleFaqCard(this)">
+                     <div class="d-flex align-items-center">
+                         <span class="q-icon">Q.</span>
+                        <span>[${safeCategory}] ${safeQuestion}</span>
+                     </div>
+                     <i class="bi bi-chevron-down toggle-icon"></i>
+                 </div>
 
                 <div id="faq-content-${f.id}" class="collapse answer-block" data-bs-parent="#faq-list-container">
                     <p class="mb-0 mt-2">
                         ${answerHtml}
-                    </p>
-                </div>
-            </li>
-           `;
-       });
+                     </p>
+                 </div>
+             </li>
+            `;
+        });
        
        container.innerHTML = html;
     }
@@ -1677,7 +1762,7 @@ async function handleMainLogin() {
         } else {
             // 취소하면 로그아웃 처리하여 꼬임 방지
             await _client.auth.signOut();
-            alert("로그아웃 되었습니다.");
+            showAlert("로그아웃 되었습니다.");
             location.reload();
         }
     }
