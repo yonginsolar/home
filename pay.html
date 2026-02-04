@@ -11,7 +11,6 @@
         h2 { margin: 0 0 10px 0; color: #191f28; font-size: 24px; font-weight: 700;}
         p.desc { color: #4e5968; font-size: 15px; margin-bottom: 30px; line-height: 1.5; }
 
-        /* 계좌 박스 */
         .account-card { background-color: #f9fafb; border-radius: 12px; padding: 24px; margin-bottom: 24px; text-align: left; }
         .bank-name { font-size: 14px; color: #8b95a1; font-weight: 500; display: block; margin-bottom: 6px; }
         .account-num { font-size: 22px; color: #333d4b; font-weight: 700; word-break: break-all; letter-spacing: -0.5px; }
@@ -19,22 +18,25 @@
         .amount-label { color: #4e5968; font-size: 15px; }
         .amount-val { color: #e65100; font-size: 20px; font-weight: 700; }
 
-        /* 버튼 */
-        .btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 56px; border-radius: 14px; font-size: 17px; font-weight: 600; cursor: pointer; text-decoration: none; border: none; margin-bottom: 12px; transition: 0.2s; }
+        .btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 56px; border-radius: 14px; font-size: 17px; font-weight: 600; cursor: pointer; text-decoration: none; border: none; margin-bottom: 12px; transition: 0.2s; box-sizing: border-box;}
         
-        /* 토스 버튼 (파란색) */
         .btn-toss { background-color: #0064FF; color: white; box-shadow: 0 4px 10px rgba(0, 100, 255, 0.2); }
-        .btn-toss:hover { background-color: #0050cc; }
-
-        /* 복사 버튼 (회색) */
         .btn-copy { background-color: #f2f4f6; color: #4e5968; }
-        .btn-copy:hover { background-color: #e5e8eb; }
 
-        /* 모바일 제어 */
-        .mobile-only { display: none; }
+        /* [핵심 수정] CSS로 제어: 기본은 숨김(none) */
+        .mobile-only-btn { display: none; }
 
-        /* 토스트 */
-        #toast { visibility: hidden; min-width: 250px; background-color: rgba(51, 61, 75, 0.9); color: #fff; text-align: center; border-radius: 50px; padding: 14px 24px; position: fixed; z-index: 99; bottom: 40px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 15px; font-weight: 500; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        /* 화면 너비가 768px 이하(모바일)이면 무조건 보임(flex) */
+        @media screen and (max-width: 768px) {
+            .mobile-only-btn { display: flex !important; }
+            /* PC 안내 멘트 숨김 */
+            .pc-guide { display: none !important; }
+        }
+
+        /* PC일 때만 보이는 안내 멘트용 클래스 */
+        .pc-guide { display: block; }
+
+        #toast { visibility: hidden; min-width: 250px; background-color: rgba(51, 61, 75, 0.9); color: #fff; text-align: center; border-radius: 50px; padding: 14px 24px; position: fixed; z-index: 99; bottom: 40px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 15px; font-weight: 500; }
         #toast.show { visibility: visible; opacity: 1; }
     </style>
 </head>
@@ -42,20 +44,22 @@
 
 <div class="container">
     <h2>출자금 입금 안내</h2>
+    
     <p class="desc" id="guideText">
-        조합원님, 아래 신협 계좌로<br>출자금을 입금해 주세요.
+        <span class="pc-guide">스마트폰 뱅킹으로 입금해 주세요.</span>
+        <span class="mobile-only-btn" style="display:none; flex-direction:column;">조합원님, 아래 신협 계좌로<br>출자금을 입금해 주세요.</span>
     </p>
     
     <div class="account-card">
         <span class="bank-name">신협</span>
-        <div class="account-num" id="accNumDisplay">131-020-667086</div>
+        <div class="account-num">131-022-855516</div>
         <div class="amount-area">
             <span class="amount-label">입금하실 금액</span>
             <span class="amount-val"><span id="displayAmount">0</span>원</span>
         </div>
     </div>
 
-    <a id="linkToss" href="#" class="btn btn-toss mobile-only">
+    <a id="linkToss" href="#" class="btn btn-toss mobile-only-btn">
         토스로 바로 보내기
     </a>
 
@@ -64,7 +68,7 @@
     </button>
     
     <p style="font-size: 13px; color: #8b95a1; margin-top: 16px;">
-        복사 후 사용하시는 은행 앱(카카오뱅크, 농협 등)에서<br>붙여넣기 하시면 됩니다.
+        계좌 복사 후 사용하시는 은행 앱에서<br>붙여넣기 하시면 됩니다.
     </p>
 </div>
 
@@ -72,50 +76,43 @@
 
 <script>
     const CONFIG = {
-        bankName: '신협',
-        bankCode: '048', 
-        accountNo: '131020667086' // 하이픈 없는 숫자
+        bankCode: '048', // 신협
+        accountNo: '131022855516' // 숫자만
     };
 
-document.addEventListener('DOMContentLoaded', () => {
-        // [추가된 기능] URL에서 파라미터 가져오기
-        const params = new URLSearchParams(window.location.search);
-        
-        let amount = params.get('amount'); // 금액
-        const userName = params.get('name'); // 이름 (서버에서 보냈다면)
+    document.addEventListener('DOMContentLoaded', () => {
+        // [수정] JS 감지 로직 강화: UserAgent OR 화면너비 체크
+        // 이제 JS가 실패해도 CSS가 화면 너비 보고 버튼을 띄웁니다.
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
 
-        // 1. 금액 처리 (기존 로직)
-        if (!amount || isNaN(amount)) amount = '0'; // 없으면 0원
-        
-        // 2. 이름 처리 (새로운 로직)
-        // guideText 아이디를 가진 태그가 있다고 가정
-        const guideEl = document.getElementById('guideText');
-        if (userName) {
-            // URL 디코딩 (한글 깨짐 방지)
-            const decodedName = decodeURIComponent(userName);
-            // 멘트 변경: "김민호 조합원님, 아래 신협 계좌로..."
-            guideEl.innerHTML = `<b>${decodedName}</b> 조합원님,<br>아래 신협 계좌로 출자금을 입금해 주세요.`;
-        }
+        // URL 파라미터 처리
+        const params = new URLSearchParams(window.location.search);
+        let amount = params.get('amount');
+        const userName = params.get('name');
+
+        if (!amount || isNaN(amount) || parseInt(amount) <= 0) amount = '1000'; // 테스트용 기본값
 
         // 화면 표시
         document.getElementById('displayAmount').innerText = parseInt(amount).toLocaleString();
 
-        // 토스 링크 활성화 (모바일만)
-        if (isMobile) {
-            document.querySelector('.mobile-only').style.display = 'flex'; // flex로 변경
-            
-            const cleanAccountNo = CONFIG.accountNo.replace(/[^0-9]/g, '');
-            const tossUrl = `supertoss://send?bank=${CONFIG.bankCode}&accountNo=${cleanAccountNo}&amount=${amount}&origin=link`;
-            
-            document.getElementById('linkToss').href = tossUrl;
+        // 이름이 있으면 멘트 교체 (모바일용 멘트 태그 찾아서 넣기)
+        if (userName) {
+            const decodedName = decodeURIComponent(userName);
+            // 모바일용 멘트 영역 찾기 (.mobile-only-btn 클래스를 가진 span)
+            const mobileTextSpan = document.querySelector('p.desc .mobile-only-btn');
+            if(mobileTextSpan) {
+                mobileTextSpan.innerHTML = `<b>${decodedName}</b> 조합원님,<br>아래 신협 계좌로 입금해 주세요.`;
+            }
         }
+
+        // 토스 링크 생성 (모바일 여부와 상관없이 미리 만들어둡니다. 어차피 PC에선 버튼이 안 보이니까요)
+        const cleanAccountNo = CONFIG.accountNo.replace(/[^0-9]/g, '');
+        const tossUrl = `supertoss://send?bank=${CONFIG.bankCode}&accountNo=${cleanAccountNo}&amount=${amount}&origin=link`;
+        document.getElementById('linkToss').href = tossUrl;
     });
 
     async function copyAccount() {
-        // 사용자 편의를 위해 '숫자만' 복사할지 결정. 
-        // 보통 앱들은 숫자만 있는걸 좋아하므로 숫자만 복사합니다.
         const textToCopy = CONFIG.accountNo; 
-        
         try {
             await navigator.clipboard.writeText(textToCopy);
             showToast("계좌번호가 복사되었습니다!");
