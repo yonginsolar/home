@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>용인모두의햇빛 출자금 입금</title>
+    <style>
+        /* [공통 스타일] */
+        body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; background-color: #f0f2f5; margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { background: white; width: 100%; max-width: 420px; padding: 30px 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 16px; box-sizing: border-box; text-align: center; }
+        
+        h2 { margin-top: 0; color: #333; font-size: 22px; }
+        p { color: #666; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+
+        /* 계좌 정보 박스 */
+        .info-box { background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .bank-label { font-size: 14px; color: #888; display: block; margin-bottom: 4px; }
+        .account-number { font-size: 20px; font-weight: bold; color: #333; letter-spacing: -0.5px; word-break: break-all; }
+        .amount-row { margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ced4da; font-size: 18px; color: #333; }
+        .amount-highlight { color: #e65100; font-weight: bold; font-size: 24px; }
+
+        /* 버튼 공통 */
+        .btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 52px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none; margin-bottom: 10px; transition: opacity 0.2s; box-sizing: border-box; }
+        .btn:active { opacity: 0.8; }
+        
+        .btn-copy { background-color: #eff2f5; color: #333; }
+        .btn-toss { background-color: #0064FF; color: white; }
+        .btn-kakao { background-color: #FEE500; color: #191919; }
+
+        /* [PC/모바일 제어용 클래스] */
+        .mobile-only { display: none; } /* 기본은 숨김 */
+        
+        /* 토스트 메시지 */
+        #toast { visibility: hidden; min-width: 250px; background-color: rgba(0,0,0,0.8); color: #fff; text-align: center; border-radius: 50px; padding: 12px 20px; position: fixed; z-index: 99; bottom: 30px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 14px;}
+        #toast.show { visibility: visible; opacity: 1; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>출자금 입금 안내</h2>
+    
+    <p id="guideText">
+        조합원님, 아래 계좌로 입금해 주세요.<br>
+        계좌번호를 누르면 복사됩니다.
+    </p>
+    
+    <div class="info-box">
+        <span class="bank-label">신협</span>
+        <div class="account-number" onclick="copyAccount()" style="cursor: pointer;">
+            131022855516
+        </div>
+        <div class="amount-row">
+            입금액: <span id="displayAmount" class="amount-highlight">0</span>원
+        </div>
+    </div>
+
+    <button class="btn btn-copy" onclick="copyAccount()">
+        계좌번호 복사하기
+    </button>
+
+    <div id="mobileButtonGroup" class="mobile-only">
+        <div style="margin: 20px 0 10px 0; border-top: 1px solid #eee;"></div>
+        
+        <a id="linkToss" href="#" class="btn btn-toss">
+            토스로 바로 보내기 (자동입력)
+        </a>
+
+        <a id="linkKakao" href="#" class="btn btn-kakao" onclick="copyAccount(true)">
+            카카오페이로 보내기
+        </a>
+        <p style="font-size: 12px; color: #999; margin-top: 8px;">
+            * 카카오페이는 실행 시 계좌가 자동 복사됩니다.
+        </p>
+    </div>
+</div>
+
+<div id="toast">계좌번호가 복사되었습니다</div>
+
+<script>
+    // --- [설정값 수정 완료] ---
+    const CONFIG = {
+        bankName: '신협',
+        bankCode: '048', // 신협 코드
+        accountNo: '131020667086' // 하이픈 뺀 실제 계좌번호 입력하세요 (테스트용 더미데이터 아님 주의)
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // 1. 모바일 여부 감지 (방어적 코딩)
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        
+        // 2. 모바일이면 앱 연동 버튼 표시
+        if (isMobile) {
+            document.getElementById('mobileButtonGroup').style.display = 'block';
+        } else {
+            // PC면 안내 멘트 변경
+            document.getElementById('guideText').innerHTML = 
+                "PC 카카오톡으로 접속하셨군요!<br>사용하시는 은행 앱이나 인터넷 뱅킹으로<br>아래 계좌에 입금해 주세요.";
+        }
+
+        // 3. 금액 파싱
+        const params = new URLSearchParams(window.location.search);
+        let amount = params.get('amount');
+        if (!amount || isNaN(amount)) amount = '0'; // 기본값
+
+        // 4. 화면 렌더링
+        document.getElementById('displayAmount').innerText = parseInt(amount).toLocaleString();
+
+        // 5. 링크 생성 (모바일용)
+        if (isMobile) {
+            // 토스: 신협(048) 적용
+            const tossUrl = `supertoss://send?bank=${CONFIG.bankCode}&accountNo=${CONFIG.accountNo}&amount=${amount}&origin=applink`;
+            document.getElementById('linkToss').href = tossUrl;
+
+            // 카카오: 홈 화면 이동
+            document.getElementById('linkKakao').href = 'kakaotalk://kakaopay/home';
+        }
+    });
+
+    // 계좌 복사 로직
+    async function copyAccount(isSilent = false) {
+        // 하이픈이 포함된 텍스트가 아니라, 숫자만 있는 CONFIG.accountNo를 복사할지,
+        // 아니면 화면에 보이는 하이픈 포함 텍스트를 복사할지 결정해야 함.
+        // 은행 앱 호환성을 위해 '숫자만' 복사하는 것이 가장 안전함.
+        const textToCopy = CONFIG.accountNo; 
+
+        try {
+            await navigator.clipboard.writeText(textToCopy);
+            if (!isSilent) showToast("계좌번호가 복사되었습니다!");
+        } catch (err) {
+            console.error('복사 실패', err);
+            if (!isSilent) prompt("직접 복사해주세요:", textToCopy);
+        }
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById("toast");
+        toast.innerText = msg;
+        toast.className = "show";
+        setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
+    }
+</script>
+
+</body>
+</html>
