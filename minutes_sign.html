@@ -3,80 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>전자서명 시스템</title>
+    <title>전자서명 - 용인모두의햇빛협동조합</title>
     <style>
-        :root { --primary: #2563eb; --bg: #f1f5f9; --text: #1e293b; }
-        body { margin: 0; font-family: sans-serif; background: var(--bg); color: var(--text); padding-bottom: 100px; }
+        :root {
+            --primary: #2563eb;
+            --bg: #525659; /* PDF 뷰어 같은 어두운 배경 */
+        }
+        body {
+            margin: 0; padding: 20px;
+            background-color: var(--bg);
+            font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+            display: flex; justify-content: center;
+            padding-bottom: 100px; /* 하단 버튼 공간 */
+        }
 
-        .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+        /* A4 용지 스타일 (HTML 디자인) */
+        .a4-paper {
+            background: white;
+            width: 100%; max-width: 210mm; /* A4 폭 */
+            min-height: 297mm; /* A4 높이 */
+            padding: 25mm; /* 표준 여백 */
+            box-sizing: border-box;
+            box-shadow: 0 0 15px rgba(0,0,0,0.3);
+            position: relative;
+        }
+
+        /* 문서 내부 스타일 */
+        .doc-header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+        .doc-title { font-size: 24pt; font-weight: bold; margin: 0; }
+        .doc-info { font-size: 11pt; margin-top: 10px; color: #555; }
         
-        .paper {
-            background: white; padding: 40px; border-radius: 4px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            min-height: 600px;
-            position: relative;
+        .doc-body {
+            font-size: 12pt; line-height: 1.8; text-align: justify;
+        }
+        
+        /* 서명란 그리드 (하단 배치) */
+        .signature-section {
+            margin-top: 60px;
+            border-top: 1px solid #ccc;
+            padding-top: 20px;
+        }
+        .sig-title { font-size: 14pt; font-weight: bold; margin-bottom: 20px; text-align: center; }
+        
+        .sig-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            justify-items: center;
         }
 
-        .minute-title { text-align: center; font-size: 1.5rem; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-        .minute-content { line-height: 1.8; font-size: 1rem; color: #333; white-space: pre-wrap; }
-
-        /* 서명란 영역 스타일 (모두싸인 느낌) */
-        .sign-grid {
-            display: flex; gap: 10px; margin-top: 50px; justify-content: flex-end; flex-wrap: wrap;
-        }
-        .sign-box {
+        .sig-stamp-box {
             width: 80px; height: 80px;
-            border: 1px solid #ddd;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
+            border: 1px dashed #ccc; /* 서명 전 점선 */
+            border-radius: 50%; /* 도장 모양 */
+            display: flex; align-items: center; justify-content: center;
             position: relative;
         }
-        .sign-box span { font-size: 0.7rem; color: #888; margin-bottom: 5px; }
-        .stamp-img { width: 60px; height: 60px; object-fit: contain; }
+        .sig-stamp-box.signed { border: none; } /* 서명 후 테두리 제거 */
 
-        /* 하단 고정 버튼 */
+        .official-name { font-size: 10pt; margin-top: 5px; font-weight: bold; }
+        .stamp-img { width: 100%; height: 100%; object-fit: contain; }
+
+        /* 하단 고정 액션바 */
         .bottom-bar {
             position: fixed; bottom: 0; left: 0; width: 100%;
-            background: white; border-top: 1px solid #ddd;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(5px);
+            border-top: 1px solid #ddd;
             padding: 15px; text-align: center;
-            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
+            display: flex; justify-content: center; align-items: center; gap: 20px;
         }
-        .btn-action {
-            background: var(--primary); color: white; border: none;
-            padding: 15px 40px; border-radius: 8px; font-size: 1.1rem; font-weight: bold;
-            cursor: pointer; transition: 0.2s;
+        .btn-sign {
+            background: var(--primary); color: white;
+            padding: 12px 30px; border: none; border-radius: 8px;
+            font-size: 1.1rem; font-weight: bold; cursor: pointer;
         }
-        .btn-action:disabled { background: #cbd5e1; cursor: not-allowed; }
-        .btn-action:hover:not(:disabled) { background: #1e40af; }
+        .btn-sign:disabled { background: #cbd5e1; cursor: not-allowed; }
 
-        /* 도장 찍히는 애니메이션 */
-        @keyframes stamp-in {
-            0% { transform: scale(3); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
+        /* 인쇄 시 설정 */
+        @media print {
+            body { background: white; padding: 0; }
+            .a4-paper { box-shadow: none; width: 100%; max-width: 100%; padding: 0; }
+            .bottom-bar { display: none; }
         }
-        .stamped { animation: stamp-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <div class="paper">
-            <h2 class="minute-title" id="doc-title">문서 로딩 중...</h2>
-            
-            <div class="minute-content" id="doc-content">
-                </div>
+    <div class="a4-paper">
+        <div class="doc-header">
+            <h1 class="doc-title" id="ui-title">회의록 로딩 중...</h1>
+            <div class="doc-info" id="ui-date"></div>
+        </div>
 
-            <div class="sign-grid" id="sign-area">
+        <div class="doc-body" id="ui-content">
+            </div>
+
+        <div class="signature-section">
+            <div class="sig-title">위와 같이 의결하고 서명합니다.</div>
+            <div class="sig-grid" id="ui-sig-grid">
                 </div>
         </div>
     </div>
 
     <div class="bottom-bar">
-        <p id="my-seal-status" style="font-size:0.8rem; color:#64748b; margin-bottom:5px;">
-            내 도장 확인 중...
-        </p>
-        <button id="btn-sign" class="btn-action" disabled onclick="doSign()">
-            문서 확인 및 서명하기
+        <div id="my-status" style="font-size: 0.9rem; color: #333;">
+            내 정보 확인 중...
+        </div>
+        <button id="btn-action" class="btn-sign" disabled onclick="handleSign()">
+            서명 날인하기
         </button>
     </div>
 
@@ -86,15 +122,15 @@
         const urlParams = new URLSearchParams(window.location.search);
         const minuteId = urlParams.get('id');
 
-        let myMemberId = null; // coop_members ID (UUID 아님)
-        let myAuthId = null;   // auth.users ID
-        let mySealUrl = null;  // 미리 등록된 도장 URL
-        let isSigned = false;
+        let myOfficialId = null; 
+        let mySealUrl = null;
+        let myName = null;
+        let myAuthId = null;
 
         async function init() {
-            if(!minuteId) return alert("문서 ID가 없습니다.");
+            if(!minuteId) return alert("문서 정보가 없습니다.");
 
-            // 1. 로그인 세션 확인
+            // 1. 세션 확인
             const { data: { session } } = await supabase.auth.getSession();
             if(!session) {
                 alert("로그인이 필요합니다.");
@@ -103,116 +139,113 @@
             }
             myAuthId = session.user.id;
 
-            // 2. 내 정보 및 '등록된 도장' 가져오기
+            // 2. [수정됨] coop_officials 조회 로직
+            // (1) 내 auth_id -> coop_members -> member_id 찾기
             const { data: member } = await supabase
                 .from('coop_members')
-                .select('id, name, seal_url') // seal_url이 있어야 함
+                .select('member_id, name')
                 .eq('email', session.user.email)
                 .single();
 
-            if(!member) return alert("조합원 정보를 찾을 수 없습니다.");
-            
-            myMemberId = member.id;
-            
-            // 도장 등록 여부 체크
-            const statusMsg = document.getElementById('my-seal-status');
-            const btn = document.getElementById('btn-sign');
+            if(member) {
+                myName = member.name;
+                // (2) member_id -> coop_officials -> id, seal_url 찾기
+                const { data: official } = await supabase
+                    .from('coop_officials')
+                    .select('id, seal_url')
+                    .eq('member_id', member.member_id) // 외래키 연결 확인 필요
+                    .eq('status', 'active') // 현직 임원만
+                    .maybeSingle();
 
-            if (member.seal_url) {
-                mySealUrl = member.seal_url;
-                statusMsg.innerText = `✅ 등록된 인감 (${member.name})을 사용하여 서명합니다.`;
-                btn.disabled = false; 
-            } else {
-                statusMsg.innerHTML = `<span style="color:red;">⚠️ 등록된 도장이 없습니다. 관리자에게 문의하세요.</span>`;
-                btn.innerText = "서명 불가 (도장 미등록)";
-                btn.disabled = true;
+                if(official) {
+                    myOfficialId = official.id;
+                    mySealUrl = official.seal_url;
+                    
+                    const statusEl = document.getElementById('my-status');
+                    if(mySealUrl) {
+                        statusEl.innerHTML = `<b>${myName}</b> 이사님, 등록된 인감이 확인되었습니다.`;
+                        document.getElementById('btn-action').disabled = false;
+                    } else {
+                        statusEl.innerHTML = `<span style="color:red;">${myName}님은 임원이지만 도장 이미지가 등록되지 않았습니다.</span>`;
+                    }
+                } else {
+                    document.getElementById('my-status').innerText = "임원 명단에 귀하의 정보가 없습니다.";
+                }
             }
 
-            // 3. 회의록 및 기존 서명 현황 로드
-            await loadDocument();
+            loadMinuteData();
         }
 
-        async function loadDocument() {
+        async function loadMinuteData() {
             // 회의록 본문
             const { data: doc } = await supabase.from('minutes').select('*').eq('id', minuteId).single();
-            document.getElementById('doc-title').innerText = doc.title;
-            document.getElementById('doc-content').innerHTML = doc.content;
+            if(!doc) return alert("문서를 찾을 수 없습니다.");
 
-            // 이미 서명된 데이터들 로드
+            document.getElementById('ui-title').innerText = doc.title;
+            document.getElementById('ui-date').innerText = `작성일: ${new Date(doc.created_at).toLocaleDateString()}`;
+            document.getElementById('ui-content').innerHTML = doc.content;
+
+            // 기존 서명 로드
             const { data: signatures } = await supabase
                 .from('doc_signatures')
-                .select('member_uuid, signature_url, signed_at')
-                .eq('minute_id', minuteId);
+                .select('official_id, signature_url');
 
-            // 서명란 그리기 (이미 서명한 사람은 도장 보여주기)
+            // 서명 그리드 렌더링 (현재는 서명한 사람만 보여주는 방식)
+            // *고도화 팁: 전체 임원 리스트를 불러와서 안 한 사람은 빈칸으로 두는게 좋음 (추후 구현)*
             renderSignatures(signatures || []);
         }
 
         function renderSignatures(signatures) {
-            const area = document.getElementById('sign-area');
-            
-            // 내 서명 여부 확인
-            const mySig = signatures.find(s => s.member_uuid === myAuthId);
-            if (mySig) {
-                isSigned = true;
-                const btn = document.getElementById('btn-sign');
-                btn.innerText = "✅ 서명 완료됨";
-                btn.disabled = true;
-                btn.style.background = "#10b981"; // 녹색
-            }
-
-            // [시각화] 서명된 도장들을 하단에 나열 (모두싸인 스타일)
-            // 실제로는 '참석 이사' 명단을 DB에서 불러와서 빈 칸도 만들어야 하지만,
-            // 여기서는 '서명된 도장'만 나열하는 형태로 구현합니다.
+            const grid = document.getElementById('ui-sig-grid');
             let html = '';
+            
+            // 이미 서명한 도장들 표시
             signatures.forEach(sig => {
                 html += `
-                    <div class="sign-box" style="border-color: #2563eb; background: #eff6ff;">
-                        <img src="${sig.signature_url}" class="stamp-img stamped">
+                    <div style="text-align:center;">
+                        <div class="sig-stamp-box signed">
+                            <img src="${sig.signature_url}" class="stamp-img">
+                        </div>
+                        <div class="official-name">(서명완료)</div>
                     </div>
                 `;
             });
 
-            // 내가 아직 안 했으면 빈 칸 하나 보여주기 (예시)
-            if (!isSigned && mySealUrl) {
+            // 내가 아직 안 했고, 도장이 있다면 '내 자리' 예시 보여주기
+            const iSigned = signatures.find(s => s.official_id === myOfficialId);
+            if (!iSigned && mySealUrl) {
                 html += `
-                    <div class="sign-box" style="border-style: dashed;">
-                        <span style="color:#ccc;">(내 서명 위치)</span>
+                    <div style="text-align:center; opacity: 0.5;">
+                        <div class="sig-stamp-box">
+                            <span style="font-size:0.7rem;">(내 서명 위치)</span>
+                        </div>
+                        <div class="official-name">${myName}</div>
                     </div>
                 `;
+            } else if (iSigned) {
+                document.getElementById('btn-action').innerText = "✅ 서명 완료됨";
+                document.getElementById('btn-action').disabled = true;
+                document.getElementById('btn-action').style.background = "#10b981";
             }
 
-            area.innerHTML = html;
+            grid.innerHTML = html;
         }
 
-        // [핵심] 서명 실행 함수
-        window.doSign = async () => {
-            if (!confirm("문서 내용을 모두 확인하였으며,\n등록된 인감으로 서명하시겠습니까?")) return;
+        window.handleSign = async () => {
+            if(!confirm("이 회의록의 내용을 확인하였으며,\n등록된 인감으로 날인하시겠습니까?")) return;
 
-            const btn = document.getElementById('btn-sign');
-            btn.disabled = true;
-            btn.innerText = "처리 중...";
+            const { error } = await supabase.from('doc_signatures').insert({
+                minute_id: minuteId,
+                official_id: myOfficialId,
+                member_uuid: myAuthId,
+                signature_url: mySealUrl
+            });
 
-            try {
-                // DB에 기록 (이미지는 coop_members에 있는 URL 그대로 사용)
-                const { error } = await supabase
-                    .from('doc_signatures')
-                    .insert({
-                        minute_id: minuteId,
-                        member_uuid: myAuthId,
-                        signature_url: mySealUrl // 핵심: 파일 업로드 없이 URL만 복사
-                    });
-
-                if (error) throw error;
-
-                alert("서명이 완료되었습니다.");
+            if(error) {
+                alert("서명 실패: " + error.message);
+            } else {
+                alert("정상적으로 서명되었습니다.");
                 location.reload();
-
-            } catch (e) {
-                console.error(e);
-                alert("서명 실패: " + e.message);
-                btn.disabled = false;
-                btn.innerText = "문서 확인 및 서명하기";
             }
         };
 
