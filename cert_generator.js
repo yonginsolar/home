@@ -47,7 +47,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         try {
             const { data: sealBlob } = await supabaseClient.storage.from('attachments').download('Official Seal.png');
             if (sealBlob) sealDataUrl = await blobToDataURL(sealBlob);
-        } catch (e) { console.warn("직인 로드 실패", e); }
+        } catch (e) { void 0; }
 
         // (C) 로고 (assets/logo_length.png)
         let logoDataUrl = null;
@@ -62,7 +62,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
                 await new Promise(r => img.onload = r);
                 logoRatio = img.height / img.width;
             }
-        } catch (e) { console.warn("로고 로드 실패", e); }
+        } catch (e) { void 0; }
 
 
         // -----------------------------------------------------------
