@@ -14,12 +14,12 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="cert_generator.js"></script>
+<script src="/cert_generator.js"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
-<script src="badges.js"></script>
+<script src="/badges.js"></script>
 
-<link href="style.css" rel="stylesheet">
+<link href="/style.css" rel="stylesheet">
 
 <style>
 
@@ -292,11 +292,11 @@ gtag('config', 'G-TR217L7JN9');
 <div class="container d-flex align-items-center justify-content-between">
 
 <div class="logo">
-<h1><a href="index.html">용인모두의햇빛협동조합</a></h1>
+<h1><a href="/index.html">용인모두의햇빛협동조합</a></h1>
 </div>
 
 <div class="d-flex align-items-center">
-<a href="index.html" class="header-link" title="메인으로 이동">
+<a href="/index.html" class="header-link" title="메인으로 이동">
 <i class="bi bi-house-door"></i>
 </a>
 <a href="#" onclick="logout()" id="headerLogoutBtn" class="header-link hidden" title="로그아웃">
@@ -987,8 +987,8 @@ oninput="autoHyphen(this)">
 <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" onclick="closeDaumPostcode()" alt="닫기 버튼">
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="footer.js"></script>
-<script src="home_patch_note.js"></script>
+<script src="/footer.js"></script>
+<script src="/home_patch_note.js"></script>
 
 <script>
 // =========================================================================
@@ -1012,38 +1012,23 @@ console.error("Supabase Init Error", e);
 alert("시스템 연결 오류");
 }
 
-// [신규] URL로 전달된 토큰을 낚아채서 세션 복구하기
+// [수정] URL 토큰은 사용하지 않고 정리만 수행 (로컬 스토리지 세션만 사용)
 async function handleManualSession() {
 const params = new URLSearchParams(window.location.search);
-const accessToken = params.get('at');
-const refreshToken = params.get('rt');
-
-if (accessToken && refreshToken) {
-console.log("URL에서 인증 토큰 발견! 세션 복구 시도...");
-
-// 1. 수동으로 세션 설정
-const { data, error } = await _supabase.auth.setSession({
-access_token: accessToken,
-refresh_token: refreshToken
-});
-
-if (!error && data.session) {
-console.log("세션 복구 성공!");
-
-// 2. URL에서 토큰 흔적 지우기 (보안 및 미관상)
-// 현재 페이지 주소에서 파라미터만 싹 제거해서 주소창 업데이트
+if (params.has('at') || params.has('rt')) {
 const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
 window.history.replaceState({}, document.title, cleanUrl);
-
-// 3. (중요) 전역 변수 업데이트해주기
-curAuth = data.session.user;
-
-// 4. 원래 로직 실행 (handleLoginSuccess 등 호출 필요하면 여기서 호출)
-// 하지만 보통 아래쪽 onAuthStateChange가 이걸 감지하고 알아서 실행함.
-} else {
-console.error("세션 복구 실패:", error);
 }
 }
+// [신규] XSS 방지용 간단 이스케이프
+function escapeHtml(value) {
+if (value === null || value === undefined) return '';
+return String(value)
+.replace(/&/g, '&amp;')
+.replace(/</g, '&lt;')
+.replace(/>/g, '&gt;')
+.replace(/"/g, '&quot;')
+.replace(/'/g, '&#39;');
 }
 // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
 async function reloadDashboard() {
@@ -1821,6 +1806,7 @@ const appTypeMap = { 'extra': '추가출자', 'reduction': '감자신청', 'with
 apps.forEach(app => {
 let statusBadge = '';
 let actionBtns = '';
+const safeReason = app.reason ? escapeHtml(app.reason).replace(/\n/g, '<br>') : '';
 
 // (1) 상태 뱃지 결정
 if (app.status === 'approved') {
@@ -1861,7 +1847,7 @@ html: `
                        </div>
                        <p class="small text-muted mb-0 mt-1">
                            ${app.amount > 0 ? Number(app.amount).toLocaleString()+'원' : ''} 
-                           ${app.reason ? '<br>사유: '+app.reason : ''}
+                           ${safeReason ? '<br>사유: '+safeReason : ''}
                        </p>
                        ${actionBtns}
                    </div>
@@ -2232,21 +2218,11 @@ async function startKakaoLogin() {
         // [백업용] 로컬 스토리지 저장 (하위 호환성 유지)
         localStorage.setItem('auth_destination', nextTarget);
 
-        // 2. 콜백 URL 생성 로직 개선 (핵심 수정)
-        // 기존: window.location.href.replace('membermanage.html', 'auth_callback.html');
-        // 변경: 현재 URL의 '마지막 파일명' 부분을 무조건 'auth_callback.html'로 교체
+        // 2. 콜백 URL 생성 로직 개선
         // 예: .../index.html -> .../auth_callback.html
         // 예: .../membermanage.html -> .../auth_callback.html
         // 예: .../ (파일명 없는 경우) -> .../auth_callback.html
-        let baseUrl = window.location.href;
-        
-        if (baseUrl.endsWith('/')) {
-            // 파일명 없이 끝나는 경우 (예: https://site.com/)
-            baseUrl = baseUrl + 'auth_callback.html';
-        } else {
-            // 파일명이 있는 경우, 마지막 슬래시 이후를 교체
-            baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + 'auth_callback.html';
-        }
+        const baseUrl = new URL('/auth_callback.html', window.location.href).href;
 
         // 최종 Redirect URL 조립
         const redirectUrl = `${baseUrl}?next=${encodeURIComponent(nextTarget)}`;
@@ -2752,20 +2728,28 @@ filteredList.forEach(m => {
 const typeBadge = m.member_type === '단체' ? '<span class="badge bg-info">단체</span>' : '<span class="badge bg-secondary">개인</span>';
 // 이메일 마스킹 (선택 사항)
 const emailDisplay = m.email || '이메일 없음';
+const safeName = escapeHtml(m.name || '');
+const safeEmail = escapeHtml(emailDisplay);
+const safeId = escapeHtml(m.id || '');
 
 html += `
            <li class="list-group-item d-flex justify-content-between align-items-center p-2">
                <div>
-                   ${typeBadge} <b>${m.name}</b>
-                   <br><span class="text-muted x-small">${emailDisplay}</span>
+                   ${typeBadge} <b>${safeName}</b>
+                   <br><span class="text-muted x-small">${safeEmail}</span>
                </div>
-               <button class="btn btn-sm btn-outline-primary" onclick="requestConnect('${m.id}', '${m.name}')">
+               <button class="btn btn-sm btn-outline-primary btn-connect" data-id="${safeId}" data-name="${safeName}">
                    연결 신청
                </button>
            </li>`;
 });
 html += '</ul>';
 area.innerHTML = html;
+area.querySelectorAll('.btn-connect').forEach(btn => {
+btn.addEventListener('click', () => {
+requestConnect(btn.dataset.id, btn.dataset.name || '');
+});
+});
 }
 
 // 5. [탭2] 연결 신청 (Propose) -> coop_applications 테이블 활용
@@ -3911,16 +3895,15 @@ alert("시스템 로딩 중입니다. 잠시 후 다시 시도해주세요.");
 return;
 }
 
-// [핵심 변경] getSession() 대신 getUser()를 사용하여 서버 유효성 검증
-// getSession: 브라우저 캐시만 확인함 (빠르지만 폐기된 토큰 모름)
-// getUser: 서버에 직접 물어봄 (확실함)
-console.log("2. 서버에 세션 유효성 확인 중...");
+// [수정] 로컬 스토리지 세션 확인
+console.log("2. 로컬 세션 유효성 확인 중...");
 
-const { data, error } = await client.auth.getUser();
+const { data, error } = await client.auth.getSession();
+const session = data ? data.session : null;
 
-// 에러가 있거나 user 정보가 없으면 -> 이미 로그아웃된 상태임
-if (error || !data || !data.user) {
-console.warn("⚠️ 세션 만료됨 (서버 확인 결과). 강제 로그아웃 처리.");
+// 에러가 있거나 세션이 없으면 -> 로그아웃된 상태임
+if (error || !session || !session.user) {
+console.warn("⚠️ 세션 없음 (로컬 확인 결과). 강제 로그아웃 처리.");
 
 alert("보안을 위해 다시 로그인이 필요합니다.");
 
@@ -3930,17 +3913,8 @@ location.reload();
 return;
 }
 
-// 3. 유효하다면 현재 세션 정보를 가져와서 토큰 추출
-// (getUser는 user객체만 주므로, 토큰을 얻기 위해 getSession을 다시 호출해도 안전함)
-const { data: sessionData } = await client.auth.getSession();
-
-console.log("3. 유효한 토큰 확보 완료");
-const accessToken = sessionData.session.access_token;
-const refreshToken = sessionData.session.refresh_token;
-
-// 4. 이동
-const targetUrl = `http://vote.yonginsolar.kr/vote_login.html?at=${accessToken}&rt=${refreshToken}`;
-
+// 3. 유효하다면 테스트 투표 페이지로 이동 (세션 공유)
+const targetUrl = '/vote/vote_login.html';
 window.location.href = targetUrl;
 }
 
@@ -3998,7 +3972,7 @@ card.classList.add('hidden'); // 에러 시 안전하게 숨김
 // [신규] 지도 페이지 이동 함수
 function goToSolarMap() {
 // 새 창으로 열기
-window.open('map.html', '_blank'); 
+window.open('/map.html', '_blank'); 
 }
 </script>
 </body>
