@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>전자서명 시스템</title>
+    <style>
+        /* [기존 디자인 시스템 계승] */
+        :root {
+            --primary: #2563eb;
+            --bg-color: #f1f5f9;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-sub: #64748b;
+            --border: #e2e8f0;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding-bottom: 120px;
+        }
+
+        /* 헤더 */
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 1rem;
+            text-align: center;
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; z-index: 50;
+        }
+        .header h1 { margin: 0; font-size: 1.25rem; }
+
+        /* 컨테이너 */
+        .container { max-width: 600px; margin: 0 auto; padding: 16px; }
+
+        /* 회의록 카드 스타일 */
+        .minute-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+        .minute-content {
+            background: #f8fafc;
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            min-height: 200px;
+            white-space: pre-line;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: #334155;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* 도장 업로드 영역 */
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 20px;
+            cursor: pointer;
+            transition: 0.2s;
+            background: #fff;
+        }
+        .upload-area:hover { border-color: var(--primary); background: #eff6ff; }
+        .upload-area.active { border-color: var(--primary); background: #eff6ff; }
+        
+        #preview-img {
+            max-width: 100px;
+            max-height: 100px;
+            margin-top: 10px;
+            display: none;
+            border: 1px solid #ddd;
+            border-radius: 50%; /* 도장처럼 원형 */
+        }
+
+        /* 하단 버튼 */
+        .bottom-action {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: white; padding: 16px;
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.05);
+            text-align: center; box-sizing: border-box; z-index: 100;
+        }
+        .btn-enter {
+            width: 100%; max-width: 500px; padding: 16px;
+            background: var(--primary); color: white;
+            border: none; border-radius: 14px;
+            font-size: 1.1rem; font-weight: 800; cursor: pointer;
+        }
+        .btn-enter:disabled { background: #94a3b8; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <h1 id="page-title">회의록 전자서명</h1>
+        <p style="margin:5px 0 0; font-size:0.85rem; color:#64748b;" id="user-greeting">로그인 확인 중...</p>
+    </header>
+
+    <div class="container">
+        <div class="minute-card">
+            <h2 id="minute-title" style="margin-top:0;">문서 로딩 중...</h2>
+            <p style="font-size:0.85rem; color:#64748b; margin-bottom:10px;">
+                ※ 내용을 꼼꼼히 확인하신 후, 하단에 서명(도장)을 업로드해주세요.
+            </p>
+            <div class="minute-content" id="minute-body">
+                (데이터를 불러오는 중입니다)
+            </div>
+        </div>
+
+        <div class="minute-card">
+            <h3 style="margin-top:0;">✍️ 서명(도장) 첨부</h3>
+            <p style="font-size:0.9rem; color:#475569;">
+                사용하실 인감/서명 이미지(PNG, JPG)를 선택해주세요.<br>
+                <span style="font-size:0.8rem; color:#ef4444;">* 배경이 투명한 PNG 파일을 권장합니다.</span>
+            </p>
+            
+            <input type="file" id="file-input" accept="image/png, image/jpeg" style="display: none;">
+            
+            <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <div id="upload-placeholder">
+                    <span style="font-size:2rem;">📂</span><br>
+                    <span style="font-weight:bold; color:var(--primary);">클릭하여 이미지 선택</span>
+                </div>
+                <img id="preview-img" src="" alt="서명 미리보기">
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-action">
+        <button id="btn-submit" class="btn-enter" disabled onclick="submitSignature()">
+            서명 제출하기
+        </button>
+    </div>
+
+    <script type="module">
+        // 1. 기존 선거 시스템과 동일한 Supabase 클라이언트 사용
+        import { supabase } from './ElectionService.js'; 
+
+        // URL에서 회의록 ID 가져오기 (?id=...)
+        const urlParams = new URLSearchParams(window.location.search);
+        const minuteId = urlParams.get('id');
+
+        let myInfo = null;
+        let selectedFile = null;
+        let isAlreadySigned = false;
+
+        // [초기화]
+        async function init() {
+            // 1. 세션 체크 (기존 코드와 동일 로직)
+            const { data: { session }, error } = await supabase.auth.getSession();
+            if (error || !session) {
+                alert("로그인이 필요합니다.");
+                window.location.href = '/membermanage.html';
+                return;
+            }
+
+            // 2. 사용자 정보 로드
+            try {
+                const { data: member } = await supabase
+                    .from('coop_members')
+                    .select('id, name, role')
+                    .eq('email', session.user.email)
+                    .single();
+                
+                if(member) {
+                    myInfo = member;
+                    document.getElementById('user-greeting').innerText = `${member.name} 이사님, 환영합니다.`;
+                }
+            } catch(e) { console.warn(e); }
+
+            // 3. 회의록 데이터 로드
+            if(minuteId) {
+                await loadMinuteData(minuteId);
+                await checkExistingSignature(minuteId, session.user.id); // 서명 여부 확인
+            } else {
+                alert("잘못된 접근입니다 (문서 ID 누락).");
+                window.history.back();
+            }
+        }
+
+        // [회의록 로드]
+        async function loadMinuteData(id) {
+            const { data, error } = await supabase
+                .from('minutes')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if(error || !data) {
+                alert("회의록을 찾을 수 없습니다.");
+                return;
+            }
+
+            document.getElementById('minute-title').innerText = data.title;
+            // HTML 태그가 포함되어 있다면 innerHTML, 아니면 innerText
+            document.getElementById('minute-body').innerHTML = data.content || "내용 없음";
+        }
+
+        // [이미 서명했는지 확인]
+        async function checkExistingSignature(mId, userId) {
+            const { data } = await supabase
+                .from('doc_signatures')
+                .select('id')
+                .eq('minute_id', mId)
+                .eq('member_uuid', userId) // auth.users id 기준
+                .maybeSingle();
+
+            if (data) {
+                isAlreadySigned = true;
+                const btn = document.getElementById('btn-submit');
+                btn.innerText = "✅ 이미 서명을 완료했습니다";
+                btn.style.backgroundColor = "#10b981";
+                btn.disabled = true;
+                
+                // 업로드 영역 비활성화
+                document.getElementById('drop-zone').onclick = null;
+                document.getElementById('upload-placeholder').innerHTML = "<span style='color:green'>서명 완료됨</span>";
+            }
+        }
+
+        // [이미지 선택 이벤트 핸들러]
+        const fileInput = document.getElementById('file-input');
+        fileInput.addEventListener('change', (e) => {
+            if(isAlreadySigned) return;
+
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // 파일 타입 검증 (방어적 코딩)
+            if (!['image/png', 'image/jpeg'].includes(file.type)) {
+                alert('PNG 또는 JPG 이미지만 업로드 가능합니다.');
+                return;
+            }
+
+            // 파일 크기 제한 (예: 2MB)
+            if (file.size > 2 * 1024 * 1024) {
+                alert('이미지 크기는 2MB 이하여야 합니다.');
+                return;
+            }
+
+            selectedFile = file;
+
+            // 미리보기 표시
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.getElementById('preview-img');
+                img.src = e.target.result;
+                img.style.display = 'inline-block';
+                document.getElementById('upload-placeholder').style.display = 'none';
+                
+                // 버튼 활성화
+                const btn = document.getElementById('btn-submit');
+                btn.disabled = false;
+                btn.innerText = "서명 제출하기";
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // [서명 제출 로직]
+        window.submitSignature = async () => {
+            if (!selectedFile || !myInfo) return;
+            if (!confirm("이 서명 이미지를 제출하시겠습니까?\n제출 후에는 수정할 수 없습니다.")) return;
+
+            const btn = document.getElementById('btn-submit');
+            btn.disabled = true;
+            btn.innerText = "업로드 중...";
+
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                
+                // 1. 스토리지에 이미지 업로드
+                // 파일명 중복 방지를 위해 난수/시간 추가
+                const fileExt = selectedFile.name.split('.').pop();
+                const filePath = `signatures/${minuteId}/${session.user.id}_${Date.now()}.${fileExt}`;
+
+                const { error: uploadError } = await supabase.storage
+                    .from('signatures') // 버킷 이름 확인 필요
+                    .upload(filePath, selectedFile);
+
+                if (uploadError) throw uploadError;
+
+                // 2. 공개 URL 가져오기
+                const { data: { publicUrl } } = supabase.storage
+                    .from('signatures')
+                    .getPublicUrl(filePath);
+
+                // 3. DB에 기록
+                const { error: dbError } = await supabase
+                    .from('doc_signatures')
+                    .insert({
+                        minute_id: minuteId,
+                        member_uuid: session.user.id, // auth.users ID
+                        signature_url: publicUrl
+                    });
+
+                if (dbError) throw dbError;
+
+                alert("서명이 성공적으로 등록되었습니다.");
+                location.reload(); // 새로고침하여 완료 상태 반영
+
+            } catch (e) {
+                console.error(e);
+                alert("서명 제출 실패: " + e.message);
+                btn.disabled = false;
+                btn.innerText = "서명 제출하기";
+            }
+        };
+
+        init();
+    </script>
+</body>
+</html>
