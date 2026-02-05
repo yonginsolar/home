@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>용인모두의햇빛협동조합 임원 운영비 입금</title>
+    <title>용인모두의햇빛 출자금 입금</title>
     <style>
         body { font-family: 'Pretendard', -apple-system, sans-serif; background-color: #f2f4f6; margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
         .container { background: white; width: 100%; max-width: 400px; padding: 40px 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border-radius: 20px; text-align: center; box-sizing: border-box; }
@@ -20,8 +20,13 @@
 
         .btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 56px; border-radius: 14px; font-size: 17px; font-weight: 600; cursor: pointer; text-decoration: none; border: none; margin-bottom: 12px; transition: 0.2s; box-sizing: border-box;}
         
+        /* [수정] 버튼 스타일 변경 */
         .btn-toss { background-color: #0064FF; color: white; box-shadow: 0 4px 10px rgba(0, 100, 255, 0.2); }
-        .btn-copy { background-color: #f2f4f6; color: #4e5968; }
+        .btn-toss:hover { background-color: #0052cc; }
+
+        /* 복사 버튼을 밝고 활성화된 느낌으로 변경 */
+        .btn-copy { background-color: #e8f0fe; color: #1a73e8; } 
+        .btn-copy:hover { background-color: #d2e3fc; color: #174ea6; }
 
         .mobile-only-btn { display: none; }
 
@@ -39,11 +44,11 @@
 <body>
 
 <div class="container">
-    <h2>운영비 입금 안내</h2>
+    <h2>출자금 입금 안내</h2>
     
     <p class="desc" id="guideText">
         <span class="pc-guide">스마트폰 뱅킹으로 입금해 주세요.</span>
-        <span class="mobile-only-btn" style="display:none; flex-direction:column;">아래 신협 계좌로<br>운영비를 입금해 주세요.</span>
+        <span class="mobile-only-btn" style="display:none; flex-direction:column;">조합원님, 아래 신협 계좌로<br>출자금을 입금해 주세요.</span>
     </p>
     
     <div class="account-card">
@@ -72,28 +77,20 @@
 
 <script>
     const CONFIG = {
-        bankCode: '048', // 신협
-        accountNo: '131022855509' // 숫자만
+        bankName: '신협', // 한글 이름 사용
+        accountNo: '131022855509' 
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        // 1. 모바일 환경 감지 (UserAgent + 화면 너비)
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
-
-        // 2. URL 파라미터 처리 (이름만 가져옴, 금액은 제거)
         const params = new URLSearchParams(window.location.search);
         const userName = params.get('name');
-
-        // 3. [핵심 변경] 금액 하드코딩 (10만원 고정)
         const FIXED_AMOUNT = 100000;
 
-        // 4. 화면 표시 (콤마 적용)
         const displayElement = document.getElementById('displayAmount');
         if (displayElement) {
             displayElement.innerText = FIXED_AMOUNT.toLocaleString();
         }
 
-        // 5. 이름이 있는 경우 멘트 교체 로직
         if (userName) {
             const decodedName = decodeURIComponent(userName);
             const mobileTextSpan = document.querySelector('p.desc .mobile-only-btn');
@@ -102,16 +99,14 @@
             }
         }
 
-        // 6. 토스 링크 생성 (고정된 금액 적용)
         const cleanAccountNo = CONFIG.accountNo.replace(/[^0-9]/g, '');
-        // supertoss 스키마에 amount 파라미터를 고정값으로 전달
-        const tossUrl = `supertoss://send?bank=${CONFIG.bankCode}&accountNo=${cleanAccountNo}&amount=${FIXED_AMOUNT}&origin=link`;
+        // bank 파라미터 인코딩 처리
+        const tossUrl = `supertoss://send?bank=${encodeURIComponent(CONFIG.bankName)}&accountNo=${cleanAccountNo}&amount=${FIXED_AMOUNT}&origin=link`;
         
         const linkElement = document.getElementById('linkToss');
         if (linkElement) {
             linkElement.href = tossUrl;
         }
-    // End of DOMContentLoaded
     });
 
     async function copyAccount() {
@@ -122,7 +117,6 @@
         } catch (err) {
             prompt("직접 복사해주세요:", textToCopy);
         }
-    // End of copyAccount
     }
 
     function showToast(msg) {
@@ -132,7 +126,6 @@
             toast.className = "show";
             setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
         }
-    // End of showToast
     }
 </script>
 
