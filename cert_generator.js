@@ -1,3 +1,58 @@
+/*
+Version: v1.0.2
+Change: Avoid global redeclare by using var showAlert.
+*/
+
+var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.background = 'rgba(0,0,0,0.45)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.zIndex = '9999';
+
+  const box = document.createElement('div');
+  box.style.background = '#fff';
+  box.style.borderRadius = '10px';
+  box.style.maxWidth = '90%';
+  box.style.minWidth = '260px';
+  box.style.padding = '18px 20px';
+  box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+
+  const msg = document.createElement('div');
+  msg.style.whiteSpace = 'pre-line';
+  msg.style.color = '#111827';
+  msg.style.fontSize = '14px';
+  msg.style.lineHeight = '1.5';
+  msg.textContent = String(message ?? '');
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '확인';
+  btn.style.marginTop = '14px';
+  btn.style.padding = '8px 16px';
+  btn.style.border = '1px solid #e5e7eb';
+  btn.style.borderRadius = '8px';
+  btn.style.background = '#111827';
+  btn.style.color = '#fff';
+  btn.style.cursor = 'pointer';
+
+  const close = () => overlay.remove();
+  btn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+
+  box.appendChild(msg);
+  box.appendChild(btn);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+};
+if (typeof window !== 'undefined') {
+  window.showAlert = showAlert;
+}
 /**
  * 출자증서 PDF 생성 모듈 (Final Version - Validated)
  * - 로고 원본 비율 유지 (워터마크)
@@ -7,7 +62,7 @@
  */
 async function generateContributionCert(memberData, totalAmount, certNumber, chairmanName, supabaseClient) {
     if (!window.jspdf) {
-        alert('PDF 라이브러리 로드 실패');
+        showAlert('PDF 라이브러리 로드 실패');
         return;
     }
 
@@ -196,7 +251,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
     } catch (e) {
         console.error(e);
         // 에러 메시지를 명확히 보여줌
-        alert("증명서 생성 실패: " + e.message);
+        showAlert("증명서 생성 실패: " + e.message);
     }
 }
 

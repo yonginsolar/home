@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<!--
+Version: v1.2.3
+Change: 2026-02-05 - Fix signed-state detection for touch signers and delegate filters.
+-->
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>전자서명 - 용인모두의햇빛협동조합</title>
+    <script>console.log('[Version] v1.2.3 | minutes_sign.html');</script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f1f5f9;
+            font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+        }
+        .page-wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .panel {
+            width: 100%;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+        }
+        .panel.hidden { display: none; }
+        .list-panel { background: #f8fafc; }
+        .list-item {
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+            padding: 18px 22px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer;
+        }
+        .list-title { font-size: 1.05rem; font-weight: 700; color: #0f172a; }
+        .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
+        .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .btn-back {
+            border: 1px solid #e2e8f0; background: #fff; padding: 6px 10px;
+            border-radius: 10px; cursor: pointer; font-weight: 700; color: #1f2937;
+        }
+        .detail-title { font-size: 1.4rem; font-weight: 800; color: #0f172a; }
+        .detail-meta { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+        .detail-content { line-height: 1.8; color: #1f2937; }
+        .status-line { margin-top: 14px; font-size: 0.95rem; color: #1f2937; }
+        .sign-actions { margin-top: 16px; display: flex; gap: 10px; }
+        .btn-sign {
+            background: #2563eb; color: white; padding: 12px 22px;
+            border: none; border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer;
+        }
+        .btn-sign:disabled { background: #cbd5e1; cursor: not-allowed; }
+        .toast {
+            position: fixed; top: 20px; right: 20px; background: #111827; color: #fff;
+            padding: 10px 14px; border-radius: 8px; font-size: 0.9rem; opacity: 0; transition: opacity 0.2s; z-index: 9999;
+        }
+        .toast.show { opacity: 1; }
+        .modal-backdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+            display: none; align-items: center; justify-content: center; z-index: 9998;
+        }
+        .modal-backdrop.show { display: flex; }
+        .modal-box {
+            background: #fff; padding: 18px 20px; border-radius: 10px;
+            min-width: 280px; max-width: 90%; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+        .btn-outline { background: #fff; border: 1px solid #e5e7eb; color: #374151; padding: 8px 12px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+        .signature-pad {
+            border: 1px dashed #cbd5e1;
+            border-radius: 8px;
+            width: 100%;
+            height: 180px;
+            background: #fff;
+            touch-action: none;
+        }
+        .sig-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="page-wrap">
+        <div id="list-panel" class="panel list-panel"></div>
+        <div id="detail-panel" class="panel hidden">
+            <div class="detail-header">
+                <button class="btn-back" onclick="showList()">← 목록</button>
+                <div class="detail-title" id="detail-title">-</div>
+            </div>
+            <div class="detail-meta" id="detail-meta">-</div>
+            <div class="detail-content" id="detail-content"></div>
+            <div class="status-line" id="detail-status"></div>
+            <div class="sign-actions">
+                <button id="btn-sign" class="btn-sign" disabled onclick="handleSign()">서명하기</button>
+                <button id="btn-cancel-sign" class="btn-outline" style="display:none;" onclick="cancelSignature()">서명 취소</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+    <div id="confirmModal" class="modal-backdrop">
+        <div class="modal-box">
+            <div id="confirmText" style="font-weight:bold;">확인</div>
+            <div class="modal-actions">
+                <button class="btn-outline" onclick="closeConfirm(false)">취소</button>
+                <button class="btn-sign" onclick="closeConfirm(true)">확인</button>
+            </div>
+        </div>
+    </div>
+    <div id="signatureModal" class="modal-backdrop">
+        <div class="modal-box" style="max-width: 520px;">
+            <div style="font-weight:bold; margin-bottom:10px;">터치 서명</div>
+            <canvas id="signatureCanvas" class="signature-pad" width="480" height="180"></canvas>
+            <div class="sig-actions">
+                <button class="btn-outline" onclick="clearSignaturePad()">지우기</button>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-outline" onclick="closeSignaturePad()">취소</button>
+                    <button class="btn-sign" onclick="saveSignaturePad()">서명 저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { MinutesService } from './MinutesService.js?v=1.0.16';
+        import { supabase } from '../vote/ElectionService.js';
+
+        const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
+        const formatMinutesSignKstDate = (value) => {
+            if (!value) return '-';
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return '-';
+            return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_MINUTES_SIGN });
+        };
+        const getDocTypeLabel = (docType) => {
+            if (docType === 'NOTICE') return '공지';
+            if (docType === 'GENERAL_ASSEMBLY') return '총회 의사록';
+            if (docType === 'MINUTES') return '이사회 의사록';
+            return '의사록';
+        };
+
+        let myOfficialId = null;
+        let mySealUrl = null;
+        let myName = null;
+        let myAuthId = null;
+        let isAdminUser = false;
+        let confirmResolve = null;
+        let currentMinuteId = null;
+        let alreadySignedOnce = false;
+        let forceSignedOnce = false;
+        let signatureCanvas = null;
+        let signatureCtx = null;
+        let drawing = false;
+        let hasDrawn = false;
+        let pendingSignAfterPad = false;
+
+        function sanitizeStyle(styleText) {
+            const raw = String(styleText || '');
+            if (!raw) return '';
+            if (/expression\s*\(/i.test(raw)) return '';
+            if (/javascript:/i.test(raw)) return '';
+            return raw.replace(/url\s*\(/gi, '');
+        }
+
+        function sanitizeHtml(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(String(html || ''), 'text/html');
+            const allowedTags = new Set([
+                'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
+                'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+                'TH','THEAD','TR','U','UL'
+            ]);
+            const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+            const allowedAttrs = {
+                '*': new Set(['class','style']),
+                'A': new Set(['href','target','rel','title','class','style']),
+                'IMG': new Set(['src','alt','title','width','height','class','style']),
+                'TABLE': new Set(['class','style','border','cellpadding','cellspacing']),
+                'TD': new Set(['class','style','colspan','rowspan','align']),
+                'TH': new Set(['class','style','colspan','rowspan','align'])
+            };
+            const isSafeUrl = (value, allowDataImage = false) => {
+                const raw = String(value || '').trim();
+                if (!raw) return null;
+                if (/^(mailto:|tel:)/i.test(raw)) return raw;
+                if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+                try {
+                    const u = new URL(raw, window.location.origin);
+                    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+                } catch (e) { void 0; }
+                return null;
+            };
+
+            const nodes = Array.from(doc.body.querySelectorAll('*'));
+            nodes.forEach(node => {
+                const tag = node.tagName;
+                if (!allowedTags.has(tag)) {
+                    if (blockedTags.has(tag)) {
+                        node.remove();
+                        return;
+                    }
+                    const parent = node.parentNode;
+                    if (!parent) return;
+                    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+                    parent.removeChild(node);
+                    return;
+                }
+
+                Array.from(node.attributes).forEach(attr => {
+                    const name = attr.name.toLowerCase();
+                    const value = attr.value;
+                    if (name.startsWith('on')) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+                    const allowSet = allowedAttrs[tag] || allowedAttrs['*'];
+                    if (allowSet && !allowSet.has(name) && !(allowedAttrs['*'] && allowedAttrs['*'].has(name))) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+                    if (name === 'href') {
+                        const safe = isSafeUrl(value, false);
+                        if (!safe) node.removeAttribute('href');
+                        else node.setAttribute('href', safe);
+                    }
+                    if (name === 'src') {
+                        const safe = isSafeUrl(value, tag === 'IMG');
+                        if (!safe) node.removeAttribute('src');
+                        else node.setAttribute('src', safe);
+                    }
+                    if (name === 'style') {
+                        const safeStyle = sanitizeStyle(value);
+                        if (safeStyle) node.setAttribute('style', safeStyle);
+                        else node.removeAttribute('style');
+                    }
+                    if (name === 'target' && node.tagName === 'A') {
+                        if (node.getAttribute('target') === '_blank') {
+                            node.setAttribute('rel', 'noopener noreferrer');
+                        }
+                    }
+                });
+            });
+            return doc.body.innerHTML;
+        }
+
+        function getRoleLabel(off) {
+            return (off.role || off.position || off.category || '').trim();
+        }
+
+        function isDirectorRole(off) {
+            const label = getRoleLabel(off);
+            if (!label) return false;
+            return label.includes('이사장') || label === '이사';
+        }
+
+        function sortDirectorOrder(list) {
+            const chairman = list.filter(o => getRoleLabel(o).includes('이사장'));
+            const directors = list.filter(o => getRoleLabel(o) === '이사');
+            directors.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+            return [...chairman, ...directors];
+        }
+
+
+        function initSignaturePad() {
+            signatureCanvas = document.getElementById('signatureCanvas');
+            if (!signatureCanvas) return;
+            signatureCtx = signatureCanvas.getContext('2d');
+            signatureCtx.lineWidth = 2;
+            signatureCtx.lineCap = 'round';
+            signatureCtx.strokeStyle = '#111827';
+
+            const getPos = (e) => {
+                const rect = signatureCanvas.getBoundingClientRect();
+                if (e.touches && e.touches[0]) {
+                    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+                }
+                return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            };
+
+            const startDraw = (e) => {
+                e.preventDefault();
+                drawing = true;
+                const pos = getPos(e);
+                signatureCtx.beginPath();
+                signatureCtx.moveTo(pos.x, pos.y);
+            };
+
+            const draw = (e) => {
+                if (!drawing) return;
+                e.preventDefault();
+                const pos = getPos(e);
+                signatureCtx.lineTo(pos.x, pos.y);
+                signatureCtx.stroke();
+                hasDrawn = true;
+            };
+
+            const endDraw = (e) => {
+                if (!drawing) return;
+                e.preventDefault();
+                drawing = false;
+                signatureCtx.closePath();
+            };
+
+            signatureCanvas.addEventListener('mousedown', startDraw);
+            signatureCanvas.addEventListener('mousemove', draw);
+            window.addEventListener('mouseup', endDraw);
+            signatureCanvas.addEventListener('touchstart', startDraw, { passive: false });
+            signatureCanvas.addEventListener('touchmove', draw, { passive: false });
+            signatureCanvas.addEventListener('touchend', endDraw);
+        }
+
+        function openSignaturePad() {
+            hasDrawn = false;
+            const modal = document.getElementById('signatureModal');
+            modal.classList.add('show');
+            if (!signatureCanvas) initSignaturePad();
+            if (signatureCtx) {
+                signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+            }
+        }
+
+        function closeSignaturePad() {
+            const modal = document.getElementById('signatureModal');
+            modal.classList.remove('show');
+            pendingSignAfterPad = false;
+        }
+        window.closeSignaturePad = closeSignaturePad;
+
+        function clearSignaturePad() {
+            if (!signatureCtx || !signatureCanvas) return;
+            signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+            hasDrawn = false;
+        }
+        window.clearSignaturePad = clearSignaturePad;
+
+
+        async function uploadSignatureImage(dataUrl) {
+            try {
+                const res = await fetch(dataUrl);
+                const blob = await res.blob();
+                const fileName = `signatures/${currentMinuteId}/${myOfficialId}_${Date.now()}.png`;
+                const { error } = await supabase.storage.from('attachments').upload(fileName, blob, {
+                    contentType: 'image/png',
+                    upsert: true
+                });
+                if (error) {
+                    showToast('서명 이미지 업로드 실패: ' + error.message);
+                    return null;
+                }
+                return fileName;
+            } catch (err) {
+                showToast('서명 이미지 처리 실패: ' + err.message);
+                return null;
+            }
+        }
+
+        async function saveSignaturePad() {
+            if (!signatureCanvas || !hasDrawn) {
+                showToast('서명을 입력해주세요.');
+                return;
+            }
+            const dataUrl = signatureCanvas.toDataURL('image/png');
+            document.getElementById('signatureModal').classList.remove('show');
+            if (pendingSignAfterPad) {
+                pendingSignAfterPad = false;
+                const uploaded = await uploadSignatureImage(dataUrl);
+                if (!uploaded) return;
+                submitSignature(uploaded);
+            }
+        }
+        window.saveSignaturePad = saveSignaturePad;
+
+
+        function signedKey(minuteId) {
+            return `signed_minutes:${minuteId}:${myOfficialId}`;
+        }
+        function markLocallySigned(minuteId) {
+            if (!minuteId || !myOfficialId) return;
+            localStorage.setItem(signedKey(minuteId), '1');
+        }
+        function clearLocallySigned(minuteId) {
+            if (!minuteId || !myOfficialId) return;
+            localStorage.removeItem(signedKey(minuteId));
+        }
+        function isLocallySigned(minuteId) {
+            if (!minuteId || !myOfficialId) return false;
+            return localStorage.getItem(signedKey(minuteId)) === '1';
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 1800);
+        }
+        function showConfirm(msg) {
+            document.getElementById('confirmText').innerText = msg;
+            document.getElementById('confirmModal').classList.add('show');
+            return new Promise(resolve => { confirmResolve = resolve; });
+        }
+        window.closeConfirm = (ok) => {
+            document.getElementById('confirmModal').classList.remove('show');
+            if (confirmResolve) confirmResolve(ok);
+        };
+
+        function showList() {
+            document.getElementById('detail-panel').classList.add('hidden');
+            document.getElementById('list-panel').style.display = 'block';
+        }
+        window.showList = showList;
+
+        async function initSession() {
+            const session = await MinutesService.getSession();
+            if (!session) {
+                showToast('로그인이 필요합니다.');
+                location.href = '../membermanage.html';
+                return false;
+            }
+            myAuthId = session.user.id;
+            isAdminUser = await MinutesService.isAdmin(session.user.id, session.user.email);
+
+            const { member, official } = await MinutesService.getMyOfficial(session);
+            if (member) myName = member.name;
+            if (official) {
+                myOfficialId = official.id;
+                mySealUrl = official.seal_url;
+            }
+            return true;
+        }
+
+        async function loadSignList() {
+            const listPanel = document.getElementById('list-panel');
+            listPanel.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.alignItems = 'center';
+            header.style.gap = '10px';
+            const backBtn = document.createElement('button');
+            backBtn.className = 'btn-back';
+            backBtn.innerText = '← 뒤로가기';
+            backBtn.onclick = () => history.back();
+            header.appendChild(backBtn);
+            const title = document.createElement('div');
+            title.style.fontWeight = 'bold';
+            title.style.fontSize = '1.1rem';
+            title.style.color = '#0f172a';
+            title.innerText = '서명 요청 문서';
+            header.appendChild(title);
+            listPanel.appendChild(header);
+
+            if (!myOfficialId && !isAdminUser) {
+                const msg = document.createElement('div');
+                msg.style.marginTop = '12px';
+                msg.style.color = '#64748b';
+                msg.innerText = '임원 전용 페이지입니다. 임원 계정으로 로그인하세요.';
+                listPanel.appendChild(msg);
+                return;
+            }
+
+            const openMinutes = (await MinutesService.listOpenSignMinutes()).data || [];
+            let targets = Array.isArray(openMinutes) ? openMinutes : [];
+
+            if (myOfficialId) {
+                const officials = await MinutesService.getOfficials();
+                const directors = sortDirectorOrder((officials || []).filter(isDirectorRole));
+                const delegates = (officials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
+                const directorIds = directors.map(o => String(o.id));
+                const delegateIds = delegates.map(o => String(o.id));
+                targets = targets.filter(t => {
+                    if (t.doc_type === 'MINUTES' || t.doc_type === 'GENERAL_ASSEMBLY') {
+                        const fallbackIds = (t.doc_type === 'GENERAL_ASSEMBLY') ? delegateIds : directorIds;
+                        const signerIds = (Array.isArray(t.signer_ids) && t.signer_ids.length > 0)
+                            ? t.signer_ids.map(id => String(id))
+                            : fallbackIds;
+                        return signerIds.includes(String(myOfficialId));
+                    }
+                    return true;
+                });
+            }
+
+            if (targets.length === 0) {
+                const msg = document.createElement('div');
+                msg.style.marginTop = '12px';
+                msg.style.color = '#64748b';
+                msg.innerText = '현재 서명할 문서가 없습니다.';
+                listPanel.appendChild(msg);
+                return;
+            }
+
+            const minuteIds = targets.map(m => m.id);
+            const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
+            const signedMap = new Map((sigList || []).map(s => [String(s.minute_id) + ':' + String(s.official_id), true]));
+
+            targets.forEach(m => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+
+                const textWrap = document.createElement('div');
+                const titleEl = document.createElement('div');
+                titleEl.className = 'list-title';
+                const label = getDocTypeLabel(m.doc_type);
+                titleEl.textContent = m.title ? `${label} · ${m.title}` : label;
+
+                const dateEl = document.createElement('div');
+                dateEl.className = 'list-sub';
+                const isSigned = myOfficialId ? (signedMap.get(String(m.id) + ':' + String(myOfficialId)) || isLocallySigned(m.id)) : false;
+                dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${isSigned ? '서명완료' : '미서명'}`;
+
+                textWrap.appendChild(titleEl);
+                textWrap.appendChild(dateEl);
+
+                item.appendChild(textWrap);
+                item.addEventListener('click', () => openDocumentById(m.id));
+                listPanel.appendChild(item);
+            });
+        }
+
+async function openDocumentById(id) {
+            const { data: doc } = await MinutesService.getMinuteById(id);
+            if (!doc) {
+                showToast('문서를 찾을 수 없습니다.');
+                return;
+            }
+            currentMinuteId = id;
+
+            document.getElementById('detail-title').textContent = doc.title
+                ? `${getDocTypeLabel(doc.doc_type)} · ${doc.title}`
+                : getDocTypeLabel(doc.doc_type);
+            document.getElementById('detail-meta').textContent = `작성일: ${formatMinutesSignKstDate(doc.created_at)}`;
+            document.getElementById('detail-content').innerHTML = sanitizeHtml(doc.content || '');
+
+            await updateSignStatus(doc);
+
+            document.getElementById('list-panel').style.display = 'none';
+            document.getElementById('detail-panel').classList.remove('hidden');
+        }
+
+        async function updateSignStatus(doc) {
+            const statusEl = document.getElementById('detail-status');
+            const btn = document.getElementById('btn-sign');
+            const cancelBtn = document.getElementById('btn-cancel-sign');
+
+            btn.disabled = true;
+            btn.innerText = '서명하기';
+            if (cancelBtn) cancelBtn.style.display = 'none';
+            btn.style.display = 'inline-flex';
+
+            if (!doc.requires_sign || doc.doc_type === 'NOTICE') {
+                statusEl.innerText = '이 문서는 서명 대상이 아닙니다.';
+                return;
+            }
+
+            if (!myOfficialId && isAdminUser) {
+                statusEl.innerText = '관리자 권한으로 열람 중입니다. 서명은 임원만 가능합니다.';
+                return;
+            }
+            if (!myOfficialId) {
+                statusEl.innerText = '임원 계정만 서명이 가능합니다.';
+                return;
+            }
+
+            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
+            const alreadySigned = forceSignedOnce || isLocallySigned(currentMinuteId)
+                || (Array.isArray(signatures) && signatures.some(s => String(s.official_id) === String(myOfficialId)));
+            if (alreadySigned) {
+                alreadySignedOnce = true;
+                markLocallySigned(currentMinuteId);
+                statusEl.innerText = '이미 서명 완료된 문서입니다.';
+                btn.disabled = true;
+                btn.innerText = '서명 완료됨';
+                btn.style.display = 'none';
+                if (cancelBtn && doc.status === 'OPEN') cancelBtn.style.display = 'inline-flex';
+                return;
+            } else {
+                alreadySignedOnce = false;
+                forceSignedOnce = false;
+                clearLocallySigned(currentMinuteId);
+            }
+
+            const officials = await MinutesService.getOfficials();
+            const directors = sortDirectorOrder((officials || []).filter(isDirectorRole));
+            const delegates = (officials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
+            const signerIds = (Array.isArray(doc.signer_ids) && doc.signer_ids.length > 0)
+                ? doc.signer_ids
+                : ((doc.doc_type === 'GENERAL_ASSEMBLY')
+                    ? delegates.map(o => o.id)
+                    : ((doc.doc_type === 'MINUTES') ? directors.map(o => o.id) : (officials || []).map(o => o.id)));
+
+            if ((doc.doc_type === 'MINUTES' || doc.doc_type === 'GENERAL_ASSEMBLY')
+                && !signerIds.map(s => String(s)).includes(String(myOfficialId))) {
+                statusEl.innerText = '서명 대상이 아닙니다.';
+                return;
+            }
+
+            if (doc.status !== 'OPEN') {
+                statusEl.innerText = '서명 마감된 문서입니다.';
+                return;
+            }
+
+            if (!mySealUrl) {
+                statusEl.innerText = `${myName || ''}님은 도장 이미지가 없어서 터치패드(직접 그리기)로 진행합니다.`;
+                btn.disabled = false;
+                return;
+            }
+
+            statusEl.innerText = '서명 가능 상태입니다.';
+            btn.style.display = 'inline-flex';
+            btn.disabled = false;
+            if (cancelBtn) cancelBtn.style.display = 'none';
+        }
+
+
+
+        async function removeSignatureFile(signatureUrl) {
+            if (!signatureUrl) return;
+            const raw = String(signatureUrl).trim();
+            if (!raw) return;
+            if (raw.startsWith('http')) {
+                const match = raw.match(/\/storage\/v1\/object\/(public|sign)\/([^/]+)\/(.+)$/);
+                if (match) {
+                    const bucket = match[2];
+                    const path = match[3];
+                    await supabase.storage.from(bucket).remove([path]);
+                }
+                return;
+            }
+            await supabase.storage.from('attachments').remove([raw.replace(/^\/+/, '')]);
+        }
+
+        async function submitSignature(signatureUrl) {
+            const { error } = await MinutesService.insertSignature({
+                minute_id: currentMinuteId,
+                official_id: myOfficialId,
+                member_uuid: myAuthId,
+                signature_url: signatureUrl
+            });
+
+            if (error) {
+                const msg = (error.message || '').toLowerCase();
+                if (error.status === 409 || msg.includes('conflict')) {
+                    forceSignedOnce = true;
+                    markLocallySigned(currentMinuteId);
+                    showToast('이미 서명된 문서입니다.');
+                    const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
+                    if (doc) await updateSignStatus(doc);
+                    await loadSignList();
+                    return;
+                }
+                showToast('서명 실패: ' + error.message);
+            } else {
+                markLocallySigned(currentMinuteId);
+                showToast('정상적으로 서명되었습니다.');
+                const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
+                if (doc) await updateSignStatus(doc);
+                await loadSignList();
+            }
+        }
+
+        window.handleSign = async () => {
+            if (!currentMinuteId) return;
+            if (alreadySignedOnce) {
+                showToast('이미 서명 완료된 문서입니다.');
+                return;
+            }
+            if (!myOfficialId) return showToast('임원 계정만 서명이 가능합니다.');
+            const ok = await showConfirm('이 의사록의 내용을 확인하였으며, 등록된 서명으로 날인하시겠습니까?');
+            if (!ok) return;
+
+            if (!mySealUrl) {
+                pendingSignAfterPad = true;
+                openSignaturePad();
+                return;
+            }
+            await submitSignature(mySealUrl);
+        };
+
+
+        window.cancelSignature = async () => {
+            if (!currentMinuteId || !myOfficialId) return;
+            const ok = await showConfirm('이미 서명한 내역을 취소하시겠습니까?');
+            if (!ok) return;
+            const { data: sigs } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
+            const mySig = Array.isArray(sigs) ? sigs.find(s => String(s.official_id) === String(myOfficialId)) : null;
+            const { error } = await MinutesService.deleteSignature(currentMinuteId, myOfficialId);
+            if (!error && mySig?.signature_url) {
+                await removeSignatureFile(mySig.signature_url);
+            }
+            if (error) {
+                showToast('서명 취소 실패: ' + error.message);
+                return;
+            }
+            alreadySignedOnce = false;
+            forceSignedOnce = false;
+            clearLocallySigned(currentMinuteId);
+            showToast('서명 취소가 완료되었습니다.');
+            const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
+            if (doc) await updateSignStatus(doc);
+        };
+
+        async function init() {
+            const ok = await initSession();
+            if (!ok) return;
+            await loadSignList();
+        }
+
+        init();
+    </script>
+</body>
+</html>

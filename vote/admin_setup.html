@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: Escape dynamic fields in admin setup lists/modals to prevent XSS.
+Version: v1.0.4
+Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>선거 관리 대시보드</title>
-    <script>console.log('[Version] v1.0.1 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.4 | admin_setup.html');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
 <style>
@@ -365,6 +365,40 @@ function escapeHtml(value) {
 }
     import { AdminService } from './AdminService.js';
     import { supabase } from './ElectionService.js';
+
+    const KST_TZ_ADMIN_SETUP = 'Asia/Seoul';
+    const toUtcIsoFromKstInput = (value) => {
+        if (!value) return null;
+        const iso = new Date(`${value}:00+09:00`).toISOString();
+        return iso;
+    };
+    const toKstInputValue = (value) => {
+        if (!value) return '';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '';
+        const dt = new Intl.DateTimeFormat('sv-SE', {
+            timeZone: KST_TZ_ADMIN_SETUP,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        }).format(d);
+        return dt.replace(' ', 'T');
+    };
+    const formatVoteSetupKstDate = (value, fallback = '미정') => {
+        if (!value) return fallback;
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return fallback;
+        return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_ADMIN_SETUP });
+    };
+    const formatVoteSetupKstDateTime = (value, fallback = '미정') => {
+        if (!value) return fallback;
+        const d = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(d.getTime())) return fallback;
+        return d.toLocaleString('ko-KR', { timeZone: KST_TZ_ADMIN_SETUP });
+    };
     
     let newElectionId = null;
     let createdDistricts = {};
@@ -1019,10 +1053,10 @@ async function loadPreviousElectionData() {
         }
 
         // 날짜 데이터 포맷팅
-        if(data.candidacy_start_at) document.getElementById('candidacy-start').value = data.candidacy_start_at.slice(0,16);
-        if(data.candidacy_end_at) document.getElementById('candidacy-end').value = data.candidacy_end_at.slice(0,16);
-        if(data.vote_start_at) document.getElementById('vote-start').value = data.vote_start_at.slice(0,16);
-        if(data.vote_end_at) document.getElementById('vote-end').value = data.vote_end_at.slice(0,16);
+        if(data.candidacy_start_at) document.getElementById('candidacy-start').value = toKstInputValue(data.candidacy_start_at);
+        if(data.candidacy_end_at) document.getElementById('candidacy-end').value = toKstInputValue(data.candidacy_end_at);
+        if(data.vote_start_at) document.getElementById('vote-start').value = toKstInputValue(data.vote_start_at);
+        if(data.vote_end_at) document.getElementById('vote-end').value = toKstInputValue(data.vote_end_at);
         
         window.showAlert('데이터가 채워졌습니다.');
     });
@@ -1216,8 +1250,8 @@ function clearDistrictInputs() {
                 }
 
                 // 날짜 포맷팅
-                const startStr = el.vote_start_at ? new Date(el.vote_start_at).toLocaleDateString() : '미정';
-                const endStr = el.vote_end_at ? new Date(el.vote_end_at).toLocaleDateString() : '미정';
+                const startStr = formatVoteSetupKstDate(el.vote_start_at);
+                const endStr = formatVoteSetupKstDate(el.vote_end_at);
                 const safeStatus = escapeHtml(el.status === 'DRAFT' ? '작성 중' : el.status);
                 const safeTitle = escapeHtml(el.title || '');
 
@@ -1243,7 +1277,7 @@ function clearDistrictInputs() {
                 item.className = 'timeline-item';
                 item.onclick = () => window.openHistoryModal(el);
                 const safeHistTitle = escapeHtml(el.title || '');
-                item.innerHTML = `<div class="timeline-date">${new Date(el.end_at).toLocaleDateString()} 종료</div>
+                item.innerHTML = `<div class="timeline-date">${formatVoteSetupKstDate(el.end_at)} 종료</div>
                     <div class="timeline-content"><h4>${safeHistTitle}</h4></div>`;
                 timelineContainer.appendChild(item);
             }
@@ -1281,10 +1315,10 @@ window.resumeSetup = async (el) => {
     }
     
     // 날짜 데이터 포맷팅 및 바인딩 (YYYY-MM-DDTHH:mm)
-    if(el.candidacy_start_at) document.getElementById('candidacy-start').value = el.candidacy_start_at.slice(0,16);
-    if(el.candidacy_end_at) document.getElementById('candidacy-end').value = el.candidacy_end_at.slice(0,16);
-    if(el.vote_start_at) document.getElementById('vote-start').value = el.vote_start_at.slice(0,16);
-    if(el.vote_end_at) document.getElementById('vote-end').value = el.vote_end_at.slice(0,16);
+    if(el.candidacy_start_at) document.getElementById('candidacy-start').value = toKstInputValue(el.candidacy_start_at);
+    if(el.candidacy_end_at) document.getElementById('candidacy-end').value = toKstInputValue(el.candidacy_end_at);
+    if(el.vote_start_at) document.getElementById('vote-start').value = toKstInputValue(el.vote_start_at);
+    if(el.vote_end_at) document.getElementById('vote-end').value = toKstInputValue(el.vote_end_at);
 
     // 4. Step 2 선거구 정보 복원
     createdDistricts = {}; // 메모리 초기화
@@ -1356,7 +1390,7 @@ window.resumeSetup = async (el) => {
         const { data: { session }, error } = await supabase.auth.getSession();
 
         if (error || !session) {
-            alert("로그인 정보가 없습니다. 선거 포털로 이동합니다.");
+            showAlert("로그인 정보가 없습니다. 선거 포털로 이동합니다.");
             window.location.href = 'vote_login.html'; // 쫓아내기
             return;
         }
@@ -1373,7 +1407,7 @@ window.resumeSetup = async (el) => {
 
             // role이 admin이 아니면 접속 불가
             if (member.role !== 'admin' && member.role !== 'super_admin') {
-                alert("⛔ 관리자 권한이 필요합니다.");
+                showAlert("⛔ 관리자 권한이 필요합니다.");
                 window.location.href = 'vote_login.html'; // 쫓아내기
                 return;
             }
@@ -1396,7 +1430,7 @@ window.resumeSetup = async (el) => {
 
         } catch (e) {
             console.error(e);
-            alert("권한 확인 중 오류: " + e.message);
+            showAlert("권한 확인 중 오류: " + e.message);
             window.location.href = 'vote_login.html';
         }
     }
@@ -1413,26 +1447,30 @@ window.createElection = async () => {
     const cE = document.getElementById('candidacy-end').value;
     const vS = document.getElementById('vote-start').value;
     const vE = document.getElementById('vote-end').value;
+    const cSUTC = toUtcIsoFromKstInput(cS);
+    const cEUTC = toUtcIsoFromKstInput(cE);
+    const vSUTC = toUtcIsoFromKstInput(vS);
+    const vEUTC = toUtcIsoFromKstInput(vE);
 
     // [검증] 공고일 포함 모든 필수값 체크
-    if(!title || !announceDate || !cS || !cE || !vS || !vE) {
+    if(!title || !announceDate || !cS || !cE || !vS || !vE || !cSUTC || !cEUTC || !vSUTC || !vEUTC) {
         return window.showAlert('선거명, 공고일, 기간 등 모든 정보를 입력하세요.');
     }
     
     // 논리적 유효성 검사
-    if(cS >= cE) return window.showAlert('후보 등록 종료일이 시작일보다 앞설 수 없습니다.');
-    if(vS >= vE) return window.showAlert('투표 종료일이 시작일보다 앞설 수 없습니다.');
+    if(new Date(cSUTC) >= new Date(cEUTC)) return window.showAlert('후보 등록 종료일이 시작일보다 앞설 수 없습니다.');
+    if(new Date(vSUTC) >= new Date(vEUTC)) return window.showAlert('투표 종료일이 시작일보다 앞설 수 없습니다.');
 
     // [DB Insert] announcement_date 추가
     const { data, error } = await supabase.from('elections').insert({
         title, 
         announcement_date: announceDate, // [추가]
-        candidacy_start_at: cS, 
-        candidacy_end_at: cE,
-        vote_start_at: vS, 
-        vote_end_at: vE,
-        start_at: cS, // 전체 시작 기준을 후보 등록 시작으로 유지 (필요시 공고일로 변경 가능)
-        end_at: vE, 
+        candidacy_start_at: cSUTC, 
+        candidacy_end_at: cEUTC,
+        vote_start_at: vSUTC, 
+        vote_end_at: vEUTC,
+        start_at: cSUTC, // 전체 시작 기준을 후보 등록 시작으로 유지 (필요시 공고일로 변경 가능)
+        end_at: vEUTC, 
         status: 'DRAFT'
     }).select().single();
 
@@ -1497,8 +1535,8 @@ window.createElection = async () => {
         const modal = document.getElementById('history-modal');
         document.getElementById('modal-title').innerText = el.title;
         // 날짜 표기 변경 (투표 기간)
-        const vStart = el.vote_start_at ? new Date(el.vote_start_at).toLocaleDateString() : '-';
-        const vEnd = el.vote_end_at ? new Date(el.vote_end_at).toLocaleDateString() : '-';
+        const vStart = formatVoteSetupKstDate(el.vote_start_at, '-');
+        const vEnd = formatVoteSetupKstDate(el.vote_end_at, '-');
         document.getElementById('modal-period').innerText = `${vStart} ~ ${vEnd}`;
         
         try {

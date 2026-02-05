@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.1
+Change: 2026-02-05 - Remove unused isMobile variable.
+-->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -75,33 +79,42 @@
 <div id="toast">계좌번호가 복사되었습니다</div>
 
 <script>
+    function escapeHtml(value = '') {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+
     const CONFIG = {
         bankCode: '048', // 신협
         accountNo: '131022855516' // 숫자만
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        // [수정] JS 감지 로직 강화: UserAgent OR 화면너비 체크
-        // 이제 JS가 실패해도 CSS가 화면 너비 보고 버튼을 띄웁니다.
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 768;
 
         // URL 파라미터 처리
         const params = new URLSearchParams(window.location.search);
         let amount = params.get('amount');
         const userName = params.get('name');
 
-        if (!amount || isNaN(amount) || parseInt(amount) <= 0) amount = '100000'; // 테스트용 기본값
+        const numericAmount = parseInt(String(amount || '').replace(/[^0-9]/g, ''), 10);
+        amount = (!numericAmount || Number.isNaN(numericAmount) || numericAmount <= 0) ? 100000 : numericAmount;
 
         // 화면 표시
-        document.getElementById('displayAmount').innerText = parseInt(amount).toLocaleString();
+        document.getElementById('displayAmount').innerText = amount.toLocaleString();
 
         // 이름이 있으면 멘트 교체 (모바일용 멘트 태그 찾아서 넣기)
         if (userName) {
-            const decodedName = decodeURIComponent(userName);
+            const decodedName = String(userName);
             // 모바일용 멘트 영역 찾기 (.mobile-only-btn 클래스를 가진 span)
             const mobileTextSpan = document.querySelector('p.desc .mobile-only-btn');
             if(mobileTextSpan) {
-                mobileTextSpan.innerHTML = `<b>${decodedName}</b> 조합원님,<br>아래 신협 계좌로 입금해 주세요.`;
+                const safeName = escapeHtml(decodedName);
+                mobileTextSpan.innerHTML = `<b>${safeName}</b> 조합원님,<br>아래 신협 계좌로 입금해 주세요.`;
             }
         }
 

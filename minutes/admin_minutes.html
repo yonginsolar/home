@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<!--
+Version: v1.2.4
+Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사록.
+-->
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>의사록 관리자 대시보드</title>
+    <script>console.log('[Version] v1.2.4 | admin_minutes.html');</script>
+    <style>
+        :root { --admin-bg: #fffbeb; --primary: #2563eb; }
+        body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
+        
+        .container { max-width: 900px; margin: 0 auto; }
+        
+        /* 헤더 */
+        .header {
+            background: var(--admin-bg); border: 1px solid #fcd34d; padding: 20px;
+            border-radius: 8px; margin-bottom: 20px; color: #92400e;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .tab-btn {
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid #e2e8f0;
+            background: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            color: #334155;
+        }
+        .tab-btn.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #2563eb;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .sub-tabs { display:flex; gap:8px; margin-bottom:16px; }
+        .sub-tabs .tab-btn { padding:8px 12px; font-size:0.9rem; }
+        .sub-panel { display:none; }
+        .sub-panel.active { display:block; }
+        .list-scroll { max-height: 560px; overflow: auto; padding-right: 6px; }
+
+        /* 카드 공통 */
+        .card {
+            background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+            padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        /* 입력 폼 */
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
+        .form-control { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+        textarea.form-control { height: 120px; resize: vertical; }
+
+        /* 리스트 아이템 */
+        .minute-item {
+            border-bottom: 1px solid #f1f5f9; padding: 20px 0;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .minute-header { display: flex; justify-content: space-between; align-items: flex-start; }
+        
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
+        .badge-open { background: #dbeafe; color: #1e40af; }
+        .badge-closed { background: #fee2e2; color: #991b1b; }
+
+        /* 서명 현황 바 */
+        .progress-container {
+            background: #f1f5f9; border-radius: 6px; padding: 10px; margin-top: 5px;
+        }
+        .progress-bar-bg { background: #e2e8f0; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 5px; }
+        .progress-bar-fill { height: 100%; background: #10b981; width: 0%; transition: width 0.5s; }
+        
+        .signer-names { font-size: 0.85rem; color: #64748b; }
+        .missing-signer { color: #ef4444; font-weight: bold; }
+
+        /* 버튼 그룹 */
+        .btn-group { display: flex; gap: 8px; margin-top: 10px; }
+        .btn { padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: bold; }
+        .btn-blue { background: #eff6ff; color: var(--primary); border: 1px solid #bfdbfe; }
+        .btn-gray { background: #f1f5f9; color: #475569; }
+        .btn-red { background: #fef2f2; color: #dc2626; }
+        .btn-submit { background: var(--primary); color: white; padding: 12px 20px; font-size: 1rem; }
+
+        /* 알림/확인 모달 */
+        .toast {
+            position: fixed; top: 20px; right: 20px;
+            background: #111827; color: #fff; padding: 10px 14px;
+            border-radius: 8px; font-size: 0.9rem; opacity: 0;
+            transition: opacity 0.2s; z-index: 9999;
+        }
+        .toast.show { opacity: 1; }
+        .modal-backdrop {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+            display: none; align-items: center; justify-content: center; z-index: 9998;
+        }
+        .modal-backdrop.show { display: flex; }
+        .modal-box {
+            background: #fff; padding: 18px 20px; border-radius: 10px;
+            min-width: 280px; max-width: 90%; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+        .btn-outline { background: #fff; border: 1px solid #e5e7eb; color: #374151; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="header">
+            <h2 style="margin:0;">🛡️ 의사록/공문 관리 (사무국용)</h2>
+            <button onclick="location.href='../membermanage.html'" class="btn btn-gray">메인으로</button>
+        </div>
+
+        <div class="tabs">
+            <button id="tab-btn-minutes" class="tab-btn active" onclick="switchTab('minutes')">의사록</button>
+            <button id="tab-btn-notices" class="tab-btn" onclick="switchTab('notices')">공문</button>
+        </div>
+
+        <div id="tab-minutes" class="tab-panel active">
+        <div class="sub-tabs">
+            <button id="sub-tab-editor" class="tab-btn active" onclick="switchMinutesSubTab('editor')">작성/업로드</button>
+            <button id="sub-tab-manage" class="tab-btn" onclick="switchMinutesSubTab('manage')">관리 목록</button>
+        </div>
+
+        <div id="sub-panel-editor" class="sub-panel active">
+        <div class="card">
+            <h3 style="margin-top:0;">📝 신규 의사록 작성</h3>
+            <div class="input-group">
+                <label>문서 유형</label>
+                <select id="in-doc-type" class="form-control">
+                    <option value="MINUTES">이사회 의사록</option>
+                    <option value="GENERAL_ASSEMBLY">총회(대의원총회) 의사록</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>의사록 제목</label>
+                <input type="text" id="in-title" class="form-control" placeholder="예: 2026년 제2차 정기이사회">
+            </div>
+            <div class="input-group">
+                <label>회의 내용 (HTML 태그 사용 가능)</label>
+                <textarea id="in-content" class="form-control" placeholder="<p>안건 1: ...</p>"></textarea>
+            </div>
+            <div class="input-group">
+                <label>첨부파일 (PDF)</label>
+                <input type="file" id="in-files" class="form-control" accept=".pdf" multiple>
+                <small class="text-muted">공개 문서에 다운로드 링크로 표시됩니다.</small>
+            </div>
+            <div class="input-group" id="signer-section">
+                <label id="signer-label">서명 대상</label>
+                <div id="signer-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+                <small class="text-muted" id="signer-help">이사장 1번 + 가나다순으로 자동 정렬됩니다.</small>
+            </div>
+            <div style="text-align: right;">
+                <button onclick="createMinute()" class="btn btn-submit">저장하기</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top:0;">📥 지난 의사록 업로드</h3>
+            <div class="input-group">
+                <label>제목</label>
+                <input type="text" id="past-title" class="form-control" placeholder="예: 2024년 제1차 정기총회 의사록">
+            </div>
+            <div class="input-group">
+                <label>작성일</label>
+                <input type="date" id="past-date" class="form-control">
+                <small class="text-muted">목록 정렬 기준으로 사용됩니다.</small>
+            </div>
+
+            <div class="input-group">
+                <label>내용</label>
+                <textarea id="past-content" class="form-control" placeholder="간단 설명 또는 메모"></textarea>
+            </div>
+            <div class="input-group">
+                <label>첨부파일 (PDF)</label>
+                <input type="file" id="past-files" class="form-control" accept=".pdf" multiple>
+                <small class="text-muted">스캔본 업로드용입니다.</small>
+            </div>
+            <div style="text-align: right;">
+                <button onclick="uploadPastMinute()" class="btn btn-submit">업로드</button>
+            </div>
+        </div>
+
+        </div>
+
+        <div id="sub-panel-manage" class="sub-panel">
+        <div class="card">
+            <h3 style="margin-top:0;">📂 관리 목록</h3>
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+                <input type="text" id="minutes-search" class="form-control" placeholder="제목/문서번호/유형 검색">
+                <button class="btn btn-gray" onclick="loadMinutes()">검색</button>
+            </div>
+            <div class="list-scroll">
+                <div id="list-area">로딩 중...</div>
+            </div>
+        </div>
+        </div>
+        </div>
+
+        <div id="tab-notices" class="tab-panel">
+        <div class="card">
+            <h3 style="margin-top:0;">📢 공문(공지) 관리</h3>
+            <div id="notice-list-area">로딩 중...</div>
+        </div>
+        </div>
+    </div>
+
+    <input type="file" id="minute-attach-input" accept=".pdf" multiple style="display:none;">
+    <div id="toast" class="toast"></div>
+
+    <div id="confirmModal" class="modal-backdrop">
+        <div class="modal-box">
+            <div id="confirmText" style="font-weight:bold;">확인</div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closeConfirm(false)">취소</button>
+                <button class="btn btn-blue" onclick="closeConfirm(true)">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="previewModal" class="modal-backdrop">
+        <div class="modal-box" style="max-width: 760px;">
+            <div id="previewTitle" style="font-weight:bold; margin-bottom:8px;"></div>
+            <div id="previewBody" style="max-height:60vh; overflow:auto; color:#374151; font-size:0.95rem;"></div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closePreview()">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    
+    <div id="minutePreviewModal" class="modal-backdrop">
+        <div class="modal-box" style="max-width: 760px;">
+            <div id="minutePreviewTitle" style="font-weight:bold; margin-bottom:8px;"></div>
+            <div id="minutePreviewMeta" style="font-size:0.85rem; color:#64748b; margin-bottom:10px;"></div>
+            <div id="minutePreviewBody" style="max-height:60vh; overflow:auto; color:#374151; font-size:0.95rem;"></div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closeMinutePreview()">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal-backdrop">
+        <div class="modal-box" style="max-width: 760px;">
+            <div style="font-weight:bold; margin-bottom:8px;">공문 내용 수정</div>
+            <div class="input-group">
+                <label style="font-weight:bold;">제목</label>
+                <input type="text" id="edit-title" class="form-control">
+            </div>
+            <div class="input-group">
+                <label style="font-weight:bold;">내용</label>
+                <textarea id="edit-content" class="form-control" style="height:200px;"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closeEdit()">취소</button>
+                <button class="btn btn-blue" onclick="saveEdit()">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { MinutesService } from './MinutesService.js';
+
+        const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
+        const formatMinutesAdminKstDate = (value, fallback = '-') => {
+            if (!value) return fallback;
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return fallback;
+            return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_MINUTES_ADMIN });
+        };
+        const getDocTypeLabel = (docType) => {
+            if (docType === 'NOTICE') return '공지';
+            if (docType === 'GENERAL_ASSEMBLY') return '총회 의사록';
+            if (docType === 'PAST_MINUTES') return '지난 의사록';
+            return '의사록';
+        };
+
+        // 전역 변수
+        let allOfficials = []; // 전체 임원 목록 (기준값)
+        let currentUserId = null;
+        let isAdminUser = false;
+        let confirmResolve = null;
+
+
+        let noticeItems = [];
+        let noticeAttachMap = {};
+        let noticeCompanyInfo = null;
+        let noticeSealUrl = null;
+
+        let minutesCache = new Map();
+        let attachTargetId = null;
+
+
+        async function generateMinuteDocNo() {
+            const year = new Date().getFullYear();
+            const prefix = `제${year}-`;
+
+            let docs = Array.from(minutesCache.values());
+            if (!docs || docs.length === 0) {
+                const { data } = await MinutesService.listMinutesAdmin();
+                docs = data || [];
+            }
+
+            let maxSeq = 0;
+            const re = new RegExp(`^제${year}-(\d{3})호$`);
+            docs.forEach(d => {
+                const m = String(d.doc_no || '').match(re);
+                if (m) {
+                    const n = parseInt(m[1], 10);
+                    if (!Number.isNaN(n)) maxSeq = Math.max(maxSeq, n);
+                }
+            });
+
+            const nextSeq = String(maxSeq + 1).padStart(3, '0');
+            return `${prefix}${nextSeq}호`;
+        }
+
+        let editTargetId = null;
+
+        function openNoticeEdit(id) {
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (!item) return;
+            const approval = item.approval || {};
+            const notice = item.notice || null;
+            editTargetId = id;
+            document.getElementById('edit-title').value = notice?.title || approval.title || '';
+            document.getElementById('edit-content').value = notice?.content || buildNoticeContentFromApproval(approval);
+            document.getElementById('editModal').classList.add('show');
+        }
+        window.openNoticeEdit = openNoticeEdit;
+
+        window.closeEdit = () => {
+            document.getElementById('editModal').classList.remove('show');
+            editTargetId = null;
+        };
+
+        window.saveEdit = async () => {
+            if (!editTargetId) return;
+            const item = noticeItems.find(n => String(n.approval?.id) === String(editTargetId));
+            if (!item) return;
+            const approval = item.approval || {};
+            const notice = item.notice || null;
+            const title = document.getElementById('edit-title').value.trim();
+            const content = document.getElementById('edit-content').value.trim();
+            if (!title) { showToast('제목을 입력하세요.'); return; }
+
+            const payload = {
+                p_id: notice?.id || null,
+                p_title: title,
+                p_content: content,
+                p_category: '공문',
+                p_status: notice?.status || 'draft',
+                p_is_popup: notice?.is_popup || false,
+                p_file_url: notice?.file_url || null,
+                p_doc_no: approval.doc_no || notice?.doc_no || null,
+                p_file_urls: notice?.file_urls || null,
+                p_file_names: notice?.file_names || null,
+                p_source_approval_id: approval.id || null
+            };
+            const { error } = await MinutesService.upsertNotice(payload);
+            if (error) showToast(error.message);
+            else {
+                showToast('수정되었습니다.');
+                closeEdit();
+                loadNotices();
+            }
+        };
+
+        function openAttachPicker(id) {
+            attachTargetId = id;
+            const input = document.getElementById('minute-attach-input');
+            if (input) input.click();
+        }
+        window.openAttachPicker = openAttachPicker;
+
+        window.clearAttachments = async (id) => {
+            const ok = await showConfirm('첨부파일을 모두 초기화할까요?');
+            if (!ok) return;
+            const { error } = await MinutesService.updateMinuteAttachments(id, []);
+            if (error) showToast(error.message);
+            else {
+                showToast('첨부파일을 초기화했습니다.');
+                loadMinutes();
+            }
+        };
+
+        function mergeUrls(base, added) {
+            const set = new Set([...(base || []), ...(added || [])]);
+            return Array.from(set).filter(Boolean);
+        }
+
+        function bindAttachInput() {
+            const attachInput = document.getElementById('minute-attach-input');
+            if (!attachInput) return;
+            attachInput.addEventListener('change', async (e) => {
+                if (!attachTargetId) return;
+                const files = Array.from(e.target.files || []);
+                e.target.value = '';
+                if (files.length === 0) return;
+
+                const { urls, error } = await MinutesService.uploadMinuteFiles(files);
+                if (error) {
+                    showToast(error.message || '첨부 업로드 실패');
+                    attachTargetId = null;
+                    return;
+                }
+                const current = minutesCache.get(attachTargetId) || {};
+                const merged = mergeUrls(current.file_urls, urls);
+                const { error: updateErr } = await MinutesService.updateMinuteAttachments(attachTargetId, merged);
+                if (updateErr) showToast(updateErr.message);
+                else {
+                    showToast('첨부 업로드 완료');
+                    loadMinutes();
+                }
+                attachTargetId = null;
+            });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bindAttachInput);
+        } else {
+            bindAttachInput();
+        }
+
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function buildNoticeContentFromApproval(doc) {
+            const lines = [];
+            if (doc?.doc_no) lines.push(`문서번호: ${doc.doc_no}`);
+            if (doc?.receiver) lines.push(`수신: ${doc.receiver}`);
+            if (doc?.via) lines.push(`경유: ${doc.via}`);
+            if (doc?.title) lines.push(`제목: ${doc.title}`);
+            lines.push('');
+            if (doc?.content) lines.push(doc.content);
+            return lines.join('\n');
+        }
+
+        async function loadNoticeCompanyInfo() {
+            if (noticeCompanyInfo) return noticeCompanyInfo;
+            const { data } = await MinutesService.getCompanyInfo();
+            noticeCompanyInfo = data || {};
+            return noticeCompanyInfo;
+        }
+
+        async function loadNoticeSealUrl() {
+            if (noticeSealUrl !== null) return noticeSealUrl || '';
+            const sealUrl = await MinutesService.getOfficialSealUrl();
+            noticeSealUrl = sealUrl || '';
+            return noticeSealUrl;
+        }
+
+        function parseNoticeContent(content) {
+            const raw = String(content || '');
+            const lines = raw.split(/\r?\n/);
+            const meta = { docNo: '', receiver: '', via: '', title: '', bodyLines: [] };
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (!meta.docNo && trimmed.startsWith('문서번호:')) {
+                    meta.docNo = trimmed.replace('문서번호:', '').trim();
+                    return;
+                }
+                if (!meta.receiver && trimmed.startsWith('수신:')) {
+                    meta.receiver = trimmed.replace('수신:', '').trim();
+                    return;
+                }
+                if (!meta.via && trimmed.startsWith('경유:')) {
+                    meta.via = trimmed.replace('경유:', '').trim();
+                    return;
+                }
+                if (!meta.title && trimmed.startsWith('제목:')) {
+                    meta.title = trimmed.replace('제목:', '').trim();
+                    return;
+                }
+                meta.bodyLines.push(line);
+            });
+            return meta;
+        }
+
+        function formatKoreanDate(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            if (Number.isNaN(d.getTime())) return '';
+            return new Intl.DateTimeFormat('ko-KR', {
+                timeZone: KST_TZ_MINUTES_ADMIN,
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            }).format(d);
+        }
+
+        async function buildNoticeTemplateHtml(approval, notice) {
+            const rawContent = notice?.content || buildNoticeContentFromApproval(approval || {});
+            const parsed = parseNoticeContent(rawContent);
+            const docNo = approval?.doc_no || notice?.doc_no || parsed.docNo || '';
+            const receiver = approval?.receiver || parsed.receiver || '-';
+            const via = approval?.via || parsed.via || '-';
+            const title = notice?.title || approval?.title || parsed.title || '공문';
+            const body = parsed.bodyLines.join('\n').trim() || approval?.content || '';
+            const safeBody = escapeHtml(body).replace(/\n/g, '<br>');
+            const dateValue = approval?.processed_at || approval?.created_at || notice?.created_at;
+            const dateLabel = formatKoreanDate(dateValue);
+            const info = await loadNoticeCompanyInfo();
+            const sealUrl = await loadNoticeSealUrl();
+            const orgNameRaw = info?.orgName || info?.company_name || '용인모두의햇빛협동조합';
+            const chairmanRaw = info?.chairman_name || info?.ceoName || '';
+            const orgName = escapeHtml(orgNameRaw);
+            const chairman = chairmanRaw ? escapeHtml(chairmanRaw) : '';
+            const sealSafe = sealUrl ? sealUrl : '';
+            const sealHtml = sealSafe
+                ? `<img src="${sealSafe}" alt="seal" style="width:70px; height:70px; object-fit:contain; margin-left:6px; vertical-align:middle;">`
+                : '';
+
+            return `
+                <div style="font-family:'Malgun Gothic',sans-serif; color:#111827;">
+                    ${docNo ? `<div style="text-align:right; font-size:12px; color:#64748b;">문서번호: ${escapeHtml(docNo)}</div>` : ''}
+                    <div style="border-top:1px solid #111; border-bottom:1px solid #111;">
+                        <div style="display:flex; border-bottom:1px solid #e5e7eb; padding:6px 0;">
+                            <div style="width:60px; font-weight:700;">수신</div>
+                            <div style="flex:1;">${escapeHtml(receiver)}</div>
+                        </div>
+                        <div style="display:flex; border-bottom:1px solid #e5e7eb; padding:6px 0;">
+                            <div style="width:60px; font-weight:700;">경유</div>
+                            <div style="flex:1;">${escapeHtml(via)}</div>
+                        </div>
+                        <div style="display:flex; padding:6px 0;">
+                            <div style="width:60px; font-weight:700;">제목</div>
+                            <div style="flex:1;">${escapeHtml(title)}</div>
+                        </div>
+                </div>
+                <div style="margin-top:14px; line-height:1.8;">${safeBody || '-'}</div>
+                ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
+                <div style="margin-top:8px; text-align:center; font-weight:700;">
+                    ${orgName} 이사장 ${chairman ? chairman : ''} ${sealHtml}
+                </div>
+            </div>
+            `;
+        }
+
+        function getRoleLabel(off) {
+            return (off.role || off.position || off.category || '').trim();
+        }
+
+        function isDirectorRole(off) {
+            const label = getRoleLabel(off);
+            if (!label) return false;
+            return label.includes('이사장') || label === '이사';
+        }
+
+        function sortDirectorOrder(list) {
+            const chairman = list.filter(o => getRoleLabel(o).includes('이사장'));
+            const directors = list.filter(o => getRoleLabel(o) === '이사');
+            directors.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+            return [...chairman, ...directors];
+        }
+
+        function renderSignerOptions(officials, docType) {
+            const wrap = document.getElementById('signer-list');
+            const labelEl = document.getElementById('signer-label');
+            const helpEl = document.getElementById('signer-help');
+            if (!wrap) return;
+
+            const isGeneral = docType === 'GENERAL_ASSEMBLY';
+            let targets = [];
+            if (isGeneral) {
+                targets = officials.filter(o => String(o.category || '').toLowerCase() === 'delegate');
+                if (labelEl) labelEl.innerText = '서명 대상 (대의원)';
+                if (helpEl) helpEl.innerText = '대의원 중에서 서명자를 선택하세요.';
+            } else {
+                targets = sortDirectorOrder(officials.filter(isDirectorRole));
+                if (labelEl) labelEl.innerText = '서명 대상 (이사회)';
+                if (helpEl) helpEl.innerText = '이사장 1번 + 가나다순으로 자동 정렬됩니다.';
+            }
+
+            if (targets.length == 0) {
+                wrap.innerHTML = isGeneral
+                    ? '<span class="text-muted">대의원(delegate) 정보가 없습니다.</span>'
+                    : '<span class="text-muted">이사/이사장 정보가 없습니다.</span>';
+                return;
+            }
+            wrap.innerHTML = targets.map(o => {
+                const name = escapeHtml(o.name || '');
+                const role = escapeHtml(getRoleLabel(o) || (isGeneral ? '대의원' : ''));
+                return `
+                    <label style="display:flex; align-items:center; gap:6px; border:1px solid #e5e7eb; padding:6px 10px; border-radius:999px; background:#f8fafc;">
+                        <input type="checkbox" name="signerIds" value="${o.id}" checked>
+                        <span>${name} ${role ? `(${role})` : ''}</span>
+                    </label>
+                `;
+            }).join('');
+        }
+
+        async function openNoticePreview(id) {
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (!item) return;
+            const approval = item.approval || {};
+            const notice = item.notice || null;
+            document.getElementById('previewTitle').innerText = notice?.title || approval.title || '공문';
+            document.getElementById('previewBody').innerHTML = await buildNoticeTemplateHtml(approval, notice);
+            document.getElementById('previewModal').classList.add('show');
+        }
+        window.openNoticePreview = openNoticePreview;
+
+        window.closePreview = () => {
+            document.getElementById('previewModal').classList.remove('show');
+        };
+
+        window.openMinutePreview = async (id) => {
+            const minute = minutesCache?.get(id);
+            if (!minute) return;
+            document.getElementById('minutePreviewTitle').innerText = minute.title || '의사록';
+            document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(minute.doc_type)} | ${formatMinutesAdminKstDate(minute.created_at)}`;
+            document.getElementById('minutePreviewBody').innerHTML = sanitizeHtml(minute.content || '');
+            document.getElementById('minutePreviewModal').classList.add('show');
+        };
+        window.closeMinutePreview = () => {
+            document.getElementById('minutePreviewModal').classList.remove('show');
+        };
+
+        window.toggleNoticeAttach = (id, checked) => {
+            noticeAttachMap[id] = checked;
+        };
+
+        async function loadNotices() {
+            const container = document.getElementById('notice-list-area');
+            if (!container) return;
+            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals();
+            if (error) {
+                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">조회 오류</div>';
+                return;
+            }
+            if (!approvals || approvals.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">결재 완료 공문이 없습니다.</div>';
+                return;
+            }
+
+            const approvalIds = approvals.map(a => a.id).filter(Boolean);
+            const { data: notices } = await MinutesService.listNoticesByApprovalIds(approvalIds);
+            const noticeMap = new Map((notices || []).map(n => [String(n.source_approval_id), n]));
+
+            noticeItems = approvals.map(a => ({
+                approval: a,
+                notice: noticeMap.get(String(a.id)) || null
+            }));
+
+            container.innerHTML = '';
+            for (const item of noticeItems) {
+                const approval = item.approval || {};
+                const notice = item.notice || null;
+                const attachCount = Array.isArray(approval?.file_links) ? approval.file_links.length : 0;
+                const existingAttach = Array.isArray(notice?.file_urls) && notice.file_urls.length > 0;
+                const hasAttach = attachCount > 0 || existingAttach;
+                const key = String(approval.id || '');
+                const checked = (noticeAttachMap[key] !== undefined) ? noticeAttachMap[key] : existingAttach;
+                noticeAttachMap[key] = checked;
+
+                const isPublished = notice?.status === 'published';
+                const badgeClass = isPublished ? 'badge-open' : 'badge-closed';
+                const badgeLabel = isPublished ? '게시됨' : '미공개';
+                const docNo = approval.doc_no ? `<span style="font-size:0.8rem; color:#64748b;">${escapeHtml(approval.doc_no)}</span>` : '';
+                const dateValue = approval.processed_at || approval.created_at;
+            const dateLabel = formatMinutesAdminKstDate(dateValue);
+                const statusLabel = approval.status ? escapeHtml(approval.status) : '-';
+                const publishButton = isPublished
+                    ? `<button onclick="unpublishNotice('${approval.id}')" class="btn btn-gray">게시 취소</button>`
+                    : `<button onclick="publishNotice('${approval.id}')" class="btn btn-blue">📢 게시</button>`;
+                const html = `
+                    <div class="minute-item">
+                        <div class="minute-header">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span class="status-badge ${badgeClass}">${badgeLabel}</span>
+                                    <strong style="font-size:1.05rem;">${escapeHtml(approval.title || '공문')}</strong>
+                                    ${docNo}
+                                </div>
+                                <div style="font-size:0.8rem; color:#888; margin-top:4px;">
+                                    결재완료일: ${dateLabel} | 결재상태: ${statusLabel} | 결재문서 ID: ${approval.id || '-'}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="btn-group">
+                            <button onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
+                            <label class="btn btn-outline" style="display:flex; align-items:center; gap:6px;">
+                                <input type="checkbox" ${checked ? 'checked' : ''} ${hasAttach ? '' : 'disabled'} onchange="toggleNoticeAttach('${approval.id}', this.checked)">
+                                첨부 포함 (${attachCount})
+                            </label>
+                            ${publishButton}
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            }
+        }
+
+        window.publishNotice = async (id) => {
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (!item) return;
+            const approval = item.approval || {};
+            const notice = item.notice || null;
+            const includeAttach = !!noticeAttachMap[String(approval.id || '')];
+            let fileUrls = null;
+            if (includeAttach) {
+                if (Array.isArray(approval.file_links) && approval.file_links.length > 0) {
+                    fileUrls = approval.file_links;
+                } else if (Array.isArray(notice?.file_urls) && notice.file_urls.length > 0) {
+                    fileUrls = notice.file_urls;
+                }
+            }
+
+            const payload = {
+                p_id: notice?.id || null,
+                p_title: notice?.title || approval.title || '공문',
+                p_content: notice?.content || buildNoticeContentFromApproval(approval),
+                p_category: '공문',
+                p_status: 'published',
+                p_is_popup: notice?.is_popup || false,
+                p_file_url: notice?.file_url || null,
+                p_doc_no: approval.doc_no || notice?.doc_no || null,
+                p_file_urls: fileUrls,
+                p_file_names: notice?.file_names || null,
+                p_source_approval_id: approval.id || null
+            };
+            const { error } = await MinutesService.upsertNotice(payload);
+            if (error) showToast(error.message);
+            else {
+                showToast('게시되었습니다.');
+                loadNotices();
+            }
+        };
+        window.unpublishNotice = async (id) => {
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (!item) return;
+            const approval = item.approval || {};
+            const notice = item.notice || null;
+            if (!notice) {
+                showToast('게시된 공문이 없습니다.');
+                return;
+            }
+            const ok = await showConfirm('게시를 취소할까요?');
+            if (!ok) return;
+
+            const payload = {
+                p_id: notice?.id || null,
+                p_title: notice?.title || approval.title || '공문',
+                p_content: notice?.content || buildNoticeContentFromApproval(approval),
+                p_category: '공문',
+                p_status: 'draft',
+                p_is_popup: notice?.is_popup || false,
+                p_file_url: notice?.file_url || null,
+                p_doc_no: approval.doc_no || notice?.doc_no || null,
+                p_file_urls: notice?.file_urls || null,
+                p_file_names: notice?.file_names || null,
+                p_source_approval_id: approval.id || null
+            };
+            const { error } = await MinutesService.upsertNotice(payload);
+            if (error) showToast(error.message);
+            else {
+                showToast('게시가 취소되었습니다.');
+                loadNotices();
+            }
+        };
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 1800);
+        }
+        function switchTab(name) {
+            const minutesBtn = document.getElementById('tab-btn-minutes');
+            const noticesBtn = document.getElementById('tab-btn-notices');
+            const minutesPanel = document.getElementById('tab-minutes');
+            const noticesPanel = document.getElementById('tab-notices');
+            if (!minutesBtn || !noticesBtn || !minutesPanel || !noticesPanel) return;
+            const isMinutes = name === 'minutes';
+            minutesBtn.classList.toggle('active', isMinutes);
+            noticesBtn.classList.toggle('active', !isMinutes);
+            minutesPanel.classList.toggle('active', isMinutes);
+            noticesPanel.classList.toggle('active', !isMinutes);
+        }
+        window.switchTab = switchTab;
+
+        window.switchMinutesSubTab = (tab) => {
+            const editor = document.getElementById('sub-panel-editor');
+            const manage = document.getElementById('sub-panel-manage');
+            const btnEditor = document.getElementById('sub-tab-editor');
+            const btnManage = document.getElementById('sub-tab-manage');
+            if (tab === 'manage') {
+                editor?.classList.remove('active');
+                manage?.classList.add('active');
+                btnEditor?.classList.remove('active');
+                btnManage?.classList.add('active');
+                loadMinutes();
+            } else {
+                manage?.classList.remove('active');
+                editor?.classList.add('active');
+                btnManage?.classList.remove('active');
+                btnEditor?.classList.add('active');
+            }
+        };
+
+        function showConfirm(msg) {
+            document.getElementById('confirmText').innerText = msg;
+            document.getElementById('confirmModal').classList.add('show');
+            return new Promise(resolve => { confirmResolve = resolve; });
+        }
+        window.closeConfirm = (ok) => {
+            document.getElementById('confirmModal').classList.remove('show');
+            if (confirmResolve) confirmResolve(ok);
+        };
+
+        async function init() {
+            // 1. 관리자 체크
+            const session = await MinutesService.getSession();
+            if (!session) {
+                showToast("로그인이 필요합니다.");
+                location.href = '../membermanage.html';
+                return;
+            }
+            currentUserId = session.user.id;
+
+            // 관리자 여부 확인 (coop_members.role 또는 coop_admins)
+            isAdminUser = await MinutesService.isAdmin(session.user.id, session.user.email);
+            if (!isAdminUser) {
+                showToast("관리자 권한이 필요합니다.");
+                location.href = '../membermanage.html';
+                return;
+            }
+
+            // 2. 전체 현직 임원 목록 미리 로드 (분모 계산용)
+            allOfficials = await MinutesService.getOfficials();
+            renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
+
+            // 문서 유형 변경 시 서명 체크 기본값 조정
+            const docTypeEl = document.getElementById('in-doc-type');
+            if (docTypeEl) {
+                docTypeEl.addEventListener('change', () => {
+                    renderSignerOptions(allOfficials, docTypeEl.value);
+                });
+            }
+
+            // 3. 목록 로드
+            loadMinutes();
+            loadNotices();
+        }
+
+        async function loadMinutes() {
+            const container = document.getElementById('list-area');
+
+            const { data: minutes } = await MinutesService.listMinutesAdmin();
+            const searchValue = (document.getElementById('minutes-search')?.value || '').trim().toLowerCase();
+            minutesCache = new Map((minutes || []).map(m => [m.id, m]));
+
+            const filteredMinutes = !searchValue ? (minutes || []) : (minutes || []).filter(m => {
+                const hay = `${m.title || ''} ${m.doc_no || ''} ${m.doc_type || ''}`.toLowerCase();
+                return hay.includes(searchValue);
+            });
+
+            if (!filteredMinutes || filteredMinutes.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">등록된 의사록이 없습니다.</div>';
+                return;
+            }
+
+            const delegateList = (allOfficials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
+            const minuteIds = filteredMinutes.map(m => m.id);
+            const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
+
+            container.innerHTML = '';
+
+
+            for (const m of filteredMinutes) {
+                // 해당 의사록의 서명 데이터 조회
+                const signedOfficialIds = sigList.filter(s => s.minute_id === m.id).map(s => String(s.official_id));
+                
+                // 통계 계산 (의사록은 참석자만)
+                const directorList = sortDirectorOrder(allOfficials.filter(isDirectorRole));
+                const defaultIds = directorList.map(o => String(o.id));
+                const delegateIds = delegateList.map(o => String(o.id));
+                const requiredIds = (Array.isArray(m.signer_ids) && m.signer_ids.length > 0)
+                    ? m.signer_ids.map(id => String(id))
+                    : (m.doc_type === 'GENERAL_ASSEMBLY' ? delegateIds : (m.doc_type === 'MINUTES' ? defaultIds : allOfficials.map(o => String(o.id))));
+
+                const totalCount = m.requires_sign ? requiredIds.length : 0;
+                const signedCount = m.requires_sign ? signedOfficialIds.filter(id => requiredIds.includes(String(id))).length : 0;
+                const percent = (totalCount > 0) ? (signedCount / totalCount) * 100 : 100;
+
+                const missingNames = m.requires_sign
+                    ? requiredIds.filter(id => !signedOfficialIds.includes(String(id)))
+                        .map(id => allOfficials.find(o => String(o.id) === String(id)))
+                        .filter(Boolean)
+                        .map(off => off.name || off.coop_members?.name)
+                        .join(', ')
+                    : '';
+
+                // 상태 뱃지
+                const statusLabel = m.status === 'OPEN' ? '서명 진행 중' : (m.status === 'CLOSED' ? '서명 마감' : '작성중');
+                const badge = `<span class="status-badge ${m.status === 'OPEN' ? 'badge-open' : 'badge-closed'}">${statusLabel}</span>`;
+                const publishBadge = m.published_at
+                    ? `<span class="status-badge badge-open">공개중</span>`
+                    : `<span class="status-badge badge-closed">비공개</span>`;
+
+                // 링크 URL
+                const signLink = `${window.location.origin}/minutes/minutes_sign.html?id=${m.id}`;
+                const viewLink = `${window.location.origin}/minutes/minutes_view.html?id=${m.id}`;
+                const canClose = (!m.requires_sign) || (signedCount === totalCount);
+                const canPublish = (!m.requires_sign) || (signedCount === totalCount && m.status === 'CLOSED');
+
+                const html = `
+                    <div class="minute-item">
+                        <div class="minute-header">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    ${badge}
+                                    ${publishBadge}
+                                    <strong style="font-size:1.1rem;">${m.title}</strong>
+                                    ${m.doc_no ? `<span style="font-size:0.8rem; color:#64748b;">${m.doc_no}</span>` : ''}
+                                    <span style="font-size:0.8rem; color:#94a3b8;">${getDocTypeLabel(m.doc_type)}</span>
+                                </div>
+                                <div style="font-size:0.8rem; color:#888; margin-top:4px;">
+                                    ${formatMinutesAdminKstDate(m.created_at)} 작성 | 첨부 ${Array.isArray(m.file_urls) ? m.file_urls.length : 0}건
+                                </div>
+                            </div>
+                            <button onclick="deleteMinute('${m.id}')" class="btn btn-red">삭제</button>
+                        </div>
+
+                        <div class="progress-container">
+                            <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:5px;">
+                                <span>서명 현황: <b>${signedCount}</b> / ${totalCount}명</span>
+                                <span>${Math.round(percent)}%</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style="width:${percent}%"></div>
+                            </div>
+                            <div class="signer-names">
+                                ${m.requires_sign ? (missingNames ? `<span class="missing-signer">📢 미서명: ${missingNames}</span>` : '<span style="color:#10b981;">🎉 전원 서명 완료!</span>') : '<span style="color:#64748b;">서명 없이 공개 가능합니다.</span>'}
+                            </div>
+                        </div>
+
+                        <div class="btn-group">
+                            ${m.requires_sign ? `<button onclick="copyLink('${signLink}')" class="btn btn-blue">
+                                ✍️ 서명 링크 복사 (이사님용)
+                            </button>` : ''}
+                            <button onclick="openMinutePreview('${m.id}')" class="btn btn-gray">🔎 미리보기</button>
+                            <button onclick="copyLink('${viewLink}')" class="btn btn-gray">
+                                📄 배포 링크 복사 (공개용)
+                            </button>
+                            <button onclick="openAttachPicker('${m.id}')" class="btn btn-gray">📎 첨부 업로드</button>
+                            ${Array.isArray(m.file_urls) && m.file_urls.length > 0 ? `<button onclick="clearAttachments('${m.id}')" class="btn btn-gray">🧹 첨부 초기화</button>` : ''}
+                            ${m.requires_sign ? (m.status === 'OPEN' 
+                                ? `<button onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>🔒 마감하기</button>`
+                                : `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">🔓 다시 열기</button>`) : ''}
+                            ${m.published_at
+                                ? `<button onclick="togglePublish('${m.id}', false)" class="btn btn-gray">🙈 공개 취소</button>`
+                                : `<button onclick="togglePublish('${m.id}', true, ${canPublish})" class="btn ${canPublish ? 'btn-blue' : 'btn-outline'}" ${canPublish ? '' : 'disabled'}>📢 공개하기</button>`
+                            }
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            }
+        }
+
+        // [기능] 생성
+        window.createMinute = async () => {
+            const title = document.getElementById('in-title').value;
+            const content = document.getElementById('in-content').value;
+            const docType = document.getElementById('in-doc-type').value;
+            const docNo = await generateMinuteDocNo();
+            if(!title) return showToast("제목을 입력하세요.");
+
+            const fileInput = document.getElementById('in-files');
+            const files = Array.from(fileInput?.files || []);
+            let fileUrls = [];
+            if (files.length > 0) {
+                const { urls, error: fileErr } = await MinutesService.uploadMinuteFiles(files);
+                if (fileErr) {
+                    showToast(fileErr.message || '첨부 업로드 실패');
+                    return;
+                }
+                fileUrls = urls;
+            }
+
+            const signerIds = Array.from(document.querySelectorAll('input[name="signerIds"]:checked'))
+                .map(el => String(el.value))
+                .filter(Boolean);
+            if (signerIds.length === 0) {
+                showToast('서명 대상을 선택하세요.');
+                return;
+            }
+
+            const { error } = await MinutesService.createMinute({
+                title,
+                content,
+                doc_type: docType,
+                doc_no: docNo || null,
+                receiver: null,
+                via: null,
+                visibility: 'MEMBERS',
+                requires_sign: true,
+                status: 'OPEN',
+                author_id: currentUserId,
+                file_urls: fileUrls.length ? fileUrls : null,
+                signer_ids: signerIds
+            });
+            if(error) showToast(error.message);
+            else {
+                showToast("등록되었습니다.");
+                document.getElementById('in-title').value = '';
+                document.getElementById('in-content').value = '';
+                const fileInput = document.getElementById('in-files');
+                if (fileInput) fileInput.value = '';
+                loadMinutes();
+                loadNotices();
+            }
+        };
+
+        window.uploadPastMinute = async () => {
+            const title = document.getElementById('past-title').value.trim();
+            const content = document.getElementById('past-content').value.trim();
+            const pastDate = document.getElementById('past-date').value;
+            if (!title) return showToast("제목을 입력하세요.");
+
+            const fileInput = document.getElementById('past-files');
+            const files = Array.from(fileInput?.files || []);
+            if (files.length === 0) return showToast("첨부파일을 선택하세요.");
+
+            const { urls, error: fileErr } = await MinutesService.uploadMinuteFiles(files);
+            if (fileErr) {
+                showToast(fileErr.message || '첨부 업로드 실패');
+                return;
+            }
+
+            let createdAt = null;
+            if (pastDate) {
+                const kstDate = new Date(`${pastDate}T00:00:00+09:00`);
+                if (!Number.isNaN(kstDate.getTime())) {
+                    createdAt = kstDate.toISOString();
+                }
+            }
+
+            const payload = {
+                title,
+                content,
+                doc_type: 'PAST_MINUTES',
+                doc_no: null,
+                receiver: null,
+                via: null,
+                visibility: 'MEMBERS',
+                requires_sign: false,
+                status: 'CLOSED',
+                author_id: currentUserId,
+                file_urls: urls.length ? urls : null,
+                signer_ids: null
+            };
+            if (createdAt) payload.created_at = createdAt;
+
+            const { error } = await MinutesService.createMinute(payload);
+
+            if (error) showToast(error.message);
+            else {
+                showToast("업로드되었습니다.");
+                document.getElementById('past-title').value = '';
+                document.getElementById('past-content').value = '';
+                document.getElementById('past-date').value = '';
+                if (fileInput) fileInput.value = '';
+                loadMinutes();
+            }
+        };
+
+        // [기능] 상태 변경
+        window.toggleStatus = async (id, status, allow = true) => {
+            if (!allow) {
+                showToast('미서명자가 있어 마감할 수 없습니다.');
+                return;
+            }
+            const { error } = await MinutesService.updateMinuteStatus(id, status);
+            if(error) showToast(error.message);
+            else loadMinutes();
+        };
+
+        // [기능] 삭제
+        window.deleteMinute = async (id) => {
+            const ok = await showConfirm("정말 삭제합니까? (서명 데이터도 모두 삭제됨)");
+            if(ok) {
+                const { error } = await MinutesService.deleteMinute(id);
+                if(error) showToast(error.message);
+                else loadMinutes();
+            }
+        };
+
+        // [기능] 공개/비공개
+        window.togglePublish = async (id, publish, allow = true) => {
+            if (!allow) {
+                showToast('미서명자가 있어 공개할 수 없습니다.');
+                return;
+            }
+            const { error } = await MinutesService.togglePublish(id, publish, currentUserId);
+            if (error) showToast(error.message);
+            else loadMinutes();
+        };
+
+        // [기능] 링크 복사
+        window.copyLink = (url) => {
+            navigator.clipboard.writeText(url).then(() => {
+                showToast("링크가 복사되었습니다.");
+            });
+        };
+
+        init();
+    </script>
+</body>
+</html>

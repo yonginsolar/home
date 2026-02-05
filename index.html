@@ -1,12 +1,19 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: About fetch limit(1), sanitize FAQ/notice, and replace alert with custom modal.
+Version: v1.0.14
+Change: 2026-02-05 - Restore console easter egg message.
 -->
 <html lang="ko">
  
 <head>
-  <script>console.log('[Version] v1.0.1 | index.html');</script>
+<script>console.log('[Version] v1.0.14 | index.html');</script>
+<script>
+  console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
+  console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
+  console.log('%c코덱스가 살을 붙이고 있어요', 'color:#2563eb;font-size:13px;font-weight:700;');
+  console.log('%c제작: 김민호 & 제미나이', 'color:#64748b;font-size:12px;');
+  console.log('%c버그를 찾으시면 사무국으로 꼭 연락 주세요.. 제발...', 'color:#ef4444;font-size:13px;font-weight:800;');
+</script>
   <meta charset="utf-8">
   <meta content="width=device-width, initial-scale=1.0" name="viewport">
   <title>용인모두의햇빛협동조합</title>
@@ -544,55 +551,6 @@ Change: About fetch limit(1), sanitize FAQ/notice, and replace alert with custom
   </div>
 </div>
 
-<div class="modal fade" id="noticeSearchModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered modal-lg"> <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title fw-bold"><i class="bi bi-search me-2"></i>공지사항 검색</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        
-        <div class="input-group mb-3">
-          <input type="text" id="modal-search-input" class="form-control" placeholder="제목이나 내용을 입력하세요" onkeyup="filterNoticesInModal()">
-          <button class="btn btn-outline-secondary" type="button"><i class="bi bi-search"></i></button>
-        </div>
-
-        <div style="max-height: 400px; overflow-y: auto;">
-            <ul id="modal-notice-list" class="list-group list-group-flush">
-               </ul>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="modal fade" id="noticeDetailModal" tabindex="-1" >
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content">
-      <div class="modal-header" style="background-color: #f8f9fa;">
-        <h5 class="modal-title fw-bold" id="notice-read-title">제목</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body p-4">
-        <div class="d-flex justify-content-between text-muted border-bottom pb-2 mb-4">
-            <span id="notice-read-cat" class="badge bg-dark">공지</span>
-            <small id="notice-read-date">202X.XX.XX</small>
-        </div>
-        <div id="notice-read-content" style="min-height: 200px; line-height: 1.8; color: #333;">
-           </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-dark" onclick="openNoticeSearchModal()">목록으로</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-
   
 
   
@@ -612,6 +570,13 @@ Change: About fetch limit(1), sanitize FAQ/notice, and replace alert with custom
     let g_badge_def = [];     // 뱃지 정의(이름, 아이콘 등) 기억용
     
     let g_total_amount = 0;
+    const KST_TZ_HOME = 'Asia/Seoul';
+    const formatHomeKstDate = (value) => {
+      if (!value) return '';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return '';
+      return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_HOME, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    };
     /* =================================================================
        1. 디자인/애니메이션 초기화 (AOS, Counter, Scroll)
        ================================================================= */
@@ -717,6 +682,170 @@ Change: About fetch limit(1), sanitize FAQ/notice, and replace alert with custom
             if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
         } catch (e) { void 0; }
         return null;
+    }
+
+    function sanitizeStyle(styleText) {
+        const raw = String(styleText || '');
+        if (!raw) return '';
+        if (/expression\s*\(/i.test(raw)) return '';
+        if (/javascript:/i.test(raw)) return '';
+        return raw.replace(/url\s*\(/gi, '');
+    }
+
+    function sanitizeHtml(html) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(String(html || ''), 'text/html');
+        const allowedTags = new Set([
+            'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
+            'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+            'TH','THEAD','TR','U','UL'
+        ]);
+        const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+        const allowedAttrs = {
+            '*': new Set(['class','style']),
+            'A': new Set(['href','target','rel','title','class','style']),
+            'IMG': new Set(['src','alt','title','width','height','class','style']),
+            'TABLE': new Set(['class','style','border','cellpadding','cellspacing']),
+            'TD': new Set(['class','style','colspan','rowspan','align']),
+            'TH': new Set(['class','style','colspan','rowspan','align'])
+        };
+        const isSafeUrl = (value, allowDataImage = false) => {
+            const raw = String(value || '').trim();
+            if (!raw) return null;
+            if (/^(mailto:|tel:)/i.test(raw)) return raw;
+            if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+            try {
+                const u = new URL(raw, window.location.origin);
+                if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+            } catch (e) { void 0; }
+            return null;
+        };
+
+        const nodes = Array.from(doc.body.querySelectorAll('*'));
+        nodes.forEach(node => {
+            const tag = node.tagName;
+            if (!allowedTags.has(tag)) {
+                if (blockedTags.has(tag)) {
+                    node.remove();
+                    return;
+                }
+                const parent = node.parentNode;
+                if (!parent) return;
+                while (node.firstChild) parent.insertBefore(node.firstChild, node);
+                parent.removeChild(node);
+                return;
+            }
+
+            const attrs = Array.from(node.attributes);
+            attrs.forEach(attr => {
+                const name = attr.name.toLowerCase();
+                const value = attr.value;
+                if (name.startsWith('on')) {
+                    node.removeAttribute(attr.name);
+                    return;
+                }
+                const allowSet = allowedAttrs[tag] || allowedAttrs['*'];
+                if (allowSet && !allowSet.has(name) && !(allowedAttrs['*'] && allowedAttrs['*'].has(name))) {
+                    node.removeAttribute(attr.name);
+                    return;
+                }
+                if (name === 'href') {
+                    const safe = isSafeUrl(value, false);
+                    if (!safe) node.removeAttribute('href');
+                    else node.setAttribute('href', safe);
+                }
+                if (name === 'src') {
+                    const safe = isSafeUrl(value, tag === 'IMG');
+                    if (!safe) node.removeAttribute('src');
+                    else node.setAttribute('src', safe);
+                }
+                if (name === 'style') {
+                    const safeStyle = sanitizeStyle(value);
+                    if (safeStyle) node.setAttribute('style', safeStyle);
+                    else node.removeAttribute('style');
+                }
+                if (name === 'target' && node.tagName === 'A') {
+                    if (node.getAttribute('target') === '_blank') {
+                        node.setAttribute('rel', 'noopener noreferrer');
+                    }
+                }
+            });
+        });
+            return doc.body.innerHTML;
+        }
+
+    function parseNoticeContent(content) {
+        const raw = String(content || '');
+        const lines = raw.split(/\r?\n/);
+        const meta = { docNo: '', receiver: '', via: '', title: '', bodyLines: [] };
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (!meta.docNo && trimmed.startsWith('문서번호:')) {
+                meta.docNo = trimmed.replace('문서번호:', '').trim();
+                return;
+            }
+            if (!meta.receiver && trimmed.startsWith('수신:')) {
+                meta.receiver = trimmed.replace('수신:', '').trim();
+                return;
+            }
+            if (!meta.via && trimmed.startsWith('경유:')) {
+                meta.via = trimmed.replace('경유:', '').trim();
+                return;
+            }
+            if (!meta.title && trimmed.startsWith('제목:')) {
+                meta.title = trimmed.replace('제목:', '').trim();
+                return;
+            }
+            meta.bodyLines.push(line);
+        });
+        return meta;
+    }
+
+    function formatKoreanDate(dateStr) {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        if (Number.isNaN(d.getTime())) return '';
+        return new Intl.DateTimeFormat('ko-KR', {
+            timeZone: KST_TZ_HOME,
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        }).format(d);
+    }
+
+    function buildNoticeTemplateHtml(n) {
+        const parsed = parseNoticeContent(n.content || '');
+        const docNo = n.doc_no || parsed.docNo || '';
+        const receiver = parsed.receiver || '-';
+        const via = parsed.via || '-';
+        const title = n.title || parsed.title || '공지';
+        const body = parsed.bodyLines.join('\n').trim() || '';
+        const safeBody = escapeHtml(body).replace(/\n/g, '<br>');
+        const dateLabel = formatKoreanDate(n.created_at);
+
+        const html = `
+            <div style="font-family:'Malgun Gothic',sans-serif; color:#111827;">
+                ${docNo ? `<div style="text-align:right; font-size:12px; color:#64748b;">문서번호: ${escapeHtml(docNo)}</div>` : ''}
+                <div style="border-top:1px solid #111; border-bottom:1px solid #111;">
+                    <div style="display:flex; border-bottom:1px solid #e5e7eb; padding:6px 0;">
+                        <div style="width:60px; font-weight:700;">수신</div>
+                        <div style="flex:1;">${escapeHtml(receiver)}</div>
+                    </div>
+                    <div style="display:flex; border-bottom:1px solid #e5e7eb; padding:6px 0;">
+                        <div style="width:60px; font-weight:700;">경유</div>
+                        <div style="flex:1;">${escapeHtml(via)}</div>
+                    </div>
+                    <div style="display:flex; padding:6px 0;">
+                        <div style="width:60px; font-weight:700;">제목</div>
+                        <div style="flex:1;">${escapeHtml(title)}</div>
+                    </div>
+                </div>
+                <div style="margin-top:14px; line-height:1.8;">${safeBody || '-'}</div>
+                ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
+                <div style="margin-top:8px; text-align:center; font-weight:700;">용인모두의햇빛협동조합 이사장</div>
+            </div>
+        `;
+        return sanitizeHtml(html);
     }
 
     const showAlert = window.showAlert || function(message) {
@@ -877,9 +1006,10 @@ function renderNotices(dataList) {
     let html = '';
         dataList.forEach(n => {
             // 카테고리별 뱃지 색상 구분
-            const badgeClass = n.category === '공지' ? 'bg-primary' : (n.category === '뉴스' ? 'bg-success' : 'bg-secondary');
-            const dateStr = n.created_at.split('T')[0].replaceAll('-', '.');
-            const safeCategory = escapeHtml(n.category || '');
+            const displayCategory = n.category === '공문' ? '공지' : (n.category || '');
+            const badgeClass = displayCategory === '공지' ? 'bg-primary' : (displayCategory === '뉴스' ? 'bg-success' : 'bg-secondary');
+            const dateStr = formatHomeKstDate(n.created_at).replaceAll('-', '.');
+            const safeCategory = escapeHtml(displayCategory);
             const safeTitle = escapeHtml(n.title || '');
             
             // ★ 핵심: onclick에 ID를 넘겨서 모달을 엽니다. (alert 제거됨)
@@ -952,13 +1082,14 @@ function renderMainNotices(items) {
 
     let html = '';
     items.forEach(n => {
-        const badgeClass = n.category === '공지' ? 'bg-primary' : 'bg-secondary';
-        const dateStr = n.created_at.split('T')[0].replaceAll('-', '.');
+        const displayCategory = n.category === '공문' ? '공지' : (n.category || '');
+        const badgeClass = displayCategory === '공지' ? 'bg-primary' : 'bg-secondary';
+        const dateStr = formatHomeKstDate(n.created_at).replaceAll('-', '.');
         
         // 클릭하면 바로 '상세 읽기 모달' 오픈
         html += `
           <li class="mb-2 d-flex align-items-center border-bottom pb-2" style="cursor:pointer;" onclick="openNoticeDetail('${n.id}')">
-             <span class="badge ${badgeClass} me-2" style="flex-shrink:0; font-size:0.75rem;">${n.category}</span> 
+             <span class="badge ${badgeClass} me-2" style="flex-shrink:0; font-size:0.75rem;">${displayCategory}</span> 
              <span class="text-dark text-truncate" style="flex-grow:1; max-width: 180px;">${n.title}</span>
              <small class="text-muted ms-2" style="font-size:0.8rem;">${dateStr}</small>
           </li>
@@ -1000,7 +1131,7 @@ function renderModalList(items) {
 
     let html = '';
     items.forEach(n => {
-        const dateStr = n.created_at.split('T')[0];
+        const dateStr = formatHomeKstDate(n.created_at);
         const safeCategory = escapeHtml(n.category || '');
         const safeTitle = escapeHtml(n.title || '');
         // 클릭 시 '상세 읽기 모달'로 이동
@@ -1045,29 +1176,39 @@ function openNoticeDetail(id) {
 
     // 기본 정보 채우기
     document.getElementById('notice-read-title').innerText = n.title;
-    document.getElementById('notice-read-cat').innerText = n.category;
-    document.getElementById('notice-read-date').innerText = n.created_at.split('T')[0];
+    document.getElementById('notice-read-cat').innerText = n.category === '공문' ? '공지' : n.category;
+    document.getElementById('notice-read-date').innerText = formatHomeKstDate(n.created_at);
     
-    // 본문 줄바꿈 처리 (안전 이스케이프)
-    const safeContent = escapeHtml(n.content || '');
-    let contentHtml = safeContent.replace(/\n/g, '<br>');
+    let contentHtml = '';
+    if (n.category === '공문') {
+        contentHtml = buildNoticeTemplateHtml(n);
+    } else {
+        // 본문 줄바꿈 처리 (안전 이스케이프)
+        const safeContent = escapeHtml(n.content || '');
+        contentHtml = safeContent.replace(/\n/g, '<br>');
+    }
 
     // ============================================================
     // ★ [핵심] 영문 파일명 예쁘게 보여주기 로직
     // ============================================================
-    if (n.file_urls && Array.isArray(n.file_urls) && n.file_urls.length > 0) {
+    const attachUrls = (Array.isArray(n.file_urls) && n.file_urls.length > 0)
+        ? n.file_urls
+        : (n.file_url ? [n.file_url] : []);
+    const attachNames = Array.isArray(n.file_names) ? n.file_names : [];
+
+    if (attachUrls.length > 0) {
         contentHtml += '<hr class="my-4" style="border-top: 1px dashed #bbb;">';
         contentHtml += '<h6 class="fw-bold mb-3"><i class="bi bi-paperclip"></i> 첨부파일</h6>';
         contentHtml += '<ul class="list-unstyled bg-light p-3 rounded">';
         
-        n.file_urls.forEach(url => {
+        attachUrls.forEach((url, idx) => {
             // 1. URL이 문자열인지 확인 (안전장치)
             if (typeof url !== 'string') return;
             const safeLink = safeUrl(url);
             if (!safeLink) return;
 
             // 2. 파일명 추출 (주소의 마지막 부분 가져오기)
-            let fileName = url.split('/').pop();
+            let fileName = (attachNames[idx] || '').trim() || url.split('/').pop();
 
             // 3. 외계어(%20 등) 해독
             try { fileName = decodeURIComponent(fileName); } catch(e) {}
@@ -1521,13 +1662,13 @@ function openPlantDetail(id) {
 
         // 2. 텍스트
         const titleEl = document.getElementById('about-title');
-        if(titleEl) titleEl.innerHTML = defaultData.title || '';
+        if(titleEl) titleEl.innerHTML = sanitizeHtml(defaultData.title || '');
 
         const subEl = document.getElementById('about-subtitle');
-        if(subEl) subEl.innerHTML = defaultData.subtitle || ''; 
+        if(subEl) subEl.innerHTML = sanitizeHtml(defaultData.subtitle || ''); 
 
         const contentEl = document.getElementById('about-content');
-        if(contentEl) contentEl.innerHTML = defaultData.content || '';
+        if(contentEl) contentEl.innerHTML = sanitizeHtml(defaultData.content || '');
 
         // 3. 리스트 (검은 점 제거 & 순수 텍스트 모드)
         const listEl = document.getElementById('about-list');
@@ -1543,7 +1684,7 @@ function openPlantDetail(id) {
                 
                 if (defaultData.list_items.includes('<li')) {
                     // HTML 직접 입력 시
-                    listEl.innerHTML = defaultData.list_items;
+                    listEl.innerHTML = sanitizeHtml(defaultData.list_items);
                 } else {
                     // 줄바꿈 입력 시 -> ★ 핵심 2: 아이콘(<i>) 없이 깔끔하게 글자만 넣음
                     let html = '';
@@ -1551,7 +1692,7 @@ function openPlantDetail(id) {
                     items.forEach(item => {
                         if(item.trim()) {
                             // <li> 안에 그냥 텍스트만 넣음 (점도 없고 아이콘도 없음)
-                            html += `<li class="mb-2">${item.trim()}</li>`;
+                            html += `<li class="mb-2">${sanitizeHtml(item.trim())}</li>`;
                         }
                     });
                     listEl.innerHTML = html;
@@ -1588,10 +1729,12 @@ function openPlantDetail(id) {
        let html = '';
        
        partners.forEach(p => {
+           const safeName = escapeHtml(p.name || '');
+           const safeLogo = p.logo_url ? safeUrl(p.logo_url) : null;
            // 리스트 화면: 로고 있으면 이미지, 없으면 텍스트
-           const content = p.logo_url 
-               ? `<img src="${p.logo_url}" class="img-fluid" alt="${p.name}">` 
-               : `<span class="partner-text">${p.name}</span>`;
+           const content = safeLogo
+               ? `<img src="${safeLogo}" class="img-fluid" alt="${safeName}">` 
+               : `<span class="partner-text">${safeName}</span>`;
 
            // ★ 카드 디자인 적용 (col-6 col-md-4 col-lg-3 + partner-card 클래스)
            html += `
@@ -1617,18 +1760,19 @@ function openPlantDetail(id) {
 
         // ★ 핵심 로직: 로고가 있으면 -> 이미지만 크게, 텍스트 로고 숨김
         //              로고가 없으면 -> 텍스트 로고 크게 보여줌
-        if(p.logo_url) {
-            imgEl.src = p.logo_url;
+        const modalLogo = p.logo_url ? safeUrl(p.logo_url) : null;
+        if(modalLogo) {
+            imgEl.src = modalLogo;
             imgEl.style.display = 'block';
             textLogoEl.style.display = 'none';
         } else {
             imgEl.style.display = 'none';
-            textLogoEl.innerText = p.name;
+            textLogoEl.innerText = p.name || '';
             textLogoEl.style.display = 'block';
         }
 
         // 하단 단체명 (보조 텍스트)
-        nameEl.innerText = p.name;
+        nameEl.innerText = p.name || '';
 
         // 설명
         document.getElementById('pt-modal-desc').innerText = p.description || '함께하는 든든한 파트너입니다.';
@@ -1654,8 +1798,9 @@ function openPlantDetail(id) {
 
         // 링크 버튼
         const linkBtn = document.getElementById('pt-modal-link');
-        if(p.link_url) {
-            linkBtn.href = p.link_url;
+        const safeLink = p.link_url ? safeUrl(p.link_url) : null;
+        if(safeLink) {
+            linkBtn.href = safeLink;
             linkBtn.style.display = 'inline-block';
         } else {
             linkBtn.style.display = 'none';
@@ -1780,5 +1925,6 @@ function printConsoleSignature() {
     void 0;
 }
   </script>
+  <script src="notice_modal.js"></script>
 </body>
 </html>

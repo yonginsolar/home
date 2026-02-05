@@ -1,80 +1,10 @@
-/*
-Version: v1.0.4
-Change: 2026-02-05 - Avoid global KST helper name collision.
+/* Version: v1.0.3
+Change: 2026-02-05 - Use KST date defaults for patch notes.
 */
-
-var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
-  const overlay = document.createElement('div');
-  overlay.style.position = 'fixed';
-  overlay.style.inset = '0';
-  overlay.style.background = 'rgba(0,0,0,0.45)';
-  overlay.style.display = 'flex';
-  overlay.style.alignItems = 'center';
-  overlay.style.justifyContent = 'center';
-  overlay.style.zIndex = '9999';
-
-  const box = document.createElement('div');
-  box.style.background = '#fff';
-  box.style.borderRadius = '10px';
-  box.style.maxWidth = '90%';
-  box.style.minWidth = '260px';
-  box.style.padding = '18px 20px';
-  box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
-
-  const msg = document.createElement('div');
-  msg.style.whiteSpace = 'pre-line';
-  msg.style.color = '#111827';
-  msg.style.fontSize = '14px';
-  msg.style.lineHeight = '1.5';
-  msg.textContent = String(message ?? '');
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.textContent = '확인';
-  btn.style.marginTop = '14px';
-  btn.style.padding = '8px 16px';
-  btn.style.border = '1px solid #e5e7eb';
-  btn.style.borderRadius = '8px';
-  btn.style.background = '#111827';
-  btn.style.color = '#fff';
-  btn.style.cursor = 'pointer';
-
-  const close = () => overlay.remove();
-  btn.addEventListener('click', close);
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) close();
-  });
-
-  box.appendChild(msg);
-  box.appendChild(btn);
-  overlay.appendChild(box);
-  document.body.appendChild(overlay);
-};
-
-const KST_TZ_PATCH = 'Asia/Seoul';
-const formatPatchKstDate = (value = new Date()) => {
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_PATCH, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-};
-if (typeof window !== 'undefined') {
-  window.showAlert = showAlert;
-}
 /**
  * [File: patch_note.js]
  * 패치노트 UI 및 관리자 기능 (작성/삭제) 포함
- * 연결 테이블: sys_home_patch_note
  */
-
-
-// 0. CSS 스타일 주입 (.hidden 클래스 처리)
-// 부트스트랩 5에는 hidden 클래스가 없으므로 강제로 스타일을 넣어줍니다.
-const style = document.createElement('style');
-style.innerHTML = `
-  .hidden { display: none !important; }
-  .modal-dialog-scrollable .modal-body { overflow-y: auto; }
-`;
-document.head.appendChild(style);
 
 // 1. 모달 HTML (입력 폼 포함)
 const patchNoteModalHTML = `
@@ -127,28 +57,95 @@ const patchNoteModalHTML = `
 </div>
 `;
 
-// HTML 주입 (body 맨 끝에 추가)
+// HTML 주입
 document.body.insertAdjacentHTML('beforeend', patchNoteModalHTML);
 
+// 공통 알림/확인 모달 (패치노트 전용 fallback)
+const patchAlertModalHTML = `
+<div class="modal fade" id="patchAlertModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-body text-center py-4" id="patchAlertBody" style="white-space: pre-wrap;"></div>
+      <div class="modal-footer justify-content-center p-1 border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+const patchConfirmModalHTML = `
+<div class="modal fade" id="patchConfirmModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white p-2">
+        <h6 class="modal-title fw-bold mb-0">⚠️ 확인</h6>
+      </div>
+      <div class="modal-body text-center py-4" id="patchConfirmBody" style="white-space: pre-wrap;"></div>
+      <div class="modal-footer justify-content-center p-2 border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-primary btn-sm" id="patchConfirmYes">확인</button>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+document.body.insertAdjacentHTML('beforeend', patchAlertModalHTML);
+document.body.insertAdjacentHTML('beforeend', patchConfirmModalHTML);
+
+let patchAlertModal;
+let patchConfirmModal;
+let patchConfirmCallback = null;
+
+function patchShowAlert(message) {
+    if (typeof showAlert === 'function') {
+        showAlert(message);
+        return;
+    }
+    if (!patchAlertModal) patchAlertModal = new bootstrap.Modal(document.getElementById('patchAlertModal'));
+    const body = document.getElementById('patchAlertBody');
+    if (body) body.textContent = message || '';
+    patchAlertModal.show();
+}
+
+function patchShowConfirm(message, callback) {
+    if (typeof showConfirm === 'function') {
+        showConfirm(message, callback);
+        return;
+    }
+    if (!patchConfirmModal) patchConfirmModal = new bootstrap.Modal(document.getElementById('patchConfirmModal'));
+    const body = document.getElementById('patchConfirmBody');
+    if (body) body.textContent = message || '';
+    patchConfirmCallback = typeof callback === 'function' ? callback : null;
+    const btn = document.getElementById('patchConfirmYes');
+    if (btn) {
+        btn.onclick = () => {
+            if (patchConfirmCallback) patchConfirmCallback();
+            patchConfirmCallback = null;
+            patchConfirmModal.hide();
+        };
+    }
+    patchConfirmModal.show();
+}
+
 // ============================================================
-// [로직] 데이터 로드 및 관리 (DB 테이블: sys_home_patch_note)
+// [로직] 데이터 로드 및 관리
 // ============================================================
 
-// 1. 최신 버전 조회 (index.html 하단 표시용 - 필요 시 사용)
+// 1. 최신 버전 조회 (index.html 하단 표시용)
 async function loadCurrentVersion() {
-    if (typeof _client === 'undefined') return;
+    if (typeof _supabase === 'undefined') return;
 
-    // 테이블명 변경: sys_home_patch_note
-    const { data, error } = await _client
-        .from('sys_home_patch_note')
+    const { data } = await _supabase
+        .from('sys_patch_notes')
         .select('version')
-        .order('release_date', { ascending: false }) // 날짜 최신순
-        .order('id', { ascending: false })           // 같은 날짜면 ID 역순
+        .order('release_date', { ascending: false })
+        .order('id', { ascending: false })
         .limit(1)
         .single();
         
-    if (data) {
-        // index.html 등에 id="currentVersion" 인 태그가 있다면 버전 표시
+    if(data) {
         const verEl = document.getElementById("currentVersion");
         if(verEl) verEl.innerText = data.version;
     }
@@ -156,70 +153,50 @@ async function loadCurrentVersion() {
 
 // 2. 패치노트 모달 열기
 async function openPatchModal() {
-    // 모달 요소 찾기
     const modalEl = document.getElementById('patchNoteModal');
-    if (!modalEl) {
-        console.error("패치노트 모달 HTML이 없습니다.");
-        return;
-    }
     const modal = new bootstrap.Modal(modalEl);
     
-    // 관리자 체크 (작성 버튼 표시 여부)
+    // 관리자 체크 (localStorage 확인)
     checkAdminPermission();
     
-    // 작성 폼 초기화 (숨김 처리 및 오늘 날짜 세팅)
-    const formEl = document.getElementById("patchWriteForm");
-    if(formEl) formEl.classList.add("hidden");
-    
-    const dateEl = document.getElementById("pnDate");
-    if(dateEl) dateEl.value = formatPatchKstDate();
+    // 작성 폼 초기화
+    document.getElementById("patchWriteForm").classList.add("hidden");
+    document.getElementById("pnDate").value = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); // 오늘 날짜 (KST)
 
     // 리스트 로딩
     await loadPatchList();
-    
-    // 모달 띄우기
     modal.show();
 }
 
-// 3. 리스트 불러오기
+// 3. 리스트 불러오기 (재사용 가능하도록 분리)
 async function loadPatchList() {
     const listEl = document.getElementById("patchList");
-    if (!listEl) return;
-    
-    // 로딩 스피너
     listEl.innerHTML = '<div class="p-4 text-center"><div class="spinner-border text-primary"></div></div>';
 
-    // 테이블명 변경: sys_home_patch_note
-    const { data, error } = await _client
-        .from('sys_home_patch_note')
+    const { data } = await _supabase
+        .from('sys_patch_notes')
         .select('*')
         .order('release_date', { ascending: false })
         .order('id', { ascending: false });
         
-    if (error) {
-        console.error("패치노트 로딩 에러:", error);
-        listEl.innerHTML = '<div class="p-4 text-center text-danger">데이터를 불러오지 못했습니다.</div>';
-        return;
-    }
-        
-    if (!data || data.length === 0) {
-        listEl.innerHTML = '<div class="p-4 text-center text-muted">등록된 업데이트 내역이 없습니다.</div>';
+    if(!data || data.length === 0) {
+        listEl.innerHTML = '<div class="p-4 text-center text-muted">업데이트 내역이 없습니다.</div>';
         return;
     }
     
-    // 관리자 여부 (삭제 버튼 표시용)
+    // 관리자 여부 재확인 (삭제 버튼 표시용)
     const isAdmin = isAdminUser();
 
     listEl.innerHTML = data.map(note => {
-        // 줄바꿈 처리 (\n -> <br>)
-        const contentHtml = note.content ? note.content.replace(/\\n/g, '<br>').replace(/\n/g, '<br>') : '';
+        // 줄바꿈 처리
+        const contentHtml = note.content.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
         
-        // 메이저 업데이트 뱃지
+        // 뱃지 스타일
         const badge = note.is_major 
             ? '<span class="badge bg-danger ms-2">Major Update</span>' 
             : '<span class="badge bg-secondary ms-2">Patch</span>';
         
-        // 삭제 버튼 (관리자만)
+        // 삭제 버튼 (관리자만 보임)
         const delBtn = isAdmin 
             ? `<button class="btn btn-outline-danger btn-sm py-0 ms-auto" style="font-size:0.7rem;" onclick="deletePatchNote(${note.id})">삭제</button>` 
             : '';
@@ -227,7 +204,7 @@ async function loadPatchList() {
         return `
             <div class="list-group-item p-3">
                 <div class="d-flex w-100 align-items-center mb-2">
-                    <h6 class="mb-0 fw-bold text-primary">${note.version} ${badge}</h6>
+                    <h6 class="mb-0 fw-bold text-primary">v${note.version} ${badge}</h6>
                     <small class="text-muted ms-2">${note.release_date}</small>
                     ${delBtn}
                 </div>
@@ -246,10 +223,12 @@ async function savePatchNote() {
     const content = document.getElementById("pnContent").value;
     const isMajor = document.getElementById("pnMajor").checked;
 
-    if(!version || !title || !content) return showAlert("내용을 모두 입력해주세요.");
+    if(!version || !title || !content) {
+        patchShowAlert("내용을 모두 입력해주세요.");
+        return;
+    }
 
-    // 테이블명 변경: sys_home_patch_note
-    const { error } = await _client.from('sys_home_patch_note').insert({
+    const { error } = await _supabase.from('sys_patch_notes').insert({
         version: version,
         release_date: date,
         title: title,
@@ -258,44 +237,33 @@ async function savePatchNote() {
     });
 
     if(error) {
-        showAlert("저장 실패: " + error.message);
-        console.error(error);
+        patchShowAlert("저장 실패: " + error.message);
     } else {
-        showAlert("업데이트 되었습니다!");
-        // 입력창 초기화
+        patchShowAlert("업데이트 되었습니다!");
+        // 폼 초기화 및 리스트 갱신
         document.getElementById("pnVersion").value = "";
         document.getElementById("pnTitle").value = "";
         document.getElementById("pnContent").value = "";
-        document.getElementById("patchWriteForm").classList.add("hidden"); // 폼 닫기
-        
-        // 리스트 새로고침
+        document.getElementById("patchWriteForm").classList.add("hidden");
         await loadPatchList();
-        loadCurrentVersion(); 
+        loadCurrentVersion(); // 메인화면 버전 텍스트도 갱신
     }
 }
 
 // 5. 패치노트 삭제 (관리자용)
 async function deletePatchNote(id) {
-    if(!confirm("이 패치 내역을 삭제하시겠습니까? (복구 불가)")) return;
-    
-    // 테이블명 변경: sys_home_patch_note
-    const { error } = await _client
-        .from('sys_home_patch_note')
-        .delete()
-        .eq('id', id);
-    
-    if(error) {
-        showAlert("삭제 실패: " + error.message);
-    } else {
-        await loadPatchList(); // 리스트 갱신
-    }
+    return patchShowConfirm("이 패치 내역을 삭제하시겠습니까?", async () => {
+            const { error } = await _supabase.from('sys_patch_notes').delete().eq('id', id);
+            if(error) {
+                patchShowAlert("삭제 실패: " + error.message);
+            }
+            else await loadPatchList();
+        });
 }
 
 // [Helper] 관리자 권한 체크 및 UI 제어
 function checkAdminPermission() {
     const btn = document.getElementById("btnShowWrite");
-    if(!btn) return;
-    
     if(isAdminUser()) {
         btn.classList.remove("hidden");
     } else {
@@ -304,27 +272,19 @@ function checkAdminPermission() {
 }
 
 function isAdminUser() {
-    // localStorage에서 사용자 정보 확인
     const userStr = localStorage.getItem('erp_user');
     if(!userStr) return false;
-    
-    try {
-        const user = JSON.parse(userStr);
-        // 국장, 관리자, 이사, 이사장 직함이 있으면 관리자로 인정
-        return (user.role === 'admin' || user.position === '국장' || user.position === '이사' || user.position === '이사장');
-    } catch (e) {
-        return false;
-    }
+    const user = JSON.parse(userStr);
+    // 권한 체크 로직 (국장, 관리자, 이사 등)
+    return ((user.role === 'admin' || user.role === 'admin_all') || user.position === '국장' || user.position === '이사' || user.position === '이사장');
 }
 
 function toggleWriteForm() {
     const form = document.getElementById("patchWriteForm");
-    if (form) {
-        form.classList.toggle("hidden");
-    }
+    form.classList.toggle("hidden");
 }
 
-// 페이지 로드 시 최신 버전 체크 (선택 사항)
+// 초기 실행
 document.addEventListener("DOMContentLoaded", function() {
     setTimeout(loadCurrentVersion, 500);
 });

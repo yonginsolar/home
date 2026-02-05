@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: Escape dynamic fields in status/preview to prevent XSS.
+Version: v1.0.3
+Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>후보자 등록 신청</title>
-    <script>console.log('[Version] v1.0.1 | candidate_apply.html');</script>
+    <script>console.log('[Version] v1.0.3 | candidate_apply.html');</script>
     <link rel="stylesheet" href="style.css">
 <style>
     :root {
@@ -551,6 +551,13 @@ Change: Escape dynamic fields in status/preview to prevent XSS.
     import { ElectionService, supabase } from './ElectionService.js';
 
     const service = new ElectionService();
+    const KST_TZ_CANDIDATE = 'Asia/Seoul';
+    const formatCandidateKstDate = (value) => {
+        if (!value) return '-';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '-';
+        return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_CANDIDATE });
+    };
 
     // --- 전역 변수 ---
     let currentUser = null;
@@ -665,8 +672,8 @@ Change: Escape dynamic fields in status/preview to prevent XSS.
 
         // 기간 표시 업데이트
         const option = selectEl.options[selectEl.selectedIndex];
-        const sDate = option.dataset.start !== '-' ? new Date(option.dataset.start).toLocaleDateString() : '-';
-        const eDate = option.dataset.end !== '-' ? new Date(option.dataset.end).toLocaleDateString() : '-';
+        const sDate = option.dataset.start !== '-' ? formatCandidateKstDate(option.dataset.start) : '-';
+        const eDate = option.dataset.end !== '-' ? formatCandidateKstDate(option.dataset.end) : '-';
         
         const periodEl = document.getElementById('display-period');
         if(periodEl) periodEl.innerText = `${sDate} ~ ${eDate}`;

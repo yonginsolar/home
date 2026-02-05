@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<!--
+Version: v1.0.5
+Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
+-->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.5 | audit_logs.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>감사 로그</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
+    .main-container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="fw-bold m-0">🧾 감사 로그</h4>
+      <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'">🏠 메뉴로</button>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">시작일</label>
+          <input type="date" class="form-control" id="filterStart">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">종료일</label>
+          <input type="date" class="form-control" id="filterEnd">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">액션 키</label>
+          <input type="text" class="form-control" id="filterAction" placeholder="approval.submit">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">실행자</label>
+          <input type="text" class="form-control" id="filterActor" placeholder="이름 또는 ID">
+        </div>
+      </div>
+      <div class="d-flex justify-content-end gap-2 mt-3">
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">초기화</button>
+        <button class="btn btn-primary btn-sm" onclick="loadLogs(true)">검색</button>
+        <button class="btn btn-outline-success btn-sm" onclick="exportCsv()">CSV 다운로드</button>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>일시</th>
+            <th>실행자</th>
+            <th>액션</th>
+            <th>요약</th>
+            <th>대상</th>
+            <th>대상 ID</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+
+    <div class="text-center mt-3">
+      <button class="btn btn-outline-secondary btn-sm" id="btnMore" onclick="loadLogs(false)">더보기</button>
+    </div>
+  </div>
+
+  <div class="modal fade" id="alertModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content">
+        <div class="modal-body text-center py-4" id="alertBody" style="white-space: pre-wrap;"></div>
+        <div class="modal-footer justify-content-center p-1 border-0">
+          <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const KST_TZ_AUDIT = 'Asia/Seoul';
+const formatAuditKstDate = (value, fallback = '') => {
+  if (!value) return fallback;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return fallback;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_AUDIT, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+};
+
+let alertModal;
+let myInfo = null;
+let permissionSet = new Set();
+let currentPage = 0;
+let pageSize = 50;
+let cachedLogs = [];
+
+window.onload = async function() {
+  alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
+  const stored = localStorage.getItem('erp_user');
+  if (!stored) { location.href = 'index.html'; return; }
+  myInfo = JSON.parse(stored);
+  permissionSet = await loadPermissions(myInfo);
+  localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
+  if (permissionSet.size > 0 && !permissionSet.has('audit.view')) {
+    showAlert("접근 권한이 없습니다.");
+    setTimeout(() => location.href = 'index.html', 1200);
+    return;
+  }
+  await loadLogs(true);
+};
+
+function showAlert(msg) {
+  document.getElementById('alertBody').textContent = msg || '';
+  alertModal.show();
+}
+
+async function loadPermissions(user) {
+  const result = new Set();
+  if (!user) return result;
+  const roleKey = user.role || '';
+  const posKey = user.position || '';
+  if (!roleKey && !posKey) return result;
+
+    const roleKeys = [roleKey, posKey].filter(Boolean);
+    if (roleKey === 'admin_all') roleKeys.push('admin');
+    if (roleKey === 'admin') roleKeys.push('admin_all');
+  const { data } = await _supabase
+    .from('erp_role_permissions')
+    .select('permission_key')
+    .in('scope', ['role','position'])
+    .in('role_key', roleKeys)
+    .eq('is_enabled', true);
+  if (Array.isArray(data)) {
+    data.forEach(r => r.permission_key && result.add(r.permission_key));
+  }
+  return result;
+}
+
+function resetFilters() {
+  document.getElementById('filterStart').value = '';
+  document.getElementById('filterEnd').value = '';
+  document.getElementById('filterAction').value = '';
+  document.getElementById('filterActor').value = '';
+}
+
+async function loadLogs(reset) {
+  if (reset) {
+    currentPage = 0;
+    cachedLogs = [];
+    document.getElementById('logBody').innerHTML = '';
+  }
+
+  const start = document.getElementById('filterStart').value;
+  const end = document.getElementById('filterEnd').value;
+  const action = document.getElementById('filterAction').value.trim();
+  const actor = document.getElementById('filterActor').value.trim();
+
+  let query = _supabase.from('erp_audit_logs').select('*').order('created_at', { ascending: false });
+  if (start) query = query.gte('created_at', `${start}T00:00:00`);
+  if (end) query = query.lte('created_at', `${end}T23:59:59`);
+  if (action) query = query.ilike('action', `%${action}%`);
+  if (actor) query = query.or(`actor_name.ilike.%${actor}%,actor_emp_id.ilike.%${actor}%`);
+
+  const from = currentPage * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error } = await query.range(from, to);
+  if (error) return showAlert("로그를 불러오지 못했습니다.");
+
+  const list = Array.isArray(data) ? data : [];
+  cachedLogs = cachedLogs.concat(list);
+  renderLogs(list, reset);
+  currentPage += 1;
+
+  document.getElementById('btnMore').classList.toggle('hidden', list.length < pageSize);
+}
+
+function renderLogs(list, reset) {
+  const body = document.getElementById('logBody');
+  if (reset) body.innerHTML = '';
+  if (!list || list.length === 0) {
+    if (reset) body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">데이터가 없습니다.</td></tr>';
+    return;
+  }
+  list.forEach(log => {
+    const tr = document.createElement('tr');
+    const created = log.created_at ? log.created_at.replace('T', ' ').slice(0, 16) : '';
+    const cells = [
+      created,
+      `${log.actor_name || ''} (${log.actor_emp_id || ''})`,
+      log.action || '',
+      log.summary || '',
+      log.entity_type || '',
+      log.entity_id || ''
+    ];
+    cells.forEach(value => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+function exportCsv() {
+  if (!cachedLogs || cachedLogs.length === 0) return showAlert("내보낼 데이터가 없습니다.");
+  const headers = ['created_at','actor_emp_id','actor_name','action','summary','entity_type','entity_id'];
+  const rows = cachedLogs.map(r => [
+    r.created_at || '',
+    r.actor_emp_id || '',
+    r.actor_name || '',
+    r.action || '',
+    r.summary || '',
+    r.entity_type || '',
+    r.entity_id || ''
+  ]);
+  const csvEscape = (val) => {
+    const str = String(val ?? '');
+    if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+    return str;
+  };
+  const csv = [headers.join(',')]
+    .concat(rows.map(r => r.map(csvEscape).join(',')))
+    .join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const dateTag = formatAuditKstDate(new Date());
+  a.download = `audit_logs_${dateTag}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>

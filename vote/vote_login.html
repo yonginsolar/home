@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
-Change: Preserve line breaks in candidate career/manifesto while keeping XSS-safe rendering.
+Version: v1.0.8
+Change: 2026-02-05 - Address masking + escape error output.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>선거 포털</title>
-    <script>console.log('[Version] v1.0.2 | vote_login.html');</script>
+    <script>console.log('[Version] v1.0.8 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -247,6 +247,17 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
         </div>
     </div>
 
+    <div id="common-alert-modal" class="modal-overlay" style="z-index: 2100;">
+        <div class="modal-box">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h3 id="common-alert-title" style="margin:0;">알림</h3>
+                <button onclick="closeAlert()" style="border:none; background:none; font-size:1.2rem; cursor:pointer;">✕</button>
+            </div>
+            <div id="common-alert-msg" style="white-space:pre-wrap; line-height:1.5;"></div>
+            <button onclick="closeAlert()" class="btn-enter" style="margin-top: 20px; padding: 12px;">확인</button>
+        </div>
+    </div>
+
     <div id="imageModal" class="img-full-overlay" onclick="closeImageModal()">
         <span class="img-close-btn">&times;</span>
         <img id="modalFullImage" class="img-full-content">
@@ -258,7 +269,27 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[ch]));
     }
+    function showAlert(message, title = '알림') {
+        const modal = document.getElementById('common-alert-modal');
+        const msgEl = document.getElementById('common-alert-msg');
+        const titleEl = document.getElementById('common-alert-title');
+        if (titleEl) titleEl.innerText = title;
+        msgEl.innerHTML = escapeHtml(message).replace(/\n/g, '<br>');
+        modal.style.display = 'flex';
+    }
+    function closeAlert() {
+        const modal = document.getElementById('common-alert-modal');
+        if (modal) modal.style.display = 'none';
+    }
        import { supabase } from './ElectionService.js';
+
+    const KST_TZ_VOTE_LOGIN = 'Asia/Seoul';
+    const formatVoteLoginKstDate = (value) => {
+        if (!value) return '';
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_VOTE_LOGIN });
+    };
 
     // ==========================================
     // [0] 전역 변수 및 상수 선언 (이 부분이 없으면 에러 발생)
@@ -300,9 +331,15 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
 
         function formatAddress(addr) {
             if (!addr) return '정보 없음';
-            const match = addr.match(/.*?(읍|면|동|가)(\s|$)/);
-            if (match) return match[0].trim();
-            return addr.replace(/[0-9]/g, '*');
+            const raw = String(addr).trim();
+            // 1) 읍/면/동/가가 있으면 그까지만 표시
+            const localMatch = raw.match(/.*?(읍|면|동|가)(?=\s|$)/);
+            if (localMatch) return localMatch[0].trim().replace(/[0-9]/g, '*');
+
+            // 2) 읍/면/동/가가 없으면 도로명(대로/로/길)까지만 표시
+            const roadMatch = raw.match(/.*?(대로|로|길)(?=\s|$)/);
+            const result = roadMatch ? roadMatch[0].trim() : raw;
+            return result.replace(/[0-9]/g, '*');
         }
 
         function openImageModal(url) {
@@ -431,7 +468,7 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
 
         // [핵심] 투표소 입장 (세션이 이미 있으므로 바로 이동)
         function goToVotePage() {
-            if(!electionId) return alert("선거 정보가 없습니다.");
+            if(!electionId) return showAlert("선거 정보가 없습니다.");
             window.location.href = `vote.html?id=${electionId}`;
         }
 
@@ -457,7 +494,7 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
         // 세션 확인
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error || !session) {
-            alert("로그인이 필요합니다.\n메인 관리 페이지로 이동합니다.");
+            showAlert("로그인이 필요합니다.\n메인 관리 페이지로 이동합니다.");
             window.location.href = '/membermanage.html';
             return;
         }
@@ -522,7 +559,7 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
 
         } catch (e) {
             console.error(e);
-            alert("정보를 불러오는 중 오류가 발생했습니다: " + e.message);
+            showAlert("정보를 불러오는 중 오류가 발생했습니다: " + e.message);
         }
     }
         // [신규] 대시보드 상태 및 버튼 결정 (무투표 당선 로직 포함)
@@ -616,7 +653,7 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
                 mainBtn.disabled = false;
                 mainBtn.style.backgroundColor = "#64748b"; 
                 mainBtn.onclick = () => {
-                    alert(`[참관인 입장]\n${myRights ? myRights.voteReason : ''}\n\n투표는 불가능하며 현황 열람만 가능합니다.`);
+                    showAlert(`[참관인 입장]\n${myRights ? myRights.voteReason : ''}\n\n투표는 불가능하며 현황 열람만 가능합니다.`);
                     goToVotePage();
                 };
             }
@@ -658,7 +695,7 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
                     mainBtn.innerText = "🚫 후보 자격 없음";
                     mainBtn.disabled = false;
                     mainBtn.style.backgroundColor = "#9ca3af";
-                    mainBtn.onclick = () => alert(`[신청 불가 사유]\n${myRights.runReason}`);
+                    mainBtn.onclick = () => showAlert(`[신청 불가 사유]\n${myRights.runReason}`);
                 }
             }
         } 
@@ -738,10 +775,10 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
                     <div style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer;" onclick="window.location.href='?id=${el.id}'">
                         <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                             <span style="background:${badgeColor}; color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem;">${statusText}</span>
-                            <span style="font-size:0.8rem; color:#666;">${new Date(el.created_at).toLocaleDateString()}</span>
+                            <span style="font-size:0.8rem; color:#666;">${formatVoteLoginKstDate(el.created_at)}</span>
                         </div>
                         <h3 style="margin:0 0 5px 0;">${safeTitle}</h3>
-                        <p style="margin:0; font-size:0.85rem; color:#666;">${new Date(el.vote_start_at).toLocaleDateString()} ~ ${new Date(el.vote_end_at).toLocaleDateString()}</p>
+                        <p style="margin:0; font-size:0.85rem; color:#666;">${formatVoteLoginKstDate(el.vote_start_at)} ~ ${formatVoteLoginKstDate(el.vote_end_at)}</p>
                     </div>
                 `;
             }).join('');
@@ -774,8 +811,8 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
 
         // 텍스트 세팅
         document.getElementById('election-title').innerText = election.title;
-        const startStr = new Date(election.vote_start_at).toLocaleDateString();
-        const endStr = new Date(election.vote_end_at).toLocaleDateString();
+        const startStr = formatVoteLoginKstDate(election.vote_start_at);
+        const endStr = formatVoteLoginKstDate(election.vote_end_at);
         document.getElementById('election-period').innerText = `투표기간: ${startStr} ~ ${endStr}`;
     }
 
@@ -790,12 +827,22 @@ Change: Preserve line breaks in candidate career/manifesto while keeping XSS-saf
 
         function renderTabs() {
             const container = document.getElementById('district-tabs');
-            let html = `<button class="tab-btn active" onclick="filterCandidates('ALL', this)">전체</button>`;
+            if (!container) return;
+            container.innerHTML = '';
+
+            const allBtn = document.createElement('button');
+            allBtn.className = 'tab-btn active';
+            allBtn.innerText = '전체';
+            allBtn.onclick = () => filterCandidates('ALL', allBtn);
+            container.appendChild(allBtn);
+
             allDistricts.forEach(d => {
-                const name = d.name || '공통 선거구';
-                html += `<button class="tab-btn" onclick="filterCandidates('${d.id}', this)">${name}</button>`;
+                const btn = document.createElement('button');
+                btn.className = 'tab-btn';
+                btn.innerText = d.name || '공통 선거구';
+                btn.onclick = () => filterCandidates(d.id, btn);
+                container.appendChild(btn);
             });
-            container.innerHTML = html;
         }
 
 // [검증됨] 탭 클릭 핸들러 (변수 참조 오류 수정 + 방어적 코딩)
@@ -903,7 +950,7 @@ function renderCandidates(filterDistId) {
                  renderResultsUI('ALL');
              } catch (e) {
                  console.error(e);
-                 container.innerHTML = `<div style="color:red; text-align:center;">결과 로드 실패: ${e.message}</div>`;
+                 container.innerHTML = `<div style="color:red; text-align:center;">결과 로드 실패: ${escapeHtml(e.message)}</div>`;
              }
         }
 
@@ -1013,9 +1060,9 @@ function renderCandidates(filterDistId) {
             }
 
             // 날짜 포맷팅
-            const start = new Date(el.vote_start_at).toLocaleDateString();
-            const end = new Date(el.vote_end_at).toLocaleDateString();
-            const created = new Date(el.created_at).toLocaleDateString();
+            const start = formatVoteLoginKstDate(el.vote_start_at);
+            const end = formatVoteLoginKstDate(el.vote_end_at);
+            const created = formatVoteLoginKstDate(el.created_at);
 
             return `
                 <div style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer; transition: transform 0.2s;" 

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: Escape audit log details before rendering to prevent XSS.
+Version: v1.0.5
+Change: 2026-02-05 - Escape admin log/action error rendering.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.1 | admin.html');</script>
+    <script>console.log('[Version] v1.0.5 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -554,6 +554,20 @@ function escapeJsString(value) {
 }
     import { AdminService } from './AdminService.js';
     import { supabase } from './ElectionService.js';
+
+    const KST_TZ_VOTE_ADMIN = 'Asia/Seoul';
+    const formatVoteAdminKstDate = (value, fallback = '미정') => {
+        if (!value) return fallback;
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return fallback;
+        return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_VOTE_ADMIN });
+    };
+    const formatVoteAdminKstDateTime = (value, fallback = '미정') => {
+        if (!value) return fallback;
+        const d = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(d.getTime())) return fallback;
+        return d.toLocaleString('ko-KR', { timeZone: KST_TZ_VOTE_ADMIN });
+    };
     
     const service = new AdminService();
     let currentElectionId = null;
@@ -590,6 +604,11 @@ function escapeJsString(value) {
         modal.style.display = 'flex';
     };
 
+    window.showAlert = (message, title = '알림') => {
+        const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+        window.showModal(title, `<div style="line-height:1.6;">${safeMessage}</div>`, null, true);
+    };
+
     window.closeModal = () => { document.getElementById('common-modal').style.display = 'none'; };
 
 // [수정] 초기화 및 3단 권한 검증 (Gatekeeper)
@@ -609,7 +628,7 @@ function escapeJsString(value) {
             const { data: { session }, error } = await supabase.auth.getSession();
 
             if (error || !session) {
-                alert("로그인 정보가 없습니다.\n선거 포털로 이동합니다.");
+                showAlert("로그인 정보가 없습니다.\n선거 포털로 이동합니다.");
                 window.location.href = 'vote_login.html';
                 return;
             }
@@ -680,13 +699,13 @@ function escapeJsString(value) {
 
             } else {
                 // 권한 없음
-                alert(`⛔ 접근 권한이 없습니다.\n관리자 또는 선관위원만 접속 가능합니다.\n(현재 계정: ${member.name})`);
+                showAlert(`⛔ 접근 권한이 없습니다.\n관리자 또는 선관위원만 접속 가능합니다.\n(현재 계정: ${member.name})`);
                 window.location.href = 'vote_login.html';
             }
 
         } catch (e) {
             console.error("Critical Auth Error:", e);
-            alert("권한 검증 중 오류가 발생했습니다.\n" + e.message);
+            showAlert("권한 검증 중 오류가 발생했습니다.\n" + e.message);
             window.location.href = 'vote_login.html';
         }
     }
@@ -703,8 +722,8 @@ window.openElectionGateway = async () => {
         const elections = await service.getAllElections();
         
         if (!elections || elections.length === 0) {
-            alert("생성된 선거가 없습니다. 설정 페이지로 이동합니다.");
-            window.location.href = 'admin_setup.html'; 
+            showAlert("생성된 선거가 없습니다. 설정 페이지로 이동합니다.");
+            window.location.href = 'admin_setup.html';
             return;
         }
         
@@ -735,7 +754,7 @@ window.openElectionGateway = async () => {
             // DRAFT 상태만 선택 불가 처리
             const isDisabled = (el.status === 'DRAFT');
             const extraText = isDisabled ? ' (설정 완료 필요)' : '';
-            const startStr = el.start_at ? new Date(el.start_at).toLocaleDateString() : '미정';
+            const startStr = formatVoteAdminKstDate(el.start_at);
             
             html += `<option value="${el.id}" ${isDisabled ? 'disabled' : ''}>
                         ${prefix} ${el.title} (${startStr}~)${extraText}
@@ -750,7 +769,7 @@ window.openElectionGateway = async () => {
             const selectedId = selectEl.value;
 
             if (!selectedId) {
-                alert("관리할 수 있는 선거를 선택해주세요.");
+                showAlert("관리할 수 있는 선거를 선택해주세요.");
                 return;
             }
 
@@ -762,7 +781,7 @@ window.openElectionGateway = async () => {
 
     } catch (e) { 
         console.error("선거 목록 로드 실패:", e);
-        alert("목록을 불러오지 못했습니다.");
+        showAlert("목록을 불러오지 못했습니다.");
     }
 };
 // End of openElectionGateway
@@ -814,8 +833,8 @@ window.openElectionGateway = async () => {
         else statusEl.style.background = '#999';
 
         // 2. 날짜 포맷팅 헬퍼 함수
-        const fmt = (ts) => ts ? new Date(ts).toLocaleString() : '<span style="color:#aaa;">미정</span>';
-        const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString() : '미정';
+        const fmt = (ts) => ts ? formatVoteAdminKstDateTime(ts) : '<span style="color:#aaa;">미정</span>';
+        const fmtDate = (ts) => formatVoteAdminKstDate(ts);
 
         // 3. 기간 계산
         // (1) 후보 등록 기간
@@ -941,7 +960,7 @@ window.openElectionGateway = async () => {
         // 1. 자동 종료 로직
         // 조건: 현재 '투표 중(OPEN)' 상태이고, 종료 시간이 지났을 때
         if (status === 'OPEN' && now >= voteEnd) {
-            console.log(`⏰ [Auto Close] 투표 종료 시간(${voteEnd.toLocaleString()}) 도달.`);
+            console.log(`⏰ [Auto Close] 투표 종료 시간(${formatVoteAdminKstDateTime(voteEnd)}) 도달.`);
             
             try {
                 // DB 상태 업데이트 (CLOSED)
@@ -955,7 +974,7 @@ window.openElectionGateway = async () => {
                 updateWorkflowUI();
                 
                 // 관리자에게 알림
-                alert("약속된 투표 종료 시간이 되어\n시스템이 투표를 자동으로 마감했습니다.");
+                showAlert("약속된 투표 종료 시간이 되어\n시스템이 투표를 자동으로 마감했습니다.");
                 
             } catch (e) {
                 console.error("자동 종료 처리 중 오류:", e);
@@ -1285,13 +1304,17 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
             btnUpdate.className = 'btn btn-outline btn-sm'; // 회색 스타일로 변경
         }
 
+        const safeName = escapeHtml(member.name || '');
+        const safePhone = escapeHtml(member.phone || '');
+        const safeAddress = escapeHtml(member.address || '(정보 없음)');
+        const safeUuid = escapeHtml(member.id || '');
         body.innerHTML = `
             ${alertHtml}
             <table style="width:100%; border-collapse:collapse;">
-                <tr><td style="color:#666; width:80px;">이름</td> <td><strong>${member.name}</strong></td></tr>
-                <tr><td style="color:#666;">연락처</td> <td>${member.phone}</td></tr>
-                <tr><td style="color:#666;">주소</td> <td>${member.address || '(정보 없음)'}</td></tr>
-                <tr><td style="color:#666;">UUID</td> <td style="font-size:0.8rem; color:#999;">${member.id}</td></tr> </table>
+                <tr><td style="color:#666; width:80px;">이름</td> <td><strong>${safeName}</strong></td></tr>
+                <tr><td style="color:#666;">연락처</td> <td>${safePhone}</td></tr>
+                <tr><td style="color:#666;">주소</td> <td>${safeAddress}</td></tr>
+                <tr><td style="color:#666;">UUID</td> <td style="font-size:0.8rem; color:#999;">${safeUuid}</td></tr> </table>
         `;
 
         // 4. 선거구 Select 옵션 생성
@@ -1311,7 +1334,7 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
 
     } catch (e) {
         console.error(e);
-        body.innerHTML = `<p style="color:red;">정보 로드 실패: ${e.message}</p>`;
+        body.innerHTML = `<p style="color:red;">정보 로드 실패: ${escapeHtml(e.message)}</p>`;
     }
 };
 
@@ -1328,7 +1351,7 @@ async function updateVoterDistrict() {
 
     const newDistrictId = document.getElementById('detail-district-select').value;
     if (String(newDistrictId) === String(currentDistrictId)) {
-        alert("변경된 사항이 없습니다.");
+        showAlert("변경된 사항이 없습니다.");
         return;
     }
 
@@ -1351,7 +1374,7 @@ async function updateVoterDistrict() {
                 .eq('member_uuid', memData.id);
 
             if (count > 0) {
-                alert("⛔ 오류: 이미 투표를 완료한 사용자는 수정할 수 없습니다.");
+                showAlert("⛔ 오류: 이미 투표를 완료한 사용자는 수정할 수 없습니다.");
                 window.openVoterInfo(memberNo, currentDistrictId); // 모달 상태 새로고침 (잠금 처리됨)
                 return;
             }
@@ -1367,7 +1390,7 @@ async function updateVoterDistrict() {
 
         if (error) throw error;
 
-        alert('변경되었습니다.');
+        showAlert('변경되었습니다.');
         
         document.getElementById('voter-detail-modal').style.display = 'none';
         window.closeModal(); // 리스트 모달 닫기
@@ -1378,7 +1401,7 @@ async function updateVoterDistrict() {
 
     } catch (e) {
         console.error(e);
-        alert('변경 실패: ' + e.message);
+        showAlert('변경 실패: ' + e.message);
     }
 }
 
@@ -1399,7 +1422,7 @@ async function updateVoterDistrict() {
 
             if (error) throw error;
 
-            alert('삭제되었습니다.');
+            showAlert('삭제되었습니다.');
             
             document.getElementById('voter-detail-modal').style.display = 'none';
             window.closeModal();
@@ -1410,7 +1433,7 @@ async function updateVoterDistrict() {
             loadLogs();
 
         } catch (e) {
-            alert('삭제 실패: ' + e.message);
+            showAlert('삭제 실패: ' + e.message);
         }
     }
 
@@ -1442,7 +1465,7 @@ window.searchMembers = async () => {
         const resultArea = document.getElementById('search-result-area');
 
         if (keyword.length < 2) {
-            alert("검색어를 2글자 이상 입력해주세요.");
+            showAlert("검색어를 2글자 이상 입력해주세요.");
             return;
         }
 
@@ -1488,18 +1511,25 @@ window.searchMembers = async () => {
             members.forEach(m => {
                 const registeredDistrict = regMap[m.member_id];
                 const isRegistered = !!registeredDistrict;
+                const safeName = escapeHtml(m.name || '');
+                const safePhone = escapeHtml(m.phone || '전화없음');
+                const safeAddress = escapeHtml(m.address || '주소없음');
+                const safeRegistered = escapeHtml(registeredDistrict || '');
+                const safeMemberNo = escapeJsString(m.member_id || '');
+                const safeMemberName = escapeJsString(m.name || '');
+                const safeMemberUuid = escapeJsString(m.id || '');
                 
                 // [핵심 수정] addVoterToElection 함수에 m.id (UUID)를 3번째 인자로 전달
                 html += `
                     <li style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; background:${isRegistered ? '#f9fafb' : 'white'};">
                         <div style="opacity:${isRegistered ? 0.6 : 1}">
-                            <strong>${m.name}</strong> <span style="font-size:0.8rem; color:#666;">(${m.phone || '전화없음'})</span><br>
-                            <span style="font-size:0.75rem; color:#999;">${m.address || '주소없음'}</span>
+                            <strong>${safeName}</strong> <span style="font-size:0.8rem; color:#666;">(${safePhone})</span><br>
+                            <span style="font-size:0.75rem; color:#999;">${safeAddress}</span>
                         </div>
                         <div>
                             ${isRegistered 
-                                ? `<span class="status-badge" style="background:#6b7280; font-size:0.75rem;">${registeredDistrict} 등록됨</span>` 
-                                : `<button onclick="addVoterToElection('${m.member_id}', '${m.name}', '${m.id}')" class="btn btn-sm btn-primary">선택</button>`
+                                ? `<span class="status-badge" style="background:#6b7280; font-size:0.75rem;">${safeRegistered} 등록됨</span>` 
+                                : `<button onclick="addVoterToElection('${safeMemberNo}', '${safeMemberName}', '${safeMemberUuid}')" class="btn btn-sm btn-primary">선택</button>`
                             }
                         </div>
                     </li>
@@ -1510,7 +1540,7 @@ window.searchMembers = async () => {
 
         } catch (e) {
             console.error(e);
-            resultArea.innerHTML = `<p style="color:red;">오류: ${e.message}</p>`;
+            resultArea.innerHTML = `<p style="color:red;">오류: ${escapeHtml(e.message)}</p>`;
         }
     };
 
@@ -1520,7 +1550,7 @@ window.searchMembers = async () => {
         const districtId = distSelect.value;
 
         if (!districtId) {
-            alert("먼저 하단의 [배정할 선거구]를 선택해주세요.");
+            showAlert("먼저 하단의 [배정할 선거구]를 선택해주세요.");
             distSelect.focus();
             return;
         }
@@ -1528,7 +1558,7 @@ window.searchMembers = async () => {
         // UUID 확인 (없으면 에러)
         // [방어코드] 자바스크립트 undefined 문자열 체크 추가
         if (!memberUuid || memberUuid === 'undefined' || memberUuid === 'null') {
-            alert("시스템 오류: 회원의 고유 ID(UUID)가 누락되었습니다.");
+            showAlert("시스템 오류: 회원의 고유 ID(UUID)가 누락되었습니다.");
             return;
         }
 
@@ -1569,13 +1599,13 @@ window.searchMembers = async () => {
 
             if (error) {
                 // 중복 에러 처리
-                if (error.code === '23505') alert("이미 등록된 조합원입니다.");
+                if (error.code === '23505') showAlert("이미 등록된 조합원입니다.");
                 else throw error;
                 return;
             }
 
             // 성공 처리
-            alert(`${memberName} 님이 추가되었습니다.`);
+            showAlert(`${memberName} 님이 추가되었습니다.`);
             window.closeAddVoterModal(); // 모달 닫기
             loadVoterStats(); // 명부 새로고침
             
@@ -1585,7 +1615,7 @@ window.searchMembers = async () => {
 
         } catch (e) {
             console.error(e);
-            alert("추가 실패: " + e.message);
+            showAlert("추가 실패: " + e.message);
         }
     };
     
@@ -1727,7 +1757,7 @@ async function loadCandidates() {
                             <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">생년월일</td><td>${safeBirth}</td></tr>
                             <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">연락처</td><td>${safeContact}</td></tr>
                             <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">주소</td><td>${safeAddress}</td></tr>
-                            <tr><td style="padding:8px; color:#666;">등록일</td><td>${new Date(c.created_at).toLocaleString()}</td></tr>
+                            <tr><td style="padding:8px; color:#666;">등록일</td><td>${formatVoteAdminKstDateTime(c.created_at)}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -1834,11 +1864,11 @@ window.assignRandomSymbols = async () => {
             });
         }
 
-        alert(`총 ${totalAssigned}명의 후보에게 랜덤 기호가 배정되었습니다.\n\n결과를 확인하고 반드시 [기호 저장] 버튼을 눌러 확정해주세요.`);
+        showAlert(`총 ${totalAssigned}명의 후보에게 랜덤 기호가 배정되었습니다.\n\n결과를 확인하고 반드시 [기호 저장] 버튼을 눌러 확정해주세요.`);
 
     } catch (e) {
         console.error(e);
-        alert("기호 추첨 중 오류가 발생했습니다: " + e.message);
+        showAlert("기호 추첨 중 오류가 발생했습니다: " + e.message);
     }
 }; // End of assignRandomSymbols
     
@@ -1857,7 +1887,7 @@ window.assignRandomSymbols = async () => {
 
             if(error) throw error;
 
-            alert('승인되었습니다.');
+            showAlert('승인되었습니다.');
             closeCandidateDetail();
             loadCandidates(); // 목록 갱신
             
@@ -1866,7 +1896,7 @@ window.assignRandomSymbols = async () => {
             loadLogs();
 
         } catch(e) {
-            alert('승인 처리 실패: ' + e.message);
+            showAlert('승인 처리 실패: ' + e.message);
         }
     };
 
@@ -1891,7 +1921,7 @@ window.assignRandomSymbols = async () => {
         const reason = document.getElementById('reject-reason-input').value.trim();
         
         if(!reason) {
-            alert('반려 사유를 입력해주세요.');
+            showAlert('반려 사유를 입력해주세요.');
             return;
         }
         
@@ -1908,7 +1938,7 @@ window.assignRandomSymbols = async () => {
 
             if(error) throw error;
 
-            alert('반려되었습니다.');
+            showAlert('반려되었습니다.');
             closeRejectModal();
             closeCandidateDetail(); // 상세 창도 닫기
             loadCandidates(); // 목록 갱신
@@ -1918,7 +1948,7 @@ window.assignRandomSymbols = async () => {
             loadLogs();
 
         } catch(e) {
-            alert('처리 실패: ' + e.message);
+            showAlert('처리 실패: ' + e.message);
         }
     };
 
@@ -1943,7 +1973,7 @@ window.saveSymbols = async () => {
                 count++;
             }
         }
-        alert(`${count}건 저장 완료`);
+        showAlert(`${count}건 저장 완료`);
         
         // [수정] 로그에 작업자 이메일 추가
         await service.logAction(currentElectionId, 'SYMBOL_UPDATE', `기호 ${count}건 저장 (작업자: ${currentUserEmail})`);
@@ -1957,7 +1987,7 @@ window.finalizeNomination = async () => {
     const pendingCount = parseInt(document.getElementById('stat-pending').innerText || '0');
     
     if (pendingCount > 0) {
-        alert("⚠️ 아직 승인 대기(PENDING) 상태인 후보가 있습니다.\n\n모든 후보를 '승인'하거나 '반려' 처리한 뒤에만\n다음 단계로 넘어갈 수 있습니다.");
+        showAlert("⚠️ 아직 승인 대기(PENDING) 상태인 후보가 있습니다.\n\n모든 후보를 '승인'하거나 '반려' 처리한 뒤에만\n다음 단계로 넘어갈 수 있습니다.");
         return;
     }
 
@@ -1988,7 +2018,7 @@ window.finalizeNomination = async () => {
                 `단계 변경: 후보확정(NOMINATION) -> 준비완료(READY) (작업자: ${currentUserEmail})`
             );
 
-            alert("✅ 후보가 확정되었습니다.\n다음 탭(확정 및 공포)으로 이동합니다.");
+            showAlert("✅ 후보가 확정되었습니다.\n다음 탭(확정 및 공포)으로 이동합니다.");
 
             // 데이터 갱신 및 UI 탭 전환
             await loadElectionInfo();
@@ -1996,7 +2026,7 @@ window.finalizeNomination = async () => {
 
         } catch (e) {
             console.error(e);
-            alert("상태 변경 실패: " + e.message);
+            showAlert("상태 변경 실패: " + e.message);
         }
     });
 }; // End of finalizeNomination
@@ -2006,7 +2036,7 @@ window.finalizeNomination = async () => {
         if (nextStatus === 'OPEN') {
             // 시작 시간이 설정되어 있는지 확인
             if (!currentElectionData.vote_start_at) {
-                alert("오류: 투표 시작 시간이 설정되지 않았습니다.");
+                showAlert("오류: 투표 시작 시간이 설정되지 않았습니다.");
                 return;
             }
 
@@ -2021,7 +2051,7 @@ window.finalizeNomination = async () => {
                 // 경고 및 확인 (강제 진행 여부 묻기)
                 const userConfirmed = confirm(
                     `⚠️ 주의: 아직 투표 시작 시간이 아닙니다.\n` +
-                    `설정된 시작 시간: ${startAt.toLocaleString()}\n` +
+                    `설정된 시작 시간: ${formatVoteAdminKstDateTime(startAt)}\n` +
                     `약 ${diffMin}분 남았습니다.\n\n` +
                     `그래도 지금 강제로 투표를 시작하시겠습니까?`
                 );
@@ -2049,7 +2079,7 @@ window.finalizeNomination = async () => {
                 // 모달 닫기는 showModal 내부 콜백에서 처리됨
             } catch (e) {
                 console.error("상태 변경 실패:", e);
-                alert("상태 변경 중 오류가 발생했습니다: " + e.message);
+                showAlert("상태 변경 중 오류가 발생했습니다: " + e.message);
             }
         });
     };
@@ -2066,7 +2096,11 @@ window.finalizeNomination = async () => {
             const div = document.createElement('div');
             div.className = 'log-entry';
             const safeDetails = escapeHtml(log.details || '');
-            div.innerHTML = `<span class="log-time">${new Date(log.created_at).toLocaleTimeString()}</span> <strong>${log.action_type}</strong> ${safeDetails}`;
+            const logTime = log.created_at
+                ? new Date(log.created_at).toLocaleTimeString('ko-KR', { timeZone: KST_TZ_VOTE_ADMIN })
+                : '';
+            const safeAction = escapeHtml(log.action_type || '');
+            div.innerHTML = `<span class="log-time">${logTime}</span> <strong>${safeAction}</strong> ${safeDetails}`;
             container.appendChild(div);
         });
     };
@@ -2086,7 +2120,7 @@ window.finalizeNomination = async () => {
          const pwd = prompt("🔐 보안 확인: 개표함 잠금을 해제하려면 '개표'라고 입력하세요.");
          
          if(pwd !== '개표') {
-             alert('비밀번호가 일치하지 않아 개표함을 열 수 없습니다.');
+             showAlert('비밀번호가 일치하지 않아 개표함을 열 수 없습니다.');
              return;
          }
 
@@ -2096,7 +2130,7 @@ window.finalizeNomination = async () => {
          // 2. [핵심] 실제 데이터를 불러오는 함수 실행!
          loadElectionResults();
          
-         alert("개표함이 열렸습니다. 집계 결과를 불러옵니다.");
+         showAlert("개표함이 열렸습니다. 집계 결과를 불러옵니다.");
     };
     
     // 단순 탭 전환 (메뉴 클릭용)
@@ -2298,7 +2332,7 @@ window.finalizeNomination = async () => {
 
         } catch (e) {
             console.error(e);
-            resultChartDiv.innerHTML = `<div style="color:#dc2626; text-align:center; padding:20px;">개표 오류: ${e.message}</div>`;
+            resultChartDiv.innerHTML = `<div style="color:#dc2626; text-align:center; padding:20px;">개표 오류: ${escapeHtml(e.message)}</div>`;
         }
     };
     window.closeAddCandidateModal = () => {
@@ -2368,7 +2402,7 @@ window.searchCandidateMember = async () => {
     const keyword = document.getElementById('cand-search-input').value.trim();
     const resDiv = document.getElementById('cand-search-result');
     
-    if(keyword.length < 2) { alert('2글자 이상 입력하세요.'); return; }
+    if(keyword.length < 2) { showAlert('2글자 이상 입력하세요.'); return; }
 
     resDiv.innerHTML = '검색 중...';
     resDiv.style.display = 'block';
@@ -2405,17 +2439,24 @@ window.searchCandidateMember = async () => {
             if (registeredUuids.includes(m.id)) return;
 
             showCount++;
-            const safeName = m.name ? m.name.replace(/'/g, "") : "";
-            const safePhone = m.phone || "";
-            const safeAddr = m.address ? m.address.replace(/'/g, "") : "";
             const rawBirth = m.rrn_display || "";
             const memberId = m.member_id || "";
+            const safeNameText = escapeHtml(m.name || '');
+            const safePhoneText = escapeHtml(m.phone || '');
+            const safeAddrText = escapeHtml(m.address || '');
+            const safeMemberIdText = escapeHtml(memberId || '');
+            const safeUuid = escapeJsString(m.id || '');
+            const safeName = escapeJsString(m.name || '');
+            const safePhone = escapeJsString(m.phone || '');
+            const safeAddr = escapeJsString(m.address || '');
+            const safeBirth = escapeJsString(rawBirth);
+            const safeMemberId = escapeJsString(memberId || '');
 
             html += `
                 <div style="padding:10px; border-bottom:1px solid #eee; cursor:pointer;" 
-                     onclick="selectCandidateMember('${m.id}', '${safeName}', '${safePhone}', '${safeAddr}', '${rawBirth}', '${memberId}')">
-                    <strong>${m.name}</strong> (${safePhone})<br>
-                    <span style="font-size:0.8rem; color:#666;">조합원번호: ${memberId} | ${safeAddr}</span>
+                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}')">
+                    <strong>${safeNameText}</strong> (${safePhoneText})<br>
+                    <span style="font-size:0.8rem; color:#666;">조합원번호: ${safeMemberIdText} | ${safeAddrText}</span>
                 </div>`;
         });
 
@@ -2462,8 +2503,8 @@ window.executeCandidateRegister = async () => {
     const address = document.getElementById('selected-cand-address').value;
     const birthDate = document.getElementById('selected-cand-birth').value;
 
-    if(!uuid) { alert('조합원을 먼저 선택해주세요.'); return; }
-    if(!districtId) { alert('선거구를 선택해주세요.'); return; }
+    if(!uuid) { showAlert('조합원을 먼저 선택해주세요.'); return; }
+    if(!districtId) { showAlert('선거구를 선택해주세요.'); return; }
 
     try {
         // [방어적 코딩] DB에 넣기 직전에 해당 선거에 이미 등록된 사람인지 한 번 더 확인
@@ -2476,7 +2517,7 @@ window.executeCandidateRegister = async () => {
 
         if (checkError) throw checkError;
         if (alreadyExists) {
-            alert('이미 이 선거에 후보로 등록된 조합원입니다. (중복 등록 불가)');
+            showAlert('이미 이 선거에 후보로 등록된 조합원입니다. (중복 등록 불가)');
             return;
         }
 
@@ -2518,14 +2559,14 @@ window.executeCandidateRegister = async () => {
 
         if(insertError) throw insertError;
 
-        alert('후보자 등록이 완료되었습니다.');
+        showAlert('후보자 등록이 완료되었습니다.');
         closeAddCandidateModal();
         if (typeof loadCandidates === 'function') loadCandidates();
         await service.logAction(currentElectionId, 'CANDIDATE_ADD_ADMIN', `관리자 등록: ${name}`);
 
     } catch(e) {
         console.error("최종 등록 오류:", e);
-        alert('등록 실패: ' + e.message);
+        showAlert('등록 실패: ' + e.message);
     }
 }; // End of executeCandidateRegister
 

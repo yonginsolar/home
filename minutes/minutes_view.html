@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<!--
+Version: v1.0.33
+Change: 2026-02-05 - Render signature images with status chips.
+-->
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>의사록 열람</title>
+    <script>console.log('[Version] v1.0.33 | minutes_view.html');</script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f1f5f9;
+            font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+        }
+        .page-wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .list-panel {
+            width: 100%;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+        }
+        .detail-panel {
+            width: 100%;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+        }
+        .detail-panel.hidden { display: none; }
+        .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .btn-back {
+            border: 1px solid #e2e8f0; background: #fff; padding: 6px 10px;
+            border-radius: 10px; cursor: pointer; font-weight: 700; color: #1f2937;
+        }
+        .detail-title { font-size: 1.4rem; font-weight: 800; color: #0f172a; }
+        .detail-meta { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+        .detail-content { line-height: 1.8; color: #1f2937; }
+        .doc-attachments { margin-top: 16px; }
+        .attachments-title { font-weight: bold; margin-bottom: 6px; }
+        .attachments-list { list-style: none; padding: 0; margin: 0; }
+        .attachments-list li { margin-bottom: 6px; }
+        .attachments-list a { color: #2563eb; text-decoration: none; }
+        .signatures-panel { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
+        .signatures-title { font-weight: 700; margin-bottom: 8px; color: #0f172a; }
+        .signatures-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .signatures-chip { padding: 6px 10px; border-radius: 999px; background: #eef2ff; color: #1e40af; font-size: 0.85rem; font-weight: 600; }
+        .signatures-chip.missing { background: #f1f5f9; color: #64748b; }
+        .signatures-item { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px; background:#f8fafc; border:1px solid #e5e7eb; }
+        .signatures-item.missing { opacity: 0.6; }
+        .signatures-img { width:40px; height:40px; border-radius:50%; border:1px solid #e5e7eb; object-fit:contain; background:#fff; }
+        .signatures-name { font-size:0.85rem; font-weight:700; color:#0f172a; }
+        .signatures-status { font-size:0.75rem; color:#64748b; }
+        .attachments-list button {
+            border: 1px solid #cbd5f5;
+            background: #eef2ff;
+            color: #1e40af;
+            font-weight: 700;
+            padding: 8px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .attachments-list button:hover { background: #e0e7ff; }
+                .list-item {
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+            padding: 18px 22px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer;
+        }
+        .list-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
+        .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
+        .list-item a { color: #2563eb; text-decoration: none; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="page-wrap">
+        <div id="list-panel" class="list-panel"></div>
+        <div id="detail-panel" class="detail-panel hidden">
+            <div class="detail-header">
+                <button class="btn-back" onclick="showList()">← 목록</button>
+                <div class="detail-title" id="detail-title">-</div>
+            </div>
+            <div class="detail-meta" id="detail-meta">-</div>
+            <div class="detail-content" id="detail-content"></div>
+            <div class="signatures-panel" id="signatures-panel" style="display:none;">
+                <div class="signatures-title">서명 현황</div>
+                <div class="signatures-list" id="signatures-list"></div>
+            </div>
+            <div class="doc-attachments" id="doc-attachments" style="display:none;">
+                <div class="attachments-title">첨부파일</div>
+                <ul class="attachments-list" id="ui-attachments"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { MinutesService } from './MinutesService.js?v=1.0.15';
+        import { supabase } from '../vote/ElectionService.js';
+
+        const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
+        const formatMinutesViewKstDate = (value) => {
+            if (!value) return '-';
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return '-';
+            return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_MINUTES_VIEW });
+        };
+        const getDocTypeLabel = (docType) => {
+            if (docType === 'NOTICE') return '공지';
+            if (docType === 'GENERAL_ASSEMBLY') return '의사록';
+            if (docType === 'PAST_MINUTES') return '의사록';
+            if (docType === 'MINUTES') return '의사록';
+            return '의사록';
+        };
+
+        function safeUrl(url) {
+            if (!url) return '';
+            try { return new URL(url).href; } catch (e) { return ''; }
+        }
+
+        function sanitizeStyle(styleText) {
+            const raw = String(styleText || '');
+            if (!raw) return '';
+            if (/expression\s*\(/i.test(raw)) return '';
+            if (/javascript:/i.test(raw)) return '';
+            return raw.replace(/url\s*\(/gi, '');
+        }
+
+        function sanitizeHtml(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(String(html || ''), 'text/html');
+            const allowedTags = new Set([
+                'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
+                'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+                'TH','THEAD','TR','U','UL'
+            ]);
+            const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+            const allowedAttrs = {
+                '*': new Set(['class','style']),
+                'A': new Set(['href','target','rel','title','class','style']),
+                'IMG': new Set(['src','alt','title','width','height','class','style']),
+                'TABLE': new Set(['class','style','border','cellpadding','cellspacing']),
+                'TD': new Set(['class','style','colspan','rowspan','align']),
+                'TH': new Set(['class','style','colspan','rowspan','align'])
+            };
+            const isSafeUrl = (value, allowDataImage = false) => {
+                const raw = String(value || '').trim();
+                if (!raw) return null;
+                if (/^(mailto:|tel:)/i.test(raw)) return raw;
+                if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+                try {
+                    const u = new URL(raw, window.location.origin);
+                    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+                } catch (e) { void 0; }
+                return null;
+            };
+
+            const nodes = Array.from(doc.body.querySelectorAll('*'));
+            nodes.forEach(node => {
+                const tag = node.tagName;
+                if (!allowedTags.has(tag)) {
+                    if (blockedTags.has(tag)) {
+                        node.remove();
+                        return;
+                    }
+                    const parent = node.parentNode;
+                    if (!parent) return;
+                    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+                    parent.removeChild(node);
+                    return;
+                }
+
+                Array.from(node.attributes).forEach(attr => {
+                    const name = attr.name.toLowerCase();
+                    const value = attr.value;
+                    if (name.startsWith('on')) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+                    const allowSet = allowedAttrs[tag] || allowedAttrs['*'];
+                    if (allowSet && !allowSet.has(name) && !(allowedAttrs['*'] && allowedAttrs['*'].has(name))) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+                    if (name === 'href') {
+                        const safe = isSafeUrl(value, false);
+                        if (!safe) node.removeAttribute('href');
+                        else node.setAttribute('href', safe);
+                    }
+                    if (name === 'src') {
+                        const safe = isSafeUrl(value, tag === 'IMG');
+                        if (!safe) node.removeAttribute('src');
+                        else node.setAttribute('src', safe);
+                    }
+                    if (name === 'style') {
+                        const safeStyle = sanitizeStyle(value);
+                        if (safeStyle) node.setAttribute('style', safeStyle);
+                        else node.removeAttribute('style');
+                    }
+                    if (name === 'target' && node.tagName === 'A') {
+                        if (node.getAttribute('target') === '_blank') {
+                            node.setAttribute('rel', 'noopener noreferrer');
+                        }
+                    }
+                });
+            });
+            return doc.body.innerHTML;
+        }
+
+        function normalizeUrls(raw) {
+            if (!raw) return [];
+            if (Array.isArray(raw)) return raw.filter(Boolean);
+            if (typeof raw === 'string') {
+                const trimmed = raw.trim();
+                if (!trimmed) return [];
+                if (trimmed.startsWith('[')) {
+                    try {
+                        const parsed = JSON.parse(trimmed);
+                        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+                    } catch (e) { /* ignore */ }
+                }
+                return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+            }
+            return [];
+        }
+
+        function uniqueUrls(urls) {
+            const seen = new Set();
+            return urls.filter(u => {
+                const key = String(u || '').trim();
+                if (!key || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        }
+
+        async function resolveAttachmentUrl(rawUrl) {
+            if (!rawUrl) return null;
+            const trimmed = String(rawUrl).trim();
+            if (!trimmed) return null;
+
+            if (trimmed.startsWith('http')) {
+                const parsed = parseStorageUrl(trimmed);
+                if (parsed) {
+                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600);
+                    if (!error && data?.signedUrl) return data.signedUrl;
+                    if (parsed.bucket !== 'attachments') {
+                        const fallback = await supabase.storage.from('attachments').createSignedUrl(parsed.path, 3600);
+                        if (!fallback.error && fallback.data?.signedUrl) return fallback.data.signedUrl;
+                    }
+                }
+                return trimmed;
+            }
+
+            const cleanedPath = trimmed.replace(/^\/+/, '');
+            const primary = await supabase.storage.from('attachments').createSignedUrl(cleanedPath, 3600);
+            if (!primary.error && primary.data?.signedUrl) return primary.data.signedUrl;
+            return trimmed;
+        }
+
+        async function renderAttachments(doc) {
+            const wrap = document.getElementById('doc-attachments');
+            const list = document.getElementById('ui-attachments');
+            if (!wrap || !list) return;
+
+            let urls = [];
+            urls = urls.concat(normalizeUrls(doc?.file_urls));
+            urls = urls.concat(normalizeUrls(doc?.file_links));
+            if (doc?.file_url) urls.push(doc.file_url);
+            urls = uniqueUrls(urls);
+
+            const names = Array.isArray(doc?.file_names) ? doc.file_names : [];
+            if (urls.length === 0) {
+                wrap.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+
+            const resolved = [];
+            for (let i = 0; i < urls.length; i += 1) {
+                const resolvedUrl = await resolveAttachmentUrl(urls[i]);
+                if (!resolvedUrl) continue;
+                resolved.push({ url: resolvedUrl, name: names[i] || null });
+            }
+
+            if (resolved.length === 0) {
+                wrap.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+
+            wrap.style.display = 'block';
+            list.innerHTML = resolved.map((item, idx) => {
+                const safe = safeUrl(item.url);
+                if (!safe) return '';
+                let name = item.name || (safe.split('/').pop() || 'attachment.pdf');
+                try { name = decodeURIComponent(name); } catch (e) {}
+                return `
+                    <li style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <a href="${safe}" target="_blank" rel="noopener noreferrer">
+                            <button type="button">다운로드</button>
+                        </a>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        let cachedSession = null;
+        let cachedIsAdmin = false;
+
+
+        function parseStorageUrl(rawUrl) {
+            if (!rawUrl) return null;
+            const match = String(rawUrl).match(/\/storage\/v1\/object\/(public|sign)\/([^/]+)\/(.+)$/);
+            if (!match) return null;
+            return { bucket: match[2], path: match[3] };
+        }
+
+        async function resolveSignatureUrl(rawUrl) {
+            if (!rawUrl) return null;
+            const trimmed = String(rawUrl).trim();
+            if (!trimmed) return null;
+            if (trimmed.startsWith('http')) {
+                const parsed = parseStorageUrl(trimmed);
+                if (parsed) {
+                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600);
+                    if (!error && data?.signedUrl) return data.signedUrl;
+                }
+                return trimmed;
+            }
+            const cleanedPath = trimmed.replace(/^\/+/, '');
+            const { data, error } = await supabase.storage.from('attachments').createSignedUrl(cleanedPath, 3600);
+            if (!error && data?.signedUrl) return data.signedUrl;
+            try {
+                const { data: blob, error: dlErr } = await supabase.storage.from('attachments').download(cleanedPath);
+                if (!dlErr && blob) {
+                    return URL.createObjectURL(blob);
+                }
+            } catch (e) { /* ignore */ }
+            return null;
+        }
+
+        async function renderSignatures(doc, officials, signatures) {
+            const panel = document.getElementById('signatures-panel');
+            const list = document.getElementById('signatures-list');
+            if (!panel || !list) return;
+
+            if (!doc || doc.doc_type === 'NOTICE' || !doc.requires_sign) {
+                panel.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+
+            const allOfficials = Array.isArray(officials) ? officials : [];
+            let required = [];
+            if (Array.isArray(doc.signer_ids) && doc.signer_ids.length > 0) {
+                required = doc.signer_ids.map(id => String(id));
+            } else if (doc.doc_type === 'GENERAL_ASSEMBLY') {
+                required = allOfficials.filter(o => String(o.category || '').toLowerCase() === 'delegate').map(o => String(o.id));
+            } else if (doc.doc_type === 'MINUTES') {
+                required = allOfficials.filter(o => {
+                    const role = (o.role || o.position || o.category || '').toString();
+                    return role.includes('이사장') || role === '이사';
+                }).map(o => String(o.id));
+            }
+
+            if (required.length === 0) {
+                panel.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+
+            const sigList = Array.isArray(signatures) ? signatures : [];
+            const sigMap = new Map(sigList.map(s => [String(s.official_id), s]));
+
+            const cards = await Promise.all(required.map(async id => {
+                const off = allOfficials.find(o => String(o.id) === String(id));
+                const name = off?.name || off?.coop_members?.name || '임원';
+                const sig = sigMap.get(String(id));
+                const isSigned = !!sig;
+                let imgHtml = '';
+                if (sig?.signature_url) {
+                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    const safe = safeUrl(signedUrl);
+                    if (safe) {
+                        imgHtml = `<img class="signatures-img" src="${safe}" alt="서명">`;
+                    }
+                }
+                const statusText = isSigned ? '서명 완료' : '미서명';
+                return `
+                    <div class="signatures-item ${isSigned ? '' : 'missing'}">
+                        ${imgHtml || '<div class="signatures-img"></div>'}
+                        <div>
+                            <div class="signatures-name">${name}</div>
+                            <div class="signatures-status">${statusText}</div>
+                        </div>
+                    </div>
+                `;
+            }));
+
+            panel.style.display = 'block';
+            list.innerHTML = cards.join('');
+        }
+
+
+        const listPanel = document.getElementById('list-panel');
+        const detailPanel = document.getElementById('detail-panel');
+        const detailTitle = document.getElementById('detail-title');
+        const detailMeta = document.getElementById('detail-meta');
+        const detailContent = document.getElementById('detail-content');
+
+        function showList() {
+            detailPanel.classList.add('hidden');
+            listPanel.style.display = 'block';
+            document.body.style.backgroundColor = '#f1f5f9';
+        }
+        window.showList = showList;
+
+        function showMessage(msg) {
+            listPanel.style.display = 'block';
+            detailPanel.classList.add('hidden');
+            listPanel.innerHTML = `<div style="text-align:center; color:#64748b; padding:12px 0;">${msg}</div>`;
+        }
+
+        async function openDocumentById(targetId) {
+            if (!targetId) return;
+            const { data: doc, error } = await MinutesService.getMinuteById(targetId);
+            if (error || !doc) {
+                showMessage('문서를 찾을 수 없거나 권한이 없습니다.');
+                return;
+            }
+            if (!doc.published_at && !cachedIsAdmin) {
+                showMessage('아직 공개되지 않은 문서입니다.');
+                return;
+            }
+            if (doc.visibility === 'MEMBERS' && !cachedSession && !cachedIsAdmin) {
+                showMessage('로그인이 필요합니다.');
+                return;
+            }
+
+            const label = getDocTypeLabel(doc.doc_type);
+            detailTitle.textContent = doc.title ? `${label} · ${doc.title}` : label;
+            detailMeta.textContent = `작성일: ${formatMinutesViewKstDate(doc.created_at)}`;
+
+            if (doc.content) {
+                detailContent.innerHTML = sanitizeHtml(doc.content || '');
+            } else {
+                detailContent.innerHTML = '<div style="color:#94a3b8;">내용이 없습니다.</div>';
+            }
+
+            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(targetId);
+            const officials = await MinutesService.getOfficials();
+            await renderSignatures(doc, officials || [], signatures || []);
+
+            await renderAttachments(doc);
+
+            listPanel.style.display = 'none';
+            detailPanel.classList.remove('hidden');
+            document.body.style.backgroundColor = '#f1f5f9';
+        }
+
+        async function renderPublishedList() {
+            listPanel.style.display = 'block';
+            detailPanel.classList.add('hidden');
+            document.body.style.backgroundColor = '#f1f5f9';
+
+            const { data: docs } = await MinutesService.listPublishedMinutes();
+            if (!docs || docs.length === 0) {
+                showMessage('공개된 문서가 없습니다.');
+                return;
+            }
+
+            listPanel.innerHTML = '';
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.alignItems = 'center';
+            header.style.gap = '10px';
+            const backBtn = document.createElement('button');
+            backBtn.className = 'btn-back';
+            backBtn.innerText = '← 뒤로가기';
+            backBtn.onclick = () => history.back();
+            header.appendChild(backBtn);
+            header.style.fontWeight = 'bold';
+            header.style.fontSize = '1.1rem';
+            header.style.color = '#0f172a';
+            const title = document.createElement('div');
+            title.innerText = '공개 의사록 목록';
+            header.appendChild(title);
+            listPanel.appendChild(header);
+
+            docs.forEach(d => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+
+                const textWrap = document.createElement('div');
+                const titleEl = document.createElement('div');
+                titleEl.className = 'list-title';
+                const label = getDocTypeLabel(d.doc_type);
+                titleEl.textContent = d.title ? `${label} · ${d.title}` : label;
+
+                const dateEl = document.createElement('div');
+                dateEl.className = 'list-sub';
+                dateEl.textContent = formatMinutesViewKstDate(d.created_at);
+
+                textWrap.appendChild(titleEl);
+                textWrap.appendChild(dateEl);
+
+                item.appendChild(textWrap);
+                item.addEventListener('click', () => openDocumentById(d.id));
+                listPanel.appendChild(item);
+            });
+        }
+
+        async function init() {
+            cachedSession = await MinutesService.getSession();
+            cachedIsAdmin = cachedSession ? await MinutesService.isAdmin(cachedSession.user.id, cachedSession.user.email) : false;
+            await renderPublishedList();
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,6 +1,11 @@
 <!DOCTYPE html>
+<!--
+Version: v1.0.8
+Change: 2026-02-05 - Fix newline rendering in text mode.
+-->
 <html lang="ko">
 <head>
+  <script>console.log('[Version] v1.0.8 | rules.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>조합 규정집 - 용인모두의햇빛협동조합</title>
@@ -50,6 +55,104 @@
   <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-TR217L7JN9"></script>
 <script>
+  function escapeHtml(value = '') {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function sanitizeStyle(styleText) {
+    const raw = String(styleText || '');
+    if (!raw) return '';
+    if (/expression\s*\(/i.test(raw)) return '';
+    if (/javascript:/i.test(raw)) return '';
+    return raw.replace(/url\s*\(/gi, '');
+  }
+
+  function sanitizeHtml(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(String(html || ''), 'text/html');
+    const allowedTags = new Set([
+      'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
+      'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+      'TH','THEAD','TR','U','UL'
+    ]);
+    const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+    const allowedAttrs = {
+      '*': new Set(['class','style']),
+      'A': new Set(['href','target','rel','title','class','style']),
+      'IMG': new Set(['src','alt','title','width','height','class','style']),
+      'TABLE': new Set(['class','style','border','cellpadding','cellspacing']),
+      'TD': new Set(['class','style','colspan','rowspan','align']),
+      'TH': new Set(['class','style','colspan','rowspan','align'])
+    };
+    const isSafeUrl = (value, allowDataImage = false) => {
+      const raw = String(value || '').trim();
+      if (!raw) return null;
+      if (/^(mailto:|tel:)/i.test(raw)) return raw;
+      if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+      try {
+        const u = new URL(raw, window.location.origin);
+        if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+      } catch (e) { void 0; }
+      return null;
+    };
+
+    const nodes = Array.from(doc.body.querySelectorAll('*'));
+    nodes.forEach(node => {
+      const tag = node.tagName;
+      if (!allowedTags.has(tag)) {
+        if (blockedTags.has(tag)) {
+          node.remove();
+          return;
+        }
+        const parent = node.parentNode;
+        if (!parent) return;
+        while (node.firstChild) parent.insertBefore(node.firstChild, node);
+        parent.removeChild(node);
+        return;
+      }
+
+      Array.from(node.attributes).forEach(attr => {
+        const name = attr.name.toLowerCase();
+        const value = attr.value;
+        if (name.startsWith('on')) {
+          node.removeAttribute(attr.name);
+          return;
+        }
+        const allowSet = allowedAttrs[tag] || allowedAttrs['*'];
+        if (allowSet && !allowSet.has(name) && !(allowedAttrs['*'] && allowedAttrs['*'].has(name))) {
+          node.removeAttribute(attr.name);
+          return;
+        }
+        if (name === 'href') {
+          const safe = isSafeUrl(value, false);
+          if (!safe) node.removeAttribute('href');
+          else node.setAttribute('href', safe);
+        }
+        if (name === 'src') {
+          const safe = isSafeUrl(value, tag === 'IMG');
+          if (!safe) node.removeAttribute('src');
+          else node.setAttribute('src', safe);
+        }
+        if (name === 'style') {
+          const safeStyle = sanitizeStyle(value);
+          if (safeStyle) node.setAttribute('style', safeStyle);
+          else node.removeAttribute('style');
+        }
+        if (name === 'target' && node.tagName === 'A') {
+          if (node.getAttribute('target') === '_blank') {
+            node.setAttribute('rel', 'noopener noreferrer');
+          }
+        }
+      });
+    });
+    return doc.body.innerHTML;
+  }
+
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
@@ -241,17 +344,20 @@ function toggleSearch(e) {
         if (pastDocs.length > 0) {
             let html = '';
             pastDocs.forEach((doc, idx) => {
+                const safeTitle = escapeHtml(doc.title || '');
+                const safeDate = escapeHtml(doc.event_date || '');
+                const safeContent = sanitizeHtml(doc.content || '');
                 const itemId = `${typeId}Arch${idx}`;
                 html += `
                     <div class="accordion-item searchable-item">
                         <h2 class="accordion-header">
                             <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#${itemId}">
-                                ${doc.title} <span class="archive-badge">${doc.event_date}</span>
+                                ${safeTitle} <span class="archive-badge">${safeDate}</span>
                             </button>
                         </h2>
                         <div id="${itemId}" class="accordion-collapse collapse">
                             <div class="accordion-body bg-light">
-                                <div class="archive-content" style="white-space: pre-wrap; font-size:0.9rem;">${doc.content}</div>
+                                <div class="archive-content" style="white-space: pre-wrap; font-size:0.9rem;">${safeContent}</div>
                             </div>
                         </div>
                     </div>`;
@@ -265,8 +371,32 @@ function toggleSearch(e) {
 function renderCards(text, containerId) {
         const container = document.getElementById(containerId);
         if (!text) return;
-
-        const lines = text.split('\n');
+        const rawText = String(text);
+        const decodeHtmlEntities = (value) => {
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = value;
+            return textarea.value;
+        };
+        const decodeHtmlEntitiesDeep = (value, maxDepth = 3) => {
+            let out = String(value);
+            for (let i = 0; i < maxDepth; i++) {
+                const decoded = decodeHtmlEntities(out);
+                if (decoded === out) break;
+                out = decoded;
+            }
+            return out;
+        };
+        const hasEncodedTag = /&lt;|&gt;|&amp;lt;|&amp;gt;|&#x3c;|&#60;/i.test(rawText);
+        const htmlSource = hasEncodedTag ? decodeHtmlEntitiesDeep(rawText) : rawText;
+        // HTML 태그가 있으면(예: <br>) 안전하게 렌더링만 하고 분해는 하지 않음
+        const hasHtml = /<[^>]+>/.test(htmlSource);
+        if (hasHtml) {
+            const safeHtml = sanitizeHtml(htmlSource);
+            container.innerHTML = safeHtml;
+            return;
+        }
+        
+        const lines = htmlSource.split('\n');
         let html = '';
         let buffer = ''; 
         let currentTitle = ''; 
@@ -331,7 +461,7 @@ function renderCards(text, containerId) {
 
             // 5. 일반 텍스트 (본문 누적)
             if (trimmed) {
-                buffer += (buffer ? '<br>' : '') + trimmed;
+                buffer += (buffer ? '\n' : '') + trimmed;
             }
         });
 
@@ -340,12 +470,15 @@ function renderCards(text, containerId) {
 
         function flushCard() {
             // 원문자 줄바꿈 처리
-            let formattedBody = buffer.replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)/g, '<br>$1');
+            const safeTitle = escapeHtml(currentTitle || '');
+            const safeBody = escapeHtml(buffer || '');
+            let formattedBody = safeBody.replace(/\n/g, '<br>');
+            formattedBody = formattedBody.replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)/g, '<br>$1');
             if(formattedBody.startsWith('<br>')) formattedBody = formattedBody.substring(4);
 
             html += `
             <div class="article-card searchable-item">
-                ${currentTitle ? `<span class="article-title">${currentTitle}</span>` : ''}
+                ${safeTitle ? `<span class="article-title">${safeTitle}</span>` : ''}
                 <div class="article-content">${formattedBody}</div>
             </div>`;
             

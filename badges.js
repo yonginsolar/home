@@ -1,3 +1,6 @@
+/* Version: v1.0.2
+Change: 2026-02-05 - Render badge dates in KST consistently.
+*/
 /**
  * badges.js
  * 기능: 뱃지 시스템 공통 모듈 (통폐합 및 최적화 버전)
@@ -135,7 +138,7 @@ const Badges = {
             
             if (hasBadge) {
                 const d = this._utils.parseDate(myBadgeMap.get(badge.id));
-                dateStr = d ? d.toLocaleDateString() : "알 수 없음";
+                dateStr = d ? d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : "알 수 없음";
             } else {
                 descStr = "🔒 " + (badge.description || "미획득");
             }

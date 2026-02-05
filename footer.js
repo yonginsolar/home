@@ -1,4 +1,57 @@
+/*
+Version: v1.0.1
+Change: Add shared showAlert modal helper.
+*/
 // footer.js
+if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
+  window.showAlert = (message) => {
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.background = 'rgba(0,0,0,0.45)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = '9999';
+
+    const box = document.createElement('div');
+    box.style.background = '#fff';
+    box.style.borderRadius = '10px';
+    box.style.maxWidth = '90%';
+    box.style.minWidth = '260px';
+    box.style.padding = '18px 20px';
+    box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+
+    const msg = document.createElement('div');
+    msg.style.whiteSpace = 'pre-line';
+    msg.style.color = '#111827';
+    msg.style.fontSize = '14px';
+    msg.style.lineHeight = '1.5';
+    msg.textContent = String(message ?? '');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '확인';
+    btn.style.marginTop = '14px';
+    btn.style.padding = '8px 16px';
+    btn.style.border = '1px solid #e5e7eb';
+    btn.style.borderRadius = '8px';
+    btn.style.background = '#111827';
+    btn.style.color = '#fff';
+    btn.style.cursor = 'pointer';
+
+    const close = () => overlay.remove();
+    btn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+
+    box.appendChild(msg);
+    box.appendChild(btn);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  };
+}
 document.addEventListener("DOMContentLoaded", function() {
     
     // 1. 푸터 HTML

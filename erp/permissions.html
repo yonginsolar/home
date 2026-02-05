@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<!--
+Version: v1.0.3
+Change: 2026-02-04 - Render permissions table with safe DOM nodes.
+-->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.3 | permissions.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>권한 관리</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
+    .main-container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="fw-bold m-0">🔐 권한 관리</h4>
+      <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'">🏠 메뉴로</button>
+    </div>
+
+    <div class="card p-3 mb-4">
+      <div class="row g-2">
+        <div class="col-12 col-md-2">
+          <label class="small text-muted">범위</label>
+          <select class="form-select" id="permScope">
+            <option value="role">role</option>
+            <option value="position">position</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">역할/직급 키</label>
+          <input type="text" class="form-control" id="permRoleKey" placeholder="admin / manager / 사무국장">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">권한 키</label>
+          <select class="form-select" id="permKey"></select>
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">설명</label>
+          <input type="text" class="form-control" id="permDesc" placeholder="설명">
+        </div>
+        <div class="col-12 col-md-1 d-flex align-items-end">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="permEnabled" checked>
+            <label class="form-check-label small" for="permEnabled">사용</label>
+          </div>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end gap-2 mt-3">
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetForm()">초기화</button>
+        <button class="btn btn-primary btn-sm" onclick="savePermission()">저장</button>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>범위</th>
+            <th>역할/직급</th>
+            <th>권한 키</th>
+            <th>설명</th>
+            <th>사용</th>
+            <th>수정</th>
+          </tr>
+        </thead>
+        <tbody id="permBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal fade" id="alertModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content">
+        <div class="modal-body text-center py-4" id="alertBody" style="white-space: pre-wrap;"></div>
+        <div class="modal-footer justify-content-center p-1 border-0">
+          <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const PERMISSION_KEYS = [
+  { key: 'approval.view', label: '전자결재 조회' },
+  { key: 'approval.submit', label: '전자결재 상신' },
+  { key: 'approval.process', label: '전자결재 결재처리' },
+  { key: 'approval.physical', label: '실물결재 처리' },
+  { key: 'mypage.view', label: '마이페이지 조회' },
+  { key: 'accounting.view', label: '회계 조회' },
+  { key: 'accounting.edit', label: '회계 등록/수정' },
+  { key: 'hr.admin', label: '직원관리' },
+  { key: 'member.admin', label: '홈페이지 관리' },
+  { key: 'audit.view', label: '감사 로그 조회' },
+  { key: 'permission.manage', label: '권한 관리' }
+];
+
+let alertModal;
+let myInfo = null;
+let permissionSet = new Set();
+
+window.onload = async function() {
+  alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
+  const stored = localStorage.getItem('erp_user');
+  if (!stored) { location.href = 'index.html'; return; }
+  myInfo = JSON.parse(stored);
+  permissionSet = await loadPermissions(myInfo);
+  localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
+  if (permissionSet.size > 0 && !permissionSet.has('permission.manage')) {
+    showAlert("접근 권한이 없습니다.");
+    setTimeout(() => location.href = 'index.html', 1200);
+    return;
+  }
+
+  initPermissionKeys();
+  await loadPermissionList();
+};
+
+function showAlert(msg) {
+  document.getElementById('alertBody').textContent = msg || '';
+  alertModal.show();
+}
+
+async function logAudit(action, summary, detail = null) {
+  try {
+    await _supabase.from('erp_audit_logs').insert({
+      actor_emp_id: myInfo?.emp_id || null,
+      actor_name: myInfo?.emp_name || null,
+      action,
+      entity_type: 'erp_role_permissions',
+      entity_id: null,
+      summary: summary || '',
+      detail
+    });
+  } catch (e) { /* noop */ }
+}
+
+function initPermissionKeys() {
+  const sel = document.getElementById('permKey');
+  sel.innerHTML = '';
+  PERMISSION_KEYS.forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = item.key;
+    opt.textContent = `${item.key} (${item.label})`;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadPermissions(user) {
+  const result = new Set();
+  if (!user) return result;
+  const roleKey = user.role || '';
+  const posKey = user.position || '';
+  if (!roleKey && !posKey) return result;
+
+    const roleKeys = [roleKey, posKey].filter(Boolean);
+    if (roleKey === 'admin_all') roleKeys.push('admin');
+    if (roleKey === 'admin') roleKeys.push('admin_all');
+  const { data } = await _supabase
+    .from('erp_role_permissions')
+    .select('permission_key')
+    .in('scope', ['role','position'])
+    .in('role_key', roleKeys)
+    .eq('is_enabled', true);
+  if (Array.isArray(data)) {
+    data.forEach(r => r.permission_key && result.add(r.permission_key));
+  }
+  return result;
+}
+
+function resetForm() {
+  document.getElementById('permScope').value = 'role';
+  document.getElementById('permRoleKey').value = '';
+  document.getElementById('permDesc').value = '';
+  document.getElementById('permEnabled').checked = true;
+}
+
+async function savePermission() {
+  const scope = document.getElementById('permScope').value;
+  const roleKey = document.getElementById('permRoleKey').value.trim();
+  const permissionKey = document.getElementById('permKey').value;
+  const desc = document.getElementById('permDesc').value.trim();
+  const isEnabled = document.getElementById('permEnabled').checked;
+
+  if (!roleKey || !permissionKey) return showAlert("역할/직급과 권한 키를 입력하세요.");
+
+  const payload = {
+    scope,
+    role_key: roleKey,
+    permission_key: permissionKey,
+    is_enabled: isEnabled,
+    description: desc || null,
+    updated_at: new Date()
+  };
+
+  const { error } = await _supabase
+    .from('erp_role_permissions')
+    .upsert(payload, { onConflict: 'scope,role_key,permission_key' });
+
+  if (error) return showAlert("저장 실패: " + error.message);
+  await logAudit('permission.upsert', '권한 저장', payload);
+  await loadPermissionList();
+  resetForm();
+}
+
+async function loadPermissionList() {
+  const body = document.getElementById('permBody');
+  body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">로딩 중...</td></tr>';
+  const { data, error } = await _supabase
+    .from('erp_role_permissions')
+    .select('*')
+    .order('scope', { ascending: true })
+    .order('role_key', { ascending: true })
+    .order('permission_key', { ascending: true });
+  if (error) return showAlert("목록을 불러오지 못했습니다.");
+  if (!data || data.length === 0) {
+    body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">등록된 권한이 없습니다.</td></tr>';
+    return;
+  }
+  body.innerHTML = '';
+  data.forEach(row => {
+    const tr = document.createElement('tr');
+
+    const tdScope = document.createElement('td');
+    tdScope.textContent = row.scope || '';
+    tr.appendChild(tdScope);
+
+    const tdRole = document.createElement('td');
+    tdRole.textContent = row.role_key || '';
+    tr.appendChild(tdRole);
+
+    const tdPerm = document.createElement('td');
+    tdPerm.textContent = row.permission_key || '';
+    tr.appendChild(tdPerm);
+
+    const tdDesc = document.createElement('td');
+    tdDesc.textContent = row.description || '';
+    tr.appendChild(tdDesc);
+
+    const tdEnabled = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = row.is_enabled ? 'badge bg-success' : 'badge bg-secondary';
+    badge.textContent = row.is_enabled ? 'ON' : 'OFF';
+    tdEnabled.appendChild(badge);
+    tr.appendChild(tdEnabled);
+
+    const tdActions = document.createElement('td');
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn btn-outline-primary btn-sm me-1';
+    toggleBtn.innerText = '토글';
+    toggleBtn.addEventListener('click', () => togglePermission(row.id, row.is_enabled));
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn btn-outline-danger btn-sm';
+    deleteBtn.innerText = '삭제';
+    deleteBtn.addEventListener('click', () => deletePermission(row.id));
+    tdActions.appendChild(toggleBtn);
+    tdActions.appendChild(deleteBtn);
+    tr.appendChild(tdActions);
+
+    body.appendChild(tr);
+  });
+}
+
+async function togglePermission(id, current) {
+  const { error } = await _supabase.from('erp_role_permissions').update({ is_enabled: !current, updated_at: new Date() }).eq('id', id);
+  if (error) return showAlert("수정 실패: " + error.message);
+  await logAudit('permission.toggle', '권한 토글', { id, is_enabled: !current });
+  await loadPermissionList();
+}
+
+async function deletePermission(id) {
+  const { error } = await _supabase.from('erp_role_permissions').delete().eq('id', id);
+  if (error) return showAlert("삭제 실패: " + error.message);
+  await logAudit('permission.delete', '권한 삭제', { id });
+  await loadPermissionList();
+}
+</script>
+</body>
+</html>
