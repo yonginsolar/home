@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.4
-Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사록.
+Version: v1.2.5
+Change: 2026-02-09 - Fix preview/search runtime errors and add minute editor helpers.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>의사록 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.4 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.5 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -59,6 +59,7 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
         .input-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
         .form-control { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
         textarea.form-control { height: 120px; resize: vertical; }
+        .editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 
         /* 리스트 아이템 */
         .minute-item {
@@ -82,7 +83,7 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
         .missing-signer { color: #ef4444; font-weight: bold; }
 
         /* 버튼 그룹 */
-        .btn-group { display: flex; gap: 8px; margin-top: 10px; }
+        .btn-group { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
         .btn { padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: bold; }
         .btn-blue { background: #eff6ff; color: var(--primary); border: 1px solid #bfdbfe; }
         .btn-gray { background: #f1f5f9; color: #475569; }
@@ -145,7 +146,15 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
             </div>
             <div class="input-group">
                 <label>회의 내용 (HTML 태그 사용 가능)</label>
+                <div class="editor-toolbar">
+                    <button type="button" class="btn btn-gray" onclick="insertMinuteTag('<h3>','</h3>')">제목</button>
+                    <button type="button" class="btn btn-gray" onclick="insertMinuteTag('<p>','</p>')">문단</button>
+                    <button type="button" class="btn btn-gray" onclick="insertMinuteTag('<strong>','</strong>')">굵게</button>
+                    <button type="button" class="btn btn-gray" onclick="insertMinuteTag('<ul><li>','</li></ul>')">목록</button>
+                    <button type="button" class="btn btn-gray" onclick="insertMinuteTag('<br>','')">줄바꿈</button>
+                </div>
                 <textarea id="in-content" class="form-control" placeholder="<p>안건 1: ...</p>"></textarea>
+                <small class="text-muted">일반 텍스트도 저장 시 줄바꿈을 유지해 미리보기/공개 화면에서 보기 좋게 표시됩니다.</small>
             </div>
             <div class="input-group">
                 <label>첨부파일 (PDF)</label>
@@ -157,7 +166,9 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
                 <div id="signer-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
                 <small class="text-muted" id="signer-help">이사장 1번 + 가나다순으로 자동 정렬됩니다.</small>
             </div>
-            <div style="text-align: right;">
+            <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+                <button onclick="loadLastMinuteTemplate()" class="btn btn-gray">지난 양식 불러오기</button>
+                <button onclick="previewDraftMinute()" class="btn btn-gray">저장 전 미리보기</button>
                 <button onclick="createMinute()" class="btn btn-submit">저장하기</button>
             </div>
         </div>
@@ -438,6 +449,156 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
         }
+
+        function sanitizeStyle(styleText) {
+            const raw = String(styleText || '');
+            if (!raw) return '';
+            if (/expression\s*\(/i.test(raw)) return '';
+            if (/javascript:/i.test(raw)) return '';
+            return raw.replace(/url\s*\(/gi, '');
+        }
+
+        function sanitizeHtml(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(String(html || ''), 'text/html');
+            const allowedTags = new Set([
+                'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
+                'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+                'TH','THEAD','TR','U','UL'
+            ]);
+            const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+            const allowedAttrs = {
+                '*': new Set(['class','style']),
+                'A': new Set(['href','target','rel','title','class','style']),
+                'IMG': new Set(['src','alt','title','width','height','class','style']),
+                'TABLE': new Set(['class','style','border','cellpadding','cellspacing']),
+                'TD': new Set(['class','style','colspan','rowspan','align']),
+                'TH': new Set(['class','style','colspan','rowspan','align'])
+            };
+
+            const isSafeUrl = (value, allowDataImage = false) => {
+                const raw = String(value || '').trim();
+                if (!raw) return null;
+                if (/^(mailto:|tel:)/i.test(raw)) return raw;
+                if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+                try {
+                    const u = new URL(raw, window.location.origin);
+                    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+                } catch (e) { void 0; }
+                return null;
+            };
+
+            const nodes = Array.from(doc.body.querySelectorAll('*'));
+            nodes.forEach(node => {
+                const tag = node.tagName;
+                if (!allowedTags.has(tag)) {
+                    if (blockedTags.has(tag)) {
+                        node.remove();
+                        return;
+                    }
+                    const parent = node.parentNode;
+                    if (!parent) return;
+                    while (node.firstChild) parent.insertBefore(node.firstChild, node);
+                    parent.removeChild(node);
+                    return;
+                }
+
+                Array.from(node.attributes).forEach(attr => {
+                    const name = attr.name.toLowerCase();
+                    const value = attr.value;
+                    if (name.startsWith('on')) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+                    const allowSet = allowedAttrs[tag] || allowedAttrs['*'];
+                    if (allowSet && !allowSet.has(name) && !(allowedAttrs['*'] && allowedAttrs['*'].has(name))) {
+                        node.removeAttribute(attr.name);
+                        return;
+                    }
+                    if (name === 'href') {
+                        const safe = isSafeUrl(value, false);
+                        if (!safe) node.removeAttribute('href');
+                        else node.setAttribute('href', safe);
+                    }
+                    if (name === 'src') {
+                        const safe = isSafeUrl(value, tag === 'IMG');
+                        if (!safe) node.removeAttribute('src');
+                        else node.setAttribute('src', safe);
+                    }
+                    if (name === 'style') {
+                        const safeStyle = sanitizeStyle(value);
+                        if (safeStyle) node.setAttribute('style', safeStyle);
+                        else node.removeAttribute('style');
+                    }
+                    if (name === 'target' && node.tagName === 'A') {
+                        if (node.getAttribute('target') === '_blank') {
+                            node.setAttribute('rel', 'noopener noreferrer');
+                        }
+                    }
+                });
+            });
+            return doc.body.innerHTML;
+        }
+
+        function normalizeMinuteContent(rawValue) {
+            const raw = String(rawValue || '');
+            const trimmed = raw.trim();
+            if (!trimmed) return '';
+            const hasHtmlTag = /<\s*\/?\s*[a-zA-Z][^>]*>/.test(trimmed);
+            if (hasHtmlTag) return trimmed;
+            return escapeHtml(trimmed).replace(/\n/g, '<br>');
+        }
+
+        window.insertMinuteTag = (before, after = '') => {
+            const editor = document.getElementById('in-content');
+            if (!editor) return;
+            const start = editor.selectionStart || 0;
+            const end = editor.selectionEnd || 0;
+            const selected = editor.value.slice(start, end);
+            const inserted = `${before}${selected}${after}`;
+            editor.setRangeText(inserted, start, end, 'end');
+            editor.focus();
+        };
+
+        window.loadLastMinuteTemplate = async () => {
+            const targetType = document.getElementById('in-doc-type')?.value || 'MINUTES';
+            let docs = Array.from(minutesCache.values());
+            if (!docs.length) {
+                const { data } = await MinutesService.listMinutesAdmin();
+                docs = data || [];
+            }
+            const sorted = docs
+                .filter(d => String(d.content || '').trim())
+                .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+            let source = sorted.find(d => d.doc_type === targetType);
+            if (!source) source = sorted.find(d => d.doc_type === 'MINUTES') || sorted[0];
+            if (!source) {
+                showToast('불러올 기존 양식이 없습니다.');
+                return;
+            }
+
+            const contentEl = document.getElementById('in-content');
+            if (contentEl) contentEl.value = source.content || '';
+            const titleEl = document.getElementById('in-title');
+            if (titleEl && !titleEl.value.trim()) titleEl.value = source.title || '';
+            showToast(`양식 불러오기 완료: ${source.title || '기존 의사록'}`);
+        };
+
+        window.previewDraftMinute = () => {
+            const title = (document.getElementById('in-title')?.value || '').trim() || '의사록 (저장 전 미리보기)';
+            const docType = document.getElementById('in-doc-type')?.value || 'MINUTES';
+            const rawContent = document.getElementById('in-content')?.value || '';
+            const normalized = normalizeMinuteContent(rawContent);
+            if (!normalized) {
+                showToast('미리보기할 내용이 없습니다.');
+                return;
+            }
+            document.getElementById('minutePreviewTitle').innerText = title;
+            document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(docType)} | 저장 전 미리보기`;
+            document.getElementById('minutePreviewBody').innerHTML = sanitizeHtml(normalized);
+            document.getElementById('minutePreviewModal').classList.add('show');
+        };
 
         function buildNoticeContentFromApproval(doc) {
             const lines = [];
@@ -972,11 +1133,12 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
                 container.insertAdjacentHTML('beforeend', html);
             }
         }
+        window.loadMinutes = () => { loadMinutes(); };
 
         // [기능] 생성
         window.createMinute = async () => {
             const title = document.getElementById('in-title').value;
-            const content = document.getElementById('in-content').value;
+            const content = normalizeMinuteContent(document.getElementById('in-content').value);
             const docType = document.getElementById('in-doc-type').value;
             const docNo = await generateMinuteDocNo();
             if(!title) return showToast("제목을 입력하세요.");
@@ -1029,7 +1191,7 @@ Change: 2026-02-05 - Add general assembly/past minutes and rename UI to 의사�
 
         window.uploadPastMinute = async () => {
             const title = document.getElementById('past-title').value.trim();
-            const content = document.getElementById('past-content').value.trim();
+            const content = normalizeMinuteContent(document.getElementById('past-content').value.trim());
             const pastDate = document.getElementById('past-date').value;
             if (!title) return showToast("제목을 입력하세요.");
 

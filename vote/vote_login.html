@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.12
-Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서브패스 배포 호환).
+Version: v1.0.13
+Change: 2026-02-09 - Fix null profile fallback on nomination flow to prevent member_uuid read errors.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>선거 포털</title>
-    <script>console.log('[Version] v1.0.12 | vote_login.html');</script>
+    <script>console.log('[Version] v1.0.13 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -348,6 +348,7 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
     // 사용자 상태 저장용 전역 변수 (초기화 필수)
     let myInfo = null;   
     let myRights = null; 
+    let authUserId = null;
     let userRole = 'user';
 
         // ==========================================
@@ -562,9 +563,12 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error || !session) {
             showAlert("로그인이 필요합니다.\n메인 관리 페이지로 이동합니다.");
-            window.location.href = '../membermanage.html';
+            const params = new URLSearchParams(window.location.search);
+            const returnTo = params.get('next') || window.location.href;
+            window.location.href = `../membermanage.html?next=${encodeURIComponent(returnTo)}`;
             return;
         }
+        authUserId = session.user.id;
 
         // 사용자 정보 및 권한 로드
         try {
@@ -572,11 +576,13 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
             const activeProfileId = sessionStorage.getItem('lastActiveProfile');
             const targetId = activeProfileId || session.user.id; // Auth ID를 기본값으로 사용
 
-            const { data: member } = await supabase
+            const { data: member, error: memberError } = await supabase
                 .from('coop_members')
                 .select('id, name, role, member_id, status, join_date, rrn_display, member_type')
                 .eq('id', targetId) // email 대신 ID로 조회하도록 수정
-                .single();
+                .maybeSingle();
+
+            if (memberError) throw memberError;
 
             if (member) {
                 myInfo = member; // 전역 변수 할당
@@ -599,11 +605,41 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
 
                 const roleName = userRole === 'admin' ? '관리자' : (userRole === 'committee' ? '선관위' : '조합원');
                 document.getElementById('user-greeting').innerText = `${member.name}님 (${roleName}) 환영합니다.`;
-                
-                renderAdminControls(userRole);
+            } else {
+                const fallbackName =
+                    session.user.user_metadata?.full_name ||
+                    session.user.user_metadata?.name ||
+                    (session.user.email ? session.user.email.split('@')[0] : '조합원');
+                myInfo = {
+                    id: targetId || session.user.id,
+                    name: fallbackName,
+                    role: null,
+                    member_id: null,
+                    status: '',
+                    join_date: null,
+                    rrn_display: '',
+                    member_type: null
+                };
+                document.getElementById('user-greeting').innerText = `${fallbackName}님 (조합원) 환영합니다.`;
             }
+            renderAdminControls(userRole);
         } catch (e) {
             console.warn("회원 정보 로드 실패:", e);
+            const fallbackName =
+                session.user.user_metadata?.full_name ||
+                session.user.user_metadata?.name ||
+                (session.user.email ? session.user.email.split('@')[0] : '조합원');
+            myInfo = {
+                id: sessionStorage.getItem('lastActiveProfile') || authUserId || null,
+                name: fallbackName,
+                role: null,
+                member_id: null,
+                status: '',
+                join_date: null,
+                rrn_display: '',
+                member_type: null
+            };
+            renderAdminControls(userRole);
         }
 
         // 화면 라우팅
@@ -744,12 +780,17 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
             infoBox.innerHTML = `ℹ️ <strong>안내:</strong> 현재 후보자 등록 기간입니다.`;
 
             // 본인 등록 여부 체크
-            const { data: myCand } = await supabase
-                .from('candidates')
-                .select('id, status')
-                .eq('election_id', electionId)
-                .eq('member_uuid', myInfo.id)
-                .maybeSingle();
+            const memberUuid = myInfo?.id || sessionStorage.getItem('lastActiveProfile') || authUserId;
+            let myCand = null;
+            if (memberUuid) {
+                const { data } = await supabase
+                    .from('candidates')
+                    .select('id, status')
+                    .eq('election_id', electionId)
+                    .eq('member_uuid', memberUuid)
+                    .maybeSingle();
+                myCand = data;
+            }
 
             if (myCand) {
                 mainBtn.innerText = "✅ 내 신청 현황 보기";
@@ -766,7 +807,10 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
                     mainBtn.innerText = "🚫 후보 자격 없음";
                     mainBtn.disabled = false;
                     mainBtn.style.backgroundColor = "#9ca3af";
-                    mainBtn.onclick = () => showAlert(`[신청 불가 사유]\n${myRights.runReason}`);
+                    mainBtn.onclick = () => {
+                        const reason = myRights?.runReason || '회원 정보 확인이 필요합니다. 잠시 후 다시 시도해주세요.';
+                        showAlert(`[신청 불가 사유]\n${reason}`);
+                    };
                 }
             }
         } 

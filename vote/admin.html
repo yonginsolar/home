@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.11
-Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스택 순서 고정.
+Version: v1.0.15
+Change: 2026-02-09 - Candidate detail modal uses explicit edit mode (click Edit before fields become editable).
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.11 | admin.html');</script>
+    <script>console.log('[Version] v1.0.15 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -535,6 +535,7 @@ Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스�
 <input type="hidden" id="selected-cand-member-id"> <input type="hidden" id="selected-cand-phone">
 <input type="hidden" id="selected-cand-address">
 <input type="hidden" id="selected-cand-birth">
+<input type="hidden" id="selected-cand-member-type">
 
                 <div id="selected-cand-display" style="margin-top:5px; font-weight:bold; color:var(--primary-blue); display:none;"></div>
             </div>
@@ -549,6 +550,15 @@ Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스�
             <div style="margin-bottom:1rem;">
                 <label style="font-weight:600;">후보자 명 (표기용)</label>
                 <input type="text" id="new-cand-name" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; margin-top:5px;">
+            </div>
+
+            <div id="new-cand-rep-wrap" style="margin-bottom:1rem; display:none;">
+                <label style="font-weight:600;">단체 대표자 이름 (필수)</label>
+                <input type="text" id="new-cand-representative-name" placeholder="예: 홍길동"
+                       style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; margin-top:5px;">
+                <div style="margin-top:6px; font-size:0.82rem; color:#6b7280;">
+                    단체 조합원 후보 등록 시 대표자 이름을 입력해주세요.
+                </div>
             </div>
 
             <div style="display:flex; gap:10px; margin-bottom:1rem;">
@@ -767,7 +777,7 @@ function escapeJsString(value) {
 
             if (error || !session) {
                 showAlert("로그인 정보가 없습니다.\n선거 포털로 이동합니다.");
-                window.location.href = 'vote_login.html';
+                window.location.href = `../membermanage.html?next=${encodeURIComponent(window.location.href)}`;
                 return;
             }
 
@@ -1889,8 +1899,14 @@ async function loadCandidates() {
             const safeManifesto = escapeHtml(c.manifesto || '내용 없음');
             const safeReject = escapeHtml(c.rejection_reason || '사유 미기재');
             const safeNameJs = escapeJsString(c.name || '');
+            const safeRepresentativeName = escapeHtml(c.representative_name || '');
+            const hasRepresentative = !!(c.representative_name || c.representative_type);
+            const canEnterEditMode = c.status === 'PENDING' || c.status === 'APPROVED';
+            const readOnlyAttr = 'readonly';
 
             body.innerHTML = `
+                <input type="hidden" id="cand-edit-status" value="${escapeHtml(c.status || '')}">
+                <input type="hidden" id="cand-edit-mode" value="view">
                 <div style="display:flex; gap:2rem; flex-wrap:wrap;">
                     <div style="flex:0 0 150px; text-align:center;">
                         <img src="${photoSrc}" 
@@ -1900,10 +1916,28 @@ async function loadCandidates() {
                     </div>
                     <div style="flex:1;">
                         <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666; width:80px;">성명</td><td style="font-weight:bold;">${safeName}</td></tr>
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">생년월일</td><td>${safeBirth}</td></tr>
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">연락처</td><td>${safeContact}</td></tr>
-                            <tr style="border-bottom:1px solid #eee;"><td style="padding:8px; color:#666;">주소</td><td>${safeAddress}</td></tr>
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="padding:8px; color:#666; width:90px;">성명</td>
+                                <td><input id="cand-edit-name" type="text" value="${safeName}" ${readOnlyAttr} style="width:100%; padding:7px; border:1px solid #d1d5db; border-radius:6px; font-weight:600; background:#f9fafb;"></td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="padding:8px; color:#666;">생년월일</td>
+                                <td><input id="cand-edit-birth" type="text" value="${safeBirth}" ${readOnlyAttr} style="width:100%; padding:7px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb;"></td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="padding:8px; color:#666;">연락처</td>
+                                <td><input id="cand-edit-contact" type="text" value="${safeContact}" ${readOnlyAttr} style="width:100%; padding:7px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb;"></td>
+                            </tr>
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="padding:8px; color:#666;">주소</td>
+                                <td><input id="cand-edit-address" type="text" value="${safeAddress}" ${readOnlyAttr} style="width:100%; padding:7px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb;"></td>
+                            </tr>
+                            ${hasRepresentative ? `
+                            <tr style="border-bottom:1px solid #eee;">
+                                <td style="padding:8px; color:#666;">대표자명</td>
+                                <td><input id="cand-edit-representative" type="text" value="${safeRepresentativeName}" ${readOnlyAttr} style="width:100%; padding:7px; border:1px solid #d1d5db; border-radius:6px; background:#f9fafb;"></td>
+                            </tr>
+                            ` : ''}
                             <tr><td style="padding:8px; color:#666;">등록일</td><td>${formatVoteAdminKstDateTime(c.created_at)}</td></tr>
                         </table>
                     </div>
@@ -1911,12 +1945,12 @@ async function loadCandidates() {
 
                 <div style="margin-top:1.5rem;">
                     <label style="font-weight:bold; display:block; margin-bottom:5px;">대표 이력</label>
-                    <div style="background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap;">${safeCareer}</div>
+                    <textarea id="cand-edit-career" ${readOnlyAttr} rows="4" style="width:100%; background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap; resize:vertical;">${safeCareer}</textarea>
                 </div>
 
                 <div style="margin-top:1rem; display:none;">
                     <label style="font-weight:bold; display:block; margin-bottom:5px; display:none;">공약 및 출마의 변</label>
-                    <div style="background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap;">${safeManifesto}</div>
+                    <textarea id="cand-edit-manifesto" ${readOnlyAttr} rows="4" style="width:100%; background:#f9fafb; padding:10px; border-radius:6px; border:1px solid #eee; white-space:pre-wrap; resize:vertical;">${safeManifesto}</textarea>
                 </div>
 
                 ${c.status === 'REJECTED' ? `
@@ -1924,17 +1958,24 @@ async function loadCandidates() {
                         <strong>⛔ 반려 사유:</strong> ${safeReject}
                     </div>
                 ` : ''}
+                ${canEnterEditMode ? `
+                    <div id="cand-edit-mode-help" style="margin-top:0.8rem; font-size:0.83rem; color:#6b7280;">
+                        기본은 읽기 전용입니다. <strong>수정하기</strong> 버튼을 눌러 편집 모드로 전환하세요.
+                    </div>
+                ` : ''}
             `;
 
             // 하단 버튼 구성 (상태에 따라 다르게)
             if (c.status === 'PENDING') {
                 actionArea.innerHTML = `
+                    <button onclick="enterCandidateEditMode('${c.id}', '${safeNameJs}')" class="btn btn-outline" style="flex:1;">✏️ 수정하기</button>
                     <button onclick="confirmApprove('${c.id}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
                     <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
                 `;
             } else if (c.status === 'APPROVED') {
                 actionArea.innerHTML = `
-                    <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="width:100%;">⛔ 승인 취소 및 반려</button>
+                    <button onclick="enterCandidateEditMode('${c.id}', '${safeNameJs}')" class="btn btn-outline" style="flex:1;">✏️ 수정하기</button>
+                    <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
                 `;
             } else { // REJECTED
                 actionArea.innerHTML = `
@@ -1948,6 +1989,127 @@ async function loadCandidates() {
         }
     };
     // End of openCandidateDetail
+
+    const setCandidateDetailFieldsEditable = (editable) => {
+        const ids = [
+            'cand-edit-name',
+            'cand-edit-birth',
+            'cand-edit-contact',
+            'cand-edit-address',
+            'cand-edit-career',
+            'cand-edit-manifesto',
+            'cand-edit-representative'
+        ];
+        ids.forEach((id) => {
+            const field = document.getElementById(id);
+            if (!field) return;
+            if (editable) {
+                field.removeAttribute('readonly');
+                field.style.background = '#fff';
+            } else {
+                field.setAttribute('readonly', 'readonly');
+                field.style.background = '#f9fafb';
+            }
+        });
+
+        const modeField = document.getElementById('cand-edit-mode');
+        if (modeField) modeField.value = editable ? 'edit' : 'view';
+
+        const modeHelp = document.getElementById('cand-edit-mode-help');
+        if (modeHelp) {
+            modeHelp.innerHTML = editable
+                ? '편집 모드입니다. 값을 확인한 뒤 <strong>수정 저장</strong>을 눌러 반영하세요.'
+                : '기본은 읽기 전용입니다. <strong>수정하기</strong> 버튼을 눌러 편집 모드로 전환하세요.';
+        }
+    };
+
+    window.enterCandidateEditMode = (candidateId, candidateName) => {
+        const status = document.getElementById('cand-edit-status')?.value || '';
+        if (!(status === 'PENDING' || status === 'APPROVED')) {
+            showAlert('현재 상태의 후보는 수정할 수 없습니다.');
+            return;
+        }
+
+        setCandidateDetailFieldsEditable(true);
+
+        const actionArea = document.getElementById('cand-action-area');
+        if (!actionArea) return;
+        const safeNameJs = escapeJsString(candidateName || '');
+        if (status === 'PENDING') {
+            actionArea.innerHTML = `
+                <button onclick="saveCandidateDetailChanges('${candidateId}')" class="btn btn-outline" style="flex:1;">💾 수정 저장</button>
+                <button onclick="cancelCandidateEditMode('${candidateId}')" class="btn btn-outline" style="flex:1;">↩️ 수정 취소</button>
+                <button onclick="confirmApprove('${candidateId}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
+                <button onclick="openRejectModal('${candidateId}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
+            `;
+        } else {
+            actionArea.innerHTML = `
+                <button onclick="saveCandidateDetailChanges('${candidateId}')" class="btn btn-outline" style="flex:1;">💾 수정 저장</button>
+                <button onclick="cancelCandidateEditMode('${candidateId}')" class="btn btn-outline" style="flex:1;">↩️ 수정 취소</button>
+                <button onclick="openRejectModal('${candidateId}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
+            `;
+        }
+    };
+
+    window.cancelCandidateEditMode = async (candidateId) => {
+        await openCandidateDetail(candidateId);
+    };
+
+    window.saveCandidateDetailChanges = async (candidateId) => {
+        const status = document.getElementById('cand-edit-status')?.value || '';
+        if (!(status === 'PENDING' || status === 'APPROVED')) {
+            showAlert('현재 상태의 후보는 수정할 수 없습니다.');
+            return;
+        }
+        const mode = document.getElementById('cand-edit-mode')?.value || 'view';
+        if (mode !== 'edit') {
+            showAlert('먼저 수정하기 버튼을 눌러 편집 모드로 전환해주세요.');
+            return;
+        }
+
+        const name = (document.getElementById('cand-edit-name')?.value || '').trim();
+        const birthDate = (document.getElementById('cand-edit-birth')?.value || '').trim();
+        const contact = (document.getElementById('cand-edit-contact')?.value || '').trim();
+        const address = (document.getElementById('cand-edit-address')?.value || '').trim();
+        const career = (document.getElementById('cand-edit-career')?.value || '').trim();
+        const manifesto = (document.getElementById('cand-edit-manifesto')?.value || '').trim();
+        const representativeEl = document.getElementById('cand-edit-representative');
+
+        if (!name) {
+            showAlert('성명은 비워둘 수 없습니다.');
+            return;
+        }
+
+        const payload = {
+            name,
+            birth_date: birthDate || null,
+            contact: contact || null,
+            address: address || null,
+            career: career || null,
+            manifesto: manifesto || null
+        };
+        if (representativeEl) {
+            payload.representative_name = representativeEl.value.trim() || null;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('candidates')
+                .update(payload)
+                .eq('id', candidateId);
+
+            if (error) throw error;
+
+            showAlert('후보자 정보를 수정했습니다.');
+            loadCandidates();
+            await service.logAction(currentElectionId, 'CANDIDATE_UPDATE_ADMIN', `후보 정보 수정: ${name} (작업자: ${currentUserEmail})`);
+            loadLogs();
+            await openCandidateDetail(candidateId);
+        } catch (e) {
+            console.error(e);
+            showAlert('수정 실패: ' + e.message);
+        }
+    };
 
     window.closeCandidateDetail = () => {
         closeModalOverlay(document.getElementById('candidate-detail-modal'));
@@ -2492,6 +2654,21 @@ window.finalizeNomination = async () => {
     // [관리자 직접 등록] 관련 함수 그룹 (HTML 구조와 완벽 동기화)
     // ============================================================
 
+const isOrganizationMemberType = (memberType) => {
+    const normalized = String(memberType ?? '').trim().toLowerCase();
+    return normalized === '단체' || normalized === 'organization' || normalized === 'org';
+};
+
+window.toggleAdminRepresentativeField = (memberType) => {
+    const repWrap = document.getElementById('new-cand-rep-wrap');
+    const repInput = document.getElementById('new-cand-representative-name');
+    if (!repWrap || !repInput) return;
+
+    const shouldShow = isOrganizationMemberType(memberType);
+    repWrap.style.display = shouldShow ? 'block' : 'none';
+    if (!shouldShow) repInput.value = '';
+};
+
 // [수정] 후보 등록 모달 열기 및 초기화 (단일화 버전)
 window.openAddCandidateModal = () => {
     // 1. 입력 필드 초기화
@@ -2506,7 +2683,8 @@ window.openAddCandidateModal = () => {
         'selected-cand-member-id', // member_no에서 수정된 ID
         'selected-cand-phone', 
         'selected-cand-address', 
-        'selected-cand-birth'
+        'selected-cand-birth',
+        'selected-cand-member-type'
     ];
     hiddenFields.forEach(id => {
         const el = document.getElementById(id);
@@ -2521,10 +2699,11 @@ window.openAddCandidateModal = () => {
     }
     
     // 4. 입력창 및 텍스트 영역 초기화
-    ['new-cand-name', 'new-cand-career', 'new-cand-manifesto', 'new-cand-photo', 'new-cand-proof'].forEach(id => {
+    ['new-cand-name', 'new-cand-representative-name', 'new-cand-career', 'new-cand-manifesto', 'new-cand-photo', 'new-cand-proof'].forEach(id => {
         const el = document.getElementById(id);
         if(el) el.value = '';
     });
+    window.toggleAdminRepresentativeField('');
 
     // 5. 선거구 선택박스 동적 생성
     const distSelect = document.getElementById('new-cand-district');
@@ -2567,7 +2746,7 @@ window.searchCandidateMember = async () => {
         // 2. 조합원 검색 (이름 또는 전화번호)
         const { data: members, error } = await supabase
             .from('coop_members')
-            .select('member_id, id, name, phone, address, rrn_display') 
+            .select('member_id, id, name, phone, address, rrn_display, member_type') 
             .or(`name.ilike.%${keyword}%,phone.ilike.%${keyword}%`)
             .limit(15);
 
@@ -2598,11 +2777,14 @@ window.searchCandidateMember = async () => {
             const safeAddr = escapeJsString(m.address || '');
             const safeBirth = escapeJsString(rawBirth);
             const safeMemberId = escapeJsString(memberId || '');
+            const safeMemberType = escapeJsString(m.member_type || '');
+            const memberTypeText = escapeHtml(m.member_type || '개인');
+            const memberTypeBadge = `<span style="display:inline-block; margin-left:6px; padding:1px 6px; border-radius:10px; font-size:0.75rem; background:${isOrganizationMemberType(m.member_type) ? '#dbeafe' : '#f3f4f6'}; color:${isOrganizationMemberType(m.member_type) ? '#1d4ed8' : '#4b5563'};">${memberTypeText}</span>`;
 
             html += `
                 <div style="padding:10px; border-bottom:1px solid #eee; cursor:pointer;" 
-                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}')">
-                    <strong>${safeNameText}</strong> (${safePhoneText})<br>
+                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}', '${safeMemberType}')">
+                    <strong>${safeNameText}</strong>${memberTypeBadge} (${safePhoneText})<br>
                     <span style="font-size:0.8rem; color:#666;">조합원번호: ${safeMemberIdText} | ${safeAddrText}</span>
                 </div>`;
         });
@@ -2621,21 +2803,24 @@ window.searchCandidateMember = async () => {
 
 
 // [수정] 선택된 조합원 정보 저장 함수
-window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId) => {
+window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, memberType) => {
     // Hidden Input에 값 주입
     document.getElementById('selected-cand-uuid').value = uuid;
     document.getElementById('selected-cand-member-id').value = memberId; // member_id 저장
     document.getElementById('selected-cand-phone').value = phone;
     document.getElementById('selected-cand-address').value = address;
-    document.getElementById('selected-cand-birth').value = birthRaw; 
+    document.getElementById('selected-cand-birth').value = birthRaw;
+    document.getElementById('selected-cand-member-type').value = memberType || '';
     
     // 화면 표시
     const disp = document.getElementById('selected-cand-display');
-    disp.innerText = `[선택됨] ${name} (조합원번호: ${memberId})`;
+    const typeLabel = isOrganizationMemberType(memberType) ? '단체' : (memberType || '개인');
+    disp.innerText = `[선택됨] ${name} (조합원번호: ${memberId}, 유형: ${typeLabel})`;
     disp.style.display = 'block';
     
     // 이름 자동 입력
     document.getElementById('new-cand-name').value = name;
+    window.toggleAdminRepresentativeField(memberType);
     
     // 검색 결과창 숨김
     document.getElementById('cand-search-result').style.display = 'none';
@@ -2649,9 +2834,16 @@ window.executeCandidateRegister = async () => {
     const phone = document.getElementById('selected-cand-phone').value;
     const address = document.getElementById('selected-cand-address').value;
     const birthDate = document.getElementById('selected-cand-birth').value;
+    const memberType = document.getElementById('selected-cand-member-type').value;
+    const representativeName = document.getElementById('new-cand-representative-name').value.trim();
+    const isOrganization = isOrganizationMemberType(memberType);
 
     if(!uuid) { showAlert('조합원을 먼저 선택해주세요.'); return; }
     if(!districtId) { showAlert('선거구를 선택해주세요.'); return; }
+    if(isOrganization && !representativeName) {
+        showAlert('단체 조합원은 대표자 이름을 입력해주세요.');
+        return;
+    }
 
     try {
         // [방어적 코딩] DB에 넣기 직전에 해당 선거에 이미 등록된 사람인지 한 번 더 확인
@@ -2686,23 +2878,29 @@ window.executeCandidateRegister = async () => {
         }
 
         // DB Insert
+        const candidatePayload = {
+            election_id: currentElectionId,
+            district_id: districtId,
+            member_uuid: uuid,
+            name: name,
+            contact: phone,
+            address: address,
+            birth_date: birthDate,
+            career: document.getElementById('new-cand-career').value,
+            manifesto: document.getElementById('new-cand-manifesto').value,
+            photo_url: photoUrl,
+            proof_url: proofUrl,
+            status: 'APPROVED',
+            agreed: true
+        };
+        if (isOrganization) {
+            candidatePayload.representative_type = 'non-member';
+            candidatePayload.representative_name = representativeName;
+        }
+
         const { error: insertError } = await supabase
             .from('candidates')
-            .insert({
-                election_id: currentElectionId,
-                district_id: districtId,
-                member_uuid: uuid,
-                name: name,
-                contact: phone,
-                address: address,
-                birth_date: birthDate,
-                career: document.getElementById('new-cand-career').value,
-                manifesto: document.getElementById('new-cand-manifesto').value,
-                photo_url: photoUrl,
-                proof_url: proofUrl,
-                status: 'APPROVED',
-                agreed: true
-            });
+            .insert(candidatePayload);
 
         if(insertError) throw insertError;
 

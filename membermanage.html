@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.17
-Change: 2026-02-08 - Added sessionStorage for 'activeMemberType' to maintain profile state across pages (e.g., Vote portal).
+Version: v1.0.18
+Change: 2026-02-09 - Show both gross/net dividend amounts and tax details in dashboard/history.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.17 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.18 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -1037,6 +1037,35 @@ if (Number.isNaN(d.getTime())) return fallback;
 return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_MEMBER, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 }
 
+const DEFAULT_DIVIDEND_TAX_RATE = 0.154;
+function toFiniteNumber(value) {
+const num = Number(value);
+return Number.isFinite(num) ? num : 0;
+}
+function getDividendTaxRate(item = {}) {
+const rawRate = toFiniteNumber(item.tax_rate);
+if (rawRate <= 0) return DEFAULT_DIVIDEND_TAX_RATE;
+return rawRate > 1 ? (rawRate / 100) : rawRate;
+}
+function getDividendGross(item = {}) {
+const gross = toFiniteNumber(item.total_amount);
+if (gross !== 0) return gross;
+const net = toFiniteNumber(item.net_amount);
+const tax = toFiniteNumber(item.tax_amount);
+return net + tax;
+}
+function getDividendTax(item = {}) {
+const gross = getDividendGross(item);
+const explicitTax = toFiniteNumber(item.tax_amount);
+if (explicitTax !== 0) return explicitTax;
+return Math.round(gross * getDividendTaxRate(item));
+}
+function getDividendNet(item = {}) {
+const explicitNet = toFiniteNumber(item.net_amount);
+if (explicitNet !== 0) return explicitNet;
+return getDividendGross(item) - getDividendTax(item);
+}
+
 try {
 _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 window._client = _supabase;
@@ -1228,7 +1257,7 @@ email: email,
 options: { 
 shouldCreateUser: true, 
 // [변경] href 대신 origin + pathname 사용 (뒤에 붙은 # 등을 제거하기 위함)
-emailRedirectTo: window.location.origin + window.location.pathname
+emailRedirectTo: window.location.origin + window.location.pathname + window.location.search
 } 
 });
 
@@ -1257,6 +1286,49 @@ document.getElementById('targetEmail').innerText = email;
 }
 }
 
+// [로그인 복귀] next 파라미터를 안전하게 검증하여 원래 페이지로 복귀
+function getSafeLoginReturnUrl() {
+const params = new URLSearchParams(window.location.search);
+const raw = params.get('next') || '';
+if (!raw) return '';
+
+const allowOrigins = [
+window.location.origin,
+'https://www.yonginsolar.kr',
+'https://erp.yonginsolar.kr',
+'http://localhost:8000'
+];
+
+function normalizeDest(candidate) {
+try {
+const dest = new URL(candidate, window.location.href);
+if (!allowOrigins.includes(dest.origin)) return null;
+return dest;
+} catch (e) {
+return null;
+}
+}
+
+let dest = normalizeDest(raw);
+if (!dest) return '';
+
+// membermanage.html?next=... 형태면 중첩 next를 우선 사용
+if (dest.origin === window.location.origin && dest.pathname.endsWith('/membermanage.html')) {
+const nestedRaw = new URLSearchParams(dest.search).get('next');
+const nestedDest = nestedRaw ? normalizeDest(nestedRaw) : null;
+if (nestedDest) dest = nestedDest;
+}
+
+// 현재 페이지로의 자기 자신 복귀는 무시
+if (dest.origin === window.location.origin &&
+dest.pathname === window.location.pathname &&
+dest.search === window.location.search) {
+return '';
+}
+
+return dest.href;
+}
+
 // [수정] 로그인 성공 후 처리 (세션 스토리지를 확인하여 마지막 프로필 유지)
 async function handleLoginSuccess(user) {
 curAuth = user;
@@ -1272,6 +1344,16 @@ if (claimErr || !claimRes.success) {
 void 0;
 document.getElementById('manualMatchModal').style.display = 'flex';
 return; 
+}
+
+// 로그인 후 원래 접근 페이지로 즉시 복귀
+const returnUrl = getSafeLoginReturnUrl();
+if (returnUrl) {
+localStorage.removeItem('auth_destination');
+const cleanUrl = window.location.origin + window.location.pathname;
+window.history.replaceState({}, document.title, cleanUrl);
+window.location.replace(returnUrl);
+return;
 }
 
 // 성공 시 대시보드 로드
@@ -1482,7 +1564,9 @@ const assets = {
 total_capital: ledger.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
 total_donation: donations.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
 current_points: points.reduce((acc, cur) => acc + Number(cur.change_amount || 0), 0),
-total_dividend: dividends.reduce((acc, cur) => acc + Number(cur.total_amount || 0), 0)
+total_dividend_gross: dividends.reduce((acc, cur) => acc + getDividendGross(cur), 0),
+total_dividend_tax: dividends.reduce((acc, cur) => acc + getDividendTax(cur), 0),
+total_dividend_net: dividends.reduce((acc, cur) => acc + getDividendNet(cur), 0)
 };
 curMem.total_capital = assets.total_capital; 
 
@@ -1742,8 +1826,9 @@ activeAssets.push({ title: '보유 포인트', val: assets.current_points, unit:
 }
 
 // 4. 배당금
-if(assets.total_dividend > 0 || dividends.length > 0) {
-activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
+if(assets.total_dividend_gross > 0 || assets.total_dividend_net > 0 || dividends.length > 0) {
+activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend_gross, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
+activeAssets.push({ title: '배당금(세후)', val: assets.total_dividend_net, unit: '원', icon: 'bi-cash-coin', color: '#1565C0', type: 'dividend_net' });
 }
 
 // Grid 컬럼 계산 (1개면 12, 2개면 6, 3개면 4, 4개면 3)
@@ -1915,24 +2000,33 @@ html += `<tr>
 }
 summaryEl.innerHTML = `현재 잔액: <span class="text-dark fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span> P`;
 
-} else if(type === 'dividend') {
-title = '📈 배당금 지급 내역';
-// 상세 모드: 연도 - 지급일 - 금액
-html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급일</th><th class="text-end py-3 pe-3">금액(세전)</th></tr></thead><tbody>';
+} else if(type === 'dividend' || type === 'dividend_net') {
+title = (type === 'dividend_net') ? '📉 배당금(세후) 지급 내역' : '📈 배당금(세전) 지급 내역';
+html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급일</th><th class="text-end py-3">세전</th><th class="text-end py-3">세액</th><th class="text-end py-3 pe-3">세후</th></tr></thead><tbody>';
 const data = globalHistoryData.dividends || [];
-total = data.reduce((a,c)=>a+Number(c.total_amount),0);
+const totalGross = data.reduce((a,c)=>a+getDividendGross(c),0);
+const totalTax = data.reduce((a,c)=>a+getDividendTax(c),0);
+const totalNet = data.reduce((a,c)=>a+getDividendNet(c),0);
+total = (type === 'dividend_net') ? totalNet : totalGross;
 
-if(data.length === 0) html += '<tr><td colspan="3" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
+if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
 else {
 data.forEach(item => {
+const gross = getDividendGross(item);
+const tax = getDividendTax(item);
+const net = getDividendNet(item);
 html += `<tr>
                    <td class="py-3 ps-3 fw-bold">${item.fiscal_year}년</td>
                    <td class="py-3 text-muted">${formatMemberKstDate(item.paid_at)}</td>
-                   <td class="text-end fw-bold py-3 pe-3 text-primary" style="font-size:1.1rem">+${Number(item.total_amount).toLocaleString()}</td>
+                   <td class="text-end fw-bold py-3 text-primary">+${Number(gross).toLocaleString()}</td>
+                   <td class="text-end fw-bold py-3 text-danger">-${Number(tax).toLocaleString()}</td>
+                   <td class="text-end fw-bold py-3 pe-3 text-success">+${Number(net).toLocaleString()}</td>
                </tr>`;
 });
 }
-summaryEl.innerHTML = `누적 지급액: <span class="text-primary fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span>원`;
+summaryEl.innerHTML = `누적 세전: <span class="text-primary fs-6 fw-bold ms-2">${Number(totalGross).toLocaleString()}</span>원
+ / 세액: <span class="text-danger fs-6 fw-bold ms-2">${Number(totalTax).toLocaleString()}</span>원
+ / 세후: <span class="text-success fs-6 fw-bold ms-2">${Number(totalNet).toLocaleString()}</span>원`;
 }
 
 html += '</tbody></table></div>';
@@ -2066,6 +2160,9 @@ html: `
 // 5. 배당금 (Dividends)
 // ---------------------------------------------------------
 dividends.forEach(d => {
+const gross = getDividendGross(d);
+const tax = getDividendTax(d);
+const net = getDividendNet(d);
 items.push({
 ts: d.paid_at ? new Date(d.paid_at).getTime() : (d.created_at ? new Date(d.created_at).getTime() : 0),
 dateStr: formatMemberKstDate(d.paid_at),
@@ -2074,7 +2171,8 @@ html: `
                    <div class="timeline-date">${formatMemberKstDate(d.paid_at)}</div>
                    <div class="timeline-content">
                        <h6 class="fw-bold text-primary"><i class="bi bi-graph-up-arrow me-1"></i>배당금 지급 (${d.fiscal_year}년도)</h6>
-                       <p class="fw-bold">${Number(d.total_amount).toLocaleString()}원</p>
+                       <p class="fw-bold mb-1">세전 ${Number(gross).toLocaleString()}원 / 세후 ${Number(net).toLocaleString()}원</p>
+                       <p class="small text-muted mb-0">원천세 ${Number(tax).toLocaleString()}원 (${(getDividendTaxRate(d) * 100).toFixed(1)}%)</p>
                    </div>
                </div>`
 });
