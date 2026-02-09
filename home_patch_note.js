@@ -1,6 +1,6 @@
 /*
-Version: v1.0.5
-Change: 2026-02-08 - Added Kakao Link button to member page.
+Version: v1.0.6
+Change: 2026-02-09 - Restore patch-note modal focus guard to prevent runtime error.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -59,6 +59,32 @@ const formatPatchKstDate = (value = new Date()) => {
 };
 if (typeof window !== 'undefined') {
   window.showAlert = showAlert;
+}
+
+let patchNoteLastFocus = null;
+let patchNoteFocusGuardBound = false;
+
+function ensurePatchNoteFocusGuard(modalEl) {
+  if (!modalEl || patchNoteFocusGuardBound) return;
+  patchNoteFocusGuardBound = true;
+
+  modalEl.addEventListener('shown.bs.modal', () => {
+    const focusTarget =
+      modalEl.querySelector('.btn-close') ||
+      modalEl.querySelector('#btnShowWrite') ||
+      modalEl.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusTarget && typeof focusTarget.focus === 'function') {
+      focusTarget.focus();
+    }
+  });
+
+  modalEl.addEventListener('hidden.bs.modal', () => {
+    const prev = patchNoteLastFocus;
+    patchNoteLastFocus = null;
+    if (prev && typeof prev.focus === 'function' && document.contains(prev)) {
+      prev.focus();
+    }
+  });
 }
 /**
  * [File: patch_note.js]
