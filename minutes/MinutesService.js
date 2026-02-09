@@ -1,6 +1,6 @@
 /*
-Version: v1.0.16
-Change: 2026-02-05 - Add deleteSignature helper.
+Version: v1.0.17
+Change: 2026-02-09 - Include minute content in admin list for preview/template features.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -97,7 +97,7 @@ async function getCompanyInfo() {
 async function listMinutesAdmin() {
     const { data, error } = await supabase
         .from('minutes')
-        .select('id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids')
+        .select('id,title,content,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids')
         .order('created_at', { ascending: false });
     return { data: data || [], error };
 }

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.5
-Change: 2026-02-09 - Fix preview/search runtime errors and add minute editor helpers.
+Version: v1.2.6
+Change: 2026-02-09 - Fix minute manage preview to always load full content.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>의사록 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.5 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.6 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -781,11 +781,31 @@ Change: 2026-02-09 - Fix preview/search runtime errors and add minute editor hel
         };
 
         window.openMinutePreview = async (id) => {
-            const minute = minutesCache?.get(id);
-            if (!minute) return;
+            let minute = minutesCache?.get(id);
+            if (!minute) {
+                const { data, error } = await MinutesService.getMinuteById(id);
+                if (error || !data) {
+                    showToast('의사록 정보를 불러오지 못했습니다.');
+                    return;
+                }
+                minute = data;
+                minutesCache.set(id, minute);
+            }
+
+            if (!String(minute.content || '').trim()) {
+                const { data, error } = await MinutesService.getMinuteById(id);
+                if (!error && data) {
+                    minute = { ...minute, ...data };
+                    minutesCache.set(id, minute);
+                }
+            }
+
+            const normalized = normalizeMinuteContent(minute.content || '');
             document.getElementById('minutePreviewTitle').innerText = minute.title || '의사록';
             document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(minute.doc_type)} | ${formatMinutesAdminKstDate(minute.created_at)}`;
-            document.getElementById('minutePreviewBody').innerHTML = sanitizeHtml(minute.content || '');
+            document.getElementById('minutePreviewBody').innerHTML = normalized
+                ? sanitizeHtml(normalized)
+                : '<div style="color:#6b7280;">표시할 본문이 없습니다.</div>';
             document.getElementById('minutePreviewModal').classList.add('show');
         };
         window.closeMinutePreview = () => {

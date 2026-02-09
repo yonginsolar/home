@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.15
-Change: 2026-02-09 - Candidate detail modal uses explicit edit mode (click Edit before fields become editable).
+Version: v1.0.20
+Change: 2026-02-09 - Add-voter modal now supports explicit confirm flow plus district-management tab with safe delete guard.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.15 | admin.html');</script>
+    <script>console.log('[Version] v1.0.20 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -455,30 +455,84 @@ Change: 2026-02-09 - Candidate detail modal uses explicit edit mode (click Edit 
 
 <div id="add-voter-modal" class="modal-overlay">
     <div class="modal-content">
-        <span class="modal-title">➕ 유권자 추가 (명부 등재)</span>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
+            <span class="modal-title">➕ 유권자 추가 (명부 등재)</span>
+            <button onclick="closeAddVoterModal()" style="border:none; background:none; cursor:pointer; font-size:1.3rem; line-height:1;">&times;</button>
+        </div>
         <p style="font-size:0.85rem; color:#666; margin-bottom:1rem;">
             전체 조합원 중에서 검색하여 선거인 명부에 추가합니다.<br>
             (이미 등록된 사람은 검색되지 않거나 표시됩니다.)
         </p>
-        
-        <div style="display:flex; gap:10px; margin-bottom:1rem;">
-            <input type="text" id="search-member-input" placeholder="이름 또는 전화번호 뒷자리" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:4px;" onkeyup="if(window.event.keyCode==13){searchMembers()}">
-            <button onclick="searchMembers()" class="btn btn-primary">검색</button>
+
+        <div style="display:flex; gap:8px; margin-bottom:0.9rem;">
+            <button id="tab-add-voter-member" onclick="switchAddVoterModalTab('member')" class="btn btn-sm btn-primary">유권자 추가</button>
+            <button id="tab-add-voter-district" onclick="switchAddVoterModalTab('district')" class="btn btn-sm btn-outline">지역구 추가</button>
         </div>
 
-        <div id="search-result-area" style="height: 200px; overflow-y: auto; border:1px solid #eee; background:#f9fafb; padding:10px; text-align:left; margin-bottom:1rem;">
-            <div style="color:#999; text-align:center; padding-top:20px;">검색 결과가 여기에 표시됩니다.</div>
-        </div>
+        <div id="pane-add-voter-member">
+            <div style="display:flex; gap:10px; margin-bottom:1rem;">
+                <input type="text" id="search-member-input" placeholder="이름 또는 전화번호 뒷자리" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:4px;" onkeyup="if(window.event.keyCode==13){searchMembers()}">
+                <button onclick="searchMembers()" class="btn btn-primary">검색</button>
+            </div>
 
-        <div style="text-align:left; margin-bottom:1rem;">
-            <label style="font-weight:600; font-size:0.9rem;">배정할 선거구 선택</label>
-            <select id="add-voter-district-select" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; margin-top:5px;">
-                <option value="">-- 선거구 선택 --</option>
+            <div id="search-result-area" style="height: 200px; overflow-y: auto; border:1px solid #eee; background:#f9fafb; padding:10px; text-align:left; margin-bottom:1rem;">
+                <div style="color:#999; text-align:center; padding-top:20px;">검색 결과가 여기에 표시됩니다.</div>
+            </div>
+
+            <input type="hidden" id="selected-voter-member-no">
+            <input type="hidden" id="selected-voter-member-name">
+            <input type="hidden" id="selected-voter-member-uuid">
+
+            <div id="selected-voter-display" style="margin-bottom:0.8rem; font-size:0.85rem; color:#1e3a8a;">
+                선택된 유권자: <strong>없음</strong>
+            </div>
+
+            <div style="text-align:left; margin-bottom:1rem;">
+                <label style="font-weight:600; font-size:0.9rem;">배정할 선거구 선택</label>
+                <select id="add-voter-district-select" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; margin-top:5px;">
+                    <option value="">-- 선거구 선택 --</option>
                 </select>
+                <div style="font-size:0.8rem; color:#64748b; margin-top:6px;">비례(찬반) 선거구는 선택한 지역구와 함께 자동으로 포함됩니다.</div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-bottom:0.6rem;">
+                <button onclick="confirmAddVoterSelection()" class="btn btn-primary" style="flex:1;">✅ 유권자 추가 확인</button>
+            </div>
         </div>
 
-        <div class="modal-actions">
-            <button onclick="closeAddVoterModal()" class="btn btn-outline">닫기</button>
+        <div id="pane-add-voter-district" style="display:none;">
+            <div style="text-align:left; margin-bottom:1rem; padding:10px; border:1px dashed #cbd5e1; border-radius:8px; background:#f8fafc;">
+                <label style="font-weight:600; font-size:0.9rem;">지역구 추가</label>
+                <input type="hidden" id="add-new-district-id">
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <input type="text" id="add-new-district-name" placeholder="지역구 이름" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                    <input type="text" id="add-new-district-code" placeholder="코드(선택)" style="width:140px; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                </div>
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <select id="add-new-district-type" style="width:140px; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                        <option value="CANDIDATE">인물투표</option>
+                        <option value="BINARY">찬반투표</option>
+                    </select>
+                    <input type="number" id="add-new-district-quota" min="1" value="1" placeholder="선출 인원" style="width:120px; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                    <button id="btn-confirm-district-save" onclick="confirmAddDistrictFromAddVoterModal()" class="btn btn-primary btn-sm" style="flex:1;">✅ 지역구 추가 확인</button>
+                </div>
+                <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:0.82rem; color:#475569;">
+                    <input type="checkbox" id="add-new-district-is-common">
+                    비례(공통) 선거구로 등록
+                </label>
+                <div style="font-size:0.75rem; color:#6b7280; margin-top:6px;">지역구를 추가하면 즉시 유권자 배정 선택 목록에 반영됩니다.</div>
+            </div>
+
+            <div style="text-align:left; margin-bottom:0.8rem;">
+                <label style="font-weight:600; font-size:0.9rem;">지역구 목록</label>
+                <div id="add-voter-district-manage-list" style="max-height:180px; overflow-y:auto; margin-top:6px; border:1px solid #e5e7eb; border-radius:6px; background:white; padding:8px;">
+                    <div style="color:#999; text-align:center; padding:10px;">등록된 지역구가 없습니다.</div>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button onclick="resetDistrictEditorFromAddVoterModal()" class="btn btn-outline btn-sm" style="flex:1;">입력 초기화</button>
+                <button onclick="syncCommonVotersFromRegional(true)" class="btn btn-outline btn-sm" style="flex:1;">비례 전체 동기화</button>
+            </div>
         </div>
     </div>
 </div>
@@ -1142,12 +1196,11 @@ window.openElectionGateway = async () => {
     
 
 
-    // [수정됨] 선거구 매핑 정보 로드 (is_common 포함)
+    // [수정됨] 선거구 매핑 정보 로드 (관리용 필드 포함)
     async function loadDistrictsMap() {
-        // 기존: select('id, name') -> 수정: select('id, name, is_common')
         const { data } = await supabase
             .from('districts')
-            .select('id, name, is_common')
+            .select('id, name, code, vote_type, quota, is_common')
             .eq('election_id', currentElectionId);
             
         if (data) {
@@ -1207,9 +1260,16 @@ window.loadVoterStats = async () => {
 
         // 4. 데이터 그룹화 및 통계 계산
         const grouped = {};
+        const districtMetaMap = {};
+        districtList.forEach((d) => {
+            districtMetaMap[String(d.id)] = d;
+        });
         
         voters.forEach(v => {
-            const dName = cachedDistricts[v.district_id] || '미지정';
+            const baseDistrictName = cachedDistricts[v.district_id] || '미지정';
+            const districtMeta = districtMetaMap[String(v.district_id)];
+            const districtTypeLabel = districtMeta ? (districtMeta.is_common ? '비례(찬반)' : '지역구') : '미지정';
+            const dName = `${baseDistrictName} (${districtTypeLabel})`;
             const memInfo = memberMap[v.member_no] || { name: '정보없음', phone: '-' };
             
             // [핵심] 투표 여부 판별
@@ -1218,6 +1278,7 @@ window.loadVoterStats = async () => {
             const combinedData = {
                 member_no: v.member_no,
                 district_id: v.district_id,
+                _view_district: dName,
                 _view_name: memInfo.name,
                 _view_phone: memInfo.phone,
                 is_voted: isVoted // 투표 여부 플래그 추가
@@ -1293,6 +1354,7 @@ window.showVoterDetail = (dName, list) => {
                     <tr>
                         <th style="width:50px;">번호</th>
                         <th>이름 / 상태</th>
+                        <th>선거구</th>
                         <th>전화</th>
                         <th style="width:50px;">관리</th>
                     </tr>
@@ -1301,7 +1363,8 @@ window.showVoterDetail = (dName, list) => {
     
     // 2. 리스트 행 생성 (data-voted 속성 주입)
     list.forEach(v => {
-        const searchKey = `${v._view_name}|${v._view_phone}`.toLowerCase();
+        const safeDistrict = escapeHtml(v._view_district || '-');
+        const searchKey = `${v._view_name}|${v._view_phone}|${v._view_district || ''}`.toLowerCase();
         // 배지 HTML 생성
         const statusBadge = v.is_voted 
             ? `<span class="badge-voted">투표완료</span>` 
@@ -1322,6 +1385,7 @@ window.showVoterDetail = (dName, list) => {
                     <span style="font-weight:bold; color:var(--primary-blue);">${v._view_name}</span>
                     ${statusBadge}
                 </td>
+                <td>${safeDistrict}</td>
                 <td>${v._view_phone || '-'}</td>
                 <td><button class="btn btn-sm btn-outline" style="padding:2px 6px; font-size:0.7rem;">관리</button></td>
             </tr>`;
@@ -1364,23 +1428,6 @@ window.filterVoterList = () => {
     });
 };
 
-    // [신규] 명부 리스트 실시간 필터링 함수
-    window.filterVoterList = () => {
-        const input = document.getElementById('voter-list-search');
-        if(!input) return;
-        
-        const filter = input.value.toLowerCase();
-        const rows = document.querySelectorAll('.voter-row');
-
-        rows.forEach(row => {
-            const key = row.getAttribute('data-search');
-            if (key.includes(filter)) {
-                row.style.display = ''; // 보이기
-            } else {
-                row.style.display = 'none'; // 숨기기
-            }
-        });
-    };
 // -----------------------------------------------------------
     // [신규] 유권자 상세 관리 및 CRUD (추가/수정/삭제) 로직
     // -----------------------------------------------------------
@@ -1585,27 +1632,402 @@ async function updateVoterDistrict() {
         }
     }
 
-window.openAddVoterModal = () => {
-        const modal = document.getElementById('add-voter-modal');
-        const distSelect = document.getElementById('add-voter-district-select');
-        const resultArea = document.getElementById('search-result-area');
-        
-        // 입력창 초기화
-        document.getElementById('search-member-input').value = '';
-        resultArea.innerHTML = '<div style="color:#999; text-align:center; padding-top:20px;">이름을 입력하고 검색하세요.</div>';
-        
-        // 선거구 옵션 채우기 (비례대표는 제외)
-        distSelect.innerHTML = '<option value="">-- 선거구 선택 --</option>';
-        districtList.forEach(d => {
-            if (d.is_common) return; // 비례는 자동 추가되므로 선택지에서 제외
+    const buildDistrictCode = (name) => {
+        const base = String(name || '')
+            .toUpperCase()
+            .replace(/[^A-Z0-9가-힣]/g, '')
+            .slice(0, 8);
+        const suffix = String(Date.now()).slice(-4);
+        return `D${base}${suffix}`;
+    };
 
-            const opt = document.createElement('option');
-            opt.value = d.id;
-            opt.text = d.name;
-            distSelect.appendChild(opt);
+    const refreshAddVoterDistrictSelectOptions = (selectedValue = '') => {
+        const distSelect = document.getElementById('add-voter-district-select');
+        if (!distSelect) return;
+        distSelect.innerHTML = '<option value="">-- 선거구 선택 --</option>';
+        districtList.forEach((district) => {
+            if (district.is_common) return;
+            const option = document.createElement('option');
+            option.value = district.id;
+            option.text = district.name;
+            if (selectedValue && String(selectedValue) === String(district.id)) option.selected = true;
+            distSelect.appendChild(option);
+        });
+    };
+
+    window.switchAddVoterModalTab = (tabName) => {
+        const isMemberTab = tabName !== 'district';
+        const memberPane = document.getElementById('pane-add-voter-member');
+        const districtPane = document.getElementById('pane-add-voter-district');
+        const memberTabBtn = document.getElementById('tab-add-voter-member');
+        const districtTabBtn = document.getElementById('tab-add-voter-district');
+
+        if (memberPane) memberPane.style.display = isMemberTab ? 'block' : 'none';
+        if (districtPane) districtPane.style.display = isMemberTab ? 'none' : 'block';
+        if (memberTabBtn) memberTabBtn.className = `btn btn-sm ${isMemberTab ? 'btn-primary' : 'btn-outline'}`;
+        if (districtTabBtn) districtTabBtn.className = `btn btn-sm ${isMemberTab ? 'btn-outline' : 'btn-primary'}`;
+    };
+
+    window.renderAddVoterDistrictManageList = () => {
+        const listEl = document.getElementById('add-voter-district-manage-list');
+        if (!listEl) return;
+
+        const sortedDistricts = [...districtList].sort((a, b) => {
+            if (!!a.is_common !== !!b.is_common) return a.is_common ? 1 : -1;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+        });
+        if (sortedDistricts.length === 0) {
+            listEl.innerHTML = '<div style="color:#999; text-align:center; padding:10px;">등록된 지역구가 없습니다.</div>';
+            return;
+        }
+
+        let html = '';
+        sortedDistricts.forEach((district) => {
+            const safeName = escapeHtml(district.name || '');
+            const safeCode = escapeHtml(district.code || '-');
+            const safeType = district.vote_type === 'BINARY' ? '찬반투표' : '인물투표';
+            const safeQuota = Number.isFinite(Number(district.quota)) ? Number(district.quota) : 1;
+            const typeBadge = district.is_common
+                ? '<span style="display:inline-block; margin-left:6px; padding:1px 6px; border-radius:10px; font-size:0.72rem; background:#ede9fe; color:#6d28d9;">비례/공통</span>'
+                : '';
+            html += `
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; border-bottom:1px solid #f1f5f9;">
+                    <div style="min-width:0;">
+                        <div style="font-weight:600;">${safeName}${typeBadge}</div>
+                        <div style="font-size:0.75rem; color:#64748b;">코드 ${safeCode} | ${safeType} | ${safeQuota}명</div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn btn-outline btn-sm" onclick="startEditDistrictFromAddVoterModal('${escapeJsString(district.id)}')">수정</button>
+                        <button class="btn btn-outline btn-sm" style="color:#dc2626; border-color:#fecaca;" onclick="deleteDistrictFromAddVoterModal('${escapeJsString(district.id)}')">삭제</button>
+                    </div>
+                </div>
+            `;
+        });
+        listEl.innerHTML = html;
+    };
+
+    const syncAllVotersToCommonDistrict = async (commonDistrictId) => {
+        const { data: rows, error } = await supabase
+            .from('election_voters')
+            .select('member_no, member_uuid, district_id')
+            .eq('election_id', currentElectionId);
+        if (error) throw error;
+
+        const commonId = String(commonDistrictId);
+        const existingCommonKeys = new Set();
+        const allVoterKeys = new Map();
+
+        (rows || []).forEach((row) => {
+            const memberKey = row.member_uuid ? `uuid:${row.member_uuid}` : `no:${row.member_no}`;
+            if (String(row.district_id) === commonId) {
+                existingCommonKeys.add(memberKey);
+            }
+            if (!allVoterKeys.has(memberKey)) {
+                allVoterKeys.set(memberKey, row);
+            }
         });
 
+        const rowsToUpsert = [];
+        allVoterKeys.forEach((row, memberKey) => {
+            if (!existingCommonKeys.has(memberKey)) {
+                rowsToUpsert.push({
+                    election_id: currentElectionId,
+                    member_no: row.member_no,
+                    member_uuid: row.member_uuid,
+                    district_id: commonDistrictId
+                });
+            }
+        });
+
+        if (rowsToUpsert.length > 0) {
+            const { error: insertError } = await supabase
+                .from('election_voters')
+                .insert(rowsToUpsert);
+            if (insertError && insertError.code !== '23505') throw insertError;
+        }
+        return rowsToUpsert.length;
+    };
+
+    window.syncCommonVotersFromRegional = async (showFeedback = true) => {
+        const commonDistricts = districtList.filter((district) => district.is_common === true);
+        if (commonDistricts.length === 0) {
+            if (showFeedback) showAlert('비례(찬반) 선거구가 없어 동기화를 건너뜁니다.');
+            return { inserted: 0 };
+        }
+
+        let totalInserted = 0;
+        for (const district of commonDistricts) {
+            totalInserted += await syncAllVotersToCommonDistrict(district.id);
+        }
+
+        if (showFeedback) {
+            if (totalInserted > 0) showAlert(`비례(찬반) 유권자 ${totalInserted}명을 동기화했습니다.`);
+            else showAlert('이미 모든 등록 유권자가 비례(찬반)에 포함되어 있습니다.');
+        }
+
+        return { inserted: totalInserted };
+    };
+
+    const resetSelectedVoterCandidate = () => {
+        const noEl = document.getElementById('selected-voter-member-no');
+        const nameEl = document.getElementById('selected-voter-member-name');
+        const uuidEl = document.getElementById('selected-voter-member-uuid');
+        const viewEl = document.getElementById('selected-voter-display');
+
+        if (noEl) noEl.value = '';
+        if (nameEl) nameEl.value = '';
+        if (uuidEl) uuidEl.value = '';
+        if (viewEl) viewEl.innerHTML = '선택된 유권자: <strong>없음</strong>';
+    };
+
+    window.selectVoterForAdd = (memberNo, memberName, memberUuid, currentDistrictId = '', currentDistrictName = '') => {
+        const noEl = document.getElementById('selected-voter-member-no');
+        const nameEl = document.getElementById('selected-voter-member-name');
+        const uuidEl = document.getElementById('selected-voter-member-uuid');
+        const viewEl = document.getElementById('selected-voter-display');
+        const districtSelect = document.getElementById('add-voter-district-select');
+
+        if (noEl) noEl.value = memberNo || '';
+        if (nameEl) nameEl.value = memberName || '';
+        if (uuidEl) uuidEl.value = memberUuid || '';
+        if (districtSelect) {
+            if (currentDistrictId && Array.from(districtSelect.options).some((option) => String(option.value) === String(currentDistrictId))) {
+                districtSelect.value = currentDistrictId;
+            } else if (!districtSelect.value) {
+                districtSelect.value = '';
+            }
+        }
+        if (viewEl) {
+            const safeName = escapeHtml(memberName || '');
+            const safeNo = escapeHtml(memberNo || '');
+            const safeDistrictName = escapeHtml(currentDistrictName || '');
+            const districtText = safeDistrictName ? ` <span style="color:#475569;">현재: ${safeDistrictName}</span>` : '';
+            viewEl.innerHTML = `선택된 유권자: <strong>${safeName}</strong> <span style="color:#64748b;">(${safeNo})</span>${districtText}`;
+        }
+    };
+
+    window.confirmAddVoterSelection = async () => {
+        const memberNo = document.getElementById('selected-voter-member-no')?.value || '';
+        const memberName = document.getElementById('selected-voter-member-name')?.value || '';
+        const memberUuid = document.getElementById('selected-voter-member-uuid')?.value || '';
+        if (!memberNo || !memberName || !memberUuid) {
+            showAlert('먼저 검색 결과에서 유권자를 선택해주세요.');
+            return;
+        }
+        await window.addVoterToElection(memberNo, memberName, memberUuid);
+    };
+
+    window.resetDistrictEditorFromAddVoterModal = () => {
+        const idInput = document.getElementById('add-new-district-id');
+        const nameInput = document.getElementById('add-new-district-name');
+        const codeInput = document.getElementById('add-new-district-code');
+        const typeInput = document.getElementById('add-new-district-type');
+        const quotaInput = document.getElementById('add-new-district-quota');
+        const isCommonInput = document.getElementById('add-new-district-is-common');
+        const confirmBtn = document.getElementById('btn-confirm-district-save');
+
+        if (idInput) idInput.value = '';
+        if (nameInput) nameInput.value = '';
+        if (codeInput) codeInput.value = '';
+        if (typeInput) typeInput.value = 'CANDIDATE';
+        if (quotaInput) quotaInput.value = '1';
+        if (isCommonInput) isCommonInput.checked = false;
+        if (confirmBtn) confirmBtn.innerText = '✅ 지역구 추가 확인';
+    };
+
+    window.startEditDistrictFromAddVoterModal = (districtId) => {
+        const district = districtList.find((item) => String(item.id) === String(districtId));
+        if (!district) {
+            showAlert('지역구 정보를 찾을 수 없습니다.');
+            return;
+        }
+
+        document.getElementById('add-new-district-id').value = district.id;
+        document.getElementById('add-new-district-name').value = district.name || '';
+        document.getElementById('add-new-district-code').value = district.code || '';
+        document.getElementById('add-new-district-type').value = district.vote_type || 'CANDIDATE';
+        document.getElementById('add-new-district-quota').value = Number.isFinite(Number(district.quota)) ? Number(district.quota) : 1;
+        document.getElementById('add-new-district-is-common').checked = !!district.is_common;
+        document.getElementById('btn-confirm-district-save').innerText = '✅ 지역구 수정 확인';
+    };
+
+    window.confirmAddDistrictFromAddVoterModal = async () => {
+        const idInput = document.getElementById('add-new-district-id');
+        const nameInput = document.getElementById('add-new-district-name');
+        const codeInput = document.getElementById('add-new-district-code');
+        const typeInput = document.getElementById('add-new-district-type');
+        const quotaInput = document.getElementById('add-new-district-quota');
+        const isCommonInput = document.getElementById('add-new-district-is-common');
+
+        const editingDistrictId = (idInput?.value || '').trim();
+        const name = (nameInput?.value || '').trim();
+        const customCode = (codeInput?.value || '').trim();
+        const voteType = typeInput?.value || 'CANDIDATE';
+        const quota = parseInt(quotaInput?.value || '1', 10);
+        const isCommon = !!(isCommonInput?.checked);
+
+        if (!name) {
+            showAlert('지역구 이름을 입력해주세요.');
+            nameInput?.focus();
+            return;
+        }
+        if (!Number.isFinite(quota) || quota < 1) {
+            showAlert('선출 인원은 1 이상이어야 합니다.');
+            quotaInput?.focus();
+            return;
+        }
+
+        const code = customCode || buildDistrictCode(name);
+        const hasSameName = districtList.some((district) => {
+            if (editingDistrictId && String(district.id) === String(editingDistrictId)) return false;
+            return String(district.name || '').trim() === name;
+        });
+        if (hasSameName) {
+            showAlert('같은 이름의 선거구가 이미 존재합니다.');
+            return;
+        }
+        const hasSameCode = districtList.some((district) => {
+            if (editingDistrictId && String(district.id) === String(editingDistrictId)) return false;
+            return String(district.code || '').trim().toUpperCase() === String(code).trim().toUpperCase();
+        });
+        if (hasSameCode) {
+            showAlert('같은 코드의 선거구가 이미 존재합니다. 코드를 변경해주세요.');
+            return;
+        }
+
+        const confirmMessage = editingDistrictId
+            ? `[${name}] 지역구를 수정하시겠습니까?`
+            : `[${name}] 지역구를 추가하시겠습니까?`;
+        if (!await showConfirm(confirmMessage)) return;
+
+        try {
+            const payload = {
+                election_id: currentElectionId,
+                name,
+                code,
+                quota,
+                vote_type: voteType,
+                is_common: isCommon
+            };
+            let data = null;
+            let error = null;
+            if (editingDistrictId) {
+                const result = await supabase
+                    .from('districts')
+                    .update(payload)
+                    .eq('id', editingDistrictId)
+                    .eq('election_id', currentElectionId)
+                    .select('*')
+                    .single();
+                data = result.data;
+                error = result.error;
+            } else {
+                const result = await supabase
+                    .from('districts')
+                    .insert(payload)
+                    .select('*')
+                    .single();
+                data = result.data;
+                error = result.error;
+            }
+
+            if (error) throw error;
+
+            if (editingDistrictId) {
+                districtList = districtList.map((district) =>
+                    String(district.id) === String(editingDistrictId) ? data : district
+                );
+            } else {
+                districtList.push(data);
+            }
+            const currentSelectedDistrictId = document.getElementById('add-voter-district-select')?.value || '';
+            cachedDistricts[data.id] = data.name;
+            const preferredSelectId = data.is_common ? currentSelectedDistrictId : data.id;
+            refreshAddVoterDistrictSelectOptions(preferredSelectId);
+            window.renderAddVoterDistrictManageList();
+
+            if (data.is_common) {
+                await syncAllVotersToCommonDistrict(data.id);
+            }
+
+            window.resetDistrictEditorFromAddVoterModal();
+
+            const actionCode = editingDistrictId ? 'DISTRICT_UPDATE_ADMIN' : 'DISTRICT_ADD_ADMIN';
+            const actionText = editingDistrictId ? '지역구 수정' : '지역구 추가';
+            showAlert(`${actionText}되었습니다: ${data.name}`);
+            await service.logAction(currentElectionId, actionCode, `${actionText}: ${data.name}(${data.code}) (작업자: ${currentUserEmail})`);
+            loadLogs();
+        } catch (e) {
+            console.error(e);
+            showAlert('지역구 저장 실패: ' + e.message);
+        }
+    };
+
+    window.deleteDistrictFromAddVoterModal = async (districtId) => {
+        const district = districtList.find((item) => String(item.id) === String(districtId));
+        if (!district) {
+            showAlert('지역구 정보를 찾을 수 없습니다.');
+            return;
+        }
+
+        const { count, error: countError } = await supabase
+            .from('election_voters')
+            .select('*', { count: 'exact', head: true })
+            .eq('election_id', currentElectionId)
+            .eq('district_id', districtId);
+        if (countError) {
+            showAlert('지역구 사용 현황 조회 실패: ' + countError.message);
+            return;
+        }
+        if ((count || 0) > 0) {
+            showAlert('유권자가 등록된 지역구는 삭제할 수 없습니다.');
+            return;
+        }
+
+        if (!await showConfirm(`[${district.name}] 지역구를 삭제하시겠습니까?`)) return;
+
+        try {
+            const { error } = await supabase
+                .from('districts')
+                .delete()
+                .eq('id', districtId)
+                .eq('election_id', currentElectionId);
+            if (error) throw error;
+
+            districtList = districtList.filter((item) => String(item.id) !== String(districtId));
+            delete cachedDistricts[districtId];
+            refreshAddVoterDistrictSelectOptions();
+            window.renderAddVoterDistrictManageList();
+
+            showAlert(`지역구가 삭제되었습니다: ${district.name}`);
+            await service.logAction(currentElectionId, 'DISTRICT_DELETE_ADMIN', `지역구 삭제: ${district.name}(${district.code || '-'}) (작업자: ${currentUserEmail})`);
+            loadLogs();
+        } catch (e) {
+            console.error(e);
+            showAlert('지역구 삭제 실패: ' + e.message);
+        }
+    };
+
+    window.openAddVoterModal = () => {
+        const modal = document.getElementById('add-voter-modal');
+        const resultArea = document.getElementById('search-result-area');
+        
+        // 입력창/선택값 초기화
+        document.getElementById('search-member-input').value = '';
+        resultArea.innerHTML = '<div style="color:#999; text-align:center; padding-top:20px;">이름을 입력하고 검색하세요.</div>';
+        resetSelectedVoterCandidate();
+        refreshAddVoterDistrictSelectOptions();
+
+        window.resetDistrictEditorFromAddVoterModal();
+
+        window.renderAddVoterDistrictManageList();
+        window.switchAddVoterModalTab('member');
         openModalOverlay(modal);
+
+        // 모달 오픈 시 비례 누락분 조용히 보정
+        window.syncCommonVotersFromRegional(false).catch((e) => {
+            console.warn('비례 동기화 백그라운드 실패:', e);
+        });
     };
 
 window.searchMembers = async () => {
@@ -1642,14 +2064,17 @@ window.searchMembers = async () => {
                 .eq('election_id', currentElectionId)
                 .in('member_no', searchedMemberNos);
 
-            // 등록된 정보를 맵핑 (이미 등록된 사람은 선거구 이름 표시)
+            // 등록된 정보를 맵핑 (이미 등록된 사람은 현재 지역구 정보를 표시)
             const regMap = {};
             if(registeredData) {
                 registeredData.forEach(r => {
                     const dInfo = districtList.find(d => d.id === r.district_id);
-                    // 비례가 아닌 지역구 이름을 우선적으로 표시
-                    if(dInfo && !dInfo.is_common) regMap[r.member_no] = dInfo.name;
-                    else if(!regMap[r.member_no]) regMap[r.member_no] = '(비례/기타)';
+                    // 비례가 아닌 지역구를 우선 표시 (변경 대상)
+                    if(dInfo && !dInfo.is_common) {
+                        regMap[r.member_no] = { districtName: dInfo.name, districtId: dInfo.id };
+                    } else if(!regMap[r.member_no]) {
+                        regMap[r.member_no] = { districtName: '(비례/기타)', districtId: '' };
+                    }
                 });
             }
 
@@ -1657,8 +2082,10 @@ window.searchMembers = async () => {
             let html = '<ul style="list-style:none; padding:0; margin:0;">';
             
             members.forEach(m => {
-                const registeredDistrict = regMap[m.member_id];
-                const isRegistered = !!registeredDistrict;
+                const registeredInfo = regMap[m.member_id];
+                const registeredDistrict = registeredInfo?.districtName || '';
+                const currentDistrictId = registeredInfo?.districtId || '';
+                const isRegistered = !!registeredInfo;
                 const safeName = escapeHtml(m.name || '');
                 const safePhone = escapeHtml(m.phone || '전화없음');
                 const safeAddress = escapeHtml(m.address || '주소없음');
@@ -1666,18 +2093,25 @@ window.searchMembers = async () => {
                 const safeMemberNo = escapeJsString(m.member_id || '');
                 const safeMemberName = escapeJsString(m.name || '');
                 const safeMemberUuid = escapeJsString(m.id || '');
+                const safeCurrentDistrictId = escapeJsString(currentDistrictId || '');
+                const safeCurrentDistrictName = escapeJsString(registeredDistrict || '');
                 
-                // [핵심 수정] addVoterToElection 함수에 m.id (UUID)를 3번째 인자로 전달
+                // [선택 후 확정] 먼저 후보를 선택한 뒤 하단 확인 버튼으로 등록
                 html += `
                     <li style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; background:${isRegistered ? '#f9fafb' : 'white'};">
-                        <div style="opacity:${isRegistered ? 0.6 : 1}">
+                        <div style="opacity:${isRegistered ? 0.9 : 1}">
                             <strong>${safeName}</strong> <span style="font-size:0.8rem; color:#666;">(${safePhone})</span><br>
                             <span style="font-size:0.75rem; color:#999;">${safeAddress}</span>
                         </div>
                         <div>
                             ${isRegistered 
-                                ? `<span class="status-badge" style="background:#6b7280; font-size:0.75rem;">${safeRegistered} 등록됨</span>` 
-                                : `<button onclick="addVoterToElection('${safeMemberNo}', '${safeMemberName}', '${safeMemberUuid}')" class="btn btn-sm btn-primary">선택</button>`
+                                ? `
+                                    <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
+                                        <span class="status-badge" style="background:#6b7280; font-size:0.75rem;">${safeRegistered} 등록됨</span>
+                                        <button onclick="selectVoterForAdd('${safeMemberNo}', '${safeMemberName}', '${safeMemberUuid}', '${safeCurrentDistrictId}', '${safeCurrentDistrictName}')" class="btn btn-sm btn-outline">지역구 변경</button>
+                                    </div>
+                                  ` 
+                                : `<button onclick="selectVoterForAdd('${safeMemberNo}', '${safeMemberName}', '${safeMemberUuid}', '', '')" class="btn btn-sm btn-primary">선택</button>`
                             }
                         </div>
                     </li>
@@ -1710,19 +2144,52 @@ window.searchMembers = async () => {
             return;
         }
 
-        // 비례대표 선거구 자동 찾기
-        const commonDistrict = districtList.find(d => d.is_common === true);
-        
-        const confirmMsg = commonDistrict
-            ? `[${memberName}] 님을 선택한 선거구로 추가하시겠습니까?\n(공통 선거구 '${commonDistrict.name}'도 자동으로 추가됩니다)`
-            : `[${memberName}] 님을 추가하시겠습니까?`;
-
-        if (!await showConfirm(confirmMsg)) return;
-
         try {
+            // 기존 등록 상태 확인 (등록된 유권자도 지역구 변경 가능)
+            const { data: existingRows, error: existingError } = await supabase
+                .from('election_voters')
+                .select('district_id')
+                .eq('election_id', currentElectionId)
+                .eq('member_no', memberNo);
+            if (existingError) throw existingError;
+
+            // 공통(비례/찬반) 선거구는 모두 자동 포함
+            const commonDistricts = districtList.filter(d => d.is_common === true);
+            const commonDistrictIdSet = new Set(commonDistricts.map((district) => String(district.id)));
+            const currentRegionalIds = Array.from(new Set(
+                (existingRows || [])
+                    .map((row) => String(row.district_id))
+                    .filter((id) => !commonDistrictIdSet.has(id))
+            ));
+            const currentRegionalNames = currentRegionalIds
+                .map((id) => districtList.find((district) => String(district.id) === id)?.name || '')
+                .filter(Boolean);
+            const selectedDistrictName = districtList.find((district) => String(district.id) === String(districtId))?.name || '선택 선거구';
+            const isDistrictChange = currentRegionalIds.length > 0 && !currentRegionalIds.includes(String(districtId));
+
+            const commonDistrictNames = commonDistricts.map(d => d.name).filter(Boolean);
+            const confirmMsg = isDistrictChange
+                ? `[${memberName}] 님의 지역구를 [${currentRegionalNames.join(', ')}] → [${selectedDistrictName}] 로 변경하시겠습니까?${commonDistricts.length > 0 ? `\n(공통 선거구 ${commonDistrictNames.length}개는 자동 포함됩니다)` : ''}`
+                : (commonDistricts.length > 0
+                    ? `[${memberName}] 님을 선택한 선거구로 추가/반영하시겠습니까?\n(공통 선거구 ${commonDistrictNames.length}개도 자동 포함됩니다)`
+                    : `[${memberName}] 님을 추가/반영하시겠습니까?`);
+
+            if (!await showConfirm(confirmMsg)) return;
+
+            // 기존 지역구(비공통) 배정은 모두 정리 후 새 선택 지역구로 반영
+            if (currentRegionalIds.length > 0) {
+                const { error: clearRegionalError } = await supabase
+                    .from('election_voters')
+                    .delete()
+                    .eq('election_id', currentElectionId)
+                    .eq('member_no', memberNo)
+                    .in('district_id', currentRegionalIds);
+                if (clearRegionalError) throw clearRegionalError;
+            }
+
             const rowsToInsert = [];
 
-            // 1. 지역구 행 추가 (member_uuid 포함)
+            // 1) 선택 지역구 행 추가 (member_uuid 포함)
             rowsToInsert.push({
                 election_id: currentElectionId,
                 member_no: memberNo,
@@ -1730,35 +2197,52 @@ window.searchMembers = async () => {
                 member_uuid: memberUuid 
             });
 
-            // 2. 비례대표 행 자동 추가 (member_uuid 포함)
-            if (commonDistrict) {
+            // 2) 공통(비례/찬반) 선거구 행 자동 추가 (member_uuid 포함)
+            const existingCommonIds = new Set(
+                (existingRows || [])
+                    .map((row) => String(row.district_id))
+                    .filter((id) => commonDistrictIdSet.has(id))
+            );
+            commonDistricts.forEach((commonDistrict) => {
+                if (String(commonDistrict.id) === String(districtId)) return;
+                if (existingCommonIds.has(String(commonDistrict.id))) return;
                 rowsToInsert.push({
                     election_id: currentElectionId,
                     member_no: memberNo,
                     district_id: commonDistrict.id,
                     member_uuid: memberUuid
                 });
-            }
+            });
 
-            // DB 입력 실행
-            const { error } = await supabase
-                .from('election_voters')
-                .insert(rowsToInsert);
+            // 동일 district_id 중복 방지
+            const uniqueRows = [];
+            const seenDistrictIds = new Set();
+            rowsToInsert.forEach((row) => {
+                const key = String(row.district_id);
+                if (seenDistrictIds.has(key)) return;
+                seenDistrictIds.add(key);
+                uniqueRows.push(row);
+            });
 
-            if (error) {
-                // 중복 에러 처리
-                if (error.code === '23505') showAlert("이미 등록된 조합원입니다.");
-                else throw error;
-                return;
+            if (uniqueRows.length > 0) {
+                // DB 입력 실행
+                const { error } = await supabase
+                    .from('election_voters')
+                    .insert(uniqueRows);
+                if (error && error.code !== '23505') throw error;
             }
 
             // 성공 처리
-            showAlert(`${memberName} 님이 추가되었습니다.`);
+            showAlert(isDistrictChange ? `${memberName} 님 지역구를 변경했습니다.` : `${memberName} 님이 반영되었습니다.`);
+            await window.syncCommonVotersFromRegional(false);
             window.closeAddVoterModal(); // 모달 닫기
             loadVoterStats(); // 명부 새로고침
             
             // [수정] 로그에 작업자 이메일 포함
-            await service.logAction(currentElectionId, 'VOTER_ADD', `유권자 추가: ${memberName}(${memberNo}) (작업자: ${currentUserEmail})`);
+            const logMessage = isDistrictChange
+                ? `유권자 지역구 변경: ${memberName}(${memberNo}) ${currentRegionalNames.join(',')} -> ${selectedDistrictName} (작업자: ${currentUserEmail})`
+                : `유권자 추가/반영: ${memberName}(${memberNo}) (작업자: ${currentUserEmail})`;
+            await service.logAction(currentElectionId, 'VOTER_ADD', logMessage);
             loadLogs(); // 로그 갱신
 
         } catch (e) {
