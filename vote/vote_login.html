@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.13
-Change: 2026-02-09 - Fix null profile fallback on nomination flow to prevent member_uuid read errors.
+Version: v1.0.14
+Change: 2026-02-09 - Hide candidate list during nomination intake and show fairness notice only.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>선거 포털</title>
-    <script>console.log('[Version] v1.0.13 | vote_login.html');</script>
+    <script>console.log('[Version] v1.0.14 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -709,6 +709,7 @@ Change: 2026-02-09 - Fix null profile fallback on nomination flow to prevent mem
             badge.style.background = "#16a34a";
             
             document.getElementById('result-view').style.display = 'none';
+            document.getElementById('district-tabs').style.display = 'flex';
             document.getElementById('candidate-area').style.display = 'flex';
             bottomBar.style.display = 'block';
 
@@ -774,10 +775,10 @@ Change: 2026-02-09 - Fix null profile fallback on nomination flow to prevent mem
             badge.style.background = "#8b5cf6";
             
             document.getElementById('result-view').style.display = 'none';
-            document.getElementById('candidate-area').style.display = 'flex';
+            renderNominationIntakeOnly();
             bottomBar.style.display = 'block';
 
-            infoBox.innerHTML = `ℹ️ <strong>안내:</strong> 현재 후보자 등록 기간입니다.`;
+            infoBox.innerHTML = `ℹ️ <strong>안내:</strong> 현재 후보 등록 접수중이며 후보자 목록은 마감 후 공개됩니다.`;
 
             // 본인 등록 여부 체크
             const memberUuid = myInfo?.id || sessionStorage.getItem('lastActiveProfile') || authUserId;
@@ -820,6 +821,7 @@ Change: 2026-02-09 - Fix null profile fallback on nomination flow to prevent mem
         // -----------------------------
         else {
             document.getElementById('result-view').style.display = 'none';
+            document.getElementById('district-tabs').style.display = 'flex';
             document.getElementById('candidate-area').style.display = 'flex';
             bottomBar.style.display = 'block';
 
@@ -931,12 +933,42 @@ Change: 2026-02-09 - Fix null profile fallback on nomination flow to prevent mem
         document.getElementById('election-period').innerText = `투표기간: ${startStr} ~ ${endStr}`;
     }
 
+        function isNominationIntakePhase() {
+            if (!currentElection) return false;
+            const now = new Date();
+            const candStart = new Date(currentElection.candidacy_start_at);
+            const candEnd = new Date(currentElection.candidacy_end_at);
+            return currentElection.status === 'NOMINATION' || (now >= candStart && now <= candEnd);
+        }
+
+        function renderNominationIntakeOnly() {
+            const candidateArea = document.getElementById('candidate-area');
+            const tabs = document.getElementById('district-tabs');
+            if (tabs) tabs.style.display = 'none';
+            if (!candidateArea) return;
+
+            candidateArea.style.display = 'block';
+            candidateArea.innerHTML = `
+                <div style="padding:28px 18px; border:1px solid #e9d5ff; border-radius:12px; background:#faf5ff; text-align:center; color:#5b21b6;">
+                    <div style="font-size:1.1rem; font-weight:700; margin-bottom:8px;">📝 후보 등록 접수중</div>
+                    <div style="font-size:0.92rem; line-height:1.6;">
+                        공정성 보호를 위해 후보자 정보는 등록 마감 후 공개됩니다.<br>
+                        접수 마감 전까지는 후보자 목록 열람이 제한됩니다.
+                    </div>
+                </div>
+            `;
+        }
+
         async function loadDistrictsAndCandidates() {
             const { data: districts } = await supabase.from('districts').select('*').eq('election_id', electionId).order('name');
             allDistricts = districts || [];
             const { data: candidates } = await supabase.from('candidates').select('*').eq('election_id', electionId).eq('status', 'APPROVED').order('symbol', { ascending: true });
             allCandidates = candidates || [];
             renderTabs();
+            if (isNominationIntakePhase()) {
+                renderNominationIntakeOnly();
+                return;
+            }
             renderCandidates('ALL');
         }
 
@@ -971,6 +1003,10 @@ window.filterCandidates = (distId, btn) => {
     // 2. [수정 핵심] 존재하지 않는 변수(currentStatus) 대신 전역 객체(currentElection) 참조
     // 데이터가 아직 로드되지 않았을 경우를 대비해 Optional Chaining 또는 삼항 연산자 사용
     const status = currentElection ? currentElection.status : null;
+    if (isNominationIntakePhase()) {
+        renderNominationIntakeOnly();
+        return;
+    }
 
     // 3. 상태에 따른 분기 처리
     if (status === 'PUBLISHED' || status === 'ENDED') {
