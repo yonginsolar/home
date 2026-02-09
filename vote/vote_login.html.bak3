@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.12
-Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서브패스 배포 호환).
+Version: v1.0.10
+Change: 2026-02-08 - Fixed closeAlert undefined error + skip age validation for organization members.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>선거 포털</title>
-    <script>console.log('[Version] v1.0.12 | vote_login.html');</script>
+    <script>console.log('[Version] v1.0.10 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -27,41 +27,6 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
             background-color: var(--bg-color);
             color: var(--text-main);
             padding-bottom: 100px; /* 하단 버튼 공간 */
-            padding-top: 50px; /* 상단 버튼 공간 */
-        }
-
-        /* 0. 상단 네비게이션 버튼 */
-        .top-nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: white;
-            border-bottom: 1px solid var(--border);
-            padding: 10px 16px;
-            display: flex;
-            gap: 10px;
-            z-index: 100;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        .btn-nav {
-            padding: 8px 16px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: white;
-            color: var(--text-main);
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .btn-nav:hover {
-            background: var(--bg-color);
-            border-color: var(--primary);
         }
 
         /* 1. 헤더 스타일 */
@@ -223,11 +188,6 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
 </head>
 <body>
 
-    <div class="top-nav">
-        <button class="btn-nav" onclick="history.back()">← 뒤로</button>
-        <button class="btn-nav" onclick="location.href='../membermanage.html'">🏠 조합원 관리</button>
-    </div>
-
     <header class="header">
         <h1 id="election-title">선거 정보를 불러오는 중...</h1>
         <span id="status-badge" class="status-badge" style="background: #9ca3af;">-</span>
@@ -371,10 +331,7 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
 
         function formatAddress(addr) {
             if (!addr) return '정보 없음';
-            let raw = String(addr).trim();
-            
-            // 우편번호 제거 (00000) 형태
-            raw = raw.replace(/\(\d{5}\)/g, '').trim();
+            const raw = String(addr).trim();
             
             // 우선순위: ~구 → ~동(행정구역) → ~로/대로/길
             // "101동" 같은 건물 동은 제외
@@ -562,7 +519,7 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error || !session) {
             showAlert("로그인이 필요합니다.\n메인 관리 페이지로 이동합니다.");
-            window.location.href = '../membermanage.html';
+            window.location.href = '/membermanage.html';
             return;
         }
 
@@ -985,10 +942,6 @@ function renderCandidates(filterDistId) {
         // 나이 계산 (함수 존재 여부 체크)
         const ageText = typeof getKoreanAge === 'function' ? getKoreanAge(c.birth_date) : '';
 
-        // 대표자 정보 (단체인 경우)
-        const repInfo = c.representative_name ? 
-            `<div style="font-size:0.8rem; color:#64748b; margin-top:2px;">대표: ${escapeHtml(c.representative_name)}</div>` : '';
-
         return `
             <div class="cand-card" onclick="openCandidateDetail('${c.id}')">
                 <div class="cand-photo-wrapper">
@@ -1004,7 +957,6 @@ function renderCandidates(filterDistId) {
                         <span class="cand-dist-badge">${safeDistName}</span>
                     </div>
                     <h3 class="cand-name">${safeName} <span class="cand-age">(${ageText})</span></h3>
-                    ${repInfo}
                     <div class="cand-cta">👉 상세 정보 보기</div>
                 </div>
             </div>

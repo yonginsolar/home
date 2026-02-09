@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.12
-Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서브패스 배포 호환).
+Version: v1.0.8
+Change: 2026-02-05 - Address masking + escape error output.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>선거 포털</title>
-    <script>console.log('[Version] v1.0.12 | vote_login.html');</script>
+    <script>console.log('[Version] v1.0.8 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -27,41 +27,6 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
             background-color: var(--bg-color);
             color: var(--text-main);
             padding-bottom: 100px; /* 하단 버튼 공간 */
-            padding-top: 50px; /* 상단 버튼 공간 */
-        }
-
-        /* 0. 상단 네비게이션 버튼 */
-        .top-nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: white;
-            border-bottom: 1px solid var(--border);
-            padding: 10px 16px;
-            display: flex;
-            gap: 10px;
-            z-index: 100;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        .btn-nav {
-            padding: 8px 16px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: white;
-            color: var(--text-main);
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .btn-nav:hover {
-            background: var(--bg-color);
-            border-color: var(--primary);
         }
 
         /* 1. 헤더 스타일 */
@@ -223,11 +188,6 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
 </head>
 <body>
 
-    <div class="top-nav">
-        <button class="btn-nav" onclick="history.back()">← 뒤로</button>
-        <button class="btn-nav" onclick="location.href='../membermanage.html'">🏠 조합원 관리</button>
-    </div>
-
     <header class="header">
         <h1 id="election-title">선거 정보를 불러오는 중...</h1>
         <span id="status-badge" class="status-badge" style="background: #9ca3af;">-</span>
@@ -371,38 +331,15 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
 
         function formatAddress(addr) {
             if (!addr) return '정보 없음';
-            let raw = String(addr).trim();
-            
-            // 우편번호 제거 (00000) 형태
-            raw = raw.replace(/\(\d{5}\)/g, '').trim();
-            
-            // 우선순위: ~구 → ~동(행정구역) → ~로/대로/길
-            // "101동" 같은 건물 동은 제외
-            
-            // 1) ~구까지 먼저 찾기
-            const guMatch = raw.match(/.*?구(?=\s|$)/);
-            let baseAddr = guMatch ? guMatch[0] : raw;
-            
-            // 2) 행정구역 "동" 찾기 (숫자 뒤의 "동"은 제외)
-            // 패턴: "동" 앞에 숫자가 아닌 문자가 있어야 함
-            const dongMatch = raw.match(/.*?[가-힣](동)(?=\s|$)/);
-            if (dongMatch) {
-                // "동" 앞에 숫자가 있는지 확인
-                const matched = dongMatch[0];
-                const dongIndex = matched.lastIndexOf('동');
-                const beforeDong = matched.substring(dongIndex - 1, dongIndex);
-                
-                // 숫자가 아니면 행정구역 "동"으로 인식
-                if (!/\d/.test(beforeDong)) {
-                    return matched.trim().replace(/[0-9]/g, '*');
-                }
-            }
-            
-            // 3) 행정 "동"이 없으면 도로명까지만 표시
-            const roadMatch = raw.match(/.*?(대로|로|길)(?=\s|[0-9]|$)/);
-            const result = roadMatch ? roadMatch[0].trim() : baseAddr;
-            
-            return result.trim().replace(/[0-9]/g, '*');
+            const raw = String(addr).trim();
+            // 1) 읍/면/동/가가 있으면 그까지만 표시
+            const localMatch = raw.match(/.*?(읍|면|동|가)(?=\s|$)/);
+            if (localMatch) return localMatch[0].trim().replace(/[0-9]/g, '*');
+
+            // 2) 읍/면/동/가가 없으면 도로명(대로/로/길)까지만 표시
+            const roadMatch = raw.match(/.*?(대로|로|길)(?=\s|$)/);
+            const result = roadMatch ? roadMatch[0].trim() : raw;
+            return result.replace(/[0-9]/g, '*');
         }
 
         function openImageModal(url) {
@@ -501,13 +438,10 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
         oneMonthBefore.setMonth(announceDate.getMonth() - 1);
 
         const isActive = member.status === '정상';
-        
-        // 단체 조합원은 나이 검증 스킵
-        const isOrganization = member.member_type === '단체';
-        const isAdult = isOrganization ? true : !isMinor(member.rrn_display);
+        const isAdult = !isMinor(member.rrn_display);
 
         // 1. 피선거권 (후보 자격)
-        // 조건: 정조합원 + 성년(단체 제외) + 가입일이 공고일 1달 전
+        // 조건: 정조합원 + 성년 + 가입일이 공고일 1달 전
         let canRun = false;
         let runReason = '';
 
@@ -517,7 +451,7 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
         else canRun = true;
 
         // 2. 선거권 (투표 자격)
-        // 조건: 정조합원 + 가입일이 공고일 이전
+        // 조건: 정조합원 + 가입일이 공고일 이전 (당일 포함 여부는 정책에 따라, 여기선 이전으로 설정)
         let canVote = false;
         let voteReason = '';
 
@@ -545,7 +479,6 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
         window.openCandidateDetail = openCandidateDetail;
         window.closeCandidateDetail = closeCandidateDetail;
         window.goToVotePage = goToVotePage;
-        window.closeAlert = closeAlert;
 
 // ==========================================
     // [1] 초기화 및 라우팅
@@ -562,7 +495,7 @@ Change: 2026-02-08 - Top nav membermanage 링크를 상대경로로 수정(서�
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error || !session) {
             showAlert("로그인이 필요합니다.\n메인 관리 페이지로 이동합니다.");
-            window.location.href = '../membermanage.html';
+            window.location.href = '/membermanage.html';
             return;
         }
 
@@ -985,10 +918,6 @@ function renderCandidates(filterDistId) {
         // 나이 계산 (함수 존재 여부 체크)
         const ageText = typeof getKoreanAge === 'function' ? getKoreanAge(c.birth_date) : '';
 
-        // 대표자 정보 (단체인 경우)
-        const repInfo = c.representative_name ? 
-            `<div style="font-size:0.8rem; color:#64748b; margin-top:2px;">대표: ${escapeHtml(c.representative_name)}</div>` : '';
-
         return `
             <div class="cand-card" onclick="openCandidateDetail('${c.id}')">
                 <div class="cand-photo-wrapper">
@@ -1004,7 +933,6 @@ function renderCandidates(filterDistId) {
                         <span class="cand-dist-badge">${safeDistName}</span>
                     </div>
                     <h3 class="cand-name">${safeName} <span class="cand-age">(${ageText})</span></h3>
-                    ${repInfo}
                     <div class="cand-cta">👉 상세 정보 보기</div>
                 </div>
             </div>

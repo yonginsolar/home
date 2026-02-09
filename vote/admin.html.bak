@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.11
-Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스택 순서 고정.
+Version: v1.0.5
+Change: 2026-02-05 - Escape admin log/action error rendering.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.11 | admin.html');</script>
+    <script>console.log('[Version] v1.0.5 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -64,41 +64,6 @@ Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스�
             color: var(--text-dark); 
             margin: 0; 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            padding-top: 50px; /* 상단 네비게이션 공간 */
-        }
-
-        /* 상단 네비게이션 버튼 */
-        .top-nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            background: white;
-            border-bottom: 1px solid var(--border-color);
-            padding: 10px 16px;
-            display: flex;
-            gap: 10px;
-            z-index: 1000;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        .btn-nav {
-            padding: 8px 16px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: white;
-            color: var(--text-dark);
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .btn-nav:hover {
-            background: var(--admin-bg);
-            border-color: var(--primary-blue);
         }
         
         /* 헤더 스타일 */
@@ -251,10 +216,6 @@ Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스�
 </head>
 <body>
 
-<div class="top-nav">
-    <button class="btn-nav" onclick="history.back()">← 뒤로</button>
-    <button class="btn-nav" onclick="location.href='../membermanage.html'">🏠 조합원 관리</button>
-</div>
 
 <header>
     <div class="header-left">
@@ -324,7 +285,7 @@ Change: 2026-02-08 - 모달 관찰자 제거 + 공통 open/close 래퍼로 스�
                 
                 
                 <table class="cand-table">
-                    <thead><tr><th>선거구</th><th>이름</th><th>대표자</th><th>상태</th><th>기호</th></tr></thead>
+                    <thead><tr><th>선거구</th><th>이름</th><th>상태</th><th>기호</th></tr></thead>
                     <tbody id="candidate-list-body"></tbody>
                 </table>
                <div style="margin-top: 1.5rem; display: flex; gap: 10px;">
@@ -618,88 +579,12 @@ function escapeJsString(value) {
     // -----------------------------------------------------------
     // [1] 모달 & 유틸리티 (기존 유지)
     // -----------------------------------------------------------
-    const MODAL_BASE_Z_INDEX = 2000;
-    const MODAL_Z_STEP = 20;
-    const MODAL_DIM_OPACITY = '0.55';
-    const MODAL_DIM_FILTER = 'grayscale(20%)';
-
-    let modalStack = [];
-    let isSyncingModalLayers = false;
-
-    const allModalOverlays = () => Array.from(document.querySelectorAll('.modal-overlay'));
-
-    const visibleModalOverlays = () => {
-        return allModalOverlays().filter((modalEl) => {
-            return window.getComputedStyle(modalEl).display !== 'none';
-        });
-    };
-
-    const syncModalStack = (preferredTopModal = null) => {
-        if (isSyncingModalLayers) return;
-
-        isSyncingModalLayers = true;
-        try {
-            const allModals = allModalOverlays();
-            const visibleModals = visibleModalOverlays();
-
-            modalStack = modalStack.filter((modalEl) => visibleModals.includes(modalEl));
-            visibleModals.forEach((modalEl) => {
-                if (!modalStack.includes(modalEl)) modalStack.push(modalEl);
-            });
-
-            if (preferredTopModal && visibleModals.includes(preferredTopModal)) {
-                modalStack = modalStack.filter((modalEl) => modalEl !== preferredTopModal);
-                modalStack.push(preferredTopModal);
-            }
-
-            allModals.forEach((modalEl) => {
-                const modalContent = modalEl.querySelector('.modal-content');
-                const stackIndex = modalStack.indexOf(modalEl);
-
-                if (stackIndex === -1) {
-                    modalEl.style.zIndex = '';
-                    modalEl.style.pointerEvents = '';
-                    if (modalContent) {
-                        modalContent.style.opacity = '';
-                        modalContent.style.filter = '';
-                    }
-                    return;
-                }
-
-                const isTop = stackIndex === modalStack.length - 1;
-                modalEl.style.zIndex = String(MODAL_BASE_Z_INDEX + stackIndex * MODAL_Z_STEP);
-                modalEl.style.pointerEvents = isTop ? 'auto' : 'none';
-
-                if (modalContent) {
-                    modalContent.style.opacity = isTop ? '' : MODAL_DIM_OPACITY;
-                    modalContent.style.filter = isTop ? '' : MODAL_DIM_FILTER;
-                }
-            });
-        } finally {
-            isSyncingModalLayers = false;
-        }
-    };
-
-    const openModalOverlay = (modalEl) => {
-        if (!modalEl) return;
-        modalEl.style.display = 'flex';
-        syncModalStack(modalEl);
-    };
-
-    const closeModalOverlay = (modalEl) => {
-        if (!modalEl) return;
-        modalEl.style.display = 'none';
-        modalStack = modalStack.filter((item) => item !== modalEl);
-        syncModalStack();
-    };
-
     window.showModal = (title, contentHtml, onConfirm = null, showCancel = true) => {
         const modal = document.getElementById('common-modal');
-
         document.getElementById('modal-title').innerText = title;
         document.getElementById('modal-body').innerHTML = contentHtml;
         const actionDiv = document.getElementById('modal-actions');
-        actionDiv.innerHTML = '';
+        actionDiv.innerHTML = ''; 
 
         if (showCancel) {
             const closeBtn = document.createElement('button');
@@ -716,8 +601,7 @@ function escapeJsString(value) {
             confirmBtn.onclick = () => { onConfirm(); if(showCancel) window.closeModal(); };
             actionDiv.appendChild(confirmBtn);
         }
-
-        openModalOverlay(modal);
+        modal.style.display = 'flex';
     };
 
     window.showAlert = (message, title = '알림') => {
@@ -725,29 +609,7 @@ function escapeJsString(value) {
         window.showModal(title, `<div style="line-height:1.6;">${safeMessage}</div>`, null, true);
     };
 
-    window.showConfirm = (message, title = '확인') => {
-        return new Promise((resolve) => {
-            const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
-            window.showModal(title, `<div style="line-height:1.6;">${safeMessage}</div>`, () => {
-                resolve(true);
-            }, true);
-
-            const modal = document.getElementById('common-modal');
-            const cancelBtn = modal.querySelector('.btn-outline');
-            if (cancelBtn) {
-                cancelBtn.onclick = () => {
-                    window.closeModal();
-                    resolve(false);
-                };
-            }
-        });
-    };
-
-    window.closeModal = () => {
-        closeModalOverlay(document.getElementById('common-modal'));
-    };
-
-    syncModalStack();
+    window.closeModal = () => { document.getElementById('common-modal').style.display = 'none'; };
 
 // [수정] 초기화 및 3단 권한 검증 (Gatekeeper)
     async function init() {
@@ -1251,7 +1113,7 @@ window.loadVoterStats = async () => {
     }
 };
     window.closeAddVoterModal = () => {
-        closeModalOverlay(document.getElementById('add-voter-modal'));
+        document.getElementById('add-voter-modal').style.display = 'none';
     };
 
 // [수정됨] 선거구별 유권자 목록 보기 (미투표 필터 추가)
@@ -1392,7 +1254,7 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
     const btnDelete = document.getElementById('btn-delete-voter');   // 삭제 버튼
     
     body.innerHTML = '정보를 불러오는 중...';
-    openModalOverlay(modal);
+    modal.style.display = 'flex';
 
     // 초기화: 버튼과 셀렉트 박스 일단 활성화
     distSelect.disabled = false;
@@ -1477,8 +1339,8 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
 };
 
     window.closeVoterDetailModal = () => {
-        closeModalOverlay(document.getElementById('voter-detail-modal'));
-        targetVoterState = { memberNo: null, currentDistrictId: null };
+        document.getElementById('voter-detail-modal').style.display = 'none';
+        targetVoterMemberId = null;
     };
 
 // [수정됨] 선거구 변경 (Update Conflict 해결 및 이메일 로깅)
@@ -1493,7 +1355,7 @@ async function updateVoterDistrict() {
         return;
     }
 
-    if (!await showConfirm('선거구를 변경하시겠습니까?')) return;
+    if (!confirm('선거구를 변경하시겠습니까?')) return;
 
     try {
         // [안전장치] 변경 전, 투표 여부를 다시 확인 (Backend Guard)
@@ -1530,7 +1392,7 @@ async function updateVoterDistrict() {
 
         showAlert('변경되었습니다.');
         
-        closeModalOverlay(document.getElementById('voter-detail-modal'));
+        document.getElementById('voter-detail-modal').style.display = 'none';
         window.closeModal(); // 리스트 모달 닫기
         loadVoterStats(); // 전체 현황 갱신
         
@@ -1548,7 +1410,7 @@ async function updateVoterDistrict() {
         const { memberNo } = targetVoterState;
         if (!memberNo) return;
 
-        if (!await showConfirm('정말 이 유권자를 명부에서 제외하시겠습니까?\n(지역구 및 비례대표 투표권이 모두 삭제됩니다.)')) return;
+        if (!confirm('정말 이 유권자를 명부에서 제외하시겠습니까?\n(지역구 및 비례대표 투표권이 모두 삭제됩니다.)')) return;
 
         try {
             // 해당 선거에서 이 사람의 모든 표(지역+비례)를 삭제
@@ -1562,7 +1424,7 @@ async function updateVoterDistrict() {
 
             showAlert('삭제되었습니다.');
             
-            closeModalOverlay(document.getElementById('voter-detail-modal'));
+            document.getElementById('voter-detail-modal').style.display = 'none';
             window.closeModal();
             loadVoterStats();
 
@@ -1595,7 +1457,7 @@ window.openAddVoterModal = () => {
             distSelect.appendChild(opt);
         });
 
-        openModalOverlay(modal);
+        modal.style.display = 'flex';
     };
 
 window.searchMembers = async () => {
@@ -1707,7 +1569,7 @@ window.searchMembers = async () => {
             ? `[${memberName}] 님을 선택한 선거구로 추가하시겠습니까?\n(공통 선거구 '${commonDistrict.name}'도 자동으로 추가됩니다)`
             : `[${memberName}] 님을 추가하시겠습니까?`;
 
-        if (!await showConfirm(confirmMsg)) return;
+        if (!confirm(confirmMsg)) return;
 
         try {
             const rowsToInsert = [];
@@ -1790,14 +1652,6 @@ async function loadCandidates() {
             if(c.status === 'APPROVED') statusBadge = `<span class="status-badge" style="background:var(--success-green)">승인됨</span>`;
             if(c.status === 'REJECTED') statusBadge = `<span class="status-badge" style="background:var(--danger-red)">반려됨</span>`;
 
-            // 대표자 정보 (단체인 경우)
-            let repInfo = '-';
-            if (c.representative_name) {
-                const safeRepName = escapeHtml(c.representative_name);
-                const safeRepPhone = c.representative_phone ? escapeHtml(c.representative_phone) : '';
-                repInfo = `${safeRepName}${safeRepPhone ? `<br><span style="font-size:0.85em;color:#6b7280;">${safeRepPhone}</span>` : ''}`;
-            }
-
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${safeDistrict}</td>
@@ -1807,7 +1661,6 @@ async function loadCandidates() {
                        ${safeName}
                     </a>
                 </td>
-                <td>${repInfo}</td>
                 <td>${statusBadge}</td>
                 <td>${c.status === 'APPROVED' ? `<input type="text" class="input-symbol" data-id="${c.id}" value="${safeSymbol}" style="width:50px; text-align:center;">` : '-'}</td>
             `;
@@ -1825,7 +1678,7 @@ async function loadCandidates() {
         const actionArea = document.getElementById('cand-action-area');
         
         body.innerHTML = '<div style="text-align:center; padding:2rem;">데이터를 불러오는 중...</div>';
-        openModalOverlay(modal);
+        modal.style.display = 'flex';
 
         try {
             // 1. 후보자 정보 조회
@@ -1950,12 +1803,12 @@ async function loadCandidates() {
     // End of openCandidateDetail
 
     window.closeCandidateDetail = () => {
-        closeModalOverlay(document.getElementById('candidate-detail-modal'));
+        document.getElementById('candidate-detail-modal').style.display = 'none';
     };
 // [신규] 기호 랜덤 추첨 및 화면 반영 함수 (DB 저장 안함, 프리뷰 용도)
 window.assignRandomSymbols = async () => {
     // 1. 사전 경고
-    if (!await showConfirm("비례대표(찬/반)를 제외한 모든 지역구 후보의 기호를\n무작위로 추첨하여 화면에 표시하시겠습니까?\n\n(주의: 기존에 입력된 기호가 덮어씌워집니다. 저장은 되지 않습니다.)")) {
+    if (!confirm("비례대표(찬/반)를 제외한 모든 지역구 후보의 기호를\n무작위로 추첨하여 화면에 표시하시겠습니까?\n\n(주의: 기존에 입력된 기호가 덮어씌워집니다. 저장은 되지 않습니다.)")) {
         return;
     }
 
@@ -2021,7 +1874,7 @@ window.assignRandomSymbols = async () => {
     
     // [신규] 승인 처리 로직 (직접 DB 업데이트)
     window.confirmApprove = async (id, name) => {
-        if(!await showConfirm(`[${name}] 후보를 정식 후보로 승인하시겠습니까?`)) return;
+        if(!confirm(`[${name}] 후보를 정식 후보로 승인하시겠습니까?`)) return;
 
         try {
             const { error } = await supabase
@@ -2055,11 +1908,11 @@ window.assignRandomSymbols = async () => {
         targetRejectId = id;
         targetRejectName = name;
         document.getElementById('reject-reason-input').value = ''; // 초기화
-        openModalOverlay(document.getElementById('reject-reason-modal'));
+        document.getElementById('reject-reason-modal').style.display = 'flex';
     };
 
     window.closeRejectModal = () => {
-        closeModalOverlay(document.getElementById('reject-reason-modal'));
+        document.getElementById('reject-reason-modal').style.display = 'none';
         targetRejectId = null;
     };
 
@@ -2072,7 +1925,7 @@ window.assignRandomSymbols = async () => {
             return;
         }
         
-        if(!await showConfirm(`[${targetRejectName}] 후보를 반려 처리하시겠습니까?`)) return;
+        if(!confirm(`[${targetRejectName}] 후보를 반려 처리하시겠습니까?`)) return;
 
         try {
             const { error } = await supabase
@@ -2100,7 +1953,7 @@ window.assignRandomSymbols = async () => {
     };
 
 window.reviewCand = async (id, decision, name) => {
-        if(await showConfirm(`${name} -> ${decision} 처리하시겠습니까?`)){
+        if(confirm(`${name} -> ${decision} 처리하시겠습니까?`)){
             await service.reviewCandidate(id, decision);
             
             // [수정] 로그에 작업자 이메일 추가
@@ -2178,7 +2031,7 @@ window.finalizeNomination = async () => {
     });
 }; // End of finalizeNomination
 // [수정] 액션 확인 및 실행 (시간 체크 기능 포함 + 이메일 로깅)
-    window.confirmAction = async (nextStatus, msg) => {
+    window.confirmAction = (nextStatus, msg) => {
         // 1. 투표 시작(OPEN) 시도 시 시간 체크 로직
         if (nextStatus === 'OPEN') {
             // 시작 시간이 설정되어 있는지 확인
@@ -2196,7 +2049,7 @@ window.finalizeNomination = async () => {
                 const diffMin = Math.ceil((startAt - now) / (1000 * 60));
                 
                 // 경고 및 확인 (강제 진행 여부 묻기)
-                const userConfirmed = await showConfirm(
+                const userConfirmed = confirm(
                     `⚠️ 주의: 아직 투표 시작 시간이 아닙니다.\n` +
                     `설정된 시작 시간: ${formatVoteAdminKstDateTime(startAt)}\n` +
                     `약 ${diffMin}분 남았습니다.\n\n` +
@@ -2483,7 +2336,7 @@ window.finalizeNomination = async () => {
         }
     };
     window.closeAddCandidateModal = () => {
-        closeModalOverlay(document.getElementById('add-candidate-modal'));
+        document.getElementById('add-candidate-modal').style.display = 'none';
     };
 
 
@@ -2541,7 +2394,7 @@ window.openAddCandidateModal = () => {
         }
     }
 
-    openModalOverlay(document.getElementById('add-candidate-modal'));
+    document.getElementById('add-candidate-modal').style.display = 'flex';
 }; // End of openAddCandidateModal
 
 // [수정] 이미 등록된 후보는 검색 결과에서 제외하는 로직 추가

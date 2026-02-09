@@ -98,6 +98,25 @@ let patchAlertModal;
 let patchConfirmModal;
 let patchConfirmCallback = null;
 
+let patchNoteLastFocus = null;
+let patchNoteFocusBound = false;
+
+function ensurePatchNoteFocusGuard(modalEl) {
+    if (patchNoteFocusBound || !modalEl) return;
+    patchNoteFocusBound = true;
+    modalEl.addEventListener('hide.bs.modal', () => {
+        const active = document.activeElement;
+        if (active && modalEl.contains(active)) active.blur();
+    });
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        if (patchNoteLastFocus && typeof patchNoteLastFocus.focus === 'function') {
+            patchNoteLastFocus.focus();
+        }
+        patchNoteLastFocus = null;
+    });
+}
+
+
 function patchShowAlert(message) {
     if (typeof showAlert === 'function') {
         showAlert(message);
@@ -155,6 +174,8 @@ async function loadCurrentVersion() {
 async function openPatchModal() {
     const modalEl = document.getElementById('patchNoteModal');
     const modal = new bootstrap.Modal(modalEl);
+    patchNoteLastFocus = document.activeElement;
+    ensurePatchNoteFocusGuard(modalEl);
     
     // 관리자 체크 (localStorage 확인)
     checkAdminPermission();

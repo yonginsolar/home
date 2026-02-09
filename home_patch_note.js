@@ -1,6 +1,6 @@
 /*
-Version: v1.0.4
-Change: 2026-02-05 - Avoid global KST helper name collision.
+Version: v1.0.5
+Change: 2026-02-08 - Added Kakao Link button to member page.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -163,6 +163,8 @@ async function openPatchModal() {
         return;
     }
     const modal = new bootstrap.Modal(modalEl);
+    patchNoteLastFocus = document.activeElement;
+    ensurePatchNoteFocusGuard(modalEl);
     
     // 관리자 체크 (작성 버튼 표시 여부)
     checkAdminPermission();

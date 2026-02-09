@@ -102,6 +102,43 @@ Change: Stop URL token handoff and enforce redirect allowlist.
                 }
 
                 // 성공 시
+                const params = new URLSearchParams(window.location.search);
+                const isLinking = params.get('linking') === 'true';
+                const currentUid = params.get('current_uid');
+
+                if (isLinking && currentUid) {
+                    document.getElementById('message').innerText = '카카오 계정 연결 처리 중...';
+
+                    const kakaoId = data.session.user.identities?.find(id => id.provider === 'kakao')?.id;
+                    
+                    if (kakaoId) {
+                        // [RPC 호출] 기존 계정에 카카오 ID 연결
+                        const { error: rpcError } = await _supabase.rpc('rpc_link_kakao', {
+                            p_member_uid: currentUid,
+                            p_kakao_id: kakaoId
+                        });
+
+                        if (rpcError) {
+                            console.error("카카오 연동 RPC 오류:", rpcError);
+                            document.getElementById('message').innerText = '카카오 연결에 실패했습니다. (DB 오류)';
+                            // 실패 시 membermanage.html로 돌려보냄
+                            setTimeout(() => window.location.replace('/membermanage.html'), 3000);
+                            return;
+                        }
+
+                        document.getElementById('message').innerText = '카카오 계정이 성공적으로 연결되었습니다!';
+                        // 연동 성공 시 membermanage.html로 강제 이동
+                        setTimeout(() => window.location.replace('/membermanage.html'), 1500);
+                        return;
+
+                    } else {
+                        document.getElementById('message').innerText = '카카오 인증 정보 추출 실패. 연동 취소.';
+                        setTimeout(() => window.location.replace('/membermanage.html'), 3000);
+                        return;
+                    }
+                }
+
+                // [원래 로직] 일반 로그인 성공 처리
                 await syncPhone(data.session.user);
                 redirectWithSession(data.session);
 
