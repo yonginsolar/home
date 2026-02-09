@@ -1,6 +1,6 @@
 /*
-Version: v1.0.17
-Change: 2026-02-09 - Include minute content in admin list for preview/template features.
+Version: v1.0.22
+Change: 2026-02-09 - Resolve member from live auth session metadata instead of localStorage token key.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -11,20 +11,100 @@ async function getSession() {
 
 async function getMemberByEmail(email) {
     if (!email) return null;
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('coop_members')
-        .select('id, role, member_id, name')
+        .select('id, role, member_id, name, email')
         .eq('email', email)
         .maybeSingle();
+    if (error) return null;
     return data || null;
 }
 
+async function getMemberByAuthId(uid) {
+    if (!uid) return null;
+    const { data, error } = await supabase
+        .from('coop_members')
+        .select('id, role, member_id, name, email')
+        .eq('id', uid)
+        .maybeSingle();
+    if (error) return null;
+    return data || null;
+}
+
+async function getMemberByProfileId(profileId) {
+    if (!profileId) return null;
+    const { data, error } = await supabase
+        .from('coop_members')
+        .select('id, role, member_id, name, email')
+        .eq('id', profileId)
+        .maybeSingle();
+    if (error) return null;
+    return data || null;
+}
+
+async function getMemberByMemberId(memberId) {
+    if (!memberId) return null;
+    const { data, error } = await supabase
+        .from('coop_members')
+        .select('id, role, member_id, name, email')
+        .eq('member_id', memberId)
+        .maybeSingle();
+    if (error) return null;
+    return data || null;
+}
+
+async function getMemberByKakaoId(kakaoId) {
+    if (!kakaoId) return null;
+    const { data, error } = await supabase
+        .from('coop_members')
+        .select('id, role, member_id, name, email')
+        .eq('kakao_id', kakaoId)
+        .maybeSingle();
+    if (error) return null;
+    return data || null;
+}
+
+async function resolveMember(uid, sessionOverride = null) {
+    const session = sessionOverride || await getSession();
+    const user = session?.user || null;
+    const resolvedUid = uid || user?.id || null;
+
+    // 1) membermanage에서 선택한 활성 프로필(uuid)
+    let activeProfileId = null;
+    try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+            activeProfileId = window.sessionStorage.getItem('lastActiveProfile');
+        }
+    } catch (e) { void 0; }
+    const byProfile = await getMemberByProfileId(activeProfileId);
+    if (byProfile) return byProfile;
+
+    // 2) auth 세션 메타데이터의 member_id(text)
+    const memberIdMeta = user?.user_metadata?.member_id || user?.user_metadata?.memberId || null;
+    const byMemberId = await getMemberByMemberId(memberIdMeta);
+    if (byMemberId) return byMemberId;
+
+    // 3) 카카오 identity id 매칭
+    const kakaoId = user?.identities?.find(i => i.provider === 'kakao')?.id || user?.user_metadata?.kakao_id || null;
+    const byKakao = await getMemberByKakaoId(kakaoId);
+    if (byKakao) return byKakao;
+
+    // 4) uid 매칭 (있으면 사용)
+    const byUid = await getMemberByAuthId(resolvedUid);
+    if (byUid) return byUid;
+
+    // 5) 이메일 fallback은 사용하지 않음 (중복 이메일 계정 오매칭 방지)
+    return null;
+}
+
 async function isAdmin(uid, email) {
-    const member = await getMemberByEmail(email);
+    const session = await getSession();
+    const resolvedUid = uid || session?.user?.id || null;
+    const member = await resolveMember(resolvedUid, session);
     const { data: adminRow } = await supabase
         .from('coop_admins')
         .select('id')
-        .eq('id', uid)
+        .eq('id', resolvedUid)
         .maybeSingle();
     return (member?.role === 'admin') || !!adminRow;
 }
@@ -41,8 +121,8 @@ async function getOfficialByMemberId(memberId) {
 }
 
 async function getMyOfficial(session) {
-    if (!session?.user?.email) return { member: null, official: null };
-    const member = await getMemberByEmail(session.user.email);
+    if (!session?.user) return { member: null, official: null };
+    const member = await resolveMember(session.user.id, session);
     const official = await getOfficialByMemberId(member?.member_id);
     return { member, official };
 }
@@ -235,6 +315,10 @@ async function updateMinuteStatus(id, status) {
     return await supabase.from('minutes').update({ status }).eq('id', id);
 }
 
+async function updateMinuteSignerIds(id, signerIds) {
+    return await supabase.from('minutes').update({ signer_ids: signerIds }).eq('id', id);
+}
+
 async function togglePublish(id, publish, userId) {
     const payload = publish
         ? { published_at: new Date().toISOString(), published_by: userId }
@@ -266,6 +350,7 @@ async function createSignedUrl(bucket, path, expiresIn = 3600) {
 export const MinutesService = {
     getSession,
     getMemberByEmail,
+    getMemberByAuthId,
     isAdmin,
     getMyOfficial,
     getOfficials,
@@ -298,7 +383,9 @@ export const MinutesService = {
     listPendingSignMinutes,
     createMinute,
     updateMinuteStatus,
+    updateMinuteSignerIds,
     togglePublish,
     deleteMinute,
-    insertSignature
+    insertSignature,
+    createSignedUrl
 };
