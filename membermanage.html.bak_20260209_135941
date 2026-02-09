@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.19
-Change: 2026-02-09 - Added quick-card attention badges for pending vote/sign tasks.
+Version: v1.0.18
+Change: 2026-02-09 - Show both gross/net dividend amounts and tax details in dashboard/history.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.19 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.18 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -240,7 +240,6 @@ flex-direction: column;
 gap: 6px;
 box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 min-height: 132px;
-position: relative;
 }
 .quick-title { font-weight: 700; font-size: 0.95rem; }
 .quick-desc { font-size: 0.8rem; color: #6b7280; }
@@ -250,26 +249,6 @@ position: relative;
 .quick-green { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-color: #a7f3d0; }
 .quick-purple { background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border-color: #ddd6fe; }
 .quick-gray { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-color: #e2e8f0; }
-.quick-card.needs-attention {
-border-color: #ef4444 !important;
-box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14), 0 2px 8px rgba(0,0,0,0.04);
-}
-.quick-attention-badge {
-position: absolute;
-top: 8px;
-right: 8px;
-width: 22px;
-height: 22px;
-border-radius: 999px;
-background: #ef4444;
-color: #fff;
-font-weight: 800;
-font-size: 14px;
-line-height: 22px;
-text-align: center;
-box-shadow: 0 2px 8px rgba(0,0,0,0.22);
-z-index: 2;
-}
 
 /* [배지] 컨테이너 스타일 */
 #badgeContainer > * {
@@ -543,7 +522,6 @@ NO. <span id="infoMemberId">-</span>
 <div class="quick-links-grid mb-4" id="quickLinksRow">
   <div class="quick-col hidden">
     <div id="quickVoteCard" class="quick-card quick-blue">
-      <span id="voteTodoBadge" class="quick-attention-badge hidden">!</span>
       <div class="quick-title"><i class="bi bi-ui-checks-grid me-1"></i>선거/투표</div>
       <div class="quick-desc">선거 관리 및 투표소</div>
       <button onclick="goToVoteSystem()" class="quick-btn btn btn-primary">투표소 입장</button>
@@ -565,7 +543,6 @@ NO. <span id="infoMemberId">-</span>
   </div>
   <div class="quick-col hidden">
     <div id="quickMinutesSignCard" class="quick-card quick-purple">
-      <span id="signTodoBadge" class="quick-attention-badge hidden">!</span>
       <div class="quick-title"><i class="bi bi-pen me-1"></i>전자서명</div>
       <div class="quick-desc">서명 요청 확인</div>
       <button onclick="location.href='minutes/minutes_sign.html'" class="quick-btn btn btn-primary">서명하기</button>
@@ -1691,7 +1668,6 @@ let globalHistoryData = {};
 // [수정] 선거 버튼 노출 여부 결정 함수 (DB 구조 반영)
 async function checkElectionVisibility(member, myRoles) {
 const voteCard = document.getElementById('quickVoteCard');
-const voteBadge = document.getElementById('voteTodoBadge');
 if (!voteCard) return;
 const setQuickCardVisible = (cardEl, visible) => {
     if (!cardEl) return;
@@ -1711,7 +1687,6 @@ const isCommittee = myRoles && myRoles.includes('election_comm');
 if (isAdmin || isCommittee) {
 void 0;
 setQuickCardVisible(voteCard, true);
-setQuickCardTodoState(voteCard, voteBadge, false);
 return;
 }
 
@@ -1728,7 +1703,6 @@ const { data: elections, error } = await _supabase
 
 if (error || !elections || elections.length === 0) {
 setQuickCardVisible(voteCard, false); // 조건 맞는 선거 없음
-setQuickCardTodoState(voteCard, voteBadge, false);
 return;
 }
 
@@ -1757,11 +1731,8 @@ break; // 하나라도 만족하면 즉시 노출
 // 최종 결정
 if (showButton) {
 setQuickCardVisible(voteCard, true);
-const hasPendingVote = await hasPendingVoteTasks(member && member.id ? member.id : null);
-setQuickCardTodoState(voteCard, voteBadge, hasPendingVote);
 } else {
 setQuickCardVisible(voteCard, false);
-setQuickCardTodoState(voteCard, voteBadge, false);
 }
 }
 
@@ -1916,65 +1887,6 @@ async function hasPendingMinuteSigns(officialIds) {
     }
 }
 
-function setQuickCardTodoState(cardEl, badgeEl, isOn) {
-    const on = !!isOn;
-    if (cardEl) cardEl.classList.toggle('needs-attention', on);
-    if (badgeEl) badgeEl.classList.toggle('hidden', !on);
-}
-
-async function hasPendingVoteTasks(memberUuid) {
-    try {
-        if (!memberUuid) return false;
-
-        const { data: openElections, error: openErr } = await _supabase
-            .from('elections')
-            .select('id')
-            .eq('status', 'OPEN');
-
-        if (openErr || !openElections || openElections.length === 0) return false;
-
-        const openElectionIds = openElections.map(row => row.id).filter(Boolean);
-        if (openElectionIds.length === 0) return false;
-
-        const { data: assigned, error: assErr } = await _supabase
-            .from('election_voters')
-            .select('election_id, district_id')
-            .eq('member_uuid', memberUuid)
-            .in('election_id', openElectionIds);
-
-        if (assErr || !assigned || assigned.length === 0) return false;
-
-        const pendingKeys = new Set();
-        assigned.forEach(row => {
-            const electionId = row.election_id;
-            const districtId = row.district_id;
-            if (electionId && districtId) pendingKeys.add(`${electionId}::${districtId}`);
-        });
-        if (pendingKeys.size === 0) return false;
-
-        const districtIds = Array.from(new Set(assigned.map(row => row.district_id).filter(Boolean)));
-        if (districtIds.length === 0) return false;
-
-        const { data: voted, error: votedErr } = await _supabase
-            .from('vote_logs')
-            .select('election_id, district_id')
-            .eq('member_uuid', memberUuid)
-            .in('election_id', openElectionIds)
-            .in('district_id', districtIds);
-
-        if (votedErr) return false;
-
-        (voted || []).forEach(row => {
-            if (!row.election_id || !row.district_id) return;
-            pendingKeys.delete(`${row.election_id}::${row.district_id}`);
-        });
-
-        return pendingKeys.size > 0;
-    } catch (e) {
-        return false;
-    }
-}
-
 // [신규] 퀵 링크 카드 노출 제어
 function renderQuickLinks(member, myRoles, isOfficial, officialIds) {
 const isAdmin = (member && member.role === 'admin');
@@ -1984,7 +1896,6 @@ const solarCard = document.getElementById('quickSolarCard');
 const minutesAdminCard = document.getElementById('quickMinutesAdminCard');
 const minutesSignCard = document.getElementById('quickMinutesSignCard');
 const minutesViewCard = document.getElementById('quickMinutesViewCard');
-const signBadge = document.getElementById('signTodoBadge');
 
 const setQuickCardVisible = (cardEl, visible) => {
     if (!cardEl) return;
@@ -1993,33 +1904,24 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
 };
 
-setQuickCardTodoState(minutesSignCard, signBadge, false);
-
 // 회의록 카드: 관리자=전체, 임원=서명만, 조합원=열람만
 if (isAdmin) {
 setQuickCardVisible(minutesAdminCard, true);
 setQuickCardVisible(minutesSignCard, true);
 setQuickCardVisible(minutesViewCard, true);
-if (minutesSignCard && officialIds && officialIds.length > 0) {
-    hasPendingMinuteSigns(officialIds).then(hasPending => {
-        setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
-    });
-}
 } else if (isOfficial) {
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesViewCard, false);
 setQuickCardVisible(minutesSignCard, false);
 if (minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
-        setQuickCardVisible(minutesSignCard, hasPending);
-        setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
+        if (hasPending) setQuickCardVisible(minutesSignCard, true);
     });
 }
 } else {
 setQuickCardVisible(minutesViewCard, true);
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesSignCard, false);
-setQuickCardTodoState(minutesSignCard, signBadge, false);
 }
 
 // 선거/태양광 노출은 기존 로직에서 제어 (카드 DOM만 여기서 초기화)

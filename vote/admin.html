@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.20
-Change: 2026-02-09 - Add-voter modal now supports explicit confirm flow plus district-management tab with safe delete guard.
+Version: v1.0.21
+Change: 2026-02-09 - Voter status line-break and district-based candidate summary/filter added.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.20 | admin.html');</script>
+    <script>console.log('[Version] v1.0.21 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -168,6 +168,11 @@ Change: 2026-02-09 - Add-voter modal now supports explicit confirm flow plus dis
             padding: 10px; border-bottom: 1px solid #eee; cursor: pointer;
         }
         .voter-group-item:hover { background-color: #f3f4f6; }
+        .voter-group-main { display: flex; flex-direction: column; min-width: 0; }
+        .voter-group-name { font-weight: 600; color: var(--text-dark); line-height: 1.25; word-break: keep-all; }
+        .voter-group-sub { font-size: 0.75rem; margin-top: 4px; line-height: 1.2; }
+        .voter-group-sub.is-alert { color: #dc2626; font-weight: 700; }
+        .voter-group-sub.is-ok { color: #16a34a; font-weight: 600; }
         .voter-count-badge { background: #e5e7eb; padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; font-weight: bold; }
 
         /* 테이블 */
@@ -175,6 +180,19 @@ Change: 2026-02-09 - Add-voter modal now supports explicit confirm flow plus dis
         .cand-table th { background: #f3f4f6; color: var(--text-dark); font-weight: 600; text-align: left; padding: 1rem; border-bottom: 2px solid var(--border-color); }
         .cand-table td { padding: 1rem; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
         .input-symbol { width: 60px; text-align: center; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-weight: bold; font-size: 1rem; }
+        .candidate-district-summary { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+        .candidate-district-item {
+            display: flex; justify-content: space-between; align-items: center; gap: 10px;
+            background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;
+        }
+        .candidate-district-name { font-weight: 700; color: #1f2937; font-size: 0.9rem; }
+        .candidate-district-meta { font-size: 0.82rem; color: #475569; white-space: nowrap; font-weight: 600; }
+        .candidate-filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .candidate-filter-btn {
+            border: 1px solid #d1d5db; border-radius: 999px; background: white; color: #374151;
+            padding: 4px 10px; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+        }
+        .candidate-filter-btn.active { background: #1f2937; border-color: #1f2937; color: white; }
         
         /* 버튼 공통 */
         .btn { padding: 0.6rem 1.2rem; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: opacity 0.2s; font-size: 0.95rem; }
@@ -313,6 +331,10 @@ Change: 2026-02-09 - Add-voter modal now supports explicit confirm flow plus dis
                     <div class="stat-item"><div class="stat-value" style="color:var(--success-green)" id="stat-approved">0</div><div class="stat-label">승인</div></div>
                     <div class="stat-item"><div class="stat-value" style="color:var(--danger-red)" id="stat-rejected">0</div><div class="stat-label">반려</div></div>
                 </div>
+                <div id="candidate-district-summary" class="candidate-district-summary">
+                    <div style="font-size:0.85rem; color:#6b7280;">선거구 현황 로딩 중...</div>
+                </div>
+                <div id="candidate-filter-tabs" class="candidate-filter-tabs"></div>
 
 <div style="margin-bottom:1rem; display:flex; gap:10px; justify-content: space-between; align-items: center;">
                     <button onclick="confirmAction('NOMINATION', '후보 등록을 시작하시겠습니까?')" class="btn btn-primary">▶ 후보 등록 시작</button>
@@ -677,6 +699,8 @@ function escapeJsString(value) {
     let currentElectionData = null; 
     let cachedDistricts = {}; 
     let districtList = []; // [신규] 선거구 전체 정보(is_common 포함) 저장용 배열
+    let cachedCandidates = [];
+    let currentCandidateFilter = 'all';
     let currentUserEmail = ''; // [신규] 현재 작업자 이메일 저장용
 
     // -----------------------------------------------------------
@@ -1301,15 +1325,16 @@ window.loadVoterStats = async () => {
             // 클릭 시 리스트 모달 열기
             div.onclick = () => showVoterDetail(dName, stat.list);
             
-            // 미투표자가 있을 때만 빨간색 강조 텍스트 표시
-            const notVotedText = stat.notVoted > 0 
-                ? `<span style="color:#dc2626; font-size:0.75rem; margin-left:5px;">(미투표 ${stat.notVoted})</span>` 
-                : `<span style="color:#16a34a; font-size:0.75rem; margin-left:5px;">(전원참여)</span>`;
+            // 미투표는 별도 줄에 표시
+            const hasNotVoted = stat.notVoted > 0;
+            const safeDistrictName = escapeHtml(dName);
+            const subText = hasNotVoted ? `미투표 ${stat.notVoted}명` : '전원참여';
+            const subClass = hasNotVoted ? 'is-alert' : 'is-ok';
 
             div.innerHTML = `
-                <div>
-                    <span style="font-weight:600;">${dName}</span>
-                    ${notVotedText}
+                <div class="voter-group-main">
+                    <span class="voter-group-name">${safeDistrictName}</span>
+                    <span class="voter-group-sub ${subClass}">${subText}</span>
                 </div>
                 <span class="voter-count-badge">${stat.total}명</span>
             `;
@@ -2255,11 +2280,12 @@ window.searchMembers = async () => {
     // [6] 기타 기존 함수 (후보, 심사, 기호 등 - 유지)
     // -----------------------------------------------------------
 async function loadCandidates() {
-        const list = await service.getCandidates(currentElectionId);
-        
+        cachedCandidates = await service.getCandidates(currentElectionId);
+        if (!Array.isArray(cachedCandidates)) cachedCandidates = [];
+
         // 통계 갱신
-        const stats = { total: list.length, pending: 0, approved: 0, rejected: 0 };
-        list.forEach(c => {
+        const stats = { total: cachedCandidates.length, pending: 0, approved: 0, rejected: 0 };
+        cachedCandidates.forEach(c => {
              if (c.status === 'PENDING') stats.pending++;
              else if (c.status === 'APPROVED') stats.approved++;
              else if (c.status === 'REJECTED') stats.rejected++;
@@ -2269,26 +2295,120 @@ async function loadCandidates() {
         document.getElementById('stat-approved').innerText = stats.approved;
         document.getElementById('stat-rejected').innerText = stats.rejected;
 
+        renderCandidateSummaryAndFilters();
+        renderCandidateTableByFilter();
+    }
+
+    const normalizeCandidateStatus = (status) => String(status || '').toUpperCase();
+
+    const getCandidateStatusBadgeHtml = (statusRaw) => {
+        const status = normalizeCandidateStatus(statusRaw);
+        if (status === 'PENDING') return `<span class="status-badge" style="background:var(--warning-yellow)">대기중</span>`;
+        if (status === 'APPROVED') return `<span class="status-badge" style="background:var(--success-green)">승인됨</span>`;
+        if (status === 'REJECTED') return `<span class="status-badge" style="background:var(--danger-red)">반려됨</span>`;
+        return `<span class="status-badge" style="background:#999">${escapeHtml(statusRaw || '-')}</span>`;
+    };
+
+    function renderCandidateSummaryAndFilters() {
+        const summaryWrap = document.getElementById('candidate-district-summary');
+        const tabsWrap = document.getElementById('candidate-filter-tabs');
+        if (!summaryWrap || !tabsWrap) return;
+
+        const districtCounters = new Map();
+        cachedCandidates.forEach((candidate) => {
+            const distKey = String(candidate.district_id || '');
+            if (!distKey) return;
+            if (!districtCounters.has(distKey)) districtCounters.set(distKey, { active: 0, total: 0 });
+
+            const counter = districtCounters.get(distKey);
+            counter.total += 1;
+            if (normalizeCandidateStatus(candidate.status) !== 'REJECTED') counter.active += 1;
+        });
+
+        const normalizedDistricts = Array.isArray(districtList) ? districtList : [];
+        const availableFilterSet = new Set(['all']);
+        normalizedDistricts.forEach((district) => {
+            availableFilterSet.add(`dist-${district.id}`);
+        });
+        if (!availableFilterSet.has(currentCandidateFilter)) currentCandidateFilter = 'all';
+
+        if (normalizedDistricts.length === 0) {
+            summaryWrap.innerHTML = '<div style="font-size:0.85rem; color:#6b7280;">선거구 정보가 없습니다.</div>';
+            tabsWrap.innerHTML = '';
+            return;
+        }
+
+        summaryWrap.innerHTML = normalizedDistricts.map((district) => {
+            const distKey = String(district.id || '');
+            const distName = escapeHtml(district.name || '선거구');
+            const distLabel = district.is_common ? `${distName} (비례)` : distName;
+            const quotaValue = Number(district.quota || 0);
+            const quota = Number.isFinite(quotaValue) && quotaValue > 0 ? quotaValue : 1;
+            const counter = districtCounters.get(distKey) || { active: 0, total: 0 };
+
+            return `
+                <div class="candidate-district-item">
+                    <span class="candidate-district-name">${distLabel}</span>
+                    <span class="candidate-district-meta">${quota}명 선출 / ${counter.active}명 등록</span>
+                </div>
+            `;
+        }).join('');
+
+        let tabsHtml = `<button type="button" class="candidate-filter-btn active" data-filter="all" onclick="setCandidateFilter('all')">전체</button>`;
+        normalizedDistricts.forEach((district) => {
+            const filterKey = `dist-${district.id}`;
+            const safeFilterKeyJs = escapeJsString(filterKey);
+            const safeFilterKeyAttr = escapeHtml(filterKey);
+            const safeName = escapeHtml(district.name || '선거구');
+            tabsHtml += `<button type="button" class="candidate-filter-btn" data-filter="${safeFilterKeyAttr}" onclick="setCandidateFilter('${safeFilterKeyJs}')">${safeName}</button>`;
+        });
+        tabsWrap.innerHTML = tabsHtml;
+
+        tabsWrap.querySelectorAll('.candidate-filter-btn').forEach((btn) => {
+            btn.classList.toggle('active', btn.dataset.filter === currentCandidateFilter);
+        });
+    }
+
+    function renderCandidateTableByFilter() {
         const tbody = document.getElementById('candidate-list-body');
+        if (!tbody) return;
+
+        const filtered = currentCandidateFilter === 'all'
+            ? [...cachedCandidates]
+            : cachedCandidates.filter((candidate) => `dist-${candidate.district_id}` === currentCandidateFilter);
+
+        filtered.sort((a, b) => {
+            const da = String(cachedDistricts[a.district_id] || a.districts?.name || '');
+            const db = String(cachedDistricts[b.district_id] || b.districts?.name || '');
+            const distCmp = da.localeCompare(db, 'ko');
+            if (distCmp !== 0) return distCmp;
+
+            const sa = Number(a.symbol || 9999);
+            const sb = Number(b.symbol || 9999);
+            if (sa !== sb) return sa - sb;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+        });
+
         tbody.innerHTML = '';
-        
-        list.forEach(c => {
-            const dName = cachedDistricts[c.district_id] || c.districts?.name || '-';
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#6b7280;">선택한 조건에 해당하는 후보가 없습니다.</td></tr>';
+            return;
+        }
+
+        filtered.forEach((candidate) => {
+            const dName = cachedDistricts[candidate.district_id] || candidate.districts?.name || '-';
             const safeDistrict = escapeHtml(dName);
-            const safeName = escapeHtml(c.name || '');
-            const safeSymbol = escapeHtml(c.symbol || '');
-            
-            // 상태별 뱃지 스타일
-            let statusBadge = `<span class="status-badge" style="background:#999">${c.status}</span>`;
-            if(c.status === 'PENDING') statusBadge = `<span class="status-badge" style="background:var(--warning-yellow)">대기중</span>`;
-            if(c.status === 'APPROVED') statusBadge = `<span class="status-badge" style="background:var(--success-green)">승인됨</span>`;
-            if(c.status === 'REJECTED') statusBadge = `<span class="status-badge" style="background:var(--danger-red)">반려됨</span>`;
+            const safeName = escapeHtml(candidate.name || '');
+            const safeSymbol = escapeHtml(candidate.symbol || '');
+            const safeCandidateIdJs = escapeJsString(candidate.id || '');
+            const safeCandidateIdAttr = escapeHtml(candidate.id || '');
+            const statusBadge = getCandidateStatusBadgeHtml(candidate.status);
 
             // 대표자 정보 (단체인 경우)
             let repInfo = '-';
-            if (c.representative_name) {
-                const safeRepName = escapeHtml(c.representative_name);
-                const safeRepPhone = c.representative_phone ? escapeHtml(c.representative_phone) : '';
+            if (candidate.representative_name) {
+                const safeRepName = escapeHtml(candidate.representative_name);
+                const safeRepPhone = candidate.representative_phone ? escapeHtml(candidate.representative_phone) : '';
                 repInfo = `${safeRepName}${safeRepPhone ? `<br><span style="font-size:0.85em;color:#6b7280;">${safeRepPhone}</span>` : ''}`;
             }
 
@@ -2296,18 +2416,29 @@ async function loadCandidates() {
             tr.innerHTML = `
                 <td>${safeDistrict}</td>
                 <td>
-                    <a href="#" onclick="openCandidateDetail('${c.id}'); return false;" 
+                    <a href="#" onclick="openCandidateDetail('${safeCandidateIdJs}'); return false;" 
                        style="font-weight:bold; color:var(--primary-blue); text-decoration:underline;">
                        ${safeName}
                     </a>
                 </td>
                 <td>${repInfo}</td>
                 <td>${statusBadge}</td>
-                <td>${c.status === 'APPROVED' ? `<input type="text" class="input-symbol" data-id="${c.id}" value="${safeSymbol}" style="width:50px; text-align:center;">` : '-'}</td>
+                <td>${candidate.status === 'APPROVED' ? `<input type="text" class="input-symbol" data-id="${safeCandidateIdAttr}" value="${safeSymbol}" style="width:50px; text-align:center;">` : '-'}</td>
             `;
             tbody.appendChild(tr);
         });
     }
+
+    window.setCandidateFilter = (filterKey = 'all') => {
+        currentCandidateFilter = filterKey || 'all';
+        renderCandidateTableByFilter();
+
+        const tabsWrap = document.getElementById('candidate-filter-tabs');
+        if (!tabsWrap) return;
+        tabsWrap.querySelectorAll('.candidate-filter-btn').forEach((btn) => {
+            btn.classList.toggle('active', btn.dataset.filter === currentCandidateFilter);
+        });
+    };
 
 // [신규] 기본 프로필 이미지 상수 (회색 사람 실루엣) - 복사해서 다른 페이지에서도 쓰세요.
     const DEFAULT_PROFILE_IMG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzk5OTk5OSI+PHBhdGggZD0iTTEyIDEyYzIuMjEgMCA0LTEuNzkgNC00cy0xLjc5LTQtNC00LTQgMS43OS00IDQgMS43OSA0IDQgNHptMCAyYy0yLjY3IDAtOCAxLjM0LTggNHYyaDE2di0yYzAtMi42Ni01LjMzLTQtOC00eiIvPjwvc3ZnPg==";
