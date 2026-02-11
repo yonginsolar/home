@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.26
-Change: 2026-02-11 - First login now shows duplicate-email member candidates and allows direct selection/linking.
+Version: v1.0.25
+Change: 2026-02-11 - Vote quick card now routes by election count (1: direct, 2+: select list).
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.26 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.25 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -1011,11 +1011,6 @@ oninput="autoHyphen(this)">
 <input type="email" id="manualEmail" class="form-control" placeholder="example@email.com">
 </div>
 
-<div id="duplicateEmailHint" class="alert alert-warning small py-2 px-3 mb-2 hidden">
-같은 이메일로 등록된 조합원이 2명 이상입니다. 아래에서 본인을 선택해 바로 연결할 수 있습니다.
-</div>
-<div id="duplicateEmailListArea" class="border rounded p-2 bg-light mb-3 hidden" style="max-height: 180px; overflow-y: auto;"></div>
-
 <div class="d-grid gap-2">
 <button class="btn btn-success fw-bold" onclick="tryManualLink()">내 정보 찾기 & 연결</button>
 <button class="btn btn-light btn-sm text-secondary" onclick="manualMatchFail()">찾을 수 없나요? (문의하기)</button>
@@ -1394,7 +1389,6 @@ showLoading(false);
 if (claimErr || !claimRes.success) {
 void 0;
 document.getElementById('manualMatchModal').style.display = 'flex';
-await loadDuplicateEmailCandidates(user && user.email ? user.email : '');
 return; 
 }
 
@@ -1486,125 +1480,6 @@ document.getElementById('manualEmail').focus();
 }
 }
 
-let duplicateEmailCandidates = [];
-
-function resetDuplicateEmailCandidates() {
-duplicateEmailCandidates = [];
-const hint = document.getElementById('duplicateEmailHint');
-const area = document.getElementById('duplicateEmailListArea');
-if (hint) hint.classList.add('hidden');
-if (area) {
-area.classList.add('hidden');
-area.innerHTML = '';
-}
-}
-
-function normalizeEmailValue(value) {
-return String(value || '').trim().toLowerCase();
-}
-
-function maskPhoneValue(phone) {
-const raw = String(phone || '').replace(/[^0-9]/g, '');
-if (raw.length < 4) return '';
-return `***-${raw.slice(-4)}`;
-}
-
-async function loadDuplicateEmailCandidates(email) {
-resetDuplicateEmailCandidates();
-
-const hint = document.getElementById('duplicateEmailHint');
-const area = document.getElementById('duplicateEmailListArea');
-const targetEmail = normalizeEmailValue(email);
-if (!hint || !area || !targetEmail) return;
-
-try {
-const { data: list, error } = await _supabase.rpc('search_profiles_for_connect', { keyword: email });
-if (error || !Array.isArray(list)) return;
-
-const dedup = [];
-const seen = new Set();
-list.forEach((row) => {
-if (!row || !row.id) return;
-if (seen.has(row.id)) return;
-const rowEmail = normalizeEmailValue(row.email);
-if (!rowEmail || rowEmail !== targetEmail) return;
-seen.add(row.id);
-dedup.push(row);
-});
-
-if (dedup.length < 2) return;
-
-duplicateEmailCandidates = dedup;
-let html = '<ul class="list-group list-group-flush small">';
-duplicateEmailCandidates.forEach((m, idx) => {
-const safeName = escapeHtml(m.name || '이름 미확인');
-const safeType = escapeHtml(m.member_type || '');
-const safeEmail = escapeHtml(m.email || '');
-const safePhone = escapeHtml(maskPhoneValue(m.phone));
-const typeBadge = safeType ? `<span class="badge bg-secondary me-1">${safeType}</span>` : '';
-const phoneLine = safePhone ? `<br><span class="text-muted x-small">전화번호 끝자리: ${safePhone}</span>` : '';
-
-html += `
-<li class="list-group-item d-flex justify-content-between align-items-center p-2">
-  <div>
-    ${typeBadge}<b>${safeName}</b>
-    <br><span class="text-muted x-small">${safeEmail}</span>
-    ${phoneLine}
-  </div>
-  <button class="btn btn-sm btn-outline-primary" onclick="selectDuplicateEmailCandidate(${idx})">선택</button>
-</li>`;
-});
-html += '</ul>';
-area.innerHTML = html;
-hint.classList.remove('hidden');
-area.classList.remove('hidden');
-} catch (e) {
-console.error('loadDuplicateEmailCandidates failed:', e);
-}
-}
-
-async function selectDuplicateEmailCandidate(idx) {
-const picked = duplicateEmailCandidates[idx];
-if (!picked) return;
-const pickedName = String(picked.name || '').trim();
-const pickedEmail = String(picked.email || '').trim();
-if (!pickedName || !pickedEmail) {
-showModal('선택한 조합원 정보가 불완전합니다.\n이름/이메일을 직접 입력해 주세요.');
-return;
-}
-
-document.getElementById('manualName').value = pickedName;
-document.getElementById('manualEmail').value = pickedEmail;
-document.getElementById('typeEmail').checked = true;
-toggleContactInput();
-
-showConfirmModal(`'${pickedName}' 님으로 계정을 연결할까요?`, async () => {
-await executeManualLink(pickedName, pickedEmail);
-});
-}
-
-async function executeManualLink(name, contact) {
-showLoading(true, '조합원 명부 검색 중...');
-
-const { data, error } = await _supabase.rpc('manual_claim_member', {
-p_name: name,
-p_contact: contact
-});
-
-showLoading(false);
-
-if (error) {
-showModal("오류 발생: " + error.message);
-} else if (data.success) {
-document.getElementById('manualMatchModal').style.display = 'none';
-showModal("🎉 반갑습니다! 정보를 찾았습니다.\n계정이 성공적으로 연결되었습니다.");
-document.getElementById('headerLogoutBtn').classList.remove('hidden');
-await loadDashboardData(curAuth.id);
-} else {
-showModal("일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.");
-}
-}
-
 // [수정] 수동 매칭 실행 함수 (Alert 제거 -> showModal 적용)
 async function tryManualLink() {
 const name = document.getElementById('manualName').value.trim();
@@ -1623,14 +1498,44 @@ if (!contact.includes('@')) return showModal("올바른 이메일 형식이 아�
 
 if (!name) return showModal("이름을 입력해주세요.");
 
-await executeManualLink(name, contact);
+// 로딩 시작
+showLoading(true, '조합원 명부 검색 중...');
+
+// 수동 매칭 RPC 호출
+const { data, error } = await _supabase.rpc('manual_claim_member', {
+p_name: name,
+p_contact: contact
+});
+
+showLoading(false);
+
+if (error) {
+showModal("오류 발생: " + error.message);
+} else if (data.success) {
+// [성공] 모달 닫고 -> 환영 메시지 모달 띄움 -> 확인 누르면 대시보드 로드
+document.getElementById('manualMatchModal').style.display = 'none';
+
+// ★ 환영 알럿을 모달로 변경
+// showConfirmModal을 응용해서 '확인' 버튼만 있는 환영창으로 씀
+// (또는 showModal을 쓰고 콜백이 필요하면 커스텀해야 하지만, 
+//  여기서는 showModal 후 바로 로드해도 사용자가 인지함)
+
+showModal("🎉 반갑습니다! 정보를 찾았습니다.\n계정이 성공적으로 연결되었습니다.");
+
+// 연결됐으니 대시보드 로드 (모달 뒤에서 로드됨)
+document.getElementById('headerLogoutBtn').classList.remove('hidden');
+await loadDashboardData(curAuth.id);
+
+} else {
+// [실패]
+showModal("일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.");
+}
 }
 
 // [수정] 수동 매칭 포기 (Alert 제거)
 async function manualMatchFail() {
 await _supabase.auth.signOut();
 document.getElementById('manualMatchModal').style.display = 'none';
-resetDuplicateEmailCandidates();
 showModal("가입 정보를 찾을 수 없습니다.\n사무국으로 문의해 주시기 바랍니다.");
 }
 
@@ -1823,25 +1728,12 @@ const d = new Date(value);
 return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function getEffectiveVoteEndAt(election) {
-if (!election) return null;
-return election.actual_closed_at || election.vote_end_at || election.end_at || null;
-}
-
-function isUncontestedClosedElection(election) {
-if (!election || !election.actual_closed_at) return false;
-const closedAt = toValidDate(election.actual_closed_at);
-const voteStart = toValidDate(election.vote_start_at || election.start_at);
-if (!closedAt || !voteStart) return false;
-return closedAt.getTime() <= voteStart.getTime();
-}
-
 function deriveElectionPhase(election, now = new Date()) {
 const status = String(election?.status || '').toUpperCase();
 const candStart = toValidDate(election?.candidacy_start_at);
 const candEnd = toValidDate(election?.candidacy_end_at);
 const voteStart = toValidDate(election?.vote_start_at || election?.start_at);
-const voteEnd = toValidDate(getEffectiveVoteEndAt(election));
+const voteEnd = toValidDate(election?.vote_end_at || election?.end_at);
 
 if (status === 'PUBLISHED' || status === 'ENDED') return 'PUBLISHED';
 if (status === 'CLOSED') return 'CLOSED';
@@ -1865,7 +1757,7 @@ const scored = elections.map(el => {
 const phase = deriveElectionPhase(el, now);
 const priority = VOTE_PHASE_PRIORITY[phase] || 99;
 const refDate = toValidDate(
-phase === 'NOMINATION' ? (el.candidacy_end_at || el.candidacy_start_at) : (getEffectiveVoteEndAt(el) || el.vote_start_at || el.start_at)
+phase === 'NOMINATION' ? (el.candidacy_end_at || el.candidacy_start_at) : (el.vote_end_at || el.end_at || el.vote_start_at || el.start_at)
 ) || toValidDate(el.created_at) || new Date(0);
 return { ...el, _phase: phase, _priority: priority, _refDate: refDate };
 });
@@ -2142,7 +2034,7 @@ const memberUuid = member && member.id ? member.id : null;
 const targetStatuses = ['NOMINATION', 'READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED', 'ENDED'];
 const { data: elections, error } = await _supabase
 .from('elections')
-.select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, actual_closed_at, start_at, end_at, created_at')
+.select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, start_at, end_at, created_at')
 .in('status', targetStatuses);
 
 if (error || !elections || elections.length === 0) {
@@ -2203,9 +2095,8 @@ const myProgress = await getMyVoteProgress(memberUuid, electionId);
 const metaLines = [];
 
 const voteStart = toValidDate(targetElection.vote_start_at || targetElection.start_at);
-const voteEnd = toValidDate(getEffectiveVoteEndAt(targetElection));
+const voteEnd = toValidDate(targetElection.vote_end_at || targetElection.end_at);
 const candEnd = toValidDate(targetElection.candidacy_end_at);
-const isUncontestedClosed = isUncontestedClosedElection(targetElection);
 
 if (phase === 'NOMINATION') {
 if (candEnd) metaLines.push(`등록 마감: ${formatMemberKstDateTime(candEnd)}`);
@@ -2249,10 +2140,7 @@ metaLines.push(`내 선거구: 무투표 ${myProgress.uncontestedCount || 0}개 
 metaLines.push('내 선거구: 투표 대상 없음');
 }
 }
-if (voteEnd) {
-if (isUncontestedClosed) metaLines.push(`무투표 당선 확정일: ${formatMemberKstDateTime(voteEnd)}`);
-else metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
-}
+if (voteEnd) metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
 const openDesc = hasActionable
 ? '투표가 진행 중입니다.'
 : '내 선거구는 무투표/후보미등록으로 별도 투표가 필요하지 않습니다.';
@@ -2269,14 +2157,11 @@ return;
 }
 
 if (phase === 'CLOSED') {
-if (voteEnd) {
-if (isUncontestedClosed) metaLines.push(`무투표 당선 확정일: ${formatMemberKstDateTime(voteEnd)}`);
-else metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
-}
+if (voteEnd) metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
 setVoteQuickCardContent({
 electionTitle: targetElection.title || '',
-stageText: isUncontestedClosed ? '확인 중' : buildPhaseBadgeText(phase),
-descText: isUncontestedClosed ? '무투표 당선 결과를 선관위에서 확인 중입니다.' : '투표가 마감되어 집계 중입니다.',
+stageText: buildPhaseBadgeText(phase),
+descText: '투표가 마감되어 집계 중입니다.',
 metaLines,
 buttonLabel: '후보자/현황 보기',
 actionUrl: voteActionUrl,

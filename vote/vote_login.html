@@ -330,6 +330,69 @@ Change: 2026-02-11 - Unified uncontested/no-candidate voting behavior across por
         if (Number.isNaN(d.getTime())) return '';
         return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_VOTE_LOGIN });
     };
+    const getEffectiveVoteEndAt = (election) => {
+        if (!election) return null;
+        return election.actual_closed_at || election.vote_end_at || election.end_at || null;
+    };
+    const normalizeDistrictName = (name) => String(name || '').replace(/\s+/g, '');
+    const getDistrictDisplayOrder = (district) => {
+        const n = normalizeDistrictName(district?.name);
+        if (n.includes('기흥구')) return 0;
+        if (n.includes('수지구')) return 1;
+        if (n.includes('처인구')) return 2;
+        if (n.includes('그외지역')) return 3;
+        if (n.includes('이사회추천')) return 4;
+        return 99;
+    };
+    const compareDistrictForDisplay = (a, b) => {
+        const orderDiff = getDistrictDisplayOrder(a) - getDistrictDisplayOrder(b);
+        if (orderDiff !== 0) return orderDiff;
+        return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+    };
+    const parseSymbolOrderValue = (symbol) => {
+        const raw = String(symbol || '').trim();
+        const numMatch = raw.match(/\d+/);
+        if (numMatch) return { rank: 0, num: Number(numMatch[0]), raw };
+        if (!raw) return { rank: 2, num: Number.MAX_SAFE_INTEGER, raw: '' };
+        return { rank: 1, num: Number.MAX_SAFE_INTEGER, raw };
+    };
+    const compareCandidateBySymbol = (a, b) => {
+        const va = parseSymbolOrderValue(a?.symbol);
+        const vb = parseSymbolOrderValue(b?.symbol);
+        if (va.rank !== vb.rank) return va.rank - vb.rank;
+        if (va.num !== vb.num) return va.num - vb.num;
+        if (va.raw !== vb.raw) return va.raw.localeCompare(vb.raw, 'ko');
+        return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+    };
+    const sortCandidatesForDisplay = (candidates, districts) => {
+        const districtMap = new Map((districts || []).map((d) => [String(d.id), d]));
+        return [...(candidates || [])].sort((a, b) => {
+            const da = districtMap.get(String(a?.district_id));
+            const db = districtMap.get(String(b?.district_id));
+            const districtDiff = compareDistrictForDisplay(da, db);
+            if (districtDiff !== 0) return districtDiff;
+            return compareCandidateBySymbol(a, b);
+        });
+    };
+    const isUncontestedClosedElection = (election) => {
+        if (!election || !election.actual_closed_at) return false;
+        const closedAt = new Date(election.actual_closed_at);
+        const voteStart = new Date(election.vote_start_at || election.start_at || '');
+        if (Number.isNaN(closedAt.getTime()) || Number.isNaN(voteStart.getTime())) return false;
+        return closedAt.getTime() <= voteStart.getTime();
+    };
+    const getVotePeriodLabel = (election) => {
+        if (!election) return '-';
+        if (isUncontestedClosedElection(election)) {
+            return '무투표 당선 확정 (투표 절차 없음)';
+        }
+        const start = formatVoteLoginKstDate(election.vote_start_at || election.start_at);
+        const end = formatVoteLoginKstDate(getEffectiveVoteEndAt(election));
+        if (start && end) return `${start} ~ ${end}`;
+        if (start) return `${start} ~`;
+        if (end) return `~ ${end}`;
+        return '-';
+    };
 
     // ==========================================
     // [0] 전역 변수 및 상수 선언 (이 부분이 없으면 에러 발생)
@@ -822,9 +885,15 @@ Change: 2026-02-11 - Unified uncontested/no-candidate voting behavior across por
             bottomBar.style.display = 'block';
 
             if (status === 'CLOSED') {
-                badge.innerText = "투표 종료"; badge.style.background = "#dc2626";
-                mainBtn.innerText = "⛔ 투표 마감";
-                infoBox.innerHTML = `ℹ️ <strong>안내:</strong> 투표가 마감되었습니다. 집계 결과를 기다려주세요.`;
+                if (isUncontestedClosedElection(currentElection)) {
+                    badge.innerText = "확인 중"; badge.style.background = "#b45309";
+                    mainBtn.innerText = "🔎 선관위 확인 중";
+                    infoBox.innerHTML = `ℹ️ <strong>안내:</strong> 무투표 당선 결과를 선관위에서 확인 중입니다.`;
+                } else {
+                    badge.innerText = "투표 종료"; badge.style.background = "#dc2626";
+                    mainBtn.innerText = "⛔ 투표 마감";
+                    infoBox.innerHTML = `ℹ️ <strong>안내:</strong> 투표가 마감되었습니다. 집계 결과를 기다려주세요.`;
+                }
             } else {
                 badge.innerText = "준비 중"; badge.style.background = "#d97706";
                 mainBtn.innerText = "🔒 투표 대기 중";
@@ -881,7 +950,15 @@ Change: 2026-02-11 - Unified uncontested/no-candidate voting behavior across por
                 let badgeColor = '#999'; let statusText = '준비중';
                 if (el.status === 'OPEN') { badgeColor = '#16a34a'; statusText = '투표중'; }
                 else if (el.status === 'PUBLISHED' || el.status === 'ENDED') { badgeColor = '#2563eb'; statusText = '결과보기'; }
-                else if (el.status === 'CLOSED') { badgeColor = '#dc2626'; statusText = '마감됨'; }
+                else if (el.status === 'CLOSED') {
+                    if (isUncontestedClosedElection(el)) {
+                        badgeColor = '#b45309';
+                        statusText = '확인 중';
+                    } else {
+                        badgeColor = '#dc2626';
+                        statusText = '마감됨';
+                    }
+                }
                 const safeTitle = escapeHtml(el.title || '');
 
                 return `
@@ -891,7 +968,7 @@ Change: 2026-02-11 - Unified uncontested/no-candidate voting behavior across por
                             <span style="font-size:0.8rem; color:#666;">${formatVoteLoginKstDate(el.created_at)}</span>
                         </div>
                         <h3 style="margin:0 0 5px 0;">${safeTitle}</h3>
-                        <p style="margin:0; font-size:0.85rem; color:#666;">${formatVoteLoginKstDate(el.vote_start_at)} ~ ${formatVoteLoginKstDate(el.vote_end_at)}</p>
+                        <p style="margin:0; font-size:0.85rem; color:#666;">${getVotePeriodLabel(el)}</p>
                     </div>
                 `;
             }).join('');
@@ -924,9 +1001,10 @@ Change: 2026-02-11 - Unified uncontested/no-candidate voting behavior across por
 
         // 텍스트 세팅
         document.getElementById('election-title').innerText = election.title;
-        const startStr = formatVoteLoginKstDate(election.vote_start_at);
-        const endStr = formatVoteLoginKstDate(election.vote_end_at);
-        document.getElementById('election-period').innerText = `투표기간: ${startStr} ~ ${endStr}`;
+        const periodLabel = getVotePeriodLabel(election);
+        document.getElementById('election-period').innerText = isUncontestedClosedElection(election)
+            ? periodLabel
+            : `투표기간: ${periodLabel}`;
     }
 
         function isNominationIntakePhase() {
@@ -957,9 +1035,9 @@ Change: 2026-02-11 - Unified uncontested/no-candidate voting behavior across por
 
         async function loadDistrictsAndCandidates() {
             const { data: districts } = await supabase.from('districts').select('*').eq('election_id', electionId).order('name');
-            allDistricts = districts || [];
+            allDistricts = [...(districts || [])].sort(compareDistrictForDisplay);
             const { data: candidates } = await supabase.from('candidates').select('*').eq('election_id', electionId).eq('status', 'APPROVED').order('symbol', { ascending: true });
-            allCandidates = candidates || [];
+            allCandidates = sortCandidatesForDisplay(candidates || [], allDistricts);
             renderTabs();
             if (isNominationIntakePhase()) {
                 renderNominationIntakeOnly();
@@ -1030,6 +1108,7 @@ function renderCandidates(filterDistId) {
     // 2. [수정 핵심] ID 비교 시 '문자열'로 변환하여 엄격하게 비교 (1 vs "1" 문제 해결)
     if (filterDistId !== 'ALL') {
         list = allCandidates.filter(c => String(c.district_id) === String(filterDistId));
+        list = [...list].sort(compareCandidateBySymbol);
     }
 
     // 3. 필터링 결과 없음 처리
@@ -1110,7 +1189,9 @@ function renderCandidates(filterDistId) {
             const container = document.getElementById('result-content');
             if (!cachedResultData) return;
             const { districts, candidates, ballots } = cachedResultData;
-            let targetDistricts = (filterDistId === 'ALL') ? districts : districts.filter(d => d.id === filterDistId);
+            let targetDistricts = (filterDistId === 'ALL')
+                ? [...districts].sort(compareDistrictForDisplay)
+                : districts.filter(d => d.id === filterDistId);
             
             if (targetDistricts.length === 0) {
                 container.innerHTML = '<div style="text-align:center; padding:40px; color:#999;">해당 선거구 정보가 없습니다.</div>';
@@ -1119,7 +1200,7 @@ function renderCandidates(filterDistId) {
 
             let html = '';
             targetDistricts.forEach(dist => {
-                const distCands = candidates.filter(c => c.district_id === dist.id);
+                const distCands = [...candidates.filter(c => c.district_id === dist.id)].sort(compareCandidateBySymbol);
                 const distBallots = ballots.filter(b => b.district_id === dist.id);
                 const quota = dist.quota || 1;
                 const isBinary = dist.vote_type === 'BINARY';
@@ -1166,10 +1247,16 @@ function renderCandidates(filterDistId) {
                     const voteCounts = {}; let totalVotes = 0;
                     distCands.forEach(c => voteCounts[c.id] = 0);
                     distBallots.forEach(b => { if(b.candidate_id && voteCounts[b.candidate_id] !== undefined) { voteCounts[b.candidate_id]++; totalVotes++; } });
-                    const results = distCands.map(c => ({ ...c, count: voteCounts[c.id], percent: totalVotes ? ((voteCounts[c.id] / totalVotes) * 100).toFixed(1) : 0 })).sort((a, b) => b.count - a.count);
+                    const scored = distCands.map(c => ({ ...c, count: voteCounts[c.id], percent: totalVotes ? ((voteCounts[c.id] / totalVotes) * 100).toFixed(1) : 0 }));
+                    const winnersByVote = [...scored]
+                        .sort((a, b) => (b.count - a.count) || compareCandidateBySymbol(a, b))
+                        .filter((r) => r.count > 0)
+                        .slice(0, quota);
+                    const winnerIdSet = new Set(winnersByVote.map((r) => r.id));
+                    const results = [...scored].sort(compareCandidateBySymbol);
                     html += `<table class="result-table"><tbody>`;
                     results.forEach((r, idx) => {
-                        const isWinner = idx < quota && r.count > 0;
+                        const isWinner = winnerIdSet.has(r.id);
                         html += `<tr class="${isWinner ? 'winner-row' : ''}"><td style="width:40%; padding-left:15px;"><div style="font-weight:bold;">${isWinner ? '👑 ' : ''} ${r.name}</div><div style="font-size:0.75rem; color:#9ca3af;">기호 ${r.symbol || '-'}</div></td><td style="text-align:right; font-weight:bold;">${r.count}표</td><td style="padding-right:15px;"><div class="bar-bg"><div class="bar-fill" style="width:${r.percent}%; background:${isWinner ? '#2563eb' : '#cbd5e1'}"></div></div><div style="font-size:0.7rem; text-align:right;">${r.percent}%</div></td></tr>`;
                     });
                     html += `</tbody></table><div style="padding:10px; text-align:right; font-size:0.8rem; background:#f8fafc;">총 투표수: ${totalVotes}표</div>`;
@@ -1216,8 +1303,13 @@ function renderCandidates(filterDistId) {
                     statusText = '🗳️ 투표 진행 중';
                     break;
                 case 'CLOSED':
-                    badgeColor = '#dc2626'; // 빨간색
-                    statusText = '🔒 집계 중 (마감)';
+                    if (isUncontestedClosedElection(el)) {
+                        badgeColor = '#b45309'; // 주황색
+                        statusText = '🔎 선관위 확인 중';
+                    } else {
+                        badgeColor = '#dc2626'; // 빨간색
+                        statusText = '🔒 집계 중 (마감)';
+                    }
                     break;
                 case 'PUBLISHED':
                 case 'ENDED':
@@ -1232,8 +1324,7 @@ function renderCandidates(filterDistId) {
             }
 
             // 날짜 포맷팅
-            const start = formatVoteLoginKstDate(el.vote_start_at);
-            const end = formatVoteLoginKstDate(el.vote_end_at);
+            const periodLabel = getVotePeriodLabel(el);
             const created = formatVoteLoginKstDate(el.created_at);
 
             return `
@@ -1250,8 +1341,8 @@ function renderCandidates(filterDistId) {
                     <h3 style="margin:0 0 6px 0; font-size:1.1rem; color:#1e293b;">${el.title}</h3>
                     
                     <div style="display:flex; align-items:center; gap:5px; font-size:0.85rem; color:#64748b;">
-                        <span>📅 투표 기간:</span>
-                        <span style="color:#334155; font-weight:500;">${start} ~ ${end}</span>
+                        <span>${isUncontestedClosedElection(el) ? '📌 선거 상태:' : '📅 투표 기간:'}</span>
+                        <span style="color:#334155; font-weight:500;">${periodLabel}</span>
                     </div>
                 </div>
             `;

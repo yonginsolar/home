@@ -45,11 +45,19 @@ export class AdminService {
     }
 
 // [수정] 선거 상태 변경 (+ 로그 기록)
-    async updateStatus(electionId, newStatus) {
+    async updateStatus(electionId, newStatus, options = {}) {
+        const payload = { status: newStatus };
+        if (Object.prototype.hasOwnProperty.call(options, 'actualClosedAt')) {
+            payload.actual_closed_at = options.actualClosedAt;
+        }
+        if (options.clearActualClosedAt) {
+            payload.actual_closed_at = null;
+        }
+
         // 1. 상태 변경
         const { error } = await supabase
             .from('elections')
-            .update({ status: newStatus })
+            .update(payload)
             .eq('id', electionId);
             
         if (error) throw new Error('상태 변경 실패: ' + error.message);

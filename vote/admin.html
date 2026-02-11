@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.22
-Change: 2026-02-11 - Unified district vote-state rendering (binary/contested/uncontested/no-candidate).
+Version: v1.0.24
+Change: 2026-02-11 - Add elected delegate save flow (preview + confirm) to store winners in coop_officials.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.22 | admin.html');</script>
+    <script>console.log('[Version] v1.0.24 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -401,10 +401,14 @@ Change: 2026-02-11 - Unified district vote-state rendering (binary/contested/unc
                 <h4>🏆 개표 및 결과</h4>
                 <div id="result-control">
                     <button onclick="openBallotBox()" class="btn" style="padding:1rem; background:#374151; color:white; width: 100%;">🔐 개표함 열기</button>
+                    <button id="btn-back-to-nomination-uncontested" onclick="rollbackToNominationFromUncontested()" class="btn btn-outline" style="display:none; width:100%; margin-top:10px;">
+                        후보자 등록으로 돌아가기
+                    </button>
                 </div>
                 <div id="result-display" style="display:none; margin-top:2rem;">
                     <div id="result-chart" style="padding: 1rem; background: #f3f4f6; border-radius: 8px;"></div>
                     <hr style="margin:2rem 0; border:0; border-top:1px solid #ddd;">
+                    <button onclick="previewAndSaveElectedOfficials()" class="btn btn-outline" style="width:100%; margin-bottom:10px;">👥 당선자 DB 저장</button>
                     <button onclick="confirmAction('PUBLISHED', '최종 결과를 공포하시겠습니까?')" class="btn btn-primary" style="width:100%;">📢 결과 최종 공포</button>
                 </div>
             </div>
@@ -702,6 +706,8 @@ function escapeJsString(value) {
     let cachedCandidates = [];
     let currentCandidateFilter = 'all';
     let currentUserEmail = ''; // [신규] 현재 작업자 이메일 저장용
+    let currentElectionVoteSummary = null;
+    let isCurrentElectionUncontestedAutoFlow = false;
 
     // -----------------------------------------------------------
     // [1] 모달 & 유틸리티 (기존 유지)
@@ -836,6 +842,427 @@ function escapeJsString(value) {
     };
 
     syncModalStack();
+
+    const isAutoUncontestedTarget = (summary) => {
+        if (!summary) return false;
+        if (summary.hasVotingRequired) return false;
+        // [정책 보류] 무후보(NO_CANDIDATE) 선거구가 있으면 자동 무투표 당선으로 처리하지 않는다.
+        if ((summary.noCandidateDistricts || []).length > 0) return false;
+        return (summary.uncontestedDistricts || []).length > 0;
+    };
+
+    async function fetchElectionVoteSummary() {
+        const [districtRes, approvedCandRes] = await Promise.all([
+            supabase
+                .from('districts')
+                .select('id, name, vote_type, quota')
+                .eq('election_id', currentElectionId),
+            supabase
+                .from('candidates')
+                .select('id, district_id')
+                .eq('election_id', currentElectionId)
+                .eq('status', 'APPROVED')
+        ]);
+
+        if (districtRes.error) throw districtRes.error;
+        if (approvedCandRes.error) throw approvedCandRes.error;
+
+        return buildElectionVoteSummary(districtRes.data || [], approvedCandRes.data || []);
+    }
+
+    async function buildElectedOfficialsPreviewData() {
+        const [districtRes, approvedCandRes, ballotRes] = await Promise.all([
+            supabase
+                .from('districts')
+                .select('id, name, vote_type, quota')
+                .eq('election_id', currentElectionId),
+            supabase
+                .from('candidates')
+                .select('id, district_id, member_uuid, name, symbol')
+                .eq('election_id', currentElectionId)
+                .eq('status', 'APPROVED'),
+            supabase
+                .from('ballots')
+                .select('district_id, candidate_id')
+                .eq('election_id', currentElectionId)
+        ]);
+
+        if (districtRes.error) throw districtRes.error;
+        if (approvedCandRes.error) throw approvedCandRes.error;
+        if (ballotRes.error) throw ballotRes.error;
+
+        const districts = districtRes.data || [];
+        const approvedCandidates = approvedCandRes.data || [];
+        const ballots = ballotRes.data || [];
+        const summary = buildElectionVoteSummary(districts, approvedCandidates);
+        const districtStateMap = new Map(
+            (summary.states || []).map((row) => [String(row.districtId), row.state])
+        );
+        const winnerRows = [];
+
+        districts.forEach((district) => {
+            const districtId = String(district.id);
+            const districtCandidates = approvedCandidates.filter(
+                (candidate) => String(candidate.district_id) === districtId
+            );
+            const districtState = districtStateMap.get(districtId) || DISTRICT_VOTE_STATE.NO_CANDIDATE;
+            const quota = Math.max(1, Number(district.quota) || 1);
+
+            // 투표 없이 당선되는 선거구: 승인 후보 전체를 당선자로 본다.
+            if (districtState === DISTRICT_VOTE_STATE.UNCONTESTED) {
+                districtCandidates.forEach((candidate) => {
+                    winnerRows.push({
+                        districtId,
+                        districtName: district.name || '-',
+                        candidateId: candidate.id,
+                        candidateName: candidate.name || '-',
+                        memberUuid: candidate.member_uuid || '',
+                        winnerType: 'UNCONTESTED',
+                        voteCount: null
+                    });
+                });
+                return;
+            }
+
+            // 경선 선거구만 득표순으로 선출
+            if (districtState !== DISTRICT_VOTE_STATE.CONTESTED) return;
+
+            const voteCountMap = new Map();
+            districtCandidates.forEach((candidate) => {
+                voteCountMap.set(String(candidate.id), 0);
+            });
+
+            ballots.forEach((ballot) => {
+                if (String(ballot.district_id) !== districtId) return;
+                const candidateId = String(ballot.candidate_id || '');
+                if (!candidateId || !voteCountMap.has(candidateId)) return;
+                voteCountMap.set(candidateId, (voteCountMap.get(candidateId) || 0) + 1);
+            });
+
+            const ranked = districtCandidates
+                .map((candidate) => ({
+                    ...candidate,
+                    voteCount: voteCountMap.get(String(candidate.id)) || 0
+                }))
+                .sort((a, b) => b.voteCount - a.voteCount);
+
+            ranked.forEach((candidate, idx) => {
+                if (idx >= quota || candidate.voteCount <= 0) return;
+                winnerRows.push({
+                    districtId,
+                    districtName: district.name || '-',
+                    candidateId: candidate.id,
+                    candidateName: candidate.name || '-',
+                    memberUuid: candidate.member_uuid || '',
+                    winnerType: 'CONTESTED',
+                    voteCount: candidate.voteCount
+                });
+            });
+        });
+
+        const uniqueWinnerMemberUuids = [...new Set(
+            winnerRows
+                .map((row) => String(row.memberUuid || '').trim())
+                .filter(Boolean)
+        )];
+
+        const memberMap = new Map();
+        if (uniqueWinnerMemberUuids.length > 0) {
+            const { data: memberRows, error: memberErr } = await supabase
+                .from('coop_members')
+                .select('id, member_id, name')
+                .in('id', uniqueWinnerMemberUuids);
+            if (memberErr) throw memberErr;
+            (memberRows || []).forEach((memberRow) => {
+                memberMap.set(String(memberRow.id), memberRow);
+            });
+        }
+
+        const rows = winnerRows.map((row) => {
+            const matchedMember = memberMap.get(String(row.memberUuid || ''));
+            return {
+                ...row,
+                memberId: matchedMember?.member_id || '',
+                memberName: matchedMember?.name || row.candidateName || '',
+                hasMemberId: !!(matchedMember && matchedMember.member_id)
+            };
+        });
+
+        return {
+            rows,
+            missingMemberRows: rows.filter((row) => !row.hasMemberId)
+        };
+    }
+
+    async function saveElectedOfficialsToDelegate({ rows, termStartDate, termEndDate }) {
+        const uniqueByMemberId = new Map();
+        (rows || []).forEach((row) => {
+            const memberId = String(row.memberId || '').trim();
+            if (!memberId) return;
+            if (!uniqueByMemberId.has(memberId)) uniqueByMemberId.set(memberId, row);
+        });
+
+        const memberIds = [...uniqueByMemberId.keys()];
+        if (memberIds.length === 0) {
+            return { targetCount: 0, insertedCount: 0, skippedCount: 0 };
+        }
+
+        // 연임 회차 계산용: 기존 대의원 이력의 최대 term_count를 회원별로 조회
+        const { data: historyRows, error: historyErr } = await supabase
+            .from('coop_officials')
+            .select('member_id, term_count')
+            .eq('category', 'delegate')
+            .eq('role', '대의원')
+            .in('member_id', memberIds);
+        if (historyErr) throw historyErr;
+
+        const maxTermCountByMemberId = new Map();
+        (historyRows || []).forEach((row) => {
+            const memberId = String(row.member_id || '').trim();
+            if (!memberId) return;
+            const rawTerm = Number(row.term_count);
+            const normalizedTerm = Number.isFinite(rawTerm) && rawTerm > 0 ? Math.floor(rawTerm) : 0;
+            const prevMax = maxTermCountByMemberId.get(memberId) || 0;
+            if (normalizedTerm > prevMax) maxTermCountByMemberId.set(memberId, normalizedTerm);
+        });
+
+        const { data: existingRows, error: existingErr } = await supabase
+            .from('coop_officials')
+            .select('id, member_id')
+            .eq('category', 'delegate')
+            .eq('role', '대의원')
+            .eq('term_start_date', termStartDate)
+            .eq('term_end_date', termEndDate)
+            .in('member_id', memberIds);
+        if (existingErr) throw existingErr;
+
+        const existingMemberIdSet = new Set((existingRows || []).map((row) => String(row.member_id)));
+        const insertPayload = memberIds
+            .filter((memberId) => !existingMemberIdSet.has(memberId))
+            .map((memberId) => {
+                const source = uniqueByMemberId.get(memberId);
+                const nextTermCount = (maxTermCountByMemberId.get(memberId) || 0) + 1;
+                return {
+                    member_id: memberId,
+                    category: 'delegate',
+                    role: '대의원',
+                    term_start_date: termStartDate,
+                    term_end_date: termEndDate,
+                    term_count: nextTermCount,
+                    name: source?.memberName || source?.candidateName || null,
+                    status: 'active'
+                };
+            });
+
+        if (insertPayload.length > 0) {
+            const { error: insertErr } = await supabase
+                .from('coop_officials')
+                .insert(insertPayload);
+            if (insertErr) throw insertErr;
+        }
+
+        return {
+            targetCount: memberIds.length,
+            insertedCount: insertPayload.length,
+            skippedCount: existingMemberIdSet.size
+        };
+    }
+
+    function renderElectedOfficialsPreviewHtml(rows, missingMemberRows) {
+        const tableRows = (rows || []).map((row, idx) => {
+            const statusLabel = row.hasMemberId ? '저장 가능' : 'member_id 누락';
+            const statusColor = row.hasMemberId ? '#166534' : '#b91c1c';
+            const electedTypeLabel = row.winnerType === 'UNCONTESTED'
+                ? '무투표'
+                : `득표 ${row.voteCount || 0}표`;
+            return `
+                <tr style="border-bottom:1px solid #e5e7eb;">
+                    <td style="padding:8px; text-align:center;">${idx + 1}</td>
+                    <td style="padding:8px;">${escapeHtml(row.districtName || '-')}</td>
+                    <td style="padding:8px;">${escapeHtml(row.candidateName || '-')}</td>
+                    <td style="padding:8px;">${escapeHtml(row.memberId || '-')}</td>
+                    <td style="padding:8px; text-align:center;">${escapeHtml(electedTypeLabel)}</td>
+                    <td style="padding:8px; color:${statusColor}; font-weight:700;">${statusLabel}</td>
+                </tr>
+            `;
+        }).join('');
+
+        const warningHtml = (missingMemberRows || []).length > 0
+            ? `<div style="margin-bottom:10px; padding:10px; border-radius:8px; background:#fef2f2; color:#991b1b; border:1px solid #fecaca;">
+                    member_id 매핑 누락 당선자 ${(missingMemberRows || []).length}명이 있어 현재 상태로는 저장할 수 없습니다.
+               </div>`
+            : `<div style="margin-bottom:10px; padding:10px; border-radius:8px; background:#ecfdf5; color:#065f46; border:1px solid #bbf7d0;">
+                    당선자 ${(rows || []).length}명 저장 준비 완료
+               </div>`;
+
+        return `
+            <div style="text-align:left;">
+                ${warningHtml}
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <div>
+                        <label style="display:block; font-weight:700; margin-bottom:4px;">임기 시작일</label>
+                        <input type="date" id="official-term-start" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px;">
+                    </div>
+                    <div>
+                        <label style="display:block; font-weight:700; margin-bottom:4px;">임기 종료일</label>
+                        <input type="date" id="official-term-end" style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px;">
+                    </div>
+                </div>
+                <div id="official-save-error" style="margin-bottom:10px;"></div>
+                <div style="max-height:320px; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.86rem;">
+                        <thead style="position:sticky; top:0; background:#f8fafc;">
+                            <tr>
+                                <th style="padding:8px; text-align:center; width:48px;">No</th>
+                                <th style="padding:8px; text-align:left;">선거구</th>
+                                <th style="padding:8px; text-align:left;">당선자</th>
+                                <th style="padding:8px; text-align:left;">member_id</th>
+                                <th style="padding:8px; text-align:center;">구분</th>
+                                <th style="padding:8px; text-align:left;">상태</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows || '<tr><td colspan="6" style="padding:14px; text-align:center; color:#6b7280;">저장할 당선자가 없습니다.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    window.previewAndSaveElectedOfficials = async () => {
+        if (!currentElectionId) {
+            showAlert('선거 정보가 없어 당선자 저장을 진행할 수 없습니다.');
+            return;
+        }
+
+        try {
+            const preview = await buildElectedOfficialsPreviewData();
+            if (!preview.rows || preview.rows.length === 0) {
+                showAlert('저장할 당선자 목록이 없습니다.\n개표 결과를 먼저 확인해주세요.');
+                return;
+            }
+
+            window.showModal(
+                '👥 당선자 DB 저장 확인',
+                renderElectedOfficialsPreviewHtml(preview.rows, preview.missingMemberRows),
+                () => {},
+                true
+            );
+
+            const modal = document.getElementById('common-modal');
+            const confirmBtn = modal?.querySelector('.btn.btn-primary');
+            const cancelBtn = modal?.querySelector('.btn.btn-outline');
+            if (confirmBtn) confirmBtn.innerText = '저장';
+            if (cancelBtn) cancelBtn.innerText = '취소';
+
+            const setErrorMessage = (msg) => {
+                const errorEl = document.getElementById('official-save-error');
+                if (!errorEl) {
+                    showAlert(msg);
+                    return;
+                }
+                errorEl.innerHTML = `<div style="padding:8px; border:1px solid #fecaca; border-radius:6px; background:#fef2f2; color:#991b1b;">${escapeHtml(msg)}</div>`;
+            };
+
+            if (confirmBtn) {
+                confirmBtn.onclick = async () => {
+                    const termStartDate = String(document.getElementById('official-term-start')?.value || '').trim();
+                    const termEndDate = String(document.getElementById('official-term-end')?.value || '').trim();
+
+                    if (!termStartDate || !termEndDate) {
+                        setErrorMessage('임기 시작일과 종료일을 모두 입력해주세요.');
+                        return;
+                    }
+                    if (termStartDate > termEndDate) {
+                        setErrorMessage('임기 종료일은 시작일보다 빠를 수 없습니다.');
+                        return;
+                    }
+                    if ((preview.missingMemberRows || []).length > 0) {
+                        setErrorMessage('member_id 매핑 누락 당선자가 있어 저장할 수 없습니다. 후보자/조합원 매핑을 먼저 확인해주세요.');
+                        return;
+                    }
+
+                    try {
+                        confirmBtn.disabled = true;
+                        if (cancelBtn) cancelBtn.disabled = true;
+                        confirmBtn.innerText = '저장중...';
+
+                        const saveResult = await saveElectedOfficialsToDelegate({
+                            rows: preview.rows,
+                            termStartDate,
+                            termEndDate
+                        });
+
+                        await service.logAction(
+                            currentElectionId,
+                            'ELECTED_OFFICIALS_SAVE',
+                            `당선자 저장: 대상 ${saveResult.targetCount}명, 신규 ${saveResult.insertedCount}명, 기존 ${saveResult.skippedCount}명, 임기 ${termStartDate}~${termEndDate} (작업자: ${currentUserEmail})`
+                        );
+
+                        window.closeModal();
+                        showAlert(
+                            `당선자 저장 완료\n` +
+                            `- 대상: ${saveResult.targetCount}명\n` +
+                            `- 신규 저장: ${saveResult.insertedCount}명\n` +
+                            `- 기존 중복(동일 임기): ${saveResult.skippedCount}명`
+                        );
+                        loadLogs();
+                    } catch (e) {
+                        console.error(e);
+                        confirmBtn.disabled = false;
+                        if (cancelBtn) cancelBtn.disabled = false;
+                        confirmBtn.innerText = '저장';
+                        setErrorMessage('저장 실패: ' + e.message);
+                    }
+                };
+            }
+        } catch (e) {
+            console.error(e);
+            showAlert('당선자 저장 준비 중 오류가 발생했습니다: ' + e.message);
+        }
+    };
+
+    function updateUncontestedRollbackButton() {
+        const rollbackBtn = document.getElementById('btn-back-to-nomination-uncontested');
+        if (!rollbackBtn) return;
+
+        const shouldShow = !!(
+            currentElectionData &&
+            currentElectionData.status === 'CLOSED' &&
+            isCurrentElectionUncontestedAutoFlow
+        );
+        rollbackBtn.style.display = shouldShow ? 'block' : 'none';
+    }
+
+    window.rollbackToNominationFromUncontested = async () => {
+        if (!currentElectionData || currentElectionData.status !== 'CLOSED' || !isCurrentElectionUncontestedAutoFlow) {
+            showAlert('현재 상태에서는 후보자 등록 단계로 되돌릴 수 없습니다.');
+            return;
+        }
+
+        const ok = await showConfirm(
+            '무투표 당선 처리를 취소하고 후보자 등록 단계로 돌아가시겠습니까?\n상태가 NOMINATION으로 변경됩니다.',
+            '후보자 등록으로 돌아가기'
+        );
+        if (!ok) return;
+
+        try {
+            await service.updateStatus(currentElectionId, 'NOMINATION', { clearActualClosedAt: true });
+            await service.logAction(
+                currentElectionId,
+                'PHASE_ROLLBACK',
+                `무투표 당선 취소: CLOSED -> NOMINATION (작업자: ${currentUserEmail})`
+            );
+            await loadElectionInfo();
+            updateWorkflowUI();
+            loadLogs();
+            showAlert('후보자 등록 단계로 돌아갔습니다.');
+        } catch (e) {
+            console.error(e);
+            showAlert('상태 되돌리기 실패: ' + e.message);
+        }
+    };
 
 // [수정] 초기화 및 3단 권한 검증 (Gatekeeper)
     async function init() {
@@ -1104,6 +1531,7 @@ window.openElectionGateway = async () => {
         `;
 
         document.getElementById('election-period-detail').innerHTML = scheduleHtml;
+        updateUncontestedRollbackButton();
     }
 
     // [신규] 상태별 탭 제어 (Workflow)
@@ -1172,6 +1600,8 @@ window.openElectionGateway = async () => {
                 // stepEl.style.pointerEvents = 'auto'; // (필요 시 주석 해제: 현재 단계만 클릭 허용)
             }
         }
+
+        updateUncontestedRollbackButton();
     }
 
 // [수정] 자동 스케줄러 (투표 자동 종료 감지)
@@ -1189,8 +1619,8 @@ window.openElectionGateway = async () => {
             console.log(`⏰ [Auto Close] 투표 종료 시간(${formatVoteAdminKstDateTime(voteEnd)}) 도달.`);
             
             try {
-                // DB 상태 업데이트 (CLOSED)
-                await service.updateStatus(currentElectionId, 'CLOSED');
+                // DB 상태 업데이트 (CLOSED + 실제 마감시각)
+                await service.updateStatus(currentElectionId, 'CLOSED', { actualClosedAt: now.toISOString() });
                 
                 // 로그 기록
                 await service.logAction(currentElectionId, 'AUTO_END', '투표 시간 종료로 시스템 자동 마감');
@@ -2283,6 +2713,13 @@ async function loadCandidates() {
         cachedCandidates = await service.getCandidates(currentElectionId);
         if (!Array.isArray(cachedCandidates)) cachedCandidates = [];
 
+        const approvedCandidates = cachedCandidates.filter(
+            (candidate) => String(candidate?.status || '').toUpperCase() === 'APPROVED'
+        );
+        currentElectionVoteSummary = buildElectionVoteSummary(districtList || [], approvedCandidates);
+        isCurrentElectionUncontestedAutoFlow = isAutoUncontestedTarget(currentElectionVoteSummary);
+        updateUncontestedRollbackButton();
+
         // 통계 갱신
         const stats = { total: cachedCandidates.length, pending: 0, approved: 0, rejected: 0 };
         cachedCandidates.forEach(c => {
@@ -2915,6 +3352,64 @@ window.finalizeNomination = async () => {
         return;
     }
 
+    let latestSummary = null;
+    try {
+        latestSummary = await fetchElectionVoteSummary();
+    } catch (e) {
+        console.error(e);
+        showAlert("무투표 여부 확인 중 오류가 발생했습니다: " + e.message);
+        return;
+    }
+
+    const isUncontestedAuto = isAutoUncontestedTarget(latestSummary);
+    if (isUncontestedAuto) {
+        const reasonText = '선출자/후보자 동수로 인한 무투표 당선';
+        const uncontestedCount = (latestSummary.uncontestedDistricts || []).length;
+        const modalMsg = `
+            <div style="text-align:left; background:#ecfdf5; border:1px solid #bbf7d0; padding:15px; border-radius:8px;">
+                <p style="margin-top:0; color:#166534; font-weight:800; font-size:1.05rem;">✅ 무투표 당선 조건이 충족되었습니다.</p>
+                <p style="margin-bottom:8px; color:#14532d;">
+                    선거구 ${uncontestedCount}곳에서 선출 정원 이내 후보만 등록되어 투표 없이 당선 처리됩니다.
+                </p>
+                <ul style="font-size:0.9rem; color:#14532d; padding-left:20px; margin-bottom:0;">
+                    <li>확인 시 <strong>2단계(확정 및 공포)</strong>를 건너뛰고 <strong>4단계(개표 및 결과)</strong>로 이동합니다.</li>
+                    <li>상태는 <strong>CLOSED(결과 공포 대기)</strong>로 전환됩니다.</li>
+                    <li>최종 공포(PUBLISHED)는 직접 점검 후 수동 진행됩니다.</li>
+                </ul>
+            </div>
+            <p style="text-align:center; margin-top:15px; font-weight:bold;">무투표 당선으로 처리하시겠습니까?</p>
+        `;
+
+        window.showModal('🎯 무투표 당선 확인', modalMsg, async () => {
+            try {
+                const uncontestedClosedAt = currentElectionData?.candidacy_end_at || new Date().toISOString();
+                await service.updateStatus(currentElectionId, 'CLOSED', { actualClosedAt: uncontestedClosedAt });
+                await service.logAction(
+                    currentElectionId,
+                    'UNCONTESTED_ELECTED',
+                    `${reasonText} (작업자: ${currentUserEmail})`
+                );
+                await service.logAction(
+                    currentElectionId,
+                    'PHASE_CHANGE',
+                    `단계 변경: 후보확정(NOMINATION) -> 결과대기(CLOSED) / ${reasonText} (작업자: ${currentUserEmail})`
+                );
+
+                currentElectionVoteSummary = latestSummary;
+                isCurrentElectionUncontestedAutoFlow = true;
+
+                await loadElectionInfo();
+                updateWorkflowUI();
+                loadLogs();
+                showAlert("✅ 무투표 당선 처리 완료.\n4단계(개표 및 결과)로 이동했습니다.");
+            } catch (e) {
+                console.error(e);
+                showAlert("무투표 당선 처리 실패: " + e.message);
+            }
+        });
+        return;
+    }
+
     // 2. 경고 메시지 구성 (HTML)
     const warningMsg = `
         <div style="text-align: left; background: #fff1f2; padding: 15px; border-radius: 8px; border: 1px solid #fecaca;">
@@ -2989,7 +3484,10 @@ window.finalizeNomination = async () => {
         window.showModal('상태 변경 확인', msg, async () => {
             try {
                 // 상태 업데이트 요청
-                await service.updateStatus(currentElectionId, nextStatus);
+                const statusUpdateOptions = nextStatus === 'CLOSED'
+                    ? { actualClosedAt: new Date().toISOString() }
+                    : {};
+                await service.updateStatus(currentElectionId, nextStatus, statusUpdateOptions);
                 
                 // 데이터 갱신
                 await loadElectionInfo(); // 선거 정보 다시 로드
