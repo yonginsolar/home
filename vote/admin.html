@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.21
-Change: 2026-02-09 - Voter status line-break and district-based candidate summary/filter added.
+Version: v1.0.22
+Change: 2026-02-11 - Unified district vote-state rendering (binary/contested/uncontested/no-candidate).
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.21 | admin.html');</script>
+    <script>console.log('[Version] v1.0.22 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -678,7 +678,7 @@ function escapeJsString(value) {
         .replace(/\n/g, '\\n');
 }
     import { AdminService } from './AdminService.js';
-    import { supabase } from './ElectionService.js';
+    import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js';
 
     const KST_TZ_VOTE_ADMIN = 'Asia/Seoul';
     const formatVoteAdminKstDate = (value, fallback = '미정') => {
@@ -3125,17 +3125,13 @@ window.finalizeNomination = async () => {
                                 <span style="font-size:0.8rem; color:#6b7280;">${dist.is_common ? '(공통/비례)' : '(지역구)'}</span>
                             </div>`;
 
+                const distSummary = buildElectionVoteSummary([dist], distCands);
+                const distState = distSummary.states[0]?.state || DISTRICT_VOTE_STATE.NO_CANDIDATE;
+
                 // ---------------------------------------------------
-                // [CASE A] 후보자 없음
+                // [CASE A] 찬반 투표 (vote_type = 'BINARY')
                 // ---------------------------------------------------
-                if (distCands.length === 0) {
-                    html += `<div style="padding: 30px; text-align: center; color: #9ca3af;">등록된 후보자가 없습니다.</div>`;
-                }
-                
-                // ---------------------------------------------------
-                // [CASE B] 찬반 투표 (vote_type = 'BINARY')
-                // ---------------------------------------------------
-                else if (isBinary) {
+                if (distState === DISTRICT_VOTE_STATE.BINARY) {
                     // 찬반 집계 (choice 컬럼: AGREE, DISAGREE, ABSTENTION)
                     const counts = { 'AGREE': 0, 'DISAGREE': 0, 'ABSTENTION': 0 };
                     let total = 0;
@@ -3165,88 +3161,90 @@ window.finalizeNomination = async () => {
                         </div>
                     `;
                 }
-
                 // ---------------------------------------------------
-                // [CASE C] 인물 투표 (vote_type = 'CANDIDATE')
+                // [CASE B] 후보 미등록
                 // ---------------------------------------------------
-                else {
-                    // C-1. 무투표 당선 조건: 후보자 수 <= 선출인원(quota)
-                    if (distCands.length <= quota) {
-                         html += `
-                            <div style="padding: 2rem; text-align: center; background: #f0fdf4;">
-                                <div style="font-size: 3rem; margin-bottom: 10px;">🎉</div>
-                                <h3 style="color: #166534; margin: 0; font-weight:800;">전원 무투표 당선</h3>
-                                <p style="color: #15803d; margin-top: 5px; font-size:0.9rem;">
-                                    후보자 수(${distCands.length}명)가 선출 정원(${quota}명) 이내이므로<br>투표 없이 전원 당선 확정되었습니다.
-                                </p>
-                                <div style="margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
-                        `;
-                        distCands.forEach(winner => {
-                            html += `
-                                <div style="background: white; padding: 10px 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #bbf7d0;">
-                                    <div style="font-weight: bold; color: #374151;">${winner.name}</div>
-                                </div>`;
-                        });
-                        html += `</div></div>`;
-                    } 
-                    // C-2. 경선 (후보자 수 > quota)
-                    else {
-                        const voteCounts = {};
-                        let totalVotesInDist = 0;
-                        distCands.forEach(c => voteCounts[c.id] = 0);
-                        
-                        distBallots.forEach(b => {
-                            if (b.candidate_id && voteCounts[b.candidate_id] !== undefined) {
-                                voteCounts[b.candidate_id]++;
-                                totalVotesInDist++;
-                            }
-                        });
+                else if (distState === DISTRICT_VOTE_STATE.NO_CANDIDATE) {
+                    html += `<div style="padding: 30px; text-align: center; color: #92400e; background:#fffbeb;">후보 미등록 선거구입니다.</div>`;
+                }
+                // ---------------------------------------------------
+                // [CASE C] 무투표 당선
+                // ---------------------------------------------------
+                else if (distState === DISTRICT_VOTE_STATE.UNCONTESTED) {
+                    html += `
+                        <div style="padding: 2rem; text-align: center; background: #f0fdf4;">
+                            <div style="font-size: 3rem; margin-bottom: 10px;">🎉</div>
+                            <h3 style="color: #166534; margin: 0; font-weight:800;">전원 무투표 당선</h3>
+                            <p style="color: #15803d; margin-top: 5px; font-size:0.9rem;">
+                                후보자 수(${distCands.length}명)가 선출 정원(${quota}명) 이내이므로<br>투표 없이 전원 당선 확정되었습니다.
+                            </p>
+                            <div style="margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
+                    `;
+                    distCands.forEach(winner => {
+                        html += `
+                            <div style="background: white; padding: 10px 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #bbf7d0;">
+                                <div style="font-weight: bold; color: #374151;">${winner.name}</div>
+                            </div>`;
+                    });
+                    html += `</div></div>`;
+                } else {
+                    // ---------------------------------------------------
+                    // [CASE D] 경선
+                    // ---------------------------------------------------
+                    const voteCounts = {};
+                    let totalVotesInDist = 0;
+                    distCands.forEach(c => voteCounts[c.id] = 0);
+                    
+                    distBallots.forEach(b => {
+                        if (b.candidate_id && voteCounts[b.candidate_id] !== undefined) {
+                            voteCounts[b.candidate_id]++;
+                            totalVotesInDist++;
+                        }
+                    });
 
-                        const results = distCands.map(c => {
-                            const count = voteCounts[c.id];
-                            const percent = totalVotesInDist === 0 ? 0 : ((count / totalVotesInDist) * 100).toFixed(1);
-                            return { ...c, count, percent };
-                        }).sort((a, b) => b.count - a.count);
+                    const results = distCands.map(c => {
+                        const count = voteCounts[c.id];
+                        const percent = totalVotesInDist === 0 ? 0 : ((count / totalVotesInDist) * 100).toFixed(1);
+                        return { ...c, count, percent };
+                    }).sort((a, b) => b.count - a.count);
 
-                        html += `<table style="width:100%; border-collapse: collapse;">
-                                    <thead style="background: #fff; border-bottom: 2px solid #eee; font-size: 0.85rem; color: #666;">
-                                        <tr>
-                                            <th style="padding:10px; text-align:center; width:50px;">순위</th>
-                                            <th style="padding:10px;">후보자</th>
-                                            <th style="padding:10px; text-align:right;">득표수</th>
-                                            <th style="padding:10px; text-align:right;">%</th>
-                                            <th style="padding:10px; width:35%;">그래프</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>`;
-                        
-                        results.forEach((r, idx) => {
-                            // 당선권: 등수가 quota 안쪽인 경우
-                            const isWinner = idx < quota && r.count > 0;
-                            const barColor = isWinner ? '#2563eb' : '#d1d5db';
-                            const rowBg = isWinner ? 'background-color: #eff6ff;' : '';
-                            const rankIcon = idx < 3 ? ['🥇','🥈','🥉'][idx] : idx + 1;
+                    html += `<table style="width:100%; border-collapse: collapse;">
+                                <thead style="background: #fff; border-bottom: 2px solid #eee; font-size: 0.85rem; color: #666;">
+                                    <tr>
+                                        <th style="padding:10px; text-align:center; width:50px;">순위</th>
+                                        <th style="padding:10px;">후보자</th>
+                                        <th style="padding:10px; text-align:right;">득표수</th>
+                                        <th style="padding:10px; text-align:right;">%</th>
+                                        <th style="padding:10px; width:35%;">그래프</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                    
+                    results.forEach((r, idx) => {
+                        const isWinner = idx < quota && r.count > 0;
+                        const barColor = isWinner ? '#2563eb' : '#d1d5db';
+                        const rowBg = isWinner ? 'background-color: #eff6ff;' : '';
+                        const rankIcon = idx < 3 ? ['🥇','🥈','🥉'][idx] : idx + 1;
 
-                            html += `<tr style="border-bottom: 1px solid #f3f4f6; ${rowBg}">
-                                        <td style="padding:10px; text-align:center;">${rankIcon}</td>
-                                        <td style="padding:10px;">
-                                            <div style="font-weight:bold;">${isWinner ? '👑 ' : ''}${r.name}</div>
-                                            <div style="font-size:0.75rem; color:#9ca3af;">기호 ${r.symbol || '-'}</div>
-                                        </td>
-                                        <td style="padding:10px; text-align:right;">${r.count}</td>
-                                        <td style="padding:10px; text-align:right;">${r.percent}%</td>
-                                        <td style="padding:10px;">
-                                            <div style="background:#e5e7eb; height:8px; border-radius:4px; overflow:hidden;">
-                                                <div style="width:${r.percent}%; height:100%; background:${barColor};"></div>
-                                            </div>
-                                        </td>
-                                     </tr>`;
-                        });
-                        html += `</tbody></table>
-                                 <div style="padding:10px; text-align:right; font-size:0.8rem; color:#666; background:#fafafa;">
-                                     총 투표: ${totalVotesInDist}표 / 선출: ${quota}명
-                                 </div>`;
-                    }
+                        html += `<tr style="border-bottom: 1px solid #f3f4f6; ${rowBg}">
+                                    <td style="padding:10px; text-align:center;">${rankIcon}</td>
+                                    <td style="padding:10px;">
+                                        <div style="font-weight:bold;">${isWinner ? '👑 ' : ''}${r.name}</div>
+                                        <div style="font-size:0.75rem; color:#9ca3af;">기호 ${r.symbol || '-'}</div>
+                                    </td>
+                                    <td style="padding:10px; text-align:right;">${r.count}</td>
+                                    <td style="padding:10px; text-align:right;">${r.percent}%</td>
+                                    <td style="padding:10px;">
+                                        <div style="background:#e5e7eb; height:8px; border-radius:4px; overflow:hidden;">
+                                            <div style="width:${r.percent}%; height:100%; background:${barColor};"></div>
+                                        </div>
+                                    </td>
+                                 </tr>`;
+                    });
+                    html += `</tbody></table>
+                             <div style="padding:10px; text-align:right; font-size:0.8rem; color:#666; background:#fafafa;">
+                                 총 투표: ${totalVotesInDist}표 / 선출: ${quota}명
+                             </div>`;
                 }
                 html += `</div>`; // 선거구 박스 닫기
             });

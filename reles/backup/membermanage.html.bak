@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.25
-Change: 2026-02-11 - Vote quick card now routes by election count (1: direct, 2+: select list).
+Version: v1.0.16
+Change: 2026-02-05 - Fix quick-link grid by hiding wrapper items.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.25 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.16 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -239,57 +239,16 @@ display: flex;
 flex-direction: column;
 gap: 6px;
 box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-min-height: 146px;
-position: relative;
+min-height: 132px;
 }
 .quick-title { font-weight: 700; font-size: 0.95rem; }
-.quick-election-title { font-weight: 800; font-size: 0.86rem; color: #1f2937; margin-top: -1px; }
 .quick-desc { font-size: 0.8rem; color: #6b7280; }
-.quick-stage-badge {
-display: inline-flex;
-align-items: center;
-width: fit-content;
-font-size: 0.72rem;
-font-weight: 700;
-padding: 2px 8px;
-border-radius: 999px;
-background: rgba(37, 99, 235, 0.12);
-color: #1d4ed8;
-}
-.quick-meta {
-font-size: 0.75rem;
-color: #475569;
-line-height: 1.35;
-display: flex;
-flex-direction: column;
-gap: 2px;
-}
 .quick-btn { width: 100%; font-weight: 700; margin-top: auto; font-size: 0.85rem; padding: 6px 8px; }
 .quick-blue { background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-color: #bfdbfe; }
 .quick-orange { background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border-color: #fed7aa; }
 .quick-green { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-color: #a7f3d0; }
 .quick-purple { background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border-color: #ddd6fe; }
 .quick-gray { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-color: #e2e8f0; }
-.quick-card.needs-attention {
-border-color: #ef4444 !important;
-box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14), 0 2px 8px rgba(0,0,0,0.04);
-}
-.quick-attention-badge {
-position: absolute;
-top: 8px;
-right: 8px;
-width: 22px;
-height: 22px;
-border-radius: 999px;
-background: #ef4444;
-color: #fff;
-font-weight: 800;
-font-size: 14px;
-line-height: 22px;
-text-align: center;
-box-shadow: 0 2px 8px rgba(0,0,0,0.22);
-z-index: 2;
-}
 
 /* [배지] 컨테이너 스타일 */
 #badgeContainer > * {
@@ -563,13 +522,9 @@ NO. <span id="infoMemberId">-</span>
 <div class="quick-links-grid mb-4" id="quickLinksRow">
   <div class="quick-col hidden">
     <div id="quickVoteCard" class="quick-card quick-blue">
-      <span id="voteTodoBadge" class="quick-attention-badge hidden">!</span>
       <div class="quick-title"><i class="bi bi-ui-checks-grid me-1"></i>선거/투표</div>
-      <div id="quickVoteElectionTitle" class="quick-election-title hidden">선거명</div>
-      <div id="quickVoteStage" class="quick-stage-badge hidden">상태 확인</div>
-      <div id="quickVoteDesc" class="quick-desc">선거 진행 상황을 확인하세요</div>
-      <div id="quickVoteMeta" class="quick-meta hidden"></div>
-      <button id="quickVoteBtn" onclick="goToVoteSystem()" class="quick-btn btn btn-primary">투표소 입장</button>
+      <div class="quick-desc">선거 관리 및 투표소</div>
+      <button onclick="goToVoteSystem()" class="quick-btn btn btn-primary">투표소 입장</button>
     </div>
   </div>
   <div class="quick-col hidden">
@@ -588,7 +543,6 @@ NO. <span id="infoMemberId">-</span>
   </div>
   <div class="quick-col hidden">
     <div id="quickMinutesSignCard" class="quick-card quick-purple">
-      <span id="signTodoBadge" class="quick-attention-badge hidden">!</span>
       <div class="quick-title"><i class="bi bi-pen me-1"></i>전자서명</div>
       <div class="quick-desc">서명 요청 확인</div>
       <button onclick="location.href='minutes/minutes_sign.html'" class="quick-btn btn btn-primary">서명하기</button>
@@ -1083,35 +1037,6 @@ if (Number.isNaN(d.getTime())) return fallback;
 return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_MEMBER, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 }
 
-const DEFAULT_DIVIDEND_TAX_RATE = 0.154;
-function toFiniteNumber(value) {
-const num = Number(value);
-return Number.isFinite(num) ? num : 0;
-}
-function getDividendTaxRate(item = {}) {
-const rawRate = toFiniteNumber(item.tax_rate);
-if (rawRate <= 0) return DEFAULT_DIVIDEND_TAX_RATE;
-return rawRate > 1 ? (rawRate / 100) : rawRate;
-}
-function getDividendGross(item = {}) {
-const gross = toFiniteNumber(item.total_amount);
-if (gross !== 0) return gross;
-const net = toFiniteNumber(item.net_amount);
-const tax = toFiniteNumber(item.tax_amount);
-return net + tax;
-}
-function getDividendTax(item = {}) {
-const gross = getDividendGross(item);
-const explicitTax = toFiniteNumber(item.tax_amount);
-if (explicitTax !== 0) return explicitTax;
-return Math.round(gross * getDividendTaxRate(item));
-}
-function getDividendNet(item = {}) {
-const explicitNet = toFiniteNumber(item.net_amount);
-if (explicitNet !== 0) return explicitNet;
-return getDividendGross(item) - getDividendTax(item);
-}
-
 try {
 _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 window._client = _supabase;
@@ -1303,7 +1228,7 @@ email: email,
 options: { 
 shouldCreateUser: true, 
 // [변경] href 대신 origin + pathname 사용 (뒤에 붙은 # 등을 제거하기 위함)
-emailRedirectTo: window.location.origin + window.location.pathname + window.location.search
+emailRedirectTo: window.location.origin + window.location.pathname
 } 
 });
 
@@ -1332,49 +1257,6 @@ document.getElementById('targetEmail').innerText = email;
 }
 }
 
-// [로그인 복귀] next 파라미터를 안전하게 검증하여 원래 페이지로 복귀
-function getSafeLoginReturnUrl() {
-const params = new URLSearchParams(window.location.search);
-const raw = params.get('next') || '';
-if (!raw) return '';
-
-const allowOrigins = [
-window.location.origin,
-'https://www.yonginsolar.kr',
-'https://erp.yonginsolar.kr',
-'http://localhost:8000'
-];
-
-function normalizeDest(candidate) {
-try {
-const dest = new URL(candidate, window.location.href);
-if (!allowOrigins.includes(dest.origin)) return null;
-return dest;
-} catch (e) {
-return null;
-}
-}
-
-let dest = normalizeDest(raw);
-if (!dest) return '';
-
-// membermanage.html?next=... 형태면 중첩 next를 우선 사용
-if (dest.origin === window.location.origin && dest.pathname.endsWith('/membermanage.html')) {
-const nestedRaw = new URLSearchParams(dest.search).get('next');
-const nestedDest = nestedRaw ? normalizeDest(nestedRaw) : null;
-if (nestedDest) dest = nestedDest;
-}
-
-// 현재 페이지로의 자기 자신 복귀는 무시
-if (dest.origin === window.location.origin &&
-dest.pathname === window.location.pathname &&
-dest.search === window.location.search) {
-return '';
-}
-
-return dest.href;
-}
-
 // [수정] 로그인 성공 후 처리 (세션 스토리지를 확인하여 마지막 프로필 유지)
 async function handleLoginSuccess(user) {
 curAuth = user;
@@ -1390,16 +1272,6 @@ if (claimErr || !claimRes.success) {
 void 0;
 document.getElementById('manualMatchModal').style.display = 'flex';
 return; 
-}
-
-// 로그인 후 원래 접근 페이지로 즉시 복귀
-const returnUrl = getSafeLoginReturnUrl();
-if (returnUrl) {
-localStorage.removeItem('auth_destination');
-const cleanUrl = window.location.origin + window.location.pathname;
-window.history.replaceState({}, document.title, cleanUrl);
-window.location.replace(returnUrl);
-return;
 }
 
 // 성공 시 대시보드 로드
@@ -1583,8 +1455,6 @@ throw new Error('회원 정보를 불러올 수 없습니다.');
 const maskedAcc = await fetchMaskedBankInfo(uuid);
 if (maskedAcc) member.account_number = maskedAcc; 
 curMem = member; 
-// [신규] 현재 로드하는 프로필 유형도 저장 (타 페이지 연동용)
-sessionStorage.setItem('activeMemberType', curMem.member_type);
 
 // 2. 모든 자산 데이터 병렬 조회 (Promise.all)
 const pLedger = _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
@@ -1610,9 +1480,7 @@ const assets = {
 total_capital: ledger.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
 total_donation: donations.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
 current_points: points.reduce((acc, cur) => acc + Number(cur.change_amount || 0), 0),
-total_dividend_gross: dividends.reduce((acc, cur) => acc + getDividendGross(cur), 0),
-total_dividend_tax: dividends.reduce((acc, cur) => acc + getDividendTax(cur), 0),
-total_dividend_net: dividends.reduce((acc, cur) => acc + getDividendNet(cur), 0)
+total_dividend: dividends.reduce((acc, cur) => acc + Number(cur.total_amount || 0), 0)
 };
 curMem.total_capital = assets.total_capital; 
 
@@ -1710,312 +1578,10 @@ return `${prefix}${yy}년 ${Number(mm)}월 ${Number(dd)}일`;
 
 // 전역 변수로 상세 내역 모달에서 쓸 데이터를 담아둡니다.
 let globalHistoryData = {};  
-let quickVoteActionUrl = 'vote/vote_login.html';
-
-const VOTE_PHASE_PRIORITY = Object.freeze({
-OPEN: 1,
-NOMINATION: 2,
-READY: 3,
-PAUSED: 3,
-CLOSED: 4,
-PUBLISHED: 5,
-ENDED: 5
-});
-
-function toValidDate(value) {
-if (!value) return null;
-const d = new Date(value);
-return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function deriveElectionPhase(election, now = new Date()) {
-const status = String(election?.status || '').toUpperCase();
-const candStart = toValidDate(election?.candidacy_start_at);
-const candEnd = toValidDate(election?.candidacy_end_at);
-const voteStart = toValidDate(election?.vote_start_at || election?.start_at);
-const voteEnd = toValidDate(election?.vote_end_at || election?.end_at);
-
-if (status === 'PUBLISHED' || status === 'ENDED') return 'PUBLISHED';
-if (status === 'CLOSED') return 'CLOSED';
-if (status === 'OPEN') return 'OPEN';
-if (status === 'NOMINATION') return 'NOMINATION';
-if (status === 'PAUSED') {
-if (voteStart && voteEnd && now >= voteStart && now <= voteEnd) return 'PAUSED';
-return 'READY';
-}
-if (status === 'READY') return 'READY';
-if (candStart && candEnd && now >= candStart && now <= candEnd) return 'NOMINATION';
-if (voteStart && voteEnd && now >= voteStart && now <= voteEnd) return 'OPEN';
-if (voteEnd && now > voteEnd) return 'CLOSED';
-return 'READY';
-}
-
-function pickPrimaryElection(elections) {
-if (!Array.isArray(elections) || elections.length === 0) return null;
-const now = new Date();
-const scored = elections.map(el => {
-const phase = deriveElectionPhase(el, now);
-const priority = VOTE_PHASE_PRIORITY[phase] || 99;
-const refDate = toValidDate(
-phase === 'NOMINATION' ? (el.candidacy_end_at || el.candidacy_start_at) : (el.vote_end_at || el.end_at || el.vote_start_at || el.start_at)
-) || toValidDate(el.created_at) || new Date(0);
-return { ...el, _phase: phase, _priority: priority, _refDate: refDate };
-});
-
-scored.sort((a, b) => {
-if (a._priority !== b._priority) return a._priority - b._priority;
-return b._refDate.getTime() - a._refDate.getTime();
-});
-return scored[0];
-}
-
-async function fetchElectionTurnoutStats(electionId) {
-if (!electionId) return null;
-try {
-const [totalRes, votedRes] = await Promise.all([
-_supabase.from('election_voters').select('*', { count: 'exact', head: true }).eq('election_id', electionId),
-_supabase.from('vote_logs').select('*', { count: 'exact', head: true }).eq('election_id', electionId)
-]);
-if (totalRes.error || votedRes.error) return null;
-const total = Number(totalRes.count || 0);
-const voted = Number(votedRes.count || 0);
-const percent = total > 0 ? ((voted / total) * 100).toFixed(1) : '0.0';
-return { total, voted, percent };
-} catch (e) {
-return null;
-}
-}
-
-const MEMBER_DISTRICT_VOTE_STATE = Object.freeze({
-BINARY: 'BINARY',
-CONTESTED: 'CONTESTED',
-UNCONTESTED: 'UNCONTESTED',
-NO_CANDIDATE: 'NO_CANDIDATE'
-});
-
-function normalizeMemberVoteQuota(value) {
-const parsed = Number(value);
-if (!Number.isFinite(parsed) || parsed < 1) return 1;
-return Math.floor(parsed);
-}
-
-function classifyMemberDistrictVoteState(voteType, candidateCount, quota) {
-const type = String(voteType || '').toUpperCase();
-if (type === 'BINARY') return MEMBER_DISTRICT_VOTE_STATE.BINARY;
-if (!Number(candidateCount) || Number(candidateCount) <= 0) return MEMBER_DISTRICT_VOTE_STATE.NO_CANDIDATE;
-if (Number(candidateCount) <= normalizeMemberVoteQuota(quota)) return MEMBER_DISTRICT_VOTE_STATE.UNCONTESTED;
-return MEMBER_DISTRICT_VOTE_STATE.CONTESTED;
-}
-
-function isMemberDistrictVotingRequired(state) {
-return state === MEMBER_DISTRICT_VOTE_STATE.BINARY || state === MEMBER_DISTRICT_VOTE_STATE.CONTESTED;
-}
-
-async function getElectionDistrictActionSummary(electionId, districtIds = []) {
-if (!electionId || !Array.isArray(districtIds) || districtIds.length === 0) {
-return {
-actionableSet: new Set(),
-binaryCount: 0,
-contestedCount: 0,
-uncontestedCount: 0,
-noCandidateCount: 0
-};
-}
-
-const uniqueDistrictIds = Array.from(new Set(districtIds.filter(Boolean)));
-if (uniqueDistrictIds.length === 0) {
-return {
-actionableSet: new Set(),
-binaryCount: 0,
-contestedCount: 0,
-uncontestedCount: 0,
-noCandidateCount: 0
-};
-}
-
-try {
-const [distRes, candRes] = await Promise.all([
-_supabase
-.from('districts')
-.select('id, vote_type, quota')
-.eq('election_id', electionId)
-.in('id', uniqueDistrictIds),
-_supabase
-.from('candidates')
-.select('district_id')
-.eq('election_id', electionId)
-.eq('status', 'APPROVED')
-.in('district_id', uniqueDistrictIds)
-]);
-
-if (distRes.error || candRes.error) return null;
-
-const candidateCountMap = new Map();
-(candRes.data || []).forEach((row) => {
-const districtId = row?.district_id;
-if (!districtId) return;
-candidateCountMap.set(districtId, (candidateCountMap.get(districtId) || 0) + 1);
-});
-
-const summary = {
-actionableSet: new Set(),
-binaryCount: 0,
-contestedCount: 0,
-uncontestedCount: 0,
-noCandidateCount: 0
-};
-
-(distRes.data || []).forEach((dist) => {
-const count = candidateCountMap.get(dist.id) || 0;
-const state = classifyMemberDistrictVoteState(dist.vote_type, count, dist.quota);
-if (state === MEMBER_DISTRICT_VOTE_STATE.BINARY) summary.binaryCount += 1;
-else if (state === MEMBER_DISTRICT_VOTE_STATE.CONTESTED) summary.contestedCount += 1;
-else if (state === MEMBER_DISTRICT_VOTE_STATE.UNCONTESTED) summary.uncontestedCount += 1;
-else if (state === MEMBER_DISTRICT_VOTE_STATE.NO_CANDIDATE) summary.noCandidateCount += 1;
-if (isMemberDistrictVotingRequired(state)) summary.actionableSet.add(dist.id);
-});
-
-return summary;
-} catch (e) {
-return null;
-}
-}
-
-async function getMyVoteProgress(memberUuid, electionId) {
-if (!memberUuid || !electionId) return null;
-try {
-const { data: assigned, error: assErr } = await _supabase
-.from('election_voters')
-.select('district_id')
-.eq('member_uuid', memberUuid)
-.eq('election_id', electionId);
-
-if (assErr || !assigned || assigned.length === 0) return { eligible: false, assigned: 0, voted: 0, pending: 0 };
-
-const districtIds = Array.from(new Set(
-assigned.map(row => row.district_id).filter(Boolean)
-));
-if (districtIds.length === 0) return { eligible: false, assigned: 0, voted: 0, pending: 0 };
-
-const districtSummary = await getElectionDistrictActionSummary(electionId, districtIds);
-if (!districtSummary) return null;
-
-const actionableDistrictIds = districtIds.filter((districtId) => districtSummary.actionableSet.has(districtId));
-if (actionableDistrictIds.length === 0) {
-return {
-eligible: false,
-assigned: 0,
-voted: 0,
-pending: 0,
-actionableAssigned: 0,
-totalAssigned: districtIds.length,
-uncontestedCount: districtSummary.uncontestedCount,
-noCandidateCount: districtSummary.noCandidateCount
-};
-}
-
-const { data: votedRows, error: votedErr } = await _supabase
-.from('vote_logs')
-.select('district_id')
-.eq('member_uuid', memberUuid)
-.eq('election_id', electionId)
-.in('district_id', actionableDistrictIds);
-
-if (votedErr) return null;
-
-const votedSet = new Set((votedRows || []).map(row => row.district_id).filter(Boolean));
-const assignedCount = actionableDistrictIds.length;
-const votedCount = votedSet.size;
-const pendingCount = Math.max(0, assignedCount - votedCount);
-return {
-eligible: true,
-assigned: assignedCount,
-voted: votedCount,
-pending: pendingCount,
-actionableAssigned: assignedCount,
-totalAssigned: districtIds.length,
-uncontestedCount: districtSummary.uncontestedCount,
-noCandidateCount: districtSummary.noCandidateCount
-};
-} catch (e) {
-return null;
-}
-}
-
-function buildPhaseBadgeText(phase) {
-switch (phase) {
-case 'NOMINATION': return '후보 등록중';
-case 'READY': return '투표 대기';
-case 'PAUSED': return '투표 일시정지';
-case 'OPEN': return '투표 진행중';
-case 'CLOSED': return '집계 중';
-case 'PUBLISHED': return '결과 공개';
-default: return '선거 진행';
-}
-}
-
-function setVoteQuickCardContent(config = {}) {
-const titleEl = document.getElementById('quickVoteElectionTitle');
-const stageEl = document.getElementById('quickVoteStage');
-const descEl = document.getElementById('quickVoteDesc');
-const metaEl = document.getElementById('quickVoteMeta');
-const btnEl = document.getElementById('quickVoteBtn');
-
-if (titleEl) {
-if (config.electionTitle) {
-titleEl.textContent = config.electionTitle;
-titleEl.classList.remove('hidden');
-} else {
-titleEl.textContent = '';
-titleEl.classList.add('hidden');
-}
-}
-
-if (stageEl) {
-if (config.stageText) {
-stageEl.textContent = config.stageText;
-stageEl.classList.remove('hidden');
-} else {
-stageEl.classList.add('hidden');
-}
-}
-
-if (descEl) {
-const hasDescText = typeof config.descText === 'string';
-const descText = hasDescText ? config.descText : '선거 진행 상황을 확인하세요';
-descEl.textContent = descText;
-descEl.classList.toggle('hidden', !descText.trim());
-}
-
-if (metaEl) {
-const lines = Array.isArray(config.metaLines) ? config.metaLines.filter(Boolean) : [];
-if (lines.length > 0) {
-metaEl.innerHTML = '';
-lines.forEach(line => {
-const lineEl = document.createElement('div');
-lineEl.textContent = line;
-metaEl.appendChild(lineEl);
-});
-metaEl.classList.remove('hidden');
-} else {
-metaEl.innerHTML = '';
-metaEl.classList.add('hidden');
-}
-}
-
-if (btnEl) {
-const btnType = config.buttonType || 'primary';
-btnEl.className = `quick-btn btn btn-${btnType}`;
-btnEl.textContent = config.buttonLabel || '투표소 입장';
-}
-
-quickVoteActionUrl = config.actionUrl || 'vote/vote_login.html';
-}
 
 // [수정] 선거 버튼 노출 여부 결정 함수 (DB 구조 반영)
 async function checkElectionVisibility(member, myRoles) {
 const voteCard = document.getElementById('quickVoteCard');
-const voteBadge = document.getElementById('voteTodoBadge');
 if (!voteCard) return;
 const setQuickCardVisible = (cardEl, visible) => {
     if (!cardEl) return;
@@ -2024,161 +1590,64 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
 };
 
-// 1. 관리자/선관위 여부
-const isAdmin = (member && member.role === 'admin');
-const isCommittee = myRoles && myRoles.includes('election_comm');
-const isPrivileged = !!(isAdmin || isCommittee);
-const memberUuid = member && member.id ? member.id : null;
+// 1. 관리자 여부 확인 (coop_members 테이블 -> role 컬럼)
+const isAdmin = (member.role === 'admin');
 
-// 2. 조건에 맞는 선거 조회
-const targetStatuses = ['NOMINATION', 'READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED', 'ENDED'];
+// 2. 선관위 여부 확인 (coop_officials 테이블 -> category 컬럼)
+// loadDashboardData에서 이미 조회된 myRoles 배열(['election_comm', ...])을 활용
+const isCommittee = myRoles && myRoles.includes('election_comm');
+
+// 관리자이거나 선관위라면 무조건 노출 (프리패스)
+if (isAdmin || isCommittee) {
+void 0;
+setQuickCardVisible(voteCard, true);
+return;
+}
+
+
+// 3. 일반 조합원: 조건에 맞는 선거가 있는지 DB 조회
+// 조건: 후보등록/대기/투표중/일시정지/마감/결과공개 중 하나여야 함
+const targetStatuses = ['NOMINATION', 'READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED'];
+
+// DB 조회: status가 위 목록에 포함되는 선거의 날짜만 가져옴
 const { data: elections, error } = await _supabase
 .from('elections')
-.select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, start_at, end_at, created_at')
+.select('start_at, end_at')
 .in('status', targetStatuses);
 
 if (error || !elections || elections.length === 0) {
 setQuickCardVisible(voteCard, false); // 조건 맞는 선거 없음
-setQuickCardTodoState(voteCard, voteBadge, false);
-setVoteQuickCardContent({
-stageText: '',
-descText: '선거 진행 상황을 확인하세요',
-metaLines: [],
-buttonLabel: '투표소 입장',
-actionUrl: 'vote/vote_login.html',
-buttonType: 'primary'
-});
 return;
 }
 
-const targetElection = pickPrimaryElection(elections);
-if (!targetElection) {
-setQuickCardVisible(voteCard, false);
-setQuickCardTodoState(voteCard, voteBadge, false);
-return;
+// 4. 날짜 정밀 체크 (JS로 계산)
+const now = new Date();
+let showButton = false;
+
+for (let el of elections) {
+// 날짜 데이터 유효성 체크
+if (!el.start_at || !el.end_at) continue;
+
+const startDate = new Date(el.start_at);
+const endDate = new Date(el.end_at);
+
+// 종료일 + 14일 계산 (결과 확인 기간)
+const extendedEndDate = new Date(endDate);
+extendedEndDate.setDate(endDate.getDate() + 14);
+
+// 오늘이 [시작일 ~ 종료일+14일] 사이에 있는가?
+if (now >= startDate && now <= extendedEndDate) {
+showButton = true;
+break; // 하나라도 만족하면 즉시 노출
+}
 }
 
-const electionCount = elections.length;
-const isMultiElection = electionCount > 1;
-const phase = targetElection._phase || deriveElectionPhase(targetElection, new Date());
-const electionId = targetElection.id;
-const singleElectionUrl = electionId ? `vote/vote_login.html?id=${electionId}` : 'vote/vote_login.html';
-const listUrl = 'vote/vote_login.html';
-const voteActionUrl = isMultiElection ? listUrl : singleElectionUrl;
-
+// 최종 결정
+if (showButton) {
 setQuickCardVisible(voteCard, true);
-
-if (!isPrivileged && memberUuid) {
-const hasPendingVote = await hasPendingVoteTasks(memberUuid);
-setQuickCardTodoState(voteCard, voteBadge, hasPendingVote);
 } else {
-setQuickCardTodoState(voteCard, voteBadge, false);
+setQuickCardVisible(voteCard, false);
 }
-
-if (isMultiElection) {
-const multiMetaLines = [`현재 대상 선거 ${electionCount}건`];
-if (targetElection.title) multiMetaLines.push(`대표 선거: ${targetElection.title}`);
-setVoteQuickCardContent({
-electionTitle: '',
-stageText: '선거 선택',
-descText: '선거가 2개 이상입니다. 선거 포털에서 원하는 선거 카드를 선택하세요.',
-metaLines: multiMetaLines,
-buttonLabel: '선거 선택하기',
-actionUrl: listUrl,
-buttonType: 'primary'
-});
-return;
-}
-
-const turnout = await fetchElectionTurnoutStats(electionId);
-const myProgress = await getMyVoteProgress(memberUuid, electionId);
-const metaLines = [];
-
-const voteStart = toValidDate(targetElection.vote_start_at || targetElection.start_at);
-const voteEnd = toValidDate(targetElection.vote_end_at || targetElection.end_at);
-const candEnd = toValidDate(targetElection.candidacy_end_at);
-
-if (phase === 'NOMINATION') {
-if (candEnd) metaLines.push(`등록 마감: ${formatMemberKstDateTime(candEnd)}`);
-setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '',
-metaLines,
-buttonLabel: '후보 등록하기',
-actionUrl: voteActionUrl,
-buttonType: 'primary'
-});
-return;
-}
-
-if (phase === 'READY' || phase === 'PAUSED') {
-if (voteStart) metaLines.push(`투표 시작: ${formatMemberKstDateTime(voteStart)}`);
-setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '후보자 정보를 확인하고 투표를 준비하세요.',
-metaLines,
-buttonLabel: '후보자 확인하기',
-actionUrl: voteActionUrl,
-buttonType: 'info'
-});
-return;
-}
-
-if (phase === 'OPEN') {
-const progressKnown = !!myProgress;
-const hasActionable = progressKnown ? (myProgress.actionableAssigned > 0) : true;
-const hasPending = progressKnown ? !!(myProgress.eligible && myProgress.pending > 0) : true;
-if (hasActionable && turnout) metaLines.push(`투표율 ${turnout.percent}% (${turnout.voted}/${turnout.total}명)`);
-if (progressKnown && myProgress.eligible) {
-metaLines.push(`내 상태: ${hasPending ? '미투표' : '투표 완료'} (${myProgress.voted}/${myProgress.assigned})`);
-} else if (progressKnown && !hasActionable) {
-if (myProgress.uncontestedCount > 0 || myProgress.noCandidateCount > 0) {
-metaLines.push(`내 선거구: 무투표 ${myProgress.uncontestedCount || 0}개 / 후보 미등록 ${myProgress.noCandidateCount || 0}개`);
-} else {
-metaLines.push('내 선거구: 투표 대상 없음');
-}
-}
-if (voteEnd) metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
-const openDesc = hasActionable
-? '투표가 진행 중입니다.'
-: '내 선거구는 무투표/후보미등록으로 별도 투표가 필요하지 않습니다.';
-setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: openDesc,
-metaLines,
-buttonLabel: hasActionable ? (hasPending ? '투표 참여하기' : '투표 현황 보기') : '후보자/현황 보기',
-actionUrl: voteActionUrl,
-buttonType: hasActionable ? 'success' : 'secondary'
-});
-return;
-}
-
-if (phase === 'CLOSED') {
-if (voteEnd) metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
-setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '투표가 마감되어 집계 중입니다.',
-metaLines,
-buttonLabel: '후보자/현황 보기',
-actionUrl: voteActionUrl,
-buttonType: 'secondary'
-});
-return;
-}
-
-setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '선거 결과가 공개되었습니다.',
-metaLines,
-buttonLabel: '결과 보기',
-actionUrl: voteActionUrl,
-buttonType: 'secondary'
-});
 }
 
 // [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
@@ -2271,9 +1740,8 @@ activeAssets.push({ title: '보유 포인트', val: assets.current_points, unit:
 }
 
 // 4. 배당금
-if(assets.total_dividend_gross > 0 || assets.total_dividend_net > 0 || dividends.length > 0) {
-activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend_gross, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
-activeAssets.push({ title: '배당금(세후)', val: assets.total_dividend_net, unit: '원', icon: 'bi-cash-coin', color: '#1565C0', type: 'dividend_net' });
+if(assets.total_dividend > 0 || dividends.length > 0) {
+activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
 }
 
 // Grid 컬럼 계산 (1개면 12, 2개면 6, 3개면 4, 4개면 3)
@@ -2332,82 +1800,6 @@ async function hasPendingMinuteSigns(officialIds) {
     }
 }
 
-function setQuickCardTodoState(cardEl, badgeEl, isOn) {
-    const on = !!isOn;
-    if (cardEl) cardEl.classList.toggle('needs-attention', on);
-    if (badgeEl) badgeEl.classList.toggle('hidden', !on);
-}
-
-async function hasPendingVoteTasks(memberUuid) {
-    try {
-        if (!memberUuid) return false;
-
-        const { data: openElections, error: openErr } = await _supabase
-            .from('elections')
-            .select('id')
-            .eq('status', 'OPEN');
-
-        if (openErr || !openElections || openElections.length === 0) return false;
-
-        const openElectionIds = openElections.map(row => row.id).filter(Boolean);
-        if (openElectionIds.length === 0) return false;
-
-        const { data: assigned, error: assErr } = await _supabase
-            .from('election_voters')
-            .select('election_id, district_id')
-            .eq('member_uuid', memberUuid)
-            .in('election_id', openElectionIds);
-
-        if (assErr || !assigned || assigned.length === 0) return false;
-
-        const assignedMap = new Map();
-        assigned.forEach((row) => {
-            const electionId = row?.election_id;
-            const districtId = row?.district_id;
-            if (!electionId || !districtId) return;
-            if (!assignedMap.has(electionId)) assignedMap.set(electionId, new Set());
-            assignedMap.get(electionId).add(districtId);
-        });
-        if (assignedMap.size === 0) return false;
-
-        const pendingKeys = new Set();
-        for (const [electionId, districtSet] of assignedMap.entries()) {
-            const districtIds = Array.from(districtSet);
-            const districtSummary = await getElectionDistrictActionSummary(electionId, districtIds);
-            if (!districtSummary) continue;
-            districtIds.forEach((districtId) => {
-                if (districtSummary.actionableSet.has(districtId)) {
-                    pendingKeys.add(`${electionId}::${districtId}`);
-                }
-            });
-        }
-        if (pendingKeys.size === 0) return false;
-
-        const actionableDistrictIds = Array.from(new Set(
-            Array.from(pendingKeys).map((key) => key.split('::')[1]).filter(Boolean)
-        ));
-        if (actionableDistrictIds.length === 0) return false;
-
-        const { data: voted, error: votedErr } = await _supabase
-            .from('vote_logs')
-            .select('election_id, district_id')
-            .eq('member_uuid', memberUuid)
-            .in('election_id', openElectionIds)
-            .in('district_id', actionableDistrictIds);
-
-        if (votedErr) return false;
-
-        (voted || []).forEach(row => {
-            if (!row.election_id || !row.district_id) return;
-            pendingKeys.delete(`${row.election_id}::${row.district_id}`);
-        });
-
-        return pendingKeys.size > 0;
-    } catch (e) {
-        return false;
-    }
-}
-
 // [신규] 퀵 링크 카드 노출 제어
 function renderQuickLinks(member, myRoles, isOfficial, officialIds) {
 const isAdmin = (member && member.role === 'admin');
@@ -2417,7 +1809,6 @@ const solarCard = document.getElementById('quickSolarCard');
 const minutesAdminCard = document.getElementById('quickMinutesAdminCard');
 const minutesSignCard = document.getElementById('quickMinutesSignCard');
 const minutesViewCard = document.getElementById('quickMinutesViewCard');
-const signBadge = document.getElementById('signTodoBadge');
 
 const setQuickCardVisible = (cardEl, visible) => {
     if (!cardEl) return;
@@ -2426,33 +1817,24 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
 };
 
-setQuickCardTodoState(minutesSignCard, signBadge, false);
-
 // 회의록 카드: 관리자=전체, 임원=서명만, 조합원=열람만
 if (isAdmin) {
 setQuickCardVisible(minutesAdminCard, true);
 setQuickCardVisible(minutesSignCard, true);
 setQuickCardVisible(minutesViewCard, true);
-if (minutesSignCard && officialIds && officialIds.length > 0) {
-    hasPendingMinuteSigns(officialIds).then(hasPending => {
-        setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
-    });
-}
 } else if (isOfficial) {
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesViewCard, false);
 setQuickCardVisible(minutesSignCard, false);
 if (minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
-        setQuickCardVisible(minutesSignCard, hasPending);
-        setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
+        if (hasPending) setQuickCardVisible(minutesSignCard, true);
     });
 }
 } else {
 setQuickCardVisible(minutesViewCard, true);
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesSignCard, false);
-setQuickCardTodoState(minutesSignCard, signBadge, false);
 }
 
 // 선거/태양광 노출은 기존 로직에서 제어 (카드 DOM만 여기서 초기화)
@@ -2531,33 +1913,24 @@ html += `<tr>
 }
 summaryEl.innerHTML = `현재 잔액: <span class="text-dark fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span> P`;
 
-} else if(type === 'dividend' || type === 'dividend_net') {
-title = (type === 'dividend_net') ? '📉 배당금(세후) 지급 내역' : '📈 배당금(세전) 지급 내역';
-html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급일</th><th class="text-end py-3">세전</th><th class="text-end py-3">세액</th><th class="text-end py-3 pe-3">세후</th></tr></thead><tbody>';
+} else if(type === 'dividend') {
+title = '📈 배당금 지급 내역';
+// 상세 모드: 연도 - 지급일 - 금액
+html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급일</th><th class="text-end py-3 pe-3">금액(세전)</th></tr></thead><tbody>';
 const data = globalHistoryData.dividends || [];
-const totalGross = data.reduce((a,c)=>a+getDividendGross(c),0);
-const totalTax = data.reduce((a,c)=>a+getDividendTax(c),0);
-const totalNet = data.reduce((a,c)=>a+getDividendNet(c),0);
-total = (type === 'dividend_net') ? totalNet : totalGross;
+total = data.reduce((a,c)=>a+Number(c.total_amount),0);
 
-if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
+if(data.length === 0) html += '<tr><td colspan="3" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
 else {
 data.forEach(item => {
-const gross = getDividendGross(item);
-const tax = getDividendTax(item);
-const net = getDividendNet(item);
 html += `<tr>
                    <td class="py-3 ps-3 fw-bold">${item.fiscal_year}년</td>
                    <td class="py-3 text-muted">${formatMemberKstDate(item.paid_at)}</td>
-                   <td class="text-end fw-bold py-3 text-primary">+${Number(gross).toLocaleString()}</td>
-                   <td class="text-end fw-bold py-3 text-danger">-${Number(tax).toLocaleString()}</td>
-                   <td class="text-end fw-bold py-3 pe-3 text-success">+${Number(net).toLocaleString()}</td>
+                   <td class="text-end fw-bold py-3 pe-3 text-primary" style="font-size:1.1rem">+${Number(item.total_amount).toLocaleString()}</td>
                </tr>`;
 });
 }
-summaryEl.innerHTML = `누적 세전: <span class="text-primary fs-6 fw-bold ms-2">${Number(totalGross).toLocaleString()}</span>원
- / 세액: <span class="text-danger fs-6 fw-bold ms-2">${Number(totalTax).toLocaleString()}</span>원
- / 세후: <span class="text-success fs-6 fw-bold ms-2">${Number(totalNet).toLocaleString()}</span>원`;
+summaryEl.innerHTML = `누적 지급액: <span class="text-primary fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span>원`;
 }
 
 html += '</tbody></table></div>';
@@ -2691,9 +2064,6 @@ html: `
 // 5. 배당금 (Dividends)
 // ---------------------------------------------------------
 dividends.forEach(d => {
-const gross = getDividendGross(d);
-const tax = getDividendTax(d);
-const net = getDividendNet(d);
 items.push({
 ts: d.paid_at ? new Date(d.paid_at).getTime() : (d.created_at ? new Date(d.created_at).getTime() : 0),
 dateStr: formatMemberKstDate(d.paid_at),
@@ -2702,8 +2072,7 @@ html: `
                    <div class="timeline-date">${formatMemberKstDate(d.paid_at)}</div>
                    <div class="timeline-content">
                        <h6 class="fw-bold text-primary"><i class="bi bi-graph-up-arrow me-1"></i>배당금 지급 (${d.fiscal_year}년도)</h6>
-                       <p class="fw-bold mb-1">세전 ${Number(gross).toLocaleString()}원 / 세후 ${Number(net).toLocaleString()}원</p>
-                       <p class="small text-muted mb-0">원천세 ${Number(tax).toLocaleString()}원 (${(getDividendTaxRate(d) * 100).toFixed(1)}%)</p>
+                       <p class="fw-bold">${Number(d.total_amount).toLocaleString()}원</p>
                    </div>
                </div>`
 });
@@ -4648,8 +4017,8 @@ location.reload();
 return;
 }
 
-// 3. 유효하다면 같은 도메인의 대상 페이지로 이동 (세션 공유)
-const targetUrl = quickVoteActionUrl || 'vote/vote_login.html';
+// 3. 유효하다면 같은 도메인의 투표 페이지로 이동 (세션 공유)
+const targetUrl = 'vote/vote_login.html';
 window.location.href = targetUrl;
 }
 

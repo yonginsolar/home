@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.36 | Change: 2026-02-09 - Donation sync new-only: if note has [전표완료], never correct/repost; skip entirely. -->
+<!-- Version: v1.0.32 | Change: 2026-02-09 - Add cancel-and-repost correction flow for donation/capital auto-sync. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.36 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.32 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>회계 관리</title>
@@ -438,15 +438,6 @@
 
     <div class="tab-pane fade" id="tabSync">
       <div class="d-grid gap-3">
-          <div class="card p-3 border-start border-5 border-dark bg-light">
-             <div class="d-flex justify-content-between align-items-center">
-               <div>
-                 <h6 class="fw-bold mb-1">↩️ 자동연동 직전 취소</h6>
-                 <small class="text-muted" id="autoSyncUndoInfo">되돌릴 자동연동 기록이 없습니다.</small>
-               </div>
-               <button class="btn btn-outline-dark btn-sm" onclick="confirmSync('undo_sync_last')">직전 취소</button>
-             </div>
-          </div>
           <div class="card p-3 border-start border-5 border-info bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💼 급여 대장 연동</h6><small class="text-muted">HR_Salary → 회계 전표</small></div>
@@ -727,7 +718,6 @@ let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
 let historyViewMode = 'single';
-const AUTO_SYNC_UNDO_KEY = 'erp_auto_sync_last_undo_v1';
 
 // 1. 초기화
 window.onload = async function() {
@@ -815,7 +805,6 @@ window.onload = async function() {
     renderReceivableVendorSelect();
     onReceivableIncomeTypeChange();
     toggleAdvancedMode();
-    renderAutoSyncUndoInfo();
 };
 
 // Helper
@@ -905,57 +894,6 @@ function createRevisionTransId(prefix, sourceId, action) {
     const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
     const rand = Math.random().toString(36).slice(2, 6);
     return `${prefix}-${sourceId}-${action}-${stamp}-${rand}`;
-}
-
-function collectTransIds(entries) {
-    return Array.from(new Set((entries || [])
-        .map((entry) => String(entry.Trans_ID || '').trim())
-        .filter(Boolean)));
-}
-
-function getLastAutoSyncUndo() {
-    try {
-        const raw = localStorage.getItem(AUTO_SYNC_UNDO_KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object') return null;
-        return parsed;
-    } catch (e) {
-        return null;
-    }
-}
-
-function setLastAutoSyncUndo(payload) {
-    try {
-        localStorage.setItem(AUTO_SYNC_UNDO_KEY, JSON.stringify(payload || {}));
-    } catch (e) { /* noop */ }
-    renderAutoSyncUndoInfo();
-}
-
-function clearLastAutoSyncUndo() {
-    try {
-        localStorage.removeItem(AUTO_SYNC_UNDO_KEY);
-    } catch (e) { /* noop */ }
-    renderAutoSyncUndoInfo();
-}
-
-function renderAutoSyncUndoInfo() {
-    const infoEl = document.getElementById('autoSyncUndoInfo');
-    if (!infoEl) return;
-
-    const state = getLastAutoSyncUndo();
-    if (!state) {
-        infoEl.textContent = '되돌릴 자동연동 기록이 없습니다.';
-        return;
-    }
-
-    const createdAt = new Date(state.created_at || '');
-    const timeLabel = Number.isNaN(createdAt.getTime())
-        ? '방금'
-        : `${createdAt.getMonth() + 1}/${createdAt.getDate()} ${String(createdAt.getHours()).padStart(2, '0')}:${String(createdAt.getMinutes()).padStart(2, '0')}`;
-    const label = String(state.label || state.type || '자동연동');
-    const transCount = Array.isArray(state.trans_ids) ? state.trans_ids.length : 0;
-    infoEl.textContent = `${label} · ${timeLabel} · 전표 ${transCount}건 되돌리기 가능`;
 }
 
 function parseSourceIdFromTransId(transId, prefix) {
@@ -1117,26 +1055,6 @@ function appendApprovalAccrualReversalEntries(entries, payload) {
     };
     entries.push({ ...common, Type: '부채', Account: '미지급금', Debit: amount, Credit: 0 });
     entries.push({ ...common, Type: '비용', Account: '미분류비용', Debit: 0, Credit: amount });
-}
-
-function appendApprovalPaymentEntries(entries, payload) {
-    const amount = Math.max(0, Number(payload.amount || 0));
-    if (!(amount > 0)) return;
-    const common = {
-        Date: payload.date,
-        Description: payload.description,
-        Trans_ID: payload.transId,
-        Project: payload.project || '본사',
-        Operator: payload.operator
-    };
-    // 집행(지급) 단계: (차) 미지급금 / (대) 보통예금
-    entries.push({ ...common, Type: '부채', Account: '미지급금', Debit: amount, Credit: 0 });
-    entries.push({ ...common, Type: '자산', Account: '보통예금', Debit: 0, Credit: amount });
-}
-
-function isSalaryLikeApproval(doc) {
-    const merged = `${doc?.doc_type || ''} ${doc?.title || ''} ${doc?.content || ''}`.toLowerCase();
-    return /급여|salary|4대보험|원천세|퇴직연금|인건비/.test(merged);
 }
 
 function appendDividendCashDeltaEntries(entries, payload) {
@@ -2715,340 +2633,148 @@ function confirmSync(type) {
     const today = new Date().toISOString().slice(0,10);
     const writer = myInfo ? myInfo.emp_name : "System";
 
-// (1) 급여 연동 (말일 발생주의 + 정정 시 취소 후 재기표)
+// (1) 급여 연동 (수정본: 말일자 기준 + 회사부담분 부채 계상)
      if(type === 'salary') {
-        const ym = document.getElementById("salaryMonth").value;
+        const ym = document.getElementById("salaryMonth").value; // 예: "2025-10"
         if(!ym) return showAlert("알림", "년-월을 선택하세요.");
-
+        
+        // [중요] 해당 월의 마지막 날짜 구하기 (말일자 기준 발생주의)
         const [year, month] = ym.split('-').map(Number);
-        const lastDateObj = new Date(year, month, 0);
-        const fDate = lastDateObj.toISOString().slice(0, 10);
+        const lastDay = new Date(year, month, 0).getDate(); // 0은 이전달의 마지막날이므로 month를 그대로 쓰면 됨 (JS month는 0부터 시작하지만 Date생성자에서는 1부터 시작하는 효과)
+        // 위 설명이 헷갈릴 수 있어 직관적 코드 사용: new Date(2025, 10, 0) -> 10월 31일
+        const lastDateObj = new Date(year, month, 0); 
+        const fDate = lastDateObj.toISOString().slice(0, 10); // "2025-10-31"
 
-        (async () => {
-            const { data: previewSalaries, error: previewSalaryError } = await _supabase
-                .from('hr_salary')
-                .select('id,pay_total,ded_total,net_pay,co_total,is_accounted')
-                .eq('year_month', ym);
-            if (previewSalaryError) return showAlert("오류", "미리보기 조회 실패: " + previewSalaryError.message);
-            if (!previewSalaries || previewSalaries.length === 0) return showAlert("알림", "급여 데이터가 없습니다.");
+        showConfirm("급여 연동", `${ym}월 급여 및 4대보험(회사분)을 전표 처리하시겠습니까?\n전표일자: ${fDate}`, async () => {
+            
+            // 1. 중복 방지 (DB 상태 체크)
+            const { data: alreadyProcessed } = await _supabase.from('hr_salary').select('id').eq('year_month', ym).eq('is_accounted', true).limit(1);
+            if (alreadyProcessed && alreadyProcessed.length > 0) return showAlert("중복", `이미 ${ym}월 급여처리가 완료되었습니다.`);
 
-            const previewDesired = previewSalaries.reduce((acc, row) => {
-                acc.pay += Math.max(0, Number(row.pay_total || 0));
-                acc.ded += Math.max(0, Number(row.ded_total || 0));
-                acc.net += Math.max(0, Number(row.net_pay || 0));
-                acc.co += Math.max(0, Number(row.co_total || 0));
-                return acc;
-            }, { pay: 0, ded: 0, net: 0, co: 0 });
-
-            const { data: previewSalRows, error: previewSalRowsError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID')
-                .like('Trans_ID', `SAL-${ym}%`);
-            if (previewSalRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewSalRowsError.message);
-            const hasPosted = (previewSalRows || []).length > 0;
-
-            const previewMsg = [
-                `${ym}월 급여 연동 미리보기`,
-                `- 대상 인원: ${previewSalaries.length}명`,
-                `- 급여총액: ${previewDesired.pay.toLocaleString()}원`,
-                `- 공제총액: ${previewDesired.ded.toLocaleString()}원`,
-                `- 실지급액: ${previewDesired.net.toLocaleString()}원`,
-                `- 회사부담분: ${previewDesired.co.toLocaleString()}원`,
-                `- 처리 방식: ${hasPosted ? '기존 SAL 전표 정정(취소 후 재기표)' : '신규 SAL 전표 생성'}`
-            ].join('\n');
-
-            showConfirm("급여 연동", previewMsg, async () => {
+            // 2. [핵심] 회사 부담분 자동 계산 (DB 함수 호출)
+            // 방금 만든 SQL 함수를 여기서 실행해서 빈칸을 채웁니다.
             const { error: calcError } = await _supabase.rpc('calc_company_share', { target_ym: ym });
             if(calcError) return showAlert("오류", "회사부담분 계산 실패: " + calcError.message);
 
-            const { data: salaries, error: fetchError } = await _supabase
-                .from('hr_salary')
-                .select('*')
-                .eq('year_month', ym);
-            if(fetchError) return showAlert("오류", "급여 데이터 조회 실패: " + fetchError.message);
-            if(!salaries || salaries.length === 0) return showAlert("알림", "급여 데이터가 없습니다.");
+            // 3. 데이터 가져오기 (계산된 결과 조회)
+            const { data: salaries, error: fetchError } = await _supabase.from('hr_salary').select('*').eq('year_month', ym);
+            if(fetchError || !salaries.length) return showAlert("오류", "급여 데이터가 없습니다.");
 
-            const desired = {
-                pay: 0,
-                ded: 0,
-                net: 0,
-                co: 0
-            };
-            const salaryStateBefore = new Map();
-            salaries.forEach((row) => {
-                desired.pay += Math.max(0, Number(row.pay_total || 0));
-                desired.ded += Math.max(0, Number(row.ded_total || 0));
-                desired.net += Math.max(0, Number(row.net_pay || 0));
-                desired.co += Math.max(0, Number(row.co_total || 0));
-                salaryStateBefore.set(String(row.id), row.is_accounted === true);
+            // 4. 합계 집계
+            let totalPay = 0;   // 지급총액 (급여)
+            let totalDed = 0;   // 직원공제총액 (예수금)
+            let totalNet = 0;   // 실지급액 (보통예금/미지급금) -> 미지급금으로 잡는게 맞음(말일 기준이라 이체 안했으니)
+            let totalCo = 0;    // 회사부담총액 (세금과공과)
+            
+            let salaryIds = [];
+
+            salaries.forEach(s => {
+                totalPay += Number(s.pay_total || 0);
+                totalDed += Number(s.ded_total || 0);
+                totalNet += Number(s.net_pay || 0);
+                totalCo  += Number(s.co_total || 0); // 계산된 회사부담금 합계
+                salaryIds.push(s.id);
             });
 
-            const { data: salRows, error: salError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', `SAL-${ym}%`);
-            if (salError) return showAlert("오류", "기존 전표 확인 실패: " + salError.message);
-
-            const current = {
-                pay: sumAccountSideAmount(salRows || [], '급여', 'Debit'),
-                ded: sumAccountSideAmount(salRows || [], '예수금', 'Credit'),
-                net: sumAccountSideAmount(salRows || [], '미지급금', 'Credit'),
-                coExpense: sumAccountSideAmount(salRows || [], '세금과공과', 'Debit'),
-                coLiability: sumAccountSideAmount(salRows || [], '미지급비용', 'Credit')
-            };
-            const hasCurrentEntries = (salRows || []).length > 0;
-            const hasLegacyFinalOnly = !hasCurrentEntries && salaries.some((row) => row.is_accounted === true);
-
-            if (hasLegacyFinalOnly) {
-                return showAlert("알림", `${ym}월은 전표완료 표시만 있고 SAL- 전표 연결이 없어 자동 정정을 건너뜁니다.\n기존 전표를 확인 후 수동 조정하세요.`);
-            }
-
-            const isSame =
-                current.pay === desired.pay &&
-                current.ded === desired.ded &&
-                current.net === desired.net &&
-                current.coExpense === desired.co &&
-                current.coLiability === desired.co;
-
-            if (isSame) {
-                const updateTargets = salaries.filter((row) => row.is_accounted !== true).map((row) => row.id);
-                if (updateTargets.length > 0) {
-                    const { error: markError } = await _supabase
-                        .from('hr_salary')
-                        .update({ is_accounted: true })
-                        .in('id', updateTargets);
-                    if (markError) return showAlert("부분 완료", "전표는 최신이나 처리상태 갱신에 실패했습니다: " + markError.message);
-
-                    const restores = updateTargets.map((id) => ({
-                        table: 'hr_salary',
-                        key_column: 'id',
-                        key_value: String(id),
-                        values: { is_accounted: salaryStateBefore.get(String(id)) === true }
-                    }));
-                    setLastAutoSyncUndo({
-                        type: 'salary',
-                        label: `급여 연동 ${ym}`,
-                        created_at: new Date().toISOString(),
-                        trans_ids: [],
-                        restores
-                    });
-                    return showAlert("완료", `${ym}월 급여 전표는 최신이며, 처리상태만 보정했습니다.`);
-                }
-                return showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
-            }
-
+            // 5. 전표 데이터 준비
             let entries = [];
-            const descBase = `[급여] ${ym}월분`;
+            const desc = `[급여] ${ym}월분`;
 
-            if (current.pay > 0 || current.ded > 0 || current.net > 0 || current.coExpense > 0 || current.coLiability > 0) {
-                const revTransId = createRevisionTransId('SAL', ym, 'REV');
-                appendSalaryAccrualReversalEntries(entries, {
-                    date: fDate,
-                    description: `${descBase} [정정취소]`,
-                    transId: revTransId,
-                    project: '본사',
-                    operator: writer,
-                    pay: current.pay,
-                    ded: current.ded,
-                    net: current.net,
-                    co: Math.max(current.coExpense, current.coLiability)
+            // === [A] 직원 급여 처리 ===
+            // (차) 급여 (비용)
+            entries.push({
+                Date: fDate, Type: '비용', Account: '급여', 
+                Description: `${desc} 정기급여 (${salaries.length}명)`, 
+                Debit: totalPay, Credit: 0, 
+                Project: '본사', Operator: writer
+            });
+
+            // (대) 예수금 (직원부담분)
+            if(totalDed > 0) {
+                entries.push({
+                    Date: fDate, Type: '부채', Account: '예수금', 
+                    Description: `${desc} 직원공제분`, 
+                    Debit: 0, Credit: totalDed, 
+                    Project: '본사', Operator: writer
                 });
             }
 
-            const desiredHasValue = desired.pay > 0 || desired.ded > 0 || desired.net > 0 || desired.co > 0;
-            if (desiredHasValue) {
-                const postTransId = !hasCurrentEntries ? `SAL-${ym}` : createRevisionTransId('SAL', ym, 'POST');
-                appendSalaryAccrualEntries(entries, {
-                    date: fDate,
-                    description: !hasCurrentEntries ? descBase : `${descBase} [정정재기표]`,
-                    transId: postTransId,
-                    project: '본사',
-                    operator: writer,
-                    pay: desired.pay,
-                    ded: desired.ded,
-                    net: desired.net,
-                    co: desired.co
+            // (대) 미지급금 (실지급액) 
+            // * 중요: 말일자에 비용을 잡는 것이므로 돈은 아직 안나갔습니다. 
+            // 따라서 '보통예금'이 아니라 '미지급금'으로 잡고, 10일에 이체할 때 (차)미지급금 / (대)보통예금 처리하는게 정석입니다.
+            // 만약 편의상 즉시 이체로 처리한다면 '보통예금'으로 유지하세요. 여기선 '미지급금'을 추천합니다.
+            if(totalNet > 0) {
+                entries.push({
+                    Date: fDate, Type: '부채', Account: '미지급금', 
+                    Description: `${desc} 실지급액 (10일 지급예정)`, 
+                    Debit: 0, Credit: totalNet, 
+                    Project: '본사', Operator: writer
                 });
             }
 
-            if (entries.length === 0) {
-                return showAlert("알림", "생성할 전표가 없습니다.");
+            // === [B] 회사 부담분 처리 (신규 기능) ===
+            if(totalCo > 0) {
+                // (차) 세금과공과 (비용 발생)
+                entries.push({
+                    Date: fDate, Type: '비용', Account: '세금과공과', 
+                    Description: `${desc} 4대보험 회사부담분`, 
+                    Debit: totalCo, Credit: 0, 
+                    Project: '본사', Operator: writer
+                });
+
+                // (대) 미지급비용 (부채 증가 - 나중에 낼 돈)
+                entries.push({
+                    Date: fDate, Type: '부채', Account: '미지급비용', 
+                    Description: `${desc} 4대보험 회사부담분`, 
+                    Debit: 0, Credit: totalCo, 
+                    Project: '본사', Operator: writer
+                });
             }
 
+            // 6. 저장 실행
+            applyTransId(entries);
             const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
             if(insertError) return showAlert("오류", "전표 저장 실패: " + insertError.message);
 
-            const { error: stateError } = await _supabase
-                .from('hr_salary')
-                .update({ is_accounted: true })
-                .eq('year_month', ym);
-            if (stateError) return showAlert("부분 완료", "전표는 저장되었으나 처리상태 갱신에 실패했습니다: " + stateError.message);
+            // 7. 상태 업데이트
+            await _supabase.from('hr_salary').update({ is_accounted: true }).in('id', salaryIds);
 
-            const restores = Array.from(salaryStateBefore.entries()).map(([id, wasAccounted]) => ({
-                table: 'hr_salary',
-                key_column: 'id',
-                key_value: id,
-                values: { is_accounted: wasAccounted === true }
-            }));
-            setLastAutoSyncUndo({
-                type: 'salary',
-                label: `급여 연동 ${ym}`,
-                created_at: new Date().toISOString(),
-                trans_ids: collectTransIds(entries),
-                restores
-            });
-
-            const isCorrection = hasCurrentEntries;
-            showAlert("완료", isCorrection ? `${ym}월 급여 정정을 반영했습니다.` : `${ym}월 급여를 전표 반영했습니다.`);
+            showAlert("성공", "급여 및 회사부담분 연동이 완료되었습니다."); 
             refreshDashboard();
-            loadHistory();
-            });
-        })();
+        });
     }
       
     // (2) 전자결재 연동
     else if (type === 'approval') {
-        (async () => {
-            const { data: approvals, error: previewError } = await _supabase
-                .from('ref_approval')
-                .select('id,doc_type,status,amount,title,content,drafter_name,created_at')
-                .eq('status', '완료')
-                .ilike('doc_type', '%지출%');
-            if (previewError) return showAlert("오류", "미리보기 조회 실패: " + previewError.message);
-            if (!approvals || approvals.length === 0) return showAlert("알림", "불러올 결재 건이 없습니다.");
-
+        showConfirm("전자결재 연동", "완료된 지출결의서를 전표로 불러오시겠습니까?", async () => {
+            const { data: approvals } = await _supabase.from('ac_approval').select('*').eq('status', '완료').ilike('doc_type', '%지출%');
+            if(!approvals || !approvals.length) return showAlert("알림", "불러올 결재 건이 없습니다.");
+            
             const { data: existing, error: existingError } = await _supabase
                 .from('ac_journal')
                 .select('Trans_ID')
                 .like('Trans_ID', 'APR-%');
-            if (existingError) return showAlert("오류", "미리보기 전표 조회 실패: " + existingError.message);
-            const existingSet = new Set(existing ? existing.map((entry) => entry.Trans_ID) : []);
-            const targetDocs = approvals.filter((doc) => !existingSet.has(`APR-${doc.id}`));
-            if (targetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
+            if (existingError) return showAlert("오류", "기존 전표 확인 실패: " + existingError.message);
+            const existingSet = new Set(existing ? existing.map(e => e.Trans_ID) : []);
+            const targetDocs = approvals.filter(a => !existingSet.has(`APR-${a.id}`));
+            
+            if(targetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
 
-            const salaryLikeCount = targetDocs.filter((doc) => isSalaryLikeApproval(doc)).length;
-            const accrualCount = targetDocs.length - salaryLikeCount;
-            const totalAmount = targetDocs.reduce((sum, doc) => sum + Math.max(0, Number(doc.amount || 0)), 0);
-
-            const previewMsg = [
-                '전자결재 연동 미리보기',
-                `- 대상 건수: ${targetDocs.length}건`,
-                `- 예상 금액: ${totalAmount.toLocaleString()}원`,
-                `- 급여/인건비 집행전표: ${salaryLikeCount}건 (차)미지급금/(대)보통예금`,
-                `- 일반 지출 발생전표: ${accrualCount}건 (차)미분류비용/(대)미지급금`
-            ].join('\n');
-
-            showConfirm("전자결재 연동", previewMsg, async () => {
-                const { data: runApprovals, error: runFetchError } = await _supabase
-                    .from('ref_approval')
-                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at')
-                    .eq('status', '완료')
-                    .ilike('doc_type', '%지출%');
-                if (runFetchError) return showAlert("오류", "데이터 조회 실패: " + runFetchError.message);
-                if (!runApprovals || runApprovals.length === 0) return showAlert("알림", "불러올 결재 건이 없습니다.");
-
-                const { data: runExisting, error: runExistingError } = await _supabase
-                    .from('ac_journal')
-                    .select('Trans_ID')
-                    .like('Trans_ID', 'APR-%');
-                if (runExistingError) return showAlert("오류", "기존 전표 확인 실패: " + runExistingError.message);
-                const runExistingSet = new Set(runExisting ? runExisting.map((entry) => entry.Trans_ID) : []);
-                const runTargetDocs = runApprovals.filter((doc) => !runExistingSet.has(`APR-${doc.id}`));
-                if (runTargetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
-
-                let entries = [];
-                let runSalaryLikeCount = 0;
-                let runAccrualCount = 0;
-
-                runTargetDocs.forEach((doc) => {
-                    const amount = Math.max(0, Number(doc.amount || 0));
-                    if (!(amount > 0)) return;
-                    const transId = `APR-${doc.id}`;
-                    const descBase = doc.title || doc.doc_type || '지출결의';
-
-                    if (isSalaryLikeApproval(doc)) {
-                        runSalaryLikeCount += 1;
-                        appendApprovalPaymentEntries(entries, {
-                            amount,
-                            date: today,
-                            description: `[전자결재-지급] ${descBase}`,
-                            transId,
-                            project: '본사',
-                            operator: doc.drafter_name || writer
-                        });
-                    } else {
-                        runAccrualCount += 1;
-                        appendApprovalAccrualEntries(entries, {
-                            amount,
-                            date: today,
-                            description: `[전자결재-발생] ${descBase}`,
-                            transId,
-                            project: '본사',
-                            operator: doc.drafter_name || writer
-                        });
-                    }
-                });
-
-                if (entries.length === 0) return showAlert("알림", "연동 대상 금액이 없어 생성할 전표가 없습니다.");
-
-                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
-                if (insertError) return showAlert("오류", "전표 저장 실패: " + insertError.message);
-
-                setLastAutoSyncUndo({
-                    type: 'approval',
-                    label: '전자결재 연동',
-                    created_at: new Date().toISOString(),
-                    trans_ids: collectTransIds(entries),
-                    restores: []
-                });
-                showAlert("완료", `${runTargetDocs.length}건 연동 성공\n- 급여/인건비 집행전표 ${runSalaryLikeCount}건\n- 일반 발생전표 ${runAccrualCount}건`);
-                refreshDashboard();
-                loadHistory();
+            let entries = [];
+            targetDocs.forEach(doc => {
+                const amt = Number(doc.amount);
+                const transId = `APR-${doc.id}`;
+                entries.push({Date: today, Type: '비용', Account: '미분류비용', Description: `[전자결재] ${doc.title}`, Debit: amt, Credit: 0, Trans_ID: transId, Project: '본사', Operator: doc.drafter_name});
+                entries.push({Date: today, Type: '부채', Account: '미지급금', Description: `[전자결재] ${doc.title}`, Debit: 0, Credit: amt, Trans_ID: transId, Project: '본사', Operator: doc.drafter_name});
             });
-        })();
+
+            const { error } = await _supabase.from('ac_journal').insert(entries);
+            if(!error) { showAlert("완료", `${targetDocs.length}건 연동 성공`); refreshDashboard(); loadHistory(); }
+        });
     }
 // (3) 출자금 연동
     else if (type === 'capital') {
-        (async () => {
-            const { data: previewMembers, error: previewMemberError } = await _supabase
-                .from('ref_members')
-                .select('id,amount,status')
-                .in('status', ['완료', '전표완료']);
-            if (previewMemberError) return showAlert("오류", "미리보기 조회 실패: " + previewMemberError.message);
-            if (!previewMembers || previewMembers.length === 0) return showAlert("알림", "처리할 출자금 내역이 없습니다.");
-
-            const { data: previewCapRows, error: previewCapError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'CAP-%');
-            if (previewCapError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewCapError.message);
-
-            const previewCashNetMap = buildCashNetMap(previewCapRows || [], 'CAP');
-            let previewNew = 0;
-            let previewCorrection = 0;
-            let previewLegacySkip = 0;
-
-            previewMembers.forEach((member) => {
-                const sourceId = String(member.id || '').trim();
-                if (!sourceId) return;
-                const desired = Math.max(0, Number(member.amount || 0));
-                const current = Number(previewCashNetMap.get(sourceId) || 0);
-                const isFinal = String(member.status || '') === '전표완료';
-                if (isFinal && current === 0) { previewLegacySkip += 1; return; }
-                if (current === desired) return;
-                if (!isFinal && current === 0 && desired > 0) previewNew += 1;
-                else previewCorrection += 1;
-            });
-
-            const previewMsg = [
-                '출자금 연동 미리보기',
-                `- 대상 건수: ${previewMembers.length}건`,
-                `- 신규 전표: ${previewNew}건`,
-                `- 정정(취소+재기표): ${previewCorrection}건`,
-                `- 레거시 연결불가: ${previewLegacySkip}건`
-            ].join('\n');
-
-            showConfirm("출자금 연동", previewMsg, async () => {
+        showConfirm("출자금 연동", "신규/정정 출자금을 전표 반영하시겠습니까?\n- 신규: 완료 -> 전표완료\n- 정정: 기존 전표 취소 후 재기표", async () => {
             const { data: members, error: fetchError } = await _supabase
                 .from('ref_members')
                 .select('*')
@@ -3056,9 +2782,6 @@ function confirmSync(type) {
 
             if (fetchError) return showAlert("오류", "데이터 조회 실패: " + fetchError.message);
             if (!members || members.length === 0) return showAlert("알림", "처리할 출자금 내역이 없습니다.");
-            const memberStatusBefore = new Map(
-                members.map((member) => [String(member.id), String(member.status || '')])
-            );
 
             const { data: capRows, error: capError } = await _supabase
                 .from('ac_journal')
@@ -3146,25 +2869,8 @@ function confirmSync(type) {
                 }
             }
 
-            const restores = uniqueMarkIds.map((id) => ({
-                table: 'ref_members',
-                key_column: 'id',
-                key_value: id,
-                values: { status: memberStatusBefore.get(id) || '완료' }
-            }));
-
             if (entries.length === 0 && uniqueMarkIds.length === 0) {
                 return showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
-            }
-
-            if (entries.length > 0 || restores.length > 0) {
-                setLastAutoSyncUndo({
-                    type: 'capital',
-                    label: '출자금 연동',
-                    created_at: new Date().toISOString(),
-                    trans_ids: collectTransIds(entries),
-                    restores
-                });
             }
 
             const baseMsg = `신규 ${newCount}건, 정정 ${correctionCount}건 처리`;
@@ -3175,52 +2881,12 @@ function confirmSync(type) {
             }
             refreshDashboard();
             loadHistory();
-            });
-        })();
+        });
     }
       
     // (4) 기부금 연동
     else if (type === 'donation') {
-        (async () => {
-            const { data: previewDonations, error: previewDonationError } = await _supabase
-                .from('coop_donations')
-                .select('id,amount,note')
-                .order('donation_date', { ascending: true });
-            if (previewDonationError) return showAlert("오류", "미리보기 조회 실패: " + previewDonationError.message);
-            if (!previewDonations || previewDonations.length === 0) return showAlert("알림", "연동할 기부금 내역이 없습니다.");
-
-            const { data: previewDonRows, error: previewDonRowsError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DON-%');
-            if (previewDonRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewDonRowsError.message);
-
-            const previewCashNetMap = buildCashNetMap(previewDonRows || [], 'DON');
-            let previewNew = 0;
-            let previewCorrection = 0;
-            let previewSkipDone = 0;
-
-            previewDonations.forEach((row) => {
-                const sourceId = String(row.id || '').trim();
-                if (!sourceId) return;
-                const desired = Math.max(0, Number(row.amount || 0));
-                const current = Number(previewCashNetMap.get(sourceId) || 0);
-                const hasDone = String(row.note || '').includes('[전표완료]');
-                if (hasDone) { previewSkipDone += 1; return; }
-                if (current === desired) return;
-                if (current === 0 && !hasDone && desired > 0) previewNew += 1;
-                else previewCorrection += 1;
-            });
-
-            const previewMsg = [
-                '기부금 연동 미리보기',
-                `- 대상 건수: ${previewDonations.length}건`,
-                `- 신규 전표: ${previewNew}건`,
-                `- 정정(취소+재기표): ${previewCorrection}건`,
-                `- 전표완료 스킵: ${previewSkipDone}건`
-            ].join('\n');
-
-            showConfirm("기부금 연동", previewMsg, async () => {
+        showConfirm("기부금 연동", "기부금 신규/정정 내역을 전표 반영하시겠습니까?\n(정정 시 기존 전표 취소 후 재기표)", async () => {
             const { data: donations, error: fetchError } = await _supabase
                 .from('coop_donations')
                 .select('*')
@@ -3241,7 +2907,6 @@ function confirmSync(type) {
             let markTargets = [];
             let createdCount = 0;
             let correctedCount = 0;
-            let legacySkipCount = 0;
 
             donations.forEach((d) => {
                 const sourceId = String(d.id || '').trim();
@@ -3249,7 +2914,6 @@ function confirmSync(type) {
 
                 const desired = Math.max(0, Number(d.amount || 0));
                 const currentNet = Number(cashNetMap.get(sourceId) || 0);
-                const rawNote = d.note;
                 const currentNote = String(d.note || '').trim();
                 const hasDone = currentNote.includes('[전표완료]');
 
@@ -3258,14 +2922,8 @@ function confirmSync(type) {
                 const descBase = `[기부금] ${donorLabel}${methodLabel}`;
                 const txDate = d.donation_date || today;
 
-                if (hasDone) {
-                    // 정책: 전표완료면 정정/재기표 금지. (수정은 새 row로 입력)
-                    legacySkipCount += 1;
-                    return;
-                }
-
                 if (currentNet === desired) {
-                    if (desired > 0 && !hasDone) markTargets.push({ id: sourceId, note: rawNote });
+                    if (desired > 0 && !hasDone) markTargets.push({ id: sourceId, note: currentNote });
                     return;
                 }
 
@@ -3296,7 +2954,7 @@ function confirmSync(type) {
                     });
                     if (isInitialPost) createdCount += 1;
                     else correctedCount += 1;
-                    markTargets.push({ id: sourceId, note: rawNote });
+                    markTargets.push({ id: sourceId, note: currentNote });
                 } else if (currentNet !== 0) {
                     correctedCount += 1;
                 }
@@ -3309,7 +2967,6 @@ function confirmSync(type) {
 
             // 전표 처리 완료 마킹 (중복 방지)
             let markFailed = 0;
-            const successfulMarks = [];
             const uniqueMarkTargets = Array.from(new Map(markTargets.map(item => [item.id, item])).values());
             for (const row of uniqueMarkTargets) {
                 const current = String(row.note || '').trim();
@@ -3324,445 +2981,193 @@ function confirmSync(type) {
                 if (markError) {
                     markFailed += 1;
                     console.error('기부금 처리완료 마킹 실패:', row.id, markError);
-                } else {
-                    successfulMarks.push(row);
                 }
             }
 
             const doneCount = uniqueMarkTargets.length;
-            const restores = successfulMarks.map((row) => ({
-                table: 'coop_donations',
-                key_column: 'id',
-                key_value: String(row.id),
-                values: { note: row.note === undefined ? null : row.note }
-            }));
-
-            if (entries.length > 0 || restores.length > 0) {
-                setLastAutoSyncUndo({
-                    type: 'donation',
-                    label: '기부금 연동',
-                    created_at: new Date().toISOString(),
-                    trans_ids: collectTransIds(entries),
-                    restores
-                });
-            }
-
             if (entries.length === 0 && doneCount === 0) {
-                if (legacySkipCount > 0) {
-                    showAlert("알림", `변경 내역은 없고 전표완료 스킵 ${legacySkipCount}건이 있습니다.`);
-                } else {
-                    showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
-                }
+                showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
             } else if (markFailed > 0) {
-                if (legacySkipCount > 0) {
-                    showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
-                } else {
-                    showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료`);
-                }
+                showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료`);
             } else {
-                if (legacySkipCount > 0) {
-                    showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
-                } else {
-                    showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료`);
-                }
-            }
-            refreshDashboard();
-            loadHistory();
-            });
-        })();
-    }
-
-    // (5) 배당금 연동
-    else if (type === 'dividend') {
-        (async () => {
-            const { data: previewDivs, error: previewDivError } = await _supabase
-                .from('ref_dividends')
-                .select('id,amount,is_accounted')
-                .order('payment_date', { ascending: true });
-            if (previewDivError) return showAlert("오류", "미리보기 조회 실패: " + previewDivError.message);
-            if (!previewDivs || previewDivs.length === 0) return showAlert("알림", "처리할 배당 내역이 없습니다.");
-
-            const { data: previewDivRows, error: previewDivRowsError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DIV-%');
-            if (previewDivRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewDivRowsError.message);
-
-            const previewCashNetMap = buildCashNetMap(previewDivRows || [], 'DIV');
-            let previewNew = 0;
-            let previewCorrection = 0;
-            let previewLegacySkip = 0;
-
-            previewDivs.forEach((row) => {
-                const sourceId = String(row.id || '').trim();
-                if (!sourceId) return;
-                const amount = Math.max(0, Number(row.amount || 0));
-                const desired = amount > 0 ? -amount : 0;
-                const current = Number(previewCashNetMap.get(sourceId) || 0);
-                const wasDone = row.is_accounted === true;
-                if (wasDone && current === 0 && amount > 0) { previewLegacySkip += 1; return; }
-                if (current === desired) return;
-                if (!wasDone && current === 0 && desired !== 0) previewNew += 1;
-                else previewCorrection += 1;
-            });
-
-            const previewMsg = [
-                '배당금 연동 미리보기',
-                `- 대상 건수: ${previewDivs.length}건`,
-                `- 신규 전표: ${previewNew}건`,
-                `- 정정(취소+재기표): ${previewCorrection}건`,
-                `- 레거시 연결불가: ${previewLegacySkip}건`
-            ].join('\n');
-
-            showConfirm("배당금 연동", previewMsg, async () => {
-            const { data: divs, error } = await _supabase
-                .from('ref_dividends')
-                .select('*')
-                .order('payment_date', { ascending: true });
-
-            if (error) return showAlert("오류", "데이터 조회 실패: " + error.message);
-            if (!divs || divs.length === 0) return showAlert("알림", "처리할 배당 내역이 없습니다.");
-
-            const { data: divRows, error: divError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DIV-%');
-            if (divError) return showAlert("오류", "기존 전표 확인 실패: " + divError.message);
-
-            const cashNetMap = buildCashNetMap(divRows || [], 'DIV');
-            let entries = [];
-            let newCount = 0;
-            let correctionCount = 0;
-            let legacySkipCount = 0;
-
-            const statusBefore = new Map();
-            const statusUpdates = new Map();
-
-            divs.forEach((d) => {
-                const sourceId = String(d.id || '').trim();
-                if (!sourceId) return;
-
-                const amount = Math.max(0, Number(d.amount || 0));
-                const desired = amount > 0 ? -amount : 0; // 배당 지급은 보통예금 감소
-                const currentNet = Number(cashNetMap.get(sourceId) || 0);
-                const wasDone = d.is_accounted === true;
-                const txDate = d.payment_date || today;
-                const descBase = `[배당] ${d.member_id || sourceId} 지급`;
-
-                statusBefore.set(sourceId, d.is_accounted === true);
-
-                if (wasDone && currentNet === 0 && amount > 0) {
-                    // 과거 랜덤 Trans_ID 전표는 소스 연결이 없어 자동 정정을 건너뜀
-                    legacySkipCount += 1;
-                    return;
-                }
-
-                if (currentNet === desired) {
-                    const shouldDone = desired !== 0;
-                    if ((d.is_accounted === true) !== shouldDone) statusUpdates.set(sourceId, shouldDone);
-                    return;
-                }
-
-                if (currentNet !== 0) {
-                    const revTransId = createRevisionTransId('DIV', sourceId, 'REV');
-                    appendDividendCashDeltaEntries(entries, {
-                        cashDelta: -currentNet,
-                        date: txDate,
-                        description: `${descBase} [정정취소]`,
-                        transId: revTransId,
-                        project: d.project || '본사',
-                        operator: writer
-                    });
-                }
-
-                if (desired !== 0) {
-                    const isInitialPost = !wasDone && currentNet === 0;
-                    const postTransId = isInitialPost
-                        ? `DIV-${sourceId}`
-                        : createRevisionTransId('DIV', sourceId, 'POST');
-                    appendDividendCashDeltaEntries(entries, {
-                        cashDelta: desired,
-                        date: txDate,
-                        description: isInitialPost ? descBase : `${descBase} [정정재기표]`,
-                        transId: postTransId,
-                        project: d.project || '본사',
-                        operator: writer
-                    });
-                    if (isInitialPost) newCount += 1;
-                    else correctionCount += 1;
-                    if (d.is_accounted !== true) statusUpdates.set(sourceId, true);
-                } else {
-                    if (currentNet !== 0) correctionCount += 1;
-                    if (d.is_accounted === true) statusUpdates.set(sourceId, false);
-                }
-            });
-
-            if (entries.length > 0) {
-                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
-                if (insertError) return showAlert("오류", "전표 저장 중 문제가 발생했습니다: " + insertError.message);
-            }
-
-            const setTrueIds = Array.from(statusUpdates.entries()).filter(([, value]) => value === true).map(([id]) => id);
-            const setFalseIds = Array.from(statusUpdates.entries()).filter(([, value]) => value === false).map(([id]) => id);
-
-            if (setTrueIds.length > 0) {
-                const { error: trueError } = await _supabase
-                    .from('ref_dividends')
-                    .update({ is_accounted: true })
-                    .in('id', setTrueIds);
-                if (trueError) return showAlert("부분 완료", "전표는 생성되었으나 배당 상태(true) 반영에 실패했습니다: " + trueError.message);
-            }
-            if (setFalseIds.length > 0) {
-                const { error: falseError } = await _supabase
-                    .from('ref_dividends')
-                    .update({ is_accounted: false })
-                    .in('id', setFalseIds);
-                if (falseError) return showAlert("부분 완료", "전표는 생성되었으나 배당 상태(false) 반영에 실패했습니다: " + falseError.message);
-            }
-
-            if (entries.length === 0 && statusUpdates.size === 0) {
-                return showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
-            }
-
-            const restores = Array.from(statusUpdates.keys()).map((id) => ({
-                table: 'ref_dividends',
-                key_column: 'id',
-                key_value: id,
-                values: { is_accounted: statusBefore.get(id) === true }
-            }));
-            setLastAutoSyncUndo({
-                type: 'dividend',
-                label: '배당금 연동',
-                created_at: new Date().toISOString(),
-                trans_ids: collectTransIds(entries),
-                restores
-            });
-
-            const baseMsg = `신규 ${newCount}건, 정정 ${correctionCount}건 처리`;
-            if (legacySkipCount > 0) {
-                showAlert("완료", `${baseMsg}\n(레거시 전표 연결 불가 ${legacySkipCount}건은 자동정정에서 제외됨)`);
-            } else {
-                showAlert("완료", baseMsg);
-            }
-            refreshDashboard();
-            loadHistory();
-            });
-        })();
-    }
-    // (6) 감가상각 실행 (신규/정정 시 취소 후 재기표)
-    else if (type === 'depreciation') {
-        const thisYear = new Date().getFullYear();
-        const dateStr = `${thisYear}-12-31`;
-
-        (async () => {
-            const { data: previewAssets, error: previewAssetError } = await _supabase
-                .from('ref_assets')
-                .select('*');
-            if (previewAssetError) return showAlert("오류", "미리보기 조회 실패: " + previewAssetError.message);
-            if (!previewAssets || previewAssets.length === 0) return showAlert("알림", "등록된 고정자산이 없습니다.");
-
-            const { data: previewDepRows, error: previewDepRowsError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DEP%');
-            if (previewDepRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewDepRowsError.message);
-
-            const previewMap = buildDepAmountMapForYear(previewDepRows || [], thisYear);
-            let previewNew = 0;
-            let previewCorrection = 0;
-            previewAssets.forEach((asset) => {
-                const sourceId = String(asset.id || asset.asset_code || '').trim();
-                if (!sourceId) return;
-                const desired = calcYearDepAmount(asset, thisYear);
-                const current = Number(previewMap.get(sourceId) || 0);
-                if (current === desired) return;
-                if (current === 0 && desired > 0) previewNew += 1;
-                else previewCorrection += 1;
-            });
-
-            const previewMsg = [
-                `${thisYear}년 감가상각 미리보기`,
-                `- 자산 대상: ${previewAssets.length}건`,
-                `- 신규 전표: ${previewNew}건`,
-                `- 정정(취소+재기표): ${previewCorrection}건`
-            ].join('\n');
-
-            showConfirm("감가상각", previewMsg, async () => {
-            const { data: assets, error } = await _supabase.from('ref_assets').select('*');
-            if (error) return showAlert("오류", "자산 데이터 조회 실패: " + error.message);
-            if (!assets || assets.length === 0) return showAlert("알림", "등록된 고정자산이 없습니다.");
-
-            const { data: depRows, error: depError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DEP%');
-            if (depError) return showAlert("오류", "기존 전표 확인 실패: " + depError.message);
-
-            const descCheck = `[결산] ${thisYear}년 감가상각`;
-            const { data: legacyRows, error: legacyError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit,Description')
-                .ilike('Description', `${descCheck}%`);
-            if (legacyError) return showAlert("오류", "기존 전표(레거시) 확인 실패: " + legacyError.message);
-
-            const currentMap = buildDepAmountMapForYear(depRows || [], thisYear);
-            const assetKeyByName = new Map();
-            assets.forEach((asset) => {
-                const sourceId = String(asset.id || asset.asset_code || '').trim();
-                const assetName = String(asset.asset_name || '').trim();
-                if (sourceId && assetName && !assetKeyByName.has(assetName)) {
-                    assetKeyByName.set(assetName, sourceId);
-                }
-            });
-
-            let legacyUnmatchedCount = 0;
-            (legacyRows || []).forEach((row) => {
-                if (String(row.Account || '') !== '감가상각비') return;
-                if (parseDepAssetCodeFromTransId(row.Trans_ID, thisYear)) return;
-                const desc = String(row.Description || '');
-                const match = desc.match(/^\[결산\]\s*\d{4}년 감가상각\s*\((.*)\)\s*$/);
-                if (!match) return;
-                const legacyName = String(match[1] || '').trim();
-                const sourceId = assetKeyByName.get(legacyName);
-                if (!sourceId) {
-                    legacyUnmatchedCount += 1;
-                    return;
-                }
-                const delta = Number(row.Debit || 0) - Number(row.Credit || 0);
-                if (!Number.isFinite(delta) || delta === 0) return;
-                currentMap.set(sourceId, (currentMap.get(sourceId) || 0) + delta);
-            });
-
-            let entries = [];
-            let newCount = 0;
-            let correctionCount = 0;
-
-            assets.forEach((asset) => {
-                const sourceId = String(asset.id || asset.asset_code || '').trim();
-                if (!sourceId) return;
-
-                const desired = calcYearDepAmount(asset, thisYear);
-                const current = Number(currentMap.get(sourceId) || 0);
-                const descBase = `${descCheck} (${asset.asset_name || sourceId})`;
-
-                if (current === desired) return;
-
-                if (current !== 0) {
-                    const revTransId = createRevisionTransId('DEP', `${thisYear}-${sourceId}`, 'REV');
-                    appendDepreciationEntries(entries, {
-                        depAmount: -current,
-                        date: dateStr,
-                        description: `${descBase} [정정취소]`,
-                        transId: revTransId,
-                        project: asset.project || '본사',
-                        operator: writer
-                    });
-                }
-
-                if (desired > 0) {
-                    const isInitialPost = current === 0;
-                    const postTransId = isInitialPost
-                        ? `DEP-${thisYear}-${sourceId}`
-                        : createRevisionTransId('DEP', `${thisYear}-${sourceId}`, 'POST');
-                    appendDepreciationEntries(entries, {
-                        depAmount: desired,
-                        date: dateStr,
-                        description: isInitialPost ? descBase : `${descBase} [정정재기표]`,
-                        transId: postTransId,
-                        project: asset.project || '본사',
-                        operator: writer
-                    });
-                    if (isInitialPost) newCount += 1;
-                    else correctionCount += 1;
-                } else if (current !== 0) {
-                    correctionCount += 1;
-                }
-            });
-
-            if (entries.length === 0) {
-                if (legacyUnmatchedCount > 0) {
-                    return showAlert("알림", `변경 내역은 없지만 레거시 자산명 불일치 ${legacyUnmatchedCount}건이 있어 자동정정 대상에서 제외되었습니다.`);
-                }
-                return showAlert("알림", "변경된 감가상각 내역이 없습니다.");
-            }
-
-            const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
-            if (insertError) return showAlert("오류", "저장 중 문제가 발생했습니다: " + insertError.message);
-
-            setLastAutoSyncUndo({
-                type: 'depreciation',
-                label: `${thisYear} 감가상각`,
-                created_at: new Date().toISOString(),
-                trans_ids: collectTransIds(entries),
-                restores: []
-            });
-
-            const baseMsg = `신규 ${newCount}건, 정정 ${correctionCount}건 처리`;
-            if (legacyUnmatchedCount > 0) {
-                showAlert("완료", `${baseMsg}\n(레거시 자산명 불일치 ${legacyUnmatchedCount}건은 자동정정 제외)`);
-            } else {
-                showAlert("완료", baseMsg);
-            }
-            refreshDashboard();
-            loadHistory();
-            });
-        })();
-    }
-
-    // (7) 자동연동 직전 취소
-    else if (type === 'undo_sync_last') {
-        const undoState = getLastAutoSyncUndo();
-        if (!undoState) return showAlert("알림", "되돌릴 자동연동 기록이 없습니다.");
-
-        const transIds = Array.isArray(undoState.trans_ids)
-            ? Array.from(new Set(undoState.trans_ids.map((value) => String(value || '').trim()).filter(Boolean)))
-            : [];
-        const restores = Array.isArray(undoState.restores) ? undoState.restores : [];
-        const label = String(undoState.label || undoState.type || '자동연동');
-
-        showConfirm("자동연동 직전 취소", `${label} 내역을 되돌리시겠습니까?\n전표 ${transIds.length}건 + 상태복원 ${restores.length}건`, async () => {
-            if (transIds.length > 0) {
-                const { error: deleteError } = await _supabase
-                    .from('ac_journal')
-                    .delete()
-                    .in('Trans_ID', transIds);
-                if (deleteError) return showAlert("오류", "전표 되돌리기 실패: " + deleteError.message);
-            }
-
-            let restoreFail = 0;
-            for (const restore of restores) {
-                const table = String(restore?.table || '');
-                const keyColumn = String(restore?.key_column || '');
-                const keyValue = restore?.key_value;
-                const values = (restore && typeof restore.values === 'object' && restore.values !== null) ? restore.values : {};
-                if (!table || !keyColumn || keyValue === undefined || keyValue === null) {
-                    restoreFail += 1;
-                    continue;
-                }
-                const { error: restoreError } = await _supabase
-                    .from(table)
-                    .update(values)
-                    .eq(keyColumn, keyValue);
-                if (restoreError) restoreFail += 1;
-            }
-
-            clearLastAutoSyncUndo();
-            if (restoreFail > 0) {
-                showAlert("부분 완료", `전표는 취소했지만 상태복원 ${restoreFail}건에 실패했습니다.\n관리자에서 확인해주세요.`);
-            } else {
-                showAlert("완료", `${label} 직전 자동연동을 되돌렸습니다.`);
+                showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료`);
             }
             refreshDashboard();
             loadHistory();
         });
     }
 
-    // (8) 연말결산 (손익마감) - 모달 입력 방식
+    // (5) 배당금 연동
+    else if (type === 'dividend') {
+        showConfirm("배당금 연동", "미처리된 배당금 지급 내역을 전표로 생성하시겠습니까?", async () => {
+            // 1. 미처리 내역 조회 (is_accounted가 null이거나 false인 것)
+            const { data: divs, error } = await _supabase
+                .from('ref_dividends')
+                .select('*')
+                .or('is_accounted.is.null,is_accounted.eq.false');
+
+            if (error) return showAlert("오류", "데이터 조회 실패: " + error.message);
+            if (!divs || divs.length === 0) return showAlert("알림", "처리할 신규 배당 내역이 없습니다.");
+
+            let entries = [];
+            let processedIds = [];
+
+            divs.forEach(d => {
+                const amt = Number(d.amount);
+                // 금액이 0보다 큰 경우에만 처리
+                if (amt > 0) {
+                    const desc = `[배당] ${d.member_id} 지급`; // 적요
+                    const pDate = d.payment_date || today;   // 지급일
+                    const transId = `DIV-${d.id}`;
+
+                    // 분개 1: (차변) 이월이익잉여금 - 자본 감소
+                    entries.push({
+                        Date: pDate,
+                        Type: '자본', 
+                        Account: '이월이익잉여금', // ac_master에 이 계정과목이 있어야 함
+                        Description: desc,
+                        Debit: amt,  // 자본은 대변이 증가이므로, 차변에 넣으면 감소 효과
+                        Credit: 0,
+                        Trans_ID: transId,
+                        Project: d.project || '본사',
+                        Operator: writer
+                    });
+
+                    // 분개 2: (대변) 보통예금 - 자산 감소
+                    entries.push({
+                        Date: pDate,
+                        Type: '자산',
+                        Account: '보통예금',
+                        Description: desc,
+                        Debit: 0,
+                        Credit: amt,
+                        Trans_ID: transId,
+                        Project: d.project || '본사',
+                        Operator: writer
+                    });
+
+                    processedIds.push(d.id);
+                }
+            });
+
+            if (entries.length > 0) {
+                // 2. 전표 일괄 저장
+                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
+                
+                if (insertError) {
+                    showAlert("오류", "전표 저장 중 문제가 발생했습니다: " + insertError.message);
+                } else {
+                    // 3. 배당금 테이블에 '처리완료' 표시 (중복 방지)
+                    await _supabase.from('ref_dividends').update({ is_accounted: true }).in('id', processedIds);
+                    
+                    showAlert("성공", `${processedIds.length}건의 배당금 내역을 전표로 처리했습니다.`);
+                    refreshDashboard();
+                }
+            }
+        });
+    }
+    // (6) 감가상각
+// (6) 감가상각 실행
+    else if (type === 'depreciation') {
+        const thisYear = new Date().getFullYear();
+        
+        showConfirm("감가상각", `${thisYear}년도 감가상각을 실행하시겠습니까?\n* 1년에 한 번만 실행하세요.`, async () => {
+            // 1. 중복 실행 방지 체크
+            const descCheck = `[결산] ${thisYear}년 감가상각`;
+            const { data: dup } = await _supabase
+                .from('ac_journal')
+                .select('id')
+                .ilike('Description', `${descCheck}%`)
+                .limit(1);
+
+            if (dup && dup.length > 0) return showAlert("중복", `이미 ${thisYear}년도 감가상각이 처리되었습니다.`);
+
+            // 2. 고정자산 대장 불러오기
+            const { data: assets, error } = await _supabase.from('ref_assets').select('*');
+            if (error) return showAlert("오류", "자산 데이터 조회 실패: " + error.message);
+            if (!assets || assets.length === 0) return showAlert("알림", "등록된 고정자산이 없습니다.");
+
+            let entries = [];
+            const dateStr = `${thisYear}-12-31`; // 결산일
+
+            assets.forEach(a => {
+                const cost = Number(a.acquisition_cost); // 취득원가
+                const life = Number(a.useful_life);      // 내용연수 (년)
+                const buyDate = new Date(a.acquisition_date);
+                const buyYear = buyDate.getFullYear();
+
+                // 유효성 체크: 금액과 수명이 있고, 취득일이 올해 이전이거나 같고, 상각 기간이 아직 남았을 때
+                // (취득년도 + 내용연수)가 현재년도보다 커야 잔존 내용연수가 있는 것임
+                if (cost > 0 && life > 0 && buyYear <= thisYear && (buyYear + life) > thisYear) {
+                    
+                    // 1년치 기본 상각액 (정액법)
+                    let yearDep = Math.floor(cost / life);
+
+                    // ★ 올해 취득한 자산이면 월할 계산
+                    if (buyYear === thisYear) {
+                        // getMonth()는 0(1월)~11(12월)을 반환함
+                        // 예: 1월 취득(0) -> 12개월 사용 / 12월 취득(11) -> 1개월 사용
+                        const monthsUsed = 12 - buyDate.getMonth();
+                        yearDep = Math.floor(yearDep * (monthsUsed / 12));
+                    }
+                    
+                    // 10원 단위 절사 (선택사항, 필요 없으면 제거 가능)
+                    yearDep = Math.floor(yearDep / 10) * 10;
+
+                    if (yearDep > 0) {
+                        const desc = `${descCheck} (${a.asset_name})`;
+                        const transId = generateTransId();
+                        
+                        // 분개 생성
+                        // (차) 감가상각비 XXX
+                        entries.push({
+                            Date: dateStr, 
+                            Type: '비용', 
+                            Account: '감가상각비', 
+                            Description: desc, 
+                            Debit: yearDep, 
+                            Credit: 0, 
+                            Trans_ID: transId,
+                            Project: a.project || '본사', 
+                            Operator: writer
+                        });
+                        
+                        // (대) 감가상각누계액 XXX
+                        entries.push({
+                            Date: dateStr, 
+                            Type: '자산', 
+                            Account: '감가상각누계액', 
+                            Description: desc, 
+                            Debit: 0, 
+                            Credit: yearDep, 
+                            Trans_ID: transId,
+                            Project: a.project || '본사', 
+                            Operator: writer
+                        });
+                    }
+                }
+            });
+
+            if (entries.length > 0) {
+                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
+                if (insertError) {
+                    showAlert("오류", "저장 중 문제가 발생했습니다: " + insertError.message);
+                } else {
+                    showAlert("성공", `${entries.length / 2}건의 자산에 대해 감가상각 처리를 완료했습니다.`);
+                    refreshDashboard();
+                }
+            } else {
+                showAlert("알림", "올해 상각 대상 자산이 없거나 이미 내용연수가 만료되었습니다.");
+            }
+        });
+    }
+
+    // (7) 연말결산 (손익마감) - 모달 입력 방식
     else if (type === 'closing') {
         openClosingModal();
     }
 
-    // (9) 연말결산 취소 (되돌리기) - 연도 입력 모달
+    // (8) 연말결산 취소 (되돌리기) - 연도 입력 모달
     else if (type === 'undo_closing') {
         const defaultYear = new Date().getFullYear() - 1;
         openYearModal("결산 취소", "취소할 결산 연도를 입력하세요.", defaultYear, async (targetYear) => {

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
-Change: Preserve line breaks in candidate career/manifesto while keeping XSS-safe rendering.
+Version: v1.0.3
+Change: 2026-02-11 - Unified pending ballot rule to actionable districts only.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>용인모두의햇빛협동조합 조합원 투표소</title>
-    <script>console.log('[Version] v1.0.2 | vote.html');</script>
+    <script>console.log('[Version] v1.0.3 | vote.html');</script>
     <link rel="stylesheet" href="style.css">
    <style>
 /* =========================================
@@ -388,7 +388,7 @@ function escapeHtml(value) {
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[ch]));
 }
-    import { ElectionService, supabase } from './ElectionService.js';
+    import { ElectionService, supabase, DISTRICT_VOTE_STATE } from './ElectionService.js';
     // [신규] 기본 프로필 이미지 상수 (회색 사람 실루엣)
     const DEFAULT_PROFILE_IMG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzk5OTk5OSI+PHBhdGggZD0iTTEyIDEyYzIuMjEgMCA0LTEuNzkgNC00cy0xLjc5LTQtNC00LTQgMS43OS00IDQgMS43OSA0IDQgNHptMCAyYy0yLjY3IDAtOCAxLjM0LTggNHYyaDE2di0yYzAtMi42Ni01LjMzLTQtOC00eiIvPjwvc3ZnPg==";
     
@@ -477,13 +477,20 @@ async function loadElection(election) {
             // 1. 모든 투표용지 정보 가져오기
             const allBallots = await service.getMyBallotList(election.id);
 
-            // 2. '아직 투표하지 않은' 용지 목록만 필터링
-            pendingBallots = allBallots.filter(b => !b.hasVoted);
+            // 2. 실제 투표가 필요한 선거구(BINARY/경선) 중 미투표만 필터링
+            pendingBallots = allBallots.filter(b => b.requiresVoting && !b.hasVoted);
 
-            // [핵심 수정] 남은 투표가 없다면(이미 다 했다면) -> 즉시 퇴장 조치
+            // [핵심] 남은 투표가 없다면 즉시 종료 (무투표/후보미등록 포함)
             if (pendingBallots.length === 0) {
-                // 더 이상 보여줄 화면 없이 바로 알림창 띄우고 종료
-                alertAndClose('이미 모든 투표를 완료하셨습니다.\n투표소를 종료합니다.');
+                const uncontestedCount = allBallots.filter((b) => b.ballotState === DISTRICT_VOTE_STATE.UNCONTESTED).length;
+                const noCandidateCount = allBallots.filter((b) => b.ballotState === DISTRICT_VOTE_STATE.NO_CANDIDATE).length;
+                let closeMessage = '이미 모든 투표를 완료하셨습니다.\n투표소를 종료합니다.';
+                if (uncontestedCount > 0 && noCandidateCount === 0) {
+                    closeMessage = '모든 선거구가 무투표 당선으로 확정되어 투표가 필요하지 않습니다.\n투표소를 종료합니다.';
+                } else if (noCandidateCount > 0) {
+                    closeMessage = '투표가 필요한 선거구가 없거나 일부 선거구는 후보 미등록 상태입니다.\n투표소를 종료합니다.';
+                }
+                alertAndClose(closeMessage);
                 return; 
             }
 

@@ -1,14 +1,16 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.3 | Change: 2026-02-05 - Avoid KST helper name collision with shared scripts. -->
+<!-- Version: v1.1.5 | Change: 2026-02-10 - Roll back physical print layout to v1.1.5 baseline. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.3 | approval.html');</script>
+  <script>console.log('[Version] v1.1.5 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>전자결재 (Final)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+  <script src="salary_ledger_module.js"></script>
   
   <style>
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
@@ -27,6 +29,43 @@
     
     .file-item { font-size: 0.9rem; background: #f8f9fa; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; border: 1px solid #eee; }
     .file-size { font-size: 0.8rem; color: #888; float: right; }
+    .html-preview-box {
+      min-height: 280px;
+      max-height: 65vh;
+      overflow-y: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 14px;
+      background: #fff;
+      line-height: 1.7;
+    }
+    .html-preview-box h1, .html-preview-box h2, .html-preview-box h3, .html-preview-box h4 { margin-top: 0.8rem; margin-bottom: 0.5rem; }
+    .html-preview-box p { margin-bottom: 0.6rem; }
+    .html-preview-box ul, .html-preview-box ol { margin-bottom: 0.8rem; padding-left: 1.25rem; }
+    .approval-editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .approval-editor-tabs { display: flex; gap: 8px; margin: 6px 0 10px; }
+    .approval-editor-panel { display: none; }
+    .approval-editor-panel.active { display: block; }
+    .approval-visual-editor {
+      min-height: 500px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 12px;
+      line-height: 1.65;
+      background: #fff;
+      overflow: auto;
+      color: #1f2937;
+    }
+    .approval-visual-editor:focus {
+      outline: none;
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.35);
+    }
+    .approval-visual-editor:empty::before {
+      content: attr(data-placeholder);
+      color: #94a3b8;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -111,6 +150,28 @@
              <input type="hidden" id="relDocId">
           </div>
         </div>
+        <div class="col-12 mb-3 hidden" id="divSalaryExpense">
+          <label class="small text-muted fw-bold">지출 상세</label>
+          <div class="card p-3 border-0 bg-light">
+            <div class="row g-2">
+              <div class="col-sm-4">
+                <select class="form-select form-select-sm" id="expenseSubType" onchange="handleExpenseSubTypeChange()">
+                  <option value="일반">일반 지출</option>
+                  <option value="급여">급여 (급여대장 연동)</option>
+                </select>
+              </div>
+              <div class="col-sm-4 hidden" id="divPayrollMonth">
+                <input type="month" class="form-control form-control-sm" id="payrollMonth" onchange="handlePayrollMonthChange()">
+              </div>
+              <div class="col-sm-4 hidden" id="divPayrollLoad">
+                <button type="button" class="btn btn-sm btn-outline-primary w-100" id="btnLoadPayroll" onclick="loadSalaryLedgerForExpense()">📊 급여대장 불러오기</button>
+              </div>
+              <div class="col-12">
+                <div id="payrollSummary" class="small text-muted">급여 연동을 선택하면 선택한 월의 실지급 합계가 자동 반영됩니다.</div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="col-12 hidden mb-3" id="divNoticeReceiver">
           <label class="small text-muted fw-bold">수신</label>
           <input type="text" class="form-control" id="noticeReceiver" placeholder="예: 조합원 전체">
@@ -122,6 +183,10 @@
         <div class="col-12 hidden mb-3" id="divNoticeSubject">
           <label class="small text-muted fw-bold">제목</label>
           <input type="text" class="form-control" id="noticeSubject" placeholder="예: 공문 제목">
+        </div>
+        <div class="col-12 hidden mb-3" id="divProposalSubject">
+          <label class="small text-muted fw-bold">품의 제목</label>
+          <input type="text" class="form-control" id="proposalSubject" placeholder="예: 2026년 2월 사무국 운영비 집행 건">
         </div>
         <div class="col-12" id="divAmount">
           <label class="small text-muted" id="amountLabel">금액 (원)</label>
@@ -190,8 +255,32 @@
       </div>
 
       <div class="mb-3">
-        <label class="small text-muted">내용</label>
-        <textarea class="form-control large-textarea" id="appDesc" placeholder="내용을 상세히 입력하세요." required rows="20"></textarea>
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <label class="small text-muted fw-bold m-0">내용</label>
+          <button type="button" class="btn btn-sm btn-outline-secondary hidden" id="btnAppDescPreview" onclick="openAppDescPreview()">👁️ HTML 미리보기</button>
+        </div>
+        <div id="appDescEditorControls" class="hidden">
+          <div class="approval-editor-toolbar">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<h3>','</h3>')">제목</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<p>','</p>')">문단</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<strong>','</strong>')">굵게</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<ul><li>','</li></ul>')">목록</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<ol><li>','</li></ol>')">번호목록</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<table>','</table>')">테이블</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<br>','')">줄바꿈</button>
+          </div>
+          <div class="approval-editor-tabs">
+            <button type="button" id="app-desc-tab-visual" class="btn btn-sm btn-primary" onclick="switchApprovalEditorTab('visual')">미리보기 편집</button>
+            <button type="button" id="app-desc-tab-html" class="btn btn-sm btn-outline-primary" onclick="switchApprovalEditorTab('html')">HTML 편집</button>
+          </div>
+        </div>
+        <div id="app-desc-panel-visual" class="approval-editor-panel">
+          <div id="appDescVisual" class="approval-visual-editor" contenteditable="true" data-placeholder="여기에 내용을 입력하세요."></div>
+        </div>
+        <div id="app-desc-panel-html" class="approval-editor-panel active">
+          <textarea class="form-control large-textarea" id="appDesc" placeholder="내용을 상세히 입력하세요." rows="20"></textarea>
+        </div>
+        <div class="small text-muted mt-2 hidden" id="appDescHtmlHelp">일반품의서는 테이블 포함 HTML 본문을 작성할 수 있습니다. `미리보기 편집` 또는 `HTML 편집` 탭으로 작성하고 제출 전 미리보기로 확인하세요.</div>
       </div>
 
       <div class="mb-4">
@@ -219,6 +308,9 @@
 <div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-body text-center py-4" id="alertBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button></div></div></div></div>
 <div class="modal fade" id="relSearchModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">관련 품의서 검색</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="input-group mb-3"><input type="text" class="form-control" id="relKeyword" placeholder="제목 또는 작성자" onkeyup="if(event.key==='Enter') runRelSearch()"><button class="btn btn-outline-secondary" onclick="runRelSearch()">검색</button></div><div class="list-group" id="relResultList" style="max-height:400px; overflow-y:auto;"></div></div></div></div></div>
 <div class="modal fade" id="relViewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">📄 관련 문서 내용</h6><div><button class="btn btn-sm btn-outline-primary me-2" onclick="openRelNewTab()">↗ 새 창으로 보기</button><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div></div><div class="modal-body"><div id="relViewContent" class="p-3">Loading...</div></div></div></div></div>
+<div class="modal fade" id="physicalRejectModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">⛔ 실물결재 반려</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted fw-bold mb-2">반려 사유</label><textarea id="physicalRejectReason" class="form-control" rows="5" placeholder="반려 사유를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button class="btn btn-danger btn-sm" id="btnPhysicalRejectSubmit" onclick="submitPhysicalReject()">반려 처리</button></div></div></div></div>
+<div class="modal fade" id="cancelDraftModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">🗑️ 상신 취소</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted fw-bold mb-2">취소 사유</label><textarea id="cancelDraftReason" class="form-control" rows="4" placeholder="취소 사유를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button><button class="btn btn-danger btn-sm" id="btnCancelDraftSubmit" onclick="submitDraftCancel()">취소 확정</button></div></div></div></div>
+<div class="modal fade" id="appDescPreviewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content"><div class="modal-header bg-light"><div><h6 class="modal-title fw-bold mb-1" id="appDescPreviewTitle">본문 미리보기</h6><div class="small text-muted" id="appDescPreviewMeta">HTML 렌더링 결과</div></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="appDescPreviewBody" class="html-preview-box"></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <input type="file" id="signedDocInput" class="hidden" accept=".pdf,.png,.jpg,.jpeg">
 
   <script>
@@ -233,6 +325,13 @@ let modalType = '';
 let tempSelection = [], finalApprovers = [], finalRefs = [], historyCache = [];
 let permissionSet = new Set();
 let pendingPhysicalDocId = null;
+let pendingPhysicalRejectDocId = null;
+let pendingCancelDocId = null;
+let salaryExpenseState = null;
+let physicalRejectModalInstance = null;
+let cancelDraftModalInstance = null;
+let appDescPreviewModalInstance = null;
+let approvalEditorMode = 'html';
 const KST_TZ_APPROVAL = 'Asia/Seoul';
 const formatApprovalKstDateISO = (value, fallback = '') => {
     if (!value) return fallback;
@@ -246,6 +345,87 @@ const formatApprovalKstDateLocale = (value, fallback = '') => {
     if (Number.isNaN(d.getTime())) return fallback;
     return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_APPROVAL });
 };
+const formatApprovalKstMonth = (value = new Date()) => {
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_APPROVAL, year: 'numeric', month: '2-digit' }).format(d);
+};
+const formatYearMonthLabel = (ym) => {
+    if (!/^\d{4}-\d{2}$/.test(String(ym || ''))) return ym || '-';
+    const [y, m] = String(ym).split('-');
+    return `${y}년 ${Number(m)}월`;
+};
+const formatMoney = (value) => Number(value || 0).toLocaleString();
+
+function parseStorageObjectRef(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    try {
+        const u = new URL(raw);
+        const m = u.pathname.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)/);
+        if (!m) return null;
+        const downloadName = u.searchParams.get('display_name') || u.searchParams.get('download') || '';
+        return { bucket: decodeURIComponent(m[1]), path: decodeURIComponent(m[2]), raw, downloadName };
+    } catch (_) {
+        const m = raw.match(/^([a-zA-Z0-9_-]+)\/(.+)$/);
+        if (!m) return null;
+        const pathPart = String(m[2] || '');
+        const qm = pathPart.indexOf('?');
+        const cleanPath = qm >= 0 ? pathPart.slice(0, qm) : pathPart;
+        const query = qm >= 0 ? pathPart.slice(qm + 1) : '';
+        const sp = new URLSearchParams(query);
+        const downloadName = sp.get('display_name') || sp.get('download') || '';
+        return { bucket: m[1], path: cleanPath, raw, downloadName };
+    }
+}
+
+async function resolveStorageUrl(rawRef, expiresSec = 3600) {
+    const ref = parseStorageObjectRef(rawRef);
+    if (!ref) return String(rawRef || '');
+    try {
+        const opts = ref.downloadName ? { download: ref.downloadName } : undefined;
+        const { data, error } = await _supabase.storage.from(ref.bucket).createSignedUrl(ref.path, expiresSec, opts);
+        if (error || !data?.signedUrl) return String(rawRef || '');
+        return data.signedUrl;
+    } catch (_) {
+        return String(rawRef || '');
+    }
+}
+
+async function fetchSalaryLedgerRowsByMonth(ym) {
+    if (!ym) return { rows: [], error: null };
+    const { data, error } = await _supabase
+        .from('hr_salary')
+        .select('year_month, emp_id, emp_name, pay_basic, pay_meal, pay_car, pay_child, pay_position, pay_service, pay_overtime, pay_bonus, pay_total, ded_pension, ded_health, ded_care, ded_employ, ded_income, ded_local, ded_advance, ded_capital, ded_total, net_pay')
+        .eq('year_month', ym)
+        .order('emp_name');
+    if (error) return { rows: [], error };
+    const rows = (Array.isArray(data) ? data : []).map(row => ({
+        year_month: row.year_month || ym,
+        emp_id: row.emp_id || '',
+        emp_name: row.emp_name || '',
+        pay_basic: Math.round(Number(row.pay_basic || 0)),
+        pay_meal: Math.round(Number(row.pay_meal || 0)),
+        pay_car: Math.round(Number(row.pay_car || 0)),
+        pay_child: Math.round(Number(row.pay_child || 0)),
+        pay_position: Math.round(Number(row.pay_position || 0)),
+        pay_service: Math.round(Number(row.pay_service || 0)),
+        pay_overtime: Math.round(Number(row.pay_overtime || 0)),
+        pay_bonus: Math.round(Number(row.pay_bonus || 0)),
+        pay_total: Math.round(Number(row.pay_total || 0)),
+        ded_pension: Math.round(Number(row.ded_pension || 0)),
+        ded_health: Math.round(Number(row.ded_health || 0)),
+        ded_care: Math.round(Number(row.ded_care || 0)),
+        ded_employ: Math.round(Number(row.ded_employ || 0)),
+        ded_income: Math.round(Number(row.ded_income || 0)),
+        ded_local: Math.round(Number(row.ded_local || 0)),
+        ded_advance: Math.round(Number(row.ded_advance || 0)),
+        ded_capital: Math.round(Number(row.ded_capital || 0)),
+        ded_total: Math.round(Number(row.ded_total || 0)),
+        net_pay: Math.round(Number(row.net_pay || 0))
+    }));
+    return { rows, error: null };
+}
 
 function escapeHtml(value) {
     if (value === null || value === undefined) return '';
@@ -255,6 +435,254 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function hasHtmlTag(value) {
+    return /<\s*\/?\s*[a-zA-Z][^>]*>/.test(String(value || ''));
+}
+
+function sanitizeApprovalStyle(rawStyle) {
+    const style = String(rawStyle || '');
+    if (!style.trim()) return '';
+    const blockedValue = /(expression\s*\(|javascript:|vbscript:|data:text\/html|@import|behavior:|-moz-binding)/i;
+    const safeRules = [];
+    style.split(';').forEach(rule => {
+        const idx = rule.indexOf(':');
+        if (idx <= 0) return;
+        const prop = rule.slice(0, idx).trim().toLowerCase();
+        const value = rule.slice(idx + 1).trim();
+        if (!prop || !value) return;
+        if (!/^[a-z-]+$/.test(prop)) return;
+        if (blockedValue.test(value)) return;
+        safeRules.push(`${prop}: ${value}`);
+    });
+    return safeRules.join('; ');
+}
+
+function sanitizeApprovalUrl(rawUrl) {
+    const input = String(rawUrl || '').trim();
+    if (!input) return '';
+    if (input.startsWith('#')) return '#';
+    if (/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s]+$/i.test(input)) return input;
+    try {
+        const parsed = new URL(input, window.location.origin);
+        if (['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)) return parsed.href;
+    } catch (_) {
+        return '';
+    }
+    return '';
+}
+
+function sanitizeApprovalHtml(rawHtml) {
+    const source = String(rawHtml || '');
+    if (!source.trim()) return '';
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, 'text/html');
+    const root = doc.body.firstElementChild || doc.body;
+    const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK']);
+
+    Array.from(root.querySelectorAll('*')).forEach(node => {
+        const tag = node.tagName.toUpperCase();
+        if (blockedTags.has(tag)) {
+            node.remove();
+            return;
+        }
+
+        Array.from(node.attributes).forEach(attr => {
+            const name = String(attr.name || '').toLowerCase();
+            if (name.startsWith('on') || name === 'srcdoc') {
+                node.removeAttribute(attr.name);
+                return;
+            }
+            if (name === 'style') {
+                const safeStyle = sanitizeApprovalStyle(attr.value);
+                if (safeStyle) node.setAttribute('style', safeStyle);
+                else node.removeAttribute(attr.name);
+                return;
+            }
+            if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'formaction') {
+                const safeUrl = sanitizeApprovalUrl(attr.value);
+                if (safeUrl) node.setAttribute(attr.name, safeUrl);
+                else node.removeAttribute(attr.name);
+                }
+        });
+
+        if (tag === 'A' && node.getAttribute('target') === '_blank') {
+            node.setAttribute('rel', 'noopener noreferrer');
+        }
+    });
+
+    return root.innerHTML;
+}
+
+function renderApprovalContent(rawValue, allowHtml = false) {
+    const raw = String(rawValue || '');
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    if (allowHtml && hasHtmlTag(trimmed)) return sanitizeApprovalHtml(trimmed);
+    return escapeHtml(trimmed).replace(/\n/g, '<br>');
+}
+
+function mergeSystemAppendContent(baseContent, appendContent, allowHtml = false) {
+    const base = String(baseContent || '');
+    const extra = String(appendContent || '');
+    if (!extra) return base;
+    if (allowHtml && hasHtmlTag(base)) {
+        const noteHtml = escapeHtml(extra.trim()).replace(/\n/g, '<br>');
+        return `${base}\n<p>${noteHtml}</p>`;
+    }
+    return `${base}${extra}`;
+}
+
+function getApprovalHtmlEditor() {
+    return document.getElementById("appDesc");
+}
+
+function getApprovalVisualEditor() {
+    return document.getElementById("appDescVisual");
+}
+
+function normalizeApprovalVisualHtml(rawHtml) {
+    return String(rawHtml || '')
+        .replace(/^\s*<br>\s*$/i, '')
+        .replace(/^\s*<div><br><\/div>\s*$/i, '')
+        .trim();
+}
+
+function syncApprovalVisualFromSource() {
+    const source = getApprovalHtmlEditor();
+    const visual = getApprovalVisualEditor();
+    if (!source || !visual) return;
+    visual.innerHTML = renderApprovalContent(source.value, true);
+}
+
+function syncApprovalSourceFromVisual() {
+    const source = getApprovalHtmlEditor();
+    const visual = getApprovalVisualEditor();
+    if (!source || !visual) return;
+    source.value = normalizeApprovalVisualHtml(visual.innerHTML);
+}
+
+function setApprovalEditorContent(rawValue) {
+    const source = getApprovalHtmlEditor();
+    if (!source) return;
+    source.value = String(rawValue || '');
+    syncApprovalVisualFromSource();
+}
+
+function getApprovalEditorContent() {
+    if (approvalEditorMode === 'visual') syncApprovalSourceFromVisual();
+    return getApprovalHtmlEditor()?.value || '';
+}
+
+function ensureApprovalVisualSelection(editor) {
+    if (!editor) return;
+    const selection = window.getSelection();
+    if (!selection) return;
+    if (selection.rangeCount > 0 && editor.contains(selection.anchorNode)) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function buildDefaultTableHtml() {
+    return '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%;"><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody><tr><td></td><td></td></tr></tbody></table>';
+}
+
+function applyApprovalVisualFormat(beforeTag) {
+    const visual = getApprovalVisualEditor();
+    if (!visual) return false;
+    visual.focus();
+    ensureApprovalVisualSelection(visual);
+
+    if (beforeTag === '<h3>') document.execCommand('formatBlock', false, 'h3');
+    else if (beforeTag === '<p>') document.execCommand('formatBlock', false, 'p');
+    else if (beforeTag === '<strong>') document.execCommand('bold', false, null);
+    else if (beforeTag === '<ul><li>') document.execCommand('insertUnorderedList', false, null);
+    else if (beforeTag === '<ol><li>') document.execCommand('insertOrderedList', false, null);
+    else if (beforeTag === '<br>') document.execCommand('insertHTML', false, '<br>');
+    else if (beforeTag === '<table>') document.execCommand('insertHTML', false, buildDefaultTableHtml());
+    else return false;
+
+    syncApprovalSourceFromVisual();
+    return true;
+}
+
+window.insertApprovalTag = (before, after = '') => {
+    if (approvalEditorMode === 'visual' && applyApprovalVisualFormat(before)) return;
+
+    const editor = getApprovalHtmlEditor();
+    if (!editor) return;
+    const start = editor.selectionStart || 0;
+    const end = editor.selectionEnd || 0;
+    const selected = editor.value.slice(start, end);
+    let inserted = `${before}${selected}${after}`;
+    if (before === '<table>') {
+        inserted = buildDefaultTableHtml();
+    }
+    editor.setRangeText(inserted, start, end, 'end');
+    editor.focus();
+    if (approvalEditorMode === 'html') syncApprovalVisualFromSource();
+};
+
+window.switchApprovalEditorTab = (mode = 'visual') => {
+    const visualBtn = document.getElementById('app-desc-tab-visual');
+    const htmlBtn = document.getElementById('app-desc-tab-html');
+    const visualPanel = document.getElementById('app-desc-panel-visual');
+    const htmlPanel = document.getElementById('app-desc-panel-html');
+    if (!visualBtn || !htmlBtn || !visualPanel || !htmlPanel) return;
+
+    const isVisual = mode !== 'html';
+    if (isVisual) syncApprovalVisualFromSource();
+    else syncApprovalSourceFromVisual();
+
+    approvalEditorMode = isVisual ? 'visual' : 'html';
+    visualPanel.classList.toggle('active', isVisual);
+    htmlPanel.classList.toggle('active', !isVisual);
+    visualBtn.classList.toggle('btn-primary', isVisual);
+    visualBtn.classList.toggle('btn-outline-primary', !isVisual);
+    htmlBtn.classList.toggle('btn-primary', !isVisual);
+    htmlBtn.classList.toggle('btn-outline-primary', isVisual);
+};
+
+function setApprovalEditorForCategory(docType) {
+    const controls = document.getElementById('appDescEditorControls');
+    const visualPanel = document.getElementById('app-desc-panel-visual');
+    const htmlPanel = document.getElementById('app-desc-panel-html');
+    if (!controls || !visualPanel || !htmlPanel) return;
+
+    const isGeneralProposal = docType === '일반품의';
+    if (isGeneralProposal) {
+        controls.classList.remove('hidden');
+        window.switchApprovalEditorTab('visual');
+    } else {
+        controls.classList.add('hidden');
+        syncApprovalSourceFromVisual();
+        approvalEditorMode = 'html';
+        visualPanel.classList.remove('active');
+        htmlPanel.classList.add('active');
+    }
+}
+
+function initializeApprovalEditor() {
+    const source = getApprovalHtmlEditor();
+    const visual = getApprovalVisualEditor();
+    if (!source || !visual) return;
+
+    source.addEventListener('input', () => {
+        if (approvalEditorMode === 'html') syncApprovalVisualFromSource();
+    });
+    visual.addEventListener('input', () => {
+        if (approvalEditorMode === 'visual') syncApprovalSourceFromVisual();
+    });
+    visual.addEventListener('blur', () => {
+        if (approvalEditorMode === 'visual') syncApprovalSourceFromVisual();
+    });
+
+    syncApprovalVisualFromSource();
 }
 
 async function createNotification(targetEmpId, title, message, linkUrl, meta = null) {
@@ -310,6 +738,9 @@ function validateAttachments(fileList) {
 window.onload = async function() {
     modalInstance = new bootstrap.Modal(document.getElementById('userModal'));
     alertModalInstance = new bootstrap.Modal(document.getElementById('alertModal'));
+    physicalRejectModalInstance = new bootstrap.Modal(document.getElementById('physicalRejectModal'));
+    cancelDraftModalInstance = new bootstrap.Modal(document.getElementById('cancelDraftModal'));
+    appDescPreviewModalInstance = new bootstrap.Modal(document.getElementById('appDescPreviewModal'));
     
     const stored = localStorage.getItem('erp_user');
     if (!stored) { location.href = 'index.html'; return; }
@@ -326,6 +757,29 @@ window.onload = async function() {
     const { data } = await _supabase.from('ref_employees').select('*').order('auth_level', {ascending: true});
     if(data) allUsers = data;
 
+    const payrollMonthInput = document.getElementById("payrollMonth");
+    if (payrollMonthInput) payrollMonthInput.value = formatApprovalKstMonth();
+
+    const physicalRejectEl = document.getElementById('physicalRejectModal');
+    if (physicalRejectEl) {
+        physicalRejectEl.addEventListener('hidden.bs.modal', () => {
+            pendingPhysicalRejectDocId = null;
+            const reasonEl = document.getElementById('physicalRejectReason');
+            if (reasonEl) reasonEl.value = '';
+        });
+    }
+    const cancelDraftEl = document.getElementById('cancelDraftModal');
+    if (cancelDraftEl) {
+        cancelDraftEl.addEventListener('hidden.bs.modal', () => {
+            pendingCancelDocId = null;
+            const reasonEl = document.getElementById('cancelDraftReason');
+            if (reasonEl) reasonEl.value = '';
+            const submitBtn = document.getElementById('btnCancelDraftSubmit');
+            if (submitBtn) submitBtn.disabled = false;
+        });
+    }
+
+    initializeApprovalEditor();
     calculateLeave(); // 연차 계산 (대리상신 고려하여 함수 분리됨)
     handleCategoryChange(); // UI 초기화
 };
@@ -360,6 +814,140 @@ function canPerform(permissionKey) {
     if (!permissionKey) return true;
     if (!permissionSet || permissionSet.size === 0) return true;
     return permissionSet.has(permissionKey);
+}
+
+function canUseSalaryExpense() {
+    const role = String(myInfo?.role || '').toLowerCase();
+    if (role === 'admin' || role === 'admin_all' || role === 'admin_accounting') return true;
+    if (permissionSet && permissionSet.size > 0) {
+        return permissionSet.has('hr.admin')
+            || permissionSet.has('accounting.manage')
+            || permissionSet.has('salary.manage')
+            || permissionSet.has('accounting.admin');
+    }
+    return false;
+}
+
+function resetSalaryExpenseUi() {
+    salaryExpenseState = null;
+    const select = document.getElementById("expenseSubType");
+    const divMonth = document.getElementById("divPayrollMonth");
+    const divLoad = document.getElementById("divPayrollLoad");
+    const summary = document.getElementById("payrollSummary");
+    const amountLabel = document.getElementById("amountLabel");
+    const amountInput = document.getElementById("appAmount");
+    if (select) select.value = '일반';
+    if (divMonth) divMonth.classList.add("hidden");
+    if (divLoad) divLoad.classList.add("hidden");
+    if (summary) {
+        summary.className = "small text-muted";
+        summary.textContent = "급여 연동을 선택하면 선택한 월의 실지급 합계가 자동 반영됩니다.";
+    }
+    if (amountLabel) amountLabel.innerText = "금액 (원)";
+    if (amountInput) amountInput.placeholder = "0";
+}
+
+function handlePayrollMonthChange() {
+    salaryExpenseState = null;
+    const summary = document.getElementById("payrollSummary");
+    if (summary && document.getElementById("expenseSubType")?.value === '급여') {
+        summary.className = "small text-muted";
+        summary.textContent = "연월이 변경되었습니다. 급여대장을 다시 불러와주세요.";
+    }
+}
+
+function handleExpenseSubTypeChange() {
+    const select = document.getElementById("expenseSubType");
+    const mode = select?.value || '일반';
+    const divMonth = document.getElementById("divPayrollMonth");
+    const divLoad = document.getElementById("divPayrollLoad");
+    const summary = document.getElementById("payrollSummary");
+    const amountLabel = document.getElementById("amountLabel");
+    const amountInput = document.getElementById("appAmount");
+    const monthInput = document.getElementById("payrollMonth");
+
+    if (mode !== '급여') {
+        salaryExpenseState = null;
+        if (divMonth) divMonth.classList.add("hidden");
+        if (divLoad) divLoad.classList.add("hidden");
+        if (summary) {
+            summary.className = "small text-muted";
+            summary.textContent = "급여 연동을 선택하면 선택한 월의 실지급 합계가 자동 반영됩니다.";
+        }
+        if (amountLabel) amountLabel.innerText = "금액 (원)";
+        if (amountInput) amountInput.placeholder = "0";
+        return;
+    }
+
+    if (!canUseSalaryExpense()) {
+        if (select) select.value = '일반';
+        if (divMonth) divMonth.classList.add("hidden");
+        if (divLoad) divLoad.classList.add("hidden");
+        return showAlert("급여 연동은 관리자/회계 권한에서만 사용할 수 있습니다.");
+    }
+
+    if (monthInput && !monthInput.value) monthInput.value = formatApprovalKstMonth();
+    if (divMonth) divMonth.classList.remove("hidden");
+    if (divLoad) divLoad.classList.remove("hidden");
+    if (summary) {
+        summary.className = "small text-muted";
+        summary.textContent = "급여대장을 불러오면 실지급 합계가 금액에 자동 반영됩니다.";
+    }
+    if (amountLabel) amountLabel.innerText = "실지급 합계 (원)";
+    if (amountInput) amountInput.placeholder = "급여대장 불러오기 시 자동 입력";
+    const currentDesc = getApprovalEditorContent();
+    if (desc && (!currentDesc.trim() || currentDesc.includes("지출하고자 하오니 승인하여"))) {
+        const ymLabel = formatYearMonthLabel(monthInput?.value || '');
+        setApprovalEditorContent(`${ymLabel} 급여 지급을 위해 지출결의를 상신합니다.`);
+    }
+}
+
+async function loadSalaryLedgerForExpense() {
+    if (!canUseSalaryExpense()) return showAlert("급여 연동 권한이 없습니다.");
+    const monthInput = document.getElementById("payrollMonth");
+    const ym = monthInput?.value || '';
+    if (!ym) return showAlert("귀속월을 선택하세요.");
+
+    const btn = document.getElementById("btnLoadPayroll");
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = "불러오는 중...";
+    }
+
+    const { rows: normalizedRows, error: ledgerError } = await fetchSalaryLedgerRowsByMonth(ym);
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = "📊 급여대장 불러오기";
+    }
+    if (ledgerError) return showAlert("급여대장 조회 실패: " + ledgerError.message);
+    if (normalizedRows.length === 0) return showAlert("해당 월의 급여대장 데이터가 없습니다.");
+    const sumBy = (key) => normalizedRows.reduce((acc, row) => acc + Number(row?.[key] || 0), 0);
+    const payTotal = Math.round(sumBy('pay_total'));
+    const dedTotal = Math.round(sumBy('ded_total'));
+    const netTotal = Math.round(sumBy('net_pay'));
+    const empCount = normalizedRows.length;
+
+    salaryExpenseState = { loaded: true, yearMonth: ym, empCount, payTotal, dedTotal, netTotal, rows: normalizedRows };
+    document.getElementById("appAmount").value = netTotal;
+
+    const ymLabel = formatYearMonthLabel(ym);
+    const summary = document.getElementById("payrollSummary");
+    if (summary) {
+        summary.className = "small text-success";
+        summary.innerHTML = `연동 완료: ${ymLabel} · ${empCount}명 · 실지급 합계 <strong>${formatMoney(netTotal)}원</strong>`;
+    }
+
+    const autoBlock = [
+        `[급여대장 연동] ${ymLabel}`,
+        `- 대상 인원: ${empCount}명`,
+        `- 지급총액: ${formatMoney(payTotal)}원`,
+        `- 공제총액: ${formatMoney(dedTotal)}원`,
+        `- 실지급총액: ${formatMoney(netTotal)}원`
+    ].join('\n');
+    const currentDesc = getApprovalEditorContent();
+    if (!currentDesc.trim() || currentDesc.includes('[급여대장 연동]')) {
+        setApprovalEditorContent(`${ymLabel} 급여 지급을 위해 지출결의를 상신합니다.\n\n${autoBlock}`);
+    }
 }
 
 // [추가] 대리 상신 모드 토글
@@ -412,7 +1000,26 @@ async function calculateLeave() {
     if(halfBadge) halfBadge.innerText = val;
 }
 
-function showAlert(msg) { document.getElementById("alertBody").textContent = msg || ""; alertModalInstance.show(); }
+function showAlert(msg, onClose = null) {
+    document.getElementById("alertBody").textContent = msg || "";
+    if (typeof onClose === 'function') {
+        const alertEl = document.getElementById('alertModal');
+        alertEl.addEventListener('hidden.bs.modal', () => {
+            try { onClose(); } catch (_) { /* noop */ }
+        }, { once: true });
+    }
+    alertModalInstance.show();
+}
+
+function canDrafterCancelPendingDoc(doc) {
+    if (!doc || doc.drafter_id !== myInfo?.emp_id) return false;
+    const status = String(doc.status || '');
+    if (!['진행중', '증빙확인중', '가승인', '실물결재대기'].includes(status)) return false;
+    const line = Array.isArray(doc.approval_line) ? doc.approval_line : [];
+    if (line.length === 0) return true;
+    const hasProcessed = line.some(step => ['승인', '반려'].includes(String(step?.status || '')));
+    return !hasProcessed;
+}
 
 function switchTab(tab) {
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
@@ -431,7 +1038,6 @@ function switchTab(tab) {
 // [수정] 카테고리 변경 핸들러 (관련 문서 UI 제어 추가)
 function handleCategoryChange() {
     const type = document.getElementById("appCategory").value;
-    const desc = document.getElementById("appDesc");
     const amtLabel = document.getElementById("amountLabel");
     const amountInput = document.getElementById("appAmount");
     const fileHelp = document.getElementById("fileHelp");
@@ -442,18 +1048,26 @@ function handleCategoryChange() {
     const divDep = document.getElementById("divDependentOption");
     const divAmt = document.getElementById("divAmount");
     const divRel = document.getElementById("divRelDoc"); // [New]
+    const divSalaryExpense = document.getElementById("divSalaryExpense");
     const divNoticeReceiver = document.getElementById("divNoticeReceiver");
     const divNoticeVia = document.getElementById("divNoticeVia");
     const divNoticeSubject = document.getElementById("divNoticeSubject");
+    const divProposalSubject = document.getElementById("divProposalSubject");
+    const btnAppDescPreview = document.getElementById("btnAppDescPreview");
+    const appDescHtmlHelp = document.getElementById("appDescHtmlHelp");
 
     // 전체 초기화
     divLeave.classList.add("hidden");
     divLeaveType.classList.add("hidden");
     divDep.classList.add("hidden");
     divRel.classList.add("hidden"); // [New]
+    divSalaryExpense.classList.add("hidden");
     divNoticeReceiver.classList.add("hidden");
     divNoticeVia.classList.add("hidden");
     divNoticeSubject.classList.add("hidden");
+    divProposalSubject.classList.add("hidden");
+    btnAppDescPreview.classList.add("hidden");
+    appDescHtmlHelp.classList.add("hidden");
     divAmt.classList.remove("hidden");
     fileHelp.classList.add("hidden");
     
@@ -463,12 +1077,13 @@ function handleCategoryChange() {
     // 반차 UI 초기화
     document.getElementById("dateRangeArea").classList.remove("hidden");
     document.getElementById("halfDayArea").classList.add("hidden");
+    if (type !== '지출결의') resetSalaryExpenseUi();
 
     if (type === '휴가') {
         divLeave.classList.remove("hidden");
         divLeaveType.classList.remove("hidden");
         divAmt.classList.add("hidden");
-        desc.value = "위와 같이 휴가를 신청하오니 재가하여 주시기 바랍니다.";
+        setApprovalEditorContent("위와 같이 휴가를 신청하오니 재가하여 주시기 바랍니다.");
         
         const lType = document.getElementById("leaveTypeSelect").value;
         if(lType === '반차' || lType === '생일반차') {
@@ -486,26 +1101,64 @@ function handleCategoryChange() {
     }
     else if (type === '지출결의') { // [New] 지출결의일 때 관련문서 UI 오픈
         divRel.classList.remove("hidden");
-        if(!desc.value) desc.value = "아래와 같이 지출을 결의하오니 승인 바랍니다.";
+        if (canUseSalaryExpense()) {
+            divSalaryExpense.classList.remove("hidden");
+            handleExpenseSubTypeChange();
+        } else {
+            resetSalaryExpenseUi();
+        }
+        const currentDesc = getApprovalEditorContent();
+        if(!currentDesc) setApprovalEditorContent("위와 같이 지출하고자 하오니 승인하여 주시기 바랍니다.");
     }
     else if (type === '공문') {
         divNoticeReceiver.classList.remove("hidden");
         divNoticeVia.classList.remove("hidden");
         divNoticeSubject.classList.remove("hidden");
         divAmt.classList.add("hidden");
-        if(!desc.value) desc.value = "아래와 같이 안내드립니다.";
+        const currentDesc = getApprovalEditorContent();
+        if(!currentDesc) setApprovalEditorContent("아래와 같이 안내드립니다.");
+    }
+    else if (type === '일반품의') {
+        divProposalSubject.classList.remove("hidden");
+        btnAppDescPreview.classList.remove("hidden");
+        appDescHtmlHelp.classList.remove("hidden");
+        const currentDesc = getApprovalEditorContent();
+        if (!currentDesc.trim() || currentDesc.includes("휴가를 신청") || currentDesc.includes("부양가족")) {
+            setApprovalEditorContent("위와 같이 품의하오니 승인하여 주시기 바랍니다.");
+        }
     }
     else {
-        if(desc.value.includes("휴가를 신청") || desc.value.includes("부양가족")) desc.value = "";
+        const currentDesc = getApprovalEditorContent();
+        if(currentDesc.includes("휴가를 신청") || currentDesc.includes("부양가족")) setApprovalEditorContent("");
     }
+    setApprovalEditorForCategory(type);
+}
+
+function openAppDescPreview() {
+    const type = String(document.getElementById("appCategory")?.value || '');
+    const rawContent = getApprovalEditorContent();
+    if (!rawContent.trim()) return showAlert("본문 내용을 먼저 입력하세요.");
+
+    const proposalTitle = document.getElementById("proposalSubject")?.value?.trim() || '';
+    const modalTitle = document.getElementById("appDescPreviewTitle");
+    const modalMeta = document.getElementById("appDescPreviewMeta");
+    const modalBody = document.getElementById("appDescPreviewBody");
+    if (!modalTitle || !modalMeta || !modalBody) return;
+
+    const allowHtml = type === '일반품의';
+    modalTitle.textContent = proposalTitle || `${type || '문서'} 본문 미리보기`;
+    modalMeta.textContent = allowHtml
+        ? '일반품의서 HTML 렌더링 미리보기'
+        : '줄바꿈 기준 본문 미리보기';
+    modalBody.innerHTML = renderApprovalContent(rawContent, allowHtml);
+    if (appDescPreviewModalInstance) appDescPreviewModalInstance.show();
 }
 
 // [기능] 부양가족 템플릿 업데이트
 function updateDepTemplate() {
     const mode = document.querySelector('input[name="depOption"]:checked').value;
-    const desc = document.getElementById("appDesc");
     const actionText = mode === 'add' ? "등재" : "해제";
-    desc.value = `[부양가족 ${actionText} 신청]\n\n1. 대상자 성명 : \n2. 관계 : \n3. 주민등록번호(앞자리) : \n4. 변동 사유 : \n\n--------------------------------\n위와 같이 가족수당 지급 및 공제 대상자 변경을 신청합니다.`;
+    setApprovalEditorContent(`[부양가족 ${actionText} 신청]\n\n1. 대상자 성명 : \n2. 관계 : \n3. 주민등록번호(앞자리) : \n4. 변동 사유 : \n\n--------------------------------\n위와 같이 가족수당 지급 및 공제 대상자 변경을 신청합니다.`);
 }
 
 // [수정] 휴가일수 계산 (반차 0.5일 고정)
@@ -706,6 +1359,8 @@ async function handleDraftSubmit(e) {
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
 
     const mainType = document.getElementById("appCategory").value;
+    const expenseSubType = document.getElementById("expenseSubType")?.value || '일반';
+    const payrollMonth = document.getElementById("payrollMonth")?.value || '';
     let subType = mainType; 
     let finalAmt = document.getElementById("appAmount").value || 0;
     let title = "";
@@ -757,6 +1412,28 @@ async function handleDraftSubmit(e) {
         title = `부양가족 ${modeTxt} 신청`;
     }
 
+    else if (mainType === '지출결의') {
+        if (expenseSubType === '급여') {
+            if (!canUseSalaryExpense()) return showAlert("급여 연동 권한이 없습니다.");
+            if (!payrollMonth) return showAlert("급여 귀속월을 선택하세요.");
+            if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
+                return showAlert("급여대장을 먼저 불러와주세요.");
+            }
+
+            subType = '지출결의(급여)';
+            title = `급여 지출결의 (${payrollMonth})`;
+            finalAmt = Number(document.getElementById("appAmount").value || 0);
+            if (finalAmt <= 0) return showAlert("실지급 합계 금액을 확인해주세요.");
+
+            const descValue = getApprovalEditorContent();
+            if (!descValue.includes('[급여대장 연동]')) {
+                const ymLabel = formatYearMonthLabel(payrollMonth);
+                appendDesc += `\n\n[급여대장 연동] ${ymLabel} / 대상 ${salaryExpenseState.empCount}명 / 지급총액 ${formatMoney(salaryExpenseState.payTotal)}원 / 공제총액 ${formatMoney(salaryExpenseState.dedTotal)}원 / 실지급총액 ${formatMoney(salaryExpenseState.netTotal)}원`;
+            }
+        } else {
+            title = '지출결의';
+        }
+    }
     else if (mainType === '공문') {
         const subject = document.getElementById("noticeSubject").value.trim();
         if (!subject) return showAlert("공문 제목을 입력하세요.");
@@ -766,9 +1443,17 @@ async function handleDraftSubmit(e) {
         subType = '공문';
         finalAmt = 0;
     }
+    else if (mainType === '일반품의') {
+        const proposalTitle = document.getElementById("proposalSubject").value.trim();
+        if (!proposalTitle) return showAlert("일반품의 제목을 입력하세요.");
+        title = proposalTitle;
+        subType = '일반품의';
+    }
     else {
         title = `${mainType}`;
     }
+    const draftBodyForValidation = getApprovalEditorContent();
+    if (!String(draftBodyForValidation || '').trim()) return showAlert("내용을 입력하세요.");
     
     // 증빙 필수 체크 (경조사, 병가) - 대리상신 제외
     if (mainType === '휴가') {
@@ -792,16 +1477,90 @@ async function handleDraftSubmit(e) {
 
     // 3. 파일 업로드
     const uploadedUrls = [];
+    const isSalaryExpenseDoc = mainType === '지출결의' && expenseSubType === '급여';
     for (let i = 0; i < fileInput.files.length; i++) {
         const file = fileInput.files[i];
         const safeName = `${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
         const { data, error } = await _supabase.storage.from('attachments').upload(safeName, file);
-        if (error) { showAlert("파일 오류: "+error.message); btn.disabled=false; return; }
+        if (error) {
+            showAlert("파일 오류: " + error.message);
+            btn.disabled = false;
+            btn.innerText = "상신하기";
+            return;
+        }
         const { data: { publicUrl } } = _supabase.storage.from('attachments').getPublicUrl(safeName);
         uploadedUrls.push(publicUrl);
     }
+    if (isSalaryExpenseDoc && salaryExpenseState?.loaded) {
+        if (!window.SalaryLedgerModule) {
+            showAlert("급여대장 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.");
+            btn.disabled = false;
+            btn.innerText = "상신하기";
+            return;
+        }
+        const salaryLedgerFileName = window.SalaryLedgerModule.makeFileName(payrollMonth);
+        let ledgerPdfBlob = null;
+        try {
+            const ledgerState = window.SalaryLedgerModule.createStateFromRows(
+                salaryExpenseState.rows || [],
+                payrollMonth || salaryExpenseState.yearMonth || ''
+            );
+            let companyInfo = {};
+            try {
+                companyInfo = JSON.parse(localStorage.getItem('erp_company_info') || '{}') || {};
+            } catch (_) {
+                companyInfo = {};
+            }
+            const ymLabel = window.SalaryLedgerModule.formatYearMonthLabel(payrollMonth);
+            ledgerPdfBlob = await window.SalaryLedgerModule.generatePdfBlob(ledgerState, {
+                fileName: salaryLedgerFileName,
+                title: `${ymLabel} 급여대장`,
+                logoUrl: companyInfo.logo_horizontal_url || "",
+                chairmanName: companyInfo.chairman_name || companyInfo.ceoName || "이사장",
+                showApprovalBox: true,
+                showPrintDate: true,
+                footerText: 'ERP 급여관리 출력본',
+                marginMm: 6
+            });
+        } catch (pdfErr) {
+            showAlert("급여대장 PDF 생성 실패: " + (pdfErr?.message || pdfErr));
+            btn.disabled = false;
+            btn.innerText = "상신하기";
+            return;
+        }
+        if (!(ledgerPdfBlob instanceof Blob) || ledgerPdfBlob.size === 0) {
+            showAlert("급여대장 PDF 생성 결과가 비어 있습니다.");
+            btn.disabled = false;
+            btn.innerText = "상신하기";
+            return;
+        }
+
+        const ymTag = String(payrollMonth || '').replace(/[^0-9]/g, '') || String(formatApprovalKstMonth() || '').replace(/[^0-9]/g, '');
+        const salaryStoragePath = `${crypto.randomUUID()}/salary_ledger_${ymTag || Date.now()}.pdf`;
+        const { error: salaryAttachErr } = await _supabase.storage
+            .from('attachments')
+            .upload(salaryStoragePath, ledgerPdfBlob, { contentType: 'application/pdf' });
+        if (salaryAttachErr) {
+            showAlert("급여대장 첨부 업로드 실패: " + salaryAttachErr.message);
+            btn.disabled = false;
+            btn.innerText = "상신하기";
+            return;
+        }
+        const { data: { publicUrl: salaryLedgerUrl } } = _supabase.storage.from('attachments').getPublicUrl(salaryStoragePath);
+        if (salaryLedgerUrl) {
+            uploadedUrls.push(`${salaryLedgerUrl}?display_name=${encodeURIComponent(salaryLedgerFileName)}`);
+        } else {
+            uploadedUrls.push(`attachments/${salaryStoragePath}?display_name=${encodeURIComponent(salaryLedgerFileName)}`);
+        }
+    }
 
     const relatedDocId = document.getElementById("relDocId").value || null;
+    const allowHtmlContent = mainType === '일반품의';
+    const rawBodyContent = getApprovalEditorContent();
+    const mergedBodyContent = mergeSystemAppendContent(rawBodyContent, appendDesc, allowHtmlContent);
+    const savedBodyContent = allowHtmlContent
+        ? renderApprovalContent(mergedBodyContent, true)
+        : mergedBodyContent;
 
     // 4. DB 저장
     const approvalLineData = finalApprovers.map(u => ({ emp_id: u.emp_id, name: u.emp_name, position: u.position, status: '대기', comment: '', processed_at: null }));
@@ -811,7 +1570,7 @@ async function handleDraftSubmit(e) {
     const { data: insertedDoc, error } = await _supabase.from('ref_approval').insert({
         doc_type: subType, 
         title: title,
-        content: document.getElementById("appDesc").value + appendDesc, // 시스템 기록 추가
+        content: savedBodyContent,
         amount: Number(finalAmt),
         drafter_id: drafterId,
         drafter_name: drafterName,
@@ -827,15 +1586,22 @@ async function handleDraftSubmit(e) {
         created_at: new Date()
     }).select('id').single();
 
-    if (error) { showAlert("상신 실패: " + error.message); btn.disabled = false; }
+    if (error) {
+        showAlert("상신 실패: " + error.message);
+        btn.disabled = false;
+        btn.innerText = "상신하기";
+    }
     else {
         const docId = insertedDoc?.id;
         if (docId) {
             await logAudit('approval.submit', docId, `${title} 상신`, { status: initialStatus });
             await createNotification(finalApprovers[0]?.emp_id, '결재 요청', `${title} 문서가 상신되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
         }
-        showAlert("상신되었습니다.");
-        location.reload();
+        const firstApprover = finalApprovers[0];
+        const firstApproverName = firstApprover ? `${firstApprover.emp_name} ${firstApprover.position || ''}`.trim() : '-';
+        showAlert(`상신이 완료되었습니다.\n첫 결재자: ${firstApproverName}\n결재 요청 알림을 전송했습니다.`, () => {
+            switchTab('history');
+        });
     }
 }
 
@@ -892,30 +1658,98 @@ async function procDoc(docId, action) {
     showAlert("처리되었습니다."); loadTodoList();
 }
 
-// [추가] 사용자 액션 (대리상신 건에 대한 증빙제출/취소)
-async function procUserAction(docId, action) {
-    const { data: doc } = await _supabase.from('ref_approval').select('title, current_approver, drafter_id').eq('id', docId).single();
+function startDraftCancel(docId) {
+    pendingCancelDocId = docId;
+    const reasonEl = document.getElementById('cancelDraftReason');
+    if (reasonEl) reasonEl.value = '';
+    if (cancelDraftModalInstance) {
+        cancelDraftModalInstance.show();
+        setTimeout(() => reasonEl?.focus(), 120);
+        return;
+    }
+    procUserAction(docId, '취소');
+}
+
+async function submitDraftCancel() {
+    if (!pendingCancelDocId) return;
+    const reasonEl = document.getElementById('cancelDraftReason');
+    const reasonText = String(reasonEl?.value || '').trim();
+    if (!reasonText) return showAlert("취소 사유를 입력하세요.");
+
+    const submitBtn = document.getElementById('btnCancelDraftSubmit');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+        const ok = await procUserAction(pendingCancelDocId, '취소', reasonText);
+        if (ok && cancelDraftModalInstance) cancelDraftModalInstance.hide();
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
+}
+
+// [추가] 사용자 액션 (증빙제출/상신취소)
+async function procUserAction(docId, action, explicitReason = null) {
+    const { data: doc, error: docErr } = await _supabase
+        .from('ref_approval')
+        .select('id, title, current_approver, drafter_id, status, approval_line')
+        .eq('id', docId)
+        .single();
+    if (docErr || !doc) {
+        showAlert("문서를 찾을 수 없습니다.");
+        return false;
+    }
+
     if (action === '취소') {
-        const reason = prompt("취소 사유를 입력하세요:");
-        if (!reason) return;
-        // 결재취소 상태로 변경 (연차 복구됨)
-        await _supabase.from('ref_approval').update({ status: '결재취소', comment: `[사용자 취소] ${reason}` }).eq('id', docId);
-        await logAudit('approval.cancel', docId, '사용자 취소', { reason });
+        if (doc.drafter_id !== myInfo.emp_id) {
+            showAlert("기안자만 취소할 수 있습니다.");
+            return false;
+        }
+        if (!canDrafterCancelPendingDoc(doc)) {
+            showAlert("이미 결재가 진행되어 취소할 수 없습니다.");
+            return false;
+        }
+
+        let reasonText = String(explicitReason || '').trim();
+        if (!reasonText) {
+            const reason = prompt("취소 사유를 입력하세요:");
+            if (reason === null) return false;
+            reasonText = String(reason || '').trim();
+            if (!reasonText) {
+                showAlert("취소 사유를 입력하세요.");
+                return false;
+            }
+        }
+
+        const { error: cancelErr } = await _supabase
+            .from('ref_approval')
+            .update({ status: '결재취소', current_approver: null })
+            .eq('id', docId);
+        if (cancelErr) {
+            showAlert("취소 처리 실패: " + cancelErr.message);
+            return false;
+        }
+        await logAudit('approval.cancel', docId, '사용자 취소', { reason: reasonText });
         if (doc?.current_approver) {
             await createNotification(doc.current_approver, '결재 취소', `${doc.title || '문서'}가 취소되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
         }
         showAlert("취소되었습니다.");
         loadHistoryList();
+        return true;
     } else if (action === '증빙제출') {
         // (간소화) 실제 구현 시 파일 모달 필요. 여기선 안내만.
         showAlert("증빙 서류가 제출되었습니다. (관리자 확인 대기)");
-        await _supabase.from('ref_approval').update({ status: '증빙확인중' }).eq('id', docId);
+        const { error: evidenceErr } = await _supabase.from('ref_approval').update({ status: '증빙확인중' }).eq('id', docId);
+        if (evidenceErr) {
+            showAlert("증빙 제출 처리 실패: " + evidenceErr.message);
+            return false;
+        }
         await logAudit('approval.evidence', docId, '증빙 제출', null);
         if (doc?.current_approver) {
             await createNotification(doc.current_approver, '증빙 제출', `${doc.title || '문서'}에 증빙이 제출되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
         }
         loadHistoryList();
+        return true;
     }
+    return false;
 }
 
 async function loadTodoList() {
@@ -928,11 +1762,52 @@ async function loadTodoList() {
         .order('created_at', {ascending: false});
     renderDocs(el, data, true);
 }
+
+function extractAuditReason(detail) {
+    if (!detail) return '';
+    if (typeof detail === 'object') return String(detail.reason || '').trim();
+    try {
+        const parsed = JSON.parse(detail);
+        return String(parsed?.reason || '').trim();
+    } catch (_) {
+        return '';
+    }
+}
+
+async function loadCancelReasonMap(docIds) {
+    const ids = Array.isArray(docIds) ? docIds.map(v => String(v || '').trim()).filter(Boolean) : [];
+    if (ids.length === 0) return {};
+
+    const { data, error } = await _supabase
+        .from('erp_audit_logs')
+        .select('entity_id, detail, created_at')
+        .eq('entity_type', 'ref_approval')
+        .eq('action', 'approval.cancel')
+        .in('entity_id', ids)
+        .order('created_at', { ascending: false });
+    if (error || !Array.isArray(data)) return {};
+
+    const out = {};
+    data.forEach(row => {
+        const key = String(row?.entity_id || '').trim();
+        if (!key || out[key]) return;
+        const reason = extractAuditReason(row?.detail);
+        if (reason) out[key] = reason;
+    });
+    return out;
+}
+
 async function loadHistoryList() {
     const el = document.getElementById("historyList");
     el.innerHTML = 'loading...';
     const { data } = await _supabase.from('ref_approval').select('*').eq('drafter_id', myInfo.emp_id).order('created_at', {ascending: false});
-    historyCache = data || [];
+    const rawList = data || [];
+    const cancelDocIds = rawList.filter(doc => String(doc?.status || '') === '결재취소').map(doc => doc.id);
+    const cancelReasonMap = await loadCancelReasonMap(cancelDocIds);
+    historyCache = rawList.map(doc => ({
+        ...doc,
+        _cancel_reason: cancelReasonMap[String(doc.id)] || ''
+    }));
     renderDocs(el, historyCache, false);
 }
 function filterHistory() {
@@ -996,6 +1871,21 @@ function renderDocs(target, list, isTodo) {
             const statusIcon = status==='승인'?'✅':(status==='반려'?'⛔':'⬜');
             return `<span class="small me-2 ${statusClass}">${statusIcon} ${name}</span>`;
         }).join("");
+        const rejectedStep = approvalLine.find(step => String(step?.status || '') === '반려' && String(step?.comment || '').trim());
+        const rejectedReason = rejectedStep ? String(rejectedStep.comment || '').trim() : '';
+        const canceledReason = String(doc?._cancel_reason || '').trim();
+        let reasonLabel = '';
+        let reasonText = '';
+        if (!isTodo && String(doc.status || '') === '반려' && rejectedReason) {
+            reasonLabel = '반려 사유';
+            reasonText = rejectedReason;
+        } else if (!isTodo && String(doc.status || '') === '결재취소' && canceledReason) {
+            reasonLabel = '취소 사유';
+            reasonText = canceledReason;
+        }
+        const reasonHtml = reasonText
+            ? `<div class="small mt-2 p-2 border rounded bg-light"><span class="fw-bold text-danger me-1">${escapeHtml(reasonLabel)}:</span>${escapeHtml(reasonText).replace(/\n/g, '<br>')}</div>`
+            : '';
 
         let ageBadge = "";
         if (doc.created_at) {
@@ -1023,11 +1913,19 @@ function renderDocs(target, list, isTodo) {
             const isSecretary = (myInfo?.position === '사무국장' || (myInfo?.role === 'admin' || myInfo?.role === 'admin_all'));
             const hasChairman = approvalLine.some(l => (l.position || '').includes('이사장'));
             const canPhysical = isSecretary && hasChairman && canPerform('approval.physical') && doc.drafter_id === myInfo.emp_id;
+            const canCancelPending = canDrafterCancelPendingDoc(doc);
+            const attachmentLinks = Array.isArray(doc.file_links)
+                ? doc.file_links.filter(link => typeof link === 'string' && link.trim())
+                : [];
 
             if (doc.status === '가승인' && doc.drafter_id === myInfo.emp_id) {
                 actions.push(`<span class="badge bg-warning text-dark me-2">⚠️ 증빙제출 필요</span>`);
                 actions.push(`<button class="btn btn-sm btn-primary me-1" onclick="procUserAction(${doc.id}, '증빙제출')">📁 증빙제출</button>`);
-                actions.push(`<button class="btn btn-sm btn-secondary" onclick="procUserAction(${doc.id}, '취소')">🗑️ 취소</button>`);
+                if (canCancelPending) {
+                    actions.push(`<button class="btn btn-sm btn-secondary" onclick="startDraftCancel(${doc.id})">🗑️ 상신취소</button>`);
+                }
+            } else if (canCancelPending) {
+                actions.push(`<button class="btn btn-sm btn-outline-secondary me-1" onclick="startDraftCancel(${doc.id})">🗑️ 상신취소</button>`);
             }
 
             if (canPhysical && ['진행중','가승인','증빙확인중','실물결재대기','실물결재완료'].includes(doc.status)) {
@@ -1035,10 +1933,20 @@ function renderDocs(target, list, isTodo) {
             }
             if (canPhysical && doc.status === '실물결재대기') {
                 actions.push(`<button class="btn btn-sm btn-success me-1" onclick="startPhysicalComplete(${doc.id})">✅ 서명첨부 완료</button>`);
+                actions.push(`<button class="btn btn-sm btn-outline-danger me-1" onclick="startPhysicalReject(${doc.id})">⛔ 실물결재 반려</button>`);
             }
             if (doc.signed_doc_url) {
                 const safeUrl = encodeURIComponent(doc.signed_doc_url);
                 actions.push(`<button class="btn btn-sm btn-outline-secondary" onclick="openSignedDoc('${safeUrl}')">📎 서명문서</button>`);
+            }
+            if (attachmentLinks.length > 0) {
+                attachmentLinks.slice(0, 3).forEach((link, idx) => {
+                    const safeUrl = encodeURIComponent(link);
+                    actions.push(`<button class="btn btn-sm btn-outline-dark me-1" onclick="openAttachment('${safeUrl}')">📎 첨부${idx + 1}</button>`);
+                });
+                if (attachmentLinks.length > 3) {
+                    actions.push(`<span class="small text-muted">+${attachmentLinks.length - 3}건</span>`);
+                }
             }
 
             const badgeClass = (doc.status === '완료' || doc.status === '실물결재완료')
@@ -1056,7 +1964,7 @@ function renderDocs(target, list, isTodo) {
             }
         }
         
-        target.innerHTML += `<div class="list-group-item shadow-sm mb-3 border-0 p-3"><div class="d-flex justify-content-between mb-2"><div><span class="badge bg-primary me-1">${safeDocType}</span>${relBtn}</div><small class="text-muted">${safeDate}${ageBadge}</small></div><h6 class="fw-bold">${safeTitle}</h6><div class="small mb-2">${lineHtml}</div>${btnHtml}</div>`;
+        target.innerHTML += `<div class="list-group-item shadow-sm mb-3 border-0 p-3"><div class="d-flex justify-content-between mb-2"><div><span class="badge bg-primary me-1">${safeDocType}</span>${relBtn}</div><small class="text-muted">${safeDate}${ageBadge}</small></div><h6 class="fw-bold">${safeTitle}</h6><div class="small mb-2">${lineHtml}</div>${reasonHtml}${btnHtml}</div>`;
     });
 }
 function updateFileList() {
@@ -1072,22 +1980,118 @@ function updateFileList() {
 
 function openSignedDoc(encodedUrl) {
     if (!encodedUrl) return;
-    const url = decodeURIComponent(encodedUrl);
-    window.open(url, '_blank');
+    const rawUrl = decodeURIComponent(encodedUrl);
+    resolveStorageUrl(rawUrl, 60 * 60 * 6)
+        .then(url => window.open(url || rawUrl, '_blank'))
+        .catch(() => window.open(rawUrl, '_blank'));
+}
+
+function openAttachment(encodedUrl) {
+    if (!encodedUrl) return;
+    const rawUrl = decodeURIComponent(encodedUrl);
+    resolveStorageUrl(rawUrl, 60 * 60 * 6)
+        .then(url => window.open(url || rawUrl, '_blank'))
+        .catch(() => window.open(rawUrl, '_blank'));
 }
 
 
 function buildPhysicalPrintHtml(doc) {
-    const safeType = escapeHtml(doc.doc_type || '');
-    const safeDrafter = escapeHtml(doc.drafter_name || '');
+    const rawType = String(doc.doc_type || '');
+    const rawDrafter = String(doc.drafter_name || '');
+    const isExpenseDoc = rawType.startsWith('지출결의');
+    const isProposalDoc = rawType.startsWith('일반품의');
+    const isNoticeDoc = rawType.startsWith('공문');
+    const docHeading = isExpenseDoc ? '지 출 결 의 서' : (isProposalDoc ? '품 의 서' : '결 재 문 서');
+    const sectionHeading = isExpenseDoc ? '결재 사유 / 집행 근거' : (isProposalDoc ? '품의 사유 / 추진 근거' : '결재 사유 / 본문');
+    const safeType = escapeHtml(rawType);
+    const safeDrafter = escapeHtml(rawDrafter);
+    const safeDocHeading = escapeHtml(docHeading);
+    const safeSectionHeading = escapeHtml(sectionHeading);
     const safeDate = escapeHtml(formatApprovalKstDateISO(doc.created_at, ''));
-    const safeAmount = Number(doc.amount || 0).toLocaleString();
-    const safeContent = escapeHtml(doc.content || '').replace(/\n/g, '<br>');
+    const amount = Number(doc.amount || 0);
+    const safeAmount = Number.isFinite(amount) ? amount.toLocaleString() : '0';
+    const toKoreanWon = (value) => {
+        const number = Math.floor(Math.abs(Number(value || 0)));
+        if (!Number.isFinite(number) || number === 0) return '영원';
+
+        const digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+        const smallUnits = ['', '십', '백', '천'];
+        const largeUnits = ['', '만', '억', '조'];
+
+        const convertChunk = (chunk) => {
+            let out = '';
+            for (let i = 0; i < 4; i += 1) {
+                const div = Math.pow(10, 3 - i);
+                const digit = Math.floor(chunk / div) % 10;
+                if (!digit) continue;
+                if (!(digit === 1 && div !== 1)) out += digits[digit];
+                out += smallUnits[3 - i];
+            }
+            return out;
+        };
+
+        let remain = number;
+        let unitIdx = 0;
+        let text = '';
+        while (remain > 0 && unitIdx < largeUnits.length) {
+            const chunk = remain % 10000;
+            if (chunk) text = `${convertChunk(chunk)}${largeUnits[unitIdx]}${text}`;
+            remain = Math.floor(remain / 10000);
+            unitIdx += 1;
+        }
+
+        return `${text}원`;
+    };
+    const safeAmountKor = escapeHtml(toKoreanWon(amount));
+    const renderedContent = isProposalDoc
+        ? renderApprovalContent(doc.content || '', true)
+        : escapeHtml(doc.content || '').replace(/\n/g, '<br>');
     const safeDocNo = escapeHtml(doc.doc_no || '');
+    const safeReceiver = escapeHtml(doc.receiver || '');
+    const safeVia = escapeHtml(doc.via || '');
+    const auxInfoLabel = isNoticeDoc ? '수신/경유' : '지급정보';
+    const safeAuxInfoLabel = escapeHtml(auxInfoLabel);
+    const shouldShowAmount = isExpenseDoc || Math.abs(amount) > 0;
+    const sourceAttachmentLinks = Array.isArray(doc.file_links)
+        ? doc.file_links.filter(link => typeof link === 'string' && link.trim())
+        : [];
+    const signedAttachmentLinks = Array.isArray(doc._signed_file_links) && doc._signed_file_links.length > 0
+        ? doc._signed_file_links
+        : [];
+    const attachmentLinks = sourceAttachmentLinks.map((sourceUrl, idx) => ({
+        sourceUrl,
+        href: String(signedAttachmentLinks[idx] || sourceUrl || '')
+    })).filter(item => item.href);
+    const extractFileName = (url, fallback) => {
+        try {
+            const u = new URL(url);
+            const qName = u.searchParams.get('display_name') || u.searchParams.get('download');
+            if (qName) return decodeURIComponent(qName);
+            const pathname = u.pathname || '';
+            const raw = pathname.split('/').pop() || '';
+            return decodeURIComponent(raw || fallback);
+        } catch (_) {
+            return fallback;
+        }
+    };
+    const attachmentItemsHtml = attachmentLinks.map((item, idx) => {
+        const safeUrl = escapeHtml(item.href);
+        const safeName = escapeHtml(extractFileName(item.sourceUrl, `첨부파일 ${idx + 1}`));
+        return `<li><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeName}</a></li>`;
+    }).join('');
+
+    const attachmentSectionHtml = attachmentItemsHtml
+        ? `
+            <div class="section-title">첨부파일</div>
+            <div class="attach-box">
+              <ul class="attach-list">${attachmentItemsHtml}</ul>
+            </div>
+          `
+        : '';
 
     let rawTitle = String(doc.title || '');
-    if (doc.drafter_name) {
-        const suffix = `- ${doc.drafter_name}`;
+    if (rawDrafter) {
+        const suffix = `- ${rawDrafter}`;
         if (rawTitle.includes(suffix)) {
             rawTitle = rawTitle.replace(suffix, '').trim();
         }
@@ -1101,22 +2105,28 @@ function buildPhysicalPrintHtml(doc) {
     const isDrafterSecretary = !!doc._drafter_is_secretary;
     let secretaryAuto = false;
     if (!secretary && isDrafterSecretary) {
-        secretary = { name: safeDrafter, status: '승인', processed_at: doc.created_at };
+        secretary = { name: rawDrafter, status: '승인', processed_at: doc.created_at };
         secretaryAuto = true;
     }
+    const safeSecretaryName = escapeHtml(secretary?.name || '');
+    const safeChairmanName = escapeHtml(chairman?.name || '');
 
-    const stampHtml = (entry, fallbackDate, autoLabel = false) => {
-        if (!entry) return '';
+    const stampHtml = (entry, fallbackDate, autoLabel = false, options = {}) => {
+        if (!entry) return `<div class="stamp-wrap"></div>`;
         if (entry.status === '승인') {
             const dt = entry.processed_at ? formatApprovalKstDateISO(entry.processed_at) : (fallbackDate || '');
             const label = autoLabel ? '자동승인' : '승인';
-            return `<div class="stamp approved">${label}</div>${dt ? `<div class="stamp-date">${dt}</div>` : ''}`;
+            return `<div class="stamp-wrap"><div class="stamp approved">${label}</div>${dt ? `<div class="stamp-date">${dt}</div>` : ''}</div>`;
         }
-        if (entry.status === '반려') return `<div class="stamp rejected">반려</div>`;
-        return `<div class="stamp pending">대기</div>`;
+        if (entry.status === '반려') return `<div class="stamp-wrap"><div class="stamp rejected">반려</div></div>`;
+        if (options.hidePending) return `<div class="stamp-wrap"></div>`;
+        return `<div class="stamp-wrap"><div class="stamp pending">대기</div></div>`;
     };
 
-    const drafterStamp = `<div class="stamp drafted">기안</div>${safeDate ? `<div class="stamp-date">${safeDate}</div>` : ''}`;
+    const drafterStamp = `<div class="stamp-wrap"><div class="stamp drafted">기안</div>${safeDate ? `<div class="stamp-date">${safeDate}</div>` : ''}</div>`;
+    const emptyText = '<span class="text-muted-light">-</span>';
+    const safePrintedAt = escapeHtml(formatApprovalKstDateISO(new Date().toISOString(), ''));
+    const pageRule = 'A4 portrait';
 
     return `
       <html>
@@ -1124,56 +2134,137 @@ function buildPhysicalPrintHtml(doc) {
           <title>실물 결재 출력</title>
           <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
           <style>
-            body { font-family: "Malgun Gothic", sans-serif; padding: 30px; }
-            .print-area { max-width: 900px; margin: 0 auto; position: relative; }
-            .header { display: flex; justify-content: space-between; gap: 20px; }
-            .doc-info { flex: 1; }
-            .doc-row { margin-bottom: 6px; }
-            .approval-boxes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; min-width: 320px; }
-            .approval-box { border: 1px solid #000; text-align: center; padding: 6px; min-height: 90px; position: relative; }
-            .approval-role { font-size: 0.85rem; font-weight: 700; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 6px; }
-            .approval-name { font-size: 0.9rem; font-weight: 600; }
-            .stamp { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 4px; border: 2px solid #16a34a; color: #16a34a; font-size: 0.8rem; font-weight: 700; }
+            @page { size: ${pageRule}; margin: 10mm; }
+            html, body { margin: 0; padding: 0; background: #fff !important; color: #111 !important; }
+            body {
+              font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+              padding: 10mm;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .print-area {
+              max-width: 1000px;
+              margin: 0 auto;
+              border: 2px solid #111;
+              padding: 18px;
+              padding-bottom: 14px;
+              background: #fff;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            }
+            .doc-title { text-align: center; font-size: 1.9rem; font-weight: 800; letter-spacing: 0.35em; text-indent: 0.35em; margin-bottom: 4px; color: #111; }
+            .doc-subtitle { text-align: center; color: #4b5563; font-size: 0.85rem; margin-bottom: 12px; }
+            .header-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 10px; align-items: stretch; }
+            .info-table, .approval-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            .info-table th, .info-table td, .approval-table th, .approval-table td { border: 1px solid #111; padding: 8px 9px; vertical-align: middle; }
+            .info-table th { width: 95px; text-align: center; background: #f3f4f6; font-size: 0.82rem; font-weight: 700; color: #111; }
+            .info-table td { font-size: 0.9rem; color: #111; }
+            .amount-main { font-size: 1.16rem; line-height: 1.3; font-weight: 800; letter-spacing: 0.01em; }
+            .amount-sub { font-size: 0.76rem; color: #4b5563; margin-top: 2px; }
+            .approval-table th { text-align: center; background: #f3f4f6; font-size: 0.82rem; font-weight: 700; color: #111; }
+            .approval-cell { height: 126px; text-align: center; vertical-align: top; }
+            .approval-name { font-size: 0.92rem; font-weight: 700; margin-top: 2px; color: #111; }
+            .stamp-wrap { min-height: 52px; margin-top: 6px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+            .stamp { display: inline-block; padding: 2px 8px; border-radius: 4px; border: 2px solid #16a34a; color: #16a34a; font-size: 0.8rem; font-weight: 700; background: #fff; }
             .stamp.rejected { border-color: #dc2626; color: #dc2626; }
             .stamp.pending { border-color: #94a3b8; color: #64748b; }
             .stamp.drafted { border-color: #2563eb; color: #2563eb; }
             .stamp-date { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
-            .content-box { margin-top: 16px; border: 1px solid #000; padding: 14px; min-height: 240px; }
+            .text-muted-light { color: #9ca3af; }
+            .section-title { margin-top: 14px; border: 1px solid #111; border-bottom: none; background: #f3f4f6; padding: 7px 10px; font-size: 0.88rem; font-weight: 700; color: #111; break-inside: avoid; page-break-inside: avoid; }
+            .content-box { border: 1px solid #111; padding: 14px; min-height: 255px; font-size: 0.95rem; line-height: 1.7; color: #111; overflow-wrap: anywhere; word-break: break-word; }
+            .content-box table { width: 100% !important; border-collapse: collapse !important; table-layout: auto; margin: 8px 0; }
+            .content-box table th, .content-box table td { border: 1px solid #111 !important; padding: 6px 8px !important; vertical-align: top; }
+            .content-box tr { break-inside: avoid; page-break-inside: avoid; }
+            .content-box img { max-width: 100% !important; height: auto !important; }
+            .attach-box { border: 1px solid #111; padding: 10px 14px; font-size: 0.86rem; color: #111; }
+            .attach-list { margin: 0; padding-left: 20px; }
+            .attach-list li { margin: 2px 0; }
+            .attach-list a { color: #0f172a; text-decoration: none; }
+            .text-end { text-align: right; }
+            .text-center { text-align: center; }
+            .fw-bold { font-weight: 700; }
+            .footer-row { margin-top: 10px; padding-top: 6px; border-top: 1px dashed #9ca3af; display: flex; justify-content: space-between; gap: 8px; font-size: 0.74rem; color: #6b7280; }
             .print-actions { position: fixed; bottom: 20px; right: 20px; }
-            @media print { .print-actions { display: none; } }
+            @media print {
+              body {
+                padding: 0;
+                background: #fff !important;
+                color: #000 !important;
+              }
+              .print-area {
+                border: none;
+                padding: 0;
+                box-shadow: none;
+              }
+              .header-grid { break-inside: avoid; page-break-inside: avoid; }
+              .content-box { min-height: 0; }
+              .footer-row { break-inside: avoid; page-break-inside: avoid; }
+              .print-actions { display: none; }
+            }
           </style>
         </head>
         <body>
-          <div class="print-area">
-            <div class="header">
-              <div class="doc-info">
-                <div class="doc-row"><strong>문서 유형:</strong> ${safeType}</div>
-                ${safeDocNo ? `<div class="doc-row"><strong>문서번호:</strong> ${safeDocNo}</div>` : ''}
-                <div class="doc-row"><strong>제목:</strong> ${safeTitle}</div>
-                <div class="doc-row"><strong>작성자:</strong> ${safeDrafter}</div>
-                <div class="doc-row"><strong>작성일:</strong> ${safeDate}</div>
-                <div class="doc-row"><strong>금액:</strong> ${safeAmount}원</div>
-              </div>
-              <div class="approval-boxes">
-                <div class="approval-box">
-                  <div class="approval-role">담당</div>
-                  <div class="approval-name">${safeDrafter}</div>
-                  ${drafterStamp}
-                </div>
-                <div class="approval-box">
-                  <div class="approval-role">사무국장</div>
-                  <div class="approval-name">${escapeHtml(secretary?.name || '')}</div>
-                  ${stampHtml(secretary, safeDate, secretaryAuto)}
-                </div>
-                <div class="approval-box">
-                  <div class="approval-role">이사장</div>
-                  <div class="approval-name">${escapeHtml(chairman?.name || '')}</div>
-                  ${stampHtml(chairman, safeDate)}
-                </div>
-              </div>
+          <div class="print-area" id="printArea">
+            <div class="doc-title">${safeDocHeading}</div>
+            <div class="doc-subtitle">${safeType || '결재문서'}${safeDate ? ` · 작성일 ${safeDate}` : ''}</div>
+
+            <div class="header-grid">
+              <table class="info-table">
+                <tbody>
+                  <tr><th>문서유형</th><td>${safeType || emptyText}</td></tr>
+                  <tr><th>문서번호</th><td>${safeDocNo || emptyText}</td></tr>
+                  <tr><th>제목</th><td>${safeTitle || emptyText}</td></tr>
+                  <tr><th>작성자</th><td>${safeDrafter || emptyText}</td></tr>
+                  <tr><th>작성일</th><td>${safeDate || emptyText}</td></tr>
+                  ${shouldShowAmount
+                    ? `<tr>
+                    <th>금액</th>
+                    <td>
+                      <div class="amount-main">${safeAmount}원</div>
+                      <div class="amount-sub">(금액한글) ${safeAmountKor}</div>
+                    </td>
+                  </tr>`
+                    : ''}
+                  ${(safeReceiver || safeVia)
+                    ? `<tr><th>${safeAuxInfoLabel}</th><td>${safeReceiver || ''}${safeReceiver && safeVia ? ' / ' : ''}${safeVia || ''}</td></tr>`
+                    : ''}
+                </tbody>
+              </table>
+
+              <table class="approval-table">
+                <thead>
+                  <tr>
+                    <th>담당</th>
+                    <th>사무국장</th>
+                    <th>이사장</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="approval-cell">
+                      <div class="approval-name">${safeDrafter || emptyText}</div>
+                      ${drafterStamp}
+                    </td>
+                    <td class="approval-cell">
+                      <div class="approval-name">${safeSecretaryName || emptyText}</div>
+                      ${stampHtml(secretary, safeDate, secretaryAuto)}
+                    </td>
+                    <td class="approval-cell">
+                      <div class="approval-name">${safeChairmanName || emptyText}</div>
+                      ${stampHtml(chairman, safeDate, false, { hidePending: true })}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
-            <div class="content-box" style="white-space: pre-wrap;">${safeContent}</div>
+            <div class="section-title">${safeSectionHeading}</div>
+            <div class="content-box">${renderedContent || emptyText}</div>
+            ${attachmentSectionHtml}
+            <div class="footer-row">
+              <span>출력일시: ${safePrintedAt || emptyText}</span>
+              <span>본 문서는 전자결재 시스템에서 출력되었습니다.</span>
+            </div>
           </div>
           <div class="print-actions">
             <button class="btn btn-primary btn-sm" onclick="window.print()">🖨️ 인쇄</button>
@@ -1188,6 +2279,16 @@ async function printPhysicalDoc(docId) {
     if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
     const { data: doc, error } = await _supabase.from('ref_approval').select('*').eq('id', docId).single();
     if (error || !doc) return showAlert("문서를 찾을 수 없습니다.");
+
+    const fileLinks = Array.isArray(doc.file_links) ? doc.file_links : [];
+    if (fileLinks.length > 0) {
+        const signedLinks = [];
+        for (const link of fileLinks) {
+            const signed = await resolveStorageUrl(link, 60 * 60 * 3);
+            signedLinks.push(signed || link);
+        }
+        doc._signed_file_links = signedLinks;
+    }
 
     // 기안자 직급 확인 (사무국장 여부)
     if (doc.drafter_id) {
@@ -1218,6 +2319,86 @@ function startPhysicalComplete(docId) {
     const input = document.getElementById('signedDocInput');
     input.value = "";
     input.click();
+}
+
+function startPhysicalReject(docId) {
+    if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
+    pendingPhysicalRejectDocId = docId;
+    const reasonEl = document.getElementById('physicalRejectReason');
+    if (reasonEl) reasonEl.value = '';
+    if (physicalRejectModalInstance) {
+        physicalRejectModalInstance.show();
+        setTimeout(() => reasonEl?.focus(), 120);
+    }
+}
+
+async function submitPhysicalReject() {
+    if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
+    if (!pendingPhysicalRejectDocId) return;
+
+    const reasonEl = document.getElementById('physicalRejectReason');
+    const reason = String(reasonEl?.value || '').trim();
+    if (!reason) return showAlert("반려 사유를 입력하세요.");
+
+    const submitBtn = document.getElementById('btnPhysicalRejectSubmit');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "처리 중...";
+    }
+
+    const { data: doc, error: docErr } = await _supabase
+        .from('ref_approval')
+        .select('id, status, approval_line, title, drafter_id')
+        .eq('id', pendingPhysicalRejectDocId)
+        .single();
+
+    if (docErr || !doc) {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "반려 처리";
+        }
+        return showAlert("문서를 찾을 수 없습니다.");
+    }
+    if (doc.status !== '실물결재대기') {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "반려 처리";
+        }
+        return showAlert("실물결재 대기 상태에서만 반려할 수 있습니다.");
+    }
+
+    const nowIso = new Date().toISOString();
+    let line = Array.isArray(doc.approval_line) ? doc.approval_line : [];
+    line = line.map(l => {
+        if ((l.position || '').includes('이사장')) {
+            return { ...l, status: '반려', processed_at: nowIso, comment: reason };
+        }
+        return l;
+    });
+
+    const { error: updateErr } = await _supabase.from('ref_approval').update({
+        status: '반려',
+        approval_line: line,
+        current_approver: null,
+        processed_at: nowIso
+    }).eq('id', pendingPhysicalRejectDocId);
+
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "반려 처리";
+    }
+    if (updateErr) return showAlert("실물결재 반려 처리 실패: " + updateErr.message);
+
+    await logAudit('approval.physical_reject', pendingPhysicalRejectDocId, '실물결재 반려', { reason });
+    if (doc?.drafter_id && doc.drafter_id !== myInfo?.emp_id) {
+        await createNotification(doc.drafter_id, '실물결재 반려', `${doc.title || '문서'} 실물결재가 반려되었습니다.`, `approval.html?doc=${pendingPhysicalRejectDocId}`, { doc_id: pendingPhysicalRejectDocId, reason });
+    }
+
+    if (physicalRejectModalInstance) physicalRejectModalInstance.hide();
+    pendingPhysicalRejectDocId = null;
+    if (reasonEl) reasonEl.value = '';
+    showAlert("실물결재가 반려되었습니다.");
+    loadHistoryList();
 }
 
 document.getElementById('signedDocInput').addEventListener('change', async (e) => {
@@ -1386,9 +2567,14 @@ async function openRelView(docId) {
 
     const contentBox = document.createElement("div");
     contentBox.className = "p-3 bg-light rounded";
-    contentBox.style.whiteSpace = "pre-wrap";
     contentBox.style.minHeight = "200px";
-    contentBox.textContent = data.content || "";
+    const allowHtmlContent = String(data.doc_type || '').startsWith('일반품의');
+    if (allowHtmlContent) {
+        contentBox.innerHTML = renderApprovalContent(data.content || '', true);
+    } else {
+        contentBox.style.whiteSpace = "pre-wrap";
+        contentBox.textContent = data.content || "";
+    }
 
     const amountEl = document.createElement("div");
     amountEl.className = "mt-3 text-end fw-bold";

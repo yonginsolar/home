@@ -16,6 +16,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="print_service.js"></script>
+  <script src="salary_ledger_module.js"></script>
   
   <style>
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -1182,35 +1183,24 @@ async function printLedger() {
     const { data: list, error } = await _supabase.from('hr_salary').select('*').eq('year_month', ym).order('emp_name');
     if(error || !list || list.length === 0) return showAlert("해당 월의 급여 데이터가 없습니다.");
     
-    // 2. 집계 및 테이블 HTML 생성 (기존 로직 유지)
-    let t = { basic:0, meal:0, car:0, child:0, pos:0, svc:0, ot:0, bonus:0, p_total:0, pen:0, hlt:0, care:0, emp:0, inc:0, loc:0, adv:0, cap:0, d_total:0, net:0 };
-    
-    const rowsHtml = list.map((d, i) => {
-        // 합계 누적
-        t.basic+=d.pay_basic; t.meal+=d.pay_meal; t.car+=d.pay_car; t.child+=d.pay_child; 
-        t.pos+=(d.pay_position||0); t.svc+=(d.pay_service||0); t.ot+=(d.pay_overtime||0); t.bonus+=(d.pay_bonus||0); t.p_total+=d.pay_total;
-        t.pen+=d.ded_pension; t.hlt+=d.ded_health; t.care+=d.ded_care; t.emp+=d.ded_employ; 
-        t.inc+=d.ded_income; t.loc+=d.ded_local; t.adv+=(d.ded_advance||0); t.cap+=(d.ded_capital||0); t.d_total+=d.ded_total; t.net+=d.net_pay;
-        
-        // 행 HTML 생성
-        return `<tr style="height:30px;"><td class="text-center">${i+1}</td><td class="text-center fw-bold">${d.emp_name}</td><td class="text-end">${Number(d.pay_basic).toLocaleString()}</td><td class="text-end">${Number(d.pay_meal).toLocaleString()}</td><td class="text-end">${Number(d.pay_car).toLocaleString()}</td><td class="text-end">${Number(d.pay_child+(d.pay_position||0)+(d.pay_service||0)+(d.pay_overtime||0)).toLocaleString()}</td><td class="text-end">${Number(d.pay_bonus||0).toLocaleString()}</td><td class="text-end bg-light fw-bold">${Number(d.pay_total).toLocaleString()}</td><td class="text-end">${Number(d.ded_pension).toLocaleString()}</td><td class="text-end">${Number(d.ded_health).toLocaleString()}</td><td class="text-end">${Number(d.ded_care).toLocaleString()}</td><td class="text-end">${Number(d.ded_employ).toLocaleString()}</td><td class="text-end">${Number(d.ded_income).toLocaleString()}</td><td class="text-end">${Number(d.ded_local).toLocaleString()}</td><td class="text-end">${Number((d.ded_advance||0)+(d.ded_capital||0)).toLocaleString()}</td><td class="text-end bg-light fw-bold" style="color:#c62828;">${Number(d.ded_total).toLocaleString()}</td><td class="text-end fw-bold" style="background:#e3f2fd;">${Number(d.net_pay).toLocaleString()}</td></tr>`;
-    }).join("");
+    if (!window.SalaryLedgerModule) return showAlert("급여대장 모듈을 불러오지 못했습니다.");
 
-    const totalHtml = `<tr style="background:#eee; font-weight:bold; height:35px;"><td colspan="2" class="text-center">합 계</td><td class="text-end">${t.basic.toLocaleString()}</td><td class="text-end">${t.meal.toLocaleString()}</td><td class="text-end">${t.car.toLocaleString()}</td><td class="text-end">${(t.child+t.pos+t.svc+t.ot).toLocaleString()}</td><td class="text-end">${t.bonus.toLocaleString()}</td><td class="text-end">${t.p_total.toLocaleString()}</td><td class="text-end">${t.pen.toLocaleString()}</td><td class="text-end">${t.hlt.toLocaleString()}</td><td class="text-end">${t.care.toLocaleString()}</td><td class="text-end">${t.emp.toLocaleString()}</td><td class="text-end">${t.inc.toLocaleString()}</td><td class="text-end">${t.loc.toLocaleString()}</td><td class="text-end">${(t.adv+t.cap).toLocaleString()}</td><td class="text-end" style="color:#c62828;">${t.d_total.toLocaleString()}</td><td class="text-end" style="background:#bbdefb;">${t.net.toLocaleString()}</td></tr>`;
-
-    // 3. 인쇄 모듈 호출 (이 부분만 변경됨)
+    // 2. 공통 모듈로 급여대장 출력
     const [y, m] = ym.split('-');
     const ceoName = companyInfo.chairman_name || companyInfo.ceoName || "이사장";
-    
-    const ledgerData = { 
-        title: `${y}년 ${Number(m)}월 급여대장`, 
-        tableBody: rowsHtml + totalHtml, 
-        logo: companyInfo.logo_horizontal_url || "", 
-        chairman: ceoName 
-    };
-    
-    // 외부 파일(print_service.js)의 함수 호출
-    PrintService.printLedger(ledgerData);
+    const state = window.SalaryLedgerModule.createStateFromRows(list, ym);
+    try {
+        window.SalaryLedgerModule.openPrintWindow(state, {
+            title: `${y}년 ${Number(m)}월 급여대장`,
+            logoUrl: companyInfo.logo_horizontal_url || "",
+            chairmanName: ceoName,
+            showApprovalBox: true,
+            showPrintDate: true,
+            footerText: 'ERP 급여관리 출력본'
+        });
+    } catch (e) {
+        showAlert("급여대장 출력 실패: " + (e?.message || e));
+    }
 }
 
 

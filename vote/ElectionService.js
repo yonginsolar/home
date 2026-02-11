@@ -7,6 +7,80 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+export const DISTRICT_VOTE_STATE = Object.freeze({
+    BINARY: 'BINARY',
+    CONTESTED: 'CONTESTED',
+    UNCONTESTED: 'UNCONTESTED',
+    NO_CANDIDATE: 'NO_CANDIDATE'
+});
+
+export function normalizeDistrictQuota(quota) {
+    const parsed = Number(quota);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return Math.floor(parsed);
+}
+
+export function classifyDistrictVoteState({ voteType, quota, candidateCount }) {
+    const type = String(voteType || '').toUpperCase();
+    const safeQuota = normalizeDistrictQuota(quota);
+    const safeCount = Number.isFinite(Number(candidateCount)) ? Number(candidateCount) : 0;
+
+    if (type === 'BINARY') return DISTRICT_VOTE_STATE.BINARY;
+    if (safeCount <= 0) return DISTRICT_VOTE_STATE.NO_CANDIDATE;
+    if (safeCount <= safeQuota) return DISTRICT_VOTE_STATE.UNCONTESTED;
+    return DISTRICT_VOTE_STATE.CONTESTED;
+}
+
+export function isDistrictVotingRequired(state) {
+    return state === DISTRICT_VOTE_STATE.BINARY || state === DISTRICT_VOTE_STATE.CONTESTED;
+}
+
+export function buildElectionVoteSummary(districts = [], candidates = []) {
+    const candidateCountMap = new Map();
+    (candidates || []).forEach((candidate) => {
+        const districtId = candidate?.district_id;
+        if (!districtId) return;
+        candidateCountMap.set(districtId, (candidateCountMap.get(districtId) || 0) + 1);
+    });
+
+    const states = (districts || []).map((district) => {
+        const districtId = district?.id;
+        const candidateCount = districtId ? (candidateCountMap.get(districtId) || 0) : 0;
+        const quota = normalizeDistrictQuota(district?.quota);
+        const state = classifyDistrictVoteState({
+            voteType: district?.vote_type,
+            quota,
+            candidateCount
+        });
+
+        return {
+            district,
+            districtId,
+            voteType: district?.vote_type || '',
+            quota,
+            candidateCount,
+            state,
+            requiresVoting: isDistrictVotingRequired(state)
+        };
+    });
+
+    const requiresVotingDistricts = states.filter((row) => row.requiresVoting);
+    const uncontestedDistricts = states.filter((row) => row.state === DISTRICT_VOTE_STATE.UNCONTESTED);
+    const noCandidateDistricts = states.filter((row) => row.state === DISTRICT_VOTE_STATE.NO_CANDIDATE);
+    const binaryDistricts = states.filter((row) => row.state === DISTRICT_VOTE_STATE.BINARY);
+    const contestedDistricts = states.filter((row) => row.state === DISTRICT_VOTE_STATE.CONTESTED);
+
+    return {
+        states,
+        requiresVotingDistricts,
+        uncontestedDistricts,
+        noCandidateDistricts,
+        binaryDistricts,
+        contestedDistricts,
+        hasVotingRequired: requiresVotingDistricts.length > 0
+    };
+}
+
 /**
  * ElectionService: 선거 관련 모든 데이터 로직을 담당하는 클래스
  */
@@ -118,15 +192,22 @@ export class ElectionService {
                 .eq('member_uuid', this.memberProfile.id)
                 .maybeSingle();
 
-            // 무투표 당선 여부 (후보자 수 <= 선출 인원)
-            const isUncontested = district.vote_type === 'CANDIDATE' && candidates.length > 0 && candidates.length <= district.quota;
+            const ballotState = classifyDistrictVoteState({
+                voteType: district.vote_type,
+                quota: district.quota,
+                candidateCount: candidates.length
+            });
+            const requiresVoting = isDistrictVotingRequired(ballotState);
+            const isUncontested = ballotState === DISTRICT_VOTE_STATE.UNCONTESTED;
 
             return {
                 district_id: districtId,
                 district: district,
                 candidates: candidates,
                 hasVoted: !!logData,
-                isUncontested: isUncontested
+                isUncontested: isUncontested,
+                ballotState: ballotState,
+                requiresVoting: requiresVoting
             };
         }));
 

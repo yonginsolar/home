@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.36 | Change: 2026-02-09 - Donation sync new-only: if note has [전표완료], never correct/repost; skip entirely. -->
+<!-- Version: v1.0.35 | Change: 2026-02-09 - Exclude legacy donation rows without DON linkage from correction count/action. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.36 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.35 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>회계 관리</title>
@@ -3198,7 +3198,7 @@ function confirmSync(type) {
             const previewCashNetMap = buildCashNetMap(previewDonRows || [], 'DON');
             let previewNew = 0;
             let previewCorrection = 0;
-            let previewSkipDone = 0;
+            let previewLegacySkip = 0;
 
             previewDonations.forEach((row) => {
                 const sourceId = String(row.id || '').trim();
@@ -3206,7 +3206,7 @@ function confirmSync(type) {
                 const desired = Math.max(0, Number(row.amount || 0));
                 const current = Number(previewCashNetMap.get(sourceId) || 0);
                 const hasDone = String(row.note || '').includes('[전표완료]');
-                if (hasDone) { previewSkipDone += 1; return; }
+                if (hasDone && current === 0 && desired > 0) { previewLegacySkip += 1; return; }
                 if (current === desired) return;
                 if (current === 0 && !hasDone && desired > 0) previewNew += 1;
                 else previewCorrection += 1;
@@ -3217,7 +3217,7 @@ function confirmSync(type) {
                 `- 대상 건수: ${previewDonations.length}건`,
                 `- 신규 전표: ${previewNew}건`,
                 `- 정정(취소+재기표): ${previewCorrection}건`,
-                `- 전표완료 스킵: ${previewSkipDone}건`
+                `- 레거시 연결불가: ${previewLegacySkip}건`
             ].join('\n');
 
             showConfirm("기부금 연동", previewMsg, async () => {
@@ -3258,8 +3258,8 @@ function confirmSync(type) {
                 const descBase = `[기부금] ${donorLabel}${methodLabel}`;
                 const txDate = d.donation_date || today;
 
-                if (hasDone) {
-                    // 정책: 전표완료면 정정/재기표 금지. (수정은 새 row로 입력)
+                if (hasDone && currentNet === 0 && desired > 0) {
+                    // 과거 랜덤 Trans_ID 전표는 소스 연결이 없어 자동 정정을 건너뜀
                     legacySkipCount += 1;
                     return;
                 }
@@ -3349,19 +3349,19 @@ function confirmSync(type) {
 
             if (entries.length === 0 && doneCount === 0) {
                 if (legacySkipCount > 0) {
-                    showAlert("알림", `변경 내역은 없고 전표완료 스킵 ${legacySkipCount}건이 있습니다.`);
+                    showAlert("알림", `변경 내역은 없지만 레거시 전표 연결 불가 ${legacySkipCount}건은 자동정정에서 제외되었습니다.`);
                 } else {
                     showAlert("알림", "변경된 내역이 없어 처리할 항목이 없습니다.");
                 }
             } else if (markFailed > 0) {
                 if (legacySkipCount > 0) {
-                    showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
+                    showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료\n레거시 연결불가 ${legacySkipCount}건 제외`);
                 } else {
                     showAlert("부분 완료", `신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount - markFailed}/${doneCount}건 완료`);
                 }
             } else {
                 if (legacySkipCount > 0) {
-                    showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
+                    showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료\n레거시 연결불가 ${legacySkipCount}건 제외`);
                 } else {
                     showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료`);
                 }
