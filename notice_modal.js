@@ -1,6 +1,6 @@
 /*
-Version: v1.0.5
-Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot exists.
+Version: v1.0.8
+Change: 2026-02-12 - Restore seal size while keeping notice content mobile-safe.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -135,19 +135,131 @@ Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot
   </div>
 </div>
 
+<style id="notice-modal-style">
+#noticeDetailModal .notice-detail-modal-dialog {
+  max-width: 900px;
+}
+#noticeDetailModal .notice-detail-modal-body {
+  overflow-x: hidden;
+}
+#notice-read-content.notice-read-content {
+  min-height: 200px;
+  line-height: 1.8;
+  color: #333;
+}
+#notice-read-content .notice-content-body {
+  width: 100%;
+  max-width: 100%;
+}
+#notice-read-content .notice-content-body * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+#notice-read-content .notice-content-body .doc {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+#notice-read-content .notice-content-body .print-bar {
+  display: none !important;
+}
+#notice-read-content .notice-content-body .notice-name-main,
+#notice-read-content .notice-content-body .notice-rep,
+#notice-read-content .notice-content-body .sign-text,
+#notice-read-content .notice-content-body .sign-mark-text {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#notice-read-content .notice-content-body .notice-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#notice-read-content .notice-content-body .notice-table-scroll > table {
+  width: max-content !important;
+  min-width: 100% !important;
+  max-width: none !important;
+  display: table !important;
+}
+#notice-read-content .notice-content-body table {
+  width: 100% !important;
+  max-width: 100% !important;
+  border-collapse: collapse;
+}
+#notice-read-content .notice-content-body th,
+#notice-read-content .notice-content-body td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#notice-read-content .notice-content-body img:not(.seal),
+#notice-read-content .notice-content-body video,
+#notice-read-content .notice-content-body canvas,
+#notice-read-content .notice-content-body svg,
+#notice-read-content .notice-content-body iframe {
+  max-width: 100% !important;
+  height: auto !important;
+}
+#notice-read-content .notice-content-body img.seal {
+  max-width: none !important;
+  width: 92px !important;
+  height: 92px !important;
+}
+#notice-read-content .notice-content-body p,
+#notice-read-content .notice-content-body div,
+#notice-read-content .notice-content-body span,
+#notice-read-content .notice-content-body li {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#notice-read-content .notice-content-body pre,
+#notice-read-content .notice-content-body code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@media (max-width: 576px) {
+  #noticeDetailModal .notice-detail-modal-dialog {
+    margin: 0.5rem;
+  }
+  #noticeDetailModal .notice-detail-modal-body {
+    padding: 1rem !important;
+  }
+  #notice-read-content .notice-content-body .title {
+    font-size: clamp(1.3rem, 6.2vw, 2rem) !important;
+    letter-spacing: 0.12em !important;
+  }
+  #notice-read-content .notice-content-body .intro {
+    font-size: 0.95rem !important;
+    line-height: 1.6 !important;
+  }
+  #noticeDetailModal .notice-read-meta {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 0.4rem;
+  }
+  #noticeDetailModal .modal-footer {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  #noticeDetailModal .modal-footer .btn {
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+  </style>
+
 <div class="modal fade" id="noticeDetailModal" tabindex="-1" >
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content">
+  <div class="modal-dialog modal-dialog-centered modal-lg notice-detail-modal-dialog">
+    <div class="modal-content notice-detail-modal-content">
       <div class="modal-header" style="background-color: #f8f9fa;">
         <h5 class="modal-title fw-bold" id="notice-read-title">제목</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body p-4">
-        <div class="d-flex justify-content-between text-muted border-bottom pb-2 mb-4">
+      <div class="modal-body p-4 notice-detail-modal-body">
+        <div class="d-flex justify-content-between text-muted border-bottom pb-2 mb-4 notice-read-meta">
             <span id="notice-read-cat" class="badge bg-dark">공지</span>
             <small id="notice-read-date">202X.XX.XX</small>
         </div>
-        <div id="notice-read-content" style="min-height: 200px; line-height: 1.8; color: #333;"></div>
+        <div id="notice-read-content" class="notice-read-content" style="min-height: 200px; line-height: 1.8; color: #333;"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-dark" onclick="openNoticeSearchModal()">목록으로</button>
@@ -260,6 +372,69 @@ Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot
     function showNoticeAlert(msg) {
         if (typeof window.showAlert === 'function') return window.showAlert(msg);
         if (typeof window.showModal === 'function') return window.showModal(msg);
+    }
+
+    function normalizeNoticeDetailContent(contentEl) {
+        if (!contentEl) return;
+        const body = contentEl.querySelector('.notice-content-body');
+        if (!body) return;
+
+        body.querySelectorAll('.print-bar').forEach(el => { el.style.display = 'none'; });
+        body.querySelectorAll('.doc').forEach(el => {
+            el.style.width = '100%';
+            el.style.maxWidth = '100%';
+        });
+
+        body.querySelectorAll('*').forEach(el => {
+            if (!(el instanceof HTMLElement)) return;
+            const widthStyle = (el.style.width || '').trim().toLowerCase();
+            if (widthStyle.endsWith('px')) {
+                const px = parseFloat(widthStyle);
+                if (Number.isFinite(px) && px >= 280) {
+                    el.style.width = '100%';
+                    el.style.maxWidth = '100%';
+                }
+            }
+
+            const minWidthStyle = (el.style.minWidth || '').trim().toLowerCase();
+            if (minWidthStyle.endsWith('px')) {
+                const minPx = parseFloat(minWidthStyle);
+                if (Number.isFinite(minPx) && minPx >= 280) {
+                    el.style.minWidth = '0';
+                }
+            }
+
+            const whiteSpaceStyle = (el.style.whiteSpace || '').trim().toLowerCase();
+            if (whiteSpaceStyle === 'nowrap') {
+                el.style.whiteSpace = 'normal';
+                el.style.wordBreak = 'break-word';
+                el.style.overflowWrap = 'anywhere';
+            }
+        });
+
+        body.querySelectorAll('table').forEach(table => {
+            const parent = table.parentElement;
+            if (!parent) return;
+            if (!parent.classList.contains('notice-table-scroll')) {
+                const wrap = document.createElement('div');
+                wrap.className = 'notice-table-scroll';
+                parent.insertBefore(wrap, table);
+                wrap.appendChild(table);
+            }
+            table.style.minWidth = '100%';
+        });
+
+        body.querySelectorAll('th, td').forEach(cell => {
+            cell.style.whiteSpace = 'normal';
+            cell.style.wordBreak = 'break-word';
+            cell.style.overflowWrap = 'anywhere';
+        });
+
+        body.querySelectorAll('img, video, canvas, svg, iframe').forEach(media => {
+            if (media.classList && media.classList.contains('seal')) return;
+            media.style.maxWidth = '100%';
+            media.style.height = 'auto';
+        });
     }
 
     async function openList() {
@@ -388,7 +563,10 @@ Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot
         }
 
         const contentEl = document.getElementById('notice-read-content');
-        if (contentEl) contentEl.innerHTML = contentHtml;
+        if (contentEl) {
+            contentEl.innerHTML = `<div class="notice-content-body">${contentHtml}</div>`;
+            normalizeNoticeDetailContent(contentEl);
+        }
 
         if (typeof bootstrap !== 'undefined') {
             const searchEl = document.getElementById('noticeSearchModal');
