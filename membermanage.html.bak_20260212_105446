@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.28
-Change: 2026-02-12 - Added game hall-of-fame section (monthly/overall) for logged-in members.
+Version: v1.0.26
+Change: 2026-02-11 - First login now shows duplicate-email member candidates and allows direct selection/linking.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.28 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.26 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -289,71 +289,6 @@ line-height: 22px;
 text-align: center;
 box-shadow: 0 2px 8px rgba(0,0,0,0.22);
 z-index: 2;
-}
-
-/* [명예의 전당] 게임 랭킹 카드 */
-.hof-tabs {
-display: inline-flex;
-gap: 6px;
-padding: 4px;
-border-radius: 999px;
-background: #eef2ff;
-}
-.hof-tab-btn {
-border: none;
-border-radius: 999px;
-padding: 6px 12px;
-font-size: 0.82rem;
-font-weight: 700;
-background: transparent;
-color: #475569;
-cursor: pointer;
-}
-.hof-tab-btn.active {
-background: #1d4ed8;
-color: #fff;
-box-shadow: 0 4px 12px rgba(29, 78, 216, 0.24);
-}
-.hof-season-label {
-font-size: 0.8rem;
-color: #64748b;
-}
-.hof-list {
-margin-top: 12px;
-}
-.hof-row {
-display: grid;
-grid-template-columns: 56px 1fr auto;
-align-items: center;
-gap: 10px;
-padding: 10px 12px;
-border: 1px solid #e2e8f0;
-border-radius: 10px;
-background: #fff;
-}
-.hof-row + .hof-row {
-margin-top: 8px;
-}
-.hof-rank {
-font-family: 'GmarketSans', sans-serif;
-font-weight: 700;
-font-size: 0.92rem;
-color: #1e293b;
-}
-.hof-name {
-font-weight: 700;
-color: #0f172a;
-font-size: 0.92rem;
-}
-.hof-meta {
-font-size: 0.76rem;
-color: #64748b;
-}
-.hof-score {
-font-family: 'GmarketSans', sans-serif;
-font-weight: 700;
-font-size: 0.96rem;
-color: #1d4ed8;
 }
 
 /* [배지] 컨테이너 스타일 */
@@ -667,24 +602,6 @@ NO. <span id="infoMemberId">-</span>
     </div>
   </div>
 </div>
-
-<div class="dashboard-card mb-4" id="hallOfFameCard">
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom pb-2">
-<h5 class="fw-bold m-0"><i class="bi bi-trophy-fill me-2 text-warning"></i>게임 명예의 전당</h5>
-<span id="hofSeasonLabel" class="hof-season-label">기준: -</span>
-</div>
-<div class="d-flex justify-content-between align-items-center mt-3 mb-2">
-<div class="hof-tabs">
-<button type="button" id="hofTabMonthly" class="hof-tab-btn active" onclick="switchHallOfFameTab('MONTHLY')">월간</button>
-<button type="button" id="hofTabOverall" class="hof-tab-btn" onclick="switchHallOfFameTab('OVERALL')">전체</button>
-</div>
-<a href="game.html" class="btn btn-sm btn-outline-primary"><i class="bi bi-controller me-1"></i>게임 하러가기</a>
-</div>
-<div id="hallOfFameList" class="hof-list">
-<p class="text-muted small mb-0">랭킹을 불러오는 중...</p>
-</div>
-</div>
-
 <div class="dashboard-card mb-4 p-3" style="background-color: #f8f9fa; border:none;">
 <div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
 <h6 class="fw-bold m-0 text-secondary"><i class="bi bi-megaphone-fill me-2"></i>최근 공지</h6>
@@ -1157,8 +1074,6 @@ let curMem = null;
 let curAuth = null;
 let currentBoardLimit = 20;
 let isBoardLoading = false;
-let g_notices_list = [];
-window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false };
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
 if (!value) return fallback;
@@ -1884,117 +1799,6 @@ if (gender === '3' || gender === '4') prefix = '20';
 return `${prefix}${yy}년 ${Number(mm)}월 ${Number(dd)}일`;
 }
 
-const HOF_SCOPE = Object.freeze({
-MONTHLY: 'MONTHLY',
-OVERALL: 'OVERALL'
-});
-
-const hallOfFameState = {
-scope: HOF_SCOPE.MONTHLY,
-monthlySeasonKey: '',
-isLoading: false
-};
-
-function getCurrentKstMonthKey() {
-const now = new Date();
-const yyyy = new Intl.DateTimeFormat('en-CA', { timeZone: KST_TZ_MEMBER, year: 'numeric' }).format(now);
-const mm = new Intl.DateTimeFormat('en-CA', { timeZone: KST_TZ_MEMBER, month: '2-digit' }).format(now);
-return `${yyyy}-${mm}`;
-}
-
-function updateHallOfFameTabUi(scope) {
-const monthlyBtn = document.getElementById('hofTabMonthly');
-const overallBtn = document.getElementById('hofTabOverall');
-if (monthlyBtn) monthlyBtn.classList.toggle('active', scope === HOF_SCOPE.MONTHLY);
-if (overallBtn) overallBtn.classList.toggle('active', scope === HOF_SCOPE.OVERALL);
-}
-
-function renderHallOfFamePlaceholder(message) {
-const listEl = document.getElementById('hallOfFameList');
-if (!listEl) return;
-listEl.innerHTML = `<p class=\"text-muted small mb-0\">${escapeHtml(message || '랭킹을 불러올 수 없습니다.')}</p>`;
-}
-
-function renderHallOfFameRows(rows, scope) {
-const listEl = document.getElementById('hallOfFameList');
-if (!listEl) return;
-if (!rows || rows.length === 0) {
-const msg = scope === HOF_SCOPE.MONTHLY
-? '이번 달 기록이 아직 없습니다. 첫 기록을 남겨보세요!'
-: '전체 누적 기록이 아직 없습니다.';
-renderHallOfFamePlaceholder(msg);
-return;
-}
-
-const html = rows.map((row, idx) => {
-const rankNo = Number(row.rank_no || (idx + 1));
-const name = escapeHtml(row.name_snapshot || '이름 미확인');
-const memberId = escapeHtml(row.member_id_snapshot || '-');
-const score = Number(row.score || 0).toLocaleString();
-const panels = Number(row.panels_cleared || 0).toLocaleString();
-const updated = formatMemberKstDateTime(row.updated_at, '-');
-return `
-<div class=\"hof-row\">
-<div class=\"hof-rank\">#${rankNo}</div>
-<div>
-<div class=\"hof-name\">${name} <span class=\"hof-meta\">(${memberId})</span></div>
-<div class=\"hof-meta\">패널 ${panels}개 · 업데이트 ${updated}</div>
-</div>
-<div class=\"hof-score\">${score}점</div>
-</div>
-`;
-}).join('');
-
-listEl.innerHTML = html;
-}
-
-async function loadHallOfFame(scope = hallOfFameState.scope) {
-if (!_supabase || hallOfFameState.isLoading) return;
-hallOfFameState.scope = scope;
-hallOfFameState.monthlySeasonKey = getCurrentKstMonthKey();
-hallOfFameState.isLoading = true;
-updateHallOfFameTabUi(scope);
-
-const seasonLabelEl = document.getElementById('hofSeasonLabel');
-if (seasonLabelEl) {
-seasonLabelEl.textContent = scope === HOF_SCOPE.MONTHLY
-? `기준: ${hallOfFameState.monthlySeasonKey} 월간`
-: '기준: 전체 누적';
-}
-renderHallOfFamePlaceholder('랭킹을 불러오는 중...');
-
-try {
-let query = _supabase
-.from('view_game_hall_of_fame_member')
-.select('ranking_scope, season_key, rank_no, member_id_snapshot, name_snapshot, score, panels_cleared, updated_at')
-.eq('ranking_scope', scope);
-
-if (scope === HOF_SCOPE.MONTHLY) query = query.eq('season_key', hallOfFameState.monthlySeasonKey);
-if (scope === HOF_SCOPE.OVERALL) query = query.eq('season_key', 'ALL');
-
-const { data, error } = await query.order('rank_no', { ascending: true }).limit(20);
-if (error) {
-renderHallOfFamePlaceholder('랭킹 조회 중 오류가 발생했습니다.');
-return;
-}
-
-const rows = Array.isArray(data) ? data : [];
-renderHallOfFameRows(rows, scope);
-} catch (e) {
-renderHallOfFamePlaceholder('랭킹 조회 중 오류가 발생했습니다.');
-} finally {
-hallOfFameState.isLoading = false;
-}
-}
-
-function switchHallOfFameTab(scope) {
-const nextScope = scope === HOF_SCOPE.OVERALL ? HOF_SCOPE.OVERALL : HOF_SCOPE.MONTHLY;
-if (nextScope === hallOfFameState.scope && hallOfFameState.isLoading) return;
-loadHallOfFame(nextScope);
-}
-
-window.switchHallOfFameTab = switchHallOfFameTab;
-
 // =========================================================================
 // 4. 신청 및 타임라인
 // =========================================================================
@@ -2613,7 +2417,6 @@ assetRow.appendChild(div);
 
 // [신규] 퀵 링크 카드 렌더링 (선거/태양광/회의록)
 renderQuickLinks(member, myRoles, isOfficial, officialIds);
-loadHallOfFame(HOF_SCOPE.MONTHLY);
 
 // ----------------------------------------------------
 // [3] 타임라인 렌더링 (통합)
@@ -3063,8 +2866,7 @@ if(amount < 10000) return showModal('1만원 이상 입력해주세요.');
 else if(type === 'reduction') {
 amount = Number(document.getElementById('redAmount').value);
 if(amount <= 0) return showModal('금액을 입력해주세요.');
-if(totalCap - amount < 100000) return showModal(`잔액 10만원 이상 유지해야 합니다.
-(현재: ${totalCap.toLocaleString()}원)`);
+if(totalCap - amount < 100000) return showModal(`잔액 10만원 이상 유지해야 합니다.\n(현재: ${totalCap.toLocaleString()}원)`);
 if(!document.getElementById('checkRedAgree').checked) return showModal('안내 사항에 동의해주세요.');
 } 
 else if(type === 'withdraw') {
@@ -3074,31 +2876,7 @@ if(!document.getElementById('checkWdAgree').checked) return showModal('동의 �
 }
 
 showConfirmModal('신청서를 제출하시겠습니까?', async function() {
-if (window.__memberAppLocks.submitApplication) {
-showModal('이미 신청 처리 중입니다. 잠시만 기다려주세요.');
-return;
-}
-window.__memberAppLocks.submitApplication = true;
 showLoading(true);
-
-try {
-const { data: existingPending, error: pendingErr } = await _supabase
-.from('coop_applications')
-.select('id')
-.eq('member_uid', curAuth.id)
-.eq('type', type)
-.eq('status', 'pending')
-.limit(1)
-.maybeSingle();
-
-if (pendingErr && String(pendingErr.code || '') !== 'PGRST116') {
-throw pendingErr;
-}
-if (existingPending?.id) {
-showModal('이미 동일한 신청이 접수되어 있습니다.\n처리 결과를 기다려주세요.');
-return;
-}
-
 const { error } = await _supabase.from('coop_applications').insert({
 member_uid: curAuth.id,
 member_id: curMem.member_id,
@@ -3109,8 +2887,9 @@ reason: reason,
 status: 'pending'
 });
 
-if(error) throw error;
-
+showLoading(false);
+if(error) showModal('오류: ' + error.message);
+else {
 showModal('신청되었습니다.');
 
 // 초기화
@@ -3122,11 +2901,6 @@ if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgre
 
 // ★ 핵심: 스마트 새로고침
 reloadDashboard();
-} catch (error) {
-showModal('오류: ' + error.message);
-} finally {
-showLoading(false);
-window.__memberAppLocks.submitApplication = false;
 }
 });
 }
@@ -3899,45 +3673,23 @@ async function requestConnect(targetUuid, targetName) {
 
 // confirm 모달은 유지 (사용자 실수 방지)
 showConfirmModal(`'${targetName}' 님과 연결을 신청하시겠습니까?`, async () => {
-if (window.__memberAppLocks.requestConnect) {
-showModal('이미 연결 신청 처리 중입니다. 잠시만 기다려주세요.');
-return;
-}
-window.__memberAppLocks.requestConnect = true;
 showLoading(true);
-
-try {
-const requestReason = `Target: ${targetUuid}`;
-const { data: existingPending, error: pendingErr } = await _supabase
-.from('coop_applications')
-.select('id')
-.eq('member_uid', curAuth.id)
-.eq('type', 'connect')
-.eq('reason', requestReason)
-.eq('status', 'pending')
-.limit(1)
-.maybeSingle();
-
-if (pendingErr && String(pendingErr.code || '') !== 'PGRST116') {
-throw pendingErr;
-}
-if (existingPending?.id) {
-showModal('이미 해당 대상에게 연결 신청이 접수되어 있습니다.');
-return;
-}
 
 const { error } = await _supabase.from('coop_applications').insert({
 member_uid: curAuth.id,
 member_id: curMem.member_id,
 name: curMem.name,
 type: 'connect', 
-reason: requestReason,
+reason: `Target: ${targetUuid}`,
 amount: 0,
 status: 'pending'
 });
 
-if(error) throw error;
+showLoading(false);
 
+if(error) {
+showModal('신청 실패: ' + error.message);
+} else {
 // 1. 가족 모달 즉시 닫기
 document.getElementById('familyModalOverlay').style.display = 'none';
 
@@ -3950,11 +3702,6 @@ actionArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
 // 4. [UX] 신청서 상단에 성공 메시지 꽂기 (Alert 아님)
 showInlineFeedback(`✅ '${targetName}' 님에게 연결 신청을 보냈습니다.`);
-} catch (error) {
-showModal('신청 실패: ' + error.message);
-} finally {
-showLoading(false);
-window.__memberAppLocks.requestConnect = false;
 }
 });
 }
@@ -4034,52 +3781,25 @@ const phone = document.getElementById('famPhone').value;
 if(!name || rrn1.length !== 6 || rrn2.length !== 1) return showModal('정보를 올바르게 입력해주세요.');
 
 showConfirmModal(`${name}님을 구성원으로 등록하시겠습니까?`, async () => {
-if (window.__memberAppLocks.submitFamily) {
-showModal('이미 구성원 등록 처리 중입니다. 잠시만 기다려주세요.');
-return;
-}
-window.__memberAppLocks.submitFamily = true;
 showLoading(true);
-
-try {
-const maskedRrn = `${rrn1}-${rrn2}******`;
-const { data: existingFamily, error: familyErr } = await _supabase
-.from('coop_members')
-.select('id')
-.eq('manager_id', curAuth.id)
-.eq('rrn_display', maskedRrn)
-.limit(1)
-.maybeSingle();
-
-if (familyErr && String(familyErr.code || '') !== 'PGRST116') {
-throw familyErr;
-}
-if (existingFamily?.id) {
-showModal('이미 등록된 구성원입니다.');
-return;
-}
 
 // 부모 정보 복사 + 필수값 설정
 const { error } = await _supabase.from('coop_members').insert({
 manager_id: curAuth.id, // 부모 UUID 연결
 name: name,
-rrn_display: maskedRrn, // 마스킹 저장
+rrn_display: `${rrn1}-${rrn2}******`, // 마스킹 저장
 phone: phone,
 address: curMem.address, // 주소는 부모와 동일하다고 가정
 join_category: '가족', // 또는 단체면 '직원' (UI에서 선택하게 하거나 자동처리)
 status: 'active' // 즉시 활성화 (또는 pending)
 });
 
-if(error) throw error;
-
+showLoading(false);
+if(error) showModal('등록 실패: ' + error.message);
+else {
 showModal('등록되었습니다.');
 document.getElementById('familyModalOverlay').style.display = 'none';
 loadFamilyList(curAuth.id);
-} catch (error) {
-showModal('등록 실패: ' + error.message);
-} finally {
-showLoading(false);
-window.__memberAppLocks.submitFamily = false;
 }
 });
 }
@@ -4089,19 +3809,6 @@ window.__memberAppLocks.submitFamily = false;
 // [게시판 로직] 공지사항(Notices) vs 게시판(Boards) 분기 처리
 // ==========================================
 let currentBoardCat = 'notice';
-
-async function fetchMemberVisibleNotices(limit = 200) {
-const { data, error } = await _supabase
-.from('coop_notices')
-.select('*')
-.eq('status', 'published')
-.order('created_at', { ascending: false })
-.limit(limit);
-if (error) throw error;
-g_notices_list = Array.isArray(data) ? data : [];
-window.g_notices_list = g_notices_list;
-return g_notices_list;
-}
 
 // [수정 4] 게시판 로드: 없는 칼럼(status) 참조 제거로 400 에러 해결
 async function loadBoard(category, btn, limit = 20) {
@@ -4115,12 +3822,6 @@ btn.classList.add('active');
 
 // 공지사항 로직 (기존 유지)
 if(category === 'notice' && !btn) {
-try {
-await fetchMemberVisibleNotices();
-} catch (e) {
-console.error("공지사항 로드 실패:", e);
-showModal('공지사항 조회 실패');
-}
 if(typeof openNoticeSearchModal === 'function') openNoticeSearchModal();
 return;
 }
@@ -4199,35 +3900,7 @@ const fileUrl = document.getElementById('writeFile').value; // 임시 파일 URL
 if(!title || !content) return showModal('제목과 내용을 입력해주세요.');
 
 showConfirmModal('게시글을 등록하시겠습니까?', async () => {
-if (window.__memberAppLocks.submitPost) {
-showModal('이미 게시글 등록 처리 중입니다. 잠시만 기다려주세요.');
-return;
-}
-window.__memberAppLocks.submitPost = true;
 showLoading(true);
-
-try {
-const { data: recentPost, error: recentPostErr } = await _supabase
-.from('coop_boards')
-.select('id, created_at')
-.eq('category', currentBoardCat)
-.eq('author_name', curMem.name)
-.eq('title', title)
-.eq('content', content)
-.order('created_at', { ascending: false })
-.limit(1)
-.maybeSingle();
-
-if (recentPostErr && String(recentPostErr.code || '') !== 'PGRST116') {
-throw recentPostErr;
-}
-if (recentPost?.id) {
-const createdAtTs = recentPost.created_at ? new Date(recentPost.created_at).getTime() : NaN;
-if (Number.isFinite(createdAtTs) && (Date.now() - createdAtTs) < 10 * 60 * 1000) {
-showModal('동일한 게시글이 이미 등록되어 있습니다.\n목록을 새로고침해 확인해주세요.');
-return;
-}
-}
 
 // 파일 배열 처리
 const files = fileUrl ? [fileUrl] : [];
@@ -4240,16 +3913,12 @@ files: files,
 author_name: curMem.name // 작성자 이름 기록
 });
 
-if(error) throw error;
-
+showLoading(false);
+if(error) showModal('등록 실패: ' + error.message);
+else {
 showModal('등록되었습니다.');
 document.getElementById('writeModalOverlay').style.display = 'none';
 loadBoard(currentBoardCat); // 목록 갱신
-} catch (error) {
-showModal('등록 실패: ' + error.message);
-} finally {
-showLoading(false);
-window.__memberAppLocks.submitPost = false;
 }
 });
 }
@@ -4439,8 +4108,7 @@ const listArea = document.getElementById('miniNoticeList');
 try {
 const { data: notices, error } = await _supabase
 .from('coop_notices')
-.select('id, title, created_at, is_members_only')
-.eq('status', 'published')
+.select('id, title, created_at')
 .order('created_at', { ascending: false })
 .limit(3); // 3개만
 
@@ -4454,13 +4122,9 @@ return;
 let html = '';
 notices.forEach(n => {
 const date = formatMemberKstDate(n.created_at).slice(5, 10); // MM-DD
-const safeTitle = escapeHtml(n.title || '');
-const visibilityBadge = n.is_members_only
-? '<span class="badge bg-success-subtle text-success border me-2">조합원</span>'
-: '<span class="badge bg-light text-muted border me-2">전체</span>';
 html += `
                <div class="notice-mini-item d-flex justify-content-between" onclick="openNoticeDetail('${n.id}')">
-                   <span class="text-truncate" style="max-width: 70%;">${visibilityBadge}${safeTitle}</span>
+                   <span class="text-truncate" style="max-width: 70%;">${n.title}</span>
                    <span class="text-muted small">${date}</span>
                </div>`;
 });

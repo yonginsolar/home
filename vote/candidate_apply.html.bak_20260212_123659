@@ -648,7 +648,6 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
     // --- 전역 변수 ---
     let currentUser = null;
     let selectedDistrict = null;
-    let candidateSubmitInFlight = false;
     
     // [DOM 캐싱] 모달 관련 요소
     const modalOverlay = document.getElementById('modal-overlay');
@@ -1035,11 +1034,6 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
     document.getElementById('btn-final-submit').addEventListener('click', async () => {
         closeConfirmModal();
         const btn = document.getElementById('btn-pre-check');
-        if (candidateSubmitInFlight) {
-            showModal('알림', '이미 제출 처리 중입니다. 잠시만 기다려주세요.');
-            return;
-        }
-        candidateSubmitInFlight = true;
         btn.disabled = true; 
         btn.innerText = '제출 중...';
 
@@ -1105,69 +1099,47 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             }
 
             // 5. DB 저장 데이터 구성
-            const baseCandidateObj = {
+            const candidateObj = {
                 election_id: document.getElementById('election-id').value,
                 district_id: document.getElementById('district-id').value,
                 member_uuid: userId,
                 name: document.getElementById('cand-name').value,
-                birth_date: document.getElementById('user-birth-raw').value,
+                birth_date: document.getElementById('user-birth-raw').value, 
                 contact: document.getElementById('user-contact').value,
                 address: document.getElementById('user-address').value,
                 career: document.getElementById('cand-career').value,
-                manifesto: document.getElementById('cand-manifesto').value,
+                manifesto: document.getElementById('cand-manifesto').value, 
                 agreed: true,
                 status: 'PENDING',
+                created_at: new Date().toISOString(), // 주의: Update 시에는 이 필드를 제외하거나 DB 트리거 확인 필요
                 ...representativeData // 대표자 정보 포함
             };
 
             // 파일이 새로 업로드된 경우에만 URL 업데이트
-            if (photoUrl) baseCandidateObj.photo_url = photoUrl;
-            if (proofUrl) baseCandidateObj.proof_url = proofUrl;
+            if (photoUrl) candidateObj.photo_url = photoUrl;
+            if (proofUrl) candidateObj.proof_url = proofUrl;
 
-            const candidateInsertObj = { ...baseCandidateObj, created_at: new Date().toISOString() };
-            const candidateUpdateObj = { ...baseCandidateObj };
-
-            // 5. Insert 또는 Update 실행 (삽입 직전 최종 중복 확인 포함)
-            let targetCandidateId = candId;
-            if (!targetCandidateId) {
-                const { data: existingAppFinal, error: existingAppFinalErr } = await supabase
-                    .from('candidates')
-                    .select('id')
-                    .eq('election_id', baseCandidateObj.election_id)
-                    .eq('member_uuid', userId)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                if (existingAppFinalErr && String(existingAppFinalErr.code || '') !== 'PGRST116') {
-                    throw existingAppFinalErr;
-                }
-                if (existingAppFinal?.id) {
-                    targetCandidateId = existingAppFinal.id;
-                }
-            }
-
+            // 5. Insert 또는 Update 실행
             let result;
-            if (targetCandidateId) {
-                result = await supabase.from('candidates').update(candidateUpdateObj).eq('id', targetCandidateId);
+            if (candId) {
+                // 수정: ID로 업데이트 (created_at 등 불필요한 필드는 제외하는 것이 정석이나, 편의상 유지함)
+                result = await supabase.from('candidates').update(candidateObj).eq('id', candId);
             } else {
-                result = await supabase.from('candidates').insert(candidateInsertObj);
+                // 신규: 삽입
+                result = await supabase.from('candidates').insert(candidateObj);
             }
-
+            
             if (result.error) throw result.error;
 
-            window.sendTalk(`새로운 후보자 등록 신청이 접수되었습니다.
-이름: ${baseCandidateObj.name}`, "[후보 등록 알림]");
+            window.sendTalk(`새로운 후보자 등록 신청이 접수되었습니다.\n이름: ${candidateObj.name}`, "[후보 등록 알림]");
 
             showModal('성공', '신청이 완료되었습니다. 관리자 승인을 기다려주세요.', () => location.reload());
-
 
         } catch (err) {
             console.error(err);
             showModal('제출 실패', err.message);
             btn.disabled = false; 
             btn.innerText = '신청서 제출';
-        } finally {
-            candidateSubmitInFlight = false;
         }
     });
     // End of btn-final-submit event listener

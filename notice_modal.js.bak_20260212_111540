@@ -1,6 +1,6 @@
 /*
-Version: v1.0.5
-Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot exists.
+Version: v1.0.4
+Change: 2026-02-05 - Hide "공문" label for public notices.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -195,28 +195,6 @@ Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot
         return data || null;
     }
 
-    async function fetchPublishedElectedNoticeSnapshot(noticeId) {
-        const client = getClient();
-        if (!client || !noticeId) return null;
-
-        const { data, error } = await client
-            .from('coop_elected_notice_snapshots')
-            .select('content_html,status')
-            .eq('notice_id', noticeId)
-            .eq('status', 'PUBLISHED')
-            .maybeSingle();
-
-        if (error) {
-            const code = String(error.code || '');
-            const message = String(error.message || '').toLowerCase();
-            if (code === 'PGRST116' || code === '42P01' || code === 'PGRST205') return null;
-            if (message.includes('coop_elected_notice_snapshots') && message.includes('does not exist')) return null;
-            console.warn('fetchPublishedElectedNoticeSnapshot failed:', error);
-            return null;
-        }
-        return data || null;
-    }
-
     function renderModalList(items) {
         const modalList = document.getElementById('modal-notice-list');
         if (!modalList) return;
@@ -341,12 +319,8 @@ Change: 2026-02-12 - Render elected notice snapshot HTML when published snapshot
         if (catEl) catEl.innerText = n.category === '공문' ? '공지' : (n.category || '');
         if (dateEl) dateEl.innerText = formatNoticeKstDate(n.created_at);
 
-        const snapshot = await fetchPublishedElectedNoticeSnapshot(n.id);
-
         let contentHtml = '';
-        if (snapshot?.content_html) {
-            contentHtml = String(snapshot.content_html);
-        } else if (n.category === '공문') {
+        if (n.category === '공문') {
             const info = await loadCompanyInfo();
             const sealUrl = await loadSealUrl();
             contentHtml = buildNoticeTemplateHtml(n, info, sealUrl);

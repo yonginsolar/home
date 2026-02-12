@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.37
-Change: 2026-02-12 - On final publish, save elected notice snapshot and link notice rendering to snapshot content.
+Version: v1.0.32
+Change: 2026-02-12 - Add district summary block and merge same-district cells in elected notice table.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.37 | admin.html');</script>
+    <script>console.log('[Version] v1.0.32 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -710,11 +710,6 @@ function escapeJsString(value) {
     let currentElectionVoteSummary = null;
     let isCurrentElectionUncontestedAutoFlow = false;
     const ELECTION_NOTICE_SEAL_FALLBACK_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/sign/attachments/ec_seal.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9hODQwZDg5Ny04MTM1LTQ2YTItODhjYi05YzI0ODUyM2ZhOWUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhdHRhY2htZW50cy9lY19zZWFsLnBuZyIsImlhdCI6MTc3MDg1NjU2NywiZXhwIjoxNzcxNDYxMzY3fQ.lw6MsofHQp2oTjJmrioGX9DrpzRrJ5pWF6uNcz8Ldl8';
-    const ELECTION_NOTICE_DOC_PREFIX = '공고 제';
-    const ELECTION_NOTICE_CATEGORY = '선거공고';
-    const ELECTION_NOTICE_TITLE = '당선인 공고문';
-    const ELECTED_NOTICE_MAX_DOCNO_RETRY = 5;
-    let isStatusTransitionInFlight = false;
 
     // -----------------------------------------------------------
     // [1] 모달 & 유틸리티 (기존 유지)
@@ -1050,15 +1045,12 @@ function escapeJsString(value) {
         return ELECTION_NOTICE_SEAL_FALLBACK_URL;
     }
 
-    function buildElectedNoticeHtml(rows, sealUrl, options = {}) {
-        const issueNo = String(options.issueNo || '2026-001호');
-        const noticeDate = String(options.noticeDateText || '2026년 2월 12일');
-        const openingText = String(options.openingText || '2026년 실시한 제1차대의원선거에 있어 당선인을 다음과 같이 공고합니다.');
+    function buildElectedNoticeHtml(rows, sealUrl) {
+        const issueNo = '2026-001호';
+        const noticeDate = '2026년 2월 12일';
+        const openingText = '2026년 실시한 제1차대의원선거에 있어 당선인을 다음과 같이 공고합니다.';
         const committeeText = '용인모두의햇빛협동조합 선거관리위원회위원장';
         const safeSealSrc = escapeHtml(String(sealUrl || '').trim());
-        const safeIssueNo = escapeHtml(issueNo);
-        const safeNoticeDate = escapeHtml(noticeDate);
-        const safeOpeningText = escapeHtml(openingText);
         const signLine = safeSealSrc
             ? `<span class="sign-text">${committeeText}<span class="sign-mark"><img class="seal" src="${safeSealSrc}" alt="선거관리위원장 인장" onerror="this.style.display='none'"><span class="sign-mark-text">(인)</span></span></span>`
             : `<span class="sign-text">${committeeText}<span class="sign-mark"><span class="sign-mark-text">(인)</span></span></span>`;
@@ -1092,46 +1084,42 @@ function escapeJsString(value) {
             };
         };
 
-        const districtSplitTablesHtml = districtGroups.length > 0
+        const districtSummaryHtml = districtGroups.length > 0
             ? districtGroups.map((group) => {
-                const safeDistrictName = escapeHtml(group.districtName);
-                const bodyRows = group.rows.map((row, idx) => {
-                    const candidateName = toNoticeCandidateName(row).html;
-                    const birthDate = escapeHtml(formatNoticeBirthDate(row?.candidateBirthDate));
-                    const address = escapeHtml(formatNoticeAddress(row?.candidateAddress));
-                    const note = row?.winnerType === 'UNCONTESTED' ? '무투표 당선' : '';
-                    return `
-                        <tr>
-                            <td>${idx + 1}</td>
-                            <td>${candidateName}</td>
-                            <td>${birthDate}</td>
-                            <td style="text-align:left;">${address}</td>
-                            <td>${escapeHtml(note)}</td>
-                        </tr>
-                    `;
-                }).join('');
-
+                const names = group.rows.map((row) => toNoticeCandidateName(row).plain);
                 return `
                     <div class="district-summary-item">
-                        <div class="district-summary-title">${safeDistrictName} 총 ${group.rows.length}명</div>
-                        <table class="district-split-table">
-                            <thead>
-                                <tr>
-                                    <th class="col-no">No</th>
-                                    <th class="col-name">성명(단체명)</th>
-                                    <th class="col-birth">생년월일</th>
-                                    <th>주소</th>
-                                    <th class="col-note">비고</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${bodyRows}
-                            </tbody>
-                        </table>
+                        <div class="district-summary-title">${escapeHtml(group.districtName)} 총 ${group.rows.length}명</div>
+                        <div class="district-summary-names">명단: ${escapeHtml(names.join(', '))}</div>
                     </div>
                 `;
             }).join('')
             : `<div class="district-summary-empty">당선자 정보가 없습니다.</div>`;
+
+        let rowNo = 0;
+        const tableRows = districtGroups.map((group) => {
+            const safeDistrictName = escapeHtml(group.districtName);
+            return group.rows.map((row, idx) => {
+                rowNo += 1;
+                const districtCell = idx === 0
+                    ? `<td rowspan="${group.rows.length}" style="text-align:left; font-weight:700;">${safeDistrictName}</td>`
+                    : '';
+                const candidateName = toNoticeCandidateName(row).html;
+                const birthDate = escapeHtml(formatNoticeBirthDate(row?.candidateBirthDate));
+                const address = escapeHtml(formatNoticeAddress(row?.candidateAddress));
+                const note = row?.winnerType === 'UNCONTESTED' ? '무투표 당선' : '';
+                return `
+                    <tr>
+                        <td>${rowNo}</td>
+                        ${districtCell}
+                        <td>${candidateName}</td>
+                        <td>${birthDate}</td>
+                        <td style="text-align:left;">${address}</td>
+                        <td>${escapeHtml(note)}</td>
+                    </tr>
+                `;
+            }).join('');
+        }).join('');
 
         return `
 <!DOCTYPE html>
@@ -1158,8 +1146,7 @@ function escapeJsString(value) {
     .col-note { width: 100px; }
     .notice-meta { margin-bottom: 34px; }
     .footer-date { text-align:center; font-size: 20px; letter-spacing: 1px; }
-    .notice-gap { height: 1.35em; }
-    .sign-wrap { margin-top: 0; text-align:right; min-height: 88px; position: relative; padding-right: 26px; }
+    .sign-wrap { margin-top: 8px; text-align:right; min-height: 88px; position: relative; padding-right: 12px; }
     .sign-text { font-size: 22px; letter-spacing: 0.3px; display:inline-block; position: relative; }
     .sign-mark { display:inline-block; position:relative; margin-left: 2px; }
     .sign-mark-text { position:relative; z-index:2; }
@@ -1169,9 +1156,7 @@ function escapeJsString(value) {
     .district-summary { margin: 0 0 18px; padding: 12px 14px; border:1px solid #d1d5db; border-radius:8px; background:#f9fafb; }
     .district-summary-item + .district-summary-item { margin-top: 10px; padding-top: 10px; border-top:1px dashed #d1d5db; }
     .district-summary-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
-    .district-split-table { width:100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; background:#fff; }
-    .district-split-table th, .district-split-table td { border: 1px solid #111827; padding: 7px 6px; text-align: center; vertical-align: middle; word-break: break-all; }
-    .district-split-table th { background: #f3f4f6; font-weight: 700; }
+    .district-summary-names { font-size: 13px; line-height: 1.6; color:#111827; letter-spacing:-0.2px; }
     .district-summary-empty { font-size:13px; color:#6b7280; }
     .print-bar { max-width: 760px; margin: 0 auto 14px; text-align: right; }
     .print-btn { border:1px solid #d1d5db; background:#fff; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:700; }
@@ -1187,360 +1172,43 @@ function escapeJsString(value) {
   </div>
   <div class="doc">
     <div class="head">
-      <div class="doc-no">공고 제${safeIssueNo}</div>
+      <div class="doc-no">공고 제${issueNo}</div>
       <div class="title-wrap">
         <div class="title">당선인 공고문</div>
-        <div class="intro">${safeOpeningText}</div>
+        <div class="intro">${openingText}</div>
       </div>
     </div>
 
     <div class="notice-meta">
-      <div class="footer-date">${safeNoticeDate}</div>
-      <div class="notice-gap"></div>
+      <div class="footer-date">${noticeDate}</div>
       <div class="sign-wrap">
         ${signLine}
       </div>
     </div>
 
     <div class="district-summary">
-      ${districtSplitTablesHtml}
+      ${districtSummaryHtml}
     </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="col-no">No</th>
+          <th class="col-district">선거구명</th>
+          <th class="col-name">성명(단체명)</th>
+          <th class="col-birth">생년월일</th>
+          <th>주소</th>
+          <th class="col-note">비고</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows || '<tr><td colspan="6" style="padding:20px;">당선자 정보가 없습니다.</td></tr>'}
+      </tbody>
+    </table>
   </div>
 </body>
 </html>
         `.trim();
-    }
-
-    function formatElectionNoticeDateText(dateLike = new Date()) {
-        const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
-        if (Number.isNaN(d.getTime())) return '';
-        return new Intl.DateTimeFormat('ko-KR', {
-            timeZone: KST_TZ_VOTE_ADMIN,
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        }).format(d);
-    }
-
-    function formatElectionNoticeDateIso(dateLike = new Date()) {
-        const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
-        if (Number.isNaN(d.getTime())) return '';
-        return new Intl.DateTimeFormat('sv-SE', {
-            timeZone: KST_TZ_VOTE_ADMIN,
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-        }).format(d);
-    }
-
-    function buildElectionNoticeOpeningText() {
-        const electionTitle = String(currentElectionData?.title || '').trim() || '대의원선거';
-        const nowYear = new Intl.DateTimeFormat('sv-SE', {
-            timeZone: KST_TZ_VOTE_ADMIN,
-            year: 'numeric'
-        }).format(new Date());
-        return `${nowYear}년 실시한 ${electionTitle}에 있어 당선인을 다음과 같이 공고합니다.`;
-    }
-
-    function extractIssueNoFromDocNo(docNo) {
-        const raw = String(docNo || '').trim();
-        if (!raw) return '';
-        const noticePrefixMatch = raw.match(/^공고\s*제(.+)$/);
-        if (noticePrefixMatch) return String(noticePrefixMatch[1] || '').trim();
-        if (raw.startsWith('제')) return raw.slice(1);
-        return raw;
-    }
-
-    function buildElectedNoticeText(rows, options = {}) {
-        const issueNo = String(options.issueNo || '').trim();
-        const noticeDateText = String(options.noticeDateText || '').trim();
-        const openingText = String(options.openingText || '').trim();
-        const committeeText = '용인모두의햇빛협동조합 선거관리위원회위원장(인)';
-        const normalizedRows = Array.isArray(rows) ? rows : [];
-        const districtMap = new Map();
-        normalizedRows.forEach((row) => {
-            const districtName = String(row?.districtName || '-').trim() || '-';
-            if (!districtMap.has(districtName)) districtMap.set(districtName, []);
-            districtMap.get(districtName).push(row);
-        });
-
-        const lines = [];
-        if (issueNo) lines.push(`공고 제${issueNo}`);
-        lines.push(ELECTION_NOTICE_TITLE);
-        if (openingText) lines.push(openingText);
-        lines.push('');
-        if (noticeDateText) lines.push(noticeDateText);
-        lines.push(committeeText);
-        lines.push('');
-
-        districtMap.forEach((districtRows, districtName) => {
-            lines.push(`${districtName} 총 ${districtRows.length}명`);
-            districtRows.forEach((row, idx) => {
-                const baseName = String(row?.memberName || row?.candidateName || '-').trim() || '-';
-                const representativeName = String(row?.candidateRepresentativeName || '').trim();
-                const finalName = representativeName ? `${baseName}(${representativeName})` : baseName;
-                const birthDate = formatNoticeBirthDate(row?.candidateBirthDate);
-                const address = formatNoticeAddress(row?.candidateAddress);
-                const note = row?.winnerType === 'UNCONTESTED' ? '무투표 당선' : '';
-                lines.push(`${idx + 1}. ${finalName} / ${birthDate} / ${address}${note ? ` / ${note}` : ''}`);
-            });
-            lines.push('');
-        });
-        return lines.join('\n').trim();
-    }
-
-    function buildElectedWinnersSnapshotRows(rows) {
-        const normalizedRows = Array.isArray(rows) ? rows : [];
-        return normalizedRows.map((row, idx) => {
-            const baseName = String(row?.memberName || row?.candidateName || '-').trim() || '-';
-            const representativeName = String(row?.candidateRepresentativeName || '').trim();
-            return {
-                order_no: idx + 1,
-                district_id: row?.districtId || null,
-                district_name: row?.districtName || '-',
-                candidate_id: row?.candidateId || null,
-                member_uuid: row?.memberUuid || null,
-                member_id: row?.memberId || null,
-                name: baseName,
-                representative_name: representativeName || null,
-                display_name: representativeName ? `${baseName}(${representativeName})` : baseName,
-                birth_date_raw: row?.candidateBirthDate || null,
-                birth_date_text: formatNoticeBirthDate(row?.candidateBirthDate),
-                address_raw: row?.candidateAddress || null,
-                address_masked: formatNoticeAddress(row?.candidateAddress),
-                winner_type: row?.winnerType || null,
-                vote_count: Number.isFinite(Number(row?.voteCount)) ? Number(row.voteCount) : null,
-                note: row?.winnerType === 'UNCONTESTED' ? '무투표 당선' : ''
-            };
-        });
-    }
-
-    async function computeSha256Hex(input) {
-        const raw = String(input || '');
-        if (!raw) return null;
-        if (!window.crypto?.subtle || typeof TextEncoder === 'undefined') return null;
-        const encoded = new TextEncoder().encode(raw);
-        const digest = await window.crypto.subtle.digest('SHA-256', encoded);
-        return Array.from(new Uint8Array(digest)).map((v) => v.toString(16).padStart(2, '0')).join('');
-    }
-
-    function isMissingSnapshotTableError(error) {
-        const code = String(error?.code || '');
-        const message = String(error?.message || '').toLowerCase();
-        if (code === '42P01' || code === 'PGRST205') return true;
-        return message.includes('coop_elected_notice_snapshots') && message.includes('does not exist');
-    }
-
-    function isDocNoUniqueConflictError(error) {
-        const code = String(error?.code || '');
-        if (code !== '23505') return false;
-        const errorText = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
-        return errorText.includes('doc_no');
-    }
-
-    async function generateElectedNoticeDocNo() {
-        const now = new Date();
-        const year = new Intl.DateTimeFormat('sv-SE', {
-            timeZone: KST_TZ_VOTE_ADMIN,
-            year: 'numeric'
-        }).format(now);
-        const prefix = `${ELECTION_NOTICE_DOC_PREFIX}${year}-`;
-
-        const { data, error } = await supabase
-            .from('coop_elected_notice_snapshots')
-            .select('doc_no')
-            .like('doc_no', `${prefix}%`)
-            .order('doc_no', { ascending: false })
-            .limit(1);
-
-        if (error) {
-            if (isMissingSnapshotTableError(error)) {
-                throw new Error('스냅샷 테이블이 없습니다. COOP_ELECTED_NOTICE_SNAPSHOT_SCHEMA.sql을 먼저 적용해주세요.');
-            }
-            throw error;
-        }
-
-        let nextSeq = 1;
-        if (Array.isArray(data) && data.length > 0 && data[0]?.doc_no) {
-            const matched = String(data[0].doc_no).match(/공고\s*제\d{4}-(\d{3})호/);
-            if (matched) nextSeq = parseInt(matched[1], 10) + 1;
-        }
-        const seq = String(nextSeq).padStart(3, '0');
-        return `${prefix}${seq}호`;
-    }
-
-    async function createOrReusePublishedElectedNoticeSnapshot() {
-        if (!currentElectionId) {
-            throw new Error('선거 정보가 없어 당선인 공고를 게시할 수 없습니다.');
-        }
-
-        const existingSnapshotRes = await supabase
-            .from('coop_elected_notice_snapshots')
-            .select('id, notice_id, doc_no, status')
-            .eq('election_id', currentElectionId)
-            .eq('status', 'PUBLISHED')
-            .order('id', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        if (existingSnapshotRes.error) {
-            const existingErrCode = String(existingSnapshotRes.error.code || '');
-            if (existingErrCode !== 'PGRST116') {
-                if (isMissingSnapshotTableError(existingSnapshotRes.error)) {
-                    throw new Error('스냅샷 테이블이 없습니다. COOP_ELECTED_NOTICE_SNAPSHOT_SCHEMA.sql을 먼저 적용해주세요.');
-                }
-                throw existingSnapshotRes.error;
-            }
-        }
-        if (existingSnapshotRes.data?.id) {
-            return {
-                snapshotId: existingSnapshotRes.data.id,
-                noticeId: existingSnapshotRes.data.notice_id,
-                docNo: existingSnapshotRes.data.doc_no,
-                reused: true
-            };
-        }
-
-        const preview = await buildElectedOfficialsPreviewData();
-        if (!preview.rows || preview.rows.length === 0) {
-            throw new Error('당선자 목록이 없어 공고문을 게시할 수 없습니다.');
-        }
-
-        for (let attempt = 1; attempt <= ELECTED_NOTICE_MAX_DOCNO_RETRY; attempt += 1) {
-            const docNo = await generateElectedNoticeDocNo();
-            const issueNo = extractIssueNoFromDocNo(docNo);
-            const now = new Date();
-            const noticeDateText = formatElectionNoticeDateText(now);
-            const noticeDateIso = formatElectionNoticeDateIso(now);
-            const openingText = buildElectionNoticeOpeningText();
-            const sealUrl = await resolveElectionNoticeSealUrl();
-            const noticeHtml = buildElectedNoticeHtml(preview.rows, sealUrl, {
-                issueNo,
-                noticeDateText,
-                openingText
-            });
-            const noticeText = buildElectedNoticeText(preview.rows, {
-                issueNo,
-                noticeDateText,
-                openingText
-            });
-
-            const noticeTitle = `${ELECTION_NOTICE_TITLE} (${docNo})`;
-            const noticePayload = {
-                p_id: null,
-                p_title: noticeTitle,
-                p_content: noticeText,
-                p_category: ELECTION_NOTICE_CATEGORY,
-                p_status: 'published',
-                p_is_popup: false,
-                p_file_url: null,
-                p_doc_no: docNo,
-                p_file_urls: null,
-                p_file_names: null,
-                p_source_approval_id: null
-            };
-
-            const { error: noticeUpsertErr } = await supabase.rpc('upsert_notice_secure', noticePayload);
-            if (noticeUpsertErr) {
-                if (isDocNoUniqueConflictError(noticeUpsertErr) && attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) {
-                    continue;
-                }
-                throw noticeUpsertErr;
-            }
-
-            const { data: noticeRow, error: noticeFindErr } = await supabase
-                .from('coop_notices')
-                .select('id')
-                .eq('doc_no', docNo)
-                .maybeSingle();
-            if (noticeFindErr) throw noticeFindErr;
-            if (!noticeRow?.id) {
-                if (attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) continue;
-                throw new Error('공지 저장 후 ID를 찾을 수 없습니다.');
-            }
-
-            const { error: noticeScopeErr } = await supabase
-                .from('coop_notices')
-                .update({ is_members_only: true, status: 'published' })
-                .eq('id', noticeRow.id);
-            if (noticeScopeErr) throw noticeScopeErr;
-
-            const { data: authData, error: authErr } = await supabase.auth.getUser();
-            if (authErr) throw authErr;
-            if (!authData?.user?.id) {
-                throw new Error('게시 사용자 정보를 확인할 수 없습니다.');
-            }
-
-            const winnersJson = buildElectedWinnersSnapshotRows(preview.rows);
-            const nowIso = now.toISOString();
-            const contentSha256 = await computeSha256Hex(noticeHtml);
-            const snapshotPayload = {
-                notice_id: noticeRow.id,
-                election_id: currentElectionId,
-                election_title: String(currentElectionData?.title || '').trim() || '-',
-                doc_no: docNo,
-                notice_title: ELECTION_NOTICE_TITLE,
-                notice_date: noticeDateIso,
-                is_members_only: true,
-                content_html: noticeHtml,
-                content_text: noticeText,
-                winners_json: winnersJson,
-                meta_json: {
-                    generated_at: nowIso,
-                    generated_by_email: currentUserEmail || authData.user.email || '',
-                    opening_text: openingText,
-                    seal_url: sealUrl || null,
-                    winner_count: winnersJson.length
-                },
-                content_sha256: contentSha256,
-                status: 'PUBLISHED',
-                published_at: nowIso,
-                published_by: authData.user.id
-            };
-
-            const { data: snapshotRow, error: snapshotErr } = await supabase
-                .from('coop_elected_notice_snapshots')
-                .insert(snapshotPayload)
-                .select('id, notice_id, doc_no')
-                .single();
-            if (snapshotErr) {
-                const snapshotErrCode = String(snapshotErr.code || '');
-                if (isMissingSnapshotTableError(snapshotErr)) {
-                    throw new Error('스냅샷 테이블이 없습니다. COOP_ELECTED_NOTICE_SNAPSHOT_SCHEMA.sql을 먼저 적용해주세요.');
-                }
-                if (snapshotErrCode === '23505') {
-                    const { data: reusedRow, error: reusedErr } = await supabase
-                        .from('coop_elected_notice_snapshots')
-                        .select('id, notice_id, doc_no')
-                        .eq('election_id', currentElectionId)
-                        .eq('status', 'PUBLISHED')
-                        .order('id', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
-                    if (!reusedErr && reusedRow?.id) {
-                        return {
-                            snapshotId: reusedRow.id,
-                            noticeId: reusedRow.notice_id,
-                            docNo: reusedRow.doc_no,
-                            reused: true
-                        };
-                    }
-                    if (isDocNoUniqueConflictError(snapshotErr) && attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) {
-                        continue;
-                    }
-                }
-                throw snapshotErr;
-            }
-
-            return {
-                snapshotId: snapshotRow.id,
-                noticeId: snapshotRow.notice_id,
-                docNo: snapshotRow.doc_no,
-                reused: false
-            };
-        }
-
-        throw new Error('공고 문서번호 생성 충돌이 반복되어 게시에 실패했습니다. 잠시 후 다시 시도해주세요.');
     }
 
     window.generateElectedNotice = async () => {
@@ -1557,11 +1225,7 @@ function escapeJsString(value) {
             }
 
             const sealUrl = await resolveElectionNoticeSealUrl();
-            const noticeHtml = buildElectedNoticeHtml(preview.rows, sealUrl, {
-                issueNo: `${new Date().getFullYear()}-001호`,
-                noticeDateText: formatElectionNoticeDateText(new Date()),
-                openingText: buildElectionNoticeOpeningText()
-            });
+            const noticeHtml = buildElectedNoticeHtml(preview.rows, sealUrl);
             const popup = window.open('', '_blank');
             if (!popup) {
                 showAlert('팝업이 차단되어 공고문을 열 수 없습니다.\n브라우저 팝업 허용 후 다시 시도해주세요.');
@@ -1773,16 +1437,16 @@ function escapeJsString(value) {
             const termStartInput = document.getElementById('official-term-start');
             const termEndInput = document.getElementById('official-term-end');
             if (termStartInput) {
-                termStartInput.onchange = () => applyAutoOfficialTermEndDate();
+                termStartInput.addEventListener('change', () => applyAutoOfficialTermEndDate());
             }
             if (termEndInput) {
-                termEndInput.onchange = () => {
+                termEndInput.addEventListener('change', () => {
                     if (!termEndInput.value) {
                         termEndInput.dataset.autoGenerated = '';
                         return;
                     }
                     termEndInput.dataset.autoGenerated = 'false';
-                };
+                });
             }
 
             const setErrorMessage = (msg) => {
@@ -4125,17 +3789,7 @@ window.finalizeNomination = async () => {
 
         // 2. 상태 변경 실행 (모달 띄우기)
         window.showModal('상태 변경 확인', msg, async () => {
-            if (isStatusTransitionInFlight) {
-                showAlert('이미 상태 변경 처리 중입니다. 잠시만 기다려주세요.');
-                return;
-            }
-            isStatusTransitionInFlight = true;
             try {
-                let publishedSnapshotInfo = null;
-                if (nextStatus === 'PUBLISHED') {
-                    publishedSnapshotInfo = await createOrReusePublishedElectedNoticeSnapshot();
-                }
-
                 // 상태 업데이트 요청
                 const statusUpdateOptions = nextStatus === 'CLOSED'
                     ? { actualClosedAt: new Date().toISOString() }
@@ -4147,14 +3801,7 @@ window.finalizeNomination = async () => {
                 updateWorkflowUI();       // 탭/UI 상태 변경
                 
                 // [수정] 로그 기록 시 작업자 이메일 포함
-                const publishedNoticeLog = (nextStatus === 'PUBLISHED' && publishedSnapshotInfo?.docNo)
-                    ? ` / 당선인공고 ${publishedSnapshotInfo.docNo}`
-                    : '';
-                await service.logAction(
-                    currentElectionId,
-                    'STATUS_CHANGE',
-                    `상태 변경: ${nextStatus}${publishedNoticeLog} (작업자: ${currentUserEmail})`
-                );
+                await service.logAction(currentElectionId, 'STATUS_CHANGE', `상태 변경: ${nextStatus} (작업자: ${currentUserEmail})`);
                 
                 loadLogs(); // 로그 갱신
                 
@@ -4162,8 +3809,6 @@ window.finalizeNomination = async () => {
             } catch (e) {
                 console.error("상태 변경 실패:", e);
                 showAlert("상태 변경 중 오류가 발생했습니다: " + e.message);
-            } finally {
-                isStatusTransitionInFlight = false;
             }
         });
     };

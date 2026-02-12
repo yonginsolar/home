@@ -713,8 +713,6 @@ function escapeJsString(value) {
     const ELECTION_NOTICE_DOC_PREFIX = '공고 제';
     const ELECTION_NOTICE_CATEGORY = '선거공고';
     const ELECTION_NOTICE_TITLE = '당선인 공고문';
-    const ELECTED_NOTICE_MAX_DOCNO_RETRY = 5;
-    let isStatusTransitionInFlight = false;
 
     // -----------------------------------------------------------
     // [1] 모달 & 유틸리티 (기존 유지)
@@ -1331,13 +1329,6 @@ function escapeJsString(value) {
         return message.includes('coop_elected_notice_snapshots') && message.includes('does not exist');
     }
 
-    function isDocNoUniqueConflictError(error) {
-        const code = String(error?.code || '');
-        if (code !== '23505') return false;
-        const errorText = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
-        return errorText.includes('doc_no');
-    }
-
     async function generateElectedNoticeDocNo() {
         const now = new Date();
         const year = new Intl.DateTimeFormat('sv-SE', {
@@ -1406,141 +1397,128 @@ function escapeJsString(value) {
             throw new Error('당선자 목록이 없어 공고문을 게시할 수 없습니다.');
         }
 
-        for (let attempt = 1; attempt <= ELECTED_NOTICE_MAX_DOCNO_RETRY; attempt += 1) {
-            const docNo = await generateElectedNoticeDocNo();
-            const issueNo = extractIssueNoFromDocNo(docNo);
-            const now = new Date();
-            const noticeDateText = formatElectionNoticeDateText(now);
-            const noticeDateIso = formatElectionNoticeDateIso(now);
-            const openingText = buildElectionNoticeOpeningText();
-            const sealUrl = await resolveElectionNoticeSealUrl();
-            const noticeHtml = buildElectedNoticeHtml(preview.rows, sealUrl, {
-                issueNo,
-                noticeDateText,
-                openingText
-            });
-            const noticeText = buildElectedNoticeText(preview.rows, {
-                issueNo,
-                noticeDateText,
-                openingText
-            });
+        const docNo = await generateElectedNoticeDocNo();
+        const issueNo = extractIssueNoFromDocNo(docNo);
+        const now = new Date();
+        const noticeDateText = formatElectionNoticeDateText(now);
+        const noticeDateIso = formatElectionNoticeDateIso(now);
+        const openingText = buildElectionNoticeOpeningText();
+        const sealUrl = await resolveElectionNoticeSealUrl();
+        const noticeHtml = buildElectedNoticeHtml(preview.rows, sealUrl, {
+            issueNo,
+            noticeDateText,
+            openingText
+        });
+        const noticeText = buildElectedNoticeText(preview.rows, {
+            issueNo,
+            noticeDateText,
+            openingText
+        });
 
-            const noticeTitle = `${ELECTION_NOTICE_TITLE} (${docNo})`;
-            const noticePayload = {
-                p_id: null,
-                p_title: noticeTitle,
-                p_content: noticeText,
-                p_category: ELECTION_NOTICE_CATEGORY,
-                p_status: 'published',
-                p_is_popup: false,
-                p_file_url: null,
-                p_doc_no: docNo,
-                p_file_urls: null,
-                p_file_names: null,
-                p_source_approval_id: null
-            };
+        const noticeTitle = `${ELECTION_NOTICE_TITLE} (${docNo})`;
+        const noticePayload = {
+            p_id: null,
+            p_title: noticeTitle,
+            p_content: noticeText,
+            p_category: ELECTION_NOTICE_CATEGORY,
+            p_status: 'published',
+            p_is_popup: false,
+            p_file_url: null,
+            p_doc_no: docNo,
+            p_file_urls: null,
+            p_file_names: null,
+            p_source_approval_id: null
+        };
 
-            const { error: noticeUpsertErr } = await supabase.rpc('upsert_notice_secure', noticePayload);
-            if (noticeUpsertErr) {
-                if (isDocNoUniqueConflictError(noticeUpsertErr) && attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) {
-                    continue;
-                }
-                throw noticeUpsertErr;
-            }
+        const { error: noticeUpsertErr } = await supabase.rpc('upsert_notice_secure', noticePayload);
+        if (noticeUpsertErr) throw noticeUpsertErr;
 
-            const { data: noticeRow, error: noticeFindErr } = await supabase
-                .from('coop_notices')
-                .select('id')
-                .eq('doc_no', docNo)
-                .maybeSingle();
-            if (noticeFindErr) throw noticeFindErr;
-            if (!noticeRow?.id) {
-                if (attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) continue;
-                throw new Error('공지 저장 후 ID를 찾을 수 없습니다.');
-            }
-
-            const { error: noticeScopeErr } = await supabase
-                .from('coop_notices')
-                .update({ is_members_only: true, status: 'published' })
-                .eq('id', noticeRow.id);
-            if (noticeScopeErr) throw noticeScopeErr;
-
-            const { data: authData, error: authErr } = await supabase.auth.getUser();
-            if (authErr) throw authErr;
-            if (!authData?.user?.id) {
-                throw new Error('게시 사용자 정보를 확인할 수 없습니다.');
-            }
-
-            const winnersJson = buildElectedWinnersSnapshotRows(preview.rows);
-            const nowIso = now.toISOString();
-            const contentSha256 = await computeSha256Hex(noticeHtml);
-            const snapshotPayload = {
-                notice_id: noticeRow.id,
-                election_id: currentElectionId,
-                election_title: String(currentElectionData?.title || '').trim() || '-',
-                doc_no: docNo,
-                notice_title: ELECTION_NOTICE_TITLE,
-                notice_date: noticeDateIso,
-                is_members_only: true,
-                content_html: noticeHtml,
-                content_text: noticeText,
-                winners_json: winnersJson,
-                meta_json: {
-                    generated_at: nowIso,
-                    generated_by_email: currentUserEmail || authData.user.email || '',
-                    opening_text: openingText,
-                    seal_url: sealUrl || null,
-                    winner_count: winnersJson.length
-                },
-                content_sha256: contentSha256,
-                status: 'PUBLISHED',
-                published_at: nowIso,
-                published_by: authData.user.id
-            };
-
-            const { data: snapshotRow, error: snapshotErr } = await supabase
-                .from('coop_elected_notice_snapshots')
-                .insert(snapshotPayload)
-                .select('id, notice_id, doc_no')
-                .single();
-            if (snapshotErr) {
-                const snapshotErrCode = String(snapshotErr.code || '');
-                if (isMissingSnapshotTableError(snapshotErr)) {
-                    throw new Error('스냅샷 테이블이 없습니다. COOP_ELECTED_NOTICE_SNAPSHOT_SCHEMA.sql을 먼저 적용해주세요.');
-                }
-                if (snapshotErrCode === '23505') {
-                    const { data: reusedRow, error: reusedErr } = await supabase
-                        .from('coop_elected_notice_snapshots')
-                        .select('id, notice_id, doc_no')
-                        .eq('election_id', currentElectionId)
-                        .eq('status', 'PUBLISHED')
-                        .order('id', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
-                    if (!reusedErr && reusedRow?.id) {
-                        return {
-                            snapshotId: reusedRow.id,
-                            noticeId: reusedRow.notice_id,
-                            docNo: reusedRow.doc_no,
-                            reused: true
-                        };
-                    }
-                    if (isDocNoUniqueConflictError(snapshotErr) && attempt < ELECTED_NOTICE_MAX_DOCNO_RETRY) {
-                        continue;
-                    }
-                }
-                throw snapshotErr;
-            }
-
-            return {
-                snapshotId: snapshotRow.id,
-                noticeId: snapshotRow.notice_id,
-                docNo: snapshotRow.doc_no,
-                reused: false
-            };
+        const { data: noticeRow, error: noticeFindErr } = await supabase
+            .from('coop_notices')
+            .select('id')
+            .eq('doc_no', docNo)
+            .maybeSingle();
+        if (noticeFindErr) throw noticeFindErr;
+        if (!noticeRow?.id) {
+            throw new Error('공지 저장 후 ID를 찾을 수 없습니다.');
         }
 
-        throw new Error('공고 문서번호 생성 충돌이 반복되어 게시에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        const { error: noticeScopeErr } = await supabase
+            .from('coop_notices')
+            .update({ is_members_only: true, status: 'published' })
+            .eq('id', noticeRow.id);
+        if (noticeScopeErr) throw noticeScopeErr;
+
+        const { data: authData, error: authErr } = await supabase.auth.getUser();
+        if (authErr) throw authErr;
+        if (!authData?.user?.id) {
+            throw new Error('게시 사용자 정보를 확인할 수 없습니다.');
+        }
+
+        const winnersJson = buildElectedWinnersSnapshotRows(preview.rows);
+        const nowIso = now.toISOString();
+        const contentSha256 = await computeSha256Hex(noticeHtml);
+        const snapshotPayload = {
+            notice_id: noticeRow.id,
+            election_id: currentElectionId,
+            election_title: String(currentElectionData?.title || '').trim() || '-',
+            doc_no: docNo,
+            notice_title: ELECTION_NOTICE_TITLE,
+            notice_date: noticeDateIso,
+            is_members_only: true,
+            content_html: noticeHtml,
+            content_text: noticeText,
+            winners_json: winnersJson,
+            meta_json: {
+                generated_at: nowIso,
+                generated_by_email: currentUserEmail || authData.user.email || '',
+                opening_text: openingText,
+                seal_url: sealUrl || null,
+                winner_count: winnersJson.length
+            },
+            content_sha256: contentSha256,
+            status: 'PUBLISHED',
+            published_at: nowIso,
+            published_by: authData.user.id
+        };
+
+        const { data: snapshotRow, error: snapshotErr } = await supabase
+            .from('coop_elected_notice_snapshots')
+            .insert(snapshotPayload)
+            .select('id, notice_id, doc_no')
+            .single();
+        if (snapshotErr) {
+            const snapshotErrCode = String(snapshotErr.code || '');
+            if (isMissingSnapshotTableError(snapshotErr)) {
+                throw new Error('스냅샷 테이블이 없습니다. COOP_ELECTED_NOTICE_SNAPSHOT_SCHEMA.sql을 먼저 적용해주세요.');
+            }
+            if (snapshotErrCode === '23505') {
+                const { data: reusedRow, error: reusedErr } = await supabase
+                    .from('coop_elected_notice_snapshots')
+                    .select('id, notice_id, doc_no')
+                    .eq('election_id', currentElectionId)
+                    .eq('status', 'PUBLISHED')
+                    .order('id', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (!reusedErr && reusedRow?.id) {
+                    return {
+                        snapshotId: reusedRow.id,
+                        noticeId: reusedRow.notice_id,
+                        docNo: reusedRow.doc_no,
+                        reused: true
+                    };
+                }
+            }
+            throw snapshotErr;
+        }
+
+        return {
+            snapshotId: snapshotRow.id,
+            noticeId: snapshotRow.notice_id,
+            docNo: snapshotRow.doc_no,
+            reused: false
+        };
     }
 
     window.generateElectedNotice = async () => {
@@ -1773,16 +1751,16 @@ function escapeJsString(value) {
             const termStartInput = document.getElementById('official-term-start');
             const termEndInput = document.getElementById('official-term-end');
             if (termStartInput) {
-                termStartInput.onchange = () => applyAutoOfficialTermEndDate();
+                termStartInput.addEventListener('change', () => applyAutoOfficialTermEndDate());
             }
             if (termEndInput) {
-                termEndInput.onchange = () => {
+                termEndInput.addEventListener('change', () => {
                     if (!termEndInput.value) {
                         termEndInput.dataset.autoGenerated = '';
                         return;
                     }
                     termEndInput.dataset.autoGenerated = 'false';
-                };
+                });
             }
 
             const setErrorMessage = (msg) => {
@@ -4125,11 +4103,6 @@ window.finalizeNomination = async () => {
 
         // 2. 상태 변경 실행 (모달 띄우기)
         window.showModal('상태 변경 확인', msg, async () => {
-            if (isStatusTransitionInFlight) {
-                showAlert('이미 상태 변경 처리 중입니다. 잠시만 기다려주세요.');
-                return;
-            }
-            isStatusTransitionInFlight = true;
             try {
                 let publishedSnapshotInfo = null;
                 if (nextStatus === 'PUBLISHED') {
@@ -4162,8 +4135,6 @@ window.finalizeNomination = async () => {
             } catch (e) {
                 console.error("상태 변경 실패:", e);
                 showAlert("상태 변경 중 오류가 발생했습니다: " + e.message);
-            } finally {
-                isStatusTransitionInFlight = false;
             }
         });
     };

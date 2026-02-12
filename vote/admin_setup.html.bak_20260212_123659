@@ -449,12 +449,7 @@ function escapeHtml(value) {
         // [추가 모드]
         else {
              // 코드 중복 체크 (DB단에서도 막히지만 UX를 위해)
-            const duplicate = districtsCache.find(d => d.code === code);
-            if (duplicate) {
-                if (!editingDistrictId || (editingDistrictId && duplicate.id !== editingDistrictId)) {
-                    return window.showAlert('이미 존재하는 코드입니다.');
-                }
-            }
+            if(districtsCache.find(d => d.code === code)) return window.showAlert('이미 존재하는 코드입니다.');
 
             const { data, error } = await supabase.from('districts')
                 .insert(payload).select().single();
@@ -462,7 +457,7 @@ function escapeHtml(value) {
             resultData = data;
         }
         
-        await loadDistrictsList(); // 리스트 갱신
+        loadDistrictsList(); // 리스트 갱신
     };
 
 
@@ -680,9 +675,7 @@ function escapeHtml(value) {
                 member_uuid: m.id, member_no: m.member_id
             }));
 
-            const { error } = await supabase
-                .from('election_voters')
-                .upsert(payload, { onConflict: 'election_id,district_id,member_uuid' });
+            const { error } = await supabase.from('election_voters').insert(payload);
             if(error) return window.showAlert('등록 실패: ' + error.message);
 
             window.showAlert(`${finalTargets.length}명 등록 완료!`);
@@ -843,6 +836,70 @@ function escapeHtml(value) {
         }
     }
 
+    // [핵심] 유권자 등록 (이동 로직 포함)
+    window.addSelectedVoters = async () => {
+        const distId = document.getElementById('target-district-select').value;
+        if(!distId) return window.showAlert('오른쪽에서 선거구를 먼저 선택하세요.');
+        if(selectedMemberIds.size === 0) return window.showAlert('왼쪽에서 이동할 조합원을 선택하세요.');
+
+        const targetDist = districtsCache.find(d => d.id === distId);
+        const membersToAdd = allMembers.filter(m => selectedMemberIds.has(m.id));
+        
+        // 1. 이미 이 선거구에 있는 사람 제외
+        const existingIds = new Set(currentVoters.map(v => v.member_uuid));
+        const realTargets = membersToAdd.filter(m => !existingIds.has(m.id));
+
+        if(realTargets.length === 0) return window.showAlert('선택한 인원은 이미 이 선거구에 있습니다.');
+
+        // 2. [충돌 검사] 타겟이 "지역구(FALSE)"라면, 다른 지역구에 있는지 확인해야 함
+        if (!targetDist.is_common) {
+            // 다른 지역구(is_common=false)의 ID들만 추출
+            const otherDistrictIds = districtsCache
+                .filter(d => !d.is_common && d.id !== distId)
+                .map(d => d.id);
+            
+            if(otherDistrictIds.length > 0) {
+                // DB에서 확인: 이 선거(electionId)의 다른 지역구들(otherDistrictIds)에 속한 사람이 있는지?
+                const { data: collisions } = await supabase.from('election_voters')
+                    .select('member_uuid, district_id')
+                    .eq('election_id', newElectionId)
+                    .in('member_uuid', realTargets.map(m => m.id))
+                    .in('district_id', otherDistrictIds);
+
+                if(collisions && collisions.length > 0) {
+                    const confirmMove = confirm(
+                        `⚠️ 중복 감지! \n선택한 인원 중 ${collisions.length}명이 이미 다른 지역구에 등록되어 있습니다.\n\n[확인]을 누르면 기존 지역구에서 삭제하고 여기로 이동시킵니다.`
+                    );
+                    if(!confirmMove) return;
+
+                    // 이동 처리: 기존 데이터 삭제 (Delete Old)
+                    await supabase.from('election_voters')
+                        .delete()
+                        .eq('election_id', newElectionId)
+                        .in('member_uuid', collisions.map(c => c.member_uuid))
+                        .in('district_id', otherDistrictIds); // 공통 선거구 데이터는 건드리지 않음
+                }
+            }
+        }
+
+        // 3. 등록 수행 (Insert)
+        const payload = realTargets.map(m => ({
+            election_id: newElectionId,
+            district_id: distId,
+            member_uuid: m.id,
+            member_no: m.member_id // 스냅샷용
+        }));
+
+        const { error } = await supabase.from('election_voters').insert(payload);
+        if(error) return window.showAlert('등록 실패: ' + error.message);
+
+        // 4. 마무리
+        window.showAlert(`${realTargets.length}명 등록 완료!`);
+        selectedMemberIds.clear();
+        document.querySelectorAll('#source-list .selected').forEach(el => el.classList.remove('selected'));
+        loadDistrictVoters(); // 오른쪽 리스트 갱신
+    };
+
     // [편의 기능] 비례대표 전체 등록
     window.addAllMembersToCommon = async () => {
         const distId = document.getElementById('target-district-select').value;
@@ -863,6 +920,22 @@ function escapeHtml(value) {
         if(error) window.showAlert('오류: ' + error.message);
         else {
             window.showAlert('전체 등록 완료!');
+            loadDistrictVoters();
+        }
+    };
+    
+    // 유권자 삭제 (오른쪽 패널)
+    window.removeSelectedVoters = async () => {
+        if(selectedVoterIds.size === 0) return window.showAlert('삭제할 인원을 선택하세요.');
+        if(!confirm('선택한 인원을 명부에서 제외하시겠습니까?')) return;
+
+        const idsToDelete = Array.from(selectedVoterIds);
+        const { error } = await supabase.from('election_voters')
+            .delete().in('id', idsToDelete);
+
+        if(error) window.showAlert('삭제 실패');
+        else {
+            selectedVoterIds.clear();
             loadDistrictVoters();
         }
     };
@@ -1408,6 +1481,54 @@ window.createElection = async () => {
     document.getElementById('step-2').style.display = 'block';
 }; 
 // End of function createElection
+
+// [수정] 선거구 추가/수정 (중복 오류 해결 + 즉시 새로고침)
+    window.addDistrict = async () => {
+        if(!newElectionId) return window.showAlert('Step 1 저장을 먼저 해주세요.');
+        
+        const name = document.getElementById('dist-name').value.trim();
+        const code = document.getElementById('dist-code').value.trim();
+        const quota = document.getElementById('dist-quota').value;
+        const type = document.getElementById('dist-type').value;
+        const isCommon = document.getElementById('dist-is-common').checked;
+
+        if (!name || !code) return window.showAlert('선거구명과 코드를 입력하세요.');
+
+        // [중복 체크 로직 개선]
+        // 1. 코드가 같은 게 있는지 찾는다.
+        const duplicate = districtsCache.find(d => d.code === code);
+        // 2. 중복이 있는데, 그게 '나 자신(수정 중인 ID)'이 아니라면 에러다.
+        if (duplicate) {
+            if (!editingDistrictId || (editingDistrictId && duplicate.id !== editingDistrictId)) {
+                return window.showAlert('이미 존재하는 코드입니다.');
+            }
+        }
+
+        const payload = {
+            election_id: newElectionId,
+            name, code, quota: parseInt(quota), 
+            vote_type: type,
+            is_common: isCommon
+        };
+
+        // [수정 모드]
+        if (editingDistrictId) {
+            const { error } = await supabase.from('districts')
+                .update(payload).eq('id', editingDistrictId);
+            
+            if(error) return window.showAlert('수정 실패: ' + error.message);
+            window.showAlert('수정되었습니다.');
+            clearDistrictInputs();
+        } 
+        // [추가 모드]
+        else {
+            const { error } = await supabase.from('districts').insert(payload);
+            if(error) return window.showAlert('추가 실패: ' + error.message);
+        }
+        
+        // [핵심] 리스트를 다시 불러와서 UI를 갱신함 (새로고침 없이 버튼 생김)
+        await loadDistrictsList(); 
+    };
 
 
     window.openHistoryModal = async (el) => {

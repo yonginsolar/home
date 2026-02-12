@@ -334,7 +334,6 @@ let currentTermType = null;
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
 const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-let joinSubmitInFlight = false;
 
     // [신규] URL로 배달된 토큰(at, rt)을 받아서 로그인 처리하는 함수
 async function handleManualSession() {
@@ -739,17 +738,6 @@ prompt: 'login'
 async function handleFormSubmit(e, form) {
 e.preventDefault();
 
-if (joinSubmitInFlight) {
-openResultModal(
-"이미 저장 처리 중입니다.\n잠시 후 다시 시도해 주세요.",
-true
-);
-return;
-}
-joinSubmitInFlight = true;
-
-try {
-
 // [수정] 내부에서 정의하던 openResultModal 제거함 (전역 함수 사용)
 
 // ---------------------------------------------------------
@@ -1065,34 +1053,15 @@ is_agreed: true
 
 // Supabase 전송
 const { error } = await _supabase.from('coop_members').insert([insertData]);
-let finalInsertError = error;
 
 if (error) {
-const code = String(error.code || '');
-const errText = `${error.message || ''} ${error.details || ''}`.toLowerCase();
-const isUniqueConflict = code === '23505' || errText.includes('duplicate key');
-
-if (isUniqueConflict) {
-const { data: existingMember, error: existingErr } = await _supabase
-.from('coop_members')
-.select('id')
-.eq('email', insertData.email)
-.maybeSingle();
-
-if (!existingErr && existingMember?.id) {
-finalInsertError = null;
-}
-}
-}
-
-if (finalInsertError) {
-console.error(finalInsertError);
+console.error(error);
 
 // ★ 변경: 실패해도 모달 띄우기 (실패 모달)
 openResultModal(
 "❌ 저장에 실패했습니다.\n" +
 "다시 시도해 주세요.\n\n" +
-"상세 오류: " + finalInsertError.message,
+"상세 오류: " + error.message,
 true
 );
 
@@ -1165,9 +1134,6 @@ btn.innerText = '가입 신청하기 ☀️';
     window.sendTalk("신규 가입 신청이 들어왔습니다. 관리자 페이지를 확인하세요.", "[가입 알림]");
 }
 
-} finally {
-joinSubmitInFlight = false;
-}
 }
 
 // [신규] 메시지 표시 및 버튼 제어 헬퍼

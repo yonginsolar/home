@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>구해줘! 태양광 발전소 v2.0</title>
+    <style>
+        :root {
+            --sky-900: #050b16;
+            --sky-700: #11263d;
+            --sky-500: #1d4765;
+            --line-soft: rgba(255, 255, 255, 0.12);
+            --line-strong: rgba(255, 255, 255, 0.35);
+            --text-main: #eff8ff;
+            --text-sub: #c0d4e7;
+            --accent-cyan: #66e7ff;
+            --accent-yellow: #ffd75a;
+            --accent-hot: #ff875f;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            touch-action: manipulation;
+            font-family: "Noto Sans KR", sans-serif;
+            background:
+                radial-gradient(circle at 20% 15%, #1a3350 0%, transparent 40%),
+                radial-gradient(circle at 80% 85%, #192942 0%, transparent 50%),
+                linear-gradient(150deg, #060b13, #0a1829 40%, #081424 100%);
+            color: var(--text-main);
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(255, 255, 255, 0.015) 0,
+                rgba(255, 255, 255, 0.015) 1px,
+                transparent 1px,
+                transparent 3px
+            );
+            opacity: 0.5;
+            z-index: 0;
+        }
+
+        #game-container {
+            position: relative;
+            width: min(100vw, 486px);
+            height: min(100vh, 840px);
+            overflow: hidden;
+            border-radius: 28px;
+            border: 1px solid var(--line-soft);
+            background: #03070f;
+            box-shadow:
+                0 30px 70px rgba(0, 0, 0, 0.55),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+            z-index: 1;
+        }
+
+        #panel-bg {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background:
+                radial-gradient(circle at 85% 15%, rgba(105, 233, 255, 0.16), transparent 36%),
+                linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+                linear-gradient(135deg, var(--sky-900), var(--sky-700), var(--sky-500));
+            background-size: 100% 100%, 38px 38px, 38px 38px, 100% 100%;
+            animation: panelDrift 22s linear infinite;
+        }
+
+        #panel-bg::after {
+            content: "";
+            position: absolute;
+            inset: -20% -10%;
+            background: radial-gradient(circle at 50% 12%, rgba(255, 212, 89, 0.22) 0, transparent 38%);
+            pointer-events: none;
+            animation: sunPulse 6s ease-in-out infinite;
+        }
+
+        canvas {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            touch-action: none;
+        }
+
+        #ui-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding-top: max(16px, env(safe-area-inset-top));
+            padding-right: 14px;
+            padding-left: 14px;
+            padding-bottom: max(16px, env(safe-area-inset-bottom));
+        }
+
+        .top-hud {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .hud-chip {
+            padding: 10px 9px;
+            border-radius: 14px;
+            background: rgba(4, 10, 18, 0.72);
+            border: 1px solid var(--line-soft);
+            backdrop-filter: blur(8px);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+            text-align: center;
+        }
+
+        .hud-label {
+            display: block;
+            font-size: 0.64rem;
+            letter-spacing: 0.08em;
+            color: var(--text-sub);
+            opacity: 0.9;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+        }
+
+        .hud-value {
+            display: block;
+            font-size: clamp(0.95rem, 2.8vw, 1.05rem);
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .center-info {
+            text-align: center;
+            color: var(--text-main);
+            padding: 22px 18px 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line-soft);
+            background: linear-gradient(180deg, rgba(8, 20, 33, 0.76), rgba(6, 14, 24, 0.58));
+            backdrop-filter: blur(9px);
+        }
+
+        .center-label {
+            margin: 0;
+            font-size: 0.84rem;
+            color: var(--text-sub);
+            letter-spacing: 0.04em;
+        }
+
+        #power-value {
+            margin-top: 6px;
+            font-size: clamp(2.8rem, 10vw, 4.1rem);
+            line-height: 1;
+            font-weight: 900;
+            color: var(--accent-yellow);
+            text-shadow:
+                0 0 15px rgba(255, 213, 90, 0.8),
+                0 0 30px rgba(255, 159, 67, 0.28);
+        }
+
+        .gauge-container {
+            margin-top: 12px;
+            width: 100%;
+            height: 14px;
+            border-radius: 999px;
+            border: 1px solid var(--line-soft);
+            background: rgba(0, 0, 0, 0.38);
+            overflow: hidden;
+        }
+
+        #gauge-fill {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #ff5d6b, #ff9a5f);
+            transition: width 0.2s ease, background 0.24s ease;
+            box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+        }
+
+        .gauge-legend {
+            margin-top: 6px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.72rem;
+            color: #9fb4c9;
+        }
+
+        .bottom-hint {
+            margin: 0 auto;
+            max-width: 95%;
+            font-size: 0.8rem;
+            text-align: center;
+            color: #d8e8f8;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 999px;
+            padding: 7px 14px;
+            background: rgba(4, 10, 18, 0.7);
+            backdrop-filter: blur(8px);
+            letter-spacing: 0.01em;
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            text-align: center;
+            background:
+                radial-gradient(circle at 50% 18%, rgba(92, 196, 255, 0.25), transparent 46%),
+                rgba(0, 0, 0, 0.82);
+            backdrop-filter: blur(4px);
+        }
+
+        .overlay-card {
+            width: min(92%, 420px);
+            border-radius: 24px;
+            border: 1px solid var(--line-strong);
+            padding: 24px 20px 22px;
+            background: linear-gradient(170deg, rgba(8, 20, 36, 0.96), rgba(8, 14, 23, 0.9));
+            box-shadow:
+                0 16px 40px rgba(0, 0, 0, 0.45),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .overlay-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 10px;
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            color: #cde4f7;
+            text-transform: uppercase;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 999px;
+            padding: 4px 10px;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        #m-title {
+            margin: 6px 0 8px;
+            font-size: clamp(1.5rem, 6vw, 2rem);
+            line-height: 1.2;
+            color: #f5fcff;
+        }
+
+        #m-desc {
+            margin: 0;
+            line-height: 1.56;
+            color: #d4e6f7;
+            font-size: 0.95rem;
+        }
+
+        .btn {
+            margin-top: 20px;
+            pointer-events: auto;
+            cursor: pointer;
+            border: none;
+            border-radius: 999px;
+            padding: 13px 26px;
+            width: min(280px, 100%);
+            font-size: 1rem;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            color: #1e1200;
+            background: linear-gradient(135deg, var(--accent-yellow), #ffb15a);
+            box-shadow:
+                0 10px 24px rgba(255, 183, 70, 0.35),
+                inset 0 -3px 0 rgba(0, 0, 0, 0.12);
+            transition: transform 0.14s ease, filter 0.2s ease;
+            animation: pulseButton 2.1s ease-in-out infinite;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.04);
+        }
+
+        .btn:active {
+            transform: translateY(1px) scale(0.995);
+        }
+
+        .result-actions {
+            display: none;
+            margin-top: 14px;
+            gap: 10px;
+            pointer-events: auto;
+        }
+
+        .result-actions.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .result-btn {
+            width: min(280px, 100%);
+            margin: 0 auto;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.26);
+            padding: 11px 16px;
+            font-size: 0.94rem;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+            transition: transform 0.14s ease, filter 0.2s ease;
+        }
+
+        .result-btn:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.03);
+        }
+
+        .result-btn:active {
+            transform: translateY(1px) scale(0.995);
+        }
+
+        .result-btn.primary {
+            color: #052031;
+            background: linear-gradient(135deg, #7ee5ff, #6fb9ff);
+            box-shadow: 0 8px 22px rgba(111, 185, 255, 0.36);
+            border-color: rgba(126, 229, 255, 0.9);
+        }
+
+        .result-btn.ghost {
+            color: #ddedff;
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .save-status {
+            min-height: 22px;
+            margin: 2px 0 0;
+            font-size: 0.82rem;
+            color: #d7e8f9;
+            line-height: 1.4;
+        }
+
+        .save-status.ok {
+            color: #9ff7b0;
+        }
+
+        .save-status.error {
+            color: #ffb2a9;
+        }
+
+        #flash {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.85) 0, rgba(255, 255, 255, 0) 68%);
+            opacity: 0;
+            z-index: 50;
+            pointer-events: none;
+            mix-blend-mode: screen;
+        }
+
+        @keyframes panelDrift {
+            0% { background-position: 0 0, 0 0, 0 0, 0 0; }
+            100% { background-position: 0 0, 38px 38px, -38px -38px, 0 0; }
+        }
+
+        @keyframes sunPulse {
+            0%, 100% { opacity: 0.8; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+        }
+
+        @keyframes pulseButton {
+            0%, 100% { box-shadow: 0 10px 24px rgba(255, 183, 70, 0.35), inset 0 -3px 0 rgba(0, 0, 0, 0.12); }
+            50% { box-shadow: 0 12px 28px rgba(255, 183, 70, 0.48), inset 0 -3px 0 rgba(0, 0, 0, 0.12); }
+        }
+
+        @media (max-width: 560px) {
+            #game-container {
+                width: 100vw;
+                height: 100vh;
+                border-radius: 0;
+                border-left: none;
+                border-right: none;
+            }
+
+            #ui-layer {
+                padding-top: max(12px, env(safe-area-inset-top));
+                padding-right: 10px;
+                padding-left: 10px;
+                padding-bottom: max(12px, env(safe-area-inset-bottom));
+            }
+
+            .center-info {
+                padding: 16px 12px 12px;
+            }
+
+            .bottom-hint {
+                font-size: 0.76rem;
+                padding: 6px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="panel-bg"></div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="flash"></div>
+
+    <div id="ui-layer">
+        <div class="top-hud">
+            <div class="hud-chip">
+                <span class="hud-label">남은 시간</span>
+                <span class="hud-value">⏱ <span id="time-text">30.0</span>s</span>
+            </div>
+            <div class="hud-chip">
+                <span class="hud-label">완료 패널</span>
+                <span class="hud-value">📋 <span id="panel-count" aria-live="polite">0</span>개</span>
+            </div>
+            <div class="hud-chip">
+                <span class="hud-label">발전량</span>
+                <span class="hud-value">🏆 <span id="score-text">0</span> kWh</span>
+            </div>
+        </div>
+
+        <div class="center-info">
+            <p class="center-label">현재 발전 효율</p>
+            <div id="power-value">0%</div>
+            <div class="gauge-container">
+                <div id="gauge-fill"></div>
+            </div>
+            <div class="gauge-legend">
+                <span>오염 심함</span>
+                <span>청소 완료</span>
+            </div>
+        </div>
+
+        <p class="bottom-hint">
+            진한 오염은 여러 번 문질러야 닦입니다!
+        </p>
+    </div>
+
+    <div id="overlay" role="dialog" aria-modal="true" aria-labelledby="m-title" aria-describedby="m-desc">
+        <div class="overlay-card">
+            <div class="overlay-badge">Yongin Solar Mini Game</div>
+            <h1 id="m-title">Solar Cleaner v2.0</h1>
+            <p id="m-desc">제한 시간 30초!<br>최대한 많은 패널을 닦아 전기를 생산하세요.</p>
+            <button id="start-btn" class="btn" type="button" aria-label="게임 시작 또는 다시 시작">발전 시작</button>
+            <div id="result-actions" class="result-actions">
+                <button id="save-score-btn" type="button" class="result-btn primary">스코어 저장하기(로그인)</button>
+                <button id="join-btn" type="button" class="result-btn ghost">아직 조합원이 아니신가요? 조합원 가입</button>
+                <p id="save-status" class="save-status" aria-live="polite"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/**
+ * Solar Cleaner Game v2.0
+ * 핵심: 무한 스테이지 루프 + 다중 문지르기 오염원
+ */
+const GAME_SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+const GAME_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const GAME_PENDING_SCORE_KEY = 'coop_game_pending_score_v1';
+const GAME_RETURN_FLAG_KEY = 'coop_game_return_after_login_v1';
+const GAME_VERSION = 'solar-cleaner-v2.0';
+
+class SolarCleanerV2 {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+        this.sampleCanvas = document.createElement('canvas');
+        this.sampleCtx = this.sampleCanvas.getContext('2d', { willReadFrequently: true });
+        this.sampleSize = 72;
+        this.container = document.getElementById('game-container');
+        this.startBtn = document.getElementById('start-btn');
+        this.titleEl = document.getElementById('m-title');
+        this.descEl = document.getElementById('m-desc');
+        
+        // UI
+        this.timeText = document.getElementById('time-text');
+        this.scoreText = document.getElementById('score-text');
+        this.panelText = document.getElementById('panel-count');
+        this.powerText = document.getElementById('power-value');
+        this.gaugeFill = document.getElementById('gauge-fill');
+        this.overlay = document.getElementById('overlay');
+        this.flash = document.getElementById('flash');
+        this.resultActions = document.getElementById('result-actions');
+        this.saveScoreBtn = document.getElementById('save-score-btn');
+        this.joinBtn = document.getElementById('join-btn');
+        this.saveStatus = document.getElementById('save-status');
+        this.defaultJoinBtnText = '아직 조합원이 아니신가요? 조합원 가입';
+        this.isJoinGuideVisible = false;
+
+        // State
+        this.isPlaying = false;
+        this.score = 0;
+        this.timeLeft = 30.0;
+        this.panelCount = 1;
+        this.clearedPanels = 0;
+        this.efficiency = 0;
+        this.isDrawing = false;
+        this.checkTimer = 0;
+        this.lastTime = 0;
+        this.elapsedSeconds = 0;
+        this.lastResultPayload = null;
+        this.saveInFlight = false;
+        this.client = null;
+
+        this.sampleCanvas.width = this.sampleSize;
+        this.sampleCanvas.height = this.sampleSize;
+
+        this.resize();
+        this.initSupabase();
+        this.initEvents();
+        this.setResultUiVisible(false);
+        this.tryAutoSavePendingScore();
+    } // End of constructor
+
+    initSupabase() {
+        if (window.supabase && typeof window.supabase.createClient === 'function') {
+            this.client = window.supabase.createClient(GAME_SUPABASE_URL, GAME_SUPABASE_ANON_KEY);
+        }
+    } // End of initSupabase
+
+    resize() {
+        this.canvas.width = this.container.clientWidth;
+        this.canvas.height = this.container.clientHeight;
+        if (this.isPlaying) this.renderDirt();
+    } // End of resize
+
+    initEvents() {
+        this.startBtn.addEventListener('click', () => this.startGame());
+        this.saveScoreBtn.addEventListener('click', () => this.handleSaveScoreClick());
+        this.joinBtn.addEventListener('click', () => this.handleJoinButtonClick());
+        
+        const start = (e) => { this.isDrawing = true; this.handleMove(e); };
+        const end = () => { this.isDrawing = false; };
+        const move = (e) => { if(this.isDrawing) this.handleMove(e); };
+
+        this.canvas.addEventListener('mousedown', start);
+        window.addEventListener('mouseup', end);
+        this.canvas.addEventListener('mousemove', move);
+
+        this.canvas.addEventListener('touchstart', (e) => { e.preventDefault(); start(e.touches[0]); }, {passive: false});
+        this.canvas.addEventListener('touchend', end);
+        this.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); move(e.touches[0]); }, {passive: false});
+        this.canvas.addEventListener('touchcancel', end);
+
+        window.addEventListener('resize', () => this.resize());
+    } // End of initEvents
+
+    startGame() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+        this.score = 0;
+        this.timeLeft = 30.0;
+        this.panelCount = 1;
+        this.clearedPanels = 0;
+        this.efficiency = 0;
+        this.checkTimer = 0;
+        this.elapsedSeconds = 0;
+        this.lastResultPayload = null;
+        this.resetJoinGuide();
+        this.timeText.textContent = this.timeLeft.toFixed(1);
+        this.scoreText.textContent = '0';
+        this.panelText.textContent = '0';
+        this.powerText.textContent = "0%";
+        this.gaugeFill.style.width = "0%";
+        this.setSaveStatus('');
+        this.setResultUiVisible(false);
+        this.overlay.style.display = 'none';
+        this.nextStage();
+        this.lastTime = performance.now();
+        requestAnimationFrame((t) => this.loop(t));
+    } // End of startGame
+
+    nextStage() {
+        // 하얀 플래시 효과
+        this.flash.style.opacity = '1';
+        setTimeout(() => this.flash.style.opacity = '0', 200);
+
+        this.renderDirt();
+        this.efficiency = 0;
+        this.powerText.textContent = "0%";
+        this.gaugeFill.style.width = "0%";
+        this.gaugeFill.style.background = "#ff416c";
+    } // End of nextStage
+
+    renderDirt() {
+        // 1단계: 기본 먼지 (연한 색)
+        this.ctx.globalCompositeOperation = 'source-over';
+        this.ctx.fillStyle = 'rgba(60, 50, 40, 0.9)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // 2단계: 강력 오염 (새똥/찌든 때 - 진한 색)
+        // 요청하신 '2번 문질러야 하는' 효과를 위해 별도의 진한 레이어를 무작위로 그림
+        for(let i=0; i<5; i++) {
+            this.ctx.fillStyle = 'rgba(30, 20, 10, 0.95)';
+            const rx = Math.random() * this.canvas.width;
+            const ry = Math.random() * this.canvas.height;
+            this.ctx.beginPath();
+            this.ctx.arc(rx, ry, 60 + Math.random()*40, 0, Math.PI*2);
+            this.ctx.fill();
+        }
+    } // End of renderDirt
+
+    handleMove(e) {
+        if (!this.isPlaying) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // 지우개 로직: 투명도를 조금씩 깎음 (한 번에 안 지워지게 함)
+        // globalAlpha를 조절하여 '여러 번 문질러야 하는' 느낌을 구현
+        this.ctx.globalCompositeOperation = 'destination-out';
+        this.ctx.globalAlpha = 0.4; // 0.4씩 깎이므로 진한 곳은 2~3번 문질러야 함
+        this.ctx.beginPath();
+        this.ctx.arc(x, y, 45, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.globalAlpha = 1.0;
+    } // End of handleMove
+
+    checkEfficiency() {
+        this.sampleCtx.clearRect(0, 0, this.sampleSize, this.sampleSize);
+        this.sampleCtx.drawImage(this.canvas, 0, 0, this.sampleSize, this.sampleSize);
+        const imageData = this.sampleCtx.getImageData(0, 0, this.sampleSize, this.sampleSize).data;
+        let clean = 0;
+        let total = 0;
+
+        for (let i = 3; i < imageData.length; i += 4) {
+            total++;
+            if (imageData[i] < 50) clean++;
+        }
+
+        this.efficiency = Math.floor((clean / total) * 100);
+        this.powerText.textContent = this.efficiency + "%";
+        this.gaugeFill.style.width = this.efficiency + "%";
+
+        // 색상 변화
+        if(this.efficiency > 80) this.gaugeFill.style.background = "#00ff00";
+        else if(this.efficiency > 40) this.gaugeFill.style.background = "#FFD700";
+        else this.gaugeFill.style.background = "#ff416c";
+
+        // 95% 이상 닦으면 다음 스테이지
+        if (this.efficiency >= 96) {
+            this.clearedPanels++;
+            this.panelText.textContent = String(this.clearedPanels);
+            this.panelCount++;
+            this.nextStage();
+        }
+    } // End of checkEfficiency
+
+    loop(timestamp) {
+        if (!this.isPlaying) return;
+
+        const dt = (timestamp - this.lastTime) / 1000;
+        this.lastTime = timestamp;
+        this.elapsedSeconds += dt;
+
+        this.timeLeft -= dt;
+        if (this.timeLeft <= 0) {
+            this.endGame();
+            return;
+        }
+
+        // 점수 계산 (효율에 비례해서 실시간 누적)
+        const powerKw = 10 * (this.efficiency / 100);
+        this.score += powerKw * dt * 10; // 가독성을 위해 10배 뻥튀기
+        
+        // UI 업데이트
+        this.timeText.textContent = this.timeLeft.toFixed(1);
+        this.scoreText.textContent = Math.floor(this.score);
+
+        // 효율 체크 (0.2초마다)
+        if (this.checkTimer >= 0.2) {
+            this.checkEfficiency();
+            this.checkTimer = 0;
+        }
+        this.checkTimer += dt;
+
+        requestAnimationFrame((t) => this.loop(t));
+    } // End of loop
+
+    endGame() {
+        this.isPlaying = false;
+        this.lastResultPayload = this.getCurrentResultPayload();
+        this.resetJoinGuide();
+        this.titleEl.textContent = "발전 종료!";
+        this.descEl.innerHTML = `
+            최종 발전량: <span style="color:#FFD700; font-size:1.5rem">${Math.floor(this.score)} kWh</span><br>
+            닦은 패널 수: ${this.clearedPanels}개<br><br>
+            결과를 저장하면 명예의 전당에 등록됩니다.
+        `;
+        this.startBtn.textContent = "다시 도전";
+        this.setResultUiVisible(true);
+        this.setSaveStatus('');
+        this.overlay.style.display = 'flex';
+        this.startBtn.focus();
+    } // End of endGame
+
+    getCurrentResultPayload() {
+        return {
+            score: Math.max(0, Math.floor(this.score)),
+            panels_cleared: Math.max(0, Number(this.clearedPanels || 0)),
+            play_seconds: Math.max(0, Number(this.elapsedSeconds || 0)).toFixed(2),
+            game_version: GAME_VERSION
+        };
+    } // End of getCurrentResultPayload
+
+    setResultUiVisible(isVisible) {
+        if (!this.resultActions) return;
+        this.resultActions.classList.toggle('active', !!isVisible);
+    } // End of setResultUiVisible
+
+    resetJoinGuide() {
+        this.isJoinGuideVisible = false;
+        if (this.joinBtn) this.joinBtn.textContent = this.defaultJoinBtnText;
+        if (this.saveScoreBtn) this.saveScoreBtn.style.display = '';
+    } // End of resetJoinGuide
+
+    showJoinGuide() {
+        this.isJoinGuideVisible = true;
+        this.titleEl.textContent = '조합원 참여 안내';
+        this.descEl.innerHTML = `“햇빛 발전, 이제 점수 말고 현실에서 함께 만들어봐요.<br>
+조합은 시민이 주인이 되는 구조로 운영됩니다.<br>
+가입 후 공지·사업 참여·조합원 전용 기능을 이용할 수 있습니다.<br>
+지금 출자금 10만원부터 참여 가능합니다.”`;
+        if (this.joinBtn) this.joinBtn.textContent = '가입하고 참여하기';
+        if (this.saveScoreBtn) this.saveScoreBtn.style.display = 'none';
+        this.setSaveStatus('');
+    } // End of showJoinGuide
+
+    setSaveStatus(message, type = '') {
+        if (!this.saveStatus) return;
+        this.saveStatus.textContent = message || '';
+        this.saveStatus.classList.remove('ok', 'error');
+        if (type === 'ok') this.saveStatus.classList.add('ok');
+        if (type === 'error') this.saveStatus.classList.add('error');
+    } // End of setSaveStatus
+
+    getPendingScorePayload() {
+        try {
+            const raw = sessionStorage.getItem(GAME_PENDING_SCORE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            return {
+                score: Number(parsed.score || 0),
+                panels_cleared: Number(parsed.panels_cleared || 0),
+                play_seconds: Number(parsed.play_seconds || 0).toFixed(2),
+                game_version: parsed.game_version || GAME_VERSION
+            };
+        } catch (e) {
+            return null;
+        }
+    } // End of getPendingScorePayload
+
+    setPendingScorePayload(payload) {
+        sessionStorage.setItem(GAME_PENDING_SCORE_KEY, JSON.stringify({
+            score: Math.max(0, Number(payload.score || 0)),
+            panels_cleared: Math.max(0, Number(payload.panels_cleared || 0)),
+            play_seconds: Math.max(0, Number(payload.play_seconds || 0)),
+            game_version: payload.game_version || GAME_VERSION
+        }));
+    } // End of setPendingScorePayload
+
+    clearPendingScorePayload() {
+        sessionStorage.removeItem(GAME_PENDING_SCORE_KEY);
+        sessionStorage.removeItem(GAME_RETURN_FLAG_KEY);
+    } // End of clearPendingScorePayload
+
+    getLoginReturnUrl() {
+        const url = new URL(window.location.href);
+        url.searchParams.set('save_score', '1');
+        return url.toString();
+    } // End of getLoginReturnUrl
+
+    async getCurrentUser() {
+        if (!this.client) return null;
+        const { data, error } = await this.client.auth.getSession();
+        if (error) return null;
+        return data && data.session ? data.session.user : null;
+    } // End of getCurrentUser
+
+    async saveScoreWithRpc(payload) {
+        const { data, error } = await this.client.rpc('save_game_score_secure', {
+            score: Math.max(0, Number(payload.score || 0)),
+            panels_cleared: Math.max(0, Number(payload.panels_cleared || 0)),
+            play_seconds: Math.max(0, Number(payload.play_seconds || 0)),
+            game_version: payload.game_version || GAME_VERSION
+        });
+        if (error) throw error;
+        const row = Array.isArray(data) ? (data[0] || {}) : (data || {});
+        return {
+            monthlySeason: row.monthly_season || '',
+            overallUpdated: !!row.overall_updated,
+            monthlyUpdated: !!row.monthly_updated
+        };
+    } // End of saveScoreWithRpc
+
+    async commitScoreSave(payload, options = {}) {
+        if (!this.client) {
+            this.setSaveStatus('저장 클라이언트 초기화에 실패했습니다. 다시 시도해 주세요.', 'error');
+            return false;
+        }
+        if (this.saveInFlight) return false;
+        this.saveInFlight = true;
+        if (this.saveScoreBtn) this.saveScoreBtn.disabled = true;
+        this.setSaveStatus(options.fromAuto ? '로그인 확인 완료, 점수를 저장 중입니다...' : '점수를 저장 중입니다...');
+
+        try {
+            const saved = await this.saveScoreWithRpc(payload);
+            this.clearPendingScorePayload();
+
+            if (saved.overallUpdated || saved.monthlyUpdated) {
+                const label = saved.monthlySeason ? ` (${saved.monthlySeason} 월간 반영)` : '';
+                this.setSaveStatus(`저장 완료! 명예의 전당이 갱신되었습니다${label}.`, 'ok');
+            } else {
+                this.setSaveStatus('기존 최고점보다 낮거나 같아 기록은 유지되었습니다.', 'ok');
+            }
+            return true;
+        } catch (error) {
+            this.setPendingScorePayload(payload);
+            this.setSaveStatus(`저장 실패: ${error.message || '알 수 없는 오류'}`, 'error');
+            return false;
+        } finally {
+            this.saveInFlight = false;
+            if (this.saveScoreBtn) this.saveScoreBtn.disabled = false;
+        }
+    } // End of commitScoreSave
+
+    async handleSaveScoreClick() {
+        const payload = this.lastResultPayload || this.getCurrentResultPayload();
+        this.lastResultPayload = payload;
+        this.setPendingScorePayload(payload);
+
+        const user = await this.getCurrentUser();
+        if (!user) {
+            this.setSaveStatus('로그인이 필요합니다. 로그인 페이지로 이동합니다...');
+            sessionStorage.setItem(GAME_RETURN_FLAG_KEY, '1');
+            const loginUrl = `membermanage.html?next=${encodeURIComponent(this.getLoginReturnUrl())}`;
+            window.location.href = loginUrl;
+            return;
+        }
+
+        await this.commitScoreSave(payload, { fromAuto: false });
+    } // End of handleSaveScoreClick
+
+    handleJoinButtonClick() {
+        if (!this.isJoinGuideVisible) {
+            this.showJoinGuide();
+            return;
+        }
+        window.location.href = 'signup.html';
+    } // End of handleJoinButtonClick
+
+    async tryAutoSavePendingScore() {
+        const pending = this.getPendingScorePayload();
+        if (!pending) return;
+
+        const shouldAutoSave = sessionStorage.getItem(GAME_RETURN_FLAG_KEY) === '1'
+            || new URL(window.location.href).searchParams.get('save_score') === '1';
+        if (!shouldAutoSave) return;
+
+        const user = await this.getCurrentUser();
+        if (!user) return;
+
+        this.lastResultPayload = pending;
+        this.resetJoinGuide();
+        this.titleEl.textContent = '로그인 복귀 완료';
+        this.descEl.innerHTML = `
+            임시 저장된 점수 <strong style="color:#FFD700;">${Math.floor(Number(pending.score || 0))} kWh</strong>를<br>
+            명예의 전당에 자동 저장합니다.
+        `;
+        this.startBtn.textContent = '발전 시작';
+        this.setResultUiVisible(true);
+        this.setSaveStatus('임시 저장 점수 확인됨. 자동 저장을 진행합니다...');
+        this.overlay.style.display = 'flex';
+
+        await this.commitScoreSave(pending, { fromAuto: true });
+
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('save_score');
+        window.history.replaceState({}, document.title, cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+    } // End of tryAutoSavePendingScore
+}
+
+document.addEventListener('DOMContentLoaded', () => new SolarCleanerV2());
+</script>
+</body>
+</html>
