@@ -1465,28 +1465,88 @@ return '';
 return dest.href;
 }
 
-// [수정] 로그인 성공 후 처리 (세션 스토리지를 확인하여 마지막 프로필 유지)
-async function handleLoginSuccess(user) {
-curAuth = user;
-showLoading(true, '정보 확인 중...');
+		// [수정] 로그인 성공 후 처리 (세션 스토리지를 확인하여 마지막 프로필 유지)
+		// [신규] 로그인 시 뱃지 자동 지급 (서버에서 멱등 처리)
+		async function ensureLoginBadgesGranted() {
+		  try {
+		    if (!_supabase || !curAuth || !curAuth.id) return;
 
-// 1. 자동 매칭 시도
-const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
+	    const key = `login_badges_granted:${curAuth.id}`;
+	    if (sessionStorage.getItem(key) === '1') return;
 
-showLoading(false);
+	    const { data, error } = await _supabase.rpc('grant_login_badges');
+	    if (error) {
+	      console.warn('grant_login_badges error:', error);
+	      return;
+	    }
 
-// 실패했다고 바로 쫓아내지 않음!
-if (claimErr || !claimRes.success) {
-void 0;
-document.getElementById('manualMatchModal').style.display = 'flex';
-await loadDuplicateEmailCandidates(user && user.email ? user.email : '');
-return; 
-}
+	    // 프로필 연결 전이면 지급하지 않고(=추후 재시도 가능) 그냥 통과
+	    if (data && data.ok === false && data.reason === 'NOT_LINKED') {
+	      return;
+	    }
 
-// 로그인 후 원래 접근 페이지로 즉시 복귀
-const returnUrl = getSafeLoginReturnUrl();
-if (returnUrl) {
-localStorage.removeItem('auth_destination');
+	    sessionStorage.setItem(key, '1');
+	  } catch (e) {
+	    console.warn('ensureLoginBadgesGranted failed:', e);
+		  }
+		}
+
+		// [신규] 프로필 전환(단체/가족 등) 시에도 뱃지 자동 지급
+		// - 기존 grant_login_badges()는 auth.uid() 본인에게만 지급
+		// - 전환된 프로필은 "로그인"이 아니라 "관리자 세션으로 접근"이므로 별도 RPC로 처리
+		async function ensureProfileBadgesGranted(profileUid) {
+		  try {
+		    if (!_supabase || !curAuth || !curAuth.id || !profileUid) return;
+
+		    // 본인은 기존 로직(ensureLoginBadgesGranted)에서 처리
+		    if (profileUid === curAuth.id) return;
+
+		    const key = `profile_badges_granted:${curAuth.id}:${profileUid}`;
+		    if (sessionStorage.getItem(key) === '1') return;
+
+		    const { data, error } = await _supabase.rpc('grant_login_badges_for_profile', {
+		      p_member_uid: profileUid
+		    });
+		    if (error) {
+		      console.warn('grant_login_badges_for_profile error:', error);
+		      return;
+		    }
+
+		    // 프로필 연결 전이면(=추후 재시도 가능) 그냥 통과
+		    if (data && data.ok === false) {
+		      return;
+		    }
+
+		    sessionStorage.setItem(key, '1');
+		  } catch (e) {
+		    console.warn('ensureProfileBadgesGranted failed:', e);
+		  }
+		}
+
+		async function handleLoginSuccess(user) {
+		curAuth = user;
+		showLoading(true, '정보 확인 중...');
+
+	// 1. 자동 매칭 시도
+	const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
+
+	showLoading(false);
+
+	// 실패했다고 바로 쫓아내지 않음!
+	if (claimErr || !claimRes.success) {
+	void 0;
+	document.getElementById('manualMatchModal').style.display = 'flex';
+	await loadDuplicateEmailCandidates(user && user.email ? user.email : '');
+	return; 
+	}
+
+	// 로그인 보상(뱃지) 자동 지급: 연결 성공 후 1회 호출
+	await ensureLoginBadgesGranted();
+
+	// 로그인 후 원래 접근 페이지로 즉시 복귀
+	const returnUrl = getSafeLoginReturnUrl();
+	if (returnUrl) {
+	localStorage.removeItem('auth_destination');
 const cleanUrl = window.location.origin + window.location.pathname;
 window.history.replaceState({}, document.title, cleanUrl);
 window.location.replace(returnUrl);
@@ -1680,15 +1740,16 @@ showLoading(false);
 
 if (error) {
 showModal("오류 발생: " + error.message);
-} else if (data.success) {
-document.getElementById('manualMatchModal').style.display = 'none';
-showModal("🎉 반갑습니다! 정보를 찾았습니다.\n계정이 성공적으로 연결되었습니다.");
-document.getElementById('headerLogoutBtn').classList.remove('hidden');
-await loadDashboardData(curAuth.id);
-} else {
-showModal("일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.");
-}
-}
+	} else if (data.success) {
+	document.getElementById('manualMatchModal').style.display = 'none';
+	showModal("🎉 반갑습니다! 정보를 찾았습니다.\n계정이 성공적으로 연결되었습니다.");
+	document.getElementById('headerLogoutBtn').classList.remove('hidden');
+	await ensureLoginBadgesGranted();
+	await loadDashboardData(curAuth.id);
+	} else {
+	showModal("일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.");
+	}
+	}
 
 // [수정] 수동 매칭 실행 함수 (Alert 제거 -> showModal 적용)
 async function tryManualLink() {
@@ -1823,14 +1884,19 @@ checkSolarMapVisibility(myRoles);
 if (typeof loadFamilyList === 'function') loadFamilyList(uuid);
 if (typeof loadMiniNotices === 'function') loadMiniNotices();
 if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
-loadBoard('free', null, 20); 
+	loadBoard('free', null, 20); 
+	
+	if (typeof Badges !== 'undefined') {
+	await ensureProfileBadgesGranted(uuid);
+	await Badges.render('badgeContainer', uuid, _supabase);
 
-if (typeof Badges !== 'undefined') {
-Badges.render('badgeContainer', uuid, _supabase);
-Badges.checkAnniversary(curMem, _supabase);
-}
-
-showOnly('dashboardSection');
+	// 가입 N주년 체크 RPC는 self-only라(보안) 프로필 전환 상태에선 호출하지 않음
+	if (curAuth && curAuth.id && uuid === curAuth.id) {
+	Badges.checkAnniversary(curMem, _supabase);
+	}
+	}
+	
+	showOnly('dashboardSection');
 
 } catch (e) {
 console.error("Dashboard Load Error:", e);
