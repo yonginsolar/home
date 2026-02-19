@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.29
-Change: 2026-02-19 - Added document-box unread badge with per-profile last-seen tracking.
+Version: v1.0.30
+Change: 2026-02-19 - Hardened document-box seen fallback when RPC is missing (404).
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.29 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.30 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -1160,6 +1160,7 @@ let currentBoardLimit = 20;
 let isBoardLoading = false;
 let g_notices_list = [];
 window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false };
+let canUseMarkDocumentBoxSeenRpc = true;
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
 if (!value) return fallback;
@@ -2753,6 +2754,23 @@ async function hasUnreadDocumentBox(memberUuid) {
     }
 }
 
+function isMissingMarkDocumentBoxSeenRpc(error) {
+    if (!error) return false;
+    const code = String(error.code || '');
+    const status = Number(error.status || error.statusCode || 0);
+    const message = String(error.message || '').toLowerCase();
+    const details = String(error.details || '').toLowerCase();
+    const hint = String(error.hint || '').toLowerCase();
+    const text = `${message} ${details} ${hint}`;
+    return (
+        code === 'PGRST202'
+        || code === '404'
+        || status === 404
+        || text.includes('could not find the function public.mark_document_box_seen')
+        || text.includes('function public.mark_document_box_seen')
+    );
+}
+
 async function markDocumentBoxSeen(memberUuid = null) {
     const targetId = memberUuid
         || sessionStorage.getItem('lastActiveProfile')
@@ -2763,23 +2781,26 @@ async function markDocumentBoxSeen(memberUuid = null) {
 
     const markAt = new Date().toISOString();
 
-    try {
-        const { error: rpcErr } = await _supabase.rpc('mark_document_box_seen', {
-            p_target_id: targetId,
-            p_seen_at: markAt
-        });
-        if (!rpcErr) {
-            if (curMem && String(curMem.id) === String(targetId)) {
-                curMem.document_box_last_seen_at = markAt;
+    if (canUseMarkDocumentBoxSeenRpc) {
+        try {
+            const { error: rpcErr } = await _supabase.rpc('mark_document_box_seen', {
+                p_target_id: targetId,
+                p_seen_at: markAt
+            });
+            if (!rpcErr) {
+                if (curMem && String(curMem.id) === String(targetId)) {
+                    curMem.document_box_last_seen_at = markAt;
+                }
+                return true;
             }
-            return true;
+            if (!isMissingMarkDocumentBoxSeenRpc(rpcErr)) {
+                console.warn('mark_document_box_seen rpc error:', rpcErr);
+                return false;
+            }
+            canUseMarkDocumentBoxSeenRpc = false;
+        } catch (e) {
+            console.warn('mark_document_box_seen rpc call failed:', e);
         }
-        if (rpcErr.code !== 'PGRST202') {
-            console.warn('mark_document_box_seen rpc error:', rpcErr);
-            return false;
-        }
-    } catch (e) {
-        console.warn('mark_document_box_seen rpc call failed:', e);
     }
 
     const { error: updErr } = await _supabase
