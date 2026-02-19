@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.28
-Change: 2026-02-12 - Added game hall-of-fame section (monthly/overall) for logged-in members.
+Version: v1.0.29
+Change: 2026-02-19 - Added document-box unread badge with per-profile last-seen tracking.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.28 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.29 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -661,9 +661,10 @@ NO. <span id="infoMemberId">-</span>
   </div>
   <div class="quick-col hidden">
     <div id="quickMinutesViewCard" class="quick-card quick-gray">
-      <div class="quick-title"><i class="bi bi-journal-text me-1"></i>의사록 열람</div>
+      <span id="docTodoBadge" class="quick-attention-badge hidden">!</span>
+      <div class="quick-title"><i class="bi bi-journal-text me-1"></i>문서함</div>
       <div class="quick-desc">공개 문서 보기</div>
-      <button onclick="location.href='minutes/minutes_view.html'" class="quick-btn btn btn-secondary">열람하기</button>
+      <button onclick="openDocumentBox()" class="quick-btn btn btn-secondary">문서함 열기</button>
     </div>
   </div>
 </div>
@@ -2716,6 +2717,86 @@ function setQuickCardTodoState(cardEl, badgeEl, isOn) {
     if (badgeEl) badgeEl.classList.toggle('hidden', !on);
 }
 
+async function hasUnreadDocumentBox(memberUuid) {
+    try {
+        if (!memberUuid) return false;
+
+        const { data: latestRows, error: latestErr } = await _supabase
+            .from('minutes')
+            .select('published_at')
+            .not('published_at', 'is', null)
+            .order('published_at', { ascending: false })
+            .limit(1);
+        if (latestErr || !Array.isArray(latestRows) || latestRows.length === 0) return false;
+
+        const latestAt = latestRows[0]?.published_at || null;
+        const latestTs = latestAt ? Date.parse(latestAt) : NaN;
+        if (!Number.isFinite(latestTs)) return false;
+
+        let seenAt = null;
+        if (curMem && String(curMem.id) === String(memberUuid)) {
+            seenAt = curMem.document_box_last_seen_at || null;
+        }
+        if (!seenAt) {
+            const { data: profile } = await _supabase
+                .from('coop_members')
+                .select('document_box_last_seen_at')
+                .eq('id', memberUuid)
+                .maybeSingle();
+            seenAt = profile?.document_box_last_seen_at || null;
+        }
+
+        const seenTs = seenAt ? Date.parse(seenAt) : NaN;
+        return !Number.isFinite(seenTs) || latestTs > seenTs;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function markDocumentBoxSeen(memberUuid = null) {
+    const targetId = memberUuid
+        || sessionStorage.getItem('lastActiveProfile')
+        || curMem?.id
+        || curAuth?.id
+        || null;
+    if (!targetId) return false;
+
+    const markAt = new Date().toISOString();
+
+    try {
+        const { error: rpcErr } = await _supabase.rpc('mark_document_box_seen', {
+            p_target_id: targetId,
+            p_seen_at: markAt
+        });
+        if (!rpcErr) {
+            if (curMem && String(curMem.id) === String(targetId)) {
+                curMem.document_box_last_seen_at = markAt;
+            }
+            return true;
+        }
+        if (rpcErr.code !== 'PGRST202') {
+            console.warn('mark_document_box_seen rpc error:', rpcErr);
+            return false;
+        }
+    } catch (e) {
+        console.warn('mark_document_box_seen rpc call failed:', e);
+    }
+
+    const { error: updErr } = await _supabase
+        .from('coop_members')
+        .update({ document_box_last_seen_at: markAt })
+        .eq('id', targetId);
+
+    if (updErr) {
+        console.warn('document_box_last_seen_at update failed:', updErr);
+        return false;
+    }
+    if (curMem && String(curMem.id) === String(targetId)) {
+        curMem.document_box_last_seen_at = markAt;
+    }
+    return true;
+}
+
 async function hasPendingVoteTasks(memberUuid) {
     try {
         if (!memberUuid) return false;
@@ -2796,6 +2877,7 @@ const minutesAdminCard = document.getElementById('quickMinutesAdminCard');
 const minutesSignCard = document.getElementById('quickMinutesSignCard');
 const minutesViewCard = document.getElementById('quickMinutesViewCard');
 const signBadge = document.getElementById('signTodoBadge');
+const docBadge = document.getElementById('docTodoBadge');
 
 const setQuickCardVisible = (cardEl, visible) => {
     if (!cardEl) return;
@@ -2805,12 +2887,18 @@ const setQuickCardVisible = (cardEl, visible) => {
 };
 
 setQuickCardTodoState(minutesSignCard, signBadge, false);
+setQuickCardTodoState(minutesViewCard, docBadge, false);
 
 // 회의록 카드: 관리자=전체, 임원=서명만, 조합원=열람만
 if (isAdmin) {
 setQuickCardVisible(minutesAdminCard, true);
 setQuickCardVisible(minutesSignCard, true);
 setQuickCardVisible(minutesViewCard, true);
+if (minutesViewCard && docBadge) {
+    hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
+        setQuickCardTodoState(minutesViewCard, docBadge, hasUnread);
+    });
+}
 if (minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
         setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
@@ -2820,6 +2908,7 @@ if (minutesSignCard && officialIds && officialIds.length > 0) {
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesViewCard, false);
 setQuickCardVisible(minutesSignCard, false);
+setQuickCardTodoState(minutesViewCard, docBadge, false);
 if (minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
         setQuickCardVisible(minutesSignCard, hasPending);
@@ -2831,6 +2920,11 @@ setQuickCardVisible(minutesViewCard, true);
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesSignCard, false);
 setQuickCardTodoState(minutesSignCard, signBadge, false);
+if (minutesViewCard && docBadge) {
+    hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
+        setQuickCardTodoState(minutesViewCard, docBadge, hasUnread);
+    });
+}
 }
 
 // 선거/태양광 노출은 기존 로직에서 제어 (카드 DOM만 여기서 초기화)
@@ -5231,6 +5325,12 @@ setQuickCardVisible(card, false); // 에러 시 안전하게 숨김
 function goToSolarMap() {
 // 새 창으로 열기
 window.open('map.html', '_blank'); 
+}
+
+async function openDocumentBox() {
+const targetId = sessionStorage.getItem('lastActiveProfile') || curMem?.id || curAuth?.id || null;
+await markDocumentBoxSeen(targetId);
+window.location.href = 'minutes/minutes_view.html';
 }
 </script>
 </body>

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.24
-Change: 2026-02-19 - Added document-box unread helpers (latest published timestamp + mark seen).
+Version: v1.0.22
+Change: 2026-02-09 - Resolve member from live auth session metadata instead of localStorage token key.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -111,17 +111,13 @@ async function isAdmin(uid, email) {
 
 async function getOfficialByMemberId(memberId) {
     if (!memberId) return null;
-    const { data, error } = await supabase
+    const { data } = await supabase
         .from('coop_officials')
         .select('id, seal_url')
         .eq('member_id', memberId)
         .eq('status', 'active')
-        .order('id', { ascending: false });
-    if (error || !Array.isArray(data) || data.length === 0) return null;
-
-    // If multiple rows exist for the same member (multiple roles/terms), prefer one that has a seal image.
-    const withSeal = data.find(row => row && row.seal_url);
-    return withSeal || data[0] || null;
+        .maybeSingle();
+    return data || null;
 }
 
 async function getMyOfficial(session) {
@@ -195,63 +191,24 @@ async function listPublishedMinutes() {
     return { data: data || [], error };
 }
 
-async function getLatestPublishedMinuteAt() {
-    const { data, error } = await supabase
-        .from('minutes')
-        .select('published_at')
-        .not('published_at', 'is', null)
-        .order('published_at', { ascending: false })
-        .limit(1);
-    if (error) return { data: null, error };
-    const latest = Array.isArray(data) && data.length > 0 ? (data[0]?.published_at || null) : null;
-    return { data: latest, error: null };
-}
-
-async function markDocumentBoxSeen(targetId = null, seenAt = null) {
-    const session = await getSession();
-    if (!session?.user) return { data: null, error: { message: '로그인이 필요합니다.' } };
-
-    const member = await resolveMember(targetId || session.user.id, session);
-    const memberId = targetId || member?.id || null;
-    if (!memberId) return { data: null, error: { message: '조합원 프로필을 찾을 수 없습니다.' } };
-
-    const markAt = seenAt || new Date().toISOString();
-
-    // Prefer RPC path if deployed (auth/manager/admin checks on DB side).
-    const { error: rpcErr } = await supabase.rpc('mark_document_box_seen', {
-        p_target_id: memberId,
-        p_seen_at: markAt
-    });
-    if (!rpcErr) return { data: { member_id: memberId, seen_at: markAt }, error: null };
-
-    // If RPC is not deployed yet, fallback to direct update path.
-    if (rpcErr?.code !== 'PGRST202') return { data: null, error: rpcErr };
-    const { error: updErr } = await supabase
-        .from('coop_members')
-        .update({ document_box_last_seen_at: markAt })
-        .eq('id', memberId);
-    if (updErr) return { data: null, error: updErr };
-    return { data: { member_id: memberId, seen_at: markAt }, error: null };
-}
-
-	async function uploadMinuteFiles(fileList) {
-	    if (!fileList || fileList.length === 0) return { urls: [], error: null };
-	    const urls = [];
-	    for (const file of fileList) {
-	        const name = file.name || '';
+async function uploadMinuteFiles(fileList) {
+    if (!fileList || fileList.length === 0) return { urls: [], error: null };
+    const urls = [];
+    for (const file of fileList) {
+        const name = file.name || '';
         const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         if (ext !== 'pdf') {
             return { urls: [], error: { message: `PDF만 업로드할 수 있습니다: ${name}` } };
         }
-	        const safeName = `${crypto.randomUUID()}_${name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-	        const storagePath = `minutes/${safeName}`;
-	        const { error } = await supabase.storage.from('attachments').upload(storagePath, file);
-	        if (error) return { urls: [], error };
-	        // Store a storage reference (not a public URL). Viewer resolves to a signed URL later.
-	        urls.push(`attachments/${storagePath}?display_name=${encodeURIComponent(name || safeName)}`);
-	    }
-	    return { urls, error: null };
-	}
+        const safeName = `${crypto.randomUUID()}_${name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+        const storagePath = `minutes/${safeName}`;
+        const { error } = await supabase.storage.from('attachments').upload(storagePath, file);
+        if (error) return { urls: [], error };
+        const { data: { publicUrl } } = supabase.storage.from('attachments').getPublicUrl(storagePath);
+        urls.push(publicUrl);
+    }
+    return { urls, error: null };
+}
 
 async function updateMinuteAttachments(id, fileUrls) {
     return await supabase.from('minutes').update({ file_urls: fileUrls }).eq('id', id);
@@ -413,8 +370,6 @@ export const MinutesService = {
     },
     listMinutesAdmin,
     listPublishedMinutes,
-    getLatestPublishedMinuteAt,
-    markDocumentBoxSeen,
     listApprovalNoticeDrafts,
     listCompletedNoticeApprovals,
     listNoticesByApprovalIds,
