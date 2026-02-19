@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.34
-Change: 2026-02-19 - Renamed to document box and added read-state mark on entry.
+    Version: v1.0.35
+    Change: 2026-02-19 - Applied notice preview template blocks (date/org/chairman/seal) in document-box detail.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.34 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.35 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -105,7 +105,7 @@ Change: 2026-02-19 - Renamed to document box and added read-state mark on entry.
     </div>
 
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.15';
+        import { MinutesService } from './MinutesService.js?v=1.0.26';
         import { supabase } from '../vote/ElectionService.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -122,10 +122,24 @@ Change: 2026-02-19 - Renamed to document box and added read-state mark on entry.
             if (docType === 'MINUTES') return '의사록';
             return '의사록';
         };
+        const APPROVAL_NOTICE_MEMO_START = '[[APPROVAL_NOTE]]';
+        const APPROVAL_NOTICE_MEMO_END = '[[/APPROVAL_NOTE]]';
+        let noticeCompanyInfo = null;
+        let noticeSealUrl = null;
 
         function safeUrl(url) {
             if (!url) return '';
             try { return new URL(url).href; } catch (e) { return ''; }
+        }
+
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function sanitizeStyle(styleText) {
@@ -215,6 +229,132 @@ Change: 2026-02-19 - Renamed to document box and added read-state mark on entry.
                 });
             });
             return doc.body.innerHTML;
+        }
+
+        function normalizeNoticeContent(rawValue) {
+            const raw = String(rawValue || '');
+            const trimmed = raw.trim();
+            if (!trimmed) return '';
+            const hasHtmlTag = /<\s*\/?\s*[a-zA-Z][^>]*>/.test(trimmed);
+            if (hasHtmlTag) return trimmed;
+            return escapeHtml(trimmed).replace(/\r?\n/g, '<br>');
+        }
+
+        function splitNoticeApprovalContent(rawContent) {
+            const raw = String(rawContent || '');
+            const startIdx = raw.indexOf(APPROVAL_NOTICE_MEMO_START);
+            const endIdx = startIdx >= 0 ? raw.indexOf(APPROVAL_NOTICE_MEMO_END, startIdx + APPROVAL_NOTICE_MEMO_START.length) : -1;
+            if (startIdx < 0 || endIdx < 0 || endIdx < startIdx) {
+                return { publicBody: raw.trim() };
+            }
+            const head = raw.slice(0, startIdx).trim();
+            const tail = raw.slice(endIdx + APPROVAL_NOTICE_MEMO_END.length).trim();
+            return { publicBody: [head, tail].filter(Boolean).join('\n\n').trim() };
+        }
+
+        function parseNoticeContent(content) {
+            const publicBody = splitNoticeApprovalContent(content).publicBody;
+            const lines = String(publicBody || '').split(/\r?\n/);
+            const meta = { docNo: '', receiver: '', via: '', title: '', bodyLines: [], publicBody };
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (!meta.docNo && trimmed.startsWith('문서번호:')) {
+                    meta.docNo = trimmed.replace('문서번호:', '').trim();
+                    return;
+                }
+                if (!meta.receiver && trimmed.startsWith('수신:')) {
+                    meta.receiver = trimmed.replace('수신:', '').trim();
+                    return;
+                }
+                if (!meta.via && trimmed.startsWith('경유:')) {
+                    meta.via = trimmed.replace('경유:', '').trim();
+                    return;
+                }
+                if (!meta.title && trimmed.startsWith('제목:')) {
+                    meta.title = trimmed.replace('제목:', '').trim();
+                    return;
+                }
+                meta.bodyLines.push(line);
+            });
+            return meta;
+        }
+
+        function renderNoticeBodyHtml(rawValue) {
+            const normalized = normalizeNoticeContent(rawValue);
+            if (!normalized) return '';
+            return sanitizeHtml(normalized);
+        }
+
+        function formatNoticeDateLabel(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            if (Number.isNaN(d.getTime())) return '';
+            return new Intl.DateTimeFormat('ko-KR', {
+                timeZone: KST_TZ_MINUTES_VIEW,
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            }).format(d);
+        }
+
+        async function loadNoticeCompanyInfo() {
+            if (noticeCompanyInfo) return noticeCompanyInfo;
+            const { data } = await MinutesService.getCompanyInfo();
+            noticeCompanyInfo = data || {};
+            return noticeCompanyInfo;
+        }
+
+        async function loadNoticeSealUrl() {
+            if (noticeSealUrl !== null) return noticeSealUrl || '';
+            const sealUrl = await MinutesService.getOfficialSealUrl();
+            noticeSealUrl = sealUrl || '';
+            return noticeSealUrl;
+        }
+
+        async function buildNoticeTemplateHtml(doc) {
+            const parsed = parseNoticeContent(doc?.content || '');
+            const docNo = String(doc?.doc_no || parsed.docNo || '').trim();
+            const receiver = String(doc?.receiver || parsed.receiver || '-').trim() || '-';
+            const via = String(doc?.via || parsed.via || '-').trim() || '-';
+            const title = String(doc?.title || parsed.title || '공문').trim() || '공문';
+            const bodyRaw = parsed.bodyLines.join('\n').trim() || parsed.publicBody || '';
+            const body = renderNoticeBodyHtml(bodyRaw);
+            const info = await loadNoticeCompanyInfo();
+            const sealUrl = await loadNoticeSealUrl();
+            const orgNameRaw = info?.orgName || info?.company_name || '용인모두의햇빛협동조합';
+            const chairmanRaw = info?.chairman_name || info?.ceoName || '';
+            const orgName = escapeHtml(orgNameRaw);
+            const chairman = chairmanRaw ? escapeHtml(chairmanRaw) : '';
+            const dateLabel = formatNoticeDateLabel(doc?.published_at || doc?.created_at);
+            const sealSafe = safeUrl(sealUrl);
+            const sealHtml = sealSafe
+                ? `<img src="${sealSafe}" alt="seal" style="width:70px; height:70px; object-fit:contain; margin-left:6px; vertical-align:middle;">`
+                : '';
+
+            return `
+                <div style="font-family:'Malgun Gothic',sans-serif; color:#111827;">
+                    ${docNo ? `<div style="text-align:right; font-size:12px; color:#64748b;">문서번호: ${escapeHtml(docNo)}</div>` : ''}
+                    <div style="border-top:1px solid #111; border-bottom:1px solid #111;">
+                        <div style="display:flex; border-bottom:1px solid #e5e7eb; padding:6px 0;">
+                            <div style="width:60px; font-weight:700;">수신</div>
+                            <div style="flex:1;">${escapeHtml(receiver)}</div>
+                        </div>
+                        <div style="display:flex; border-bottom:1px solid #e5e7eb; padding:6px 0;">
+                            <div style="width:60px; font-weight:700;">경유</div>
+                            <div style="flex:1;">${escapeHtml(via)}</div>
+                        </div>
+                        <div style="display:flex; padding:6px 0;">
+                            <div style="width:60px; font-weight:700;">제목</div>
+                            <div style="flex:1;">${escapeHtml(title)}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px; line-height:1.8;">${body || '-'}</div>
+                    ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
+                    <div style="margin-top:8px; text-align:center; font-weight:700;">
+                        ${orgName} 이사장 ${chairman ? chairman : ''} ${sealHtml}
+                    </div>
+                </div>
+            `;
         }
 
         function normalizeUrls(raw) {
@@ -470,7 +610,9 @@ Change: 2026-02-19 - Renamed to document box and added read-state mark on entry.
             detailTitle.textContent = doc.title ? `${label} · ${doc.title}` : label;
             detailMeta.textContent = `작성일: ${formatMinutesViewKstDate(doc.created_at)}`;
 
-            if (doc.content) {
+            if (doc.doc_type === 'NOTICE') {
+                detailContent.innerHTML = await buildNoticeTemplateHtml(doc);
+            } else if (doc.content) {
                 detailContent.innerHTML = sanitizeHtml(doc.content || '');
             } else {
                 detailContent.innerHTML = '<div style="color:#94a3b8;">내용이 없습니다.</div>';

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.10
-Change: 2026-02-19 - Notice publishing strips internal approval memo markers from approval content.
+Version: v1.2.13
+Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box (minutes NOTICE).
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>의사록 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.10 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.13 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -79,6 +79,15 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             border-color: #93c5fd;
             box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.35);
         }
+        .template-picker-list { max-height: 52vh; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 6px; }
+        .template-picker-item { width: 100%; text-align: left; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; background: #fff; cursor: pointer; margin-bottom: 8px; }
+        .template-picker-item:last-child { margin-bottom: 0; }
+        .template-picker-item:hover { border-color: #93c5fd; background: #f8fafc; }
+        .template-picker-item.active { border-color: #2563eb; background: #eff6ff; }
+        .template-picker-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+        .template-picker-title { font-weight: 700; color: #0f172a; }
+        .template-picker-meta { font-size: 0.78rem; color: #64748b; white-space: nowrap; }
+        .template-picker-snippet { font-size: 0.84rem; color: #334155; line-height: 1.45; }
         .minute-visual-editor:empty::before {
             content: attr(data-placeholder);
             color: #94a3b8;
@@ -345,6 +354,18 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
         </div>
     </div>
 
+    <div id="minuteTemplateModal" class="modal-backdrop">
+        <div class="modal-box" style="max-width: 760px;">
+            <div style="font-weight:bold; margin-bottom:6px;">지난 양식 선택</div>
+            <div id="minuteTemplateMeta" style="font-size:0.85rem; color:#64748b; margin-bottom:10px;"></div>
+            <div id="minuteTemplateList" class="template-picker-list"></div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closeMinuteTemplatePicker()">취소</button>
+                <button class="btn btn-blue" onclick="applySelectedMinuteTemplate()">선택 양식 적용</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { MinutesService } from './MinutesService.js';
 
@@ -383,6 +404,8 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             allowedSignerIds: new Set()
         };
         let minuteEditorMode = 'visual';
+        let minuteTemplateCandidates = [];
+        let minuteTemplateSelectedId = '';
 
 
         async function generateMinuteDocNo() {
@@ -756,6 +779,71 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             if (minuteEditorMode === 'html') syncMinuteVisualFromSource();
         };
 
+        function renderMinuteTemplateList() {
+            const listEl = document.getElementById('minuteTemplateList');
+            if (!listEl) return;
+            listEl.innerHTML = '';
+            if (!Array.isArray(minuteTemplateCandidates) || minuteTemplateCandidates.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.padding = '12px';
+                empty.style.textAlign = 'center';
+                empty.style.color = '#64748b';
+                empty.textContent = '선택 가능한 양식이 없습니다.';
+                listEl.appendChild(empty);
+                return;
+            }
+
+            minuteTemplateCandidates.forEach((doc) => {
+                const idKey = String(doc?.id || '');
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `template-picker-item${idKey === String(minuteTemplateSelectedId) ? ' active' : ''}`;
+                btn.addEventListener('click', () => {
+                    minuteTemplateSelectedId = idKey;
+                    renderMinuteTemplateList();
+                });
+
+                const head = document.createElement('div');
+                head.className = 'template-picker-head';
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'template-picker-title';
+                titleEl.textContent = String(doc?.title || '제목 없음');
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'template-picker-meta';
+                metaEl.textContent = `${getDocTypeLabel(doc?.doc_type)} · ${formatMinutesAdminKstDate(doc?.created_at, '-')}`;
+
+                const snippetEl = document.createElement('div');
+                snippetEl.className = 'template-picker-snippet';
+                const raw = String(doc?.content || '').replace(/\s+/g, ' ').trim();
+                snippetEl.textContent = raw ? raw.slice(0, 120) + (raw.length > 120 ? '...' : '') : '(본문 없음)';
+
+                head.appendChild(titleEl);
+                head.appendChild(metaEl);
+                btn.appendChild(head);
+                btn.appendChild(snippetEl);
+                listEl.appendChild(btn);
+            });
+        }
+
+        window.closeMinuteTemplatePicker = () => {
+            document.getElementById('minuteTemplateModal')?.classList.remove('show');
+        };
+
+        window.applySelectedMinuteTemplate = () => {
+            const selected = minuteTemplateCandidates.find(d => String(d?.id || '') === String(minuteTemplateSelectedId));
+            if (!selected) {
+                showToast('양식을 먼저 선택하세요.');
+                return;
+            }
+            setMinuteEditorContent(selected.content || '');
+            const titleEl = document.getElementById('in-title');
+            if (titleEl && !titleEl.value.trim()) titleEl.value = selected.title || '';
+            closeMinuteTemplatePicker();
+            showToast(`양식 불러오기 완료: ${selected.title || '기존 의사록'}`);
+        };
+
         window.loadLastMinuteTemplate = async () => {
             const targetType = document.getElementById('in-doc-type')?.value || 'MINUTES';
             let docs = Array.from(minutesCache.values());
@@ -767,17 +855,25 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
                 .filter(d => String(d.content || '').trim())
                 .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-            let source = sorted.find(d => d.doc_type === targetType);
-            if (!source) source = sorted.find(d => d.doc_type === 'MINUTES') || sorted[0];
-            if (!source) {
+            if (!sorted.length) {
                 showToast('불러올 기존 양식이 없습니다.');
                 return;
             }
 
-            setMinuteEditorContent(source.content || '');
-            const titleEl = document.getElementById('in-title');
-            if (titleEl && !titleEl.value.trim()) titleEl.value = source.title || '';
-            showToast(`양식 불러오기 완료: ${source.title || '기존 의사록'}`);
+            const sameType = sorted.filter(d => d.doc_type === targetType);
+            minuteTemplateCandidates = sameType.length > 0 ? sameType : sorted;
+            minuteTemplateSelectedId = String(minuteTemplateCandidates[0]?.id || '');
+
+            const metaEl = document.getElementById('minuteTemplateMeta');
+            if (metaEl) {
+                if (sameType.length > 0) {
+                    metaEl.textContent = `${getDocTypeLabel(targetType)} 양식 ${sameType.length}건`;
+                } else {
+                    metaEl.textContent = `${getDocTypeLabel(targetType)} 양식이 없어 전체 ${sorted.length}건을 표시합니다.`;
+                }
+            }
+            renderMinuteTemplateList();
+            document.getElementById('minuteTemplateModal')?.classList.add('show');
         };
 
         window.previewDraftMinute = () => {
@@ -863,6 +959,12 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             return meta;
         }
 
+        function renderNoticeBodyHtml(rawValue) {
+            const normalized = normalizeMinuteContent(rawValue);
+            if (!normalized) return '';
+            return sanitizeHtml(normalized);
+        }
+
         function formatKoreanDate(dateStr) {
             if (!dateStr) return '';
             const d = new Date(dateStr);
@@ -884,7 +986,7 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             const title = notice?.title || approval?.title || parsed.title || '공문';
             const approvalBody = splitNoticeApprovalContent(approval?.content || '').publicBody;
             const body = parsed.bodyLines.join('\n').trim() || approvalBody || '';
-            const safeBody = escapeHtml(body).replace(/\n/g, '<br>');
+            const safeBody = renderNoticeBodyHtml(body);
             const dateValue = approval?.processed_at || approval?.created_at || notice?.created_at;
             const dateLabel = formatKoreanDate(dateValue);
             const info = await loadNoticeCompanyInfo();
@@ -1326,6 +1428,48 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             }
         }
 
+        function buildNoticeMinuteDocNo(approval, notice) {
+            const docNo = String(approval?.doc_no || notice?.doc_no || '').trim();
+            if (docNo) return docNo;
+            const approvalId = String(approval?.id || '').trim();
+            return approvalId ? `공문-${approvalId}` : '';
+        }
+
+        async function syncNoticeToDocumentBox({ approval, notice, title, content, fileUrls, publish }) {
+            const docNo = buildNoticeMinuteDocNo(approval, notice);
+            if (!docNo) {
+                return { error: { message: '문서함 동기화 실패: 공문 식별값이 없습니다.' } };
+            }
+
+            const payload = {
+                title: String(title || approval?.title || notice?.title || '공문'),
+                content: String(content || ''),
+                doc_type: 'NOTICE',
+                doc_no: docNo,
+                receiver: approval?.receiver || null,
+                via: approval?.via || null,
+                visibility: 'MEMBERS',
+                requires_sign: false,
+                signer_ids: [],
+                status: 'OPEN',
+                author_id: currentUserId,
+                file_urls: Array.isArray(fileUrls) && fileUrls.length > 0 ? fileUrls : null,
+                published_at: publish ? new Date().toISOString() : null,
+                published_by: publish ? currentUserId : null
+            };
+
+            const { data: existing, error: findErr } = await MinutesService.findMinuteByDocNoAndType(docNo, 'NOTICE');
+            if (findErr) return { error: findErr };
+
+            if (existing?.id) {
+                const { error } = await MinutesService.updateMinute(existing.id, payload);
+                return { error: error || null };
+            }
+
+            const { error } = await MinutesService.createMinute(payload);
+            return { error: error || null };
+        }
+
         window.publishNotice = async (id) => {
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
             if (!item) return;
@@ -1340,11 +1484,13 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
                     fileUrls = notice.file_urls;
                 }
             }
+            const title = notice?.title || approval.title || '공문';
+            const content = notice?.content || buildNoticeContentFromApproval(approval);
 
             const payload = {
                 p_id: notice?.id || null,
-                p_title: notice?.title || approval.title || '공문',
-                p_content: notice?.content || buildNoticeContentFromApproval(approval),
+                p_title: title,
+                p_content: content,
                 p_category: '공문',
                 p_status: 'published',
                 p_is_popup: notice?.is_popup || false,
@@ -1355,11 +1501,27 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
                 p_source_approval_id: approval.id || null
             };
             const { error } = await MinutesService.upsertNotice(payload);
-            if (error) showToast(error.message);
-            else {
-                showToast('게시되었습니다.');
-                loadNotices();
+            if (error) {
+                showToast(error.message);
+                return;
             }
+
+            const { error: syncErr } = await syncNoticeToDocumentBox({
+                approval,
+                notice,
+                title,
+                content,
+                fileUrls,
+                publish: true
+            });
+            if (syncErr) {
+                showToast(syncErr.message || '문서함 동기화 실패');
+                return;
+            }
+
+            showToast('게시되었습니다.');
+            loadNotices();
+            loadMinutes();
         };
         window.unpublishNotice = async (id) => {
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
@@ -1372,11 +1534,14 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
             }
             const ok = await showConfirm('게시를 취소할까요?');
             if (!ok) return;
+            const title = notice?.title || approval.title || '공문';
+            const content = notice?.content || buildNoticeContentFromApproval(approval);
+            const fileUrls = Array.isArray(notice?.file_urls) ? notice.file_urls : null;
 
             const payload = {
                 p_id: notice?.id || null,
-                p_title: notice?.title || approval.title || '공문',
-                p_content: notice?.content || buildNoticeContentFromApproval(approval),
+                p_title: title,
+                p_content: content,
                 p_category: '공문',
                 p_status: 'draft',
                 p_is_popup: notice?.is_popup || false,
@@ -1387,11 +1552,27 @@ Change: 2026-02-19 - Notice publishing strips internal approval memo markers fro
                 p_source_approval_id: approval.id || null
             };
             const { error } = await MinutesService.upsertNotice(payload);
-            if (error) showToast(error.message);
-            else {
-                showToast('게시가 취소되었습니다.');
-                loadNotices();
+            if (error) {
+                showToast(error.message);
+                return;
             }
+
+            const { error: syncErr } = await syncNoticeToDocumentBox({
+                approval,
+                notice,
+                title,
+                content,
+                fileUrls,
+                publish: false
+            });
+            if (syncErr) {
+                showToast(syncErr.message || '문서함 동기화 실패');
+                return;
+            }
+
+            showToast('게시가 취소되었습니다.');
+            loadNotices();
+            loadMinutes();
         };
         function showToast(msg) {
             const toast = document.getElementById('toast');

@@ -1,8 +1,10 @@
 /*
-Version: v1.0.24
-Change: 2026-02-19 - Added document-box unread helpers (latest published timestamp + mark seen).
+Version: v1.0.26
+Change: 2026-02-19 - Hardened document-box seen RPC fallback for missing function/404 responses.
 */
 import { supabase } from '../vote/ElectionService.js';
+
+let canUseMarkDocumentBoxSeenRpc = true;
 
 async function getSession() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -207,6 +209,23 @@ async function getLatestPublishedMinuteAt() {
     return { data: latest, error: null };
 }
 
+function isMissingMarkDocumentBoxSeenRpc(error) {
+    if (!error) return false;
+    const code = String(error.code || '');
+    const status = Number(error.status || error.statusCode || 0);
+    const message = String(error.message || '').toLowerCase();
+    const details = String(error.details || '').toLowerCase();
+    const hint = String(error.hint || '').toLowerCase();
+    const text = `${message} ${details} ${hint}`;
+    return (
+        code === 'PGRST202'
+        || code === '404'
+        || status === 404
+        || text.includes('could not find the function public.mark_document_box_seen')
+        || text.includes('function public.mark_document_box_seen')
+    );
+}
+
 async function markDocumentBoxSeen(targetId = null, seenAt = null) {
     const session = await getSession();
     if (!session?.user) return { data: null, error: { message: '로그인이 필요합니다.' } };
@@ -217,15 +236,19 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
 
     const markAt = seenAt || new Date().toISOString();
 
-    // Prefer RPC path if deployed (auth/manager/admin checks on DB side).
-    const { error: rpcErr } = await supabase.rpc('mark_document_box_seen', {
-        p_target_id: memberId,
-        p_seen_at: markAt
-    });
-    if (!rpcErr) return { data: { member_id: memberId, seen_at: markAt }, error: null };
+    if (canUseMarkDocumentBoxSeenRpc) {
+        // Prefer RPC path if deployed (auth/manager/admin checks on DB side).
+        const { error: rpcErr } = await supabase.rpc('mark_document_box_seen', {
+            p_target_id: memberId,
+            p_seen_at: markAt
+        });
+        if (!rpcErr) return { data: { member_id: memberId, seen_at: markAt }, error: null };
 
-    // If RPC is not deployed yet, fallback to direct update path.
-    if (rpcErr?.code !== 'PGRST202') return { data: null, error: rpcErr };
+        // If RPC is not deployed yet, fallback to direct update path.
+        if (!isMissingMarkDocumentBoxSeenRpc(rpcErr)) return { data: null, error: rpcErr };
+        canUseMarkDocumentBoxSeenRpc = false;
+    }
+
     const { error: updErr } = await supabase
         .from('coop_members')
         .update({ document_box_last_seen_at: markAt })
@@ -354,6 +377,25 @@ async function createMinute(payload) {
     return await supabase.from('minutes').insert(payload);
 }
 
+async function findMinuteByDocNoAndType(docNo, docType = 'NOTICE') {
+    const safeDocNo = String(docNo || '').trim();
+    const safeDocType = String(docType || '').trim();
+    if (!safeDocNo || !safeDocType) return { data: null, error: null };
+    const { data, error } = await supabase
+        .from('minutes')
+        .select('id,doc_no,doc_type,published_at,status')
+        .eq('doc_no', safeDocNo)
+        .eq('doc_type', safeDocType)
+        .order('created_at', { ascending: false })
+        .limit(1);
+    const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+    return { data: row, error };
+}
+
+async function updateMinute(id, payload) {
+    return await supabase.from('minutes').update(payload).eq('id', id);
+}
+
 async function updateMinuteStatus(id, status) {
     return await supabase.from('minutes').update({ status }).eq('id', id);
 }
@@ -427,6 +469,8 @@ export const MinutesService = {
     listSignaturesByMinuteId,
     listPendingSignMinutes,
     createMinute,
+    findMinuteByDocNoAndType,
+    updateMinute,
     updateMinuteStatus,
     updateMinuteSignerIds,
     togglePublish,
