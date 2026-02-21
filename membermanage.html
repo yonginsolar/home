@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.30
-Change: 2026-02-19 - Hardened document-box seen fallback when RPC is missing (404).
+Version: v1.0.31
+Change: 2026-02-21 - Added session-expiry recovery UX and search noindex guard.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.30 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.31 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 
 <link rel="icon" type="image/png" href="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/favicon.png">
 
@@ -1152,6 +1153,8 @@ oninput="autoHyphen(this)">
 // =========================================================================
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const SUPABASE_PROJECT_REF = 'ifdqlwxgqgsvnawmhlfc';
+const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 
 let _supabase = null;
 let curMem = null;
@@ -1159,6 +1162,7 @@ let curAuth = null;
 let currentBoardLimit = 20;
 let isBoardLoading = false;
 let g_notices_list = [];
+let suppressSessionExpiredHandling = false;
 window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false };
 let canUseMarkDocumentBoxSeenRpc = true;
 const KST_TZ_MEMBER = 'Asia/Seoul';
@@ -1202,6 +1206,57 @@ function getDividendNet(item = {}) {
 const explicitNet = toFiniteNumber(item.net_amount);
 if (explicitNet !== 0) return explicitNet;
 return getDividendGross(item) - getDividendTax(item);
+}
+
+function getSupabaseAuthStorageKeys() {
+const prefix = `sb-${SUPABASE_PROJECT_REF}-auth-token`;
+const matched = [];
+[localStorage, sessionStorage].forEach((store) => {
+for (let i = 0; i < store.length; i += 1) {
+const key = store.key(i);
+if (key && key.indexOf(prefix) === 0) matched.push([store, key]);
+}
+});
+return matched;
+}
+
+function hasSupabaseAuthCache() {
+return getSupabaseAuthStorageKeys().length > 0;
+}
+
+function clearSupabaseAuthCache() {
+try {
+getSupabaseAuthStorageKeys().forEach(([store, key]) => store.removeItem(key));
+} catch (e) {
+console.error('Failed to clear Supabase auth cache:', e);
+}
+}
+
+async function signOutSilently(client = _supabase) {
+suppressSessionExpiredHandling = true;
+try {
+if (client && client.auth) await client.auth.signOut();
+} catch (e) {
+console.error('Silent sign-out failed:', e);
+} finally {
+setTimeout(() => { suppressSessionExpiredHandling = false; }, 500);
+}
+}
+
+function showSessionExpiredNoticeOnce() {
+if (sessionStorage.getItem(SESSION_EXPIRED_NOTICE_KEY) === '1') return;
+sessionStorage.setItem(SESSION_EXPIRED_NOTICE_KEY, '1');
+showModal("로그인 세션이 만료되었습니다.\n다시 로그인하면 이어서 이용할 수 있습니다.");
+}
+
+async function recoverFromExpiredSession() {
+clearSupabaseAuthCache();
+await signOutSilently(_supabase);
+curAuth = null;
+curMem = null;
+showOnly('loginSection');
+showLoading(false);
+showSessionExpiredNoticeOnce();
 }
 
 try {
@@ -1319,16 +1374,27 @@ return;
 }
 
 // 3. 인증 상태 변경 감지
-_supabase.auth.onAuthStateChange((event, session) => {
+_supabase.auth.onAuthStateChange(async (event, session) => {
 // 로딩바 끄기 (결정 났음)
 if (typeof showLoading === 'function') showLoading(false);
 
 if (session) {
+sessionStorage.removeItem(SESSION_EXPIRED_NOTICE_KEY);
 // [로그인 상태] -> 데이터 로드 시작
 // 주의: 여기서 바로 showOnly('dashboardSection') 하지 않음.
 // 데이터가 텅 빈 화면이 보일 수 있으므로 loadDashboardData 완료 후 보여줌.
 handleLoginSuccess(session.user);
 } else {
+const shouldRecover =
+!suppressSessionExpiredHandling &&
+(event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') &&
+hasSupabaseAuthCache();
+
+if (shouldRecover) {
+await recoverFromExpiredSession();
+return;
+}
+
 // [비로그인 상태] -> 로그인 화면 즉시 노출
 void 0;
 showOnly('loginSection'); 
@@ -1386,7 +1452,7 @@ if(btn) btn.disabled = true;
 showLoading(true, '보안 연결 초기화 및 메일 발송 중...');
 
 // 1. 기존 세션 로그아웃
-await _supabase.auth.signOut();
+await signOutSilently(_supabase);
 
 // 2. 로그인 링크 발송
 // [수정된 부분] sendMagicLink 함수 내부
@@ -1776,7 +1842,7 @@ await executeManualLink(name, contact);
 
 // [수정] 수동 매칭 포기 (Alert 제거)
 async function manualMatchFail() {
-await _supabase.auth.signOut();
+await signOutSilently(_supabase);
 document.getElementById('manualMatchModal').style.display = 'none';
 resetDuplicateEmailCandidates();
 showModal("가입 정보를 찾을 수 없습니다.\n사무국으로 문의해 주시기 바랍니다.");
@@ -3498,7 +3564,7 @@ showModal('증명서 발급 중 오류가 발생했습니다.\n' + (e.message ||
 
 function logout() { 
 showConfirmModal('로그아웃 하시겠습니까?', () => {
-_supabase.auth.signOut().then(() => location.reload());
+signOutSilently(_supabase).then(() => location.reload());
 }); 
 }
 
@@ -5275,7 +5341,7 @@ void 0;
 showModal("보안을 위해 다시 로그인이 필요합니다.");
 
 // 로컬에 남은 껍데기 세션도 깔끔하게 지워줌
-await client.auth.signOut(); 
+await signOutSilently(client); 
 location.reload(); 
 return;
 }
