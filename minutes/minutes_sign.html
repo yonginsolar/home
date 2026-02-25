@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.6
-Change: 2026-02-09 - Use live auth session metadata for official member resolution.
+Version: v1.2.8
+Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting documents.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.6 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.8 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -41,6 +41,20 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
         .list-title { font-size: 1.05rem; font-weight: 700; color: #0f172a; }
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
         .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .mode-pill {
+            display: none;
+            align-items: center;
+            padding: 5px 10px;
+            border-radius: 999px;
+            border: 1px solid #fca5a5;
+            background: #fef2f2;
+            color: #991b1b;
+            font-size: 0.82rem;
+            font-weight: 800;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        .mode-pill.show { display: inline-flex; }
         .btn-back {
             border: 1px solid #e2e8f0; background: #fff; padding: 6px 10px;
             border-radius: 10px; cursor: pointer; font-weight: 700; color: #1f2937;
@@ -87,6 +101,7 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
         <div id="list-panel" class="panel list-panel"></div>
         <div id="detail-panel" class="panel hidden">
             <div class="detail-header">
+                <span id="detail-mode-pill" class="mode-pill">서명대기 · 열람중</span>
                 <button class="btn-back" onclick="showList()">← 목록</button>
                 <div class="detail-title" id="detail-title">-</div>
             </div>
@@ -125,7 +140,7 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
     </div>
 
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.22';
+        import { MinutesService } from './MinutesService.js?v=1.0.28';
         import { supabase } from '../vote/ElectionService.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -409,8 +424,15 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
         function showList() {
             document.getElementById('detail-panel').classList.add('hidden');
             document.getElementById('list-panel').style.display = 'block';
+            setDetailModePill(false);
         }
         window.showList = showList;
+
+        function setDetailModePill(showWaitingView) {
+            const pill = document.getElementById('detail-mode-pill');
+            if (!pill) return;
+            pill.classList.toggle('show', !!showWaitingView);
+        }
 
         async function initSession() {
             const session = await MinutesService.getSession();
@@ -448,7 +470,7 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
             title.style.fontWeight = 'bold';
             title.style.fontSize = '1.1rem';
             title.style.color = '#0f172a';
-            title.innerText = '서명 요청 문서';
+            title.innerText = '서명/열람 문서';
             header.appendChild(title);
             listPanel.appendChild(header);
 
@@ -461,8 +483,8 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
                 return;
             }
 
-            const openMinutes = (await MinutesService.listOpenSignMinutes()).data || [];
-            let targets = Array.isArray(openMinutes) ? openMinutes : [];
+            const signModeMinutes = (await MinutesService.listSignModeMinutes()).data || [];
+            let targets = Array.isArray(signModeMinutes) ? signModeMinutes : [];
 
             if (myOfficialId) {
                 const officials = await MinutesService.getOfficials();
@@ -486,7 +508,7 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
                 const msg = document.createElement('div');
                 msg.style.marginTop = '12px';
                 msg.style.color = '#64748b';
-                msg.innerText = '현재 서명할 문서가 없습니다.';
+                msg.innerText = '현재 열람/서명 가능한 문서가 없습니다.';
                 listPanel.appendChild(msg);
                 return;
             }
@@ -508,7 +530,8 @@ Change: 2026-02-09 - Use live auth session metadata for official member resoluti
                 const dateEl = document.createElement('div');
                 dateEl.className = 'list-sub';
                 const isSigned = myOfficialId ? (signedMap.get(String(m.id) + ':' + String(myOfficialId)) || isLocallySigned(m.id)) : false;
-                dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${isSigned ? '서명완료' : '미서명'}`;
+                const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
+                dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${isSigned ? '서명완료' : '미서명'}`;
 
                 textWrap.appendChild(titleEl);
                 textWrap.appendChild(dateEl);
@@ -544,6 +567,7 @@ async function openDocumentById(id) {
             const btn = document.getElementById('btn-sign');
             const cancelBtn = document.getElementById('btn-cancel-sign');
 
+            setDetailModePill(false);
             btn.disabled = true;
             btn.innerText = '서명하기';
             if (cancelBtn) cancelBtn.style.display = 'none';
@@ -597,7 +621,16 @@ async function openDocumentById(id) {
             }
 
             if (doc.status !== 'OPEN') {
-                statusEl.innerText = '서명 마감된 문서입니다.';
+                const signedCount = Array.isArray(signatures) ? signatures.length : 0;
+                if (doc.status === 'CLOSED' && signedCount === 0) {
+                    statusEl.innerText = '현재 열람모드입니다. 수정이 필요한 내용이 있으면 사무국장에게 연락 바랍니다.';
+                    setDetailModePill(true);
+                } else {
+                    statusEl.innerText = '서명 마감된 문서입니다.';
+                }
+                btn.disabled = true;
+                btn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'none';
                 return;
             }
 

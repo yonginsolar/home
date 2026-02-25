@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.13
-Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box (minutes NOTICE).
+Version: v1.2.19
+Change: 2026-02-25 - Fixed minute edit modal sizing/close UX and clarified waiting-to-view mode controls.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>의사록 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.13 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.19 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -79,15 +79,6 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             border-color: #93c5fd;
             box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.35);
         }
-        .template-picker-list { max-height: 52vh; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 6px; }
-        .template-picker-item { width: 100%; text-align: left; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; background: #fff; cursor: pointer; margin-bottom: 8px; }
-        .template-picker-item:last-child { margin-bottom: 0; }
-        .template-picker-item:hover { border-color: #93c5fd; background: #f8fafc; }
-        .template-picker-item.active { border-color: #2563eb; background: #eff6ff; }
-        .template-picker-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
-        .template-picker-title { font-weight: 700; color: #0f172a; }
-        .template-picker-meta { font-size: 0.78rem; color: #64748b; white-space: nowrap; }
-        .template-picker-snippet { font-size: 0.84rem; color: #334155; line-height: 1.45; }
         .minute-visual-editor:empty::before {
             content: attr(data-placeholder);
             color: #94a3b8;
@@ -144,6 +135,15 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             background: #fff; padding: 18px 20px; border-radius: 10px;
             min-width: 280px; max-width: 90%; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
         }
+        .minute-edit-modal-box {
+            width: min(760px, 92vw);
+            max-height: 86vh;
+            overflow-y: auto;
+        }
+        #minute-edit-content-visual {
+            min-height: 160px;
+            max-height: 42vh;
+        }
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
         .btn-outline { background: #fff; border: 1px solid #e5e7eb; color: #374151; }
         .signer-edit-list { max-height: 45vh; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; background: #f8fafc; }
@@ -166,6 +166,18 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             border-radius: 999px;
             padding: 2px 8px;
         }
+        .channel-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid #e5e7eb;
+            border-radius: 999px;
+            padding: 6px 10px;
+            background: #fff;
+            font-size: 0.82rem;
+            color: #334155;
+        }
+        .channel-toggle input { margin: 0; }
     </style>
 </head>
 <body>
@@ -336,6 +348,40 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
         </div>
     </div>
 
+    <div id="templatePickerModal" class="modal-backdrop">
+        <div class="modal-box" style="max-width: 760px;">
+            <div style="font-weight:bold; margin-bottom:6px;">지난 양식 선택</div>
+            <div id="templatePickerMeta" style="font-size:0.85rem; color:#64748b; margin-bottom:10px;"></div>
+            <div id="templatePickerList" class="signer-edit-list"></div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closeTemplatePicker()">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="minuteEditModal" class="modal-backdrop">
+        <div class="modal-box minute-edit-modal-box" style="max-width: 760px;">
+            <div style="font-weight:bold; margin-bottom:8px;">의사록 문구 수정</div>
+            <div style="font-size:0.82rem; color:#64748b; margin-bottom:10px;">
+                서명 시작 전(서명 0건) 문서만 수정 가능합니다.
+            </div>
+            <div class="input-group">
+                <label style="font-weight:bold;">제목</label>
+                <input type="text" id="minute-edit-title" class="form-control">
+            </div>
+            <div class="input-group">
+                <label style="font-weight:bold;">내용 (적용 화면 기준 편집)</label>
+                <div id="minute-edit-content-visual" class="minute-visual-editor" contenteditable="true" data-placeholder="수정할 문구를 입력하세요."></div>
+                <textarea id="minute-edit-content" class="form-control" style="display:none;" aria-hidden="true"></textarea>
+                <small class="text-muted">HTML 원문 대신 화면에 적용된 상태로 문구를 바로 수정합니다.</small>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-gray" onclick="closeMinuteEdit()">취소</button>
+                <button class="btn btn-blue" onclick="saveMinuteEdit()">저장</button>
+            </div>
+        </div>
+    </div>
+
     <div id="editModal" class="modal-backdrop">
         <div class="modal-box" style="max-width: 760px;">
             <div style="font-weight:bold; margin-bottom:8px;">공문 내용 수정</div>
@@ -350,18 +396,6 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             <div class="modal-actions">
                 <button class="btn btn-gray" onclick="closeEdit()">취소</button>
                 <button class="btn btn-blue" onclick="saveEdit()">저장</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="minuteTemplateModal" class="modal-backdrop">
-        <div class="modal-box" style="max-width: 760px;">
-            <div style="font-weight:bold; margin-bottom:6px;">지난 양식 선택</div>
-            <div id="minuteTemplateMeta" style="font-size:0.85rem; color:#64748b; margin-bottom:10px;"></div>
-            <div id="minuteTemplateList" class="template-picker-list"></div>
-            <div class="modal-actions">
-                <button class="btn btn-gray" onclick="closeMinuteTemplatePicker()">취소</button>
-                <button class="btn btn-blue" onclick="applySelectedMinuteTemplate()">선택 양식 적용</button>
             </div>
         </div>
     </div>
@@ -392,6 +426,7 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
 
         let noticeItems = [];
         let noticeAttachMap = {};
+        let noticeChannelMap = {};
         let noticeCompanyInfo = null;
         let noticeSealUrl = null;
 
@@ -404,8 +439,10 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             allowedSignerIds: new Set()
         };
         let minuteEditorMode = 'visual';
-        let minuteTemplateCandidates = [];
-        let minuteTemplateSelectedId = '';
+        let templatePickerState = {
+            targetType: 'MINUTES',
+            candidates: []
+        };
 
 
         async function generateMinuteDocNo() {
@@ -433,6 +470,7 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
         }
 
         let editTargetId = null;
+        let minuteEditTargetId = null;
 
         function openNoticeEdit(id) {
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
@@ -481,6 +519,82 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                 closeEdit();
                 loadNotices();
             }
+        };
+
+        window.openMinuteEdit = async (id, allow = true) => {
+            if (!allow) {
+                showToast('이미 서명이 시작된 문서는 수정할 수 없습니다.');
+                return;
+            }
+            let minute = minutesCache?.get(id);
+            if (!minute) {
+                const { data, error } = await MinutesService.getMinuteById(id);
+                if (error || !data) {
+                    showToast('의사록 정보를 불러오지 못했습니다.');
+                    return;
+                }
+                minute = data;
+                minutesCache.set(id, minute);
+            }
+
+            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(id);
+            if (Array.isArray(signatures) && signatures.length > 0) {
+                showToast('이미 서명이 시작된 문서는 수정할 수 없습니다.');
+                await loadMinutes();
+                return;
+            }
+
+            minuteEditTargetId = id;
+            document.getElementById('minute-edit-title').value = minute.title || '';
+            document.getElementById('minute-edit-content').value = minute.content || '';
+            initializeMinuteEditEditor();
+            syncMinuteEditVisualFromSource();
+            document.getElementById('minuteEditModal').classList.add('show');
+        };
+
+        window.closeMinuteEdit = () => {
+            document.getElementById('minuteEditModal').classList.remove('show');
+            const titleEl = document.getElementById('minute-edit-title');
+            const sourceEl = document.getElementById('minute-edit-content');
+            const visualEl = document.getElementById('minute-edit-content-visual');
+            if (titleEl) titleEl.value = '';
+            if (sourceEl) sourceEl.value = '';
+            if (visualEl) visualEl.innerHTML = '';
+            minuteEditTargetId = null;
+        };
+
+        window.saveMinuteEdit = async () => {
+            if (!minuteEditTargetId) return;
+            syncMinuteEditSourceFromVisual();
+            const title = (document.getElementById('minute-edit-title')?.value || '').trim();
+            const rawContent = document.getElementById('minute-edit-content')?.value || '';
+            const content = normalizeMinuteContent(rawContent);
+            if (!title) {
+                showToast('제목을 입력하세요.');
+                return;
+            }
+            if (!String(content || '').trim()) {
+                showToast('내용을 입력하세요.');
+                return;
+            }
+
+            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(minuteEditTargetId);
+            if (Array.isArray(signatures) && signatures.length > 0) {
+                showToast('이미 서명이 시작된 문서는 수정할 수 없습니다.');
+                closeMinuteEdit();
+                await loadMinutes();
+                return;
+            }
+
+            const { error } = await MinutesService.updateMinute(minuteEditTargetId, { title, content });
+            if (error) {
+                showToast(error.message || '문구 수정 실패');
+                return;
+            }
+
+            showToast('문구가 수정되었습니다.');
+            closeMinuteEdit();
+            await loadMinutes();
         };
 
         function openAttachPicker(id) {
@@ -669,6 +783,50 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                 .trim();
         }
 
+        function getMinuteEditHtmlEditor() {
+            return document.getElementById('minute-edit-content');
+        }
+
+        function getMinuteEditVisualEditor() {
+            return document.getElementById('minute-edit-content-visual');
+        }
+
+        function syncMinuteEditVisualFromSource() {
+            const source = getMinuteEditHtmlEditor();
+            const visual = getMinuteEditVisualEditor();
+            if (!source || !visual) return;
+            visual.innerHTML = getMinuteRenderedHtml(source.value);
+        }
+
+        function syncMinuteEditSourceFromVisual() {
+            const source = getMinuteEditHtmlEditor();
+            const visual = getMinuteEditVisualEditor();
+            if (!source || !visual) return;
+            source.value = normalizeVisualEditorHtml(visual.innerHTML);
+        }
+
+        function initializeMinuteEditEditor() {
+            const visual = getMinuteEditVisualEditor();
+            if (!visual || visual.dataset.bindMinuteEdit === '1') return;
+            visual.addEventListener('input', syncMinuteEditSourceFromVisual);
+            visual.addEventListener('blur', syncMinuteEditSourceFromVisual);
+            visual.dataset.bindMinuteEdit = '1';
+        }
+
+        function initializeMinuteEditModalClose() {
+            const modal = document.getElementById('minuteEditModal');
+            if (!modal || modal.dataset.bindCloseMinuteEdit === '1') return;
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) window.closeMinuteEdit?.();
+            });
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal.classList.contains('show')) {
+                    window.closeMinuteEdit?.();
+                }
+            });
+            modal.dataset.bindCloseMinuteEdit = '1';
+        }
+
         function syncMinuteVisualFromSource() {
             const source = getMinuteHtmlEditor();
             const visual = getMinuteVisualEditor();
@@ -779,69 +937,71 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             if (minuteEditorMode === 'html') syncMinuteVisualFromSource();
         };
 
-        function renderMinuteTemplateList() {
-            const listEl = document.getElementById('minuteTemplateList');
-            if (!listEl) return;
-            listEl.innerHTML = '';
-            if (!Array.isArray(minuteTemplateCandidates) || minuteTemplateCandidates.length === 0) {
-                const empty = document.createElement('div');
-                empty.style.padding = '12px';
-                empty.style.textAlign = 'center';
-                empty.style.color = '#64748b';
-                empty.textContent = '선택 가능한 양식이 없습니다.';
-                listEl.appendChild(empty);
-                return;
-            }
-
-            minuteTemplateCandidates.forEach((doc) => {
-                const idKey = String(doc?.id || '');
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = `template-picker-item${idKey === String(minuteTemplateSelectedId) ? ' active' : ''}`;
-                btn.addEventListener('click', () => {
-                    minuteTemplateSelectedId = idKey;
-                    renderMinuteTemplateList();
-                });
-
-                const head = document.createElement('div');
-                head.className = 'template-picker-head';
-
-                const titleEl = document.createElement('div');
-                titleEl.className = 'template-picker-title';
-                titleEl.textContent = String(doc?.title || '제목 없음');
-
-                const metaEl = document.createElement('div');
-                metaEl.className = 'template-picker-meta';
-                metaEl.textContent = `${getDocTypeLabel(doc?.doc_type)} · ${formatMinutesAdminKstDate(doc?.created_at, '-')}`;
-
-                const snippetEl = document.createElement('div');
-                snippetEl.className = 'template-picker-snippet';
-                const raw = String(doc?.content || '').replace(/\s+/g, ' ').trim();
-                snippetEl.textContent = raw ? raw.slice(0, 120) + (raw.length > 120 ? '...' : '') : '(본문 없음)';
-
-                head.appendChild(titleEl);
-                head.appendChild(metaEl);
-                btn.appendChild(head);
-                btn.appendChild(snippetEl);
-                listEl.appendChild(btn);
-            });
+        function getTemplateTypePriority(targetType) {
+            if (targetType === 'GENERAL_ASSEMBLY') return ['GENERAL_ASSEMBLY', 'MINUTES', 'PAST_MINUTES'];
+            return ['MINUTES', 'GENERAL_ASSEMBLY', 'PAST_MINUTES'];
         }
 
-        window.closeMinuteTemplatePicker = () => {
-            document.getElementById('minuteTemplateModal')?.classList.remove('show');
-        };
+        function buildTemplateCandidates(rawDocs, targetType) {
+            const priority = getTemplateTypePriority(targetType);
+            const scoreByType = new Map(priority.map((type, idx) => [type, idx]));
+            const docs = (Array.isArray(rawDocs) ? rawDocs : [])
+                .filter(doc => String(doc?.content || '').trim())
+                .map(doc => ({
+                    doc,
+                    score: scoreByType.has(doc.doc_type) ? scoreByType.get(doc.doc_type) : 99
+                }))
+                .sort((a, b) => {
+                    if (a.score !== b.score) return a.score - b.score;
+                    return new Date(b.doc.created_at || 0).getTime() - new Date(a.doc.created_at || 0).getTime();
+                })
+                .map(item => item.doc);
+            return docs.slice(0, 20);
+        }
 
-        window.applySelectedMinuteTemplate = () => {
-            const selected = minuteTemplateCandidates.find(d => String(d?.id || '') === String(minuteTemplateSelectedId));
-            if (!selected) {
-                showToast('양식을 먼저 선택하세요.');
+        function renderTemplatePickerList() {
+            const listEl = document.getElementById('templatePickerList');
+            const metaEl = document.getElementById('templatePickerMeta');
+            if (!listEl || !metaEl) return;
+
+            const targetLabel = getDocTypeLabel(templatePickerState.targetType);
+            metaEl.innerText = `문서유형 우선 추천: ${targetLabel}`;
+            const candidates = templatePickerState.candidates || [];
+            if (candidates.length === 0) {
+                listEl.innerHTML = '<div style="color:#64748b; padding:8px;">불러올 양식이 없습니다.</div>';
                 return;
             }
-            setMinuteEditorContent(selected.content || '');
+
+            listEl.innerHTML = candidates.map((doc) => {
+                const safeId = String(doc.id || '');
+                const safeTitle = escapeHtml(doc.title || '제목 없음');
+                const safeType = escapeHtml(getDocTypeLabel(doc.doc_type));
+                const safeDate = formatMinutesAdminKstDate(doc.created_at, '-');
+                return `
+                    <div style="border:1px solid #e5e7eb; border-radius:10px; background:#fff; padding:10px; margin-bottom:8px;">
+                        <div style="font-weight:700; color:#111827; margin-bottom:4px;">${safeTitle}</div>
+                        <div style="font-size:0.8rem; color:#64748b; margin-bottom:8px;">${safeType} | ${safeDate}</div>
+                        <button class="btn btn-blue" onclick="selectMinuteTemplate('${safeId}')">이 양식 적용</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        window.selectMinuteTemplate = (id) => {
+            const found = (templatePickerState.candidates || []).find(doc => String(doc.id) === String(id));
+            if (!found) {
+                showToast('선택한 양식을 찾지 못했습니다.');
+                return;
+            }
+            setMinuteEditorContent(found.content || '');
             const titleEl = document.getElementById('in-title');
-            if (titleEl && !titleEl.value.trim()) titleEl.value = selected.title || '';
-            closeMinuteTemplatePicker();
-            showToast(`양식 불러오기 완료: ${selected.title || '기존 의사록'}`);
+            if (titleEl && !titleEl.value.trim()) titleEl.value = found.title || '';
+            closeTemplatePicker();
+            showToast(`양식 불러오기 완료: ${found.title || '기존 의사록'}`);
+        };
+
+        window.closeTemplatePicker = () => {
+            document.getElementById('templatePickerModal')?.classList.remove('show');
         };
 
         window.loadLastMinuteTemplate = async () => {
@@ -851,29 +1011,18 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                 const { data } = await MinutesService.listMinutesAdmin();
                 docs = data || [];
             }
-            const sorted = docs
-                .filter(d => String(d.content || '').trim())
-                .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-
-            if (!sorted.length) {
+            const candidates = buildTemplateCandidates(docs, targetType);
+            if (!candidates.length) {
                 showToast('불러올 기존 양식이 없습니다.');
                 return;
             }
 
-            const sameType = sorted.filter(d => d.doc_type === targetType);
-            minuteTemplateCandidates = sameType.length > 0 ? sameType : sorted;
-            minuteTemplateSelectedId = String(minuteTemplateCandidates[0]?.id || '');
-
-            const metaEl = document.getElementById('minuteTemplateMeta');
-            if (metaEl) {
-                if (sameType.length > 0) {
-                    metaEl.textContent = `${getDocTypeLabel(targetType)} 양식 ${sameType.length}건`;
-                } else {
-                    metaEl.textContent = `${getDocTypeLabel(targetType)} 양식이 없어 전체 ${sorted.length}건을 표시합니다.`;
-                }
-            }
-            renderMinuteTemplateList();
-            document.getElementById('minuteTemplateModal')?.classList.add('show');
+            templatePickerState = {
+                targetType,
+                candidates
+            };
+            renderTemplatePickerList();
+            document.getElementById('templatePickerModal')?.classList.add('show');
         };
 
         window.previewDraftMinute = () => {
@@ -959,12 +1108,6 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             return meta;
         }
 
-        function renderNoticeBodyHtml(rawValue) {
-            const normalized = normalizeMinuteContent(rawValue);
-            if (!normalized) return '';
-            return sanitizeHtml(normalized);
-        }
-
         function formatKoreanDate(dateStr) {
             if (!dateStr) return '';
             const d = new Date(dateStr);
@@ -986,7 +1129,7 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             const title = notice?.title || approval?.title || parsed.title || '공문';
             const approvalBody = splitNoticeApprovalContent(approval?.content || '').publicBody;
             const body = parsed.bodyLines.join('\n').trim() || approvalBody || '';
-            const safeBody = renderNoticeBodyHtml(body);
+            const safeBody = escapeHtml(body).replace(/\n/g, '<br>');
             const dateValue = approval?.processed_at || approval?.created_at || notice?.created_at;
             const dateLabel = formatKoreanDate(dateValue);
             const info = await loadNoticeCompanyInfo();
@@ -1357,6 +1500,156 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             noticeAttachMap[id] = checked;
         };
 
+        function getNoticeApprovalKey(approvalId) {
+            return String(approvalId || '');
+        }
+
+        function getNoticeDocNo(approval, notice) {
+            return String(approval?.doc_no || notice?.doc_no || '').trim();
+        }
+
+        function getOrInitNoticeChannels(key, defaults = {}) {
+            if (!noticeChannelMap[key]) {
+                noticeChannelMap[key] = {
+                    notice: !!defaults.notice,
+                    document: !!defaults.document
+                };
+            }
+            return noticeChannelMap[key];
+        }
+
+        window.toggleNoticeChannel = (id, channel, checked) => {
+            const key = getNoticeApprovalKey(id);
+            const state = getOrInitNoticeChannels(key, {});
+            if (channel === 'notice') state.notice = !!checked;
+            if (channel === 'document') state.document = !!checked;
+        };
+
+        function resolveNoticeFileUrls(approval, notice, includeAttach) {
+            if (!includeAttach) return null;
+            if (Array.isArray(approval?.file_links) && approval.file_links.length > 0) {
+                return approval.file_links;
+            }
+            if (Array.isArray(notice?.file_urls) && notice.file_urls.length > 0) {
+                return notice.file_urls;
+            }
+            return null;
+        }
+
+        function buildNoticeUpsertPayload(approval, notice, status, fileUrls) {
+            return {
+                p_id: notice?.id || null,
+                p_title: notice?.title || approval.title || '공문',
+                p_content: notice?.content || buildNoticeContentFromApproval(approval),
+                p_category: '공문',
+                p_status: status,
+                p_is_popup: notice?.is_popup || false,
+                p_file_url: notice?.file_url || null,
+                p_doc_no: approval.doc_no || notice?.doc_no || null,
+                p_file_urls: fileUrls,
+                p_file_names: notice?.file_names || null,
+                p_source_approval_id: approval.id || null
+            };
+        }
+
+        async function syncNoticePortalChannel(approval, notice, shouldPublish, fileUrls) {
+            if (shouldPublish) {
+                const payload = buildNoticeUpsertPayload(approval, notice, 'published', fileUrls);
+                return await MinutesService.upsertNotice(payload);
+            }
+
+            if (!notice || notice.status !== 'published') {
+                return { data: null, error: null };
+            }
+            const payload = buildNoticeUpsertPayload(approval, notice, 'draft', notice?.file_urls || null);
+            return await MinutesService.upsertNotice(payload);
+        }
+
+        function buildNoticeMinutePayload(approval, notice, fileUrls, publishAt) {
+            const content = notice?.content || buildNoticeContentFromApproval(approval);
+            return {
+                title: notice?.title || approval.title || '공문',
+                content,
+                doc_type: 'NOTICE',
+                doc_no: getNoticeDocNo(approval, notice) || null,
+                receiver: approval?.receiver || null,
+                via: approval?.via || null,
+                visibility: 'MEMBERS',
+                requires_sign: false,
+                status: 'CLOSED',
+                author_id: currentUserId,
+                file_urls: fileUrls,
+                signer_ids: null,
+                published_at: publishAt,
+                published_by: publishAt ? currentUserId : null
+            };
+        }
+
+        async function syncNoticeDocumentBoxChannel(approval, notice, shouldPublish, fileUrls) {
+            const docNo = getNoticeDocNo(approval, notice);
+            let existingMinute = null;
+
+            if (docNo) {
+                const { data, error } = await MinutesService.findMinuteByDocNoAndType(docNo, 'NOTICE');
+                if (error) return { data: null, error };
+                existingMinute = data || null;
+            }
+
+            if (shouldPublish) {
+                if (!docNo) {
+                    return { data: null, error: { message: '문서번호가 없어 문서함 채널 게시를 진행할 수 없습니다.' } };
+                }
+                const payload = buildNoticeMinutePayload(approval, notice, fileUrls, new Date().toISOString());
+                if (existingMinute?.id) return await MinutesService.updateMinute(existingMinute.id, payload);
+                return await MinutesService.createMinute(payload);
+            }
+
+            if (!existingMinute?.id) {
+                return { data: null, error: null };
+            }
+            const payload = buildNoticeMinutePayload(approval, notice, fileUrls, null);
+            return await MinutesService.updateMinute(existingMinute.id, payload);
+        }
+
+        window.applyNoticeChannels = async (id) => {
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (!item) return;
+            const approval = item.approval || {};
+            const notice = item.notice || null;
+            const key = getNoticeApprovalKey(approval.id);
+            const state = getOrInitNoticeChannels(key, {});
+            const noticeOn = !!state.notice;
+            const documentOn = !!state.document;
+
+            if (!noticeOn && !documentOn) {
+                showToast('게시 채널을 1개 이상 선택하세요. (공지/문서함)');
+                return;
+            }
+
+            if (documentOn && !getNoticeDocNo(approval, notice)) {
+                showToast('문서함 채널 게시를 위해 문서번호가 필요합니다.');
+                return;
+            }
+
+            const includeAttach = !!noticeAttachMap[key];
+            const fileUrls = resolveNoticeFileUrls(approval, notice, includeAttach);
+
+            const { error: noticeError } = await syncNoticePortalChannel(approval, notice, noticeOn, fileUrls);
+            if (noticeError) {
+                showToast(noticeError.message || '공지 채널 반영 실패');
+                return;
+            }
+
+            const { error: boxError } = await syncNoticeDocumentBoxChannel(approval, notice, documentOn, fileUrls);
+            if (boxError) {
+                showToast(boxError.message || '문서함 채널 반영 실패');
+                return;
+            }
+
+            showToast('채널 설정이 반영되었습니다.');
+            loadNotices();
+        };
+
         async function loadNotices() {
             const container = document.getElementById('notice-list-area');
             if (!container) return;
@@ -1373,6 +1666,16 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             const approvalIds = approvals.map(a => a.id).filter(Boolean);
             const { data: notices } = await MinutesService.listNoticesByApprovalIds(approvalIds);
             const noticeMap = new Map((notices || []).map(n => [String(n.source_approval_id), n]));
+            const docNos = approvals
+                .map(a => String(a.doc_no || '').trim())
+                .filter(Boolean);
+            const { data: minuteNotices } = await MinutesService.listNoticeMinutesByDocNos(docNos);
+            const minuteByDocNo = new Map();
+            (minuteNotices || []).forEach((row) => {
+                const key = String(row.doc_no || '').trim();
+                if (!key || minuteByDocNo.has(key)) return;
+                minuteByDocNo.set(key, row);
+            });
 
             noticeItems = approvals.map(a => ({
                 approval: a,
@@ -1386,26 +1689,35 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                 const attachCount = Array.isArray(approval?.file_links) ? approval.file_links.length : 0;
                 const existingAttach = Array.isArray(notice?.file_urls) && notice.file_urls.length > 0;
                 const hasAttach = attachCount > 0 || existingAttach;
-                const key = String(approval.id || '');
+                const key = getNoticeApprovalKey(approval.id);
                 const checked = (noticeAttachMap[key] !== undefined) ? noticeAttachMap[key] : existingAttach;
                 noticeAttachMap[key] = checked;
 
-                const isPublished = notice?.status === 'published';
-                const badgeClass = isPublished ? 'badge-open' : 'badge-closed';
-                const badgeLabel = isPublished ? '게시됨' : '미공개';
+                const docNoRaw = getNoticeDocNo(approval, notice);
+                const minuteNotice = docNoRaw ? minuteByDocNo.get(docNoRaw) : null;
+                const isNoticePublished = notice?.status === 'published';
+                const isDocumentPublished = !!minuteNotice?.published_at;
+                const channelState = getOrInitNoticeChannels(key, {
+                    // 신규 공문은 공지 채널을 기본 미선택으로 시작.
+                    notice: isNoticePublished,
+                    // 문서함은 기존 게시 상태를 우선 반영, 신규는 기본 선택.
+                    document: isDocumentPublished || (!isNoticePublished && !isDocumentPublished)
+                });
+                const noticeBadgeClass = isNoticePublished ? 'badge-open' : 'badge-closed';
+                const noticeBadgeLabel = isNoticePublished ? '공지 ON' : '공지 OFF';
+                const boxBadgeClass = isDocumentPublished ? 'badge-open' : 'badge-closed';
+                const boxBadgeLabel = isDocumentPublished ? '문서함 ON' : '문서함 OFF';
                 const docNo = approval.doc_no ? `<span style="font-size:0.8rem; color:#64748b;">${escapeHtml(approval.doc_no)}</span>` : '';
                 const dateValue = approval.processed_at || approval.created_at;
-            const dateLabel = formatMinutesAdminKstDate(dateValue);
+                const dateLabel = formatMinutesAdminKstDate(dateValue);
                 const statusLabel = approval.status ? escapeHtml(approval.status) : '-';
-                const publishButton = isPublished
-                    ? `<button onclick="unpublishNotice('${approval.id}')" class="btn btn-gray">게시 취소</button>`
-                    : `<button onclick="publishNotice('${approval.id}')" class="btn btn-blue">📢 게시</button>`;
                 const html = `
                     <div class="minute-item">
                         <div class="minute-header">
                             <div>
                                 <div style="display:flex; align-items:center; gap:8px;">
-                                    <span class="status-badge ${badgeClass}">${badgeLabel}</span>
+                                    <span class="status-badge ${noticeBadgeClass}">${noticeBadgeLabel}</span>
+                                    <span class="status-badge ${boxBadgeClass}">${boxBadgeLabel}</span>
                                     <strong style="font-size:1.05rem;">${escapeHtml(approval.title || '공문')}</strong>
                                     ${docNo}
                                 </div>
@@ -1416,164 +1728,25 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                         </div>
                         <div class="btn-group">
                             <button onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
+                            <label class="channel-toggle">
+                                <input type="checkbox" ${channelState.notice ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'notice', this.checked)">
+                                공지
+                            </label>
+                            <label class="channel-toggle">
+                                <input type="checkbox" ${channelState.document ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'document', this.checked)">
+                                문서함
+                            </label>
                             <label class="btn btn-outline" style="display:flex; align-items:center; gap:6px;">
                                 <input type="checkbox" ${checked ? 'checked' : ''} ${hasAttach ? '' : 'disabled'} onchange="toggleNoticeAttach('${approval.id}', this.checked)">
                                 첨부 포함 (${attachCount})
                             </label>
-                            ${publishButton}
+                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">채널 적용</button>
                         </div>
                     </div>
                 `;
                 container.insertAdjacentHTML('beforeend', html);
             }
         }
-
-        function buildNoticeMinuteDocNo(approval, notice) {
-            const docNo = String(approval?.doc_no || notice?.doc_no || '').trim();
-            if (docNo) return docNo;
-            const approvalId = String(approval?.id || '').trim();
-            return approvalId ? `공문-${approvalId}` : '';
-        }
-
-        async function syncNoticeToDocumentBox({ approval, notice, title, content, fileUrls, publish }) {
-            const docNo = buildNoticeMinuteDocNo(approval, notice);
-            if (!docNo) {
-                return { error: { message: '문서함 동기화 실패: 공문 식별값이 없습니다.' } };
-            }
-
-            const payload = {
-                title: String(title || approval?.title || notice?.title || '공문'),
-                content: String(content || ''),
-                doc_type: 'NOTICE',
-                doc_no: docNo,
-                receiver: approval?.receiver || null,
-                via: approval?.via || null,
-                visibility: 'MEMBERS',
-                requires_sign: false,
-                signer_ids: [],
-                status: 'OPEN',
-                author_id: currentUserId,
-                file_urls: Array.isArray(fileUrls) && fileUrls.length > 0 ? fileUrls : null,
-                published_at: publish ? new Date().toISOString() : null,
-                published_by: publish ? currentUserId : null
-            };
-
-            const { data: existing, error: findErr } = await MinutesService.findMinuteByDocNoAndType(docNo, 'NOTICE');
-            if (findErr) return { error: findErr };
-
-            if (existing?.id) {
-                const { error } = await MinutesService.updateMinute(existing.id, payload);
-                return { error: error || null };
-            }
-
-            const { error } = await MinutesService.createMinute(payload);
-            return { error: error || null };
-        }
-
-        window.publishNotice = async (id) => {
-            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
-            if (!item) return;
-            const approval = item.approval || {};
-            const notice = item.notice || null;
-            const includeAttach = !!noticeAttachMap[String(approval.id || '')];
-            let fileUrls = null;
-            if (includeAttach) {
-                if (Array.isArray(approval.file_links) && approval.file_links.length > 0) {
-                    fileUrls = approval.file_links;
-                } else if (Array.isArray(notice?.file_urls) && notice.file_urls.length > 0) {
-                    fileUrls = notice.file_urls;
-                }
-            }
-            const title = notice?.title || approval.title || '공문';
-            const content = notice?.content || buildNoticeContentFromApproval(approval);
-
-            const payload = {
-                p_id: notice?.id || null,
-                p_title: title,
-                p_content: content,
-                p_category: '공문',
-                p_status: 'published',
-                p_is_popup: notice?.is_popup || false,
-                p_file_url: notice?.file_url || null,
-                p_doc_no: approval.doc_no || notice?.doc_no || null,
-                p_file_urls: fileUrls,
-                p_file_names: notice?.file_names || null,
-                p_source_approval_id: approval.id || null
-            };
-            const { error } = await MinutesService.upsertNotice(payload);
-            if (error) {
-                showToast(error.message);
-                return;
-            }
-
-            const { error: syncErr } = await syncNoticeToDocumentBox({
-                approval,
-                notice,
-                title,
-                content,
-                fileUrls,
-                publish: true
-            });
-            if (syncErr) {
-                showToast(syncErr.message || '문서함 동기화 실패');
-                return;
-            }
-
-            showToast('게시되었습니다.');
-            loadNotices();
-            loadMinutes();
-        };
-        window.unpublishNotice = async (id) => {
-            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
-            if (!item) return;
-            const approval = item.approval || {};
-            const notice = item.notice || null;
-            if (!notice) {
-                showToast('게시된 공문이 없습니다.');
-                return;
-            }
-            const ok = await showConfirm('게시를 취소할까요?');
-            if (!ok) return;
-            const title = notice?.title || approval.title || '공문';
-            const content = notice?.content || buildNoticeContentFromApproval(approval);
-            const fileUrls = Array.isArray(notice?.file_urls) ? notice.file_urls : null;
-
-            const payload = {
-                p_id: notice?.id || null,
-                p_title: title,
-                p_content: content,
-                p_category: '공문',
-                p_status: 'draft',
-                p_is_popup: notice?.is_popup || false,
-                p_file_url: notice?.file_url || null,
-                p_doc_no: approval.doc_no || notice?.doc_no || null,
-                p_file_urls: notice?.file_urls || null,
-                p_file_names: notice?.file_names || null,
-                p_source_approval_id: approval.id || null
-            };
-            const { error } = await MinutesService.upsertNotice(payload);
-            if (error) {
-                showToast(error.message);
-                return;
-            }
-
-            const { error: syncErr } = await syncNoticeToDocumentBox({
-                approval,
-                notice,
-                title,
-                content,
-                fileUrls,
-                publish: false
-            });
-            if (syncErr) {
-                showToast(syncErr.message || '문서함 동기화 실패');
-                return;
-            }
-
-            showToast('게시가 취소되었습니다.');
-            loadNotices();
-            loadMinutes();
-        };
         function showToast(msg) {
             const toast = document.getElementById('toast');
             toast.innerText = msg;
@@ -1645,6 +1818,7 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
             allOfficials = await MinutesService.getOfficials();
             renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
             initializeMinuteEditor();
+            initializeMinuteEditModalClose();
 
             // 문서 유형 변경 시 서명 체크 기본값 조정
             const docTypeEl = document.getElementById('in-doc-type');
@@ -1708,14 +1882,21 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                     : '';
 
                 // 상태 뱃지
-                const statusLabel = m.status === 'OPEN' ? '서명 진행 중' : (m.status === 'CLOSED' ? '서명 마감' : '작성중');
+                const waitingViewMode = (m.status === 'CLOSED' && m.requires_sign && signedCount === 0);
+                const statusLabel = m.status === 'OPEN'
+                    ? '서명 진행 중'
+                    : (m.status === 'CLOSED'
+                        ? (waitingViewMode ? '열람 중' : '서명 마감')
+                        : '작성중');
                 const badge = `<span class="status-badge ${m.status === 'OPEN' ? 'badge-open' : 'badge-closed'}">${statusLabel}</span>`;
                 const publishBadge = m.published_at
                     ? `<span class="status-badge badge-open">공개중</span>`
                     : `<span class="status-badge badge-closed">비공개</span>`;
 
-                const canClose = (!m.requires_sign) || (signedCount === totalCount);
+                // 서명이 시작되지 않은 문서(0명 서명)는 운영자가 다시 대기 상태로 돌릴 수 있게 허용.
+                const canClose = (!m.requires_sign) || (signedCount === 0) || (signedCount === totalCount);
                 const canPublish = (!m.requires_sign) || (signedCount === totalCount && m.status === 'CLOSED');
+                const canEditCopy = (!m.requires_sign) || (signedCount === 0);
 
                 const html = `
                     <div class="minute-item">
@@ -1750,12 +1931,13 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
 
                         <div class="btn-group">
                             <button onclick="openMinutePreview('${m.id}')" class="btn btn-gray">🔎 미리보기</button>
+                            ${m.requires_sign ? `<button onclick="openMinuteEdit('${m.id}', ${canEditCopy})" class="btn btn-gray" ${canEditCopy ? '' : 'disabled'}>✏️ 문구 수정</button>` : ''}
                             ${m.requires_sign ? `<button onclick="openSignerEditor('${m.id}')" class="btn btn-blue">👥 서명자 수정</button>` : ''}
                             <button onclick="openAttachPicker('${m.id}')" class="btn btn-gray">📎 첨부 업로드</button>
                             ${Array.isArray(m.file_urls) && m.file_urls.length > 0 ? `<button onclick="clearAttachments('${m.id}')" class="btn btn-gray">🧹 첨부 초기화</button>` : ''}
-                            ${m.requires_sign ? (m.status === 'OPEN' 
-                                ? `<button onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>🔒 마감하기</button>`
-                                : `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">🔓 다시 열기</button>`) : ''}
+                            ${m.requires_sign ? (m.status === 'OPEN'
+                                ? `<button onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>${signedCount === 0 ? '👁️ 열람모드 전환' : '🔒 마감하기'}</button>`
+                                : `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">${signedCount === 0 ? '▶️ 서명 개시' : '🔓 다시 열기'}</button>`) : ''}
                             ${m.published_at
                                 ? `<button onclick="togglePublish('${m.id}', false)" class="btn btn-gray">🙈 공개 취소</button>`
                                 : `<button onclick="togglePublish('${m.id}', true, ${canPublish})" class="btn ${canPublish ? 'btn-blue' : 'btn-outline'}" ${canPublish ? '' : 'disabled'}>📢 공개하기</button>`
@@ -1805,7 +1987,7 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
                 via: null,
                 visibility: 'MEMBERS',
                 requires_sign: true,
-                status: 'OPEN',
+                status: 'CLOSED',
                 author_id: currentUserId,
                 file_urls: fileUrls.length ? fileUrls : null,
                 signer_ids: signerIds
@@ -1878,7 +2060,7 @@ Change: 2026-02-19 - Notice publish/unpublish now syncs to members document box 
         // [기능] 상태 변경
         window.toggleStatus = async (id, status, allow = true) => {
             if (!allow) {
-                showToast('미서명자가 있어 마감할 수 없습니다.');
+                showToast('일부 서명이 진행된 문서는 마감할 수 없습니다.');
                 return;
             }
             const { error } = await MinutesService.updateMinuteStatus(id, status);

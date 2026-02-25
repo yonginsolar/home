@@ -1,6 +1,6 @@
 /*
-Version: v1.0.26
-Change: 2026-02-19 - Hardened document-box seen RPC fallback for missing function/404 responses.
+Version: v1.0.28
+Change: 2026-02-25 - Added sign-mode list helper to include OPEN/CLOSED minutes for signature page view mode.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -310,6 +310,22 @@ async function listNoticesByApprovalIds(ids) {
     return { data: data || [], error };
 }
 
+async function listNoticeMinutesByDocNos(docNos) {
+    const safeDocNos = Array.from(
+        new Set((Array.isArray(docNos) ? docNos : [])
+            .map(v => String(v || '').trim())
+            .filter(Boolean))
+    );
+    if (safeDocNos.length === 0) return { data: [], error: null };
+    const { data, error } = await supabase
+        .from('minutes')
+        .select('id,doc_no,doc_type,published_at,status')
+        .eq('doc_type', 'NOTICE')
+        .in('doc_no', safeDocNos)
+        .order('created_at', { ascending: false });
+    return { data: data || [], error };
+}
+
 async function getApprovalsByIds(ids) {
     if (!ids || ids.length === 0) return { data: [], error: null };
     const { data, error } = await supabase
@@ -447,9 +463,18 @@ export const MinutesService = {
     async listOpenSignMinutes() {
         const { data, error } = await supabase
             .from('minutes')
-            .select('id,title,created_at,status,requires_sign')
+            .select('id,title,created_at,status,requires_sign,signer_ids,doc_type')
             .eq('requires_sign', true)
             .eq('status', 'OPEN')
+            .order('created_at', { ascending: false });
+        return { data: data || [], error };
+    },
+    async listSignModeMinutes() {
+        const { data, error } = await supabase
+            .from('minutes')
+            .select('id,title,created_at,status,requires_sign,signer_ids,doc_type')
+            .eq('requires_sign', true)
+            .in('status', ['OPEN', 'CLOSED'])
             .order('created_at', { ascending: false });
         return { data: data || [], error };
     },
@@ -460,6 +485,7 @@ export const MinutesService = {
     listApprovalNoticeDrafts,
     listCompletedNoticeApprovals,
     listNoticesByApprovalIds,
+    listNoticeMinutesByDocNos,
     getApprovalsByIds,
     upsertNotice,
     uploadMinuteFiles,
