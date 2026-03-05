@@ -1,6 +1,6 @@
 /*
-Version: v1.0.2
-Change: Avoid global redeclare by using var showAlert.
+Version: v1.0.3
+Change: Propagate PDF generation errors and allow contribution cert date override.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -60,10 +60,9 @@ if (typeof window !== 'undefined') {
  * - 도장 위치 상향 조정
  * - [UPDATE] 개인/단체 구분 및 유효성 검사 추가
  */
-async function generateContributionCert(memberData, totalAmount, certNumber, chairmanName, supabaseClient) {
+async function generateContributionCert(memberData, totalAmount, certNumber, chairmanName, supabaseClient, options = {}) {
     if (!window.jspdf) {
-        showAlert('PDF 라이브러리 로드 실패');
-        return;
+        throw new Error('PDF 라이브러리 로드 실패');
     }
 
     try {
@@ -144,8 +143,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         doc.rect(12, 12, 186, 273); // 내곽
 
         // [데이터 가공]
-        const today = new Date();
-        const dateStr = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,'0')}월 ${String(today.getDate()).padStart(2,'0')}일`;
+        const dateStr = formatKoreanDateLabel(options.issueDate) || formatKoreanDateLabel(new Date());
         
         // [UPDATE] 개인/단체 구분에 따른 라벨 및 값 설정
         let displayLabel = "생 년 월 일"; // 기본값 (개인)
@@ -250,14 +248,314 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
 
     } catch (e) {
         console.error(e);
-        // 에러 메시지를 명확히 보여줌
-        showAlert("증명서 생성 실패: " + e.message);
+        throw e;
+    }
+}
+
+/**
+ * 기부금 수령 확인서 PDF 생성
+ * criteria.mode: 'cutoff' | 'manual'
+ * criteria.cutoff_date: YYYY-MM-DD or null
+ */
+async function generateDonationReceipt(memberData, totalAmount, criteria, receiptNumber, chairmanName, supabaseClient) {
+    if (!window.jspdf) {
+        throw new Error('PDF 라이브러리 로드 실패');
+    }
+
+    try {
+        if (!totalAmount || totalAmount <= 0) {
+            throw new Error("기부금 금액이 확인되지 않습니다.");
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+
+        // (A) 폰트
+        const fontRes = await fetch('https://raw.githubusercontent.com/orioncactus/pretendard/master/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf');
+        const fontBuffer = await fontRes.arrayBuffer();
+        doc.addFileToVFS('Pretendard.ttf', arrayBufferToBase64(fontBuffer));
+        doc.addFont('Pretendard.ttf', 'Pretendard', 'normal');
+        doc.setFont('Pretendard');
+
+        // (B) 직인
+        let sealDataUrl = null;
+        try {
+            const { data: sealBlob } = await supabaseClient.storage.from('attachments').download('Official Seal.png');
+            if (sealBlob) sealDataUrl = await blobToDataURL(sealBlob);
+        } catch (e) { void 0; }
+
+        // (C) 워터마크 로고
+        let logoDataUrl = null;
+        let logoRatio = 0;
+        try {
+            const { data: logoBlob } = await supabaseClient.storage.from('assets').download('logo_length.png');
+            if (logoBlob) {
+                logoDataUrl = await blobToDataURL(logoBlob);
+                const img = new Image();
+                img.src = logoDataUrl;
+                await new Promise(r => img.onload = r);
+                logoRatio = img.height / img.width;
+            }
+        } catch (e) { void 0; }
+
+        if (logoDataUrl && logoRatio > 0) {
+            doc.saveGraphicsState();
+            doc.setGState(new doc.GState({ opacity: 0.1 }));
+            const logoW = 140;
+            const logoH = logoW * logoRatio;
+            const logoY = (297 - logoH) / 2;
+            doc.addImage(logoDataUrl, 'PNG', 35, logoY, logoW, logoH, '', 'CENTER');
+            doc.restoreGraphicsState();
+        }
+
+        // 테두리
+        doc.setLineWidth(1.5);
+        doc.rect(10, 10, 190, 277);
+        doc.setLineWidth(0.5);
+        doc.rect(12, 12, 186, 273);
+
+        const today = new Date();
+        const issueDate = `${today.getFullYear()}년 ${String(today.getMonth()+1).padStart(2,'0')}월 ${String(today.getDate()).padStart(2,'0')}일`;
+        let baseDateLabel = issueDate;
+        if (criteria && criteria.mode === 'cutoff') {
+            if (criteria.period_from && criteria.period_to) {
+                baseDateLabel = `${formatKoreanDateLabel(criteria.period_from)} ~ ${formatKoreanDateLabel(criteria.period_to)}`;
+            } else if (criteria.cutoff_date) {
+                baseDateLabel = formatKoreanDateLabel(criteria.cutoff_date);
+            }
+        }
+        const issuerInfo = await fetchReceiptIssuerInfo(supabaseClient);
+        const issuerName = issuerInfo.company_name || issuerInfo.orgName || '용인모두의햇빛협동조합';
+        const issuerBizNum = issuerInfo.bizNum || '-';
+        const issuerAddress = issuerInfo.company_address || '-';
+        const issuerContact = issuerInfo.company_contact || '-';
+
+        const idLabel = memberData.member_type === '단체' ? '법인등록번호' : '생년월일';
+        let idValue = '-';
+        if (memberData.member_type === '단체') {
+            idValue = memberData.corp_number || '-';
+        } else {
+            const rrn = String(memberData.rrn_display || '');
+            if (rrn.length >= 6) {
+                const clean = rrn.replace(/[^0-9]/g, '');
+                const yy = clean.substring(0, 2);
+                const mm = clean.substring(2, 4);
+                const dd = clean.substring(4, 6);
+                let prefix = '19';
+                if (clean.length >= 7) {
+                    const g = clean.substring(6, 7);
+                    if (g === '3' || g === '4') prefix = '20';
+                }
+                idValue = `${prefix}${yy}년 ${mm}월 ${dd}일`;
+            }
+        }
+
+        // 타이틀
+        doc.setFontSize(30);
+        doc.text("기 부 금 수 령 확 인 서", 105, 45, { align: "center" });
+
+        doc.setFontSize(12);
+        doc.text(`확인서번호 : ${receiptNumber}`, 20, 60);
+
+        doc.setFontSize(18);
+        const moneyText = `일금${numberToKorean(totalAmount)}원정 (₩${totalAmount.toLocaleString()})`;
+        doc.text(moneyText, 105, 80, { align: "center" });
+        const textWidth = doc.getTextWidth(moneyText);
+        doc.setLineWidth(0.5);
+        doc.line(105 - (textWidth/2) - 5, 85, 105 + (textWidth/2) + 5, 85);
+
+        // 표
+        const startY = 100;
+        const rowH = 14;
+        doc.rect(20, startY, 170, rowH * 5);
+        for (let i = 1; i < 5; i++) doc.line(20, startY + (rowH * i), 190, startY + (rowH * i));
+        doc.line(75, startY, 75, startY + (rowH * 5));
+
+        const drawRow = (idx, label, value) => {
+            const yPos = startY + (rowH * idx) + 9;
+            doc.setFontSize(12);
+            doc.text(label, 47.5, yPos, { align: "center" });
+            doc.text(String(value ?? '-'), 80, yPos);
+        };
+
+        drawRow(0, "조합원 번호", memberData.member_id || '-');
+        drawRow(1, memberData.member_type === '단체' ? "단   체   명" : "성        명", memberData.name || '-');
+        drawRow(2, idLabel, idValue);
+        drawRow(3, "금        액", `${Number(totalAmount).toLocaleString()} 원`);
+        drawRow(4, "기 준 일 자", baseDateLabel || '-');
+
+        const msgY = startY + (rowH * 5) + 20;
+        doc.setFontSize(14);
+        doc.text("위 금액을 수령하였음을 확인합니다.", 105, msgY, { align: "center" });
+        const recipientWord = String(memberData.member_type || '').includes('단체') ? '귀사' : '귀하';
+        const noticeText = `본 확인서는 당 조합으로 ${recipientWord}의 후원금이 정상적으로 입금되었음을 확인하는 용도로만 사용되며, 연말정산 및 법인세법에 따른 세액공제용 기부금 증빙 서류로 확인할 수 없습니다.`;
+        doc.setFontSize(10);
+        doc.text("세액공제 관련 안내는 다음 페이지를 확인해 주세요.", 105, msgY + 8, { align: "center" });
+        const issuerRows = [
+            `발급기관: ${issuerName}`,
+            `사업자등록번호: ${issuerBizNum}`
+        ];
+        if (issuerAddress && issuerAddress !== '-') issuerRows.push(`주소: ${issuerAddress}`);
+        if (issuerContact && issuerContact !== '-') issuerRows.push(`연락처: ${issuerContact}`);
+
+        const maxDateY = 258;
+        let dateY = msgY + 14;
+        if (issuerRows.length > 0) {
+            const boxX = 22;
+            const boxW = 166;
+            const boxPadX = 6;
+            const boxPadY = 4.5;
+            const lineGap = 4.8;
+            const issuerWrapped = issuerRows.flatMap((line) => doc.splitTextToSize(line, boxW - (boxPadX * 2)));
+            const boxH = (boxPadY * 2) + (issuerWrapped.length * lineGap);
+            let boxY = dateY;
+            const maxBoxY = maxDateY - boxH - 7;
+            if (boxY > maxBoxY) boxY = Math.max(msgY + 12, maxBoxY);
+
+            doc.setFillColor(248, 249, 250);
+            doc.setDrawColor(220, 223, 226);
+            doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
+            doc.setFontSize(11);
+            issuerWrapped.forEach((line, idx) => {
+                const lineY = boxY + boxPadY + 3.5 + (idx * lineGap);
+                doc.text(String(line), boxX + boxPadX, lineY);
+            });
+            dateY = boxY + boxH + 7;
+        }
+        doc.setFontSize(15);
+        if (dateY > maxDateY) dateY = maxDateY;
+        doc.text(issueDate, 105, dateY, { align: "center" });
+
+        doc.setFontSize(22);
+        const signText = `용인모두의햇빛협동조합 이사장  ${chairmanName || '이사장'}`;
+        const signY = dateY + 21;
+        doc.text(signText, 105, signY, { align: "center" });
+
+        if (sealDataUrl) {
+            const signWidth = doc.getTextWidth(signText);
+            const sealX = 105 + (signWidth / 2) - 15;
+            const sealY = signY - 14;
+            doc.addImage(sealDataUrl, 'PNG', sealX, sealY, 24, 24);
+        }
+
+        const details = Array.isArray(criteria?.details) ? criteria.details : [];
+        doc.addPage();
+        doc.setFont('Pretendard');
+        doc.setFontSize(20);
+        doc.text("기부금 수령 상세 내역", 105, 24, { align: "center" });
+
+        const fromLabel = formatKoreanDateLabel(criteria.period_from) || '-';
+        const toLabel = formatKoreanDateLabel(criteria.period_to) || '-';
+        doc.setFontSize(11);
+        doc.text(`조회기간: ${fromLabel} ~ ${toLabel}`, 20, 34);
+
+        const noticePageLines = doc.splitTextToSize(noticeText, 160);
+        const noticeBoxY = 40;
+        const noticeBoxH = 8 + (noticePageLines.length * 5.2);
+        doc.setFillColor(248, 249, 250);
+        doc.setDrawColor(220, 223, 226);
+        doc.roundedRect(20, noticeBoxY, 170, noticeBoxH, 2, 2, 'FD');
+        doc.setFontSize(10.5);
+        doc.text(noticePageLines, 25, noticeBoxY + 5.5, { lineHeightFactor: 1.35 });
+
+        if (details.length > 0) {
+            const drawDetailHeader = (y) => {
+                doc.setFillColor(245, 245, 245);
+                doc.rect(20, y, 170, 10, 'F');
+                doc.setLineWidth(0.2);
+                doc.rect(20, y, 170, 10);
+                doc.line(120, y, 120, y + 10);
+                doc.setFontSize(11);
+                doc.text('입금일', 25, y + 7);
+                doc.text('금액', 180, y + 7, { align: 'right' });
+            };
+
+            let y = noticeBoxY + noticeBoxH + 8;
+            drawDetailHeader(y);
+            y += 10;
+
+            let sum = 0;
+            details.forEach((row) => {
+                const amount = Number(row.amount || 0);
+                sum += amount;
+
+                if (y > 270) {
+                    doc.addPage();
+                    doc.setFont('Pretendard');
+                    y = 20;
+                    drawDetailHeader(y);
+                    y += 10;
+                }
+
+                const dateText = formatKoreanDateLabel(row.donation_date) || String(row.donation_date || '-');
+                doc.rect(20, y, 170, 9);
+                doc.line(120, y, 120, y + 9);
+                doc.setFontSize(11);
+                doc.text(dateText, 25, y + 6);
+                doc.text(`${amount.toLocaleString()}원`, 180, y + 6, { align: 'right' });
+                y += 9;
+            });
+
+            if (y > 270) {
+                doc.addPage();
+                doc.setFont('Pretendard');
+                y = 20;
+            }
+            doc.setFillColor(245, 245, 245);
+            doc.rect(20, y, 170, 10, 'F');
+            doc.rect(20, y, 170, 10);
+            doc.line(120, y, 120, y + 10);
+            doc.setFontSize(12);
+            doc.text('합계', 25, y + 7);
+            doc.text(`${sum.toLocaleString()}원`, 180, y + 7, { align: 'right' });
+        } else {
+            doc.setFontSize(11);
+            doc.text('해당 발급 건의 상세 내역은 없습니다.', 20, noticeBoxY + noticeBoxH + 12);
+        }
+
+        doc.save(`${memberData.name || '조합원'}_기부금수령확인서.pdf`);
+    } catch (e) {
+        console.error(e);
+        throw e;
     }
 }
 
 // ----------------------------------------------------
 // 유틸리티 함수들
 // ----------------------------------------------------
+async function fetchReceiptIssuerInfo(supabaseClient) {
+    if (!supabaseClient) return {};
+    try {
+        const { data, error } = await supabaseClient
+            .from('ref_company_info')
+            .select('key, value');
+        if (error || !Array.isArray(data)) return {};
+        const info = {};
+        data.forEach((row) => {
+            const k = String(row?.key || '').trim();
+            if (!k) return;
+            info[k] = row?.value ?? '';
+        });
+        return info;
+    } catch (_) {
+        return {};
+    }
+}
+
+function formatKoreanDateLabel(value) {
+    if (!value) return '';
+    if (typeof value === 'string') {
+        const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) return `${m[1]}년 ${m[2]}월 ${m[3]}일`;
+    }
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}년 ${m}월 ${day}일`;
+}
+
 function arrayBufferToBase64(buffer) {
     let binary = '';
     const bytes = new Uint8Array(buffer);

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.8
-Change: 2026-02-12 - Restore seal size while keeping notice content mobile-safe.
+Version: v1.0.9
+Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent signed URL expiry issues.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -107,6 +107,45 @@ Change: 2026-02-12 - Restore seal size while keeping notice content mobile-safe.
         } catch (e) {
             sealUrlCache = '';
             return '';
+        }
+    }
+
+    async function loadElectionSealUrl() {
+        const client = getClient();
+        if (!client || !client.storage) return '';
+        try {
+            const { data, error } = await client.storage
+                .from('attachments')
+                .createSignedUrl('ec_seal.png', 60 * 60);
+            if (!error && data?.signedUrl) return data.signedUrl;
+        } catch (e) { void 0; }
+        try {
+            const { data } = client.storage.from('attachments').getPublicUrl('ec_seal.png');
+            if (data?.publicUrl) return data.publicUrl;
+        } catch (e) { void 0; }
+        return '';
+    }
+
+    function refreshElectionSealInSnapshotHtml(contentHtml, sealUrl) {
+        const rawHtml = String(contentHtml || '');
+        const safeSealUrl = safeUrl(String(sealUrl || '').trim(), true);
+        if (!rawHtml || !safeSealUrl) return rawHtml;
+        if (!/<img[^>]+class=['"][^'"]*\bseal\b/i.test(rawHtml)) return rawHtml;
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(rawHtml, 'text/html');
+            const sealImgs = doc.querySelectorAll('img.seal');
+            if (!sealImgs || sealImgs.length === 0) return rawHtml;
+            sealImgs.forEach((img) => {
+                img.setAttribute('src', safeSealUrl);
+                if (!img.getAttribute('onerror')) {
+                    img.setAttribute('onerror', "this.style.display='none'");
+                }
+            });
+            return doc.body.innerHTML || rawHtml;
+        } catch (e) {
+            return rawHtml;
         }
     }
 
@@ -521,6 +560,8 @@ Change: 2026-02-12 - Restore seal size while keeping notice content mobile-safe.
         let contentHtml = '';
         if (snapshot?.content_html) {
             contentHtml = String(snapshot.content_html);
+            const electionSealUrl = await loadElectionSealUrl();
+            contentHtml = refreshElectionSealInSnapshotHtml(contentHtml, electionSealUrl);
         } else if (n.category === '공문') {
             const info = await loadCompanyInfo();
             const sealUrl = await loadSealUrl();

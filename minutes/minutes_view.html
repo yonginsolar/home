@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-    Version: v1.0.35
-    Change: 2026-02-19 - Applied notice preview template blocks (date/org/chairman/seal) in document-box detail.
+    Version: v1.0.41
+    Change: 2026-03-05 - Regulation parser now preserves card parsing when decorated HTML wrappers are mixed with tables.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.35 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.41 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -81,6 +81,73 @@
         .list-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
         .list-item a { color: #2563eb; text-decoration: none; font-weight: 700; }
+        .list-tabs { display:flex; flex-wrap:wrap; gap:8px; margin: 14px 0 6px; }
+        .list-tab-btn {
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #334155;
+            border-radius: 999px;
+            padding: 6px 14px;
+            font-size: 0.86rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .list-tab-btn.active {
+            background: #0f172a;
+            border-color: #0f172a;
+            color: #ffffff;
+        }
+        .detail-content .article-card {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+        }
+        .detail-content .article-title {
+            color: #009961;
+            font-weight: 800;
+            font-size: 1.05rem;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .detail-content .article-content {
+            font-size: 0.98rem;
+            line-height: 1.7;
+            color: #333;
+            word-break: keep-all;
+        }
+        .detail-content .chapter-title {
+            text-align: center;
+            font-size: 1.35rem;
+            font-weight: 900;
+            color: #2c3e50;
+            margin-top: 36px;
+            margin-bottom: 16px;
+            border-bottom: 3px solid #009961;
+            background: #f8f9fa;
+            padding: 12px 14px;
+            border-radius: 8px;
+        }
+        .detail-content .section-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #495057;
+            margin-top: 28px;
+            margin-bottom: 12px;
+            padding-left: 10px;
+            border-left: 4px solid #adb5bd;
+        }
+        .detail-content .addenda-title {
+            font-size: 1.18rem;
+            font-weight: 800;
+            color: #555;
+            margin-top: 40px;
+            margin-bottom: 14px;
+            padding-left: 10px;
+            border-left: 5px solid #6c757d;
+        }
     </style>
 </head>
 <body>
@@ -105,7 +172,7 @@
     </div>
 
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.26';
+        import { MinutesService } from './MinutesService.js?v=1.0.29';
         import { supabase } from '../vote/ElectionService.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -122,6 +189,12 @@
             if (docType === 'MINUTES') return '의사록';
             return '의사록';
         };
+        const DOCUMENT_LIST_TABS = [
+            { key: 'ALL', label: '전체' },
+            { key: 'MINUTES', label: '의사록' },
+            { key: 'NOTICE', label: '공문' },
+            { key: 'RULES', label: '규정' }
+        ];
         const APPROVAL_NOTICE_MEMO_START = '[[APPROVAL_NOTE]]';
         const APPROVAL_NOTICE_MEMO_END = '[[/APPROVAL_NOTE]]';
         let noticeCompanyInfo = null;
@@ -475,6 +548,9 @@
 
         let cachedSession = null;
         let cachedIsAdmin = false;
+        let publishedDocsCache = [];
+        let libraryDocsCache = [];
+        let currentDocumentListTab = 'ALL';
 
 
         function parseStorageUrl(rawUrl) {
@@ -590,6 +666,390 @@
             listPanel.innerHTML = `<div style="text-align:center; color:#64748b; padding:12px 0;">${msg}</div>`;
         }
 
+        function canReadMembersOnlyDocuments() {
+            return !!(cachedSession || cachedIsAdmin);
+        }
+
+        function inferLibraryDocAccessByTitle(title) {
+            const text = String(title || '').trim();
+            if (text.includes('규정')) return 'MEMBERS';
+            if (text.includes('정관') || text.includes('규약')) return 'PUBLIC';
+            return 'MEMBERS';
+        }
+
+        function getLibraryDocAccess(doc) {
+            const scope = String(doc?.access_scope || '').toUpperCase();
+            if (scope === 'PUBLIC' || scope === 'MEMBERS') return scope;
+            return inferLibraryDocAccessByTitle(doc?.title);
+        }
+
+        function getLibraryDocAccessLabel(doc) {
+            return getLibraryDocAccess(doc) === 'PUBLIC' ? '전체 공개' : '조합원 공개';
+        }
+
+        function canOpenLibraryDoc(doc) {
+            return getLibraryDocAccess(doc) === 'PUBLIC' || canReadMembersOnlyDocuments();
+        }
+
+        function renderLibraryDocContent(rawContent) {
+            const rawText = String(rawContent || '');
+            if (!rawText.trim()) return '<div style="color:#94a3b8;">내용이 없습니다.</div>';
+
+            const decodeHtmlEntities = (value) => {
+                const textarea = document.createElement('textarea');
+                textarea.innerHTML = String(value || '');
+                return textarea.value;
+            };
+            const decodeHtmlEntitiesDeep = (value, maxDepth = 3) => {
+                let out = String(value || '');
+                for (let i = 0; i < maxDepth; i += 1) {
+                    const decoded = decodeHtmlEntities(out);
+                    if (decoded === out) break;
+                    out = decoded;
+                }
+                return out;
+            };
+
+            const hasEncodedTag = /&lt;|&gt;|&amp;lt;|&amp;gt;|&#x3c;|&#60;/i.test(rawText);
+            const source = hasEncodedTag ? decodeHtmlEntitiesDeep(rawText) : rawText;
+            const renderTextBlock = (textBlock) => {
+                const lines = String(textBlock || '').split('\n');
+                let out = '';
+                let currentTitle = '';
+                let buffer = '';
+
+                const chapterPattern = /^제\s*\d+\s*장/;
+                const sectionPattern = /^제\s*\d+\s*절/;
+                const addendaPattern = /^부\s*칙/;
+                const articlePattern = /^제\s*\d+\s*조/;
+                const appendixPattern = /^\[\s*별\s*표\s*([0-9]+(?:-[0-9]+)?)\s*\]\s*(.*)$/;
+
+                const flushCard = () => {
+                    if (!currentTitle && !buffer) return;
+                    const safeTitle = escapeHtml(currentTitle || '');
+                    const safeBody = escapeHtml(buffer || '');
+                    let formattedBody = safeBody.replace(/\n/g, '<br>');
+                    formattedBody = formattedBody.replace(/(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)/g, '<br>$1');
+                    if (formattedBody.startsWith('<br>')) formattedBody = formattedBody.substring(4);
+                    out += `
+                        <div class="article-card">
+                            ${safeTitle ? `<span class="article-title">${safeTitle}</span>` : ''}
+                            <div class="article-content">${formattedBody}</div>
+                        </div>
+                    `;
+                    currentTitle = '';
+                    buffer = '';
+                };
+
+                lines.forEach((line) => {
+                    const trimmed = String(line || '').trim();
+                    if (!trimmed) return;
+
+                    const appendixMatch = trimmed.match(appendixPattern);
+                    if (appendixMatch) {
+                        flushCard();
+                        currentTitle = `[별표 ${appendixMatch[1]}]`;
+                        buffer = String(appendixMatch[2] || '').trim();
+                        return;
+                    }
+                    if (chapterPattern.test(trimmed)) {
+                        flushCard();
+                        out += `<div class="chapter-title">${escapeHtml(trimmed)}</div>`;
+                        return;
+                    }
+                    if (sectionPattern.test(trimmed)) {
+                        flushCard();
+                        out += `<div class="section-title">${escapeHtml(trimmed)}</div>`;
+                        return;
+                    }
+                    if (addendaPattern.test(trimmed)) {
+                        flushCard();
+                        out += `<div class="addenda-title">${escapeHtml(trimmed)}</div>`;
+                        return;
+                    }
+
+                    if (articlePattern.test(trimmed) || (trimmed.startsWith('제') && trimmed.includes('조'))) {
+                        flushCard();
+                        const parenEnd = trimmed.indexOf(')');
+                        const circleMatch = trimmed.search(/①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩/);
+                        if (parenEnd > -1 && parenEnd < trimmed.length - 1) {
+                            currentTitle = trimmed.substring(0, parenEnd + 1).trim();
+                            buffer = trimmed.substring(parenEnd + 1).trim();
+                        } else if (circleMatch > 0) {
+                            currentTitle = trimmed.substring(0, circleMatch).trim();
+                            buffer = trimmed.substring(circleMatch).trim();
+                        } else {
+                            currentTitle = trimmed;
+                            buffer = '';
+                        }
+                        return;
+                    }
+
+                    buffer += (buffer ? '\n' : '') + trimmed;
+                });
+
+                flushCard();
+                return out;
+            };
+
+            const splitMixedBlocks = (input) => {
+                const parser = new DOMParser();
+                const mixedDoc = parser.parseFromString(`<div id="__mixed_root">${String(input || '')}</div>`, 'text/html');
+                const root = mixedDoc.getElementById('__mixed_root');
+                if (!root) return [{ type: 'text', content: String(input || '') }];
+
+                const outBlocks = [];
+                let textBuffer = '';
+                const blockWrapperTags = new Set(['DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'ASIDE', 'P']);
+                const inlineTextTags = new Set(['SPAN', 'B', 'STRONG', 'EM', 'I', 'U', 'SMALL', 'SUB', 'SUP', 'MARK', 'CODE', 'A']);
+
+                const flushText = () => {
+                    const normalized = textBuffer.replace(/\r\n/g, '\n');
+                    if (normalized.trim()) outBlocks.push({ type: 'text', content: normalized });
+                    textBuffer = '';
+                };
+                const appendText = (value) => {
+                    if (value === null || value === undefined) return;
+                    textBuffer += String(value);
+                };
+                const walk = (node) => {
+                    if (!node) return;
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        appendText(node.textContent || '');
+                        return;
+                    }
+                    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+                    const tag = String(node.tagName || '').toUpperCase();
+                    if (tag === 'BR') {
+                        appendText('\n');
+                        return;
+                    }
+                    if (tag === 'TABLE') {
+                        flushText();
+                        outBlocks.push({ type: 'table', content: node.outerHTML || '' });
+                        return;
+                    }
+                    if (blockWrapperTags.has(tag)) {
+                        appendText('\n');
+                        Array.from(node.childNodes || []).forEach(walk);
+                        appendText('\n');
+                        return;
+                    }
+                    if (inlineTextTags.has(tag)) {
+                        Array.from(node.childNodes || []).forEach(walk);
+                        return;
+                    }
+
+                    flushText();
+                    outBlocks.push({ type: 'html', content: node.outerHTML || '' });
+                };
+
+                Array.from(root.childNodes || []).forEach(walk);
+                flushText();
+                if (outBlocks.length === 0) outBlocks.push({ type: 'text', content: String(input || '') });
+                return outBlocks;
+            };
+
+            const blocks = splitMixedBlocks(source);
+
+            let html = '';
+            blocks.forEach((block) => {
+                if (!block || !String(block.content || '').trim()) return;
+                if (block.type === 'table' || block.type === 'html') {
+                    const sanitizedHtmlBlock = sanitizeHtml(block.content);
+                    if (sanitizedHtmlBlock.trim()) {
+                        html += `
+                            <div class="article-card">
+                                <div class="article-content">${sanitizedHtmlBlock}</div>
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+                html += renderTextBlock(String(block.content || ''));
+            });
+
+            if (!html.trim()) return `<div style="white-space:pre-wrap;">${escapeHtml(source)}</div>`;
+            return html;
+        }
+
+        function buildDocumentListHeader() {
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.alignItems = 'center';
+            header.style.gap = '10px';
+            header.style.fontWeight = 'bold';
+            header.style.fontSize = '1.1rem';
+            header.style.color = '#0f172a';
+
+            const backBtn = document.createElement('button');
+            backBtn.className = 'btn-back';
+            backBtn.innerText = '← 뒤로가기';
+            backBtn.onclick = () => history.back();
+            header.appendChild(backBtn);
+
+            const title = document.createElement('div');
+            title.innerText = '문서함';
+            header.appendChild(title);
+            return header;
+        }
+
+        function buildDocumentListTabs() {
+            const tabsWrap = document.createElement('div');
+            tabsWrap.className = 'list-tabs';
+            DOCUMENT_LIST_TABS.forEach((tab) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `list-tab-btn${tab.key === currentDocumentListTab ? ' active' : ''}`;
+                btn.textContent = tab.label;
+                btn.onclick = () => setDocumentListTab(tab.key);
+                tabsWrap.appendChild(btn);
+            });
+            return tabsWrap;
+        }
+
+        function filterDocumentsByTab(docs, tabKey) {
+            const safeTab = String(tabKey || '').toUpperCase();
+            if (safeTab === 'NOTICE') return docs.filter((d) => String(d?.doc_type || '') === 'NOTICE');
+            if (safeTab === 'MINUTES') return docs.filter((d) => String(d?.doc_type || '') !== 'NOTICE');
+            return docs;
+        }
+
+        function renderDocumentListItems() {
+            listPanel.innerHTML = '';
+            listPanel.appendChild(buildDocumentListHeader());
+            listPanel.appendChild(buildDocumentListTabs());
+
+            if (currentDocumentListTab === 'RULES') {
+                const allRules = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []);
+                const regulationDocs = allRules.filter((doc) => getLibraryDocAccess(doc) === 'MEMBERS');
+                const visibleRegulations = regulationDocs.filter((doc) => canOpenLibraryDoc(doc));
+
+                const shortcutItem = document.createElement('div');
+                shortcutItem.className = 'list-item';
+                const shortcutWrap = document.createElement('div');
+                const shortcutTitle = document.createElement('div');
+                shortcutTitle.className = 'list-title';
+                shortcutTitle.textContent = '정관/규약 확인';
+                const shortcutSub = document.createElement('div');
+                shortcutSub.className = 'list-sub';
+                shortcutSub.textContent = '홈페이지 정관/규약 화면으로 이동';
+                shortcutWrap.appendChild(shortcutTitle);
+                shortcutWrap.appendChild(shortcutSub);
+                shortcutItem.appendChild(shortcutWrap);
+                shortcutItem.addEventListener('click', () => {
+                    window.location.href = '../rules.html';
+                });
+                listPanel.appendChild(shortcutItem);
+
+                if (!visibleRegulations.length) {
+                    const emptyEl = document.createElement('div');
+                    emptyEl.style.textAlign = 'center';
+                    emptyEl.style.color = '#64748b';
+                    emptyEl.style.padding = '24px 0';
+                    emptyEl.innerText = (regulationDocs.length > 0 && !canReadMembersOnlyDocuments())
+                        ? '조합원 공개 문서는 로그인 후 확인할 수 있습니다.'
+                        : '등록된 규정 문서가 없습니다.';
+                    listPanel.appendChild(emptyEl);
+                    return;
+                }
+
+                visibleRegulations.forEach((doc) => {
+                    const item = document.createElement('div');
+                    item.className = 'list-item';
+
+                    const textWrap = document.createElement('div');
+                    const titleEl = document.createElement('div');
+                    titleEl.className = 'list-title';
+                    titleEl.textContent = doc.title || '문서';
+
+                    const subEl = document.createElement('div');
+                    subEl.className = 'list-sub';
+                    subEl.textContent = `${formatMinutesViewKstDate(doc.event_date)} · ${getLibraryDocAccessLabel(doc)}`;
+
+                    textWrap.appendChild(titleEl);
+                    textWrap.appendChild(subEl);
+                    item.appendChild(textWrap);
+                    item.addEventListener('click', () => openLibraryDocumentById(doc.id));
+                    listPanel.appendChild(item);
+                });
+                return;
+            }
+
+            const filtered = filterDocumentsByTab(publishedDocsCache, currentDocumentListTab);
+            if (!filtered || filtered.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.style.textAlign = 'center';
+                emptyEl.style.color = '#64748b';
+                emptyEl.style.padding = '24px 0';
+                emptyEl.innerText = '선택한 탭에 공개된 문서가 없습니다.';
+                listPanel.appendChild(emptyEl);
+                return;
+            }
+
+            filtered.forEach((d) => {
+                const item = document.createElement('div');
+                item.className = 'list-item';
+
+                const textWrap = document.createElement('div');
+                const titleEl = document.createElement('div');
+                titleEl.className = 'list-title';
+                const label = getDocTypeLabel(d.doc_type);
+                titleEl.textContent = d.title ? `${label} · ${d.title}` : label;
+
+                const dateEl = document.createElement('div');
+                dateEl.className = 'list-sub';
+                dateEl.textContent = formatMinutesViewKstDate(d.created_at);
+
+                textWrap.appendChild(titleEl);
+                textWrap.appendChild(dateEl);
+
+                item.appendChild(textWrap);
+                item.addEventListener('click', () => openDocumentById(d.id));
+                listPanel.appendChild(item);
+            });
+        }
+
+        function setDocumentListTab(tabKey) {
+            const safeKey = String(tabKey || '').toUpperCase();
+            const exists = DOCUMENT_LIST_TABS.some((t) => t.key === safeKey);
+            currentDocumentListTab = exists ? safeKey : 'ALL';
+            renderDocumentListItems();
+        }
+        window.setDocumentListTab = setDocumentListTab;
+
+        async function openLibraryDocumentById(targetId) {
+            if (!targetId) return;
+            const doc = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []).find((item) => String(item?.id) === String(targetId));
+            if (!doc) {
+                showMessage('문서를 찾을 수 없거나 권한이 없습니다.');
+                return;
+            }
+            if (!canOpenLibraryDoc(doc)) {
+                showMessage('로그인이 필요합니다.');
+                return;
+            }
+
+            detailTitle.textContent = doc.title ? `문서 · ${doc.title}` : '문서';
+            detailMeta.textContent = `시행일: ${formatMinutesViewKstDate(doc.event_date)} · 공개: ${getLibraryDocAccessLabel(doc)}`;
+            detailContent.innerHTML = renderLibraryDocContent(doc.content);
+
+            const signaturesPanel = document.getElementById('signatures-panel');
+            const signaturesList = document.getElementById('signatures-list');
+            if (signaturesPanel) signaturesPanel.style.display = 'none';
+            if (signaturesList) signaturesList.innerHTML = '';
+
+            const attachmentsWrap = document.getElementById('doc-attachments');
+            const attachmentsList = document.getElementById('ui-attachments');
+            if (attachmentsWrap) attachmentsWrap.style.display = 'none';
+            if (attachmentsList) attachmentsList.innerHTML = '';
+
+            listPanel.style.display = 'none';
+            detailPanel.classList.remove('hidden');
+            document.body.style.backgroundColor = '#f1f5f9';
+        }
+
         async function openDocumentById(targetId) {
             if (!targetId) return;
             const { data: doc, error } = await MinutesService.getMinuteById(targetId);
@@ -634,51 +1094,20 @@
             detailPanel.classList.add('hidden');
             document.body.style.backgroundColor = '#f1f5f9';
 
-            const { data: docs } = await MinutesService.listPublishedMinutes();
-            if (!docs || docs.length === 0) {
+            const [{ data: docs }, { data: libraryDocs }] = await Promise.all([
+                MinutesService.listPublishedMinutes(),
+                MinutesService.listLibraryDocuments()
+            ]);
+
+            publishedDocsCache = Array.isArray(docs) ? docs : [];
+            libraryDocsCache = Array.isArray(libraryDocs) ? libraryDocs : [];
+
+            if (publishedDocsCache.length === 0 && libraryDocsCache.length === 0) {
                 showMessage('문서함에 공개된 문서가 없습니다.');
                 return;
             }
-
-            listPanel.innerHTML = '';
-            const header = document.createElement('div');
-            header.style.display = 'flex';
-            header.style.alignItems = 'center';
-            header.style.gap = '10px';
-            const backBtn = document.createElement('button');
-            backBtn.className = 'btn-back';
-            backBtn.innerText = '← 뒤로가기';
-            backBtn.onclick = () => history.back();
-            header.appendChild(backBtn);
-            header.style.fontWeight = 'bold';
-            header.style.fontSize = '1.1rem';
-            header.style.color = '#0f172a';
-            const title = document.createElement('div');
-            title.innerText = '문서함';
-            header.appendChild(title);
-            listPanel.appendChild(header);
-
-            docs.forEach(d => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-
-                const textWrap = document.createElement('div');
-                const titleEl = document.createElement('div');
-                titleEl.className = 'list-title';
-                const label = getDocTypeLabel(d.doc_type);
-                titleEl.textContent = d.title ? `${label} · ${d.title}` : label;
-
-                const dateEl = document.createElement('div');
-                dateEl.className = 'list-sub';
-                dateEl.textContent = formatMinutesViewKstDate(d.created_at);
-
-                textWrap.appendChild(titleEl);
-                textWrap.appendChild(dateEl);
-
-                item.appendChild(textWrap);
-                item.addEventListener('click', () => openDocumentById(d.id));
-                listPanel.appendChild(item);
-            });
+            currentDocumentListTab = 'ALL';
+            renderDocumentListItems();
         }
 
         async function init() {

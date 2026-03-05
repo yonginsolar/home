@@ -1,6 +1,6 @@
 /*
-Version: v1.0.28
-Change: 2026-02-25 - Added sign-mode list helper to include OPEN/CLOSED minutes for signature page view mode.
+Version: v1.0.29
+Change: 2026-03-05 - Added site document list helper for rules tab rendering with title-based access scope.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -207,6 +207,27 @@ async function getLatestPublishedMinuteAt() {
     if (error) return { data: null, error };
     const latest = Array.isArray(data) && data.length > 0 ? (data[0]?.published_at || null) : null;
     return { data: latest, error: null };
+}
+
+function inferDocumentAccessScope(title) {
+    const text = String(title || '').trim();
+    if (text.includes('규정')) return 'MEMBERS';
+    if (text.includes('정관') || text.includes('규약')) return 'PUBLIC';
+    return 'MEMBERS';
+}
+
+async function listLibraryDocuments() {
+    const { data, error } = await supabase
+        .from('site_documents')
+        .select('id,title,content,event_date,version,is_current,file_url,category')
+        .eq('category', 'doc')
+        .order('event_date', { ascending: false });
+    const rows = Array.isArray(data) ? data : [];
+    const mapped = rows.map((row) => ({
+        ...row,
+        access_scope: inferDocumentAccessScope(row?.title)
+    }));
+    return { data: mapped, error };
 }
 
 function isMissingMarkDocumentBoxSeenRpc(error) {
@@ -480,6 +501,7 @@ export const MinutesService = {
     },
     listMinutesAdmin,
     listPublishedMinutes,
+    listLibraryDocuments,
     getLatestPublishedMinuteAt,
     markDocumentBoxSeen,
     listApprovalNoticeDrafts,
