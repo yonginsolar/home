@@ -411,6 +411,38 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 1800);
         }
+        function buildListHeader() {
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.alignItems = 'center';
+            header.style.gap = '10px';
+            const backBtn = document.createElement('button');
+            backBtn.className = 'btn-back';
+            backBtn.innerText = '← 뒤로가기';
+            backBtn.onclick = () => history.back();
+            header.appendChild(backBtn);
+            const title = document.createElement('div');
+            title.style.fontWeight = 'bold';
+            title.style.fontSize = '1.1rem';
+            title.style.color = '#0f172a';
+            title.innerText = '서명/열람 문서';
+            header.appendChild(title);
+            return header;
+        }
+        function appendListMessage(container, message, color = '#64748b') {
+            const msg = document.createElement('div');
+            msg.style.marginTop = '12px';
+            msg.style.color = color;
+            msg.innerText = message;
+            container.appendChild(msg);
+        }
+        function renderListError(message = '문서를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.') {
+            const listPanel = document.getElementById('list-panel');
+            if (!listPanel) return;
+            listPanel.innerHTML = '';
+            listPanel.appendChild(buildListHeader());
+            appendListMessage(listPanel, message, '#b91c1c');
+        }
         function showConfirm(msg) {
             document.getElementById('confirmText').innerText = msg;
             document.getElementById('confirmModal').classList.add('show');
@@ -456,110 +488,96 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
         async function loadSignList() {
             const listPanel = document.getElementById('list-panel');
             listPanel.innerHTML = '';
+            listPanel.appendChild(buildListHeader());
 
-            const header = document.createElement('div');
-            header.style.display = 'flex';
-            header.style.alignItems = 'center';
-            header.style.gap = '10px';
-            const backBtn = document.createElement('button');
-            backBtn.className = 'btn-back';
-            backBtn.innerText = '← 뒤로가기';
-            backBtn.onclick = () => history.back();
-            header.appendChild(backBtn);
-            const title = document.createElement('div');
-            title.style.fontWeight = 'bold';
-            title.style.fontSize = '1.1rem';
-            title.style.color = '#0f172a';
-            title.innerText = '서명/열람 문서';
-            header.appendChild(title);
-            listPanel.appendChild(header);
+            try {
+                if (!myOfficialId && !isAdminUser) {
+                    appendListMessage(listPanel, '임원 전용 페이지입니다. 임원 본인 계정으로 로그인하세요.');
+                    return;
+                }
 
-            if (!myOfficialId && !isAdminUser) {
-                const msg = document.createElement('div');
-                msg.style.marginTop = '12px';
-                msg.style.color = '#64748b';
-                msg.innerText = '임원 전용 페이지입니다. 임원 계정으로 로그인하세요.';
-                listPanel.appendChild(msg);
-                return;
-            }
+                const signModeMinutes = (await MinutesService.listSignModeMinutes()).data || [];
+                let targets = Array.isArray(signModeMinutes) ? signModeMinutes : [];
 
-            const signModeMinutes = (await MinutesService.listSignModeMinutes()).data || [];
-            let targets = Array.isArray(signModeMinutes) ? signModeMinutes : [];
+                if (myOfficialId) {
+                    const officials = await MinutesService.getOfficials();
+                    const directors = sortDirectorOrder((officials || []).filter(isDirectorRole));
+                    const delegates = (officials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
+                    const directorIds = directors.map(o => String(o.id));
+                    const delegateIds = delegates.map(o => String(o.id));
+                    targets = targets.filter(t => {
+                        if (t.doc_type === 'MINUTES' || t.doc_type === 'GENERAL_ASSEMBLY') {
+                            const fallbackIds = (t.doc_type === 'GENERAL_ASSEMBLY') ? delegateIds : directorIds;
+                            const signerIds = (Array.isArray(t.signer_ids) && t.signer_ids.length > 0)
+                                ? t.signer_ids.map(id => String(id))
+                                : fallbackIds;
+                            return signerIds.includes(String(myOfficialId));
+                        }
+                        return true;
+                    });
+                }
 
-            if (myOfficialId) {
-                const officials = await MinutesService.getOfficials();
-                const directors = sortDirectorOrder((officials || []).filter(isDirectorRole));
-                const delegates = (officials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
-                const directorIds = directors.map(o => String(o.id));
-                const delegateIds = delegates.map(o => String(o.id));
-                targets = targets.filter(t => {
-                    if (t.doc_type === 'MINUTES' || t.doc_type === 'GENERAL_ASSEMBLY') {
-                        const fallbackIds = (t.doc_type === 'GENERAL_ASSEMBLY') ? delegateIds : directorIds;
-                        const signerIds = (Array.isArray(t.signer_ids) && t.signer_ids.length > 0)
-                            ? t.signer_ids.map(id => String(id))
-                            : fallbackIds;
-                        return signerIds.includes(String(myOfficialId));
-                    }
-                    return true;
+                if (targets.length === 0) {
+                    appendListMessage(listPanel, '현재 열람/서명 가능한 문서가 없습니다.');
+                    return;
+                }
+
+                const minuteIds = targets.map(m => m.id);
+                const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
+                const signedMap = new Map((sigList || []).map(s => [String(s.minute_id) + ':' + String(s.official_id), true]));
+
+                targets.forEach(m => {
+                    const item = document.createElement('div');
+                    item.className = 'list-item';
+
+                    const textWrap = document.createElement('div');
+                    const titleEl = document.createElement('div');
+                    titleEl.className = 'list-title';
+                    const label = getDocTypeLabel(m.doc_type);
+                    titleEl.textContent = m.title ? `${label} · ${m.title}` : label;
+
+                    const dateEl = document.createElement('div');
+                    dateEl.className = 'list-sub';
+                    const isSigned = myOfficialId ? (signedMap.get(String(m.id) + ':' + String(myOfficialId)) || isLocallySigned(m.id)) : false;
+                    const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
+                    dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${isSigned ? '서명완료' : '미서명'}`;
+
+                    textWrap.appendChild(titleEl);
+                    textWrap.appendChild(dateEl);
+
+                    item.appendChild(textWrap);
+                    item.addEventListener('click', () => openDocumentById(m.id));
+                    listPanel.appendChild(item);
                 });
+            } catch (err) {
+                console.error('minutes_sign loadSignList error:', err);
+                renderListError('서명 문서 목록을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
             }
-
-            if (targets.length === 0) {
-                const msg = document.createElement('div');
-                msg.style.marginTop = '12px';
-                msg.style.color = '#64748b';
-                msg.innerText = '현재 열람/서명 가능한 문서가 없습니다.';
-                listPanel.appendChild(msg);
-                return;
-            }
-
-            const minuteIds = targets.map(m => m.id);
-            const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
-            const signedMap = new Map((sigList || []).map(s => [String(s.minute_id) + ':' + String(s.official_id), true]));
-
-            targets.forEach(m => {
-                const item = document.createElement('div');
-                item.className = 'list-item';
-
-                const textWrap = document.createElement('div');
-                const titleEl = document.createElement('div');
-                titleEl.className = 'list-title';
-                const label = getDocTypeLabel(m.doc_type);
-                titleEl.textContent = m.title ? `${label} · ${m.title}` : label;
-
-                const dateEl = document.createElement('div');
-                dateEl.className = 'list-sub';
-                const isSigned = myOfficialId ? (signedMap.get(String(m.id) + ':' + String(myOfficialId)) || isLocallySigned(m.id)) : false;
-                const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
-                dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${isSigned ? '서명완료' : '미서명'}`;
-
-                textWrap.appendChild(titleEl);
-                textWrap.appendChild(dateEl);
-
-                item.appendChild(textWrap);
-                item.addEventListener('click', () => openDocumentById(m.id));
-                listPanel.appendChild(item);
-            });
         }
 
 async function openDocumentById(id) {
-            const { data: doc } = await MinutesService.getMinuteById(id);
-            if (!doc) {
-                showToast('문서를 찾을 수 없습니다.');
-                return;
+            try {
+                const { data: doc } = await MinutesService.getMinuteById(id);
+                if (!doc) {
+                    showToast('문서를 찾을 수 없습니다.');
+                    return;
+                }
+                currentMinuteId = id;
+
+                document.getElementById('detail-title').textContent = doc.title
+                    ? `${getDocTypeLabel(doc.doc_type)} · ${doc.title}`
+                    : getDocTypeLabel(doc.doc_type);
+                document.getElementById('detail-meta').textContent = `작성일: ${formatMinutesSignKstDate(doc.created_at)}`;
+                document.getElementById('detail-content').innerHTML = sanitizeHtml(doc.content || '');
+
+                await updateSignStatus(doc);
+
+                document.getElementById('list-panel').style.display = 'none';
+                document.getElementById('detail-panel').classList.remove('hidden');
+            } catch (err) {
+                console.error('minutes_sign openDocumentById error:', err);
+                showToast('문서 내용을 불러오지 못했습니다.');
             }
-            currentMinuteId = id;
-
-            document.getElementById('detail-title').textContent = doc.title
-                ? `${getDocTypeLabel(doc.doc_type)} · ${doc.title}`
-                : getDocTypeLabel(doc.doc_type);
-            document.getElementById('detail-meta').textContent = `작성일: ${formatMinutesSignKstDate(doc.created_at)}`;
-            document.getElementById('detail-content').innerHTML = sanitizeHtml(doc.content || '');
-
-            await updateSignStatus(doc);
-
-            document.getElementById('list-panel').style.display = 'none';
-            document.getElementById('detail-panel').classList.remove('hidden');
         }
 
         async function updateSignStatus(doc) {
@@ -735,9 +753,15 @@ async function openDocumentById(id) {
         };
 
         async function init() {
-            const ok = await initSession();
-            if (!ok) return;
-            await loadSignList();
+            try {
+                const ok = await initSession();
+                if (!ok) return;
+                await loadSignList();
+            } catch (err) {
+                console.error('minutes_sign init error:', err);
+                renderListError('전자서명 화면을 초기화하지 못했습니다. 잠시 후 다시 시도해주세요.');
+                showToast('전자서명 화면 로딩 실패');
+            }
         }
 
         init();

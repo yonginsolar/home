@@ -1,6 +1,6 @@
 /*
-Version: v1.0.29
-Change: 2026-03-05 - Added site document list helper for rules tab rendering with title-based access scope.
+Version: v1.0.30
+Change: 2026-03-12 - Fallback to auth-linked personal member when active profile is a group/non-official account on e-sign pages.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -66,28 +66,43 @@ async function getMemberByKakaoId(kakaoId) {
     return data || null;
 }
 
-async function resolveMember(uid, sessionOverride = null) {
+function getActiveProfileId() {
+    try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+            return window.sessionStorage.getItem('lastActiveProfile');
+        }
+    } catch (e) { void 0; }
+    return null;
+}
+
+function getSessionMemberIdMeta(user) {
+    return user?.user_metadata?.member_id || user?.user_metadata?.memberId || null;
+}
+
+function getSessionKakaoId(user) {
+    return user?.identities?.find(i => i.provider === 'kakao')?.id || user?.user_metadata?.kakao_id || null;
+}
+
+async function resolveMember(uid, sessionOverride = null, options = {}) {
     const session = sessionOverride || await getSession();
     const user = session?.user || null;
     const resolvedUid = uid || user?.id || null;
+    const includeActiveProfile = options.includeActiveProfile !== false;
 
     // 1) membermanage에서 선택한 활성 프로필(uuid)
-    let activeProfileId = null;
-    try {
-        if (typeof window !== 'undefined' && window.sessionStorage) {
-            activeProfileId = window.sessionStorage.getItem('lastActiveProfile');
-        }
-    } catch (e) { void 0; }
-    const byProfile = await getMemberByProfileId(activeProfileId);
-    if (byProfile) return byProfile;
+    if (includeActiveProfile) {
+        const activeProfileId = getActiveProfileId();
+        const byProfile = await getMemberByProfileId(activeProfileId);
+        if (byProfile) return byProfile;
+    }
 
     // 2) auth 세션 메타데이터의 member_id(text)
-    const memberIdMeta = user?.user_metadata?.member_id || user?.user_metadata?.memberId || null;
+    const memberIdMeta = getSessionMemberIdMeta(user);
     const byMemberId = await getMemberByMemberId(memberIdMeta);
     if (byMemberId) return byMemberId;
 
     // 3) 카카오 identity id 매칭
-    const kakaoId = user?.identities?.find(i => i.provider === 'kakao')?.id || user?.user_metadata?.kakao_id || null;
+    const kakaoId = getSessionKakaoId(user);
     const byKakao = await getMemberByKakaoId(kakaoId);
     if (byKakao) return byKakao;
 
@@ -130,7 +145,16 @@ async function getMyOfficial(session) {
     if (!session?.user) return { member: null, official: null };
     const member = await resolveMember(session.user.id, session);
     const official = await getOfficialByMemberId(member?.member_id);
-    return { member, official };
+    if (member && official) return { member, official };
+
+    // 전자서명은 임원 본인 기준으로 동작해야 하므로,
+    // 활성 프로필이 단체/가족 계정이면 auth에 묶인 개인 계정으로 한 번 더 찾는다.
+    const authMember = await resolveMember(session.user.id, session, { includeActiveProfile: false });
+    const authOfficial = await getOfficialByMemberId(authMember?.member_id);
+    return {
+        member: authMember || member || null,
+        official: authOfficial || official || null
+    };
 }
 
 async function getOfficials() {
