@@ -1173,6 +1173,10 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             return (off.role || off.position || off.category || '').trim();
         }
 
+        function escapeRegExp(value) {
+            return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
         function isDirectorRole(off) {
             const label = getRoleLabel(off);
             if (!label) return false;
@@ -1333,6 +1337,154 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             `;
         }
 
+        async function buildMinuteSignaturePrintHtml(minute, signatures) {
+            if (!minute || !minute.requires_sign || minute.doc_type === 'NOTICE') return '';
+
+            const requiredIds = getRequiredSignerIds(minute);
+            if (requiredIds.length === 0) return '';
+
+            const sigRows = Array.isArray(signatures) ? signatures : [];
+            const sigMap = new Map(sigRows.map(row => [String(row.official_id), row]));
+            const items = await Promise.all(requiredIds.map(async (id) => {
+                const off = (allOfficials || []).find(o => String(o.id) === String(id));
+                const safeName = escapeHtml(off?.name || '임원');
+                const safeRole = escapeHtml(getRoleLabel(off) || '');
+                const sig = sigMap.get(String(id));
+                const isSigned = !!sig;
+
+                let imgHtml = '<div style="width:56px; height:56px; border:1px solid #d1d5db; border-radius:50%; background:#fff;"></div>';
+                if (sig?.signature_url) {
+                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    if (signedUrl) {
+                        imgHtml = `<img src="${signedUrl}" alt="서명" style="width:56px; height:56px; border-radius:50%; border:1px solid #d1d5db; object-fit:contain; background:#fff;">`;
+                    }
+                }
+
+                return `
+                    <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #e5e7eb;">
+                        ${imgHtml}
+                        <div style="font-size:14px; color:#111827; font-weight:700;">
+                            ${safeName}${safeRole ? ` (${safeRole})` : ''}
+                            <span style="font-size:12px; font-weight:600; color:${isSigned ? '#166534' : '#64748b'}; margin-left:8px;">${isSigned ? '서명 완료' : '미서명'}</span>
+                        </div>
+                    </div>
+                `;
+            }));
+
+            return `
+                <div style="margin-top:28px;">
+                    <h3 style="margin:0 0 12px; font-size:16px; color:#111827;">서명 현황</h3>
+                    <div>
+                        ${items.join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function buildCompactOfficialName(value) {
+            return String(value || '').replace(/\s+/g, '').trim();
+        }
+
+        function buildSpacedOfficialName(value) {
+            const compact = buildCompactOfficialName(value);
+            return compact ? compact.split('').join(' ') : '';
+        }
+
+        async function injectInlineSignatureImages(contentHtml, minute, signatures) {
+            if (!minute || !minute.requires_sign || minute.doc_type === 'NOTICE') return contentHtml;
+            const html = String(contentHtml || '');
+            if (!html) return html;
+
+            const requiredIds = getRequiredSignerIds(minute);
+            if (!requiredIds.length) return html;
+
+            const sigRows = Array.isArray(signatures) ? signatures : [];
+            const sigMap = new Map(sigRows.map(row => [String(row.official_id), row]));
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const signatureBlocks = Array.from(doc.querySelectorAll('div')).filter((el) => {
+                const text = buildCompactOfficialName(el.textContent || '');
+                return text.includes('의장이사장') || text.includes('용인모두의햇빛협동조합의장이사장');
+            });
+            const block = signatureBlocks.at(-1);
+            if (!block) return html;
+
+            const templateSpan = block.querySelector('span');
+            const spanStyle = templateSpan?.getAttribute('style') || 'display: inline-block; width: 100px; font-weight: bold; text-align: right; margin-right: 15px;';
+
+            const lineHtml = [];
+            for (const id of requiredIds) {
+                const off = (allOfficials || []).find(o => String(o.id) === String(id));
+                if (!off) continue;
+
+                const roleLabel = String(getRoleLabel(off) || '').includes('이사장') ? '의장 이사장' : (getRoleLabel(off) || '이사');
+                const displayName = buildSpacedOfficialName(off?.name) || escapeHtml(off?.name || '임원');
+                const sig = sigMap.get(String(id));
+
+                let imgHtml = '';
+                if (sig?.signature_url) {
+                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    if (signedUrl) {
+                        imgHtml = ` <img src="${escapeHtml(signedUrl)}" alt="서명" style="width:56px; height:56px; object-fit:contain; vertical-align:middle; margin-left:8px;">`;
+                    }
+                }
+
+                lineHtml.push(`<span style="${escapeHtml(spanStyle)}">${escapeHtml(roleLabel)}</span> ${escapeHtml(displayName)}${imgHtml}<br>`);
+            }
+
+            if (!lineHtml.length) return html;
+            block.innerHTML = lineHtml.join('');
+            return doc.body.innerHTML;
+        }
+
+        async function buildPrintableMinuteHtml(minute, signatures) {
+            const title = escapeHtml(minute?.title || '의사록');
+            const typeLabel = escapeHtml(getDocTypeLabel(minute?.doc_type));
+            const dateLabel = escapeHtml(formatMinutesAdminKstDate(minute?.created_at));
+            let bodyHtml = minute?.content
+                ? sanitizeHtml(normalizeMinuteContent(minute.content))
+                : '<div style="color:#64748b;">내용이 없습니다.</div>';
+            bodyHtml = await injectInlineSignatureImages(bodyHtml, minute, signatures || []);
+
+            return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>${title}</title>
+    <style>
+        body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; margin: 32px; color: #111827; }
+        .meta { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+        .content { line-height: 1.8; font-size: 14px; }
+        img { max-width: 100%; }
+        @media print {
+            body { margin: 18mm; }
+        }
+    </style>
+</head>
+<body>
+    <h1 style="margin:0 0 10px; font-size:24px;">${title}</h1>
+    <div class="meta">${typeLabel} | 작성일 ${dateLabel}</div>
+    <div class="content">${bodyHtml}</div>
+</body>
+</html>`;
+        }
+
+        async function waitForPrintWindowImages(printWindow, timeoutMs = 3000) {
+            try {
+                const imgs = Array.from(printWindow.document.images || []);
+                if (imgs.length === 0) return;
+                await Promise.race([
+                    Promise.all(imgs.map((img) => new Promise((resolve) => {
+                        if (img.complete) return resolve();
+                        const done = () => resolve();
+                        img.addEventListener('load', done, { once: true });
+                        img.addEventListener('error', done, { once: true });
+                    }))),
+                    new Promise((resolve) => setTimeout(resolve, timeoutMs))
+                ]);
+            } catch (e) { void 0; }
+        }
+
         async function openNoticePreview(id) {
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
             if (!item) return;
@@ -1378,6 +1530,34 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
                 ${signatureHtml}
             `;
             document.getElementById('minutePreviewModal').classList.add('show');
+        };
+        window.printMinute = async (id) => {
+            let minute = minutesCache?.get(id);
+            if (!minute) {
+                const { data, error } = await MinutesService.getMinuteById(id);
+                if (error || !data) {
+                    showToast('의사록 정보를 불러오지 못했습니다.');
+                    return;
+                }
+                minute = data;
+                minutesCache.set(id, minute);
+            }
+
+            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(id);
+            const html = await buildPrintableMinuteHtml(minute, signatures || []);
+            const printWindow = window.open('', '_blank', 'width=960,height=900');
+            if (!printWindow) {
+                showToast('팝업이 차단되어 출력 창을 열지 못했습니다.');
+                return;
+            }
+            printWindow.document.open();
+            printWindow.document.write(html);
+            printWindow.document.close();
+            printWindow.focus();
+            await waitForPrintWindowImages(printWindow);
+            try {
+                printWindow.print();
+            } catch (e) { void 0; }
         };
         window.closeMinutePreview = () => {
             document.getElementById('minutePreviewModal').classList.remove('show');
@@ -1898,6 +2078,7 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
                 const canClose = (!m.requires_sign) || (signedCount === 0) || (signedCount === totalCount);
                 const canPublish = (!m.requires_sign) || (signedCount === totalCount && m.status === 'CLOSED');
                 const canEditCopy = (!m.requires_sign) || (signedCount === 0);
+                const isSignatureCompleted = !!(m.requires_sign && m.status === 'CLOSED' && totalCount > 0 && signedCount === totalCount);
 
                 const html = `
                     <div class="minute-item">
@@ -1932,13 +2113,14 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
 
                         <div class="btn-group">
                             <button onclick="openMinutePreview('${m.id}')" class="btn btn-gray">🔎 미리보기</button>
-                            ${m.requires_sign ? `<button onclick="openMinuteEdit('${m.id}', ${canEditCopy})" class="btn btn-gray" ${canEditCopy ? '' : 'disabled'}>✏️ 문구 수정</button>` : ''}
-                            ${m.requires_sign ? `<button onclick="openSignerEditor('${m.id}')" class="btn btn-blue">👥 서명자 수정</button>` : ''}
+                            ${canEditCopy ? `<button onclick="openMinuteEdit('${m.id}', true)" class="btn btn-gray">✏️ 문구 수정</button>` : ''}
+                            ${m.requires_sign && signedCount === 0 ? `<button onclick="openSignerEditor('${m.id}')" class="btn btn-blue">👥 서명자 수정</button>` : ''}
                             <button onclick="openAttachPicker('${m.id}')" class="btn btn-gray">📎 첨부 업로드</button>
                             ${Array.isArray(m.file_urls) && m.file_urls.length > 0 ? `<button onclick="clearAttachments('${m.id}')" class="btn btn-gray">🧹 첨부 초기화</button>` : ''}
                             ${m.requires_sign ? (m.status === 'OPEN'
                                 ? `<button onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>${signedCount === 0 ? '👁️ 열람모드 전환' : '🔒 마감하기'}</button>`
-                                : `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">${signedCount === 0 ? '▶️ 서명 개시' : '🔓 다시 열기'}</button>`) : ''}
+                                : `${signedCount === 0 ? `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">▶️ 서명 개시</button>` : ''}`) : ''}
+                            ${isSignatureCompleted ? `<button onclick="printMinute('${m.id}')" class="btn btn-blue">🖨️ 출력</button>` : ''}
                             ${m.published_at
                                 ? `<button onclick="togglePublish('${m.id}', false)" class="btn btn-gray">🙈 공개 취소</button>`
                                 : `<button onclick="togglePublish('${m.id}', true, ${canPublish})" class="btn ${canPublish ? 'btn-blue' : 'btn-outline'}" ${canPublish ? '' : 'disabled'}>📢 공개하기</button>`
