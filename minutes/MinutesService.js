@@ -1,6 +1,6 @@
 /*
-Version: v1.0.30
-Change: 2026-03-12 - Fallback to auth-linked personal member when active profile is a group/non-official account on e-sign pages.
+Version: v1.0.31
+Change: 2026-03-13 - Return active official rows set for e-sign pages so executive/delegate overlap does not hide signable documents.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -126,34 +126,57 @@ async function isAdmin(uid, email) {
     return (member?.role === 'admin') || !!adminRow;
 }
 
-async function getOfficialByMemberId(memberId) {
-    if (!memberId) return null;
+async function getOfficialsByMemberId(memberId) {
+    if (!memberId) return [];
     const { data, error } = await supabase
         .from('coop_officials')
-        .select('id, seal_url')
+        .select('id, seal_url, role, category, status')
         .eq('member_id', memberId)
         .eq('status', 'active')
         .order('id', { ascending: false });
-    if (error || !Array.isArray(data) || data.length === 0) return null;
+    if (error || !Array.isArray(data) || data.length === 0) return [];
+    return data;
+}
 
-    // If multiple rows exist for the same member (multiple roles/terms), prefer one that has a seal image.
-    const withSeal = data.find(row => row && row.seal_url);
-    return withSeal || data[0] || null;
+function pickPrimaryOfficial(officials) {
+    const safeOfficials = Array.isArray(officials) ? officials.filter(Boolean) : [];
+    if (safeOfficials.length === 0) return null;
+
+    const ranked = [...safeOfficials].sort((a, b) => {
+        const aExecutive = String(a.category || '').toLowerCase() === 'executive' ? 0 : 1;
+        const bExecutive = String(b.category || '').toLowerCase() === 'executive' ? 0 : 1;
+        if (aExecutive !== bExecutive) return aExecutive - bExecutive;
+
+        const aChair = String(a.role || '').includes('이사장') ? 0 : 1;
+        const bChair = String(b.role || '').includes('이사장') ? 0 : 1;
+        if (aChair !== bChair) return aChair - bChair;
+
+        const aSeal = a.seal_url ? 0 : 1;
+        const bSeal = b.seal_url ? 0 : 1;
+        if (aSeal !== bSeal) return aSeal - bSeal;
+
+        return Number(a.id || 0) - Number(b.id || 0);
+    });
+
+    return ranked[0] || null;
 }
 
 async function getMyOfficial(session) {
-    if (!session?.user) return { member: null, official: null };
+    if (!session?.user) return { member: null, official: null, officials: [] };
     const member = await resolveMember(session.user.id, session);
-    const official = await getOfficialByMemberId(member?.member_id);
-    if (member && official) return { member, official };
+    const officials = await getOfficialsByMemberId(member?.member_id);
+    const official = pickPrimaryOfficial(officials);
+    if (member && official) return { member, official, officials };
 
     // 전자서명은 임원 본인 기준으로 동작해야 하므로,
     // 활성 프로필이 단체/가족 계정이면 auth에 묶인 개인 계정으로 한 번 더 찾는다.
     const authMember = await resolveMember(session.user.id, session, { includeActiveProfile: false });
-    const authOfficial = await getOfficialByMemberId(authMember?.member_id);
+    const authOfficials = await getOfficialsByMemberId(authMember?.member_id);
+    const authOfficial = pickPrimaryOfficial(authOfficials);
     return {
         member: authMember || member || null,
-        official: authOfficial || official || null
+        official: authOfficial || official || null,
+        officials: authOfficials.length > 0 ? authOfficials : officials
     };
 }
 
@@ -482,10 +505,10 @@ async function insertSignature(payload) {
 
 async function deleteSignature(minuteId, officialId) {
     if (!minuteId || !officialId) return { error: { message: 'missing ids' } };
-    return await supabase.from('doc_signatures')
-        .delete()
-        .eq('minute_id', minuteId)
-        .eq('official_id', officialId);
+    return await supabase.rpc('cancel_my_signature', {
+        p_minute_id: minuteId,
+        p_official_id: officialId
+    });
 }
 
 async function createSignedUrl(bucket, path, expiresIn = 3600) {
@@ -548,5 +571,6 @@ export const MinutesService = {
     togglePublish,
     deleteMinute,
     insertSignature,
+    deleteSignature,
     createSignedUrl
 };

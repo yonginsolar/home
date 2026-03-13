@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.8
-Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting documents.
+Version: v1.2.9
+Change: 2026-03-13 - Use all active official rows for sign visibility so executive/delegate overlap does not hide documents.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.8 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.9 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -140,7 +140,7 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
     </div>
 
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.28';
+        import { MinutesService } from './MinutesService.js?v=1.0.31';
         import { supabase } from '../vote/ElectionService.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -158,6 +158,10 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
         };
 
         let myOfficialId = null;
+        let myOfficialRows = [];
+        let myOfficialIds = [];
+        let myExecutiveOfficialIds = [];
+        let myDelegateOfficialIds = [];
         let mySealUrl = null;
         let myName = null;
         let myAuthId = null;
@@ -276,6 +280,63 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
             const directors = list.filter(o => getRoleLabel(o) === '이사');
             directors.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
             return [...chairman, ...directors];
+        }
+
+        function normalizeOfficialIds(values) {
+            return Array.from(new Set((Array.isArray(values) ? values : [])
+                .map(value => String(value || '').trim())
+                .filter(Boolean)));
+        }
+
+        function getRelevantOfficialIdsForDoc(doc) {
+            const docType = String(doc?.doc_type || '').toUpperCase();
+            if (docType === 'MINUTES') {
+                return myExecutiveOfficialIds.length > 0 ? myExecutiveOfficialIds : myOfficialIds;
+            }
+            if (docType === 'GENERAL_ASSEMBLY') {
+                return myDelegateOfficialIds.length > 0 ? myDelegateOfficialIds : myOfficialIds;
+            }
+            return myOfficialIds;
+        }
+
+        function getAllMyOfficialIdsForDocFallback(doc) {
+            const relevantIds = getRelevantOfficialIdsForDoc(doc);
+            return relevantIds.length > 0 ? relevantIds : myOfficialIds;
+        }
+
+        function resolveSignerIdsForDoc(doc, officials) {
+            const safeOfficials = Array.isArray(officials) ? officials : [];
+            const explicitSignerIds = normalizeOfficialIds(doc?.signer_ids);
+            if (explicitSignerIds.length > 0) return explicitSignerIds;
+
+            const docType = String(doc?.doc_type || '').toUpperCase();
+            const directors = sortDirectorOrder(safeOfficials.filter(isDirectorRole));
+            const delegates = safeOfficials.filter(o => String(o.category || '').toLowerCase() === 'delegate');
+            if (docType === 'GENERAL_ASSEMBLY') return normalizeOfficialIds(delegates.map(o => o.id));
+            if (docType === 'MINUTES') return normalizeOfficialIds(directors.map(o => o.id));
+            return normalizeOfficialIds(safeOfficials.map(o => o.id));
+        }
+
+        function resolveSigningOfficialId(doc, officials) {
+            const signerIds = resolveSignerIdsForDoc(doc, officials);
+            const preferredIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(doc));
+            return signerIds.find(id => preferredIds.includes(String(id)))
+                || preferredIds[0]
+                || null;
+        }
+
+        function hasMySignatureForDoc(signatures) {
+            if (!Array.isArray(signatures) || myOfficialIds.length === 0) return false;
+            return signatures.some(sig => myOfficialIds.includes(String(sig?.official_id || '').trim()));
+        }
+
+        function findMySignatureForDoc(signatures, doc) {
+            if (!Array.isArray(signatures) || signatures.length === 0) return null;
+            const relevantIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(doc));
+            const allIds = normalizeOfficialIds(myOfficialIds);
+            return signatures.find(sig => relevantIds.includes(String(sig?.official_id || '').trim()))
+                || signatures.find(sig => allIds.includes(String(sig?.official_id || '').trim()))
+                || null;
         }
 
 
@@ -476,11 +537,23 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
             myAuthId = session.user.id;
             isAdminUser = await MinutesService.isAdmin(session.user.id, session.user.email);
 
-            const { member, official } = await MinutesService.getMyOfficial(session);
+            const { member, official, officials } = await MinutesService.getMyOfficial(session);
             if (member) myName = member.name;
+            myOfficialRows = Array.isArray(officials) ? officials : [];
+            myOfficialIds = normalizeOfficialIds(myOfficialRows.map(row => row.id));
+            myExecutiveOfficialIds = normalizeOfficialIds(
+                myOfficialRows
+                    .filter(row => String(row?.category || '').toLowerCase() === 'executive')
+                    .map(row => row.id)
+            );
+            myDelegateOfficialIds = normalizeOfficialIds(
+                myOfficialRows
+                    .filter(row => String(row?.category || '').toLowerCase() === 'delegate')
+                    .map(row => row.id)
+            );
             if (official) {
                 myOfficialId = official.id;
-                mySealUrl = official.seal_url;
+                mySealUrl = official.seal_url || (myOfficialRows.find(row => row?.seal_url)?.seal_url || null);
             }
             return true;
         }
@@ -491,7 +564,7 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
             listPanel.appendChild(buildListHeader());
 
             try {
-                if (!myOfficialId && !isAdminUser) {
+                if (myOfficialIds.length === 0 && !isAdminUser) {
                     appendListMessage(listPanel, '임원 전용 페이지입니다. 임원 본인 계정으로 로그인하세요.');
                     return;
                 }
@@ -499,19 +572,13 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
                 const signModeMinutes = (await MinutesService.listSignModeMinutes()).data || [];
                 let targets = Array.isArray(signModeMinutes) ? signModeMinutes : [];
 
-                if (myOfficialId) {
+                if (myOfficialIds.length > 0) {
                     const officials = await MinutesService.getOfficials();
-                    const directors = sortDirectorOrder((officials || []).filter(isDirectorRole));
-                    const delegates = (officials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
-                    const directorIds = directors.map(o => String(o.id));
-                    const delegateIds = delegates.map(o => String(o.id));
                     targets = targets.filter(t => {
                         if (t.doc_type === 'MINUTES' || t.doc_type === 'GENERAL_ASSEMBLY') {
-                            const fallbackIds = (t.doc_type === 'GENERAL_ASSEMBLY') ? delegateIds : directorIds;
-                            const signerIds = (Array.isArray(t.signer_ids) && t.signer_ids.length > 0)
-                                ? t.signer_ids.map(id => String(id))
-                                : fallbackIds;
-                            return signerIds.includes(String(myOfficialId));
+                            const signerIds = resolveSignerIdsForDoc(t, officials);
+                            const relevantIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(t));
+                            return signerIds.some(id => relevantIds.includes(String(id)));
                         }
                         return true;
                     });
@@ -538,7 +605,9 @@ Change: 2026-02-25 - Added top-left waiting/view badge for signature-waiting doc
 
                     const dateEl = document.createElement('div');
                     dateEl.className = 'list-sub';
-                    const isSigned = myOfficialId ? (signedMap.get(String(m.id) + ':' + String(myOfficialId)) || isLocallySigned(m.id)) : false;
+                    const isSigned = myOfficialIds.length > 0
+                        ? (myOfficialIds.some(officialId => signedMap.get(String(m.id) + ':' + String(officialId))) || isLocallySigned(m.id))
+                        : false;
                     const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
                     dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${isSigned ? '서명완료' : '미서명'}`;
 
@@ -596,19 +665,22 @@ async function openDocumentById(id) {
                 return;
             }
 
-            if (!myOfficialId && isAdminUser) {
+            if (myOfficialIds.length === 0 && isAdminUser) {
                 statusEl.innerText = '관리자 권한으로 열람 중입니다. 서명은 임원만 가능합니다.';
                 return;
             }
-            if (!myOfficialId) {
+            if (myOfficialIds.length === 0) {
                 statusEl.innerText = '임원 계정만 서명이 가능합니다.';
                 return;
             }
 
             const { data: signatures } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
-            const alreadySigned = forceSignedOnce || isLocallySigned(currentMinuteId)
-                || (Array.isArray(signatures) && signatures.some(s => String(s.official_id) === String(myOfficialId)));
+            const alreadySigned = forceSignedOnce || isLocallySigned(currentMinuteId) || hasMySignatureForDoc(signatures);
             if (alreadySigned) {
+                const mySignature = findMySignatureForDoc(signatures, doc);
+                if (mySignature?.official_id) {
+                    myOfficialId = Number(mySignature.official_id);
+                }
                 alreadySignedOnce = true;
                 markLocallySigned(currentMinuteId);
                 statusEl.innerText = '이미 서명 완료된 문서입니다.';
@@ -624,16 +696,15 @@ async function openDocumentById(id) {
             }
 
             const officials = await MinutesService.getOfficials();
-            const directors = sortDirectorOrder((officials || []).filter(isDirectorRole));
-            const delegates = (officials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate');
-            const signerIds = (Array.isArray(doc.signer_ids) && doc.signer_ids.length > 0)
-                ? doc.signer_ids
-                : ((doc.doc_type === 'GENERAL_ASSEMBLY')
-                    ? delegates.map(o => o.id)
-                    : ((doc.doc_type === 'MINUTES') ? directors.map(o => o.id) : (officials || []).map(o => o.id)));
+            const signerIds = resolveSignerIdsForDoc(doc, officials);
+            const relevantIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(doc));
+            const signingOfficialId = resolveSigningOfficialId(doc, officials);
+            if (signingOfficialId) {
+                myOfficialId = Number(signingOfficialId);
+            }
 
             if ((doc.doc_type === 'MINUTES' || doc.doc_type === 'GENERAL_ASSEMBLY')
-                && !signerIds.map(s => String(s)).includes(String(myOfficialId))) {
+                && !signerIds.some(id => relevantIds.includes(String(id)))) {
                 statusEl.innerText = '서명 대상이 아닙니다.';
                 return;
             }
@@ -683,9 +754,14 @@ async function openDocumentById(id) {
         }
 
         async function submitSignature(signatureUrl) {
+            const signingOfficialId = Number(myOfficialId || 0);
+            if (!signingOfficialId) {
+                showToast('서명 가능한 임원 정보를 찾지 못했습니다.');
+                return;
+            }
             const { error } = await MinutesService.insertSignature({
                 minute_id: currentMinuteId,
-                official_id: myOfficialId,
+                official_id: signingOfficialId,
                 member_uuid: myAuthId,
                 signature_url: signatureUrl
             });
@@ -717,7 +793,7 @@ async function openDocumentById(id) {
                 showToast('이미 서명 완료된 문서입니다.');
                 return;
             }
-            if (!myOfficialId) return showToast('임원 계정만 서명이 가능합니다.');
+            if (myOfficialIds.length === 0) return showToast('임원 계정만 서명이 가능합니다.');
             const ok = await showConfirm('이 의사록의 내용을 확인하였으며, 등록된 서명으로 날인하시겠습니까?');
             if (!ok) return;
 
@@ -731,14 +807,24 @@ async function openDocumentById(id) {
 
 
         window.cancelSignature = async () => {
-            if (!currentMinuteId || !myOfficialId) return;
+            if (!currentMinuteId || myOfficialIds.length === 0) return;
             const ok = await showConfirm('이미 서명한 내역을 취소하시겠습니까?');
             if (!ok) return;
+            const { data: currentDoc } = await MinutesService.getMinuteById(currentMinuteId);
             const { data: sigs } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
-            const mySig = Array.isArray(sigs) ? sigs.find(s => String(s.official_id) === String(myOfficialId)) : null;
-            const { error } = await MinutesService.deleteSignature(currentMinuteId, myOfficialId);
-            if (!error && mySig?.signature_url) {
-                await removeSignatureFile(mySig.signature_url);
+            const mySig = findMySignatureForDoc(sigs, currentDoc);
+            const cancelOfficialId = Number(mySig?.official_id || myOfficialId || 0);
+            if (!cancelOfficialId) {
+                showToast('취소할 서명 정보를 찾지 못했습니다.');
+                return;
+            }
+            const { data: deletedRows, error } = await MinutesService.deleteSignature(currentMinuteId, cancelOfficialId);
+            const deletedSignatureUrl = Array.isArray(deletedRows) && deletedRows.length > 0
+                ? String(deletedRows[0]?.signature_url || '').trim()
+                : '';
+            const signatureUrlToRemove = deletedSignatureUrl || String(mySig?.signature_url || '').trim();
+            if (!error && signatureUrlToRemove) {
+                await removeSignatureFile(signatureUrlToRemove);
             }
             if (error) {
                 showToast('서명 취소 실패: ' + error.message);
