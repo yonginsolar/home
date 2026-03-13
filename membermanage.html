@@ -647,7 +647,7 @@ NO. <span id="infoMemberId">-</span>
   </div>
   <div class="quick-col hidden">
     <div id="quickMinutesAdminCard" class="quick-card quick-green">
-      <div class="quick-title"><i class="bi bi-shield-lock me-1"></i>의사록 관리</div>
+      <div class="quick-title"><i class="bi bi-shield-lock me-1"></i>문서함 관리</div>
       <div class="quick-desc">작성/서명/공개</div>
       <button onclick="location.href='minutes/admin_minutes.html'" class="quick-btn btn btn-success">관리 페이지</button>
     </div>
@@ -1146,7 +1146,7 @@ oninput="autoHyphen(this)">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="footer.js"></script>
 <script src="home_patch_note.js"></script>
-<script src="notice_modal.js?v=20260305-1"></script>
+<script src="notice_modal.js?v=20260310-1"></script>
 
 <script>
 // =========================================================================
@@ -1165,7 +1165,6 @@ let isBoardLoading = false;
 let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
 window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false };
-let canUseMarkDocumentBoxSeenRpc = true;
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
 if (!value) return fallback;
@@ -1723,6 +1722,38 @@ if (raw.length < 4) return '';
 return `***-${raw.slice(-4)}`;
 }
 
+function normalizePhoneDigits(value) {
+return String(value || '').replace(/[^0-9]/g, '');
+}
+
+async function handleManualLinkFailure(contact, isPhone, result) {
+const normalizedContact = String(contact || '').trim();
+const serverMessage = String(result?.message || '').trim();
+
+if (!isPhone && normalizedContact) {
+await loadDuplicateEmailCandidates(normalizedContact);
+if (duplicateEmailCandidates.length >= 2) {
+showModal('같은 이메일로 등록된 조합원이 여러 명입니다.\n아래 목록에서 본인을 선택해 바로 연결해주세요.');
+return;
+}
+}
+
+if (serverMessage) {
+if (serverMessage.indexOf('ambiguous') >= 0 && isPhone) {
+showModal('같은 전화번호로 등록된 조합원이 여러 명일 수 있습니다.\n이메일이나 카카오 로그인으로 다시 시도해주세요.');
+return;
+}
+if (serverMessage.indexOf('not_found') >= 0) {
+showModal('일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.');
+return;
+}
+showModal(`가입 정보를 찾지 못했습니다.\n사유: ${serverMessage}`);
+return;
+}
+
+showModal('일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.');
+}
+
 async function loadDuplicateEmailCandidates(email) {
 resetDuplicateEmailCandidates();
 
@@ -1816,7 +1847,7 @@ showModal("오류 발생: " + error.message);
 	await ensureLoginBadgesGranted();
 	await loadDashboardData(curAuth.id);
 	} else {
-	showModal("일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.");
+	await handleManualLinkFailure(contact, document.getElementById('typePhone').checked, data);
 	}
 	}
 
@@ -1830,7 +1861,7 @@ let contact = '';
 // [유효성 검사] alert 대신 showModal 사용
 if (isPhone) {
 contact = document.getElementById('manualPhone').value.trim();
-if (contact.length < 12) return showModal("전화번호를 올바르게 입력해주세요.\n(숫자만 입력하면 됩니다)");
+if (normalizePhoneDigits(contact).length < 10) return showModal("전화번호를 올바르게 입력해주세요.\n(숫자만 입력하면 됩니다)");
 } else {
 contact = document.getElementById('manualEmail').value.trim();
 if (!contact.includes('@')) return showModal("올바른 이메일 형식이 아닙니다.");
@@ -2821,23 +2852,6 @@ async function hasUnreadDocumentBox(memberUuid) {
     }
 }
 
-function isMissingMarkDocumentBoxSeenRpc(error) {
-    if (!error) return false;
-    const code = String(error.code || '');
-    const status = Number(error.status || error.statusCode || 0);
-    const message = String(error.message || '').toLowerCase();
-    const details = String(error.details || '').toLowerCase();
-    const hint = String(error.hint || '').toLowerCase();
-    const text = `${message} ${details} ${hint}`;
-    return (
-        code === 'PGRST202'
-        || code === '404'
-        || status === 404
-        || text.includes('could not find the function public.mark_document_box_seen')
-        || text.includes('function public.mark_document_box_seen')
-    );
-}
-
 async function markDocumentBoxSeen(memberUuid = null) {
     const targetId = memberUuid
         || sessionStorage.getItem('lastActiveProfile')
@@ -2847,28 +2861,6 @@ async function markDocumentBoxSeen(memberUuid = null) {
     if (!targetId) return false;
 
     const markAt = new Date().toISOString();
-
-    if (canUseMarkDocumentBoxSeenRpc) {
-        try {
-            const { error: rpcErr } = await _supabase.rpc('mark_document_box_seen', {
-                p_target_id: targetId,
-                p_seen_at: markAt
-            });
-            if (!rpcErr) {
-                if (curMem && String(curMem.id) === String(targetId)) {
-                    curMem.document_box_last_seen_at = markAt;
-                }
-                return true;
-            }
-            if (!isMissingMarkDocumentBoxSeenRpc(rpcErr)) {
-                console.warn('mark_document_box_seen rpc error:', rpcErr);
-                return false;
-            }
-            canUseMarkDocumentBoxSeenRpc = false;
-        } catch (e) {
-            console.warn('mark_document_box_seen rpc call failed:', e);
-        }
-    }
 
     const { error: updErr } = await _supabase
         .from('coop_members')
@@ -2977,7 +2969,7 @@ const setQuickCardVisible = (cardEl, visible) => {
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 setQuickCardTodoState(minutesViewCard, docBadge, false);
 
-// 회의록 카드: 관리자=전체, 임원=서명만, 조합원=열람만
+// 회의록 카드: 관리자=전체, 임원=서명+문서함, 조합원=문서함
 if (isAdmin) {
 setQuickCardVisible(minutesAdminCard, true);
 setQuickCardVisible(minutesSignCard, true);
@@ -2994,9 +2986,13 @@ if (minutesSignCard && officialIds && officialIds.length > 0) {
 }
 } else if (isOfficial) {
 setQuickCardVisible(minutesAdminCard, false);
-setQuickCardVisible(minutesViewCard, false);
+setQuickCardVisible(minutesViewCard, true);
 setQuickCardVisible(minutesSignCard, false);
-setQuickCardTodoState(minutesViewCard, docBadge, false);
+if (minutesViewCard && docBadge) {
+    hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
+        setQuickCardTodoState(minutesViewCard, docBadge, hasUnread);
+    });
+}
 if (minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
         setQuickCardVisible(minutesSignCard, hasPending);
@@ -4291,6 +4287,7 @@ showLoading(true);
 
 try {
 const maskedRrn = `${rrn1}-${rrn2}******`;
+const coopId = curMem?.coop_id || null;
 const { data: existingFamily, error: familyErr } = await _supabase
 .from('coop_members')
 .select('id')
@@ -4306,9 +4303,13 @@ if (existingFamily?.id) {
 showModal('이미 등록된 구성원입니다.');
 return;
 }
+if (!coopId) {
+throw new Error('조합 정보가 없어 구성원을 등록할 수 없습니다. 다시 로그인 후 시도해주세요.');
+}
 
 // 부모 정보 복사 + 필수값 설정
 const { error } = await _supabase.from('coop_members').insert({
+coop_id: coopId,
 manager_id: curAuth.id, // 부모 UUID 연결
 name: name,
 rrn_display: maskedRrn, // 마스킹 저장
@@ -5015,7 +5016,7 @@ const name = document.getElementById('findEmailName').value.trim();
 const phone = document.getElementById('findEmailPhone').value.trim();
 
 // 1. 유효성 검사 (전화번호 12자리 이상: 010-XXXX-XXXX)
-if (!name || phone.length < 12) {
+if (!name || normalizePhoneDigits(phone).length < 10) {
 // 기존 알럿 대신 모달 사용 (depth 처리 적용)
 setModalDepth(true); 
 return showModal('이름과 휴대폰 번호를 정확히 입력해주세요.');
