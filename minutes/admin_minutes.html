@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.21
-Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and add printable output with signatures.
+Version: v1.2.23
+Change: 2026-03-13 - Allow assembly material web preview and post-upload visibility save in document box management.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>의사록 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.21 | admin_minutes.html');</script>
+    <title>문서함 관리자 대시보드</title>
+    <script>console.log('[Version] v1.2.23 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -184,13 +184,14 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
 
     <div class="container">
         <div class="header">
-            <h2 style="margin:0;">🛡️ 의사록/공문 관리 (사무국용)</h2>
+            <h2 style="margin:0;">🛡️ 문서함 관리 (사무국용)</h2>
             <button onclick="location.href='../membermanage.html'" class="btn btn-gray">메인으로</button>
         </div>
 
         <div class="tabs">
             <button id="tab-btn-minutes" class="tab-btn active" onclick="switchTab('minutes')">의사록</button>
             <button id="tab-btn-notices" class="tab-btn" onclick="switchTab('notices')">공문</button>
+            <button id="tab-btn-materials" class="tab-btn" onclick="switchTab('materials')">총회 자료</button>
         </div>
 
         <div id="tab-minutes" class="tab-panel active">
@@ -299,6 +300,51 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             <div id="notice-list-area">로딩 중...</div>
         </div>
         </div>
+
+        <div id="tab-materials" class="tab-panel">
+        <div class="card">
+            <h3 style="margin-top:0;">📚 총회 자료 업로드</h3>
+            <div class="input-group">
+                <label>자료집 제목</label>
+                <input type="text" id="material-title" class="form-control" placeholder="예: 2026년 정기총회 자료집">
+            </div>
+            <div class="input-group">
+                <label>기준일</label>
+                <input type="date" id="material-date" class="form-control">
+                <small class="text-muted">목록 정렬 기준으로 사용됩니다.</small>
+            </div>
+            <div class="input-group">
+                <label>열람 범위</label>
+                <select id="material-visibility" class="form-control">
+                    <option value="OFFICIALS">대의원·임원 공개</option>
+                    <option value="MEMBERS">전체 조합원 공개</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>안내 문구/설명</label>
+                <textarea id="material-content" class="form-control" placeholder="예: 총회 자료집과 부속 참고자료입니다."></textarea>
+            </div>
+            <div class="input-group">
+                <label>첨부파일 (PDF)</label>
+                <input type="file" id="material-files" class="form-control" accept=".pdf" multiple>
+                <small class="text-muted">총회 자료집 PDF와 부속 참고자료를 함께 올릴 수 있습니다.</small>
+            </div>
+            <div style="text-align: right;">
+                <button onclick="uploadAssemblyMaterial()" class="btn btn-submit">업로드</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top:0;">📂 총회 자료 목록</h3>
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+                <input type="text" id="materials-search" class="form-control" placeholder="제목/문서번호 검색">
+                <button class="btn btn-gray" onclick="loadAssemblyMaterials()">검색</button>
+            </div>
+            <div class="list-scroll">
+                <div id="materials-list-area">로딩 중...</div>
+            </div>
+        </div>
+        </div>
     </div>
 
     <input type="file" id="minute-attach-input" accept=".pdf" multiple style="display:none;">
@@ -401,7 +447,7 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
     </div>
 
     <script type="module">
-        import { MinutesService } from './MinutesService.js';
+        import { MinutesService } from './MinutesService.js?v=1.0.33';
 
         const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
         const formatMinutesAdminKstDate = (value, fallback = '-') => {
@@ -412,10 +458,18 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
         };
         const getDocTypeLabel = (docType) => {
             if (docType === 'NOTICE') return '공지';
+            if (docType === 'ASSEMBLY_MATERIAL') return '총회 자료';
             if (docType === 'GENERAL_ASSEMBLY') return '총회 의사록';
             if (docType === 'PAST_MINUTES') return '지난 의사록';
             return '의사록';
         };
+
+        function getVisibilityLabel(visibility) {
+            const safeVisibility = String(visibility || 'MEMBERS').toUpperCase();
+            if (safeVisibility === 'OFFICIALS') return '대의원·임원 공개';
+            if (safeVisibility === 'PUBLIC') return '전체 공개';
+            return '전체 조합원 공개';
+        }
 
         // 전역 변수
         let allOfficials = []; // 전체 임원 목록 (기준값)
@@ -1936,14 +1990,24 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
         function switchTab(name) {
             const minutesBtn = document.getElementById('tab-btn-minutes');
             const noticesBtn = document.getElementById('tab-btn-notices');
+            const materialsBtn = document.getElementById('tab-btn-materials');
             const minutesPanel = document.getElementById('tab-minutes');
             const noticesPanel = document.getElementById('tab-notices');
-            if (!minutesBtn || !noticesBtn || !minutesPanel || !noticesPanel) return;
-            const isMinutes = name === 'minutes';
+            const materialsPanel = document.getElementById('tab-materials');
+            if (!minutesBtn || !noticesBtn || !materialsBtn || !minutesPanel || !noticesPanel || !materialsPanel) return;
+            const safeName = String(name || 'minutes');
+            const isMinutes = safeName === 'minutes';
+            const isNotices = safeName === 'notices';
+            const isMaterials = safeName === 'materials';
             minutesBtn.classList.toggle('active', isMinutes);
-            noticesBtn.classList.toggle('active', !isMinutes);
+            noticesBtn.classList.toggle('active', isNotices);
+            materialsBtn.classList.toggle('active', isMaterials);
             minutesPanel.classList.toggle('active', isMinutes);
-            noticesPanel.classList.toggle('active', !isMinutes);
+            noticesPanel.classList.toggle('active', isNotices);
+            materialsPanel.classList.toggle('active', isMaterials);
+            if (isMinutes) loadMinutes();
+            if (isNotices) loadNotices();
+            if (isMaterials) loadAssemblyMaterials();
         }
         window.switchTab = switchTab;
 
@@ -2007,10 +2071,19 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
                     renderSignerOptions(allOfficials, docTypeEl.value);
                 });
             }
+            const materialDateEl = document.getElementById('material-date');
+            if (materialDateEl && !materialDateEl.value) {
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                materialDateEl.value = `${yyyy}-${mm}-${dd}`;
+            }
 
             // 3. 목록 로드
             loadMinutes();
             loadNotices();
+            loadAssemblyMaterials();
         }
 
         async function loadMinutes() {
@@ -2019,7 +2092,10 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             const { data: minutes } = await MinutesService.listMinutesAdmin();
             const searchValue = (document.getElementById('minutes-search')?.value || '').trim().toLowerCase();
             minutesCache = new Map((minutes || []).map(m => [m.id, m]));
-            const minuteDocs = (minutes || []).filter((m) => String(m?.doc_type || '').toUpperCase() !== 'NOTICE');
+            const minuteDocs = (minutes || []).filter((m) => {
+                const type = String(m?.doc_type || '').toUpperCase();
+                return type !== 'NOTICE' && type !== 'ASSEMBLY_MATERIAL';
+            });
 
             const filteredMinutes = !searchValue ? minuteDocs : minuteDocs.filter(m => {
                 const hay = `${m.title || ''} ${m.doc_no || ''} ${m.doc_type || ''}`.toLowerCase();
@@ -2133,6 +2209,84 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
         }
         window.loadMinutes = () => { loadMinutes(); };
 
+        async function loadAssemblyMaterials() {
+            const container = document.getElementById('materials-list-area');
+            if (!container) return;
+
+            const { data: minutes, error } = await MinutesService.listMinutesAdmin();
+            if (error) {
+                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">총회 자료를 불러오지 못했습니다.</div>';
+                return;
+            }
+
+            const searchValue = (document.getElementById('materials-search')?.value || '').trim().toLowerCase();
+            const materials = (minutes || []).filter((m) => String(m?.doc_type || '').toUpperCase() === 'ASSEMBLY_MATERIAL');
+            const filtered = !searchValue ? materials : materials.filter((m) => {
+                const hay = `${m.title || ''} ${m.doc_no || ''}`.toLowerCase();
+                return hay.includes(searchValue);
+            });
+
+            if (!filtered.length) {
+                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">등록된 총회 자료가 없습니다.</div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            filtered.forEach((m) => {
+                const fileCount = Array.isArray(m.file_urls) ? m.file_urls.length : 0;
+                const publishLabel = m.published_at ? '배포중' : '비공개';
+                const html = `
+                    <div class="list-item">
+                        <div style="display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                                <div>
+                                    <div style="font-weight:700; font-size:1.02rem;">${escapeHtml(m.title || '총회 자료')}</div>
+                                    <div style="font-size:0.86rem; color:#64748b;">${formatMinutesAdminKstDate(m.created_at)} 작성 · ${getVisibilityLabel(m.visibility)} · 첨부 ${fileCount}건</div>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                    <span class="badge" style="background:${m.published_at ? '#dcfce7' : '#e5e7eb'}; color:${m.published_at ? '#166534' : '#374151'}; border-radius:999px; padding:6px 10px;">${publishLabel}</span>
+                                    ${m.published_at
+                                        ? `<button onclick="togglePublish('${m.id}', false)" class="btn btn-gray">배포 취소</button>`
+                                        : `<button onclick="togglePublish('${m.id}', true, true)" class="btn btn-blue">배포하기</button>`}
+                                    <button onclick="openMinutePreview('${m.id}')" class="btn btn-gray">미리보기</button>
+                                    <button onclick="deleteMinute('${m.id}')" class="btn btn-danger">삭제</button>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <label for="material-visibility-row-${m.id}" style="font-size:0.84rem; color:#475569; font-weight:600;">배포 범위</label>
+                                <select id="material-visibility-row-${m.id}" class="form-control" style="max-width:220px;">
+                                    <option value="OFFICIALS" ${String(m.visibility || '').toUpperCase() === 'OFFICIALS' ? 'selected' : ''}>대의원·임원 공개</option>
+                                    <option value="MEMBERS" ${String(m.visibility || '').toUpperCase() === 'MEMBERS' ? 'selected' : ''}>전체 조합원 공개</option>
+                                </select>
+                                <button onclick="saveAssemblyMaterialVisibility('${m.id}')" class="btn btn-blue">저장</button>
+                                <span style="font-size:0.82rem; color:#64748b;">배포 이후에도 공개 범위를 바꿀 수 있습니다.</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            });
+        }
+        window.loadAssemblyMaterials = () => { loadAssemblyMaterials(); };
+
+        window.saveAssemblyMaterialVisibility = async (id) => {
+            const selectEl = document.getElementById(`material-visibility-row-${id}`);
+            const visibility = String(selectEl?.value || 'OFFICIALS').toUpperCase();
+            if (!['OFFICIALS', 'MEMBERS'].includes(visibility)) {
+                showToast('배포 범위를 다시 선택하세요.');
+                return;
+            }
+
+            const { error } = await MinutesService.updateMinute(id, { visibility });
+            if (error) {
+                showToast(error.message || '배포 범위 저장 실패');
+                return;
+            }
+
+            showToast('저장되었습니다.');
+            loadAssemblyMaterials();
+        };
+
         // [기능] 생성
         window.createMinute = async () => {
             const title = document.getElementById('in-title').value;
@@ -2240,6 +2394,64 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             }
         };
 
+        window.uploadAssemblyMaterial = async () => {
+            const title = (document.getElementById('material-title')?.value || '').trim();
+            const content = normalizeMinuteContent((document.getElementById('material-content')?.value || '').trim());
+            const materialDate = document.getElementById('material-date')?.value || '';
+            const visibility = document.getElementById('material-visibility')?.value || 'OFFICIALS';
+            if (!title) return showToast('자료집 제목을 입력하세요.');
+
+            const fileInput = document.getElementById('material-files');
+            const files = Array.from(fileInput?.files || []);
+            if (files.length === 0) return showToast('PDF 자료를 1개 이상 선택하세요.');
+
+            const { urls, error: fileErr } = await MinutesService.uploadMinuteFiles(files);
+            if (fileErr) {
+                showToast(fileErr.message || '첨부 업로드 실패');
+                return;
+            }
+
+            let createdAt = null;
+            if (materialDate) {
+                const kstDate = new Date(`${materialDate}T00:00:00+09:00`);
+                if (!Number.isNaN(kstDate.getTime())) {
+                    createdAt = kstDate.toISOString();
+                }
+            }
+
+            const payload = {
+                title,
+                content,
+                doc_type: 'ASSEMBLY_MATERIAL',
+                doc_no: await generateMinuteDocNo(),
+                receiver: null,
+                via: null,
+                visibility,
+                requires_sign: false,
+                status: 'CLOSED',
+                author_id: currentUserId,
+                file_urls: urls.length ? urls : null,
+                signer_ids: null,
+                published_at: new Date().toISOString(),
+                published_by: currentUserId
+            };
+            if (createdAt) payload.created_at = createdAt;
+
+            const { error } = await MinutesService.createMinute(payload);
+            if (error) {
+                showToast(error.message || '총회 자료 저장 실패');
+                return;
+            }
+
+            showToast('총회 자료가 배포되었습니다.');
+            document.getElementById('material-title').value = '';
+            document.getElementById('material-content').value = '';
+            document.getElementById('material-date').value = '';
+            document.getElementById('material-visibility').value = 'OFFICIALS';
+            if (fileInput) fileInput.value = '';
+            loadAssemblyMaterials();
+        };
+
         // [기능] 상태 변경
         window.toggleStatus = async (id, status, allow = true) => {
             if (!allow) {
@@ -2257,7 +2469,10 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             if(ok) {
                 const { error } = await MinutesService.deleteMinute(id);
                 if(error) showToast(error.message);
-                else loadMinutes();
+                else {
+                    loadMinutes();
+                    loadAssemblyMaterials();
+                }
             }
         };
 
@@ -2269,7 +2484,10 @@ Change: 2026-03-12 - Hide meaningless controls on completed signed minutes and a
             }
             const { error } = await MinutesService.togglePublish(id, publish, currentUserId);
             if (error) showToast(error.message);
-            else loadMinutes();
+            else {
+                loadMinutes();
+                loadAssemblyMaterials();
+            }
         };
 
         init();

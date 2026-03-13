@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-    Version: v1.0.41
-    Change: 2026-03-05 - Regulation parser now preserves card parsing when decorated HTML wrappers are mixed with tables.
+    Version: v1.0.43
+    Change: 2026-03-13 - Add assembly materials tab and support officials-only/member-wide material distribution in the document box.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.41 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.43 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -172,7 +172,7 @@
     </div>
 
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.29';
+        import { MinutesService } from './MinutesService.js?v=1.0.33';
         import { supabase } from '../vote/ElectionService.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -184,6 +184,7 @@
         };
         const getDocTypeLabel = (docType) => {
             if (docType === 'NOTICE') return '공지';
+            if (docType === 'ASSEMBLY_MATERIAL') return '총회 자료';
             if (docType === 'GENERAL_ASSEMBLY') return '의사록';
             if (docType === 'PAST_MINUTES') return '의사록';
             if (docType === 'MINUTES') return '의사록';
@@ -193,12 +194,14 @@
             { key: 'ALL', label: '전체' },
             { key: 'MINUTES', label: '의사록' },
             { key: 'NOTICE', label: '공문' },
+            { key: 'MATERIALS', label: '총회 자료' },
             { key: 'RULES', label: '규정' }
         ];
         const APPROVAL_NOTICE_MEMO_START = '[[APPROVAL_NOTE]]';
         const APPROVAL_NOTICE_MEMO_END = '[[/APPROVAL_NOTE]]';
         let noticeCompanyInfo = null;
         let noticeSealUrl = null;
+        let cachedDocumentBoxAccess = null;
 
         function safeUrl(url) {
             if (!url) return '';
@@ -670,6 +673,10 @@
             return !!(cachedSession || cachedIsAdmin);
         }
 
+        function canReadOfficialsOnlyDocuments() {
+            return !!(cachedIsAdmin || cachedDocumentBoxAccess?.canAccess);
+        }
+
         function inferLibraryDocAccessByTitle(title) {
             const text = String(title || '').trim();
             if (text.includes('규정')) return 'MEMBERS';
@@ -679,16 +686,37 @@
 
         function getLibraryDocAccess(doc) {
             const scope = String(doc?.access_scope || '').toUpperCase();
-            if (scope === 'PUBLIC' || scope === 'MEMBERS') return scope;
+            if (scope === 'PUBLIC' || scope === 'MEMBERS' || scope === 'OFFICIALS') return scope;
             return inferLibraryDocAccessByTitle(doc?.title);
         }
 
         function getLibraryDocAccessLabel(doc) {
-            return getLibraryDocAccess(doc) === 'PUBLIC' ? '전체 공개' : '조합원 공개';
+            const access = getLibraryDocAccess(doc);
+            if (access === 'PUBLIC') return '전체 공개';
+            if (access === 'OFFICIALS') return '대의원·임원 공개';
+            return '조합원 공개';
         }
 
         function canOpenLibraryDoc(doc) {
-            return getLibraryDocAccess(doc) === 'PUBLIC' || canReadMembersOnlyDocuments();
+            const access = getLibraryDocAccess(doc);
+            if (access === 'PUBLIC') return true;
+            if (access === 'OFFICIALS') return canReadOfficialsOnlyDocuments();
+            return canReadMembersOnlyDocuments();
+        }
+
+        function getMinuteVisibilityLabel(doc) {
+            const visibility = String(doc?.visibility || 'MEMBERS').toUpperCase();
+            if (visibility === 'PUBLIC') return '전체 공개';
+            if (visibility === 'OFFICIALS') return '대의원·임원 공개';
+            return '조합원 공개';
+        }
+
+        function canOpenMinuteDoc(doc) {
+            if (!doc?.published_at && !cachedIsAdmin) return false;
+            const visibility = String(doc?.visibility || 'MEMBERS').toUpperCase();
+            if (visibility === 'PUBLIC') return true;
+            if (visibility === 'OFFICIALS') return canReadOfficialsOnlyDocuments();
+            return canReadMembersOnlyDocuments();
         }
 
         function renderLibraryDocContent(rawContent) {
@@ -912,7 +940,13 @@
         function filterDocumentsByTab(docs, tabKey) {
             const safeTab = String(tabKey || '').toUpperCase();
             if (safeTab === 'NOTICE') return docs.filter((d) => String(d?.doc_type || '') === 'NOTICE');
-            if (safeTab === 'MINUTES') return docs.filter((d) => String(d?.doc_type || '') !== 'NOTICE');
+            if (safeTab === 'MATERIALS') return docs.filter((d) => String(d?.doc_type || '') === 'ASSEMBLY_MATERIAL');
+            if (safeTab === 'MINUTES') {
+                return docs.filter((d) => {
+                    const type = String(d?.doc_type || '');
+                    return type !== 'NOTICE' && type !== 'ASSEMBLY_MATERIAL';
+                });
+            }
             return docs;
         }
 
@@ -923,8 +957,12 @@
 
             if (currentDocumentListTab === 'RULES') {
                 const allRules = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []);
-                const regulationDocs = allRules.filter((doc) => getLibraryDocAccess(doc) === 'MEMBERS');
-                const visibleRegulations = regulationDocs.filter((doc) => canOpenLibraryDoc(doc));
+                const visibleLibraryDocs = allRules
+                    .filter((doc) => canOpenLibraryDoc(doc))
+                    .filter((doc) => {
+                        const title = String(doc?.title || '');
+                        return !title.includes('정관') && !title.includes('규약');
+                    });
 
                 const shortcutItem = document.createElement('div');
                 shortcutItem.className = 'list-item';
@@ -943,19 +981,17 @@
                 });
                 listPanel.appendChild(shortcutItem);
 
-                if (!visibleRegulations.length) {
+                if (!visibleLibraryDocs.length) {
                     const emptyEl = document.createElement('div');
                     emptyEl.style.textAlign = 'center';
                     emptyEl.style.color = '#64748b';
                     emptyEl.style.padding = '24px 0';
-                    emptyEl.innerText = (regulationDocs.length > 0 && !canReadMembersOnlyDocuments())
-                        ? '조합원 공개 문서는 로그인 후 확인할 수 있습니다.'
-                        : '등록된 규정 문서가 없습니다.';
+                    emptyEl.innerText = '열람 가능한 문서가 없습니다.';
                     listPanel.appendChild(emptyEl);
                     return;
                 }
 
-                visibleRegulations.forEach((doc) => {
+                visibleLibraryDocs.forEach((doc) => {
                     const item = document.createElement('div');
                     item.className = 'list-item';
 
@@ -977,7 +1013,8 @@
                 return;
             }
 
-            const filtered = filterDocumentsByTab(publishedDocsCache, currentDocumentListTab);
+            const filtered = filterDocumentsByTab(publishedDocsCache, currentDocumentListTab)
+                .filter((doc) => canOpenMinuteDoc(doc));
             if (!filtered || filtered.length === 0) {
                 const emptyEl = document.createElement('div');
                 emptyEl.style.textAlign = 'center';
@@ -1027,7 +1064,10 @@
                 return;
             }
             if (!canOpenLibraryDoc(doc)) {
-                showMessage('로그인이 필요합니다.');
+                const access = getLibraryDocAccess(doc);
+                showMessage(access === 'OFFICIALS'
+                    ? '이 문서는 대의원, 이사, 감사만 열람할 수 있습니다.'
+                    : '로그인이 필요합니다.');
                 return;
             }
 
@@ -1061,14 +1101,17 @@
                 showMessage('아직 공개되지 않은 문서입니다.');
                 return;
             }
-            if (doc.visibility === 'MEMBERS' && !cachedSession && !cachedIsAdmin) {
-                showMessage('로그인이 필요합니다.');
+            if (!canOpenMinuteDoc(doc)) {
+                const visibility = String(doc.visibility || 'MEMBERS').toUpperCase();
+                showMessage(visibility === 'OFFICIALS'
+                    ? '이 문서는 대의원, 이사, 감사만 열람할 수 있습니다.'
+                    : '로그인이 필요합니다.');
                 return;
             }
 
             const label = getDocTypeLabel(doc.doc_type);
             detailTitle.textContent = doc.title ? `${label} · ${doc.title}` : label;
-            detailMeta.textContent = `작성일: ${formatMinutesViewKstDate(doc.created_at)}`;
+            detailMeta.textContent = `작성일: ${formatMinutesViewKstDate(doc.created_at)} · 공개: ${getMinuteVisibilityLabel(doc)}`;
 
             if (doc.doc_type === 'NOTICE') {
                 detailContent.innerHTML = await buildNoticeTemplateHtml(doc);
@@ -1113,6 +1156,7 @@
         async function init() {
             cachedSession = await MinutesService.getSession();
             cachedIsAdmin = cachedSession ? await MinutesService.isAdmin(cachedSession.user.id, cachedSession.user.email) : false;
+            cachedDocumentBoxAccess = await MinutesService.getDocumentBoxAccess(cachedSession?.user?.id || null, cachedSession);
             await renderPublishedList();
             // Mark as seen on entry for the active profile (if logged in).
             if (cachedSession || cachedIsAdmin) {

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.31
-Change: 2026-03-13 - Return active official rows set for e-sign pages so executive/delegate overlap does not hide signable documents.
+Version: v1.0.33
+Change: 2026-03-13 - Read saved access_scope for document-box documents and support assembly materials distribution.
 */
 import { supabase } from '../vote/ElectionService.js';
 
@@ -138,6 +138,30 @@ async function getOfficialsByMemberId(memberId) {
     return data;
 }
 
+function getDocumentBoxEligibleOfficials(officials) {
+    const safeOfficials = Array.isArray(officials) ? officials.filter(Boolean) : [];
+    return safeOfficials.filter((official) => {
+        const category = String(official?.category || '').toLowerCase();
+        return category === 'delegate' || category === 'executive';
+    });
+}
+
+async function getDocumentBoxAccess(uid = null, sessionOverride = null) {
+    const session = sessionOverride || await getSession();
+    const user = session?.user || null;
+    const resolvedUid = uid || user?.id || null;
+    const member = await resolveMember(resolvedUid, session);
+    const allOfficials = await getOfficialsByMemberId(member?.member_id);
+    const eligibleOfficials = getDocumentBoxEligibleOfficials(allOfficials);
+    const admin = resolvedUid ? await isAdmin(resolvedUid, user?.email || '') : false;
+    return {
+        member: member || null,
+        isAdmin: !!admin,
+        officials: eligibleOfficials,
+        canAccess: !!admin || eligibleOfficials.length > 0
+    };
+}
+
 function pickPrimaryOfficial(officials) {
     const safeOfficials = Array.isArray(officials) ? officials.filter(Boolean) : [];
     if (safeOfficials.length === 0) return null;
@@ -266,13 +290,13 @@ function inferDocumentAccessScope(title) {
 async function listLibraryDocuments() {
     const { data, error } = await supabase
         .from('site_documents')
-        .select('id,title,content,event_date,version,is_current,file_url,category')
+        .select('id,title,content,event_date,version,is_current,file_url,category,access_scope')
         .eq('category', 'doc')
         .order('event_date', { ascending: false });
     const rows = Array.isArray(data) ? data : [];
     const mapped = rows.map((row) => ({
         ...row,
-        access_scope: inferDocumentAccessScope(row?.title)
+        access_scope: String(row?.access_scope || '').toUpperCase() || inferDocumentAccessScope(row?.title)
     }));
     return { data: mapped, error };
 }
@@ -521,6 +545,7 @@ export const MinutesService = {
     getMemberByEmail,
     getMemberByAuthId,
     isAdmin,
+    getDocumentBoxAccess,
     getMyOfficial,
     getOfficials,
     getCompanyInfo,
