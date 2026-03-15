@@ -647,9 +647,9 @@ NO. <span id="infoMemberId">-</span>
   </div>
   <div class="quick-col hidden">
     <div id="quickMinutesAdminCard" class="quick-card quick-green">
-      <div class="quick-title"><i class="bi bi-shield-lock me-1"></i>문서함 관리</div>
-      <div class="quick-desc">작성/서명/공개</div>
-      <button onclick="location.href='minutes/admin_minutes.html'" class="quick-btn btn btn-success">관리 페이지</button>
+      <div class="quick-title"><i class="bi bi-shield-lock me-1"></i>회의/공문 관리</div>
+      <div class="quick-desc">의사록 · 공문 · 총회 자료</div>
+      <button onclick="goToMinutesAdmin()" class="quick-btn btn btn-success">관리 페이지</button>
     </div>
   </div>
   <div class="quick-col hidden">
@@ -657,7 +657,7 @@ NO. <span id="infoMemberId">-</span>
       <span id="signTodoBadge" class="quick-attention-badge hidden">!</span>
       <div class="quick-title"><i class="bi bi-pen me-1"></i>전자서명</div>
       <div class="quick-desc">서명 요청 확인</div>
-      <button onclick="location.href='minutes/minutes_sign.html'" class="quick-btn btn btn-primary">서명하기</button>
+      <button onclick="goToMinutesSign()" class="quick-btn btn btn-primary">서명하기</button>
     </div>
   </div>
   <div class="quick-col hidden">
@@ -1903,10 +1903,13 @@ try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
 sessionStorage.setItem('lastActiveProfile', uuid);
 
+// [2026-03-15] tenant hardening: 첫 프로필 조회 전에 coop_id를 먼저 확정한다.
+currentMemberCoopId = currentMemberCoopId || await getCurrentMemberCoopId();
+
 // 1. 멤버 기본 정보 조회
-const { data: member, error: memErr } = await _supabase
+const { data: member, error: memErr } = await scopeMemberTenant(_supabase
 .from('coop_members')
-.select('*')
+.select('*'))
 .eq('id', uuid)
 .single();
 
@@ -1924,6 +1927,7 @@ throw new Error('회원 정보를 불러올 수 없습니다.');
 const maskedAcc = await fetchMaskedBankInfo(uuid);
 if (maskedAcc) member.account_number = maskedAcc; 
 curMem = member; 
+currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
 // [신규] 현재 로드하는 프로필 유형도 저장 (타 페이지 연동용)
 sessionStorage.setItem('activeMemberType', curMem.member_type);
 
@@ -1962,9 +1966,9 @@ curMem.total_capital = assets.total_capital;
 
 // ▼▼▼ [확인] 선관위 권한 조회 로직 (SQL 대신 JS에서 처리하기 위해 조회) ▼▼▼
 // coop_officials 테이블에서 내 아이디(member_id)로 category를 조회합니다.
-const { data: officials } = await _supabase
+const { data: officials } = await scopeMemberTenant(_supabase
 .from('coop_officials')
-.select('id, category, status')
+.select('id, category, status'))
 .eq('member_id', curMem.member_id)
 .eq('status', 'active');
 
@@ -1972,6 +1976,8 @@ const { data: officials } = await _supabase
 const myRoles = officials ? officials.map(r => r.category) : [];
 const isOfficial = officials && officials.length > 0;
 const officialIds = officials ? officials.map(r => r.id).filter(Boolean) : [];
+
+await loadCoopRuntimeModules();
 
 // 5. 렌더링 호출
 renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds);
@@ -2168,6 +2174,26 @@ window.switchHallOfFameTab = switchHallOfFameTab;
 // 전역 변수로 상세 내역 모달에서 쓸 데이터를 담아둡니다.
 let globalHistoryData = {};  
 let quickVoteActionUrl = 'vote/vote_login.html';
+let coopRuntimeModules = null;
+let currentMemberCoopId = null;
+
+async function getCurrentMemberCoopId() {
+if (currentMemberCoopId) return currentMemberCoopId;
+try {
+const { data, error } = await _supabase.rpc('get_my_coop_id');
+if (error) throw error;
+currentMemberCoopId = data || null;
+return currentMemberCoopId;
+} catch (e) {
+console.warn('getCurrentMemberCoopId failed:', e);
+return null;
+}
+}
+
+function scopeMemberTenant(query) {
+const safeCoopId = String(currentMemberCoopId || '').trim();
+return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+}
 
 const VOTE_PHASE_PRIORITY = Object.freeze({
 OPEN: 1,
@@ -2243,8 +2269,8 @@ async function fetchElectionTurnoutStats(electionId) {
 if (!electionId) return null;
 try {
 const [totalRes, votedRes] = await Promise.all([
-_supabase.from('election_voters').select('*', { count: 'exact', head: true }).eq('election_id', electionId),
-_supabase.from('vote_logs').select('*', { count: 'exact', head: true }).eq('election_id', electionId)
+scopeMemberTenant(_supabase.from('election_voters').select('*', { count: 'exact', head: true })).eq('election_id', electionId),
+scopeMemberTenant(_supabase.from('vote_logs').select('*', { count: 'exact', head: true })).eq('election_id', electionId)
 ]);
 if (totalRes.error || votedRes.error) return null;
 const total = Number(totalRes.count || 0);
@@ -2305,14 +2331,14 @@ noCandidateCount: 0
 
 try {
 const [distRes, candRes] = await Promise.all([
-_supabase
+scopeMemberTenant(_supabase
 .from('districts')
-.select('id, vote_type, quota')
+.select('id, vote_type, quota'))
 .eq('election_id', electionId)
 .in('id', uniqueDistrictIds),
-_supabase
+scopeMemberTenant(_supabase
 .from('candidates')
-.select('district_id')
+.select('district_id'))
 .eq('election_id', electionId)
 .eq('status', 'APPROVED')
 .in('district_id', uniqueDistrictIds)
@@ -2354,9 +2380,9 @@ return null;
 async function getMyVoteProgress(memberUuid, electionId) {
 if (!memberUuid || !electionId) return null;
 try {
-const { data: assigned, error: assErr } = await _supabase
+const { data: assigned, error: assErr } = await scopeMemberTenant(_supabase
 .from('election_voters')
-.select('district_id')
+.select('district_id'))
 .eq('member_uuid', memberUuid)
 .eq('election_id', electionId);
 
@@ -2384,9 +2410,9 @@ noCandidateCount: districtSummary.noCandidateCount
 };
 }
 
-const { data: votedRows, error: votedErr } = await _supabase
+const { data: votedRows, error: votedErr } = await scopeMemberTenant(_supabase
 .from('vote_logs')
-.select('district_id')
+.select('district_id'))
 .eq('member_uuid', memberUuid)
 .eq('election_id', electionId)
 .in('district_id', actionableDistrictIds);
@@ -2482,6 +2508,28 @@ btnEl.textContent = config.buttonLabel || '투표소 입장';
 quickVoteActionUrl = config.actionUrl || 'vote/vote_login.html';
 }
 
+async function loadCoopRuntimeModules() {
+try {
+const { data, error } = await _supabase.rpc('get_my_erp_runtime');
+if (error) throw error;
+const modules = data && data.modules && typeof data.modules === 'object' ? data.modules : {};
+coopRuntimeModules = modules;
+return modules;
+} catch (e) {
+console.warn('loadCoopRuntimeModules failed:', e);
+coopRuntimeModules = null;
+return null;
+}
+}
+
+function isCoopRuntimeModuleEnabled(moduleKey) {
+const key = String(moduleKey || '').trim();
+if (!key) return true;
+if (!coopRuntimeModules || typeof coopRuntimeModules !== 'object') return true;
+if (!(key in coopRuntimeModules)) return true;
+return coopRuntimeModules[key] !== false;
+}
+
 // [수정] 선거 버튼 노출 여부 결정 함수 (DB 구조 반영)
 async function checkElectionVisibility(member, myRoles) {
 const voteCard = document.getElementById('quickVoteCard');
@@ -2494,6 +2542,12 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
 };
 
+if (!isCoopRuntimeModuleEnabled('vote')) {
+setQuickCardVisible(voteCard, false);
+setQuickCardTodoState(voteCard, voteBadge, false);
+return;
+}
+
 // 1. 관리자/선관위 여부
 const isAdmin = (member && member.role === 'admin');
 const isCommittee = myRoles && myRoles.includes('election_comm');
@@ -2502,9 +2556,9 @@ const memberUuid = member && member.id ? member.id : null;
 
 // 2. 조건에 맞는 선거 조회
 const targetStatuses = ['NOMINATION', 'READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED', 'ENDED'];
-const { data: elections, error } = await _supabase
+const { data: elections, error } = await scopeMemberTenant(_supabase
 .from('elections')
-.select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, actual_closed_at, start_at, end_at, created_at')
+.select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, actual_closed_at, start_at, end_at, created_at'))
 .in('status', targetStatuses);
 
 if (error || !elections || elections.length === 0) {
@@ -2791,16 +2845,16 @@ renderTimeline(ledger, apps, donations, points, dividends);
 async function hasPendingMinuteSigns(officialIds) {
     try {
         if (!officialIds || officialIds.length === 0) return false;
-        const { data: minutes, error: minErr } = await _supabase
+        const { data: minutes, error: minErr } = await scopeMemberTenant(_supabase
             .from('minutes')
-            .select('id')
+            .select('id'))
             .eq('requires_sign', true)
             .eq('status', 'OPEN');
         if (minErr || !minutes || minutes.length === 0) return false;
         const minuteIds = minutes.map(m => m.id);
-        const { data: signed } = await _supabase
+        const { data: signed } = await scopeMemberTenant(_supabase
             .from('doc_signatures')
-            .select('minute_id, official_id')
+            .select('minute_id, official_id'))
             .in('official_id', officialIds)
             .in('minute_id', minuteIds);
         const signedSet = new Set((signed || []).map(s => s.minute_id));
@@ -2820,9 +2874,9 @@ async function hasUnreadDocumentBox(memberUuid) {
     try {
         if (!memberUuid) return false;
 
-        const { data: latestRows, error: latestErr } = await _supabase
+        const { data: latestRows, error: latestErr } = await scopeMemberTenant(_supabase
             .from('minutes')
-            .select('published_at')
+            .select('published_at'))
             .not('published_at', 'is', null)
             .order('published_at', { ascending: false })
             .limit(1);
@@ -2837,9 +2891,9 @@ async function hasUnreadDocumentBox(memberUuid) {
             seenAt = curMem.document_box_last_seen_at || null;
         }
         if (!seenAt) {
-            const { data: profile } = await _supabase
+            const { data: profile } = await scopeMemberTenant(_supabase
                 .from('coop_members')
-                .select('document_box_last_seen_at')
+                .select('document_box_last_seen_at'))
                 .eq('id', memberUuid)
                 .maybeSingle();
             seenAt = profile?.document_box_last_seen_at || null;
@@ -2881,9 +2935,9 @@ async function hasPendingVoteTasks(memberUuid) {
     try {
         if (!memberUuid) return false;
 
-        const { data: openElections, error: openErr } = await _supabase
+        const { data: openElections, error: openErr } = await scopeMemberTenant(_supabase
             .from('elections')
-            .select('id')
+            .select('id'))
             .eq('status', 'OPEN');
 
         if (openErr || !openElections || openElections.length === 0) return false;
@@ -2891,9 +2945,9 @@ async function hasPendingVoteTasks(memberUuid) {
         const openElectionIds = openElections.map(row => row.id).filter(Boolean);
         if (openElectionIds.length === 0) return false;
 
-        const { data: assigned, error: assErr } = await _supabase
+        const { data: assigned, error: assErr } = await scopeMemberTenant(_supabase
             .from('election_voters')
-            .select('election_id, district_id')
+            .select('election_id, district_id'))
             .eq('member_uuid', memberUuid)
             .in('election_id', openElectionIds);
 
@@ -2927,9 +2981,9 @@ async function hasPendingVoteTasks(memberUuid) {
         ));
         if (actionableDistrictIds.length === 0) return false;
 
-        const { data: voted, error: votedErr } = await _supabase
+        const { data: voted, error: votedErr } = await scopeMemberTenant(_supabase
             .from('vote_logs')
-            .select('election_id, district_id')
+            .select('election_id, district_id'))
             .eq('member_uuid', memberUuid)
             .in('election_id', openElectionIds)
             .in('district_id', actionableDistrictIds);
@@ -2958,6 +3012,9 @@ const minutesSignCard = document.getElementById('quickMinutesSignCard');
 const minutesViewCard = document.getElementById('quickMinutesViewCard');
 const signBadge = document.getElementById('signTodoBadge');
 const docBadge = document.getElementById('docTodoBadge');
+const minutesEnabled = isCoopRuntimeModuleEnabled('minutes');
+const documentsEnabled = isCoopRuntimeModuleEnabled('documents');
+const signatureEnabled = isCoopRuntimeModuleEnabled('signature');
 
 const setQuickCardVisible = (cardEl, visible) => {
     if (!cardEl) return;
@@ -2971,42 +3028,42 @@ setQuickCardTodoState(minutesViewCard, docBadge, false);
 
 // 회의록 카드: 관리자=전체, 임원=서명+문서함, 조합원=문서함
 if (isAdmin) {
-setQuickCardVisible(minutesAdminCard, true);
-setQuickCardVisible(minutesSignCard, true);
-setQuickCardVisible(minutesViewCard, true);
+setQuickCardVisible(minutesAdminCard, minutesEnabled);
+setQuickCardVisible(minutesSignCard, signatureEnabled);
+setQuickCardVisible(minutesViewCard, documentsEnabled);
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
-        setQuickCardTodoState(minutesViewCard, docBadge, hasUnread);
+        setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
     });
 }
-if (minutesSignCard && officialIds && officialIds.length > 0) {
+if (signatureEnabled && minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
-        setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
+        setQuickCardTodoState(minutesSignCard, signBadge, signatureEnabled && hasPending);
     });
 }
 } else if (isOfficial) {
 setQuickCardVisible(minutesAdminCard, false);
-setQuickCardVisible(minutesViewCard, true);
+setQuickCardVisible(minutesViewCard, documentsEnabled);
 setQuickCardVisible(minutesSignCard, false);
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
-        setQuickCardTodoState(minutesViewCard, docBadge, hasUnread);
+        setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
     });
 }
-if (minutesSignCard && officialIds && officialIds.length > 0) {
+if (signatureEnabled && minutesSignCard && officialIds && officialIds.length > 0) {
     hasPendingMinuteSigns(officialIds).then(hasPending => {
-        setQuickCardVisible(minutesSignCard, hasPending);
-        setQuickCardTodoState(minutesSignCard, signBadge, hasPending);
+        setQuickCardVisible(minutesSignCard, signatureEnabled && hasPending);
+        setQuickCardTodoState(minutesSignCard, signBadge, signatureEnabled && hasPending);
     });
 }
 } else {
-setQuickCardVisible(minutesViewCard, true);
+setQuickCardVisible(minutesViewCard, documentsEnabled);
 setQuickCardVisible(minutesAdminCard, false);
 setQuickCardVisible(minutesSignCard, false);
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
-        setQuickCardTodoState(minutesViewCard, docBadge, hasUnread);
+        setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
     });
 }
 }
@@ -3522,6 +3579,7 @@ showModal(`최대 ${limit.toLocaleString()}원까지만 가능합니다.`); // a
 }
 
 // [수정] 증명서 다운로드 (스마트 새로고침 적용 - 혹시라도 상태 갱신 필요 시)
+// [2026-03-15] tenant hardening: 발급기관 정보는 현재 조합(ref_company_info.coop_id)에서만 읽는다.
 async function downloadCert() {
 if(!curMem) return;
 showLoading(true, '증서 발급 중...');
@@ -3544,7 +3602,10 @@ p_amount: finalTotal
 
 if (error) throw error;
 
-const { data: info } = await _supabase.from('ref_company_info').select('value').eq('key', 'chairman_name').single();
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+const { data: info } = await (coopId
+? _supabase.from('ref_company_info').select('value').eq('coop_id', coopId).eq('key', 'chairman_name').single()
+: Promise.resolve({ data: null }));
 await generateContributionCert(curMem, finalTotal, cert.cert_number, info?info.value:"이사장", _supabase);
 
 showLoading(false);
@@ -4340,9 +4401,9 @@ window.__memberAppLocks.submitFamily = false;
 let currentBoardCat = 'notice';
 
 async function fetchMemberVisibleNotices(limit = 200) {
-const { data, error } = await _supabase
+const { data, error } = await scopeMemberTenant(_supabase
 .from('coop_notices')
-.select('*')
+.select('*'))
 .eq('status', 'published')
 .order('created_at', { ascending: false })
 .limit(limit);
@@ -4384,9 +4445,10 @@ if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">
 const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
 
 // [핵심 수정] .eq('status', 'published') 삭제됨 -> 모든 글 조회
-const { data: posts, error } = await _supabase
+const baseListQuery = _supabase
 .from(tableName)
-.select('*')
+.select('*');
+const { data: posts, error } = await (tableName === 'coop_notices' ? scopeMemberTenant(baseListQuery) : baseListQuery)
 .order('created_at', { ascending: false })
 .range(0, limit - 1);
 
@@ -4517,7 +4579,8 @@ return;
 const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
 
 // 1. 조회
-const { data: post, error } = await _supabase.from(tableName).select('*').eq('id', id).single();
+const basePostQuery = _supabase.from(tableName).select('*');
+const { data: post, error } = await (tableName === 'coop_notices' ? scopeMemberTenant(basePostQuery) : basePostQuery).eq('id', id).single();
 if(error || !post) return showModal('글을 불러오지 못했습니다.');
 
 // 2. 바인딩 (안전하게 ID 확인)
@@ -4686,9 +4749,9 @@ loadBoard(currentBoardCat); // 목록 갱신
 async function loadMiniNotices() {
 const listArea = document.getElementById('miniNoticeList');
 try {
-const { data: notices, error } = await _supabase
+const { data: notices, error } = await scopeMemberTenant(_supabase
 .from('coop_notices')
-.select('id, title, created_at, is_members_only')
+.select('id, title, created_at, is_members_only'))
 .eq('status', 'published')
 .order('created_at', { ascending: false })
 .limit(3); // 3개만
@@ -5099,9 +5162,9 @@ async function loadPartnerInfo(memberId) {
 if(!memberId) return;
 
 // 공개 조회가 가능하므로 public 테이블 조회
-const { data, error } = await _supabase
+const { data, error } = await scopeMemberTenant(_supabase
 .from('site_partners')
-.select('*')
+.select('*'))
 .eq('member_id', memberId)
 .maybeSingle(); // 없어도 에러 아님
 
@@ -5361,6 +5424,11 @@ reloadDashboard(); // 데이터 갱신
 async function goToVoteSystem() {
 void 0;
 
+if (!isCoopRuntimeModuleEnabled('vote')) {
+showModal("현재 조합에서 선거/투표 모듈 사용이 중지되었습니다.");
+return;
+}
+
 const client = (typeof _supabase !== 'undefined') ? _supabase : window._client;
 
 if (!client) {
@@ -5390,6 +5458,22 @@ return;
 // 3. 유효하다면 같은 도메인의 대상 페이지로 이동 (세션 공유)
 const targetUrl = quickVoteActionUrl || 'vote/vote_login.html';
 window.location.href = targetUrl;
+}
+
+function goToMinutesAdmin() {
+if (!isCoopRuntimeModuleEnabled('minutes')) {
+showModal("현재 조합에서 회의/공문 모듈 사용이 중지되었습니다.");
+return;
+}
+window.location.href = 'minutes/minutes_admin.html';
+}
+
+function goToMinutesSign() {
+if (!isCoopRuntimeModuleEnabled('signature')) {
+showModal("현재 조합에서 전자서명 모듈 사용이 중지되었습니다.");
+return;
+}
+window.location.href = 'minutes/minutes_sign.html';
 }
 
 // [기존 유지/확인] 취소 기능
@@ -5430,9 +5514,11 @@ return;
 }
 
 // 2. 일반 조합원: DB 스위치(ref_company_info) 확인
+// [2026-03-15] tenant hardening: service_solar_map 스위치도 현재 조합 범위에서만 읽는다.
 const { data } = await _supabase
 .from('ref_company_info')
 .select('value')
+.eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
 .eq('key', 'service_solar_map')
 .single();
 
@@ -5456,6 +5542,10 @@ window.open('map.html', '_blank');
 }
 
 async function openDocumentBox() {
+if (!isCoopRuntimeModuleEnabled('documents')) {
+showModal("현재 조합에서 문서함 모듈 사용이 중지되었습니다.");
+return;
+}
 const targetId = sessionStorage.getItem('lastActiveProfile') || curMem?.id || curAuth?.id || null;
 await markDocumentBoxSeen(targetId);
 window.location.href = 'minutes/minutes_view.html';

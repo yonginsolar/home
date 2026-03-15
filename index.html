@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.18
-Change: 2026-02-21 - Added SEO baseline (canonical + robots + JSON-LD).
+Version: v1.0.19
+Change: 2026-03-10 - Delegated notice detail/search functions to shared notice_modal.js wrappers to prevent drift.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.18 | index.html');</script>
+<script>console.log('[Version] v1.0.19 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -807,6 +807,27 @@ Change: 2026-02-21 - Added SEO baseline (canonical + robots + JSON-LD).
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
     window._client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    window.__noticeModalScope = 'public';
+    let g_visible_site_coop_id_promise = null;
+
+    async function getVisibleSiteCoopId() {
+        if (!g_visible_site_coop_id_promise) {
+            g_visible_site_coop_id_promise = (async () => {
+                const { data, error } = await _client.rpc('get_visible_coop_id');
+                if (error) {
+                    console.warn('getVisibleSiteCoopId failed:', error);
+                    return null;
+                }
+                return data || null;
+            })();
+        }
+        return await g_visible_site_coop_id_promise;
+    }
+
+    async function scopePublicTenant(query) {
+        const coopId = String(await getVisibleSiteCoopId() || '').trim();
+        return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
+    }
 
     // [보안] 간단 HTML 이스케이프 & URL 검증
     function escapeHtml(value = '') {
@@ -1159,7 +1180,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // [신규 기능] DB 설정에 따라 섹션과 메뉴를 끄고 켜는 함수
     async function manageSections() {
-        const { data: sections, error } = await _client.from('site_sections').select('*');
+        const { data: sections, error } = await (await scopePublicTenant(_client.from('site_sections').select('*')));
         
         if (error || !sections) return;
 
@@ -1288,12 +1309,12 @@ let g_notices_list = [];
 // 1. 공지사항 데이터 가져오기 (최초 1회 실행)
 async function fetchNotices() {
     // 넉넉하게 50개 가져옴
-    const { data: notices, error } = await _client.from('coop_notices')
+    const { data: notices, error } = await (await scopePublicTenant(_client.from('coop_notices')
         .select('*')
         .eq('status', 'published')
         .eq('is_members_only', false)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(50)));
 
     const mainList = document.getElementById('recent-notices-list');
     
@@ -1332,151 +1353,27 @@ function renderMainNotices(items) {
 }
 
 // 3. [더 보기 버튼] 클릭 시 -> 검색 모달 열기
+// Notice detail/search is owned by notice_modal.js so index/membermanage stay aligned.
+// If this shared flow changes, verify both pages rather than reintroducing local copies.
 function openNoticeSearchModal() {
-    // 1) 검색 모달 리스트에 전체 데이터 뿌리기
-    renderModalList(g_notices_list);
-    
-    // 2) 검색창 초기화
-    const input = document.getElementById('modal-search-input');
-    if(input) input.value = '';
-
-    // 3) 상세 모달이 열려있다면 닫고, 검색 모달 열기 (순서 중요)
-    // 부트스트랩 모달 인스턴스 가져오기
-    const detailEl = document.getElementById('noticeDetailModal');
-    const searchEl = document.getElementById('noticeSearchModal');
-    
-    const detailModal = bootstrap.Modal.getInstance(detailEl);
-    if(detailModal) detailModal.hide(); // 상세창 닫기
-
-    const searchModal = new bootstrap.Modal(searchEl);
-    searchModal.show(); // 검색창 열기
-}
-
-// 4. 검색 모달 내부 리스트 렌더링
-function renderModalList(items) {
-    const modalList = document.getElementById('modal-notice-list');
-    if(!modalList) return;
-
-    if(items.length === 0) {
-        modalList.innerHTML = '<div class="text-center py-3 text-muted">검색 결과가 없습니다.</div>';
-        return;
+    if (window.NoticeModal && typeof window.NoticeModal.openList === 'function') {
+        return window.NoticeModal.openList();
     }
-
-    let html = '';
-    items.forEach(n => {
-        const dateStr = formatHomeKstDate(n.created_at);
-        const safeCategory = escapeHtml(n.category || '');
-        const safeTitle = escapeHtml(n.title || '');
-        // 클릭 시 '상세 읽기 모달'로 이동
-        html += `
-          <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
-              onclick="openNoticeDetail('${n.id}')" style="cursor:pointer;">
-             <div>
-                <span class="badge bg-light text-dark border me-1">${safeCategory}</span>
-                <span class="fw-bold text-dark">${safeTitle}</span>
-             </div>
-             <small class="text-muted">${dateStr}</small>
-          </li>
-        `;
-    });
-    modalList.innerHTML = html;
+    console.warn('NoticeModal.openList is not ready.');
 }
 
-// 5. [검색 기능] 모달 내부에서 타이핑 할 때
 function filterNoticesInModal() {
-    const input = document.getElementById('modal-search-input');
-    const keyword = input.value.toLowerCase().trim();
-
-    const filtered = g_notices_list.filter(n => {
-        const t = n.title ? n.title.toLowerCase() : '';
-        const c = n.content ? n.content.toLowerCase() : '';
-        return t.includes(keyword) || c.includes(keyword);
-    });
-
-    renderModalList(filtered);
+    if (window.NoticeModal && typeof window.NoticeModal.filterInModal === 'function') {
+        return window.NoticeModal.filterInModal();
+    }
+    console.warn('NoticeModal.filterInModal is not ready.');
 }
 
-// [심플 버전] 영문 파일명 자동 정화 (언더바 -> 공백 변환)
 function openNoticeDetail(id) {
-    void 0;
-
-    const n = g_notices_list.find(item => item.id == id);
-    
-    if(!n) {
-        showAlert("해당 공지사항의 데이터를 찾을 수 없습니다.");
-        return;
+    if (window.NoticeModal && typeof window.NoticeModal.openDetail === 'function') {
+        return window.NoticeModal.openDetail(id);
     }
-
-    // 기본 정보 채우기
-    document.getElementById('notice-read-title').innerText = n.title;
-    document.getElementById('notice-read-cat').innerText = n.category === '공문' ? '공지' : n.category;
-    document.getElementById('notice-read-date').innerText = formatHomeKstDate(n.created_at);
-    
-    let contentHtml = '';
-    if (n.category === '공문') {
-        contentHtml = buildNoticeTemplateHtml(n);
-    } else {
-        // 본문 줄바꿈 처리 (안전 이스케이프)
-        const safeContent = escapeHtml(n.content || '');
-        contentHtml = safeContent.replace(/\n/g, '<br>');
-    }
-
-    // ============================================================
-    // ★ [핵심] 영문 파일명 예쁘게 보여주기 로직
-    // ============================================================
-    const attachUrls = (Array.isArray(n.file_urls) && n.file_urls.length > 0)
-        ? n.file_urls
-        : (n.file_url ? [n.file_url] : []);
-    const attachNames = Array.isArray(n.file_names) ? n.file_names : [];
-
-    if (attachUrls.length > 0) {
-        contentHtml += '<hr class="my-4" style="border-top: 1px dashed #bbb;">';
-        contentHtml += '<h6 class="fw-bold mb-3"><i class="bi bi-paperclip"></i> 첨부파일</h6>';
-        contentHtml += '<ul class="list-unstyled bg-light p-3 rounded">';
-        
-        attachUrls.forEach((url, idx) => {
-            // 1. URL이 문자열인지 확인 (안전장치)
-            if (typeof url !== 'string') return;
-            const safeLink = safeUrl(url);
-            if (!safeLink) return;
-
-            // 2. 파일명 추출 (주소의 마지막 부분 가져오기)
-            let fileName = (attachNames[idx] || '').trim() || url.split('/').pop();
-
-            // 3. 외계어(%20 등) 해독
-            try { fileName = decodeURIComponent(fileName); } catch(e) {}
-
-            // 4. [뷰티 포인트] 언더바(_)를 공백으로 바꿔서 사람이 읽기 편하게 만듦
-            // 예: Yongin_Solar_Notice.pdf -> Yongin Solar Notice.pdf
-            let displayName = fileName.replace(/_/g, ' ');
-            const safeDisplay = escapeHtml(displayName);
-
-            contentHtml += `
-                <li class="mb-2">
-                    <a href="${safeLink}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center" rel="noopener noreferrer">
-                        <i class="bi bi-file-earmark-arrow-down fs-5 text-primary me-2"></i>
-                        <span class="text-decoration-underline">${safeDisplay}</span>
-                    </a>
-                </li>
-            `;
-        });
-        contentHtml += '</ul>';
-    }
-    // ============================================================
-
-    // 최종 HTML 주입
-    document.getElementById('notice-read-content').innerHTML = contentHtml;
-
-    // 모달 열기
-    const searchEl = document.getElementById('noticeSearchModal');
-    if (typeof bootstrap !== 'undefined') {
-        const searchModal = bootstrap.Modal.getInstance(searchEl);
-        if(searchModal) searchModal.hide();
-
-        const detailEl = document.getElementById('noticeDetailModal');
-        const detailModal = bootstrap.Modal.getOrCreateInstance(detailEl);
-        detailModal.show();
-    }
+    console.warn('NoticeModal.openDetail is not ready.', id);
 }
 
 
@@ -1486,7 +1383,7 @@ function openNoticeDetail(id) {
 
 // 1. 발전소 데이터 로드 및 분배
 async function fetchPlants() {
-    const { data, error } = await _client.from('site_power_plants').select('*').order('display_order');
+    const { data, error } = await (await scopePublicTenant(_client.from('site_power_plants').select('*').order('display_order')));
     
     if(error || !data) return;
 
@@ -1880,7 +1777,7 @@ function openPlantDetail(id) {
 // [수정] About 섹션 데이터 로드 (샘플 강제 삭제 버전)
 // [수정] About 데이터 로드 (점 삭제 + 아이콘 강제 삭제 버전)
     async function fetchAbout() {
-        const { data, error } = await _client.from('site_about').select('*').limit(1);
+        const { data, error } = await (await scopePublicTenant(_client.from('site_about').select('*').limit(1)));
         if (error) return;
         const row = Array.isArray(data) ? data[0] : data;
         if (!row) return; // keep default static content if no data
@@ -1943,15 +1840,15 @@ function openPlantDetail(id) {
        if(!container) return;
 
        // 1. 뱃지 정보 로드
-       const { data: badges } = await _client.from('site_badges').select('*');
+       const { data: badges } = await (await scopePublicTenant(_client.from('site_badges').select('*')));
        g_badge_def = badges || [];
 
        // 2. 파트너 데이터 로드 (승인된 것만)
-       const { data: partners, error } = await _client
+       const { data: partners, error } = await (await scopePublicTenant(_client
            .from('site_partners')
            .select('*')
            .eq('status', 'active') 
-           .order('display_order', { ascending: true });
+           .order('display_order', { ascending: true })));
 
        if (error || !partners || partners.length === 0) {
            container.innerHTML = '<div class="col-12 text-center py-5 text-muted">등록된 협력 단체가 없습니다.</div>';
@@ -2049,11 +1946,11 @@ function openPlantDetail(id) {
        if(!container) return;
 
        // 1. DB에서 공개된(is_visible=true) FAQ만 가져오기
-       const { data: faqs, error } = await _client
+       const { data: faqs, error } = await (await scopePublicTenant(_client
            .from('site_faqs')
            .select('*')
            .eq('is_visible', true)
-           .order('display_order', { ascending: true });
+           .order('display_order', { ascending: true })));
 
        if (error || !faqs || faqs.length === 0) {
            container.innerHTML = '<div class="text-center text-muted py-5">등록된 질문이 없습니다.</div>';

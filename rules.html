@@ -322,10 +322,31 @@ function toggleSearch(e) {
         }
     }
 
+    // [2026-03-15] tenant hardening: 규정집은 visible coop 문서만 조회한다.
+    let __rulesVisibleCoopId = null;
+    async function getRulesVisibleCoopId() {
+        if (__rulesVisibleCoopId) return __rulesVisibleCoopId;
+        try {
+            const { data, error } = await _supabase.rpc('get_visible_coop_id');
+            if (error) throw error;
+            __rulesVisibleCoopId = String(data || '').trim() || null;
+            return __rulesVisibleCoopId;
+        } catch (e) {
+            console.warn('getRulesVisibleCoopId failed:', e);
+            return null;
+        }
+    }
+
+    function scopeRulesVisibleTenant(query, coopId) {
+        const safeCoopId = String(coopId || '').trim();
+        return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+    }
+
     // 데이터 로드 및 렌더링 (기존 로직 유지)
     async function loadDocuments(keyword, typeId) {
-        const { data } = await _supabase.from('site_documents')
-            .select('*').eq('category', 'doc').ilike('title', `%${keyword}%`).order('event_date', {ascending: false});
+        const coopId = await getRulesVisibleCoopId();
+        const { data } = await scopeRulesVisibleTenant(_supabase.from('site_documents')
+            .select('*'), coopId).eq('category', 'doc').ilike('title', `%${keyword}%`).order('event_date', {ascending: false});
 
         if (!data || data.length === 0) {
             document.getElementById(`${typeId}-container`).innerHTML = '<div class="text-center py-5 text-muted">등록된 문서가 없습니다.</div>';

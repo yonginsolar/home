@@ -1,13 +1,18 @@
 /*
-Version: v1.0.9
-Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent signed URL expiry issues.
+Version: v1.0.10
+Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member notice modal and fix malformed modal CSS block.
 */
 (function () {
     if (window.NoticeModal) return;
 
+    // Shared notice detail renderer used by both public and member pages.
+    // Election notice snapshots carry fixed-layout HTML/CSS, so generic overflow
+    // normalization must not rewrite that DOM or the published layout breaks.
+
     let cache = [];
     let companyInfoCache = null;
     let sealUrlCache = null;
+    let visibleNoticeCoopIdPromise = null;
     const KST_TZ_NOTICE = 'Asia/Seoul';
 
     function formatNoticeKstDate(value) {
@@ -19,6 +24,33 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
 
     function getClient() {
         return window._client || window._supabase || null;
+    }
+
+    function isPublicNoticeContext() {
+        if (window.__noticeModalScope === 'public') return true;
+        const path = String(window.location?.pathname || '');
+        return path === '/' || /(?:^|\/)index\.html$/i.test(path);
+    }
+
+    async function getVisibleNoticeCoopId() {
+        if (!visibleNoticeCoopIdPromise) {
+            visibleNoticeCoopIdPromise = (async () => {
+                const client = getClient();
+                if (!client) return null;
+                const { data, error } = await client.rpc('get_visible_coop_id');
+                if (error) {
+                    console.warn('NoticeModal.getVisibleNoticeCoopId failed:', error);
+                    return null;
+                }
+                return data || null;
+            })();
+        }
+        return await visibleNoticeCoopIdPromise;
+    }
+
+    async function scopeVisibleNoticeTenant(query) {
+        const coopId = String(await getVisibleNoticeCoopId() || '').trim();
+        return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
     }
 
     function escapeHtml(value = '') {
@@ -82,7 +114,7 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
         if (companyInfoCache) return companyInfoCache;
         const client = getClient();
         if (!client) return {};
-        const { data } = await client.from('ref_company_info').select('key,value');
+        const { data } = await (await scopeVisibleNoticeTenant(client.from('ref_company_info').select('key,value')));
         const info = {};
         if (Array.isArray(data)) {
             data.forEach(row => {
@@ -143,7 +175,23 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
                     img.setAttribute('onerror', "this.style.display='none'");
                 }
             });
-            return doc.body.innerHTML || rawHtml;
+            return doc.documentElement?.outerHTML || rawHtml;
+        } catch (e) {
+            return rawHtml;
+        }
+    }
+
+    function flattenSnapshotDocumentHtml(contentHtml) {
+        const rawHtml = String(contentHtml || '');
+        if (!rawHtml) return '';
+        if (!/<(?:html|head|body|style)\b/i.test(rawHtml)) return rawHtml;
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(rawHtml, 'text/html');
+            const styles = Array.from(doc.querySelectorAll('style')).map((node) => node.outerHTML).join('');
+            const bodyHtml = doc.body ? doc.body.innerHTML : rawHtml;
+            return `${styles}${bodyHtml}` || rawHtml;
         } catch (e) {
             return rawHtml;
         }
@@ -190,44 +238,48 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
   width: 100%;
   max-width: 100%;
 }
-#notice-read-content .notice-content-body * {
+#notice-read-content .notice-content-body.notice-content-body--fixed {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) * {
   max-width: 100%;
   box-sizing: border-box;
 }
-#notice-read-content .notice-content-body .doc {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .doc {
   width: 100% !important;
   max-width: 100% !important;
 }
 #notice-read-content .notice-content-body .print-bar {
   display: none !important;
 }
-#notice-read-content .notice-content-body .notice-name-main,
-#notice-read-content .notice-content-body .notice-rep,
-#notice-read-content .notice-content-body .sign-text,
-#notice-read-content .notice-content-body .sign-mark-text {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .notice-name-main,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .notice-rep,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .sign-text,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .sign-mark-text {
   white-space: normal !important;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-#notice-read-content .notice-content-body .notice-table-scroll {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .notice-table-scroll {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-#notice-read-content .notice-content-body .notice-table-scroll > table {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) .notice-table-scroll > table {
   width: max-content !important;
   min-width: 100% !important;
   max-width: none !important;
   display: table !important;
 }
-#notice-read-content .notice-content-body table {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) table {
   width: 100% !important;
   max-width: 100% !important;
   border-collapse: collapse;
 }
-#notice-read-content .notice-content-body th,
-#notice-read-content .notice-content-body td {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) th,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) td {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -245,15 +297,15 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
   width: 92px !important;
   height: 92px !important;
 }
-#notice-read-content .notice-content-body p,
-#notice-read-content .notice-content-body div,
-#notice-read-content .notice-content-body span,
-#notice-read-content .notice-content-body li {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) p,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) div,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) span,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) li {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-#notice-read-content .notice-content-body pre,
-#notice-read-content .notice-content-body code {
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) pre,
+#notice-read-content .notice-content-body:not(.notice-content-body--fixed) code {
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -264,11 +316,11 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
   #noticeDetailModal .notice-detail-modal-body {
     padding: 1rem !important;
   }
-  #notice-read-content .notice-content-body .title {
+  #notice-read-content .notice-content-body:not(.notice-content-body--fixed) .title {
     font-size: clamp(1.3rem, 6.2vw, 2rem) !important;
     letter-spacing: 0.12em !important;
   }
-  #notice-read-content .notice-content-body .intro {
+  #notice-read-content .notice-content-body:not(.notice-content-body--fixed) .intro {
     font-size: 0.95rem !important;
     line-height: 1.6 !important;
   }
@@ -284,7 +336,8 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
   #noticeDetailModal .modal-footer .btn {
     flex: 1 1 calc(50% - 0.5rem);
   }
-  </style>
+}
+</style>
 
 <div class="modal fade" id="noticeDetailModal" tabindex="-1" >
   <div class="modal-dialog modal-dialog-centered modal-lg notice-detail-modal-dialog">
@@ -332,7 +385,11 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
         if (!force && cache.length > 0) return cache;
         const client = getClient();
         if (!client) return [];
-        const { data, error } = await client.from('coop_notices').select('*').order('created_at', { ascending: false }).limit(200);
+        let query = await scopeVisibleNoticeTenant(client.from('coop_notices').select('*'));
+        if (isPublicNoticeContext()) {
+            query = query.eq('status', 'published').eq('is_members_only', false);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
         if (error) return [];
         cache = data || [];
         return cache;
@@ -341,7 +398,11 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
     async function fetchNoticeById(id) {
         const client = getClient();
         if (!client) return null;
-        const { data, error } = await client.from('coop_notices').select('*').eq('id', id).single();
+        let query = await scopeVisibleNoticeTenant(client.from('coop_notices').select('*').eq('id', id));
+        if (isPublicNoticeContext()) {
+            query = query.eq('status', 'published').eq('is_members_only', false);
+        }
+        const { data, error } = await query.single();
         if (error) return null;
         return data || null;
     }
@@ -350,12 +411,12 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
         const client = getClient();
         if (!client || !noticeId) return null;
 
-        const { data, error } = await client
+        const { data, error } = await (await scopeVisibleNoticeTenant(client
             .from('coop_elected_notice_snapshots')
             .select('content_html,status')
             .eq('notice_id', noticeId)
             .eq('status', 'PUBLISHED')
-            .maybeSingle();
+            .maybeSingle()));
 
         if (error) {
             const code = String(error.code || '');
@@ -413,12 +474,24 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
         if (typeof window.showModal === 'function') return window.showModal(msg);
     }
 
-    function normalizeNoticeDetailContent(contentEl) {
+    function normalizeNoticeDetailContent(contentEl, options = {}) {
         if (!contentEl) return;
         const body = contentEl.querySelector('.notice-content-body');
         if (!body) return;
 
+        const preserveFixedLayout = Boolean(options.preserveFixedLayout);
+        body.classList.toggle('notice-content-body--fixed', preserveFixedLayout);
         body.querySelectorAll('.print-bar').forEach(el => { el.style.display = 'none'; });
+
+        if (preserveFixedLayout) {
+            body.querySelectorAll('img, video, canvas, svg, iframe').forEach(media => {
+                if (media.classList && media.classList.contains('seal')) return;
+                media.style.maxWidth = '100%';
+                media.style.height = 'auto';
+            });
+            return;
+        }
+
         body.querySelectorAll('.doc').forEach(el => {
             el.style.width = '100%';
             el.style.maxWidth = '100%';
@@ -504,7 +577,7 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
         const safeBody = escapeHtml(body).replace(/\n/g, '<br>');
         const dateLabel = formatKoreanDate(n.created_at);
 
-        const orgNameRaw = companyInfo?.orgName || companyInfo?.company_name || '용인모두의햇빛협동조합';
+        const orgNameRaw = companyInfo?.orgName || companyInfo?.company_name || '협동조합';
         const chairmanRaw = companyInfo?.chairman_name || companyInfo?.ceoName || '';
         const orgName = escapeHtml(orgNameRaw);
         const chairman = chairmanRaw ? escapeHtml(chairmanRaw) : '';
@@ -558,10 +631,12 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
         const snapshot = await fetchPublishedElectedNoticeSnapshot(n.id);
 
         let contentHtml = '';
+        const preserveFixedLayout = Boolean(snapshot?.content_html);
         if (snapshot?.content_html) {
             contentHtml = String(snapshot.content_html);
             const electionSealUrl = await loadElectionSealUrl();
             contentHtml = refreshElectionSealInSnapshotHtml(contentHtml, electionSealUrl);
+            contentHtml = flattenSnapshotDocumentHtml(contentHtml);
         } else if (n.category === '공문') {
             const info = await loadCompanyInfo();
             const sealUrl = await loadSealUrl();
@@ -605,8 +680,9 @@ Change: 2026-03-05 - Refresh election seal URL on snapshot render to prevent sig
 
         const contentEl = document.getElementById('notice-read-content');
         if (contentEl) {
-            contentEl.innerHTML = `<div class="notice-content-body">${contentHtml}</div>`;
-            normalizeNoticeDetailContent(contentEl);
+            const bodyClass = preserveFixedLayout ? 'notice-content-body notice-content-body--fixed' : 'notice-content-body';
+            contentEl.innerHTML = `<div class="${bodyClass}">${contentHtml}</div>`;
+            normalizeNoticeDetailContent(contentEl, { preserveFixedLayout });
         }
 
         if (typeof bootstrap !== 'undefined') {

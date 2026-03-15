@@ -526,9 +526,30 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
 async function fetchReceiptIssuerInfo(supabaseClient) {
     if (!supabaseClient) return {};
     try {
-        const { data, error } = await supabaseClient
+        // [2026-03-15] tenant hardening: coop_id를 확인하지 못하면 발급기관 정보를 읽지 않는다.
+        let coopId = '';
+        if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+                const storedUser = JSON.parse(window.localStorage.getItem('erp_user') || 'null');
+                coopId = String(storedUser?.coop_id || '').trim();
+            } catch (_) {
+                coopId = '';
+            }
+        }
+        if (!coopId && typeof supabaseClient.rpc === 'function') {
+            try {
+                const { data, error } = await supabaseClient.rpc('get_my_coop_id');
+                if (!error) coopId = String(data || '').trim();
+            } catch (_) {
+                coopId = '';
+            }
+        }
+        if (!coopId) return {};
+        let query = supabaseClient
             .from('ref_company_info')
-            .select('key, value');
+            .select('key, value')
+            .eq('coop_id', coopId);
+        const { data, error } = await query;
         if (error || !Array.isArray(data)) return {};
         const info = {};
         data.forEach((row) => {
