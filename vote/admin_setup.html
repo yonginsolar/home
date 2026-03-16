@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.4
-Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
+Version: v1.0.7
+Change: 2026-03-15 - Require member management linkage for election admin setup.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 관리 대시보드</title>
-    <script>console.log('[Version] v1.0.4 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.7 | admin_setup.html');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    
+
 <style>
     /* [기본 변수] */
     :root {
@@ -53,7 +54,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
         cursor: pointer; transition: all 0.2s ease;
     }
     .active-election-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    
+
     .card-actions { display: flex; gap: 8px; margin-left: 20px; }
     .btn-control { padding: 6px 12px; border-radius: 4px; border: none; font-size: 0.85rem; font-weight: bold; cursor: pointer; transition: background 0.2s; }
     .btn-pause { background: #f59e0b; color: white; }
@@ -64,12 +65,12 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
 
     /* [모달 공통] */
     .modal-overlay {
-        position: fixed; 
-        top: 0; 
-        left: 0; 
-        width: 100%; 
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
         height: 100%;
-        background-color: var(--bg-overlay); 
+        background-color: var(--bg-overlay);
         z-index: 9999;
         display: none; /* JS에서 flex로 변경됨 */
         justify-content: center; /* 가로 중앙 */
@@ -97,7 +98,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
     .preview-table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.9rem; }
     .preview-table th, .preview-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
     .btn-delete { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
-    
+
     /* [Step 폼 스타일] */
     .form-group { margin-bottom: 1rem; }
     .form-label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; color: #374151; }
@@ -109,26 +110,26 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
     .panel { flex: 1; display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 8px; background: white; overflow: hidden; }
     .panel-header { padding: 10px 15px; background: #f9fafb; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
     .panel-body { flex: 1; overflow-y: auto; padding: 10px; }
-    
+
     .search-box { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; }
-    
+
     /* [기존 스타일 유지...] */
-    
+
     /* [수정] 주소 전체 보기용 스타일 (제안 A 적용) */
     .member-item { display: flex; align-items: flex-start; /* 위쪽 정렬로 변경 */ padding: 10px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background 0.1s; }
     .member-item:hover { background: #f0f9ff; }
     .member-item.selected { background: #dbeafe; border-left: 4px solid var(--color-primary); }
-    
+
     .member-info { flex: 1; font-size: 0.9rem; line-height: 1.4; }
     .member-info strong { font-size: 0.95rem; color: #333; }
     .member-info small { color: #888; letter-spacing: 0; }
-    
+
     /* 주소 스타일: 줄바꿈 허용, 폰트 축소, 회색 */
-    .member-address { 
-        display: block; 
-        margin-top: 4px; 
-        font-size: 0.85rem; 
-        color: #6b7280; 
+    .member-address {
+        display: block;
+        margin-top: 4px;
+        font-size: 0.85rem;
+        color: #6b7280;
         word-break: keep-all; /* 단어 단위 줄바꿈 */
         white-space: normal;  /* 줄바꿈 허용 */
     }
@@ -155,7 +156,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
     </header>
 
     <div class="container active">
-        
+
 
 
         <div id="dashboard-section" style="display:none;">
@@ -182,10 +183,10 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
                 <h2 style="margin:0;">⚙️ 선거 생성</h2>
                 <button onclick="location.reload()" style="border:1px solid #ddd; background:#fff; padding:6px 12px; border-radius:4px; cursor:pointer;">취소</button>
             </div>
-            
+
             <div class="admin-panel" style="padding:1.5rem; border:1px solid #ccc; border-radius:8px; margin-bottom:10px;">
     <h3>Step 1. 기본 정보 및 일정</h3>
-    
+
     <div class="form-group">
         <label class="form-label">선거명</label>
         <input type="text" id="election-title" placeholder="예: 2026년 임원 선출의 건" class="form-input" style="width:100%; box-sizing:border-box;">
@@ -216,15 +217,15 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
         <div class="form-helper">* 후보 등록 마감 이후로 설정하는 것을 권장합니다.</div>
     </div>
 
-    <button onclick="createElection()" style="margin-top:1rem; padding:10px; background:var(--color-primary); color:white; border:none; width:100%; cursor:pointer; border-radius:6px; font-weight:bold;">설정 저장 후 다음</button>
+    <button id="btnCreateElection" onclick="createElection()" style="margin-top:1rem; padding:10px; background:var(--color-primary); color:white; border:none; width:100%; cursor:pointer; border-radius:6px; font-weight:bold;">설정 저장 후 다음</button>
 </div>
-            
+
 <div id="step-2" style="display:none; margin-top:1rem; padding:1.5rem; border:1px solid #ccc; border-radius:8px;">
                 <h3>Step 2. 선거구 및 선출 인원</h3>
                 <p style="font-size:0.9rem; color:#666; margin-bottom:1rem;">
                     선거구를 등록하세요. '비례대표'는 모든 조합원이 포함될 수 있는 중복 허용 선거구입니다.
                 </p>
-                
+
                 <div style="background:#f9fafb; padding:15px; border-radius:8px; margin-bottom:15px;">
                     <div class="form-row" style="align-items: flex-end;">
                         <div style="flex:2;">
@@ -265,7 +266,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
 
 <div id="step-3" style="display:none; margin-top:1rem;">
                 <h3 style="margin-bottom:15px;">Step 3. 선거인 명부 관리</h3>
-                
+
                 <div style="background:#f0f9ff; padding:20px; border-radius:8px; border:1px solid #bae6fd; text-align:center; margin-bottom:20px;">
                     <label style="font-size:1.1rem; font-weight:bold; color:#0369a1; display:block; margin-bottom:10px;">
                         📌 작업할 선거구를 먼저 선택해주세요
@@ -325,7 +326,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
                         </div>
                     </div>
                 </div>
-                
+
                 <div style="margin-top:20px; text-align:right;">
                      <button onclick="finishSetup()" style="padding:12px 24px; background:#1f2937; color:white; border:none; border-radius:6px; font-size:1rem; font-weight:bold; cursor:pointer;">
                         🎉 선거 설정 완료 (대시보드로)
@@ -357,6 +358,7 @@ Change: 2026-02-05 - Avoid KST helper name collision with shared scripts.
         </div>
     </div>
 
+<script src="../erp/erp_runtime_guard.js"></script>
 <script type="module">
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -399,7 +401,7 @@ function escapeHtml(value) {
         if (Number.isNaN(d.getTime())) return fallback;
         return d.toLocaleString('ko-KR', { timeZone: KST_TZ_ADMIN_SETUP });
     };
-    
+
     let newElectionId = null;
     let createdDistricts = {};
     const adminService = new AdminService();
@@ -411,15 +413,79 @@ function escapeHtml(value) {
     let districtsCache = [];  // 선거구 정보 캐시 (중복 체크용)
     let selectedMemberIds = new Set(); // 왼쪽 패널 선택
     let selectedVoterIds = new Set();  // 오른쪽 패널 선택
+    let createElectionInFlight = false;
+    let currentCoopId = null;
+    const voteAdminSetupMode = (() => {
+        try {
+            return String(new URLSearchParams(window.location.search || '').get('mode') || '').trim().toLowerCase();
+        } catch (_) {
+            return '';
+        }
+    })();
+
+    const withTenantPayload = (payload) => {
+        if (!currentCoopId || !payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+        return { ...payload, coop_id: currentCoopId };
+    };
+
+    const withTenantRows = (rows) => {
+        if (!currentCoopId || !Array.isArray(rows)) return rows;
+        return rows.map((row) => withTenantPayload(row));
+    };
+
+    const normalizeMemberType = (memberType) => {
+        const raw = String(memberType || '').trim();
+        return raw || '개인';
+    };
+
+    const buildElectionVoterSnapshot = (member) => {
+        const memberType = normalizeMemberType(member?.member_type);
+        const isOrganization = memberType === '단체' || memberType.toLowerCase() === 'organization';
+        const identityCode = isOrganization
+            ? (member?.corp_number || member?.business_number || member?.member_id || '')
+            : (member?.member_id || '');
+        const identityKind = isOrganization
+            ? (member?.corp_number ? 'corp_number' : member?.business_number ? 'business_number' : member?.member_id ? 'member_id' : '')
+            : (member?.member_id ? 'member_id' : '');
+
+        return {
+            voter_name: member?.name || null,
+            voter_type: memberType,
+            voter_identity_code: identityCode || null,
+            voter_identity_kind: identityKind || null,
+            voter_birth_date: member?.birth_date || null,
+            voter_phone: member?.phone || null,
+            voter_email: member?.email || null
+        };
+    };
+
+    const withElectionVoterSnapshot = (payload, member) => ({
+        ...payload,
+        ...buildElectionVoterSnapshot(member)
+    });
+
+    const scopeByTenant = (query) => {
+        const safeCoopId = String(currentCoopId || '').trim();
+        return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+    };
+
+    function setCreateElectionBusy(isBusy) {
+        const btn = document.getElementById('btnCreateElection');
+        if (!btn) return;
+        btn.disabled = !!isBusy;
+        btn.style.opacity = isBusy ? '0.6' : '1';
+        btn.style.cursor = isBusy ? 'not-allowed' : 'pointer';
+        btn.innerText = isBusy ? '저장 중...' : '설정 저장 후 다음';
+    }
 
     // -----------------------------------------------------------
     // [Step 2] 선거구 관리 (수정/삭제/비례 포함)
     // -----------------------------------------------------------
-    
+
     // 선거구 추가/수정 함수
     window.addDistrict = async () => {
         if(!newElectionId) return window.showAlert('Step 1 저장을 먼저 해주세요.');
-        
+
         const name = document.getElementById('dist-name').value.trim();
         const code = document.getElementById('dist-code').value.trim();
         const quota = document.getElementById('dist-quota').value;
@@ -430,7 +496,7 @@ function escapeHtml(value) {
 
         const payload = {
             election_id: newElectionId,
-            name, code, quota: parseInt(quota), 
+            name, code, quota: parseInt(quota),
             vote_type: type,
             is_common: isCommon
         };
@@ -439,13 +505,14 @@ function escapeHtml(value) {
 
         // [수정 모드]
         if (editingDistrictId) {
-            const { data, error } = await supabase.from('districts')
-                .update(payload).eq('id', editingDistrictId).select().single();
+            const { data, error } = await scopeByTenant(
+                supabase.from('districts').update(withTenantPayload(payload))
+            ).eq('id', editingDistrictId).select().single();
             if(error) return window.showAlert('수정 실패: ' + error.message);
             resultData = data;
             window.showAlert('수정되었습니다.');
             clearDistrictInputs(); // 초기화
-        } 
+        }
         // [추가 모드]
         else {
              // 코드 중복 체크 (DB단에서도 막히지만 UX를 위해)
@@ -457,11 +524,11 @@ function escapeHtml(value) {
             }
 
             const { data, error } = await supabase.from('districts')
-                .insert(payload).select().single();
+                .insert(withTenantPayload(payload)).select().single();
             if(error) return window.showAlert('추가 실패: ' + error.message);
             resultData = data;
         }
-        
+
         await loadDistrictsList(); // 리스트 갱신
     };
 
@@ -487,7 +554,9 @@ function escapeHtml(value) {
     // 삭제 버튼 클릭 시
     window.deleteDistrict = async (id) => {
         if(!confirm('선거구를 삭제하시겠습니까?\n등록된 명부도 함께 삭제됩니다.')) return;
-        const { error } = await supabase.from('districts').delete().eq('id', id);
+        const { error } = await scopeByTenant(
+            supabase.from('districts').delete()
+        ).eq('id', id);
         if(error) window.showAlert(error.message);
         else loadDistrictsList();
     };
@@ -496,15 +565,16 @@ function escapeHtml(value) {
     async function loadDistrictsList() {
         if(!newElectionId) return;
 
-        const { data, error } = await supabase.from('districts')
-            .select('*').eq('election_id', newElectionId).order('created_at');
-        
+        const { data, error } = await scopeByTenant(
+            supabase.from('districts').select('*')
+        ).eq('election_id', newElectionId).order('created_at');
+
         if(error) return;
         districtsCache = data;
 
         const listEl = document.getElementById('district-list');
         const selectEl = document.getElementById('target-district-select'); // Step 3 셀렉트박스
-        
+
         // 초기화
         listEl.innerHTML = '';
         selectEl.innerHTML = '<option value="">선거구를 선택하세요</option>'; // 기본값 복구
@@ -512,10 +582,10 @@ function escapeHtml(value) {
         if(data.length > 0) {
             document.getElementById('district-warning').innerText = `✅ 총 ${data.length}개 선거구 등록됨`;
             document.getElementById('district-warning').style.color = 'green';
-            
+
             // Step 3 영역 보이기
             document.getElementById('step-3').style.display = 'block';
-            
+
             // Step 3용 조합원 데이터 미리 로드 (없으면)
             if(allMembers.length === 0) fetchAllMembers();
         } else {
@@ -559,13 +629,14 @@ function escapeHtml(value) {
     async function fetchAllMembers() {
         // status가 'ACTIVE'(또는 '정상')인 사람만 가져오기
         // DB에 저장된 값이 한글 '정상'이라면 .eq('status', '정상') 으로 변경하세요.
-        const { data, error } = await supabase.from('coop_members')
-            .select('id, member_id, name, phone, address')
+        const { data, error } = await scopeByTenant(
+            supabase.from('coop_members').select('id, member_id, name, phone, address, email, birth_date, member_type, corp_number, business_number')
+        )
             .eq('status', '정상') // <--- 여기가 핵심 변경 사항입니다.
             .order('name');
-        
+
         if(error) return window.showAlert('조합원 DB 로드 실패: ' + error.message);
-        
+
         allMembers = data;
         document.getElementById('total-member-count').innerText = `${data.length}명 (정조합원)`;
         renderSourceList(data);
@@ -579,7 +650,7 @@ function escapeHtml(value) {
         currentSourceList = list; // 현재 리스트 저장 (전체 선택을 위해)
         const container = document.getElementById('source-list');
         container.innerHTML = '';
-        
+
         // 전체 선택 체크박스 상태 동기화 (UI 초기화)
         document.getElementById('cb-select-all').checked = false;
 
@@ -588,7 +659,7 @@ function escapeHtml(value) {
             // 이미 선택된 상태면 클래스 추가
             div.className = `member-item ${selectedMemberIds.has(m.id) ? 'selected' : ''}`;
             div.onclick = () => toggleSelection(m.id, 'source', div);
-            
+
             // [A안] 주소 전체 노출 (줄바꿈 허용)
             const addrText = m.address || '(주소 없음)';
             const safeAddr = escapeHtml(addrText);
@@ -612,7 +683,7 @@ function escapeHtml(value) {
 
         currentSourceList.forEach(m => {
             const el = document.querySelectorAll('#source-list .member-item')[currentSourceList.indexOf(m)];
-            
+
             if (isChecked) {
                 selectedMemberIds.add(m.id);
                 if(el) el.classList.add('selected');
@@ -635,13 +706,14 @@ function escapeHtml(value) {
         }
 
         // 2. '지역구'에 등록된 유권자만 DB에서 조회 (비례대표 등록자는 조회 안 함)
-        const { data: assigned, error } = await supabase.from('election_voters')
-            .select('member_uuid')
+        const { data: assigned, error } = await scopeByTenant(
+            supabase.from('election_voters').select('member_uuid')
+        )
             .eq('election_id', newElectionId)
             .in('district_id', regionalDistIds); // 지역구 ID 목록에 포함된 사람만
-        
+
         if(error) return window.showAlert('데이터 조회 실패: ' + error.message);
-        
+
         // 3. Set으로 변환 (지역구 배정된 사람들의 ID 집합)
         const assignedIds = new Set(assigned.map(v => v.member_uuid));
 
@@ -651,7 +723,7 @@ function escapeHtml(value) {
 
         // 5. 렌더링
         renderSourceList(unassignedMembers);
-        
+
         // 안내 메시지
         if (unassignedMembers.length === 0) {
             window.showAlert("모든 조합원이 지역구에 배정되었습니다! 🎉");
@@ -675,14 +747,16 @@ function escapeHtml(value) {
 
         // 로직 실행 함수 (중복 처리 후 실행됨)
         const executeInsert = async (finalTargets) => {
-            const payload = finalTargets.map(m => ({
-                election_id: newElectionId, district_id: distId,
-                member_uuid: m.id, member_no: m.member_id
-            }));
+            const payload = finalTargets.map(m => withElectionVoterSnapshot({
+                election_id: newElectionId,
+                district_id: distId,
+                member_uuid: m.id,
+                member_no: m.member_id
+            }, m));
 
             const { error } = await supabase
                 .from('election_voters')
-                .upsert(payload, { onConflict: 'election_id,district_id,member_uuid' });
+                .upsert(withTenantRows(payload), { onConflict: 'election_id,district_id,member_uuid' });
             if(error) return window.showAlert('등록 실패: ' + error.message);
 
             window.showAlert(`${finalTargets.length}명 등록 완료!`);
@@ -696,8 +770,9 @@ function escapeHtml(value) {
         if (!targetDist.is_common) {
             const otherDistrictIds = districtsCache.filter(d => !d.is_common && d.id !== distId).map(d => d.id);
             if(otherDistrictIds.length > 0) {
-                const { data: collisions } = await supabase.from('election_voters')
-                    .select('member_uuid, district_id')
+                const { data: collisions } = await scopeByTenant(
+                    supabase.from('election_voters').select('member_uuid, district_id')
+                )
                     .eq('election_id', newElectionId)
                     .in('member_uuid', realTargets.map(m => m.id))
                     .in('district_id', otherDistrictIds);
@@ -708,11 +783,11 @@ function escapeHtml(value) {
                         `⚠️ ${collisions.length}명이 다른 지역구에 이미 등록되어 있습니다.\n이동하시겠습니까?`,
                         async () => {
                             // 이동 처리: 기존 삭제
-                            await supabase.from('election_voters').delete()
+                            await scopeByTenant(supabase.from('election_voters').delete())
                                 .eq('election_id', newElectionId)
                                 .in('member_uuid', collisions.map(c => c.member_uuid))
                                 .in('district_id', otherDistrictIds);
-                            
+
                             // 삭제 후 입력 실행
                             await executeInsert(realTargets);
                         }
@@ -729,11 +804,13 @@ function escapeHtml(value) {
     // [수정] 유권자 삭제 (Confirm -> ShowConfirm)
     window.removeSelectedVoters = async () => {
         if(selectedVoterIds.size === 0) return window.showAlert('삭제할 인원을 선택하세요.');
-        
+
         window.showConfirm('선택한 인원을 명부에서 제외하시겠습니까?', async () => {
             const idsToDelete = Array.from(selectedVoterIds);
-            const { error } = await supabase.from('election_voters').delete().in('id', idsToDelete);
-            
+            const { error } = await scopeByTenant(
+                supabase.from('election_voters').delete()
+            ).in('id', idsToDelete);
+
             if(error) window.showAlert('삭제 실패');
             else {
                 selectedVoterIds.clear();
@@ -745,8 +822,8 @@ function escapeHtml(value) {
     // 필터 기능 (검색 & 버튼)
     window.filterMembers = () => {
         const keyword = document.getElementById('search-member').value.toLowerCase();
-        const filtered = allMembers.filter(m => 
-            m.name.toLowerCase().includes(keyword) || 
+        const filtered = allMembers.filter(m =>
+            m.name.toLowerCase().includes(keyword) ||
             (m.address && m.address.toLowerCase().includes(keyword)) ||
             m.phone.includes(keyword)
         );
@@ -761,7 +838,7 @@ function escapeHtml(value) {
 // [수정] 선거구 유권자 로드 (UX 변경 대응)
     window.loadDistrictVoters = async () => {
         const distId = document.getElementById('target-district-select').value;
-        
+
         // 1. 선거구가 선택되지 않았다면 패널을 숨김
         if(!distId) {
             document.getElementById('manage-panel').style.display = 'none';
@@ -773,11 +850,11 @@ function escapeHtml(value) {
 
         const dist = districtsCache.find(d => d.id === distId);
         document.getElementById('target-dist-name').innerText = dist.name;
-        
+
         // 버튼 텍스트/보임 여부 처리
         const btnAll = document.getElementById('btn-add-all-common');
         const btnSel = document.getElementById('btn-add-selected');
-        
+
         if(dist.is_common) {
             btnAll.style.display = 'block';
             btnSel.innerText = '선택 인원 추가 (중복 허용) >';
@@ -789,8 +866,9 @@ function escapeHtml(value) {
         }
 
         // 유권자 데이터 가져오기
-        const { data, error } = await supabase.from('election_voters')
-            .select('*, member:coop_members(name, member_id)')
+        const { data, error } = await scopeByTenant(
+            supabase.from('election_voters').select('*, member:coop_members(name, member_id, member_type)')
+        )
             .eq('election_id', newElectionId)
             .eq('district_id', distId)
             .order('created_at', { ascending: false }); // 최신순
@@ -804,12 +882,13 @@ function escapeHtml(value) {
     // [신규 추가] 오른쪽 패널(유권자) 검색 필터 함수 (에러 원인 해결)
     window.filterVoters = () => {
         const keyword = document.getElementById('search-voter').value.toLowerCase();
-        
+
         // currentVoters(현재 불러온 유권자)에서 검색
-        const filtered = currentVoters.filter(v => 
-            v.member.name.toLowerCase().includes(keyword) || 
-            v.member.member_id.includes(keyword)
-        );
+        const filtered = currentVoters.filter(v => {
+            const memberName = String(v.member?.name || v.voter_name || '').toLowerCase();
+            const memberCode = String(v.member?.member_id || v.member_no || v.voter_identity_code || '').toLowerCase();
+            return memberName.includes(keyword) || memberCode.includes(keyword);
+        });
         renderTargetList(filtered);
     };
 
@@ -820,11 +899,13 @@ function escapeHtml(value) {
             const div = document.createElement('div');
             div.className = `member-item ${selectedVoterIds.has(v.id) ? 'selected' : ''}`;
             div.onclick = () => toggleSelection(v.id, 'target', div);
-            const safeName = escapeHtml(v.member.name);
-            const safeMemberId = escapeHtml(v.member.member_id);
+            const safeName = escapeHtml(v.member?.name || v.voter_name || '이름 미등록');
+            const safeMemberId = escapeHtml(v.member?.member_id || v.member_no || v.voter_identity_code || '-');
+            const safeMemberType = escapeHtml(v.member?.member_type || v.voter_type || '');
+            const memberTypeBadge = safeMemberType ? ` <small style="color:#6b7280;">[${safeMemberType}]</small>` : '';
             div.innerHTML = `
                 <div class="member-info">
-                    <strong>${safeName}</strong> <small>(${safeMemberId})</small>
+                    <strong>${safeName}</strong> <small>(${safeMemberId})</small>${memberTypeBadge}
                 </div>
             `;
             container.appendChild(div);
@@ -850,15 +931,15 @@ function escapeHtml(value) {
 
         // 전체 인원 Payload 생성
         // (주의: 인원이 1000명 단위면 나눠서 보내야 할 수도 있으나, Supabase는 수천 건 정도는 한 번에 처리 가능)
-        const payload = allMembers.map(m => ({
+        const payload = allMembers.map(m => withElectionVoterSnapshot({
             election_id: newElectionId,
             district_id: distId,
             member_uuid: m.id,
             member_no: m.member_id
-        }));
+        }, m));
 
         const { error } = await supabase.from('election_voters')
-            .upsert(payload, { onConflict: 'election_id, district_id, member_uuid' }); // 중복 무시
+            .upsert(withTenantRows(payload), { onConflict: 'election_id, district_id, member_uuid' }); // 중복 무시
 
         if(error) window.showAlert('오류: ' + error.message);
         else {
@@ -883,16 +964,16 @@ window.finishSetup = async () => {
         async () => {
             try {
                 // 4. DB 상태 업데이트 (DRAFT -> PREPARE)
-                const { error } = await supabase
-                    .from('elections')
-                    .update({ status: 'PREPARE' })
+                const { error } = await scopeByTenant(
+                    supabase.from('elections').update(withTenantPayload({ status: 'PREPARE' }))
+                )
                     .eq('id', newElectionId);
 
                 if (error) throw error;
 
                 // 5. 성공 처리
                 window.showAlert("설정이 완료되었습니다! 🎉");
-                
+
                 // 임시 ID 제거 (더 이상 Draft가 아니므로)
                 localStorage.removeItem('draft_election_id');
                 newElectionId = null;
@@ -919,11 +1000,11 @@ window.finishSetup = async () => {
 
         // 메시지 줄바꿈 처리
     msgBox.innerHTML = escapeHtml(msg).replace(/\n/g, '<br>');
-        
+
         // 확인 버튼 (중앙 정렬)
         btnBox.innerHTML = `<button onclick="document.getElementById('common-alert-modal').style.display='none'" class="btn-modal btn-confirm">확인</button>`;
         btnBox.style.justifyContent = 'center'; // 버튼 중앙 정렬
-        
+
         modal.style.display = 'flex'; // flex로 띄워야 중앙에 옴
     };
 
@@ -933,9 +1014,9 @@ window.finishSetup = async () => {
         const btnBox = document.getElementById('common-alert-btns');
 
     msgBox.innerHTML = escapeHtml(msg).replace(/\n/g, '<br>');
-        
+
         btnBox.innerHTML = '';
-        
+
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'btn-modal btn-cancel';
         cancelBtn.innerText = '취소';
@@ -959,21 +1040,22 @@ window.finishSetup = async () => {
     // ----------------------------------------------------------------
 
     // [전역 변수] 중복 실행 방지용 잠금 장치 (하나만 남김)
-    
+
 
 async function loadPreviousElectionData() {
     // 가장 최근에 생성된 선거 1개를 조회
-    const { data, error } = await supabase.from('elections')
-        .select('*')
+    const { data, error } = await scopeByTenant(
+        supabase.from('elections').select('*')
+    )
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-        
+
     if (error || !data) return window.showAlert('불러올 이전 선거 데이터가 없습니다.');
 
     window.showConfirm(`최근 선거 '${data.title}'의 정보를 불러오시겠습니까?`, () => {
         document.getElementById('election-title').value = data.title + ' (복사본)';
-        
+
         // [추가] 공고일 복사 (이전 데이터에 있을 경우)
         if(data.announcement_date) {
             document.getElementById('announcement-date').value = data.announcement_date;
@@ -984,10 +1066,10 @@ async function loadPreviousElectionData() {
         if(data.candidacy_end_at) document.getElementById('candidacy-end').value = toKstInputValue(data.candidacy_end_at);
         if(data.vote_start_at) document.getElementById('vote-start').value = toKstInputValue(data.vote_start_at);
         if(data.vote_end_at) document.getElementById('vote-end').value = toKstInputValue(data.vote_end_at);
-        
+
         window.showAlert('데이터가 채워졌습니다.');
     });
-} 
+}
 // End of function loadPreviousElectionData
 
 function resetStep1Form() {
@@ -997,7 +1079,7 @@ function resetStep1Form() {
     document.getElementById('candidacy-end').value = '';
     document.getElementById('vote-start').value = '';
     document.getElementById('vote-end').value = '';
-} 
+}
 // End of function resetStep1Form
 
 // [신규] 상태 뱃지 업데이트 헬퍼 함수
@@ -1011,7 +1093,7 @@ function updateStatusBadge(status) {
     }
     badge.style.display = 'inline-block';
     badge.innerText = status === 'DRAFT' ? '작성 중' : status;
-    
+
     // 상태별 색상 적용
     if (status === 'DRAFT') {
         badge.style.background = '#fef3c7'; badge.style.color = '#d97706'; // 노랑
@@ -1026,7 +1108,7 @@ function updateStatusBadge(status) {
 // [전역 함수] 선거구 리스트 UI 생성 (수정/삭제 버튼 포함)
 function addDistrictToListUI(id, name, code, quota, type) {
     const list = document.getElementById('district-list');
-    
+
     // 기존에 같은 ID가 있으면 중복 생성 방지
     if (document.getElementById(`li-${id}`)) return;
 
@@ -1075,12 +1157,12 @@ function addButtonsToLi(container, id, name, code, quota, type) {
 
         // 2. 수정 모드 활성화
         editingDistrictId = id;
-        
+
         // 3. 메인 버튼 모양 변경
         const mainBtn = document.querySelector('#step-2 button[onclick="addDistrict()"]');
         mainBtn.innerText = '💾 수정 저장';
         mainBtn.style.background = '#2563eb'; // 파란색으로 강조
-        
+
         // 4. 스크롤을 입력창 쪽으로 살짝 이동 (UX)
         document.getElementById('step-2').scrollIntoView({ behavior: 'smooth' });
     };
@@ -1093,7 +1175,9 @@ function addButtonsToLi(container, id, name, code, quota, type) {
         if (!confirm('정말 삭제하시겠습니까?')) return;
 
         // DB 삭제
-        const { error } = await supabase.from('districts').delete().eq('id', id);
+        const { error } = await scopeByTenant(
+            supabase.from('districts').delete()
+        ).eq('id', id);
         if (error) return window.showAlert('삭제 실패: ' + error.message);
 
         // DOM 및 메모리 삭제
@@ -1104,7 +1188,7 @@ function addButtonsToLi(container, id, name, code, quota, type) {
         if (editingDistrictId === id) {
             clearDistrictInputs();
         }
-        
+
         // 목록이 비었으면 Step 3 숨김
         if (document.getElementById('district-list').children.length === 0) {
             document.getElementById('step-3').style.display = 'none';
@@ -1122,7 +1206,7 @@ function clearDistrictInputs() {
     document.getElementById('dist-name').value = '';
     document.getElementById('dist-code').value = '';
     document.getElementById('dist-quota').value = '1';
-    
+
     editingDistrictId = null;
     const btn = document.querySelector('#step-2 button[onclick="addDistrict()"]');
     if(btn) {
@@ -1130,7 +1214,7 @@ function clearDistrictInputs() {
         btn.style.background = '#4b5563';
     }
 }
-    
+
     // ----------------------------------------------------------------
     // [3] 비즈니스 로직 (대시보드 등)
     // ----------------------------------------------------------------
@@ -1140,7 +1224,7 @@ function clearDistrictInputs() {
         const elections = await adminService.getAllElections();
         const activeContainer = document.getElementById('active-list');
         const timelineContainer = document.getElementById('history-timeline');
-        
+
         activeContainer.innerHTML = '';
         timelineContainer.innerHTML = '';
 
@@ -1154,7 +1238,7 @@ function clearDistrictInputs() {
             if (activeStatuses.includes(el.status)) {
                 const card = document.createElement('div');
                 card.className = 'active-election-card';
-                
+
                 // 상태별 뱃지 색상
                 let badgeColor = '#6b7280';
                 if(el.status === 'OPEN') badgeColor = 'var(--color-primary)';
@@ -1164,7 +1248,7 @@ function clearDistrictInputs() {
                 if (el.status === 'DRAFT') {
                     card.onclick = (e) => {
                         // 삭제 버튼 클릭 시 카드 클릭 이벤트 방지
-                        if(e.target.tagName === 'BUTTON') return; 
+                        if(e.target.tagName === 'BUTTON') return;
                         resumeSetup(el);
                     };
                     card.style.borderLeftColor = '#9ca3af';
@@ -1189,9 +1273,9 @@ function clearDistrictInputs() {
                         <span style="font-size:0.85rem; color:#666;">투표: ${startStr} ~ ${endStr}</span>
                     </div>
                     <div class="card-actions">
-                        ${el.status === 'OPEN' || el.status === 'PAUSED' ? 
+                        ${el.status === 'OPEN' || el.status === 'PAUSED' ?
                           `<button class="btn-control btn-stop" onclick="handleStatusChange(event, '${el.id}', 'ENDED')">종료</button>` : ''}
-                        
+
                         <button onclick="deleteElection('${el.id}')" style="margin-left:5px; padding:6px 12px; border-radius:4px; border:1px solid #fca5a5; background:#fee2e2; color:#dc2626; font-weight:bold; cursor:pointer;">
                             🗑️ 삭제
                         </button>
@@ -1214,8 +1298,10 @@ function clearDistrictInputs() {
     // [신규] 선거 삭제 함수
     window.deleteElection = async (id) => {
         if(!confirm('정말 이 선거를 삭제하시겠습니까?\n설정된 선거구와 명부 등 모든 데이터가 영구 삭제됩니다.')) return;
-        
-        const { error } = await supabase.from('elections').delete().eq('id', id);
+
+        const { error } = await scopeByTenant(
+            supabase.from('elections').delete()
+        ).eq('id', id);
         if(error) window.showAlert('삭제 실패: ' + error.message);
         else {
             window.showAlert('삭제되었습니다.');
@@ -1227,7 +1313,7 @@ window.resumeSetup = async (el) => {
     // 1. 화면 전환 (대시보드 숨김 -> 설정창 표시)
     document.getElementById('dashboard-section').style.display = 'none';
     document.getElementById('setup-section').style.display = 'block';
-    
+
     // 2. 전역 변수 설정 및 스토리지 저장 (새로고침 방어)
     newElectionId = el.id;
     localStorage.setItem('draft_election_id', newElectionId);
@@ -1235,12 +1321,12 @@ window.resumeSetup = async (el) => {
 
     // 3. Step 1 폼 데이터 채우기
     document.getElementById('election-title').value = el.title;
-    
+
     // [추가] 공고일 바인딩 (데이터가 있을 경우에만)
     if(el.announcement_date) {
         document.getElementById('announcement-date').value = el.announcement_date;
     }
-    
+
     // 날짜 데이터 포맷팅 및 바인딩 (YYYY-MM-DDTHH:mm)
     if(el.candidacy_start_at) document.getElementById('candidacy-start').value = toKstInputValue(el.candidacy_start_at);
     if(el.candidacy_end_at) document.getElementById('candidacy-end').value = toKstInputValue(el.candidacy_end_at);
@@ -1252,16 +1338,16 @@ window.resumeSetup = async (el) => {
     document.getElementById('district-list').innerHTML = ''; // 화면 리스트 초기화
 
     // DB에서 선거구 조회
-    const { data: districts } = await supabase
-        .from('districts')
-        .select('*')
+    const { data: districts } = await scopeByTenant(
+        supabase.from('districts').select('*')
+    )
         .eq('election_id', newElectionId);
-        
+
     // 선거구가 존재하면 리스트 생성
     if (districts && districts.length > 0) {
         districts.forEach(d => {
             createdDistricts[d.code] = d.id; // 중복 방지용 맵 업데이트
-            
+
             // UI 헬퍼 함수 사용하여 리스트 생성
             addDistrictToListUI(d.id, d.name, d.code, d.quota, d.vote_type);
         });
@@ -1278,7 +1364,7 @@ window.resumeSetup = async (el) => {
          document.getElementById('district-warning').innerText = '⚠️ 선거구는 최소 1개 이상 등록해야 합니다.';
          document.getElementById('district-warning').style.color = 'red';
     }
-}; 
+};
 // End of function resumeSetup
 
     // 상태 변경
@@ -1290,7 +1376,9 @@ window.resumeSetup = async (el) => {
         else if(newStatus === 'OPEN') warning = '투표를 재개하시겠습니까?';
 
         window.showConfirm(warning, async () => {
-            const { error } = await supabase.from('elections').update({ status: newStatus }).eq('id', electionId);
+            const { error } = await scopeByTenant(
+                supabase.from('elections').update(withTenantPayload({ status: newStatus }))
+            ).eq('id', electionId);
             if(error) window.showAlert('오류 발생: ' + error.message);
             else {
                 window.showAlert('상태가 변경되었습니다.');
@@ -1305,7 +1393,7 @@ window.resumeSetup = async (el) => {
 // [수정] 로그아웃 핸들러
     window.handleLogout = async () => {
         await supabase.auth.signOut();
-        window.location.href = 'vote_login.html'; // 선거 포털로 이동
+        window.location.href = '../erp/member_admin.html';
     };
 
 
@@ -1317,31 +1405,71 @@ window.resumeSetup = async (el) => {
         const { data: { session }, error } = await supabase.auth.getSession();
 
         if (error || !session) {
-            showAlert("로그인 정보가 없습니다. 선거 포털로 이동합니다.");
-            window.location.href = `../membermanage.html?next=${encodeURIComponent(window.location.href)}`; // 로그인 후 복귀
+            showAlert("로그인 정보가 없습니다. ERP 선거관리로 이동합니다.");
+            window.location.href = `../erp/index.html?next=${encodeURIComponent(window.location.href)}`;
             return;
         }
 
+        const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+            moduleKey: 'vote',
+            moduleLabel: '선거/투표',
+            redirectUrl: `../erp/index.html?next=${encodeURIComponent(window.location.href)}`,
+            alertFn: (msg) => showAlert(msg)
+        });
+        if (!runtimeCheck.ok) return;
+        const memberAdminEnabled = runtimeCheck.runtime?.modules?.member_admin !== false;
+        if (!memberAdminEnabled) {
+            showAlert("선거 기능은 조합원 관리 연동이 필요합니다.");
+            window.location.href = '../erp/member_admin.html';
+            return;
+        }
+        currentCoopId = runtimeCheck.runtime?.coop_id || null;
+
         // 2. 관리자 권한 확인 (DB 조회)
         try {
-            const { data: member, error: dbError } = await supabase
-                .from('coop_members')
-                .select('name, role, email')
+            let storedErpUser = null;
+            let storedErpPermissions = [];
+            try { storedErpUser = JSON.parse(localStorage.getItem('erp_user') || 'null'); } catch (_) {}
+            try {
+                const rawPermissions = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
+                storedErpPermissions = Array.isArray(rawPermissions) ? rawPermissions : [];
+            } catch (_) {}
+            const hasErpAdminFallback =
+                storedErpUser?.role === 'admin' ||
+                storedErpUser?.role === 'admin_all' ||
+                storedErpPermissions.includes('member.admin');
+            const { data: electionAdminFlag, error: electionAdminError } = await supabase.rpc('is_election_admin');
+            if (electionAdminError) {
+                console.error('admin_setup is_election_admin failed:', electionAdminError);
+            }
+            const hasElectionAdminAuthority = hasErpAdminFallback || electionAdminFlag === true;
+
+            let { data: member, error: dbError } = await scopeByTenant(
+                supabase.from('coop_members').select('name, role, email')
+            )
                 .eq('email', session.user.email)
                 .single();
 
-            if (dbError || !member) throw new Error("회원 정보를 찾을 수 없습니다.");
+            if ((dbError || !member) && hasElectionAdminAuthority) {
+                member = {
+                    name: storedErpUser?.name || storedErpUser?.full_name || session.user.email,
+                    role: 'admin',
+                    email: session.user.email
+                };
+            } else if (dbError || !member) {
+                throw new Error("회원 정보를 찾을 수 없습니다.");
+            }
 
             // role이 admin이 아니면 접속 불가
-            if (member.role !== 'admin' && member.role !== 'super_admin') {
-                showAlert("⛔ 관리자 권한이 필요합니다.");
-                window.location.href = 'vote_login.html'; // 쫓아내기
+            if (member.role !== 'admin' && member.role !== 'super_admin' && !hasElectionAdminAuthority) {
+                showAlert("⛔ 선거 관리 권한이 필요합니다.");
+                window.location.href = '../erp/member_admin.html';
                 return;
             }
 
             // 3. [성공] 대시보드 화면 표시
             console.log(`✅ 관리자 인증 성공: ${member.name}`);
-            
+
             // 상단 헤더 정보 표시 (필요 시)
             const headerInfo = document.getElementById('user-info-area');
             if(headerInfo) {
@@ -1351,14 +1479,19 @@ window.resumeSetup = async (el) => {
 
             // 대시보드 섹션 보이기
             document.getElementById('dashboard-section').style.display = 'block';
-            
+
+            if (voteAdminSetupMode === 'create') {
+                window.showCreateForm();
+                return;
+            }
+
             // 데이터 로드 시작
             await loadDashboard();
 
         } catch (e) {
             console.error(e);
             showAlert("권한 확인 중 오류: " + e.message);
-            window.location.href = 'vote_login.html';
+            window.location.href = '../erp/member_admin.html';
         }
     }
 
@@ -1368,6 +1501,9 @@ window.resumeSetup = async (el) => {
     };
 
 window.createElection = async () => {
+    if (createElectionInFlight) {
+        return window.showAlert('이미 저장 중입니다. 잠시만 기다려주세요.');
+    }
     const title = document.getElementById('election-title').value;
     const announceDate = document.getElementById('announcement-date').value; // [추가]
     const cS = document.getElementById('candidacy-start').value;
@@ -1383,30 +1519,56 @@ window.createElection = async () => {
     if(!title || !announceDate || !cS || !cE || !vS || !vE || !cSUTC || !cEUTC || !vSUTC || !vEUTC) {
         return window.showAlert('선거명, 공고일, 기간 등 모든 정보를 입력하세요.');
     }
-    
+
     // 논리적 유효성 검사
     if(new Date(cSUTC) >= new Date(cEUTC)) return window.showAlert('후보 등록 종료일이 시작일보다 앞설 수 없습니다.');
     if(new Date(vSUTC) >= new Date(vEUTC)) return window.showAlert('투표 종료일이 시작일보다 앞설 수 없습니다.');
 
-    // [DB Insert] announcement_date 추가
-    const { data, error } = await supabase.from('elections').insert({
-        title, 
-        announcement_date: announceDate, // [추가]
-        candidacy_start_at: cSUTC, 
-        candidacy_end_at: cEUTC,
-        vote_start_at: vSUTC, 
-        vote_end_at: vEUTC,
-        start_at: cSUTC, // 전체 시작 기준을 후보 등록 시작으로 유지 (필요시 공고일로 변경 가능)
-        end_at: vEUTC, 
-        status: 'DRAFT'
-    }).select().single();
+    createElectionInFlight = true;
+    setCreateElectionBusy(true);
+    try {
+        const { data: existingRows, error: existingError } = await scopeByTenant(
+            supabase.from('elections').select('id')
+        )
+            .eq('title', title)
+            .eq('announcement_date', announceDate)
+            .eq('candidacy_start_at', cSUTC)
+            .eq('candidacy_end_at', cEUTC)
+            .eq('vote_start_at', vSUTC)
+            .eq('vote_end_at', vEUTC)
+            .order('created_at', { ascending: false })
+            .limit(1);
+        if (existingError) return window.showAlert('중복 확인 실패: ' + existingError.message);
+        if (Array.isArray(existingRows) && existingRows.length > 0) {
+            newElectionId = existingRows[0].id;
+            window.showAlert('동일한 임시 선거가 이미 존재합니다.\n기존 데이터를 이어서 설정합니다.');
+            document.getElementById('step-2').style.display = 'block';
+            return;
+        }
 
-    if(error) return window.showAlert('생성 실패: ' + error.message);
+        // [DB Insert] announcement_date 추가
+        const { data, error } = await supabase.from('elections').insert(withTenantPayload({
+            title,
+            announcement_date: announceDate, // [추가]
+            candidacy_start_at: cSUTC,
+            candidacy_end_at: cEUTC,
+            vote_start_at: vSUTC,
+            vote_end_at: vEUTC,
+            start_at: cSUTC, // 전체 시작 기준을 후보 등록 시작으로 유지 (필요시 공고일로 변경 가능)
+            end_at: vEUTC,
+            status: 'DRAFT'
+        })).select().single();
 
-    newElectionId = data.id;
-    window.showAlert('임시 저장되었습니다.\n선거구 설정을 계속해주세요.');
-    document.getElementById('step-2').style.display = 'block';
-}; 
+        if(error) return window.showAlert('생성 실패: ' + error.message);
+
+        newElectionId = data.id;
+        window.showAlert('임시 저장되었습니다.\n선거구 설정을 계속해주세요.');
+        document.getElementById('step-2').style.display = 'block';
+    } finally {
+        createElectionInFlight = false;
+        setCreateElectionBusy(false);
+    }
+};
 // End of function createElection
 
 
@@ -1417,7 +1579,7 @@ window.createElection = async () => {
         const vStart = formatVoteSetupKstDate(el.vote_start_at, '-');
         const vEnd = formatVoteSetupKstDate(el.vote_end_at, '-');
         document.getElementById('modal-period').innerText = `${vStart} ~ ${vEnd}`;
-        
+
         try {
             const stats = await adminService.getTurnoutStats(el.id);
             document.getElementById('modal-total').innerText = stats.total;

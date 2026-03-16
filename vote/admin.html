@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.37
-Change: 2026-02-12 - On final publish, save elected notice snapshot and link notice rendering to snapshot content.
+Version: v1.0.40
+Change: 2026-03-15 - Require member management linkage for election admin flows.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.37 | admin.html');</script>
+    <script>console.log('[Version] v1.0.40 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -271,7 +272,7 @@ Change: 2026-02-12 - On final publish, save elected notice snapshot and link not
 
 <div class="top-nav">
     <button class="btn-nav" onclick="history.back()">← 뒤로</button>
-    <button class="btn-nav" onclick="location.href='../membermanage.html'">🏠 조합원 관리</button>
+    <button class="btn-nav" onclick="location.href='../erp/member_admin.html'">🏠 조합원 관리</button>
 </div>
 
 <header>
@@ -617,6 +618,8 @@ Change: 2026-02-12 - On final publish, save elected notice snapshot and link not
 <input type="hidden" id="selected-cand-address">
 <input type="hidden" id="selected-cand-birth">
 <input type="hidden" id="selected-cand-member-type">
+<input type="hidden" id="selected-cand-identity-code">
+<input type="hidden" id="selected-cand-identity-kind">
 
                 <div id="selected-cand-display" style="margin-top:5px; font-weight:bold; color:var(--primary-blue); display:none;"></div>
             </div>
@@ -669,11 +672,19 @@ Change: 2026-02-12 - On final publish, save elected notice snapshot and link not
             </div>
         </div>
     </div>
+<script src="../erp/erp_runtime_guard.js"></script>
 <script type="module">
 function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[ch]));
+}
+function sanitizeOrKeyword(value) {
+    return String(value ?? '')
+        .replace(/[,%()]/g, ' ')
+        .replace(/["'`]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 function escapeJsString(value) {
     return String(value ?? '')
@@ -707,14 +718,30 @@ function escapeJsString(value) {
     let cachedCandidates = [];
     let currentCandidateFilter = 'all';
     let currentUserEmail = ''; // [신규] 현재 작업자 이메일 저장용
+    let currentCoopId = null;
     let currentElectionVoteSummary = null;
     let isCurrentElectionUncontestedAutoFlow = false;
-    const ELECTION_NOTICE_SEAL_FALLBACK_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/sign/attachments/ec_seal.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9hODQwZDg5Ny04MTM1LTQ2YTItODhjYi05YzI0ODUyM2ZhOWUiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhdHRhY2htZW50cy9lY19zZWFsLnBuZyIsImlhdCI6MTc3MDg1NjU2NywiZXhwIjoxNzcxNDYxMzY3fQ.lw6MsofHQp2oTjJmrioGX9DrpzRrJ5pWF6uNcz8Ldl8';
+    const ELECTION_NOTICE_SEAL_FALLBACK_URL = '';
     const ELECTION_NOTICE_DOC_PREFIX = '공고 제';
     const ELECTION_NOTICE_CATEGORY = '선거공고';
     const ELECTION_NOTICE_TITLE = '당선인 공고문';
     const ELECTED_NOTICE_MAX_DOCNO_RETRY = 5;
     let isStatusTransitionInFlight = false;
+
+    const withTenantPayload = (payload) => {
+        if (!currentCoopId || !payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+        return { ...payload, coop_id: currentCoopId };
+    };
+
+    const withTenantRows = (rows) => {
+        if (!currentCoopId || !Array.isArray(rows)) return rows;
+        return rows.map((row) => withTenantPayload(row));
+    };
+
+    const scopeByTenant = (query) => {
+        const safeCoopId = String(currentCoopId || '').trim();
+        return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+    };
 
     // -----------------------------------------------------------
     // [1] 모달 & 유틸리티 (기존 유지)
@@ -1046,6 +1073,10 @@ function escapeJsString(value) {
                 .from('attachments')
                 .createSignedUrl('ec_seal.png', 60 * 60 * 24 * 14);
             if (!error && data?.signedUrl) return data.signedUrl;
+        } catch (e) {}
+        try {
+            const { data } = supabase.storage.from('attachments').getPublicUrl('ec_seal.png');
+            if (data?.publicUrl) return data.publicUrl;
         } catch (e) {}
         return ELECTION_NOTICE_SEAL_FALLBACK_URL;
     }
@@ -1448,9 +1479,12 @@ function escapeJsString(value) {
                 throw noticeUpsertErr;
             }
 
-            const { data: noticeRow, error: noticeFindErr } = await supabase
-                .from('coop_notices')
-                .select('id')
+            // [2026-03-15] tenant hardening: doc_no로 공지를 다시 찾을 때도 현재 조합 범위를 강제한다.
+            const { data: noticeRow, error: noticeFindErr } = await scopeByTenant(
+                supabase
+                    .from('coop_notices')
+                    .select('id')
+            )
                 .eq('doc_no', docNo)
                 .maybeSingle();
             if (noticeFindErr) throw noticeFindErr;
@@ -1459,9 +1493,9 @@ function escapeJsString(value) {
                 throw new Error('공지 저장 후 ID를 찾을 수 없습니다.');
             }
 
-            const { error: noticeScopeErr } = await supabase
-                .from('coop_notices')
-                .update({ is_members_only: true, status: 'published' })
+            const { error: noticeScopeErr } = await scopeByTenant(
+                supabase.from('coop_notices').update(withTenantPayload({ is_members_only: true, status: 'published' }))
+            )
                 .eq('id', noticeRow.id);
             if (noticeScopeErr) throw noticeScopeErr;
 
@@ -1497,6 +1531,7 @@ function escapeJsString(value) {
                 published_at: nowIso,
                 published_by: authData.user.id
             };
+            if (currentCoopId) snapshotPayload.coop_id = currentCoopId;
 
             const { data: snapshotRow, error: snapshotErr } = await supabase
                 .from('coop_elected_notice_snapshots')
@@ -1509,9 +1544,9 @@ function escapeJsString(value) {
                     throw new Error('스냅샷 테이블이 없습니다. COOP_ELECTED_NOTICE_SNAPSHOT_SCHEMA.sql을 먼저 적용해주세요.');
                 }
                 if (snapshotErrCode === '23505') {
-                    const { data: reusedRow, error: reusedErr } = await supabase
-                        .from('coop_elected_notice_snapshots')
-                        .select('id, notice_id, doc_no')
+                    const { data: reusedRow, error: reusedErr } = await scopeByTenant(
+                        supabase.from('coop_elected_notice_snapshots').select('id, notice_id, doc_no')
+                    )
                         .eq('election_id', currentElectionId)
                         .eq('status', 'PUBLISHED')
                         .order('id', { ascending: false })
@@ -1590,9 +1625,9 @@ function escapeJsString(value) {
         }
 
         // 연임 회차 계산용: 기존 대의원 이력의 최대 term_count를 회원별로 조회
-        const { data: historyRows, error: historyErr } = await supabase
-            .from('coop_officials')
-            .select('member_id, term_count')
+        const { data: historyRows, error: historyErr } = await scopeByTenant(
+            supabase.from('coop_officials').select('member_id, term_count')
+        )
             .eq('category', 'delegate')
             .eq('role', '대의원')
             .in('member_id', memberIds);
@@ -1608,9 +1643,9 @@ function escapeJsString(value) {
             if (normalizedTerm > prevMax) maxTermCountByMemberId.set(memberId, normalizedTerm);
         });
 
-        const { data: existingRows, error: existingErr } = await supabase
-            .from('coop_officials')
-            .select('id, member_id')
+        const { data: existingRows, error: existingErr } = await scopeByTenant(
+            supabase.from('coop_officials').select('id, member_id')
+        )
             .eq('category', 'delegate')
             .eq('role', '대의원')
             .eq('term_start_date', termStartDate)
@@ -1639,7 +1674,7 @@ function escapeJsString(value) {
         if (insertPayload.length > 0) {
             const { error: insertErr } = await supabase
                 .from('coop_officials')
-                .insert(insertPayload);
+                .insert(withTenantRows(insertPayload));
             if (insertErr) throw insertErr;
         }
 
@@ -1924,10 +1959,25 @@ function escapeJsString(value) {
             const { data: { session }, error } = await supabase.auth.getSession();
 
             if (error || !session) {
-                showAlert("로그인 정보가 없습니다.\n선거 포털로 이동합니다.");
-                window.location.href = `../membermanage.html?next=${encodeURIComponent(window.location.href)}`;
+                showAlert("로그인 정보가 없습니다.\nERP 선거관리로 이동합니다.");
+                window.location.href = `../erp/index.html?next=${encodeURIComponent(window.location.href)}`;
                 return;
             }
+
+            const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+                moduleKey: 'vote',
+                moduleLabel: '선거/투표',
+                redirectUrl: `../erp/index.html?next=${encodeURIComponent(window.location.href)}`,
+                alertFn: (msg) => showAlert(msg)
+            });
+            if (!runtimeCheck.ok) return;
+            const memberAdminEnabled = runtimeCheck.runtime?.modules?.member_admin !== false;
+            if (!memberAdminEnabled) {
+                showAlert("선거 기능은 조합원 관리 연동이 필요합니다.");
+                window.location.href = '../erp/member_admin.html';
+                return;
+            }
+            currentCoopId = runtimeCheck.runtime?.coop_id || null;
 
             // 전역 변수에 이메일 저장 (로그 남길 때 사용)
             currentUserEmail = session.user.email;
@@ -1935,14 +1985,40 @@ function escapeJsString(value) {
                 document.getElementById('admin-email').innerText = currentUserEmail;
             }
 
+            let storedErpUser = null;
+            let storedErpPermissions = [];
+            try { storedErpUser = JSON.parse(localStorage.getItem('erp_user') || 'null'); } catch (_) {}
+            try {
+                const rawPermissions = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
+                storedErpPermissions = Array.isArray(rawPermissions) ? rawPermissions : [];
+            } catch (_) {}
+            const hasErpAdminFallback =
+                storedErpUser?.role === 'admin' ||
+                storedErpUser?.role === 'admin_all' ||
+                storedErpPermissions.includes('member.admin');
+            const { data: electionAdminFlag, error: electionAdminError } = await supabase.rpc('is_election_admin');
+            if (electionAdminError) {
+                console.error('admin is_election_admin failed:', electionAdminError);
+            }
+            const hasElectionAdminAuthority = hasErpAdminFallback || electionAdminFlag === true;
+
             // 2. 내 정보 조회 (UUID -> Text ID 획득)
-            const { data: member, error: memError } = await supabase
-                .from('coop_members')
-                .select('id, member_id, name, role') // UUID, TextID, 이름, 역할
+            let { data: member, error: memError } = await scopeByTenant(
+                supabase.from('coop_members').select('id, member_id, name, role')
+            ) // UUID, TextID, 이름, 역할
                 .eq('id', session.user.id) // 내 UUID로 검색
                 .single();
 
-            if (memError || !member) throw new Error("회원 정보를 찾을 수 없습니다.");
+            if ((memError || !member) && hasElectionAdminAuthority) {
+                member = {
+                    id: session.user.id,
+                    member_id: null,
+                    name: storedErpUser?.name || storedErpUser?.full_name || session.user.email,
+                    role: 'admin'
+                };
+            } else if (memError || !member) {
+                throw new Error("회원 정보를 찾을 수 없습니다.");
+            }
 
             console.log(`🔎 사용자 식별: ${member.name} (ID: ${member.member_id})`);
 
@@ -1952,17 +2028,17 @@ function escapeJsString(value) {
             // 3. 권한 정밀 체크 (3단 논법)
             
             // [Check A] 관리자 Role 확인
-            if (member.role === 'admin' || member.role === 'super_admin') {
+            if (member.role === 'admin' || member.role === 'super_admin' || hasElectionAdminAuthority) {
                 isAuthorized = true;
-                authType = '관리자(Admin)';
+                authType = hasErpAdminFallback ? '관리자(Admin)' : '선거관리 권한';
             } 
             
             // [Check B] 선관위 확인 (Text ID 사용)
             // 관리자가 아니라면, coop_officials 테이블에서 내 Text ID를 찾음
             else if (member.member_id) {
-                const { data: official } = await supabase
-                    .from('coop_officials')
-                    .select('id')
+                const { data: official } = await scopeByTenant(
+                    supabase.from('coop_officials').select('id')
+                )
                     .eq('member_id', member.member_id) // ★ UUID가 아닌 Text ID로 비교
                     .eq('category', 'election_comm')
                     .eq('status', 'active') // 현직 선관위만
@@ -1996,13 +2072,13 @@ function escapeJsString(value) {
             } else {
                 // 권한 없음
                 showAlert(`⛔ 접근 권한이 없습니다.\n관리자 또는 선관위원만 접속 가능합니다.\n(현재 계정: ${member.name})`);
-                window.location.href = 'vote_login.html';
+                window.location.href = '../erp/member_admin.html';
             }
 
         } catch (e) {
             console.error("Critical Auth Error:", e);
             showAlert("권한 검증 중 오류가 발생했습니다.\n" + e.message);
-            window.location.href = 'vote_login.html';
+            window.location.href = '../erp/member_admin.html';
         }
     }
 
@@ -2081,10 +2157,10 @@ window.openElectionGateway = async () => {
     }
 };
 // End of openElectionGateway
-    // [수정] 로그아웃 (선거 포털로 이동)
+    // [수정] 로그아웃 (ERP 선거 허브로 이동)
     window.handleLogout = async () => {
         await supabase.auth.signOut();
-        window.location.href = 'vote_login.html';
+        window.location.href = '../erp/member_admin.html';
     };
 
 
@@ -2425,11 +2501,12 @@ window.loadVoterStats = async () => {
 
 // [수정됨] 선거구별 유권자 목록 보기 (미투표 필터 추가)
 window.showVoterDetail = (dName, list) => {
+    const safeDistrictTitle = escapeHtml(dName || '-');
     // 1. 모달 헤더 및 필터 UI 구성
     let html = `
         <div style="padding:15px; background:#f9fafb; border-bottom:1px solid #eee;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h4 style="margin:0;">${dName} 명부 (${list.length}명)</h4>
+                <h4 style="margin:0;">${safeDistrictTitle} 명부 (${list.length}명)</h4>
             </div>
             
             <div style="margin-top:10px;">
@@ -2660,9 +2737,9 @@ async function updateVoterDistrict() {
             .single();
 
         if (memData) {
-            const { count } = await supabase
-                .from('vote_logs')
-                .select('*', { count: 'exact', head: true })
+            const { count } = await scopeByTenant(
+                supabase.from('vote_logs').select('*', { count: 'exact', head: true })
+            )
                 .eq('election_id', currentElectionId)
                 .eq('member_uuid', memData.id);
 
@@ -2674,9 +2751,9 @@ async function updateVoterDistrict() {
         }
 
         // 2. 실제 업데이트 실행
-        const { error } = await supabase
-            .from('election_voters')
-            .update({ district_id: newDistrictId })
+        const { error } = await scopeByTenant(
+            supabase.from('election_voters').update(withTenantPayload({ district_id: newDistrictId }))
+        )
             .eq('election_id', currentElectionId)
             .eq('member_no', memberNo)
             .eq('district_id', currentDistrictId);
@@ -2707,9 +2784,9 @@ async function updateVoterDistrict() {
 
         try {
             // 해당 선거에서 이 사람의 모든 표(지역+비례)를 삭제
-            const { error } = await supabase
-                .from('election_voters')
-                .delete()
+            const { error } = await scopeByTenant(
+                supabase.from('election_voters').delete()
+            )
                 .eq('election_id', currentElectionId)
                 .eq('member_no', memberNo);
 
@@ -2805,9 +2882,9 @@ async function updateVoterDistrict() {
     };
 
     const syncAllVotersToCommonDistrict = async (commonDistrictId) => {
-        const { data: rows, error } = await supabase
-            .from('election_voters')
-            .select('member_no, member_uuid, district_id')
+        const { data: rows, error } = await scopeByTenant(
+            supabase.from('election_voters').select('member_no, member_uuid, district_id')
+        )
             .eq('election_id', currentElectionId);
         if (error) throw error;
 
@@ -2840,7 +2917,7 @@ async function updateVoterDistrict() {
         if (rowsToUpsert.length > 0) {
             const { error: insertError } = await supabase
                 .from('election_voters')
-                .insert(rowsToUpsert);
+                .insert(withTenantRows(rowsToUpsert));
             if (insertError && insertError.code !== '23505') throw insertError;
         }
         return rowsToUpsert.length;
@@ -3010,9 +3087,9 @@ async function updateVoterDistrict() {
             let data = null;
             let error = null;
             if (editingDistrictId) {
-                const result = await supabase
-                    .from('districts')
-                    .update(payload)
+                const result = await scopeByTenant(
+                    supabase.from('districts').update(withTenantPayload(payload))
+                )
                     .eq('id', editingDistrictId)
                     .eq('election_id', currentElectionId)
                     .select('*')
@@ -3022,7 +3099,7 @@ async function updateVoterDistrict() {
             } else {
                 const result = await supabase
                     .from('districts')
-                    .insert(payload)
+                    .insert(withTenantPayload(payload))
                     .select('*')
                     .single();
                 data = result.data;
@@ -3068,9 +3145,9 @@ async function updateVoterDistrict() {
             return;
         }
 
-        const { count, error: countError } = await supabase
-            .from('election_voters')
-            .select('*', { count: 'exact', head: true })
+        const { count, error: countError } = await scopeByTenant(
+            supabase.from('election_voters').select('*', { count: 'exact', head: true })
+        )
             .eq('election_id', currentElectionId)
             .eq('district_id', districtId);
         if (countError) {
@@ -3085,11 +3162,11 @@ async function updateVoterDistrict() {
         if (!await showConfirm(`[${district.name}] 지역구를 삭제하시겠습니까?`)) return;
 
         try {
-            const { error } = await supabase
-                .from('districts')
-                .delete()
-                .eq('id', districtId)
-                .eq('election_id', currentElectionId);
+        const { error } = await scopeByTenant(
+            supabase.from('districts').delete()
+        )
+            .eq('id', districtId)
+            .eq('election_id', currentElectionId);
             if (error) throw error;
 
             districtList = districtList.filter((item) => String(item.id) !== String(districtId));
@@ -3141,10 +3218,15 @@ window.searchMembers = async () => {
 
         try {
             // [핵심 수정] select에 'id' (UUID)를 반드시 포함
+            const safeKeyword = sanitizeOrKeyword(keyword);
+            if (!safeKeyword) {
+                showAlert("검색어를 다시 입력해주세요.");
+                return;
+            }
             const { data: members, error } = await supabase
                 .from('coop_members')
                 .select('member_id, id, name, phone, address') 
-                .or(`name.ilike.%${keyword}%,phone.ilike.%${keyword}%`)
+                .or(`name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`)
                 .limit(20);
 
             if (error) throw error;
@@ -3156,9 +3238,9 @@ window.searchMembers = async () => {
 
             // 검색된 사람들의 현재 등록 상태 확인
             const searchedMemberNos = members.map(m => m.member_id);
-            const { data: registeredData } = await supabase
-                .from('election_voters')
-                .select('member_no, district_id')
+            const { data: registeredData } = await scopeByTenant(
+                supabase.from('election_voters').select('member_no, district_id')
+            )
                 .eq('election_id', currentElectionId)
                 .in('member_no', searchedMemberNos);
 
@@ -3244,9 +3326,9 @@ window.searchMembers = async () => {
 
         try {
             // 기존 등록 상태 확인 (등록된 유권자도 지역구 변경 가능)
-            const { data: existingRows, error: existingError } = await supabase
-                .from('election_voters')
-                .select('district_id')
+            const { data: existingRows, error: existingError } = await scopeByTenant(
+                supabase.from('election_voters').select('district_id')
+            )
                 .eq('election_id', currentElectionId)
                 .eq('member_no', memberNo);
             if (existingError) throw existingError;
@@ -3276,9 +3358,9 @@ window.searchMembers = async () => {
 
             // 기존 지역구(비공통) 배정은 모두 정리 후 새 선택 지역구로 반영
             if (currentRegionalIds.length > 0) {
-                const { error: clearRegionalError } = await supabase
-                    .from('election_voters')
-                    .delete()
+                const { error: clearRegionalError } = await scopeByTenant(
+                    supabase.from('election_voters').delete()
+                )
                     .eq('election_id', currentElectionId)
                     .eq('member_no', memberNo)
                     .in('district_id', currentRegionalIds);
@@ -3326,7 +3408,7 @@ window.searchMembers = async () => {
                 // DB 입력 실행
                 const { error } = await supabase
                     .from('election_voters')
-                    .insert(uniqueRows);
+                    .insert(withTenantRows(uniqueRows));
                 if (error && error.code !== '23505') throw error;
             }
 
@@ -3534,9 +3616,9 @@ async function loadCandidates() {
 
         try {
             // 1. 후보자 정보 조회
-            const { data: c, error } = await supabase
-                .from('candidates')
-                .select('*')
+            const { data: c, error } = await scopeByTenant(
+                supabase.from('candidates').select('*')
+            )
                 .eq('id', candidateId)
                 .single();
 
@@ -3788,9 +3870,9 @@ async function loadCandidates() {
         }
 
         try {
-            const { error } = await supabase
-                .from('candidates')
-                .update(payload)
+            const { error } = await scopeByTenant(
+                supabase.from('candidates').update(withTenantPayload(payload))
+            )
                 .eq('id', candidateId);
 
             if (error) throw error;
@@ -3881,13 +3963,12 @@ window.assignRandomSymbols = async () => {
         if(!await showConfirm(`[${name}] 후보를 정식 후보로 승인하시겠습니까?`)) return;
 
         try {
-            const { error } = await supabase
-                .from('candidates')
-                .update({ 
+            const { error } = await scopeByTenant(
+                supabase.from('candidates').update(withTenantPayload({ 
                     status: 'APPROVED',
                     rejection_reason: null // 승인 시 반려 사유 초기화
-                })
-                .eq('id', id);
+                }))
+            ).eq('id', id);
 
             if(error) throw error;
 
@@ -3932,13 +4013,12 @@ window.assignRandomSymbols = async () => {
         if(!await showConfirm(`[${targetRejectName}] 후보를 반려 처리하시겠습니까?`)) return;
 
         try {
-            const { error } = await supabase
-                .from('candidates')
-                .update({ 
+            const { error } = await scopeByTenant(
+                supabase.from('candidates').update(withTenantPayload({ 
                     status: 'REJECTED',
                     rejection_reason: reason 
-                })
-                .eq('id', targetRejectId);
+                }))
+            ).eq('id', targetRejectId);
 
             if(error) throw error;
 
@@ -4169,7 +4249,7 @@ window.finalizeNomination = async () => {
     };
     
     window.openVoterPreview = () => {
-        window.open(`vote_login.html?id=${currentElectionId}`, '_blank');
+        window.open(`vote_login.html?id=${currentElectionId}&portal=1`, '_blank');
     };
 
     window.loadLogs = async () => {
@@ -4432,6 +4512,22 @@ const isOrganizationMemberType = (memberType) => {
     return normalized === '단체' || normalized === 'organization' || normalized === 'org';
 };
 
+const buildCandidateIdentitySnapshot = ({ memberType, memberId, corpNumber, businessNumber }) => {
+    const normalizedType = String(memberType || '').trim() || '개인';
+    const isOrganization = isOrganizationMemberType(normalizedType);
+    const identityCode = isOrganization
+        ? (corpNumber || businessNumber || memberId || '')
+        : (memberId || '');
+    const identityKind = isOrganization
+        ? (corpNumber ? 'corp_number' : businessNumber ? 'business_number' : memberId ? 'member_id' : '')
+        : (memberId ? 'member_id' : '');
+    return {
+        candidate_member_type: normalizedType,
+        candidate_identity_code: identityCode || null,
+        candidate_identity_kind: identityKind || null
+    };
+};
+
 window.toggleAdminRepresentativeField = (memberType) => {
     const repWrap = document.getElementById('new-cand-rep-wrap');
     const repInput = document.getElementById('new-cand-representative-name');
@@ -4457,7 +4553,9 @@ window.openAddCandidateModal = () => {
         'selected-cand-phone', 
         'selected-cand-address', 
         'selected-cand-birth',
-        'selected-cand-member-type'
+        'selected-cand-member-type',
+        'selected-cand-identity-code',
+        'selected-cand-identity-kind'
     ];
     hiddenFields.forEach(id => {
         const el = document.getElementById(id);
@@ -4508,19 +4606,24 @@ window.searchCandidateMember = async () => {
 
     try {
         // 1. 현재 선거에 이미 등록된 후보자들의 UUID 목록을 먼저 가져옵니다.
-        const { data: existingCands, error: candError } = await supabase
-            .from('candidates')
-            .select('member_uuid')
+        const { data: existingCands, error: candError } = await scopeByTenant(
+            supabase.from('candidates').select('member_uuid')
+        )
             .eq('election_id', currentElectionId);
 
         if(candError) throw candError;
         const registeredUuids = existingCands.map(c => c.member_uuid);
 
         // 2. 조합원 검색 (이름 또는 전화번호)
-        const { data: members, error } = await supabase
-            .from('coop_members')
-            .select('member_id, id, name, phone, address, rrn_display, member_type') 
-            .or(`name.ilike.%${keyword}%,phone.ilike.%${keyword}%`)
+        const safeKeyword = sanitizeOrKeyword(keyword);
+        if (!safeKeyword) {
+            resDiv.innerHTML = '<div style="padding:10px; color:#999;">검색어를 다시 입력하세요.</div>';
+            return;
+        }
+        const { data: members, error } = await scopeByTenant(
+            supabase.from('coop_members').select('member_id, id, name, phone, address, rrn_display, member_type, corp_number, business_number')
+        ) 
+            .or(`name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`)
             .limit(15);
 
         if(error) throw error;
@@ -4551,12 +4654,14 @@ window.searchCandidateMember = async () => {
             const safeBirth = escapeJsString(rawBirth);
             const safeMemberId = escapeJsString(memberId || '');
             const safeMemberType = escapeJsString(m.member_type || '');
+            const safeCorpNumber = escapeJsString(m.corp_number || '');
+            const safeBusinessNumber = escapeJsString(m.business_number || '');
             const memberTypeText = escapeHtml(m.member_type || '개인');
             const memberTypeBadge = `<span style="display:inline-block; margin-left:6px; padding:1px 6px; border-radius:10px; font-size:0.75rem; background:${isOrganizationMemberType(m.member_type) ? '#dbeafe' : '#f3f4f6'}; color:${isOrganizationMemberType(m.member_type) ? '#1d4ed8' : '#4b5563'};">${memberTypeText}</span>`;
 
             html += `
                 <div style="padding:10px; border-bottom:1px solid #eee; cursor:pointer;" 
-                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}', '${safeMemberType}')">
+                     onclick="selectCandidateMember('${safeUuid}', '${safeName}', '${safePhone}', '${safeAddr}', '${safeBirth}', '${safeMemberId}', '${safeMemberType}', '${safeCorpNumber}', '${safeBusinessNumber}')">
                     <strong>${safeNameText}</strong>${memberTypeBadge} (${safePhoneText})<br>
                     <span style="font-size:0.8rem; color:#666;">조합원번호: ${safeMemberIdText} | ${safeAddrText}</span>
                 </div>`;
@@ -4576,7 +4681,13 @@ window.searchCandidateMember = async () => {
 
 
 // [수정] 선택된 조합원 정보 저장 함수
-window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, memberType) => {
+window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, memberType, corpNumber, businessNumber) => {
+    const identitySnapshot = buildCandidateIdentitySnapshot({
+        memberType,
+        memberId,
+        corpNumber,
+        businessNumber
+    });
     // Hidden Input에 값 주입
     document.getElementById('selected-cand-uuid').value = uuid;
     document.getElementById('selected-cand-member-id').value = memberId; // member_id 저장
@@ -4584,6 +4695,8 @@ window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, 
     document.getElementById('selected-cand-address').value = address;
     document.getElementById('selected-cand-birth').value = birthRaw;
     document.getElementById('selected-cand-member-type').value = memberType || '';
+    document.getElementById('selected-cand-identity-code').value = identitySnapshot.candidate_identity_code || '';
+    document.getElementById('selected-cand-identity-kind').value = identitySnapshot.candidate_identity_kind || '';
     
     // 화면 표시
     const disp = document.getElementById('selected-cand-display');
@@ -4608,6 +4721,8 @@ window.executeCandidateRegister = async () => {
     const address = document.getElementById('selected-cand-address').value;
     const birthDate = document.getElementById('selected-cand-birth').value;
     const memberType = document.getElementById('selected-cand-member-type').value;
+    const identityCode = document.getElementById('selected-cand-identity-code').value;
+    const identityKind = document.getElementById('selected-cand-identity-kind').value;
     const representativeName = document.getElementById('new-cand-representative-name').value.trim();
     const isOrganization = isOrganizationMemberType(memberType);
 
@@ -4620,9 +4735,9 @@ window.executeCandidateRegister = async () => {
 
     try {
         // [방어적 코딩] DB에 넣기 직전에 해당 선거에 이미 등록된 사람인지 한 번 더 확인
-        const { data: alreadyExists, error: checkError } = await supabase
-            .from('candidates')
-            .select('id')
+        const { data: alreadyExists, error: checkError } = await scopeByTenant(
+            supabase.from('candidates').select('id')
+        )
             .eq('election_id', currentElectionId)
             .eq('member_uuid', uuid)
             .maybeSingle();
@@ -4664,8 +4779,12 @@ window.executeCandidateRegister = async () => {
             photo_url: photoUrl,
             proof_url: proofUrl,
             status: 'APPROVED',
-            agreed: true
+            agreed: true,
+            candidate_member_type: memberType || '개인',
+            candidate_identity_code: identityCode || null,
+            candidate_identity_kind: identityKind || null
         };
+        if (currentCoopId) candidatePayload.coop_id = currentCoopId;
         if (isOrganization) {
             candidatePayload.representative_type = 'non-member';
             candidatePayload.representative_name = representativeName;
@@ -4673,7 +4792,7 @@ window.executeCandidateRegister = async () => {
 
         const { error: insertError } = await supabase
             .from('candidates')
-            .insert(candidatePayload);
+            .insert(withTenantPayload(candidatePayload));
 
         if(insertError) throw insertError;
 

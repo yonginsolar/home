@@ -1,10 +1,41 @@
 /*
-Version: v1.0.33
-Change: 2026-03-13 - Read saved access_scope for document-box documents and support assembly materials distribution.
+Version: v1.0.34
+Change: 2026-03-16 - Use shared Supabase client so governance services do not depend on vote service files.
 */
-import { supabase } from '../vote/ElectionService.js';
+import { supabase } from '../shared/supabase-client.js';
 
-let canUseMarkDocumentBoxSeenRpc = true;
+let cachedRuntimeCoopId = null;
+let cachedVisibleCoopId = undefined;
+
+async function getRuntimeCoopId() {
+    if (cachedRuntimeCoopId) return cachedRuntimeCoopId;
+    const { data, error } = await supabase.rpc('get_my_erp_runtime');
+    if (error || !data?.coop_id) return null;
+    cachedRuntimeCoopId = data.coop_id;
+    return cachedRuntimeCoopId;
+}
+
+async function getVisibleCoopId() {
+    if (cachedVisibleCoopId !== undefined) return cachedVisibleCoopId;
+    const { data, error } = await supabase.rpc('get_visible_coop_id');
+    if (error) {
+        console.warn('MinutesService.getVisibleCoopId failed:', error);
+        cachedVisibleCoopId = null;
+        return cachedVisibleCoopId;
+    }
+    cachedVisibleCoopId = data || null;
+    return cachedVisibleCoopId;
+}
+
+function scopeByCoop(query, coopId) {
+    const safeCoopId = String(coopId || '').trim();
+    return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+}
+
+function withTenantPayload(payload, coopId) {
+    if (!coopId || !payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+    return { ...payload, coop_id: coopId };
+}
 
 async function getSession() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -128,12 +159,13 @@ async function isAdmin(uid, email) {
 
 async function getOfficialsByMemberId(memberId) {
     if (!memberId) return [];
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_officials')
         .select('id, seal_url, role, category, status')
         .eq('member_id', memberId)
         .eq('status', 'active')
-        .order('id', { ascending: false });
+        .order('id', { ascending: false }), coopId);
     if (error || !Array.isArray(data) || data.length === 0) return [];
     return data;
 }
@@ -205,12 +237,13 @@ async function getMyOfficial(session) {
 }
 
 async function getOfficials() {
+    const coopId = await getVisibleCoopId();
     let data = null;
     let error = null;
 
-    ({ data, error } = await supabase
+    ({ data, error } = await scopeByCoop(supabase
         .from('coop_officials')
-        .select('*'));
+        .select('*'), coopId));
 
     if (error || !data) return [];
 
@@ -218,10 +251,10 @@ async function getOfficials() {
     const memberIds = filtered.map(o => o.member_id).filter(Boolean);
     const nameMap = {};
     if (memberIds.length > 0) {
-        const { data: members } = await supabase
+        const { data: members } = await scopeByCoop(supabase
             .from('coop_members')
             .select('member_id, name')
-            .in('member_id', memberIds);
+            .in('member_id', memberIds), coopId);
         if (Array.isArray(members)) {
             members.forEach(m => { nameMap[m.member_id] = m.name; });
         }
@@ -235,9 +268,10 @@ async function getOfficials() {
 }
 
 async function getCompanyInfo() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('ref_company_info')
-        .select('key,value');
+        .select('key,value'), coopId);
     const info = {};
     if (Array.isArray(data)) {
         data.forEach(row => {
@@ -252,29 +286,32 @@ async function getCompanyInfo() {
 }
 
 async function listMinutesAdmin() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('id,title,content,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
 
 async function listPublishedMinutes() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('id,title,created_at,doc_type,published_at,visibility,file_urls,signer_ids')
         .not('published_at', 'is', null)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
 
 async function getLatestPublishedMinuteAt() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('published_at')
         .not('published_at', 'is', null)
         .order('published_at', { ascending: false })
-        .limit(1);
+        .limit(1), coopId);
     if (error) return { data: null, error };
     const latest = Array.isArray(data) && data.length > 0 ? (data[0]?.published_at || null) : null;
     return { data: latest, error: null };
@@ -288,34 +325,18 @@ function inferDocumentAccessScope(title) {
 }
 
 async function listLibraryDocuments() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('site_documents')
         .select('id,title,content,event_date,version,is_current,file_url,category,access_scope')
         .eq('category', 'doc')
-        .order('event_date', { ascending: false });
+        .order('event_date', { ascending: false }), coopId);
     const rows = Array.isArray(data) ? data : [];
     const mapped = rows.map((row) => ({
         ...row,
         access_scope: String(row?.access_scope || '').toUpperCase() || inferDocumentAccessScope(row?.title)
     }));
     return { data: mapped, error };
-}
-
-function isMissingMarkDocumentBoxSeenRpc(error) {
-    if (!error) return false;
-    const code = String(error.code || '');
-    const status = Number(error.status || error.statusCode || 0);
-    const message = String(error.message || '').toLowerCase();
-    const details = String(error.details || '').toLowerCase();
-    const hint = String(error.hint || '').toLowerCase();
-    const text = `${message} ${details} ${hint}`;
-    return (
-        code === 'PGRST202'
-        || code === '404'
-        || status === 404
-        || text.includes('could not find the function public.mark_document_box_seen')
-        || text.includes('function public.mark_document_box_seen')
-    );
 }
 
 async function markDocumentBoxSeen(targetId = null, seenAt = null) {
@@ -327,19 +348,6 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
     if (!memberId) return { data: null, error: { message: '조합원 프로필을 찾을 수 없습니다.' } };
 
     const markAt = seenAt || new Date().toISOString();
-
-    if (canUseMarkDocumentBoxSeenRpc) {
-        // Prefer RPC path if deployed (auth/manager/admin checks on DB side).
-        const { error: rpcErr } = await supabase.rpc('mark_document_box_seen', {
-            p_target_id: memberId,
-            p_seen_at: markAt
-        });
-        if (!rpcErr) return { data: { member_id: memberId, seen_at: markAt }, error: null };
-
-        // If RPC is not deployed yet, fallback to direct update path.
-        if (!isMissingMarkDocumentBoxSeenRpc(rpcErr)) return { data: null, error: rpcErr };
-        canUseMarkDocumentBoxSeenRpc = false;
-    }
 
     const { error: updErr } = await supabase
         .from('coop_members')
@@ -369,16 +377,20 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
 	}
 
 async function updateMinuteAttachments(id, fileUrls) {
-    return await supabase.from('minutes').update({ file_urls: fileUrls }).eq('id', id);
+    const coopId = await getRuntimeCoopId();
+    let query = supabase.from('minutes').update(withTenantPayload({ file_urls: fileUrls }, coopId)).eq('id', id);
+    query = scopeByCoop(query, coopId);
+    return await query;
 }
 
 async function listApprovalNoticeDrafts() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_notices')
         .select('id,title,content,created_at,status,category,is_popup,file_url,file_urls,file_names,doc_no,source_approval_id')
         .not('source_approval_id', 'is', null)
         .neq('status', 'published')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
 
@@ -395,10 +407,11 @@ async function listCompletedNoticeApprovals() {
 
 async function listNoticesByApprovalIds(ids) {
     if (!ids || ids.length === 0) return { data: [], error: null };
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_notices')
         .select('id,title,content,created_at,status,category,is_popup,file_url,file_urls,file_names,doc_no,source_approval_id')
-        .in('source_approval_id', ids);
+        .in('source_approval_id', ids), coopId);
     return { data: data || [], error };
 }
 
@@ -409,12 +422,13 @@ async function listNoticeMinutesByDocNos(docNos) {
             .filter(Boolean))
     );
     if (safeDocNos.length === 0) return { data: [], error: null };
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('id,doc_no,doc_type,published_at,status')
         .eq('doc_type', 'NOTICE')
         .in('doc_no', safeDocNos)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
 
@@ -432,44 +446,48 @@ async function upsertNotice(payload) {
 }
 
 async function getMinuteById(minuteId) {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('*')
-        .eq('id', minuteId)
+        .eq('id', minuteId), coopId)
         .single();
     return { data, error };
 }
 
 async function listSignaturesForMinutes(minuteIds) {
     if (!minuteIds || minuteIds.length === 0) return { data: [], error: null };
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('doc_signatures')
         .select('minute_id, official_id')
-        .in('minute_id', minuteIds);
+        .in('minute_id', minuteIds), coopId);
     return { data: data || [], error };
 }
 
 async function listSignaturesByMinuteId(minuteId) {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('doc_signatures')
         .select('official_id, signature_url')
-        .eq('minute_id', minuteId);
+        .eq('minute_id', minuteId), coopId);
     return { data, error };
 }
 
 async function listPendingSignMinutes(officialId) {
     if (!officialId) return { data: [], error: null };
-    const { data: minutes, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data: minutes, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('id,title,created_at,status,requires_sign,signer_ids,doc_type')
         .eq('requires_sign', true)
         .eq('status', 'OPEN')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }), coopId);
     if (error) return { data: [], error };
-    const { data: signed } = await supabase
+    const { data: signed } = await scopeByCoop(supabase
         .from('doc_signatures')
         .select('minute_id')
-        .eq('official_id', officialId);
+        .eq('official_id', officialId), coopId);
     const signedIds = new Set((signed || []).map(s => s.minute_id));
     const targets = (minutes || []).filter(m => {
         if (signedIds.has(m.id)) return false;
@@ -482,49 +500,67 @@ async function listPendingSignMinutes(officialId) {
 }
 
 async function createMinute(payload) {
-    return await supabase.from('minutes').insert(payload);
+    const coopId = await getRuntimeCoopId();
+    return await supabase.from('minutes').insert(withTenantPayload(payload, coopId));
 }
 
 async function findMinuteByDocNoAndType(docNo, docType = 'NOTICE') {
     const safeDocNo = String(docNo || '').trim();
     const safeDocType = String(docType || '').trim();
     if (!safeDocNo || !safeDocType) return { data: null, error: null };
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('id,doc_no,doc_type,published_at,status')
         .eq('doc_no', safeDocNo)
         .eq('doc_type', safeDocType)
         .order('created_at', { ascending: false })
-        .limit(1);
+        .limit(1), coopId);
     const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
     return { data: row, error };
 }
 
 async function updateMinute(id, payload) {
-    return await supabase.from('minutes').update(payload).eq('id', id);
+    const coopId = await getRuntimeCoopId();
+    let query = supabase.from('minutes').update(withTenantPayload(payload, coopId)).eq('id', id);
+    query = scopeByCoop(query, coopId);
+    return await query;
 }
 
 async function updateMinuteStatus(id, status) {
-    return await supabase.from('minutes').update({ status }).eq('id', id);
+    const coopId = await getRuntimeCoopId();
+    let query = supabase.from('minutes').update(withTenantPayload({ status }, coopId)).eq('id', id);
+    query = scopeByCoop(query, coopId);
+    return await query;
 }
 
 async function updateMinuteSignerIds(id, signerIds) {
-    return await supabase.from('minutes').update({ signer_ids: signerIds }).eq('id', id);
+    const coopId = await getRuntimeCoopId();
+    let query = supabase.from('minutes').update(withTenantPayload({ signer_ids: signerIds }, coopId)).eq('id', id);
+    query = scopeByCoop(query, coopId);
+    return await query;
 }
 
 async function togglePublish(id, publish, userId) {
     const payload = publish
         ? { published_at: new Date().toISOString(), published_by: userId }
         : { published_at: null, published_by: null };
-    return await supabase.from('minutes').update(payload).eq('id', id);
+    const coopId = await getRuntimeCoopId();
+    let query = supabase.from('minutes').update(withTenantPayload(payload, coopId)).eq('id', id);
+    query = scopeByCoop(query, coopId);
+    return await query;
 }
 
 async function deleteMinute(id) {
-    return await supabase.from('minutes').delete().eq('id', id);
+    const coopId = await getRuntimeCoopId();
+    let query = supabase.from('minutes').delete().eq('id', id);
+    query = scopeByCoop(query, coopId);
+    return await query;
 }
 
 async function insertSignature(payload) {
-    return await supabase.from('doc_signatures').insert(payload);
+    const coopId = await getRuntimeCoopId();
+    return await supabase.from('doc_signatures').insert(withTenantPayload(payload, coopId));
 }
 
 async function deleteSignature(minuteId, officialId) {
@@ -554,21 +590,23 @@ export const MinutesService = {
         return data?.signedUrl || null;
     },
     async listOpenSignMinutes() {
-        const { data, error } = await supabase
+        const coopId = await getVisibleCoopId();
+        const { data, error } = await scopeByCoop(supabase
             .from('minutes')
             .select('id,title,created_at,status,requires_sign,signer_ids,doc_type')
             .eq('requires_sign', true)
             .eq('status', 'OPEN')
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false }), coopId);
         return { data: data || [], error };
     },
     async listSignModeMinutes() {
-        const { data, error } = await supabase
+        const coopId = await getVisibleCoopId();
+        const { data, error } = await scopeByCoop(supabase
             .from('minutes')
             .select('id,title,created_at,status,requires_sign,signer_ids,doc_type')
             .eq('requires_sign', true)
             .in('status', ['OPEN', 'CLOSED'])
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false }), coopId);
         return { data: data || [], error };
     },
     listMinutesAdmin,

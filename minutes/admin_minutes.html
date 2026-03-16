@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.24
-Change: 2026-03-14 - Add scoped entry support for minutes / notices / materials admin pages.
+Version: v1.2.26
+Change: 2026-03-16 - Ensure printable minutes include signature status even without inline signature placeholders.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-14 - Add scoped entry support for minutes / notices / materials 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.24 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.26 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -447,10 +447,10 @@ Change: 2026-03-14 - Add scoped entry support for minutes / notices / materials 
         </div>
     </div>
 
-    <script src="../erp/erp_runtime_guard.js"></script>
+    <script src="https://erp.yonginsolar.kr/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.33';
-        import { supabase } from '../vote/ElectionService.js';
+        import { MinutesService } from './MinutesService.js?v=1.0.34';
+        import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
         const formatMinutesAdminKstDate = (value, fallback = '-') => {
@@ -1537,10 +1537,13 @@ Change: 2026-03-14 - Add scoped entry support for minutes / notices / materials 
             const title = escapeHtml(minute?.title || '의사록');
             const typeLabel = escapeHtml(getDocTypeLabel(minute?.doc_type));
             const dateLabel = escapeHtml(formatMinutesAdminKstDate(minute?.created_at));
-            let bodyHtml = minute?.content
+            const originalBodyHtml = minute?.content
                 ? sanitizeHtml(normalizeMinuteContent(minute.content))
                 : '<div style="color:#64748b;">내용이 없습니다.</div>';
-            bodyHtml = await injectInlineSignatureImages(bodyHtml, minute, signatures || []);
+            const bodyHtml = await injectInlineSignatureImages(originalBodyHtml, minute, signatures || []);
+            const signaturePrintHtml = bodyHtml === originalBodyHtml
+                ? await buildMinuteSignaturePrintHtml(minute, signatures || [])
+                : '';
 
             return `<!DOCTYPE html>
 <html lang="ko">
@@ -1561,6 +1564,7 @@ Change: 2026-03-14 - Add scoped entry support for minutes / notices / materials 
     <h1 style="margin:0 0 10px; font-size:24px;">${title}</h1>
     <div class="meta">${typeLabel} | 작성일 ${dateLabel}</div>
     <div class="content">${bodyHtml}</div>
+    ${signaturePrintHtml}
 </body>
 </html>`;
         }

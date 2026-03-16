@@ -1,4 +1,31 @@
-import { supabase } from './ElectionService.js'; // 기존 설정 재사용
+/*
+Version: v1.0.10
+Change: 2026-03-16 - Use shared Supabase client instead of importing through ElectionService.
+*/
+import { supabase } from '../shared/supabase-client.js';
+
+let cachedRuntimeCoopId = null;
+
+async function getRuntimeCoopId() {
+    if (cachedRuntimeCoopId) return cachedRuntimeCoopId;
+    const { data, error } = await supabase.rpc('get_my_coop_id');
+    if (error) {
+        console.error('AdminService coop_id 조회 실패:', error);
+        return null;
+    }
+    cachedRuntimeCoopId = data || null;
+    return cachedRuntimeCoopId;
+}
+
+function withTenantPayload(payload, coopId) {
+    if (!coopId || Object.prototype.hasOwnProperty.call(payload, 'coop_id')) return payload;
+    return { ...payload, coop_id: coopId };
+}
+
+function scopeByTenant(query, coopId) {
+    const safeCoopId = String(coopId || '').trim();
+    return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+}
 
 export class AdminService {
     
@@ -34,9 +61,11 @@ export class AdminService {
             return null;
         }
 
-        const { data, error } = await supabase
+        const coopId = await getRuntimeCoopId();
+
+        const { data, error } = await scopeByTenant(supabase
             .from('elections')
-            .select('*')
+            .select('*'), coopId)
             .eq('id', electionId) // [핵심] 특정 ID로 필터링
             .single();
             
@@ -46,6 +75,7 @@ export class AdminService {
 
 // [수정] 선거 상태 변경 (+ 로그 기록)
     async updateStatus(electionId, newStatus, options = {}) {
+        const coopId = await getRuntimeCoopId();
         const payload = { status: newStatus };
         if (Object.prototype.hasOwnProperty.call(options, 'actualClosedAt')) {
             payload.actual_closed_at = options.actualClosedAt;
@@ -55,9 +85,9 @@ export class AdminService {
         }
 
         // 1. 상태 변경
-        const { error } = await supabase
+        const { error } = await scopeByTenant(supabase
             .from('elections')
-            .update(payload)
+            .update(withTenantPayload(payload, coopId)), coopId)
             .eq('id', electionId);
             
         if (error) throw new Error('상태 변경 실패: ' + error.message);
@@ -68,9 +98,10 @@ export class AdminService {
 
     // 3. 승인 대기중인 후보자 목록 가져오기
     async getPendingCandidates(electionId) {
-        const { data, error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { data, error } = await scopeByTenant(supabase
             .from('candidates')
-            .select(`*, districts(name)`) // 선거구 이름도 같이
+            .select(`*, districts(name)`), coopId) // 선거구 이름도 같이
             .eq('election_id', electionId)
             .eq('status', 'PENDING');
 
@@ -81,9 +112,10 @@ export class AdminService {
     // 4. 후보자 승인/반려 처리
     async reviewCandidate(candidateId, decision) {
         // decision: 'APPROVED' or 'REJECTED'
-        const { error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { error } = await scopeByTenant(supabase
             .from('candidates')
-            .update({ status: decision })
+            .update(withTenantPayload({ status: decision }, coopId)), coopId)
             .eq('id', candidateId);
             
         if (error) throw error;
@@ -92,16 +124,17 @@ export class AdminService {
     // 5. [모니터링] 실시간 투표율 집계
     // RLS 때문에 일반 유저는 못 쓰는 쿼리
     async getTurnoutStats(electionId) {
+        const coopId = await getRuntimeCoopId();
         // 전체 유권자 수 (명부 기준)
-        const { count: totalVoters } = await supabase
+        const { count: totalVoters } = await scopeByTenant(supabase
             .from('election_voters')
-            .select('*', { count: 'exact', head: true })
+            .select('*', { count: 'exact', head: true }), coopId)
             .eq('election_id', electionId);
 
         // 투표 참여자 수 (로그 기준)
-        const { count: currentVotes } = await supabase
+        const { count: currentVotes } = await scopeByTenant(supabase
             .from('vote_logs')
-            .select('*', { count: 'exact', head: true })
+            .select('*', { count: 'exact', head: true }), coopId)
             .eq('election_id', electionId);
 
         return {
@@ -113,9 +146,10 @@ export class AdminService {
 
     // 6. [개표] 결과 가져오기 (관리자 전용)
     async getResults(electionId) {
+        const coopId = await getRuntimeCoopId();
         // 실제로는 DB RPC로 집계하는 게 빠르지만, MVP에서는 JS로 계산
         // 1. 모든 투표용지 가져오기
-        const { data: ballots, error } = await supabase
+        const { data: ballots, error } = await scopeByTenant(supabase
             .from('ballots')
             .select(`
                 district_id,
@@ -123,7 +157,7 @@ export class AdminService {
                 choice,
                 districts(name, vote_type),
                 candidates(name)
-            `)
+            `), coopId)
             .eq('election_id', electionId);
 
         if (error) throw error;
@@ -138,22 +172,24 @@ export class AdminService {
     async logAction(electionId, actionType, details) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
+        const coopId = await getRuntimeCoopId();
 
-        const { error } = await supabase.from('vote_admin_logs').insert({
+        const { error } = await supabase.from('vote_admin_logs').insert(withTenantPayload({
             election_id: electionId,
             admin_email: user.email,
             action_type: actionType,
             details: details
-        });
+        }, coopId));
 
         if (error) console.error("로그 저장 실패:", error);
     }
 
     // [수정] 로그 목록 가져오기 (테이블명 변경: admin_logs -> vote_admin_logs)
     async getLogs(electionId) {
-        const { data, error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { data, error } = await scopeByTenant(supabase
             .from('vote_admin_logs')  // 여기를 변경
-            .select('*')
+            .select('*'), coopId)
             .eq('election_id', electionId)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -167,9 +203,10 @@ export class AdminService {
 
     // [추가] 후보자 목록(기호 포함) 가져오기
     async getCandidates(electionId) {
-        const { data, error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { data, error } = await scopeByTenant(supabase
             .from('candidates')
-            .select(`*, districts(name)`)
+            .select(`*, districts(name)`), coopId)
             .eq('election_id', electionId)
             .order('district_id', { ascending: true }) // 선거구별 정렬
             .order('symbol', { ascending: true }); // 기호순 정렬
@@ -180,9 +217,10 @@ export class AdminService {
 
     // [추가] 후보자 승인/반려 (+ 로그)
     async reviewCandidate(candId, decision, candName) {
-        const { error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { error } = await scopeByTenant(supabase
             .from('candidates')
-            .update({ status: decision })
+            .update(withTenantPayload({ status: decision }, coopId)), coopId)
             .eq('id', candId);
             
         if (error) throw error;
@@ -194,9 +232,10 @@ export class AdminService {
 
     // [추가] 후보자 기호 저장
     async updateSymbol(candId, symbol) {
-        const { error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { error } = await scopeByTenant(supabase
             .from('candidates')
-            .update({ symbol: symbol })
+            .update(withTenantPayload({ symbol: symbol }, coopId)), coopId)
             .eq('id', candId);
         
         if (error) throw error;
@@ -205,9 +244,10 @@ export class AdminService {
 
     // [통합] 모든 선거 이력 가져오기 (HTML에서 이 이름을 호출함)
     async getAllElections() {
-        const { data, error } = await supabase
+        const coopId = await getRuntimeCoopId();
+        const { data, error } = await scopeByTenant(supabase
             .from('elections')
-            .select('*')
+            .select('*'), coopId)
             .order('created_at', { ascending: false }); // 최신 선거 우선
 
         if (error) {

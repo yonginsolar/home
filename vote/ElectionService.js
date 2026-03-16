@@ -1,11 +1,31 @@
-// 변경된 Import URL: esm.sh를 사용하여 Named Export 호환성 문제 해결
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+/*
+Version: v1.0.18
+Change: 2026-03-16 - Use shared Supabase client so vote and minutes modules do not depend on each other's service files.
+*/
+import { supabase } from '../shared/supabase-client.js';
 
-// 1. Supabase 클라이언트 초기화
-const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+let cachedRuntimeCoopId = null;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+async function getRuntimeCoopId() {
+    if (cachedRuntimeCoopId) return cachedRuntimeCoopId;
+    const { data, error } = await supabase.rpc('get_my_coop_id');
+    if (error) {
+        console.error('ElectionService coop_id 조회 실패:', error);
+        return null;
+    }
+    cachedRuntimeCoopId = data || null;
+    return cachedRuntimeCoopId;
+}
+
+function withTenantPayload(payload, coopId) {
+    if (!coopId || Object.prototype.hasOwnProperty.call(payload, 'coop_id')) return payload;
+    return { ...payload, coop_id: coopId };
+}
+
+function scopeByTenant(query, coopId) {
+    const safeCoopId = String(coopId || '').trim();
+    return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+}
 
 export const DISTRICT_VOTE_STATE = Object.freeze({
     BINARY: 'BINARY',
@@ -90,6 +110,7 @@ export class ElectionService {
         this.currentUser = null; // auth.users 정보
         this.memberProfile = null; // coop_members 정보
         this.voterInfo = null; // election_voters 정보 (선거구 포함)
+        this.currentCoopId = null;
     }
 
     /**
@@ -104,11 +125,12 @@ export class ElectionService {
         }
 
         this.currentUser = user;
+        this.currentCoopId = await getRuntimeCoopId();
         
         // 1-2. 조합원 상세 정보 가져오기
-        const { data: profile, error: profileError } = await supabase
+        const { data: profile, error: profileError } = await scopeByTenant(supabase
             .from('coop_members')
-            .select('*')
+            .select('*'), this.currentCoopId)
             .eq('id', user.id)
             .single();
 
@@ -127,9 +149,10 @@ export class ElectionService {
      * - 변경: OPEN 또는 NOMINATION 상태인 '모든' 선거를 배열로 반환
      */
     async getActiveElections() {
-        const { data, error } = await supabase
+        if (!this.currentCoopId) this.currentCoopId = await getRuntimeCoopId();
+        const { data, error } = await scopeByTenant(supabase
             .from('elections')
-            .select('*')
+            .select('*'), this.currentCoopId)
             .in('status', ['OPEN', 'NOMINATION'])
             .order('created_at', { ascending: false }); // 최신순 정렬은 유지하되 목록 전체 반환
 
@@ -147,11 +170,12 @@ export class ElectionService {
      */
     async getMyBallotList(electionId) {
         if (!this.memberProfile) await this.initialize();
+        if (!this.currentCoopId) this.currentCoopId = await getRuntimeCoopId();
 
         // 1. 선거인 명부 조회
-        const { data: voterList, error: voterError } = await supabase
+        const { data: voterList, error: voterError } = await scopeByTenant(supabase
             .from('election_voters')
-            .select('district_id')
+            .select('district_id'), this.currentCoopId)
             .eq('election_id', electionId)
             .eq('member_uuid', this.memberProfile.id);
 
@@ -164,18 +188,18 @@ export class ElectionService {
             const districtId = voter.district_id;
 
             // [중요 1] is_common 컬럼을 반드시 가져와야 정렬이 가능함
-            const { data: district } = await supabase
+            const { data: district } = await scopeByTenant(supabase
                 .from('districts')
-                .select('name, vote_type, quota, is_common') 
+                .select('name, vote_type, quota, is_common'), this.currentCoopId) 
                 .eq('id', districtId)
                 .single();
 
             // 후보자 목록 조회
             let candidates = [];
             if (district.vote_type === 'CANDIDATE') {
-                const { data: candData } = await supabase
+                const { data: candData } = await scopeByTenant(supabase
                     .from('candidates')
-                    .select('*')
+                    .select('*'), this.currentCoopId)
                     .eq('election_id', electionId)
                     .eq('district_id', districtId) 
                     .eq('status', 'APPROVED')
@@ -184,9 +208,9 @@ export class ElectionService {
             }
 
             // 투표 여부 확인
-            const { data: logData } = await supabase
+            const { data: logData } = await scopeByTenant(supabase
                 .from('vote_logs')
-                .select('id')
+                .select('id'), this.currentCoopId)
                 .eq('election_id', electionId)
                 .eq('district_id', districtId)
                 .eq('member_uuid', this.memberProfile.id)
@@ -253,6 +277,7 @@ export class ElectionService {
     // [1] 기존 applyCandidate 함수를 이걸로 통째로 교체하세요.
     // ============================================================
     async applyCandidate({ electionId, districtId, name, photoFile, manifesto }) {
+        if (!this.currentCoopId) this.currentCoopId = await getRuntimeCoopId();
         // 1. 로그인된 유저 ID 가져오기
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
@@ -274,7 +299,7 @@ export class ElectionService {
         // 3. DB에 후보자 정보 저장
         const { data, error } = await supabase
             .from('candidates')
-            .insert({
+            .insert(withTenantPayload({
                 election_id: electionId,
                 district_id: districtId,
                 member_uuid: userId,
@@ -283,7 +308,7 @@ export class ElectionService {
                 manifesto: manifesto,
                 status: 'PENDING',       // 승인 대기 상태
                 created_at: new Date().toISOString()
-            })
+            }, this.currentCoopId))
             .select();
 
         if (error) {

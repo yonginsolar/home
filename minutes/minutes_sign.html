@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.9
-Change: 2026-03-13 - Use all active official rows for sign visibility so executive/delegate overlap does not hide documents.
+Version: v1.2.11
+Change: 2026-03-16 - Added attachment review to sign view and synced MinutesService cache-busting version.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.9 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.11 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -63,6 +63,27 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
         .detail-title { font-size: 1.4rem; font-weight: 800; color: #0f172a; }
         .detail-meta { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
         .detail-content { line-height: 1.8; color: #1f2937; }
+        .attachment-panel {
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid #e5e7eb;
+            display: none;
+        }
+        .attachment-title { font-weight: 700; color: #0f172a; margin-bottom: 8px; }
+        .attachment-list { display: flex; flex-direction: column; gap: 10px; }
+        .attachment-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: #f8fafc;
+        }
+        .attachment-name { font-size: 0.92rem; font-weight: 700; color: #0f172a; }
+        .attachment-meta { font-size: 0.8rem; color: #64748b; }
+        .attachment-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .status-line { margin-top: 14px; font-size: 0.95rem; color: #1f2937; }
         .sign-actions { margin-top: 16px; display: flex; gap: 10px; }
         .btn-sign {
@@ -108,6 +129,10 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
             </div>
             <div class="detail-meta" id="detail-meta">-</div>
             <div class="detail-content" id="detail-content"></div>
+            <div class="attachment-panel" id="attachment-panel">
+                <div class="attachment-title">첨부파일</div>
+                <div class="attachment-list" id="attachment-list"></div>
+            </div>
             <div class="status-line" id="detail-status"></div>
             <div class="sign-actions">
                 <button id="btn-sign" class="btn-sign" disabled onclick="handleSign()">서명하기</button>
@@ -140,10 +165,10 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
         </div>
     </div>
 
-    <script src="../erp/erp_runtime_guard.js"></script>
+    <script src="https://erp.yonginsolar.kr/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.31';
-        import { supabase } from '../vote/ElectionService.js';
+        import { MinutesService } from './MinutesService.js?v=1.0.34';
+        import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
         const formatMinutesSignKstDate = (value) => {
@@ -158,6 +183,74 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
             if (docType === 'MINUTES') return '이사회 의사록';
             return '의사록';
         };
+
+        function normalizeUrls(raw) {
+            if (!raw) return [];
+            if (Array.isArray(raw)) return raw.filter(Boolean);
+            if (typeof raw === 'string') {
+                const trimmed = raw.trim();
+                if (!trimmed) return [];
+                if (trimmed.startsWith('[')) {
+                    try {
+                        const parsed = JSON.parse(trimmed);
+                        if (Array.isArray(parsed)) return parsed.filter(Boolean);
+                    } catch (e) { void 0; }
+                }
+                return trimmed.split(',').map((value) => value.trim()).filter(Boolean);
+            }
+            return [];
+        }
+
+        function uniqueUrls(urls) {
+            const seen = new Set();
+            return (urls || []).filter((value) => {
+                const safe = String(value || '').trim();
+                if (!safe || seen.has(safe)) return false;
+                seen.add(safe);
+                return true;
+            });
+        }
+
+        function parseStorageUrl(rawUrl) {
+            if (!rawUrl) return null;
+            const match = String(rawUrl).match(/\/storage\/v1\/object\/(public|sign)\/([^/]+)\/(.+)$/);
+            if (!match) return null;
+            return { bucket: match[2], path: match[3] };
+        }
+
+        async function resolveAttachmentUrl(rawUrl) {
+            if (!rawUrl) return null;
+            const trimmed = String(rawUrl).trim();
+            if (!trimmed) return null;
+
+            if (trimmed.startsWith('http')) {
+                const parsed = parseStorageUrl(trimmed);
+                if (parsed) {
+                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600);
+                    if (!error && data?.signedUrl) return data.signedUrl;
+                }
+                return trimmed;
+            }
+
+            const cleaned = trimmed.replace(/^\/+/, '');
+            const parts = cleaned.split('?');
+            const pathPart = parts[0] || '';
+            const searchParams = new URLSearchParams(parts[1] || '');
+            const downloadName = searchParams.get('display_name') || searchParams.get('download') || '';
+            const options = downloadName ? { download: downloadName } : undefined;
+            const knownBuckets = new Set(['attachments', 'assets', 'contracts', 'candidates', 'candidate_proofs']);
+            const bucketMatch = pathPart.match(/^([^/]+)\/(.+)$/);
+            const bucket = (bucketMatch && knownBuckets.has(bucketMatch[1])) ? bucketMatch[1] : 'attachments';
+            const objectPath = (bucketMatch && knownBuckets.has(bucketMatch[1])) ? bucketMatch[2] : pathPart;
+
+            const primary = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600, options);
+            if (!primary.error && primary.data?.signedUrl) return primary.data.signedUrl;
+            if (bucket !== 'attachments') {
+                const fallback = await supabase.storage.from('attachments').createSignedUrl(objectPath, 3600, options);
+                if (!fallback.error && fallback.data?.signedUrl) return fallback.data.signedUrl;
+            }
+            return trimmed;
+        }
 
         let myOfficialId = null;
         let myOfficialRows = [];
@@ -265,6 +358,80 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
                 });
             });
             return doc.body.innerHTML;
+        }
+
+        function safeUrl(value) {
+            const raw = String(value || '').trim();
+            if (!raw) return null;
+            try {
+                const url = new URL(raw, window.location.origin);
+                if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+            } catch (e) { void 0; }
+            return null;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        async function renderAttachments(doc) {
+            const panel = document.getElementById('attachment-panel');
+            const list = document.getElementById('attachment-list');
+            if (!panel || !list) return;
+
+            let urls = [];
+            urls = urls.concat(normalizeUrls(doc?.file_urls));
+            urls = urls.concat(normalizeUrls(doc?.file_links));
+            if (doc?.file_url) urls.push(doc.file_url);
+            urls = uniqueUrls(urls);
+
+            const names = Array.isArray(doc?.file_names) ? doc.file_names : [];
+            if (urls.length === 0) {
+                panel.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+
+            const resolved = [];
+            for (let i = 0; i < urls.length; i += 1) {
+                const resolvedUrl = await resolveAttachmentUrl(urls[i]);
+                if (!resolvedUrl) continue;
+                resolved.push({
+                    url: resolvedUrl,
+                    name: names[i] || urls[i] || `attachment-${i + 1}`
+                });
+            }
+
+            if (resolved.length === 0) {
+                panel.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
+
+            panel.style.display = 'block';
+            list.innerHTML = resolved.map((item, index) => {
+                const safe = safeUrl(item.url);
+                if (!safe) return '';
+                let displayName = item.name || `첨부파일 ${index + 1}`;
+                try { displayName = decodeURIComponent(String(displayName)); } catch (e) { void 0; }
+                return `
+                    <div class="attachment-item">
+                        <div>
+                            <div class="attachment-name">${escapeHtml(displayName)}</div>
+                            <div class="attachment-meta">첨부 ${index + 1}</div>
+                        </div>
+                        <div class="attachment-actions">
+                            <a class="btn-outline" href="${safe}" target="_blank" rel="noopener noreferrer">열기</a>
+                            <a class="btn-outline" href="${safe}" download>다운로드</a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
         function getRoleLabel(off) {
@@ -641,6 +808,7 @@ async function openDocumentById(id) {
                     : getDocTypeLabel(doc.doc_type);
                 document.getElementById('detail-meta').textContent = `작성일: ${formatMinutesSignKstDate(doc.created_at)}`;
                 document.getElementById('detail-content').innerHTML = sanitizeHtml(doc.content || '');
+                await renderAttachments(doc);
 
                 await updateSignStatus(doc);
 

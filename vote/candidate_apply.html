@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.11
-Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
+Version: v1.0.14
+Change: 2026-03-15 - Require member management linkage for election candidate flows.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>후보자 등록 신청</title>
-    <script>console.log('[Version] v1.0.11 | candidate_apply.html');</script>
+    <script>console.log('[Version] v1.0.14 | candidate_apply.html');</script>
     <script src="../telegram_bot.js"></script>
     <link rel="stylesheet" href="style.css">
 <style>
@@ -369,8 +370,8 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             <input type="hidden" id="candidate-id">
 
             <h3 style="border-bottom:2px solid #333; padding-bottom:10px; margin-top:30px;">1. 기본 인적사항</h3>
-            <div style="background:#fff7ed; padding:10px; border-radius:6px; font-size:0.85rem; color:#c2410c; margin-bottom:15px;">
-                ⚠️ 정보가 변경되었다면 <strong><a href="/admin/members" target="_blank" style="text-decoration:underline; color:#c2410c;">[조합원 관리]</a></strong> 페이지에서 먼저 수정해주세요.
+            <div id="member-sync-warning" style="background:#fff7ed; padding:10px; border-radius:6px; font-size:0.85rem; color:#c2410c; margin-bottom:15px;">
+                ⚠️ 정보가 변경되었다면 <strong><a href="../erp/member_admin.html" target="_blank" style="text-decoration:underline; color:#c2410c;">[조합원 관리]</a></strong> 페이지에서 먼저 수정해주세요.
             </div>
             
             <div style="margin-bottom:1rem;">
@@ -628,6 +629,7 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
         </div>
     </div>
 
+        <script src="../erp/erp_runtime_guard.js"></script>
         <script type="module">
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -649,12 +651,88 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
     let currentUser = null;
     let selectedDistrict = null;
     let candidateSubmitInFlight = false;
+    let currentCoopId = null;
+    let manualCandidateMode = false;
+    let memberAdminConnected = true;
+
+    const isModuleEnabled = (runtime, moduleKey) => {
+        const modules = runtime && typeof runtime.modules === 'object' ? runtime.modules : null;
+        if (!modules || !(moduleKey in modules)) return true;
+        return modules[moduleKey] !== false;
+    };
+
+    const withTenantPayload = (payload) => {
+        if (!currentCoopId || !payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+        return { ...payload, coop_id: currentCoopId };
+    };
+
+    const scopeByTenant = (query) => {
+        const safeCoopId = String(currentCoopId || '').trim();
+        return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+    };
     
     // [DOM 캐싱] 모달 관련 요소
     const modalOverlay = document.getElementById('modal-overlay');
     const modalTitle = document.getElementById('modal-title');
     const modalMsg = document.getElementById('modal-msg');
     const modalBtnArea = document.getElementById('modal-btn-area');
+
+    function isOrganizationMemberType(memberType) {
+        const normalized = String(memberType ?? '').trim().toLowerCase();
+        return normalized === '단체' || normalized === 'organization' || normalized === 'org';
+    }
+
+    function seedManualCandidateProfile(user) {
+        return {
+            ...(user || {}),
+            id: user?.id || '',
+            name: user?.user_metadata?.name || user?.name || '',
+            member_type: '개인',
+            member_id: '',
+            email: user?.email || '',
+            phone: user?.phone || user?.user_metadata?.phone || '',
+            contact: user?.phone || user?.user_metadata?.phone || '',
+            address: '',
+            rrn_display: '',
+            birth_date: ''
+        };
+    }
+
+    function setInputEditable(inputId, editable, placeholder = '') {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.readOnly = !editable;
+        input.classList.toggle('readonly-input', !editable);
+        if (editable && placeholder) input.placeholder = placeholder;
+        if (!editable) input.placeholder = '';
+    }
+
+    function applyCandidateProfileMode() {
+        setInputEditable('user-name', manualCandidateMode, '후보자 이름');
+        setInputEditable('user-birth-display', manualCandidateMode, 'YYYY-MM-DD');
+        setInputEditable('user-contact', manualCandidateMode, '연락처');
+        setInputEditable('user-address', manualCandidateMode, '주소');
+        const syncWarning = document.getElementById('member-sync-warning');
+        if (syncWarning) syncWarning.style.display = manualCandidateMode ? 'none' : 'block';
+    }
+
+    function syncCurrentUserFromManualForm() {
+        if (!manualCandidateMode) return;
+        const name = String(document.getElementById('user-name')?.value || '').trim();
+        const birthDate = String(document.getElementById('user-birth-display')?.value || '').trim();
+        const contact = String(document.getElementById('user-contact')?.value || '').trim();
+        const address = String(document.getElementById('user-address')?.value || '').trim();
+        currentUser = {
+            ...(currentUser || {}),
+            name,
+            birth_date: birthDate,
+            contact,
+            phone: contact,
+            address
+        };
+        const birthRawEl = document.getElementById('user-birth-raw');
+        if (birthRawEl) birthRawEl.value = birthDate;
+    }
 
     // --- [1] 유틸: 주민번호 파싱 ---
     function formatRRN(rrn) {
@@ -690,6 +768,24 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
         return `${yyyy}-${mm}-${dd}`;
     }
 
+    function buildCandidateIdentitySnapshot(member) {
+        const memberType = String(member?.member_type || '').trim() || '개인';
+        const isOrganization = isOrganizationMemberType(memberType);
+        const email = String(member?.email || '').trim();
+        const phone = String(member?.phone || member?.contact || '').trim();
+        const identityCode = isOrganization
+            ? (member?.corp_number || member?.business_number || member?.member_id || email || phone || '')
+            : (member?.member_id || email || phone || '');
+        const identityKind = isOrganization
+            ? (member?.corp_number ? 'corp_number' : member?.business_number ? 'business_number' : member?.member_id ? 'member_id' : (email || phone) ? 'manual_group_code' : '')
+            : (member?.member_id ? 'member_id' : (email || phone) ? 'manual_personal_code' : '');
+        return {
+            candidate_member_type: memberType,
+            candidate_identity_code: identityCode || null,
+            candidate_identity_kind: identityKind || null
+        };
+    }
+
     // --- [2] 유틸: 커스텀 모달 (기존 디자인 유지) ---
     function showModal(title, msg, onOk = null) {
         modalTitle.innerText = title;
@@ -710,7 +806,14 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             const targetElectionId = params.get('id'); // URL에서 ID 확인
 
             // 2. 로그인 확인
-            currentUser = await service.initialize();
+            let initializedProfile = null;
+            try {
+                initializedProfile = await service.initialize();
+            } catch (initProfileError) {
+                console.warn('candidate_apply initialize profile fallback:', initProfileError);
+            }
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            currentUser = initializedProfile || authUser;
             
             if (!currentUser || !currentUser.id) { // currentUser.id 체크 추가
                 showModal('알림', '로그인이 필요합니다.\n선거 포털에서 다시 접속해주세요.', () => {
@@ -719,31 +822,50 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
                 return; 
             }
 
+            const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+                moduleKey: 'vote',
+                moduleLabel: '선거/투표',
+                redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
+                alertFn: (msg) => showModal('알림', String(msg || '접근할 수 없습니다.'))
+            });
+            if (!runtimeCheck.ok) return;
+            currentCoopId = runtimeCheck.runtime?.coop_id || null;
+            memberAdminConnected = isModuleEnabled(runtimeCheck.runtime, 'member_admin');
+            if (!memberAdminConnected) {
+                showModal('안내', '선거 기능은 조합원 관리 연동이 필요합니다.\n먼저 조합원 관리를 연결해주세요.', () => {
+                    window.location.href = '../membermanage.html';
+                });
+                return;
+            }
+
             // [신규] membermanage에서 활성 프로필 (개인/단체) ID를 가져옴
             const activeProfileId = sessionStorage.getItem('lastActiveProfile');
             const targetMemberId = activeProfileId || currentUser.id; // 세션에 없으면 기본 Auth ID 사용
 
             // 3. 사용자 정보 보강 (선택된 활성 프로필로 조회)
-            const { data: memberInfo } = await supabase.from('coop_members').select('*').eq('id', targetMemberId).maybeSingle();
+            const { data: memberInfo } = await scopeByTenant(
+                supabase.from('coop_members').select('*')
+            ).eq('id', targetMemberId).maybeSingle();
             
             if (!memberInfo) {
-                // [신규 로직] 조합원 명부(coop_members)에 없는 사용자 (미승인 or 가족계정 등)
-                // 에러 코드: E_VOTE_CANDIDATE_01
-                showModal('접근 오류', '에러코드 E_VOTE_CANDIDATE_01: 사무국에 문의해 주세요');
+                showModal('안내', '현재 조합원 명부에 후보자 정보가 없습니다.\n먼저 조합원을 등록해주세요.', () => {
+                    window.location.href = '../erp/member_admin.html';
+                });
                 return;
+            } else {
+                currentUser = { ...(authUser || {}), ...(currentUser || {}), ...memberInfo };
+                manualCandidateMode = false;
+                applyCandidateProfileMode();
             }
-
-            // [신규 로직] 단체 조합원 차단 로직 제거됨 - 2026-02-08
-
-            if (memberInfo) currentUser = { ...currentUser, ...memberInfo };
 
             console.log('[Romi Debug] Active Profile ID:', targetMemberId);
             console.log('[Romi Debug] Loaded Profile Name:', currentUser.name);
             console.log('[Romi Debug] Loaded Profile Type:', currentUser.member_type);
 
             // 4. 선거 목록 로드
-            const { data: elections } = await supabase.from('elections')
-                .select('*')
+            const { data: elections } = await scopeByTenant(
+                supabase.from('elections').select('*')
+            )
                 .eq('status', 'NOMINATION')
                 .order('created_at', { ascending: false });
 
@@ -806,12 +928,32 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
 
         try {
             // 1. 선거인 명부 체크
-            const { data: voterRows } = await supabase.from('election_voters').select('district_id').eq('election_id', electionId).eq('member_uuid', currentUser.id);
+            let { data: voterRows } = await scopeByTenant(
+                supabase.from('election_voters').select('district_id')
+            ).eq('election_id', electionId).eq('member_uuid', currentUser.id);
+            if ((!voterRows || !voterRows.length) && manualCandidateMode) {
+                const manualEmail = String(currentUser.email || '').trim();
+                const manualPhone = String(currentUser.phone || currentUser.contact || '').trim();
+                if (manualEmail) {
+                    const { data: emailRows } = await scopeByTenant(
+                        supabase.from('election_voters').select('district_id')
+                    ).eq('election_id', electionId).eq('voter_email', manualEmail);
+                    voterRows = emailRows;
+                }
+                if ((!voterRows || !voterRows.length) && manualPhone) {
+                    const { data: phoneRows } = await scopeByTenant(
+                        supabase.from('election_voters').select('district_id')
+                    ).eq('election_id', electionId).eq('voter_phone', manualPhone);
+                    voterRows = phoneRows;
+                }
+            }
             if (!voterRows || !voterRows.length) throw new Error('선거인 명부에 귀하의 정보가 없습니다.\n(해당 선거의 유권자가 아닙니다)');
 
             // 2. 지역구 체크
             const districtIds = voterRows.map(r => r.district_id);
-            const { data: districtData } = await supabase.from('districts').select('*').in('id', districtIds).eq('is_common', false).limit(1).maybeSingle();
+            const { data: districtData } = await scopeByTenant(
+                supabase.from('districts').select('*')
+            ).in('id', districtIds).eq('is_common', false).limit(1).maybeSingle();
 
             if (!districtData) throw new Error('출마 가능한 지역 선거구가 확인되지 않습니다.\n(비례대표 투표권만 있거나 선거구 데이터 오류)');
             if (districtData.vote_type === 'BINARY') throw new Error('선택하신 지역구는 찬반 투표 대상이므로\n후보자 등록 대상이 아닙니다.');
@@ -819,7 +961,9 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             selectedDistrict = districtData;
 
             // 3. 기존 신청 내역 체크
-            const { data: existingApp } = await supabase.from('candidates').select('*').eq('election_id', electionId).eq('member_uuid', currentUser.id).maybeSingle();
+            const { data: existingApp } = await scopeByTenant(
+                supabase.from('candidates').select('*')
+            ).eq('election_id', electionId).eq('member_uuid', currentUser.id).maybeSingle();
 
             // 성공 시 선택 섹션 숨김 (자연스러운 전환)
             document.getElementById('selection-section').style.display = 'none';
@@ -858,9 +1002,9 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
         // 읽기 전용 데이터 바인딩
         document.getElementById('user-name').value = currentUser.name || '';
         const rrnRaw = currentUser.rrn_display || '';
-        document.getElementById('user-birth-display').value = formatRRN(rrnRaw);
-        document.getElementById('user-birth-raw').value = rrnRaw;
-        document.getElementById('user-contact').value = currentUser.contact || currentUser.phone || '';
+        document.getElementById('user-birth-display').value = manualCandidateMode ? (currentUser.birth_date || '') : formatRRN(rrnRaw);
+        document.getElementById('user-birth-raw').value = manualCandidateMode ? (currentUser.birth_date || '') : rrnRaw;
+        document.getElementById('user-contact').value = currentUser.contact || currentUser.phone || currentUser.email || '';
         document.getElementById('user-address').value = currentUser.address || '';
 
         // 단체 조합원 체크 및 대표자 섹션 표시
@@ -975,9 +1119,10 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             searchBtn.innerText = '검색 중...';
 
             try {
-                const { data, error } = await supabase
+                const { data, error } = await scopeByTenant(supabase
                     .from('coop_members')
                     .select('name, rrn_display')
+                )
                     .eq('member_id', memberId)
                     .eq('status', '정상')
                     .maybeSingle();
@@ -1007,6 +1152,13 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
     document.getElementById('btn-pre-check').addEventListener('click', () => {
         const form = document.getElementById('apply-form');
         if (!form.reportValidity()) return; 
+        if (manualCandidateMode) {
+            syncCurrentUserFromManualForm();
+            if (!currentUser.name || !currentUser.birth_date || !currentUser.contact) {
+                showModal('알림', '후보자 기본정보(이름, 생년월일, 연락처)를 입력해주세요.');
+                return;
+            }
+        }
 
         const name = document.getElementById('cand-name').value;
         const photoFile = document.getElementById('cand-photo').files[0];
@@ -1048,6 +1200,12 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             const candId = document.getElementById('candidate-id').value; // 수정 모드일 때 ID
             const photoFile = document.getElementById('cand-photo').files[0];
             const proofFile = document.getElementById('cand-proof').files[0];
+            if (manualCandidateMode) {
+                syncCurrentUserFromManualForm();
+                if (!currentUser.name || !currentUser.birth_date || !currentUser.contact) {
+                    throw new Error('후보자 기본정보(이름, 생년월일, 연락처)를 먼저 입력해주세요.');
+                }
+            }
 
             // [설정] 파일 용량 제한 (10MB)
             const MAX_SIZE = 10 * 1024 * 1024; 
@@ -1117,8 +1275,10 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
                 manifesto: document.getElementById('cand-manifesto').value,
                 agreed: true,
                 status: 'PENDING',
+                ...buildCandidateIdentitySnapshot(currentUser),
                 ...representativeData // 대표자 정보 포함
             };
+            if (currentCoopId) baseCandidateObj.coop_id = currentCoopId;
 
             // 파일이 새로 업로드된 경우에만 URL 업데이트
             if (photoUrl) baseCandidateObj.photo_url = photoUrl;
@@ -1130,9 +1290,9 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
             // 5. Insert 또는 Update 실행 (삽입 직전 최종 중복 확인 포함)
             let targetCandidateId = candId;
             if (!targetCandidateId) {
-                const { data: existingAppFinal, error: existingAppFinalErr } = await supabase
-                    .from('candidates')
-                    .select('id')
+                const { data: existingAppFinal, error: existingAppFinalErr } = await scopeByTenant(
+                    supabase.from('candidates').select('id')
+                )
                     .eq('election_id', baseCandidateObj.election_id)
                     .eq('member_uuid', userId)
                     .order('created_at', { ascending: false })
@@ -1148,9 +1308,11 @@ Change: 2026-02-11 - 후보등록 페이지 상단 뒤로가기 버튼 추가.
 
             let result;
             if (targetCandidateId) {
-                result = await supabase.from('candidates').update(candidateUpdateObj).eq('id', targetCandidateId);
+                result = await scopeByTenant(
+                    supabase.from('candidates').update(withTenantPayload(candidateUpdateObj))
+                ).eq('id', targetCandidateId);
             } else {
-                result = await supabase.from('candidates').insert(candidateInsertObj);
+                result = await supabase.from('candidates').insert(withTenantPayload(candidateInsertObj));
             }
 
             if (result.error) throw result.error;
