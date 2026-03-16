@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.23
-Change: 2026-03-13 - Allow assembly material web preview and post-upload visibility save in document box management.
+Version: v1.2.24
+Change: 2026-03-14 - Add scoped entry support for minutes / notices / materials admin pages.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>문서함 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.23 | admin_minutes.html');</script>
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+    <title>회의·문서 관리자 대시보드</title>
+    <script>console.log('[Version] v1.2.24 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -184,8 +185,8 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
 
     <div class="container">
         <div class="header">
-            <h2 style="margin:0;">🛡️ 문서함 관리 (사무국용)</h2>
-            <button onclick="location.href='../membermanage.html'" class="btn btn-gray">메인으로</button>
+            <h2 id="page-title" style="margin:0;">🛡️ 회의·문서 관리 (사무국용)</h2>
+            <button onclick="location.href='../erp/index.html'" class="btn btn-gray">메인으로</button>
         </div>
 
         <div class="tabs">
@@ -446,8 +447,10 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
         </div>
     </div>
 
+    <script src="../erp/erp_runtime_guard.js"></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.33';
+        import { supabase } from '../vote/ElectionService.js';
 
         const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
         const formatMinutesAdminKstDate = (value, fallback = '-') => {
@@ -497,6 +500,45 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
             targetType: 'MINUTES',
             candidates: []
         };
+        const ADMIN_MINUTES_SCOPE = (() => {
+            const raw = new URLSearchParams(window.location.search).get('scope');
+            if (raw === 'minutes' || raw === 'notices' || raw === 'materials') return raw;
+            return null;
+        })();
+        const ADMIN_MINUTES_SCOPE_META = Object.freeze({
+            minutes: { title: '📝 의사록 관리' },
+            notices: { title: '📢 공문 관리' },
+            materials: { title: '📚 총회 자료 관리' }
+        });
+
+        function getAllowedAdminMinutesTabs() {
+            if (!ADMIN_MINUTES_SCOPE) return ['minutes', 'notices', 'materials'];
+            return [ADMIN_MINUTES_SCOPE];
+        }
+
+        function sanitizeAdminMinutesTab(name) {
+            const safeName = String(name || '').trim();
+            const allowed = getAllowedAdminMinutesTabs();
+            return allowed.includes(safeName) ? safeName : allowed[0];
+        }
+
+        function applyAdminMinutesScopeUi() {
+            const titleEl = document.getElementById('page-title');
+            if (titleEl && ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE]) {
+                titleEl.textContent = ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE].title;
+                document.title = ADMIN_MINUTES_SCOPE_META[ADMIN_MINUTES_SCOPE].title.replace(/^[^\\s]+\\s*/, '');
+            }
+
+            const allowed = new Set(getAllowedAdminMinutesTabs());
+            [
+                ['minutes', document.getElementById('tab-btn-minutes')],
+                ['notices', document.getElementById('tab-btn-notices')],
+                ['materials', document.getElementById('tab-btn-materials')]
+            ].forEach(([key, el]) => {
+                if (!el) return;
+                el.style.display = allowed.has(key) ? '' : 'none';
+            });
+        }
 
 
         async function generateMinuteDocNo() {
@@ -1995,7 +2037,7 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
             const noticesPanel = document.getElementById('tab-notices');
             const materialsPanel = document.getElementById('tab-materials');
             if (!minutesBtn || !noticesBtn || !materialsBtn || !minutesPanel || !noticesPanel || !materialsPanel) return;
-            const safeName = String(name || 'minutes');
+            const safeName = sanitizeAdminMinutesTab(name || 'minutes');
             const isMinutes = safeName === 'minutes';
             const isNotices = safeName === 'notices';
             const isMaterials = safeName === 'materials';
@@ -2035,6 +2077,19 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
             document.getElementById('confirmModal').classList.add('show');
             return new Promise(resolve => { confirmResolve = resolve; });
         }
+        function hasErpAdminAccess() {
+            try {
+                const rawUser = localStorage.getItem('erp_user');
+                const rawPermissions = localStorage.getItem('erp_permissions');
+                const user = rawUser ? JSON.parse(rawUser) : null;
+                const permissionList = rawPermissions ? JSON.parse(rawPermissions) : [];
+                const permissionSet = new Set(Array.isArray(permissionList) ? permissionList : []);
+                if (user && (user.role === 'admin' || user.role === 'admin_all')) return true;
+                return permissionSet.has('member.admin') || permissionSet.has('site.admin');
+            } catch (_) {
+                return false;
+            }
+        }
         window.closeConfirm = (ok) => {
             document.getElementById('confirmModal').classList.remove('show');
             if (confirmResolve) confirmResolve(ok);
@@ -2045,16 +2100,25 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
             const session = await MinutesService.getSession();
             if (!session) {
                 showToast("로그인이 필요합니다.");
-                location.href = '../membermanage.html';
+                location.href = `../erp/index.html?next=${encodeURIComponent(window.location.href)}`;
                 return;
             }
+
+            const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+                moduleKey: 'minutes',
+                moduleLabel: '회의/공문',
+                redirectUrl: `../erp/index.html?next=${encodeURIComponent(window.location.href)}`,
+                alertFn: (msg) => showToast(msg)
+            });
+            if (!runtimeCheck.ok) return;
+
             currentUserId = session.user.id;
 
-            // 관리자 여부 확인 (coop_members.role 또는 coop_admins)
-            isAdminUser = await MinutesService.isAdmin(session.user.id, session.user.email);
+            // 관리자 여부 확인 (ERP 관리자 권한 우선, 기존 coop_admins/co-op admin fallback 유지)
+            isAdminUser = hasErpAdminAccess() || await MinutesService.isAdmin(session.user.id, session.user.email);
             if (!isAdminUser) {
                 showToast("관리자 권한이 필요합니다.");
-                location.href = '../membermanage.html';
+                location.href = '../erp/index.html';
                 return;
             }
 
@@ -2063,6 +2127,7 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
             renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
             initializeMinuteEditor();
             initializeMinuteEditModalClose();
+            applyAdminMinutesScopeUi();
 
             // 문서 유형 변경 시 서명 체크 기본값 조정
             const docTypeEl = document.getElementById('in-doc-type');
@@ -2080,10 +2145,8 @@ Change: 2026-03-13 - Allow assembly material web preview and post-upload visibil
                 materialDateEl.value = `${yyyy}-${mm}-${dd}`;
             }
 
-            // 3. 목록 로드
-            loadMinutes();
-            loadNotices();
-            loadAssemblyMaterials();
+            // 3. 기본 탭 로드
+            switchTab(ADMIN_MINUTES_SCOPE || 'minutes');
         }
 
         async function loadMinutes() {

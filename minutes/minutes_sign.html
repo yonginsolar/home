@@ -7,6 +7,7 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
     <script>console.log('[Version] v1.2.9 | minutes_sign.html');</script>
     <style>
@@ -139,6 +140,7 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
         </div>
     </div>
 
+    <script src="../erp/erp_runtime_guard.js"></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.31';
         import { supabase } from '../vote/ElectionService.js';
@@ -531,7 +533,8 @@ Change: 2026-03-13 - Use all active official rows for sign visibility so executi
             const session = await MinutesService.getSession();
             if (!session) {
                 showToast('로그인이 필요합니다.');
-                location.href = '../membermanage.html';
+                const loginUrl = `sign_login.html?next=${encodeURIComponent(window.location.href)}`;
+                location.href = loginUrl;
                 return false;
             }
             myAuthId = session.user.id;
@@ -842,6 +845,13 @@ async function openDocumentById(id) {
             try {
                 const ok = await initSession();
                 if (!ok) return;
+                const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+                    moduleKey: 'signature',
+                    moduleLabel: '전자서명',
+                    redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
+                    alertFn: (msg) => showToast(msg)
+                });
+                if (!runtimeCheck.ok) return;
                 await loadSignList();
             } catch (err) {
                 console.error('minutes_sign init error:', err);

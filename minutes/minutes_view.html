@@ -171,6 +171,7 @@
         </div>
     </div>
 
+    <script src="../erp/erp_runtime_guard.js"></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.33';
         import { supabase } from '../vote/ElectionService.js';
@@ -666,7 +667,14 @@
         function showMessage(msg) {
             listPanel.style.display = 'block';
             detailPanel.classList.add('hidden');
-            listPanel.innerHTML = `<div style="text-align:center; color:#64748b; padding:12px 0;">${msg}</div>`;
+            listPanel.innerHTML = '';
+            listPanel.appendChild(buildDocumentListHeader());
+            const messageEl = document.createElement('div');
+            messageEl.style.textAlign = 'center';
+            messageEl.style.color = '#64748b';
+            messageEl.style.padding = '12px 0';
+            messageEl.textContent = String(msg || '문서를 불러올 수 없습니다.');
+            listPanel.appendChild(messageEl);
         }
 
         function canReadMembersOnlyDocuments() {
@@ -1155,6 +1163,15 @@
 
         async function init() {
             cachedSession = await MinutesService.getSession();
+            if (cachedSession) {
+                const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+                    moduleKey: 'documents',
+                    moduleLabel: '문서함',
+                    redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
+                    alertFn: (msg) => showMessage(String(msg || '접근할 수 없습니다.'))
+                });
+                if (!runtimeCheck.ok) return;
+            }
             cachedIsAdmin = cachedSession ? await MinutesService.isAdmin(cachedSession.user.id, cachedSession.user.email) : false;
             cachedDocumentBoxAccess = await MinutesService.getDocumentBoxAccess(cachedSession?.user?.id || null, cachedSession);
             await renderPublishedList();
