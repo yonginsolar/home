@@ -1,8 +1,9 @@
 /*
-Version: v1.0.18
-Change: 2026-03-16 - Use shared Supabase client so vote and minutes modules do not depend on each other's service files.
+Version: v1.0.19
+Change: 2026-03-17 - Re-export shared Supabase client for vote entry pages.
 */
 import { supabase } from '../shared/supabase-client.js';
+export { supabase };
 
 let cachedRuntimeCoopId = null;
 
