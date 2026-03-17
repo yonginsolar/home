@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.26
-Change: 2026-03-16 - Ensure printable minutes include signature status even without inline signature placeholders.
+Version: v1.2.27
+Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN minutes.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.26 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.27 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -186,7 +186,7 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
     <div class="container">
         <div class="header">
             <h2 id="page-title" style="margin:0;">🛡️ 회의·문서 관리 (사무국용)</h2>
-            <button onclick="location.href='../erp/index.html'" class="btn btn-gray">메인으로</button>
+            <button onclick="location.href='https://erp.yonginsolar.kr/'" class="btn btn-gray">메인으로</button>
         </div>
 
         <div class="tabs">
@@ -539,6 +539,32 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
                 el.style.display = allowed.has(key) ? '' : 'none';
             });
         }
+
+        function buildSignatureSignBaseUrl() {
+            return new URL('./minutes_sign.html', window.location.href).toString();
+        } // End of buildSignatureSignBaseUrl
+
+        async function triggerSignatureTelegramNotification(minuteId) {
+            const safeMinuteId = String(minuteId || '').trim();
+            if (!safeMinuteId) return { ok: false, error: 'MINUTE_ID_REQUIRED' };
+
+            const response = await supabase.functions.invoke('signature-telegram-dm', {
+                body: {
+                    minuteId: safeMinuteId,
+                    signBaseUrl: buildSignatureSignBaseUrl(),
+                },
+            });
+
+            if (response.error) {
+                throw response.error;
+            }
+
+            const data = response.data || {};
+            if (Number(data?.failedCount || 0) > 0) {
+                console.warn('signature telegram dispatch partial failure:', data);
+            }
+            return data;
+        } // End of triggerSignatureTelegramNotification
 
 
         async function generateMinuteDocNo() {
@@ -1771,7 +1797,26 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
                 minutesCache.set(minuteId, { ...cached, signer_ids: finalSignerIds });
             }
 
-            showToast('서명자 구성이 저장되었습니다.');
+            const minuteStatus = String(cached?.status || '').toUpperCase();
+            if (minuteStatus === 'OPEN') {
+                try {
+                    const notifyResult = await triggerSignatureTelegramNotification(minuteId);
+                    if (Number(notifyResult?.sentCount || 0) > 0) {
+                        showToast(`서명자 구성이 저장되었습니다. Telegram 알림 ${notifyResult.sentCount}건을 발송했습니다.`);
+                    } else {
+                        showToast('서명자 구성이 저장되었습니다.');
+                    }
+                } catch (error) {
+                    console.warn('triggerSignatureTelegramNotification after saveSignerEditor failed:', error?.message || error);
+                    showToast('서명자 구성이 저장되었습니다. Telegram 알림은 다시 시도해 주세요.');
+                    window.closeSignerEditor();
+                    loadMinutes();
+                    return;
+                }
+            } else {
+                showToast('서명자 구성이 저장되었습니다.');
+            }
+
             window.closeSignerEditor();
             loadMinutes();
         };
@@ -2104,14 +2149,14 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
             const session = await MinutesService.getSession();
             if (!session) {
                 showToast("로그인이 필요합니다.");
-                location.href = `../erp/index.html?next=${encodeURIComponent(window.location.href)}`;
+                location.href = `https://erp.yonginsolar.kr/?next=${encodeURIComponent(window.location.href)}`;
                 return;
             }
 
             const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
                 moduleKey: 'minutes',
                 moduleLabel: '회의/공문',
-                redirectUrl: `../erp/index.html?next=${encodeURIComponent(window.location.href)}`,
+                redirectUrl: `https://erp.yonginsolar.kr/?next=${encodeURIComponent(window.location.href)}`,
                 alertFn: (msg) => showToast(msg)
             });
             if (!runtimeCheck.ok) return;
@@ -2122,7 +2167,7 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
             isAdminUser = hasErpAdminAccess() || await MinutesService.isAdmin(session.user.id, session.user.email);
             if (!isAdminUser) {
                 showToast("관리자 권한이 필요합니다.");
-                location.href = '../erp/index.html';
+                location.href = 'https://erp.yonginsolar.kr/';
                 return;
             }
 
@@ -2527,7 +2572,24 @@ Change: 2026-03-16 - Ensure printable minutes include signature status even with
             }
             const { error } = await MinutesService.updateMinuteStatus(id, status);
             if(error) showToast(error.message);
-            else loadMinutes();
+            else {
+                if (String(status || '').toUpperCase() === 'OPEN') {
+                    try {
+                        const notifyResult = await triggerSignatureTelegramNotification(id);
+                        if (Number(notifyResult?.sentCount || 0) > 0) {
+                            showToast(`서명 개시와 함께 Telegram 알림 ${notifyResult.sentCount}건을 발송했습니다.`);
+                        } else {
+                            showToast('서명 상태가 변경되었습니다.');
+                        }
+                    } catch (notifyError) {
+                        console.warn('triggerSignatureTelegramNotification after toggleStatus failed:', notifyError?.message || notifyError);
+                        showToast('서명 상태는 변경되었지만 Telegram 알림 발송은 다시 시도해 주세요.');
+                        loadMinutes();
+                        return;
+                    }
+                }
+                loadMinutes();
+            }
         };
 
         // [기능] 삭제

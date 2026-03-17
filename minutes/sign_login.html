@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.0
-Change: Added dedicated sign-in entry for electronic signature with magic link and Kakao login.
+Version: v1.0.2
+Change: 2026-03-17 - Added magic-link invite guidance and standalone Kakao linking step.
 -->
 <html lang="ko">
 <head>
+    <script>console.log('[Version] v1.0.2 | sign_login.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -154,8 +155,8 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
         <div id="loginView" class="hidden">
             <h1>전자서명 로그인</h1>
             <p class="sub">
-                서명 요청 문서를 확인하려면 먼저 로그인해야 합니다.<br>
-                카카오 또는 이메일 링크로 로그인할 수 있습니다.
+                서명 초대는 이메일 매직링크로 진행됩니다.<br>
+                처음 접속한 뒤에는 카카오 계정을 연결해 더 빠르게 로그인할 수 있습니다.
             </p>
 
             <label class="label" for="emailInput">이메일 주소</label>
@@ -173,7 +174,7 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
 
             <div class="hint">
                 로그인 후 자동으로 전자서명 화면으로 돌아옵니다.<br>
-                자동 연결이 안 되면 조합원 포털에서 본인 연결을 먼저 진행할 수 있습니다.
+                자동 연결이 안 되면 관리자에게 서명자 등록 또는 계정 연결 상태를 확인해 주세요.
             </div>
         </div>
 
@@ -185,16 +186,37 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
 
             <div id="linkErrorBox" class="error-box">
                 <strong>자동 연결 실패</strong>
-                <span id="linkErrorMessage">조합원 포털에서 본인 연결을 진행한 뒤 다시 시도해 주세요.</span>
+                <span id="linkErrorMessage">서명자 등록 또는 계정 연결 상태를 관리자에게 확인한 뒤 다시 로그인해 주세요.</span>
             </div>
 
-            <button class="btn btn-primary" type="button" onclick="goToMemberManage()">
-                조합원 포털에서 본인 연결하기
+            <button class="btn btn-primary" type="button" onclick="signOutAndReset()">
+                다시 로그인하기
             </button>
 
             <button class="btn btn-outline" type="button" onclick="signOutAndReset()">
                 다른 계정으로 다시 로그인
             </button>
+        </div>
+
+        <div id="linkReadyView" class="hidden">
+            <h1>전자서명 접속 준비 완료</h1>
+            <p class="sub">
+                초대는 이메일 링크로 확인했고, 다음 접속부터는 카카오 계정을 연결해 더 간편하게 로그인할 수 있습니다.
+            </p>
+
+            <div id="linkedStatusBox" class="success hidden"></div>
+
+            <button id="btnLinkKakao" class="btn btn-kakao" type="button" onclick="startKakaoLinking()">
+                카카오 연동하고 계속
+            </button>
+
+            <button id="btnContinueSign" class="btn btn-primary" type="button" onclick="continueToSign()">
+                지금 바로 서명하기
+            </button>
+
+            <div class="hint">
+                카카오 연동은 선택 사항입니다. 원하면 계속 이메일 링크로도 로그인할 수 있습니다.
+            </div>
         </div>
 
         <div class="footer-note">전자서명 전용 로그인 화면</div>
@@ -236,17 +258,11 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
             return new URL('../auth_callback.html', window.location.href);
         }
 
-        function getMemberManageUrl() {
-            const nextTarget = getNextTarget();
-            const url = new URL('../membermanage.html', window.location.href);
-            url.searchParams.set('next', nextTarget);
-            return url.href;
-        }
-
         function showView(id) {
             document.getElementById('loadingView').classList.add('hidden');
             document.getElementById('loginView').classList.add('hidden');
             document.getElementById('linkErrorView').classList.add('hidden');
+            document.getElementById('linkReadyView').classList.add('hidden');
             const target = document.getElementById(id);
             if (target) target.classList.remove('hidden');
         }
@@ -271,14 +287,24 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
 
         function mapClaimFailureMessage(message) {
             const code = String(message || '').trim();
-            if (code === 'ambiguous_email') return '같은 이메일을 사용하는 조합원 프로필이 여러 건 있습니다. 조합원 포털에서 본인 프로필을 먼저 선택해 주세요.';
-            if (code === 'ambiguous_kakao') return '같은 카카오 ID와 연결된 조합원 프로필이 여러 건입니다. 조합원 포털에서 먼저 본인 연결을 진행해 주세요.';
-            if (code === 'ambiguous_phone') return '같은 전화번호와 연결된 조합원 프로필이 여러 건입니다. 조합원 포털에서 먼저 본인 연결을 진행해 주세요.';
+            if (code === 'ambiguous_email') return '같은 이메일을 사용하는 프로필이 여러 건 있습니다. 관리자에게 서명자 연결 상태를 확인해 주세요.';
+            if (code === 'ambiguous_kakao') return '같은 카카오 ID와 연결된 프로필이 여러 건입니다. 관리자에게 서명자 연결 상태를 확인해 주세요.';
+            if (code === 'ambiguous_phone') return '같은 전화번호와 연결된 프로필이 여러 건입니다. 관리자에게 서명자 연결 상태를 확인해 주세요.';
             if (code === 'already_claimed') return '이미 다른 인증 계정과 연결된 프로필입니다. 관리자에게 연결 상태를 확인해 주세요.';
-            if (code === 'not_found') return '자동으로 일치하는 조합원 프로필을 찾지 못했습니다. 조합원 포털에서 본인 연결을 먼저 진행해 주세요.';
+            if (code === 'not_found') return '자동으로 일치하는 서명자 프로필을 찾지 못했습니다. 관리자에게 등록 또는 연결 상태를 확인해 주세요.';
             if (code === 'link_failed') return '프로필 연결 중 DB 오류가 발생했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해 주세요.';
             if (code === 'not_authenticated') return '로그인 세션을 확인하지 못했습니다. 다시 로그인해 주세요.';
-            return '자동 연결을 완료하지 못했습니다. 조합원 포털에서 본인 연결을 먼저 진행해 주세요.';
+            return '자동 연결을 완료하지 못했습니다. 관리자에게 서명자 연결 상태를 확인해 주세요.';
+        }
+
+        function hasKakaoIdentity(user) {
+            return Boolean(user?.identities?.some((identity) => identity?.provider === 'kakao'));
+        }
+
+        function shouldOfferKakaoLink(user) {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('linked') === '1') return false;
+            return !hasKakaoIdentity(user);
         }
 
         async function handleLinkedSession() {
@@ -291,7 +317,16 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
                 return;
             }
 
-            window.location.replace(getNextTarget());
+            const { data } = await _supabase.auth.getSession();
+            const currentUser = data?.session?.user || null;
+
+            if (shouldOfferKakaoLink(currentUser)) {
+                localStorage.setItem('sign_post_login_next', getNextTarget());
+                showView('linkReadyView');
+                return;
+            }
+
+            continueToSign();
         }
 
         async function sendMagicLink() {
@@ -345,8 +380,52 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
             }
         }
 
-        function goToMemberManage() {
-            window.location.href = getMemberManageUrl();
+        async function startKakaoLinking() {
+            const linkBtn = document.getElementById('btnLinkKakao');
+            const continueBtn = document.getElementById('btnContinueSign');
+            if (linkBtn) linkBtn.disabled = true;
+            if (continueBtn) continueBtn.disabled = true;
+
+            try {
+                const { data } = await _supabase.auth.getSession();
+                const currentUid = data?.session?.user?.id;
+                if (!currentUid) {
+                    showView('loginView');
+                    window.alert('로그인 세션을 찾지 못했습니다. 다시 로그인해 주세요.');
+                    return;
+                }
+
+                const callbackUrl = getAuthCallbackUrl();
+                callbackUrl.searchParams.set('linking', 'true');
+                callbackUrl.searchParams.set('current_uid', currentUid);
+
+                const landingUrl = getLandingUrl();
+                landingUrl.searchParams.set('linked', '1');
+                callbackUrl.searchParams.set('next', landingUrl.href);
+                localStorage.setItem('auth_destination', landingUrl.href);
+
+                const { data: oauthData, error } = await _supabase.auth.signInWithOAuth({
+                    provider: 'kakao',
+                    options: {
+                        redirectTo: callbackUrl.href,
+                        skipBrowserRedirect: true,
+                        scopes: 'account_email phone_number profile_nickname'
+                    }
+                });
+
+                if (error) throw error;
+                window.location.href = oauthData.url;
+            } catch (error) {
+                if (linkBtn) linkBtn.disabled = false;
+                if (continueBtn) continueBtn.disabled = false;
+                window.alert('카카오 연동 연결 실패: ' + error.message);
+            }
+        }
+
+        function continueToSign() {
+            const nextTarget = localStorage.getItem('sign_post_login_next') || getNextTarget();
+            localStorage.removeItem('sign_post_login_next');
+            window.location.replace(normalizeDest(nextTarget));
         }
 
         async function signOutAndReset() {
@@ -354,11 +433,25 @@ Change: Added dedicated sign-in entry for electronic signature with magic link a
                 await _supabase.auth.signOut();
             } catch (_) { void 0; }
             setStatus('');
+            const linkedStatusBox = document.getElementById('linkedStatusBox');
+            if (linkedStatusBox) {
+                linkedStatusBox.classList.add('hidden');
+                linkedStatusBox.textContent = '';
+            }
+            localStorage.removeItem('sign_post_login_next');
             showView('loginView');
         }
 
         async function init() {
             setLoading('로그인 상태를 확인하고 있습니다...');
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('linked') === '1') {
+                const linkedStatusBox = document.getElementById('linkedStatusBox');
+                if (linkedStatusBox) {
+                    linkedStatusBox.textContent = '카카오 연동이 완료되었습니다. 이제 전자서명 화면으로 이동할 수 있습니다.';
+                    linkedStatusBox.classList.remove('hidden');
+                }
+            }
             const { data } = await _supabase.auth.getSession();
             if (data?.session?.user) {
                 await handleLinkedSession();

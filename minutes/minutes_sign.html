@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.11
-Change: 2026-03-16 - Added attachment review to sign view and synced MinutesService cache-busting version.
+Version: v1.2.14
+Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only preview when they are not a signer.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.11 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.14 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -34,6 +34,56 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
         }
         .panel.hidden { display: none; }
         .list-panel { background: #f8fafc; }
+        .signature-telegram-panel {
+            background: linear-gradient(135deg, #eff6ff, #ffffff);
+            border-color: #bfdbfe;
+        }
+        .signature-telegram-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .signature-telegram-title {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #0f172a;
+        }
+        .signature-telegram-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            color: #334155;
+            font-size: 0.82rem;
+            font-weight: 800;
+        }
+        .signature-telegram-badge.connected {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .signature-telegram-badge.disabled {
+            background: #e2e8f0;
+            color: #64748b;
+        }
+        .signature-telegram-help {
+            font-size: 0.95rem;
+            color: #334155;
+            margin-bottom: 8px;
+        }
+        .signature-telegram-meta {
+            font-size: 0.85rem;
+            color: #64748b;
+            line-height: 1.6;
+        }
+        .signature-telegram-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 12px 0 10px;
+        }
         .list-item {
             background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
             padding: 18px 22px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center;
@@ -120,6 +170,20 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
 </head>
 <body>
     <div class="page-wrap">
+        <div id="signature-telegram-panel" class="panel signature-telegram-panel hidden">
+            <div class="signature-telegram-header">
+                <div class="signature-telegram-title">서명 요청 Telegram 알림</div>
+                <span id="signatureTelegramStatusBadge" class="signature-telegram-badge">미확인</span>
+            </div>
+            <div id="signatureTelegramHelpText" class="signature-telegram-help">서명건이 열리면 Telegram 개인 DM으로 바로 안내를 받을 수 있습니다.</div>
+            <div class="signature-telegram-actions">
+                <button class="btn-sign" type="button" id="btnSignatureTelegramConnect" onclick="openSignatureTelegramConnect()">Telegram 연결</button>
+                <button class="btn-outline" type="button" id="btnSignatureTelegramCopyLink" style="display:none;" onclick="copySignatureTelegramConnectLink()">봇 링크 복사</button>
+                <button class="btn-outline" type="button" id="btnSignatureTelegramCopyStart" style="display:none;" onclick="copySignatureTelegramConnectCommand()">연결 명령 복사</button>
+                <button class="btn-outline" type="button" id="btnSignatureTelegramDisconnect" style="display:none;" onclick="disconnectSignatureTelegramLink()">연결 해제</button>
+            </div>
+            <div id="signatureTelegramMeta" class="signature-telegram-meta">처음 한 번만 연결해 두면 이후 새 서명 요청이 생길 때마다 Telegram으로 안내를 받을 수 있습니다.</div>
+        </div>
         <div id="list-panel" class="panel list-panel"></div>
         <div id="detail-panel" class="panel hidden">
             <div class="detail-header">
@@ -270,6 +334,14 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
         let drawing = false;
         let hasDrawn = false;
         let pendingSignAfterPad = false;
+        let signatureTelegramConnectUrl = '';
+        let signatureTelegramConnectCommand = '';
+        let signatureTelegramConnectCode = '';
+        const requestedMinuteId = (() => {
+            const params = new URLSearchParams(window.location.search);
+            return String(params.get('minuteId') || params.get('id') || '').trim();
+        })();
+        let autoOpenedRequestedMinute = false;
 
         function sanitizeStyle(styleText) {
             const raw = String(styleText || '');
@@ -641,6 +713,171 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 1800);
         }
+        function renderSignatureTelegramLinkStatus(status = {}) {
+            const section = document.getElementById('signature-telegram-panel');
+            const badge = document.getElementById('signatureTelegramStatusBadge');
+            const help = document.getElementById('signatureTelegramHelpText');
+            const meta = document.getElementById('signatureTelegramMeta');
+            const connectBtn = document.getElementById('btnSignatureTelegramConnect');
+            const copyLinkBtn = document.getElementById('btnSignatureTelegramCopyLink');
+            const copyStartBtn = document.getElementById('btnSignatureTelegramCopyStart');
+            const disconnectBtn = document.getElementById('btnSignatureTelegramDisconnect');
+            if (!section || !badge || !help || !meta || !connectBtn || !copyLinkBtn || !copyStartBtn || !disconnectBtn) return;
+
+            const shouldShow = myOfficialIds.length > 0 || isAdminUser;
+            const isAdminPreviewOnly = isAdminUser && myOfficialIds.length === 0;
+            section.classList.toggle('hidden', !shouldShow);
+            if (!shouldShow) return;
+
+            const enabled = status?.enabled === true;
+            const linked = status?.linked === true;
+            const botUsername = String(status?.bot_username || '').trim();
+            const maskedChat = String(status?.chat_id_masked || '').trim();
+
+            connectBtn.disabled = !enabled;
+            copyLinkBtn.style.display = signatureTelegramConnectUrl ? 'inline-flex' : 'none';
+            copyStartBtn.style.display = signatureTelegramConnectCommand ? 'inline-flex' : 'none';
+            disconnectBtn.style.display = linked ? 'inline-flex' : 'none';
+
+            if (isAdminPreviewOnly) {
+                badge.className = 'signature-telegram-badge disabled';
+                badge.textContent = '관리자 보기';
+                help.textContent = '서명 대상 임원·대의원 계정으로 로그인하면 이 위치에서 Telegram 연결 상태를 확인할 수 있습니다.';
+                meta.textContent = '현재 계정은 서명자가 아니므로 이 화면에서는 Telegram 연결 상태 조회나 연결 버튼이 활성화되지 않습니다.';
+                connectBtn.style.display = 'none';
+                copyLinkBtn.style.display = 'none';
+                copyStartBtn.style.display = 'none';
+                disconnectBtn.style.display = 'none';
+                return;
+            }
+
+            if (!enabled) {
+                badge.className = 'signature-telegram-badge disabled';
+                badge.textContent = '준비중';
+                help.textContent = '아직 Telegram 서명 알림이 활성화되지 않았습니다.';
+                meta.textContent = '관리자가 Telegram 서명 알림을 활성화하면 이 화면 상단에서 바로 연결할 수 있습니다.';
+                connectBtn.style.display = 'inline-flex';
+                return;
+            }
+
+            badge.className = linked ? 'signature-telegram-badge connected' : 'signature-telegram-badge';
+            badge.textContent = linked ? '연결됨' : '미연결';
+            connectBtn.style.display = linked ? 'none' : 'inline-flex';
+
+            if (linked) {
+                help.textContent = botUsername ? `@${botUsername} 봇과 연결되었습니다.` : 'Telegram 개인 DM이 연결되었습니다.';
+                meta.textContent = maskedChat
+                    ? `현재 연결 채팅: ${maskedChat}. 새 서명 요청이 생기면 Telegram으로 바로 안내를 받습니다.`
+                    : '새 서명 요청이 생기면 Telegram으로 바로 안내를 받습니다.';
+                signatureTelegramConnectUrl = '';
+                signatureTelegramConnectCommand = '';
+                signatureTelegramConnectCode = '';
+                copyLinkBtn.style.display = 'none';
+                copyStartBtn.style.display = 'none';
+                return;
+            }
+
+            help.textContent = botUsername
+                ? `@${botUsername} 봇으로 서명 요청 알림을 받을 수 있습니다.`
+                : 'Telegram 개인 DM으로 서명 요청 알림을 받을 수 있습니다.';
+            meta.textContent = '지금 Telegram 연결을 해두면 다음 서명 요청부터 바로 안내를 받을 수 있습니다. 자동 연결이 안 되면 연결 명령 복사를 눌러 Telegram 대화창에 그대로 붙여넣어 주세요.';
+        } // End of renderSignatureTelegramLinkStatus
+
+        async function loadSignatureTelegramLinkStatus() {
+            if (myOfficialIds.length === 0) {
+                renderSignatureTelegramLinkStatus({ enabled: false, linked: false });
+                return;
+            }
+            try {
+                const { data, error } = await supabase.rpc('signature_get_telegram_link_status');
+                if (error) throw error;
+                renderSignatureTelegramLinkStatus(data || {});
+            } catch (error) {
+                console.warn('signature telegram link status load failed:', error?.message || error);
+                renderSignatureTelegramLinkStatus({ enabled: false, linked: false });
+            }
+        } // End of loadSignatureTelegramLinkStatus
+
+        async function openSignatureTelegramConnect() {
+            try {
+                const { data, error } = await supabase.rpc('signature_issue_my_telegram_link_request');
+                if (error) throw error;
+                signatureTelegramConnectUrl = String(data?.connect_url || '').trim();
+                signatureTelegramConnectCommand = String(data?.connect_command || '').trim();
+                signatureTelegramConnectCode = String(data?.connect_code || '').trim();
+                const botUsername = String(data?.bot_username || '').trim();
+                const connectToken = String(data?.token || '').trim();
+                const telegramAppUrl = (botUsername && connectToken)
+                    ? `tg://resolve?domain=${encodeURIComponent(botUsername)}&start=${encodeURIComponent(connectToken)}`
+                    : '';
+                renderSignatureTelegramLinkStatus(
+                    await supabase.rpc('signature_get_telegram_link_status')
+                        .then((result) => result.data || { enabled: true, linked: false, bot_username: botUsername })
+                        .catch(() => ({ enabled: true, linked: false, bot_username: botUsername })),
+                );
+                const meta = document.getElementById('signatureTelegramMeta');
+                if (meta) {
+                    meta.textContent = `봇 화면을 열었습니다. Telegram에서 START BOT을 누르면 연결됩니다. 연결 코드: ${signatureTelegramConnectCode || '-'} / 만료 시각: ${String(data?.expires_at || '').replace('T', ' ').replace('Z', '')}. 연결이 완료되면 이후 새 서명 요청을 Telegram으로 바로 받을 수 있습니다.`;
+                }
+                document.getElementById('btnSignatureTelegramCopyLink')?.style.setProperty('display', 'inline-flex');
+                document.getElementById('btnSignatureTelegramCopyStart')?.style.setProperty('display', 'inline-flex');
+                if (telegramAppUrl) {
+                    window.location.href = telegramAppUrl;
+                    setTimeout(function openTelegramWebFallback() {
+                        if (signatureTelegramConnectUrl) window.open(signatureTelegramConnectUrl, '_blank', 'noopener');
+                    }, 900);
+                } else if (signatureTelegramConnectUrl) {
+                    window.open(signatureTelegramConnectUrl, '_blank', 'noopener');
+                }
+            } catch (error) {
+                showToast('Telegram 연결 링크 생성 실패: ' + (error?.message || error));
+            }
+        } // End of openSignatureTelegramConnect
+        window.openSignatureTelegramConnect = openSignatureTelegramConnect;
+
+        async function copySignatureTelegramConnectCommand() {
+            if (!signatureTelegramConnectCommand) {
+                showToast('먼저 Telegram 연결 링크를 생성해 주세요.');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(signatureTelegramConnectCommand);
+                showToast('연결 명령을 복사했습니다.');
+            } catch (error) {
+                showToast('연결 명령 복사 실패: ' + (error?.message || error));
+            }
+        } // End of copySignatureTelegramConnectCommand
+        window.copySignatureTelegramConnectCommand = copySignatureTelegramConnectCommand;
+
+        async function copySignatureTelegramConnectLink() {
+            if (!signatureTelegramConnectUrl) {
+                showToast('먼저 Telegram 연결 링크를 생성해 주세요.');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(signatureTelegramConnectUrl);
+                showToast('Telegram 연결 링크를 복사했습니다.');
+            } catch (error) {
+                showToast('링크 복사 실패: ' + (error?.message || error));
+            }
+        } // End of copySignatureTelegramConnectLink
+        window.copySignatureTelegramConnectLink = copySignatureTelegramConnectLink;
+
+        async function disconnectSignatureTelegramLink() {
+            try {
+                const { data, error } = await supabase.rpc('signature_disconnect_my_telegram_link');
+                if (error) throw error;
+                signatureTelegramConnectUrl = '';
+                signatureTelegramConnectCommand = '';
+                signatureTelegramConnectCode = '';
+                await loadSignatureTelegramLinkStatus();
+                showToast(data ? 'Telegram 연결을 해제했습니다.' : '해제할 Telegram 연결이 없습니다.');
+            } catch (error) {
+                showToast('Telegram 연결 해제 실패: ' + (error?.message || error));
+            }
+        } // End of disconnectSignatureTelegramLink
+        window.disconnectSignatureTelegramLink = disconnectSignatureTelegramLink;
+
         function buildListHeader() {
             const header = document.createElement('div');
             header.style.display = 'flex';
@@ -725,6 +962,7 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
                 myOfficialId = official.id;
                 mySealUrl = official.seal_url || (myOfficialRows.find(row => row?.seal_url)?.seal_url || null);
             }
+            await loadSignatureTelegramLinkStatus();
             return true;
         }
 
@@ -755,6 +993,10 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
                 }
 
                 if (targets.length === 0) {
+                    if (requestedMinuteId && !autoOpenedRequestedMinute) {
+                        autoOpenedRequestedMinute = true;
+                        showToast('해당 문서를 찾을 수 없습니다.');
+                    }
                     appendListMessage(listPanel, '현재 열람/서명 가능한 문서가 없습니다.');
                     return;
                 }
@@ -788,6 +1030,16 @@ Change: 2026-03-16 - Added attachment review to sign view and synced MinutesServ
                     item.addEventListener('click', () => openDocumentById(m.id));
                     listPanel.appendChild(item);
                 });
+
+                if (requestedMinuteId && !autoOpenedRequestedMinute) {
+                    autoOpenedRequestedMinute = true;
+                    const matched = targets.find((target) => String(target?.id || '') === requestedMinuteId);
+                    if (matched?.id) {
+                        await openDocumentById(matched.id);
+                    } else {
+                        showToast('해당 문서를 찾을 수 없습니다.');
+                    }
+                }
             } catch (err) {
                 console.error('minutes_sign loadSignList error:', err);
                 renderListError('서명 문서 목록을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
@@ -1016,7 +1268,7 @@ async function openDocumentById(id) {
                 const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
                     moduleKey: 'signature',
                     moduleLabel: '전자서명',
-                    redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
+                    redirectUrl: `sign_login.html?next=${encodeURIComponent(window.location.href)}`,
                     alertFn: (msg) => showToast(msg)
                 });
                 if (!runtimeCheck.ok) return;
