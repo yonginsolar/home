@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.14
-Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only preview when they are not a signer.
+Version: v1.2.16
+Change: 2026-03-18 - 서명 상태 표시를 강화하고 서명 완료 후 목록으로 자동 복귀하도록 조정.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.14 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.16 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -91,6 +91,33 @@ Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only
         }
         .list-title { font-size: 1.05rem; font-weight: 700; color: #0f172a; }
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
+        .list-status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 86px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-size: 0.82rem;
+            font-weight: 800;
+            white-space: nowrap;
+            border: 1px solid transparent;
+        }
+        .list-status-badge.pending {
+            background: #eff6ff;
+            border-color: #bfdbfe;
+            color: #1d4ed8;
+        }
+        .list-status-badge.completed {
+            background: #dcfce7;
+            border-color: #86efac;
+            color: #166534;
+        }
+        .list-status-badge.readonly {
+            background: #f8fafc;
+            border-color: #cbd5e1;
+            color: #475569;
+        }
         .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
         .mode-pill {
             display: none;
@@ -780,7 +807,9 @@ Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only
             help.textContent = botUsername
                 ? `@${botUsername} 봇으로 서명 요청 알림을 받을 수 있습니다.`
                 : 'Telegram 개인 DM으로 서명 요청 알림을 받을 수 있습니다.';
-            meta.textContent = '지금 Telegram 연결을 해두면 다음 서명 요청부터 바로 안내를 받을 수 있습니다. 자동 연결이 안 되면 연결 명령 복사를 눌러 Telegram 대화창에 그대로 붙여넣어 주세요.';
+            meta.textContent = botUsername
+                ? `지금 Telegram 연결을 해두면 다음 서명 요청부터 바로 안내를 받을 수 있습니다. 링크가 안 열리면 Telegram에서 @${botUsername} 봇을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어 주세요.`
+                : '지금 Telegram 연결을 해두면 다음 서명 요청부터 바로 안내를 받을 수 있습니다. 링크가 안 열리면 Telegram에서 봇 이름을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어 주세요.';
         } // End of renderSignatureTelegramLinkStatus
 
         async function loadSignatureTelegramLinkStatus() {
@@ -817,7 +846,9 @@ Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only
                 );
                 const meta = document.getElementById('signatureTelegramMeta');
                 if (meta) {
-                    meta.textContent = `봇 화면을 열었습니다. Telegram에서 START BOT을 누르면 연결됩니다. 연결 코드: ${signatureTelegramConnectCode || '-'} / 만료 시각: ${String(data?.expires_at || '').replace('T', ' ').replace('Z', '')}. 연결이 완료되면 이후 새 서명 요청을 Telegram으로 바로 받을 수 있습니다.`;
+                    meta.textContent = botUsername
+                        ? `봇 화면을 열었습니다. Telegram에서 시작 버튼을 눌러 연결해 주세요. 링크가 안 열리면 Telegram에서 @${botUsername} 봇을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어도 됩니다. 연결 코드: ${signatureTelegramConnectCode || '-'} / 만료 시각: ${String(data?.expires_at || '').replace('T', ' ').replace('Z', '')}. 연결이 완료되면 이후 새 서명 요청을 Telegram으로 바로 받을 수 있습니다.`
+                        : `봇 화면을 열었습니다. Telegram에서 시작 버튼을 눌러 연결해 주세요. 링크가 안 열리면 Telegram에서 봇 이름을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어도 됩니다. 연결 코드: ${signatureTelegramConnectCode || '-'} / 만료 시각: ${String(data?.expires_at || '').replace('T', ' ').replace('Z', '')}. 연결이 완료되면 이후 새 서명 요청을 Telegram으로 바로 받을 수 있습니다.`;
                 }
                 document.getElementById('btnSignatureTelegramCopyLink')?.style.setProperty('display', 'inline-flex');
                 document.getElementById('btnSignatureTelegramCopyStart')?.style.setProperty('display', 'inline-flex');
@@ -927,10 +958,21 @@ Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only
         }
         window.showList = showList;
 
-        function setDetailModePill(showWaitingView) {
+        function setDetailModePill(showWaitingView, label = '서명대기 · 열람중') {
             const pill = document.getElementById('detail-mode-pill');
             if (!pill) return;
+            pill.textContent = label;
             pill.classList.toggle('show', !!showWaitingView);
+        }
+
+        function getDocumentSignProgress(doc, isSigned) {
+            if (isSigned) {
+                return { label: '서명 완료', className: 'completed', detailText: '이미 서명 완료된 문서입니다.' };
+            }
+            if (String(doc?.status || '') === 'OPEN') {
+                return { label: '서명 필요', className: 'pending', detailText: '서명 필요 문서입니다. 내용을 확인한 뒤 전자서명을 진행해 주세요.' };
+            }
+            return { label: '열람 전용', className: 'readonly', detailText: '현재는 열람 전용 문서입니다.' };
         }
 
         async function initSession() {
@@ -1020,13 +1062,18 @@ Change: 2026-03-17 - Show Telegram signature alert panel for admins as read-only
                     const isSigned = myOfficialIds.length > 0
                         ? (myOfficialIds.some(officialId => signedMap.get(String(m.id) + ':' + String(officialId))) || isLocallySigned(m.id))
                         : false;
+                    const signProgress = getDocumentSignProgress(m, isSigned);
                     const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
-                    dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${isSigned ? '서명완료' : '미서명'}`;
+                    dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${signProgress.label}`;
 
                     textWrap.appendChild(titleEl);
                     textWrap.appendChild(dateEl);
 
                     item.appendChild(textWrap);
+                    const badgeEl = document.createElement('span');
+                    badgeEl.className = `list-status-badge ${signProgress.className}`;
+                    badgeEl.textContent = signProgress.label;
+                    item.appendChild(badgeEl);
                     item.addEventListener('click', () => openDocumentById(m.id));
                     listPanel.appendChild(item);
                 });
@@ -1110,6 +1157,7 @@ async function openDocumentById(id) {
                 btn.disabled = true;
                 btn.innerText = '서명 완료됨';
                 btn.style.display = 'none';
+                setDetailModePill(true, '서명 완료');
                 if (cancelBtn && doc.status === 'OPEN') cancelBtn.style.display = 'inline-flex';
                 return;
             } else {
@@ -1136,9 +1184,10 @@ async function openDocumentById(id) {
                 const signedCount = Array.isArray(signatures) ? signatures.length : 0;
                 if (doc.status === 'CLOSED' && signedCount === 0) {
                     statusEl.innerText = '현재 열람모드입니다. 수정이 필요한 내용이 있으면 사무국장에게 연락 바랍니다.';
-                    setDetailModePill(true);
+                    setDetailModePill(true, '서명 마감 · 열람중');
                 } else {
                     statusEl.innerText = '서명 마감된 문서입니다.';
+                    setDetailModePill(true, '서명 마감');
                 }
                 btn.disabled = true;
                 btn.style.display = 'none';
@@ -1152,7 +1201,7 @@ async function openDocumentById(id) {
                 return;
             }
 
-            statusEl.innerText = '서명 가능 상태입니다.';
+            statusEl.innerText = '서명 필요 문서입니다. 내용을 확인한 뒤 전자서명을 진행해 주세요.';
             btn.style.display = 'inline-flex';
             btn.disabled = false;
             if (cancelBtn) cancelBtn.style.display = 'none';
@@ -1198,6 +1247,7 @@ async function openDocumentById(id) {
                     const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
                     if (doc) await updateSignStatus(doc);
                     await loadSignList();
+                    showList();
                     return;
                 }
                 showToast('서명 실패: ' + error.message);
@@ -1207,6 +1257,7 @@ async function openDocumentById(id) {
                 const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
                 if (doc) await updateSignStatus(doc);
                 await loadSignList();
+                showList();
             }
         }
 
