@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
+Version: v1.0.3
 Change: Restore default coop mapping for public signup domain.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.2 | signup.html');</script>
+  <script>console.log('[Version] v1.0.3 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -115,9 +115,16 @@ gtag('config', 'G-TR217L7JN9');
 <div id="email-gate-input" class="mt-4" style="display:none; animation: fadeIn 0.5s;">
 <div class="input-group mb-2 email-gate-group">
 <input type="email" id="init-email" class="form-control" placeholder="이메일 주소 입력">
-<button class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">링크 발송</button>
+<button class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">코드 발송</button>
 </div>
 <p id="mail-status" class="small mt-2"></p>
+<div id="signup-otp-area" class="mt-3" style="display:none;">
+<div class="input-group mb-2">
+<input type="text" id="signup-otp-input" class="form-control" placeholder="메일로 받은 인증코드" inputmode="numeric" autocomplete="one-time-code" onkeyup="if(event.key==='Enter') verifySignupOtp()">
+<button class="btn btn-dark" type="button" id="btnVerifySignupOtp" onclick="verifySignupOtp()">코드 확인</button>
+</div>
+<p class="small text-muted mb-0">같은 화면에서 인증코드를 입력하면 가입 신청서로 바로 넘어갑니다.</p>
+</div>
 </div>
 </div>
 
@@ -339,6 +346,7 @@ const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 let signupTenant = null;
 let signupTenantReadyPromise = null;
+let pendingSignupOtpEmail = '';
 
 function getSignupCoopCodeFromLocation() {
 const params = new URLSearchParams(window.location.search);
@@ -690,17 +698,54 @@ const btn = document.getElementById('btnSendLink');
 btn.disabled = true; btn.innerText = "발송중...";
 
 const { error } = await _supabase.auth.signInWithOtp({ 
-email: email, options: { emailRedirectTo: window.location.href } 
+email: email, options: { shouldCreateUser: true } 
 });
 
 if(error) { 
 // [수정] alert -> 모달로 변경
 openResultModal(error.message, true); 
-btn.disabled=false; btn.innerText="링크 발송"; 
+btn.disabled=false; btn.innerText="코드 발송"; 
 }
 else { 
-document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 링크를 확인해주세요 📨"; 
+pendingSignupOtpEmail = String(email || '').trim().toLowerCase();
+document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 인증코드를 입력해주세요 📨"; 
+document.getElementById('signup-otp-area').style.display = 'block';
 btn.innerText = "발송완료";
+btn.disabled = false;
+}
+}
+
+async function verifySignupOtp() {
+const email = String(pendingSignupOtpEmail || document.getElementById('init-email')?.value || '').trim().toLowerCase();
+const token = String(document.getElementById('signup-otp-input')?.value || '').trim();
+const btn = document.getElementById('btnVerifySignupOtp');
+if (!email) return openResultModal('먼저 인증코드를 받아주세요.', true);
+if (!token) return openResultModal('메일로 받은 인증코드를 입력하세요.', true);
+
+btn.disabled = true;
+btn.innerText = '확인중...';
+try {
+const { data, error } = await _supabase.auth.verifyOtp({
+email,
+token,
+type: 'email'
+});
+if (error) {
+openResultModal(error.message, true);
+return;
+}
+const session = data?.session || (await _supabase.auth.getSession()).data?.session || null;
+if (!session) {
+openResultModal('인증은 완료되었지만 로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.', true);
+return;
+}
+await ensureSignupTenant();
+checkExistingMember(session);
+} catch (error) {
+openResultModal(error?.message || String(error), true);
+} finally {
+btn.disabled = false;
+btn.innerText = '코드 확인';
 }
 }
 

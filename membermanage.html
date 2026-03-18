@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.32
+Version: v1.0.33
 Change: 2026-03-16 - Removed admin-only minutes management shortcut from member portal.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.32 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.33 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -465,7 +465,7 @@ gtag('config', 'G-TR217L7JN9');
 <i class="bi bi-info-circle-fill text-success fs-4 me-3"></i>
 <div>
 가입 시 등록한 <b>이메일</b>을 입력해주세요.<br>
-<small class="text-muted">입력하신 메일로 로그인 링크를 보내드립니다.</small>
+<small class="text-muted">입력하신 메일로 인증코드를 보내드립니다.</small>
 </div>
 </div>
 
@@ -473,7 +473,7 @@ gtag('config', 'G-TR217L7JN9');
 <label class="form-label fw-bold small text-secondary">이메일 주소</label>
 <div class="input-group">
 <input type="email" id="emailInput" class="form-control form-control-lg" placeholder="example@email.com" onkeyup="if(event.key==='Enter') sendMagicLink()">
-<button class="btn btn-dark" type="button" onclick="sendMagicLink()">링크 받기</button>
+<button class="btn btn-dark" type="button" onclick="sendMagicLink()">코드 받기</button>
 </div>
 
 <div class="text-end mt-2">
@@ -489,8 +489,13 @@ gtag('config', 'G-TR217L7JN9');
 <h4 class="fw-bold mt-2">메일함을 확인해주세요!</h4>
 <p class="text-muted mb-3">
 <span id="targetEmail" class="fw-bold text-dark"></span>(으)로<br>
-로그인 링크가 발송되었습니다.
+인증코드가 발송되었습니다.
 </p>
+<div class="input-group mb-2">
+<input type="text" id="otpInput" class="form-control" placeholder="메일로 받은 인증코드" inputmode="numeric" autocomplete="one-time-code" onkeyup="if(event.key==='Enter') verifyLoginOtp()">
+<button class="btn btn-dark" type="button" id="btnVerifyOtp" onclick="verifyLoginOtp()">코드 확인</button>
+</div>
+<small class="text-muted">같은 화면에서 인증코드를 입력하면 바로 로그인됩니다.</small>
 <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">이메일 다시 입력하기</button>
 </div>
 
@@ -1153,6 +1158,7 @@ const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 let _supabase = null;
 let curMem = null;
 let curAuth = null;
+let pendingLoginOtpEmail = '';
 let currentBoardLimit = 20;
 let isBoardLoading = false;
 let g_notices_list = [];
@@ -1433,7 +1439,7 @@ async function startKakaoLinking() {
 // [수정] 매직링크 발송 함수 (버튼 중복 클릭 방지 추가)
 async function sendMagicLink() {
 const emailInput = document.getElementById('emailInput');
-const email = emailInput.value.trim();
+const email = emailInput.value.trim().toLowerCase();
 // 버튼을 ID 없이 쿼리 셀렉터로 찾거나, HTML에 id="btnSendLink"를 추가하는 것이 좋지만
 // 현재 구조에서는 형제 요소로 찾습니다.
 const btn = emailInput.nextElementSibling; // input 바로 다음이 버튼임
@@ -1442,19 +1448,16 @@ if(!email.includes('@')) return showModal('이메일 주소 형식이 올바르�
 
 // [방어 로직] 버튼 비활성화 및 로딩 표시
 if(btn) btn.disabled = true; 
-showLoading(true, '보안 연결 초기화 및 메일 발송 중...');
+showLoading(true, '보안 연결 초기화 및 인증코드 발송 중...');
 
 // 1. 기존 세션 로그아웃
 await signOutSilently(_supabase);
 
-// 2. 로그인 링크 발송
-// [수정된 부분] sendMagicLink 함수 내부
+// 2. 로그인 인증코드 발송
 const { error } = await _supabase.auth.signInWithOtp({
 email: email,
 options: { 
-shouldCreateUser: true, 
-// [변경] href 대신 origin + pathname 사용 (뒤에 붙은 # 등을 제거하기 위함)
-emailRedirectTo: window.location.origin + window.location.pathname + window.location.search
+shouldCreateUser: true
 } 
 });
 
@@ -1468,18 +1471,53 @@ const friendlyMsg = translateAuthError(error.message);
 showModal(friendlyMsg);
 }
 else {
-// [성공] 성공 시에는 버튼을 계속 막아두거나, "발송됨"으로 텍스트 변경
+pendingLoginOtpEmail = email;
 if(btn) {
 btn.innerText = "발송 완료";
 // 60초 뒤에 다시 활성화 (선택 사항)
 setTimeout(() => { 
 btn.disabled = false; 
-btn.innerText = "링크 받기";
+btn.innerText = "코드 받기";
 }, 60000); 
 }
 
 document.getElementById('sentMsgBox').classList.remove('hidden');
 document.getElementById('targetEmail').innerText = email;
+}
+}
+
+async function verifyLoginOtp() {
+const email = String(pendingLoginOtpEmail || document.getElementById('emailInput')?.value || '').trim().toLowerCase();
+const token = String(document.getElementById('otpInput')?.value || '').trim();
+const btn = document.getElementById('btnVerifyOtp');
+if (!email) return showModal('먼저 인증코드를 받아주세요.');
+if (!token) return showModal('메일로 받은 인증코드를 입력해 주세요.');
+
+btn.disabled = true;
+showLoading(true, '인증 상태를 확인하는 중...');
+try {
+const { data, error } = await _supabase.auth.verifyOtp({
+email,
+token,
+type: 'email'
+});
+if (error) {
+showLoading(false);
+showModal(translateAuthError(error.message));
+return;
+}
+const session = data?.session || (await _supabase.auth.getSession()).data?.session || null;
+if (!session?.user) {
+showLoading(false);
+showModal('인증은 완료되었지만 로그인 세션을 확인하지 못했습니다. 다시 시도해 주세요.');
+return;
+}
+await handleLoginSuccess(session.user);
+} catch (error) {
+showLoading(false);
+showModal('시스템 오류: ' + (error?.message || error));
+} finally {
+btn.disabled = false;
 }
 }
 

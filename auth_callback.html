@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
-Change: Added noindex for callback page (SEO hardening).
+Version: v1.0.3
+Change: Routed Kakao linking callback by next/auth_destination instead of membermanage hardcoding.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.2 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.3 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -109,6 +109,8 @@ Change: Added noindex for callback page (SEO hardening).
 
                 if (isLinking && currentUid) {
                     document.getElementById('message').innerText = '카카오 계정 연결 처리 중...';
+                    const redirectTarget = getDest();
+                    localStorage.removeItem('auth_destination');
 
                     const kakaoId = data.session.user.identities?.find(id => id.provider === 'kakao')?.id;
                     
@@ -122,19 +124,17 @@ Change: Added noindex for callback page (SEO hardening).
                         if (rpcError) {
                             console.error("카카오 연동 RPC 오류:", rpcError);
                             document.getElementById('message').innerText = '카카오 연결에 실패했습니다. (DB 오류)';
-                            // 실패 시 membermanage.html로 돌려보냄
-                            setTimeout(() => window.location.replace('/membermanage.html'), 3000);
+                            setTimeout(() => window.location.replace(redirectTarget), 3000);
                             return;
                         }
 
                         document.getElementById('message').innerText = '카카오 계정이 성공적으로 연결되었습니다!';
-                        // 연동 성공 시 membermanage.html로 강제 이동
-                        setTimeout(() => window.location.replace('/membermanage.html'), 1500);
+                        setTimeout(() => window.location.replace(redirectTarget), 1500);
                         return;
 
                     } else {
                         document.getElementById('message').innerText = '카카오 인증 정보 추출 실패. 연동 취소.';
-                        setTimeout(() => window.location.replace('/membermanage.html'), 3000);
+                        setTimeout(() => window.location.replace(redirectTarget), 3000);
                         return;
                     }
                 }
