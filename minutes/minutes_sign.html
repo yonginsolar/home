@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.16
-Change: 2026-03-18 - 서명 상태 표시를 강화하고 서명 완료 후 목록으로 자동 복귀하도록 조정.
+Version: v1.2.17
+Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Telegram 완료 알림을 비차단 방식으로 발송.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-18 - 서명 상태 표시를 강화하고 서명 완료 후 목�
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.16 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.17 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -1252,6 +1252,7 @@ async function openDocumentById(id) {
                 }
                 showToast('서명 실패: ' + error.message);
             } else {
+                await notifySignatureCompletionIfNeeded(currentMinuteId);
                 markLocallySigned(currentMinuteId);
                 showToast('정상적으로 서명되었습니다.');
                 const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
@@ -1259,7 +1260,28 @@ async function openDocumentById(id) {
                 await loadSignList();
                 showList();
             }
-        }
+        } // End of submitSignature
+
+        async function notifySignatureCompletionIfNeeded(minuteId) {
+            const safeMinuteId = String(minuteId || '').trim();
+            if (!safeMinuteId) return;
+            try {
+                const { data, error } = await supabase.functions.invoke('signature-telegram-complete-dm', {
+                    body: {
+                        minuteId: safeMinuteId
+                    }
+                });
+                if (error) {
+                    console.warn('[minutes_sign] signature completion notify failed:', error.message || error);
+                    return;
+                }
+                if (data?.ok === false) {
+                    console.warn('[minutes_sign] signature completion notify response not ok:', data);
+                }
+            } catch (invokeError) {
+                console.warn('[minutes_sign] signature completion notify exception:', invokeError?.message || invokeError);
+            }
+        } // End of notifySignatureCompletionIfNeeded
 
         window.handleSign = async () => {
             if (!currentMinuteId) return;
