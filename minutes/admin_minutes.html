@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.27
-Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN minutes.
+Version: v1.2.34
+Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page for general assembly minutes.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.27 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.34 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -449,7 +449,7 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
 
     <script src="https://erp.yonginsolar.kr/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.34';
+        import { MinutesService } from './MinutesService.js?v=1.0.36';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
@@ -458,6 +458,20 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
             const d = new Date(value);
             if (Number.isNaN(d.getTime())) return fallback;
             return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_MINUTES_ADMIN });
+        };
+        const formatMinutesAdminKstDateTime = (value, fallback = '-') => {
+            if (!value) return fallback;
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return fallback;
+            return d.toLocaleString('ko-KR', {
+                timeZone: KST_TZ_MINUTES_ADMIN,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
         };
         const getDocTypeLabel = (docType) => {
             if (docType === 'NOTICE') return '공지';
@@ -1315,16 +1329,25 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
         function sortDelegateOrder(list) {
             const safeList = Array.isArray(list) ? list : [];
             const getName = (off) => String(off?.name || off?.coop_members?.name || '').trim();
-            const isChairperson = (off) => {
-                const role = getRoleLabel(off);
-                const name = getName(off);
-                return role.includes('이사장') || name === '김민정';
-            };
             const compareNameKo = (a, b) => getName(a).localeCompare(getName(b), 'ko');
 
-            const chairs = safeList.filter(isChairperson).sort(compareNameKo);
-            const others = safeList.filter(o => !isChairperson(o)).sort(compareNameKo);
+            const chairs = safeList.filter(isGeneralAssemblyChairperson).sort(compareNameKo);
+            const others = safeList.filter(o => !isGeneralAssemblyChairperson(o)).sort(compareNameKo);
             return [...chairs, ...others];
+        }
+
+        function isGeneralAssemblyChairperson(off) {
+            const role = getRoleLabel(off);
+            const name = String(off?.name || off?.coop_members?.name || '').trim();
+            return role.includes('이사장') || name === '김민정';
+        }
+
+        function getMinuteCertificateRoleLabel(minute, off) {
+            if (!minute) return getRoleLabel(off) || '-';
+            if (minute.doc_type === 'GENERAL_ASSEMBLY') {
+                return isGeneralAssemblyChairperson(off) ? '의장' : '대의원';
+            }
+            return getRoleLabel(off) || '-';
         }
 
         function renderSignerOptions(officials, docType) {
@@ -1408,6 +1431,24 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
                 return minute.signer_ids.map(id => String(id));
             }
             return getSignerPoolByDocType(minute.doc_type).map(o => String(o.id));
+        }
+
+        function isMinuteSignatureFullyCompleted(minute, signatures) {
+            if (!minute || !minute.requires_sign || minute.doc_type === 'NOTICE') return false;
+            const requiredIds = getRequiredSignerIds(minute);
+            if (!requiredIds.length) return false;
+            const sigSet = new Set((Array.isArray(signatures) ? signatures : []).map((row) => String(row.official_id)));
+            return requiredIds.every((id) => sigSet.has(String(id)));
+        }
+
+        function buildMinuteCertificationPreviewHtml(minute, signatures) {
+            if (!isMinuteSignatureFullyCompleted(minute, signatures || [])) return '';
+            return `
+                <div style="margin-bottom:14px; padding:10px 14px; border:1px solid #cbd5e1; border-radius:14px; background:#eff6ff;">
+                    <div style="font-size:0.82rem; font-weight:800; color:#1d4ed8; margin-bottom:4px;">전자서명 완료 문서 출력본</div>
+                    <div style="font-size:0.8rem; color:#475569; line-height:1.6;">이 문서는 전자서명 완료 문서의 출력본이며, 원본은 시스템에 전자적으로 보관됩니다.</div>
+                </div>
+            `;
         }
 
         async function buildMinuteSignaturePreviewHtml(minute, signatures) {
@@ -1503,6 +1544,78 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
             `;
         }
 
+        async function buildMinuteCertificationSheetHtml(minute, signatures) {
+            if (!isMinuteSignatureFullyCompleted(minute, signatures || [])) return '';
+
+            const requiredIds = getRequiredSignerIds(minute);
+            if (!requiredIds.length) return '';
+
+            const sigRows = Array.isArray(signatures) ? signatures : [];
+            const sigMap = new Map(sigRows.map(row => [String(row.official_id), row]));
+            const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
+            const title = escapeHtml(minute?.title || '의사록');
+            const typeLabel = escapeHtml(getDocTypeLabel(minute?.doc_type));
+            const createdAtLabel = escapeHtml(formatMinutesAdminKstDate(minute?.created_at));
+            const minuteIdLabel = escapeHtml(String(minute?.id || '-'));
+
+            const rowsHtml = await Promise.all(requiredIds.map(async (id, index) => {
+                const off = (allOfficials || []).find(o => String(o.id) === String(id));
+                const safeName = escapeHtml(off?.name || '임원');
+                const safeRole = escapeHtml(getMinuteCertificateRoleLabel(minute, off));
+                const sig = sigMap.get(String(id));
+                const signedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(sig?.signed_at, '서명 시각 미기록'));
+
+                let stampHtml = '<span class="cert-sheet-sign-status">완료</span>';
+                if (sig?.signature_url) {
+                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    if (signedUrl) {
+                        stampHtml = `<img src="${signedUrl}" alt="서명" class="cert-sheet-sign-image">`;
+                    }
+                }
+
+                return `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${safeName}</td>
+                        <td>${safeRole}</td>
+                        <td>${signedAtLabel}</td>
+                        <td>${stampHtml}</td>
+                    </tr>
+                `;
+            }));
+
+            return `
+                <section class="print-cert-sheet">
+                    <div class="print-cert-sheet-badge">전자서명 완료 증명</div>
+                    <h2 class="print-cert-sheet-title">전자서명 완료 증명 페이지</h2>
+                    <div class="print-cert-sheet-desc">이 페이지는 전자서명 완료 문서의 출력본 증명 정보입니다. 본문과 함께 보관해 주세요.</div>
+                    <div class="print-cert-sheet-meta">
+                        <div><strong>문서 제목</strong><span>${title}</span></div>
+                        <div><strong>문서 종류</strong><span>${typeLabel}</span></div>
+                        <div><strong>문서 ID</strong><span>${minuteIdLabel}</span></div>
+                        <div><strong>작성일</strong><span>${createdAtLabel}</span></div>
+                        <div><strong>출력일시</strong><span>${printedAtLabel}</span></div>
+                        <div><strong>서명 완료 상태</strong><span>필수 서명 완료</span></div>
+                    </div>
+                    <table class="print-cert-sheet-table">
+                        <thead>
+                            <tr>
+                                <th style="width:52px;">순번</th>
+                                <th>서명자</th>
+                                <th style="width:160px;">구분</th>
+                                <th style="width:220px;">서명 확인</th>
+                                <th style="width:120px;">서명 이미지</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml.join('')}
+                        </tbody>
+                    </table>
+                    <div class="print-cert-sheet-note">전자서명 완료 문서의 원본은 시스템에 전자적으로 보관됩니다. 이 출력본은 열람 및 보관용 사본입니다.</div>
+                </section>
+            `;
+        }
+
         function buildCompactOfficialName(value) {
             return String(value || '').replace(/\s+/g, '').trim();
         }
@@ -1510,6 +1623,57 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
         function buildSpacedOfficialName(value) {
             const compact = buildCompactOfficialName(value);
             return compact ? compact.split('').join(' ') : '';
+        }
+
+        function appendMinuteSignatureImageToOfficialName(rootNode, official, signedUrl) {
+            if (!rootNode || !official?.name || !signedUrl) return false;
+
+            const compactName = buildCompactOfficialName(official.name);
+            if (!compactName) return false;
+
+            const matcher = new RegExp(compactName.split('').map(ch => escapeRegExp(ch)).join('\\s*'), 'g');
+            const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT);
+            const candidates = [];
+            let currentNode = walker.nextNode();
+            while (currentNode) {
+                const rawText = String(currentNode.nodeValue || '');
+                if (buildCompactOfficialName(rawText).includes(compactName)) {
+                    candidates.push(currentNode);
+                }
+                currentNode = walker.nextNode();
+            }
+            if (!candidates.length) return false;
+
+            const targetNode = candidates[candidates.length - 1];
+            const rawText = String(targetNode.nodeValue || '');
+            let match = null;
+            for (const found of rawText.matchAll(matcher)) {
+                match = found;
+            }
+            if (!match || typeof match.index !== 'number') return false;
+
+            const before = rawText.slice(0, match.index);
+            const matched = rawText.slice(match.index, match.index + match[0].length);
+            const after = rawText.slice(match.index + match[0].length);
+            const fragment = document.createDocumentFragment();
+
+            if (before) fragment.appendChild(document.createTextNode(before));
+            fragment.appendChild(document.createTextNode(matched));
+
+            const img = document.createElement('img');
+            img.src = signedUrl;
+            img.alt = '서명';
+            img.style.width = '56px';
+            img.style.height = '56px';
+            img.style.objectFit = 'contain';
+            img.style.verticalAlign = 'middle';
+            img.style.marginLeft = '8px';
+            img.style.background = '#fff';
+            fragment.appendChild(img);
+
+            if (after) fragment.appendChild(document.createTextNode(after));
+            targetNode.parentNode?.replaceChild(fragment, targetNode);
+            return true;
         }
 
         async function injectInlineSignatureImages(contentHtml, minute, signatures) {
@@ -1524,38 +1688,15 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
             const sigMap = new Map(sigRows.map(row => [String(row.official_id), row]));
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-            const signatureBlocks = Array.from(doc.querySelectorAll('div')).filter((el) => {
-                const text = buildCompactOfficialName(el.textContent || '');
-                return text.includes('의장이사장') || text.includes('용인모두의햇빛협동조합의장이사장');
-            });
-            const block = signatureBlocks.at(-1);
-            if (!block) return html;
-
-            const templateSpan = block.querySelector('span');
-            const spanStyle = templateSpan?.getAttribute('style') || 'display: inline-block; width: 100px; font-weight: bold; text-align: right; margin-right: 15px;';
-
-            const lineHtml = [];
             for (const id of requiredIds) {
                 const off = (allOfficials || []).find(o => String(o.id) === String(id));
                 if (!off) continue;
-
-                const roleLabel = String(getRoleLabel(off) || '').includes('이사장') ? '의장 이사장' : (getRoleLabel(off) || '이사');
-                const displayName = buildSpacedOfficialName(off?.name) || escapeHtml(off?.name || '임원');
                 const sig = sigMap.get(String(id));
-
-                let imgHtml = '';
-                if (sig?.signature_url) {
-                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
-                    if (signedUrl) {
-                        imgHtml = ` <img src="${escapeHtml(signedUrl)}" alt="서명" style="width:56px; height:56px; object-fit:contain; vertical-align:middle; margin-left:8px;">`;
-                    }
-                }
-
-                lineHtml.push(`<span style="${escapeHtml(spanStyle)}">${escapeHtml(roleLabel)}</span> ${escapeHtml(displayName)}${imgHtml}<br>`);
+                if (!sig?.signature_url) continue;
+                const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                if (!signedUrl) continue;
+                appendMinuteSignatureImageToOfficialName(doc.body, off, signedUrl);
             }
-
-            if (!lineHtml.length) return html;
-            block.innerHTML = lineHtml.join('');
             return doc.body.innerHTML;
         }
 
@@ -1563,12 +1704,40 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
             const title = escapeHtml(minute?.title || '의사록');
             const typeLabel = escapeHtml(getDocTypeLabel(minute?.doc_type));
             const dateLabel = escapeHtml(formatMinutesAdminKstDate(minute?.created_at));
+            const isCertifiedPrint = isMinuteSignatureFullyCompleted(minute, signatures || []);
+            const minuteIdLabel = escapeHtml(String(minute?.id || '-'));
+            const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
             const originalBodyHtml = minute?.content
                 ? sanitizeHtml(normalizeMinuteContent(minute.content))
                 : '<div style="color:#64748b;">내용이 없습니다.</div>';
             const bodyHtml = await injectInlineSignatureImages(originalBodyHtml, minute, signatures || []);
             const signaturePrintHtml = bodyHtml === originalBodyHtml
                 ? await buildMinuteSignaturePrintHtml(minute, signatures || [])
+                : '';
+            const certificationSheetHtml = await buildMinuteCertificationSheetHtml(minute, signatures || []);
+            const certificationBadgeHtml = isCertifiedPrint
+                ? `<div class="print-cert-badge">전자서명 완료 문서 출력본</div>`
+                : '';
+            const certificationWatermarkHtml = isCertifiedPrint
+                ? `<div class="print-cert-watermark" aria-hidden="true">전자서명 완료 문서 출력본</div>`
+                : '';
+            const certificationFooterHtml = isCertifiedPrint
+                ? `
+                    <tfoot>
+                        <tr>
+                            <td>
+                                <div class="print-cert-footer">
+                                    <span>전자서명 완료 문서 출력본</span>
+                                    <span>문서 ID ${minuteIdLabel}</span>
+                                    <span>출력 ${printedAtLabel}</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tfoot>
+                `
+                : '';
+            const certificationNoticeHtml = isCertifiedPrint
+                ? `<div class="print-cert-notice">이 문서는 전자서명 완료 문서의 출력본이며, 원본은 시스템에 전자적으로 보관됩니다.</div>`
                 : '';
 
             return `<!DOCTYPE html>
@@ -1577,20 +1746,63 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
     <meta charset="UTF-8">
     <title>${title}</title>
     <style>
-        body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; margin: 32px; color: #111827; }
+        @page { size: A4 portrait; margin: 16mm 14mm 18mm 14mm; }
+        html, body { width: auto; height: auto; }
+        body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; margin: 0; color: #111827; position: relative; }
+        .print-frame { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .print-frame td { padding: 0; vertical-align: top; }
         .meta { font-size: 13px; color: #64748b; margin-bottom: 20px; }
-        .content { line-height: 1.8; font-size: 14px; }
-        img { max-width: 100%; }
+        .content { line-height: 1.8; font-size: 14px; overflow-wrap: anywhere; word-break: break-word; }
+        .content, .content * { box-sizing: border-box; max-width: 100%; }
+        .content img, img { max-width: 100% !important; height: auto !important; }
+        .content table { width: 100% !important; table-layout: fixed; border-collapse: collapse; }
+        .content th, .content td { word-break: break-word; overflow-wrap: anywhere; }
+        .content pre { white-space: pre-wrap; word-break: break-word; }
+        .print-cert-badge { display:inline-block; margin:0 0 14px; padding:6px 12px; border:1px solid #cbd5e1; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:12px; font-weight:700; letter-spacing:0.02em; }
+        .print-cert-notice { margin-top:24px; padding-top:10px; border-top:1px solid #d1d5db; color:#475569; font-size:12px; line-height:1.6; }
+        .print-cert-watermark { position:fixed; top:45%; left:50%; transform:translate(-50%, -50%) rotate(-22deg); font-size:56px; font-weight:800; color:rgba(148,163,184,0.18); white-space:nowrap; z-index:0; pointer-events:none; }
+        .print-layer { position:relative; z-index:1; }
+        .print-cert-footer { padding-top: 8mm; margin-top: 8mm; border-top: 1px dashed rgba(37, 99, 235, 0.38); font-size: 10.5px; color: #475569; display: flex; justify-content: space-between; gap: 12px; }
+        .print-cert-sheet { break-before: page; page-break-before: always; padding-top: 10mm; }
+        .print-cert-sheet-badge { display:inline-block; margin:0 0 12px; padding:6px 12px; border:1px solid #bfdbfe; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:12px; font-weight:800; }
+        .print-cert-sheet-title { margin:0 0 10px; font-size:24px; color:#0f172a; }
+        .print-cert-sheet-desc { margin-bottom:16px; color:#475569; font-size:13px; line-height:1.6; }
+        .print-cert-sheet-meta { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px 16px; margin-bottom:18px; padding:14px 16px; border:1px solid #dbeafe; border-radius:14px; background:#f8fbff; }
+        .print-cert-sheet-meta div { display:flex; flex-direction:column; gap:4px; font-size:13px; color:#334155; }
+        .print-cert-sheet-meta strong { color:#0f172a; font-size:12px; }
+        .print-cert-sheet-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+        .print-cert-sheet-table th, .print-cert-sheet-table td { border:1px solid #cbd5e1; padding:10px 8px; font-size:12px; word-break:break-word; overflow-wrap:anywhere; text-align:left; }
+        .print-cert-sheet-table th { background:#f8fafc; color:#0f172a; font-weight:800; }
+        .print-cert-sheet-sign-image { width:60px; height:60px; object-fit:contain; background:#fff; display:block; }
+        .print-cert-sheet-sign-status { display:inline-flex; align-items:center; justify-content:center; min-width:58px; padding:6px 10px; border-radius:999px; background:#dcfce7; color:#166534; font-size:11px; font-weight:800; }
+        .print-cert-sheet-note { margin-top:16px; color:#475569; font-size:12px; line-height:1.6; }
         @media print {
-            body { margin: 18mm; }
+            html, body { margin: 0; padding: 0; }
+            tfoot { display: table-footer-group; }
+            .print-cert-watermark, .print-cert-sheet-badge, .print-cert-sheet-meta, .print-cert-sheet-sign-status { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
     </style>
 </head>
 <body>
-    <h1 style="margin:0 0 10px; font-size:24px;">${title}</h1>
-    <div class="meta">${typeLabel} | 작성일 ${dateLabel}</div>
-    <div class="content">${bodyHtml}</div>
-    ${signaturePrintHtml}
+    ${certificationWatermarkHtml}
+    <div class="print-layer">
+        <table class="print-frame" role="presentation">
+            ${certificationFooterHtml}
+            <tbody>
+                <tr>
+                    <td>
+                        ${certificationBadgeHtml}
+                        <h1 style="margin:0 0 10px; font-size:24px;">${title}</h1>
+                        <div class="meta">${typeLabel} | 작성일 ${dateLabel}</div>
+                        <div class="content">${bodyHtml}</div>
+                        ${signaturePrintHtml}
+                        ${certificationNoticeHtml}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        ${certificationSheetHtml}
+    </div>
 </body>
 </html>`;
         }
@@ -1648,11 +1860,15 @@ Change: 2026-03-17 - Restored signature request Telegram dispatch hooks for OPEN
 
             const normalized = normalizeMinuteContent(minute.content || '');
             const { data: signatures } = await MinutesService.listSignaturesByMinuteId(id);
+            const safeBodyHtml = normalized ? sanitizeHtml(normalized) : '<div style="color:#6b7280;">표시할 본문이 없습니다.</div>';
+            const inlineBodyHtml = normalized ? await injectInlineSignatureImages(safeBodyHtml, minute, signatures || []) : safeBodyHtml;
+            const certificationHtml = buildMinuteCertificationPreviewHtml(minute, signatures || []);
             const signatureHtml = await buildMinuteSignaturePreviewHtml(minute, signatures || []);
             document.getElementById('minutePreviewTitle').innerText = minute.title || '의사록';
             document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(minute.doc_type)} | ${formatMinutesAdminKstDate(minute.created_at)}`;
             document.getElementById('minutePreviewBody').innerHTML = `
-                ${normalized ? sanitizeHtml(normalized) : '<div style="color:#6b7280;">표시할 본문이 없습니다.</div>'}
+                ${certificationHtml}
+                ${inlineBodyHtml}
                 ${signatureHtml}
             `;
             document.getElementById('minutePreviewModal').classList.add('show');

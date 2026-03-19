@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-    Version: v1.0.44
-    Change: 2026-03-16 - Use shared Supabase client instead of importing through vote service.
+    Version: v1.0.45
+    Change: 2026-03-19 - Hide bottom signature block for certified docs when inline signatures are injected.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.44 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.45 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -588,10 +588,138 @@
             return null;
         }
 
-        async function renderSignatures(doc, officials, signatures) {
+        function getRequiredSignerIds(doc, officials) {
+            if (!doc || !doc.requires_sign || doc.doc_type === 'NOTICE') return [];
+            const allOfficials = Array.isArray(officials) ? officials : [];
+            if (Array.isArray(doc.signer_ids) && doc.signer_ids.length > 0) {
+                return doc.signer_ids.map(id => String(id));
+            }
+            if (doc.doc_type === 'GENERAL_ASSEMBLY') {
+                return allOfficials
+                    .filter(o => String(o.category || '').toLowerCase() === 'delegate')
+                    .map(o => String(o.id));
+            }
+            if (doc.doc_type === 'MINUTES') {
+                return allOfficials
+                    .filter(o => {
+                        const role = (o.role || o.position || o.category || '').toString();
+                        return role.includes('이사장') || role === '이사';
+                    })
+                    .map(o => String(o.id));
+            }
+            return [];
+        }
+
+        function isMinuteSignatureFullyCompleted(doc, officials, signatures) {
+            const required = getRequiredSignerIds(doc, officials);
+            if (!required.length) return false;
+            const signedSet = new Set((Array.isArray(signatures) ? signatures : []).map(row => String(row.official_id)));
+            return required.every((id) => signedSet.has(String(id)));
+        }
+
+        function buildCompactOfficialName(value) {
+            return String(value || '').replace(/\s+/g, '').trim();
+        }
+
+        function escapeRegExp(value) {
+            return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function appendMinuteSignatureImageToOfficialName(rootNode, official, signedUrl) {
+            if (!rootNode || !official?.name || !signedUrl) return false;
+            const compactName = buildCompactOfficialName(official.name);
+            if (!compactName) return false;
+
+            const matcher = new RegExp(compactName.split('').map(ch => escapeRegExp(ch)).join('\\s*'), 'g');
+            const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_TEXT);
+            const candidates = [];
+            let currentNode = walker.nextNode();
+            while (currentNode) {
+                const rawText = String(currentNode.nodeValue || '');
+                if (buildCompactOfficialName(rawText).includes(compactName)) {
+                    candidates.push(currentNode);
+                }
+                currentNode = walker.nextNode();
+            }
+            if (!candidates.length) return false;
+
+            const targetNode = candidates[candidates.length - 1];
+            const rawText = String(targetNode.nodeValue || '');
+            let match = null;
+            for (const found of rawText.matchAll(matcher)) {
+                match = found;
+            }
+            if (!match || typeof match.index !== 'number') return false;
+
+            const before = rawText.slice(0, match.index);
+            const matched = rawText.slice(match.index, match.index + match[0].length);
+            const after = rawText.slice(match.index + match[0].length);
+            const fragment = document.createDocumentFragment();
+
+            if (before) fragment.appendChild(document.createTextNode(before));
+            fragment.appendChild(document.createTextNode(matched));
+
+            const img = document.createElement('img');
+            img.src = signedUrl;
+            img.alt = '서명';
+            img.style.width = '56px';
+            img.style.height = '56px';
+            img.style.objectFit = 'contain';
+            img.style.verticalAlign = 'middle';
+            img.style.marginLeft = '8px';
+            img.style.background = '#fff';
+            fragment.appendChild(img);
+
+            if (after) fragment.appendChild(document.createTextNode(after));
+            targetNode.parentNode?.replaceChild(fragment, targetNode);
+            return true;
+        }
+
+        async function injectInlineSignatureImages(contentHtml, doc, officials, signatures) {
+            if (!doc || !doc.requires_sign || doc.doc_type === 'NOTICE') {
+                return { html: String(contentHtml || ''), injected: false };
+            }
+            const html = String(contentHtml || '');
+            if (!html) return { html, injected: false };
+
+            const requiredIds = getRequiredSignerIds(doc, officials);
+            if (!requiredIds.length) return { html, injected: false };
+
+            const sigRows = Array.isArray(signatures) ? signatures : [];
+            const sigMap = new Map(sigRows.map(row => [String(row.official_id), row]));
+            const parser = new DOMParser();
+            const parsed = parser.parseFromString(html, 'text/html');
+            let injectedCount = 0;
+
+            for (const id of requiredIds) {
+                const official = (Array.isArray(officials) ? officials : []).find(o => String(o.id) === String(id));
+                if (!official) continue;
+                const signature = sigMap.get(String(id));
+                if (!signature?.signature_url) continue;
+                const signedUrl = await resolveSignatureUrl(signature.signature_url);
+                const safe = safeUrl(signedUrl);
+                if (!safe) continue;
+                if (appendMinuteSignatureImageToOfficialName(parsed.body, official, safe)) {
+                    injectedCount += 1;
+                }
+            }
+
+            return {
+                html: parsed.body.innerHTML,
+                injected: injectedCount > 0
+            };
+        }
+
+        async function renderSignatures(doc, officials, signatures, options = {}) {
             const panel = document.getElementById('signatures-panel');
             const list = document.getElementById('signatures-list');
             if (!panel || !list) return;
+
+            if (options.hidePanel === true) {
+                panel.style.display = 'none';
+                list.innerHTML = '';
+                return;
+            }
 
             if (!doc || doc.doc_type === 'NOTICE' || !doc.requires_sign) {
                 panel.style.display = 'none';
@@ -600,17 +728,7 @@
             }
 
             const allOfficials = Array.isArray(officials) ? officials : [];
-            let required = [];
-            if (Array.isArray(doc.signer_ids) && doc.signer_ids.length > 0) {
-                required = doc.signer_ids.map(id => String(id));
-            } else if (doc.doc_type === 'GENERAL_ASSEMBLY') {
-                required = allOfficials.filter(o => String(o.category || '').toLowerCase() === 'delegate').map(o => String(o.id));
-            } else if (doc.doc_type === 'MINUTES') {
-                required = allOfficials.filter(o => {
-                    const role = (o.role || o.position || o.category || '').toString();
-                    return role.includes('이사장') || role === '이사';
-                }).map(o => String(o.id));
-            }
+            const required = getRequiredSignerIds(doc, allOfficials);
 
             if (required.length === 0) {
                 panel.style.display = 'none';
@@ -1131,7 +1249,16 @@
 
             const { data: signatures } = await MinutesService.listSignaturesByMinuteId(targetId);
             const officials = await MinutesService.getOfficials();
-            await renderSignatures(doc, officials || [], signatures || []);
+            if (doc.doc_type !== 'NOTICE' && doc.content) {
+                const sanitizedContent = sanitizeHtml(doc.content || '');
+                const inlineResult = await injectInlineSignatureImages(sanitizedContent, doc, officials || [], signatures || []);
+                detailContent.innerHTML = inlineResult.html || '<div style="color:#94a3b8;">내용이 없습니다.</div>';
+                await renderSignatures(doc, officials || [], signatures || [], {
+                    hidePanel: !!(doc.published_at && isMinuteSignatureFullyCompleted(doc, officials || [], signatures || []) && inlineResult.injected)
+                });
+            } else {
+                await renderSignatures(doc, officials || [], signatures || []);
+            }
 
             await renderAttachments(doc);
 

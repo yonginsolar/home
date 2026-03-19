@@ -1,6 +1,6 @@
 /*
-Version: v1.0.34
-Change: 2026-03-16 - Use shared Supabase client so governance services do not depend on vote service files.
+Version: v1.0.36
+Change: 2026-03-19 - Use doc_signatures.signed_at for admin signature queries after verifying schema.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -460,7 +460,7 @@ async function listSignaturesForMinutes(minuteIds) {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('doc_signatures')
-        .select('minute_id, official_id')
+        .select('minute_id, official_id, signed_at')
         .in('minute_id', minuteIds), coopId);
     return { data: data || [], error };
 }
@@ -469,7 +469,7 @@ async function listSignaturesByMinuteId(minuteId) {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('doc_signatures')
-        .select('official_id, signature_url')
+        .select('official_id, signature_url, signed_at')
         .eq('minute_id', minuteId), coopId);
     return { data, error };
 }
