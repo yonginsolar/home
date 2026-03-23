@@ -1,6 +1,6 @@
 /*
-Version: v1.0.6
-Change: 2026-02-09 - Restore patch-note modal focus guard to prevent runtime error.
+Version: v1.0.7
+Change: 2026-03-23 - Blur homepage patch-note dismiss controls before Bootstrap applies aria-hidden.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -68,6 +68,22 @@ function ensurePatchNoteFocusGuard(modalEl) {
   if (!modalEl || patchNoteFocusGuardBound) return;
   patchNoteFocusGuardBound = true;
 
+  const blurDismissTarget = (event) => {
+    const target = event.currentTarget;
+    if (target && typeof target.blur === 'function') {
+      target.blur();
+    }
+  };
+
+  modalEl.querySelectorAll('[data-bs-dismiss="modal"]').forEach((btn) => {
+    btn.addEventListener('click', blurDismissTarget, true);
+    btn.addEventListener('pointerdown', blurDismissTarget, true);
+  });
+
+  modalEl.addEventListener('show.bs.modal', () => {
+    modalEl.removeAttribute('inert');
+  });
+
   modalEl.addEventListener('shown.bs.modal', () => {
     const focusTarget =
       modalEl.querySelector('.btn-close') ||
@@ -76,6 +92,14 @@ function ensurePatchNoteFocusGuard(modalEl) {
     if (focusTarget && typeof focusTarget.focus === 'function') {
       focusTarget.focus();
     }
+  });
+
+  modalEl.addEventListener('hide.bs.modal', () => {
+    const active = document.activeElement;
+    if (active && modalEl.contains(active) && typeof active.blur === 'function') {
+      active.blur();
+    }
+    modalEl.setAttribute('inert', '');
   });
 
   modalEl.addEventListener('hidden.bs.modal', () => {

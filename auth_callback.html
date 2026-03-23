@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
-Change: Routed Kakao linking callback by next/auth_destination instead of membermanage hardcoding.
+Version: v1.0.4
+Change: Verify linked Kakao identity via official identity linking and sync the correct provider ID.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.3 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.4 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -67,6 +67,40 @@ Change: Routed Kakao linking callback by next/auth_destination instead of member
             window.location.replace(dest);
         }
 
+        function getHashAuthError() {
+            const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+            if (!hash) return '';
+            const params = new URLSearchParams(hash);
+            return params.get('error_description') || params.get('error') || '';
+        }
+
+        async function getLinkedIdentity(user, provider) {
+            try {
+                if (typeof _supabase.auth.getUserIdentities === 'function') {
+                    const { data, error } = await _supabase.auth.getUserIdentities();
+                    if (!error) {
+                        const identities = data?.identities || [];
+                        const linked = identities.find(identity => identity.provider === provider);
+                        if (linked) return linked;
+                    }
+                }
+            } catch (e) {
+                void 0;
+            }
+
+            return user?.identities?.find(identity => identity.provider === provider) || null;
+        }
+
+        function getIdentityProviderId(identity) {
+            if (!identity) return '';
+            return (
+                identity.provider_id ||
+                identity.identity_data?.provider_id ||
+                identity.identity_data?.sub ||
+                ''
+            );
+        }
+
         // 전화번호 업데이트 (실패해도 무시)
         async function syncPhone(user) {
             try {
@@ -105,19 +139,28 @@ Change: Routed Kakao linking callback by next/auth_destination instead of member
                 // 성공 시
                 const params = new URLSearchParams(window.location.search);
                 const isLinking = params.get('linking') === 'true';
-                const currentUid = params.get('current_uid');
 
-                if (isLinking && currentUid) {
+                if (isLinking) {
                     document.getElementById('message').innerText = '카카오 계정 연결 처리 중...';
                     const redirectTarget = getDest();
                     localStorage.removeItem('auth_destination');
+                    await syncPhone(data.session.user);
 
-                    const kakaoId = data.session.user.identities?.find(id => id.provider === 'kakao')?.id;
+                    const authError = getHashAuthError();
+                    if (authError) {
+                        console.error('카카오 연결 콜백 오류:', authError);
+                        document.getElementById('message').innerText = '카카오 연결에 실패했습니다. 다시 시도해 주세요.';
+                        setTimeout(() => window.location.replace(redirectTarget), 3000);
+                        return;
+                    }
+
+                    const kakaoIdentity = await getLinkedIdentity(data.session.user, 'kakao');
+                    const kakaoId = getIdentityProviderId(kakaoIdentity);
                     
                     if (kakaoId) {
-                        // [RPC 호출] 기존 계정에 카카오 ID 연결
+                        // [RPC 호출] linkIdentity 완료 후 조합원 프로필에 Kakao ID만 동기화
                         const { error: rpcError } = await _supabase.rpc('rpc_link_kakao', {
-                            p_member_uid: currentUid,
+                            p_member_uid: data.session.user.id,
                             p_kakao_id: kakaoId
                         });
 

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.33
-Change: 2026-03-16 - Removed admin-only minutes management shortcut from member portal.
+Version: v1.0.38
+Change: 2026-03-23 - Use official identity linking for Kakao account connection.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.33 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.38 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -522,6 +522,7 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 <span id="memberStatusBadge" class="badge rounded-pill bg-secondary">-</span>
 </div>
+
 
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
 
@@ -1049,8 +1050,7 @@ oninput="autoHyphen(this)"> </div>
 
 <div id="viewFiles" class="mb-3 border-top pt-3"></div>
 
-<div class="d-flex justify-content-between border-top pt-3">
-<button class="btn btn-outline-secondary btn-sm" onclick="reportPost()">🚨 신고</button>
+<div class="d-flex justify-content-end border-top pt-3">
 
 <div id="viewBtnGroup">
 <button class="btn btn-dark btn-sm" onclick="document.getElementById('boardViewModal').style.display='none'">닫기</button>
@@ -1144,7 +1144,7 @@ oninput="autoHyphen(this)">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="footer.js"></script>
 <script src="home_patch_note.js"></script>
-<script src="notice_modal.js?v=20260310-1"></script>
+<script src="notice_modal.js?v=20260323-2"></script>
 
 <script>
 // =========================================================================
@@ -1406,34 +1406,79 @@ showOnly('loginSection');
 // =========================================================================
 // 기존 함수 -> 변경할 함수
 
-// [신규] 카카오톡 계정 연동 시작 (현재 로그인된 세션에 카카오 ID를 연결)
+function buildAuthCallbackUrl(extraParams = {}) {
+let baseUrl = window.location.href;
+
+if (baseUrl.endsWith('/')) {
+baseUrl = baseUrl + 'auth_callback.html';
+} else {
+baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + 'auth_callback.html';
+}
+
+const url = new URL(baseUrl);
+Object.entries(extraParams || {}).forEach(([key, value]) => {
+if (value === null || value === undefined || value === '') return;
+url.searchParams.set(key, String(value));
+});
+return url.toString();
+}
+
+function translateKakaoLinkError(errorMsg) {
+const msg = String(errorMsg || '').trim();
+const lowered = msg.toLowerCase();
+
+if (!msg) return '카카오 연동 중 알 수 없는 오류가 발생했습니다.';
+if (lowered.includes('manual linking')) {
+return '현재 인증 설정에서 외부 계정 연동이 비활성화되어 있습니다.\n관리자에게 문의해주세요.';
+}
+if (lowered.includes('already linked') || lowered.includes('identity') && lowered.includes('linked')) {
+return '이 카카오 계정은 이미 다른 계정에 연결되어 있습니다.\n다른 카카오 계정으로 시도하거나 관리자에게 문의해주세요.';
+}
+if (lowered.includes('same identity')) {
+return '이미 이 계정에 연결된 카카오 계정입니다.';
+}
+return '카카오 연동 오류: ' + msg;
+}
+
+// [수정] 카카오톡 계정 연동 시작 (기존 세션에 OAuth identity를 정식 링크)
 async function startKakaoLinking() {
-    showLoading(true, '카카오 연동을 시작합니다...');
+showLoading(true, '카카오 연동을 시작합니다...');
 
-    // 1. 현재 세션의 ID를 저장해둡니다 (나중에 콜백 페이지에서 사용)
-    const currentMemberId = curAuth ? curAuth.id : null;
-    if (!currentMemberId) {
-        showLoading(false);
-        return showModal('로그인 세션 정보가 없어 연동을 시작할 수 없습니다.');
-    }
+if (!curAuth || !curAuth.id) {
+showLoading(false);
+return showModal('로그인 세션 정보가 없어 연동을 시작할 수 없습니다.');
+}
 
-    // 2. 카카오 로그인 URL 생성 (Scope는 동일하게, 중요한 것은 redirect URL)
-    const { data, error } = await _supabase.auth.signInWithOAuth({
-        provider: 'kakao',
-        options: {
-            redirectTo: window.location.origin + '/auth_callback.html?linking=true&current_uid=' + currentMemberId,
-            skipBrowserRedirect: true // 수동으로 리다이렉트 (추정)
-        }
-    });
+if (!_supabase || !_supabase.auth || typeof _supabase.auth.linkIdentity !== 'function') {
+showLoading(false);
+return showModal('현재 인증 버전에서는 카카오 계정 연동을 지원하지 않습니다.\n관리자에게 문의해주세요.');
+}
 
-    showLoading(false);
+try {
+const nextTarget = window.location.href;
+localStorage.setItem('auth_destination', nextTarget);
+const redirectUrl = buildAuthCallbackUrl({ linking: 'true', next: nextTarget });
 
-    if (error) {
-        return showModal('카카오 연동 오류: ' + error.message);
-    }
-    
-    // 3. 카카오 인증 서버로 리다이렉트
-    window.location.href = data.url;
+const { data, error } = await _supabase.auth.linkIdentity({
+provider: 'kakao',
+options: {
+redirectTo: redirectUrl,
+scopes: 'account_email phone_number profile_nickname'
+}
+});
+
+if (error) throw error;
+
+if (data && data.url) {
+window.location.href = data.url;
+return;
+}
+} catch (e) {
+console.error('Kakao Link Error:', e);
+showModal(translateKakaoLinkError(e && e.message ? e.message : e));
+} finally {
+showLoading(false);
+}
 }
 
 // [수정] 매직링크 발송 함수 (버튼 중복 클릭 방지 추가)
@@ -2233,8 +2278,10 @@ READY: 3,
 PAUSED: 3,
 CLOSED: 4,
 PUBLISHED: 5,
-ENDED: 5
+ENDED: 6
 });
+
+const ELECTION_RESULT_PUBLIC_WINDOW_DAYS = 14;
 
 function toValidDate(value) {
 if (!value) return null;
@@ -2245,6 +2292,19 @@ return Number.isNaN(d.getTime()) ? null : d;
 function getEffectiveVoteEndAt(election) {
 if (!election) return null;
 return election.actual_closed_at || election.vote_end_at || election.end_at || null;
+}
+
+function getElectionResultPublicDeadline(election) {
+const closedAt = toValidDate(getEffectiveVoteEndAt(election));
+if (!closedAt) return null;
+return new Date(closedAt.getTime() + (ELECTION_RESULT_PUBLIC_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+}
+
+function isElectionResultPubliclyVisible(election, now = new Date()) {
+const deadline = getElectionResultPublicDeadline(election);
+const current = now instanceof Date ? now : new Date(now);
+if (!deadline || Number.isNaN(current.getTime())) return false;
+return current.getTime() <= deadline.getTime();
 }
 
 function isUncontestedClosedElection(election) {
@@ -2262,7 +2322,9 @@ const candEnd = toValidDate(election?.candidacy_end_at);
 const voteStart = toValidDate(election?.vote_start_at || election?.start_at);
 const voteEnd = toValidDate(getEffectiveVoteEndAt(election));
 
-if (status === 'PUBLISHED' || status === 'ENDED') return 'PUBLISHED';
+if (status === 'PUBLISHED' || status === 'ENDED') {
+return isElectionResultPubliclyVisible(election, now) ? 'PUBLISHED' : 'ENDED';
+}
 if (status === 'CLOSED') return 'CLOSED';
 if (status === 'OPEN') return 'OPEN';
 if (status === 'NOMINATION') return 'NOMINATION';
@@ -2477,6 +2539,7 @@ case 'PAUSED': return '투표 일시정지';
 case 'OPEN': return '투표 진행중';
 case 'CLOSED': return '집계 중';
 case 'PUBLISHED': return '결과 공개';
+case 'ENDED': return '종료';
 default: return '선거 진행';
 }
 }
@@ -2606,16 +2669,32 @@ buttonType: 'primary'
 return;
 }
 
-const targetElection = pickPrimaryElection(elections);
+const now = new Date();
+const visibleElections = elections.filter((el) => {
+const status = String(el?.status || '').toUpperCase();
+if (isPrivileged) return true;
+if (status === 'PUBLISHED' || status === 'ENDED') {
+return isElectionResultPubliclyVisible(el, now);
+}
+return true;
+});
+
+if (!visibleElections.length) {
+setQuickCardVisible(voteCard, false);
+setQuickCardTodoState(voteCard, voteBadge, false);
+return;
+}
+
+const targetElection = pickPrimaryElection(visibleElections);
 if (!targetElection) {
 setQuickCardVisible(voteCard, false);
 setQuickCardTodoState(voteCard, voteBadge, false);
 return;
 }
 
-const electionCount = elections.length;
+const electionCount = visibleElections.length;
 const isMultiElection = electionCount > 1;
-const phase = targetElection._phase || deriveElectionPhase(targetElection, new Date());
+const phase = targetElection._phase || deriveElectionPhase(targetElection, now);
 const electionId = targetElection.id;
 const singleElectionUrl = electionId ? `vote/vote_login.html?id=${electionId}` : 'vote/vote_login.html';
 const listUrl = 'vote/vote_login.html';
@@ -3689,24 +3768,8 @@ async function startKakaoLogin() {
         // [백업용] 로컬 스토리지 저장 (하위 호환성 유지)
         localStorage.setItem('auth_destination', nextTarget);
 
-        // 2. 콜백 URL 생성 로직 개선 (핵심 수정)
-        // 기존: window.location.href.replace('membermanage.html', 'auth_callback.html');
-        // 변경: 현재 URL의 '마지막 파일명' 부분을 무조건 'auth_callback.html'로 교체
-        // 예: .../index.html -> .../auth_callback.html
-        // 예: .../membermanage.html -> .../auth_callback.html
-        // 예: .../ (파일명 없는 경우) -> .../auth_callback.html
-        let baseUrl = window.location.href;
-        
-        if (baseUrl.endsWith('/')) {
-            // 파일명 없이 끝나는 경우 (예: https://site.com/)
-            baseUrl = baseUrl + 'auth_callback.html';
-        } else {
-            // 파일명이 있는 경우, 마지막 슬래시 이후를 교체
-            baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + 'auth_callback.html';
-        }
-
-        // 최종 Redirect URL 조립
-        const redirectUrl = `${baseUrl}?next=${encodeURIComponent(nextTarget)}`;
+        // 2. 최종 Redirect URL 조립
+        const redirectUrl = buildAuthCallbackUrl({ next: nextTarget });
         
         void 0; // 디버깅용 로그
 
@@ -4668,7 +4731,6 @@ let html = `<button class="btn btn-dark btn-sm" onclick="document.getElementById
 // 공지사항 아니고 내 글이면 수정/삭제 노출
 if(category !== 'notice' && isMine) {
 html = `
-               <button class="btn btn-warning btn-sm me-1" onclick="showModal('수정 준비중')">수정</button>
                <button class="btn btn-danger btn-sm me-1" onclick="deletePost('${post.id}')">삭제</button>
                ${html}
            `;
@@ -4681,14 +4743,6 @@ document.getElementById('boardViewModal').style.display = 'flex';
 }
 // End of viewPost
 
-// [신규] 게시글 신고 함수
-function reportPost() {
-showConfirmModal('이 게시글을 관리자에게 신고하시겠습니까?', () => {
-// 실제 DB 로직은 추후 구현 (현재는 UI만 작동)
-showModal('신고가 접수되었습니다.\n관리자가 검토 후 조치합니다.');
-document.getElementById('boardViewModal').style.display = 'none';
-});
-}
 // ==========================================
 // [신규 기능] 프로필 전환 (Context Switching)
 // ==========================================

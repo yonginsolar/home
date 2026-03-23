@@ -1,6 +1,6 @@
 /*
-Version: v1.0.10
-Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member notice modal and fix malformed modal CSS block.
+Version: v1.0.12
+Change: 2026-03-23 - Blur notice modal focus before Bootstrap hides it to prevent aria-hidden warnings.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -48,9 +48,9 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
         return await visibleNoticeCoopIdPromise;
     }
 
-    async function scopeVisibleNoticeTenant(query) {
+    async function getVisibleNoticeScopeCoopId() {
         const coopId = String(await getVisibleNoticeCoopId() || '').trim();
-        return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
+        return coopId || '00000000-0000-0000-0000-000000000000';
     }
 
     function escapeHtml(value = '') {
@@ -114,7 +114,11 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
         if (companyInfoCache) return companyInfoCache;
         const client = getClient();
         if (!client) return {};
-        const { data } = await (await scopeVisibleNoticeTenant(client.from('ref_company_info').select('key,value')));
+        const coopId = await getVisibleNoticeScopeCoopId();
+        const { data } = await client
+            .from('ref_company_info')
+            .select('key,value')
+            .eq('coop_id', coopId);
         const info = {};
         if (Array.isArray(data)) {
             data.forEach(row => {
@@ -197,8 +201,43 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
         }
     }
 
+    function ensureNoticeModalFocusGuard(modalEl) {
+        if (!modalEl || modalEl.dataset.noticeFocusGuardBound === 'true') return;
+        modalEl.dataset.noticeFocusGuardBound = 'true';
+
+        const blurDismissTarget = (event) => {
+            const target = event.currentTarget;
+            if (target && typeof target.blur === 'function') target.blur();
+        };
+
+        modalEl.querySelectorAll('[data-bs-dismiss="modal"], [data-notice-modal-close]').forEach((btn) => {
+            btn.addEventListener('click', blurDismissTarget, true);
+            btn.addEventListener('pointerdown', blurDismissTarget, true);
+        });
+
+        modalEl.addEventListener('show.bs.modal', () => {
+            modalEl.removeAttribute('inert');
+        });
+
+        modalEl.addEventListener('hide.bs.modal', () => {
+            const active = document.activeElement;
+            if (active && modalEl.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+            modalEl.setAttribute('inert', '');
+        });
+    }
+
+    function bindNoticeModalFocusGuards() {
+        ensureNoticeModalFocusGuard(document.getElementById('noticeSearchModal'));
+        ensureNoticeModalFocusGuard(document.getElementById('noticeDetailModal'));
+    }
+
     function ensureModals() {
-        if (document.getElementById('noticeSearchModal')) return;
+        if (document.getElementById('noticeSearchModal')) {
+            bindNoticeModalFocusGuards();
+            return;
+        }
         const html = `
 <div class="modal fade" id="noticeSearchModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg"> <div class="modal-content">
@@ -354,7 +393,7 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
         <div id="notice-read-content" class="notice-read-content" style="min-height: 200px; line-height: 1.8; color: #333;"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-dark" onclick="openNoticeSearchModal()">목록으로</button>
+        <button type="button" class="btn btn-outline-dark" data-notice-modal-close="detail-to-list" onclick="openNoticeSearchModal()">목록으로</button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
       </div>
     </div>
@@ -362,6 +401,7 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
 </div>
 `;
         document.body.insertAdjacentHTML('beforeend', html);
+        bindNoticeModalFocusGuards();
     }
 
     function getGlobalNoticeList() {
@@ -385,7 +425,8 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
         if (!force && cache.length > 0) return cache;
         const client = getClient();
         if (!client) return [];
-        let query = await scopeVisibleNoticeTenant(client.from('coop_notices').select('*'));
+        const coopId = await getVisibleNoticeScopeCoopId();
+        let query = client.from('coop_notices').select('*').eq('coop_id', coopId);
         if (isPublicNoticeContext()) {
             query = query.eq('status', 'published').eq('is_members_only', false);
         }
@@ -398,7 +439,8 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
     async function fetchNoticeById(id) {
         const client = getClient();
         if (!client) return null;
-        let query = await scopeVisibleNoticeTenant(client.from('coop_notices').select('*').eq('id', id));
+        const coopId = await getVisibleNoticeScopeCoopId();
+        let query = client.from('coop_notices').select('*').eq('id', id).eq('coop_id', coopId);
         if (isPublicNoticeContext()) {
             query = query.eq('status', 'published').eq('is_members_only', false);
         }
@@ -410,13 +452,15 @@ Change: 2026-03-10 - Preserve fixed-layout election notice snapshots in member n
     async function fetchPublishedElectedNoticeSnapshot(noticeId) {
         const client = getClient();
         if (!client || !noticeId) return null;
+        const coopId = await getVisibleNoticeScopeCoopId();
 
-        const { data, error } = await (await scopeVisibleNoticeTenant(client
+        const { data, error } = await client
             .from('coop_elected_notice_snapshots')
             .select('content_html,status')
+            .eq('coop_id', coopId)
             .eq('notice_id', noticeId)
             .eq('status', 'PUBLISHED')
-            .maybeSingle()));
+            .maybeSingle();
 
         if (error) {
             const code = String(error.code || '');
