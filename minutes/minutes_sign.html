@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.17
-Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Telegram 완료 알림을 비차단 방식으로 발송.
+Version: v1.2.19
+Change: 2026-03-22 - Generalized page title for standalone signature module.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-    <title>전자서명 - 용인모두의햇빛협동조합</title>
-    <script>console.log('[Version] v1.2.17 | minutes_sign.html');</script>
+    <title>전자서명</title>
+    <script>console.log('[Version] v1.2.19 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -88,6 +88,61 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
             background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
             padding: 18px 22px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center;
             cursor: pointer;
+        }
+        .list-toolbar {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 14px;
+        }
+        .list-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .list-summary-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 12px 14px;
+        }
+        .list-summary-label {
+            color: #64748b;
+            font-size: .78rem;
+            font-weight: 800;
+            letter-spacing: .03em;
+        }
+        .list-summary-value {
+            color: #0f172a;
+            font-size: 1.35rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-top: 4px;
+        }
+        .list-summary-desc {
+            color: #64748b;
+            font-size: .82rem;
+            margin-top: 4px;
+        }
+        .list-filter-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .list-filter-chip {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #475569;
+            font-size: .82rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .list-filter-chip.active {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            color: #1d4ed8;
         }
         .list-title { font-size: 1.05rem; font-weight: 700; color: #0f172a; }
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
@@ -364,6 +419,7 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
         let signatureTelegramConnectUrl = '';
         let signatureTelegramConnectCommand = '';
         let signatureTelegramConnectCode = '';
+        let signListFilter = 'all';
         const requestedMinuteId = (() => {
             const params = new URLSearchParams(window.location.search);
             return String(params.get('minuteId') || params.get('id') || '').trim();
@@ -927,6 +983,41 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
             header.appendChild(title);
             return header;
         }
+        function buildListToolbar(summary = { total: 0, pending: 0, completed: 0, readonly: 0 }) {
+            const wrap = document.createElement('div');
+            wrap.className = 'list-toolbar';
+            wrap.innerHTML = `
+                <div class="list-summary-grid">
+                    <div class="list-summary-card">
+                        <div class="list-summary-label">대상 문서</div>
+                        <div class="list-summary-value">${Number(summary.total || 0)}</div>
+                        <div class="list-summary-desc">현재 열람 가능한 전체 문서</div>
+                    </div>
+                    <div class="list-summary-card">
+                        <div class="list-summary-label">내 서명 필요</div>
+                        <div class="list-summary-value">${Number(summary.pending || 0)}</div>
+                        <div class="list-summary-desc">지금 바로 처리할 문서</div>
+                    </div>
+                    <div class="list-summary-card">
+                        <div class="list-summary-label">서명 완료</div>
+                        <div class="list-summary-value">${Number(summary.completed || 0)}</div>
+                        <div class="list-summary-desc">이미 서명한 문서</div>
+                    </div>
+                    <div class="list-summary-card">
+                        <div class="list-summary-label">열람 전용</div>
+                        <div class="list-summary-value">${Number(summary.readonly || 0)}</div>
+                        <div class="list-summary-desc">마감되었거나 열람만 가능한 문서</div>
+                    </div>
+                </div>
+                <div class="list-filter-row">
+                    <button type="button" class="list-filter-chip ${signListFilter === 'all' ? 'active' : ''}" onclick="setSignListFilter('all')">전체</button>
+                    <button type="button" class="list-filter-chip ${signListFilter === 'pending' ? 'active' : ''}" onclick="setSignListFilter('pending')">내 서명 필요</button>
+                    <button type="button" class="list-filter-chip ${signListFilter === 'completed' ? 'active' : ''}" onclick="setSignListFilter('completed')">서명 완료</button>
+                    <button type="button" class="list-filter-chip ${signListFilter === 'readonly' ? 'active' : ''}" onclick="setSignListFilter('readonly')">열람 전용</button>
+                </div>
+            `;
+            return wrap;
+        }
         function appendListMessage(container, message, color = '#64748b') {
             const msg = document.createElement('div');
             msg.style.marginTop = '12px';
@@ -934,6 +1025,12 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
             msg.innerText = message;
             container.appendChild(msg);
         }
+        window.setSignListFilter = function setSignListFilter(nextFilter) {
+            signListFilter = ['all', 'pending', 'completed', 'readonly'].includes(String(nextFilter || ''))
+                ? String(nextFilter)
+                : 'all';
+            loadSignList();
+        };
         function renderListError(message = '문서를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.') {
             const listPanel = document.getElementById('list-panel');
             if (!listPanel) return;
@@ -973,6 +1070,16 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
                 return { label: '서명 필요', className: 'pending', detailText: '서명 필요 문서입니다. 내용을 확인한 뒤 전자서명을 진행해 주세요.' };
             }
             return { label: '열람 전용', className: 'readonly', detailText: '현재는 열람 전용 문서입니다.' };
+        }
+
+        async function applyMinutesSignPageTitle() {
+            try {
+                const { data } = await MinutesService.getCompanyInfo();
+                const orgName = String(data?.orgName || data?.company_name || '').trim();
+                document.title = orgName ? `전자서명 - ${orgName}` : '전자서명';
+            } catch (_) {
+                document.title = '전자서명';
+            }
         }
 
         async function initSession() {
@@ -1046,8 +1153,58 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
                 const minuteIds = targets.map(m => m.id);
                 const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
                 const signedMap = new Map((sigList || []).map(s => [String(s.minute_id) + ':' + String(s.official_id), true]));
+                const viewModels = targets.map((m) => {
+                    const isSigned = myOfficialIds.length > 0
+                        ? (myOfficialIds.some(officialId => signedMap.get(String(m.id) + ':' + String(officialId))) || isLocallySigned(m.id))
+                        : false;
+                    const signProgress = getDocumentSignProgress(m, isSigned);
+                    const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
+                    return {
+                        minute: m,
+                        isSigned,
+                        signProgress,
+                        modeLabel,
+                        isPending: signProgress.className === 'pending',
+                        isCompleted: signProgress.className === 'completed',
+                        isReadonly: signProgress.className === 'readonly'
+                    };
+                }).sort((a, b) => {
+                    const priority = (item) => item.isPending ? 0 : item.isCompleted ? 1 : 2;
+                    const prioDiff = priority(a) - priority(b);
+                    if (prioDiff !== 0) return prioDiff;
+                    const aTime = new Date(a.minute?.created_at || 0).getTime();
+                    const bTime = new Date(b.minute?.created_at || 0).getTime();
+                    return bTime - aTime;
+                });
 
-                targets.forEach(m => {
+                const summary = {
+                    total: viewModels.length,
+                    pending: viewModels.filter((item) => item.isPending).length,
+                    completed: viewModels.filter((item) => item.isCompleted).length,
+                    readonly: viewModels.filter((item) => item.isReadonly).length
+                };
+                listPanel.appendChild(buildListToolbar(summary));
+
+                const filteredViewModels = viewModels.filter((item) => {
+                    if (signListFilter === 'pending') return item.isPending;
+                    if (signListFilter === 'completed') return item.isCompleted;
+                    if (signListFilter === 'readonly') return item.isReadonly;
+                    return true;
+                });
+
+                if (filteredViewModels.length === 0) {
+                    const emptyMessage = signListFilter === 'pending'
+                        ? '현재 바로 서명할 문서가 없습니다.'
+                        : signListFilter === 'completed'
+                            ? '서명 완료 문서가 없습니다.'
+                            : signListFilter === 'readonly'
+                                ? '열람 전용 문서가 없습니다.'
+                                : '현재 열람/서명 가능한 문서가 없습니다.';
+                    appendListMessage(listPanel, emptyMessage);
+                    return;
+                }
+
+                filteredViewModels.forEach(({ minute: m, signProgress, modeLabel }) => {
                     const item = document.createElement('div');
                     item.className = 'list-item';
 
@@ -1059,11 +1216,6 @@ Change: 2026-03-18 - 전원 서명 완료 시 문서 작성 관리자에게 Tele
 
                     const dateEl = document.createElement('div');
                     dateEl.className = 'list-sub';
-                    const isSigned = myOfficialIds.length > 0
-                        ? (myOfficialIds.some(officialId => signedMap.get(String(m.id) + ':' + String(officialId))) || isLocallySigned(m.id))
-                        : false;
-                    const signProgress = getDocumentSignProgress(m, isSigned);
-                    const modeLabel = m.status === 'OPEN' ? '서명모드' : '열람모드';
                     dateEl.textContent = `${formatMinutesSignKstDate(m.created_at)} | ${modeLabel} | ${signProgress.label}`;
 
                     textWrap.appendChild(titleEl);
@@ -1336,6 +1488,7 @@ async function openDocumentById(id) {
 
         async function init() {
             try {
+                await applyMinutesSignPageTitle();
                 const ok = await initSession();
                 if (!ok) return;
                 const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {

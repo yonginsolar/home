@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-    Version: v1.0.45
-    Change: 2026-03-19 - Hide bottom signature block for certified docs when inline signatures are injected.
+    Version: v1.0.50
+    Change: 2026-03-22 - Simplify document box helper wording.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.45 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.50 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -96,6 +96,42 @@
             background: #0f172a;
             border-color: #0f172a;
             color: #ffffff;
+        }
+        .library-helper {
+            margin-top: 8px;
+            color: #64748b;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        .library-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            margin: 14px 0 8px;
+        }
+        .library-summary-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            background: #fff;
+            padding: 14px 16px;
+        }
+        .library-summary-card .label {
+            color: #64748b;
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: .03em;
+        }
+        .library-summary-card .value {
+            color: #0f172a;
+            font-size: 1.35rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-top: 4px;
+        }
+        .library-summary-card .desc {
+            color: #64748b;
+            font-size: 0.82rem;
+            margin-top: 4px;
         }
         .detail-content .article-card {
             background: #ffffff;
@@ -1031,10 +1067,8 @@
         function buildDocumentListHeader() {
             const header = document.createElement('div');
             header.style.display = 'flex';
-            header.style.alignItems = 'center';
-            header.style.gap = '10px';
-            header.style.fontWeight = 'bold';
-            header.style.fontSize = '1.1rem';
+            header.style.alignItems = 'flex-start';
+            header.style.gap = '12px';
             header.style.color = '#0f172a';
 
             const backBtn = document.createElement('button');
@@ -1043,20 +1077,69 @@
             backBtn.onclick = () => history.back();
             header.appendChild(backBtn);
 
+            const textWrap = document.createElement('div');
             const title = document.createElement('div');
+            title.style.fontWeight = '800';
+            title.style.fontSize = '1.1rem';
             title.innerText = '문서함';
-            header.appendChild(title);
+            const helper = document.createElement('div');
+            helper.className = 'library-helper';
+            helper.innerText = '공개된 의사록, 공문, 총회 자료, 규정을 한 곳에서 확인할 수 있습니다.';
+            textWrap.appendChild(title);
+            textWrap.appendChild(helper);
+            header.appendChild(textWrap);
             return header;
         }
 
+        function getVisibleDocumentCounts() {
+            const visibleMinutes = filterDocumentsByTab(publishedDocsCache, 'MINUTES').filter((doc) => canOpenMinuteDoc(doc)).length;
+            const visibleNotices = filterDocumentsByTab(publishedDocsCache, 'NOTICE').filter((doc) => canOpenMinuteDoc(doc)).length;
+            const visibleMaterials = filterDocumentsByTab(publishedDocsCache, 'MATERIALS').filter((doc) => canOpenMinuteDoc(doc)).length;
+            const visibleRules = (Array.isArray(libraryDocsCache) ? libraryDocsCache : [])
+                .filter((doc) => canOpenLibraryDoc(doc))
+                .filter((doc) => {
+                    const title = String(doc?.title || '');
+                    return !title.includes('정관') && !title.includes('규약');
+                }).length;
+            return {
+                ALL: visibleMinutes + visibleNotices + visibleMaterials,
+                MINUTES: visibleMinutes,
+                NOTICE: visibleNotices,
+                MATERIALS: visibleMaterials,
+                RULES: visibleRules
+            };
+        }
+
+        function buildDocumentListSummary() {
+            const counts = getVisibleDocumentCounts();
+            const summaryWrap = document.createElement('div');
+            summaryWrap.className = 'library-summary-grid';
+            const cards = [
+                { key: 'ALL', label: '전체 문서', desc: '문서함에 등록된 문서' },
+                { key: 'MINUTES', label: '의사록', desc: '회의록과 총회 의사록' },
+                { key: 'NOTICE', label: '공문', desc: '공개된 공문 문서' },
+                { key: 'MATERIALS', label: '총회 자료', desc: '자료집과 참고 PDF' },
+                { key: 'RULES', label: '규정', desc: '규정 문서와 정관/규약 바로가기' }
+            ];
+            summaryWrap.innerHTML = cards.map((card) => `
+                <div class="library-summary-card">
+                    <div class="label">${card.label}</div>
+                    <div class="value">${counts[card.key] || 0}</div>
+                    <div class="desc">${card.desc}</div>
+                </div>
+            `).join('');
+            return summaryWrap;
+        }
+
         function buildDocumentListTabs() {
+            const counts = getVisibleDocumentCounts();
             const tabsWrap = document.createElement('div');
             tabsWrap.className = 'list-tabs';
             DOCUMENT_LIST_TABS.forEach((tab) => {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = `list-tab-btn${tab.key === currentDocumentListTab ? ' active' : ''}`;
-                btn.textContent = tab.label;
+                btn.textContent = `${tab.label} (${counts[tab.key] || 0})`;
                 btn.onclick = () => setDocumentListTab(tab.key);
                 tabsWrap.appendChild(btn);
             });
@@ -1079,6 +1162,7 @@
         function renderDocumentListItems() {
             listPanel.innerHTML = '';
             listPanel.appendChild(buildDocumentListHeader());
+            listPanel.appendChild(buildDocumentListSummary());
             listPanel.appendChild(buildDocumentListTabs());
 
             if (currentDocumentListTab === 'RULES') {

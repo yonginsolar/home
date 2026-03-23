@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.34
-Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page for general assembly minutes.
+Version: v1.2.44
+Change: 2026-03-23 - Fix minutes manage globals and refresh rendering errors.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.34 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.44 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -110,6 +110,57 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
         
         .signer-names { font-size: 0.85rem; color: #64748b; }
         .missing-signer { color: #ef4444; font-weight: bold; }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .summary-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px 16px;
+            background: #fff;
+        }
+        .summary-box .label {
+            color: #64748b;
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: .03em;
+        }
+        .summary-box .value {
+            color: #0f172a;
+            font-size: 1.45rem;
+            font-weight: 800;
+            line-height: 1.15;
+            margin-top: 4px;
+        }
+        .summary-box .desc {
+            color: #64748b;
+            font-size: 0.82rem;
+            margin-top: 4px;
+        }
+        .filter-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .filter-chip {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #475569;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .filter-chip.active {
+            background: #eff6ff;
+            border-color: #93c5fd;
+            color: #1d4ed8;
+        }
 
         /* 버튼 그룹 */
         .btn-group { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
@@ -284,9 +335,41 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
         <div id="sub-panel-manage" class="sub-panel">
         <div class="card">
             <h3 style="margin-top:0;">📂 관리 목록</h3>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px;">
+                <button type="button" class="btn btn-gray" onclick="refreshMinutesManageList()">새로고침</button>
+                <button type="button" class="btn btn-gray" onclick="copySignatureLoginLink()">서명자 로그인 링크 복사</button>
+            </div>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
                 <input type="text" id="minutes-search" class="form-control" placeholder="제목/문서번호/유형 검색">
                 <button class="btn btn-gray" onclick="loadMinutes()">검색</button>
+            </div>
+            <div class="filter-chip-row">
+                <button type="button" class="filter-chip active" id="minutes-filter-all" onclick="setMinutesStatusFilter('all')">전체</button>
+                <button type="button" class="filter-chip" id="minutes-filter-open" onclick="setMinutesStatusFilter('open')">서명 진행 중</button>
+                <button type="button" class="filter-chip" id="minutes-filter-waiting" onclick="setMinutesStatusFilter('waiting')">열람/대기</button>
+                <button type="button" class="filter-chip" id="minutes-filter-completed" onclick="setMinutesStatusFilter('completed')">전자서명 완료</button>
+            </div>
+            <div class="summary-grid" id="minutesSummaryGrid">
+                <div class="summary-box">
+                    <div class="label">대상 문서</div>
+                    <div class="value" id="minutesSummaryTotal">-</div>
+                    <div class="desc">관리 목록에 포함된 회의 문서</div>
+                </div>
+                <div class="summary-box">
+                    <div class="label">서명 진행 중</div>
+                    <div class="value" id="minutesSummaryOpen">-</div>
+                    <div class="desc">현재 서명 중인 문서</div>
+                </div>
+                <div class="summary-box">
+                    <div class="label">열람/대기</div>
+                    <div class="value" id="minutesSummaryWaiting">-</div>
+                    <div class="desc">서명 개시 전 열람 상태 문서</div>
+                </div>
+                <div class="summary-box">
+                    <div class="label">전자서명 완료</div>
+                    <div class="value" id="minutesSummaryCompleted">-</div>
+                    <div class="desc">전원 서명 완료 후 출력 가능</div>
+                </div>
             </div>
             <div class="list-scroll">
                 <div id="list-area">로딩 중...</div>
@@ -366,6 +449,7 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
             <div id="previewTitle" style="font-weight:bold; margin-bottom:8px;"></div>
             <div id="previewBody" style="max-height:60vh; overflow:auto; color:#374151; font-size:0.95rem;"></div>
             <div class="modal-actions">
+                <button class="btn btn-blue" onclick="printPreviewNotice()">🖨️ 출력</button>
                 <button class="btn btn-gray" onclick="closePreview()">닫기</button>
             </div>
         </div>
@@ -493,6 +577,7 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
         let currentUserId = null;
         let isAdminUser = false;
         let confirmResolve = null;
+        let minutesStatusFilter = 'all';
 
 
         let noticeItems = [];
@@ -500,6 +585,7 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
         let noticeChannelMap = {};
         let noticeCompanyInfo = null;
         let noticeSealUrl = null;
+        let currentPreviewNoticeState = null;
 
         let minutesCache = new Map();
         let attachTargetId = null;
@@ -558,6 +644,19 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
             return new URL('./minutes_sign.html', window.location.href).toString();
         } // End of buildSignatureSignBaseUrl
 
+        function buildSignatureLoginUrl() {
+            return new URL('./sign_login.html', window.location.href).toString();
+        } // End of buildSignatureLoginUrl
+
+        window.copySignatureLoginLink = async () => {
+            try {
+                await navigator.clipboard.writeText(buildSignatureLoginUrl());
+                showToast('서명자 로그인 링크를 복사했습니다.');
+            } catch (error) {
+                showToast('서명자 로그인 링크 복사 실패: ' + (error?.message || 'Unknown error'));
+            }
+        };
+
         async function triggerSignatureTelegramNotification(minuteId) {
             const safeMinuteId = String(minuteId || '').trim();
             if (!safeMinuteId) return { ok: false, error: 'MINUTE_ID_REQUIRED' };
@@ -579,6 +678,20 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
             }
             return data;
         } // End of triggerSignatureTelegramNotification
+
+        window.remindMinuteSigners = async (minuteId) => {
+            try {
+                const result = await triggerSignatureTelegramNotification(minuteId);
+                if (Number(result?.sentCount || 0) > 0) {
+                    showToast(`Telegram 리마인드 ${result.sentCount}건을 발송했습니다.`);
+                } else {
+                    showToast('발송 가능한 Telegram 리마인드 대상이 없습니다.');
+                }
+            } catch (error) {
+                console.warn('remindMinuteSigners failed:', error?.message || error);
+                showToast('Telegram 리마인드 발송 실패: ' + (error?.message || 'Unknown error'));
+            }
+        };
 
 
         async function generateMinuteDocNo() {
@@ -1265,7 +1378,8 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
             const title = notice?.title || approval?.title || parsed.title || '공문';
             const approvalBody = splitNoticeApprovalContent(approval?.content || '').publicBody;
             const body = parsed.bodyLines.join('\n').trim() || approvalBody || '';
-            const safeBody = escapeHtml(body).replace(/\n/g, '<br>');
+            const normalizedBody = normalizeMinuteContent(body);
+            const safeBodyHtml = normalizedBody ? sanitizeHtml(normalizedBody) : '-';
             const dateValue = approval?.processed_at || approval?.created_at || notice?.created_at;
             const dateLabel = formatKoreanDate(dateValue);
             const info = await loadNoticeCompanyInfo();
@@ -1296,13 +1410,53 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
                             <div style="flex:1;">${escapeHtml(title)}</div>
                         </div>
                 </div>
-                <div style="margin-top:14px; line-height:1.8;">${safeBody || '-'}</div>
+                <div style="margin-top:14px; line-height:1.8;">${safeBodyHtml}</div>
                 ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
                 <div style="margin-top:8px; text-align:center; font-weight:700;">
                     ${orgName} 이사장 ${chairman ? chairman : ''} ${sealHtml}
                 </div>
-            </div>
+                </div>
             `;
+        }
+
+        function buildPrintableNoticeHtml(title, noticeHtml) {
+            const safeTitle = escapeHtml(title || '공문');
+            const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
+            return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>${safeTitle}</title>
+    <style>
+        @page { size: A4 portrait; margin: 16mm 14mm 18mm 14mm; }
+        html, body { width: auto; height: auto; }
+        body { margin: 0; font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color: #111827; background: #ffffff; }
+        .print-shell { position: relative; }
+        .print-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 18px; padding-bottom: 10px; border-bottom: 1px solid #d1d5db; }
+        .print-head-title { font-size: 24px; font-weight: 800; color: #0f172a; }
+        .print-head-meta { font-size: 12px; color: #64748b; text-align: right; }
+        .print-notice-wrap, .print-notice-wrap * { box-sizing: border-box; max-width: 100%; }
+        .print-notice-wrap { font-size: 14px; line-height: 1.8; color: #111827; }
+        .print-notice-wrap img { max-width: 100% !important; height: auto !important; }
+        .print-notice-wrap table { width: 100% !important; border-collapse: collapse; table-layout: fixed; }
+        .print-notice-wrap th, .print-notice-wrap td { word-break: break-word; overflow-wrap: anywhere; }
+        .print-foot { margin-top: 24px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #64748b; text-align: right; }
+        @media print {
+            html, body { margin: 0; padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="print-shell">
+        <div class="print-head">
+            <div class="print-head-title">${safeTitle}</div>
+            <div class="print-head-meta">출력 ${printedAtLabel}</div>
+        </div>
+        <div class="print-notice-wrap">${noticeHtml || '<div>내용이 없습니다.</div>'}</div>
+        <div class="print-foot">공지 출력본</div>
+    </div>
+</body>
+</html>`;
         }
 
         function getRoleLabel(off) {
@@ -1828,6 +1982,7 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
             if (!item) return;
             const approval = item.approval || {};
             const notice = item.notice || null;
+            currentPreviewNoticeState = { approval, notice };
             document.getElementById('previewTitle').innerText = notice?.title || approval.title || '공문';
             document.getElementById('previewBody').innerHTML = await buildNoticeTemplateHtml(approval, notice);
             document.getElementById('previewModal').classList.add('show');
@@ -1835,7 +1990,33 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
         window.openNoticePreview = openNoticePreview;
 
         window.closePreview = () => {
+            currentPreviewNoticeState = null;
             document.getElementById('previewModal').classList.remove('show');
+        };
+
+        window.printPreviewNotice = async () => {
+            const approval = currentPreviewNoticeState?.approval || null;
+            const notice = currentPreviewNoticeState?.notice || null;
+            if (!approval && !notice) {
+                showToast('출력할 공문을 찾지 못했습니다.');
+                return;
+            }
+            const title = notice?.title || approval?.title || '공문';
+            const noticeHtml = await buildNoticeTemplateHtml(approval || {}, notice || null);
+            const html = buildPrintableNoticeHtml(title, noticeHtml);
+            const printWindow = window.open('', '_blank', 'width=960,height=900');
+            if (!printWindow) {
+                showToast('팝업이 차단되어 출력 창을 열지 못했습니다.');
+                return;
+            }
+            printWindow.document.open();
+            printWindow.document.write(html);
+            printWindow.document.close();
+            printWindow.focus();
+            await waitForPrintWindowImages(printWindow);
+            try {
+                printWindow.print();
+            } catch (e) { void 0; }
         };
 
         window.openMinutePreview = async (id) => {
@@ -2318,7 +2499,24 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
         }
         window.switchTab = switchTab;
 
-        window.switchMinutesSubTab = (tab) => {
+        function setMinutesStatusFilter(filterName) {
+            minutesStatusFilter = ['all', 'open', 'waiting', 'completed'].includes(String(filterName || ''))
+                ? String(filterName)
+                : 'all';
+            [
+                ['all', document.getElementById('minutes-filter-all')],
+                ['open', document.getElementById('minutes-filter-open')],
+                ['waiting', document.getElementById('minutes-filter-waiting')],
+                ['completed', document.getElementById('minutes-filter-completed')]
+            ].forEach(([key, el]) => {
+                if (!el) return;
+                el.classList.toggle('active', key === minutesStatusFilter);
+            });
+            loadMinutes();
+        }
+        window.setMinutesStatusFilter = setMinutesStatusFilter;
+
+        function switchMinutesSubTab(tab) {
             const editor = document.getElementById('sub-panel-editor');
             const manage = document.getElementById('sub-panel-manage');
             const btnEditor = document.getElementById('sub-tab-editor');
@@ -2335,7 +2533,17 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
                 btnManage?.classList.remove('active');
                 btnEditor?.classList.add('active');
             }
-        };
+        }
+        window.switchMinutesSubTab = switchMinutesSubTab;
+
+        function refreshMinutesManageList() {
+            const container = document.getElementById('list-area');
+            if (container) {
+                container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">목록을 새로고침하는 중...</div>';
+            }
+            switchMinutesSubTab('manage');
+        }
+        window.refreshMinutesManageList = refreshMinutesManageList;
 
         function showConfirm(msg) {
             document.getElementById('confirmText').innerText = msg;
@@ -2416,6 +2624,17 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
 
         async function loadMinutes() {
             const container = document.getElementById('list-area');
+            const totalEl = document.getElementById('minutesSummaryTotal');
+            const openEl = document.getElementById('minutesSummaryOpen');
+            const waitingEl = document.getElementById('minutesSummaryWaiting');
+            const completedEl = document.getElementById('minutesSummaryCompleted');
+
+            const setSummary = ({ total = 0, open = 0, waiting = 0, completed = 0 } = {}) => {
+                if (totalEl) totalEl.textContent = String(total);
+                if (openEl) openEl.textContent = String(open);
+                if (waitingEl) waitingEl.textContent = String(waiting);
+                if (completedEl) completedEl.textContent = String(completed);
+            };
 
             const { data: minutes } = await MinutesService.listMinutesAdmin();
             const searchValue = (document.getElementById('minutes-search')?.value || '').trim().toLowerCase();
@@ -2425,24 +2644,22 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
                 return type !== 'NOTICE' && type !== 'ASSEMBLY_MATERIAL';
             });
 
-            const filteredMinutes = !searchValue ? minuteDocs : minuteDocs.filter(m => {
+            const searchedMinutes = !searchValue ? minuteDocs : minuteDocs.filter(m => {
                 const hay = `${m.title || ''} ${m.doc_no || ''} ${m.doc_type || ''}`.toLowerCase();
                 return hay.includes(searchValue);
             });
 
-            if (!filteredMinutes || filteredMinutes.length === 0) {
+            if (!searchedMinutes || searchedMinutes.length === 0) {
+                setSummary();
                 container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">등록된 의사록이 없습니다.</div>';
                 return;
             }
 
             const delegateList = sortDelegateOrder((allOfficials || []).filter(o => String(o.category || '').toLowerCase() === 'delegate'));
-            const minuteIds = filteredMinutes.map(m => m.id);
+            const minuteIds = searchedMinutes.map(m => m.id);
             const { data: sigList } = await MinutesService.listSignaturesForMinutes(minuteIds);
 
-            container.innerHTML = '';
-
-
-            for (const m of filteredMinutes) {
+            const viewModels = searchedMinutes.map((m) => {
                 // 해당 의사록의 서명 데이터 조회
                 const signedOfficialIds = sigList.filter(s => s.minute_id === m.id).map(s => String(s.official_id));
                 
@@ -2483,6 +2700,66 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
                 const canPublish = (!m.requires_sign) || (signedCount === totalCount && m.status === 'CLOSED');
                 const canEditCopy = (!m.requires_sign) || (signedCount === 0);
                 const isSignatureCompleted = !!(m.requires_sign && m.status === 'CLOSED' && totalCount > 0 && signedCount === totalCount);
+                return {
+                    minute: m,
+                    badge,
+                    publishBadge,
+                    signedCount,
+                    totalCount,
+                    percent,
+                    missingNames,
+                    waitingViewMode,
+                    canClose,
+                    canPublish,
+                    canEditCopy,
+                    isSignatureCompleted,
+                    isSignatureOpen: !!(m.requires_sign && m.status === 'OPEN')
+                };
+            });
+
+            const filteredViewModels = viewModels.filter(({ waitingViewMode, isSignatureCompleted, isSignatureOpen }) => {
+                if (minutesStatusFilter === 'open') return isSignatureOpen;
+                if (minutesStatusFilter === 'waiting') return waitingViewMode;
+                if (minutesStatusFilter === 'completed') return isSignatureCompleted;
+                return true;
+            });
+
+            const openCount = filteredViewModels.filter((item) => item.isSignatureOpen).length;
+            const waitingCount = filteredViewModels.filter((item) => item.waitingViewMode).length;
+            const completedCount = filteredViewModels.filter((item) => item.isSignatureCompleted).length;
+            setSummary({
+                total: filteredViewModels.length,
+                open: openCount,
+                waiting: waitingCount,
+                completed: completedCount
+            });
+
+            container.innerHTML = '';
+            if (!filteredViewModels.length) {
+                const emptyLabel = minutesStatusFilter === 'open'
+                    ? '서명 진행 중 문서가 없습니다.'
+                    : minutesStatusFilter === 'waiting'
+                        ? '열람/대기 문서가 없습니다.'
+                        : minutesStatusFilter === 'completed'
+                            ? '전자서명 완료 문서가 없습니다.'
+                            : '등록된 의사록이 없습니다.';
+                container.innerHTML = `<div style="text-align:center; color:#999; padding:20px;">${emptyLabel}</div>`;
+                return;
+            }
+
+            for (const item of filteredViewModels) {
+                const m = item.minute;
+                const badge = item.badge;
+                const publishBadge = item.publishBadge;
+                const signedCount = item.signedCount;
+                const totalCount = item.totalCount;
+                const percent = item.percent;
+                const missingNames = item.missingNames;
+                const waitingViewMode = item.waitingViewMode;
+                const canClose = item.canClose;
+                const canPublish = item.canPublish;
+                const canEditCopy = item.canEditCopy;
+                const isSignatureCompleted = item.isSignatureCompleted;
 
                 const html = `
                     <div class="minute-item">
@@ -2521,6 +2798,7 @@ Change: 2026-03-19 - Show chairperson as 의장 on the final certificate page fo
                             ${m.requires_sign && signedCount === 0 ? `<button onclick="openSignerEditor('${m.id}')" class="btn btn-blue">👥 서명자 수정</button>` : ''}
                             <button onclick="openAttachPicker('${m.id}')" class="btn btn-gray">📎 첨부 업로드</button>
                             ${Array.isArray(m.file_urls) && m.file_urls.length > 0 ? `<button onclick="clearAttachments('${m.id}')" class="btn btn-gray">🧹 첨부 초기화</button>` : ''}
+                            ${m.requires_sign && m.status === 'OPEN' && signedCount < totalCount ? `<button onclick="remindMinuteSigners('${m.id}')" class="btn btn-blue">🔔 리마인드</button>` : ''}
                             ${m.requires_sign ? (m.status === 'OPEN'
                                 ? `<button onclick="toggleStatus('${m.id}', 'CLOSED', ${canClose})" class="btn btn-gray" ${canClose ? '' : 'disabled'}>${signedCount === 0 ? '👁️ 열람모드 전환' : '🔒 마감하기'}</button>`
                                 : `${signedCount === 0 ? `<button onclick="toggleStatus('${m.id}', 'OPEN')" class="btn btn-gray">▶️ 서명 개시</button>` : ''}`) : ''}

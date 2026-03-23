@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
-Change: 2026-03-17 - Added magic-link invite guidance and standalone Kakao linking step.
+Version: v1.0.6
+Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.3 | sign_login.html');</script>
+    <script>console.log('[Version] v1.0.6 | sign_login.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -143,6 +143,26 @@ Change: 2026-03-17 - Added magic-link invite guidance and standalone Kakao linki
             color: #94a3b8;
             text-align: center;
         }
+        .flow-box {
+            margin: 0 0 18px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid #dbeafe;
+            background: #eff6ff;
+        }
+        .flow-title {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #1d4ed8;
+            margin-bottom: 8px;
+        }
+        .flow-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 0.9rem;
+            color: #334155;
+        }
     </style>
 </head>
 <body>
@@ -236,17 +256,29 @@ Change: 2026-03-17 - Added magic-link invite guidance and standalone Kakao linki
         const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         let pendingOtpEmail = '';
 
+        function getAllowedDestOrigins() {
+            const origins = new Set([window.location.origin]);
+            const host = String(window.location.hostname || '').trim().toLowerCase();
+            if (host === 'localhost' || host === '127.0.0.1') {
+                origins.add('http://localhost:8000');
+                origins.add('http://127.0.0.1:8000');
+                return Array.from(origins);
+            }
+            const hostParts = host.split('.').filter(Boolean);
+            if (hostParts.length >= 2) {
+                const baseHost = hostParts.slice(-2).join('.');
+                origins.add(`${window.location.protocol}//www.${baseHost}`);
+                origins.add(`${window.location.protocol}//erp.${baseHost}`);
+            }
+            return Array.from(origins);
+        }
+
         function normalizeDest(raw) {
             const fallback = new URL('minutes_sign.html', window.location.href).href;
             if (!raw) return fallback;
             try {
                 const dest = new URL(raw, window.location.origin);
-                const allowOrigins = [
-                    window.location.origin,
-                    'https://www.yonginsolar.kr',
-                    'https://erp.yonginsolar.kr',
-                    'http://localhost:8000'
-                ];
+                const allowOrigins = getAllowedDestOrigins();
                 if (!allowOrigins.includes(dest.origin)) return fallback;
                 return dest.href;
             } catch (_) {
