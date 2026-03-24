@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.45
-Change: 2026-03-23 - Allow notice channels to save with both targets off.
+Version: v1.2.53
+Change: 2026-03-24 - Add divider below notice footer approval row.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.45 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.53 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -533,7 +533,7 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
 
     <script src="https://erp.yonginsolar.kr/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.36';
+        import { MinutesService } from './MinutesService.js?v=1.0.37';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
@@ -1369,6 +1369,18 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
             }).format(d);
         }
 
+        const noticeDrafterPositionMap = new Map();
+
+        async function loadNoticeDrafterPosition(empId) {
+            const safeEmpId = String(empId || '').trim();
+            if (!safeEmpId) return '';
+            if (noticeDrafterPositionMap.has(safeEmpId)) return noticeDrafterPositionMap.get(safeEmpId) || '';
+            const { data } = await MinutesService.getEmployeePositionByEmpId(safeEmpId);
+            const safePosition = String(data || '').trim();
+            noticeDrafterPositionMap.set(safeEmpId, safePosition);
+            return safePosition;
+        }
+
         async function buildNoticeTemplateHtml(approval, notice) {
             const rawContent = notice?.content || buildNoticeContentFromApproval(approval || {});
             const parsed = parseNoticeContent(rawContent);
@@ -1382,16 +1394,6 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
             const safeBodyHtml = normalizedBody ? sanitizeHtml(normalizedBody) : '-';
             const dateValue = approval?.processed_at || approval?.created_at || notice?.created_at;
             const dateLabel = formatKoreanDate(dateValue);
-            const info = await loadNoticeCompanyInfo();
-            const sealUrl = await loadNoticeSealUrl();
-            const orgNameRaw = info?.orgName || info?.company_name || '용인모두의햇빛협동조합';
-            const chairmanRaw = info?.chairman_name || info?.ceoName || '';
-            const orgName = escapeHtml(orgNameRaw);
-            const chairman = chairmanRaw ? escapeHtml(chairmanRaw) : '';
-            const sealSafe = sealUrl ? sealUrl : '';
-            const sealHtml = sealSafe
-                ? `<img src="${sealSafe}" alt="seal" style="width:70px; height:70px; object-fit:contain; margin-left:6px; vertical-align:middle;">`
-                : '';
 
             return `
                 <div style="font-family:'Malgun Gothic',sans-serif; color:#111827;">
@@ -1412,14 +1414,88 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
                 </div>
                 <div style="margin-top:14px; line-height:1.8;">${safeBodyHtml}</div>
                 ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
-                <div style="margin-top:8px; text-align:center; font-weight:700;">
-                    ${orgName} 이사장 ${chairman ? chairman : ''} ${sealHtml}
-                </div>
                 </div>
             `;
         }
 
-        function buildPrintableNoticeHtml(title, noticeHtml) {
+        async function buildNoticePrintApprovalEntries(approval) {
+            const entries = [];
+            const drafterName = String(approval?.drafter_name || '').trim();
+            const drafterPosition = await loadNoticeDrafterPosition(approval?.drafter_id);
+            if (drafterName) {
+                entries.push({
+                    name: drafterPosition ? `${drafterPosition}: ${drafterName}` : drafterName,
+                    meta: `(기안) (${formatMinutesAdminKstDateTime(approval?.created_at, '-')})`,
+                    isDrafter: true
+                });
+            }
+
+            const approvalLine = Array.isArray(approval?.approval_line) ? approval.approval_line : [];
+            approvalLine.forEach((step, idx) => {
+                const rawName = String(step?.name || '').trim();
+                if (!rawName) return;
+                const position = String(step?.position || '').trim();
+                const isLast = idx === approvalLine.length - 1;
+                entries.push({
+                    name: isLast && position ? `${position}: ${rawName}` : rawName,
+                    meta: `(결재) (${formatMinutesAdminKstDateTime(step?.processed_at, '-')})`
+                });
+            });
+
+            return entries;
+        }
+
+        async function buildNoticePrintFooterHtml(approval) {
+            const info = await loadNoticeCompanyInfo();
+            const sealUrl = await loadNoticeSealUrl();
+            const orgNameRaw = info?.orgName || info?.company_name || '용인모두의햇빛협동조합';
+            const chairmanRaw = info?.chairman_name || info?.ceoName || '김민정';
+            const zipCodeRaw = info?.zip_code || '17115';
+            const addressRaw = info?.address || '경기도 용인시 처인구 남사읍 상동로 28';
+            const homepageRaw = info?.homepage || 'https://www.yonginsolar.kr';
+            const emailRaw = info?.email || 'yonginsolar@gmail.com';
+            const phoneRaw = info?.phone || '010-2513-5736';
+            const orgName = escapeHtml(orgNameRaw);
+            const chairman = escapeHtml(chairmanRaw || '김민정');
+            const zipCode = escapeHtml(zipCodeRaw || '17115');
+            const address = escapeHtml(addressRaw || '경기도 용인시 처인구 남사읍 상동로 28');
+            const homepage = escapeHtml(homepageRaw || 'https://www.yonginsolar.kr');
+            const email = escapeHtml(emailRaw || 'yonginsolar@gmail.com');
+            const phone = escapeHtml(phoneRaw || '010-2513-5736');
+            const sealSafe = sealUrl ? sealUrl : '';
+            const sealHtml = sealSafe
+                ? `<img src="${sealSafe}" alt="seal" class="print-foot-seal">`
+                : '';
+            const approvalEntries = await buildNoticePrintApprovalEntries(approval);
+            const approvalItemsHtml = approvalEntries.map((entry, idx) => {
+                const alignClass = idx === 0 ? 'is-left' : (idx === approvalEntries.length - 1 ? 'is-right' : 'is-center');
+                return `
+                    <div class="print-foot-approval-item ${alignClass}">
+                        <div class="print-foot-approval-name">${escapeHtml(entry.name || '-')}</div>
+                        <div class="print-foot-approval-meta">${escapeHtml(entry.meta || '')}</div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="print-foot-sign"><span class="print-foot-sign-text">${orgName} 이사장 ${chairman}</span>${sealHtml}</div>
+                <div class="print-foot-divider"></div>
+                <div class="print-foot-approvals">${approvalItemsHtml}</div>
+                <div class="print-foot-row-divider"></div>
+                <div class="print-foot-contact-grid">
+                    <span class="is-left">우 ${zipCode}</span>
+                    <span class="is-center">${address}</span>
+                    <span class="is-right">${homepage}</span>
+                </div>
+                <div class="print-foot-row-divider"></div>
+                <div class="print-foot-contact-split">
+                    <span class="is-left">E-mail: ${email}</span>
+                    <span class="is-right">T: ${phone}</span>
+                </div>
+            `;
+        }
+
+        function buildPrintableNoticeHtml(title, noticeHtml, footerHtml) {
             const safeTitle = escapeHtml(title || '공문');
             const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
             return `<!DOCTYPE html>
@@ -1440,7 +1516,26 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
         .print-notice-wrap img { max-width: 100% !important; height: auto !important; }
         .print-notice-wrap table { width: 100% !important; border-collapse: collapse; table-layout: fixed; }
         .print-notice-wrap th, .print-notice-wrap td { word-break: break-word; overflow-wrap: anywhere; }
-        .print-foot { margin-top: 24px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #64748b; text-align: right; }
+        .print-foot { margin-top: 28px; color: #111111; }
+        .print-foot-sign { display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: nowrap; text-align: center; font-size: 18px; font-weight: 700; color: #111827; }
+        .print-foot-sign-text { white-space: nowrap; word-break: keep-all; }
+        .print-foot-seal { width: 68px; height: 68px; object-fit: contain; margin-left: 6px; vertical-align: middle; }
+        .print-foot-approvals { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-top: 0; color: #111111; flex-wrap: nowrap; }
+        .print-foot-approval-item { flex: 1 1 0; min-width: 0; }
+        .print-foot-approval-item.is-left { text-align: left; }
+        .print-foot-approval-item.is-center { text-align: center; }
+        .print-foot-approval-item.is-right { text-align: right; }
+        .print-foot-approval-name { font-size: 16px; font-weight: 700; color: #111111; white-space: nowrap; word-break: keep-all; }
+        .print-foot-approval-meta { margin-top: 4px; font-size: 10px; color: #111111; white-space: nowrap; }
+        .print-foot-divider { margin: 14px 0 12px; border-top: 4px solid #9ca3af; }
+        .print-foot-contact-grid { display: grid; grid-template-columns: 0.9fr 2.2fr 1.3fr; gap: 12px; align-items: center; margin-top: 4px; font-size: 12px; color: #111111; }
+        .print-foot-contact-grid .is-left { text-align: left; }
+        .print-foot-contact-grid .is-center { text-align: center; }
+        .print-foot-contact-grid .is-right { text-align: right; }
+        .print-foot-row-divider { margin: 8px 0; border-top: 1px solid #111111; }
+        .print-foot-contact-split { display: flex; justify-content: space-between; gap: 16px; margin-top: 8px; font-size: 12px; color: #111111; }
+        .print-foot-contact-split .is-left { text-align: left; }
+        .print-foot-contact-split .is-right { text-align: right; }
         @media print {
             html, body { margin: 0; padding: 0; }
         }
@@ -1453,7 +1548,7 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
             <div class="print-head-meta">출력 ${printedAtLabel}</div>
         </div>
         <div class="print-notice-wrap">${noticeHtml || '<div>내용이 없습니다.</div>'}</div>
-        <div class="print-foot">공지 출력본</div>
+        <div class="print-foot">${footerHtml || ''}</div>
     </div>
 </body>
 </html>`;
@@ -2003,7 +2098,8 @@ Change: 2026-03-23 - Allow notice channels to save with both targets off.
             }
             const title = notice?.title || approval?.title || '공문';
             const noticeHtml = await buildNoticeTemplateHtml(approval || {}, notice || null);
-            const html = buildPrintableNoticeHtml(title, noticeHtml);
+            const footerHtml = await buildNoticePrintFooterHtml(approval || {});
+            const html = buildPrintableNoticeHtml(title, noticeHtml, footerHtml);
             const printWindow = window.open('', '_blank', 'width=960,height=900');
             if (!printWindow) {
                 showToast('팝업이 차단되어 출력 창을 열지 못했습니다.');

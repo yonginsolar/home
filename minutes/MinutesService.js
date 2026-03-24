@@ -1,6 +1,6 @@
 /*
-Version: v1.0.36
-Change: 2026-03-19 - Use doc_signatures.signed_at for admin signature queries after verifying schema.
+Version: v1.0.39
+Change: 2026-03-23 - Include drafter_id for notice print footer position lookup.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -397,12 +397,25 @@ async function listApprovalNoticeDrafts() {
 async function listCompletedNoticeApprovals() {
     const { data, error } = await supabase
         .from('ref_approval')
-        .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links')
+        .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,approval_line')
         .eq('doc_type', '공문')
         .in('status', ['완료', '실물결재완료'])
         .order('processed_at', { ascending: false })
         .order('created_at', { ascending: false });
     return { data: data || [], error };
+}
+
+async function getEmployeePositionByEmpId(empId) {
+    const safeEmpId = String(empId || '').trim();
+    if (!safeEmpId) return { data: null, error: null };
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
+        .from('ref_employees')
+        .select('position')
+        .eq('emp_id', safeEmpId)
+        .limit(1), coopId);
+    const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
+    return { data: row?.position || null, error };
 }
 
 async function listNoticesByApprovalIds(ids) {
@@ -616,6 +629,7 @@ export const MinutesService = {
     markDocumentBoxSeen,
     listApprovalNoticeDrafts,
     listCompletedNoticeApprovals,
+    getEmployeePositionByEmpId,
     listNoticesByApprovalIds,
     listNoticeMinutesByDocNos,
     getApprovalsByIds,
