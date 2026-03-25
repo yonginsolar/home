@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.4
-Change: Verify linked Kakao identity via official identity linking and sync the correct provider ID.
+Version: v1.0.5
+Change: Handle Naver identity linking alongside Kakao linking in the shared auth callback.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.4 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.5 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -91,6 +91,21 @@ Change: Verify linked Kakao identity via official identity linking and sync the 
             return user?.identities?.find(identity => identity.provider === provider) || null;
         }
 
+        function getLinkingProviderMeta() {
+            const params = new URLSearchParams(window.location.search);
+            const rawProvider = String(params.get('provider') || 'kakao').trim().toLowerCase();
+            if (rawProvider === 'naver') {
+                return {
+                    key: 'custom:naver',
+                    label: '네이버'
+                };
+            }
+            return {
+                key: 'kakao',
+                label: '카카오'
+            };
+        }
+
         function getIdentityProviderId(identity) {
             if (!identity) return '';
             return (
@@ -141,23 +156,37 @@ Change: Verify linked Kakao identity via official identity linking and sync the 
                 const isLinking = params.get('linking') === 'true';
 
                 if (isLinking) {
-                    document.getElementById('message').innerText = '카카오 계정 연결 처리 중...';
+                    const providerMeta = getLinkingProviderMeta();
+                    document.getElementById('message').innerText = `${providerMeta.label} 계정 연결 처리 중...`;
                     const redirectTarget = getDest();
                     localStorage.removeItem('auth_destination');
-                    await syncPhone(data.session.user);
+                    if (providerMeta.key === 'kakao') {
+                        await syncPhone(data.session.user);
+                    }
 
                     const authError = getHashAuthError();
                     if (authError) {
-                        console.error('카카오 연결 콜백 오류:', authError);
-                        document.getElementById('message').innerText = '카카오 연결에 실패했습니다. 다시 시도해 주세요.';
+                        console.error(`${providerMeta.label} 연결 콜백 오류:`, authError);
+                        document.getElementById('message').innerText = `${providerMeta.label} 연결에 실패했습니다. 다시 시도해 주세요.`;
                         setTimeout(() => window.location.replace(redirectTarget), 3000);
                         return;
                     }
 
-                    const kakaoIdentity = await getLinkedIdentity(data.session.user, 'kakao');
-                    const kakaoId = getIdentityProviderId(kakaoIdentity);
-                    
-                    if (kakaoId) {
+                    const linkedIdentity = await getLinkedIdentity(data.session.user, providerMeta.key);
+                    if (!linkedIdentity) {
+                        document.getElementById('message').innerText = `${providerMeta.label} 인증 정보 추출 실패. 연동 취소.`;
+                        setTimeout(() => window.location.replace(redirectTarget), 3000);
+                        return;
+                    }
+
+                    if (providerMeta.key === 'kakao') {
+                        const kakaoId = getIdentityProviderId(linkedIdentity);
+                        if (!kakaoId) {
+                            document.getElementById('message').innerText = '카카오 인증 정보 추출 실패. 연동 취소.';
+                            setTimeout(() => window.location.replace(redirectTarget), 3000);
+                            return;
+                        }
+
                         // [RPC 호출] linkIdentity 완료 후 조합원 프로필에 Kakao ID만 동기화
                         const { error: rpcError } = await _supabase.rpc('rpc_link_kakao', {
                             p_member_uid: data.session.user.id,
@@ -170,16 +199,11 @@ Change: Verify linked Kakao identity via official identity linking and sync the 
                             setTimeout(() => window.location.replace(redirectTarget), 3000);
                             return;
                         }
-
-                        document.getElementById('message').innerText = '카카오 계정이 성공적으로 연결되었습니다!';
-                        setTimeout(() => window.location.replace(redirectTarget), 1500);
-                        return;
-
-                    } else {
-                        document.getElementById('message').innerText = '카카오 인증 정보 추출 실패. 연동 취소.';
-                        setTimeout(() => window.location.replace(redirectTarget), 3000);
-                        return;
                     }
+
+                    document.getElementById('message').innerText = `${providerMeta.label} 계정이 성공적으로 연결되었습니다!`;
+                    setTimeout(() => window.location.replace(redirectTarget), 1500);
+                    return;
                 }
 
                 // [원래 로직] 일반 로그인 성공 처리
