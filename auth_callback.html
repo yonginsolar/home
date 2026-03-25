@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.5
-Change: Handle Naver identity linking alongside Kakao linking in the shared auth callback.
+Version: v1.0.6
+Change: Sync Naver phone metadata and support public member profile linking for Naver in the shared auth callback.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.5 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.6 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -50,6 +50,15 @@ Change: Handle Naver identity linking alongside Kakao linking in the shared auth
             const params = new URLSearchParams(window.location.search);
             const raw = params.get('next') || localStorage.getItem('auth_destination');
             return normalizeDest(raw);
+        }
+
+        function isErpDestination(rawDest) {
+            try {
+                const dest = new URL(normalizeDest(rawDest), window.location.origin);
+                return dest.origin === 'https://erp.yonginsolar.kr' || dest.pathname === '/erp' || dest.pathname.startsWith('/erp/');
+            } catch (e) {
+                return false;
+            }
         }
 
         // [핵심] 세션은 동일 출처에 저장되므로 URL로 토큰을 전달하지 않음
@@ -116,15 +125,77 @@ Change: Handle Naver identity linking alongside Kakao linking in the shared auth
             );
         }
 
-        // 전화번호 업데이트 (실패해도 무시)
+        function getIdentityPhone(identity) {
+            if (!identity) return '';
+            return String(
+                identity.identity_data?.phone_number ||
+                identity.identity_data?.phone ||
+                ''
+            ).trim();
+        }
+
+        function getBestSocialPhone(user) {
+            const meta = user?.user_metadata || {};
+            const candidates = [
+                user?.phone,
+                meta.phone_number,
+                meta.phone,
+                meta?.custom_claims?.naver_mobile_e164,
+                meta?.custom_claims?.naver_mobile
+            ].map((value) => String(value || '').trim()).filter(Boolean);
+
+            const identities = Array.isArray(user?.identities) ? user.identities.slice() : [];
+            identities.sort((a, b) => {
+                const order = { kakao: 1, 'custom:naver': 2, email: 3 };
+                const aOrder = order[String(a?.provider || '').trim().toLowerCase()] || 99;
+                const bOrder = order[String(b?.provider || '').trim().toLowerCase()] || 99;
+                return aOrder - bOrder;
+            });
+            identities.forEach((identity) => {
+                const phone = getIdentityPhone(identity);
+                if (phone) candidates.push(phone);
+            });
+
+            return candidates.find(Boolean) || '';
+        }
+
+        async function syncPublicMemberSocialIdentity(providerMeta, user, linkedIdentity) {
+            const providerId = getIdentityProviderId(linkedIdentity);
+            if (!providerId) {
+                throw new Error(`${providerMeta.label} 인증 정보 추출 실패.`);
+            }
+
+            let rpcName = '';
+            let payload = null;
+            if (providerMeta.key === 'kakao') {
+                rpcName = 'rpc_link_kakao';
+                payload = {
+                    p_member_uid: user.id,
+                    p_kakao_id: providerId
+                };
+            } else if (providerMeta.key === 'custom:naver') {
+                rpcName = 'rpc_link_naver';
+                payload = {
+                    p_member_uid: user.id,
+                    p_naver_id: providerId
+                };
+            }
+
+            if (!rpcName || !payload) return;
+
+            const { error } = await _supabase.rpc(rpcName, payload);
+            if (error) {
+                throw error;
+            }
+        }
+
+        // 전화번호 메타 업데이트 (실패해도 무시)
         async function syncPhone(user) {
             try {
-                const kakao = user.identities?.find(id => id.provider === 'kakao');
-                if (kakao?.identity_data) {
-                    const phone = kakao.identity_data.phone_number || kakao.identity_data.phone;
-                    if (phone && user.user_metadata.phone !== phone) {
-                        await _supabase.auth.updateUser({ data: { phone: phone } });
-                    }
+                const phone = getBestSocialPhone(user);
+                const currentPhone = String(user?.user_metadata?.phone_number || user?.user_metadata?.phone || '').trim();
+                if (phone && currentPhone !== phone) {
+                    await _supabase.auth.updateUser({ data: { phone: phone, phone_number: phone } });
                 }
             } catch (e) { void 0; }
         }
@@ -160,9 +231,7 @@ Change: Handle Naver identity linking alongside Kakao linking in the shared auth
                     document.getElementById('message').innerText = `${providerMeta.label} 계정 연결 처리 중...`;
                     const redirectTarget = getDest();
                     localStorage.removeItem('auth_destination');
-                    if (providerMeta.key === 'kakao') {
-                        await syncPhone(data.session.user);
-                    }
+                    await syncPhone(data.session.user);
 
                     const authError = getHashAuthError();
                     if (authError) {
@@ -179,23 +248,12 @@ Change: Handle Naver identity linking alongside Kakao linking in the shared auth
                         return;
                     }
 
-                    if (providerMeta.key === 'kakao') {
-                        const kakaoId = getIdentityProviderId(linkedIdentity);
-                        if (!kakaoId) {
-                            document.getElementById('message').innerText = '카카오 인증 정보 추출 실패. 연동 취소.';
-                            setTimeout(() => window.location.replace(redirectTarget), 3000);
-                            return;
-                        }
-
-                        // [RPC 호출] linkIdentity 완료 후 조합원 프로필에 Kakao ID만 동기화
-                        const { error: rpcError } = await _supabase.rpc('rpc_link_kakao', {
-                            p_member_uid: data.session.user.id,
-                            p_kakao_id: kakaoId
-                        });
-
-                        if (rpcError) {
-                            console.error("카카오 연동 RPC 오류:", rpcError);
-                            document.getElementById('message').innerText = '카카오 연결에 실패했습니다. (DB 오류)';
+                    if (!isErpDestination(redirectTarget)) {
+                        try {
+                            await syncPublicMemberSocialIdentity(providerMeta, data.session.user, linkedIdentity);
+                        } catch (rpcError) {
+                            console.error(`${providerMeta.label} 연동 RPC 오류:`, rpcError);
+                            document.getElementById('message').innerText = `${providerMeta.label} 연결에 실패했습니다. (DB 오류)`;
                             setTimeout(() => window.location.replace(redirectTarget), 3000);
                             return;
                         }

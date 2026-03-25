@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
-Change: Restore default coop mapping for public signup domain.
+Version: v1.0.4
+Change: Add Naver social signup and align public signup autofill/member detection with social profile metadata.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.3 | signup.html');</script>
+  <script>console.log('[Version] v1.0.4 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -100,6 +100,13 @@ gtag('config', 'G-TR217L7JN9');
 <div class="gate-card" onclick="startKakaoSignup()">
 <div class="d-flex align-items-center justify-content-center gap-2">
 <i class="bi bi-chat-fill" style="color:#3c1e1e;"></i> <span>카카오로 3초 만에 시작</span>
+
+</div>
+<center></center><small class="text-muted">* 개인 조합원</small>
+</div>
+<div class="gate-card" onclick="startNaverSignup()">
+<div class="d-flex align-items-center justify-content-center gap-2">
+<i class="bi bi-n-square-fill" style="color:#03C75A;"></i> <span>네이버로 3초 만에 시작</span>
 
 </div>
 <center></center><small class="text-muted">* 개인 조합원</small>
@@ -787,6 +794,156 @@ return;
 handleManualSession();
 };
 
+function normalizeSignupProviderKey(value) {
+return String(value || '').trim().toLowerCase();
+}
+
+function signupProviderMatches(candidate, providerKey) {
+const normalizedCandidate = normalizeSignupProviderKey(candidate);
+const normalizedProvider = normalizeSignupProviderKey(providerKey);
+if (!normalizedCandidate || !normalizedProvider) return false;
+if (normalizedCandidate === normalizedProvider) return true;
+if (normalizedProvider === 'custom:naver' && normalizedCandidate === 'naver') return true;
+return false;
+}
+
+function hasSignupProvider(user, providerKey) {
+const identities = Array.isArray(user?.identities) ? user.identities : [];
+if (identities.some((identity) => signupProviderMatches(identity?.provider, providerKey))) return true;
+
+const appProviders = Array.isArray(user?.app_metadata?.providers) ? user.app_metadata.providers : [];
+if (appProviders.some((provider) => signupProviderMatches(provider, providerKey))) return true;
+
+const rawAppProviders = Array.isArray(user?.raw_app_meta_data?.providers) ? user.raw_app_meta_data.providers : [];
+if (rawAppProviders.some((provider) => signupProviderMatches(provider, providerKey))) return true;
+
+return signupProviderMatches(user?.app_metadata?.provider, providerKey)
+|| signupProviderMatches(user?.raw_app_meta_data?.provider, providerKey);
+}
+
+function isSignupKakaoUser(user) {
+return hasSignupProvider(user, 'kakao');
+}
+
+function isSignupNaverUser(user) {
+return hasSignupProvider(user, 'custom:naver');
+}
+
+function getSignupAuthProvider(user) {
+if (isSignupKakaoUser(user)) return 'kakao';
+if (isSignupNaverUser(user)) return 'custom:naver';
+return normalizeSignupProviderKey(user?.app_metadata?.provider || user?.raw_app_meta_data?.provider || '');
+}
+
+function getSignupProviderLabel(user) {
+if (isSignupKakaoUser(user)) return '카카오';
+if (isSignupNaverUser(user)) return '네이버';
+return '';
+}
+
+function getSignupSocialName(user) {
+const meta = user?.user_metadata || {};
+return String(meta.full_name || meta.name || meta.nickname || '').trim();
+}
+
+function getSignupIdentityPhone(user) {
+const identities = Array.isArray(user?.identities) ? user.identities : [];
+const ordered = identities.slice().sort((a, b) => {
+const order = { kakao: 1, 'custom:naver': 2, email: 3 };
+const aOrder = order[normalizeSignupProviderKey(a?.provider)] || 99;
+const bOrder = order[normalizeSignupProviderKey(b?.provider)] || 99;
+return aOrder - bOrder;
+});
+for (const identity of ordered) {
+const identityData = identity?.identity_data || {};
+const phone = String(identityData.phone_number || identityData.phone || '').trim();
+if (phone) return phone;
+}
+return '';
+}
+
+function getSignupSocialPhone(user) {
+const meta = user?.user_metadata || {};
+const candidates = [
+user?.phone,
+meta.phone_number,
+meta.phone,
+meta?.custom_claims?.naver_mobile_e164,
+meta?.custom_claims?.naver_mobile,
+getSignupIdentityPhone(user)
+];
+for (const candidate of candidates) {
+const safeValue = String(candidate || '').trim();
+if (safeValue) return safeValue;
+}
+return '';
+}
+
+function normalizeSignupPhoneDigits(rawPhone) {
+let digits = String(rawPhone || '').replace(/[^0-9]/g, '');
+if (digits.startsWith('82')) digits = '0' + digits.substring(2);
+return digits;
+}
+
+function formatSignupPhoneForStorage(rawPhone) {
+const digits = normalizeSignupPhoneDigits(rawPhone);
+if (digits.length === 11) {
+return `${digits.substring(0, 3)}-${digits.substring(3, 7)}-${digits.substring(7, 11)}`;
+}
+if (digits.length === 10) {
+return `${digits.substring(0, 3)}-${digits.substring(3, 6)}-${digits.substring(6, 10)}`;
+}
+return '';
+}
+
+function fillSignupPhoneInputs(rawPhone) {
+const digits = normalizeSignupPhoneDigits(rawPhone);
+if (digits.length === 11) {
+document.getElementById('p1').value = digits.substring(0, 3);
+document.getElementById('p2').value = digits.substring(3, 7);
+document.getElementById('p3').value = digits.substring(7, 11);
+return;
+}
+if (digits.length === 10) {
+document.getElementById('p1').value = digits.substring(0, 3);
+document.getElementById('p2').value = digits.substring(3, 6);
+document.getElementById('p3').value = digits.substring(6, 10);
+}
+}
+
+function setSignupSocialMode(isPersonalOnly, providerLabel = '') {
+const radioIndi = document.getElementById('t-indi');
+const radioOrg = document.getElementById('t-org');
+const labelOrg = document.querySelector('label[for="t-org"]');
+if (!radioIndi || !radioOrg || !labelOrg) return;
+
+if (isPersonalOnly) {
+radioIndi.checked = true;
+radioOrg.disabled = true;
+labelOrg.classList.remove('btn-outline-success');
+labelOrg.classList.add('btn-outline-secondary');
+labelOrg.innerText = `🏢 단체 (${providerLabel || '소셜'} 불가)`;
+return;
+}
+
+radioOrg.disabled = false;
+labelOrg.classList.remove('btn-outline-secondary');
+labelOrg.classList.add('btn-outline-success');
+labelOrg.innerText = '🏢 단체';
+}
+
+function getSignupIdentityProviderId(user, providerKey) {
+const identities = Array.isArray(user?.identities) ? user.identities : [];
+const matched = identities.find((identity) => signupProviderMatches(identity?.provider, providerKey));
+if (!matched) return '';
+return String(
+matched.provider_id
+|| matched.identity_data?.provider_id
+|| matched.identity_data?.sub
+|| ''
+).trim();
+}
+
 // [코드 2] 가입 신청서 화면 렌더링 및 UI 제어
 function showApplicationForm(session) {
 // 1. 화면 전환 (게이트 숨김 -> 폼 표시)
@@ -794,33 +951,17 @@ document.getElementById('step-gate').style.display = 'none';
 document.getElementById('step-form').style.display = 'block';
 
 const user = session.user;
-const meta = user.user_metadata || {};
-const provider = user.app_metadata.provider; // 'kakao', 'google', 'email' 등
+const providerLabel = getSignupProviderLabel(user);
+const isPersonalOnlySocial = isSignupKakaoUser(user) || isSignupNaverUser(user);
 
 // ============================================================
-// [핵심 로직] 카카오 로그인 시 '단체' 가입 차단
+// [핵심 로직] 소셜 로그인 시 '단체' 가입 차단
 // ============================================================
-if (provider === 'kakao') {
-// 1. '개인' 라디오 버튼 강제 선택
-const radioIndi = document.getElementById('t-indi');
-radioIndi.checked = true;
-
-// 2. '단체' 라디오 버튼 비활성화 (클릭 불가)
-const radioOrg = document.getElementById('t-org');
-radioOrg.disabled = true;
-
-// 3. UI 갱신 (주민번호 입력창 보이기, 사업자번호 숨기기)
+if (isPersonalOnlySocial) {
+setSignupSocialMode(true, providerLabel);
 toggleType('개인');
-
-// (선택사항) 시각적 힌트: 라벨에 스타일 적용
-const labelOrg = document.querySelector('label[for="t-org"]');
-if(labelOrg) {
-labelOrg.classList.remove('btn-outline-success');
-labelOrg.classList.add('btn-outline-secondary'); // 회색으로 변경
-labelOrg.innerText = "🏢 단체 (카카오 불가)";
-}
 } else {
-// 카카오가 아니면 기본값 '개인' 세팅 (버튼은 둘 다 활성화)
+setSignupSocialMode(false);
 toggleType('개인'); 
 }
 
@@ -835,76 +976,68 @@ emailInput.value = user.email;
 }
 
 // 2. 이름 자동 입력
-if(meta.full_name) {
+const socialName = getSignupSocialName(user);
+if(socialName) {
 const nameInput = document.getElementById('userName');
 if(!nameInput.value) {
-nameInput.value = meta.full_name;
+nameInput.value = socialName;
 if(typeof syncAccountHolder === 'function') syncAccountHolder();
 }
 }
 
 // 3. 전화번호 파싱 및 입력
-if (meta.phone_number) {
-let rawPhone = meta.phone_number;
-// 숫자만 남기기
-let cleanNum = rawPhone.replace(/[^0-9]/g, '');
-// 국가코드 82 처리
-if (cleanNum.startsWith('82')) cleanNum = '0' + cleanNum.substring(2);
-
-if (cleanNum.length === 11) {
-document.getElementById('p1').value = cleanNum.substring(0, 3);
-document.getElementById('p2').value = cleanNum.substring(3, 7);
-document.getElementById('p3').value = cleanNum.substring(7, 11);
-} else if (cleanNum.length === 10) {
-document.getElementById('p1').value = cleanNum.substring(0, 3);
-document.getElementById('p2').value = cleanNum.substring(3, 6);
-document.getElementById('p3').value = cleanNum.substring(6, 10);
-}
-}
+const socialPhone = getSignupSocialPhone(user);
+if (socialPhone) fillSignupPhoneInputs(socialPhone);
 }
 
 // signup 페이지의 스크립트 부분 교체
 
 async function startKakaoSignup() {
-try {
-await ensureSignupTenant();
-} catch (tenantError) {
-openResultModal('가입 대상을 확인할 수 없습니다.', true);
-return;
+    try {
+        await ensureSignupTenant();
+
+        // const nextTarget = '/'; // (추천) 가입 후 메인으로 이동
+        const nextTarget = window.location.href;
+        const redirectUrl = `${window.location.origin}/auth_callback.html?next=${encodeURIComponent(nextTarget)}`;
+
+        localStorage.setItem('auth_destination', nextTarget);
+
+        const { error } = await _supabase.auth.signInWithOAuth({
+            provider: 'kakao',
+            options: {
+                redirectTo: redirectUrl,
+                scopes: 'account_email phone_number profile_nickname',
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'login'
+                }
+            }
+        });
+        if (error) throw error;
+    } catch (error) {
+        openResultModal(error?.message || '카카오 로그인 시작에 실패했습니다.', true);
+    }
 }
-// ---------------------------------------------------------------
-// [수정 포인트 1] 가입 후 이동할 목적지 설정
-// ---------------------------------------------------------------
-// 기존 코드: window.location.href (현재 페이지 = 회원가입 페이지로 복귀)
-// 조언: 가입 성공 후에는 보통 메인('/')으로 보내는 게 자연스럽습니다.
-// 원하시는 대로 쓰시되, 메인으로 보내려면 아래 주석을 해제하세요.
 
-// const nextTarget = '/'; // (추천) 가입 후 메인으로 이동
-const nextTarget = window.location.href; // (기존 유지) 현재 페이지로 복귀
+async function startNaverSignup() {
+    try {
+        await ensureSignupTenant();
 
-// ---------------------------------------------------------------
-// [수정 포인트 2] URL 파라미터에 목적지 탑승 (인코딩 필수!)
-// ---------------------------------------------------------------
-// encodeURIComponent를 안 하면 URL 구조가 깨질 수 있습니다.
-const redirectUrl = `${window.location.origin}/auth_callback.html?next=${encodeURIComponent(nextTarget)}`;
+        const nextTarget = window.location.href;
+        const redirectUrl = `${window.location.origin}/auth_callback.html?next=${encodeURIComponent(nextTarget)}`;
+        localStorage.setItem('auth_destination', nextTarget);
 
-// [방어 코드] 혹시 모르니 로컬 스토리지에도 백업 (하위 호환성)
-localStorage.setItem('auth_destination', nextTarget);
-
-// 3. Supabase 로그인 시작
-await _supabase.auth.signInWithOAuth({ 
-provider: 'kakao', 
-options: { 
-// 여기가 핵심! 만들어둔 URL을 넣습니다.
-redirectTo: redirectUrl,
-
-scopes: 'account_email phone_number profile_nickname', 
-queryParams: {
-access_type: 'offline',
-prompt: 'login' 
-}
-} 
-});
+        const { error } = await _supabase.auth.signInWithOAuth({
+            provider: 'custom:naver',
+            options: {
+                redirectTo: redirectUrl,
+                scopes: 'openid profile'
+            }
+        });
+        if (error) throw error;
+    } catch (error) {
+        openResultModal(error?.message || '네이버 로그인 시작에 실패했습니다.', true);
+    }
 }
 
 // [7] 제출 로직
@@ -1203,10 +1336,11 @@ let joinPath = '홈페이지';
 let kakaoId = null;
 
 if (session) {
-const provider = session.user.app_metadata.provider;
-if (provider === 'kakao') {
+if (isSignupKakaoUser(session.user)) {
 joinPath = '간편가입(카카오)';
-kakaoId = session.user.id;
+kakaoId = getSignupIdentityProviderId(session.user, 'kakao') || null;
+  } else if (isSignupNaverUser(session.user)) {
+joinPath = '간편가입(네이버)';
   } else {
 joinPath = '일반가입(웹)';
 }
@@ -1534,29 +1668,36 @@ document.getElementById('finalCorpNo').value = c1 + "-" + c2; // 값 저장
 async function checkExistingMember(session) {
 try {
 await ensureSignupTenant();
-const email = session.user.email;
+const email = String(session?.user?.email || '').trim();
+const phone = formatSignupPhoneForStorage(getSignupSocialPhone(session?.user));
+let hasExistingMember = false;
 
-// 이메일 정보가 없으면 바로 가입 폼으로 (방어 코드)
-if (!email) {
-showApplicationForm(session);
-return;
-}
-
-// coop_members 테이블에서 이메일 조회
+if (email) {
 const { data, error } = await _supabase.rpc('check_duplicate_signup', {
 check_field: 'email',
 check_value: email,
 p_coop_code: signupTenant.coop_code
 });
 
-if (error) {
-void 0;
-showApplicationForm(session);
-return;
+if (!error && data === true) {
+hasExistingMember = true;
+}
+}
+
+if (!hasExistingMember && phone && (isSignupKakaoUser(session?.user) || isSignupNaverUser(session?.user))) {
+const { data, error } = await _supabase.rpc('check_duplicate_signup', {
+check_field: 'phone',
+check_value: phone,
+p_coop_code: signupTenant.coop_code
+});
+
+if (!error && data === true) {
+hasExistingMember = true;
+}
 }
 
 // [Case A] 이미 가입된 이메일이 존재함
-if (data === true) {
+if (hasExistingMember) {
 // "이미 가입된 조합원입니다" 모달 띄우기
 const modal = document.getElementById('alreadyMemberModal');
 if (modal) modal.style.display = 'flex';
