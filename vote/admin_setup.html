@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.8
-Change: 2026-03-17 - Restore vote hub routing for election setup flows.
+Version: v1.0.9
+Change: 2026-03-25 - Accept ERP session bridge on www vote setup routes and use canonical ERP return URLs.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 관리 대시보드</title>
-    <script>console.log('[Version] v1.0.8 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.9 | admin_setup.html');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
@@ -1391,36 +1391,79 @@ window.resumeSetup = async (el) => {
     // [3] 이벤트 핸들러
     // ----------------------------------------------------------------
 // [수정] 로그아웃 핸들러
+    function isLocalVotePageHost() {
+        return /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname);
+    }
+
+    function getErpVoteHubUrl() {
+        return isLocalVotePageHost() ? '../erp/vote_hub.html' : 'https://erp.yonginsolar.kr/vote_hub.html';
+    }
+
+    function getErpIndexUrl(nextUrl) {
+        if (isLocalVotePageHost()) {
+            return `../erp/index.html?next=${encodeURIComponent(nextUrl || window.location.href)}`;
+        }
+        return `https://erp.yonginsolar.kr/?next=${encodeURIComponent(nextUrl || window.location.href)}`;
+    }
+
+    function goToErpVoteHub() {
+        window.location.href = getErpVoteHubUrl();
+    }
+
+    async function applyVoteHashSessionBridge() {
+        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+        if (!hash) return false;
+
+        const hashParams = new URLSearchParams(hash);
+        const accessToken = String(hashParams.get('access_token') || '').trim();
+        const refreshToken = String(hashParams.get('refresh_token') || '').trim();
+        if (!accessToken || !refreshToken) return false;
+
+        const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+        });
+        if (error) {
+            console.error('vote admin_setup session bridge failed:', error);
+            return false;
+        }
+
+        const cleanUrl = `${window.location.pathname}${window.location.search}`;
+        window.history.replaceState({}, document.title, cleanUrl);
+        return true;
+    }
+
     window.handleLogout = async () => {
         await supabase.auth.signOut();
-        window.location.href = '../erp/vote_hub.html';
+        goToErpVoteHub();
     };
 
 
 // [수정] 초기화 함수: 로그인 창 없이 즉시 권한 체크
     async function init() {
         console.log("🚀 관리자 페이지 진입...");
+        await applyVoteHashSessionBridge();
 
         // 1. 세션 확인 (vote_login.html에서 로그인하고 넘어왔는지)
         const { data: { session }, error } = await supabase.auth.getSession();
 
         if (error || !session) {
             showAlert("로그인 정보가 없습니다. ERP 선거관리로 이동합니다.");
-            window.location.href = `../erp/index.html?next=${encodeURIComponent(window.location.href)}`;
+            window.location.href = getErpIndexUrl(window.location.href);
             return;
         }
 
         const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
             moduleKey: 'vote',
             moduleLabel: '선거/투표',
-            redirectUrl: `../erp/index.html?next=${encodeURIComponent(window.location.href)}`,
+            redirectUrl: getErpIndexUrl(window.location.href),
             alertFn: (msg) => showAlert(msg)
         });
         if (!runtimeCheck.ok) return;
         const memberAdminEnabled = runtimeCheck.runtime?.modules?.member_admin !== false;
         if (!memberAdminEnabled) {
             showAlert("선거 기능은 조합원 관리 연동이 필요합니다.");
-            window.location.href = '../erp/vote_hub.html';
+            goToErpVoteHub();
             return;
         }
         currentCoopId = runtimeCheck.runtime?.coop_id || null;
@@ -1463,7 +1506,7 @@ window.resumeSetup = async (el) => {
             // role이 admin이 아니면 접속 불가
             if (member.role !== 'admin' && member.role !== 'super_admin' && !hasElectionAdminAuthority) {
                 showAlert("⛔ 선거 관리 권한이 필요합니다.");
-                window.location.href = '../erp/vote_hub.html';
+                goToErpVoteHub();
                 return;
             }
 
@@ -1491,7 +1534,7 @@ window.resumeSetup = async (el) => {
         } catch (e) {
             console.error(e);
             showAlert("권한 확인 중 오류: " + e.message);
-            window.location.href = '../erp/vote_hub.html';
+            goToErpVoteHub();
         }
     }
 

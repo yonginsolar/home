@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<!-- Version: v1.0.1 -->
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>선거 포털로 이동 중...</title>
+  <script>console.log('[Version] v1.0.1 | vote/index.html');</script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f8fafc;
+      color: #334155;
+      font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+      padding: 24px;
+    }
+    .card {
+      width: min(520px, calc(100% - 32px));
+      background: #fff;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 18px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+      padding: 28px 24px;
+      text-align: center;
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .copy {
+      font-size: 14px;
+      color: #64748b;
+      margin: 0;
+      white-space: pre-wrap;
+    }
+    .link {
+      display: inline-block;
+      margin-top: 16px;
+      font-weight: 700;
+      color: #2563eb;
+      text-decoration: none;
+    }
+  </style>
+  <script>
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    function buildVotePortalUrl() {
+      const params = new URLSearchParams(window.location.search || '');
+      if (!params.get('portal')) params.set('portal', '1');
+      const nextUrl = new URL('vote_login.html', window.location.href);
+      nextUrl.search = params.toString();
+      return nextUrl.toString();
+    }
+
+    async function applyVoteHashSessionBridge() {
+      const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+      if (!hash) return false;
+
+      const hashParams = new URLSearchParams(hash);
+      const accessToken = String(hashParams.get('access_token') || '').trim();
+      const refreshToken = String(hashParams.get('refresh_token') || '').trim();
+      if (!accessToken || !refreshToken) return false;
+
+      const { error } = await supabaseClient.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken
+      });
+      if (error) {
+        console.error('vote/index session bridge failed:', error);
+        return false;
+      }
+
+      const cleanUrl = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+      return true;
+    }
+
+    async function bootVoteIndex() {
+      try {
+        await applyVoteHashSessionBridge();
+      } catch (error) {
+        console.error('vote/index boot failed:', error);
+      }
+      window.location.replace(buildVotePortalUrl());
+    }
+
+    window.addEventListener('load', bootVoteIndex);
+  </script>
+</head>
+<body>
+  <div class="card">
+    <div class="title">선거 포털로 이동 중입니다</div>
+    <p class="copy">조합원/대표자 확인 후 투표, 후보 등록, 선거 안내 화면으로 연결합니다.</p>
+    <noscript>
+      <a class="link" href="vote_login.html?portal=1">직접 열기</a>
+    </noscript>
+  </div>
+</body>
+</html>
