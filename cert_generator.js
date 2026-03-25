@@ -1,6 +1,6 @@
 /*
-Version: v1.0.3
-Change: Propagate PDF generation errors and allow contribution cert date override.
+Version: v1.0.6
+Change: Resolve certificate company metadata by coop_id and prefer shrinking long company names before wrapping in PDF outputs.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -53,6 +53,195 @@ var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(
 if (typeof window !== 'undefined') {
   window.showAlert = showAlert;
 }
+
+function trimCertCompanyValue(value) {
+    return String(value == null ? '' : value).trim();
+} // End of trimCertCompanyValue
+
+function resolveCertCompanyName(info) {
+    return trimCertCompanyValue(info?.company_name || info?.orgName);
+} // End of resolveCertCompanyName
+
+function resolveCertChairmanName(info, fallbackChairmanName) {
+    return trimCertCompanyValue(info?.chairman_name || info?.ceoName || fallbackChairmanName);
+} // End of resolveCertChairmanName
+
+function buildCertCompanyContact(info) {
+    const direct = trimCertCompanyValue(info?.company_contact);
+    if (direct) return direct;
+
+    const parts = [
+        trimCertCompanyValue(info?.company_contact_name),
+        trimCertCompanyValue(info?.company_contact_phone)
+    ].filter(Boolean);
+    if (parts.length > 0) return parts.join(' ');
+
+    return trimCertCompanyValue(info?.email);
+} // End of buildCertCompanyContact
+
+function buildCertWrappedTextLayout(doc, text, options = {}) {
+    const value = String(text == null ? '' : text).trim();
+    const maxWidth = Number(options.maxWidth || 150);
+    const minFontSize = Number(options.minFontSize || 9);
+    let fontSize = Number(options.initialFontSize || 12);
+
+    doc.setFontSize(fontSize);
+    while (fontSize > minFontSize && value && doc.getTextWidth(value) > maxWidth) {
+        fontSize -= 1;
+        doc.setFontSize(fontSize);
+    }
+
+    let lines = value ? [value] : [''];
+    if (value && doc.getTextWidth(value) > maxWidth) {
+        lines = doc.splitTextToSize(value, maxWidth);
+    }
+    while (fontSize > minFontSize && lines.length > Number(options.maxLines || 2)) {
+        fontSize -= 1;
+        doc.setFontSize(fontSize);
+        lines = value ? doc.splitTextToSize(value, maxWidth) : [''];
+    }
+
+    return {
+        fontSize,
+        lines: lines.length ? lines : ['']
+    };
+} // End of buildCertWrappedTextLayout
+
+function drawCenteredCertWrappedText(doc, text, centerX, startY, options = {}) {
+    const layout = buildCertWrappedTextLayout(doc, text, options);
+    const lineHeight = Number(options.lineHeight || 7);
+    doc.setFontSize(layout.fontSize);
+
+    layout.lines.forEach((line, index) => {
+        doc.text(String(line), centerX, startY + (index * lineHeight), { align: 'center' });
+    });
+
+    const lastLine = String(layout.lines[layout.lines.length - 1] || '');
+    return {
+        ...layout,
+        lineHeight,
+        endY: startY + ((layout.lines.length - 1) * lineHeight),
+        lastLineWidth: doc.getTextWidth(lastLine)
+    };
+} // End of drawCenteredCertWrappedText
+
+function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = {}) {
+    const companyLayout = drawCenteredCertWrappedText(
+        doc,
+        trimCertCompanyValue(companyProfile?.companyName),
+        centerX,
+        startY,
+        {
+            maxWidth: options.maxWidth || 150,
+            initialFontSize: options.companyFontSize || 18,
+            minFontSize: options.companyMinFontSize || 13,
+            maxLines: options.companyMaxLines || 3,
+            lineHeight: options.companyLineHeight || 7
+        }
+    );
+
+    const chairmanStartY = companyLayout.endY + Number(options.gapBeforeChairman || 7);
+    const chairmanLayout = drawCenteredCertWrappedText(
+        doc,
+        `이사장  ${trimCertCompanyValue(companyProfile?.chairmanName)}`,
+        centerX,
+        chairmanStartY,
+        {
+            maxWidth: options.maxWidth || 150,
+            initialFontSize: options.chairmanFontSize || 22,
+            minFontSize: options.chairmanMinFontSize || 15,
+            maxLines: options.chairmanMaxLines || 2,
+            lineHeight: options.chairmanLineHeight || 9
+        }
+    );
+
+    return {
+        companyLayout,
+        chairmanLayout,
+        sealX: centerX + (chairmanLayout.lastLineWidth / 2) - Number(options.sealOffsetX || 12),
+        sealY: chairmanLayout.endY - Number(options.sealLift || 14)
+    };
+} // End of drawCertSignatureBlock
+
+async function fetchCertRemoteDataUrl(sourceUrl) {
+    const response = await fetch(sourceUrl, { credentials: 'omit' });
+    if (!response.ok) {
+        throw new Error(`이미지 로드 실패 (${response.status})`);
+    }
+    return blobToDataURL(await response.blob());
+} // End of fetchCertRemoteDataUrl
+
+async function downloadCertStorageAssetDataUrl(supabaseClient, bucketName, assetRef) {
+    if (!supabaseClient?.storage?.from) return '';
+    const { data, error } = await supabaseClient.storage.from(bucketName).download(assetRef);
+    if (error || !data) {
+        throw error || new Error('이미지를 불러오지 못했습니다.');
+    }
+    return blobToDataURL(data);
+} // End of downloadCertStorageAssetDataUrl
+
+async function measureCertImageRatio(dataUrl) {
+    if (!dataUrl) return 0;
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img.width > 0 ? img.height / img.width : 0);
+        img.onerror = () => resolve(0);
+        img.src = dataUrl;
+    });
+} // End of measureCertImageRatio
+
+async function loadCertCompanyImageAsset(supabaseClient, bucketName, assetRef) {
+    const source = trimCertCompanyValue(assetRef);
+    if (!source) return { dataUrl: '', ratio: 0 };
+
+    try {
+        const dataUrl = /^(https?:|data:)/i.test(source)
+            ? await fetchCertRemoteDataUrl(source)
+            : await downloadCertStorageAssetDataUrl(supabaseClient, bucketName, source);
+
+        return {
+            dataUrl,
+            ratio: await measureCertImageRatio(dataUrl)
+        };
+    } catch (_) {
+        return { dataUrl: '', ratio: 0 };
+    }
+} // End of loadCertCompanyImageAsset
+
+async function buildCertCompanyPrintProfile(supabaseClient, options = {}) {
+    const info = await fetchReceiptIssuerInfo(supabaseClient, options?.coopId);
+    const profile = {
+        companyName: resolveCertCompanyName(info),
+        chairmanName: resolveCertChairmanName(info, options?.fallbackChairmanName),
+        address: trimCertCompanyValue(info?.company_address),
+        contact: buildCertCompanyContact(info),
+        bizNum: trimCertCompanyValue(info?.bizNum),
+        logoPath: trimCertCompanyValue(info?.logo_horizontal_url),
+        sealPath: trimCertCompanyValue(info?.seal_url),
+        logoDataUrl: '',
+        logoRatio: 0,
+        sealDataUrl: ''
+    };
+
+    const [logoAsset, sealAsset] = await Promise.all([
+        loadCertCompanyImageAsset(supabaseClient, 'assets', profile.logoPath),
+        loadCertCompanyImageAsset(supabaseClient, 'attachments', profile.sealPath)
+    ]);
+
+    profile.logoDataUrl = logoAsset.dataUrl;
+    profile.logoRatio = logoAsset.ratio;
+    profile.sealDataUrl = sealAsset.dataUrl;
+    return profile;
+} // End of buildCertCompanyPrintProfile
+
+function ensureCertCompanyPrintProfile(profile, contextLabel) {
+    if (!trimCertCompanyValue(profile?.companyName)) {
+        throw new Error(`${contextLabel} 전에 회사 정보의 법인명(조합명)을 먼저 확인해주세요.`);
+    }
+    if (!trimCertCompanyValue(profile?.chairmanName)) {
+        throw new Error(`${contextLabel} 전에 회사 정보의 이사장명을 먼저 확인해주세요.`);
+    }
+} // End of ensureCertCompanyPrintProfile
 /**
  * 출자증서 PDF 생성 모듈 (Final Version - Validated)
  * - 로고 원본 비율 유지 (워터마크)
@@ -66,6 +255,12 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
     }
 
     try {
+        const companyProfile = await buildCertCompanyPrintProfile(supabaseClient, {
+            coopId: options?.coopId,
+            fallbackChairmanName: chairmanName
+        });
+        ensureCertCompanyPrintProfile(companyProfile, '출자증서 발급');
+
         // -----------------------------------------------------------
         // [UPDATE] 0. 데이터 유효성 검사 (Validation)
         // -----------------------------------------------------------
@@ -96,27 +291,9 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         doc.addFont('Pretendard.ttf', 'Pretendard', 'normal');
         doc.setFont('Pretendard');
 
-        // (B) 직인 (Official Seal.png)
-        let sealDataUrl = null;
-        try {
-            const { data: sealBlob } = await supabaseClient.storage.from('attachments').download('Official Seal.png');
-            if (sealBlob) sealDataUrl = await blobToDataURL(sealBlob);
-        } catch (e) { void 0; }
-
-        // (C) 로고 (assets/logo_length.png)
-        let logoDataUrl = null;
-        let logoRatio = 0; // 비율 저장용
-        try {
-            const { data: logoBlob } = await supabaseClient.storage.from('assets').download('logo_length.png');
-            if (logoBlob) {
-                logoDataUrl = await blobToDataURL(logoBlob);
-                // 이미지 비율 계산을 위해 임시 로드
-                const img = new Image();
-                img.src = logoDataUrl;
-                await new Promise(r => img.onload = r);
-                logoRatio = img.height / img.width;
-            }
-        } catch (e) { void 0; }
+        const sealDataUrl = companyProfile.sealDataUrl || null;
+        const logoDataUrl = companyProfile.logoDataUrl || null;
+        const logoRatio = Number(companyProfile.logoRatio || 0);
 
 
         // -----------------------------------------------------------
@@ -219,28 +396,42 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         // [하단 문구]
         const msgY = startY + (rowH * 6) + 30; // 표 끝에서 30mm 띄움
         doc.setFontSize(14);
-        doc.text("상기와 같이 출자하였으므로 용인모두의햇빛협동조합", 105, msgY, { align: "center" });
-        doc.text("정관 제19조 제1항에 따라 이 증서를 드립니다.", 105, msgY + 10, { align: "center" });
+        const companyIntroText = `상기와 같이 출자하였으므로 ${companyProfile.companyName}`;
+        const introLayout = drawCenteredCertWrappedText(doc, companyIntroText, 105, msgY, {
+            maxWidth: 150,
+            initialFontSize: 14,
+            minFontSize: 11,
+            maxLines: 3,
+            lineHeight: 6.8
+        });
+        doc.setFontSize(14);
+        const charterLineY = introLayout.endY + 10;
+        doc.text("정관 제19조 제1항에 따라 이 증서를 드립니다.", 105, charterLineY, { align: "center" });
 
         // [발급일]
         doc.setFontSize(15);
-        doc.text(dateStr, 105, msgY + 30, { align: "center" });
+        const issueDateY = charterLineY + 20;
+        doc.text(dateStr, 105, issueDateY, { align: "center" });
 
         // [이사장 서명]
-        doc.setFontSize(22);
-        const signText = `용인모두의햇빛협동조합 이사장  ${chairmanName}`;
-        doc.text(signText, 105, msgY + 55, { align: "center" });
+        const signatureLayout = drawCertSignatureBlock(doc, companyProfile, 105, issueDateY + 25, {
+            maxWidth: 150,
+            companyFontSize: 18,
+            companyMinFontSize: 13,
+            companyMaxLines: 3,
+            companyLineHeight: 7,
+            gapBeforeChairman: 7,
+            chairmanFontSize: 22,
+            chairmanMinFontSize: 15,
+            chairmanMaxLines: 2,
+            chairmanLineHeight: 9,
+            sealOffsetX: 12,
+            sealLift: 14
+        });
 
         // [직인] 위치 수정 (위로 35px ≈ 10mm 올림) 8px 내림
         if (sealDataUrl) {
-            // 이사장 이름(msgY+55) 기준으로 배치
-            // 기존(+48)에서 10mm 올려서 (+38)
-            // 서명 텍스트 끝부분에 겹치게
-            const signWidth = doc.getTextWidth(signText);
-            const sealX = 105 + (signWidth / 2) - 15; // 이름 끝부분 안쪽으로 살짝 들어오게
-            const sealY = msgY + 40; 
-            
-            doc.addImage(sealDataUrl, 'PNG', sealX, sealY, 24, 24);
+            doc.addImage(sealDataUrl, 'PNG', signatureLayout.sealX, signatureLayout.sealY, 24, 24);
         }
 
         // 파일 저장
@@ -263,6 +454,12 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
     }
 
     try {
+        const companyProfile = await buildCertCompanyPrintProfile(supabaseClient, {
+            coopId: criteria?.coopId,
+            fallbackChairmanName: chairmanName
+        });
+        ensureCertCompanyPrintProfile(companyProfile, '기부금 수령 확인서 발급');
+
         if (!totalAmount || totalAmount <= 0) {
             throw new Error("기부금 금액이 확인되지 않습니다.");
         }
@@ -277,26 +474,9 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
         doc.addFont('Pretendard.ttf', 'Pretendard', 'normal');
         doc.setFont('Pretendard');
 
-        // (B) 직인
-        let sealDataUrl = null;
-        try {
-            const { data: sealBlob } = await supabaseClient.storage.from('attachments').download('Official Seal.png');
-            if (sealBlob) sealDataUrl = await blobToDataURL(sealBlob);
-        } catch (e) { void 0; }
-
-        // (C) 워터마크 로고
-        let logoDataUrl = null;
-        let logoRatio = 0;
-        try {
-            const { data: logoBlob } = await supabaseClient.storage.from('assets').download('logo_length.png');
-            if (logoBlob) {
-                logoDataUrl = await blobToDataURL(logoBlob);
-                const img = new Image();
-                img.src = logoDataUrl;
-                await new Promise(r => img.onload = r);
-                logoRatio = img.height / img.width;
-            }
-        } catch (e) { void 0; }
+        const sealDataUrl = companyProfile.sealDataUrl || null;
+        const logoDataUrl = companyProfile.logoDataUrl || null;
+        const logoRatio = Number(companyProfile.logoRatio || 0);
 
         if (logoDataUrl && logoRatio > 0) {
             doc.saveGraphicsState();
@@ -324,11 +504,10 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
                 baseDateLabel = formatKoreanDateLabel(criteria.cutoff_date);
             }
         }
-        const issuerInfo = await fetchReceiptIssuerInfo(supabaseClient);
-        const issuerName = issuerInfo.company_name || issuerInfo.orgName || '용인모두의햇빛협동조합';
-        const issuerBizNum = issuerInfo.bizNum || '-';
-        const issuerAddress = issuerInfo.company_address || '-';
-        const issuerContact = issuerInfo.company_contact || '-';
+        const issuerName = companyProfile.companyName;
+        const issuerBizNum = companyProfile.bizNum || '-';
+        const issuerAddress = companyProfile.address || '-';
+        const issuerContact = companyProfile.contact || '-';
 
         const idLabel = memberData.member_type === '단체' ? '법인등록번호' : '생년월일';
         let idValue = '-';
@@ -426,16 +605,23 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
         if (dateY > maxDateY) dateY = maxDateY;
         doc.text(issueDate, 105, dateY, { align: "center" });
 
-        doc.setFontSize(22);
-        const signText = `용인모두의햇빛협동조합 이사장  ${chairmanName || '이사장'}`;
-        const signY = dateY + 21;
-        doc.text(signText, 105, signY, { align: "center" });
+        const signatureLayout = drawCertSignatureBlock(doc, companyProfile, 105, dateY + 21, {
+            maxWidth: 150,
+            companyFontSize: 17,
+            companyMinFontSize: 13,
+            companyMaxLines: 3,
+            companyLineHeight: 6.6,
+            gapBeforeChairman: 6,
+            chairmanFontSize: 22,
+            chairmanMinFontSize: 15,
+            chairmanMaxLines: 2,
+            chairmanLineHeight: 9,
+            sealOffsetX: 12,
+            sealLift: 14
+        });
 
         if (sealDataUrl) {
-            const signWidth = doc.getTextWidth(signText);
-            const sealX = 105 + (signWidth / 2) - 15;
-            const sealY = signY - 14;
-            doc.addImage(sealDataUrl, 'PNG', sealX, sealY, 24, 24);
+            doc.addImage(sealDataUrl, 'PNG', signatureLayout.sealX, signatureLayout.sealY, 24, 24);
         }
 
         const details = Array.isArray(criteria?.details) ? criteria.details : [];
@@ -523,15 +709,15 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
 // ----------------------------------------------------
 // 유틸리티 함수들
 // ----------------------------------------------------
-async function fetchReceiptIssuerInfo(supabaseClient) {
+async function fetchReceiptIssuerInfo(supabaseClient, preferredCoopId = '') {
     if (!supabaseClient) return {};
     try {
         // [2026-03-15] tenant hardening: coop_id를 확인하지 못하면 발급기관 정보를 읽지 않는다.
-        let coopId = '';
-        if (typeof window !== 'undefined' && window.localStorage) {
+        let coopId = trimCertCompanyValue(preferredCoopId);
+        if (!coopId && typeof window !== 'undefined' && window.localStorage) {
             try {
                 const storedUser = JSON.parse(window.localStorage.getItem('erp_user') || 'null');
-                coopId = String(storedUser?.coop_id || '').trim();
+                coopId = trimCertCompanyValue(storedUser?.coop_id);
             } catch (_) {
                 coopId = '';
             }
