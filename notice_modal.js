@@ -1,6 +1,6 @@
 /*
-Version: v1.0.12
-Change: 2026-03-23 - Blur notice modal focus before Bootstrap hides it to prevent aria-hidden warnings.
+Version: v1.0.13
+Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of exposing raw tags in the shared detail modal.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -69,6 +69,99 @@ Change: 2026-03-23 - Blur notice modal focus before Bootstrap hides it to preven
             if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
         } catch (e) { void 0; }
         return null;
+    }
+
+    function sanitizeStyle(styleText) {
+        const raw = String(styleText || '');
+        if (!raw) return '';
+        if (/expression\s*\(/i.test(raw)) return '';
+        if (/javascript:/i.test(raw)) return '';
+        return raw.replace(/url\s*\(/gi, '');
+    }
+
+    function sanitizeHtml(html) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(String(html || ''), 'text/html');
+        const allowedTags = new Set([
+            'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
+            'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+            'TH','THEAD','TR','U','UL'
+        ]);
+        const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+        const allowedAttrs = {
+            '*': new Set(['class','style']),
+            'A': new Set(['href','target','rel','title','class','style']),
+            'IMG': new Set(['src','alt','title','width','height','class','style']),
+            'TABLE': new Set(['class','style','border','cellpadding','cellspacing']),
+            'TD': new Set(['class','style','colspan','rowspan','align']),
+            'TH': new Set(['class','style','colspan','rowspan','align'])
+        };
+
+        const nodes = Array.from(doc.body.querySelectorAll('*'));
+        nodes.forEach(node => {
+            const tag = node.tagName;
+            if (!allowedTags.has(tag)) {
+                if (blockedTags.has(tag)) {
+                    node.remove();
+                    return;
+                }
+                const parent = node.parentNode;
+                if (!parent) return;
+                while (node.firstChild) parent.insertBefore(node.firstChild, node);
+                parent.removeChild(node);
+                return;
+            }
+
+            Array.from(node.attributes).forEach(attr => {
+                const name = attr.name.toLowerCase();
+                const value = attr.value;
+                if (name.startsWith('on')) {
+                    node.removeAttribute(attr.name);
+                    return;
+                }
+                const allowSet = allowedAttrs[tag] || allowedAttrs['*'];
+                if (allowSet && !allowSet.has(name) && !(allowedAttrs['*'] && allowedAttrs['*'].has(name))) {
+                    node.removeAttribute(attr.name);
+                    return;
+                }
+                if (name === 'href') {
+                    const safe = safeUrl(value, false);
+                    if (!safe) node.removeAttribute('href');
+                    else node.setAttribute('href', safe);
+                }
+                if (name === 'src') {
+                    const safe = safeUrl(value, tag === 'IMG');
+                    if (!safe) node.removeAttribute('src');
+                    else node.setAttribute('src', safe);
+                }
+                if (name === 'style') {
+                    const safeStyle = sanitizeStyle(value);
+                    if (safeStyle) node.setAttribute('style', safeStyle);
+                    else node.removeAttribute('style');
+                }
+                if (name === 'target' && node.tagName === 'A') {
+                    if (node.getAttribute('target') === '_blank') {
+                        node.setAttribute('rel', 'noopener noreferrer');
+                    }
+                }
+            });
+        });
+        return doc.body.innerHTML;
+    }
+
+    function normalizeNoticeBodyContent(rawValue) {
+        const raw = String(rawValue || '');
+        const trimmed = raw.trim();
+        if (!trimmed) return '';
+        const hasHtmlTag = /<\s*\/?\s*[a-zA-Z][^>]*>/.test(trimmed);
+        if (hasHtmlTag) return trimmed;
+        return escapeHtml(trimmed).replace(/\n/g, '<br>');
+    }
+
+    function getRenderedNoticeBodyHtml(rawValue) {
+        const normalized = normalizeNoticeBodyContent(rawValue);
+        if (!normalized) return '';
+        return sanitizeHtml(normalized);
     }
 
     function parseNoticeContent(content) {
@@ -686,8 +779,7 @@ Change: 2026-03-23 - Blur notice modal focus before Bootstrap hides it to preven
             const sealUrl = await loadSealUrl();
             contentHtml = buildNoticeTemplateHtml(n, info, sealUrl);
         } else {
-            const safeContent = escapeHtml(n.content || '');
-            contentHtml = safeContent.replace(/\n/g, '<br>');
+            contentHtml = getRenderedNoticeBodyHtml(n.content || '');
         }
 
         const attachUrls = (Array.isArray(n.file_urls) && n.file_urls.length > 0)
