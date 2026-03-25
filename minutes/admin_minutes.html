@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.53
-Change: 2026-03-24 - Add divider below notice footer approval row.
+Version: v1.2.54
+Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-24 - Add divider below notice footer approval row.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.53 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.54 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -535,6 +535,40 @@ Change: 2026-03-24 - Add divider below notice footer approval row.
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.37';
         import { supabase } from '../shared/supabase-client.js';
+
+        function readTransferredSessionFromHash() {
+            const rawHash = String(window.location.hash || '').replace(/^#/, '');
+            if (!rawHash) return null;
+            const params = new URLSearchParams(rawHash);
+            const accessToken = String(params.get('erp_access_token') || '').trim();
+            const refreshToken = String(params.get('erp_refresh_token') || '').trim();
+            if (!accessToken || !refreshToken) return null;
+            return {
+                access_token: accessToken,
+                refresh_token: refreshToken
+            };
+        }
+
+        function clearTransferredSessionHash() {
+            if (!window.location.hash) return;
+            const cleanUrl = `${window.location.pathname}${window.location.search}`;
+            window.history.replaceState({}, document.title, cleanUrl);
+        }
+
+        async function bootstrapTransferredSession() {
+            const transferredSession = readTransferredSessionFromHash();
+            if (!transferredSession) return;
+            try {
+                const { error } = await supabase.auth.setSession(transferredSession);
+                if (error) {
+                    console.error('admin_minutes session transfer failed:', error);
+                }
+            } catch (error) {
+                console.error('admin_minutes session bootstrap failed:', error);
+            } finally {
+                clearTransferredSessionHash();
+            }
+        }
 
         const KST_TZ_MINUTES_ADMIN = 'Asia/Seoul';
         const formatMinutesAdminKstDate = (value, fallback = '-') => {
@@ -2659,6 +2693,8 @@ Change: 2026-03-24 - Add divider below notice footer approval row.
         };
 
         async function init() {
+            await bootstrapTransferredSession();
+
             // 1. 관리자 체크
             const session = await MinutesService.getSession();
             if (!session) {
