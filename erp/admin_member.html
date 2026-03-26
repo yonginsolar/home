@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.44
-Change: 2026-03-26 - Refresh certificate generator cache for seal center alignment with the last chairman character.
+Version: v1.0.45
+Change: 2026-03-26 - Fix manual dividend RPC and show current dividend balance in the member lookup modal.
 -->
 <html lang="ko">
 <head>
   <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.44';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.45';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -551,6 +551,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
                                 <input type="text" id="dv-member-id" class="form-control" placeholder="ID 입력 또는 검색" readonly>
                                 <input type="text" id="dv-member-name" class="form-control bg-white" placeholder="이름" readonly>
                                 <button class="btn btn-secondary" type="button" onclick="openMemberSearch('dividend')">🔍 찾기</button>
+                            </div>
+                            <div id="dv-current-balance-box" class="mt-2 px-2 py-2 border rounded bg-light small" style="display:none;">
+                                <div class="text-muted x-small mb-1">현재 이용고배당 잔액</div>
+                                <div class="fw-bold text-primary" id="dv-current-balance">0원</div>
+                                <div class="x-small text-muted mt-1" id="dv-current-balance-meta"></div>
                             </div>
                         </div>
                         <div class="mb-3">
@@ -7990,6 +7995,63 @@ async function submitDonationBatch() {
     });
 }
 
+let g_dividend_current_balance = null;
+
+function resetDividendCurrentBalance() {
+    g_dividend_current_balance = null;
+    const box = document.getElementById('dv-current-balance-box');
+    const valueEl = document.getElementById('dv-current-balance');
+    const metaEl = document.getElementById('dv-current-balance-meta');
+
+    if (!box || !valueEl || !metaEl) return;
+
+    box.style.display = 'none';
+    valueEl.className = 'fw-bold text-primary';
+    valueEl.innerText = '0원';
+    metaEl.innerText = '';
+}
+
+async function refreshDividendCurrentBalance(memberId) {
+    const box = document.getElementById('dv-current-balance-box');
+    const valueEl = document.getElementById('dv-current-balance');
+    const metaEl = document.getElementById('dv-current-balance-meta');
+
+    if (!box || !valueEl || !metaEl) return;
+
+    if (!memberId) {
+        resetDividendCurrentBalance();
+        return;
+    }
+
+    box.style.display = 'block';
+    valueEl.className = 'fw-bold text-secondary';
+    valueEl.innerText = '조회 중...';
+    metaEl.innerText = '이용고배당 내역을 불러오는 중입니다.';
+
+    const { data, error } = await _supabase
+        .from('coop_points')
+        .select('change_amount')
+        .eq('member_id', memberId);
+
+    if (document.getElementById('dv-member-id').value !== memberId) return;
+
+    if (error) {
+        g_dividend_current_balance = null;
+        valueEl.className = 'fw-bold text-danger';
+        valueEl.innerText = '조회 실패';
+        metaEl.innerText = error.message || '잔액을 불러오지 못했습니다.';
+        return;
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    const balance = rows.reduce((sum, row) => sum + Number(row.change_amount || 0), 0);
+    g_dividend_current_balance = balance;
+
+    valueEl.className = `fw-bold ${balance >= 0 ? 'text-primary' : 'text-danger'}`;
+    valueEl.innerText = `${balance.toLocaleString()}원`;
+    metaEl.innerText = rows.length > 0 ? `총 ${rows.length}건 기준 현재 잔액` : '아직 지급/차감 내역이 없습니다.';
+}
+
 // 기존 openDividendModal 함수 교체
 function openDividendModal() {
     // 필드 초기화
@@ -7997,6 +8059,7 @@ function openDividendModal() {
     document.getElementById('dv-member-name').value = '';
     document.getElementById('dv-amount').value = '';
     document.getElementById('dv-reason').value = '';
+    resetDividendCurrentBalance();
 
     // 엑셀 탭 초기화
     document.getElementById('div-excel-file').value = '';
@@ -8011,21 +8074,27 @@ function openDividendModal() {
 
 // 4. 이용고배당 지급 실행 (RPC)
 async function submitDividendGrant() {
-    const textId = document.getElementById('dv-member-id').value;
-    const amount = document.getElementById('dv-amount').value;
-    const reason = document.getElementById('dv-reason').value;
+    const textId = document.getElementById('dv-member-id').value.trim();
+    const amount = Number(document.getElementById('dv-amount').value);
+    const reason = document.getElementById('dv-reason').value.trim();
 
-    if(!textId || !amount || !reason) return myAlert("모든 항목을 입력해주세요.", "warning");
+    if(!textId || !Number.isFinite(amount) || amount === 0 || !reason) {
+        return myAlert("모든 항목을 올바르게 입력해주세요. 금액은 0이 될 수 없습니다.", "warning");
+    }
+
+    const currentBalance = Number.isFinite(g_dividend_current_balance) ? g_dividend_current_balance : null;
+    const afterBalance = currentBalance === null ? null : currentBalance + amount;
+    const balanceSummary = afterBalance === null
+        ? ''
+        : `\n현재 잔액 ${currentBalance.toLocaleString()}원 → 적용 후 ${afterBalance.toLocaleString()}원`;
 
     // 용어 통일: 포인트 -> 이용고배당
-    myConfirm(`[${textId}] 조합원에게\n이용고배당 ${amount}원을 적용하시겠습니까?`, async () => {
+    myConfirm(`[${textId}] 조합원에게\n이용고배당 ${amount.toLocaleString()}원을 적용하시겠습니까?${balanceSummary}`, async () => {
         showLoading(true);
 
-        // ★ 중요: RPC 함수명은 기존에 생성된 것이 있다면 그대로 씁니다.
-        // 만약 'grant_point_manual'을 사용 중이라면 그대로 두고 UI만 배당으로 표시합니다.
-        const { error } = await _supabase.rpc('grant_point_manual', {
+        const { error } = await _supabase.rpc('grant_dividend_manual', {
             p_member_text_id: textId,
-            p_amount: Number(amount),
+            p_amount: Math.trunc(amount),
             p_reason: reason,
             p_admin_email: document.getElementById('adminProfile').innerText
         });
@@ -8210,6 +8279,7 @@ function selectMemberForModal(id, name) {
     if(g_search_target === 'dividend') {
         document.getElementById('dv-member-id').value = id;
         document.getElementById('dv-member-name').value = name;
+        refreshDividendCurrentBalance(id);
     } else if (g_search_target === 'donation') {
         document.getElementById('dn-member-id').value = id;
         document.getElementById('dn-member-name').value = name;
