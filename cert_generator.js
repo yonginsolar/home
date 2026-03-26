@@ -1,6 +1,6 @@
 /*
-Version: v1.0.7
-Change: Keep signature text centered while placing the seal to the right of the chairman text block.
+Version: v1.0.8
+Change: Align the seal center with the last chairman character while keeping signature text centered.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -129,10 +129,11 @@ function drawCenteredCertWrappedText(doc, text, centerX, startY, options = {}) {
 
 function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = {}) {
     const sealWidth = Number(options.sealWidth || 24);
-    const sealGap = Number(options.sealGap || 3);
+    const sealCenterOffset = Number(options.sealCenterOffset || 0);
+    const chairmanRightReserve = Math.max(0, (sealWidth / 2) - sealCenterOffset);
     const chairmanMaxWidth = Math.max(
         90,
-        Number(options.maxWidth || 150) - ((companyProfile?.sealDataUrl || options.hasSeal) ? (sealWidth + sealGap) : 0)
+        Number(options.maxWidth || 150) - ((companyProfile?.sealDataUrl || options.hasSeal) ? chairmanRightReserve : 0)
     );
     const companyLayout = drawCenteredCertWrappedText(
         doc,
@@ -166,7 +167,7 @@ function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = 
     return {
         companyLayout,
         chairmanLayout,
-        sealX: centerX + (chairmanLayout.maxLineWidth / 2) + sealGap,
+        sealX: centerX + (chairmanLayout.lastLineWidth / 2) - (sealWidth / 2) + sealCenterOffset,
         sealY: chairmanLayout.endY - Number(options.sealLift || 14)
     };
 } // End of drawCertSignatureBlock
@@ -434,7 +435,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             chairmanMaxLines: 2,
             chairmanLineHeight: 9,
             sealWidth: 24,
-            sealGap: 3,
+            sealCenterOffset: 0,
             sealLift: 14
         });
 
@@ -626,7 +627,7 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
             chairmanMaxLines: 2,
             chairmanLineHeight: 9,
             sealWidth: 24,
-            sealGap: 3,
+            sealCenterOffset: 0,
             sealLift: 14
         });
 
