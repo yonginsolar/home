@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.42
-Change: 2026-03-25 - Refresh certificate generator cache and prefer shrinking long company names in member certificate PDFs.
+Version: v1.0.44
+Change: 2026-03-26 - Refresh certificate generator cache for centered signature text with right-aligned seal placement.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.42 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.44 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -20,7 +20,7 @@ Change: 2026-03-25 - Refresh certificate generator cache and prefer shrinking lo
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="cert_generator.js?v=20260325_03"></script>
+<script src="cert_generator.js?v=20260326_01"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 <script src="badges.js"></script>
@@ -1675,13 +1675,25 @@ if (!raw) return '';
 const allowOrigins = [
 window.location.origin,
 'https://www.yonginsolar.kr',
-'https://erp.yonginsolar.kr',
 'http://localhost:8000'
 ];
 
+function remapLegacyErpDestination(dest) {
+if (!(dest instanceof URL)) return dest;
+if (dest.origin !== 'https://erp.yonginsolar.kr') return dest;
+const mapped = new URL('https://www.yonginsolar.kr');
+const safePath = String(dest.pathname || '').trim();
+mapped.pathname = (!safePath || safePath === '/')
+? '/erp/'
+: (safePath === '/erp' || safePath.startsWith('/erp/') ? safePath : `/erp${safePath.startsWith('/') ? '' : '/'}${safePath}`);
+mapped.search = dest.search;
+mapped.hash = dest.hash;
+return mapped;
+}
+
 function normalizeDest(candidate) {
 try {
-const dest = new URL(candidate, window.location.href);
+const dest = remapLegacyErpDestination(new URL(candidate, window.location.href));
 if (!allowOrigins.includes(dest.origin)) return null;
 return dest;
 } catch (e) {

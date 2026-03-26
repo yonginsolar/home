@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.43
-Change: 2026-03-26 - Use unified /erp routes for ERP return links on vote admin.
+Version: v1.0.44
+Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /erp migration.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.43 | admin.html');</script>
+    <script>console.log('[Version] v1.0.44 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -1962,32 +1962,15 @@ function escapeJsString(value) {
         window.location.href = getErpVoteHubUrl();
     }
 
-    async function applyVoteHashSessionBridge() {
-        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-        if (!hash) return false;
-
-        const hashParams = new URLSearchParams(hash);
-        const accessToken = String(hashParams.get('access_token') || '').trim();
-        const refreshToken = String(hashParams.get('refresh_token') || '').trim();
-        if (!accessToken || !refreshToken) return false;
-
-        const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-        });
-        if (error) {
-            console.error('vote admin session bridge failed:', error);
-            return false;
-        }
-
+    function clearLegacyVoteSessionHash() {
+        if (!window.location.hash) return;
         const cleanUrl = `${window.location.pathname}${window.location.search}`;
         window.history.replaceState({}, document.title, cleanUrl);
-        return true;
     }
 
     async function init() {
         console.log("🚀 선거 운영 페이지 진입...");
-        await applyVoteHashSessionBridge();
+        clearLegacyVoteSessionHash();
 
         // 화면 요소 초기화
         const header = document.querySelector('header');

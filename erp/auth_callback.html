@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.2 -->
+<!-- Version: v1.0.3 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.2 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.3 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -26,15 +26,28 @@
         const ERP_BASE_URL = new URL('./', window.location.href);
         const ERP_INDEX_URL = new URL('index.html', ERP_BASE_URL).href;
 
+        function remapLegacyErpDestination(dest) {
+            if (!(dest instanceof URL)) return dest;
+            if (dest.origin !== 'https://erp.yonginsolar.kr') return dest;
+
+            const mapped = new URL('https://www.yonginsolar.kr');
+            const safePath = String(dest.pathname || '').trim();
+            mapped.pathname = (!safePath || safePath === '/')
+                ? '/erp/'
+                : (safePath === '/erp' || safePath.startsWith('/erp/') ? safePath : `/erp${safePath.startsWith('/') ? '' : '/'}${safePath}`);
+            mapped.search = dest.search;
+            mapped.hash = dest.hash;
+            return mapped;
+        }
+
         function normalizeDest(raw) {
             const fallback = ERP_INDEX_URL;
             if (!raw) return fallback;
             try {
-                const dest = new URL(raw, window.location.origin);
+                const dest = remapLegacyErpDestination(new URL(raw, window.location.origin));
                 const allowOrigins = [
                     window.location.origin,
                     'https://www.yonginsolar.kr',
-                    'https://erp.yonginsolar.kr',
                     'http://localhost:8000'
                 ];
                 if (!allowOrigins.includes(dest.origin)) return fallback;

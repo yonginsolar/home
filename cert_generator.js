@@ -1,6 +1,6 @@
 /*
-Version: v1.0.6
-Change: Resolve certificate company metadata by coop_id and prefer shrinking long company names before wrapping in PDF outputs.
+Version: v1.0.7
+Change: Keep signature text centered while placing the seal to the right of the chairman text block.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -111,6 +111,7 @@ function drawCenteredCertWrappedText(doc, text, centerX, startY, options = {}) {
     const layout = buildCertWrappedTextLayout(doc, text, options);
     const lineHeight = Number(options.lineHeight || 7);
     doc.setFontSize(layout.fontSize);
+    const lineWidths = layout.lines.map((line) => doc.getTextWidth(String(line)));
 
     layout.lines.forEach((line, index) => {
         doc.text(String(line), centerX, startY + (index * lineHeight), { align: 'center' });
@@ -121,11 +122,18 @@ function drawCenteredCertWrappedText(doc, text, centerX, startY, options = {}) {
         ...layout,
         lineHeight,
         endY: startY + ((layout.lines.length - 1) * lineHeight),
-        lastLineWidth: doc.getTextWidth(lastLine)
+        lastLineWidth: doc.getTextWidth(lastLine),
+        maxLineWidth: lineWidths.reduce((maxWidth, width) => Math.max(maxWidth, width), 0)
     };
 } // End of drawCenteredCertWrappedText
 
 function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = {}) {
+    const sealWidth = Number(options.sealWidth || 24);
+    const sealGap = Number(options.sealGap || 3);
+    const chairmanMaxWidth = Math.max(
+        90,
+        Number(options.maxWidth || 150) - ((companyProfile?.sealDataUrl || options.hasSeal) ? (sealWidth + sealGap) : 0)
+    );
     const companyLayout = drawCenteredCertWrappedText(
         doc,
         trimCertCompanyValue(companyProfile?.companyName),
@@ -147,7 +155,7 @@ function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = 
         centerX,
         chairmanStartY,
         {
-            maxWidth: options.maxWidth || 150,
+            maxWidth: chairmanMaxWidth,
             initialFontSize: options.chairmanFontSize || 22,
             minFontSize: options.chairmanMinFontSize || 15,
             maxLines: options.chairmanMaxLines || 2,
@@ -158,7 +166,7 @@ function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = 
     return {
         companyLayout,
         chairmanLayout,
-        sealX: centerX + (chairmanLayout.lastLineWidth / 2) - Number(options.sealOffsetX || 12),
+        sealX: centerX + (chairmanLayout.maxLineWidth / 2) + sealGap,
         sealY: chairmanLayout.endY - Number(options.sealLift || 14)
     };
 } // End of drawCertSignatureBlock
@@ -425,11 +433,12 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             chairmanMinFontSize: 15,
             chairmanMaxLines: 2,
             chairmanLineHeight: 9,
-            sealOffsetX: 12,
+            sealWidth: 24,
+            sealGap: 3,
             sealLift: 14
         });
 
-        // [직인] 위치 수정 (위로 35px ≈ 10mm 올림) 8px 내림
+        // [직인] 이사장 텍스트의 오른쪽에 배치
         if (sealDataUrl) {
             doc.addImage(sealDataUrl, 'PNG', signatureLayout.sealX, signatureLayout.sealY, 24, 24);
         }
@@ -616,7 +625,8 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
             chairmanMinFontSize: 15,
             chairmanMaxLines: 2,
             chairmanLineHeight: 9,
-            sealOffsetX: 12,
+            sealWidth: 24,
+            sealGap: 3,
             sealLift: 14
         });
 

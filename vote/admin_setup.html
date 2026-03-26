@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.10
-Change: 2026-03-26 - Use unified /erp routes for ERP return links on vote setup.
+Version: v1.0.11
+Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /erp migration.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 관리 대시보드</title>
-    <script>console.log('[Version] v1.0.10 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.11 | admin_setup.html');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
@@ -1410,27 +1410,10 @@ window.resumeSetup = async (el) => {
         window.location.href = getErpVoteHubUrl();
     }
 
-    async function applyVoteHashSessionBridge() {
-        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-        if (!hash) return false;
-
-        const hashParams = new URLSearchParams(hash);
-        const accessToken = String(hashParams.get('access_token') || '').trim();
-        const refreshToken = String(hashParams.get('refresh_token') || '').trim();
-        if (!accessToken || !refreshToken) return false;
-
-        const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-        });
-        if (error) {
-            console.error('vote admin_setup session bridge failed:', error);
-            return false;
-        }
-
+    function clearLegacyVoteSessionHash() {
+        if (!window.location.hash) return;
         const cleanUrl = `${window.location.pathname}${window.location.search}`;
         window.history.replaceState({}, document.title, cleanUrl);
-        return true;
     }
 
     window.handleLogout = async () => {
@@ -1442,7 +1425,7 @@ window.resumeSetup = async (el) => {
 // [수정] 초기화 함수: 로그인 창 없이 즉시 권한 체크
     async function init() {
         console.log("🚀 관리자 페이지 진입...");
-        await applyVoteHashSessionBridge();
+        clearLegacyVoteSessionHash();
 
         // 1. 세션 확인 (vote_login.html에서 로그인하고 넘어왔는지)
         const { data: { session }, error } = await supabase.auth.getSession();

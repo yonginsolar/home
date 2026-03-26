@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.27 -->
+<!-- Version: v1.0.28 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.27 | index.html');</script>
+  <script>console.log('[Version] v1.0.28 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -286,12 +286,6 @@ const MINUTES_ROUTE_TARGETS = Object.freeze({
     documents: 'https://www.yonginsolar.kr/minutes/minutes_view',
     signature: 'https://www.yonginsolar.kr/minutes/minutes_sign'
 });
-const MINUTES_ROUTE_SESSION_KEYS = new Set([
-    'integrated_admin',
-    'minutes_admin',
-    'notices_admin',
-    'materials_admin'
-]);
 
 let myInfo = null;
 let permissionSet = new Set();
@@ -335,43 +329,9 @@ function getMinutesRouteTarget(routeKey) {
     return target;
 }
 
-function requiresMinutesRouteSession(routeKey) {
-    return MINUTES_ROUTE_SESSION_KEYS.has(String(routeKey || '').trim());
-}
-
 async function buildMinutesRouteUrl(routeKey) {
     const safeKey = String(routeKey || '').trim();
-    const destination = new URL(getMinutesRouteTarget(safeKey));
-    if (!requiresMinutesRouteSession(safeKey)) {
-        return destination.href;
-    }
-
-    const { data: sessionData, error: sessionError } = await _supabase.auth.getSession();
-    if (sessionError) throw sessionError;
-
-    const currentSession = sessionData?.session || null;
-    if (!currentSession?.refresh_token && !currentSession?.access_token) {
-        throw new Error('ERP_LOGIN_SESSION_REQUIRED');
-    }
-
-    const { data: refreshedData, error: refreshError } = await _supabase.auth.refreshSession();
-    const activeSession = refreshedData?.session || currentSession;
-    if (refreshError && !activeSession?.access_token) {
-        throw new Error('ERP_LOGIN_SESSION_REQUIRED');
-    }
-
-    const accessToken = String(activeSession?.access_token || '').trim();
-    const refreshToken = String(activeSession?.refresh_token || '').trim();
-    if (!accessToken || !refreshToken) {
-        throw new Error('ERP_LOGIN_SESSION_REQUIRED');
-    }
-
-    const transferParams = new URLSearchParams();
-    transferParams.set('erp_access_token', accessToken);
-    transferParams.set('erp_refresh_token', refreshToken);
-    transferParams.set('source', 'erp_index');
-    destination.hash = transferParams.toString();
-    return destination.href;
+    return getMinutesRouteTarget(safeKey);
 }
 
 async function openMinutesRoute(routeKey) {

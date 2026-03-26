@@ -1,4 +1,4 @@
-/* Version: v1.0.5 | Change: 2026-03-25 - Prefer shrinking long company names before wrapping in print signature blocks. */
+/* Version: v1.0.6 | Change: 2026-03-26 - Center signature text independently and place the seal to the right of the text block. */
 const PrintService = {
     // 1. 공통 CSS 스타일 (유지보수를 위해 이곳에서 통합 관리)
     styles: {
@@ -69,32 +69,34 @@ const PrintService = {
         const companyName = String(data?.compName || '').trim();
         const chairmanName = String(data?.chairman || '').trim();
         const sealWidth = Number(cfg.sealWidth || 60);
-        const sealPadding = Number(cfg.sealPadding || 16);
-        const paddingRight = data?.seal ? `${sealWidth + sealPadding}px` : '0';
+        const sealGap = Number(cfg.sealGap || cfg.sealPadding || 16);
+        const maxWidthCss = String(cfg.maxWidth || '560px');
+        const chairmanMaxWidthCss = data?.seal ? `calc(${maxWidthCss} - ${sealWidth + sealGap}px)` : maxWidthCss;
         const maxWidthPx = Number(cfg.maxWidthPx || 520);
-        const availableWidthPx = Math.max(180, maxWidthPx - (data?.seal ? (sealWidth + sealPadding) : 0));
         const companyFit = this.fitSignatureText(companyName, {
             initialFontSize: Number(cfg.companyFontSize || 18),
             minFontSize: Number(cfg.companyMinFontSize || 13),
-            maxWidthPx: availableWidthPx,
+            maxWidthPx,
             fontWeight: 700
         });
         const chairmanFit = this.fitSignatureText(`이사장 ${chairmanName}`, {
             initialFontSize: Number(cfg.chairmanFontSize || 22),
             minFontSize: Number(cfg.chairmanMinFontSize || 15),
-            maxWidthPx: availableWidthPx,
+            maxWidthPx: Math.max(180, maxWidthPx - (data?.seal ? (sealWidth + sealGap) : 0)),
             fontWeight: Number(cfg.fontWeight || 700)
         });
         const companyLine = companyName
-            ? `<div style="font-size:${companyFit.fontSize}px; font-weight:700; line-height:1.3; white-space:${companyFit.wrap ? 'normal' : 'nowrap'}; word-break:${companyFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${companyFit.wrap ? 'anywhere' : 'normal'};">${companyName}</div>`
+            ? `<div style="display:inline-block; max-width:${maxWidthCss}; text-align:center; font-size:${companyFit.fontSize}px; font-weight:700; line-height:1.3; white-space:${companyFit.wrap ? 'normal' : 'nowrap'}; word-break:${companyFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${companyFit.wrap ? 'anywhere' : 'normal'};">${companyName}</div>`
             : '';
 
         return `
             <div style="text-align:center; margin-top:${Number(cfg.marginTop || 40)}px;">
-                <div style="display:inline-block; position:relative; max-width:${cfg.maxWidth || '560px'}; padding-right:${paddingRight};">
+                <div style="display:inline-flex; flex-direction:column; align-items:center; max-width:${maxWidthCss};">
                     ${companyLine}
-                    <div style="font-size:${chairmanFit.fontSize}px; font-weight:${cfg.fontWeight || 700}; line-height:1.3; margin-top:${companyLine ? '6px' : '0'}; white-space:${chairmanFit.wrap ? 'normal' : 'nowrap'}; word-break:${chairmanFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${chairmanFit.wrap ? 'anywhere' : 'normal'};">이사장 ${chairmanName}</div>
-                    ${data?.seal ? `<img src="${data.seal}" style="position:absolute; right:0; bottom:${cfg.sealBottom || '-6px'}; width:${sealWidth}px; opacity:${cfg.sealOpacity || 0.8};">` : ''}
+                    <div style="display:inline-block; position:relative; margin-top:${companyLine ? '6px' : '0'};">
+                        <div style="display:inline-block; max-width:${chairmanMaxWidthCss}; text-align:center; font-size:${chairmanFit.fontSize}px; font-weight:${cfg.fontWeight || 700}; line-height:1.3; white-space:${chairmanFit.wrap ? 'normal' : 'nowrap'}; word-break:${chairmanFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${chairmanFit.wrap ? 'anywhere' : 'normal'};">이사장 ${chairmanName}</div>
+                        ${data?.seal ? `<img src="${data.seal}" style="position:absolute; left:calc(100% + ${sealGap}px); bottom:${cfg.sealBottom || '-6px'}; width:${sealWidth}px; opacity:${cfg.sealOpacity || 0.8};">` : ''}
+                    </div>
                 </div>
             </div>`;
     },
@@ -139,6 +141,7 @@ const PrintService = {
             chairmanFontSize: 20,
             chairmanMinFontSize: 15,
             sealWidth: 60,
+            sealGap: 14,
             sealBottom: '-8px',
             fontWeight: 600
         });
@@ -207,6 +210,7 @@ const PrintService = {
             chairmanFontSize: 24,
             chairmanMinFontSize: 16,
             sealWidth: 80,
+            sealGap: 18,
             sealBottom: '-10px',
             sealPadding: 22,
             fontWeight: 'bold'

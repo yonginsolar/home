@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.6
-Change: Sync Naver phone metadata and support public member profile linking for Naver in the shared auth callback.
+Version: v1.0.7
+Change: Normalize legacy erp.yonginsolar.kr destinations to canonical www/erp paths.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.6 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.7 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -28,15 +28,28 @@ Change: Sync Naver phone metadata and support public member profile linking for 
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // 목적지 찾기
+        function remapLegacyErpDestination(dest) {
+            if (!(dest instanceof URL)) return dest;
+            if (dest.origin !== 'https://erp.yonginsolar.kr') return dest;
+
+            const mapped = new URL('https://www.yonginsolar.kr');
+            const safePath = String(dest.pathname || '').trim();
+            mapped.pathname = (!safePath || safePath === '/')
+                ? '/erp/'
+                : (safePath === '/erp' || safePath.startsWith('/erp/') ? safePath : `/erp${safePath.startsWith('/') ? '' : '/'}${safePath}`);
+            mapped.search = dest.search;
+            mapped.hash = dest.hash;
+            return mapped;
+        }
+
         function normalizeDest(raw) {
             const fallback = '/';
             if (!raw) return fallback;
             try {
-                const dest = new URL(raw, window.location.origin);
+                const dest = remapLegacyErpDestination(new URL(raw, window.location.origin));
                 const allowOrigins = [
                     window.location.origin,
                     'https://www.yonginsolar.kr',
-                    'https://erp.yonginsolar.kr',
                     'http://localhost:8000'
                 ];
                 if (!allowOrigins.includes(dest.origin)) return fallback;
@@ -55,7 +68,7 @@ Change: Sync Naver phone metadata and support public member profile linking for 
         function isErpDestination(rawDest) {
             try {
                 const dest = new URL(normalizeDest(rawDest), window.location.origin);
-                return dest.origin === 'https://erp.yonginsolar.kr' || dest.pathname === '/erp' || dest.pathname.startsWith('/erp/');
+                return dest.pathname === '/erp' || dest.pathname.startsWith('/erp/');
             } catch (e) {
                 return false;
             }

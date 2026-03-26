@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.1 -->
+<!-- Version: v1.0.2 -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>선거 포털로 이동 중...</title>
-  <script>console.log('[Version] v1.0.1 | vote/index.html');</script>
+  <script>console.log('[Version] v1.0.2 | vote/index.html');</script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body {
@@ -61,35 +61,14 @@
       return nextUrl.toString();
     }
 
-    async function applyVoteHashSessionBridge() {
-      const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-      if (!hash) return false;
-
-      const hashParams = new URLSearchParams(hash);
-      const accessToken = String(hashParams.get('access_token') || '').trim();
-      const refreshToken = String(hashParams.get('refresh_token') || '').trim();
-      if (!accessToken || !refreshToken) return false;
-
-      const { error } = await supabaseClient.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken
-      });
-      if (error) {
-        console.error('vote/index session bridge failed:', error);
-        return false;
-      }
-
+    function clearLegacyVoteSessionHash() {
+      if (!window.location.hash) return;
       const cleanUrl = `${window.location.pathname}${window.location.search}`;
       window.history.replaceState({}, document.title, cleanUrl);
-      return true;
     }
 
     async function bootVoteIndex() {
-      try {
-        await applyVoteHashSessionBridge();
-      } catch (error) {
-        console.error('vote/index boot failed:', error);
-      }
+      clearLegacyVoteSessionHash();
       window.location.replace(buildVotePortalUrl());
     }
 
