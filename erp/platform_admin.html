@@ -1,0 +1,1596 @@
+<!DOCTYPE html>
+<!-- Version: v1.1.6 -->
+<html>
+<head>
+  <script>console.log('[Version] v1.1.6 | platform_admin.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>협동조합 ERP (통합 관리자)</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(13, 110, 253, 0.14), transparent 35%),
+        linear-gradient(180deg, #eef3f8 0%, #f7f9fc 100%);
+      min-height: 100vh;
+      color: #17212b;
+    }
+    .page-shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 24px auto 40px;
+    }
+    .hero-card,
+    .panel-card,
+    .manage-card {
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 20px;
+      box-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(10px);
+    }
+    .hero-card {
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+    .panel-card,
+    .manage-card {
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+    .eyebrow {
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-size: 12px;
+      font-weight: 700;
+      color: #4c6ef5;
+    }
+    .headline {
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 800;
+      line-height: 1.05;
+      margin: 10px 0 12px;
+    }
+    .subcopy {
+      color: #5b6571;
+      margin: 0;
+    }
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      background: #edf2ff;
+      color: #3b5bdb;
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+    .status-chip.warn {
+      background: #fff3bf;
+      color: #8f5c00;
+    }
+    .muted-label {
+      font-size: 12px;
+      color: #6c757d;
+      margin-bottom: 6px;
+      display: block;
+      font-weight: 700;
+    }
+    .table thead th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #6c757d;
+      border-bottom-width: 1px;
+      white-space: nowrap;
+    }
+    .table td {
+      vertical-align: middle;
+    }
+    .empty-box {
+      border: 1px dashed rgba(108, 117, 125, 0.4);
+      border-radius: 16px;
+      padding: 28px 20px;
+      text-align: center;
+      color: #6c757d;
+      background: rgba(248, 249, 250, 0.8);
+    }
+    .hidden {
+      display: none !important;
+    }
+    .form-hint {
+      font-size: 12px;
+      color: #6c757d;
+    }
+    .bootstrap-panel {
+      border: 1px solid rgba(255, 193, 7, 0.35);
+      background: linear-gradient(135deg, rgba(255, 249, 219, 0.95), rgba(255, 243, 191, 0.8));
+    }
+    .result-box {
+      white-space: pre-wrap;
+      font-size: 14px;
+    }
+    .badge-soft {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      background: #edf2ff;
+      color: #334eac;
+    }
+    .badge-soft.off {
+      background: #ffe3e3;
+      color: #c92a2a;
+    }
+    .badge-soft.profile-legacy {
+      background: #e3fafc;
+      color: #0b7285;
+    }
+    .badge-soft.profile-lite {
+      background: #fff3bf;
+      color: #8f5c00;
+    }
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .module-tile {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 14px;
+      padding: 14px;
+      background: #f8fafc;
+    }
+    .module-price-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .module-price-badge.unpriced {
+      background: #fff7ed;
+      color: #c2410c;
+    }
+    .module-price-badge.included {
+      background: #ecfdf5;
+      color: #047857;
+    }
+    .module-scope-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: #475569;
+      font-size: 12px;
+    }
+    .module-scope-list li + li {
+      margin-top: 4px;
+    }
+    .billing-summary {
+      margin-top: 16px;
+      border-top: 1px dashed rgba(15, 23, 42, 0.12);
+      padding-top: 14px;
+    }
+    .billing-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    }
+    .billing-line:last-child {
+      border-bottom: 0;
+    }
+    .billing-line-title {
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .billing-line-note {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .billing-line-amount {
+      font-size: 14px;
+      font-weight: 800;
+      color: #1d4ed8;
+      white-space: nowrap;
+    }
+    .billing-line-amount.unpriced {
+      color: #c2410c;
+    }
+    .billing-line-amount.included {
+      color: #047857;
+    }
+    .billing-total {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(15, 23, 42, 0.12);
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .pricing-card {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 16px;
+      padding: 16px;
+      background: #fbfdff;
+    }
+    .pricing-card h3 {
+      font-size: 16px;
+      font-weight: 800;
+      margin: 0 0 8px;
+    }
+    .pricing-amount {
+      font-size: 22px;
+      font-weight: 800;
+      color: #1d4ed8;
+      margin-bottom: 6px;
+    }
+    .pricing-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #475569;
+      font-size: 13px;
+    }
+    .pricing-addon-table td,
+    .pricing-addon-table th {
+      font-size: 13px;
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 800;
+      margin-bottom: 10px;
+      color: #334155;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .manage-meta {
+      font-size: 13px;
+      color: #64748b;
+    }
+    #coopManageModal .modal-body {
+      padding: 0;
+    }
+    @media (max-width: 768px) {
+      .page-shell {
+        width: min(100%, calc(100% - 20px));
+        margin-top: 12px;
+      }
+      .hero-card,
+      .panel-card,
+      .manage-card {
+        border-radius: 16px;
+        padding: 16px;
+      }
+      .module-grid {
+        grid-template-columns: 1fr;
+      }
+      .pricing-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+  <link rel="stylesheet" href="./erp_theme.css?v=1.0.0">
+</head>
+<body class="erp-unified">
+  <div class="page-shell">
+    <section class="hero-card">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
+        <div>
+          <div class="eyebrow">Platform Admin</div>
+          <h1 class="headline">조합 생성과 운영 제어</h1>
+          <p class="subcopy">통합 관리자는 여기서 새 조합 생성, 첫 ERP 관리자 등록, 조합 활성/중지, 모듈 on/off, 대표 관리자 재지정을 처리합니다.</p>
+          <div class="mt-2">
+            <span class="status-chip" id="chipPlatform">통합 관리자 확인 중</span>
+            <span class="status-chip warn hidden" id="chipBootstrap">초기 claim 필요</span>
+          </div>
+        </div>
+        <div class="text-lg-end">
+          <div class="small text-muted">현재 사용자</div>
+          <div class="fw-bold fs-5" id="currentUserName">-</div>
+          <div class="text-muted small" id="currentUserMeta">-</div>
+          <div class="mt-3 d-flex gap-2 justify-content-lg-end">
+            <button class="btn btn-outline-secondary btn-sm" type="button" onclick="location.href='index.html'">홈으로</button>
+            <button class="btn btn-outline-dark btn-sm" type="button" onclick="initPage()">새로고침</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="statusArea" class="alert alert-secondary hidden"></div>
+
+    <section class="panel-card bootstrap-panel hidden" id="bootstrapPanel">
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+        <div>
+          <h2 class="h5 fw-bold mb-1">초기 통합 관리자 claim</h2>
+          <p class="mb-0 text-muted">아직 플랫폼 관리자 테이블이 비어 있습니다. 현재 ERP 관리자 계정을 첫 통합 관리자로 등록해야 조합 생성 및 운영 제어 기능이 열립니다.</p>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-warning fw-bold" type="button" id="btnClaimAdmin" onclick="claimPlatformAdmin()">통합 관리자 권한 등록</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-card hidden" id="createPanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h2 class="h5 fw-bold mb-1">새 조합 생성</h2>
+          <p class="text-muted mb-0">조합 기본 정보와 첫 ERP 관리자 1인을 함께 등록합니다. 운영 프로필 기본값은 <code>간소화 (workforce_lite)</code>이며 필요하면 <code>전체형 (legacy_full)</code>으로 바꿔 생성할 수 있습니다.</p>
+          </div>
+        </div>
+      <form id="createForm" class="row g-3" onsubmit="submitCreateForm(event)">
+        <div class="col-md-4">
+          <label class="muted-label" for="coopCodeInput">조합 코드</label>
+          <input class="form-control" id="coopCodeInput" placeholder="yongin-modu-sunlight" required>
+          <div class="form-hint mt-1">조합명을 입력하면 자동 생성됩니다. 필요하면 직접 수정할 수 있습니다.</div>
+        </div>
+        <div class="col-md-8">
+          <label class="muted-label" for="coopNameInput">조합명</label>
+          <input class="form-control" id="coopNameInput" placeholder="용인모두의햇빛협동조합" required>
+        </div>
+        <div class="col-md-4">
+          <label class="muted-label" for="bizNumInput">사업자등록번호</label>
+          <input class="form-control" id="bizNumInput" placeholder="123-45-67890">
+        </div>
+        <div class="col-md-4">
+          <label class="muted-label" for="runtimeProfileInput">운영 프로필</label>
+          <select class="form-select" id="runtimeProfileInput">
+            <option value="workforce_lite" selected>간소화 (workforce_lite)</option>
+            <option value="legacy_full">전체형 (legacy_full)</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="muted-label" for="adminNameInput">첫 관리자 이름</label>
+          <input class="form-control" id="adminNameInput" placeholder="홍길동" required>
+        </div>
+        <div class="col-md-4">
+          <label class="muted-label" for="adminEmailInput">첫 관리자 이메일</label>
+          <input type="email" class="form-control" id="adminEmailInput" placeholder="chair@coop.com" required>
+        </div>
+        <div class="col-md-6">
+          <label class="muted-label" for="adminPositionInput">직책</label>
+          <input class="form-control" id="adminPositionInput" value="이사장">
+        </div>
+        <div class="col-md-6">
+          <label class="muted-label" for="adminDepartmentInput">부서</label>
+          <input class="form-control" id="adminDepartmentInput" value="사무국">
+        </div>
+        <div class="col-12 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+          <div class="form-hint">등록이 완료되면 첫 관리자는 ERP 메인 로그인 화면에서 등록한 이메일로 매직링크를 받아 계정을 연결합니다.</div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary" type="button" onclick="resetCreateForm()">초기화</button>
+            <button class="btn btn-primary fw-bold" type="submit" id="btnCreateCoop">조합 생성</button>
+          </div>
+        </div>
+      </form>
+      <div class="alert alert-light border mt-3 hidden result-box" id="createResultBox"></div>
+    </section>
+
+    <section class="panel-card hidden" id="pricingPanel">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h2 class="h5 fw-bold mb-1">요금 안내</h2>
+          <p class="text-muted mb-0">현재 운영안 기준 요금표입니다. ERP 토글은 내부 운영 제어용이고, 실제 가격은 아래 상품 단위로 안내합니다.</p>
+        </div>
+        <div class="small text-muted" id="pricingVatNotice">부가세 별도</div>
+      </div>
+      <div id="pricingOverviewGrid" class="pricing-grid mb-3"></div>
+      <div class="panel-card mb-0">
+        <div class="section-title mb-2">옵션 모듈</div>
+        <div class="form-hint mb-2">인사·전자결재와 문서 관련 기능은 기본형에 추가되는 옵션입니다. 선거/투표는 조합원 관리 운영 범위에 포함해 안내합니다.</div>
+        <div class="table-responsive">
+          <table class="table align-middle mb-0 pricing-addon-table">
+            <thead>
+              <tr>
+                <th>모듈</th>
+                <th>월 요금</th>
+                <th>범위</th>
+              </tr>
+            </thead>
+            <tbody id="pricingAddonTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-card hidden" id="telegramPanel">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h2 class="h5 fw-bold mb-1">공용 Telegram 봇</h2>
+          <p class="text-muted mb-0">모든 조합이 같은 Telegram 봇을 사용합니다. 통합 관리자가 여기서 토큰을 저장하고 webhook을 동기화합니다.</p>
+        </div>
+      </div>
+      <div class="row g-3">
+        <div class="col-lg-8">
+          <label class="muted-label" for="platformTelegramBotTokenInput">봇 토큰</label>
+          <input type="password" class="form-control" id="platformTelegramBotTokenInput" placeholder="비워두면 기존 토큰을 유지합니다.">
+          <div class="form-hint mt-1">BotFather에서 발급한 공용 봇 토큰 1개만 저장하면 됩니다.</div>
+        </div>
+        <div class="col-lg-4">
+          <label class="muted-label d-block" for="platformTelegramEnabledToggle">사용 여부</label>
+          <div class="form-check form-switch fs-5 mb-2">
+            <input class="form-check-input" type="checkbox" id="platformTelegramEnabledToggle">
+            <label class="form-check-label" for="platformTelegramEnabledToggle">공용 Telegram 봇 사용</label>
+          </div>
+          <div class="form-hint">조합별 알림 on/off는 각 조합 설정에서 별도로 제어합니다.</div>
+        </div>
+        <div class="col-12">
+          <div class="small text-muted mb-1" id="platformTelegramTokenHint">저장 상태를 확인하는 중입니다.</div>
+          <div class="small text-muted" id="platformTelegramWebhookHint">봇 연결 상태를 확인하는 중입니다.</div>
+        </div>
+        <div class="col-12 d-flex gap-2 justify-content-end">
+          <button class="btn btn-primary" type="button" id="btnSavePlatformTelegram" onclick="savePlatformTelegramSettings()">저장 및 동기화</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-card hidden" id="listPanel">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h2 class="h5 fw-bold mb-1">조합 목록</h2>
+          <p class="text-muted mb-0">조합 상태, 첫 관리자, 모듈 운영을 여기서 관리합니다.</p>
+        </div>
+        <div class="small text-muted" id="coopCountLabel">0건</div>
+      </div>
+      <div id="coopTableWrap">
+        <div class="empty-box">조합을 불러오는 중입니다.</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal fade" id="coopManageModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+      <div class="modal-content border-0 bg-transparent shadow-none">
+        <div class="modal-body">
+          <div class="manage-card mb-0">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+              <div>
+                <div class="eyebrow">Coop Settings</div>
+                <h2 class="h4 fw-bold mb-1" id="manageCoopTitle">조합 설정</h2>
+                <div class="manage-meta" id="manageCoopMeta">-</div>
+              </div>
+              <button class="btn-close" type="button" data-bs-dismiss="modal"></button>
+            </div>
+
+            <div id="manageStatusBox" class="alert alert-secondary hidden"></div>
+
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <div class="panel-card mb-0">
+                  <div class="section-title">조합 상태</div>
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                      <div class="fw-bold" id="manageActiveLabel">활성</div>
+                      <div class="form-hint">중지하면 해당 조합 사용자는 ERP 로그인 후 바로 차단됩니다.</div>
+                    </div>
+                    <div class="form-check form-switch fs-5 mb-0">
+                      <input class="form-check-input" type="checkbox" id="manageCoopActiveToggle">
+                    </div>
+                  </div>
+                  <button class="btn btn-outline-primary w-100" type="button" id="btnSaveCoopActive" onclick="saveCoopActive()">상태 저장</button>
+                </div>
+              </div>
+
+              <div class="col-lg-8">
+                <div class="panel-card mb-0">
+                  <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-9">
+                      <div class="section-title mb-1">운영 프로필</div>
+                      <label class="muted-label" for="manageRuntimeProfileSelect">프로필 선택</label>
+                      <select class="form-select" id="manageRuntimeProfileSelect">
+                        <option value="workforce_lite">간소화 (workforce_lite)</option>
+                        <option value="legacy_full">전체형 (legacy_full)</option>
+                      </select>
+                      <div class="form-hint mt-1">전체형은 기존 ERP 흐름을 유지하고, 간소화는 판매용 모듈 중심 구성입니다.</div>
+                    </div>
+                    <div class="col-md-3 d-grid">
+                      <button class="btn btn-outline-primary" type="button" id="btnSaveCoopProfile" onclick="saveCoopProfile()">프로필 저장</button>
+                    </div>
+                  </div>
+                  <hr class="my-3">
+                  <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                    <div>
+                      <div class="section-title mb-1">대표 관리자</div>
+                      <div class="form-hint">선택한 직원은 `admin_all`로 승격되고 기존 `admin_all`은 `admin`으로 조정됩니다.</div>
+                    </div>
+                    <button class="btn btn-outline-dark btn-sm" type="button" onclick="loadManageModalData(true)">새로고침</button>
+                  </div>
+                  <div class="row g-2 align-items-end">
+                    <div class="col-md-9">
+                      <label class="muted-label" for="manageAdminSelect">직원 선택</label>
+                      <select class="form-select" id="manageAdminSelect"></select>
+                    </div>
+                    <div class="col-md-3 d-grid">
+                      <button class="btn btn-primary" type="button" id="btnSavePrimaryAdmin" onclick="savePrimaryAdmin()">대표 관리자 저장</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="panel-card mb-0">
+                  <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+                    <div>
+                      <div class="section-title mb-1">모듈 설정</div>
+                      <div class="form-hint">조합별로 홈 메뉴 노출과 ERP 사용 범위를 조정합니다.</div>
+                      <div class="form-hint mt-1">현재 이 화면은 ERP 런타임 기준 모듈을 저장합니다. 선거/투표는 조합원 관리와 함께, 전자서명은 문서함과 함께 제어됩니다.</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick="applyStandardPreset()">표준 모듈 적용</button>
+                      <button class="btn btn-primary btn-sm" type="button" id="btnSaveModules" onclick="saveCoopModules()">모듈 저장</button>
+                    </div>
+                  </div>
+                  <div id="manageModuleGrid" class="module-grid"></div>
+                  <div class="billing-summary" id="moduleBillingSummary">
+                    <div class="section-title mb-1">청구 기준</div>
+                    <div class="form-hint mb-2">전자결재, 마이페이지, 직원관리, 권한관리는 운영상 따로 잠글 수 있어도 요금은 한 세트로 계산합니다. 선거/투표는 조합원 관리에 포함하고, 전자서명은 문서함과 함께 안내합니다.</div>
+                    <div id="moduleBillingLines"></div>
+                    <div class="billing-total" id="moduleBillingTotal"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let currentUser = null;
+    let platformContext = null;
+    let coopManageModal = null;
+    let selectedCoop = null;
+    let coopRows = [];
+    let coopCodeManuallyEdited = false;
+    let platformTelegramSettings = null;
+    const PLATFORM_PRICING_CATALOG = Object.freeze({
+      vatNotice: '현재 요금은 미정입니다.',
+      freePlan: {
+        name: 'Free Starter',
+        monthlyFee: null,
+        priceLabel: '미정',
+        setupFee: null,
+        setupFeeLabel: '미정',
+        scope: '공개 홈페이지 1개, 공지, FAQ, 기본 소개',
+        limits: [
+          '공용 서브도메인 사용',
+          '관리자 1명',
+          '조합원 관리 / 인사·전자결재 / 문서관리 제외'
+        ]
+      },
+      basePlan: {
+        name: 'Lite',
+        monthlyFee: null,
+        priceLabel: '미정',
+        setupFee: null,
+        setupFeeLabel: '미정',
+        scope: '홈페이지 관리 + 조합원 관리 + 가족/단체 관리 + 조합원 포털 + 선거/투표'
+      },
+      modulePricing: [
+        { key: 'workforce', name: '인사·전자결재', monthlyFee: null, priceLabel: '미정', scope: '직원관리, 결재, 마이페이지, 휴가' },
+        { key: 'minutes', name: '회의/공문', monthlyFee: null, priceLabel: '미정', scope: '회의록, 공문 관리' },
+        { key: 'document_bundle', name: '문서함·전자서명', monthlyFee: null, priceLabel: '미정', scope: '문서 열람, 자료실 운영, 서명 요청, 서명 수집' },
+        { key: 'kakao', name: '카카오 연동', monthlyFee: null, priceLabel: '별도 협의', scope: '조합별 채널/앱 설정에 따라 별도 협의' }
+      ]
+    });
+
+    const HANGUL_INITIALS = ['g', 'kk', 'n', 'd', 'tt', 'r', 'm', 'b', 'pp', 's', 'ss', '', 'j', 'jj', 'ch', 'k', 't', 'p', 'h'];
+    const HANGUL_MEDIALS = ['a', 'ae', 'ya', 'yae', 'eo', 'e', 'yeo', 'ye', 'o', 'wa', 'wae', 'oe', 'yo', 'u', 'wo', 'we', 'wi', 'yu', 'eu', 'ui', 'i'];
+    const HANGUL_FINALS = ['', 'k', 'k', 'ks', 'n', 'nj', 'nh', 't', 'l', 'lk', 'lm', 'lb', 'ls', 'lt', 'lp', 'lh', 'm', 'p', 'ps', 't', 't', 'ng', 't', 't', 'k', 't', 'p', 'h'];
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function setStatus(message, type) {
+      const area = document.getElementById('statusArea');
+      if (!area) return;
+      area.className = 'alert';
+      area.classList.add(type || 'alert-secondary');
+      area.textContent = message || '';
+      if (!message) {
+        area.classList.add('hidden');
+        return;
+      }
+      area.classList.remove('hidden');
+    }
+
+    function setManageStatus(message, type) {
+      const area = document.getElementById('manageStatusBox');
+      if (!area) return;
+      area.className = 'alert';
+      area.classList.add(type || 'alert-secondary');
+      area.textContent = message || '';
+      if (!message) {
+        area.classList.add('hidden');
+        return;
+      }
+      area.classList.remove('hidden');
+    }
+
+    function setLoadingState(buttonId, isLoading, label) {
+        const button = document.getElementById(buttonId);
+        if (!button) return;
+        if (!button.dataset.originalLabel) button.dataset.originalLabel = button.textContent;
+        button.disabled = isLoading;
+        button.textContent = isLoading ? (label || '처리 중...') : button.dataset.originalLabel;
+    }
+
+    function formatWon(value) {
+      const amount = Number(value);
+      if (!Number.isFinite(amount)) return '-';
+      return `${amount.toLocaleString('ko-KR')}원`;
+    }
+
+    function getPricingAmountLabel(item) {
+      if (item?.priceLabel) return String(item.priceLabel);
+      if (item?.monthlyFee === 0) return '무료';
+      return formatWon(item?.monthlyFee);
+    }
+
+    function getPricingSetupAmountLabel(item) {
+      if (item?.setupFeeLabel) return String(item.setupFeeLabel);
+      if (item?.setupFee === 0) return '무료';
+      return formatWon(item?.setupFee);
+    }
+
+    function findPricingModule(key) {
+      return (PLATFORM_PRICING_CATALOG.modulePricing || []).find((item) => item.key === key) || null;
+    }
+
+    function getModuleGroupCatalog() {
+      return [
+        {
+          groupKey: 'workforce_bundle',
+          title: '인사·전자결재',
+          description: '전자결재, 마이페이지, 직원 및 설정 관리, 권한 관리를 한 세트로 운영합니다.',
+          moduleKeys: ['approval', 'mypage', 'hr', 'permission'],
+          scopes: ['전자결재: approval.html', '마이페이지: mypage.html', '직원관리: admin_employee.html', '권한 관리: permissions.html']
+        },
+        {
+          groupKey: 'site_admin',
+          title: '홈페이지 관리',
+          description: '공지사항, 사이트 컨텐츠, FAQ, 협력단체, 임원 서명 관리',
+          moduleKeys: ['site_admin'],
+          scopes: ['관리 화면: site_admin.html → admin_member.html', '제어 탭: 공지사항 / 임원 서명 / 홈페이지 관리']
+        },
+        {
+          groupKey: 'member_admin',
+          title: '조합원 관리',
+          description: '조합원 명부, 신청 처리, 입금 매칭, 자금/배당 관리, 선거/투표',
+          moduleKeys: ['member_admin', 'vote'],
+          scopes: ['관리 화면: member_admin.html → admin_member.html', '제어 탭: 조합원 명부 / 자금 관리 / 신청 처리 / 입금 매칭', '연결 기능: 선거 생성 / 선거 관리 / 후보 등록 / 투표 포털']
+        },
+        {
+          groupKey: 'accounting',
+          title: '회계관리',
+          description: '회계 입력, 장부, 자동연동, 결산 관련 기능',
+          moduleKeys: ['accounting'],
+          scopes: ['회계 화면: accounting.html']
+        },
+        {
+          groupKey: 'minutes',
+          title: '회의/공문',
+          description: '회의록, 공문, 총회 자료 작성 및 공개 관리',
+          moduleKeys: ['minutes'],
+          scopes: ['의사록: minutes/minutes_admin.html', '공문: minutes/notices_admin.html', '총회 자료: minutes/materials_admin.html', '통합 화면: minutes/admin_minutes.html']
+        },
+        {
+          groupKey: 'documents',
+          title: '문서함·전자서명',
+          description: '공개 문서, 총회 자료, 규정 문서 열람과 임원/대의원 전자서명',
+          moduleKeys: ['documents', 'signature'],
+          scopes: ['문서함 화면: minutes/minutes_view.html', '전자서명 화면: minutes/minutes_sign.html']
+        },
+        {
+          groupKey: 'audit',
+          title: '감사 로그',
+          description: '중요 작업 기록은 기본 기능으로 유지됩니다.',
+          moduleKeys: ['audit'],
+          forceEnabled: true,
+          scopes: ['감사 로그: audit_logs.html']
+        }
+      ];
+    }
+
+    function buildModuleStateMap(list) {
+      const map = {};
+      (Array.isArray(list) ? list : []).forEach((row) => {
+        const key = String(row?.module_key || '').trim();
+        if (!key) return;
+        map[key] = {
+          moduleKey: key,
+          moduleName: row?.module_name || key,
+          isEnabled: row?.is_enabled !== false
+        };
+      });
+      return map;
+    }
+
+    function getModuleGroupSelection(group, stateMap) {
+      const keys = Array.isArray(group?.moduleKeys) ? group.moduleKeys : [];
+      const states = keys.map((key) => {
+        if (!stateMap || !(key in stateMap)) return true;
+        return stateMap[key].isEnabled !== false;
+      });
+      return {
+        checked: states.every(Boolean),
+        partial: states.some(Boolean) && !states.every(Boolean)
+      };
+    }
+
+    function getModuleBillingMeta(moduleKey) {
+      const normalizedKey = String(moduleKey || '').trim();
+      const basePlan = PLATFORM_PRICING_CATALOG.basePlan || {};
+      const workforcePlan = findPricingModule('workforce') || {};
+
+      if (['workforce_bundle', 'approval', 'mypage', 'hr', 'permission'].includes(normalizedKey)) {
+        return {
+          groupKey: 'workforce_bundle',
+          groupName: '인사·전자결재 세트',
+          monthlyFee: null,
+          amountLabel: getPricingAmountLabel(workforcePlan),
+          badgeLabel: `인사·전자결재 세트 · ${getPricingAmountLabel(workforcePlan)}`,
+          note: '전자결재, 마이페이지, 직원관리, 권한관리는 청구 시 한 세트로 계산합니다.',
+          badgeClass: 'unpriced',
+          amountClass: 'unpriced',
+          priced: false
+        };
+      }
+
+      if (['site_admin', 'member_admin', 'member', 'vote'].includes(normalizedKey)) {
+        return {
+          groupKey: 'lite_base',
+          groupName: `${basePlan.name || 'Lite'} 기본형`,
+          monthlyFee: null,
+          amountLabel: getPricingAmountLabel(basePlan),
+          badgeLabel: `${basePlan.name || 'Lite'} 기본형 · ${getPricingAmountLabel(basePlan)}`,
+          note: '홈페이지 관리, 조합원 관리, 조합원 포털, 선거/투표는 Lite 기본형 범위로 안내합니다.',
+          badgeClass: 'unpriced',
+          amountClass: 'unpriced',
+          priced: false
+        };
+      }
+
+      if (normalizedKey === 'audit') {
+        return {
+          groupKey: 'audit_included',
+          groupName: '감사 로그',
+          monthlyFee: 0,
+          amountLabel: '기본 포함',
+          badgeLabel: '기본 포함',
+          note: '감사 로그는 운영 기본 기능으로 유지됩니다.',
+          badgeClass: 'included',
+          amountClass: 'included',
+          priced: false
+        };
+      }
+
+      if (normalizedKey === 'accounting') {
+        return {
+          groupKey: 'accounting_unpriced',
+          groupName: '회계관리',
+          monthlyFee: 0,
+          amountLabel: '미정',
+          badgeLabel: '미정',
+          note: '회계관리는 판매 정책을 별도로 정리할 예정입니다.',
+          badgeClass: 'unpriced',
+          amountClass: 'unpriced',
+          priced: false
+        };
+      }
+
+      if (normalizedKey === 'minutes') {
+        const optionPlan = findPricingModule('minutes') || {};
+        return {
+          groupKey: normalizedKey,
+          groupName: optionPlan.name || normalizedKey,
+          monthlyFee: null,
+          amountLabel: getPricingAmountLabel(optionPlan),
+          badgeLabel: `${optionPlan.name || normalizedKey} · ${getPricingAmountLabel(optionPlan)}`,
+          note: optionPlan.scope || '옵션 모듈',
+          badgeClass: 'unpriced',
+          amountClass: 'unpriced',
+          priced: false
+        };
+      }
+
+      if (['documents', 'signature'].includes(normalizedKey)) {
+        const optionPlan = findPricingModule('document_bundle') || {};
+        return {
+          groupKey: 'document_bundle',
+          groupName: optionPlan.name || '문서함·전자서명',
+          monthlyFee: null,
+          amountLabel: getPricingAmountLabel(optionPlan),
+          badgeLabel: `${optionPlan.name || '문서함·전자서명'} · ${getPricingAmountLabel(optionPlan)}`,
+          note: optionPlan.scope || '옵션 모듈',
+          badgeClass: 'unpriced',
+          amountClass: 'unpriced',
+          priced: false
+        };
+      }
+
+      return null;
+    }
+
+    function renderModuleBillingSummary() {
+      const linesEl = document.getElementById('moduleBillingLines');
+      const totalEl = document.getElementById('moduleBillingTotal');
+      if (!linesEl || !totalEl) return;
+
+      const enabledKeys = Array.from(document.querySelectorAll('.module-toggle'))
+        .filter((el) => el.checked)
+        .map((el) => String(el.dataset.moduleGroupKey || '').trim())
+        .filter(Boolean);
+
+      const billingGroups = new Map();
+      enabledKeys.forEach((key) => {
+        const meta = getModuleBillingMeta(key);
+        if (!meta || billingGroups.has(meta.groupKey)) return;
+        billingGroups.set(meta.groupKey, meta);
+      });
+
+      if (billingGroups.size === 0) {
+        linesEl.innerHTML = '<div class="form-hint">활성화된 유료 모듈이 없습니다.</div>';
+        totalEl.innerHTML = '<span>예상 월 요금</span><span>0원</span>';
+        return;
+      }
+
+      let totalMonthlyFee = 0;
+      let hasPendingPricing = false;
+      linesEl.innerHTML = Array.from(billingGroups.values()).map((meta) => {
+        if (meta.priced) totalMonthlyFee += Number(meta.monthlyFee || 0);
+        if (!meta.priced && String(meta.amountLabel || '').trim() === '미정') hasPendingPricing = true;
+        return `
+          <div class="billing-line">
+            <div>
+              <div class="billing-line-title">${escapeHtml(meta.groupName)}</div>
+              <div class="billing-line-note">${escapeHtml(meta.note || '')}</div>
+            </div>
+            <div class="billing-line-amount ${escapeHtml(meta.amountClass || '')}">${escapeHtml(meta.amountLabel)}</div>
+          </div>
+        `;
+      }).join('');
+
+      totalEl.innerHTML = `
+        <span>예상 월 요금</span>
+        <span>${escapeHtml(hasPendingPricing ? '미정' : formatWon(totalMonthlyFee))}</span>
+      `;
+    }
+
+    function renderPricingPanel() {
+      const catalog = PLATFORM_PRICING_CATALOG;
+      const vatEl = document.getElementById('pricingVatNotice');
+      const overviewEl = document.getElementById('pricingOverviewGrid');
+      const addonBody = document.getElementById('pricingAddonTableBody');
+      if (!vatEl || !overviewEl || !addonBody) return;
+
+      vatEl.textContent = catalog.vatNotice || '부가세 별도';
+      overviewEl.innerHTML = `
+        <article class="pricing-card">
+          <h3>${escapeHtml(catalog.freePlan.name)}</h3>
+          <div class="pricing-amount">${escapeHtml(getPricingAmountLabel(catalog.freePlan))}</div>
+          <div class="small text-muted mb-2">초기 구축 ${escapeHtml(getPricingSetupAmountLabel(catalog.freePlan))}</div>
+          <div class="form-hint mb-2">${escapeHtml(catalog.freePlan.scope)}</div>
+          <ul class="pricing-list">
+            ${(catalog.freePlan.limits || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+          </ul>
+        </article>
+        <article class="pricing-card">
+          <h3>${escapeHtml(catalog.basePlan.name)}</h3>
+          <div class="pricing-amount">${escapeHtml(getPricingAmountLabel(catalog.basePlan))}</div>
+          <div class="small text-muted mb-2">초기 구축 ${escapeHtml(getPricingSetupAmountLabel(catalog.basePlan))}</div>
+          <div class="form-hint">${escapeHtml(catalog.basePlan.scope)}</div>
+        </article>
+      `;
+
+      addonBody.innerHTML = (catalog.modulePricing || []).map((item) => `
+        <tr>
+          <td class="fw-bold">${escapeHtml(item.name || item.key || '-')}</td>
+          <td>${escapeHtml(getPricingAmountLabel(item))}</td>
+          <td>${escapeHtml(item.scope || '-')}</td>
+        </tr>
+      `).join('');
+    }
+
+    function syncPlatformTelegramSettingsUi() {
+      const enabledToggle = document.getElementById('platformTelegramEnabledToggle');
+      const tokenInput = document.getElementById('platformTelegramBotTokenInput');
+      const tokenHint = document.getElementById('platformTelegramTokenHint');
+      const webhookHint = document.getElementById('platformTelegramWebhookHint');
+      if (!enabledToggle || !tokenInput || !tokenHint || !webhookHint) return;
+
+      const enabled = platformTelegramSettings?.enabled === true;
+      const hasToken = platformTelegramSettings?.has_token === true;
+      const botUsername = String(platformTelegramSettings?.bot_username || '').trim();
+      const webhookUrl = String(platformTelegramSettings?.webhook_url || '').trim();
+      const webhookSyncedAt = String(platformTelegramSettings?.webhook_synced_at || '').trim();
+
+      enabledToggle.checked = enabled;
+      tokenInput.value = '';
+      tokenHint.textContent = hasToken
+        ? '현재 저장 상태: 공용 봇 토큰 저장됨 (새로 입력하면 교체됩니다).'
+        : '현재 저장 상태: 공용 봇 토큰 미등록';
+
+      if (!enabled) {
+        webhookHint.textContent = '현재 연결 상태: 공용 Telegram 봇 사용 안 함';
+        return;
+      }
+      if (!botUsername) {
+        webhookHint.textContent = '현재 연결 상태: 봇 username 미확인 (저장 및 동기화 필요)';
+        return;
+      }
+      webhookHint.textContent = webhookUrl && webhookSyncedAt
+        ? `현재 연결 상태: @${botUsername} / 웹훅 등록 완료`
+        : `현재 연결 상태: @${botUsername} / 웹훅 등록 필요`;
+    } // End of syncPlatformTelegramSettingsUi
+
+    async function loadPlatformTelegramSettings() {
+      const { data, error } = await _supabase.rpc('platform_get_telegram_bot_settings');
+      if (error) throw error;
+      platformTelegramSettings = data || {};
+      syncPlatformTelegramSettingsUi();
+      return platformTelegramSettings;
+    } // End of loadPlatformTelegramSettings
+
+    function collectPlatformTelegramSettingsFromUi() {
+      return {
+        enabled: !!document.getElementById('platformTelegramEnabledToggle')?.checked,
+        botToken: String(document.getElementById('platformTelegramBotTokenInput')?.value || '').trim(),
+      };
+    } // End of collectPlatformTelegramSettingsFromUi
+
+    async function syncPlatformTelegramWebhookSettings(platformTelegramConfig) {
+      if (!platformTelegramConfig?.enabled) return { ok: true, skipped: 'telegram_disabled' };
+      const { data: payload, error } = await _supabase.functions.invoke('erp-telegram-admin', {
+        body: {
+          action: 'syncWebhook',
+          connectWebhookUrl: `${SUPABASE_URL}/functions/v1/erp-telegram-connect-webhook`
+        }
+      });
+      if (error) {
+        throw error;
+      }
+      if (payload?.ok === false) {
+        throw new Error(payload?.detail || payload?.error || 'PLATFORM_TELEGRAM_WEBHOOK_SYNC_FAILED');
+      }
+      platformTelegramSettings = {
+        ...(platformTelegramSettings || {}),
+        enabled: platformTelegramConfig.enabled,
+        has_token: true,
+        bot_username: payload?.bot_username || '',
+        webhook_url: payload?.webhook_url || '',
+        webhook_synced_at: payload?.synced_at || null,
+      };
+      syncPlatformTelegramSettingsUi();
+      return payload;
+    } // End of syncPlatformTelegramWebhookSettings
+
+    async function savePlatformTelegramSettings() {
+      setStatus('', '');
+      setLoadingState('btnSavePlatformTelegram', true, '저장 중...');
+      try {
+        const config = collectPlatformTelegramSettingsFromUi();
+        const { data, error } = await _supabase.rpc('platform_upsert_telegram_bot_settings', {
+          p_enabled: config.enabled,
+          p_bot_token: config.botToken || null,
+        });
+        if (error) throw error;
+        platformTelegramSettings = data || {};
+        syncPlatformTelegramSettingsUi();
+        await syncPlatformTelegramWebhookSettings(config);
+        await loadPlatformTelegramSettings();
+        setStatus('공용 Telegram 봇 설정을 저장하고 webhook 동기화를 완료했습니다.', 'alert-success');
+      } catch (err) {
+        console.error('savePlatformTelegramSettings failed:', err);
+        setStatus(`공용 Telegram 봇 저장 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnSavePlatformTelegram', false, '저장 중...');
+      }
+    } // End of savePlatformTelegramSettings
+
+    function romanizeHangulChar(char) {
+      const code = char.charCodeAt(0);
+      if (code < 0xac00 || code > 0xd7a3) return char.toLowerCase();
+      const offset = code - 0xac00;
+      const initialIndex = Math.floor(offset / 588);
+      const medialIndex = Math.floor((offset % 588) / 28);
+      const finalIndex = offset % 28;
+      return `${HANGUL_INITIALS[initialIndex]}${HANGUL_MEDIALS[medialIndex]}${HANGUL_FINALS[finalIndex]}`;
+    }
+
+    function generateCoopCodeFromName(name) {
+      const source = String(name || '').trim();
+      if (!source) return '';
+
+      let buffer = '';
+      for (const char of source) {
+        const code = char.charCodeAt(0);
+        if (code >= 0xac00 && code <= 0xd7a3) {
+          buffer += romanizeHangulChar(char);
+          continue;
+        }
+        if (/[A-Za-z0-9]/.test(char)) {
+          buffer += char.toLowerCase();
+          continue;
+        }
+        buffer += '-';
+      }
+
+      const slug = buffer
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+      return slug || 'coop';
+    }
+
+    function syncCoopCodeFromName() {
+      if (coopCodeManuallyEdited) return;
+      const coopName = document.getElementById('coopNameInput')?.value || '';
+      const generated = generateCoopCodeFromName(coopName);
+      const codeInput = document.getElementById('coopCodeInput');
+      if (codeInput) codeInput.value = generated;
+    }
+
+    function handleCoopNameInput() {
+      syncCoopCodeFromName();
+    }
+
+    function handleCoopCodeInput() {
+      const codeInput = document.getElementById('coopCodeInput');
+      if (!codeInput) return;
+      coopCodeManuallyEdited = String(codeInput.value || '').trim() !== '';
+    }
+
+    function fillCurrentUser() {
+      const stored = localStorage.getItem('erp_user');
+      let parsed = null;
+      try {
+        parsed = stored ? JSON.parse(stored) : null;
+      } catch (_) {
+        parsed = null;
+      }
+      const name = parsed?.emp_name || currentUser?.email || '-';
+      const dept = parsed?.department || '-';
+      const pos = parsed?.position || '-';
+      document.getElementById('currentUserName').textContent = name;
+      document.getElementById('currentUserMeta').textContent = `${dept} / ${pos}`;
+    }
+
+    function renderPlatformContext() {
+      const chipPlatform = document.getElementById('chipPlatform');
+      const chipBootstrap = document.getElementById('chipBootstrap');
+      const bootstrapPanel = document.getElementById('bootstrapPanel');
+      const createPanel = document.getElementById('createPanel');
+      const pricingPanel = document.getElementById('pricingPanel');
+      const telegramPanel = document.getElementById('telegramPanel');
+      const listPanel = document.getElementById('listPanel');
+      const isPlatformAdmin = platformContext?.is_platform_admin === true;
+      const isBootstrapMode = platformContext?.bootstrap_mode === true;
+      const isClaimedByMe = platformContext?.claimed_by_me === true;
+
+      if (isPlatformAdmin) {
+        chipPlatform.textContent = '통합 관리자 접근 가능';
+        chipPlatform.className = 'status-chip';
+      } else {
+        chipPlatform.textContent = '통합 관리자 아님';
+        chipPlatform.className = 'status-chip warn';
+      }
+
+      if (isBootstrapMode && !isClaimedByMe) {
+        chipBootstrap.classList.remove('hidden');
+        bootstrapPanel.classList.remove('hidden');
+        createPanel.classList.add('hidden');
+        pricingPanel.classList.add('hidden');
+        telegramPanel.classList.add('hidden');
+        listPanel.classList.add('hidden');
+        return;
+      }
+
+      chipBootstrap.classList.add('hidden');
+      bootstrapPanel.classList.add('hidden');
+      if (isPlatformAdmin) {
+        createPanel.classList.remove('hidden');
+        pricingPanel.classList.remove('hidden');
+        telegramPanel.classList.remove('hidden');
+        listPanel.classList.remove('hidden');
+      } else {
+        createPanel.classList.add('hidden');
+        pricingPanel.classList.add('hidden');
+        telegramPanel.classList.add('hidden');
+        listPanel.classList.add('hidden');
+      }
+    }
+
+    async function loadPlatformContext() {
+      const { data, error } = await _supabase.rpc('platform_get_context');
+      if (error) throw error;
+      platformContext = data || null;
+      renderPlatformContext();
+      return platformContext;
+    }
+
+    function renderCoopTable(rows) {
+      coopRows = Array.isArray(rows) ? rows.slice() : [];
+      const wrap = document.getElementById('coopTableWrap');
+      document.getElementById('coopCountLabel').textContent = `${coopRows.length}건`;
+      if (coopRows.length === 0) {
+        wrap.innerHTML = '<div class="empty-box">등록된 조합이 없습니다.</div>';
+        return;
+      }
+
+      wrap.innerHTML = `
+        <div class="table-responsive">
+          <table class="table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>조합명</th>
+                <th>코드</th>
+                <th>프로필</th>
+                <th>상태</th>
+                <th>직원 수</th>
+                <th>관리자 수</th>
+                <th>대표 관리자</th>
+                <th>관리자 이메일</th>
+                <th class="text-end">작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${coopRows.map((row) => `
+                <tr>
+                  <td class="fw-bold">${escapeHtml(row.coop_name || '-')}</td>
+                  <td><code>${escapeHtml(row.coop_code || '-')}</code></td>
+                  <td>${renderProfileBadge(row.runtime_profile)}</td>
+                  <td><span class="badge-soft ${row.is_active ? '' : 'off'}">${row.is_active ? '활성' : '중지'}</span></td>
+                  <td>${escapeHtml(row.employee_count ?? 0)}</td>
+                  <td>${escapeHtml(row.admin_count ?? 0)}</td>
+                  <td>${escapeHtml(row.primary_admin_name || '-')}</td>
+                  <td>${escapeHtml(row.primary_admin_email || '-')}</td>
+                  <td class="text-end">
+                    <button class="btn btn-outline-primary btn-sm" type="button" onclick="openManageModal('${escapeHtml(row.coop_id)}')">설정</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function loadCoopList() {
+      const wrap = document.getElementById('coopTableWrap');
+      wrap.innerHTML = '<div class="empty-box">조합 목록을 불러오는 중입니다.</div>';
+      const { data, error } = await _supabase.rpc('platform_list_coops');
+      if (error) throw error;
+      renderCoopTable(Array.isArray(data) ? data : []);
+    }
+
+    async function claimPlatformAdmin() {
+      setStatus('', '');
+      setLoadingState('btnClaimAdmin', true, '등록 중...');
+      try {
+        const { data, error } = await _supabase.rpc('platform_claim_admin');
+        if (error) throw error;
+        if (!data || data.ok !== true) throw new Error('통합 관리자 등록 결과를 확인하지 못했습니다.');
+        setStatus('현재 계정을 첫 통합 관리자로 등록했습니다.', 'alert-success');
+        await loadPlatformContext();
+        await loadCoopList();
+      } catch (err) {
+        console.error('claimPlatformAdmin failed:', err);
+        setStatus(`통합 관리자 등록 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnClaimAdmin', false, '등록 중...');
+      }
+    }
+
+    function resetCreateForm(clearResult) {
+      const shouldClearResult = clearResult !== false;
+      document.getElementById('createForm').reset();
+      document.getElementById('runtimeProfileInput').value = 'workforce_lite';
+      document.getElementById('adminPositionInput').value = '이사장';
+      document.getElementById('adminDepartmentInput').value = '사무국';
+      coopCodeManuallyEdited = false;
+      syncCoopCodeFromName();
+      if (shouldClearResult) {
+        document.getElementById('createResultBox').classList.add('hidden');
+        document.getElementById('createResultBox').textContent = '';
+      }
+    }
+
+    async function submitCreateForm(event) {
+      event.preventDefault();
+      setStatus('', '');
+      const resultBox = document.getElementById('createResultBox');
+      resultBox.classList.add('hidden');
+      resultBox.textContent = '';
+
+      const payload = {
+        p_coop_code: document.getElementById('coopCodeInput').value.trim().toLowerCase() || generateCoopCodeFromName(document.getElementById('coopNameInput').value),
+        p_coop_name: document.getElementById('coopNameInput').value.trim(),
+        p_biz_num: document.getElementById('bizNumInput').value.trim(),
+        p_admin_name: document.getElementById('adminNameInput').value.trim(),
+        p_admin_email: document.getElementById('adminEmailInput').value.trim().toLowerCase(),
+        p_admin_position: document.getElementById('adminPositionInput').value.trim(),
+        p_admin_department: document.getElementById('adminDepartmentInput').value.trim(),
+        p_runtime_profile: document.getElementById('runtimeProfileInput').value
+      };
+
+      if (!payload.p_coop_code || !payload.p_coop_name || !payload.p_admin_name || !payload.p_admin_email) {
+        setStatus('조합 코드, 조합명, 첫 관리자 이름, 이메일은 필수입니다.', 'alert-danger');
+        return;
+      }
+
+      setLoadingState('btnCreateCoop', true, '생성 중...');
+      try {
+        const { data, error } = await _supabase.rpc('platform_create_coop_with_admin', payload);
+        if (error) throw error;
+        if (!data || data.ok !== true) throw new Error('조합 생성 결과를 확인하지 못했습니다.');
+
+        resultBox.textContent =
+          `조합 생성 완료\n` +
+          `- 조합명: ${data.coop_name}\n` +
+          `- 조합 코드: ${data.coop_code}\n` +
+          `- 운영 프로필: ${getProfileDisplayLabel(data.runtime_profile || payload.p_runtime_profile)}\n` +
+          `- 첫 관리자 사번: ${data.admin_emp_id}\n` +
+          `- 첫 관리자 이메일: ${data.admin_email}\n` +
+          `- 기본 모듈: ${payload.p_runtime_profile === 'workforce_lite' ? '인사·전자결재 중심, 회계관리·홈페이지 관리·조합원 관리는 필요 시 켜서 사용' : '전체형 기본값'}\n\n` +
+          `다음 단계: 등록한 이메일로 ERP 메인에서 로그인 링크를 요청하면 Auth 계정이 연결됩니다.`;
+        resultBox.classList.remove('hidden');
+        setStatus('새 조합과 첫 ERP 관리자 등록이 완료되었습니다.', 'alert-success');
+        resetCreateForm(false);
+        resultBox.classList.remove('hidden');
+        await loadCoopList();
+      } catch (err) {
+        console.error('submitCreateForm failed:', err);
+        setStatus(`조합 생성 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnCreateCoop', false, '생성 중...');
+      }
+    }
+
+    function openManageModal(coopId) {
+      const row = coopRows.find((item) => String(item.coop_id) === String(coopId));
+      selectedCoop = {
+        coop_id: coopId,
+        coop_name: row?.coop_name || '-',
+        is_active: row?.is_active === true,
+        runtime_profile: row?.runtime_profile || 'workforce_lite'
+      };
+      document.getElementById('manageCoopTitle').textContent = selectedCoop.coop_name;
+      document.getElementById('manageCoopMeta').textContent = `조합 ID: ${selectedCoop.coop_id}`;
+      document.getElementById('manageCoopActiveToggle').checked = selectedCoop.is_active;
+      document.getElementById('manageActiveLabel').textContent = selectedCoop.is_active ? '활성' : '중지';
+      document.getElementById('manageRuntimeProfileSelect').value = selectedCoop.runtime_profile;
+      document.getElementById('manageModuleGrid').innerHTML = '<div class="empty-box">모듈 정보를 불러오는 중입니다.</div>';
+      document.getElementById('manageAdminSelect').innerHTML = '<option>불러오는 중...</option>';
+      setManageStatus('', '');
+      if (!coopManageModal) coopManageModal = new bootstrap.Modal(document.getElementById('coopManageModal'));
+      coopManageModal.show();
+      loadManageModalData(false);
+    }
+
+    function getProfileLabel(profile) {
+      if (profile === 'legacy_full') return '전체형';
+      if (profile === 'workforce_lite') return '간소화';
+      return profile || '-';
+    }
+
+    function getProfileDisplayLabel(profile) {
+      const safe = String(profile || '').trim();
+      if (!safe) return '-';
+      const label = getProfileLabel(safe);
+      if (label === safe) return safe;
+      return `${label} (${safe})`;
+    }
+
+    function renderProfileBadge(profile) {
+      const value = profile || 'workforce_lite';
+      const cls = value === 'legacy_full' ? 'profile-legacy' : 'profile-lite';
+      return `<span class="badge-soft ${cls}" title="${escapeHtml(value)}">${escapeHtml(getProfileLabel(value))}</span>`;
+    }
+
+    async function loadManageModalData(showNotice) {
+      if (!selectedCoop || !selectedCoop.coop_id) return;
+      if (showNotice) setManageStatus('설정 정보를 새로 불러왔습니다.', 'alert-secondary');
+      try {
+        const [moduleRes, adminRes] = await Promise.all([
+          _supabase.rpc('platform_list_coop_modules', { p_coop_id: selectedCoop.coop_id }),
+          _supabase.rpc('platform_list_coop_admin_candidates', { p_coop_id: selectedCoop.coop_id })
+        ]);
+
+        if (moduleRes.error) throw moduleRes.error;
+        if (adminRes.error) throw adminRes.error;
+
+        renderModuleGrid(Array.isArray(moduleRes.data) ? moduleRes.data : []);
+        renderAdminCandidates(Array.isArray(adminRes.data) ? adminRes.data : []);
+      } catch (err) {
+        console.error('loadManageModalData failed:', err);
+        setManageStatus(`조합 설정 조회 실패: ${err.message}`, 'alert-danger');
+      }
+    }
+
+    function renderModuleGrid(list) {
+      const grid = document.getElementById('manageModuleGrid');
+      if (!Array.isArray(list) || list.length === 0) {
+        grid.innerHTML = '<div class="empty-box">설정된 모듈이 없습니다.</div>';
+        renderModuleBillingSummary();
+        return;
+      }
+      const stateMap = buildModuleStateMap(list);
+      grid.innerHTML = getModuleGroupCatalog().map((group) => {
+        const selection = getModuleGroupSelection(group, stateMap);
+        const billingMeta = getModuleBillingMeta(group.groupKey);
+        const noteText = selection.partial
+          ? '현재 세부 모듈 상태가 나뉘어 있습니다. 저장하면 묶음 기준으로 통일됩니다.'
+          : (billingMeta?.note || group.description || '');
+        return `
+        <label class="module-tile">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <div class="fw-bold">${escapeHtml(group.title)}</div>
+              <div class="form-hint"><code>${escapeHtml(group.moduleKeys.join(' + '))}</code></div>
+              ${billingMeta ? `
+                  <div class="module-price-badge ${escapeHtml(billingMeta.badgeClass || '')}">${escapeHtml(billingMeta.badgeLabel)}</div>
+              ` : ''}
+              <div class="form-hint mt-1">${escapeHtml(noteText)}</div>
+              ${Array.isArray(group.scopes) && group.scopes.length ? `
+                <ul class="module-scope-list">
+                  ${group.scopes.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+                </ul>
+              ` : ''}
+            </div>
+            <div class="form-check form-switch fs-5 mb-0">
+              <input class="form-check-input module-toggle" type="checkbox" data-module-group-key="${escapeHtml(group.groupKey)}" ${selection.checked ? 'checked' : ''} ${group.forceEnabled ? 'disabled' : ''}>
+            </div>
+          </div>
+        </label>
+      `;
+      }).join('');
+      document.querySelectorAll('.module-toggle').forEach((el) => {
+        el.addEventListener('change', renderModuleBillingSummary);
+      });
+      renderModuleBillingSummary();
+    }
+
+    function renderAdminCandidates(list) {
+      const select = document.getElementById('manageAdminSelect');
+      if (!Array.isArray(list) || list.length === 0) {
+        select.innerHTML = '<option value="">직원 없음</option>';
+        return;
+      }
+      let preferredEmpId = '';
+      list.forEach((row) => {
+        if (!preferredEmpId && row.role === 'admin_all') preferredEmpId = row.emp_id;
+      });
+      if (!preferredEmpId) preferredEmpId = list[0].emp_id;
+      select.innerHTML = list.map((row) => {
+        const roleLabel = row.role || '-';
+        const activeLabel = row.is_active ? '활성' : '비활성';
+        const selected = row.emp_id === preferredEmpId ? 'selected' : '';
+        return `<option value="${escapeHtml(row.emp_id)}" ${selected}>${escapeHtml(row.emp_name || row.email || row.emp_id)} / ${escapeHtml(roleLabel)} / ${escapeHtml(activeLabel)}</option>`;
+      }).join('');
+    }
+
+    function applyStandardPreset() {
+      const runtimeProfile = document.getElementById('manageRuntimeProfileSelect')?.value || selectedCoop?.runtime_profile || 'workforce_lite';
+      document.querySelectorAll('.module-toggle').forEach((el) => {
+        const key = String(el.dataset.moduleGroupKey || '');
+        if (key === 'audit') {
+          el.checked = true;
+          return;
+        }
+        if (runtimeProfile === 'workforce_lite' && (key === 'accounting' || key === 'site_admin' || key === 'member_admin')) {
+          el.checked = false;
+          return;
+        }
+        el.checked = true;
+      });
+      renderModuleBillingSummary();
+      setManageStatus('표준 모듈 프리셋을 적용했습니다. 저장 버튼을 눌러 확정하세요.', 'alert-secondary');
+    }
+
+    async function saveCoopActive() {
+      if (!selectedCoop || !selectedCoop.coop_id) return;
+      setManageStatus('', '');
+      setLoadingState('btnSaveCoopActive', true, '저장 중...');
+      try {
+        const isActive = document.getElementById('manageCoopActiveToggle').checked;
+        const { data, error } = await _supabase.rpc('platform_set_coop_active', {
+          p_coop_id: selectedCoop.coop_id,
+          p_is_active: isActive
+        });
+        if (error) throw error;
+        selectedCoop.is_active = data.is_active === true;
+        document.getElementById('manageActiveLabel').textContent = selectedCoop.is_active ? '활성' : '중지';
+        setManageStatus(`조합 상태를 ${selectedCoop.is_active ? '활성' : '중지'}으로 저장했습니다.`, 'alert-success');
+        await loadCoopList();
+      } catch (err) {
+        console.error('saveCoopActive failed:', err);
+        setManageStatus(`조합 상태 저장 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnSaveCoopActive', false, '저장 중...');
+      }
+    }
+
+    async function saveCoopProfile() {
+      if (!selectedCoop || !selectedCoop.coop_id) return;
+      const runtimeProfile = document.getElementById('manageRuntimeProfileSelect').value;
+      if (!runtimeProfile) {
+        setManageStatus('운영 프로필을 선택해주세요.', 'alert-danger');
+        return;
+      }
+      setManageStatus('', '');
+      setLoadingState('btnSaveCoopProfile', true, '저장 중...');
+      try {
+        const { data, error } = await _supabase.rpc('platform_set_coop_runtime_profile', {
+          p_coop_id: selectedCoop.coop_id,
+          p_runtime_profile: runtimeProfile
+        });
+        if (error) throw error;
+        selectedCoop.runtime_profile = data.runtime_profile;
+        setManageStatus(`운영 프로필을 ${getProfileDisplayLabel(data.runtime_profile)}로 저장했습니다.`, 'alert-success');
+        await loadCoopList();
+      } catch (err) {
+        console.error('saveCoopProfile failed:', err);
+        setManageStatus(`운영 프로필 저장 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnSaveCoopProfile', false, '저장 중...');
+      }
+    }
+
+    async function saveCoopModules() {
+      if (!selectedCoop || !selectedCoop.coop_id) return;
+      setManageStatus('', '');
+      setLoadingState('btnSaveModules', true, '저장 중...');
+      try {
+        const payload = {};
+        const groupMap = {};
+        getModuleGroupCatalog().forEach((group) => {
+          groupMap[group.groupKey] = group;
+        });
+        document.querySelectorAll('.module-toggle').forEach((el) => {
+          const groupKey = String(el.dataset.moduleGroupKey || '').trim();
+          const group = groupMap[groupKey];
+          if (!group) return;
+          const enabled = group.forceEnabled ? true : el.checked;
+          group.moduleKeys.forEach((moduleKey) => {
+            payload[moduleKey] = enabled;
+          });
+        });
+        const { data, error } = await _supabase.rpc('platform_save_coop_modules', {
+          p_coop_id: selectedCoop.coop_id,
+          p_modules: payload
+        });
+        if (error) throw error;
+        setManageStatus(`모듈 설정을 저장했습니다. (${data.updated_count || 0}건)`, 'alert-success');
+      } catch (err) {
+        console.error('saveCoopModules failed:', err);
+        setManageStatus(`모듈 저장 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnSaveModules', false, '저장 중...');
+      }
+    }
+
+    async function savePrimaryAdmin() {
+      if (!selectedCoop || !selectedCoop.coop_id) return;
+      const targetEmpId = document.getElementById('manageAdminSelect').value;
+      if (!targetEmpId) {
+        setManageStatus('대표 관리자로 지정할 직원을 선택해주세요.', 'alert-danger');
+        return;
+      }
+      setManageStatus('', '');
+      setLoadingState('btnSavePrimaryAdmin', true, '저장 중...');
+      try {
+        const { data, error } = await _supabase.rpc('platform_assign_primary_admin', {
+          p_coop_id: selectedCoop.coop_id,
+          p_emp_id: targetEmpId
+        });
+        if (error) throw error;
+        setManageStatus(`대표 관리자를 ${data.emp_name || data.email}로 변경했습니다.`, 'alert-success');
+        await loadManageModalData(false);
+        await loadCoopList();
+      } catch (err) {
+        console.error('savePrimaryAdmin failed:', err);
+        setManageStatus(`대표 관리자 저장 실패: ${err.message}`, 'alert-danger');
+      } finally {
+        setLoadingState('btnSavePrimaryAdmin', false, '저장 중...');
+      }
+    }
+
+    async function ensureSession() {
+      const { data, error } = await _supabase.auth.getUser();
+      if (error) throw error;
+      if (!data?.user) {
+        window.location.href = 'index.html';
+        return false;
+      }
+      currentUser = data.user;
+      fillCurrentUser();
+      return true;
+    }
+
+    async function initPage() {
+      setStatus('', '');
+      try {
+        const hasSession = await ensureSession();
+        if (!hasSession) return;
+        await loadPlatformContext();
+        if (!platformContext || platformContext.is_platform_admin !== true) {
+          setStatus('통합 관리자 권한이 없습니다. ERP 홈으로 이동합니다.', 'alert-danger');
+          setTimeout(function() {
+            window.location.href = 'index.html';
+          }, 1200);
+          return;
+        }
+        if (platformContext.bootstrap_mode === true && platformContext.claimed_by_me !== true) return;
+        await loadPlatformTelegramSettings();
+        await loadCoopList();
+      } catch (err) {
+        console.error('initPage failed:', err);
+        setStatus(`통합 관리자 화면 초기화 실패: ${err.message}`, 'alert-danger');
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      const modalEl = document.getElementById('coopManageModal');
+      if (modalEl) coopManageModal = new bootstrap.Modal(modalEl);
+      const coopNameInput = document.getElementById('coopNameInput');
+      const coopCodeInput = document.getElementById('coopCodeInput');
+      if (coopNameInput) coopNameInput.addEventListener('input', handleCoopNameInput);
+      if (coopCodeInput) {
+        coopCodeInput.addEventListener('input', handleCoopCodeInput);
+        coopCodeInput.addEventListener('blur', function() {
+          if (!String(coopCodeInput.value || '').trim()) {
+            coopCodeManuallyEdited = false;
+            syncCoopCodeFromName();
+          }
+        });
+      }
+      syncCoopCodeFromName();
+      renderPricingPanel();
+      const activeToggle = document.getElementById('manageCoopActiveToggle');
+      if (activeToggle) {
+        activeToggle.addEventListener('change', function() {
+          document.getElementById('manageActiveLabel').textContent = activeToggle.checked ? '활성' : '중지';
+        });
+      }
+      initPage();
+    });
+  </script>
+<script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
+</body>
+</html>

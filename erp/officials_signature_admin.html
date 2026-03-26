@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<!-- Version: v1.0.10 -->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.10 | officials_signature_admin.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>임원 서명 관리</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { background:#f8f9fa; padding:24px; font-family:'Segoe UI','Malgun Gothic',sans-serif; }
+    .wrap { max-width:1180px; margin:0 auto; }
+    .panel { background:#fff; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,.05); padding:24px; }
+    .helper { color:#6b7280; font-size:.92rem; }
+    .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .table td, .table th { vertical-align:middle; }
+    .seal-preview-box {
+      width: 92px;
+      height: 64px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #f8fafc;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #64748b;
+      font-size: .78rem;
+      overflow: hidden;
+    }
+    .seal-preview-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #fff;
+    }
+    .seal-preview-modal-box {
+      min-height: 360px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f8fafc;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      padding: 16px;
+    }
+    .seal-preview-modal-box img {
+      max-width: 100%;
+      max-height: 420px;
+      object-fit: contain;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
+    }
+    .summary-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 14px 16px;
+      background: #fff;
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+    }
+    .summary-card .label {
+      color: #6b7280;
+      font-size: .82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .summary-card .value {
+      color: #111827;
+      font-size: 1.55rem;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-top: 4px;
+    }
+    .summary-card .desc {
+      color: #6b7280;
+      font-size: .82rem;
+      margin-top: 4px;
+    }
+  </style>
+  <link rel="stylesheet" href="./erp_theme.css?v=1.0.0">
+</head>
+<body class="erp-unified">
+  <div class="wrap">
+    <div class="panel">
+      <div class="toolbar mb-3">
+        <div>
+          <h1 class="h4 mb-1">임원·대의원·선관위원 서명 관리</h1>
+          <div class="helper">임원 관리 전용 서명 화면입니다. 전자서명 모듈만 사용하는 조합도 여기서 서명 이미지를 바로 관리할 수 있습니다.</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-outline-secondary btn-sm" type="button" onclick="location.href='index.html'">ERP 메인</button>
+          <button class="btn btn-outline-secondary btn-sm" type="button" onclick="location.href='officials_admin.html'">임원 관리</button>
+        </div>
+      </div>
+
+      <div id="pageAlert" class="alert d-none" role="alert"></div>
+
+      <div class="alert alert-info small mb-3">
+        <i class="bi bi-info-circle-fill"></i> 업로드한 서명 이미지는 <code>coop_officials.seal_url</code>에 저장되며, 의사록·총회자료 전자서명 화면에서 재사용됩니다. 큰 이미지는 업로드 전에 자동 축소하고, 너무 작은 이미지는 경고만 표시한 뒤 그대로 등록합니다.
+      </div>
+
+      <div class="row g-3 mb-3" id="signatureSummaryRow">
+        <div class="col-sm-6 col-lg-3">
+          <div class="summary-card">
+            <div class="label">대상 인원</div>
+            <div class="value" id="signatureSummaryTotal">-</div>
+            <div class="desc">활성 임원·대의원·선관위원</div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <div class="summary-card">
+            <div class="label">서명 등록</div>
+            <div class="value" id="signatureSummaryRegistered">-</div>
+            <div class="desc">서명 이미지가 등록된 인원</div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <div class="summary-card">
+            <div class="label">미등록</div>
+            <div class="value" id="signatureSummaryMissing">-</div>
+            <div class="desc">업로드가 필요한 인원</div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <div class="summary-card">
+            <div class="label">Telegram 연결</div>
+            <div class="value" id="signatureSummaryTelegram">-</div>
+            <div class="desc">서명 리마인드 수신 가능 인원</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="signatureOpsBanner" class="alert alert-secondary d-none" role="status"></div>
+
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <div class="toolbar mb-3">
+            <div>
+              <h2 class="h6 mb-1">현재 서명 등록 현황</h2>
+              <div class="helper">활성 임원·대의원·선관위원을 기준으로 1명당 1개의 서명 이미지를 관리합니다.</div>
+            </div>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+              <select id="signatureFilter" class="form-select form-select-sm" style="width:180px;">
+                <option value="all">전체 보기</option>
+                <option value="missing">미등록만 보기</option>
+                <option value="registered">등록 완료만 보기</option>
+                <option value="telegram_missing">Telegram 미연결만 보기</option>
+              </select>
+              <button class="btn btn-outline-primary btn-sm" type="button" onclick="copySignatureLoginLink()">서명자 로그인 링크 복사</button>
+              <button class="btn btn-outline-secondary btn-sm" type="button" onclick="loadOfficialSignatures()">새로고침</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>이름</th>
+                  <th>구분</th>
+                  <th>직책</th>
+                  <th>Telegram</th>
+                  <th>미리보기</th>
+                  <th>업로드</th>
+                  <th class="text-end">관리</th>
+                </tr>
+              </thead>
+              <tbody id="officialSignBody">
+                <tr><td colspan="7" class="text-center text-muted py-4">데이터를 불러오는 중입니다...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="sealPreviewModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header bg-light">
+          <div>
+            <h6 class="modal-title fw-bold mb-1" id="sealPreviewTitle">서명 이미지 미리보기</h6>
+            <div class="small text-muted" id="sealPreviewMeta">등록된 서명 이미지를 화면 안에서 바로 확인합니다.</div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="seal-preview-modal-box" id="sealPreviewBody">이미지를 불러오는 중입니다...</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let permissionSet = new Set();
+    let currentRuntime = null;
+    let currentCoopId = '';
+    let currentUser = null;
+    let officialSignGroups = {};
+    let signatureTelegramStatusMap = {};
+    let sealPreviewModal = null;
+    let currentSignatureFilter = 'all';
+    const MAX_SEAL_LONG_EDGE = 1600;
+    const MIN_SEAL_LONG_EDGE_WARNING = 600;
+
+    function readStoredUser() {
+      try { return JSON.parse(localStorage.getItem('erp_user') || 'null'); } catch (_) { return null; }
+    }
+
+    function readStoredPermissions() {
+      try {
+        const raw = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
+        return new Set(Array.isArray(raw) ? raw : []);
+      } catch (_) {
+        return new Set();
+      }
+    }
+
+    async function loadPermissions(user) {
+      const result = new Set();
+      if (!user) return result;
+      const coopId = String(user.coop_id || '').trim();
+      const roleKey = user.role || '';
+      const posKey = user.position || '';
+      if ((!roleKey && !posKey) || !coopId) return result;
+
+      const roleKeys = [roleKey, posKey].filter(Boolean);
+      if (roleKey === 'admin_all') roleKeys.push('admin');
+      if (roleKey === 'admin') roleKeys.push('admin_all');
+
+      const { data, error } = await _supabase
+        .from('erp_role_permissions')
+        .select('permission_key')
+        .eq('coop_id', coopId)
+        .in('scope', ['role', 'position'])
+        .in('role_key', roleKeys)
+        .eq('is_enabled', true);
+
+      if (error) throw error;
+      (data || []).forEach((row) => {
+        if (row.permission_key) result.add(row.permission_key);
+      });
+      return result;
+    }
+
+    function hasPermission(set, key) {
+      if (!set || set.size === 0) return null;
+      return set.has(key);
+    }
+
+    function isModuleEnabled(runtime, moduleKey) {
+      const modules = runtime && typeof runtime.modules === 'object' ? runtime.modules : null;
+      if (!modules || !(moduleKey in modules)) return true;
+      return modules[moduleKey] !== false;
+    }
+
+    async function loadRuntime() {
+      const { data, error } = await _supabase.rpc('get_my_erp_runtime');
+      if (error) throw error;
+      return data || null;
+    }
+
+    async function getMyCoopId() {
+      if (currentRuntime?.coop_id) return currentRuntime.coop_id;
+      const { data, error } = await _supabase.rpc('get_my_coop_id');
+      if (error) throw error;
+      return data || null;
+    }
+
+    function scopeByTenant(query) {
+      const safeCoopId = String(currentCoopId || '').trim();
+      return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
+    }
+
+    function isAdminFallbackUser() {
+      return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'admin_all');
+    }
+
+    function canManageStandaloneSignatures() {
+      if (!isModuleEnabled(currentRuntime, 'signature')) return false;
+      const canMemberAdmin = hasPermission(permissionSet, 'member.admin');
+      const canSiteAdmin = hasPermission(permissionSet, 'site.admin');
+      return isAdminFallbackUser() || canMemberAdmin === true || canSiteAdmin === true;
+    }
+
+    function categoryLabel(category) {
+      const safe = String(category || '').toLowerCase();
+      if (safe === 'delegate') return '대의원';
+      if (safe === 'election_comm') return '선거관리';
+      if (safe === 'executive') return '임원';
+      return safe || '-';
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function showAlert(message, type = 'info') {
+      const el = document.getElementById('pageAlert');
+      if (!el) return;
+      el.className = `alert alert-${type}`;
+      el.textContent = String(message || '');
+      el.classList.remove('d-none');
+    }
+
+    function clearAlert() {
+      const el = document.getElementById('pageAlert');
+      if (!el) return;
+      el.classList.add('d-none');
+      el.textContent = '';
+    }
+
+    function escapeHtmlAttribute(value) {
+      return escapeHtml(value).replace(/`/g, '&#96;');
+    }
+
+    function formatOfficialSignatureTelegramLinkedAt(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const date = new Date(raw);
+      if (Number.isNaN(date.getTime())) return raw;
+      return date.toLocaleString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    async function loadSignatureTelegramStatusMap() {
+      signatureTelegramStatusMap = {};
+      try {
+        const { data, error } = await _supabase.rpc('signature_admin_list_telegram_link_statuses');
+        if (error) throw error;
+        (Array.isArray(data) ? data : []).forEach((row) => {
+          const memberId = String(row?.member_id || '').trim();
+          if (!memberId) return;
+          signatureTelegramStatusMap[memberId] = {
+            linked: true,
+            linked_at: String(row?.linked_at || '').trim()
+          };
+        });
+      } catch (error) {
+        console.warn('signature telegram admin status load failed:', error?.message || error);
+        signatureTelegramStatusMap = {};
+      }
+    }
+
+    function buildSignatureTelegramStatusHtml(memberId) {
+      const safeMemberId = String(memberId || '').trim();
+      if (!safeMemberId) {
+        return '<span class="text-muted small">대상 없음</span>';
+      }
+      const status = signatureTelegramStatusMap[safeMemberId];
+      if (!status?.linked) {
+        return '<span class="badge bg-secondary">미연결</span>';
+      }
+      const linkedAtLabel = formatOfficialSignatureTelegramLinkedAt(status.linked_at);
+      return `
+        <div class="d-flex flex-column gap-1">
+          <span class="badge bg-success">연결됨</span>
+          ${linkedAtLabel ? `<div class="small text-muted">${escapeHtml(linkedAtLabel)}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function updateSignatureSummary(groups) {
+      const entries = Object.values(groups || {});
+      const total = entries.length;
+      const registered = entries.filter((group) => !!group?.seal_url).length;
+      const missing = Math.max(0, total - registered);
+      const telegramLinked = entries.filter((group) => {
+        const memberId = String(group?.member_id || '').trim();
+        return !!(memberId && signatureTelegramStatusMap[memberId]?.linked);
+      }).length;
+
+      const totalEl = document.getElementById('signatureSummaryTotal');
+      const registeredEl = document.getElementById('signatureSummaryRegistered');
+      const missingEl = document.getElementById('signatureSummaryMissing');
+      const telegramEl = document.getElementById('signatureSummaryTelegram');
+      const bannerEl = document.getElementById('signatureOpsBanner');
+      if (totalEl) totalEl.textContent = String(total);
+      if (registeredEl) registeredEl.textContent = String(registered);
+      if (missingEl) missingEl.textContent = String(missing);
+      if (telegramEl) telegramEl.textContent = String(telegramLinked);
+
+      if (bannerEl) {
+        const telegramMissing = Math.max(0, total - telegramLinked);
+        const actionButtons = [];
+        if (missing > 0) {
+          actionButtons.push('<button type="button" class="btn btn-sm btn-outline-primary" onclick="setSignatureFilter(\'missing\')">미등록자 보기</button>');
+        }
+        if (telegramMissing > 0) {
+          actionButtons.push('<button type="button" class="btn btn-sm btn-outline-primary" onclick="setSignatureFilter(\'telegram_missing\')">Telegram 미연결 보기</button>');
+        }
+        if (missing === 0 && telegramMissing === 0) {
+          bannerEl.className = 'alert alert-success';
+          bannerEl.innerHTML = '서명 운영 준비가 완료되었습니다. 현재 활성 임원·대의원·선관위원 모두 서명 이미지와 Telegram 수신 연결이 준비된 상태입니다.';
+        } else {
+          bannerEl.className = 'alert alert-warning';
+          bannerEl.innerHTML = `
+            <div class="fw-bold mb-1">서명 운영 전 확인이 필요한 항목이 있습니다.</div>
+            <div class="small mb-2">서명 이미지 미등록 ${missing}명 / Telegram 미연결 ${telegramMissing}명</div>
+            <div class="d-flex gap-2 flex-wrap">${actionButtons.join('')}</div>
+          `;
+        }
+        bannerEl.classList.remove('d-none');
+      }
+    }
+
+    window.setSignatureFilter = function setSignatureFilter(nextFilter) {
+      currentSignatureFilter = ['all', 'missing', 'registered', 'telegram_missing'].includes(String(nextFilter || '').trim())
+        ? String(nextFilter || '').trim()
+        : 'all';
+      const filterEl = document.getElementById('signatureFilter');
+      if (filterEl) filterEl.value = currentSignatureFilter;
+      loadOfficialSignatures();
+    };
+
+    window.copySignatureLoginLink = async function copySignatureLoginLink() {
+      try {
+        const loginUrl = new URL('../minutes/sign_login.html', window.location.href).href;
+        await navigator.clipboard.writeText(loginUrl);
+        showAlert('서명자 로그인 링크를 복사했습니다.', 'success');
+      } catch (error) {
+        showAlert('서명자 로그인 링크 복사 실패: ' + (error?.message || 'Unknown error'), 'danger');
+      }
+    };
+
+    function getFilteredSignatureGroupEntries(groups) {
+      const filter = String(currentSignatureFilter || 'all').trim();
+      const entries = Object.values(groups || {});
+      if (filter === 'missing') {
+        return entries.filter((group) => !group?.seal_url);
+      }
+      if (filter === 'registered') {
+        return entries.filter((group) => !!group?.seal_url);
+      }
+      if (filter === 'telegram_missing') {
+        return entries.filter((group) => {
+          const memberId = String(group?.member_id || '').trim();
+          return !memberId || !signatureTelegramStatusMap[memberId]?.linked;
+        });
+      }
+      return entries;
+    }
+
+    async function loadImageElementFromFile(file) {
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'));
+          image.src = objectUrl;
+        });
+        return img;
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+
+    async function prepareSealUploadFile(file) {
+      const image = await loadImageElementFromFile(file);
+      const width = Number(image.naturalWidth || image.width || 0);
+      const height = Number(image.naturalHeight || image.height || 0);
+      if (!width || !height) {
+        throw new Error('IMAGE_DIMENSION_READ_FAILED');
+      }
+
+      const longEdge = Math.max(width, height);
+      const shouldWarnSmall = longEdge < MIN_SEAL_LONG_EDGE_WARNING;
+      const shouldResize = longEdge > MAX_SEAL_LONG_EDGE;
+
+      if (!shouldResize) {
+        return {
+          file,
+          resized: false,
+          smallWarning: shouldWarnSmall
+        };
+      }
+
+      const scale = MAX_SEAL_LONG_EDGE / longEdge;
+      const targetWidth = Math.max(1, Math.round(width * scale));
+      const targetHeight = Math.max(1, Math.round(height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('CANVAS_CONTEXT_UNAVAILABLE');
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+      ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) resolve(value);
+          else reject(new Error('IMAGE_RESIZE_FAILED'));
+        }, 'image/png');
+      });
+
+      const converted = new File([blob], 'seal.png', { type: 'image/png' });
+      return {
+        file: converted,
+        resized: true,
+        smallWarning: false
+      };
+    }
+
+    async function loadOfficialSignatures() {
+      const body = document.getElementById('officialSignBody');
+      if (!body) return;
+      body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">불러오는 중입니다...</td></tr>';
+
+      const { data: officials, error } = await scopeByTenant(_supabase
+        .from('coop_officials')
+        .select('id, member_id, name, role, category, seal_url, status')
+        .in('category', ['delegate', 'executive', 'election_comm'])
+        .order('status', { ascending: true })
+        .order('role', { ascending: true }));
+
+      if (error || !Array.isArray(officials)) {
+        body.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">임원 정보를 불러오지 못했습니다.</td></tr>';
+        showAlert('서명 목록 로드 실패: ' + (error?.message || 'Unknown error'), 'danger');
+        return;
+      }
+
+      const filtered = officials.filter((row) => !row.status || row.status === 'active');
+      if (filtered.length === 0) {
+        body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">등록된 활성 임원 정보가 없습니다.</td></tr>';
+        officialSignGroups = {};
+        signatureTelegramStatusMap = {};
+        updateSignatureSummary({});
+        return;
+      }
+
+      await loadSignatureTelegramStatusMap();
+
+      const memberIds = [...new Set(filtered.map((row) => row.member_id).filter(Boolean))];
+      let memberMap = {};
+      if (memberIds.length > 0) {
+        const { data: members } = await scopeByTenant(_supabase
+          .from('coop_members')
+          .select('member_id, name')
+          .in('member_id', memberIds));
+        (members || []).forEach((row) => {
+          memberMap[row.member_id] = row.name;
+        });
+      }
+
+      const groups = {};
+      const groupKeys = [];
+      filtered.forEach((row) => {
+        const rawMemberId = row.member_id ? String(row.member_id) : '';
+        const keyBase = rawMemberId || String(row.id);
+        const key = (rawMemberId ? 'm_' : 'o_') + keyBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+        if (!groups[key]) {
+          groups[key] = {
+            key,
+            member_id: rawMemberId,
+            officialIds: [],
+            roles: new Set(),
+            categories: new Set(),
+            seal_url: null,
+            display_name: ''
+          };
+          groupKeys.push(key);
+        }
+        groups[key].officialIds.push(row.id);
+        if (row.role) groups[key].roles.add(String(row.role));
+        if (row.category) groups[key].categories.add(String(row.category));
+        if (row.seal_url) groups[key].seal_url = row.seal_url;
+        if (!groups[key].display_name && (memberMap[row.member_id] || row.name)) {
+          groups[key].display_name = memberMap[row.member_id] || row.name;
+        }
+      });
+      officialSignGroups = groups;
+      updateSignatureSummary(groups);
+
+      const filteredEntries = getFilteredSignatureGroupEntries(groups);
+      if (filteredEntries.length === 0) {
+        const emptyMessage = currentSignatureFilter === 'missing'
+          ? '서명 이미지가 아직 등록되지 않은 인원이 없습니다.'
+          : currentSignatureFilter === 'registered'
+            ? '서명 이미지가 등록된 인원이 없습니다.'
+            : currentSignatureFilter === 'telegram_missing'
+              ? 'Telegram 미연결 인원이 없습니다.'
+              : '표시할 인원이 없습니다.';
+        body.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">${emptyMessage}</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = filteredEntries.map((group) => {
+        const name = escapeHtml(group.display_name || group.member_id || '-');
+        const categories = Array.from(group.categories);
+        const hasDelegate = categories.includes('delegate');
+        const hasExec = categories.includes('executive');
+        const hasElection = categories.includes('election_comm');
+        const categoryParts = [];
+        if (hasExec) categoryParts.push('임원');
+        if (hasDelegate) categoryParts.push('대의원');
+        if (hasElection) categoryParts.push('선거관리');
+        const displayCategory = categoryParts.length ? categoryParts.join('/') : '임원';
+        const roleText = escapeHtml(Array.from(group.roles).filter(Boolean).join(', ') || '-');
+        const telegramStatus = buildSignatureTelegramStatusHtml(group.member_id);
+        const sealPreview = group.seal_url
+          ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-preview-key="${group.key}">보기</button>`
+          : '<span class="text-muted small">미등록</span>';
+        const sealStatus = group.seal_url
+          ? '<span class="badge bg-success">등록됨</span>'
+          : '<span class="badge bg-secondary">없음</span>';
+        return `
+          <tr>
+            <td>
+              <div class="fw-bold">${name}</div>
+              <div class="text-muted small">${escapeHtml(group.member_id || '-')}</div>
+            </td>
+            <td>${escapeHtml(displayCategory)}</td>
+            <td>${roleText}</td>
+            <td>${telegramStatus}</td>
+            <td>
+              <div class="d-flex flex-column gap-2">
+                <div>${sealStatus}</div>
+                <div>${sealPreview}</div>
+              </div>
+            </td>
+            <td>
+              <input type="file" id="seal-file-${group.key}" accept="image/*" class="form-control form-control-sm">
+            </td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-primary" type="button" data-upload-key="${group.key}">업로드</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      body.querySelectorAll('button[data-upload-key]').forEach((btn) => {
+        btn.addEventListener('click', () => uploadOfficialSeal(btn.getAttribute('data-upload-key')));
+      });
+      body.querySelectorAll('button[data-preview-key]').forEach((btn) => {
+        btn.addEventListener('click', () => previewOfficialSeal(btn.getAttribute('data-preview-key')));
+      });
+    }
+
+    async function uploadOfficialSeal(groupKey) {
+      const group = officialSignGroups[groupKey];
+      if (!group) {
+        showAlert('대상 정보를 찾지 못했습니다. 새로고침 후 다시 시도해주세요.', 'warning');
+        return;
+      }
+
+      const input = document.getElementById(`seal-file-${groupKey}`);
+      if (!input || !input.files || input.files.length === 0) {
+        showAlert('업로드할 이미지 파일을 먼저 선택해주세요.', 'warning');
+        return;
+      }
+
+      const file = input.files[0];
+      if (!file.type.startsWith('image/')) {
+        showAlert('이미지 파일만 업로드할 수 있습니다.', 'warning');
+        return;
+      }
+
+      clearAlert();
+      let prepared;
+      try {
+        prepared = await prepareSealUploadFile(file);
+      } catch (error) {
+        showAlert('이미지 처리 실패: ' + (error?.message || 'Unknown error'), 'danger');
+        return;
+      }
+
+      const uploadFile = prepared.file;
+      const ext = uploadFile.type === 'image/png'
+        ? 'png'
+        : (uploadFile.name.includes('.') ? uploadFile.name.split('.').pop().toLowerCase() : 'png');
+      const memberSafe = String(group.member_id || groupKey).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const fileName = `official_seals/${memberSafe}/${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await _supabase.storage
+        .from('attachments')
+        .upload(fileName, uploadFile, { upsert: true, contentType: uploadFile.type || 'image/png' });
+      if (uploadError) {
+        showAlert('업로드 실패: ' + uploadError.message, 'danger');
+        return;
+      }
+
+      let updateError = null;
+      if (group.member_id) {
+        ({ error: updateError } = await scopeByTenant(_supabase
+          .from('coop_officials')
+          .update({ seal_url: fileName })
+          .eq('member_id', group.member_id)));
+      } else if (Array.isArray(group.officialIds) && group.officialIds.length > 0) {
+        ({ error: updateError } = await scopeByTenant(_supabase
+          .from('coop_officials')
+          .update({ seal_url: fileName })
+          .in('id', group.officialIds)));
+      } else {
+        updateError = { message: 'missing official ids' };
+      }
+
+      if (updateError) {
+        showAlert('저장 실패: ' + updateError.message, 'danger');
+        return;
+      }
+
+      if (prepared.smallWarning) {
+        showAlert('서명 이미지가 등록되었습니다. 다만 현재 파일 해상도가 낮아 문서에서 흐릿하게 보일 수 있습니다.', 'warning');
+      } else if (prepared.resized) {
+        showAlert('서명 이미지가 등록되었습니다. 큰 이미지는 업로드 전에 자동으로 축소했습니다.', 'success');
+      } else {
+        showAlert('서명 이미지가 등록되었습니다.', 'success');
+      }
+      await loadOfficialSignatures();
+    }
+
+    async function previewOfficialSeal(groupKey) {
+      const group = officialSignGroups[groupKey];
+      if (!group || !group.seal_url) {
+        showAlert('미리보기할 서명 이미지가 없습니다.', 'warning');
+        return;
+      }
+      const { data, error } = await _supabase.storage
+        .from('attachments')
+        .createSignedUrl(group.seal_url, 3600);
+      if (error || !data?.signedUrl) {
+        showAlert('미리보기를 열지 못했습니다: ' + (error?.message || 'signed url missing'), 'danger');
+        return;
+      }
+      const titleEl = document.getElementById('sealPreviewTitle');
+      const metaEl = document.getElementById('sealPreviewMeta');
+      const bodyEl = document.getElementById('sealPreviewBody');
+      if (titleEl) titleEl.textContent = `${group.display_name || group.member_id || '임원'} 서명 이미지`;
+      if (metaEl) metaEl.textContent = `${Array.from(group.roles || []).join(', ') || '-'} · ${Array.from(group.categories || []).map(categoryLabel).join('/') || '임원'}`;
+      if (bodyEl) {
+        bodyEl.innerHTML = `<img src="${escapeHtmlAttribute(data.signedUrl)}" alt="${escapeHtmlAttribute(group.display_name || '서명 이미지')}">`;
+      }
+      sealPreviewModal.show();
+    }
+
+    async function ensureAccess() {
+      const user = readStoredUser();
+      if (!user) {
+        location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
+        return false;
+      }
+      currentUser = user;
+      permissionSet = await loadPermissions(user);
+      if (permissionSet.size === 0) permissionSet = readStoredPermissions();
+      currentRuntime = await loadRuntime();
+      currentCoopId = await getMyCoopId();
+
+      const moduleEnabled = canManageStandaloneSignatures();
+      if (!moduleEnabled) {
+        showAlert('현재 조합에서는 서명 관리 화면을 사용할 수 없습니다.', 'warning');
+        setTimeout(() => {
+          location.href = 'officials_admin.html';
+        }, 900);
+        return false;
+      }
+      return true;
+    }
+
+    async function init() {
+      try {
+        sealPreviewModal = new bootstrap.Modal(document.getElementById('sealPreviewModal'));
+        const filterEl = document.getElementById('signatureFilter');
+        if (filterEl) {
+          filterEl.addEventListener('change', () => {
+            currentSignatureFilter = String(filterEl.value || 'all').trim();
+            loadOfficialSignatures();
+          });
+        }
+        const ok = await ensureAccess();
+        if (!ok) return;
+        await loadOfficialSignatures();
+      } catch (error) {
+        console.error('officials_signature_admin init error:', error);
+        showAlert('서명 관리 화면을 초기화하지 못했습니다: ' + (error?.message || 'Unknown error'), 'danger');
+      }
+    }
+
+    init();
+  </script>
+<script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
+</body>
+</html>

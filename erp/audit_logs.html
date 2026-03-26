@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<!--
+Version: v1.1.3
+Change: 2026-03-22 - Remove first-use guidance banner from audit logs.
+-->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.1.3 | audit_logs.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>감사 로그</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="erp_runtime_guard.js"></script>
+  <style>
+    body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
+    .main-container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="fw-bold m-0">🧾 감사 로그</h4>
+      <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'">🏠 메뉴로</button>
+    </div>
+
+    <div class="card p-3 mb-3">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-2">
+          <label class="small text-muted">로그 구분</label>
+          <select class="form-select" id="filterSource">
+            <option value="erp">ERP 로그</option>
+            <option value="admin">플랫폼 변경</option>
+            <option value="all">전체</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">시작일</label>
+          <input type="date" class="form-control" id="filterStart">
+        </div>
+        <div class="col-12 col-md-3">
+          <label class="small text-muted">종료일</label>
+          <input type="date" class="form-control" id="filterEnd">
+        </div>
+        <div class="col-12 col-md-2">
+          <label class="small text-muted">액션 키</label>
+          <input type="text" class="form-control" id="filterAction" placeholder="approval.submit">
+        </div>
+        <div class="col-12 col-md-2">
+          <label class="small text-muted">실행자</label>
+          <input type="text" class="form-control" id="filterActor" placeholder="이름 또는 ID">
+        </div>
+      </div>
+      <div class="d-flex justify-content-end gap-2 mt-3">
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">초기화</button>
+        <button class="btn btn-primary btn-sm" onclick="loadLogs(true)">검색</button>
+        <button class="btn btn-outline-success btn-sm" onclick="exportCsv()">CSV 다운로드</button>
+      </div>
+      <div class="small text-muted mt-2" id="sourceHint"></div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>소스</th>
+            <th>일시</th>
+            <th>실행자</th>
+            <th>액션</th>
+            <th>요약</th>
+            <th>대상</th>
+            <th>대상 ID</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+
+    <div class="text-center mt-3">
+      <button class="btn btn-outline-secondary btn-sm" id="btnMore" onclick="loadLogs(false)">더보기</button>
+    </div>
+  </div>
+
+  <div class="modal fade" id="alertModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content">
+        <div class="modal-body text-center py-4" id="alertBody" style="white-space: pre-wrap;"></div>
+        <div class="modal-footer justify-content-center p-1 border-0">
+          <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const KST_TZ_AUDIT = 'Asia/Seoul';
+const formatAuditKstDate = (value, fallback = '') => {
+  if (!value) return fallback;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return fallback;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_AUDIT, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+};
+const formatAuditKstDateTime = (value, fallback = '') => {
+  if (!value) return fallback;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return fallback;
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_AUDIT, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(d).replace(',', '');
+};
+const sanitizeOrKeyword = (value) => String(value ?? '')
+  .replace(/[,%()]/g, ' ')
+  .replace(/["'`]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+let alertModal;
+let myInfo = null;
+let permissionSet = new Set();
+let currentPage = 0;
+let pageSize = 50;
+let cachedLogs = [];
+function hasAuditViewerRoleFallback() {
+  const role = String(myInfo?.role || '').toLowerCase();
+  return role === 'admin' || role === 'admin_all';
+}
+
+function updateSourceHint() {
+  const source = String(document.getElementById('filterSource')?.value || 'erp').toLowerCase();
+  const hint = document.getElementById('sourceHint');
+  if (!hint) return;
+  if (source === 'admin') {
+    hint.textContent = '플랫폼 변경은 전체 관리자가 현재 조합의 모듈, 상태, 대표 관리자 등을 바꾼 이력만 표시합니다.';
+    return;
+  }
+  if (source === 'all') {
+    hint.textContent = '전체는 ERP 사용자 로그와 플랫폼 변경 이력을 함께 표시합니다.';
+    return;
+  }
+  hint.textContent = 'ERP 로그는 현재 조합의 전자결재, 직원관리, 조합원관리 등 일반 업무 이력만 표시합니다.';
+} // End of updateSourceHint
+
+window.onload = async function() {
+  alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
+  const stored = localStorage.getItem('erp_user');
+  if (!stored) { location.href = 'index.html'; return; }
+  myInfo = JSON.parse(stored);
+  permissionSet = await loadPermissions(myInfo);
+  localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
+  const canViewAudit = permissionSet.size > 0 ? permissionSet.has('audit.view') : hasAuditViewerRoleFallback();
+  if (!canViewAudit) {
+    showAlert("접근 권한이 없습니다.");
+    setTimeout(() => location.href = 'index.html', 1200);
+    return;
+  }
+  const auditRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
+    moduleKey: 'audit',
+    moduleLabel: '감사 로그',
+    alertFn: function(msg) { showAlert(msg); },
+    redirectUrl: 'index.html'
+  });
+  if (!auditRuntimeGate.ok) return;
+  document.getElementById('filterSource').addEventListener('change', function() {
+    updateSourceHint();
+    loadLogs(true);
+  });
+  updateSourceHint();
+  await loadLogs(true);
+}; // End of window.onload
+
+function showAlert(msg) {
+  document.getElementById('alertBody').textContent = msg || '';
+  alertModal.show();
+}
+
+async function loadPermissions(user) {
+  const result = new Set();
+  if (!user) return result;
+  const coopId = String(user.coop_id || '').trim();
+  const roleKey = user.role || '';
+  const posKey = user.position || '';
+  if ((!roleKey && !posKey) || !coopId) return result;
+
+    const roleKeys = [roleKey, posKey].filter(Boolean);
+    if (roleKey === 'admin_all') roleKeys.push('admin');
+    if (roleKey === 'admin') roleKeys.push('admin_all');
+  const { data } = await _supabase
+    .from('erp_role_permissions')
+    .select('permission_key')
+    .eq('coop_id', coopId)
+    .in('scope', ['role','position'])
+    .in('role_key', roleKeys)
+    .eq('is_enabled', true);
+  if (Array.isArray(data)) {
+    data.forEach(r => r.permission_key && result.add(r.permission_key));
+  }
+  return result;
+}
+
+function resetFilters() {
+  document.getElementById('filterSource').value = 'erp';
+  document.getElementById('filterStart').value = '';
+  document.getElementById('filterEnd').value = '';
+  document.getElementById('filterAction').value = '';
+  document.getElementById('filterActor').value = '';
+  updateSourceHint();
+} // End of resetFilters
+
+async function loadLogs(reset) {
+  if (reset) {
+    currentPage = 0;
+    cachedLogs = [];
+    document.getElementById('logBody').innerHTML = '';
+  }
+
+  const source = String(document.getElementById('filterSource').value || 'all').toLowerCase();
+  const start = document.getElementById('filterStart').value;
+  const end = document.getElementById('filterEnd').value;
+  const action = document.getElementById('filterAction').value.trim();
+  const actor = document.getElementById('filterActor').value.trim();
+
+  const safeAction = sanitizeOrKeyword(action);
+  const safeActor = sanitizeOrKeyword(actor);
+  const offset = currentPage * pageSize;
+  const params = {
+    p_start: start ? `${start}T00:00:00+09:00` : null,
+    p_end: end ? `${end}T23:59:59+09:00` : null,
+    p_action: safeAction || null,
+    p_actor: safeActor || null,
+    p_source: source || 'all',
+    p_offset: offset,
+    p_limit: pageSize
+  };
+  const { data, error } = await _supabase.rpc('erp_get_audit_logs_unified', params);
+  let list = Array.isArray(data) ? data : [];
+  if (error) {
+    const msg = String(error?.message || '');
+    const missingRpc = error?.code === 'PGRST202' || msg.includes('erp_get_audit_logs_unified');
+    if (!missingRpc) return showAlert("로그를 불러오지 못했습니다.\n" + msg);
+    if (source === 'admin') {
+      return showAlert("통합 감사로그 RPC가 아직 적용되지 않았습니다.\nSQL 패치를 먼저 실행해주세요.");
+    }
+    let legacyQuery = _supabase.from('erp_audit_logs').select('*').eq('coop_id', String(myInfo?.coop_id || '').trim()).order('created_at', { ascending: false });
+    if (start) legacyQuery = legacyQuery.gte('created_at', `${start}T00:00:00`);
+    if (end) legacyQuery = legacyQuery.lte('created_at', `${end}T23:59:59`);
+    if (safeAction) legacyQuery = legacyQuery.ilike('action', `%${safeAction}%`);
+    if (safeActor) legacyQuery = legacyQuery.or(`actor_name.ilike.%${safeActor}%,actor_emp_id.ilike.%${safeActor}%`);
+    const { data: legacyRows, error: legacyError } = await legacyQuery.range(offset, offset + pageSize - 1);
+    if (legacyError) return showAlert("로그를 불러오지 못했습니다.\n" + (legacyError.message || ''));
+    list = (Array.isArray(legacyRows) ? legacyRows : []).map((r) => ({
+      source: 'ERP',
+      created_at: r.created_at || null,
+      actor: `${r.actor_name || ''}${r.actor_emp_id ? ` (${r.actor_emp_id})` : ''}`.trim(),
+      action: r.action || '',
+      summary: r.summary || '',
+      entity_type: r.entity_type || '',
+      entity_id: r.entity_id || '',
+      ip_address: ''
+    }));
+  }
+  cachedLogs = cachedLogs.concat(list);
+  renderLogs(list, reset);
+  currentPage += 1;
+
+  document.getElementById('btnMore').classList.toggle('hidden', list.length < pageSize);
+}
+
+function renderLogs(list, reset) {
+  const body = document.getElementById('logBody');
+  if (reset) body.innerHTML = '';
+  if (!list || list.length === 0) {
+    if (reset) body.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-4">데이터가 없습니다.</td></tr>';
+    return;
+  }
+  list.forEach(log => {
+    const tr = document.createElement('tr');
+    const sourceRaw = String(log.source || '').toUpperCase();
+    const sourceLabel = sourceRaw === 'ADMIN' ? '플랫폼' : 'ERP';
+    const sourceBadge = sourceRaw === 'ADMIN'
+      ? '<span class="badge text-bg-dark">플랫폼</span>'
+      : '<span class="badge text-bg-primary">ERP</span>';
+    const created = formatAuditKstDateTime(log.created_at, '');
+    const actor = String(log.actor || '').trim();
+    const action = String(log.action || '').trim();
+    const summary = String(log.summary || '').trim();
+    const entityType = String(log.entity_type || '').trim();
+    const entityId = String(log.entity_id || '').trim();
+    const cells = [
+      sourceLabel,
+      created,
+      actor,
+      action,
+      summary,
+      entityType,
+      entityId
+    ];
+    cells.forEach((value, idx) => {
+      const td = document.createElement('td');
+      if (idx === 0) td.innerHTML = sourceBadge;
+      else td.textContent = value;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+function exportCsv() {
+  if (!cachedLogs || cachedLogs.length === 0) return showAlert("내보낼 데이터가 없습니다.");
+  const headers = ['source','created_at','actor','action','summary','entity_type','entity_id','ip_address'];
+  const rows = cachedLogs.map(r => [
+    r.source || '',
+    r.created_at || '',
+    r.actor || '',
+    r.action || '',
+    r.summary || '',
+    r.entity_type || '',
+    r.entity_id || '',
+    r.ip_address || ''
+  ]);
+  const csvEscape = (val) => {
+    const str = String(val ?? '');
+    if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+    return str;
+  };
+  const csv = [headers.join(',')]
+    .concat(rows.map(r => r.map(csvEscape).join(',')))
+    .join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const dateTag = formatAuditKstDate(new Date());
+  a.download = `audit_logs_${dateTag}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+<script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
+</body>
+</html>

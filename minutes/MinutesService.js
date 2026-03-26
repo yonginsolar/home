@@ -1,6 +1,6 @@
 /*
-Version: v1.0.39
-Change: 2026-03-23 - Include drafter_id for notice print footer position lookup.
+Version: v1.0.40
+Change: 2026-03-24 - Scope completed notice approval reads by visible coop_id before print/export.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -395,13 +395,14 @@ async function listApprovalNoticeDrafts() {
 }
 
 async function listCompletedNoticeApprovals() {
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('ref_approval')
         .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,approval_line')
         .eq('doc_type', '공문')
         .in('status', ['완료', '실물결재완료'])
         .order('processed_at', { ascending: false })
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
 

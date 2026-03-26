@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.54
-Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
+Version: v1.2.55
+Change: 2026-03-26 - Use unified /erp routes for runtime guard and ERP return flow.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.54 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.55 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -237,7 +237,7 @@ Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
     <div class="container">
         <div class="header">
             <h2 id="page-title" style="margin:0;">🛡️ 회의·문서 관리 (사무국용)</h2>
-            <button onclick="location.href='https://erp.yonginsolar.kr/'" class="btn btn-gray">메인으로</button>
+            <button onclick="location.href='/erp/'" class="btn btn-gray">메인으로</button>
         </div>
 
         <div class="tabs">
@@ -531,10 +531,18 @@ Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
         </div>
     </div>
 
-    <script src="https://erp.yonginsolar.kr/erp_runtime_guard.js"></script>
+    <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
         import { MinutesService } from './MinutesService.js?v=1.0.37';
         import { supabase } from '../shared/supabase-client.js';
+
+        function getErpHomeUrl() {
+            return '/erp/';
+        }
+
+        function getErpLoginUrl(nextUrl) {
+            return `/erp/?next=${encodeURIComponent(nextUrl || window.location.href)}`;
+        }
 
         function readTransferredSessionFromHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');
@@ -2699,14 +2707,14 @@ Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
             const session = await MinutesService.getSession();
             if (!session) {
                 showToast("로그인이 필요합니다.");
-                location.href = `https://erp.yonginsolar.kr/?next=${encodeURIComponent(window.location.href)}`;
+                location.href = getErpLoginUrl(window.location.href);
                 return;
             }
 
             const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
                 moduleKey: 'minutes',
                 moduleLabel: '회의/공문',
-                redirectUrl: `https://erp.yonginsolar.kr/?next=${encodeURIComponent(window.location.href)}`,
+                redirectUrl: getErpLoginUrl(window.location.href),
                 alertFn: (msg) => showToast(msg)
             });
             if (!runtimeCheck.ok) return;
@@ -2717,7 +2725,7 @@ Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
             isAdminUser = hasErpAdminAccess() || await MinutesService.isAdmin(session.user.id, session.user.email);
             if (!isAdminUser) {
                 showToast("관리자 권한이 필요합니다.");
-                location.href = 'https://erp.yonginsolar.kr/';
+                location.href = getErpHomeUrl();
                 return;
             }
 
@@ -3241,5 +3249,6 @@ Change: 2026-03-25 - Accept ERP hash session handoff before admin bootstrap.
 
         init();
     </script>
+<script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>

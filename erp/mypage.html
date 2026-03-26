@@ -1,0 +1,1961 @@
+<!DOCTYPE html>
+<!-- Version: v1.0.38 | Change: 2026-03-25 - Refresh print service cache and prefer shrinking long company names in mypage certificate signatures. -->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.38 | mypage.html');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+<title>마이페이지</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="erp_runtime_guard.js"></script>
+<script src="print_service.js?v=20260325-3"></script>
+<script src="payroll_durunuri_module.js"></script>
+<script src="leave_ledger.js"></script>
+  
+<style>
+body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic',sans-serif}
+.main-container{max-width:1040px;margin:0 auto;padding:28px 28px 80px;background:transparent!important;border:none!important;box-shadow:none!important}
+.hidden{display:none!important}
+.mypage-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px;padding:6px 4px 2px}
+.mypage-eyebrow{font-size:.76rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#64748b;margin-bottom:8px}
+.mypage-title{font-size:1.85rem;font-weight:800;letter-spacing:-0.04em;margin:0}
+.mypage-subtitle{font-size:.95rem;color:#64748b;line-height:1.6;margin-top:8px}
+.mypage-surface{background:rgba(255,255,255,.95);border:1px solid rgba(15,23,42,.08);border-radius:22px;padding:28px;box-shadow:0 18px 44px rgba(15,23,42,.08)}
+.profile-card{background:white;border-radius:18px;padding:24px 26px;margin-bottom:24px;display:flex;align-items:center;box-shadow:0 8px 24px rgba(15,23,42,0.06);border:1px solid rgba(148,163,184,.16)}
+.profile-icon{width:70px;height:70px;background:#e9ecef;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;margin-right:20px}
+.leave-badge{background-color:#fff;border:1px solid #0d6efd;color:#0d6efd;padding:5px 12px;border-radius:20px;font-size:0.9rem;font-weight:bold;cursor:pointer;transition:all 0.2s;display:inline-flex;align-items:center;gap:5px;margin-left:10px;vertical-align:middle}
+.leave-badge:hover{background-color:#0d6efd;color:white}
+.nav-tabs .nav-link{color:#495057;cursor:pointer;font-weight:500;padding:12px 20px}
+.nav-tabs .nav-link.active{font-weight:bold;color:#0d6efd;border-bottom:3px solid #0d6efd;background:transparent}
+.tab-content{background:white;border:1px solid #dee2e6;border-top:none;border-radius:0 0 16px 16px;padding:30px;box-shadow:0 8px 24px rgba(15,23,42,0.05)}
+.readonly-field{background-color:#f8f9fa;border:1px solid #eee;color:#555;pointer-events:none}
+.editable-field{background-color:#fff;border:1px solid #ced4da;color:#000}
+.salary-blur{filter:blur(6px);transition:filter 0.3s;cursor:pointer;user-select:none}
+.salary-blur:hover{filter:blur(0)}
+.amount-text{text-align:right;font-family:'Consolas',monospace;letter-spacing:-0.5px}
+#calendar{max-width:100%;margin:0 auto;font-size:0.9rem}
+.fc-event{cursor:pointer;border:none}
+.fc-day-sun a{color:red;text-decoration:none}
+.fc-day-sat a{color:blue;text-decoration:none}
+.leave-section{margin-bottom:15px;border:1px solid #eee;border-radius:8px;background:#f8f9fa;padding:15px}
+.leave-section h6{font-weight:bold;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:10px;font-size:0.95rem}
+.leave-list{list-style:none;padding:0;margin:0;font-size:0.85rem}
+.leave-list li{margin-bottom:6px}
+.overtime-summary-card{background:#f8f9fa;border:1px solid #e9ecef;border-radius:12px;padding:14px}
+.overtime-summary-metric{background:#fff;border:1px solid #e9ecef;border-radius:10px;padding:12px}
+.overtime-summary-metric .label{font-size:.78rem;color:#6c757d}
+.overtime-summary-metric .value{font-size:1.1rem;font-weight:700}
+.fc-day-other .fc-event { opacity: 0.5; filter: grayscale(100%); }
+.telegram-connect-card{background:#f8fbff;border:1px solid rgba(37,99,235,.12);border-radius:16px;padding:18px}
+@media (max-width: 767px){
+body{padding:18px 14px 28px}
+.main-container{padding:18px 18px 56px}
+.mypage-hero{flex-direction:column;align-items:stretch;margin-bottom:18px}
+.mypage-title{font-size:1.5rem}
+.mypage-surface{padding:18px}
+.profile-card{padding:18px;align-items:flex-start}
+.profile-icon{width:58px;height:58px;font-size:24px;margin-right:14px}
+.leave-badge{margin-left:0;margin-top:10px}
+.mypage-loading-shell{background:white;border-radius:18px;padding:28px 24px;margin:0 auto 24px;box-shadow:0 8px 24px rgba(15,23,42,0.06);border:1px solid rgba(148,163,184,.16);text-align:center}
+.mypage-loading-shell .spinner-border{width:2.5rem;height:2.5rem}
+}
+</style>
+  <link rel="stylesheet" href="./erp_theme.css?v=1.0.0">
+</head>
+<body class="erp-unified">
+<div id="mypageLoadingScreen" class="main-container">
+<div class="mypage-loading-shell">
+<div class="spinner-border text-primary mb-3" role="status"></div>
+<div class="fw-bold mb-1">마이페이지를 준비하고 있습니다</div>
+<div class="small text-muted">권한과 개인 정보를 확인한 뒤 화면을 표시합니다.</div>
+</div>
+</div>
+<div id="mypagePageShell" class="main-container hidden">
+<div class="mypage-hero">
+<div>
+<div class="mypage-eyebrow">My Page</div>
+<h1 class="mypage-title">내 정보와 근무 기록</h1>
+<div class="mypage-subtitle">급여, 연차, 증명서와 Telegram 결재 알림 연결 상태를 한 곳에서 관리합니다.</div>
+</div>
+<button onclick="location.href='index.html'" class="btn btn-outline-secondary btn-sm"><i class="bi bi-grid-1x2-fill me-1"></i>메뉴로</button>
+</div>
+<div class="mypage-surface">
+<div class="profile-card">
+<div class="profile-icon">👤</div>
+<div>
+<div class="d-flex align-items-center mb-1">
+<h4 class="fw-bold m-0 me-2"><span id="dspName">Loading...</span></h4>
+<span class="badge bg-primary rounded-pill fs-6" id="dspRank">-</span>
+<div class="leave-badge" role="button" tabindex="0" onclick="showLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showLeaveDetail();}" title="상세 내역 보기">
+<span>잔여 연차: <span id="lvRemain">0</span>일</span><span class="small" id="lvReservedInline"></span><span>🔍</span>
+</div>
+</div>
+<div class="text-muted small">
+<span id="dspDept">-</span> | 입사일: <span id="dspJoin">-</span> (<span id="dspTenure" class="text-primary fw-bold">-</span>)
+</div>
+</div>
+</div>
+<ul class="nav nav-tabs" id="myTab" role="tablist">
+<li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabInfo">내 정보</button></li>
+<li class="nav-item"><button class="nav-link" id="tab-calendar-btn" data-bs-toggle="tab" data-bs-target="#tabCalendar">📅 전사 일정</button></li>
+<li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSalary">💰 급여 명세서</button></li>
+<li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCert">📜 증명서/계약서</button></li>
+<li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabNotice">📢 공지사항</button></li>
+</ul>
+<div class="tab-content">
+<div class="tab-pane fade show active" id="tabInfo">
+<div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+<h6 class="fw-bold m-0">📝 기본 정보 수정</h6>
+<div>
+<button class="btn btn-sm btn-outline-primary" id="btnEditInfo" onclick="toggleEditMode(true)">✏️ 수정하기</button>
+<button class="btn btn-sm btn-secondary hidden" id="btnCancelInfo" onclick="toggleEditMode(false)">취소</button>
+<button class="btn btn-sm btn-primary hidden" id="btnSaveInfo" onclick="updateInfo()">💾 저장 완료</button>
+</div>
+</div>
+<div class="row g-3">
+<div class="col-md-6"><label class="small text-muted">이름</label><input type="text" id="myName" class="form-control bg-light" readonly></div>
+<div class="col-md-6">
+        <label class="small text-muted fw-bold text-primary">조합원 번호</label>
+    <input type="text" id="myMemberId" class="form-control readonly-field" placeholder="조합원 번호" oninput="autoHyphenMemberId(this)">
+    </div>
+<div class="col-md-6"><label class="small text-muted">전화번호</label><input type="text" id="myPhone" class="form-control readonly-field" maxlength="13" oninput="autoHyphen(this)"></div>
+<div class="col-md-6"><label class="small text-muted">이메일</label><input type="email" id="myEmail" class="form-control readonly-field"></div>
+<div class="col-12"><label class="small text-muted">주소</label><div class="input-group"><input type="text" id="myAddress" class="form-control readonly-field" placeholder="주소" readonly><button class="btn btn-outline-secondary hidden" id="btnAddrSearch" type="button" onclick="openAddressSearch()">🔍 검색</button></div></div>
+<div class="col-md-6"><label class="small text-muted">급여 은행</label><input type="text" id="myBank" class="form-control readonly-field"></div>
+<div class="col-md-6"><label class="small text-muted">계좌번호</label><input type="text" id="myAccount" class="form-control readonly-field"></div>
+</div>
+<div class="mt-5 pt-3 border-top">
+<div class="d-flex justify-content-between align-items-center mb-3">
+<h6 class="fw-bold m-0">🚨 비상 연락망</h6>
+<button class="btn btn-sm btn-outline-dark hidden" id="btnAddEm" onclick="addEmergencyUI()">+ 추가</button>
+</div>
+<div class="table-responsive">
+<table class="table table-hover align-middle">
+<thead class="table-light"><tr><th>이름</th><th>관계</th><th>연락처</th><th style="width:60px;"></th></tr></thead>
+<tbody id="emergencyListBody"></tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="tab-pane fade" id="tabCalendar">
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2 mb-3"><div class="small text-muted">승인 문서와 사내 일정을 Google Calendar에서 가져올 수 있는 `.ics` 파일로 내보냅니다.</div><div class="d-flex flex-wrap gap-2 align-self-start align-self-lg-auto"><button class="btn btn-sm btn-outline-primary" type="button" onclick="downloadGoogleCalendarIcs()">Google Calendar(.ics) 내보내기</button><button class="btn btn-sm btn-outline-secondary hidden" type="button" id="btnOpenMypageCalendarSettings" onclick="openMypageCalendarSubscriptionModal()">구독 설정</button></div></div>
+<div id="calendar"></div></div>
+<div class="tab-pane fade" id="tabSalary">
+<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="input-group" style="max-width: 250px;">
+<input type="month" class="form-control" id="salaryMonth">
+<button class="btn btn-primary" onclick="searchSalary()">조회</button>
+</div>
+<button class="btn btn-sm btn-dark hidden" id="btnPrintSalary" onclick="printSalaryPopup()">🖨️ 인쇄하기</button>
+</div>
+<div id="salaryResult" class="hidden mt-4">
+<div class="card p-4 shadow-sm border-0">
+<h5 class="fw-bold text-center mb-4"><span id="sl_ym_display"></span> 급여 내역</h5>
+<div class="row">
+<div class="col-6"><table class="table table-bordered"><thead class="table-light"><tr><th colspan="2" class="text-primary text-center">지급</th></tr></thead><tbody id="tbl_pay_body"></tbody></table></div>
+<div class="col-6"><table class="table table-bordered"><thead class="table-light"><tr><th colspan="2" class="text-danger text-center">공제</th></tr></thead><tbody id="tbl_ded_body"></tbody></table></div>
+</div>
+<div class="p-3 bg-primary bg-opacity-10 rounded text-center border border-primary mt-3">
+<span class="text-primary me-2 fw-bold">실 수령액</span>
+<h3 class="fw-bold m-0 d-inline-block"><span class="salary-blur" id="v_net">0</span> 원</h3>
+</div>
+</div>
+</div>
+</div>
+<div class="tab-pane fade" id="tabCert">
+<div class="card p-3 border mb-3"><div class="d-flex justify-content-between align-items-center"><div><h6 class="fw-bold mb-1" id="certCardTitle">📄 재직증명서</h6><small class="text-muted" id="certCardSubtitle">은행/관공서 제출용</small></div><button class="btn btn-outline-primary" id="btnCert" onclick="openCertModal()">발급 신청</button></div></div>
+<div class="card p-3 border"><div class="d-flex justify-content-between align-items-center"><div><h6 class="fw-bold mb-1">🤝 근로계약서</h6><small class="text-muted">서명 완료된 계약서</small></div><button class="btn btn-secondary" id="btnContract" onclick="viewContract()" disabled>등록된 계약서 없음</button></div></div>
+</div>
+<div class="tab-pane fade" id="tabNotice"><div class="list-group" id="noticeList"><div class="text-center p-3 text-muted">로딩 중...</div></div></div>
+</div>
+</div>
+</div>
+<div class="modal fade" id="certPurposeModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">발급 용도</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><select class="form-select mb-2" id="certPurposeSelect" onchange="toggleEtcInput()"><option value="관공서 제출용">관공서 제출용</option><option value="금융기관 제출용">금융기관 제출용</option><option value="기타">기타</option></select><input type="text" id="certPurposeEtc" class="form-control hidden" placeholder="용도 입력"></div><div class="modal-footer"><button class="btn btn-primary btn-sm" onclick="runCertIssue()">인쇄하기</button></div></div></div></div>
+<div class="modal fade" id="leaveDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">연차 상세 리포트</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-3"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
+<div class="modal fade" id="noticeDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold" id="noticeModalTitle"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="text-muted small mb-3"><span id="noticeModalDate"></span> | <span id="noticeModalWriter"></span></div><div id="noticeModalContent" style="white-space: pre-wrap;"></div><div id="noticeFileArea" class="mt-3 pt-2 border-top hidden"><a href="#" id="noticeFileLink" target="_blank">첨부파일 다운로드</a></div></div></div></div></div>
+<div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-body text-center fw-bold py-4" id="alertBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button></div></div></div></div>
+<div class="modal fade" id="eventModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📅 일정 관리</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">
+
+  <input type="hidden" id="evtId">
+<div class="mb-2"><label class="small text-muted mb-1">일정명</label><input type="text" id="evtTitle" class="form-control" placeholder="일정 제목"></div>
+<div class="mb-2"><label class="small text-muted mb-1">공개 범위</label><select id="evtVisibility" class="form-select"><option value="company">🏢 전체 공개 (전직원)</option><option value="admin">🔒 관리자 전용 (세무/행정)</option><option value="private">👤 나만 보기 (개인 일정)</option></select></div>
+<div class="mb-2"><label class="small text-muted mb-1">일시</label><div class="d-flex gap-2"><input type="date" id="evtDate" class="form-control"><input type="time" id="evtTime" class="form-control"></div></div>
+<div class="mb-2"><label class="small text-muted mb-1">반복 설정</label><select id="evtRecure" class="form-select"><option value="none">반복 없음</option><option value="yearly">매년 반복</option><option value="monthly">매월 반복</option></select></div>
+<div class="mb-3"><label class="small text-muted mb-1">메모</label><textarea id="evtMemo" class="form-control" rows="4" placeholder="상세 내용 입력..."></textarea></div>
+<div class="form-check"><input class="form-check-input" type="checkbox" id="evtIsHoliday"><label class="form-check-label small" for="evtIsHoliday">공휴일 (빨간날 표시)</label></div>
+</div><div class="modal-footer justify-content-between"><button type="button" class="btn btn-danger btn-sm hidden" id="btnDelEvent" onclick="deleteEvent()">삭제</button><div><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary btn-sm" id="btnSaveEvent" onclick="saveEvent()">저장</button></div></div></div></div></div>
+<div class="modal fade" id="calendarSubscriptionModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">📅 Google Calendar 구독 설정</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="small text-muted mb-3">관리자용 설정입니다. 직원들이 구독하는 URL 사용 여부와 Google ICS 포함 항목을 여기서 관리할 수 있습니다.</div><div class="row g-3 mt-1"><div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="mypage_calendar_ics_enabled" onchange="syncMypageCalendarIcsActionState()"><label class="form-check-label fw-bold" for="mypage_calendar_ics_enabled">Google Calendar ICS 구독 사용</label></div></div><div class="col-12 col-lg-8"><label class="small text-muted">구독 URL</label><input type="text" class="form-control form-control-sm" id="mypage_calendar_ics_feed_url" readonly placeholder="저장 후 구독 URL이 생성됩니다."><div class="form-text" id="mypageCalendarIcsFeedHelp">Google Calendar에서 “URL로 추가”로 붙이면 승인 일정이 주기적으로 동기화됩니다.</div></div><div class="col-12 col-lg-4"><label class="small text-muted d-block">&nbsp;</label><div class="d-flex flex-wrap gap-2"><button type="button" class="btn btn-outline-secondary btn-sm" id="btnCopyMypageCalendarIcsUrl" onclick="copyMypageCalendarIcsFeedUrl()">URL 복사</button><button type="button" class="btn btn-outline-primary btn-sm" id="btnRegenerateMypageCalendarIcsUrl" onclick="regenerateMypageCalendarIcsFeedToken()">URL 재발급</button></div></div><div class="col-12"><div class="fw-bold mb-2">Google ICS 포함 항목</div><div class="small text-muted mb-2">직원들이 휴대폰에서 보는 Google Calendar 구독 피드에 포함할 항목을 설정합니다.</div><div class="row g-2" id="mypageCalendarGoogleScopeSwitches"></div></div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-primary btn-sm" onclick="saveMypageCalendarIcsSettings()">저장</button></div></div></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white p-2">
+                <h6 class="modal-title fw-bold">⚠️ 확인</h6>
+            </div>
+            <div class="modal-body text-center py-4">
+                <p class="mb-0 fw-bold" id="confirmMessage">진행하시겠습니까?</p>
+            </div>
+            <div class="modal-footer justify-content-center p-2 border-0">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="executeConfirmAction()">확인</button>
+            </div>
+        </div>
+    </div>
+</div>
+  
+<script>
+const SUPABASE_URL='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const _supabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const KST_TZ_MYPAGE='Asia/Seoul';
+const formatMypageKstDate=(value,fallback='')=>{if(!value) return fallback; const d=new Date(value); if(Number.isNaN(d.getTime())) return fallback; return new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d)};
+const formatMypageKstMonth=(value=new Date())=>{const d=value instanceof Date?value:new Date(value); if(Number.isNaN(d.getTime())) return ''; return new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit'}).format(d)};
+const toUtcIsoFromKstInput=(value)=>{if(!value) return null; return new Date(`${value}:00+09:00`).toISOString()};
+function isMypageRetiredEmployee(){return !!String(myInfo?.resign_date||'').trim()}
+function getMypageCertificateMeta(){
+const retired=isMypageRetiredEmployee();
+return retired
+?{type:'경력증명서',title:'📄 경력증명서',subtitle:'퇴사 후 3년 이내 발급 가능',statement:'위와 같이 근무하였음을 증명합니다.'}
+:{type:'재직증명서',title:'📄 재직증명서',subtitle:'은행/관공서 제출용',statement:'위와 같이 재직하고 있음을 증명합니다.'};
+}
+function applyMypageCertificateUi(){
+const meta=getMypageCertificateMeta();
+const titleEl=document.getElementById('certCardTitle');
+const subEl=document.getElementById('certCardSubtitle');
+if(titleEl) titleEl.textContent=meta.title;
+if(subEl) subEl.textContent=meta.subtitle;
+}
+const getMypageKstDateParts=(value)=>{if(!value) return {date:'',time:'',hasTime:false}; if(typeof value==='string' && !value.includes('T')) return {date:value,time:'',hasTime:false}; const d=new Date(value); if(Number.isNaN(d.getTime())) return {date:'',time:'',hasTime:false}; const date=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d); const time=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,hour:'2-digit',minute:'2-digit',hour12:false}).format(d); return {date,time,hasTime:true}};
+function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
+async function getAdjustedSalaryRowForMypage(row, ym){if(!row) return row; if(!window.PayrollDurunuriModule) return row; try{const supportMap=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym); return window.PayrollDurunuriModule.adjustSalaryRow(row,supportMap);}catch(e){console.warn('Durunuri support load failed:',e?.message||e); return row;}}
+let myInfo={},companyInfo={},currentSalaryData=null,tempEmergencyList=[],noticesData=[],leaveSnapshotState=null,contractSignedUrl='';
+let permissionSet = new Set();
+let purposeModal,leaveDetailModal,noticeDetailModal,alertModal,eventModal,calendarSubscriptionModal;
+let confirmModal;
+let confirmActionFunc = null; // 확인 버튼 눌렀을 때 실행할 함수 저장소
+let mypageRuntimeProfile='legacy_full';
+let noticeComposeModal=null;
+let mypageTelegramConnectUrl='';
+let mypageTelegramConnectCommand='';
+let mypageLeaveTypeCatalog=null;
+let mypageLeaveSnapshotSupported=false;
+let mypageBusinessTripSnapshotSupported=false;
+let mypageCalendarIcsSettings={enabled:false,feedToken:'',sourceCatalog:null};
+let lastAlertFocusTarget=null;
+const MYPAGE_LEAVE_TYPE_CONFIG_KEY='approval_leave_type_catalog_json';
+const MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot';
+const MYPAGE_BUSINESS_TRIP_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,status,drafter_id,drafter_name,business_trip_snapshot';
+const MYPAGE_SCHEMA_FEATURE_CACHE_VERSION=1;
+const MYPAGE_SCHEMA_FEATURE_CACHE_TTL_MS=24*60*60*1000;
+const MYPAGE_COMPANY_INFO_CACHE_VERSION=1;
+const MYPAGE_COMPANY_INFO_CACHE_TTL_MS=10*60*1000;
+const MYPAGE_DEFAULT_LEAVE_TYPE_CATALOG=Object.freeze([
+{id:'annual',label:'연차',enabled:true,deductible:true,duration_mode:'date_range',aliases:['연차']},
+{id:'half_day',label:'반차',enabled:true,deductible:true,duration_mode:'half_day',aliases:['반차']},
+{id:'birthday_half',label:'생일반차',enabled:true,deductible:false,duration_mode:'half_day',aliases:['생일반차']}
+]);
+const MYPAGE_CALENDAR_SOURCE_CONFIG_KEY='calendar_ics_source_catalog_json';
+const MYPAGE_DEFAULT_CALENDAR_SOURCE_CATALOG=Object.freeze({
+erp:Object.freeze({
+leave:true,
+business_trip:true,
+manual_events:true,
+birthdays:true,
+hire_anniversaries:true,
+company_anniversary:true
+}),
+google_ics:Object.freeze({
+leave:true,
+business_trip:true,
+manual_company:true,
+birthdays:false,
+hire_anniversaries:false,
+company_anniversary:true
+})
+});
+const MYPAGE_CALENDAR_SOURCE_ITEM_CATALOG=Object.freeze([
+{key:'leave',label:'승인된 휴가',description:'승인 또는 실물결재 완료된 휴가 문서를 Google Calendar 구독 피드에 포함합니다.'},
+{key:'business_trip',label:'승인된 출장',description:'승인 또는 실물결재 완료된 출장신청 문서를 Google Calendar 구독 피드에 포함합니다.'},
+{key:'manual_company',label:'공용 수동 일정',description:'회사 공개 수동 일정만 Google Calendar 구독 피드에 포함합니다.'},
+{key:'birthdays',label:'직원 생일',description:'직원 생일을 반복 일정으로 Google Calendar 구독 피드에 포함합니다.'},
+{key:'hire_anniversaries',label:'입사기념일',description:'직원 입사기념일을 반복 일정으로 Google Calendar 구독 피드에 포함합니다.'},
+{key:'company_anniversary',label:'창립기념일',description:'회사 창립기념일을 반복 일정으로 Google Calendar 구독 피드에 포함합니다.'}
+]);
+function hasMypageRoleFallback(){
+const role=String(myInfo?.role||'').toLowerCase();
+return ['admin','admin_all','admin_home','admin_accounting','staff'].includes(role);
+}
+function isMypageWorkforceLiteProfile(){
+return mypageRuntimeProfile==='workforce_lite';
+}
+function isMypageAdminUser(){
+const role=String(myInfo?.role||'').toLowerCase();
+return role==='admin'||role==='admin_all';
+}
+function getMypageDefaultLeaveTypeCatalog(){
+return MYPAGE_DEFAULT_LEAVE_TYPE_CATALOG.map(item=>({id:String(item.id||'').trim(),label:String(item.label||'').trim(),enabled:item.enabled!==false,deductible:item.deductible===true,duration_mode:String(item.duration_mode||'date_range').trim(),aliases:Array.from(new Set((Array.isArray(item.aliases)?item.aliases:[]).map(alias=>String(alias||'').trim()).filter(Boolean)))}));
+}
+function getMypageDefaultCalendarSourceCatalog(){
+return JSON.parse(JSON.stringify(MYPAGE_DEFAULT_CALENDAR_SOURCE_CATALOG));
+}
+function normalizeMypageCalendarScopeCatalog(rawValue,defaults){
+const normalized={};
+const source=rawValue&&typeof rawValue==='object'&&!Array.isArray(rawValue)?rawValue:{};
+Object.keys(defaults||{}).forEach(key=>{
+normalized[key]=source[key]===undefined?defaults[key]===true:source[key]===true||String(source[key]).trim().toLowerCase()==='true';
+});
+return normalized;
+}
+function normalizeMypageCalendarSourceCatalog(rawValue){
+const defaults=getMypageDefaultCalendarSourceCatalog();
+let parsed=rawValue;
+if(typeof parsed==='string'){
+try{parsed=JSON.parse(parsed)}catch(_){parsed={}}
+}
+if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)) parsed={};
+return {
+erp:normalizeMypageCalendarScopeCatalog(parsed.erp,defaults.erp),
+google_ics:normalizeMypageCalendarScopeCatalog(parsed.google_ics,defaults.google_ics)
+};
+}
+function getMypageCalendarSourceCatalog(){
+return normalizeMypageCalendarSourceCatalog(companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]);
+}
+function canManageMypageCalendarSettings(){
+return permissionSet.size>0?permissionSet.has('hr.admin'):isMypageAdminUser();
+}
+function getMypageCalendarSourceItemInfo(key){
+return MYPAGE_CALENDAR_SOURCE_ITEM_CATALOG.find(item=>item.key===key)||null;
+}
+function buildMypageCalendarGoogleScopeSwitchesHtml(defaults){
+return Object.keys(defaults||{}).map(key=>{
+const info=getMypageCalendarSourceItemInfo(key);
+if(!info) return '';
+const inputId=`mypage_calendar_google_ics_${key}`;
+return `<div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="${inputId}"><label class="form-check-label fw-bold" for="${inputId}">${info.label}</label></div><div class="small text-muted ms-4">${info.description}</div></div>`;
+}).join('');
+}
+function getMypageCalendarIcsFeedUrl(token){
+const safeToken=String(token||'').trim();
+if(!safeToken) return '';
+return `${SUPABASE_URL}/functions/v1/erp-calendar-ics-feed?token=${encodeURIComponent(safeToken)}`;
+}
+function syncMypageCalendarSettingsCardVisibility(){
+const buttonEl=document.getElementById('btnOpenMypageCalendarSettings');
+if(!buttonEl) return;
+buttonEl.classList.toggle('hidden',!canManageMypageCalendarSettings());
+}
+function openMypageCalendarSubscriptionModal(){
+if(!canManageMypageCalendarSettings()) return;
+ensureMypageCalendarSettingsFields();
+syncMypageCalendarSettingsUi();
+if(!calendarSubscriptionModal){
+const modalEl=document.getElementById('calendarSubscriptionModal');
+if(!modalEl) return;
+calendarSubscriptionModal=new bootstrap.Modal(modalEl);
+}
+calendarSubscriptionModal.show();
+}
+function ensureMypageCalendarSettingsFields(){
+const wrapper=document.getElementById('mypageCalendarGoogleScopeSwitches');
+if(!wrapper) return;
+if(!wrapper.dataset.bound){
+wrapper.innerHTML=buildMypageCalendarGoogleScopeSwitchesHtml(getMypageDefaultCalendarSourceCatalog().google_ics);
+wrapper.dataset.bound='1';
+}
+}
+function syncMypageCalendarIcsActionState(){
+const enabledInput=document.getElementById('mypage_calendar_ics_enabled');
+const urlInput=document.getElementById('mypage_calendar_ics_feed_url');
+const copyButton=document.getElementById('btnCopyMypageCalendarIcsUrl');
+const regenerateButton=document.getElementById('btnRegenerateMypageCalendarIcsUrl');
+const helpText=document.getElementById('mypageCalendarIcsFeedHelp');
+const isEnabled=!!enabledInput?.checked;
+const hasUrl=!!String(urlInput?.value||'').trim();
+if(copyButton) copyButton.disabled=!hasUrl;
+if(regenerateButton) regenerateButton.disabled=!isEnabled;
+if(helpText){
+helpText.textContent=isEnabled
+?'Google Calendar에서 “URL로 추가”로 붙이면 승인 일정이 주기적으로 동기화됩니다.'
+:'비활성화하면 공개 구독 URL이 동작하지 않습니다. 포함 항목 설정은 그대로 저장됩니다.';
+}
+}
+function renderMypageCalendarIcsFeedUrl(){
+const urlInput=document.getElementById('mypage_calendar_ics_feed_url');
+if(!urlInput) return;
+urlInput.value=getMypageCalendarIcsFeedUrl(mypageCalendarIcsSettings.feedToken);
+syncMypageCalendarIcsActionState();
+}
+function syncMypageCalendarSettingsUi(){
+syncMypageCalendarSettingsCardVisibility();
+if(!canManageMypageCalendarSettings()) return;
+ensureMypageCalendarSettingsFields();
+const enabledInput=document.getElementById('mypage_calendar_ics_enabled');
+const sourceCatalog=normalizeMypageCalendarSourceCatalog(mypageCalendarIcsSettings.sourceCatalog||companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]);
+const enabled=mypageCalendarIcsSettings.enabled===true||String(companyInfo['calendar_ics_enabled']||'').trim().toLowerCase()==='true';
+if(enabledInput) enabledInput.checked=enabled;
+Object.entries(sourceCatalog.google_ics||{}).forEach(([key,value])=>{
+const input=document.getElementById(`mypage_calendar_google_ics_${key}`);
+if(input) input.checked=value===true;
+});
+renderMypageCalendarIcsFeedUrl();
+}
+function collectMypageCalendarIcsSettingsFromUi(){
+const sourceCatalog=normalizeMypageCalendarSourceCatalog(mypageCalendarIcsSettings.sourceCatalog||companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]);
+Object.keys(sourceCatalog.google_ics).forEach(key=>{
+sourceCatalog.google_ics[key]=!!document.getElementById(`mypage_calendar_google_ics_${key}`)?.checked;
+});
+return {
+enabled:!!document.getElementById('mypage_calendar_ics_enabled')?.checked,
+sourceCatalog
+};
+}
+async function loadMypageCalendarIcsSettings(){
+syncMypageCalendarSettingsCardVisibility();
+if(!canManageMypageCalendarSettings()) return;
+const fallbackCatalog=normalizeMypageCalendarSourceCatalog(companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]);
+mypageCalendarIcsSettings={enabled:String(companyInfo['calendar_ics_enabled']||'').trim().toLowerCase()==='true',feedToken:'',sourceCatalog:fallbackCatalog};
+try{
+const {data,error}=await _supabase.rpc('erp_get_calendar_ics_settings');
+if(error) throw error;
+mypageCalendarIcsSettings={enabled:data?.enabled===true,feedToken:String(data?.feed_token||'').trim(),sourceCatalog:normalizeMypageCalendarSourceCatalog(data?.source_catalog)};
+}catch(error){
+console.warn('mypage calendar ICS settings load failed:',error?.message||error);
+}
+syncMypageCalendarSettingsUi();
+}
+async function copyMypageCalendarIcsFeedUrl(){
+const feedUrl=getMypageCalendarIcsFeedUrl(mypageCalendarIcsSettings.feedToken);
+if(!feedUrl) return showAlert('먼저 캘린더 설정을 저장해 구독 URL을 생성해 주세요.');
+try{
+await navigator.clipboard.writeText(feedUrl);
+showAlert('Google Calendar 구독 URL을 복사했습니다.');
+}catch(error){
+showAlert('구독 URL 복사 실패: '+(error?.message||error));
+}
+}
+async function regenerateMypageCalendarIcsFeedToken(){
+if(!canManageMypageCalendarSettings()) return;
+openConfirmModal('캘린더 구독 URL을 재발급하시겠습니까?\n기존 URL은 더 이상 동작하지 않습니다.',async function(){
+try{
+const config=collectMypageCalendarIcsSettingsFromUi();
+const {data,error}=await _supabase.rpc('erp_upsert_calendar_ics_settings',{p_enabled:config.enabled,p_source_catalog:config.sourceCatalog,p_regenerate_token:true});
+if(error) throw error;
+companyInfo['calendar_ics_enabled']=data?.enabled===true?'true':'false';
+companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]=JSON.stringify(normalizeMypageCalendarSourceCatalog(data?.source_catalog));
+mypageCalendarIcsSettings={enabled:data?.enabled===true,feedToken:String(data?.feed_token||'').trim(),sourceCatalog:normalizeMypageCalendarSourceCatalog(data?.source_catalog)};
+syncMypageCalendarSettingsUi();
+showAlert('캘린더 구독 URL을 재발급했습니다. 기존 URL은 더 이상 동작하지 않습니다.');
+}catch(error){
+showAlert('캘린더 URL 재발급 실패: '+(error?.message||error));
+}
+});
+}
+async function saveMypageCalendarIcsSettings(){
+if(!canManageMypageCalendarSettings()) return;
+try{
+const config=collectMypageCalendarIcsSettingsFromUi();
+const {data,error}=await _supabase.rpc('erp_upsert_calendar_ics_settings',{p_enabled:config.enabled,p_source_catalog:config.sourceCatalog,p_regenerate_token:false});
+if(error) throw error;
+companyInfo['calendar_ics_enabled']=data?.enabled===true?'true':'false';
+companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]=JSON.stringify(normalizeMypageCalendarSourceCatalog(data?.source_catalog));
+mypageCalendarIcsSettings={enabled:data?.enabled===true,feedToken:String(data?.feed_token||'').trim(),sourceCatalog:normalizeMypageCalendarSourceCatalog(data?.source_catalog)};
+syncMypageCalendarSettingsUi();
+showAlert('캘린더 구독 설정이 저장되었습니다.');
+}catch(error){
+showAlert('캘린더 구독 설정 저장 실패: '+(error?.message||error));
+}
+}
+function shouldIncludeMypageCalendarSource(scope,key){
+const safeScope=scope==='google_ics'?'google_ics':'erp';
+const catalog=getMypageCalendarSourceCatalog();
+return catalog?.[safeScope]?.[key]===true;
+}
+function normalizeMypageLeaveTypeAliases(value){
+const source=Array.isArray(value)?value:(()=>{if(typeof value!=='string'||!value.trim()) return [];try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed:[]}catch(_){return []}})();
+return Array.from(new Set(source.map(item=>String(item||'').trim()).filter(Boolean)));
+}
+function parseMypageLeaveTypeCatalog(rawValue){
+const fallback=getMypageDefaultLeaveTypeCatalog();
+if(typeof rawValue!=='string'||!rawValue.trim()) return fallback;
+try{
+const parsed=JSON.parse(rawValue);
+if(!Array.isArray(parsed)) return fallback;
+const rows=parsed.map((item,index)=>{
+const label=String(item?.label||'').trim();
+if(!label) return null;
+const id=String(item?.id||'').trim().toLowerCase().replace(/[^a-z0-9_]+/g,'_').replace(/^_+|_+$/g,'')||`leave_type_${index+1}`;
+return {id,label,enabled:item?.enabled!==false,deductible:item?.deductible===true,duration_mode:String(item?.duration_mode||'date_range').trim(),aliases:normalizeMypageLeaveTypeAliases(item?.aliases)};
+}).filter(Boolean);
+return rows;
+}catch(_){
+return fallback;
+}
+}
+function getMypageLeaveTypeCatalog(){
+return Array.isArray(mypageLeaveTypeCatalog)?mypageLeaveTypeCatalog:getMypageDefaultLeaveTypeCatalog();
+}
+function getMypageLeaveTypeConfigByStoredSubtype(subType){
+const safe=String(subType||'').trim();
+if(!safe) return null;
+return getMypageLeaveTypeCatalog().find(item=>item.id===safe||item.label===safe||normalizeMypageLeaveTypeAliases(item.aliases).includes(safe))||null;
+}
+function getMypageLeaveSnapshotMeta(doc){
+const raw=doc?.leave_snapshot;
+if(!raw) return null;
+if(raw&&typeof raw==='object'&&!Array.isArray(raw)) return raw;
+if(typeof raw!=='string') return null;
+try{
+const parsed=JSON.parse(raw);
+return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+}catch(_){
+return null;
+}
+}
+function getMypageLeaveTypeDisplayLabel(subType,doc){
+const snapshot=getMypageLeaveSnapshotMeta(doc);
+if(snapshot?.label) return String(snapshot.label).trim();
+const config=getMypageLeaveTypeConfigByStoredSubtype(subType);
+return config?.label||String(subType||'').trim();
+}
+function isMypageHalfDayLeaveSubtype(subType,doc){
+const snapshot=getMypageLeaveSnapshotMeta(doc);
+if(snapshot?.duration_mode) return String(snapshot.duration_mode).trim()==='half_day';
+const config=getMypageLeaveTypeConfigByStoredSubtype(subType);
+return String(config?.duration_mode||'').trim()==='half_day';
+}
+function isMypageDeductibleLeaveDoc(doc){
+const snapshot=getMypageLeaveSnapshotMeta(doc);
+if(snapshot&&typeof snapshot.deductible==='boolean') return snapshot.deductible===true;
+const leaveLedger=window.LeaveLedger||{};
+const subType=typeof leaveLedger.getLeaveSubType==='function'?leaveLedger.getLeaveSubType(doc?.doc_type):'';
+const config=getMypageLeaveTypeConfigByStoredSubtype(subType);
+return config?.deductible===true;
+}
+function formatMypageLeaveDocType(docOrType){
+const doc=docOrType&&typeof docOrType==='object'?docOrType:null;
+const raw=String(doc?doc.doc_type:docOrType||'').trim();
+if(!raw.startsWith('휴가(')) return raw;
+const snapshot=getMypageLeaveSnapshotMeta(doc);
+if(snapshot?.label) return `휴가(${String(snapshot.label).trim()})`;
+const leaveLedger=window.LeaveLedger||{};
+const subType=typeof leaveLedger.getLeaveSubType==='function'?String(leaveLedger.getLeaveSubType(raw)||'').trim():'';
+if(!subType) return raw;
+return `휴가(${getMypageLeaveTypeDisplayLabel(subType,doc)})`;
+}
+function syncMypageLeaveTypeRuntime(){
+mypageLeaveTypeCatalog=parseMypageLeaveTypeCatalog(companyInfo[MYPAGE_LEAVE_TYPE_CONFIG_KEY]);
+if(window.LeaveLedger&&typeof window.LeaveLedger.setDeductibleSubTypes==='function'){
+const tokens=[];
+getMypageLeaveTypeCatalog().forEach(item=>{
+if(item.deductible!==true) return;
+[item.id,item.label,...normalizeMypageLeaveTypeAliases(item.aliases)].forEach(token=>{
+const safe=String(token||'').trim();
+if(safe) tokens.push(safe);
+});
+});
+window.LeaveLedger.setDeductibleSubTypes(Array.from(new Set(tokens)));
+}
+}
+function getMypageSchemaFeatureCacheKey(){
+return `erp_mypage_schema_features:${SUPABASE_URL}`;
+}
+function readMypageSchemaFeatureCache(){
+try{
+const raw=localStorage.getItem(getMypageSchemaFeatureCacheKey());
+if(!raw) return null;
+const parsed=JSON.parse(raw);
+if(!parsed||Number(parsed.version||0)!==MYPAGE_SCHEMA_FEATURE_CACHE_VERSION) return null;
+const savedAtMs=new Date(parsed.saved_at||'').getTime();
+if(!Number.isFinite(savedAtMs)) return null;
+if((Date.now()-savedAtMs)>MYPAGE_SCHEMA_FEATURE_CACHE_TTL_MS) return null;
+return{
+leave_snapshot:!!parsed.leave_snapshot,
+business_trip_snapshot:!!parsed.business_trip_snapshot
+};
+}catch(_){
+return null;
+}
+}
+function writeMypageSchemaFeatureCache(features={}){
+try{
+localStorage.setItem(getMypageSchemaFeatureCacheKey(),JSON.stringify({
+version:MYPAGE_SCHEMA_FEATURE_CACHE_VERSION,
+saved_at:new Date().toISOString(),
+leave_snapshot:!!features.leave_snapshot,
+business_trip_snapshot:!!features.business_trip_snapshot
+}));
+}catch(_){
+void 0;
+}
+}
+async function fetchMypageSchemaFeaturesFromOpenApi(){
+const response=await fetch(`${SUPABASE_URL}/rest/v1/?apikey=${encodeURIComponent(SUPABASE_KEY)}`,{headers:{Accept:'application/openapi+json'}});
+if(!response.ok) throw new Error(`MYPAGE_OPENAPI_FETCH_${response.status}`);
+const openapi=await response.json();
+const properties=openapi?.definitions?.ref_approval?.properties||{};
+return{
+leave_snapshot:!!properties.leave_snapshot,
+business_trip_snapshot:!!properties.business_trip_snapshot
+};
+}
+async function loadMypageSchemaFeatures(){
+const cached=readMypageSchemaFeatureCache();
+if(cached) return cached;
+try{
+const fresh=await fetchMypageSchemaFeaturesFromOpenApi();
+writeMypageSchemaFeatureCache(fresh);
+return fresh;
+}catch(_){
+return{
+leave_snapshot:false,
+business_trip_snapshot:false
+};
+}
+}
+function applyMypageSchemaFeatureState(features={}){
+mypageLeaveSnapshotSupported=!!features.leave_snapshot;
+mypageBusinessTripSnapshotSupported=!!features.business_trip_snapshot;
+}
+function getMypageCompanyInfoCacheKey(coopId){
+const safeCoopId=String(coopId||'').trim();
+if(!safeCoopId) return '';
+return `erp_mypage_company_info:${safeCoopId}`;
+}
+function readMypageCompanyInfoCache(coopId,options={}){
+const allowStale=options?.allowStale===true;
+try{
+const cacheKey=getMypageCompanyInfoCacheKey(coopId);
+if(!cacheKey) return null;
+const raw=localStorage.getItem(cacheKey);
+if(!raw) return null;
+const parsed=JSON.parse(raw);
+if(!parsed||Number(parsed.version||0)!==MYPAGE_COMPANY_INFO_CACHE_VERSION||!parsed.data||typeof parsed.data!=='object') return null;
+const savedAtMs=new Date(parsed.saved_at||'').getTime();
+if(!allowStale){
+if(!Number.isFinite(savedAtMs)) return null;
+if((Date.now()-savedAtMs)>MYPAGE_COMPANY_INFO_CACHE_TTL_MS) return null;
+}
+return {...parsed.data};
+}catch(_){
+return null;
+}
+}
+function writeMypageCompanyInfoCache(coopId,infoMap={}){
+try{
+const cacheKey=getMypageCompanyInfoCacheKey(coopId);
+if(!cacheKey) return;
+localStorage.setItem(cacheKey,JSON.stringify({
+version:MYPAGE_COMPANY_INFO_CACHE_VERSION,
+saved_at:new Date().toISOString(),
+data:{...(infoMap||{})}
+}));
+}catch(_){
+void 0;
+}
+}
+function trimMypageCompanyValue(value){
+return String(value==null?'':value).trim();
+}
+function escapeMypageCompanyRegExp(value){
+return String(value||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+}
+function resolveMypageCompanyName(info){
+return trimMypageCompanyValue(info?.company_name||info?.orgName);
+}
+function resolveMypageChairmanName(info){
+return trimMypageCompanyValue(info?.chairman_name||info?.ceoName);
+}
+function buildMypageCompanyContact(info){
+const direct=trimMypageCompanyValue(info?.company_contact);
+if(direct) return direct;
+const parts=[
+trimMypageCompanyValue(info?.company_contact_name),
+trimMypageCompanyValue(info?.company_contact_phone)
+].filter(Boolean);
+if(parts.length>0) return parts.join(' ');
+return trimMypageCompanyValue(info?.email);
+}
+function buildMypageCompanyAddress(info){
+const rawAddress=trimMypageCompanyValue(info?.company_address);
+if(!rawAddress) return '';
+const nameCandidates=Array.from(new Set([
+resolveMypageCompanyName(info),
+trimMypageCompanyValue(info?.orgName)
+].filter(Boolean)));
+let normalized=rawAddress;
+nameCandidates.forEach((name)=>{
+const safeName=escapeMypageCompanyRegExp(name);
+normalized=normalized.replace(new RegExp(`^${safeName}\\s*`,'g'),'').trim();
+normalized=normalized.replace(new RegExp(`\\s*${safeName}$`,'g'),'').trim();
+});
+return normalized||rawAddress;
+}
+function buildMypageCompanyPrintProfile(){
+return {
+companyName:resolveMypageCompanyName(companyInfo),
+chairmanName:resolveMypageChairmanName(companyInfo),
+address:buildMypageCompanyAddress(companyInfo),
+contact:buildMypageCompanyContact(companyInfo),
+logoUrl:trimMypageCompanyValue(companyInfo?.logo_horizontal_url),
+sealUrl:trimMypageCompanyValue(companyInfo?.seal_url)
+};
+}
+function ensureMypageCompanyPrintProfile(profile,contextLabel){
+if(!trimMypageCompanyValue(profile?.companyName)) throw new Error(`${contextLabel} 전에 회사 정보의 법인명(조합명)을 먼저 확인해주세요.`);
+if(!trimMypageCompanyValue(profile?.chairmanName)) throw new Error(`${contextLabel} 전에 회사 정보의 이사장명을 먼저 확인해주세요.`);
+}
+function applyMypageCompanyInfoState(infoMap={}){
+companyInfo={...(infoMap||{})};
+syncMypageLeaveTypeRuntime();
+companyInfo.chairman=resolveMypageChairmanName(companyInfo);
+}
+async function refreshMypageCompanyInfo(coopId){
+try{
+const {data,error}=await _supabase.from('ref_company_info').select('key,value').eq('coop_id',coopId);
+if(error) throw error;
+const nextInfo={};
+(data||[]).forEach(row=>{nextInfo[row.key]=row.value;});
+if(nextInfo.logo_horizontal_url&&!String(nextInfo.logo_horizontal_url).startsWith('http')){
+const {data:d}=_supabase.storage.from('assets').getPublicUrl(nextInfo.logo_horizontal_url);
+if(d?.publicUrl) nextInfo.logo_horizontal_url=d.publicUrl;
+}
+if(nextInfo.seal_url){
+const rawSealPath=String(nextInfo.seal_url||'').trim();
+const sealPath=rawSealPath.startsWith('http')?rawSealPath.split('/').pop():rawSealPath;
+if(sealPath){
+const {data:d}=await _supabase.storage.from('attachments').createSignedUrl(sealPath,3600);
+if(d?.signedUrl) nextInfo.seal_url=d.signedUrl;
+}
+}
+applyMypageCompanyInfoState(nextInfo);
+writeMypageCompanyInfoCache(coopId,nextInfo);
+return nextInfo;
+}catch(error){
+console.warn('mypage company info refresh failed:',error?.message||error);
+return null;
+}
+}
+
+function ensureTelegramConnectUi(){
+const tabInfo=document.getElementById('tabInfo');
+if(!tabInfo||document.getElementById('mypageTelegramConnectSection')) return;
+const section=document.createElement('div');
+section.id='mypageTelegramConnectSection';
+section.className='mt-4 pt-3 border-top';
+section.innerHTML=`<div class="telegram-connect-card"><div class="d-flex justify-content-between align-items-center mb-2"><h6 class="fw-bold m-0">🤖 Telegram 연결</h6><span class="badge bg-secondary" id="telegramConnectStatusBadge">미확인</span></div><div class="small text-muted mb-2" id="telegramConnectHelpText">결재 알림을 Telegram 개인 DM으로 받을 수 있습니다.</div><div class="d-flex flex-wrap gap-2 mb-2"><button class="btn btn-sm btn-outline-primary" type="button" id="btnTelegramConnect" onclick="openMypageTelegramConnect()">Telegram 연결</button><button class="btn btn-sm btn-outline-secondary hidden" type="button" id="btnTelegramCopyLink" onclick="copyMypageTelegramConnectLink()">봇 링크 복사</button><button class="btn btn-sm btn-outline-secondary hidden" type="button" id="btnTelegramCopyStart" onclick="copyMypageTelegramConnectCommand()">연결 명령 복사</button><button class="btn btn-sm btn-outline-success hidden" type="button" id="btnTelegramTest" onclick="sendMypageTelegramTestMessage()">테스트 메시지</button><button class="btn btn-sm btn-outline-danger hidden" type="button" id="btnTelegramDisconnect" onclick="disconnectMypageTelegramLink()">연결 해제</button></div><div class="small text-muted" id="telegramConnectMeta">1. Telegram 연결을 누르면 봇 화면이 열립니다. 2. Telegram에서 START BOT을 누르면 연결이 완료됩니다. 3. 자동 연결이 안 되면 연결 명령 복사를 눌러 Telegram 대화창에 그대로 붙여넣어 주세요.</div></div>`;
+const emergencySection=tabInfo.querySelector('.mt-5.pt-3.border-top');
+if(emergencySection&&emergencySection.parentNode){
+emergencySection.parentNode.insertBefore(section, emergencySection);
+}else{
+tabInfo.appendChild(section);
+}
+} // End of ensureTelegramConnectUi
+
+function ensureMypageOvertimeSummarySection(){
+const tabInfo=document.getElementById('tabInfo');
+if(!tabInfo||document.getElementById('mypageOvertimeSummarySection')) return;
+const section=document.createElement('div');
+section.id='mypageOvertimeSummarySection';
+section.className='mt-4 pt-3 border-top';
+section.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-3"><h6 class="fw-bold m-0">⏱️ 이번 달 시간외 근로</h6><span class="small text-muted" id="mypageOvertimeSummaryMonth">${formatMypageKstMonth()}</span></div><div class="overtime-summary-card"><div class="row g-2"><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">승인 시간</div><div class="value" id="mypageOvertimeHours">0시간</div></div></div><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">수당 지급 기록</div><div class="value text-primary" id="mypageOvertimeAllowance">0시간</div></div></div><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">보상휴가 적립 기록</div><div class="value text-success" id="mypageOvertimeCompLeave">0시간</div></div></div></div><div class="small text-muted mt-2" id="mypageOvertimeSummaryHelp">승인 완료된 시간외 근로 문서를 기준으로 요약합니다.</div></div>`;
+const emergencySection=tabInfo.querySelector('.mt-5.pt-3.border-top');
+if(emergencySection&&emergencySection.parentNode){
+emergencySection.parentNode.insertBefore(section, emergencySection);
+}else{
+tabInfo.appendChild(section);
+}
+}
+
+function renderMypageOvertimeSummary(summary){
+ensureMypageOvertimeSummarySection();
+const hoursEl=document.getElementById('mypageOvertimeHours');
+const allowanceEl=document.getElementById('mypageOvertimeAllowance');
+const compLeaveEl=document.getElementById('mypageOvertimeCompLeave');
+const helpEl=document.getElementById('mypageOvertimeSummaryHelp');
+if(hoursEl) hoursEl.textContent=`${Number(summary?.hours||0)}시간`;
+if(allowanceEl) allowanceEl.textContent=`${Number(summary?.allowance||0)}시간`;
+if(compLeaveEl) compLeaveEl.textContent=`${Number(summary?.compLeaveDays||0)}시간`;
+if(helpEl) helpEl.textContent=summary?.count>0?`승인 완료 문서 ${summary.count}건을 기준으로 집계했습니다.`:'이번 달 승인 완료된 시간외 근로 문서가 없습니다.';
+}
+
+function renderMypageTelegramLinkStatus(statusData){
+ensureTelegramConnectUi();
+const badge=document.getElementById('telegramConnectStatusBadge');
+const help=document.getElementById('telegramConnectHelpText');
+const meta=document.getElementById('telegramConnectMeta');
+const connectBtn=document.getElementById('btnTelegramConnect');
+const copyBtn=document.getElementById('btnTelegramCopyLink');
+const copyCommandBtn=document.getElementById('btnTelegramCopyStart');
+const testBtn=document.getElementById('btnTelegramTest');
+const disconnectBtn=document.getElementById('btnTelegramDisconnect');
+if(!badge||!help||!meta||!connectBtn||!copyBtn||!copyCommandBtn||!testBtn||!disconnectBtn) return;
+const enabled=!!statusData?.enabled;
+const linked=!!statusData?.linked;
+const botUsername=String(statusData?.bot_username||'').trim();
+const maskedChat=String(statusData?.chat_id_masked||'').trim();
+connectBtn.disabled=!enabled||!botUsername;
+copyBtn.classList.toggle('hidden',!mypageTelegramConnectUrl);
+copyCommandBtn.classList.toggle('hidden',!mypageTelegramConnectCommand);
+if(!enabled){
+badge.className='badge bg-secondary';
+badge.textContent='미사용';
+help.textContent='이 조합은 Telegram 결재 알림을 사용하지 않습니다.';
+meta.textContent='통합 관리자와 조합 관리자 설정이 끝나면 개인 DM 연결을 진행할 수 있습니다.';
+copyCommandBtn.classList.add('hidden');
+testBtn.classList.add('hidden');
+disconnectBtn.classList.add('hidden');
+return;
+}
+if(!botUsername){
+badge.className='badge bg-warning text-dark';
+badge.textContent='준비 중';
+help.textContent='봇 연결 정보를 확인하는 중입니다.';
+meta.textContent='통합 관리자가 공용 Telegram 봇 설정 저장을 다시 실행하면 봇 username과 webhook이 자동 동기화됩니다.';
+copyCommandBtn.classList.add('hidden');
+testBtn.classList.add('hidden');
+disconnectBtn.classList.add('hidden');
+return;
+}
+if(linked){
+badge.className='badge bg-success';
+badge.textContent='연결됨';
+help.textContent=`@${botUsername} 봇과 연결되었습니다. 테스트 메시지로 DM 수신을 바로 확인할 수 있습니다.`;
+meta.textContent=maskedChat?`현재 연결 채팅: ${maskedChat}`:`@${botUsername} 봇과 연결되어 있습니다.`;
+copyCommandBtn.classList.add('hidden');
+testBtn.classList.remove('hidden');
+disconnectBtn.classList.remove('hidden');
+return;
+}
+badge.className='badge bg-light text-dark border';
+badge.textContent='미연결';
+help.textContent=`@${botUsername} 봇으로 결재 알림을 받을 수 있습니다.`;
+meta.textContent=botUsername?`Telegram 연결을 누른 뒤 Telegram에서 시작 버튼을 눌러 주세요. 링크가 안 열리면 Telegram에서 @${botUsername} 봇을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어도 됩니다.`:'Telegram 연결을 누른 뒤 Telegram에서 시작 버튼을 눌러 주세요. 링크가 안 열리면 Telegram에서 봇 이름을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어도 됩니다.';
+testBtn.classList.add('hidden');
+disconnectBtn.classList.add('hidden');
+} // End of renderMypageTelegramLinkStatus
+
+async function loadMypageTelegramLinkStatus(){
+ensureTelegramConnectUi();
+try{
+const {data,error}=await _supabase.rpc('erp_get_telegram_link_status');
+if(error) throw error;
+renderMypageTelegramLinkStatus(data||{});
+}catch(error){
+renderMypageTelegramLinkStatus({enabled:false,linked:false});
+console.warn('telegram link status load failed:', error?.message||error);
+}
+} // End of loadMypageTelegramLinkStatus
+
+async function openMypageTelegramConnect(){
+try{
+const {data,error}=await _supabase.rpc('erp_issue_my_telegram_link_request');
+if(error) throw error;
+mypageTelegramConnectUrl=String(data?.connect_url||'').trim();
+if(!mypageTelegramConnectUrl) throw new Error('TELEGRAM_CONNECT_URL_MISSING');
+const botUsername=String(data?.bot_username||'').trim();
+const connectCommand=String(data?.connect_command||'').trim();
+const connectCode=String(data?.connect_code||'').trim();
+const connectToken=String(data?.token||'').trim();
+const telegramAppUrl=(botUsername&&connectToken)?`tg://resolve?domain=${encodeURIComponent(botUsername)}&start=${encodeURIComponent(connectToken)}`:'';
+mypageTelegramConnectCommand=connectCommand||'';
+renderMypageTelegramLinkStatus(await _supabase.rpc('erp_get_telegram_link_status').then((result)=>result.data||{}).catch(()=>({enabled:true,linked:false,bot_username:String(data?.bot_username||'').trim()})));
+document.getElementById('telegramConnectMeta').textContent=botUsername?`봇 화면을 열었습니다. Telegram에서 시작 버튼을 눌러 연결해 주세요. 링크가 안 열리면 Telegram에서 @${botUsername} 봇을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어도 됩니다. 연결 코드: ${connectCode||'-'} / 만료 시각: ${String(data?.expires_at||'').replace('T',' ').replace('Z','')}.`:`봇 화면을 열었습니다. Telegram에서 시작 버튼을 눌러 연결해 주세요. 링크가 안 열리면 Telegram에서 봇 이름을 검색해 직접 추가한 뒤 연결 명령을 붙여넣어도 됩니다. 연결 코드: ${connectCode||'-'} / 만료 시각: ${String(data?.expires_at||'').replace('T',' ').replace('Z','')}.`;
+document.getElementById('btnTelegramCopyLink')?.classList.remove('hidden');
+document.getElementById('btnTelegramCopyStart')?.classList.remove('hidden');
+if(telegramAppUrl){
+window.location.href=telegramAppUrl;
+setTimeout(function openTelegramWebFallback(){
+window.open(mypageTelegramConnectUrl,'_blank','noopener');
+},900);
+}else{
+window.open(mypageTelegramConnectUrl,'_blank','noopener');
+}
+}catch(error){
+showAlert('Telegram 연결 링크 생성 실패: '+(error?.message||error));
+}
+} // End of openMypageTelegramConnect
+
+async function copyMypageTelegramConnectCommand(){
+if(!mypageTelegramConnectCommand) return showAlert('먼저 Telegram 연결 링크를 생성해 주세요.');
+try{
+await navigator.clipboard.writeText(mypageTelegramConnectCommand);
+showAlert('연결 명령을 복사했습니다. Telegram에서 봇을 검색해 연 뒤 대화창에 그대로 붙여넣고 전송해 주세요.');
+}catch(error){
+showAlert('연결 명령 복사 실패: '+(error?.message||error));
+}
+} // End of copyMypageTelegramConnectCommand
+
+async function copyMypageTelegramConnectLink(){
+if(!mypageTelegramConnectUrl) return showAlert('먼저 Telegram 연결 링크를 생성해 주세요.');
+try{
+await navigator.clipboard.writeText(mypageTelegramConnectUrl);
+showAlert('Telegram 연결 링크를 복사했습니다.');
+}catch(error){
+showAlert('링크 복사 실패: '+(error?.message||error));
+}
+} // End of copyMypageTelegramConnectLink
+
+async function disconnectMypageTelegramLink(){
+try{
+const {data,error}=await _supabase.rpc('erp_disconnect_my_telegram_link');
+if(error) throw error;
+mypageTelegramConnectUrl='';
+mypageTelegramConnectCommand='';
+await loadMypageTelegramLinkStatus();
+showAlert(data?'Telegram 연결을 해제했습니다.':'해제할 Telegram 연결이 없습니다.');
+}catch(error){
+showAlert('Telegram 연결 해제 실패: '+(error?.message||error));
+}
+} // End of disconnectMypageTelegramLink
+
+async function sendMypageTelegramTestMessage(){
+const testBtn=document.getElementById('btnTelegramTest');
+const originalLabel=testBtn?.innerHTML||'테스트 메시지';
+if(testBtn){
+testBtn.setAttribute('disabled','disabled');
+testBtn.innerHTML='전송 중...';
+}
+try{
+const {data:sessionData,error:sessionError}=await _supabase.auth.getSession();
+if(sessionError) throw sessionError;
+const currentSession=sessionData?.session||null;
+if(!currentSession?.refresh_token&&!currentSession?.access_token) throw new Error('ERP_LOGIN_SESSION_REQUIRED');
+const {data:refreshedData,error:refreshError}=await _supabase.auth.refreshSession();
+const activeSession=refreshedData?.session||currentSession;
+if(refreshError&&!activeSession?.access_token) throw new Error('ERP_LOGIN_SESSION_REQUIRED');
+const accessToken=String(activeSession?.access_token||'').trim();
+if(!accessToken) throw new Error('ERP_LOGIN_SESSION_REQUIRED');
+const response=await fetch(`${SUPABASE_URL}/functions/v1/erp-telegram-self-test`,{
+method:'POST',
+headers:{
+'Content-Type':'application/json',
+'apikey':SUPABASE_KEY,
+'Authorization':`Bearer ${accessToken}`
+},
+body:JSON.stringify({source:'mypage'})
+});
+let responseBody=null;
+let responseText='';
+try{
+responseBody=await response.clone().json();
+}catch(_jsonError){
+try{responseText=String(await response.text()||'').trim()}catch(_textError){}
+}
+if(!response.ok){
+const failureText=String(responseBody?.detail||responseBody?.error||responseText||`HTTP_${response.status}`).trim();
+throw new Error(failureText);
+}
+if(responseBody?.ok===false){
+throw new Error(responseBody?.detail||responseBody?.error||'TELEGRAM_TEST_SEND_FAILED');
+}
+showAlert(String(responseBody?.message||'Telegram 테스트 메시지를 보냈습니다.'));
+}catch(error){
+const normalizedErrorText=String(error?.message||error||'').trim();
+if(normalizedErrorText.includes('ERP_LOGIN_SESSION_REQUIRED')||normalizedErrorText.includes('Auth session missing')||normalizedErrorText.includes('invalid JWT')||normalizedErrorText.includes('JWT')){
+await handleMypageSessionExpired('로그인 세션이 만료되었습니다.\n다시 로그인한 뒤 Telegram 테스트 메시지를 보내 주세요.');
+return;
+}
+showAlert('Telegram 테스트 메시지 전송 실패: '+normalizedErrorText);
+}finally{
+if(testBtn){
+testBtn.removeAttribute('disabled');
+testBtn.innerHTML=originalLabel;
+}
+}
+} // End of sendMypageTelegramTestMessage
+async function handleMypageSessionExpired(message){
+try{
+await _supabase.auth.signOut();
+}catch(_signOutError){}
+localStorage.removeItem('erp_user');
+localStorage.removeItem('erp_permissions');
+showAlert(message||'로그인 세션이 만료되었습니다.\n다시 로그인해 주세요.');
+setTimeout(function(){location.href='index.html';},1200);
+} // End of handleMypageSessionExpired
+function ensureNoticeComposeUi(){
+const tabNotice=document.getElementById('tabNotice');
+if(!tabNotice) return;
+if(!document.getElementById('mypageNoticeToolbar')){
+const toolbar=document.createElement('div');
+toolbar.id='mypageNoticeToolbar';
+toolbar.className='d-flex justify-content-end mb-2 hidden';
+toolbar.innerHTML='<button class="btn btn-sm btn-primary" type="button" onclick="openNoticeComposeModal()">공지 작성</button>';
+tabNotice.prepend(toolbar);
+}
+if(!document.getElementById('noticeComposeModal')){
+const modalWrapper=document.createElement('div');
+modalWrapper.innerHTML=`<div class="modal fade" id="noticeComposeModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">공지 작성</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-2"><label class="small text-muted fw-bold">제목</label><input type="text" id="noticeComposeTitle" class="form-control" maxlength="120"></div><div><label class="small text-muted fw-bold">내용</label><textarea id="noticeComposeContent" class="form-control" rows="8" placeholder="공지 내용을 입력하세요."></textarea></div></div><div class="modal-footer justify-content-end"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="btnSaveMypageNotice" onclick="saveMypageNotice()">저장</button></div></div></div></div>`;
+document.body.appendChild(modalWrapper.firstChild);
+}
+if(!noticeComposeModal){
+noticeComposeModal=new bootstrap.Modal(document.getElementById('noticeComposeModal'));
+}
+}
+function applyMypageRuntimeProfileUi(){
+ensureNoticeComposeUi();
+ensureTelegramConnectUi();
+const toolbar=document.getElementById('mypageNoticeToolbar');
+if(toolbar){
+toolbar.classList.toggle('hidden',!(isMypageWorkforceLiteProfile()&&isMypageAdminUser()));
+}
+}
+function openNoticeComposeModal(){
+if(!(isMypageWorkforceLiteProfile()&&isMypageAdminUser())) return;
+ensureNoticeComposeUi();
+document.getElementById('noticeComposeTitle').value='';
+document.getElementById('noticeComposeContent').value='';
+noticeComposeModal.show();
+}
+async function saveMypageNotice(){
+if(!(isMypageWorkforceLiteProfile()&&isMypageAdminUser())) return showAlert('관리자만 공지사항을 작성할 수 있습니다.');
+const titleEl=document.getElementById('noticeComposeTitle');
+const contentEl=document.getElementById('noticeComposeContent');
+const saveBtn=document.getElementById('btnSaveMypageNotice');
+const title=String(titleEl?.value||'').trim();
+const content=String(contentEl?.value||'').trim();
+if(!title||!content) return showAlert('제목과 내용을 입력해주세요.');
+if(saveBtn) saveBtn.disabled=true;
+try{
+const {error}=await _supabase.from('ref_notice').insert({
+title:title,
+content:content,
+writer:myInfo.emp_name||'관리자'
+});
+if(error) throw error;
+if(noticeComposeModal) noticeComposeModal.hide();
+await loadNotices();
+showAlert('공지사항이 저장되었습니다.');
+}catch(error){
+showAlert('공지사항 저장 실패: '+(error?.message||error));
+}finally{
+if(saveBtn) saveBtn.disabled=false;
+}
+}
+function focusLeaveBadgeFallback(){
+const badge=document.querySelector('.leave-badge');
+if(!badge) return null;
+if(!badge.hasAttribute('tabindex')) badge.setAttribute('tabindex','0');
+if(!badge.hasAttribute('role')) badge.setAttribute('role','button');
+return badge;
+}
+function getMypageFocusFallback(){
+return focusLeaveBadgeFallback()||document.querySelector('button[onclick*=\"index.html\"]')||document.getElementById('btnEditInfo')||document.body;
+}
+function setupLeaveDetailModalFocusGuard(){
+const leaveModalEl=document.getElementById('leaveDetailModal');
+if(!leaveModalEl) return;
+leaveModalEl.addEventListener('hide.bs.modal',function(){
+const active=document.activeElement;
+if(active&&leaveModalEl.contains(active)&&typeof active.blur==='function'){
+active.blur();
+}
+});
+leaveModalEl.addEventListener('hidden.bs.modal',function(){
+const target=focusLeaveBadgeFallback()||document.querySelector('button[onclick*=\"index.html\"]');
+if(target&&typeof target.focus==='function'){
+try{target.focus({preventScroll:true})}catch(_){try{target.focus()}catch(__){}}
+}
+});
+}
+function setupAlertModalFocusGuard(){
+const alertModalEl=document.getElementById('alertModal');
+if(!alertModalEl) return;
+alertModalEl.addEventListener('show.bs.modal',function(){
+const active=document.activeElement;
+if(active&&typeof active==='object'&&'focus' in active&&!alertModalEl.contains(active)){
+lastAlertFocusTarget=active;
+}
+});
+alertModalEl.addEventListener('hide.bs.modal',function(){
+const active=document.activeElement;
+if(active&&alertModalEl.contains(active)&&typeof active.blur==='function'){
+active.blur();
+}
+});
+alertModalEl.addEventListener('hidden.bs.modal',function(){
+const fallbackTarget=(lastAlertFocusTarget&&document.body.contains(lastAlertFocusTarget))?lastAlertFocusTarget:getMypageFocusFallback();
+lastAlertFocusTarget=null;
+if(fallbackTarget&&typeof fallbackTarget.focus==='function'){
+try{fallbackTarget.focus({preventScroll:true})}catch(_){try{fallbackTarget.focus()}catch(__){}}
+}
+});
+}
+function setMypageBootStateReady(){
+const loadingEl=document.getElementById('mypageLoadingScreen');
+const shellEl=document.getElementById('mypagePageShell');
+if(loadingEl) loadingEl.classList.add('hidden');
+if(shellEl) shellEl.classList.remove('hidden');
+}
+window.onload=async function(){
+try{
+purposeModal=new bootstrap.Modal(document.getElementById('certPurposeModal'));
+leaveDetailModal=new bootstrap.Modal(document.getElementById('leaveDetailModal'));
+noticeDetailModal=new bootstrap.Modal(document.getElementById('noticeDetailModal'));
+alertModal=new bootstrap.Modal(document.getElementById('alertModal'));
+eventModal=new bootstrap.Modal(document.getElementById('eventModal'));
+calendarSubscriptionModal=new bootstrap.Modal(document.getElementById('calendarSubscriptionModal'));
+confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+setupLeaveDetailModalFocusGuard();
+setupAlertModalFocusGuard();
+focusLeaveBadgeFallback();
+const stored=localStorage.getItem('erp_user');
+if(!stored){showAlert("로그인이 필요합니다.");location.href='index.html';return}
+const {data:authData,error:authError}=await _supabase.auth.getUser();
+if(authError||!authData?.user){
+await handleMypageSessionExpired('로그인 세션이 만료되었습니다.\n다시 로그인해 주세요.');
+return;
+}
+myInfo=JSON.parse(stored);
+permissionSet = await loadPermissions(myInfo);
+localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
+const hasMypageView = permissionSet.size > 0 ? permissionSet.has('mypage.view') : hasMypageRoleFallback();
+if (!hasMypageView) {
+    showAlert("접근 권한이 없습니다.");
+    setTimeout(() => location.href = 'index.html', 1200);
+    return;
+}
+syncMypageCalendarSettingsCardVisibility();
+const mypageRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
+    moduleKey: 'mypage',
+    moduleLabel: '마이페이지',
+    alertFn: function(msg) { showAlert(msg); },
+    redirectUrl: 'index.html'
+});
+if (!mypageRuntimeGate.ok) return;
+mypageRuntimeProfile=String(mypageRuntimeGate.runtime?.runtime_profile||'legacy_full');
+applyMypageRuntimeProfileUi();
+document.getElementById("salaryMonth").value=formatMypageKstMonth();
+document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',function(e){renderCalendar()});
+await loadCompanyInfo();
+await loadMypageCalendarIcsSettings();
+await Promise.all([loadProfile(),loadEmergencyList(),loadNotices(),calculateLeave(),loadMypageTelegramLinkStatus(),loadMypageOvertimeSummary()]);
+applyMypageRuntimeProfileUi();
+}catch(error){
+console.error('[mypage] boot failed:', error);
+showAlert(`마이페이지 초기화 중 오류가 발생했습니다.\n${error?.message || '잠시 후 다시 시도해 주세요.'}`);
+}finally{
+setMypageBootStateReady();
+}
+};
+function showAlert(m){
+const alertModalEl=document.getElementById('alertModal');
+const active=document.activeElement;
+if(active&&alertModalEl&&!alertModalEl.contains(active)) lastAlertFocusTarget=active;
+document.getElementById("alertBody").textContent=m||"";
+alertModal.show();
+}
+window.viewContract=function(){
+if(!contractSignedUrl){showAlert("등록된 계약서가 없습니다.");return}
+window.open(contractSignedUrl,'_blank','noopener');
+}
+function autoHyphen(t){t.value=t.value.replace(/[^0-9]/g,'').replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g,"$1-$2-$3").replace(/(\-{1,2})$/g,"")}
+function openAddressSearch(){new daum.Postcode({oncomplete:function(d){let a=d.userSelectedType==='R'?d.roadAddress:d.jibunAddress;if(d.buildingName)a+=' ('+d.buildingName+')';document.getElementById("myAddress").value=a}}).open()}
+async function loadPermissions(user) {
+    const result = new Set();
+    if (!user) return result;
+    const coopId = String(user.coop_id || '').trim();
+    const roleKey = user.role || '';
+    const posKey = user.position || '';
+    if ((!roleKey && !posKey) || !coopId) return result;
+
+    const roleKeys = [roleKey, posKey].filter(Boolean);
+    if (roleKey === 'admin_all') roleKeys.push('admin');
+    if (roleKey === 'admin') roleKeys.push('admin_all');
+    const { data } = await _supabase
+        .from('erp_role_permissions')
+        .select('permission_key')
+        .eq('coop_id', coopId)
+        .in('scope', ['role', 'position'])
+        .in('role_key', roleKeys)
+        .eq('is_enabled', true);
+    if (Array.isArray(data)) {
+        data.forEach(row => {
+            if (row.permission_key) result.add(row.permission_key);
+        });
+    }
+    return result;
+}
+async function loadCompanyInfo(){
+const schemaFeaturePromise=loadMypageSchemaFeatures();
+const coopId=String(myInfo?.coop_id||'').trim();
+const cachedCompanyInfo=readMypageCompanyInfoCache(coopId);
+if(!coopId){
+applyMypageCompanyInfoState({});
+applyMypageSchemaFeatureState(await schemaFeaturePromise);
+return;
+}
+if(cachedCompanyInfo) applyMypageCompanyInfoState(cachedCompanyInfo);
+else applyMypageCompanyInfoState({});
+applyMypageSchemaFeatureState(await schemaFeaturePromise);
+if(cachedCompanyInfo){
+void refreshMypageCompanyInfo(coopId);
+return;
+}
+await refreshMypageCompanyInfo(coopId);
+}
+async function loadProfile() {
+    const { data } = await _supabase.from('ref_employees').select('*').eq('emp_id', myInfo.emp_id).single();
+    if (data) {
+        myInfo = data;
+        localStorage.setItem('erp_user', JSON.stringify(data));
+    }
+    applyMypageCertificateUi();
+    
+    // 표시 전용 텍스트
+    document.getElementById("dspName").innerText = myInfo.emp_name;
+    document.getElementById("dspRank").innerText = myInfo.position;
+    document.getElementById("dspDept").innerText = myInfo.department;
+    document.getElementById("dspJoin").innerText = myInfo.hire_date || '-';
+    
+    // 입력 폼 값 채우기
+    document.getElementById("myName").value = myInfo.emp_name;
+    document.getElementById("myMemberId").value = myInfo.member_id || ""; // [추가]
+    document.getElementById("myPhone").value = myInfo.phone || "";
+    document.getElementById("myEmail").value = myInfo.email || "";
+    document.getElementById("myAddress").value = myInfo.address || "";
+    document.getElementById("myBank").value = myInfo.bank_name || "";
+    document.getElementById("myAccount").value = myInfo.account_number || "";
+
+    // 계약서 버튼 처리
+    const btn = document.getElementById("btnContract");
+    contractSignedUrl='';
+    btn.disabled = true;
+    btn.className = "btn btn-secondary";
+    btn.innerText = "등록된 계약서 없음";
+    btn.onclick = () => window.viewContract();
+    if (myInfo.contract_url) {
+        let u = myInfo.contract_url.startsWith('http') ? myInfo.contract_url : null;
+        if (!u) {
+            const { data: d } = await _supabase.storage.from('contracts').createSignedUrl(myInfo.contract_url, 3600);
+            if (d) u = d.signedUrl;
+        }
+        if (u) {
+            contractSignedUrl = u;
+            btn.disabled = false;
+            btn.className = "btn btn-outline-primary fw-bold";
+            btn.innerText = "📄 계약서 보기";
+            btn.onclick = () => window.viewContract();
+        }
+    }
+}
+async function loadMypageOvertimeSummary(){
+try{
+ensureMypageOvertimeSummarySection();
+const currentMonth=formatMypageKstMonth();
+const coopId=String(myInfo?.coop_id||'').trim();
+let query=_supabase.from('ref_approval').select('id, doc_type, created_at, status, attendance_snapshot').eq('drafter_id', myInfo.emp_id).in('status', ['완료','실물결재완료']).in('doc_type', ['시간외근로','야근','휴일근로']);
+if(coopId) query=query.eq('coop_id', coopId);
+const { data, error } = await query;
+if(error) throw error;
+const summary=(data||[]).reduce((acc, doc) => {
+const snapshot = typeof doc?.attendance_snapshot === 'string' ? (() => { try { return JSON.parse(doc.attendance_snapshot); } catch (_) { return null; } })() : doc?.attendance_snapshot;
+if(!snapshot || typeof snapshot !== 'object') return acc;
+const yearMonth=/^\d{4}-\d{2}/.test(String(snapshot.work_date||'')) ? String(snapshot.work_date).slice(0,7) : formatMypageKstMonth(doc.created_at || new Date());
+if(yearMonth !== currentMonth) return acc;
+acc.count += 1;
+acc.hours = Math.round((acc.hours + Math.max(0, Number(snapshot.total_hours||0))) * 100) / 100;
+if(String(snapshot.compensation_mode||'') === 'comp_leave') acc.compLeaveDays = Math.round((acc.compLeaveDays + Math.max(0, Number(snapshot.total_hours||0))) * 100) / 100;
+else acc.allowance = Math.round((acc.allowance + Math.max(0, Number(snapshot.total_hours||0))) * 100) / 100;
+return acc;
+},{ count:0, hours:0, allowance:0, compLeaveDays:0 });
+renderMypageOvertimeSummary(summary);
+}catch(error){
+console.warn('loadMypageOvertimeSummary failed:', error?.message || error);
+renderMypageOvertimeSummary({ count:0, hours:0, allowance:0, compLeaveDays:0 });
+}
+}
+function toggleEditMode(e){const f=document.querySelectorAll('.readonly-field');f.forEach(x=>{if(e){x.classList.remove('readonly-field');x.classList.add('editable-field');x.readOnly=false}else{x.classList.add('readonly-field');x.classList.remove('editable-field');x.readOnly=true}});document.getElementById("btnEditInfo").classList.toggle('hidden',e);document.getElementById("btnCancelInfo").classList.toggle('hidden',!e);document.getElementById("btnSaveInfo").classList.toggle('hidden',!e);document.getElementById("btnAddrSearch").classList.toggle('hidden',!e);document.getElementById("btnAddEm").classList.toggle('hidden',!e);if(!e){loadProfile();loadEmergencyList()}}
+async function updateInfo() {
+    openConfirmModal("정보를 저장하시겠습니까?", async function() {
+        const mid = document.getElementById("myMemberId").value; // [추가]
+
+        const u = {
+            member_id: mid || null, // [추가] 텍스트 그대로 전송
+            phone: document.getElementById("myPhone").value,
+            email: document.getElementById("myEmail").value,
+            address: document.getElementById("myAddress").value,
+            bank_name: document.getElementById("myBank").value,
+            account_number: document.getElementById("myAccount").value
+        };
+
+        const { error } = await _supabase.from('ref_employees').update(u).eq('emp_id', myInfo.emp_id);
+        
+        if (error) {
+            showAlert("저장 실패: " + error.message);
+            return;
+        }
+
+        // 비상연락망 저장 (기존 유지)
+        await _supabase.from('ref_emergency_contacts').delete().eq('emp_id', myInfo.emp_id);
+        if (tempEmergencyList.length > 0) {
+            const i = tempEmergencyList.map(x => ({
+                emp_id: myInfo.emp_id,
+                contact_name: x.contact_name,
+                relation: x.relation,
+                phone: x.phone
+            }));
+            await _supabase.from('ref_emergency_contacts').insert(i);
+        }
+
+        showAlert("저장되었습니다.");
+        toggleEditMode(false);
+    });
+}
+async function loadEmergencyList(){const{data}=await _supabase.from('ref_emergency_contacts').select('*').eq('emp_id',myInfo.emp_id).order('id');tempEmergencyList=data||[];renderEmergencyTable()}
+function renderEmergencyTable(){
+const b=document.getElementById("emergencyListBody");
+const isEditing=!document.getElementById("btnSaveInfo").classList.contains('hidden');
+b.innerHTML="";
+tempEmergencyList.forEach((r,i)=>{
+const tr=document.createElement('tr');
+const tdName=document.createElement('td');
+const tdRel=document.createElement('td');
+const tdPhone=document.createElement('td');
+const tdAct=document.createElement('td');
+tdName.textContent=r.contact_name||"";
+tdRel.textContent=r.relation||"";
+tdPhone.textContent=r.phone||"";
+if(isEditing){
+const btn=document.createElement('button');
+btn.className="btn btn-sm btn-outline-danger py-0";
+btn.type="button";
+btn.textContent="×";
+btn.onclick=()=>removeTempEm(i);
+tdAct.appendChild(btn);
+}
+tr.appendChild(tdName);
+tr.appendChild(tdRel);
+tr.appendChild(tdPhone);
+tr.appendChild(tdAct);
+b.appendChild(tr);
+})}
+function addEmergencyUI(){const b=document.getElementById("emergencyListBody"),t=document.createElement('tr');t.innerHTML=`<td><input type="text" class="form-control form-control-sm" id="newEmName" placeholder="이름"></td><td><input type="text" class="form-control form-control-sm" id="newEmRel" placeholder="관계"></td><td><input type="text" class="form-control form-control-sm" id="newEmPhone" placeholder="연락처" oninput="autoHyphen(this)"></td><td><button class="btn btn-sm btn-primary py-0" onclick="confirmAddEm(this)">V</button></td>`;b.appendChild(t)}
+function confirmAddEm(b){const t=b.closest('tr'),n=t.querySelector('#newEmName').value,r=t.querySelector('#newEmRel').value,p=t.querySelector('#newEmPhone').value;if(!n||!r)return;tempEmergencyList.push({contact_name:n,relation:r,phone:p});renderEmergencyTable()}
+function removeTempEm(i){tempEmergencyList.splice(i,1);renderEmergencyTable()}
+function parseMypageDotDateToIso(value){
+const raw=String(value||'').trim();
+const m=raw.match(/(\d{4})[.\-\/](\d{2})[.\-\/](\d{2})/);
+if(!m) return '';
+return `${m[1]}-${m[2]}-${m[3]}`;
+}
+function addDaysToIsoDate(isoDate,days){
+const raw=String(isoDate||'').trim();
+const m=raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+if(!m) return '';
+const d=new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3])));
+if(Number.isNaN(d.getTime())) return '';
+d.setUTCDate(d.getUTCDate()+Number(days||0));
+const y=d.getUTCFullYear();
+const mm=String(d.getUTCMonth()+1).padStart(2,'0');
+const dd=String(d.getUTCDate()).padStart(2,'0');
+return `${y}-${mm}-${dd}`;
+}
+function buildLeaveCalendarTitle(doc,deptText,periodText){
+const leaveLedger=window.LeaveLedger||{};
+const subType=typeof leaveLedger.getLeaveSubType==='function'?String(leaveLedger.getLeaveSubType(doc?.doc_type)||'').trim():'';
+const displayLabel=getMypageLeaveTypeDisplayLabel(subType,doc);
+const ampmMatch=String(periodText||'').match(/\b(오전|오후)\b/);
+const ampm=ampmMatch?ampmMatch[1]:'';
+if(isMypageHalfDayLeaveSubtype(subType,doc)){
+const suffix=ampm?`${ampm}${displayLabel}`:displayLabel;
+return `${doc?.drafter_name||''}${deptText} ${suffix}`.trim();
+}
+if(displayLabel && displayLabel !== '연차'){
+return `${doc?.drafter_name||''}${deptText} ${displayLabel}`.trim();
+}
+return `${doc?.drafter_name||''}${deptText} 휴가`.trim();
+}
+function getMypageEmployeeDisplayNoValue(employee){
+const parsedDisplayNo=Number(employee?.display_emp_no);
+if(Number.isFinite(parsedDisplayNo)&&parsedDisplayNo>0){
+return String(Math.trunc(parsedDisplayNo));
+}
+const fallbackEmpId=String(employee?.emp_id||'').trim();
+return fallbackEmpId||'-';
+}
+function getMypageDocDrafterDisplayNo(doc){
+if(doc?.drafter_id===myInfo?.emp_id){
+return getMypageEmployeeDisplayNoValue(myInfo);
+}
+return String(doc?.drafter_id||'-').trim()||'-';
+}
+function buildLeaveCalendarEvent(doc){
+const leaveLedger=window.LeaveLedger||{};
+const periodLabel=typeof leaveLedger.extractLeavePeriodLabel==='function'?leaveLedger.extractLeavePeriodLabel(doc):'';
+const startIso=typeof leaveLedger.getLeaveStartIso==='function'?leaveLedger.getLeaveStartIso(doc):parseMypageDotDateToIso(periodLabel);
+if(!startIso) return null;
+let endIso=startIso;
+const rangeMatch=String(periodLabel||'').match(/(\d{4}[.\-\/]\d{2}[.\-\/]\d{2})\s*~\s*(\d{4}[.\-\/]\d{2}[.\-\/]\d{2})/);
+if(rangeMatch){
+const parsedEnd=parseMypageDotDateToIso(rangeMatch[2]);
+if(parsedEnd) endIso=parsedEnd;
+}
+const endExclusive=endIso!==startIso?addDaysToIsoDate(endIso,1):'';
+const deptText=doc?.drafter_dept?`(${doc.drafter_dept})`:'';
+const periodText=typeof leaveLedger.formatLeavePeriodText==='function'?leaveLedger.formatLeavePeriodText(doc):periodLabel;
+const leaveTitle=buildLeaveCalendarTitle(doc,deptText,periodText);
+const memoLines=[`결재 처리된 휴가입니다.`,`상태: ${doc?.status||'-'}`,`사번: ${getMypageDocDrafterDisplayNo(doc)}`,`기안자: ${doc?.drafter_name||'-'}`];
+if(periodText) memoLines.push(`휴가일: ${periodText}`);
+const event={title:leaveTitle,start:startIso,color:(doc?.drafter_id===myInfo.emp_id?'#0d6efd':'#198754'),allDay:true,extendedProps:{origin:{title:leaveTitle,start_date:startIso,end_date:endIso,type:'leave',visibility:'company',cal_memo:memoLines.join('\n')}}};
+if(endExclusive) event.end=endExclusive;
+return event;
+}
+function getMypageBusinessTripSnapshotMeta(doc){
+const raw=doc?.business_trip_snapshot;
+if(!raw) return null;
+if(raw&&typeof raw==='object'&&!Array.isArray(raw)) return raw;
+if(typeof raw!=='string') return null;
+try{
+const parsed=JSON.parse(raw);
+return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+}catch(_){
+return null;
+}
+}
+function formatMypageBusinessTripPeriodText(snapshot){
+const startDate=String(snapshot?.start_date||'').trim();
+const endDate=String(snapshot?.end_date||'').trim();
+const periodLabel=String(snapshot?.period_label||'').trim();
+if(!startDate&&!endDate) return '-';
+if(startDate&&endDate&&startDate!==endDate){
+return `${startDate} ~ ${endDate}${periodLabel?` (${periodLabel})`:''}`;
+}
+const baseDate=startDate||endDate;
+return `${baseDate}${periodLabel?` (${periodLabel})`:''}`;
+}
+function buildBusinessTripCalendarEvent(doc){
+const snapshot=getMypageBusinessTripSnapshotMeta(doc);
+const deptText=doc?.drafter_dept?`(${doc.drafter_dept})`:'';
+const title=`${doc?.drafter_name||''}${deptText} 출장`.trim();
+const memoLines=[`결재 완료된 출장 일정입니다.`,`상태: ${doc?.status||'-'}`,`기안자: ${doc?.drafter_name||'-'}`];
+if(doc?.title) memoLines.push(`문서 제목: ${doc.title}`);
+if(snapshot?.period_label){
+memoLines.push(`출장 기간: ${formatMypageBusinessTripPeriodText(snapshot)}`);
+}else{
+memoLines.push(`출장 시작: ${String(snapshot?.start_date||'-')} ${String(snapshot?.start_time||'-')}`.trim());
+memoLines.push(`출장 종료: ${String(snapshot?.end_date||'-')} ${String(snapshot?.end_time||'-')}`.trim());
+}
+if(snapshot.location) memoLines.push(`출장 장소: ${snapshot.location}`);
+if(snapshot?.period_label){
+const startDate=String(snapshot.start_date||'').trim();
+const endDate=String(snapshot.end_date||'').trim();
+if(!startDate||!endDate) return null;
+const isAllDay=snapshot.calendar_all_day===true||startDate!==endDate;
+if(isAllDay){
+const endExclusive=addDaysToIsoDate(endDate,1);
+return{title,start:startDate,end:endExclusive||undefined,color:(doc?.drafter_id===myInfo.emp_id?'#fd7e14':'#f59f00'),allDay:true,extendedProps:{origin:{title,start_date:startDate,end_date:endDate,type:'business_trip',visibility:'company',cal_memo:memoLines.join('\n')}}};
+}
+const startValue=String(snapshot.start_at||'').trim();
+const endValue=String(snapshot.end_at||'').trim();
+const startMs=new Date(startValue).getTime();
+const endMs=new Date(endValue).getTime();
+if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs) return null;
+return{title,start:startValue,end:endValue,color:(doc?.drafter_id===myInfo.emp_id?'#fd7e14':'#f59f00'),allDay:false,extendedProps:{origin:{title,start_date:startValue,end_date:endValue,type:'business_trip',visibility:'company',cal_memo:memoLines.join('\n')}}};
+}
+if(!snapshot?.start_at||!snapshot?.end_at) return null;
+const startValue=String(snapshot.start_at||'').trim();
+const endValue=String(snapshot.end_at||'').trim();
+const startMs=new Date(startValue).getTime();
+const endMs=new Date(endValue).getTime();
+if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs) return null;
+return{title,start:startValue,end:endValue,color:(doc?.drafter_id===myInfo.emp_id?'#fd7e14':'#f59f00'),allDay:false,extendedProps:{origin:{title,start_date:startValue,end_date:endValue,type:'business_trip',visibility:'company',cal_memo:memoLines.join('\n')}}};
+}
+async function loadMypageCalendarSourceData(scope='erp'){
+const safeScope=scope==='google_ics'?'google_ics':'erp';
+const coopId=String(myInfo?.coop_id||'').trim();
+const leaveStatuses=safeScope==='google_ics'?['완료','실물결재완료']:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'];
+let leaveQuery=_supabase.from('ref_approval').select('*').ilike('doc_type','휴가%').in('status',leaveStatuses);
+if(coopId) leaveQuery=leaveQuery.eq('coop_id', coopId);
+const {data:l}=await leaveQuery;
+const approvedTripStatuses=['완료','실물결재완료'];
+const tripSelect=mypageBusinessTripSnapshotSupported?MYPAGE_BUSINESS_TRIP_SELECT_COLUMNS_WITH_SNAPSHOT:'id,title,content,status,created_at,drafter_id,drafter_name,business_trip_snapshot';
+let tripQuery=_supabase.from('ref_approval').select(tripSelect).eq('doc_type','출장신청').in('status',approvedTripStatuses);
+if(coopId) tripQuery=tripQuery.eq('coop_id', coopId);
+const {data:bt}=await tripQuery;
+const employeePromise=(() => {
+let query=_supabase.from('ref_employees').select('emp_id,display_emp_no,emp_name,department,hire_date,birth_date,resign_date');
+if(coopId) query=query.eq('coop_id', coopId);
+return query;
+})();
+let calendarQuery=_supabase.from('ref_calendar').select('*');
+if(coopId) calendarQuery=calendarQuery.eq('coop_id', coopId);
+const [{data:e},{data:c}]=await Promise.all([employeePromise,calendarQuery]);
+return {leaveDocs:Array.isArray(l)?l:[],businessTripDocs:Array.isArray(bt)?bt:[],employeeRows:Array.isArray(e)?e:[],calendarRows:Array.isArray(c)?c:[]};
+}
+function buildMypageCalendarDisplayEvents(source,scope='erp'){
+let evts=[];
+const bY=new Date().getFullYear();
+const yrs=[bY-2,bY-1,bY,bY+1,bY+2];
+if(shouldIncludeMypageCalendarSource(scope,'leave')) source.leaveDocs.forEach(x=>{const leaveEvent=buildLeaveCalendarEvent(x);if(leaveEvent) evts.push(leaveEvent);});
+if(shouldIncludeMypageCalendarSource(scope,'business_trip')) source.businessTripDocs.forEach(x=>{const tripEvent=buildBusinessTripCalendarEvent(x);if(tripEvent) evts.push(tripEvent);});
+source.employeeRows.forEach(p=>{
+const dn=p.department?`(${p.department})`:'';
+const displayEmpNo=getMypageEmployeeDisplayNoValue(p);
+if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&p.birth_date)yrs.forEach(y=>evts.push({title:`${p.emp_name}${dn} 🎂`,start:`${y}-${p.birth_date}`,color:'#ffc107',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 생일 🎂`,start_date:`${y}-${p.birth_date}`,type:'event',visibility:'company',cal_memo:`${p.emp_name}님의 생일입니다.\n사번: ${displayEmpNo}\n부서: ${p.department||'-'}`}}}));
+if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&p.hire_date){const hY=parseInt(p.hire_date.substring(0,4));yrs.forEach(y=>{const diff=y-hY;if(diff>0)evts.push({title:`${p.emp_name}${dn} 입사 ${diff}주년 🎉`,start:`${y}-${p.hire_date.slice(5,10)}`,color:'#0dcaf0',textColor:'#000',allDay:true,extendedProps:{origin:{title:`${p.emp_name} 입사 ${diff}주년 🎉`,start_date:`${y}-${p.hire_date.slice(5,10)}`,type:'event',visibility:'company',cal_memo:`${p.emp_name}님의 입사 ${diff}주년입니다.\n사번: ${displayEmpNo}\n입사일: ${p.hire_date}`}}})})}
+});
+source.calendarRows.forEach(x=>{
+if(scope==='google_ics'){
+if(!shouldIncludeMypageCalendarSource(scope,'manual_company')) return;
+if(x.visibility!=='company') return;
+}else{
+if(!shouldIncludeMypageCalendarSource(scope,'manual_events')) return;
+if(x.visibility==='admin'&&!(myInfo.role==='admin' || myInfo.role==='admin_all'))return;
+if(x.visibility==='private'&&x.created_by!==myInfo.emp_id)return;
+}
+const bg=x.visibility==='admin'?'#6610f2':(x.visibility==='private'?'#198754':(x.type==='holiday'?'#dc3545':'#0d6efd'));const startParts=getMypageKstDateParts(x.start_date);const endParts=getMypageKstDateParts(x.end_date);const timeSuffix=startParts.hasTime&&startParts.time?`T${startParts.time}`:'';if(x.recurrence==='yearly'){yrs.forEach(y=>{const md=startParts.date?startParts.date.slice(5,10):'';if(!md) return;evts.push({id:x.id,title:x.title,start:`${y}-${md}${timeSuffix}`,color:bg,extendedProps:{origin:x}})});}else if(x.recurrence==='monthly'){yrs.forEach(y=>{for(let m=1;m<=12;m++){const mm=String(m).padStart(2,'0'),dd=startParts.date?startParts.date.slice(8,10):'';if(!dd) return;if(new Date(`${y}-${mm}-${dd}`).getDate()==dd){evts.push({id:x.id,title:x.title,start:`${y}-${mm}-${dd}${timeSuffix}`,color:bg,extendedProps:{origin:x}})}}});}else{const startVal=startParts.date?`${startParts.date}${timeSuffix}`:x.start_date;const endSuffix=endParts.hasTime&&endParts.time?`T${endParts.time}`:'';const endVal=endParts.date?`${endParts.date}${endSuffix}`:x.end_date;evts.push({id:x.id,title:x.title,start:startVal,end:endVal,color:bg,extendedProps:{origin:x}})}}); 
+if(shouldIncludeMypageCalendarSource(scope,'company_anniversary')&&companyInfo.estDate){const tY=new Date().getFullYear();for(let y=tY-50;y<=tY+50;y++){evts.push({title:"🎉 창립기념일",start:`${y}-${companyInfo.estDate.slice(5,10)}`,color:'#ff4081',allDay:true,extendedProps:{origin:{title:"🎉 창립기념일",start_date:`${y}-${companyInfo.estDate.slice(5,10)}`,type:'event',visibility:'company',cal_memo:`우리 회사의 창립기념일입니다.\n설립일: ${companyInfo.estDate}`}}})}}
+return evts;
+}
+function escapeMypageIcsText(value){
+return String(value??'').replace(/\\/g,'\\\\').replace(/\r?\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');
+}
+function formatMypageIcsUtcDateTime(value){
+const date=value instanceof Date?value:new Date(value);
+if(Number.isNaN(date.getTime())) return '';
+const y=String(date.getUTCFullYear());
+const mm=String(date.getUTCMonth()+1).padStart(2,'0');
+const dd=String(date.getUTCDate()).padStart(2,'0');
+const hh=String(date.getUTCHours()).padStart(2,'0');
+const mi=String(date.getUTCMinutes()).padStart(2,'0');
+const ss=String(date.getUTCSeconds()).padStart(2,'0');
+return `${y}${mm}${dd}T${hh}${mi}${ss}Z`;
+}
+function formatMypageIcsDateValue(value){
+const raw=String(value||'').trim();
+const normalized=raw.includes('T')?raw.slice(0,10):raw;
+return normalized.replace(/[^0-9]/g,'').slice(0,8);
+}
+function addOneDayToMypageDateValue(value){
+const raw=String(value||'').trim();
+const m=raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+if(!m) return '';
+const date=new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3])));
+if(Number.isNaN(date.getTime())) return '';
+date.setUTCDate(date.getUTCDate()+1);
+const y=String(date.getUTCFullYear());
+const mm=String(date.getUTCMonth()+1).padStart(2,'0');
+const dd=String(date.getUTCDate()).padStart(2,'0');
+return `${y}${mm}${dd}`;
+}
+function foldMypageIcsLine(line){
+const raw=String(line||'');
+if(raw.length<=73) return raw;
+const chunks=[];
+let index=0;
+while(index<raw.length){
+chunks.push(index===0?raw.slice(index,index+73):` ${raw.slice(index,index+72)}`);
+index+=index===0?73:72;
+}
+return chunks.join('\r\n');
+}
+function appendMypageIcsEvent(lines,eventLines){
+eventLines.forEach(line=>lines.push(foldMypageIcsLine(line)));
+}
+function buildMypageIcsEventLines(options){
+const lines=['BEGIN:VEVENT',`UID:${escapeMypageIcsText(options.uid)}`,`DTSTAMP:${formatMypageIcsUtcDateTime(new Date())}`,`SUMMARY:${escapeMypageIcsText(options.title)}`];
+if(options.description) lines.push(`DESCRIPTION:${escapeMypageIcsText(options.description)}`);
+if(options.location) lines.push(`LOCATION:${escapeMypageIcsText(options.location)}`);
+if(options.allDay){
+const startDate=formatMypageIcsDateValue(options.start);
+if(!startDate) return [];
+const endDate=formatMypageIcsDateValue(options.end)||addOneDayToMypageDateValue(String(options.start||'').slice(0,10));
+lines.push(`DTSTART;VALUE=DATE:${startDate}`);
+if(endDate) lines.push(`DTEND;VALUE=DATE:${endDate}`);
+}else{
+const startDateTime=formatMypageIcsUtcDateTime(options.start);
+if(!startDateTime) return [];
+lines.push(`DTSTART:${startDateTime}`);
+const endDateTime=formatMypageIcsUtcDateTime(options.end||options.start);
+if(endDateTime) lines.push(`DTEND:${endDateTime}`);
+}
+if(options.rrule) lines.push(`RRULE:${options.rrule}`);
+lines.push('END:VEVENT');
+return lines;
+}
+function buildMypageCalendarIcsContent(source,scope='google_ics'){
+const companyName=String(companyInfo.company_name||companyInfo.orgName||'협동조합').trim()||'협동조합';
+const lines=['BEGIN:VCALENDAR','VERSION:2.0','CALSCALE:GREGORIAN',`PRODID:-//${escapeMypageIcsText(companyName)}//ERP Calendar//KO`,`X-WR-CALNAME:${escapeMypageIcsText(`${companyName} ERP 일정`)}`,'X-WR-TIMEZONE:Asia/Seoul'];
+if(shouldIncludeMypageCalendarSource(scope,'leave')) source.leaveDocs.forEach(doc=>{
+const event=buildLeaveCalendarEvent(doc);
+if(!event?.start) return;
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`leave-${doc.id}@erp.yonginsolar.kr`,title:event.title,description:event?.extendedProps?.origin?.cal_memo||'',start:event.start,end:event.end||'',allDay:true}));
+});
+if(shouldIncludeMypageCalendarSource(scope,'business_trip')) source.businessTripDocs.forEach(doc=>{
+const event=buildBusinessTripCalendarEvent(doc);
+if(!event?.start||!event?.end) return;
+const snapshot=getMypageBusinessTripSnapshotMeta(doc)||{};
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`business-trip-${doc.id}@erp.yonginsolar.kr`,title:event.title,description:event?.extendedProps?.origin?.cal_memo||'',location:snapshot.location||'',start:event.start,end:event.end,allDay:false}));
+});
+source.employeeRows.forEach(row=>{
+const deptLabel=row.department?`(${row.department})`:'';
+if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&row.birth_date){
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`birthday-${row.emp_id}@erp.yonginsolar.kr`,title:`${row.emp_name}${deptLabel} 생일 🎂`,description:`${row.emp_name}님의 생일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n부서: ${row.department||'-'}`,start:`${new Date().getFullYear()}-${String(row.birth_date).slice(5,10)}`,allDay:true,rrule:'FREQ=YEARLY'}));
+}
+if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&row.hire_date){
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`hire-anniversary-${row.emp_id}@erp.yonginsolar.kr`,title:`${row.emp_name}${deptLabel} 입사기념일 🎉`,description:`${row.emp_name}님의 입사기념일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n입사일: ${row.hire_date}`,start:row.hire_date,allDay:true,rrule:'FREQ=YEARLY'}));
+}
+});
+source.calendarRows.forEach(row=>{
+if(scope==='google_ics'){
+if(!shouldIncludeMypageCalendarSource(scope,'manual_company')) return;
+if(row.visibility!=='company') return;
+}else{
+if(!shouldIncludeMypageCalendarSource(scope,'manual_events')) return;
+if(row.visibility==='admin'&&!(myInfo.role==='admin' || myInfo.role==='admin_all')) return;
+if(row.visibility==='private'&&row.created_by!==myInfo.emp_id) return;
+}
+const startParts=getMypageKstDateParts(row.start_date);
+const endParts=getMypageKstDateParts(row.end_date);
+const isAllDay=!startParts.hasTime;
+let rrule='';
+if(row.recurrence==='yearly') rrule='FREQ=YEARLY';
+if(row.recurrence==='monthly'){
+const day=startParts.date?String(Number(startParts.date.slice(8,10))):'';
+if(day) rrule=`FREQ=MONTHLY;BYMONTHDAY=${day}`;
+}
+const startValue=isAllDay?(startParts.date||String(row.start_date||'').slice(0,10)):(row.start_date||'');
+const endValue=isAllDay?(endParts.date||startParts.date||''):(row.end_date||'');
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`manual-calendar-${row.id}@erp.yonginsolar.kr`,title:row.title||'일정',description:row.cal_memo||'',start:startValue,end:endValue,allDay:isAllDay,rrule}));
+});
+if(shouldIncludeMypageCalendarSource(scope,'company_anniversary')&&companyInfo.estDate){
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`company-anniversary-${String(myInfo?.coop_id||'global')}@erp.yonginsolar.kr`,title:'🎉 창립기념일',description:`우리 회사의 창립기념일입니다.\n설립일: ${companyInfo.estDate}`,start:companyInfo.estDate,allDay:true,rrule:'FREQ=YEARLY'}));
+}
+lines.push('END:VCALENDAR');
+return `${lines.join('\r\n')}\r\n`;
+}
+async function downloadGoogleCalendarIcs(){
+try{
+const source=await loadMypageCalendarSourceData('google_ics');
+const content=buildMypageCalendarIcsContent(source,'google_ics');
+const blob=new Blob([content],{type:'text/calendar;charset=utf-8'});
+const companyName=String(companyInfo.company_name||companyInfo.orgName||'coop').trim().replace(/[\\/:*?"<>|]+/g,'_');
+const today=formatMypageKstDate(new Date(),'').replace(/-/g,'');
+const link=document.createElement('a');
+link.href=URL.createObjectURL(blob);
+link.download=`${companyName||'coop'}_google_calendar_${today||'export'}.ics`;
+document.body.appendChild(link);
+link.click();
+link.remove();
+setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+showAlert("Google Calendar용 .ics 파일을 내려받았습니다.\nGoogle Calendar > 설정 > 가져오기 및 내보내기 > 가져오기에서 추가할 수 있습니다.");
+}catch(error){
+console.error('downloadGoogleCalendarIcs failed:',error);
+showAlert(`Google Calendar 내보내기 실패: ${error?.message||'알 수 없는 오류'}`);
+}
+} // End of downloadGoogleCalendarIcs
+async function renderCalendar(){
+const source=await loadMypageCalendarSourceData('erp');
+const evts=buildMypageCalendarDisplayEvents(source,'erp');
+const el=document.getElementById('calendar');
+const cal=new FullCalendar.Calendar(el,{initialView:'dayGridMonth',locale:'ko',height:600,headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,listMonth'},dayMaxEvents:true,events:evts,selectable:true,dateClick:function(i){openEventModal(null,i.dateStr)},eventClick:function(i){if(i.event.extendedProps.origin){openEventModal(i.event.extendedProps.origin,null)}}});
+cal.render()}
+function renderLeaveBadge(snapshot){
+const remain=Math.max(0,Number(snapshot?.effectiveRemainDays??0));
+const reserved=Math.max(0,Number(snapshot?.reservedDays??0));
+document.getElementById("lvRemain").innerText=remain;
+const inlineEl=document.getElementById("lvReservedInline");
+if(inlineEl) inlineEl.textContent=reserved>0?`(예정 ${reserved}일)`:'';
+const b=document.querySelector('.leave-badge');
+if(remain<=0){b.style.borderColor='#dc3545';b.style.color='#dc3545'}else{b.style.borderColor='#0d6efd';b.style.color='#0d6efd'}
+}
+async function calculateLeave(){
+try{
+if(window.LeaveLedger&&typeof window.LeaveLedger.getLeaveSnapshot==='function'){
+leaveSnapshotState=await window.LeaveLedger.getLeaveSnapshot(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,reservedStatuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'],includeToday:true,unknownAsReserved:false});
+renderLeaveBadge(leaveSnapshotState);
+return;
+}
+}catch(error){console.error('calculateLeave snapshot failed:',error)}
+const{data:r,error}=await _supabase.rpc('calculate_leave_days',{p_emp_id:myInfo.emp_id});if(error){console.error(error);return}
+leaveSnapshotState={effectiveRemainDays:(r!==null?r:0),reservedDays:0,summary:{reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[]}};
+renderLeaveBadge(leaveSnapshotState);
+}
+function getLeaveStatusBadgeHtml(status){
+if(status==='가승인') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">가승인</span>';
+if(status==='증빙확인중') return '<span class="badge bg-info text-dark ms-1" style="font-size:0.7em">증빙중</span>';
+if(status==='실물결재대기') return '<span class="badge bg-secondary ms-1" style="font-size:0.7em">실물대기</span>';
+if(status==='실물결재완료') return '<span class="badge bg-success ms-1" style="font-size:0.7em">실물완료</span>';
+if(status==='완료') return '<span class="badge bg-primary ms-1" style="font-size:0.7em">완료</span>';
+return '';
+}
+function renderLeaveDocList(docs,emptyText){
+let html='<ul class="leave-list">';
+if(Array.isArray(docs)&&docs.length>0){
+docs.forEach(doc=>{
+const period=(window.LeaveLedger&&typeof window.LeaveLedger.formatLeavePeriodText==='function')?window.LeaveLedger.formatLeavePeriodText(doc):'';
+const periodLabel=period?` · ${escapeHtml(period)}`:'';
+const statusBadge=getLeaveStatusBadgeHtml(String(doc?.status||''));
+const createdAt=formatMypageKstDate(doc?.created_at,'-');
+const amount=Math.max(0,Number(doc?.amount||doc?._leave_amount||0));
+html+=`<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>${escapeHtml(formatMypageLeaveDocType(doc||doc?.doc_type||'휴가'))} ${statusBadge}${periodLabel}</span><span class="fw-bold text-danger">-${amount}일</span></div><div class="text-muted" style="font-size:0.75rem;">${createdAt}</div></li>`;
+});
+}else{
+html+=`<li class="text-muted">${emptyText||'- 없음 -'}</li>`;
+}
+html+='</ul>';
+return html;
+}
+async function showLeaveDetail(){
+const el=document.getElementById('leaveDetailModal'),bd=el.querySelector('.modal-body');if(!el)return;
+bd.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';leaveDetailModal.show();
+try{
+const{data:em}=await _supabase.from('ref_employees').select('hire_date').eq('emp_id',myInfo.emp_id).single();
+const{data:al}=await _supabase.from('hr_leave_adj').select('*').eq('emp_id',myInfo.emp_id).order('created_at',{ascending:false});
+let leaveDocs=[],summary={reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
+if(window.LeaveLedger&&typeof window.LeaveLedger.fetchLeaveApprovals==='function'){
+leaveDocs=await window.LeaveLedger.fetchLeaveApprovals(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,statuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료']});
+summary=window.LeaveLedger.summarizeLeaveDocs(leaveDocs,{reservedStatuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'],includeToday:true,unknownAsReserved:false});
+}else{
+const leaveSelect=mypageLeaveSnapshotSupported?'id,created_at,doc_type,title,content,amount,status,leave_snapshot':'id,created_at,doc_type,title,content,amount,status';
+const{data:ul}=await _supabase.from('ref_approval').select(leaveSelect).eq('drafter_id',myInfo.emp_id).in('status',['완료','가승인','증빙확인중','실물결재대기','실물결재완료']).ilike('doc_type','휴가%').order('created_at',{ascending:false});
+leaveDocs=(ul||[]).filter(doc=>isMypageDeductibleLeaveDoc(doc));
+summary={reservedDocs:[],pastOrUsedDocs:leaveDocs,unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
+}
+let h='<div class="d-flex flex-column gap-3">';
+let gh='<ul class="leave-list">';
+if(em&&em.hire_date){const hd=new Date(em.hire_date),n=new Date(),oy=new Date(hd);oy.setFullYear(oy.getFullYear()+1);if(n<oy){let m=(n.getFullYear()-hd.getFullYear())*12+(n.getMonth()-hd.getMonth());if(n.getDate()<hd.getDate())m--;gh+=`<li class="text-primary">🟢 1년 미만: ${Math.min(11,Math.max(0,m))}개</li>`}else{gh+=`<li class="text-muted">⚪ 1년 미만: 0개</li>`}if(n.getFullYear()>hd.getFullYear())gh+=`<li class="text-primary">🔵 회계연도(${n.getFullYear()}): 15개</li>`;else gh+=`<li class="text-muted">⚪ 회계연도: 0개</li>`}gh+='</ul>';h+=`<div class="leave-section"><h6>🎁 발생 내역</h6>${gh}</div>`;
+let ah='<ul class="leave-list">';if(al&&al.length>0)al.forEach(i=>{const c=(i.adj_type==='지급'||i.adj_type==='포상')?'text-success':'text-danger',s=(i.adj_type==='지급'||i.adj_type==='포상')?'+':'-';ah+=`<li><span class="${c} fw-bold">[${i.adj_type}]</span> ${i.reason||''} (${s}${i.days}일)</li>`});else ah+='<li class="text-muted">- 없음 -</li>';ah+='</ul>';h+=`<div class="leave-section"><h6>⚖️ 조정 내역</h6>${ah}</div>`;
+h+=`<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-${Number(summary.reservedDays||0)}일</span></h6>${renderLeaveDocList(summary.reservedDocs,'- 없음 -')}</div>`;
+h+=`<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-${Number(summary.pastOrUsedDays||0)}일</span></h6>${renderLeaveDocList(summary.pastOrUsedDocs,'- 없음 -')}</div>`;
+if(Array.isArray(summary.unknownDateDocs)&&summary.unknownDateDocs.length>0){
+h+=`<div class="leave-section"><h6>ℹ️ 일자 미확인 내역</h6>${renderLeaveDocList(summary.unknownDateDocs,'- 없음 -')}</div>`;
+}
+h+='</div>';bd.innerHTML=h;
+}catch(error){
+console.error('showLeaveDetail failed:',error);
+const msg=escapeHtml(error?.message||'알 수 없는 오류');
+bd.innerHTML=`<div class="text-danger small">연차 상세 조회 중 오류가 발생했습니다.<br>${msg}</div>`;
+}
+}
+function openEventModal(e,d){
+const b=document.getElementById("btnDelEvent"),s=document.getElementById("btnSaveEvent");
+const inputs=eventModal._element.querySelectorAll('input, select, textarea');
+const canEdit= !e || ((myInfo.role==='admin' || myInfo.role==='admin_all') || e.created_by===myInfo.emp_id);
+inputs.forEach(el=>{el.disabled=!canEdit});
+if(canEdit){s.classList.remove('hidden');if(e)b.classList.remove("hidden");else b.classList.add("hidden")}else{s.classList.add('hidden');b.classList.add("hidden")}
+if(e){document.getElementById("evtId").value=e.id;document.getElementById("evtTitle").value=e.title;document.getElementById("evtVisibility").value=e.visibility||'company';const dt=getMypageKstDateParts(e.start_date);document.getElementById("evtDate").value=dt.date||'';document.getElementById("evtTime").value=dt.time||"";document.getElementById("evtRecure").value=e.recurrence||'none';document.getElementById("evtIsHoliday").checked=(e.type==='holiday');document.getElementById("evtMemo").value=e.cal_memo||""}else{document.getElementById("evtId").value="";document.getElementById("evtTitle").value="";document.getElementById("evtVisibility").value='private';document.getElementById("evtDate").value=d;document.getElementById("evtTime").value="";document.getElementById("evtRecure").value="none";document.getElementById("evtIsHoliday").checked=false;document.getElementById("evtMemo").value=""}
+eventModal.show();
+}
+async function saveEvent(){
+const i=document.getElementById("evtId").value,t=document.getElementById("evtTitle").value,v=document.getElementById("evtVisibility").value,d=document.getElementById("evtDate").value,tm=document.getElementById("evtTime").value,r=document.getElementById("evtRecure").value,tp=document.getElementById("evtIsHoliday").checked?'holiday':'company',mm=document.getElementById("evtMemo").value;
+if(!t||!d){showAlert("입력 확인");return}const fd=tm?toUtcIsoFromKstInput(`${d}T${tm}`):d,p={title:t,start_date:fd,type:tp,recurrence:r,visibility:v,created_by:myInfo.emp_id,cal_memo:mm};
+const{error}=i?await _supabase.from('ref_calendar').update(p).eq('id',i):await _supabase.from('ref_calendar').insert(p);
+if(error)showAlert("저장 실패: "+error.message);else{showAlert("저장되었습니다.");eventModal.hide();renderCalendar()}
+}
+async function deleteEvent(){const i=document.getElementById("evtId").value;if(!i) return;openConfirmModal("정말 삭제하시겠습니까?\n(반복 일정은 전체 삭제됩니다)", async function() {await _supabase.from('ref_calendar').delete().eq('id',i);eventModal.hide();renderCalendar();
+showAlert("삭제되었습니다.");
+});
+}
+async function searchSalary(){
+const ym=document.getElementById("salaryMonth").value;
+const{data,error}=await _supabase.from('hr_salary').select('*').eq('emp_id',myInfo.emp_id).eq('year_month',ym).maybeSingle();
+if(error) return showAlert("조회 실패: "+error.message);
+if(!data){showAlert("내역 없음");return}
+const adjusted=await getAdjustedSalaryRowForMypage({...data,year_month:ym},ym);
+currentSalaryData=adjusted;
+document.getElementById("salaryResult").classList.remove("hidden");
+document.getElementById("btnPrintSalary").classList.remove("hidden");
+const[y,m]=ym.split('-');
+document.getElementById("sl_ym_display").innerText=`${y}년 ${Number(m)}월`;
+const f=n=>Number(n).toLocaleString();
+const dedAdvanceLabel=getSalaryDedAdvanceLabel(adjusted);
+const p=[['pay_basic','기본급'],['pay_meal','식대'],['pay_car','차량유지비'],['pay_position','직책수당'],['pay_service','근속수당'],['pay_overtime','연장수당'],['pay_child','육아수당'],['pay_bonus','상여금']];
+const d=[['ded_pension','국민연금'],['ded_health','건강보험'],['ded_care','장기요양'],['ded_employ','고용보험'],['ded_income','소득세'],['ded_local','지방소득세'],['ded_advance',dedAdvanceLabel],['ded_capital','출자금']];
+let ph="";
+p.forEach(i=>ph+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(adjusted[i[0]]||0)}</span></td></tr>`);
+ph+=`<tr><td class="bg-light fw-bold">지급계</td><td class="amount-text text-primary fw-bold"><span class="salary-blur">${f(adjusted.pay_total)}</span></td></tr>`;
+document.getElementById("tbl_pay_body").innerHTML=ph;
+let dh="";
+d.forEach(i=>dh+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(adjusted[i[0]]||0)}</span></td></tr>`);
+dh+=`<tr><td class="bg-light fw-bold">공제계</td><td class="amount-text text-danger fw-bold"><span class="salary-blur">${f(adjusted.ded_total)}</span></td></tr>`;
+document.getElementById("tbl_ded_body").innerHTML=dh;
+document.getElementById("v_net").innerText=f(adjusted.net_pay)
+}
+// [수정됨] 급여명세서 인쇄 (PrintService 호출)
+async function printSalaryPopup() {
+    if (!currentSalaryData) return showAlert("조회된 급여 내역이 없습니다.");
+
+    // 숫자 쉼표 포맷팅 헬퍼
+    const fmt = (n) => Number(n || 0).toLocaleString();
+    const d = currentSalaryData;
+    const dedAdvanceLabel = getSalaryDedAdvanceLabel(d);
+    const [y, m] = d.year_month.split('-'); // 2025-05
+
+    // 날짜 포맷팅
+    const payDateObj = new Date(y, Number(m), 10); // 다음달 10일 (예시 로직)
+    const payDateStr = `${payDateObj.getFullYear()}년 ${payDateObj.getMonth() + 1}월 ${payDateObj.getDate()}일`;
+
+    // 데이터 패키징 (PrintService 규격에 맞춤)
+    const companyProfile = buildMypageCompanyPrintProfile();
+    ensureMypageCompanyPrintProfile(companyProfile,'급여명세서 출력');
+
+    const salaryData = {
+        titleDate: `${y}년 ${Number(m)}월`,
+        attrDate: `${y}년 ${Number(m)}월 (귀속)`,
+        payDate: payDateStr,
+        empInfo: `${getMypageEmployeeDisplayNoValue(myInfo)} / ${myInfo.emp_name}`,
+        dept: myInfo.department || "-",
+        pos: myInfo.position || "-",
+        
+        // 지급 내역
+        p_basic: fmt(d.pay_basic), p_meal: fmt(d.pay_meal), p_car: fmt(d.pay_car),
+        p_pos: fmt(d.pay_position), p_svc: fmt(d.pay_service), p_ot: fmt(d.pay_overtime),
+        p_child: fmt(d.pay_child), p_bonus: fmt(d.pay_bonus), p_total: fmt(d.pay_total),
+        
+        // 공제 내역
+        d_pen: fmt(d.ded_pension), d_hlt: fmt(d.ded_health), d_care: fmt(d.ded_care),
+        d_emp: fmt(d.ded_employ), d_inc: fmt(d.ded_income), d_loc: fmt(d.ded_local),
+        d_adv: fmt(d.ded_advance), d_adv_label: dedAdvanceLabel, d_cap: fmt(d.ded_capital), d_total: fmt(d.ded_total),
+        
+        // 실지급액
+        net: fmt(d.net_pay),
+        
+        // 회사 정보
+        logo: companyProfile.logoUrl,
+        seal: companyProfile.sealUrl,
+        chairman: companyProfile.chairmanName,
+        compName: companyProfile.companyName
+    };
+
+    // 모듈 호출
+    PrintService.printSalary(salaryData);
+}
+
+function getSalaryDedAdvanceLabel(row){
+const supportEmp=Number(row?.durunuri_emp_support||0);
+const rawAdvance=Number(row?.ded_advance_raw ?? row?.ded_advance ?? 0);
+if(supportEmp>0&&rawAdvance===0) return '두루누리 지원금';
+if(supportEmp>0) return '기타조정(두루누리 포함)';
+return '기타조정';
+} // End of getSalaryDedAdvanceLabel
+
+  function toggleEtcInput(){const v=document.getElementById("certPurposeSelect").value,e=document.getElementById("certPurposeEtc");if(v==='기타'){e.classList.remove('hidden');e.focus()}else{e.classList.add('hidden')}}
+function openCertModal(){purposeModal.show()}
+async function loadNotices(){
+  const{data}=await _supabase.from('ref_notice').select('*').order('created_at',{ascending:false}).limit(5);
+  const listEl=document.getElementById("noticeList");
+  if(data&&data.length){
+    listEl.innerHTML=data.map((n,i)=>{
+      const safeTitle=escapeHtml(n.title);
+      const safeDate=escapeHtml(formatMypageKstDate(n.created_at));
+      return `<div class="list-group-item" onclick="viewNotice(${i})" style="cursor:pointer"><h6 class="fw-bold mb-1">${safeTitle}</h6><small class="text-muted">${safeDate}</small></div>`;
+    }).join("");
+  }else{
+    listEl.innerHTML='<div class="text-center p-3 text-muted">공지사항 없음</div>';
+  }
+  noticesData=data;
+}
+function viewNotice(i){const n=noticesData[i];document.getElementById("noticeModalTitle").innerText=n.title;document.getElementById("noticeModalDate").innerText=formatMypageKstDate(n.created_at);document.getElementById("noticeModalWriter").innerText=n.writer||"관리자";document.getElementById("noticeModalContent").innerText=n.content;const l=document.getElementById("noticeFileLink"),a=document.getElementById("noticeFileArea");if(n.file_url){a.classList.remove("hidden");l.href=n.file_url}else a.classList.add("hidden");noticeDetailModal.show()}
+// [추가] 범용 확인 모달 열기 함수
+function openConfirmModal(msg, callback) {
+    document.getElementById("confirmMessage").innerText = msg;
+    confirmActionFunc = callback; // 확인 버튼 누르면 실행할 함수를 기억해둠
+    confirmModal.show();
+}
+
+// [추가] 모달에서 '확인' 버튼 클릭 시 실행
+function executeConfirmAction() {
+    if (confirmActionFunc) {
+        confirmActionFunc(); // 기억해둔 함수 실행
+    }
+    confirmModal.hide();
+}
+// [최종 수정] 재직증명서 발급 (DB 함수 사용으로 중복 방지)
+async function runCertIssue() {
+    // 1. 용도 확인
+    const s = document.getElementById("certPurposeSelect").value;
+    const e = document.getElementById("certPurposeEtc").value;
+    const purpose = (s === '기타') ? e : s;
+    if (!purpose) { showAlert("용도를 입력해주세요."); return; }
+    purposeModal.hide();
+
+    // 2. 생년월일 조회
+    const { data: birthDate } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: myInfo.emp_id });
+    const birthStr = birthDate || "미등록";
+
+    // 3. 재직 기간 텍스트 생성
+    const certMeta = getMypageCertificateMeta();
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`;
+    let tenureStr = "-";
+    if (myInfo.hire_date) {
+        const join = new Date(myInfo.hire_date);
+        const endBase = myInfo.resign_date ? new Date(myInfo.resign_date) : today;
+        const diff = endBase - join;
+        const y = Math.floor(diff / (1000 * 60 * 60 * 24 * 365));
+        const m = Math.floor((diff % (1000 * 60 * 60 * 24 * 365)) / (1000 * 60 * 60 * 24 * 30));
+        const endLabel = myInfo.resign_date || '현재';
+        tenureStr = `${myInfo.hire_date} ~ ${endLabel} (${y}년 ${m}개월)`;
+    }
+
+    // [핵심 변경] 클라이언트 계산 로직 삭제 -> DB RPC 함수 호출
+    // DB가 알아서 번호 따고, 저장까지 하고, 결과를 리턴해줍니다.
+    const { data: newCert, error } = await _supabase.rpc('issue_certificate', {
+        p_emp_id: myInfo.emp_id,
+        p_emp_name: myInfo.emp_name,
+        p_purpose: purpose,
+        p_type: certMeta.type
+    });
+
+    if (error) {
+        console.error(error);
+        return showAlert("발급 중 오류 발생: " + error.message);
+    }
+
+    const companyProfile = buildMypageCompanyPrintProfile();
+    ensureMypageCompanyPrintProfile(companyProfile, certMeta.type);
+
+    // 4. 인쇄 데이터 준비 (DB에서 받은 cert_num 사용)
+    const certData = {
+        docNum: newCert.cert_num, // DB가 생성한 안전한 번호
+        logo: companyProfile.logoUrl,
+        name: myInfo.emp_name,
+        birth: birthStr,
+        dept: myInfo.department || "-",
+        pos: myInfo.position || "-",
+        address: myInfo.address || "-",
+        tenure: tenureStr,
+        purpose: purpose,
+        today: dateStr,
+        certTitle: certMeta.type,
+        employmentStatement: certMeta.statement,
+        chairman: companyProfile.chairmanName,
+        compName: companyProfile.companyName,
+        compAddr: companyProfile.address,
+        contact: companyProfile.contact,
+        seal: companyProfile.sealUrl,
+        siteUrl: ''
+    };
+
+    // 모듈 호출
+    PrintService.printCert(certData);
+}
+  // [공통] 입력 시 자동 하이픈 추가 (2025-24-0002 형식)
+function autoHyphenMemberId(target) {
+    let val = target.value.replace(/[^0-9]/g, ''); // 숫자만 추출
+    
+    // 길이 제한 (최대 10자리 숫자)
+    if (val.length > 10) val = val.substring(0, 10);
+
+    // 포맷팅
+    if (val.length > 6) {
+        val = val.replace(/(\d{4})(\d{2})(\d{1,4})/, '$1-$2-$3');
+    } else if (val.length > 4) {
+        val = val.replace(/(\d{4})(\d{1,2})/, '$1-$2');
+    }
+    
+    target.value = val;
+}
+</script>
+<script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
+</body>
+</html>
