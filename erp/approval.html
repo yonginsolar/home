@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.74 | Change: 2026-03-26 - Canonicalize ERP notification links for unified www/erp deployment. -->
+<!-- Version: v1.1.76 | Change: 2026-03-27 - Clarify approval upload errors and notify the platform maintainer on file upload failure. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.74 | approval.html');</script>
+  <script>console.log('[Version] v1.1.76 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -4626,6 +4626,132 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
     }
 } // End of createNotification
 
+function normalizeApprovalUploadError(error) {
+    const rawMessage = (() => {
+        if (typeof error === 'string') return error.trim();
+        if (error && typeof error === 'object') {
+            const preferred = String(error.message || error.error_description || error.error || '').trim();
+            if (preferred) return preferred;
+            try {
+                return JSON.stringify(error);
+            } catch (_) { /* noop */ }
+        }
+        return String(error || '').trim();
+    })();
+    const status = Number(error?.statusCode || error?.status || error?.originalError?.status || 0) || null;
+    return {
+        rawMessage: rawMessage || 'unknown error',
+        status
+    };
+} // End of normalizeApprovalUploadError
+
+function summarizeApprovalUploadFileNames(fileNames) {
+    const names = Array.isArray(fileNames)
+        ? fileNames.map((name) => String(name || '').trim()).filter(Boolean)
+        : [];
+    if (names.length === 0) return '';
+    const visible = names.slice(0, 3).join(', ');
+    return names.length > 3 ? `${visible} 외 ${names.length - 3}건` : visible;
+} // End of summarizeApprovalUploadFileNames
+
+function getApprovalUploadPermissionHint() {
+    const perms = permissionSet instanceof Set ? permissionSet : new Set();
+    if (perms.has('site.admin') || perms.has('member.admin')) return '';
+    const role = String(myInfo?.role || '').trim().toLowerCase();
+    if (role === 'admin' || role === 'admin_all') return '';
+    if (!role) return '';
+    return `현재 계정 역할(${role})은 storage 정책상 일반 첨부 저장 권한 대상이 아닐 수 있습니다. 관리자 권한 또는 site.admin/member.admin 권한을 확인해 주세요.`;
+} // End of getApprovalUploadPermissionHint
+
+function buildApprovalUploadErrorMessage(error, options = {}) {
+    const normalized = normalizeApprovalUploadError(error);
+    const rawMessage = normalized.rawMessage;
+    const status = normalized.status;
+    const fileSummary = summarizeApprovalUploadFileNames(options.fileNames);
+    const isFetchFailure = /Failed to fetch/i.test(rawMessage);
+    const isPermissionFailure = status === 403 || /row-level security|permission|forbidden|not allowed/i.test(rawMessage);
+    const isAuthFailure = status === 401 || /jwt|unauthorized|auth/i.test(rawMessage);
+    const isTooLarge = status === 413 || /payload too large|entity too large|maximum allowed size|too large/i.test(rawMessage);
+    let headline = '첨부파일 업로드 중 오류가 발생했습니다.';
+    if (isTooLarge) {
+        headline = '첨부파일 용량이 허용 범위를 초과했습니다.';
+    } else if (isAuthFailure) {
+        headline = '로그인 세션 확인에 실패해 첨부 업로드를 완료하지 못했습니다. 새로고침 후 다시 로그인해 주세요.';
+    } else if (isPermissionFailure) {
+        headline = '첨부 저장 권한이 없어 업로드를 완료하지 못했습니다.';
+    } else if (isFetchFailure) {
+        headline = navigator.onLine === false
+            ? '인터넷 연결이 끊겨 첨부 업로드 요청을 보낼 수 없습니다.'
+            : '첨부 업로드 요청이 브라우저 단계에서 중단되었습니다.';
+    }
+
+    const lines = [headline];
+    if (options.contextLabel) lines.push(`구분: ${options.contextLabel}`);
+    if (options.docType) lines.push(`문서유형: ${options.docType}`);
+    if (fileSummary) lines.push(`파일: ${fileSummary}`);
+    if (isFetchFailure && navigator.onLine !== false) {
+        lines.push('오래 열린 탭, 브라우저 확장프로그램, 일시적인 네트워크 상태를 함께 확인해 주세요.');
+    }
+    const permissionHint = getApprovalUploadPermissionHint();
+    if (permissionHint && (isPermissionFailure || isFetchFailure)) {
+        lines.push(permissionHint);
+    }
+    if (status) lines.push(`상태코드: ${status}`);
+    if (rawMessage && !headline.includes(rawMessage)) {
+        lines.push(`세부오류: ${rawMessage}`);
+    }
+    return lines.join('\n');
+} // End of buildApprovalUploadErrorMessage
+
+async function notifyApprovalUploadFailure(options = {}) {
+    try {
+        let accessToken = await getApprovalFunctionAccessToken(false);
+        if (!accessToken) return;
+        const normalized = normalizeApprovalUploadError(options.error);
+        const docId = Number(options.docId || 0) > 0 ? Number(options.docId) : null;
+        const runRequest = async (token) => fetch(`${SUPABASE_URL}/functions/v1/erp-platform-alert`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'apikey': SUPABASE_KEY
+            },
+            body: JSON.stringify({
+                alertType: 'approval_upload_error',
+                contextKey: String(options.contextKey || 'generic'),
+                contextLabel: String(options.contextLabel || '전자결재 첨부'),
+                rawError: String(normalized.rawMessage || '').slice(0, 300),
+                httpStatus: normalized.status,
+                fileNames: Array.isArray(options.fileNames) ? options.fileNames.slice(0, 5) : [],
+                pagePath: String(window.location?.pathname || ''),
+                pageUrl: String(window.location?.href || ''),
+                actorEmpId: myInfo?.emp_id || null,
+                actorName: myInfo?.emp_name || null,
+                actorRole: myInfo?.role || null,
+                docId,
+                docType: options.docType || null
+            })
+        });
+
+        let response = await runRequest(accessToken);
+        if (response.status === 401) {
+            accessToken = await getApprovalFunctionAccessToken(true);
+            if (accessToken) response = await runRequest(accessToken);
+        }
+        if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            console.warn('[approval-upload] platform alert skipped:', response.status, errText);
+            return;
+        }
+        const payload = await response.json().catch(() => null);
+        if (payload?.ok === false) {
+            console.warn('[approval-upload] platform alert rejected:', payload);
+        }
+    } catch (e) {
+        console.warn('[approval-upload] notify failure skipped:', e);
+    }
+} // End of notifyApprovalUploadFailure
+
 async function logAudit(action, entityId, summary, detail = null) {
     try {
         await _supabase.from('erp_audit_logs').insert({
@@ -7422,7 +7548,22 @@ async function handleDraftSubmit(e) {
         try {
             await deleteDraftAttachmentObjects(uploadRollbackItems);
         } catch (_) { /* noop */ }
-        showAlert("파일 오류: " + (error?.message || error));
+        const submitFileNames = Array.from(fileInput.files || []).map((file) => String(file?.name || '').trim()).filter(Boolean);
+        if (approvalDraftAttachmentRefs.length > 0) {
+            submitFileNames.push(`임시저장 첨부 ${approvalDraftAttachmentRefs.length}건`);
+        }
+        void notifyApprovalUploadFailure({
+            error,
+            contextKey: 'submit',
+            contextLabel: '상신 첨부',
+            docType: subType || mainType || '',
+            fileNames: submitFileNames
+        });
+        showAlert(buildApprovalUploadErrorMessage(error, {
+            contextLabel: '상신 첨부',
+            docType: subType || mainType || '',
+            fileNames: submitFileNames
+        }));
         btn.disabled = false;
         btn.innerText = "상신하기";
         return;
@@ -7885,7 +8026,20 @@ async function submitEvidenceUpload() {
                 submitEl.disabled = false;
                 submitEl.textContent = '제출하기';
             }
-            return showAlert('증빙 업로드 실패: ' + uploadErr.message);
+            const evidenceFileNames = files.map((item) => String(item?.name || '').trim()).filter(Boolean);
+            void notifyApprovalUploadFailure({
+                error: uploadErr,
+                contextKey: 'evidence',
+                contextLabel: '증빙 첨부',
+                docId: pendingEvidenceDocId,
+                docType: String(doc.doc_type || '').trim(),
+                fileNames: evidenceFileNames
+            });
+            return showAlert(buildApprovalUploadErrorMessage(uploadErr, {
+                contextLabel: '증빙 첨부',
+                docType: String(doc.doc_type || '').trim(),
+                fileNames: evidenceFileNames
+            }));
         }
         uploadedRefs.push(`attachments/${safeName}?display_name=${encodeURIComponent(`[증빙] ${file.name || safeName}`)}`);
     }
@@ -9256,7 +9410,22 @@ document.getElementById('signedDocInput').addEventListener('change', async (e) =
     const file = fileInput.files[0];
 	    const safeName = `${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
 	    const { error: uploadErr } = await _supabase.storage.from('attachments').upload(safeName, file);
-	    if (uploadErr) return showAlert("파일 오류: " + uploadErr.message);
+	    if (uploadErr) {
+            const signedFileNames = [String(file?.name || '').trim()].filter(Boolean);
+            void notifyApprovalUploadFailure({
+                error: uploadErr,
+                contextKey: 'physical_signed',
+                contextLabel: '실물결재 서명본',
+                docId: pendingPhysicalDocId,
+                docType: '실물결재',
+                fileNames: signedFileNames
+            });
+            return showAlert(buildApprovalUploadErrorMessage(uploadErr, {
+                contextLabel: '실물결재 서명본',
+                docType: '실물결재',
+                fileNames: signedFileNames
+            }));
+        }
 	    const signedDocRef = `attachments/${safeName}?display_name=${encodeURIComponent(file.name || safeName)}`;
 
     const { data: doc } = await _supabase
