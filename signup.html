@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.4
-Change: Add Naver social signup and align public signup autofill/member detection with social profile metadata.
+Version: v1.0.5
+Change: Retry tenant resolution on signup gate failures and harden social/email start actions.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.4 | signup.html');</script>
+  <script>console.log('[Version] v1.0.5 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -122,7 +122,7 @@ gtag('config', 'G-TR217L7JN9');
 <div id="email-gate-input" class="mt-4" style="display:none; animation: fadeIn 0.5s;">
 <div class="input-group mb-2 email-gate-group">
 <input type="email" id="init-email" class="form-control" placeholder="이메일 주소 입력">
-<button class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">코드 발송</button>
+<button type="button" class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">코드 발송</button>
 </div>
 <p id="mail-status" class="small mt-2"></p>
 <div id="signup-otp-area" class="mt-3" style="display:none;">
@@ -426,6 +426,26 @@ mailStatus.className = 'small mt-2 text-danger';
 }
 }
 
+function showSignupTenantRetryState(message) {
+document.querySelectorAll('.gate-card').forEach((card) => {
+card.style.pointerEvents = '';
+card.style.opacity = '';
+});
+
+const emailInput = document.getElementById('init-email');
+if (emailInput) emailInput.disabled = false;
+const sendButton = document.getElementById('btnSendLink');
+if (sendButton) {
+sendButton.disabled = false;
+sendButton.innerText = '코드 발송';
+}
+const mailStatus = document.getElementById('mail-status');
+if (mailStatus) {
+mailStatus.textContent = message || '가입 대상을 확인하지 못했습니다. 다시 시도해 주세요.';
+mailStatus.className = 'small mt-2 text-danger';
+}
+} // End of showSignupTenantRetryState
+
 async function ensureSignupTenant() {
 if (signupTenantReadyPromise) return signupTenantReadyPromise;
 
@@ -445,7 +465,13 @@ applySignupTenantBranding();
 return resolved;
 })().catch((error) => {
 signupTenant = null;
+signupTenantReadyPromise = null;
+const msg = String(error?.message || '').trim();
+if (msg === 'SIGNUP_COOP_CONTEXT_MISSING' || msg === 'SIGNUP_COOP_NOT_FOUND') {
 blockSignupTenantContext();
+} else {
+showSignupTenantRetryState('가입 대상을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+}
 throw error;
 });
 
@@ -694,7 +720,7 @@ async function sendMagicLink() {
 try {
 await ensureSignupTenant();
 } catch (tenantError) {
-return openResultModal('가입 대상을 확인할 수 없습니다.', true);
+return openResultModal('가입 대상을 확인하지 못했습니다.\n새로고침 후 다시 시도해 주세요.', true);
 }
 
 const email = document.getElementById('init-email').value;
@@ -1015,7 +1041,12 @@ async function startKakaoSignup() {
         });
         if (error) throw error;
     } catch (error) {
-        openResultModal(error?.message || '카카오 로그인 시작에 실패했습니다.', true);
+        const msg = String(error?.message || '').trim();
+        if (msg === 'SIGNUP_COOP_CONTEXT_MISSING' || msg === 'SIGNUP_COOP_NOT_FOUND') {
+            openResultModal('가입 대상을 확인하지 못했습니다.\n새로고침 후 다시 시도해 주세요.', true);
+            return;
+        }
+        openResultModal(msg || '카카오 로그인 시작에 실패했습니다.', true);
     }
 }
 
@@ -1036,7 +1067,12 @@ async function startNaverSignup() {
         });
         if (error) throw error;
     } catch (error) {
-        openResultModal(error?.message || '네이버 로그인 시작에 실패했습니다.', true);
+        const msg = String(error?.message || '').trim();
+        if (msg === 'SIGNUP_COOP_CONTEXT_MISSING' || msg === 'SIGNUP_COOP_NOT_FOUND') {
+            openResultModal('가입 대상을 확인하지 못했습니다.\n새로고침 후 다시 시도해 주세요.', true);
+            return;
+        }
+        openResultModal(msg || '네이버 로그인 시작에 실패했습니다.', true);
     }
 }
 
