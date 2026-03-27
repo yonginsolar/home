@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.5
-Change: Retry tenant resolution on signup gate failures and harden social/email start actions.
+Version: v1.0.6
+Change: Add shared boot guard and explicit retry action for signup tenant bootstrap failures.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.5 | signup.html');</script>
+  <script>console.log('[Version] v1.0.6 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -20,6 +20,7 @@ Change: Retry tenant resolution on signup gate failures and harden social/email 
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="telegram_bot.js"></script>
+<script src="shared/boot_guard.js?v=20260327-1"></script>
 <style>
 /* [CSS 추가] 가입 완료 모달 스타일 */
 .center-modal {
@@ -71,6 +72,14 @@ padding: 12px;
 border-radius: 12px;
 margin-top: 15px;
 margin-bottom: 10px;
+}
+
+.signup-retry-actions {
+display: none;
+align-items: center;
+gap: 8px;
+justify-content: center;
+margin-top: 8px;
 }
 
 </style>
@@ -125,6 +134,9 @@ gtag('config', 'G-TR217L7JN9');
 <button type="button" class="btn btn-dark" onclick="sendMagicLink()" id="btnSendLink">코드 발송</button>
 </div>
 <p id="mail-status" class="small mt-2"></p>
+<div id="signupRetryActions" class="signup-retry-actions">
+<button type="button" class="btn btn-outline-secondary btn-sm" id="btnRetrySignupTenant" onclick="retrySignupTenantGate()">가입 대상 다시 확인</button>
+</div>
 <div id="signup-otp-area" class="mt-3" style="display:none;">
 <div class="input-group mb-2">
 <input type="text" id="signup-otp-input" class="form-control" placeholder="메일로 받은 인증코드" inputmode="numeric" autocomplete="one-time-code" onkeyup="if(event.key==='Enter') verifySignupOtp()">
@@ -352,7 +364,21 @@ let joinSubmitInFlight = false;
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 let signupTenant = null;
-let signupTenantReadyPromise = null;
+const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
+const coopCode = getSignupCoopCodeFromLocation();
+if (!coopCode) throw new Error('SIGNUP_COOP_CONTEXT_MISSING');
+
+const { data, error } = await _supabase.rpc('resolve_public_signup_coop', { p_coop_code: coopCode });
+const resolved = Array.isArray(data) ? data[0] : data;
+
+if (error || !resolved?.coop_id || !resolved?.coop_name) {
+throw error || new Error('SIGNUP_COOP_NOT_FOUND');
+}
+
+signupTenant = resolved;
+applySignupTenantBranding();
+return resolved;
+});
 let pendingSignupOtpEmail = '';
 
 function getSignupCoopCodeFromLocation() {
@@ -424,6 +450,17 @@ if (mailStatus) {
 mailStatus.textContent = '가입 대상을 확인할 수 없습니다.';
 mailStatus.className = 'small mt-2 text-danger';
 }
+hideSignupRetryActions();
+}
+
+function hideSignupRetryActions() {
+const wrap = document.getElementById('signupRetryActions');
+if (wrap) wrap.style.display = 'none';
+}
+
+function showSignupRetryActions() {
+const wrap = document.getElementById('signupRetryActions');
+if (wrap) wrap.style.display = 'flex';
 }
 
 function showSignupTenantRetryState(message) {
@@ -444,38 +481,53 @@ if (mailStatus) {
 mailStatus.textContent = message || '가입 대상을 확인하지 못했습니다. 다시 시도해 주세요.';
 mailStatus.className = 'small mt-2 text-danger';
 }
+showSignupRetryActions();
 } // End of showSignupTenantRetryState
 
-async function ensureSignupTenant() {
-if (signupTenantReadyPromise) return signupTenantReadyPromise;
-
-signupTenantReadyPromise = (async () => {
-const coopCode = getSignupCoopCodeFromLocation();
-if (!coopCode) throw new Error('SIGNUP_COOP_CONTEXT_MISSING');
-
-const { data, error } = await _supabase.rpc('resolve_public_signup_coop', { p_coop_code: coopCode });
-const resolved = Array.isArray(data) ? data[0] : data;
-
-if (error || !resolved?.coop_id || !resolved?.coop_name) {
-throw error || new Error('SIGNUP_COOP_NOT_FOUND');
+function clearSignupTenantRetryState() {
+const mailStatus = document.getElementById('mail-status');
+if (mailStatus && mailStatus.classList.contains('text-danger')) {
+mailStatus.textContent = '';
+mailStatus.className = 'small mt-2';
+}
+hideSignupRetryActions();
 }
 
-signupTenant = resolved;
-applySignupTenantBranding();
+async function ensureSignupTenant() {
+try {
+const resolved = await signupTenantLoader.run();
+clearSignupTenantRetryState();
 return resolved;
-})().catch((error) => {
+} catch (error) {
 signupTenant = null;
-signupTenantReadyPromise = null;
-const msg = String(error?.message || '').trim();
-if (msg === 'SIGNUP_COOP_CONTEXT_MISSING' || msg === 'SIGNUP_COOP_NOT_FOUND') {
+signupTenantLoader.reset();
+const kind = BootGuard.classifyError(error, {
+fatalMessages: ['SIGNUP_COOP_CONTEXT_MISSING', 'SIGNUP_COOP_NOT_FOUND']
+});
+if (kind === 'fatal') {
 blockSignupTenantContext();
 } else {
 showSignupTenantRetryState('가입 대상을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
 }
 throw error;
-});
+}
+}
 
-return signupTenantReadyPromise;
+async function retrySignupTenantGate() {
+const retryButton = document.getElementById('btnRetrySignupTenant');
+if (retryButton) {
+retryButton.disabled = true;
+retryButton.innerText = '확인 중...';
+}
+try {
+showSignupTenantRetryState('가입 대상을 다시 확인하는 중입니다...');
+await ensureSignupTenant();
+} finally {
+if (retryButton) {
+retryButton.disabled = false;
+retryButton.innerText = '가입 대상 다시 확인';
+}
+}
 }
 
     // [신규] URL로 배달된 토큰(at, rt)을 받아서 로그인 처리하는 함수

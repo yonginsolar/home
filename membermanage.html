@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.46
-Change: 2026-03-27 - Show linked Kakao/Naver status badges in the member portal profile header.
+Version: v1.0.47
+Change: 2026-03-27 - Harden member portal boot with retryable boot guard and keep social link status badges.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.46 | membermanage.html');</script>
+  <script>console.log('[Version] v1.0.47 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리 - 용인모두의햇빛협동조합</title>
@@ -25,6 +25,7 @@ Change: 2026-03-27 - Show linked Kakao/Naver status badges in the member portal 
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 <script src="badges.js"></script>
 <script src="telegram_bot.js"></script>
+<script src="shared/boot_guard.js?v=20260327-1"></script>
 
 <link href="style.css" rel="stylesheet">
 
@@ -139,6 +140,17 @@ padding: 25px;
 box-shadow: 0 5px 20px rgba(0,0,0,0.05);
 border: 1px solid #f0f0f0;
 height: 100%;
+}
+.portal-retry-panel {
+display: none;
+margin-top: 16px;
+padding: 14px 16px;
+border: 1px solid #fecaca;
+background: #fff1f2;
+border-radius: 14px;
+}
+.portal-retry-panel.show {
+display: block;
 }
 .count-icon {
 font-size: 2.5rem;
@@ -466,6 +478,15 @@ gtag('config', 'G-TR217L7JN9');
 <div>
 가입 시 등록한 <b>이메일</b>을 입력해주세요.<br>
 <small class="text-muted">입력하신 메일로 인증코드를 보내드립니다.</small>
+</div>
+</div>
+
+<div id="portalRetryPanel" class="portal-retry-panel">
+<div class="fw-bold text-danger mb-1">조합원 화면을 준비하지 못했습니다.</div>
+<div class="small text-secondary mb-3" id="portalRetryMessage">잠시 후 다시 시도해 주세요.</div>
+<div class="d-flex gap-2">
+<button type="button" class="btn btn-dark btn-sm" id="btnRetryPortalBoot" onclick="retryPortalBoot()">다시 시도</button>
+<button type="button" class="btn btn-outline-secondary btn-sm" onclick="location.reload()">새로고침</button>
 </div>
 </div>
 
@@ -1265,6 +1286,7 @@ clearSupabaseAuthCache();
 await signOutSilently(_supabase);
 curAuth = null;
 curMem = null;
+hidePortalRetryState();
 showOnly('loginSection');
 showLoading(false);
 showSessionExpiredNoticeOnce();
@@ -1371,6 +1393,22 @@ document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none'
 if(msg) document.getElementById('loadingMsg').innerText = msg;
 }
 
+function showPortalRetryState(message) {
+const panel = document.getElementById('portalRetryPanel');
+const text = document.getElementById('portalRetryMessage');
+if (text) {
+text.textContent = message || '조합원 정보를 준비하지 못했습니다. 다시 시도해 주세요.';
+}
+if (panel) panel.classList.add('show');
+showOnly('loginSection');
+showLoading(false);
+}
+
+function hidePortalRetryState() {
+const panel = document.getElementById('portalRetryPanel');
+if (panel) panel.classList.remove('show');
+}
+
 // [수정 1] 초기화 로직: 보안 강화 및 화면 겹침 원천 차단
 // [수정] 초기화 로직: 세션 상태에 따라 showOnly로 명확하게 분기
 window.addEventListener('DOMContentLoaded', async () => {
@@ -1391,6 +1429,7 @@ if (typeof showLoading === 'function') showLoading(false);
 
 if (session) {
 sessionStorage.removeItem(SESSION_EXPIRED_NOTICE_KEY);
+hidePortalRetryState();
 // [로그인 상태] -> 데이터 로드 시작
 // 주의: 여기서 바로 showOnly('dashboardSection') 하지 않음.
 // 데이터가 텅 빈 화면이 보일 수 있으므로 loadDashboardData 완료 후 보여줌.
@@ -1408,6 +1447,7 @@ return;
 
 // [비로그인 상태] -> 로그인 화면 즉시 노출
 void 0;
+hidePortalRetryState();
 showOnly('loginSection'); 
 }
 });
@@ -1799,55 +1839,94 @@ return dest.href;
 		  }
 		}
 
-		async function handleLoginSuccess(user) {
+		function classifyPortalBootError(error) {
+		return BootGuard.classifyError(error, {
+		fatalCodes: ['PGRST301', '401', '403', 'PORTAL_AUTH_EXPIRED'],
+		fatalMessages: ['PORTAL_AUTH_EXPIRED', '로그인 세션이 만료되었습니다.']
+		});
+		}
+
+		const runPortalBoot = BootGuard.createSingleFlightAction(async (user) => {
 		curAuth = user;
+		hidePortalRetryState();
 		showLoading(true, '정보 확인 중...');
 
-	// 1. 자동 매칭 시도
-	const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
+		try {
+		const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
+		if (claimErr) throw claimErr;
 
-	showLoading(false);
+		if (!claimRes || !claimRes.success) {
+		document.getElementById('manualMatchModal').style.display = 'flex';
+		await loadDuplicateEmailCandidates(user && user.email ? user.email : '');
+		return;
+		}
 
-	// 실패했다고 바로 쫓아내지 않음!
-	if (claimErr || !claimRes.success) {
-	void 0;
-	document.getElementById('manualMatchModal').style.display = 'flex';
-	await loadDuplicateEmailCandidates(user && user.email ? user.email : '');
-	return; 
-	}
+		await ensureLoginBadgesGranted();
 
-	// 로그인 보상(뱃지) 자동 지급: 연결 성공 후 1회 호출
-	await ensureLoginBadgesGranted();
+		const returnUrl = getSafeLoginReturnUrl();
+		if (returnUrl) {
+		localStorage.removeItem('auth_destination');
+		const cleanUrl = window.location.origin + window.location.pathname;
+		window.history.replaceState({}, document.title, cleanUrl);
+		window.location.replace(returnUrl);
+		return;
+		}
 
-	// 로그인 후 원래 접근 페이지로 즉시 복귀
-	const returnUrl = getSafeLoginReturnUrl();
-	if (returnUrl) {
-	localStorage.removeItem('auth_destination');
-const cleanUrl = window.location.origin + window.location.pathname;
-window.history.replaceState({}, document.title, cleanUrl);
-window.location.replace(returnUrl);
-return;
-}
+		document.getElementById('headerLogoutBtn').classList.remove('hidden');
 
-// 성공 시 대시보드 로드
-document.getElementById('headerLogoutBtn').classList.remove('hidden');
+		const lastProfileId = sessionStorage.getItem('lastActiveProfile');
+		const targetUuid = lastProfileId ? lastProfileId : user.id;
 
-// [핵심 변경] 저장된 마지막 프로필이 있는지 확인
-const lastProfileId = sessionStorage.getItem('lastActiveProfile');
-// 저장된 게 있으면 그걸로, 없으면 로그인한 본인 ID(user.id)로 로드
-const targetUuid = lastProfileId ? lastProfileId : user.id;
+		await loadDashboardData(targetUuid, { rethrowOnError: true });
+		syncSocialLinkButtons();
 
-// [1] 대시보드 데이터 우선 로드
-await loadDashboardData(targetUuid);
+		if (typeof loadManagedProfiles === 'function') {
+		await loadManagedProfiles(user.id);
+		}
+		} catch (error) {
+		console.error('handleLoginSuccess failed:', error);
+		const kind = classifyPortalBootError(error);
+		if (kind === 'fatal') {
+		await recoverFromExpiredSession();
+		return;
+		}
+		showPortalRetryState('조합원 정보를 불러오지 못했습니다. 다시 시도해 주세요.');
+		} finally {
+		showLoading(false);
+		}
+		});
 
-// [2] 관리 가능한 프로필(단체/가족) 목록 로드
-	// [신규] 카카오 연동 버튼 노출 (이미 연동되어 있으면 숨김)
-syncSocialLinkButtons();
+		async function handleLoginSuccess(user) {
+		return runPortalBoot(user);
+		}
 
-if (typeof loadManagedProfiles === 'function') {
-await loadManagedProfiles(user.id);
-}
-}
+		async function retryPortalBoot() {
+		const retryButton = document.getElementById('btnRetryPortalBoot');
+		if (retryButton) {
+		retryButton.disabled = true;
+		retryButton.textContent = '다시 시도 중...';
+		}
+
+		try {
+		hidePortalRetryState();
+		showLoading(true, '조합원 화면을 다시 준비하는 중...');
+		const user = curAuth || (await _supabase.auth.getUser()).data?.user || null;
+		if (!user) {
+		await recoverFromExpiredSession();
+		return;
+		}
+		await handleLoginSuccess(user);
+		} catch (error) {
+		console.error('retryPortalBoot failed:', error);
+		showPortalRetryState('조합원 정보를 다시 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+		} finally {
+		if (retryButton) {
+		retryButton.disabled = false;
+		retryButton.textContent = '다시 시도';
+		}
+		showLoading(false);
+		}
+		}
 // [신규] 사업자등록번호 자동 하이픈 (000-00-00000)
 function formatBizNo(target) {
 let raw = target.value.replace(/[^0-9]/g, '');
@@ -2102,7 +2181,7 @@ return data ? data.account_number : null;
 } catch (e) { return null; }
 }
 // [수정] 대시보드 데이터 로드 (세션 스토리지 저장 기능 추가)
-async function loadDashboardData(uuid) {
+async function loadDashboardData(uuid, options = {}) {
 try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
 sessionStorage.setItem('lastActiveProfile', uuid);
@@ -2211,8 +2290,15 @@ if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
 
 } catch (e) {
 console.error("Dashboard Load Error:", e);
-showLoading(false);
-showModal('데이터 로드 오류: ' + e.message);
+if (options && options.rethrowOnError) {
+if (e && (e.code === 'PGRST301' || e.status === 403)) {
+const authError = new Error('로그인 세션이 만료되었습니다.');
+authError.code = 'PORTAL_AUTH_EXPIRED';
+throw authError;
+}
+throw (e instanceof Error ? e : new Error(String(e)));
+}
+showModal('데이터 로드 오류: ' + (e?.message || e));
 showOnly('loginSection');
 } finally {
 showLoading(false);

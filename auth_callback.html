@@ -1,26 +1,35 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.7
-Change: Normalize legacy erp.yonginsolar.kr destinations to canonical www/erp paths.
+Version: v1.0.8
+Change: Add shared boot guard and explicit retry UI for callback delays or transient auth sync failures.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.7 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.8 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>인증 처리 중...</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="shared/boot_guard.js?v=20260327-1"></script>
     <style>
         body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f8f9fa; flex-direction: column; font-family: sans-serif; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #F7E600; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #message { color: #555; }
+        .callback-actions { display: none; margin-top: 18px; gap: 8px; flex-wrap: wrap; justify-content: center; }
+        .callback-actions.show { display: flex; }
+        .callback-actions button { border: 1px solid #d1d5db; background: #fff; color: #111827; border-radius: 999px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+        .callback-actions button.primary { background: #111827; color: #fff; border-color: #111827; }
     </style>
 </head>
 <body>
     <div class="loader"></div>
     <div id="message">로그인 정보를 동기화하고 있습니다...</div>
+    <div id="callbackActions" class="callback-actions">
+        <button type="button" class="primary" id="btnRetryCallback">다시 시도</button>
+        <button type="button" id="btnGoDest">원래 화면으로 이동</button>
+    </div>
 
     <script>
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -87,6 +96,22 @@ Change: Normalize legacy erp.yonginsolar.kr destinations to canonical www/erp pa
 
             document.getElementById('message').innerText = '인증 완료! 이동합니다...';
             window.location.replace(dest);
+        }
+
+        function setCallbackBusyState(message) {
+            const actions = document.getElementById('callbackActions');
+            const loader = document.querySelector('.loader');
+            if (loader) loader.style.display = 'block';
+            if (actions) actions.classList.remove('show');
+            document.getElementById('message').innerText = message || '로그인 정보를 동기화하고 있습니다...';
+        }
+
+        function showCallbackRetryState(message) {
+            const actions = document.getElementById('callbackActions');
+            const loader = document.querySelector('.loader');
+            if (loader) loader.style.display = 'none';
+            if (actions) actions.classList.add('show');
+            document.getElementById('message').innerText = message || '인증 처리를 완료하지 못했습니다. 다시 시도해 주세요.';
         }
 
         function getHashAuthError() {
@@ -213,8 +238,9 @@ Change: Normalize legacy erp.yonginsolar.kr destinations to canonical www/erp pa
             } catch (e) { void 0; }
         }
 
-        async function processAuth() {
+        const runCallbackBoot = BootGuard.createSingleFlightAction(async function processAuthInternal() {
             try {
+                setCallbackBusyState('로그인 정보를 동기화하고 있습니다...');
                 // 1. 세션 획득 시도 (2.5초 타임아웃)
                 const { data, error } = await Promise.race([
                     _supabase.auth.getSession(),
@@ -224,12 +250,18 @@ Change: Normalize legacy erp.yonginsolar.kr destinations to canonical www/erp pa
                 if (error || !data.session) {
                     // getSession 실패 시, 혹시 URL에 hash(#)가 남아있다면 그걸 믿어본다
                     // (Supabase는 URL 해시로 토큰을 줍니다)
-                    _supabase.auth.onAuthStateChange((evt, session) => {
+                    let settled = false;
+                    const fallbackTimer = setTimeout(() => {
+                        if (!settled) {
+                            showCallbackRetryState('인증 처리가 지연되고 있습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
+                        }
+                    }, 3500);
+                    const authListener = _supabase.auth.onAuthStateChange((evt, session) => {
                         if (session) {
+                            settled = true;
+                            clearTimeout(fallbackTimer);
+                            authListener?.data?.subscription?.unsubscribe?.();
                             syncPhone(session.user).then(() => redirectWithSession(session));
-                        } else {
-                            // 진짜 실패면 그냥 이동
-                            window.location.replace(getDest());
                         }
                     });
                     return;
@@ -283,9 +315,20 @@ Change: Normalize legacy erp.yonginsolar.kr destinations to canonical www/erp pa
 
             } catch (err) {
                 console.error(err);
-                window.location.replace(getDest());
+                showCallbackRetryState('인증 처리를 완료하지 못했습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
             }
+        });
+
+        async function processAuth() {
+            return runCallbackBoot();
         }
+
+        document.getElementById('btnRetryCallback').addEventListener('click', () => {
+            processAuth();
+        });
+        document.getElementById('btnGoDest').addEventListener('click', () => {
+            window.location.replace(getDest());
+        });
 
         processAuth();
     </script>
