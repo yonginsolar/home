@@ -239,7 +239,7 @@
       unknownAsReserved: opts.unknownAsReserved
     });
 
-    var effectiveRemainDays = Math.max(0, roundLeaveDays(baseRemainDays - summary.reservedDays));
+    var effectiveRemainDays = Math.max(0, roundLeaveDays(baseRemainDays));
 
     return {
       baseRemainDays: baseRemainDays,
