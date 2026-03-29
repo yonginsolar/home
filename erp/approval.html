@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.91 | Change: 2026-03-29 - Fix approval leave-cancel/history query builder collisions and normalize initial general proposal title. -->
+<!-- Version: v1.1.92 | Change: 2026-03-30 - Fix remaining approval tenant-helper raw builder collisions in submit/template/user-action paths. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.91 | approval.html');</script>
+  <script>console.log('[Version] v1.1.92 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -4779,9 +4779,10 @@ async function openApprovalTemplatePicker() {
     if (listEl) listEl.innerHTML = '<div class="text-center text-muted py-4">불러오는 중...</div>';
     approvalTemplateModalInstance.show();
 
-    const { data, error } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data, error } = await _supabase
+        .from('ref_approval')
         .select('id, doc_type, title, content, created_at, receiver, via')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id)
         .order('created_at', { ascending: false })
         .limit(120);
@@ -7560,9 +7561,10 @@ async function buildJeongyeolMonthlyDraft() {
     if (!range) return showAlert('보고월 형식이 올바르지 않습니다.');
 
     const reportTitle = `${JEONGYEOL_MONTHLY_TITLE_PREFIX} (${reportYm})`;
-    const { data: existingRows, error: existingError } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data: existingRows, error: existingError } = await _supabase
+        .from('ref_approval')
         .select('id, doc_no, status')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id)
         .eq('doc_type', JEONGYEOL_MONTHLY_DOC_TYPE)
         .eq('title', reportTitle)
@@ -7573,9 +7575,10 @@ async function buildJeongyeolMonthlyDraft() {
         return showAlert(`이미 ${reportYm} 월간보고가 있습니다.\n문서번호: ${row.doc_no || '-'}\n상태: ${row.status || '-'}`);
     }
 
-    const { data, error } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data, error } = await _supabase
+        .from('ref_approval')
         .select('id, doc_no, doc_type, title, amount, status, created_at, drafter_name, approval_line, content')
+        .eq('coop_id', getApprovalScopedCoopId())
         .gte('created_at', range.startIso)
         .lt('created_at', range.endIso)
         .order('created_at', { ascending: true });
@@ -7662,9 +7665,10 @@ async function generateDocNo() {
     const year = new Date().getFullYear();
     const prefix = `제${year}-`;
 
-    const { data } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data } = await _supabase
+        .from('ref_approval')
         .select('doc_no')
+        .eq('coop_id', getApprovalScopedCoopId())
         .like('doc_no', `${prefix}%`)
         .not('doc_no', 'is', null)
         .order('doc_no', { ascending: false })
@@ -8406,9 +8410,10 @@ async function deleteCanceledDoc(docId) {
     const numericDocId = Number(docId);
     if (!Number.isFinite(numericDocId)) return;
 
-    const { data: doc, error: docErr } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data: doc, error: docErr } = await _supabase
+        .from('ref_approval')
         .select('id, title, status, drafter_id')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', numericDocId)
         .single();
     if (docErr || !doc) {
@@ -8427,9 +8432,10 @@ async function deleteCanceledDoc(docId) {
     });
     if (!ok) return;
 
-    const { error: delErr } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { error: delErr } = await _supabase
+        .from('ref_approval')
         .delete()
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', numericDocId);
     if (delErr) {
         showAlert("삭제 실패: " + delErr.message);
@@ -8446,9 +8452,10 @@ async function deleteCanceledDoc(docId) {
 
 // [추가] 사용자 액션 (증빙제출/상신취소)
 async function procUserAction(docId, action, explicitReason = null) {
-    const { data: doc, error: docErr } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data: doc, error: docErr } = await _supabase
+        .from('ref_approval')
         .select('id, title, current_approver, drafter_id, status, approval_line')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', docId)
         .single();
     if (docErr || !doc) {
@@ -8480,9 +8487,10 @@ async function procUserAction(docId, action, explicitReason = null) {
             }
         }
 
-        const { error: cancelErr } = await scopeApprovalTenant(_supabase
-            .from('ref_approval'))
+        const { error: cancelErr } = await _supabase
+            .from('ref_approval')
             .update({ status: '결재취소', current_approver: null })
+            .eq('coop_id', getApprovalScopedCoopId())
             .eq('id', docId);
         if (cancelErr) {
             showAlert("취소 처리 실패: " + cancelErr.message);
@@ -8531,9 +8539,10 @@ async function submitEvidenceUpload() {
         submitEl.textContent = '업로드 중...';
     }
 
-    const { data: doc, error: docErr } = await scopeApprovalTenant(_supabase
-        .from('ref_approval'))
+    const { data: doc, error: docErr } = await _supabase
+        .from('ref_approval')
         .select('id, title, current_approver, drafter_id, status, file_links')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', pendingEvidenceDocId)
         .single();
     if (docErr || !doc) {
