@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.51
+Version: v1.0.56
 Change: 2026-03-28 - Harden admin member onclick string args and fund note rendering against unsafe values.
 -->
 <html lang="ko">
 <head>
   <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.51';
+window.ADMIN_MEMBER_VERSION = 'v1.0.56';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -63,6 +63,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 /* 기본 정보 탭 버튼 제어 */
 #btn-save-mode { display: none; } /* 처음엔 숨김 */
 #rrn-edit-area { display: none; } /* 처음엔 숨김 */
+.section-manage-controls { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+.section-order-controls .btn { min-width: 34px; height: 32px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; }
+.section-visibility-switch { display: inline-flex; align-items: center; margin: 0; min-height: 32px; }
+.section-visibility-switch .form-check-input { float: none; margin: 0; width: 45px; height: 24px; }
+.section-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.0.0">
 </head>
@@ -821,10 +826,15 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 
 <div class="tab-pane fade show active" id="sub-sections">
 <div class="alert alert-info small d-flex flex-wrap align-items-center justify-content-between gap-2">
-<div><i class="bi bi-info-circle-fill"></i> 홈페이지의 메뉴와 본문 섹션을 끄고 켤 수 있습니다. (체크 해제 시 즉시 반영)</div>
-<button id="btnSeedGameHallSection" type="button" class="btn btn-sm btn-outline-primary hidden" onclick="seedGameHallSection()">
-<i class="bi bi-plus-circle me-1"></i>game-hall 섹션 등록
+<div><i class="bi bi-info-circle-fill"></i> 홈페이지의 메뉴와 본문 섹션 순서와 공개 여부를 조정한 뒤 저장하면 반영됩니다.</div>
+<div class="section-actions">
+<button id="btnSaveSectionChanges" type="button" class="btn btn-sm btn-primary" onclick="saveSectionChanges()" disabled>
+<i class="bi bi-check2-circle me-1"></i>저장
 </button>
+<button id="btnSeedRequiredSections" type="button" class="btn btn-sm btn-outline-primary hidden" onclick="seedRequiredSections()">
+<i class="bi bi-plus-circle me-1"></i>누락 섹션 등록
+</button>
+</div>
 </div>
 <div id="sectionSeedHint" class="alert alert-warning small py-2 px-3 hidden mb-2"></div>
 <table class="table table-bordered bg-white text-center">
@@ -4416,12 +4426,20 @@ function logout() { _supabase.auth.signOut().then(() => location.href='index.htm
 // [기능 5] 섹션(메뉴) 관리 (ON/OFF)
 // ================================================================
 
-const REQUIRED_SECTION_GAME_HALL = Object.freeze({
+const REQUIRED_SITE_SECTIONS = Object.freeze([
+Object.freeze({
+id: 'ops-system',
+name: '협동조합 운영 시스템',
+display_order: 7,
+is_visible: true
+}),
+Object.freeze({
 id: 'game-hall',
 name: '햇빛 게임 명예의 전당',
-display_order: 9,
+display_order: 10,
 is_visible: true
-});
+})
+]);
 
 const SECTION_VISUAL_ORDER = Object.freeze({
 hero: 1,
@@ -4430,12 +4448,105 @@ progress: 3,
 status: 4,
 portfolio: 5,
 calculator: 6,
-partners: 7,
+ 'ops-system': 7,
 documents: 8,
-'game-hall': 9,
-faq: 10,
-contact: 11
+partners: 9,
+'game-hall': 10,
+faq: 11,
+contact: 12
 });
+
+let g_siteSections = [];
+let g_sectionDrafts = [];
+
+function getSectionDisplayOrder(section) {
+const order = Number(section?.display_order);
+if (Number.isFinite(order) && order > 0) return order;
+if (Object.prototype.hasOwnProperty.call(SECTION_VISUAL_ORDER, section?.id)) {
+return SECTION_VISUAL_ORDER[section.id];
+}
+return 9999;
+}
+
+function createSectionSnapshot(list = []) {
+return [...list]
+.map((section) => ({
+id: String(section?.id || '').trim(),
+display_order: getSectionDisplayOrder(section),
+is_visible: section?.is_visible === true
+}))
+.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+}
+
+function hasPendingSectionChanges() {
+const source = JSON.stringify(createSectionSnapshot(g_siteSections));
+const draft = JSON.stringify(createSectionSnapshot(g_sectionDrafts));
+return source !== draft;
+}
+
+function updateSectionSaveButton() {
+const btn = document.getElementById('btnSaveSectionChanges');
+if (!btn) return;
+const dirty = hasPendingSectionChanges();
+btn.disabled = !dirty;
+btn.classList.toggle('btn-primary', dirty);
+btn.classList.toggle('btn-outline-secondary', !dirty);
+}
+
+function getSortedSectionDrafts() {
+return [...(Array.isArray(g_sectionDrafts) ? g_sectionDrafts : [])].sort((a, b) => {
+const aOrder = getSectionDisplayOrder(a);
+const bOrder = getSectionDisplayOrder(b);
+if (aOrder !== bOrder) return aOrder - bOrder;
+return String(a.id || '').localeCompare(String(b.id || ''));
+});
+}
+
+function renderSectionRows() {
+const tbody = document.getElementById('sectionListBody');
+if (!tbody) return;
+const sortedSections = getSortedSectionDrafts();
+tbody.innerHTML = '';
+
+sortedSections.forEach(sec => {
+const checkedAttr = sec.is_visible ? 'checked' : '';
+const statusBadge = sec.is_visible
+? '<span class="badge bg-success">공개중</span>'
+: '<span class="badge bg-secondary">숨김</span>';
+
+const sectionIndex = sortedSections.findIndex((row) => row.id === sec.id);
+const moveControls = `
+<div class="btn-group btn-group-sm section-order-controls" role="group" aria-label="section-order">
+  <button type="button" class="btn btn-outline-secondary" ${sectionIndex <= 0 ? 'disabled' : ''} onclick="moveSectionOrder('${sec.id}', -1)">↑</button>
+  <button type="button" class="btn btn-outline-secondary" ${sectionIndex >= sortedSections.length - 1 ? 'disabled' : ''} onclick="moveSectionOrder('${sec.id}', 1)">↓</button>
+</div>
+`;
+
+tbody.innerHTML += `
+                   <tr>
+                       <td class="align-middle text-center">${getSectionDisplayOrder(sec)}</td>
+                       <td class="align-middle text-start ps-4">
+                           <span class="fw-bold text-dark">${sec.name}</span> <br>
+                           <small class="text-muted" style="font-size:0.85em;">ID: ${sec.id}</small>
+                       </td>
+                       <td class="align-middle text-center">${statusBadge}</td>
+                       <td class="align-middle text-center">
+                           <div class="section-manage-controls">
+                           ${moveControls}
+                           <div class="form-check form-switch section-visibility-switch">
+                               <input class="form-check-input" type="checkbox" role="switch"
+                                   style="cursor: pointer;"
+                                   ${checkedAttr}
+                                   onchange="toggleSection('${sec.id}', this.checked)">
+                           </div>
+                           </div>
+                       </td>
+                   </tr>
+               `;
+});
+
+updateSectionSaveButton();
+}
 
 function renderSectionSeedHint(message = '', isWarning = true) {
 const hintEl = document.getElementById('sectionSeedHint');
@@ -4451,10 +4562,16 @@ hintEl.classList.toggle('alert-success', !isWarning);
 hintEl.textContent = message;
 }
 
-function renderSectionSeedButton(isMissingGameHall) {
-const btn = document.getElementById('btnSeedGameHallSection');
+function renderSectionSeedButton(missingSections = []) {
+const btn = document.getElementById('btnSeedRequiredSections');
 if (!btn) return;
-btn.classList.toggle('hidden', !isMissingGameHall);
+const labels = Array.isArray(missingSections)
+? missingSections.map((sec) => String(sec?.id || '').trim()).filter(Boolean)
+: [];
+btn.classList.toggle('hidden', labels.length === 0);
+if (labels.length > 0) {
+btn.innerHTML = `<i class="bi bi-plus-circle me-1"></i>누락 섹션 등록 (${labels.join(', ')})`;
+}
 }
 
 // 1. 섹션 목록 불러오기
@@ -4477,124 +4594,116 @@ renderSectionSeedHint('', true);
 
 if (!data || data.length === 0) {
 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3">섹션 정보가 없습니다.</td></tr>';
-renderSectionSeedButton(true);
-renderSectionSeedHint('site_sections가 비어 있어 game-hall을 포함한 섹션을 표시할 수 없습니다. 먼저 game-hall 섹션 등록을 시도하세요.', true);
+renderSectionSeedButton(REQUIRED_SITE_SECTIONS);
+renderSectionSeedHint('site_sections가 비어 있어 필수 홈페이지 섹션을 표시할 수 없습니다. 먼저 누락 섹션 등록을 실행하세요.', true);
 return;
 }
 
 const sortedSections = [...data].sort((a, b) => {
-const aOrder = Object.prototype.hasOwnProperty.call(SECTION_VISUAL_ORDER, a.id)
-? SECTION_VISUAL_ORDER[a.id]
-: Number(a.display_order || 9999);
-const bOrder = Object.prototype.hasOwnProperty.call(SECTION_VISUAL_ORDER, b.id)
-? SECTION_VISUAL_ORDER[b.id]
-: Number(b.display_order || 9999);
+const aOrder = getSectionDisplayOrder(a);
+const bOrder = getSectionDisplayOrder(b);
 if (aOrder !== bOrder) return aOrder - bOrder;
 return String(a.id || '').localeCompare(String(b.id || ''));
 });
 
-const hasGameHall = sortedSections.some(sec => sec && sec.id === REQUIRED_SECTION_GAME_HALL.id);
-renderSectionSeedButton(!hasGameHall);
-if (!hasGameHall) {
-renderSectionSeedHint('현재 site_sections에 game-hall이 없어 ON/OFF 스위치가 표시되지 않습니다. 우측 버튼으로 등록하거나 reles SQL을 1회 실행하세요.', true);
+g_siteSections = sortedSections;
+g_sectionDrafts = sortedSections.map((sec) => ({ ...sec, display_order: getSectionDisplayOrder(sec), is_visible: sec.is_visible === true }));
+
+const missingRequiredSections = REQUIRED_SITE_SECTIONS.filter((requiredSec) => (
+!sortedSections.some((sec) => sec && sec.id === requiredSec.id)
+));
+renderSectionSeedButton(missingRequiredSections);
+if (missingRequiredSections.length > 0) {
+const missingIds = missingRequiredSections.map((sec) => sec.id).join(', ');
+renderSectionSeedHint(`현재 site_sections에 ${missingIds} 섹션이 없어 ON/OFF 스위치가 표시되지 않습니다. 우측 버튼으로 등록해 주세요.`, true);
+}
+renderSectionRows();
 }
 
-sortedSections.forEach(sec => {
-// 스위치가 켜져야 하는지 꺼져야 하는지 확인
-const checkedAttr = sec.is_visible ? 'checked' : '';
-
-// 상태 배지 (초록색/회색)
-const statusBadge = sec.is_visible
-? '<span class="badge bg-success">공개중</span>'
-: '<span class="badge bg-secondary">숨김</span>';
-
-// 테이블 행 추가
-tbody.innerHTML += `
-                   <tr>
-                       <td class="align-middle text-center">${sec.display_order}</td>
-                       <td class="align-middle text-start ps-4">
-                           <span class="fw-bold text-dark">${sec.name}</span> <br>
-                           <small class="text-muted" style="font-size:0.85em;">ID: ${sec.id}</small>
-                       </td>
-                       <td class="align-middle text-center">${statusBadge}</td>
-                       <td class="align-middle text-center">
-                           <div class="form-check form-switch d-inline-block">
-                               <input class="form-check-input" type="checkbox" role="switch"
-                                   style="width: 45px; height: 24px; cursor: pointer;"
-                                   ${checkedAttr}
-                                   onchange="toggleSection('${sec.id}', this.checked)">
-                           </div>
-                       </td>
-                   </tr>
-               `;
-});
-}
-
-async function seedGameHallSection() {
+async function seedRequiredSections() {
 renderSectionSeedHint('', true);
-const btn = document.getElementById('btnSeedGameHallSection');
+const btn = document.getElementById('btnSeedRequiredSections');
 if (btn) btn.disabled = true;
 
 try {
-const payload = await withAdminTenantPayload({
-id: REQUIRED_SECTION_GAME_HALL.id,
-name: REQUIRED_SECTION_GAME_HALL.name,
-display_order: REQUIRED_SECTION_GAME_HALL.display_order,
-is_visible: REQUIRED_SECTION_GAME_HALL.is_visible
+for (const section of REQUIRED_SITE_SECTIONS) {
+const { error } = await _supabase.rpc('upsert_site_section_secure', {
+p_id: section.id,
+p_name: section.name,
+p_display_order: section.display_order,
+p_is_visible: section.is_visible
 });
-
-const { error } = await _supabase
-.from('site_sections')
-.upsert(payload, { onConflict: 'coop_id,id' });
-
 if (error) {
-renderSectionSeedHint('자동 등록에 실패했습니다. reles/UPSERT_SITE_SECTION_GAME_HALL_TENANT_2026-03-14.sql 을 1회 실행해 주세요.', true);
-myAlert('game-hall 섹션 자동 등록 실패: ' + error.message, 'warning');
+renderSectionSeedHint('자동 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.', true);
+myAlert('누락 섹션 자동 등록 실패: ' + error.message, 'warning');
 return;
 }
+}
 
-renderSectionSeedHint('game-hall 섹션이 등록되었습니다. 이제 ON/OFF 스위치를 사용할 수 있습니다.', false);
+renderSectionSeedHint('누락된 홈페이지 섹션이 등록되었습니다. 이제 ON/OFF 스위치를 사용할 수 있습니다.', false);
 await fetchSections();
 } catch (e) {
-renderSectionSeedHint('자동 등록에 실패했습니다. reles/UPSERT_SITE_SECTION_GAME_HALL_TENANT_2026-03-14.sql 을 1회 실행해 주세요.', true);
-myAlert('game-hall 섹션 등록 중 오류가 발생했습니다.', 'warning');
+renderSectionSeedHint('자동 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.', true);
+myAlert('누락 섹션 등록 중 오류가 발생했습니다.', 'warning');
 } finally {
 if (btn) btn.disabled = false;
 }
 }
 
-// 2. 스위치 변경 시 DB 즉시 저장
-// 2. 스위치 변경 (수정됨: RPC 사용으로 권한 문제 해결)
-async function toggleSection(id, isVisible) {
-let { error } = await _supabase.rpc('update_section_visible_secure', {
-p_id: id,
-p_visible: isVisible
-});
+async function moveSectionOrder(id, direction) {
+const currentSections = getSortedSectionDrafts();
+const fromIndex = currentSections.findIndex((section) => section && section.id === id);
+const toIndex = fromIndex + Number(direction || 0);
+if (fromIndex < 0 || toIndex < 0 || toIndex >= currentSections.length) return;
 
-if (error && (error.code === 'PGRST202' || String(error.message || '').includes('update_section_visible_secure'))) {
-const legacy = await _supabase.rpc('update_section_visible', {
-p_id: id,
-p_visible: isVisible
-});
-error = legacy.error || null;
+const target = currentSections[toIndex];
+if (!target?.id) return;
+
+const current = currentSections[fromIndex];
+const sourceDraft = g_sectionDrafts.find((section) => section.id === current.id);
+const targetDraft = g_sectionDrafts.find((section) => section.id === target.id);
+if (!sourceDraft || !targetDraft) return;
+
+const sourceOrder = getSectionDisplayOrder(sourceDraft);
+sourceDraft.display_order = getSectionDisplayOrder(targetDraft);
+targetDraft.display_order = sourceOrder;
+renderSectionRows();
 }
 
+function toggleSection(id, isVisible) {
+const target = g_sectionDrafts.find((section) => section && section.id === id);
+if (!target) return;
+target.is_visible = !!isVisible;
+renderSectionRows();
+}
+
+async function saveSectionChanges() {
+const btn = document.getElementById('btnSaveSectionChanges');
+if (btn) btn.disabled = true;
+
+try {
+const drafts = getSortedSectionDrafts();
+for (const section of drafts) {
+const { error } = await _supabase.rpc('upsert_site_section_secure', {
+p_id: section.id,
+p_name: section.name,
+p_display_order: getSectionDisplayOrder(section),
+p_is_visible: section.is_visible === true
+});
 if (error) {
-const msg = String(error.message || '');
-if (msg.includes('관리자') || msg.includes('permission') || msg.includes('권한')) {
-myAlert(
-'섹션 변경 권한이 거부되었습니다.\\n' +
-'현재 로그인 계정이 관리자 화면 접근 권한(get_my_role)과\\n' +
-'사이트 섹션 변경 권한(update_section_visible)이 서로 다르게 판정되고 있을 수 있습니다.\\n\\n' +
-'reles/FIX_SITE_SECTION_ORDER_AND_TOGGLE_AUTH_2026-02-12.sql 을 적용한 뒤 다시 시도해 주세요.',
-'warning'
-);
-} else {
-myAlert('변경 실패: ' + msg, 'error');
+myAlert('섹션 저장 실패: ' + String(error.message || error.code || '알 수 없는 오류'), 'warning');
+updateSectionSaveButton();
+return;
 }
-fetchSections();
-} else {
-fetchSections();
+}
+
+renderSectionSeedHint('섹션 변경사항이 저장되었습니다.', false);
+await fetchSections();
+} catch (e) {
+myAlert('섹션 저장 중 오류가 발생했습니다.', 'warning');
+updateSectionSaveButton();
+} finally {
+if (btn) btn.disabled = false;
 }
 }
 // 연혁 삭제 함수
