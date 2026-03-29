@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.8 -->
+<!-- Version: v1.0.9 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.8 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.9 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -44,12 +44,25 @@
             return CoopRouteGuard.normalizeDestination(raw, { fallback: ERP_INDEX_URL });
         }
 
-        function getDest() {
+        function pickErpDestCandidate() {
             const params = new URLSearchParams(window.location.search);
-            const raw = params.get('next')
-                || localStorage.getItem(ERP_AUTH_DEST_KEY)
-                || localStorage.getItem(LEGACY_AUTH_DEST_KEY);
-            return normalizeDest(raw);
+            const candidates = [
+                params.get('next'),
+                localStorage.getItem(ERP_AUTH_DEST_KEY),
+                localStorage.getItem(LEGACY_AUTH_DEST_KEY)
+            ].map((value) => String(value || '').trim()).filter(Boolean);
+
+            return candidates.find((candidate) => {
+                try {
+                    return CoopRouteGuard.isErpDestination(candidate, { fallback: ERP_INDEX_URL });
+                } catch (_) {
+                    return false;
+                }
+            }) || '';
+        }
+
+        function getDest() {
+            return normalizeDest(pickErpDestCandidate());
         }
 
         async function syncPhone(user) {

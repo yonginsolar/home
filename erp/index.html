@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.32 -->
+<!-- Version: v1.0.33 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.32 | index.html');</script>
+  <script>console.log('[Version] v1.0.33 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -271,7 +271,6 @@
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const ERP_BASE_URL = new URL('./', window.location.href);
 const ERP_ROUTE_ORIGINS = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : {
     currentOrigin: window.location.origin,
     publicOrigin: window.location.origin,
@@ -282,6 +281,7 @@ const ERP_ROUTE_ORIGINS = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigin
 const ERP_PUBLIC_BASE_URL = String(ERP_ROUTE_ORIGINS.publicOrigin || window.location.origin).replace(/\/+$/, '');
 const ERP_RUNTIME_BASE_URL = String(ERP_ROUTE_ORIGINS.erpBaseUrl || new URL('/erp/', `${window.location.origin}/`).href).replace(/\/+$/, '');
 const ERP_SOCIAL_AUTH_CALLBACK_URL = new URL('auth_callback.html', `${ERP_RUNTIME_BASE_URL}/`).href;
+const ERP_INDEX_URL = new URL('index.html', `${ERP_RUNTIME_BASE_URL}/`).href;
 const ERP_AUTH_DEST_KEY = 'erp_auth_destination';
 const SUPABASE_PROJECT_REF = 'ifdqlwxgqgsvnawmhlfc';
 const ERP_SESSION_EXPIRED_NOTICE_KEY = 'erp_session_expired_notice_v1';
@@ -324,6 +324,17 @@ function buildSocialCallbackUrl(extraParams = {}) {
         callbackUrl.searchParams.set(key, String(value));
     });
     return callbackUrl.href;
+}
+
+function normalizeErpAuthDestination(raw) {
+    if (window.CoopRouteGuard?.normalizeDestination) {
+        return CoopRouteGuard.normalizeDestination(raw, { fallback: ERP_INDEX_URL });
+    }
+    return String(raw || '').trim() || ERP_INDEX_URL;
+}
+
+function getCanonicalErpCurrentUrl() {
+    return normalizeErpAuthDestination(window.location.href);
 }
 
 function getMinutesRouteTarget(routeKey) {
@@ -496,7 +507,7 @@ function translateSocialLinkError(providerLabel, errorMsg) {
 async function launchNaverLogin() {
     if (naverLoginInFlight) return;
     naverLoginInFlight = true;
-    const nextTarget = new URL('index.html', ERP_BASE_URL).href;
+    const nextTarget = ERP_INDEX_URL;
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
     localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
 
@@ -538,7 +549,7 @@ async function startKakaoLinking() {
             return;
         }
 
-        const nextTarget = window.location.href;
+        const nextTarget = getCanonicalErpCurrentUrl();
         localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
         const redirectUrl = buildSocialCallbackUrl({
             linking: 'true',
@@ -589,7 +600,7 @@ async function startNaverLinking() {
             return;
         }
 
-        const nextTarget = window.location.href;
+        const nextTarget = getCanonicalErpCurrentUrl();
         localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
         const redirectUrl = buildSocialCallbackUrl({
             linking: 'true',
@@ -1713,7 +1724,7 @@ async function verifyEmailOtp() {
 async function startKakaoLogin() {
     if (kakaoLoginInFlight) return;
     kakaoLoginInFlight = true;
-    const nextTarget = new URL('index.html', ERP_BASE_URL).href;
+    const nextTarget = ERP_INDEX_URL;
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
     localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
 
