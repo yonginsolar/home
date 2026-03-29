@@ -1,6 +1,6 @@
 /*
-Version: v1.0.2
-Change: Canonicalize ERP runtime URLs to /erp/... while still accepting erp.<domain> aliases.
+Version: v1.0.3
+Change: Preserve the currently served host for ERP app URLs so public-host /erp deployments do not drift to a synthesized bare domain.
 */
 (function attachCoopRouteGuard(global) {
   'use strict';
@@ -20,6 +20,7 @@ Change: Canonicalize ERP runtime URLs to /erp/... while still accepting erp.<dom
     const loc = locationLike || global.location;
     const protocol = loc.protocol || 'https:';
     const hostname = String(loc.hostname || '').trim();
+    const pathname = String(loc.pathname || '').trim();
     const port = loc.port ? `:${loc.port}` : '';
     const origins = new Set([loc.origin]);
 
@@ -42,7 +43,12 @@ Change: Canonicalize ERP runtime URLs to /erp/... while still accepting erp.<dom
     const publicOrigin = `${protocol}//www.${baseHostname}${port}`;
     const erpOrigin = `${protocol}//erp.${baseHostname}${port}`;
     const bareOrigin = `${protocol}//${baseHostname}${port}`;
-    const erpBaseUrl = new URL('/erp/', `${bareOrigin}/`).href;
+    const isErpHost = /^erp\./i.test(hostname);
+    const currentServesErpPath = pathname === '/erp' || pathname === '/erp/' || pathname.startsWith('/erp/');
+    let erpBaseUrl = new URL('/erp/', `${loc.origin}/`).href;
+    if (isErpHost && !currentServesErpPath) {
+      erpBaseUrl = new URL('/', `${loc.origin}/`).href;
+    }
 
     origins.add(publicOrigin);
     origins.add(erpOrigin);
