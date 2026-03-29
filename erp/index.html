@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.33 -->
+<!-- Version: v1.0.34 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.33 | index.html');</script>
+  <script>console.log('[Version] v1.0.34 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -337,6 +337,19 @@ function getCanonicalErpCurrentUrl() {
     return normalizeErpAuthDestination(window.location.href);
 }
 
+function getRequestedErpNextTarget() {
+    const params = new URLSearchParams(window.location.search);
+    const requested = String(params.get('next') || '').trim();
+    if (requested && window.CoopRouteGuard?.isErpDestination) {
+        try {
+            if (CoopRouteGuard.isErpDestination(requested, { fallback: ERP_INDEX_URL })) {
+                return normalizeErpAuthDestination(requested);
+            }
+        } catch (_) {}
+    }
+    return ERP_INDEX_URL;
+}
+
 function getMinutesRouteTarget(routeKey) {
     const safeKey = String(routeKey || '').trim();
     const target = MINUTES_ROUTE_TARGETS[safeKey];
@@ -507,7 +520,7 @@ function translateSocialLinkError(providerLabel, errorMsg) {
 async function launchNaverLogin() {
     if (naverLoginInFlight) return;
     naverLoginInFlight = true;
-    const nextTarget = ERP_INDEX_URL;
+    const nextTarget = getRequestedErpNextTarget();
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
     localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
 
@@ -1713,6 +1726,11 @@ async function verifyEmailOtp() {
         sessionStorage.removeItem(ERP_SESSION_EXPIRED_NOTICE_KEY);
         showScreen('loadingScreen');
         await loadUserInfo(user);
+        const nextTarget = getRequestedErpNextTarget();
+        const currentUrl = getCanonicalErpCurrentUrl();
+        if (nextTarget && nextTarget !== ERP_INDEX_URL && nextTarget !== currentUrl) {
+            window.location.replace(nextTarget);
+        }
     } catch (error) {
         showAlert('인증 실패: ' + (error?.message || error));
     } finally {
@@ -1724,7 +1742,7 @@ async function verifyEmailOtp() {
 async function startKakaoLogin() {
     if (kakaoLoginInFlight) return;
     kakaoLoginInFlight = true;
-    const nextTarget = ERP_INDEX_URL;
+    const nextTarget = getRequestedErpNextTarget();
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
     localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
 
