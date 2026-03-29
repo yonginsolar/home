@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.10 -->
+<!-- Version: v1.0.12 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.10 | officials_signature_admin.html');</script>
+  <script>console.log('[Version] v1.0.12 | officials_signature_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -325,8 +325,16 @@
       el.textContent = '';
     }
 
-    function escapeHtmlAttribute(value) {
-      return escapeHtml(value).replace(/`/g, '&#96;');
+    function safeUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      try {
+        const url = new URL(raw, window.location.origin);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+        return url.href;
+      } catch (_) {
+        return '';
+      }
     }
 
     function formatOfficialSignatureTelegramLinkedAt(value) {
@@ -749,8 +757,17 @@
       const bodyEl = document.getElementById('sealPreviewBody');
       if (titleEl) titleEl.textContent = `${group.display_name || group.member_id || '임원'} 서명 이미지`;
       if (metaEl) metaEl.textContent = `${Array.from(group.roles || []).join(', ') || '-'} · ${Array.from(group.categories || []).map(categoryLabel).join('/') || '임원'}`;
+      const safeSignedUrl = safeUrl(data.signedUrl);
+      if (!safeSignedUrl) {
+        showAlert('미리보기 주소가 올바르지 않습니다.', 'danger');
+        return;
+      }
       if (bodyEl) {
-        bodyEl.innerHTML = `<img src="${escapeHtmlAttribute(data.signedUrl)}" alt="${escapeHtmlAttribute(group.display_name || '서명 이미지')}">`;
+        bodyEl.textContent = '';
+        const img = document.createElement('img');
+        img.src = safeSignedUrl;
+        img.alt = String(group.display_name || '서명 이미지');
+        bodyEl.appendChild(img);
       }
       sealPreviewModal.show();
     }

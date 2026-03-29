@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.28 -->
+<!-- Version: v1.0.32 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.28 | index.html');</script>
+  <script>console.log('[Version] v1.0.32 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -10,6 +10,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/shared/route_guard.js?v=20260328-1"></script>
   
   <style>
     body { 
@@ -271,7 +272,17 @@ const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const ERP_BASE_URL = new URL('./', window.location.href);
-const ERP_SOCIAL_AUTH_CALLBACK_URL = 'https://www.yonginsolar.kr/erp/auth_callback.html';
+const ERP_ROUTE_ORIGINS = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : {
+    currentOrigin: window.location.origin,
+    publicOrigin: window.location.origin,
+    erpOrigin: window.location.origin,
+    bareOrigin: window.location.origin,
+    erpBaseUrl: new URL('/erp/', `${window.location.origin}/`).href
+};
+const ERP_PUBLIC_BASE_URL = String(ERP_ROUTE_ORIGINS.publicOrigin || window.location.origin).replace(/\/+$/, '');
+const ERP_RUNTIME_BASE_URL = String(ERP_ROUTE_ORIGINS.erpBaseUrl || new URL('/erp/', `${window.location.origin}/`).href).replace(/\/+$/, '');
+const ERP_SOCIAL_AUTH_CALLBACK_URL = new URL('auth_callback.html', `${ERP_RUNTIME_BASE_URL}/`).href;
+const ERP_AUTH_DEST_KEY = 'erp_auth_destination';
 const SUPABASE_PROJECT_REF = 'ifdqlwxgqgsvnawmhlfc';
 const ERP_SESSION_EXPIRED_NOTICE_KEY = 'erp_session_expired_notice_v1';
 const MAGICLINK_RATE_KEY = 'erp_magiclink_rate_v1';
@@ -279,12 +290,12 @@ const MAGICLINK_COOLDOWN_MS = 60 * 1000;
 const MAGICLINK_MIN_PAGE_AGE_MS = 1200;
 const ERP_RETIRED_ACCESS_YEARS = 3;
 const MINUTES_ROUTE_TARGETS = Object.freeze({
-    integrated_admin: 'https://www.yonginsolar.kr/minutes/admin_minutes',
-    minutes_admin: 'https://www.yonginsolar.kr/minutes/minutes_admin',
-    notices_admin: 'https://www.yonginsolar.kr/minutes/notices_admin',
-    materials_admin: 'https://www.yonginsolar.kr/minutes/materials_admin',
-    documents: 'https://www.yonginsolar.kr/minutes/minutes_view',
-    signature: 'https://www.yonginsolar.kr/minutes/minutes_sign'
+    integrated_admin: new URL('/minutes/admin_minutes.html', `${ERP_PUBLIC_BASE_URL}/`).href,
+    minutes_admin: new URL('/minutes/minutes_admin.html', `${ERP_PUBLIC_BASE_URL}/`).href,
+    notices_admin: new URL('/minutes/notices_admin.html', `${ERP_PUBLIC_BASE_URL}/`).href,
+    materials_admin: new URL('/minutes/materials_admin.html', `${ERP_PUBLIC_BASE_URL}/`).href,
+    documents: new URL('/minutes/minutes_view.html', `${ERP_PUBLIC_BASE_URL}/`).href,
+    signature: new URL('/minutes/minutes_sign.html', `${ERP_PUBLIC_BASE_URL}/`).href
 });
 
 let myInfo = null;
@@ -306,15 +317,8 @@ let employeeMatchCandidates = [];
 let employeeMatchActiveUser = null;
 let employeeMatchClaimInFlight = false;
 
-function isLocalSocialCallbackHost() {
-    return /^https?:$/.test(window.location.protocol) &&
-        ['localhost', '127.0.0.1'].includes(window.location.hostname);
-}
-
 function buildSocialCallbackUrl(extraParams = {}) {
-    const callbackUrl = isLocalSocialCallbackHost()
-        ? new URL('/auth_callback.html', window.location.origin)
-        : new URL(ERP_SOCIAL_AUTH_CALLBACK_URL);
+    const callbackUrl = new URL(ERP_SOCIAL_AUTH_CALLBACK_URL);
     Object.entries(extraParams || {}).forEach(([key, value]) => {
         if (value === null || value === undefined || value === '') return;
         callbackUrl.searchParams.set(key, String(value));
@@ -494,7 +498,7 @@ async function launchNaverLogin() {
     naverLoginInFlight = true;
     const nextTarget = new URL('index.html', ERP_BASE_URL).href;
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
-    localStorage.setItem('auth_destination', nextTarget);
+    localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
 
     try {
         const { error } = await _supabase.auth.signInWithOAuth({
@@ -535,7 +539,7 @@ async function startKakaoLinking() {
         }
 
         const nextTarget = window.location.href;
-        localStorage.setItem('auth_destination', nextTarget);
+        localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
         const redirectUrl = buildSocialCallbackUrl({
             linking: 'true',
             provider: 'kakao',
@@ -586,7 +590,7 @@ async function startNaverLinking() {
         }
 
         const nextTarget = window.location.href;
-        localStorage.setItem('auth_destination', nextTarget);
+        localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
         const redirectUrl = buildSocialCallbackUrl({
             linking: 'true',
             provider: 'naver',
@@ -712,18 +716,20 @@ function renderEmployeeMatchCandidates() {
         btn.className = 'btn btn-outline-primary employee-match-item';
         btn.dataset.empId = candidate.emp_id || '';
 
-        const reasonText = getEmployeeMatchReasonLabels(candidate.match_reasons).join(' / ');
-        const numberText = Number.isFinite(Number(candidate.display_emp_no)) ? `사번 ${candidate.display_emp_no}` : `내부ID ${candidate.emp_id || '-'}`;
-        const deptText = [candidate.department, candidate.position].filter(Boolean).join(' / ') || '부서·직급 정보 없음';
-        const contactText = [candidate.email, candidate.phone].filter(Boolean).join(' / ') || '연락처 정보 없음';
+        const reasonText = escapeHtml(getEmployeeMatchReasonLabels(candidate.match_reasons).join(' / '));
+        const numberText = escapeHtml(Number.isFinite(Number(candidate.display_emp_no)) ? `사번 ${candidate.display_emp_no}` : `내부ID ${candidate.emp_id || '-'}`);
+        const deptText = escapeHtml([candidate.department, candidate.position].filter(Boolean).join(' / ') || '부서·직급 정보 없음');
+        const contactText = escapeHtml([candidate.email, candidate.phone].filter(Boolean).join(' / ') || '연락처 정보 없음');
+        const safeEmpName = escapeHtml(candidate.emp_name || '직원');
+        const safeBadgeClass = candidate.claimable ? 'bg-primary' : 'bg-secondary';
         const linkedText = candidate.linked_elsewhere
-            ? `이미 다른 ERP 계정${candidate.linked_auth_email ? `(${candidate.linked_auth_email})` : ''}에 연결됨`
+            ? escapeHtml(`이미 다른 ERP 계정${candidate.linked_auth_email ? `(${candidate.linked_auth_email})` : ''}에 연결됨`)
             : '선택하면 이 직원으로 바로 연결합니다.';
 
         btn.innerHTML = `
             <div class="d-flex justify-content-between align-items-start gap-2">
-              <strong>${candidate.emp_name || '직원'}</strong>
-              <span class="badge ${candidate.claimable ? 'bg-primary' : 'bg-secondary'}">${numberText}</span>
+              <strong>${safeEmpName}</strong>
+              <span class="badge ${safeBadgeClass}">${numberText}</span>
             </div>
             <div class="employee-match-meta mt-1">${deptText}</div>
             <div class="employee-match-meta mt-1">${contactText}</div>
@@ -1653,8 +1659,13 @@ async function sendMagicLink() {
         recordMagicLinkAttempt(email, false);
         showAlert("전송 실패: " + (error?.message || error));
     } finally {
-        btn.disabled = false;
-        btn.innerText = "📧 인증코드 받기";
+        const cooldownUntil = Number(readMagicLinkState()?.cooldown_until || 0);
+        if (cooldownUntil > Date.now()) {
+            applyMagicLinkCooldown();
+        } else {
+            btn.disabled = false;
+            btn.innerText = "📧 인증코드 받기";
+        }
     }
 } // End of sendMagicLink
 
@@ -1704,7 +1715,7 @@ async function startKakaoLogin() {
     kakaoLoginInFlight = true;
     const nextTarget = new URL('index.html', ERP_BASE_URL).href;
     const redirectUrl = buildSocialCallbackUrl({ next: nextTarget });
-    localStorage.setItem('auth_destination', nextTarget);
+    localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
 
     try {
         const { error } = await _supabase.auth.signInWithOAuth({ 

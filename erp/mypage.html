@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.40 | Change: 2026-03-26 - Refresh print service cache for seal center alignment with the last chairman character. -->
+<!-- Version: v1.0.43 | Change: 2026-03-28 - Scope emergency contacts and leave adjustment reads/writes in mypage by coop_id. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.40 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.43 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -593,7 +593,6 @@ leave_snapshot:!!features.leave_snapshot,
 business_trip_snapshot:!!features.business_trip_snapshot
 }));
 }catch(_){
-void 0;
 }
 }
 async function fetchMypageSchemaFeaturesFromOpenApi(){
@@ -658,7 +657,6 @@ saved_at:new Date().toISOString(),
 data:{...(infoMap||{})}
 }));
 }catch(_){
-void 0;
 }
 }
 function trimMypageCompanyValue(value){
@@ -1201,8 +1199,21 @@ return;
 }
 await refreshMypageCompanyInfo(coopId);
 }
+function getMypageCoopId(){
+return String(myInfo?.coop_id||'').trim();
+}
+function scopeMypageEmployee(query){
+const coopId=getMypageCoopId();
+return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
+}
+function withMypageTenantPayload(payload){
+if(!payload||typeof payload!=='object'||Array.isArray(payload)) return payload;
+const coopId=getMypageCoopId();
+if(!coopId) return payload;
+return { ...payload, coop_id: coopId };
+}
 async function loadProfile() {
-    const { data } = await _supabase.from('ref_employees').select('*').eq('emp_id', myInfo.emp_id).single();
+    const { data } = await scopeMypageEmployee(_supabase.from('ref_employees').select('*')).eq('emp_id', myInfo.emp_id).single();
     if (data) {
         myInfo = data;
         localStorage.setItem('erp_user', JSON.stringify(data));
@@ -1286,7 +1297,7 @@ async function updateInfo() {
             account_number: document.getElementById("myAccount").value
         };
 
-        const { error } = await _supabase.from('ref_employees').update(u).eq('emp_id', myInfo.emp_id);
+        const { error } = await scopeMypageEmployee(_supabase.from('ref_employees').update(u)).eq('emp_id', myInfo.emp_id);
         
         if (error) {
             showAlert("저장 실패: " + error.message);
@@ -1294,7 +1305,7 @@ async function updateInfo() {
         }
 
         // 비상연락망 저장 (기존 유지)
-        await _supabase.from('ref_emergency_contacts').delete().eq('emp_id', myInfo.emp_id);
+        await scopeMypageEmployee(_supabase.from('ref_emergency_contacts')).delete().eq('emp_id', myInfo.emp_id);
         if (tempEmergencyList.length > 0) {
             const i = tempEmergencyList.map(x => ({
                 emp_id: myInfo.emp_id,
@@ -1302,14 +1313,14 @@ async function updateInfo() {
                 relation: x.relation,
                 phone: x.phone
             }));
-            await _supabase.from('ref_emergency_contacts').insert(i);
+            await _supabase.from('ref_emergency_contacts').insert(i.map(withMypageTenantPayload));
         }
 
         showAlert("저장되었습니다.");
         toggleEditMode(false);
     });
 }
-async function loadEmergencyList(){const{data}=await _supabase.from('ref_emergency_contacts').select('*').eq('emp_id',myInfo.emp_id).order('id');tempEmergencyList=data||[];renderEmergencyTable()}
+async function loadEmergencyList(){const{data}=await scopeMypageEmployee(_supabase.from('ref_emergency_contacts').select('*')).eq('emp_id',myInfo.emp_id).order('id');tempEmergencyList=data||[];renderEmergencyTable()}
 function renderEmergencyTable(){
 const b=document.getElementById("emergencyListBody");
 const isEditing=!document.getElementById("btnSaveInfo").classList.contains('hidden');
@@ -1560,6 +1571,21 @@ return chunks.join('\r\n');
 function appendMypageIcsEvent(lines,eventLines){
 eventLines.forEach(line=>lines.push(foldMypageIcsLine(line)));
 }
+function getMypageIcsUidDomain(){
+try{
+const routeOrigins=window.CoopRouteGuard?CoopRouteGuard.buildSiteOrigins(window.location):null;
+const candidates=[routeOrigins?.erpOrigin,window.location?.origin];
+for(const candidate of candidates){
+const safe=String(candidate||'').trim();
+if(!safe) continue;
+try{
+const url=new URL(safe);
+if(url.hostname) return url.hostname;
+}catch(_){}
+}
+}catch(_){}
+return 'erp.local';
+}
 function buildMypageIcsEventLines(options){
 const lines=['BEGIN:VEVENT',`UID:${escapeMypageIcsText(options.uid)}`,`DTSTAMP:${formatMypageIcsUtcDateTime(new Date())}`,`SUMMARY:${escapeMypageIcsText(options.title)}`];
 if(options.description) lines.push(`DESCRIPTION:${escapeMypageIcsText(options.description)}`);
@@ -1583,25 +1609,26 @@ return lines;
 }
 function buildMypageCalendarIcsContent(source,scope='google_ics'){
 const companyName=String(companyInfo.company_name||companyInfo.orgName||'협동조합').trim()||'협동조합';
+const uidDomain=getMypageIcsUidDomain();
 const lines=['BEGIN:VCALENDAR','VERSION:2.0','CALSCALE:GREGORIAN',`PRODID:-//${escapeMypageIcsText(companyName)}//ERP Calendar//KO`,`X-WR-CALNAME:${escapeMypageIcsText(`${companyName} ERP 일정`)}`,'X-WR-TIMEZONE:Asia/Seoul'];
 if(shouldIncludeMypageCalendarSource(scope,'leave')) source.leaveDocs.forEach(doc=>{
 const event=buildLeaveCalendarEvent(doc);
 if(!event?.start) return;
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`leave-${doc.id}@erp.yonginsolar.kr`,title:event.title,description:event?.extendedProps?.origin?.cal_memo||'',start:event.start,end:event.end||'',allDay:true}));
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`leave-${doc.id}@${uidDomain}`,title:event.title,description:event?.extendedProps?.origin?.cal_memo||'',start:event.start,end:event.end||'',allDay:true}));
 });
 if(shouldIncludeMypageCalendarSource(scope,'business_trip')) source.businessTripDocs.forEach(doc=>{
 const event=buildBusinessTripCalendarEvent(doc);
 if(!event?.start||!event?.end) return;
 const snapshot=getMypageBusinessTripSnapshotMeta(doc)||{};
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`business-trip-${doc.id}@erp.yonginsolar.kr`,title:event.title,description:event?.extendedProps?.origin?.cal_memo||'',location:snapshot.location||'',start:event.start,end:event.end,allDay:false}));
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`business-trip-${doc.id}@${uidDomain}`,title:event.title,description:event?.extendedProps?.origin?.cal_memo||'',location:snapshot.location||'',start:event.start,end:event.end,allDay:false}));
 });
 source.employeeRows.forEach(row=>{
 const deptLabel=row.department?`(${row.department})`:'';
 if(shouldIncludeMypageCalendarSource(scope,'birthdays')&&row.birth_date){
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`birthday-${row.emp_id}@erp.yonginsolar.kr`,title:`${row.emp_name}${deptLabel} 생일 🎂`,description:`${row.emp_name}님의 생일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n부서: ${row.department||'-'}`,start:`${new Date().getFullYear()}-${String(row.birth_date).slice(5,10)}`,allDay:true,rrule:'FREQ=YEARLY'}));
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`birthday-${row.emp_id}@${uidDomain}`,title:`${row.emp_name}${deptLabel} 생일 🎂`,description:`${row.emp_name}님의 생일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n부서: ${row.department||'-'}`,start:`${new Date().getFullYear()}-${String(row.birth_date).slice(5,10)}`,allDay:true,rrule:'FREQ=YEARLY'}));
 }
 if(shouldIncludeMypageCalendarSource(scope,'hire_anniversaries')&&row.hire_date){
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`hire-anniversary-${row.emp_id}@erp.yonginsolar.kr`,title:`${row.emp_name}${deptLabel} 입사기념일 🎉`,description:`${row.emp_name}님의 입사기념일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n입사일: ${row.hire_date}`,start:row.hire_date,allDay:true,rrule:'FREQ=YEARLY'}));
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`hire-anniversary-${row.emp_id}@${uidDomain}`,title:`${row.emp_name}${deptLabel} 입사기념일 🎉`,description:`${row.emp_name}님의 입사기념일입니다.\n사번: ${getMypageEmployeeDisplayNoValue(row)}\n입사일: ${row.hire_date}`,start:row.hire_date,allDay:true,rrule:'FREQ=YEARLY'}));
 }
 });
 source.calendarRows.forEach(row=>{
@@ -1624,10 +1651,10 @@ if(day) rrule=`FREQ=MONTHLY;BYMONTHDAY=${day}`;
 }
 const startValue=isAllDay?(startParts.date||String(row.start_date||'').slice(0,10)):(row.start_date||'');
 const endValue=isAllDay?(endParts.date||startParts.date||''):(row.end_date||'');
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`manual-calendar-${row.id}@erp.yonginsolar.kr`,title:row.title||'일정',description:row.cal_memo||'',start:startValue,end:endValue,allDay:isAllDay,rrule}));
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`manual-calendar-${row.id}@${uidDomain}`,title:row.title||'일정',description:row.cal_memo||'',start:startValue,end:endValue,allDay:isAllDay,rrule}));
 });
 if(shouldIncludeMypageCalendarSource(scope,'company_anniversary')&&companyInfo.estDate){
-appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`company-anniversary-${String(myInfo?.coop_id||'global')}@erp.yonginsolar.kr`,title:'🎉 창립기념일',description:`우리 회사의 창립기념일입니다.\n설립일: ${companyInfo.estDate}`,start:companyInfo.estDate,allDay:true,rrule:'FREQ=YEARLY'}));
+appendMypageIcsEvent(lines,buildMypageIcsEventLines({uid:`company-anniversary-${String(myInfo?.coop_id||'global')}@${uidDomain}`,title:'🎉 창립기념일',description:`우리 회사의 창립기념일입니다.\n설립일: ${companyInfo.estDate}`,start:companyInfo.estDate,allDay:true,rrule:'FREQ=YEARLY'}));
 }
 lines.push('END:VCALENDAR');
 return `${lines.join('\r\n')}\r\n`;
@@ -1708,8 +1735,8 @@ async function showLeaveDetail(){
 const el=document.getElementById('leaveDetailModal'),bd=el.querySelector('.modal-body');if(!el)return;
 bd.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';leaveDetailModal.show();
 try{
-const{data:em}=await _supabase.from('ref_employees').select('hire_date').eq('emp_id',myInfo.emp_id).single();
-const{data:al}=await _supabase.from('hr_leave_adj').select('*').eq('emp_id',myInfo.emp_id).order('created_at',{ascending:false});
+const{data:em}=await scopeMypageEmployee(_supabase.from('ref_employees').select('hire_date')).eq('emp_id',myInfo.emp_id).single();
+const{data:al}=await scopeMypageEmployee(_supabase.from('hr_leave_adj').select('*')).eq('emp_id',myInfo.emp_id).order('created_at',{ascending:false});
 let leaveDocs=[],summary={reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
 if(window.LeaveLedger&&typeof window.LeaveLedger.fetchLeaveApprovals==='function'){
 leaveDocs=await window.LeaveLedger.fetchLeaveApprovals(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,statuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료']});

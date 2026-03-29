@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.6
-Change: Add shared boot guard and explicit retry action for signup tenant bootstrap failures.
+Version: v1.0.14
+Change: Restore localhost social signup by using an exact local auth callback URL without next= query params.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.6 | signup.html');</script>
+  <script>console.log('[Version] v1.0.14 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -21,6 +21,7 @@ Change: Add shared boot guard and explicit retry action for signup tenant bootst
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
+<script src="shared/route_guard.js?v=20260328-2"></script>
 <style>
 /* [CSS 추가] 가입 완료 모달 스타일 */
 .center-modal {
@@ -103,7 +104,7 @@ gtag('config', 'G-TR217L7JN9');
 <div id="step-gate" class="text-center pt-5">
 <span class="step-emoji">☀️</span>
 <h2 style="font-family:'GmarketSans'; font-weight:700;">함께 지구를 구해요!</h2>
-<p id="gateWelcomeText" class="text-muted mb-5">용인모두의햇빛협동조합 가입을 환영합니다 🌱</p>
+<p id="gateWelcomeText" class="text-muted mb-5">조합 가입을 환영합니다 🌱</p>
 
 <div class="d-grid gap-3">
 <div class="gate-card" onclick="startKakaoSignup()">
@@ -149,7 +150,7 @@ gtag('config', 'G-TR217L7JN9');
 
 <div id="step-form" style="display:none;">
 <div class="text-center mb-4">
-<h4 id="signupTitle" class="form-title">용인모두의햇빛협동조합<br>조합원 가입 신청서</h4>
+<h4 id="signupTitle" class="form-title">조합원 가입 신청서</h4>
 </div>
 
 <form id="joinForm" onsubmit="handleFormSubmit(event, this)" novalidate>
@@ -313,10 +314,10 @@ oninput="clearFieldWarning(this)">
 <div style="font-size:50px;">🎉</div>
 <h3 class="fw-bold mt-3">가입 신청 완료</h3>
 <p id="successModalCopy" class="text-muted small">신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.</p>
-<div id="successAccountBox" class="p-3 bg-light rounded-3 text-start small mb-3">
+<div id="successAccountBox" class="p-3 bg-light rounded-3 text-start small mb-3" style="display:none;">
 🏦 <b>신협 131-022-855516</b><br>(예금주: 용인모두의햇빛협동조합)
 </div>
-<div id="successKakaoBox" class="kakao-box"><a id="successKakaoLink" href="https://invite.kakao.com/tc/cLtR3LGLQX" target="_blank" class="kakao-link-btn">📢 카카오톡 팀채팅방 참여하기</a></div>
+<div id="successKakaoBox" class="kakao-box" style="display:none;"><a id="successKakaoLink" href="https://invite.kakao.com/tc/cLtR3LGLQX" target="_blank" class="kakao-link-btn">📢 카카오톡 팀채팅방 참여하기</a></div>
 <button class="btn btn-success w-100" onclick="location.href='index.html'">홈으로 이동</button>
 </div>
 </div>
@@ -363,6 +364,7 @@ const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let joinSubmitInFlight = false;
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
+const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
 let signupTenant = null;
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
 const coopCode = getSignupCoopCodeFromLocation();
@@ -387,7 +389,7 @@ const queryCode = (params.get('coop') || '').trim().toLowerCase();
 const host = (window.location.hostname || '').trim().toLowerCase();
 const isLocal = window.location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1';
 
-if (isLocal) return queryCode;
+if (isLocal) return queryCode || DEFAULT_SIGNUP_COOP_CODE;
 
 const normalizedHost = host.startsWith('www.') ? host.slice(4) : host;
 if (normalizedHost === 'yonginsolar.kr') return DEFAULT_SIGNUP_COOP_CODE;
@@ -397,11 +399,37 @@ if (!firstLabel || firstLabel === 'www') return '';
 return firstLabel;
 }
 
+function isLocalSignupServerRuntime() {
+const host = String(window.location.hostname || '').trim().toLowerCase();
+return (window.location.protocol === 'http:' || window.location.protocol === 'https:')
+&& (host === 'localhost' || host === '127.0.0.1');
+}
+
+function isFileSignupRuntime() {
+return window.location.protocol === 'file:';
+}
+
 function applyTenantTerms() {
 if (!signupTenant?.coop_name) return;
 Object.keys(termsData).forEach((key) => {
 termsData[key].content = termsData[key].content.replaceAll('용인모두의햇빛협동조합', signupTenant.coop_name);
 });
+}
+
+function buildSignupAuthCallbackUrl(nextTarget, extraParams = {}) {
+const params = Object.assign({}, extraParams || {});
+if (!isLocalSignupServerRuntime() && nextTarget) {
+params.next = nextTarget;
+}
+if (window.CoopRouteGuard?.buildSiblingPageUrl) {
+return window.CoopRouteGuard.buildSiblingPageUrl('auth_callback.html', params);
+}
+const url = new URL('auth_callback.html', window.location.href);
+Object.entries(params).forEach(([key, value]) => {
+if (value === null || value === undefined || value === '') return;
+url.searchParams.set(key, String(value));
+});
+return url.toString();
 }
 
 function applySignupTenantBranding() {
@@ -414,7 +442,12 @@ const gateWelcomeText = document.getElementById('gateWelcomeText');
 if (gateWelcomeText) gateWelcomeText.textContent = `${coopName} 가입을 환영합니다 🌱`;
 
 const signupTitle = document.getElementById('signupTitle');
-if (signupTitle) signupTitle.innerHTML = `${coopName}<br>조합원 가입 신청서`;
+if (signupTitle) {
+signupTitle.textContent = '';
+signupTitle.appendChild(document.createTextNode(coopName));
+signupTitle.appendChild(document.createElement('br'));
+signupTitle.appendChild(document.createTextNode('조합원 가입 신청서'));
+}
 
 const successModalCopy = document.getElementById('successModalCopy');
 const successAccountBox = document.getElementById('successAccountBox');
@@ -537,8 +570,6 @@ async function handleManualSession() {
     const refreshToken = params.get('rt');
 
     if (accessToken && refreshToken) {
-        void 0;
-        
         // 1. 수동으로 세션 주입 (로그인 강제 실행)
         const { data, error } = await _supabase.auth.setSession({
             access_token: accessToken,
@@ -546,8 +577,6 @@ async function handleManualSession() {
         });
 
         if (!error && data.session) {
-            void 0;
-            
             // 2. 주소창에서 토큰 흔적 지우기 (깔끔하게)
             const coopCode = new URLSearchParams(window.location.search).get('coop');
             const cleanUrl = coopCode
@@ -557,7 +586,7 @@ async function handleManualSession() {
             
             // 3. (중요) 기존 로직 트리거
             // onAuthStateChange가 돌겠지만, 확실하게 하기 위해 회원 체크 실행
-            checkExistingMember(data.session);
+            await checkExistingMember(data.session);
         }
     }
 }
@@ -694,7 +723,7 @@ directInput.style.display = 'none'; directInput.required = false;
 }
 
 // 사업자번호 검증 (원 코드 로직 복구)
-function validateBizNo() {
+async function validateBizNo() {
 var b1 = document.getElementById('biz1').value;
 var b2 = document.getElementById('biz2').value;
 var b3 = document.getElementById('biz3').value;
@@ -711,17 +740,19 @@ remander = (10 - (chkSum % 10)) % 10 ;
 
 if (Math.floor(bizNo.charAt(9)) === remander) {
 // 서버 중복 체크
-_supabase.rpc('check_duplicate_signup', { 
-check_field: 'biz', check_value: b1 + "-" + b2 + "-" + b3, p_coop_code: signupTenant?.coop_code || ''
-}).then(({ data }) => {
-if(data === true) {
+try {
+const exists = await runSignupDuplicateCheck('biz', b1 + "-" + b2 + "-" + b3);
+if(exists === true) {
 setMsg('bizMsg', "❌ 이미 가입된 사업자(고유)번호입니다.", true);
 document.getElementById('orgNo').value = "";
 } else {
 setMsg('bizMsg', "✅ 유효한 사업자(고유)번호입니다.", false);
 document.getElementById('orgNo').value = b1 + "-" + b2 + "-" + b3;
 }
-});
+} catch (error) {
+setMsg('bizMsg', "⚠️ 사업자(고유)번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
+document.getElementById('orgNo').value = "";
+}
 } else { 
 setMsg('bizMsg', "❌ 유효하지 않은 사업자(고유)번호입니다.", true);
 document.getElementById('orgNo').value = ""; 
@@ -847,6 +878,9 @@ btn.innerText = '코드 확인';
 
 // 1. 통합 상태 감지 리스너 (페이지 로드 시점 + 로그인 변동 시점 모두 커버)
 _supabase.auth.onAuthStateChange(async (event, session) => {
+if (event && !['INITIAL_SESSION', 'SIGNED_IN'].includes(event)) {
+return;
+}
 if (session) {
 // 로그인 되어 있으면 -> 회원 명부 확인 (딱 한 번만 실행됨)
 try {
@@ -855,8 +889,8 @@ await ensureSignupTenant();
 openResultModal('가입 대상을 확인할 수 없습니다.', true);
 return;
 }
-checkExistingMember(session); 
-}
+            await checkExistingMember(session); 
+        }
 });
 
 // 2. 윈도우 로드 시에는 UI 초기화만 수행 (DB 조회 제거)
@@ -1073,12 +1107,16 @@ if (socialPhone) fillSignupPhoneInputs(socialPhone);
 async function startKakaoSignup() {
     try {
         await ensureSignupTenant();
+        if (isFileSignupRuntime()) {
+            openResultModal('file:// 환경에서는 카카오 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
+            return;
+        }
 
         // const nextTarget = '/'; // (추천) 가입 후 메인으로 이동
         const nextTarget = window.location.href;
-        const redirectUrl = `${window.location.origin}/auth_callback.html?next=${encodeURIComponent(nextTarget)}`;
+        const redirectUrl = buildSignupAuthCallbackUrl(nextTarget);
 
-        localStorage.setItem('auth_destination', nextTarget);
+        localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
@@ -1105,10 +1143,14 @@ async function startKakaoSignup() {
 async function startNaverSignup() {
     try {
         await ensureSignupTenant();
+        if (isFileSignupRuntime()) {
+            openResultModal('file:// 환경에서는 네이버 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
+            return;
+        }
 
         const nextTarget = window.location.href;
-        const redirectUrl = `${window.location.origin}/auth_callback.html?next=${encodeURIComponent(nextTarget)}`;
-        localStorage.setItem('auth_destination', nextTarget);
+        const redirectUrl = buildSignupAuthCallbackUrl(nextTarget);
+        localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: 'custom:naver',
@@ -1523,9 +1565,6 @@ btn.innerText = '가입 신청하기 ☀️';
   // - 템플릿 검수 중엔 실패할 수 있으니 에러 본문을 최대한 뽑아봅니다.
   // - 필요 없으면 아래 블록 전체를 주석 처리해도 됩니다.
   // ===========================================
-
-  void 0;
-
   try {
     const { data, error } = await _supabase.functions.invoke('send-welcome-kakao', {
       body: {
@@ -1534,10 +1573,6 @@ btn.innerText = '가입 신청하기 ☀️';
         amount: Number(moneyVal)
       }
     });
-
-    void 0;
-    void 0;
-
     // 에러가 있으면 상세 본문까지 최대한 확인
     if (error) {
       console.error('❌ 알림톡 발송 실패:', error);
@@ -1567,10 +1602,6 @@ btn.innerText = '가입 신청하기 ☀️';
       }
 
       console.error('에러 상세:', detail);
-    } else if (data?.success) {
-      void 0;
-    } else {
-      void 0;
     }
   } catch (kakaoError) {
     console.error('❌ 알림톡 발송 중 예외:', kakaoError);
@@ -1610,6 +1641,16 @@ el.innerText = "";
 el.style.display = 'none';
 }
 document.getElementById('btnSubmit').disabled = false;
+}
+
+async function runSignupDuplicateCheck(checkField, checkValue) {
+const { data, error } = await _supabase.rpc('check_duplicate_signup', {
+check_field: checkField,
+check_value: checkValue,
+p_coop_code: signupTenant?.coop_code || ''
+});
+if (error) throw error;
+return data === true;
 }
 
 // [신규] 빨간 테두리 제거 (다시 입력 시 호출)
@@ -1652,19 +1693,17 @@ return;
 const type = document.querySelector('input[name="userType"]:checked').value;
 if (type === '단체') return; // 단체면 패스
 
-// 사업자번호 로직과 똑같이 then() 구조 사용
-_supabase.rpc('check_duplicate_signup', { 
-check_field: 'rrn', 
-check_value: r1 + "-" + r2,
-p_coop_code: signupTenant?.coop_code || ''
-}).then(({ data, error }) => {
-if (data === true) {
+try {
+const exists = await runSignupDuplicateCheck('rrn', r1 + "-" + r2);
+if (exists === true) {
 setMsg('rrnMsg', "❌ 이미 가입된 주민등록번호입니다.", true);
 document.getElementById('rrn2').value = ""; // 입력값 지우기
 } else {
 setMsg('rrnMsg', "✅ 가입 가능한 번호입니다.", false);
 }
-});
+} catch (error) {
+setMsg('rrnMsg', "⚠️ 주민등록번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
+}
 }
 
 async function checkPhoneDuplicateServer() {
@@ -1676,14 +1715,15 @@ const p2 = document.getElementById('p2').value;
 const p3 = document.getElementById('p3').value;
 if(!p1 || !p2 || !p3) return;
 
-const { data } = await _supabase.rpc('check_duplicate_signup', { 
-check_field: 'phone', check_value: p1 + "-" + p2 + "-" + p3, p_coop_code: signupTenant?.coop_code || ''
-});
-
-if (data === true) {
+try {
+const exists = await runSignupDuplicateCheck('phone', p1 + "-" + p2 + "-" + p3);
+if (exists === true) {
 setMsg('phoneMsg', "❌ 이미 가입된 연락처입니다.", true);
 } else {
 setMsg('phoneMsg', "✅ 사용 가능한 연락처입니다.", false);
+}
+} catch (error) {
+setMsg('phoneMsg', "⚠️ 연락처 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
 }
 }
 function validateName() {
@@ -1722,7 +1762,7 @@ return result === arr[12];
 }
 
 // [수정] 법인등록번호 검증 (공식 검사 -> 서버 중복 검사)
-function validateCorpNo() {
+async function validateCorpNo() {
 const c1 = document.getElementById('corp1').value;
 const c2 = document.getElementById('corp2').value;
 const fullCorpNo = c1 + c2;
@@ -1738,22 +1778,22 @@ return; // 공식 틀리면 서버로 보내지도 않고 여기서 끝냄
 }
 
 // 3. 서버 중복 체크 (RPC call) - 공식이 통과된 경우에만 실행
-_supabase.rpc('check_duplicate_signup', { 
-check_field: 'corp_no', 
-check_value: c1 + "-" + c2,
-p_coop_code: signupTenant?.coop_code || ''
-}).then(({ data, error }) => {
-if(data === true) {
+try {
+const exists = await runSignupDuplicateCheck('corp_no', c1 + "-" + c2);
+if(exists === true) {
 setMsg('corpMsg', "❌ 이미 가입된 법인등록번호입니다.", true);
 document.getElementById('finalCorpNo').value = ""; // 저장 못하게 비움
 } else {
 setMsg('corpMsg', "✅ 사용 가능한 법인번호입니다.", false);
 document.getElementById('finalCorpNo').value = c1 + "-" + c2; // 값 저장
 }
-});
+} catch (error) {
+setMsg('corpMsg', "⚠️ 법인등록번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
+document.getElementById('finalCorpNo').value = "";
+}
 }
 // [코드 1] 기존 회원 여부 확인 (이메일 기준)
-async function checkExistingMember(session) {
+const runExistingMemberCheck = BootGuard.createSingleFlightAction(async function checkExistingMemberInternal(session) {
 try {
 await ensureSignupTenant();
 const email = String(session?.user?.email || '').trim();
@@ -1797,8 +1837,12 @@ showApplicationForm(session);
 
 } catch (err) {
 console.error("스크립트 에러:", err);
-showApplicationForm(session);
+openResultModal('기존 가입 여부를 확인하지 못했습니다.\n잠시 후 다시 시도해 주세요.', true);
 }
+});
+
+async function checkExistingMember(session) {
+return runExistingMemberCheck(session);
 }
     // [신규 추가] 실패 모달 닫기 함수
 function closeFailModal() {

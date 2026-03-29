@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: 2026-02-05 - Remove unused isMobile variable.
+Version: v1.0.2
+Change: Replace native clipboard fallback prompt with inline copy-help sheet.
 -->
 <html lang="ko">
 <head>
@@ -42,6 +42,16 @@ Change: 2026-02-05 - Remove unused isMobile variable.
 
         #toast { visibility: hidden; min-width: 250px; background-color: rgba(51, 61, 75, 0.9); color: #fff; text-align: center; border-radius: 50px; padding: 14px 24px; position: fixed; z-index: 99; bottom: 40px; left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity 0.3s; font-size: 15px; font-weight: 500; }
         #toast.show { visibility: visible; opacity: 1; }
+        .copy-help-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: none; align-items: center; justify-content: center; z-index: 120; padding: 20px; }
+        .copy-help-overlay.show { display: flex; }
+        .copy-help-sheet { width: 100%; max-width: 360px; background: #fff; border-radius: 18px; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24); padding: 24px 20px 18px; text-align: left; }
+        .copy-help-sheet h3 { margin: 0 0 10px; font-size: 18px; color: #191f28; }
+        .copy-help-sheet p { margin: 0 0 14px; font-size: 14px; color: #4e5968; line-height: 1.6; }
+        .copy-help-sheet input { width: 100%; border: 1px solid #d1d5db; border-radius: 12px; padding: 12px 14px; font-size: 16px; font-weight: 700; color: #111827; background: #f9fafb; }
+        .copy-help-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+        .copy-help-actions button { border: none; border-radius: 12px; padding: 10px 14px; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .copy-help-actions .btn-secondary { background: #f2f4f6; color: #4e5968; }
+        .copy-help-actions .btn-primary { background: #111827; color: #fff; }
     </style>
 </head>
 <body>
@@ -77,6 +87,17 @@ Change: 2026-02-05 - Remove unused isMobile variable.
 </div>
 
 <div id="toast">계좌번호가 복사되었습니다</div>
+<div id="copyHelpOverlay" class="copy-help-overlay" aria-hidden="true">
+    <div class="copy-help-sheet" role="dialog" aria-modal="true" aria-labelledby="copyHelpTitle">
+        <h3 id="copyHelpTitle">계좌번호 직접 복사</h3>
+        <p>브라우저가 자동 복사를 허용하지 않았습니다. 아래 계좌번호를 길게 눌러 복사해 주세요.</p>
+        <input type="text" id="copyHelpInput" readonly value="">
+        <div class="copy-help-actions">
+            <button type="button" class="btn-secondary" onclick="hideCopyHelp()">닫기</button>
+            <button type="button" class="btn-primary" onclick="selectCopyHelpText()">텍스트 선택</button>
+        </div>
+    </div>
+</div>
 
 <script>
     function escapeHtml(value = '') {
@@ -130,7 +151,7 @@ Change: 2026-02-05 - Remove unused isMobile variable.
             await navigator.clipboard.writeText(textToCopy);
             showToast("계좌번호가 복사되었습니다!");
         } catch (err) {
-            prompt("직접 복사해주세요:", textToCopy);
+            showCopyHelp(textToCopy);
         }
     }
 
@@ -139,6 +160,33 @@ Change: 2026-02-05 - Remove unused isMobile variable.
         toast.innerText = msg;
         toast.className = "show";
         setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
+    }
+
+    function showCopyHelp(text) {
+        const overlay = document.getElementById('copyHelpOverlay');
+        const input = document.getElementById('copyHelpInput');
+        if (!overlay || !input) return;
+        input.value = String(text || '');
+        overlay.classList.add('show');
+        overlay.setAttribute('aria-hidden', 'false');
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 0);
+    }
+
+    function hideCopyHelp() {
+        const overlay = document.getElementById('copyHelpOverlay');
+        if (!overlay) return;
+        overlay.classList.remove('show');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+
+    function selectCopyHelpText() {
+        const input = document.getElementById('copyHelpInput');
+        if (!input) return;
+        input.focus();
+        input.select();
     }
 </script>
 

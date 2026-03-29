@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.65 | Change: 2026-03-22 - Remove leftover guidance lines from accounting header. -->
+<!-- Version: v1.0.66 | Change: 2026-03-28 - Scope accounting employee and approval sync reads to the current coop. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.65 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.66 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2266,10 +2266,12 @@ async function refreshDurunuriSupportRows() {
     if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">목록을 불러오는 중입니다.</td></tr>';
     if (summaryEl) summaryEl.textContent = '로딩 중...';
 
+    const coopId = String(myInfo?.coop_id || '').trim();
     const [{ data: employees, error: empError }, supportMap] = await Promise.all([
         _supabase
             .from('ref_employees')
             .select('emp_id,emp_name,resign_date')
+            .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
             .order('emp_id', { ascending: true }),
         module.getSupportMap(_supabase, applyMonth)
     ]);
@@ -4738,9 +4740,11 @@ function confirmSync(type) {
     // (2) 전자결재 연동
     else if (type === 'approval') {
         (async () => {
+            const coopId = String(myInfo?.coop_id || '').trim();
             const { data: approvals, error: previewError } = await _supabase
                 .from('ref_approval')
                 .select('id,doc_type,status,amount,title,content,drafter_name,created_at')
+                .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                 .in('status', ['완료', '실물결재완료'])
                 .ilike('doc_type', '%지출%');
             if (previewError) return showAlert("오류", "미리보기 조회 실패: " + previewError.message);
@@ -4772,6 +4776,7 @@ function confirmSync(type) {
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
                     .select('id,doc_type,status,amount,title,content,drafter_name,created_at')
+                    .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                     .in('status', ['완료', '실물결재완료'])
                     .ilike('doc_type', '%지출%');
                 if (runFetchError) return showAlert("오류", "데이터 조회 실패: " + runFetchError.message);

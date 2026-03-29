@@ -1,65 +1,54 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.3 -->
+<!-- Version: v1.0.8 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.3 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.8 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>인증 처리 중...</title>
+    <link rel="icon" type="image/png" href="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/favicon.png">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/shared/boot_guard.js?v=20260327-1"></script>
+    <script src="/shared/route_guard.js?v=20260328-2"></script>
     <style>
         body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f8f9fa; flex-direction: column; font-family: sans-serif; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #F7E600; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #message { color: #555; text-align: center; }
+        .callback-actions { display: none; margin-top: 18px; gap: 8px; flex-wrap: wrap; justify-content: center; }
+        .callback-actions.show { display: flex; }
+        .callback-actions button { border: 1px solid #d1d5db; background: #fff; color: #111827; border-radius: 999px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+        .callback-actions button.primary { background: #111827; color: #fff; border-color: #111827; }
     </style>
 </head>
 <body>
     <div class="loader"></div>
     <div id="message">로그인 정보를 동기화하고 있습니다...</div>
+    <div id="callbackActions" class="callback-actions">
+        <button type="button" class="primary" id="btnRetryCallback">다시 시도</button>
+        <button type="button" id="btnGoDest">원래 화면으로 이동</button>
+    </div>
 
     <script>
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        const ERP_BASE_URL = new URL('./', window.location.href);
-        const ERP_INDEX_URL = new URL('index.html', ERP_BASE_URL).href;
-
-        function remapLegacyErpDestination(dest) {
-            if (!(dest instanceof URL)) return dest;
-            if (dest.origin !== 'https://erp.yonginsolar.kr') return dest;
-
-            const mapped = new URL('https://www.yonginsolar.kr');
-            const safePath = String(dest.pathname || '').trim();
-            mapped.pathname = (!safePath || safePath === '/')
-                ? '/erp/'
-                : (safePath === '/erp' || safePath.startsWith('/erp/') ? safePath : `/erp${safePath.startsWith('/') ? '' : '/'}${safePath}`);
-            mapped.search = dest.search;
-            mapped.hash = dest.hash;
-            return mapped;
-        }
+        const ERP_INDEX_URL = window.CoopRouteGuard?.buildAppPageUrl
+            ? window.CoopRouteGuard.buildAppPageUrl('index.html', { app: 'erp' })
+            : new URL('index.html', new URL('./', window.location.href)).href;
+        const ERP_AUTH_DEST_KEY = 'erp_auth_destination';
+        const LEGACY_AUTH_DEST_KEY = 'auth_destination';
 
         function normalizeDest(raw) {
-            const fallback = ERP_INDEX_URL;
-            if (!raw) return fallback;
-            try {
-                const dest = remapLegacyErpDestination(new URL(raw, window.location.origin));
-                const allowOrigins = [
-                    window.location.origin,
-                    'https://www.yonginsolar.kr',
-                    'http://localhost:8000'
-                ];
-                if (!allowOrigins.includes(dest.origin)) return fallback;
-                return dest.href;
-            } catch (e) {
-                return fallback;
-            }
+            return CoopRouteGuard.normalizeDestination(raw, { fallback: ERP_INDEX_URL });
         }
 
         function getDest() {
             const params = new URLSearchParams(window.location.search);
-            const raw = params.get('next') || localStorage.getItem('auth_destination');
+            const raw = params.get('next')
+                || localStorage.getItem(ERP_AUTH_DEST_KEY)
+                || localStorage.getItem(LEGACY_AUTH_DEST_KEY);
             return normalizeDest(raw);
         }
 
@@ -72,41 +61,104 @@
                         await _supabase.auth.updateUser({ data: { phone: phone } });
                     }
                 }
-            } catch (e) { void 0; }
+            } catch (e) {}
         }
 
         function redirectTo(dest) {
-            localStorage.removeItem('auth_destination');
+            clearCallbackFallbackState();
+            localStorage.removeItem(ERP_AUTH_DEST_KEY);
             window.location.replace(dest);
         }
 
-        async function processAuth() {
+        function setCallbackBusyState(message) {
+            document.getElementById('message').innerText = message || '로그인 정보를 동기화하고 있습니다...';
+            document.getElementById('callbackActions').classList.remove('show');
+            const loader = document.querySelector('.loader');
+            if (loader) loader.style.display = 'block';
+        }
+
+        function showCallbackRetryState(message) {
+            document.getElementById('message').innerText = message || '인증 처리를 완료하지 못했습니다. 다시 시도해 주세요.';
+            document.getElementById('callbackActions').classList.add('show');
+            const loader = document.querySelector('.loader');
+            if (loader) loader.style.display = 'none';
+        }
+
+        let authStateFallbackSubscription = null;
+        let authStateFallbackTimer = null;
+
+        function clearAuthStateFallbackSubscription() {
             try {
+                authStateFallbackSubscription?.data?.subscription?.unsubscribe?.();
+            } catch (_) {}
+            authStateFallbackSubscription = null;
+        }
+
+        function clearCallbackFallbackState() {
+            if (authStateFallbackTimer) {
+                clearTimeout(authStateFallbackTimer);
+                authStateFallbackTimer = null;
+            }
+            clearAuthStateFallbackSubscription();
+        }
+
+        const runCallbackBoot = BootGuard.createSingleFlightAction(async function processAuthInternal() {
+            try {
+                setCallbackBusyState('로그인 정보를 동기화하고 있습니다...');
+                clearCallbackFallbackState();
                 const params = new URLSearchParams(window.location.search);
                 const code = params.get('code');
 
                 if (code) {
                     const { data, error } = await _supabase.auth.exchangeCodeForSession(code);
                     if (!error && data?.session) {
+                        clearCallbackFallbackState();
                         await syncPhone(data.session.user);
                         history.replaceState({}, document.title, window.location.pathname);
                         return redirectTo(getDest());
                     }
                 }
 
-                const { data: sessionData } = await _supabase.auth.getSession();
+                const { data: sessionData } = await Promise.race([
+                    _supabase.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: null, error: 'timeout' }), 2500))
+                ]);
                 if (sessionData?.session) {
+                    clearCallbackFallbackState();
                     await syncPhone(sessionData.session.user);
                     return redirectTo(getDest());
                 }
 
-                document.getElementById('message').innerText = '인증 정보가 없습니다. 로그인 화면으로 이동합니다.';
-                setTimeout(() => redirectTo(getDest()), 1200);
+                let settled = false;
+                authStateFallbackTimer = setTimeout(() => {
+                    if (!settled) {
+                        showCallbackRetryState('인증 처리가 지연되고 있습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
+                    }
+                }, 3500);
+
+                authStateFallbackSubscription = _supabase.auth.onAuthStateChange((_evt, session) => {
+                    if (!session) return;
+                    settled = true;
+                    clearCallbackFallbackState();
+                    syncPhone(session.user).then(() => redirectTo(getDest()));
+                });
             } catch (err) {
-                document.getElementById('message').innerText = '인증 처리 중 오류가 발생했습니다. 잠시 후 이동합니다.';
-                setTimeout(() => redirectTo(getDest()), 1500);
+                clearCallbackFallbackState();
+                showCallbackRetryState('인증 처리 중 오류가 발생했습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
             }
+        });
+
+        function processAuth() {
+            return runCallbackBoot();
         }
+
+        document.getElementById('btnRetryCallback').addEventListener('click', () => {
+            processAuth();
+        });
+        document.getElementById('btnGoDest').addEventListener('click', () => {
+            clearCallbackFallbackState();
+            redirectTo(getDest());
+        });
 
         processAuth();
     </script>

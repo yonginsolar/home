@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.5
-Change: 2026-03-22 - Remove first-use guidance banner from permission management.
+Version: v1.0.6
+Change: 2026-03-29 - Guard permission queries when coop context is missing.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.5 | permissions.html');</script>
+  <script>console.log('[Version] v1.0.6 | permissions.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -244,11 +244,17 @@ async function savePermission() {
 
 async function loadPermissionList() {
   const body = document.getElementById('permBody');
+  const coopId = String(myInfo?.coop_id || '').trim();
+  if (!coopId) {
+    body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">조합 정보를 확인하지 못했습니다.</td></tr>';
+    showAlert("조합 정보가 없어 권한 목록을 조회할 수 없습니다. 다시 로그인해 주세요.");
+    return;
+  }
   body.innerHTML = '<tr><td colspan="6" class="text-center text-muted p-4">로딩 중...</td></tr>';
   const { data, error } = await _supabase
     .from('erp_role_permissions')
     .select('*')
-    .eq('coop_id', myInfo?.coop_id || null)
+    .eq('coop_id', coopId)
     .order('scope', { ascending: true })
     .order('role_key', { ascending: true })
     .order('permission_key', { ascending: true });
@@ -302,14 +308,18 @@ async function loadPermissionList() {
 }
 
 async function togglePermission(id, current) {
-  const { error } = await _supabase.from('erp_role_permissions').update({ is_enabled: !current, updated_at: new Date() }).eq('coop_id', myInfo?.coop_id || null).eq('id', id);
+  const coopId = String(myInfo?.coop_id || '').trim();
+  if (!coopId) return showAlert("조합 정보가 없어 권한을 수정할 수 없습니다. 다시 로그인해 주세요.");
+  const { error } = await _supabase.from('erp_role_permissions').update({ is_enabled: !current, updated_at: new Date() }).eq('coop_id', coopId).eq('id', id);
   if (error) return showAlert("수정 실패: " + error.message);
   await logAudit('permission.toggle', '권한 토글', { id, is_enabled: !current });
   await loadPermissionList();
 }
 
 async function deletePermission(id) {
-  const { error } = await _supabase.from('erp_role_permissions').delete().eq('coop_id', myInfo?.coop_id || null).eq('id', id);
+  const coopId = String(myInfo?.coop_id || '').trim();
+  if (!coopId) return showAlert("조합 정보가 없어 권한을 삭제할 수 없습니다. 다시 로그인해 주세요.");
+  const { error } = await _supabase.from('erp_role_permissions').delete().eq('coop_id', coopId).eq('id', id);
   if (error) return showAlert("삭제 실패: " + error.message);
   await logAudit('permission.delete', '권한 삭제', { id });
   await loadPermissionList();

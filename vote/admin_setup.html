@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.11
-Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /erp migration.
+Version: v1.0.14
+Change: 2026-03-28 - Escape district action identifiers before injecting into admin setup button handlers.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 관리 대시보드</title>
-    <script>console.log('[Version] v1.0.11 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.14 | admin_setup.html');</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
@@ -365,6 +365,13 @@ function escapeHtml(value) {
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[ch]));
 }
+function escapeJsString(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
+}
     import { AdminService } from './AdminService.js';
     import { supabase } from './ElectionService.js';
 
@@ -469,6 +476,14 @@ function escapeHtml(value) {
         return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
     };
 
+    function ensureTenantContext(actionLabel = '작업') {
+        const safeCoopId = String(currentCoopId || '').trim();
+        if (safeCoopId) return true;
+        console.error(`vote/admin_setup tenant context missing during ${actionLabel}`);
+        window.showAlert('조합 정보를 확인하지 못했습니다. 다시 로그인한 뒤 다시 시도해주세요.');
+        return false;
+    }
+
     function setCreateElectionBusy(isBusy) {
         const btn = document.getElementById('btnCreateElection');
         if (!btn) return;
@@ -485,6 +500,7 @@ function escapeHtml(value) {
     // 선거구 추가/수정 함수
     window.addDistrict = async () => {
         if(!newElectionId) return window.showAlert('Step 1 저장을 먼저 해주세요.');
+        if (!ensureTenantContext('선거구 저장')) return;
 
         const name = document.getElementById('dist-name').value.trim();
         const code = document.getElementById('dist-code').value.trim();
@@ -553,7 +569,9 @@ function escapeHtml(value) {
 
     // 삭제 버튼 클릭 시
     window.deleteDistrict = async (id) => {
-        if(!confirm('선거구를 삭제하시겠습니까?\n등록된 명부도 함께 삭제됩니다.')) return;
+        if (!ensureTenantContext('선거구 삭제')) return;
+        const ok = await window.showConfirmAsync('선거구를 삭제하시겠습니까?\n등록된 명부도 함께 삭제됩니다.');
+        if(!ok) return;
         const { error } = await scopeByTenant(
             supabase.from('districts').delete()
         ).eq('id', id);
@@ -599,6 +617,7 @@ function escapeHtml(value) {
             const badge = d.is_common ? '<span class="badge-common">비례/공통</span>' : '';
             const safeName = escapeHtml(d.name);
             const safeCode = escapeHtml(d.code);
+            const safeDistrictId = escapeJsString(d.id);
             div.innerHTML = `
                 <div>
                     <strong>${safeName}</strong> (${safeCode}) ${badge}
@@ -607,8 +626,8 @@ function escapeHtml(value) {
                     </div>
                 </div>
                 <div class="card-actions">
-                    <button onclick="editDistrict('${d.id}')" style="cursor:pointer; border:1px solid #ddd; background:white; padding:4px 8px; border-radius:4px;">✏️</button>
-                    <button onclick="deleteDistrict('${d.id}')" style="cursor:pointer; border:1px solid #fca5a5; background:#fee2e2; color:#dc2626; padding:4px 8px; border-radius:4px;">🗑️</button>
+                    <button onclick="editDistrict('${safeDistrictId}')" style="cursor:pointer; border:1px solid #ddd; background:white; padding:4px 8px; border-radius:4px;">✏️</button>
+                    <button onclick="deleteDistrict('${safeDistrictId}')" style="cursor:pointer; border:1px solid #fca5a5; background:#fee2e2; color:#dc2626; padding:4px 8px; border-radius:4px;">🗑️</button>
                 </div>
             `;
             listEl.appendChild(div);
@@ -737,6 +756,7 @@ function escapeHtml(value) {
         const distId = document.getElementById('target-district-select').value;
         if(!distId) return window.showAlert('선거구를 선택하세요.');
         if(selectedMemberIds.size === 0) return window.showAlert('조합원을 선택하세요.');
+        if (!ensureTenantContext('유권자 등록')) return;
 
         const targetDist = districtsCache.find(d => d.id === distId);
         const membersToAdd = allMembers.filter(m => selectedMemberIds.has(m.id));
@@ -804,6 +824,7 @@ function escapeHtml(value) {
     // [수정] 유권자 삭제 (Confirm -> ShowConfirm)
     window.removeSelectedVoters = async () => {
         if(selectedVoterIds.size === 0) return window.showAlert('삭제할 인원을 선택하세요.');
+        if (!ensureTenantContext('유권자 삭제')) return;
 
         window.showConfirm('선택한 인원을 명부에서 제외하시겠습니까?', async () => {
             const idsToDelete = Array.from(selectedVoterIds);
@@ -926,8 +947,10 @@ function escapeHtml(value) {
 
     // [편의 기능] 비례대표 전체 등록
     window.addAllMembersToCommon = async () => {
+        if (!ensureTenantContext('비례 유권자 일괄 등록')) return;
         const distId = document.getElementById('target-district-select').value;
-        if(!confirm('전체 조합원을 이 선거구(비례)에 등록하시겠습니까?\n이미 등록된 인원은 건너뛰고 신규 인원만 추가됩니다.')) return;
+        const ok = await window.showConfirmAsync('전체 조합원을 이 선거구(비례)에 등록하시겠습니까?\n이미 등록된 인원은 건너뛰고 신규 인원만 추가됩니다.');
+        if(!ok) return;
 
         // 전체 인원 Payload 생성
         // (주의: 인원이 1000명 단위면 나눠서 보내야 할 수도 있으나, Supabase는 수천 건 정도는 한 번에 처리 가능)
@@ -952,6 +975,7 @@ function escapeHtml(value) {
 window.finishSetup = async () => {
     // 1. 선거 ID 존재 여부 확인
     if (!newElectionId) return window.showAlert('진행 중인 선거 설정이 없습니다.');
+    if (!ensureTenantContext('선거 설정 완료')) return;
 
     // 2. 안전장치: 선거구가 1개라도 있는지 로컬 캐시(districtsCache)로 확인
     if (!districtsCache || districtsCache.length === 0) {
@@ -1033,6 +1057,39 @@ window.finishSetup = async () => {
         btnBox.appendChild(cancelBtn);
         btnBox.appendChild(okBtn);
         modal.style.display = 'flex';
+    };
+
+    window.showConfirmAsync = (msg) => {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('common-alert-modal');
+            const msgBox = document.getElementById('common-alert-msg');
+            const btnBox = document.getElementById('common-alert-btns');
+
+            msgBox.innerHTML = escapeHtml(msg).replace(/\n/g, '<br>');
+            btnBox.innerHTML = '';
+
+            let settled = false;
+            const finish = (result) => {
+                if (settled) return;
+                settled = true;
+                modal.style.display = 'none';
+                resolve(!!result);
+            };
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn-modal btn-cancel';
+            cancelBtn.innerText = '취소';
+            cancelBtn.onclick = () => finish(false);
+
+            const okBtn = document.createElement('button');
+            okBtn.className = 'btn-modal btn-confirm';
+            okBtn.innerText = '확인';
+            okBtn.onclick = () => finish(true);
+
+            btnBox.appendChild(cancelBtn);
+            btnBox.appendChild(okBtn);
+            modal.style.display = 'flex';
+        });
     };
 
     // ----------------------------------------------------------------
@@ -1172,7 +1229,8 @@ function addButtonsToLi(container, id, name, code, quota, type) {
     delBtn.innerText = '🗑️ 삭제';
     delBtn.className = 'btn-delete';
     delBtn.onclick = async () => {
-        if (!confirm('정말 삭제하시겠습니까?')) return;
+        const ok = await window.showConfirmAsync('정말 삭제하시겠습니까?');
+        if (!ok) return;
 
         // DB 삭제
         const { error } = await scopeByTenant(
@@ -1297,7 +1355,9 @@ function clearDistrictInputs() {
 
     // [신규] 선거 삭제 함수
     window.deleteElection = async (id) => {
-        if(!confirm('정말 이 선거를 삭제하시겠습니까?\n설정된 선거구와 명부 등 모든 데이터가 영구 삭제됩니다.')) return;
+        if (!ensureTenantContext('선거 삭제')) return;
+        const ok = await window.showConfirmAsync('정말 이 선거를 삭제하시겠습니까?\n설정된 선거구와 명부 등 모든 데이터가 영구 삭제됩니다.');
+        if(!ok) return;
 
         const { error } = await scopeByTenant(
             supabase.from('elections').delete()
@@ -1370,6 +1430,7 @@ window.resumeSetup = async (el) => {
     // 상태 변경
     window.handleStatusChange = async (event, electionId, newStatus) => {
         event.stopPropagation();
+        if (!ensureTenantContext('선거 상태 변경')) return;
         let warning = '';
         if(newStatus === 'ENDED') warning = '정말 선거를 종료하시겠습니까?\n종료 후에는 되돌릴 수 없습니다.';
         else if(newStatus === 'PAUSED') warning = '선거를 일시정지 하시겠습니까?\n투표가 중단됩니다.';
@@ -1530,6 +1591,7 @@ window.createElection = async () => {
     if (createElectionInFlight) {
         return window.showAlert('이미 저장 중입니다. 잠시만 기다려주세요.');
     }
+    if (!ensureTenantContext('선거 생성')) return;
     const title = document.getElementById('election-title').value;
     const announceDate = document.getElementById('announcement-date').value; // [추가]
     const cS = document.getElementById('candidacy-start').value;

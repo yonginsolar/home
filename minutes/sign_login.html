@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.6
-Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
+Version: v1.0.9
+Change: 2026-03-28 - Harden sign login boot so session/profile checks never strand the page in loading state.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.6 | sign_login.html');</script>
+    <script>console.log('[Version] v1.0.9 | sign_login.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명 로그인</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="../shared/route_guard.js?v=20260328-1"></script>
     <style>
         body {
             margin: 0;
@@ -247,6 +248,8 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
             </div>
         </div>
 
+        <div id="globalErrorBox" class="error-box hidden"></div>
+
         <div class="footer-note">전자서명 전용 로그인 화면</div>
     </div>
 
@@ -275,6 +278,12 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
 
         function normalizeDest(raw) {
             const fallback = new URL('minutes_sign.html', window.location.href).href;
+            if (window.CoopRouteGuard && typeof window.CoopRouteGuard.normalizeDestination === 'function') {
+                return window.CoopRouteGuard.normalizeDestination(raw, {
+                    fallback,
+                    currentLocation: window.location
+                });
+            }
             if (!raw) return fallback;
             try {
                 const dest = new URL(raw, window.location.origin);
@@ -308,9 +317,23 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
             if (target) target.classList.remove('hidden');
         }
 
+        function setGlobalError(text) {
+            const box = document.getElementById('globalErrorBox');
+            if (!box) return;
+            const message = String(text || '').trim();
+            if (!message) {
+                box.classList.add('hidden');
+                box.textContent = '';
+                return;
+            }
+            box.textContent = message;
+            box.classList.remove('hidden');
+        }
+
         function setLoading(text) {
             const loadingText = document.getElementById('loadingText');
             if (loadingText) loadingText.textContent = text || '처리 중입니다...';
+            setGlobalError('');
             showView('loadingView');
         }
 
@@ -324,6 +347,11 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
             }
             statusBox.textContent = text;
             statusBox.classList.remove('hidden');
+        }
+
+        function clearFeedback() {
+            setStatus('');
+            setGlobalError('');
         }
 
         function setOtpAreaVisible(visible) {
@@ -355,36 +383,58 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
         }
 
         async function handleLinkedSession() {
-            setLoading('조합원 프로필을 확인하고 있습니다...');
-            const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
-            if (claimErr || !claimRes?.success) {
-                const message = claimErr?.message || claimRes?.message || '';
-                document.getElementById('linkErrorMessage').textContent = mapClaimFailureMessage(message);
-                showView('linkErrorView');
-                return;
+            try {
+                setLoading('조합원 프로필을 확인하고 있습니다...');
+                const claimResult = await Promise.race([
+                    _supabase.rpc('claim_member_profile'),
+                    new Promise((resolve) => setTimeout(() => resolve({
+                        data: null,
+                        error: { message: 'timeout' }
+                    }), 5000))
+                ]);
+                const claimRes = claimResult?.data || null;
+                const claimErr = claimResult?.error || null;
+                if (claimErr || !claimRes?.success) {
+                    const message = claimErr?.message || claimRes?.message || '';
+                    setGlobalError('');
+                    document.getElementById('linkErrorMessage').textContent = mapClaimFailureMessage(message);
+                    showView('linkErrorView');
+                    return;
+                }
+
+                const sessionResult = await Promise.race([
+                    _supabase.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({
+                        data: null,
+                        error: { message: 'timeout' }
+                    }), 3000))
+                ]);
+                const currentUser = sessionResult?.data?.session?.user || null;
+
+                if (shouldOfferKakaoLink(currentUser)) {
+                    localStorage.setItem('sign_post_login_next', getNextTarget());
+                    showView('linkReadyView');
+                    return;
+                }
+
+                continueToSign();
+            } catch (error) {
+                console.error('sign_login.handleLinkedSession failed:', error);
+                setGlobalError('서명자 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                showView('loginView');
             }
-
-            const { data } = await _supabase.auth.getSession();
-            const currentUser = data?.session?.user || null;
-
-            if (shouldOfferKakaoLink(currentUser)) {
-                localStorage.setItem('sign_post_login_next', getNextTarget());
-                showView('linkReadyView');
-                return;
-            }
-
-            continueToSign();
         }
 
         async function sendMagicLink() {
             const email = String(document.getElementById('emailInput')?.value || '').trim();
             if (!email) {
-                window.alert('이메일을 입력해 주세요.');
+                setGlobalError('이메일을 입력해 주세요.');
+                document.getElementById('emailInput')?.focus();
                 return;
             }
             const btn = document.getElementById('btnMagicLink');
             btn.disabled = true;
-            setStatus('');
+            clearFeedback();
 
             const { error } = await _supabase.auth.signInWithOtp({
                 email,
@@ -393,7 +443,7 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
 
             btn.disabled = false;
             if (error) {
-                window.alert('인증코드 전송 실패: ' + error.message);
+                setGlobalError('인증코드 전송 실패: ' + error.message);
                 return;
             }
             pendingOtpEmail = email;
@@ -406,14 +456,17 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
             const token = String(document.getElementById('otpInput')?.value || '').trim();
             const btn = document.getElementById('btnVerifyOtp');
             if (!email) {
-                window.alert('먼저 이메일로 인증코드를 받아 주세요.');
+                setGlobalError('먼저 이메일로 인증코드를 받아 주세요.');
+                document.getElementById('emailInput')?.focus();
                 return;
             }
             if (!token) {
-                window.alert('메일로 받은 인증코드를 입력해 주세요.');
+                setGlobalError('메일로 받은 인증코드를 입력해 주세요.');
+                document.getElementById('otpInput')?.focus();
                 return;
             }
             btn.disabled = true;
+            setGlobalError('');
             try {
                 const { error } = await _supabase.auth.verifyOtp({
                     email,
@@ -421,12 +474,12 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
                     type: 'email'
                 });
                 if (error) {
-                    window.alert('인증 실패: ' + error.message);
+                    setGlobalError('인증 실패: ' + error.message);
                     return;
                 }
                 await handleLinkedSession();
             } catch (error) {
-                window.alert('인증 실패: ' + (error?.message || error));
+                setGlobalError('인증 실패: ' + (error?.message || error));
             } finally {
                 btn.disabled = false;
             }
@@ -435,6 +488,7 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
         async function startKakaoLogin() {
             const btn = document.getElementById('btnKakaoLogin');
             btn.disabled = true;
+            clearFeedback();
             try {
                 const callbackUrl = getAuthCallbackUrl();
                 callbackUrl.searchParams.set('next', getLandingUrl().href);
@@ -452,7 +506,7 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
                 });
             } catch (error) {
                 btn.disabled = false;
-                window.alert('카카오 로그인 연결 실패: ' + error.message);
+                setGlobalError('카카오 로그인 연결 실패: ' + error.message);
             }
         }
 
@@ -461,13 +515,14 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
             const continueBtn = document.getElementById('btnContinueSign');
             if (linkBtn) linkBtn.disabled = true;
             if (continueBtn) continueBtn.disabled = true;
+            setGlobalError('');
 
             try {
                 const { data } = await _supabase.auth.getSession();
                 const currentUid = data?.session?.user?.id;
                 if (!currentUid) {
                     showView('loginView');
-                    window.alert('로그인 세션을 찾지 못했습니다. 다시 로그인해 주세요.');
+                    setGlobalError('로그인 세션을 찾지 못했습니다. 다시 로그인해 주세요.');
                     return;
                 }
 
@@ -494,7 +549,7 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
             } catch (error) {
                 if (linkBtn) linkBtn.disabled = false;
                 if (continueBtn) continueBtn.disabled = false;
-                window.alert('카카오 연동 연결 실패: ' + error.message);
+                setGlobalError('카카오 연동 연결 실패: ' + error.message);
             }
         }
 
@@ -507,8 +562,8 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
         async function signOutAndReset() {
             try {
                 await _supabase.auth.signOut();
-            } catch (_) { void 0; }
-            setStatus('');
+            } catch (_) {}
+            clearFeedback();
             setOtpAreaVisible(false);
             pendingOtpEmail = '';
             const otpInput = document.getElementById('otpInput');
@@ -523,22 +578,35 @@ Change: 2026-03-22 - Remove first-use guidance box from standalone sign login.
         }
 
         async function init() {
-            setLoading('로그인 상태를 확인하고 있습니다...');
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('linked') === '1') {
-                const linkedStatusBox = document.getElementById('linkedStatusBox');
-                if (linkedStatusBox) {
-                    linkedStatusBox.textContent = '카카오 연동이 완료되었습니다. 이제 전자서명 화면으로 이동할 수 있습니다.';
-                    linkedStatusBox.classList.remove('hidden');
+            try {
+                setLoading('로그인 상태를 확인하고 있습니다...');
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('linked') === '1') {
+                    const linkedStatusBox = document.getElementById('linkedStatusBox');
+                    if (linkedStatusBox) {
+                        linkedStatusBox.textContent = '카카오 연동이 완료되었습니다. 이제 전자서명 화면으로 이동할 수 있습니다.';
+                        linkedStatusBox.classList.remove('hidden');
+                    }
                 }
+                const sessionResult = await Promise.race([
+                    _supabase.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({
+                        data: null,
+                        error: { message: 'timeout' }
+                    }), 3000))
+                ]);
+                if (sessionResult?.data?.session?.user) {
+                    await handleLinkedSession();
+                    return;
+                }
+                setOtpAreaVisible(false);
+                showView('loginView');
+            } catch (error) {
+                console.error('sign_login.init failed:', error);
+                setOtpAreaVisible(false);
+                showView('loginView');
+                setGlobalError('로그인 상태를 확인하지 못했습니다. 다시 시도해 주세요.');
             }
-            const { data } = await _supabase.auth.getSession();
-            if (data?.session?.user) {
-                await handleLinkedSession();
-                return;
-            }
-            setOtpAreaVisible(false);
-            showView('loginView');
         }
 
         init();

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.14
-Change: 2026-03-15 - Require member management linkage for election candidate flows.
+Version: v1.0.17
+Change: 2026-03-29 - Read coop branding from tenant company key/value rows instead of a missing ref_company_info.company_name column.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>후보자 등록 신청</title>
-    <script>console.log('[Version] v1.0.14 | candidate_apply.html');</script>
+    <script>console.log('[Version] v1.0.17 | candidate_apply.html');</script>
     <script src="../telegram_bot.js"></script>
     <link rel="stylesheet" href="style.css">
 <style>
@@ -513,7 +513,7 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
 만약 기재 내용이 사실과 다를 경우 후보 자격 박탈 및 당선 후라도 즉시 대의원 자격 정지 및 조합에서 제명될 수 있음을 확인합니다.                
                 </textarea>
                 <label style="cursor:pointer;">
-                    <input type="checkbox" id="agree-privacy" required> 위 내용을 확인하였으며 동의합니다.
+                    <input type="checkbox" id="agree-fact" required> 위 내용을 확인하였으며 동의합니다.
                 </label>
             </div>
     
@@ -524,7 +524,7 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
 ✅ 1) 개인정보 수집·이용 동의서 (대의원 출마자용)
 
 [개인정보 수집·이용 동의]
-본인은 용인모두의햇빛협동조합협동조합(이하 “조합”)의 대의원 선거 출마자로서, 조합이 아래 목적을 위해 개인정보를 수집·이용하는 것에 동의합니다.
+본인은 {{COOP_NAME}}(이하 “조합”)의 대의원 선거 출마자로서, 조합이 아래 목적을 위해 개인정보를 수집·이용하는 것에 동의합니다.
 1. 수집·이용 목적
 대의원 선거 출마 접수 및 후보자 자격 확인
 선거 관련 안내(일정, 서류보완 요청, 공지 등) 및 연락
@@ -636,6 +636,16 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[ch]));
         }
+        function safeUrl(value, { allowDataImage = false } = {}) {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+            try {
+                const url = new URL(raw, window.location.origin);
+                if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+            } catch (e) {}
+            return '';
+        }
     import { ElectionService, supabase } from './ElectionService.js';
 
     const service = new ElectionService();
@@ -652,6 +662,7 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
     let selectedDistrict = null;
     let candidateSubmitInFlight = false;
     let currentCoopId = null;
+    let currentCoopName = '';
     let manualCandidateMode = false;
     let memberAdminConnected = true;
 
@@ -670,6 +681,49 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
         const safeCoopId = String(currentCoopId || '').trim();
         return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
     };
+
+    function getCandidateApplyCoopName(defaultValue = '조합') {
+        return String(currentCoopName || '').trim() || defaultValue;
+    }
+
+    async function loadCandidateApplyCoopInfo() {
+        if (!currentCoopId) return null;
+        try {
+            const { data, error } = await scopeByTenant(
+                supabase.from('ref_company_info').select('key,value').in('key', ['company_name', 'orgName'])
+            );
+            if (!error) {
+                const rows = Array.isArray(data) ? data : [];
+                const infoMap = rows.reduce((acc, row) => {
+                    const key = String(row?.key || '').trim();
+                    if (!key) return acc;
+                    acc[key] = String(row?.value || '').trim();
+                    return acc;
+                }, {});
+                currentCoopName = String(infoMap.company_name || infoMap.orgName || '').trim();
+            }
+        } catch (error) {
+            console.warn('candidate_apply load company info failed:', error);
+        }
+        return currentCoopName || null;
+    }
+
+    function applyCandidateApplyCoopText() {
+        const coopName = getCandidateApplyCoopName();
+        document.title = `${coopName} 후보자 등록 신청`;
+        const pageTitle = document.getElementById('page-title');
+        if (pageTitle) pageTitle.textContent = `🙋‍♀️ ${coopName} 후보자 등록 신청`;
+        document.querySelectorAll('.terms-text').forEach((field) => {
+            if (!field) return;
+            const template = String(field.dataset.template || field.value || field.textContent || '');
+            if (!field.dataset.template) field.dataset.template = template;
+            const rendered = template
+                .replaceAll('{{COOP_NAME}}', coopName)
+                .replaceAll('용인모두의햇빛협동조합협동조합', coopName)
+                .replaceAll('용인모두의햇빛협동조합', coopName);
+            field.value = rendered;
+        });
+    }
     
     // [DOM 캐싱] 모달 관련 요소
     const modalOverlay = document.getElementById('modal-overlay');
@@ -830,6 +884,8 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
             });
             if (!runtimeCheck.ok) return;
             currentCoopId = runtimeCheck.runtime?.coop_id || null;
+            await loadCandidateApplyCoopInfo();
+            applyCandidateApplyCoopText();
             memberAdminConnected = isModuleEnabled(runtimeCheck.runtime, 'member_admin');
             if (!memberAdminConnected) {
                 showModal('안내', '선거 기능은 조합원 관리 연동이 필요합니다.\n먼저 조합원 관리를 연결해주세요.', () => {
@@ -1020,11 +1076,15 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
             document.getElementById('cand-name').value = data.name;
             document.getElementById('cand-career').value = data.career || '';
             document.getElementById('cand-manifesto').value = data.manifesto;
+            document.getElementById('agree-fact').checked = true;
             document.getElementById('agree-privacy').checked = true;
             document.getElementById('agree-conflict').checked = true;
             if (data.photo_url) {
-                document.getElementById('current-photo-area').style.display = 'block';
-                document.getElementById('preview-photo').src = data.photo_url;
+                const safePhotoUrl = safeUrl(data.photo_url, { allowDataImage: true });
+                if (safePhotoUrl) {
+                    document.getElementById('current-photo-area').style.display = 'block';
+                    document.getElementById('preview-photo').src = safePhotoUrl;
+                }
             }
             if (data.proof_url) {
                 document.getElementById('current-proof-area').style.display = 'block';
@@ -1074,7 +1134,9 @@ Change: 2026-03-15 - Require member management linkage for election candidate fl
             if (inputId === 'cand-photo' && this.files[0]) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    document.getElementById('preview-photo').src = e.target.result;
+                    const previewUrl = safeUrl(e.target?.result, { allowDataImage: true });
+                    if (!previewUrl) return;
+                    document.getElementById('preview-photo').src = previewUrl;
                     document.getElementById('current-photo-area').style.display = 'block';
                 }
                 reader.readAsDataURL(this.files[0]);

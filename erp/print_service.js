@@ -1,4 +1,4 @@
-/* Version: v1.0.7 | Change: 2026-03-26 - Align the seal center with the end of the chairman text while keeping signature text centered. */
+/* Version: v1.0.8 | Change: 2026-03-29 - Escape printable data and validate print asset URLs before writing popup HTML. */
 const PrintService = {
     // 1. 공통 CSS 스타일 (유지보수를 위해 이곳에서 통합 관리)
     styles: {
@@ -26,6 +26,33 @@ const PrintService = {
             th { background-color: #f5f5f5; text-align: center; font-weight: bold; white-space: nowrap; } 
             .text-center { text-align: center; } .text-end { text-align: right; } .fw-bold { font-weight: bold; } .bg-light { background-color: #f9f9f9; }
         `
+    },
+
+    escapeHtml: function(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+
+    safeUrl: function(url, allowDataImage = false) {
+        try {
+            const raw = String(url || '').trim();
+            if (!raw) return '';
+            if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+            const parsed = new URL(raw, window.location.origin);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+        } catch (e) {}
+        return '';
+    },
+
+    formatMultilineHtml: function(value) {
+        return String(value ?? '')
+            .split(/<br\s*\/?>|\r?\n/gi)
+            .map((part) => this.escapeHtml(part))
+            .join('<br>');
     },
 
     fitSignatureText: function(text, options) {
@@ -68,11 +95,14 @@ const PrintService = {
         const cfg = options || {};
         const companyName = String(data?.compName || '').trim();
         const chairmanName = String(data?.chairman || '').trim();
+        const safeCompanyName = this.escapeHtml(companyName);
+        const safeChairmanName = this.escapeHtml(chairmanName);
+        const safeSealUrl = this.safeUrl(data?.seal, true);
         const sealWidth = Number(cfg.sealWidth || 60);
         const sealCenterOffset = Number(cfg.sealCenterOffset || 0);
-        const maxWidthCss = String(cfg.maxWidth || '560px');
-        const chairmanRightReservePx = data?.seal ? Math.max(0, Math.round((sealWidth / 2) - sealCenterOffset)) : 0;
-        const chairmanMaxWidthCss = data?.seal ? `calc(${maxWidthCss} - ${chairmanRightReservePx}px)` : maxWidthCss;
+        const maxWidthCss = String(cfg.maxWidth || '560px').replace(/"/g, '');
+        const chairmanRightReservePx = safeSealUrl ? Math.max(0, Math.round((sealWidth / 2) - sealCenterOffset)) : 0;
+        const chairmanMaxWidthCss = safeSealUrl ? `calc(${maxWidthCss} - ${chairmanRightReservePx}px)` : maxWidthCss;
         const maxWidthPx = Number(cfg.maxWidthPx || 520);
         const companyFit = this.fitSignatureText(companyName, {
             initialFontSize: Number(cfg.companyFontSize || 18),
@@ -87,7 +117,7 @@ const PrintService = {
             fontWeight: Number(cfg.fontWeight || 700)
         });
         const companyLine = companyName
-            ? `<div style="display:inline-block; max-width:${maxWidthCss}; text-align:center; font-size:${companyFit.fontSize}px; font-weight:700; line-height:1.3; white-space:${companyFit.wrap ? 'normal' : 'nowrap'}; word-break:${companyFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${companyFit.wrap ? 'anywhere' : 'normal'};">${companyName}</div>`
+            ? `<div style="display:inline-block; max-width:${maxWidthCss}; text-align:center; font-size:${companyFit.fontSize}px; font-weight:700; line-height:1.3; white-space:${companyFit.wrap ? 'normal' : 'nowrap'}; word-break:${companyFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${companyFit.wrap ? 'anywhere' : 'normal'};">${safeCompanyName}</div>`
             : '';
 
         return `
@@ -95,8 +125,8 @@ const PrintService = {
                 <div style="display:inline-flex; flex-direction:column; align-items:center; max-width:${maxWidthCss};">
                     ${companyLine}
                     <div style="display:inline-block; position:relative; margin-top:${companyLine ? '6px' : '0'};">
-                        <div style="display:inline-block; max-width:${chairmanMaxWidthCss}; text-align:center; font-size:${chairmanFit.fontSize}px; font-weight:${cfg.fontWeight || 700}; line-height:1.3; white-space:${chairmanFit.wrap ? 'normal' : 'nowrap'}; word-break:${chairmanFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${chairmanFit.wrap ? 'anywhere' : 'normal'};">이사장 ${chairmanName}</div>
-                        ${data?.seal ? `<img src="${data.seal}" style="position:absolute; left:calc(100% - ${sealWidth / 2}px + ${sealCenterOffset}px); bottom:${cfg.sealBottom || '-6px'}; width:${sealWidth}px; opacity:${cfg.sealOpacity || 0.8};">` : ''}
+                        <div style="display:inline-block; max-width:${chairmanMaxWidthCss}; text-align:center; font-size:${chairmanFit.fontSize}px; font-weight:${cfg.fontWeight || 700}; line-height:1.3; white-space:${chairmanFit.wrap ? 'normal' : 'nowrap'}; word-break:${chairmanFit.wrap ? 'keep-all' : 'normal'}; overflow-wrap:${chairmanFit.wrap ? 'anywhere' : 'normal'};">이사장 ${safeChairmanName}</div>
+                        ${safeSealUrl ? `<img src="${safeSealUrl}" style="position:absolute; left:calc(100% - ${sealWidth / 2}px + ${sealCenterOffset}px); bottom:${cfg.sealBottom || '-6px'}; width:${sealWidth}px; opacity:${cfg.sealOpacity || 0.8};">` : ''}
                     </div>
                 </div>
             </div>`;
@@ -133,6 +163,38 @@ const PrintService = {
 
     // 3. [기능] 급여명세서 출력
     printSalary: function(data) {
+        const safeData = {
+            titleDate: this.escapeHtml(data?.titleDate),
+            attrDate: this.formatMultilineHtml(data?.attrDate),
+            payDate: this.escapeHtml(data?.payDate),
+            empInfo: this.escapeHtml(data?.empInfo),
+            dept: this.escapeHtml(data?.dept),
+            pos: this.escapeHtml(data?.pos),
+            p_basic: this.escapeHtml(data?.p_basic),
+            p_meal: this.escapeHtml(data?.p_meal),
+            p_car: this.escapeHtml(data?.p_car),
+            p_pos: this.escapeHtml(data?.p_pos),
+            p_svc: this.escapeHtml(data?.p_svc),
+            p_ot: this.escapeHtml(data?.p_ot),
+            p_child: this.escapeHtml(data?.p_child),
+            p_bonus: this.escapeHtml(data?.p_bonus),
+            p_total: this.escapeHtml(data?.p_total),
+            d_pen: this.escapeHtml(data?.d_pen),
+            d_hlt: this.escapeHtml(data?.d_hlt),
+            d_care: this.escapeHtml(data?.d_care),
+            d_emp: this.escapeHtml(data?.d_emp),
+            d_inc: this.escapeHtml(data?.d_inc),
+            d_loc: this.escapeHtml(data?.d_loc),
+            d_adv: this.escapeHtml(data?.d_adv),
+            d_adv_label: this.escapeHtml(data?.d_adv_label || '기타조정'),
+            d_cap: this.escapeHtml(data?.d_cap),
+            d_total: this.escapeHtml(data?.d_total),
+            net: this.escapeHtml(data?.net),
+            logo: this.safeUrl(data?.logo, true),
+            seal: this.safeUrl(data?.seal, true),
+            chairman: this.escapeHtml(data?.chairman),
+            compName: this.escapeHtml(data?.compName)
+        };
         const signatureBlock = this.buildSignatureBlock(data, {
             marginTop: 40,
             maxWidth: '520px',
@@ -148,36 +210,36 @@ const PrintService = {
         });
         const content = `
         <div class="print-salary" style="padding: 10px; height: 100%;">
-            <h1 style="text-align:center; margin-bottom: 30px; font-size: 28px; margin-top: 50px;">${data.titleDate} 급여명세서</h1>
+            <h1 style="text-align:center; margin-bottom: 30px; font-size: 28px; margin-top: 50px;">${safeData.titleDate} 급여명세서</h1>
             <table style="width:100%; margin-bottom:20px;">
-                <tr><th style="background:#f5f5f5; padding:8px; width:18%;">귀속연월</th><td style="padding:8px; width:32%;">${data.attrDate}</td><th style="background:#f5f5f5; padding:8px; width:18%;">사원번호/명</th><td style="padding:8px;">${data.empInfo}</td></tr>
-                <tr><th style="background:#f5f5f5; padding:8px;">지급일자</th><td style="padding:8px;">${data.payDate}</td><th style="background:#f5f5f5; padding:8px;">소속/직급</th><td style="padding:8px;">${data.dept} / ${data.pos}</td></tr>
+                <tr><th style="background:#f5f5f5; padding:8px; width:18%;">귀속연월</th><td style="padding:8px; width:32%;">${safeData.attrDate}</td><th style="background:#f5f5f5; padding:8px; width:18%;">사원번호/명</th><td style="padding:8px;">${safeData.empInfo}</td></tr>
+                <tr><th style="background:#f5f5f5; padding:8px;">지급일자</th><td style="padding:8px;">${safeData.payDate}</td><th style="background:#f5f5f5; padding:8px;">소속/직급</th><td style="padding:8px;">${safeData.dept} / ${safeData.pos}</td></tr>
             </table>
             <div style="display:flex; gap:20px; border-top:2px solid #888; padding-top:10px;">
                 <div style="flex:1;">
                     <div style="text-align:center; font-weight:bold; padding:5px; border-bottom:2px solid #0d47a1; color:#0d47a1; margin-bottom:5px;">지급내역</div>
                     <table style="width:100%;">
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">기본급</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_basic}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">식 대</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_meal}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">차량유지비</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_car}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">직책수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_pos}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">근속수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_svc}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">연장수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_ot}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">육아수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_child}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">상여금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.p_bonus}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">기본급</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_basic}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">식 대</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_meal}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">차량유지비</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_car}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">직책수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_pos}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">근속수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_svc}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">연장수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_ot}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">육아수당</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_child}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">상여금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.p_bonus}</td></tr>
                     </table>
                 </div>
                 <div style="flex:1;">
                     <div style="text-align:center; font-weight:bold; padding:5px; border-bottom:2px solid #b71c1c; color:#b71c1c; margin-bottom:5px;">공제내역</div>
                     <table style="width:100%;">
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">국민연금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_pen}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">건강보험</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_hlt}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">장기요양</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_care}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">고용보험</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_emp}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">소득세</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_inc}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">지방소득세</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_loc}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_adv_label || '기타조정'}</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_adv}</td></tr>
-                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">출자금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${data.d_cap}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">국민연금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_pen}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">건강보험</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_hlt}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">장기요양</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_care}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">고용보험</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_emp}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">소득세</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_inc}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">지방소득세</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_loc}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_adv_label}</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_adv}</td></tr>
+                        <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">출자금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_cap}</td></tr>
                     </table>
                 </div>
             </div>
@@ -185,9 +247,9 @@ const PrintService = {
             <div style="height:120px; position:relative;">
                 <div style="position:absolute; top:30px; left:20px; color:#666;">노고에 감사드립니다.</div>
                 <table style="position:absolute; right:0; top:0; width:350px; background:#fff;">
-                    <tr><td style="background:#f5f5f5;">지급합계</td><td class="text-end">${data.p_total}</td></tr>
-                    <tr><td style="background:#f5f5f5;">공제합계</td><td class="text-end">${data.d_total}</td></tr>
-                    <tr><td style="background:#f5f5f5;">실지급액</td><td class="text-end" style="font-weight:bold;">${data.net}</td></tr>
+                    <tr><td style="background:#f5f5f5;">지급합계</td><td class="text-end">${safeData.p_total}</td></tr>
+                    <tr><td style="background:#f5f5f5;">공제합계</td><td class="text-end">${safeData.d_total}</td></tr>
+                    <tr><td style="background:#f5f5f5;">실지급액</td><td class="text-end" style="font-weight:bold;">${safeData.net}</td></tr>
                 </table>
             </div>
             ${signatureBlock}
@@ -197,11 +259,23 @@ const PrintService = {
 
     // 4. [기능] 재직/경력증명서 출력
     printCert: function(data) {
-        const siteUrl = String(data?.siteUrl || '').trim();
+        const safeLogoUrl = this.safeUrl(data?.logo, true);
+        const safeSiteUrl = this.escapeHtml(String(data?.siteUrl || '').trim());
+        const safeDocNum = this.escapeHtml(data?.docNum);
+        const safeName = this.escapeHtml(data?.name);
+        const safeBirth = this.escapeHtml(data?.birth);
+        const safeDept = this.escapeHtml(data?.dept);
+        const safePos = this.escapeHtml(data?.pos);
+        const safeAddress = this.formatMultilineHtml(data?.address);
+        const safeTenure = this.escapeHtml(data?.tenure);
+        const safePurpose = this.formatMultilineHtml(data?.purpose);
+        const safeToday = this.escapeHtml(data?.today);
+        const safeCertTitle = this.escapeHtml(String(data?.certTitle || '재직증명서'));
+        const safeEmploymentStatement = this.formatMultilineHtml(data?.employmentStatement || '위와 같이 재직하고 있음을 증명합니다.');
         const footerLines = [];
         const addressBits = [String(data?.compAddr || '').trim(), String(data?.compName || '').trim()].filter(Boolean);
-        if (addressBits.length > 0) footerLines.push(addressBits.join(' '));
-        if (String(data?.contact || '').trim()) footerLines.push(`문의: ${String(data.contact).trim()}`);
+        if (addressBits.length > 0) footerLines.push(this.escapeHtml(addressBits.join(' ')));
+        if (String(data?.contact || '').trim()) footerLines.push(`문의: ${this.escapeHtml(String(data.contact).trim())}`);
         const signatureBlock = this.buildSignatureBlock(data, {
             marginTop: 60,
             maxWidth: '560px',
@@ -218,26 +292,26 @@ const PrintService = {
         });
         const content = `
         <div class="print-cert" style="padding: 20px; height: 100%; box-sizing: border-box; position: relative;">
-            ${data.logo ? `<img src="${data.logo}" style="position:absolute; left:20px; top:20px; height:45px;">` : ''}
-            ${siteUrl ? `<div style="text-align:right; font-size:12px; margin-top:20px; margin-bottom:5px;">${siteUrl}</div>` : ''}
-            <h2 style="text-align:center; font-size: 32px; text-decoration: underline; margin: 50px 0 40px 0; font-weight: bold;">${String(data.certTitle || '재직증명서').replace(/\s+/g, '').split('').join(' ')}</h2>
-            <div style="text-align:right; font-size: 13px; margin-bottom: 20px;">문서번호: ${data.docNum}</div>
+            ${safeLogoUrl ? `<img src="${safeLogoUrl}" style="position:absolute; left:20px; top:20px; height:45px;">` : ''}
+            ${safeSiteUrl ? `<div style="text-align:right; font-size:12px; margin-top:20px; margin-bottom:5px;">${safeSiteUrl}</div>` : ''}
+            <h2 style="text-align:center; font-size: 32px; text-decoration: underline; margin: 50px 0 40px 0; font-weight: bold;">${safeCertTitle.replace(/\s+/g, '').split('').join(' ')}</h2>
+            <div style="text-align:right; font-size: 13px; margin-bottom: 20px;">문서번호: ${safeDocNum}</div>
             
             <div style="text-align:left; font-weight: bold; font-size: 16px; margin-top: 10px; margin-bottom: 5px;">1. 인적사항</div>
             <table style="width:100%;">
-                <tr><th style="background:#f9f9f9; width:100px; padding:6px 10px;">성 명</th><td style="padding:6px 10px;">${data.name}</td><th style="background:#f9f9f9; width:100px; padding:6px 10px;">생년월일</th><td style="padding:6px 10px;">${data.birth}</td></tr>
-                <tr><th style="background:#f9f9f9; padding:6px 10px;">소 속</th><td style="padding:6px 10px;">${data.dept}</td><th style="background:#f9f9f9; padding:6px 10px;">직 위</th><td style="padding:6px 10px;">${data.pos}</td></tr>
-                <tr><th style="background:#f9f9f9; padding:6px 10px;">주 소</th><td colspan="3" style="padding:6px 10px;">${data.address}</td></tr>
+                <tr><th style="background:#f9f9f9; width:100px; padding:6px 10px;">성 명</th><td style="padding:6px 10px;">${safeName}</td><th style="background:#f9f9f9; width:100px; padding:6px 10px;">생년월일</th><td style="padding:6px 10px;">${safeBirth}</td></tr>
+                <tr><th style="background:#f9f9f9; padding:6px 10px;">소 속</th><td style="padding:6px 10px;">${safeDept}</td><th style="background:#f9f9f9; padding:6px 10px;">직 위</th><td style="padding:6px 10px;">${safePos}</td></tr>
+                <tr><th style="background:#f9f9f9; padding:6px 10px;">주 소</th><td colspan="3" style="padding:6px 10px;">${safeAddress}</td></tr>
             </table>
 
             <div style="text-align:left; font-weight: bold; font-size: 16px; margin-top: 20px; margin-bottom: 5px;">2. 재직사항</div>
             <table style="width:100%;">
-                <tr><th style="background:#f9f9f9; width:100px; padding:6px 10px;">재직기간</th><td colspan="3" style="padding:6px 10px;">${data.tenure}</td></tr>
-                <tr><th style="background:#f9f9f9; padding:6px 10px;">용 도</th><td colspan="3" style="padding:6px 10px;">${data.purpose}</td></tr>
+                <tr><th style="background:#f9f9f9; width:100px; padding:6px 10px;">재직기간</th><td colspan="3" style="padding:6px 10px;">${safeTenure}</td></tr>
+                <tr><th style="background:#f9f9f9; padding:6px 10px;">용 도</th><td colspan="3" style="padding:6px 10px;">${safePurpose}</td></tr>
             </table>
 
-            <div style="text-align:center; margin-top: 60px; font-size: 18px;">${data.employmentStatement || '위와 같이 재직하고 있음을 증명합니다.'}</div>
-            <div style="text-align:center; margin-top: 30px; font-size: 18px;">${data.today}</div>
+            <div style="text-align:center; margin-top: 60px; font-size: 18px;">${safeEmploymentStatement}</div>
+            <div style="text-align:center; margin-top: 30px; font-size: 18px;">${safeToday}</div>
             
             ${signatureBlock}
             ${footerLines.length > 0 ? `<div style="text-align:center; margin-top: 70px; font-size: 12px; color: #555;">${footerLines.join('<br>')}</div>` : ''}
@@ -247,12 +321,14 @@ const PrintService = {
 
     // 5. [기능] 급여대장 출력
     printLedger: function(data) {
+        const safeTitle = this.escapeHtml(data?.title);
+        const safeLogoUrl = this.safeUrl(data?.logo, true);
         const content = `
         <div style="padding: 10px;">
             <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom: 20px;">
-                ${data.logo ? `<img src="${data.logo}" style="height:40px;">` : '<div></div>'}
+                ${safeLogoUrl ? `<img src="${safeLogoUrl}" style="height:40px;">` : '<div></div>'}
                 <div style="text-align:center;">
-                    <h1 style="margin:0; font-size: 24px; text-decoration: underline;">${data.title}</h1>
+                    <h1 style="margin:0; font-size: 24px; text-decoration: underline;">${safeTitle}</h1>
                 </div>
                 <table style="width: 200px; border-collapse: collapse; text-align: center; float: right; margin-bottom: 10px;">
                     <tr><td style="border: 1px solid #000; background: #f0f0f0; font-size: 11px; padding: 2px; width:33%;">담당</td><td style="border: 1px solid #000; background: #f0f0f0; font-size: 11px; padding: 2px; width:33%;">사무국장</td><td style="border: 1px solid #000; background: #f0f0f0; font-size: 11px; padding: 2px; width:33%;">이사장</td></tr>

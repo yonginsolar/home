@@ -1,5 +1,5 @@
-/* Version: v1.0.4
-Change: 2026-03-23 - Blur patch note dismiss buttons before Bootstrap hides the modal.
+/* Version: v1.0.5
+Change: 2026-03-29 - Sanitize ERP patch note list rendering and delete actions.
 */
 /**
  * [File: patch_note.js]
@@ -100,6 +100,61 @@ let patchConfirmCallback = null;
 
 let patchNoteLastFocus = null;
 let patchNoteFocusBound = false;
+
+function escapePatchHtml(value = '') {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function safePatchUrl(url) {
+    try {
+        const parsed = new URL(String(url || ''), window.location.origin);
+        if (['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)) return parsed.href;
+    } catch (e) {}
+    return null;
+}
+
+function sanitizePatchContent(raw) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(String(raw || ''), 'text/html');
+    const allowedTags = new Set(['A', 'B', 'BR', 'CODE', 'DIV', 'EM', 'I', 'LI', 'OL', 'P', 'PRE', 'SMALL', 'SPAN', 'STRONG', 'U', 'UL']);
+
+    doc.body.querySelectorAll('*').forEach((el) => {
+        const tag = el.tagName.toUpperCase();
+        if (!allowedTags.has(tag)) {
+            el.replaceWith(doc.createTextNode(el.textContent || ''));
+            return;
+        }
+
+        Array.from(el.attributes).forEach((attr) => {
+            const name = attr.name.toLowerCase();
+            const value = String(attr.value || '');
+            if (name.startsWith('on')) {
+                el.removeAttribute(attr.name);
+                return;
+            }
+            if (tag === 'A' && name === 'href') {
+                const safe = safePatchUrl(value);
+                if (safe) {
+                    el.setAttribute('href', safe);
+                    el.setAttribute('target', '_blank');
+                    el.setAttribute('rel', 'noopener noreferrer');
+                } else {
+                    el.removeAttribute(attr.name);
+                }
+                return;
+            }
+            if (tag === 'A' && name === 'title') return;
+            el.removeAttribute(attr.name);
+        });
+    });
+
+    return doc.body.innerHTML.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+}
 
 function ensurePatchNoteFocusGuard(modalEl) {
     if (patchNoteFocusBound || !modalEl) return;
@@ -221,8 +276,11 @@ async function loadPatchList() {
     const isAdmin = isAdminUser();
 
     listEl.innerHTML = data.map(note => {
-        // 줄바꿈 처리
-        const contentHtml = note.content.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+        const contentHtml = sanitizePatchContent(note.content || '');
+        const safeVersion = escapePatchHtml(note.version || '');
+        const safeReleaseDate = escapePatchHtml(note.release_date || '');
+        const safeTitle = escapePatchHtml(note.title || '');
+        const safeNoteId = Number.isFinite(Number(note.id)) ? Number(note.id) : null;
         
         // 뱃지 스타일
         const badge = note.is_major 
@@ -230,18 +288,18 @@ async function loadPatchList() {
             : '<span class="badge bg-secondary ms-2">Patch</span>';
         
         // 삭제 버튼 (관리자만 보임)
-        const delBtn = isAdmin 
-            ? `<button class="btn btn-outline-danger btn-sm py-0 ms-auto" style="font-size:0.7rem;" onclick="deletePatchNote(${note.id})">삭제</button>` 
+        const delBtn = (isAdmin && safeNoteId !== null)
+            ? `<button class="btn btn-outline-danger btn-sm py-0 ms-auto" style="font-size:0.7rem;" onclick="deletePatchNote(${safeNoteId})">삭제</button>` 
             : '';
 
         return `
             <div class="list-group-item p-3">
                 <div class="d-flex w-100 align-items-center mb-2">
-                    <h6 class="mb-0 fw-bold text-primary">v${note.version} ${badge}</h6>
-                    <small class="text-muted ms-2">${note.release_date}</small>
+                    <h6 class="mb-0 fw-bold text-primary">v${safeVersion} ${badge}</h6>
+                    <small class="text-muted ms-2">${safeReleaseDate}</small>
                     ${delBtn}
                 </div>
-                <h6 class="fw-bold mb-2">${note.title}</h6>
+                <h6 class="fw-bold mb-2">${safeTitle}</h6>
                 <p class="mb-1 small text-secondary" style="line-height: 1.6;">${contentHtml}</p>
             </div>
         `;

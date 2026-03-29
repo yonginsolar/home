@@ -1,5 +1,5 @@
-/* Version: v1.0.2
-Change: 2026-02-05 - Render badge dates in KST consistently.
+/* Version: v1.0.3
+Change: 2026-03-29 - Escape dataset-derived badge info before rendering selected badge details.
 */
 /**
  * badges.js
@@ -184,21 +184,26 @@ const Badges = {
         const date = element.dataset.date;
         const desc = element.dataset.desc;
         const infoBox = document.getElementById('selectedBadgeInfo');
+        const safeIcon = this._utils.escapeHtml(icon || '');
+        const safeName = this._utils.escapeHtml(name || '');
+        const safeDate = this._utils.escapeHtml(date || '');
+        const safeDesc = this._utils.escapeHtml(desc || '');
+        const safePlainDesc = this._utils.escapeHtml(String(desc || '').replace(/^🔒\s*/, ''));
 
         // 4. 정보창 내용 업데이트
         if(has) {
             infoBox.innerHTML = `
-                <div class="fs-1 mb-1">${icon}</div>
-                <h6 class="fw-bold text-dark">${name}</h6>
-                <div class="text-success small fw-bold mb-2">🎉 ${date} 획득</div>
-                <div class="text-secondary small">${desc}</div>
+                <div class="fs-1 mb-1">${safeIcon}</div>
+                <h6 class="fw-bold text-dark">${safeName}</h6>
+                <div class="text-success small fw-bold mb-2">🎉 ${safeDate} 획득</div>
+                <div class="text-secondary small">${safeDesc}</div>
             `;
         } else {
             infoBox.innerHTML = `
-                <div class="fs-1 mb-1 opacity-50">${icon}</div>
-                <h6 class="fw-bold text-muted">${name}</h6>
+                <div class="fs-1 mb-1 opacity-50">${safeIcon}</div>
+                <h6 class="fw-bold text-muted">${safeName}</h6>
                 <div class="text-muted small mb-1">미획득</div>
-                <div class="text-secondary small bg-white p-2 rounded d-inline-block border">조건: ${desc.replace('🔒 ', '')}</div>
+                <div class="text-secondary small bg-white p-2 rounded d-inline-block border">조건: ${safePlainDesc}</div>
             `;
         }
     },

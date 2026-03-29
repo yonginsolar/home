@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.47
-Change: 2026-03-27 - Harden member portal boot with retryable boot guard and keep social link status badges.
+Version: v1.0.64
+Change: 2026-03-29 - Stabilize initial member portal branding and keep duplicate name/email fields out of expanded profile details.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.47 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.64 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>조합원 관리 - 용인모두의햇빛협동조합</title>
+<title>조합원 관리</title>
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 
 <link rel="icon" type="image/png" href="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/favicon.png">
@@ -26,6 +26,7 @@ Change: 2026-03-27 - Harden member portal boot with retryable boot guard and kee
 <script src="badges.js"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
+<script src="shared/route_guard.js?v=20260328-1"></script>
 
 <link href="style.css" rel="stylesheet">
 
@@ -167,6 +168,28 @@ font-size: 1.5rem;
 color: #333;
 }
 .text-green { color: #2E7D32 !important; }
+.profile-summary-card {
+background: #f8fafc;
+border: 1px solid #e5e7eb;
+border-radius: 12px;
+padding: 12px 14px;
+height: 100%;
+}
+.profile-summary-label {
+font-size: 0.74rem;
+color: #6b7280;
+margin-bottom: 4px;
+}
+.profile-summary-value {
+font-weight: 700;
+color: #111827;
+word-break: break-word;
+}
+.profile-details-toggle {
+display: inline-flex;
+align-items: center;
+gap: 6px;
+}
 
 /* [타임라인] 활동 내역 스타일 */
 .timeline-item {
@@ -447,7 +470,7 @@ gtag('config', 'G-TR217L7JN9');
 <div class="container d-flex align-items-center justify-content-between">
 
 <div class="logo">
-<h1><a href="index.html">용인모두의햇빛협동조합</a></h1>
+<h1><a href="index.html" id="headerCoopLink">협동조합</a></h1>
 </div>
 
 <div class="d-flex align-items-center">
@@ -587,12 +610,30 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-2 mb-3" id="profileSummaryRow">
 <div class="col-md-6">
-<label class="small text-muted">이름 (단체명)</label>
-<div class="fw-bold" id="infoName">-</div>
+<div class="profile-summary-card">
+<div class="profile-summary-label" id="summaryNameLabel">이름</div>
+<div class="profile-summary-value" id="summaryName">-</div>
+</div>
+</div>
+<div class="col-md-6">
+<div class="profile-summary-card">
+<div class="profile-summary-label">이메일</div>
+<div class="profile-summary-value" id="summaryEmail">-</div>
+</div>
+</div>
 </div>
 
+<div class="d-flex justify-content-end mb-3">
+<button type="button" class="btn btn-sm btn-outline-secondary profile-details-toggle" id="btnToggleProfileDetails" onclick="toggleProfileDetails()">
+<i class="bi bi-chevron-down" id="profileDetailsToggleIcon"></i>
+<span id="profileDetailsToggleLabel">상세 보기</span>
+</button>
+</div>
+
+<div class="hidden" id="profileDetailsSection">
+<div class="row g-3 mb-4">
 <div class="col-md-6" id="personalInfoGroup">
 <label class="small text-muted">생년월일</label>
 <div class="fw-bold" id="infoBirth">-</div>
@@ -620,11 +661,6 @@ NO. <span id="infoMemberId">-</span>
 </small>
 </div>
 </div>
-</div>
-
-<div class="col-md-6">
-<label class="small text-muted">이메일 (변경불가)</label>
-<div class="fw-bold text-secondary" id="infoEmail">-</div>
 </div>
 
 <div class="col-md-6"> 
@@ -659,6 +695,7 @@ NO. <span id="infoMemberId">-</span>
 <input type="text" id="editHolder" class="readonly-text" placeholder="예금주" readonly>
 </div>
 <small class="text-muted" style="font-size:0.8rem;">* 계좌번호를 수정하지 않으면 기존 정보가 유지됩니다.<br>* 본인 명의의 계좌를 입력해주세요.</small>
+</div>
 </div>
 </div>
 </div>
@@ -1304,6 +1341,24 @@ return String(value)
 .replace(/\"/g, '&quot;')
 .replace(/'/g, '&#39;');
 }
+function escapeJsString(value = '') {
+return String(value ?? '')
+.replace(/\\/g, '\\\\')
+.replace(/'/g, "\\'")
+.replace(/\r/g, '\\r')
+.replace(/\n/g, '\\n');
+}
+function safeUrl(value = '') {
+const raw = String(value || '').trim();
+if (!raw) return '';
+try {
+const url = new URL(raw, window.location.origin);
+if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+return url.href;
+} catch (_) {
+return '';
+}
+}
 handleManualSession();
 } catch (e) {
 console.error("Supabase Init Error", e);
@@ -1317,8 +1372,6 @@ const accessToken = params.get('at');
 const refreshToken = params.get('rt');
 
 if (accessToken && refreshToken) {
-void 0;
-
 // 1. 수동으로 세션 설정
 const { data, error } = await _supabase.auth.setSession({
 access_token: accessToken,
@@ -1326,8 +1379,6 @@ refresh_token: refreshToken
 });
 
 if (!error && data.session) {
-void 0;
-
 // 2. URL에서 토큰 흔적 지우기 (보안 및 미관상)
 // 현재 페이지 주소에서 파라미터만 싹 제거해서 주소창 업데이트
 const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
@@ -1446,7 +1497,6 @@ return;
 }
 
 // [비로그인 상태] -> 로그인 화면 즉시 노출
-void 0;
 hidePortalRetryState();
 showOnly('loginSection'); 
 }
@@ -1458,22 +1508,33 @@ showOnly('loginSection');
 // =========================================================================
 // 기존 함수 -> 변경할 함수
 
-function buildAuthCallbackUrl(extraParams = {}) {
-let baseUrl = window.location.href;
-
-if (baseUrl.endsWith('/')) {
-baseUrl = baseUrl + 'auth_callback.html';
-} else {
-baseUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + 'auth_callback.html';
+function isLocalPortalServerRuntime() {
+const host = String(window.location.hostname || '').trim().toLowerCase();
+return (window.location.protocol === 'http:' || window.location.protocol === 'https:')
+&& (host === 'localhost' || host === '127.0.0.1');
 }
 
-const url = new URL(baseUrl);
-Object.entries(extraParams || {}).forEach(([key, value]) => {
+function isFilePortalRuntime() {
+return window.location.protocol === 'file:';
+}
+
+function buildAuthCallbackUrl(extraParams = {}) {
+const params = Object.assign({}, extraParams || {});
+if (isLocalPortalServerRuntime()) {
+delete params.next;
+}
+if (window.CoopRouteGuard?.buildSiblingPageUrl) {
+return window.CoopRouteGuard.buildSiblingPageUrl('auth_callback.html', params);
+}
+const url = new URL('auth_callback.html', window.location.href);
+Object.entries(params).forEach(([key, value]) => {
 if (value === null || value === undefined || value === '') return;
 url.searchParams.set(key, String(value));
 });
 return url.toString();
 }
+
+const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
 
 function normalizePortalProviderKey(value) {
 return String(value || '').trim().toLowerCase();
@@ -1564,6 +1625,11 @@ return `${providerLabel} 연동 오류: ${msg}`;
 async function startKakaoLinking() {
 showLoading(true, '카카오 연동을 시작합니다...');
 
+if (isFilePortalRuntime()) {
+showLoading(false);
+return showModal('file:// 환경에서는 카카오 연동을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.');
+}
+
 if (!curAuth || !curAuth.id) {
 showLoading(false);
 return showModal('로그인 세션 정보가 없어 연동을 시작할 수 없습니다.');
@@ -1576,7 +1642,7 @@ return showModal('현재 인증 버전에서는 카카오 계정 연동을 지�
 
 try {
 const nextTarget = window.location.href;
-localStorage.setItem('auth_destination', nextTarget);
+localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 const redirectUrl = buildAuthCallbackUrl({ linking: 'true', next: nextTarget });
 
 const { data, error } = await _supabase.auth.linkIdentity({
@@ -1604,6 +1670,11 @@ showLoading(false);
 async function startNaverLinking() {
 showLoading(true, '네이버 연동을 시작합니다...');
 
+if (isFilePortalRuntime()) {
+showLoading(false);
+return showModal('file:// 환경에서는 네이버 연동을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.');
+}
+
 if (!curAuth || !curAuth.id) {
 showLoading(false);
 return showModal('로그인 세션 정보가 없어 연동을 시작할 수 없습니다.');
@@ -1616,7 +1687,7 @@ return showModal('현재 인증 버전에서는 네이버 계정 연동을 지�
 
 try {
 const nextTarget = window.location.href;
-localStorage.setItem('auth_destination', nextTarget);
+localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 const redirectUrl = buildAuthCallbackUrl({ linking: 'true', provider: 'naver', next: nextTarget });
 
 const { data, error } = await _supabase.auth.linkIdentity({
@@ -1732,33 +1803,8 @@ const params = new URLSearchParams(window.location.search);
 const raw = params.get('next') || '';
 if (!raw) return '';
 
-const allowOrigins = [
-window.location.origin,
-'https://www.yonginsolar.kr',
-'http://localhost:8000'
-];
-
-function remapLegacyErpDestination(dest) {
-if (!(dest instanceof URL)) return dest;
-if (dest.origin !== 'https://erp.yonginsolar.kr') return dest;
-const mapped = new URL('https://www.yonginsolar.kr');
-const safePath = String(dest.pathname || '').trim();
-mapped.pathname = (!safePath || safePath === '/')
-? '/erp/'
-: (safePath === '/erp' || safePath.startsWith('/erp/') ? safePath : `/erp${safePath.startsWith('/') ? '' : '/'}${safePath}`);
-mapped.search = dest.search;
-mapped.hash = dest.hash;
-return mapped;
-}
-
 function normalizeDest(candidate) {
-try {
-const dest = remapLegacyErpDestination(new URL(candidate, window.location.href));
-if (!allowOrigins.includes(dest.origin)) return null;
-return dest;
-} catch (e) {
-return null;
-}
+return CoopRouteGuard.tryNormalizeDestination(candidate, { returnFallback: false });
 }
 
 let dest = normalizeDest(raw);
@@ -1865,7 +1911,7 @@ return dest.href;
 
 		const returnUrl = getSafeLoginReturnUrl();
 		if (returnUrl) {
-		localStorage.removeItem('auth_destination');
+		localStorage.removeItem(PUBLIC_AUTH_DEST_KEY);
 		const cleanUrl = window.location.origin + window.location.pathname;
 		window.history.replaceState({}, document.title, cleanUrl);
 		window.location.replace(returnUrl);
@@ -2174,7 +2220,6 @@ const { data, error } = await _supabase
 .maybeSingle();
 
 if (error) {
-void 0;
 return null;
 }
 return data ? data.account_number : null;
@@ -2211,20 +2256,22 @@ const maskedAcc = await fetchMaskedBankInfo(uuid);
 if (maskedAcc) member.account_number = maskedAcc; 
 curMem = member; 
 currentMemberCoopId = member.coop_id || await getCurrentMemberCoopId();
+await loadMembermanageBranding();
+applyMembermanageBranding();
 // [신규] 현재 로드하는 프로필 유형도 저장 (타 페이지 연동용)
 sessionStorage.setItem('activeMemberType', curMem.member_type);
 syncSocialLinkButtons();
 
 // 2. 모든 자산 데이터 병렬 조회 (Promise.all)
-const pLedger = _supabase.from('ref_members').select('*').eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
-const pApps = _supabase.from('coop_applications').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
+const pLedger = scopeMemberTenant(_supabase.from('ref_members').select('*')).eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
+const pApps = scopeMemberTenant(_supabase.from('coop_applications').select('*')).eq('member_uid', uuid).order('created_at', { ascending: false });
 
-const pDonations = _supabase.from('coop_donations')
+const pDonations = scopeMemberTenant(_supabase.from('coop_donations')
 .select('*')
 .eq('member_id', curMem.member_id) 
-.order('donation_date', { ascending: false });
-const pPoints = _supabase.from('coop_points').select('*').eq('member_uid', uuid).order('created_at', { ascending: false });
-const pDividends = _supabase.from('coop_dividends').select('*').eq('member_id', curMem.member_id).order('paid_at', { ascending: false });
+.order('donation_date', { ascending: false }));
+const pPoints = scopeMemberTenant(_supabase.from('coop_points').select('*')).eq('member_uid', uuid).order('created_at', { ascending: false });
+const pDividends = scopeMemberTenant(_supabase.from('coop_dividends').select('*')).eq('member_id', curMem.member_id).order('paid_at', { ascending: false });
 
 const [resLedger, resApps, resDonations, resPoints, resDividends] = await Promise.all([pLedger, pApps, pDonations, pPoints, pDividends]);
 
@@ -2467,6 +2514,9 @@ let globalHistoryData = {};
 let quickVoteActionUrl = 'vote/vote_login.html';
 let coopRuntimeModules = null;
 let currentMemberCoopId = null;
+const MEMBERMANAGE_BRANDING_CACHE_KEY = 'membermanage_branding_name';
+const DEFAULT_MEMBERMANAGE_COOP_NAME = '용인모두의햇빛협동조합';
+let currentMemberCoopName = String(localStorage.getItem(MEMBERMANAGE_BRANDING_CACHE_KEY) || '').trim() || DEFAULT_MEMBERMANAGE_COOP_NAME;
 
 async function getCurrentMemberCoopId() {
 if (currentMemberCoopId) return currentMemberCoopId;
@@ -2485,6 +2535,81 @@ function scopeMemberTenant(query) {
 const safeCoopId = String(currentMemberCoopId || '').trim();
 return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
 }
+function withMemberTenantPayload(payload) {
+if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+const safeCoopId = String(currentMemberCoopId || '').trim();
+if (!safeCoopId) return payload;
+return { ...payload, coop_id: safeCoopId };
+}
+
+function setProfileDetailsExpanded(expanded) {
+const section = document.getElementById('profileDetailsSection');
+const label = document.getElementById('profileDetailsToggleLabel');
+const icon = document.getElementById('profileDetailsToggleIcon');
+if (!section || !label || !icon) return;
+const open = !!expanded;
+section.classList.toggle('hidden', !open);
+label.textContent = open ? '상세 접기' : '상세 보기';
+icon.className = open ? 'bi bi-chevron-up' : 'bi bi-chevron-down';
+}
+
+function toggleProfileDetails(forceExpanded) {
+const section = document.getElementById('profileDetailsSection');
+if (!section) return;
+const next = typeof forceExpanded === 'boolean'
+? forceExpanded
+: section.classList.contains('hidden');
+setProfileDetailsExpanded(next);
+}
+
+async function loadMembermanageBranding() {
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+if (!coopId) return currentMemberCoopName;
+if (currentMemberCoopName) return currentMemberCoopName;
+try {
+const { data, error } = await _supabase
+.from('ref_company_info')
+.select('key,value')
+.eq('coop_id', coopId)
+.in('key', ['company_name', 'orgName']);
+if (error) throw error;
+const rows = Array.isArray(data) ? data : [];
+const infoMap = rows.reduce((acc, row) => {
+const key = String(row?.key || '').trim();
+if (!key) return acc;
+acc[key] = String(row?.value || '').trim();
+return acc;
+}, {});
+currentMemberCoopName = String(infoMap.company_name || infoMap.orgName || '').trim();
+if (!currentMemberCoopName) {
+const { data: coopRow, error: coopError } = await _supabase
+    .from('coops')
+    .select('coop_name')
+    .eq('id', coopId)
+    .limit(1)
+    .maybeSingle();
+if (coopError) throw coopError;
+currentMemberCoopName = String(coopRow?.coop_name || '').trim();
+}
+if (currentMemberCoopName) {
+localStorage.setItem(MEMBERMANAGE_BRANDING_CACHE_KEY, currentMemberCoopName);
+}
+return currentMemberCoopName;
+} catch (e) {
+console.warn('loadMembermanageBranding failed:', e);
+return currentMemberCoopName;
+}
+}
+
+function applyMembermanageBranding() {
+const coopName = String(currentMemberCoopName || '').trim() || DEFAULT_MEMBERMANAGE_COOP_NAME;
+const pageTitle = coopName ? `조합원 관리 - ${coopName}` : '조합원 관리';
+document.title = pageTitle;
+const headerCoopLink = document.getElementById('headerCoopLink');
+if (headerCoopLink) headerCoopLink.textContent = coopName || '협동조합';
+}
+
+applyMembermanageBranding();
 
 const VOTE_PHASE_PRIORITY = Object.freeze({
 OPEN: 1,
@@ -3047,6 +3172,11 @@ setText('infoMemberId', member.member_id || '-'); // 상단으로 이동된 조�
 const isGroup = (member.member_type === '단체'); // 단체 회원 여부 판단
 const personalGroup = document.getElementById('personalInfoGroup'); // 개인용(생년월일)
 const orgGroup = document.getElementById('orgInfoGroup');           // 단체용(사업자번호)
+const summaryNameLabel = document.getElementById('summaryNameLabel');
+
+if (summaryNameLabel) {
+summaryNameLabel.textContent = isGroup ? '단체명' : '이름';
+}
 
 if (isGroup) {
 // [단체] 생년월일 숨기고 사업자/법인번호 표시
@@ -3078,8 +3208,8 @@ const btnPartner = document.getElementById('menuBtnPartner');
 if(btnPartner) btnPartner.classList.add('hidden');
 }
 
-setText('infoName', member.name);
-setText('infoEmail', member.email || curAuth.email);
+setText('summaryName', member.name);
+setText('summaryEmail', member.email || curAuth.email);
 
 // 공통 필드들
 setVal('editPhone', member.phone);
@@ -3142,10 +3272,11 @@ else if(count >= 4) colClass = 'col-md-3 col-6';
 activeAssets.forEach(item => {
 const div = document.createElement('div');
 div.className = colClass;
+const safeAssetType = escapeJsString(item.type || '');
 // 클릭 시 openHistoryModal 호출
 div.innerHTML = `
            <div class="dashboard-card text-center p-3 h-100" style="cursor:pointer; transition: transform 0.2s;" 
-                onclick="openHistoryModal('${item.type}')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+                onclick="openHistoryModal('${safeAssetType}')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
                <i class="bi ${item.icon} count-icon" style="font-size: 2rem; color: ${item.color}; margin-bottom: 10px;"></i>
                <div class="count-title" style="color: #666; font-size: 0.9rem;">${item.title}</div>
                <div class="count-val" style="font-family: 'GmarketSans'; font-weight: 700; font-size: 1.3rem; color: #333;">
@@ -3241,9 +3372,9 @@ async function markDocumentBoxSeen(memberUuid = null) {
 
     const markAt = new Date().toISOString();
 
-    const { error: updErr } = await _supabase
+    const { error: updErr } = await scopeMemberTenant(_supabase
         .from('coop_members')
-        .update({ document_box_last_seen_at: markAt })
+        .update({ document_box_last_seen_at: markAt }))
         .eq('id', targetId);
 
     if (updErr) {
@@ -3554,9 +3685,10 @@ if (app.type !== 'connect') {
 const canModify = (app.type !== 'withdraw'); 
 
 // 버튼 HTML 조립
+const safeAppType = escapeJsString(app.type || '');
 actionBtns = `
                <div class="mt-2 text-end">
-                   ${canModify ? `<button class="btn btn-sm btn-outline-primary py-0 px-2 me-1" style="font-size:0.8rem;" onclick="openModifyModal(${app.id}, '${app.type}', ${app.amount})">수정</button>` : ''}
+                   ${canModify ? `<button class="btn btn-sm btn-outline-primary py-0 px-2 me-1" style="font-size:0.8rem;" onclick="openModifyModal(${app.id}, '${safeAppType}', ${app.amount})">수정</button>` : ''}
                    <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:0.8rem;" onclick="cancelApp(${app.id})">취소</button>
                </div>`;
 }
@@ -3659,8 +3791,8 @@ async function cancelApp(appId) {
 // confirm -> showConfirmModal
 showConfirmModal('신청을 취소하시겠습니까?', async function() {
 showLoading(true);
-const { error } = await _supabase
-.from('coop_applications')
+const { error } = await scopeMemberTenant(_supabase
+.from('coop_applications'))
 .update({ status: 'cancelled' })
 .eq('id', appId);
 
@@ -3704,8 +3836,13 @@ window.__memberAppLocks.submitApplication = true;
 showLoading(true);
 
 try {
-const { data: existingPending, error: pendingErr } = await _supabase
-.from('coop_applications')
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+if (!coopId) {
+throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
+}
+
+const { data: existingPending, error: pendingErr } = await scopeMemberTenant(_supabase
+.from('coop_applications'))
 .select('id')
 .eq('member_uid', curAuth.id)
 .eq('type', type)
@@ -3721,7 +3858,7 @@ showModal('이미 동일한 신청이 접수되어 있습니다.\n처리 결과�
 return;
 }
 
-const { error } = await _supabase.from('coop_applications').insert({
+const { error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
 member_uid: curAuth.id,
 member_id: curMem.member_id,
 name: curMem.name,
@@ -3729,7 +3866,7 @@ type: type,
 amount: amount,
 reason: reason,
 status: 'pending'
-});
+}));
 
 if(error) throw error;
 
@@ -3805,6 +3942,7 @@ try {
 const { data: existing, error: checkErr } = await _supabase
 .from('coop_members')
 .select('id, manager_id') 
+.eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
 .eq('phone', phone)
 .neq('id', targetUuid)
 .maybeSingle();
@@ -3906,7 +4044,7 @@ if(!curMem) return;
 showLoading(true, '증서 발급 중...');
 
 try {
-const { data: pay } = await _supabase.from('ref_members').select('amount').eq('member_id', curMem.member_id);
+const { data: pay } = await scopeMemberTenant(_supabase.from('ref_members').select('amount')).eq('member_id', curMem.member_id);
 const ledgerTotal = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
 const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
 
@@ -3954,7 +4092,8 @@ const meta = session.user.user_metadata;
 // 1. 헤더 프로필 사진 연결
 const profileImg = document.getElementById('headerProfileImg'); // ID 변경됨
 if (profileImg && meta.avatar_url) {
-profileImg.src = meta.avatar_url;
+const safeAvatarUrl = safeUrl(meta.avatar_url);
+if (safeAvatarUrl) profileImg.src = safeAvatarUrl;
 }
 
 // 2. 헤더 이름 연결
@@ -3973,18 +4112,20 @@ loadUserProfile();
 async function startKakaoLogin() {
     try {
         showLoading(true, '카카오 로그인 페이지로 이동합니다...');
+        if (isFilePortalRuntime()) {
+            showLoading(false);
+            return showModal('file:// 환경에서는 카카오 로그인을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.');
+        }
 
         // 1. 돌아올 목적지 설정 (현재 보고 있는 페이지의 전체 URL)
         const nextTarget = window.location.href;
 
         // [백업용] 로컬 스토리지 저장 (하위 호환성 유지)
-        localStorage.setItem('auth_destination', nextTarget);
+        localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 
         // 2. 최종 Redirect URL 조립
         const redirectUrl = buildAuthCallbackUrl({ next: nextTarget });
         
-        void 0; // 디버깅용 로그
-
         // 3. Supabase 로그인 시작
         const { data, error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
@@ -4009,9 +4150,13 @@ async function startKakaoLogin() {
 async function startNaverLogin() {
     try {
         showLoading(true, '네이버 로그인 페이지로 이동합니다...');
+        if (isFilePortalRuntime()) {
+            showLoading(false);
+            return showModal('file:// 환경에서는 네이버 로그인을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.');
+        }
 
         const nextTarget = window.location.href;
-        localStorage.setItem('auth_destination', nextTarget);
+        localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
         const redirectUrl = buildAuthCallbackUrl({ next: nextTarget });
 
         const { data, error } = await _supabase.auth.signInWithOAuth({
@@ -4105,6 +4250,7 @@ const accInput = document.getElementById('editAccountNo');
 const detailAddrInput = document.getElementById('editAddrDetail');
 
 if (isEdit) {
+setProfileDetailsExpanded(true);
 // [수정 모드]
 document.getElementById('btnEditProfile').classList.add('hidden');
 document.getElementById('btnSaveProfile').classList.remove('hidden');
@@ -4298,16 +4444,18 @@ let targetInfo = null; // 연결된 상대방 정보 (이름, ID)
 if (isGroup) {
 // [단체 입장] 나를 관리하는 부모(manager_id)가 있는가?
 if (curMem.manager_id) {
-const { data: parent } = await _supabase.from('coop_members')
-.select('name').eq('id', curMem.manager_id).single();
+const { data: parent } = await scopeMemberTenant(_supabase.from('coop_members')
+.select('name'))
+.eq('id', curMem.manager_id)
+.single();
 
 isConnected = true;
 targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager_id };
 }
 } else {
 // [개인 입장] 내가 관리하는 "단체"가 있는가? (1:1 원칙 체크)
-const { data: group } = await _supabase.from('coop_members')
-.select('id, name')
+const { data: group } = await scopeMemberTenant(_supabase.from('coop_members')
+.select('id, name'))
 .eq('manager_id', curAuth.id)
 .eq('member_type', '단체') // 단체만 체크 (자녀는 여러 명이어도 됨)
 .maybeSingle(); // 하나라도 있으면 가져옴
@@ -4331,9 +4479,11 @@ connArea.innerHTML = '<div class="text-center text-danger py-3">정보 확인 �
 function renderConnectTabUI(container, isConnected, targetInfo, amIGroup) {
 if (isConnected) {
 // [Case A] 이미 연결됨: 검색창 숨김 + 해제 버튼 노출
+const safeTargetName = escapeHtml(targetInfo?.name || '알 수 없음');
+const safeTargetId = encodeURIComponent(String(targetInfo?.id || ''));
 const msg = amIGroup 
-? `현재 <b>'${targetInfo.name}'</b> 님이<br>이 계정을 관리하고 있습니다.`
-: `현재 <b>'${targetInfo.name}'</b> (단체)를<br>관리하고 있습니다.`;
+? `현재 <b>'${safeTargetName}'</b> 님이<br>이 계정을 관리하고 있습니다.`
+: `현재 <b>'${safeTargetName}'</b> (단체)를<br>관리하고 있습니다.`;
 
 container.innerHTML = `
            <div class="text-center py-4 bg-light rounded border">
@@ -4343,7 +4493,7 @@ container.innerHTML = `
                <h6 class="fw-bold mb-3">연결된 계정</h6>
                <p class="text-muted mb-4 small">${msg}</p>
                
-               <button class="btn btn-outline-danger btn-sm fw-bold px-4" onclick="disconnectRelation('${targetInfo.id}', ${amIGroup})">
+               <button class="btn btn-outline-danger btn-sm fw-bold px-4" onclick="disconnectRelation(decodeURIComponent('${safeTargetId}'), ${amIGroup})">
                    <i class="bi bi-x-circle me-1"></i> 연결 해제
                </button>
            </div>
@@ -4386,14 +4536,14 @@ let error = null;
 if (amIGroup) {
 // [단체 입장] 내 머리 위의 manager_id 삭제
 // (RLS 정책에 따라 자기 자신 업데이트는 보통 허용됨)
-const { error: err } = await _supabase.from('coop_members')
-.update({ manager_id: null })
+const { error: err } = await scopeMemberTenant(_supabase.from('coop_members')
+.update({ manager_id: null }))
 .eq('id', curAuth.id); // 내 ID 기준
 error = err;
 } else {
 // [개인 입장] 내가 관리하던 단체의 manager_id 삭제
-const { error: err } = await _supabase.from('coop_members')
-.update({ manager_id: null })
+const { error: err } = await scopeMemberTenant(_supabase.from('coop_members')
+.update({ manager_id: null }))
 .eq('id', targetId); // 단체의 UUID 기준
 error = err;
 }
@@ -4508,15 +4658,18 @@ let html = '<ul class="list-group list-group-flush small">';
 filteredList.forEach(m => {
 const typeBadge = m.member_type === '단체' ? '<span class="badge bg-info">단체</span>' : '<span class="badge bg-secondary">개인</span>';
 // 이메일 마스킹 (선택 사항)
-const emailDisplay = m.email || '이메일 없음';
+const emailDisplay = escapeHtml(m.email || '이메일 없음');
+const safeTargetId = encodeURIComponent(String(m.id || ''));
+const safeTargetName = escapeHtml(m.name || '');
+const safeTargetNameArg = encodeURIComponent(String(m.name || ''));
 
 html += `
            <li class="list-group-item d-flex justify-content-between align-items-center p-2">
                <div>
-                   ${typeBadge} <b>${m.name}</b>
+                   ${typeBadge} <b>${safeTargetName}</b>
                    <br><span class="text-muted x-small">${emailDisplay}</span>
                </div>
-               <button class="btn btn-sm btn-outline-primary" onclick="requestConnect('${m.id}', '${m.name}')">
+               <button class="btn btn-sm btn-outline-primary" onclick="requestConnect(decodeURIComponent('${safeTargetId}'), decodeURIComponent('${safeTargetNameArg}'))">
                    연결 신청
                </button>
            </li>`;
@@ -4539,9 +4692,14 @@ window.__memberAppLocks.requestConnect = true;
 showLoading(true);
 
 try {
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+if (!coopId) {
+throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
+}
+
 const requestReason = `Target: ${targetUuid}`;
-const { data: existingPending, error: pendingErr } = await _supabase
-.from('coop_applications')
+const { data: existingPending, error: pendingErr } = await scopeMemberTenant(_supabase
+.from('coop_applications'))
 .select('id')
 .eq('member_uid', curAuth.id)
 .eq('type', 'connect')
@@ -4558,7 +4716,7 @@ showModal('이미 해당 대상에게 연결 신청이 접수되어 있습니다
 return;
 }
 
-const { error } = await _supabase.from('coop_applications').insert({
+const { error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
 member_uid: curAuth.id,
 member_id: curMem.member_id,
 name: curMem.name,
@@ -4566,7 +4724,7 @@ type: 'connect',
 reason: requestReason,
 amount: 0,
 status: 'pending'
-});
+}));
 
 if(error) throw error;
 
@@ -4631,6 +4789,7 @@ async function loadFamilyList(managerUid) {
 const { data: fams } = await _supabase
 .from('coop_members')
 .select('*')
+.eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
 .eq('manager_id', managerUid);
 
 const area = document.getElementById('familyListArea');
@@ -4679,6 +4838,7 @@ const coopId = curMem?.coop_id || null;
 const { data: existingFamily, error: familyErr } = await _supabase
 .from('coop_members')
 .select('id')
+.eq('coop_id', coopId)
 .eq('manager_id', curAuth.id)
 .eq('rrn_display', maskedRrn)
 .limit(1)
@@ -4775,7 +4935,7 @@ const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
 const baseListQuery = _supabase
 .from(tableName)
 .select('*');
-const { data: posts, error } = await (tableName === 'coop_notices' ? scopeMemberTenant(baseListQuery) : baseListQuery)
+const { data: posts, error } = await scopeMemberTenant(baseListQuery)
 .order('created_at', { ascending: false })
 .range(0, limit - 1);
 
@@ -4793,9 +4953,10 @@ const date = formatMemberKstDate(p.created_at);
     const strippedContent = rawContent.replace(/<[^>]*>?/gm, '');
     const safeContent = escapeHtml(strippedContent);
     const safeTitle = escapeHtml(p.title || '');
+    const safeCategory = escapeJsString(category || '');
 
     html += `
-       <div class="board-list-item p-3 border-bottom" onclick="viewPost(${p.id}, '${category}')" style="cursor:pointer;">
+       <div class="board-list-item p-3 border-bottom" onclick="viewPost(${p.id}, '${safeCategory}')" style="cursor:pointer;">
            <div class="d-flex justify-content-between">
                 <span class="fw-bold text-dark text-truncate">${safeTitle}</span>
                 <small class="text-muted">${date}</small>
@@ -4845,8 +5006,13 @@ window.__memberAppLocks.submitPost = true;
 showLoading(true);
 
 try {
-const { data: recentPost, error: recentPostErr } = await _supabase
-.from('coop_boards')
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+if (!coopId) {
+throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
+}
+
+const { data: recentPost, error: recentPostErr } = await scopeMemberTenant(_supabase
+.from('coop_boards'))
 .select('id, created_at')
 .eq('category', currentBoardCat)
 .eq('author_name', curMem.name)
@@ -4870,13 +5036,13 @@ return;
 // 파일 배열 처리
 const files = fileUrl ? [fileUrl] : [];
 
-const { error } = await _supabase.from('coop_boards').insert({
+const { error } = await _supabase.from('coop_boards').insert(withMemberTenantPayload({
 category: currentBoardCat, // 현재 보고 있는 탭의 카테고리 (free, executive 등)
 title: title,
 content: content,
 files: files,
 author_name: curMem.name // 작성자 이름 기록
-});
+}));
 
 if(error) throw error;
 
@@ -4907,7 +5073,7 @@ const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
 
 // 1. 조회
 const basePostQuery = _supabase.from(tableName).select('*');
-const { data: post, error } = await (tableName === 'coop_notices' ? scopeMemberTenant(basePostQuery) : basePostQuery).eq('id', id).single();
+const { data: post, error } = await scopeMemberTenant(basePostQuery).eq('id', id).single();
 if(error || !post) return showModal('글을 불러오지 못했습니다.');
 
 // 2. 바인딩 (안전하게 ID 확인)
@@ -4945,10 +5111,19 @@ fileArea.innerHTML = '';
 
 if (files.length > 0) {
 files.forEach((f, i) => {
-// URL이 유효한 경우에만 버튼 생성
-if(f && f.length > 5) {
+const safeHref = safeUrl(f);
+if (safeHref) {
 const name = fileNames[i] || `첨부파일 ${i+1}`;
-fileArea.innerHTML += `<a href="${f}" target="_blank" class="btn btn-sm btn-outline-primary me-2 my-1"><i class="bi bi-download"></i> ${escapeHtml(name)}</a>`;
+const link = document.createElement('a');
+link.href = safeHref;
+link.target = '_blank';
+link.rel = 'noopener noreferrer';
+link.className = 'btn btn-sm btn-outline-primary me-2 my-1';
+const icon = document.createElement('i');
+icon.className = 'bi bi-download';
+link.appendChild(icon);
+link.appendChild(document.createTextNode(` ${name}`));
+fileArea.appendChild(link);
 }
 });
 }
@@ -4967,8 +5142,9 @@ let html = `<button class="btn btn-dark btn-sm" onclick="document.getElementById
 
 // 공지사항 아니고 내 글이면 수정/삭제 노출
 if(category !== 'notice' && isMine) {
+const safePostId = escapeJsString(post.id || '');
 html = `
-               <button class="btn btn-danger btn-sm me-1" onclick="deletePost('${post.id}')">삭제</button>
+               <button class="btn btn-danger btn-sm me-1" onclick="deletePost('${safePostId}')">삭제</button>
                ${html}
            `;
 }
@@ -4990,24 +5166,21 @@ async function loadManagedProfiles(myAuthId) {
 const switcher = document.getElementById('profileSwitcher');
 const menu = document.getElementById('profileListMenu');
 
-void 0;
-
 // (1) 본인 계정 정보
-const { data: me, error: errMe } = await _supabase.from('coop_members').select('id, name, member_type').eq('id', myAuthId).single();
+const { data: me, error: errMe } = await scopeMemberTenant(_supabase.from('coop_members').select('id, name, member_type')).eq('id', myAuthId).single();
 if(errMe) console.error("❌ 내 정보 조회 실패:", errMe);
 
 // (2) 내가 관리자인 계정들 가져오기 (manager_id가 나인 경우)
 const { data: subProfiles, error: errSub } = await _supabase
 .from('coop_members')
 .select('id, name, member_type')
+.eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
 .eq('manager_id', myAuthId); // ★ 여기가 핵심
 
 if(errSub) console.error("❌ 서브 계정 조회 에러:", errSub);
-void 0;
 
 // 관리할 계정이 없으면 스위처 숨김 (여기에 걸리는지 확인 필요)
 if (!subProfiles || subProfiles.length === 0) {
-void 0;
 switcher.classList.add('hidden');
 return;
 }
@@ -5021,18 +5194,20 @@ if(!p) return;
 const isMe = p.id === myAuthId;
 const badge = p.member_type === '단체' ? '<span class="badge bg-info ms-1">단체</span>' : '';
 const activeClass = (curMem && curMem.id === p.id) ? 'active' : ''; 
+const safeProfileId = escapeJsString(p.id || '');
+const safeProfileNameArg = escapeJsString(p.name || '');
+const safeProfileNameText = escapeHtml(p.name || '');
 
 menu.innerHTML += `
            <li>
-               <button class="dropdown-item d-flex justify-content-between align-items-center ${activeClass}" onclick="switchProfile('${p.id}', '${p.name}')">
-                   <span>${p.name} ${isMe ? '(나)' : ''}</span>
+               <button class="dropdown-item d-flex justify-content-between align-items-center ${activeClass}" onclick="switchProfile('${safeProfileId}', '${safeProfileNameArg}')">
+                   <span>${safeProfileNameText} ${isMe ? '(나)' : ''}</span>
                    ${badge}
                </button>
            </li>`;
 });
 
 // 스위처 노출 (hidden 클래스 제거)
-void 0;
 switcher.classList.remove('hidden');
 }
 
@@ -5054,7 +5229,7 @@ showModal(`'${targetName}' 계정으로 전환되었습니다.\n이제 이 명�
 // [추가] 삭제 함수
 async function deletePost(id) {
 showConfirmModal('정말 삭제하시겠습니까?', async () => {
-const { error } = await _supabase.from('coop_boards').delete().eq('id', id);
+const { error } = await scopeMemberTenant(_supabase.from('coop_boards')).delete().eq('id', id);
 if(error) showModal('삭제 실패');
 else {
 showModal('삭제되었습니다.');
@@ -5085,11 +5260,12 @@ let html = '';
 notices.forEach(n => {
 const date = formatMemberKstDate(n.created_at).slice(5, 10); // MM-DD
 const safeTitle = escapeHtml(n.title || '');
+const safeNoticeId = escapeJsString(n.id || '');
 const visibilityBadge = n.is_members_only
 ? '<span class="badge bg-success-subtle text-success border me-2">조합원</span>'
 : '<span class="badge bg-light text-muted border me-2">전체</span>';
 html += `
-               <div class="notice-mini-item d-flex justify-content-between" onclick="openNoticeDetail('${n.id}')">
+               <div class="notice-mini-item d-flex justify-content-between" onclick="openNoticeDetail('${safeNoticeId}')">
                    <span class="text-truncate" style="max-width: 70%;">${visibilityBadge}${safeTitle}</span>
                    <span class="text-muted small">${date}</span>
                </div>`;
@@ -5123,27 +5299,49 @@ alertDiv.id = 'connectRequestAlert';
 alertDiv.className = 'alert alert-primary border-primary d-flex flex-column gap-2 mb-4 shadow-sm';
 alertDiv.style.backgroundColor = '#e3f2fd';
 
-let html = `<div class="d-flex align-items-center text-primary fw-bold">
-                   <i class="bi bi-link-45deg fs-3 me-2"></i>
-                   계정 연결 요청이 도착했습니다!
-               </div>`;
+const header = document.createElement('div');
+header.className = 'd-flex align-items-center text-primary fw-bold';
+const headerIcon = document.createElement('i');
+headerIcon.className = 'bi bi-link-45deg fs-3 me-2';
+header.appendChild(headerIcon);
+header.appendChild(document.createTextNode('계정 연결 요청이 도착했습니다!'));
+alertDiv.appendChild(header);
 
 // JSON 배열 순회
 requests.forEach(req => {
-html += `
-           <div class="bg-white p-3 rounded border d-flex justify-content-between align-items-center mt-2">
-               <div>
-                   <span class="fw-bold text-dark">${req.requester_name}</span> 님이
-                   <br><small class="text-muted">내 계정을 관리하길 원합니다.</small>
-               </div>
-               <div class="d-flex gap-2">
-                   <button class="btn btn-sm btn-outline-danger" onclick="answerConnect(${req.app_id}, 'reject')">거절</button>
-                   <button class="btn btn-sm btn-primary fw-bold" onclick="answerConnect(${req.app_id}, 'approve')">수락</button>
-               </div>
-           </div>`;
+const safeAppId = Number(req?.app_id);
+if (!Number.isFinite(safeAppId) || safeAppId <= 0) return;
+const requestRow = document.createElement('div');
+requestRow.className = 'bg-white p-3 rounded border d-flex justify-content-between align-items-center mt-2';
+const requestText = document.createElement('div');
+const requesterNameEl = document.createElement('span');
+requesterNameEl.className = 'fw-bold text-dark';
+requesterNameEl.textContent = String(req?.requester_name || '이름 미상');
+requestText.appendChild(requesterNameEl);
+requestText.appendChild(document.createTextNode(' 님이'));
+requestText.appendChild(document.createElement('br'));
+const requestHelp = document.createElement('small');
+requestHelp.className = 'text-muted';
+requestHelp.textContent = '내 계정을 관리하길 원합니다.';
+requestText.appendChild(requestHelp);
+const requestActions = document.createElement('div');
+requestActions.className = 'd-flex gap-2';
+const rejectBtn = document.createElement('button');
+rejectBtn.type = 'button';
+rejectBtn.className = 'btn btn-sm btn-outline-danger';
+rejectBtn.textContent = '거절';
+rejectBtn.addEventListener('click', () => answerConnect(safeAppId, 'reject'));
+const approveBtn = document.createElement('button');
+approveBtn.type = 'button';
+approveBtn.className = 'btn btn-sm btn-primary fw-bold';
+approveBtn.textContent = '수락';
+approveBtn.addEventListener('click', () => answerConnect(safeAppId, 'approve'));
+requestActions.appendChild(rejectBtn);
+requestActions.appendChild(approveBtn);
+requestRow.appendChild(requestText);
+requestRow.appendChild(requestActions);
+alertDiv.appendChild(requestRow);
 });
-
-alertDiv.innerHTML = html;
 
 // 4. 삽입 위치: 생일 배너 다음
 const banner = document.getElementById('birthdayBanner');
@@ -5286,6 +5484,7 @@ let tempChildData = null; // 데이터를 잠시 담아둘 변수
 
 function openConsentModal(data) {
 tempChildData = data; // 데이터 임시 저장
+const safeApplicantName = escapeHtml(data?.name || '');
 
 // 모달 내용 생성 (PDF 텍스트 + 체크박스)
 // 체크박스 라벨은 요청하신 대로 길게, 내용은 수정해서 쓰시면 됩니다.
@@ -5293,7 +5492,7 @@ const content = `
        <div class="text-start bg-light p-3 rounded border mb-3" style="max-height: 300px; overflow-y: auto; font-size: 0.9rem; line-height: 1.6;">
            <h6 class="fw-bold text-center mb-3">[미성년자 조합원 가입 법정대리인 동의서]</h6>
            
-           <p>1. <b>가입 동의:</b> 본인은 신청인(${data.name})의 법정대리인으로서 귀 협동조합 가입에 동의합니다.</p>
+           <p>1. <b>가입 동의:</b> 본인은 신청인(${safeApplicantName})의 법정대리인으로서 귀 협동조합 가입에 동의합니다.</p>
            <p>2. <b>내용 확인:</b> 본인은 신청인이 조합원 가입으로 발생하는 권리와 의무, 출자금 납입, 이용고 배당, 손실 발생 시 책임, 총회 의결권 등에 대해 잘 알고 있음을 확인합니다.</p>
            <p>3. <b>개인정보 활용:</b> 위 동의서와 관련해 조합에 가입되어 있지 않은 법정대리인의 개인정보 활용에 동의합니다.</p>
            <hr>
@@ -5495,8 +5694,11 @@ document.getElementById('ptLogoUrl').value = data.logo_url || '';
 // 로고 미리보기
 if(data.logo_url) {
 const prev = document.getElementById('ptLogoPreview');
-prev.querySelector('img').src = data.logo_url;
+const safeLogoUrl = safeUrl(data.logo_url);
+if (safeLogoUrl) {
+prev.querySelector('img').src = safeLogoUrl;
 prev.classList.remove('hidden');
+}
 }
 
 // 상태 표시
@@ -5740,8 +5942,6 @@ reloadDashboard(); // 데이터 갱신
 // [수정된 버전] 선거 시스템 이동 함수
 // [수정] 선거 시스템 이동 함수 (서버 검증 추가)
 async function goToVoteSystem() {
-void 0;
-
 if (!isCoopRuntimeModuleEnabled('vote')) {
 showModal("현재 조합에서 선거/투표 모듈 사용이 중지되었습니다.");
 return;
@@ -5757,14 +5957,10 @@ return;
 // [핵심 변경] getSession() 대신 getUser()를 사용하여 서버 유효성 검증
 // getSession: 브라우저 캐시만 확인함 (빠르지만 폐기된 토큰 모름)
 // getUser: 서버에 직접 물어봄 (확실함)
-void 0;
-
 const { data, error } = await client.auth.getUser();
 
 // 에러가 있거나 user 정보가 없으면 -> 이미 로그아웃된 상태임
 if (error || !data || !data.user) {
-void 0;
-
 showModal("보안을 위해 다시 로그인이 필요합니다.");
 
 // 로컬에 남은 껍데기 세션도 깔끔하게 지워줌
@@ -5818,7 +6014,6 @@ const isExecutive = myRoles && myRoles.includes('executive');
 
 // 관리자거나 임원이면 -> DB 스위치 무시하고 무조건 노출
 if (isAdmin || isExecutive) {
-void 0;
 setQuickCardVisible(card, true);
 return;
 }

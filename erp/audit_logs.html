@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.1.3
-Change: 2026-03-22 - Remove first-use guidance banner from audit logs.
+Version: v1.1.4
+Change: 2026-03-29 - Escape CSV formula cells in audit export.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.3 | audit_logs.html');</script>
+  <script>console.log('[Version] v1.1.4 | audit_logs.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -311,15 +311,19 @@ function renderLogs(list, reset) {
 function exportCsv() {
   if (!cachedLogs || cachedLogs.length === 0) return showAlert("내보낼 데이터가 없습니다.");
   const headers = ['source','created_at','actor','action','summary','entity_type','entity_id','ip_address'];
+  const protectCsvCell = (value) => {
+    const str = String(value ?? '');
+    return /^[=+\-@]/.test(str) ? `'${str}` : str;
+  };
   const rows = cachedLogs.map(r => [
-    r.source || '',
-    r.created_at || '',
-    r.actor || '',
-    r.action || '',
-    r.summary || '',
-    r.entity_type || '',
-    r.entity_id || '',
-    r.ip_address || ''
+    protectCsvCell(r.source || ''),
+    protectCsvCell(r.created_at || ''),
+    protectCsvCell(r.actor || ''),
+    protectCsvCell(r.action || ''),
+    protectCsvCell(r.summary || ''),
+    protectCsvCell(r.entity_type || ''),
+    protectCsvCell(r.entity_id || ''),
+    protectCsvCell(r.ip_address || '')
   ]);
   const csvEscape = (val) => {
     const str = String(val ?? '');

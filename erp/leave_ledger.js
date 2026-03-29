@@ -35,6 +35,16 @@
     return String(value || '').trim();
   }
 
+  function getCurrentCoopId() {
+    if (typeof window === 'undefined' || !window.localStorage) return '';
+    try {
+      var storedUser = JSON.parse(window.localStorage.getItem('erp_user') || 'null');
+      return normalizeText(storedUser && storedUser.coop_id);
+    } catch (_) {
+      return '';
+    }
+  }
+
   function getLeaveSubType(docType) {
     var raw = normalizeText(docType);
     var match = raw.match(/^휴가\(([^)]+)\)/);
@@ -178,7 +188,7 @@
     return summary;
   }
 
-  function buildLeaveQuery(supabase, empId, statuses, columns) {
+  function buildLeaveQuery(supabase, empId, statuses, columns, coopId) {
     // 일부 환경(ref_approval)에는 start_date 컬럼이 없어 기본 조회에서는 제외한다.
     var selectCols = columns || DEFAULT_APPROVAL_SELECT_COLUMNS;
     var query = supabase
@@ -186,6 +196,9 @@
       .select(selectCols)
       .eq('drafter_id', empId)
       .ilike('doc_type', '휴가%');
+
+    var safeCoopId = normalizeText(coopId);
+    query = query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
 
     if (Array.isArray(statuses) && statuses.length > 0) {
       query = query.in('status', statuses);
@@ -201,8 +214,9 @@
     var opts = options || {};
     var statuses = Array.isArray(opts.statuses) ? opts.statuses : DEFAULT_RESERVED_STATUSES;
     var columns = opts.columns;
+    var coopId = normalizeText(opts.coopId || getCurrentCoopId());
 
-    var result = await buildLeaveQuery(supabase, empId, statuses, columns);
+    var result = await buildLeaveQuery(supabase, empId, statuses, columns, coopId);
     if (result.error) throw result.error;
     return result.data || [];
   }

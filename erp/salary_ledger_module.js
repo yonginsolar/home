@@ -1,6 +1,8 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
+  const MODULE_VERSION = 'v1.0.2';
+
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
     'ded_pension', 'ded_health', 'ded_care', 'ded_employ', 'ded_income', 'ded_local', 'ded_advance', 'ded_advance_raw', 'ded_capital', 'ded_total', 'net_pay',
@@ -23,6 +25,17 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function safeUrl(value, allowDataImage) {
+    try {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+      const parsed = new URL(raw, window.location.origin);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+    } catch (_) {}
+    return '';
   }
 
   function allowance(row) {
@@ -157,7 +170,7 @@
     const ymLabel = formatYearMonthLabel(state.yearMonth);
     const title = opts.title || (ymLabel ? ymLabel + ' 급여대장' : '급여대장');
     const subtitle = opts.subtitle || '';
-    const logoUrl = opts.logoUrl || '';
+    const logoUrl = safeUrl(opts.logoUrl || '', true);
     const footerText = opts.footerText || '';
     const showPrintDate = opts.showPrintDate !== false;
     const printDate = new Date().toLocaleDateString('ko-KR');
@@ -184,7 +197,7 @@
       '</style>' +
 
       '<div class="ledger-header">' +
-      '<div class="ledger-logo">' + (logoUrl ? '<img src="' + escapeHtml(logoUrl) + '" alt="logo">' : '') + '</div>' +
+      '<div class="ledger-logo">' + (logoUrl ? '<img src="' + logoUrl + '" alt="logo">' : '') + '</div>' +
       '<div class="ledger-title-wrap">' +
       '<h1 class="ledger-title">' + escapeHtml(title) + '</h1>' +
       (subtitle ? '<div class="ledger-subtitle">' + escapeHtml(subtitle) + '</div>' : '') +
@@ -326,6 +339,7 @@
   }
 
   global.SalaryLedgerModule = {
+    VERSION: MODULE_VERSION,
     NUMERIC_FIELDS: NUMERIC_FIELDS.slice(),
     formatYearMonthLabel: formatYearMonthLabel,
     makeFileName: makeFileName,

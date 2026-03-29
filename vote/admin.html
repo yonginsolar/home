@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.44
-Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /erp migration.
+Version: v1.0.51
+Change: 2026-03-29 - Read coop branding from tenant company key/value rows instead of a missing ref_company_info.company_name column.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.44 | admin.html');</script>
+    <script>console.log('[Version] v1.0.51 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -693,6 +693,17 @@ function escapeJsString(value) {
         .replace(/\r/g, '\\r')
         .replace(/\n/g, '\\n');
 }
+function safeUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const url = new URL(raw, window.location.origin);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+        return url.href;
+    } catch (_) {
+        return '';
+    }
+}
     import { AdminService } from './AdminService.js';
     import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js';
 
@@ -719,6 +730,7 @@ function escapeJsString(value) {
     let currentCandidateFilter = 'all';
     let currentUserEmail = ''; // [신규] 현재 작업자 이메일 저장용
     let currentCoopId = null;
+    let currentCoopName = '';
     let currentElectionVoteSummary = null;
     let isCurrentElectionUncontestedAutoFlow = false;
     const ELECTION_NOTICE_SEAL_FALLBACK_URL = '';
@@ -742,6 +754,45 @@ function escapeJsString(value) {
         const safeCoopId = String(currentCoopId || '').trim();
         return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
     };
+
+    function ensureTenantContext(actionLabel = '작업') {
+        const safeCoopId = String(currentCoopId || '').trim();
+        if (safeCoopId) return true;
+        console.error(`vote/admin tenant context missing during ${actionLabel}`);
+        showAlert('조합 정보를 확인하지 못했습니다. 다시 로그인한 뒤 다시 시도해주세요.');
+        return false;
+    }
+
+    function getCurrentCoopName(defaultValue = '조합') {
+        return String(currentCoopName || '').trim() || defaultValue;
+    }
+
+    async function loadVoteAdminCompanyInfo() {
+        if (!currentCoopId) return null;
+        try {
+            const { data, error } = await scopeByTenant(
+                supabase.from('ref_company_info').select('key,value').in('key', ['company_name', 'orgName'])
+            );
+            if (!error) {
+                const rows = Array.isArray(data) ? data : [];
+                const infoMap = rows.reduce((acc, row) => {
+                    const key = String(row?.key || '').trim();
+                    if (!key) return acc;
+                    acc[key] = String(row?.value || '').trim();
+                    return acc;
+                }, {});
+                currentCoopName = String(infoMap.company_name || infoMap.orgName || '').trim();
+            }
+        } catch (error) {
+            console.warn('vote admin load company info failed:', error);
+        }
+        return currentCoopName || null;
+    }
+
+    function getElectionCommitteeText(includeSealSuffix = false) {
+        const base = `${getCurrentCoopName()} 선거관리위원회위원장`;
+        return includeSealSuffix ? `${base}(인)` : base;
+    }
 
     // -----------------------------------------------------------
     // [1] 모달 & 유틸리티 (기존 유지)
@@ -871,6 +922,42 @@ function escapeJsString(value) {
         });
     };
 
+    window.showTextPrompt = (message, options = {}) => {
+        return new Promise((resolve) => {
+            const title = String(options?.title || '입력').trim() || '입력';
+            const placeholder = escapeHtml(String(options?.placeholder || '').trim());
+            const initialValue = escapeHtml(String(options?.initialValue || '').trim());
+            const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
+            const inputId = `modal-input-${Date.now()}`;
+            window.showModal(
+                title,
+                `<div style="line-height:1.6; text-align:left;"><div style="margin-bottom:12px;">${safeMessage}</div><input id="${inputId}" class="modal-inline-input" type="text" value="${initialValue}" placeholder="${placeholder}" style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:10px;"></div>`,
+                () => {
+                    const input = document.getElementById(inputId);
+                    resolve(String(input?.value || '').trim());
+                },
+                true
+            );
+
+            const modal = document.getElementById('common-modal');
+            const cancelBtn = modal?.querySelector('.btn-outline');
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    window.closeModal();
+                    resolve(null);
+                };
+            }
+
+            window.setTimeout(() => {
+                const input = document.getElementById(inputId);
+                if (input) {
+                    input.focus();
+                    input.select();
+                }
+            }, 0);
+        });
+    };
+
     window.closeModal = () => {
         closeModalOverlay(document.getElementById('common-modal'));
     };
@@ -887,12 +974,16 @@ function escapeJsString(value) {
 
     async function fetchElectionVoteSummary() {
         const [districtRes, approvedCandRes] = await Promise.all([
-            supabase
-                .from('districts')
+            scopeByTenant(
+                supabase
+                    .from('districts')
+            )
                 .select('id, name, vote_type, quota')
                 .eq('election_id', currentElectionId),
-            supabase
-                .from('candidates')
+            scopeByTenant(
+                supabase
+                    .from('candidates')
+            )
                 .select('id, district_id')
                 .eq('election_id', currentElectionId)
                 .eq('status', 'APPROVED')
@@ -906,17 +997,23 @@ function escapeJsString(value) {
 
     async function buildElectedOfficialsPreviewData() {
         const [districtRes, approvedCandRes, ballotRes] = await Promise.all([
-            supabase
-                .from('districts')
+            scopeByTenant(
+                supabase
+                    .from('districts')
+            )
                 .select('id, name, vote_type, quota')
                 .eq('election_id', currentElectionId),
-            supabase
-                .from('candidates')
+            scopeByTenant(
+                supabase
+                    .from('candidates')
+            )
                 .select('id, district_id, member_uuid, name, symbol, birth_date, address, representative_name')
                 .eq('election_id', currentElectionId)
                 .eq('status', 'APPROVED'),
-            supabase
-                .from('ballots')
+            scopeByTenant(
+                supabase
+                    .from('ballots')
+            )
                 .select('district_id, candidate_id')
                 .eq('election_id', currentElectionId)
         ]);
@@ -1008,8 +1105,10 @@ function escapeJsString(value) {
 
         const memberMap = new Map();
         if (uniqueWinnerMemberUuids.length > 0) {
-            const { data: memberRows, error: memberErr } = await supabase
-                .from('coop_members')
+            const { data: memberRows, error: memberErr } = await scopeByTenant(
+                supabase
+                    .from('coop_members')
+            )
                 .select('id, member_id, name')
                 .in('id', uniqueWinnerMemberUuids);
             if (memberErr) throw memberErr;
@@ -1085,7 +1184,7 @@ function escapeJsString(value) {
         const issueNo = String(options.issueNo || '2026-001호');
         const noticeDate = String(options.noticeDateText || '2026년 2월 12일');
         const openingText = String(options.openingText || '2026년 실시한 제1차대의원선거에 있어 당선인을 다음과 같이 공고합니다.');
-        const committeeText = '용인모두의햇빛협동조합 선거관리위원회위원장';
+        const committeeText = getElectionCommitteeText(false);
         const safeSealSrc = escapeHtml(String(sealUrl || '').trim());
         const safeIssueNo = escapeHtml(issueNo);
         const safeNoticeDate = escapeHtml(noticeDate);
@@ -1286,7 +1385,7 @@ function escapeJsString(value) {
         const issueNo = String(options.issueNo || '').trim();
         const noticeDateText = String(options.noticeDateText || '').trim();
         const openingText = String(options.openingText || '').trim();
-        const committeeText = '용인모두의햇빛협동조합 선거관리위원회위원장(인)';
+        const committeeText = getElectionCommitteeText(true);
         const normalizedRows = Array.isArray(rows) ? rows : [];
         const districtMap = new Map();
         normalizedRows.forEach((row) => {
@@ -1784,6 +1883,7 @@ function escapeJsString(value) {
             showAlert('선거 정보가 없어 당선자 저장을 진행할 수 없습니다.');
             return;
         }
+        if (!ensureTenantContext('당선자 저장')) return;
 
         try {
             const preview = await buildElectedOfficialsPreviewData();
@@ -1918,6 +2018,7 @@ function escapeJsString(value) {
             showAlert('현재 상태에서는 후보자 등록 단계로 되돌릴 수 없습니다.');
             return;
         }
+        if (!ensureTenantContext('무투표 당선 롤백')) return;
 
         const ok = await showConfirm(
             '무투표 당선 처리를 취소하고 후보자 등록 단계로 돌아가시겠습니까?\n상태가 NOMINATION으로 변경됩니다.',
@@ -2004,6 +2105,7 @@ function escapeJsString(value) {
                 return;
             }
             currentCoopId = runtimeCheck.runtime?.coop_id || null;
+            await loadVoteAdminCompanyInfo();
 
             // 전역 변수에 이메일 저장 (로그 남길 때 사용)
             currentUserEmail = session.user.email;
@@ -2397,8 +2499,10 @@ window.openElectionGateway = async () => {
 
     // [수정됨] 선거구 매핑 정보 로드 (관리용 필드 포함)
     async function loadDistrictsMap() {
-        const { data } = await supabase
-            .from('districts')
+        const { data } = await scopeByTenant(
+            supabase
+                .from('districts')
+        )
             .select('id, name, code, vote_type, quota, is_common')
             .eq('election_id', currentElectionId);
             
@@ -2418,18 +2522,22 @@ window.loadVoterStats = async () => {
     const container = document.getElementById('voter-stats-list');
     container.innerHTML = '<p style="font-size:0.8rem;">데이터 분석 중...</p>';
     
-    try {
-        // 1. 유권자 목록 & 투표 기록 병렬 조회 (Promise.all)
-        const [voterRes, logRes] = await Promise.all([
-            supabase
-                .from('election_voters')
-                .select('member_no, district_id, member_uuid') 
-                .eq('election_id', currentElectionId),
-            supabase
-                .from('vote_logs')
-                .select('member_uuid')
-                .eq('election_id', currentElectionId)
-        ]);
+        try {
+            // 1. 유권자 목록 & 투표 기록 병렬 조회 (Promise.all)
+            const [voterRes, logRes] = await Promise.all([
+                scopeByTenant(
+                    supabase
+                        .from('election_voters')
+                )
+                    .select('member_no, district_id, member_uuid') 
+                    .eq('election_id', currentElectionId),
+                scopeByTenant(
+                    supabase
+                        .from('vote_logs')
+                )
+                    .select('member_uuid')
+                    .eq('election_id', currentElectionId)
+            ]);
 
         if(voterRes.error) throw voterRes.error;
         if(logRes.error) throw logRes.error;
@@ -2447,8 +2555,10 @@ window.loadVoterStats = async () => {
 
         // 3. 조합원 상세 정보 가져오기 (이름, 전화번호)
         const memberNos = voters.map(v => v.member_no);
-        const { data: members, error: memberError } = await supabase
-            .from('coop_members')
+        const { data: members, error: memberError } = await scopeByTenant(
+            supabase
+                .from('coop_members')
+        )
             .select('member_id, name, phone')
             .in('member_id', memberNos);
 
@@ -2573,13 +2683,15 @@ window.showVoterDetail = (dName, list) => {
         
         // 투표 여부에 따라 행 배경색 미세 조정 (미투표자는 약간 붉은끼)
         const rowBg = v.is_voted ? '' : 'background-color:#fffafa;';
+        const safeMemberNoJs = escapeJsString(v.member_no || '');
+        const safeDistrictIdJs = escapeJsString(v.district_id || '');
 
         html += `
             <tr class="voter-row" 
                 data-search="${searchKey}" 
                 data-voted="${v.is_voted}" 
                 style="cursor:pointer; ${rowBg}" 
-                onclick="openVoterInfo('${v.member_no}', '${v.district_id}')">
+                onclick="openVoterInfo('${safeMemberNoJs}', '${safeDistrictIdJs}')">
                 
                 <td>${v.member_no}</td>
                 <td>
@@ -2659,23 +2771,27 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
     btnUpdate.innerText = '변경 저장';
     btnUpdate.className = 'btn btn-primary btn-sm';
 
-    try {
-        // 1. 조합원 정보 + UUID 조회
-        const { data: member, error } = await supabase
-            .from('coop_members')
-            .select('*')
-            .eq('member_id', memberNo)
-            .single();
+        try {
+            // 1. 조합원 정보 + UUID 조회
+            const { data: member, error } = await scopeByTenant(
+                supabase
+                    .from('coop_members')
+            )
+                .select('*')
+                .eq('member_id', memberNo)
+                .single();
 
         if (error) throw error;
 
-        // 2. [핵심] 투표 여부 확인 (vote_logs 조회)
-        // member.id는 회원의 UUID입니다.
-        const { count, error: logError } = await supabase
-            .from('vote_logs')
-            .select('*', { count: 'exact', head: true }) // 데이터 없이 개수만 조회
-            .eq('election_id', currentElectionId)
-            .eq('member_uuid', member.id);
+            // 2. [핵심] 투표 여부 확인 (vote_logs 조회)
+            // member.id는 회원의 UUID입니다.
+            const { count, error: logError } = await scopeByTenant(
+                supabase
+                    .from('vote_logs')
+            )
+                .select('*', { count: 'exact', head: true }) // 데이터 없이 개수만 조회
+                .eq('election_id', currentElectionId)
+                .eq('member_uuid', member.id);
 
         if (logError) throw logError;
 
@@ -2744,6 +2860,7 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
 async function updateVoterDistrict() {
     const { memberNo, currentDistrictId } = targetVoterState;
     if (!memberNo || !currentDistrictId) return;
+    if (!ensureTenantContext('유권자 선거구 변경')) return;
 
     const newDistrictId = document.getElementById('detail-district-select').value;
     if (String(newDistrictId) === String(currentDistrictId)) {
@@ -2753,14 +2870,16 @@ async function updateVoterDistrict() {
 
     if (!await showConfirm('선거구를 변경하시겠습니까?')) return;
 
-    try {
-        // [안전장치] 변경 전, 투표 여부를 다시 확인 (Backend Guard)
-        // 1. member_no로 member_uuid 찾기
-        const { data: memData } = await supabase
-            .from('coop_members')
-            .select('id')
-            .eq('member_id', memberNo)
-            .single();
+        try {
+            // [안전장치] 변경 전, 투표 여부를 다시 확인 (Backend Guard)
+            // 1. member_no로 member_uuid 찾기
+            const { data: memData } = await scopeByTenant(
+                supabase
+                    .from('coop_members')
+            )
+                .select('id')
+                .eq('member_id', memberNo)
+                .single();
 
         if (memData) {
             const { count } = await scopeByTenant(
@@ -2805,6 +2924,7 @@ async function updateVoterDistrict() {
     async function deleteVoter() {
         const { memberNo } = targetVoterState;
         if (!memberNo) return;
+        if (!ensureTenantContext('유권자 삭제')) return;
 
         if (!await showConfirm('정말 이 유권자를 명부에서 제외하시겠습니까?\n(지역구 및 비례대표 투표권이 모두 삭제됩니다.)')) return;
 
@@ -2950,6 +3070,9 @@ async function updateVoterDistrict() {
     };
 
     window.syncCommonVotersFromRegional = async (showFeedback = true) => {
+        if (!ensureTenantContext('공통 선거구 유권자 동기화')) {
+            return { inserted: 0 };
+        }
         const commonDistricts = districtList.filter((district) => district.is_common === true);
         if (commonDistricts.length === 0) {
             if (showFeedback) showAlert('비례(찬반) 선거구가 없어 동기화를 건너뜁니다.');
@@ -3053,6 +3176,7 @@ async function updateVoterDistrict() {
     };
 
     window.confirmAddDistrictFromAddVoterModal = async () => {
+        if (!ensureTenantContext('지역구 저장')) return;
         const idInput = document.getElementById('add-new-district-id');
         const nameInput = document.getElementById('add-new-district-name');
         const codeInput = document.getElementById('add-new-district-code');
@@ -3165,6 +3289,7 @@ async function updateVoterDistrict() {
     };
 
     window.deleteDistrictFromAddVoterModal = async (districtId) => {
+        if (!ensureTenantContext('지역구 삭제')) return;
         const district = districtList.find((item) => String(item.id) === String(districtId));
         if (!district) {
             showAlert('지역구 정보를 찾을 수 없습니다.');
@@ -3249,8 +3374,10 @@ window.searchMembers = async () => {
                 showAlert("검색어를 다시 입력해주세요.");
                 return;
             }
-            const { data: members, error } = await supabase
-                .from('coop_members')
+            const { data: members, error } = await scopeByTenant(
+                supabase
+                    .from('coop_members')
+            )
                 .select('member_id, id, name, phone, address') 
                 .or(`name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`)
                 .limit(20);
@@ -3333,9 +3460,10 @@ window.searchMembers = async () => {
     };
 
 // [수정됨] 명부 등재 실행 (UUID 포함 Insert 및 이메일 로깅)
-    window.addVoterToElection = async (memberNo, memberName, memberUuid) => {
+window.addVoterToElection = async (memberNo, memberName, memberUuid) => {
         const distSelect = document.getElementById('add-voter-district-select');
         const districtId = distSelect.value;
+        if (!ensureTenantContext('유권자 추가')) return;
 
         if (!districtId) {
             showAlert("먼저 하단의 [배정할 선거구]를 선택해주세요.");
@@ -3661,7 +3789,7 @@ async function loadCandidates() {
             
             if (c.photo_url) {
                 if (c.photo_url.startsWith('http')) {
-                    photoSrc = c.photo_url;
+                    photoSrc = safeUrl(c.photo_url) || DEFAULT_PROFILE_IMG;
                 } else {
                     // 경로만 있다면 서명된 URL 생성
                     const { data: photoData } = await supabase
@@ -3669,7 +3797,7 @@ async function loadCandidates() {
                         .from('candidate_photos') // 주의: 버킷명 확인 (photos vs proofs)
                         .createSignedUrl(c.photo_url, 3600);
                     
-                    if (photoData) photoSrc = photoData.signedUrl;
+                    if (photoData?.signedUrl) photoSrc = safeUrl(photoData.signedUrl) || DEFAULT_PROFILE_IMG;
                 }
             }
 
@@ -3678,17 +3806,17 @@ async function loadCandidates() {
             if (c.proof_url) {
                 let finalProofUrl = '';
                 if (c.proof_url.startsWith('http')) {
-                    finalProofUrl = c.proof_url;
+                    finalProofUrl = safeUrl(c.proof_url);
                 } else {
                     const { data: proofData } = await supabase
                         .storage
                         .from(BUCKET_NAME)
                         .createSignedUrl(c.proof_url, 3600);
-                    if (proofData) finalProofUrl = proofData.signedUrl;
+                    if (proofData?.signedUrl) finalProofUrl = safeUrl(proofData.signedUrl);
                 }
 
                 if (finalProofUrl) {
-                    proofLink = `<a href="${finalProofUrl}" target="_blank" class="btn btn-sm btn-outline">📂 증빙서류</a>`;
+                    proofLink = `<a href="${finalProofUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline">📂 증빙서류</a>`;
                 }
             }
             // -----------------------------------------------------------
@@ -3769,26 +3897,27 @@ async function loadCandidates() {
             `;
 
             // 하단 버튼 구성 (상태에 따라 다르게)
+            const safeCandidateIdJs = escapeJsString(c.id || '');
             if (c.status === 'PENDING') {
                 actionArea.innerHTML = `
-                    <button onclick="enterCandidateEditMode('${c.id}', '${safeNameJs}')" class="btn btn-outline" style="flex:1;">✏️ 수정하기</button>
-                    <button onclick="confirmApprove('${c.id}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
-                    <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
+                    <button onclick="enterCandidateEditMode('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-outline" style="flex:1;">✏️ 수정하기</button>
+                    <button onclick="confirmApprove('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
+                    <button onclick="openRejectModal('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
                 `;
             } else if (c.status === 'APPROVED') {
                 actionArea.innerHTML = `
-                    <button onclick="enterCandidateEditMode('${c.id}', '${safeNameJs}')" class="btn btn-outline" style="flex:1;">✏️ 수정하기</button>
-                    <button onclick="openRejectModal('${c.id}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
+                    <button onclick="enterCandidateEditMode('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-outline" style="flex:1;">✏️ 수정하기</button>
+                    <button onclick="openRejectModal('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
                 `;
             } else { // REJECTED
                 actionArea.innerHTML = `
-                    <button onclick="confirmApprove('${c.id}', '${safeNameJs}')" class="btn btn-primary" style="width:100%;">🔄 재심사 (승인 처리)</button>
+                    <button onclick="confirmApprove('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-primary" style="width:100%;">🔄 재심사 (승인 처리)</button>
                 `;
             }
 
         } catch (e) {
             console.error(e);
-            body.innerHTML = `<p style="color:red;">정보를 불러오지 못했습니다: ${e.message}</p>`;
+            body.innerHTML = `<p style="color:red;">정보를 불러오지 못했습니다: ${escapeHtml(e?.message || '알 수 없는 오류')}</p>`;
         }
     };
     // End of openCandidateDetail
@@ -3838,18 +3967,19 @@ async function loadCandidates() {
         const actionArea = document.getElementById('cand-action-area');
         if (!actionArea) return;
         const safeNameJs = escapeJsString(candidateName || '');
+        const safeCandidateIdJs = escapeJsString(candidateId || '');
         if (status === 'PENDING') {
             actionArea.innerHTML = `
-                <button onclick="saveCandidateDetailChanges('${candidateId}')" class="btn btn-outline" style="flex:1;">💾 수정 저장</button>
-                <button onclick="cancelCandidateEditMode('${candidateId}')" class="btn btn-outline" style="flex:1;">↩️ 수정 취소</button>
-                <button onclick="confirmApprove('${candidateId}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
-                <button onclick="openRejectModal('${candidateId}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
+                <button onclick="saveCandidateDetailChanges('${safeCandidateIdJs}')" class="btn btn-outline" style="flex:1;">💾 수정 저장</button>
+                <button onclick="cancelCandidateEditMode('${safeCandidateIdJs}')" class="btn btn-outline" style="flex:1;">↩️ 수정 취소</button>
+                <button onclick="confirmApprove('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-primary" style="flex:1;">✅ 승인하기</button>
+                <button onclick="openRejectModal('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 반려하기</button>
             `;
         } else {
             actionArea.innerHTML = `
-                <button onclick="saveCandidateDetailChanges('${candidateId}')" class="btn btn-outline" style="flex:1;">💾 수정 저장</button>
-                <button onclick="cancelCandidateEditMode('${candidateId}')" class="btn btn-outline" style="flex:1;">↩️ 수정 취소</button>
-                <button onclick="openRejectModal('${candidateId}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
+                <button onclick="saveCandidateDetailChanges('${safeCandidateIdJs}')" class="btn btn-outline" style="flex:1;">💾 수정 저장</button>
+                <button onclick="cancelCandidateEditMode('${safeCandidateIdJs}')" class="btn btn-outline" style="flex:1;">↩️ 수정 취소</button>
+                <button onclick="openRejectModal('${safeCandidateIdJs}', '${safeNameJs}')" class="btn btn-danger" style="flex:1;">⛔ 승인 취소 및 반려</button>
             `;
         }
     };
@@ -3859,6 +3989,7 @@ async function loadCandidates() {
     };
 
     window.saveCandidateDetailChanges = async (candidateId) => {
+        if (!ensureTenantContext('후보 정보 수정')) return;
         const status = document.getElementById('cand-edit-status')?.value || '';
         if (!(status === 'PENDING' || status === 'APPROVED')) {
             showAlert('현재 상태의 후보는 수정할 수 없습니다.');
@@ -3985,7 +4116,8 @@ window.assignRandomSymbols = async () => {
 }; // End of assignRandomSymbols
     
     // [신규] 승인 처리 로직 (직접 DB 업데이트)
-    window.confirmApprove = async (id, name) => {
+window.confirmApprove = async (id, name) => {
+        if (!ensureTenantContext('후보 승인')) return;
         if(!await showConfirm(`[${name}] 후보를 정식 후보로 승인하시겠습니까?`)) return;
 
         try {
@@ -4029,6 +4161,7 @@ window.assignRandomSymbols = async () => {
 
     // [신규] 반려 확정 로직 (사유 포함)
     document.getElementById('btn-confirm-reject').onclick = async () => {
+        if (!ensureTenantContext('후보 반려')) return;
         const reason = document.getElementById('reject-reason-input').value.trim();
         
         if(!reason) {
@@ -4063,6 +4196,7 @@ window.assignRandomSymbols = async () => {
     };
 
 window.reviewCand = async (id, decision, name) => {
+        if (!ensureTenantContext('후보 심사')) return;
         if(await showConfirm(`${name} -> ${decision} 처리하시겠습니까?`)){
             await service.reviewCandidate(id, decision);
             
@@ -4075,6 +4209,7 @@ window.reviewCand = async (id, decision, name) => {
     };
 
 window.saveSymbols = async () => {
+        if (!ensureTenantContext('후보 기호 저장')) return;
         const inputs = document.querySelectorAll('.input-symbol');
         let count = 0;
         for (const input of inputs) {
@@ -4093,6 +4228,7 @@ window.saveSymbols = async () => {
     };
 // [신규] 후보 확정 및 다음 단계(READY) 이동 로직
 window.finalizeNomination = async () => {
+    if (!ensureTenantContext('후보 확정')) return;
     // 1. 안전장치: 대기 중인 후보가 있는지 통계 값으로 확인
     const pendingCount = parseInt(document.getElementById('stat-pending').innerText || '0');
     
@@ -4200,6 +4336,7 @@ window.finalizeNomination = async () => {
 }; // End of finalizeNomination
 // [수정] 액션 확인 및 실행 (시간 체크 기능 포함 + 이메일 로깅)
     window.confirmAction = async (nextStatus, msg) => {
+        if (!ensureTenantContext('선거 상태 변경')) return;
         // 1. 투표 시작(OPEN) 시도 시 시간 체크 로직
         if (nextStatus === 'OPEN') {
             // 시작 시간이 설정되어 있는지 확인
@@ -4306,9 +4443,13 @@ window.finalizeNomination = async () => {
     }
 
 // [수정됨] 개표함 열기 버튼 클릭 시
-    window.openBallotBox = () => {
-         const pwd = prompt("🔐 보안 확인: 개표함 잠금을 해제하려면 '개표'라고 입력하세요.");
-         
+    window.openBallotBox = async () => {
+         const pwd = await showTextPrompt("🔐 보안 확인: 개표함 잠금을 해제하려면 '개표'라고 입력하세요.", {
+             title: '개표함 잠금 해제',
+             placeholder: '개표'
+         });
+
+         if(pwd === null) return;
          if(pwd !== '개표') {
              showAlert('비밀번호가 일치하지 않아 개표함을 열 수 없습니다.');
              return;
@@ -4349,14 +4490,20 @@ window.finalizeNomination = async () => {
         try {
             // 1. 정확한 스키마로 데이터 조회 (quota, vote_type 포함)
             const [distRes, candRes, ballotRes] = await Promise.all([
-                supabase.from('districts')
+                scopeByTenant(
+                    supabase.from('districts')
+                )
                     .select('id, name, is_common, quota, vote_type') // quota: 선출인원, vote_type: 투표유형
                     .eq('election_id', currentElectionId),
-                supabase.from('candidates')
+                scopeByTenant(
+                    supabase.from('candidates')
+                )
                     .select('*')
                     .eq('election_id', currentElectionId)
                     .eq('status', 'APPROVED'),
-                supabase.from('ballots')
+                scopeByTenant(
+                    supabase.from('ballots')
+                )
                     .select('district_id, candidate_id, choice')
                     .eq('election_id', currentElectionId)
             ]);
@@ -4740,6 +4887,7 @@ window.selectCandidateMember = (uuid, name, phone, address, birthRaw, memberId, 
 
 // [수정] 등록 직전 최종 중복 검증 로직 추가 (v1.0.3)
 window.executeCandidateRegister = async () => {
+    if (!ensureTenantContext('후보 등록')) return;
     const uuid = document.getElementById('selected-cand-uuid').value;
     const name = document.getElementById('new-cand-name').value;
     const districtId = document.getElementById('new-cand-district').value;

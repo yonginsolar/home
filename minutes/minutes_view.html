@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-    Version: v1.0.51
-    Change: 2026-03-26 - Load ERP runtime guard from unified /erp path.
+	    Version: v1.0.54
+	    Change: 2026-03-28 - Clean no-op guards in document box render flow.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.51 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.54 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -288,7 +288,7 @@
                 try {
                     const u = new URL(raw, window.location.origin);
                     if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
-                } catch (e) { void 0; }
+                } catch (e) {}
                 return null;
             };
 
@@ -434,10 +434,13 @@
             const body = renderNoticeBodyHtml(bodyRaw);
             const info = await loadNoticeCompanyInfo();
             const sealUrl = await loadNoticeSealUrl();
-            const orgNameRaw = info?.orgName || info?.company_name || '용인모두의햇빛협동조합';
-            const chairmanRaw = info?.chairman_name || info?.ceoName || '';
+            const orgNameRaw = info?.orgName || info?.company_name || '조합명 확인 필요';
+            const chairmanRaw = info?.chairman_name || info?.ceoName || '대표자 확인 필요';
             const orgName = escapeHtml(orgNameRaw);
-            const chairman = chairmanRaw ? escapeHtml(chairmanRaw) : '';
+            const chairman = escapeHtml(chairmanRaw);
+            const signLeaderText = chairmanRaw && chairmanRaw !== '대표자 확인 필요'
+                ? `이사장 ${chairman}`
+                : chairman;
             const dateLabel = formatNoticeDateLabel(doc?.published_at || doc?.created_at);
             const sealSafe = safeUrl(sealUrl);
             const sealHtml = sealSafe
@@ -464,7 +467,7 @@
                     <div style="margin-top:14px; line-height:1.8;">${body || '-'}</div>
                     ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
                     <div style="margin-top:8px; text-align:center; font-weight:700;">
-                        ${orgName} 이사장 ${chairman ? chairman : ''} ${sealHtml}
+                        ${orgName} ${signLeaderText} ${sealHtml}
                     </div>
                 </div>
             `;
@@ -662,7 +665,8 @@
         }
 
         function appendMinuteSignatureImageToOfficialName(rootNode, official, signedUrl) {
-            if (!rootNode || !official?.name || !signedUrl) return false;
+            const safeSignedUrl = safeUrl(signedUrl);
+            if (!rootNode || !official?.name || !safeSignedUrl) return false;
             const compactName = buildCompactOfficialName(official.name);
             if (!compactName) return false;
 
@@ -696,7 +700,7 @@
             fragment.appendChild(document.createTextNode(matched));
 
             const img = document.createElement('img');
-            img.src = signedUrl;
+            img.src = safeSignedUrl;
             img.alt = '서명';
             img.style.width = '56px';
             img.style.height = '56px';
@@ -777,7 +781,7 @@
 
             const cards = await Promise.all(required.map(async id => {
                 const off = allOfficials.find(o => String(o.id) === String(id));
-                const name = off?.name || off?.coop_members?.name || '임원';
+                const name = escapeHtml(off?.name || off?.coop_members?.name || '임원');
                 const sig = sigMap.get(String(id));
                 const isSigned = !!sig;
                 let imgHtml = '';
@@ -1391,7 +1395,7 @@
                 let activeProfileId = null;
                 try {
                     activeProfileId = window.sessionStorage ? window.sessionStorage.getItem('lastActiveProfile') : null;
-                } catch (e) { void 0; }
+                } catch (e) {}
                 const { error } = await MinutesService.markDocumentBoxSeen(activeProfileId || null);
                 if (error) {
                     console.warn('markDocumentBoxSeen failed:', error);

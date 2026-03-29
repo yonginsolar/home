@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.56
-Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /erp migration.
+Version: v1.2.60
+Change: 2026-03-28 - Finish no-op cleanup in minute print preview flow.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.56 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.60 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -926,6 +926,18 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
                 .replace(/'/g, '&#39;');
         }
 
+        function safeUrl(value, { allowDataImage = false } = {}) {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            if (/^(mailto:|tel:)/i.test(raw)) return raw;
+            if (allowDataImage && /^data:image\//i.test(raw)) return raw;
+            try {
+                const url = new URL(raw, window.location.origin);
+                if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+            } catch (e) {}
+            return '';
+        }
+
         function sanitizeStyle(styleText) {
             const raw = String(styleText || '');
             if (!raw) return '';
@@ -960,7 +972,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
                 try {
                     const u = new URL(raw, window.location.origin);
                     if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
-                } catch (e) { void 0; }
+                } catch (e) {}
                 return null;
             };
 
@@ -1462,21 +1474,25 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
         async function buildNoticePrintFooterHtml(approval) {
             const info = await loadNoticeCompanyInfo();
             const sealUrl = await loadNoticeSealUrl();
-            const orgNameRaw = info?.orgName || info?.company_name || '용인모두의햇빛협동조합';
-            const chairmanRaw = info?.chairman_name || info?.ceoName || '김민정';
-            const zipCodeRaw = info?.zip_code || '17115';
-            const addressRaw = info?.address || '경기도 용인시 처인구 남사읍 상동로 28';
-            const homepageRaw = info?.homepage || 'https://www.yonginsolar.kr';
-            const emailRaw = info?.email || 'yonginsolar@gmail.com';
-            const phoneRaw = info?.phone || '010-2513-5736';
+            const orgNameRaw = info?.orgName || info?.company_name || '조합명 확인 필요';
+            const chairmanRaw = info?.chairman_name || info?.ceoName || '대표자 확인 필요';
+            const zipCodeRaw = info?.zip_code || '';
+            const addressRaw = info?.address || '';
+            const homepageRaw = info?.homepage || '';
+            const emailRaw = info?.email || '';
+            const phoneRaw = info?.phone || '';
             const orgName = escapeHtml(orgNameRaw);
-            const chairman = escapeHtml(chairmanRaw || '김민정');
-            const zipCode = escapeHtml(zipCodeRaw || '17115');
-            const address = escapeHtml(addressRaw || '경기도 용인시 처인구 남사읍 상동로 28');
-            const homepage = escapeHtml(homepageRaw || 'https://www.yonginsolar.kr');
-            const email = escapeHtml(emailRaw || 'yonginsolar@gmail.com');
-            const phone = escapeHtml(phoneRaw || '010-2513-5736');
-            const sealSafe = sealUrl ? sealUrl : '';
+            const chairman = escapeHtml(chairmanRaw || '대표자 확인 필요');
+            const signLeaderText = chairmanRaw && chairmanRaw !== '대표자 확인 필요'
+                ? `이사장 ${chairman}`
+                : chairman;
+            const zipCode = escapeHtml(zipCodeRaw || '');
+            const address = escapeHtml(addressRaw || '');
+            const homepage = escapeHtml(homepageRaw || '');
+            const email = escapeHtml(emailRaw || '');
+            const phone = escapeHtml(phoneRaw || '');
+            const zipCodeLabel = zipCode ? `우 ${zipCode}` : '';
+            const sealSafe = safeUrl(sealUrl, { allowDataImage: true });
             const sealHtml = sealSafe
                 ? `<img src="${sealSafe}" alt="seal" class="print-foot-seal">`
                 : '';
@@ -1492,19 +1508,19 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
             }).join('');
 
             return `
-                <div class="print-foot-sign"><span class="print-foot-sign-text">${orgName} 이사장 ${chairman}</span>${sealHtml}</div>
+                <div class="print-foot-sign"><span class="print-foot-sign-text">${orgName} ${signLeaderText}</span>${sealHtml}</div>
                 <div class="print-foot-divider"></div>
                 <div class="print-foot-approvals">${approvalItemsHtml}</div>
                 <div class="print-foot-row-divider"></div>
                 <div class="print-foot-contact-grid">
-                    <span class="is-left">우 ${zipCode}</span>
-                    <span class="is-center">${address}</span>
-                    <span class="is-right">${homepage}</span>
+                    <span class="is-left">${zipCodeLabel || '&nbsp;'}</span>
+                    <span class="is-center">${address || '&nbsp;'}</span>
+                    <span class="is-right">${homepage || '&nbsp;'}</span>
                 </div>
                 <div class="print-foot-row-divider"></div>
                 <div class="print-foot-contact-split">
-                    <span class="is-left">E-mail: ${email}</span>
-                    <span class="is-right">T: ${phone}</span>
+                    <span class="is-left">${email ? `E-mail: ${email}` : '&nbsp;'}</span>
+                    <span class="is-right">${phone ? `T: ${phone}` : '&nbsp;'}</span>
                 </div>
             `;
         }
@@ -1601,8 +1617,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
 
         function isGeneralAssemblyChairperson(off) {
             const role = getRoleLabel(off);
-            const name = String(off?.name || off?.coop_members?.name || '').trim();
-            return role.includes('이사장') || name === '김민정';
+            return role.includes('이사장') || role.includes('의장');
         }
 
         function getMinuteCertificateRoleLabel(minute, off) {
@@ -1733,7 +1748,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
 
                 let imgHtml = '<div style="width:42px; height:42px; border:1px solid #e5e7eb; border-radius:50%; background:#fff;"></div>';
                 if (sig?.signature_url) {
-                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    const signedUrl = safeUrl(await resolveSignatureUrl(sig.signature_url), { allowDataImage: true });
                     if (signedUrl) {
                         imgHtml = `<img src="${signedUrl}" alt="서명" style="width:42px; height:42px; border-radius:50%; border:1px solid #e5e7eb; object-fit:contain; background:#fff;">`;
                     }
@@ -1780,7 +1795,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
 
                 let imgHtml = '<div style="width:56px; height:56px; border:1px solid #d1d5db; border-radius:50%; background:#fff;"></div>';
                 if (sig?.signature_url) {
-                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    const signedUrl = safeUrl(await resolveSignatureUrl(sig.signature_url), { allowDataImage: true });
                     if (signedUrl) {
                         imgHtml = `<img src="${signedUrl}" alt="서명" style="width:56px; height:56px; border-radius:50%; border:1px solid #d1d5db; object-fit:contain; background:#fff;">`;
                     }
@@ -1830,7 +1845,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
 
                 let stampHtml = '<span class="cert-sheet-sign-status">완료</span>';
                 if (sig?.signature_url) {
-                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
+                    const signedUrl = safeUrl(await resolveSignatureUrl(sig.signature_url), { allowDataImage: true });
                     if (signedUrl) {
                         stampHtml = `<img src="${signedUrl}" alt="서명" class="cert-sheet-sign-image">`;
                     }
@@ -1889,7 +1904,8 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
         }
 
         function appendMinuteSignatureImageToOfficialName(rootNode, official, signedUrl) {
-            if (!rootNode || !official?.name || !signedUrl) return false;
+            const safeSignedUrl = safeUrl(signedUrl, { allowDataImage: true });
+            if (!rootNode || !official?.name || !safeSignedUrl) return false;
 
             const compactName = buildCompactOfficialName(official.name);
             if (!compactName) return false;
@@ -1924,7 +1940,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
             fragment.appendChild(document.createTextNode(matched));
 
             const img = document.createElement('img');
-            img.src = signedUrl;
+            img.src = safeSignedUrl;
             img.alt = '서명';
             img.style.width = '56px';
             img.style.height = '56px';
@@ -2083,7 +2099,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
                     }))),
                     new Promise((resolve) => setTimeout(resolve, timeoutMs))
                 ]);
-            } catch (e) { void 0; }
+            } catch (e) {}
         }
 
         async function openNoticePreview(id) {
@@ -2126,7 +2142,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
             await waitForPrintWindowImages(printWindow);
             try {
                 printWindow.print();
-            } catch (e) { void 0; }
+            } catch (e) {}
         };
 
         window.openMinutePreview = async (id) => {
@@ -2190,7 +2206,7 @@ Change: 2026-03-26 - Remove legacy hash token session bridge after same-origin /
             await waitForPrintWindowImages(printWindow);
             try {
                 printWindow.print();
-            } catch (e) { void 0; }
+            } catch (e) {}
         };
         window.closeMinutePreview = () => {
             document.getElementById('minutePreviewModal').classList.remove('show');

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.8
-Change: Align the seal center with the last chairman character while keeping signature text centered.
+Version: v1.0.9
+Change: Cache Pretendard font loading so certificate PDF generation does not refetch the same font every time.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -53,6 +53,9 @@ var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(
 if (typeof window !== 'undefined') {
   window.showAlert = showAlert;
 }
+
+const CERT_FONT_URL = 'https://raw.githubusercontent.com/orioncactus/pretendard/master/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf';
+let certPretendardFontBase64Promise = null;
 
 function trimCertCompanyValue(value) {
     return String(value == null ? '' : value).trim();
@@ -171,6 +174,23 @@ function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = 
         sealY: chairmanLayout.endY - Number(options.sealLift || 14)
     };
 } // End of drawCertSignatureBlock
+
+async function getCertPretendardFontBase64() {
+    if (!certPretendardFontBase64Promise) {
+        certPretendardFontBase64Promise = (async () => {
+            const fontRes = await fetch(CERT_FONT_URL);
+            if (!fontRes.ok) {
+                throw new Error(`폰트 로드 실패 (${fontRes.status})`);
+            }
+            const fontBuffer = await fontRes.arrayBuffer();
+            return arrayBufferToBase64(fontBuffer);
+        })().catch((error) => {
+            certPretendardFontBase64Promise = null;
+            throw error;
+        });
+    }
+    return await certPretendardFontBase64Promise;
+} // End of getCertPretendardFontBase64
 
 async function fetchCertRemoteDataUrl(sourceUrl) {
     const response = await fetch(sourceUrl, { credentials: 'omit' });
@@ -294,9 +314,8 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         // -----------------------------------------------------------
         
         // (A) 폰트 (Pretendard SemiBold)
-        const fontRes = await fetch('https://raw.githubusercontent.com/orioncactus/pretendard/master/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf');
-        const fontBuffer = await fontRes.arrayBuffer();
-        doc.addFileToVFS('Pretendard.ttf', arrayBufferToBase64(fontBuffer));
+        const fontBase64 = await getCertPretendardFontBase64();
+        doc.addFileToVFS('Pretendard.ttf', fontBase64);
         doc.addFont('Pretendard.ttf', 'Pretendard', 'normal');
         doc.setFont('Pretendard');
 
@@ -478,9 +497,8 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
         const doc = new jsPDF('p', 'mm', 'a4');
 
         // (A) 폰트
-        const fontRes = await fetch('https://raw.githubusercontent.com/orioncactus/pretendard/master/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf');
-        const fontBuffer = await fontRes.arrayBuffer();
-        doc.addFileToVFS('Pretendard.ttf', arrayBufferToBase64(fontBuffer));
+        const fontBase64 = await getCertPretendardFontBase64();
+        doc.addFileToVFS('Pretendard.ttf', fontBase64);
         doc.addFont('Pretendard.ttf', 'Pretendard', 'normal');
         doc.setFont('Pretendard');
 

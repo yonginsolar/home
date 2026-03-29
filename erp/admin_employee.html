@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.31
-Change: 2026-03-26 - Refresh HR print service cache for seal center alignment with the last chairman character.
+Version: v1.0.41
+Change: 2026-03-29 - Fix salary-loading tenant query collisions and keep position-settings layout improvements.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.31 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.41 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -416,6 +416,35 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
+function safeUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const url = new URL(raw, window.location.origin);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+        return url.href;
+    } catch (_) {
+        return '';
+    }
+}
+
+function setContractViewLink(viewEl, href) {
+    if (!viewEl) return;
+    const safeHref = safeUrl(href);
+    if (!safeHref) {
+        viewEl.innerHTML = `<span class="text-danger small">실패</span>`;
+        return;
+    }
+    const link = document.createElement('a');
+    link.href = safeHref;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'btn btn-sm btn-info w-100 text-white fw-bold';
+    link.textContent = '📄 계약서 보기';
+    viewEl.innerHTML = '';
+    viewEl.appendChild(link);
+}
+
 function getRoleBadge(roleKey) {
     const map = {
         admin: { label: '전체 관리자', cls: 'bg-danger' },
@@ -529,14 +558,14 @@ const HR_WORKFORCE_LITE_DEFAULT_LEAVE_TYPE_CATALOG = Object.freeze([
     { id: 'birthday_half', label: '생일반차', enabled: true, deductible: false, duration_mode: 'half_day', aliases: ['생일반차'] }
 ]);
 const HR_DEFAULT_POSITION_CATALOG = Object.freeze([
-    { name: '사원', enabled: true },
-    { name: '대리', enabled: true },
-    { name: '과장', enabled: true },
-    { name: '차장', enabled: true },
-    { name: '부장', enabled: true },
-    { name: '이사', enabled: true },
-    { name: '국장', enabled: true },
-    { name: '이사장', enabled: true }
+    { name: '이사장', enabled: true, rank: 10 },
+    { name: '국장', enabled: true, rank: 20 },
+    { name: '이사', enabled: true, rank: 30 },
+    { name: '부장', enabled: true, rank: 40 },
+    { name: '차장', enabled: true, rank: 50 },
+    { name: '과장', enabled: true, rank: 60 },
+    { name: '대리', enabled: true, rank: 70 },
+    { name: '사원', enabled: true, rank: 80 }
 ]);
 const HR_DEFAULT_OVERTIME_POLICY = Object.freeze({
     default_mode: 'allowance'
@@ -868,18 +897,34 @@ function parseHrDepartmentCatalog(rawValue) {
     }
 }
 
+function normalizeHrPositionRank(value, fallback = 999) {
+    const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+}
+
+function sortHrPositionCatalog(items) {
+    return (Array.isArray(items) ? items : []).slice().sort((a, b) => {
+        const rankDiff = normalizeHrPositionRank(a?.rank, 999) - normalizeHrPositionRank(b?.rank, 999);
+        if (rankDiff !== 0) return rankDiff;
+        return String(a?.name || '').localeCompare(String(b?.name || ''), 'ko');
+    });
+}
+
 function sanitizeHrPositionCatalog(items) {
     const rows = Array.isArray(items) ? items : [];
     const usedNames = new Set();
-    return rows.map((item) => {
+    const normalized = rows.map((item, index) => {
         const name = String(item?.name || item || '').trim();
         if (!name || usedNames.has(name)) return null;
         usedNames.add(name);
         return {
             name,
-            enabled: item?.enabled !== false
+            enabled: item?.enabled !== false,
+            rank: normalizeHrPositionRank(item?.rank, (index + 1) * 10)
         };
     }).filter(Boolean);
+    return sortHrPositionCatalog(normalized);
 }
 
 function parseHrPositionCatalog(rawValue) {
@@ -910,7 +955,7 @@ function buildHrDepartmentOptionsHtml(selectedValue = '', includeCustom = false)
 function buildHrPositionOptionsHtml(selectedValue = '') {
     const selected = String(selectedValue || '').trim();
     const catalog = (Array.isArray(hrPositionCatalog) && hrPositionCatalog.length > 0)
-        ? hrPositionCatalog.filter((item) => item.enabled !== false)
+        ? sortHrPositionCatalog(hrPositionCatalog).filter((item) => item.enabled !== false)
         : HR_DEFAULT_POSITION_CATALOG;
     const options = catalog.map((item) => {
         const isSelected = item.name === selected ? ' selected' : '';
@@ -930,12 +975,17 @@ function renderHrPositionCatalogRows() {
         listEl.innerHTML = '<div class="small text-muted border rounded p-3 text-center">등록된 직급이 없습니다. 아래 버튼으로 추가하세요.</div>';
         return;
     }
+    hrPositionCatalog = sortHrPositionCatalog(hrPositionCatalog);
     hrPositionCatalog.forEach((item, index) => {
         const row = document.createElement('div');
         row.className = 'position-row';
         row.innerHTML = `
           <div class="row g-2 align-items-end">
-            <div class="col-md-8">
+            <div class="col-md-3">
+              <label class="small text-muted fw-bold mb-1">랭크</label>
+              <input type="number" min="1" step="1" class="form-control form-control-sm position-rank" value="${escapeHtml(String(normalizeHrPositionRank(item.rank, (index + 1) * 10)))}" placeholder="작을수록 상위">
+            </div>
+            <div class="col-md-6">
               <label class="small text-muted fw-bold mb-1">직급명</label>
               <input type="text" class="form-control form-control-sm position-name" value="${escapeHtml(item.name || '')}" placeholder="예: 팀장">
             </div>
@@ -945,7 +995,7 @@ function renderHrPositionCatalogRows() {
                 <label class="form-check-label small fw-bold">사용</label>
               </div>
             </div>
-            <div class="col-md-2 d-grid">
+            <div class="col-md-1 d-grid">
               <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeHrPositionRow(${index})">삭제</button>
             </div>
           </div>
@@ -956,7 +1006,10 @@ function renderHrPositionCatalogRows() {
 
 function addHrPositionRow() {
     hrPositionCatalog = Array.isArray(hrPositionCatalog) ? hrPositionCatalog.slice() : [];
-    hrPositionCatalog.push({ name: '', enabled: true });
+    const nextRank = hrPositionCatalog.length > 0
+        ? Math.max(...hrPositionCatalog.map((item, index) => normalizeHrPositionRank(item?.rank, (index + 1) * 10))) + 10
+        : 10;
+    hrPositionCatalog.push({ name: '', enabled: true, rank: nextRank });
     renderHrPositionCatalogRows();
 }
 
@@ -970,7 +1023,8 @@ function collectHrPositionCatalogFromUi() {
     const rows = Array.from(document.querySelectorAll('#hrPositionCatalogList .position-row'));
     return sanitizeHrPositionCatalog(rows.map((row) => ({
         name: row.querySelector('.position-name')?.value || '',
-        enabled: !!row.querySelector('.position-enabled')?.checked
+        enabled: !!row.querySelector('.position-enabled')?.checked,
+        rank: row.querySelector('.position-rank')?.value || ''
     })));
 }
 
@@ -1067,12 +1121,22 @@ function ensureHrStructureSettingsFields() {
         <button type="button" class="btn btn-sm btn-outline-primary" onclick="addHrDepartmentRow()">+ 부서 추가</button>
         <button type="button" class="btn btn-sm btn-primary" onclick="saveHrStructureSettingsOnly('departments')">부서 저장</button>
       </div>
-      <div class="fw-bold mb-1">직급 설정</div>
-      <div class="small text-muted mb-2">직원 등록과 상세 수정에서 선택할 직급 목록입니다.</div>
-      <div id="hrPositionCatalogList" class="mb-2"></div>
-      <div class="d-flex justify-content-end gap-2 mb-3">
-        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addHrPositionRow()">+ 직급 추가</button>
-        <button type="button" class="btn btn-sm btn-primary" onclick="saveHrStructureSettingsOnly('positions')">직급 저장</button>
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <div>
+          <div class="fw-bold mb-1">직급 설정</div>
+          <div class="small text-muted">직원 등록과 상세 수정에서 선택할 직급 목록입니다.</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="hrPositionSectionToggleBtn" onclick="toggleHrPositionSettings()">
+          직급 설정 펼치기
+        </button>
+      </div>
+      <div id="hrPositionSectionBody" class="hidden">
+        <div class="small text-muted mb-2">랭크는 작을수록 상위 직급이며, 저장 후 선택 목록도 같은 순서로 정렬됩니다.</div>
+        <div id="hrPositionCatalogList" class="mb-2"></div>
+        <div class="d-flex justify-content-end gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="addHrPositionRow()">+ 직급 추가</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="saveHrStructureSettingsOnly('positions')">직급 저장</button>
+        </div>
       </div>
       <div class="fw-bold mb-1">시간외 근로 정책</div>
       <div class="small text-muted mb-2">처리 방식과 시간만 기록됩니다. (급여 미반영)</div>
@@ -1096,6 +1160,15 @@ function ensureHrStructureSettingsFields() {
     companyRow.appendChild(section);
 }
 
+function toggleHrPositionSettings(forceExpanded = null) {
+    const bodyEl = document.getElementById('hrPositionSectionBody');
+    const btnEl = document.getElementById('hrPositionSectionToggleBtn');
+    if (!bodyEl || !btnEl) return;
+    const shouldExpand = forceExpanded === null ? bodyEl.classList.contains('hidden') : !!forceExpanded;
+    bodyEl.classList.toggle('hidden', !shouldExpand);
+    btnEl.textContent = shouldExpand ? '직급 설정 접기' : '직급 설정 펼치기';
+} // End of toggleHrPositionSettings
+
 function syncHrStructureSettingsUi() {
     ensureHrStructureSettingsFields();
     hrDepartmentCatalog = parseHrDepartmentCatalog(companyInfo[HR_DEPARTMENT_CATALOG_KEY]);
@@ -1108,6 +1181,7 @@ function syncHrStructureSettingsUi() {
     populateInvitePositionOptions(document.getElementById('newRank')?.value || '사원');
     const detailPositionValue = String(document.getElementById('editPosition')?.value || document.getElementById('viewPosition')?.textContent || '').trim();
     populateDetailPositionOptions(detailPositionValue === '-' ? '' : detailPositionValue);
+    toggleHrPositionSettings(false);
 }
 
 function collectHrOvertimePolicyFromUi() {
@@ -1242,7 +1316,7 @@ async function renderOrgChart() {
     bodyEl.innerHTML = '<div class="text-center text-muted py-4">조직도를 불러오는 중...</div>';
     let employees = Array.isArray(employeeCache) ? employeeCache.slice() : [];
     if (employees.length === 0) {
-        const { data } = await _supabase.from('ref_employees').select('emp_id,emp_name,position,department,resign_date').order('emp_id');
+        const { data } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('emp_id,emp_name,position,department,resign_date')).order('emp_id');
         employees = Array.isArray(data) ? data : [];
     }
     employees = employees.filter(emp => !emp?.resign_date);
@@ -2188,9 +2262,7 @@ function revokeCompanySealPreviewObjectUrl() {
     if (!companySealPreviewObjectUrl) return;
     try {
         URL.revokeObjectURL(companySealPreviewObjectUrl);
-    } catch (_) {
-        void 0;
-    }
+    } catch (_) {}
     companySealPreviewObjectUrl = '';
 } // End of revokeCompanySealPreviewObjectUrl
 
@@ -2204,7 +2276,7 @@ function syncCompanySealSettingsUi(previewUrl, previewMetaText) {
     if (!hiddenInput || !fileInput || !previewWrap || !previewImg || !previewMeta || !emptyState) return;
 
     const rawPath = String(companyInfo?._seal_storage_path || '').trim();
-    const activePreviewUrl = String(previewUrl ?? companyInfo?._seal_preview_url ?? companyInfo?.seal_url ?? '').trim();
+    const activePreviewUrl = safeUrl(previewUrl ?? companyInfo?._seal_preview_url ?? companyInfo?.seal_url ?? '');
     hiddenInput.value = rawPath;
 
     if (activePreviewUrl) {
@@ -2400,6 +2472,25 @@ function normalizeAdminEmployeeEmail(value) {
     return String(value || '').trim().toLowerCase();
 } // End of normalizeAdminEmployeeEmail
 
+function getAdminEmployeeCoopId() {
+    return String(myInfo?.coop_id || '').trim();
+} // End of getAdminEmployeeCoopId
+
+function getAdminEmployeeScopedCoopId() {
+    return getAdminEmployeeCoopId() || '00000000-0000-0000-0000-000000000000';
+} // End of getAdminEmployeeScopedCoopId
+
+function scopeEmployeeTenant(query) {
+    return query.eq('coop_id', getAdminEmployeeScopedCoopId());
+} // End of scopeEmployeeTenant
+
+function withEmployeeTenantPayload(payload) {
+    const coopId = getAdminEmployeeCoopId();
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+    if (!coopId) return payload;
+    return { ...payload, coop_id: coopId };
+} // End of withEmployeeTenantPayload
+
 function isLoginRelevantEmployeeRow(row) {
     if (!row) return false;
     if (row.is_active === false) return false;
@@ -2421,9 +2512,9 @@ async function findEmployeeEmailConflict(email, options = {}) {
     const safeEmail = normalizeAdminEmployeeEmail(email);
     if (!safeEmail) return null;
     const excludeEmpId = String(options?.excludeEmpId || '').trim();
-    const { data, error } = await _supabase
+    const { data, error } = await scopeEmployeeTenant(_supabase
         .from('ref_employees')
-        .select('emp_id, emp_name, display_emp_no, resign_date, is_active, email')
+        .select('emp_id, emp_name, display_emp_no, resign_date, is_active, email'))
         .ilike('email', safeEmail);
     if (error) throw error;
     const rows = Array.isArray(data) ? data : [];
@@ -2437,7 +2528,7 @@ async function findEmployeeEmailConflict(email, options = {}) {
 async function loadList() {
     const tbody = document.getElementById("empListBody");
     tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
-    const { data: list, error } = await _supabase.from('ref_employees').select('*');
+    const { data: list, error } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('*'));
     if (error || !list) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center">데이터 없음</td></tr>';
         return;
@@ -2513,7 +2604,7 @@ async function loadCompanyInfo() {
     syncCompanySealSettingsUi();
     syncHrStructureSettingsUi();
 } // End of loadCompanyInfo
-async function loadAdvancedSettings() { const tbody = document.getElementById("advSettingsBody"); tbody.innerHTML = '<tr><td colspan="3">로딩...</td></tr>'; const coopId = String(myInfo?.coop_id || '').trim(); if (!coopId) { advancedSettingsRaw = []; tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">조합 정보를 확인할 수 없습니다.</td></tr>'; return; } const { data } = await _supabase.from('ref_settings').select('*').eq('coop_id', coopId).order('category'); if(data) { advancedSettingsRaw = data; tbody.innerHTML = data.map((r, i) => `<tr><td><small class="text-muted">${r.item_key}</small></td><td><input type="number" step="0.00001" value="${r.item_value}" id="adv_val_${i}"></td><td><small>${r.description||'-'}</small></td></tr>`).join(""); } }
+async function loadAdvancedSettings() { const tbody = document.getElementById("advSettingsBody"); tbody.innerHTML = '<tr><td colspan="3">로딩...</td></tr>'; const coopId = String(myInfo?.coop_id || '').trim(); if (!coopId) { advancedSettingsRaw = []; tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">조합 정보를 확인할 수 없습니다.</td></tr>'; return; } const { data } = await _supabase.from('ref_settings').select('*').eq('coop_id', coopId).order('category'); if(data) { advancedSettingsRaw = data; tbody.innerHTML = data.map((r, i) => `<tr><td><small class="text-muted">${escapeHtml(r.item_key)}</small></td><td><input type="number" step="0.00001" value="${escapeHtml(r.item_value)}" id="adv_val_${i}"></td><td><small>${escapeHtml(r.description||'-')}</small></td></tr>`).join(""); } }
 
 function calcHalf(type) { document.getElementById(`half_${type}`).innerText = (Number(document.getElementById(`set_${type}_total`).value)/2).toFixed(3); }
 
@@ -2739,7 +2830,8 @@ async function runInvite() {
                 auth_level: normalizeHrAuthLevelValue(document.getElementById('newAuthLevel')?.value) ?? 9,
                 role: document.getElementById("newRole").value,
                 department: getInviteDepartmentValue(),
-                hire_date: formatAdminEmployeeKstDate(new Date())
+                hire_date: formatAdminEmployeeKstDate(new Date()),
+                coop_id: getAdminEmployeeCoopId() || null
             });
 
             if (!error) {
@@ -2804,12 +2896,13 @@ async function loadSettings() {
         const res = await _supabase
             .from('ref_settings_history')
             .select('*')
+            .eq('coop_id', getAdminEmployeeScopedCoopId())
             .eq('target_year', selYear);
         data = res.data;
         error = res.error;
     } else {
         // 현재/미래 데이터 (원본 테이블)
-        const res = await _supabase.from('ref_settings').select('*');
+        const res = await scopeEmployeeTenant(_supabase.from('ref_settings').select('*'));
         data = res.data;
         error = res.error;
     }
@@ -2839,9 +2932,9 @@ async function loadSettings() {
     if (data && data.length > 0) {
         tbody.innerHTML = data.map((r, i) => `
             <tr>
-                <td><small class="text-muted">${r.item_key}</small></td>
-                <td><input type="number" step="0.00001" value="${r.item_value}" id="adv_val_${i}" class="form-control form-control-sm"></td>
-                <td><small>${r.description || '-'}</small></td>
+                <td><small class="text-muted">${escapeHtml(r.item_key)}</small></td>
+                <td><input type="number" step="0.00001" value="${escapeHtml(r.item_value)}" id="adv_val_${i}" class="form-control form-control-sm"></td>
+                <td><small>${escapeHtml(r.description || '-')}</small></td>
             </tr>
         `).join("");
     } else {
@@ -3083,7 +3176,7 @@ async function openDetail(u) {
     document.getElementById("viewBirth").innerText = birthDate || "미등록";
     
     // [추가된 부분] 비상 연락망 조회 및 표시
-    const { data: emList } = await _supabase.from('ref_emergency_contacts').select('*').eq('emp_id', u.emp_id);
+    const { data: emList } = await scopeEmployeeTenant(_supabase.from('ref_emergency_contacts').select('*')).eq('emp_id', u.emp_id);
     const emDiv = document.getElementById("viewEmergency");
     if(emList && emList.length > 0) {
         emDiv.innerHTML = emList.map(e => {
@@ -3100,7 +3193,7 @@ async function openDetail(u) {
     document.getElementById("rrnFront").value = ""; document.getElementById("rrnBack").value = "";
     
     const viewDiv = document.getElementById("contractView"); viewDiv.innerHTML = '로딩...'; document.getElementById("hiddenContractUrl").value = u.contract_url || "";
-    if(u.contract_url) { try { const { data } = await _supabase.storage.from('contracts').createSignedUrl(u.contract_url, 3600); viewDiv.innerHTML = data ? `<a href="${data.signedUrl}" target="_blank" class="btn btn-sm btn-info w-100 text-white fw-bold">📄 계약서 보기</a>` : `<span class="text-danger small">실패</span>`; } catch(e) { viewDiv.innerHTML = "-"; } } else viewDiv.innerHTML = `<span class="text-muted small">미등록</span>`;
+    if(u.contract_url) { try { const { data } = await _supabase.storage.from('contracts').createSignedUrl(u.contract_url, 3600); if (data?.signedUrl) setContractViewLink(viewDiv, data.signedUrl); else viewDiv.innerHTML = `<span class="text-danger small">실패</span>`; } catch(e) { viewDiv.innerHTML = "-"; } } else viewDiv.innerHTML = `<span class="text-muted small">미등록</span>`;
 
     const area = document.getElementById("btnResignArea");
     if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
@@ -3152,15 +3245,15 @@ async function saveBasicInfo() {
     }; 
 
     // 3. DB 업데이트 시도
-    const { error } = await _supabase.from('ref_employees').update(updates).eq('emp_id', currentEmpId); 
+    const { error } = await scopeEmployeeTenant(_supabase.from('ref_employees').update(updates)).eq('emp_id', currentEmpId); 
     
     // [중요] 에러 발생 시 여기서 중단 (화면 업데이트 안 함)
     if(error) return showAlert("저장 실패: " + error.message); 
 
-    // 4. 연봉 이력 관리 (변경 시에만)
-    if (sal !== currentAnnualSalary && normalizedSalaryApplyDate) { 
-        await _supabase.from('hr_salary_contracts').insert({ emp_id: currentEmpId, amount: sal, apply_date: normalizedSalaryApplyDate }); 
-    } 
+        // 4. 연봉 이력 관리 (변경 시에만)
+        if (sal !== currentAnnualSalary && normalizedSalaryApplyDate) { 
+        await _supabase.from('hr_salary_contracts').insert(withEmployeeTenantPayload({ emp_id: currentEmpId, amount: sal, apply_date: normalizedSalaryApplyDate })); 
+        } 
 
     // 5. 전역 변수 업데이트
     currentAnnualSalary = sal; 
@@ -3185,7 +3278,7 @@ async function saveBasicInfo() {
 }
 
 async function saveRRN() { const f = document.getElementById("rrnFront").value; const b = document.getElementById("rrnBack").value; if((f+b).length !== 13) return showAlert("13자리를 입력하세요."); const { error } = await _supabase.rpc('update_employee_rrn', { p_emp_id: currentEmpId, p_rrn: f+"-"+b }); if(error) showAlert("실패: "+error.message); else { showAlert("암호화되어 저장되었습니다."); const { data: bd } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: currentEmpId }); document.getElementById("viewBirth").innerText = bd || f; document.getElementById("rrnFront").value=""; document.getElementById("rrnBack").value=""; toggleEditMode(false); } }
-async function uploadContract() { const fileInput = document.getElementById("contractFile"); if (fileInput.files.length === 0) return showAlert("파일을 선택해주세요."); const file = fileInput.files[0]; const fileName = `${currentEmpId}_contract_${Date.now()}.${file.name.split('.').pop()}`; showLoading(); try { const { data: emp } = await _supabase.from('ref_employees').select('contract_url').eq('emp_id', currentEmpId).single(); if (emp?.contract_url && !emp.contract_url.startsWith('http')) await _supabase.storage.from('contracts').remove([emp.contract_url]); const { data, error } = await _supabase.storage.from('contracts').upload(fileName, file, { upsert: true }); if (error) throw error; await _supabase.from('ref_employees').update({ contract_url: data.path }).eq('emp_id', currentEmpId); hideLoading(); setTimeout(async () => { showAlert("계약서가 등록되었습니다."); const { data: signed } = await _supabase.storage.from('contracts').createSignedUrl(data.path, 3600); document.getElementById("contractView").innerHTML = `<a href="${signed.signedUrl}" target="_blank" class="btn btn-sm btn-info w-100 text-white fw-bold">📄 계약서 보기</a>`; document.getElementById("hiddenContractUrl").value = data.path; fileInput.value = ""; }, 500); } catch (err) { hideLoading(); setTimeout(() => showAlert("오류 발생: " + err.message), 500); } }
+async function uploadContract() { const fileInput = document.getElementById("contractFile"); if (fileInput.files.length === 0) return showAlert("파일을 선택해주세요."); const file = fileInput.files[0]; const fileName = `${currentEmpId}_contract_${Date.now()}.${file.name.split('.').pop()}`; showLoading(); try { const { data: emp } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('contract_url')).eq('emp_id', currentEmpId).single(); if (emp?.contract_url && !emp.contract_url.startsWith('http')) await _supabase.storage.from('contracts').remove([emp.contract_url]); const { data, error } = await _supabase.storage.from('contracts').upload(fileName, file, { upsert: true }); if (error) throw error; await scopeEmployeeTenant(_supabase.from('ref_employees').update({ contract_url: data.path })).eq('emp_id', currentEmpId); hideLoading(); setTimeout(async () => { showAlert("계약서가 등록되었습니다."); const { data: signed } = await _supabase.storage.from('contracts').createSignedUrl(data.path, 3600); setContractViewLink(document.getElementById("contractView"), signed?.signedUrl || ''); document.getElementById("hiddenContractUrl").value = data.path; fileInput.value = ""; }, 500); } catch (err) { hideLoading(); setTimeout(() => showAlert("오류 발생: " + err.message), 500); } }
 
 async function reqDeletePermanent() {
     showConfirm("⚠️ 영구 삭제 경고", `${currentEmpName} 데이터를 모두 삭제하시겠습니까?`, async function() {
@@ -3201,7 +3294,7 @@ async function reqDeletePermanent() {
 
             const deletions = ['hr_salary', 'hr_leave_adj', 'hr_salary_contracts', 'log_cert', 'ref_employees'];
             for (const tableName of deletions) {
-                const { error } = await _supabase.from(tableName).delete().eq('emp_id', currentEmpId);
+                const { error } = await scopeEmployeeTenant(_supabase.from(tableName).delete()).eq('emp_id', currentEmpId);
                 if (error) throw new Error(`${tableName} 삭제 실패: ${error.message}`);
             }
 
@@ -3223,7 +3316,7 @@ async function confirmResign() {
     const rDate = document.getElementById("inputResignDate").value;
     if(!rDate) return showAlert("퇴사일을 입력해주세요.");
     resignModal.hide();
-    const { error } = await _supabase.from('ref_employees').update({ resign_date: rDate }).eq('emp_id', currentEmpId);
+    const { error } = await scopeEmployeeTenant(_supabase.from('ref_employees').update({ resign_date: rDate })).eq('emp_id', currentEmpId);
     if (error) return showAlert("퇴사 처리 실패: " + error.message);
     await logHrAudit('hr.employee.resign', `${currentEmpName} 퇴사 처리`, { resign_date: rDate });
     detailModal.hide();
@@ -3232,7 +3325,7 @@ async function confirmResign() {
 }
 async function cancelResign() {
     showConfirm("퇴사 취소하시겠습니까?", async () => {
-        const { error } = await _supabase.from('ref_employees').update({ resign_date: null }).eq('emp_id', currentEmpId);
+        const { error } = await scopeEmployeeTenant(_supabase.from('ref_employees').update({ resign_date: null })).eq('emp_id', currentEmpId);
         if (error) return showAlert("퇴사 취소 실패: " + error.message);
         await logHrAudit('hr.employee.resign_cancel', `${currentEmpName} 퇴사 취소`, { resign_date: null });
         detailModal.hide();
@@ -3274,6 +3367,7 @@ async function loadSalaryData() {
     const endDate = `${month}-${String(lastDay).padStart(2, '0')}`;
     const { data: unpaidDocs } = await _supabase.from('ref_approval')
         .select('amount, doc_type, status')
+        .eq('coop_id', getAdminEmployeeScopedCoopId())
         .eq('drafter_id', currentEmpId)
         .in('status', ['완료', '가승인']) 
         .or('doc_type.ilike.%무급%,doc_type.ilike.%생리%,doc_type.ilike.%결근%') 
@@ -3298,6 +3392,7 @@ async function loadSalaryData() {
     // [로직] 기존 저장된 급여 내역 불러오기
     const { data: saved } = await _supabase.from('hr_salary')
         .select('*')
+        .eq('coop_id', getAdminEmployeeScopedCoopId())
         .eq('emp_id', currentEmpId)
         .eq('year_month', month)
         .maybeSingle();
@@ -3355,8 +3450,7 @@ async function deleteSalary() {
         `<strong>${month}</strong>월 급여 데이터를 정말 삭제하시겠습니까?<br><span class="text-danger small">삭제 후에는 자동 계산 상태로 돌아갑니다.</span>`, 
         async function() {
             showLoading();
-            const { error } = await _supabase.from('hr_salary')
-                .delete()
+            const { error } = await scopeEmployeeTenant(_supabase.from('hr_salary').delete())
                 .eq('emp_id', currentEmpId)
                 .eq('year_month', month);
             
@@ -3436,12 +3530,12 @@ async function saveSalary() {
     };
 
     // [6] Insert or Update 실행
-    const { data: existing } = await _supabase.from('hr_salary').select('id').eq('emp_id', currentEmpId).eq('year_month', month).maybeSingle();
+    const { data: existing } = await scopeEmployeeTenant(_supabase.from('hr_salary').select('id')).eq('emp_id', currentEmpId).eq('year_month', month).maybeSingle();
     
     // 직원 부담금(JS계산) 저장
     const { error } = existing 
-        ? await _supabase.from('hr_salary').update(payload).eq('id', existing.id) 
-        : await _supabase.from('hr_salary').insert(payload);
+        ? await scopeEmployeeTenant(_supabase.from('hr_salary').update(withEmployeeTenantPayload(payload))).eq('id', existing.id) 
+        : await _supabase.from('hr_salary').insert(withEmployeeTenantPayload(payload));
 
     if (error) {
         showAlert("실패: " + error.message);
@@ -3489,7 +3583,7 @@ async function loadLeave() {
     const reservedEl = document.getElementById("displayLeaveReserved");
     if (reservedEl) reservedEl.innerText = "결재 반영 예정 0일";
 }
-async function saveLog() { const type = document.getElementById("logType").value; const val = Number(document.getElementById("logValue").value); const reason = document.getElementById("logReason").value; if(!val || !reason) return showAlert("입력 필요"); await _supabase.from('hr_leave_adj').insert({ emp_id: currentEmpId, adj_type: type, days: val, reason: reason }); showAlert("반영됨"); document.getElementById("logValue").value = ""; document.getElementById("logReason").value = ""; loadLeave(); }
+async function saveLog() { const type = document.getElementById("logType").value; const val = Number(document.getElementById("logValue").value); const reason = document.getElementById("logReason").value; if(!val || !reason) return showAlert("입력 필요"); const { error } = await _supabase.from('hr_leave_adj').insert(withEmployeeTenantPayload({ emp_id: currentEmpId, adj_type: type, days: val, reason: reason })); if (error) return showAlert("반영 실패: " + error.message); showAlert("반영됨"); document.getElementById("logValue").value = ""; document.getElementById("logReason").value = ""; loadLeave(); }
 
 function openAdminCertModal() { document.getElementById("adminCertPurpose").value = "관공서 제출용"; toggleAdminEtc(); adminCertModal.show(); }
 function toggleAdminEtc() { const v = document.getElementById("adminCertPurpose").value; const e = document.getElementById("adminCertEtc"); if(v==='기타') { e.style.display='block'; e.focus(); } else e.style.display='none'; }
@@ -3540,7 +3634,7 @@ async function reqIssueCert() {
     
     // 부서/직급 정보 확인
     let dept="", pos=""; 
-    const { data: empData } = await _supabase.from('ref_employees').select('department, position').eq('emp_id', currentEmpId).single(); 
+    const { data: empData } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('department, position')).eq('emp_id', currentEmpId).single(); 
     if(empData) { dept = empData.department; pos = empData.position; }
 
     // 5. 인쇄 데이터 패키징 (DB에서 받은 안전한 cert_num 사용)
@@ -3620,7 +3714,7 @@ async function printSalaryAdmin() {
     };
 
     // 부서/직급 조회 후 인쇄 모듈 호출
-    _supabase.from('ref_employees').select('department, position').eq('emp_id', currentEmpId).single().then(({data}) => { 
+    scopeEmployeeTenant(_supabase.from('ref_employees').select('department, position')).eq('emp_id', currentEmpId).single().then(({data}) => { 
         if(data) { salaryData.dept = data.department; salaryData.pos = data.position; } 
         // [변경] 외부 모듈 호출
         PrintService.printSalary(salaryData);
@@ -3642,7 +3736,7 @@ async function printLedger() {
     ledgerModal.hide();
 
     // 1. 데이터 조회
-    const { data: list, error } = await _supabase.from('hr_salary').select('*').eq('year_month', ym).order('emp_name');
+    const { data: list, error } = await scopeEmployeeTenant(_supabase.from('hr_salary').select('*')).eq('year_month', ym).order('emp_name');
     if(error || !list || list.length === 0) return showAlert("해당 월의 급여 데이터가 없습니다.");
     
     if (!window.SalaryLedgerModule) return showAlert("급여대장 모듈을 불러오지 못했습니다.");
@@ -3699,8 +3793,8 @@ async function openStatsDashboard() {
     const dateStr = oneYearAgo.toISOString();
 
     const [approvalRes, salaryRes] = await Promise.all([
-        _supabase.from('ref_approval').select('*').gte('created_at', dateStr).order('created_at', {ascending: true}),
-        _supabase.from('hr_salary').select('*').gte('created_at', dateStr).order('year_month', {ascending: true})
+        scopeEmployeeTenant(_supabase.from('ref_approval').select('*')).gte('created_at', dateStr).order('created_at', {ascending: true}),
+        scopeEmployeeTenant(_supabase.from('hr_salary').select('*')).gte('created_at', dateStr).order('year_month', {ascending: true})
     ]);
 
     if(approvalRes.error || salaryRes.error) return showAlert("데이터 로드 실패");
@@ -3979,14 +4073,15 @@ async function getTaxRates(year) {
         const response = await _supabase
             .from('ref_settings_history')
             .select('item_key, item_value')
+            .eq('coop_id', getAdminEmployeeScopedCoopId())
             .eq('target_year', targetYear);
         data = response.data;
         error = response.error;
     } 
     // 2. 현재 또는 미래 데이터라면 (원본 테이블 조회)
     else {
-        const response = await _supabase
-            .from('ref_settings')
+        const response = await scopeEmployeeTenant(_supabase
+            .from('ref_settings'))
             .select('item_key, item_value');
         data = response.data;
         error = response.error;

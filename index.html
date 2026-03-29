@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.19
-Change: 2026-03-10 - Delegated notice detail/search functions to shared notice_modal.js wrappers to prevent drift.
+Version: v1.0.29
+Change: Fix public main login member lookup so tenant scoping does not resolve the query before maybeSingle().
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.19 | index.html');</script>
+<script>console.log('[Version] v1.0.29 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -839,11 +839,22 @@ Change: 2026-03-10 - Delegated notice detail/search functions to shared notice_m
             .replace(/'/g, '&#39;');
     }
 
+    function escapeJsString(value = '') {
+        return String(value)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '\\"')
+            .replace(/\r/g, '\\r')
+            .replace(/\n/g, '\\n')
+            .replace(/</g, '\\u003C')
+            .replace(/>/g, '\\u003E');
+    }
+
     function safeUrl(url) {
         try {
             const u = new URL(url, window.location.origin);
             if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
-        } catch (e) { void 0; }
+        } catch (e) {}
         return null;
     }
 
@@ -880,7 +891,7 @@ Change: 2026-03-10 - Delegated notice detail/search functions to shared notice_m
             try {
                 const u = new URL(raw, window.location.origin);
                 if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
-            } catch (e) { void 0; }
+            } catch (e) {}
             return null;
         };
 
@@ -1011,7 +1022,7 @@ Change: 2026-03-10 - Delegated notice detail/search functions to shared notice_m
         return sanitizeHtml(html);
     }
 
-    const showAlert = window.showAlert || function(message) {
+    const homeShowAlert = window.showAlert || function(message) {
         const overlay = document.createElement('div');
         overlay.style.position = 'fixed';
         overlay.style.inset = '0';
@@ -1058,7 +1069,83 @@ Change: 2026-03-10 - Delegated notice detail/search functions to shared notice_m
         overlay.appendChild(box);
         document.body.appendChild(overlay);
     };
-    window.showAlert = showAlert;
+    window.showAlert = homeShowAlert;
+
+    const homeShowConfirm = window.showConfirm || function(message) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.background = 'rgba(0,0,0,0.45)';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.zIndex = '10000';
+
+            const box = document.createElement('div');
+            box.style.background = '#fff';
+            box.style.borderRadius = '10px';
+            box.style.maxWidth = '90%';
+            box.style.minWidth = '280px';
+            box.style.padding = '18px 20px';
+            box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+
+            const msg = document.createElement('div');
+            msg.style.whiteSpace = 'pre-line';
+            msg.style.color = '#111827';
+            msg.style.fontSize = '14px';
+            msg.style.lineHeight = '1.5';
+            msg.textContent = String(message ?? '');
+
+            const actions = document.createElement('div');
+            actions.style.display = 'flex';
+            actions.style.justifyContent = 'flex-end';
+            actions.style.gap = '8px';
+            actions.style.marginTop = '14px';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.textContent = '취소';
+            cancelBtn.style.padding = '8px 16px';
+            cancelBtn.style.border = '1px solid #d1d5db';
+            cancelBtn.style.borderRadius = '8px';
+            cancelBtn.style.background = '#fff';
+            cancelBtn.style.color = '#111827';
+            cancelBtn.style.cursor = 'pointer';
+
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.textContent = '이동';
+            okBtn.style.padding = '8px 16px';
+            okBtn.style.border = '1px solid #111827';
+            okBtn.style.borderRadius = '8px';
+            okBtn.style.background = '#111827';
+            okBtn.style.color = '#fff';
+            okBtn.style.cursor = 'pointer';
+
+            let settled = false;
+            const finish = (result) => {
+                if (settled) return;
+                settled = true;
+                overlay.remove();
+                resolve(!!result);
+            };
+
+            cancelBtn.addEventListener('click', () => finish(false));
+            okBtn.addEventListener('click', () => finish(true));
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) finish(false);
+            });
+
+            actions.appendChild(cancelBtn);
+            actions.appendChild(okBtn);
+            box.appendChild(msg);
+            box.appendChild(actions);
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+        });
+    };
+    window.showConfirm = homeShowConfirm;
 
     function renderPublicHofPlaceholder(message) {
       const container = document.getElementById('publicHallOfFameList');
@@ -1264,13 +1351,14 @@ function renderNotices(dataList) {
             const dateStr = formatHomeKstDate(n.created_at).replaceAll('-', '.');
             const safeCategory = escapeHtml(displayCategory);
             const safeTitle = escapeHtml(n.title || '');
+            const safeNoticeId = encodeURIComponent(String(n.id || ''));
             
             // ★ 핵심: onclick에 ID를 넘겨서 모달을 엽니다. (alert 제거됨)
             html += `
           <li class="mb-2 d-flex align-items-center border-bottom pb-2">
              <span class="badge ${badgeClass} me-2" style="flex-shrink:0;">${safeCategory}</span> 
              <a href="javascript:void(0);" class="text-dark text-decoration-none text-truncate" 
-                 onclick="openNoticeDetail('${n.id}')" style="max-width: 60%; display:inline-block;">
+                 onclick="openNoticeDetail(decodeURIComponent('${safeNoticeId}'))" style="max-width: 60%; display:inline-block;">
                 ${safeTitle}
              </a>
              <small class="text-muted ms-auto">${dateStr}</small>
@@ -1339,12 +1427,15 @@ function renderMainNotices(items) {
         const displayCategory = n.category === '공문' ? '공지' : (n.category || '');
         const badgeClass = displayCategory === '공지' ? 'bg-primary' : 'bg-secondary';
         const dateStr = formatHomeKstDate(n.created_at).replaceAll('-', '.');
+        const safeCategory = escapeHtml(displayCategory);
+        const safeTitle = escapeHtml(n.title || '');
+        const safeNoticeId = encodeURIComponent(String(n.id || ''));
         
         // 클릭하면 바로 '상세 읽기 모달' 오픈
         html += `
-          <li class="mb-2 d-flex align-items-center border-bottom pb-2" style="cursor:pointer;" onclick="openNoticeDetail('${n.id}')">
-             <span class="badge ${badgeClass} me-2" style="flex-shrink:0; font-size:0.75rem;">${displayCategory}</span> 
-             <span class="text-dark text-truncate" style="flex-grow:1; max-width: 180px;">${n.title}</span>
+          <li class="mb-2 d-flex align-items-center border-bottom pb-2" style="cursor:pointer;" onclick="openNoticeDetail(decodeURIComponent('${safeNoticeId}'))">
+             <span class="badge ${badgeClass} me-2" style="flex-shrink:0; font-size:0.75rem;">${safeCategory}</span> 
+             <span class="text-dark text-truncate" style="flex-grow:1; max-width: 180px;">${safeTitle}</span>
              <small class="text-muted ms-2" style="font-size:0.8rem;">${dateStr}</small>
           </li>
         `;
@@ -1404,21 +1495,25 @@ async function fetchPlants() {
             let pfHtml = '';
             operatingPlants.forEach(p => {
                  // 이미지가 없으면 플레이스홀더 사용
-                 const imgUrl = p.image_url || 'https://via.placeholder.com/800x600?text=Solar+Plant';
+                 const imgUrl = safeUrl(p.image_url) || 'https://via.placeholder.com/800x600?text=Solar+Plant';
+                 const safePlantName = escapeHtml(p.name || '');
+                 const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
+                 const safeLocation = escapeHtml(p.location || '용인시');
+                 const safePlantId = encodeURIComponent(String(p.id || ''));
                  
                  pfHtml += `
                   <div class="col-lg-4 col-md-6 portfolio-item mb-4" data-aos="fade-up">
                     <div class="portfolio-wrap shadow-sm rounded overflow-hidden">
                       <div style="height:250px; overflow:hidden;">
-                        <img src="${imgUrl}" class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${p.name}">
+                        <img src="${imgUrl}" class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${safePlantName}">
                       </div>
                       <div class="portfolio-info p-3 bg-white">
-                        <h4 class="fw-bold text-dark">${p.name}</h4>
-                        <p class="text-muted small mb-2">${p.capacity}kW | ${p.location || '용인시'}</p>
+                        <h4 class="fw-bold text-dark">${safePlantName}</h4>
+                        <p class="text-muted small mb-2">${safeCapacity}kW | ${safeLocation}</p>
                         
                         <div class="d-flex justify-content-between align-items-center mt-3">
                             <span class="badge bg-success">정상 가동 중</span>
-                            <button class="btn btn-sm btn-outline-primary rounded-pill" onclick="openPlantDetail('${p.id}')">
+                            <button class="btn btn-sm btn-outline-primary rounded-pill" onclick="openPlantDetail(decodeURIComponent('${safePlantId}'))">
                                 <i class="bi bi-plus-lg"></i> 상세 정보
                             </button>
                         </div>
@@ -1447,19 +1542,23 @@ function openPlantDetail(id) {
     document.getElementById('plant-modal-title').innerText = p.name;
     
     const imgEl = document.getElementById('plant-modal-img');
-    imgEl.src = p.image_url || 'https://via.placeholder.com/800x400?text=No+Image';
+    imgEl.src = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
 
     // 2) 리스트 구성 (동적으로 생성)
     const listContainer = document.getElementById('plant-modal-info-list');
+    const safeLocation = escapeHtml(p.location || '-');
+    const safeStatus = escapeHtml(p.status || '-');
+    const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
+    const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
     let listHtml = `
         <li class="list-group-item d-flex justify-content-between">
-          <span>설비 용량</span> <strong>${p.capacity} kW</strong>
+          <span>설비 용량</span> <strong>${safeCapacity} kW</strong>
         </li>
         <li class="list-group-item d-flex justify-content-between">
-          <span>위치</span> <span>${p.location || '-'}</span>
+          <span>위치</span> <span>${safeLocation}</span>
         </li>
         <li class="list-group-item d-flex justify-content-between">
-          <span>진행 상태</span> <strong class="text-primary">${p.status}</strong>
+          <span>진행 상태</span> <strong class="text-primary">${safeStatus}</strong>
         </li>
     `;
     
@@ -1467,7 +1566,7 @@ function openPlantDetail(id) {
     if(p.completion_date) {
         listHtml += `
         <li class="list-group-item d-flex justify-content-between">
-          <span>준공일(예정)</span> <strong>${p.completion_date}</strong>
+          <span>준공일(예정)</span> <strong>${safeCompletion}</strong>
         </li>`;
     }
     listContainer.innerHTML = listHtml;
@@ -1482,7 +1581,7 @@ function openPlantDetail(id) {
         
         // 모니터링 링크가 있으면 버튼 활성화
         if(p.monitor_url) {
-            linkBtn.href = p.monitor_url;
+            linkBtn.href = safeUrl(p.monitor_url) || '#';
             linkBtn.style.display = 'inline-block';
             linkBtn.innerText = '실시간 발전량 모니터링';
         } else {
@@ -1521,7 +1620,13 @@ function openPlantDetail(id) {
         let html = '';
         inProgressPlants.forEach(p => {
             const rate = p.progress_rate || 0;
-            const img = p.image_url || 'https://via.placeholder.com/800x400?text=No+Image';
+            const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
+            const safeName = escapeHtml(p.name || '');
+            const safeStatus = escapeHtml(p.status || '');
+            const safeLocation = escapeHtml(p.location || '미정');
+            const safeArea = escapeHtml(String(p.area || '-'));
+            const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
+            const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
             
             // 단계 계산
             const s1 = rate >= 0 ? 'active' : '';   const c1 = (rate >= 0 && rate < 20) ? 'current' : '';
@@ -1550,15 +1655,15 @@ function openPlantDetail(id) {
                       </div>
                       <div class="col-md-7">
                           <div class="d-flex align-items-center mb-2">
-                              <span class="badge bg-warning text-dark me-2">${p.status}</span>
-                              <h3 style="font-weight: 700; font-size: 1.5rem; margin:0;">${p.name}</h3>
+                              <span class="badge bg-warning text-dark me-2">${safeStatus}</span>
+                              <h3 style="font-weight: 700; font-size: 1.5rem; margin:0;">${safeName}</h3>
                           </div>
                           
                           <ul class="list-unstyled text-muted small mb-3">
-                              <li><i class="bi bi-geo-alt me-1"></i> 위치: ${p.location || '미정'}</li>
-                              <li><i class="bi bi-aspect-ratio me-1"></i> 면적: ${p.area || '-'}</li>
-                              <li><i class="bi bi-lightning-charge me-1"></i> 용량(예정): ${p.capacity}kW</li>
-                              <li><i class="bi bi-calendar-check me-1"></i> 준공(예정): ${p.completion_date || '미정'}</li>
+                              <li><i class="bi bi-geo-alt me-1"></i> 위치: ${safeLocation}</li>
+                              <li><i class="bi bi-aspect-ratio me-1"></i> 면적: ${safeArea}</li>
+                              <li><i class="bi bi-lightning-charge me-1"></i> 용량(예정): ${safeCapacity}kW</li>
+                              <li><i class="bi bi-calendar-check me-1"></i> 준공(예정): ${safeCompletion}</li>
                           </ul>
 
                           <p class="mb-2 fw-bold text-dark" style="font-size:1.1rem;">${statusText}</p>
@@ -1640,13 +1745,15 @@ function openPlantDetail(id) {
     function createHistoryItemHtml(doc) {
         // ★ 여기서 텍스트를 HTML로 예쁘게 변환합니다.
         const formattedContent = formatTextToHtml(doc.content);
+        const safeDate = escapeHtml(String(doc.event_date || '').replaceAll('-','.'));
+        const safeTitle = escapeHtml(doc.title || '');
 
         return `
           <div class="col-lg-8 offset-lg-2" data-aos="fade-up"> 
             <div class="timeline-item">
-              <div class="timeline-date">${doc.event_date.replaceAll('-','.')}</div>
+              <div class="timeline-date">${safeDate}</div>
               <div class="timeline-content">
-                <h4>${doc.title}</h4>
+                <h4>${safeTitle}</h4>
                 ${formattedContent ? `<div class="text-muted">${formattedContent}</div>` : ''}
               </div>
             </div>
@@ -1666,6 +1773,7 @@ function openPlantDetail(id) {
 
         lines.forEach(line => {
             line = line.trim();
+            const safeLine = escapeHtml(line);
             
             // '-' 또는 '•'로 시작하면 목록으로 간주
             if (line.startsWith('-') || line.startsWith('•')) {
@@ -1674,7 +1782,7 @@ function openPlantDetail(id) {
                     inList = true;
                 }
                 // 앞의 특수문자 빼고 내용만 넣기
-                html += `<li>${line.substring(1).trim()}</li>`;
+                html += `<li>${escapeHtml(line.substring(1).trim())}</li>`;
             } else {
                 // 목록이 끝났으면 닫아줌
                 if (inList) {
@@ -1684,7 +1792,7 @@ function openPlantDetail(id) {
                 
                 // 빈 줄이 아니면 출력 (엔터 처리)
                 if (line !== '') {
-                   html += `${line}<br>`;
+                   html += `${safeLine}<br>`;
                 }
             }
         });
@@ -1861,6 +1969,7 @@ function openPlantDetail(id) {
        partners.forEach(p => {
            const safeName = escapeHtml(p.name || '');
            const safeLogo = p.logo_url ? safeUrl(p.logo_url) : null;
+           const safePartnerId = escapeJsString(p.id || '');
            // 리스트 화면: 로고 있으면 이미지, 없으면 텍스트
            const content = safeLogo
                ? `<img src="${safeLogo}" class="img-fluid" alt="${safeName}">` 
@@ -1869,7 +1978,7 @@ function openPlantDetail(id) {
            // ★ 카드 디자인 적용 (col-6 col-md-4 col-lg-3 + partner-card 클래스)
            html += `
             <div class="col-6 col-md-4 col-lg-3">
-                <div class="partner-card" onclick="openPartnerDetail('${p.id}')">
+                <div class="partner-card" onclick="openPartnerDetail('${safePartnerId}')">
                     ${content}
                 </div>
             </div>
@@ -1965,10 +2074,11 @@ function openPlantDetail(id) {
             const safeCategory = escapeHtml(f.category || '');
             const safeQuestion = escapeHtml(f.question || '');
             const answerHtml = escapeHtml(f.answer || '').replace(/\n/g, '<br>');
+            const safeFaqId = String(f.id || `faq_${index}`).replace(/[^a-zA-Z0-9_-]/g, '_');
             
             html += `
              <li data-aos="fade-up" data-aos-delay="${index * 100}">
-                 <div class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${f.id}" aria-expanded="false" onclick="toggleFaqCard(this)">
+                 <div class="question-block" data-bs-toggle="collapse" data-bs-target="#faq-content-${safeFaqId}" aria-expanded="false" onclick="toggleFaqCard(this)">
                      <div class="d-flex align-items-center">
                          <span class="q-icon">Q.</span>
                         <span>[${safeCategory}] ${safeQuestion}</span>
@@ -1976,7 +2086,7 @@ function openPlantDetail(id) {
                      <i class="bi bi-chevron-down toggle-icon"></i>
                  </div>
 
-                <div id="faq-content-${f.id}" class="collapse answer-block" data-bs-parent="#faq-list-container">
+                <div id="faq-content-${safeFaqId}" class="collapse answer-block" data-bs-parent="#faq-list-container">
                     <p class="mb-0 mt-2">
                         ${answerHtml}
                      </p>
@@ -2005,41 +2115,114 @@ function openPlantDetail(id) {
             parentLi.classList.add('active');
         }
     }
-    // [신규 기능] 메인 로그인 버튼 클릭 시 라우팅 처리
-async function handleMainLogin() {
-    // 1. 현재 로그인 세션 확인
-    const { data: { session } } = await _client.auth.getSession();
-
-    // [CASE A] 로그인이 안 된 상태 -> 로그인 페이지로 이동
-    if (!session) {
-        // 로그인 페이지가 따로 있다면 login.html로, 
-        // 혹은 바로 관리 페이지로 보내서 그쪽에서 로그인을 유도할 수도 있습니다.
-        location.href = 'membermanage.html'; 
-        return;
+    function getPublicSessionSocialIds(user) {
+        const result = { kakao: '', naver: '' };
+        const identities = Array.isArray(user?.identities) ? user.identities : [];
+        identities.forEach((identity) => {
+            const provider = String(identity?.provider || '').trim().toLowerCase();
+            const providerId = String(
+                identity?.provider_id ||
+                identity?.identity_data?.provider_id ||
+                identity?.identity_data?.sub ||
+                ''
+            ).trim();
+            if (!providerId) return;
+            if (provider === 'kakao' && !result.kakao) result.kakao = providerId;
+            if ((provider === 'custom:naver' || provider === 'naver') && !result.naver) result.naver = providerId;
+        });
+        return result;
     }
+    // [신규 기능] 메인 로그인 버튼 클릭 시 라우팅 처리
+let publicMainLoginInFlight = false;
+async function handleMainLogin() {
+    if (publicMainLoginInFlight) return;
+    publicMainLoginInFlight = true;
+    try {
+        const { data: { session } } = await _client.auth.getSession();
 
-    // [CASE B, C] 로그인은 되어 있음 -> 정회원 명부 확인
-    // 이메일 또는 카카오ID로 조회
-    const { data: member, error } = await _client
-        .from('coop_members')
-        .select('id')
-        .or(`email.eq.${session.user.email},kakao_id.eq.${session.user.id}`)
-        .maybeSingle();
-
-    if (member) {
-        // [CASE B] 명부에 데이터 있음 -> 이미 가입된 조합원
-        location.href = 'membermanage.html'; 
-    } else {
-        // [CASE C] 인증은 됐는데 명부에 없음 -> 가입 신청서를 쓰다 만 사람
-        // 여기서 바로 가입 페이지(signup.html)로 이동합니다.
-        if(confirm("가입 신청서 작성이 완료되지 않았습니다.\n작성 페이지로 이동하시겠습니까?")) {
-            location.href = 'signup.html';
-        } else {
-            // 취소하면 로그아웃 처리하여 꼬임 방지
-            await _client.auth.signOut();
-            showAlert("로그아웃 되었습니다.");
-            location.reload();
+        if (!session) {
+            location.href = 'membermanage.html';
+            return;
         }
+
+        const email = String(session.user?.email || '').trim().toLowerCase();
+        const socialIds = getPublicSessionSocialIds(session.user);
+        const kakaoId = String(socialIds.kakao || '').trim();
+        const naverId = String(socialIds.naver || '').trim();
+        const memberChecks = [];
+
+        const visibleCoopId = String(await getVisibleSiteCoopId() || '').trim() || '00000000-0000-0000-0000-000000000000';
+
+        if (email) {
+            memberChecks.push(
+                (async () => {
+                    return await _client
+                        .from('coop_members')
+                        .select('id')
+                        .eq('coop_id', visibleCoopId)
+                        .eq('email', email)
+                        .limit(1)
+                        .maybeSingle();
+                })()
+            );
+        }
+
+        if (kakaoId) {
+            memberChecks.push(
+                (async () => {
+                    return await _client
+                        .from('coop_members')
+                        .select('id')
+                        .eq('coop_id', visibleCoopId)
+                        .eq('kakao_id', kakaoId)
+                        .limit(1)
+                        .maybeSingle();
+                })()
+            );
+        }
+
+        if (naverId) {
+            memberChecks.push(
+                (async () => {
+                    return await _client
+                        .from('coop_members')
+                        .select('id')
+                        .eq('coop_id', visibleCoopId)
+                        .eq('naver_id', naverId)
+                        .limit(1)
+                        .maybeSingle();
+                })()
+            );
+        }
+
+        const memberResults = await Promise.all(memberChecks);
+        const member = memberResults.find(result => result?.data)?.data || null;
+        const lookupError = memberResults.find(result => result?.error)?.error || null;
+
+        if (lookupError) {
+            console.warn('handleMainLogin member lookup failed:', lookupError);
+            homeShowAlert('로그인 상태를 확인하는 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+            return;
+        }
+
+        if (member) {
+            location.href = 'membermanage.html';
+            return;
+        }
+
+        if (await homeShowConfirm("가입 신청서 작성이 완료되지 않았습니다.\n작성 페이지로 이동하시겠습니까?")) {
+            location.href = 'signup.html';
+            return;
+        }
+
+        await _client.auth.signOut();
+        homeShowAlert("로그아웃 되었습니다.");
+        location.reload();
+    } catch (error) {
+        console.warn('handleMainLogin failed:', error);
+        homeShowAlert('로그인 상태를 확인하는 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+        publicMainLoginInFlight = false;
     }
 }
    // [이스터 에그] 콘솔 환영 메시지
@@ -2049,10 +2232,6 @@ function printConsoleSignature() {
     const badgeStyle = "background: #2e7d32; color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: bold; margin-right: 5px;";
     const geminiStyle = "background: linear-gradient(90deg, #4285F4, #9B72CB, #D96570); color: #fff; padding: 4px 8px; border-radius: 4px; font-weight: bold;";
 
-    void 0;
-    void 0;
-    void 0;
-    void 0;
 }
   </script>
   <script src="notice_modal.js"></script>

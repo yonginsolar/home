@@ -1,6 +1,6 @@
 /**
  * telegram_bot.js
- * V2.0 - 라이브러리 의존성 제거 및 보안 헤더(JWT) 탑재 버전
+ * V2.1 - 중복 전송 억제 및 콘솔 민감 메시지 노출 최소화
  */
 (function() {
     // 1. 설정 (보안 키 및 주소)
@@ -9,13 +9,38 @@
     
     // 정확한 함수 전체 주소 (v1/send-telegram 포함)
     const _URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co/functions/v1/send-telegram';
+    const DUPLICATE_WINDOW_MS = 30 * 1000;
+
+    function buildTalkFingerprint(text, prefix) {
+        const normalizedText = String(text || '').trim().replace(/\s+/g, ' ').slice(0, 300);
+        const normalizedPrefix = String(prefix || '').trim();
+        return `telegram_bot:${window.location.pathname}:${normalizedPrefix}:${normalizedText}`;
+    }
+
+    function shouldSuppressDuplicate(text, prefix) {
+        try {
+            const key = buildTalkFingerprint(text, prefix);
+            const now = Date.now();
+            const last = Number(sessionStorage.getItem(key) || 0);
+            if (Number.isFinite(last) && last > 0 && (now - last) < DUPLICATE_WINDOW_MS) {
+                return true;
+            }
+            sessionStorage.setItem(key, String(now));
+        } catch (_) {}
+        return false;
+    }
 
     // 2. 전역 함수 등록
     // window.sendTalk("메시지 내용", "[말머리]") 형태로 사용
     window.sendTalk = async function(text, prefix = "[시스템 알림]") {
         const finalMessage = `${prefix}\n\n${text}\n(시간: ${new Date().toLocaleString('ko-KR')})`;
-        
-        console.log("📨 텔레그램 발송 시도...", text);
+
+        if (shouldSuppressDuplicate(text, prefix)) {
+            console.info('ℹ️ 텔레그램 중복 전송 억제');
+            return true;
+        }
+
+        console.log("📨 텔레그램 발송 시도...");
 
         try {
             // 3. fetch를 이용한 독립적 전송 (Supabase 라이브러리 없이 동작)
@@ -46,5 +71,5 @@
         }
     };
 
-    console.log("🚀 알림 모듈(V2) 로드 완료 (라이브러리 독립형)");
+    console.log("🚀 알림 모듈(V2.1) 로드 완료");
 })();

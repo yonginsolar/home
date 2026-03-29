@@ -1,17 +1,19 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.8
-Change: Add shared boot guard and explicit retry UI for callback delays or transient auth sync failures.
+Version: v1.0.14
+Change: Add explicit favicon and keep public callback fallback on membermanage while ignoring local /erp destinations.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.8 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.14 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>인증 처리 중...</title>
+    <link rel="icon" type="image/png" href="https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/favicon.png">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="shared/boot_guard.js?v=20260327-1"></script>
+    <script src="shared/route_guard.js?v=20260328-2"></script>
     <style>
         body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f8f9fa; flex-direction: column; font-family: sans-serif; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #F7E600; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
@@ -35,58 +37,96 @@ Change: Add shared boot guard and explicit retry UI for callback delays or trans
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
+        const LEGACY_AUTH_DEST_KEY = 'auth_destination';
+        const PUBLIC_MEMBERMANAGE_URL = window.CoopRouteGuard?.buildSiblingPageUrl
+            ? window.CoopRouteGuard.buildSiblingPageUrl('membermanage.html')
+            : new URL('membermanage.html', window.location.href).href;
 
         // 목적지 찾기
-        function remapLegacyErpDestination(dest) {
-            if (!(dest instanceof URL)) return dest;
-            if (dest.origin !== 'https://erp.yonginsolar.kr') return dest;
-
-            const mapped = new URL('https://www.yonginsolar.kr');
-            const safePath = String(dest.pathname || '').trim();
-            mapped.pathname = (!safePath || safePath === '/')
-                ? '/erp/'
-                : (safePath === '/erp' || safePath.startsWith('/erp/') ? safePath : `/erp${safePath.startsWith('/') ? '' : '/'}${safePath}`);
-            mapped.search = dest.search;
-            mapped.hash = dest.hash;
-            return mapped;
+        function normalizeDest(raw) {
+            return CoopRouteGuard.normalizeDestination(raw, { fallback: PUBLIC_MEMBERMANAGE_URL });
         }
 
-        function normalizeDest(raw) {
-            const fallback = '/';
-            if (!raw) return fallback;
-            try {
-                const dest = remapLegacyErpDestination(new URL(raw, window.location.origin));
-                const allowOrigins = [
-                    window.location.origin,
-                    'https://www.yonginsolar.kr',
-                    'http://localhost:8000'
-                ];
-                if (!allowOrigins.includes(dest.origin)) return fallback;
-                return dest.href;
-            } catch (e) {
-                return fallback;
+        function isLocalPublicCallbackRuntime() {
+            const host = String(window.location.hostname || '').trim().toLowerCase();
+            return (window.location.protocol === 'http:' || window.location.protocol === 'https:')
+                && (host === 'localhost' || host === '127.0.0.1');
+        }
+
+        function pickPublicDestCandidate() {
+            const params = new URLSearchParams(window.location.search);
+            const queryNext = String(params.get('next') || '').trim();
+            const publicStored = String(localStorage.getItem(PUBLIC_AUTH_DEST_KEY) || '').trim();
+            const legacyStored = String(localStorage.getItem(LEGACY_AUTH_DEST_KEY) || '').trim();
+            const isBlockedLocalErpDest = (candidate) => (
+                isLocalPublicCallbackRuntime()
+                && candidate
+                && CoopRouteGuard.isErpDestination(candidate, { fallback: PUBLIC_MEMBERMANAGE_URL })
+            );
+
+            if (queryNext && !isBlockedLocalErpDest(queryNext)) return queryNext;
+            if (publicStored && !isBlockedLocalErpDest(publicStored)) return publicStored;
+
+            if (legacyStored) {
+                if (isBlockedLocalErpDest(legacyStored)) {
+                    return '';
+                }
+                return legacyStored;
             }
+
+            return '';
         }
 
         function getDest() {
-            const params = new URLSearchParams(window.location.search);
-            const raw = params.get('next') || localStorage.getItem('auth_destination');
+            const raw = pickPublicDestCandidate();
             return normalizeDest(raw);
         }
 
         function isErpDestination(rawDest) {
+            return CoopRouteGuard.isErpDestination(rawDest, { fallback: '/' });
+        }
+
+        let authStateFallbackSubscription = null;
+        let authStateFallbackTimer = null;
+        let callbackRedirectTimer = null;
+
+        function clearAuthStateFallbackSubscription() {
             try {
-                const dest = new URL(normalizeDest(rawDest), window.location.origin);
-                return dest.pathname === '/erp' || dest.pathname.startsWith('/erp/');
-            } catch (e) {
-                return false;
+                authStateFallbackSubscription?.data?.subscription?.unsubscribe?.();
+            } catch (_) {}
+            authStateFallbackSubscription = null;
+        }
+
+        function clearCallbackRedirectTimer() {
+            if (callbackRedirectTimer) {
+                clearTimeout(callbackRedirectTimer);
+                callbackRedirectTimer = null;
             }
+        }
+
+        function scheduleCallbackRedirect(dest, delayMs) {
+            clearCallbackRedirectTimer();
+            callbackRedirectTimer = setTimeout(() => {
+                callbackRedirectTimer = null;
+                window.location.replace(dest);
+            }, Math.max(0, Number(delayMs) || 0));
+        }
+
+        function clearCallbackFallbackState() {
+            if (authStateFallbackTimer) {
+                clearTimeout(authStateFallbackTimer);
+                authStateFallbackTimer = null;
+            }
+            clearCallbackRedirectTimer();
+            clearAuthStateFallbackSubscription();
         }
 
         // [핵심] 세션은 동일 출처에 저장되므로 URL로 토큰을 전달하지 않음
         function redirectWithSession(session) {
+            clearCallbackFallbackState();
             const dest = getDest();
-            localStorage.removeItem('auth_destination'); // 청소
+            localStorage.removeItem(PUBLIC_AUTH_DEST_KEY);
 
             if (!session) {
                 // 세션이 없으면 그냥 이동 (실패 상황)
@@ -131,9 +171,7 @@ Change: Add shared boot guard and explicit retry UI for callback delays or trans
                         if (linked) return linked;
                     }
                 }
-            } catch (e) {
-                void 0;
-            }
+            } catch (e) {}
 
             return user?.identities?.find(identity => identity.provider === provider) || null;
         }
@@ -235,85 +273,106 @@ Change: Add shared boot guard and explicit retry UI for callback delays or trans
                 if (phone && currentPhone !== phone) {
                     await _supabase.auth.updateUser({ data: { phone: phone, phone_number: phone } });
                 }
-            } catch (e) { void 0; }
+            } catch (e) {}
         }
 
         const runCallbackBoot = BootGuard.createSingleFlightAction(async function processAuthInternal() {
             try {
                 setCallbackBusyState('로그인 정보를 동기화하고 있습니다...');
-                // 1. 세션 획득 시도 (2.5초 타임아웃)
-                const { data, error } = await Promise.race([
-                    _supabase.auth.getSession(),
-                    new Promise(r => setTimeout(() => r({ error: 'timeout' }), 2500))
-                ]);
+                clearCallbackFallbackState();
+                const params = new URLSearchParams(window.location.search);
+                const code = params.get('code');
+                let activeSession = null;
 
-                if (error || !data.session) {
-                    // getSession 실패 시, 혹시 URL에 hash(#)가 남아있다면 그걸 믿어본다
-                    // (Supabase는 URL 해시로 토큰을 줍니다)
-                    let settled = false;
-                    const fallbackTimer = setTimeout(() => {
-                        if (!settled) {
-                            showCallbackRetryState('인증 처리가 지연되고 있습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
-                        }
-                    }, 3500);
-                    const authListener = _supabase.auth.onAuthStateChange((evt, session) => {
-                        if (session) {
-                            settled = true;
-                            clearTimeout(fallbackTimer);
-                            authListener?.data?.subscription?.unsubscribe?.();
-                            syncPhone(session.user).then(() => redirectWithSession(session));
-                        }
-                    });
-                    return;
+                if (code) {
+                    const { data: exchanged, error: exchangeError } = await _supabase.auth.exchangeCodeForSession(code);
+                    if (!exchangeError && exchanged?.session) {
+                        activeSession = exchanged.session;
+                        try {
+                            const sanitizedUrl = new URL(window.location.href);
+                            sanitizedUrl.searchParams.delete('code');
+                            sanitizedUrl.searchParams.delete('state');
+                            window.history?.replaceState?.({}, document.title, `${sanitizedUrl.pathname}${sanitizedUrl.search}${sanitizedUrl.hash}`);
+                        } catch (_) {}
+                    }
+                }
+
+                // 1. 세션 획득 시도 (2.5초 타임아웃)
+                if (!activeSession) {
+                    const { data, error } = await Promise.race([
+                        _supabase.auth.getSession(),
+                        new Promise(r => setTimeout(() => r({ error: 'timeout' }), 2500))
+                    ]);
+
+                    if (error || !data.session) {
+                        // getSession 실패 시, 혹시 URL에 hash(#)가 남아있다면 그걸 믿어본다
+                        // (Supabase는 URL 해시로 토큰을 줍니다)
+                        let settled = false;
+                        authStateFallbackTimer = setTimeout(() => {
+                            if (!settled) {
+                                showCallbackRetryState('인증 처리가 지연되고 있습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
+                            }
+                        }, 3500);
+                        authStateFallbackSubscription = _supabase.auth.onAuthStateChange((evt, session) => {
+                            if (session) {
+                                settled = true;
+                                clearCallbackFallbackState();
+                                syncPhone(session.user).then(() => redirectWithSession(session));
+                            }
+                        });
+                        return;
+                    }
+                    activeSession = data.session;
                 }
 
                 // 성공 시
-                const params = new URLSearchParams(window.location.search);
                 const isLinking = params.get('linking') === 'true';
 
                 if (isLinking) {
                     const providerMeta = getLinkingProviderMeta();
                     document.getElementById('message').innerText = `${providerMeta.label} 계정 연결 처리 중...`;
                     const redirectTarget = getDest();
-                    localStorage.removeItem('auth_destination');
-                    await syncPhone(data.session.user);
+                    localStorage.removeItem(PUBLIC_AUTH_DEST_KEY);
+                    await syncPhone(activeSession.user);
 
                     const authError = getHashAuthError();
                     if (authError) {
                         console.error(`${providerMeta.label} 연결 콜백 오류:`, authError);
                         document.getElementById('message').innerText = `${providerMeta.label} 연결에 실패했습니다. 다시 시도해 주세요.`;
-                        setTimeout(() => window.location.replace(redirectTarget), 3000);
+                        scheduleCallbackRedirect(redirectTarget, 3000);
                         return;
                     }
 
-                    const linkedIdentity = await getLinkedIdentity(data.session.user, providerMeta.key);
+                    const linkedIdentity = await getLinkedIdentity(activeSession.user, providerMeta.key);
                     if (!linkedIdentity) {
                         document.getElementById('message').innerText = `${providerMeta.label} 인증 정보 추출 실패. 연동 취소.`;
-                        setTimeout(() => window.location.replace(redirectTarget), 3000);
+                        scheduleCallbackRedirect(redirectTarget, 3000);
                         return;
                     }
 
                     if (!isErpDestination(redirectTarget)) {
                         try {
-                            await syncPublicMemberSocialIdentity(providerMeta, data.session.user, linkedIdentity);
+                            await syncPublicMemberSocialIdentity(providerMeta, activeSession.user, linkedIdentity);
                         } catch (rpcError) {
                             console.error(`${providerMeta.label} 연동 RPC 오류:`, rpcError);
                             document.getElementById('message').innerText = `${providerMeta.label} 연결에 실패했습니다. (DB 오류)`;
-                            setTimeout(() => window.location.replace(redirectTarget), 3000);
+                            scheduleCallbackRedirect(redirectTarget, 3000);
                             return;
                         }
                     }
 
                     document.getElementById('message').innerText = `${providerMeta.label} 계정이 성공적으로 연결되었습니다!`;
-                    setTimeout(() => window.location.replace(redirectTarget), 1500);
+                    scheduleCallbackRedirect(redirectTarget, 1500);
                     return;
                 }
 
                 // [원래 로직] 일반 로그인 성공 처리
-                await syncPhone(data.session.user);
-                redirectWithSession(data.session);
+                clearCallbackFallbackState();
+                await syncPhone(activeSession.user);
+                redirectWithSession(activeSession);
 
             } catch (err) {
+                clearCallbackFallbackState();
                 console.error(err);
                 showCallbackRetryState('인증 처리를 완료하지 못했습니다. 다시 시도하거나 원래 화면으로 이동해 주세요.');
             }
@@ -327,6 +386,7 @@ Change: Add shared boot guard and explicit retry UI for callback delays or trans
             processAuth();
         });
         document.getElementById('btnGoDest').addEventListener('click', () => {
+            clearCallbackFallbackState();
             window.location.replace(getDest());
         });
 

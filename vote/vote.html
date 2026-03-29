@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.5
-Change: 2026-03-15 - Require member management linkage for vote booth entry.
+Version: v1.0.7
+Change: 2026-03-29 - Validate candidate and manifesto image URLs before rendering.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-    <title>용인모두의햇빛협동조합 조합원 투표소</title>
-    <script>console.log('[Version] v1.0.5 | vote.html');</script>
+    <title>조합원 투표소</title>
+    <script>console.log('[Version] v1.0.7 | vote.html');</script>
     <link rel="stylesheet" href="style.css">
    <style>
 /* =========================================
@@ -333,7 +333,7 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
 
     <div id="vote-container" class="container">
         <header>
-            <h1 id="election-title">용인모두의햇빛협동조합 조합원 투표소</h1>
+            <h1 id="election-title">조합원 투표소</h1>
             <p id="voter-info" style="color: #666; text-align: center;">회원 확인중...</p>
             <div style="background: #f0fdf4; color: #166534; padding: 0.5rem; text-align: center; border-radius: 4px; margin-top: 0.5rem;">
                 <strong id="district-name">선거구 확인중</strong>
@@ -390,17 +390,34 @@ function escapeHtml(value) {
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[ch]));
 }
+
+function safeUrl(value, options = {}) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const allowRelative = options.allowRelative === true;
+    try {
+        const parsed = new URL(raw, window.location.origin);
+        const isRelative = !/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(raw);
+        if (isRelative && !allowRelative) return '';
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+        return '';
+    } catch (_) {
+        return '';
+    }
+}
     import { ElectionService, supabase, DISTRICT_VOTE_STATE } from './ElectionService.js';
     // [신규] 기본 프로필 이미지 상수 (회색 사람 실루엣)
     const DEFAULT_PROFILE_IMG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzk5OTk5OSI+PHBhdGggZD0iTTEyIDEyYzIuMjEgMCA0LTEuNzkgNC00cy0xLjc5LTQtNC00LTQgMS43OS00IDQgMS43OSA0IDQgNHptMCAyYy0yLjY3IDAtOCAxLjM0LTggNHYyaDE2di0yYzAtMi42Ni01LjMzLTQtOC00eiIvPjwvc3ZnPg==";
 
     async function resolveCandidatePhotoUrl(photoPath) {
         if (!photoPath) return DEFAULT_PROFILE_IMG;
-        if (photoPath.startsWith('http')) return photoPath;
+        const safeDirectUrl = safeUrl(photoPath);
+        if (safeDirectUrl) return safeDirectUrl;
         try {
             const { data, error } = await supabase.storage.from('candidate_proofs').createSignedUrl(photoPath, 3600);
-            if (error || !data?.signedUrl) return DEFAULT_PROFILE_IMG;
-            return data.signedUrl;
+            const signedUrl = safeUrl(data?.signedUrl || '');
+            if (error || !signedUrl) return DEFAULT_PROFILE_IMG;
+            return signedUrl;
         } catch (_) {
             return DEFAULT_PROFILE_IMG;
         }
@@ -472,6 +489,7 @@ function escapeHtml(value) {
 
     // 선거 목록 렌더링 (기존과 동일)
     function renderElectionList(elections) {
+        document.title = '참여할 선거 선택';
         titleElem.innerText = "참여할 선거를 선택해주세요";
         document.getElementById('district-name').style.display = 'none';
         voteBtn.style.display = 'none';
@@ -506,6 +524,7 @@ function escapeHtml(value) {
 
 async function loadElection(election) {
         currentElection = election;
+        document.title = String(election?.title || '조합원 투표소').trim() || '조합원 투표소';
         titleElem.innerText = election.title;
         // 로딩 중 표시
         ballotArea.innerHTML = '<div style="text-align:center; padding:2rem;">투표 기록을 확인 중입니다...</div>';
@@ -575,8 +594,10 @@ async function loadNextBallot() {
 
         // 남은 투표 수 표시
         if (pendingBallots.length > 1) {
+             document.title = `${currentElection.title} (${pendingBallots.length}건 남음)`;
              titleElem.innerText = `${currentElection.title} (${pendingBallots.length}건 남음)`;
         } else {
+             document.title = String(currentElection.title || '조합원 투표소').trim() || '조합원 투표소';
              titleElem.innerText = currentElection.title;
         }
 
@@ -914,8 +935,12 @@ voteBtn.addEventListener('click', () => {
 
         if (manifestoText && (manifestoText.startsWith('http') || manifestoText.startsWith('/'))) {
              // 이미지인 경우
-             const safeUrl = encodeURI(manifestoText);
-             innerContent = `<img src="${safeUrl}" class="manifesto-img" alt="공약 이미지">`;
+             const safeManifestoUrl = safeUrl(manifestoText, { allowRelative: true });
+             if (safeManifestoUrl) {
+                 innerContent = `<img src="${safeManifestoUrl}" class="manifesto-img" alt="공약 이미지">`;
+             } else {
+                 innerContent = `<div class="manifesto-content-text">등록된 공약 이미지를 불러오지 못했습니다.</div>`;
+             }
         } else {
              // 텍스트인 경우
             const safeManifesto = escapeHtml(manifestoText || "등록된 공약 내용이 없습니다.").replace(/\n/g, '<br>');

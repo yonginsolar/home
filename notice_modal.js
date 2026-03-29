@@ -1,6 +1,6 @@
 /*
-Version: v1.0.13
-Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of exposing raw tags in the shared detail modal.
+Version: v1.0.15
+Change: 2026-03-29 - Escape notice ids in modal list click handlers.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -62,12 +62,22 @@ Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of e
             .replace(/'/g, '&#39;');
     }
 
+    function escapeJsString(value = '') {
+        return String(value)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/\r/g, '\\r')
+            .replace(/\n/g, '\\n')
+            .replace(/</g, '\\x3C')
+            .replace(/>/g, '\\x3E');
+    }
+
     function safeUrl(url, allowDataImage = false) {
         try {
             if (allowDataImage && /^data:image\//i.test(url)) return url;
             const u = new URL(url, window.location.origin);
             if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
-        } catch (e) { void 0; }
+        } catch (e) {}
         return null;
     }
 
@@ -247,11 +257,11 @@ Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of e
                 .from('attachments')
                 .createSignedUrl('ec_seal.png', 60 * 60);
             if (!error && data?.signedUrl) return data.signedUrl;
-        } catch (e) { void 0; }
+        } catch (e) {}
         try {
             const { data } = client.storage.from('attachments').getPublicUrl('ec_seal.png');
             if (data?.publicUrl) return data.publicUrl;
-        } catch (e) { void 0; }
+        } catch (e) {}
         return '';
     }
 
@@ -502,7 +512,7 @@ Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of e
             if (typeof g_notices_list !== 'undefined' && Array.isArray(g_notices_list) && g_notices_list.length > 0) {
                 return g_notices_list;
             }
-        } catch (e) { void 0; }
+        } catch (e) {}
         if (Array.isArray(window.g_notices_list) && window.g_notices_list.length > 0) {
             return window.g_notices_list;
         }
@@ -580,9 +590,10 @@ Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of e
             const dateStr = formatNoticeKstDate(n.created_at);
             const safeCategory = escapeHtml(n.category || '');
             const safeTitle = escapeHtml(n.title || '');
+            const safeNoticeId = escapeJsString(n.id || '');
             html += `
           <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
-              onclick="openNoticeDetail('${n.id}')" style="cursor:pointer;">
+              onclick="openNoticeDetail('${safeNoticeId}')" style="cursor:pointer;">
              <div>
                 <span class="badge bg-light text-dark border me-1">${safeCategory}</span>
                 <span class="fw-bold text-dark">${safeTitle}</span>
@@ -798,7 +809,7 @@ Change: 2026-03-25 - Render HTML-based notice bodies with sanitizer instead of e
                 if (!safeLink) return;
 
                 let fileName = (attachNames[idx] || '').trim() || url.split('/').pop();
-                try { fileName = decodeURIComponent(fileName); } catch (e) { void 0; }
+                try { fileName = decodeURIComponent(fileName); } catch (e) {}
                 let displayName = fileName.replace(/_/g, ' ');
                 const safeDisplay = escapeHtml(displayName);
 

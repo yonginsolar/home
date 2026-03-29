@@ -1,6 +1,6 @@
 /*
-Version: v1.0.40
-Change: 2026-03-24 - Scope completed notice approval reads by visible coop_id before print/export.
+Version: v1.0.42
+Change: 2026-03-28 - Scope document box seen updates and approval notice linkage reads by visible coop_id.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -44,55 +44,60 @@ async function getSession() {
 
 async function getMemberByEmail(email) {
     if (!email) return null;
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_members')
         .select('id, role, member_id, name, email')
-        .eq('email', email)
-        .maybeSingle();
+        .ilike('email', String(email).trim())
+        .maybeSingle(), coopId);
     if (error) return null;
     return data || null;
 }
 
 async function getMemberByAuthId(uid) {
     if (!uid) return null;
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_members')
         .select('id, role, member_id, name, email')
         .eq('id', uid)
-        .maybeSingle();
+        .maybeSingle(), coopId);
     if (error) return null;
     return data || null;
 }
 
 async function getMemberByProfileId(profileId) {
     if (!profileId) return null;
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_members')
         .select('id, role, member_id, name, email')
         .eq('id', profileId)
-        .maybeSingle();
+        .maybeSingle(), coopId);
     if (error) return null;
     return data || null;
 }
 
 async function getMemberByMemberId(memberId) {
     if (!memberId) return null;
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_members')
         .select('id, role, member_id, name, email')
         .eq('member_id', memberId)
-        .maybeSingle();
+        .maybeSingle(), coopId);
     if (error) return null;
     return data || null;
 }
 
 async function getMemberByKakaoId(kakaoId) {
     if (!kakaoId) return null;
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('coop_members')
         .select('id, role, member_id, name, email')
         .eq('kakao_id', kakaoId)
-        .maybeSingle();
+        .maybeSingle(), coopId);
     if (error) return null;
     return data || null;
 }
@@ -102,7 +107,7 @@ function getActiveProfileId() {
         if (typeof window !== 'undefined' && window.sessionStorage) {
             return window.sessionStorage.getItem('lastActiveProfile');
         }
-    } catch (e) { void 0; }
+    } catch (e) {}
     return null;
 }
 
@@ -348,10 +353,11 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
     if (!memberId) return { data: null, error: { message: '조합원 프로필을 찾을 수 없습니다.' } };
 
     const markAt = seenAt || new Date().toISOString();
+    const coopId = await getVisibleCoopId();
 
-    const { error: updErr } = await supabase
+    const { error: updErr } = await scopeByCoop(supabase
         .from('coop_members')
-        .update({ document_box_last_seen_at: markAt })
+        .update({ document_box_last_seen_at: markAt }), coopId)
         .eq('id', memberId);
     if (updErr) return { data: null, error: updErr };
     return { data: { member_id: memberId, seen_at: markAt }, error: null };
@@ -448,10 +454,11 @@ async function listNoticeMinutesByDocNos(docNos) {
 
 async function getApprovalsByIds(ids) {
     if (!ids || ids.length === 0) return { data: [], error: null };
-    const { data, error } = await supabase
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
         .from('ref_approval')
         .select('id,file_links,doc_no')
-        .in('id', ids);
+        .in('id', ids), coopId);
     return { data: data || [], error };
 }
 

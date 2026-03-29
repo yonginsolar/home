@@ -1,4 +1,39 @@
 window.ErpRuntimeGuard = {
+  showInlineAlert: function(message) {
+    const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
+    try {
+      const existing = document.getElementById('__erpRuntimeGuardAlert');
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      const alertBox = document.createElement('div');
+      alertBox.id = '__erpRuntimeGuardAlert';
+      alertBox.setAttribute('role', 'alert');
+      alertBox.style.cssText = [
+        'position:fixed',
+        'top:24px',
+        'left:50%',
+        'transform:translateX(-50%)',
+        'z-index:99999',
+        'max-width:min(92vw,420px)',
+        'padding:14px 16px',
+        'border-radius:14px',
+        'border:1px solid #fdba74',
+        'background:#fff7ed',
+        'color:#9a3412',
+        'box-shadow:0 16px 40px rgba(15,23,42,0.18)',
+        'font-family:\"Malgun Gothic\",\"Apple SD Gothic Neo\",sans-serif',
+        'font-size:14px',
+        'line-height:1.6',
+        'white-space:pre-wrap'
+      ].join(';');
+      alertBox.textContent = text;
+      document.body.appendChild(alertBox);
+      setTimeout(function() {
+        if (alertBox.parentNode) alertBox.parentNode.removeChild(alertBox);
+      }, 3200);
+    } catch (error) {
+      console.error('ErpRuntimeGuard inline alert failed:', error, text);
+    }
+  },
   getRuntime: async function(_supabase) {
     const { data, error } = await _supabase.rpc('get_my_erp_runtime');
     if (error) throw error;
@@ -30,7 +65,7 @@ window.ErpRuntimeGuard = {
     const alertFn = typeof opts.alertFn === 'function'
       ? opts.alertFn
       : function(msg) {
-          window.alert(String(msg || '확인이 필요합니다.'));
+          window.ErpRuntimeGuard.showInlineAlert(String(msg || '확인이 필요합니다.'));
         };
 
     let runtime = null;
@@ -58,11 +93,11 @@ window.ErpRuntimeGuard = {
       try {
         localStorage.removeItem('erp_user');
         localStorage.removeItem('erp_permissions');
-      } catch (_) { void 0; }
+      } catch (_) {}
       if (signOutOnInactive) {
         try {
           await _supabase.auth.signOut();
-        } catch (_) { void 0; }
+        } catch (_) {}
       }
       setTimeout(function() {
         location.href = redirectUrl;

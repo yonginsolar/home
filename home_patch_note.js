@@ -1,6 +1,6 @@
 /*
-Version: v1.0.7
-Change: 2026-03-23 - Blur homepage patch-note dismiss controls before Bootstrap applies aria-hidden.
+Version: v1.0.9
+Change: Sanitize home patch note list rendering and delete actions.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -51,6 +51,136 @@ var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(
   document.body.appendChild(overlay);
 };
 
+var showConfirm = (typeof window !== 'undefined' && window.showConfirm) || function(message) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.background = 'rgba(0,0,0,0.45)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = '10000';
+
+    const box = document.createElement('div');
+    box.style.background = '#fff';
+    box.style.borderRadius = '10px';
+    box.style.maxWidth = '90%';
+    box.style.minWidth = '280px';
+    box.style.padding = '18px 20px';
+    box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
+
+    const msg = document.createElement('div');
+    msg.style.whiteSpace = 'pre-line';
+    msg.style.color = '#111827';
+    msg.style.fontSize = '14px';
+    msg.style.lineHeight = '1.5';
+    msg.textContent = String(message ?? '');
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+    actions.style.marginTop = '14px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = '취소';
+    cancelBtn.style.padding = '8px 16px';
+    cancelBtn.style.border = '1px solid #d1d5db';
+    cancelBtn.style.borderRadius = '8px';
+    cancelBtn.style.background = '#fff';
+    cancelBtn.style.color = '#111827';
+    cancelBtn.style.cursor = 'pointer';
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.textContent = '삭제';
+    okBtn.style.padding = '8px 16px';
+    okBtn.style.border = '1px solid #dc2626';
+    okBtn.style.borderRadius = '8px';
+    okBtn.style.background = '#dc2626';
+    okBtn.style.color = '#fff';
+    okBtn.style.cursor = 'pointer';
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      overlay.remove();
+      resolve(!!result);
+    };
+
+    cancelBtn.addEventListener('click', () => finish(false));
+    okBtn.addEventListener('click', () => finish(true));
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) finish(false);
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    box.appendChild(msg);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  });
+};
+
+function escapePatchHtml(value = '') {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safePatchUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''), window.location.origin);
+    if (['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)) return parsed.href;
+  } catch (e) {}
+  return null;
+}
+
+function sanitizePatchContent(raw) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(String(raw || ''), 'text/html');
+  const allowedTags = new Set(['A', 'B', 'BR', 'CODE', 'DIV', 'EM', 'I', 'LI', 'OL', 'P', 'PRE', 'SMALL', 'SPAN', 'STRONG', 'U', 'UL']);
+
+  doc.body.querySelectorAll('*').forEach((el) => {
+    const tag = el.tagName.toUpperCase();
+    if (!allowedTags.has(tag)) {
+      el.replaceWith(doc.createTextNode(el.textContent || ''));
+      return;
+    }
+
+    Array.from(el.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = String(attr.value || '');
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+        return;
+      }
+      if (tag === 'A' && name === 'href') {
+        const safe = safePatchUrl(value);
+        if (safe) {
+          el.setAttribute('href', safe);
+          el.setAttribute('target', '_blank');
+          el.setAttribute('rel', 'noopener noreferrer');
+        } else {
+          el.removeAttribute(attr.name);
+        }
+        return;
+      }
+      if (tag === 'A' && name === 'title') return;
+      el.removeAttribute(attr.name);
+    });
+  });
+
+  return doc.body.innerHTML.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+}
+
 const KST_TZ_PATCH = 'Asia/Seoul';
 const formatPatchKstDate = (value = new Date()) => {
   const d = value instanceof Date ? value : new Date(value);
@@ -59,6 +189,7 @@ const formatPatchKstDate = (value = new Date()) => {
 };
 if (typeof window !== 'undefined') {
   window.showAlert = showAlert;
+  window.showConfirm = showConfirm;
 }
 
 let patchNoteLastFocus = null;
@@ -263,8 +394,11 @@ async function loadPatchList() {
     const isAdmin = isAdminUser();
 
     listEl.innerHTML = data.map(note => {
-        // 줄바꿈 처리 (\n -> <br>)
-        const contentHtml = note.content ? note.content.replace(/\\n/g, '<br>').replace(/\n/g, '<br>') : '';
+        const contentHtml = sanitizePatchContent(note.content || '');
+        const safeVersion = escapePatchHtml(note.version || '');
+        const safeReleaseDate = escapePatchHtml(note.release_date || '');
+        const safeTitle = escapePatchHtml(note.title || '');
+        const safeNoteId = Number.isFinite(Number(note.id)) ? Number(note.id) : null;
         
         // 메이저 업데이트 뱃지
         const badge = note.is_major 
@@ -272,18 +406,18 @@ async function loadPatchList() {
             : '<span class="badge bg-secondary ms-2">Patch</span>';
         
         // 삭제 버튼 (관리자만)
-        const delBtn = isAdmin 
-            ? `<button class="btn btn-outline-danger btn-sm py-0 ms-auto" style="font-size:0.7rem;" onclick="deletePatchNote(${note.id})">삭제</button>` 
+        const delBtn = (isAdmin && safeNoteId !== null)
+            ? `<button class="btn btn-outline-danger btn-sm py-0 ms-auto" style="font-size:0.7rem;" onclick="deletePatchNote(${safeNoteId})">삭제</button>` 
             : '';
 
         return `
             <div class="list-group-item p-3">
                 <div class="d-flex w-100 align-items-center mb-2">
-                    <h6 class="mb-0 fw-bold text-primary">${note.version} ${badge}</h6>
-                    <small class="text-muted ms-2">${note.release_date}</small>
+                    <h6 class="mb-0 fw-bold text-primary">${safeVersion} ${badge}</h6>
+                    <small class="text-muted ms-2">${safeReleaseDate}</small>
                     ${delBtn}
                 </div>
-                <h6 class="fw-bold mb-2">${note.title}</h6>
+                <h6 class="fw-bold mb-2">${safeTitle}</h6>
                 <p class="mb-1 small text-secondary" style="line-height: 1.6;">${contentHtml}</p>
             </div>
         `;
@@ -328,7 +462,8 @@ async function savePatchNote() {
 
 // 5. 패치노트 삭제 (관리자용)
 async function deletePatchNote(id) {
-    if(!confirm("이 패치 내역을 삭제하시겠습니까? (복구 불가)")) return;
+    const ok = await showConfirm("이 패치 내역을 삭제하시겠습니까? (복구 불가)");
+    if(!ok) return;
     
     // 테이블명 변경: sys_home_patch_note
     const { error } = await _client
