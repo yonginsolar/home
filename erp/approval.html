@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.95 | Change: 2026-03-30 - Highlight previous/next attachment navigation when more previewable files remain. -->
+<!-- Version: v1.1.96 | Change: 2026-03-30 - Pass fresh Authorization header explicitly when invoking approval Edge Functions. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.95 | approval.html');</script>
+  <script>console.log('[Version] v1.1.96 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -6473,7 +6473,17 @@ async function invokeApprovalEdgeFunction(functionName, body, options = {}) {
         return { data: null, error: firstSession.error };
     }
 
-    let { data, error } = await _supabase.functions.invoke(safeFunctionName, { body });
+    const buildInvokeOptions = (token) => ({
+        body,
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    let { data, error } = await _supabase.functions.invoke(
+        safeFunctionName,
+        buildInvokeOptions(firstSession.token)
+    );
     if (!error) return { data, error: null };
 
     const normalizedText = normalizeApprovalEdgeInvokeError(error);
@@ -6486,7 +6496,10 @@ async function invokeApprovalEdgeFunction(functionName, body, options = {}) {
         return { data: null, error: refreshedSession.error };
     }
 
-    const retryResult = await _supabase.functions.invoke(safeFunctionName, { body });
+    const retryResult = await _supabase.functions.invoke(
+        safeFunctionName,
+        buildInvokeOptions(refreshedSession.token)
+    );
     return { data: retryResult.data, error: retryResult.error || null };
 } // End of invokeApprovalEdgeFunction
 
