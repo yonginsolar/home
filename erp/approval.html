@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.94 | Change: 2026-03-30 - Prevent leave title auto-generation from leaking into general proposal title on approval boot. -->
+<!-- Version: v1.1.95 | Change: 2026-03-30 - Highlight previous/next attachment navigation when more previewable files remain. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.94 | approval.html');</script>
+  <script>console.log('[Version] v1.1.95 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -10216,6 +10216,16 @@ async function buildRelAttachmentViewer(attachments) {
             .filter(item => canPreviewAttachment(item.rawRef))
     };
     const getItemDisplayName = (item, fallback) => String(item?.displayName || extractDisplayFileName(item?.rawRef, fallback));
+    const syncAttachmentNavButtons = () => {
+        const hasPrev = state.previewable.length > 0 && state.index > 0;
+        const hasNext = state.previewable.length > 0 && state.index < state.previewable.length - 1;
+        prevBtn.disabled = !hasPrev;
+        nextBtn.disabled = !hasNext;
+        prevBtn.className = hasPrev ? 'btn btn-sm btn-outline-primary' : 'btn btn-sm btn-outline-secondary';
+        nextBtn.className = hasNext ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-secondary';
+        prevBtn.textContent = hasPrev ? '이전 첨부' : '이전';
+        nextBtn.textContent = hasNext ? '다음 첨부' : '다음';
+    };
 
     let stageObjectUrl = null;
     const resetStageObjectUrl = () => {
@@ -10231,14 +10241,12 @@ async function buildRelAttachmentViewer(attachments) {
         if (!state.previewable.length) {
             metaBox.textContent = '첨부파일은 있지만 웹 바로보기를 지원하는 형식은 없습니다.';
             stage.innerHTML = '<div class="text-center text-muted">PDF와 이미지 파일만 여기에서 바로 볼 수 있습니다.</div>';
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
+            syncAttachmentNavButtons();
             return;
         }
         state.index = Math.max(0, Math.min(previewIndex, state.previewable.length - 1));
         const current = state.previewable[state.index];
-        prevBtn.disabled = state.index === 0;
-        nextBtn.disabled = state.index === state.previewable.length - 1;
+        syncAttachmentNavButtons();
         stage.innerHTML = '<div class="text-muted">첨부파일을 불러오는 중입니다.</div>';
         try {
             resetStageObjectUrl();
