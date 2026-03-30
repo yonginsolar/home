@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.78 | Change: 2026-03-27 - Show half-day leave as 0.5 in the pending approval leave badge. -->
+<!-- Version: v1.1.96 | Change: 2026-03-30 - Pass fresh Authorization header explicitly when invoking approval Edge Functions. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.78 | approval.html');</script>
+  <script>console.log('[Version] v1.1.96 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -11,6 +11,7 @@
   <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/shared/route_guard.js?v=20260329-3"></script>
   <script src="erp_runtime_guard.js"></script>
   <script src="payroll_durunuri_module.js"></script>
   <script src="salary_ledger_module.js"></script>
@@ -417,12 +418,16 @@
         </div>
 
         <div class="col-12 mb-3 hidden" id="divRelDoc">
-          <label class="small text-muted fw-bold">관련 근거 (품의서)</label>
+          <label class="small text-muted fw-bold" id="relDocLabel">관련 근거 (품의서)</label>
           <div class="card p-3 border-0 bg-light">
              <div class="d-flex align-items-center justify-content-between">
                  <span id="relDocName" class="text-muted small">선택된 관련 문서가 없습니다.</span>
-                 <button type="button" class="btn btn-sm btn-outline-dark" onclick="openRelSearch()">🔍 문서 찾기</button>
+                 <button type="button" class="btn btn-sm btn-outline-dark" id="btnRelDocSearch" onclick="openRelSearch()">🔍 문서 찾기</button>
              </div>
+             <div class="mt-2 hidden" id="relDocSelectWrap">
+                 <select class="form-select form-select-sm" id="relDocSelect" onchange="handleApprovalRelatedDocSelectChange()"></select>
+             </div>
+             <div class="small text-muted mt-2 hidden" id="relDocHelp"></div>
              <input type="hidden" id="relDocId">
           </div>
         </div>
@@ -751,6 +756,7 @@
 <div class="modal fade" id="userModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold" id="modalTitle">직원 선택</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><div class="list-group list-group-flush" id="userSelectList"></div></div><div class="modal-footer justify-content-between"><span class="small text-muted ms-2"><span id="selCount">0</span>명 선택됨</span><button type="button" class="btn btn-primary" onclick="confirmSelection()">선택 완료</button></div></div></div></div>
 <div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-body text-center py-4" id="alertBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">확인</button></div></div></div></div>
 <div class="modal fade" id="confirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header py-2"><h6 class="modal-title fw-bold" id="confirmTitle">확인</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body text-center py-4" id="confirmBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger btn-sm" id="confirmOkBtn">확인</button></div></div></div></div>
+<div class="modal fade" id="promptModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header py-2"><h6 class="modal-title fw-bold" id="promptTitle">입력</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body py-3"><div class="small text-muted mb-2" id="promptBody" style="white-space: pre-wrap;"></div><input type="text" id="promptInput" class="form-control" placeholder=""></div><div class="modal-footer justify-content-center p-1 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="promptOkBtn">확인</button></div></div></div></div>
 <div class="modal fade" id="approvalActionModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold" id="approvalActionModalTitle">결재 처리</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="small text-muted mb-2" id="approvalActionModalGuide">결재 메모를 남길 수 있습니다.</div><textarea id="approvalActionReason" class="form-control" rows="5" placeholder="처리 메모를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="btnApprovalActionSubmit" onclick="submitApprovalActionModal()">처리</button></div></div></div></div>
 <div class="modal fade" id="relSearchModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">관련 품의서 검색</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="input-group mb-3"><input type="text" class="form-control" id="relKeyword" placeholder="제목, 내용 또는 작성자" onkeyup="if(event.key==='Enter') runRelSearch()"><button class="btn btn-outline-secondary" onclick="runRelSearch()">검색</button></div><div class="list-group" id="relResultList" style="max-height:400px; overflow-y:auto;"></div></div></div></div></div>
 <div class="modal fade" id="relViewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold" id="relViewModalTitle">📄 문서 내용</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="relViewContent" class="p-3">Loading...</div></div><div class="modal-footer justify-content-between p-2 border-0 hidden" id="relViewModalFooter"><div class="small text-muted" id="relViewActionHint"></div><div class="d-flex gap-2" id="relViewActionButtons"></div></div></div></div></div>
@@ -773,7 +779,7 @@ const APPROVAL_HTML2PDF_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0
 
 let myInfo = null;
 let allUsers = [];
-let modalInstance, alertModalInstance, confirmModalInstance;
+let modalInstance, alertModalInstance, confirmModalInstance, promptModalInstance;
 let modalType = ''; 
 let tempSelection = [], finalApprovers = [], finalRefs = [], historyCache = [], historySearchCache = [], pendingSubmissionCache = [], todoCache = [];
 let approvalDraftModalInstance = null;
@@ -842,6 +848,7 @@ let approvalAttendanceSnapshotSupported = false;
 let approvalBusinessTripSnapshotSupported = false;
 let approvalOvertimePolicy = null;
 let approvalLastCategory = '';
+let approvalLeaveCancelCandidates = [];
 let pendingApprovalAction = null;
 let modalStackSequence = 0;
 const APPROVAL_LEAVE_TYPE_CONFIG_KEY = 'approval_leave_type_catalog_json';
@@ -850,9 +857,12 @@ const APPROVAL_OVERTIME_POLICY_KEY = 'approval_overtime_policy_json';
 const APPROVAL_DEFAULT_MIDDLE_APPROVER_KEY = 'approval_default_middle_approver_emp_id';
 const APPROVAL_DEFAULT_FINAL_APPROVER_KEY = 'approval_default_final_approver_emp_id';
 const APPROVAL_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT = 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot';
+const APPROVAL_LEAVE_CANCEL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id,current_approver,leave_snapshot,approval_line';
 const APPROVAL_DEFAULT_OVERTIME_POLICY = Object.freeze({
     default_mode: 'allowance'
 });
+const APPROVAL_LEAVE_RESERVED_STATUSES = Object.freeze(['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']);
+const APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
 const APPROVAL_DEFAULT_LEAVE_TYPE_CATALOG = Object.freeze([
     { id: 'annual', label: '연차', enabled: true, deductible: true, duration_mode: 'date_range', aliases: ['연차'] },
     { id: 'half_day', label: '반차', enabled: true, deductible: true, duration_mode: 'half_day', aliases: ['반차'] },
@@ -871,6 +881,7 @@ const WORKFORCE_LITE_APPROVAL_DOC_GROUPS = Object.freeze([
         label: '인사/근태',
         items: [
             { value: '휴가', label: '🏖️ 휴가 신청', key: 'approval_doc_leave_enabled', defaultEnabled: true, ruleOptions: ['require_attachment'] },
+            { value: '휴가취소', label: '↩️ 휴가 취소 신청', key: 'approval_doc_leave_cancel_enabled', defaultEnabled: true, ruleOptions: [] },
             { value: '시간외근로', label: '⏱️ 시간외 근로 신청서', key: 'approval_doc_overtime_enabled', defaultEnabled: true, ruleOptions: ['require_attachment'] },
             { value: '출장신청', label: '🚄 출장신청서', key: 'approval_doc_business_trip_enabled', defaultEnabled: true, ruleOptions: ['require_attachment'] },
             { value: '근무변경', label: '🕒 근무변경 신청서', key: 'approval_doc_work_change_enabled', defaultEnabled: true, ruleOptions: ['require_attachment'] }
@@ -1078,6 +1089,297 @@ function setApprovalRelatedDocLabel(docId, labelText) {
         relDocNameEl.textContent = safeLabel || '선택된 관련 문서가 없습니다.';
     }
 } // End of setApprovalRelatedDocLabel
+
+function isApprovalLeaveCancelCategory(docType) {
+    return String(docType || '').trim() === '휴가취소';
+} // End of isApprovalLeaveCancelCategory
+
+function isApprovalLeaveCancelDocType(docType) {
+    return String(docType || '').trim().startsWith('취소휴가(');
+} // End of isApprovalLeaveCancelDocType
+
+function getApprovalLeaveCancelSubType(docType) {
+    const raw = String(docType || '').trim();
+    const match = raw.match(/^취소휴가\(([^)]+)\)/);
+    return match ? String(match[1] || '').trim() : '';
+} // End of getApprovalLeaveCancelSubType
+
+function buildApprovalLeaveCancelDocType(targetDoc) {
+    const rawDocType = String(targetDoc?.doc_type || '').trim();
+    const subType = getApprovalLeaveSubType(rawDocType) || String(targetDoc?._leave_snapshot?.type_id || '').trim() || 'annual';
+    return `취소휴가(${subType})`;
+} // End of buildApprovalLeaveCancelDocType
+
+function getApprovalCurrentTargetEmpId() {
+    const targetEmp = getApprovalLeaveTargetEmpInfo();
+    return String(targetEmp?.emp_id || myInfo?.emp_id || '').trim();
+} // End of getApprovalCurrentTargetEmpId
+
+function isApprovalLeaveReservedStatus(status) {
+    return APPROVAL_LEAVE_RESERVED_STATUSES.includes(String(status || '').trim());
+} // End of isApprovalLeaveReservedStatus
+
+function buildApprovalLeaveCancelAmountText(doc) {
+    const leaveLabel = buildLeaveAmountLabel(doc);
+    if (leaveLabel) return leaveLabel;
+    const daysLabel = formatLeaveDayCount(doc?.amount);
+    return daysLabel ? `${daysLabel}일` : '';
+} // End of buildApprovalLeaveCancelAmountText
+
+function buildApprovalLeaveCancelTargetLabel(doc, options = {}) {
+    if (!doc) return '선택된 관련 문서가 없습니다.';
+    const includeStatus = options?.includeStatus !== false;
+    const typeLabel = formatApprovalDocTypeLabel(doc || doc?.doc_type || '휴가') || '휴가';
+    const periodText = (window.LeaveLedger && typeof window.LeaveLedger.formatLeavePeriodText === 'function')
+        ? window.LeaveLedger.formatLeavePeriodText(doc)
+        : extractLeavePeriodLabel(doc);
+    const amountText = buildApprovalLeaveCancelAmountText(doc);
+    const statusText = String(doc?.status || '').trim();
+    const parts = [typeLabel];
+    if (periodText) parts.push(periodText);
+    if (amountText && (!periodText || !String(periodText).includes(amountText))) parts.push(amountText);
+    if (includeStatus && statusText) parts.push(statusText);
+    return parts.filter(Boolean).join(' · ');
+} // End of buildApprovalLeaveCancelTargetLabel
+
+function buildApprovalLeaveCancelTitle(targetDoc) {
+    if (!targetDoc) return '휴가 취소 신청';
+    const rawTypeLabel = formatApprovalDocTypeLabel(targetDoc || targetDoc?.doc_type || '휴가') || '휴가';
+    const shortTypeLabel = rawTypeLabel.startsWith('휴가(') ? rawTypeLabel.replace(/^휴가\(/, '').replace(/\)$/, '') : rawTypeLabel;
+    const periodText = (window.LeaveLedger && typeof window.LeaveLedger.formatLeavePeriodText === 'function')
+        ? window.LeaveLedger.formatLeavePeriodText(targetDoc)
+        : extractLeavePeriodLabel(targetDoc);
+    return periodText ? `${shortTypeLabel} 취소 신청 (${periodText})` : `${shortTypeLabel} 취소 신청`;
+} // End of buildApprovalLeaveCancelTitle
+
+function getApprovalLeaveCancelSelectedDoc() {
+    const selectedId = String(document.getElementById('relDocId')?.value || '').trim();
+    if (!selectedId) return null;
+    return approvalLeaveCancelCandidates.find((doc) => String(doc?.id || '') === selectedId) || null;
+} // End of getApprovalLeaveCancelSelectedDoc
+
+function sortApprovalLeaveCancelCandidates(list) {
+    return (Array.isArray(list) ? list : []).slice().sort((a, b) => {
+        const aStart = String(a?._leave_start_iso || '').trim();
+        const bStart = String(b?._leave_start_iso || '').trim();
+        if (aStart && bStart && aStart !== bStart) return aStart.localeCompare(bStart);
+        return new Date(b?.created_at || 0) - new Date(a?.created_at || 0);
+    });
+} // End of sortApprovalLeaveCancelCandidates
+
+async function fetchApprovalActiveLeaveCancelRequestIds(targetEmpId, relatedDocIds = []) {
+    const safeTargetId = String(targetEmpId || '').trim();
+    const safeRelatedIds = Array.isArray(relatedDocIds)
+        ? relatedDocIds.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    if (!safeTargetId || safeRelatedIds.length === 0) return new Set();
+    const scopedCoopId = getApprovalScopedCoopId();
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id, related_doc_id, status, drafter_id, doc_type')
+        .eq('coop_id', scopedCoopId)
+        .eq('drafter_id', safeTargetId)
+        .in('status', APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES)
+        .like('doc_type', '취소휴가(%')
+        .in('related_doc_id', safeRelatedIds);
+    if (error || !Array.isArray(data)) return new Set();
+
+    return new Set(data.map((row) => String(row?.related_doc_id || '').trim()).filter(Boolean));
+} // End of fetchApprovalActiveLeaveCancelRequestIds
+
+async function refreshApprovalLeaveCancelCandidates(options = {}) {
+    const targetEmpId = getApprovalCurrentTargetEmpId();
+    const summaryReservedDocs = Array.isArray(leaveSnapshotState?.summary?.reservedDocs) ? leaveSnapshotState.summary.reservedDocs : [];
+    const candidateBase = sortApprovalLeaveCancelCandidates(summaryReservedDocs.filter((doc) => isApprovalLeaveReservedStatus(doc?.status)));
+    const activeCancelTargetIds = await fetchApprovalActiveLeaveCancelRequestIds(targetEmpId, candidateBase.map((doc) => doc?.id));
+    approvalLeaveCancelCandidates = candidateBase.filter((doc) => !activeCancelTargetIds.has(String(doc?.id || '').trim()));
+
+    const categoryEl = document.getElementById('appCategory');
+    const previousCategory = String(categoryEl?.value || '').trim();
+    renderApprovalCategoryOptions();
+    const currentCategory = String(categoryEl?.value || '').trim();
+    if (currentCategory === '휴가취소' || previousCategory === '휴가취소') {
+        handleCategoryChange();
+    }
+} // End of refreshApprovalLeaveCancelCandidates
+
+function handleApprovalRelatedDocSelectChange() {
+    const category = String(document.getElementById('appCategory')?.value || '').trim();
+    if (!isApprovalLeaveCancelCategory(category)) return;
+    const selectedDoc = approvalLeaveCancelCandidates.find((doc) => String(doc?.id || '') === String(document.getElementById('relDocSelect')?.value || '').trim()) || null;
+    setApprovalRelatedDocLabel(selectedDoc?.id || '', selectedDoc ? buildApprovalLeaveCancelTargetLabel(selectedDoc) : '');
+    syncApprovalTitleInput('휴가취소');
+} // End of handleApprovalRelatedDocSelectChange
+
+function syncApprovalRelatedDocUi(type) {
+    const safeType = String(type || '').trim();
+    const labelEl = document.getElementById('relDocLabel');
+    const searchBtn = document.getElementById('btnRelDocSearch');
+    const selectWrapEl = document.getElementById('relDocSelectWrap');
+    const selectEl = document.getElementById('relDocSelect');
+    const helpEl = document.getElementById('relDocHelp');
+    if (!labelEl || !searchBtn || !selectWrapEl || !selectEl || !helpEl) return;
+
+    if (safeType === '지출결의') {
+        labelEl.textContent = '관련 근거 (품의서)';
+        searchBtn.textContent = '🔍 문서 찾기';
+        searchBtn.classList.remove('hidden');
+        selectWrapEl.classList.add('hidden');
+        helpEl.classList.add('hidden');
+        helpEl.textContent = '';
+        return;
+    }
+
+    if (isApprovalLeaveCancelCategory(safeType)) {
+        labelEl.textContent = '취소 대상 휴가';
+        searchBtn.classList.add('hidden');
+        const selectedId = String(document.getElementById('relDocId')?.value || '').trim();
+        const matched = approvalLeaveCancelCandidates.find((doc) => String(doc?.id || '') === selectedId) || null;
+        const selectedDoc = matched || approvalLeaveCancelCandidates[0] || null;
+
+        selectEl.innerHTML = '';
+        approvalLeaveCancelCandidates.forEach((doc) => {
+            const option = document.createElement('option');
+            option.value = String(doc.id || '');
+            option.textContent = buildApprovalLeaveCancelTargetLabel(doc, { includeStatus: true });
+            selectEl.appendChild(option);
+        });
+
+        if (approvalLeaveCancelCandidates.length > 1) {
+            selectWrapEl.classList.remove('hidden');
+            if (selectedDoc) selectEl.value = String(selectedDoc.id || '');
+        } else {
+            selectWrapEl.classList.add('hidden');
+        }
+
+        if (selectedDoc) {
+            setApprovalRelatedDocLabel(selectedDoc.id, buildApprovalLeaveCancelTargetLabel(selectedDoc));
+            helpEl.textContent = approvalLeaveCancelCandidates.length > 1
+                ? '현재 유효한 승인 휴가 중 취소할 문서를 선택하세요.'
+                : '현재 유효한 승인 휴가 1건을 자동으로 연결했습니다.';
+            helpEl.classList.remove('hidden');
+        } else {
+            setApprovalRelatedDocLabel('', '');
+            helpEl.textContent = '현재 취소할 수 있는 승인 휴가가 없습니다.';
+            helpEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    searchBtn.classList.add('hidden');
+    selectWrapEl.classList.add('hidden');
+    helpEl.classList.add('hidden');
+    helpEl.textContent = '';
+} // End of syncApprovalRelatedDocUi
+
+async function hasActiveApprovalLeaveCancelRequestForTarget(targetEmpId, relatedDocId, excludeDocId = null) {
+    const safeTargetId = String(targetEmpId || '').trim();
+    const safeRelatedDocId = String(relatedDocId || '').trim();
+    const excludedId = String(excludeDocId || '').trim();
+    if (!safeTargetId || !safeRelatedDocId) return false;
+    const scopedCoopId = getApprovalScopedCoopId();
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id')
+        .eq('coop_id', scopedCoopId)
+        .eq('drafter_id', safeTargetId)
+        .eq('related_doc_id', safeRelatedDocId)
+        .in('status', APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES)
+        .like('doc_type', '취소휴가(%');
+    if (error || !Array.isArray(data)) return false;
+    return data.some((row) => String(row?.id || '').trim() !== excludedId);
+} // End of hasActiveApprovalLeaveCancelRequestForTarget
+
+async function loadApprovalLeaveCancelTargetDoc(targetDocId, targetEmpId, options = {}) {
+    const safeTargetDocId = toPositiveDocId(targetDocId);
+    const safeTargetEmpId = String(targetEmpId || '').trim();
+    if (!safeTargetDocId) {
+        return { ok: false, message: '취소 대상 휴가를 먼저 선택하세요.', targetDoc: null };
+    }
+    const scopedCoopId = getApprovalScopedCoopId();
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select(APPROVAL_LEAVE_CANCEL_SELECT_COLUMNS)
+        .eq('coop_id', scopedCoopId)
+        .eq('id', safeTargetDocId)
+        .maybeSingle();
+    if (error || !data) {
+        return { ok: false, message: '취소 대상 휴가 문서를 찾을 수 없습니다.', targetDoc: null };
+    }
+    if (!isLeaveApprovalDoc(data)) {
+        return { ok: false, message: '선택한 문서는 휴가 문서가 아닙니다.', targetDoc: null };
+    }
+    const leaveLedger = window.LeaveLedger || {};
+    if (typeof leaveLedger.isDeductibleLeaveDoc === 'function' && !leaveLedger.isDeductibleLeaveDoc(data)) {
+        return { ok: false, message: '차감되는 휴가 문서만 취소할 수 있습니다.', targetDoc: null };
+    }
+    if (safeTargetEmpId && String(data.drafter_id || '').trim() !== safeTargetEmpId) {
+        return { ok: false, message: '선택한 휴가가 현재 대상자와 일치하지 않습니다.', targetDoc: null };
+    }
+    if (!isApprovalLeaveReservedStatus(data.status)) {
+        return { ok: false, message: '이미 취소되었거나 더 이상 취소할 수 없는 휴가입니다.', targetDoc: null };
+    }
+
+    const startIso = typeof leaveLedger.getLeaveStartIso === 'function' ? leaveLedger.getLeaveStartIso(data) : '';
+    const todayIso = typeof leaveLedger.getTodayKstIso === 'function' ? leaveLedger.getTodayKstIso() : formatApprovalKstDateISO(new Date(), '');
+    if (!startIso || startIso < todayIso) {
+        return { ok: false, message: '당일 이후에 효력이 남아 있는 휴가만 취소할 수 있습니다.', targetDoc: null };
+    }
+
+    if (options.checkExistingCancel !== false) {
+        const hasOtherCancel = await hasActiveApprovalLeaveCancelRequestForTarget(
+            safeTargetEmpId || String(data.drafter_id || '').trim(),
+            safeTargetDocId,
+            options.excludeDocId || ''
+        );
+        if (hasOtherCancel) {
+            return { ok: false, message: '이미 이 휴가를 대상으로 진행 중인 취소 결재가 있습니다.', targetDoc: null };
+        }
+    }
+
+    return { ok: true, message: '', targetDoc: data };
+} // End of loadApprovalLeaveCancelTargetDoc
+
+async function applyApprovalLeaveCancelSettlement(doc, newStatus, options = {}) {
+    if (!isLeaveCancelApprovalDoc(doc) || String(newStatus || '').trim() !== '완료') return '';
+    const targetResult = options.targetDoc
+        ? { ok: true, targetDoc: options.targetDoc }
+        : await loadApprovalLeaveCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
+            excludeDocId: doc?.id || '',
+            checkExistingCancel: false
+        });
+    if (!targetResult?.ok || !targetResult?.targetDoc) {
+        throw new Error(targetResult?.message || '취소 대상 휴가를 확인하지 못했습니다.');
+    }
+
+    const targetDoc = targetResult.targetDoc;
+    const { error: targetUpdateError } = await _supabase
+        .from('ref_approval')
+        .update({ status: '결재취소', current_approver: null })
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('id', targetDoc.id);
+    if (targetUpdateError) throw targetUpdateError;
+
+    await logAudit('approval.cancel', targetDoc.id, '휴가 취소 승인 반영', {
+        reason: `${String(doc.title || '휴가 취소 요청').trim()} 승인`,
+        cancel_request_doc_id: doc?.id || null,
+        cancel_request_doc_type: String(doc?.doc_type || '').trim() || null
+    });
+
+    if (targetDoc.current_approver) {
+        await createNotification(
+            targetDoc.current_approver,
+            '휴가 취소',
+            `${targetDoc.title || '휴가'}가 휴가 취소 결재 승인으로 취소되었습니다.`,
+            `approval.html?doc=${targetDoc.id}`,
+            { doc_id: targetDoc.id, cancel_request_doc_id: doc?.id || null }
+        );
+    }
+    return '';
+} // End of applyApprovalLeaveCancelSettlement
 
 function clearApprovalDraftLocalFiles() {
     const input = document.getElementById('attachFile');
@@ -1385,6 +1687,7 @@ function resetApprovalComposerForm(options = {}) {
     toggleProxyMode();
     handleCategoryChange();
     calculateLeave();
+    normalizeApprovalInitialComposerTitle();
     updateFileList();
     syncApprovalDraftStatusText();
 } // End of resetApprovalComposerForm
@@ -1554,6 +1857,9 @@ async function loadApprovalDraftFromServer(draftId) {
         setApprovalEditorContent(String(payload?.body || '').trim());
 
         setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
+        if (category === '휴가취소') {
+            syncApprovalRelatedDocUi('휴가취소');
+        }
 
         const leaveStartEl = document.getElementById('leaveStart');
         const leaveEndEl = document.getElementById('leaveEnd');
@@ -2078,6 +2384,11 @@ function getApprovalLeaveTypeDisplayLabel(subType, doc) {
 function formatApprovalDocTypeLabel(docOrType) {
     const doc = (docOrType && typeof docOrType === 'object') ? docOrType : null;
     const raw = String(doc ? doc.doc_type : docOrType || '').trim();
+    if (isApprovalLeaveCancelDocType(raw)) {
+        const subType = getApprovalLeaveCancelSubType(raw);
+        const displayLabel = getApprovalLeaveTypeDisplayLabel(subType, null);
+        return subType ? `휴가취소(${displayLabel || subType})` : '휴가취소';
+    }
     if (!raw.startsWith('휴가(')) return raw;
     const snapshot = getApprovalLeaveSnapshotMeta(doc);
     if (snapshot?.label) return `휴가(${String(snapshot.label).trim()})`;
@@ -2103,7 +2414,9 @@ function syncApprovalLeaveInputMode() {
     if (dateRangeTitle) dateRangeTitle.textContent = `📅 ${label} 기간`;
     if (singleDayTitle) singleDayTitle.textContent = `📅 ${label} 날짜`;
     if (halfDayTitle) halfDayTitle.textContent = `📅 ${label} 날짜`;
-    syncApprovalTitleInput('휴가');
+    if (getCurrentApprovalCategory() === '휴가') {
+        syncApprovalTitleInput('휴가');
+    }
 }
 
 function isApprovalProposalLikeType(docType) {
@@ -2119,6 +2432,7 @@ function getWorkforceLiteApprovalDocGroups() {
     return WORKFORCE_LITE_APPROVAL_DOC_GROUPS.map((group) => ({
         ...group,
         items: group.items.filter((item) => {
+            if (item.value === '휴가취소' && approvalLeaveCancelCandidates.length === 0) return false;
             const current = approvalCompanyInfo[item.key];
             return parseApprovalBoolean(current, item.defaultEnabled !== false);
         })
@@ -2136,6 +2450,7 @@ function getFirstAvailableWorkforceLiteApprovalDocType() {
 function isApprovalDocEnabledForCurrentProfile(docType) {
     const safeDocType = String(docType || '').trim();
     if (!safeDocType) return false;
+    if (safeDocType === '휴가취소' && approvalLeaveCancelCandidates.length === 0) return false;
     for (const group of WORKFORCE_LITE_APPROVAL_DOC_GROUPS) {
         const hit = group.items.find((item) => item.value === safeDocType);
         if (hit) return parseApprovalBoolean(approvalCompanyInfo[hit.key], hit.defaultEnabled !== false);
@@ -2356,6 +2671,19 @@ async function loadApprovalCompanyInfo() {
     await refreshApprovalCompanyInfo(coopId);
 }
 
+function getApprovalCoopId() {
+    return String(myInfo?.coop_id || '').trim();
+}
+
+function getApprovalScopedCoopId() {
+    return getApprovalCoopId() || '00000000-0000-0000-0000-000000000000';
+}
+
+function scopeApprovalTenant(query) {
+    const coopId = getApprovalCoopId();
+    return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
+}
+
 function getApprovalSchemaFeatureCacheKey() {
     return `erp_approval_schema_features:${SUPABASE_URL}`;
 } // End of getApprovalSchemaFeatureCacheKey
@@ -2389,9 +2717,7 @@ function writeApprovalSchemaFeatureCache(features = {}) {
             attendance_snapshot: !!features.attendance_snapshot,
             business_trip_snapshot: !!features.business_trip_snapshot
         }));
-    } catch (_) {
-        void 0;
-    }
+    } catch (_) {}
 } // End of writeApprovalSchemaFeatureCache
 
 async function fetchApprovalSchemaFeaturesFromOpenApi() {
@@ -2470,9 +2796,7 @@ function writeApprovalCompanyInfoCache(coopId, infoMap = {}) {
             saved_at: new Date().toISOString(),
             data: { ...(infoMap || {}) }
         }));
-    } catch (_) {
-        void 0;
-    }
+    } catch (_) {}
 } // End of writeApprovalCompanyInfoCache
 
 function applyApprovalCompanyInfoState(infoMap = {}) {
@@ -2535,9 +2859,7 @@ function writeApprovalEmployeeCache(employees = []) {
             saved_at: new Date().toISOString(),
             data: Array.isArray(employees) ? employees : []
         }));
-    } catch (_) {
-        void 0;
-    }
+    } catch (_) {}
 } // End of writeApprovalEmployeeCache
 
 function applyApprovalEmployeeData(employees = []) {
@@ -2548,7 +2870,7 @@ function applyApprovalEmployeeData(employees = []) {
 } // End of applyApprovalEmployeeData
 
 async function fetchApprovalEmployeesFromServer() {
-    const { data, error } = await _supabase.from('ref_employees').select('*').order('auth_level', { ascending: true });
+    const { data, error } = await scopeApprovalTenant(_supabase.from('ref_employees').select('*')).order('auth_level', { ascending: true });
     if (error) throw error;
     return Array.isArray(data) ? data : [];
 } // End of fetchApprovalEmployeesFromServer
@@ -3330,6 +3652,10 @@ function isLeaveApprovalDoc(doc) {
     return String(doc?.doc_type || '').trim().startsWith('휴가');
 }
 
+function isLeaveCancelApprovalDoc(doc) {
+    return isApprovalLeaveCancelDocType(doc?.doc_type || doc);
+}
+
 function toKoreanWonText(value) {
     const number = Math.floor(Math.abs(Number(value || 0)));
     if (!Number.isFinite(number) || number === 0) return '영원';
@@ -3364,6 +3690,15 @@ function toKoreanWonText(value) {
 }
 
 function getApprovalAmountDisplayPayload(doc) {
+    if (isLeaveCancelApprovalDoc(doc)) {
+        const cancelText = buildApprovalLeaveCancelAmountText(doc);
+        return {
+            showAmount: true,
+            labelText: '취소 휴가일',
+            mainText: cancelText || '-',
+            subText: '승인 시 원 휴가 문서가 취소됩니다.'
+        };
+    }
     const isLeaveDoc = isLeaveApprovalDoc(doc);
     const leaveLabel = buildLeaveAmountLabel(doc);
     if (isLeaveDoc) {
@@ -3401,6 +3736,10 @@ function formatApprovalAmountInline(doc) {
     if (display.labelText === '휴가일') {
         const leaveText = String(display.mainText || '').trim();
         return leaveText && leaveText !== '-' ? `휴가일 ${leaveText}` : '휴가일';
+    }
+    if (display.labelText === '취소 휴가일') {
+        const cancelText = String(display.mainText || '').trim();
+        return cancelText && cancelText !== '-' ? `취소 휴가일 ${cancelText}` : '휴가 취소';
     }
     return String(display.mainText || '0원');
 }
@@ -4363,6 +4702,7 @@ function initializeApprovalEditor() {
 function mapApprovalDocTypeToMainCategory(docType) {
     const raw = String(docType || '').trim();
     if (!raw) return '';
+    if (raw.startsWith('취소휴가')) return '휴가취소';
     if (raw.startsWith('휴가')) return '휴가';
     if (raw.startsWith('시간외근로') || raw.startsWith('야근') || raw.startsWith('휴일근로')) return '시간외근로';
     if (raw.startsWith('부양가족')) return '부양가족';
@@ -4444,6 +4784,7 @@ async function openApprovalTemplatePicker() {
     const { data, error } = await _supabase
         .from('ref_approval')
         .select('id, doc_type, title, content, created_at, receiver, via')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id)
         .order('created_at', { ascending: false })
         .limit(120);
@@ -4530,7 +4871,13 @@ function buildApprovalNotificationEventKey(targetEmpId, title, linkUrl, meta = n
 } // End of buildApprovalNotificationEventKey
 
 function getApprovalNotificationBaseUrl() {
-    const fallbackOrigin = 'https://www.yonginsolar.kr/erp/';
+    const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
+    const routeErpOrigin = String(routeOrigins?.erpOrigin || '').trim();
+    const currentOrigin = String(window.location?.origin || '').trim();
+    const safeFallbackOriginBase = /^https?:\/\//i.test(routeErpOrigin)
+        ? routeErpOrigin
+        : (/^https?:\/\//i.test(currentOrigin) ? currentOrigin : 'https://erp.local');
+    const fallbackOrigin = `${safeFallbackOriginBase.replace(/\/+$/, '')}/`;
     const protocol = String(window.location?.protocol || '').trim().toLowerCase();
     const hostname = String(window.location?.hostname || '').trim().toLowerCase();
     const isLocal = protocol === 'file:' || hostname === 'localhost' || hostname === '127.0.0.1';
@@ -4539,12 +4886,13 @@ function getApprovalNotificationBaseUrl() {
     try {
         const currentUrl = new URL(window.location.href);
         const safePath = String(currentUrl.pathname || '').trim();
-        if (safePath === '/erp' || safePath === '/erp/' || safePath.startsWith('/erp/')) {
+        if (routeOrigins?.erpOrigin && currentUrl.origin === routeOrigins.erpOrigin) {
             return new URL('./', currentUrl).href;
         }
-    } catch (e) {
-        void 0;
-    }
+        if (safePath === '/erp' || safePath === '/erp/' || safePath.startsWith('/erp/')) {
+            return `${String(routeOrigins?.erpOrigin || currentUrl.origin).replace(/\/+$/, '')}/`;
+        }
+    } catch (e) {}
     return fallbackOrigin;
 } // End of getApprovalNotificationBaseUrl
 
@@ -4552,17 +4900,8 @@ async function sendTelegramApprovalNotification(payload) {
     try {
         const targetEmpId = String(payload?.targetEmpId || '').trim();
         if (!targetEmpId) return false;
-        let accessToken = await getApprovalFunctionAccessToken(false);
-        if (!accessToken) return false;
         const erpBaseUrl = getApprovalNotificationBaseUrl();
-        const runRequest = async (token) => fetch(`${SUPABASE_URL}/functions/v1/erp-approval-telegram-dm`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'apikey': SUPABASE_KEY
-            },
-            body: JSON.stringify({
+        const { data: payloadData, error } = await invokeApprovalEdgeFunction('erp-approval-telegram-dm', {
                 mode: 'create_and_dispatch',
                 targetEmpId,
                 title: String(payload?.title || '알림'),
@@ -4570,16 +4909,13 @@ async function sendTelegramApprovalNotification(payload) {
                 linkUrl: String(payload?.linkUrl || 'approval.html'),
                 meta: payload?.meta && typeof payload.meta === 'object' ? payload.meta : {},
                 erpBaseUrl
-            })
         });
-        let response = await runRequest(accessToken);
-        if (response.status === 401) {
-            accessToken = await getApprovalFunctionAccessToken(true);
-            if (accessToken) response = await runRequest(accessToken);
+        if (error) {
+            console.warn('[telegram] approval notification skipped:', normalizeApprovalEdgeInvokeError(error));
+            return false;
         }
-        if (!response.ok) {
-            const errText = await response.text().catch(() => '');
-            console.warn('[telegram] approval notification skipped:', response.status, errText);
+        if (payloadData?.ok === false) {
+            console.warn('[telegram] approval notification rejected:', payloadData);
             return false;
         }
         return true;
@@ -4705,18 +5041,9 @@ function buildApprovalUploadErrorMessage(error, options = {}) {
 
 async function notifyApprovalUploadFailure(options = {}) {
     try {
-        let accessToken = await getApprovalFunctionAccessToken(false);
-        if (!accessToken) return;
         const normalized = normalizeApprovalUploadError(options.error);
         const docId = Number(options.docId || 0) > 0 ? Number(options.docId) : null;
-        const runRequest = async (token) => fetch(`${SUPABASE_URL}/functions/v1/erp-platform-alert`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'apikey': SUPABASE_KEY
-            },
-            body: JSON.stringify({
+        const { data: payload, error } = await invokeApprovalEdgeFunction('erp-platform-alert', {
                 alertType: 'approval_upload_error',
                 contextKey: String(options.contextKey || 'generic'),
                 contextLabel: String(options.contextLabel || '전자결재 첨부'),
@@ -4730,20 +5057,11 @@ async function notifyApprovalUploadFailure(options = {}) {
                 actorRole: myInfo?.role || null,
                 docId,
                 docType: options.docType || null
-            })
         });
-
-        let response = await runRequest(accessToken);
-        if (response.status === 401) {
-            accessToken = await getApprovalFunctionAccessToken(true);
-            if (accessToken) response = await runRequest(accessToken);
-        }
-        if (!response.ok) {
-            const errText = await response.text().catch(() => '');
-            console.warn('[approval-upload] platform alert skipped:', response.status, errText);
+        if (error) {
+            console.warn('[approval-upload] platform alert skipped:', normalizeApprovalEdgeInvokeError(error));
             return;
         }
-        const payload = await response.json().catch(() => null);
         if (payload?.ok === false) {
             console.warn('[approval-upload] platform alert rejected:', payload);
         }
@@ -5210,11 +5528,13 @@ window.onload = async function() {
     const userModalEl = document.getElementById('userModal');
     const alertModalEl = document.getElementById('alertModal');
     const confirmModalEl = document.getElementById('confirmModal');
+    const promptModalEl = document.getElementById('promptModal');
     const approvalActionModalEl = document.getElementById('approvalActionModal');
     const attachmentPreviewModalEl = document.getElementById('attachmentPreviewModal');
     modalInstance = new bootstrap.Modal(userModalEl);
     alertModalInstance = new bootstrap.Modal(alertModalEl);
     confirmModalInstance = new bootstrap.Modal(confirmModalEl);
+    promptModalInstance = new bootstrap.Modal(promptModalEl);
     approvalActionModalInstance = new bootstrap.Modal(approvalActionModalEl);
     physicalRejectModalInstance = new bootstrap.Modal(document.getElementById('physicalRejectModal'));
     cancelDraftModalInstance = new bootstrap.Modal(document.getElementById('cancelDraftModal'));
@@ -5228,6 +5548,7 @@ window.onload = async function() {
     bindModalFocusGuard(userModalEl, document.getElementById('tab1'));
     bindModalFocusGuard(alertModalEl, document.getElementById('tab1'));
     bindModalFocusGuard(confirmModalEl, document.getElementById('tab1'));
+    bindModalFocusGuard(promptModalEl, document.getElementById('tab1'));
     document.querySelectorAll('.modal').forEach((modalEl) => {
         bindModalFocusGuard(modalEl, document.getElementById('tab1'));
     });
@@ -5391,6 +5712,7 @@ window.onload = async function() {
     }
     applyApprovalRuntimeProfileUi();
     handleCategoryChange(); // UI 초기화
+    normalizeApprovalInitialComposerTitle();
     syncApprovalDraftStatusText();
     updateFileList();
     await openApprovalDocFromLocationIfNeeded();
@@ -5937,6 +6259,14 @@ async function calculateLeave() {
     if (!targetId) {
         applyLeaveRemainToUi({ effectiveRemainDays: 0, reservedDays: 0 });
         leaveSnapshotState = null;
+        approvalLeaveCancelCandidates = [];
+        const categoryEl = document.getElementById('appCategory');
+        const previousCategory = String(categoryEl?.value || '').trim();
+        renderApprovalCategoryOptions();
+        const currentCategory = String(categoryEl?.value || '').trim();
+        if (currentCategory === '휴가취소' || previousCategory === '휴가취소') {
+            handleCategoryChange();
+        }
         return;
     }
 
@@ -5944,11 +6274,12 @@ async function calculateLeave() {
         if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
             leaveSnapshotState = await window.LeaveLedger.getLeaveSnapshot(_supabase, targetId, {
                 columns: approvalLeaveSnapshotSupported ? APPROVAL_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT : undefined,
-                reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
+                reservedStatuses: APPROVAL_LEAVE_RESERVED_STATUSES,
                 includeToday: true,
                 unknownAsReserved: false
             });
             applyLeaveRemainToUi(leaveSnapshotState);
+            await refreshApprovalLeaveCancelCandidates();
             return;
         }
     } catch (err) {
@@ -5959,6 +6290,14 @@ async function calculateLeave() {
     const { data: remain } = await _supabase.rpc('calculate_leave_days', { p_emp_id: targetId });
     applyLeaveRemainToUi({ effectiveRemainDays: (remain !== null ? remain : 0), reservedDays: 0 });
     leaveSnapshotState = null;
+    approvalLeaveCancelCandidates = [];
+    const categoryEl = document.getElementById('appCategory');
+    const previousCategory = String(categoryEl?.value || '').trim();
+    renderApprovalCategoryOptions();
+    const currentCategory = String(categoryEl?.value || '').trim();
+    if (currentCategory === '휴가취소' || previousCategory === '휴가취소') {
+        handleCategoryChange();
+    }
 }
 
 function showAlert(msg, onClose = null) {
@@ -6013,6 +6352,65 @@ function showConfirm(msg, options = {}) {
     });
 }
 
+function showPrompt(msg, options = {}) {
+    const modalEl = document.getElementById('promptModal');
+    const titleEl = document.getElementById('promptTitle');
+    const bodyEl = document.getElementById('promptBody');
+    const inputEl = document.getElementById('promptInput');
+    const okBtn = document.getElementById('promptOkBtn');
+    if (!promptModalInstance || !modalEl || !titleEl || !bodyEl || !inputEl || !okBtn) {
+        showAlert(String(msg || '입력이 필요합니다.'));
+        return Promise.resolve(null);
+    }
+
+    const title = String(options?.title || '입력').trim() || '입력';
+    const okText = String(options?.okText || '확인').trim() || '확인';
+    const okClass = String(options?.okClass || 'btn-primary').trim() || 'btn-primary';
+    const placeholder = String(options?.placeholder || '').trim();
+    const initialValue = options?.value === undefined || options?.value === null
+        ? ''
+        : String(options.value);
+
+    titleEl.textContent = title;
+    bodyEl.textContent = String(msg || '');
+    inputEl.value = initialValue;
+    inputEl.placeholder = placeholder;
+    okBtn.textContent = okText;
+    okBtn.className = `btn ${okClass} btn-sm`;
+
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            okBtn.removeEventListener('click', onConfirm);
+            inputEl.removeEventListener('keydown', onKeydown);
+            modalEl.removeEventListener('hidden.bs.modal', onHidden);
+            resolve(value);
+        };
+        const onConfirm = () => {
+            finish(inputEl.value);
+            promptModalInstance.hide();
+        };
+        const onHidden = () => {
+            finish(null);
+        };
+        const onKeydown = (event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            onConfirm();
+        };
+        okBtn.addEventListener('click', onConfirm);
+        inputEl.addEventListener('keydown', onKeydown);
+        modalEl.addEventListener('hidden.bs.modal', onHidden, { once: true });
+        modalEl.addEventListener('shown.bs.modal', () => {
+            inputEl.focus();
+            inputEl.select();
+        }, { once: true });
+        promptModalInstance.show();
+    });
+}
+
 function isSessionNearExpiry(session, thresholdMs = 2 * 60 * 1000) {
     const expiresAtSec = Number(session?.expires_at || 0);
     if (!Number.isFinite(expiresAtSec) || expiresAtSec <= 0) return true;
@@ -6029,13 +6427,81 @@ async function getApprovalFunctionAccessToken(forceRefresh = false) {
     const needsRefresh = !!forceRefresh || !accessToken || isSessionNearExpiry(session);
 
     if (needsRefresh) {
-        const { data: refreshedData } = await _supabase.auth.refreshSession().catch(() => ({ data: null }));
-        session = refreshedData?.session || session;
-        accessToken = session?.access_token || accessToken;
+        const { data: refreshedData, error: refreshError } = await _supabase.auth.refreshSession().catch(() => ({ data: null, error: null }));
+        if (refreshError || !refreshedData?.session?.access_token) return '';
+        session = refreshedData.session;
+        accessToken = session.access_token || '';
     }
 
     return accessToken || '';
 } // End of getApprovalFunctionAccessToken
+
+function normalizeApprovalEdgeInvokeError(error) {
+    if (!error) return 'unknown error';
+    const status = Number(error?.context?.status || error?.status || error?.response?.status || 0);
+    const message = String(error?.message || error?.name || error?.error || '').trim();
+    let detailText = '';
+    const context = error?.context;
+    if (context && typeof context.text === 'function') {
+        detailText = '[response body omitted]';
+    } else if (context && typeof context === 'object') {
+        try {
+            detailText = JSON.stringify(context);
+        } catch (_) { /* noop */ }
+    }
+    return [
+        status ? `status=${status}` : '',
+        message || '',
+        detailText || ''
+    ].filter(Boolean).join(' | ') || 'unknown error';
+} // End of normalizeApprovalEdgeInvokeError
+
+async function invokeApprovalEdgeFunction(functionName, body, options = {}) {
+    const safeFunctionName = String(functionName || '').trim();
+    if (!safeFunctionName) {
+        return { data: null, error: new Error('FUNCTION_NAME_REQUIRED') };
+    }
+
+    const ensureSession = async (forceRefresh = false) => {
+        const token = await getApprovalFunctionAccessToken(forceRefresh);
+        if (!token) return { ok: false, error: new Error(forceRefresh ? 'AUTH_REFRESH_FAILED' : 'AUTH_SESSION_MISSING') };
+        return { ok: true, token };
+    };
+
+    const firstSession = await ensureSession(false);
+    if (!firstSession.ok) {
+        return { data: null, error: firstSession.error };
+    }
+
+    const buildInvokeOptions = (token) => ({
+        body,
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    let { data, error } = await _supabase.functions.invoke(
+        safeFunctionName,
+        buildInvokeOptions(firstSession.token)
+    );
+    if (!error) return { data, error: null };
+
+    const normalizedText = normalizeApprovalEdgeInvokeError(error);
+    const shouldRetryAuth = options?.retryAuth !== false
+        && (/status=401/.test(normalizedText) || /auth|jwt|unauthorized/i.test(normalizedText));
+    if (!shouldRetryAuth) return { data, error };
+
+    const refreshedSession = await ensureSession(true);
+    if (!refreshedSession.ok) {
+        return { data: null, error: refreshedSession.error };
+    }
+
+    const retryResult = await _supabase.functions.invoke(
+        safeFunctionName,
+        buildInvokeOptions(refreshedSession.token)
+    );
+    return { data: retryResult.data, error: retryResult.error || null };
+} // End of invokeApprovalEdgeFunction
 
 function getApprovalDocProcessContext(doc) {
     const approvalLine = Array.isArray(doc?.approval_line) ? doc.approval_line : [];
@@ -6285,6 +6751,9 @@ function buildApprovalGeneratedTitle(mainType) {
         const leavePeriodLabel = leaveDays > 0 ? buildLeavePeriodLabelForDraft(leaveLabel, leaveDays) : '';
         return leavePeriodLabel ? `${leaveLabel} 신청 (${leavePeriodLabel})` : `${leaveLabel} 신청`;
     }
+    if (isApprovalLeaveCancelCategory(safeType)) {
+        return buildApprovalLeaveCancelTitle(getApprovalLeaveCancelSelectedDoc());
+    }
     if (isApprovalOvertimeType(safeType)) {
         const overtimeSnapshot = buildApprovalOvertimeSnapshot(safeType);
         if (overtimeSnapshot.work_date && overtimeSnapshot.total_hours > 0) {
@@ -6309,12 +6778,39 @@ function buildApprovalGeneratedTitle(mainType) {
     return safeType;
 } // End of buildApprovalGeneratedTitle
 
+function normalizeApprovalInitialComposerTitle() {
+    const currentCategory = String(document.getElementById('appCategory')?.value || '').trim();
+    if (currentCategory !== '일반품의') return;
+
+    const proposalSubjectEl = document.getElementById('proposalSubject');
+    if (!proposalSubjectEl) return;
+
+    const currentValue = String(proposalSubjectEl.value || '').trim();
+    if (!currentValue) {
+        proposalSubjectEl.dataset.autoGenerated = '0';
+        return;
+    }
+
+    const currentLeaveLabel = getApprovalCurrentLeaveTypeLabel() || '휴가';
+    const leaveGeneratedCandidates = new Set([
+        `${currentLeaveLabel} 신청`,
+        String(buildApprovalGeneratedTitle('휴가') || '').trim()
+    ].filter(Boolean));
+
+    if (proposalSubjectEl.dataset.autoGenerated === '1' || leaveGeneratedCandidates.has(currentValue)) {
+        proposalSubjectEl.value = '';
+        proposalSubjectEl.dataset.autoGenerated = '0';
+    }
+} // End of normalizeApprovalInitialComposerTitle
+
 function syncApprovalTitleInput(mainType, options = {}) {
     const safeType = String(mainType || '').trim();
     const force = options && options.force === true;
     const titleInput = getApprovalTitleInputElement(safeType);
     const proposalLabel = document.getElementById('proposalSubjectLabel');
     const proposalInput = document.getElementById('proposalSubject');
+    const currentCategory = getCurrentApprovalCategory();
+    const usesSharedProposalTitle = safeType && safeType !== '공문';
 
     if (safeType && safeType !== '공문') {
         const fieldConfig = getApprovalTitleFieldConfig(safeType);
@@ -6322,6 +6818,10 @@ function syncApprovalTitleInput(mainType, options = {}) {
         if (proposalInput) proposalInput.placeholder = fieldConfig.placeholder;
     }
     if (!titleInput) return;
+
+    if (usesSharedProposalTitle && currentCategory && currentCategory !== safeType) {
+        return;
+    }
 
     const currentValue = String(titleInput.value || '').trim();
     const isAutoGenerated = titleInput.dataset.autoGenerated === '1';
@@ -6390,6 +6890,12 @@ function handleCategoryChange() {
     const btnAppDescPreview = document.getElementById("btnAppDescPreview");
     const appDescHtmlHelp = document.getElementById("appDescHtmlHelp");
 
+    if (typeChanged) {
+        setApprovalRelatedDocLabel('', '');
+        const relDocSelectEl = document.getElementById('relDocSelect');
+        if (relDocSelectEl) relDocSelectEl.innerHTML = '';
+    }
+
     // 전체 초기화
     divLeave.classList.add("hidden");
     divLeaveType.classList.add("hidden");
@@ -6429,6 +6935,16 @@ function handleCategoryChange() {
         }
         syncApprovalLeaveInputMode();
     } 
+    else if (type === '휴가취소') {
+        divRel.classList.remove("hidden");
+        divProposalSubject.classList.remove("hidden");
+        divAmt.classList.add("hidden");
+        syncApprovalRelatedDocUi(type);
+        const currentDesc = String(getApprovalEditorContent() || '').trim();
+        if (!currentDesc || isApprovalAutoGeneratedTemplateContent(currentDesc)) {
+            setApprovalEditorContent("기 승인된 휴가를 취소하고 정상 출근으로 변경하고자 하오니 승인하여 주시기 바랍니다.");
+        }
+    }
     else if (isApprovalOvertimeType(type)) {
         divOvertime.classList.remove("hidden");
         divProposalSubject.classList.remove("hidden");
@@ -6551,6 +7067,7 @@ function handleCategoryChange() {
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (isApprovalAutoGeneratedTemplateContent(currentDesc)) setApprovalEditorContent("");
     }
+    syncApprovalRelatedDocUi(type);
     syncApprovalAttachmentHelp(type);
     syncApprovalTitleInput(type, { force: typeChanged });
     applyDefaultApprovalLineTemplate();
@@ -7068,6 +7585,9 @@ function formatJeongyeolAmountLabel(doc) {
     if (docType.startsWith('지출결의')) {
         return `${formatMoney(Number(doc?.amount || 0))}원`;
     }
+    if (isApprovalLeaveCancelDocType(docType)) {
+        return `${buildApprovalLeaveCancelAmountText(doc) || '0일'} 취소`;
+    }
     if (docType.startsWith('휴가')) {
         const leaveLabel = buildLeaveAmountLabel(doc);
         return leaveLabel || `${Number(doc?.amount || 0)}일`;
@@ -7090,6 +7610,7 @@ async function buildJeongyeolMonthlyDraft() {
     const { data: existingRows, error: existingError } = await _supabase
         .from('ref_approval')
         .select('id, doc_no, status')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id)
         .eq('doc_type', JEONGYEOL_MONTHLY_DOC_TYPE)
         .eq('title', reportTitle)
@@ -7103,6 +7624,7 @@ async function buildJeongyeolMonthlyDraft() {
     const { data, error } = await _supabase
         .from('ref_approval')
         .select('id, doc_no, doc_type, title, amount, status, created_at, drafter_name, approval_line, content')
+        .eq('coop_id', getApprovalScopedCoopId())
         .gte('created_at', range.startIso)
         .lt('created_at', range.endIso)
         .order('created_at', { ascending: true });
@@ -7192,6 +7714,7 @@ async function generateDocNo() {
     const { data } = await _supabase
         .from('ref_approval')
         .select('doc_no')
+        .eq('coop_id', getApprovalScopedCoopId())
         .like('doc_no', `${prefix}%`)
         .not('doc_no', 'is', null)
         .order('doc_no', { ascending: false })
@@ -7223,7 +7746,12 @@ async function insertApprovalWithDocNoRetry(basePayload, maxAttempts = 5) {
     let lastConflictError = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         const docNo = await generateDocNo();
-        const payload = { ...basePayload, doc_no: docNo, created_at: new Date() };
+        const payload = {
+            ...basePayload,
+            coop_id: basePayload?.coop_id || getApprovalCoopId() || null,
+            doc_no: docNo,
+            created_at: new Date()
+        };
         const { data, error } = await _supabase
             .from('ref_approval')
             .insert(payload)
@@ -7354,6 +7882,19 @@ async function handleDraftSubmit(e) {
         const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
         title = getApprovalResolvedTitle(mainType, leavePeriodLabel ? `${lType} 신청 (${leavePeriodLabel})` : `${lType} 신청`);
     } 
+    else if (mainType === '휴가취소') {
+        const selectedTargetDocId = document.getElementById('relDocId')?.value || '';
+        const leaveCancelTarget = await loadApprovalLeaveCancelTargetDoc(selectedTargetDocId, drafterId, {
+            checkExistingCancel: true
+        });
+        if (!leaveCancelTarget.ok || !leaveCancelTarget.targetDoc) {
+            return showAlert(leaveCancelTarget.message || '취소 대상 휴가를 확인하지 못했습니다.');
+        }
+        subType = buildApprovalLeaveCancelDocType(leaveCancelTarget.targetDoc);
+        finalAmt = Number(leaveCancelTarget.targetDoc.amount || 0);
+        title = getApprovalResolvedTitle(mainType, buildApprovalLeaveCancelTitle(leaveCancelTarget.targetDoc));
+        setApprovalRelatedDocLabel(leaveCancelTarget.targetDoc.id, buildApprovalLeaveCancelTargetLabel(leaveCancelTarget.targetDoc));
+    }
     else if (isApprovalOvertimeType(mainType)) {
         attendanceSnapshotPayload = buildApprovalOvertimeSnapshot(mainType);
         if (!attendanceSnapshotPayload.work_date) return showAlert("근무일자를 입력하세요.");
@@ -7768,7 +8309,7 @@ async function processApprovalDoc(docId, action, reason = '') {
         return { ok: false };
     }
 
-    const { data: doc, error: docError } = await _supabase.from('ref_approval').select('*').eq('id', docId).single();
+    const { data: doc, error: docError } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', docId).single();
     if (docError || !doc) {
         showAlert("문서를 불러오지 못했습니다.");
         return { ok: false };
@@ -7804,13 +8345,33 @@ async function processApprovalDoc(docId, action, reason = '') {
         else newStatus = '완료'; 
     }
 
-    const { error: approvalUpdateError } = await _supabase
+    let leaveCancelTargetDoc = null;
+    if (action !== '반려' && newStatus === '완료' && isLeaveCancelApprovalDoc(doc)) {
+        const leaveCancelTarget = await loadApprovalLeaveCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
+            excludeDocId: doc?.id || '',
+            checkExistingCancel: false
+        });
+        if (!leaveCancelTarget.ok || !leaveCancelTarget.targetDoc) {
+            showAlert(leaveCancelTarget.message || '취소 대상 휴가를 확인하지 못했습니다.');
+            return { ok: false };
+        }
+        leaveCancelTargetDoc = leaveCancelTarget.targetDoc;
+    }
+
+    const { error: approvalUpdateError } = await scopeApprovalTenant(_supabase
         .from('ref_approval')
-        .update({ approval_line: line, current_approver: nextUser, status: newStatus })
+        .update({ approval_line: line, current_approver: nextUser, status: newStatus }))
         .eq('id', docId);
     if (approvalUpdateError) {
         showAlert("결재 상태 저장 실패: " + approvalUpdateError.message);
         return { ok: false };
+    }
+    let leaveCancelSettlementNotice = '';
+    try {
+        await applyApprovalLeaveCancelSettlement(doc, newStatus, { targetDoc: leaveCancelTargetDoc });
+    } catch (leaveCancelError) {
+        console.error('휴가 취소 반영 실패:', leaveCancelError);
+        leaveCancelSettlementNotice = '원 휴가 문서 취소 반영은 완료하지 못했습니다. 휴가 상태를 확인해 주세요.';
     }
     let attendanceSettlementNotice = '';
     try {
@@ -7824,6 +8385,7 @@ async function processApprovalDoc(docId, action, reason = '') {
         reason: reason || null,
         delegated_from_emp_id: delegatedFrom ? effectiveApproverEmpId : null,
         delegate_emp_id: delegatedFrom ? actorEmpId : null,
+        leave_cancel_warning: leaveCancelSettlementNotice || null,
         attendance_settlement_warning: attendanceSettlementNotice || null
     });
 
@@ -7851,6 +8413,7 @@ async function processApprovalDoc(docId, action, reason = '') {
     await Promise.all([loadTodoList(), loadHistoryList()]);
     const hasTelegramFallback = notificationResults.some((result) => result?.ok && result?.telegramSent === false && result?.fallbackInserted === true);
     const notices = [];
+    if (leaveCancelSettlementNotice) notices.push(leaveCancelSettlementNotice);
     if (attendanceSettlementNotice) notices.push(attendanceSettlementNotice);
     if (hasTelegramFallback) notices.push('앱 알림은 저장했지만 Telegram 전송은 실패했습니다.');
     return {
@@ -7896,6 +8459,7 @@ async function deleteCanceledDoc(docId) {
     const { data: doc, error: docErr } = await _supabase
         .from('ref_approval')
         .select('id, title, status, drafter_id')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', numericDocId)
         .single();
     if (docErr || !doc) {
@@ -7917,6 +8481,7 @@ async function deleteCanceledDoc(docId) {
     const { error: delErr } = await _supabase
         .from('ref_approval')
         .delete()
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', numericDocId);
     if (delErr) {
         showAlert("삭제 실패: " + delErr.message);
@@ -7936,6 +8501,7 @@ async function procUserAction(docId, action, explicitReason = null) {
     const { data: doc, error: docErr } = await _supabase
         .from('ref_approval')
         .select('id, title, current_approver, drafter_id, status, approval_line')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', docId)
         .single();
     if (docErr || !doc) {
@@ -7955,7 +8521,10 @@ async function procUserAction(docId, action, explicitReason = null) {
 
         let reasonText = String(explicitReason || '').trim();
         if (!reasonText) {
-            const reason = prompt("취소 사유를 입력하세요:");
+            const reason = await showPrompt("취소 사유를 입력하세요:", {
+                title: '상신 취소',
+                placeholder: '취소 사유를 입력하세요.'
+            });
             if (reason === null) return false;
             reasonText = String(reason || '').trim();
             if (!reasonText) {
@@ -7967,6 +8536,7 @@ async function procUserAction(docId, action, explicitReason = null) {
         const { error: cancelErr } = await _supabase
             .from('ref_approval')
             .update({ status: '결재취소', current_approver: null })
+            .eq('coop_id', getApprovalScopedCoopId())
             .eq('id', docId);
         if (cancelErr) {
             showAlert("취소 처리 실패: " + cancelErr.message);
@@ -8018,6 +8588,7 @@ async function submitEvidenceUpload() {
     const { data: doc, error: docErr } = await _supabase
         .from('ref_approval')
         .select('id, title, current_approver, drafter_id, status, file_links')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('id', pendingEvidenceDocId)
         .single();
     if (docErr || !doc) {
@@ -8359,6 +8930,7 @@ function buildApprovalDraftHistoryQuery(recentSinceIso = '') {
     let query = _supabase
         .from('ref_approval')
         .select('*')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id);
     if (recentSinceIso) query = query.gte('created_at', recentSinceIso);
     return query;
@@ -8368,6 +8940,7 @@ function buildApprovalCoopHistoryQuery(coopId, recentSinceIso = '') {
     let query = _supabase
         .from('ref_approval')
         .select('*')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('coop_id', coopId);
     if (recentSinceIso) query = query.gte('created_at', recentSinceIso);
     return query;
@@ -8400,6 +8973,7 @@ async function fetchPendingSubmissionDocs() {
     const { data, error } = await _supabase
         .from('ref_approval')
         .select('*')
+        .eq('coop_id', getApprovalScopedCoopId())
         .eq('drafter_id', myInfo.emp_id)
         .in('status', HISTORY_STATUS_GROUPS.PENDING)
         .order('created_at', { ascending: false });
@@ -8538,6 +9112,7 @@ function mapHistoryStatusGroup(status) {
 function mapHistoryDocTypeGroup(docType) {
     const raw = String(docType || '').trim();
     if (!raw) return 'OTHER';
+    if (raw.startsWith('취소휴가')) return 'LEAVE';
     if (raw.startsWith(JEONGYEOL_MONTHLY_DOC_TYPE)) return 'GENERAL_PROPOSAL';
     if (raw.startsWith('일반품의')) return 'GENERAL_PROPOSAL';
     if (raw.startsWith('출장신청')) return 'GENERAL_PROPOSAL';
@@ -9288,7 +9863,7 @@ function buildPhysicalPrintHtml(doc) {
 
 async function printPhysicalDoc(docId) {
     if (!canPerform('approval.physical')) return showAlert("처리 권한이 없습니다.");
-    const { data: doc, error } = await _supabase.from('ref_approval').select('*').eq('id', docId).single();
+    const { data: doc, error } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', docId).single();
     if (error || !doc) return showAlert("문서를 찾을 수 없습니다.");
 
     const fileLinks = Array.isArray(doc.file_links) ? doc.file_links : [];
@@ -9303,9 +9878,9 @@ async function printPhysicalDoc(docId) {
 
     // 기안자 직급 확인 (사무국장 여부)
     if (doc.drafter_id) {
-        const { data: drafterEmp } = await _supabase
+        const { data: drafterEmp } = await scopeApprovalTenant(_supabase
             .from('ref_employees')
-            .select('position')
+            .select('position'))
             .eq('emp_id', doc.drafter_id)
             .maybeSingle();
         doc._drafter_is_secretary = !!(drafterEmp?.position || '').includes('사무국장');
@@ -9313,9 +9888,9 @@ async function printPhysicalDoc(docId) {
 
     const relatedDocId = toPositiveDocId(doc.related_doc_id);
     if (relatedDocId) {
-        const { data: relatedDoc, error: relatedErr } = await _supabase
+        const { data: relatedDoc, error: relatedErr } = await scopeApprovalTenant(_supabase
             .from('ref_approval')
-            .select('*')
+            .select('*'))
             .eq('id', relatedDocId)
             .maybeSingle();
         if (!relatedErr && relatedDoc) {
@@ -9328,8 +9903,8 @@ async function printPhysicalDoc(docId) {
     win.document.close();
 
     if (!['실물결재대기', '실물결재완료'].includes(doc.status)) {
-        await _supabase.from('ref_approval')
-            .update({ status: '실물결재대기', current_approver: null })
+        await scopeApprovalTenant(_supabase.from('ref_approval')
+            .update({ status: '실물결재대기', current_approver: null }))
             .eq('id', docId);
         await logAudit('approval.physical_print', docId, '실물결재 출력', null);
         loadHistoryList();
@@ -9369,9 +9944,9 @@ async function submitPhysicalReject() {
         submitBtn.textContent = "처리 중...";
     }
 
-    const { data: doc, error: docErr } = await _supabase
+    const { data: doc, error: docErr } = await scopeApprovalTenant(_supabase
         .from('ref_approval')
-        .select('id, status, approval_line, title, drafter_id')
+        .select('id, status, approval_line, title, drafter_id'))
         .eq('id', pendingPhysicalRejectDocId)
         .single();
 
@@ -9399,12 +9974,12 @@ async function submitPhysicalReject() {
         return l;
     });
 
-    const { error: updateErr } = await _supabase.from('ref_approval').update({
+    const { error: updateErr } = await scopeApprovalTenant(_supabase.from('ref_approval').update({
         status: '반려',
         approval_line: line,
         current_approver: null,
         processed_at: nowIso
-    }).eq('id', pendingPhysicalRejectDocId);
+    })).eq('id', pendingPhysicalRejectDocId);
 
     if (submitBtn) {
         submitBtn.disabled = false;
@@ -9453,9 +10028,9 @@ document.getElementById('signedDocInput').addEventListener('change', async (e) =
         }
 	    const signedDocRef = `attachments/${safeName}?display_name=${encodeURIComponent(file.name || safeName)}`;
 
-    const { data: doc } = await _supabase
+    const { data: doc } = await scopeApprovalTenant(_supabase
         .from('ref_approval')
-        .select('id, approval_line, title, drafter_id, doc_type, content, doc_no, receiver, via')
+        .select('id, approval_line, title, drafter_id, doc_type, content, doc_no, receiver, via'))
         .eq('id', pendingPhysicalDocId)
         .single();
     const nowIso = new Date().toISOString();
@@ -9467,7 +10042,7 @@ document.getElementById('signedDocInput').addEventListener('change', async (e) =
         return l;
     });
 
-	    await _supabase.from('ref_approval').update({
+	    await scopeApprovalTenant(_supabase.from('ref_approval').update({
 	        status: '실물결재완료',
 	        signed_doc_url: signedDocRef,
 	        physical_approved_at: nowIso,
@@ -9475,7 +10050,7 @@ document.getElementById('signedDocInput').addEventListener('change', async (e) =
 	        approval_line: line,
 	        current_approver: null,
 	        processed_at: nowIso
-	    }).eq('id', pendingPhysicalDocId);
+	    })).eq('id', pendingPhysicalDocId);
 
 	    await logAudit('approval.physical_complete', pendingPhysicalDocId, '실물결재 완료', { signed_doc_url: signedDocRef });
     if (doc?.drafter_id && doc.drafter_id !== myInfo?.emp_id) {
@@ -9528,6 +10103,7 @@ async function runRelSearch() {
     // 쿼리: status in (완료, 실물결재완료), doc_type=일반품의
     let query = _supabase.from('ref_approval')
         .select('*')
+        .eq('coop_id', getApprovalScopedCoopId())
         .in('status', ['완료', '실물결재완료'])
         .eq('doc_type', '일반품의') // 품의서만 검색
         .order('created_at', {ascending: false})
@@ -9653,6 +10229,16 @@ async function buildRelAttachmentViewer(attachments) {
             .filter(item => canPreviewAttachment(item.rawRef))
     };
     const getItemDisplayName = (item, fallback) => String(item?.displayName || extractDisplayFileName(item?.rawRef, fallback));
+    const syncAttachmentNavButtons = () => {
+        const hasPrev = state.previewable.length > 0 && state.index > 0;
+        const hasNext = state.previewable.length > 0 && state.index < state.previewable.length - 1;
+        prevBtn.disabled = !hasPrev;
+        nextBtn.disabled = !hasNext;
+        prevBtn.className = hasPrev ? 'btn btn-sm btn-outline-primary' : 'btn btn-sm btn-outline-secondary';
+        nextBtn.className = hasNext ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-secondary';
+        prevBtn.textContent = hasPrev ? '이전 첨부' : '이전';
+        nextBtn.textContent = hasNext ? '다음 첨부' : '다음';
+    };
 
     let stageObjectUrl = null;
     const resetStageObjectUrl = () => {
@@ -9668,14 +10254,12 @@ async function buildRelAttachmentViewer(attachments) {
         if (!state.previewable.length) {
             metaBox.textContent = '첨부파일은 있지만 웹 바로보기를 지원하는 형식은 없습니다.';
             stage.innerHTML = '<div class="text-center text-muted">PDF와 이미지 파일만 여기에서 바로 볼 수 있습니다.</div>';
-            prevBtn.disabled = true;
-            nextBtn.disabled = true;
+            syncAttachmentNavButtons();
             return;
         }
         state.index = Math.max(0, Math.min(previewIndex, state.previewable.length - 1));
         const current = state.previewable[state.index];
-        prevBtn.disabled = state.index === 0;
-        nextBtn.disabled = state.index === state.previewable.length - 1;
+        syncAttachmentNavButtons();
         stage.innerHTML = '<div class="text-muted">첨부파일을 불러오는 중입니다.</div>';
         try {
             resetStageObjectUrl();
@@ -9777,7 +10361,7 @@ async function openRelView(docId) {
     syncRelViewActionArea(null);
     relViewModal.show();
 
-    const { data, error } = await _supabase.from('ref_approval').select('*').eq('id', safeDocId).maybeSingle();
+    const { data, error } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', safeDocId).maybeSingle();
     if (error || !data) { contentEl.textContent = "문서를 불러올 수 없습니다."; return; }
 
     // 보기 전용 템플릿 렌더링 (안전한 DOM 구성)
