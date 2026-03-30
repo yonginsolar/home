@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.92 | Change: 2026-03-30 - Fix remaining approval tenant-helper raw builder collisions in submit/template/user-action paths. -->
+<!-- Version: v1.1.94 | Change: 2026-03-30 - Prevent leave title auto-generation from leaking into general proposal title on approval boot. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.92 | approval.html');</script>
+  <script>console.log('[Version] v1.1.94 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2414,7 +2414,9 @@ function syncApprovalLeaveInputMode() {
     if (dateRangeTitle) dateRangeTitle.textContent = `📅 ${label} 기간`;
     if (singleDayTitle) singleDayTitle.textContent = `📅 ${label} 날짜`;
     if (halfDayTitle) halfDayTitle.textContent = `📅 ${label} 날짜`;
-    syncApprovalTitleInput('휴가');
+    if (getCurrentApprovalCategory() === '휴가') {
+        syncApprovalTitleInput('휴가');
+    }
 }
 
 function isApprovalProposalLikeType(docType) {
@@ -4898,17 +4900,8 @@ async function sendTelegramApprovalNotification(payload) {
     try {
         const targetEmpId = String(payload?.targetEmpId || '').trim();
         if (!targetEmpId) return false;
-        let accessToken = await getApprovalFunctionAccessToken(false);
-        if (!accessToken) return false;
         const erpBaseUrl = getApprovalNotificationBaseUrl();
-        const runRequest = async (token) => fetch(`${SUPABASE_URL}/functions/v1/erp-approval-telegram-dm`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'apikey': SUPABASE_KEY
-            },
-            body: JSON.stringify({
+        const { data: payloadData, error } = await invokeApprovalEdgeFunction('erp-approval-telegram-dm', {
                 mode: 'create_and_dispatch',
                 targetEmpId,
                 title: String(payload?.title || '알림'),
@@ -4916,16 +4909,13 @@ async function sendTelegramApprovalNotification(payload) {
                 linkUrl: String(payload?.linkUrl || 'approval.html'),
                 meta: payload?.meta && typeof payload.meta === 'object' ? payload.meta : {},
                 erpBaseUrl
-            })
         });
-        let response = await runRequest(accessToken);
-        if (response.status === 401) {
-            accessToken = await getApprovalFunctionAccessToken(true);
-            if (accessToken) response = await runRequest(accessToken);
+        if (error) {
+            console.warn('[telegram] approval notification skipped:', normalizeApprovalEdgeInvokeError(error));
+            return false;
         }
-        if (!response.ok) {
-            const errText = await response.text().catch(() => '');
-            console.warn('[telegram] approval notification skipped:', response.status, errText);
+        if (payloadData?.ok === false) {
+            console.warn('[telegram] approval notification rejected:', payloadData);
             return false;
         }
         return true;
@@ -5051,18 +5041,9 @@ function buildApprovalUploadErrorMessage(error, options = {}) {
 
 async function notifyApprovalUploadFailure(options = {}) {
     try {
-        let accessToken = await getApprovalFunctionAccessToken(false);
-        if (!accessToken) return;
         const normalized = normalizeApprovalUploadError(options.error);
         const docId = Number(options.docId || 0) > 0 ? Number(options.docId) : null;
-        const runRequest = async (token) => fetch(`${SUPABASE_URL}/functions/v1/erp-platform-alert`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'apikey': SUPABASE_KEY
-            },
-            body: JSON.stringify({
+        const { data: payload, error } = await invokeApprovalEdgeFunction('erp-platform-alert', {
                 alertType: 'approval_upload_error',
                 contextKey: String(options.contextKey || 'generic'),
                 contextLabel: String(options.contextLabel || '전자결재 첨부'),
@@ -5076,20 +5057,11 @@ async function notifyApprovalUploadFailure(options = {}) {
                 actorRole: myInfo?.role || null,
                 docId,
                 docType: options.docType || null
-            })
         });
-
-        let response = await runRequest(accessToken);
-        if (response.status === 401) {
-            accessToken = await getApprovalFunctionAccessToken(true);
-            if (accessToken) response = await runRequest(accessToken);
-        }
-        if (!response.ok) {
-            const errText = await response.text().catch(() => '');
-            console.warn('[approval-upload] platform alert skipped:', response.status, errText);
+        if (error) {
+            console.warn('[approval-upload] platform alert skipped:', normalizeApprovalEdgeInvokeError(error));
             return;
         }
-        const payload = await response.json().catch(() => null);
         if (payload?.ok === false) {
             console.warn('[approval-upload] platform alert rejected:', payload);
         }
@@ -6455,13 +6427,68 @@ async function getApprovalFunctionAccessToken(forceRefresh = false) {
     const needsRefresh = !!forceRefresh || !accessToken || isSessionNearExpiry(session);
 
     if (needsRefresh) {
-        const { data: refreshedData } = await _supabase.auth.refreshSession().catch(() => ({ data: null }));
-        session = refreshedData?.session || session;
-        accessToken = session?.access_token || accessToken;
+        const { data: refreshedData, error: refreshError } = await _supabase.auth.refreshSession().catch(() => ({ data: null, error: null }));
+        if (refreshError || !refreshedData?.session?.access_token) return '';
+        session = refreshedData.session;
+        accessToken = session.access_token || '';
     }
 
     return accessToken || '';
 } // End of getApprovalFunctionAccessToken
+
+function normalizeApprovalEdgeInvokeError(error) {
+    if (!error) return 'unknown error';
+    const status = Number(error?.context?.status || error?.status || error?.response?.status || 0);
+    const message = String(error?.message || error?.name || error?.error || '').trim();
+    let detailText = '';
+    const context = error?.context;
+    if (context && typeof context.text === 'function') {
+        detailText = '[response body omitted]';
+    } else if (context && typeof context === 'object') {
+        try {
+            detailText = JSON.stringify(context);
+        } catch (_) { /* noop */ }
+    }
+    return [
+        status ? `status=${status}` : '',
+        message || '',
+        detailText || ''
+    ].filter(Boolean).join(' | ') || 'unknown error';
+} // End of normalizeApprovalEdgeInvokeError
+
+async function invokeApprovalEdgeFunction(functionName, body, options = {}) {
+    const safeFunctionName = String(functionName || '').trim();
+    if (!safeFunctionName) {
+        return { data: null, error: new Error('FUNCTION_NAME_REQUIRED') };
+    }
+
+    const ensureSession = async (forceRefresh = false) => {
+        const token = await getApprovalFunctionAccessToken(forceRefresh);
+        if (!token) return { ok: false, error: new Error(forceRefresh ? 'AUTH_REFRESH_FAILED' : 'AUTH_SESSION_MISSING') };
+        return { ok: true, token };
+    };
+
+    const firstSession = await ensureSession(false);
+    if (!firstSession.ok) {
+        return { data: null, error: firstSession.error };
+    }
+
+    let { data, error } = await _supabase.functions.invoke(safeFunctionName, { body });
+    if (!error) return { data, error: null };
+
+    const normalizedText = normalizeApprovalEdgeInvokeError(error);
+    const shouldRetryAuth = options?.retryAuth !== false
+        && (/status=401/.test(normalizedText) || /auth|jwt|unauthorized/i.test(normalizedText));
+    if (!shouldRetryAuth) return { data, error };
+
+    const refreshedSession = await ensureSession(true);
+    if (!refreshedSession.ok) {
+        return { data: null, error: refreshedSession.error };
+    }
+
+    const retryResult = await _supabase.functions.invoke(safeFunctionName, { body });
+    return { data: retryResult.data, error: retryResult.error || null };
+} // End of invokeApprovalEdgeFunction
 
 function getApprovalDocProcessContext(doc) {
     const approvalLine = Array.isArray(doc?.approval_line) ? doc.approval_line : [];
@@ -6769,6 +6796,8 @@ function syncApprovalTitleInput(mainType, options = {}) {
     const titleInput = getApprovalTitleInputElement(safeType);
     const proposalLabel = document.getElementById('proposalSubjectLabel');
     const proposalInput = document.getElementById('proposalSubject');
+    const currentCategory = getCurrentApprovalCategory();
+    const usesSharedProposalTitle = safeType && safeType !== '공문';
 
     if (safeType && safeType !== '공문') {
         const fieldConfig = getApprovalTitleFieldConfig(safeType);
@@ -6776,6 +6805,10 @@ function syncApprovalTitleInput(mainType, options = {}) {
         if (proposalInput) proposalInput.placeholder = fieldConfig.placeholder;
     }
     if (!titleInput) return;
+
+    if (usesSharedProposalTitle && currentCategory && currentCategory !== safeType) {
+        return;
+    }
 
     const currentValue = String(titleInput.value || '').trim();
     const isAutoGenerated = titleInput.dataset.autoGenerated === '1';
