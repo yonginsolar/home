@@ -1,12 +1,12 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.2';
+  const MODULE_VERSION = 'v1.0.4';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
     'ded_pension', 'ded_health', 'ded_care', 'ded_employ', 'ded_income', 'ded_local', 'ded_advance', 'ded_advance_raw', 'ded_capital', 'ded_total', 'net_pay',
-    'durunuri_emp_support'
+    'durunuri_emp_support', 'work_days', 'work_hours'
   ];
 
   function toInt(value) {
@@ -15,6 +15,15 @@
 
   function formatMoney(value) {
     return toInt(value).toLocaleString();
+  }
+
+  function roundMetric(value) {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 2) / 2;
+  }
+
+  function formatMetric(value) {
+    var rounded = roundMetric(value);
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace(/\.0$/, '');
   }
 
   function escapeHtml(value) {
@@ -64,7 +73,8 @@
     const normalized = {
       year_month: src.year_month || fallbackYm || '',
       emp_id: src.emp_id || '',
-      emp_name: src.emp_name || ''
+      emp_name: src.emp_name || '',
+      work_description: src.work_description || ''
     };
     NUMERIC_FIELDS.forEach(function eachNumeric(key) {
       normalized[key] = toInt(src[key]);
@@ -82,7 +92,7 @@
       if (!hasEtcValue) return true;
       return supportEmp !== 0 && rawAdvance === 0 && capital === 0;
     });
-    return hasOnlyDurunuri ? '두루누리 지원금' : '기타공제';
+    return hasOnlyDurunuri ? '두루누리' : '기타공제';
   }
 
   function createStateFromRows(rows, yearMonth) {
@@ -93,6 +103,8 @@
     const ym = yearMonth || (normalizedRows[0] ? normalizedRows[0].year_month : '');
     const totals = normalizedRows.reduce(function reduceTotals(acc, row) {
       acc.pay_basic += toInt(row.pay_basic);
+      acc.work_days += roundMetric(row.work_days);
+      acc.work_hours += roundMetric(row.work_hours);
       acc.pay_meal += toInt(row.pay_meal);
       acc.pay_car += toInt(row.pay_car);
       acc.pay_allow += allowance(row);
@@ -109,6 +121,7 @@
       acc.net_pay += toInt(row.net_pay);
       return acc;
     }, {
+      work_days: 0, work_hours: 0,
       pay_basic: 0, pay_meal: 0, pay_car: 0, pay_allow: 0, pay_bonus: 0, pay_total: 0,
       ded_pension: 0, ded_health: 0, ded_care: 0, ded_employ: 0, ded_income: 0, ded_local: 0, ded_etc: 0, ded_total: 0, net_pay: 0
     });
@@ -131,6 +144,9 @@
         '<tr>' +
         '<td class="text-center">' + (idx + 1) + '</td>' +
         '<td class="text-center">' + escapeHtml(row.emp_name || '') + '</td>' +
+        '<td>' + escapeHtml(row.work_description || '') + '</td>' +
+        '<td class="text-end">' + formatMetric(row.work_days) + '</td>' +
+        '<td class="text-end">' + formatMetric(row.work_hours) + '</td>' +
         '<td class="text-end">' + formatMoney(row.pay_basic) + '</td>' +
         '<td class="text-end">' + formatMoney(row.pay_meal) + '</td>' +
         '<td class="text-end">' + formatMoney(row.pay_car) + '</td>' +
@@ -188,8 +204,8 @@
       '.approval-box th, .approval-box td { border:1px solid #111; text-align:center; }' +
       '.approval-box th { height:22px; background:#f3f4f6; font-weight:700; }' +
       '.approval-box td { height:52px; }' +
-      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
-      '.ledger-table th, .ledger-table td { border:1px solid #111; padding:4px 5px; }' +
+      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:10px; }' +
+      '.ledger-table th, .ledger-table td { border:1px solid #111; padding:3px 4px; vertical-align:middle; }' +
       '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:nowrap; }' +
       '.ledger-table tfoot th { background:#e5e7eb; }' +
       '.text-center { text-align:center; } .text-end { text-align:right; } .fw-bold { font-weight:700; }' +
@@ -210,6 +226,9 @@
       '<tr>' +
       '<th rowspan="2" style="width:40px;">No</th>' +
       '<th rowspan="2" style="width:72px;">성명</th>' +
+      '<th rowspan="2" style="width:124px;">종사업무</th>' +
+      '<th rowspan="2" style="width:46px;">근로일수</th>' +
+      '<th rowspan="2" style="width:52px;">근로시간</th>' +
       '<th colspan="6">지 급 내 역</th>' +
       '<th colspan="7">공 제 내 역</th>' +
       '<th rowspan="2">공제계</th>' +
@@ -223,7 +242,9 @@
       '<tbody>' + buildRowsHtml(rows) + '</tbody>' +
       '<tfoot>' +
       '<tr>' +
-      '<th colspan="2">합계 (' + rows.length + '명)</th>' +
+      '<th colspan="3">합계 (' + rows.length + '명)</th>' +
+      '<th class="text-end">' + formatMetric(totals.work_days) + '</th>' +
+      '<th class="text-end">' + formatMetric(totals.work_hours) + '</th>' +
       '<th class="text-end">' + formatMoney(totals.pay_basic) + '</th>' +
       '<th class="text-end">' + formatMoney(totals.pay_meal) + '</th>' +
       '<th class="text-end">' + formatMoney(totals.pay_car) + '</th>' +

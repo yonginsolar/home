@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.41
-Change: 2026-03-29 - Fix salary-loading tenant query collisions and keep position-settings layout improvements.
+Version: v1.0.44
+Change: 2026-03-31 - Tighten salary ledger column widths and shorten Durunuri header label for cleaner payroll print layout.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.41 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.44 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -19,7 +19,7 @@ Change: 2026-03-29 - Fix salary-loading tenant query collisions and keep positio
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="print_service.js?v=20260326-2"></script>
   <script src="payroll_durunuri_module.js"></script>
-  <script src="salary_ledger_module.js?v=20260323-1"></script>
+  <script src="salary_ledger_module.js?v=20260331-2"></script>
   <script src="leave_ledger.js"></script>
   
   <style>
@@ -220,6 +220,30 @@ Change: 2026-03-29 - Fix salary-loading tenant query collisions and keep positio
         <label class="small fw-bold text-primary">💰 월 지급 총액 (연봉 ÷ 12)</label>
         <input type="number" id="payTotalFixed" class="form-control fw-bold fs-5 bg-white" oninput="recalcSalaryComponents()">
         <div class="form-text x-small">이 금액을 기준으로 기본급과 수당을 나눕니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-card border mb-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12">
+        <label class="small fw-bold text-primary">🧾 임금대장 추가 정보</label>
+        <div class="form-text x-small mb-2">종사업무는 직접 기재하고, 근로일수/근로시간은 평일 - 공휴일 - 승인 휴가 기준으로 먼저 채운 뒤 수정할 수 있습니다.</div>
+      </div>
+      <div class="col-12">
+        <label class="small text-muted">종사업무</label>
+        <input type="text" id="workDescription" class="form-control" placeholder="예: 사무국 운영 및 조합 행정">
+      </div>
+      <div class="col-md-6">
+        <label class="small text-muted">근로일수</label>
+        <input type="number" id="workDays" class="form-control" step="0.5" min="0" oninput="handleSalaryWorkDaysInput()">
+      </div>
+      <div class="col-md-6">
+        <label class="small text-muted">근로시간</label>
+        <input type="number" id="workHours" class="form-control" step="0.5" min="0" oninput="handleSalaryWorkHoursInput()">
+      </div>
+      <div class="col-12">
+        <div class="form-text" id="salaryWorkMetaHelp">기본값 계산 전입니다.</div>
       </div>
     </div>
   </div>
@@ -3338,6 +3362,9 @@ async function loadSalaryData() {
     const month = document.getElementById("salaryMonth").value;
     const badge = document.getElementById("salaryStatusBadge");
     const alertBox = document.getElementById("salaryAlertBox");
+    const workDescriptionInput = document.getElementById("workDescription");
+    const workDaysInput = document.getElementById("workDays");
+    const workHoursInput = document.getElementById("workHours");
     
     // 버튼 DOM 가져오기
     const btnSave = document.getElementById("btnSaveSalary");
@@ -3356,8 +3383,22 @@ async function loadSalaryData() {
     btnSave.classList.add("btn-success");
     
     if (!month || !currentEmpId) {
+        if (workDescriptionInput) workDescriptionInput.value = '';
+        if (workDaysInput) workDaysInput.value = '';
+        if (workHoursInput) workHoursInput.value = '';
+        setSalaryWorkMetaHelpText('귀속월을 선택하면 근로일수/근로시간 기본값을 계산합니다.');
         resetDurunuriSupportState();
         return;
+    }
+
+    let workMetaDefaults = { baseWeekdays: 0, holidayDays: 0, leaveDays: 0, workDays: 0, workHours: 0 };
+    let workMetaDefaultsAvailable = true;
+    try {
+        workMetaDefaults = await buildAdminEmployeeSalaryWorkMetaDefaults(month);
+    } catch (workMetaError) {
+        workMetaDefaultsAvailable = false;
+        console.warn('Salary work meta default load failed:', workMetaError?.message || workMetaError);
+        setSalaryWorkMetaHelpText('근로일수 기본값을 계산하지 못했습니다. 직접 입력 후 저장할 수 있습니다.');
     }
 
     // --- (기존 로직: 무급휴가 감지 부분은 그대로 유지) ---
@@ -3413,6 +3454,20 @@ async function loadSalaryData() {
         btnSave.innerText = "💾 수정사항 저장"; // 문구 변경
         btnSave.classList.remove("btn-success");
         btnSave.classList.add("btn-warning"); // 색상 변경 (수정 느낌)
+
+        const isLegacyBlankWorkMeta = !String(saved.work_description || '').trim()
+            && Number(saved.work_days || 0) === 0
+            && Number(saved.work_hours || 0) === 0;
+        const resolvedWorkDays = isLegacyBlankWorkMeta
+            ? workMetaDefaults.workDays
+            : roundAdminEmployeeWorkMetric(saved.work_days);
+        const resolvedWorkHours = isLegacyBlankWorkMeta
+            ? workMetaDefaults.workHours
+            : resolveAdminEmployeeSavedWorkHours(saved.work_hours, resolvedWorkDays);
+        workDescriptionInput.value = String(saved.work_description || '');
+        workDaysInput.value = formatAdminEmployeeWorkMetricInput(resolvedWorkDays);
+        workHoursInput.value = formatAdminEmployeeWorkMetricInput(resolvedWorkHours);
+        markSalaryWorkHoursAutoDerived(isLegacyBlankWorkMeta || Math.abs(resolvedWorkHours - (resolvedWorkDays * 8)) < 0.001);
         
         currentSalaryDataForPrint = await getAdjustedSalaryRowWithDurunuri({
             ...saved,
@@ -3429,8 +3484,16 @@ async function loadSalaryData() {
         
         badge.innerText = "미저장 (자동계산)";
         badge.className = "badge bg-secondary";
+        workDescriptionInput.value = '';
+        workDaysInput.value = formatAdminEmployeeWorkMetricInput(workMetaDefaults.workDays);
+        workHoursInput.value = formatAdminEmployeeWorkMetricInput(workMetaDefaults.workHours);
+        markSalaryWorkHoursAutoDerived(true);
         
         currentSalaryDataForPrint = null;
+    }
+
+    if (workMetaDefaultsAvailable) {
+        setSalaryWorkMetaHelpText(buildAdminEmployeeSalaryWorkMetaSummary(workMetaDefaults));
     }
 
     await loadDurunuriSupportState(month, currentEmpId);
@@ -3473,6 +3536,226 @@ function recalcSalaryComponents() {
     document.getElementById("payBasic").value = basic > 0 ? basic : 0;
 }
 
+function roundAdminEmployeeWorkMetric(value) {
+    const safe = Number(value || 0);
+    if (!Number.isFinite(safe)) return 0;
+    return Math.round((safe + Number.EPSILON) * 2) / 2;
+}
+
+function formatAdminEmployeeWorkMetricInput(value) {
+    const rounded = roundAdminEmployeeWorkMetric(value);
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1).replace(/\.0$/, '');
+}
+
+function setSalaryWorkMetaHelpText(text) {
+    const helpEl = document.getElementById('salaryWorkMetaHelp');
+    if (helpEl) helpEl.textContent = String(text || '').trim() || '근로일수/근로시간 기본값 계산 전입니다.';
+}
+
+function markSalaryWorkHoursAutoDerived(isAuto) {
+    const workHoursInput = document.getElementById('workHours');
+    if (workHoursInput) {
+        workHoursInput.dataset.autoDerived = isAuto ? '1' : '0';
+    }
+}
+
+function syncSalaryWorkHoursFromDays(forceSync = false) {
+    const workDaysInput = document.getElementById('workDays');
+    const workHoursInput = document.getElementById('workHours');
+    if (!workDaysInput || !workHoursInput) return;
+    if (!forceSync && workHoursInput.dataset.autoDerived !== '1') return;
+    const workDays = roundAdminEmployeeWorkMetric(workDaysInput.value);
+    const nextHours = roundAdminEmployeeWorkMetric(workDays * 8);
+    workHoursInput.value = formatAdminEmployeeWorkMetricInput(nextHours);
+    markSalaryWorkHoursAutoDerived(true);
+}
+
+function handleSalaryWorkDaysInput() {
+    syncSalaryWorkHoursFromDays(false);
+}
+
+function handleSalaryWorkHoursInput() {
+    markSalaryWorkHoursAutoDerived(false);
+}
+
+function parseAdminEmployeeIsoDate(value) {
+    const raw = String(value || '').trim();
+    const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatAdminEmployeeIsoDateFromParts(dateObj) {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return '';
+    return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+}
+
+function getAdminEmployeeMonthDateRange(yearMonth) {
+    const match = String(yearMonth || '').trim().match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const monthIndex = Number(match[2]) - 1;
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex + 1, 0);
+    return {
+        start,
+        end,
+        startIso: formatAdminEmployeeIsoDateFromParts(start),
+        endIso: formatAdminEmployeeIsoDateFromParts(end),
+        year,
+        monthIndex
+    };
+}
+
+function clampAdminEmployeeDateRange(startDate, endDate, minDate, maxDate) {
+    if (!(startDate instanceof Date) || !(endDate instanceof Date)) return null;
+    const start = new Date(Math.max(startDate.getTime(), minDate.getTime()));
+    const end = new Date(Math.min(endDate.getTime(), maxDate.getTime()));
+    if (start.getTime() > end.getTime()) return null;
+    return { start, end };
+}
+
+function countAdminEmployeeWeekdaysInRange(startDate, endDate) {
+    const range = clampAdminEmployeeDateRange(startDate, endDate, startDate, endDate);
+    if (!range) return 0;
+    let count = 0;
+    const cursor = new Date(range.start.getFullYear(), range.start.getMonth(), range.start.getDate());
+    while (cursor.getTime() <= range.end.getTime()) {
+        const day = cursor.getDay();
+        if (day !== 0 && day !== 6) count += 1;
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return count;
+}
+
+function buildAdminEmployeeCalendarOccurrenceRange(entry, monthRange) {
+    const baseStart = parseAdminEmployeeIsoDate(entry?.start_date);
+    const baseEnd = parseAdminEmployeeIsoDate(entry?.end_date || entry?.start_date);
+    if (!baseStart) return null;
+    const durationDays = Math.max(0, Math.round(((baseEnd || baseStart).getTime() - baseStart.getTime()) / 86400000));
+    const recurrence = String(entry?.recurrence || '').trim();
+
+    let occurrenceStart = baseStart;
+    if (recurrence === 'yearly') {
+        occurrenceStart = new Date(monthRange.year, baseStart.getMonth(), baseStart.getDate());
+        if (occurrenceStart.getMonth() !== baseStart.getMonth()) return null;
+    } else if (recurrence === 'monthly') {
+        occurrenceStart = new Date(monthRange.year, monthRange.monthIndex, baseStart.getDate());
+        if (occurrenceStart.getMonth() !== monthRange.monthIndex) return null;
+    }
+
+    const occurrenceEnd = new Date(occurrenceStart.getFullYear(), occurrenceStart.getMonth(), occurrenceStart.getDate());
+    occurrenceEnd.setDate(occurrenceEnd.getDate() + durationDays);
+    return { start: occurrenceStart, end: occurrenceEnd };
+}
+
+function countAdminEmployeeHolidayWeekdays(entries, monthRange, employmentRange) {
+    const holidayDates = new Set();
+    const rows = Array.isArray(entries) ? entries : [];
+    rows.forEach((entry) => {
+        const occurrence = buildAdminEmployeeCalendarOccurrenceRange(entry, monthRange);
+        if (!occurrence) return;
+        const clamped = clampAdminEmployeeDateRange(occurrence.start, occurrence.end, employmentRange.start, employmentRange.end);
+        if (!clamped) return;
+        const cursor = new Date(clamped.start.getFullYear(), clamped.start.getMonth(), clamped.start.getDate());
+        while (cursor.getTime() <= clamped.end.getTime()) {
+            const day = cursor.getDay();
+            if (day !== 0 && day !== 6) {
+                holidayDates.add(formatAdminEmployeeIsoDateFromParts(cursor));
+            }
+            cursor.setDate(cursor.getDate() + 1);
+        }
+    });
+    return holidayDates.size;
+}
+
+function parseAdminEmployeeDotDate(value) {
+    const match = String(value || '').trim().match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
+    if (!match) return null;
+    return parseAdminEmployeeIsoDate(`${match[1]}-${match[2]}-${match[3]}`);
+}
+
+function calculateAdminEmployeeLeaveDaysInMonth(doc, monthRange) {
+    if (!window.LeaveLedger || !window.LeaveLedger.isLeaveDocType(doc?.doc_type)) return 0;
+    const safeAmount = roundAdminEmployeeWorkMetric(doc?.amount);
+    if (!(safeAmount > 0)) return 0;
+
+    const periodLabel = String(window.LeaveLedger.extractLeavePeriodLabel(doc) || '').trim();
+    const rangeMatch = periodLabel.match(/^(\d{4}\.\d{2}\.\d{2})\s*~\s*(\d{4}\.\d{2}\.\d{2})/);
+    if (rangeMatch) {
+        const start = parseAdminEmployeeDotDate(rangeMatch[1]);
+        const end = parseAdminEmployeeDotDate(rangeMatch[2]);
+        if (start && end) {
+            const clamped = clampAdminEmployeeDateRange(start, end, monthRange.start, monthRange.end);
+            if (!clamped) return 0;
+            return Math.min(safeAmount, countAdminEmployeeWeekdaysInRange(clamped.start, clamped.end));
+        }
+    }
+
+    const startIso = String(window.LeaveLedger.getLeaveStartIso(doc) || '').trim();
+    if (startIso && startIso.slice(0, 7) === `${monthRange.year}-${String(monthRange.monthIndex + 1).padStart(2, '0')}`) {
+        return safeAmount;
+    }
+    return 0;
+}
+
+async function buildAdminEmployeeSalaryWorkMetaDefaults(yearMonth) {
+    const monthRange = getAdminEmployeeMonthDateRange(yearMonth);
+    if (!monthRange || !currentEmpId) {
+        return { baseWeekdays: 0, holidayDays: 0, leaveDays: 0, workDays: 0, workHours: 0 };
+    }
+
+    const employmentStart = currentEmpHireDate ? parseAdminEmployeeIsoDate(currentEmpHireDate) : null;
+    const employmentEnd = currentEmpResignDate ? parseAdminEmployeeIsoDate(currentEmpResignDate) : null;
+    const activeRange = clampAdminEmployeeDateRange(
+        employmentStart || monthRange.start,
+        employmentEnd || monthRange.end,
+        monthRange.start,
+        monthRange.end
+    );
+    if (!activeRange) {
+        return { baseWeekdays: 0, holidayDays: 0, leaveDays: 0, workDays: 0, workHours: 0 };
+    }
+
+    const [holidayRes, leaveDocs] = await Promise.all([
+        scopeEmployeeTenant(_supabase.from('ref_calendar').select('id,start_date,end_date,recurrence,type'))
+            .eq('type', 'holiday'),
+        window.LeaveLedger.fetchLeaveApprovals(_supabase, currentEmpId, {
+            statuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
+            columns: 'id,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
+            coopId: getAdminEmployeeScopedCoopId()
+        })
+    ]);
+
+    if (holidayRes.error) {
+        throw holidayRes.error;
+    }
+
+    const baseWeekdays = countAdminEmployeeWeekdaysInRange(activeRange.start, activeRange.end);
+    const holidayDays = countAdminEmployeeHolidayWeekdays(holidayRes.data || [], monthRange, activeRange);
+    const leaveDays = roundAdminEmployeeWorkMetric((Array.isArray(leaveDocs) ? leaveDocs : []).reduce((sum, doc) => {
+        return sum + calculateAdminEmployeeLeaveDaysInMonth(doc, monthRange);
+    }, 0));
+    const workDays = Math.max(0, roundAdminEmployeeWorkMetric(baseWeekdays - holidayDays - leaveDays));
+    const workHours = Math.max(0, roundAdminEmployeeWorkMetric(workDays * 8));
+
+    return { baseWeekdays, holidayDays, leaveDays, workDays, workHours };
+}
+
+function buildAdminEmployeeSalaryWorkMetaSummary(workMeta) {
+    const meta = workMeta || {};
+    return `기본값: 평일 ${formatAdminEmployeeWorkMetricInput(meta.baseWeekdays)}일 - 공휴일 ${formatAdminEmployeeWorkMetricInput(meta.holidayDays)}일 - 승인 휴가 ${formatAdminEmployeeWorkMetricInput(meta.leaveDays)}일 = 근로일수 ${formatAdminEmployeeWorkMetricInput(meta.workDays)}일 / 근로시간 ${formatAdminEmployeeWorkMetricInput(meta.workHours)}시간`;
+}
+
+function resolveAdminEmployeeSavedWorkHours(savedHours, workDays) {
+    const numericSaved = Number(savedHours);
+    if (Number.isFinite(numericSaved) && numericSaved !== 0) {
+        return roundAdminEmployeeWorkMetric(numericSaved);
+    }
+    return roundAdminEmployeeWorkMetric(workDays * 8);
+}
+
 // [수정] 급여 확정 및 저장 (연도별 요율 적용)
 async function saveSalary() {
     const month = document.getElementById("salaryMonth").value; 
@@ -3491,6 +3774,13 @@ async function saveSalary() {
     const p_car = Number(document.getElementById("payCar").value); 
     const p_child = Number(document.getElementById("payChild").value); 
     const p_bonus = Number(document.getElementById("payBonus").value);
+    const workDescription = String(document.getElementById("workDescription").value || '').trim();
+    const workDays = roundAdminEmployeeWorkMetric(document.getElementById("workDays").value);
+    const workHours = roundAdminEmployeeWorkMetric(document.getElementById("workHours").value);
+
+    if (workDays < 0 || workHours < 0) {
+        return showAlert("근로일수와 근로시간은 0 이상이어야 합니다.");
+    }
     
     const p_total = p_basic + p_meal + p_car + p_child + p_bonus;
 
@@ -3526,7 +3816,10 @@ async function saveSalary() {
         ded_pension: pen, ded_health: hlt, ded_care: care, ded_employ: emp, 
         ded_income: inc, ded_local: loc, 
         ded_total: pen+hlt+care+emp+inc+loc, 
-        net_pay: p_total-(pen+hlt+care+emp+inc+loc) 
+        net_pay: p_total-(pen+hlt+care+emp+inc+loc),
+        work_description: workDescription,
+        work_days: workDays,
+        work_hours: workHours
     };
 
     // [6] Insert or Update 실행
@@ -4080,9 +4373,11 @@ async function getTaxRates(year) {
     } 
     // 2. 현재 또는 미래 데이터라면 (원본 테이블 조회)
     else {
-        const response = await scopeEmployeeTenant(_supabase
-            .from('ref_settings'))
-            .select('item_key, item_value');
+        const response = await scopeEmployeeTenant(
+            _supabase
+                .from('ref_settings')
+                .select('item_key, item_value')
+        );
         data = response.data;
         error = response.error;
     }
