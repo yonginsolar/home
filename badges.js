@@ -1,5 +1,5 @@
-/* Version: v1.0.3
-Change: 2026-03-29 - Escape dataset-derived badge info before rendering selected badge details.
+/* Version: v1.0.4
+Change: 2026-03-31 - Expose Badges on window/globalThis so duplicate loader checks do not reinsert the same script.
 */
 /**
  * badges.js
@@ -308,3 +308,10 @@ const Badges = {
         }
     }
 };
+
+if (typeof window !== "undefined") {
+    window.Badges = Badges;
+}
+if (typeof globalThis !== "undefined") {
+    globalThis.Badges = Badges;
+}
