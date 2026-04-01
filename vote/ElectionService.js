@@ -1,6 +1,6 @@
 /*
-Version: v1.0.19
-Change: 2026-03-17 - Re-export shared Supabase client for vote entry pages.
+Version: v1.0.20
+Change: 2026-04-01 - Resolve the active member profile by auth_user_id within the current host coop instead of assuming coop_members.id = auth.uid().
 */
 import { supabase } from '../shared/supabase-client.js';
 export { supabase };
@@ -16,6 +16,44 @@ async function getRuntimeCoopId() {
     }
     cachedRuntimeCoopId = data || null;
     return cachedRuntimeCoopId;
+}
+
+function getStoredActiveProfileId() {
+    try {
+        return String(window.sessionStorage?.getItem('lastActiveProfile') || '').trim();
+    } catch (_) {
+        return '';
+    }
+}
+
+export async function resolveCurrentMemberProfileId(authUserId, coopId) {
+    const safeAuthUserId = String(authUserId || '').trim();
+    const safeCoopId = String(coopId || '').trim();
+    if (!safeAuthUserId || !safeCoopId) return null;
+
+    const storedProfileId = getStoredActiveProfileId();
+    if (storedProfileId) {
+        const { data: storedProfile } = await scopeByTenant(supabase
+            .from('coop_members')
+            .select('id'), safeCoopId)
+            .eq('id', storedProfileId)
+            .maybeSingle();
+        if (storedProfile?.id) return storedProfile.id;
+    }
+
+    const { data: linkedProfile } = await scopeByTenant(supabase
+        .from('coop_members')
+        .select('id'), safeCoopId)
+        .eq('auth_user_id', safeAuthUserId)
+        .maybeSingle();
+    if (linkedProfile?.id) return linkedProfile.id;
+
+    const { data: legacyProfile } = await scopeByTenant(supabase
+        .from('coop_members')
+        .select('id'), safeCoopId)
+        .eq('id', safeAuthUserId)
+        .maybeSingle();
+    return legacyProfile?.id || null;
 }
 
 function withTenantPayload(payload, coopId) {
@@ -127,12 +165,16 @@ export class ElectionService {
 
         this.currentUser = user;
         this.currentCoopId = await getRuntimeCoopId();
+        const resolvedProfileId = await resolveCurrentMemberProfileId(user.id, this.currentCoopId);
+        if (!resolvedProfileId) {
+            throw new Error('현재 조합에서 연결된 조합원 정보를 찾을 수 없습니다.');
+        }
         
         // 1-2. 조합원 상세 정보 가져오기
         const { data: profile, error: profileError } = await scopeByTenant(supabase
             .from('coop_members')
             .select('*'), this.currentCoopId)
-            .eq('id', user.id)
+            .eq('id', resolvedProfileId)
             .single();
 
         if (profileError) {

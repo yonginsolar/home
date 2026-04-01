@@ -1,12 +1,56 @@
 /*
-Version: v1.0.3
-Change: Preserve the currently served host for ERP app URLs so public-host /erp deployments do not drift to a synthesized bare domain.
+Version: v1.1.2
+Change: Keep localhost public QA paths from being mis-remapped into /erp/* while preserving localhost-only public host override support.
 */
 (function attachCoopRouteGuard(global) {
   'use strict';
 
+  const LOCAL_PUBLIC_HOST_PARAM = 'public_host';
+  const LOCAL_PUBLIC_HOST_OVERRIDE_KEY = 'local_public_host_override_v1';
+
   function isLocalHostname(hostname) {
     return hostname === 'localhost' || hostname === '127.0.0.1';
+  }
+
+  function normalizeHostname(hostname) {
+    return String(hostname || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\.$/, '');
+  }
+
+  function readLocalPublicHostOverride(locationLike) {
+    const loc = locationLike || global.location;
+    const actualHost = normalizeHostname(loc && loc.hostname);
+    if (!isLocalHostname(actualHost)) return '';
+
+    let queryOverride = '';
+    try {
+      const params = new URLSearchParams(String(loc.search || ''));
+      queryOverride = normalizeHostname(params.get(LOCAL_PUBLIC_HOST_PARAM));
+    } catch (_) {
+      queryOverride = '';
+    }
+
+    if (queryOverride && !isLocalHostname(queryOverride)) {
+      try {
+        global.localStorage?.setItem(LOCAL_PUBLIC_HOST_OVERRIDE_KEY, queryOverride);
+      } catch (_) {}
+      return queryOverride;
+    }
+
+    try {
+      const stored = normalizeHostname(global.localStorage?.getItem(LOCAL_PUBLIC_HOST_OVERRIDE_KEY));
+      if (stored && !isLocalHostname(stored)) return stored;
+    } catch (_) {}
+
+    return '';
+  }
+
+  function clearLocalPublicHostOverride() {
+    try {
+      global.localStorage?.removeItem(LOCAL_PUBLIC_HOST_OVERRIDE_KEY);
+    } catch (_) {}
   }
 
   function getBaseHostname(hostname) {
@@ -19,7 +63,7 @@ Change: Preserve the currently served host for ERP app URLs so public-host /erp 
   function buildSiteOrigins(locationLike) {
     const loc = locationLike || global.location;
     const protocol = loc.protocol || 'https:';
-    const hostname = String(loc.hostname || '').trim();
+    const hostname = normalizeHostname(loc.hostname);
     const pathname = String(loc.pathname || '').trim();
     const port = loc.port ? `:${loc.port}` : '';
     const origins = new Set([loc.origin]);
@@ -69,6 +113,7 @@ Change: Preserve the currently served host for ERP app URLs so public-host /erp 
     const origins = buildSiteOrigins(locationLike);
     const path = String(dest.pathname || '').trim();
     const erpBaseUrl = String(origins.erpBaseUrl || '').trim();
+    const hasDistinctErpOrigin = String(origins.erpOrigin || '') !== String(origins.currentOrigin || '');
     const isLegacyPublicErpPath = (
       dest.origin === origins.publicOrigin ||
       dest.origin === origins.bareOrigin ||
@@ -83,7 +128,7 @@ Change: Preserve the currently served host for ERP app URLs so public-host /erp 
       return mapped;
     }
 
-    const isLegacyErpOriginPath = dest.origin === origins.erpOrigin;
+    const isLegacyErpOriginPath = hasDistinctErpOrigin && dest.origin === origins.erpOrigin;
     if (!isLegacyErpOriginPath || !erpBaseUrl) return dest;
 
     const mapped = new URL(erpBaseUrl);
@@ -126,6 +171,33 @@ Change: Preserve the currently served host for ERP app URLs so public-host /erp 
   function normalizeDestination(raw, options) {
     const dest = tryNormalizeDestination(raw, Object.assign({}, options, { returnFallback: true }));
     return dest ? dest.href : buildFallbackUrl((options || {}).fallback, (options || {}).currentLocation || global.location).href;
+  }
+
+  function getPublicRuntimeHost(locationLike) {
+    const loc = locationLike || global.location;
+    const actualHost = normalizeHostname(loc && loc.hostname);
+    const localOverride = readLocalPublicHostOverride(loc);
+    return localOverride || actualHost;
+  }
+
+  function buildSupabaseGlobalHeaders(locationLike, extraHeaders) {
+    const headers = Object.assign({}, extraHeaders || {});
+    const host = getPublicRuntimeHost(locationLike);
+    if (host) headers['x-public-host'] = host;
+    return headers;
+  }
+
+  function createSupabaseClient(supabaseLib, url, key, options) {
+    if (!supabaseLib || typeof supabaseLib.createClient !== 'function') {
+      throw new Error('SUPABASE_LIB_REQUIRED');
+    }
+    const opts = Object.assign({}, options || {});
+    const currentLocation = opts.currentLocation || global.location;
+    const globalOptions = Object.assign({}, opts.global || {});
+    globalOptions.headers = buildSupabaseGlobalHeaders(currentLocation, globalOptions.headers);
+    opts.global = globalOptions;
+    delete opts.currentLocation;
+    return supabaseLib.createClient(url, key, opts);
   }
 
   function buildSiblingPageUrl(pageName, extraParams, options) {
@@ -179,7 +251,12 @@ Change: Preserve the currently served host for ERP app URLs so public-host /erp 
     buildSiteOrigins,
     buildSiblingPageUrl,
     buildAppPageUrl,
+    buildSupabaseGlobalHeaders,
+    createSupabaseClient,
+    clearLocalPublicHostOverride,
+    getPublicRuntimeHost,
     isErpDestination,
+    normalizeHostname,
     normalizeDestination,
     remapLegacyErpPathDestination,
     tryNormalizeDestination

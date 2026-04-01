@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.46
-Change: 2026-03-31 - Add payroll bulk Excel import flow with saved header mapping, preview validation, and monthly hr_salary upsert.
+Version: v1.0.47
+Change: 2026-04-01 - Carry forward the most recent work description into a new payroll month when no saved row exists yet.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.46 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.47 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -4215,6 +4215,7 @@ async function loadSalaryData() {
         console.warn('Salary work meta default load failed:', workMetaError?.message || workMetaError);
         setSalaryWorkMetaHelpText('근로일수 기본값을 계산하지 못했습니다. 직접 입력 후 저장할 수 있습니다.');
     }
+    const recentWorkDescription = await getAdminEmployeeRecentWorkDescription(currentEmpId, month);
 
     // --- (기존 로직: 무급휴가 감지 부분은 그대로 유지) ---
     const startDate = `${month}-01`;
@@ -4299,7 +4300,7 @@ async function loadSalaryData() {
         
         badge.innerText = "미저장 (자동계산)";
         badge.className = "badge bg-secondary";
-        workDescriptionInput.value = '';
+        workDescriptionInput.value = recentWorkDescription;
         workDaysInput.value = formatAdminEmployeeWorkMetricInput(workMetaDefaults.workDays);
         workHoursInput.value = formatAdminEmployeeWorkMetricInput(workMetaDefaults.workHours);
         markSalaryWorkHoursAutoDerived(true);
@@ -4569,6 +4570,28 @@ function resolveAdminEmployeeSavedWorkHours(savedHours, workDays) {
         return roundAdminEmployeeWorkMetric(numericSaved);
     }
     return roundAdminEmployeeWorkMetric(workDays * 8);
+}
+
+async function getAdminEmployeeRecentWorkDescription(empId, month) {
+    const safeEmpId = Number(empId);
+    const safeMonth = String(month || '').trim();
+    if (!Number.isFinite(safeEmpId) || !safeMonth) return '';
+
+    const { data, error } = await _supabase.from('hr_salary')
+        .select('work_description, year_month')
+        .eq('coop_id', getAdminEmployeeScopedCoopId())
+        .eq('emp_id', safeEmpId)
+        .lt('year_month', safeMonth)
+        .order('year_month', { ascending: false })
+        .limit(120);
+
+    if (error) {
+        console.warn('Recent work description load failed:', error.message || error);
+        return '';
+    }
+
+    const recentRow = (data || []).find((row) => String(row?.work_description || '').trim());
+    return recentRow ? String(recentRow.work_description || '').trim() : '';
 }
 
 // [수정] 급여 확정 및 저장 (연도별 요율 적용)

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.17
-Change: 2026-03-29 - Read coop branding from tenant company key/value rows instead of a missing ref_company_info.company_name column.
+Version: v1.0.18
+Change: 2026-04-01 - Resolve the active member profile within the current host coop instead of assuming auth.uid() matches coop_members.id.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>후보자 등록 신청</title>
-    <script>console.log('[Version] v1.0.17 | candidate_apply.html');</script>
+    <script>console.log('[Version] v1.0.18 | candidate_apply.html');</script>
     <script src="../telegram_bot.js"></script>
     <link rel="stylesheet" href="style.css">
 <style>
@@ -646,7 +646,7 @@ Change: 2026-03-29 - Read coop branding from tenant company key/value rows inste
             } catch (e) {}
             return '';
         }
-    import { ElectionService, supabase } from './ElectionService.js';
+    import { ElectionService, supabase, resolveCurrentMemberProfileId } from './ElectionService.js';
 
     const service = new ElectionService();
     const KST_TZ_CANDIDATE = 'Asia/Seoul';
@@ -895,8 +895,7 @@ Change: 2026-03-29 - Read coop branding from tenant company key/value rows inste
             }
 
             // [신규] membermanage에서 활성 프로필 (개인/단체) ID를 가져옴
-            const activeProfileId = sessionStorage.getItem('lastActiveProfile');
-            const targetMemberId = activeProfileId || currentUser.id; // 세션에 없으면 기본 Auth ID 사용
+            const targetMemberId = await resolveCurrentMemberProfileId(authUser?.id || currentUser?.id, currentCoopId) || currentUser.id;
 
             // 3. 사용자 정보 보강 (선택된 활성 프로필로 조회)
             const { data: memberInfo } = await scopeByTenant(

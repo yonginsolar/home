@@ -21,7 +21,7 @@ Change: Restore localhost social signup by using an exact local auth callback UR
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
-<script src="shared/route_guard.js?v=20260328-2"></script>
+<script src="shared/route_guard.js?v=20260401-1"></script>
 <style>
 /* [CSS 추가] 가입 완료 모달 스타일 */
 .center-modal {
@@ -360,21 +360,31 @@ let currentTermType = null;
 // [1] 슈퍼베이스 설정
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k'; 
-const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const _supabase = window.CoopRouteGuard?.createSupabaseClient
+? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
+: supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let joinSubmitInFlight = false;
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
 let signupTenant = null;
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
+const { data: contextData, error: contextError } = await _supabase.rpc('get_public_signup_context');
+const contextResolved = Array.isArray(contextData) ? contextData[0] : contextData;
+if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
+signupTenant = contextResolved;
+applySignupTenantBranding();
+return contextResolved;
+}
+
 const coopCode = getSignupCoopCodeFromLocation();
-if (!coopCode) throw new Error('SIGNUP_COOP_CONTEXT_MISSING');
+if (!coopCode) throw contextError || new Error('SIGNUP_COOP_CONTEXT_MISSING');
 
 const { data, error } = await _supabase.rpc('resolve_public_signup_coop', { p_coop_code: coopCode });
 const resolved = Array.isArray(data) ? data[0] : data;
 
 if (error || !resolved?.coop_id || !resolved?.coop_name) {
-throw error || new Error('SIGNUP_COOP_NOT_FOUND');
+throw error || contextError || new Error('SIGNUP_COOP_NOT_FOUND');
 }
 
 signupTenant = resolved;

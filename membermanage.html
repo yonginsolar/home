@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.64
-Change: 2026-03-29 - Stabilize initial member portal branding and keep duplicate name/email fields out of expanded profile details.
+Version: v1.0.65
+Change: 2026-04-01 - Hide disabled module links for general members while leaving admin-only entry visibility for status awareness.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.64 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.65 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -26,7 +26,7 @@ Change: 2026-03-29 - Stabilize initial member portal branding and keep duplicate
 <script src="badges.js"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
-<script src="shared/route_guard.js?v=20260329-3"></script>
+<script src="shared/route_guard.js?v=20260401-1"></script>
 
 <link href="style.css" rel="stylesheet">
 
@@ -1228,6 +1228,7 @@ const SESSION_EXPIRED_NOTICE_KEY = 'member_session_expired_notice_v1';
 let _supabase = null;
 let curMem = null;
 let curAuth = null;
+let rootMemberProfileId = null;
 let pendingLoginOtpEmail = '';
 let currentBoardLimit = 20;
 let isBoardLoading = false;
@@ -1330,7 +1331,9 @@ showSessionExpiredNoticeOnce();
 }
 
 try {
-_supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+_supabase = window.CoopRouteGuard?.createSupabaseClient
+? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
+: supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 window._client = _supabase;
 // [보안] 간단 HTML 이스케이프
 function escapeHtml(value = '') {
@@ -1397,7 +1400,7 @@ console.error("세션 복구 실패:", error);
 // [신규] 스마트 새로고침: 현재 보고 있는 프로필을 유지하며 데이터 갱신
 async function reloadDashboard() {
 // 1. 보고 있던 계정(curMem)이 있으면 그 ID, 없으면 로그인 계정(curAuth) ID 사용
-const targetId = (curMem && curMem.id) ? curMem.id : (curAuth ? curAuth.id : null);
+const targetId = getPreferredDashboardProfileId();
 
 if (targetId) {
 await loadDashboardData(targetId);
@@ -1861,7 +1864,7 @@ return dest.href;
 		    if (!_supabase || !curAuth || !curAuth.id || !profileUid) return;
 
 		    // 본인은 기존 로직(ensureLoginBadgesGranted)에서 처리
-		    if (profileUid === curAuth.id) return;
+		    if (profileUid === getRootMemberProfileId()) return;
 
 		    const key = `profile_badges_granted:${curAuth.id}:${profileUid}`;
 		    if (sessionStorage.getItem(key) === '1') return;
@@ -1907,6 +1910,8 @@ return dest.href;
 		return;
 		}
 
+		rootMemberProfileId = claimRes.profile_id || null;
+
 		await ensureLoginBadgesGranted();
 
 		const returnUrl = getSafeLoginReturnUrl();
@@ -1921,13 +1926,13 @@ return dest.href;
 		document.getElementById('headerLogoutBtn').classList.remove('hidden');
 
 		const lastProfileId = sessionStorage.getItem('lastActiveProfile');
-		const targetUuid = lastProfileId ? lastProfileId : user.id;
+		const targetUuid = lastProfileId ? lastProfileId : (claimRes.profile_id || user.id);
 
 		await loadDashboardData(targetUuid, { rethrowOnError: true });
 		syncSocialLinkButtons();
 
 		if (typeof loadManagedProfiles === 'function') {
-		await loadManagedProfiles(user.id);
+		await loadManagedProfiles(rootMemberProfileId || claimRes.profile_id || user.id);
 		}
 		} catch (error) {
 		console.error('handleLoginSuccess failed:', error);
@@ -2173,8 +2178,12 @@ showModal("오류 발생: " + error.message);
 	document.getElementById('manualMatchModal').style.display = 'none';
 	showModal("🎉 반갑습니다! 정보를 찾았습니다.\n계정이 성공적으로 연결되었습니다.");
 	document.getElementById('headerLogoutBtn').classList.remove('hidden');
+	rootMemberProfileId = data.profile_id || rootMemberProfileId;
 	await ensureLoginBadgesGranted();
-	await loadDashboardData(curAuth.id);
+	await loadDashboardData(data.profile_id || getPreferredDashboardProfileId());
+	if (typeof loadManagedProfiles === 'function') {
+	await loadManagedProfiles(getRootMemberProfileId() || data.profile_id || (curAuth ? curAuth.id : null));
+	}
 	} else {
 	await handleManualLinkFailure(contact, document.getElementById('typePhone').checked, data);
 	}
@@ -2328,7 +2337,7 @@ if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
 	await Badges.render('badgeContainer', uuid, _supabase);
 
 	// 가입 N주년 체크 RPC는 self-only라(보안) 프로필 전환 상태에선 호출하지 않음
-	if (curAuth && curAuth.id && uuid === curAuth.id) {
+	if (getRootMemberProfileId() && uuid === getRootMemberProfileId()) {
 	Badges.checkAnniversary(curMem, _supabase);
 	}
 	}
@@ -2518,6 +2527,29 @@ const MEMBERMANAGE_BRANDING_CACHE_KEY = 'membermanage_branding_name';
 const DEFAULT_MEMBERMANAGE_COOP_NAME = '용인모두의햇빛협동조합';
 let currentMemberCoopName = String(localStorage.getItem(MEMBERMANAGE_BRANDING_CACHE_KEY) || '').trim() || DEFAULT_MEMBERMANAGE_COOP_NAME;
 
+function isMemberPortalAdmin(member) {
+return !!(member && member.role === 'admin');
+}
+
+function shouldShowModuleEntryToMember(moduleKey, member) {
+return isCoopRuntimeModuleEnabled(moduleKey) || isMemberPortalAdmin(member);
+}
+
+function setQuickCardButtonState(cardEl, options = {}) {
+if (!cardEl) return;
+const descEl = cardEl.querySelector('.quick-desc');
+const btnEl = cardEl.querySelector('.quick-btn');
+if (descEl && typeof options.descText === 'string') {
+descEl.textContent = options.descText;
+}
+if (btnEl) {
+if (typeof options.buttonText === 'string') btnEl.textContent = options.buttonText;
+if (typeof options.buttonClassName === 'string' && options.buttonClassName.trim()) {
+btnEl.className = options.buttonClassName.trim();
+}
+}
+}
+
 async function getCurrentMemberCoopId() {
 if (currentMemberCoopId) return currentMemberCoopId;
 try {
@@ -2540,6 +2572,23 @@ if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return pa
 const safeCoopId = String(currentMemberCoopId || '').trim();
 if (!safeCoopId) return payload;
 return { ...payload, coop_id: safeCoopId };
+}
+
+function getRootMemberProfileId() {
+const raw = String(rootMemberProfileId || '').trim();
+return raw || null;
+}
+
+function getActiveMemberProfileId() {
+const fromMemory = String(curMem?.id || '').trim();
+if (fromMemory) return fromMemory;
+const fromSession = String(sessionStorage.getItem('lastActiveProfile') || '').trim();
+if (fromSession) return fromSession;
+return getRootMemberProfileId();
+}
+
+function getPreferredDashboardProfileId() {
+return getActiveMemberProfileId() || getRootMemberProfileId() || (curAuth ? curAuth.id : null);
 }
 
 function setProfileDetailsExpanded(expanded) {
@@ -2976,17 +3025,31 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
 };
 
-if (!isCoopRuntimeModuleEnabled('vote')) {
-setQuickCardVisible(voteCard, false);
-setQuickCardTodoState(voteCard, voteBadge, false);
-return;
-}
-
 // 1. 관리자/선관위 여부
-const isAdmin = (member && member.role === 'admin');
+const isAdmin = isMemberPortalAdmin(member);
 const isCommittee = myRoles && myRoles.includes('election_comm');
 const isPrivileged = !!(isAdmin || isCommittee);
 const memberUuid = member && member.id ? member.id : null;
+
+if (!isCoopRuntimeModuleEnabled('vote')) {
+if (isAdmin) {
+setQuickCardVisible(voteCard, true);
+setQuickCardTodoState(voteCard, voteBadge, false);
+setVoteQuickCardContent({
+electionTitle: '',
+stageText: '모듈 비활성',
+descText: '현재 조합에서 선거/투표 모듈이 꺼져 있습니다.',
+metaLines: ['ERP 모듈 설정에서 선거/투표 사용 여부를 확인하세요.'],
+buttonLabel: '모듈 상태 확인',
+actionUrl: 'vote/vote_login.html',
+buttonType: 'secondary'
+});
+} else {
+setQuickCardVisible(voteCard, false);
+setQuickCardTodoState(voteCard, voteBadge, false);
+}
+return;
+}
 
 // 2. 조건에 맞는 선거 조회
 const targetStatuses = ['NOMINATION', 'READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED', 'ENDED'];
@@ -3190,11 +3253,15 @@ setVal('editBizNo', member.business_number); // 수정창에도 값 세팅
 setText('viewCorpNoBox', member.corp_number || '-');
 setVal('editCorpNo', member.corp_number);    // 수정창에도 값 세팅
 
-// 파트너 신청 버튼 보이기
+// 파트너 신청 버튼 노출: 일반 사용자는 모듈 켜진 경우만, 관리자는 비활성 상태도 확인 가능
 const btnPartner = document.getElementById('menuBtnPartner');
+const siteAdminEnabled = isCoopRuntimeModuleEnabled('site_admin');
 if(btnPartner) {
-btnPartner.classList.remove('hidden');
+const canShowPartner = !!(siteAdminEnabled || isMemberPortalAdmin(member));
+btnPartner.classList.toggle('hidden', !canShowPartner);
+if (canShowPartner && siteAdminEnabled) {
 loadPartnerInfo(member.member_id);
+}
 }
 } else {
 // [개인] 사업자번호 숨기고 생년월일 표시
@@ -3364,9 +3431,7 @@ async function hasUnreadDocumentBox(memberUuid) {
 
 async function markDocumentBoxSeen(memberUuid = null) {
     const targetId = memberUuid
-        || sessionStorage.getItem('lastActiveProfile')
-        || curMem?.id
-        || curAuth?.id
+        || getPreferredDashboardProfileId()
         || null;
     if (!targetId) return false;
 
@@ -3459,7 +3524,7 @@ async function hasPendingVoteTasks(memberUuid) {
 
 // [신규] 퀵 링크 카드 노출 제어
 function renderQuickLinks(member, myRoles, isOfficial, officialIds) {
-const isAdmin = (member && member.role === 'admin');
+const isAdmin = isMemberPortalAdmin(member);
 
 const voteCard = document.getElementById('quickVoteCard');
 const solarCard = document.getElementById('quickSolarCard');
@@ -3481,10 +3546,39 @@ const setQuickCardVisible = (cardEl, visible) => {
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 setQuickCardTodoState(minutesViewCard, docBadge, false);
 
+setQuickCardButtonState(minutesSignCard, {
+descText: '서명 요청 확인',
+buttonText: '서명하기',
+buttonClassName: 'quick-btn btn btn-primary'
+});
+setQuickCardButtonState(minutesViewCard, {
+descText: '공개 문서 보기',
+buttonText: '문서함 열기',
+buttonClassName: 'quick-btn btn btn-secondary'
+});
+
+if (!documentsEnabled && isAdmin) {
+setQuickCardVisible(minutesViewCard, true);
+setQuickCardButtonState(minutesViewCard, {
+descText: '현재 조합에서 문서함 모듈이 꺼져 있습니다.',
+buttonText: '모듈 상태 확인',
+buttonClassName: 'quick-btn btn btn-outline-secondary'
+});
+}
+
+if (!signatureEnabled && isAdmin) {
+setQuickCardVisible(minutesSignCard, true);
+setQuickCardButtonState(minutesSignCard, {
+descText: '현재 조합에서 전자서명 모듈이 꺼져 있습니다.',
+buttonText: '모듈 상태 확인',
+buttonClassName: 'quick-btn btn btn-outline-secondary'
+});
+}
+
 // 회의록 카드: 관리자=전체, 임원=서명+문서함, 조합원=문서함
 if (isAdmin) {
-setQuickCardVisible(minutesSignCard, signatureEnabled);
-setQuickCardVisible(minutesViewCard, documentsEnabled);
+setQuickCardVisible(minutesSignCard, shouldShowModuleEntryToMember('signature', member));
+setQuickCardVisible(minutesViewCard, shouldShowModuleEntryToMember('documents', member));
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
         setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
@@ -3800,7 +3894,7 @@ showLoading(false);
 if(error) showModal('취소 실패: ' + error.message);
 else {
 showModal('취소되었습니다.');
-loadDashboardData(curAuth.id);
+loadDashboardData(getPreferredDashboardProfileId());
 }
 });
 }
@@ -3837,14 +3931,18 @@ showLoading(true);
 
 try {
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+const activeProfileId = getActiveMemberProfileId();
 if (!coopId) {
 throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
+}
+if (!activeProfileId) {
+throw new Error('현재 조합원 프로필을 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
 }
 
 const { data: existingPending, error: pendingErr } = await scopeMemberTenant(_supabase
 .from('coop_applications'))
 .select('id')
-.eq('member_uid', curAuth.id)
+.eq('member_uid', activeProfileId)
 .eq('type', type)
 .eq('status', 'pending')
 .limit(1)
@@ -3859,7 +3957,7 @@ return;
 }
 
 const { error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
-member_uid: curAuth.id,
+member_uid: activeProfileId,
 member_id: curMem.member_id,
 name: curMem.name,
 type: type,
@@ -3998,6 +4096,11 @@ reloadDashboard();
 
 // [수정] 탭 전환 (감자 한도 체크 로직 포함)
 function toggleTab(type, btn) {
+if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
+showModal('현재 조합에서 홈페이지 관리 모듈 사용이 중지되었습니다.');
+return;
+}
+
 document.getElementById('tabPlaceholder').classList.add('hidden');
 // [수정] tabPartner 추가
 ['tabExtra', 'tabReduction', 'tabWithdraw', 'tabCert', 'tabPartner'].forEach(id => {
@@ -4456,7 +4559,7 @@ targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager
 // [개인 입장] 내가 관리하는 "단체"가 있는가? (1:1 원칙 체크)
 const { data: group } = await scopeMemberTenant(_supabase.from('coop_members')
 .select('id, name'))
-.eq('manager_id', curAuth.id)
+.eq('manager_id', getActiveMemberProfileId())
 .eq('member_type', '단체') // 단체만 체크 (자녀는 여러 명이어도 됨)
 .maybeSingle(); // 하나라도 있으면 가져옴
 
@@ -4538,7 +4641,7 @@ if (amIGroup) {
 // (RLS 정책에 따라 자기 자신 업데이트는 보통 허용됨)
 const { error: err } = await scopeMemberTenant(_supabase.from('coop_members')
 .update({ manager_id: null }))
-.eq('id', curAuth.id); // 내 ID 기준
+.eq('id', getActiveMemberProfileId()); // 내 프로필 기준
 error = err;
 } else {
 // [개인 입장] 내가 관리하던 단체의 manager_id 삭제
@@ -4557,9 +4660,9 @@ showModal('연결이 해제되었습니다.');
 document.getElementById('familyModalOverlay').style.display = 'none'; // 모달 닫기
 
 // 데이터 갱신 (대시보드 및 프로필 목록)
-await loadDashboardData(curAuth.id);
+await loadDashboardData(getPreferredDashboardProfileId());
 if (typeof loadManagedProfiles === 'function') {
-await loadManagedProfiles(curAuth.id);
+await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
 }
 }
 });
@@ -4698,10 +4801,14 @@ throw new Error('조합 정보를 확인하지 못했습니다. 다시 로그인
 }
 
 const requestReason = `Target: ${targetUuid}`;
+const activeProfileId = getActiveMemberProfileId();
+if (!activeProfileId) {
+throw new Error('현재 조합원 프로필을 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
+}
 const { data: existingPending, error: pendingErr } = await scopeMemberTenant(_supabase
 .from('coop_applications'))
 .select('id')
-.eq('member_uid', curAuth.id)
+.eq('member_uid', activeProfileId)
 .eq('type', 'connect')
 .eq('reason', requestReason)
 .eq('status', 'pending')
@@ -4717,7 +4824,7 @@ return;
 }
 
 const { error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
-member_uid: curAuth.id,
+member_uid: activeProfileId,
 member_id: curMem.member_id,
 name: curMem.name,
 type: 'connect', 
@@ -4732,7 +4839,7 @@ if(error) throw error;
 document.getElementById('familyModalOverlay').style.display = 'none';
 
 // 2. 데이터 갱신 (비동기)
-await loadDashboardData(curAuth.id);
+await loadDashboardData(getPreferredDashboardProfileId());
 
 // 3. [UX] 신청서 영역으로 부드럽게 스크롤 이동
 const actionArea = document.getElementById('actionArea');
@@ -4839,7 +4946,7 @@ const { data: existingFamily, error: familyErr } = await _supabase
 .from('coop_members')
 .select('id')
 .eq('coop_id', coopId)
-.eq('manager_id', curAuth.id)
+.eq('manager_id', getActiveMemberProfileId())
 .eq('rrn_display', maskedRrn)
 .limit(1)
 .maybeSingle();
@@ -4858,7 +4965,7 @@ throw new Error('조합 정보가 없어 구성원을 등록할 수 없습니다
 // 부모 정보 복사 + 필수값 설정
 const { error } = await _supabase.from('coop_members').insert({
 coop_id: coopId,
-manager_id: curAuth.id, // 부모 UUID 연결
+manager_id: getActiveMemberProfileId(), // 부모 UUID 연결
 name: name,
 rrn_display: maskedRrn, // 마스킹 저장
 phone: phone,
@@ -4871,7 +4978,7 @@ if(error) throw error;
 
 showModal('등록되었습니다.');
 document.getElementById('familyModalOverlay').style.display = 'none';
-loadFamilyList(curAuth.id);
+loadFamilyList(getActiveMemberProfileId());
 } catch (error) {
 showModal('등록 실패: ' + error.message);
 } finally {
@@ -5131,7 +5238,7 @@ fileArea.appendChild(link);
 
 // 4. 버튼 권한 (작성자 확인)
 const writerId = post.author_id; 
-const isMine = (curAuth && writerId && curAuth.id === writerId);
+const isMine = !!(writerId && writerId === getActiveMemberProfileId());
 
 // 현재 보고 있는 글 ID 전역 저장 (신고/삭제용)
 window.currentPostId = id; 
@@ -5162,12 +5269,17 @@ document.getElementById('boardViewModal').style.display = 'flex';
 
 // 1. 관리 가능한 프로필 목록 로드 및 UI 생성
 // [디버깅용] 관리 가능한 프로필 목록 로드 및 UI 생성
-async function loadManagedProfiles(myAuthId) {
+async function loadManagedProfiles(managerProfileId) {
 const switcher = document.getElementById('profileSwitcher');
 const menu = document.getElementById('profileListMenu');
+const rootProfileId = managerProfileId || getRootMemberProfileId();
+if (!rootProfileId) {
+switcher.classList.add('hidden');
+return;
+}
 
 // (1) 본인 계정 정보
-const { data: me, error: errMe } = await scopeMemberTenant(_supabase.from('coop_members').select('id, name, member_type')).eq('id', myAuthId).single();
+const { data: me, error: errMe } = await scopeMemberTenant(_supabase.from('coop_members').select('id, name, member_type')).eq('id', rootProfileId).single();
 if(errMe) console.error("❌ 내 정보 조회 실패:", errMe);
 
 // (2) 내가 관리자인 계정들 가져오기 (manager_id가 나인 경우)
@@ -5175,7 +5287,7 @@ const { data: subProfiles, error: errSub } = await _supabase
 .from('coop_members')
 .select('id, name, member_type')
 .eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
-.eq('manager_id', myAuthId); // ★ 여기가 핵심
+.eq('manager_id', rootProfileId); // ★ 여기가 핵심
 
 if(errSub) console.error("❌ 서브 계정 조회 에러:", errSub);
 
@@ -5191,7 +5303,7 @@ const allProfiles = [me, ...subProfiles];
 
 allProfiles.forEach(p => {
 if(!p) return;
-const isMe = p.id === myAuthId;
+const isMe = p.id === rootProfileId;
 const badge = p.member_type === '단체' ? '<span class="badge bg-info ms-1">단체</span>' : '';
 const activeClass = (curMem && curMem.id === p.id) ? 'active' : ''; 
 const safeProfileId = escapeJsString(p.id || '');
@@ -5222,7 +5334,7 @@ showLoading(true, `${targetName} 님으로 전환 중...`);
 await loadDashboardData(targetUuid);
 
 // 스위처 UI 다시 그리기 (Active 상태 변경을 위해)
-await loadManagedProfiles(curAuth.id);
+await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
 
 showModal(`'${targetName}' 계정으로 전환되었습니다.\n이제 이 명의로 활동합니다.`);
 }
@@ -5373,11 +5485,11 @@ showModal(`${actionText}되었습니다.`);
 
 // ★ 1번 해결: 승인했다면 내가 관리할 수 있는 프로필 목록을 갱신해야 함
 if(decision === 'approve') {
-await loadManagedProfiles(curAuth.id);
+await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
 }
 
 // 알림 제거 및 데이터 갱신
-loadDashboardData(curAuth.id); 
+loadDashboardData(getPreferredDashboardProfileId()); 
 const alertDiv = document.getElementById('connectRequestAlert');
 if(alertDiv) alertDiv.remove();
 }
@@ -5550,7 +5662,7 @@ document.getElementById('customModalOverlay').style.display = 'none';
 showLoading(true, '가입 처리 중...');
 
 const params = {
-p_manager_id: curAuth.id, // 부모 UUID
+p_manager_id: getActiveMemberProfileId(), // 부모 UUID
 p_name: tempChildData.name,
 p_rrn_display: `${tempChildData.rrn1}-${tempChildData.rrn2}******`,
 p_phone: null,   // 자녀 폰번호 없음 (독립 시 입력)
@@ -5574,9 +5686,9 @@ showModal('🎉 가입이 완료되었습니다!\n(출자금 입금 및 관리�
 document.getElementById('familyModalOverlay').style.display = 'none';
 
 // 목록 갱신
-loadDashboardData(curAuth.id);
+loadDashboardData(getPreferredDashboardProfileId());
 if (typeof loadManagedProfiles === 'function') {
-loadManagedProfiles(curAuth.id);
+loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
 }
 }
 }
@@ -5921,7 +6033,7 @@ closeModifyModal(); // 모달 닫기
 // RPC 호출
 const { data, error } = await _supabase.rpc('modify_application', {
 p_app_id: appId,
-p_user_uid: curAuth.id, // 보안 확인용
+p_user_uid: getActiveMemberProfileId(), // 보안 확인용
 p_new_amount: newAmount,
 p_new_reason: null // 사유 수정은 UI가 복잡해지니 일단 null (기존 유지)
 });
@@ -6051,7 +6163,7 @@ if (!isCoopRuntimeModuleEnabled('documents')) {
 showModal("현재 조합에서 문서함 모듈 사용이 중지되었습니다.");
 return;
 }
-const targetId = sessionStorage.getItem('lastActiveProfile') || curMem?.id || curAuth?.id || null;
+const targetId = getPreferredDashboardProfileId();
 await markDocumentBoxSeen(targetId);
 window.location.href = 'minutes/minutes_view.html';
 }

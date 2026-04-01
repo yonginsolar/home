@@ -57,6 +57,13 @@ async function getMemberByEmail(email) {
 async function getMemberByAuthId(uid) {
     if (!uid) return null;
     const coopId = await getVisibleCoopId();
+    const { data: byAuthUserId, error: authUserIdError } = await scopeByCoop(supabase
+        .from('coop_members')
+        .select('id, role, member_id, name, email')
+        .eq('auth_user_id', uid)
+        .maybeSingle(), coopId);
+    if (!authUserIdError && byAuthUserId) return byAuthUserId;
+
     const { data, error } = await scopeByCoop(supabase
         .from('coop_members')
         .select('id, role, member_id, name, email')
