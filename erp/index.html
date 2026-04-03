@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.36 -->
+<!-- Version: v1.0.37 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.36 | index.html');</script>
+  <script>console.log('[Version] v1.0.37 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -18,7 +18,8 @@
   </script>
   <script src="/shared/browser_env_guard.js?v=20260402-1"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="/shared/route_guard.js?v=20260329-3"></script>
+  <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
+  <script src="/shared/route_guard.js?v=20260403-1"></script>
   
   <style>
     body { 
@@ -278,16 +279,22 @@
 <script>
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
-const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: {
+        headers: {
+            'x-erp-host': String(window.location.hostname || '').trim().toLowerCase()
+        }
+    }
+});
 const ERP_ROUTE_ORIGINS = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : {
     currentOrigin: window.location.origin,
     publicOrigin: window.location.origin,
     erpOrigin: window.location.origin,
     bareOrigin: window.location.origin,
-    erpBaseUrl: new URL('/erp/', `${window.location.origin}/`).href
+    erpBaseUrl: new URL('/', `${window.location.origin}/`).href
 };
 const ERP_PUBLIC_BASE_URL = String(ERP_ROUTE_ORIGINS.publicOrigin || window.location.origin).replace(/\/+$/, '');
-const ERP_RUNTIME_BASE_URL = String(ERP_ROUTE_ORIGINS.erpBaseUrl || new URL('/erp/', `${window.location.origin}/`).href).replace(/\/+$/, '');
+const ERP_RUNTIME_BASE_URL = String(ERP_ROUTE_ORIGINS.erpBaseUrl || new URL('/', `${window.location.origin}/`).href).replace(/\/+$/, '');
 const ERP_SOCIAL_AUTH_CALLBACK_URL = new URL('auth_callback.html', `${ERP_RUNTIME_BASE_URL}/`).href;
 const ERP_INDEX_URL = new URL('index.html', `${ERP_RUNTIME_BASE_URL}/`).href;
 const ERP_AUTH_DEST_KEY = 'erp_auth_destination';
@@ -1103,11 +1110,15 @@ async function loadUserInfo(user) {
         showScreen('loginForm'); 
         return;
     }
-    let { data, error } = await _supabase
-        .from('ref_employees')
-        .select('*')
-        .eq('auth_user_id', authUserId)
-        .maybeSingle();
+    let data = null;
+    let error = null;
+    try {
+        const boundEmployeeResult = await _supabase.rpc('erp_get_bound_login_employee');
+        data = boundEmployeeResult?.data || null;
+        error = boundEmployeeResult?.error || null;
+    } catch (boundEmployeeException) {
+        error = boundEmployeeException;
+    }
 
     if (!data && isSocialLoginUser(user)) {
         await handleDirectSocialLoginPolicy(user);
@@ -1119,10 +1130,7 @@ async function loadUserInfo(user) {
             const { data: recoveryData, error: recoveryError } = await _supabase.rpc('erp_resolve_login_employee');
             if (!recoveryError && recoveryData?.ok === true) {
                 const retry = await _supabase
-                    .from('ref_employees')
-                    .select('*')
-                    .eq('auth_user_id', authUserId)
-                    .maybeSingle();
+                    .rpc('erp_get_bound_login_employee');
                 data = retry.data || null;
                 error = retry.error || null;
             } else if (await handleSocialLoginRecoveryFailure(user, recoveryData)) {

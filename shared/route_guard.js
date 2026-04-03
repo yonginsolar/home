@@ -1,6 +1,6 @@
 /*
-Version: v1.1.2
-Change: Keep localhost public QA paths from being mis-remapped into /erp/* while preserving localhost-only public host override support.
+Version: v1.1.3
+Change: Respect explicit ERP app context so custom ERP-only domains keep root-based ERP paths instead of forcing /erp/* remaps.
 */
 (function attachCoopRouteGuard(global) {
   'use strict';
@@ -17,6 +17,12 @@ Change: Keep localhost public QA paths from being mis-remapped into /erp/* while
       .trim()
       .toLowerCase()
       .replace(/\.$/, '');
+  }
+
+  function getRouteAppHint() {
+    return String(global.__COOP_ROUTE_APP__ || '')
+      .trim()
+      .toLowerCase();
   }
 
   function readLocalPublicHostOverride(locationLike) {
@@ -65,12 +71,14 @@ Change: Keep localhost public QA paths from being mis-remapped into /erp/* while
     const protocol = loc.protocol || 'https:';
     const hostname = normalizeHostname(loc.hostname);
     const pathname = String(loc.pathname || '').trim();
+    const appHint = getRouteAppHint();
     const port = loc.port ? `:${loc.port}` : '';
     const origins = new Set([loc.origin]);
+    const currentServesErpPath = pathname === '/erp' || pathname === '/erp/' || pathname.startsWith('/erp/');
 
     if (isLocalHostname(hostname)) {
       const bareOrigin = `${protocol}//${hostname || 'localhost'}${port}`;
-      const erpBaseUrl = new URL('/erp/', `${bareOrigin}/`).href;
+      const erpBaseUrl = new URL(appHint === 'erp' && !currentServesErpPath ? '/' : '/erp/', `${bareOrigin}/`).href;
       origins.add(`${protocol}//localhost${port}`);
       origins.add(`${protocol}//127.0.0.1${port}`);
       return {
@@ -84,11 +92,29 @@ Change: Keep localhost public QA paths from being mis-remapped into /erp/* while
     }
 
     const baseHostname = getBaseHostname(hostname);
+    if (appHint === 'erp') {
+      const isLegacyErpHost = /^erp\./i.test(hostname);
+      const publicOrigin = isLegacyErpHost ? `${protocol}//www.${baseHostname}${port}` : loc.origin;
+      const bareOrigin = isLegacyErpHost ? `${protocol}//${baseHostname}${port}` : loc.origin;
+      const erpBaseUrl = new URL(currentServesErpPath ? '/erp/' : '/', `${loc.origin}/`).href;
+
+      origins.add(publicOrigin);
+      origins.add(bareOrigin);
+
+      return {
+        currentOrigin: loc.origin,
+        publicOrigin,
+        erpOrigin: loc.origin,
+        bareOrigin,
+        erpBaseUrl,
+        allowOrigins: Array.from(origins)
+      };
+    }
+
     const publicOrigin = `${protocol}//www.${baseHostname}${port}`;
     const erpOrigin = `${protocol}//erp.${baseHostname}${port}`;
     const bareOrigin = `${protocol}//${baseHostname}${port}`;
     const isErpHost = /^erp\./i.test(hostname);
-    const currentServesErpPath = pathname === '/erp' || pathname === '/erp/' || pathname.startsWith('/erp/');
     let erpBaseUrl = new URL('/erp/', `${loc.origin}/`).href;
     if (isErpHost && !currentServesErpPath) {
       erpBaseUrl = new URL('/', `${loc.origin}/`).href;

@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.57
-Change: 2026-03-31 - Prevent duplicate badges.js reload so member detail no longer crashes on repeated Badges declaration.
+Version: v1.0.58
+Change: 2026-04-03 - Manual member registration now splits personal/group input and Excel import supports resident/business identifiers.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.57';
+window.ADMIN_MEMBER_VERSION = 'v1.0.58';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1089,25 +1089,54 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </div>
 
 <div class="modal fade" id="memberCreateModal" tabindex="-1">
-<div class="modal-dialog">
+<div class="modal-dialog modal-lg">
 <div class="modal-content">
 <div class="modal-header"><h5 class="modal-title">조합원 등록</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
 <div class="modal-body">
-<div class="mb-3"><label class="form-label small">이름</label><input type="text" id="create-name" class="form-control"></div>
-<div class="mb-3"><label class="form-label small">이메일</label><input type="email" id="create-email" class="form-control" placeholder="로그인/연락에 사용할 이메일"></div>
+<div class="mb-3">
+<label class="form-label small fw-bold">등록 유형</label>
+<select id="create-member-type" class="form-select" onchange="syncCreateMemberTypeFields()">
+<option value="개인">개인</option>
+<option value="단체">단체</option>
+</select>
+<div class="form-text">선택한 유형에 따라 필요한 입력 항목이 달라집니다.</div>
+</div>
+
+<div id="create-personal-fields" class="border rounded p-3 mb-3 bg-light-subtle">
+<div class="small fw-bold text-primary mb-3">개인 조합원 정보</div>
 <div class="row g-2">
-<div class="col-md-6 mb-3"><label class="form-label small">연락처</label><input type="text" id="create-phone" class="form-control"></div>
-<div class="col-md-6 mb-3"><label class="form-label small">생년월일</label><input type="date" id="create-birth-date" class="form-control"></div>
+<div class="col-md-6 mb-3"><label class="form-label small">이름</label><input type="text" id="create-personal-name" class="form-control" placeholder="홍길동"></div>
+<div class="col-md-6 mb-3"><label class="form-label small">이메일</label><input type="email" id="create-personal-email" class="form-control" placeholder="로그인/연락에 사용할 이메일"></div>
 </div>
 <div class="row g-2">
-<div class="col-md-6 mb-3"><label class="form-label small">유형</label><select id="create-member-type" class="form-select"><option value="개인">개인</option><option value="단체">단체</option></select></div>
-<div class="col-md-6 mb-3"><label class="form-label small">상태</label><select id="create-status" class="form-select"><option value="정상">정상</option><option value="승인대기">승인대기</option></select></div>
+<div class="col-md-6 mb-3"><label class="form-label small">연락처</label><input type="text" id="create-personal-phone" class="form-control" maxlength="13" oninput="autoHyphen(this)"></div>
+<div class="col-md-6 mb-3"><label class="form-label small">주민등록번호</label><input type="text" id="create-personal-rrn" class="form-control" placeholder="000000-0000000" maxlength="14" oninput="autoHyphen(this)"></div>
 </div>
-<div class="mb-3"><label class="form-label small">주소</label><input type="text" id="create-address" class="form-control"></div>
+<div class="mb-0"><label class="form-label small">주소</label><input type="text" id="create-personal-address" class="form-control"></div>
+<div class="form-text mt-2">주민등록번호를 저장하면 생년월일은 자동으로 계산됩니다.</div>
+</div>
+
+<div id="create-group-fields" class="border rounded p-3 mb-3 bg-light-subtle d-none">
+<div class="small fw-bold text-primary mb-3">단체 조합원 정보</div>
+<div class="row g-2">
+<div class="col-md-6 mb-3"><label class="form-label small">단체명</label><input type="text" id="create-group-name" class="form-control" placeholder="햇빛상회"></div>
+<div class="col-md-6 mb-3"><label class="form-label small">이메일</label><input type="email" id="create-group-email" class="form-control" placeholder="로그인/연락에 사용할 이메일"></div>
+</div>
+<div class="row g-2">
+<div class="col-md-6 mb-3"><label class="form-label small">연락처</label><input type="text" id="create-group-phone" class="form-control" maxlength="13" oninput="autoHyphen(this)"></div>
+<div class="col-md-6 mb-3"><label class="form-label small">사업자번호</label><input type="text" id="create-group-biz-num" class="form-control" placeholder="000-00-00000" maxlength="12" oninput="autoHyphen(this)"></div>
+</div>
+<div class="row g-2">
+<div class="col-md-6 mb-3"><label class="form-label small">법인번호(선택)</label><input type="text" id="create-group-corp-num" class="form-control" placeholder="000000-0000000" maxlength="14" oninput="autoHyphen(this)"></div>
+<div class="col-md-6 mb-3"><label class="form-label small">주소</label><input type="text" id="create-group-address" class="form-control"></div>
+</div>
+</div>
+
 <div class="row g-2">
 <div class="col-md-6 mb-3"><label class="form-label small">조합원번호(선택)</label><input type="text" id="create-member-id" class="form-control" placeholder="비워두면 자동 생성"></div>
 <div class="col-md-6 mb-3"><label class="form-label small">가입 구분</label><input type="text" id="create-join-category" class="form-control" value="일반"></div>
 </div>
+<div class="mb-3"><label class="form-label small">상태</label><select id="create-status" class="form-select"><option value="정상">정상</option><option value="승인대기">승인대기</option></select></div>
 <div class="mb-0"><label class="form-label small">관리 메모</label><textarea id="create-admin-memo" class="form-control" rows="3"></textarea></div>
 </div>
 <div class="modal-footer"><button class="btn btn-primary" onclick="saveNewMember()">등록</button></div>
@@ -1124,7 +1153,7 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </div>
 <div class="modal-body">
 <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
-<div class="small text-muted">양식에 맞는 엑셀을 업로드하면 조합원을 순차 등록합니다.</div>
+<div class="small text-muted">회원가입이 어려운 조합원은 이 양식에 적어 받은 뒤 엑셀 업로드로 순차 등록할 수 있습니다.</div>
 <button class="btn btn-sm btn-outline-success" onclick="downloadMemberImportTemplate()">양식 다운로드</button>
 </div>
 <div class="mb-3">
@@ -1153,6 +1182,7 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 <th>이름</th>
 <th>이메일</th>
 <th>유형</th>
+<th>주민/사업자번호</th>
 <th>상태</th>
 <th>가입일</th>
 <th>검증</th>
@@ -2176,7 +2206,13 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 // ★ Supabase 설정 (Anon Key 사용 - RPC 보안으로 안전함)
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
-const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+        headers: {
+            'x-erp-host': String(window.location.hostname || '').trim().toLowerCase()
+        }
+    }
+});
 let permissionSet = new Set();
 let pendingAdminOtpEmail = '';
 let g_adminMemberRuntime = null;
@@ -2225,11 +2261,7 @@ async function loadAdminMemberPermissions(user) {
     }
     if (!storedUser?.coop_id || (!storedUser?.role && !storedUser?.position)) {
         try {
-            const { data: employeeRow } = await _supabase
-                .from('ref_employees')
-                .select('emp_id, emp_name, email, role, position, coop_id, auth_user_id')
-                .eq('auth_user_id', user.id)
-                .single();
+            const { data: employeeRow } = await _supabase.rpc('erp_get_bound_login_employee');
             if (employeeRow) {
                 storedUser = { ...(storedUser || {}), ...employeeRow };
                 localStorage.setItem('erp_user', JSON.stringify(storedUser));
@@ -3214,13 +3246,19 @@ function buildMemberExportRows(records, options = {}) {
 
 function openCreateMemberModal() {
 const defaults = {
-    'create-name': '',
-    'create-email': '',
-    'create-phone': '',
-    'create-birth-date': '',
     'create-member-type': '개인',
+    'create-personal-name': '',
+    'create-personal-email': '',
+    'create-personal-phone': '',
+    'create-personal-rrn': '',
+    'create-personal-address': '',
+    'create-group-name': '',
+    'create-group-email': '',
+    'create-group-phone': '',
+    'create-group-biz-num': '',
+    'create-group-corp-num': '',
+    'create-group-address': '',
     'create-status': '정상',
-    'create-address': '',
     'create-member-id': '',
     'create-join-category': '일반',
     'create-admin-memo': ''
@@ -3229,7 +3267,48 @@ Object.entries(defaults).forEach(([id, value]) => {
     const el = document.getElementById(id);
     if (el) el.value = value;
 });
+syncCreateMemberTypeFields();
 new bootstrap.Modal(document.getElementById('memberCreateModal')).show();
+}
+
+function getCreateMemberType() {
+const type = String(document.getElementById('create-member-type')?.value || '개인').trim();
+return type === '단체' ? '단체' : '개인';
+}
+
+function syncCreateMemberTypeFields() {
+const isGroup = getCreateMemberType() === '단체';
+const personalBox = document.getElementById('create-personal-fields');
+const groupBox = document.getElementById('create-group-fields');
+if (personalBox) personalBox.classList.toggle('d-none', isGroup);
+if (groupBox) groupBox.classList.toggle('d-none', !isGroup);
+}
+
+function normalizeRrnDisplay(value) {
+const digits = String(value || '').replace(/[^0-9]/g, '');
+if (!digits) return '';
+if (digits.length !== 13) return '';
+return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+}
+
+function normalizeBusinessNumberDisplay(value) {
+const digits = String(value || '').replace(/[^0-9]/g, '');
+if (!digits) return '';
+if (digits.length !== 10) return '';
+return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
+
+function normalizeCorpNumberDisplay(value) {
+const digits = String(value || '').replace(/[^0-9]/g, '');
+if (!digits) return '';
+if (digits.length !== 13) return '';
+return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+}
+
+function maskRrnDisplay(rrnDisplay) {
+const normalized = normalizeRrnDisplay(rrnDisplay);
+if (!normalized) return '-';
+return `${normalized.slice(0, 8)}******`;
 }
 
 function openMemberImportModal() {
@@ -3250,32 +3329,66 @@ new bootstrap.Modal(document.getElementById('memberImportModal')).show();
 }
 
 async function saveNewMember() {
+const memberType = getCreateMemberType();
+const isGroup = memberType === '단체';
+const name = isGroup
+    ? (document.getElementById('create-group-name')?.value || '').trim()
+    : (document.getElementById('create-personal-name')?.value || '').trim();
+const email = isGroup
+    ? (document.getElementById('create-group-email')?.value || '').trim()
+    : (document.getElementById('create-personal-email')?.value || '').trim();
+const phone = isGroup
+    ? (document.getElementById('create-group-phone')?.value || '').trim()
+    : (document.getElementById('create-personal-phone')?.value || '').trim();
+const address = isGroup
+    ? (document.getElementById('create-group-address')?.value || '').trim()
+    : (document.getElementById('create-personal-address')?.value || '').trim();
+const rrn = normalizeRrnDisplay(document.getElementById('create-personal-rrn')?.value || '');
+const businessNumber = normalizeBusinessNumberDisplay(document.getElementById('create-group-biz-num')?.value || '');
+const corpNumber = normalizeCorpNumberDisplay(document.getElementById('create-group-corp-num')?.value || '');
+
 const payload = {
-    p_name: (document.getElementById('create-name')?.value || '').trim(),
-    p_email: (document.getElementById('create-email')?.value || '').trim(),
-    p_phone: (document.getElementById('create-phone')?.value || '').trim() || null,
-    p_birth_date: (document.getElementById('create-birth-date')?.value || '').trim() || null,
-    p_member_type: document.getElementById('create-member-type')?.value || '개인',
+    p_name: name,
+    p_email: email,
+    p_phone: phone || null,
+    p_birth_date: null,
+    p_member_type: memberType,
     p_status: document.getElementById('create-status')?.value || '정상',
-    p_address: (document.getElementById('create-address')?.value || '').trim() || null,
+    p_address: address || null,
     p_member_id: (document.getElementById('create-member-id')?.value || '').trim() || null,
     p_join_category: (document.getElementById('create-join-category')?.value || '').trim() || '일반',
-    p_admin_memo: (document.getElementById('create-admin-memo')?.value || '').trim() || null
+    p_admin_memo: (document.getElementById('create-admin-memo')?.value || '').trim() || null,
+    p_rrn: isGroup ? null : rrn,
+    p_business_number: isGroup ? businessNumber || null : null,
+    p_corp_number: isGroup ? corpNumber || null : null,
+    p_join_date: null
 };
 
-if (!payload.p_name) return myAlert('이름을 입력하세요.', 'warning');
+if (!payload.p_name) return myAlert(isGroup ? '단체명을 입력하세요.' : '이름을 입력하세요.', 'warning');
 if (!payload.p_email) return myAlert('이메일을 입력하세요.', 'warning');
 if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(payload.p_email)) {
     return myAlert('올바른 이메일 형식을 입력하세요.', 'warning');
 }
+if (!isGroup && /[0-9]/.test(payload.p_name)) {
+    return myAlert('개인 이름에는 숫자를 포함할 수 없습니다.', 'warning');
+}
+if (!isGroup && !payload.p_rrn) {
+    return myAlert('개인 등록에는 주민등록번호가 필요합니다.', 'warning');
+}
+if (isGroup && !payload.p_business_number) {
+    return myAlert('단체 등록에는 사업자번호가 필요합니다.', 'warning');
+}
+if (isGroup && document.getElementById('create-group-corp-num')?.value && !payload.p_corp_number) {
+    return myAlert('법인번호는 숫자 13자리로 입력해주세요.', 'warning');
+}
 
 showLoading(true);
-const { error } = await _supabase.rpc('create_member_secure', payload);
+const { error } = await _supabase.rpc('create_member_secure_v2', payload);
 showLoading(false);
 
 if (error) {
     console.error(error);
-    return myAlert('조합원 등록 실패: ' + error.message, 'error');
+    return myAlert('조합원 등록 실패: ' + (error.hint || error.message), 'error');
 }
 
 myAlert('조합원이 등록되었습니다.');
@@ -3285,9 +3398,9 @@ fetchMembers();
 
 function downloadMemberImportTemplate() {
 const wsData = [
-  ['이름', '이메일', '연락처', '생년월일', '유형', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모'],
-  ['홍길동', 'hong@example.com', '01012345678', '1980-01-01', '개인', '정상', '경기도 용인시 처인구 예시로 1', 'M-2026-0001', '일반', '2026-03-15', '초기 이관'],
-  ['햇빛상회', 'corp@example.com', '01023456789', '', '단체', '승인대기', '경기도 용인시 수지구 예시로 2', '', '일반', '', '법인 조합원']
+  ['유형', '이름', '단체명', '주민등록번호', '이메일', '연락처', '사업자번호', '법인번호', '상태', '주소', '조합원번호', '가입구분', '가입일', '관리메모'],
+  ['개인', '홍길동', '', '800101-1234567', 'hong@example.com', '01012345678', '', '', '정상', '경기도 용인시 처인구 예시로 1', 'M-2026-0001', '일반', '2026-03-15', '회원가입 대행 입력'],
+  ['단체', '', '햇빛상회', '', 'corp@example.com', '01023456789', '123-45-67890', '110111-1234567', '승인대기', '경기도 용인시 수지구 예시로 2', '', '일반', '', '회원가입 대행 입력']
 ];
 const ws = XLSX.utils.aoa_to_sheet(wsData);
 const wb = XLSX.utils.book_new();
@@ -3340,33 +3453,52 @@ const pick = (...keys) => {
 };
 
 const joinDateRaw = pick('가입일', 'join_date');
-const birthDateRaw = pick('생년월일', 'birth_date');
 const memberType = String(pick('유형', 'member_type') || '개인').trim() || '개인';
 const status = String(pick('상태', 'status') || '정상').trim() || '정상';
+const isGroup = memberType === '단체';
+const rrnRaw = pick('주민등록번호', '주민번호', 'rrn');
+const businessRaw = pick('사업자번호', '사업자등록번호', 'business_number');
+const corpRaw = pick('법인번호', '법인등록번호', 'corp_number');
+const name = isGroup
+  ? String(pick('단체명', '법인명', '상호', '이름', 'name')).trim()
+  : String(pick('이름', '성명', 'name', '단체명')).trim();
+const rrn = normalizeRrnDisplay(rrnRaw);
+const businessNumber = normalizeBusinessNumberDisplay(businessRaw);
+const corpNumber = normalizeCorpNumberDisplay(corpRaw);
+const identifierDisplay = isGroup
+  ? (businessNumber || corpNumber || '-')
+  : maskRrnDisplay(rrn);
 const normalized = {
   rowNo: index + 2,
   source_row: { ...row },
-  name: String(pick('이름', '성명', 'name')).trim(),
+  name,
   email: String(pick('이메일', 'email')).trim(),
   phone: normalizeMemberImportPhone(pick('연락처', '전화번호', 'phone')),
-  birth_date: normalizeMemberImportDate(birthDateRaw),
+  birth_date: null,
   member_type: memberType,
   status,
   address: String(pick('주소', 'address')).trim(),
   member_id: String(pick('조합원번호', 'member_id')).trim(),
   join_category: String(pick('가입구분', 'join_category') || '일반').trim() || '일반',
   join_date: normalizeMemberImportDate(joinDateRaw),
-  admin_memo: String(pick('관리메모', '비고', 'admin_memo')).trim()
+  admin_memo: String(pick('관리메모', '비고', 'admin_memo')).trim(),
+  rrn,
+  business_number: businessNumber,
+  corp_number: corpNumber,
+  identifier_display: identifierDisplay
 };
 
 const errors = [];
-if (!normalized.name) errors.push('이름 누락');
+if (!normalized.name) errors.push(isGroup ? '단체명 누락' : '이름 누락');
 if (!normalized.email) errors.push('이메일 누락');
 if (normalized.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) errors.push('이메일 형식 오류');
 if (!['개인', '단체'].includes(normalized.member_type)) errors.push('유형 오류');
 if (!['정상', '승인대기', '탈퇴', '제명'].includes(normalized.status)) errors.push('상태 오류');
 if (joinDateRaw && !normalized.join_date) errors.push('가입일 형식 오류');
-if (birthDateRaw && !normalized.birth_date) errors.push('생년월일 형식 오류');
+if (!isGroup && /[0-9]/.test(normalized.name)) errors.push('이름 형식 오류');
+if (!isGroup && !normalized.rrn) errors.push('주민번호 형식 오류');
+if (isGroup && !normalized.business_number) errors.push('사업자번호 형식 오류');
+if (corpRaw && !normalized.corp_number) errors.push('법인번호 형식 오류');
 
 normalized.errors = errors;
 normalized.valid = errors.length === 0;
@@ -3382,24 +3514,41 @@ rows.forEach((row) => {
 const baseValidRows = rows.filter((row) => row.valid);
 const emailCounts = new Map();
 const memberIdCounts = new Map();
+const rrnCounts = new Map();
+const businessCounts = new Map();
+const corpCounts = new Map();
 
 baseValidRows.forEach((row) => {
   const emailKey = String(row.email || '').trim().toLowerCase();
   const memberIdKey = String(row.member_id || '').trim();
+  const rrnKey = String(row.rrn || '').trim();
+  const businessKey = String(row.business_number || '').trim();
+  const corpKey = String(row.corp_number || '').trim();
   if (emailKey) emailCounts.set(emailKey, (emailCounts.get(emailKey) || 0) + 1);
   if (memberIdKey) memberIdCounts.set(memberIdKey, (memberIdCounts.get(memberIdKey) || 0) + 1);
+  if (rrnKey) rrnCounts.set(rrnKey, (rrnCounts.get(rrnKey) || 0) + 1);
+  if (businessKey) businessCounts.set(businessKey, (businessCounts.get(businessKey) || 0) + 1);
+  if (corpKey) corpCounts.set(corpKey, (corpCounts.get(corpKey) || 0) + 1);
 });
 
 baseValidRows.forEach((row) => {
   const emailKey = String(row.email || '').trim().toLowerCase();
   const memberIdKey = String(row.member_id || '').trim();
+  const rrnKey = String(row.rrn || '').trim();
+  const businessKey = String(row.business_number || '').trim();
+  const corpKey = String(row.corp_number || '').trim();
   if (emailKey && (emailCounts.get(emailKey) || 0) > 1) row.errors.push('중복 이메일(파일)');
   if (memberIdKey && (memberIdCounts.get(memberIdKey) || 0) > 1) row.errors.push('중복 조합원번호(파일)');
+  if (rrnKey && (rrnCounts.get(rrnKey) || 0) > 1) row.errors.push('중복 주민번호(파일)');
+  if (businessKey && (businessCounts.get(businessKey) || 0) > 1) row.errors.push('중복 사업자번호(파일)');
+  if (corpKey && (corpCounts.get(corpKey) || 0) > 1) row.errors.push('중복 법인번호(파일)');
   row.valid = row.errors.length === 0;
 });
 
 const emails = [...new Set(baseValidRows.map((row) => String(row.email || '').trim()).filter(Boolean))];
 const memberIds = [...new Set(baseValidRows.map((row) => String(row.member_id || '').trim()).filter(Boolean))];
+const businessNumbers = [...new Set(baseValidRows.map((row) => String(row.business_number || '').trim()).filter(Boolean))];
+const corpNumbers = [...new Set(baseValidRows.map((row) => String(row.corp_number || '').trim()).filter(Boolean))];
 
 if (emails.length > 0) {
   const { data, error } = await scopeAdminTenant(
@@ -3423,6 +3572,32 @@ if (memberIds.length > 0) {
   rows.forEach((row) => {
     const memberIdKey = String(row.member_id || '').trim();
     if (memberIdKey && existingMemberIds.has(memberIdKey)) row.errors.push('중복 조합원번호(DB)');
+    row.valid = row.errors.length === 0;
+  });
+}
+
+if (businessNumbers.length > 0) {
+  const { data, error } = await scopeAdminTenant(
+    _supabase.from('coop_members').select('business_number').in('business_number', businessNumbers)
+  );
+  if (error) throw error;
+  const existingBusinessNumbers = new Set((data || []).map((item) => String(item.business_number || '').trim()).filter(Boolean));
+  rows.forEach((row) => {
+    const businessKey = String(row.business_number || '').trim();
+    if (businessKey && existingBusinessNumbers.has(businessKey)) row.errors.push('중복 사업자번호(DB)');
+    row.valid = row.errors.length === 0;
+  });
+}
+
+if (corpNumbers.length > 0) {
+  const { data, error } = await scopeAdminTenant(
+    _supabase.from('coop_members').select('corp_number').in('corp_number', corpNumbers)
+  );
+  if (error) throw error;
+  const existingCorpNumbers = new Set((data || []).map((item) => String(item.corp_number || '').trim()).filter(Boolean));
+  rows.forEach((row) => {
+    const corpKey = String(row.corp_number || '').trim();
+    if (corpKey && existingCorpNumbers.has(corpKey)) row.errors.push('중복 법인번호(DB)');
     row.valid = row.errors.length === 0;
   });
 }
@@ -3461,6 +3636,7 @@ filteredRows.slice(0, 10).forEach((row) => {
     <td>${escapeHtml(row.name || '-')}</td>
     <td>${escapeHtml(row.email || '-')}</td>
     <td>${escapeHtml(row.member_type || '-')}</td>
+    <td>${escapeHtml(row.identifier_display || '-')}</td>
     <td>${escapeHtml(row.status || '-')}</td>
     <td>${escapeHtml(row.join_date || '-')}</td>
     <td>${row.valid ? '<span class="badge bg-success">정상</span>' : errorBadges}</td>
@@ -3486,11 +3662,14 @@ if (failedRows.length === 0) {
 }
 
 const rows = failedRows.map((row) => ({
+  유형: row.source_row?.['유형'] ?? row.member_type ?? '',
   이름: row.source_row?.['이름'] ?? row.name ?? '',
+  단체명: row.source_row?.['단체명'] ?? '',
+  주민등록번호: row.source_row?.['주민등록번호'] ?? row.rrn ?? '',
   이메일: row.source_row?.['이메일'] ?? row.email ?? '',
   연락처: row.source_row?.['연락처'] ?? row.phone ?? '',
-  생년월일: row.source_row?.['생년월일'] ?? row.birth_date ?? '',
-  유형: row.source_row?.['유형'] ?? row.member_type ?? '',
+  사업자번호: row.source_row?.['사업자번호'] ?? row.business_number ?? '',
+  법인번호: row.source_row?.['법인번호'] ?? row.corp_number ?? '',
   상태: row.source_row?.['상태'] ?? row.status ?? '',
   주소: row.source_row?.['주소'] ?? row.address ?? '',
   조합원번호: row.source_row?.['조합원번호'] ?? row.member_id ?? '',
@@ -3567,7 +3746,7 @@ myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 �
       continue;
     }
 
-    const { error } = await _supabase.rpc('create_member_import_secure', {
+    const { error } = await _supabase.rpc('create_member_secure_v2', {
       p_name: row.name,
       p_email: row.email,
       p_phone: row.phone || null,
@@ -3578,13 +3757,16 @@ myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 �
       p_member_id: row.member_id || null,
       p_join_category: row.join_category || '일반',
       p_admin_memo: row.admin_memo || null,
+      p_rrn: row.member_type === '개인' ? row.rrn || null : null,
+      p_business_number: row.member_type === '단체' ? row.business_number || null : null,
+      p_corp_number: row.member_type === '단체' ? row.corp_number || null : null,
       p_join_date: row.join_date || null
     });
 
     if (error) {
       console.error('member import failed', row, error);
       failCnt++;
-      failLogs.push(`${row.rowNo}행: ${error.message}`);
+      failLogs.push(`${row.rowNo}행: ${error.hint || error.message}`);
     } else {
       successCnt++;
     }
@@ -7362,22 +7544,22 @@ function autoHyphen(target) {
     // 숫자만 남기고 제거
     let val = target.value.replace(/[^0-9]/g, '');
 
-    if(target.id === 'md-phone') { // 전화번호
+    if(target.id === 'md-phone' || target.id === 'create-personal-phone' || target.id === 'create-group-phone') { // 전화번호
         if(val.length < 4) target.value = val;
         else if(val.length < 7) target.value = val.substr(0, 3) + '-' + val.substr(3);
         else if(val.length < 11) target.value = val.substr(0, 3) + '-' + val.substr(3, 3) + '-' + val.substr(6);
         else target.value = val.substr(0, 3) + '-' + val.substr(3, 4) + '-' + val.substr(7);
 
-    } else if(target.id === 'md-rrn') { // 주민번호 (6-7)
+    } else if(target.id === 'md-rrn' || target.id === 'create-personal-rrn') { // 주민번호 (6-7)
         if(val.length < 7) target.value = val;
         else target.value = val.substr(0, 6) + '-' + val.substr(6, 7);
 
-    } else if(target.id === 'md-corp-num') { // [추가] 법인번호 (6-7)
+    } else if(target.id === 'md-corp-num' || target.id === 'create-group-corp-num') { // [추가] 법인번호 (6-7)
         // 예: 110111-1234567
         if(val.length < 7) target.value = val;
         else target.value = val.substr(0, 6) + '-' + val.substr(6);
 
-    } else if(target.id === 'md-biz-num') { // [추가] 사업자번호 (3-2-5)
+    } else if(target.id === 'md-biz-num' || target.id === 'create-group-biz-num') { // [추가] 사업자번호 (3-2-5)
         // 예: 123-45-67890
         if(val.length < 4) target.value = val;
         else if(val.length < 6) target.value = val.substr(0, 3) + '-' + val.substr(3);
