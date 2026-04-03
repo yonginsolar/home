@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.8 -->
+<!-- Version: v1.1.9 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.1.8 | platform_admin.html');</script>
+  <script>console.log('[Version] v1.1.9 | platform_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -700,6 +700,11 @@
       const safe = normalizeCoopcoSubdomainInput(subdomain);
       return safe ? `${safe}.${COOPCO_ROOT_DOMAIN}` : '';
     } // End of buildCoopcoHostname
+
+    function isFixedErpDomain(hostname) {
+      const safe = String(hostname || '').trim().toLowerCase();
+      return safe === 'erp.yonginsolar.kr';
+    } // End of isFixedErpDomain
 
     function isValidCoopcoSubdomain(subdomain) {
       return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(String(subdomain || ''));
@@ -1465,7 +1470,18 @@
       selectedCoopDomainRoutes = Array.isArray(list) ? list.slice() : [];
       const wrap = document.getElementById('manageDomainTableWrap');
       if (!wrap) return;
-      if (!selectedCoopDomainRoutes.length) {
+      const visibleRoutes = selectedCoopDomainRoutes.filter((row) => !isFixedErpDomain(row?.hostname));
+      const hiddenFixedRoutes = selectedCoopDomainRoutes.filter((row) => isFixedErpDomain(row?.hostname));
+      if (!visibleRoutes.length) {
+        if (hiddenFixedRoutes.length) {
+          wrap.innerHTML = `
+            <div class="empty-box">
+              편집 가능한 도메인 매핑이 없습니다.
+              <div class="form-hint mt-2">시스템 고정 ERP 도메인(<code>${escapeHtml(hiddenFixedRoutes.map((row) => row.hostname).join(', '))}</code>)은 별도 운영되므로 이 목록에서 숨깁니다.</div>
+            </div>
+          `;
+          return;
+        }
         wrap.innerHTML = '<div class="empty-box">저장된 도메인 매핑이 없습니다.</div>';
         return;
       }
@@ -1481,7 +1497,7 @@
               </tr>
             </thead>
             <tbody>
-              ${selectedCoopDomainRoutes.map((row) => {
+              ${visibleRoutes.map((row) => {
                 const routeId = String(row.route_id || '').trim();
                 const hostname = String(row.hostname || '').trim();
                 const verifiedLabel = row.verified_at ? formatDateTimeShort(row.verified_at) : '미확인';
@@ -1511,6 +1527,7 @@
             </tbody>
           </table>
         </div>
+        ${hiddenFixedRoutes.length ? `<div class="form-hint mt-2">시스템 고정 ERP 도메인(<code>${escapeHtml(hiddenFixedRoutes.map((row) => row.hostname).join(', '))}</code>)은 별도 운영되므로 여기서 수정하지 않습니다.</div>` : ''}
       `;
     } // End of renderDomainRoutes
 

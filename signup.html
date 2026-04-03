@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.15
-Change: Add a legacy-safe browser environment guard for in-app and outdated browsers on signup.
+Version: v1.0.17
+Change: Enable auth.coopco.kr broker for Kakao/Naver signup starts.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.15 | signup.html');</script>
+  <script>console.log('[Version] v1.0.17 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -18,6 +18,14 @@ Change: Add a legacy-safe browser environment guard for in-app and outdated brow
 <link href="style.css" rel="stylesheet">
 
 <script>
+window.__AUTH_BROKER_CONFIG__ = {
+origin: 'https://auth.coopco.kr',
+enabledProviders: {
+  kakao: true,
+  'custom:naver': true
+},
+supportedModes: ['login']
+};
 window.__BROWSER_ENV_GUARD_CONFIG__ = {
 title: '회원가입은 외부 브라우저에서 진행해 주세요.',
 actionLabel: '회원가입과 이메일 인증',
@@ -30,6 +38,7 @@ recommendedBrowsers: 'Safari, Chrome, Edge 또는 웨일의 최신 버전'
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
+<script src="shared/auth_broker_helper.js?v=20260404-1"></script>
 <style>
 /* [CSS 추가] 가입 완료 모달 스타일 */
 .center-modal {
@@ -1136,6 +1145,24 @@ async function startKakaoSignup() {
 
         localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 
+        const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
+            ? window.AuthBrokerHelper.buildStartUrl({
+                provider: 'kakao',
+                mode: 'login',
+                app: 'public',
+                callback: redirectUrl,
+                scopes: 'account_email phone_number profile_nickname',
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'login'
+                }
+            })
+            : '';
+        if (brokerUrl) {
+            window.location.href = brokerUrl;
+            return;
+        }
+
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: 'kakao',
             options: {
@@ -1169,6 +1196,20 @@ async function startNaverSignup() {
         const nextTarget = window.location.href;
         const redirectUrl = buildSignupAuthCallbackUrl(nextTarget);
         localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
+
+        const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
+            ? window.AuthBrokerHelper.buildStartUrl({
+                provider: 'custom:naver',
+                mode: 'login',
+                app: 'public',
+                callback: redirectUrl,
+                scopes: 'openid profile'
+            })
+            : '';
+        if (brokerUrl) {
+            window.location.href = brokerUrl;
+            return;
+        }
 
         const { error } = await _supabase.auth.signInWithOAuth({
             provider: 'custom:naver',

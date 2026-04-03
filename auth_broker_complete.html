@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<!--
+Version: v1.0.0
+Change: Add auth.coopco.kr broker completion page that hands Supabase OAuth hash back to the original app callback.
+-->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.0 | auth_broker_complete.html');</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>인증을 마무리하고 있습니다</title>
+  <script src="shared/auth_broker_helper.js?v=20260404-1"></script>
+  <style>
+    body { background:#f8fafc; min-height:100vh; margin:0; display:flex; align-items:center; justify-content:center; padding:24px; font-family:"Pretendard Variable","Pretendard",-apple-system,sans-serif; }
+    .broker-card { width:100%; max-width:520px; background:#fff; border-radius:20px; box-shadow:0 16px 48px rgba(15,23,42,.12); padding:32px 28px; }
+    .broker-title { font-size:1.4rem; font-weight:800; margin-bottom:12px; color:#0f172a; }
+    .broker-copy { color:#475569; line-height:1.7; margin-bottom:0; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="broker-card">
+    <div class="broker-title">인증을 마무리하고 있습니다</div>
+    <p class="broker-copy" id="brokerCompleteStatus">원래 페이지로 돌아가는 중입니다...</p>
+  </div>
+
+  <script>
+  (function runAuthBrokerComplete() {
+    'use strict';
+
+    var STORAGE_PREFIX = 'auth_broker_redirect_v1:';
+    var statusEl = document.getElementById('brokerCompleteStatus');
+
+    function setStatus(message) {
+      if (statusEl) statusEl.textContent = String(message || '');
+    }
+
+    function getParams() {
+      return new URLSearchParams(window.location.search || '');
+    }
+
+    function readStatePayload(state) {
+      if (!state) return null;
+      try {
+        var raw = window.sessionStorage.getItem(STORAGE_PREFIX + state);
+        if (!raw) return null;
+        window.sessionStorage.removeItem(STORAGE_PREFIX + state);
+        return JSON.parse(raw);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function mergeErrorParams(targetUrl) {
+      var params = getParams();
+      var error = params.get('error');
+      var errorCode = params.get('error_code');
+      var errorDescription = params.get('error_description');
+      if (error) targetUrl.searchParams.set('error', error);
+      if (errorCode) targetUrl.searchParams.set('error_code', errorCode);
+      if (errorDescription) targetUrl.searchParams.set('error_description', errorDescription);
+      return targetUrl;
+    }
+
+    function finish() {
+      var state = getParams().get('state') || '';
+      var payload = readStatePayload(state);
+      var callbackUrl = payload && payload.callback ? payload.callback : '';
+      var parsedCallback = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.parseCallbackUrl === 'function'
+        ? window.AuthBrokerHelper.parseCallbackUrl(callbackUrl)
+        : null;
+
+      if (!parsedCallback) {
+        setStatus('원래 돌아갈 주소를 확인하지 못했습니다.\n브라우저를 닫고 다시 시도해 주세요.');
+        return;
+      }
+
+      mergeErrorParams(parsedCallback);
+      if (window.location.hash) {
+        parsedCallback.hash = window.location.hash.replace(/^#/, '');
+      }
+
+      window.location.replace(parsedCallback.href);
+    }
+
+    finish();
+  })();
+  </script>
+</body>
+</html>
