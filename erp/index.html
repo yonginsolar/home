@@ -436,9 +436,28 @@ function isSocialLoginUser(user) {
     return hasAuthProvider(user, 'kakao') || hasAuthProvider(user, 'custom:naver');
 }
 
+function normalizeSocialProviderKey(provider) {
+    const normalized = String(provider || '').trim().toLowerCase();
+    if (normalized === 'naver') return 'custom:naver';
+    return normalized;
+}
+
+function getActiveSocialProviderKey(user) {
+    const primary = normalizeSocialProviderKey(
+        user?.app_metadata?.provider ||
+        user?.raw_app_meta_data?.provider ||
+        ''
+    );
+    if (primary === 'kakao' || primary === 'custom:naver') return primary;
+    if (hasAuthProvider(user, 'kakao')) return 'kakao';
+    if (hasAuthProvider(user, 'custom:naver')) return 'custom:naver';
+    return '';
+}
+
 function getSocialProviderLabel(user) {
-    if (hasAuthProvider(user, 'kakao')) return '카카오';
-    if (hasAuthProvider(user, 'custom:naver')) return '네이버';
+    const providerKey = getActiveSocialProviderKey(user);
+    if (providerKey === 'kakao') return '카카오';
+    if (providerKey === 'custom:naver') return '네이버';
     return '소셜';
 }
 
@@ -1174,11 +1193,10 @@ async function loadUserInfo(user) {
     // [복구 완료] 국장님이 요청하신 모달/로그 처리 로직 그대로 복구
     if (error || !data) {
         console.error("접근 권한 없음: 직원 명부에 없는 계정입니다.");
-        const isKakaoLogin = Array.isArray(user?.identities) && user.identities.some(identity => identity?.provider === 'kakao');
-        const isNaverLogin = hasAuthProvider(user, 'custom:naver');
-        const blockedMessage = isKakaoLogin
+        const providerLabel = getSocialProviderLabel(user);
+        const blockedMessage = providerLabel === '카카오'
             ? `접근 권한 없음\n이 카카오 계정은 아직 ERP 계정에 연결되지 않았습니다.\n${buildExistingAccountLinkGuidance('카카오')}`
-            : isNaverLogin
+            : providerLabel === '네이버'
                 ? `접근 권한 없음\n이 네이버 계정은 아직 ERP 계정에 연결되지 않았습니다.\n${buildExistingAccountLinkGuidance('네이버')}`
                 : "접근 권한 없음\n귀하는 직원으로 등록되지 않았습니다. 로그아웃 합니다.";
         
