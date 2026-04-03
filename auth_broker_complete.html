@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.0
-Change: Add auth.coopco.kr broker completion page that hands Supabase OAuth hash back to the original app callback.
+Version: v1.0.1
+Change: Forward successful OAuth query parameters (including code flow params) from auth.coopco.kr back to the original callback instead of forwarding only error params.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.0 | auth_broker_complete.html');</script>
+  <script>console.log('[Version] v1.0.1 | auth_broker_complete.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -51,14 +51,12 @@ Change: Add auth.coopco.kr broker completion page that hands Supabase OAuth hash
       }
     }
 
-    function mergeErrorParams(targetUrl) {
+    function mergeQueryParams(targetUrl) {
       var params = getParams();
-      var error = params.get('error');
-      var errorCode = params.get('error_code');
-      var errorDescription = params.get('error_description');
-      if (error) targetUrl.searchParams.set('error', error);
-      if (errorCode) targetUrl.searchParams.set('error_code', errorCode);
-      if (errorDescription) targetUrl.searchParams.set('error_description', errorDescription);
+      params.forEach(function (value, key) {
+        if (key === 'state') return;
+        targetUrl.searchParams.set(key, value);
+      });
       return targetUrl;
     }
 
@@ -75,7 +73,7 @@ Change: Add auth.coopco.kr broker completion page that hands Supabase OAuth hash
         return;
       }
 
-      mergeErrorParams(parsedCallback);
+      mergeQueryParams(parsedCallback);
       if (window.location.hash) {
         parsedCallback.hash = window.location.hash.replace(/^#/, '');
       }
