@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.00 | Change: 2026-04-04 - Force /erp/* canonical paths on custom ERP domains before loading relative approval assets. -->
+<!-- Version: v1.2.01 | Change: 2026-04-05 - Restore approval employee picker for non-admin users via secure RPC and harden modal focus handling. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.00 | approval.html');</script>
+  <script>console.log('[Version] v1.2.01 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -801,6 +801,8 @@ const APPROVAL_HTML2PDF_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0
 
 let myInfo = null;
 let allUsers = [];
+let approvalEmployeeDirectoryState = 'idle';
+let approvalEmployeeDirectoryErrorMessage = '';
 let modalInstance, alertModalInstance, confirmModalInstance, promptModalInstance;
 let modalType = ''; 
 let tempSelection = [], finalApprovers = [], finalRefs = [], historyCache = [], historySearchCache = [], pendingSubmissionCache = [], todoCache = [];
@@ -2885,27 +2887,42 @@ function writeApprovalEmployeeCache(employees = []) {
 } // End of writeApprovalEmployeeCache
 
 function applyApprovalEmployeeData(employees = []) {
-    if (!Array.isArray(employees) || employees.length === 0) return;
-    allUsers = employees;
+    const normalizedEmployees = Array.isArray(employees)
+        ? employees.filter((employee) => employee && String(employee.emp_id || '').trim())
+        : [];
+    allUsers = normalizedEmployees;
     populateDelegationTargets();
     setDelegationDefaultPeriod();
 } // End of applyApprovalEmployeeData
 
 async function fetchApprovalEmployeesFromServer() {
-    const { data, error } = await scopeApprovalTenant(_supabase.from('ref_employees').select('*')).order('auth_level', { ascending: true });
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
+    const { data, error } = await _supabase.rpc('erp_list_approval_employees');
+    if (!error) return Array.isArray(data) ? data : [];
+
+    console.warn('approval employee rpc failed, fallbacking to direct employee query', error);
+    const { data: fallbackData, error: fallbackError } = await scopeApprovalTenant(
+        _supabase
+            .from('ref_employees')
+            .select('emp_id, emp_name, position, department, role, auth_level')
+    ).order('auth_level', { ascending: true });
+    if (fallbackError) throw fallbackError;
+    return Array.isArray(fallbackData) ? fallbackData : [];
 } // End of fetchApprovalEmployeesFromServer
 
 async function refreshApprovalEmployees(options = {}) {
     const applyToUi = options?.applyToUi !== false;
+    approvalEmployeeDirectoryState = 'loading';
+    approvalEmployeeDirectoryErrorMessage = '';
     try {
         const employees = await fetchApprovalEmployeesFromServer();
         writeApprovalEmployeeCache(employees);
         if (applyToUi) applyApprovalEmployeeData(employees);
+        approvalEmployeeDirectoryState = 'ready';
         return employees;
     } catch (error) {
         console.warn('approval employee refresh failed', error);
+        approvalEmployeeDirectoryState = 'error';
+        approvalEmployeeDirectoryErrorMessage = String(error?.message || '직원 목록을 불러오지 못했습니다.');
         return [];
     }
 } // End of refreshApprovalEmployees
@@ -5218,17 +5235,21 @@ function bindModalFocusGuard(modalEl, fallbackEl) {
     if (!modalEl || modalEl.dataset.focusGuardBound === '1') return;
     modalEl.dataset.focusGuardBound = '1';
     const guard = () => moveFocusOutsideModal(modalEl, fallbackEl);
-    modalEl.addEventListener('hide.bs.modal', guard, true);
-    modalEl.addEventListener('hidden.bs.modal', guard, true);
-    const earlyGuard = (event) => {
-        const dismissTarget = event.target && typeof event.target.closest === 'function'
-            ? event.target.closest('[data-bs-dismiss="modal"]')
-            : null;
-        if (!dismissTarget) return;
-        guard();
+    const setModalInert = (enabled) => {
+        if (!modalEl) return;
+        if (enabled) modalEl.setAttribute('inert', '');
+        else modalEl.removeAttribute('inert');
     };
-    modalEl.addEventListener('pointerdown', earlyGuard, true);
-    modalEl.addEventListener('click', earlyGuard, true);
+    modalEl.addEventListener('show.bs.modal', () => setModalInert(false), true);
+    modalEl.addEventListener('shown.bs.modal', () => setModalInert(false), true);
+    modalEl.addEventListener('hide.bs.modal', () => {
+        setModalInert(true);
+        guard();
+    }, true);
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        guard();
+        setModalInert(false);
+    }, true);
 }
 
 function normalizeModalStacking() {
@@ -5655,6 +5676,15 @@ window.onload = async function() {
 
     const employeeData = await employeePromise;
     applyApprovalEmployeeData(employeeData);
+    if (finalApprovers.length === 0) {
+        applyDefaultApprovalLineTemplate(true);
+    } else {
+        renderLinePreview();
+    }
+    renderRefPreview();
+    if (document.getElementById("chkProxy")?.checked) {
+        toggleProxyMode();
+    }
     scheduleApprovalBackgroundRefresh(initialTab);
 
     const payrollMonthInput = document.getElementById("payrollMonth");
@@ -7479,11 +7509,22 @@ function renderUserList() {
     const selCountEl = document.getElementById("selCount");
     listEl.innerHTML = "";
     if (selCountEl) selCountEl.innerText = String(tempSelection.length);
+
+    if (!Array.isArray(allUsers) || allUsers.length === 0) {
+        if (approvalEmployeeDirectoryState === 'loading' || approvalEmployeeDirectoryState === 'idle') {
+            listEl.innerHTML = '<div class="p-3 text-center text-muted">직원 목록을 불러오는 중입니다.</div>';
+            return;
+        }
+        if (approvalEmployeeDirectoryState === 'error') {
+            listEl.innerHTML = `<div class="p-3 text-center text-muted">직원 목록을 불러오지 못했습니다.<br>${escapeHtml(approvalEmployeeDirectoryErrorMessage || '잠시 후 다시 시도해 주세요.')}</div>`;
+            return;
+        }
+    }
     
     // 나보다 직급 낮은 사람 제외, 본인 제외
     const myLevelRaw = Number(myInfo?.auth_level);
     const myLevel = Number.isFinite(myLevelRaw) ? myLevelRaw : 99;
-    let targets = allUsers.filter(u => String(u?.emp_id) !== String(myInfo?.emp_id));
+    let targets = (Array.isArray(allUsers) ? allUsers : []).filter(u => String(u?.emp_id) !== String(myInfo?.emp_id));
     
     if (modalType === 'approver') {
         // [수정] 상향식 필터링: 나보다 높은 사람(숫자가 작은 사람)만 표시
