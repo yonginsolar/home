@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.01 | Change: 2026-04-05 - Restore approval employee picker for non-admin users via secure RPC and harden modal focus handling. -->
+<!-- Version: v1.2.02 | Change: 2026-04-05 - Make approver/reference selection overlap-safe and support incremental approver edits in the picker. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.01 | approval.html');</script>
+  <script>console.log('[Version] v1.2.02 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -7490,6 +7490,38 @@ function formatLabelWithEuroRo(label) {
     return text ? `${text}${getKoreanEuroRoParticle(text)}` : '결재자로';
 }
 
+function normalizeApprovalSelectionUsers(users = []) {
+    const unique = [];
+    const seen = new Set();
+    (Array.isArray(users) ? users : []).forEach((user) => {
+        const normalized = normalizeApprovalDraftLineUser(user);
+        const safeEmpId = String(normalized?.emp_id || '').trim();
+        if (!safeEmpId || seen.has(safeEmpId)) return;
+        seen.add(safeEmpId);
+        unique.push(normalized);
+    });
+    return unique;
+}
+
+function sortApprovalApproverSelection(users = []) {
+    return normalizeApprovalSelectionUsers(users).sort((a, b) => {
+        const aLevel = getApprovalAuthLevelNumber(a?.auth_level);
+        const bLevel = getApprovalAuthLevelNumber(b?.auth_level);
+        if (aLevel !== bLevel) return bLevel - aLevel;
+        const aPriority = getApprovalPositionPriority(a?.position);
+        const bPriority = getApprovalPositionPriority(b?.position);
+        if (aPriority !== bPriority) return bPriority - aPriority;
+        return String(a?.emp_name || '').localeCompare(String(b?.emp_name || ''), 'ko');
+    });
+}
+
+function filterOutApprovalApproversFromRefs(users = [], approvers = []) {
+    const approverIds = new Set(
+        normalizeApprovalSelectionUsers(approvers).map((user) => String(user?.emp_id || '').trim()).filter(Boolean)
+    );
+    return normalizeApprovalSelectionUsers(users).filter((user) => !approverIds.has(String(user?.emp_id || '').trim()));
+}
+
 // [기능] 직원 선택 모달 (필터 적용)
 function openUserModal(type) {
     if (type === 'approver' && jeongyeolLineLocked) {
@@ -7499,7 +7531,9 @@ function openUserModal(type) {
     }
     modalType = type;
     document.getElementById("modalTitle").innerText = (type === 'approver') ? "결재자 선택" : "참조자 선택";
-    tempSelection = (type === 'approver') ? [...finalApprovers] : [...finalRefs];
+    tempSelection = (type === 'approver')
+        ? sortApprovalApproverSelection(finalApprovers)
+        : filterOutApprovalApproversFromRefs(finalRefs, finalApprovers);
     renderUserList();
     modalInstance.show();
 }
@@ -7524,32 +7558,34 @@ function renderUserList() {
     // 나보다 직급 낮은 사람 제외, 본인 제외
     const myLevelRaw = Number(myInfo?.auth_level);
     const myLevel = Number.isFinite(myLevelRaw) ? myLevelRaw : 99;
+    const selectedEmpIds = new Set(tempSelection.map((user) => String(user?.emp_id || '').trim()).filter(Boolean));
     let targets = (Array.isArray(allUsers) ? allUsers : []).filter(u => String(u?.emp_id) !== String(myInfo?.emp_id));
     
     if (modalType === 'approver') {
-        // [수정] 상향식 필터링: 나보다 높은 사람(숫자가 작은 사람)만 표시
-        // 이미 선택된 사람이 있다면, 그 사람보다 더 높은 사람만 표시
-        const selectedLevels = tempSelection
-            .map(u => Number(u?.auth_level))
-            .filter(v => Number.isFinite(v));
-        const currentHighestLevel = (selectedLevels.length > 0)
-            ? Math.min(...selectedLevels)
-            : myLevel;
-            
         targets = targets.filter(u => {
+            const safeEmpId = String(u?.emp_id || '').trim();
+            if (selectedEmpIds.has(safeEmpId)) return true;
             const level = Number(u?.auth_level);
-            return Number.isFinite(level) && level < currentHighestLevel;
+            return Number.isFinite(level) && level < myLevel;
         });
     } else {
         targets = targets.filter(u => !finalApprovers.some(a => String(a?.emp_id) === String(u?.emp_id)));
     }
 
+    if (modalType === 'approver') {
+        targets.sort((a, b) => {
+            const aSelected = selectedEmpIds.has(String(a?.emp_id || '').trim()) ? 0 : 1;
+            const bSelected = selectedEmpIds.has(String(b?.emp_id || '').trim()) ? 0 : 1;
+            if (aSelected !== bSelected) return aSelected - bSelected;
+            const aLevel = getApprovalAuthLevelNumber(a?.auth_level);
+            const bLevel = getApprovalAuthLevelNumber(b?.auth_level);
+            if (aLevel !== bLevel) return aLevel - bLevel;
+            return String(a?.emp_name || '').localeCompare(String(b?.emp_name || ''), 'ko');
+        });
+    }
+
     if (targets.length === 0) {
-        if (tempSelection.length > 0 && modalType === 'approver') {
-            listEl.innerHTML = '<div class="p-3 text-center text-muted">추가로 선택 가능한 상위 결재자가 없습니다.<br>아래의 선택 완료 버튼을 눌러 확정하세요.</div>';
-        } else {
-            listEl.innerHTML = '<div class="p-3 text-center text-muted">선택 가능한 대상이 없습니다.</div>';
-        }
+        listEl.innerHTML = '<div class="p-3 text-center text-muted">선택 가능한 대상이 없습니다.</div>';
         return;
     }
 
@@ -7582,17 +7618,22 @@ function renderUserList() {
 function toggleSelect(user) {
     const idx = tempSelection.findIndex(s => String(s?.emp_id) === String(user?.emp_id));
     if (idx > -1) tempSelection.splice(idx, 1); else tempSelection.push(user);
+    tempSelection = modalType === 'approver'
+        ? sortApprovalApproverSelection(tempSelection)
+        : normalizeApprovalSelectionUsers(tempSelection);
     renderUserList();
 }
 
 function confirmSelection() {
     if (modalType === 'approver') {
-        finalApprovers = [...tempSelection];
+        finalApprovers = sortApprovalApproverSelection(tempSelection);
+        finalRefs = filterOutApprovalApproversFromRefs(finalRefs, finalApprovers);
         approvalLineTemplateAutoApplied = false;
     } else {
-        finalRefs = [...tempSelection];
+        finalRefs = filterOutApprovalApproversFromRefs(tempSelection, finalApprovers);
     }
-    modalType==='approver' ? renderLinePreview() : renderRefPreview();
+    renderLinePreview();
+    renderRefPreview();
     modalInstance.hide();
 }
 
