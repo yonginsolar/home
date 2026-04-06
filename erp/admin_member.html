@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.58
-Change: 2026-04-03 - Manual member registration now splits personal/group input and Excel import supports resident/business identifiers.
+Version: v1.0.59
+Change: 2026-04-06 - Donation grant modal now supports name-first search and registration confirm shows member number plus name.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.58';
+window.ADMIN_MEMBER_VERSION = 'v1.0.59';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -640,10 +640,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
                         <div class="mb-3">
                             <label class="small fw-bold text-muted">대상 조합원</label>
                             <div class="input-group input-group-sm">
-                                <input type="text" id="dn-member-id" class="form-control" placeholder="ID 입력 또는 검색" readonly>
-                                <input type="text" id="dn-member-name" class="form-control bg-white" placeholder="이름" readonly>
+                                <input type="text" id="dn-member-id" class="form-control" placeholder="선택된 조합원번호" readonly>
+                                <input type="text" id="dn-member-name" class="form-control bg-white" placeholder="이름 입력 후 찾기" oninput="clearDonationMemberSelection()" onkeyup="if(event.key==='Enter') openMemberSearch('donation')">
                                 <button class="btn btn-secondary" type="button" onclick="openMemberSearch('donation')">🔍 찾기</button>
                             </div>
+                            <div class="form-text x-small">이름을 입력한 뒤 <strong>찾기</strong>를 누르면 같은 이름의 조합원을 검색합니다.</div>
                         </div>
                         <div class="mb-3">
                             <label class="small fw-bold text-muted">기부일</label>
@@ -8214,6 +8215,7 @@ function openDonationModal() {
 
 async function submitDonationGrant() {
     const memberId = document.getElementById('dn-member-id').value.trim();
+    const memberName = document.getElementById('dn-member-name').value.trim();
     const amount = Number(document.getElementById('dn-amount').value);
     const donationDate = document.getElementById('dn-date').value;
     const method = normalizeDonationMethod(document.getElementById('dn-method').value);
@@ -8223,7 +8225,8 @@ async function submitDonationGrant() {
     if (!Number.isFinite(amount) || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
     if (!donationDate) return myAlert('기부일을 선택해주세요.', 'warning');
 
-    myConfirm(`[${memberId}] 조합원에게\n자산수증이익 ${amount.toLocaleString()}원을 등록하시겠습니까?`, async () => {
+    const memberLabel = memberName ? `[${memberId}] ${memberName}` : `[${memberId}]`;
+    myConfirm(`${memberLabel} 조합원에게\n자산수증이익 ${amount.toLocaleString()}원을 등록하시겠습니까?`, async () => {
         showLoading(true);
 
         const { error } = await _supabase.rpc('manage_donation_secure', {
@@ -8247,7 +8250,7 @@ async function submitDonationGrant() {
         bootstrap.Modal.getInstance(document.getElementById('donationModal')).hide();
         fetchGlobalDonations();
     });
-}
+} // End of submitDonationGrant
 
 function downloadDonationTemplate() {
     const wsData = [
@@ -8585,11 +8588,35 @@ async function submitDividendBatch() {
 // 검색 모달 열기
 function openMemberSearch(target) {
     g_search_target = target;
-    document.getElementById('ms-keyword').value = '';
+    const seedKeyword = getMemberSearchSeed(target);
+    document.getElementById('ms-keyword').value = seedKeyword;
     document.getElementById('ms-result-list').innerHTML = '<div class="text-center py-4 text-muted x-small">이름을 입력하세요.</div>';
     new bootstrap.Modal(document.getElementById('memberSearchModal')).show();
-    setTimeout(() => document.getElementById('ms-keyword').focus(), 500);
-}
+    setTimeout(() => {
+        const keywordEl = document.getElementById('ms-keyword');
+        keywordEl.focus();
+        if (seedKeyword) {
+            keywordEl.select();
+            searchMemberForModal();
+        }
+    }, 500);
+} // End of openMemberSearch
+
+function getMemberSearchSeed(target) {
+    if (target === 'donation') {
+        return String(document.getElementById('dn-member-name')?.value || document.getElementById('dn-member-id')?.value || '').trim();
+    }
+    if (target === 'dividend') {
+        return String(document.getElementById('dv-member-name')?.value || document.getElementById('dv-member-id')?.value || '').trim();
+    }
+    return '';
+} // End of getMemberSearchSeed
+
+function clearDonationMemberSelection() {
+    const idEl = document.getElementById('dn-member-id');
+    if (!idEl) return;
+    idEl.value = '';
+} // End of clearDonationMemberSelection
 
 // 조합원 검색 실행 (메모리상 데이터 g_members 활용)
 function searchMemberForModal() {
