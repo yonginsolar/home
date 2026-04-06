@@ -1,12 +1,14 @@
 /*
-Version: v1.1.3
-Change: Respect explicit ERP app context so custom ERP-only domains keep root-based ERP paths instead of forcing /erp/* remaps.
+Version: v1.1.4
+Change: Add localhost-only erp_host override so local ERP QA can emulate a real coop ERP host without changing account permissions.
 */
 (function attachCoopRouteGuard(global) {
   'use strict';
 
   const LOCAL_PUBLIC_HOST_PARAM = 'public_host';
   const LOCAL_PUBLIC_HOST_OVERRIDE_KEY = 'local_public_host_override_v1';
+  const LOCAL_ERP_HOST_PARAM = 'erp_host';
+  const LOCAL_ERP_HOST_OVERRIDE_KEY = 'local_erp_host_override_v1';
 
   function isLocalHostname(hostname) {
     return hostname === 'localhost' || hostname === '127.0.0.1';
@@ -25,7 +27,7 @@ Change: Respect explicit ERP app context so custom ERP-only domains keep root-ba
       .toLowerCase();
   }
 
-  function readLocalPublicHostOverride(locationLike) {
+  function readLocalHostOverride(locationLike, paramName, storageKey) {
     const loc = locationLike || global.location;
     const actualHost = normalizeHostname(loc && loc.hostname);
     if (!isLocalHostname(actualHost)) return '';
@@ -33,29 +35,43 @@ Change: Respect explicit ERP app context so custom ERP-only domains keep root-ba
     let queryOverride = '';
     try {
       const params = new URLSearchParams(String(loc.search || ''));
-      queryOverride = normalizeHostname(params.get(LOCAL_PUBLIC_HOST_PARAM));
+      queryOverride = normalizeHostname(params.get(paramName));
     } catch (_) {
       queryOverride = '';
     }
 
     if (queryOverride && !isLocalHostname(queryOverride)) {
       try {
-        global.localStorage?.setItem(LOCAL_PUBLIC_HOST_OVERRIDE_KEY, queryOverride);
+        global.localStorage?.setItem(storageKey, queryOverride);
       } catch (_) {}
       return queryOverride;
     }
 
     try {
-      const stored = normalizeHostname(global.localStorage?.getItem(LOCAL_PUBLIC_HOST_OVERRIDE_KEY));
+      const stored = normalizeHostname(global.localStorage?.getItem(storageKey));
       if (stored && !isLocalHostname(stored)) return stored;
     } catch (_) {}
 
     return '';
   }
 
+  function readLocalPublicHostOverride(locationLike) {
+    return readLocalHostOverride(locationLike, LOCAL_PUBLIC_HOST_PARAM, LOCAL_PUBLIC_HOST_OVERRIDE_KEY);
+  }
+
+  function readLocalErpHostOverride(locationLike) {
+    return readLocalHostOverride(locationLike, LOCAL_ERP_HOST_PARAM, LOCAL_ERP_HOST_OVERRIDE_KEY);
+  }
+
   function clearLocalPublicHostOverride() {
     try {
       global.localStorage?.removeItem(LOCAL_PUBLIC_HOST_OVERRIDE_KEY);
+    } catch (_) {}
+  }
+
+  function clearLocalErpHostOverride() {
+    try {
+      global.localStorage?.removeItem(LOCAL_ERP_HOST_OVERRIDE_KEY);
     } catch (_) {}
   }
 
@@ -206,6 +222,13 @@ Change: Respect explicit ERP app context so custom ERP-only domains keep root-ba
     return localOverride || actualHost;
   }
 
+  function getErpRuntimeHost(locationLike) {
+    const loc = locationLike || global.location;
+    const actualHost = normalizeHostname(loc && loc.hostname);
+    const localOverride = readLocalErpHostOverride(loc);
+    return localOverride || actualHost;
+  }
+
   function buildSupabaseGlobalHeaders(locationLike, extraHeaders) {
     const headers = Object.assign({}, extraHeaders || {});
     const host = getPublicRuntimeHost(locationLike);
@@ -279,7 +302,9 @@ Change: Respect explicit ERP app context so custom ERP-only domains keep root-ba
     buildAppPageUrl,
     buildSupabaseGlobalHeaders,
     createSupabaseClient,
+    clearLocalErpHostOverride,
     clearLocalPublicHostOverride,
+    getErpRuntimeHost,
     getPublicRuntimeHost,
     isErpDestination,
     normalizeHostname,
