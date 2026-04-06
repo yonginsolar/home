@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.72 | Change: 2026-04-06 - Restrict card cashback postings to non-operating income accounts. -->
+<!-- Version: v1.0.77 | Change: 2026-04-06 - Show dashboard asset card as current total assets and keep approval auto-payment bank sync defaults. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.72 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.77 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1274,6 +1274,13 @@ function addAccountingMonths(ym, diff) {
     return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+function buildAccountingDateFromYmDay(ym, day, fallback = '') {
+    const safeYm = normalizeAccountingYm(ym);
+    const safeDay = Number(day);
+    if (!safeYm || !Number.isFinite(safeDay) || safeDay < 1 || safeDay > 31) return fallback;
+    return `${safeYm}-${String(safeDay).padStart(2, '0')}`;
+} // End of buildAccountingDateFromYmDay
+
 function normalizeAccountingYm(value) {
     const raw = String(value || '').trim();
     return /^\d{4}-\d{2}$/.test(raw) ? raw : '';
@@ -1716,6 +1723,64 @@ function buildCashNetMap(rows, prefix) {
     return map;
 }
 
+function normalizeDonationLegacyLabel(value) {
+    let text = String(value || '').trim();
+    if (!text) return '';
+    text = text.replace(/^\[기부금\]\s*/, '').trim();
+    text = text.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
+    text = text.replace(/\/[A-Za-z_]+$/, '').trim();
+    text = text.replace(/\s*자산수증이익\s*$/, '').trim();
+    return text;
+}
+
+function buildDonationLegacyCashKey(dateValue, donorLabel, amount) {
+    const txDate = String(dateValue || '').trim();
+    const donor = normalizeDonationLegacyLabel(donorLabel);
+    const normalizedAmount = Math.max(0, Number(amount || 0));
+    if (!txDate || !donor || !(normalizedAmount > 0)) return '';
+    return `${txDate}::${donor}::${normalizedAmount}`;
+}
+
+function buildLegacyDonationCashNetMap(rows, donations) {
+    const legacyBucket = new Map();
+
+    (rows || []).forEach((row) => {
+        if (!isCashLikeAccount(row.Account)) return;
+        if (parseSourceIdFromTransId(row.Trans_ID, 'DON')) return;
+
+        const description = String(row.Description || '').trim();
+        if (!description || !description.endsWith('자산수증이익')) return;
+
+        const donorLabel = normalizeDonationLegacyLabel(description.replace(/\s*자산수증이익\s*$/, '').trim());
+        const delta = Number(row.Debit || 0) - Number(row.Credit || 0);
+        if (!(delta > 0)) return;
+
+        const key = buildDonationLegacyCashKey(row.Date, donorLabel, delta);
+        if (!key) return;
+        legacyBucket.set(key, (legacyBucket.get(key) || 0) + 1);
+    });
+
+    const result = new Map();
+    (donations || []).forEach((donation) => {
+        const sourceId = String(donation?.id || '').trim();
+        if (!sourceId) return;
+
+        const donorLabel = String(donation.member_id || donation.member_uid || '익명').trim();
+        const txDate = String(donation.donation_date || '').trim();
+        const desired = Math.max(0, Number(donation.amount || 0));
+        const key = buildDonationLegacyCashKey(txDate, donorLabel, desired);
+        if (!key) return;
+
+        const remain = Number(legacyBucket.get(key) || 0);
+        if (remain <= 0) return;
+
+        legacyBucket.set(key, remain - 1);
+        result.set(sourceId, desired);
+    });
+
+    return result;
+}
+
 function parseApprovalSourceIdFromTransId(transId) {
     const raw = String(transId || '').trim();
     if (!raw.startsWith('APR-')) return null;
@@ -1938,7 +2003,7 @@ function renderApprovalUnclassifiedQueue(items) {
     const rowsHtml = safeItems.map((item) => {
         const safeDate = escapeHtml(item.date || '-');
         const safeTransId = escapeHtml(item.transId || '-');
-        const cleanDesc = (item.description || '').replace(/^\[전자결재-발생\]\s*/i, '') || item.description || '-';
+        const cleanDesc = (item.description || '').replace(/^\[전자결재-(?:발생|지급|카드|체크카드)\]\s*/i, '') || item.description || '-';
         const safeDesc = escapeHtml(cleanDesc);
         const safeProject = escapeHtml(item.project || '본사');
         const safeOperator = escapeHtml(item.operator || 'System');
@@ -2105,7 +2170,7 @@ function syncApprovalSplitReclassSummary() {
     const rows = Array.isArray(approvalSplitReclassState?.rows) ? approvalSplitReclassState.rows : [];
     if (metaEl) {
         metaEl.textContent = item
-            ? `${item.date || '-'} · ${item.transId || '-'} · ${(item.description || '').replace(/^\[전자결재-발생\]\s*/i, '') || item.transId || '전자결재'} · ${item.project || '본사'}`
+            ? `${item.date || '-'} · ${item.transId || '-'} · ${(item.description || '').replace(/^\[전자결재-(?:발생|지급|카드|체크카드)\]\s*/i, '') || item.transId || '전자결재'} · ${item.project || '본사'}`
             : '대상 정보를 다시 불러와 주세요.';
     }
     if (sourceEl) sourceEl.textContent = `${Number(item?.amount || 0).toLocaleString()}원`;
@@ -2686,7 +2751,7 @@ function normalizeApprovalExpenseSnapshot(doc) {
     if (!raw || typeof raw !== 'object') {
         return {
             payment_method: 'auto',
-            payment_method_label: '자동(기존 방식)',
+            payment_method_label: '자동(즉시지급)',
             card_alias: '',
             card_company: ''
         };
@@ -2720,8 +2785,34 @@ function buildAccountingYmFromParts(year, month) {
     return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}`;
 }
 
+function getApprovalEffectiveProcessedAt(doc) {
+    const direct = String(doc?.processed_at || '').trim();
+    if (direct) return direct;
+    const lines = Array.isArray(doc?.approval_line) ? doc.approval_line : [];
+    let latestIso = '';
+    let latestTime = Number.NEGATIVE_INFINITY;
+    lines.forEach((entry) => {
+        const raw = String(entry?.processed_at || '').trim();
+        if (!raw) return;
+        const time = new Date(raw).getTime();
+        if (!Number.isFinite(time)) return;
+        if (time > latestTime) {
+            latestTime = time;
+            latestIso = raw;
+        }
+    });
+    return latestIso;
+} // End of getApprovalEffectiveProcessedAt
+
+function getApprovalJournalDate(doc, fallbackDate) {
+    const effectiveIso = getApprovalEffectiveProcessedAt(doc);
+    const completedDate = effectiveIso ? formatAccountingKstDate(effectiveIso, '') : '';
+    return completedDate || fallbackDate;
+} // End of getApprovalJournalDate
+
 function getApprovalBaseKstInfo(doc) {
-    const baseYm = formatAccountingKstMonth(doc?.created_at || new Date(), formatAccountingKstMonth(new Date(), ''));
+    const baseSource = getApprovalEffectiveProcessedAt(doc) || doc?.created_at || new Date();
+    const baseYm = formatAccountingKstMonth(baseSource, formatAccountingKstMonth(new Date(), ''));
     const year = Number(baseYm.slice(0, 4));
     const month = Number(baseYm.slice(5, 7));
     return { year, month, ym: baseYm };
@@ -2788,19 +2879,27 @@ function parseApprovalInsurancePaymentDate(doc, fallbackDate) {
     }
 
     const monthDay = rawText.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-    if (!monthDay) return fallbackDate;
+    if (monthDay) {
+        const payMonth = Number(monthDay[1]);
+        const payDay = Number(monthDay[2]);
+        if ([payMonth, payDay].every((value) => Number.isFinite(value) && value > 0)) {
+            const baseInfo = getApprovalBaseKstInfo(doc);
+            let payYear = baseInfo.year;
+            if (payMonth < (baseInfo.month - 1)) payYear += 1;
 
-    const payMonth = Number(monthDay[1]);
-    const payDay = Number(monthDay[2]);
-    if (![payMonth, payDay].every((value) => Number.isFinite(value) && value > 0)) return fallbackDate;
+            const parsed = `${String(payYear).padStart(4, '0')}-${String(payMonth).padStart(2, '0')}-${String(payDay).padStart(2, '0')}`;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
+        }
+    }
 
-    const baseInfo = getApprovalBaseKstInfo(doc);
-    let payYear = baseInfo.year;
-    if (payMonth < (baseInfo.month - 1)) payYear += 1;
-
-    const parsed = `${String(payYear).padStart(4, '0')}-${String(payMonth).padStart(2, '0')}-${String(payDay).padStart(2, '0')}`;
-    return /^\d{4}-\d{2}-\d{2}$/.test(parsed) ? parsed : fallbackDate;
-}
+    const insuranceRange = parseApprovalInsuranceMonthRange(doc);
+    if (insuranceRange?.endYm) {
+        const nextYm = addAccountingMonths(insuranceRange.endYm, 1);
+        const inferred = buildAccountingDateFromYmDay(nextYm, 10, '');
+        if (inferred) return inferred;
+    }
+    return fallbackDate;
+} // End of parseApprovalInsurancePaymentDate
 
 function buildApprovalInsuranceBaseDescription(doc) {
     const firstLine = String(doc?.content || '')
@@ -2857,6 +2956,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
 
         const transId = `APR-${doc.id}`;
         const operator = doc?.drafter_name || writer;
+        const journalDate = getApprovalJournalDate(doc, fallbackDate);
 
         if (isInsuranceApproval(doc)) {
             const monthRange = parseApprovalInsuranceMonthRange(doc);
@@ -2889,7 +2989,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
             plans.push({
                 kind: 'insurance',
                 amount,
-                date: parseApprovalInsurancePaymentDate(doc, fallbackDate),
+                date: parseApprovalInsurancePaymentDate(doc, journalDate),
                 description: buildApprovalInsuranceBaseDescription(doc),
                 transId,
                 project: '본사',
@@ -2904,6 +3004,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         }
 
         const expenseSnapshot = normalizeApprovalExpenseSnapshot(doc);
+        const paymentMethod = String(expenseSnapshot.payment_method || 'auto').trim();
         const cardAlias = String(expenseSnapshot.card_alias || '').trim();
         const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
         const descBase = `${cardPrefix}${doc?.title || doc?.doc_type || '지출결의'}`;
@@ -2911,7 +3012,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
             plans.push({
                 kind: 'payment',
                 amount,
-                date: fallbackDate,
+                date: journalDate,
                 description: `[전자결재-지급] ${descBase}`,
                 transId,
                 project: '본사',
@@ -2919,22 +3020,27 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
             });
             paymentCount += 1;
         } else {
-            const approvalKind = expenseSnapshot.payment_method === 'check_card' ? 'check_card' : 'accrual';
-            const approvalPrefix = expenseSnapshot.payment_method === 'check_card'
+            const approvalKind = paymentMethod === 'check_card'
+                ? 'check_card'
+                : paymentMethod === 'credit_card'
+                    ? 'accrual'
+                    : 'direct_payment';
+            const approvalPrefix = paymentMethod === 'check_card'
                 ? '[전자결재-체크카드]'
-                : expenseSnapshot.payment_method === 'credit_card'
+                : paymentMethod === 'credit_card'
                     ? '[전자결재-카드]'
-                    : '[전자결재-발생]';
+                    : '[전자결재-지급]';
             plans.push({
                 kind: approvalKind,
                 amount,
-                date: fallbackDate,
+                date: journalDate,
                 description: `${approvalPrefix} ${descBase}`,
                 transId,
                 project: '본사',
                 operator
             });
             if (approvalKind === 'check_card') checkCardCount += 1;
+            else if (approvalKind === 'direct_payment') paymentCount += 1;
             else accrualCount += 1;
         }
         totalAmount += amount;
@@ -2951,6 +3057,10 @@ function appendApprovalEntriesFromPlan(entries, plan) {
     }
     if (plan.kind === 'payment') {
         appendApprovalPaymentEntries(entries, plan);
+        return;
+    }
+    if (plan.kind === 'direct_payment') {
+        appendApprovalImmediateExpenseEntries(entries, plan);
         return;
     }
     if (plan.kind === 'check_card') {
@@ -3603,6 +3713,7 @@ async function refreshDashboard() {
     if (!data) return;
 
     const now = new Date();
+    const todayKst = formatAccountingKstDate(now);
     const currentYear = now.getFullYear().toString();
     const selectedYear = String(getDashboardYear());
     const currentMonth = now.getMonth() + 1; // 1~12월
@@ -3613,7 +3724,7 @@ async function refreshDashboard() {
 
     let rev = 0;         // 선택 연도 매출 합계
     let exp = 0;         // 선택 연도 비용 합계
-    let ast = 0;         // 선택 연도 자산 증감 합계
+    let ast = 0;         // 오늘 기준 총자산
     let vatIn = 0;       // 부가세예수금 (현재 분기만)
     let vatOut = 0;      // 부가세대급금 (현재 분기만)
     let bankBalance = 0; // 보통예금 (전체 누적)
@@ -3626,10 +3737,10 @@ async function refreshDashboard() {
         const rYear = r.Date.substring(0, 4);
         const rMonth = Number(r.Date.substring(5, 7));
 
-        // 1. 자산 증감(선택 연도) + 통장 잔고(전체 누적)
+        // 1. 오늘 기준 총자산 + 통장 잔고(오늘까지 누적)
         if (r.Type === '자산') {
-            if (rYear === selectedYear) ast += (db - cr);
-            if (r.Account === '보통예금' || r.Account === '현금') {
+            if (r.Date <= todayKst) ast += (db - cr);
+            if ((r.Account === '보통예금' || r.Account === '현금') && r.Date <= todayKst) {
                 bankBalance += (db - cr);
             }
         }
@@ -5410,7 +5521,7 @@ function confirmSync(type) {
             const coopId = String(myInfo?.coop_id || '').trim();
             const { data: approvals, error: previewError } = await _supabase
                 .from('ref_approval')
-                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,expense_snapshot')
+                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot')
                 .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                 .in('status', ['완료', '실물결재완료'])
                 .ilike('doc_type', '%지출%');
@@ -5435,7 +5546,7 @@ function confirmSync(type) {
                 `- 대상 건수: ${targetDocs.length}건`,
                 `- 예상 금액: ${totalAmount.toLocaleString()}원`,
                 `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, 대)보통예금`,
-                `- 급여/인건비 집행전표: ${previewPlanResult.paymentCount}건 (차)미지급금/(대)보통예금`,
+                `- 즉시지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`
             ].join('\n');
@@ -5443,7 +5554,7 @@ function confirmSync(type) {
             showConfirm("전자결재 연동", previewMsg, async () => {
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
-                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,expense_snapshot')
+                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot')
                     .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                     .in('status', ['완료', '실물결재완료'])
                     .ilike('doc_type', '%지출%');
@@ -5477,7 +5588,7 @@ function confirmSync(type) {
                     trans_ids: collectTransIds(entries),
                     restores: []
                 });
-                showAlert("완료", `${runTargetDocs.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 급여/인건비 집행전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건`);
+                showAlert("완료", `${runTargetDocs.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 즉시지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
@@ -5683,18 +5794,18 @@ function confirmSync(type) {
         (async () => {
             const { data: previewDonations, error: previewDonationError } = await _supabase
                 .from('coop_donations')
-                .select('id,amount,note')
+                .select('id,amount,note,donation_date,member_id,member_uid')
                 .order('donation_date', { ascending: true });
             if (previewDonationError) return showAlert("오류", "미리보기 조회 실패: " + previewDonationError.message);
             if (!previewDonations || previewDonations.length === 0) return showAlert("알림", "연동할 기부금 내역이 없습니다.");
 
             const { data: previewDonRows, error: previewDonRowsError } = await _supabase
                 .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DON-%');
+                .select('Date,Description,Trans_ID,Account,Debit,Credit');
             if (previewDonRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewDonRowsError.message);
 
             const previewCashNetMap = buildCashNetMap(previewDonRows || [], 'DON');
+            const previewLegacyCashNetMap = buildLegacyDonationCashNetMap(previewDonRows || [], previewDonations || []);
             let previewNew = 0;
             let previewCorrection = 0;
             let previewSkipDone = 0;
@@ -5703,7 +5814,7 @@ function confirmSync(type) {
                 const sourceId = String(row.id || '').trim();
                 if (!sourceId) return;
                 const desired = Math.max(0, Number(row.amount || 0));
-                const current = Number(previewCashNetMap.get(sourceId) || 0);
+                const current = Number(previewCashNetMap.get(sourceId) || 0) + Number(previewLegacyCashNetMap.get(sourceId) || 0);
                 const hasDone = String(row.note || '').includes('[전표완료]');
                 if (current === desired) {
                     if (hasDone) previewSkipDone += 1;
@@ -5732,11 +5843,11 @@ function confirmSync(type) {
 
             const { data: existingRows, error: existingError } = await _supabase
                 .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'DON-%');
+                .select('Date,Description,Trans_ID,Account,Debit,Credit');
             if (existingError) return showAlert("오류", "기존 전표 확인 실패: " + existingError.message);
 
             const cashNetMap = buildCashNetMap(existingRows || [], 'DON');
+            const legacyCashNetMap = buildLegacyDonationCashNetMap(existingRows || [], donations || []);
 
             let entries = [];
             let markTargets = [];
@@ -5749,7 +5860,7 @@ function confirmSync(type) {
                 if (!sourceId) return;
 
                 const desired = Math.max(0, Number(d.amount || 0));
-                const currentNet = Number(cashNetMap.get(sourceId) || 0);
+                const currentNet = Number(cashNetMap.get(sourceId) || 0) + Number(legacyCashNetMap.get(sourceId) || 0);
                 const rawNote = d.note;
                 const currentNote = String(d.note || '').trim();
                 const hasDone = currentNote.includes('[전표완료]');

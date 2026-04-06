@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.04 | Change: 2026-04-06 - Derive expense card handling from registered credit/check card types. -->
+<!-- Version: v1.2.05 | Change: 2026-04-06 - Save document-level processed_at on final digital approval completion. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.04 | approval.html');</script>
+  <script>console.log('[Version] v1.2.05 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -8624,9 +8624,10 @@ async function processApprovalDoc(docId, action, reason = '') {
     const effectiveApproverEmpId = String(context.effectiveApproverEmpId || actorEmpId || '').trim();
     const idx = Number(context.idx);
 
+    const nowIso = new Date().toISOString();
     line[idx].status = action;
     line[idx].comment = reason;
-    line[idx].processed_at = new Date().toISOString();
+    line[idx].processed_at = nowIso;
     if (delegatedFrom) {
         line[idx].delegate_emp_id = actorEmpId;
         line[idx].delegate_name = myInfo?.emp_name || actorEmpId;
@@ -8654,9 +8655,14 @@ async function processApprovalDoc(docId, action, reason = '') {
         leaveCancelTargetDoc = leaveCancelTarget.targetDoc;
     }
 
+    const approvalUpdatePayload = { approval_line: line, current_approver: nextUser, status: newStatus };
+    if (newStatus === '완료') {
+        approvalUpdatePayload.processed_at = nowIso;
+    }
+
     const { error: approvalUpdateError } = await scopeApprovalTenant(_supabase
         .from('ref_approval')
-        .update({ approval_line: line, current_approver: nextUser, status: newStatus }))
+        .update(approvalUpdatePayload))
         .eq('id', docId);
     if (approvalUpdateError) {
         showAlert("결재 상태 저장 실패: " + approvalUpdateError.message);
