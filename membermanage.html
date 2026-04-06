@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.69
+Version: v1.0.70
 Change: Enable auth.coopco.kr broker for Kakao/Naver portal login starts.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.69 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.70 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -999,7 +999,7 @@ oninput="autoHyphen(this)"> </div>
 
 <div class="d-grid gap-2">
 <button class="btn btn-success fw-bold" onclick="tryFindEmail()">이메일 확인</button>
-<button class="btn btn-light btn-sm" onclick="document.getElementById('findEmailModalOverlay').style.display='none'">닫기</button>
+<button class="btn btn-light btn-sm" onclick="closeFindEmailModal()">닫기</button>
 </div>
 </div>
 </div>
@@ -2121,11 +2121,15 @@ if (serverMessage.indexOf('ambiguous') >= 0 && isPhone) {
 showModal('같은 전화번호로 등록된 조합원이 여러 명일 수 있습니다.\n이메일이나 카카오 로그인으로 다시 시도해주세요.');
 return;
 }
+if (serverMessage.indexOf('contact_mismatch') >= 0) {
+showModal('일치하는 가입 정보를 찾지 못했습니다.\n이름과 연락처를 다시 확인해주세요.');
+return;
+}
 if (serverMessage.indexOf('not_found') >= 0) {
 showModal('일치하는 정보가 없습니다.\n이름이나 연락처를 다시 확인해주세요.');
 return;
 }
-showModal(`가입 정보를 찾지 못했습니다.\n사유: ${serverMessage}`);
+showModal('가입 정보를 찾지 못했습니다.\n입력한 정보를 다시 확인해주세요.');
 return;
 }
 
@@ -4357,6 +4361,7 @@ function setVal(id, val) { const el=document.getElementById(id); if(el) el.value
 
 // [추가] 모달 제어 함수
 function showModal(msg) {
+setModalDepth(true);
 document.getElementById('customModalMsg').innerText = msg;
 document.getElementById('btnModalNo').style.display = 'none'; // 취소버튼 숨김
 document.getElementById('btnModalYes').onclick = closeCustomModal;
@@ -4397,6 +4402,7 @@ setModalDepth(false); // 복구
 
 function closeCustomModal() {
 document.getElementById('customModalOverlay').style.display = 'none';
+setModalDepth(false);
 }
 
 // =========================================================================
@@ -5771,8 +5777,17 @@ function openFindEmailModal() {
 // 입력창 초기화
 document.getElementById('findEmailName').value = '';
 document.getElementById('findEmailPhone').value = '';
-document.getElementById('findEmailModalOverlay').style.display = 'flex';
+const overlay = document.getElementById('findEmailModalOverlay');
+overlay.classList.remove('modal-depth-back');
+overlay.style.display = 'flex';
 }
+
+function closeFindEmailModal() {
+const overlay = document.getElementById('findEmailModalOverlay');
+if (!overlay) return;
+overlay.style.display = 'none';
+overlay.classList.remove('modal-depth-back');
+} // End of closeFindEmailModal
 
 // [신규] 이메일 찾기 실행
 async function tryFindEmail() {
@@ -5781,8 +5796,6 @@ const phone = document.getElementById('findEmailPhone').value.trim();
 
 // 1. 유효성 검사 (전화번호 12자리 이상: 010-XXXX-XXXX)
 if (!name || normalizePhoneDigits(phone).length < 10) {
-// 기존 알럿 대신 모달 사용 (depth 처리 적용)
-setModalDepth(true); 
 return showModal('이름과 휴대폰 번호를 정확히 입력해주세요.');
 }
 
@@ -5804,18 +5817,16 @@ throw error;
 // 3. 결과 처리
 if (data && data.success) {
 // 찾음
-document.getElementById('findEmailModalOverlay').style.display = 'none';
+closeFindEmailModal();
 showModal(`회원님의 이메일 주소 힌트입니다.\n\n📧 ${data.masked_email}\n\n위 주소로 다시 로그인해주세요.`);
 } else {
 // 못 찾음 (보안상 모호하게 메시지 처리)
-setModalDepth(true);
 showModal('일치하는 가입 정보를 찾을 수 없습니다.\n이름이나 전화번호를 확인해주세요.');
 }
 
 } catch (e) {
 showLoading(false);
 console.error(e);
-setModalDepth(true);
 showModal('오류가 발생했습니다: ' + e.message);
 }
 }
