@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.18
-Change: Enable auth.coopco.kr broker for Kakao/Naver signup starts.
+Version: v1.0.19
+Change: Save public group signup business numbers into business_number and use public signup v2 RPC.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.18 | signup.html');</script>
+  <script>console.log('[Version] v1.0.19 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -1554,7 +1554,8 @@ const insertData = {
 coop_id: signupTenant.coop_id,
 name: nameInput.value,
 member_type: userType,
-rrn_encrypted: fullID,
+rrn_encrypted: userType === '개인' ? fullID : null,
+business_number: userType === '단체' ? document.getElementById('orgNo').value : null,
 corp_number: userType === '단체' ? document.getElementById('finalCorpNo').value : null,
 phone: document.getElementById('p1').value + '-' + p2.value + '-' + p3.value,
 email: document.getElementById('verifiedEmail').value,
@@ -1577,11 +1578,12 @@ is_agreed: true
 };
 
 // Supabase 전송
-const { error } = await _supabase.rpc('create_public_signup_member', {
+const { error } = await _supabase.rpc('create_public_signup_member_v2', {
   p_coop_code: signupTenant.coop_code,
   p_name: insertData.name,
   p_member_type: insertData.member_type,
   p_rrn_encrypted: insertData.rrn_encrypted,
+  p_business_number: insertData.business_number,
   p_corp_number: insertData.corp_number,
   p_phone: insertData.phone,
   p_email: insertData.email,
