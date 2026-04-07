@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.17
+Version: v1.0.18
 Change: Enable auth.coopco.kr broker for Kakao/Naver signup starts.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.17 | signup.html');</script>
+  <script>console.log('[Version] v1.0.18 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -206,10 +206,10 @@ onblur="checkRRNFinal()">
 </div>
 <div id="box-corp" class="d-flex gap-2 align-items-center mb-2" style="display:none;">
 <input type="text" id="corp1" maxlength="6" class="form-control text-center" placeholder="법인번호 앞 6자리" required 
-oninput="onlyNum(this); autoMove(this,'corp2',6); resetMsg('corpMsg'); clearFieldWarning(this);">
+oninput="onlyNum(this); autoMove(this,'corp2',6); resetSignupCorpValidationState(); clearFieldWarning(this);">
 <span>-</span>
 <input type="text" id="corp2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" required 
-oninput="onlyNum(this); resetMsg('corpMsg'); clearFieldWarning(this);" 
+oninput="onlyNum(this); resetSignupCorpValidationState(); clearFieldWarning(this);" 
 onblur="validateCorpNo()"> 
 </div>
 <div id="corpMsg" class="msg-box" style="display:none;"></div>
@@ -217,13 +217,13 @@ onblur="validateCorpNo()">
 
 <div id="box-biz" class="d-flex gap-2 align-items-center" style="display:none;">
 <input type="text" id="biz1" maxlength="3" class="form-control text-center" placeholder="3자리" required 
-oninput="onlyNum(this); autoMove(this,'biz2',3); resetMsg('bizMsg'); clearFieldWarning(this);">
+oninput="onlyNum(this); autoMove(this,'biz2',3); resetSignupBizValidationState(); clearFieldWarning(this);">
 <span>-</span>
 <input type="text" id="biz2" maxlength="2" class="form-control text-center" placeholder="2자리" required 
-oninput="onlyNum(this); autoMove(this,'biz3',2); resetMsg('bizMsg'); clearFieldWarning(this);">
+oninput="onlyNum(this); autoMove(this,'biz3',2); resetSignupBizValidationState(); clearFieldWarning(this);">
 <span>-</span>
 <input type="text" id="biz3" maxlength="5" class="form-control text-center" placeholder="5자리" required 
-oninput="onlyNum(this); resetMsg('bizMsg'); clearFieldWarning(this);"
+oninput="onlyNum(this); resetSignupBizValidationState(); clearFieldWarning(this);"
 onblur="validateBizNo()">
 </div>
 
@@ -717,6 +717,11 @@ document.getElementById('rrn1').required = false; document.getElementById('rrn2'
 document.getElementById('corp1').required = true; document.getElementById('corp2').required = true;
 document.getElementById('biz1').required = true; document.getElementById('biz3').required = true;
 }
+
+document.getElementById('orgNo').value = '';
+document.getElementById('finalCorpNo').value = '';
+resetMsg('bizMsg');
+resetMsg('corpMsg');
 
 syncAccountHolder();
 // 버튼 상태 초기화 (토글 시 잘못된 비활성화 풀기)
@@ -1281,6 +1286,11 @@ setError(input);
 const userType = document.querySelector('input[name="userType"]:checked').value;
 const nameInput = document.getElementById('userName');
 
+if (userType === '단체') {
+await validateBizNo();
+await validateCorpNo();
+}
+
 // 3-1. 이름/단체명 2글자 미만 체크
 if (nameInput.value.trim().length < 2) {
 setError(nameInput);
@@ -1701,6 +1711,16 @@ el.style.display = 'none';
 }
 document.getElementById('btnSubmit').disabled = false;
 }
+
+function resetSignupBizValidationState() {
+document.getElementById('orgNo').value = '';
+resetMsg('bizMsg');
+} // End of resetSignupBizValidationState
+
+function resetSignupCorpValidationState() {
+document.getElementById('finalCorpNo').value = '';
+resetMsg('corpMsg');
+} // End of resetSignupCorpValidationState
 
 async function runSignupDuplicateCheck(checkField, checkValue) {
 const { data, error } = await _supabase.rpc('check_duplicate_signup', {
