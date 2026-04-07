@@ -1,6 +1,6 @@
 /*
-Version: v1.0.9
-Change: Cache Pretendard font loading so certificate PDF generation does not refetch the same font every time.
+Version: v1.0.10
+Change: Fix Korean amount text on certificates so large amounts like 9,940,000 print as 구백구십사만 instead of 구구사만.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -806,55 +806,38 @@ function blobToDataURL(blob) {
 
 // [업그레이드] 숫자 -> 한글 변환 (일금 일십만...)
 function numberToKorean(number) {
-    const inputNumber  = number < 0 ? false : number;
-    const unitWords    = ['', '만', '억', '조', '경'];
-    const splitUnit    = 10000;
-    const splitCount   = unitWords.length;
-    const resultArray  = [];
-    let resultString   = '';
+    const safeNumber = Number(number);
+    if (!Number.isFinite(safeNumber) || safeNumber < 0) return '';
 
-    for (let i = 0; i < splitCount; i++){
-        let unitResult = (inputNumber % Math.pow(splitUnit, i + 1)) / Math.pow(splitUnit, i);
-        unitResult = Math.floor(unitResult);
-        if (unitResult > 0){
-            resultArray[i] = unitResult;
+    const integerValue = Math.floor(safeNumber);
+    if (integerValue === 0) return '영';
+
+    const digitWords = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+    const smallUnits = ['', '십', '백', '천'];
+    const largeUnits = ['', '만', '억', '조', '경'];
+    const parts = [];
+    let remaining = integerValue;
+    let largeUnitIndex = 0;
+
+    while (remaining > 0 && largeUnitIndex < largeUnits.length) {
+        const chunk = remaining % 10000;
+        if (chunk > 0) {
+            const chunkDigits = String(chunk).padStart(4, '0');
+            let chunkText = '';
+
+            for (let i = 0; i < chunkDigits.length; i += 1) {
+                const digit = Number(chunkDigits[i]);
+                if (digit === 0) continue;
+                const unitIndex = chunkDigits.length - 1 - i;
+                chunkText += `${digitWords[digit]}${smallUnits[unitIndex]}`;
+            }
+
+            parts.unshift(`${chunkText}${largeUnits[largeUnitIndex]}`);
         }
+
+        remaining = Math.floor(remaining / 10000);
+        largeUnitIndex += 1;
     }
 
-    for (let i = 0; i < resultArray.length; i++){
-        if(!resultArray[i]) continue;
-        resultString = String(resultArray[i]) + unitWords[i] + resultString;
-    }
-
-    // 숫자 -> 한글 매핑
-    const digitMap = { '1': '일', '2': '이', '3': '삼', '4': '사', '5': '오', '6': '육', '7': '칠', '8': '팔', '9': '구', '0': '' };
-    
-    // 단순 변환 (만, 억 단위 처리 후 숫자를 한글로)
-    // 예: 100000 -> 10만 -> 일십만
-    // 이 로직은 복잡하므로, 가장 많이 쓰는 정형화된 패턴으로 처리하거나
-    // 간단히 '100,000' -> '일십만' 변환을 수행
-    
-    // 여기서는 결과 문자열(예: '10만')을 한글로 바꿈
-    let final = resultString;
-    // 10 -> 일십, 1 -> 일 (단위 앞에서는 생략하는 경우도 있지만 '일금' 표기시엔 '일'을 붙임)
-    
-    // 간이 변환 로직 (숫자 하나하나 변환하되 단위 앞 1 처리)
-    // 실제로는 num2kor 라이브러리 없이 완벽 구현이 길어지므로, 
-    // 결과값인 resultString(예: "10만")을 한글로 바꿉니다.
-    
-    // 만약 "100000" 이라면 resultString은 "10만"이 됨.
-    // "10만" -> "일십만" 으로 바꾸기
-    
-    final = final.replace(/10/g, '일십');
-    final = final.replace(/1/g, '일');
-    final = final.replace(/2/g, '이');
-    final = final.replace(/3/g, '삼');
-    final = final.replace(/4/g, '사');
-    final = final.replace(/5/g, '오');
-    final = final.replace(/6/g, '육');
-    final = final.replace(/7/g, '칠');
-    final = final.replace(/8/g, '팔');
-    final = final.replace(/9/g, '구');
-    
-    return final; 
-}
+    return parts.join('');
+} // End of numberToKorean
