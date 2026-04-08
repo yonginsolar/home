@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.40 | Change: 2026-04-04 - Force /erp/* canonical paths on custom ERP domains before loading relative ERP links and assets. -->
+<!-- Version: v1.0.41 | Change: 2026-04-08 - Show host-mapped coop name on ERP main page before and after login. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.40 | index.html');</script>
+  <script>console.log('[Version] v1.0.41 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-  <title>협동조합 ERP (메인)</title>
+  <title>협동조합 ERP</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
@@ -42,7 +42,7 @@
     }
   })();
 </script>
-  <script src="/shared/route_guard.js?v=20260403-1"></script>
+  <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="/shared/auth_broker_helper.js?v=20260404-1"></script>
   
   <style>
@@ -81,7 +81,7 @@
 <body class="erp-unified">
 
   <div class="main-card">
-    <h3 class="fw-bold mb-4">⚡ 협동조합 ERP</h3>
+    <h3 class="fw-bold mb-4" id="erpBrandTitle">⚡ 협동조합 ERP</h3>
 
     <div id="loadingScreen">
       <div class="spinner-border text-primary mb-3" role="status"></div>
@@ -303,10 +303,18 @@
 <script>
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co'; 
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const ERP_RUNTIME_HOST = window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase();
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     global: {
         headers: {
-            'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase()
+            'x-erp-host': ERP_RUNTIME_HOST
+        }
+    }
+});
+const _supabasePublicContext = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: {
+        headers: {
+            'x-public-host': ERP_RUNTIME_HOST
         }
     }
 });
@@ -355,6 +363,37 @@ let employeeMatchModalInstance = null;
 let employeeMatchCandidates = [];
 let employeeMatchActiveUser = null;
 let employeeMatchClaimInFlight = false;
+
+function normalizeErpBrandName(value) {
+    return String(value || '').trim();
+} // End of normalizeErpBrandName
+
+function applyErpBranding(coopName) {
+    const safeName = normalizeErpBrandName(coopName) || '협동조합';
+    document.title = `${safeName} ERP`;
+    const titleEl = document.getElementById('erpBrandTitle');
+    if (titleEl) titleEl.textContent = `⚡ ${safeName} ERP`;
+} // End of applyErpBranding
+
+async function loadErpPublicContext() {
+    try {
+        const { data, error } = await _supabasePublicContext.rpc('get_public_site_context');
+        if (error) {
+            console.error('get_public_site_context failed:', error);
+            return null;
+        }
+        return data || null;
+    } catch (err) {
+        console.error('get_public_site_context exception:', err);
+        return null;
+    }
+} // End of loadErpPublicContext
+
+async function hydrateErpBranding() {
+    const publicContext = await loadErpPublicContext();
+    const coopName = normalizeErpBrandName(publicContext?.coop_name);
+    if (coopName) applyErpBranding(coopName);
+} // End of hydrateErpBranding
 
 function buildSocialCallbackUrl(extraParams = {}) {
     const callbackUrl = new URL(ERP_SOCIAL_AUTH_CALLBACK_URL);
@@ -1248,6 +1287,7 @@ async function loadUserInfo(user) {
     permissionSet = await loadPermissions(data);
     platformContext = await loadPlatformContext();
     coopRuntime = await loadCoopRuntime();
+    applyErpBranding(coopRuntime?.coop_name || '');
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
 
     if (coopRuntime && coopRuntime.is_active === false) {
@@ -1874,6 +1914,7 @@ async function logout() {
 }
 
 document.addEventListener('DOMContentLoaded', initCommonModals);
+document.addEventListener('DOMContentLoaded', () => { void hydrateErpBranding(); });
 </script>
 
 <script src="patch_note.js"></script>
