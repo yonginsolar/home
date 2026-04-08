@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.59
+Version: v1.0.60
 Change: 2026-04-06 - Donation grant modal now supports name-first search and registration confirm shows member number plus name.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.59';
+window.ADMIN_MEMBER_VERSION = 'v1.0.60';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1522,9 +1522,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </div>
 
 <div class="mb-2">
-<label class="form-label small fw-bold text-primary">🏅 뱃지 부여</label>
-<div class="card p-2 bg-light border-0" style="max-height:120px; overflow-y:auto;">
-<div id="badge-checkboxes" class="d-flex flex-wrap gap-2">
+<label class="form-label small fw-bold text-primary">🏅 연동 뱃지</label>
+<div class="card p-2 bg-light border-0">
+<div id="partner-badge-note" class="small text-muted mb-2">조합원 관리에서 부여한 뱃지가 실시간 연동됩니다.</div>
+<div id="partner-badge-preview" class="d-flex flex-wrap gap-2">
+<span class="small text-muted">조합원 번호를 입력하면 연동된 뱃지가 표시됩니다.</span>
 </div>
 </div>
 </div>
@@ -5424,6 +5426,115 @@ function resolvePartnerPendingPreview(partner) {
     };
 } // End of resolvePartnerPendingPreview
 
+let g_partnerBadgeSyncTimer = null;
+let g_partnerBadgePreviewRequestSeq = 0;
+
+function renderPartnerSyncedBadgePreview(badgeCodes, emptyMessage, noteMessage) {
+    const box = document.getElementById('partner-badge-preview');
+    const note = document.getElementById('partner-badge-note');
+    if (!box || !note) return;
+
+    note.textContent = noteMessage || '조합원 관리에서 부여한 뱃지가 실시간 연동됩니다.';
+
+    const codes = Array.isArray(badgeCodes) ? badgeCodes.filter(Boolean) : [];
+    if (!codes.length) {
+        box.innerHTML = `<span class="small text-muted">${escapeHtml(emptyMessage || '연동된 뱃지가 없습니다.')}</span>`;
+        return;
+    }
+
+    let html = '';
+    codes.forEach((code) => {
+        const badge = (g_badges || []).find((item) => item.code === code);
+        if (badge) html += Badges.renderPill(badge);
+    });
+
+    box.innerHTML = html || `<span class="small text-muted">${escapeHtml(emptyMessage || '연동된 뱃지가 없습니다.')}</span>`;
+} // End of renderPartnerSyncedBadgePreview
+
+async function fetchPartnerMemberBadgeCodes(memberId) {
+    const safeMemberId = String(memberId || '').trim();
+    if (!safeMemberId) return { found: false, codes: [] };
+
+    const { data: member, error: memberError } = await scopeAdminTenant(
+        _supabase.from('coop_members').select('id').eq('member_id', safeMemberId).maybeSingle()
+    );
+    if (memberError) throw memberError;
+    if (!member || !member.id) return { found: false, codes: [] };
+
+    const { data: rows, error: badgeError } = await scopeAdminTenant(
+        _supabase.from('coop_member_badges').select('badge_id').eq('member_uid', member.id)
+    );
+    if (badgeError) throw badgeError;
+
+    const codes = [];
+    (rows || []).forEach((row) => {
+        const badge = (g_badges || []).find((item) => Number(item.id) === Number(row.badge_id));
+        if (badge && badge.code && !codes.includes(badge.code)) codes.push(badge.code);
+    });
+
+    return { found: true, codes };
+} // End of fetchPartnerMemberBadgeCodes
+
+async function refreshPartnerBadgeSyncPreview(memberId, fallbackCodes = []) {
+    const seq = ++g_partnerBadgePreviewRequestSeq;
+    const safeMemberId = String(memberId || '').trim();
+
+    if (!safeMemberId) {
+        renderPartnerSyncedBadgePreview(
+            Array.isArray(fallbackCodes) ? fallbackCodes : [],
+            '조합원 번호를 입력하면 연동된 뱃지가 표시됩니다.',
+            '조합원 관리에서 부여한 뱃지가 실시간 연동됩니다.'
+        );
+        return;
+    }
+
+    try {
+        const result = await fetchPartnerMemberBadgeCodes(safeMemberId);
+        if (seq !== g_partnerBadgePreviewRequestSeq) return;
+
+        if (!result.found) {
+            renderPartnerSyncedBadgePreview(
+                [],
+                '일치하는 조합원을 찾지 못했습니다.',
+                '저장 시 연동 뱃지는 비워집니다.'
+            );
+            return;
+        }
+
+        renderPartnerSyncedBadgePreview(
+            result.codes,
+            '이 조합원에 부여된 뱃지가 없습니다.',
+            '조합원 관리에서 부여한 뱃지가 실시간 연동됩니다.'
+        );
+    } catch (error) {
+        console.warn('refreshPartnerBadgeSyncPreview failed:', error);
+        if (seq !== g_partnerBadgePreviewRequestSeq) return;
+        renderPartnerSyncedBadgePreview(
+            Array.isArray(fallbackCodes) ? fallbackCodes : [],
+            '연동된 뱃지를 불러오지 못했습니다.',
+            '조합원 관리에서 부여한 뱃지가 실시간 연동됩니다.'
+        );
+    }
+} // End of refreshPartnerBadgeSyncPreview
+
+function bindPartnerBadgeSyncInput() {
+    const input = document.getElementById('pt-member-id');
+    if (!input || input.dataset.badgeSyncBound === '1') return;
+
+    const queueRefresh = () => {
+        clearTimeout(g_partnerBadgeSyncTimer);
+        const nextMemberId = input.value;
+        g_partnerBadgeSyncTimer = setTimeout(() => {
+            refreshPartnerBadgeSyncPreview(nextMemberId, []);
+        }, 180);
+    };
+
+    input.addEventListener('input', queueRefresh);
+    input.addEventListener('change', queueRefresh);
+    input.addEventListener('blur', queueRefresh);
+    input.dataset.badgeSyncBound = '1';
+} // End of bindPartnerBadgeSyncInput
+
 // [수정] 파트너 목록 불러오기 (badges.js 활용)
 async function fetchPartners() {
     await ensureBadgesReady();
@@ -5545,7 +5656,8 @@ async function openPartnerModal(id) {
             }
 
             // 뱃지 체크박스
-            Badges.renderCheckboxes('badge-checkboxes', g_badges, displayData.badges || []);
+            bindPartnerBadgeSyncInput();
+            await refreshPartnerBadgeSyncPreview(displayData.member_id || '', displayData.badges || []);
 
             // 이미지 프리뷰
             handleImagePreview('pt', displayData.logo_url);
@@ -5561,7 +5673,8 @@ async function openPartnerModal(id) {
         document.getElementById('pt-order').value = 99;
 
         document.querySelector('#partnerModal .modal-header h5').innerText = '🤝 협력 단체 등록';
-        Badges.renderCheckboxes('badge-checkboxes', g_badges, []);
+        bindPartnerBadgeSyncInput();
+        await refreshPartnerBadgeSyncPreview('', []);
         handleImagePreview('pt', null);
     }
 
@@ -5598,11 +5711,7 @@ showLoading(false);
 return myAlert('이미지 업로드 오류: ' + e.message, 'error');
 }
 
-// 2. 뱃지 데이터 수집
-const selectedBadges = [];
-document.querySelectorAll('#badge-checkboxes input:checked').forEach(cb => selectedBadges.push(cb.value));
-
-// 3. DB 저장 (RPC 호출)
+// 2. DB 저장 (RPC 호출)
 const updates = {
 p_id: idVal, // NULL 또는 UUID
 p_name: name,
@@ -5612,7 +5721,7 @@ p_display_order: Number(document.getElementById('pt-order').value),
 p_description: document.getElementById('pt-desc').value,
 p_member_id: document.getElementById('pt-member-id').value,
 p_status: document.getElementById('pt-status').value,
-p_badges: selectedBadges
+p_badges: []
 };
 
 const { error } = await _supabase.rpc('upsert_partner_secure', updates);
