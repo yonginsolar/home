@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.42
-Change: Attach current public hostname to Supabase requests so public pages resolve the serving coop by domain.
+Version: v1.0.43
+Change: Show host-mapped coop name on the public homepage title and visible brand labels.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.42 | index.html');</script>
+<script>console.log('[Version] v1.0.43 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -16,7 +16,7 @@ Change: Attach current public hostname to Supabase requests so public pages reso
 </script>
   <meta charset="utf-8">
   <meta content="width=device-width, initial-scale=1.0" name="viewport">
-  <title>용인모두의햇빛협동조합</title>
+  <title>협동조합</title>
   <link rel="canonical" href="https://www.yonginsolar.kr/">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
   <meta content="용인 시민이 주인이 되는 태양광 발전소" name="description">
@@ -278,7 +278,7 @@ Change: Attach current public hostname to Supabase requests so public pages reso
 
   <header id="header" class="fixed-top ">
 <div class="container d-flex align-items-center justify-content-between"> <div class="logo">
-    <h1><a href="index.html">용인모두의햇빛협동조합</a></h1>
+    <h1><a href="index.html" id="siteBrandName">용인모두의햇빛협동조합</a></h1>
   </div>
 
   <nav id="navbar" class="navbar">
@@ -839,7 +839,7 @@ Change: Attach current public hostname to Supabase requests so public pages reso
       <div class="modal-body pt-2 pb-4 px-4">
         <div class="small text-muted mb-3">아래 연락처로 편하게 문의해 주세요.</div>
         <div class="p-3 rounded-4" style="background:#f8fafc; border:1px solid #e2e8f0;">
-          <div class="fw-bold mb-2">용인모두의햇빛협동조합</div>
+          <div class="fw-bold mb-2" id="opsContactOrgName">용인모두의햇빛협동조합</div>
           <div class="mb-1">사무국장 김민호 010-2513-5736</div>
           <div>이메일 yonginsolar@gmail.com</div>
         </div>
@@ -976,6 +976,46 @@ Change: Attach current public hostname to Supabase requests so public pages reso
       : supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     window.__noticeModalScope = 'public';
     let g_visible_site_coop_id_promise = null;
+    let g_public_site_context_promise = null;
+    window.__PUBLIC_SITE_COOP_NAME__ = '용인모두의햇빛협동조합';
+
+    function normalizePublicCoopName(value) {
+        return String(value || '').trim();
+    }
+
+    function applyPublicBranding(coopName) {
+        const safeName = normalizePublicCoopName(coopName) || '협동조합';
+        window.__PUBLIC_SITE_COOP_NAME__ = safeName;
+        document.title = safeName;
+        const brandEl = document.getElementById('siteBrandName');
+        if (brandEl) brandEl.textContent = safeName;
+        const opsOrgEl = document.getElementById('opsContactOrgName');
+        if (opsOrgEl) opsOrgEl.textContent = safeName;
+        const aboutContentEl = document.getElementById('about-content');
+        if (aboutContentEl && aboutContentEl.textContent.includes('용인모두의햇빛협동조합')) {
+            aboutContentEl.textContent = aboutContentEl.textContent.replace(/용인모두의햇빛협동조합/g, safeName);
+        }
+    }
+
+    async function getPublicSiteContext() {
+        if (!g_public_site_context_promise) {
+            g_public_site_context_promise = (async () => {
+                const { data, error } = await _client.rpc('get_public_site_context');
+                if (error) {
+                    console.warn('getPublicSiteContext failed:', error);
+                    return null;
+                }
+                return data || null;
+            })();
+        }
+        return await g_public_site_context_promise;
+    }
+
+    async function hydratePublicBranding() {
+        const context = await getPublicSiteContext();
+        const coopName = normalizePublicCoopName(context?.coop_name);
+        if (coopName) applyPublicBranding(coopName);
+    }
 
     async function getVisibleSiteCoopId() {
         if (!g_visible_site_coop_id_promise) {
@@ -1251,7 +1291,7 @@ Change: Attach current public hostname to Supabase requests so public pages reso
                 </div>
                 <div style="margin-top:14px; line-height:1.8;">${safeBody || '-'}</div>
                 ${dateLabel ? `<div style="margin-top:18px; text-align:center; font-weight:600;">${escapeHtml(dateLabel)}</div>` : ''}
-                <div style="margin-top:8px; text-align:center; font-weight:700;">용인모두의햇빛협동조합 이사장</div>
+                <div style="margin-top:8px; text-align:center; font-weight:700;">${escapeHtml(window.__PUBLIC_SITE_COOP_NAME__ || '협동조합')} 이사장</div>
             </div>
         `;
         return sanitizeHtml(html);
@@ -1473,6 +1513,7 @@ Change: Attach current public hostname to Supabase requests so public pages reso
 
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
+    await hydratePublicBranding();
     // 1. 섹션 관리는 먼저 실행 (화면 레이아웃 잡기)
     await manageSections(); 
     AOS.refresh(); 
