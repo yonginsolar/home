@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.70
-Change: Enable auth.coopco.kr broker for Kakao/Naver portal login starts.
+Version: v1.0.71
+Change: Send Telegram DM alerts to same-coop admins when a partner registration or update request is submitted.
 -->
 <html lang="ko">
 <head>
@@ -5912,6 +5912,26 @@ await renderPartnerBadgePreview([]);
 }
 }
 
+async function notifyPartnerRequestAdmins(targetMemberId) {
+const safeTargetMemberId = String(targetMemberId || '').trim();
+if (!safeTargetMemberId || !_supabase || !_supabase.functions || typeof _supabase.functions.invoke !== 'function') return;
+
+try {
+const { data, error } = await _supabase.functions.invoke('erp-site-partner-alert', {
+body: {
+targetMemberId: safeTargetMemberId
+}
+});
+
+if (error) throw error;
+if (data && data.ok === false && !data.skipped) {
+console.warn('[partner-alert] admin telegram skipped:', data);
+}
+} catch (error) {
+console.warn('[partner-alert] admin telegram skipped:', error?.message || error, error || {});
+}
+} // End of notifyPartnerRequestAdmins
+
 // 2. 파트너 신청 제출 (상태 체크 + 이미지 업로드 + RPC 호출)
 async function submitPartnerApplication() {
 // [1] 권한 체크: '정상' 상태가 아니면 신청 차단 (B안 적용)
@@ -5970,6 +5990,9 @@ if(rpcError) throw rpcError;
 showLoading(false);
 
 if(result.success) {
+notifyPartnerRequestAdmins(curMem.member_id).catch((error) => {
+console.warn('[partner-alert] admin telegram skipped:', error?.message || error, error || {});
+});
 showModal(result.message); // RPC에서 리턴한 메시지 출력
 loadPartnerInfo(curMem.member_id); // 화면 갱신
 } else {
