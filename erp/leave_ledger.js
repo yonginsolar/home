@@ -6,6 +6,24 @@
   var deductibleSubTypes = DEFAULT_DEDUCTIBLE_SUB_TYPES.slice();
   var DEFAULT_RESERVED_STATUSES = ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'];
   var DEFAULT_APPROVAL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id';
+  var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v1';
+  var LEAVE_REPORT_STYLE_TEXT = [
+    '.leave-section{margin-bottom:15px;border:1px solid #eee;border-radius:8px;background:#f8f9fa;padding:15px}',
+    '.leave-section h6{font-weight:bold;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:10px;font-size:0.95rem}',
+    '.leave-list{list-style:none;padding:0;margin:0;font-size:0.85rem}',
+    '.leave-list li{margin-bottom:6px}'
+  ].join('');
+
+  function ensureLeaveDetailStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById(LEAVE_REPORT_STYLE_ID)) return;
+    var styleEl = document.createElement('style');
+    styleEl.id = LEAVE_REPORT_STYLE_ID;
+    styleEl.textContent = LEAVE_REPORT_STYLE_TEXT;
+    if (document.head) {
+      document.head.appendChild(styleEl);
+    }
+  } // End of ensureLeaveDetailStyles
 
   function toNumber(value, fallback) {
     var n = Number(value);
@@ -392,6 +410,7 @@
   } // End of buildLeaveAdjustmentListHtml
 
   function buildLeaveDetailReportHtml(options) {
+    ensureLeaveDetailStyles();
     var opts = options || {};
     var summary = opts.summary || {};
     var html = '<div class="d-flex flex-column gap-3">';
@@ -453,6 +472,7 @@
     formatLeavePeriodText: formatLeavePeriodText,
     getLeaveStatusBadgeHtml: getLeaveStatusBadgeHtml,
     renderLeaveDocListHtml: renderLeaveDocListHtml,
+    ensureLeaveDetailStyles: ensureLeaveDetailStyles,
     buildLeaveDetailReportHtml: buildLeaveDetailReportHtml,
     summarizeLeaveDocs: summarizeLeaveDocs,
     fetchLeaveApprovals: fetchLeaveApprovals,
