@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.49
-Change: 2026-04-09 - Hide secretary approval box when no secretary approval exists.
+Version: v1.0.50
+Change: 2026-04-09 - Add leave detail modal in attendance/reward tab.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.49 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.50 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -79,6 +79,8 @@ Change: 2026-04-09 - Hide secretary approval box when no secretary approval exis
     .payroll-import-status-pill.ok { background: #e8f7ee; color: #198754; }
     .payroll-import-status-pill.warn { background: #fff4db; color: #b26a00; }
     .payroll-import-status-pill.error { background: #fdecec; color: #dc3545; }
+    .leave-summary-card-button { cursor: pointer; transition: transform 0.18s ease, box-shadow 0.18s ease; }
+    .leave-summary-card-button:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(13,110,253,0.08); }
     @media (max-width: 991.98px) {
       .hr-page-subtitle { white-space: normal; }
       .hr-page-actions { width: 100%; justify-content: flex-start; }
@@ -331,7 +333,7 @@ Change: 2026-04-09 - Hide secretary approval box when no secretary approval exis
 </div>
 </div>
           <div class="tab-pane fade" id="tabLog">
-            <div class="card bg-light border-0 p-3 mb-3 text-center"><small class="text-muted">현재 잔여 연차</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">0일</h3><div class="small text-muted mt-1" id="displayLeaveReserved">결재 반영 예정 0일</div></div>
+            <div class="card bg-light border-0 p-3 mb-3 text-center leave-summary-card-button" role="button" tabindex="0" onclick="showAdminLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdminLeaveDetail();}" title="연차 상세 리포트 보기"><small class="text-muted">현재 잔여 연차</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">0일</h3><div class="small text-muted mt-1" id="displayLeaveReserved">결재 반영 예정 0일</div><div class="small text-primary mt-2">상세 보기</div></div>
             <div class="mb-2"><label class="small text-muted">구분</label><select id="logType" class="form-select"><option value="지급">🎁 지급 (포상 등)</option><option value="차감">⚠️ 차감 (징계 등)</option></select></div>
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
@@ -350,6 +352,7 @@ Change: 2026-04-09 - Hide secretary approval box when no secretary approval exis
 <div class="modal fade" id="adminCertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📄 재직증명서 발급</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted mb-1">발급 용도</label><select id="adminCertPurpose" class="form-select form-select-sm" onchange="toggleAdminEtc()"><option value="관공서 제출용">관공서 제출용</option><option value="금융기관 제출용">금융기관 제출용</option><option value="기타">기타 (직접 입력)</option></select><input type="text" id="adminCertEtc" class="form-control form-control-sm mt-2" placeholder="직접 입력" style="display:none;"></div><div class="modal-footer p-1 border-0 justify-content-center"><button class="btn btn-primary btn-sm w-100" onclick="reqIssueCert()">발급 및 인쇄</button></div></div></div></div>
 <div class="modal fade" id="orgChartModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">🏢 조직도</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="small text-muted mb-3">부서/직급 설정을 저장하면 그 구조를 조직도에 반영합니다. 저장된 부서가 없으면 현재 등록된 직원의 부서명을 기준으로 임시 조직도를 구성합니다.</div><div id="orgChartBody" class="org-tree"></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-outline-primary btn-sm" type="button" onclick="renderOrgChart()">새로고침</button><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <div class="modal fade" id="ledgerModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">📊 급여대장 출력</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted mb-1">대상 연월</label><input type="month" id="ledgerMonth" class="form-control"></div><div class="modal-footer p-1 border-0 justify-content-center"><button class="btn btn-primary btn-sm w-100" onclick="printLedger()">대장 출력 (A4 가로)</button></div></div></div></div>
+<div class="modal fade" id="adminLeaveDetailModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold">연차 상세 리포트</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-3"></div><div class="modal-footer justify-content-center p-1 border-0"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button></div></div></div></div>
 <div class="modal fade" id="payrollImportModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
     <div class="modal-content">
@@ -621,8 +624,9 @@ const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0; 
 let currentEmpHireDate = null, currentEmpResignDate = null; 
 let confirmCallback = null; let currentSalaryDataForPrint = null; 
+let currentEmployeeLeaveSnapshot = null;
 let currentDurunuriSupport = { emp_support: 0, biz_support: 0, apply_month: '', source_month: '' };
-let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal;
+let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal, adminLeaveDetailModal;
 let hasCheckedExpired = false;
 let myInfo = null;
 let permissionSet = new Set();
@@ -2223,9 +2227,10 @@ window.onload = async function() {
     ledgerModal = new bootstrap.Modal(document.getElementById('ledgerModal'));
     resignModal = new bootstrap.Modal(document.getElementById('resignModal'));
     orgChartModal = new bootstrap.Modal(document.getElementById('orgChartModal'));
+    adminLeaveDetailModal = new bootstrap.Modal(document.getElementById('adminLeaveDetailModal'));
     payrollImportModal = new bootstrap.Modal(document.getElementById('payrollImportModal'));
 
-    const modalIds = ['inviteModal', 'detailModal', 'statsModal', 'settingsModal', 'alertModal', 'confirmModal', 'adminCertModal', 'loadingModal', 'ledgerModal', 'resignModal', 'orgChartModal', 'payrollImportModal'];
+    const modalIds = ['inviteModal', 'detailModal', 'statsModal', 'settingsModal', 'alertModal', 'confirmModal', 'adminCertModal', 'loadingModal', 'ledgerModal', 'resignModal', 'orgChartModal', 'adminLeaveDetailModal', 'payrollImportModal'];
     modalIds.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -4711,10 +4716,12 @@ async function loadLeave() {
     try {
         if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
             const snapshot = await window.LeaveLedger.getLeaveSnapshot(_supabase, currentEmpId, {
+                columns: 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
                 reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
                 includeToday: true,
                 unknownAsReserved: false
             });
+            currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
             const reserved = Number(snapshot?.reservedDays || 0);
             document.getElementById("displayLeaveRemain").innerText = remain + "일";
@@ -4732,10 +4739,182 @@ async function loadLeave() {
         showAlert("연차 조회 실패: " + error.message);
         return;
     }
+    currentEmployeeLeaveSnapshot = { effectiveRemainDays: Number(remainDays || 0), reservedDays: 0, summary: { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [] } };
     document.getElementById("displayLeaveRemain").innerText = remainDays + "일";
     const reservedEl = document.getElementById("displayLeaveReserved");
     if (reservedEl) reservedEl.innerText = "결재 반영 예정 0일";
 }
+function getAdminEmployeeLeaveTypeCatalog() {
+    return Array.isArray(hrLeaveTypeCatalog) && hrLeaveTypeCatalog.length > 0 ? hrLeaveTypeCatalog : getHrDefaultLeaveTypeCatalog();
+} // End of getAdminEmployeeLeaveTypeCatalog
+
+function getAdminEmployeeLeaveSnapshotMeta(doc) {
+    const raw = doc?.leave_snapshot;
+    if (!raw) return null;
+    if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+        } catch (_) {
+            return null;
+        }
+    }
+    return null;
+} // End of getAdminEmployeeLeaveSnapshotMeta
+
+function getAdminEmployeeLeaveTypeConfigByStoredSubtype(subType) {
+    const safeSubType = String(subType || '').trim();
+    if (!safeSubType) return null;
+    return getAdminEmployeeLeaveTypeCatalog().find((item) => {
+        const tokens = [
+            String(item?.id || '').trim(),
+            String(item?.label || '').trim(),
+            ...(Array.isArray(item?.aliases) ? item.aliases : []).map((alias) => String(alias || '').trim())
+        ].filter(Boolean);
+        return tokens.includes(safeSubType);
+    }) || null;
+} // End of getAdminEmployeeLeaveTypeConfigByStoredSubtype
+
+function isAdminEmployeeDeductibleLeaveDoc(doc) {
+    const snapshot = getAdminEmployeeLeaveSnapshotMeta(doc);
+    if (snapshot && typeof snapshot.deductible === 'boolean') return snapshot.deductible === true;
+    const leaveLedger = window.LeaveLedger || {};
+    const subType = typeof leaveLedger.getLeaveSubType === 'function'
+        ? String(leaveLedger.getLeaveSubType(doc?.doc_type) || '').trim()
+        : '';
+    const config = getAdminEmployeeLeaveTypeConfigByStoredSubtype(subType);
+    return config?.deductible === true;
+} // End of isAdminEmployeeDeductibleLeaveDoc
+
+function formatAdminEmployeeLeaveDocType(docOrType) {
+    const doc = docOrType && typeof docOrType === 'object' ? docOrType : null;
+    const raw = String(doc ? doc.doc_type : docOrType || '').trim();
+    if (!raw.startsWith('휴가(')) return raw;
+    const snapshot = getAdminEmployeeLeaveSnapshotMeta(doc);
+    if (snapshot?.label) return `휴가(${String(snapshot.label).trim()})`;
+    const leaveLedger = window.LeaveLedger || {};
+    const subType = typeof leaveLedger.getLeaveSubType === 'function'
+        ? String(leaveLedger.getLeaveSubType(raw) || '').trim()
+        : '';
+    if (!subType) return raw;
+    const config = getAdminEmployeeLeaveTypeConfigByStoredSubtype(subType);
+    return `휴가(${String(config?.label || subType).trim()})`;
+} // End of formatAdminEmployeeLeaveDocType
+
+function getAdminEmployeeLeaveStatusBadgeHtml(status) {
+    if (status === '가승인') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">가승인</span>';
+    if (status === '증빙확인중') return '<span class="badge bg-info text-dark ms-1" style="font-size:0.7em">증빙중</span>';
+    if (status === '실물결재대기') return '<span class="badge bg-secondary ms-1" style="font-size:0.7em">실물대기</span>';
+    if (status === '실물결재완료') return '<span class="badge bg-success ms-1" style="font-size:0.7em">실물완료</span>';
+    if (status === '완료') return '<span class="badge bg-primary ms-1" style="font-size:0.7em">완료</span>';
+    return '';
+} // End of getAdminEmployeeLeaveStatusBadgeHtml
+
+function renderAdminEmployeeLeaveDocList(docs, emptyText) {
+    let html = '<ul class="leave-list">';
+    if (Array.isArray(docs) && docs.length > 0) {
+        docs.forEach((doc) => {
+            const leaveLedger = window.LeaveLedger || {};
+            const period = typeof leaveLedger.formatLeavePeriodText === 'function' ? leaveLedger.formatLeavePeriodText(doc) : '';
+            const periodLabel = period ? ` · ${escapeHtml(period)}` : '';
+            const statusBadge = getAdminEmployeeLeaveStatusBadgeHtml(String(doc?.status || ''));
+            const createdAt = formatAdminEmployeeKstDate(doc?.created_at, '-');
+            const amount = Math.max(0, Number(doc?.amount || doc?._leave_amount || 0));
+            html += `<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>${escapeHtml(formatAdminEmployeeLeaveDocType(doc || doc?.doc_type || '휴가'))} ${statusBadge}${periodLabel}</span><span class="fw-bold text-danger">-${amount}일</span></div><div class="text-muted" style="font-size:0.75rem;">${createdAt}</div></li>`;
+        });
+    } else {
+        html += `<li class="text-muted">${emptyText || '- 없음 -'}</li>`;
+    }
+    html += '</ul>';
+    return html;
+} // End of renderAdminEmployeeLeaveDocList
+
+async function showAdminLeaveDetail() {
+    if (!currentEmpId) return showAlert('직원을 먼저 선택해주세요.');
+    const el = document.getElementById('adminLeaveDetailModal');
+    const bodyEl = el?.querySelector('.modal-body');
+    if (!el || !bodyEl || !adminLeaveDetailModal) return;
+    bodyEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';
+    adminLeaveDetailModal.show();
+    try {
+        const [{ data: employeeRow, error: employeeError }, { data: adjustments, error: adjustmentError }] = await Promise.all([
+            scopeEmployeeTenant(_supabase.from('ref_employees').select('hire_date')).eq('emp_id', currentEmpId).single(),
+            scopeEmployeeTenant(_supabase.from('hr_leave_adj').select('*')).eq('emp_id', currentEmpId).order('created_at', { ascending: false })
+        ]);
+        if (employeeError) throw employeeError;
+        if (adjustmentError) throw adjustmentError;
+
+        let leaveDocs = [];
+        let summary = { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [], reservedDays: 0, pastOrUsedDays: 0, unknownDateDays: 0 };
+        if (window.LeaveLedger && typeof window.LeaveLedger.fetchLeaveApprovals === 'function') {
+            leaveDocs = await window.LeaveLedger.fetchLeaveApprovals(_supabase, currentEmpId, {
+                columns: 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
+                statuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']
+            });
+            summary = window.LeaveLedger.summarizeLeaveDocs(leaveDocs, {
+                reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
+                includeToday: true,
+                unknownAsReserved: false
+            });
+        } else {
+            const { data: leaveRows, error: leaveError } = await scopeEmployeeTenant(_supabase.from('ref_approval').select('id,created_at,doc_type,title,content,amount,status,leave_snapshot')).eq('drafter_id', currentEmpId).in('status', ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']).ilike('doc_type', '휴가%').order('created_at', { ascending: false });
+            if (leaveError) throw leaveError;
+            leaveDocs = (leaveRows || []).filter((doc) => isAdminEmployeeDeductibleLeaveDoc(doc));
+            summary = { reservedDocs: [], pastOrUsedDocs: leaveDocs, unknownDateDocs: [], reservedDays: 0, pastOrUsedDays: 0, unknownDateDays: 0 };
+        }
+
+        let generatedHtml = '<div class="d-flex flex-column gap-3">';
+        let grantHtml = '<ul class="leave-list">';
+        if (employeeRow?.hire_date) {
+            const hireDate = new Date(employeeRow.hire_date);
+            const now = new Date();
+            const oneYear = new Date(hireDate);
+            oneYear.setFullYear(oneYear.getFullYear() + 1);
+            if (now < oneYear) {
+                let months = (now.getFullYear() - hireDate.getFullYear()) * 12 + (now.getMonth() - hireDate.getMonth());
+                if (now.getDate() < hireDate.getDate()) months--;
+                grantHtml += `<li class="text-primary">🟢 1년 미만: ${Math.min(11, Math.max(0, months))}개</li>`;
+            } else {
+                grantHtml += '<li class="text-muted">⚪ 1년 미만: 0개</li>';
+            }
+            if (now.getFullYear() > hireDate.getFullYear()) {
+                grantHtml += `<li class="text-primary">🔵 회계연도(${now.getFullYear()}): 15개</li>`;
+            } else {
+                grantHtml += '<li class="text-muted">⚪ 회계연도: 0개</li>';
+            }
+        } else {
+            grantHtml += '<li class="text-muted">- 입사일 정보 없음 -</li>';
+        }
+        grantHtml += '</ul>';
+        generatedHtml += `<div class="leave-section"><h6>🎁 발생 내역</h6>${grantHtml}</div>`;
+
+        let adjustmentHtml = '<ul class="leave-list">';
+        if (Array.isArray(adjustments) && adjustments.length > 0) {
+            adjustments.forEach((item) => {
+                const positive = item.adj_type === '지급' || item.adj_type === '포상';
+                const toneClass = positive ? 'text-success' : 'text-danger';
+                const prefix = positive ? '+' : '-';
+                adjustmentHtml += `<li><span class="${toneClass} fw-bold">[${escapeHtml(item.adj_type || '')}]</span> ${escapeHtml(item.reason || '')} (${prefix}${Number(item.days || 0)}일)</li>`;
+            });
+        } else {
+            adjustmentHtml += '<li class="text-muted">- 없음 -</li>';
+        }
+        adjustmentHtml += '</ul>';
+        generatedHtml += `<div class="leave-section"><h6>⚖️ 조정 내역</h6>${adjustmentHtml}</div>`;
+        generatedHtml += `<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-${Number(summary.reservedDays || 0)}일</span></h6>${renderAdminEmployeeLeaveDocList(summary.reservedDocs, '- 없음 -')}</div>`;
+        generatedHtml += `<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-${Number(summary.pastOrUsedDays || 0)}일</span></h6>${renderAdminEmployeeLeaveDocList(summary.pastOrUsedDocs, '- 없음 -')}</div>`;
+        if (Array.isArray(summary.unknownDateDocs) && summary.unknownDateDocs.length > 0) {
+            generatedHtml += `<div class="leave-section"><h6>ℹ️ 일자 미확인 내역</h6>${renderAdminEmployeeLeaveDocList(summary.unknownDateDocs, '- 없음 -')}</div>`;
+        }
+        generatedHtml += '</div>';
+        bodyEl.innerHTML = generatedHtml;
+    } catch (error) {
+        console.error('showAdminLeaveDetail failed:', error);
+        bodyEl.innerHTML = `<div class="text-danger small">연차 상세 조회 중 오류가 발생했습니다.<br>${escapeHtml(error?.message || '알 수 없는 오류')}</div>`;
+    }
+} // End of showAdminLeaveDetail
+
 async function saveLog() { const type = document.getElementById("logType").value; const val = Number(document.getElementById("logValue").value); const reason = document.getElementById("logReason").value; if(!val || !reason) return showAlert("입력 필요"); const { error } = await _supabase.from('hr_leave_adj').insert(withEmployeeTenantPayload({ emp_id: currentEmpId, adj_type: type, days: val, reason: reason })); if (error) return showAlert("반영 실패: " + error.message); showAlert("반영됨"); document.getElementById("logValue").value = ""; document.getElementById("logReason").value = ""; loadLeave(); }
 
 function openAdminCertModal() { document.getElementById("adminCertPurpose").value = "관공서 제출용"; toggleAdminEtc(); adminCertModal.show(); }
