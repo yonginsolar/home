@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.11 | Change: 2026-04-09 - Fix salary snapshot durunuri adjustment caching and refresh payroll snapshots. -->
+<!-- Version: v1.2.12 | Change: 2026-04-09 - Enable approval delegation by installed RPCs in legacy_full as well. -->
 <html lang="ko">
 <head>
   <script>console.log('[Version] v1.2.10 | approval.html');</script>
@@ -5372,11 +5372,6 @@ function isDelegationRpcMissingError(error) {
 function syncDelegationAvailabilityUi() {
     const openBtn = document.querySelector('button[onclick="openDelegationModal()"]');
     if (!openBtn) return;
-    if (!isApprovalWorkforceLiteProfile()) {
-        openBtn.disabled = false;
-        openBtn.removeAttribute('title');
-        return;
-    }
     if (!delegationRpcUnavailable) {
         openBtn.disabled = false;
         openBtn.removeAttribute('title');
@@ -5461,16 +5456,6 @@ function bindModalStackingBehavior() {
 } // End of bindModalStackingBehavior
 
 async function loadDelegationContext(options = {}) {
-    if (!isApprovalWorkforceLiteProfile()) {
-        delegationOutgoing = null;
-        delegationIncoming = [];
-        delegationIncomingMap = new Map();
-        delegatedApproverEmpIds = [];
-        renderDelegationBanner();
-        populateDelegationTargets();
-        syncDelegationAvailabilityUi();
-        return;
-    }
     const refreshTodo = !!options.refreshTodo;
     if (delegationRpcUnavailable) {
         delegationOutgoing = null;
@@ -5527,10 +5512,6 @@ function canProcessApprovals() {
 }
 
 async function openDelegationModal() {
-    if (!isApprovalWorkforceLiteProfile()) {
-        showAlert('현재 환경에는 결재 위임 기능(DB RPC)이 설치되어 있지 않습니다.');
-        return;
-    }
     if (!delegationModalInstance) return;
     if (delegationRpcUnavailable) {
         showAlert('현재 환경에는 결재 위임 기능(DB RPC)이 설치되어 있지 않습니다.');
@@ -6244,7 +6225,7 @@ function scheduleApprovalBackgroundRefresh(initialTab) {
     window.requestAnimationFrame(() => {
         window.setTimeout(async () => {
             try {
-                if (isApprovalWorkforceLiteProfile() && (delegationIncoming.length === 0 || delegationOutgoing === null) && !delegationRpcUnavailable) {
+                if ((delegationIncoming.length === 0 || delegationOutgoing === null) && !delegationRpcUnavailable) {
                     await loadDelegationContext({ refreshTodo: false });
                 }
                 if (initialTab !== 'pending' && initialTab !== 'history') {
