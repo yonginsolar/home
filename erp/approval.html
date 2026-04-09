@@ -725,7 +725,10 @@
         <div id="fileListArea" class="mt-2"></div>
       </div>
 
-      <button type="submit" class="btn btn-primary w-100 py-3 fw-bold btn-lg" id="btnSubmit">상신하기</button>
+      <div class="d-grid gap-2">
+        <button type="button" class="btn btn-outline-secondary py-2 fw-bold" id="btnSubmitPreview" onclick="openApprovalSubmitPreview()">상신 미리보기</button>
+        <button type="submit" class="btn btn-primary w-100 py-3 fw-bold btn-lg" id="btnSubmit">상신하기</button>
+      </div>
     </form>
   </div>
 
@@ -5063,6 +5066,21 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
     }
 } // End of createNotification
 
+function buildApprovalSubmitNotice(firstApproverName, notificationResult) {
+    const safeApproverName = String(firstApproverName || '-').trim() || '-';
+    const result = notificationResult && typeof notificationResult === 'object' ? notificationResult : null;
+    if (result?.ok && result?.telegramSent === true) {
+        return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\nTelegram 결재 요청 알림을 전송했습니다.`;
+    }
+    if (result?.ok && result?.telegramSent === false && result?.fallbackInserted === true) {
+        return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\nTelegram 전송은 실패했고 앱 알림만 저장했습니다.`;
+    }
+    if (result?.ok && result?.telegramSent === false && result?.fallbackInserted === false) {
+        return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\n알림 전송 상태를 확인하지 못했습니다.`;
+    }
+    return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\n결재 요청 알림 상태를 확인해주세요.`;
+} // End of buildApprovalSubmitNotice
+
 function normalizeApprovalUploadError(error) {
     const rawMessage = (() => {
         if (typeof error === 'string') return error.trim();
@@ -7328,6 +7346,252 @@ function openAppDescPreview() {
     if (appDescPreviewModalInstance) appDescPreviewModalInstance.show();
 }
 
+function buildApprovalSubmitPreviewData() {
+    const mainType = String(document.getElementById("appCategory")?.value || '').trim();
+    if (!mainType) throw new Error('문서 유형을 선택하세요.');
+    if (!isApprovalDocEnabledForCurrentProfile(mainType)) {
+        throw new Error('현재 조합에서 사용하지 않는 문서유형입니다.');
+    }
+
+    const expenseSubType = String(document.getElementById("expenseSubType")?.value || '일반').trim();
+    const payrollMonth = String(document.getElementById("payrollMonth")?.value || '').trim();
+    let subType = mainType;
+    let finalAmt = Number(document.getElementById("appAmount")?.value || 0);
+    let title = '';
+    let receiver = null;
+    let via = null;
+    let noticeApprovalMemo = '';
+    let appendDesc = '';
+    let leaveSnapshotPayload = null;
+    let attendanceSnapshotPayload = null;
+    let businessTripSnapshotPayload = null;
+    let expenseSnapshotPayload = null;
+
+    const isProxy = !!document.getElementById("chkProxy")?.checked;
+    let drafterName = String(myInfo?.emp_name || '').trim();
+    if (isProxy) {
+        const targetSel = document.getElementById("proxyTargetSelect");
+        if (!targetSel?.value) throw new Error('기안 대상자를 선택하세요.');
+        drafterName = String(targetSel.options[targetSel.selectedIndex]?.text || '').split(' ')[0] || drafterName;
+        appendDesc = `\n\n[시스템 기록] ${formatApprovalKstDateLocale(new Date())} ${myInfo.emp_name}에 의한 대리 상신`;
+    }
+
+    if (mainType === '휴가') {
+        const leaveTypeConfig = getApprovalCurrentLeaveTypeConfig();
+        const lType = getApprovalCurrentLeaveTypeLabel();
+        if (!leaveTypeConfig || !lType) throw new Error('휴가 종류를 먼저 설정하거나 선택하세요.');
+        subType = `휴가(${getApprovalCurrentLeaveTypeStoredKey()})`;
+        leaveSnapshotPayload = {
+            type_id: String(leaveTypeConfig.id || getApprovalCurrentLeaveTypeStoredKey() || '').trim(),
+            label: String(leaveTypeConfig.label || lType || '').trim(),
+            deductible: leaveTypeConfig.deductible === true,
+            duration_mode: normalizeApprovalLeaveTypeDurationMode(leaveTypeConfig.duration_mode),
+            saved_at: new Date().toISOString()
+        };
+        const days = Number(document.getElementById("leaveDaysCalc")?.value || 0);
+        if (days <= 0) throw new Error('기간을 선택하세요.');
+        finalAmt = days;
+        const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
+        title = getApprovalResolvedTitle(mainType, leavePeriodLabel ? `${lType} 신청 (${leavePeriodLabel})` : `${lType} 신청`);
+    } else if (mainType === '휴가취소') {
+        const selectedTargetDocId = document.getElementById('relDocId')?.value || '';
+        const leaveCancelTarget = latestRelatedDocList.find((doc) => String(doc?.id || '') === String(selectedTargetDocId || '').trim());
+        if (!leaveCancelTarget) throw new Error('취소 대상 휴가를 먼저 선택하세요.');
+        subType = buildApprovalLeaveCancelDocType(leaveCancelTarget);
+        finalAmt = Number(leaveCancelTarget.amount || 0);
+        title = getApprovalResolvedTitle(mainType, buildApprovalLeaveCancelTitle(leaveCancelTarget));
+    } else if (isApprovalOvertimeType(mainType)) {
+        attendanceSnapshotPayload = buildApprovalOvertimeSnapshot(mainType);
+        if (!attendanceSnapshotPayload.work_date) throw new Error('근무일자를 입력하세요.');
+        if (!(attendanceSnapshotPayload.total_hours > 0)) throw new Error('인정 시간을 확인하세요.');
+        finalAmt = attendanceSnapshotPayload.total_hours;
+        title = getApprovalResolvedTitle(mainType, `시간외근로 신청 (${attendanceSnapshotPayload.work_date} · ${attendanceSnapshotPayload.total_hours}시간)`);
+    } else if (mainType === '지출결의') {
+        if (expenseSubType === '급여') {
+            if (!payrollMonth) throw new Error('급여 귀속월을 선택하세요.');
+            if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
+                throw new Error('급여대장을 먼저 불러와주세요.');
+            }
+            subType = '지출결의(급여)';
+            title = getApprovalResolvedTitle(mainType, `급여 지출결의 (${payrollMonth})`);
+            finalAmt = Number(document.getElementById("appAmount")?.value || 0);
+            const descValue = getApprovalEditorContent();
+            if (!String(descValue || '').includes('[급여대장 연동]')) {
+                const ymLabel = formatYearMonthLabel(payrollMonth);
+                appendDesc += `\n\n[급여대장 연동] ${ymLabel} / 대상 ${salaryExpenseState.empCount}명 / 지급총액 ${formatMoney(salaryExpenseState.payTotal)}원 / 공제총액 ${formatMoney(salaryExpenseState.dedTotal)}원 / 실지급총액 ${formatMoney(salaryExpenseState.netTotal)}원`;
+            }
+        } else {
+            expenseSnapshotPayload = buildApprovalExpenseSnapshot();
+            title = getApprovalResolvedTitle(mainType, '지출결의');
+        }
+    } else if (mainType === '공문') {
+        const subject = String(document.getElementById("noticeSubject")?.value || '').trim();
+        if (!subject) throw new Error('공문 제목을 입력하세요.');
+        receiver = String(document.getElementById("noticeReceiver")?.value || '').trim() || null;
+        via = String(document.getElementById("noticeVia")?.value || '').trim() || null;
+        noticeApprovalMemo = String(document.getElementById("noticeApprovalMemo")?.value || '').trim();
+        title = getApprovalResolvedTitle(mainType, subject);
+        subType = '공문';
+        finalAmt = 0;
+    } else if (mainType === '일반품의') {
+        const proposalTitle = String(document.getElementById("proposalSubject")?.value || '').trim();
+        if (!proposalTitle) throw new Error('일반품의 제목을 입력하세요.');
+        title = getApprovalResolvedTitle(mainType, proposalTitle);
+        subType = '일반품의';
+        if (proposalTitle.startsWith(`${JEONGYEOL_MONTHLY_TITLE_PREFIX} (`)) subType = JEONGYEOL_MONTHLY_DOC_TYPE;
+    } else if (mainType === '출장신청' || mainType === '구매요청' || mainType === '증명서발급' || mainType === '근무변경') {
+        const proposalTitle = String(document.getElementById("proposalSubject")?.value || '').trim();
+        if (!proposalTitle) throw new Error(`${getApprovalSubjectConfig(mainType).label}을 입력하세요.`);
+        title = getApprovalResolvedTitle(mainType, proposalTitle);
+        subType = mainType;
+        if (mainType === '출장신청') {
+            businessTripSnapshotPayload = buildApprovalBusinessTripSnapshot();
+            if (businessTripSnapshotPayload.start_date && businessTripSnapshotPayload.location) {
+                appendDesc += `\n\n[출장 일정]\n- 기간: ${formatApprovalBusinessTripPeriodText(businessTripSnapshotPayload)}\n- 장소: ${businessTripSnapshotPayload.location}`;
+            }
+            finalAmt = 0;
+        } else if (mainType === '구매요청') {
+            finalAmt = Number(document.getElementById("appAmount")?.value || 0);
+        } else {
+            finalAmt = 0;
+        }
+    } else {
+        title = getApprovalResolvedTitle(mainType, `${mainType}`);
+    }
+
+    const rawBodyContent = getApprovalEditorContent();
+    if (!String(rawBodyContent || '').trim()) throw new Error('내용을 입력하세요.');
+
+    const allowHtmlContent = isApprovalHtmlEditorType(mainType);
+    const isNoticeDraft = mainType === '공문';
+    const mergedBodyContent = mergeSystemAppendContent(rawBodyContent, isNoticeDraft ? '' : appendDesc, allowHtmlContent);
+    let previewContent = allowHtmlContent
+        ? renderApprovalContent(mergedBodyContent, true)
+        : mergedBodyContent;
+    let noticeParts = null;
+    if (isNoticeDraft) {
+        const mergedNoticeMemo = mergeSystemAppendContent(noticeApprovalMemo, appendDesc, false);
+        previewContent = composeNoticeApprovalContent(mergedBodyContent, mergedNoticeMemo);
+        noticeParts = splitNoticeApprovalContent(previewContent);
+    }
+
+    const previewApprovers = Array.isArray(finalApprovers)
+        ? finalApprovers.slice().sort((a, b) => Number(b?.auth_level || 0) - Number(a?.auth_level || 0))
+        : [];
+    const attachmentNames = [];
+    const fileInput = document.getElementById('attachFile');
+    Array.from(fileInput?.files || []).forEach((file) => {
+        const name = String(file?.name || '').trim();
+        if (name) attachmentNames.push(name);
+    });
+    if (approvalDraftAttachmentRefs.length > 0) {
+        attachmentNames.push(`임시저장 첨부 ${approvalDraftAttachmentRefs.length}건`);
+    }
+    if (subType === '지출결의(급여)') {
+        const salaryFileName = window.SalaryLedgerModule ? window.SalaryLedgerModule.makeFileName(payrollMonth) : '급여대장.pdf';
+        attachmentNames.push(`[자동첨부 예정] ${salaryFileName}`);
+    }
+
+    return {
+        doc_type: subType,
+        title: title,
+        content: previewContent,
+        amount: Number(finalAmt || 0),
+        drafter_name: drafterName,
+        created_at: new Date().toISOString(),
+        approval_line: previewApprovers.map((u) => ({
+            name: u.emp_name,
+            position: u.position,
+            status: '대기'
+        })),
+        receiver,
+        via,
+        attachmentNames,
+        noticeParts,
+        allowHtmlContent,
+        leave_snapshot: leaveSnapshotPayload,
+        attendance_snapshot: attendanceSnapshotPayload,
+        business_trip_snapshot: businessTripSnapshotPayload,
+        expense_snapshot: expenseSnapshotPayload
+    };
+} // End of buildApprovalSubmitPreviewData
+
+function openApprovalSubmitPreview() {
+    try {
+        const previewDoc = buildApprovalSubmitPreviewData();
+        currentViewingDocId = null;
+        resetRelViewObjectUrls();
+        const contentEl = document.getElementById("relViewContent");
+        const modalTitleEl = document.getElementById("relViewModalTitle");
+        if (!contentEl || !modalTitleEl || !relViewModal) return;
+        modalTitleEl.textContent = "📄 상신 미리보기";
+        contentEl.innerHTML = "";
+        syncRelViewActionArea(null);
+
+        const line = (Array.isArray(previewDoc.approval_line) ? previewDoc.approval_line : [])
+            .map((l) => `${l.name || ''}(${l.status || ''})`).join(" → ");
+
+        const titleEl = document.createElement("h4");
+        titleEl.className = "fw-bold mb-3";
+        titleEl.textContent = previewDoc.title || "";
+
+        const metaEl = document.createElement("div");
+        metaEl.className = "mb-3 text-muted small";
+        metaEl.textContent = `작성자: ${previewDoc.drafter_name || ''} | 문서유형: ${previewDoc.doc_type || ''} | 결재선: ${line || '-'}`;
+
+        const contentBox = document.createElement("div");
+        contentBox.className = "p-3 bg-light rounded";
+        contentBox.style.minHeight = "200px";
+        const rawDocType = String(previewDoc.doc_type || '');
+        const isNoticeDoc = rawDocType.startsWith('공문');
+        const allowHtmlPreview = isApprovalHtmlEditorType(rawDocType) || isNoticeDoc;
+        const noticeParts = isNoticeDoc ? (previewDoc.noticeParts || splitNoticeApprovalContent(previewDoc.content || '')) : null;
+        if (isNoticeDoc && String(noticeParts?.approvalMemo || '').trim()) {
+            const memoBox = document.createElement("div");
+            memoBox.className = "p-3 border rounded bg-white mb-3";
+            memoBox.innerHTML = `<div class="small fw-bold text-muted mb-2">결재 요청 메모 (내부)</div>${escapeHtml(noticeParts.approvalMemo).replace(/\n/g, '<br>')}`;
+            contentEl.appendChild(memoBox);
+        }
+        if (allowHtmlPreview) {
+            const contentSource = isNoticeDoc ? (noticeParts?.publicBody || '') : (previewDoc.content || '');
+            contentBox.innerHTML = renderApprovalContent(contentSource, true);
+        } else {
+            contentBox.style.whiteSpace = "pre-wrap";
+            contentBox.textContent = isNoticeDoc ? (noticeParts?.publicBody || "") : (previewDoc.content || "");
+        }
+
+        const amountEl = document.createElement("div");
+        amountEl.className = "mt-3 text-end fw-bold";
+        const amountDisplay = getApprovalAmountDisplayPayload(previewDoc);
+        amountEl.textContent = `${amountDisplay.labelText || '금액'}: ${amountDisplay.mainText || '-'}`;
+
+        contentEl.appendChild(titleEl);
+        contentEl.appendChild(metaEl);
+
+        if (previewDoc.receiver || previewDoc.via) {
+            const receiverEl = document.createElement("div");
+            receiverEl.className = "mb-3 small text-muted";
+            receiverEl.innerHTML = `${previewDoc.receiver ? `수신: ${escapeHtml(previewDoc.receiver)}` : ''}${previewDoc.receiver && previewDoc.via ? ' | ' : ''}${previewDoc.via ? `경유: ${escapeHtml(previewDoc.via)}` : ''}`;
+            contentEl.appendChild(receiverEl);
+        }
+
+        contentEl.appendChild(document.createElement("hr"));
+        contentEl.appendChild(contentBox);
+        contentEl.appendChild(amountEl);
+
+        if (Array.isArray(previewDoc.attachmentNames) && previewDoc.attachmentNames.length > 0) {
+            const attachmentBox = document.createElement("div");
+            attachmentBox.className = "mt-3 p-3 border rounded bg-white";
+            attachmentBox.innerHTML = `<div class="small fw-bold text-muted mb-2">첨부 예정 파일</div>${previewDoc.attachmentNames.map((name) => `<div>• ${escapeHtml(name)}</div>`).join('')}`;
+            contentEl.appendChild(attachmentBox);
+        }
+
+        relViewModal.show();
+    } catch (error) {
+        showAlert(error?.message || '상신 미리보기를 불러오지 못했습니다.');
+    }
+} // End of openApprovalSubmitPreview
+
 function getApprovalLeaveTargetEmpInfo() {
     const isProxy = !!document.getElementById("chkProxy")?.checked;
     if (!isProxy) return myInfo || null;
@@ -8517,11 +8781,7 @@ async function handleDraftSubmit(e) {
     const firstApprover = finalApprovers[0];
     const firstApproverName = firstApprover ? `${firstApprover.emp_name} ${firstApprover.position || ''}`.trim() : '-';
     resetApprovalComposerForm();
-    const submitNotice = insertedDoc?._notificationResult?.ok
-        && insertedDoc?._notificationResult?.telegramSent === false
-        && insertedDoc?._notificationResult?.fallbackInserted === true
-        ? `상신이 완료되었습니다.\n첫 결재자: ${firstApproverName}\n앱 알림은 저장했지만 Telegram 전송은 실패했습니다.`
-        : `상신이 완료되었습니다.\n첫 결재자: ${firstApproverName}\n결재 요청 알림을 전송했습니다.`;
+    const submitNotice = buildApprovalSubmitNotice(firstApproverName, insertedDoc?._notificationResult);
     showAlert(submitNotice, () => {
         switchTab('pending');
     });

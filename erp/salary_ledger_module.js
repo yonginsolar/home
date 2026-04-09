@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.4';
+  const MODULE_VERSION = 'v1.0.5';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -301,6 +301,20 @@
           requestAnimationFrame(resolve);
         });
       });
+      const measuredWidthPx = Math.max(
+        captureWidthPx,
+        Math.ceil(Number(target.scrollWidth) || 0),
+        Math.ceil(Number(target.getBoundingClientRect().width) || 0),
+        Math.ceil(Number(host.scrollWidth) || 0)
+      );
+      if (measuredWidthPx > captureWidthPx) {
+        host.style.width = String(measuredWidthPx) + 'px';
+        await new Promise(function onResize(resolve) {
+          requestAnimationFrame(function raf2() {
+            requestAnimationFrame(resolve);
+          });
+        });
+      }
       const filename = opts.fileName || makeFileName(state.yearMonth);
       const worker = global.html2pdf()
         .set({
@@ -313,7 +327,7 @@
             backgroundColor: '#ffffff',
             scrollX: 0,
             scrollY: 0,
-            windowWidth: captureWidthPx
+            windowWidth: measuredWidthPx
           },
           jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
           pagebreak: { mode: ['css', 'legacy'] }
