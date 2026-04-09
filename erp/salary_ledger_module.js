@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.7';
+  const MODULE_VERSION = 'v1.0.8';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -259,19 +259,19 @@
       '.approval-entry-stamp { margin-top:6px; display:inline-block; padding:2px 6px; border:1px solid #2563eb; border-radius:999px; color:#2563eb; font-size:10px; font-weight:700; }' +
       '.approval-entry-date { margin-top:4px; font-size:10px; color:#374151; }' +
       '.approval-entry-note { margin-top:4px; font-size:9px; color:#6b7280; }' +
-      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
+      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:10.75px; }' +
       '.ledger-table th, .ledger-table td { border:1px solid #111; padding:3px 4px; vertical-align:middle; }' +
       '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:nowrap; }' +
       '.ledger-table tfoot th { background:#e5e7eb; }' +
       '.text-center { text-align:center; } .text-end { text-align:right; } .fw-bold { font-weight:700; }' +
       '.ledger-work-desc { white-space:normal; word-break:keep-all; overflow-wrap:anywhere; line-height:1.45; }' +
       '.ledger-summary-cell { padding:6px !important; }' +
-      '.ledger-summary-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:4px 6px; }' +
-      '.ledger-summary-item { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-width:0; border:1px solid #d1d5db; border-radius:4px; background:#fff; padding:4px 6px; }' +
+      '.ledger-summary-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:3px 5px; }' +
+      '.ledger-summary-item { display:flex; align-items:flex-start; justify-content:space-between; gap:6px; min-width:0; border:1px solid #d1d5db; border-radius:4px; background:#fff; padding:3px 5px; }' +
       '.ledger-summary-item.is-highlight { background:#eef2ff; border-color:#94a3b8; }' +
-      '.ledger-summary-label { font-size:10px; color:#4b5563; white-space:nowrap; }' +
-      '.ledger-summary-value { font-size:10.5px; font-weight:700; color:#111; text-align:right; word-break:break-all; }' +
-      '.ledger-net-pay { white-space:nowrap; font-size:11px; }' +
+      '.ledger-summary-label { font-size:9.5px; color:#4b5563; white-space:nowrap; }' +
+      '.ledger-summary-value { font-size:10px; font-weight:700; color:#111; text-align:right; word-break:break-all; }' +
+      '.ledger-net-pay { white-space:nowrap; font-size:10.5px; }' +
       '.ledger-footer { margin-top:6px; display:flex; justify-content:space-between; gap:8px; font-size:11px; color:#6b7280; }' +
       '</style>' +
 
@@ -290,11 +290,11 @@
       '<th style="width:40px;">No</th>' +
       '<th style="width:72px;">성명</th>' +
       '<th style="width:136px;">종사업무</th>' +
-      '<th style="width:62px;">근로일수</th>' +
-      '<th style="width:70px;">근로시간</th>' +
-      '<th style="width:290px;">지급내역</th>' +
-      '<th style="width:340px;">공제내역</th>' +
-      '<th style="width:98px;">차인지급액</th>' +
+      '<th style="width:56px;">근로일수</th>' +
+      '<th style="width:60px;">근로시간</th>' +
+      '<th style="width:258px;">지급내역</th>' +
+      '<th style="width:304px;">공제내역</th>' +
+      '<th style="width:82px;">차인지급액</th>' +
       '</tr>' +
       '</thead>' +
       '<tbody>' + buildRowsHtml(rows, state.dedEtcLabel) + '</tbody>' +
