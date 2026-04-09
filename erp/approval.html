@@ -992,8 +992,15 @@ const APPROVAL_DRAFT_LIMIT = 10;
 const APPROVAL_SUMMARY_CACHE_VERSION = 1;
 const APPROVAL_SUMMARY_CACHE_TTL_MS = 2 * 60 * 1000;
 const APPROVAL_DATA_CACHE_TTL_MS = 30 * 1000;
-const APPROVAL_SCHEMA_FEATURE_CACHE_VERSION = 3;
+const APPROVAL_SCHEMA_FEATURE_CACHE_VERSION = 4;
 const APPROVAL_SCHEMA_FEATURE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const APPROVAL_VERIFIED_SCHEMA_FEATURES = Object.freeze({
+    leave_snapshot: true,
+    attendance_snapshot: true,
+    business_trip_snapshot: true,
+    expense_snapshot: true,
+    salary_ledger_snapshot: true
+});
 const APPROVAL_COMPANY_INFO_CACHE_VERSION = 1;
 const APPROVAL_COMPANY_INFO_CACHE_TTL_MS = 10 * 60 * 1000;
 const APPROVAL_EMPLOYEE_CACHE_VERSION = 1;
@@ -2786,19 +2793,7 @@ function writeApprovalSchemaFeatureCache(features = {}) {
 } // End of writeApprovalSchemaFeatureCache
 
 async function fetchApprovalSchemaFeaturesFromOpenApi() {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/?apikey=${encodeURIComponent(SUPABASE_KEY)}`, {
-        headers: { Accept: 'application/openapi+json' }
-    });
-    if (!response.ok) throw new Error(`APPROVAL_OPENAPI_FETCH_${response.status}`);
-    const openapi = await response.json();
-    const properties = openapi?.definitions?.ref_approval?.properties || {};
-    return {
-        leave_snapshot: !!properties.leave_snapshot,
-        attendance_snapshot: !!properties.attendance_snapshot,
-        business_trip_snapshot: !!properties.business_trip_snapshot,
-        expense_snapshot: !!properties.expense_snapshot,
-        salary_ledger_snapshot: !!properties.salary_ledger_snapshot
-    };
+    return { ...APPROVAL_VERIFIED_SCHEMA_FEATURES };
 } // End of fetchApprovalSchemaFeaturesFromOpenApi
 
 async function loadApprovalSchemaFeatures() {
@@ -2809,13 +2804,7 @@ async function loadApprovalSchemaFeatures() {
         writeApprovalSchemaFeatureCache(fresh);
         return fresh;
     } catch (_) {
-        return {
-            leave_snapshot: false,
-            attendance_snapshot: false,
-            business_trip_snapshot: false,
-            expense_snapshot: false,
-            salary_ledger_snapshot: false
-        };
+        return { ...APPROVAL_VERIFIED_SCHEMA_FEATURES };
     }
 } // End of loadApprovalSchemaFeatures
 
@@ -3993,6 +3982,10 @@ function extractDisplayFileName(rawRef, fallback = '첨부파일') {
         const pathnameLeaf = decodeURIComponent((asUrl.pathname || '').split('/').pop() || '');
         return pathnameLeaf || fallback;
     } catch (_) {
+        const plain = String(rawRef || '').trim();
+        if (plain && !plain.includes('/') && !plain.includes('\\')) {
+            return plain;
+        }
         return String(fallback || '첨부파일');
     }
 }
