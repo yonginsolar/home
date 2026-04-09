@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.6';
+  const MODULE_VERSION = 'v1.0.7';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -261,7 +261,7 @@
       '.approval-entry-note { margin-top:4px; font-size:9px; color:#6b7280; }' +
       '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
       '.ledger-table th, .ledger-table td { border:1px solid #111; padding:3px 4px; vertical-align:middle; }' +
-      '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:normal; }' +
+      '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:nowrap; }' +
       '.ledger-table tfoot th { background:#e5e7eb; }' +
       '.text-center { text-align:center; } .text-end { text-align:right; } .fw-bold { font-weight:700; }' +
       '.ledger-work-desc { white-space:normal; word-break:keep-all; overflow-wrap:anywhere; line-height:1.45; }' +
@@ -287,18 +287,14 @@
       '<table class="ledger-table">' +
       '<thead>' +
       '<tr>' +
-      '<th rowspan="2" style="width:40px;">No</th>' +
-      '<th rowspan="2" style="width:72px;">성명</th>' +
-      '<th rowspan="2" style="width:156px;">종사업무</th>' +
-      '<th rowspan="2" style="width:46px;">근로일수</th>' +
-      '<th rowspan="2" style="width:52px;">근로시간</th>' +
-      '<th>지급내역</th>' +
-      '<th>공제내역</th>' +
-      '<th rowspan="2" style="width:94px;">차인지급액</th>' +
-      '</tr>' +
-      '<tr>' +
-      '<th style="width:290px;">기본급 · 식대 · 차량 · 기타수당 · 상여 · 지급계</th>' +
-      '<th style="width:340px;">국민연금 · 건강보험 · 장기요양 · 고용보험 · 소득세 · 지방세 · ' + escapeHtml(state.dedEtcLabel || '기타공제') + ' · 공제계</th>' +
+      '<th style="width:40px;">No</th>' +
+      '<th style="width:72px;">성명</th>' +
+      '<th style="width:136px;">종사업무</th>' +
+      '<th style="width:62px;">근로일수</th>' +
+      '<th style="width:70px;">근로시간</th>' +
+      '<th style="width:290px;">지급내역</th>' +
+      '<th style="width:340px;">공제내역</th>' +
+      '<th style="width:98px;">차인지급액</th>' +
       '</tr>' +
       '</thead>' +
       '<tbody>' + buildRowsHtml(rows, state.dedEtcLabel) + '</tbody>' +
