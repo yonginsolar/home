@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.47
-Change: 2026-04-01 - Carry forward the most recent work description into a new payroll month when no saved row exists yet.
+Version: v1.0.48
+Change: 2026-04-09 - Fill salary ledger approval box from completed salary approvals.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.47 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.48 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -4882,6 +4882,70 @@ function getSalaryDedAdvanceLabelForAdmin(row) {
     return '기타조정';
 } // End of getSalaryDedAdvanceLabelForAdmin
 
+function isCompletedSalaryApprovalStatus(status) {
+    const safeStatus = String(status || '').trim();
+    return safeStatus === '완료' || safeStatus === '실물결재완료';
+} // End of isCompletedSalaryApprovalStatus
+
+function findSalaryApprovalLineEntryByPosition(approvalLine, keyword) {
+    const safeKeyword = String(keyword || '').trim();
+    if (!safeKeyword) return null;
+    return (Array.isArray(approvalLine) ? approvalLine : []).find((entry) => String(entry?.position || '').includes(safeKeyword)) || null;
+} // End of findSalaryApprovalLineEntryByPosition
+
+function buildSalaryLedgerApprovalBoxEntries(approvalDoc, companyProfile) {
+    if (!approvalDoc || !isCompletedSalaryApprovalStatus(approvalDoc.status)) return [];
+    const approvalLine = Array.isArray(approvalDoc.approval_line) ? approvalDoc.approval_line : [];
+    const secretaryEmp = (Array.isArray(employeeCache) ? employeeCache : []).find((emp) => String(emp?.position || '').includes('사무국장') && !emp?.resign_date) || null;
+    const secretaryLine = findSalaryApprovalLineEntryByPosition(approvalLine, '사무국장');
+    const chairmanLine = findSalaryApprovalLineEntryByPosition(approvalLine, '이사장');
+    const drafterName = String(approvalDoc.drafter_name || myInfo?.emp_name || '').trim();
+    const createdDate = formatAdminEmployeeKstDate(approvalDoc.created_at, '');
+    const secretaryDate = formatAdminEmployeeKstDate(secretaryLine?.processed_at, '');
+    const chairmanDate = formatAdminEmployeeKstDate(chairmanLine?.processed_at || approvalDoc.processed_at, '');
+    const secretaryName = String(secretaryLine?.name || secretaryEmp?.emp_name || '').trim();
+    const chairmanName = String(chairmanLine?.name || companyProfile?.chairmanName || '').trim();
+
+    return [
+        {
+            title: '담당',
+            name: drafterName,
+            stampLabel: createdDate ? '전자기안' : '',
+            stampDate: createdDate
+        },
+        {
+            title: '사무국장',
+            name: secretaryName,
+            stampLabel: secretaryLine?.status === '승인' ? '전자결재' : '',
+            stampDate: secretaryDate
+        },
+        {
+            title: '이사장',
+            name: chairmanName,
+            stampLabel: chairmanDate ? '전자결재' : '',
+            stampDate: chairmanDate
+        }
+    ];
+} // End of buildSalaryLedgerApprovalBoxEntries
+
+async function fetchCompletedSalaryApprovalForMonth(ym) {
+    const safeYm = String(ym || '').trim();
+    if (!safeYm) return null;
+    const { data, error } = await scopeEmployeeTenant(
+        _supabase
+            .from('ref_approval')
+            .select('id, doc_no, title, status, created_at, processed_at, drafter_name, approval_line')
+            .eq('doc_type', '지출결의(급여)')
+            .eq('title', `급여 지출결의 (${safeYm})`)
+            .in('status', ['완료', '실물결재완료'])
+            .order('processed_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+            .limit(1)
+    );
+    if (error) throw error;
+    return Array.isArray(data) && data.length > 0 ? data[0] : null;
+} // End of fetchCompletedSalaryApprovalForMonth
+
 function openLedgerModal() { ledgerModal.show(); }
 async function printLedger() {
     const ym = document.getElementById("ledgerMonth").value; 
@@ -4909,12 +4973,20 @@ async function printLedger() {
     const companyProfile = buildAdminEmployeeCompanyPrintProfile();
     ensureAdminEmployeeCompanyPrintProfile(companyProfile, '급여대장 출력');
     const state = window.SalaryLedgerModule.createStateFromRows(adjustedList, ym);
+    let approvalBoxEntries = [];
+    try {
+        const approvalDoc = await fetchCompletedSalaryApprovalForMonth(ym);
+        approvalBoxEntries = buildSalaryLedgerApprovalBoxEntries(approvalDoc, companyProfile);
+    } catch (approvalErr) {
+        console.warn('salary approval box load failed:', approvalErr?.message || approvalErr);
+    }
     try {
         window.SalaryLedgerModule.openPrintWindow(state, {
             title: `${y}년 ${Number(m)}월 급여대장`,
             logoUrl: companyProfile.logoUrl,
             chairmanName: companyProfile.chairmanName,
             showApprovalBox: true,
+            approvalBoxEntries,
             showPrintDate: true,
             footerText: 'ERP 급여관리 출력본'
         });

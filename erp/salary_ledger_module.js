@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.5';
+  const MODULE_VERSION = 'v1.0.6';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -138,43 +138,94 @@
     };
   }
 
-  function buildRowsHtml(rows) {
+  function buildSummaryItemsHtml(items, options) {
+    var opts = options || {};
+    var className = String(opts.className || '').trim();
+    return '<div class="ledger-summary-grid' + (className ? (' ' + className) : '') + '">' +
+      items.map(function itemHtml(item) {
+        return '' +
+          '<div class="ledger-summary-item' + (item.highlight ? ' is-highlight' : '') + '">' +
+          '<span class="ledger-summary-label">' + escapeHtml(item.label || '') + '</span>' +
+          '<span class="ledger-summary-value">' + escapeHtml(formatMoney(item.value || 0)) + '</span>' +
+          '</div>';
+      }).join('') +
+      '</div>';
+  }
+
+  function buildPaySummaryCellHtml(row) {
+    return buildSummaryItemsHtml([
+      { label: '기본급', value: row.pay_basic },
+      { label: '식대', value: row.pay_meal },
+      { label: '차량', value: row.pay_car },
+      { label: '기타수당', value: allowance(row) },
+      { label: '상여', value: row.pay_bonus },
+      { label: '지급계', value: row.pay_total, highlight: true }
+    ], { className: 'ledger-pay-grid' });
+  }
+
+  function buildDeductionSummaryCellHtml(row, etcLabel) {
+    return buildSummaryItemsHtml([
+      { label: '국민연금', value: row.ded_pension },
+      { label: '건강보험', value: row.ded_health },
+      { label: '장기요양', value: row.ded_care },
+      { label: '고용보험', value: row.ded_employ },
+      { label: '소득세', value: row.ded_income },
+      { label: '지방세', value: row.ded_local },
+      { label: etcLabel || '기타공제', value: toInt(row.ded_advance) + toInt(row.ded_capital) },
+      { label: '공제계', value: row.ded_total, highlight: true }
+    ], { className: 'ledger-deduction-grid' });
+  }
+
+  function buildRowsHtml(rows, dedEtcLabel) {
     return rows.map(function rowHtml(row, idx) {
       return '' +
         '<tr>' +
         '<td class="text-center">' + (idx + 1) + '</td>' +
         '<td class="text-center">' + escapeHtml(row.emp_name || '') + '</td>' +
-        '<td>' + escapeHtml(row.work_description || '') + '</td>' +
+        '<td class="ledger-work-desc">' + escapeHtml(row.work_description || '') + '</td>' +
         '<td class="text-end">' + formatMetric(row.work_days) + '</td>' +
         '<td class="text-end">' + formatMetric(row.work_hours) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.pay_basic) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.pay_meal) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.pay_car) + '</td>' +
-        '<td class="text-end">' + formatMoney(allowance(row)) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.pay_bonus) + '</td>' +
-        '<td class="text-end fw-bold">' + formatMoney(row.pay_total) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.ded_pension) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.ded_health) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.ded_care) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.ded_employ) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.ded_income) + '</td>' +
-        '<td class="text-end">' + formatMoney(row.ded_local) + '</td>' +
-        '<td class="text-end">' + formatMoney(toInt(row.ded_advance) + toInt(row.ded_capital)) + '</td>' +
-        '<td class="text-end fw-bold">' + formatMoney(row.ded_total) + '</td>' +
-        '<td class="text-end fw-bold">' + formatMoney(row.net_pay) + '</td>' +
+        '<td class="ledger-summary-cell">' + buildPaySummaryCellHtml(row) + '</td>' +
+        '<td class="ledger-summary-cell">' + buildDeductionSummaryCellHtml(row, dedEtcLabel) + '</td>' +
+        '<td class="text-end fw-bold ledger-net-pay">' + formatMoney(row.net_pay) + '</td>' +
         '</tr>';
     }).join('');
+  }
+
+  function buildApprovalBoxCellHtml(entry) {
+    var row = entry && typeof entry === 'object' ? entry : {};
+    var safeName = escapeHtml(row.name || '');
+    var safeStampLabel = escapeHtml(row.stampLabel || '');
+    var safeStampDate = escapeHtml(row.stampDate || '');
+    var safeNote = escapeHtml(row.note || '');
+    return '' +
+      '<td>' +
+      (safeName ? '<div class="approval-entry-name">' + safeName + '</div>' : '') +
+      (safeStampLabel ? '<div class="approval-entry-stamp">' + safeStampLabel + '</div>' : '') +
+      (safeStampDate ? '<div class="approval-entry-date">' + safeStampDate + '</div>' : '') +
+      (safeNote ? '<div class="approval-entry-note">' + safeNote + '</div>' : '') +
+      '</td>';
   }
 
   function buildApprovalBoxHtml(options) {
     if (!options || !options.showApprovalBox) return '';
     const chairmanLabel = '이사장';
+    const entries = Array.isArray(options.approvalBoxEntries) ? options.approvalBoxEntries : [];
+    const normalizedEntries = [
+      { title: '담당', ...(entries[0] || {}) },
+      { title: '사무국장', ...(entries[1] || {}) },
+      { title: chairmanLabel, ...(entries[2] || { name: options.chairmanName || '' }) }
+    ];
     return '' +
       '<table class="approval-box">' +
       '<thead>' +
-      '<tr><th>담당</th><th>사무국장</th><th>' + chairmanLabel + '</th></tr>' +
+      '<tr>' + normalizedEntries.map(function eachHeader(entry) {
+        return '<th>' + escapeHtml(entry.title || '') + '</th>';
+      }).join('') + '</tr>' +
       '</thead>' +
-      '<tbody><tr><td></td><td></td><td></td></tr></tbody>' +
+      '<tbody><tr>' + normalizedEntries.map(function eachCell(entry) {
+        return buildApprovalBoxCellHtml(entry);
+      }).join('') + '</tr></tbody>' +
       '</table>';
   }
 
@@ -199,16 +250,28 @@
       '.ledger-title-wrap { flex:1; }' +
       '.ledger-title { margin:0; font-size:23px; font-weight:800; text-decoration:underline; letter-spacing:0.01em; }' +
       '.ledger-subtitle { margin-top:2px; font-size:12px; color:#4b5563; }' +
-      '.ledger-logo img { height:36px; max-width:240px; object-fit:contain; }' +
-      '.approval-box { width:220px; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
+      '.ledger-logo img { height:40px; max-width:240px; object-fit:contain; }' +
+      '.approval-box { width:250px; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
       '.approval-box th, .approval-box td { border:1px solid #111; text-align:center; }' +
       '.approval-box th { height:22px; background:#f3f4f6; font-weight:700; }' +
-      '.approval-box td { height:52px; }' +
-      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:10px; }' +
+      '.approval-box td { height:60px; padding:4px; vertical-align:top; }' +
+      '.approval-entry-name { font-size:11px; font-weight:700; color:#111; }' +
+      '.approval-entry-stamp { margin-top:6px; display:inline-block; padding:2px 6px; border:1px solid #2563eb; border-radius:999px; color:#2563eb; font-size:10px; font-weight:700; }' +
+      '.approval-entry-date { margin-top:4px; font-size:10px; color:#374151; }' +
+      '.approval-entry-note { margin-top:4px; font-size:9px; color:#6b7280; }' +
+      '.ledger-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:11px; }' +
       '.ledger-table th, .ledger-table td { border:1px solid #111; padding:3px 4px; vertical-align:middle; }' +
-      '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:nowrap; }' +
+      '.ledger-table thead th { background:#f3f4f6; text-align:center; font-weight:700; white-space:normal; }' +
       '.ledger-table tfoot th { background:#e5e7eb; }' +
       '.text-center { text-align:center; } .text-end { text-align:right; } .fw-bold { font-weight:700; }' +
+      '.ledger-work-desc { white-space:normal; word-break:keep-all; overflow-wrap:anywhere; line-height:1.45; }' +
+      '.ledger-summary-cell { padding:6px !important; }' +
+      '.ledger-summary-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:4px 6px; }' +
+      '.ledger-summary-item { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-width:0; border:1px solid #d1d5db; border-radius:4px; background:#fff; padding:4px 6px; }' +
+      '.ledger-summary-item.is-highlight { background:#eef2ff; border-color:#94a3b8; }' +
+      '.ledger-summary-label { font-size:10px; color:#4b5563; white-space:nowrap; }' +
+      '.ledger-summary-value { font-size:10.5px; font-weight:700; color:#111; text-align:right; word-break:break-all; }' +
+      '.ledger-net-pay { white-space:nowrap; font-size:11px; }' +
       '.ledger-footer { margin-top:6px; display:flex; justify-content:space-between; gap:8px; font-size:11px; color:#6b7280; }' +
       '</style>' +
 
@@ -226,40 +289,43 @@
       '<tr>' +
       '<th rowspan="2" style="width:40px;">No</th>' +
       '<th rowspan="2" style="width:72px;">성명</th>' +
-      '<th rowspan="2" style="width:124px;">종사업무</th>' +
+      '<th rowspan="2" style="width:156px;">종사업무</th>' +
       '<th rowspan="2" style="width:46px;">근로일수</th>' +
       '<th rowspan="2" style="width:52px;">근로시간</th>' +
-      '<th colspan="6">지 급 내 역</th>' +
-      '<th colspan="7">공 제 내 역</th>' +
-      '<th rowspan="2">공제계</th>' +
-      '<th rowspan="2">차인지급액</th>' +
+      '<th>지급내역</th>' +
+      '<th>공제내역</th>' +
+      '<th rowspan="2" style="width:94px;">차인지급액</th>' +
       '</tr>' +
       '<tr>' +
-      '<th>기본급</th><th>식대</th><th>차량</th><th>기타수당</th><th>상여</th><th class="fw-bold">지급계</th>' +
-      '<th>국민연금</th><th>건강보험</th><th>장기요양</th><th>고용보험</th><th>소득세</th><th>지방세</th><th>' + escapeHtml(state.dedEtcLabel || '기타공제') + '</th>' +
+      '<th style="width:290px;">기본급 · 식대 · 차량 · 기타수당 · 상여 · 지급계</th>' +
+      '<th style="width:340px;">국민연금 · 건강보험 · 장기요양 · 고용보험 · 소득세 · 지방세 · ' + escapeHtml(state.dedEtcLabel || '기타공제') + ' · 공제계</th>' +
       '</tr>' +
       '</thead>' +
-      '<tbody>' + buildRowsHtml(rows) + '</tbody>' +
+      '<tbody>' + buildRowsHtml(rows, state.dedEtcLabel) + '</tbody>' +
       '<tfoot>' +
       '<tr>' +
       '<th colspan="3">합계 (' + rows.length + '명)</th>' +
       '<th class="text-end">' + formatMetric(totals.work_days) + '</th>' +
       '<th class="text-end">' + formatMetric(totals.work_hours) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.pay_basic) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.pay_meal) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.pay_car) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.pay_allow) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.pay_bonus) + '</th>' +
-      '<th class="text-end fw-bold">' + formatMoney(totals.pay_total) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_pension) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_health) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_care) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_employ) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_income) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_local) + '</th>' +
-      '<th class="text-end">' + formatMoney(totals.ded_etc) + '</th>' +
-      '<th class="text-end fw-bold">' + formatMoney(totals.ded_total) + '</th>' +
-      '<th class="text-end fw-bold">' + formatMoney(totals.net_pay) + '</th>' +
+      '<th class="ledger-summary-cell">' + buildSummaryItemsHtml([
+        { label: '기본급', value: totals.pay_basic },
+        { label: '식대', value: totals.pay_meal },
+        { label: '차량', value: totals.pay_car },
+        { label: '기타수당', value: totals.pay_allow },
+        { label: '상여', value: totals.pay_bonus },
+        { label: '지급계', value: totals.pay_total, highlight: true }
+      ], { className: 'ledger-pay-grid' }) + '</th>' +
+      '<th class="ledger-summary-cell">' + buildSummaryItemsHtml([
+        { label: '국민연금', value: totals.ded_pension },
+        { label: '건강보험', value: totals.ded_health },
+        { label: '장기요양', value: totals.ded_care },
+        { label: '고용보험', value: totals.ded_employ },
+        { label: '소득세', value: totals.ded_income },
+        { label: '지방세', value: totals.ded_local },
+        { label: state.dedEtcLabel || '기타공제', value: totals.ded_etc },
+        { label: '공제계', value: totals.ded_total, highlight: true }
+      ], { className: 'ledger-deduction-grid' }) + '</th>' +
+      '<th class="text-end fw-bold ledger-net-pay">' + formatMoney(totals.net_pay) + '</th>' +
       '</tr>' +
       '</tfoot>' +
       '</table>' +
