@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.44
-Change: Show a live collection timestamp under public member and capital stats.
+Version: v1.0.45
+Change: Replace the example power status section with real plant generation stats based on manual/admin input.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.44 | index.html');</script>
+<script>console.log('[Version] v1.0.45 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -434,39 +434,42 @@ Change: Show a live collection timestamp under public member and capital stats.
 <section id="status" class="counts" style="background:#f6f9fe;">
       <div class="container" data-aos="fade-up">
         <div class="section-title">
-          <h2>Dashboard</h2>
-          <p>실시간 <span>발전 현황</span> (예시)</p>
+          <h2>Generation</h2>
+          <p>우리 <span>발전 현황</span></p>
+          <div id="public-power-stats-timestamp" class="mt-3" style="display:inline-block; font-size: 13px; opacity: 0.82; background: rgba(15,23,42,0.08); padding: 6px 14px; border-radius: 999px;">
+            최근 입력 기준
+          </div>
         </div>
 
         <div class="row no-gutters">
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
-              <i class="bi bi-sun" style="color: #ffc107;"></i> <span data-purecounter-start="0" data-purecounter-end="0" data-purecounter-duration="1" class="purecounter">0</span>
-              <p><strong>오늘 발전량</strong> (kWh)</p>
+              <i class="bi bi-sun" style="color: #ffc107;"></i> <span id="power-stat-latest-day-kwh">0</span>
+              <p><strong>최근 발전일 발전량</strong> (kWh)</p>
             </div>
           </div>
 
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
-              <i class="bi bi-battery-charging" style="color: var(--color-primary);"></i>
-              <span data-purecounter-start="0" data-purecounter-end="4210" data-purecounter-duration="1" class="purecounter">0</span>
+              <i class="bi bi-calendar3" style="color: var(--color-primary);"></i>
+              <span id="power-stat-month-kwh">0</span>
+              <p><strong>이번 달 누적</strong> (kWh)</p>
+            </div>
+          </div>
+
+          <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
+            <div class="count-box">
+              <i class="bi bi-battery-charging" style="color: #2e7d32;"></i>
+              <span id="power-stat-cumulative-kwh">0</span>
               <p><strong>누적 발전량</strong> (kWh)</p>
             </div>
           </div>
 
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
-              <i class="bi bi-tree" style="color: #2e7d32;"></i>
-              <span data-purecounter-start="0" data-purecounter-end="18" data-purecounter-duration="1" class="purecounter">0</span>
-              <p><strong>심은 소나무</strong> (그루)</p>
-            </div>
-          </div>
-
-          <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
-            <div class="count-box">
-              <i class="bi bi-activity" style="color: #ff5722;"></i>
-              <span data-purecounter-start="0" data-purecounter-end="98" data-purecounter-duration="1" class="purecounter">0%</span>
-              <p><strong>발전소 가동률</strong> (%)</p>
+              <i class="bi bi-building" style="color: #ff5722;"></i>
+              <span id="power-stat-operating-count">0</span>
+              <p><strong>운영 발전소 수</strong> (개소)</p>
             </div>
           </div>
         </div>
@@ -1527,6 +1530,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 2. 데이터 로드: 병렬 처리 (동시에 출발!)
     await Promise.all([
         fetchStats(),
+        fetchPowerGenerationStats(),
         fetchPlants(),
         fetchHistory(),
         fetchPartners(),
@@ -1627,6 +1631,56 @@ function updatePublicStatsTimestamp(dateLike) {
       if (!el) return;
       const formatted = formatPublicStatsTimestamp(dateLike);
       el.textContent = formatted ? `실시간 집계 · ${formatted} 기준` : '실시간 집계';
+    }
+
+function formatPublicPowerValue(value) {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num)) return '0';
+      return num.toLocaleString('ko-KR', {
+        minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+function formatPublicPowerDate(value) {
+      if (!value) return '';
+      const date = new Date(String(value).length <= 10 ? `${value}T00:00:00+09:00` : value);
+      if (Number.isNaN(date.getTime())) return '';
+      return new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(date).replace(/\.\s?/g, '.').replace(/\.$/, '');
+    }
+
+function renderPublicPowerStats(stats) {
+      const latestDayEl = document.getElementById('power-stat-latest-day-kwh');
+      const monthEl = document.getElementById('power-stat-month-kwh');
+      const cumulativeEl = document.getElementById('power-stat-cumulative-kwh');
+      const operatingEl = document.getElementById('power-stat-operating-count');
+      const stampEl = document.getElementById('public-power-stats-timestamp');
+      if (!latestDayEl || !monthEl || !cumulativeEl || !operatingEl || !stampEl) return;
+
+      latestDayEl.innerText = formatPublicPowerValue(stats.latest_day_total_kwh || 0);
+      monthEl.innerText = formatPublicPowerValue(stats.current_month_total_kwh || 0);
+      cumulativeEl.innerText = formatPublicPowerValue(stats.cumulative_total_kwh || 0);
+      operatingEl.innerText = Number(stats.operating_plant_count || 0).toLocaleString('ko-KR');
+
+      const latestDateText = formatPublicPowerDate(stats.latest_generation_date);
+      stampEl.textContent = latestDateText
+        ? `최근 입력일 · ${latestDateText} 기준`
+        : '발전량 입력 대기 중';
+    }
+
+async function fetchPowerGenerationStats() {
+      const { data, error } = await _client.rpc('get_public_power_generation_stats');
+      if (error) {
+        console.warn('fetchPowerGenerationStats failed:', error);
+        renderPublicPowerStats({});
+        return;
+      }
+      renderPublicPowerStats(data || {});
     }
 
 /* =================================================================
