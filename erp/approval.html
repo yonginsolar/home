@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.05 | Change: 2026-04-06 - Save document-level processed_at on final digital approval completion. -->
+<!-- Version: v1.2.06 | Change: 2026-04-09 - Show submit preview attachments with the same viewer as approvers. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.05 | approval.html');</script>
+  <script>console.log('[Version] v1.2.06 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -3931,8 +3931,8 @@ function getAttachmentPreviewType(fileNameOrRef, mimeType = '') {
     return '';
 }
 
-function canPreviewAttachment(fileNameOrRef) {
-    return !!getAttachmentPreviewType(fileNameOrRef);
+function canPreviewAttachment(fileNameOrRef, mimeType = '') {
+    return !!getAttachmentPreviewType(fileNameOrRef, mimeType);
 }
 
 function resetAttachmentPreviewObjectUrl() {
@@ -7346,6 +7346,80 @@ function openAppDescPreview() {
     if (appDescPreviewModalInstance) appDescPreviewModalInstance.show();
 }
 
+async function buildApprovalSubmitPreviewAttachments(previewDoc) {
+    const attachments = [];
+    const fileInput = document.getElementById('attachFile');
+    Array.from(fileInput?.files || []).forEach((file) => {
+        if (!(file instanceof File)) return;
+        const objectUrl = URL.createObjectURL(file);
+        relViewObjectUrls.push(objectUrl);
+        attachments.push({
+            rawRef: objectUrl,
+            previewUrl: objectUrl,
+            displayName: String(file.name || '첨부파일').trim() || '첨부파일',
+            size: Number(file.size || 0) || 0,
+            mimeType: String(file.type || '').trim()
+        });
+    });
+
+    approvalDraftAttachmentRefs
+        .map((item) => normalizeApprovalDraftAttachmentItem(item))
+        .filter(Boolean)
+        .forEach((item) => {
+            attachments.push({
+                rawRef: item.rawRef,
+                displayName: item.displayName,
+                size: Number(item.size || 0) || 0,
+                mimeType: String(item.mimeType || '').trim()
+            });
+        });
+
+    if (String(previewDoc?.doc_type || '') === '지출결의(급여)') {
+        if (!salaryExpenseState?.loaded || !window.SalaryLedgerModule) {
+            throw new Error('급여대장 미리보기 첨부를 준비할 수 없습니다. 급여대장을 다시 불러와주세요.');
+        }
+        await ensureApprovalHtml2PdfReady();
+        const payrollMonth = String(previewDoc?.payroll_month || '').trim() || String(salaryExpenseState.yearMonth || '').trim();
+        const salaryFileName = window.SalaryLedgerModule.makeFileName(payrollMonth);
+        const ledgerState = window.SalaryLedgerModule.createStateFromRows(
+            salaryExpenseState.rows || [],
+            payrollMonth || salaryExpenseState.yearMonth || ''
+        );
+        let companyInfo = {};
+        try {
+            const coopId = String(myInfo?.coop_id || '').trim();
+            companyInfo = readApprovalCompanyInfoCache(coopId, { allowStale: true }) || {};
+        } catch (_) {
+            companyInfo = {};
+        }
+        const ymLabel = window.SalaryLedgerModule.formatYearMonthLabel(payrollMonth);
+        const ledgerPdfBlob = await window.SalaryLedgerModule.generatePdfBlob(ledgerState, {
+            fileName: salaryFileName,
+            title: `${ymLabel} 급여대장`,
+            logoUrl: companyInfo.logo_horizontal_url || "",
+            chairmanName: companyInfo.chairman_name || companyInfo.ceoName || "이사장",
+            showApprovalBox: true,
+            showPrintDate: true,
+            footerText: 'ERP 급여관리 출력본',
+            marginMm: 6
+        });
+        if (!(ledgerPdfBlob instanceof Blob) || ledgerPdfBlob.size === 0) {
+            throw new Error('급여대장 PDF 미리보기를 생성하지 못했습니다.');
+        }
+        const salaryObjectUrl = URL.createObjectURL(ledgerPdfBlob);
+        relViewObjectUrls.push(salaryObjectUrl);
+        attachments.push({
+            rawRef: salaryObjectUrl,
+            previewUrl: salaryObjectUrl,
+            displayName: salaryFileName,
+            size: Number(ledgerPdfBlob.size || 0) || 0,
+            mimeType: 'application/pdf'
+        });
+    }
+
+    return attachments;
+} // End of buildApprovalSubmitPreviewAttachments
+
 function buildApprovalSubmitPreviewData() {
     const mainType = String(document.getElementById("appCategory")?.value || '').trim();
     if (!mainType) throw new Error('문서 유형을 선택하세요.');
@@ -7478,20 +7552,6 @@ function buildApprovalSubmitPreviewData() {
     const previewApprovers = Array.isArray(finalApprovers)
         ? finalApprovers.slice().sort((a, b) => Number(b?.auth_level || 0) - Number(a?.auth_level || 0))
         : [];
-    const attachmentNames = [];
-    const fileInput = document.getElementById('attachFile');
-    Array.from(fileInput?.files || []).forEach((file) => {
-        const name = String(file?.name || '').trim();
-        if (name) attachmentNames.push(name);
-    });
-    if (approvalDraftAttachmentRefs.length > 0) {
-        attachmentNames.push(`임시저장 첨부 ${approvalDraftAttachmentRefs.length}건`);
-    }
-    if (subType === '지출결의(급여)') {
-        const salaryFileName = window.SalaryLedgerModule ? window.SalaryLedgerModule.makeFileName(payrollMonth) : '급여대장.pdf';
-        attachmentNames.push(`[자동첨부 예정] ${salaryFileName}`);
-    }
-
     return {
         doc_type: subType,
         title: title,
@@ -7504,9 +7564,9 @@ function buildApprovalSubmitPreviewData() {
             position: u.position,
             status: '대기'
         })),
+        payroll_month: payrollMonth,
         receiver,
         via,
-        attachmentNames,
         noticeParts,
         allowHtmlContent,
         leave_snapshot: leaveSnapshotPayload,
@@ -7516,7 +7576,7 @@ function buildApprovalSubmitPreviewData() {
     };
 } // End of buildApprovalSubmitPreviewData
 
-function openApprovalSubmitPreview() {
+async function openApprovalSubmitPreview() {
     try {
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
@@ -7578,16 +7638,19 @@ function openApprovalSubmitPreview() {
         contentEl.appendChild(document.createElement("hr"));
         contentEl.appendChild(contentBox);
         contentEl.appendChild(amountEl);
-
-        if (Array.isArray(previewDoc.attachmentNames) && previewDoc.attachmentNames.length > 0) {
-            const attachmentBox = document.createElement("div");
-            attachmentBox.className = "mt-3 p-3 border rounded bg-white";
-            attachmentBox.innerHTML = `<div class="small fw-bold text-muted mb-2">첨부 예정 파일</div>${previewDoc.attachmentNames.map((name) => `<div>• ${escapeHtml(name)}</div>`).join('')}`;
-            contentEl.appendChild(attachmentBox);
-        }
-
         relViewModal.show();
+        const attachmentPlaceholder = document.createElement("div");
+        attachmentPlaceholder.className = "mt-3 p-3 border rounded bg-white small text-muted";
+        attachmentPlaceholder.textContent = "첨부파일 미리보기를 준비하는 중입니다.";
+        contentEl.appendChild(attachmentPlaceholder);
+        const previewAttachments = await buildApprovalSubmitPreviewAttachments(previewDoc);
+        const attachmentViewerEl = await buildRelAttachmentViewer(previewAttachments);
+        attachmentPlaceholder.replaceWith(attachmentViewerEl);
     } catch (error) {
+        resetRelViewObjectUrls();
+        try {
+            relViewModal?.hide();
+        } catch (_) {}
         showAlert(error?.message || '상신 미리보기를 불러오지 못했습니다.');
     }
 } // End of openApprovalSubmitPreview
@@ -10784,13 +10847,13 @@ async function buildRelAttachmentViewer(attachments) {
     const list = document.createElement('div');
     list.className = 'list-group list-group-flush rel-attachment-list mt-3';
 
+    const getItemDisplayName = (item, fallback) => String(item?.displayName || extractDisplayFileName(item?.rawRef, fallback));
     const state = {
         index: 0,
         previewable: attachments
             .map((item, idx) => ({ ...item, idx }))
-            .filter(item => canPreviewAttachment(item.rawRef))
+            .filter(item => canPreviewAttachment(getItemDisplayName(item, `첨부파일 ${item.idx + 1}`), item.mimeType))
     };
-    const getItemDisplayName = (item, fallback) => String(item?.displayName || extractDisplayFileName(item?.rawRef, fallback));
     const syncAttachmentNavButtons = () => {
         const hasPrev = state.previewable.length > 0 && state.index > 0;
         const hasNext = state.previewable.length > 0 && state.index < state.previewable.length - 1;
@@ -10825,31 +10888,44 @@ async function buildRelAttachmentViewer(attachments) {
         stage.innerHTML = '<div class="text-muted">첨부파일을 불러오는 중입니다.</div>';
         try {
             resetStageObjectUrl();
+            const currentName = getItemDisplayName(current, `첨부파일 ${current.idx + 1}`);
+            if (String(current.previewUrl || '').trim()) {
+                const previewType = getAttachmentPreviewType(currentName, current.mimeType || '');
+                if (!previewType) throw new Error('unsupported-preview-type');
+                metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName} · ${getAttachmentTypeLabel(currentName, current.mimeType || '')}${current.size ? ` · ${formatAttachmentSize(current.size)}` : ''}`;
+                if (previewType === 'pdf') {
+                    stage.innerHTML = `<iframe src="${escapeHtml(current.previewUrl)}#toolbar=1"></iframe>`;
+                } else {
+                    stage.innerHTML = `<img src="${escapeHtml(current.previewUrl)}" alt="${escapeHtml(currentName)}">`;
+                }
+                return;
+            }
             const payload = await fetchPreviewBlob(current.rawRef, 60 * 60 * 3);
-            const previewType = getAttachmentPreviewType(current.rawRef, payload.blob?.type || '');
+            const previewType = getAttachmentPreviewType(currentName, payload.blob?.type || current.mimeType || '');
             if (!previewType) {
                 throw new Error('unsupported-preview-type');
             }
             stageObjectUrl = payload.url;
             relViewObjectUrls.push(stageObjectUrl);
-            metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${getItemDisplayName(current, `첨부파일 ${current.idx + 1}`)} · ${payload.typeLabel}${payload.sizeLabel ? ` · ${payload.sizeLabel}` : ''}`;
+            metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName} · ${payload.typeLabel}${payload.sizeLabel ? ` · ${payload.sizeLabel}` : ''}`;
             if (previewType === 'pdf') {
                 stage.innerHTML = `<iframe src="${escapeHtml(stageObjectUrl)}#toolbar=1"></iframe>`;
             } else {
-                stage.innerHTML = `<img src="${escapeHtml(stageObjectUrl)}" alt="${escapeHtml(getItemDisplayName(current, `첨부파일 ${current.idx + 1}`))}">`;
+                stage.innerHTML = `<img src="${escapeHtml(stageObjectUrl)}" alt="${escapeHtml(currentName)}">`;
             }
         } catch (_) {
             try {
-                const previewType = getAttachmentPreviewType(current.rawRef);
+                const currentName = getItemDisplayName(current, `첨부파일 ${current.idx + 1}`);
+                const previewType = getAttachmentPreviewType(currentName, current.mimeType || '');
                 if (!previewType) {
                     throw new Error('unsupported-preview-type');
                 }
                 const fallbackUrl = await resolveStorageUrl(current.rawRef, 60 * 60 * 3, { download: false });
-                metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${getItemDisplayName(current, `첨부파일 ${current.idx + 1}`)} · ${getAttachmentTypeLabel(current.rawRef)} · 직접 미리보기`;
+                metaBox.textContent = `${state.index + 1}/${state.previewable.length} · ${currentName} · ${getAttachmentTypeLabel(currentName, current.mimeType || '')} · 직접 미리보기`;
                 if (previewType === 'pdf') {
                     stage.innerHTML = `<iframe src="${escapeHtml(fallbackUrl || current.rawRef)}#toolbar=1"></iframe>`;
                 } else {
-                    stage.innerHTML = `<img src="${escapeHtml(fallbackUrl || current.rawRef)}" alt="${escapeHtml(getItemDisplayName(current, `첨부파일 ${current.idx + 1}`))}">`;
+                    stage.innerHTML = `<img src="${escapeHtml(fallbackUrl || current.rawRef)}" alt="${escapeHtml(currentName)}">`;
                 }
             } catch (_) {
                 metaBox.textContent = `${getItemDisplayName(current, `첨부파일 ${current.idx + 1}`)} · 미리보기 실패`;
@@ -10860,14 +10936,14 @@ async function buildRelAttachmentViewer(attachments) {
 
     attachments.forEach((item, idx) => {
         const fileName = getItemDisplayName(item, `첨부파일 ${idx + 1}`);
-        const canPreview = canPreviewAttachment(item.rawRef);
+        const canPreview = canPreviewAttachment(fileName, item.mimeType || '');
         const row = document.createElement('div');
         row.className = 'list-group-item';
         row.innerHTML = `
             <div class="d-flex justify-content-between align-items-center gap-3">
                 <div>
                     <div class="fw-semibold">${escapeHtml(fileName)}</div>
-                    <div class="small text-muted">${escapeHtml(getAttachmentTypeLabel(item.rawRef))}</div>
+                    <div class="small text-muted">${escapeHtml(getAttachmentTypeLabel(fileName, item.mimeType || ''))}${item.size ? ` · ${escapeHtml(formatAttachmentSize(item.size))}` : ''}</div>
                 </div>
                 <div class="d-flex gap-2">
                     ${canPreview ? `<button type="button" class="btn btn-sm btn-outline-primary" data-preview-index="${state.previewable.findIndex(entry => entry.idx === idx)}">바로보기</button>` : ''}
