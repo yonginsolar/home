@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.06 | Change: 2026-04-09 - Show submit preview attachments with the same viewer as approvers. -->
+<!-- Version: v1.2.07 | Change: 2026-04-09 - Store salary ledger snapshot and render it inline in preview/detail. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.06 | approval.html');</script>
+  <script>console.log('[Version] v1.2.07 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -886,6 +886,7 @@ let approvalLeaveSnapshotSupported = false;
 let approvalAttendanceSnapshotSupported = false;
 let approvalBusinessTripSnapshotSupported = false;
 let approvalExpenseSnapshotSupported = false;
+let approvalSalaryLedgerSnapshotSupported = false;
 let approvalOvertimePolicy = null;
 let approvalLastCategory = '';
 let approvalLeaveCancelCandidates = [];
@@ -991,7 +992,7 @@ const APPROVAL_DRAFT_LIMIT = 10;
 const APPROVAL_SUMMARY_CACHE_VERSION = 1;
 const APPROVAL_SUMMARY_CACHE_TTL_MS = 2 * 60 * 1000;
 const APPROVAL_DATA_CACHE_TTL_MS = 30 * 1000;
-const APPROVAL_SCHEMA_FEATURE_CACHE_VERSION = 1;
+const APPROVAL_SCHEMA_FEATURE_CACHE_VERSION = 2;
 const APPROVAL_SCHEMA_FEATURE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const APPROVAL_COMPANY_INFO_CACHE_VERSION = 1;
 const APPROVAL_COMPANY_INFO_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -2762,7 +2763,8 @@ function readApprovalSchemaFeatureCache() {
             leave_snapshot: !!parsed.leave_snapshot,
             attendance_snapshot: !!parsed.attendance_snapshot,
             business_trip_snapshot: !!parsed.business_trip_snapshot,
-            expense_snapshot: !!parsed.expense_snapshot
+            expense_snapshot: !!parsed.expense_snapshot,
+            salary_ledger_snapshot: !!parsed.salary_ledger_snapshot
         };
     } catch (_) {
         return null;
@@ -2777,7 +2779,8 @@ function writeApprovalSchemaFeatureCache(features = {}) {
             leave_snapshot: !!features.leave_snapshot,
             attendance_snapshot: !!features.attendance_snapshot,
             business_trip_snapshot: !!features.business_trip_snapshot,
-            expense_snapshot: !!features.expense_snapshot
+            expense_snapshot: !!features.expense_snapshot,
+            salary_ledger_snapshot: !!features.salary_ledger_snapshot
         }));
     } catch (_) {}
 } // End of writeApprovalSchemaFeatureCache
@@ -2793,7 +2796,8 @@ async function fetchApprovalSchemaFeaturesFromOpenApi() {
         leave_snapshot: !!properties.leave_snapshot,
         attendance_snapshot: !!properties.attendance_snapshot,
         business_trip_snapshot: !!properties.business_trip_snapshot,
-        expense_snapshot: !!properties.expense_snapshot
+        expense_snapshot: !!properties.expense_snapshot,
+        salary_ledger_snapshot: !!properties.salary_ledger_snapshot
     };
 } // End of fetchApprovalSchemaFeaturesFromOpenApi
 
@@ -2809,7 +2813,8 @@ async function loadApprovalSchemaFeatures() {
             leave_snapshot: false,
             attendance_snapshot: false,
             business_trip_snapshot: false,
-            expense_snapshot: false
+            expense_snapshot: false,
+            salary_ledger_snapshot: false
         };
     }
 } // End of loadApprovalSchemaFeatures
@@ -2819,6 +2824,7 @@ function applyApprovalSchemaFeatureState(features = {}) {
     approvalAttendanceSnapshotSupported = !!features.attendance_snapshot;
     approvalBusinessTripSnapshotSupported = !!features.business_trip_snapshot;
     approvalExpenseSnapshotSupported = !!features.expense_snapshot;
+    approvalSalaryLedgerSnapshotSupported = !!features.salary_ledger_snapshot;
 } // End of applyApprovalSchemaFeatureState
 
 function getApprovalCompanyInfoCacheKey(coopId) {
@@ -3167,6 +3173,76 @@ function buildApprovalExpenseSnapshot() {
         saved_at: new Date().toISOString()
     };
 } // End of buildApprovalExpenseSnapshot
+
+function buildApprovalSalaryLedgerSnapshot(payrollMonth) {
+    if (!salaryExpenseState?.loaded || !window.SalaryLedgerModule) {
+        throw new Error('급여대장 스냅샷을 만들 수 없습니다. 급여대장을 다시 불러와주세요.');
+    }
+    const normalizedYm = String(payrollMonth || salaryExpenseState.yearMonth || '').trim();
+    const ledgerState = window.SalaryLedgerModule.createStateFromRows(
+        salaryExpenseState.rows || [],
+        normalizedYm
+    );
+    let companyInfo = {};
+    try {
+        const coopId = String(myInfo?.coop_id || '').trim();
+        companyInfo = readApprovalCompanyInfoCache(coopId, { allowStale: true }) || {};
+    } catch (_) {
+        companyInfo = {};
+    }
+    const ymLabel = window.SalaryLedgerModule.formatYearMonthLabel(normalizedYm);
+    const renderOptions = {
+        title: `${ymLabel} 급여대장`,
+        logoUrl: companyInfo.logo_horizontal_url || '',
+        showApprovalBox: false,
+        showPrintDate: false,
+        footerText: ''
+    };
+    return {
+        kind: 'salary_ledger',
+        year_month: normalizedYm,
+        module_version: String(window.SalaryLedgerModule.VERSION || '').trim(),
+        saved_at: new Date().toISOString(),
+        state: ledgerState,
+        render_options: renderOptions,
+        html: window.SalaryLedgerModule.buildHtml(ledgerState, renderOptions)
+    };
+} // End of buildApprovalSalaryLedgerSnapshot
+
+function getApprovalSalaryLedgerSnapshot(doc) {
+    const raw = doc?.salary_ledger_snapshot;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const state = raw.state && typeof raw.state === 'object' && !Array.isArray(raw.state) ? raw.state : null;
+    if (!state || !Array.isArray(state.rows)) return null;
+    return { ...raw, state };
+} // End of getApprovalSalaryLedgerSnapshot
+
+function renderApprovalSalaryLedgerSnapshotHtml(doc) {
+    const snapshot = getApprovalSalaryLedgerSnapshot(doc);
+    if (!snapshot) return '';
+    const storedHtml = String(snapshot.html || '').trim();
+    if (storedHtml) return storedHtml;
+    if (!window.SalaryLedgerModule?.buildHtml) return '';
+    try {
+        return window.SalaryLedgerModule.buildHtml(snapshot.state, snapshot.render_options || {});
+    } catch (_) {
+        return '';
+    }
+} // End of renderApprovalSalaryLedgerSnapshotHtml
+
+function appendApprovalSalaryLedgerSnapshotSection(container, doc) {
+    if (!container) return false;
+    const html = renderApprovalSalaryLedgerSnapshotHtml(doc);
+    if (!html) return false;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mt-4';
+    wrapper.innerHTML = `
+        <div class="fw-bold mb-2">연동 급여대장</div>
+        <div class="border rounded bg-white p-3 overflow-auto">${html}</div>
+    `;
+    container.appendChild(wrapper);
+    return true;
+} // End of appendApprovalSalaryLedgerSnapshotSection
 
 function syncApprovalBusinessTripSummary() {
     const summaryEl = document.getElementById('businessTripSummaryText');
@@ -7374,49 +7450,6 @@ async function buildApprovalSubmitPreviewAttachments(previewDoc) {
             });
         });
 
-    if (String(previewDoc?.doc_type || '') === '지출결의(급여)') {
-        if (!salaryExpenseState?.loaded || !window.SalaryLedgerModule) {
-            throw new Error('급여대장 미리보기 첨부를 준비할 수 없습니다. 급여대장을 다시 불러와주세요.');
-        }
-        await ensureApprovalHtml2PdfReady();
-        const payrollMonth = String(previewDoc?.payroll_month || '').trim() || String(salaryExpenseState.yearMonth || '').trim();
-        const salaryFileName = window.SalaryLedgerModule.makeFileName(payrollMonth);
-        const ledgerState = window.SalaryLedgerModule.createStateFromRows(
-            salaryExpenseState.rows || [],
-            payrollMonth || salaryExpenseState.yearMonth || ''
-        );
-        let companyInfo = {};
-        try {
-            const coopId = String(myInfo?.coop_id || '').trim();
-            companyInfo = readApprovalCompanyInfoCache(coopId, { allowStale: true }) || {};
-        } catch (_) {
-            companyInfo = {};
-        }
-        const ymLabel = window.SalaryLedgerModule.formatYearMonthLabel(payrollMonth);
-        const ledgerPdfBlob = await window.SalaryLedgerModule.generatePdfBlob(ledgerState, {
-            fileName: salaryFileName,
-            title: `${ymLabel} 급여대장`,
-            logoUrl: companyInfo.logo_horizontal_url || "",
-            chairmanName: companyInfo.chairman_name || companyInfo.ceoName || "이사장",
-            showApprovalBox: true,
-            showPrintDate: true,
-            footerText: 'ERP 급여관리 출력본',
-            marginMm: 6
-        });
-        if (!(ledgerPdfBlob instanceof Blob) || ledgerPdfBlob.size === 0) {
-            throw new Error('급여대장 PDF 미리보기를 생성하지 못했습니다.');
-        }
-        const salaryObjectUrl = URL.createObjectURL(ledgerPdfBlob);
-        relViewObjectUrls.push(salaryObjectUrl);
-        attachments.push({
-            rawRef: salaryObjectUrl,
-            previewUrl: salaryObjectUrl,
-            displayName: salaryFileName,
-            size: Number(ledgerPdfBlob.size || 0) || 0,
-            mimeType: 'application/pdf'
-        });
-    }
-
     return attachments;
 } // End of buildApprovalSubmitPreviewAttachments
 
@@ -7440,6 +7473,7 @@ function buildApprovalSubmitPreviewData() {
     let attendanceSnapshotPayload = null;
     let businessTripSnapshotPayload = null;
     let expenseSnapshotPayload = null;
+    let salaryLedgerSnapshotPayload = null;
 
     const isProxy = !!document.getElementById("chkProxy")?.checked;
     let drafterName = String(myInfo?.emp_name || '').trim();
@@ -7486,6 +7520,7 @@ function buildApprovalSubmitPreviewData() {
             if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
                 throw new Error('급여대장을 먼저 불러와주세요.');
             }
+            salaryLedgerSnapshotPayload = buildApprovalSalaryLedgerSnapshot(payrollMonth);
             subType = '지출결의(급여)';
             title = getApprovalResolvedTitle(mainType, `급여 지출결의 (${payrollMonth})`);
             finalAmt = Number(document.getElementById("appAmount")?.value || 0);
@@ -7572,7 +7607,8 @@ function buildApprovalSubmitPreviewData() {
         leave_snapshot: leaveSnapshotPayload,
         attendance_snapshot: attendanceSnapshotPayload,
         business_trip_snapshot: businessTripSnapshotPayload,
-        expense_snapshot: expenseSnapshotPayload
+        expense_snapshot: expenseSnapshotPayload,
+        salary_ledger_snapshot: salaryLedgerSnapshotPayload
     };
 } // End of buildApprovalSubmitPreviewData
 
@@ -7638,6 +7674,7 @@ async function openApprovalSubmitPreview() {
         contentEl.appendChild(document.createElement("hr"));
         contentEl.appendChild(contentBox);
         contentEl.appendChild(amountEl);
+        appendApprovalSalaryLedgerSnapshotSection(contentEl, previewDoc);
         relViewModal.show();
         const attachmentPlaceholder = document.createElement("div");
         attachmentPlaceholder.className = "mt-3 p-3 border rounded bg-white small text-muted";
@@ -8445,6 +8482,7 @@ async function handleDraftSubmit(e) {
     let attendanceSnapshotPayload = null;
     let businessTripSnapshotPayload = null;
     let expenseSnapshotPayload = null;
+    let salaryLedgerSnapshotPayload = null;
     
     if (isProxy) {
         const targetSel = document.getElementById("proxyTargetSelect");
@@ -8524,6 +8562,7 @@ async function handleDraftSubmit(e) {
             if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
                 return showAlert("급여대장을 먼저 불러와주세요.");
             }
+            salaryLedgerSnapshotPayload = buildApprovalSalaryLedgerSnapshot(payrollMonth);
 
             subType = '지출결의(급여)';
             title = getApprovalResolvedTitle(mainType, `급여 지출결의 (${payrollMonth})`);
@@ -8682,55 +8721,6 @@ async function handleDraftSubmit(e) {
             });
         }
 
-        if (isSalaryExpenseDoc && salaryExpenseState?.loaded) {
-            if (!window.SalaryLedgerModule) {
-                throw new Error("급여대장 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.");
-            }
-            await ensureApprovalHtml2PdfReady();
-            const salaryLedgerFileName = window.SalaryLedgerModule.makeFileName(payrollMonth);
-            let ledgerPdfBlob = null;
-            try {
-                const ledgerState = window.SalaryLedgerModule.createStateFromRows(
-                    salaryExpenseState.rows || [],
-                    payrollMonth || salaryExpenseState.yearMonth || ''
-                );
-                let companyInfo = {};
-                try {
-                    const coopId = String(myInfo?.coop_id || '').trim();
-                    companyInfo = readApprovalCompanyInfoCache(coopId, { allowStale: true }) || {};
-                } catch (_) {
-                    companyInfo = {};
-                }
-                const ymLabel = window.SalaryLedgerModule.formatYearMonthLabel(payrollMonth);
-                ledgerPdfBlob = await window.SalaryLedgerModule.generatePdfBlob(ledgerState, {
-                    fileName: salaryLedgerFileName,
-                    title: `${ymLabel} 급여대장`,
-                    logoUrl: companyInfo.logo_horizontal_url || "",
-                    chairmanName: companyInfo.chairman_name || companyInfo.ceoName || "이사장",
-                    showApprovalBox: true,
-                    showPrintDate: true,
-                    footerText: 'ERP 급여관리 출력본',
-                    marginMm: 6
-                });
-            } catch (pdfErr) {
-                throw new Error("급여대장 PDF 생성 실패: " + (pdfErr?.message || pdfErr));
-            }
-            if (!(ledgerPdfBlob instanceof Blob) || ledgerPdfBlob.size === 0) {
-                throw new Error("급여대장 PDF 생성 결과가 비어 있습니다.");
-            }
-
-            const ymTag = String(payrollMonth || '').replace(/[^0-9]/g, '') || String(formatApprovalKstMonth() || '').replace(/[^0-9]/g, '');
-            const salaryStoragePath = `${crypto.randomUUID()}/salary_ledger_${ymTag || Date.now()}.pdf`;
-            const { error: salaryAttachErr } = await _supabase.storage
-                .from('attachments')
-                .upload(salaryStoragePath, ledgerPdfBlob, { contentType: 'application/pdf' });
-            if (salaryAttachErr) {
-                throw new Error("급여대장 첨부 업로드 실패: " + salaryAttachErr.message);
-            }
-            const rawRef = `attachments/${salaryStoragePath}?display_name=${encodeURIComponent(salaryLedgerFileName)}`;
-            uploadedUrls.push(rawRef);
-            uploadRollbackItems.push({ rawRef });
-        }
     } catch (error) {
         try {
             await deleteDraftAttachmentObjects(uploadRollbackItems);
@@ -8807,7 +8797,8 @@ async function handleDraftSubmit(e) {
         ...(approvalLeaveSnapshotSupported && leaveSnapshotPayload ? { leave_snapshot: leaveSnapshotPayload } : {}),
         ...(approvalAttendanceSnapshotSupported && attendanceSnapshotPayload ? { attendance_snapshot: attendanceSnapshotPayload } : {}),
         ...(approvalBusinessTripSnapshotSupported && businessTripSnapshotPayload ? { business_trip_snapshot: businessTripSnapshotPayload } : {}),
-        ...(approvalExpenseSnapshotSupported && expenseSnapshotPayload ? { expense_snapshot: expenseSnapshotPayload } : {})
+        ...(approvalExpenseSnapshotSupported && expenseSnapshotPayload ? { expense_snapshot: expenseSnapshotPayload } : {}),
+        ...(approvalSalaryLedgerSnapshotSupported && salaryLedgerSnapshotPayload ? { salary_ledger_snapshot: salaryLedgerSnapshotPayload } : {})
     };
 
     let insertedDoc = null;
@@ -11048,6 +11039,7 @@ async function openRelView(docId) {
     contentEl.appendChild(hr);
     contentEl.appendChild(contentBox);
     contentEl.appendChild(amountEl);
+    appendApprovalSalaryLedgerSnapshotSection(contentEl, data);
 
     const attachmentRefs = Array.isArray(data.file_links)
         ? data.file_links.filter(link => typeof link === 'string' && link.trim()).map(rawRef => ({ rawRef }))
