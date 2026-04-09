@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.61
-Change: 2026-04-09 - Partner logos in admin list now auto-fit into a fixed thumbnail box.
+Version: v1.0.62
+Change: 2026-04-09 - Added manual power generation management with a separate advanced integration entry point.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.61';
+window.ADMIN_MEMBER_VERSION = 'v1.0.62';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -86,6 +86,16 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 .section-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .partner-logo-thumb { width: 72px; height: 44px; margin: 0 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: #fff; }
 .partner-logo-thumb img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; }
+.power-generation-summary-card { background: #fff; border: 1px solid #e9ecef; border-radius: 14px; padding: 16px 18px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04); height: 100%; }
+.power-generation-summary-card .label { font-size: 12px; color: #64748b; font-weight: 700; letter-spacing: 0.02em; }
+.power-generation-summary-card .value { font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2; }
+.power-generation-summary-card .unit { font-size: 0.9rem; font-weight: 700; color: #475569; margin-left: 4px; }
+.power-generation-summary-card .meta { margin-top: 6px; font-size: 12px; color: #64748b; }
+.power-generation-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.power-generation-filters .form-label { font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 4px; }
+.power-generation-filters .form-control,
+.power-generation-filters .form-select { min-width: 160px; }
+.power-generation-advanced-callout { border: 1px dashed #cbd5e1; background: #f8fafc; border-radius: 14px; padding: 14px 16px; color: #475569; }
 </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.0.0">
 </head>
@@ -804,6 +814,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </a>
 </li>
 <li class="nav-item">
+<a class="nav-link" data-bs-toggle="tab" href="#sub-generation" onclick="setTimeout(fetchPowerGenerationLogs,100)">
+발전량 현황
+</a>
+</li>
+<li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-docs" onclick="setTimeout(fetchDocs,100)">
 문서 관리 (정관/규약/규정)
 </a>
@@ -908,6 +923,82 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 <table class="table table-bordered bg-white">
 <thead><tr><th>순서</th><th>발전소명</th><th>용량(kW)</th><th>상태</th><th>모니터링</th><th>관리</th></tr></thead>
 <tbody id="plantListBody"></tbody>
+</table>
+</div>
+
+<div class="tab-pane fade" id="sub-generation">
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+<div class="small text-muted">
+발전소별 발전일과 발전량을 직접 입력하면 홈페이지 <strong>발전 현황</strong> 섹션에 집계되어 반영됩니다.
+</div>
+<div class="d-flex gap-2">
+<button class="btn btn-sm btn-outline-primary" onclick="openPowerGenerationModal()">+ 발전량 입력</button>
+<button class="btn btn-sm btn-outline-secondary" onclick="openPowerGenerationAdvancedModal()">고급 연동</button>
+</div>
+</div>
+
+<div class="row g-3 mb-3">
+<div class="col-lg-3 col-md-6">
+<div class="power-generation-summary-card">
+<div class="label">최근 발전일 발전량</div>
+<div><span class="value" id="power-generation-latest-day">0</span><span class="unit">kWh</span></div>
+<div class="meta" id="power-generation-latest-date">최근 입력일이 없습니다.</div>
+</div>
+</div>
+<div class="col-lg-3 col-md-6">
+<div class="power-generation-summary-card">
+<div class="label">이번 달 누적</div>
+<div><span class="value" id="power-generation-month-total">0</span><span class="unit">kWh</span></div>
+<div class="meta">이번 달 1일부터 오늘까지 기준</div>
+</div>
+</div>
+<div class="col-lg-3 col-md-6">
+<div class="power-generation-summary-card">
+<div class="label">누적 발전량</div>
+<div><span class="value" id="power-generation-cumulative">0</span><span class="unit">kWh</span></div>
+<div class="meta">홈페이지 공개 집계와 같은 기준</div>
+</div>
+</div>
+<div class="col-lg-3 col-md-6">
+<div class="power-generation-summary-card">
+<div class="label">운영 발전소 수</div>
+<div><span class="value" id="power-generation-operating-count">0</span><span class="unit">개소</span></div>
+<div class="meta" id="power-generation-last-updated">최근 반영 시각을 불러오는 중...</div>
+</div>
+</div>
+</div>
+
+<div class="d-flex justify-content-between align-items-end flex-wrap gap-3 mb-3">
+<div class="power-generation-filters">
+<div>
+<label class="form-label">조회 월</label>
+<input type="month" id="power-generation-month" class="form-control form-control-sm" onchange="fetchPowerGenerationLogs()">
+</div>
+<div>
+<label class="form-label">발전소</label>
+<select id="power-generation-plant-filter" class="form-select form-select-sm" onchange="fetchPowerGenerationLogs()">
+<option value="">전체 발전소</option>
+</select>
+</div>
+<div class="d-flex align-items-end">
+<button class="btn btn-sm btn-outline-secondary" onclick="fetchPowerGenerationLogs()">새로고침</button>
+</div>
+</div>
+<div class="small text-muted text-end" id="power-generation-summary-note">최근 입력 기준으로 홈페이지 발전 현황이 갱신됩니다.</div>
+</div>
+
+<table class="table table-bordered bg-white align-middle">
+<thead class="table-light text-center">
+<tr>
+<th style="width:120px;">발전일</th>
+<th>발전소명</th>
+<th style="width:140px;">발전량(kWh)</th>
+<th style="width:110px;">입력방식</th>
+<th>비고</th>
+<th style="width:140px;">관리</th>
+</tr>
+</thead>
+<tbody id="powerGenerationListBody"></tbody>
 </table>
 </div>
 
@@ -1363,6 +1454,60 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </div>
 </div>
 <div class="modal-footer"><button class="btn btn-primary px-4" onclick="savePlant()">저장하기</button></div>
+</div>
+</div>
+</div>
+
+<div class="modal fade" id="powerGenerationModal" tabindex="-1">
+<div class="modal-dialog modal-dialog-centered">
+<div class="modal-content">
+<div class="modal-header"><h5 class="modal-title fw-bold">발전량 입력</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body">
+<input type="hidden" id="power-generation-id">
+<div class="mb-3">
+<label class="form-label small fw-bold">발전소</label>
+<select id="power-generation-plant" class="form-select"></select>
+</div>
+<div class="row g-2">
+<div class="col-md-6 mb-3">
+<label class="form-label small fw-bold">발전일</label>
+<input type="date" id="power-generation-date" class="form-control">
+</div>
+<div class="col-md-6 mb-3">
+<label class="form-label small fw-bold">발전량(kWh)</label>
+<input type="number" id="power-generation-kwh" class="form-control" min="0" step="0.01" placeholder="예: 421.5">
+</div>
+</div>
+<div class="mb-0">
+<label class="form-label small fw-bold">비고</label>
+<textarea id="power-generation-note" class="form-control" rows="3" placeholder="선택 입력"></textarea>
+</div>
+<div class="form-text mt-2">같은 발전소와 같은 발전일은 다시 저장하면 덮어써집니다.</div>
+</div>
+<div class="modal-footer">
+<button class="btn btn-outline-secondary" data-bs-dismiss="modal">닫기</button>
+<button class="btn btn-primary" onclick="savePowerGenerationLog()">저장하기</button>
+</div>
+</div>
+</div>
+</div>
+
+<div class="modal fade" id="powerGenerationAdvancedModal" tabindex="-1">
+<div class="modal-dialog modal-dialog-centered">
+<div class="modal-content">
+<div class="modal-header"><h5 class="modal-title fw-bold">고급 연동 안내</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body">
+<div class="power-generation-advanced-callout">
+<div class="fw-bold mb-2">1차는 수동 입력형이 기본입니다.</div>
+<div class="small">
+지원 공급사별 API 주소, 발전소 식별값, 인증 방식이 제각각이라 고급 연동은 공급사별 사양을 확인한 뒤 순차 지원하는 것이 안전합니다.<br><br>
+지금 단계에서는 이 버튼을 고급 연동 진입점으로 분리해두고, 실제 운영은 <strong>발전량 입력</strong>에서 수동 입력으로 먼저 진행하는 방식을 권장합니다.
+</div>
+</div>
+</div>
+<div class="modal-footer">
+<button class="btn btn-dark" data-bs-dismiss="modal">확인</button>
+</div>
 </div>
 </div>
 </div>
@@ -2577,6 +2722,7 @@ let g_members = [];
 let g_member_import_rows = [];
 // 전역 변수
 let g_plants = []; // [추가] 발전소 목록 기억용
+let g_powerGenerationLogs = [];
 
 let g_badges = []; // DB에서 불러온 뱃지 목록을 기억해둠
 let g_fund_page = 0; // [추가] 무한 스크롤 페이지 번호
@@ -4342,6 +4488,7 @@ tbody.innerHTML = '';
 
 if(!data) {
 g_plants = []; // 데이터 없으면 빈 배열
+updatePowerGenerationPlantOptions();
 return;
 }
 
@@ -4360,6 +4507,7 @@ tbody.innerHTML += `<tr>
                    </td>
                </tr>`;
 });
+updatePowerGenerationPlantOptions();
 }
 // [수정] 발전소 모달 열기 (순서 자동 계산)
 // [수정 2] 발전소 모달 열기 (순서 자동 계산 + 빈칸 0 처리)
@@ -5250,6 +5398,245 @@ bootstrap.Modal.getInstance(document.getElementById('plantModal')).hide();
 fetchPlants();
 }
 }
+
+function formatPowerGenerationKwh(value) {
+const num = Number(value || 0);
+if (!Number.isFinite(num)) return '0';
+return num.toLocaleString('ko-KR', {
+minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+maximumFractionDigits: 2
+});
+}
+
+function formatPowerGenerationDate(value) {
+if (!value) return '-';
+const date = new Date(String(value).length <= 10 ? `${value}T00:00:00+09:00` : value);
+if (Number.isNaN(date.getTime())) return String(value);
+return new Intl.DateTimeFormat('ko-KR', {
+timeZone: 'Asia/Seoul',
+year: 'numeric',
+month: '2-digit',
+day: '2-digit'
+}).format(date).replace(/\.\s?/g, '.').replace(/\.$/, '');
+}
+
+function formatPowerGenerationDateTime(value) {
+if (!value) return '-';
+const date = new Date(value);
+if (Number.isNaN(date.getTime())) return String(value);
+return new Intl.DateTimeFormat('ko-KR', {
+timeZone: 'Asia/Seoul',
+year: 'numeric',
+month: '2-digit',
+day: '2-digit',
+hour: '2-digit',
+minute: '2-digit',
+hour12: false
+}).format(date).replace(/\.\s?/g, '.').replace(/\.$/, '');
+}
+
+function getCurrentKstMonthString() {
+const now = new Date();
+const kst = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+const year = kst.getFullYear();
+const month = String(kst.getMonth() + 1).padStart(2, '0');
+return `${year}-${month}`;
+}
+
+function ensurePowerGenerationFiltersReady() {
+const monthInput = document.getElementById('power-generation-month');
+if (monthInput && !monthInput.value) monthInput.value = getCurrentKstMonthString();
+updatePowerGenerationPlantOptions();
+}
+
+function updatePowerGenerationPlantOptions() {
+const options = (Array.isArray(g_plants) ? g_plants : [])
+.slice()
+.sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+
+const filterEl = document.getElementById('power-generation-plant-filter');
+const modalEl = document.getElementById('power-generation-plant');
+if (filterEl) {
+const current = filterEl.value;
+filterEl.innerHTML = '<option value="">전체 발전소</option>' + options.map((plant) => `<option value="${escapeHtml(String(plant.id || ''))}">${escapeHtml(plant.name || '-')}</option>`).join('');
+if (current && options.some((plant) => String(plant.id) === current)) filterEl.value = current;
+}
+if (modalEl) {
+const current = modalEl.value;
+modalEl.innerHTML = options.map((plant) => `<option value="${escapeHtml(String(plant.id || ''))}">${escapeHtml(plant.name || '-')}</option>`).join('');
+if (current && options.some((plant) => String(plant.id) === current)) modalEl.value = current;
+}
+}
+
+async function fetchPowerGenerationStats() {
+const { data, error } = await _supabase.rpc('get_my_power_generation_stats');
+if (error) {
+console.error('[fetchPowerGenerationStats] failed:', error);
+document.getElementById('power-generation-summary-note').innerText = '발전량 집계를 불러오지 못했습니다.';
+return;
+}
+
+const stats = data || {};
+document.getElementById('power-generation-latest-day').innerText = formatPowerGenerationKwh(stats.latest_day_total_kwh || 0);
+document.getElementById('power-generation-month-total').innerText = formatPowerGenerationKwh(stats.current_month_total_kwh || 0);
+document.getElementById('power-generation-cumulative').innerText = formatPowerGenerationKwh(stats.cumulative_total_kwh || 0);
+document.getElementById('power-generation-operating-count').innerText = Number(stats.operating_plant_count || 0).toLocaleString('ko-KR');
+document.getElementById('power-generation-latest-date').innerText = stats.latest_generation_date
+? `최근 입력일 ${formatPowerGenerationDate(stats.latest_generation_date)}`
+: '최근 입력일이 없습니다.';
+document.getElementById('power-generation-last-updated').innerText = stats.latest_logged_at
+? `최근 반영 ${formatPowerGenerationDateTime(stats.latest_logged_at)}`
+: '아직 반영된 발전량 기록이 없습니다.';
+document.getElementById('power-generation-summary-note').innerText = stats.latest_generation_date
+? `홈페이지 발전 현황은 ${formatPowerGenerationDate(stats.latest_generation_date)} 입력값까지 집계합니다.`
+: '발전량을 입력하면 홈페이지 발전 현황이 이 데이터를 기준으로 집계됩니다.';
+}
+
+function renderPowerGenerationRows(rows) {
+const tbody = document.getElementById('powerGenerationListBody');
+if (!tbody) return;
+const plantMap = new Map((Array.isArray(g_plants) ? g_plants : []).map((plant) => [String(plant.id), plant]));
+tbody.innerHTML = '';
+
+if (!Array.isArray(rows) || rows.length === 0) {
+tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">입력된 발전량 기록이 없습니다.</td></tr>';
+return;
+}
+
+rows.forEach((row) => {
+const plant = plantMap.get(String(row.plant_id || ''));
+const plantName = plant?.name || '-';
+const sourceLabel = String(row.source_type || '').toLowerCase() === 'api'
+? '<span class="badge bg-info-subtle text-info border border-info-subtle">API</span>'
+: '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">수동</span>';
+tbody.innerHTML += `
+<tr>
+<td class="text-center">${formatPowerGenerationDate(row.generation_date)}</td>
+<td>${escapeHtml(plantName)}</td>
+<td class="text-end fw-bold">${formatPowerGenerationKwh(row.generated_kwh)} kWh</td>
+<td class="text-center">${sourceLabel}</td>
+<td>${escapeHtml(row.note || '-')}</td>
+<td class="text-center">
+<button class="btn btn-sm btn-light" onclick="openPowerGenerationModal('${escapeJsString(String(row.id || ''))}')">수정</button>
+<button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeletePowerGenerationLog('${escapeJsString(String(row.id || ''))}')">삭제</button>
+</td>
+</tr>`;
+});
+}
+
+async function fetchPowerGenerationLogs() {
+if (!Array.isArray(g_plants) || g_plants.length === 0) {
+await fetchPlants();
+}
+ensurePowerGenerationFiltersReady();
+await fetchPowerGenerationStats();
+
+let query = scopeAdminTenant(_supabase
+.from('site_power_generation_logs')
+.select('*'))
+.order('generation_date', { ascending: false })
+.order('updated_at', { ascending: false })
+.limit(120);
+
+const monthValue = String(document.getElementById('power-generation-month')?.value || '').trim();
+if (monthValue) {
+const [year, month] = monthValue.split('-').map((v) => Number(v));
+if (Number.isFinite(year) && Number.isFinite(month)) {
+const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+const monthEndDate = new Date(Date.UTC(year, month, 0));
+const monthEnd = `${year}-${String(month).padStart(2, '0')}-${String(monthEndDate.getUTCDate()).padStart(2, '0')}`;
+query = query.gte('generation_date', monthStart).lte('generation_date', monthEnd);
+}
+}
+
+const plantId = String(document.getElementById('power-generation-plant-filter')?.value || '').trim();
+if (plantId) query = query.eq('plant_id', plantId);
+
+const { data, error } = await query;
+if (error) {
+console.error('[fetchPowerGenerationLogs] failed:', error);
+myAlert('발전량 기록을 불러오지 못했습니다: ' + error.message, 'error');
+return;
+}
+
+g_powerGenerationLogs = Array.isArray(data) ? data : [];
+renderPowerGenerationRows(g_powerGenerationLogs);
+}
+
+async function openPowerGenerationModal(id) {
+if (!Array.isArray(g_plants) || g_plants.length === 0) {
+await fetchPlants();
+}
+updatePowerGenerationPlantOptions();
+if (!Array.isArray(g_plants) || g_plants.length === 0) {
+myAlert('먼저 발전소를 등록해주세요.', 'warning');
+return;
+}
+
+document.getElementById('power-generation-id').value = id || '';
+document.getElementById('power-generation-note').value = '';
+document.getElementById('power-generation-kwh').value = '';
+document.getElementById('power-generation-date').value = getAdminMemberKstDateString();
+
+if (id) {
+const { data, error } = await scopeAdminTenant(_supabase.from('site_power_generation_logs').select('*')).eq('id', id).single();
+if (error) {
+myAlert('발전량 기록을 불러오지 못했습니다: ' + error.message, 'error');
+return;
+}
+document.getElementById('power-generation-plant').value = data.plant_id || '';
+document.getElementById('power-generation-date').value = data.generation_date || getAdminMemberKstDateString();
+document.getElementById('power-generation-kwh').value = data.generated_kwh ?? '';
+document.getElementById('power-generation-note').value = data.note || '';
+} else {
+document.getElementById('power-generation-plant').value = String(g_plants[0]?.id || '');
+}
+
+bootstrap.Modal.getOrCreateInstance(document.getElementById('powerGenerationModal')).show();
+}
+
+async function savePowerGenerationLog() {
+const plantId = String(document.getElementById('power-generation-plant').value || '').trim();
+const generationDate = String(document.getElementById('power-generation-date').value || '').trim();
+const generatedKwh = Number(document.getElementById('power-generation-kwh').value || 0);
+const note = document.getElementById('power-generation-note').value || '';
+
+if (!plantId) return myAlert('발전소를 선택해주세요.', 'warning');
+if (!generationDate) return myAlert('발전일을 선택해주세요.', 'warning');
+if (!Number.isFinite(generatedKwh) || generatedKwh < 0) return myAlert('발전량은 0 이상으로 입력해주세요.', 'warning');
+
+showLoading(true);
+const { error } = await _supabase.rpc('upsert_power_generation_log_secure', {
+p_id: document.getElementById('power-generation-id').value || null,
+p_plant_id: plantId,
+p_generation_date: generationDate,
+p_generated_kwh: generatedKwh,
+p_note: note,
+p_source_type: 'manual'
+});
+showLoading(false);
+
+if (error) {
+console.error('[savePowerGenerationLog] failed:', error);
+myAlert('저장 실패: ' + error.message, 'error');
+return;
+}
+
+bootstrap.Modal.getInstance(document.getElementById('powerGenerationModal'))?.hide();
+await fetchPowerGenerationLogs();
+myAlert('발전량 기록이 저장되었습니다.');
+}
+
+function askDeletePowerGenerationLog(id) {
+deleteType = 'power-generation';
+document.getElementById('delete-target-id').value = id;
+document.getElementById('btn-real-delete').onclick = confirmDelete;
+new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
+}
+
+function openPowerGenerationAdvancedModal() {
+bootstrap.Modal.getOrCreateInstance(document.getElementById('powerGenerationAdvancedModal')).show();
+}
 // ================================================================
 // [기능 8] 문서 관리 (정관/규약)
 // ================================================================
@@ -6002,6 +6389,7 @@ async function confirmDelete() {
   let rpcName = '';
   if (deleteType === 'history') rpcName = 'delete_document_secure';
   else if (deleteType === 'plant') rpcName = 'delete_plant_secure';
+  else if (deleteType === 'power-generation') rpcName = 'delete_power_generation_log_secure';
   else if (deleteType === 'partner') rpcName = 'delete_partner_secure';
   else if (deleteType === 'badge') rpcName = 'delete_badge_secure';
   else if (deleteType === 'faq') rpcName = 'delete_faq_secure';
@@ -6024,6 +6412,7 @@ async function confirmDelete() {
   // 목록 새로고침
   if (deleteType === 'history') fetchHistory();
   else if (deleteType === 'plant') fetchPlants();
+  else if (deleteType === 'power-generation') fetchPowerGenerationLogs();
   else if (deleteType === 'partner') fetchPartners();
   else if (deleteType === 'badge') fetchBadges();
   else if (deleteType === 'faq') fetchFaqs();
