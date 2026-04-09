@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.48
-Change: 2026-04-09 - Fill salary ledger approval box from completed salary approvals.
+Version: v1.0.49
+Change: 2026-04-09 - Hide secretary approval box when no secretary approval exists.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.48 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.49 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -4905,27 +4905,29 @@ function buildSalaryLedgerApprovalBoxEntries(approvalDoc, companyProfile) {
     const chairmanDate = formatAdminEmployeeKstDate(chairmanLine?.processed_at || approvalDoc.processed_at, '');
     const secretaryName = String(secretaryLine?.name || secretaryEmp?.emp_name || '').trim();
     const chairmanName = String(chairmanLine?.name || companyProfile?.chairmanName || '').trim();
-
-    return [
+    const rows = [
         {
             title: '담당',
             name: drafterName,
             stampLabel: createdDate ? '전자기안' : '',
             stampDate: createdDate
-        },
-        {
+        }
+    ];
+    if (secretaryLine?.status === '승인') {
+        rows.push({
             title: '사무국장',
             name: secretaryName,
-            stampLabel: secretaryLine?.status === '승인' ? '전자결재' : '',
+            stampLabel: '전자결재',
             stampDate: secretaryDate
-        },
-        {
+        });
+    }
+    rows.push({
             title: '이사장',
             name: chairmanName,
             stampLabel: chairmanDate ? '전자결재' : '',
             stampDate: chairmanDate
-        }
-    ];
+        });
+    return rows;
 } // End of buildSalaryLedgerApprovalBoxEntries
 
 async function fetchCompletedSalaryApprovalForMonth(ym) {

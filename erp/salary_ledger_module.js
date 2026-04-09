@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.8';
+  const MODULE_VERSION = 'v1.0.9';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -211,11 +211,16 @@
     if (!options || !options.showApprovalBox) return '';
     const chairmanLabel = '이사장';
     const entries = Array.isArray(options.approvalBoxEntries) ? options.approvalBoxEntries : [];
-    const normalizedEntries = [
-      { title: '담당', ...(entries[0] || {}) },
-      { title: '사무국장', ...(entries[1] || {}) },
-      { title: chairmanLabel, ...(entries[2] || { name: options.chairmanName || '' }) }
-    ];
+    const normalizedEntries = entries.length > 0
+      ? entries.map(function eachEntry(entry, idx) {
+          if (entry && typeof entry === 'object') return entry;
+          if (idx === 0) return { title: '담당' };
+          return { title: chairmanLabel, name: options.chairmanName || '' };
+        })
+      : [
+          { title: '담당' },
+          { title: chairmanLabel, name: options.chairmanName || '' }
+        ];
     return '' +
       '<table class="approval-box">' +
       '<thead>' +
