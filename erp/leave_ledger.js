@@ -277,7 +277,149 @@
 
     var startIso = getLeaveStartIso(doc);
     return formatDotDate(startIso);
-  }
+  } // End of formatLeavePeriodText
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  } // End of escapeHtml
+
+  function defaultFormatLeaveDocType(docOrType) {
+    var doc = docOrType && typeof docOrType === 'object' ? docOrType : null;
+    var raw = normalizeText(doc ? doc.doc_type : docOrType || '');
+    if (!raw) return '휴가';
+    if (raw.indexOf('휴가(') !== 0) return raw;
+    var snapshot = getLeaveSnapshotMeta(doc);
+    if (snapshot && snapshot.label) return '휴가(' + normalizeText(snapshot.label) + ')';
+    var subType = getLeaveSubType(raw);
+    if (!subType) return raw;
+    return '휴가(' + subType + ')';
+  } // End of defaultFormatLeaveDocType
+
+  function defaultFormatCreatedAt(value, fallback) {
+    var formatted = formatKstIsoDate(value);
+    return formatted || String(fallback || '-');
+  } // End of defaultFormatCreatedAt
+
+  function getLeaveStatusBadgeHtml(status) {
+    if (status === '가승인') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">가승인</span>';
+    if (status === '증빙확인중') return '<span class="badge bg-info text-dark ms-1" style="font-size:0.7em">증빙중</span>';
+    if (status === '실물결재대기') return '<span class="badge bg-secondary ms-1" style="font-size:0.7em">실물대기</span>';
+    if (status === '실물결재완료') return '<span class="badge bg-success ms-1" style="font-size:0.7em">실물완료</span>';
+    if (status === '완료') return '<span class="badge bg-primary ms-1" style="font-size:0.7em">완료</span>';
+    return '';
+  } // End of getLeaveStatusBadgeHtml
+
+  function renderLeaveDocListHtml(docs, options) {
+    var opts = options || {};
+    var formatDate = typeof opts.formatDate === 'function' ? opts.formatDate : defaultFormatCreatedAt;
+    var formatLeaveDocType = typeof opts.formatLeaveDocType === 'function' ? opts.formatLeaveDocType : defaultFormatLeaveDocType;
+    var emptyText = normalizeText(opts.emptyText) || '- 없음 -';
+    var html = '<ul class="leave-list">';
+    var rows = Array.isArray(docs) ? docs : [];
+    if (rows.length > 0) {
+      rows.forEach(function (doc) {
+        var period = typeof formatLeavePeriodText === 'function' ? formatLeavePeriodText(doc) : '';
+        var periodLabel = period ? ' · ' + escapeHtml(period) : '';
+        var statusBadge = getLeaveStatusBadgeHtml(String(doc && doc.status || ''));
+        var createdAt = escapeHtml(formatDate(doc && doc.created_at, '-'));
+        var amount = Math.max(0, Number(doc && (doc.amount || doc._leave_amount) || 0));
+        html += '<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>'
+          + escapeHtml(formatLeaveDocType(doc || doc && doc.doc_type || '휴가'))
+          + ' ' + statusBadge + periodLabel
+          + '</span><span class="fw-bold text-danger">-' + amount + '일</span></div><div class="text-muted" style="font-size:0.75rem;">'
+          + createdAt + '</div></li>';
+      });
+    } else {
+      html += '<li class="text-muted">' + escapeHtml(emptyText) + '</li>';
+    }
+    html += '</ul>';
+    return html;
+  } // End of renderLeaveDocListHtml
+
+  function buildLeaveGrantListHtml(hireDateValue, options) {
+    var opts = options || {};
+    var today = opts.today instanceof Date ? opts.today : new Date();
+    var html = '<ul class="leave-list">';
+    if (!hireDateValue) {
+      html += '<li class="text-muted">- 입사일 정보 없음 -</li></ul>';
+      return html;
+    }
+    var hireDate = new Date(hireDateValue);
+    if (Number.isNaN(hireDate.getTime())) {
+      html += '<li class="text-muted">- 입사일 정보 없음 -</li></ul>';
+      return html;
+    }
+    var oneYear = new Date(hireDate);
+    oneYear.setFullYear(oneYear.getFullYear() + 1);
+    if (today < oneYear) {
+      var months = (today.getFullYear() - hireDate.getFullYear()) * 12 + (today.getMonth() - hireDate.getMonth());
+      if (today.getDate() < hireDate.getDate()) months -= 1;
+      html += '<li class="text-primary">🟢 1년 미만: ' + Math.min(11, Math.max(0, months)) + '개</li>';
+    } else {
+      html += '<li class="text-muted">⚪ 1년 미만: 0개</li>';
+    }
+    if (today.getFullYear() > hireDate.getFullYear()) {
+      html += '<li class="text-primary">🔵 회계연도(' + today.getFullYear() + '): 15개</li>';
+    } else {
+      html += '<li class="text-muted">⚪ 회계연도: 0개</li>';
+    }
+    html += '</ul>';
+    return html;
+  } // End of buildLeaveGrantListHtml
+
+  function buildLeaveAdjustmentListHtml(adjustments) {
+    var html = '<ul class="leave-list">';
+    var rows = Array.isArray(adjustments) ? adjustments : [];
+    if (rows.length > 0) {
+      rows.forEach(function (item) {
+        var positive = item && (item.adj_type === '지급' || item.adj_type === '포상');
+        var toneClass = positive ? 'text-success' : 'text-danger';
+        var prefix = positive ? '+' : '-';
+        html += '<li><span class="' + toneClass + ' fw-bold">[' + escapeHtml(item && item.adj_type || '') + ']</span> '
+          + escapeHtml(item && item.reason || '')
+          + ' (' + prefix + Number(item && item.days || 0) + '일)</li>';
+      });
+    } else {
+      html += '<li class="text-muted">- 없음 -</li>';
+    }
+    html += '</ul>';
+    return html;
+  } // End of buildLeaveAdjustmentListHtml
+
+  function buildLeaveDetailReportHtml(options) {
+    var opts = options || {};
+    var summary = opts.summary || {};
+    var html = '<div class="d-flex flex-column gap-3">';
+    html += '<div class="leave-section"><h6>🎁 발생 내역</h6>' + buildLeaveGrantListHtml(opts.hireDate, { today: opts.today }) + '</div>';
+    html += '<div class="leave-section"><h6>⚖️ 조정 내역</h6>' + buildLeaveAdjustmentListHtml(opts.adjustments) + '</div>';
+    html += '<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-' + Number(summary.reservedDays || 0) + '일</span></h6>'
+      + renderLeaveDocListHtml(summary.reservedDocs, {
+        formatDate: opts.formatDate,
+        formatLeaveDocType: opts.formatLeaveDocType,
+        emptyText: '- 없음 -'
+      }) + '</div>';
+    html += '<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-' + Number(summary.pastOrUsedDays || 0) + '일</span></h6>'
+      + renderLeaveDocListHtml(summary.pastOrUsedDocs, {
+        formatDate: opts.formatDate,
+        formatLeaveDocType: opts.formatLeaveDocType,
+        emptyText: '- 없음 -'
+      }) + '</div>';
+    if (Array.isArray(summary.unknownDateDocs) && summary.unknownDateDocs.length > 0) {
+      html += '<div class="leave-section"><h6>ℹ️ 일자 미확인 내역</h6>'
+        + renderLeaveDocListHtml(summary.unknownDateDocs, {
+          formatDate: opts.formatDate,
+          formatLeaveDocType: opts.formatLeaveDocType,
+          emptyText: '- 없음 -'
+        }) + '</div>';
+    }
+    html += '</div>';
+    return html;
+  } // End of buildLeaveDetailReportHtml
 
   function setDeductibleSubTypes(subTypes) {
     if (!Array.isArray(subTypes)) {
@@ -309,6 +451,9 @@
     extractLeavePeriodLabel: extractLeavePeriodLabel,
     getLeaveStartIso: getLeaveStartIso,
     formatLeavePeriodText: formatLeavePeriodText,
+    getLeaveStatusBadgeHtml: getLeaveStatusBadgeHtml,
+    renderLeaveDocListHtml: renderLeaveDocListHtml,
+    buildLeaveDetailReportHtml: buildLeaveDetailReportHtml,
     summarizeLeaveDocs: summarizeLeaveDocs,
     fetchLeaveApprovals: fetchLeaveApprovals,
     getLeaveSnapshot: getLeaveSnapshot
