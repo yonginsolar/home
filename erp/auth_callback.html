@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.10 -->
+<!-- Version: v1.0.11 | Change: Complete hash-token OAuth callbacks explicitly for brokered Kakao/Naver login. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.10 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.11 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -119,6 +119,40 @@
             if (loader) loader.style.display = 'none';
         }
 
+        function getHashParams() {
+            const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+            return new URLSearchParams(hash || '');
+        }
+
+        function clearAuthHashFromUrl() {
+            try {
+                const sanitizedUrl = new URL(window.location.href);
+                sanitizedUrl.hash = '';
+                history.replaceState({}, document.title, `${sanitizedUrl.pathname}${sanitizedUrl.search}`);
+            } catch (_) {}
+        }
+
+        async function trySetSessionFromHash() {
+            const hashParams = getHashParams();
+            const accessToken = hashParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token');
+            if (!accessToken || !refreshToken) return null;
+
+            const { data, error } = await _supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+            });
+            if (error) {
+                console.error('hash session set failed:', error);
+                return null;
+            }
+            if (data?.session) {
+                clearAuthHashFromUrl();
+                return data.session;
+            }
+            return null;
+        }
+
         let authStateFallbackSubscription = null;
         let authStateFallbackTimer = null;
 
@@ -152,6 +186,13 @@
                         history.replaceState({}, document.title, window.location.pathname);
                         return redirectTo(getDest());
                     }
+                }
+
+                const hashSession = await trySetSessionFromHash();
+                if (hashSession) {
+                    clearCallbackFallbackState();
+                    await syncPhone(hashSession.user);
+                    return redirectTo(getDest());
                 }
 
                 const { data: sessionData } = await Promise.race([
