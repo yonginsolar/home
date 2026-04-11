@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.15
-Change: Send current public hostname on callback auth requests so domain-based coop context survives login.
+Version: v1.0.16
+Change: Complete hash-token OAuth callbacks explicitly so brokered Kakao/Naver login does not depend on browser timing.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.15 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.16 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -163,6 +163,40 @@ Change: Send current public hostname on callback auth requests so domain-based c
             return params.get('error_description') || params.get('error') || '';
         }
 
+        function getHashParams() {
+            const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+            return new URLSearchParams(hash || '');
+        }
+
+        function clearAuthHashFromUrl() {
+            try {
+                const sanitizedUrl = new URL(window.location.href);
+                sanitizedUrl.hash = '';
+                window.history?.replaceState?.({}, document.title, `${sanitizedUrl.pathname}${sanitizedUrl.search}`);
+            } catch (_) {}
+        }
+
+        async function trySetSessionFromHash() {
+            const hashParams = getHashParams();
+            const accessToken = hashParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token');
+            if (!accessToken || !refreshToken) return null;
+
+            const { data, error } = await _supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+            });
+            if (error) {
+                console.error('hash session set failed:', error);
+                return null;
+            }
+            if (data?.session) {
+                clearAuthHashFromUrl();
+                return data.session;
+            }
+            return null;
+        }
+
         async function getLinkedIdentity(user, provider) {
             try {
                 if (typeof _supabase.auth.getUserIdentities === 'function') {
@@ -297,6 +331,10 @@ Change: Send current public hostname on callback auth requests so domain-based c
                             window.history?.replaceState?.({}, document.title, `${sanitizedUrl.pathname}${sanitizedUrl.search}${sanitizedUrl.hash}`);
                         } catch (_) {}
                     }
+                }
+
+                if (!activeSession) {
+                    activeSession = await trySetSessionFromHash();
                 }
 
                 // 1. 세션 획득 시도 (2.5초 타임아웃)
