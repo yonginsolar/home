@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.12 | Change: 2026-04-09 - Enable approval delegation by installed RPCs in legacy_full as well. -->
+<!-- Version: v1.2.13 | Change: 2026-04-13 - Allow mixed full-day/half-day annual leave in one approval. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.10 | approval.html');</script>
+  <script>console.log('[Version] v1.2.13 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -37,6 +37,15 @@
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
     .main-container { max-width: 900px; margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 30px; }
     .hidden { display: none !important; }
+    .approval-leave-mixed-row {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px;
+    }
+    .approval-leave-mixed-row + .approval-leave-mixed-row {
+      margin-top: 8px;
+    }
     
     /* 결재선 스타일 */
     .line-step { display: inline-block; background: #e3f2fd; color: #0d47a1; padding: 5px 12px; border-radius: 20px; margin-right: 5px; margin-bottom: 5px; font-size: 0.9rem; border: 1px solid #bbdefb; }
@@ -392,7 +401,6 @@
             <label class="small text-muted fw-bold">휴가 종류</label>
             <select class="form-select" id="leaveTypeSelect" onchange="handleCategoryChange()">
                 <option value="연차">🟢 연차 (잔여 연차 차감)</option>
-                <option value="반차">🌗 반차 (0.5일 차감)</option>
                 <option value="생일반차">🎂 생일반차 (차감 X)</option>
                 <option value="생리휴가">🌸 생리휴가 (무급, 차감 X)</option>
                 <option value="경조사">💍 경조사 (증빙필수, 차감 X)</option>
@@ -518,6 +526,16 @@
                   <span class="input-group-text">~</span>
                   <input type="date" class="form-control" id="leaveEnd" onchange="calcLeaveDays()">
                 </div>
+            </div>
+
+            <div id="mixedDayArea" class="hidden">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-bold" id="mixedDayAreaTitle">📅 연차 사용 내역</span>
+                    <span class="badge bg-primary">잔여 연차: <span id="remainDaysBadgeMixed">0</span>일</span>
+                </div>
+                <div class="small text-muted mb-2">전일은 1일, 오전/오후는 0.5일로 계산됩니다. 여러 줄을 추가하면 1.5일 이상도 한 결재로 상신할 수 있습니다.</div>
+                <div id="mixedLeaveRows"></div>
+                <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addApprovalLeaveMixedRow()">+ 날짜 추가</button>
             </div>
 
             <div id="singleDayArea" class="hidden">
@@ -906,9 +924,14 @@ const APPROVAL_DEFAULT_OVERTIME_POLICY = Object.freeze({
 const APPROVAL_LEAVE_RESERVED_STATUSES = Object.freeze(['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']);
 const APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
 const APPROVAL_DEFAULT_LEAVE_TYPE_CATALOG = Object.freeze([
-    { id: 'annual', label: '연차', enabled: true, deductible: true, duration_mode: 'date_range', aliases: ['연차'] },
-    { id: 'half_day', label: '반차', enabled: true, deductible: true, duration_mode: 'half_day', aliases: ['반차'] },
+    { id: 'annual', label: '연차', enabled: true, deductible: true, duration_mode: 'mixed_days', aliases: ['연차'] },
+    { id: 'half_day', label: '반차', enabled: false, deductible: true, duration_mode: 'half_day', aliases: ['반차'] },
     { id: 'birthday_half', label: '생일반차', enabled: true, deductible: false, duration_mode: 'half_day', aliases: ['생일반차'] }
+]);
+const APPROVAL_MIXED_LEAVE_SLOT_OPTIONS = Object.freeze([
+    { value: 'full', label: '전일', days: 1, hours: 8 },
+    { value: 'am', label: '오전', days: 0.5, hours: 4 },
+    { value: 'pm', label: '오후', days: 0.5, hours: 4 }
 ]);
 const WORKFORCE_LITE_APPROVAL_DOC_GROUPS = Object.freeze([
     {
@@ -1471,6 +1494,7 @@ function collectApprovalDraftFormPayload() {
             payroll_month: String(document.getElementById('payrollMonth')?.value || '').trim(),
             leave_start: String(document.getElementById('leaveStart')?.value || '').trim(),
             leave_end: String(document.getElementById('leaveEnd')?.value || '').trim(),
+            leave_items: collectApprovalLeaveMixedItems(),
             single_leave_date: String(document.getElementById('singleLeaveDate')?.value || '').trim(),
             half_date: String(document.getElementById('halfDate')?.value || '').trim(),
             half_slot: String(selectedHalf?.value || '').trim(),
@@ -1935,6 +1959,7 @@ async function loadApprovalDraftFromServer(draftId) {
         const halfDateEl = document.getElementById('halfDate');
         if (leaveStartEl) leaveStartEl.value = String(fields.leave_start || '').trim();
         if (leaveEndEl) leaveEndEl.value = String(fields.leave_end || '').trim();
+        renderApprovalLeaveMixedItems(fields.leave_items);
         if (singleLeaveDateEl) singleLeaveDateEl.value = String(fields.single_leave_date || '').trim();
         if (halfDateEl) halfDateEl.value = String(fields.half_date || '').trim();
         const halfSlot = String(fields.half_slot || '').trim();
@@ -2242,7 +2267,7 @@ function getApprovalDefaultLeaveTypeCatalog() {
 
 function normalizeApprovalLeaveTypeDurationMode(value) {
     const safe = String(value || '').trim();
-    if (safe === 'half_day' || safe === 'single_day' || safe === 'date_range') return safe;
+    if (safe === 'half_day' || safe === 'single_day' || safe === 'date_range' || safe === 'mixed_days') return safe;
     return 'date_range';
 }
 
@@ -2282,12 +2307,16 @@ function parseApprovalLeaveTypeCatalog(rawValue) {
                 ...normalizeApprovalLeaveTypeAliases(item?.alias_json),
                 ...(String(item?.originalLabel || '').trim() && String(item?.originalLabel || '').trim() !== label ? [String(item.originalLabel || '').trim()] : [])
             ].map((alias) => String(alias || '').trim()).filter(Boolean).filter((alias) => alias !== label)));
+            const parsedDurationMode = normalizeApprovalLeaveTypeDurationMode(item?.duration_mode);
+            const annualTokens = [id, label, ...aliases].map((token) => String(token || '').trim());
             sanitized.push({
                 id,
                 label,
                 enabled: item?.enabled !== false,
                 deductible: item?.deductible === true,
-                duration_mode: normalizeApprovalLeaveTypeDurationMode(item?.duration_mode),
+                duration_mode: (parsedDurationMode === 'date_range' && (annualTokens.includes('annual') || annualTokens.includes('연차')))
+                    ? 'mixed_days'
+                    : parsedDurationMode,
                 aliases
             });
         });
@@ -2378,15 +2407,22 @@ function isApprovalSingleDayLeaveType(configOrSubType, doc) {
     return normalizeApprovalLeaveTypeDurationMode(config?.duration_mode) === 'single_day';
 }
 
+function isApprovalMixedDayLeaveType(configOrSubType, doc) {
+    const config = resolveApprovalLeaveTypeMeta(configOrSubType, doc);
+    return normalizeApprovalLeaveTypeDurationMode(config?.duration_mode) === 'mixed_days';
+}
+
 function isApprovalDeductibleLeaveType(configOrSubType, doc) {
     const config = resolveApprovalLeaveTypeMeta(configOrSubType, doc);
     return config?.deductible === true;
 }
 
 function buildApprovalLeaveTypeOptionLabel(config) {
-    const durationLabel = isApprovalHalfDayLeaveType(config)
+    const durationLabel = isApprovalMixedDayLeaveType(config)
+        ? '일자별'
+        : (isApprovalHalfDayLeaveType(config)
         ? '반차'
-        : (isApprovalSingleDayLeaveType(config) ? '1일' : '기간');
+        : (isApprovalSingleDayLeaveType(config) ? '1일' : '기간'));
     const deductibleLabel = isApprovalDeductibleLeaveType(config) ? '연차 차감' : '차감 없음';
     return `${config.label} (${durationLabel}, ${deductibleLabel})`;
 }
@@ -2470,21 +2506,257 @@ function syncApprovalLeaveInputMode() {
     const mode = normalizeApprovalLeaveTypeDurationMode(config?.duration_mode);
     const label = String(config?.label || '휴가').trim();
     const dateRangeArea = document.getElementById('dateRangeArea');
+    const mixedDayArea = document.getElementById('mixedDayArea');
     const singleDayArea = document.getElementById('singleDayArea');
     const halfDayArea = document.getElementById('halfDayArea');
     const dateRangeTitle = document.getElementById('dateRangeAreaTitle');
+    const mixedDayTitle = document.getElementById('mixedDayAreaTitle');
     const singleDayTitle = document.getElementById('singleDayAreaTitle');
     const halfDayTitle = document.getElementById('halfDayAreaTitle');
 
     if (dateRangeArea) dateRangeArea.classList.toggle('hidden', mode !== 'date_range');
+    if (mixedDayArea) mixedDayArea.classList.toggle('hidden', mode !== 'mixed_days');
     if (singleDayArea) singleDayArea.classList.toggle('hidden', mode !== 'single_day');
     if (halfDayArea) halfDayArea.classList.toggle('hidden', mode !== 'half_day');
     if (dateRangeTitle) dateRangeTitle.textContent = `📅 ${label} 기간`;
+    if (mixedDayTitle) mixedDayTitle.textContent = `📅 ${label} 사용 내역`;
     if (singleDayTitle) singleDayTitle.textContent = `📅 ${label} 날짜`;
     if (halfDayTitle) halfDayTitle.textContent = `📅 ${label} 날짜`;
+    if (mode === 'mixed_days') ensureApprovalLeaveMixedRows();
     if (getCurrentApprovalCategory() === '휴가') {
         syncApprovalTitleInput('휴가');
     }
+}
+
+function normalizeApprovalMixedLeaveSlot(value) {
+    const safe = String(value || '').trim();
+    if (safe === '전일') return 'full';
+    if (safe === '오전') return 'am';
+    if (safe === '오후') return 'pm';
+    return APPROVAL_MIXED_LEAVE_SLOT_OPTIONS.some((item) => item.value === safe) ? safe : 'full';
+}
+
+function getApprovalMixedLeaveSlotMeta(value) {
+    const normalized = normalizeApprovalMixedLeaveSlot(value);
+    return APPROVAL_MIXED_LEAVE_SLOT_OPTIONS.find((item) => item.value === normalized) || APPROVAL_MIXED_LEAVE_SLOT_OPTIONS[0];
+}
+
+function getApprovalLeaveMixedRowsContainer() {
+    return document.getElementById('mixedLeaveRows');
+}
+
+function ensureApprovalLeaveMixedRows() {
+    const container = getApprovalLeaveMixedRowsContainer();
+    if (!container) return;
+    if (container.querySelectorAll('.approval-leave-mixed-row').length === 0) {
+        addApprovalLeaveMixedRow({}, { skipCalc: true });
+    }
+}
+
+function addApprovalLeaveMixedRow(initialItem = {}, options = {}) {
+    const container = getApprovalLeaveMixedRowsContainer();
+    if (!container) return;
+    const safeItem = initialItem && typeof initialItem === 'object' && !Array.isArray(initialItem) ? initialItem : {};
+    const row = document.createElement('div');
+    row.className = 'approval-leave-mixed-row';
+
+    const rowInner = document.createElement('div');
+    rowInner.className = 'row g-2 align-items-center';
+
+    const dateCol = document.createElement('div');
+    dateCol.className = 'col-md-5';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.className = 'form-control';
+    dateInput.dataset.leaveMixedDate = '1';
+    dateInput.value = String(safeItem.leave_date || safeItem.date || '').trim();
+    dateInput.addEventListener('change', calcLeaveDays);
+    dateCol.appendChild(dateInput);
+
+    const slotCol = document.createElement('div');
+    slotCol.className = 'col-md-5';
+    const slotSelect = document.createElement('select');
+    slotSelect.className = 'form-select';
+    slotSelect.dataset.leaveMixedSlot = '1';
+    const selectedSlot = normalizeApprovalMixedLeaveSlot(safeItem.slot || safeItem.slot_label);
+    APPROVAL_MIXED_LEAVE_SLOT_OPTIONS.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = `${item.label} (${formatApprovalLeaveDayCount(item.days)}일)`;
+        option.selected = item.value === selectedSlot;
+        slotSelect.appendChild(option);
+    });
+    slotSelect.addEventListener('change', calcLeaveDays);
+    slotCol.appendChild(slotSelect);
+
+    const actionCol = document.createElement('div');
+    actionCol.className = 'col-md-2 d-grid';
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-outline-danger';
+    removeBtn.textContent = '삭제';
+    removeBtn.addEventListener('click', () => removeApprovalLeaveMixedRow(removeBtn));
+    actionCol.appendChild(removeBtn);
+
+    rowInner.appendChild(dateCol);
+    rowInner.appendChild(slotCol);
+    rowInner.appendChild(actionCol);
+    row.appendChild(rowInner);
+    container.appendChild(row);
+
+    if (!options.skipCalc) calcLeaveDays();
+}
+
+function removeApprovalLeaveMixedRow(buttonEl) {
+    const row = buttonEl?.closest?.('.approval-leave-mixed-row');
+    if (row) row.remove();
+    ensureApprovalLeaveMixedRows();
+    calcLeaveDays();
+}
+
+function normalizeApprovalMixedLeaveItems(rawValue) {
+    const source = (() => {
+        if (Array.isArray(rawValue)) return rawValue;
+        if (typeof rawValue !== 'string' || !rawValue.trim()) return [];
+        try {
+            const parsed = JSON.parse(rawValue);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+            return [];
+        }
+    })();
+    return source.map((item) => {
+        const meta = getApprovalMixedLeaveSlotMeta(item?.slot || item?.slot_label);
+        return {
+            leave_date: String(item?.leave_date || item?.date || '').trim(),
+            slot: meta.value,
+            slot_label: meta.label,
+            deducted_days: meta.days,
+            deducted_hours: meta.hours
+        };
+    }).filter((item) => item.leave_date);
+}
+
+function renderApprovalLeaveMixedItems(items) {
+    const container = getApprovalLeaveMixedRowsContainer();
+    if (!container) return;
+    container.innerHTML = '';
+    const normalized = normalizeApprovalMixedLeaveItems(items);
+    if (normalized.length === 0) {
+        addApprovalLeaveMixedRow({}, { skipCalc: true });
+        return;
+    }
+    normalized.forEach((item) => addApprovalLeaveMixedRow(item, { skipCalc: true }));
+}
+
+function isApprovalWeekendIsoDate(isoDate) {
+    const date = new Date(`${isoDate}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return false;
+    const day = date.getDay();
+    return day === 0 || day === 6;
+}
+
+function getApprovalMixedLeaveSummary(options = {}) {
+    const requireComplete = options.requireComplete === true;
+    const container = getApprovalLeaveMixedRowsContainer();
+    const rows = container ? Array.from(container.querySelectorAll('.approval-leave-mixed-row')) : [];
+    const items = [];
+    const errors = [];
+    const slotsByDate = new Map();
+
+    if (rows.length === 0 && requireComplete) {
+        errors.push('연차 사용 내역을 1건 이상 입력하세요.');
+    }
+
+    rows.forEach((row, index) => {
+        const dateValue = String(row.querySelector('[data-leave-mixed-date]')?.value || '').trim();
+        const slotValue = normalizeApprovalMixedLeaveSlot(row.querySelector('[data-leave-mixed-slot]')?.value || 'full');
+        const meta = getApprovalMixedLeaveSlotMeta(slotValue);
+
+        if (!dateValue) {
+            if (requireComplete) errors.push(`${index + 1}번째 연차 날짜를 입력하세요.`);
+            return;
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+            errors.push(`${index + 1}번째 연차 날짜 형식이 올바르지 않습니다.`);
+            return;
+        }
+        if (isApprovalWeekendIsoDate(dateValue)) {
+            errors.push(`${index + 1}번째 연차 날짜는 주말입니다. 근무일을 선택하세요.`);
+            return;
+        }
+
+        const usedSlots = slotsByDate.get(dateValue) || new Set();
+        if (slotValue === 'full' && usedSlots.size > 0) {
+            errors.push(`${dateValue}은 전일과 반차를 동시에 신청할 수 없습니다.`);
+            return;
+        }
+        if (slotValue !== 'full' && usedSlots.has('full')) {
+            errors.push(`${dateValue}은 전일과 반차를 동시에 신청할 수 없습니다.`);
+            return;
+        }
+        if (usedSlots.has(slotValue)) {
+            errors.push(`${dateValue} ${meta.label} 연차가 중복 입력되었습니다.`);
+            return;
+        }
+        usedSlots.add(slotValue);
+        slotsByDate.set(dateValue, usedSlots);
+
+        items.push({
+            leave_date: dateValue,
+            slot: meta.value,
+            slot_label: meta.label,
+            deducted_days: meta.days,
+            deducted_hours: meta.hours
+        });
+    });
+
+    const sortedItems = items.slice().sort((a, b) => {
+        const dateCompare = String(a.leave_date).localeCompare(String(b.leave_date));
+        if (dateCompare !== 0) return dateCompare;
+        const slotOrder = { full: 0, am: 1, pm: 2 };
+        return Number(slotOrder[a.slot] ?? 99) - Number(slotOrder[b.slot] ?? 99);
+    });
+    const totalDays = Math.round(sortedItems.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0) * 2) / 2;
+    const totalHours = sortedItems.reduce((sum, item) => sum + Number(item.deducted_hours || 0), 0);
+
+    return {
+        ok: errors.length === 0 && (!requireComplete || sortedItems.length > 0),
+        items: sortedItems,
+        totalDays,
+        totalHours,
+        errors
+    };
+}
+
+function collectApprovalLeaveMixedItems(options = {}) {
+    return getApprovalMixedLeaveSummary(options).items;
+}
+
+function formatApprovalMixedLeaveItemLabel(item) {
+    const dateText = formatApprovalDotDate(item?.leave_date || '');
+    const slotLabel = String(item?.slot_label || getApprovalMixedLeaveSlotMeta(item?.slot).label || '').trim();
+    if (!dateText) return '';
+    return `${dateText} ${slotLabel}`.trim();
+}
+
+function formatApprovalMixedLeaveItemsLabel(items, totalDays = null) {
+    const normalized = normalizeApprovalMixedLeaveItems(items);
+    if (normalized.length === 0) return '';
+    const total = totalDays === null
+        ? Math.round(normalized.reduce((sum, item) => sum + Number(item.deducted_days || 0), 0) * 2) / 2
+        : Number(totalDays || 0);
+    const firstLabel = formatApprovalMixedLeaveItemLabel(normalized[0]);
+    if (normalized.length === 1) return firstLabel;
+    return `${firstLabel} 외 ${normalized.length - 1}건 총 ${formatApprovalLeaveDayCount(total)}일`;
+}
+
+function formatApprovalMixedLeaveDetailText(items) {
+    const normalized = normalizeApprovalMixedLeaveItems(items);
+    if (normalized.length === 0) return '';
+    return normalized
+        .map((item) => `- ${formatApprovalMixedLeaveItemLabel(item)}: ${formatApprovalLeaveDayCount(item.deducted_days)}일`)
+        .join('\n');
 }
 
 function isApprovalProposalLikeType(docType) {
@@ -3779,6 +4051,10 @@ function buildLeavePeriodLabelForDraft(leaveType, daysValue) {
     const config = currentConfig && [currentConfig.id, currentConfig.label].includes(String(leaveType || '').trim())
         ? currentConfig
         : getApprovalLeaveTypeConfigByStoredSubtype(leaveType);
+    if (isApprovalMixedDayLeaveType(config)) {
+        const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
+        return formatApprovalMixedLeaveItemsLabel(summary.items, daysValue || summary.totalDays);
+    }
     if (isApprovalHalfDayLeaveType(config)) {
         const halfDate = formatApprovalDotDate(document.getElementById('halfDate')?.value || '');
         const ampm = String(document.querySelector('input[name="ampm"]:checked')?.value || '').trim();
@@ -3813,6 +4089,10 @@ function buildLeaveAmountLabel(doc) {
     const leaveSnapshot = getApprovalLeaveSnapshotMeta(doc);
     const leaveTypeLabel = leaveSnapshot?.label || getApprovalLeaveTypeDisplayLabel(leaveSubType, doc);
     const isHalf = isApprovalHalfDayLeaveType(leaveSubType, doc);
+    const snapshotItems = normalizeApprovalMixedLeaveItems(leaveSnapshot?.items);
+    if (snapshotItems.length > 0) {
+        return formatApprovalMixedLeaveItemsLabel(snapshotItems, doc?.amount);
+    }
     const periodLabel = extractLeavePeriodLabelFromDoc(doc);
     const daysLabel = formatLeaveDayCount(doc?.amount);
 
@@ -6548,6 +6828,8 @@ function applyLeaveRemainToUi(snapshot) {
     if (halfBadge) halfBadge.innerText = effective;
     const singleBadge = document.getElementById("remainDaysBadgeSingle");
     if (singleBadge) singleBadge.innerText = effective;
+    const mixedBadge = document.getElementById("remainDaysBadgeMixed");
+    if (mixedBadge) mixedBadge.innerText = effective;
     syncApprovalPendingLeaveDaysBadge();
 }
 
@@ -7238,6 +7520,8 @@ function handleCategoryChange() {
     
     // 반차 UI 초기화
     document.getElementById("dateRangeArea").classList.remove("hidden");
+    document.getElementById("mixedDayArea").classList.add("hidden");
+    document.getElementById("singleDayArea").classList.add("hidden");
     document.getElementById("halfDayArea").classList.add("hidden");
     if (type !== '지출결의') resetSalaryExpenseUi();
 
@@ -7481,6 +7765,10 @@ function buildApprovalSubmitPreviewData() {
         const lType = getApprovalCurrentLeaveTypeLabel();
         if (!leaveTypeConfig || !lType) throw new Error('휴가 종류를 먼저 설정하거나 선택하세요.');
         subType = `휴가(${getApprovalCurrentLeaveTypeStoredKey()})`;
+        const mixedSummary = isApprovalMixedDayLeaveType(leaveTypeConfig)
+            ? getApprovalMixedLeaveSummary({ requireComplete: true })
+            : null;
+        if (mixedSummary && !mixedSummary.ok) throw new Error(mixedSummary.errors[0] || '연차 사용 내역을 확인하세요.');
         leaveSnapshotPayload = {
             type_id: String(leaveTypeConfig.id || getApprovalCurrentLeaveTypeStoredKey() || '').trim(),
             label: String(leaveTypeConfig.label || lType || '').trim(),
@@ -7488,10 +7776,18 @@ function buildApprovalSubmitPreviewData() {
             duration_mode: normalizeApprovalLeaveTypeDurationMode(leaveTypeConfig.duration_mode),
             saved_at: new Date().toISOString()
         };
-        const days = Number(document.getElementById("leaveDaysCalc")?.value || 0);
+        if (mixedSummary) {
+            leaveSnapshotPayload.items = mixedSummary.items;
+            leaveSnapshotPayload.total_days = mixedSummary.totalDays;
+            leaveSnapshotPayload.total_hours = mixedSummary.totalHours;
+        }
+        const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc")?.value || 0);
         if (days <= 0) throw new Error('기간을 선택하세요.');
         finalAmt = days;
         const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
+        if (mixedSummary && mixedSummary.items.length > 0) {
+            appendDesc += `\n\n[휴가 신청 내역]\n${formatApprovalMixedLeaveDetailText(mixedSummary.items)}`;
+        }
         title = getApprovalResolvedTitle(mainType, leavePeriodLabel ? `${lType} 신청 (${leavePeriodLabel})` : `${lType} 신청`);
     } else if (mainType === '휴가취소') {
         const selectedTargetDocId = document.getElementById('relDocId')?.value || '';
@@ -7694,6 +7990,10 @@ function getApprovalLeaveTargetEmpInfo() {
 
 function getApprovalSelectedLeaveStartDate(leaveType) {
     const config = getApprovalCurrentLeaveTypeConfig() || getApprovalLeaveTypeConfigByStoredSubtype(leaveType);
+    if (isApprovalMixedDayLeaveType(config)) {
+        const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
+        return String(summary.items[0]?.leave_date || '').trim();
+    }
     if (isApprovalHalfDayLeaveType(config)) {
         return String(document.getElementById("halfDate")?.value || '').trim();
     }
@@ -7723,6 +8023,10 @@ function isApprovalBirthdayHalfLeaveType(configOrSubType, doc) {
 function getApprovalLeaveStartIsoFromDoc(doc) {
     const direct = String(doc?.start_date || '').trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct;
+    const snapshotItems = normalizeApprovalMixedLeaveItems(getApprovalLeaveSnapshotMeta(doc)?.items);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(snapshotItems[0]?.leave_date || '').trim())) {
+        return String(snapshotItems[0].leave_date).trim();
+    }
     const periodLabel = extractLeavePeriodLabelFromDoc(doc);
     const match = periodLabel.match(/(\d{4})[.\-\/](\d{2})[.\-\/](\d{2})/);
     if (!match) return '';
@@ -7914,6 +8218,32 @@ function calcLeaveDays() {
         document.getElementById("leaveDaysCalc").value = 0;
         syncApprovalPendingLeaveDaysBadge(0);
         if (msg) msg.classList.add("hidden");
+        return;
+    }
+
+    if (isApprovalMixedDayLeaveType(leaveConfig)) {
+        ensureApprovalLeaveMixedRows();
+        const summary = getApprovalMixedLeaveSummary({ requireComplete: false });
+        document.getElementById("leaveDaysBadge").innerText = `${formatApprovalLeaveDayCount(summary.totalDays)}일`;
+        document.getElementById("leaveDaysCalc").value = summary.totalDays;
+        syncApprovalPendingLeaveDaysBadge(summary.totalDays);
+
+        if (msg) {
+            if (summary.errors.length > 0) {
+                msg.textContent = `⛔ ${summary.errors[0]}`;
+                msg.classList.remove("hidden");
+            } else if (requiresLeaveValidation) {
+                const validation = getApprovalLeaveValidationSummary(lType);
+                if (isApprovalLeaveValidationBlocked(validation, summary.totalDays)) {
+                    msg.textContent = getApprovalLeaveValidationMessage(validation);
+                    msg.classList.remove("hidden");
+                } else {
+                    msg.classList.add("hidden");
+                }
+            } else {
+                msg.classList.add("hidden");
+            }
+        }
         return;
     }
 
@@ -8492,6 +8822,12 @@ async function handleDraftSubmit(e) {
         const lType = getApprovalCurrentLeaveTypeLabel();
         if (!leaveTypeConfig || !lType) return showAlert("휴가 종류를 먼저 설정하거나 선택하세요.");
         subType = `휴가(${getApprovalCurrentLeaveTypeStoredKey()})`;
+        const mixedSummary = isApprovalMixedDayLeaveType(leaveTypeConfig)
+            ? getApprovalMixedLeaveSummary({ requireComplete: true })
+            : null;
+        if (mixedSummary && !mixedSummary.ok) {
+            return showAlert(mixedSummary.errors[0] || '연차 사용 내역을 확인하세요.');
+        }
         leaveSnapshotPayload = {
             type_id: String(leaveTypeConfig.id || getApprovalCurrentLeaveTypeStoredKey() || '').trim(),
             label: String(leaveTypeConfig.label || lType || '').trim(),
@@ -8499,8 +8835,13 @@ async function handleDraftSubmit(e) {
             duration_mode: normalizeApprovalLeaveTypeDurationMode(leaveTypeConfig.duration_mode),
             saved_at: new Date().toISOString()
         };
+        if (mixedSummary) {
+            leaveSnapshotPayload.items = mixedSummary.items;
+            leaveSnapshotPayload.total_days = mixedSummary.totalDays;
+            leaveSnapshotPayload.total_hours = mixedSummary.totalHours;
+        }
         
-        const days = Number(document.getElementById("leaveDaysCalc").value);
+        const days = mixedSummary ? mixedSummary.totalDays : Number(document.getElementById("leaveDaysCalc").value);
         if(days <= 0) return showAlert("기간을 선택하세요.");
 
         const leaveValidation = getApprovalLeaveValidationSummary(lType);
@@ -8522,6 +8863,9 @@ async function handleDraftSubmit(e) {
         }
         finalAmt = days;
         const leavePeriodLabel = buildLeavePeriodLabelForDraft(lType, days);
+        if (mixedSummary && mixedSummary.items.length > 0) {
+            appendDesc += `\n\n[휴가 신청 내역]\n${formatApprovalMixedLeaveDetailText(mixedSummary.items)}`;
+        }
         title = getApprovalResolvedTitle(mainType, leavePeriodLabel ? `${lType} 신청 (${leavePeriodLabel})` : `${lType} 신청`);
     } 
     else if (mainType === '휴가취소') {
