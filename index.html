@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.46
-Change: Replace the example power status section with real plant generation stats based on manual/admin input.
+Version: v1.0.47
+Change: Add multi-photo carousel support for activity detail posts.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.46 | index.html');</script>
+<script>console.log('[Version] v1.0.47 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -198,6 +198,30 @@ Change: Replace the example power status section with real plant generation stat
   object-fit: cover;
   border-radius: 16px;
   margin-bottom: 16px;
+}
+.activity-detail-carousel {
+  margin-bottom: 16px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #0f172a;
+}
+.activity-detail-carousel img {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  background: #0f172a;
+}
+.activity-detail-carousel .carousel-caption-count {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  z-index: 2;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
 }
 .activity-detail-content {
   color: #1e293b;
@@ -1882,8 +1906,35 @@ function filterNotices() {
 // 데이터 보관용 전역 변수
 let g_notices_list = []; 
 
+const ACTIVITY_GALLERY_META_RE = /<!--\s*ACTIVITY_GALLERY:([\s\S]*?)\s*-->/;
+
+function normalizeActivityGalleryUrls(urls) {
+    return Array.from(new Set((Array.isArray(urls) ? urls : [])
+        .map((url) => safeUrl(url))
+        .filter(Boolean)));
+}
+
+function parseActivityContentWithGallery(value, fallbackUrl = '') {
+    const raw = String(value || '');
+    const match = raw.match(ACTIVITY_GALLERY_META_RE);
+    let galleryUrls = [];
+    let body = raw;
+    if (match) {
+        try {
+            galleryUrls = normalizeActivityGalleryUrls(JSON.parse(decodeURIComponent(match[1] || '[]')));
+        } catch (e) {
+            galleryUrls = [];
+        }
+        body = raw.replace(match[0], '').trim();
+    }
+    if (galleryUrls.length === 0 && String(fallbackUrl || '').trim()) {
+        galleryUrls = normalizeActivityGalleryUrls([fallbackUrl]);
+    }
+    return { body, galleryUrls };
+}
+
 function normalizeActivityContentHtml(rawValue) {
-    const raw = String(rawValue || '').trim();
+    const raw = String(parseActivityContentWithGallery(rawValue).body || '').trim();
     if (!raw) {
         return '<p class="text-muted mb-0">활동 내용이 아직 등록되지 않았습니다.</p>';
     }
@@ -1894,7 +1945,7 @@ function normalizeActivityContentHtml(rawValue) {
 }
 
 function getActivitySummaryText(rawValue, maxLen = 120) {
-    const html = normalizeActivityContentHtml(rawValue);
+    const html = normalizeActivityContentHtml(parseActivityContentWithGallery(rawValue).body);
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
     const text = String(doc.body.textContent || '')
@@ -1906,7 +1957,12 @@ function getActivitySummaryText(rawValue, maxLen = 120) {
 }
 
 function getActivityCoverUrl(activity) {
-    return safeUrl(activity?.file_url || '') || '';
+    return getActivityGalleryUrls(activity)[0] || '';
+}
+
+function getActivityGalleryUrls(activity) {
+    const parsed = parseActivityContentWithGallery(activity?.content || '', activity?.file_url || '');
+    return parsed.galleryUrls;
 }
 
 function renderActivityCards(items) {
@@ -1993,23 +2049,40 @@ function openActivityDetail(id) {
     const dateEl = document.getElementById('activityDetailDate');
     const contentEl = document.getElementById('activityDetailContent');
     const coverWrapEl = document.getElementById('activityDetailCoverWrap');
-    const coverEl = document.getElementById('activityDetailCover');
     const modalEl = document.getElementById('activityDetailModal');
 
     if (titleEl) titleEl.textContent = item.title || '활동 내역';
     if (dateEl) dateEl.textContent = formatKoreanDate(item.event_date || item.created_at) || '';
     if (contentEl) contentEl.innerHTML = normalizeActivityContentHtml(item.content);
 
-    const coverUrl = getActivityCoverUrl(item);
-    if (coverWrapEl && coverEl) {
-        if (coverUrl) {
-            coverEl.src = coverUrl;
-            coverEl.alt = item.title || '활동 대표 사진';
+    const galleryUrls = getActivityGalleryUrls(item);
+    if (coverWrapEl) {
+        if (galleryUrls.length === 0) {
+            coverWrapEl.innerHTML = '<img id="activityDetailCover" class="activity-detail-cover" alt="">';
+            coverWrapEl.style.display = 'none';
+        } else if (galleryUrls.length === 1) {
+            coverWrapEl.innerHTML = `<img id="activityDetailCover" class="activity-detail-cover" src="${escapeHtml(galleryUrls[0])}" alt="${escapeHtml(item.title || '활동 대표 사진')}">`;
             coverWrapEl.style.display = '';
         } else {
-            coverEl.removeAttribute('src');
-            coverEl.alt = '';
-            coverWrapEl.style.display = 'none';
+            const slides = galleryUrls.map((url, index) => `
+              <div class="carousel-item ${index === 0 ? 'active' : ''}">
+                <img src="${escapeHtml(url)}" alt="${escapeHtml(`${item.title || '활동 사진'} ${index + 1}`)}">
+                <span class="carousel-caption-count">${index + 1} / ${galleryUrls.length}</span>
+              </div>
+            `).join('');
+            coverWrapEl.innerHTML = `
+              <div id="activityDetailCarousel" class="carousel slide activity-detail-carousel" data-bs-interval="false">
+                <div class="carousel-inner">${slides}</div>
+                <button class="carousel-control-prev" type="button" data-bs-target="#activityDetailCarousel" data-bs-slide="prev">
+                  <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                  <span class="visually-hidden">이전</span>
+                </button>
+                <button class="carousel-control-next" type="button" data-bs-target="#activityDetailCarousel" data-bs-slide="next">
+                  <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                  <span class="visually-hidden">다음</span>
+                </button>
+              </div>`;
+            coverWrapEl.style.display = '';
         }
     }
 
