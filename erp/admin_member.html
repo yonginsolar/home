@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.66
-Change: 2026-04-15 - Add drag-and-drop multi-photo gallery support for activity posts.
+Version: v1.0.67
+Change: 2026-04-15 - Debounce homepage intro preview updates to reduce admin typing lag.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.66';
+window.ADMIN_MEMBER_VERSION = 'v1.0.67';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -908,24 +908,24 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 <div class="col-lg-6">
 <div class="mb-2">
 <label class="form-label small fw-bold">제목</label>
-<input type="text" id="admin-about-title" class="form-control" oninput="updateTotalPreview()">
+<input type="text" id="admin-about-title" class="form-control" oninput="queueTotalPreviewUpdate()">
 </div>
 <div class="mb-2">
 <label class="form-label small fw-bold">부제목</label>
-<input type="text" id="admin-about-subtitle" class="form-control" oninput="updateTotalPreview()">
+<input type="text" id="admin-about-subtitle" class="form-control" oninput="queueTotalPreviewUpdate()">
 </div>
 <div class="mb-2">
 <label class="form-label small fw-bold">본문 (HTML 허용)</label>
-<textarea id="admin-about-content" class="form-control" rows="6" oninput="updateTotalPreview()"></textarea>
+<textarea id="admin-about-content" class="form-control" rows="6" oninput="queueTotalPreviewUpdate()"></textarea>
 </div>
 <div class="mb-2">
 <label class="form-label small fw-bold">리스트 항목</label>
-<textarea id="admin-about-list" class="form-control" rows="4" placeholder="줄바꿈으로 여러 항목 입력\n또는 <li>...</li> HTML" oninput="updateTotalPreview()"></textarea>
+<textarea id="admin-about-list" class="form-control" rows="4" placeholder="줄바꿈으로 여러 항목 입력\n또는 <li>...</li> HTML" oninput="queueTotalPreviewUpdate()"></textarea>
 <div class="form-text text-muted">줄바꿈 입력 시 자동으로 &lt;li&gt;로 변환됩니다.</div>
 </div>
 <div class="mb-3">
 <label class="form-label small fw-bold">이미지 URL</label>
-<input type="text" id="admin-about-img" class="form-control" oninput="updateTotalPreview()">
+<input type="text" id="admin-about-img" class="form-control" oninput="queueTotalPreviewUpdate()">
 </div>
 <div class="d-flex justify-content-end">
 <button class="btn btn-primary btn-sm px-4" onclick="saveAboutSettings()">저장하기</button>
@@ -5474,6 +5474,18 @@ if (typeof updateTotalPreview === 'function') updateTotalPreview();
 // [보조 함수] 전체 미리보기 업데이트 (탭 누를 때 실행됨)
 // [수정] 전체 미리보기 (입력 안 한 건 안 보이게 처리)
 // [수정] 전체 미리보기 (점 제거 반영)
+let totalPreviewUpdateTimer = null;
+
+function queueTotalPreviewUpdate() {
+if (totalPreviewUpdateTimer) {
+window.clearTimeout(totalPreviewUpdateTimer);
+}
+totalPreviewUpdateTimer = window.setTimeout(() => {
+totalPreviewUpdateTimer = null;
+updateTotalPreview();
+}, 120);
+}
+
 function updateTotalPreview() {
 const title = document.getElementById('admin-about-title').value;
 const subtitle = document.getElementById('admin-about-subtitle').value;
