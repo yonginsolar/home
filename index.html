@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.49
-Change: Make activity cards bottom-aligned and horizontally swipeable.
+Version: v1.0.50
+Change: Smooth activity carousel scrolling and hide load-more when no next page exists.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.49 | index.html');</script>
+<script>console.log('[Version] v1.0.50 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -132,8 +132,7 @@ Change: Make activity cards bottom-aligned and horizontally swipeable.
   gap: var(--activity-card-gap);
   overflow-x: auto;
   overflow-y: visible;
-  scroll-snap-type: x mandatory;
-  scroll-padding: 2px;
+  scroll-behavior: smooth;
   padding: 4px 2px 18px;
   margin-left: 0;
   margin-right: 0;
@@ -158,7 +157,6 @@ Change: Make activity cards bottom-aligned and horizontally swipeable.
 .activity-card-slide {
   flex: 0 0 calc((100% - (var(--activity-card-gap) * 2)) / 3);
   max-width: calc((100% - (var(--activity-card-gap) * 2)) / 3);
-  scroll-snap-align: start;
   display: flex;
 }
 .activity-card:hover,
@@ -2060,6 +2058,12 @@ function getActivityGalleryUrls(activity) {
     return parsed.galleryUrls;
 }
 
+function isActivityScrollNearEnd(container) {
+    if (!container) return false;
+    const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft;
+    return remaining < Math.max(240, container.clientWidth * 0.55);
+}
+
 function setupActivityScrollTrack(container) {
     if (!container || container.dataset.activityScrollBound === '1') return;
     let isPointerDown = false;
@@ -2071,8 +2075,7 @@ function setupActivityScrollTrack(container) {
     container.addEventListener('scroll', () => {
         if (scrollTimer) window.clearTimeout(scrollTimer);
         scrollTimer = window.setTimeout(() => {
-            const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft;
-            if (remaining < Math.max(240, container.clientWidth * 0.55)) {
+            if (isActivityScrollNearEnd(container)) {
                 fetchMoreActivities();
             }
         }, 120);
@@ -2111,7 +2114,9 @@ function setupActivityScrollTrack(container) {
             window.setTimeout(() => {
                 container.dataset.activitySuppressClick = '0';
             }, 120);
-            fetchMoreActivities();
+            if (isActivityScrollNearEnd(container)) {
+                fetchMoreActivities();
+            }
         }
     }
 
@@ -2187,7 +2192,6 @@ function renderActivityCards(items, options = {}) {
             <button type="button" class="activity-load-more-card" onclick="fetchMoreActivities()">
               <i class="bi bi-arrow-right-circle"></i>
               <span class="fw-bold">다음 활동 보기</span>
-              <span class="small">필요한 만큼만 불러옵니다.</span>
             </button>
           </div>
         `;
@@ -2207,15 +2211,20 @@ async function fetchActivityPage(offset = 0) {
         .eq('access_scope', 'PUBLIC')
         .order('event_date', { ascending: false })
         .order('updated_at', { ascending: false })
-        .range(offset, offset + ACTIVITY_PAGE_SIZE - 1)));
+        .range(offset, offset + ACTIVITY_PAGE_SIZE)));
 
-    return { data: Array.isArray(data) ? data : [], error };
+    const rows = Array.isArray(data) ? data : [];
+    return {
+        data: rows.slice(0, ACTIVITY_PAGE_SIZE),
+        hasMore: rows.length > ACTIVITY_PAGE_SIZE,
+        error
+    };
 }
 
 async function fetchActivities() {
     g_activity_loading_more = true;
     g_activity_has_more = true;
-    const { data, error } = await fetchActivityPage(0);
+    const { data, hasMore, error } = await fetchActivityPage(0);
     g_activity_loading_more = false;
 
     if (error) {
@@ -2226,14 +2235,14 @@ async function fetchActivities() {
     }
 
     g_activity_list = data;
-    g_activity_has_more = data.length === ACTIVITY_PAGE_SIZE;
+    g_activity_has_more = hasMore;
     renderActivityCards(g_activity_list);
 }
 
 async function fetchMoreActivities() {
     if (g_activity_loading_more || !g_activity_has_more) return;
     g_activity_loading_more = true;
-    const { data, error } = await fetchActivityPage(g_activity_list.length);
+    const { data, hasMore, error } = await fetchActivityPage(g_activity_list.length);
     g_activity_loading_more = false;
 
     if (error) {
@@ -2241,14 +2250,18 @@ async function fetchMoreActivities() {
         return;
     }
 
-    if (data.length < ACTIVITY_PAGE_SIZE) {
-        g_activity_has_more = false;
+    g_activity_has_more = hasMore;
+    if (data.length === 0) {
+        renderActivityCards(g_activity_list, { preserveScroll: true });
+        return;
     }
-    if (data.length === 0) return;
 
     const existingIds = new Set(g_activity_list.map((item) => String(item?.id || '')));
     const nextItems = data.filter((item) => !existingIds.has(String(item?.id || '')));
-    if (nextItems.length === 0) return;
+    if (nextItems.length === 0) {
+        renderActivityCards(g_activity_list, { preserveScroll: true });
+        return;
+    }
     g_activity_list = g_activity_list.concat(nextItems);
     renderActivityCards(g_activity_list, { preserveScroll: true });
 }
