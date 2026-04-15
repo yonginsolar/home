@@ -1,6 +1,6 @@
 /*
-Version: v1.0.0
-Change: Block in-app and outdated browsers on auth entry pages with a legacy-safe 안내 overlay.
+Version: v1.0.1
+Change: Smooth out blocked-browser overlay copy on auth entry pages.
 */
 (function attachBrowserEnvGuard(global) {
   'use strict';
@@ -163,7 +163,7 @@ Change: Block in-app and outdated browsers on auth entry pages with a legacy-saf
     var copy = document.createElement('p');
     copy.className = 'browser-env-guard-copy';
     copy.appendChild(document.createTextNode(
-      actionLabel + '을(를) 안전하게 진행하기 어려운 환경입니다. 아래 내용을 확인한 뒤 외부 브라우저의 최신 버전에서 다시 시도해 주세요.'
+      '현재 브라우저에서는 ' + actionLabel + ' 진행이 어렵습니다. 아래 내용을 확인한 뒤 외부 브라우저의 최신 버전에서 다시 시도해 주세요.'
     ));
 
     var list = document.createElement('ul');
