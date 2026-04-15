@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.64
+Version: v1.0.65
 Change: 2026-04-10 - Expanded advanced power-generation integrations to SMA, Fronius, Enphase, and Huawei FusionSolar.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.64';
+window.ADMIN_MEMBER_VERSION = 'v1.0.65';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -835,6 +835,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </a>
 </li>
 <li class="nav-item">
+<a class="nav-link" data-bs-toggle="tab" href="#sub-activities" onclick="setTimeout(fetchActivities,100)">
+활동 내역
+</a>
+</li>
+<li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-docs" onclick="setTimeout(fetchDocs,100)">
 문서 관리 (정관/규약/규정)
 </a>
@@ -1015,6 +1020,28 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </tr>
 </thead>
 <tbody id="powerGenerationListBody"></tbody>
+</table>
+</div>
+
+<div class="tab-pane fade" id="sub-activities">
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+<div class="small text-muted">
+홈페이지 <strong>활동 내역</strong> 섹션에는 공개중인 최신 3건만 노출됩니다. 대표사진 1장과 본문을 등록해 최근 운영 소식을 남겨보세요.
+</div>
+<button class="btn btn-sm btn-outline-primary" onclick="openActivityModal()">+ 활동 등록</button>
+</div>
+<table class="table table-bordered bg-white align-middle">
+<thead class="table-light text-center">
+<tr>
+<th style="width:120px;">활동일</th>
+<th style="width:90px;">대표사진</th>
+<th>제목</th>
+<th style="width:90px;">공개</th>
+<th style="width:260px;">요약</th>
+<th style="width:120px;">관리</th>
+</tr>
+</thead>
+<tbody id="activityListBody"></tbody>
 </table>
 </div>
 
@@ -1805,6 +1832,66 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 <div class="modal-footer border-0 pt-0">
 <button class="btn btn-light" data-bs-dismiss="modal">취소</button>
 <button class="btn btn-primary px-4" onclick="saveDoc()">저장하기</button>
+</div>
+</div>
+</div>
+</div>
+
+<div class="modal fade" id="activityModal" tabindex="-1">
+<div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+<div class="modal-content border-0 shadow">
+<div class="modal-header bg-white">
+<h5 class="modal-title fw-bold"><i class="bi bi-journal-richtext text-success me-2"></i>활동 내역 등록</h5>
+<button class="btn-close" data-bs-dismiss="modal"></button>
+</div>
+<div class="modal-body p-4">
+<input type="hidden" id="activity-id">
+<input type="hidden" id="activity-cover-original">
+<input type="hidden" id="activity-cover-url">
+<input type="hidden" id="activity-cover-removed" value="0">
+
+<div class="row g-3 mb-3">
+<div class="col-md-8">
+<label class="form-label small fw-bold text-muted">제목</label>
+<input type="text" id="activity-title" class="form-control" placeholder="예: 2026년 4월 정기 이사회 개최">
+</div>
+<div class="col-md-4">
+<label class="form-label small fw-bold text-muted">활동일</label>
+<input type="date" id="activity-date" class="form-control">
+</div>
+</div>
+
+<div class="row g-3 mb-3">
+<div class="col-md-7">
+<label class="form-label small fw-bold text-muted">대표 사진</label>
+<input type="file" id="activity-cover-file" class="form-control form-control-sm mb-2" accept="image/*" onchange="previewActivityCover(this)">
+<div class="form-text">메인 카드와 상세 모달 상단에 노출됩니다. 사진이 없어도 저장은 가능합니다.</div>
+</div>
+<div class="col-md-5">
+<label class="form-label small fw-bold text-muted">공개 상태</label>
+<div class="form-check p-3 bg-light rounded border">
+<input class="form-check-input" type="checkbox" id="activity-visible">
+<label class="form-check-label fw-bold text-success" for="activity-visible">홈페이지에 공개</label>
+<div class="small text-muted mt-1">해제하면 목록에는 남아도 홈페이지에는 보이지 않습니다.</div>
+</div>
+</div>
+</div>
+
+<div class="border rounded bg-light d-flex align-items-center justify-content-center position-relative mb-3" style="height: 220px; overflow:hidden;">
+<img id="activity-cover-preview" src="" alt="activity cover preview" style="max-width:100%; max-height:100%; display:none;">
+<span id="activity-cover-placeholder" class="text-muted small">대표 사진 없음</span>
+<button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2" onclick="clearActivityCover()">삭제</button>
+</div>
+
+<div class="mb-0">
+<label class="form-label small fw-bold text-muted">본문</label>
+<textarea id="activity-content" class="form-control" rows="10" placeholder="예: 이사회에서 2분기 사업 일정과 총회 준비 상황을 논의했습니다.&#13;&#10;&#13;&#10;줄바꿈은 홈페이지 상세 모달에서 그대로 반영됩니다. HTML을 직접 입력해도 됩니다."></textarea>
+<div class="form-text">한글/워드 붙여넣기, 줄바꿈, 간단한 HTML을 그대로 저장할 수 있습니다.</div>
+</div>
+</div>
+<div class="modal-footer border-0 pt-0">
+<button class="btn btn-light" data-bs-dismiss="modal">취소</button>
+<button class="btn btn-primary px-4" onclick="saveActivity()">저장하기</button>
 </div>
 </div>
 </div>
@@ -2954,6 +3041,8 @@ docs_url: 'https://support.huawei.com/enterprise/en/doc/EDOC1100440661/356f0ec1/
 ];
 
 let g_badges = []; // DB에서 불러온 뱃지 목록을 기억해둠
+let g_siteActivities = [];
+let isSavingActivity = false;
 let g_fund_page = 0; // [추가] 무한 스크롤 페이지 번호
 const PAGE_SIZE = 20; // [추가] 한 번에 불러올 개수
 
@@ -5012,6 +5101,12 @@ function logout() { _supabase.auth.signOut().then(() => location.href='index.htm
 
 const REQUIRED_SITE_SECTIONS = Object.freeze([
 Object.freeze({
+id: 'activities',
+name: '활동 내역',
+display_order: 7,
+is_visible: true
+}),
+Object.freeze({
 id: 'ops-system',
 name: '협동조합 운영 시스템',
 display_order: 7,
@@ -5032,6 +5127,7 @@ progress: 3,
 status: 4,
 portfolio: 5,
 calculator: 6,
+activities: 7,
  'ops-system': 7,
 documents: 8,
 partners: 9,
@@ -6448,6 +6544,236 @@ deleteType = 'history'; // 문서는 기술적으로 history와 같은 테이블
 document.getElementById('delete-target-id').value = id;
 document.getElementById('btn-real-delete').onclick = confirmDelete;
 new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
+}
+
+function releaseActivityCoverPreviewObjectUrl() {
+const previewEl = document.getElementById('activity-cover-preview');
+if (!previewEl) return;
+const objectUrl = previewEl.dataset.objectUrl || '';
+if (objectUrl.startsWith('blob:')) {
+try { URL.revokeObjectURL(objectUrl); } catch (e) {}
+}
+delete previewEl.dataset.objectUrl;
+}
+
+function renderActivityCoverPreview(url, objectUrl = '') {
+const previewEl = document.getElementById('activity-cover-preview');
+const placeholderEl = document.getElementById('activity-cover-placeholder');
+if (!previewEl || !placeholderEl) return;
+
+releaseActivityCoverPreviewObjectUrl();
+
+const finalUrl = String(objectUrl || url || '').trim();
+if (!finalUrl) {
+previewEl.removeAttribute('src');
+previewEl.style.display = 'none';
+placeholderEl.style.display = '';
+return;
+}
+
+previewEl.src = finalUrl;
+previewEl.style.display = '';
+placeholderEl.style.display = 'none';
+if (objectUrl) previewEl.dataset.objectUrl = objectUrl;
+}
+
+function setActivityCoverState(url) {
+document.getElementById('activity-cover-url').value = String(url || '').trim();
+renderActivityCoverPreview(url || '');
+}
+
+function previewActivityCover(input) {
+const file = input?.files?.[0];
+if (!file) {
+renderActivityCoverPreview(document.getElementById('activity-cover-url').value || '');
+return;
+}
+
+document.getElementById('activity-cover-removed').value = '0';
+const objectUrl = URL.createObjectURL(file);
+renderActivityCoverPreview('', objectUrl);
+}
+
+function clearActivityCover() {
+document.getElementById('activity-cover-file').value = '';
+document.getElementById('activity-cover-removed').value = '1';
+setActivityCoverState('');
+}
+
+function normalizeActivityContentForEditor(value) {
+return String(value || '').replace(/<br\s*\/?>/gi, '\n').trim();
+}
+
+async function fetchActivities() {
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
+  .eq('category', 'activity')
+  .order('event_date', { ascending: false })
+  .order('updated_at', { ascending: false });
+
+const tbody = document.getElementById('activityListBody');
+if (!tbody) return;
+tbody.innerHTML = '';
+
+if (error) {
+console.error('[fetchActivities] failed:', error);
+tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">활동 내역을 불러오지 못했습니다.</td></tr>';
+return;
+}
+
+g_siteActivities = Array.isArray(data) ? data : [];
+
+if (g_siteActivities.length === 0) {
+tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">등록된 활동 내역이 없습니다.</td></tr>';
+return;
+}
+
+g_siteActivities.forEach((row) => {
+const coverUrl = String(row.file_url || '').trim();
+const coverHtml = coverUrl
+? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(row.title || '활동 대표 사진')}" style="width:72px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;">`
+: '<span class="text-muted small">없음</span>';
+const visibleBadge = row.is_current
+? '<span class="badge bg-success">공개중</span>'
+: '<span class="badge bg-secondary">숨김</span>';
+const summaryPreview = escapeHtml(toPlainSummaryPreview(row.content, 88));
+
+tbody.innerHTML += `<tr>
+<td class="text-center">${escapeHtml(row.event_date || '-')}</td>
+<td class="text-center">${coverHtml}</td>
+<td class="text-start fw-bold">${escapeHtml(row.title || '-')}</td>
+<td class="text-center">${visibleBadge}</td>
+<td class="text-start small">${summaryPreview}</td>
+<td class="text-center">
+  <button class="btn btn-sm btn-light" onclick="openActivityModal('${escapeJsString(String(row.id || ''))}')">수정</button>
+  <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteActivity('${escapeJsString(String(row.id || ''))}')">삭제</button>
+</td>
+</tr>`;
+});
+}
+
+async function openActivityModal(id) {
+document.getElementById('activity-id').value = id || '';
+document.getElementById('activity-cover-file').value = '';
+document.getElementById('activity-cover-removed').value = '0';
+document.getElementById('activity-cover-original').value = '';
+document.getElementById('activity-title').value = '';
+document.getElementById('activity-date').value = getAdminMemberKstDateString();
+document.getElementById('activity-content').value = '';
+document.getElementById('activity-visible').checked = true;
+setActivityCoverState('');
+
+if (id) {
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
+  .eq('id', id)
+  .eq('category', 'activity')
+  .maybeSingle();
+if (error) {
+myAlert('활동 내역을 불러오지 못했습니다: ' + error.message, 'error');
+return;
+}
+if (data) {
+document.getElementById('activity-title').value = data.title || '';
+document.getElementById('activity-date').value = data.event_date || getAdminMemberKstDateString();
+document.getElementById('activity-content').value = normalizeActivityContentForEditor(data.content || '');
+document.getElementById('activity-visible').checked = data.is_current !== false;
+document.getElementById('activity-cover-original').value = data.file_url || '';
+setActivityCoverState(data.file_url || '');
+}
+}
+
+bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).show();
+}
+
+async function saveActivity() {
+if (isSavingActivity) return;
+
+const title = (document.getElementById('activity-title').value || '').trim();
+const eventDate = document.getElementById('activity-date').value;
+const content = document.getElementById('activity-content').value || '';
+if (!title) return myAlert('제목을 입력하세요.', 'warning');
+if (!eventDate) return myAlert('활동일을 입력하세요.', 'warning');
+
+const id = document.getElementById('activity-id').value || null;
+const fileInput = document.getElementById('activity-cover-file');
+const originalUrl = String(document.getElementById('activity-cover-original').value || '').trim();
+const removeCover = document.getElementById('activity-cover-removed').value === '1';
+let finalCoverUrl = String(document.getElementById('activity-cover-url').value || '').trim();
+let uploadedNewUrl = '';
+
+isSavingActivity = true;
+showLoading(true);
+
+try {
+if (fileInput?.files?.[0]) {
+uploadedNewUrl = await uploadFileToStorage(fileInput.files[0], 'site-activities');
+finalCoverUrl = uploadedNewUrl;
+} else if (removeCover) {
+finalCoverUrl = '';
+}
+
+const { error } = await _supabase.rpc('upsert_document_secure', {
+p_id: id,
+p_category: 'activity',
+p_title: title,
+p_date: eventDate,
+p_content: content,
+p_version: null,
+p_file_url: finalCoverUrl || null,
+p_is_current: document.getElementById('activity-visible').checked,
+p_access_scope: 'PUBLIC'
+});
+
+if (error) throw error;
+
+if (uploadedNewUrl && originalUrl && originalUrl !== finalCoverUrl) {
+await deleteOldFile(originalUrl);
+} else if (removeCover && originalUrl) {
+await deleteOldFile(originalUrl);
+}
+
+bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).hide();
+await fetchActivities();
+myAlert('활동 내역이 저장되었습니다.');
+} catch (e) {
+console.error('[saveActivity] failed:', e);
+if (uploadedNewUrl) {
+await deleteOldFile(uploadedNewUrl);
+}
+myAlert('활동 내역 저장 중 오류가 발생했습니다: ' + (e.message || e), 'error');
+} finally {
+showLoading(false);
+isSavingActivity = false;
+}
+}
+
+function askDeleteActivity(id) {
+if (!id) return;
+
+myConfirm('이 활동 내역을 삭제하시겠습니까?\n대표 사진도 함께 정리됩니다.', async () => {
+showLoading(true);
+try {
+const { data, error: fetchError } = await scopeAdminTenant(_supabase.from('site_documents').select('id, file_url'))
+  .eq('id', id)
+  .eq('category', 'activity')
+  .maybeSingle();
+if (fetchError) throw fetchError;
+
+const { error } = await _supabase.rpc('delete_document_secure', { p_id: id });
+if (error) throw error;
+
+if (data?.file_url) {
+await deleteOldFile(data.file_url);
+}
+
+await fetchActivities();
+myAlert('활동 내역이 삭제되었습니다.');
+} catch (e) {
+console.error('[askDeleteActivity] failed:', e);
+myAlert('삭제 실패: ' + (e.message || e), 'error');
+} finally {
+showLoading(false);
+}
+});
 }
 
 function hasPartnerPendingChanges(value) {
