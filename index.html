@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.48  
-Change: Remove missing created_at dependency from public activity queries.
+Version: v1.0.49
+Change: Make activity cards bottom-aligned and horizontally swipeable.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.48 | index.html');</script>
+<script>console.log('[Version] v1.0.49 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -114,13 +114,52 @@ Change: Remove missing created_at dependency from public activity queries.
 }
 .activity-card {
   height: 100%;
+  width: 100%;
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   background: #fff;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   cursor: pointer;
+  display: flex;
+  flex-direction: column;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.activity-scroll-track {
+  --activity-card-gap: 24px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--activity-card-gap);
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 2px;
+  padding: 4px 2px 18px;
+  margin-left: 0;
+  margin-right: 0;
+  cursor: grab;
+  -webkit-overflow-scrolling: touch;
+}
+.activity-scroll-track.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.activity-scroll-track::-webkit-scrollbar {
+  height: 8px;
+}
+.activity-scroll-track::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+}
+.activity-scroll-track::-webkit-scrollbar-thumb {
+  background: rgba(22, 101, 52, 0.32);
+  border-radius: 999px;
+}
+.activity-card-slide {
+  flex: 0 0 calc((100% - (var(--activity-card-gap) * 2)) / 3);
+  max-width: calc((100% - (var(--activity-card-gap) * 2)) / 3);
+  scroll-snap-align: start;
+  display: flex;
 }
 .activity-card:hover,
 .activity-card:focus-visible {
@@ -156,6 +195,9 @@ Change: Remove missing created_at dependency from public activity queries.
 }
 .activity-card-body {
   padding: 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 .activity-card-date {
   display: inline-flex;
@@ -183,6 +225,8 @@ Change: Remove missing created_at dependency from public activity queries.
   gap: 6px;
   font-weight: 700;
   color: #166534;
+  margin-top: auto;
+  padding-top: 4px;
 }
 .activity-empty-state {
   border: 1px dashed #cbd5e1;
@@ -191,6 +235,31 @@ Change: Remove missing created_at dependency from public activity queries.
   text-align: center;
   padding: 36px 20px;
   color: #64748b;
+}
+.activity-load-more-card {
+  min-height: 100%;
+  width: 100%;
+  border: 1px dashed rgba(22, 101, 52, 0.32);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(240, 253, 244, 0.92), rgba(255, 251, 235, 0.92));
+  color: #166534;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 18px;
+  text-align: center;
+  cursor: pointer;
+}
+.activity-load-more-card i {
+  font-size: 2rem;
+}
+.activity-load-more-card:hover,
+.activity-load-more-card:focus-visible {
+  border-color: rgba(22, 101, 52, 0.58);
+  outline: none;
+  box-shadow: 0 14px 30px rgba(22, 101, 52, 0.12);
 }
 .activity-detail-cover {
   width: 100%;
@@ -236,6 +305,29 @@ Change: Remove missing created_at dependency from public activity queries.
 }
 .activity-detail-content table {
   width: 100%;
+}
+@media (max-width: 991.98px) {
+  .activity-scroll-track {
+    --activity-card-gap: 18px;
+  }
+  .activity-card-slide {
+    flex-basis: calc((100% - var(--activity-card-gap)) / 2);
+    max-width: calc((100% - var(--activity-card-gap)) / 2);
+  }
+}
+@media (max-width: 767.98px) {
+  .activity-scroll-track {
+    --activity-card-gap: 16px;
+    padding-left: 4px;
+    padding-right: 22px;
+  }
+  .activity-card-slide {
+    flex-basis: 86%;
+    max-width: 86%;
+  }
+  .activity-card-media {
+    height: 205px;
+  }
 }
 .public-hof-wrap {
   max-width: 760px;
@@ -671,8 +763,8 @@ Change: Remove missing created_at dependency from public activity queries.
       <p>최근 <span>활동 내역</span></p>
     </div>
 
-    <div class="row g-4" id="activities-container">
-      <div class="col-12">
+    <div class="activity-scroll-track" id="activities-container">
+      <div class="activity-card-slide">
         <div class="activity-empty-state">
           <div class="spinner-border spinner-border-sm text-success" role="status"></div>
           <div class="mt-2 small">활동 내역을 불러오는 중...</div>
@@ -1838,6 +1930,9 @@ async function fetchPowerGenerationStats() {
 
 let g_plants_list = [];    // 모달 연결을 위해 발전소 전체 데이터 저장
 let g_activity_list = [];  // 활동 내역 상세 모달 연결용 데이터 저장
+const ACTIVITY_PAGE_SIZE = 3;
+let g_activity_has_more = true;
+let g_activity_loading_more = false;
 
 /* =================================================================
    [기능 1] 공지사항 (Notices) - 검색 및 모달 구현
@@ -1965,13 +2060,81 @@ function getActivityGalleryUrls(activity) {
     return parsed.galleryUrls;
 }
 
-function renderActivityCards(items) {
+function setupActivityScrollTrack(container) {
+    if (!container || container.dataset.activityScrollBound === '1') return;
+    let isPointerDown = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    let didDrag = false;
+    let scrollTimer = null;
+
+    container.addEventListener('scroll', () => {
+        if (scrollTimer) window.clearTimeout(scrollTimer);
+        scrollTimer = window.setTimeout(() => {
+            const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft;
+            if (remaining < Math.max(240, container.clientWidth * 0.55)) {
+                fetchMoreActivities();
+            }
+        }, 120);
+    }, { passive: true });
+
+    container.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'touch') return;
+        if (event.button !== undefined && event.button !== 0) return;
+        isPointerDown = true;
+        didDrag = false;
+        startX = event.clientX;
+        startScrollLeft = container.scrollLeft;
+        container.classList.add('is-dragging');
+        if (container.setPointerCapture) container.setPointerCapture(event.pointerId);
+    });
+
+    container.addEventListener('pointermove', (event) => {
+        if (!isPointerDown) return;
+        const deltaX = event.clientX - startX;
+        if (Math.abs(deltaX) > 4) {
+            didDrag = true;
+            container.scrollLeft = startScrollLeft - deltaX;
+            event.preventDefault();
+        }
+    });
+
+    function finishPointerDrag(event) {
+        if (!isPointerDown) return;
+        isPointerDown = false;
+        container.classList.remove('is-dragging');
+        if (container.releasePointerCapture) {
+            try { container.releasePointerCapture(event.pointerId); } catch (e) {}
+        }
+        if (didDrag) {
+            container.dataset.activitySuppressClick = '1';
+            window.setTimeout(() => {
+                container.dataset.activitySuppressClick = '0';
+            }, 120);
+            fetchMoreActivities();
+        }
+    }
+
+    container.addEventListener('pointerup', finishPointerDrag);
+    container.addEventListener('pointercancel', finishPointerDrag);
+    container.addEventListener('click', (event) => {
+        if (container.dataset.activitySuppressClick === '1') {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    }, true);
+    container.dataset.activityScrollBound = '1';
+}
+
+function renderActivityCards(items, options = {}) {
     const container = document.getElementById('activities-container');
     if (!container) return;
+    setupActivityScrollTrack(container);
+    const previousScrollLeft = options.preserveScroll ? container.scrollLeft : 0;
 
     if (!Array.isArray(items) || items.length === 0) {
         container.innerHTML = `
-          <div class="col-12">
+          <div class="activity-card-slide">
             <div class="activity-empty-state">
               <i class="bi bi-journal-check d-block fs-2 mb-2 text-success"></i>
               <div class="fw-bold mb-1">아직 등록된 활동 내역이 없습니다.</div>
@@ -2000,7 +2163,7 @@ function renderActivityCards(items) {
             `;
 
         html += `
-          <div class="col-lg-4 col-md-6" data-aos="zoom-in" data-aos-delay="${delay}">
+          <div class="activity-card-slide" data-aos="zoom-in" data-aos-delay="${delay}">
             <article class="activity-card"
                 role="button"
                 tabindex="0"
@@ -2018,10 +2181,25 @@ function renderActivityCards(items) {
         `;
     });
 
+    if (g_activity_has_more) {
+        html += `
+          <div class="activity-card-slide" data-activity-load-more="1">
+            <button type="button" class="activity-load-more-card" onclick="fetchMoreActivities()">
+              <i class="bi bi-arrow-right-circle"></i>
+              <span class="fw-bold">다음 활동 보기</span>
+              <span class="small">필요한 만큼만 불러옵니다.</span>
+            </button>
+          </div>
+        `;
+    }
+
     container.innerHTML = html;
+    if (options.preserveScroll) {
+        container.scrollLeft = previousScrollLeft;
+    }
 }
 
-async function fetchActivities() {
+async function fetchActivityPage(offset = 0) {
     const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
         .select('id, title, content, event_date, file_url, is_current, access_scope, updated_at')
         .eq('category', 'activity')
@@ -2029,16 +2207,50 @@ async function fetchActivities() {
         .eq('access_scope', 'PUBLIC')
         .order('event_date', { ascending: false })
         .order('updated_at', { ascending: false })
-        .limit(3)));
+        .range(offset, offset + ACTIVITY_PAGE_SIZE - 1)));
+
+    return { data: Array.isArray(data) ? data : [], error };
+}
+
+async function fetchActivities() {
+    g_activity_loading_more = true;
+    g_activity_has_more = true;
+    const { data, error } = await fetchActivityPage(0);
+    g_activity_loading_more = false;
 
     if (error) {
         console.warn('fetchActivities failed:', error);
+        g_activity_has_more = false;
         renderActivityCards([]);
         return;
     }
 
-    g_activity_list = Array.isArray(data) ? data : [];
+    g_activity_list = data;
+    g_activity_has_more = data.length === ACTIVITY_PAGE_SIZE;
     renderActivityCards(g_activity_list);
+}
+
+async function fetchMoreActivities() {
+    if (g_activity_loading_more || !g_activity_has_more) return;
+    g_activity_loading_more = true;
+    const { data, error } = await fetchActivityPage(g_activity_list.length);
+    g_activity_loading_more = false;
+
+    if (error) {
+        console.warn('fetchMoreActivities failed:', error);
+        return;
+    }
+
+    if (data.length < ACTIVITY_PAGE_SIZE) {
+        g_activity_has_more = false;
+    }
+    if (data.length === 0) return;
+
+    const existingIds = new Set(g_activity_list.map((item) => String(item?.id || '')));
+    const nextItems = data.filter((item) => !existingIds.has(String(item?.id || '')));
+    if (nextItems.length === 0) return;
+    g_activity_list = g_activity_list.concat(nextItems);
+    renderActivityCards(g_activity_list, { preserveScroll: true });
 }
 
 function openActivityDetail(id) {
