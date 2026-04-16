@@ -1,14 +1,13 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.15 | Change: 2026-04-15 - Fix leave cancel submit preview target lookup. -->
+<!-- Version: v1.2.22 | Change: 2026-04-16 - Fix Tiptap CDN plugin instance collision and Supabase Edge auth warning. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.15 | approval.html');</script>
+  <script>console.log('[Version] v1.2.22 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>전자결재 (Final)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
@@ -32,6 +31,7 @@
   <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
   <script src="salary_ledger_module.js?v=20260331-2"></script>
   <script src="leave_ledger.js"></script>
+  <script src="approval_rich_editor.js?v=20260416-5"></script>
   
   <style>
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
@@ -210,16 +210,37 @@
     .approval-editor-tabs { display: flex; gap: 8px; margin: 6px 0 10px; }
     .approval-editor-panel { display: none; }
     .approval-editor-panel.active { display: block; }
-    .general-proposal-quill-wrap {
+    .general-proposal-rich-wrap {
       border: 1px solid #cbd5e1;
       border-radius: 10px;
       overflow: hidden;
       background: #fff;
     }
-    .general-proposal-quill-wrap .ql-toolbar.ql-snow {
-      border: none;
+    .approval-tiptap-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
       border-bottom: 1px solid #e5e7eb;
       background: #f8fafc;
+      padding: 10px 12px;
+    }
+    .approval-tiptap-toolbar .btn,
+    .approval-tiptap-toolbar .form-select {
+      font-size: 0.84rem;
+      line-height: 1.2;
+    }
+    .approval-tiptap-toolbar .btn.active {
+      background: #0d6efd;
+      border-color: #0d6efd;
+      color: #fff;
+    }
+    .approval-tiptap-toolbar .approval-toolbar-divider {
+      width: 1px;
+      align-self: stretch;
+      min-height: 28px;
+      background: #dbe3ef;
+      margin: 0 2px;
     }
     .general-proposal-template-toolbar {
       display: flex;
@@ -232,16 +253,54 @@
     .general-proposal-template-toolbar .btn {
       white-space: nowrap;
     }
-    .general-proposal-quill-wrap .ql-container.ql-snow {
-      border: none;
+    .approval-tiptap-content {
       min-height: 500px;
+      padding: 16px;
       font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
       font-size: 15px;
       line-height: 1.7;
+      color: #1f2937;
+      outline: none;
     }
-    .general-proposal-quill-wrap .ql-editor {
-      min-height: 500px;
-      padding: 16px;
+    .approval-tiptap-content p.is-editor-empty:first-child::before {
+      content: attr(data-placeholder);
+      float: left;
+      color: #94a3b8;
+      height: 0;
+      pointer-events: none;
+    }
+    .approval-tiptap-content table,
+    .approval-rich-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      table-layout: fixed;
+    }
+    .approval-tiptap-content th,
+    .approval-tiptap-content td,
+    .approval-rich-table th,
+    .approval-rich-table td {
+      border: 1px solid #cbd5e1;
+      padding: 8px 10px;
+      vertical-align: top;
+      min-width: 80px;
+    }
+    .approval-tiptap-content th,
+    .approval-rich-table th {
+      background: #f1f5f9;
+      font-weight: 700;
+      text-align: center;
+    }
+    .approval-tiptap-content .selectedCell::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(13, 110, 253, 0.12);
+      pointer-events: none;
+    }
+    .approval-tiptap-content td,
+    .approval-tiptap-content th {
+      position: relative;
     }
     .approval-visual-editor {
       min-height: 500px;
@@ -713,68 +772,63 @@
           </div>
         </div>
         <div id="appDescEditorControls" class="hidden">
-          <div class="approval-editor-toolbar" id="legacyApprovalEditorToolbar">
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<h3>','</h3>')">제목</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<p>','</p>')">문단</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<strong>','</strong>')">굵게</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<ul><li>','</li></ul>')">목록</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<ol><li>','</li></ol>')">번호목록</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<table>','</table>')">테이블</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertApprovalTag('<br>','')">줄바꿈</button>
-          </div>
           <div class="approval-editor-tabs">
             <button type="button" id="app-desc-tab-visual" class="btn btn-sm btn-primary" onclick="switchApprovalEditorTab('visual')">미리보기 편집</button>
             <button type="button" id="app-desc-tab-html" class="btn btn-sm btn-outline-primary" onclick="switchApprovalEditorTab('html')">HTML 편집</button>
           </div>
         </div>
         <div id="app-desc-panel-visual" class="approval-editor-panel">
-          <div id="generalProposalEditorWrap" class="general-proposal-quill-wrap hidden">
-            <div id="generalProposalQuillToolbar">
-              <span class="ql-formats">
-                <select class="ql-header">
-                  <option selected></option>
-                  <option value="1"></option>
-                  <option value="2"></option>
-                </select>
-              </span>
-              <span class="ql-formats">
-                <button type="button" class="ql-bold"></button>
-                <button type="button" class="ql-italic"></button>
-                <button type="button" class="ql-underline"></button>
-              </span>
-              <span class="ql-formats">
-                <button type="button" class="ql-list" value="ordered"></button>
-                <button type="button" class="ql-list" value="bullet"></button>
-                <button type="button" class="ql-blockquote"></button>
-              </span>
-              <span class="ql-formats">
-                <button type="button" class="ql-link"></button>
-                <button type="button" class="ql-clean"></button>
-              </span>
+          <div id="generalProposalEditorWrap" class="general-proposal-rich-wrap hidden">
+            <div id="generalProposalRichToolbar" class="approval-tiptap-toolbar">
+              <select class="form-select form-select-sm w-auto" data-approval-editor-select="block" title="문단 형식">
+                <option value="paragraph">문단</option>
+                <option value="heading1">제목 1</option>
+                <option value="heading2">제목 2</option>
+                <option value="heading3">제목 3</option>
+              </select>
+              <span class="approval-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bold">굵게</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="italic">기울임</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="underline">밑줄</button>
+              <span class="approval-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bulletList">목록</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="orderedList">번호목록</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="blockquote">인용</button>
+              <span class="approval-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="alignLeft">왼쪽</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="alignCenter">가운데</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="alignRight">오른쪽</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="alignJustify">양쪽</button>
+              <span class="approval-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="link">링크</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="clean">서식삭제</button>
+              <span class="approval-toolbar-divider" aria-hidden="true"></span>
+              <button type="button" class="btn btn-sm btn-outline-primary" data-approval-editor-command="insertTable">표 넣기</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="addRowAfter">행 추가</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="deleteRow">행 삭제</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="addColumnAfter">열 추가</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="deleteColumn">열 삭제</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="mergeCells">셀 병합</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="splitCell">셀 분할</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-approval-editor-command="deleteTable">표 삭제</button>
             </div>
             <div id="generalProposalTemplateToolbar" class="general-proposal-template-toolbar hidden">
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('full')">기본안 넣기</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('summary')">개요</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('background')">추진 배경</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('details')">주요 내용</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('budget')">예산</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('schedule')">일정</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="insertGeneralProposalTemplateBlock('effect')">기대 효과</button>
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="insertGeneralProposalTableRow()">행 추가</button>
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="removeGeneralProposalTableRow()">행 삭제</button>
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="insertGeneralProposalTableColumn()">열 추가</button>
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="removeGeneralProposalTableColumn()">열 삭제</button>
-              <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeGeneralProposalTable()">표 삭제</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('full')">기본안 넣기</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('summary')">개요</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('background')">추진 배경</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('details')">주요 내용</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('budget')">예산</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('schedule')">일정</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary approval-proposal-template-action" onclick="insertGeneralProposalTemplateBlock('effect')">기대 효과</button>
             </div>
-            <div class="small text-muted px-3 pb-2 hidden" id="generalProposalTableHelp">표 안의 셀을 먼저 클릭한 뒤 행/열 버튼을 사용하세요. 단축키: Alt+Shift+R(행 추가), Alt+Shift+X(행 삭제), Alt+Shift+C(열 추가), Alt+Shift+D(열 삭제)</div>
-            <div id="generalProposalQuill"></div>
+            <div id="generalProposalRichEditor"></div>
           </div>
           <div id="appDescVisual" class="approval-visual-editor" contenteditable="true" data-placeholder="여기에 내용을 입력하세요."></div>
         </div>
         <div id="app-desc-panel-html" class="approval-editor-panel active">
           <textarea class="form-control large-textarea" id="appDesc" placeholder="내용을 상세히 입력하세요." rows="20"></textarea>
         </div>
-        <div class="small text-muted mt-2 hidden" id="appDescHtmlHelp">일반품의/공문은 테이블 포함 HTML 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.</div>
+        <div class="small text-muted mt-2 hidden" id="appDescHtmlHelp">전자결재 문서는 서식 있는 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.</div>
       </div>
 
       <div class="mb-4">
@@ -872,8 +926,14 @@ const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     }
   }
 });
-const _supabaseEdge = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APPROVAL_QUILL_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js';
+const _supabaseEdge = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    storageKey: 'erp-approval-edge-functions'
+  }
+});
 const APPROVAL_HTML2PDF_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js';
 
 let myInfo = null;
@@ -893,7 +953,7 @@ let activeApprovalTab = 'draft';
 let approvalDataLoadedAt = { todo: 0, history: 0 };
 let approvalBootstrapSummary = null;
 let approvalBootstrapReady = false;
-let approvalQuillLoaderPromise = null;
+let approvalRichEditorLoaderPromise = null;
 let approvalHtml2PdfLoaderPromise = null;
 let permissionSet = new Set();
 let pendingPhysicalDocId = null;
@@ -913,9 +973,8 @@ let approvalTemplateCandidates = [];
 let approvalTemplateSelectedId = '';
 let approvalEditorMode = 'html';
 let approvalDraftRestoreEditorModeHint = '';
-let generalProposalQuill = null;
-let generalProposalQuillSyncing = false;
-let lastGeneralProposalTableSelection = null;
+let approvalRichEditor = null;
+let generalProposalTiptap = null;
 let currentAttachmentPreviewObjectUrl = null;
 let relViewObjectUrls = [];
 let leaveSnapshotState = null;
@@ -2965,9 +3024,17 @@ function isApprovalProposalLikeType(docType) {
     return APPROVAL_PROPOSAL_LIKE_TYPES.includes(String(docType || '').trim());
 }
 
+function isGeneralProposalDocType(docType) {
+    return String(docType || '').trim() === '일반품의';
+}
+
 function isApprovalHtmlEditorType(docType) {
     const safeDocType = String(docType || '').trim();
-    return safeDocType === '공문' || isApprovalProposalLikeType(safeDocType) || isApprovalOvertimeType(safeDocType);
+    if (!safeDocType) return false;
+    const mainDocType = mapApprovalDocTypeToMainCategory(safeDocType);
+    return WORKFORCE_LITE_APPROVAL_DOC_GROUPS.some((group) => (
+        Array.isArray(group.items) && group.items.some((item) => item.value === mainDocType)
+    ));
 }
 
 function getWorkforceLiteApprovalDocGroups() {
@@ -3087,7 +3154,7 @@ function getApprovalSubjectConfig(docType) {
                 amountLabel: '금액 (원)',
                 amountPlaceholder: '0',
                 showAmount: false,
-                htmlHelp: '일반품의서는 테이블 포함 HTML 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.'
+                htmlHelp: '일반품의서는 서식 있는 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.'
             };
     }
 }
@@ -4825,31 +4892,34 @@ function loadApprovalExternalScript(src, marker) {
     });
 }
 
-function warmApprovalQuillAssets() {
-    if (typeof window.Quill === 'function') {
-        if (String(getCurrentApprovalCategory() || '').trim() === '일반품의') {
-            ensureGeneralProposalQuill();
-            syncApprovalVisualSurface('일반품의');
+function warmApprovalRichEditorAssets() {
+    const currentCategory = getCurrentApprovalCategory();
+    if (window.ApprovalRichEditor?.isTiptapReady?.()) {
+        if (isApprovalHtmlEditorType(currentCategory)) {
+            ensureGeneralProposalRichEditor();
+            syncApprovalVisualSurface(currentCategory);
         }
         return Promise.resolve(true);
     }
-    if (approvalQuillLoaderPromise) return approvalQuillLoaderPromise;
-    approvalQuillLoaderPromise = loadApprovalExternalScript(APPROVAL_QUILL_SCRIPT_URL, 'quill')
+    if (approvalRichEditorLoaderPromise) return approvalRichEditorLoaderPromise;
+    if (!window.ApprovalRichEditor?.loadTiptapModules) return Promise.resolve(false);
+    approvalRichEditorLoaderPromise = window.ApprovalRichEditor.loadTiptapModules()
         .then(() => {
-            if (typeof window.Quill !== 'function') throw new Error('APPROVAL_QUILL_UNAVAILABLE');
-            if (String(getCurrentApprovalCategory() || '').trim() === '일반품의') {
-                ensureGeneralProposalQuill();
-                syncApprovalVisualSurface('일반품의');
+            if (!window.ApprovalRichEditor?.isTiptapReady?.()) throw new Error('APPROVAL_TIPTAP_UNAVAILABLE');
+            const loadedCategory = getCurrentApprovalCategory();
+            if (isApprovalHtmlEditorType(loadedCategory)) {
+                ensureGeneralProposalRichEditor();
+                syncApprovalVisualSurface(loadedCategory);
                 if (approvalEditorMode === 'visual') window.switchApprovalEditorTab('visual');
             }
             return true;
         })
         .catch((error) => {
-            approvalQuillLoaderPromise = null;
-            console.warn('approval quill load failed', error);
+            approvalRichEditorLoaderPromise = null;
+            console.warn('approval tiptap load failed', error);
             return false;
         });
-    return approvalQuillLoaderPromise;
+    return approvalRichEditorLoaderPromise;
 }
 
 async function ensureApprovalHtml2PdfReady() {
@@ -4869,19 +4939,71 @@ async function ensureApprovalHtml2PdfReady() {
 }
 
 function hasGeneralProposalEnhancedEditor(docType) {
-    return String(docType || '').trim() === '일반품의' && typeof window.Quill === 'function';
+    return isApprovalHtmlEditorType(docType)
+        && window.ApprovalRichEditor?.isTiptapReady?.()
+        && !!window.ApprovalRichEditor?.createTiptapBridge;
 }
 
-function getGeneralProposalQuillWrap() {
+function getGeneralProposalRichEditorWrap() {
     return document.getElementById('generalProposalEditorWrap');
 }
 
-function getGeneralProposalQuillEditor() {
-    return document.getElementById('generalProposalQuill');
+function getGeneralProposalRichEditorElement() {
+    return document.getElementById('generalProposalRichEditor');
 }
 
 function getGeneralProposalTemplateToolbar() {
     return document.getElementById('generalProposalTemplateToolbar');
+}
+
+function getApprovalRichEditorPlaceholder(docType) {
+    const safeDocType = String(docType || '').trim();
+    if (safeDocType === '휴가') return '휴가 신청 사유나 참고 사항을 작성하세요.';
+    if (safeDocType === '휴가취소') return '휴가 취소 사유나 참고 사항을 작성하세요.';
+    if (safeDocType === '지출결의') return '지출 사유와 세부 내용을 작성하세요.';
+    if (safeDocType === '공문') return '공문 본문을 작성하세요.';
+    if (safeDocType === '출장신청') return '출장 목적과 주요 일정을 작성하세요.';
+    if (safeDocType === '구매요청') return '구매 사유와 요청 내용을 작성하세요.';
+    if (safeDocType === '증명서발급') return '발급 사유와 요청 내용을 작성하세요.';
+    if (safeDocType === '근무변경') return '근무 변경 사유와 세부 내용을 작성하세요.';
+    if (isApprovalOvertimeType(safeDocType)) return '시간외근로 사유와 업무 내용을 작성하세요.';
+    if (isGeneralProposalDocType(safeDocType)) return '일반품의 내용을 작성하세요.';
+    return '결재 본문을 작성하세요.';
+}
+
+function getApprovalRichEditorHelpText(docType) {
+    const safeDocType = String(docType || '').trim();
+    if (safeDocType === '일반품의') {
+        return '일반품의서는 전용 간편 편집기를 사용합니다. 블록 버튼으로 기본 품의안을 빠르게 넣고, 표/정렬/목록이 필요하면 상단 편집 도구를 사용하세요.';
+    }
+    if (safeDocType === '지출결의') {
+        return '지출결의서도 서식 있는 본문을 작성할 수 있습니다. 표가 필요하면 표 넣기에서 칸 수를 정하고, 세부 HTML이 필요하면 HTML 편집 탭에서 직접 수정하세요.';
+    }
+    if (safeDocType === '휴가' || safeDocType === '휴가취소') {
+        return '휴가 관련 문서도 서식 있는 본문을 작성할 수 있습니다. 기본 신청 내역은 별도 입력값으로 자동 반영됩니다.';
+    }
+    return `${safeDocType || '전자결재 문서'}는 서식 있는 본문을 작성할 수 있습니다. 표/정렬/목록이 필요하면 상단 편집 도구를 사용하세요.`;
+}
+
+function getApprovalRichEditor() {
+    if (approvalRichEditor) return approvalRichEditor;
+    if (!window.ApprovalRichEditor?.createTiptapBridge) return null;
+
+    approvalRichEditor = window.ApprovalRichEditor.createTiptapBridge({
+        editor: 'generalProposalRichEditor',
+        toolbar: '#generalProposalRichToolbar',
+        getSourceElement: () => getApprovalHtmlEditor(),
+        getPlaceholder: () => getApprovalRichEditorPlaceholder(getCurrentApprovalCategory()),
+        buildHtmlFromSource: (rawValue) => buildGeneralProposalRichEditorHtml(rawValue),
+        normalizeHtml: (rawHtml) => normalizeGeneralProposalRichEditorHtml(rawHtml),
+        shouldSyncToSource: () => approvalEditorMode === 'visual' && hasGeneralProposalEnhancedEditor(getCurrentApprovalCategory()),
+        askText: (message, options = {}) => showPrompt(message, options),
+        showMessage: (message) => showAlert(message),
+        onReady: (editor) => {
+            generalProposalTiptap = editor;
+        }
+    });
+    return approvalRichEditor;
 }
 
 function buildGeneralProposalTemplateBlockHtml(blockKey) {
@@ -4893,9 +5015,9 @@ function buildGeneralProposalTemplateBlockHtml(blockKey) {
         case 'details':
             return '<h3>3. 주요 내용</h3><ul><li>추진 항목</li><li>세부 실행 내용</li></ul>';
         case 'budget':
-            return '<h3>4. 예산 계획</h3><table><tbody><tr><th>항목</th><th>금액</th><th>비고</th></tr><tr><td>예산 항목</td><td></td><td></td></tr></tbody></table>';
+            return '<h3>4. 예산 계획</h3><ul><li>예산 항목: </li><li>금액: </li><li>비고: </li></ul>';
         case 'schedule':
-            return '<h3>5. 추진 일정</h3><table><tbody><tr><th>일정</th><th>내용</th></tr><tr><td></td><td></td></tr></tbody></table>';
+            return '<h3>5. 추진 일정</h3><ul><li>일정: </li><li>내용: </li></ul>';
         case 'effect':
             return '<h3>6. 기대 효과</h3><ul><li>기대 효과를 작성합니다.</li></ul>';
         case 'full':
@@ -4903,8 +5025,8 @@ function buildGeneralProposalTemplateBlockHtml(blockKey) {
                 '<h3>1. 품의 개요</h3><p>품의 목적과 요청 사항을 간단히 작성합니다.</p>',
                 '<h3>2. 추진 배경</h3><p>현재 상황과 추진이 필요한 배경을 작성합니다.</p>',
                 '<h3>3. 주요 내용</h3><ul><li>추진 항목</li><li>세부 실행 내용</li></ul>',
-                '<h3>4. 예산 계획</h3><table><tbody><tr><th>항목</th><th>금액</th><th>비고</th></tr><tr><td>예산 항목</td><td></td><td></td></tr></tbody></table>',
-                '<h3>5. 추진 일정</h3><table><tbody><tr><th>일정</th><th>내용</th></tr><tr><td></td><td></td></tr></tbody></table>',
+                '<h3>4. 예산 계획</h3><ul><li>예산 항목: </li><li>금액: </li><li>비고: </li></ul>',
+                '<h3>5. 추진 일정</h3><ul><li>일정: </li><li>내용: </li></ul>',
                 '<h3>6. 기대 효과</h3><ul><li>기대 효과를 작성합니다.</li></ul>',
                 '<h3>7. 요청 사항</h3><p>위와 같이 품의하오니 승인하여 주시기 바랍니다.</p>'
             ].join('');
@@ -4915,267 +5037,105 @@ function buildGeneralProposalTemplateBlockHtml(blockKey) {
 
 function syncGeneralProposalTemplateToolbar(docType) {
     const toolbar = getGeneralProposalTemplateToolbar();
-    const help = document.getElementById('generalProposalTableHelp');
     if (!toolbar) return;
-    const visible = hasGeneralProposalEnhancedEditor(docType) && isApprovalWorkforceLiteProfile();
+    const visible = hasGeneralProposalEnhancedEditor(docType);
+    const showProposalTemplates = visible && isGeneralProposalDocType(docType);
     toolbar.classList.toggle('hidden', !visible);
-    if (help) help.classList.toggle('hidden', !visible);
+    toolbar.querySelectorAll('.approval-proposal-template-action').forEach((button) => {
+        button.classList.toggle('hidden', !showProposalTemplates);
+    });
 }
 
-function buildGeneralProposalQuillHtml(rawValue) {
+function buildGeneralProposalRichEditorHtml(rawValue) {
     const rendered = renderApprovalContent(rawValue, true);
     return rendered || '<p><br></p>';
 }
 
-function normalizeGeneralProposalQuillHtml(rawHtml) {
-    const normalized = normalizeApprovalVisualHtml(rawHtml);
-    if (!normalized || /^<p><br><\/p>$/i.test(normalized)) return '';
+function inlineLegacyApprovalAlignmentHtml(rawHtml) {
+    const source = String(rawHtml || '');
+    if (!source.trim() || !/ql-align-/.test(source)) return source;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${source}</div>`, 'text/html');
+    const root = doc.body.firstElementChild || doc.body;
+    root.querySelectorAll('[class]').forEach((node) => {
+        const classList = String(node.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+        const alignmentClass = classList.find((name) => /^ql-align-(center|right|justify)$/.test(name));
+        if (!alignmentClass) return;
+
+        const alignment = alignmentClass.replace('ql-align-', '');
+        node.style.textAlign = alignment;
+        const nextClasses = classList.filter((name) => !/^ql-align-(center|right|justify)$/.test(name));
+        if (nextClasses.length > 0) node.setAttribute('class', nextClasses.join(' '));
+        else node.removeAttribute('class');
+    });
+    return root.innerHTML;
+}
+
+function normalizeGeneralProposalRichEditorHtml(rawHtml) {
+    const normalized = normalizeApprovalVisualHtml(inlineLegacyApprovalAlignmentHtml(rawHtml));
+    if (!normalized || /^<p>(<br>)?<\/p>$/i.test(normalized)) return '';
     return sanitizeApprovalHtml(normalized);
 }
 
-function ensureGeneralProposalQuill() {
-    if (generalProposalQuill) return true;
-    if (typeof window.Quill !== 'function') return false;
-    const editorEl = getGeneralProposalQuillEditor();
+function ensureGeneralProposalRichEditor() {
+    if (generalProposalTiptap) {
+        getApprovalRichEditor()?.setPlaceholder();
+        return true;
+    }
+    if (!window.ApprovalRichEditor?.isTiptapReady?.()) return false;
+    const richEditor = getApprovalRichEditor();
+    if (!richEditor) return false;
+    const editorEl = getGeneralProposalRichEditorElement();
     if (!editorEl) return false;
 
-    generalProposalQuill = new window.Quill(editorEl, {
-        theme: 'snow',
-        modules: {
-            toolbar: '#generalProposalQuillToolbar'
-        },
-        placeholder: '일반품의 내용을 작성하세요.'
-    });
-    generalProposalQuill.on('text-change', function () {
-        if (generalProposalQuillSyncing) return;
-        if (approvalEditorMode !== 'visual') return;
-        if (!hasGeneralProposalEnhancedEditor(getCurrentApprovalCategory())) return;
-        syncApprovalSourceFromGeneralProposalQuill();
-    });
-    const captureSelection = () => {
-        window.setTimeout(() => {
-            updateGeneralProposalTableSelectionCache();
-        }, 0);
-    };
-    generalProposalQuill.root.addEventListener('mouseup', captureSelection);
-    generalProposalQuill.root.addEventListener('keyup', captureSelection);
-    generalProposalQuill.root.addEventListener('focusin', captureSelection);
-    generalProposalQuill.root.addEventListener('keydown', handleGeneralProposalTableShortcut);
-    return true;
+    return richEditor.ensure();
 }
 
-function syncGeneralProposalQuillFromSource() {
-    if (!ensureGeneralProposalQuill()) return false;
-    const source = getApprovalHtmlEditor();
-    if (!source) return false;
-    generalProposalQuillSyncing = true;
-    generalProposalQuill.clipboard.dangerouslyPasteHTML(buildGeneralProposalQuillHtml(source.value));
-    generalProposalQuillSyncing = false;
-    return true;
+function syncGeneralProposalRichEditorFromSource() {
+    if (!ensureGeneralProposalRichEditor()) return false;
+    return !!getApprovalRichEditor()?.syncFromSource();
 }
 
-function syncApprovalSourceFromGeneralProposalQuill() {
-    if (!ensureGeneralProposalQuill()) return false;
-    const source = getApprovalHtmlEditor();
-    if (!source) return false;
-    source.value = normalizeGeneralProposalQuillHtml(generalProposalQuill.root.innerHTML);
-    return true;
+function syncApprovalSourceFromGeneralProposalRichEditor() {
+    if (!ensureGeneralProposalRichEditor()) return false;
+    return !!getApprovalRichEditor()?.syncToSource();
 }
 
 function shouldReplaceGeneralProposalEditorWithTemplate(currentHtml) {
-    const normalized = normalizeGeneralProposalQuillHtml(currentHtml);
+    const normalized = normalizeGeneralProposalRichEditorHtml(currentHtml);
     if (!normalized) return true;
     const plainText = normalized.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     return isApprovalAutoGeneratedTemplateContent(normalized) || isApprovalAutoGeneratedTemplateContent(plainText);
 }
 
 function insertGeneralProposalTemplateBlock(blockKey) {
-    if (!hasGeneralProposalEnhancedEditor(getCurrentApprovalCategory())) return;
-    if (!ensureGeneralProposalQuill()) return;
+    const currentCategory = getCurrentApprovalCategory();
+    if (!isGeneralProposalDocType(currentCategory) || !hasGeneralProposalEnhancedEditor(currentCategory)) return;
+    if (!ensureGeneralProposalRichEditor()) return;
+    const richEditor = getApprovalRichEditor();
+    if (!richEditor) return;
     const html = buildGeneralProposalTemplateBlockHtml(blockKey);
     if (!html) return;
 
-    const currentHtml = normalizeGeneralProposalQuillHtml(generalProposalQuill.root.innerHTML);
+    const currentHtml = normalizeGeneralProposalRichEditorHtml(richEditor.getRootHtml());
     const shouldReplaceAll = shouldReplaceGeneralProposalEditorWithTemplate(currentHtml);
     if (shouldReplaceAll && String(blockKey || '').trim() === 'full') {
-        generalProposalQuill.clipboard.dangerouslyPasteHTML(html, 'user');
+        richEditor.pasteHtml(html, 'user');
     } else {
-        const range = generalProposalQuill.getSelection(true);
-        const insertIndex = range && Number.isInteger(range.index) ? range.index : generalProposalQuill.getLength();
-        generalProposalQuill.clipboard.dangerouslyPasteHTML(insertIndex, html, 'user');
+        richEditor.insertHtml(html);
     }
-    syncApprovalSourceFromGeneralProposalQuill();
+    syncApprovalSourceFromGeneralProposalRichEditor();
 }
-
-function resolveGeneralProposalSelectedTableContextFromSelection() {
-    const root = generalProposalQuill.root;
-    const selection = window.getSelection();
-    let node = selection && selection.anchorNode;
-    if (!node) return null;
-    if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-    if (!(node instanceof Element)) node = node?.parentElement || null;
-    if (!node || !root.contains(node)) return null;
-    const cell = node.closest('td,th');
-    if (!cell || !root.contains(cell)) return null;
-    const row = cell.closest('tr');
-    const table = cell.closest('table');
-    if (!row || !table) return null;
-    return {
-        root,
-        table,
-        row,
-        cell,
-        cellIndex: Array.from(row.children).indexOf(cell)
-    };
-}
-
-function updateGeneralProposalTableSelectionCache() {
-    const context = resolveGeneralProposalSelectedTableContextFromSelection();
-    if (!context) return;
-    const tables = Array.from(context.root.querySelectorAll('table'));
-    const rows = Array.from(context.table.querySelectorAll('tr'));
-    lastGeneralProposalTableSelection = {
-        tableIndex: tables.indexOf(context.table),
-        rowIndex: rows.indexOf(context.row),
-        cellIndex: context.cellIndex
-    };
-}
-
-function handleGeneralProposalTableShortcut(event) {
-    if (!event || !event.altKey || !event.shiftKey || event.metaKey || event.ctrlKey) return false;
-    const key = String(event.key || '').toLowerCase();
-    if (key === 'r') {
-        event.preventDefault();
-        window.insertGeneralProposalTableRow();
-        return true;
-    }
-    if (key === 'x') {
-        event.preventDefault();
-        window.removeGeneralProposalTableRow();
-        return true;
-    }
-    if (key === 'c') {
-        event.preventDefault();
-        window.insertGeneralProposalTableColumn();
-        return true;
-    }
-    if (key === 'd') {
-        event.preventDefault();
-        window.removeGeneralProposalTableColumn();
-        return true;
-    }
-    return false;
-}
-
-function getGeneralProposalSelectedTableContext() {
-    if (!ensureGeneralProposalQuill()) return null;
-    const liveContext = resolveGeneralProposalSelectedTableContextFromSelection();
-    if (liveContext) {
-        updateGeneralProposalTableSelectionCache();
-        return liveContext;
-    }
-    const cache = lastGeneralProposalTableSelection;
-    if (!cache) return null;
-    const root = generalProposalQuill.root;
-    const tables = Array.from(root.querySelectorAll('table'));
-    const table = tables[cache.tableIndex];
-    if (!table) return null;
-    const rows = Array.from(table.querySelectorAll('tr'));
-    const row = rows[cache.rowIndex] || rows[rows.length - 1];
-    const cell = row?.children?.[cache.cellIndex] || row?.lastElementChild || null;
-    if (!row || !cell) return null;
-    return {
-        root,
-        table,
-        row,
-        cell,
-        cellIndex: Array.from(row.children).indexOf(cell)
-    };
-}
-
-function syncGeneralProposalQuillFromCurrentDom() {
-    if (!ensureGeneralProposalQuill()) return false;
-    const nextHtml = normalizeGeneralProposalQuillHtml(generalProposalQuill.root.innerHTML);
-    generalProposalQuillSyncing = true;
-    generalProposalQuill.clipboard.dangerouslyPasteHTML(nextHtml || '<p><br></p>');
-    generalProposalQuillSyncing = false;
-    lastGeneralProposalTableSelection = null;
-    syncApprovalSourceFromGeneralProposalQuill();
-    generalProposalQuill.focus();
-    return true;
-}
-
-function buildGeneralProposalEmptyDataRow(referenceRow) {
-    const row = document.createElement('tr');
-    Array.from(referenceRow?.children || []).forEach((cell) => {
-        const nextCell = document.createElement('td');
-        if (cell.colSpan && cell.colSpan > 1) nextCell.colSpan = cell.colSpan;
-        row.appendChild(nextCell);
-    });
-    return row;
-}
-
-window.insertGeneralProposalTableRow = function () {
-    const context = getGeneralProposalSelectedTableContext();
-    if (!context) return showAlert('표 안의 셀을 먼저 클릭하세요.');
-    const nextRow = buildGeneralProposalEmptyDataRow(context.row);
-    if (!nextRow.children.length) return showAlert('표 행을 추가할 수 없습니다.');
-    context.row.parentNode.insertBefore(nextRow, context.row.nextSibling);
-    syncGeneralProposalQuillFromCurrentDom();
-};
-
-window.removeGeneralProposalTableRow = function () {
-    const context = getGeneralProposalSelectedTableContext();
-    if (!context) return showAlert('표 안의 셀을 먼저 클릭하세요.');
-    const isHeaderRow = Array.from(context.row.children).some((cell) => String(cell.tagName || '').toUpperCase() === 'TH');
-    if (isHeaderRow) return showAlert('제목 행은 삭제하지 않고 유지합니다.');
-    const dataRows = Array.from(context.table.querySelectorAll('tr')).filter((row) =>
-        !Array.from(row.children).some((cell) => String(cell.tagName || '').toUpperCase() === 'TH')
-    );
-    if (dataRows.length <= 1) return showAlert('표에는 최소 한 줄의 내용 행이 필요합니다.');
-    context.row.remove();
-    syncGeneralProposalQuillFromCurrentDom();
-};
-
-window.insertGeneralProposalTableColumn = function () {
-    const context = getGeneralProposalSelectedTableContext();
-    if (!context) return showAlert('표 안의 셀을 먼저 클릭하세요.');
-    Array.from(context.table.querySelectorAll('tr')).forEach((row) => {
-        const referenceCell = row.children[context.cellIndex] || row.lastElementChild;
-        const tagName = String(referenceCell?.tagName || 'td').toLowerCase();
-        const nextCell = document.createElement(tagName === 'th' ? 'th' : 'td');
-        if (tagName === 'th') nextCell.textContent = '항목';
-        row.insertBefore(nextCell, referenceCell ? referenceCell.nextSibling : null);
-    });
-    syncGeneralProposalQuillFromCurrentDom();
-};
-
-window.removeGeneralProposalTableColumn = function () {
-    const context = getGeneralProposalSelectedTableContext();
-    if (!context) return showAlert('표 안의 셀을 먼저 클릭하세요.');
-    const maxColumns = Math.max(...Array.from(context.table.querySelectorAll('tr')).map((row) => row.children.length), 0);
-    if (maxColumns <= 1) return showAlert('표에는 최소 한 개의 열이 필요합니다.');
-    Array.from(context.table.querySelectorAll('tr')).forEach((row) => {
-        if (row.children[context.cellIndex]) row.children[context.cellIndex].remove();
-    });
-    syncGeneralProposalQuillFromCurrentDom();
-};
-
-window.removeGeneralProposalTable = function () {
-    const context = getGeneralProposalSelectedTableContext();
-    if (!context) return showAlert('표 안의 셀을 먼저 클릭하세요.');
-    context.table.remove();
-    syncGeneralProposalQuillFromCurrentDom();
-};
 
 function syncApprovalVisualSurface(docType) {
     const useGeneralProposalEditor = hasGeneralProposalEnhancedEditor(docType);
-    const quillWrap = getGeneralProposalQuillWrap();
+    const richWrap = getGeneralProposalRichEditorWrap();
     const visual = getApprovalVisualEditor();
-    if (quillWrap) quillWrap.classList.toggle('hidden', !useGeneralProposalEditor);
+    if (richWrap) richWrap.classList.toggle('hidden', !useGeneralProposalEditor);
     if (visual) visual.classList.toggle('hidden', useGeneralProposalEditor);
     syncGeneralProposalTemplateToolbar(docType);
-    if (useGeneralProposalEditor) syncGeneralProposalQuillFromSource();
+    if (useGeneralProposalEditor) syncGeneralProposalRichEditorFromSource();
     else syncApprovalVisualFromSource();
 }
 
@@ -5209,14 +5169,14 @@ function setApprovalEditorContent(rawValue) {
         approvalEditorMode = 'html';
         return;
     }
-    if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalQuillFromSource();
+    if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalRichEditorFromSource();
     else syncApprovalVisualFromSource();
 }
 
 function getApprovalEditorContent() {
     if (approvalEditorMode === 'visual') {
         const currentCategory = getCurrentApprovalCategory();
-        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncApprovalSourceFromGeneralProposalQuill();
+        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncApprovalSourceFromGeneralProposalRichEditor();
         else syncApprovalSourceFromVisual();
     }
     return getApprovalHtmlEditor()?.value || '';
@@ -5234,8 +5194,19 @@ function ensureApprovalVisualSelection(editor) {
     selection.addRange(range);
 }
 
-function buildDefaultTableHtml() {
-    return '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%;"><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody><tr><td></td><td></td></tr></tbody></table>';
+function getApprovalAlignmentCommand(formatKey) {
+    switch (String(formatKey || '')) {
+        case '__align_left__':
+            return { command: 'justifyLeft', style: 'left' };
+        case '__align_center__':
+            return { command: 'justifyCenter', style: 'center' };
+        case '__align_right__':
+            return { command: 'justifyRight', style: 'right' };
+        case '__align_justify__':
+            return { command: 'justifyFull', style: 'justify' };
+        default:
+            return null;
+    }
 }
 
 function applyApprovalVisualFormat(beforeTag) {
@@ -5244,14 +5215,15 @@ function applyApprovalVisualFormat(beforeTag) {
     visual.focus();
     ensureApprovalVisualSelection(visual);
 
+    const alignment = getApprovalAlignmentCommand(beforeTag);
+    if (alignment) document.execCommand(alignment.command, false, null);
     if (beforeTag === '<h3>') document.execCommand('formatBlock', false, 'h3');
     else if (beforeTag === '<p>') document.execCommand('formatBlock', false, 'p');
     else if (beforeTag === '<strong>') document.execCommand('bold', false, null);
     else if (beforeTag === '<ul><li>') document.execCommand('insertUnorderedList', false, null);
     else if (beforeTag === '<ol><li>') document.execCommand('insertOrderedList', false, null);
     else if (beforeTag === '<br>') document.execCommand('insertHTML', false, '<br>');
-    else if (beforeTag === '<table>') document.execCommand('insertHTML', false, buildDefaultTableHtml());
-    else return false;
+    else if (!alignment) return false;
 
     syncApprovalSourceFromVisual();
     return true;
@@ -5265,9 +5237,10 @@ window.insertApprovalTag = (before, after = '') => {
     const start = editor.selectionStart || 0;
     const end = editor.selectionEnd || 0;
     const selected = editor.value.slice(start, end);
+    const alignment = getApprovalAlignmentCommand(before);
     let inserted = `${before}${selected}${after}`;
-    if (before === '<table>') {
-        inserted = buildDefaultTableHtml();
+    if (alignment) {
+        inserted = `<div style="text-align:${alignment.style};">${selected || '<br>'}</div>`;
     }
     editor.setRangeText(inserted, start, end, 'end');
     editor.focus();
@@ -5284,10 +5257,10 @@ window.switchApprovalEditorTab = (mode = 'visual') => {
     const isVisual = mode !== 'html';
     const currentCategory = getCurrentApprovalCategory();
     if (isVisual) {
-        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalQuillFromSource();
+        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalRichEditorFromSource();
         else syncApprovalVisualFromSource();
     } else {
-        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncApprovalSourceFromGeneralProposalQuill();
+        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncApprovalSourceFromGeneralProposalRichEditor();
         else syncApprovalSourceFromVisual();
     }
 
@@ -5303,7 +5276,6 @@ window.switchApprovalEditorTab = (mode = 'visual') => {
 
 function setApprovalEditorForCategory(docType) {
     const controls = document.getElementById('appDescEditorControls');
-    const legacyToolbar = document.getElementById('legacyApprovalEditorToolbar');
     const visualBtn = document.getElementById('app-desc-tab-visual');
     const htmlBtn = document.getElementById('app-desc-tab-html');
     const visualPanel = document.getElementById('app-desc-panel-visual');
@@ -5313,13 +5285,12 @@ function setApprovalEditorForCategory(docType) {
     const supportsHtmlEditor = isApprovalHtmlEditorType(docType);
     const useGeneralProposalEditor = hasGeneralProposalEnhancedEditor(docType);
     const preferHtmlMode = supportsHtmlEditor && approvalDraftRestoreEditorModeHint === 'html';
-    if (legacyToolbar) legacyToolbar.classList.toggle('hidden', useGeneralProposalEditor);
     if (supportsHtmlEditor) {
         controls.classList.remove('hidden');
         if (preferHtmlMode) {
-            const quillWrap = getGeneralProposalQuillWrap();
+            const richWrap = getGeneralProposalRichEditorWrap();
             const visual = getApprovalVisualEditor();
-            if (quillWrap) quillWrap.classList.toggle('hidden', !useGeneralProposalEditor);
+            if (richWrap) richWrap.classList.toggle('hidden', !useGeneralProposalEditor);
             if (visual) visual.classList.toggle('hidden', useGeneralProposalEditor);
             syncGeneralProposalTemplateToolbar(docType);
             approvalEditorMode = 'html';
@@ -5339,7 +5310,7 @@ function setApprovalEditorForCategory(docType) {
         window.switchApprovalEditorTab('visual');
     } else {
         controls.classList.add('hidden');
-        if (useGeneralProposalEditor) syncApprovalSourceFromGeneralProposalQuill();
+        if (useGeneralProposalEditor) syncApprovalSourceFromGeneralProposalRichEditor();
         else syncApprovalSourceFromVisual();
         approvalEditorMode = 'html';
         visualPanel.classList.remove('active');
@@ -5356,7 +5327,7 @@ function initializeApprovalEditor() {
     source.addEventListener('input', () => {
         if (approvalEditorMode !== 'html') return;
         const currentCategory = getCurrentApprovalCategory();
-        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalQuillFromSource();
+        if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalRichEditorFromSource();
         else syncApprovalVisualFromSource();
     });
     visual.addEventListener('input', () => {
@@ -5368,7 +5339,7 @@ function initializeApprovalEditor() {
 
     syncApprovalVisualFromSource();
     scheduleApprovalIdleTask(() => {
-        void warmApprovalQuillAssets();
+        void warmApprovalRichEditorAssets();
     });
 }
 
@@ -7169,6 +7140,8 @@ function showPrompt(msg, options = {}) {
     const okText = String(options?.okText || '확인').trim() || '확인';
     const okClass = String(options?.okClass || 'btn-primary').trim() || 'btn-primary';
     const placeholder = String(options?.placeholder || '').trim();
+    const inputType = String(options?.inputType || 'text').trim() || 'text';
+    const inputMode = String(options?.inputMode || '').trim();
     const initialValue = options?.value === undefined || options?.value === null
         ? ''
         : String(options.value);
@@ -7177,11 +7150,24 @@ function showPrompt(msg, options = {}) {
     bodyEl.textContent = String(msg || '');
     inputEl.value = initialValue;
     inputEl.placeholder = placeholder;
+    inputEl.type = inputType;
+    if (inputMode) inputEl.setAttribute('inputmode', inputMode);
+    else inputEl.removeAttribute('inputmode');
+    ['min', 'max', 'step', 'pattern'].forEach((attrName) => {
+        const attrValue = options?.[attrName];
+        if (attrValue === undefined || attrValue === null || String(attrValue).trim() === '') {
+            inputEl.removeAttribute(attrName);
+        } else {
+            inputEl.setAttribute(attrName, String(attrValue));
+        }
+    });
     okBtn.textContent = okText;
     okBtn.className = `btn ${okClass} btn-sm`;
 
     return new Promise((resolve) => {
         let settled = false;
+        let confirmed = false;
+        let confirmedValue = null;
         const finish = (value) => {
             if (settled) return;
             settled = true;
@@ -7191,11 +7177,12 @@ function showPrompt(msg, options = {}) {
             resolve(value);
         };
         const onConfirm = () => {
-            finish(inputEl.value);
+            confirmed = true;
+            confirmedValue = inputEl.value;
             promptModalInstance.hide();
         };
         const onHidden = () => {
-            finish(null);
+            finish(confirmed ? confirmedValue : null);
         };
         const onKeydown = (event) => {
             if (event.key !== 'Enter') return;
@@ -7712,6 +7699,7 @@ function handleCategoryChange() {
     divProposalSubject.classList.add("hidden");
     btnAppDescPreview.classList.add("hidden");
     appDescHtmlHelp.classList.add("hidden");
+    appDescHtmlHelp.textContent = "";
     divAmt.classList.remove("hidden");
     fileHelp.classList.add("hidden");
     
@@ -7827,7 +7815,7 @@ function handleCategoryChange() {
         divNoticeApprovalMemo.classList.remove("hidden");
         btnAppDescPreview.classList.remove("hidden");
         appDescHtmlHelp.classList.remove("hidden");
-        appDescHtmlHelp.textContent = "공문은 테이블 포함 HTML 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.";
+        appDescHtmlHelp.textContent = "공문은 서식 있는 본문을 작성할 수 있습니다. 미리보기 편집 또는 HTML 편집 탭으로 작성하고 제출 전 미리보기로 확인하세요.";
         divAmt.classList.add("hidden");
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (!currentDesc || isApprovalAutoGeneratedTemplateContent(currentDesc)) {
@@ -7838,12 +7826,12 @@ function handleCategoryChange() {
         }
     }
     else if (type === '일반품의') {
-        void warmApprovalQuillAssets();
+        void warmApprovalRichEditorAssets();
         divProposalSubject.classList.remove("hidden");
         btnAppDescPreview.classList.remove("hidden");
         appDescHtmlHelp.classList.remove("hidden");
         appDescHtmlHelp.textContent = hasGeneralProposalEnhancedEditor(type)
-            ? '일반품의서는 전용 간편 편집기를 사용합니다. 블록 버튼으로 기본 품의안을 빠르게 넣고, 표나 세부 HTML이 필요하면 HTML 편집 탭에서 직접 수정하세요.'
+            ? '일반품의서는 전용 간편 편집기를 사용합니다. 블록 버튼으로 기본 품의안을 빠르게 넣고, 세부 HTML이 필요하면 HTML 편집 탭에서 직접 수정하세요.'
             : getApprovalSubjectConfig(type).htmlHelp;
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (!currentDesc || isApprovalAutoGeneratedTemplateContent(currentDesc)) {
@@ -7871,10 +7859,18 @@ function handleCategoryChange() {
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (isApprovalAutoGeneratedTemplateContent(currentDesc)) setApprovalEditorContent("");
     }
+    if (isApprovalHtmlEditorType(type)) {
+        btnAppDescPreview.classList.remove("hidden");
+        appDescHtmlHelp.classList.remove("hidden");
+        if (!String(appDescHtmlHelp.textContent || '').trim()) {
+            appDescHtmlHelp.textContent = getApprovalRichEditorHelpText(type);
+        }
+    }
     syncApprovalRelatedDocUi(type);
     syncApprovalAttachmentHelp(type);
     syncApprovalTitleInput(type, { force: typeChanged });
     applyDefaultApprovalLineTemplate();
+    if (isApprovalHtmlEditorType(type)) void warmApprovalRichEditorAssets();
     setApprovalEditorForCategory(type);
     updateJeongyeolUi();
     approvalLastCategory = type;
