@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.51
-Change: Optimize activity image loading and append next activity cards without full rerender.
+Version: v1.0.52
+Change: Reflect authenticated home state in header and harden activity detail card clicks.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.51 | index.html');</script>
+<script>console.log('[Version] v1.0.52 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -81,7 +81,7 @@ Change: Optimize activity image loading and append next activity cards without f
   }
 
   /* 2. 로그인 텍스트 링크 수정 */
-  #header .d-flex.align-items-center > a[href="membermanage.html"] {
+  #header .d-flex.align-items-center > #homeAuthLink {
     font-size: 13px !important;    /* 글자 크기 미세 축소 */
     margin-right: 5px !important;  /* 기존 me-3(16px) -> 5px로 강제 축소 */
     white-space: nowrap;           /* 텍스트 줄바꿈 방지 */
@@ -224,7 +224,11 @@ Change: Optimize activity image loading and append next activity cards without f
   font-weight: 700;
   color: #166534;
   margin-top: auto;
-  padding-top: 4px;
+  padding: 4px 0 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
 }
 .activity-empty-state {
   border: 1px dashed #cbd5e1;
@@ -516,8 +520,8 @@ Change: Optimize activity image loading and append next activity cards without f
   </nav>
 
 <div class="d-flex align-items-center">
-        <a href="javascript:void(0);" onclick="handleMainLogin()" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
-        <a href="signup.html" class="get-started-btn scrollto">조합원 가입</a> 
+        <a id="homeAuthLink" href="javascript:void(0);" onclick="handleMainLogin(event)" class="scrollto me-3" style="color: #fff; font-size: 14px; text-decoration: none;">로그인</a>
+        <a id="homeSignupLink" href="signup.html" class="get-started-btn scrollto">조합원 가입</a> 
   
     <i class="bi bi-list mobile-nav-toggle d-lg-none ms-3" onclick="toggleMobileMenu()"></i>
   </div>
@@ -1761,6 +1765,8 @@ Change: Optimize activity image loading and append next activity cards without f
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
     await hydratePublicBranding();
+    bindHomeAuthState();
+    refreshHomeAuthUi();
     // 1. 섹션 관리는 먼저 실행 (화면 레이아웃 잡기)
     await manageSections(); 
     AOS.refresh(); 
@@ -2199,6 +2205,7 @@ function setupActivityScrollTrack(container) {
     });
     container.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
+        if (event.target.closest('button, a, input, textarea, select')) return;
         const card = event.target.closest('.activity-card[data-activity-id]');
         if (card && container.contains(card)) {
             event.preventDefault();
@@ -2241,7 +2248,7 @@ function buildActivityCardSlideHtml(item, index = 0) {
             <div class="activity-card-date"><i class="bi bi-calendar-event"></i>${dateText}</div>
             <h3 class="activity-card-title">${titleText}</h3>
             <p class="activity-card-summary">${summaryText}</p>
-            <span class="activity-card-link">자세히 보기 <i class="bi bi-arrow-right"></i></span>
+            <button type="button" class="activity-card-link">자세히 보기 <i class="bi bi-arrow-right"></i></button>
           </div>
         </article>
       </div>
@@ -2376,9 +2383,40 @@ async function fetchMoreActivities() {
     appendActivityCards(nextItems, startIndex);
 }
 
-function openActivityDetail(id) {
-    const item = g_activity_list.find((row) => String(row?.id || '') === String(id || ''));
-    if (!item) return;
+async function resolveActivityDetailItem(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId) return null;
+    const cached = g_activity_list.find((row) => String(row?.id || '') === safeId);
+    if (cached) return cached;
+
+    const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
+        .select('id, title, content, event_date, file_url, is_current, access_scope, updated_at')
+        .eq('id', safeId)
+        .eq('category', 'activity')
+        .eq('is_current', true)
+        .eq('access_scope', 'PUBLIC')
+        .limit(1)));
+    if (error) {
+        console.warn('resolveActivityDetailItem failed:', error);
+        return null;
+    }
+    const row = Array.isArray(data) ? data[0] : null;
+    if (row) g_activity_list.push(row);
+    return row || null;
+}
+
+async function openActivityDetail(id) {
+    let item = null;
+    try {
+        item = await resolveActivityDetailItem(id);
+    } catch (error) {
+        console.warn('openActivityDetail failed:', error);
+    }
+    if (!item) {
+        console.warn('Activity detail item not found:', id);
+        homeShowAlert('활동 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        return;
+    }
 
     const titleEl = document.getElementById('activityDetailTitle');
     const dateEl = document.getElementById('activityDetailDate');
@@ -3175,95 +3213,65 @@ function openPlantDetail(id) {
         });
         return result;
     }
+    function getHomeMembermanageUrl() {
+        if (window.CoopRouteGuard && typeof window.CoopRouteGuard.buildSiblingPageUrl === 'function') {
+            return window.CoopRouteGuard.buildSiblingPageUrl('membermanage.html');
+        }
+        return new URL('membermanage.html', window.location.href).href;
+    }
+
+    function setHomeAuthUiState(isLoggedIn) {
+        const authLink = document.getElementById('homeAuthLink');
+        const signupLink = document.getElementById('homeSignupLink');
+        const memberUrl = getHomeMembermanageUrl();
+
+        if (authLink) {
+            authLink.textContent = isLoggedIn ? '마이페이지' : '로그인';
+            authLink.href = isLoggedIn ? memberUrl : 'javascript:void(0);';
+            authLink.setAttribute('aria-label', isLoggedIn ? '마이페이지로 이동' : '로그인 화면으로 이동');
+        }
+
+        if (signupLink) {
+            signupLink.textContent = isLoggedIn ? '내 정보 보기' : '조합원 가입';
+            signupLink.href = isLoggedIn ? memberUrl : 'signup.html';
+            signupLink.setAttribute('aria-label', isLoggedIn ? '내 정보 보기' : '조합원 가입');
+        }
+    }
+
+    async function refreshHomeAuthUi() {
+        try {
+            const { data: { session } } = await _client.auth.getSession();
+            setHomeAuthUiState(!!session);
+        } catch (error) {
+            console.warn('refreshHomeAuthUi failed:', error);
+            setHomeAuthUiState(false);
+        }
+    }
+
+    function bindHomeAuthState() {
+        if (bindHomeAuthState.bound) return;
+        bindHomeAuthState.bound = true;
+        if (!_client?.auth || typeof _client.auth.onAuthStateChange !== 'function') return;
+        _client.auth.onAuthStateChange((_event, session) => {
+            setHomeAuthUiState(!!session);
+        });
+    }
+
     // [신규 기능] 메인 로그인 버튼 클릭 시 라우팅 처리
 let publicMainLoginInFlight = false;
-async function handleMainLogin() {
+async function handleMainLogin(event) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
     if (publicMainLoginInFlight) return;
     publicMainLoginInFlight = true;
     try {
         const { data: { session } } = await _client.auth.getSession();
+        const memberUrl = getHomeMembermanageUrl();
+        setHomeAuthUiState(!!session);
 
-        if (!session) {
-            location.href = 'membermanage.html';
-            return;
-        }
-
-        const email = String(session.user?.email || '').trim().toLowerCase();
-        const socialIds = getPublicSessionSocialIds(session.user);
-        const kakaoId = String(socialIds.kakao || '').trim();
-        const naverId = String(socialIds.naver || '').trim();
-        const memberChecks = [];
-
-        const visibleCoopId = String(await getVisibleSiteCoopId() || '').trim() || '00000000-0000-0000-0000-000000000000';
-
-        if (email) {
-            memberChecks.push(
-                (async () => {
-                    return await _client
-                        .from('coop_members')
-                        .select('id')
-                        .eq('coop_id', visibleCoopId)
-                        .eq('email', email)
-                        .limit(1)
-                        .maybeSingle();
-                })()
-            );
-        }
-
-        if (kakaoId) {
-            memberChecks.push(
-                (async () => {
-                    return await _client
-                        .from('coop_members')
-                        .select('id')
-                        .eq('coop_id', visibleCoopId)
-                        .eq('kakao_id', kakaoId)
-                        .limit(1)
-                        .maybeSingle();
-                })()
-            );
-        }
-
-        if (naverId) {
-            memberChecks.push(
-                (async () => {
-                    return await _client
-                        .from('coop_members')
-                        .select('id')
-                        .eq('coop_id', visibleCoopId)
-                        .eq('naver_id', naverId)
-                        .limit(1)
-                        .maybeSingle();
-                })()
-            );
-        }
-
-        const memberResults = await Promise.all(memberChecks);
-        const member = memberResults.find(result => result?.data)?.data || null;
-        const lookupError = memberResults.find(result => result?.error)?.error || null;
-
-        if (lookupError) {
-            console.warn('handleMainLogin member lookup failed:', lookupError);
-            homeShowAlert('로그인 상태를 확인하는 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
-            return;
-        }
-
-        if (member) {
-            location.href = 'membermanage.html';
-            return;
-        }
-
-        if (await homeShowConfirm("가입 신청서 작성이 완료되지 않았습니다.\n작성 페이지로 이동하시겠습니까?")) {
-            location.href = 'signup.html';
-            return;
-        }
-
-        await _client.auth.signOut();
-        homeShowAlert("로그아웃 되었습니다.");
-        location.reload();
+        location.href = memberUrl;
     } catch (error) {
         console.warn('handleMainLogin failed:', error);
-        homeShowAlert('로그인 상태를 확인하는 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        location.href = getHomeMembermanageUrl();
     } finally {
         publicMainLoginInFlight = false;
     }
