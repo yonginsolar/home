@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.52
-Change: Reflect authenticated home state in header and harden activity detail card clicks.
+Version: v1.0.54
+Change: Add fallback display for activity detail modal when Bootstrap modal initialization is unavailable.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.52 | index.html');</script>
+<script>console.log('[Version] v1.0.54 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -2215,6 +2215,21 @@ function setupActivityScrollTrack(container) {
     container.dataset.activityScrollBound = '1';
 }
 
+function handleActivityCardAction(event, encodedId) {
+    const container = document.getElementById('activities-container');
+    if (container?.dataset.activitySuppressClick === '1') {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        container.dataset.activitySuppressClick = '0';
+        return false;
+    }
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    openActivityDetail(decodeURIComponent(String(encodedId || '')));
+    return false;
+}
+window.handleActivityCardAction = handleActivityCardAction;
+
 function buildActivityCardSlideHtml(item, index = 0) {
     const encodedId = encodeURIComponent(String(item.id || ''));
     const coverUrl = getActivityCoverUrl(item);
@@ -2242,13 +2257,15 @@ function buildActivityCardSlideHtml(item, index = 0) {
             role="button"
             tabindex="0"
             data-activity-id="${escapeHtml(encodedId)}"
+            onclick="return handleActivityCardAction(event, '${escapeHtml(encodedId)}')"
+            onkeydown="if(event.key==='Enter'||event.key===' '){return handleActivityCardAction(event, '${escapeHtml(encodedId)}')}"
             aria-label="${titleText} 자세히 보기">
           <div class="activity-card-media">${mediaHtml}</div>
           <div class="activity-card-body">
             <div class="activity-card-date"><i class="bi bi-calendar-event"></i>${dateText}</div>
             <h3 class="activity-card-title">${titleText}</h3>
             <p class="activity-card-summary">${summaryText}</p>
-            <button type="button" class="activity-card-link">자세히 보기 <i class="bi bi-arrow-right"></i></button>
+            <button type="button" class="activity-card-link" onclick="return handleActivityCardAction(event, '${escapeHtml(encodedId)}')">자세히 보기 <i class="bi bi-arrow-right"></i></button>
           </div>
         </article>
       </div>
@@ -2469,11 +2486,43 @@ async function openActivityDetail(id) {
         }
     }
 
-    if (modalEl && window.bootstrap?.Modal) {
+    if (!modalEl) {
+        homeShowAlert('활동 내역 화면을 준비하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+        return;
+    }
+
+    if (window.bootstrap?.Modal) {
         window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        return;
+    }
+
+    modalEl.classList.add('show');
+    modalEl.style.display = 'block';
+    modalEl.removeAttribute('aria-hidden');
+    modalEl.setAttribute('aria-modal', 'true');
+    document.body.classList.add('modal-open');
+    if (!document.getElementById('activityDetailFallbackBackdrop')) {
+        const backdrop = document.createElement('div');
+        backdrop.id = 'activityDetailFallbackBackdrop';
+        backdrop.className = 'modal-backdrop fade show';
+        document.body.appendChild(backdrop);
+        backdrop.addEventListener('click', closeActivityDetailFallback);
     }
 }
 window.openActivityDetail = openActivityDetail;
+
+function closeActivityDetailFallback() {
+    const modalEl = document.getElementById('activityDetailModal');
+    if (modalEl) {
+        modalEl.classList.remove('show');
+        modalEl.style.display = 'none';
+        modalEl.setAttribute('aria-hidden', 'true');
+        modalEl.removeAttribute('aria-modal');
+    }
+    document.getElementById('activityDetailFallbackBackdrop')?.remove();
+    document.body.classList.remove('modal-open');
+}
+window.closeActivityDetailFallback = closeActivityDetailFallback;
 
 // 1. 공지사항 데이터 가져오기 (최초 1회 실행)
 async function fetchNotices() {
@@ -3226,9 +3275,10 @@ function openPlantDetail(id) {
         const memberUrl = getHomeMembermanageUrl();
 
         if (authLink) {
-            authLink.textContent = isLoggedIn ? '마이페이지' : '로그인';
-            authLink.href = isLoggedIn ? memberUrl : 'javascript:void(0);';
-            authLink.setAttribute('aria-label', isLoggedIn ? '마이페이지로 이동' : '로그인 화면으로 이동');
+            authLink.style.display = isLoggedIn ? 'none' : '';
+            authLink.textContent = '로그인';
+            authLink.href = 'javascript:void(0);';
+            authLink.setAttribute('aria-label', '로그인 화면으로 이동');
         }
 
         if (signupLink) {
@@ -3299,7 +3349,7 @@ function openOpsContactModal() {
             <div class="small text-success fw-bold" id="activityDetailDate"></div>
             <h5 class="modal-title fw-bold" id="activityDetailTitle">활동 내역</h5>
           </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="closeActivityDetailFallback()" aria-label="닫기"></button>
         </div>
         <div class="modal-body p-4">
           <div id="activityDetailCoverWrap" style="display:none;">
