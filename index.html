@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.55
-Change: Prevent activity carousel pointer capture from swallowing activity detail clicks.
+Version: v1.0.56
+Change: Move focus out of the activity detail modal before hiding it.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.55 | index.html');</script>
+<script>console.log('[Version] v1.0.56 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -1934,6 +1934,7 @@ async function fetchPowerGenerationStats() {
 
 let g_plants_list = [];    // 모달 연결을 위해 발전소 전체 데이터 저장
 let g_activity_list = [];  // 활동 내역 상세 모달 연결용 데이터 저장
+let g_activity_detail_trigger = null;
 const ACTIVITY_PAGE_SIZE = 3;
 let g_activity_has_more = true;
 let g_activity_loading_more = false;
@@ -2206,7 +2207,7 @@ function setupActivityScrollTrack(container) {
         const card = event.target.closest('.activity-card[data-activity-id]');
         if (card && container.contains(card)) {
             event.preventDefault();
-            openActivityDetail(decodeURIComponent(card.dataset.activityId || ''));
+            openActivityDetail(decodeURIComponent(card.dataset.activityId || ''), card);
         }
     });
     container.addEventListener('keydown', (event) => {
@@ -2215,7 +2216,7 @@ function setupActivityScrollTrack(container) {
         const card = event.target.closest('.activity-card[data-activity-id]');
         if (card && container.contains(card)) {
             event.preventDefault();
-            openActivityDetail(decodeURIComponent(card.dataset.activityId || ''));
+            openActivityDetail(decodeURIComponent(card.dataset.activityId || ''), card);
         }
     });
     container.dataset.activityScrollBound = '1';
@@ -2231,10 +2232,45 @@ function handleActivityCardAction(event, encodedId) {
     }
     event?.preventDefault?.();
     event?.stopPropagation?.();
-    openActivityDetail(decodeURIComponent(String(encodedId || '')));
+    const triggerEl = event?.currentTarget?.closest?.('.activity-card[data-activity-id]')
+        || event?.target?.closest?.('.activity-card[data-activity-id]')
+        || event?.currentTarget
+        || null;
+    openActivityDetail(decodeURIComponent(String(encodedId || '')), triggerEl);
     return false;
 }
 window.handleActivityCardAction = handleActivityCardAction;
+
+function rememberActivityDetailTrigger(triggerEl) {
+    if (triggerEl && typeof triggerEl.focus === 'function') {
+        g_activity_detail_trigger = triggerEl;
+    }
+}
+
+function restoreActivityDetailFocus() {
+    const modalEl = document.getElementById('activityDetailModal');
+    const activeEl = document.activeElement;
+    if (modalEl?.contains(activeEl) && typeof activeEl?.blur === 'function') {
+        activeEl.blur();
+    }
+    const targetEl = g_activity_detail_trigger?.isConnected
+        ? g_activity_detail_trigger
+        : document.getElementById('activities-container');
+    if (targetEl && typeof targetEl.focus === 'function') {
+        try {
+            targetEl.focus({ preventScroll: true });
+        } catch (e) {
+            targetEl.focus();
+        }
+    }
+}
+
+function bindActivityDetailModalFocusGuard(modalEl) {
+    if (!modalEl || modalEl.dataset.activityFocusGuardBound === '1') return;
+    modalEl.addEventListener('hide.bs.modal', restoreActivityDetailFocus);
+    modalEl.addEventListener('hidden.bs.modal', restoreActivityDetailFocus);
+    modalEl.dataset.activityFocusGuardBound = '1';
+}
 
 function buildActivityCardSlideHtml(item, index = 0) {
     const encodedId = encodeURIComponent(String(item.id || ''));
@@ -2428,7 +2464,8 @@ async function resolveActivityDetailItem(id) {
     return row || null;
 }
 
-async function openActivityDetail(id) {
+async function openActivityDetail(id, triggerEl = null) {
+    rememberActivityDetailTrigger(triggerEl);
     let item = null;
     try {
         item = await resolveActivityDetailItem(id);
@@ -2497,6 +2534,7 @@ async function openActivityDetail(id) {
         return;
     }
 
+    bindActivityDetailModalFocusGuard(modalEl);
     if (window.bootstrap?.Modal) {
         window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
         return;
@@ -2519,6 +2557,7 @@ window.openActivityDetail = openActivityDetail;
 
 function closeActivityDetailFallback() {
     const modalEl = document.getElementById('activityDetailModal');
+    restoreActivityDetailFocus();
     if (modalEl) {
         modalEl.classList.remove('show');
         modalEl.style.display = 'none';
@@ -3355,7 +3394,7 @@ function openOpsContactModal() {
             <div class="small text-success fw-bold" id="activityDetailDate"></div>
             <h5 class="modal-title fw-bold" id="activityDetailTitle">활동 내역</h5>
           </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="closeActivityDetailFallback()" aria-label="닫기"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="if(!window.bootstrap?.Modal){closeActivityDetailFallback();}" aria-label="닫기"></button>
         </div>
         <div class="modal-body p-4">
           <div id="activityDetailCoverWrap" style="display:none;">
