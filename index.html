@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.59
-Change: Add resilient image fallback for external RSS news thumbnails.
+Version: v1.0.60
+Change: Improve external RSS news preview readability and preserve line breaks.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.59 | index.html');</script>
+<script>console.log('[Version] v1.0.60 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -464,18 +464,59 @@ Change: Add resilient image fallback for external RSS news thumbnails.
   padding: 34px 20px;
   color: #64748b;
 }
+.external-news-detail-dialog {
+  max-width: min(1080px, calc(100vw - 32px));
+}
+.external-news-detail-content {
+  max-height: min(86vh, 900px);
+  border-radius: 24px;
+  overflow: hidden;
+}
+.external-news-detail-header {
+  padding: 26px 32px 18px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #f8fafc 0%, #f0fdf4 100%);
+}
+.external-news-detail-meta {
+  margin-bottom: 8px;
+  color: #15803d;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+.external-news-detail-title {
+  color: #0f172a;
+  font-size: clamp(1.35rem, 2vw, 2rem);
+  font-weight: 900;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.external-news-detail-body {
+  padding: 30px 32px 28px;
+}
 .external-news-detail-image {
   width: 100%;
-  max-height: 360px;
+  max-height: 420px;
   object-fit: cover;
-  border-radius: 16px;
-  margin-bottom: 16px;
+  border-radius: 20px;
+  margin-bottom: 24px;
   background: #f8fafc;
 }
 .external-news-detail-summary {
   color: #1e293b;
-  line-height: 1.9;
+  font-size: 1.06rem;
+  line-height: 2;
   white-space: pre-line;
+}
+.external-news-detail-footer {
+  gap: 10px;
+  padding: 0 32px 28px;
+  border-top: 0;
+}
+.external-news-detail-hint {
+  margin-right: auto;
+  color: #64748b;
+  font-size: 0.86rem;
 }
 @media (max-width: 991.98px) {
   .activity-scroll-track {
@@ -517,6 +558,25 @@ Change: Add resilient image fallback for external RSS news thumbnails.
   }
   .external-news-thumb img {
     min-height: 180px;
+  }
+  .external-news-detail-dialog {
+    max-width: calc(100vw - 16px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .external-news-detail-header {
+    padding: 22px 22px 16px;
+  }
+  .external-news-detail-body {
+    padding: 22px;
+  }
+  .external-news-detail-footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 0 22px 22px;
+  }
+  .external-news-detail-hint {
+    margin-right: 0;
   }
 }
 .public-hof-wrap {
@@ -2688,8 +2748,9 @@ function getExternalNewsScopeLabel(scope) {
     return scope === 'national' ? '전국' : '광역';
 }
 
-function normalizeExternalNewsText(value, fallback = '') {
+function normalizeExternalNewsText(value, fallback = '', options = {}) {
     let current = String(value || '').trim();
+    const preserveLineBreaks = options.preserveLineBreaks === true;
     const decoder = document.createElement('textarea');
     for (let i = 0; i < 3; i += 1) {
         decoder.innerHTML = current;
@@ -2698,12 +2759,27 @@ function normalizeExternalNewsText(value, fallback = '') {
         current = next;
     }
     current = current
+        .replace(/\r\n?/g, '\n')
+        .replace(/<\s*br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|div|section|article|li|h[1-6])>/gi, '\n')
+        .replace(/<li(?:\s[^>]*)?>/gi, '- ')
+        .replace(/<[^>]+>/g, ' ');
+    current = current
         .replace(/\u00a0/g, ' ')
         .replace(/&nbsp;/gi, ' ')
         .replace(/&amp;nbsp;/gi, ' ')
-        .replace(/&nb\.{3}/gi, '...')
-        .replace(/\s+/g, ' ')
-        .trim();
+        .replace(/&nb\.{3}/gi, '...');
+    if (preserveLineBreaks) {
+        current = current
+            .split('\n')
+            .map((line) => line.replace(/[ \t\f\v]+/g, ' ').trim())
+            .filter(Boolean)
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    } else {
+        current = current.replace(/\s+/g, ' ').trim();
+    }
     return current || fallback;
 }
 
@@ -2915,7 +2991,7 @@ async function openExternalNewsDetail(scope, id, triggerEl = null) {
     const linkEl = document.getElementById('externalNewsDetailLink');
     const modalEl = document.getElementById('externalNewsDetailModal');
     const title = normalizeExternalNewsText(item.title, '소식');
-    const summary = normalizeExternalNewsText(item.summary, '원문에서 자세한 내용을 확인해보세요.');
+    const summary = normalizeExternalNewsText(item.summary, '원문에서 자세한 내용을 확인해보세요.', { preserveLineBreaks: true });
     const dateText = formatKoreanDate(item.published_at || item.updated_at);
     const imageUrl = safeUrl(item.image_url || '');
     const externalLink = safeUrl(item.external_link || '');
@@ -3911,23 +3987,24 @@ function openOpsContactModal() {
     </div>
   </div>
   <div class="modal fade" id="externalNewsDetailModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
-      <div class="modal-content border-0 shadow">
-        <div class="modal-header">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered external-news-detail-dialog">
+      <div class="modal-content border-0 shadow external-news-detail-content">
+        <div class="modal-header external-news-detail-header">
           <div>
-            <div class="small text-success fw-bold" id="externalNewsDetailMeta"></div>
-            <h5 class="modal-title fw-bold" id="externalNewsDetailTitle">소식</h5>
+            <div class="external-news-detail-meta" id="externalNewsDetailMeta"></div>
+            <h5 class="modal-title external-news-detail-title" id="externalNewsDetailTitle">소식</h5>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
         </div>
-        <div class="modal-body p-4">
+        <div class="modal-body external-news-detail-body">
           <img id="externalNewsDetailImage" class="external-news-detail-image" alt="" style="display:none;">
           <div id="externalNewsDetailSummary" class="external-news-detail-summary"></div>
-          <div class="mt-4 d-flex justify-content-end">
-            <a id="externalNewsDetailLink" class="btn btn-outline-success rounded-pill px-4" href="#" target="_blank" rel="noopener noreferrer">
-              원문 보기 <i class="bi bi-box-arrow-up-right ms-1"></i>
-            </a>
-          </div>
+        </div>
+        <div class="modal-footer external-news-detail-footer">
+          <div class="external-news-detail-hint">원문은 외부 사이트에서 새 창으로 열립니다.</div>
+          <a id="externalNewsDetailLink" class="btn btn-outline-success rounded-pill px-4" href="#" target="_blank" rel="noopener noreferrer">
+            원문 보기 <i class="bi bi-box-arrow-up-right ms-1"></i>
+          </a>
         </div>
       </div>
     </div>
