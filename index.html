@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.57
-Change: Add RSS-powered regional and national news tabs to the homepage news section.
+Version: v1.0.58
+Change: Open external RSS news in an in-site modal and add paged loading.
 -->
 <html lang="ko">
  
 <head>
-<script>console.log('[Version] v1.0.57 | index.html');</script>
+<script>console.log('[Version] v1.0.58 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -353,13 +353,14 @@ Change: Add RSS-powered regional and national news tabs to the homepage news sec
   grid-template-columns: 144px minmax(0, 1fr);
   gap: 18px;
   align-items: stretch;
+  width: 100%;
   padding: 16px;
   border: 1px solid #e2e8f0;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-  text-decoration: none;
   color: inherit;
+  text-align: left;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 .external-news-item:hover,
@@ -420,6 +421,25 @@ Change: Add RSS-powered regional and national news tabs to the homepage news sec
   line-height: 1.65;
   margin: 0;
 }
+.external-news-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+.external-news-more-btn {
+  border: 1px solid rgba(22, 101, 52, 0.24);
+  border-radius: 999px;
+  background: #fff;
+  color: #166534;
+  font-weight: 800;
+  padding: 10px 18px;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
+}
+.external-news-more-btn:hover,
+.external-news-more-btn:focus-visible {
+  background: #f0fdf4;
+  outline: none;
+}
 .external-news-empty {
   max-width: 720px;
   margin: 0 auto;
@@ -429,6 +449,19 @@ Change: Add RSS-powered regional and national news tabs to the homepage news sec
   text-align: center;
   padding: 34px 20px;
   color: #64748b;
+}
+.external-news-detail-image {
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+  border-radius: 16px;
+  margin-bottom: 16px;
+  background: #f8fafc;
+}
+.external-news-detail-summary {
+  color: #1e293b;
+  line-height: 1.9;
+  white-space: pre-line;
 }
 @media (max-width: 991.98px) {
   .activity-scroll-track {
@@ -2103,6 +2136,9 @@ async function fetchPowerGenerationStats() {
 let g_plants_list = [];    // 모달 연결을 위해 발전소 전체 데이터 저장
 let g_activity_list = [];  // 활동 내역 상세 모달 연결용 데이터 저장
 let g_external_news = { regional: [], national: [] };
+let g_external_news_has_more = { regional: false, national: false };
+let g_external_news_loading = { regional: false, national: false };
+let g_external_news_detail_trigger = null;
 let g_activity_detail_trigger = null;
 const ACTIVITY_PAGE_SIZE = 3;
 const EXTERNAL_NEWS_PAGE_SIZE = 5;
@@ -2638,6 +2674,56 @@ function getExternalNewsScopeLabel(scope) {
     return scope === 'national' ? '전국' : '광역';
 }
 
+function normalizeExternalNewsText(value, fallback = '') {
+    let current = String(value || '').trim();
+    const decoder = document.createElement('textarea');
+    for (let i = 0; i < 3; i += 1) {
+        decoder.innerHTML = current;
+        const next = decoder.value;
+        if (next === current) break;
+        current = next;
+    }
+    current = current
+        .replace(/\u00a0/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;nbsp;/gi, ' ')
+        .replace(/&nb\.{3}/gi, '...')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return current || fallback;
+}
+
+function rememberExternalNewsDetailTrigger(triggerEl) {
+    if (triggerEl && typeof triggerEl.focus === 'function') {
+        g_external_news_detail_trigger = triggerEl;
+    }
+}
+
+function restoreExternalNewsDetailFocus() {
+    const modalEl = document.getElementById('externalNewsDetailModal');
+    const activeEl = document.activeElement;
+    if (modalEl?.contains(activeEl) && typeof activeEl?.blur === 'function') {
+        activeEl.blur();
+    }
+    const targetEl = g_external_news_detail_trigger?.isConnected
+        ? g_external_news_detail_trigger
+        : document.getElementById('activities');
+    if (targetEl && typeof targetEl.focus === 'function') {
+        try {
+            targetEl.focus({ preventScroll: true });
+        } catch (e) {
+            targetEl.focus();
+        }
+    }
+}
+
+function bindExternalNewsDetailModalFocusGuard(modalEl) {
+    if (!modalEl || modalEl.dataset.externalNewsFocusGuardBound === '1') return;
+    modalEl.addEventListener('hide.bs.modal', restoreExternalNewsDetailFocus);
+    modalEl.addEventListener('hidden.bs.modal', restoreExternalNewsDetailFocus);
+    modalEl.dataset.externalNewsFocusGuardBound = '1';
+}
+
 function renderExternalNews(scope, items = []) {
     const safeScope = scope === 'national' ? 'national' : 'regional';
     const listEl = document.getElementById(`${safeScope}-news-list`);
@@ -2654,35 +2740,41 @@ function renderExternalNews(scope, items = []) {
         return;
     }
 
-    listEl.innerHTML = items.map((item, index) => {
-        const title = escapeHtml(item.title || '소식');
-        const sourceName = escapeHtml(item.source_name || '외부 소식');
+    const listHtml = items.map((item, index) => {
+        const encodedId = encodeURIComponent(String(item.id || ''));
+        const title = escapeHtml(normalizeExternalNewsText(item.title, '소식'));
         const dateText = escapeHtml(formatKoreanDate(item.published_at || item.updated_at) || '');
-        const summary = escapeHtml(String(item.summary || '').trim() || '원문에서 자세한 내용을 확인해보세요.');
-        const link = safeUrl(item.external_link || '') || '#';
+        const summary = escapeHtml(normalizeExternalNewsText(item.summary, '원문에서 자세한 내용을 확인해보세요.'));
         const imageUrl = safeUrl(item.image_url || '');
         const imageHtml = imageUrl
             ? `<img src="${escapeHtml(imageUrl)}" alt="${title}" loading="${index < 2 ? 'eager' : 'lazy'}" decoding="async">`
             : `<i class="bi bi-newspaper fs-2"></i>`;
         return `
-          <a class="external-news-item" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">
+          <button type="button" class="external-news-item" onclick="return handleExternalNewsCardAction(event, '${safeScope}', '${escapeHtml(encodedId)}')">
             <div class="external-news-thumb">${imageHtml}</div>
             <div class="external-news-body">
               <div class="external-news-meta">
                 <span class="external-news-scope">${getExternalNewsScopeLabel(safeScope)} 소식</span>
-                <span>${sourceName}</span>
                 ${dateText ? `<span>${dateText}</span>` : ''}
               </div>
               <h3 class="external-news-title">${title}</h3>
               <p class="external-news-summary">${summary}</p>
             </div>
-          </a>
+          </button>
         `;
     }).join('');
+    const moreHtml = g_external_news_has_more[safeScope]
+        ? `<div class="external-news-more-wrap"><button type="button" class="external-news-more-btn" onclick="fetchMoreExternalNews('${safeScope}')">다음 소식 보기 <i class="bi bi-arrow-right"></i></button></div>`
+        : '';
+    listEl.innerHTML = `${listHtml}${moreHtml}`;
 }
 
-async function fetchExternalNews(scope) {
+async function fetchExternalNews(scope, options = {}) {
     const safeScope = scope === 'national' ? 'national' : 'regional';
+    if (g_external_news_loading[safeScope]) return;
+    const append = options.append === true;
+    const offset = Number.isFinite(Number(options.offset)) ? Math.max(0, Number(options.offset)) : 0;
+    g_external_news_loading[safeScope] = true;
     const { data, error } = await (await scopePublicTenant(_client.from('site_external_news')
         .select('id, scope, title, summary, image_url, external_link, source_name, published_at, updated_at')
         .eq('scope', safeScope)
@@ -2690,18 +2782,38 @@ async function fetchExternalNews(scope) {
         .is('removed_at', null)
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('updated_at', { ascending: false })
-        .limit(EXTERNAL_NEWS_PAGE_SIZE)));
+        .range(offset, offset + EXTERNAL_NEWS_PAGE_SIZE)));
+    g_external_news_loading[safeScope] = false;
 
     if (error) {
         console.warn(`fetchExternalNews(${safeScope}) failed:`, error);
-        g_external_news[safeScope] = [];
+        if (!append) g_external_news[safeScope] = [];
+        g_external_news_has_more[safeScope] = false;
         renderExternalNews(safeScope, []);
         return;
     }
 
-    g_external_news[safeScope] = Array.isArray(data) ? data : [];
+    const rows = Array.isArray(data) ? data : [];
+    const nextRows = rows.slice(0, EXTERNAL_NEWS_PAGE_SIZE);
+    g_external_news_has_more[safeScope] = rows.length > EXTERNAL_NEWS_PAGE_SIZE;
+    if (append) {
+        const existingIds = new Set(g_external_news[safeScope].map((item) => String(item?.id || '')));
+        g_external_news[safeScope] = g_external_news[safeScope].concat(nextRows.filter((item) => !existingIds.has(String(item?.id || ''))));
+    } else {
+        g_external_news[safeScope] = nextRows;
+    }
     renderExternalNews(safeScope, g_external_news[safeScope]);
 }
+
+async function fetchMoreExternalNews(scope) {
+    const safeScope = scope === 'national' ? 'national' : 'regional';
+    if (!g_external_news_has_more[safeScope] || g_external_news_loading[safeScope]) return;
+    await fetchExternalNews(safeScope, {
+        append: true,
+        offset: g_external_news[safeScope].length
+    });
+}
+window.fetchMoreExternalNews = fetchMoreExternalNews;
 
 async function fetchAllExternalNews() {
     await Promise.all([
@@ -2724,6 +2836,91 @@ function switchHomeNewsTab(scope) {
     });
 }
 window.switchHomeNewsTab = switchHomeNewsTab;
+
+async function resolveExternalNewsItem(scope, id) {
+    const safeScope = scope === 'national' ? 'national' : 'regional';
+    const safeId = String(id || '').trim();
+    if (!safeId) return null;
+    const cached = g_external_news[safeScope].find((row) => String(row?.id || '') === safeId);
+    if (cached) return cached;
+
+    const { data, error } = await (await scopePublicTenant(_client.from('site_external_news')
+        .select('id, scope, title, summary, image_url, external_link, source_name, published_at, updated_at')
+        .eq('id', safeId)
+        .eq('scope', safeScope)
+        .eq('is_visible', true)
+        .is('removed_at', null)
+        .limit(1)));
+    if (error) {
+        console.warn('resolveExternalNewsItem failed:', error);
+        return null;
+    }
+    const row = Array.isArray(data) ? data[0] : null;
+    if (row) g_external_news[safeScope].push(row);
+    return row || null;
+}
+
+async function openExternalNewsDetail(scope, id, triggerEl = null) {
+    const safeScope = scope === 'national' ? 'national' : 'regional';
+    rememberExternalNewsDetailTrigger(triggerEl);
+    const item = await resolveExternalNewsItem(safeScope, id);
+    if (!item) {
+        homeShowAlert('소식을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        return;
+    }
+
+    const titleEl = document.getElementById('externalNewsDetailTitle');
+    const metaEl = document.getElementById('externalNewsDetailMeta');
+    const imageEl = document.getElementById('externalNewsDetailImage');
+    const summaryEl = document.getElementById('externalNewsDetailSummary');
+    const linkEl = document.getElementById('externalNewsDetailLink');
+    const modalEl = document.getElementById('externalNewsDetailModal');
+    const title = normalizeExternalNewsText(item.title, '소식');
+    const summary = normalizeExternalNewsText(item.summary, '원문에서 자세한 내용을 확인해보세요.');
+    const dateText = formatKoreanDate(item.published_at || item.updated_at);
+    const imageUrl = safeUrl(item.image_url || '');
+    const externalLink = safeUrl(item.external_link || '');
+
+    if (titleEl) titleEl.textContent = title;
+    if (metaEl) metaEl.textContent = [getExternalNewsScopeLabel(safeScope) + ' 소식', dateText].filter(Boolean).join(' · ');
+    if (summaryEl) summaryEl.textContent = summary;
+    if (imageEl) {
+        if (imageUrl) {
+            imageEl.src = imageUrl;
+            imageEl.alt = title;
+            imageEl.style.display = '';
+        } else {
+            imageEl.removeAttribute('src');
+            imageEl.alt = '';
+            imageEl.style.display = 'none';
+        }
+    }
+    if (linkEl) {
+        if (externalLink) {
+            linkEl.href = externalLink;
+            linkEl.classList.remove('disabled');
+            linkEl.setAttribute('aria-disabled', 'false');
+        } else {
+            linkEl.href = '#';
+            linkEl.classList.add('disabled');
+            linkEl.setAttribute('aria-disabled', 'true');
+        }
+    }
+    if (!modalEl) return;
+    bindExternalNewsDetailModalFocusGuard(modalEl);
+    if (window.bootstrap?.Modal) {
+        window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+}
+
+function handleExternalNewsCardAction(event, scope, encodedId) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const triggerEl = event?.currentTarget || event?.target?.closest?.('.external-news-item') || null;
+    openExternalNewsDetail(scope, decodeURIComponent(String(encodedId || '')), triggerEl);
+    return false;
+}
+window.handleExternalNewsCardAction = handleExternalNewsCardAction;
 
 async function openActivityDetail(id, triggerEl = null) {
     rememberActivityDetailTrigger(triggerEl);
@@ -3662,6 +3859,28 @@ function openOpsContactModal() {
             <img id="activityDetailCover" class="activity-detail-cover" alt="">
           </div>
           <div id="activityDetailContent" class="activity-detail-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="externalNewsDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+      <div class="modal-content border-0 shadow">
+        <div class="modal-header">
+          <div>
+            <div class="small text-success fw-bold" id="externalNewsDetailMeta"></div>
+            <h5 class="modal-title fw-bold" id="externalNewsDetailTitle">소식</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+        </div>
+        <div class="modal-body p-4">
+          <img id="externalNewsDetailImage" class="external-news-detail-image" alt="" style="display:none;">
+          <div id="externalNewsDetailSummary" class="external-news-detail-summary"></div>
+          <div class="mt-4 d-flex justify-content-end">
+            <a id="externalNewsDetailLink" class="btn btn-outline-success rounded-pill px-4" href="#" target="_blank" rel="noopener noreferrer">
+              원문 보기 <i class="bi bi-box-arrow-up-right ms-1"></i>
+            </a>
+          </div>
         </div>
       </div>
     </div>
