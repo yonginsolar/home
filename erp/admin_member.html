@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.67
-Change: 2026-04-15 - Debounce homepage intro preview updates to reduce admin typing lag.
+Version: v1.0.68
+Change: 2026-04-20 - Add external RSS news synchronization for the public homepage.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.67';
+window.ADMIN_MEMBER_VERSION = 'v1.0.68';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -120,6 +120,9 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 .activity-gallery-thumb .activity-gallery-actions { position: absolute; top: 7px; right: 7px; display: flex; gap: 5px; }
 .activity-gallery-thumb .activity-gallery-cover-badge { position: absolute; left: 7px; bottom: 7px; background: rgba(22, 101, 52, 0.92); color: #fff; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 800; }
 .activity-gallery-thumb .activity-gallery-pending-badge { position: absolute; left: 7px; top: 7px; background: rgba(15, 23, 42, 0.78); color: #fff; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 700; }
+.external-news-thumb-admin { width: 74px; height: 48px; object-fit: cover; border-radius: 10px; border: 1px solid #e5e7eb; background: #f8fafc; }
+.external-news-sync-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.external-news-sync-summary .badge { font-size: 12px; }
 </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.0.0">
 </head>
@@ -848,6 +851,11 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </a>
 </li>
 <li class="nav-item">
+<a class="nav-link" data-bs-toggle="tab" href="#sub-external-news" onclick="setTimeout(fetchExternalNewsAdmin,100)">
+외부 소식
+</a>
+</li>
+<li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-docs" onclick="setTimeout(fetchDocs,100)">
 문서 관리 (정관/규약/규정)
 </a>
@@ -1050,6 +1058,32 @@ body { font-family: 'Pretendard', sans-serif; background-color: #f8f9fa; overflo
 </tr>
 </thead>
 <tbody id="activityListBody"></tbody>
+</table>
+</div>
+
+<div class="tab-pane fade" id="sub-external-news">
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+<div class="small text-muted">
+홈페이지 <strong>광역 소식/전국 소식</strong> 탭은 RSS를 동기화해 제목, 요약, 썸네일, 원문 링크를 표시합니다. 본문 전체는 원문 사이트로 연결됩니다.
+</div>
+<button class="btn btn-sm btn-outline-primary" onclick="syncExternalNewsAdmin()">
+<i class="bi bi-arrow-repeat me-1"></i>RSS 지금 동기화
+</button>
+</div>
+<div id="externalNewsSyncStatus" class="alert alert-light border small py-2 px-3">
+최근 동기화 상태를 불러오는 중입니다.
+</div>
+<table class="table table-bordered bg-white align-middle">
+<thead class="table-light text-center">
+<tr>
+<th style="width:86px;">분류</th>
+<th style="width:90px;">썸네일</th>
+<th>제목 / 원문</th>
+<th style="width:130px;">발행일</th>
+<th style="width:160px;">출처</th>
+</tr>
+</thead>
+<tbody id="externalNewsListBody"></tbody>
 </table>
 </div>
 
@@ -3063,6 +3097,7 @@ docs_url: 'https://support.huawei.com/enterprise/en/doc/EDOC1100440661/356f0ec1/
 
 let g_badges = []; // DB에서 불러온 뱃지 목록을 기억해둠
 let g_siteActivities = [];
+let g_externalNewsAdmin = [];
 let isSavingActivity = false;
 let activityGalleryItems = [];
 let activityGalleryObjectUrls = [];
@@ -6918,6 +6953,116 @@ myAlert('삭제 실패: ' + (e.message || e), 'error');
 showLoading(false);
 }
 });
+}
+
+function getExternalNewsAdminScopeLabel(scope) {
+return scope === 'national' ? '전국' : '광역';
+}
+
+function normalizeExternalNewsAdminUrl(value) {
+try {
+const url = new URL(String(value || '').trim(), window.location.origin);
+if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+} catch (_) {}
+return '';
+}
+
+function renderExternalNewsSyncStatus(feeds = []) {
+const box = document.getElementById('externalNewsSyncStatus');
+if (!box) return;
+const rows = Array.isArray(feeds) ? feeds : [];
+if (rows.length === 0) {
+box.className = 'alert alert-light border small py-2 px-3';
+box.textContent = 'RSS 동기화 설정을 불러오지 못했거나 아직 동기화 기록이 없습니다.';
+return;
+}
+box.className = 'alert alert-light border small py-2 px-3 external-news-sync-summary';
+box.innerHTML = rows.map((feed) => {
+const scopeLabel = getExternalNewsAdminScopeLabel(feed.scope);
+const status = String(feed.last_sync_status || '').trim();
+const statusBadge = status === 'success'
+? '<span class="badge bg-success">정상</span>'
+: (status === 'error' ? '<span class="badge bg-danger">오류</span>' : '<span class="badge bg-secondary">대기</span>');
+const syncedAt = feed.last_synced_at ? formatAdminMemberKstDateTime(feed.last_synced_at) : '아직 없음';
+const message = escapeHtml(feed.last_sync_message || '');
+return `<span>${escapeHtml(scopeLabel)} ${statusBadge} <span class="text-muted">최근 ${escapeHtml(syncedAt)}</span>${message ? ` <span class="text-muted">· ${message}</span>` : ''}</span>`;
+}).join('');
+}
+
+async function fetchExternalNewsAdmin() {
+const tbody = document.getElementById('externalNewsListBody');
+if (tbody) {
+tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">외부 소식을 불러오는 중...</td></tr>';
+}
+
+const [feedsResult, newsResult] = await Promise.all([
+scopeAdminTenant(_supabase.from('site_external_news_feeds').select('*')).order('scope', { ascending: true }),
+scopeAdminTenant(_supabase.from('site_external_news').select('*'))
+  .order('published_at', { ascending: false, nullsFirst: false })
+  .order('updated_at', { ascending: false })
+  .limit(40)
+]);
+
+if (feedsResult.error) {
+console.error('[fetchExternalNewsAdmin] feed failed:', feedsResult.error);
+renderExternalNewsSyncStatus([]);
+}
+else {
+renderExternalNewsSyncStatus(feedsResult.data || []);
+}
+
+if (!tbody) return;
+if (newsResult.error) {
+console.error('[fetchExternalNewsAdmin] news failed:', newsResult.error);
+tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-danger">외부 소식을 불러오지 못했습니다.</td></tr>';
+return;
+}
+
+g_externalNewsAdmin = Array.isArray(newsResult.data) ? newsResult.data : [];
+if (g_externalNewsAdmin.length === 0) {
+tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">동기화된 외부 소식이 없습니다. 우측 상단 RSS 동기화를 실행하세요.</td></tr>';
+return;
+}
+
+tbody.innerHTML = g_externalNewsAdmin.map((row) => {
+const imageUrl = normalizeExternalNewsAdminUrl(row.image_url);
+const linkUrl = normalizeExternalNewsAdminUrl(row.external_link);
+const thumbHtml = imageUrl
+? `<img class="external-news-thumb-admin" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(row.title || '외부 소식 썸네일')}">`
+: '<span class="text-muted small">없음</span>';
+const statusBadge = row.removed_at
+? '<span class="badge bg-secondary ms-1">비노출</span>'
+: '<span class="badge bg-success ms-1">노출</span>';
+return `<tr>
+<td class="text-center">${escapeHtml(getExternalNewsAdminScopeLabel(row.scope))}${statusBadge}</td>
+<td class="text-center">${thumbHtml}</td>
+<td class="text-start">
+  <div class="fw-bold">${escapeHtml(row.title || '-')}</div>
+  ${linkUrl ? `<a class="small text-decoration-none" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener">원문 열기</a>` : '<span class="small text-muted">원문 링크 없음</span>'}
+</td>
+<td class="text-center">${escapeHtml(formatAdminMemberKstDate(row.published_at, '-'))}</td>
+<td class="text-center">${escapeHtml(row.source_name || '-')}</td>
+</tr>`;
+}).join('');
+}
+
+async function syncExternalNewsAdmin() {
+showLoading(true);
+const { data, error } = await _supabase.functions.invoke('site-news-rss-sync', {
+body: { scopes: ['regional', 'national'] }
+});
+showLoading(false);
+
+if (error) {
+console.error('[syncExternalNewsAdmin] failed:', error);
+await fetchExternalNewsAdmin();
+return myAlert('RSS 동기화 실패: ' + (error.message || '알 수 없는 오류'), 'error');
+}
+
+await fetchExternalNewsAdmin();
+const totalUpserted = Number(data?.total_upserted || 0);
+const totalRemoved = Number(data?.total_removed || 0);
+myAlert(`RSS 동기화가 완료되었습니다. (${totalUpserted.toLocaleString('ko-KR')}건 반영, ${totalRemoved.toLocaleString('ko-KR')}건 비노출)`);
 }
 
 function hasPartnerPendingChanges(value) {
