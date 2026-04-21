@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.19
-Change: Save public group signup business numbers into business_number and use public signup v2 RPC.
+Version: v1.0.21
+Change: Support Naver app signup testing from private LAN mobile devices.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.19 | signup.html');</script>
+  <script>console.log('[Version] v1.0.21 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -29,15 +29,16 @@ supportedModes: ['login']
 window.__BROWSER_ENV_GUARD_CONFIG__ = {
 title: '회원가입은 외부 브라우저에서 진행해 주세요.',
 actionLabel: '회원가입과 이메일 인증',
-recommendedBrowsers: 'Safari, Chrome, Edge 또는 웨일의 최신 버전'
+recommendedBrowsers: 'Safari, Chrome, Edge 또는 웨일의 최신 버전',
+allowNaverApp: true
 };
 </script>
-<script src="shared/browser_env_guard.js?v=20260415-1"></script>
+<script src="shared/browser_env_guard.js?v=20260421-2"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
-<script src="shared/route_guard.js?v=20260401-1"></script>
+<script src="shared/route_guard.js?v=20260421-1"></script>
 <script src="shared/auth_broker_helper.js?v=20260404-1"></script>
 <style>
 /* [CSS 추가] 가입 완료 모달 스타일 */
@@ -410,11 +411,20 @@ return resolved;
 });
 let pendingSignupOtpEmail = '';
 
+function isPrivateLanSignupHost(hostname) {
+const parts = String(hostname || '').trim().toLowerCase().split('.');
+const octets = parts.map((part) => (/^\d+$/.test(part) ? Number(part) : NaN));
+if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false;
+if (octets[0] === 10) return true;
+if (octets[0] === 192 && octets[1] === 168) return true;
+return octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31;
+}
+
 function getSignupCoopCodeFromLocation() {
 const params = new URLSearchParams(window.location.search);
 const queryCode = (params.get('coop') || '').trim().toLowerCase();
 const host = (window.location.hostname || '').trim().toLowerCase();
-const isLocal = window.location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1';
+const isLocal = window.location.protocol === 'file:' || host === 'localhost' || host === '127.0.0.1' || isPrivateLanSignupHost(host);
 
 if (isLocal) return queryCode || DEFAULT_SIGNUP_COOP_CODE;
 
@@ -429,7 +439,7 @@ return firstLabel;
 function isLocalSignupServerRuntime() {
 const host = String(window.location.hostname || '').trim().toLowerCase();
 return (window.location.protocol === 'http:' || window.location.protocol === 'https:')
-&& (host === 'localhost' || host === '127.0.0.1');
+&& (host === 'localhost' || host === '127.0.0.1' || isPrivateLanSignupHost(host));
 }
 
 function isFileSignupRuntime() {
