@@ -1,6 +1,6 @@
 /*
-Version: v1.0.2
-Change: Prefer extensionless OAuth broker/callback paths on production to avoid Pages .html redirects during social auth.
+Version: v1.0.3
+Change: Re-run signup social-return session checks when in-app browsers restore the signup page from bfcache.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -123,6 +123,68 @@ Change: Prefer extensionless OAuth broker/callback paths on production to avoid 
     return startUrl.href;
   }
 
+  var signupSocialReturnResumeLockedUntil = 0;
+
+  function isSignupSocialReturnLocation() {
+    try {
+      var pathname = String(global.location && global.location.pathname || '').toLowerCase();
+      if (pathname !== '/signup' && pathname !== '/signup.html') return false;
+      return new URLSearchParams(global.location.search || '').has('auth_return');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function triggerSignupSocialReturnResume(reason) {
+    var now = Date.now();
+    if (!isSignupSocialReturnLocation()) return;
+    if (now < signupSocialReturnResumeLockedUntil) return;
+    signupSocialReturnResumeLockedUntil = now + 6500;
+
+    global.setTimeout(function () {
+      var result = null;
+      try {
+        if (typeof global.checkCurrentSignupSessionOnLoad === 'function') {
+          result = global.checkCurrentSignupSessionOnLoad({
+            reason: 'auth-broker-helper:' + String(reason || 'return'),
+            showFailure: true
+          });
+        } else if (typeof global.resumeSignupFromCurrentSession === 'function') {
+          result = global.resumeSignupFromCurrentSession('auth-broker-helper:' + String(reason || 'return'));
+        }
+      } catch (error) {
+        console.warn('[auth-broker-helper] signup social return resume failed:', error);
+      }
+
+      if (result && typeof result.finally === 'function') {
+        result.finally(function () {
+          signupSocialReturnResumeLockedUntil = Date.now() + 250;
+        });
+      } else {
+        signupSocialReturnResumeLockedUntil = Date.now() + 250;
+      }
+    }, 0);
+  }
+
+  function attachSignupSocialReturnResumeHooks() {
+    if (!global.addEventListener) return;
+
+    global.addEventListener('pageshow', function (event) {
+      if (event && event.persisted) triggerSignupSocialReturnResume('pageshow');
+    });
+
+    global.addEventListener('focus', function () {
+      triggerSignupSocialReturnResume('focus');
+    });
+
+    if (global.document && global.document.addEventListener) {
+      global.document.addEventListener('visibilitychange', function () {
+        if (global.document.hidden) return;
+        triggerSignupSocialReturnResume('visibilitychange');
+      });
+    }
+  }
+
   global.AuthBrokerHelper = {
     getBrokerOrigin: getBrokerOrigin,
     normalizeProvider: normalizeProvider,
@@ -130,4 +192,6 @@ Change: Prefer extensionless OAuth broker/callback paths on production to avoid 
     parseCallbackUrl: parseCallbackUrl,
     buildStartUrl: buildStartUrl
   };
+
+  attachSignupSocialReturnResumeHooks();
 })(window);
