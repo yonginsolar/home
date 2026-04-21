@@ -1,6 +1,6 @@
 /*
-Version: v1.0.3
-Change: Re-run signup social-return session checks when in-app browsers restore the signup page from bfcache.
+Version: v1.0.4
+Change: Defer signup auth-state callbacks outside Supabase's auth lock on the signup page.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -123,12 +123,64 @@ Change: Re-run signup social-return session checks when in-app browsers restore 
     return startUrl.href;
   }
 
+  function isSignupPageLocation() {
+    try {
+      var pathname = String(global.location && global.location.pathname || '').toLowerCase();
+      return pathname === '/signup' || pathname === '/signup.html';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function installSignupAuthStateCallbackDeferrer() {
+    if (!isSignupPageLocation()) return;
+    if (!global.supabase || typeof global.supabase.createClient !== 'function') return;
+    if (global.supabase.__coopSignupAuthStateDeferrerInstalled) return;
+
+    var originalCreateClient = global.supabase.createClient;
+    global.supabase.createClient = function createClientWithSignupAuthDeferrer() {
+      var client = originalCreateClient.apply(this, arguments);
+
+      try {
+        if (
+          client &&
+          client.auth &&
+          typeof client.auth.onAuthStateChange === 'function' &&
+          !client.auth.__coopSignupAuthStateDeferrerInstalled
+        ) {
+          var originalOnAuthStateChange = client.auth.onAuthStateChange.bind(client.auth);
+          client.auth.onAuthStateChange = function onAuthStateChangeOutsideSignupLock(callback) {
+            if (typeof callback !== 'function') {
+              return originalOnAuthStateChange(callback);
+            }
+
+            return originalOnAuthStateChange(function deferSignupAuthStateCallback(event, session) {
+              global.setTimeout(function runDeferredSignupAuthStateCallback() {
+                try {
+                  callback(event, session);
+                } catch (error) {
+                  console.warn('[auth-broker-helper] deferred signup auth callback failed:', error);
+                }
+              }, 0);
+            });
+          };
+          client.auth.__coopSignupAuthStateDeferrerInstalled = true;
+        }
+      } catch (error) {
+        console.warn('[auth-broker-helper] signup auth deferrer install failed:', error);
+      }
+
+      return client;
+    };
+    global.supabase.__coopSignupAuthStateDeferrerInstalled = true;
+  }
+  // End of installSignupAuthStateCallbackDeferrer
+
   var signupSocialReturnResumeLockedUntil = 0;
 
   function isSignupSocialReturnLocation() {
     try {
-      var pathname = String(global.location && global.location.pathname || '').toLowerCase();
-      if (pathname !== '/signup' && pathname !== '/signup.html') return false;
+      if (!isSignupPageLocation()) return false;
       return new URLSearchParams(global.location.search || '').has('auth_return');
     } catch (_) {
       return false;
@@ -193,5 +245,6 @@ Change: Re-run signup social-return session checks when in-app browsers restore 
     buildStartUrl: buildStartUrl
   };
 
+  installSignupAuthStateCallbackDeferrer();
   attachSignupSocialReturnResumeHooks();
 })(window);
