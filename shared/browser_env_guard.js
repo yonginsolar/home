@@ -1,6 +1,6 @@
 /*
-Version: v1.0.1
-Change: Smooth out blocked-browser overlay copy on auth entry pages.
+Version: v1.0.3
+Change: Fully allow configured Naver app WebView flows, including unknown browser-family detection, while keeping other in-app browsers blocked.
 */
 (function attachBrowserEnvGuard(global) {
   'use strict';
@@ -17,6 +17,30 @@ Change: Smooth out blocked-browser overlay copy on auth entry pages.
     var match = ua.match(pattern);
     if (!match || !match[1]) return 0;
     return parseInt(String(match[1]).split('.')[0], 10) || 0;
+  }
+
+  function isNaverAppBrowser(ua) {
+    return /NAVER\(inapp/i.test(ua) || /NAVERAPP/i.test(ua);
+  }
+
+  function normalizeProvider(value) {
+    var raw = String(value || '').trim().toLowerCase();
+    if (raw === 'naver') return 'custom:naver';
+    return raw;
+  }
+
+  function shouldAllowNaverApp(ua) {
+    var config = getConfig();
+    var allowedProviders = config.allowNaverAppProviders;
+    var currentProvider = '';
+    if (!config.allowNaverApp || !isNaverAppBrowser(ua)) return false;
+    if (!Array.isArray(allowedProviders) || allowedProviders.length === 0) return true;
+    try {
+      currentProvider = normalizeProvider(new URLSearchParams(global.location && global.location.search || '').get('provider'));
+    } catch (_) {
+      currentProvider = '';
+    }
+    return allowedProviders.map(normalizeProvider).indexOf(currentProvider) >= 0;
   }
 
   function isInAppBrowser(ua) {
@@ -98,13 +122,14 @@ Change: Smooth out blocked-browser overlay copy on auth entry pages.
   function buildReasons() {
     var ua = getUserAgent();
     var info = detectBrowserFamily(ua);
+    var naverAppAllowed = shouldAllowNaverApp(ua);
     var reasons = [];
 
-    if (isInAppBrowser(ua)) {
-      reasons.push('카카오·네이버 같은 앱 안 브라우저에서 열려 있습니다.');
+    if (isInAppBrowser(ua) && !naverAppAllowed) {
+      reasons.push('카카오톡·인스타그램 같은 앱 안 브라우저에서 열려 있습니다.');
     }
 
-    if (isBrowserOutdated(info)) {
+    if (!naverAppAllowed && isBrowserOutdated(info)) {
       reasons.push('브라우저 버전이 오래되었거나 현재 환경을 지원하지 않습니다.');
     }
 
@@ -210,6 +235,7 @@ Change: Smooth out blocked-browser overlay copy on auth entry pages.
     buildReasons: buildReasons,
     isBlocked: shouldBlock,
     isInAppBrowser: function () { return isInAppBrowser(getUserAgent()); },
+    isNaverAppBrowser: function () { return isNaverAppBrowser(getUserAgent()); },
     init: init
   };
 

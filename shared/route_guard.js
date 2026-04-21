@@ -1,6 +1,6 @@
 /*
-Version: v1.1.4
-Change: Add localhost-only erp_host override so local ERP QA can emulate a real coop ERP host without changing account permissions.
+Version: v1.1.5
+Change: Allow private LAN development hosts to use local public/ERP host overrides for mobile device QA.
 */
 (function attachCoopRouteGuard(global) {
   'use strict';
@@ -11,7 +11,23 @@ Change: Add localhost-only erp_host override so local ERP QA can emulate a real 
   const LOCAL_ERP_HOST_OVERRIDE_KEY = 'local_erp_host_override_v1';
 
   function isLocalHostname(hostname) {
-    return hostname === 'localhost' || hostname === '127.0.0.1';
+    const normalized = normalizeHostname(hostname);
+    return normalized === 'localhost' || normalized === '127.0.0.1' || isPrivateLanHostname(normalized);
+  }
+
+  function isPrivateLanHostname(hostname) {
+    const normalized = String(hostname || '').trim().toLowerCase();
+    const parts = normalized.split('.');
+    const octets = parts.map((part) => {
+      if (!/^\d+$/.test(part)) return NaN;
+      return Number(part);
+    });
+    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+      return false;
+    }
+    if (octets[0] === 10) return true;
+    if (octets[0] === 192 && octets[1] === 168) return true;
+    return octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31;
   }
 
   function normalizeHostname(hostname) {
