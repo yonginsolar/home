@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.21
-Change: Support Naver app signup testing from private LAN mobile devices.
+Version: v1.0.24
+Change: Add an explicit session fallback after social-auth return so mobile in-app browsers show the signup form even if auth state events are missed.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.21 | signup.html');</script>
+  <script>console.log('[Version] v1.0.24 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -30,10 +30,11 @@ window.__BROWSER_ENV_GUARD_CONFIG__ = {
 title: '회원가입은 외부 브라우저에서 진행해 주세요.',
 actionLabel: '회원가입과 이메일 인증',
 recommendedBrowsers: 'Safari, Chrome, Edge 또는 웨일의 최신 버전',
-allowNaverApp: true
+allowNaverApp: true,
+allowKakaoApp: true
 };
 </script>
-<script src="shared/browser_env_guard.js?v=20260421-2"></script>
+<script src="shared/browser_env_guard.js?v=20260421-3"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="telegram_bot.js"></script>
@@ -442,6 +443,31 @@ return (window.location.protocol === 'http:' || window.location.protocol === 'ht
 && (host === 'localhost' || host === '127.0.0.1' || isPrivateLanSignupHost(host));
 }
 
+function getSignupPublicRuntimeHost() {
+if (window.CoopRouteGuard?.getPublicRuntimeHost) {
+return String(window.CoopRouteGuard.getPublicRuntimeHost() || '').trim().toLowerCase();
+}
+const params = new URLSearchParams(window.location.search || '');
+return String(params.get('public_host') || window.location.hostname || '').trim().toLowerCase();
+}
+
+function isPrivateLanSignupRuntime() {
+return isPrivateLanSignupHost(String(window.location.hostname || '').trim().toLowerCase());
+}
+
+function buildPrivateLanPublicUrl(pageName, params = {}) {
+const runtimeHost = getSignupPublicRuntimeHost();
+if (!runtimeHost || isPrivateLanSignupHost(runtimeHost) || runtimeHost === 'localhost' || runtimeHost === '127.0.0.1') {
+return '';
+}
+const target = new URL(String(pageName || '').replace(/^\/+/, ''), `https://${runtimeHost}/`);
+Object.entries(params || {}).forEach(([key, value]) => {
+if (value === null || value === undefined || value === '') return;
+target.searchParams.set(key, String(value));
+});
+return target.href;
+}
+
 function isFileSignupRuntime() {
 return window.location.protocol === 'file:';
 }
@@ -455,6 +481,12 @@ termsData[key].content = termsData[key].content.replaceAll('용인모두의햇�
 
 function buildSignupAuthCallbackUrl(nextTarget, extraParams = {}) {
 const params = Object.assign({}, extraParams || {});
+if (isPrivateLanSignupRuntime()) {
+const publicSignupUrl = buildPrivateLanPublicUrl('signup.html');
+if (publicSignupUrl) params.next = publicSignupUrl;
+const publicCallbackUrl = buildPrivateLanPublicUrl('auth_callback.html', params);
+if (publicCallbackUrl) return publicCallbackUrl;
+}
 if (!isLocalSignupServerRuntime() && nextTarget) {
 params.next = nextTarget;
 }
@@ -624,8 +656,10 @@ async function handleManualSession() {
             // 3. (중요) 기존 로직 트리거
             // onAuthStateChange가 돌겠지만, 확실하게 하기 위해 회원 체크 실행
             await checkExistingMember(data.session);
+            return true;
         }
     }
+    return false;
 }
 // [2] 약관 데이터 (선생님 원문 100% 복구)
 const termsData = {
@@ -935,17 +969,30 @@ return;
         }
 });
 
-// 2. 윈도우 로드 시에는 UI 초기화만 수행 (DB 조회 제거)
+async function checkCurrentSignupSessionOnLoad() {
+try {
+const { data, error } = await _supabase.auth.getSession();
+if (error || !data?.session) return false;
+await checkExistingMember(data.session);
+return true;
+} catch (error) {
+console.warn('signup session fallback failed:', error);
+return false;
+}
+}
+
+// 2. 윈도우 로드 시에도 현재 세션을 한 번 확인해 모바일 인앱 브라우저의 auth 이벤트 누락을 보정
 window.onload = async function() {
 toggleType('개인'); 
-// 기존에 있던 getSession() 호출 코드는 삭제 (위 리스너가 대신함)
   // [추가] 페이지가 열리자마자 "배달 온 토큰 있나요?" 하고 확인
 try {
 await ensureSignupTenant();
 } catch (tenantError) {
 return;
 }
-handleManualSession();
+const manualSessionHandled = await handleManualSession();
+if (manualSessionHandled) return;
+await checkCurrentSignupSessionOnLoad();
 };
 
 function normalizeSignupProviderKey(value) {

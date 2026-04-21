@@ -1,6 +1,6 @@
 /*
-Version: v1.0.3
-Change: Fully allow configured Naver app WebView flows, including unknown browser-family detection, while keeping other in-app browsers blocked.
+Version: v1.0.4
+Change: Allow configured KakaoTalk/Naver app WebView flows by provider while keeping other in-app browsers blocked.
 */
 (function attachBrowserEnvGuard(global) {
   'use strict';
@@ -23,6 +23,10 @@ Change: Fully allow configured Naver app WebView flows, including unknown browse
     return /NAVER\(inapp/i.test(ua) || /NAVERAPP/i.test(ua);
   }
 
+  function isKakaoAppBrowser(ua) {
+    return /KAKAOTALK/i.test(ua);
+  }
+
   function normalizeProvider(value) {
     var raw = String(value || '').trim().toLowerCase();
     if (raw === 'naver') return 'custom:naver';
@@ -41,6 +45,24 @@ Change: Fully allow configured Naver app WebView flows, including unknown browse
       currentProvider = '';
     }
     return allowedProviders.map(normalizeProvider).indexOf(currentProvider) >= 0;
+  }
+
+  function shouldAllowKakaoApp(ua) {
+    var config = getConfig();
+    var allowedProviders = config.allowKakaoAppProviders;
+    var currentProvider = '';
+    if (!config.allowKakaoApp || !isKakaoAppBrowser(ua)) return false;
+    if (!Array.isArray(allowedProviders) || allowedProviders.length === 0) return true;
+    try {
+      currentProvider = normalizeProvider(new URLSearchParams(global.location && global.location.search || '').get('provider'));
+    } catch (_) {
+      currentProvider = '';
+    }
+    return allowedProviders.map(normalizeProvider).indexOf(currentProvider) >= 0;
+  }
+
+  function shouldAllowConfiguredInAppBrowser(ua) {
+    return shouldAllowNaverApp(ua) || shouldAllowKakaoApp(ua);
   }
 
   function isInAppBrowser(ua) {
@@ -122,14 +144,14 @@ Change: Fully allow configured Naver app WebView flows, including unknown browse
   function buildReasons() {
     var ua = getUserAgent();
     var info = detectBrowserFamily(ua);
-    var naverAppAllowed = shouldAllowNaverApp(ua);
+    var configuredInAppAllowed = shouldAllowConfiguredInAppBrowser(ua);
     var reasons = [];
 
-    if (isInAppBrowser(ua) && !naverAppAllowed) {
+    if (isInAppBrowser(ua) && !configuredInAppAllowed) {
       reasons.push('카카오톡·인스타그램 같은 앱 안 브라우저에서 열려 있습니다.');
     }
 
-    if (!naverAppAllowed && isBrowserOutdated(info)) {
+    if (!configuredInAppAllowed && isBrowserOutdated(info)) {
       reasons.push('브라우저 버전이 오래되었거나 현재 환경을 지원하지 않습니다.');
     }
 
@@ -235,6 +257,7 @@ Change: Fully allow configured Naver app WebView flows, including unknown browse
     buildReasons: buildReasons,
     isBlocked: shouldBlock,
     isInAppBrowser: function () { return isInAppBrowser(getUserAgent()); },
+    isKakaoAppBrowser: function () { return isKakaoAppBrowser(getUserAgent()); },
     isNaverAppBrowser: function () { return isNaverAppBrowser(getUserAgent()); },
     init: init
   };
