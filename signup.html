@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.29
-Change: Run the full social-return session retry flow on bfcache pageshow/focus returns, not only on initial load.
+Version: v1.0.30
+Change: Defer signup session checks outside Supabase auth-state callbacks to avoid auth lock re-entry.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.29 | signup.html');</script>
+  <script>console.log('[Version] v1.0.30 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -386,6 +386,33 @@ let joinSubmitInFlight = false;
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
+let signupAuthInitialStateReady = false;
+let resolveSignupAuthInitialStateReady = null;
+const signupAuthInitialStateReadyPromise = new Promise((resolve) => {
+resolveSignupAuthInitialStateReady = resolve;
+});
+
+function markSignupAuthInitialStateReady(reason = '') {
+if (signupAuthInitialStateReady) return;
+signupAuthInitialStateReady = true;
+if (reason) console.debug('[signup] auth initial state ready:', reason);
+if (typeof resolveSignupAuthInitialStateReady === 'function') {
+resolveSignupAuthInitialStateReady(reason || 'ready');
+}
+}
+// End of markSignupAuthInitialStateReady
+
+async function waitForSignupAuthInitialState(reason = '') {
+if (signupAuthInitialStateReady) return true;
+if (reason) console.debug('[signup] waiting auth initial state:', reason);
+await Promise.race([
+signupAuthInitialStateReadyPromise,
+new Promise((resolve) => setTimeout(() => resolve('timeout'), 1800))
+]);
+return signupAuthInitialStateReady;
+}
+// End of waitForSignupAuthInitialState
+
 let signupTenant = null;
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
 const { data: contextData, error: contextError } = await _supabase.rpc('get_public_signup_context');
@@ -631,6 +658,7 @@ hideSignupRetryActions();
 
 async function ensureSignupTenant() {
 try {
+await waitForSignupAuthInitialState('ensure-signup-tenant');
 const resolved = await signupTenantLoader.run();
 clearSignupTenantRetryState();
 return resolved;
@@ -986,26 +1014,36 @@ btn.innerText = '코드 확인';
 // 1. 상태 감지 리스너 (로그인/로그아웃 이벤트가 발생하면 즉시 실행)
 // [수정] 페이지 로드 및 인증 감지 -> 기존 회원 체크 로직 추가
 
-// 1. 통합 상태 감지 리스너 (페이지 로드 시점 + 로그인 변동 시점 모두 커버)
-_supabase.auth.onAuthStateChange(async (event, session) => {
-if (event && !['INITIAL_SESSION', 'SIGNED_IN'].includes(event)) {
-return;
-}
-if (session) {
-// 로그인 되어 있으면 -> 회원 명부 확인 (딱 한 번만 실행됨)
-try {
-await ensureSignupTenant();
-} catch (tenantError) {
-openResultModal('가입 대상을 확인할 수 없습니다.', true);
-return;
-}
-            await checkExistingMember(session); 
-        }
-});
-
 let signupSessionResumeInFlight = null;
 let signupSessionCheckInFlight = null;
 let signupSocialReturnFailureShown = false;
+
+function queueSignupAuthSessionCheck(session, reason = '') {
+if (!session) return;
+window.setTimeout(async () => {
+try {
+await ensureSignupTenant();
+if (reason) console.debug('[signup] auth session check queued:', reason);
+await checkExistingMember(session);
+} catch (tenantError) {
+console.warn('signup auth session handling failed:', tenantError);
+openResultModal('가입 대상을 확인할 수 없습니다.', true);
+}
+}, 0);
+}
+// End of queueSignupAuthSessionCheck
+
+// 1. 통합 상태 감지 리스너 (페이지 로드 시점 + 로그인 변동 시점 모두 커버)
+_supabase.auth.onAuthStateChange((event, session) => {
+const eventName = event || 'unknown';
+window.setTimeout(() => markSignupAuthInitialStateReady(`auth-state:${eventName}`), 0);
+if (event && !['INITIAL_SESSION', 'SIGNED_IN'].includes(event)) {
+return;
+}
+queueSignupAuthSessionCheck(session, `auth-state:${eventName}`);
+});
+
+window.setTimeout(() => markSignupAuthInitialStateReady('auth-state-fallback-timeout'), 2500);
 
 async function resumeSignupFromCurrentSession(reason = '') {
 if (signupSessionResumeInFlight) return signupSessionResumeInFlight;
