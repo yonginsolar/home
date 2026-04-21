@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.28
-Change: Route already-linked social users to the member portal and surface a visible error when social return has no readable session.
+Version: v1.0.29
+Change: Run the full social-return session retry flow on bfcache pageshow/focus returns, not only on initial load.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.28 | signup.html');</script>
+  <script>console.log('[Version] v1.0.29 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -1004,6 +1004,8 @@ return;
 });
 
 let signupSessionResumeInFlight = null;
+let signupSessionCheckInFlight = null;
+let signupSocialReturnFailureShown = false;
 
 async function resumeSignupFromCurrentSession(reason = '') {
 if (signupSessionResumeInFlight) return signupSessionResumeInFlight;
@@ -1025,23 +1027,37 @@ signupSessionResumeInFlight = null;
 return signupSessionResumeInFlight;
 }
 
-async function checkCurrentSignupSessionOnLoad() {
+function isSignupSocialReturnUrl() {
 const params = new URLSearchParams(window.location.search || '');
-const isSocialReturn = params.has('auth_return');
+return params.has('auth_return');
+}
+
+async function checkCurrentSignupSessionOnLoad(options = {}) {
+if (signupSessionCheckInFlight) return signupSessionCheckInFlight;
+signupSessionCheckInFlight = (async () => {
+const config = options || {};
+const reason = String(config.reason || 'load');
+const showFailure = config.showFailure !== false;
+const isSocialReturn = isSignupSocialReturnUrl();
 const delays = isSocialReturn ? [0, 250, 750, 1500, 2500] : [0];
 try {
 for (const delayMs of delays) {
 if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
-if (await resumeSignupFromCurrentSession(`load${isSocialReturn ? ':social-return' : ''}`)) return true;
+if (await resumeSignupFromCurrentSession(`${reason}${isSocialReturn ? ':social-return' : ''}`)) return true;
 }
-if (isSocialReturn) {
+if (isSocialReturn && showFailure && !signupSocialReturnFailureShown) {
+signupSocialReturnFailureShown = true;
 openResultModal('네이버/카카오 인증 후 돌아왔지만 로그인 세션을 확인하지 못했습니다.\n브라우저가 인증 토큰을 전달하지 못한 상태입니다. 새로고침 후 다시 시도하거나 조합원 포털에서 로그인해 주세요.', true);
 }
 return false;
 } catch (error) {
 console.warn('signup session fallback failed:', error);
 return false;
+} finally {
+signupSessionCheckInFlight = null;
 }
+})();
+return signupSessionCheckInFlight;
 }
 
 // 2. 윈도우 로드 시에도 현재 세션을 한 번 확인해 모바일 인앱 브라우저의 auth 이벤트 누락을 보정
@@ -1055,19 +1071,32 @@ return;
 }
 const manualSessionHandled = await handleManualSession();
 if (manualSessionHandled) return;
-await checkCurrentSignupSessionOnLoad();
+await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
 };
 
 window.addEventListener('pageshow', () => {
+if (isSignupSocialReturnUrl()) {
+checkCurrentSignupSessionOnLoad({ reason: 'pageshow', showFailure: true });
+return;
+}
 resumeSignupFromCurrentSession('pageshow');
 });
 
 window.addEventListener('focus', () => {
+if (isSignupSocialReturnUrl()) {
+checkCurrentSignupSessionOnLoad({ reason: 'focus', showFailure: true });
+return;
+}
 resumeSignupFromCurrentSession('focus');
 });
 
 document.addEventListener('visibilitychange', () => {
-if (!document.hidden) resumeSignupFromCurrentSession('visibilitychange');
+if (document.hidden) return;
+if (isSignupSocialReturnUrl()) {
+checkCurrentSignupSessionOnLoad({ reason: 'visibilitychange', showFailure: true });
+return;
+}
+resumeSignupFromCurrentSession('visibilitychange');
 });
 
 function normalizeSignupProviderKey(value) {
