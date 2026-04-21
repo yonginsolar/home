@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.24
-Change: Add an explicit session fallback after social-auth return so mobile in-app browsers show the signup form even if auth state events are missed.
+Version: v1.0.25
+Change: Retry social-auth return session detection for mobile in-app browsers before leaving the signup gate visible.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.24 | signup.html');</script>
+  <script>console.log('[Version] v1.0.25 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -472,6 +472,13 @@ function isFileSignupRuntime() {
 return window.location.protocol === 'file:';
 }
 
+function buildSignupReturnUrl(provider = '') {
+const target = new URL(window.location.href);
+target.searchParams.set('auth_return', provider || 'social');
+target.hash = '';
+return target.href;
+}
+
 function applyTenantTerms() {
 if (!signupTenant?.coop_name) return;
 Object.keys(termsData).forEach((key) => {
@@ -482,7 +489,9 @@ termsData[key].content = termsData[key].content.replaceAll('용인모두의햇�
 function buildSignupAuthCallbackUrl(nextTarget, extraParams = {}) {
 const params = Object.assign({}, extraParams || {});
 if (isPrivateLanSignupRuntime()) {
-const publicSignupUrl = buildPrivateLanPublicUrl('signup.html');
+const publicSignupParams = nextTarget ? Object.fromEntries(new URL(nextTarget, window.location.href).searchParams.entries()) : {};
+if (!publicSignupParams.auth_return) publicSignupParams.auth_return = String(params.auth_return || 'social');
+const publicSignupUrl = buildPrivateLanPublicUrl('signup.html', publicSignupParams);
 if (publicSignupUrl) params.next = publicSignupUrl;
 const publicCallbackUrl = buildPrivateLanPublicUrl('auth_callback.html', params);
 if (publicCallbackUrl) return publicCallbackUrl;
@@ -970,11 +979,22 @@ return;
 });
 
 async function checkCurrentSignupSessionOnLoad() {
+const params = new URLSearchParams(window.location.search || '');
+const isSocialReturn = params.has('auth_return');
+const delays = isSocialReturn ? [0, 250, 750, 1500, 2500] : [0];
 try {
+for (const delayMs of delays) {
+if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
 const { data, error } = await _supabase.auth.getSession();
-if (error || !data?.session) return false;
+if (error) {
+console.warn('signup session fallback getSession failed:', error);
+continue;
+}
+if (!data?.session) continue;
 await checkExistingMember(data.session);
 return true;
+}
+return false;
 } catch (error) {
 console.warn('signup session fallback failed:', error);
 return false;
@@ -1202,8 +1222,8 @@ async function startKakaoSignup() {
         }
 
         // const nextTarget = '/'; // (추천) 가입 후 메인으로 이동
-        const nextTarget = window.location.href;
-        const redirectUrl = buildSignupAuthCallbackUrl(nextTarget);
+        const nextTarget = buildSignupReturnUrl('kakao');
+        const redirectUrl = buildSignupAuthCallbackUrl(nextTarget, { auth_return: 'kakao' });
 
         localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 
@@ -1255,8 +1275,8 @@ async function startNaverSignup() {
             return;
         }
 
-        const nextTarget = window.location.href;
-        const redirectUrl = buildSignupAuthCallbackUrl(nextTarget);
+        const nextTarget = buildSignupReturnUrl('naver');
+        const redirectUrl = buildSignupAuthCallbackUrl(nextTarget, { auth_return: 'naver' });
         localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 
         const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
