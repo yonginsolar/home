@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.25
-Change: Retry social-auth return session detection for mobile in-app browsers before leaving the signup gate visible.
+Version: v1.0.26
+Change: Resume signup form from an existing session on mobile bfcache/focus returns and before starting another social OAuth attempt.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.25 | signup.html');</script>
+  <script>console.log('[Version] v1.0.26 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -978,6 +978,28 @@ return;
         }
 });
 
+let signupSessionResumeInFlight = null;
+
+async function resumeSignupFromCurrentSession(reason = '') {
+if (signupSessionResumeInFlight) return signupSessionResumeInFlight;
+signupSessionResumeInFlight = (async () => {
+try {
+await ensureSignupTenant();
+const { data, error } = await _supabase.auth.getSession();
+if (error || !data?.session) return false;
+if (reason) console.debug('[signup] resuming from current session:', reason);
+await checkExistingMember(data.session);
+return true;
+} catch (error) {
+console.warn('signup session resume failed:', error);
+return false;
+} finally {
+signupSessionResumeInFlight = null;
+}
+})();
+return signupSessionResumeInFlight;
+}
+
 async function checkCurrentSignupSessionOnLoad() {
 const params = new URLSearchParams(window.location.search || '');
 const isSocialReturn = params.has('auth_return');
@@ -985,14 +1007,7 @@ const delays = isSocialReturn ? [0, 250, 750, 1500, 2500] : [0];
 try {
 for (const delayMs of delays) {
 if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
-const { data, error } = await _supabase.auth.getSession();
-if (error) {
-console.warn('signup session fallback getSession failed:', error);
-continue;
-}
-if (!data?.session) continue;
-await checkExistingMember(data.session);
-return true;
+if (await resumeSignupFromCurrentSession(`load${isSocialReturn ? ':social-return' : ''}`)) return true;
 }
 return false;
 } catch (error) {
@@ -1014,6 +1029,18 @@ const manualSessionHandled = await handleManualSession();
 if (manualSessionHandled) return;
 await checkCurrentSignupSessionOnLoad();
 };
+
+window.addEventListener('pageshow', () => {
+resumeSignupFromCurrentSession('pageshow');
+});
+
+window.addEventListener('focus', () => {
+resumeSignupFromCurrentSession('focus');
+});
+
+document.addEventListener('visibilitychange', () => {
+if (!document.hidden) resumeSignupFromCurrentSession('visibilitychange');
+});
 
 function normalizeSignupProviderKey(value) {
 return String(value || '').trim().toLowerCase();
@@ -1216,6 +1243,7 @@ if (socialPhone) fillSignupPhoneInputs(socialPhone);
 async function startKakaoSignup() {
     try {
         await ensureSignupTenant();
+        if (await resumeSignupFromCurrentSession('before-kakao-oauth')) return;
         if (isFileSignupRuntime()) {
             openResultModal('file:// 환경에서는 카카오 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
             return;
@@ -1270,6 +1298,7 @@ async function startKakaoSignup() {
 async function startNaverSignup() {
     try {
         await ensureSignupTenant();
+        if (await resumeSignupFromCurrentSession('before-naver-oauth')) return;
         if (isFileSignupRuntime()) {
             openResultModal('file:// 환경에서는 네이버 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
             return;
