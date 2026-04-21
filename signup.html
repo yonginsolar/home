@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.26
-Change: Resume signup form from an existing session on mobile bfcache/focus returns and before starting another social OAuth attempt.
+Version: v1.0.27
+Change: Use extensionless OAuth callback/broker paths on production to avoid Pages .html redirects during social signup return.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.26 | signup.html');</script>
+  <script>console.log('[Version] v1.0.27 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>햇빛의 파트너가 되어주세요 ☀️</title>
@@ -40,7 +40,7 @@ allowKakaoApp: true
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260421-1"></script>
-<script src="shared/auth_broker_helper.js?v=20260404-1"></script>
+<script src="shared/auth_broker_helper.js?v=20260421-4"></script>
 <style>
 /* [CSS 추가] 가입 완료 모달 스타일 */
 .center-modal {
@@ -455,12 +455,17 @@ function isPrivateLanSignupRuntime() {
 return isPrivateLanSignupHost(String(window.location.hostname || '').trim().toLowerCase());
 }
 
+function stripSignupHtmlExtension(pageName) {
+return String(pageName || '').replace(/\.html(?=([?#]|$))/i, '');
+}
+
 function buildPrivateLanPublicUrl(pageName, params = {}) {
 const runtimeHost = getSignupPublicRuntimeHost();
 if (!runtimeHost || isPrivateLanSignupHost(runtimeHost) || runtimeHost === 'localhost' || runtimeHost === '127.0.0.1') {
 return '';
 }
-const target = new URL(String(pageName || '').replace(/^\/+/, ''), `https://${runtimeHost}/`);
+const targetName = stripSignupHtmlExtension(String(pageName || '').replace(/^\/+/, ''));
+const target = new URL(targetName, `https://${runtimeHost}/`);
 Object.entries(params || {}).forEach(([key, value]) => {
 if (value === null || value === undefined || value === '') return;
 target.searchParams.set(key, String(value));
@@ -470,6 +475,12 @@ return target.href;
 
 function isFileSignupRuntime() {
 return window.location.protocol === 'file:';
+}
+
+function getSignupOAuthPageName(pageName) {
+const normalized = String(pageName || '').replace(/^\/+/, '');
+if (isFileSignupRuntime() || isLocalSignupServerRuntime()) return normalized;
+return stripSignupHtmlExtension(normalized);
 }
 
 function buildSignupReturnUrl(provider = '') {
@@ -499,10 +510,11 @@ if (publicCallbackUrl) return publicCallbackUrl;
 if (!isLocalSignupServerRuntime() && nextTarget) {
 params.next = nextTarget;
 }
+const callbackPageName = getSignupOAuthPageName('auth_callback.html');
 if (window.CoopRouteGuard?.buildSiblingPageUrl) {
-return window.CoopRouteGuard.buildSiblingPageUrl('auth_callback.html', params);
+return window.CoopRouteGuard.buildSiblingPageUrl(callbackPageName, params);
 }
-const url = new URL('auth_callback.html', window.location.href);
+const url = new URL(callbackPageName, window.location.href);
 Object.entries(params).forEach(([key, value]) => {
 if (value === null || value === undefined || value === '') return;
 url.searchParams.set(key, String(value));

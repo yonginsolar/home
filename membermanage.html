@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.72
-Change: Allow configured Naver/Kakao app WebViews to finish member portal login without showing the external-browser blocker.
+Version: v1.0.73
+Change: Use extensionless OAuth callback paths on production to avoid Pages .html redirects during portal social auth.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.72 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.73 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -45,7 +45,7 @@ allowKakaoApp: true
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
-<script src="shared/auth_broker_helper.js?v=20260404-1"></script>
+<script src="shared/auth_broker_helper.js?v=20260421-4"></script>
 
 <link href="style.css" rel="stylesheet">
 
@@ -1567,15 +1567,26 @@ function isFilePortalRuntime() {
 return window.location.protocol === 'file:';
 }
 
+function stripPortalHtmlExtension(pageName) {
+return String(pageName || '').replace(/\.html(?=([?#]|$))/i, '');
+}
+
+function getPortalOAuthPageName(pageName) {
+const normalized = String(pageName || '').replace(/^\/+/, '');
+if (isFilePortalRuntime() || isLocalPortalServerRuntime()) return normalized;
+return stripPortalHtmlExtension(normalized);
+}
+
 function buildAuthCallbackUrl(extraParams = {}) {
 const params = Object.assign({}, extraParams || {});
 if (isLocalPortalServerRuntime()) {
 delete params.next;
 }
+const callbackPageName = getPortalOAuthPageName('auth_callback.html');
 if (window.CoopRouteGuard?.buildSiblingPageUrl) {
-return window.CoopRouteGuard.buildSiblingPageUrl('auth_callback.html', params);
+return window.CoopRouteGuard.buildSiblingPageUrl(callbackPageName, params);
 }
-const url = new URL('auth_callback.html', window.location.href);
+const url = new URL(callbackPageName, window.location.href);
 Object.entries(params).forEach(([key, value]) => {
 if (value === null || value === undefined || value === '') return;
 url.searchParams.set(key, String(value));

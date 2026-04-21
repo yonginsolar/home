@@ -1,6 +1,6 @@
 /*
-Version: v1.0.1
-Change: Add broker config helpers for Kakao/Naver login, including safe queryParams forwarding.
+Version: v1.0.2
+Change: Prefer extensionless OAuth broker/callback paths on production to avoid Pages .html redirects during social auth.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -20,7 +20,9 @@ Change: Add broker config helpers for Kakao/Naver login, including safe queryPar
   ];
 
   var ALLOWED_CALLBACK_PATHS = {
+    '/auth_callback': true,
     '/auth_callback.html': true,
+    '/erp/auth_callback': true,
     '/erp/auth_callback.html': true
   };
 
@@ -103,7 +105,7 @@ Change: Add broker config helpers for Kakao/Naver login, including safe queryPar
     if (!isModeSupported(mode)) return '';
     if (!callbackUrl) return '';
 
-    startUrl = new URL('/auth_broker_start.html', brokerOrigin);
+    startUrl = new URL('/auth_broker_start', brokerOrigin);
     startUrl.searchParams.set('provider', provider);
     startUrl.searchParams.set('mode', mode);
     startUrl.searchParams.set('callback', callbackUrl.href);

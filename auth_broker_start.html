@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.5
-Change: Allow KakaoTalk app only for Kakao broker login while keeping Naver app scoped to Naver.
+Version: v1.0.6
+Change: Use extensionless broker completion URL on production to avoid Pages .html redirects during OAuth return.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.5 | auth_broker_start.html');</script>
+  <script>console.log('[Version] v1.0.6 | auth_broker_start.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -23,7 +23,7 @@ Change: Allow KakaoTalk app only for Kakao broker login while keeping Naver app 
     };
   </script>
   <script src="shared/browser_env_guard.js?v=20260421-3"></script>
-  <script src="shared/auth_broker_helper.js?v=20260404-1"></script>
+  <script src="shared/auth_broker_helper.js?v=20260421-4"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { background:#f8fafc; min-height:100vh; margin:0; display:flex; align-items:center; justify-content:center; padding:24px; font-family:"Pretendard Variable","Pretendard",-apple-system,sans-serif; }
@@ -66,8 +66,19 @@ Change: Allow KakaoTalk app only for Kakao broker login while keeping Naver app 
       return new URLSearchParams(window.location.search || '');
     }
 
+    function isLocalBrokerRuntime() {
+      var host = String(window.location.hostname || '').trim().toLowerCase();
+      return window.location.protocol === 'file:'
+        || host === 'localhost'
+        || host === '127.0.0.1';
+    }
+
+    function getBrokerPageName(baseName) {
+      return isLocalBrokerRuntime() ? baseName + '.html' : baseName;
+    }
+
     function buildCompleteUrl(state) {
-      var url = new URL('auth_broker_complete.html', window.location.href);
+      var url = new URL(getBrokerPageName('auth_broker_complete'), window.location.href);
       url.searchParams.set('state', state);
       return url.href;
     }
