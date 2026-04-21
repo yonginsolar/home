@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.16
-Change: Complete hash-token OAuth callbacks explicitly so brokered Kakao/Naver login does not depend on browser timing.
+Version: v1.0.17
+Change: Accept broker-relayed access/refresh tokens from query parameters when in-app browsers drop OAuth fragments.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.16 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.17 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -176,6 +176,45 @@ Change: Complete hash-token OAuth callbacks explicitly so brokered Kakao/Naver l
             } catch (_) {}
         }
 
+        function clearQuerySessionTokensFromUrl() {
+            try {
+                const sanitizedUrl = new URL(window.location.href);
+                [
+                    'at',
+                    'rt',
+                    'access_token',
+                    'refresh_token',
+                    'expires_at',
+                    'expires_in',
+                    'token_type',
+                    'provider_token',
+                    'provider_refresh_token'
+                ].forEach((key) => sanitizedUrl.searchParams.delete(key));
+                window.history?.replaceState?.({}, document.title, `${sanitizedUrl.pathname}${sanitizedUrl.search}${sanitizedUrl.hash}`);
+            } catch (_) {}
+        }
+
+        async function trySetSessionFromQuery() {
+            const params = new URLSearchParams(window.location.search);
+            const accessToken = params.get('at') || params.get('access_token');
+            const refreshToken = params.get('rt') || params.get('refresh_token');
+            if (!accessToken || !refreshToken) return null;
+
+            const { data, error } = await _supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+            });
+            if (error) {
+                console.error('query session set failed:', error);
+                return null;
+            }
+            if (data?.session) {
+                clearQuerySessionTokensFromUrl();
+                return data.session;
+            }
+            return null;
+        }
+
         async function trySetSessionFromHash() {
             const hashParams = getHashParams();
             const accessToken = hashParams.get('access_token');
@@ -331,6 +370,10 @@ Change: Complete hash-token OAuth callbacks explicitly so brokered Kakao/Naver l
                             window.history?.replaceState?.({}, document.title, `${sanitizedUrl.pathname}${sanitizedUrl.search}${sanitizedUrl.hash}`);
                         } catch (_) {}
                     }
+                }
+
+                if (!activeSession) {
+                    activeSession = await trySetSessionFromQuery();
                 }
 
                 if (!activeSession) {

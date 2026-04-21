@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
-Change: Load extensionless-aware auth broker helper so OAuth callbacks survive production Pages routing.
+Version: v1.0.3
+Change: Relay OAuth hash session tokens to the final same-origin callback query as a fallback for in-app browsers that drop fragments.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.2 | auth_broker_complete.html');</script>
+  <script>console.log('[Version] v1.0.3 | auth_broker_complete.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -60,6 +60,25 @@ Change: Load extensionless-aware auth broker helper so OAuth callbacks survive p
       return targetUrl;
     }
 
+    function relayHashSessionTokens(targetUrl) {
+      var rawHash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      var hashParams;
+      var accessToken;
+      var refreshToken;
+
+      if (!rawHash) return false;
+
+      hashParams = new URLSearchParams(rawHash);
+      accessToken = hashParams.get('access_token');
+      refreshToken = hashParams.get('refresh_token');
+
+      if (!accessToken || !refreshToken) return false;
+
+      targetUrl.searchParams.set('at', accessToken);
+      targetUrl.searchParams.set('rt', refreshToken);
+      return true;
+    }
+
     function finish() {
       var state = getParams().get('state') || '';
       var payload = readStatePayload(state);
@@ -74,7 +93,7 @@ Change: Load extensionless-aware auth broker helper so OAuth callbacks survive p
       }
 
       mergeQueryParams(parsedCallback);
-      if (window.location.hash) {
+      if (!relayHashSessionTokens(parsedCallback) && window.location.hash) {
         parsedCallback.hash = window.location.hash.replace(/^#/, '');
       }
 
