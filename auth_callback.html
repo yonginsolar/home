@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.17
-Change: Accept broker-relayed access/refresh tokens from query parameters when in-app browsers drop OAuth fragments.
+Version: v1.0.18
+Change: Complete member social linking through the current coop-aware profile claim RPC.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.17 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.18 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -316,27 +316,12 @@ Change: Accept broker-relayed access/refresh tokens from query parameters when i
                 throw new Error(`${providerMeta.label} 인증 정보 추출 실패.`);
             }
 
-            let rpcName = '';
-            let payload = null;
-            if (providerMeta.key === 'kakao') {
-                rpcName = 'rpc_link_kakao';
-                payload = {
-                    p_member_uid: user.id,
-                    p_kakao_id: providerId
-                };
-            } else if (providerMeta.key === 'custom:naver') {
-                rpcName = 'rpc_link_naver';
-                payload = {
-                    p_member_uid: user.id,
-                    p_naver_id: providerId
-                };
-            }
-
-            if (!rpcName || !payload) return;
-
-            const { error } = await _supabase.rpc(rpcName, payload);
+            const { data, error } = await _supabase.rpc('claim_member_profile');
             if (error) {
                 throw error;
+            }
+            if (!data || data.success !== true) {
+                throw new Error(data?.message || 'member_profile_sync_failed');
             }
         }
 

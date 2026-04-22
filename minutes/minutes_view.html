@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-	    Version: v1.0.54
-	    Change: 2026-03-28 - Clean no-op guards in document box render flow.
+	    Version: v1.0.55
+	    Change: 2026-04-22 - Lazy-load document detail content and render document attachments/images.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>문서함</title>
-    <script>console.log('[Version] v1.0.54 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.55 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -53,6 +53,15 @@
         .attachments-list { list-style: none; padding: 0; margin: 0; }
         .attachments-list li { margin-bottom: 6px; }
         .attachments-list a { color: #2563eb; text-decoration: none; }
+        .attachment-preview-img {
+            max-width: min(100%, 520px);
+            max-height: 320px;
+            display: block;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            object-fit: contain;
+            background: #fff;
+        }
         .signatures-panel { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
         .signatures-title { font-weight: 700; margin-bottom: 8px; color: #0f172a; }
         .signatures-list { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -209,7 +218,7 @@
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.34';
+        import { MinutesService } from './MinutesService.js?v=1.0.43';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -500,6 +509,12 @@
             });
         }
 
+        function isPreviewableImageAttachment(url, name = '') {
+            const raw = `${String(url || '')} ${String(name || '')}`.toLowerCase();
+            if (raw.startsWith('data:image/')) return true;
+            return /\.(png|jpe?g|gif|webp|svg)(\?|#|$|\s)/i.test(raw);
+        }
+
 	        async function resolveAttachmentUrl(rawUrl) {
 	            if (!rawUrl) return null;
 	            const trimmed = String(rawUrl).trim();
@@ -560,12 +575,11 @@
                 return;
             }
 
-            const resolved = [];
-            for (let i = 0; i < urls.length; i += 1) {
-                const resolvedUrl = await resolveAttachmentUrl(urls[i]);
-                if (!resolvedUrl) continue;
-                resolved.push({ url: resolvedUrl, name: names[i] || null });
-            }
+            const resolved = (await Promise.all(urls.map(async (url, idx) => {
+                const resolvedUrl = await resolveAttachmentUrl(url);
+                if (!resolvedUrl) return null;
+                return { url: resolvedUrl, name: names[idx] || null };
+            }))).filter(Boolean);
 
             if (resolved.length === 0) {
                 wrap.style.display = 'none';
@@ -579,11 +593,16 @@
                 if (!safe) return '';
                 let name = item.name || (safe.split('/').pop() || 'attachment.pdf');
                 try { name = decodeURIComponent(name); } catch (e) {}
+                const imagePreview = isPreviewableImageAttachment(safe, name)
+                    ? `<img class="attachment-preview-img" src="${safe}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.style.display='none';">`
+                    : '';
                 return `
                     <li style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        ${imagePreview}
                         <a href="${safe}" target="_blank" rel="noopener noreferrer">
                             <button type="button">다운로드</button>
                         </a>
+                        <span style="color:#64748b; font-size:0.9rem;">${escapeHtml(name)}</span>
                     </li>
                 `;
             }).join('');
@@ -1272,22 +1291,18 @@
 
         async function openLibraryDocumentById(targetId) {
             if (!targetId) return;
-            const doc = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []).find((item) => String(item?.id) === String(targetId));
-            if (!doc) {
+            const summaryDoc = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []).find((item) => String(item?.id) === String(targetId));
+            if (!summaryDoc) {
                 showMessage('문서를 찾을 수 없거나 권한이 없습니다.');
                 return;
             }
-            if (!canOpenLibraryDoc(doc)) {
-                const access = getLibraryDocAccess(doc);
+            if (!canOpenLibraryDoc(summaryDoc)) {
+                const access = getLibraryDocAccess(summaryDoc);
                 showMessage(access === 'OFFICIALS'
                     ? '이 문서는 대의원, 이사, 감사만 열람할 수 있습니다.'
                     : '로그인이 필요합니다.');
                 return;
             }
-
-            detailTitle.textContent = doc.title ? `문서 · ${doc.title}` : '문서';
-            detailMeta.textContent = `시행일: ${formatMinutesViewKstDate(doc.event_date)} · 공개: ${getLibraryDocAccessLabel(doc)}`;
-            detailContent.innerHTML = renderLibraryDocContent(doc.content);
 
             const signaturesPanel = document.getElementById('signatures-panel');
             const signaturesList = document.getElementById('signatures-list');
@@ -1299,9 +1314,31 @@
             if (attachmentsWrap) attachmentsWrap.style.display = 'none';
             if (attachmentsList) attachmentsList.innerHTML = '';
 
+            detailTitle.textContent = summaryDoc.title ? `문서 · ${summaryDoc.title}` : '문서';
+            detailMeta.textContent = `시행일: ${formatMinutesViewKstDate(summaryDoc.event_date)} · 공개: ${getLibraryDocAccessLabel(summaryDoc)}`;
+            detailContent.innerHTML = '<div style="color:#64748b;">문서 내용을 불러오는 중입니다...</div>';
             listPanel.style.display = 'none';
             detailPanel.classList.remove('hidden');
             document.body.style.backgroundColor = '#f1f5f9';
+
+            const { data: fullDoc, error } = await MinutesService.getLibraryDocumentById(targetId);
+            if (error || !fullDoc) {
+                detailContent.innerHTML = '<div style="color:#ef4444;">문서 내용을 불러오지 못했습니다.</div>';
+                return;
+            }
+            const doc = { ...summaryDoc, ...fullDoc };
+            if (!canOpenLibraryDoc(doc)) {
+                const access = getLibraryDocAccess(doc);
+                showMessage(access === 'OFFICIALS'
+                    ? '이 문서는 대의원, 이사, 감사만 열람할 수 있습니다.'
+                    : '로그인이 필요합니다.');
+                return;
+            }
+
+            detailTitle.textContent = doc.title ? `문서 · ${doc.title}` : '문서';
+            detailMeta.textContent = `시행일: ${formatMinutesViewKstDate(doc.event_date)} · 공개: ${getLibraryDocAccessLabel(doc)}`;
+            detailContent.innerHTML = renderLibraryDocContent(doc.content);
+            await renderAttachments(doc);
         }
 
         async function openDocumentById(targetId) {
@@ -1335,24 +1372,32 @@
                 detailContent.innerHTML = '<div style="color:#94a3b8;">내용이 없습니다.</div>';
             }
 
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(targetId);
-            const officials = await MinutesService.getOfficials();
-            if (doc.doc_type !== 'NOTICE' && doc.content) {
-                const sanitizedContent = sanitizeHtml(doc.content || '');
-                const inlineResult = await injectInlineSignatureImages(sanitizedContent, doc, officials || [], signatures || []);
-                detailContent.innerHTML = inlineResult.html || '<div style="color:#94a3b8;">내용이 없습니다.</div>';
-                await renderSignatures(doc, officials || [], signatures || [], {
-                    hidePanel: !!(doc.published_at && isMinuteSignatureFullyCompleted(doc, officials || [], signatures || []) && inlineResult.injected)
-                });
-            } else {
-                await renderSignatures(doc, officials || [], signatures || []);
-            }
-
-            await renderAttachments(doc);
-
             listPanel.style.display = 'none';
             detailPanel.classList.remove('hidden');
             document.body.style.backgroundColor = '#f1f5f9';
+
+            const signaturesTask = (async () => {
+                const [{ data: signatures }, officials] = await Promise.all([
+                    MinutesService.listSignaturesByMinuteId(targetId),
+                    MinutesService.getOfficials()
+                ]);
+                if (doc.doc_type !== 'NOTICE' && doc.content) {
+                    const sanitizedContent = sanitizeHtml(doc.content || '');
+                    const inlineResult = await injectInlineSignatureImages(sanitizedContent, doc, officials || [], signatures || []);
+                    detailContent.innerHTML = inlineResult.html || '<div style="color:#94a3b8;">내용이 없습니다.</div>';
+                    await renderSignatures(doc, officials || [], signatures || [], {
+                        hidePanel: !!(doc.published_at && isMinuteSignatureFullyCompleted(doc, officials || [], signatures || []) && inlineResult.injected)
+                    });
+                } else {
+                    await renderSignatures(doc, officials || [], signatures || []);
+                }
+            })();
+
+            const attachmentsTask = renderAttachments(doc);
+            const settled = await Promise.allSettled([signaturesTask, attachmentsTask]);
+            settled.forEach((result) => {
+                if (result.status === 'rejected') console.warn('document detail side content failed:', result.reason);
+            });
         }
 
         async function renderPublishedList() {

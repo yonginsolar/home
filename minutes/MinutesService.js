@@ -1,6 +1,6 @@
 /*
-Version: v1.0.42
-Change: 2026-03-28 - Scope document box seen updates and approval notice linkage reads by visible coop_id.
+Version: v1.0.43
+Change: 2026-04-22 - Lazy-load document library content and keep document list queries lightweight.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -340,7 +340,7 @@ async function listLibraryDocuments() {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('site_documents')
-        .select('id,title,content,event_date,version,is_current,file_url,category,access_scope')
+        .select('id,title,event_date,version,is_current,file_url,category,access_scope,updated_at')
         .eq('category', 'doc')
         .order('event_date', { ascending: false }), coopId);
     const rows = Array.isArray(data) ? data : [];
@@ -349,6 +349,26 @@ async function listLibraryDocuments() {
         access_scope: String(row?.access_scope || '').toUpperCase() || inferDocumentAccessScope(row?.title)
     }));
     return { data: mapped, error };
+}
+
+async function getLibraryDocumentById(documentId) {
+    const safeId = String(documentId || '').trim();
+    if (!safeId) return { data: null, error: { message: 'missing document id' } };
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
+        .from('site_documents')
+        .select('id,title,content,event_date,version,is_current,file_url,category,access_scope,updated_at')
+        .eq('category', 'doc')
+        .eq('id', safeId), coopId)
+        .maybeSingle();
+    if (error || !data) return { data: data || null, error };
+    return {
+        data: {
+            ...data,
+            access_scope: String(data?.access_scope || '').toUpperCase() || inferDocumentAccessScope(data?.title)
+        },
+        error: null
+    };
 }
 
 async function markDocumentBoxSeen(targetId = null, seenAt = null) {
@@ -640,6 +660,7 @@ export const MinutesService = {
     listMinutesAdmin,
     listPublishedMinutes,
     listLibraryDocuments,
+    getLibraryDocumentById,
     getLatestPublishedMinuteAt,
     markDocumentBoxSeen,
     listApprovalNoticeDrafts,
