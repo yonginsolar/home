@@ -1,6 +1,6 @@
 /*
-Version: v1.0.43
-Change: 2026-04-22 - Lazy-load document library content and keep document list queries lightweight.
+Version: v1.0.44
+Change: 2026-04-22 - Keep completed notice approvals sorted newest first with null processed dates last.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -434,7 +434,7 @@ async function listCompletedNoticeApprovals() {
         .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,approval_line')
         .eq('doc_type', '공문')
         .in('status', ['완료', '실물결재완료'])
-        .order('processed_at', { ascending: false })
+        .order('processed_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false }), coopId);
     return { data: data || [], error };
 }
