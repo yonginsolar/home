@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.55
-Change: 2026-04-24 - Add bulk leave adjustment workflow.
+Version: v1.0.56
+Change: 2026-04-24 - Refine bulk leave selection by department.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.55 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.56 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -377,7 +377,7 @@ Change: 2026-04-24 - Add bulk leave adjustment workflow.
       </div>
       <div class="modal-body">
         <div class="alert alert-info bulk-leave-note mb-3">
-          주말 근무 대체휴가처럼 여러 직원에게 같은 사유와 일수를 적용할 때 사용합니다. 일수를 음수로 입력하면 자동으로 차감 처리합니다.
+          주말 근무 대체휴가처럼 여러 직원에게 같은 사유와 일수를 적용할 때 사용합니다. 지급과 차감은 조정 구분에서 선택하고, 일수는 양수로 입력합니다.
         </div>
         <div class="bulk-leave-summary-card mb-3">
           <div class="row g-2 align-items-end">
@@ -390,7 +390,7 @@ Change: 2026-04-24 - Add bulk leave adjustment workflow.
             </div>
             <div class="col-md-3">
               <label class="small text-muted mb-1">일수</label>
-              <input type="number" id="bulkLeaveDays" class="form-control form-control-sm" step="0.5" placeholder="예: 1 또는 -1">
+              <input type="number" id="bulkLeaveDays" class="form-control form-control-sm" min="0.5" step="0.5" placeholder="예: 1">
             </div>
             <div class="col-md-6">
               <label class="small text-muted mb-1">사유</label>
@@ -401,6 +401,10 @@ Change: 2026-04-24 - Add bulk leave adjustment workflow.
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
           <div class="small fw-bold text-secondary" id="bulkLeaveSelectedSummary">선택 0명</div>
           <div class="d-flex flex-wrap gap-2">
+            <select id="bulkLeaveDepartmentSelect" class="form-select form-select-sm w-auto" aria-label="팀별 선택">
+              <option value="">팀/부서 선택</option>
+            </select>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="setBulkLeaveSelectionByDepartment()">해당 팀 선택</button>
             <button type="button" class="btn btn-outline-primary btn-sm" onclick="setBulkLeaveSelection('all')">재직자 전체 선택</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setBulkLeaveSelection('none')">선택 해제</button>
           </div>
@@ -5028,14 +5032,25 @@ function resetBulkLeaveForm() {
     const typeEl = document.getElementById('bulkLeaveType');
     const daysEl = document.getElementById('bulkLeaveDays');
     const reasonEl = document.getElementById('bulkLeaveReason');
+    const departmentEl = document.getElementById('bulkLeaveDepartmentSelect');
     const tbody = document.getElementById('bulkLeaveEmployeeBody');
     if (typeEl) typeEl.value = '지급';
     if (daysEl) daysEl.value = '';
     if (reasonEl) reasonEl.value = '';
+    if (departmentEl) departmentEl.value = '';
     if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-muted">직원 목록을 불러오는 중입니다.</td></tr>';
     setBulkLeaveApplyButtonState(false);
     updateBulkLeaveSelectionSummary();
 } // End of resetBulkLeaveForm
+
+function getBulkLeaveDepartmentKey(employee) {
+    const department = String(employee?.department || '').trim();
+    return department || '__UNASSIGNED__';
+} // End of getBulkLeaveDepartmentKey
+
+function getBulkLeaveDepartmentLabel(departmentKey) {
+    return departmentKey === '__UNASSIGNED__' ? '미지정' : String(departmentKey || '').trim();
+} // End of getBulkLeaveDepartmentLabel
 
 function getBulkLeaveEligibleEmployees() {
     const source = Array.isArray(employeeCache) ? employeeCache : [];
@@ -5055,9 +5070,30 @@ async function openBulkLeaveModal() {
     }
     resetBulkLeaveForm();
     renderBulkLeaveEmployeeRows();
+    renderBulkLeaveDepartmentOptions();
     bulkLeaveModal.show();
     window.setTimeout(syncHrModalStack, 0);
 } // End of openBulkLeaveModal
+
+function renderBulkLeaveDepartmentOptions() {
+    const selectEl = document.getElementById('bulkLeaveDepartmentSelect');
+    if (!selectEl) return;
+    const currentValue = selectEl.value;
+    const departments = new Map();
+    getBulkLeaveEligibleEmployees().forEach((employee) => {
+        const key = getBulkLeaveDepartmentKey(employee);
+        departments.set(key, getBulkLeaveDepartmentLabel(key));
+    });
+    const sortedDepartments = Array.from(departments.entries()).sort((a, b) => a[1].localeCompare(b[1], 'ko-KR'));
+    selectEl.innerHTML = '';
+    selectEl.appendChild(new Option('팀/부서 선택', ''));
+    sortedDepartments.forEach(([key, label]) => {
+        selectEl.appendChild(new Option(label, key));
+    });
+    if (currentValue && departments.has(currentValue)) {
+        selectEl.value = currentValue;
+    }
+} // End of renderBulkLeaveDepartmentOptions
 
 function renderBulkLeaveEmployeeRows() {
     const tbody = document.getElementById('bulkLeaveEmployeeBody');
@@ -5077,9 +5113,10 @@ function renderBulkLeaveEmployeeRows() {
         const safeDisplayNo = escapeHtml(getEmployeeDisplayNoValue(employee));
         const safeName = escapeHtml(employee.emp_name || '-');
         const safeDept = escapeHtml(employee.department || '-');
+        const safeDeptKey = escapeHtml(getBulkLeaveDepartmentKey(employee));
         const safePosition = escapeHtml(employee.position || '-');
         tr.innerHTML = `
-            <td><input type="checkbox" class="form-check-input bulk-leave-employee-check" id="${checkboxId}" data-emp-id="${safeEmpId}" onchange="updateBulkLeaveSelectionSummary()"></td>
+            <td><input type="checkbox" class="form-check-input bulk-leave-employee-check" id="${checkboxId}" data-emp-id="${safeEmpId}" data-dept-key="${safeDeptKey}" onchange="updateBulkLeaveSelectionSummary()"></td>
             <td class="fw-bold text-secondary">${safeDisplayNo}</td>
             <td><div class="fw-bold">${safeName}</div><div class="small text-muted">${safeDept}</div></td>
             <td>${safePosition}</td>
@@ -5105,6 +5142,26 @@ function setBulkLeaveSelection(mode) {
     });
     updateBulkLeaveSelectionSummary();
 } // End of setBulkLeaveSelection
+
+function setBulkLeaveSelectionByDepartment() {
+    const selectEl = document.getElementById('bulkLeaveDepartmentSelect');
+    const departmentKey = String(selectEl?.value || '').trim();
+    if (!departmentKey) {
+        showAlert('선택할 팀/부서를 먼저 골라주세요.');
+        return;
+    }
+    const checkboxes = Array.from(document.querySelectorAll('.bulk-leave-employee-check'));
+    let selectedCount = 0;
+    checkboxes.forEach((checkbox) => {
+        const shouldSelect = checkbox.dataset.deptKey === departmentKey;
+        checkbox.checked = shouldSelect;
+        if (shouldSelect) selectedCount += 1;
+    });
+    updateBulkLeaveSelectionSummary();
+    if (selectedCount === 0) {
+        showAlert('해당 팀/부서의 재직 직원을 찾지 못했습니다.');
+    }
+} // End of setBulkLeaveSelectionByDepartment
 
 function updateBulkLeaveSelectionSummary() {
     const checkboxes = Array.from(document.querySelectorAll('.bulk-leave-employee-check'));
@@ -5132,21 +5189,16 @@ function getBulkLeaveAdjustmentInput() {
     const typeEl = document.getElementById('bulkLeaveType');
     const daysEl = document.getElementById('bulkLeaveDays');
     const reasonEl = document.getElementById('bulkLeaveReason');
-    let adjType = typeEl?.value === '차감' ? '차감' : '지급';
+    const adjType = typeEl?.value === '차감' ? '차감' : '지급';
     const rawDays = Number(daysEl?.value);
     const reason = String(reasonEl?.value || '').trim();
-    if (!Number.isFinite(rawDays) || rawDays === 0) {
-        return { error: '조정할 휴가 일수를 입력해주세요.' };
+    if (!Number.isFinite(rawDays) || rawDays <= 0) {
+        return { error: '휴가 일수는 0보다 큰 값으로 입력해주세요.' };
     }
     if (!reason) {
         return { error: '일괄 조정 사유를 입력해주세요.' };
     }
-    let days = Math.abs(rawDays);
-    if (rawDays < 0) {
-        adjType = '차감';
-        if (typeEl) typeEl.value = '차감';
-    }
-    return { adjType, days, reason };
+    return { adjType, days: rawDays, reason };
 } // End of getBulkLeaveAdjustmentInput
 
 function setBulkLeaveApplyButtonState(isBusy) {
