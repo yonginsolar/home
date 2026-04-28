@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.79 | Change: 2026-04-22 - Switch accounting workspace to PC-first ERP layout. -->
+<!-- Version: v1.0.80 | Change: 2026-04-28 - Add Durunuri support invoice/total calculator. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.79 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.80 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -28,38 +28,38 @@
 </script>
   <script src="erp_runtime_guard.js"></script>
   <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
-  
+
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
     .main-container { max-width: 1380px; width: min(100%, 1380px); margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 25px; }
-    
+
     .stat-card { flex: 1; padding: 15px; border-radius: 12px; text-align: center; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     .bg-rev { background: linear-gradient(135deg, #2ecc71, #27ae60); }
     .bg-exp { background: linear-gradient(135deg, #e74c3c, #c0392b); }
     .bg-ast { background: linear-gradient(135deg, #3498db, #2980b9); }
-    
+
     .sub-card { flex: 1; padding: 10px; border-radius: 10px; text-align: center; border: 1px solid #eee; background-color: #fff; }
-    .text-vat { color: #d63384; font-weight: bold; } 
+    .text-vat { color: #d63384; font-weight: bold; }
     .text-cash { color: #0d6efd; font-weight: bold; }
-    
+
     .btn-report { width: 100%; font-weight: bold; border-radius: 10px; }
 	    .readonly-input { background-color: #f8f9fa; cursor: pointer; }
 	    .history-mode .btn { min-width: 94px; }
-    
+
     /* 리포트 스타일 */
     #reportContent { font-family: "Malgun Gothic", serif; font-size: 12px; }
     .rpt-title { text-align: center; font-size: 24px; font-weight: bold; margin-bottom: 20px; text-decoration: underline; }
     .rpt-header-tbl { width: 100%; border: 2px solid #000; margin-bottom: 20px; }
     .rpt-header-tbl th { background: #f1f3f5; padding: 5px; border: 1px solid #000; text-align: center; width: 15%; }
     .rpt-header-tbl td { padding: 5px; border: 1px solid #000; }
-    
+
     .rpt-tbl { width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #000; }
     .rpt-tbl th, .rpt-tbl td { border: 1px solid #000; padding: 6px 8px; }
     .rpt-tbl th { background: #f8f9fa; text-align: center; font-weight: bold; }
     .rpt-amt { text-align: right; font-family: 'Consolas', monospace; }
     .rpt-indent { padding-left: 20px !important; }
-    
+
     /* 인쇄 설정 */
     @media print {
         .page-break { page-break-before: always; }
@@ -67,11 +67,11 @@
         body { background: white; padding: 0; }
         .main-container { box-shadow: none; border: none; max-width: 100%; padding: 0; }
     }
-    
+
     .search-list-item:hover { background-color: #e9ecef; cursor: pointer; }
     .acc-item-name { font-size: 1.1rem; font-weight: bold; color: #333; }
     .acc-item-std { font-size: 0.85rem; color: #888; }
-    
+
     .hidden { display: none !important; }
     .ime-kr { ime-mode: active; }
   </style>
@@ -125,10 +125,10 @@
   </ul>
 
   <div class="tab-content no-print">
-    
+
     <div class="tab-pane fade show active" id="tabForm">
       <form id="erpForm" onsubmit="handleFormSubmit(event)">
-        
+
         <div class="row mb-3">
           <div class="col-6">
             <label class="small text-muted">날짜</label>
@@ -148,12 +148,12 @@
           <div class="d-flex gap-2 mb-2">
              <input type="radio" class="btn-check" name="settleMode" id="smNorm" value="" checked onchange="toggleSettleMode()">
              <label class="btn btn-sm btn-outline-secondary flex-fill" for="smNorm">일반거래</label>
-      <!-- 
+      <!--
               <input type="radio" class="btn-check" name="settleMode" id="smPre" value="pre_expense" onchange="toggleSettleMode()">
               <label class="btn btn-sm btn-outline-primary flex-fill" for="smPre">설립전/개인</label>
               <input type="radio" class="btn-check" name="settleMode" id="smReim" value="reimburse" onchange="toggleSettleMode()">
               <label class="btn btn-sm btn-outline-danger flex-fill" for="smReim">정산지급</label>
-      -->        
+      -->
           </div>
           <div id="payerInputDiv" class="hidden">
             <div class="input-group input-group-sm">
@@ -174,13 +174,13 @@
 <div class="btn-group w-100" role="group">
     <input type="radio" class="btn-check" name="inputType" id="t1" value="매출" onchange="resetAccountInput()">
     <label class="btn btn-outline-success" for="t1">매출</label>
-    
+
     <input type="radio" class="btn-check" name="inputType" id="t_etc_rev" value="영업외수익" onchange="resetAccountInput()">
     <label class="btn btn-outline-info" for="t_etc_rev">영업외</label>
 
     <input type="radio" class="btn-check" name="inputType" id="t2" value="비용" checked onchange="resetAccountInput()">
     <label class="btn btn-outline-danger" for="t2">비용</label>
-    
+
     <input type="radio" class="btn-check" name="inputType" id="t3" value="자산" onchange="resetAccountInput()">
     <label class="btn btn-outline-primary" for="t3">자산</label>
 
@@ -199,7 +199,7 @@
             <button class="btn btn-secondary" type="button" onclick="openSelModal()">🔍</button>
             <button class="btn btn-outline-secondary" type="button" onclick="openAddModal()">➕</button>
           </div>
-          
+
           <input type="hidden" id="hiddenItem">
           <input type="hidden" id="hiddenStandard">
           <input type="hidden" id="hiddenCode">
@@ -214,7 +214,7 @@
 
         <div class="mb-3"><label class="small text-muted">적요</label><input type="text" class="form-control ime-kr" id="inputDesc" required></div>
         <div class="mb-2"><label class="small text-muted">금액 (합계)</label><input type="number" class="form-control form-control-lg" id="inputAmount" placeholder="0" required min="0"></div>
-        
+
         <div class="d-flex justify-content-between align-items-center mt-3">
            <div class="d-flex align-items-center gap-2" id="cardOptionDiv">
                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="payMethod" onchange="toggleCard()"><label class="form-check-label small" for="payMethod">💳 카드결제</label></div>
@@ -223,7 +223,7 @@
            </div>
            <div class="ms-auto"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="vatCheck" checked><label class="form-check-label small" for="vatCheck">부가세포함</label></div></div>
         </div>
-        
+
         <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm mt-4" id="submitBtn">저장하기</button>
       </form>
     </div>
@@ -751,6 +751,45 @@
         <div class="small text-muted mb-2">
           근로자 지원분은 익월 급여 공제에서 차감(실지급 가산)되고, 사업주 지원분은 익월 4대보험 회사부담분에서 차감됩니다.
         </div>
+        <div class="border rounded bg-light p-3 mb-3">
+          <div class="row g-3">
+            <div class="col-lg-5">
+              <div class="fw-bold small mb-2">총액으로 배분</div>
+              <div class="row g-2">
+                <div class="col-sm-6">
+                  <label class="small text-muted">근로자 지원합계</label>
+                  <input type="number" min="0" step="1" class="form-control form-control-sm text-end" id="durunuriTotalEmpSupport" placeholder="0">
+                </div>
+                <div class="col-sm-6">
+                  <label class="small text-muted">사업주 지원합계</label>
+                  <input type="number" min="0" step="1" class="form-control form-control-sm text-end" id="durunuriTotalBizSupport" placeholder="0">
+                </div>
+              </div>
+              <button class="btn btn-outline-primary btn-sm mt-2 w-100" type="button" onclick="applyDurunuriTotalCalculator()">직원별 배분</button>
+            </div>
+            <div class="col-lg-7">
+              <div class="fw-bold small mb-2">4대보험 고지서 항목으로 계산</div>
+              <div class="row g-2">
+                <div class="col-md-4">
+                  <label class="small text-muted">국민연금 사회보험료 지원금</label>
+                  <input type="number" min="0" step="1" class="form-control form-control-sm text-end" id="durunuriInvoicePensionSupport" placeholder="0">
+                </div>
+                <div class="col-md-4">
+                  <label class="small text-muted">실업급여보험료 사회보험료 지원금</label>
+                  <input type="number" min="0" step="1" class="form-control form-control-sm text-end" id="durunuriInvoiceUnemploymentSupport" placeholder="0">
+                </div>
+                <div class="col-md-4">
+                  <label class="small text-muted">고용안정/직업능력개발보험료 지원금</label>
+                  <input type="number" min="0" step="1" class="form-control form-control-sm text-end" id="durunuriInvoiceStabilitySupport" placeholder="0">
+                </div>
+              </div>
+              <button class="btn btn-outline-primary btn-sm mt-2 w-100" type="button" onclick="applyDurunuriInvoiceCalculator()">고지서 기준 계산</button>
+            </div>
+          </div>
+          <div id="durunuriCalculatorHint" class="small text-muted mt-2">
+            목록을 불러오면 지원 귀속월 급여대장의 국민연금/고용보험 공제액 기준으로 직원별 금액을 나눕니다.
+          </div>
+        </div>
         <div id="durunuriSupportSummary" class="small text-muted mb-2">목록 로딩 전입니다.</div>
         <div class="table-responsive border rounded" style="max-height: 420px;">
           <table class="table table-sm align-middle mb-0">
@@ -891,14 +930,14 @@
       </div>
       <div class="modal-body">
         <label class="small text-muted mb-1">구분</label>
-        
+
         <select class="form-select mb-3" id="addTypeSelect" disabled>
             <option value="매출">매출</option>
             <option value="비용">비용</option>
             <option value="자산">자산</option>
             <option value="부채">부채</option>
             <option value="자본">자본</option>
-            <option value="영업외수익">영업외수익</option> 
+            <option value="영업외수익">영업외수익</option>
         </select>
     <label class="small text-muted mb-1">중분류</label><select class="form-select mb-2" id="addCategorySelect"></select><div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="chkManualCat" onchange="toggleManualCat()"><label class="form-check-label small" for="chkManualCat">직접 입력</label></div><input type="text" class="form-control mb-3 hidden" id="manualCatInput" placeholder="새 중분류명 입력">
     <label class="small text-muted mb-1">사용처</label><select class="form-select mb-3" id="addUsageSelect"><option value="전체">전체</option><option value="본사">본사</option><option value="1호기">1호기</option><option value="2호기">2호기</option></select>
@@ -975,7 +1014,7 @@ function toggleLabor(target) {
             <label class="small text-muted">사업자등록번호</label>
             <input type="text" class="form-control bg-light" id="bizNum" readonly>
           </div>
-          
+
           <div class="mb-3">
             <label class="small text-muted">설립일</label>
             <input type="date" class="form-control bg-light" id="estDate" readonly>
@@ -994,7 +1033,7 @@ function toggleLabor(target) {
 </div>
 
 <script>
-const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co'; 
+const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
 const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     global: {
@@ -1004,7 +1043,7 @@ const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     }
 });
 
-let mData=[], cardData=[]; 
+let mData=[], cardData=[];
 let selectModal, reportModal, addModal, infoModal, alertModal, confirmModal, closingModal, yearModal, durunuriModal, approvalSplitReclassModal, cashbackModal, cardManageModal;
 let myInfo = null, confirmCallback = null;
 let confirmReturnModalId = null, confirmAccepted = false;
@@ -1545,7 +1584,7 @@ window.onload = async function() {
     });
 
     // 데이터 로드 (순서 중요: 프로젝트 -> 마스터 -> 카드 -> 대시보드)
-    await loadProjects(); 
+    await loadProjects();
     await Promise.all([ loadMasterData(), loadCards(), refreshDashboard() ]);
     loadPrepayExpenseAccounts();
     loadReceivableIncomeAccounts();
@@ -2542,6 +2581,170 @@ async function openDurunuriSupportModal() {
     await refreshDurunuriSupportRows();
 }
 
+function parseDurunuriWon(value) {
+    const normalized = String(value ?? '').replace(/[^\d.-]/g, '');
+    const amount = Number(normalized || 0);
+    if (!Number.isFinite(amount)) return 0;
+    return Math.max(0, Math.round(amount));
+}
+
+function getDurunuriCombinedPremiumBase(row) {
+    return Math.max(0, Number(row?.ded_pension || 0)) + Math.max(0, Number(row?.ded_employ || 0));
+}
+
+function splitDurunuriSharedSupport(totalAmount) {
+    const total = parseDurunuriWon(totalAmount);
+    const emp = Math.floor(total / 2);
+    return { emp, biz: total - emp };
+}
+
+function allocateDurunuriAmount(totalAmount, items, weightSelector) {
+    const amount = parseDurunuriWon(totalAmount);
+    const safeItems = Array.isArray(items) ? items : [];
+    const allocations = safeItems.map(() => 0);
+    if (!(amount > 0)) return allocations;
+
+    const weighted = safeItems.map((item, index) => {
+        const weight = Math.max(0, Number(weightSelector(item) || 0));
+        return { index, weight };
+    }).filter((item) => item.weight > 0);
+    const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0);
+    if (!(totalWeight > 0)) return null;
+
+    let assigned = 0;
+    const shares = weighted.map((item) => {
+        const exact = amount * item.weight / totalWeight;
+        const floor = Math.floor(exact);
+        assigned += floor;
+        return {
+            index: item.index,
+            floor,
+            remainder: exact - floor
+        };
+    });
+    shares.sort((a, b) => {
+        if (b.remainder !== a.remainder) return b.remainder - a.remainder;
+        return a.index - b.index;
+    });
+
+    let remainder = amount - assigned;
+    shares.forEach((share) => {
+        const addOne = remainder > 0 ? 1 : 0;
+        allocations[share.index] = share.floor + addOne;
+        remainder -= addOne;
+    });
+    return allocations;
+}
+
+function syncDurunuriSupportCacheFromInputs() {
+    const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
+    const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
+    const bizByIndex = new Map(bizInputs.map((el) => [Number(el.dataset.index), el]));
+
+    empInputs.forEach((empEl) => {
+        const index = Number(empEl.dataset.index);
+        if (!Number.isInteger(index) || !durunuriSupportRowsCache[index]) return;
+        const bizEl = bizByIndex.get(index);
+        durunuriSupportRowsCache[index] = {
+            ...durunuriSupportRowsCache[index],
+            emp_support: parseDurunuriWon(empEl.value),
+            biz_support: parseDurunuriWon(bizEl?.value)
+        };
+    });
+}
+
+function updateDurunuriCalculatorHint(items) {
+    const hint = document.getElementById('durunuriCalculatorHint');
+    if (!hint) return;
+    const rows = Array.isArray(items) ? items : durunuriSupportRowsCache;
+    const pensionBase = rows.reduce((sum, row) => sum + Math.max(0, Number(row.ded_pension || 0)), 0);
+    const employBase = rows.reduce((sum, row) => sum + Math.max(0, Number(row.ded_employ || 0)), 0);
+    const matched = rows.filter((row) => getDurunuriCombinedPremiumBase(row) > 0).length;
+    if (!rows.length) {
+        hint.textContent = '목록을 불러오면 지원 귀속월 급여대장의 국민연금/고용보험 공제액 기준으로 직원별 금액을 나눕니다.';
+        return;
+    }
+    if (pensionBase + employBase <= 0) {
+        hint.textContent = '지원 귀속월 급여대장에서 국민연금/고용보험 공제액을 찾지 못했습니다. 급여대장을 확인하거나 직원별 금액을 직접 입력하세요.';
+        return;
+    }
+    hint.textContent = `배분 기준: 급여대장 매칭 ${matched}명 · 국민연금 공제 ${pensionBase.toLocaleString()}원 · 고용보험 공제 ${employBase.toLocaleString()}원`;
+}
+
+function updateDurunuriSupportSummaryFromInputs() {
+    const summary = document.getElementById('durunuriSupportSummary');
+    if (!summary) return;
+    syncDurunuriSupportCacheFromInputs();
+    const rows = Array.isArray(durunuriSupportRowsCache) ? durunuriSupportRowsCache : [];
+    if (rows.length === 0) {
+        summary.textContent = '대상 직원이 없습니다.';
+        return;
+    }
+    const empTotal = rows.reduce((sum, row) => sum + Math.max(0, Number(row.emp_support || 0)), 0);
+    const bizTotal = rows.reduce((sum, row) => sum + Math.max(0, Number(row.biz_support || 0)), 0);
+    summary.textContent = `대상 ${rows.length}명 · 근로자 지원합계 ${empTotal.toLocaleString()}원 · 사업주 지원합계 ${bizTotal.toLocaleString()}원`;
+}
+
+function setDurunuriSupportInputValues(empAllocations, bizAllocations) {
+    const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
+    const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
+    empInputs.forEach((input) => {
+        const index = Number(input.dataset.index);
+        input.value = parseDurunuriWon(empAllocations[index] || 0);
+    });
+    bizInputs.forEach((input) => {
+        const index = Number(input.dataset.index);
+        input.value = parseDurunuriWon(bizAllocations[index] || 0);
+    });
+    updateDurunuriSupportSummaryFromInputs();
+}
+
+function applyDurunuriTotalCalculator() {
+    const rows = Array.isArray(durunuriSupportRowsCache) ? durunuriSupportRowsCache : [];
+    if (rows.length === 0) return showAlert('알림', '먼저 목록을 불러오세요.');
+    const empTotal = parseDurunuriWon(document.getElementById('durunuriTotalEmpSupport')?.value);
+    const bizTotal = parseDurunuriWon(document.getElementById('durunuriTotalBizSupport')?.value);
+    if (!(empTotal > 0 || bizTotal > 0)) return showAlert('알림', '배분할 지원금 합계를 입력하세요.');
+
+    const empAllocations = allocateDurunuriAmount(empTotal, rows, getDurunuriCombinedPremiumBase);
+    const bizAllocations = allocateDurunuriAmount(bizTotal, rows, getDurunuriCombinedPremiumBase);
+    if (!empAllocations || !bizAllocations) {
+        return showAlert('알림', '지원 귀속월 급여대장에 국민연금/고용보험 공제액이 없어 자동 배분할 수 없습니다.');
+    }
+    setDurunuriSupportInputValues(empAllocations, bizAllocations);
+}
+
+function applyDurunuriInvoiceCalculator() {
+    const rows = Array.isArray(durunuriSupportRowsCache) ? durunuriSupportRowsCache : [];
+    if (rows.length === 0) return showAlert('알림', '먼저 목록을 불러오세요.');
+
+    const pensionTotal = parseDurunuriWon(document.getElementById('durunuriInvoicePensionSupport')?.value);
+    const unemploymentTotal = parseDurunuriWon(document.getElementById('durunuriInvoiceUnemploymentSupport')?.value);
+    const stabilityTotal = parseDurunuriWon(document.getElementById('durunuriInvoiceStabilitySupport')?.value);
+    if (!(pensionTotal > 0 || unemploymentTotal > 0 || stabilityTotal > 0)) {
+        return showAlert('알림', '고지서의 사회보험료 지원금 금액을 입력하세요.');
+    }
+
+    const pensionSplit = splitDurunuriSharedSupport(pensionTotal);
+    const unemploymentSplit = splitDurunuriSharedSupport(unemploymentTotal);
+    const empPension = allocateDurunuriAmount(pensionSplit.emp, rows, (row) => row.ded_pension);
+    const bizPension = allocateDurunuriAmount(pensionSplit.biz, rows, (row) => row.ded_pension);
+    if (!empPension || !bizPension) {
+        return showAlert('알림', '국민연금 지원금을 배분할 급여대장 국민연금 공제액이 없습니다.');
+    }
+
+    const empUnemployment = allocateDurunuriAmount(unemploymentSplit.emp, rows, (row) => row.ded_employ);
+    const bizUnemployment = allocateDurunuriAmount(unemploymentSplit.biz, rows, (row) => row.ded_employ);
+    const bizStability = allocateDurunuriAmount(stabilityTotal, rows, (row) => row.ded_employ);
+    if (!empUnemployment || !bizUnemployment || !bizStability) {
+        return showAlert('알림', '고용보험 지원금을 배분할 급여대장 고용보험 공제액이 없습니다.');
+    }
+
+    const empAllocations = rows.map((_, index) => (empPension[index] || 0) + (empUnemployment[index] || 0));
+    const bizAllocations = rows.map((_, index) => (bizPension[index] || 0) + (bizUnemployment[index] || 0) + (bizStability[index] || 0));
+    setDurunuriSupportInputValues(empAllocations, bizAllocations);
+}
+
 function renderDurunuriSupportRows(items) {
     const tbody = document.getElementById('durunuriSupportBody');
     const summary = document.getElementById('durunuriSupportSummary');
@@ -2550,6 +2753,7 @@ function renderDurunuriSupportRows(items) {
     if (safeItems.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">표시할 직원이 없습니다.</td></tr>';
         summary.textContent = '대상 직원이 없습니다.';
+        updateDurunuriCalculatorHint([]);
         return;
     }
     const rowsHtml = safeItems.map((item, index) => {
@@ -2569,6 +2773,7 @@ function renderDurunuriSupportRows(items) {
                         class="form-control form-control-sm text-end durunuri-emp-input"
                         data-index="${index}"
                         value="${empSupport}"
+                        oninput="updateDurunuriSupportSummaryFromInputs()"
                     >
                 </td>
                 <td>
@@ -2579,15 +2784,15 @@ function renderDurunuriSupportRows(items) {
                         class="form-control form-control-sm text-end durunuri-biz-input"
                         data-index="${index}"
                         value="${bizSupport}"
+                        oninput="updateDurunuriSupportSummaryFromInputs()"
                     >
                 </td>
             </tr>
         `;
     }).join('');
     tbody.innerHTML = rowsHtml;
-    const empTotal = safeItems.reduce((sum, row) => sum + Math.max(0, Number(row.emp_support || 0)), 0);
-    const bizTotal = safeItems.reduce((sum, row) => sum + Math.max(0, Number(row.biz_support || 0)), 0);
-    summary.textContent = `대상 ${safeItems.length}명 · 근로자 지원합계 ${empTotal.toLocaleString()}원 · 사업주 지원합계 ${bizTotal.toLocaleString()}원`;
+    updateDurunuriCalculatorHint(safeItems);
+    updateDurunuriSupportSummaryFromInputs();
 }
 
 async function refreshDurunuriSupportRows() {
@@ -2604,28 +2809,48 @@ async function refreshDurunuriSupportRows() {
     if (applyEl) applyEl.value = applyMonth;
     if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">목록을 불러오는 중입니다.</td></tr>';
     if (summaryEl) summaryEl.textContent = '로딩 중...';
+    updateDurunuriCalculatorHint([]);
 
     const coopId = String(myInfo?.coop_id || '').trim();
-    const [{ data: employees, error: empError }, supportMap] = await Promise.all([
+    const [
+        { data: employees, error: empError },
+        { data: salaryRows, error: salaryError },
+        supportMap
+    ] = await Promise.all([
         _supabase
             .from('ref_employees')
             .select('emp_id,emp_name,resign_date')
             .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
             .order('emp_id', { ascending: true }),
+        _supabase
+            .from('hr_salary')
+            .select('emp_id,ded_pension,ded_employ,co_total')
+            .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
+            .eq('year_month', sourceMonth),
         module.getSupportMap(_supabase, applyMonth)
     ]);
     if (empError) return showAlert('오류', '직원 목록 조회 실패: ' + empError.message);
+    if (salaryError) return showAlert('오류', '급여대장 조회 실패: ' + salaryError.message);
+
+    const salaryByEmpId = new Map((Array.isArray(salaryRows) ? salaryRows : []).map((row) => [
+        String(row.emp_id || '').trim(),
+        row
+    ]));
 
     const rows = (Array.isArray(employees) ? employees : [])
         .filter((row) => String(row?.emp_id || '').trim())
         .map((row) => {
             const empId = String(row.emp_id || '').trim();
             const support = supportMap?.[empId] || null;
+            const salary = salaryByEmpId.get(empId) || {};
             return {
                 emp_id: empId,
                 emp_name: String(row.emp_name || '').trim(),
                 emp_support: Math.max(0, Number(support?.emp_support || 0)),
-                biz_support: Math.max(0, Number(support?.biz_support || 0))
+                biz_support: Math.max(0, Number(support?.biz_support || 0)),
+                ded_pension: Math.max(0, Number(salary.ded_pension || 0)),
+                ded_employ: Math.max(0, Number(salary.ded_employ || 0)),
+                co_total: Math.max(0, Number(salary.co_total || 0))
             };
         });
 
@@ -2634,6 +2859,7 @@ async function refreshDurunuriSupportRows() {
 }
 
 function collectDurunuriSupportRowsFromInputs() {
+    syncDurunuriSupportCacheFromInputs();
     const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
     const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
     const bizByIndex = new Map(bizInputs.map((el) => [Number(el.dataset.index), el]));
@@ -2645,8 +2871,8 @@ function collectDurunuriSupportRowsFromInputs() {
         return {
             emp_id: String(base.emp_id || '').trim(),
             emp_name: String(base.emp_name || '').trim(),
-            emp_support: Math.max(0, Math.round(Number(empEl.value || 0))),
-            biz_support: Math.max(0, Math.round(Number(bizEl?.value || 0)))
+            emp_support: parseDurunuriWon(empEl.value),
+            biz_support: parseDurunuriWon(bizEl?.value)
         };
     }).filter((row) => row.emp_id);
 }
@@ -3348,7 +3574,7 @@ async function loadProjects() {
     const { data, error } = await _supabase.from('ref_projects').select('*').order('id');
     const sel = document.getElementById("projectSelect");
     sel.innerHTML = "";
-    
+
     if (data && data.length > 0) {
         data.forEach(p => sel.add(new Option(p.project_name, p.project_name)));
     } else {
@@ -3362,7 +3588,7 @@ async function loadProjects() {
 // [수정] 마스터 데이터 로드 (SpecialType, Tax_Free, Usage 확인)
 async function loadMasterData() {
     const { data } = await _supabase.from('ac_master').select('*').order('Type').order('Standard').order('Item');
-    if(data) mData = data; 
+    if(data) mData = data;
 }
 
 async function loadCards() {
@@ -3900,10 +4126,10 @@ function resetAccountInput() {
     document.getElementById("cardOptionDiv").style.display = "none";
 }
 
-function openSelModal() { 
-    filterAccounts(); 
-    selectModal.show(); 
-    setTimeout(() => document.getElementById("accountSearchInput").focus(), 300); 
+function openSelModal() {
+    filterAccounts();
+    selectModal.show();
+    setTimeout(() => document.getElementById("accountSearchInput").focus(), 300);
 }
 
 // [수정] 계정과목 검색 필터 (Usage 연동)
@@ -3912,15 +4138,15 @@ function filterAccounts() {
     const k = document.getElementById("accountSearchInput").value.trim();
     const forcedType = selectContext && selectContext.forcedType;
     const type = forcedType || document.querySelector('input[name="inputType"]:checked').value;
-    
+
     // [추가] 현재 선택된 프로젝트 값을 가져옵니다. (본사 vs 발전소 구분용)
     const currentProject = (selectContext && selectContext.projectOverride)
         ? selectContext.projectOverride
         : document.getElementById("projectSelect").value;
     const list = document.getElementById("accountList");
-    
+
     list.innerHTML = "";
-    
+
     const filtered = mData.filter(m => {
         const mType = m.Type || m.type;
         const mItem = m.Item || m.item;
@@ -3943,26 +4169,26 @@ function filterAccounts() {
 
         return typeMatch && keywordMatch && usageMatch;
     });
-    
-    if(filtered.length === 0) { 
-        list.innerHTML = "<div class='p-3 text-center text-muted'>검색 결과가 없습니다.</div>"; 
-        return; 
+
+    if(filtered.length === 0) {
+        list.innerHTML = "<div class='p-3 text-center text-muted'>검색 결과가 없습니다.</div>";
+        return;
     }
 
     // 화면에 리스트 그리기
     filtered.forEach(acc => {
         const d = document.createElement("div");
         d.className = "list-group-item list-group-item-action p-2 ps-3 border-0 border-bottom search-list-item";
-        
-        const isTaxFree = acc.tax_free; 
+
+        const isTaxFree = acc.tax_free;
         const specialRaw = acc.special_code || "";
         const specialType = normalizeSpecialCode(specialRaw);
-        
+
         const badge = (isTaxFree === true || isTaxFree === 'TRUE' || isTaxFree === '면세') ? '<span class="badge bg-secondary ms-2" style="font-size:0.7em;">면세</span>' : '';
         const spBadge = (specialRaw) ? `<span class="badge bg-info text-dark ms-1" style="font-size:0.7em;">${specialRaw}</span>` : '';
 
         d.innerHTML = `<div class="d-flex justify-content-between align-items-center"><div><span class="acc-item-name">${acc.Item}</span><span class="acc-item-std ms-1">(${acc.Standard})</span></div><div>${spBadge}${badge}</div></div>`;
-        
+
         d.onclick = () => {
             if (selectContext && selectContext.mode === 'prepayExpense') {
                 setPrepayExpenseAccount(acc.Item);
@@ -3993,11 +4219,11 @@ function filterAccounts() {
             document.getElementById("displayAccount").value = acc.Item;
             document.getElementById("hiddenItem").value = acc.Item;
             document.getElementById("hiddenStandard").value = acc.Standard;
-            document.getElementById("hiddenCode").value = acc.Code || acc.code || ""; 
-            document.getElementById("isTaxFree").value = isTaxFree; 
-            document.getElementById("specialMode").value = specialType || ""; 
+            document.getElementById("hiddenCode").value = acc.Code || acc.code || "";
+            document.getElementById("isTaxFree").value = isTaxFree;
+            document.getElementById("specialMode").value = specialType || "";
             document.getElementById("hiddenSpecialRaw").value = specialRaw || "";
-            
+
             // 특수 UI 업데이트 함수 호출
             updateDynamicUI(acc.Item, acc.Type, specialType, isTaxFree, specialRaw);
             selectModal.hide();
@@ -4011,11 +4237,11 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
     const area = document.getElementById("dynamicArea");
     const vatCheck = document.getElementById("vatCheck");
     const cardDiv = document.getElementById("cardOptionDiv");
-    
-    area.innerHTML = ""; 
+
+    area.innerHTML = "";
     document.getElementById("hiddenCounterAccount").value = "";
     document.getElementById("hiddenCounterType").value = "";
-    
+
     // ▼ [신규] 법인세 신고용 증빙유형 선택 박스 추가 (기존 로직 간섭 없음)
     let evidenceHtml = `
         <div class="mb-2 p-2 bg-white border rounded">
@@ -4032,14 +4258,14 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
     // ▲ [신규 끝]
 
     // 1. 면세 처리 (Tax_Free 칼럼 체크)
-    if (isTaxFree === true || isTaxFree === 'TRUE' || isTaxFree === '면세') { 
-        vatCheck.checked = false; 
-        vatCheck.disabled = true; 
-    } else { 
-        vatCheck.disabled = false; 
-        vatCheck.checked = true; 
+    if (isTaxFree === true || isTaxFree === 'TRUE' || isTaxFree === '면세') {
+        vatCheck.checked = false;
+        vatCheck.disabled = true;
+    } else {
+        vatCheck.disabled = false;
+        vatCheck.checked = true;
     }
-    
+
     // 초기화
     document.getElementById("payMethod").checked = false;
     document.getElementById("cardSelect").classList.add("hidden");
@@ -4049,11 +4275,11 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
     if (specialCode === "interest_inc") { // 이자수익
         area.innerHTML += `<div class="special-box alert alert-primary p-2 mb-2"><small class="fw-bold">ℹ️ 이자수익 (원천징수 자동분개)</small><br>세전 이자총액을 입력하세요. (15.4% 자동 차감)</div>`;
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
-    } 
+    }
     else if (specialCode === "salary" || specialCode === "retirement_pension") { // 급여, 퇴직연금
         area.innerHTML += `<div class="special-box alert alert-success p-2 mb-2"><small class="fw-bold">ℹ️ 인건비 처리</small><br>4대보험/세금 등은 급여연동 기능을 권장합니다.</div>`;
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
-    } 
+    }
     else if (specialCode === "insurance") { // 4대보험 납부 (부채 상환 및 차액 정산)
         // 기본값: 지난달 (보통 10일에 납부하므로 지난달 귀속분)
         const now = new Date();
@@ -4065,7 +4291,7 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
             <div class="special-box alert alert-primary p-2 mb-2">
                 <small class="fw-bold">ℹ️ 4대보험 통합 납부</small>
                 <div class="x-small text-muted mb-2">지난달 급여연동으로 잡힌 부채를 상환합니다.</div>
-                
+
                 <div class="input-group input-group-sm mb-2">
                     <span class="input-group-text">귀속월</span>
                     <input type="month" class="form-control" id="payTargetMonthStart" value="${lastMonthYM}">
@@ -4096,7 +4322,7 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
 
                 <div class="form-text x-small text-danger fw-bold">* 아래 '금액' 란에 실제 통장 출금액을 입력하세요.<br>* 차액은 선급금/미지급금 정산대기로 누적하고, 확정 후 합산 정산하세요.</div>
             </div>`;
-        
+
         // 부가세 체크 해제 및 비활성, 카드입력 숨김
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
         setTimeout(() => refreshInsurancePendingSummary(), 0);
@@ -4104,7 +4330,7 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
     else if (specialCode === "loan_pay") { // 대출상환
         area.innerHTML += `<div class="special-box alert alert-warning p-2 mb-2"><small class="fw-bold">ℹ️ 대출 원리금 상환</small><div class="input-group input-group-sm mt-1"><span class="input-group-text">이자 포함분</span><input type="number" class="form-control" id="loanInterest" placeholder="이 중 이자는 얼마?" min="0" oninput="validNum(this)"></div></div>`;
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
-    } 
+    }
     else if (specialCode === "labor") { // 인적용역
         area.innerHTML += `<div class="special-box alert alert-danger p-2 mb-2"><small class="fw-bold">ℹ️ 사업소득세 (원천징수)</small><div class="btn-group btn-group-sm w-100 mt-1"><input type="radio" class="btn-check" name="laborTaxRate" id="tax33" value="0.033" checked><label class="btn btn-outline-secondary" for="tax33">3.3% (일반)</label><input type="radio" class="btn-check" name="laborTaxRate" id="tax88" value="0.088"><label class="btn btn-outline-secondary" for="tax88">8.8% (강사료 등)</label></div></div>`;
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
@@ -4152,9 +4378,9 @@ function toggleSettleMode() {
     const inputDiv = document.getElementById("payerInputDiv");
     const payerLabel = document.getElementById("payerLabel");
     const badge = document.getElementById("modeBadge");
-    
+
     inputDiv.classList.add("hidden");
-    
+
     if (mode === "pre_expense") {
         inputDiv.classList.remove("hidden");
         payerLabel.innerText = "지출자";
@@ -4168,7 +4394,7 @@ function toggleSettleMode() {
     }
 }
 
-function toggleCard() { 
+function toggleCard() {
     const chk = document.getElementById("payMethod").checked;
     const sel = document.getElementById("cardSelect");
     if(chk) { sel.classList.remove("hidden"); sel.required = true; }
@@ -4845,7 +5071,7 @@ async function handleFormSubmit(e) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const item = document.getElementById("hiddenItem").value;
     if(!item) return showAlert("오류", "계정과목을 선택하세요.");
-    
+
     const fDate = document.getElementById("dateField").value;
     const project = document.getElementById("projectSelect").value;
     const type = document.querySelector('input[name="inputType"]:checked').value;
@@ -4866,7 +5092,7 @@ async function handleFormSubmit(e) {
         return;
     }
     await submitAccounting(ctx);
-} 
+}
 
 async function submitAccounting(ctx) {
     const { item, fDate, project, type, settleMode, desc, totalAmt, useVAT, evidenceType, specialCode, isCard, cardName, payerName } = ctx;
@@ -4898,10 +5124,10 @@ async function submitAccounting(ctx) {
             const bookYesu = Number(document.getElementById("hiddenYesu").value);
             const bookMigigeub = Number(document.getElementById("hiddenMigigeub").value);
             const bookTotal = bookYesu + bookMigigeub;
-            
+
             if (bookTotal === 0 && totalAmt > 0) return showAlert("오류", "먼저 [장부 조회] 버튼을 눌러 부채 내역을 불러오세요.");
-            
-            const diff = totalAmt - bookTotal; 
+
+            const diff = totalAmt - bookTotal;
 
             if (bookYesu > 0) entries.push({ Date: fDate, Type: '부채', Account: '예수금', Description: `${finalDesc} (직원분 상환)`, Debit: bookYesu, Credit: 0, Project: project, Operator: writer, Evidence_Type: '금융거래' });
             if (bookMigigeub > 0) entries.push({ Date: fDate, Type: '부채', Account: '미지급비용', Description: `${finalDesc} (회사분 상환)`, Debit: bookMigigeub, Credit: 0, Project: project, Operator: writer, Evidence_Type: '금융거래' });
@@ -4933,7 +5159,7 @@ async function submitAccounting(ctx) {
             entries.push({ Date: fDate, Type: '자산', Account: '선납세금', Description: `[${item}] 원천징수`, Debit: taxAmt, Credit: 0, Project: project, Operator: writer, Evidence_Type: '원천징수' });
             entries.push({ Date: fDate, Type: '자산', Account: '보통예금', Description: finalDesc, Debit: realIn, Credit: 0, Project: project, Operator: writer, Evidence_Type: '금융거래' });
         }
-    } 
+    }
     // ==========================================
     // [2] 고급 분개 모드 (Advanced Mode)
     // ==========================================
@@ -4963,16 +5189,16 @@ async function submitAccounting(ctx) {
     // ==========================================
     // [3] 일반 분개 모드 (Normal Mode)
     // ==========================================
-    else { 
+    else {
         if (settleMode === 'pre_expense') { // 설립전 비용
             entries.push({ Date: fDate, Type: type, Account: item, Description: finalDesc, Debit: netAmount, Credit: 0, Project: project, Operator: writer, Evidence_Type: evidenceType });
             if(vatAmount > 0) entries.push({ Date: fDate, Type: '자산', Account: '부가세대급금', Description: `[${item}] 부가세`, Debit: vatAmount, Credit: 0, Project: project, Operator: writer, Evidence_Type: "세금계산서" });
             entries.push({ Date: fDate, Type: '부채', Account: '미지급금', Description: finalDesc, Debit: 0, Credit: totalAmt, Project: project, Operator: writer, Evidence_Type: evidenceType });
-        } 
+        }
         else if (settleMode === 'reimburse') { // 정산 지급
             entries.push({ Date: fDate, Type: '부채', Account: '미지급금', Description: finalDesc, Debit: totalAmt, Credit: 0, Project: project, Operator: writer, Evidence_Type: evidenceType });
             entries.push({ Date: fDate, Type: '자산', Account: '보통예금', Description: finalDesc, Debit: 0, Credit: totalAmt, Project: project, Operator: writer, Evidence_Type: "금융거래" });
-        } 
+        }
         else { // 일반 거래
             if (type === '매출' || type === '영업외수익') {
                 entries.push({ Date: fDate, Type: type, Account: item, Description: finalDesc, Debit: 0, Credit: netAmount, Project: project, Operator: writer, Evidence_Type: evidenceType });
@@ -4985,7 +5211,7 @@ async function submitAccounting(ctx) {
                 entries.push({ Date: fDate, Type: '비용', Account: item, Description: finalDesc, Debit: netAmount, Credit: 0, Project: project, Operator: writer, Evidence_Type: evidenceType });
                 if(vatAmount > 0) entries.push({ Date: fDate, Type: '자산', Account: '부가세대급금', Description: `[${item}] 부가세`, Debit: vatAmount, Credit: 0, Project: project, Operator: writer, Evidence_Type: "세금계산서" });
                 entries.push({ Date: fDate, Type: creditType, Account: creditAcc, Description: finalDesc, Debit: 0, Credit: totalAmt, Project: project, Operator: writer, Evidence_Type: credEvid });
-            } else { 
+            } else {
                 const isDebit = (type === "자산" || type === "자본반환" || type === "부채감소");
                 const db = isDebit ? totalAmt : 0;
                 const cr = isDebit ? 0 : totalAmt;
@@ -5610,7 +5836,7 @@ function confirmSync(type) {
             });
         })();
     }
-      
+
     // (2) 전자결재 연동
     else if (type === 'approval') {
         (async () => {
@@ -5884,7 +6110,7 @@ function confirmSync(type) {
             });
         })();
     }
-      
+
     // (4) 기부금 연동
     else if (type === 'donation') {
         (async () => {
@@ -6758,11 +6984,11 @@ async function deleteTx(id, transId) {
 
     showConfirm("전표 삭제", "이 전표와 관련된 모든 분개(차/대변 전체)를 삭제하시겠습니까?", async function() {
         // Trans_ID가 같은 모든 행을 삭제
-        const { error } = await _supabase.from('ac_journal').delete().eq('Trans_ID', transId); 
+        const { error } = await _supabase.from('ac_journal').delete().eq('Trans_ID', transId);
         if(error) showAlert("오류", "삭제 실패");
         else {
             await logAudit('accounting.delete', transId, '전표 삭제(전체)', null);
-            loadHistory(); 
+            loadHistory();
             refreshDashboard();
         }
     });
@@ -6790,11 +7016,11 @@ async function confAdd() {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const type = document.getElementById("addTypeSelect").value;
     const name = document.getElementById("addNewItemName").value;
-    
+
     // 중분류 처리 (기존 로직 유지)
     let cat = document.getElementById("addCategorySelect").value;
     if(document.getElementById("chkManualCat").checked) cat = document.getElementById("manualCatInput").value;
-    
+
     const usage = document.getElementById("addUsageSelect").value;
 
     if(!name || !cat) return showAlert("알림", "내용을 입력하세요");
@@ -6807,26 +7033,26 @@ async function confAdd() {
     // 2. DB 저장 데이터 매핑
     // (1) SpecialType: 선택된 값들을 쉼표(,)로 연결 (예: "tax_free,labor_3.3")
     const specialTypeVal = attrValues.join(',');
-    
+
     // (2) Tax_Free: 'tax_free' 값이 포함되어 있으면 TRUE, 아니면 FALSE
     const isTaxFree = attrValues.includes('tax_free') ? "TRUE" : "FALSE";
 
     // DB Insert
     // SpecialType 칼럼 추가됨
     const { error } = await _supabase.from('ac_master').insert({
-        Type: type, 
-        Standard: cat, 
-        Item: name, 
-        Usage: usage, 
-        tax_free: isTaxFree,         
-        special_code: specialTypeVal 
+        Type: type,
+        Standard: cat,
+        Item: name,
+        Usage: usage,
+        tax_free: isTaxFree,
+        special_code: specialTypeVal
     });
 
     if (error) {
         showAlert("오류", "저장 실패: " + error.message);
     } else {
-        showAlert("성공", "추가되었습니다."); 
-        addModal.hide(); 
+        showAlert("성공", "추가되었습니다.");
+        addModal.hide();
         loadMasterData();
         loadPrepayExpenseAccounts();
         loadReceivableIncomeAccounts();
@@ -6846,8 +7072,8 @@ async function openInfoModal() {
     const { data } = await _supabase.from('ref_company_info').select('*').eq('coop_id', coopId);
     const map = {}; if(data) data.forEach(i=>map[i.key]=i.value);
     document.getElementById("orgName").value = map['orgName']||"";
-    document.getElementById("ceoName").value = map['ceoName']||""; 
-    document.getElementById("bizNum").value = map['bizNum']||"";   
+    document.getElementById("ceoName").value = map['ceoName']||"";
+    document.getElementById("bizNum").value = map['bizNum']||"";
     document.getElementById("estDate").value = map['estDate']||"";
     const { data: cap } = await _supabase.from('ac_journal').select('*').eq('Account','출자금');
     let totalCap=0; if(cap) cap.forEach(c=>totalCap+=c.Credit);
@@ -7293,11 +7519,11 @@ async function printReport() {
             <tr><td class="fw-bold">I. 처분전 이익잉여금</td><td class="rpt-amt fw-bold">${totalSurplus.toLocaleString()}</td></tr>
             <tr><td class="rpt-indent">1. 전기이월 이익잉여금</td><td class="rpt-amt">0</td></tr>
             <tr><td class="rpt-indent">2. 당기순이익</td><td class="rpt-amt">${netIncome.toLocaleString()}</td></tr>
-            
+
             <tr><td class="fw-bold">II. 이익잉여금 처분액</td><td class="rpt-amt fw-bold">${totalAppropriation.toLocaleString()}</td></tr>
             <tr><td class="rpt-indent">1. 법정적립금 (10% 이상)</td><td class="rpt-amt">${surplus.legal.toLocaleString()}</td></tr>
             <tr><td class="rpt-indent">2. 임의적립금 (사업준비금 등)</td><td class="rpt-amt">${surplus.voluntary.toLocaleString()}</td></tr>
-            
+
             <tr><td class="fw-bold bg-light">III. 차기이월 이익잉여금</td><td class="rpt-amt fw-bold text-primary" style="font-size:1.1em;">${carriedForward.toLocaleString()}</td></tr>
         </table>
         <div class="alert alert-info small p-2 mt-2">
@@ -7591,7 +7817,7 @@ async function fetchLiabilitySum() {
     // 화면 표시
     document.getElementById("txtBookVal").innerText = totalBook.toLocaleString() + "원";
     document.getElementById("txtDetailVal").innerText = `[${periodLabel}] (예수금: ${totalYesu.toLocaleString()} + 미지급비용: ${totalMigigeub.toLocaleString()})`;
-    
+
     // 숨겨진 필드에 값 저장 (저장 시 사용)
     document.getElementById("hiddenBookVal").value = totalBook;
     document.getElementById("hiddenYesu").value = totalYesu;
