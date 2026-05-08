@@ -1,7 +1,7 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.9';
+  const MODULE_VERSION = 'v1.0.10';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
@@ -170,7 +170,7 @@
       { label: '장기요양', value: row.ded_care },
       { label: '고용보험', value: row.ded_employ },
       { label: '소득세', value: row.ded_income },
-      { label: '지방세', value: row.ded_local },
+      { label: '지방소득세', value: row.ded_local },
       { label: etcLabel || '기타공제', value: toInt(row.ded_advance) + toInt(row.ded_capital) },
       { label: '공제계', value: row.ded_total, highlight: true }
     ], { className: 'ledger-deduction-grid' });
@@ -322,7 +322,7 @@
         { label: '장기요양', value: totals.ded_care },
         { label: '고용보험', value: totals.ded_employ },
         { label: '소득세', value: totals.ded_income },
-        { label: '지방세', value: totals.ded_local },
+        { label: '지방소득세', value: totals.ded_local },
         { label: state.dedEtcLabel || '기타공제', value: totals.ded_etc },
         { label: '공제계', value: totals.ded_total, highlight: true }
       ], { className: 'ledger-deduction-grid' }) + '</th>' +

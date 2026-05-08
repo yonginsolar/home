@@ -1,4 +1,4 @@
-/* Version: v1.0.8 | Change: 2026-03-29 - Escape printable data and validate print asset URLs before writing popup HTML. */
+/* Version: v1.0.9 | Change: 2026-05-08 - Rename salary ledger local tax label to 지방소득세. */
 const PrintService = {
     // 1. 공통 CSS 스타일 (유지보수를 위해 이곳에서 통합 관리)
     styles: {
@@ -346,7 +346,7 @@ const PrintService = {
                     </tr>
                     <tr style="background:#f0f0f0;">
                         <th>기본급</th><th>식대</th><th>차량</th><th>기타수당</th><th>상여</th><th style="background:#fff3e0;">지급계</th>
-                        <th>국민연금</th><th>건강보험</th><th>장기요양</th><th>고용보험</th><th>소득세</th><th>지방세</th><th>기타공제</th>
+                        <th>국민연금</th><th>건강보험</th><th>장기요양</th><th>고용보험</th><th>소득세</th><th>지방소득세</th><th>기타공제</th>
                     </tr>
                 </thead>
                 <tbody>${data.tableBody}</tbody>
