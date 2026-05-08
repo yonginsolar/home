@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.57
-Change: 2026-04-28 - Complete bulk leave adjustment without stacked loading/success modals.
+Version: v1.0.58
+Change: 2026-05-08 - Use official payroll withholding table with employee tax profile and settlement fields.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.57 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.58 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -34,6 +34,7 @@ Change: 2026-04-28 - Complete bulk leave adjustment without stacked loading/succ
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="print_service.js?v=20260326-2"></script>
+  <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
   <script src="salary_ledger_module.js?v=20260331-2"></script>
   <script src="leave_ledger.js?v=20260409-1258-1"></script>
@@ -276,6 +277,45 @@ Change: 2026-04-28 - Complete bulk leave adjustment without stacked loading/succ
         <label class="small fw-bold text-primary">💰 월 지급 총액 (연봉 ÷ 12)</label>
         <input type="number" id="payTotalFixed" class="form-control fw-bold fs-5 bg-white" oninput="recalcSalaryComponents()">
         <div class="form-text x-small">이 금액을 기준으로 기본급과 수당을 나눕니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-card border mb-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12">
+        <label class="small fw-bold text-primary">🧮 근로소득 간이세액표 설정</label>
+        <div class="form-text x-small mb-2">기본값은 부양가족 1명, 자녀 0명, 100% 원천징수입니다. 직원별로 저장하면 다음 급여부터 기본값으로 불러옵니다.</div>
+      </div>
+      <div class="col-md-4">
+        <label class="small text-muted">공제대상 가족 수</label>
+        <input type="number" id="salaryTaxFamilyCount" class="form-control" min="1" step="1" value="1" oninput="syncSalaryTaxPreview()">
+      </div>
+      <div class="col-md-4">
+        <label class="small text-muted">8세 이상 20세 이하 자녀 수</label>
+        <input type="number" id="salaryTaxChildCount" class="form-control" min="0" step="1" value="0" oninput="syncSalaryTaxPreview()">
+      </div>
+      <div class="col-md-4">
+        <label class="small text-muted">원천징수율</label>
+        <select id="salaryTaxWithholdingRate" class="form-select" onchange="syncSalaryTaxPreview()">
+          <option value="1">100%</option>
+          <option value="0.8">80%</option>
+          <option value="1.2">120%</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="small text-muted">정산 환급 소득세</label>
+        <input type="number" id="payrollTaxAdjustmentIncome" class="form-control" min="0" step="10" value="0" oninput="syncSalaryTaxPreview()">
+      </div>
+      <div class="col-md-6">
+        <label class="small text-muted">정산 환급 지방소득세</label>
+        <input type="number" id="payrollTaxAdjustmentLocal" class="form-control" min="0" step="10" value="0" oninput="syncSalaryTaxPreview()">
+      </div>
+      <div class="col-12">
+        <input type="text" id="payrollTaxAdjustmentNote" class="form-control" placeholder="정산 메모 예: 1~3월 원천세 과다징수분 4월 급여 반영">
+      </div>
+      <div class="col-12">
+        <div class="form-text" id="salaryTaxPreviewText">간이세액표 계산 전입니다.</div>
       </div>
     </div>
   </div>
@@ -703,6 +743,7 @@ let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
 let currentEmpHireDate = null, currentEmpResignDate = null;
+let currentPayrollTaxProfile = { familyCount: 1, childCount: 0, withholdingRate: 1 };
 let confirmCallback = null; let currentSalaryDataForPrint = null;
 let currentEmployeeLeaveSnapshot = null;
 let currentDurunuriSupport = { emp_support: 0, biz_support: 0, apply_month: '', source_month: '' };
@@ -3800,6 +3841,9 @@ async function runInvite() {
                 role: document.getElementById("newRole").value,
                 department: getInviteDepartmentValue(),
                 hire_date: formatAdminEmployeeKstDate(new Date()),
+                withholding_family_count: 1,
+                withholding_child_count: 0,
+                withholding_rate: 1,
                 coop_id: getAdminEmployeeCoopId() || null
             });
 
@@ -4127,6 +4171,9 @@ async function openDetail(u) {
     currentAnnualSalary = u.base_salary || 0;
     currentEmpHireDate = u.hire_date;
     currentEmpResignDate = u.resign_date;
+    currentPayrollTaxProfile = normalizeAdminEmployeePayrollTaxProfile(u);
+    setSalaryTaxInputs(currentPayrollTaxProfile);
+    setSalaryTaxAdjustmentInputs();
 
     document.getElementById("detailName").innerText = u.emp_name; document.getElementById("viewMemberId").innerText = u.member_id || "-";
     document.getElementById("editMemberId").value = u.member_id || "";document.getElementById("detailId").innerText = `사번 ${currentEmpDisplayNo}`;
@@ -4302,6 +4349,119 @@ async function cancelResign() {
     });
 }
 
+function formatPayrollTaxWon(value) {
+    const numeric = Math.round(Number(value || 0));
+    return `${numeric.toLocaleString()}원`;
+} // End of formatPayrollTaxWon
+
+function getPayrollTaxTableModule() {
+    return window.PayrollTaxTable || null;
+} // End of getPayrollTaxTableModule
+
+function normalizeAdminEmployeePayrollTaxProfile(source = {}) {
+    const taxModule = getPayrollTaxTableModule();
+    const familyRaw = source.withholding_family_count ?? source.familyCount ?? 1;
+    const childRaw = source.withholding_child_count ?? source.childCount ?? 0;
+    const rateRaw = source.withholding_rate ?? source.withholdingRate ?? 1;
+
+    const normalizeFamily = taxModule?.normalizeFamilyCount || ((value) => Math.max(1, Math.floor(Number(value) || 1)));
+    const normalizeChild = taxModule?.normalizeChildCount || ((value) => Math.max(0, Math.floor(Number(value) || 0)));
+    const normalizeRate = taxModule?.normalizeWithholdingRate || ((value) => {
+        const numeric = Number(value);
+        return [0.8, 1, 1.2].includes(numeric) ? numeric : 1;
+    });
+
+    return {
+        familyCount: normalizeFamily(familyRaw),
+        childCount: normalizeChild(childRaw),
+        withholdingRate: normalizeRate(rateRaw)
+    };
+} // End of normalizeAdminEmployeePayrollTaxProfile
+
+function setSalaryTaxInputs(profile = {}) {
+    const normalized = normalizeAdminEmployeePayrollTaxProfile(profile);
+    const familyInput = document.getElementById('salaryTaxFamilyCount');
+    const childInput = document.getElementById('salaryTaxChildCount');
+    const rateInput = document.getElementById('salaryTaxWithholdingRate');
+    if (familyInput) familyInput.value = normalized.familyCount;
+    if (childInput) childInput.value = normalized.childCount;
+    if (rateInput) rateInput.value = String(normalized.withholdingRate);
+    currentPayrollTaxProfile = normalized;
+    syncSalaryTaxPreview();
+} // End of setSalaryTaxInputs
+
+function getSalaryTaxInputProfile() {
+    return normalizeAdminEmployeePayrollTaxProfile({
+        familyCount: document.getElementById('salaryTaxFamilyCount')?.value,
+        childCount: document.getElementById('salaryTaxChildCount')?.value,
+        withholdingRate: document.getElementById('salaryTaxWithholdingRate')?.value
+    });
+} // End of getSalaryTaxInputProfile
+
+function normalizePayrollTaxAdjustmentValue(value) {
+    const numeric = Math.max(0, Math.floor(Number(value || 0)));
+    return Math.floor(numeric / 10) * 10;
+} // End of normalizePayrollTaxAdjustmentValue
+
+function setSalaryTaxAdjustmentInputs(source = {}) {
+    const incomeInput = document.getElementById('payrollTaxAdjustmentIncome');
+    const localInput = document.getElementById('payrollTaxAdjustmentLocal');
+    const noteInput = document.getElementById('payrollTaxAdjustmentNote');
+    if (incomeInput) incomeInput.value = normalizePayrollTaxAdjustmentValue(source.payroll_tax_adjustment_income || 0);
+    if (localInput) localInput.value = normalizePayrollTaxAdjustmentValue(source.payroll_tax_adjustment_local || 0);
+    if (noteInput) noteInput.value = String(source.payroll_tax_adjustment_note || '');
+    syncSalaryTaxPreview();
+} // End of setSalaryTaxAdjustmentInputs
+
+function getSalaryTaxAdjustmentInput() {
+    return {
+        income: normalizePayrollTaxAdjustmentValue(document.getElementById('payrollTaxAdjustmentIncome')?.value),
+        local: normalizePayrollTaxAdjustmentValue(document.getElementById('payrollTaxAdjustmentLocal')?.value),
+        note: String(document.getElementById('payrollTaxAdjustmentNote')?.value || '').trim()
+    };
+} // End of getSalaryTaxAdjustmentInput
+
+function calculateAdminEmployeeSalaryTaxBaseFromInputs(rule = settings) {
+    const fixedTotal = Number(document.getElementById("payTotalFixed")?.value) || 0;
+    const bonus = Number(document.getElementById("payBonus")?.value) || 0;
+    const meal = Number(document.getElementById("payMeal")?.value) || 0;
+    const car = Number(document.getElementById("payCar")?.value) || 0;
+    const child = Number(document.getElementById("payChild")?.value) || 0;
+    const limitMeal = Number(rule?.limit_meal || 200000);
+    const limitCar = Number(rule?.limit_car || 200000);
+    const limitChild = Number(rule?.limit_child || 200000);
+    return Math.max(0, (fixedTotal + bonus) - (Math.min(meal, limitMeal) + Math.min(car, limitCar) + Math.min(child, limitChild)));
+} // End of calculateAdminEmployeeSalaryTaxBaseFromInputs
+
+function calculateAdminEmployeePayrollTax(monthlyIncome, profile = {}) {
+    const taxModule = getPayrollTaxTableModule();
+    if (!taxModule || typeof taxModule.calculate !== 'function') {
+        throw new Error('근로소득 간이세액표 모듈을 불러오지 못했습니다.');
+    }
+    return taxModule.calculate({
+        monthlyIncome,
+        familyCount: profile.familyCount ?? profile.withholding_family_count ?? 1,
+        childCount: profile.childCount ?? profile.withholding_child_count ?? 0,
+        withholdingRate: profile.withholdingRate ?? profile.withholding_rate ?? 1
+    });
+} // End of calculateAdminEmployeePayrollTax
+
+function syncSalaryTaxPreview() {
+    const previewEl = document.getElementById('salaryTaxPreviewText');
+    if (!previewEl) return;
+    try {
+        const profile = getSalaryTaxInputProfile();
+        const taxBase = calculateAdminEmployeeSalaryTaxBaseFromInputs();
+        const taxCalc = calculateAdminEmployeePayrollTax(taxBase, profile);
+        const adjustment = getSalaryTaxAdjustmentInput();
+        const finalIncomeTax = Math.round(Number(taxCalc.incomeTax || 0)) - adjustment.income;
+        const finalLocalTax = Math.round(Number(taxCalc.localTax || 0)) - adjustment.local;
+        previewEl.textContent = `과세대상 ${formatPayrollTaxWon(taxBase)} · 간이세액표 소득세 ${formatPayrollTaxWon(taxCalc.incomeTax)} / 지방세 ${formatPayrollTaxWon(taxCalc.localTax)} · 정산 후 이번 급여 ${formatPayrollTaxWon(finalIncomeTax)} / ${formatPayrollTaxWon(finalLocalTax)}`;
+    } catch (error) {
+        previewEl.textContent = error?.message || '간이세액표 계산을 확인하지 못했습니다.';
+    }
+} // End of syncSalaryTaxPreview
+
 // [수정] 급여 데이터 로드 (삭제 버튼 제어 로직 추가)
 async function loadSalaryData() {
     const month = document.getElementById("salaryMonth").value;
@@ -4332,6 +4492,7 @@ async function loadSalaryData() {
         if (workDaysInput) workDaysInput.value = '';
         if (workHoursInput) workHoursInput.value = '';
         setSalaryWorkMetaHelpText('귀속월을 선택하면 근로일수/근로시간 기본값을 계산합니다.');
+        setSalaryTaxAdjustmentInputs();
         resetDurunuriSupportState();
         return;
     }
@@ -4414,6 +4575,12 @@ async function loadSalaryData() {
         workDaysInput.value = formatAdminEmployeeWorkMetricInput(resolvedWorkDays);
         workHoursInput.value = formatAdminEmployeeWorkMetricInput(resolvedWorkHours);
         markSalaryWorkHoursAutoDerived(isLegacyBlankWorkMeta || Math.abs(resolvedWorkHours - (resolvedWorkDays * 8)) < 0.001);
+        setSalaryTaxInputs({
+            familyCount: saved.withholding_family_count ?? currentPayrollTaxProfile.familyCount,
+            childCount: saved.withholding_child_count ?? currentPayrollTaxProfile.childCount,
+            withholdingRate: saved.withholding_rate ?? currentPayrollTaxProfile.withholdingRate
+        });
+        setSalaryTaxAdjustmentInputs(saved);
 
         currentSalaryDataForPrint = await getAdjustedSalaryRowWithDurunuri({
             ...saved,
@@ -4434,6 +4601,8 @@ async function loadSalaryData() {
         workDaysInput.value = formatAdminEmployeeWorkMetricInput(workMetaDefaults.workDays);
         workHoursInput.value = formatAdminEmployeeWorkMetricInput(workMetaDefaults.workHours);
         markSalaryWorkHoursAutoDerived(true);
+        setSalaryTaxInputs(currentPayrollTaxProfile);
+        setSalaryTaxAdjustmentInputs();
 
         currentSalaryDataForPrint = null;
     }
@@ -4480,6 +4649,7 @@ function recalcSalaryComponents() {
     const meal = Number(document.getElementById("payMeal").value) || 0; const car = Number(document.getElementById("payCar").value) || 0; const child = Number(document.getElementById("payChild").value) || 0;
     const basic = total - (meal + car + child);
     document.getElementById("payBasic").value = basic > 0 ? basic : 0;
+    syncSalaryTaxPreview();
 }
 
 function roundAdminEmployeeWorkMetric(value) {
@@ -4762,7 +4932,7 @@ async function saveSalary() {
     const tf_child = Math.min(p_child, limit_child);
 
     // 과세 표준액
-    const tax_base = p_total - (tf_meal + tf_car + tf_child);
+    const tax_base = Math.max(0, p_total - (tf_meal + tf_car + tf_child));
 
     // 3. 4대보험 계산 (DB 요율 적용)
     // rule['key'] || 0.045 -> DB에 값이 있으면 쓰고, 없으면 기본값 사용
@@ -4771,9 +4941,28 @@ async function saveSalary() {
     const care = Math.floor((hlt * (rule['care_rate_ratio'] || 0.1314))/10)*10;
     const emp = Math.floor(tax_base * (rule['employ_rate_emp'] || 0.009));
 
-    // 4. 소득세 계산 (별도 함수 사용)
-    let inc = calculateIncomeTax(tax_base);
-    let loc = Math.floor((inc * 0.1) / 10) * 10; // 지방세 10%
+    // 4. 소득세 계산 (국세청 간이세액표 + 직원별 설정 + 정산 환급)
+    const taxProfile = getSalaryTaxInputProfile();
+    const taxAdjustment = getSalaryTaxAdjustmentInput();
+    let taxCalc;
+    try {
+        taxCalc = calculateAdminEmployeePayrollTax(tax_base, taxProfile);
+    } catch (error) {
+        return showAlert(error?.message || '근로소득 간이세액표 계산에 실패했습니다.');
+    }
+    let inc = Math.round(Number(taxCalc.incomeTax || 0)) - taxAdjustment.income;
+    let loc = Math.round(Number(taxCalc.localTax || 0)) - taxAdjustment.local;
+
+    const employeeTaxProfilePayload = {
+        withholding_family_count: taxCalc.familyCount,
+        withholding_child_count: taxCalc.childCount,
+        withholding_rate: taxCalc.withholdingRate
+    };
+    const { error: employeeTaxError } = await scopeEmployeeTenant(_supabase.from('ref_employees').update(employeeTaxProfilePayload)).eq('emp_id', currentEmpId);
+    if (employeeTaxError) {
+        return showAlert("직원별 원천세 기본값 저장 실패: " + employeeTaxError.message);
+    }
+    currentPayrollTaxProfile = normalizeAdminEmployeePayrollTaxProfile(employeeTaxProfilePayload);
 
     // 5. DB 저장 Payload 생성
     const payload = {
@@ -4787,7 +4976,16 @@ async function saveSalary() {
         net_pay: p_total-(pen+hlt+care+emp+inc+loc),
         work_description: workDescription,
         work_days: workDays,
-        work_hours: workHours
+        work_hours: workHours,
+        income_tax_base: Math.round(tax_base),
+        income_tax_table_amount: Math.round(Number(taxCalc.tableIncomeTax || 0)),
+        income_tax_child_credit: Math.round(Number(taxCalc.childTaxCredit || 0)),
+        withholding_family_count: taxCalc.familyCount,
+        withholding_child_count: taxCalc.childCount,
+        withholding_rate: taxCalc.withholdingRate,
+        payroll_tax_adjustment_income: taxAdjustment.income,
+        payroll_tax_adjustment_local: taxAdjustment.local,
+        payroll_tax_adjustment_note: taxAdjustment.note || null
     };
 
     // [6] Insert or Update 실행
@@ -5772,42 +5970,10 @@ function autoHyphenMemberId(target) {
     }
     target.value = val;
 }
-  // [신규] 2024/2025 국세청 근로소득 간이세액표 약식 로직 (1인 가구 기준)
-// 정확도: 오차범위 10~100원 내외 (실무 사용 가능)
-function calculateIncomeTax(monthlyIncome) {
-    // 1. 비과세 제외한 월 급여 (단위: 원)
-    const income = monthlyIncome;
-
-    // 2. 근로소득 간이세액표 산출 로직 (2024 개정 기준 근사치)
-    // 106만원 미만은 면세
-    if (income < 1060000) return 0;
-
-    let tax = 0;
-
-    // 구간별 계산 (국세청 산출식 역산 로직)
-    if (income <= 3000000) {
-        // 300만원 이하 구간: (급여 - 공제) * 약 3~4% 내외
-        // *참고: 정확한 표는 수백 줄이므로, 통상적으로 쓰이는 근사 공식을 적용합니다.
-        // 1인 가구 기준 공제 체감 반영
-        if(income < 1500000) {
-             tax = (income - 1060000) * 0.027; // 저소득 구간 초저세율
-        } else if (income < 2000000) {
-             tax = 8500 + (income - 1500000) * 0.045;
-        } else {
-             tax = 31000 + (income - 2000000) * 0.05; // 200~300구간
-        }
-    }
-    else if (income <= 4000000) {
-         tax = 84850 + (income - 3000000) * 0.09; // 300초과 누진
-    }
-    else {
-         // 400 초과 고소득 구간 (약식)
-         tax = 174850 + (income - 4000000) * 0.15;
-    }
-
-    // 10원 단위 절사 (소득세법 원칙)
-    return Math.floor(tax / 10) * 10;
-}
+  // [공통] 국세청 근로소득 간이세액표 계산 래퍼
+function calculateIncomeTax(monthlyIncome, profile = {}) {
+    return calculateAdminEmployeePayrollTax(monthlyIncome, profile).incomeTax;
+} // End of calculateIncomeTax
 
   // [신규] 연도별 요율 조회 함수 (테이블 이원화 대응)
 async function getTaxRates(year) {
