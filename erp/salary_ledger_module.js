@@ -1,11 +1,12 @@
 (function initSalaryLedgerModule(global) {
   'use strict';
 
-  const MODULE_VERSION = 'v1.0.10';
+  const MODULE_VERSION = 'v1.0.11';
 
   const NUMERIC_FIELDS = [
     'pay_basic', 'pay_meal', 'pay_car', 'pay_child', 'pay_position', 'pay_service', 'pay_overtime', 'pay_bonus', 'pay_total',
     'ded_pension', 'ded_health', 'ded_care', 'ded_employ', 'ded_income', 'ded_local', 'ded_advance', 'ded_advance_raw', 'ded_capital', 'ded_total', 'net_pay',
+    'payroll_tax_adjustment_income', 'payroll_tax_adjustment_local',
     'durunuri_emp_support', 'work_days', 'work_hours'
   ];
 
@@ -49,6 +50,11 @@
 
   function allowance(row) {
     return toInt(row.pay_child) + toInt(row.pay_position) + toInt(row.pay_service) + toInt(row.pay_overtime);
+  }
+
+  function payrollTaxAdjustment(row) {
+    return Math.max(0, toInt(row.payroll_tax_adjustment_income)) +
+      Math.max(0, toInt(row.payroll_tax_adjustment_local));
   }
 
   function formatYearMonthLabel(ym) {
@@ -116,6 +122,7 @@
       acc.ded_employ += toInt(row.ded_employ);
       acc.ded_income += toInt(row.ded_income);
       acc.ded_local += toInt(row.ded_local);
+      acc.payroll_tax_adjustment += payrollTaxAdjustment(row);
       acc.ded_etc += toInt(row.ded_advance) + toInt(row.ded_capital);
       acc.ded_total += toInt(row.ded_total);
       acc.net_pay += toInt(row.net_pay);
@@ -123,7 +130,8 @@
     }, {
       work_days: 0, work_hours: 0,
       pay_basic: 0, pay_meal: 0, pay_car: 0, pay_allow: 0, pay_bonus: 0, pay_total: 0,
-      ded_pension: 0, ded_health: 0, ded_care: 0, ded_employ: 0, ded_income: 0, ded_local: 0, ded_etc: 0, ded_total: 0, net_pay: 0
+      ded_pension: 0, ded_health: 0, ded_care: 0, ded_employ: 0, ded_income: 0, ded_local: 0,
+      payroll_tax_adjustment: 0, ded_etc: 0, ded_total: 0, net_pay: 0
     });
 
     return {
@@ -164,16 +172,23 @@
   }
 
   function buildDeductionSummaryCellHtml(row, etcLabel) {
-    return buildSummaryItemsHtml([
+    var adjustment = payrollTaxAdjustment(row);
+    var items = [
       { label: '국민연금', value: row.ded_pension },
       { label: '건강보험', value: row.ded_health },
       { label: '장기요양', value: row.ded_care },
       { label: '고용보험', value: row.ded_employ },
       { label: '소득세', value: row.ded_income },
-      { label: '지방소득세', value: row.ded_local },
+      { label: '지방소득세', value: row.ded_local }
+    ];
+    if (adjustment > 0) {
+      items.push({ label: '원천세 과공제 정산', value: -adjustment });
+    }
+    items.push(
       { label: etcLabel || '기타공제', value: toInt(row.ded_advance) + toInt(row.ded_capital) },
       { label: '공제계', value: row.ded_total, highlight: true }
-    ], { className: 'ledger-deduction-grid' });
+    );
+    return buildSummaryItemsHtml(items, { className: 'ledger-deduction-grid' });
   }
 
   function buildRowsHtml(rows, dedEtcLabel) {
@@ -316,16 +331,24 @@
         { label: '상여', value: totals.pay_bonus },
         { label: '지급계', value: totals.pay_total, highlight: true }
       ], { className: 'ledger-pay-grid' }) + '</th>' +
-      '<th class="ledger-summary-cell">' + buildSummaryItemsHtml([
+      '<th class="ledger-summary-cell">' + buildSummaryItemsHtml((function buildDeductionTotalItems() {
+        var items = [
         { label: '국민연금', value: totals.ded_pension },
         { label: '건강보험', value: totals.ded_health },
         { label: '장기요양', value: totals.ded_care },
         { label: '고용보험', value: totals.ded_employ },
         { label: '소득세', value: totals.ded_income },
-        { label: '지방소득세', value: totals.ded_local },
+        { label: '지방소득세', value: totals.ded_local }
+        ];
+        if (toInt(totals.payroll_tax_adjustment) > 0) {
+          items.push({ label: '원천세 과공제 정산', value: -toInt(totals.payroll_tax_adjustment) });
+        }
+        items.push(
         { label: state.dedEtcLabel || '기타공제', value: totals.ded_etc },
         { label: '공제계', value: totals.ded_total, highlight: true }
-      ], { className: 'ledger-deduction-grid' }) + '</th>' +
+        );
+        return items;
+      }()), { className: 'ledger-deduction-grid' }) + '</th>' +
       '<th class="text-end fw-bold ledger-net-pay">' + formatMoney(totals.net_pay) + '</th>' +
       '</tr>' +
       '</tfoot>' +

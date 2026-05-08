@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.59
-Change: 2026-05-08 - Rename salary ledger local tax label to 지방소득세.
+Version: v1.0.60
+Change: 2026-05-08 - Separate reported withholding tax from payroll over-deduction settlement.
 -->
 <html>
 <head>
@@ -35,8 +35,8 @@ Change: 2026-05-08 - Rename salary ledger local tax label to 지방소득세.
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="print_service.js?v=20260508-0937-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
-  <script src="salary_ledger_module.js?v=20260508-0937-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
+  <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260409-1258-1"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
@@ -4454,9 +4454,11 @@ function syncSalaryTaxPreview() {
         const taxBase = calculateAdminEmployeeSalaryTaxBaseFromInputs();
         const taxCalc = calculateAdminEmployeePayrollTax(taxBase, profile);
         const adjustment = getSalaryTaxAdjustmentInput();
-        const finalIncomeTax = Math.round(Number(taxCalc.incomeTax || 0)) - adjustment.income;
-        const finalLocalTax = Math.round(Number(taxCalc.localTax || 0)) - adjustment.local;
-        previewEl.textContent = `과세대상 ${formatPayrollTaxWon(taxBase)} · 간이세액표 소득세 ${formatPayrollTaxWon(taxCalc.incomeTax)} / 지방소득세 ${formatPayrollTaxWon(taxCalc.localTax)} · 정산 후 이번 급여 ${formatPayrollTaxWon(finalIncomeTax)} / ${formatPayrollTaxWon(finalLocalTax)}`;
+        const adjustmentTotal = Math.max(0, adjustment.income) + Math.max(0, adjustment.local);
+        const adjustmentText = adjustmentTotal > 0
+            ? ` · 원천세 과공제 정산 -${formatPayrollTaxWon(adjustmentTotal)}`
+            : '';
+        previewEl.textContent = `과세대상 ${formatPayrollTaxWon(taxBase)} · 신고 기준 소득세 ${formatPayrollTaxWon(taxCalc.incomeTax)} / 지방소득세 ${formatPayrollTaxWon(taxCalc.localTax)}${adjustmentText}`;
     } catch (error) {
         previewEl.textContent = error?.message || '간이세액표 계산을 확인하지 못했습니다.';
     }
@@ -4950,8 +4952,10 @@ async function saveSalary() {
     } catch (error) {
         return showAlert(error?.message || '근로소득 간이세액표 계산에 실패했습니다.');
     }
-    let inc = Math.round(Number(taxCalc.incomeTax || 0)) - taxAdjustment.income;
-    let loc = Math.round(Number(taxCalc.localTax || 0)) - taxAdjustment.local;
+    const inc = Math.round(Number(taxCalc.incomeTax || 0));
+    const loc = Math.round(Number(taxCalc.localTax || 0));
+    const payrollTaxAdjustmentTotal = Math.max(0, taxAdjustment.income) + Math.max(0, taxAdjustment.local);
+    const deductionTotal = pen + hlt + care + emp + inc + loc - payrollTaxAdjustmentTotal;
 
     const employeeTaxProfilePayload = {
         withholding_family_count: taxCalc.familyCount,
@@ -4972,8 +4976,8 @@ async function saveSalary() {
         pay_basic: p_basic, pay_meal: p_meal, pay_car: p_car, pay_child: p_child, pay_bonus: p_bonus, pay_total: p_total,
         ded_pension: pen, ded_health: hlt, ded_care: care, ded_employ: emp,
         ded_income: inc, ded_local: loc,
-        ded_total: pen+hlt+care+emp+inc+loc,
-        net_pay: p_total-(pen+hlt+care+emp+inc+loc),
+        ded_total: deductionTotal,
+        net_pay: p_total - deductionTotal,
         work_description: workDescription,
         work_days: workDays,
         work_hours: workHours,

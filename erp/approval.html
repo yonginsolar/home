@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.26 | Change: 2026-05-08 - Refresh salary ledger label cache key for 지방소득세. -->
+<!-- Version: v1.2.27 | Change: 2026-05-08 - Include payroll tax over-deduction settlement in salary ledger snapshots. -->
 <html lang="ko">
 <head>
   <script>console.log('[Version] v1.2.26 | approval.html');</script>
@@ -28,8 +28,8 @@
 </script>
   <script src="/shared/route_guard.js?v=20260403-1"></script>
   <script src="erp_runtime_guard.js"></script>
-  <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
-  <script src="salary_ledger_module.js?v=20260508-0937-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
+  <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
 
@@ -4650,7 +4650,7 @@ async function fetchSalaryLedgerRowsByMonth(ym) {
     if (!ym) return { rows: [], error: null };
     const { data, error } = await _supabase
         .from('hr_salary')
-        .select('year_month, emp_id, emp_name, work_description, work_days, work_hours, pay_basic, pay_meal, pay_car, pay_child, pay_position, pay_service, pay_overtime, pay_bonus, pay_total, ded_pension, ded_health, ded_care, ded_employ, ded_income, ded_local, ded_advance, ded_capital, ded_total, net_pay')
+        .select('year_month, emp_id, emp_name, work_description, work_days, work_hours, pay_basic, pay_meal, pay_car, pay_child, pay_position, pay_service, pay_overtime, pay_bonus, pay_total, ded_pension, ded_health, ded_care, ded_employ, ded_income, ded_local, ded_advance, ded_capital, ded_total, net_pay, payroll_tax_adjustment_income, payroll_tax_adjustment_local, payroll_tax_adjustment_note')
         .eq('year_month', ym)
         .order('emp_name');
     if (error) return { rows: [], error };
@@ -4678,6 +4678,9 @@ async function fetchSalaryLedgerRowsByMonth(ym) {
         ded_local: Math.round(Number(row.ded_local || 0)),
         ded_advance: Math.round(Number(row.ded_advance || 0)),
         ded_capital: Math.round(Number(row.ded_capital || 0)),
+        payroll_tax_adjustment_income: Math.round(Number(row.payroll_tax_adjustment_income || 0)),
+        payroll_tax_adjustment_local: Math.round(Number(row.payroll_tax_adjustment_local || 0)),
+        payroll_tax_adjustment_note: String(row.payroll_tax_adjustment_note || '').trim(),
         ded_total: Math.round(Number(row.ded_total || 0)),
         net_pay: Math.round(Number(row.net_pay || 0))
     }));

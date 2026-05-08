@@ -125,6 +125,11 @@
     return map[eid] || null;
   }
 
+  function getPayrollTaxAdjustmentTotal(source) {
+    return Math.max(0, toInt(source.payroll_tax_adjustment_income)) +
+      Math.max(0, toInt(source.payroll_tax_adjustment_local));
+  }
+
   function adjustSalaryRow(row, supportMap) {
     var source = row && typeof row === 'object' ? row : {};
     var empId = String(source.emp_id || '').trim();
@@ -140,8 +145,9 @@
       toInt(source.ded_local);
     var rawAdvance = toInt(source.ded_advance);
     var rawCapital = toInt(source.ded_capital);
+    var payrollTaxAdjustment = getPayrollTaxAdjustmentTotal(source);
     var adjustedAdvance = rawAdvance - supportEmp;
-    var dedTotal = Math.max(0, baseSix + adjustedAdvance + rawCapital);
+    var dedTotal = Math.max(0, baseSix + adjustedAdvance + rawCapital - payrollTaxAdjustment);
     var payTotal = toInt(source.pay_total);
     var netPay = payTotal - dedTotal;
     var coTotalRaw = Math.max(0, toInt(source.co_total));
@@ -151,6 +157,8 @@
     adjusted.ded_advance_raw = rawAdvance;
     adjusted.ded_advance = adjustedAdvance;
     adjusted.ded_capital = rawCapital;
+    adjusted.payroll_tax_adjustment_income = Math.max(0, toInt(source.payroll_tax_adjustment_income));
+    adjusted.payroll_tax_adjustment_local = Math.max(0, toInt(source.payroll_tax_adjustment_local));
     adjusted.ded_total = dedTotal;
     adjusted.net_pay = netPay;
     adjusted.co_total_raw = coTotalRaw;
