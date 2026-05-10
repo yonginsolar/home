@@ -1,4 +1,4 @@
-/* Version: v1.0.9 | Change: 2026-05-08 - Rename salary ledger local tax label to 지방소득세. */
+/* Version: v1.0.11 | Change: 2026-05-10 - Support payroll over-deduction settlement in salary statements and legacy ledger output. */
 const PrintService = {
     // 1. 공통 CSS 스타일 (유지보수를 위해 이곳에서 통합 관리)
     styles: {
@@ -185,6 +185,8 @@ const PrintService = {
             d_emp: this.escapeHtml(data?.d_emp),
             d_inc: this.escapeHtml(data?.d_inc),
             d_loc: this.escapeHtml(data?.d_loc),
+            d_tax_adj: this.escapeHtml(data?.d_tax_adj),
+            d_tax_adj_label: this.escapeHtml(data?.d_tax_adj_label || '원천세 과공제 정산'),
             d_adv: this.escapeHtml(data?.d_adv),
             d_adv_label: this.escapeHtml(data?.d_adv_label || '기타조정'),
             d_cap: this.escapeHtml(data?.d_cap),
@@ -195,6 +197,10 @@ const PrintService = {
             chairman: this.escapeHtml(data?.chairman),
             compName: this.escapeHtml(data?.compName)
         };
+        const taxAdjustmentRaw = String(data?.d_tax_adj ?? '').trim();
+        const taxAdjustmentRow = taxAdjustmentRaw && taxAdjustmentRaw !== '0'
+            ? `<tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_tax_adj_label}</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_tax_adj}</td></tr>`
+            : '';
         const signatureBlock = this.buildSignatureBlock(data, {
             marginTop: 40,
             maxWidth: '520px',
@@ -238,6 +244,7 @@ const PrintService = {
                         <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">고용보험</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_emp}</td></tr>
                         <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">소득세</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_inc}</td></tr>
                         <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">지방소득세</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_loc}</td></tr>
+                        ${taxAdjustmentRow}
                         <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_adv_label}</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_adv}</td></tr>
                         <tr><td style="padding:5px; border:none; border-bottom:1px solid #eee;">출자금</td><td class="text-end" style="padding:5px; border:none; border-bottom:1px solid #eee;">${safeData.d_cap}</td></tr>
                     </table>
@@ -323,6 +330,12 @@ const PrintService = {
     printLedger: function(data) {
         const safeTitle = this.escapeHtml(data?.title);
         const safeLogoUrl = this.safeUrl(data?.logo, true);
+        const defaultDeductionHeaders = ['국민연금', '건강보험', '장기요양', '고용보험', '소득세', '지방소득세', '기타공제'];
+        const deductionHeaders = Array.isArray(data?.deductionHeaders) && data.deductionHeaders.length > 0
+            ? data.deductionHeaders.map((label) => this.escapeHtml(label || ''))
+            : defaultDeductionHeaders.map((label) => this.escapeHtml(label));
+        const deductionColspan = Math.max(1, deductionHeaders.length);
+        const deductionHeaderHtml = deductionHeaders.map((label) => `<th>${label}</th>`).join('');
         const content = `
         <div style="padding: 10px;">
             <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom: 20px;">
@@ -341,12 +354,12 @@ const PrintService = {
                     <tr style="background:#e0e0e0;">
                         <th rowspan="2" style="width:30px;">No</th><th rowspan="2" style="width:70px;">성명</th>
                         <th colspan="6">지 급 내 역</th>
-                        <th colspan="7">공 제 내 역</th>
+                        <th colspan="${deductionColspan}">공 제 내 역</th>
                         <th rowspan="2">공제계</th><th rowspan="2">차인지급액</th>
                     </tr>
                     <tr style="background:#f0f0f0;">
                         <th>기본급</th><th>식대</th><th>차량</th><th>기타수당</th><th>상여</th><th style="background:#fff3e0;">지급계</th>
-                        <th>국민연금</th><th>건강보험</th><th>장기요양</th><th>고용보험</th><th>소득세</th><th>지방소득세</th><th>기타공제</th>
+                        ${deductionHeaderHtml}
                     </tr>
                 </thead>
                 <tbody>${data.tableBody}</tbody>

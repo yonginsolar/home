@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.47 | Change: 2026-04-09 - Refresh payroll durunuri module cache key for salary ledger consistency. -->
+<!-- Version: v1.0.48 | Change: 2026-05-10 - Show payroll over-deduction settlement only on adjusted salary statements. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.46 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.48 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -29,8 +29,8 @@
   })();
 </script>
   <script src="erp_runtime_guard.js"></script>
-<script src="print_service.js?v=20260326-2"></script>
-<script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
+<script src="print_service.js?v=20260510-1324-1"></script>
+<script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
 <script src="leave_ledger.js?v=20260409-1258-1"></script>
   
 <style>
@@ -1822,14 +1822,16 @@ const[y,m]=ym.split('-');
 document.getElementById("sl_ym_display").innerText=`${y}년 ${Number(m)}월`;
 const f=n=>Number(n).toLocaleString();
 const dedAdvanceLabel=getSalaryDedAdvanceLabel(adjusted);
+const payrollTaxAdjustmentTotal=getSalaryPayrollTaxAdjustmentTotal(adjusted);
 const p=[['pay_basic','기본급'],['pay_meal','식대'],['pay_car','차량유지비'],['pay_position','직책수당'],['pay_service','근속수당'],['pay_overtime','연장수당'],['pay_child','육아수당'],['pay_bonus','상여금']];
 const d=[['ded_pension','국민연금'],['ded_health','건강보험'],['ded_care','장기요양'],['ded_employ','고용보험'],['ded_income','소득세'],['ded_local','지방소득세'],['ded_advance',dedAdvanceLabel],['ded_capital','출자금']];
+if(payrollTaxAdjustmentTotal>0)d.splice(6,0,['__payroll_tax_adjustment','원천세 과공제 정산',-payrollTaxAdjustmentTotal]);
 let ph="";
 p.forEach(i=>ph+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(adjusted[i[0]]||0)}</span></td></tr>`);
 ph+=`<tr><td class="bg-light fw-bold">지급계</td><td class="amount-text text-primary fw-bold"><span class="salary-blur">${f(adjusted.pay_total)}</span></td></tr>`;
 document.getElementById("tbl_pay_body").innerHTML=ph;
 let dh="";
-d.forEach(i=>dh+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(adjusted[i[0]]||0)}</span></td></tr>`);
+d.forEach(i=>{const value=i[0]==='__payroll_tax_adjustment'?i[2]:(adjusted[i[0]]||0);dh+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(value)}</span></td></tr>`});
 dh+=`<tr><td class="bg-light fw-bold">공제계</td><td class="amount-text text-danger fw-bold"><span class="salary-blur">${f(adjusted.ded_total)}</span></td></tr>`;
 document.getElementById("tbl_ded_body").innerHTML=dh;
 document.getElementById("v_net").innerText=f(adjusted.net_pay)
@@ -1842,6 +1844,7 @@ async function printSalaryPopup() {
     const fmt = (n) => Number(n || 0).toLocaleString();
     const d = currentSalaryData;
     const dedAdvanceLabel = getSalaryDedAdvanceLabel(d);
+    const payrollTaxAdjustmentTotal = getSalaryPayrollTaxAdjustmentTotal(d);
     const [y, m] = d.year_month.split('-'); // 2025-05
 
     // 날짜 포맷팅
@@ -1868,6 +1871,8 @@ async function printSalaryPopup() {
         // 공제 내역
         d_pen: fmt(d.ded_pension), d_hlt: fmt(d.ded_health), d_care: fmt(d.ded_care),
         d_emp: fmt(d.ded_employ), d_inc: fmt(d.ded_income), d_loc: fmt(d.ded_local),
+        d_tax_adj: payrollTaxAdjustmentTotal > 0 ? fmt(-payrollTaxAdjustmentTotal) : '',
+        d_tax_adj_label: '원천세 과공제 정산',
         d_adv: fmt(d.ded_advance), d_adv_label: dedAdvanceLabel, d_cap: fmt(d.ded_capital), d_total: fmt(d.ded_total),
         
         // 실지급액
@@ -1883,6 +1888,10 @@ async function printSalaryPopup() {
     // 모듈 호출
     PrintService.printSalary(salaryData);
 }
+
+function getSalaryPayrollTaxAdjustmentTotal(row){
+return Math.max(0,Number(row?.payroll_tax_adjustment_income||0))+Math.max(0,Number(row?.payroll_tax_adjustment_local||0));
+} // End of getSalaryPayrollTaxAdjustmentTotal
 
 function getSalaryDedAdvanceLabel(row){
 const supportEmp=Number(row?.durunuri_emp_support||0);

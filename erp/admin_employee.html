@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.60
-Change: 2026-05-08 - Separate reported withholding tax from payroll over-deduction settlement.
+Version: v1.0.61
+Change: 2026-05-10 - Show payroll over-deduction settlement on salary statements.
 -->
 <html>
 <head>
@@ -33,7 +33,7 @@ Change: 2026-05-08 - Separate reported withholding tax from payroll over-deducti
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="print_service.js?v=20260508-0937-1"></script>
+  <script src="print_service.js?v=20260510-1324-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
@@ -5543,6 +5543,7 @@ async function printSalaryAdmin() {
     if(!currentSalaryDataForPrint) return showAlert("저장된 급여 내역이 없습니다.");
     const d = currentSalaryDataForPrint;
     const dedAdvanceLabel = getSalaryDedAdvanceLabelForAdmin(d);
+    const payrollTaxAdjustmentTotal = getPayrollTaxAdjustmentTotalForAdmin(d);
     const [y, m] = d.year_month.split('-');
 
     // 스마트 기간 산정
@@ -5581,6 +5582,8 @@ async function printSalaryAdmin() {
         p_child: fmt(d.pay_child), p_bonus: fmt(d.pay_bonus), p_total: fmt(d.pay_total),
         d_pen: fmt(d.ded_pension), d_hlt: fmt(d.ded_health), d_care: fmt(d.ded_care),
         d_emp: fmt(d.ded_employ), d_inc: fmt(d.ded_income), d_loc: fmt(d.ded_local),
+        d_tax_adj: payrollTaxAdjustmentTotal > 0 ? fmt(-payrollTaxAdjustmentTotal) : '',
+        d_tax_adj_label: '원천세 과공제 정산',
         d_adv: fmt(d.ded_advance), d_adv_label: dedAdvanceLabel, d_cap: fmt(d.ded_capital), d_total: fmt(d.ded_total),
         net: fmt(d.net_pay),
         logo: companyProfile.logoUrl,
@@ -5596,6 +5599,11 @@ async function printSalaryAdmin() {
         PrintService.printSalary(salaryData);
     });
 }
+
+function getPayrollTaxAdjustmentTotalForAdmin(row) {
+    return Math.max(0, Number(row?.payroll_tax_adjustment_income || 0)) +
+        Math.max(0, Number(row?.payroll_tax_adjustment_local || 0));
+} // End of getPayrollTaxAdjustmentTotalForAdmin
 
 function getSalaryDedAdvanceLabelForAdmin(row) {
     const supportEmp = Number(row?.durunuri_emp_support || 0);
