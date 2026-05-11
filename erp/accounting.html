@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.80 | Change: 2026-04-28 - Add Durunuri support invoice/total calculator. -->
+<!-- Version: v1.0.81 | Change: 2026-05-11 - Route check-card cashback to non-operating miscellaneous income. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.80 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.81 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -501,7 +501,7 @@
              <div class="d-flex justify-content-between align-items-center">
                <div>
                  <h6 class="fw-bold mb-1">💳 체크카드 캐시백</h6>
-                 <small class="text-muted">체크카드 캐시백 입금분을 `(차)보통예금 / (대)영업외수익`으로 반영합니다.</small>
+                 <small class="text-muted">체크카드 캐시백 입금분을 `(차)보통예금 / (대)잡이익`으로 반영합니다.</small>
                </div>
                <div class="d-flex align-items-center gap-2">
                  <button class="btn btn-outline-secondary btn-sm" onclick="openCardManageModal()">카드관리</button>
@@ -842,7 +842,7 @@
         <div class="mb-2">
           <label class="small text-muted">수익 계정</label>
           <input type="text" class="form-control bg-light" id="cashbackIncomeAccount" readonly>
-          <div class="small text-muted mt-1" id="cashbackIncomeHint">영업외수익 계정을 자동 선택합니다.</div>
+          <div class="small text-muted mt-1" id="cashbackIncomeHint">영업외수익/잡이익 계정을 자동 선택합니다.</div>
         </div>
         <div class="mb-0">
           <label class="small text-muted">적요</label>
@@ -3959,21 +3959,20 @@ function requestDeleteCard(card) {
 
 function resolveCashbackIncomeAccount() {
     const candidates = Array.isArray(mData) ? mData : [];
-    const pick = candidates.find((row) => {
-        const item = String(row?.Item || row?.item || '').trim();
-        const standard = String(row?.Standard || row?.standard || '').trim();
-        const type = String(row?.Type || row?.type || '').trim();
-        if (type !== '영업외수익') return false;
-        return item === '잡이익'
-            || standard === '잡이익'
-            || item === '기타수익'
-            || standard === '기타수익'
-            || item === '자산수증이익'
-            || standard === '자산수증이익';
-    });
+    const normalized = candidates.map((row) => ({
+        row,
+        item: String(row?.Item || row?.item || '').trim(),
+        standard: String(row?.Standard || row?.standard || '').trim(),
+        type: String(row?.Type || row?.type || '').trim()
+    }));
+    const nonOperating = normalized.filter((entry) => entry.type === '영업외수익');
+    const pick = nonOperating.find((entry) => entry.item === '잡이익')
+        || nonOperating.find((entry) => entry.standard === '잡이익')
+        || nonOperating.find((entry) => entry.item === '기타수익' || entry.standard === '기타수익')
+        || nonOperating.find((entry) => entry.item === '자산수증이익' || entry.standard === '자산수증이익');
     return {
-        item: String(pick?.Item || pick?.item || '').trim(),
-        type: String(pick?.Type || pick?.type || '').trim()
+        item: pick?.item || '',
+        type: pick?.type || ''
     };
 } // End of resolveCashbackIncomeAccount
 
@@ -3981,7 +3980,7 @@ function openCardCashbackModal() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
     const incomeAccount = resolveCashbackIncomeAccount();
     if (!incomeAccount.item) {
-        return showAlert('오류', '캐시백 영업외수익 계정을 찾지 못했습니다. ac_master에 영업외수익(예: 자산수증이익/잡이익) 계정을 확인하세요.');
+        return showAlert('오류', '캐시백 잡이익 계정을 찾지 못했습니다. ac_master에 영업외수익/잡이익 계정을 확인하세요.');
     }
     populateCashbackCardOptions();
     const checkCards = (cardData || []).filter((card) => normalizeCardManageTypeValue(card?.card_type) === 'check_card');
