@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<!--
+Version: v1.0.0
+Change: 2026-05-16 - Add preference poll create/edit page for admin users.
+-->
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+    <title>선호도 투표 설정</title>
+    <script>console.log('[Version] v1.0.0 | poll_setup.html');</script>
+    <style>
+        :root {
+            --bg: #f4f7fb;
+            --card: #ffffff;
+            --line: #d9e3f0;
+            --text: #14213d;
+            --muted: #5f6b85;
+            --primary: #1d4ed8;
+            --primary-soft: #e8f0ff;
+            --success: #0f766e;
+            --danger: #b91c1c;
+            --warning: #b45309;
+            --radius: 18px;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+            background: linear-gradient(180deg, #eff4fb 0%, #f8fafc 100%);
+            color: var(--text);
+        }
+        .page {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 18px 64px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .topbar-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            border: 1px solid var(--line);
+            background: #fff;
+            color: var(--text);
+            border-radius: 999px;
+            padding: 11px 16px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .btn.success { background: var(--success); border-color: var(--success); color: #fff; }
+        .btn.ghost { background: transparent; }
+        .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+        .hero {
+            background: radial-gradient(circle at top left, rgba(29,78,216,0.16), transparent 45%), var(--card);
+            border: 1px solid rgba(29,78,216,0.12);
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 24px 50px rgba(15, 23, 42, 0.08);
+            margin-bottom: 18px;
+        }
+        .hero h1 { margin: 0 0 8px; font-size: clamp(26px, 4vw, 38px); }
+        .hero p { margin: 0; color: var(--muted); line-height: 1.6; }
+        .layout {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 18px;
+        }
+        .panel {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 22px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+        }
+        .panel h2, .panel h3 {
+            margin: 0 0 14px;
+            font-size: 18px;
+        }
+        .field { margin-bottom: 16px; }
+        .field label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+        .field small { display: block; margin-top: 6px; color: var(--muted); }
+        .field input, .field textarea, .field select {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 12px 14px;
+            font-size: 15px;
+            background: #fff;
+            color: var(--text);
+        }
+        textarea { min-height: 110px; resize: vertical; }
+        .field-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .chip-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .chip {
+            border-radius: 999px;
+            padding: 7px 10px;
+            font-size: 13px;
+            font-weight: 800;
+            background: var(--primary-soft);
+            color: var(--primary);
+        }
+        .option-list { display: grid; gap: 10px; }
+        .option-item {
+            display: grid;
+            grid-template-columns: 52px 1fr auto;
+            gap: 10px;
+            align-items: center;
+            background: #f8fbff;
+            border: 1px solid #dbe7ff;
+            border-radius: 16px;
+            padding: 10px;
+        }
+        .option-order {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: #fff;
+            border: 1px solid #c8d8ff;
+            font-weight: 900;
+            color: var(--primary);
+        }
+        .option-actions { display: flex; gap: 8px; }
+        .option-actions button {
+            border: 1px solid var(--line);
+            background: #fff;
+            border-radius: 12px;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-weight: 800;
+        }
+        .info-box {
+            border-radius: 16px;
+            padding: 14px 16px;
+            background: #f8fafc;
+            border: 1px solid #e5edf7;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+        .info-box strong { color: var(--text); }
+        .status-box {
+            border-radius: 18px;
+            padding: 16px;
+            margin-bottom: 14px;
+            background: #eef6ff;
+            border: 1px solid #cfe0ff;
+        }
+        .status-box.hidden { display: none; }
+        .status-box strong { display: block; margin-bottom: 6px; }
+        .helper-list {
+            margin: 0;
+            padding-left: 18px;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            z-index: 4000;
+        }
+        .modal-card {
+            width: min(460px, 100%);
+            background: #fff;
+            border-radius: 22px;
+            padding: 24px;
+            border: 1px solid #d8e0ec;
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+        }
+        .modal-card h4 { margin: 0 0 10px; font-size: 20px; }
+        .modal-card p { margin: 0; color: var(--muted); line-height: 1.6; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .modal-actions .btn { border-radius: 14px; }
+        @media (max-width: 960px) {
+            .layout { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .field-grid { grid-template-columns: 1fr; }
+            .option-item { grid-template-columns: 44px 1fr; }
+            .option-actions { grid-column: 1 / -1; justify-content: flex-end; }
+            .topbar { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="topbar">
+        <button class="btn ghost" type="button" onclick="location.href='../erp/vote_hub.html'">← 선거관리 허브</button>
+        <div class="topbar-actions">
+            <button class="btn" type="button" onclick="location.href='poll_admin.html'">선호도 투표 관리</button>
+            <button class="btn" type="button" id="btnPortalPreview">조합원 포털 보기</button>
+        </div>
+    </div>
+
+    <section class="hero">
+        <h1>선호도 투표 설정</h1>
+        <p>발전소 이름, 행사 일정, 우선 추진 사업처럼 조합원 선호를 빠르게 모으는 투표입니다. 기존 선거와 분리해서 운영하고, 결과는 종료 후 관리자만 확인합니다.</p>
+    </section>
+
+    <div class="layout">
+        <section class="panel">
+            <div id="statusBox" class="status-box hidden">
+                <strong id="statusTitle">상태</strong>
+                <div id="statusBody"></div>
+            </div>
+
+            <h2>기본 정보</h2>
+            <div class="field">
+                <label for="pollTitle">투표명</label>
+                <input id="pollTitle" type="text" maxlength="120" placeholder="예: 3호 발전소 이름 선호도 조사">
+            </div>
+            <div class="field">
+                <label for="pollDescription">설명</label>
+                <textarea id="pollDescription" placeholder="왜 이 투표를 하는지, 어떤 기준으로 골라주면 되는지 짧게 적어주세요."></textarea>
+            </div>
+
+            <div class="field-grid">
+                <div class="field">
+                    <label for="pollStartAt">시작 시각</label>
+                    <input id="pollStartAt" type="datetime-local">
+                </div>
+                <div class="field">
+                    <label for="pollEndAt">종료 시각</label>
+                    <input id="pollEndAt" type="datetime-local">
+                </div>
+            </div>
+
+            <div class="field-grid">
+                <div class="field">
+                    <label for="pollMinChoices">최소 선택 수</label>
+                    <select id="pollMinChoices"></select>
+                </div>
+                <div class="field">
+                    <label for="pollMaxChoices">최대 선택 수</label>
+                    <select id="pollMaxChoices"></select>
+                </div>
+            </div>
+
+            <div class="chip-row">
+                <span class="chip">옵션 최대 9개</span>
+                <span class="chip">기간 내 수정 가능</span>
+                <span class="chip">결과는 종료 후 관리자만 확인</span>
+                <span class="chip">옵션 순서는 조합원별 고정 랜덤</span>
+            </div>
+
+            <h2 style="margin-top:26px;">옵션</h2>
+            <div id="optionList" class="option-list"></div>
+            <div class="chip-row">
+                <button class="btn" type="button" id="btnAddOption">+ 옵션 추가</button>
+            </div>
+
+            <div class="chip-row" style="margin-top:24px;">
+                <button class="btn primary" type="button" id="btnSaveDraft">초안 저장</button>
+                <button class="btn success" type="button" id="btnPublish">대상자 확정 후 공개</button>
+            </div>
+        </section>
+
+        <aside class="panel">
+            <h3>운영 메모</h3>
+            <div class="info-box">
+                <strong>이번 1차 버전 기준</strong>
+                <ul class="helper-list">
+                    <li>대상자는 현재 조합의 정상 조합원 전체입니다.</li>
+                    <li>공개 시점에 대상자 스냅샷을 고정합니다.</li>
+                    <li>공개 후 아직 제출이 없으면 수정 저장 시 다시 초안으로 돌아갑니다.</li>
+                    <li>한 번 제출한 조합원도 기간 안에는 다시 제출할 수 있지만, 최종 집계에는 최신 선택만 반영됩니다.</li>
+                </ul>
+            </div>
+            <div class="info-box" style="margin-top:14px;">
+                <strong>이용고배당 연동 준비</strong>
+                <ul class="helper-list">
+                    <li>지금은 포인트를 바로 지급하지 않습니다.</li>
+                    <li>대신 DB에는 향후 수동 정산용 reward ledger 틀을 함께 만듭니다.</li>
+                    <li>나중에 실제 이용고배당 반영이 필요하면 같은 투표를 기준으로 중복 없이 정산할 수 있게 설계합니다.</li>
+                </ul>
+            </div>
+        </aside>
+    </div>
+</div>
+
+<div id="modalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <h4 id="modalTitle">알림</h4>
+        <p id="modalMessage"></p>
+        <div class="modal-actions" id="modalActions"></div>
+    </div>
+</div>
+
+<script type="module">
+    import { PreferencePollService, derivePreferencePollPhase } from './PreferencePollService.js';
+
+    const service = new PreferencePollService();
+    const urlParams = new URLSearchParams(window.location.search || '');
+    const currentPollId = String(urlParams.get('id') || '').trim();
+    const optionListEl = document.getElementById('optionList');
+    const minChoicesEl = document.getElementById('pollMinChoices');
+    const maxChoicesEl = document.getElementById('pollMaxChoices');
+    const statusBoxEl = document.getElementById('statusBox');
+    const statusTitleEl = document.getElementById('statusTitle');
+    const statusBodyEl = document.getElementById('statusBody');
+    const modalBackdropEl = document.getElementById('modalBackdrop');
+    const modalTitleEl = document.getElementById('modalTitle');
+    const modalMessageEl = document.getElementById('modalMessage');
+    const modalActionsEl = document.getElementById('modalActions');
+
+    let optionState = [];
+    let loadedPoll = null;
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function showModal(title, message, actions = []) {
+        modalTitleEl.textContent = title;
+        modalMessageEl.innerHTML = String(message || '').replace(/\n/g, '<br>');
+        modalActionsEl.innerHTML = '';
+        actions.forEach((action) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `btn ${action.type || ''}`.trim();
+            button.textContent = action.label;
+            button.addEventListener('click', () => {
+                modalBackdropEl.style.display = 'none';
+                if (typeof action.onClick === 'function') action.onClick();
+            });
+            modalActionsEl.appendChild(button);
+        });
+        if (actions.length === 0) {
+            const closeButton = document.createElement('button');
+            closeButton.type = 'button';
+            closeButton.className = 'btn primary';
+            closeButton.textContent = '확인';
+            closeButton.addEventListener('click', () => {
+                modalBackdropEl.style.display = 'none';
+            });
+            modalActionsEl.appendChild(closeButton);
+        }
+        modalBackdropEl.style.display = 'flex';
+    }
+
+    function showAlert(title, message) {
+        showModal(title, escapeHtml(message));
+    }
+
+    function showConfirm(title, message) {
+        return new Promise((resolve) => {
+            showModal(title, escapeHtml(message), [
+                { label: '취소', type: '', onClick: () => resolve(false) },
+                { label: '확인', type: 'primary', onClick: () => resolve(true) }
+            ]);
+        });
+    }
+
+    function kstIsoToInputValue(value) {
+        const date = value ? new Date(value) : null;
+        if (!date || Number.isNaN(date.getTime())) return '';
+        const shifted = new Date(date.getTime() + (9 * 60 * 60 * 1000));
+        const yyyy = shifted.getUTCFullYear();
+        const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(shifted.getUTCDate()).padStart(2, '0');
+        const hh = String(shifted.getUTCHours()).padStart(2, '0');
+        const mi = String(shifted.getUTCMinutes()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+    }
+
+    function inputValueToKstIso(value) {
+        const raw = String(value || '').trim();
+        const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+        if (!match) return '';
+        const [, y, m, d, hh, mm] = match;
+        const utcMs = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh) - 9, Number(mm), 0, 0);
+        return new Date(utcMs).toISOString();
+    }
+
+    function formatKst(value) {
+        const date = value ? new Date(value) : null;
+        if (!date || Number.isNaN(date.getTime())) return '-';
+        return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    }
+
+    function buildChoiceOptions(optionCount) {
+        const safeOptionCount = Math.max(2, Math.min(9, Number(optionCount) || 2));
+        const allowedMax = safeOptionCount <= 2 ? 1 : safeOptionCount - 1;
+        return {
+            minValues: Array.from({ length: allowedMax }, (_, idx) => idx + 1),
+            maxValues: Array.from({ length: allowedMax }, (_, idx) => idx + 1),
+            allowedMax
+        };
+    }
+
+    function syncChoiceSelectors(force = false) {
+        const { minValues, maxValues, allowedMax } = buildChoiceOptions(optionState.length || 2);
+        const currentMin = Number(minChoicesEl.value) || 1;
+        const currentMax = Number(maxChoicesEl.value) || 1;
+        minChoicesEl.innerHTML = minValues.map((value) => `<option value="${value}">${value}개</option>`).join('');
+        maxChoicesEl.innerHTML = maxValues.map((value) => `<option value="${value}">${value}개</option>`).join('');
+
+        const nextMax = force ? Math.min(currentMax, allowedMax) : Math.min(Math.max(currentMax, 1), allowedMax);
+        const nextMin = force ? Math.min(currentMin, nextMax) : Math.min(Math.max(currentMin, 1), nextMax);
+        minChoicesEl.value = String(nextMin);
+        maxChoicesEl.value = String(nextMax);
+        if (Number(minChoicesEl.value) > Number(maxChoicesEl.value)) {
+            minChoicesEl.value = maxChoicesEl.value;
+        }
+    }
+
+    function renderOptionList() {
+        optionListEl.innerHTML = '';
+        optionState.forEach((option, index) => {
+            const row = document.createElement('div');
+            row.className = 'option-item';
+            row.innerHTML = `
+                <div class="option-order">${index + 1}</div>
+                <input type="text" value="${escapeHtml(option.label || '')}" placeholder="옵션 ${index + 1} 입력">
+                <div class="option-actions">
+                    <button type="button" data-action="up" ${index === 0 ? 'disabled' : ''}>위로</button>
+                    <button type="button" data-action="down" ${index === optionState.length - 1 ? 'disabled' : ''}>아래로</button>
+                    <button type="button" data-action="remove">삭제</button>
+                </div>
+            `;
+            const input = row.querySelector('input');
+            input.addEventListener('input', (event) => {
+                optionState[index].label = event.target.value;
+            });
+            row.querySelector('[data-action="up"]')?.addEventListener('click', () => {
+                if (index <= 0) return;
+                const swapped = [...optionState];
+                [swapped[index - 1], swapped[index]] = [swapped[index], swapped[index - 1]];
+                optionState = swapped;
+                renderOptionList();
+            });
+            row.querySelector('[data-action="down"]')?.addEventListener('click', () => {
+                if (index >= optionState.length - 1) return;
+                const swapped = [...optionState];
+                [swapped[index], swapped[index + 1]] = [swapped[index + 1], swapped[index]];
+                optionState = swapped;
+                renderOptionList();
+            });
+            row.querySelector('[data-action="remove"]')?.addEventListener('click', async () => {
+                if (optionState.length <= 2) {
+                    showAlert('옵션 제한', '옵션은 최소 2개 이상 유지해야 합니다.');
+                    return;
+                }
+                optionState.splice(index, 1);
+                renderOptionList();
+            });
+            optionListEl.appendChild(row);
+        });
+        syncChoiceSelectors();
+    }
+
+    function readFormPayload() {
+        return {
+            id: currentPollId || '',
+            title: document.getElementById('pollTitle').value,
+            description: document.getElementById('pollDescription').value,
+            startAt: inputValueToKstIso(document.getElementById('pollStartAt').value),
+            endAt: inputValueToKstIso(document.getElementById('pollEndAt').value),
+            minChoices: Number(minChoicesEl.value) || 1,
+            maxChoices: Number(maxChoicesEl.value) || 1,
+            allowRevote: true,
+            optionOrderMode: 'RANDOM_PER_MEMBER',
+            options: optionState.map((option) => ({ id: option.id || null, label: option.label || '' }))
+        };
+    }
+
+    function setStatusBox(poll) {
+        if (!poll) {
+            statusBoxEl.classList.add('hidden');
+            return;
+        }
+        const phase = derivePreferencePollPhase(poll);
+        statusTitleEl.textContent = `현재 상태: ${phase}`;
+        statusBodyEl.innerHTML = `저장 상태는 <strong>${escapeHtml(poll.status || 'DRAFT')}</strong> 입니다.<br>투표 기간: ${escapeHtml(formatKst(poll.start_at))} ~ ${escapeHtml(formatKst(poll.end_at))}`;
+        statusBoxEl.classList.remove('hidden');
+    }
+
+    async function loadPoll() {
+        if (!currentPollId) return;
+        const { poll, options } = await service.getAdminPoll(currentPollId);
+        if (!poll) {
+            showAlert('투표 없음', '선택한 선호도 투표를 찾지 못했습니다.');
+            return;
+        }
+        loadedPoll = poll;
+        document.getElementById('pollTitle').value = poll.title || '';
+        document.getElementById('pollDescription').value = poll.description || '';
+        document.getElementById('pollStartAt').value = kstIsoToInputValue(poll.start_at);
+        document.getElementById('pollEndAt').value = kstIsoToInputValue(poll.end_at);
+        optionState = (options || []).map((option) => ({ id: option.id, label: option.label || '' }));
+        if (optionState.length < 2) {
+            while (optionState.length < 2) optionState.push({ id: null, label: '' });
+        }
+        renderOptionList();
+        minChoicesEl.value = String(Math.max(1, Number(poll.min_choices) || 1));
+        maxChoicesEl.value = String(Math.max(1, Number(poll.max_choices) || 1));
+        syncChoiceSelectors(true);
+        setStatusBox(poll);
+    }
+
+    async function saveDraft() {
+        const btn = document.getElementById('btnSaveDraft');
+        const previousLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '저장 중...';
+        try {
+            const pollId = await service.savePoll(readFormPayload());
+            showAlert('저장 완료', '선호도 투표 초안을 저장했습니다.');
+            if (!currentPollId && pollId) {
+                window.location.replace(`poll_setup.html?id=${encodeURIComponent(pollId)}`);
+                return;
+            }
+            await loadPoll();
+        } catch (error) {
+            showAlert('저장 실패', error.message || '초안 저장에 실패했습니다.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = previousLabel;
+        }
+    }
+
+    async function publishPoll() {
+        const pollId = currentPollId || '';
+        if (!pollId) {
+            showAlert('공개 전 확인', '먼저 초안을 저장한 뒤 공개해주세요.');
+            return;
+        }
+        const ok = await showConfirm('대상자 확정 후 공개', '현재 조합의 정상 조합원 전체를 대상으로 스냅샷을 확정하고 공개합니다. 계속할까요?');
+        if (!ok) return;
+
+        const btn = document.getElementById('btnPublish');
+        const previousLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '공개 중...';
+        try {
+            const result = await service.publishPoll(pollId);
+            showAlert('공개 완료', `대상자 ${result?.voter_count || 0}명을 기준으로 투표를 공개했습니다.`);
+            await loadPoll();
+        } catch (error) {
+            showAlert('공개 실패', error.message || '투표 공개에 실패했습니다.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = previousLabel;
+        }
+    }
+
+    async function boot() {
+        const adminContext = await service.initializeAdminContext();
+        if (!adminContext?.user) {
+            showAlert('로그인 필요', '로그인 후 다시 시도해주세요.');
+            return;
+        }
+        if (!adminContext.canAdmin) {
+            showAlert('접근 권한 없음', '선호도 투표 관리자만 접근할 수 있습니다.');
+            return;
+        }
+
+        optionState = [{ id: null, label: '' }, { id: null, label: '' }];
+        renderOptionList();
+        document.getElementById('btnAddOption').addEventListener('click', () => {
+            if (optionState.length >= 9) {
+                showAlert('옵션 제한', '옵션은 최대 9개까지만 등록할 수 있습니다.');
+                return;
+            }
+            optionState.push({ id: null, label: '' });
+            renderOptionList();
+        });
+        minChoicesEl.addEventListener('change', () => {
+            if (Number(minChoicesEl.value) > Number(maxChoicesEl.value)) maxChoicesEl.value = minChoicesEl.value;
+        });
+        maxChoicesEl.addEventListener('change', () => {
+            if (Number(maxChoicesEl.value) < Number(minChoicesEl.value)) minChoicesEl.value = maxChoicesEl.value;
+        });
+        document.getElementById('btnSaveDraft').addEventListener('click', saveDraft);
+        document.getElementById('btnPublish').addEventListener('click', publishPoll);
+        document.getElementById('btnPortalPreview').addEventListener('click', () => {
+            location.href = 'index.html?portal=1';
+        });
+        await loadPoll();
+    }
+
+    boot().catch((error) => {
+        console.error('poll_setup boot failed:', error);
+        showAlert('화면 준비 실패', error.message || '선호도 투표 설정 화면을 불러오지 못했습니다.');
+    });
+</script>
+</body>
+</html>

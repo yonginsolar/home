@@ -1,90 +1,670 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.3 -->
+<!--
+Version: v1.0.4
+Change: 2026-05-16 - Replace redirect stub with a unified election/preference poll portal.
+-->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-  <title>선거 포털로 이동 중...</title>
-  <script>console.log('[Version] v1.0.3 | vote/index.html');</script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="../shared/route_guard.js?v=20260401-1"></script>
+  <title>선거/투표 포털</title>
+  <script>console.log('[Version] v1.0.4 | vote/index.html');</script>
   <style>
+    :root {
+      --bg: #f3f7fb;
+      --card: #ffffff;
+      --line: #d8e2ee;
+      --text: #16213e;
+      --muted: #5f6b85;
+      --primary: #1d4ed8;
+      --success: #0f766e;
+      --warning: #b45309;
+      --danger: #b91c1c;
+      --slate: #475569;
+      --purple: #7c3aed;
+    }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-height: 100vh;
+      font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      background: linear-gradient(180deg, #eef4fb 0%, #f8fafc 100%);
+      color: var(--text);
+    }
+    .page {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 24px 18px 64px;
+    }
+    .topbar {
       display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .topbar-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 11px 16px;
+      font-weight: 800;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: #f8fafc;
-      color: #334155;
-      font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
-      padding: 24px;
+      gap: 6px;
     }
-    .card {
-      width: min(520px, calc(100% - 32px));
-      background: #fff;
-      border: 1px solid rgba(15, 23, 42, 0.08);
-      border-radius: 18px;
-      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
-      padding: 28px 24px;
-      text-align: center;
+    .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .btn.secondary { background: #fff; }
+    .hero {
+      background: radial-gradient(circle at top left, rgba(29,78,216,0.18), transparent 45%), #fff;
+      border: 1px solid rgba(29,78,216,0.14);
+      border-radius: 26px;
+      padding: 28px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+      margin-bottom: 18px;
     }
-    .title {
-      font-size: 20px;
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 4vw, 42px);
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .chip {
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 13px;
       font-weight: 800;
+      background: #edf4ff;
+      color: var(--primary);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 22px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .section-head h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+    .section-head span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .card-list {
+      display: grid;
+      gap: 12px;
+    }
+    .item-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      background: #fff;
+    }
+    .item-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
       margin-bottom: 8px;
     }
-    .copy {
+    .item-head h3 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      line-height: 1.4;
+    }
+    .badge {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .badge.open { background: #dcfce7; color: #166534; }
+    .badge.ready { background: #e0ecff; color: #1d4ed8; }
+    .badge.closed { background: #e5e7eb; color: #374151; }
+    .badge.warning { background: #fef3c7; color: #92400e; }
+    .badge.purple { background: #f3e8ff; color: #6d28d9; }
+    .item-desc {
+      color: var(--muted);
+      line-height: 1.6;
       font-size: 14px;
-      color: #64748b;
-      margin: 0;
+      margin-bottom: 10px;
       white-space: pre-wrap;
     }
-    .link {
-      display: inline-block;
-      margin-top: 16px;
-      font-weight: 700;
-      color: #2563eb;
-      text-decoration: none;
+    .meta-list {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .card-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .empty-box {
+      border: 1px dashed #c7d3e4;
+      border-radius: 18px;
+      padding: 28px;
+      text-align: center;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .status-banner {
+      margin-bottom: 18px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid #dbe7ff;
+      background: #f8fbff;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .status-banner strong { color: var(--text); }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 4000;
+    }
+    .modal-card {
+      width: min(460px, 100%);
+      background: #fff;
+      border-radius: 22px;
+      padding: 24px;
+      border: 1px solid #d8e0ec;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+    }
+    .modal-card h4 { margin: 0 0 10px; font-size: 20px; }
+    .modal-card p { margin: 0; color: var(--muted); line-height: 1.6; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .topbar { flex-direction: column; align-items: stretch; }
+      .card-actions .btn { width: 100%; }
     }
   </style>
-  <script>
-    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
-    const supabaseClient = window.CoopRouteGuard?.createSupabaseClient
-      ? window.CoopRouteGuard.createSupabaseClient(window.supabase, SUPABASE_URL, SUPABASE_KEY)
-      : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    function buildVotePortalUrl() {
-      const params = new URLSearchParams(window.location.search || '');
-      if (!params.get('portal')) params.set('portal', '1');
-      const nextUrl = new URL('vote_login.html', window.location.href);
-      nextUrl.search = params.toString();
-      return nextUrl.toString();
-    }
-
-    function clearLegacyVoteSessionHash() {
-      if (!window.location.hash) return;
-      const cleanUrl = `${window.location.pathname}${window.location.search}`;
-      window.history.replaceState({}, document.title, cleanUrl);
-    }
-
-    async function bootVoteIndex() {
-      clearLegacyVoteSessionHash();
-      window.location.replace(buildVotePortalUrl());
-    }
-
-    window.addEventListener('load', bootVoteIndex);
-  </script>
 </head>
 <body>
-  <div class="card">
-    <div class="title">선거 포털로 이동 중입니다</div>
-    <p class="copy">조합원/대표자 확인 후 투표, 후보 등록, 선거 안내 화면으로 연결합니다.</p>
-    <noscript>
-      <a class="link" href="vote_login.html?portal=1">직접 열기</a>
-    </noscript>
+<div class="page">
+  <div class="topbar">
+    <a class="btn secondary" href="../membermanage.html">← 조합원 화면</a>
+    <div class="topbar-actions">
+      <a class="btn secondary" id="adminHubButton" href="../erp/vote_hub.html" style="display:none;">관리 허브</a>
+      <a class="btn primary" href="vote_login.html?portal=1">기존 선거 포털</a>
+    </div>
   </div>
+
+  <section class="hero">
+    <h1>선거/투표 포털</h1>
+    <p>임원·대의원 선거와 조합원 선호도 투표를 한 화면에서 확인합니다. 공개된 항목만 보여주고, 선호도 투표 결과는 종료 후에도 관리자에게만 열리도록 유지합니다.</p>
+    <div class="hero-meta">
+      <span class="chip">선거와 선호도 투표 통합 진입점</span>
+      <span class="chip">기간 내 선호도 재제출 가능</span>
+      <span class="chip">결과는 종료 후 관리자만 확인</span>
+    </div>
+  </section>
+
+  <div id="statusBanner" class="status-banner" style="display:none;"></div>
+
+  <div class="layout">
+    <section class="panel">
+      <div class="section-head">
+        <h2>선거</h2>
+        <span id="electionCountLabel">0건</span>
+      </div>
+      <div id="electionList" class="card-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <h2>선호도 투표</h2>
+        <span id="pollCountLabel">0건</span>
+      </div>
+      <div id="pollList" class="card-list"></div>
+    </section>
+  </div>
+</div>
+
+<div id="modalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h4 id="modalTitle">알림</h4>
+    <p id="modalMessage"></p>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<script src="../erp/erp_runtime_guard.js"></script>
+<script type="module">
+  import { supabase, resolveCurrentMemberProfileId } from './ElectionService.js';
+  import { PreferencePollService, derivePreferencePollPhase } from './PreferencePollService.js';
+
+  const ELECTION_RESULT_PUBLIC_WINDOW_DAYS = 14;
+  const electionListEl = document.getElementById('electionList');
+  const pollListEl = document.getElementById('pollList');
+  const electionCountLabelEl = document.getElementById('electionCountLabel');
+  const pollCountLabelEl = document.getElementById('pollCountLabel');
+  const statusBannerEl = document.getElementById('statusBanner');
+  const adminHubButtonEl = document.getElementById('adminHubButton');
+  const modalBackdropEl = document.getElementById('modalBackdrop');
+  const modalTitleEl = document.getElementById('modalTitle');
+  const modalMessageEl = document.getElementById('modalMessage');
+  const modalActionsEl = document.getElementById('modalActions');
+  const service = new PreferencePollService();
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+
+  function showModal(title, message, actions = []) {
+    modalTitleEl.textContent = title;
+    modalMessageEl.innerHTML = String(message || '').replace(/\n/g, '<br>');
+    modalActionsEl.innerHTML = '';
+    actions.forEach((action) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `btn ${action.type || ''}`.trim();
+      button.textContent = action.label;
+      button.addEventListener('click', () => {
+        modalBackdropEl.style.display = 'none';
+        if (typeof action.onClick === 'function') action.onClick();
+      });
+      modalActionsEl.appendChild(button);
+    });
+    if (actions.length === 0) {
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.className = 'btn primary';
+      closeButton.textContent = '확인';
+      closeButton.addEventListener('click', () => {
+        modalBackdropEl.style.display = 'none';
+      });
+      modalActionsEl.appendChild(closeButton);
+    }
+    modalBackdropEl.style.display = 'flex';
+  }
+
+  function showAlert(title, message, onClose = null) {
+    showModal(title, escapeHtml(message), onClose ? [
+      { label: '확인', type: 'primary', onClick: onClose }
+    ] : []);
+  }
+
+  function formatKst(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+  }
+
+  function toValidDate(value) {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function getEffectiveVoteEndAt(election) {
+    if (!election) return null;
+    return election.actual_closed_at || election.vote_end_at || election.end_at || null;
+  }
+
+  function getElectionResultPublicDeadline(election) {
+    const closedAt = toValidDate(getEffectiveVoteEndAt(election));
+    if (!closedAt) return null;
+    return new Date(closedAt.getTime() + (ELECTION_RESULT_PUBLIC_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+  }
+
+  function isElectionResultPubliclyVisible(election, now = new Date()) {
+    const deadline = getElectionResultPublicDeadline(election);
+    const current = now instanceof Date ? now : new Date(now);
+    if (!deadline || Number.isNaN(current.getTime())) return false;
+    return current.getTime() <= deadline.getTime();
+  }
+
+  function isUncontestedClosedElection(election) {
+    if (!election || !election.actual_closed_at) return false;
+    const closedAt = toValidDate(election.actual_closed_at);
+    const voteStart = toValidDate(election.vote_start_at || election.start_at);
+    if (!closedAt || !voteStart) return false;
+    return closedAt.getTime() <= voteStart.getTime();
+  }
+
+  function deriveElectionPhase(election, now = new Date()) {
+    const status = String(election?.status || '').toUpperCase();
+    const candidacyStart = toValidDate(election?.candidacy_start_at);
+    const candidacyEnd = toValidDate(election?.candidacy_end_at);
+    const voteStart = toValidDate(election?.vote_start_at || election?.start_at);
+    const voteEnd = toValidDate(getEffectiveVoteEndAt(election));
+
+    if (status === 'PUBLISHED' || status === 'ENDED') {
+      return isElectionResultPubliclyVisible(election, now) ? 'PUBLISHED' : 'ENDED';
+    }
+    if (status === 'CLOSED') return 'CLOSED';
+    if (status === 'OPEN') return 'OPEN';
+    if (status === 'NOMINATION') return 'NOMINATION';
+    if (status === 'PAUSED') {
+      if (voteStart && voteEnd && now >= voteStart && now <= voteEnd) return 'PAUSED';
+      return 'READY';
+    }
+    if (status === 'READY') return 'READY';
+    if (candidacyStart && candidacyEnd && now >= candidacyStart && now <= candidacyEnd) return 'NOMINATION';
+    if (voteStart && voteEnd && now >= voteStart && now <= voteEnd) return 'OPEN';
+    if (voteEnd && now > voteEnd) return 'CLOSED';
+    return 'READY';
+  }
+
+  function getElectionPhaseBadge(phase, election) {
+    if (phase === 'OPEN') return { className: 'open', label: '투표 진행 중' };
+    if (phase === 'NOMINATION') return { className: 'purple', label: '후보 등록 중' };
+    if (phase === 'READY' || phase === 'PAUSED') return { className: 'ready', label: phase === 'PAUSED' ? '투표 일시정지' : '투표 대기' };
+    if (phase === 'CLOSED') {
+      return { className: 'warning', label: isUncontestedClosedElection(election) ? '무투표 확인 중' : '집계 중' };
+    }
+    if (phase === 'PUBLISHED') return { className: 'ready', label: '결과 공개' };
+    return { className: 'closed', label: '종료' };
+  }
+
+  function describeElectionCard(election, phase) {
+    const voteStart = toValidDate(election.vote_start_at || election.start_at);
+    const voteEnd = toValidDate(getEffectiveVoteEndAt(election));
+    const candidacyEnd = toValidDate(election.candidacy_end_at);
+    const meta = [];
+    let desc = '선거 상세와 후보자 정보를 확인할 수 있습니다.';
+    let buttonLabel = '열기';
+
+    if (phase === 'NOMINATION') {
+      desc = '후보 등록 기간입니다. 공정성을 위해 등록 마감 전에는 후보 목록 일부가 제한될 수 있습니다.';
+      buttonLabel = '후보 등록/확인';
+      if (candidacyEnd) meta.push(`등록 마감: ${formatKst(candidacyEnd)}`);
+    } else if (phase === 'READY' || phase === 'PAUSED') {
+      desc = '투표 시작 전입니다. 후보자와 선거구 구성을 먼저 확인할 수 있습니다.';
+      buttonLabel = '후보자 보기';
+      if (voteStart) meta.push(`투표 시작: ${formatKst(voteStart)}`);
+    } else if (phase === 'OPEN') {
+      desc = '현재 투표가 진행 중입니다. 본인 확인 후 투표소로 이동할 수 있습니다.';
+      buttonLabel = '투표소 입장';
+      if (voteEnd) meta.push(`투표 마감: ${formatKst(voteEnd)}`);
+    } else if (phase === 'CLOSED') {
+      desc = isUncontestedClosedElection(election)
+        ? '무투표 당선 여부를 확인 중입니다.'
+        : '투표가 마감되어 집계 중입니다.';
+      buttonLabel = '현황 보기';
+      if (voteEnd) meta.push(`마감 시각: ${formatKst(voteEnd)}`);
+    } else if (phase === 'PUBLISHED') {
+      desc = '결과가 공개된 선거입니다.';
+      buttonLabel = '결과 보기';
+      if (voteEnd) meta.push(`종료 시각: ${formatKst(voteEnd)}`);
+    } else {
+      desc = '결과 공개 기간이 지난 선거입니다.';
+      buttonLabel = '기록 보기';
+      if (voteEnd) meta.push(`종료 시각: ${formatKst(voteEnd)}`);
+    }
+
+    meta.push(`등록일: ${formatKst(election.created_at)}`);
+    return { desc, buttonLabel, meta };
+  }
+
+  function getPreferenceBadge(row) {
+    const phase = String(row?.phase || '').toUpperCase();
+    if (phase === 'OPEN') {
+      return row?.is_submitted
+        ? { className: 'purple', label: '참여 완료' }
+        : { className: 'open', label: '참여 필요' };
+    }
+    if (phase === 'READY') return { className: 'ready', label: '시작 전' };
+    if (phase === 'SETTLED') return { className: 'purple', label: '정산 대기/완료' };
+    return { className: 'closed', label: '종료' };
+  }
+
+  function describePreferencePoll(row) {
+    const phase = String(row?.phase || '').toUpperCase();
+    const meta = [
+      `기간: ${formatKst(row?.start_at)} ~ ${formatKst(row?.end_at)}`,
+      `선택 규칙: 최소 ${Number(row?.min_choices || 1)}개, 최대 ${Number(row?.max_choices || 1)}개`,
+      `옵션 수: ${Number(row?.option_count || 0)}개`
+    ];
+    let desc = String(row?.description || '').trim();
+    let buttonLabel = '투표 열기';
+
+    if (!desc) {
+      if (phase === 'OPEN' && row?.is_submitted) {
+        desc = '이미 제출한 내용이 있습니다. 기간 안에는 다시 선택해서 수정 제출할 수 있습니다.';
+      } else if (phase === 'OPEN') {
+        desc = '지금 참여할 수 있습니다. 제출 전에는 원하는 옵션을 자유롭게 고를 수 있습니다.';
+      } else if (phase === 'READY') {
+        desc = '정해진 시작 시각이 되면 자동으로 열립니다.';
+      } else {
+        desc = '투표가 종료되었습니다. 내 제출 상태만 확인할 수 있고 결과는 관리자만 열람합니다.';
+      }
+    }
+
+    if (phase === 'OPEN') {
+      buttonLabel = row?.is_submitted ? '선택 수정하기' : '투표 참여하기';
+      if (row?.is_submitted && row?.submitted_at) meta.push(`최근 제출: ${formatKst(row.submitted_at)}`);
+    } else if (phase === 'READY') {
+      buttonLabel = '내용 확인';
+    } else {
+      buttonLabel = row?.is_submitted ? '내 제출 보기' : '상세 보기';
+      if (row?.is_submitted && row?.submitted_at) meta.push(`제출 완료: ${formatKst(row.submitted_at)}`);
+    }
+
+    return { desc, buttonLabel, meta };
+  }
+
+  function readStoredAdminFallback() {
+    try {
+      const user = JSON.parse(localStorage.getItem('erp_user') || 'null');
+      const permissions = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
+      const permissionSet = new Set(Array.isArray(permissions) ? permissions : []);
+      return !!(user && (user.role === 'admin' || user.role === 'admin_all' || permissionSet.has('member.admin')));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function canAdminElection() {
+    if (readStoredAdminFallback()) return true;
+    try {
+      const { data, error } = await supabase.rpc('is_election_admin');
+      if (error) return false;
+      return data === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function loadElectionRows(coopId, canBypassWindow = false) {
+    const safeCoopId = String(coopId || '').trim();
+    if (!safeCoopId) return [];
+    const { data, error } = await supabase
+      .from('elections')
+      .select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, actual_closed_at, start_at, end_at, created_at')
+      .eq('coop_id', safeCoopId)
+      .neq('status', 'DRAFT')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const now = new Date();
+    return (Array.isArray(data) ? data : []).filter((row) => {
+      const status = String(row?.status || '').toUpperCase();
+      if (canBypassWindow) return true;
+      if (status === 'PUBLISHED' || status === 'ENDED') {
+        return isElectionResultPubliclyVisible(row, now);
+      }
+      return true;
+    });
+  }
+
+  function renderElectionList(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    electionCountLabelEl.textContent = `${list.length}건`;
+    if (list.length === 0) {
+      electionListEl.innerHTML = '<div class="empty-box">현재 보이는 선거가 없습니다.<br>새 선거가 공개되면 여기에서 바로 확인할 수 있습니다.</div>';
+      return;
+    }
+
+    const now = new Date();
+    electionListEl.innerHTML = list.map((row) => {
+      const phase = deriveElectionPhase(row, now);
+      const badge = getElectionPhaseBadge(phase, row);
+      const content = describeElectionCard(row, phase);
+      return `
+        <article class="item-card">
+          <div class="item-head">
+            <div>
+              <h3>${escapeHtml(row.title || '무제 선거')}</h3>
+            </div>
+            <span class="badge ${badge.className}">${escapeHtml(badge.label)}</span>
+          </div>
+          <div class="item-desc">${escapeHtml(content.desc)}</div>
+          <div class="meta-list">
+            ${content.meta.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}
+          </div>
+          <div class="card-actions">
+            <a class="btn primary" href="vote_login.html?id=${encodeURIComponent(row.id)}">${escapeHtml(content.buttonLabel)}</a>
+          </div>
+        </article>
+      `;
+    }).join('');
+  }
+
+  function renderPreferencePollList(rows) {
+    const list = [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+      const phaseRank = (value) => ({ OPEN: 0, READY: 1, CLOSED: 2, SETTLED: 3 }[String(value || '').toUpperCase()] ?? 9);
+      const rankDiff = phaseRank(a?.phase) - phaseRank(b?.phase);
+      if (rankDiff !== 0) return rankDiff;
+      const aTime = toValidDate(a?.start_at)?.getTime() || 0;
+      const bTime = toValidDate(b?.start_at)?.getTime() || 0;
+      return bTime - aTime;
+    });
+
+    pollCountLabelEl.textContent = `${list.length}건`;
+    if (list.length === 0) {
+      pollListEl.innerHTML = '<div class="empty-box">현재 참여 가능한 선호도 투표가 없습니다.<br>조합에서 새 의견 수렴을 열면 여기에서 확인할 수 있습니다.</div>';
+      return;
+    }
+
+    pollListEl.innerHTML = list.map((row) => {
+      const badge = getPreferenceBadge(row);
+      const content = describePreferencePoll(row);
+      return `
+        <article class="item-card">
+          <div class="item-head">
+            <div>
+              <h3>${escapeHtml(row.title || '무제 선호도 투표')}</h3>
+            </div>
+            <span class="badge ${badge.className}">${escapeHtml(badge.label)}</span>
+          </div>
+          <div class="item-desc">${escapeHtml(content.desc)}</div>
+          <div class="meta-list">
+            ${content.meta.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}
+          </div>
+          <div class="card-actions">
+            <a class="btn primary" href="poll_vote.html?id=${encodeURIComponent(row.poll_id)}">${escapeHtml(content.buttonLabel)}</a>
+          </div>
+        </article>
+      `;
+    }).join('');
+  }
+
+  function updateStatusBanner(elections, polls) {
+    const electionCount = Array.isArray(elections) ? elections.length : 0;
+    const pollCount = Array.isArray(polls) ? polls.length : 0;
+    const openPollCount = (Array.isArray(polls) ? polls : []).filter((row) => String(row?.phase || '').toUpperCase() === 'OPEN' && !row?.is_submitted).length;
+    if (electionCount === 0 && pollCount === 0) {
+      statusBannerEl.style.display = 'block';
+      statusBannerEl.innerHTML = '<strong>현재 참여할 항목이 없습니다.</strong><br>선거가 공개되거나 선호도 투표가 시작되면 여기에서 바로 볼 수 있습니다.';
+      return;
+    }
+
+    const lines = [];
+    if (electionCount > 0) lines.push(`선거 ${electionCount}건`);
+    if (pollCount > 0) lines.push(`선호도 투표 ${pollCount}건`);
+    if (openPollCount > 0) lines.push(`아직 제출하지 않은 선호도 투표 ${openPollCount}건`);
+    statusBannerEl.style.display = 'block';
+    statusBannerEl.innerHTML = `<strong>현재 확인 가능한 항목</strong><br>${escapeHtml(lines.join(' · '))}`;
+  }
+
+  async function boot() {
+    const memberContext = await service.initializeMemberContext();
+    if (!memberContext?.user) {
+      showAlert('로그인 필요', '로그인 후 다시 시도해주세요.', () => {
+        location.href = `../membermanage.html?next=${encodeURIComponent(window.location.href)}`;
+      });
+      return;
+    }
+
+    const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+      moduleKey: 'vote',
+      moduleLabel: '선거/투표',
+      redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
+      alertFn: (message) => showAlert('이동 안내', message)
+    });
+    if (!runtimeCheck.ok) return;
+
+    if (runtimeCheck.runtime?.modules?.member_admin === false) {
+      showAlert('연동 필요', '선거/투표 기능은 조합원 관리 연동이 필요합니다.', () => {
+        location.href = '../membermanage.html';
+      });
+      return;
+    }
+
+    const currentCoopId = runtimeCheck.runtime?.coop_id || memberContext.coopId || null;
+    const canAdmin = await canAdminElection();
+    if (canAdmin) adminHubButtonEl.style.display = 'inline-flex';
+
+    const [elections, polls] = await Promise.all([
+      loadElectionRows(currentCoopId, canAdmin),
+      service.listPortalPolls(memberContext.memberProfileId)
+    ]);
+
+    renderElectionList(elections);
+    renderPreferencePollList(polls);
+    updateStatusBanner(elections, polls);
+  }
+
+  boot().catch((error) => {
+    console.error('vote/index boot failed:', error);
+    showAlert('포털 준비 실패', error.message || '선거/투표 포털을 불러오지 못했습니다.');
+  });
+</script>
 </body>
 </html>
