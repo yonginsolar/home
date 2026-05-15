@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.76
-Change: Fix tenant-scoped Supabase query builder order for member applications and board actions.
+Version: v1.0.77
+Change: Surface unified election/preference-poll portal entries in the quick vote card.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.76 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.77 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -2654,7 +2654,7 @@ window.switchHallOfFameTab = switchHallOfFameTab;
 
 // 전역 변수로 상세 내역 모달에서 쓸 데이터를 담아둡니다.
 let globalHistoryData = {};  
-let quickVoteActionUrl = 'vote/vote_login.html';
+let quickVoteActionUrl = 'vote/index.html?portal=1';
 let coopRuntimeModules = null;
 let currentMemberCoopId = null;
 const MEMBERMANAGE_BRANDING_CACHE_KEY = 'membermanage_branding_name';
@@ -2879,6 +2879,57 @@ if (a._priority !== b._priority) return a._priority - b._priority;
 return b._refDate.getTime() - a._refDate.getTime();
 });
 return scored[0];
+}
+
+const MEMBER_PREFERENCE_POLL_PHASE_PRIORITY = Object.freeze({
+OPEN: 0,
+READY: 1,
+CLOSED: 2,
+SETTLED: 3
+});
+
+function getPreferencePollPhasePriority(phase) {
+const key = String(phase || '').toUpperCase();
+return Object.prototype.hasOwnProperty.call(MEMBER_PREFERENCE_POLL_PHASE_PRIORITY, key)
+? MEMBER_PREFERENCE_POLL_PHASE_PRIORITY[key]
+: 99;
+}
+
+function pickPrimaryPreferencePoll(rows) {
+if (!Array.isArray(rows) || rows.length === 0) return null;
+const normalized = rows.map((row) => ({
+...row,
+_phase: String(row?.phase || '').toUpperCase(),
+_priority: getPreferencePollPhasePriority(row?.phase),
+_refDate: toValidDate(row?.start_at || row?.end_at || row?.submitted_at) || new Date(0)
+}));
+normalized.sort((a, b) => {
+if (a._priority !== b._priority) return a._priority - b._priority;
+return b._refDate.getTime() - a._refDate.getTime();
+});
+return normalized[0];
+}
+
+async function listMemberPreferencePolls(memberUuid) {
+if (!memberUuid) return [];
+try {
+const { data, error } = await _supabase.rpc('preference_list_portal_polls', { p_member_uuid: memberUuid });
+if (error) {
+console.warn('listMemberPreferencePolls failed:', error);
+return [];
+}
+return Array.isArray(data) ? data : [];
+} catch (e) {
+console.warn('listMemberPreferencePolls failed:', e);
+return [];
+}
+}
+
+function hasPendingPreferencePollTasks(rows = []) {
+return (Array.isArray(rows) ? rows : []).some((row) => {
+const phase = String(row?.phase || '').toUpperCase();
+return phase === 'OPEN' && !row?.is_submitted;
+});
 }
 
 async function fetchElectionTurnoutStats(electionId) {
@@ -3122,7 +3173,7 @@ btnEl.className = `quick-btn btn btn-${btnType}`;
 btnEl.textContent = config.buttonLabel || '투표소 입장';
 }
 
-quickVoteActionUrl = config.actionUrl || 'vote/vote_login.html';
+quickVoteActionUrl = config.actionUrl || 'vote/index.html?portal=1';
 }
 
 async function loadCoopRuntimeModules() {
@@ -3159,7 +3210,7 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
 };
 
-// 1. 관리자/선관위 여부
+const portalUrl = 'vote/index.html?portal=1';
 const isAdmin = isMemberPortalAdmin(member);
 const isCommittee = myRoles && myRoles.includes('election_comm');
 const isPrivileged = !!(isAdmin || isCommittee);
@@ -3170,13 +3221,13 @@ if (isAdmin) {
 setQuickCardVisible(voteCard, true);
 setQuickCardTodoState(voteCard, voteBadge, false);
 setVoteQuickCardContent({
-electionTitle: '',
-stageText: '모듈 비활성',
-descText: '현재 조합에서 선거/투표 모듈이 꺼져 있습니다.',
-metaLines: ['ERP 모듈 설정에서 선거/투표 사용 여부를 확인하세요.'],
-buttonLabel: '모듈 상태 확인',
-actionUrl: 'vote/vote_login.html',
-buttonType: 'secondary'
+  electionTitle: '',
+  stageText: '모듈 비활성',
+  descText: '현재 조합에서 선거/투표 모듈이 꺼져 있습니다.',
+  metaLines: ['ERP 모듈 설정에서 선거/투표 사용 여부를 확인하세요.'],
+  buttonLabel: '모듈 상태 확인',
+  actionUrl: portalUrl,
+  buttonType: 'secondary'
 });
 } else {
 setQuickCardVisible(voteCard, false);
@@ -3185,25 +3236,18 @@ setQuickCardTodoState(voteCard, voteBadge, false);
 return;
 }
 
-// 2. 조건에 맞는 선거 조회
 const targetStatuses = ['NOMINATION', 'READY', 'OPEN', 'PAUSED', 'CLOSED', 'PUBLISHED', 'ENDED'];
-const { data: elections, error } = await scopeMemberTenant(_supabase
+const [electionRes, preferencePolls] = await Promise.all([
+scopeMemberTenant(_supabase
 .from('elections')
 .select('id, title, status, candidacy_start_at, candidacy_end_at, vote_start_at, vote_end_at, actual_closed_at, start_at, end_at, created_at'))
-.in('status', targetStatuses);
+.in('status', targetStatuses),
+listMemberPreferencePolls(memberUuid)
+]);
 
-if (error || !elections || elections.length === 0) {
-setQuickCardVisible(voteCard, false); // 조건 맞는 선거 없음
-setQuickCardTodoState(voteCard, voteBadge, false);
-setVoteQuickCardContent({
-stageText: '',
-descText: '선거 진행 상황을 확인하세요',
-metaLines: [],
-buttonLabel: '투표소 입장',
-actionUrl: 'vote/vote_login.html',
-buttonType: 'primary'
-});
-return;
+const elections = electionRes?.error || !Array.isArray(electionRes?.data) ? [] : electionRes.data;
+if (electionRes?.error) {
+console.warn('checkElectionVisibility election load failed:', electionRes.error);
 }
 
 const now = new Date();
@@ -3216,9 +3260,117 @@ return isElectionResultPubliclyVisible(el, now);
 return true;
 });
 
-if (!visibleElections.length) {
+const visiblePreferencePolls = (Array.isArray(preferencePolls) ? preferencePolls : []).filter((row) => {
+const phase = String(row?.phase || '').toUpperCase();
+return ['OPEN', 'READY', 'CLOSED', 'SETTLED'].includes(phase);
+});
+
+if (visibleElections.length === 0 && visiblePreferencePolls.length === 0) {
 setQuickCardVisible(voteCard, false);
 setQuickCardTodoState(voteCard, voteBadge, false);
+setVoteQuickCardContent({
+stageText: '',
+descText: '선거와 선호도 투표 진행 상황을 확인하세요',
+metaLines: [],
+buttonLabel: '포털 열기',
+actionUrl: portalUrl,
+buttonType: 'primary'
+});
+return;
+}
+
+if (visibleElections.length > 0 && visiblePreferencePolls.length > 0) {
+const primaryElection = pickPrimaryElection(visibleElections);
+const primaryPoll = pickPrimaryPreferencePoll(visiblePreferencePolls);
+const hasPendingVote = (!isPrivileged && memberUuid) ? await hasPendingVoteTasks(memberUuid) : false;
+const hasPendingPoll = !isPrivileged && hasPendingPreferencePollTasks(visiblePreferencePolls);
+const metaLines = [`선거 ${visibleElections.length}건`, `선호도 투표 ${visiblePreferencePolls.length}건`];
+if (primaryElection?.title) metaLines.push(`대표 선거: ${primaryElection.title}`);
+if (primaryPoll?.title) metaLines.push(`대표 투표: ${primaryPoll.title}`);
+setQuickCardVisible(voteCard, true);
+setQuickCardTodoState(voteCard, voteBadge, !!(hasPendingVote || hasPendingPoll));
+setVoteQuickCardContent({
+  electionTitle: '',
+  stageText: '선거/투표 선택',
+  descText: '현재 선거와 선호도 투표가 함께 열려 있습니다. 포털에서 원하는 항목을 선택하세요.',
+  metaLines,
+  buttonLabel: '포털 열기',
+  actionUrl: portalUrl,
+  buttonType: 'primary'
+});
+return;
+}
+
+if (visibleElections.length === 0 && visiblePreferencePolls.length > 0) {
+const primaryPoll = pickPrimaryPreferencePoll(visiblePreferencePolls);
+if (!primaryPoll) {
+setQuickCardVisible(voteCard, false);
+setQuickCardTodoState(voteCard, voteBadge, false);
+return;
+}
+const pollCount = visiblePreferencePolls.length;
+const isMultiPoll = pollCount > 1;
+const phase = String(primaryPoll._phase || primaryPoll.phase || '').toUpperCase();
+const metaLines = [`선호도 투표 ${pollCount}건`];
+if (primaryPoll.start_at || primaryPoll.end_at) {
+metaLines.push(`기간: ${formatMemberKstDateTime(primaryPoll.start_at)} ~ ${formatMemberKstDateTime(primaryPoll.end_at)}`);
+}
+metaLines.push(`선택 규칙: 최소 ${Number(primaryPoll.min_choices || 1)}개 / 최대 ${Number(primaryPoll.max_choices || 1)}개`);
+const pollActionUrl = isMultiPoll ? portalUrl : `vote/poll_vote.html?id=${primaryPoll.poll_id}`;
+const hasPendingPoll = !isPrivileged && hasPendingPreferencePollTasks(visiblePreferencePolls);
+setQuickCardVisible(voteCard, true);
+setQuickCardTodoState(voteCard, voteBadge, hasPendingPoll);
+
+if (isMultiPoll) {
+setVoteQuickCardContent({
+  electionTitle: '',
+  stageText: '선호도 투표 선택',
+  descText: '현재 참여 가능한 선호도 투표가 여러 건입니다. 포털에서 원하는 투표를 선택하세요.',
+  metaLines,
+  buttonLabel: '포털 열기',
+  actionUrl: portalUrl,
+  buttonType: 'primary'
+});
+return;
+}
+
+if (phase === 'READY') {
+setVoteQuickCardContent({
+  electionTitle: primaryPoll.title || '',
+  stageText: '투표 시작 전',
+  descText: '정해진 시작 시각이 되면 자동으로 열립니다.',
+  metaLines,
+  buttonLabel: '내용 확인',
+  actionUrl: pollActionUrl,
+  buttonType: 'info'
+});
+return;
+}
+
+if (phase === 'OPEN') {
+setVoteQuickCardContent({
+  electionTitle: primaryPoll.title || '',
+  stageText: primaryPoll.is_submitted ? '참여 완료' : '참여 필요',
+  descText: primaryPoll.is_submitted
+    ? '이미 제출한 내용이 있습니다. 기간 안에는 다시 수정 제출할 수 있습니다.'
+    : '지금 참여할 수 있습니다. 원하는 옵션을 고른 뒤 제출하세요.',
+  metaLines,
+  buttonLabel: primaryPoll.is_submitted ? '선택 수정하기' : '투표 참여하기',
+  actionUrl: pollActionUrl,
+  buttonType: primaryPoll.is_submitted ? 'secondary' : 'success'
+});
+return;
+}
+
+setVoteQuickCardContent({
+  electionTitle: primaryPoll.title || '',
+  stageText: '투표 종료',
+  descText: '투표가 종료되었습니다. 결과는 관리자만 확인할 수 있습니다.',
+  metaLines,
+  buttonLabel: primaryPoll.is_submitted ? '내 제출 보기' : '상세 보기',
+  actionUrl: pollActionUrl,
+  buttonType: 'secondary'
+});
 return;
 }
 
@@ -3233,8 +3385,8 @@ const electionCount = visibleElections.length;
 const isMultiElection = electionCount > 1;
 const phase = targetElection._phase || deriveElectionPhase(targetElection, now);
 const electionId = targetElection.id;
-const singleElectionUrl = electionId ? `vote/vote_login.html?id=${electionId}` : 'vote/vote_login.html';
-const listUrl = 'vote/vote_login.html';
+const singleElectionUrl = electionId ? `vote/vote_login.html?id=${electionId}` : portalUrl;
+const listUrl = portalUrl;
 const voteActionUrl = isMultiElection ? listUrl : singleElectionUrl;
 
 setQuickCardVisible(voteCard, true);
@@ -3250,13 +3402,13 @@ if (isMultiElection) {
 const multiMetaLines = [`현재 대상 선거 ${electionCount}건`];
 if (targetElection.title) multiMetaLines.push(`대표 선거: ${targetElection.title}`);
 setVoteQuickCardContent({
-electionTitle: '',
-stageText: '선거 선택',
-descText: '선거가 2개 이상입니다. 선거 포털에서 원하는 선거 카드를 선택하세요.',
-metaLines: multiMetaLines,
-buttonLabel: '선거 선택하기',
-actionUrl: listUrl,
-buttonType: 'primary'
+  electionTitle: '',
+  stageText: '선거 선택',
+  descText: '선거가 2개 이상입니다. 포털에서 원하는 선거 카드를 선택하세요.',
+  metaLines: multiMetaLines,
+  buttonLabel: '포털 열기',
+  actionUrl: listUrl,
+  buttonType: 'primary'
 });
 return;
 }
@@ -3273,13 +3425,13 @@ const isUncontestedClosed = isUncontestedClosedElection(targetElection);
 if (phase === 'NOMINATION') {
 if (candEnd) metaLines.push(`등록 마감: ${formatMemberKstDateTime(candEnd)}`);
 setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '',
-metaLines,
-buttonLabel: '후보 등록하기',
-actionUrl: voteActionUrl,
-buttonType: 'primary'
+  electionTitle: targetElection.title || '',
+  stageText: buildPhaseBadgeText(phase),
+  descText: '',
+  metaLines,
+  buttonLabel: '후보 등록하기',
+  actionUrl: voteActionUrl,
+  buttonType: 'primary'
 });
 return;
 }
@@ -3287,13 +3439,13 @@ return;
 if (phase === 'READY' || phase === 'PAUSED') {
 if (voteStart) metaLines.push(`투표 시작: ${formatMemberKstDateTime(voteStart)}`);
 setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '후보자 정보를 확인하고 투표를 준비하세요.',
-metaLines,
-buttonLabel: '후보자 확인하기',
-actionUrl: voteActionUrl,
-buttonType: 'info'
+  electionTitle: targetElection.title || '',
+  stageText: buildPhaseBadgeText(phase),
+  descText: '후보자 정보를 확인하고 투표를 준비하세요.',
+  metaLines,
+  buttonLabel: '후보자 확인하기',
+  actionUrl: voteActionUrl,
+  buttonType: 'info'
 });
 return;
 }
@@ -3320,13 +3472,13 @@ const openDesc = hasActionable
 ? '투표가 진행 중입니다.'
 : '내 선거구는 무투표/후보미등록으로 별도 투표가 필요하지 않습니다.';
 setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: openDesc,
-metaLines,
-buttonLabel: hasActionable ? (hasPending ? '투표 참여하기' : '투표 현황 보기') : '후보자/현황 보기',
-actionUrl: voteActionUrl,
-buttonType: hasActionable ? 'success' : 'secondary'
+  electionTitle: targetElection.title || '',
+  stageText: buildPhaseBadgeText(phase),
+  descText: openDesc,
+  metaLines,
+  buttonLabel: hasActionable ? (hasPending ? '투표 참여하기' : '투표 현황 보기') : '후보자/현황 보기',
+  actionUrl: voteActionUrl,
+  buttonType: hasActionable ? 'success' : 'secondary'
 });
 return;
 }
@@ -3337,25 +3489,25 @@ if (isUncontestedClosed) metaLines.push(`무투표 당선 확정일: ${formatMem
 else metaLines.push(`투표 마감: ${formatMemberKstDateTime(voteEnd)}`);
 }
 setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: isUncontestedClosed ? '확인 중' : buildPhaseBadgeText(phase),
-descText: isUncontestedClosed ? '무투표 당선 결과를 선관위에서 확인 중입니다.' : '투표가 마감되어 집계 중입니다.',
-metaLines,
-buttonLabel: '후보자/현황 보기',
-actionUrl: voteActionUrl,
-buttonType: 'secondary'
+  electionTitle: targetElection.title || '',
+  stageText: isUncontestedClosed ? '확인 중' : buildPhaseBadgeText(phase),
+  descText: isUncontestedClosed ? '무투표 당선 결과를 선관위에서 확인 중입니다.' : '투표가 마감되어 집계 중입니다.',
+  metaLines,
+  buttonLabel: '후보자/현황 보기',
+  actionUrl: voteActionUrl,
+  buttonType: 'secondary'
 });
 return;
 }
 
 setVoteQuickCardContent({
-electionTitle: targetElection.title || '',
-stageText: buildPhaseBadgeText(phase),
-descText: '선거 결과가 공개되었습니다.',
-metaLines,
-buttonLabel: '결과 보기',
-actionUrl: voteActionUrl,
-buttonType: 'secondary'
+  electionTitle: targetElection.title || '',
+  stageText: buildPhaseBadgeText(phase),
+  descText: '선거 결과가 공개되었습니다.',
+  metaLines,
+  buttonLabel: '결과 보기',
+  actionUrl: voteActionUrl,
+  buttonType: 'secondary'
 });
 }
 
