@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.61
-Change: 2026-04-22 - Sort notice management by newest effective date before rendering.
+Version: v1.2.62
+Change: 2026-05-18 - Use shared official document numbering and retry minute inserts on doc number conflicts.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-04-22 - Sort notice management by newest effective date before rend
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.61 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.62 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -709,28 +709,38 @@ Change: 2026-04-22 - Sort notice management by newest effective date before rend
 
 
         async function generateMinuteDocNo() {
-            const year = new Date().getFullYear();
-            const prefix = `제${year}-`;
+            const { data, error } = await supabase.rpc('get_next_official_doc_no');
+            if (error) throw error;
+            return data || null;
+        } // End of generateMinuteDocNo
 
-            let docs = Array.from(minutesCache.values());
-            if (!docs || docs.length === 0) {
-                const { data } = await MinutesService.listMinutesAdmin();
-                docs = data || [];
-            }
+        function isMinuteDocNoConflictError(error) {
+            const code = String(error?.code || '');
+            const message = String(error?.message || '').toLowerCase();
+            const details = String(error?.details || '').toLowerCase();
+            return code === '23505' && (message.includes('doc_no') || details.includes('doc_no'));
+        } // End of isMinuteDocNoConflictError
 
-            let maxSeq = 0;
-            const re = new RegExp(`^제${year}-(\d{3})호$`);
-            docs.forEach(d => {
-                const m = String(d.doc_no || '').match(re);
-                if (m) {
-                    const n = parseInt(m[1], 10);
-                    if (!Number.isNaN(n)) maxSeq = Math.max(maxSeq, n);
+        async function createOfficialMinuteWithDocNoRetry(basePayload, maxAttempts = 5) {
+            let lastConflictError = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                const docNo = await generateMinuteDocNo();
+                const { error } = await MinutesService.createMinute({
+                    ...basePayload,
+                    doc_no: docNo || null
+                });
+                if (!error) return { error: null, docNo };
+                if (isMinuteDocNoConflictError(error)) {
+                    lastConflictError = error;
+                    continue;
                 }
-            });
-
-            const nextSeq = String(maxSeq + 1).padStart(3, '0');
-            return `${prefix}${nextSeq}호`;
-        }
+                return { error, docNo };
+            }
+            return {
+                error: lastConflictError || new Error('문서번호를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.'),
+                docNo: null
+            };
+        } // End of createOfficialMinuteWithDocNoRetry
 
         let editTargetId = null;
         let minuteEditTargetId = null;
@@ -3029,7 +3039,6 @@ Change: 2026-04-22 - Sort notice management by newest effective date before rend
             const title = document.getElementById('in-title').value;
             const content = normalizeMinuteContent(getMinuteEditorContent());
             const docType = document.getElementById('in-doc-type').value;
-            const docNo = await generateMinuteDocNo();
             if(!title) return showToast("제목을 입력하세요.");
 
             const fileInput = document.getElementById('in-files');
@@ -3052,11 +3061,10 @@ Change: 2026-04-22 - Sort notice management by newest effective date before rend
                 return;
             }
 
-            const { error } = await MinutesService.createMinute({
+            const { error } = await createOfficialMinuteWithDocNoRetry({
                 title,
                 content,
                 doc_type: docType,
-                doc_no: docNo || null,
                 receiver: null,
                 via: null,
                 visibility: 'MEMBERS',
@@ -3160,7 +3168,6 @@ Change: 2026-04-22 - Sort notice management by newest effective date before rend
                 title,
                 content,
                 doc_type: 'ASSEMBLY_MATERIAL',
-                doc_no: await generateMinuteDocNo(),
                 receiver: null,
                 via: null,
                 visibility,
@@ -3174,7 +3181,7 @@ Change: 2026-04-22 - Sort notice management by newest effective date before rend
             };
             if (createdAt) payload.created_at = createdAt;
 
-            const { error } = await MinutesService.createMinute(payload);
+            const { error } = await createOfficialMinuteWithDocNoRetry(payload);
             if (error) {
                 showToast(error.message || '총회 자료 저장 실패');
                 return;
