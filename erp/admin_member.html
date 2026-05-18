@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.71
-Change: 2026-04-29 - Fix RSS sync Edge Function auth and prepare scheduled checks.
+Version: v1.0.72
+Change: 2026-05-18 - Add regulation revision registration flow without overwriting prior versions.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.71';
+window.ADMIN_MEMBER_VERSION = 'v1.0.72';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1831,11 +1831,14 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="modal-dialog modal-dialog-centered">
 <div class="modal-content border-0 shadow">
 <div class="modal-header bg-white">
-<h5 class="modal-title fw-bold"><i class="bi bi-file-earmark-text text-primary me-2"></i>규정/문서 등록</h5>
+<h5 class="modal-title fw-bold" id="doc-modal-title"><i class="bi bi-file-earmark-text text-primary me-2"></i>규정/문서 등록</h5>
 <button class="btn-close" data-bs-dismiss="modal"></button>
 </div>
 <div class="modal-body p-4">
 <input type="hidden" id="doc-id">
+<div class="alert alert-primary small hidden" id="doc-revision-hint">
+기존 문서를 바꾸지 않고 새 개정판을 등록합니다. 저장하면 이전 버전은 그대로 남습니다.
+</div>
 
 <div class="row g-3 mb-3">
 <div class="col-md-7">
@@ -1881,7 +1884,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 <div class="modal-footer border-0 pt-0">
 <button class="btn btn-light" data-bs-dismiss="modal">취소</button>
-<button class="btn btn-primary px-4" onclick="saveDoc()">저장하기</button>
+<button class="btn btn-primary px-4" id="btn-save-doc" onclick="saveDoc()">저장하기</button>
 </div>
 </div>
 </div>
@@ -6667,7 +6670,8 @@ tbody.innerHTML += `<tr>
                    <td class="text-start small text-truncate" style="max-width:200px;">${summaryPreview}</td>
                    <td>${fileBtn}</td>
                    <td>
-                       <button class="btn btn-sm btn-light" onclick="openDocModal('${d.id}')">수정</button>
+                       <button class="btn btn-sm btn-outline-primary" onclick="openDocRevisionModal('${d.id}')">개정판 등록</button>
+                       <button class="btn btn-sm btn-light ms-1" onclick="openDocModal('${d.id}')">수정</button>
                        <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteDoc('${d.id}')">삭제</button>
                    </td>
                </tr>`;
@@ -6683,6 +6687,10 @@ tbody.innerHTML += `<tr>
 // [수정] 문서 모달 열기 (파일 관련 제거)
 async function openDocModal(id) {
 document.getElementById('doc-id').value = id || '';
+const titleEl = document.getElementById('doc-modal-title');
+const hintEl = document.getElementById('doc-revision-hint');
+if (titleEl) titleEl.innerHTML = '<i class="bi bi-file-earmark-text text-primary me-2"></i>규정/문서 등록';
+if (hintEl) hintEl.classList.add('hidden');
 
 if(id) {
 const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
@@ -6706,11 +6714,36 @@ document.getElementById('doc-access-scope').value = 'PUBLIC';
 new bootstrap.Modal(document.getElementById('docModal')).show();
 }
 
+async function openDocRevisionModal(id) {
+if (!id) return;
+const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
+if (!data) return myAlert('원본 문서를 불러오지 못했습니다.', 'warning');
+
+document.getElementById('doc-id').value = '';
+document.getElementById('doc-title').value = data.title || '';
+document.getElementById('doc-version').value = '';
+document.getElementById('doc-date').value = getAdminMemberKstDateString();
+document.getElementById('doc-content').value = data.content || '';
+document.getElementById('doc-current').checked = true;
+document.getElementById('doc-access-scope').value = getDocVisibilityMeta(data.access_scope, data.title).scope;
+const titleEl = document.getElementById('doc-modal-title');
+const hintEl = document.getElementById('doc-revision-hint');
+if (titleEl) titleEl.innerHTML = '<i class="bi bi-file-earmark-plus text-primary me-2"></i>규정 개정판 등록';
+if (hintEl) hintEl.classList.remove('hidden');
+new bootstrap.Modal(document.getElementById('docModal')).show();
+}
+
 // [수정] 문서 저장 (파일 로직 삭제)
 async function saveDoc() {
 const title = document.getElementById('doc-title').value;
 if(!title) return myAlert("제목을 입력하세요.", 'warning');
+const saveBtn = document.getElementById('btn-save-doc');
+if (saveBtn?.disabled) return;
 
+if (saveBtn) {
+saveBtn.disabled = true;
+saveBtn.textContent = '저장 중...';
+}
 showLoading(true);
 
 // 파일 업로드 로직 삭제됨 (순수 텍스트만 저장)
@@ -6727,13 +6760,19 @@ p_is_current: document.getElementById('doc-current').checked,
 p_access_scope: document.getElementById('doc-access-scope').value
 };
 
+try {
 const { error } = await _supabase.rpc('upsert_document_secure', updates);
-showLoading(false);
-
 if(error) myAlert('저장 실패: ' + error.message, 'error');
 else {
 bootstrap.Modal.getInstance(document.getElementById('docModal')).hide();
 fetchDocs();
+}
+} finally {
+showLoading(false);
+if (saveBtn) {
+saveBtn.disabled = false;
+saveBtn.textContent = '저장하기';
+}
 }
 }
 

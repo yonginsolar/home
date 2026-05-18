@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.28 | Change: 2026-05-18 - Use shared official document numbering across approvals and minutes. -->
+<!-- Version: v1.2.29 | Change: 2026-05-18 - Show linked proposal grounds in expense approval previews and detail views. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.28 | approval.html');</script>
+  <script>console.log('[Version] v1.2.29 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -8106,6 +8106,7 @@ function buildApprovalSubmitPreviewData() {
         title: title,
         content: previewContent,
         amount: Number(finalAmt || 0),
+        related_doc_id: toPositiveDocId(document.getElementById('relDocId')?.value || '') || null,
         drafter_name: drafterName,
         created_at: new Date().toISOString(),
         approval_line: previewApprovers.map((u) => ({
@@ -8125,6 +8126,88 @@ function buildApprovalSubmitPreviewData() {
         salary_ledger_snapshot: salaryLedgerSnapshotPayload
     };
 } // End of buildApprovalSubmitPreviewData
+
+async function loadApprovalRelatedDocById(docId) {
+    const safeDocId = toPositiveDocId(docId);
+    if (!safeDocId) return null;
+
+    const { data, error } = await scopeApprovalTenant(_supabase
+        .from('ref_approval')
+        .select('*'))
+        .eq('id', safeDocId)
+        .maybeSingle();
+    if (error) {
+        console.warn('loadApprovalRelatedDocById failed:', error);
+        return null;
+    }
+    return data || null;
+} // End of loadApprovalRelatedDocById
+
+function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId) {
+    const wrapper = document.createElement('section');
+    wrapper.className = 'mt-4';
+
+    const headingEl = document.createElement('div');
+    headingEl.className = 'fw-bold mb-2';
+    headingEl.textContent = '집행 근거 (연동 품의서)';
+    wrapper.appendChild(headingEl);
+
+    const boxEl = document.createElement('div');
+    boxEl.className = 'p-3 border rounded bg-white';
+    wrapper.appendChild(boxEl);
+
+    if (!relatedDoc) {
+        boxEl.textContent = `연동된 품의서(ID: ${relatedDocId})를 불러오지 못했습니다.`;
+        return wrapper;
+    }
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'fw-bold mb-1';
+    titleEl.textContent = String(relatedDoc.title || '연동 품의서');
+    boxEl.appendChild(titleEl);
+
+    const metaParts = [];
+    if (relatedDoc.doc_no) metaParts.push(`문서번호 ${relatedDoc.doc_no}`);
+    if (relatedDoc.doc_type) metaParts.push(`유형 ${relatedDoc.doc_type}`);
+    if (relatedDoc.drafter_name) metaParts.push(`작성자 ${relatedDoc.drafter_name}`);
+    if (relatedDoc.created_at) metaParts.push(`기안일 ${formatApprovalKstDateISO(relatedDoc.created_at, '')}`);
+    if (metaParts.length > 0) {
+        const metaEl = document.createElement('div');
+        metaEl.className = 'small text-muted mb-2';
+        metaEl.textContent = metaParts.join(' | ');
+        boxEl.appendChild(metaEl);
+    }
+
+    const rawType = String(relatedDoc.doc_type || '');
+    const isNoticeDoc = rawType.startsWith('공문');
+    const allowHtmlContent = isApprovalHtmlEditorType(rawType) || isNoticeDoc;
+    const noticeParts = isNoticeDoc ? splitNoticeApprovalContent(relatedDoc.content || '') : null;
+    const contentSource = isNoticeDoc ? (noticeParts?.publicBody || '') : String(relatedDoc.content || '');
+    const contentEl = document.createElement('div');
+    if (allowHtmlContent) {
+        contentEl.innerHTML = renderApprovalContent(contentSource, true);
+    } else {
+        contentEl.style.whiteSpace = 'pre-wrap';
+        contentEl.textContent = contentSource;
+    }
+    boxEl.appendChild(contentEl);
+
+    const amountDisplay = getApprovalAmountDisplayPayload(relatedDoc);
+    const amountEl = document.createElement('div');
+    amountEl.className = 'small text-end fw-bold mt-2';
+    amountEl.textContent = `${amountDisplay.labelText || '금액'}: ${amountDisplay.mainText || '-'}`;
+    boxEl.appendChild(amountEl);
+
+    return wrapper;
+} // End of buildApprovalRelatedDocSectionElement
+
+async function appendApprovalRelatedDocSection(container, doc) {
+    if (!container || !String(doc?.doc_type || '').startsWith('지출결의')) return;
+    const relatedDocId = toPositiveDocId(doc?.related_doc_id);
+    if (!relatedDocId) return;
+    const relatedDoc = doc?._related_doc || await loadApprovalRelatedDocById(relatedDocId);
+    container.appendChild(buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId));
+} // End of appendApprovalRelatedDocSection
 
 async function openApprovalSubmitPreview() {
     try {
@@ -8189,6 +8272,7 @@ async function openApprovalSubmitPreview() {
         contentEl.appendChild(contentBox);
         contentEl.appendChild(amountEl);
         appendApprovalSalaryLedgerSnapshotSection(contentEl, previewDoc);
+        await appendApprovalRelatedDocSection(contentEl, previewDoc);
         relViewModal.show();
         const attachmentPlaceholder = document.createElement("div");
         attachmentPlaceholder.className = "mt-3 p-3 border rounded bg-white small text-muted";
@@ -11645,6 +11729,7 @@ async function openRelView(docId) {
     contentEl.appendChild(contentBox);
     contentEl.appendChild(amountEl);
     appendApprovalSalaryLedgerSnapshotSection(contentEl, data);
+    await appendApprovalRelatedDocSection(contentEl, data);
 
     const attachmentRefs = Array.isArray(data.file_links)
         ? data.file_links.filter(link => typeof link === 'string' && link.trim()).map(rawRef => ({ rawRef }))
