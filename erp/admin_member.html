@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.73
-Change: 2026-05-19 - Group old regulation versions under the current revision and add revision summaries.
+Version: v1.0.74
+Change: 2026-05-19 - Preserve line breaks in regulation revision summaries.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.73';
+window.ADMIN_MEMBER_VERSION = 'v1.0.74';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -73,6 +73,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .hidden { display: none !important; }
 .table th { font-size: 13px; background-color: #f1f3f5; font-weight: 600; }
 .table td { font-size: 14px; vertical-align: middle; }
+.doc-revision-summary-preview { white-space: pre-wrap; line-height: 1.55; color: #0f172a; word-break: keep-all; }
+.doc-content-summary-preview { color: #64748b; font-size: 12px; line-height: 1.45; margin-top: 6px; }
 .tab-pane { display: none; }
 .tab-pane.active { display: block; animation: fadeIn 0.3s; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -6672,15 +6674,28 @@ return fileUrl
 : '<span class="text-muted text-xs">없음</span>';
 }
 
+function normalizeRevisionSummaryPreview(value, maxLen = 260) {
+const raw = String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+if (!raw) return '';
+if (!Number.isFinite(maxLen) || maxLen <= 0 || raw.length <= maxLen) return raw;
+return `${raw.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
+}
+
+function renderRevisionSummaryPreview(value, maxLen = 260) {
+const normalized = normalizeRevisionSummaryPreview(value, maxLen);
+if (!normalized) return '';
+return `<div class="doc-revision-summary-preview fw-semibold">${escapeHtml(normalized)}</div>`;
+}
+
 function buildDocSummaryCell(doc, contentMaxLen = 90) {
-const revisionSummary = toPlainSummaryPreview(doc?.revision_summary || '', 120);
+const revisionSummaryHtml = renderRevisionSummaryPreview(doc?.revision_summary || '', 260);
 const contentSummary = toPlainSummaryPreview(doc?.content || '', contentMaxLen);
 const parts = [];
-if (revisionSummary !== '-') {
-parts.push(`<div class="fw-semibold">${escapeHtml(revisionSummary)}</div>`);
+if (revisionSummaryHtml) {
+parts.push(revisionSummaryHtml);
 }
 if (contentSummary !== '-') {
-parts.push(`<div class="text-muted x-small mt-1">${escapeHtml(contentSummary)}</div>`);
+parts.push(`<div class="doc-content-summary-preview">${escapeHtml(contentSummary)}</div>`);
 }
 return parts.length ? parts.join('') : '<span class="text-muted">-</span>';
 }
