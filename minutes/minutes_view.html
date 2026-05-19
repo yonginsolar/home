@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-	    Version: v1.0.56
-	    Change: 2026-04-23 - Mark dynamic document box as noindex and add description metadata.
+	    Version: v1.0.57
+	    Change: 2026-05-19 - Group old regulation versions under current document history.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.56 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.57 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -92,7 +92,46 @@
         }
         .list-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
+        .list-summary { font-size: 0.86rem; color: #475569; margin-top: 6px; line-height: 1.45; }
         .list-item a { color: #2563eb; text-decoration: none; font-weight: 700; }
+        .revision-history-toggle {
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #334155;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.82rem;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .revision-history-toggle:hover { background: #e2e8f0; }
+        .revision-history-panel {
+            margin: 8px 0 4px 18px;
+            padding-left: 14px;
+            border-left: 3px solid #cbd5e1;
+        }
+        .revision-history-panel.hidden { display: none; }
+        .revision-history-item {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+        .revision-history-item:hover { background: #f8fafc; }
+        .revision-history-label {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            background: #f1f5f9;
+            color: #64748b;
+            padding: 2px 8px;
+            font-size: 0.76rem;
+            font-weight: 800;
+            margin-right: 6px;
+        }
         .list-tabs { display:flex; flex-wrap:wrap; gap:8px; margin: 14px 0 6px; }
         .list-tab-btn {
             border: 1px solid #cbd5e1;
@@ -221,7 +260,7 @@
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.43';
+        import { MinutesService } from './MinutesService.js?v=1.0.45';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -892,6 +931,92 @@
             return canReadMembersOnlyDocuments();
         }
 
+        function isCharterOrBylawDoc(doc) {
+            const title = String(doc?.title || '');
+            return title.includes('정관') || title.includes('규약');
+        }
+
+        function getLibraryDocGroupKey(doc) {
+            const groupId = String(doc?.document_group_id || '').trim();
+            if (groupId) return `group:${groupId}`;
+            return `title:${String(doc?.title || '').trim().toLowerCase()}`;
+        }
+
+        function sortLibraryDocsByRevisionDesc(a, b) {
+            const currentDelta = Number(b?.is_current === true) - Number(a?.is_current === true);
+            if (currentDelta) return currentDelta;
+            const dateCompare = String(b?.event_date || '').localeCompare(String(a?.event_date || ''));
+            if (dateCompare) return dateCompare;
+            return String(b?.updated_at || '').localeCompare(String(a?.updated_at || ''));
+        }
+
+        function groupLibraryDocuments(docs) {
+            const grouped = new Map();
+            (Array.isArray(docs) ? docs : []).forEach((doc) => {
+                const key = getLibraryDocGroupKey(doc);
+                if (!grouped.has(key)) grouped.set(key, []);
+                grouped.get(key).push(doc);
+            });
+
+            return Array.from(grouped.values()).map((items) => {
+                const sortedItems = items.slice().sort(sortLibraryDocsByRevisionDesc);
+                const currentDoc = sortedItems.find((doc) => doc?.is_current === true) || sortedItems[0];
+                return {
+                    currentDoc,
+                    historyDocs: sortedItems.filter((doc) => String(doc?.id || '') !== String(currentDoc?.id || '')),
+                    sortKey: String(currentDoc?.event_date || currentDoc?.updated_at || '')
+                };
+            }).sort((a, b) => String(b.sortKey || '').localeCompare(String(a.sortKey || '')));
+        }
+
+        function getVisibleLibraryRuleGroups() {
+            const visibleLibraryDocs = (Array.isArray(libraryDocsCache) ? libraryDocsCache : [])
+                .filter((doc) => canOpenLibraryDoc(doc))
+                .filter((doc) => !isCharterOrBylawDoc(doc));
+            return groupLibraryDocuments(visibleLibraryDocs);
+        }
+
+        function getLibraryDocRevisionSummary(doc, maxLen = 90) {
+            const raw = String(doc?.revision_summary || '').replace(/\s+/g, ' ').trim();
+            if (!raw) return '';
+            if (!Number.isFinite(maxLen) || maxLen <= 0) return raw;
+            return raw.length <= maxLen ? raw : `${raw.slice(0, Math.max(0, maxLen - 3))}...`;
+        }
+
+        function getLibraryDocVersionText(doc) {
+            return String(doc?.version || '').trim() || '버전 정보 없음';
+        }
+
+        function getLibraryDocMetaText(doc) {
+            return `${formatMinutesViewKstDate(doc?.event_date)} · ${getLibraryDocAccessLabel(doc)} · ${getLibraryDocVersionText(doc)}`;
+        }
+
+        function getLibraryDocDetailMetaText(doc) {
+            const lifecycle = doc?.is_current === true ? '현재 적용본' : '구판';
+            return `시행일: ${formatMinutesViewKstDate(doc?.event_date)} · 공개: ${getLibraryDocAccessLabel(doc)} · 버전: ${getLibraryDocVersionText(doc)} · ${lifecycle}`;
+        }
+
+        function buildLibraryDocRevisionNotice(doc) {
+            const summaryText = getLibraryDocRevisionSummary(doc, 0);
+            if (!summaryText) return '';
+            const label = doc?.is_current === true ? '개정 내용' : '구판 개정 내용';
+            return `
+                <div class="article-card">
+                    <span class="article-title">${escapeHtml(label)}</span>
+                    <div class="article-content">${escapeHtml(summaryText)}</div>
+                </div>
+            `;
+        }
+
+        function toggleLibraryRevisionHistory(panelId, button) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            const willOpen = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !willOpen);
+            if (button) button.textContent = willOpen ? '개정 이력 접기' : button.dataset.closedText || '개정 이력 보기';
+        }
+        window.toggleLibraryRevisionHistory = toggleLibraryRevisionHistory;
+
         function getMinuteVisibilityLabel(doc) {
             const visibility = String(doc?.visibility || 'MEMBERS').toUpperCase();
             if (visibility === 'PUBLIC') return '전체 공개';
@@ -1121,12 +1246,7 @@
             const visibleMinutes = filterDocumentsByTab(publishedDocsCache, 'MINUTES').filter((doc) => canOpenMinuteDoc(doc)).length;
             const visibleNotices = filterDocumentsByTab(publishedDocsCache, 'NOTICE').filter((doc) => canOpenMinuteDoc(doc)).length;
             const visibleMaterials = filterDocumentsByTab(publishedDocsCache, 'MATERIALS').filter((doc) => canOpenMinuteDoc(doc)).length;
-            const visibleRules = (Array.isArray(libraryDocsCache) ? libraryDocsCache : [])
-                .filter((doc) => canOpenLibraryDoc(doc))
-                .filter((doc) => {
-                    const title = String(doc?.title || '');
-                    return !title.includes('정관') && !title.includes('규약');
-                }).length;
+            const visibleRules = getVisibleLibraryRuleGroups().length;
             return {
                 ALL: visibleMinutes + visibleNotices + visibleMaterials,
                 MINUTES: visibleMinutes,
@@ -1192,13 +1312,7 @@
             listPanel.appendChild(buildDocumentListTabs());
 
             if (currentDocumentListTab === 'RULES') {
-                const allRules = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []);
-                const visibleLibraryDocs = allRules
-                    .filter((doc) => canOpenLibraryDoc(doc))
-                    .filter((doc) => {
-                        const title = String(doc?.title || '');
-                        return !title.includes('정관') && !title.includes('규약');
-                    });
+                const visibleRuleGroups = getVisibleLibraryRuleGroups();
 
                 const shortcutItem = document.createElement('div');
                 shortcutItem.className = 'list-item';
@@ -1217,7 +1331,7 @@
                 });
                 listPanel.appendChild(shortcutItem);
 
-                if (!visibleLibraryDocs.length) {
+                if (!visibleRuleGroups.length) {
                     const emptyEl = document.createElement('div');
                     emptyEl.style.textAlign = 'center';
                     emptyEl.style.color = '#64748b';
@@ -1227,7 +1341,10 @@
                     return;
                 }
 
-                visibleLibraryDocs.forEach((doc) => {
+                visibleRuleGroups.forEach((group, groupIndex) => {
+                    const doc = group.currentDoc;
+                    const historyDocs = group.historyDocs || [];
+                    const panelId = `revision-history-${groupIndex}-${String(doc?.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`;
                     const item = document.createElement('div');
                     item.className = 'list-item';
 
@@ -1238,13 +1355,63 @@
 
                     const subEl = document.createElement('div');
                     subEl.className = 'list-sub';
-                    subEl.textContent = `${formatMinutesViewKstDate(doc.event_date)} · ${getLibraryDocAccessLabel(doc)}`;
+                    subEl.textContent = getLibraryDocMetaText(doc);
 
                     textWrap.appendChild(titleEl);
                     textWrap.appendChild(subEl);
+                    const summaryText = getLibraryDocRevisionSummary(doc);
+                    if (summaryText) {
+                        const summaryEl = document.createElement('div');
+                        summaryEl.className = 'list-summary';
+                        summaryEl.textContent = summaryText;
+                        textWrap.appendChild(summaryEl);
+                    }
+
                     item.appendChild(textWrap);
+                    if (historyDocs.length > 0) {
+                        const toggleBtn = document.createElement('button');
+                        toggleBtn.type = 'button';
+                        toggleBtn.className = 'revision-history-toggle';
+                        toggleBtn.dataset.closedText = `개정 이력 ${historyDocs.length}건`;
+                        toggleBtn.textContent = toggleBtn.dataset.closedText;
+                        toggleBtn.addEventListener('click', (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            toggleLibraryRevisionHistory(panelId, toggleBtn);
+                        });
+                        item.appendChild(toggleBtn);
+                    }
                     item.addEventListener('click', () => openLibraryDocumentById(doc.id));
                     listPanel.appendChild(item);
+
+                    if (historyDocs.length > 0) {
+                        const historyPanel = document.createElement('div');
+                        historyPanel.id = panelId;
+                        historyPanel.className = 'revision-history-panel hidden';
+                        historyDocs.forEach((historyDoc) => {
+                            const historyItem = document.createElement('div');
+                            historyItem.className = 'revision-history-item';
+                            const historyTitle = document.createElement('div');
+                            historyTitle.className = 'list-title';
+                            historyTitle.innerHTML = `<span class="revision-history-label">구판</span>${escapeHtml(historyDoc.title || '문서')}`;
+                            const historySub = document.createElement('div');
+                            historySub.className = 'list-sub';
+                            historySub.textContent = getLibraryDocMetaText(historyDoc);
+                            historyItem.appendChild(historyTitle);
+                            historyItem.appendChild(historySub);
+
+                            const historySummary = getLibraryDocRevisionSummary(historyDoc);
+                            if (historySummary) {
+                                const historySummaryEl = document.createElement('div');
+                                historySummaryEl.className = 'list-summary';
+                                historySummaryEl.textContent = historySummary;
+                                historyItem.appendChild(historySummaryEl);
+                            }
+                            historyItem.addEventListener('click', () => openLibraryDocumentById(historyDoc.id));
+                            historyPanel.appendChild(historyItem);
+                        });
+                        listPanel.appendChild(historyPanel);
+                    }
                 });
                 return;
             }
@@ -1318,7 +1485,7 @@
             if (attachmentsList) attachmentsList.innerHTML = '';
 
             detailTitle.textContent = summaryDoc.title ? `문서 · ${summaryDoc.title}` : '문서';
-            detailMeta.textContent = `시행일: ${formatMinutesViewKstDate(summaryDoc.event_date)} · 공개: ${getLibraryDocAccessLabel(summaryDoc)}`;
+            detailMeta.textContent = getLibraryDocDetailMetaText(summaryDoc);
             detailContent.innerHTML = '<div style="color:#64748b;">문서 내용을 불러오는 중입니다...</div>';
             listPanel.style.display = 'none';
             detailPanel.classList.remove('hidden');
@@ -1339,8 +1506,8 @@
             }
 
             detailTitle.textContent = doc.title ? `문서 · ${doc.title}` : '문서';
-            detailMeta.textContent = `시행일: ${formatMinutesViewKstDate(doc.event_date)} · 공개: ${getLibraryDocAccessLabel(doc)}`;
-            detailContent.innerHTML = renderLibraryDocContent(doc.content);
+            detailMeta.textContent = getLibraryDocDetailMetaText(doc);
+            detailContent.innerHTML = buildLibraryDocRevisionNotice(doc) + renderLibraryDocContent(doc.content);
             await renderAttachments(doc);
         }
 

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.44
-Change: 2026-04-22 - Keep completed notice approvals sorted newest first with null processed dates last.
+Version: v1.0.45
+Change: 2026-05-19 - Include regulation revision group and summary fields for document box history.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -340,7 +340,7 @@ async function listLibraryDocuments() {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('site_documents')
-        .select('id,title,event_date,version,is_current,file_url,category,access_scope,updated_at')
+        .select('id,title,event_date,version,is_current,file_url,category,access_scope,updated_at,document_group_id,revision_summary')
         .eq('category', 'doc')
         .order('event_date', { ascending: false }), coopId);
     const rows = Array.isArray(data) ? data : [];
@@ -357,7 +357,7 @@ async function getLibraryDocumentById(documentId) {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('site_documents')
-        .select('id,title,content,event_date,version,is_current,file_url,category,access_scope,updated_at')
+        .select('id,title,content,event_date,version,is_current,file_url,category,access_scope,updated_at,document_group_id,revision_summary')
         .eq('category', 'doc')
         .eq('id', safeId), coopId)
         .maybeSingle();
