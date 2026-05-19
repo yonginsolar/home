@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.32
-Change: Add public SEO metadata and a single page h1.
+Version: v1.0.33
+Change: Allow valid 13-digit corporate registration numbers without blocking on an unreliable client checksum.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.32 | signup.html');</script>
+  <script>console.log('[Version] v1.0.33 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -241,8 +241,8 @@ onblur="checkRRNFinal()">
 oninput="onlyNum(this); autoMove(this,'corp2',6); resetSignupCorpValidationState(); clearFieldWarning(this);">
 <span>-</span>
 <input type="text" id="corp2" maxlength="7" class="form-control text-center" placeholder="뒤 7자리" required 
-oninput="onlyNum(this); resetSignupCorpValidationState(); clearFieldWarning(this);" 
-onblur="validateCorpNo()"> 
+oninput="onlyNum(this); resetSignupCorpValidationState(); clearFieldWarning(this);"
+onblur="validateCorpNo()">
 </div>
 <div id="corpMsg" class="msg-box" style="display:none;"></div>
 <input type="hidden" id="finalCorpNo"> 
@@ -981,18 +981,18 @@ if(!email) return openResultModal('이메일을 입력하세요.', true);
 const btn = document.getElementById('btnSendLink');
 btn.disabled = true; btn.innerText = "발송중...";
 
-const { error } = await _supabase.auth.signInWithOtp({ 
-email: email, options: { shouldCreateUser: true } 
+const { error } = await _supabase.auth.signInWithOtp({
+email: email, options: { shouldCreateUser: true }
 });
 
-if(error) { 
+if(error) {
 // [수정] alert -> 모달로 변경
-openResultModal(error.message, true); 
-btn.disabled=false; btn.innerText="코드 발송"; 
+openResultModal(error.message, true);
+btn.disabled=false; btn.innerText="코드 발송";
 }
-else { 
+else {
 pendingSignupOtpEmail = String(email || '').trim().toLowerCase();
-document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 인증코드를 입력해주세요 📨"; 
+document.getElementById('mail-status').innerHTML = "메일이 발송되었습니다! 인증코드를 입력해주세요 📨";
 document.getElementById('signup-otp-area').style.display = 'block';
 btn.innerText = "발송완료";
 btn.disabled = false;
@@ -2051,53 +2051,34 @@ setMsg('nameMsg', "✅ 확인되었습니다.", false);
 nameInput.classList.remove('is-invalid-field');
 }
 }
-// [신규 추가] 법인등록번호 중복 검사
-// [신규 추가] 법인등록번호 유효성 공식 검사 (오타 방지용)
-function checkCorpNoChecksum(value) {
-if (!value || value.length !== 13) return false;
-
-// 문자열을 숫자로 변환
-const arr = value.split('').map(Number);
-let sum = 0;
-
-// 공식: 1, 2, 1, 2... 순서대로 곱해서 합산 (앞 12자리)
-for (let i = 0; i < 12; i++) {
-const weight = (i % 2 === 0) ? 1 : 2;
-sum += arr[i] * weight;
+function normalizeSignupCorpNo(corpPart1, corpPart2) {
+const digits = String(corpPart1 || '').replace(/\D/g, '') + String(corpPart2 || '').replace(/\D/g, '');
+if (digits.length !== 13) return '';
+return digits.slice(0, 6) + '-' + digits.slice(6);
 }
 
-// 나머지 계산
-const result = (10 - (sum % 10)) % 10;
-
-// 계산된 결과가 13번째 자리(마지막 숫자)와 같아야 함
-return result === arr[12];
-}
-
-// [수정] 법인등록번호 검증 (공식 검사 -> 서버 중복 검사)
+// 법인등록번호 검증: 13자리 형식을 확인한 뒤 서버 중복 검사만 수행한다.
 async function validateCorpNo() {
 const c1 = document.getElementById('corp1').value;
 const c2 = document.getElementById('corp2').value;
-const fullCorpNo = c1 + c2;
+const formattedCorpNo = normalizeSignupCorpNo(c1, c2);
 
-// 1. 길이 체크
-if(c1.length < 6 || c2.length < 7) return; 
-
-// 2. [추가됨] 유효성 공식 체크 (Checksum)
-if (!checkCorpNoChecksum(fullCorpNo)) {
-setMsg('corpMsg', "❌ 유효하지 않은 법인등록번호입니다. (오타 확인)", true);
-document.getElementById('finalCorpNo').value = ""; // 저장 방지
-return; // 공식 틀리면 서버로 보내지도 않고 여기서 끝냄
+if (!formattedCorpNo) {
+document.getElementById('finalCorpNo').value = "";
+if ((c1 + c2).length > 0) {
+setMsg('corpMsg', "❌ 법인등록번호는 숫자 13자리로 입력해 주세요.", true);
+}
+return;
 }
 
-// 3. 서버 중복 체크 (RPC call) - 공식이 통과된 경우에만 실행
 try {
-const exists = await runSignupDuplicateCheck('corp_no', c1 + "-" + c2);
+const exists = await runSignupDuplicateCheck('corp_no', formattedCorpNo);
 if(exists === true) {
 setMsg('corpMsg', "❌ 이미 가입된 법인등록번호입니다.", true);
 document.getElementById('finalCorpNo').value = ""; // 저장 못하게 비움
 } else {
-setMsg('corpMsg', "✅ 사용 가능한 법인번호입니다.", false);
-document.getElementById('finalCorpNo').value = c1 + "-" + c2; // 값 저장
+setMsg('corpMsg', "✅ 사용 가능한 법인등록번호입니다.", false);
+document.getElementById('finalCorpNo').value = formattedCorpNo; // 값 저장
 }
 } catch (error) {
 setMsg('corpMsg', "⚠️ 법인등록번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
