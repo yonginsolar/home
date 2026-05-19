@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-	    Version: v1.0.57
-	    Change: 2026-05-19 - Group old regulation versions under current document history.
+	    Version: v1.0.59
+	    Change: 2026-05-19 - Move regulation revision summary below document body.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.57 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.59 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -92,7 +92,7 @@
         }
         .list-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
         .list-sub { font-size: 0.9rem; color: #64748b; margin-top: 4px; }
-        .list-summary { font-size: 0.86rem; color: #475569; margin-top: 6px; line-height: 1.45; }
+        .list-summary { font-size: 0.86rem; color: #475569; margin-top: 6px; line-height: 1.5; white-space: pre-wrap; word-break: keep-all; }
         .list-item a { color: #2563eb; text-decoration: none; font-weight: 700; }
         .revision-history-toggle {
             border: 1px solid #cbd5e1;
@@ -204,6 +204,16 @@
             line-height: 1.7;
             color: #333;
             word-break: keep-all;
+        }
+        .detail-content .revision-summary-content {
+            white-space: pre-wrap;
+            line-height: 1.75;
+            color: #1f2937;
+        }
+        .detail-content .revision-summary-footer {
+            margin-top: 28px;
+            border-style: dashed;
+            background: #f8fafc;
         }
         .detail-content .chapter-title {
             text-align: center;
@@ -976,11 +986,11 @@
             return groupLibraryDocuments(visibleLibraryDocs);
         }
 
-        function getLibraryDocRevisionSummary(doc, maxLen = 90) {
-            const raw = String(doc?.revision_summary || '').replace(/\s+/g, ' ').trim();
+        function getLibraryDocRevisionSummary(doc, maxLen = 180) {
+            const raw = String(doc?.revision_summary || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
             if (!raw) return '';
             if (!Number.isFinite(maxLen) || maxLen <= 0) return raw;
-            return raw.length <= maxLen ? raw : `${raw.slice(0, Math.max(0, maxLen - 3))}...`;
+            return raw.length <= maxLen ? raw : `${raw.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`;
         }
 
         function getLibraryDocVersionText(doc) {
@@ -996,14 +1006,14 @@
             return `시행일: ${formatMinutesViewKstDate(doc?.event_date)} · 공개: ${getLibraryDocAccessLabel(doc)} · 버전: ${getLibraryDocVersionText(doc)} · ${lifecycle}`;
         }
 
-        function buildLibraryDocRevisionNotice(doc) {
+        function buildLibraryDocRevisionFooter(doc) {
             const summaryText = getLibraryDocRevisionSummary(doc, 0);
             if (!summaryText) return '';
             const label = doc?.is_current === true ? '개정 내용' : '구판 개정 내용';
             return `
-                <div class="article-card">
+                <div class="article-card revision-summary-footer">
                     <span class="article-title">${escapeHtml(label)}</span>
-                    <div class="article-content">${escapeHtml(summaryText)}</div>
+                    <div class="article-content revision-summary-content">${escapeHtml(summaryText)}</div>
                 </div>
             `;
         }
@@ -1507,7 +1517,7 @@
 
             detailTitle.textContent = doc.title ? `문서 · ${doc.title}` : '문서';
             detailMeta.textContent = getLibraryDocDetailMetaText(doc);
-            detailContent.innerHTML = buildLibraryDocRevisionNotice(doc) + renderLibraryDocContent(doc.content);
+            detailContent.innerHTML = renderLibraryDocContent(doc.content) + buildLibraryDocRevisionFooter(doc);
             await renderAttachments(doc);
         }
 
