@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.77
-Change: 2026-05-19 - Fix group search modal focus handoff and surface search RPC failures.
+Version: v1.0.78
+Change: 2026-05-19 - Load related member detail rows on demand from connected member lists.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.77';
+window.ADMIN_MEMBER_VERSION = 'v1.0.78';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -3201,6 +3201,30 @@ async function ensureBadgesReady() {
 // 전역 변수
 let g_members = [];
 let g_member_import_rows = [];
+const ADMIN_MEMBER_SELECT_COLUMNS = [
+    'id',
+    'member_id',
+    'name',
+    'member_type',
+    'phone',
+    'email',
+    'status',
+    'join_date',
+    'birth_date',
+    'created_at',
+    'address',
+    'rrn_display',
+    'corp_number',
+    'business_number',
+    'bank_name',
+    'account_holder',
+    'account_num_display',
+    'admin_memo',
+    'kakao_id',
+    'naver_id',
+    'join_category',
+    'manager_id'
+].join(',');
 // 전역 변수
 let g_plants = []; // [추가] 발전소 목록 기억용
 let g_powerGenerationLogs = [];
@@ -8545,30 +8569,7 @@ async function fetchMembers() {
         // 2. coop_members 기본 조회 (필터링)
         let q = scopeAdminTenant(_supabase
             .from('coop_members')
-            .select([
-                'id',               // UUID (매칭용)
-                'member_id',        // 텍스트 ID
-                'name',
-                'member_type',
-                'phone',
-                'email',
-                'status',
-                'join_date',
-                'birth_date',
-                'created_at',
-                'address',
-                'rrn_display',
-                'corp_number',      // [추가] 법인등록번호
-                'business_number',  // [추가] 사업자등록번호
-                'bank_name',
-                'account_holder',
-                'account_num_display',
-                'admin_memo',
-                'kakao_id',
-                'naver_id',
-                'join_category',
-                'manager_id'
-            ].join(',')));
+            .select(ADMIN_MEMBER_SELECT_COLUMNS));
 
         // 2-1. 필터 및 정렬 적용
         if (status && status !== 'all') q = q.eq('status', status);
@@ -8615,13 +8616,7 @@ async function fetchMembers() {
         }
 
         // 4. 데이터 병합 (Members + Capital)
-        g_members = list.map(m => ({
-            ...m,
-            // 맵에서 UUID로 찾아 매칭 (없으면 0원)
-            total_capital: capitalMap[m.id] || 0,
-            account_number: m.account_num_display || null,
-            birth_date: m.birth_date || null
-        }));
+        g_members = list.map(m => normalizeAdminMemberRow(m, capitalMap[m.id] || 0));
 
         // (옵션) 만약 정렬 기준이 '출자금순'이라면 JS 레벨에서 재정렬
         if (sort === 'capital') {
@@ -8760,11 +8755,100 @@ function renderEmptyState() {
 let g_current_member_id = null; // 현재 보고 있는 조합원 UUID
 let g_current_member_row = null; // 현재 상세 모달의 조합원 원본 데이터
 
+function normalizeAdminMemberRow(row, totalCapital) {
+    if (!row) return null;
+
+    return {
+        ...row,
+        total_capital: Number(totalCapital || row.total_capital || 0),
+        account_number: row.account_num_display || row.account_number || null,
+        birth_date: row.birth_date || null
+    };
+}
+
+function findCachedAdminMember(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId || !Array.isArray(g_members)) return null;
+
+    return g_members.find(x => String(x.id || x.member_uid || x.uid || '') === safeId)
+        || g_members.find(x => String(x.member_id || '') === safeId)
+        || null;
+}
+
+function upsertCachedAdminMember(row) {
+    if (!row) return null;
+    if (!Array.isArray(g_members)) g_members = [];
+
+    const rowUid = String(row.id || row.member_uid || row.uid || '');
+    const rowMemberId = String(row.member_id || '');
+    const existingIndex = g_members.findIndex(x => {
+        const xUid = String(x.id || x.member_uid || x.uid || '');
+        const xMemberId = String(x.member_id || '');
+        return (rowUid && xUid === rowUid) || (rowMemberId && xMemberId === rowMemberId);
+    });
+
+    if (existingIndex >= 0) {
+        g_members[existingIndex] = { ...g_members[existingIndex], ...row };
+        return g_members[existingIndex];
+    }
+
+    g_members.push(row);
+    return row;
+}
+
+async function fetchAdminMemberDetailRow(id) {
+    const safeId = String(id || '').trim();
+    if (!safeId) return null;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(safeId);
+    let q = scopeAdminTenant(_supabase
+        .from('coop_members')
+        .select(ADMIN_MEMBER_SELECT_COLUMNS));
+
+    q = isUuid ? q.eq('id', safeId) : q.eq('member_id', safeId);
+
+    const { data, error } = await q.maybeSingle();
+    if (error) {
+        console.error('조합원 상세 직접 조회 실패:', error);
+        throw error;
+    }
+    if (!data) return null;
+
+    let totalCapital = 0;
+    const memberUid = data.id || data.member_uid || data.uid || null;
+    if (memberUid) {
+        const { data: asset, error: assetError } = await _supabase
+            .from('view_my_assets')
+            .select('total_capital')
+            .eq('member_uid', memberUid)
+            .maybeSingle();
+
+        if (!assetError && asset) {
+            totalCapital = Number(asset.total_capital || 0);
+        } else if (assetError) {
+            console.error('조합원 상세 출자금 직접 조회 실패:', assetError);
+        }
+    }
+
+    return normalizeAdminMemberRow(data, totalCapital);
+}
 
 async function openMemberDetail(id) {
     // 1. 데이터 매칭
-    const m = g_members.find(x => (x.id || x.member_uid || x.uid) === id)
-            || g_members.find(x => (x.member_id || '') === id);
+    let m = findCachedAdminMember(id);
+
+    if (!m) {
+        try {
+            if (typeof showLoading === 'function') showLoading(true);
+            m = await fetchAdminMemberDetailRow(id);
+            if (m) m = upsertCachedAdminMember(m);
+        } catch (err) {
+            const message = err?.message || err;
+            return myAlert("데이터를 불러오지 못했습니다: " + message, 'error');
+        } finally {
+            if (typeof showLoading === 'function') showLoading(false);
+        }
+    }
 
     if (!m) return myAlert("데이터를 찾을 수 없습니다.", 'error');
 
