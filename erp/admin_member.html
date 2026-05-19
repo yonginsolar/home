@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.76
-Change: 2026-05-19 - Move regulation document authoring from homepage management into document management scope.
+Version: v1.0.77
+Change: 2026-05-19 - Fix group search modal focus handoff and surface search RPC failures.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.76';
+window.ADMIN_MEMBER_VERSION = 'v1.0.77';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -9841,7 +9841,13 @@ loadMemberFunds(uid, textId, false); // false = 추가 로드
 function openGroupSearch() {
 document.getElementById('group-search-input').value = '';
 document.getElementById('group-search-result').innerHTML = '';
-new bootstrap.Modal(document.getElementById('groupSearchModal')).show();
+const modalEl = document.getElementById('groupSearchModal');
+if (modalEl) {
+modalEl.addEventListener('shown.bs.modal', () => {
+document.getElementById('group-search-input')?.focus();
+}, { once: true });
+new bootstrap.Modal(modalEl).show();
+}
 }
 
 // 2. 검색 실행
@@ -9849,8 +9855,17 @@ async function searchGroups() {
 const keyword = document.getElementById('group-search-input').value;
 if(!keyword) return;
 
-const { data } = await _supabase.rpc('search_groups', { keyword });
 const list = document.getElementById('group-search-result');
+list.innerHTML = '<div class="p-3 text-center text-muted">검색 중...</div>';
+
+const { data, error } = await _supabase.rpc('search_groups', { keyword });
+if (error) {
+console.error('search_groups failed:', error);
+list.innerHTML = '<div class="p-3 text-center text-danger">단체 검색 중 오류가 발생했습니다.</div>';
+myAlert('단체 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.', 'error');
+return;
+}
+
 list.innerHTML = '';
 
 if(!data || data.length===0) { list.innerHTML = '<div class="p-3 text-center text-muted">결과 없음</div>'; return; }
@@ -9920,12 +9935,25 @@ const type = document.querySelector('input[name="relationType"]:checked').value;
 // 현재 모달 닫기
 const modalEl = document.getElementById('relationSelectModal');
 const modalInstance = bootstrap.Modal.getInstance(modalEl);
-modalInstance.hide();
+if (modalEl && modalEl.contains(document.activeElement)) {
+document.activeElement.blur();
+}
 
+const openNextStep = () => {
 if (type === 'child') {
-setTimeout(() => openChildForm(), 120);
+openChildForm();
 } else {
-setTimeout(() => openGroupSearch(), 120);
+openGroupSearch();
+}
+};
+
+if (modalEl) {
+modalEl.addEventListener('hidden.bs.modal', openNextStep, { once: true });
+}
+if (modalInstance) {
+modalInstance.hide();
+} else {
+openNextStep();
 }
 }
 // [신규] 자녀 등록 폼 열기
