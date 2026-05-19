@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.78
-Change: 2026-05-19 - Load related member detail rows on demand from connected member lists.
+Version: v1.0.79
+Change: 2026-05-19 - Stabilize nested member-detail modal ordering and alerts.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.78';
+window.ADMIN_MEMBER_VERSION = 'v1.0.79';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -3094,6 +3094,77 @@ function bindIssueDocModalFocusGuard() {
     modalEl.dataset.focusGuardBound = '1';
 }
 bindIssueDocModalFocusGuard();
+
+const ADMIN_MEMBER_MODAL_Z_INDEX = {
+    memberDetailModal: 1055,
+    issueDocModal: 1065,
+    fundEditorModal: 1065,
+    relationSelectModal: 1065,
+    groupSearchModal: 1065,
+    childRegisterModal: 1065,
+    customConfirmModal: 1085,
+    customAlertModal: 1095
+};
+
+function applyAdminMemberModalLayer(modalEl) {
+    if (!modalEl) return;
+    const zIndex = ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id];
+    if (!zIndex) return;
+
+    modalEl.style.zIndex = String(zIndex);
+    syncAdminMemberModalLayers();
+}
+
+function syncAdminMemberModalLayers() {
+    const openModals = Array.from(document.querySelectorAll('.modal.show'))
+        .filter((modalEl) => ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id])
+        .sort((a, b) => ADMIN_MEMBER_MODAL_Z_INDEX[a.id] - ADMIN_MEMBER_MODAL_Z_INDEX[b.id]);
+
+    openModals.forEach((modalEl) => {
+        modalEl.style.zIndex = String(ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id]);
+    });
+
+    const backdrops = Array.from(document.querySelectorAll('.modal-backdrop'));
+    backdrops.forEach((backdrop, index) => {
+        const modalEl = openModals[Math.min(index, openModals.length - 1)];
+        if (!modalEl) return;
+        const zIndex = ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id];
+        backdrop.style.zIndex = String(zIndex - 5);
+        backdrop.dataset.modalFor = modalEl.id;
+    });
+}
+
+function bindAdminMemberModalLayering() {
+    if (window.__adminMemberModalLayeringBound) return;
+
+    document.addEventListener('show.bs.modal', (event) => {
+        applyAdminMemberModalLayer(event.target);
+    }, true);
+
+    document.addEventListener('shown.bs.modal', (event) => {
+        applyAdminMemberModalLayer(event.target);
+        syncAdminMemberModalLayers();
+        if (document.querySelectorAll('.modal.show').length > 0) {
+            document.body.classList.add('modal-open');
+        }
+    }, true);
+
+    document.addEventListener('hide.bs.modal', (event) => {
+        moveFocusOutsideModal(event.target);
+        requestAnimationFrame(() => moveFocusOutsideModal(event.target));
+    }, true);
+
+    document.addEventListener('hidden.bs.modal', () => {
+        const openModals = Array.from(document.querySelectorAll('.modal.show'));
+        if (openModals.length > 0) {
+            document.body.classList.add('modal-open');
+            syncAdminMemberModalLayers();
+        }
+    }, true);
+
+    window.__adminMemberModalLayeringBound = true;
+}
+bindAdminMemberModalLayering();
 
 let g_certGeneratorEnsurePromise = null;
 let g_badgesEnsurePromise = null;
@@ -8974,7 +9045,19 @@ async function openMemberDetail(id) {
     loadConsultLogs(memberUid);
     loadMemberFamily(memberUid);
 
-    new bootstrap.Modal(document.getElementById('memberDetailModal')).show();
+    const basicTabBtn = document.querySelector('#memberDetailTab [data-bs-target="#md-tab-basic"]');
+    if (basicTabBtn && bootstrap.Tab) {
+        bootstrap.Tab.getOrCreateInstance(basicTabBtn).show();
+    }
+
+    const detailModalEl = document.getElementById('memberDetailModal');
+    if (detailModalEl) {
+        const detailModal = bootstrap.Modal.getOrCreateInstance(detailModalEl);
+        applyAdminMemberModalLayer(detailModalEl);
+        if (!detailModalEl.classList.contains('show')) {
+            detailModal.show();
+        }
+    }
 }
 
 function todayYmdKst() {
@@ -9858,7 +9941,7 @@ icon.style.fontSize = '2rem';
 iconEl.appendChild(icon);
 }
 if (textEl) textEl.textContent = msg || '';
-new bootstrap.Modal(document.getElementById('customAlertModal')).show();
+bootstrap.Modal.getOrCreateInstance(document.getElementById('customAlertModal')).show();
 }
 
 function myConfirm(msg, callback) {
@@ -9872,10 +9955,21 @@ btn.parentNode.replaceChild(newBtn, btn);
 
 newBtn.onclick = () => {
 const inst = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+const runCallback = () => {
+try {
+Promise.resolve(callback()).catch((err) => {
+console.error('confirm callback failed:', err);
+myAlert('처리 중 오류가 발생했습니다: ' + (err?.message || err), 'error');
+});
+} catch (err) {
+console.error('confirm callback failed:', err);
+myAlert('처리 중 오류가 발생했습니다: ' + (err?.message || err), 'error');
+}
+};
+modalEl.addEventListener('hidden.bs.modal', runCallback, { once: true });
 moveFocusOutsideModal(modalEl);
 requestAnimationFrame(() => moveFocusOutsideModal(modalEl));
 inst.hide();
-callback();
 };
 bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
@@ -9930,7 +10024,7 @@ if (modalEl) {
 modalEl.addEventListener('shown.bs.modal', () => {
 document.getElementById('group-search-input')?.focus();
 }, { once: true });
-new bootstrap.Modal(modalEl).show();
+bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 }
 
@@ -9999,17 +10093,29 @@ showLoading(false);
 
 if(error) myAlert('연결 실패: ' + error.message, 'error');
 else {
-myAlert('연결되었습니다.');
-bootstrap.Modal.getInstance(document.getElementById('groupSearchModal')).hide();
+const groupModalEl = document.getElementById('groupSearchModal');
 const parentId = g_current_member_id || document.getElementById('md-uid').value;
+const finishConnect = async () => {
 if (parentId) await loadMemberFamily(parentId);
+myAlert('연결되었습니다.');
+};
+if (groupModalEl && groupModalEl.classList.contains('show')) {
+const groupModal = bootstrap.Modal.getOrCreateInstance(groupModalEl);
+groupModalEl.addEventListener('hidden.bs.modal', () => {
+finishConnect();
+}, { once: true });
+moveFocusOutsideModal(groupModalEl);
+groupModal.hide();
+} else {
+await finishConnect();
+}
 }
 });
 }
 // [신규] 관계 선택 모달 열기
 function openRelationSelectModal() {
 // 상세 모달 위에 띄워야 하므로 z-index 관리 필요할 수 있음 (Bootstrap이 자동 처리하기도 함)
-new bootstrap.Modal(document.getElementById('relationSelectModal')).show();
+bootstrap.Modal.getOrCreateInstance(document.getElementById('relationSelectModal')).show();
 }
 
 // [신규] 선택 후 다음 단계 이동
@@ -10060,7 +10166,7 @@ function openChildForm() {
     document.getElementById('child-rrn').value = '';
 
     // 5. 모달 열기
-    new bootstrap.Modal(document.getElementById('childRegisterModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('childRegisterModal')).show();
 }
 
 // [신규] 자녀 저장 실행
