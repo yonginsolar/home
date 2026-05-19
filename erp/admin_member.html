@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.75
-Change: 2026-05-19 - Move regulation revision summary below document body.
+Version: v1.0.76
+Change: 2026-05-19 - Move regulation document authoring from homepage management into document management scope.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.75';
+window.ADMIN_MEMBER_VERSION = 'v1.0.76';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -189,6 +189,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="menu-category" id="siteOpsCategory">운영 관리</div>
 <a class="nav-link" onclick="switchTab('notices')" id="nav-notices" style="cursor:pointer;">
 <i class="bi bi-megaphone"></i> 공지사항 관리
+</a>
+<a class="nav-link" onclick="location.href='admin_member.html?scope=documents_admin&tab=site'" id="nav-documents-admin" style="cursor:pointer;">
+<i class="bi bi-folder2-open"></i> 규정·정관 관리
 </a>
 
 <div class="menu-category" id="siteAdminCategory">홈페이지 관리</div>
@@ -833,12 +836,17 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="tab-pane fade" id="tab-site">
-<div class="content-header"><h3>🖥️ 홈페이지 컨텐츠 관리</h3></div>
+<div class="content-header"><h3 id="site-content-title">🖥️ 홈페이지 컨텐츠 관리</h3></div>
+<div class="alert alert-light border small py-2 px-3" id="site-documents-moved-note">
+<i class="bi bi-folder2-open me-1"></i>
+정관·규약·규정 원본과 개정 이력은 <strong>문서관리 &gt; 규정·정관 관리</strong>에서 관리합니다.
+<button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="location.href='admin_member.html?scope=documents_admin&tab=site'">규정·정관 관리로 이동</button>
+</div>
 
-<ul class="nav nav-tabs mb-4">
+<ul class="nav nav-tabs mb-4" id="site-content-tabs">
 
 <li class="nav-item">
-<a class="nav-link active" data-bs-toggle="tab" href="#sub-sections" onclick="setTimeout(fetchSections,100)">
+<a class="nav-link active" id="site-sections-tab-link" data-bs-toggle="tab" href="#sub-sections" onclick="setTimeout(fetchSections,100)">
 섹션 설정 (ON/OFF)
 </a>
 </li>
@@ -865,8 +873,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 외부 소식
 </a>
 </li>
-<li class="nav-item">
-<a class="nav-link" data-bs-toggle="tab" href="#sub-docs" onclick="setTimeout(fetchDocs,100)">
+<li class="nav-item hidden" id="site-docs-nav-item">
+<a class="nav-link" id="site-docs-tab-link" data-bs-toggle="tab" href="#sub-docs" onclick="setTimeout(fetchDocs,100)">
 문서 관리 (정관/규약/규정)
 </a>
 </li>
@@ -1188,7 +1196,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 <div class="alert alert-light border small py-2 px-3">
 <i class="bi bi-info-circle me-1"></i>
-공개 규칙: <strong>정관/규약</strong>은 전체 공개, <strong>규정</strong>은 조합원 공개로 표시됩니다.
+이 화면은 공식 문서 원본을 관리합니다. <strong>정관/규약</strong>은 홈페이지 규정집과 문서함에 전체 공개로 표시되고, <strong>규정</strong>은 문서함에 조합원 공개로 표시됩니다.
 </div>
 
 <table class="table table-bordered bg-white text-center">
@@ -2745,14 +2753,15 @@ const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   try {
     const params = new URLSearchParams(window.location.search || '');
     const scope = String(params.get('scope') || '').trim();
-    return scope === 'member_admin' || scope === 'site_admin' ? scope : '';
+    return scope === 'member_admin' || scope === 'site_admin' || scope === 'documents_admin' ? scope : '';
   } catch (_) {
     return '';
   }
 })();
 const ADMIN_MEMBER_TABS = Object.freeze({
     member_admin: ['members', 'funds-manage', 'applications', 'deposit'],
-    site_admin: ['notices', 'site']
+    site_admin: ['notices', 'site'],
+    documents_admin: ['site']
 });
 const KST_TZ_ADMIN_MEMBER = 'Asia/Seoul';
 const formatAdminMemberKstDate = (value, fallback = '-') => {
@@ -8098,6 +8107,7 @@ const cachedRoleIsAdmin = cachedRole === 'admin' || cachedRole === 'admin_all';
 if (!permissionSet || permissionSet.size === 0) return cachedRoleIsAdmin;
 if (safeScope === 'member_admin') return permissionSet.has('member.admin');
 if (safeScope === 'site_admin') return permissionSet.has('site.admin') || permissionSet.has('member.admin');
+if (safeScope === 'documents_admin') return permissionSet.has('site.admin') || permissionSet.has('member.admin');
 return cachedRoleIsAdmin;
 }
 
@@ -8105,20 +8115,59 @@ function canAccessAdminMemberTab(tabName) {
 const safeTab = String(tabName || '').trim();
 if (!safeTab) return true;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin' && safeTab === 'dashboard') return false;
+if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' && safeTab !== 'site') return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && ADMIN_MEMBER_TABS.site_admin.includes(safeTab)) return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin' && ADMIN_MEMBER_TABS.member_admin.includes(safeTab)) return false;
-if (safeTab === 'dashboard') return ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin';
+if (safeTab === 'dashboard') return ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
 if (ADMIN_MEMBER_TABS.member_admin.includes(safeTab)) return isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin');
+if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' && ADMIN_MEMBER_TABS.documents_admin.includes(safeTab)) return isAdminMemberRuntimeModuleEnabled('documents') && hasAdminMemberScopePermission('documents_admin');
 if (ADMIN_MEMBER_TABS.site_admin.includes(safeTab)) return isAdminMemberRuntimeModuleEnabled('site_admin') && hasAdminMemberScopePermission('site_admin');
 return true;
 }
 
+function selectAdminMemberSiteSubTab(subTabId) {
+const safeSubTabId = String(subTabId || '').trim();
+if (!safeSubTabId) return;
+document.querySelectorAll('#tab-site .tab-content > .tab-pane').forEach((pane) => {
+const isTarget = pane.id === safeSubTabId;
+pane.classList.toggle('show', isTarget);
+pane.classList.toggle('active', isTarget);
+});
+document.querySelectorAll('#tab-site .nav-link[data-bs-toggle="tab"]').forEach((link) => {
+const href = String(link.getAttribute('href') || '').replace(/^#/, '');
+link.classList.toggle('active', href === safeSubTabId);
+});
+}
+
+function applyAdminMemberSiteScopeUi() {
+const documentsScope = ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin';
+const titleEl = document.getElementById('site-content-title');
+if (titleEl) titleEl.textContent = documentsScope ? '📚 규정·정관 관리' : '🖥️ 홈페이지 컨텐츠 관리';
+
+const tabsEl = document.getElementById('site-content-tabs');
+if (tabsEl) tabsEl.classList.toggle('hidden', documentsScope);
+
+const movedNoteEl = document.getElementById('site-documents-moved-note');
+if (movedNoteEl) movedNoteEl.classList.toggle('hidden', documentsScope);
+
+const docsNavItem = document.getElementById('site-docs-nav-item');
+if (docsNavItem) docsNavItem.classList.toggle('hidden', !documentsScope);
+
+if (documentsScope) {
+selectAdminMemberSiteSubTab('sub-docs');
+} else {
+const activePane = document.querySelector('#tab-site .tab-content > .tab-pane.show.active');
+if (activePane?.id === 'sub-docs') selectAdminMemberSiteSubTab('sub-sections');
+}
+}
+
 function applyAdminMemberRuntimeUi(runtime) {
 g_adminMemberRuntime = runtime && typeof runtime === 'object' ? runtime : null;
-const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin';
+const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
 const voteEnabled = memberAdminEnabled && isAdminMemberRuntimeModuleEnabled('vote');
-const siteAdminEnabled = isAdminMemberRuntimeModuleEnabled('site_admin') && hasAdminMemberScopePermission('site_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'member_admin';
-const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin';
+const documentsAdminEnabled = isAdminMemberRuntimeModuleEnabled('documents') && hasAdminMemberScopePermission('documents_admin');
+const siteAdminEnabled = isAdminMemberRuntimeModuleEnabled('site_admin') && hasAdminMemberScopePermission('site_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'member_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
+const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
 [
 ['nav-dashboard', dashboardEnabled],
 ['memberAdminCategory', memberAdminEnabled],
@@ -8127,8 +8176,9 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin';
 ['nav-applications', memberAdminEnabled],
 ['nav-deposit', memberAdminEnabled],
 ['nav-vote-hub', voteEnabled],
-['siteOpsCategory', siteAdminEnabled],
+['siteOpsCategory', siteAdminEnabled || documentsAdminEnabled],
 ['nav-notices', siteAdminEnabled],
+['nav-documents-admin', documentsAdminEnabled],
 ['siteAdminCategory', siteAdminEnabled],
 ['nav-site', siteAdminEnabled]
 ].forEach(([id, enabled]) => {
@@ -8136,6 +8186,7 @@ const el = document.getElementById(id);
 if (!el) return;
 el.classList.toggle('hidden', !enabled);
 });
+applyAdminMemberSiteScopeUi();
 }
 
 function getInitialAdminMemberTab() {
@@ -8146,6 +8197,7 @@ function getInitialAdminMemberTab() {
   } catch (_) {}
   if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') return 'dashboard';
   if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin') return 'site';
+  if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') return 'site';
   return 'dashboard';
 }
 
@@ -8191,9 +8243,11 @@ requestAnimationFrame(update);
 // [수정] 탭 전환 함수 (전체 코드)
 function switchTab(tabName) {
     if (!canAccessAdminMemberTab(tabName)) {
-        const message = ADMIN_MEMBER_TABS.member_admin.includes(tabName)
-            ? '조합원 관리 모듈 사용이 중지되었습니다.'
-            : '홈페이지 관리 모듈 사용이 중지되었습니다.';
+        const message = ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin'
+            ? '문서관리 모듈 사용이 중지되었습니다.'
+            : (ADMIN_MEMBER_TABS.member_admin.includes(tabName)
+                ? '조합원 관리 모듈 사용이 중지되었습니다.'
+                : '홈페이지 관리 모듈 사용이 중지되었습니다.');
         myAlert(message, 'warning');
         return;
     }
@@ -8215,7 +8269,9 @@ function switchTab(tabName) {
     // 3. 사이드바 네비게이션 활성화 표시
     document.querySelectorAll('.sidebar-menu .nav-link').forEach(el => el.classList.remove('active'));
 
-    const navBtn = document.getElementById('nav-' + tabName);
+    const navBtn = (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' && tabName === 'site')
+        ? document.getElementById('nav-documents-admin')
+        : document.getElementById('nav-' + tabName);
     if (navBtn) navBtn.classList.add('active');
 
     // 4. 탭별 데이터 로드 로직 (분기 처리)
@@ -8228,6 +8284,12 @@ function switchTab(tabName) {
     }
     else if (tabName === 'notices') {
         fetchNotices();
+    }
+    else if (tabName === 'site') {
+        applyAdminMemberSiteScopeUi();
+        if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
+            fetchDocs();
+        }
     }
     else if (tabName === 'funds-manage') {
         // 자금 관리 탭: 날짜 기본값 세팅
@@ -9963,6 +10025,8 @@ window.onload = async function() {
             hasAdminAccess = permissionSet.has('member.admin');
         } else if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin') {
             hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
+        } else if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
+            hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
         } else {
             hasAdminAccess = permissionSet.has('member.admin') || permissionSet.has('site.admin');
         }
@@ -9981,12 +10045,16 @@ window.onload = async function() {
     }
     const runtimeModuleKeys = ADMIN_MEMBER_PAGE_SCOPE === 'member_admin'
         ? ['member_admin']
-        : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin' ? ['site_admin'] : ['site_admin', 'member_admin']);
+        : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
+            ? ['site_admin']
+            : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? ['documents'] : ['site_admin', 'member_admin']));
     const memberRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
         moduleKeysAny: runtimeModuleKeys,
         moduleLabel: ADMIN_MEMBER_PAGE_SCOPE === 'member_admin'
             ? '조합원 관리'
-            : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin' ? '홈페이지 관리' : '조합원/홈페이지 관리'),
+            : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
+                ? '홈페이지 관리'
+                : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? '문서관리' : '조합원/홈페이지 관리')),
         alertFn: function(msg) { myAlert(msg, 'error'); },
         redirectUrl: 'index.html'
     });
