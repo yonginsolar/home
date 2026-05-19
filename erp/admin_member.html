@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.72
-Change: 2026-05-18 - Add regulation revision registration flow without overwriting prior versions.
+Version: v1.0.73
+Change: 2026-05-19 - Group old regulation versions under the current revision and add revision summaries.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.72';
+window.ADMIN_MEMBER_VERSION = 'v1.0.73';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1195,7 +1195,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <th>날짜/버전</th>
 <th>제목</th>
 <th>공개대상</th>
-<th>개정 요약</th>
+<th>요약</th>
 <th>파일</th>
 <th>관리</th>
 </tr>
@@ -1836,6 +1836,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 <div class="modal-body p-4">
 <input type="hidden" id="doc-id">
+<input type="hidden" id="doc-revision-source-id">
 <div class="alert alert-primary small hidden" id="doc-revision-hint">
 기존 문서를 바꾸지 않고 새 개정판을 등록합니다. 저장하면 이전 버전은 그대로 남습니다.
 </div>
@@ -1865,6 +1866,12 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="mb-3">
 <label class="form-label small fw-bold text-muted">시행일</label>
 <input type="date" id="doc-date" class="form-control">
+</div>
+
+<div class="mb-3">
+<label class="form-label small fw-bold text-muted">개정 내용</label>
+<textarea id="doc-revision-summary" class="form-control" rows="3" placeholder="예: 지출결의 전결 기준을 삭제하고 이사장 결재 원칙으로 정리"></textarea>
+<div class="form-text text-end x-small">개정판 이력에 표시됩니다. 제정 문서라면 제정 취지를 남겨도 됩니다.</div>
 </div>
 
 <div class="mb-3">
@@ -6640,42 +6647,166 @@ badgeClass: 'bg-primary-subtle text-primary border border-primary-subtle'
 return getDocVisibilityMetaByTitle(title);
 }
 
+function getDocRevisionGroupKey(doc) {
+const groupId = String(doc?.document_group_id || '').trim();
+if (groupId) return `group:${groupId}`;
+return `title:${String(doc?.title || '').trim().toLowerCase()}`;
+}
+
+function getDocSortTimestamp(doc) {
+return String(doc?.event_date || doc?.updated_at || '');
+}
+
+function sortDocsByRevisionDesc(a, b) {
+const currentDelta = Number(b?.is_current === true) - Number(a?.is_current === true);
+if (currentDelta) return currentDelta;
+const dateCompare = String(b?.event_date || '').localeCompare(String(a?.event_date || ''));
+if (dateCompare) return dateCompare;
+return String(b?.updated_at || '').localeCompare(String(a?.updated_at || ''));
+}
+
+function buildDocFileButton(doc) {
+const fileUrl = String(doc?.file_url || '').trim();
+return fileUrl
+? `<a href="${escapeHtml(fileUrl)}" target="_blank" class="btn btn-xs btn-outline-success"><i class="bi bi-file-pdf"></i> 보기</a>`
+: '<span class="text-muted text-xs">없음</span>';
+}
+
+function buildDocSummaryCell(doc, contentMaxLen = 90) {
+const revisionSummary = toPlainSummaryPreview(doc?.revision_summary || '', 120);
+const contentSummary = toPlainSummaryPreview(doc?.content || '', contentMaxLen);
+const parts = [];
+if (revisionSummary !== '-') {
+parts.push(`<div class="fw-semibold">${escapeHtml(revisionSummary)}</div>`);
+}
+if (contentSummary !== '-') {
+parts.push(`<div class="text-muted x-small mt-1">${escapeHtml(contentSummary)}</div>`);
+}
+return parts.length ? parts.join('') : '<span class="text-muted">-</span>';
+}
+
+function buildDocDateVersionCell(doc) {
+const versionText = escapeHtml(doc?.version || '-');
+const dateText = escapeHtml(doc?.event_date || '-');
+const currentBadge = doc?.is_current === true
+? '<span class="badge bg-success-subtle text-success border border-success-subtle mt-1">현재 적용</span>'
+: '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle mt-1">구판</span>';
+return `<div class="fw-bold">${versionText}</div><small class="text-muted d-block">${dateText}</small>${currentBadge}`;
+}
+
+function buildDocActionButtons(doc, historyCount = 0) {
+const id = escapeJsString(String(doc?.id || ''));
+const historyButton = historyCount > 0
+? `<button class="btn btn-sm btn-outline-secondary ms-1" type="button" data-bs-toggle="collapse" data-bs-target="#docHistory_${id.replace(/[^a-zA-Z0-9_-]/g, '')}"><i class="bi bi-clock-history"></i> 개정 이력 ${historyCount}건</button>`
+: '';
+return `
+<button class="btn btn-sm btn-outline-primary" onclick="openDocRevisionModal('${id}')">개정판 등록</button>
+<button class="btn btn-sm btn-light ms-1" onclick="openDocModal('${id}')">수정</button>
+${historyButton}
+<button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteDoc('${id}')">삭제</button>`;
+}
+
+function buildDocHistoryRows(historyDocs) {
+return historyDocs.map((doc) => {
+const id = escapeJsString(String(doc?.id || ''));
+const visibilityMeta = getDocVisibilityMeta(doc?.access_scope, doc?.title);
+const visibilityBadge = `<span class="badge ${visibilityMeta.badgeClass}">${visibilityMeta.label}</span>`;
+return `<tr>
+<td class="text-start">${buildDocDateVersionCell(doc)}</td>
+<td class="text-start">${escapeHtml(doc?.title || '-')}</td>
+<td>${visibilityBadge}</td>
+<td class="text-start small">${buildDocSummaryCell(doc, 70)}</td>
+<td>${buildDocFileButton(doc)}</td>
+<td>
+  <button class="btn btn-sm btn-light" onclick="openDocHistoryViewModal('${id}')">보기</button>
+  <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteDoc('${id}')">삭제</button>
+</td>
+</tr>`;
+}).join('');
+}
+
 // 1. 문서 목록 불러오기
 async function fetchDocs() {
-// category가 'doc'인 것만 가져옴
-const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('category', 'doc').order('event_date', {ascending:false});
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
+  .eq('category', 'doc')
+  .order('event_date', { ascending: false })
+  .order('updated_at', { ascending: false });
 const tbody = document.getElementById('docListBody');
 tbody.innerHTML = '';
+
+if (error) {
+console.error('[fetchDocs] failed:', error);
+tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-danger">문서를 불러오지 못했습니다.</td></tr>';
+return;
+}
 
 if(!data || data.length === 0) {
 tbody.innerHTML = '<tr><td colspan="6" class="py-4 text-muted">등록된 문서가 없습니다.</td></tr>';
 return;
 }
 
-data.forEach(d => {
-const visibilityMeta = getDocVisibilityMeta(d.access_scope, d.title);
-const visibilityBadge = `<span class="badge ${visibilityMeta.badgeClass}">${visibilityMeta.label}</span>`;
-const summaryPreview = escapeHtml(toPlainSummaryPreview(d.content, 120));
-const versionText = escapeHtml(d.version || '-');
-const dateText = escapeHtml(d.event_date || '-');
-const titleText = escapeHtml(d.title || '-');
-const fileBtn = d.file_url
-? `<a href="${d.file_url}" target="_blank" class="btn btn-xs btn-outline-success"><i class="bi bi-file-pdf"></i> 보기</a>`
-: '<span class="text-muted text-xs">없음</span>';
-
-tbody.innerHTML += `<tr>
-                   <td><div class="fw-bold">${versionText}</div><small class="text-muted">${dateText}</small></td>
-                   <td>${titleText}</td>
-                   <td>${visibilityBadge}</td>
-                   <td class="text-start small text-truncate" style="max-width:200px;">${summaryPreview}</td>
-                   <td>${fileBtn}</td>
-                   <td>
-                       <button class="btn btn-sm btn-outline-primary" onclick="openDocRevisionModal('${d.id}')">개정판 등록</button>
-                       <button class="btn btn-sm btn-light ms-1" onclick="openDocModal('${d.id}')">수정</button>
-                       <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteDoc('${d.id}')">삭제</button>
-                   </td>
-               </tr>`;
+const groupsByKey = new Map();
+data.forEach((doc) => {
+const key = getDocRevisionGroupKey(doc);
+if (!groupsByKey.has(key)) groupsByKey.set(key, []);
+groupsByKey.get(key).push(doc);
 });
+
+const groups = Array.from(groupsByKey.values()).map((docs) => {
+const sortedDocs = docs.slice().sort(sortDocsByRevisionDesc);
+const currentDoc = sortedDocs.find((doc) => doc?.is_current === true) || sortedDocs[0];
+return {
+currentDoc,
+historyDocs: sortedDocs.filter((doc) => String(doc?.id || '') !== String(currentDoc?.id || '')),
+sortKey: getDocSortTimestamp(currentDoc)
+};
+}).sort((a, b) => String(b.sortKey || '').localeCompare(String(a.sortKey || '')));
+
+const rows = [];
+groups.forEach((group) => {
+const doc = group.currentDoc;
+const id = escapeJsString(String(doc?.id || ''));
+const collapseId = `docHistory_${id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+const visibilityMeta = getDocVisibilityMeta(doc?.access_scope, doc?.title);
+const visibilityBadge = `<span class="badge ${visibilityMeta.badgeClass}">${visibilityMeta.label}</span>`;
+rows.push(`<tr>
+<td class="text-start">${buildDocDateVersionCell(doc)}</td>
+<td class="text-start">
+  <div class="fw-bold">${escapeHtml(doc?.title || '-')}</div>
+  ${group.historyDocs.length > 0 ? `<div class="text-muted x-small mt-1">구판 ${group.historyDocs.length}건 보관 중</div>` : ''}
+</td>
+<td>${visibilityBadge}</td>
+<td class="text-start small" style="max-width:260px;">${buildDocSummaryCell(doc)}</td>
+<td>${buildDocFileButton(doc)}</td>
+<td>${buildDocActionButtons(doc, group.historyDocs.length)}</td>
+</tr>`);
+if (group.historyDocs.length > 0) {
+rows.push(`<tr class="bg-light">
+<td colspan="6" class="p-0">
+<div class="collapse p-3" id="${collapseId}">
+  <div class="text-start fw-bold small mb-2"><i class="bi bi-clock-history me-1"></i>개정 이력</div>
+  <div class="table-responsive">
+    <table class="table table-sm table-bordered bg-white mb-0 align-middle">
+      <thead class="table-light text-center">
+        <tr>
+          <th style="width:150px;">날짜/버전</th>
+          <th>제목</th>
+          <th style="width:130px;">공개대상</th>
+          <th>개정 내용</th>
+          <th style="width:90px;">파일</th>
+          <th style="width:130px;">관리</th>
+        </tr>
+      </thead>
+      <tbody>${buildDocHistoryRows(group.historyDocs)}</tbody>
+    </table>
+  </div>
+</div>
+</td>
+</tr>`);
+}
+});
+
+tbody.innerHTML = rows.join('');
 }
 
 // 2. 모달 열기
@@ -6684,53 +6815,107 @@ tbody.innerHTML += `<tr>
 
 // [수정] 문서 저장 (is_current 포함)
 
+function setDocRevisionHint(mode) {
+const hintEl = document.getElementById('doc-revision-hint');
+if (!hintEl) return;
+hintEl.className = 'alert alert-primary small hidden';
+hintEl.textContent = '기존 문서를 바꾸지 않고 새 개정판을 등록합니다. 저장하면 이전 버전은 그대로 남습니다.';
+if (mode === 'revision') {
+hintEl.className = 'alert alert-primary small';
+} else if (mode === 'history') {
+hintEl.className = 'alert alert-light border small';
+hintEl.textContent = '구판은 개정 이력으로 보관되는 문서입니다. 내용 수정은 현재판에서 새 개정판을 등록해 반영하세요.';
+}
+}
+
+function setDocModalReadonly(isReadonly) {
+['doc-title', 'doc-version', 'doc-access-scope', 'doc-date', 'doc-revision-summary', 'doc-content', 'doc-current'].forEach((fieldId) => {
+const field = document.getElementById(fieldId);
+if (field) field.disabled = !!isReadonly;
+});
+const saveBtn = document.getElementById('btn-save-doc');
+if (saveBtn) saveBtn.classList.toggle('hidden', !!isReadonly);
+}
+
+function populateDocModalFields(data = {}) {
+document.getElementById('doc-title').value = data.title || '';
+document.getElementById('doc-version').value = data.version || '';
+document.getElementById('doc-date').value = data.event_date || getAdminMemberKstDateString();
+document.getElementById('doc-revision-summary').value = data.revision_summary || '';
+document.getElementById('doc-content').value = data.content || '';
+document.getElementById('doc-current').checked = data.is_current !== false;
+document.getElementById('doc-access-scope').value = getDocVisibilityMeta(data.access_scope, data.title).scope;
+}
+
+function showDocModal() {
+bootstrap.Modal.getOrCreateInstance(document.getElementById('docModal')).show();
+}
+
 // [수정] 문서 모달 열기 (파일 관련 제거)
 async function openDocModal(id) {
 document.getElementById('doc-id').value = id || '';
+document.getElementById('doc-revision-source-id').value = '';
+setDocModalReadonly(false);
+setDocRevisionHint('');
 const titleEl = document.getElementById('doc-modal-title');
-const hintEl = document.getElementById('doc-revision-hint');
 if (titleEl) titleEl.innerHTML = '<i class="bi bi-file-earmark-text text-primary me-2"></i>규정/문서 등록';
-if (hintEl) hintEl.classList.add('hidden');
 
 if(id) {
-const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
-if(data) {
-document.getElementById('doc-title').value = data.title;
-document.getElementById('doc-version').value = data.version || '';
-document.getElementById('doc-date').value = data.event_date;
-document.getElementById('doc-content').value = data.content || '';
-document.getElementById('doc-current').checked = data.is_current;
-document.getElementById('doc-access-scope').value = getDocVisibilityMeta(data.access_scope, data.title).scope;
-}
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
+if (error) return myAlert('문서를 불러오지 못했습니다: ' + error.message, 'error');
+if(data) populateDocModalFields(data);
 } else {
-// 신규
-document.getElementById('doc-title').value = '정관';
-document.getElementById('doc-version').value = '';
-document.getElementById('doc-date').value = getAdminMemberKstDateString();
-document.getElementById('doc-content').value = '';
-document.getElementById('doc-current').checked = true;
-document.getElementById('doc-access-scope').value = 'PUBLIC';
+populateDocModalFields({
+title: '정관',
+version: '',
+event_date: getAdminMemberKstDateString(),
+content: '',
+revision_summary: '',
+is_current: true,
+access_scope: 'PUBLIC'
+});
 }
-new bootstrap.Modal(document.getElementById('docModal')).show();
+showDocModal();
 }
 
 async function openDocRevisionModal(id) {
 if (!id) return;
-const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
+if (error) return myAlert('원본 문서를 불러오지 못했습니다: ' + error.message, 'error');
 if (!data) return myAlert('원본 문서를 불러오지 못했습니다.', 'warning');
 
 document.getElementById('doc-id').value = '';
-document.getElementById('doc-title').value = data.title || '';
-document.getElementById('doc-version').value = '';
-document.getElementById('doc-date').value = getAdminMemberKstDateString();
-document.getElementById('doc-content').value = data.content || '';
-document.getElementById('doc-current').checked = true;
-document.getElementById('doc-access-scope').value = getDocVisibilityMeta(data.access_scope, data.title).scope;
+document.getElementById('doc-revision-source-id').value = id;
+setDocModalReadonly(false);
+populateDocModalFields({
+title: data.title || '',
+version: '',
+event_date: getAdminMemberKstDateString(),
+content: data.content || '',
+revision_summary: '',
+is_current: true,
+access_scope: getDocVisibilityMeta(data.access_scope, data.title).scope
+});
 const titleEl = document.getElementById('doc-modal-title');
-const hintEl = document.getElementById('doc-revision-hint');
 if (titleEl) titleEl.innerHTML = '<i class="bi bi-file-earmark-plus text-primary me-2"></i>규정 개정판 등록';
-if (hintEl) hintEl.classList.remove('hidden');
-new bootstrap.Modal(document.getElementById('docModal')).show();
+setDocRevisionHint('revision');
+showDocModal();
+}
+
+async function openDocHistoryViewModal(id) {
+if (!id) return;
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('id', id).single();
+if (error) return myAlert('구판 문서를 불러오지 못했습니다: ' + error.message, 'error');
+if (!data) return myAlert('구판 문서를 불러오지 못했습니다.', 'warning');
+
+document.getElementById('doc-id').value = id;
+document.getElementById('doc-revision-source-id').value = '';
+populateDocModalFields(data);
+setDocModalReadonly(true);
+const titleEl = document.getElementById('doc-modal-title');
+if (titleEl) titleEl.innerHTML = '<i class="bi bi-clock-history text-secondary me-2"></i>규정 구판 보기';
+setDocRevisionHint('history');
+showDocModal();
 }
 
 // [수정] 문서 저장 (파일 로직 삭제)
@@ -6757,7 +6942,9 @@ p_content: document.getElementById('doc-content').value,
 p_version: document.getElementById('doc-version').value,
 p_file_url: null, // 파일 없음
 p_is_current: document.getElementById('doc-current').checked,
-p_access_scope: document.getElementById('doc-access-scope').value
+p_access_scope: document.getElementById('doc-access-scope').value,
+p_revision_summary: document.getElementById('doc-revision-summary').value || null,
+p_revision_source_id: document.getElementById('doc-revision-source-id').value || null
 };
 
 try {
