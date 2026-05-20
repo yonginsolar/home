@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.79
-Change: 2026-05-19 - Stabilize nested member-detail modal ordering and alerts.
+Version: v1.0.80
+Change: 2026-05-21 - Require disconnect before reconnecting managed members and groups.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.79';
+window.ADMIN_MEMBER_VERSION = 'v1.0.80';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -9621,21 +9621,85 @@ async function loadMemberFamily(parentId) {
         if (m.status === '승인대기') statusClass = 'bg-danger';
         else if (m.status === '탈퇴') statusClass = 'bg-secondary';
 
-        const statusBadge = `<span class="badge ${statusClass}">${m.status}</span>`;
+        const safeId = escapeJsString(m.id || '');
+        const safeNameText = escapeHtml(m.name || '-');
+        const safeIdNum = escapeHtml(idNum);
+        const safeStatus = escapeHtml(m.status || '-');
+        const safeNameArg = escapeJsString(m.name || '');
+        const safeTypeArg = escapeJsString(m.member_type || '');
 
         tbody.innerHTML += `
             <tr>
                 <td>${typeBadge}</td>
-                <td class="fw-bold">${m.name}</td>
-                <td class="small font-monospace">${idNum}</td>
-                <td>${statusBadge}</td>
-                <td>
-                    <button class="btn btn-xs btn-outline-dark border" onclick="openMemberDetail('${m.id}')">
+                <td class="fw-bold">${safeNameText}</td>
+                <td class="small font-monospace">${safeIdNum}</td>
+                <td><span class="badge ${statusClass}">${safeStatus}</span></td>
+                <td class="d-flex gap-1 justify-content-center flex-wrap">
+                    <button type="button" class="btn btn-xs btn-outline-dark border" onclick="openMemberDetail('${safeId}')">
                         상세보기
+                    </button>
+                    <button type="button" class="btn btn-xs btn-outline-danger border" onclick="confirmDisconnectManagedMember('${safeId}', '${safeNameArg}', '${safeTypeArg}')">
+                        연결 해제
                     </button>
                 </td>
             </tr>
         `;
+    });
+}
+
+function getManagedLinkErrorMessage(error) {
+    const message = String(error?.message || error || '');
+    if (message.includes('GROUP_ALREADY_MANAGED')) {
+        return '이미 다른 관리자에게 연결된 단체입니다. 먼저 기존 연결을 해제한 뒤 다시 연결해 주세요.';
+    }
+    if (message.includes('MANAGED_MEMBER_LINK_MISMATCH')) {
+        return '현재 상세 조합원에게 연결된 계정이 아닙니다. 목록을 새로고침한 뒤 다시 확인해 주세요.';
+    }
+    if (message.includes('MANAGED_MEMBER_NOT_FOUND')) {
+        return '연결된 계정을 찾을 수 없습니다.';
+    }
+    if (message.includes('GROUP_NOT_FOUND')) {
+        return '단체 계정을 찾을 수 없습니다.';
+    }
+    if (message.includes('MANAGER_NOT_FOUND')) {
+        return '관리자 계정을 찾을 수 없습니다.';
+    }
+    if (message.includes('COOP_CONTEXT_REQUIRED')) {
+        return '조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.';
+    }
+    return message || '처리 중 오류가 발생했습니다.';
+}
+
+function confirmDisconnectManagedMember(managedId, managedName, memberType) {
+    const parentId = g_current_member_id || document.getElementById('md-uid')?.value || '';
+    if (!parentId) return myAlert('현재 상세 조합원 정보를 찾을 수 없습니다.', 'error');
+    if (!managedId) return myAlert('연결된 계정 정보를 찾을 수 없습니다.', 'error');
+
+    const typeLabel = String(memberType || '').includes('단체') ? '단체' : '개인/가족';
+    const displayName = managedName || '선택한 계정';
+    const msg = `'${displayName}' ${typeLabel} 연결을 해제하시겠습니까?\n계정은 삭제되지 않고, 현재 조합원과의 관리 연결만 해제됩니다.`;
+
+    myConfirm(msg, async () => {
+        showLoading(true);
+        const { error } = await _supabase.rpc('disconnect_managed_member', {
+            managed_uuid: managedId,
+            manager_uuid: parentId
+        });
+        showLoading(false);
+
+        if (error) {
+            myAlert('연결 해제 실패: ' + getManagedLinkErrorMessage(error), 'error');
+            return;
+        }
+
+        const cached = findCachedAdminMember(managedId);
+        if (cached) {
+            cached.manager_id = null;
+            if (String(cached.member_type || '').includes('단체')) cached.rep_uuid = null;
+        }
+
+        await loadMemberFamily(parentId);
+        myAlert('연결이 해제되었습니다.');
     });
 }
 
@@ -10052,7 +10116,15 @@ if(!data || data.length===0) { list.innerHTML = '<div class="p-3 text-center tex
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'list-group-item list-group-item-action';
+    if (g.rep_name) {
+    btn.classList.add('list-group-item-warning');
+    btn.title = '이미 관리자에게 연결된 단체입니다.';
+    btn.addEventListener('click', () => {
+    myAlert('이미 관리자에게 연결된 단체입니다. 먼저 기존 연결을 해제한 뒤 다시 연결해 주세요.', 'warning');
+    });
+    } else {
     btn.addEventListener('click', () => tryConnectGroup(g.id, g.name || '', g.rep_name || ''));
+    }
 
     const row = document.createElement('div');
     row.className = 'd-flex justify-content-between align-items-center';
@@ -10080,7 +10152,8 @@ const myName = document.getElementById('md-name').value;
 let msg = `'${groupName}'의 관리자로 등록하시겠습니까?`;
 
 if(currentManager) {
-msg = `⚠️ <b>주의:</b> 현재 '${currentManager}'님이 관리자로 되어 있습니다.<br>관리자를 '${myName}'님으로 변경하시겠습니까?`;
+myAlert(`현재 '${currentManager}'님이 관리자로 연결되어 있습니다. 먼저 기존 연결을 해제한 뒤 '${myName}'님에게 다시 연결해 주세요.`, 'warning');
+return;
 }
 
 myConfirm(msg, async () => {
@@ -10091,7 +10164,7 @@ manager_uuid: g_current_member_id
 });
 showLoading(false);
 
-if(error) myAlert('연결 실패: ' + error.message, 'error');
+if(error) myAlert('연결 실패: ' + getManagedLinkErrorMessage(error), 'error');
 else {
 const groupModalEl = document.getElementById('groupSearchModal');
 const parentId = g_current_member_id || document.getElementById('md-uid').value;
