@@ -1,6 +1,6 @@
 /*
-Version: v1.0.45
-Change: 2026-05-19 - Include regulation revision group and summary fields for document box history.
+Version: v1.0.46
+Change: 2026-05-21 - Normalize uploaded attachment filenames for Korean downloads.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -35,6 +35,16 @@ function scopeByCoop(query, coopId) {
 function withTenantPayload(payload, coopId) {
     if (!coopId || !payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
     return { ...payload, coop_id: coopId };
+}
+
+function normalizeAttachmentFileName(value, fallback = '') {
+    const raw = String(value || fallback || '').trim();
+    if (!raw) return '';
+    try {
+        return raw.normalize('NFC');
+    } catch (e) {
+        return raw;
+    }
 }
 
 async function getSession() {
@@ -394,17 +404,17 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
 	    if (!fileList || fileList.length === 0) return { urls: [], error: null };
 	    const urls = [];
 	    for (const file of fileList) {
-	        const name = file.name || '';
-        const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-        if (ext !== 'pdf') {
-            return { urls: [], error: { message: `PDF만 업로드할 수 있습니다: ${name}` } };
-        }
+	        const name = normalizeAttachmentFileName(file.name || '');
+	        const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+	        if (ext !== 'pdf') {
+	            return { urls: [], error: { message: `PDF만 업로드할 수 있습니다: ${name}` } };
+	        }
 	        const safeName = `${crypto.randomUUID()}_${name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
 	        const storagePath = `minutes/${safeName}`;
 	        const { error } = await supabase.storage.from('attachments').upload(storagePath, file);
 	        if (error) return { urls: [], error };
 	        // Store a storage reference (not a public URL). Viewer resolves to a signed URL later.
-	        urls.push(`attachments/${storagePath}?display_name=${encodeURIComponent(name || safeName)}`);
+	        urls.push(`attachments/${storagePath}?display_name=${encodeURIComponent(normalizeAttachmentFileName(name || safeName))}`);
 	    }
 	    return { urls, error: null };
 	}

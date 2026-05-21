@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-	    Version: v1.0.59
-	    Change: 2026-05-19 - Move regulation revision summary below document body.
+	    Version: v1.0.60
+	    Change: 2026-05-21 - Hide noisy attachment URLs and normalize Korean download names.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.59 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.60 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -270,7 +270,7 @@
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.45';
+        import { MinutesService } from './MinutesService.js?v=1.0.46';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -567,47 +567,82 @@
             return /\.(png|jpe?g|gif|webp|svg)(\?|#|$|\s)/i.test(raw);
         }
 
-	        async function resolveAttachmentUrl(rawUrl) {
-	            if (!rawUrl) return null;
-	            const trimmed = String(rawUrl).trim();
-	            if (!trimmed) return null;
+        function normalizeAttachmentFileName(value) {
+            let raw = String(value || '').trim();
+            if (!raw) return '';
+            try { raw = decodeURIComponent(raw); } catch (e) {}
+            try { raw = raw.normalize('NFC'); } catch (e) {}
+            return raw;
+        }
 
-	            if (trimmed.startsWith('http')) {
-	                const parsed = parseStorageUrl(trimmed);
-	                if (parsed) {
-	                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600);
-	                    if (!error && data?.signedUrl) return data.signedUrl;
-	                    if (parsed.bucket !== 'attachments') {
-	                        const fallback = await supabase.storage.from('attachments').createSignedUrl(parsed.path, 3600);
-	                        if (!fallback.error && fallback.data?.signedUrl) return fallback.data.signedUrl;
-	                    }
-	                }
-	                return trimmed;
-	            }
+        function getAttachmentDownloadNameFromReference(rawUrl) {
+            const raw = String(rawUrl || '').trim();
+            if (!raw) return '';
+            try {
+                const params = raw.startsWith('http')
+                    ? new URL(raw).searchParams
+                    : new URLSearchParams((raw.split('?')[1] || '').trim());
+                return normalizeAttachmentFileName(params.get('display_name') || params.get('download') || '');
+            } catch (e) {
+                const query = raw.split('?')[1] || '';
+                const params = new URLSearchParams(query);
+                return normalizeAttachmentFileName(params.get('display_name') || params.get('download') || '');
+            }
+        }
 
-	            const cleaned = trimmed.replace(/^\/+/, '');
-	            const parts = cleaned.split('?');
-	            const pathPart = parts[0] || '';
-	            const sp = new URLSearchParams(parts[1] || '');
-	            const downloadName = sp.get('display_name') || sp.get('download') || '';
-	            const opts = downloadName ? { download: downloadName } : undefined;
+        function getCleanAttachmentDisplayName(value) {
+            const normalized = normalizeAttachmentFileName(value);
+            if (!normalized) return '';
+            if (/^https?:\/\//i.test(normalized)) return '';
+            if (/[?&](token|download|display_name)=/i.test(normalized)) return '';
+            const base = normalized.split(/[\\/]/).pop().trim();
+            if (!base || base.length > 120) return '';
+            return base;
+        }
 
-	            // Support both:
-	            // - "attachments/minutes/..." style references
-	            // - "minutes/..." / "signatures/..." (implicit attachments bucket)
-	            const knownBuckets = new Set(['attachments', 'assets', 'contracts', 'candidates', 'candidate_proofs']);
-		            const m = pathPart.match(/^([^/]+)\/(.+)$/);
-	            const bucket = (m && knownBuckets.has(m[1])) ? m[1] : 'attachments';
-	            const objectPath = (m && knownBuckets.has(m[1])) ? m[2] : pathPart;
+        async function resolveAttachmentUrl(rawUrl) {
+            if (!rawUrl) return null;
+            const trimmed = String(rawUrl).trim();
+            if (!trimmed) return null;
 
-	            const primary = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600, opts);
-	            if (!primary.error && primary.data?.signedUrl) return primary.data.signedUrl;
-	            if (bucket !== 'attachments') {
-	                const fallback = await supabase.storage.from('attachments').createSignedUrl(objectPath, 3600, opts);
-	                if (!fallback.error && fallback.data?.signedUrl) return fallback.data.signedUrl;
-	            }
-	            return trimmed;
-	        }
+            if (trimmed.startsWith('http')) {
+                const parsed = parseStorageUrl(trimmed);
+                if (parsed) {
+                    const downloadName = getAttachmentDownloadNameFromReference(trimmed);
+                    const opts = downloadName ? { download: downloadName } : undefined;
+                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600, opts);
+                    if (!error && data?.signedUrl) return data.signedUrl;
+                    if (parsed.bucket !== 'attachments') {
+                        const fallback = await supabase.storage.from('attachments').createSignedUrl(parsed.path, 3600, opts);
+                        if (!fallback.error && fallback.data?.signedUrl) return fallback.data.signedUrl;
+                    }
+                }
+                return trimmed;
+            }
+
+            const cleaned = trimmed.replace(/^\/+/, '');
+            const parts = cleaned.split('?');
+            const pathPart = parts[0] || '';
+            const sp = new URLSearchParams(parts[1] || '');
+            const downloadName = normalizeAttachmentFileName(sp.get('display_name') || sp.get('download') || '');
+            const opts = downloadName ? { download: downloadName } : undefined;
+
+            // Support both:
+            // - "attachments/minutes/..." style references
+            // - "minutes/..." / "signatures/..." (implicit attachments bucket)
+            const knownBuckets = new Set(['attachments', 'assets', 'contracts', 'candidates', 'candidate_proofs']);
+            const m = pathPart.match(/^([^/]+)\/(.+)$/);
+            const bucket = (m && knownBuckets.has(m[1])) ? m[1] : 'attachments';
+            const objectPath = (m && knownBuckets.has(m[1])) ? m[2] : pathPart;
+
+            const primary = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600, opts);
+            if (!primary.error && primary.data?.signedUrl) return primary.data.signedUrl;
+            if (bucket !== 'attachments') {
+                const fallback = await supabase.storage.from('attachments').createSignedUrl(objectPath, 3600, opts);
+                if (!fallback.error && fallback.data?.signedUrl) return fallback.data.signedUrl;
+            }
+            return trimmed;
+        }
 
         async function renderAttachments(doc) {
             const wrap = document.getElementById('doc-attachments');
@@ -630,7 +665,8 @@
             const resolved = (await Promise.all(urls.map(async (url, idx) => {
                 const resolvedUrl = await resolveAttachmentUrl(url);
                 if (!resolvedUrl) return null;
-                return { url: resolvedUrl, name: names[idx] || null };
+                const name = getCleanAttachmentDisplayName(names[idx]) || getAttachmentDownloadNameFromReference(url);
+                return { url: resolvedUrl, name };
             }))).filter(Boolean);
 
             if (resolved.length === 0) {
@@ -643,18 +679,16 @@
             list.innerHTML = resolved.map((item, idx) => {
                 const safe = safeUrl(item.url);
                 if (!safe) return '';
-                let name = item.name || (safe.split('/').pop() || 'attachment.pdf');
-                try { name = decodeURIComponent(name); } catch (e) {}
+                const name = getCleanAttachmentDisplayName(item.name) || `첨부파일 ${idx + 1}`;
                 const imagePreview = isPreviewableImageAttachment(safe, name)
                     ? `<img class="attachment-preview-img" src="${safe}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.style.display='none';">`
                     : '';
                 return `
                     <li style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         ${imagePreview}
-                        <a href="${safe}" target="_blank" rel="noopener noreferrer">
+                        <a href="${safe}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(name)} 다운로드">
                             <button type="button">다운로드</button>
                         </a>
-                        <span style="color:#64748b; font-size:0.9rem;">${escapeHtml(name)}</span>
                     </li>
                 `;
             }).join('');
@@ -671,7 +705,7 @@
             if (!rawUrl) return null;
             const match = String(rawUrl).match(/\/storage\/v1\/object\/(public|sign)\/([^/]+)\/(.+)$/);
             if (!match) return null;
-            return { bucket: match[2], path: match[3] };
+            return { bucket: match[2], path: String(match[3] || '').split('?')[0] };
         }
 
         async function resolveSignatureUrl(rawUrl) {

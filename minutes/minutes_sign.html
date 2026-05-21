@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.21
-Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
+Version: v1.2.22
+Change: 2026-05-21 - Normalize attachment download names and avoid signed URL filenames.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.21 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.22 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -313,7 +313,7 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.34';
+        import { MinutesService } from './MinutesService.js?v=1.0.46';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -361,7 +361,40 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
             if (!rawUrl) return null;
             const match = String(rawUrl).match(/\/storage\/v1\/object\/(public|sign)\/([^/]+)\/(.+)$/);
             if (!match) return null;
-            return { bucket: match[2], path: match[3] };
+            return { bucket: match[2], path: String(match[3] || '').split('?')[0] };
+        }
+
+        function normalizeAttachmentFileName(value) {
+            let raw = String(value || '').trim();
+            if (!raw) return '';
+            try { raw = decodeURIComponent(raw); } catch (e) {}
+            try { raw = raw.normalize('NFC'); } catch (e) {}
+            return raw;
+        }
+
+        function getAttachmentDownloadNameFromReference(rawUrl) {
+            const raw = String(rawUrl || '').trim();
+            if (!raw) return '';
+            try {
+                const params = raw.startsWith('http')
+                    ? new URL(raw).searchParams
+                    : new URLSearchParams((raw.split('?')[1] || '').trim());
+                return normalizeAttachmentFileName(params.get('display_name') || params.get('download') || '');
+            } catch (e) {
+                const query = raw.split('?')[1] || '';
+                const params = new URLSearchParams(query);
+                return normalizeAttachmentFileName(params.get('display_name') || params.get('download') || '');
+            }
+        }
+
+        function getCleanAttachmentDisplayName(value) {
+            const normalized = normalizeAttachmentFileName(value);
+            if (!normalized) return '';
+            if (/^https?:\/\//i.test(normalized)) return '';
+            if (/[?&](token|download|display_name)=/i.test(normalized)) return '';
+            const base = normalized.split(/[\\/]/).pop().trim();
+            if (!base || base.length > 120) return '';
+            return base;
         }
 
         async function resolveAttachmentUrl(rawUrl) {
@@ -372,7 +405,9 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
             if (trimmed.startsWith('http')) {
                 const parsed = parseStorageUrl(trimmed);
                 if (parsed) {
-                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600);
+                    const downloadName = getAttachmentDownloadNameFromReference(trimmed);
+                    const options = downloadName ? { download: downloadName } : undefined;
+                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600, options);
                     if (!error && data?.signedUrl) return data.signedUrl;
                 }
                 return trimmed;
@@ -382,7 +417,7 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
             const parts = cleaned.split('?');
             const pathPart = parts[0] || '';
             const searchParams = new URLSearchParams(parts[1] || '');
-            const downloadName = searchParams.get('display_name') || searchParams.get('download') || '';
+            const downloadName = normalizeAttachmentFileName(searchParams.get('display_name') || searchParams.get('download') || '');
             const options = downloadName ? { download: downloadName } : undefined;
             const knownBuckets = new Set(['attachments', 'assets', 'contracts', 'candidates', 'candidate_proofs']);
             const bucketMatch = pathPart.match(/^([^/]+)\/(.+)$/);
@@ -558,7 +593,7 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
                 if (!resolvedUrl) continue;
                 resolved.push({
                     url: resolvedUrl,
-                    name: names[i] || urls[i] || `attachment-${i + 1}`
+                    name: getCleanAttachmentDisplayName(names[i]) || getAttachmentDownloadNameFromReference(urls[i]) || `첨부파일 ${i + 1}`
                 });
             }
 
@@ -572,8 +607,7 @@ Change: 2026-03-28 - Clean no-op guards in signer flow and attachment helpers.
             list.innerHTML = resolved.map((item, index) => {
                 const safe = safeUrl(item.url);
                 if (!safe) return '';
-                let displayName = item.name || `첨부파일 ${index + 1}`;
-                try { displayName = decodeURIComponent(String(displayName)); } catch (e) {}
+                const displayName = getCleanAttachmentDisplayName(item.name) || `첨부파일 ${index + 1}`;
                 return `
                     <div class="attachment-item">
                         <div>
