@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.77
-Change: Surface unified election/preference-poll portal entries in the quick vote card.
+Version: v1.0.78
+Change: Route member portal managed-account disconnects through the shared RPC.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.77 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.78 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1326,7 +1326,7 @@ let currentBoardLimit = 20;
 let isBoardLoading = false;
 let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
-window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false };
+window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false, disconnectRelation: false };
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
 if (!value) return fallback;
@@ -4894,12 +4894,25 @@ connArea.innerHTML = '<div class="text-center text-danger py-3">정보 확인 �
 }
 }
 
+function getManagedLinkErrorMessage(error) {
+const raw = String(error?.message || error || '').trim();
+if (!raw) return '알 수 없는 오류가 발생했습니다.';
+if (raw.includes('COOP_CONTEXT_REQUIRED')) return '조합 정보를 확인하지 못했습니다. 다시 로그인 후 시도해주세요.';
+if (raw.includes('MANAGED_MEMBER_NOT_FOUND')) return '연결된 계정 정보를 찾을 수 없습니다.';
+if (raw.includes('MANAGER_NOT_FOUND')) return '관리자 계정 정보를 찾을 수 없습니다.';
+if (raw.includes('MANAGED_MEMBER_LINK_MISMATCH')) return '현재 연결 정보가 화면과 달라졌습니다. 새로고침 후 다시 확인해주세요.';
+if (raw.includes('GROUP_ALREADY_MANAGED') || raw.includes('MANAGED_MEMBER_ALREADY_LINKED')) return '이미 다른 계정과 연결되어 있습니다. 먼저 기존 연결을 해제해주세요.';
+if (raw.includes('권한이 없습니다')) return '이 연결을 해제할 권한이 없습니다.';
+return raw;
+}
+
 // [신규] 연결 탭 UI 렌더링 (검색창 vs 해제화면 분기)
 function renderConnectTabUI(container, isConnected, targetInfo, amIGroup) {
 if (isConnected) {
 // [Case A] 이미 연결됨: 검색창 숨김 + 해제 버튼 노출
 const safeTargetName = escapeHtml(targetInfo?.name || '알 수 없음');
 const safeTargetId = encodeURIComponent(String(targetInfo?.id || ''));
+const safeTargetNameArg = encodeURIComponent(String(targetInfo?.name || ''));
 const msg = amIGroup 
 ? `현재 <b>'${safeTargetName}'</b> 님이<br>이 계정을 관리하고 있습니다.`
 : `현재 <b>'${safeTargetName}'</b> (단체)를<br>관리하고 있습니다.`;
@@ -4912,7 +4925,7 @@ container.innerHTML = `
                <h6 class="fw-bold mb-3">연결된 계정</h6>
                <p class="text-muted mb-4 small">${msg}</p>
                
-               <button class="btn btn-outline-danger btn-sm fw-bold px-4" onclick="disconnectRelation(decodeURIComponent('${safeTargetId}'), ${amIGroup})">
+               <button class="btn btn-outline-danger btn-sm fw-bold px-4" onclick="disconnectRelation(decodeURIComponent('${safeTargetId}'), ${amIGroup}, decodeURIComponent('${safeTargetNameArg}'))">
                    <i class="bi bi-x-circle me-1"></i> 연결 해제
                </button>
            </div>
@@ -4941,45 +4954,66 @@ container.innerHTML = `
 }
 
 // [신규] 연결 해제 로직 (개인/단체 공용)
-async function disconnectRelation(targetId, amIGroup) {
-const confirmMsg = amIGroup 
-? "관리자 연결을 해제하시겠습니까?\n이제 스스로 계정을 관리해야 합니다." 
-: "단체 관리를 종료하시겠습니까?";
+async function disconnectRelation(targetId, amIGroup, targetName = '') {
+const activeProfileId = getActiveMemberProfileId();
+const managedId = amIGroup ? activeProfileId : targetId;
+const managerId = amIGroup ? targetId : activeProfileId;
+const displayName = String(targetName || '').trim() || (amIGroup ? '관리자' : '선택한 계정');
 
-// 기존 showConfirmModal 사용
+if (!managedId || !managerId) {
+showModal('연결 정보를 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.');
+return;
+}
+
+const confirmMsg = amIGroup
+? `'${displayName}' 님과의 관리자 연결을 해제하시겠습니까?\n이제 이 계정은 직접 관리해야 합니다.`
+: `'${displayName}' 계정과의 관리 연결을 해제하시겠습니까?\n계정은 삭제되지 않고 관리 연결만 해제됩니다.`;
+
 showConfirmModal(confirmMsg, async () => {
+if (window.__memberAppLocks.disconnectRelation) {
+showModal('이미 연결 해제를 처리 중입니다. 잠시만 기다려주세요.');
+return;
+}
+
+window.__memberAppLocks.disconnectRelation = true;
 showLoading(true, '해제 처리 중...');
 
-let error = null;
+try {
+const { error } = await _supabase.rpc('disconnect_managed_member', {
+managed_uuid: managedId,
+manager_uuid: managerId
+});
+if (error) throw error;
 
-if (amIGroup) {
-// [단체 입장] 내 머리 위의 manager_id 삭제
-// (RLS 정책에 따라 자기 자신 업데이트는 보통 허용됨)
-const { error: err } = await scopeMemberTenant(_supabase.from('coop_members')
-.update({ manager_id: null }))
-.eq('id', getActiveMemberProfileId()); // 내 프로필 기준
-error = err;
-} else {
-// [개인 입장] 내가 관리하던 단체의 manager_id 삭제
-const { error: err } = await scopeMemberTenant(_supabase.from('coop_members')
-.update({ manager_id: null }))
-.eq('id', targetId); // 단체의 UUID 기준
-error = err;
+if (amIGroup && curMem) {
+curMem.manager_id = null;
+if (String(curMem.member_type || '').includes('단체')) curMem.rep_uuid = null;
 }
 
 showLoading(false);
-
-if (error) {
-showModal('해제 실패: ' + error.message);
-} else {
+const familyOverlay = document.getElementById('familyModalOverlay');
+if (familyOverlay) familyOverlay.style.display = 'none';
+setModalDepth(false);
 showModal('연결이 해제되었습니다.');
-document.getElementById('familyModalOverlay').style.display = 'none'; // 모달 닫기
 
-// 데이터 갱신 (대시보드 및 프로필 목록)
-await loadDashboardData(getPreferredDashboardProfileId());
+const rootProfileId = getRootMemberProfileId();
+const refreshProfileId = (amIGroup && rootProfileId && rootProfileId !== managedId)
+? rootProfileId
+: getPreferredDashboardProfileId();
+
+try {
+await loadDashboardData(refreshProfileId);
 if (typeof loadManagedProfiles === 'function') {
-await loadManagedProfiles(getRootMemberProfileId() || (curAuth ? curAuth.id : null));
+await loadManagedProfiles(rootProfileId || (curAuth ? curAuth.id : null));
 }
+} catch (refreshError) {
+console.warn('Managed profile refresh failed after disconnect:', refreshError);
+}
+} catch (error) {
+showLoading(false);
+showModal('해제 실패: ' + getManagedLinkErrorMessage(error));
+} finally {
+window.__memberAppLocks.disconnectRelation = false;
 }
 });
 }
@@ -5222,19 +5256,26 @@ return;
 }
 
 let html = '<ul class="list-group list-group-flush">';
-    fams.forEach(f => {
-    const safeName = escapeHtml(f.name || '');
-    const safeMemberId = escapeHtml(f.member_id || '승인 대기중');
-    const safeJoinCat = escapeHtml(f.join_category || '');
-    html += `
-               <li class="list-group-item d-flex justify-content-between align-items-center">
-                   <div>
-                       <span class="fw-bold">${safeName}</span>
-                       <small class="text-muted ms-2">${safeMemberId}</small>
-                   </div>
-                   <span class="badge bg-light text-dark border">${safeJoinCat}</span>
-               </li>`;
-    });
+	fams.forEach(f => {
+	const safeName = escapeHtml(f.name || '');
+	const safeMemberId = escapeHtml(f.member_id || '승인 대기중');
+	const safeJoinCat = escapeHtml(f.join_category || f.member_type || '');
+	const safeMemberUuid = encodeURIComponent(String(f.id || ''));
+	const safeMemberNameArg = encodeURIComponent(String(f.name || ''));
+	html += `
+	               <li class="list-group-item d-flex justify-content-between align-items-center gap-2">
+	                   <div class="flex-grow-1">
+	                       <span class="fw-bold">${safeName}</span>
+	                       <small class="text-muted ms-2">${safeMemberId}</small>
+	                   </div>
+	                   <div class="d-flex align-items-center gap-2 flex-shrink-0">
+	                       <span class="badge bg-light text-dark border">${safeJoinCat}</span>
+	                       <button class="btn btn-outline-danger btn-sm" type="button" onclick="disconnectRelation(decodeURIComponent('${safeMemberUuid}'), false, decodeURIComponent('${safeMemberNameArg}'))">
+	                           연결 해제
+	                       </button>
+	                   </div>
+	               </li>`;
+	    });
 html += '</ul>';
 area.innerHTML = html;
 }
