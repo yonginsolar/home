@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.29 | Change: 2026-05-18 - Show linked proposal grounds in expense approval previews and detail views. -->
+<!-- Version: v1.2.31 | Change: 2026-05-26 - Group business trip apply/cancel under one request menu. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.29 | approval.html');</script>
+  <script>console.log('[Version] v1.2.31 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -476,7 +476,17 @@
 
         <div class="col-12 hidden mb-3" id="divBusinessTripSection">
           <div class="p-3 bg-light border rounded">
-            <div class="row g-2">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <span class="fw-bold">출장신청서</span>
+              <div class="btn-group btn-group-sm" role="group" aria-label="출장신청서 처리 구분">
+                <input type="radio" class="btn-check" name="businessTripRequestMode" id="businessTripModeApply" value="apply" autocomplete="off" checked onchange="handleApprovalBusinessTripModeChange()">
+                <label class="btn btn-outline-primary" for="businessTripModeApply">신청</label>
+                <input type="radio" class="btn-check" name="businessTripRequestMode" id="businessTripModeCancel" value="cancel" autocomplete="off" onchange="handleApprovalBusinessTripModeChange()">
+                <label class="btn btn-outline-warning" for="businessTripModeCancel">취소</label>
+              </div>
+            </div>
+            <div class="small text-muted mb-3" id="businessTripModeHelp">출장 기간, 구분, 장소를 입력하면 승인 완료 후 전사 일정에 자동 표시됩니다.</div>
+            <div class="row g-2" id="businessTripApplyFields">
               <div class="col-md-6">
                 <label class="small text-muted fw-bold">출장 시작일</label>
                 <input type="date" class="form-control" id="businessTripStartDate" onchange="syncApprovalBusinessTripSummary()">
@@ -1017,6 +1027,7 @@ let approvalSalaryLedgerSnapshotSupported = false;
 let approvalOvertimePolicy = null;
 let approvalLastCategory = '';
 let approvalLeaveCancelCandidates = [];
+let approvalBusinessTripCancelCandidates = [];
 let pendingApprovalAction = null;
 let modalStackSequence = 0;
 let approvalCardData = [];
@@ -1027,11 +1038,14 @@ const APPROVAL_DEFAULT_MIDDLE_APPROVER_KEY = 'approval_default_middle_approver_e
 const APPROVAL_DEFAULT_FINAL_APPROVER_KEY = 'approval_default_final_approver_emp_id';
 const APPROVAL_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT = 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot';
 const APPROVAL_LEAVE_CANCEL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id,current_approver,leave_snapshot,approval_line';
+const APPROVAL_BUSINESS_TRIP_CANCEL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id,drafter_name,current_approver,business_trip_snapshot,approval_line';
 const APPROVAL_DEFAULT_OVERTIME_POLICY = Object.freeze({
     default_mode: 'allowance'
 });
 const APPROVAL_LEAVE_RESERVED_STATUSES = Object.freeze(['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']);
 const APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
+const APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES = Object.freeze(['완료', '실물결재완료']);
+const APPROVAL_BUSINESS_TRIP_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
 const APPROVAL_DEFAULT_LEAVE_TYPE_CATALOG = Object.freeze([
     { id: 'annual', label: '연차', enabled: true, deductible: true, duration_mode: 'mixed_days', aliases: ['연차'] },
     { id: 'half_day', label: '반차', enabled: false, deductible: true, duration_mode: 'half_day', aliases: ['반차'] },
@@ -1376,21 +1390,28 @@ async function refreshApprovalLeaveCancelCandidates(options = {}) {
     const activeCancelTargetIds = await fetchApprovalActiveLeaveCancelRequestIds(targetEmpId, candidateBase.map((doc) => doc?.id));
     approvalLeaveCancelCandidates = candidateBase.filter((doc) => !activeCancelTargetIds.has(String(doc?.id || '').trim()));
 
-    const categoryEl = document.getElementById('appCategory');
-    const previousCategory = String(categoryEl?.value || '').trim();
+    const previousCategory = getCurrentDraftMainType();
     renderApprovalCategoryOptions();
-    const currentCategory = String(categoryEl?.value || '').trim();
+    const currentCategory = getCurrentDraftMainType();
     if (currentCategory === '휴가취소' || previousCategory === '휴가취소') {
         handleCategoryChange();
     }
 } // End of refreshApprovalLeaveCancelCandidates
 
 function handleApprovalRelatedDocSelectChange() {
-    const category = String(document.getElementById('appCategory')?.value || '').trim();
-    if (!isApprovalLeaveCancelCategory(category)) return;
-    const selectedDoc = approvalLeaveCancelCandidates.find((doc) => String(doc?.id || '') === String(document.getElementById('relDocSelect')?.value || '').trim()) || null;
-    setApprovalRelatedDocLabel(selectedDoc?.id || '', selectedDoc ? buildApprovalLeaveCancelTargetLabel(selectedDoc) : '');
-    syncApprovalTitleInput('휴가취소');
+    const category = getCurrentDraftMainType();
+    const selectedValue = String(document.getElementById('relDocSelect')?.value || '').trim();
+    if (isApprovalLeaveCancelCategory(category)) {
+        const selectedDoc = approvalLeaveCancelCandidates.find((doc) => String(doc?.id || '') === selectedValue) || null;
+        setApprovalRelatedDocLabel(selectedDoc?.id || '', selectedDoc ? buildApprovalLeaveCancelTargetLabel(selectedDoc) : '');
+        syncApprovalTitleInput('휴가취소');
+        return;
+    }
+    if (isApprovalBusinessTripCancelCategory(category)) {
+        const selectedDoc = approvalBusinessTripCancelCandidates.find((doc) => String(doc?.id || '') === selectedValue) || null;
+        setApprovalRelatedDocLabel(selectedDoc?.id || '', selectedDoc ? buildApprovalBusinessTripCancelTargetLabel(selectedDoc) : '');
+        syncApprovalTitleInput('출장취소');
+    }
 } // End of handleApprovalRelatedDocSelectChange
 
 function syncApprovalRelatedDocUi(type) {
@@ -1443,6 +1464,46 @@ function syncApprovalRelatedDocUi(type) {
         } else {
             setApprovalRelatedDocLabel('', '');
             helpEl.textContent = '현재 취소할 수 있는 승인 휴가가 없습니다.';
+            helpEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (isApprovalBusinessTripCancelCategory(safeType)) {
+        labelEl.textContent = '취소 대상 출장';
+        searchBtn.classList.add('hidden');
+        const selectedId = String(document.getElementById('relDocId')?.value || '').trim();
+        const matched = approvalBusinessTripCancelCandidates.find((doc) => String(doc?.id || '') === selectedId) || null;
+        const selectedDoc = matched || (selectedId ? null : approvalBusinessTripCancelCandidates[0] || null);
+
+        selectEl.innerHTML = '';
+        approvalBusinessTripCancelCandidates.forEach((doc) => {
+            const option = document.createElement('option');
+            option.value = String(doc.id || '');
+            option.textContent = buildApprovalBusinessTripCancelTargetLabel(doc, { includeStatus: true });
+            selectEl.appendChild(option);
+        });
+
+        if (approvalBusinessTripCancelCandidates.length > 1) {
+            selectWrapEl.classList.remove('hidden');
+            if (selectedDoc) selectEl.value = String(selectedDoc.id || '');
+        } else {
+            selectWrapEl.classList.add('hidden');
+        }
+
+        if (selectedDoc) {
+            setApprovalRelatedDocLabel(selectedDoc.id, buildApprovalBusinessTripCancelTargetLabel(selectedDoc));
+            helpEl.textContent = approvalBusinessTripCancelCandidates.length > 1
+                ? '결재완료된 출장신청 중 취소할 문서를 선택하세요.'
+                : '결재완료된 출장신청 1건을 자동으로 연결했습니다.';
+            helpEl.classList.remove('hidden');
+        } else if (selectedId) {
+            selectWrapEl.classList.add('hidden');
+            helpEl.textContent = '저장된 취소 대상 출장 문서를 상신 시 다시 확인합니다.';
+            helpEl.classList.remove('hidden');
+        } else {
+            setApprovalRelatedDocLabel('', '');
+            helpEl.textContent = '현재 취소할 수 있는 결재완료 출장신청이 없습니다.';
             helpEl.classList.remove('hidden');
         }
         return;
@@ -1562,6 +1623,315 @@ async function applyApprovalLeaveCancelSettlement(doc, newStatus, options = {}) 
     return '';
 } // End of applyApprovalLeaveCancelSettlement
 
+function isApprovalBusinessTripCancelCategory(docType) {
+    return String(docType || '').trim() === '출장취소';
+} // End of isApprovalBusinessTripCancelCategory
+
+function getSelectedApprovalCategory() {
+    return String(document.getElementById('appCategory')?.value || '').trim();
+} // End of getSelectedApprovalCategory
+
+function normalizeApprovalBusinessTripRequestMode(value) {
+    return String(value || '').trim() === 'cancel' ? 'cancel' : 'apply';
+} // End of normalizeApprovalBusinessTripRequestMode
+
+function getApprovalBusinessTripRequestMode() {
+    const cancelEl = document.getElementById('businessTripModeCancel');
+    if (cancelEl?.checked) return 'cancel';
+    return 'apply';
+} // End of getApprovalBusinessTripRequestMode
+
+function setApprovalBusinessTripRequestMode(mode, options = {}) {
+    const normalized = normalizeApprovalBusinessTripRequestMode(mode);
+    const applyEl = document.getElementById('businessTripModeApply');
+    const cancelEl = document.getElementById('businessTripModeCancel');
+    if (applyEl) applyEl.checked = normalized === 'apply';
+    if (cancelEl) cancelEl.checked = normalized === 'cancel';
+    if (options.silent !== true) handleCategoryChange();
+} // End of setApprovalBusinessTripRequestMode
+
+function resolveApprovalDraftMainType(rawCategory = '') {
+    const selectedCategory = String(rawCategory || getSelectedApprovalCategory()).trim();
+    if (isApprovalBusinessTripCancelCategory(selectedCategory)) return '출장취소';
+    if (selectedCategory === '출장신청' && getApprovalBusinessTripRequestMode() === 'cancel') return '출장취소';
+    return selectedCategory;
+} // End of resolveApprovalDraftMainType
+
+function handleApprovalBusinessTripModeChange() {
+    const categoryEl = document.getElementById('appCategory');
+    if (categoryEl && String(categoryEl.value || '').trim() !== '출장신청') {
+        categoryEl.value = '출장신청';
+    }
+    handleCategoryChange();
+} // End of handleApprovalBusinessTripModeChange
+
+function syncApprovalBusinessTripModeUi(resolvedType = '') {
+    const safeType = String(resolvedType || '').trim();
+    const applyFieldsEl = document.getElementById('businessTripApplyFields');
+    const helpEl = document.getElementById('businessTripModeHelp');
+    const applyEl = document.getElementById('businessTripModeApply');
+    const cancelEl = document.getElementById('businessTripModeCancel');
+    const cancelLabelEl = document.querySelector('label[for="businessTripModeCancel"]');
+    if (!applyFieldsEl || !helpEl || !applyEl || !cancelEl) return;
+
+    const isBusinessTripMenu = getSelectedApprovalCategory() === '출장신청' || safeType === '출장신청' || isApprovalBusinessTripCancelCategory(safeType);
+    if (!isBusinessTripMenu) {
+        applyFieldsEl.classList.remove('hidden');
+        helpEl.textContent = '출장 기간, 구분, 장소를 입력하면 승인 완료 후 전사 일정에 자동 표시됩니다.';
+        return;
+    }
+
+    const hasLinkedCancelTarget = !!String(document.getElementById('relDocId')?.value || '').trim();
+    const cancelRequested = isApprovalBusinessTripCancelCategory(safeType) && cancelEl.checked;
+    const cancelAvailable = approvalBusinessTripCancelCandidates.length > 0 || hasLinkedCancelTarget || cancelRequested;
+    cancelEl.disabled = !cancelAvailable;
+    cancelLabelEl?.classList.toggle('disabled', !cancelAvailable);
+    cancelLabelEl?.classList.toggle('opacity-50', !cancelAvailable);
+    if (!cancelAvailable && cancelEl.checked) {
+        applyEl.checked = true;
+        cancelEl.checked = false;
+    }
+
+    const mode = getApprovalBusinessTripRequestMode();
+    applyFieldsEl.classList.toggle('hidden', mode === 'cancel');
+    if (mode === 'cancel') {
+        if (approvalBusinessTripCancelCandidates.length > 1) {
+            helpEl.textContent = '결재완료된 출장신청 중 취소할 문서를 선택하세요.';
+        } else if (approvalBusinessTripCancelCandidates.length === 1) {
+            helpEl.textContent = '결재완료된 출장신청 1건을 자동으로 연결합니다.';
+        } else if (hasLinkedCancelTarget) {
+            helpEl.textContent = '저장된 취소 대상 출장 문서를 상신 시 다시 확인합니다.';
+        } else {
+            helpEl.textContent = '현재 취소할 수 있는 결재완료 출장신청이 없습니다.';
+        }
+    } else {
+        helpEl.textContent = cancelAvailable
+            ? '출장을 새로 신청합니다. 이미 승인된 출장을 취소하려면 오른쪽 취소를 선택하세요.'
+            : '출장 기간, 구분, 장소를 입력하면 승인 완료 후 전사 일정에 자동 표시됩니다.';
+    }
+} // End of syncApprovalBusinessTripModeUi
+
+function isApprovalBusinessTripCancelDocType(docType) {
+    const raw = String(docType || '').trim();
+    return raw === '취소출장신청' || raw.startsWith('취소출장신청(');
+} // End of isApprovalBusinessTripCancelDocType
+
+function isBusinessTripApprovalDoc(docOrType) {
+    const raw = String((docOrType && typeof docOrType === 'object') ? docOrType.doc_type : docOrType || '').trim();
+    return raw === '출장신청';
+} // End of isBusinessTripApprovalDoc
+
+function buildApprovalBusinessTripCancelDocType() {
+    return '취소출장신청';
+} // End of buildApprovalBusinessTripCancelDocType
+
+function getApprovalBusinessTripPeriodTextFromDoc(doc) {
+    const snapshot = getApprovalBusinessTripSnapshotMeta(doc);
+    const periodText = snapshot ? formatApprovalBusinessTripPeriodText(snapshot) : '';
+    return periodText && periodText !== '-' ? periodText : '';
+} // End of getApprovalBusinessTripPeriodTextFromDoc
+
+function buildApprovalBusinessTripCancelTargetLabel(doc, options = {}) {
+    if (!doc) return '선택된 관련 문서가 없습니다.';
+    const includeStatus = options?.includeStatus !== false;
+    const periodText = getApprovalBusinessTripPeriodTextFromDoc(doc);
+    const snapshot = getApprovalBusinessTripSnapshotMeta(doc);
+    const location = String(snapshot?.location || '').trim();
+    const titleText = String(doc?.title || '').trim();
+    const statusText = String(doc?.status || '').trim();
+    const parts = ['출장신청'];
+    if (periodText) parts.push(periodText);
+    if (location) parts.push(location);
+    if (!periodText && titleText) parts.push(titleText);
+    if (includeStatus && statusText) parts.push(statusText);
+    return parts.filter(Boolean).join(' · ');
+} // End of buildApprovalBusinessTripCancelTargetLabel
+
+function buildApprovalBusinessTripCancelTitle(targetDoc) {
+    if (!targetDoc) return '출장 취소 신청';
+    const periodText = getApprovalBusinessTripPeriodTextFromDoc(targetDoc);
+    const titleText = String(targetDoc?.title || '').trim();
+    if (periodText) return `출장 취소 신청 (${periodText})`;
+    if (titleText) return `출장 취소 신청 (${titleText})`;
+    return '출장 취소 신청';
+} // End of buildApprovalBusinessTripCancelTitle
+
+function buildApprovalBusinessTripCancelAppendText(targetDoc) {
+    if (!targetDoc) return '';
+    const snapshot = getApprovalBusinessTripSnapshotMeta(targetDoc);
+    const periodText = getApprovalBusinessTripPeriodTextFromDoc(targetDoc);
+    const titleText = String(targetDoc?.title || '').trim();
+    const location = String(snapshot?.location || '').trim();
+    const lines = ['[취소 대상 출장]'];
+    if (targetDoc?.id) lines.push(`- 원문서 ID: ${targetDoc.id}`);
+    if (titleText) lines.push(`- 원문서 제목: ${titleText}`);
+    if (periodText) lines.push(`- 출장 일정: ${periodText}`);
+    if (location) lines.push(`- 출장 장소: ${location}`);
+    return lines.length > 1 ? `\n\n${lines.join('\n')}` : '';
+} // End of buildApprovalBusinessTripCancelAppendText
+
+function getApprovalBusinessTripCancelSelectedDoc() {
+    const selectedId = String(document.getElementById('relDocId')?.value || '').trim();
+    if (!selectedId) return null;
+    return approvalBusinessTripCancelCandidates.find((doc) => String(doc?.id || '') === selectedId) || null;
+} // End of getApprovalBusinessTripCancelSelectedDoc
+
+function sortApprovalBusinessTripCancelCandidates(list) {
+    return (Array.isArray(list) ? list : []).slice().sort((a, b) => {
+        const aStart = String(getApprovalBusinessTripSnapshotMeta(a)?.start_date || '').trim();
+        const bStart = String(getApprovalBusinessTripSnapshotMeta(b)?.start_date || '').trim();
+        if (aStart && bStart && aStart !== bStart) return aStart.localeCompare(bStart);
+        if (aStart && !bStart) return -1;
+        if (!aStart && bStart) return 1;
+        return new Date(b?.created_at || 0) - new Date(a?.created_at || 0);
+    });
+} // End of sortApprovalBusinessTripCancelCandidates
+
+async function fetchApprovalActiveBusinessTripCancelRequestIds(targetEmpId, relatedDocIds = []) {
+    const safeTargetId = String(targetEmpId || '').trim();
+    const safeRelatedIds = Array.isArray(relatedDocIds)
+        ? relatedDocIds.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    if (!safeTargetId || safeRelatedIds.length === 0) return new Set();
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id, related_doc_id, status, drafter_id, doc_type')
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('drafter_id', safeTargetId)
+        .in('status', APPROVAL_BUSINESS_TRIP_CANCEL_ACTIVE_STATUSES)
+        .eq('doc_type', buildApprovalBusinessTripCancelDocType())
+        .in('related_doc_id', safeRelatedIds);
+    if (error || !Array.isArray(data)) return new Set();
+
+    return new Set(data.map((row) => String(row?.related_doc_id || '').trim()).filter(Boolean));
+} // End of fetchApprovalActiveBusinessTripCancelRequestIds
+
+async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
+    const targetEmpId = getApprovalCurrentTargetEmpId();
+    const previousCategory = getCurrentDraftMainType();
+    if (!targetEmpId) {
+        approvalBusinessTripCancelCandidates = [];
+        renderApprovalCategoryOptions();
+        const currentCategory = getCurrentDraftMainType();
+        syncApprovalBusinessTripModeUi(currentCategory);
+        if (currentCategory === '출장취소' || previousCategory === '출장취소') {
+            handleCategoryChange();
+        }
+        return;
+    }
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select(APPROVAL_BUSINESS_TRIP_CANCEL_SELECT_COLUMNS)
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('drafter_id', targetEmpId)
+        .eq('doc_type', '출장신청')
+        .in('status', APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES)
+        .order('created_at', { ascending: false });
+    if (error || !Array.isArray(data)) {
+        console.warn('business trip cancel candidates load failed:', error);
+        approvalBusinessTripCancelCandidates = [];
+    } else {
+        const candidateBase = sortApprovalBusinessTripCancelCandidates(data);
+        const activeCancelTargetIds = await fetchApprovalActiveBusinessTripCancelRequestIds(targetEmpId, candidateBase.map((doc) => doc?.id));
+        approvalBusinessTripCancelCandidates = candidateBase.filter((doc) => !activeCancelTargetIds.has(String(doc?.id || '').trim()));
+    }
+
+    renderApprovalCategoryOptions();
+    const currentCategory = getCurrentDraftMainType();
+    syncApprovalBusinessTripModeUi(currentCategory);
+    if (options.forceHandleCategoryChange || currentCategory === '출장취소' || previousCategory === '출장취소') {
+        handleCategoryChange();
+    }
+} // End of refreshApprovalBusinessTripCancelCandidates
+
+async function hasActiveApprovalBusinessTripCancelRequestForTarget(targetEmpId, relatedDocId, excludeDocId = null) {
+    const safeTargetId = String(targetEmpId || '').trim();
+    const safeRelatedDocId = String(relatedDocId || '').trim();
+    const excludedId = String(excludeDocId || '').trim();
+    if (!safeTargetId || !safeRelatedDocId) return false;
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id')
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('drafter_id', safeTargetId)
+        .eq('related_doc_id', safeRelatedDocId)
+        .in('status', APPROVAL_BUSINESS_TRIP_CANCEL_ACTIVE_STATUSES)
+        .eq('doc_type', buildApprovalBusinessTripCancelDocType());
+    if (error || !Array.isArray(data)) return false;
+    return data.some((row) => String(row?.id || '').trim() !== excludedId);
+} // End of hasActiveApprovalBusinessTripCancelRequestForTarget
+
+async function loadApprovalBusinessTripCancelTargetDoc(targetDocId, targetEmpId, options = {}) {
+    const safeTargetDocId = toPositiveDocId(targetDocId);
+    const safeTargetEmpId = String(targetEmpId || '').trim();
+    if (!safeTargetDocId) {
+        return { ok: false, message: '취소 대상 출장을 먼저 선택하세요.', targetDoc: null };
+    }
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select(APPROVAL_BUSINESS_TRIP_CANCEL_SELECT_COLUMNS)
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('id', safeTargetDocId)
+        .maybeSingle();
+    if (error || !data) {
+        return { ok: false, message: '취소 대상 출장 문서를 찾을 수 없습니다.', targetDoc: null };
+    }
+    if (!isBusinessTripApprovalDoc(data)) {
+        return { ok: false, message: '선택한 문서는 출장신청 문서가 아닙니다.', targetDoc: null };
+    }
+    if (safeTargetEmpId && String(data.drafter_id || '').trim() !== safeTargetEmpId) {
+        return { ok: false, message: '선택한 출장이 현재 대상자와 일치하지 않습니다.', targetDoc: null };
+    }
+    if (!APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(data.status || '').trim())) {
+        return { ok: false, message: '이미 취소되었거나 더 이상 취소할 수 없는 출장입니다.', targetDoc: null };
+    }
+
+    if (options.checkExistingCancel !== false) {
+        const hasOtherCancel = await hasActiveApprovalBusinessTripCancelRequestForTarget(
+            safeTargetEmpId || String(data.drafter_id || '').trim(),
+            safeTargetDocId,
+            options.excludeDocId || ''
+        );
+        if (hasOtherCancel) {
+            return { ok: false, message: '이미 이 출장을 대상으로 진행 중인 취소 결재가 있습니다.', targetDoc: null };
+        }
+    }
+
+    return { ok: true, message: '', targetDoc: data };
+} // End of loadApprovalBusinessTripCancelTargetDoc
+
+async function applyApprovalBusinessTripCancelSettlement(doc, newStatus, options = {}) {
+    if (!isApprovalBusinessTripCancelDocType(doc?.doc_type || doc) || String(newStatus || '').trim() !== '완료') return '';
+    const targetResult = options.targetDoc
+        ? { ok: true, targetDoc: options.targetDoc }
+        : await loadApprovalBusinessTripCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
+            excludeDocId: doc?.id || '',
+            checkExistingCancel: false
+        });
+    if (!targetResult?.ok || !targetResult?.targetDoc) {
+        throw new Error(targetResult?.message || '취소 대상 출장을 확인하지 못했습니다.');
+    }
+
+    const targetDoc = targetResult.targetDoc;
+    const { error: targetUpdateError } = await _supabase
+        .from('ref_approval')
+        .update({ status: '결재취소', current_approver: null })
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('id', targetDoc.id);
+    if (targetUpdateError) throw targetUpdateError;
+
+    await logAudit('approval.cancel', targetDoc.id, '출장 취소 승인 반영', {
+        reason: `${String(doc.title || '출장 취소 요청').trim()} 승인`,
+        cancel_request_doc_id: doc?.id || null,
+        cancel_request_doc_type: String(doc?.doc_type || '').trim() || null
+    });
+    return '';
+} // End of applyApprovalBusinessTripCancelSettlement
+
 function clearApprovalDraftLocalFiles() {
     const input = document.getElementById('attachFile');
     if (input) input.value = '';
@@ -1624,7 +1994,8 @@ function collectApprovalDraftFormPayload() {
             business_trip_end_date: String(document.getElementById('businessTripEndDate')?.value || '').trim(),
             business_trip_slot_am: !!document.getElementById('businessTripSlotAm')?.checked,
             business_trip_slot_pm: !!document.getElementById('businessTripSlotPm')?.checked,
-            business_trip_location: String(document.getElementById('businessTripLocation')?.value || '').trim()
+            business_trip_location: String(document.getElementById('businessTripLocation')?.value || '').trim(),
+            business_trip_request_mode: getApprovalBusinessTripRequestMode() === 'cancel' ? 'cancel' : ''
         }
     };
 } // End of collectApprovalDraftFormPayload
@@ -1838,6 +2209,7 @@ async function copyApprovalDraftAttachmentsForSubmit(items) {
 
 function resetApprovalComposerForm(options = {}) {
     const keepDraftIdentity = options.keepDraftIdentity === true;
+    const skipAutoRefresh = options.skipAutoRefresh === true;
     const form = document.getElementById('draftForm');
     if (form) form.reset();
 
@@ -1883,9 +2255,9 @@ function resetApprovalComposerForm(options = {}) {
 
     const proxyCheckEl = document.getElementById('chkProxy');
     if (proxyCheckEl) proxyCheckEl.checked = false;
-    toggleProxyMode();
+    toggleProxyMode({ skipAutoRefresh });
     handleCategoryChange();
-    calculateLeave();
+    if (!skipAutoRefresh) calculateLeave();
     normalizeApprovalInitialComposerTitle();
     updateFileList();
     syncApprovalDraftStatusText();
@@ -2011,8 +2383,13 @@ async function loadApprovalDraftFromServer(draftId) {
 
         const payload = draftRow?.form_payload && typeof draftRow.form_payload === 'object' ? draftRow.form_payload : {};
         const fields = payload?.fields && typeof payload.fields === 'object' ? payload.fields : {};
-        const category = String(payload?.category || draftRow?.doc_type || document.getElementById('appCategory')?.value || '일반품의').trim() || '일반품의';
-        approvalDraftRestoreEditorModeHint = shouldPreferHtmlEditorForRestore(category, payload?.body) ? 'html' : '';
+        const storedCategory = String(payload?.category || draftRow?.doc_type || document.getElementById('appCategory')?.value || '일반품의').trim() || '일반품의';
+        const restoreAsBusinessTripCancel = isApprovalBusinessTripCancelCategory(storedCategory)
+            || isApprovalBusinessTripCancelDocType(storedCategory)
+            || (storedCategory === '출장신청' && normalizeApprovalBusinessTripRequestMode(fields.business_trip_request_mode) === 'cancel');
+        const category = restoreAsBusinessTripCancel ? '출장신청' : storedCategory;
+        const effectiveCategory = restoreAsBusinessTripCancel ? '출장취소' : category;
+        approvalDraftRestoreEditorModeHint = shouldPreferHtmlEditorForRestore(effectiveCategory, payload?.body) ? 'html' : '';
 
         const proxyCheckEl = document.getElementById('chkProxy');
         if (proxyCheckEl) proxyCheckEl.checked = !!payload?.proxy?.enabled;
@@ -2023,7 +2400,9 @@ async function loadApprovalDraftFromServer(draftId) {
         const categoryEl = document.getElementById('appCategory');
         const leaveTypeEl = document.getElementById('leaveTypeSelect');
         if (categoryEl) categoryEl.value = category;
+        setApprovalBusinessTripRequestMode(restoreAsBusinessTripCancel ? 'cancel' : 'apply', { silent: true });
         if (leaveTypeEl && String(fields.leave_type || '').trim()) leaveTypeEl.value = String(fields.leave_type || '').trim();
+        setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
         handleCategoryChange();
 
         const proposalSubjectEl = document.getElementById('proposalSubject');
@@ -2069,8 +2448,8 @@ async function loadApprovalDraftFromServer(draftId) {
         setApprovalEditorContent(String(payload?.body || '').trim());
 
         setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
-        if (category === '휴가취소') {
-            syncApprovalRelatedDocUi('휴가취소');
+        if (effectiveCategory === '휴가취소' || effectiveCategory === '출장취소') {
+            syncApprovalRelatedDocUi(effectiveCategory);
         }
 
         const leaveStartEl = document.getElementById('leaveStart');
@@ -2627,6 +3006,7 @@ function formatApprovalDocTypeLabel(docOrType) {
         const displayLabel = getApprovalLeaveTypeDisplayLabel(subType, null);
         return subType ? `휴가취소(${displayLabel || subType})` : '휴가취소';
     }
+    if (isApprovalBusinessTripCancelDocType(raw)) return '출장취소';
     if (!raw.startsWith('휴가(')) return raw;
     const snapshot = getApprovalLeaveSnapshotMeta(doc);
     if (snapshot?.label) return `휴가(${String(snapshot.label).trim()})`;
@@ -3038,6 +3418,7 @@ function isApprovalHtmlEditorType(docType) {
     const safeDocType = String(docType || '').trim();
     if (!safeDocType) return false;
     const mainDocType = mapApprovalDocTypeToMainCategory(safeDocType);
+    if (isApprovalBusinessTripCancelCategory(mainDocType)) return true;
     return WORKFORCE_LITE_APPROVAL_DOC_GROUPS.some((group) => (
         Array.isArray(group.items) && group.items.some((item) => item.value === mainDocType)
     ));
@@ -3048,6 +3429,7 @@ function getWorkforceLiteApprovalDocGroups() {
         ...group,
         items: group.items.filter((item) => {
             if (item.value === '휴가취소' && approvalLeaveCancelCandidates.length === 0) return false;
+            if (item.value === '출장취소' && approvalBusinessTripCancelCandidates.length === 0) return false;
             const current = approvalCompanyInfo[item.key];
             return parseApprovalBoolean(current, item.defaultEnabled !== false);
         })
@@ -3066,6 +3448,15 @@ function isApprovalDocEnabledForCurrentProfile(docType) {
     const safeDocType = String(docType || '').trim();
     if (!safeDocType) return false;
     if (safeDocType === '휴가취소' && approvalLeaveCancelCandidates.length === 0) return false;
+    if (safeDocType === '출장취소') {
+        const hasLinkedCancelTarget = !!String(document.getElementById('relDocId')?.value || '').trim();
+        if (approvalBusinessTripCancelCandidates.length === 0 && !hasLinkedCancelTarget) return false;
+        const businessTripItem = WORKFORCE_LITE_APPROVAL_DOC_GROUPS
+            .flatMap((group) => Array.isArray(group.items) ? group.items : [])
+            .find((item) => item.value === '출장신청');
+        if (!businessTripItem) return true;
+        return parseApprovalBoolean(approvalCompanyInfo[businessTripItem.key], businessTripItem.defaultEnabled !== false);
+    }
     for (const group of WORKFORCE_LITE_APPROVAL_DOC_GROUPS) {
         const hit = group.items.find((item) => item.value === safeDocType);
         if (hit) return parseApprovalBoolean(approvalCompanyInfo[hit.key], hit.defaultEnabled !== false);
@@ -3190,6 +3581,8 @@ function syncApprovalAttachmentHelp(docType) {
 function getApprovalAutoGeneratedBodyList() {
     const bodies = [
         '위와 같이 휴가를 신청하오니 재가하여 주시기 바랍니다.',
+        '기 승인된 휴가를 취소하고 정상 출근으로 변경하고자 하오니 승인하여 주시기 바랍니다.',
+        '기 승인된 출장을 취소하고자 하오니 승인하여 주시기 바랍니다.',
         '위와 같이 시간외 근로를 신청하오니 승인하여 주시기 바랍니다.',
         '아래와 같이 지출결의를 상신하오니 승인하여 주시기 바랍니다.',
         '아래와 같이 안내드립니다.',
@@ -3661,6 +4054,19 @@ function getApprovalBusinessTripApproxTimeRange(startDate, endDate, slotState) {
     return { startTime: '', endTime: '', calendarAllDay: false };
 } // End of getApprovalBusinessTripApproxTimeRange
 
+function getApprovalBusinessTripSnapshotMeta(doc) {
+    const raw = doc?.business_trip_snapshot;
+    if (!raw) return null;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+    if (typeof raw !== 'string') return null;
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch (_) {
+        return null;
+    }
+} // End of getApprovalBusinessTripSnapshotMeta
+
 function formatApprovalBusinessTripPeriodText(snapshot) {
     const startDate = String(snapshot?.start_date || '').trim();
     const endDate = String(snapshot?.end_date || '').trim();
@@ -4056,7 +4462,7 @@ function getKstMonthRangeIso(ym) {
 }
 
 function getCurrentDraftMainType() {
-    return String(document.getElementById('appCategory')?.value || '').trim();
+    return resolveApprovalDraftMainType(getSelectedApprovalCategory());
 }
 
 function getCurrentDraftAmount() {
@@ -4429,6 +4835,16 @@ function toKoreanWonText(value) {
 }
 
 function getApprovalAmountDisplayPayload(doc) {
+    if (isApprovalBusinessTripCancelDocType(doc?.doc_type || doc)) {
+        const targetDoc = doc?._related_doc || null;
+        const targetLabel = targetDoc ? buildApprovalBusinessTripCancelTargetLabel(targetDoc, { includeStatus: false }) : '원 출장신청';
+        return {
+            showAmount: true,
+            labelText: '취소 대상',
+            mainText: targetLabel,
+            subText: '승인 시 원 출장신청 문서가 취소됩니다.'
+        };
+    }
     if (isLeaveCancelApprovalDoc(doc)) {
         const cancelText = buildApprovalLeaveCancelAmountText(doc);
         return {
@@ -4479,6 +4895,10 @@ function formatApprovalAmountInline(doc) {
     if (display.labelText === '취소 휴가일') {
         const cancelText = String(display.mainText || '').trim();
         return cancelText && cancelText !== '-' ? `취소 휴가일 ${cancelText}` : '휴가 취소';
+    }
+    if (display.labelText === '취소 대상') {
+        const cancelText = String(display.mainText || '').trim();
+        return cancelText && cancelText !== '-' ? `취소 대상 ${cancelText}` : '출장 취소';
     }
     return String(display.mainText || '0원');
 }
@@ -4864,7 +5284,7 @@ function getApprovalVisualEditor() {
 }
 
 function getCurrentApprovalCategory() {
-    return String(document.getElementById("appCategory")?.value || '').trim();
+    return getCurrentDraftMainType();
 }
 
 function scheduleApprovalIdleTask(task) {
@@ -4969,6 +5389,7 @@ function getApprovalRichEditorPlaceholder(docType) {
     const safeDocType = String(docType || '').trim();
     if (safeDocType === '휴가') return '휴가 신청 사유나 참고 사항을 작성하세요.';
     if (safeDocType === '휴가취소') return '휴가 취소 사유나 참고 사항을 작성하세요.';
+    if (safeDocType === '출장취소') return '출장 취소 사유나 참고 사항을 작성하세요.';
     if (safeDocType === '지출결의') return '지출 사유와 세부 내용을 작성하세요.';
     if (safeDocType === '공문') return '공문 본문을 작성하세요.';
     if (safeDocType === '출장신청') return '출장 목적과 주요 일정을 작성하세요.';
@@ -4990,6 +5411,9 @@ function getApprovalRichEditorHelpText(docType) {
     }
     if (safeDocType === '휴가' || safeDocType === '휴가취소') {
         return '휴가 관련 문서도 서식 있는 본문을 작성할 수 있습니다. 기본 신청 내역은 별도 입력값으로 자동 반영됩니다.';
+    }
+    if (safeDocType === '출장취소') {
+        return '출장 취소 문서도 서식 있는 본문을 작성할 수 있습니다. 취소 대상 출장 내역은 관련 문서로 자동 연결됩니다.';
     }
     return `${safeDocType || '전자결재 문서'}는 서식 있는 본문을 작성할 수 있습니다. 표/정렬/목록이 필요하면 상단 편집 도구를 사용하세요.`;
 }
@@ -5356,6 +5780,7 @@ function mapApprovalDocTypeToMainCategory(docType) {
     const raw = String(docType || '').trim();
     if (!raw) return '';
     if (raw.startsWith('취소휴가')) return '휴가취소';
+    if (raw.startsWith('취소출장신청')) return '출장취소';
     if (raw.startsWith('휴가')) return '휴가';
     if (raw.startsWith('시간외근로') || raw.startsWith('야근') || raw.startsWith('휴일근로')) return '시간외근로';
     if (raw.startsWith('부양가족')) return '부양가족';
@@ -5427,7 +5852,7 @@ async function openApprovalTemplatePicker() {
     }
     if (!approvalTemplateModalInstance) return;
 
-    const currentCategory = String(document.getElementById('appCategory')?.value || '').trim();
+    const currentCategory = getCurrentApprovalCategory();
     const metaEl = document.getElementById('approvalTemplateMeta');
     const listEl = document.getElementById('approvalTemplateList');
     if (metaEl) metaEl.textContent = '불러오는 중...';
@@ -5468,7 +5893,7 @@ function applySelectedApprovalTemplate() {
         return;
     }
 
-    const currentCategory = String(document.getElementById('appCategory')?.value || '').trim();
+    const currentCategory = getCurrentApprovalCategory();
     const sourceDocType = String(selected?.doc_type || '');
     const sourceIsNotice = sourceDocType.startsWith('공문');
     const sourceContent = String(selected?.content || '');
@@ -6967,10 +7392,11 @@ async function loadSalaryLedgerForExpense() {
 }
 
 // [추가] 대리 상신 모드 토글
-function toggleProxyMode() {
+function toggleProxyMode(options = {}) {
     const isProxy = document.getElementById("chkProxy").checked;
     const targetDiv = document.getElementById("divProxyTarget");
     const targetSel = document.getElementById("proxyTargetSelect");
+    const skipAutoRefresh = options.skipAutoRefresh === true;
 
     if (isProxy) {
         const myLevel = myInfo.auth_level || 99;
@@ -6997,7 +7423,7 @@ function toggleProxyMode() {
     } else {
         targetDiv.classList.add("hidden");
     }
-    calculateLeave(); // 대상자가 바뀌었으니 연차 다시 조회
+    if (!skipAutoRefresh) calculateLeave(); // 대상자가 바뀌었으니 연차 다시 조회
     updateJeongyeolUi();
     applyDefaultApprovalLineTemplate();
 }
@@ -7042,11 +7468,11 @@ async function calculateLeave() {
         applyLeaveRemainToUi({ effectiveRemainDays: 0, reservedDays: 0 });
         leaveSnapshotState = null;
         approvalLeaveCancelCandidates = [];
-        const categoryEl = document.getElementById('appCategory');
-        const previousCategory = String(categoryEl?.value || '').trim();
+        approvalBusinessTripCancelCandidates = [];
+        const previousCategory = getCurrentDraftMainType();
         renderApprovalCategoryOptions();
-        const currentCategory = String(categoryEl?.value || '').trim();
-        if (currentCategory === '휴가취소' || previousCategory === '휴가취소') {
+        const currentCategory = getCurrentDraftMainType();
+        if (currentCategory === '휴가취소' || previousCategory === '휴가취소' || currentCategory === '출장취소' || previousCategory === '출장취소') {
             handleCategoryChange();
         }
         return;
@@ -7062,6 +7488,7 @@ async function calculateLeave() {
             });
             applyLeaveRemainToUi(leaveSnapshotState);
             await refreshApprovalLeaveCancelCandidates();
+            await refreshApprovalBusinessTripCancelCandidates();
             return;
         }
     } catch (err) {
@@ -7073,11 +7500,11 @@ async function calculateLeave() {
     applyLeaveRemainToUi({ effectiveRemainDays: (remain !== null ? remain : 0), reservedDays: 0 });
     leaveSnapshotState = null;
     approvalLeaveCancelCandidates = [];
-    const categoryEl = document.getElementById('appCategory');
-    const previousCategory = String(categoryEl?.value || '').trim();
+    await refreshApprovalBusinessTripCancelCandidates();
+    const previousCategory = getCurrentDraftMainType();
     renderApprovalCategoryOptions();
-    const currentCategory = String(categoryEl?.value || '').trim();
-    if (currentCategory === '휴가취소' || previousCategory === '휴가취소') {
+    const currentCategory = getCurrentDraftMainType();
+    if (currentCategory === '휴가취소' || previousCategory === '휴가취소' || currentCategory === '출장취소' || previousCategory === '출장취소') {
         handleCategoryChange();
     }
 }
@@ -7408,6 +7835,9 @@ function syncRelViewActionArea(doc) {
     if (canViewApprovalArchiveDoc(doc)) {
         actions.push(`<button type="button" class="btn btn-outline-secondary btn-sm" onclick="printApprovalArchiveDoc(${Number(doc.id)})">🖨️ 문서 출력</button>`);
     }
+    if (canStartBusinessTripCancelFromDoc(doc)) {
+        actions.push(`<button type="button" class="btn btn-outline-warning btn-sm" onclick="startBusinessTripCancelFromDoc(${Number(doc.id)})">↩️ 출장취소</button>`);
+    }
 
     const context = getApprovalDocProcessContext(doc);
     if (context.canProcess) {
@@ -7484,6 +7914,27 @@ function canViewApprovalArchiveDoc(doc) {
     return isApprovalParticipantDoc(doc, safeEmpId);
 } // End of canViewApprovalArchiveDoc
 
+function canProxyApprovalForEmpId(empId) {
+    const safeEmpId = normalizeApprovalEmpId(empId);
+    const myEmpId = normalizeApprovalEmpId(myInfo?.emp_id);
+    if (!safeEmpId || !myEmpId) return false;
+    if (safeEmpId === myEmpId) return true;
+    if (!canPerform('approval.submit')) return false;
+    const targetUser = allUsers.find((user) => normalizeApprovalEmpId(user?.emp_id) === safeEmpId);
+    if (!targetUser) return false;
+    const myLevel = Number(myInfo?.auth_level || 99);
+    const targetLevel = Number(targetUser?.auth_level || 99);
+    if (!Number.isFinite(myLevel) || !Number.isFinite(targetLevel) || targetLevel <= myLevel) return false;
+    if (myInfo?.role === 'admin' || myInfo?.role === 'admin_all' || myLevel === 1) return true;
+    return String(targetUser.department || '') === String(myInfo?.department || '');
+} // End of canProxyApprovalForEmpId
+
+function canStartBusinessTripCancelFromDoc(doc) {
+    if (!doc || !isBusinessTripApprovalDoc(doc)) return false;
+    if (!APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(doc.status || '').trim())) return false;
+    return canProxyApprovalForEmpId(doc.drafter_id);
+} // End of canStartBusinessTripCancelFromDoc
+
 function decorateTodoDelegation(doc) {
     const curApprover = normalizeApprovalEmpId(doc?.current_approver);
     if (curApprover && curApprover !== normalizeApprovalEmpId(myInfo?.emp_id) && delegationIncomingMap.has(curApprover)) {
@@ -7552,6 +8003,12 @@ function getApprovalTitleFieldConfig(mainType) {
             placeholder: subjectConfig.placeholder
         };
     }
+    if (isApprovalBusinessTripCancelCategory(safeType)) {
+        return {
+            label: '출장 취소 제목',
+            placeholder: '예: 서울 협동조합 간담회 출장 취소'
+        };
+    }
     return {
         label: '제목',
         placeholder: safeType ? `예: ${safeType}` : '예: 문서 제목'
@@ -7569,6 +8026,9 @@ function buildApprovalGeneratedTitle(mainType) {
     }
     if (isApprovalLeaveCancelCategory(safeType)) {
         return buildApprovalLeaveCancelTitle(getApprovalLeaveCancelSelectedDoc());
+    }
+    if (isApprovalBusinessTripCancelCategory(safeType)) {
+        return buildApprovalBusinessTripCancelTitle(getApprovalBusinessTripCancelSelectedDoc());
     }
     if (isApprovalOvertimeType(safeType)) {
         const overtimeSnapshot = buildApprovalOvertimeSnapshot(safeType);
@@ -7676,13 +8136,23 @@ function getApprovalResolvedTitle(mainType, generatedTitle) {
 // [수정] 카테고리 변경 핸들러 (관련 문서 UI 제어 추가)
 function handleCategoryChange() {
     const categoryEl = document.getElementById("appCategory");
-    let type = categoryEl.value;
+    let rawType = String(categoryEl?.value || '').trim();
+    if (isApprovalBusinessTripCancelCategory(rawType)) {
+        rawType = '출장신청';
+        if (categoryEl) categoryEl.value = rawType;
+        setApprovalBusinessTripRequestMode('cancel', { silent: true });
+    }
+    if (rawType && !isApprovalDocEnabledForCurrentProfile(rawType)) {
+        rawType = getFirstAvailableWorkforceLiteApprovalDocType();
+        if (categoryEl) categoryEl.value = rawType;
+    }
+    if (rawType !== '출장신청') {
+        setApprovalBusinessTripRequestMode('apply', { silent: true });
+    }
+    syncApprovalBusinessTripModeUi(resolveApprovalDraftMainType(rawType));
+    let type = resolveApprovalDraftMainType(rawType);
     const previousType = String(approvalLastCategory || '').trim();
     const typeChanged = previousType !== String(type || '').trim();
-    if (type && !isApprovalDocEnabledForCurrentProfile(type)) {
-        type = getFirstAvailableWorkforceLiteApprovalDocType();
-        categoryEl.value = type;
-    }
     const amtLabel = document.getElementById("amountLabel");
     const amountInput = document.getElementById("appAmount");
     const fileHelp = document.getElementById("fileHelp");
@@ -7764,6 +8234,18 @@ function handleCategoryChange() {
             setApprovalEditorContent("기 승인된 휴가를 취소하고 정상 출근으로 변경하고자 하오니 승인하여 주시기 바랍니다.");
         }
     }
+    else if (type === '출장취소') {
+        divBusinessTrip.classList.remove("hidden");
+        divRel.classList.remove("hidden");
+        divProposalSubject.classList.remove("hidden");
+        divAmt.classList.add("hidden");
+        syncApprovalBusinessTripModeUi(type);
+        syncApprovalRelatedDocUi(type);
+        const currentDesc = String(getApprovalEditorContent() || '').trim();
+        if (!currentDesc || isApprovalAutoGeneratedTemplateContent(currentDesc)) {
+            setApprovalEditorContent("기 승인된 출장을 취소하고자 하오니 승인하여 주시기 바랍니다.");
+        }
+    }
     else if (isApprovalOvertimeType(type)) {
         divOvertime.classList.remove("hidden");
         divProposalSubject.classList.remove("hidden");
@@ -7789,6 +8271,7 @@ function handleCategoryChange() {
     else if (type === '출장신청') {
         const subjectConfig = getApprovalSubjectConfig(type);
         divBusinessTrip.classList.remove("hidden");
+        syncApprovalBusinessTripModeUi(type);
         divProposalSubject.classList.remove("hidden");
         btnAppDescPreview.classList.remove("hidden");
         appDescHtmlHelp.classList.remove("hidden");
@@ -7886,6 +8369,7 @@ function handleCategoryChange() {
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (isApprovalAutoGeneratedTemplateContent(currentDesc)) setApprovalEditorContent("");
     }
+    syncApprovalBusinessTripModeUi(type);
     if (isApprovalHtmlEditorType(type)) {
         btnAppDescPreview.classList.remove("hidden");
         appDescHtmlHelp.classList.remove("hidden");
@@ -7904,7 +8388,7 @@ function handleCategoryChange() {
 }
 
 function openAppDescPreview() {
-    const type = String(document.getElementById("appCategory")?.value || '');
+    const type = getCurrentDraftMainType();
     const rawContent = getApprovalEditorContent();
     if (!rawContent.trim()) return showAlert("본문 내용을 먼저 입력하세요.");
 
@@ -7955,7 +8439,7 @@ async function buildApprovalSubmitPreviewAttachments(previewDoc) {
 } // End of buildApprovalSubmitPreviewAttachments
 
 function buildApprovalSubmitPreviewData() {
-    const mainType = String(document.getElementById("appCategory")?.value || '').trim();
+    const mainType = getCurrentDraftMainType();
     if (!mainType) throw new Error('문서 유형을 선택하세요.');
     if (!isApprovalDocEnabledForCurrentProfile(mainType)) {
         throw new Error('현재 조합에서 사용하지 않는 문서유형입니다.');
@@ -8022,6 +8506,13 @@ function buildApprovalSubmitPreviewData() {
         subType = buildApprovalLeaveCancelDocType(leaveCancelTarget);
         finalAmt = Number(leaveCancelTarget.amount || 0);
         title = getApprovalResolvedTitle(mainType, buildApprovalLeaveCancelTitle(leaveCancelTarget));
+    } else if (mainType === '출장취소') {
+        const businessTripCancelTarget = getApprovalBusinessTripCancelSelectedDoc();
+        if (!businessTripCancelTarget) throw new Error('취소 대상 출장을 먼저 선택하세요.');
+        subType = buildApprovalBusinessTripCancelDocType();
+        finalAmt = 0;
+        title = getApprovalResolvedTitle(mainType, buildApprovalBusinessTripCancelTitle(businessTripCancelTarget));
+        appendDesc += buildApprovalBusinessTripCancelAppendText(businessTripCancelTarget);
     } else if (isApprovalOvertimeType(mainType)) {
         attendanceSnapshotPayload = buildApprovalOvertimeSnapshot(mainType);
         if (!attendanceSnapshotPayload.work_date) throw new Error('근무일자를 입력하세요.');
@@ -8143,13 +8634,20 @@ async function loadApprovalRelatedDocById(docId) {
     return data || null;
 } // End of loadApprovalRelatedDocById
 
-function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId) {
+function getApprovalRelatedDocSectionTitle(parentDoc) {
+    const rawType = String(parentDoc?.doc_type || parentDoc || '').trim();
+    if (isLeaveCancelApprovalDoc(rawType)) return '취소 대상 휴가';
+    if (isApprovalBusinessTripCancelDocType(rawType)) return '취소 대상 출장';
+    return '집행 근거 (연동 품의서)';
+} // End of getApprovalRelatedDocSectionTitle
+
+function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId, options = {}) {
     const wrapper = document.createElement('section');
     wrapper.className = 'mt-4';
 
     const headingEl = document.createElement('div');
     headingEl.className = 'fw-bold mb-2';
-    headingEl.textContent = '집행 근거 (연동 품의서)';
+    headingEl.textContent = String(options.title || '').trim() || '집행 근거 (연동 품의서)';
     wrapper.appendChild(headingEl);
 
     const boxEl = document.createElement('div');
@@ -8157,7 +8655,7 @@ function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId) {
     wrapper.appendChild(boxEl);
 
     if (!relatedDoc) {
-        boxEl.textContent = `연동된 품의서(ID: ${relatedDocId})를 불러오지 못했습니다.`;
+        boxEl.textContent = `연동된 문서(ID: ${relatedDocId})를 불러오지 못했습니다.`;
         return wrapper;
     }
 
@@ -8202,11 +8700,14 @@ function buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId) {
 } // End of buildApprovalRelatedDocSectionElement
 
 async function appendApprovalRelatedDocSection(container, doc) {
-    if (!container || !String(doc?.doc_type || '').startsWith('지출결의')) return;
+    const rawType = String(doc?.doc_type || '').trim();
+    if (!container || !(rawType.startsWith('지출결의') || isLeaveCancelApprovalDoc(rawType) || isApprovalBusinessTripCancelDocType(rawType))) return;
     const relatedDocId = toPositiveDocId(doc?.related_doc_id);
     if (!relatedDocId) return;
     const relatedDoc = doc?._related_doc || await loadApprovalRelatedDocById(relatedDocId);
-    container.appendChild(buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId));
+    container.appendChild(buildApprovalRelatedDocSectionElement(relatedDoc, relatedDocId, {
+        title: getApprovalRelatedDocSectionTitle(doc)
+    }));
 } // End of appendApprovalRelatedDocSection
 
 async function openApprovalSubmitPreview() {
@@ -9070,7 +9571,7 @@ async function handleDraftSubmit(e) {
     e.preventDefault();
     if (!canPerform('approval.submit')) return showAlert("상신 권한이 없습니다.");
 
-    const mainType = document.getElementById("appCategory").value;
+    const mainType = getCurrentDraftMainType();
     if (!isApprovalDocEnabledForCurrentProfile(mainType)) {
         return showAlert('현재 조합에서 사용하지 않는 문서유형입니다. 설정에서 사용 여부를 확인하세요.');
     }
@@ -9172,6 +9673,20 @@ async function handleDraftSubmit(e) {
         finalAmt = Number(leaveCancelTarget.targetDoc.amount || 0);
         title = getApprovalResolvedTitle(mainType, buildApprovalLeaveCancelTitle(leaveCancelTarget.targetDoc));
         setApprovalRelatedDocLabel(leaveCancelTarget.targetDoc.id, buildApprovalLeaveCancelTargetLabel(leaveCancelTarget.targetDoc));
+    }
+    else if (mainType === '출장취소') {
+        const selectedTargetDocId = document.getElementById('relDocId')?.value || '';
+        const businessTripCancelTarget = await loadApprovalBusinessTripCancelTargetDoc(selectedTargetDocId, drafterId, {
+            checkExistingCancel: true
+        });
+        if (!businessTripCancelTarget.ok || !businessTripCancelTarget.targetDoc) {
+            return showAlert(businessTripCancelTarget.message || '취소 대상 출장을 확인하지 못했습니다.');
+        }
+        subType = buildApprovalBusinessTripCancelDocType();
+        finalAmt = 0;
+        title = getApprovalResolvedTitle(mainType, buildApprovalBusinessTripCancelTitle(businessTripCancelTarget.targetDoc));
+        appendDesc += buildApprovalBusinessTripCancelAppendText(businessTripCancelTarget.targetDoc);
+        setApprovalRelatedDocLabel(businessTripCancelTarget.targetDoc.id, buildApprovalBusinessTripCancelTargetLabel(businessTripCancelTarget.targetDoc));
     }
     else if (isApprovalOvertimeType(mainType)) {
         attendanceSnapshotPayload = buildApprovalOvertimeSnapshot(mainType);
@@ -9598,6 +10113,18 @@ async function processApprovalDoc(docId, action, reason = '') {
         }
         leaveCancelTargetDoc = leaveCancelTarget.targetDoc;
     }
+    let businessTripCancelTargetDoc = null;
+    if (action !== '반려' && newStatus === '완료' && isApprovalBusinessTripCancelDocType(doc?.doc_type || doc)) {
+        const businessTripCancelTarget = await loadApprovalBusinessTripCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
+            excludeDocId: doc?.id || '',
+            checkExistingCancel: false
+        });
+        if (!businessTripCancelTarget.ok || !businessTripCancelTarget.targetDoc) {
+            showAlert(businessTripCancelTarget.message || '취소 대상 출장을 확인하지 못했습니다.');
+            return { ok: false };
+        }
+        businessTripCancelTargetDoc = businessTripCancelTarget.targetDoc;
+    }
 
     const approvalUpdatePayload = { approval_line: line, current_approver: nextUser, status: newStatus };
     if (newStatus === '완료') {
@@ -9619,6 +10146,13 @@ async function processApprovalDoc(docId, action, reason = '') {
         console.error('휴가 취소 반영 실패:', leaveCancelError);
         leaveCancelSettlementNotice = '원 휴가 문서 취소 반영은 완료하지 못했습니다. 휴가 상태를 확인해 주세요.';
     }
+    let businessTripCancelSettlementNotice = '';
+    try {
+        await applyApprovalBusinessTripCancelSettlement(doc, newStatus, { targetDoc: businessTripCancelTargetDoc });
+    } catch (businessTripCancelError) {
+        console.error('출장 취소 반영 실패:', businessTripCancelError);
+        businessTripCancelSettlementNotice = '원 출장 문서 취소 반영은 완료하지 못했습니다. 출장 상태를 확인해 주세요.';
+    }
     let attendanceSettlementNotice = '';
     try {
         await applyApprovalAttendanceSettlement(doc, newStatus);
@@ -9632,6 +10166,7 @@ async function processApprovalDoc(docId, action, reason = '') {
         delegated_from_emp_id: delegatedFrom ? effectiveApproverEmpId : null,
         delegate_emp_id: delegatedFrom ? actorEmpId : null,
         leave_cancel_warning: leaveCancelSettlementNotice || null,
+        business_trip_cancel_warning: businessTripCancelSettlementNotice || null,
         attendance_settlement_warning: attendanceSettlementNotice || null
     });
 
@@ -9660,6 +10195,7 @@ async function processApprovalDoc(docId, action, reason = '') {
     const hasTelegramFallback = notificationResults.some((result) => result?.ok && result?.telegramSent === false && result?.fallbackInserted === true);
     const notices = [];
     if (leaveCancelSettlementNotice) notices.push(leaveCancelSettlementNotice);
+    if (businessTripCancelSettlementNotice) notices.push(businessTripCancelSettlementNotice);
     if (attendanceSettlementNotice) notices.push(attendanceSettlementNotice);
     if (hasTelegramFallback) notices.push('앱 알림은 저장했지만 Telegram 전송은 실패했습니다.');
     return {
@@ -9801,6 +10337,83 @@ async function procUserAction(docId, action, explicitReason = null) {
     }
     return false;
 }
+
+function hasMeaningfulApprovalDraftContentForReplacement() {
+    if (currentApprovalDraftId) return true;
+    if (approvalDraftAttachmentRefs.length > 0) return true;
+    if (Array.from(document.getElementById('attachFile')?.files || []).length > 0) return true;
+    const body = String(getApprovalEditorContent() || '').trim();
+    if (body && !isApprovalAutoGeneratedTemplateContent(body)) return true;
+    const proposalSubjectEl = document.getElementById('proposalSubject');
+    const proposalSubject = String(proposalSubjectEl?.value || '').trim();
+    if (proposalSubject && proposalSubjectEl?.dataset?.autoGenerated !== '1') return true;
+    const noticeSubject = String(document.getElementById('noticeSubject')?.value || '').trim();
+    return !!noticeSubject;
+} // End of hasMeaningfulApprovalDraftContentForReplacement
+
+async function startBusinessTripCancelFromDoc(docId) {
+    const safeDocId = toPositiveDocId(docId);
+    if (!safeDocId) return showAlert('출장신청 문서를 찾을 수 없습니다.');
+
+    const { data: targetDoc, error } = await _supabase
+        .from('ref_approval')
+        .select(APPROVAL_BUSINESS_TRIP_CANCEL_SELECT_COLUMNS)
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('id', safeDocId)
+        .maybeSingle();
+    if (error || !targetDoc) return showAlert('출장신청 문서를 찾을 수 없습니다.');
+    if (!canStartBusinessTripCancelFromDoc(targetDoc)) {
+        return showAlert('이 출장신청서는 현재 계정으로 취소 상신할 수 없습니다.');
+    }
+
+    const targetResult = await loadApprovalBusinessTripCancelTargetDoc(targetDoc.id, targetDoc.drafter_id, {
+        checkExistingCancel: true
+    });
+    if (!targetResult.ok || !targetResult.targetDoc) {
+        return showAlert(targetResult.message || '취소 대상 출장을 확인하지 못했습니다.');
+    }
+
+    if (hasMeaningfulApprovalDraftContentForReplacement()) {
+        const ok = await showConfirm('현재 작성 중인 내용이 있습니다.\n출장 취소 신청서로 바꾸시겠습니까?', {
+            title: '출장 취소 신청',
+            okText: '바꾸기',
+            okClass: 'btn-primary'
+        });
+        if (!ok) return;
+    }
+
+    const relViewModalEl = document.getElementById('relViewModal');
+    if (relViewModal && relViewModalEl?.classList.contains('show')) {
+        relViewModal.hide();
+        await waitForModalHidden(relViewModalEl);
+    }
+
+    resetApprovalComposerForm({ skipAutoRefresh: true });
+    const isSelfDraft = normalizeApprovalEmpId(targetDoc.drafter_id) === normalizeApprovalEmpId(myInfo?.emp_id);
+    const proxyCheckEl = document.getElementById('chkProxy');
+    const proxyTargetEl = document.getElementById('proxyTargetSelect');
+    if (!isSelfDraft) {
+        if (proxyCheckEl && !proxyCheckEl.checked) proxyCheckEl.checked = true;
+        toggleProxyMode({ skipAutoRefresh: true });
+        if (proxyTargetEl) proxyTargetEl.value = String(targetDoc.drafter_id || '').trim();
+    } else if (proxyCheckEl?.checked) {
+        proxyCheckEl.checked = false;
+        toggleProxyMode({ skipAutoRefresh: true });
+    }
+
+    await calculateLeave();
+    await refreshApprovalBusinessTripCancelCandidates({ forceHandleCategoryChange: false });
+
+    const categoryEl = document.getElementById('appCategory');
+    if (categoryEl) categoryEl.value = '출장신청';
+    setApprovalBusinessTripRequestMode('cancel', { silent: true });
+    handleCategoryChange();
+    setApprovalRelatedDocLabel(targetDoc.id, buildApprovalBusinessTripCancelTargetLabel(targetDoc));
+    syncApprovalRelatedDocUi('출장취소');
+    syncApprovalTitleInput('출장취소', { force: true });
+    switchTab('draft');
+    showAlert('출장 취소 신청서가 작성 화면에 준비되었습니다. 결재선을 확인한 뒤 상신하세요.');
+} // End of startBusinessTripCancelFromDoc
 
 function startEvidenceUpload(docId) {
     pendingEvidenceDocId = toPositiveDocId(docId);
@@ -10359,6 +10972,7 @@ function mapHistoryDocTypeGroup(docType) {
     const raw = String(docType || '').trim();
     if (!raw) return 'OTHER';
     if (raw.startsWith('취소휴가')) return 'LEAVE';
+    if (raw.startsWith('취소출장신청')) return 'GENERAL_PROPOSAL';
     if (raw.startsWith(JEONGYEOL_MONTHLY_DOC_TYPE)) return 'GENERAL_PROPOSAL';
     if (raw.startsWith('일반품의')) return 'GENERAL_PROPOSAL';
     if (raw.startsWith('출장신청')) return 'GENERAL_PROPOSAL';
@@ -10637,6 +11251,9 @@ function renderDocs(target, list, isTodo) {
                 if (canViewApprovalArchiveDoc(doc)) {
                     actions.push(`<button class="btn btn-sm btn-outline-secondary me-1" onclick="printApprovalArchiveDoc(${titleDocId})">🖨️ 문서 출력</button>`);
                 }
+            }
+            if (canStartBusinessTripCancelFromDoc(doc)) {
+                actions.push(`<button class="btn btn-sm btn-outline-warning me-1" onclick="startBusinessTripCancelFromDoc(${Number(doc.id)})">↩️ 출장취소</button>`);
             }
 
             if (doc.status === '가승인' && doc.drafter_id === myInfo.emp_id) {
@@ -10919,7 +11536,9 @@ function buildPhysicalPrintHtml(doc) {
     const pageRule = 'A4 portrait';
     const relatedDocType = String(relatedDoc?.doc_type || '');
     const relatedDocIsNotice = relatedDocType.startsWith('공문');
-    const relatedDocAllowHtml = relatedDocType.startsWith('일반품의') || relatedDocIsNotice;
+    const relatedDocAllowHtml = isApprovalHtmlEditorType(relatedDocType) || relatedDocIsNotice;
+    const relatedDocSectionTitle = getApprovalRelatedDocSectionTitle(doc);
+    const safeRelatedDocSectionTitle = escapeHtml(relatedDocSectionTitle);
     const relatedDocNoticeParts = relatedDocIsNotice
         ? splitNoticeApprovalContent(relatedDoc?.content || '')
         : null;
@@ -10946,7 +11565,7 @@ function buildPhysicalPrintHtml(doc) {
         : '';
     const relatedDocSectionHtml = relatedDoc
         ? `
-            <div class="section-title">집행 근거 (연동 품의서)</div>
+            <div class="section-title">${safeRelatedDocSectionTitle}</div>
             <div class="content-box" style="min-height: 0;">
               <div class="fw-bold mb-1">${safeRelatedDocTitle}</div>
               ${relatedMetaHtml}
@@ -10956,8 +11575,8 @@ function buildPhysicalPrintHtml(doc) {
           `
         : (safeRelDocId
             ? `
-                <div class="section-title">집행 근거 (연동 품의서)</div>
-                <div class="content-box" style="min-height: 0;">연동된 품의서(ID: ${escapeHtml(safeRelDocId)})를 불러오지 못했습니다.</div>
+                <div class="section-title">${safeRelatedDocSectionTitle}</div>
+                <div class="content-box" style="min-height: 0;">연동된 문서(ID: ${escapeHtml(safeRelDocId)})를 불러오지 못했습니다.</div>
               `
             : '');
 
