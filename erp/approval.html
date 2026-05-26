@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.31 | Change: 2026-05-26 - Group business trip apply/cancel under one request menu. -->
+<!-- Version: v1.2.32 | Change: 2026-05-27 - Limit business trip cancellation targets to upcoming or recent trips. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.31 | approval.html');</script>
+  <script>console.log('[Version] v1.2.32 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1046,6 +1046,7 @@ const APPROVAL_LEAVE_RESERVED_STATUSES = Object.freeze(['완료', '가승인', '
 const APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
 const APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES = Object.freeze(['완료', '실물결재완료']);
 const APPROVAL_BUSINESS_TRIP_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
+const APPROVAL_BUSINESS_TRIP_CANCEL_LOOKBACK_DAYS = 7;
 const APPROVAL_DEFAULT_LEAVE_TYPE_CATALOG = Object.freeze([
     { id: 'annual', label: '연차', enabled: true, deductible: true, duration_mode: 'mixed_days', aliases: ['연차'] },
     { id: 'half_day', label: '반차', enabled: false, deductible: true, duration_mode: 'half_day', aliases: ['반차'] },
@@ -1503,7 +1504,7 @@ function syncApprovalRelatedDocUi(type) {
             helpEl.classList.remove('hidden');
         } else {
             setApprovalRelatedDocLabel('', '');
-            helpEl.textContent = '현재 취소할 수 있는 결재완료 출장신청이 없습니다.';
+            helpEl.textContent = `현재 취소할 수 있는 결재완료 출장신청이 없습니다. ${getApprovalBusinessTripCancelWindowMessage()}`;
             helpEl.classList.remove('hidden');
         }
         return;
@@ -1702,7 +1703,7 @@ function syncApprovalBusinessTripModeUi(resolvedType = '') {
         } else if (hasLinkedCancelTarget) {
             helpEl.textContent = '저장된 취소 대상 출장 문서를 상신 시 다시 확인합니다.';
         } else {
-            helpEl.textContent = '현재 취소할 수 있는 결재완료 출장신청이 없습니다.';
+            helpEl.textContent = `현재 취소할 수 있는 결재완료 출장신청이 없습니다. ${getApprovalBusinessTripCancelWindowMessage()}`;
         }
     } else {
         helpEl.textContent = cancelAvailable
@@ -1730,6 +1731,57 @@ function getApprovalBusinessTripPeriodTextFromDoc(doc) {
     const periodText = snapshot ? formatApprovalBusinessTripPeriodText(snapshot) : '';
     return periodText && periodText !== '-' ? periodText : '';
 } // End of getApprovalBusinessTripPeriodTextFromDoc
+
+function isApprovalIsoDateValue(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+} // End of isApprovalIsoDateValue
+
+function shiftApprovalIsoDateDays(isoDate, days) {
+    const safeIso = String(isoDate || '').trim();
+    if (!isApprovalIsoDateValue(safeIso)) return '';
+    const [year, month, day] = safeIso.split('-').map((part) => Number(part));
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (Number.isNaN(date.getTime())) return '';
+    date.setUTCDate(date.getUTCDate() + Number(days || 0));
+    return date.toISOString().slice(0, 10);
+} // End of shiftApprovalIsoDateDays
+
+function normalizeApprovalSnapshotDate(value) {
+    const raw = String(value || '').trim();
+    if (isApprovalIsoDateValue(raw)) return raw;
+    const datePart = raw.slice(0, 10);
+    return isApprovalIsoDateValue(datePart) ? datePart : '';
+} // End of normalizeApprovalSnapshotDate
+
+function getApprovalBusinessTripDateRangeFromDoc(doc) {
+    const snapshot = getApprovalBusinessTripSnapshotMeta(doc);
+    if (!snapshot) return { startDate: '', endDate: '' };
+    const startDate = normalizeApprovalSnapshotDate(snapshot.start_date || snapshot.start_at);
+    const endDate = normalizeApprovalSnapshotDate(snapshot.end_date || snapshot.end_at) || startDate;
+    return {
+        startDate: startDate || endDate,
+        endDate
+    };
+} // End of getApprovalBusinessTripDateRangeFromDoc
+
+function getApprovalBusinessTripCancelCutoffIso(todayIso = '') {
+    const safeToday = normalizeApprovalSnapshotDate(todayIso) || formatApprovalKstDateISO(new Date(), '');
+    return shiftApprovalIsoDateDays(safeToday, -APPROVAL_BUSINESS_TRIP_CANCEL_LOOKBACK_DAYS);
+} // End of getApprovalBusinessTripCancelCutoffIso
+
+function isApprovalBusinessTripInCancelWindow(doc, options = {}) {
+    const todayIso = normalizeApprovalSnapshotDate(options.todayIso) || formatApprovalKstDateISO(new Date(), '');
+    const cutoffIso = getApprovalBusinessTripCancelCutoffIso(todayIso);
+    const range = getApprovalBusinessTripDateRangeFromDoc(doc);
+    if (!cutoffIso || !range.endDate) return false;
+    return range.endDate >= cutoffIso;
+} // End of isApprovalBusinessTripInCancelWindow
+
+function getApprovalBusinessTripCancelWindowMessage(todayIso = '') {
+    const safeToday = normalizeApprovalSnapshotDate(todayIso) || formatApprovalKstDateISO(new Date(), '');
+    const cutoffIso = getApprovalBusinessTripCancelCutoffIso(safeToday);
+    return `출장 취소는 오늘(${safeToday}) 기준 예정된 출장 또는 종료일이 ${cutoffIso} 이후인 출장만 신청할 수 있습니다.`;
+} // End of getApprovalBusinessTripCancelWindowMessage
 
 function buildApprovalBusinessTripCancelTargetLabel(doc, options = {}) {
     if (!doc) return '선택된 관련 문서가 없습니다.';
@@ -1833,7 +1885,9 @@ async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
         console.warn('business trip cancel candidates load failed:', error);
         approvalBusinessTripCancelCandidates = [];
     } else {
-        const candidateBase = sortApprovalBusinessTripCancelCandidates(data);
+        const candidateBase = sortApprovalBusinessTripCancelCandidates(
+            data.filter((doc) => isApprovalBusinessTripInCancelWindow(doc))
+        );
         const activeCancelTargetIds = await fetchApprovalActiveBusinessTripCancelRequestIds(targetEmpId, candidateBase.map((doc) => doc?.id));
         approvalBusinessTripCancelCandidates = candidateBase.filter((doc) => !activeCancelTargetIds.has(String(doc?.id || '').trim()));
     }
@@ -1889,6 +1943,9 @@ async function loadApprovalBusinessTripCancelTargetDoc(targetDocId, targetEmpId,
     if (!APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(data.status || '').trim())) {
         return { ok: false, message: '이미 취소되었거나 더 이상 취소할 수 없는 출장입니다.', targetDoc: null };
     }
+    if (options.checkCancelWindow !== false && !isApprovalBusinessTripInCancelWindow(data)) {
+        return { ok: false, message: getApprovalBusinessTripCancelWindowMessage(), targetDoc: null };
+    }
 
     if (options.checkExistingCancel !== false) {
         const hasOtherCancel = await hasActiveApprovalBusinessTripCancelRequestForTarget(
@@ -1910,7 +1967,8 @@ async function applyApprovalBusinessTripCancelSettlement(doc, newStatus, options
         ? { ok: true, targetDoc: options.targetDoc }
         : await loadApprovalBusinessTripCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
             excludeDocId: doc?.id || '',
-            checkExistingCancel: false
+            checkExistingCancel: false,
+            checkCancelWindow: false
         });
     if (!targetResult?.ok || !targetResult?.targetDoc) {
         throw new Error(targetResult?.message || '취소 대상 출장을 확인하지 못했습니다.');
@@ -7932,6 +7990,7 @@ function canProxyApprovalForEmpId(empId) {
 function canStartBusinessTripCancelFromDoc(doc) {
     if (!doc || !isBusinessTripApprovalDoc(doc)) return false;
     if (!APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(doc.status || '').trim())) return false;
+    if (!isApprovalBusinessTripInCancelWindow(doc)) return false;
     return canProxyApprovalForEmpId(doc.drafter_id);
 } // End of canStartBusinessTripCancelFromDoc
 
@@ -10117,7 +10176,8 @@ async function processApprovalDoc(docId, action, reason = '') {
     if (action !== '반려' && newStatus === '완료' && isApprovalBusinessTripCancelDocType(doc?.doc_type || doc)) {
         const businessTripCancelTarget = await loadApprovalBusinessTripCancelTargetDoc(doc?.related_doc_id, doc?.drafter_id, {
             excludeDocId: doc?.id || '',
-            checkExistingCancel: false
+            checkExistingCancel: false,
+            checkCancelWindow: false
         });
         if (!businessTripCancelTarget.ok || !businessTripCancelTarget.targetDoc) {
             showAlert(businessTripCancelTarget.message || '취소 대상 출장을 확인하지 못했습니다.');
@@ -10362,6 +10422,9 @@ async function startBusinessTripCancelFromDoc(docId) {
         .eq('id', safeDocId)
         .maybeSingle();
     if (error || !targetDoc) return showAlert('출장신청 문서를 찾을 수 없습니다.');
+    if (isBusinessTripApprovalDoc(targetDoc) && APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(targetDoc.status || '').trim()) && !isApprovalBusinessTripInCancelWindow(targetDoc)) {
+        return showAlert(getApprovalBusinessTripCancelWindowMessage());
+    }
     if (!canStartBusinessTripCancelFromDoc(targetDoc)) {
         return showAlert('이 출장신청서는 현재 계정으로 취소 상신할 수 없습니다.');
     }
