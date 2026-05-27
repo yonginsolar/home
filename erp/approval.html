@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.32 | Change: 2026-05-27 - Limit business trip cancellation targets to upcoming or recent trips. -->
+<!-- Version: v1.2.33 | Change: 2026-05-27 - Hide business trip cancel action when a cancellation request already exists. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.32 | approval.html');</script>
+  <script>console.log('[Version] v1.2.33 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1858,6 +1858,48 @@ async function fetchApprovalActiveBusinessTripCancelRequestIds(targetEmpId, rela
 
     return new Set(data.map((row) => String(row?.related_doc_id || '').trim()).filter(Boolean));
 } // End of fetchApprovalActiveBusinessTripCancelRequestIds
+
+async function fetchApprovalBusinessTripCancelRequestTargetIds(relatedDocIds = []) {
+    const safeRelatedIds = Array.from(new Set(
+        (Array.isArray(relatedDocIds) ? relatedDocIds : [])
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+    ));
+    if (safeRelatedIds.length === 0) return new Set();
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id, related_doc_id, status, doc_type')
+        .eq('coop_id', getApprovalScopedCoopId())
+        .in('status', APPROVAL_BUSINESS_TRIP_CANCEL_ACTIVE_STATUSES)
+        .eq('doc_type', buildApprovalBusinessTripCancelDocType())
+        .in('related_doc_id', safeRelatedIds);
+    if (error || !Array.isArray(data)) {
+        console.warn('business trip cancel request state load failed:', error);
+        return new Set();
+    }
+
+    return new Set(data.map((row) => String(row?.related_doc_id || '').trim()).filter(Boolean));
+} // End of fetchApprovalBusinessTripCancelRequestTargetIds
+
+async function annotateApprovalBusinessTripCancelRequestState(list) {
+    const safeList = Array.isArray(list) ? list : [];
+    const targetIds = safeList
+        .filter((doc) => isBusinessTripApprovalDoc(doc))
+        .filter((doc) => APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(doc?.status || '').trim()))
+        .map((doc) => String(doc?.id || '').trim())
+        .filter(Boolean);
+    const blockedTargetIds = await fetchApprovalBusinessTripCancelRequestTargetIds(targetIds);
+
+    return safeList.map((doc) => {
+        const safeDocId = String(doc?.id || '').trim();
+        if (!safeDocId || !isBusinessTripApprovalDoc(doc)) return doc;
+        return {
+            ...doc,
+            _business_trip_cancel_request_exists: blockedTargetIds.has(safeDocId)
+        };
+    });
+} // End of annotateApprovalBusinessTripCancelRequestState
 
 async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
     const targetEmpId = getApprovalCurrentTargetEmpId();
@@ -7990,6 +8032,7 @@ function canProxyApprovalForEmpId(empId) {
 function canStartBusinessTripCancelFromDoc(doc) {
     if (!doc || !isBusinessTripApprovalDoc(doc)) return false;
     if (!APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES.includes(String(doc.status || '').trim())) return false;
+    if (doc._business_trip_cancel_request_exists === true) return false;
     if (!isApprovalBusinessTripInCancelWindow(doc)) return false;
     return canProxyApprovalForEmpId(doc.drafter_id);
 } // End of canStartBusinessTripCancelFromDoc
@@ -10885,10 +10928,11 @@ async function normalizeHistoryDocsWithCancelReason(rawList) {
     const safeList = sortApprovalDocsByCreatedAt(rawList);
     const cancelDocIds = safeList.filter(doc => String(doc?.status || '') === '결재취소').map(doc => doc.id);
     const cancelReasonMap = await loadCancelReasonMap(cancelDocIds);
-    return safeList.map(doc => ({
+    const docsWithCancelReason = safeList.map(doc => ({
         ...doc,
         _cancel_reason: cancelReasonMap[String(doc.id)] || ''
     }));
+    return annotateApprovalBusinessTripCancelRequestState(docsWithCancelReason);
 }
 
 async function fetchPendingSubmissionDocs() {
@@ -12361,8 +12405,9 @@ async function openRelView(docId) {
     syncRelViewActionArea(null);
     relViewModal.show();
 
-    const { data, error } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', safeDocId).maybeSingle();
-    if (error || !data) { contentEl.textContent = "문서를 불러올 수 없습니다."; return; }
+    const { data: rawDoc, error } = await scopeApprovalTenant(_supabase.from('ref_approval').select('*')).eq('id', safeDocId).maybeSingle();
+    if (error || !rawDoc) { contentEl.textContent = "문서를 불러올 수 없습니다."; return; }
+    const [data] = await annotateApprovalBusinessTripCancelRequestState([rawDoc]);
 
     // 보기 전용 템플릿 렌더링 (안전한 DOM 구성)
     const lines = (Array.isArray(data.approval_line) ? data.approval_line : [])
