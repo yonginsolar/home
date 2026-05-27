@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.81
-Change: 2026-05-27 - Split dashboard location composition into Gyeonggi and outside-province segments.
+Version: v1.0.82
+Change: 2026-05-27 - Render dashboard location composition directly from scoped member addresses.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.81';
+window.ADMIN_MEMBER_VERSION = 'v1.0.82';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8477,6 +8477,51 @@ const DASHBOARD_LOCATION_COLORS = Object.freeze({
     '주소 미확인': '#dee2e6',
     '그 외': '#adb5bd'
 });
+const DASHBOARD_GYEONGGI_ADDRESS_PATTERNS = Object.freeze([
+    '수원시', '수원특례시', '장안구', '권선구', '팔달구', '영통구',
+    '성남시', '수정구', '중원구', '분당구',
+    '의정부시', '안양시', '만안구', '동안구', '부천시',
+    '광명시', '평택시', '동두천시', '안산시', '상록구', '단원구',
+    '고양시', '고양특례시', '덕양구', '일산동구', '일산서구',
+    '과천시', '구리시', '남양주시', '오산시', '시흥시',
+    '군포시', '의왕시', '하남시', '용인시', '용인특례시',
+    '파주시', '이천시', '안성시', '김포시', '화성시',
+    '화성특례시', '광주시', '양주시', '포천시', '여주시',
+    '연천군', '가평군', '양평군'
+]);
+const DASHBOARD_OUTSIDE_ADDRESS_PATTERNS = Object.freeze([
+    /^서울/, /서울특별시/, /서울시/,
+    /^인천/, /인천광역시/, /인천시/,
+    /^부산/, /부산광역시/, /부산시/,
+    /^대구/, /대구광역시/, /대구시/,
+    /^대전/, /대전광역시/, /대전시/,
+    /^울산/, /울산광역시/, /울산시/,
+    /^세종/, /세종특별자치시/, /세종시/,
+    /광주광역시/,
+    /^강원/, /강원특별자치도/, /강원도/,
+    /^충북/, /^충청북도/, /충청북도/,
+    /^충남/, /^충청남도/, /충청남도/,
+    /^전북/, /^전라북도/, /전라북도/, /전북특별자치도/,
+    /^전남/, /^전라남도/, /전라남도/,
+    /^경북/, /^경상북도/, /경상북도/,
+    /^경남/, /^경상남도/, /경상남도/,
+    /^제주/, /제주특별자치도/, /제주도/
+]);
+
+function classifyDashboardLocationAddress(address) {
+    const normalized = String(address || '').replace(/\s+/g, '');
+    if (!normalized) return '주소 미확인';
+    if (normalized.includes('수지구')) return '수지구';
+    if (normalized.includes('기흥구')) return '기흥구';
+    if (normalized.includes('처인구')) return '처인구';
+    if (normalized.includes('경기도') || normalized.startsWith('경기') || DASHBOARD_GYEONGGI_ADDRESS_PATTERNS.some(function (pattern) { return normalized.includes(pattern); })) {
+        return '경기도 관내';
+    }
+    if (DASHBOARD_OUTSIDE_ADDRESS_PATTERNS.some(function (pattern) { return pattern.test(normalized); })) {
+        return '관외';
+    }
+    return '주소 미확인';
+}
 
 function buildDashboardLocationChartData(locationStats) {
     const source = (locationStats && typeof locationStats === 'object') ? locationStats : {};
@@ -8503,6 +8548,36 @@ function buildDashboardLocationChartData(locationStats) {
         data: orderedEntries.map(function (entry) { return entry.count; }),
         colors: orderedEntries.map(function (entry) { return DASHBOARD_LOCATION_COLORS[entry.label] || '#adb5bd'; })
     };
+}
+
+async function fetchDashboardLocationStats() {
+    const totals = {};
+    const pageSize = 1000;
+    let from = 0;
+
+    while (true) {
+        const { data, error } = await scopeAdminTenant(_supabase
+            .from('coop_members')
+            .select('address'))
+            .eq('status', '정상')
+            .range(from, from + pageSize - 1);
+
+        if (error) {
+            console.warn('지역 구성 직접 집계 실패:', error);
+            return null;
+        }
+
+        const rows = Array.isArray(data) ? data : [];
+        rows.forEach(function (row) {
+            const label = classifyDashboardLocationAddress(row && row.address);
+            totals[label] = (totals[label] || 0) + 1;
+        });
+
+        if (rows.length < pageSize) break;
+        from += pageSize;
+    }
+
+    return totals;
 }
 
 // [수정] 대시보드 데이터 로드 (통계 차트 연동)
@@ -8569,7 +8644,8 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
         }, `📉 총 감자액(반환): ${Number(stats.capital_reduction || 0).toLocaleString()}원`);
 
         // (2) 지역 분포 차트 (Pie Chart)
-        const locationChartData = buildDashboardLocationChartData(stats.location || {});
+        const locationStats = await fetchDashboardLocationStats() || (stats.location || {});
+        const locationChartData = buildDashboardLocationChartData(locationStats);
         renderChart('location', 'chart-location', 'doughnut', {
             labels: locationChartData.labels,
             datasets: [{
