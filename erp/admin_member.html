@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.80
-Change: 2026-05-21 - Require disconnect before reconnecting managed members and groups.
+Version: v1.0.81
+Change: 2026-05-27 - Split dashboard location composition into Gyeonggi and outside-province segments.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.80';
+window.ADMIN_MEMBER_VERSION = 'v1.0.81';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8467,6 +8467,44 @@ async function fetchPendingApplicationCount() {
     return count || 0;
 }
 
+const DASHBOARD_LOCATION_LABEL_ORDER = Object.freeze(['수지구', '기흥구', '처인구', '경기도 관내', '관외', '주소 미확인', '그 외']);
+const DASHBOARD_LOCATION_COLORS = Object.freeze({
+    '수지구': '#0d6efd',
+    '기흥구': '#20c997',
+    '처인구': '#198754',
+    '경기도 관내': '#ffc107',
+    '관외': '#6c757d',
+    '주소 미확인': '#dee2e6',
+    '그 외': '#adb5bd'
+});
+
+function buildDashboardLocationChartData(locationStats) {
+    const source = (locationStats && typeof locationStats === 'object') ? locationStats : {};
+    const seenLabels = new Set();
+    const orderedEntries = [];
+
+    DASHBOARD_LOCATION_LABEL_ORDER.forEach(function (label) {
+        if (!Object.prototype.hasOwnProperty.call(source, label)) return;
+        const count = Number(source[label] || 0);
+        if (count <= 0) return;
+        seenLabels.add(label);
+        orderedEntries.push({ label, count });
+    });
+
+    Object.keys(source).sort().forEach(function (label) {
+        if (seenLabels.has(label)) return;
+        const count = Number(source[label] || 0);
+        if (count <= 0) return;
+        orderedEntries.push({ label, count });
+    });
+
+    return {
+        labels: orderedEntries.map(function (entry) { return entry.label; }),
+        data: orderedEntries.map(function (entry) { return entry.count; }),
+        colors: orderedEntries.map(function (entry) { return DASHBOARD_LOCATION_COLORS[entry.label] || '#adb5bd'; })
+    };
+}
+
 // [수정] 대시보드 데이터 로드 (통계 차트 연동)
 async function loadDashboard() {
 
@@ -8531,13 +8569,12 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
         }, `📉 총 감자액(반환): ${Number(stats.capital_reduction || 0).toLocaleString()}원`);
 
         // (2) 지역 분포 차트 (Pie Chart)
-        const locLabels = Object.keys(stats.location || {});
-        const locData = Object.values(stats.location || {});
+        const locationChartData = buildDashboardLocationChartData(stats.location || {});
         renderChart('location', 'chart-location', 'doughnut', {
-            labels: locLabels,
+            labels: locationChartData.labels,
             datasets: [{
-                data: locData,
-                backgroundColor: ['#0d6efd', '#6610f2', '#fd7e14', '#adb5bd'] // Bootstrap Colors
+                data: locationChartData.data,
+                backgroundColor: locationChartData.colors
             }]
         });
 
