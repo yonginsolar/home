@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.61
-Change: 2026-05-10 - Show payroll over-deduction settlement on salary statements.
+Version: v1.0.62
+Change: 2026-05-27 - Include approved paid leave in payroll work days by default.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.59 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.62 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -324,7 +324,7 @@ Change: 2026-05-10 - Show payroll over-deduction settlement on salary statements
     <div class="row g-2 align-items-end">
       <div class="col-12">
         <label class="small fw-bold text-primary">🧾 임금대장 추가 정보</label>
-        <div class="form-text x-small mb-2">종사업무는 직접 기재하고, 근로일수/근로시간은 평일 - 공휴일 - 승인 휴가 기준으로 먼저 채운 뒤 수정할 수 있습니다.</div>
+        <div class="form-text x-small mb-2">종사업무는 직접 기재하고, 근로일수/근로시간은 평일 - 공휴일 기준으로 먼저 채웁니다. 연차/반차 등 승인 유급휴가는 근로일수에 포함합니다.</div>
       </div>
       <div class="col-12">
         <label class="small text-muted">종사업무</label>
@@ -4855,7 +4855,7 @@ async function buildAdminEmployeeSalaryWorkMetaDefaults(yearMonth) {
     const leaveDays = roundAdminEmployeeWorkMetric((Array.isArray(leaveDocs) ? leaveDocs : []).reduce((sum, doc) => {
         return sum + calculateAdminEmployeeLeaveDaysInMonth(doc, monthRange);
     }, 0));
-    const workDays = Math.max(0, roundAdminEmployeeWorkMetric(baseWeekdays - holidayDays - leaveDays));
+    const workDays = Math.max(0, roundAdminEmployeeWorkMetric(baseWeekdays - holidayDays));
     const workHours = Math.max(0, roundAdminEmployeeWorkMetric(workDays * 8));
 
     return { baseWeekdays, holidayDays, leaveDays, workDays, workHours };
@@ -4863,7 +4863,10 @@ async function buildAdminEmployeeSalaryWorkMetaDefaults(yearMonth) {
 
 function buildAdminEmployeeSalaryWorkMetaSummary(workMeta) {
     const meta = workMeta || {};
-    return `기본값: 평일 ${formatAdminEmployeeWorkMetricInput(meta.baseWeekdays)}일 - 공휴일 ${formatAdminEmployeeWorkMetricInput(meta.holidayDays)}일 - 승인 휴가 ${formatAdminEmployeeWorkMetricInput(meta.leaveDays)}일 = 근로일수 ${formatAdminEmployeeWorkMetricInput(meta.workDays)}일 / 근로시간 ${formatAdminEmployeeWorkMetricInput(meta.workHours)}시간`;
+    const leaveNote = Number(meta.leaveDays || 0) > 0
+        ? ` · 승인 휴가 ${formatAdminEmployeeWorkMetricInput(meta.leaveDays)}일은 근로일수에서 차감하지 않음`
+        : '';
+    return `기본값: 평일 ${formatAdminEmployeeWorkMetricInput(meta.baseWeekdays)}일 - 공휴일 ${formatAdminEmployeeWorkMetricInput(meta.holidayDays)}일 = 근로일수 ${formatAdminEmployeeWorkMetricInput(meta.workDays)}일 / 근로시간 ${formatAdminEmployeeWorkMetricInput(meta.workHours)}시간${leaveNote}`;
 }
 
 function resolveAdminEmployeeSavedWorkHours(savedHours, workDays) {
