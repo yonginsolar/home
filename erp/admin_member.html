@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.83
-Change: 2026-05-27 - Split member dashboard into Yongin and Gyeonggi location charts.
+Version: v1.0.84
+Change: 2026-05-28 - Add finalized dividend export downloads for bank and tax review files.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.83';
+window.ADMIN_MEMBER_VERSION = 'v1.0.84';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -510,6 +510,11 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 📈 이용고배당 관리
             </button>
         </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sub-tab-dividend-exports" type="button" onclick="initializeDividendExportTab()">
+                <i class="bi bi-download me-1"></i> 확정 배당 파일
+            </button>
+        </li>
     </ul>
 
     <div class="tab-content">
@@ -595,6 +600,103 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         <tr><td colspan="5" class="py-5 text-muted">로딩 중...</td></tr>
     </tbody>
 </table>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="sub-tab-dividend-exports">
+            <div class="alert alert-warning border-0 bg-warning bg-opacity-10 small mb-3">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                홈택스 CSV는 검토 및 입력 보조용입니다. 고정폭 전산매체 업로드 파일은 최신 국세청 제출요령과 식별번호 원문 처리 경로가 확정된 뒤 잠급니다.
+            </div>
+
+            <div class="row g-3">
+                <div class="col-lg-7">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-bold mb-0">확정 배당 회차</h6>
+                        <button class="btn btn-sm btn-outline-dark" type="button" onclick="fetchDividendExportBatches(true)">
+                            <i class="bi bi-arrow-clockwise"></i> 새로고침
+                        </button>
+                    </div>
+                    <div class="table-responsive bg-white border rounded" style="max-height: 520px; overflow-y: auto;">
+                        <table class="table table-hover align-middle mb-0 text-center small">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>회계연도</th>
+                                    <th class="text-start">회차</th>
+                                    <th>상태</th>
+                                    <th class="text-end">세후지급액</th>
+                                    <th>은행정보</th>
+                                    <th>선택</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dividendExportBatchBody">
+                                <tr><td colspan="6" class="py-5 text-muted">새로고침을 눌러 확정 배당 회차를 불러오세요.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="col-lg-5">
+                    <div class="bg-white border rounded p-3 mb-3">
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                            <div>
+                                <h6 class="fw-bold mb-1" id="dividendExportSelectedTitle">선택된 회차 없음</h6>
+                                <div class="small text-muted" id="dividendExportSelectedMeta">확정 배당 회차를 선택해주세요.</div>
+                            </div>
+                            <span class="badge bg-light text-dark border" id="dividendExportSelectedStatus">-</span>
+                        </div>
+                        <div class="row g-2 text-center small">
+                            <div class="col-4">
+                                <div class="border rounded py-2">
+                                    <div class="text-muted">대상</div>
+                                    <div class="fw-bold" id="dividendExportPayableCount">0건</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded py-2">
+                                    <div class="text-muted">은행 누락</div>
+                                    <div class="fw-bold text-danger" id="dividendExportMissingBankCount">0건</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded py-2">
+                                    <div class="text-muted">식별 확인</div>
+                                    <div class="fw-bold text-warning" id="dividendExportMissingIdentifierCount">0건</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border rounded p-3">
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendExportDebitMemo">내 통장 표시</label>
+                                <input type="text" id="dividendExportDebitMemo" class="form-control form-control-sm" value="배당금" maxlength="20">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendExportCreditMemo">받는 분 표시</label>
+                                <input type="text" id="dividendExportCreditMemo" class="form-control form-control-sm" value="배당금" maxlength="20">
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-sm btn-primary" type="button" onclick="downloadDividendBankTransferXlsx()">
+                                <i class="bi bi-bank"></i> 은행 대량이체 XLSX
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" onclick="downloadDividendTaxLedgerXlsx()">
+                                <i class="bi bi-journal-spreadsheet"></i> 세무 검토 장부 XLSX
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="downloadDividendHometaxPaymentStatementCsv()">
+                                <i class="bi bi-filetype-csv"></i> 이자ㆍ배당 지급명세서 CSV
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="downloadDividendWithholdingSummaryCsv()">
+                                <i class="bi bi-filetype-csv"></i> 원천세 집계 CSV
+                            </button>
+                        </div>
+
+                        <div class="small text-muted mt-3" id="dividendExportLastLoaded">파일 데이터가 아직 준비되지 않았습니다.</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -10823,6 +10925,512 @@ async function fetchGlobalDividends() {
         `;
     });
 }
+
+const DIVIDEND_BANK_TRANSFER_SAMPLE_BANK_NAMES = Object.freeze([
+    '* 입금 은행명 입니다. ',
+    'BNK투자증권',
+    'BOA은행',
+    'DB금융투자',
+    'HSBC은행',
+    'IBK기업은행',
+    'IBK투자증권',
+    'KB국민은행',
+    'KB증권',
+    'KDB산업은행',
+    'K뱅크',
+    'NH농협은행',
+    'NH투자증권',
+    'SC제일은행',
+    'SK증권',
+    '경남은행',
+    '광주은행',
+    '교보증권',
+    '기타외국은행',
+    '농협회원조합',
+    '다올투자증권',
+    'iM뱅크 (구)대구',
+    '대신증권',
+    '도이치은행',
+    '메리츠증권',
+    '미래에셋대우',
+    '미즈호은행',
+    '부국증권',
+    '부산은행',
+    '비엔피파리바은행',
+    '산림조합중앙회',
+    '산업은행',
+    '삼성증권',
+    '새마을금고',
+    '수출입은행',
+    '수협은행',
+    '신영증권',
+    '신한은행',
+    '신한투자증권',
+    '신협',
+    '에이비엔암로은행',
+    '엠유에프지은행',
+    '우리은행',
+    '우리종합금융',
+    '우체국',
+    '유안타증권',
+    '유진투자증권',
+    '엘에스증권',
+    '저축은행',
+    '전북은행',
+    '제이피모간체이스은행',
+    '제주은행',
+    '중국건설은행',
+    '중국공상은행',
+    '중국은행',
+    '카카오뱅크',
+    '카카오페이증권',
+    '케이프투자증권',
+    '키움증권　　',
+    '토스뱅크',
+    '토스증권',
+    '하나은행',
+    '하나증권',
+    '하이투자증권',
+    '씨티은행',
+    '한국은행',
+    '한국투자증권',
+    '한국포스증권',
+    '한화투자증권',
+    '현대차증권'
+]);
+
+const g_dividend_export_state = {
+    initialized: false,
+    batches: [],
+    selectedBatchId: '',
+    bankRows: null,
+    taxRows: null,
+    withholdingSummaryRows: null
+};
+
+function normalizeDividendExportNumber(value) {
+    const n = Number(value ?? 0);
+    return Number.isFinite(n) ? n : 0;
+} // End of normalizeDividendExportNumber
+
+function formatDividendExportMoney(value) {
+    return `${Math.trunc(normalizeDividendExportNumber(value)).toLocaleString('ko-KR')}원`;
+} // End of formatDividendExportMoney
+
+function formatDividendExportDateValue(value, fallback = '-') {
+    const raw = String(value ?? '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    return formatAdminMemberKstDate(value, fallback);
+} // End of formatDividendExportDateValue
+
+function sanitizeDividendExportFilePart(value, fallback = '배당') {
+    const normalized = String(value ?? '')
+        .replace(/[\\/:*?"<>|]/g, ' ')
+        .replace(/\s+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 36);
+    return normalized || fallback;
+} // End of sanitizeDividendExportFilePart
+
+function getDividendExportSelectedBatch() {
+    const selectedId = g_dividend_export_state.selectedBatchId;
+    return g_dividend_export_state.batches.find((batch) => String(batch.batch_id) === String(selectedId)) || null;
+} // End of getDividendExportSelectedBatch
+
+function makeDividendExportFileName(suffix, extension) {
+    const batch = getDividendExportSelectedBatch();
+    const fiscalYear = sanitizeDividendExportFilePart(batch?.fiscal_year || '연도');
+    const title = sanitizeDividendExportFilePart(batch?.title || '확정배당');
+    const today = getAdminMemberKstDateString().replace(/-/g, '');
+    const cleanSuffix = sanitizeDividendExportFilePart(suffix, '파일');
+    return `배당_${fiscalYear}_${title}_${cleanSuffix}_${today}.${extension}`;
+} // End of makeDividendExportFileName
+
+function getDividendExportRpcErrorMessage(error) {
+    const message = String(error?.message || error?.hint || error || '알 수 없는 오류');
+    if (/Could not find the function|schema cache|42883|not exist/i.test(message)) {
+        return '배당 5/6단계 DB 스크립트 적용 후 사용할 수 있습니다.';
+    }
+    return message;
+} // End of getDividendExportRpcErrorMessage
+
+function getDividendExportStatusBadge(status) {
+    const safeStatus = escapeHtml(status || '-');
+    if (status === 'FINALIZED') return '<span class="badge bg-primary bg-opacity-10 text-primary">확정</span>';
+    if (status === 'PAYMENT_READY') return '<span class="badge bg-info bg-opacity-10 text-info">지급준비</span>';
+    if (status === 'PARTIALLY_PAID') return '<span class="badge bg-warning bg-opacity-10 text-dark">부분지급</span>';
+    if (status === 'PAID') return '<span class="badge bg-success">지급완료</span>';
+    return `<span class="badge bg-light text-dark border">${safeStatus}</span>`;
+} // End of getDividendExportStatusBadge
+
+function renderDividendExportSelectedBatch(batch) {
+    document.getElementById('dividendExportSelectedTitle').innerText = batch?.title || '선택된 회차 없음';
+    document.getElementById('dividendExportSelectedMeta').innerText = batch
+        ? `${batch.fiscal_year}년 · ${formatDividendExportDateValue(batch.period_start)} ~ ${formatDividendExportDateValue(batch.period_end)} · 지급예정 ${formatDividendExportDateValue(batch.payment_due_date)}`
+        : '확정 배당 회차를 선택해주세요.';
+    document.getElementById('dividendExportSelectedStatus').innerText = batch?.status || '-';
+    document.getElementById('dividendExportPayableCount').innerText = `${Number(batch?.payable_count || 0).toLocaleString('ko-KR')}건`;
+    document.getElementById('dividendExportMissingBankCount').innerText = `${Number(batch?.missing_bank_count || 0).toLocaleString('ko-KR')}건`;
+    document.getElementById('dividendExportMissingIdentifierCount').innerText = `${Number(batch?.missing_identifier_count || 0).toLocaleString('ko-KR')}건`;
+} // End of renderDividendExportSelectedBatch
+
+function renderDividendExportBatches() {
+    const tbody = document.getElementById('dividendExportBatchBody');
+    const batches = g_dividend_export_state.batches;
+
+    if (!batches.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-5 text-muted">확정된 배당 회차가 없습니다.</td></tr>';
+        renderDividendExportSelectedBatch(null);
+        return;
+    }
+
+    tbody.innerHTML = batches.map((batch) => {
+        const selectedClass = String(batch.batch_id) === String(g_dividend_export_state.selectedBatchId) ? 'table-primary' : '';
+        const missingBank = Number(batch.missing_bank_count || 0);
+        const bankBadge = missingBank > 0
+            ? `<span class="badge bg-danger">${missingBank.toLocaleString('ko-KR')}건 누락</span>`
+            : '<span class="badge bg-success bg-opacity-10 text-success">확인</span>';
+
+        return `
+            <tr class="${selectedClass}">
+                <td>${escapeHtml(batch.fiscal_year || '-')}</td>
+                <td class="text-start">
+                    <div class="fw-bold">${escapeHtml(batch.title || '-')}</div>
+                    <small class="text-muted">${escapeHtml(formatDividendExportDateValue(batch.period_start))} ~ ${escapeHtml(formatDividendExportDateValue(batch.period_end))}</small>
+                </td>
+                <td>${getDividendExportStatusBadge(batch.status)}</td>
+                <td class="text-end fw-bold">${escapeHtml(formatDividendExportMoney(batch.net_total))}</td>
+                <td>${bankBadge}</td>
+                <td>
+                    <button class="btn btn-xs btn-outline-primary" type="button" onclick="selectDividendExportBatch('${escapeJsString(batch.batch_id)}')">
+                        선택
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+} // End of renderDividendExportBatches
+
+async function initializeDividendExportTab() {
+    if (g_dividend_export_state.initialized) return;
+    g_dividend_export_state.initialized = true;
+    await fetchDividendExportBatches(false);
+} // End of initializeDividendExportTab
+
+async function fetchDividendExportBatches(showToast = false) {
+    const tbody = document.getElementById('dividendExportBatchBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="6" class="py-5"><div class="spinner-border text-primary"></div></td></tr>';
+
+    const { data, error } = await _supabase.rpc('list_dividend_export_batches', { p_limit: 50 });
+
+    if (error) {
+        const message = getDividendExportRpcErrorMessage(error);
+        tbody.innerHTML = `<tr><td colspan="6" class="py-5 text-danger">${escapeHtml(message)}</td></tr>`;
+        document.getElementById('dividendExportLastLoaded').innerText = message;
+        return;
+    }
+
+    g_dividend_export_state.batches = Array.isArray(data) ? data : [];
+
+    const selectedStillExists = g_dividend_export_state.batches.some((batch) => String(batch.batch_id) === String(g_dividend_export_state.selectedBatchId));
+    if (!selectedStillExists) {
+        g_dividend_export_state.selectedBatchId = g_dividend_export_state.batches[0]?.batch_id || '';
+    }
+
+    g_dividend_export_state.bankRows = null;
+    g_dividend_export_state.taxRows = null;
+    g_dividend_export_state.withholdingSummaryRows = null;
+
+    renderDividendExportBatches();
+    renderDividendExportSelectedBatch(getDividendExportSelectedBatch());
+    document.getElementById('dividendExportLastLoaded').innerText = g_dividend_export_state.selectedBatchId
+        ? '회차를 선택했습니다. 다운로드 버튼을 누르면 최신 행을 조회합니다.'
+        : '파일 데이터가 아직 준비되지 않았습니다.';
+
+    if (showToast) myAlert('확정 배당 회차를 새로고침했습니다.');
+} // End of fetchDividendExportBatches
+
+function selectDividendExportBatch(batchId) {
+    g_dividend_export_state.selectedBatchId = String(batchId || '');
+    g_dividend_export_state.bankRows = null;
+    g_dividend_export_state.taxRows = null;
+    g_dividend_export_state.withholdingSummaryRows = null;
+    renderDividendExportBatches();
+    renderDividendExportSelectedBatch(getDividendExportSelectedBatch());
+    document.getElementById('dividendExportLastLoaded').innerText = '선택한 회차의 파일 데이터가 아직 준비되지 않았습니다.';
+} // End of selectDividendExportBatch
+
+function requireDividendExportBatchId() {
+    const batchId = String(g_dividend_export_state.selectedBatchId || '').trim();
+    if (!batchId) {
+        myAlert('확정 배당 회차를 먼저 선택해주세요.', 'warning');
+        return '';
+    }
+    return batchId;
+} // End of requireDividendExportBatchId
+
+async function loadDividendExportRows(forceRefresh = false) {
+    const batchId = requireDividendExportBatchId();
+    if (!batchId) return null;
+
+    if (!forceRefresh
+        && Array.isArray(g_dividend_export_state.bankRows)
+        && Array.isArray(g_dividend_export_state.taxRows)
+        && Array.isArray(g_dividend_export_state.withholdingSummaryRows)) {
+        return {
+            bankRows: g_dividend_export_state.bankRows,
+            taxRows: g_dividend_export_state.taxRows,
+            withholdingSummaryRows: g_dividend_export_state.withholdingSummaryRows
+        };
+    }
+
+    const debitMemo = document.getElementById('dividendExportDebitMemo')?.value || '배당금';
+    const creditMemo = document.getElementById('dividendExportCreditMemo')?.value || '배당금';
+
+    showLoading(true);
+    try {
+        const [bankResult, taxResult, summaryResult] = await Promise.all([
+            _supabase.rpc('get_dividend_bank_transfer_rows', {
+                p_batch_id: batchId,
+                p_debit_memo: debitMemo,
+                p_credit_memo: creditMemo
+            }),
+            _supabase.rpc('get_dividend_tax_ledger_rows', { p_batch_id: batchId }),
+            _supabase.rpc('get_dividend_withholding_summary', { p_batch_id: batchId })
+        ]);
+
+        const error = bankResult.error || taxResult.error || summaryResult.error;
+        if (error) throw error;
+
+        g_dividend_export_state.bankRows = Array.isArray(bankResult.data) ? bankResult.data : [];
+        g_dividend_export_state.taxRows = Array.isArray(taxResult.data) ? taxResult.data : [];
+        g_dividend_export_state.withholdingSummaryRows = Array.isArray(summaryResult.data) ? summaryResult.data : [];
+        document.getElementById('dividendExportLastLoaded').innerText = `${formatAdminMemberKstDateTime(new Date())} 기준 파일 데이터 준비 완료`;
+
+        return {
+            bankRows: g_dividend_export_state.bankRows,
+            taxRows: g_dividend_export_state.taxRows,
+            withholdingSummaryRows: g_dividend_export_state.withholdingSummaryRows
+        };
+    } catch (e) {
+        const message = getDividendExportRpcErrorMessage(e);
+        document.getElementById('dividendExportLastLoaded').innerText = message;
+        myAlert('파일 데이터 조회 실패: ' + message, 'error');
+        return null;
+    } finally {
+        showLoading(false);
+    }
+} // End of loadDividendExportRows
+
+function applyDividendExportSheetWidths(sheet, widths) {
+    sheet['!cols'] = widths.map((wch) => ({ wch }));
+} // End of applyDividendExportSheetWidths
+
+async function downloadDividendBankTransferXlsx() {
+    const loaded = await loadDividendExportRows(true);
+    if (!loaded) return;
+
+    const rows = loaded.bankRows || [];
+    if (!rows.length) {
+        myAlert('은행 대량이체로 내보낼 지급 대상이 없습니다.', 'warning');
+        return;
+    }
+
+    const missingRows = rows.filter((row) => {
+        return !String(row.bank_name || '').trim()
+            || !String(row.bank_account || '').trim()
+            || !String(row.bank_holder || '').trim()
+            || normalizeDividendExportNumber(row.transfer_amount) <= 0;
+    });
+
+    if (missingRows.length > 0) {
+        myAlert(`은행명, 계좌번호, 예금주 또는 이체금액이 누락된 행이 ${missingRows.length.toLocaleString('ko-KR')}건 있습니다. 조합원 계좌 정보를 먼저 보완해주세요.`, 'warning');
+        return;
+    }
+
+    const transferSheetRows = [
+        ['입금은행', '입금계좌', '이체금액(원)', '입금계좌 예금주', '내통장표시내용', '받는분통장표시내용'],
+        ...rows.map((row) => [
+            String(row.bank_name || '').trim(),
+            String(row.bank_account || '').replace(/\s+/g, ''),
+            Math.trunc(normalizeDividendExportNumber(row.transfer_amount)),
+            String(row.bank_holder || row.member_name || '').trim(),
+            String(row.debit_memo || '배당금').trim(),
+            String(row.credit_memo || '배당금').trim()
+        ])
+    ];
+
+    const bankNameSheetRows = DIVIDEND_BANK_TRANSFER_SAMPLE_BANK_NAMES.map((bankName) => [bankName]);
+    const workbook = XLSX.utils.book_new();
+    const transferSheet = XLSX.utils.aoa_to_sheet(transferSheetRows);
+    const bankNameSheet = XLSX.utils.aoa_to_sheet(bankNameSheetRows);
+
+    applyDividendExportSheetWidths(transferSheet, [16, 22, 14, 18, 18, 22]);
+    applyDividendExportSheetWidths(bankNameSheet, [24]);
+
+    XLSX.utils.book_append_sheet(workbook, transferSheet, '대량이체');
+    XLSX.utils.book_append_sheet(workbook, bankNameSheet, '은행명');
+    XLSX.writeFile(workbook, makeDividendExportFileName('은행대량이체', 'xlsx'));
+} // End of downloadDividendBankTransferXlsx
+
+function getDividendTaxIdentifierReviewText(row) {
+    if (row?.recipient_identifier_status === 'ENCRYPTED_REFERENCE_PRESENT') return '암호화참조 있음 - 원문 확인 필요';
+    return '주민/사업자번호 원문 확인 필요';
+} // End of getDividendTaxIdentifierReviewText
+
+async function downloadDividendTaxLedgerXlsx() {
+    const loaded = await loadDividendExportRows(true);
+    if (!loaded) return;
+
+    const taxRows = loaded.taxRows || [];
+    const summaryRows = loaded.withholdingSummaryRows || [];
+
+    if (!taxRows.length) {
+        myAlert('세무 장부로 내보낼 배당 산출 행이 없습니다.', 'warning');
+        return;
+    }
+
+    const ledgerSheetRows = [
+        ['귀속연도', '지급기준일', '지급예정일', '조합원번호', '성명', '식별번호 확인', '세전배당', '소득세', '지방소득세', '세후지급액', '출자금배당', '이용실적배당', '지급상태', '회차'],
+        ...taxRows.map((row) => [
+            row.tax_year || '',
+            formatDividendExportDateValue(row.payment_base_date, ''),
+            formatDividendExportDateValue(row.payment_due_date, ''),
+            row.member_no || '',
+            row.member_name || '',
+            getDividendTaxIdentifierReviewText(row),
+            Math.trunc(normalizeDividendExportNumber(row.gross_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.income_tax_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.local_income_tax_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.net_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.capital_dividend_gross)),
+            Math.trunc(normalizeDividendExportNumber(row.usage_dividend_gross)),
+            row.payment_status || '',
+            row.batch_title || ''
+        ])
+    ];
+
+    const summarySheetRows = [
+        ['지급월', '귀속연도', '대상자수', '세전배당합계', '소득세합계', '지방소득세합계', '원천세합계', '세후지급합계', '원천세 납부기한 검토', '지급명세서 제출기한 검토'],
+        ...summaryRows.map((row) => [
+            row.payment_month || '',
+            row.tax_year || '',
+            row.recipient_count || 0,
+            Math.trunc(normalizeDividendExportNumber(row.gross_total)),
+            Math.trunc(normalizeDividendExportNumber(row.income_tax_total)),
+            Math.trunc(normalizeDividendExportNumber(row.local_income_tax_total)),
+            Math.trunc(normalizeDividendExportNumber(row.tax_total)),
+            Math.trunc(normalizeDividendExportNumber(row.net_total)),
+            formatDividendExportDateValue(row.withholding_due_date, ''),
+            formatDividendExportDateValue(row.payment_statement_due_date, '')
+        ])
+    ];
+
+    const checkSheetRows = [
+        ['확인항목', '내용'],
+        ['파일 성격', '내부 검토 및 세무대리인 전달용 장부입니다.'],
+        ['홈택스 전산매체', '고정폭 업로드 파일이 아니므로 홈택스 직접 제출 전 최신 제출요령으로 변환해야 합니다.'],
+        ['식별번호', '주민등록번호/사업자등록번호 원문은 이 파일에 자동 노출하지 않습니다. 세무 처리 권한이 있는 경로에서 별도 확인해야 합니다.'],
+        ['간이지급명세서', '순수 배당소득 기본 경로가 아니며, 향후 미션 보상이 사업/기타/근로소득으로 분류될 때 별도 report_kind로 사용합니다.']
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    const ledgerSheet = XLSX.utils.aoa_to_sheet(ledgerSheetRows);
+    const summarySheet = XLSX.utils.aoa_to_sheet(summarySheetRows);
+    const checkSheet = XLSX.utils.aoa_to_sheet(checkSheetRows);
+
+    applyDividendExportSheetWidths(ledgerSheet, [12, 12, 12, 16, 14, 30, 14, 12, 14, 14, 14, 14, 12, 24]);
+    applyDividendExportSheetWidths(summarySheet, [12, 12, 10, 16, 14, 16, 14, 16, 18, 22]);
+    applyDividendExportSheetWidths(checkSheet, [18, 92]);
+
+    XLSX.utils.book_append_sheet(workbook, ledgerSheet, '세무검토장부');
+    XLSX.utils.book_append_sheet(workbook, summarySheet, '원천세집계');
+    XLSX.utils.book_append_sheet(workbook, checkSheet, '제출전확인');
+    XLSX.writeFile(workbook, makeDividendExportFileName('세무검토장부', 'xlsx'));
+} // End of downloadDividendTaxLedgerXlsx
+
+function toDividendCsvCell(value) {
+    const raw = String(value ?? '');
+    if (!/[",\r\n]/.test(raw)) return raw;
+    return `"${raw.replace(/"/g, '""')}"`;
+} // End of toDividendCsvCell
+
+function downloadDividendCsvFile(fileName, rows) {
+    const csv = rows.map((row) => row.map(toDividendCsvCell).join(',')).join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+} // End of downloadDividendCsvFile
+
+async function downloadDividendHometaxPaymentStatementCsv() {
+    const loaded = await loadDividendExportRows(true);
+    if (!loaded) return;
+
+    const taxRows = loaded.taxRows || [];
+    if (!taxRows.length) {
+        myAlert('지급명세서 CSV로 내보낼 배당 산출 행이 없습니다.', 'warning');
+        return;
+    }
+
+    const csvRows = [
+        ['귀속연도', '지급기준일', '소득구분', '조합원번호', '성명', '식별번호확인', '세전배당', '소득세', '지방소득세', '세후지급액', '출자금배당', '이용실적배당', '비고'],
+        ...taxRows.map((row) => [
+            row.tax_year || '',
+            formatDividendExportDateValue(row.payment_base_date, ''),
+            '배당소득',
+            row.member_no || '',
+            row.member_name || '',
+            getDividendTaxIdentifierReviewText(row),
+            Math.trunc(normalizeDividendExportNumber(row.gross_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.income_tax_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.local_income_tax_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.net_amount)),
+            Math.trunc(normalizeDividendExportNumber(row.capital_dividend_gross)),
+            Math.trunc(normalizeDividendExportNumber(row.usage_dividend_gross)),
+            '홈택스 이자ㆍ배당소득 지급명세서 입력 보조용'
+        ])
+    ];
+
+    downloadDividendCsvFile(makeDividendExportFileName('홈택스_이자배당_지급명세서_검토용', 'csv'), csvRows);
+} // End of downloadDividendHometaxPaymentStatementCsv
+
+async function downloadDividendWithholdingSummaryCsv() {
+    const loaded = await loadDividendExportRows(true);
+    if (!loaded) return;
+
+    const summaryRows = loaded.withholdingSummaryRows || [];
+    if (!summaryRows.length) {
+        myAlert('원천세 집계 CSV로 내보낼 자료가 없습니다.', 'warning');
+        return;
+    }
+
+    const csvRows = [
+        ['지급월', '귀속연도', '대상자수', '세전배당합계', '소득세합계', '지방소득세합계', '원천세합계', '세후지급합계', '원천세 납부기한 검토', '지급명세서 제출기한 검토', '비고'],
+        ...summaryRows.map((row) => [
+            row.payment_month || '',
+            row.tax_year || '',
+            row.recipient_count || 0,
+            Math.trunc(normalizeDividendExportNumber(row.gross_total)),
+            Math.trunc(normalizeDividendExportNumber(row.income_tax_total)),
+            Math.trunc(normalizeDividendExportNumber(row.local_income_tax_total)),
+            Math.trunc(normalizeDividendExportNumber(row.tax_total)),
+            Math.trunc(normalizeDividendExportNumber(row.net_total)),
+            formatDividendExportDateValue(row.withholding_due_date, ''),
+            formatDividendExportDateValue(row.payment_statement_due_date, ''),
+            '홈택스 원천세 신고 입력 보조용'
+        ])
+    ];
+
+    downloadDividendCsvFile(makeDividendExportFileName('홈택스_원천세_집계_검토용', 'csv'), csvRows);
+} // End of downloadDividendWithholdingSummaryCsv
 
 let g_donation_excel_data = [];
 
