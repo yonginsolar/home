@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.86
-Change: 2026-05-29 - Align dividend batch rate workflow and fix member reward history modal.
+Version: v1.0.87
+Change: 2026-05-29 - Use weighted capital basis for dividend rate pool preview.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.86';
+window.ADMIN_MEMBER_VERSION = 'v1.0.87';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -658,7 +658,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                                     <input type="number" id="dividendBatchCapitalRate" class="form-control text-end" min="0" max="10" step="0.01" value="0" oninput="refreshDividendCapitalPoolPreview()">
                                     <span class="input-group-text">%</span>
                                 </div>
-                                <div class="small text-muted mt-1">출자금 기준 종료일까지의 납입 출자금에 요율을 적용합니다.</div>
+                                <div class="small text-muted mt-1">입금일별 보유일수를 반영한 기간가중 출자금에 요율을 적용합니다.</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="small fw-bold text-muted">예상 출자금 배당 총액</label>
@@ -11314,32 +11314,44 @@ function normalizeDividendBatchRate(id) {
     return Number.isFinite(value) && value >= 0 ? value : null;
 } // End of normalizeDividendBatchRate
 
-function calculateDividendCapitalPoolFromRate(capitalBasisTotal, capitalRatePercent) {
-    const basisTotal = normalizeDividendExportNumber(capitalBasisTotal);
+function calculateDividendCapitalPoolFromRate(capitalBasisAverageTotal, capitalRatePercent) {
+    const basisTotal = normalizeDividendExportNumber(capitalBasisAverageTotal);
     const rate = normalizeDividendExportNumber(capitalRatePercent);
     if (basisTotal <= 0 || rate <= 0) return 0;
-    // DB 계산 RPC는 배당 재원 금액을 받아 조합원별 기간가중 출자금 비율로 나눈다.
-    // 화면에서는 관리자가 요율만 입력하도록 하고, 그 요율로 필요한 총 재원을 먼저 산출해 저장한다.
+    // DB 계산 RPC는 입금일별 보유일수를 반영한 기간가중 출자금으로 조합원별 배당을 나눈다.
+    // 총 재원도 같은 기준(기간가중 평균 출자금 합계)에 요율을 곱해 저장해야 첫 배당처럼
+    // 입금일이 제각각인 회차에서도 화면 미리보기와 실제 배분 기준이 어긋나지 않는다.
     return Math.trunc(basisTotal * (rate / 100));
 } // End of calculateDividendCapitalPoolFromRate
 
-async function fetchDividendCapitalBasisTotal(capitalEnd) {
+async function fetchDividendCapitalBasisSummary(capitalStart, capitalEnd) {
+    const safeCapitalStart = String(capitalStart || '').trim();
     const safeCapitalEnd = String(capitalEnd || '').trim();
-    if (!safeCapitalEnd) return 0;
+    if (!safeCapitalStart || !safeCapitalEnd) {
+        return { paidTotal: 0, weightedTotal: 0, averageTotal: 0, memberCount: 0 };
+    }
 
-    const { data, error } = await scopeAdminTenant(_supabase
-        .from('ref_members')
-        .select('amount,deposit_date,status'))
-        .lte('deposit_date', safeCapitalEnd)
-        .in('status', DIVIDEND_CAPITAL_STATUSES);
+    const coopId = await getAdminMemberCoopId();
+    if (!coopId) throw new Error('현재 조합을 확인할 수 없습니다.');
+
+    const { data, error } = await _supabase.rpc('dividend_get_capital_basis_rows', {
+        p_coop_id: coopId,
+        p_basis_start: safeCapitalStart,
+        p_basis_end: safeCapitalEnd,
+        p_statuses: DIVIDEND_CAPITAL_STATUSES
+    });
 
     if (error) throw error;
 
-    return (Array.isArray(data) ? data : []).reduce((sum, row) => {
-        const amount = normalizeDividendExportNumber(row.amount);
-        return amount > 0 ? sum + amount : sum;
-    }, 0);
-} // End of fetchDividendCapitalBasisTotal
+    const rows = Array.isArray(data) ? data : [];
+    return rows.reduce((summary, row) => {
+        summary.memberCount += 1;
+        summary.paidTotal += normalizeDividendExportNumber(row.paid_amount);
+        summary.weightedTotal += normalizeDividendExportNumber(row.weighted_amount_days);
+        summary.averageTotal += normalizeDividendExportNumber(row.average_amount);
+        return summary;
+    }, { paidTotal: 0, weightedTotal: 0, averageTotal: 0, memberCount: 0 });
+} // End of fetchDividendCapitalBasisSummary
 
 async function refreshDividendCapitalPoolPreview() {
     const previewEl = document.getElementById('dividendBatchCapitalPoolPreview');
@@ -11347,12 +11359,13 @@ async function refreshDividendCapitalPoolPreview() {
     if (!previewEl || !basisEl) return;
 
     const token = ++g_dividend_capital_preview_token;
+    const capitalStart = getDividendBatchFormValue('dividendBatchCapitalStart');
     const capitalEnd = getDividendBatchFormValue('dividendBatchCapitalEnd');
     const rate = normalizeDividendBatchRate('dividendBatchCapitalRate');
 
-    if (!capitalEnd) {
+    if (!capitalStart || !capitalEnd) {
         previewEl.innerText = '0원';
-        basisEl.innerText = '기준 종료일을 입력하세요.';
+        basisEl.innerText = '출자금 기준 기간을 입력하세요.';
         return;
     }
 
@@ -11364,11 +11377,11 @@ async function refreshDividendCapitalPoolPreview() {
 
     basisEl.innerText = '기준 출자금 계산 중...';
     try {
-        const capitalBasisTotal = await fetchDividendCapitalBasisTotal(capitalEnd);
+        const capitalBasis = await fetchDividendCapitalBasisSummary(capitalStart, capitalEnd);
         if (token !== g_dividend_capital_preview_token) return;
-        const capitalPool = calculateDividendCapitalPoolFromRate(capitalBasisTotal, rate);
+        const capitalPool = calculateDividendCapitalPoolFromRate(capitalBasis.averageTotal, rate);
         previewEl.innerText = formatDividendExportMoney(capitalPool);
-        basisEl.innerText = `기준 출자금 ${formatDividendExportMoney(capitalBasisTotal)} × ${rate}%`;
+        basisEl.innerText = `기간가중 출자금 ${formatDividendExportMoney(capitalBasis.averageTotal)} × ${rate}% · 대상 ${capitalBasis.memberCount.toLocaleString('ko-KR')}명`;
     } catch (error) {
         if (token !== g_dividend_capital_preview_token) return;
         console.warn('출자금 배당 재원 미리보기 실패:', error);
@@ -11713,13 +11726,13 @@ async function createDividendBatch() {
     if (capitalRate === null || capitalRate > 10) return myAlert('출자금 배당 요율은 0% 이상 10% 이하로 입력해주세요.', 'warning');
     if (!Number.isFinite(incomeTaxRate) || incomeTaxRate < 0 || !Number.isFinite(localIncomeTaxRate) || localIncomeTaxRate < 0) return myAlert('세율을 확인해주세요.', 'warning');
 
-    let capitalBasisTotal = 0;
+    let capitalBasis = { paidTotal: 0, weightedTotal: 0, averageTotal: 0, memberCount: 0 };
     try {
-        capitalBasisTotal = await fetchDividendCapitalBasisTotal(capitalEnd);
+        capitalBasis = await fetchDividendCapitalBasisSummary(capitalStart, capitalEnd);
     } catch (error) {
         return myAlert('출자금 기준 금액 조회 실패: ' + error.message, 'error');
     }
-    const capitalPool = calculateDividendCapitalPoolFromRate(capitalBasisTotal, capitalRate);
+    const capitalPool = calculateDividendCapitalPoolFromRate(capitalBasis.averageTotal, capitalRate);
 
     const coopId = await getAdminMemberCoopId();
     const payload = {
@@ -11740,7 +11753,7 @@ async function createDividendBatch() {
     };
     if (coopId) payload.coop_id = coopId;
 
-    myConfirm(`${title} 회차를 생성하시겠습니까?\n\n출자금 배당 요율: ${capitalRate}%\n예상 출자금 배당 총액: ${formatDividendExportMoney(capitalPool)}\n이용고 배당은 수동 지급 원장을 불러와 계산합니다.`, async () => {
+    myConfirm(`${title} 회차를 생성하시겠습니까?\n\n출자금 배당 요율: ${capitalRate}%\n기간가중 출자금: ${formatDividendExportMoney(capitalBasis.averageTotal)}\n예상 출자금 배당 총액: ${formatDividendExportMoney(capitalPool)}\n이용고 배당은 수동 지급 원장을 불러와 계산합니다.`, async () => {
         showLoading(true);
         const { data, error } = await _supabase
             .from('coop_dividend_batches')
