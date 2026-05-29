@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.78
-Change: Route member portal managed-account disconnects through the shared RPC.
+Version: v1.0.81
+Change: Read finalized dividend batch items through member-only RPC.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.78 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.81 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -959,6 +959,7 @@ NO. <span id="infoMemberId">-</span>
 <div class="mb-3">
 <label class="small text-muted fw-bold">로고 이미지</label>
 <input type="file" id="ptLogoFile" class="form-control form-control-sm" accept="image/*">
+<div class="form-text small text-muted">권장: 가로형 600x300px 또는 최소 300x150px, PNG/JPG. 투명 배경은 PNG를 권장합니다.</div>
 <input type="hidden" id="ptLogoUrl"> 
 <div id="ptLogoPreview" class="mt-2 p-2 border rounded text-center bg-light hidden">
 <img src="" style="max-height: 80px; max-width: 100%;">
@@ -1326,6 +1327,7 @@ let currentBoardLimit = 20;
 let isBoardLoading = false;
 let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
+let portalBootInProgress = false;
 window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false, disconnectRelation: false };
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
@@ -1368,6 +1370,92 @@ function getDividendNet(item = {}) {
 const explicitNet = toFiniteNumber(item.net_amount);
 if (explicitNet !== 0) return explicitNet;
 return getDividendGross(item) - getDividendTax(item);
+}
+function getDividendDateValue(item = {}) {
+return item.paid_at || item.payment_due_date || item.finalized_at || item.member_visible_at || item.approved_at || item.created_at || null;
+}
+function getDividendSortTime(item = {}) {
+const raw = getDividendDateValue(item);
+if (!raw) return 0;
+const d = new Date(raw);
+return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+function getDividendDisplayDate(item = {}, fallback = '-') {
+return formatMemberKstDate(getDividendDateValue(item), fallback);
+}
+function getDividendDateLabel(item = {}) {
+if (item.paid_at) return '지급일';
+if (item.payment_due_date) return '지급예정일';
+if (item.finalized_at || item.member_visible_at) return '확정일';
+return '기록일';
+}
+function getDividendPaymentStatusLabel(item = {}) {
+const status = String(item.payment_status || item.batch_status || '').toUpperCase();
+if (item.paid_at || status === 'PAID') return '지급 완료';
+if (status === 'FILE_EXPORTED') return '이체 파일 생성';
+if (status === 'READY' || item.payment_due_date) return '지급 예정';
+if (status === 'PAYMENT_READY') return '지급 준비';
+if (status === 'FINALIZED') return '확정';
+if (status === 'HELD') return '보류';
+if (status === 'FAILED') return '지급 실패';
+if (status === 'CANCELED') return '취소';
+return item.member_visible_at || item.finalized_at ? '확정' : '-';
+}
+function getDividendTimelineTitle(item = {}) {
+const status = String(item.payment_status || '').toUpperCase();
+if (item.paid_at || status === 'PAID') return '배당금 지급';
+if (item.payment_due_date || status === 'READY') return '배당금 지급 예정';
+return '배당금 확정';
+}
+function normalizeDividendHistoryRow(row = {}, sourceType = 'LEGACY_DIVIDEND') {
+const gross = getDividendGross(row);
+const tax = getDividendTax(row);
+const net = getDividendNet({ ...row, total_amount: gross, tax_amount: tax });
+return {
+...row,
+source_type: row.source_type || sourceType,
+total_amount: gross,
+tax_amount: tax,
+net_amount: net,
+tax_rate: row.tax_rate || DEFAULT_DIVIDEND_TAX_RATE,
+paid_at: row.paid_at || null,
+payment_due_date: row.payment_due_date || null,
+created_at: row.created_at || row.finalized_at || row.member_visible_at || row.approved_at || null
+};
+}
+function mergeDividendHistoryRows(legacyRows = [], confirmedRows = []) {
+const merged = [];
+const seen = new Set();
+const addRow = (row, sourceType) => {
+if (!row) return;
+const normalized = normalizeDividendHistoryRow(row, sourceType);
+const key = normalized.dividend_item_id
+? `batch:${normalized.dividend_item_id}`
+: (normalized.id ? `legacy:${normalized.id}` : `${normalized.source_type}:${normalized.fiscal_year}:${getDividendGross(normalized)}:${getDividendDateValue(normalized) || ''}`);
+if (seen.has(key)) return;
+seen.add(key);
+merged.push(normalized);
+};
+(confirmedRows || []).forEach(row => addRow(row, 'DIVIDEND_BATCH'));
+(legacyRows || []).forEach(row => addRow(row, 'LEGACY_DIVIDEND'));
+merged.sort((a, b) => getDividendSortTime(b) - getDividendSortTime(a));
+return merged;
+}
+async function fetchConfirmedDividendHistory(memberUuid) {
+try {
+if (!_supabase || !memberUuid) return [];
+const { data, error } = await _supabase.rpc('list_my_dividend_history', {
+p_member_uuid: memberUuid
+});
+if (error) {
+console.warn('confirmed dividend history rpc unavailable:', error.message || error);
+return [];
+}
+return Array.isArray(data) ? data.map(row => normalizeDividendHistoryRow(row, 'DIVIDEND_BATCH')) : [];
+} catch (e) {
+console.warn('confirmed dividend history load failed:', e);
+return [];
+}
 }
 
 function getSupabaseAuthStorageKeys() {
@@ -1617,12 +1705,20 @@ showOnly('loginSection');
 });
 });
 
-window.addEventListener('pageshow', () => {
-if (!hasPortalAuthenticatedUser()) {
+window.addEventListener('pageshow', async () => {
+if (portalBootInProgress || hasPortalAuthenticatedUser()) return;
+try {
+const { data: { session } } = await _supabase.auth.getSession();
+if (session?.user) {
+handleLoginSuccess(session.user);
+return;
+}
+} catch (e) {
+console.warn('pageshow session check failed:', e);
+}
 resetPortalRetryState();
 showOnly('loginSection');
 showLoading(false);
-}
 });
 
 // =========================================================================
@@ -2018,17 +2114,68 @@ return dest.href;
 		  }
 		}
 
-		function classifyPortalBootError(error) {
-		return BootGuard.classifyError(error, {
-		fatalCodes: ['PGRST301', '401', '403', 'PORTAL_AUTH_EXPIRED'],
-		fatalMessages: ['PORTAL_AUTH_EXPIRED', '로그인 세션이 만료되었습니다.']
-		});
-		}
+			function classifyPortalBootError(error) {
+			return BootGuard.classifyError(error, {
+			fatalCodes: ['PGRST301', '401', '403', 'PORTAL_AUTH_EXPIRED'],
+			fatalMessages: ['PORTAL_AUTH_EXPIRED', '로그인 세션이 만료되었습니다.']
+			});
+			}
 
-		const runPortalBoot = BootGuard.createSingleFlightAction(async (user) => {
-		curAuth = user;
-		hidePortalRetryState();
-		showLoading(true, '정보 확인 중...');
+			function normalizePortalProfileId(value) {
+			return String(value || '').trim();
+			}
+
+			function isRecoverableProfileLoadError(error) {
+			const code = String(error?.code || error?.status || '').trim();
+			const message = String(error?.message || error || '').trim();
+			return code === 'PGRST116'
+			|| code === 'PORTAL_PROFILE_NOT_FOUND'
+			|| message.includes('회원 정보를 불러올 수 없습니다.');
+			}
+
+			function clearStaleActiveProfile(profileId) {
+			const staleId = normalizePortalProfileId(profileId);
+			const storedId = normalizePortalProfileId(sessionStorage.getItem('lastActiveProfile'));
+			if (!staleId || storedId === staleId) {
+			sessionStorage.removeItem('lastActiveProfile');
+			sessionStorage.removeItem('activeMemberType');
+			}
+			curMem = null;
+			}
+
+			async function loadDashboardDataWithProfileFallback(targetUuid, fallbackUuid) {
+			const safeTargetUuid = normalizePortalProfileId(targetUuid);
+			const safeFallbackUuid = normalizePortalProfileId(fallbackUuid);
+			const firstUuid = safeTargetUuid || safeFallbackUuid;
+			if (!firstUuid) throw new Error('회원 정보를 불러올 수 없습니다.');
+
+			try {
+			await loadDashboardData(firstUuid, { rethrowOnError: true });
+			return;
+			} catch (error) {
+			if (
+			safeFallbackUuid &&
+			firstUuid !== safeFallbackUuid &&
+			isRecoverableProfileLoadError(error)
+			) {
+			console.warn('active profile is unavailable; falling back to root member profile:', {
+			activeProfileId: firstUuid,
+			rootProfileId: safeFallbackUuid,
+			error
+			});
+			clearStaleActiveProfile(firstUuid);
+			await loadDashboardData(safeFallbackUuid, { rethrowOnError: true });
+			return;
+			}
+			throw error;
+			}
+			}
+
+			const runPortalBoot = BootGuard.createSingleFlightAction(async (user) => {
+			portalBootInProgress = true;
+			curAuth = user;
+			hidePortalRetryState();
+			showLoading(true, '정보 확인 중...');
 
 		try {
 		const { data: claimRes, error: claimErr } = await _supabase.rpc('claim_member_profile');
@@ -2055,11 +2202,12 @@ return dest.href;
 
 		document.getElementById('headerLogoutBtn').classList.remove('hidden');
 
-		const lastProfileId = sessionStorage.getItem('lastActiveProfile');
-		const targetUuid = lastProfileId ? lastProfileId : (claimRes.profile_id || user.id);
+			const rootProfileUuid = normalizePortalProfileId(claimRes.profile_id || user.id);
+			const lastProfileId = normalizePortalProfileId(sessionStorage.getItem('lastActiveProfile'));
+			const targetUuid = lastProfileId || rootProfileUuid;
 
-		await loadDashboardData(targetUuid, { rethrowOnError: true });
-		syncSocialLinkButtons();
+			await loadDashboardDataWithProfileFallback(targetUuid, rootProfileUuid);
+			syncSocialLinkButtons();
 
 		if (typeof loadManagedProfiles === 'function') {
 		await loadManagedProfiles(rootMemberProfileId || claimRes.profile_id || user.id);
@@ -2072,10 +2220,11 @@ return dest.href;
 		return;
 		}
 		showPortalRetryState('조합원 정보를 불러오지 못했습니다. 다시 시도해 주세요.');
-		} finally {
-		showLoading(false);
-		}
-		});
+			} finally {
+			portalBootInProgress = false;
+			showLoading(false);
+			}
+			});
 
 		async function handleLoginSuccess(user) {
 		return runPortalBoot(user);
@@ -2384,15 +2533,24 @@ const { data: member, error: memErr } = await scopeMemberTenant(_supabase
 .eq('id', uuid)
 .single();
 
-if (memErr || !member) {
-console.error("멤버 조회 실패:", memErr);
-if (memErr && (memErr.code === 'PGRST301' || memErr.status === 403)) {
-showModal("보안을 위해 다시 로그인해주세요.");
-logout(); 
-return;
-}
-throw new Error('회원 정보를 불러올 수 없습니다.');
-}
+	if (memErr || !member) {
+	console.error("멤버 조회 실패:", memErr);
+	if (memErr && (memErr.code === 'PGRST301' || memErr.status === 403)) {
+	if (options && options.rethrowOnError) {
+	const authError = new Error('로그인 세션이 만료되었습니다.');
+	authError.code = 'PORTAL_AUTH_EXPIRED';
+	throw authError;
+	}
+	showModal("보안을 위해 다시 로그인해주세요.");
+	logout();
+	return;
+	}
+	const profileError = new Error('회원 정보를 불러올 수 없습니다.');
+	profileError.code = memErr?.code || 'PORTAL_PROFILE_NOT_FOUND';
+	profileError.status = memErr?.status || null;
+	profileError.profile_id = uuid;
+	throw profileError;
+	}
 
 // 마스킹 계좌 적용
 const maskedAcc = await fetchMaskedBankInfo(uuid);
@@ -2414,15 +2572,16 @@ const pDonations = scopeMemberTenant(_supabase.from('coop_donations')
 .eq('member_id', curMem.member_id) 
 .order('donation_date', { ascending: false }));
 const pPoints = scopeMemberTenant(_supabase.from('coop_points').select('*')).eq('member_uid', uuid).order('created_at', { ascending: false });
-const pDividends = scopeMemberTenant(_supabase.from('coop_dividends').select('*')).eq('member_id', curMem.member_id).order('paid_at', { ascending: false });
+const pLegacyDividends = scopeMemberTenant(_supabase.from('coop_dividends').select('*')).eq('member_id', curMem.member_id).order('paid_at', { ascending: false });
+const pConfirmedDividends = fetchConfirmedDividendHistory(uuid);
 
-const [resLedger, resApps, resDonations, resPoints, resDividends] = await Promise.all([pLedger, pApps, pDonations, pPoints, pDividends]);
+const [resLedger, resApps, resDonations, resPoints, resLegacyDividends, confirmedDividends] = await Promise.all([pLedger, pApps, pDonations, pPoints, pLegacyDividends, pConfirmedDividends]);
 
 const ledger = resLedger.data || [];
 const apps = resApps.data || [];
 const donations = resDonations.data || [];
 const points = resPoints.data || [];
-const dividends = resDividends.data || [];
+const dividends = mergeDividendHistoryRows(resLegacyDividends.data || [], confirmedDividends || []);
 
 // 3. 자산 총계 계산
 const assets = {
@@ -3978,7 +4137,7 @@ summaryEl.innerHTML = `현재 잔액: <span class="text-dark fs-5 fw-bold ms-2">
 
 } else if(type === 'dividend' || type === 'dividend_net') {
 title = (type === 'dividend_net') ? '📉 배당금(세후) 지급 내역' : '📈 배당금(세전) 지급 내역';
-html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급일</th><th class="text-end py-3">세전</th><th class="text-end py-3">세액</th><th class="text-end py-3 pe-3">세후</th></tr></thead><tbody>';
+html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급/예정일</th><th class="text-end py-3">세전</th><th class="text-end py-3">세액</th><th class="text-end py-3 pe-3">세후</th></tr></thead><tbody>';
 const data = globalHistoryData.dividends || [];
 const totalGross = data.reduce((a,c)=>a+getDividendGross(c),0);
 const totalTax = data.reduce((a,c)=>a+getDividendTax(c),0);
@@ -3991,9 +4150,14 @@ data.forEach(item => {
 const gross = getDividendGross(item);
 const tax = getDividendTax(item);
 const net = getDividendNet(item);
+const dateLabel = getDividendDateLabel(item);
+const statusLabel = getDividendPaymentStatusLabel(item);
 html += `<tr>
                    <td class="py-3 ps-3 fw-bold">${item.fiscal_year}년</td>
-                   <td class="py-3 text-muted">${formatMemberKstDate(item.paid_at)}</td>
+                   <td class="py-3 text-muted">
+                       <div>${getDividendDisplayDate(item)}</div>
+                       <div class="x-small">${dateLabel} · ${statusLabel}</div>
+                   </td>
                    <td class="text-end fw-bold py-3 text-primary">+${Number(gross).toLocaleString()}</td>
                    <td class="text-end fw-bold py-3 text-danger">-${Number(tax).toLocaleString()}</td>
                    <td class="text-end fw-bold py-3 pe-3 text-success">+${Number(net).toLocaleString()}</td>
@@ -4140,16 +4304,20 @@ dividends.forEach(d => {
 const gross = getDividendGross(d);
 const tax = getDividendTax(d);
 const net = getDividendNet(d);
+const displayDate = getDividendDisplayDate(d);
+const dateLabel = getDividendDateLabel(d);
+const statusLabel = getDividendPaymentStatusLabel(d);
+const timelineTitle = getDividendTimelineTitle(d);
 items.push({
-ts: d.paid_at ? new Date(d.paid_at).getTime() : (d.created_at ? new Date(d.created_at).getTime() : 0),
-dateStr: formatMemberKstDate(d.paid_at),
+ts: getDividendSortTime(d),
+dateStr: displayDate,
 html: `
                <div class="timeline-item" style="border-left-color: #1976D2;">
-                   <div class="timeline-date">${formatMemberKstDate(d.paid_at)}</div>
+                   <div class="timeline-date">${displayDate}</div>
                    <div class="timeline-content">
-                       <h6 class="fw-bold text-primary"><i class="bi bi-graph-up-arrow me-1"></i>배당금 지급 (${d.fiscal_year}년도)</h6>
+                       <h6 class="fw-bold text-primary"><i class="bi bi-graph-up-arrow me-1"></i>${timelineTitle} (${d.fiscal_year}년도)</h6>
                        <p class="fw-bold mb-1">세전 ${Number(gross).toLocaleString()}원 / 세후 ${Number(net).toLocaleString()}원</p>
-                       <p class="small text-muted mb-0">원천세 ${Number(tax).toLocaleString()}원 (${(getDividendTaxRate(d) * 100).toFixed(1)}%)</p>
+                       <p class="small text-muted mb-0">${dateLabel} ${displayDate} · ${statusLabel} · 원천세 ${Number(tax).toLocaleString()}원 (${(getDividendTaxRate(d) * 100).toFixed(1)}%)</p>
                    </div>
                </div>`
 });
@@ -6211,6 +6379,51 @@ console.warn('[partner-alert] admin telegram skipped:', error?.message || error,
 }
 } // End of notifyPartnerRequestAdmins
 
+function getPartnerApplicationErrorMessage(error) {
+const raw = String(error?.message || error || '').trim();
+if (!raw) return '알 수 없는 오류가 발생했습니다.';
+if (raw.includes('row-level security')) return '로고 업로드 권한을 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.';
+if (raw.includes('파트너 로고 업로드 경로')) return raw;
+if (raw.includes('이미지 파일만')) return raw;
+if (raw.includes('5MB')) return raw;
+return raw;
+}
+
+async function uploadPartnerLogoFile(file) {
+if (!file) return '';
+if (!String(file.type || '').startsWith('image/')) {
+throw new Error('이미지 파일만 업로드할 수 있습니다.');
+}
+if (Number(file.size || 0) > 5 * 1024 * 1024) {
+throw new Error('로고 이미지는 5MB 이하로 업로드해주세요.');
+}
+
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+const profileId = getActiveMemberProfileId();
+if (!coopId || !profileId) {
+throw new Error('파트너 로고 업로드 경로를 만들 수 없습니다. 다시 로그인 후 시도해주세요.');
+}
+
+const rawExt = String(file.name || '').split('.').pop() || 'png';
+const safeExt = rawExt.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'png';
+const fileName = `partners/${coopId}/${profileId}/${Date.now()}_${Math.random().toString(36).slice(2, 11)}.${safeExt}`;
+
+const { error: uploadError } = await _supabase.storage
+.from('assets')
+.upload(fileName, file, {
+cacheControl: '3600',
+upsert: false
+});
+
+if (uploadError) throw uploadError;
+
+const { data: urlData } = _supabase.storage
+.from('assets')
+.getPublicUrl(fileName);
+
+return urlData.publicUrl;
+}
+
 // 2. 파트너 신청 제출 (상태 체크 + 이미지 업로드 + RPC 호출)
 async function submitPartnerApplication() {
 // [1] 권한 체크: '정상' 상태가 아니면 신청 차단 (B안 적용)
@@ -6235,23 +6448,7 @@ try {
 // [3] 파일 업로드 (새 파일이 있는 경우만)
 if(fileInput.files.length > 0) {
 const file = fileInput.files[0];
-const fileExt = file.name.split('.').pop();
-// 파일명 난수화 (충돌 방지)
-const fileName = `partners/${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
-
-// assets 버킷에 업로드
-const { data: uploadData, error: uploadError } = await _supabase.storage
-.from('assets')
-.upload(fileName, file);
-
-if(uploadError) throw uploadError;
-
-// 공개 URL 획득
-const { data: urlData } = _supabase.storage
-.from('assets')
-.getPublicUrl(fileName);
-
-logoUrl = urlData.publicUrl;
+logoUrl = await uploadPartnerLogoFile(file);
 }
 
 // [4] RPC 호출 (DB 저장)
@@ -6281,7 +6478,7 @@ showModal('오류: ' + result.message);
 } catch (e) {
 showLoading(false);
 console.error(e);
-showModal('처리 중 오류가 발생했습니다.\n' + e.message);
+showModal('처리 중 오류가 발생했습니다.\n' + getPartnerApplicationErrorMessage(e));
 }
 });
 }
