@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.84
-Change: 2026-05-28 - Add finalized dividend export downloads for bank and tax review files.
+Version: v1.0.85
+Change: 2026-05-29 - Add dividend batch workflow UI and clean member detail reward cards.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.84';
+window.ADMIN_MEMBER_VERSION = 'v1.0.85';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -496,7 +496,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <div class="tab-pane fade" id="tab-funds-manage">
     <div class="content-header">
-        <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">💰 운영자금(자산수증) 및 이용고배당</h3>
+        <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">💰 운영자금 및 배당 관리</h3>
     </div>
 
     <ul class="nav nav-tabs mb-4">
@@ -507,7 +507,12 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         </li>
         <li class="nav-item">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sub-tab-dividends" type="button" onclick="fetchGlobalDividends()">
-                📈 이용고배당 관리
+                📈 이용실적 보상 원장
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sub-tab-dividend-batches" type="button" onclick="initializeDividendBatchTab()">
+                <i class="bi bi-diagram-3 me-1"></i> 배당 회차 관리
             </button>
         </li>
         <li class="nav-item">
@@ -571,7 +576,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         <div class="tab-pane fade" id="sub-tab-dividends">
             <div class="alert alert-info border-0 bg-info bg-opacity-10 small mb-3">
                 <i class="bi bi-info-circle-fill me-1"></i>
-                <strong>이용고배당이란?</strong> 조합원의 사업 이용 실적(전기 사용량 등)에 따라 배분되는 배당금입니다. (구 포인트)
+                <strong>이용실적 보상 원장</strong> 조합원의 사업 이용 실적, 활동, 미션 보상을 적립/차감하고 이후 이용실적 배당 계산의 기준으로 사용합니다.
             </div>
 
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -600,6 +605,153 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         <tr><td colspan="5" class="py-5 text-muted">로딩 중...</td></tr>
     </tbody>
 </table>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="sub-tab-dividend-batches">
+            <div class="row g-3">
+                <div class="col-xl-5">
+                    <div class="bg-white border rounded p-3 mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="fw-bold mb-0">배당 회차 생성</h6>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="resetDividendBatchCreateForm()">
+                                <i class="bi bi-arrow-counterclockwise"></i>
+                            </button>
+                        </div>
+
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <label class="small fw-bold text-muted" for="dividendBatchFiscalYear">회계연도</label>
+                                <input type="number" id="dividendBatchFiscalYear" class="form-control form-control-sm" min="2000" max="2100">
+                            </div>
+                            <div class="col-md-8">
+                                <label class="small fw-bold text-muted" for="dividendBatchTitle">회차명</label>
+                                <input type="text" id="dividendBatchTitle" class="form-control form-control-sm" maxlength="80">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchPeriodStart">결산 시작일</label>
+                                <input type="date" id="dividendBatchPeriodStart" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchPeriodEnd">결산 종료일</label>
+                                <input type="date" id="dividendBatchPeriodEnd" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchCapitalStart">출자금 기준 시작일</label>
+                                <input type="date" id="dividendBatchCapitalStart" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchCapitalEnd">출자금 기준 종료일</label>
+                                <input type="date" id="dividendBatchCapitalEnd" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchUsageStart">이용실적 기준 시작일</label>
+                                <input type="date" id="dividendBatchUsageStart" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchUsageEnd">이용실적 기준 종료일</label>
+                                <input type="date" id="dividendBatchUsageEnd" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchCapitalPool">출자금 배당 재원</label>
+                                <input type="number" id="dividendBatchCapitalPool" class="form-control form-control-sm text-end" min="0" step="1" value="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchUsagePool">이용실적 배당 재원</label>
+                                <input type="number" id="dividendBatchUsagePool" class="form-control form-control-sm text-end" min="0" step="1" value="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchIncomeTaxRate">소득세율</label>
+                                <input type="number" id="dividendBatchIncomeTaxRate" class="form-control form-control-sm text-end" min="0" step="0.0001" value="0.14">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchLocalTaxRate">지방소득세율</label>
+                                <input type="number" id="dividendBatchLocalTaxRate" class="form-control form-control-sm text-end" min="0" step="0.0001" value="0.014">
+                            </div>
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="dividendBatchIsFirst">
+                                    <label class="form-check-label small" for="dividendBatchIsFirst">첫 배당 회차</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-sm btn-primary w-100 mt-3" type="button" onclick="createDividendBatch()">
+                            <i class="bi bi-plus-circle"></i> 배당 회차 생성
+                        </button>
+                    </div>
+
+                    <div class="bg-white border rounded p-3">
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                            <div>
+                                <h6 class="fw-bold mb-1" id="dividendBatchSelectedTitle">선택된 회차 없음</h6>
+                                <div class="small text-muted" id="dividendBatchSelectedMeta">회차를 선택하면 총회 승인과 확정을 진행할 수 있습니다.</div>
+                            </div>
+                            <span class="badge bg-light text-dark border" id="dividendBatchSelectedStatus">-</span>
+                        </div>
+
+                        <div class="row g-2">
+                            <div class="col-md-12">
+                                <label class="small fw-bold text-muted" for="dividendBatchMinutesDocId">총회 의사록 UUID</label>
+                                <input type="text" id="dividendBatchMinutesDocId" class="form-control form-control-sm" placeholder="minutes.id">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchMeetingDate">총회일</label>
+                                <input type="date" id="dividendBatchMeetingDate" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchResolutionResult">의결 결과</label>
+                                <select id="dividendBatchResolutionResult" class="form-select form-select-sm">
+                                    <option value="APPROVED">승인</option>
+                                    <option value="CONDITIONAL_APPROVED">조건부 승인</option>
+                                </select>
+                            </div>
+                            <div class="col-md-12">
+                                <label class="small fw-bold text-muted" for="dividendBatchAgenda">안건명</label>
+                                <input type="text" id="dividendBatchAgenda" class="form-control form-control-sm" maxlength="160">
+                            </div>
+                            <div class="col-md-6">
+                                <button class="btn btn-sm btn-outline-primary w-100 mt-2" type="button" onclick="approveSelectedDividendBatch()">
+                                    <i class="bi bi-check2-square"></i> 총회 승인 반영
+                                </button>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small fw-bold text-muted" for="dividendBatchPaymentDueDate">지급예정일</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="date" id="dividendBatchPaymentDueDate" class="form-control">
+                                    <button class="btn btn-success" type="button" onclick="finalizeSelectedDividendBatch()">확정</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-7">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-bold mb-0">배당 회차 목록</h6>
+                        <button class="btn btn-sm btn-outline-dark" type="button" onclick="fetchDividendManageBatches(true)">
+                            <i class="bi bi-arrow-clockwise"></i> 새로고침
+                        </button>
+                    </div>
+                    <div class="table-responsive bg-white border rounded" style="max-height: 680px; overflow-y: auto;">
+                        <table class="table table-hover align-middle mb-0 text-center small">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>연도</th>
+                                    <th class="text-start">회차</th>
+                                    <th>상태</th>
+                                    <th class="text-end">세전</th>
+                                    <th class="text-end">세후</th>
+                                    <th>항목</th>
+                                    <th>처리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dividendBatchManageBody">
+                                <tr><td colspan="7" class="py-5 text-muted">새로고침을 눌러 배당 회차를 불러오세요.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -2476,14 +2628,16 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <h6 class="fw-bold text-warning">🪙 포인트/적립금</h6>
 <div class="border rounded p-3 text-center bg-light">
 <h4 class="fw-bold mb-0" id="md-point-total">0 P</h4>
-<button class="btn btn-sm btn-link text-decoration-none" onclick="myAlert('Phase 3: 포인트 내역 상세')">내역 보기</button>
+<small class="text-muted d-block mt-1" id="md-point-meta">이용실적 보상 원장 기준</small>
+<button class="btn btn-sm btn-link text-decoration-none" onclick="openHistoryModal('point')">내역 보기</button>
 </div>
 </div>
 <div class="col-md-6">
-<h6 class="fw-bold text-info">💵 미지급 배당금</h6>
+<h6 class="fw-bold text-info">💵 확정 배당금</h6>
 <div class="border rounded p-3 text-center bg-light">
 <h4 class="fw-bold mb-0" id="md-dividend-total">0 원</h4>
-<button class="btn btn-sm btn-link text-decoration-none" onclick="myAlert('Phase 3: 배당금 지급 처리')">지급 처리</button>
+<small class="text-muted d-block mt-1" id="md-dividend-meta">미지급 세후금액 기준</small>
+<button class="btn btn-sm btn-link text-decoration-none" onclick="openHistoryModal('dividend')">확정 내역 보기</button>
 </div>
 </div>
 </div>
@@ -5267,6 +5421,13 @@ tbody.innerHTML += `<tr>
                </tr>`;
 });
 }
+let globalHistoryData = {
+    ledger: [],
+    donations: [],
+    points: [],
+    dividends: []
+};
+
 // [수정] 상세 내역 모달 열기 (기부금에서 '구분' 칼럼 제거됨)
 function openHistoryModal(type) {
     const titleEl = document.getElementById('historyModalTitle');
@@ -5314,7 +5475,7 @@ function openHistoryModal(type) {
         summaryEl.innerText = `총 기부액: ${Number(total).toLocaleString()}원`;
 
     } else if(type === 'point') {
-        title = '포인트 적립/사용 내역';
+        title = '이용실적 보상 적립/차감 내역';
         html += '<tr class="table-warning"><th>날짜</th><th>내용</th><th class="text-end">변동</th></tr></thead><tbody>';
         const data = globalHistoryData.points || [];
         total = data.reduce((a,c)=>a+Number(c.change_amount),0);
@@ -5327,30 +5488,33 @@ function openHistoryModal(type) {
                 const sign = isPlus ? '+' : '';
                 html += `<tr>
                     <td>${formatAdminMemberKstDate(item.created_at)}</td>
-                    <td>${item.reason || item.transaction_type}</td>
+                    <td>${escapeHtml(item.reason || item.transaction_type || '-')}</td>
                     <td class="text-end fw-bold ${style}">${sign}${Number(item.change_amount).toLocaleString()}</td>
                 </tr>`;
             });
         }
-        summaryEl.innerText = `현재 잔액: ${Number(total).toLocaleString()} P`;
+        summaryEl.innerText = `현재 잔액: ${Number(total).toLocaleString()}원`;
 
     } else if(type === 'dividend') {
-        title = '배당금 지급 내역';
-        html += '<tr class="table-primary"><th>연도</th><th>지급일</th><th class="text-end">금액(세전)</th></tr></thead><tbody>';
+        title = '확정 배당금 내역';
+        html += '<tr class="table-primary"><th>연도</th><th>회차</th><th>지급기준일</th><th>상태</th><th class="text-end">세전</th><th class="text-end">세후</th></tr></thead><tbody>';
         const data = globalHistoryData.dividends || [];
-        total = data.reduce((a,c)=>a+Number(c.total_amount),0);
+        total = data.reduce((a,c)=>a+Number(c.net_amount || c.total_amount || 0),0);
 
-        if(data.length === 0) html += '<tr><td colspan="3" class="text-center py-3">내역 없음</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="6" class="text-center py-3">내역 없음</td></tr>';
         else {
             data.forEach(item => {
                 html += `<tr>
                     <td>${item.fiscal_year}년</td>
-                    <td>${formatAdminMemberKstDate(item.paid_at)}</td>
-                    <td class="text-end fw-bold">${Number(item.total_amount).toLocaleString()}원</td>
+                    <td class="text-start">${escapeHtml(item.title || '-')}</td>
+                    <td>${formatAdminMemberKstDate(item.paid_at || item.payment_due_date || item.payment_base_date)}</td>
+                    <td>${getDividendExportStatusBadge(item.payment_status || item.status || '-')}</td>
+                    <td class="text-end fw-bold">${Number(item.total_amount || item.gross_amount || 0).toLocaleString()}원</td>
+                    <td class="text-end fw-bold text-primary">${Number(item.net_amount || 0).toLocaleString()}원</td>
                 </tr>`;
             });
         }
-        summaryEl.innerText = `누적 지급액: ${Number(total).toLocaleString()}원`;
+        summaryEl.innerText = `세후 합계: ${Number(total).toLocaleString()}원`;
     }
 
     html += '</tbody></table>';
@@ -9941,7 +10105,7 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType) {
 }
 
 // ================================================================
-// [기능 Phase 3] 자금 관리 (출자/기부 CRUD)
+// [기능] 자금 관리 (출자/기부 CRUD)
 // ================================================================
 
 // [수정] 에디터 모달 열기 (삭제 버튼 제어 로직 추가)
@@ -9999,8 +10163,126 @@ function openFundEditor(type, rowDataStr) {
     new bootstrap.Modal(modalEl).show();
 }
 
+function resetMemberFundsSummaryCards() {
+    globalHistoryData = {
+        ledger: [],
+        donations: [],
+        points: [],
+        dividends: []
+    };
+
+    const pointTotalEl = document.getElementById('md-point-total');
+    const pointMetaEl = document.getElementById('md-point-meta');
+    const dividendTotalEl = document.getElementById('md-dividend-total');
+    const dividendMetaEl = document.getElementById('md-dividend-meta');
+
+    if (pointTotalEl) pointTotalEl.innerText = '0 원';
+    if (pointMetaEl) pointMetaEl.innerText = '이용실적 보상 원장 기준';
+    if (dividendTotalEl) dividendTotalEl.innerText = '0 원';
+    if (dividendMetaEl) dividendMetaEl.innerText = '미지급 세후금액 기준';
+} // End of resetMemberFundsSummaryCards
+
+function isFinalizedDividendBatchStatus(status) {
+    return ['FINALIZED', 'PAYMENT_READY', 'PARTIALLY_PAID', 'PAID'].includes(String(status || ''));
+} // End of isFinalizedDividendBatchStatus
+
+async function loadMemberRewardAndDividendSummary(uuid, textId) {
+    const pointTotalEl = document.getElementById('md-point-total');
+    const pointMetaEl = document.getElementById('md-point-meta');
+    const dividendTotalEl = document.getElementById('md-dividend-total');
+    const dividendMetaEl = document.getElementById('md-dividend-meta');
+
+    if (pointMetaEl) pointMetaEl.innerText = '조회 중...';
+    if (dividendMetaEl) dividendMetaEl.innerText = '조회 중...';
+
+    if (textId && textId !== 'ID없음' && textId !== '-') {
+        const { data: points, error: pointError } = await _supabase
+            .from('coop_points')
+            .select('created_at,change_amount,reason,transaction_type')
+            .eq('member_id', textId)
+            .order('created_at', { ascending: false })
+            .limit(500);
+
+        if (pointError) {
+            console.warn('조합원 이용실적 보상 원장 로드 실패:', pointError);
+            if (pointMetaEl) pointMetaEl.innerText = '조회 실패';
+        } else {
+            globalHistoryData.points = Array.isArray(points) ? points : [];
+            const pointTotal = globalHistoryData.points.reduce((sum, row) => sum + normalizeDividendExportNumber(row.change_amount), 0);
+            if (pointTotalEl) pointTotalEl.innerText = `${Math.trunc(pointTotal).toLocaleString('ko-KR')} 원`;
+            if (pointMetaEl) pointMetaEl.innerText = `${globalHistoryData.points.length.toLocaleString('ko-KR')}건 기준`;
+        }
+    } else if (pointMetaEl) {
+        pointMetaEl.innerText = '조합원 번호 없음';
+    }
+
+    if (uuid) {
+        const { data: dividendItems, error: dividendError } = await scopeAdminTenant(_supabase
+            .from('coop_dividend_batch_items')
+            .select('id,batch_id,capital_dividend_gross,usage_dividend_gross,gross_amount,income_tax_amount,local_income_tax_amount,net_amount,payment_status,payment_due_date,paid_at,created_at'))
+            .eq('member_uuid', uuid)
+            .order('created_at', { ascending: false })
+            .limit(200);
+
+        if (dividendError) {
+            console.warn('조합원 확정 배당 내역 로드 실패:', dividendError);
+            if (dividendMetaEl) dividendMetaEl.innerText = '조회 실패';
+            return;
+        }
+
+        const items = Array.isArray(dividendItems) ? dividendItems : [];
+        const batchIds = [...new Set(items.map((item) => item.batch_id).filter(Boolean))];
+        const batchMap = new Map();
+
+        if (batchIds.length > 0) {
+            const { data: batches, error: batchError } = await scopeAdminTenant(_supabase
+                .from('coop_dividend_batches')
+                .select('id,fiscal_year,title,status,payment_due_date,period_start,period_end'))
+                .in('id', batchIds);
+
+            if (batchError) {
+                console.warn('조합원 배당 회차 메타 로드 실패:', batchError);
+            } else {
+                (batches || []).forEach((batch) => batchMap.set(String(batch.id), batch));
+            }
+        }
+
+        globalHistoryData.dividends = items
+            .map((item) => {
+                const batch = batchMap.get(String(item.batch_id)) || {};
+                return {
+                    ...item,
+                    fiscal_year: batch.fiscal_year || '-',
+                    title: batch.title || '-',
+                    status: batch.status || item.payment_status,
+                    payment_due_date: item.payment_due_date || batch.payment_due_date,
+                    payment_base_date: item.paid_at || item.payment_due_date || batch.payment_due_date,
+                    total_amount: item.gross_amount
+                };
+            })
+            .filter((item) => isFinalizedDividendBatchStatus(item.status));
+
+        const unpaidRows = globalHistoryData.dividends.filter((item) => {
+            return normalizeDividendExportNumber(item.net_amount) > 0
+                && !['PAID', 'CANCELED'].includes(String(item.payment_status || ''));
+        });
+        const unpaidTotal = unpaidRows.reduce((sum, item) => sum + normalizeDividendExportNumber(item.net_amount), 0);
+
+        if (dividendTotalEl) dividendTotalEl.innerText = `${Math.trunc(unpaidTotal).toLocaleString('ko-KR')} 원`;
+        if (dividendMetaEl) {
+            dividendMetaEl.innerText = globalHistoryData.dividends.length > 0
+                ? `확정 ${globalHistoryData.dividends.length.toLocaleString('ko-KR')}건 · 미지급 ${unpaidRows.length.toLocaleString('ko-KR')}건`
+                : '확정 배당 내역 없음';
+        }
+    } else if (dividendMetaEl) {
+        dividendMetaEl.innerText = '조합원 UUID 없음';
+    }
+} // End of loadMemberRewardAndDividendSummary
+
 // [수정] 자금 목록 로드 (조회 기준 변경: UUID -> Member ID 우선)
 async function loadMemberFunds(uuid, textId, reset=false) {
+    if (reset) resetMemberFundsSummaryCards();
+
     // 1. 출자금 리스트 처리 (기존 유지)
     const capListEl = document.getElementById('md-capital-list');
     if (capListEl) {
@@ -10014,6 +10296,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
                 .order('deposit_date', {ascending: false});
 
             if (capErr) console.error("출자금 로드 실패:", capErr);
+            globalHistoryData.ledger = Array.isArray(caps) ? caps : [];
 
             capListEl.innerHTML = '';
             if (!caps || caps.length === 0) {
@@ -10060,6 +10343,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
         const { data: dons, error: donErr } = await query;
 
         if (donErr) console.error("기부금 로드 실패:", donErr);
+        globalHistoryData.donations = Array.isArray(dons) ? dons : [];
 
         // 렌더링
         donListEl.innerHTML = '';
@@ -10089,6 +10373,8 @@ async function loadMemberFunds(uuid, textId, reset=false) {
             });
         }
     }
+
+    await loadMemberRewardAndDividendSummary(uuid, textId);
 }
 
 // [최종] 자금 내역 삭제 함수
@@ -10926,6 +11212,350 @@ async function fetchGlobalDividends() {
     });
 }
 
+const g_dividend_batch_state = {
+    initialized: false,
+    batches: [],
+    selectedBatchId: ''
+};
+
+function getDividendManageSelectedBatch() {
+    const selectedId = g_dividend_batch_state.selectedBatchId;
+    return g_dividend_batch_state.batches.find((batch) => String(batch.id) === String(selectedId)) || null;
+} // End of getDividendManageSelectedBatch
+
+function getDividendBatchFormValue(id) {
+    return String(document.getElementById(id)?.value || '').trim();
+} // End of getDividendBatchFormValue
+
+function normalizeDividendBatchAmount(id) {
+    const value = Number(getDividendBatchFormValue(id).replace(/,/g, ''));
+    return Number.isFinite(value) && value >= 0 ? value : null;
+} // End of normalizeDividendBatchAmount
+
+function resetDividendBatchCreateForm() {
+    const year = new Date().getFullYear();
+    const start = `${year}-01-01`;
+    const end = `${year}-12-31`;
+    const defaults = {
+        dividendBatchFiscalYear: year,
+        dividendBatchTitle: `${year}년 정기 배당`,
+        dividendBatchPeriodStart: start,
+        dividendBatchPeriodEnd: end,
+        dividendBatchCapitalStart: start,
+        dividendBatchCapitalEnd: end,
+        dividendBatchUsageStart: start,
+        dividendBatchUsageEnd: end,
+        dividendBatchCapitalPool: 0,
+        dividendBatchUsagePool: 0,
+        dividendBatchIncomeTaxRate: 0.14,
+        dividendBatchLocalTaxRate: 0.014
+    };
+
+    Object.entries(defaults).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    });
+
+    const firstDividendEl = document.getElementById('dividendBatchIsFirst');
+    if (firstDividendEl) firstDividendEl.checked = false;
+} // End of resetDividendBatchCreateForm
+
+function renderDividendBatchSelectedPanel(batch) {
+    document.getElementById('dividendBatchSelectedTitle').innerText = batch?.title || '선택된 회차 없음';
+    document.getElementById('dividendBatchSelectedMeta').innerText = batch
+        ? `${batch.fiscal_year}년 · ${formatDividendExportDateValue(batch.period_start)} ~ ${formatDividendExportDateValue(batch.period_end)}`
+        : '회차를 선택하면 총회 승인과 확정을 진행할 수 있습니다.';
+    document.getElementById('dividendBatchSelectedStatus').innerText = batch?.status || '-';
+
+    if (batch?.general_meeting_date) {
+        document.getElementById('dividendBatchMeetingDate').value = formatDividendExportDateValue(batch.general_meeting_date, '');
+    }
+    if (batch?.payment_due_date) {
+        document.getElementById('dividendBatchPaymentDueDate').value = formatDividendExportDateValue(batch.payment_due_date, '');
+    }
+    if (batch?.general_meeting_agenda) {
+        document.getElementById('dividendBatchAgenda').value = batch.general_meeting_agenda;
+    }
+    if (batch?.minutes_doc_id) {
+        document.getElementById('dividendBatchMinutesDocId').value = batch.minutes_doc_id;
+    }
+    if (batch?.general_meeting_resolution_result) {
+        document.getElementById('dividendBatchResolutionResult').value = batch.general_meeting_resolution_result;
+    }
+} // End of renderDividendBatchSelectedPanel
+
+function renderDividendManageBatches() {
+    const tbody = document.getElementById('dividendBatchManageBody');
+    if (!tbody) return;
+
+    const batches = g_dividend_batch_state.batches;
+    if (!batches.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="py-5 text-muted">배당 회차가 없습니다.</td></tr>';
+        renderDividendBatchSelectedPanel(null);
+        return;
+    }
+
+    tbody.innerHTML = batches.map((batch) => {
+        const selectedClass = String(batch.id) === String(g_dividend_batch_state.selectedBatchId) ? 'table-primary' : '';
+        const canCalculate = ['DRAFT', 'CALCULATED', 'REVIEW_READY', 'REVISION_REQUIRED'].includes(batch.status);
+        const itemCount = Number(batch.item_count || 0);
+        const grossTotal = normalizeDividendExportNumber(batch.item_gross_total || batch.total_gross_amount);
+        const netTotal = normalizeDividendExportNumber(batch.item_net_total);
+
+        return `
+            <tr class="${selectedClass}">
+                <td>${escapeHtml(batch.fiscal_year || '-')}</td>
+                <td class="text-start">
+                    <div class="fw-bold">${escapeHtml(batch.title || '-')}</div>
+                    <small class="text-muted">${escapeHtml(formatDividendExportDateValue(batch.period_start))} ~ ${escapeHtml(formatDividendExportDateValue(batch.period_end))}</small>
+                </td>
+                <td>${getDividendExportStatusBadge(batch.status)}</td>
+                <td class="text-end">${escapeHtml(formatDividendExportMoney(grossTotal))}</td>
+                <td class="text-end fw-bold">${escapeHtml(formatDividendExportMoney(netTotal))}</td>
+                <td>${itemCount.toLocaleString('ko-KR')}건</td>
+                <td>
+                    <div class="d-flex flex-wrap gap-1 justify-content-center">
+                        <button class="btn btn-xs btn-outline-primary" type="button" onclick="selectDividendManageBatch('${escapeJsString(batch.id)}')">선택</button>
+                        <button class="btn btn-xs btn-outline-success" type="button" ${canCalculate ? '' : 'disabled'} onclick="runDividendCapitalCalculation('${escapeJsString(batch.id)}')">출자</button>
+                        <button class="btn btn-xs btn-outline-info" type="button" ${canCalculate ? '' : 'disabled'} onclick="runDividendUsageCalculation('${escapeJsString(batch.id)}')">이용</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+} // End of renderDividendManageBatches
+
+async function initializeDividendBatchTab() {
+    if (!g_dividend_batch_state.initialized) {
+        g_dividend_batch_state.initialized = true;
+        resetDividendBatchCreateForm();
+    }
+    await fetchDividendManageBatches(false);
+} // End of initializeDividendBatchTab
+
+async function fetchDividendManageBatches(showToast = false) {
+    const tbody = document.getElementById('dividendBatchManageBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="7" class="py-5"><div class="spinner-border text-primary"></div></td></tr>';
+
+    const { data: batches, error } = await scopeAdminTenant(_supabase
+        .from('coop_dividend_batches')
+        .select('id,fiscal_year,title,period_start,period_end,is_first_dividend,capital_basis_start,capital_basis_end,usage_basis_start,usage_basis_end,capital_dividend_pool,usage_dividend_pool,total_gross_amount,income_tax_rate,local_income_tax_rate,status,minutes_doc_id,general_meeting_date,general_meeting_agenda,general_meeting_resolution_result,payment_due_date,created_at,updated_at'))
+        .order('fiscal_year', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+    if (error) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-5 text-danger">${escapeHtml(error.message)}</td></tr>`;
+        return;
+    }
+
+    const rows = Array.isArray(batches) ? batches : [];
+    const ids = rows.map((batch) => batch.id).filter(Boolean);
+    let itemRows = [];
+
+    if (ids.length > 0) {
+        const { data: items, error: itemError } = await scopeAdminTenant(_supabase
+            .from('coop_dividend_batch_items')
+            .select('batch_id,gross_amount,net_amount,payment_status'))
+            .in('batch_id', ids);
+
+        if (itemError) {
+            console.warn('배당 회차 항목 집계 실패:', itemError);
+        } else {
+            itemRows = Array.isArray(items) ? items : [];
+        }
+    }
+
+    const summaryByBatch = new Map();
+    itemRows.forEach((item) => {
+        const key = String(item.batch_id || '');
+        if (!summaryByBatch.has(key)) {
+            summaryByBatch.set(key, { item_count: 0, item_gross_total: 0, item_net_total: 0 });
+        }
+        const summary = summaryByBatch.get(key);
+        summary.item_count += 1;
+        summary.item_gross_total += normalizeDividendExportNumber(item.gross_amount);
+        summary.item_net_total += normalizeDividendExportNumber(item.net_amount);
+    });
+
+    g_dividend_batch_state.batches = rows.map((batch) => ({
+        ...batch,
+        ...(summaryByBatch.get(String(batch.id)) || { item_count: 0, item_gross_total: 0, item_net_total: 0 })
+    }));
+
+    const selectedStillExists = g_dividend_batch_state.batches.some((batch) => String(batch.id) === String(g_dividend_batch_state.selectedBatchId));
+    if (!selectedStillExists) {
+        g_dividend_batch_state.selectedBatchId = g_dividend_batch_state.batches[0]?.id || '';
+    }
+
+    renderDividendManageBatches();
+    renderDividendBatchSelectedPanel(getDividendManageSelectedBatch());
+    if (showToast) myAlert('배당 회차 목록을 새로고침했습니다.');
+} // End of fetchDividendManageBatches
+
+function selectDividendManageBatch(batchId) {
+    g_dividend_batch_state.selectedBatchId = String(batchId || '');
+    renderDividendManageBatches();
+    renderDividendBatchSelectedPanel(getDividendManageSelectedBatch());
+} // End of selectDividendManageBatch
+
+async function createDividendBatch() {
+    const fiscalYear = Number(getDividendBatchFormValue('dividendBatchFiscalYear'));
+    const title = getDividendBatchFormValue('dividendBatchTitle');
+    const periodStart = getDividendBatchFormValue('dividendBatchPeriodStart');
+    const periodEnd = getDividendBatchFormValue('dividendBatchPeriodEnd');
+    const capitalStart = getDividendBatchFormValue('dividendBatchCapitalStart');
+    const capitalEnd = getDividendBatchFormValue('dividendBatchCapitalEnd');
+    const usageStart = getDividendBatchFormValue('dividendBatchUsageStart');
+    const usageEnd = getDividendBatchFormValue('dividendBatchUsageEnd');
+    const capitalPool = normalizeDividendBatchAmount('dividendBatchCapitalPool');
+    const usagePool = normalizeDividendBatchAmount('dividendBatchUsagePool');
+    const incomeTaxRate = Number(getDividendBatchFormValue('dividendBatchIncomeTaxRate'));
+    const localIncomeTaxRate = Number(getDividendBatchFormValue('dividendBatchLocalTaxRate'));
+
+    if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) return myAlert('회계연도를 확인해주세요.', 'warning');
+    if (!title) return myAlert('회차명을 입력해주세요.', 'warning');
+    if (!periodStart || !periodEnd || periodEnd < periodStart) return myAlert('결산 기간을 확인해주세요.', 'warning');
+    if (!capitalStart || !capitalEnd || capitalEnd < capitalStart) return myAlert('출자금 기준 기간을 확인해주세요.', 'warning');
+    if (!usageStart || !usageEnd || usageEnd < usageStart) return myAlert('이용실적 기준 기간을 확인해주세요.', 'warning');
+    if (capitalPool === null || usagePool === null) return myAlert('배당 재원은 0 이상 숫자로 입력해주세요.', 'warning');
+    if (!Number.isFinite(incomeTaxRate) || incomeTaxRate < 0 || !Number.isFinite(localIncomeTaxRate) || localIncomeTaxRate < 0) return myAlert('세율을 확인해주세요.', 'warning');
+
+    const coopId = await getAdminMemberCoopId();
+    const payload = {
+        fiscal_year: fiscalYear,
+        title,
+        period_start: periodStart,
+        period_end: periodEnd,
+        is_first_dividend: !!document.getElementById('dividendBatchIsFirst')?.checked,
+        capital_basis_start: capitalStart,
+        capital_basis_end: capitalEnd,
+        usage_basis_start: usageStart,
+        usage_basis_end: usageEnd,
+        capital_dividend_pool: Math.trunc(capitalPool),
+        usage_dividend_pool: Math.trunc(usagePool),
+        income_tax_rate: incomeTaxRate,
+        local_income_tax_rate: localIncomeTaxRate,
+        status: 'DRAFT'
+    };
+    if (coopId) payload.coop_id = coopId;
+
+    myConfirm(`${title} 회차를 생성하시겠습니까?`, async () => {
+        showLoading(true);
+        const { data, error } = await _supabase
+            .from('coop_dividend_batches')
+            .insert(payload)
+            .select('id')
+            .single();
+        showLoading(false);
+
+        if (error) return myAlert('배당 회차 생성 실패: ' + error.message, 'error');
+
+        g_dividend_batch_state.selectedBatchId = data?.id || '';
+        myAlert('배당 회차가 생성되었습니다.');
+        fetchDividendManageBatches(false);
+    });
+} // End of createDividendBatch
+
+function requireDividendManageBatchId() {
+    const batchId = String(g_dividend_batch_state.selectedBatchId || '').trim();
+    if (!batchId) {
+        myAlert('배당 회차를 먼저 선택해주세요.', 'warning');
+        return '';
+    }
+    return batchId;
+} // End of requireDividendManageBatchId
+
+async function runDividendCapitalCalculation(batchId) {
+    const targetId = String(batchId || requireDividendManageBatchId()).trim();
+    if (!targetId) return;
+
+    myConfirm('선택한 회차의 출자금 기준 배당을 계산하시겠습니까?', async () => {
+        showLoading(true);
+        const { error } = await _supabase.rpc('calculate_capital_dividend_batch', {
+            p_batch_id: targetId,
+            p_confirm_replace: true,
+            p_capital_statuses: ['완료', '전표완료']
+        });
+        showLoading(false);
+
+        if (error) return myAlert('출자금 배당 계산 실패: ' + error.message, 'error');
+        myAlert('출자금 배당 계산이 완료되었습니다.');
+        fetchDividendManageBatches(false);
+    });
+} // End of runDividendCapitalCalculation
+
+async function runDividendUsageCalculation(batchId) {
+    const targetId = String(batchId || requireDividendManageBatchId()).trim();
+    if (!targetId) return;
+
+    myConfirm('선택한 회차의 이용실적 기준 배당을 계산하시겠습니까?', async () => {
+        showLoading(true);
+        const { error } = await _supabase.rpc('calculate_usage_dividend_batch', {
+            p_batch_id: targetId,
+            p_confirm_replace: true
+        });
+        showLoading(false);
+
+        if (error) return myAlert('이용실적 배당 계산 실패: ' + error.message, 'error');
+        myAlert('이용실적 배당 계산이 완료되었습니다.');
+        fetchDividendManageBatches(false);
+    });
+} // End of runDividendUsageCalculation
+
+async function approveSelectedDividendBatch() {
+    const batchId = requireDividendManageBatchId();
+    if (!batchId) return;
+
+    const minutesDocId = getDividendBatchFormValue('dividendBatchMinutesDocId');
+    const meetingDate = getDividendBatchFormValue('dividendBatchMeetingDate');
+    const agenda = getDividendBatchFormValue('dividendBatchAgenda');
+    const resolutionResult = getDividendBatchFormValue('dividendBatchResolutionResult') || 'APPROVED';
+
+    if (!minutesDocId) return myAlert('총회 의사록 UUID를 입력해주세요.', 'warning');
+    if (!meetingDate) return myAlert('총회일을 입력해주세요.', 'warning');
+    if (!agenda) return myAlert('안건명을 입력해주세요.', 'warning');
+
+    myConfirm('선택한 배당 회차에 총회 승인 근거를 반영하시겠습니까?', async () => {
+        showLoading(true);
+        const { error } = await _supabase.rpc('approve_dividend_batch_by_general_meeting', {
+            p_batch_id: batchId,
+            p_minutes_doc_id: minutesDocId,
+            p_general_meeting_date: meetingDate,
+            p_general_meeting_agenda: agenda,
+            p_resolution_result: resolutionResult
+        });
+        showLoading(false);
+
+        if (error) return myAlert('총회 승인 반영 실패: ' + error.message, 'error');
+        myAlert('총회 승인 근거가 반영되었습니다.');
+        fetchDividendManageBatches(false);
+    });
+} // End of approveSelectedDividendBatch
+
+async function finalizeSelectedDividendBatch() {
+    const batchId = requireDividendManageBatchId();
+    if (!batchId) return;
+
+    const paymentDueDate = getDividendBatchFormValue('dividendBatchPaymentDueDate');
+    if (!paymentDueDate) return myAlert('지급예정일을 입력해주세요.', 'warning');
+
+    myConfirm('선택한 배당 회차를 조합원 공개 상태로 확정하시겠습니까?', async () => {
+        showLoading(true);
+        const { error } = await _supabase.rpc('finalize_dividend_batch', {
+            p_batch_id: batchId,
+            p_payment_due_date: paymentDueDate
+        });
+        showLoading(false);
+
+        if (error) return myAlert('배당 확정 실패: ' + error.message, 'error');
+        myAlert('배당 회차가 확정되었습니다.');
+        fetchDividendManageBatches(false);
+    });
+} // End of finalizeSelectedDividendBatch
+
 const DIVIDEND_BANK_TRANSFER_SAMPLE_BANK_NAMES = Object.freeze([
     '* 입금 은행명 입니다. ',
     'BNK투자증권',
@@ -11056,10 +11686,21 @@ function getDividendExportRpcErrorMessage(error) {
 
 function getDividendExportStatusBadge(status) {
     const safeStatus = escapeHtml(status || '-');
+    if (status === 'DRAFT') return '<span class="badge bg-light text-dark border">작성중</span>';
+    if (status === 'CALCULATED') return '<span class="badge bg-secondary bg-opacity-10 text-secondary">계산완료</span>';
+    if (status === 'REVIEW_READY') return '<span class="badge bg-warning bg-opacity-10 text-dark">검토대기</span>';
+    if (status === 'GENERAL_MEETING_APPROVED') return '<span class="badge bg-success bg-opacity-10 text-success">총회승인</span>';
     if (status === 'FINALIZED') return '<span class="badge bg-primary bg-opacity-10 text-primary">확정</span>';
     if (status === 'PAYMENT_READY') return '<span class="badge bg-info bg-opacity-10 text-info">지급준비</span>';
     if (status === 'PARTIALLY_PAID') return '<span class="badge bg-warning bg-opacity-10 text-dark">부분지급</span>';
     if (status === 'PAID') return '<span class="badge bg-success">지급완료</span>';
+    if (status === 'REVISION_REQUIRED') return '<span class="badge bg-danger bg-opacity-10 text-danger">수정필요</span>';
+    if (status === 'CANCELED') return '<span class="badge bg-dark">취소</span>';
+    if (status === 'READY') return '<span class="badge bg-info bg-opacity-10 text-info">지급대기</span>';
+    if (status === 'FILE_EXPORTED') return '<span class="badge bg-primary bg-opacity-10 text-primary">파일생성</span>';
+    if (status === 'FAILED') return '<span class="badge bg-danger bg-opacity-10 text-danger">지급실패</span>';
+    if (status === 'HELD') return '<span class="badge bg-secondary">보류</span>';
+    if (status === 'NOT_READY') return '<span class="badge bg-light text-dark border">미준비</span>';
     return `<span class="badge bg-light text-dark border">${safeStatus}</span>`;
 } // End of getDividendExportStatusBadge
 
