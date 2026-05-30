@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.81
-Change: Read finalized dividend batch items through member-only RPC.
+Version: v1.0.82
+Change: Guide unmatched social logins back to verified email OTP login.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.81 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.82 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1270,6 +1270,20 @@ oninput="autoHyphen(this)">
 </div>
 </div>
 
+<div id="socialEmailVerifyModal" class="custom-modal-overlay">
+<div class="custom-modal-box" style="text-align: left;">
+<h5 class="fw-bold mb-3"><i class="bi bi-envelope-check me-2"></i>가입 이메일 인증이 필요합니다</h5>
+<p class="small text-muted mb-4">
+카카오 또는 네이버 로그인은 완료되었지만, 연결된 조합원 정보를 찾지 못했습니다.<br>
+처음 이용하는 경우에는 가입 시 등록한 이메일로 먼저 인증해주세요.
+</p>
+<div class="d-grid gap-2">
+<button type="button" id="btnSocialEmailOtp" class="btn btn-success fw-bold" onclick="returnToEmailOtpLogin()">가입 이메일로 인증하기</button>
+<button type="button" class="btn btn-light btn-sm text-secondary" onclick="returnToEmailOtpLogin()">로그인 화면으로 돌아가기</button>
+</div>
+</div>
+</div>
+
 
 
 <div id="modifyAppModal" class="custom-modal-overlay">
@@ -1792,6 +1806,20 @@ return portalProviderMatches(user?.app_metadata?.provider, providerKey)
 || portalProviderMatches(user?.raw_app_meta_data?.provider, providerKey);
 }
 
+function getPrimaryPortalAuthProvider(user) {
+return normalizePortalProviderKey(
+user?.app_metadata?.provider
+|| user?.raw_app_meta_data?.provider
+|| ''
+);
+}
+
+function isDirectSocialPortalSession(user) {
+const provider = getPrimaryPortalAuthProvider(user);
+return portalProviderMatches(provider, 'kakao')
+|| portalProviderMatches(provider, 'custom:naver');
+}
+
 function getPortalIdentityProviderId(user, providerKey) {
 const identities = Array.isArray(user?.identities) ? user.identities : [];
 const matched = identities.find((identity) => portalProviderMatches(identity?.provider, providerKey));
@@ -2182,6 +2210,10 @@ return dest.href;
 		if (claimErr) throw claimErr;
 
 		if (!claimRes || !claimRes.success) {
+		if (isDirectSocialPortalSession(user)) {
+		openSocialEmailVerificationModal();
+		return;
+		}
 		document.getElementById('manualMatchModal').style.display = 'flex';
 		await loadDuplicateEmailCandidates(user && user.email ? user.email : '');
 		return;
@@ -2310,6 +2342,67 @@ phoneGroup.classList.add('hidden');
 emailGroup.classList.remove('hidden');
 document.getElementById('manualEmail').focus();
 }
+}
+
+let socialEmailVerifyPreviousBodyOverflow = '';
+
+function openSocialEmailVerificationModal() {
+const manualModal = document.getElementById('manualMatchModal');
+const socialModal = document.getElementById('socialEmailVerifyModal');
+if (!socialModal) return;
+if (socialModal.style.display === 'flex') return;
+
+if (manualModal) {
+manualModal.style.display = 'none';
+manualModal.classList.remove('modal-depth-back');
+}
+resetDuplicateEmailCandidates();
+socialEmailVerifyPreviousBodyOverflow = document.body.style.overflow;
+document.body.style.overflow = 'hidden';
+socialModal.classList.remove('modal-depth-back');
+socialModal.style.display = 'flex';
+setTimeout(() => document.getElementById('btnSocialEmailOtp')?.focus(), 0);
+}
+
+function closeSocialEmailVerificationModal() {
+const socialModal = document.getElementById('socialEmailVerifyModal');
+if (socialModal) {
+socialModal.style.display = 'none';
+socialModal.classList.remove('modal-depth-back');
+}
+document.body.style.overflow = socialEmailVerifyPreviousBodyOverflow;
+socialEmailVerifyPreviousBodyOverflow = '';
+}
+
+async function returnToEmailOtpLogin() {
+const button = document.getElementById('btnSocialEmailOtp');
+if (button?.disabled) return;
+if (button) button.disabled = true;
+
+showLoading(true, '이메일 인증 화면으로 이동합니다...');
+clearSupabaseAuthCache();
+await signOutSilently(_supabase);
+clearSupabaseAuthCache();
+
+curAuth = null;
+curMem = null;
+rootMemberProfileId = null;
+pendingLoginOtpEmail = '';
+closeSocialEmailVerificationModal();
+resetDuplicateEmailCandidates();
+hidePortalRetryState();
+
+const sentMsgBox = document.getElementById('sentMsgBox');
+const emailInput = document.getElementById('emailInput');
+const otpInput = document.getElementById('otpInput');
+if (sentMsgBox) sentMsgBox.classList.add('hidden');
+if (emailInput) emailInput.value = '';
+if (otpInput) otpInput.value = '';
+
+showOnly('loginSection');
+showLoading(false);
+if (button) button.disabled = false;
+setTimeout(() => emailInput?.focus(), 0);
 }
 
 let duplicateEmailCandidates = [];
