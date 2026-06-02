@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.62
-Change: 2026-05-27 - Include approved paid leave in payroll work days by default.
+Version: v1.0.63
+Change: 2026-06-02 - Add coop-level lunch time settings for hourly leave calculations.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.62 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.63 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -150,7 +150,7 @@ Change: 2026-05-27 - Include approved paid leave in payroll work days by default
         <ul class="nav nav-tabs mb-3" id="settingTab" role="tablist">
           <li class="nav-item">
             <a class="nav-link active" data-bs-toggle="tab" href="#setTax">📊 주요 요율/비과세</a></li>
-          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setCompany">🏢 회사 정보</a></li><li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced" onclick="loadAdvancedSettings()">⚙️ 고급 설정 (전체)</a></li></ul><div class="tab-content"><div class="tab-pane fade show active" id="setTax"><h6 class="fw-bold text-primary small border-bottom pb-1 mb-2">4대보험 총 요율 (자동 50:50 분할)</h6><div class="row g-2 mb-3"><div class="col-6"><label class="small text-muted">국민연금 총합 (%)</label><input type="number" id="set_pension_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('pension')"><div class="x-small text-secondary mt-1">인당: <span id="half_pension">0</span>%</div></div><div class="col-6"><label class="small text-muted">건강보험 총합 (%)</label><input type="number" id="set_health_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('health')"><div class="x-small text-secondary mt-1">인당: <span id="half_health">0</span>%</div></div></div><h6 class="fw-bold text-success small border-bottom pb-1 mb-2">비과세 한도 설정</h6><div class="row g-2 mb-3"><div class="col-4"><label class="small text-muted">식대비과세</label><input type="number" id="set_meal" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">차량비과세</label><input type="number" id="set_car" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">육아비과세</label><input type="number" id="set_child" class="form-control form-control-sm"></div></div></div><div class="tab-pane fade" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/*" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" min="1" step="1" placeholder="예: 100000"><div class="form-text">조합원 명부 엑셀 다운로드의 출자좌수 계산과 시청 신고용 출력에 사용됩니다.</div></div></div></div><div class="tab-pane fade" id="setAdvanced"><div class="table-responsive" style="max-height: 300px;"><table class="table table-sm adv-table align-middle"><thead class="table-light"><tr><th>항목 키</th><th style="width: 120px;">값</th><th>설명</th></tr></thead><tbody id="advSettingsBody"></tbody></table></div></div></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">설정 통합 저장</button></div></div></div></div>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setCompany">🏢 회사 정보</a></li><li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced" onclick="loadAdvancedSettings()">⚙️ 고급 설정 (전체)</a></li></ul><div class="tab-content"><div class="tab-pane fade show active" id="setTax"><h6 class="fw-bold text-primary small border-bottom pb-1 mb-2">4대보험 총 요율 (자동 50:50 분할)</h6><div class="row g-2 mb-3"><div class="col-6"><label class="small text-muted">국민연금 총합 (%)</label><input type="number" id="set_pension_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('pension')"><div class="x-small text-secondary mt-1">인당: <span id="half_pension">0</span>%</div></div><div class="col-6"><label class="small text-muted">건강보험 총합 (%)</label><input type="number" id="set_health_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('health')"><div class="x-small text-secondary mt-1">인당: <span id="half_health">0</span>%</div></div></div><h6 class="fw-bold text-success small border-bottom pb-1 mb-2">비과세 한도 설정</h6><div class="row g-2 mb-3"><div class="col-4"><label class="small text-muted">식대비과세</label><input type="number" id="set_meal" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">차량비과세</label><input type="number" id="set_car" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">육아비과세</label><input type="number" id="set_child" class="form-control form-control-sm"></div></div></div><div class="tab-pane fade" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/*" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" min="1" step="1" placeholder="예: 100000"><div class="form-text">조합원 명부 엑셀 다운로드의 출자좌수 계산과 시청 신고용 출력에 사용됩니다.</div></div></div></div><div class="tab-pane fade" id="setAdvanced"><div class="table-responsive" style="max-height: 300px;"><table class="table table-sm adv-table align-middle"><thead class="table-light"><tr><th>항목 키</th><th style="width: 120px;">값</th><th>설명</th></tr></thead><tbody id="advSettingsBody"></tbody></table></div></div></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">설정 통합 저장</button></div></div></div></div>
 <div class="modal fade" id="inviteModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">✨ 직원 신규 등록</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="alert alert-light border text-center small mb-3">🆔 사원번호는 자동 생성됩니다.</div><div id="inviteStatus" class="alert d-none small py-2 px-3 mb-3" role="status" aria-live="polite"></div><label class="small text-muted ms-1">이름</label><input type="text" id="newName" class="form-control mb-2" placeholder="홍길동"><label class="small text-muted ms-1">이메일</label><input type="email" id="newEmail" class="form-control mb-2" placeholder="user@gmail.com"><div class="row g-2 mb-2"><div class="col"><label class="small text-muted ms-1">직급</label><select id="newRank" class="form-select"></select></div><div class="col"><label class="small text-muted ms-1">권한</label><select id="newRole" class="form-select"><option value="admin_all">전체 관리자 (모든 접근)</option><option value="admin_home">홈페이지 관리자 (전자결재/마이페이지/홈페이지)</option><option value="admin_accounting">회계 관리자 (전자결재/마이페이지/회계관리)</option><option value="staff">일반 직원 (전자결재/마이페이지)</option></select></div></div><div class="row g-2 mb-2"><div class="col"><label class="small text-muted ms-1">결재 레벨</label><select id="newAuthLevel" class="form-select"></select><div class="form-text">1이 최상위, 숫자가 클수록 하위 결재선입니다.</div></div></div><div class="mb-2"><label class="small text-muted ms-1">부서</label><select id="newDeptSelect" class="form-select" onchange="syncInviteDepartmentInput()"><option value="">미지정</option></select></div><div class="mb-3 hidden" id="newDeptCustomWrap"><label class="small text-muted ms-1">직접 입력 부서명</label><input type="text" id="newDeptCustom" class="form-control" placeholder="기획팀"></div><button id="inviteSubmitBtn" class="btn btn-primary w-100 btn-rounded py-2" onclick="runInvite()">등록하기</button></div></div></div></div>
 
 <div class="modal fade" id="detailModal" tabindex="-1">
@@ -842,6 +842,12 @@ const HR_WORKFORCE_LITE_LEAVE_CONFIG_KEY = 'approval_leave_type_catalog_json';
 const HR_DEPARTMENT_CATALOG_KEY = 'hr_department_catalog_json';
 const HR_POSITION_CATALOG_KEY = 'hr_position_catalog_json';
 const HR_OVERTIME_POLICY_KEY = 'approval_overtime_policy_json';
+const HR_WORK_LUNCH_START_TIME_KEY = 'work_lunch_start_time';
+const HR_WORK_LUNCH_END_TIME_KEY = 'work_lunch_end_time';
+const HR_DEFAULT_WORK_LUNCH_TIME = Object.freeze({
+    start: '12:00',
+    end: '13:00'
+});
 const HR_APPROVAL_DEFAULT_MIDDLE_APPROVER_KEY = 'approval_default_middle_approver_emp_id';
 const HR_APPROVAL_DEFAULT_FINAL_APPROVER_KEY = 'approval_default_final_approver_emp_id';
 const HR_PAYROLL_IMPORT_MAPPING_KEY = 'hr_payroll_import_mapping_json';
@@ -1449,6 +1455,41 @@ function parseHrOvertimePolicy(rawValue) {
         return base;
     }
 }
+
+function normalizeHrTimeOfDay(value, fallback = '') {
+    const safe = String(value || '').trim();
+    const match = safe.match(/^(\d{2}):(\d{2})$/);
+    if (!match) return String(fallback || '').trim();
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return String(fallback || '').trim();
+    }
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+} // End of normalizeHrTimeOfDay
+
+function getHrWorkLunchTimeSettingsFromUi() {
+    return {
+        start: normalizeHrTimeOfDay(document.getElementById('set_workLunchStartTime')?.value),
+        end: normalizeHrTimeOfDay(document.getElementById('set_workLunchEndTime')?.value)
+    };
+} // End of getHrWorkLunchTimeSettingsFromUi
+
+function validateHrWorkLunchTimeSettings(settingsValue) {
+    const start = normalizeHrTimeOfDay(settingsValue?.start);
+    const end = normalizeHrTimeOfDay(settingsValue?.end);
+    if (!start || !end) {
+        throw new Error('점심시간 시작과 종료를 모두 입력해주세요.');
+    }
+    const toMinutes = (value) => {
+        const [hour, minute] = value.split(':').map(Number);
+        return (hour * 60) + minute;
+    };
+    if (toMinutes(end) <= toMinutes(start)) {
+        throw new Error('점심시간 종료는 시작보다 늦어야 합니다.');
+    }
+    return { start, end };
+} // End of validateHrWorkLunchTimeSettings
 
 function ensureHrStructureSettingsFields() {
     const companyPane = document.getElementById('setCompany');
@@ -3960,6 +4001,8 @@ async function loadSettings() {
     document.getElementById("set_ceoName").value = resolveAdminEmployeeChairmanName(companyInfo);
     document.getElementById("set_bizNum").value = companyInfo['bizNum'] || "";
     document.getElementById("set_address").value = companyInfo['company_address'] || "";
+    document.getElementById("set_workLunchStartTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_START_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.start);
+    document.getElementById("set_workLunchEndTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_END_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.end);
     document.getElementById("set_memberShareUnitAmount").value = companyInfo['member_export_share_unit_amount'] || "";
     syncCompanySealSettingsUi();
     await loadCalendarIcsSettings();
@@ -3979,6 +4022,7 @@ async function saveSettings() {
         const telegramApprovalConfig = collectTelegramApprovalSettingsFromUi();
         const approvalLineConfig = collectApprovalLineSettingsFromUi();
         const calendarSettingsConfig = collectCalendarSettingsFromUi();
+        const lunchTimeSettings = validateHrWorkLunchTimeSettings(getHrWorkLunchTimeSettingsFromUi());
 
         if (!coopId) throw new Error("조합 정보가 없어 저장할 수 없습니다. 다시 로그인해 주세요.");
 
@@ -4079,6 +4123,8 @@ async function saveSettings() {
             { coop_id: coopId, key: 'chairman_name', value: ceo },
             { coop_id: coopId, key: 'bizNum', value: document.getElementById("set_bizNum").value },
             { coop_id: coopId, key: 'company_address', value: document.getElementById("set_address").value },
+            { coop_id: coopId, key: HR_WORK_LUNCH_START_TIME_KEY, value: lunchTimeSettings.start },
+            { coop_id: coopId, key: HR_WORK_LUNCH_END_TIME_KEY, value: lunchTimeSettings.end },
             { coop_id: coopId, key: 'member_export_share_unit_amount', value: memberShareUnitAmount },
             { coop_id: coopId, key: HR_DEPARTMENT_CATALOG_KEY, value: JSON.stringify(departmentCatalog) },
             { coop_id: coopId, key: HR_POSITION_CATALOG_KEY, value: JSON.stringify(positionCatalog) },
