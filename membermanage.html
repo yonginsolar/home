@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.82
-Change: Guide unmatched social logins back to verified email OTP login.
+Version: v1.0.83
+Change: Distinguish approved extra-capital deposit confirmations in the member timeline.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.82 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.83 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -302,6 +302,30 @@ font-size: 1rem; font-weight: 600; margin: 0; color: #333;
 }
 .timeline-content p {
 font-size: 0.9rem; color: #666; margin: 0;
+}
+.timeline-item.timeline-item--capital-confirmation {
+margin-left: 18px;
+padding: 0 0 14px 16px;
+border-left: 1px dashed #a5d6a7;
+}
+.timeline-item.timeline-item--capital-confirmation::before {
+width: 8px;
+height: 8px;
+left: -5px;
+top: 5px;
+background: #e8f5e9;
+border-width: 1px;
+}
+.timeline-item--capital-confirmation .timeline-date {
+font-size: 0.72rem;
+margin-bottom: 1px;
+}
+.timeline-item--capital-confirmation .timeline-content h6 {
+font-size: 0.82rem;
+margin-bottom: 1px;
+}
+.timeline-item--capital-confirmation .timeline-content p {
+font-size: 0.8rem;
 }
 
 /* [메뉴 탭] 버튼 스타일 */
@@ -4281,14 +4305,23 @@ const items = [];
 // 1. 출자금 (Ledger)
 // ---------------------------------------------------------
 ledger.forEach(d => {
+const isApprovedExtraCapitalDeposit = d.note === '추가 출자 (신청 승인)'
+    && d.depositor === '관리자 승인';
+const timelineItemClass = isApprovedExtraCapitalDeposit
+    ? 'timeline-item timeline-item--capital-confirmation'
+    : 'timeline-item';
+const timelineTitle = isApprovedExtraCapitalDeposit
+    ? '출자금 입금 확인'
+    : '출자금 입금';
+
 items.push({
 ts: d.deposit_date ? new Date(d.deposit_date).getTime() : 0,
 dateStr: formatMemberKstDate(d.deposit_date),
 html: `
-               <div class="timeline-item">
+               <div class="${timelineItemClass}">
                    <div class="timeline-date">${formatMemberKstDate(d.deposit_date)}</div>
                    <div class="timeline-content">
-                       <h6 class="fw-bold text-success"><i class="bi bi-piggy-bank me-1"></i>출자금 입금</h6>
+                       <h6 class="fw-bold text-success"><i class="bi bi-piggy-bank me-1"></i>${timelineTitle}</h6>
                        <p class="text-dark fw-bold">+${Number(d.amount).toLocaleString()}원</p>
                    </div>
                </div>`
