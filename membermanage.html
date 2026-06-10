@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.84
-Change: Notify tenant ERP admins when a member submits a capital or withdrawal request.
+Version: v1.0.85
+Change: Notify tenant ERP admins when a member modifies or cancels a pending request.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.84 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.85 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1366,7 +1366,7 @@ let isBoardLoading = false;
 let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
 let portalBootInProgress = false;
-window.__memberAppLocks = { submitApplication: false, requestConnect: false, submitFamily: false, submitPost: false, disconnectRelation: false };
+window.__memberAppLocks = { submitApplication: false, cancelApplication: false, modifyApplication: false, requestConnect: false, submitFamily: false, submitPost: false, disconnectRelation: false };
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
 if (!value) return fallback;
@@ -4464,41 +4464,70 @@ list.innerHTML = items.map(i => i.html).join('');
 async function cancelApp(appId) {
 // confirm -> showConfirmModal
 showConfirmModal('신청을 취소하시겠습니까?', async function() {
+if (window.__memberAppLocks.cancelApplication) {
+showModal('이미 취소 처리 중입니다. 잠시만 기다려주세요.');
+return;
+}
+window.__memberAppLocks.cancelApplication = true;
 showLoading(true);
-const { error } = await scopeMemberTenant(_supabase
+
+try {
+const { data: cancelledApplication, error } = await scopeMemberTenant(_supabase
 .from('coop_applications')
-.update({ status: 'cancelled' }))
-.eq('id', appId);
+.update({ status: 'cancelled', updated_at: new Date().toISOString() }))
+.eq('id', appId)
+.eq('status', 'pending')
+.select('id')
+.maybeSingle();
+
+if(error) throw error;
+if (!cancelledApplication?.id) {
+showLoading(false);
+showModal('이미 처리되었거나 취소할 수 없는 신청입니다.');
+loadDashboardData(getPreferredDashboardProfileId());
+return;
+}
+
+notifyMemberApplicationAdmins(cancelledApplication.id, 'application_cancelled').catch((notifyError) => {
+console.warn('[member-request-alert] application cancellation admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+});
 
 showLoading(false);
-if(error) showModal('취소 실패: ' + error.message);
-else {
 showModal('취소되었습니다.');
 loadDashboardData(getPreferredDashboardProfileId());
+} catch (error) {
+showLoading(false);
+showModal('취소 실패: ' + error.message);
+} finally {
+showLoading(false);
+window.__memberAppLocks.cancelApplication = false;
 }
 });
-}
+} // End of cancelApp
 
 // [수정] 신청 로직 (스마트 새로고침 적용)
-async function notifyMemberApplicationAdmins(applicationId) {
+async function notifyMemberApplicationAdmins(applicationId, eventType = 'application') {
 const safeApplicationId = Number(applicationId || 0);
+const safeEventType = String(eventType || '').trim();
+const supportedEventTypes = ['application', 'application_modified', 'application_cancelled'];
 if (!Number.isInteger(safeApplicationId) || safeApplicationId <= 0) return;
+if (!supportedEventTypes.includes(safeEventType)) return;
 if (!_supabase?.functions || typeof _supabase.functions.invoke !== 'function') return;
 
 try {
 const { data, error } = await _supabase.functions.invoke('erp-member-request-alert', {
 body: {
-eventType: 'application',
+eventType: safeEventType,
 applicationId: safeApplicationId
 }
 });
 
 if (error) throw error;
 if (data && data.ok === false && !data.skipped) {
-console.warn('[member-request-alert] application admin telegram skipped:', data);
+console.warn(`[member-request-alert] ${safeEventType} admin telegram skipped:`, data);
 }
 } catch (error) {
-console.warn('[member-request-alert] application admin telegram skipped:', error?.message || error, error || {});
+console.warn(`[member-request-alert] ${safeEventType} admin telegram skipped:`, error?.message || error, error || {});
 }
 } // End of notifyMemberApplicationAdmins
 
@@ -6761,29 +6790,43 @@ if(newAmount <= 0) return showModal('금액을 올바르게 입력해주세요.'
 
 // 2. 실행
 showConfirmModal('신청 내용을 수정하시겠습니까?', async () => {
+if (window.__memberAppLocks.modifyApplication) {
+showModal('이미 수정 처리 중입니다. 잠시만 기다려주세요.');
+return;
+}
+window.__memberAppLocks.modifyApplication = true;
 showLoading(true, '수정 중...');
 closeModifyModal(); // 모달 닫기
 
+try {
 // RPC 호출
-const { data, error } = await _supabase.rpc('modify_application', {
+const { error } = await _supabase.rpc('modify_application', {
 p_app_id: appId,
 p_user_uid: getActiveMemberProfileId(), // 보안 확인용
 p_new_amount: newAmount,
 p_new_reason: null // 사유 수정은 UI가 복잡해지니 일단 null (기존 유지)
 });
 
-showLoading(false);
+if(error) throw error;
 
-if(error) {
-// DB에서 10만원 미만 등 에러가 발생하면 여기서 잡힘
-// alert 대신 커스텀 모달 사용 권장
-showModal('수정 실패:\n' + error.message);
-} else {
+notifyMemberApplicationAdmins(appId, 'application_modified').catch((notifyError) => {
+console.warn('[member-request-alert] application modification admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+});
+
+showLoading(false);
 showModal('성공적으로 수정되었습니다.');
 reloadDashboard(); // 데이터 갱신
+} catch (error) {
+// DB에서 10만원 미만 등 에러가 발생하면 여기서 잡힘
+// alert 대신 커스텀 모달 사용 권장
+showLoading(false);
+showModal('수정 실패:\n' + error.message);
+} finally {
+showLoading(false);
+window.__memberAppLocks.modifyApplication = false;
 }
 });
-}
+} // End of submitModifyApp
 
 // [수정된 버전] 선거 시스템 이동 함수
 // [수정] 선거 시스템 이동 함수 (서버 검증 추가)
