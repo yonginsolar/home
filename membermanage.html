@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.83
-Change: Distinguish approved extra-capital deposit confirmations in the member timeline.
+Version: v1.0.84
+Change: Notify tenant ERP admins when a member submits a capital or withdrawal request.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.83 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.84 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -4480,6 +4480,28 @@ loadDashboardData(getPreferredDashboardProfileId());
 }
 
 // [수정] 신청 로직 (스마트 새로고침 적용)
+async function notifyMemberApplicationAdmins(applicationId) {
+const safeApplicationId = Number(applicationId || 0);
+if (!Number.isInteger(safeApplicationId) || safeApplicationId <= 0) return;
+if (!_supabase?.functions || typeof _supabase.functions.invoke !== 'function') return;
+
+try {
+const { data, error } = await _supabase.functions.invoke('erp-member-request-alert', {
+body: {
+eventType: 'application',
+applicationId: safeApplicationId
+}
+});
+
+if (error) throw error;
+if (data && data.ok === false && !data.skipped) {
+console.warn('[member-request-alert] application admin telegram skipped:', data);
+}
+} catch (error) {
+console.warn('[member-request-alert] application admin telegram skipped:', error?.message || error, error || {});
+}
+} // End of notifyMemberApplicationAdmins
+
 async function submitApplication(type) {
 let amount = 0, reason = '';
 const totalCap = Number(curMem.total_capital || 0);
@@ -4536,7 +4558,7 @@ showModal('이미 동일한 신청이 접수되어 있습니다.\n처리 결과�
 return;
 }
 
-const { error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
+const { data: createdApplication, error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
 member_uid: activeProfileId,
 member_id: curMem.member_id,
 name: curMem.name,
@@ -4544,9 +4566,13 @@ type: type,
 amount: amount,
 reason: reason,
 status: 'pending'
-}));
+})).select('id').single();
 
 if(error) throw error;
+
+notifyMemberApplicationAdmins(createdApplication?.id).catch((notifyError) => {
+console.warn('[member-request-alert] application admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+});
 
 showModal('신청되었습니다.');
 

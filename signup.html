@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.33
-Change: Allow valid 13-digit corporate registration numbers without blocking on an unreliable client checksum.
+Version: v1.0.34
+Change: Route new-member Telegram alerts through the tenant-aware ERP admin DM channel.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.33 | signup.html');</script>
+  <script>console.log('[Version] v1.0.34 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -49,7 +49,6 @@ allowKakaoApp: true
 <script src="shared/browser_env_guard.js?v=20260421-3"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260421-1"></script>
 <script src="shared/auth_broker_helper.js?v=20260421-4"></script>
@@ -421,6 +420,27 @@ let resolveSignupAuthInitialStateReady = null;
 const signupAuthInitialStateReadyPromise = new Promise((resolve) => {
 resolveSignupAuthInitialStateReady = resolve;
 });
+
+async function notifySignupRequestAdmins(memberUuid) {
+const safeMemberUuid = String(memberUuid || '').trim();
+if (!safeMemberUuid || !_supabase?.functions || typeof _supabase.functions.invoke !== 'function') return;
+
+try {
+const { data, error } = await _supabase.functions.invoke('erp-member-request-alert', {
+body: {
+eventType: 'signup',
+memberUuid: safeMemberUuid
+}
+});
+
+if (error) throw error;
+if (data && data.ok === false && !data.skipped) {
+console.warn('[member-request-alert] signup admin telegram skipped:', data);
+}
+} catch (error) {
+console.warn('[member-request-alert] signup admin telegram skipped:', error?.message || error, error || {});
+}
+} // End of notifySignupRequestAdmins
 
 function markSignupAuthInitialStateReady(reason = '') {
 if (signupAuthInitialStateReady) return;
@@ -1809,7 +1829,7 @@ is_agreed: true
 };
 
 // Supabase 전송
-const { error } = await _supabase.rpc('create_public_signup_member_v2', {
+const { data: createdMemberUuid, error } = await _supabase.rpc('create_public_signup_member_v2', {
   p_coop_code: signupTenant.coop_code,
   p_name: insertData.name,
   p_member_type: insertData.member_type,
@@ -1862,6 +1882,10 @@ true
 btn.disabled = false;
 btn.innerText = '가입 신청하기 ☀️';
 } else {
+  notifySignupRequestAdmins(createdMemberUuid).catch((notifyError) => {
+    console.warn('[member-request-alert] signup admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+  });
+
   // ===========================================
   // 알림톡 발송 (Supabase Edge Function 호출)
   // - 템플릿 검수 중엔 실패할 수 있으니 에러 본문을 최대한 뽑아봅니다.
@@ -1914,7 +1938,6 @@ btn.innerText = '가입 신청하기 ☀️';
     "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
     false
   );
-    window.sendTalk("신규 가입 신청이 들어왔습니다. 관리자 페이지를 확인하세요.", "[가입 알림]");
 }
 
 } finally {
