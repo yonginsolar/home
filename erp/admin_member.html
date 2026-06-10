@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.88
-Change: 2026-06-01 - Apply the capital dividend percentage as an annual rate.
+Version: v1.0.89
+Change: Separate additional-capital requests from general-meeting reduction and withdrawal requests.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.88';
+window.ADMIN_MEMBER_VERSION = 'v1.0.89';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -344,7 +344,30 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             </button>
         </div>
 
-        <ul class="nav nav-tabs mb-3" id="app-sub-tabs">
+        <ul class="nav nav-pills gap-2 mb-3" id="app-type-tabs">
+            <li class="nav-item">
+                <button id="app-type-extra" class="nav-link active fw-bold" onclick="filterAppType('extra')">
+                    추가출자 <span id="app-type-extra-count" class="badge bg-light text-dark ms-1">0</span>
+                </button>
+            </li>
+            <li class="nav-item">
+                <button id="app-type-governance" class="nav-link text-secondary" onclick="filterAppType('governance')">
+                    감자·탈퇴 <span id="app-type-governance-count" class="badge bg-light text-dark ms-1">0</span>
+                </button>
+            </li>
+            <li class="nav-item">
+                <button id="app-type-all" class="nav-link text-secondary" onclick="filterAppType('all')">
+                    전체 <span id="app-type-all-count" class="badge bg-light text-dark ms-1">0</span>
+                </button>
+            </li>
+        </ul>
+
+        <div id="app-governance-notice" class="alert alert-warning border-warning d-none mb-3">
+            <div class="fw-bold"><i class="bi bi-calendar-check me-1"></i> 감자·탈퇴 신청은 총회 승인 대상입니다.</div>
+            <div class="small mt-1">정기총회 승인과 반환금 지급을 완료한 뒤 처리해주세요. 접수된 신청은 총회 처리 전까지 대기 상태로 보관할 수 있습니다.</div>
+        </div>
+
+        <ul class="nav nav-tabs mb-3" id="app-status-tabs">
             <li class="nav-item">
                 <button class="nav-link active fw-bold" onclick="filterAppList('pending')">처리 대기중</button>
             </li>
@@ -12942,6 +12965,7 @@ function selectMemberForModal(id, name) {
 
 let g_apps = []; // 데이터 저장용
 let g_app_filter = 'pending'; // 현재 탭 상태
+let g_app_type_filter = 'extra'; // 추가출자 / 감자·탈퇴 / 전체
 
 // 1. 신청 목록 불러오기
 // [디버깅용] fetchApplications 함수
@@ -12984,8 +13008,13 @@ function renderAppList() {
 
     // 탭 필터링
     const list = g_apps.filter(item => {
-        if (g_app_filter === 'pending') return item.status === 'pending';
-        return true; // all
+        const matchesType = g_app_type_filter === 'extra'
+            ? item.type === 'extra'
+            : g_app_type_filter === 'governance'
+            ? ['reduction', 'withdraw'].includes(item.type)
+            : true;
+        const matchesStatus = g_app_filter === 'pending' ? item.status === 'pending' : true;
+        return matchesType && matchesStatus;
     });
 
     if (list.length === 0) {
@@ -13009,10 +13038,16 @@ function renderAppList() {
         if (app.status === 'pending') {
             statusBadge = `<span class="badge bg-warning text-dark">대기중</span>`;
             const safeAppType = escapeJsString(app.type || '');
+            const approveButtonClass = app.type === 'extra' ? 'btn-primary' : ['reduction', 'withdraw'].includes(app.type) ? 'btn-warning' : 'btn-primary';
+            const approveButtonLabel = app.type === 'extra'
+                ? '<i class="bi bi-cash-coin"></i> 입금 확인·승인'
+                : ['reduction', 'withdraw'].includes(app.type)
+                ? '<i class="bi bi-calendar-check"></i> 총회 승인 후 처리'
+                : '<i class="bi bi-check-lg"></i> 승인/확인';
             // ★ [승인/확인] 버튼 (클릭 시 DB 기록됨)
             actionBtns = `
-                <button class="btn btn-sm btn-primary fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">
-                    <i class="bi bi-check-lg"></i> 승인/확인
+                <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">
+                    ${approveButtonLabel}
                 </button>
                 <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="processApp(${app.id}, 'reject')">
                     반려
@@ -13022,6 +13057,8 @@ function renderAppList() {
             statusBadge = `<span class="badge bg-success">처리완료</span>`;
         } else if (app.status === 'rejected') {
             statusBadge = `<span class="badge bg-danger">반려됨</span>`;
+        } else if (app.status === 'cancelled') {
+            statusBadge = `<span class="badge bg-secondary">신청취소</span>`;
         }
 
         tbody.innerHTML += `
@@ -13041,19 +13078,39 @@ function renderAppList() {
     });
 }
 
-// 3. 탭 전환 (대기중 / 전체)
+// 3. 상태 탭 전환 (대기중 / 전체)
 function filterAppList(mode) {
     g_app_filter = mode;
     // 탭 스타일 변경
-    const tabs = document.querySelectorAll('#app-sub-tabs .nav-link');
+    const tabs = document.querySelectorAll('#app-status-tabs .nav-link');
     tabs.forEach(t => t.classList.remove('active', 'fw-bold'));
     if(mode === 'pending') tabs[0].classList.add('active', 'fw-bold');
     else tabs[1].classList.add('active', 'fw-bold');
 
     renderAppList();
-}
+} // End of filterAppList
 
-// 4. 승인/반려 실행 (핵심)
+// 4. 유형 탭 전환 (추가출자 / 감자·탈퇴 / 전체)
+function filterAppType(mode) {
+    const safeMode = ['extra', 'governance', 'all'].includes(mode) ? mode : 'extra';
+    g_app_type_filter = safeMode;
+
+    document.querySelectorAll('#app-type-tabs .nav-link').forEach(tab => {
+        tab.classList.remove('active', 'fw-bold');
+        tab.classList.add('text-secondary');
+    });
+    const activeTab = document.getElementById(`app-type-${safeMode}`);
+    if (activeTab) {
+        activeTab.classList.add('active', 'fw-bold');
+        activeTab.classList.remove('text-secondary');
+    }
+
+    const governanceNotice = document.getElementById('app-governance-notice');
+    if (governanceNotice) governanceNotice.classList.toggle('d-none', safeMode !== 'governance');
+    renderAppList();
+} // End of filterAppType
+
+// 5. 승인/반려 실행 (핵심)
 async function processApp(appId, action, type, amount) {
     let msg = "";
     if (action === 'reject') {
@@ -13061,8 +13118,8 @@ async function processApp(appId, action, type, amount) {
     } else {
         // 승인 시 안내 메시지
         if (type === 'extra') msg = `[추가 출자] ${Number(amount).toLocaleString()}원 입금을 확인하셨습니까?\n승인 시 출자금 원장에 '입금' 기록됩니다.`;
-        else if (type === 'reduction') msg = `[감자] ${Number(amount).toLocaleString()}원을 반환하셨습니까?\n승인 시 출자금 원장에 '차감(-)' 기록됩니다.`;
-        else if (type === 'withdraw') msg = `[탈퇴] 반환금 지급을 완료하셨습니까?\n승인 시 출자금 원장에 '전액 차감' 기록됩니다.`;
+        else if (type === 'reduction') msg = `[감자] 총회 승인과 ${Number(amount).toLocaleString()}원 반환금 지급을 모두 완료하셨습니까?\n처리 시 출자금 원장에 '차감(-)' 기록됩니다.`;
+        else if (type === 'withdraw') msg = `[탈퇴] 총회 승인과 반환금 지급을 모두 완료하셨습니까?\n처리 시 출자금 원장에 '전액 차감' 기록됩니다.`;
         else msg = "이 신청을 승인 처리하시겠습니까?";
     }
 
@@ -13088,7 +13145,7 @@ async function processApp(appId, action, type, amount) {
     });
 }
 
-// 5. 뱃지 업데이트 (대시보드/사이드바)
+// 6. 뱃지 업데이트 (대시보드/사이드바/유형 탭)
 function updateAppBadges(pendingCountOverride = null) {
     const pendingCount = (typeof pendingCountOverride === 'number')
         ? pendingCountOverride
@@ -13105,7 +13162,15 @@ function updateAppBadges(pendingCountOverride = null) {
         if(pendingCount > 0) sideEl.classList.remove('hidden');
         else sideEl.classList.add('hidden');
     }
-}
+
+    const setTypeCount = (id, count) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = count;
+    };
+    setTypeCount('app-type-extra-count', g_apps.filter(a => a.type === 'extra' && a.status === 'pending').length);
+    setTypeCount('app-type-governance-count', g_apps.filter(a => ['reduction', 'withdraw'].includes(a.type) && a.status === 'pending').length);
+    setTypeCount('app-type-all-count', g_apps.filter(a => a.status === 'pending').length);
+} // End of updateAppBadges
 
 // ================================================================
 // [신규 기능] 대리 접수 (Proxy)
