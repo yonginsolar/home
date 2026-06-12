@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.66
-Change: Release image-based self-reliant village dashboard.
+Version: v1.0.67
+Change: Connect the village dashboard to actual six-month public aggregates.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.66 | index.html');</script>
+<script>console.log('[Version] v1.0.67 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -1411,7 +1411,7 @@ Change: Release image-based self-reliant village dashboard.
           <div class="village-impact-kicker"><i class="bi bi-sun-fill"></i> 시민이 키우는 에너지 자립마을</div>
           <h3>한 사람의 참여가 마을의 햇빛이 됩니다</h3>
           <p>집마다 모인 시민의 힘과 금고에 쌓인 출자금이 우리 지역의 에너지 전환을 만듭니다.</p>
-          <div class="village-demo-notice" id="village-demo-notice"><i class="bi bi-stars"></i> 지역 비율과 과거 월별 수치는 화면 검토용 데모 분포입니다.</div>
+          <div class="village-demo-notice" id="village-demo-notice"><i class="bi bi-clock-history"></i> 최근 6개월 실제 현황을 불러오고 있습니다.</div>
         </div>
 
         <div class="village-map-shell">
@@ -1440,22 +1440,22 @@ Change: Release image-based self-reliant village dashboard.
 
               <div class="vault-board" id="village-vault-board">에너지 자립 기금 0원</div>
             </div>
-            <div class="timeline-tab-bar" id="timeline-tab-bar" role="tablist" aria-label="데모 월별 현황"></div>
+            <div class="timeline-tab-bar" id="timeline-tab-bar" role="tablist" aria-label="최근 6개월 실제 현황"></div>
           </div>
 
           <div class="village-summary-strip">
             <div class="village-summary-card">
               <span class="village-summary-label">현재 함께하는 조합원</span>
-              <span class="village-summary-value"><span id="stat-total-members" class="purecounter">0</span>명</span>
+              <span class="village-summary-value"><span id="stat-total-members">0</span>명</span>
               <span class="village-summary-meta">개인 <strong id="stat-ind-members">0</strong>명 · 단체 <strong id="stat-grp-members">0</strong>곳</span>
             </div>
             <div class="village-summary-card">
               <span class="village-summary-label">현재 총출자금</span>
-              <span class="village-summary-value"><span id="stat-total-amount" class="purecounter">0</span>원</span>
+              <span class="village-summary-value"><span id="stat-total-amount">0</span>원</span>
               <span class="village-summary-meta">시민이 직접 만든 에너지 자립 기금</span>
             </div>
             <div class="village-summary-card">
-              <span class="village-summary-label">선택한 데모 시점</span>
+              <span class="village-summary-label">선택한 시점</span>
               <span class="village-summary-value" id="village-selected-month">현재</span>
               <span class="village-summary-meta" id="village-selected-summary">마을 지도를 준비하고 있습니다.</span>
             </div>
@@ -1980,18 +1980,11 @@ Change: Release image-based self-reliant village dashboard.
 
     let g_total_amount = 0;
     const VILLAGE_REGION_CONFIG = Object.freeze([
-      { key: 'cheoin', label: '처인구', weight: 0.36, color: '#65a36f' },
-      { key: 'giheung', label: '기흥구', weight: 0.29, color: '#e5a13b' },
-      { key: 'suji', label: '수지구', weight: 0.23, color: '#4e87b7' },
-      { key: 'outside', label: '용인 외', weight: 0.12, color: '#d87961' }
+      { key: 'cheoin', label: '처인구', color: '#65a36f' },
+      { key: 'giheung', label: '기흥구', color: '#e5a13b' },
+      { key: 'suji', label: '수지구', color: '#4e87b7' },
+      { key: 'outside', label: '용인 외', color: '#d87961' }
     ]);
-    const VILLAGE_MONTH_PROGRESS = Object.freeze([0.72, 0.78, 0.84, 0.9, 0.95, 1]);
-    const VILLAGE_DEMO_FALLBACK_STATS = Object.freeze({
-      count: 168,
-      ind_count: 157,
-      grp_count: 11,
-      amount: 824000000
-    });
     const villageDashboardState = {
       stats: { count: 0, ind_count: 0, grp_count: 0, amount: 0 },
       months: [],
@@ -2653,11 +2646,6 @@ Change: Release image-based self-reliant village dashboard.
 
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
-    const isLocalVillagePreview = ['localhost', '127.0.0.1', ''].includes(window.location.hostname);
-    const initialVillageStats = isLocalVillagePreview
-      ? VILLAGE_DEMO_FALLBACK_STATS
-      : { count: 0, ind_count: 0, grp_count: 0, amount: 0 };
-    hydrateVillageDashboard(initialVillageStats, isLocalVillagePreview);
     await hydratePublicBranding();
     bindHomeAuthState();
     refreshHomeAuthUi();
@@ -2727,70 +2715,106 @@ document.addEventListener('DOMContentLoaded', async () => {
 // [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
 // [1] 통계 데이터 (업그레이드 버전)
 async function fetchStats() {
-      const { data: stats, error } = await _client.rpc('get_public_stats');
+      const { data: timelinePayload, error: timelineError } = await _client.rpc('get_public_village_timeline');
+      const actualMonths = normalizeVillageTimelineMonths(timelinePayload);
 
-      if (stats) {
-        // 전역 변수에 저장
-        g_total_amount = stats.amount || 0;
-
-        // 숫자와 콤마 설정 (HTML 속성에 값 주입)
-        updateCounter('stat-total-members', stats.count);
-        updateCounter('stat-total-amount', stats.amount);
-        updateCounter('stat-ind-members', stats.ind_count);
-        updateCounter('stat-grp-members', stats.grp_count);
-        hydrateVillageDashboard(stats);
-
-        // ★ [수정됨] end: 100 삭제. 이제 HTML에 적힌 진짜 숫자로 작동함.
-        new PureCounter({
-            selector: '.purecounter',
-            duration: 1,
-            separator: true // 콤마 켜기
-        });
-
-        // 계산기 범위 설정 실행
+      if (!timelineError && actualMonths.length > 0) {
+        const latestMonth = actualMonths[actualMonths.length - 1];
+        hydrateVillageDashboard(latestMonth, actualMonths);
+        g_total_amount = latestMonth.amount;
         setupCalculator(g_total_amount);
-        updatePublicStatsTimestamp(new Date());
+        updatePublicStatsTimestamp(timelinePayload?.generated_at || new Date());
+        return;
       }
+
+      console.warn('get_public_village_timeline failed:', timelineError);
+      const { data: stats, error: statsError } = await _client.rpc('get_public_stats');
+      if (statsError || !stats) {
+        console.warn('get_public_stats fallback failed:', statsError);
+        hydrateVillageDashboard({ count: 0, ind_count: 0, grp_count: 0, amount: 0 }, null, true);
+        return;
+      }
+
+      const fallbackMonths = getVillageMonthEntries();
+      const latestFallback = fallbackMonths[fallbackMonths.length - 1];
+      Object.assign(latestFallback, normalizeVillageStats(stats));
+      hydrateVillageDashboard(stats, fallbackMonths, true);
+      g_total_amount = Math.max(0, Number(stats.amount || 0));
+      setupCalculator(g_total_amount);
+      updatePublicStatsTimestamp(new Date());
     }
 
 function getVillageMonthEntries() {
-      const formatter = new Intl.DateTimeFormat('ko-KR', {
-        timeZone: 'Asia/Seoul',
-        year: 'numeric',
-        month: '2-digit'
-      });
       const entries = [];
-      const now = new Date();
+      const currentMonthParts = getHomeMonthKey().split('-').map(Number);
+      const currentYear = currentMonthParts[0];
+      const currentMonthIndex = currentMonthParts[1] - 1;
 
       for (let offset = 5; offset >= 0; offset -= 1) {
-        const monthDate = new Date(now.getFullYear(), now.getMonth() - offset, 1);
-        const year = monthDate.getFullYear();
-        const month = String(monthDate.getMonth() + 1).padStart(2, '0');
+        const monthDate = new Date(Date.UTC(currentYear, currentMonthIndex - offset, 1));
+        const year = monthDate.getUTCFullYear();
+        const month = String(monthDate.getUTCMonth() + 1).padStart(2, '0');
         entries.push({
           key: `${year}-${month}`,
           label: offset === 0 ? '현재' : `${month}월`,
-          fullLabel: formatter.format(monthDate).replace(/\.\s?/g, '.').replace(/\.$/, ''),
-          progress: VILLAGE_MONTH_PROGRESS[entries.length]
+          fullLabel: `${year}.${month}`,
+          count: 0,
+          ind_count: 0,
+          grp_count: 0,
+          amount: 0,
+          regions: { cheoin: 0, giheung: 0, suji: 0, outside: 0 }
         });
       }
 
       return entries;
     }
 
-function allocateVillageRegionCounts(totalCount) {
-      const safeTotal = Math.max(0, Math.floor(Number(totalCount || 0)));
-      const counts = [];
-      let assigned = 0;
+function normalizeVillageStats(stats) {
+      return {
+        count: Math.max(0, Number(stats?.count || 0)),
+        ind_count: Math.max(0, Number(stats?.ind_count || 0)),
+        grp_count: Math.max(0, Number(stats?.grp_count || 0)),
+        amount: Math.max(0, Number(stats?.amount || 0))
+      };
+    }
 
-      VILLAGE_REGION_CONFIG.forEach(function assignRegion(region, index) {
-        const isLast = index === VILLAGE_REGION_CONFIG.length - 1;
-        const nextCount = isLast ? safeTotal - assigned : Math.floor(safeTotal * region.weight);
-        const safeCount = Math.max(0, nextCount);
-        counts.push({ key: region.key, label: region.label, count: safeCount, color: region.color });
-        assigned += safeCount;
+function normalizeVillageTimelineMonths(payload) {
+      const currentMonthKey = getHomeMonthKey();
+      const sourceMonths = Array.isArray(payload?.months) ? payload.months : [];
+
+      return sourceMonths.map(function normalizeMonth(month) {
+        const key = String(month?.key || '');
+        const monthNumber = key.slice(5, 7);
+        const stats = normalizeVillageStats(month);
+        return {
+          key: key,
+          label: key === currentMonthKey ? '현재' : `${monthNumber}월`,
+          fullLabel: key.replace('-', '.'),
+          count: stats.count,
+          ind_count: stats.ind_count,
+          grp_count: stats.grp_count,
+          amount: stats.amount,
+          regions: {
+            cheoin: Math.max(0, Number(month?.regions?.cheoin || 0)),
+            giheung: Math.max(0, Number(month?.regions?.giheung || 0)),
+            suji: Math.max(0, Number(month?.regions?.suji || 0)),
+            outside: Math.max(0, Number(month?.regions?.outside || 0))
+          }
+        };
+      }).filter(function keepValidMonth(month) {
+        return /^\d{4}-\d{2}$/.test(month.key);
       });
+    }
 
-      return counts;
+function getVillageRegionCounts(month) {
+      return VILLAGE_REGION_CONFIG.map(function mapRegion(region) {
+        return {
+          key: region.key,
+          label: region.label,
+          color: region.color,
+          count: Math.max(0, Number(month?.regions?.[region.key] || 0))
+        };
+      });
     }
 
 function formatVillageWon(value) {
@@ -2950,16 +2974,16 @@ function switchTimelineMonth(selectedMonth) {
       if (!month) return;
 
       villageDashboardState.selectedMonth = month.key;
-      const selectedCount = Math.max(0, Math.round(villageDashboardState.stats.count * month.progress));
-      const selectedAmount = Math.max(0, Math.round(villageDashboardState.stats.amount * month.progress / 10000) * 10000);
-      const regions = allocateVillageRegionCounts(selectedCount);
+      const selectedCount = Math.max(0, Number(month.count || 0));
+      const selectedAmount = Math.max(0, Number(month.amount || 0));
+      const regions = getVillageRegionCounts(month);
 
       updateVillageRegionLabels(regions, selectedAmount);
       renderVillageCrowds(month.key, regions, selectedAmount);
       updateVillageTimelineButtons(month.key);
 
       const monthLabel = document.getElementById('village-selected-month');
-      if (monthLabel) monthLabel.textContent = month.label === '현재' ? '현재 실시간 현황' : `${month.fullLabel} 데모`;
+      if (monthLabel) monthLabel.textContent = month.label === '현재' ? '현재 실시간 현황' : `${month.fullLabel} 월말`;
       const summary = document.getElementById('village-selected-summary');
       if (summary) summary.textContent = `조합원 ${selectedCount.toLocaleString('ko-KR')}명 · 자립 기금 ${formatVillageCompactWon(selectedAmount)}`;
     }
@@ -2985,20 +3009,15 @@ function renderVillageTimelineButtons() {
       });
     }
 
-function hydrateVillageDashboard(stats, isFallback) {
-      villageDashboardState.stats = {
-        count: Math.max(0, Number(stats?.count || 0)),
-        ind_count: Math.max(0, Number(stats?.ind_count || 0)),
-        grp_count: Math.max(0, Number(stats?.grp_count || 0)),
-        amount: Math.max(0, Number(stats?.amount || 0))
-      };
-      if (isFallback) {
-        updateCounter('stat-total-members', villageDashboardState.stats.count);
-        updateCounter('stat-total-amount', villageDashboardState.stats.amount);
-        updateCounter('stat-ind-members', villageDashboardState.stats.ind_count);
-        updateCounter('stat-grp-members', villageDashboardState.stats.grp_count);
-      }
-      villageDashboardState.months = getVillageMonthEntries();
+function hydrateVillageDashboard(stats, months, isFallback) {
+      villageDashboardState.stats = normalizeVillageStats(stats);
+      updateCounter('stat-total-members', villageDashboardState.stats.count);
+      updateCounter('stat-total-amount', villageDashboardState.stats.amount);
+      updateCounter('stat-ind-members', villageDashboardState.stats.ind_count);
+      updateCounter('stat-grp-members', villageDashboardState.stats.grp_count);
+      villageDashboardState.months = Array.isArray(months) && months.length > 0
+        ? months
+        : getVillageMonthEntries();
       villageDashboardState.layouts = {};
       renderVillageTimelineButtons();
       const latestMonth = villageDashboardState.months[villageDashboardState.months.length - 1];
@@ -3006,8 +3025,8 @@ function hydrateVillageDashboard(stats, isFallback) {
       const notice = document.getElementById('village-demo-notice');
       if (notice) {
         notice.innerHTML = isFallback
-          ? '<i class="bi bi-stars"></i> 로컬 미리보기용 예시 통계입니다. 운영 도메인에서는 실제 전체 통계로 교체됩니다.'
-          : '<i class="bi bi-stars"></i> 전체 조합원·출자금은 실제 값이며, 지역 비율과 과거 월별 수치는 화면 검토용 데모 분포입니다.';
+          ? '<i class="bi bi-exclamation-circle"></i> 월별 이력을 불러오지 못해 현재 전체 현황만 표시하고 있습니다.'
+          : '<i class="bi bi-clock-history"></i> 최근 6개월 실제 조합원 가입일·출자금 입금일 기준 집계입니다.';
       }
     }
 
