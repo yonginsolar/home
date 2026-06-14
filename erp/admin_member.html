@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.89
-Change: Separate additional-capital requests from general-meeting reduction and withdrawal requests.
+Version: v1.0.90
+Change: Show member counts and percentages together in location dashboard charts.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.89';
+window.ADMIN_MEMBER_VERSION = 'v1.0.90';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8911,6 +8911,40 @@ function buildDashboardLocationChartData(locationStats, labelOrder) {
     };
 }
 
+function getDashboardChartDatasetTotal(chart, datasetIndex = 0) {
+    const values = chart?.data?.datasets?.[datasetIndex]?.data;
+    if (!Array.isArray(values)) return 0;
+    return values.reduce(function (total, value) {
+        const count = Number(value || 0);
+        return total + (Number.isFinite(count) && count > 0 ? count : 0);
+    }, 0);
+}
+
+function formatDashboardChartCountPercentage(label, count, total) {
+    const safeLabel = String(label || '').trim() || '기타';
+    const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+    const percentage = total > 0 ? (safeCount / total) * 100 : 0;
+    return `${safeLabel} ${safeCount.toLocaleString()}명 (${percentage.toFixed(1)}%)`;
+}
+
+function buildDashboardDoughnutLegendLabels(chart) {
+    const defaultGenerator = Chart.defaults?.plugins?.legend?.labels?.generateLabels;
+    const labels = typeof defaultGenerator === 'function' ? defaultGenerator(chart) : [];
+    const total = getDashboardChartDatasetTotal(chart);
+    return labels.map(function (item) {
+        const count = Number(chart?.data?.datasets?.[item.datasetIndex || 0]?.data?.[item.index] || 0);
+        return {
+            ...item,
+            text: formatDashboardChartCountPercentage(item.text, count, total)
+        };
+    });
+}
+
+function buildDashboardDoughnutTooltipLabel(context) {
+    const total = getDashboardChartDatasetTotal(context.chart, context.datasetIndex || 0);
+    return formatDashboardChartCountPercentage(context.label, context.raw, total);
+}
+
 async function fetchDashboardLocationStats() {
     const totals = {
         yongin: {},
@@ -9091,7 +9125,15 @@ function renderChart(key, canvasId, type, data, titleText = null) {
         plugins: {
             legend: {
                 display: type !== 'bar' || data.indexAxis === 'y', // 막대그래프는 범례 숨김 (깔끔하게)
-                position: 'bottom'
+                position: 'bottom',
+                labels: type === 'doughnut'
+                    ? { generateLabels: buildDashboardDoughnutLegendLabels }
+                    : {}
+            },
+            tooltip: {
+                callbacks: type === 'doughnut'
+                    ? { label: buildDashboardDoughnutTooltipLabel }
+                    : {}
             }
         }
     };
