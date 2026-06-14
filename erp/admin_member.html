@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.90
-Change: Show member counts and percentages together in location dashboard charts.
+Version: v1.0.91
+Change: Merge the youngest age groups and show count and percentage labels above age bars.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.90';
+window.ADMIN_MEMBER_VERSION = 'v1.0.91';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8945,6 +8945,79 @@ function buildDashboardDoughnutTooltipLabel(context) {
     return formatDashboardChartCountPercentage(context.label, context.raw, total);
 }
 
+function buildDashboardAgeChartData(ageStats) {
+    const source = (ageStats && typeof ageStats === 'object') ? ageStats : {};
+    const totals = {};
+
+    Object.keys(source).forEach(function (label) {
+        const count = Number(source[label] || 0);
+        if (!Number.isFinite(count) || count <= 0) return;
+        const normalizedLabel = label === '0대' || label === '10대' ? '10대' : label;
+        totals[normalizedLabel] = (totals[normalizedLabel] || 0) + count;
+    });
+
+    const labels = Object.keys(totals).sort(function (a, b) {
+        const ageA = Number.parseInt(a, 10);
+        const ageB = Number.parseInt(b, 10);
+        if (Number.isFinite(ageA) && Number.isFinite(ageB)) return ageA - ageB;
+        if (Number.isFinite(ageA)) return -1;
+        if (Number.isFinite(ageB)) return 1;
+        return a.localeCompare(b, 'ko');
+    });
+
+    return {
+        labels,
+        data: labels.map(function (label) { return totals[label]; })
+    };
+}
+
+function formatDashboardAgePercentage(count, total) {
+    const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+    const percentage = total > 0 ? (safeCount / total) * 100 : 0;
+    return `${safeCount.toLocaleString()}명 (${percentage.toFixed(1)}%)`;
+}
+
+function buildDashboardAgeTooltipLabel(context) {
+    const total = getDashboardChartDatasetTotal(context.chart, context.datasetIndex || 0);
+    return formatDashboardAgePercentage(context.raw, total);
+}
+
+const DASHBOARD_AGE_VALUE_LABEL_PLUGIN = Object.freeze({
+    id: 'dashboardAgeValueLabels',
+    afterDatasetsDraw: function (chart) {
+        const dataset = chart?.data?.datasets?.[0];
+        const meta = chart?.getDatasetMeta?.(0);
+        if (!dataset || !Array.isArray(dataset.data) || !meta || !Array.isArray(meta.data)) return;
+
+        const total = getDashboardChartDatasetTotal(chart);
+        const ctx = chart.ctx;
+        if (!ctx || !chart.chartArea) return;
+
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        meta.data.forEach(function (bar, index) {
+            const count = Number(dataset.data[index] || 0);
+            if (!Number.isFinite(count) || count <= 0) return;
+
+            const percentage = total > 0 ? (count / total) * 100 : 0;
+            const x = Number(bar.x);
+            const y = Math.max(chart.chartArea.top + 11, Number(bar.y) - 19);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+            ctx.fillStyle = '#495057';
+            ctx.font = '700 12px Pretendard, sans-serif';
+            ctx.fillText(`${count.toLocaleString()}명`, x, y);
+            ctx.fillStyle = '#6c757d';
+            ctx.font = '600 11px Pretendard, sans-serif';
+            ctx.fillText(`(${percentage.toFixed(1)}%)`, x, y + 14);
+        });
+
+        ctx.restore();
+    }
+});
+
 async function fetchDashboardLocationStats() {
     const totals = {
         yongin: {},
@@ -9078,16 +9151,14 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
         });
 
         // (3) 연령대 분포 (Bar Chart)
-        // 정렬: 10대, 20대... 순서 보장
-        const ageObj = stats.age_group || {};
-        const ageLabels = Object.keys(ageObj).sort();
-        const ageData = ageLabels.map(k => ageObj[k]);
+        // 0대와 10대는 화면에서 10대로 합치고 숫자 순서로 정렬한다.
+        const ageChartData = buildDashboardAgeChartData(stats.age_group || {});
 
         renderChart('age', 'chart-age', 'bar', {
-            labels: ageLabels,
+            labels: ageChartData.labels,
             datasets: [{
                 label: '조합원 수',
-                data: ageData,
+                data: ageChartData.data,
                 backgroundColor: '#ffc107' // Warning Color
             }]
         });
@@ -9133,10 +9204,23 @@ function renderChart(key, canvasId, type, data, titleText = null) {
             tooltip: {
                 callbacks: type === 'doughnut'
                     ? { label: buildDashboardDoughnutTooltipLabel }
+                    : key === 'age'
+                    ? { label: buildDashboardAgeTooltipLabel }
                     : {}
             }
         }
     };
+
+    if (key === 'age') {
+        options.layout = { padding: { top: 32 } };
+        options.scales = {
+            y: {
+                beginAtZero: true,
+                grace: '18%',
+                ticks: { precision: 0 }
+            }
+        };
+    }
 
     // 제목이 있으면 추가 (예: 감자액 표시용)
     if (titleText) {
@@ -9152,7 +9236,8 @@ function renderChart(key, canvasId, type, data, titleText = null) {
     g_charts[key] = new Chart(ctx, {
         type: type,
         data: data,
-        options: options
+        options: options,
+        plugins: key === 'age' ? [DASHBOARD_AGE_VALUE_LABEL_PLUGIN] : []
     });
 }
 
