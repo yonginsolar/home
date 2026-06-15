@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.71
-Change: Improve village dashboard mobile readability and month navigation.
+Version: v1.0.72
+Change: Prebuild the latest three village months and optimize animated layers.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.71 | index.html');</script>
+<script>console.log('[Version] v1.0.72 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -224,11 +224,26 @@ Change: Improve village dashboard mobile readability and month navigation.
       z-index: 20;
       pointer-events: none;
     }
-    #crowd-cheoin { left: 8%; top: 58%; width: 21%; height: 24%; }
-    #crowd-giheung { left: 27%; top: 60%; width: 18%; height: 23%; }
-    #crowd-suji { left: 43.5%; top: 59%; width: 15.5%; height: 23%; }
-    #crowd-outside { left: 58.5%; top: 60%; width: 15%; height: 22%; }
-    #crowd-vault { left: 78.5%; top: 47%; width: 18%; height: 24%; }
+    .village-layer-stack,
+    .village-month-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .village-layer-stack {
+      z-index: 20;
+    }
+    .village-month-layer {
+      contain: layout paint style;
+    }
+    .village-month-layer[hidden] {
+      display: none;
+    }
+    .village-crowd[data-zone="cheoin"] { left: 8%; top: 58%; width: 21%; height: 24%; }
+    .village-crowd[data-zone="giheung"] { left: 27%; top: 60%; width: 18%; height: 23%; }
+    .village-crowd[data-zone="suji"] { left: 43.5%; top: 59%; width: 15.5%; height: 23%; }
+    .village-crowd[data-zone="outside"] { left: 58.5%; top: 60%; width: 15%; height: 22%; }
+    .village-crowd[data-zone="vault"] { left: 78.5%; top: 47%; width: 18%; height: 24%; }
     .village-avatar,
     .village-coin-dot {
       position: absolute;
@@ -239,7 +254,6 @@ Change: Improve village dashboard mobile readability and month navigation.
       padding: 0;
       background: transparent;
       pointer-events: none;
-      filter: drop-shadow(0 2px 2px rgba(40, 42, 32, 0.28));
       animation: villageAvatarBob 2.8s ease-in-out infinite;
     }
     .village-avatar-sprite {
@@ -408,7 +422,7 @@ Change: Improve village dashboard mobile readability and month navigation.
     .village-avatar.is-group .village-avatar-sprite.is-companion {
       z-index: -1;
       transform: translateX(28%) translateY(5%) scale(0.76);
-      filter: saturate(0.76) brightness(1.06);
+      opacity: 0.82;
     }
     .village-avatar.is-group .village-avatar-body {
       background:
@@ -600,8 +614,8 @@ Change: Improve village dashboard mobile readability and month navigation.
       50% { transform: translateY(-3px) rotate(1deg); }
     }
     @keyframes villageCoinPulse {
-      0%, 100% { transform: translateY(0) scale(1); filter: drop-shadow(0 2px 2px rgba(40, 42, 32, 0.25)); }
-      50% { transform: translateY(-3px) scale(1.08); filter: drop-shadow(0 3px 4px rgba(255, 194, 28, 0.48)); }
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-3px) scale(1.08); }
     }
     @media (prefers-reduced-motion: reduce) {
       .village-avatar,
@@ -680,9 +694,9 @@ Change: Improve village dashboard mobile readability and month navigation.
       }
       .timeline-tab-bar {
         position: static;
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         align-items: center;
-        justify-content: flex-start;
         gap: 8px;
         min-height: 0;
         padding: 12px 14px 14px;
@@ -692,24 +706,12 @@ Change: Improve village dashboard mobile readability and month navigation.
         background: #fff;
         box-shadow: none;
         backdrop-filter: none;
-        overflow-x: auto;
-        overflow-y: hidden;
-        scroll-padding-inline: 14px;
-        scroll-snap-type: x mandatory;
-        overscroll-behavior-inline: contain;
-        scrollbar-width: none;
-        -webkit-overflow-scrolling: touch;
-      }
-      .timeline-tab-bar::-webkit-scrollbar {
-        display: none;
       }
       .timeline-tab-button {
-        flex: 0 0 clamp(88px, 27vw, 108px);
-        width: auto;
+        width: 100%;
         min-height: 48px;
         padding: 10px 12px;
         font-size: 0.86rem;
-        scroll-snap-align: center;
       }
       .village-summary-strip {
         grid-template-columns: 1fr;
@@ -1515,7 +1517,7 @@ Change: Improve village dashboard mobile readability and month navigation.
           <div class="village-impact-kicker"><i class="bi bi-sun-fill"></i> 시민이 키우는 에너지 자립마을</div>
           <h3>한 사람의 참여가 마을의 햇빛이 됩니다</h3>
           <p>집마다 모인 시민의 힘과 금고에 쌓인 출자금이 우리 지역의 에너지 전환을 만듭니다.</p>
-          <div class="village-demo-notice" id="village-demo-notice"><i class="bi bi-clock-history"></i> 최근 6개월 실제 현황과 조합원 구성을 불러오고 있습니다.</div>
+          <div class="village-demo-notice" id="village-demo-notice"><i class="bi bi-clock-history"></i> 최근 3개월 실제 현황과 조합원 구성을 불러오고 있습니다.</div>
         </div>
 
         <div class="village-map-shell">
@@ -1536,11 +1538,7 @@ Change: Improve village dashboard mobile readability and month navigation.
               <div class="village-stat-bubble" data-zone="outside"><span id="village-label-outside">용인 외<br><strong>0명</strong></span></div>
               <div class="village-stat-bubble" data-zone="vault"><span id="village-label-vault">함께 모은<br><strong>0원</strong></span></div>
 
-              <div id="crowd-cheoin" class="village-crowd" aria-label="처인구 참여 도트"></div>
-              <div id="crowd-giheung" class="village-crowd" aria-label="기흥구 참여 도트"></div>
-              <div id="crowd-suji" class="village-crowd" aria-label="수지구 참여 도트"></div>
-              <div id="crowd-outside" class="village-crowd" aria-label="용인 외 참여 도트"></div>
-              <div id="crowd-vault" class="village-crowd" aria-label="출자금 참여 도트"></div>
+              <div class="village-layer-stack" id="village-layer-stack" aria-label="최근 3개월 조합원과 출자금 변화"></div>
 
               <div class="vault-board" id="village-vault-board">에너지 자립 기금 0원</div>
             </div>
@@ -1551,7 +1549,7 @@ Change: Improve village dashboard mobile readability and month navigation.
               <div class="village-mobile-region-item" data-zone="outside"><span>용인 외</span><strong id="village-mobile-outside">0명</strong></div>
               <div class="village-mobile-region-item" data-zone="vault"><span>함께 모은 출자금</span><strong id="village-mobile-vault">0원</strong></div>
             </div>
-            <div class="timeline-tab-bar" id="timeline-tab-bar" role="tablist" aria-label="최근 6개월 실제 현황"></div>
+            <div class="timeline-tab-bar" id="timeline-tab-bar" role="tablist" aria-label="최근 3개월 실제 현황"></div>
           </div>
 
           <div class="village-summary-strip">
@@ -2100,8 +2098,7 @@ Change: Improve village dashboard mobile readability and month navigation.
       stats: { count: 0, ind_count: 0, grp_count: 0, amount: 0 },
       months: [],
       selectedMonth: '',
-      layouts: {},
-      timelineInteracted: false
+      layouts: {}
     };
     const PUBLIC_HOF_SCOPE = Object.freeze({ MONTHLY: 'MONTHLY', OVERALL: 'OVERALL' });
     const publicHofState = { scope: PUBLIC_HOF_SCOPE.MONTHLY, monthKey: '', loading: false };
@@ -2863,7 +2860,7 @@ function getVillageMonthEntries() {
       const currentYear = currentMonthParts[0];
       const currentMonthIndex = currentMonthParts[1] - 1;
 
-      for (let offset = 5; offset >= 0; offset -= 1) {
+      for (let offset = 2; offset >= 0; offset -= 1) {
         const monthDate = new Date(Date.UTC(currentYear, currentMonthIndex - offset, 1));
         const year = monthDate.getUTCFullYear();
         const month = String(monthDate.getUTCMonth() + 1).padStart(2, '0');
@@ -3148,25 +3145,62 @@ function getVillageLayout(month, regions, selectedAmount) {
       return layout;
     }
 
-function renderVillageCrowds(month, regions, selectedAmount) {
+function createVillageCrowdContainer(zone, label) {
+      const crowd = document.createElement('div');
+      crowd.className = 'village-crowd';
+      crowd.dataset.zone = zone;
+      crowd.setAttribute('aria-label', label);
+      return crowd;
+    }
+
+function createVillageMonthLayer(month) {
+      const regions = getVillageRegionCounts(month);
+      const selectedAmount = Math.max(0, Number(month.amount || 0));
       const layout = getVillageLayout(month, regions, selectedAmount);
+      const layer = document.createElement('div');
+      layer.className = 'village-month-layer';
+      layer.dataset.month = month.key;
+      layer.hidden = true;
+      layer.setAttribute('aria-hidden', 'true');
 
       regions.forEach(function renderRegion(region) {
-        const crowd = document.getElementById(`crowd-${region.key}`);
-        if (!crowd) return;
-        crowd.replaceChildren();
+        const crowd = createVillageCrowdContainer(region.key, `${region.label} 참여 도트`);
+        const fragment = document.createDocumentFragment();
         (layout.regions[region.key] || []).forEach(function renderAvatar(position, index) {
-          crowd.appendChild(createVillageAvatar(region, position.top, position.left, index, position.profile));
+          fragment.appendChild(createVillageAvatar(region, position.top, position.left, index, position.profile));
         });
+        crowd.appendChild(fragment);
+        layer.appendChild(crowd);
       });
 
-      const vaultCrowd = document.getElementById('crowd-vault');
-      if (vaultCrowd) {
-        vaultCrowd.replaceChildren();
-        layout.vault.forEach(function renderCoin(position, index) {
-          vaultCrowd.appendChild(createVillageCoinDot(position.top, position.left, index));
-        });
-      }
+      const vaultCrowd = createVillageCrowdContainer('vault', '출자금 참여 도트');
+      const vaultFragment = document.createDocumentFragment();
+      layout.vault.forEach(function renderCoin(position, index) {
+        vaultFragment.appendChild(createVillageCoinDot(position.top, position.left, index));
+      });
+      vaultCrowd.appendChild(vaultFragment);
+      layer.appendChild(vaultCrowd);
+      return layer;
+    }
+
+function renderVillageMonthLayers() {
+      const stack = document.getElementById('village-layer-stack');
+      if (!stack) return;
+
+      const fragment = document.createDocumentFragment();
+      villageDashboardState.months.forEach(function renderMonthLayer(month) {
+        fragment.appendChild(createVillageMonthLayer(month));
+      });
+      stack.replaceChildren(fragment);
+    }
+
+function showVillageMonthLayer(selectedMonth) {
+      document.querySelectorAll('.village-month-layer').forEach(function updateLayer(layer) {
+        const isActive = layer.dataset.month === selectedMonth;
+        layer.hidden = !isActive;
+        layer.classList.toggle('is-active', isActive);
+        layer.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+      });
     }
 
 function updateVillageRegionLabels(regions, selectedAmount) {
@@ -3185,31 +3219,12 @@ function updateVillageRegionLabels(regions, selectedAmount) {
       if (board) board.textContent = `에너지 자립 기금 ${formatVillageWon(selectedAmount)}`;
     }
 
-function centerVillageTimelineButton(button) {
-      const tabBar = document.getElementById('timeline-tab-bar');
-      if (!button || !tabBar || !window.matchMedia('(max-width: 767px)').matches) return;
-      if (tabBar.scrollWidth <= tabBar.clientWidth) return;
-
-      const targetLeft = button.offsetLeft - ((tabBar.clientWidth - button.offsetWidth) / 2);
-      const maxLeft = Math.max(0, tabBar.scrollWidth - tabBar.clientWidth);
-      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      tabBar.scrollTo({
-        left: Math.min(maxLeft, Math.max(0, targetLeft)),
-        behavior: villageDashboardState.timelineInteracted && !prefersReducedMotion ? 'smooth' : 'auto'
-      });
-    }
-
 function updateVillageTimelineButtons(selectedMonth) {
-      let activeButton = null;
       document.querySelectorAll('.timeline-tab-button').forEach(function updateButton(button) {
         const isActive = button.dataset.month === selectedMonth;
         button.classList.toggle('is-active', isActive);
         button.setAttribute('aria-selected', isActive ? 'true' : 'false');
         button.tabIndex = isActive ? 0 : -1;
-        if (isActive) activeButton = button;
-      });
-      window.requestAnimationFrame(function centerSelectedTimelineButton() {
-        centerVillageTimelineButton(activeButton);
       });
     }
 
@@ -3218,6 +3233,10 @@ function switchTimelineMonth(selectedMonth) {
         return item.key === selectedMonth;
       }) || villageDashboardState.months[villageDashboardState.months.length - 1];
       if (!month) return;
+      if (villageDashboardState.selectedMonth === month.key) {
+        updateVillageTimelineButtons(month.key);
+        return;
+      }
 
       villageDashboardState.selectedMonth = month.key;
       const selectedCount = Math.max(0, Number(month.count || 0));
@@ -3225,7 +3244,7 @@ function switchTimelineMonth(selectedMonth) {
       const regions = getVillageRegionCounts(month);
 
       updateVillageRegionLabels(regions, selectedAmount);
-      renderVillageCrowds(month, regions, selectedAmount);
+      showVillageMonthLayer(month.key);
       updateVillageTimelineButtons(month.key);
 
       const monthLabel = document.getElementById('village-selected-month');
@@ -3239,7 +3258,6 @@ function renderVillageTimelineButtons() {
       const tabBar = document.getElementById('timeline-tab-bar');
       if (!tabBar) return;
       tabBar.replaceChildren();
-      villageDashboardState.timelineInteracted = false;
 
       villageDashboardState.months.forEach(function renderMonth(month) {
         const button = document.createElement('button');
@@ -3250,7 +3268,6 @@ function renderVillageTimelineButtons() {
         button.setAttribute('aria-selected', 'false');
         button.textContent = month.label;
         button.addEventListener('click', function handleTimelineClick() {
-          villageDashboardState.timelineInteracted = true;
           switchTimelineMonth(month.key);
         });
         tabBar.appendChild(button);
@@ -3263,18 +3280,20 @@ function hydrateVillageDashboard(stats, months, isFallback) {
       updateCounter('stat-total-amount', villageDashboardState.stats.amount);
       updateCounter('stat-ind-members', villageDashboardState.stats.ind_count);
       updateCounter('stat-grp-members', villageDashboardState.stats.grp_count);
-      villageDashboardState.months = Array.isArray(months) && months.length > 0
+      const availableMonths = Array.isArray(months) && months.length > 0
         ? months
         : getVillageMonthEntries();
+      villageDashboardState.months = availableMonths.slice(-3);
       villageDashboardState.layouts = {};
       renderVillageTimelineButtons();
+      renderVillageMonthLayers();
       const latestMonth = villageDashboardState.months[villageDashboardState.months.length - 1];
       if (latestMonth) switchTimelineMonth(latestMonth.key);
       const notice = document.getElementById('village-demo-notice');
       if (notice) {
         notice.innerHTML = isFallback
           ? '<i class="bi bi-exclamation-circle"></i> 월별 이력을 불러오지 못해 현재 전체 현황만 표시하고 있습니다.'
-          : '<i class="bi bi-clock-history"></i> 최근 6개월 실제 현황이며, 아바타 구성은 월별 전체 연령대·성별·단체 비율을 반영합니다.';
+          : '<i class="bi bi-clock-history"></i> 최근 3개월 실제 현황이며, 아바타 구성은 월별 전체 연령대·성별·단체 비율을 반영합니다.';
       }
     }
 
