@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.72
-Change: Prebuild the latest three village months and optimize animated layers.
+Version: v1.0.73
+Change: Pause offscreen village motion and limit animated elements on mobile and lower-power devices.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.72 | index.html');</script>
+<script>console.log('[Version] v1.0.73 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -625,6 +625,14 @@ Change: Prebuild the latest three village months and optimize animated layers.
       .timeline-tab-button {
         transition: none;
       }
+    }
+    #impact.village-animation-paused .village-avatar,
+    #impact.village-animation-paused .village-coin-dot {
+      animation-play-state: paused;
+    }
+    #impact.village-low-motion .village-avatar:nth-child(n+7),
+    #impact.village-low-motion .village-coin-dot:nth-child(n+25) {
+      animation: none;
     }
     @media (max-width: 991px) {
       .village-map-shell {
@@ -2098,7 +2106,10 @@ Change: Prebuild the latest three village months and optimize animated layers.
       stats: { count: 0, ind_count: 0, grp_count: 0, amount: 0 },
       months: [],
       selectedMonth: '',
-      layouts: {}
+      layouts: {},
+      animationObserver: null,
+      animationVisibilityBound: false,
+      isSectionVisible: false
     };
     const PUBLIC_HOF_SCOPE = Object.freeze({ MONTHLY: 'MONTHLY', OVERALL: 'OVERALL' });
     const publicHofState = { scope: PUBLIC_HOF_SCOPE.MONTHLY, monthKey: '', loading: false };
@@ -2952,6 +2963,44 @@ function getVillageRegionCounts(month) {
       });
     }
 
+function isVillageLowResourceDevice() {
+      const isMobileViewport = window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+      const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const savesData = Boolean(navigator.connection?.saveData);
+      const lowCpuCount = Number(navigator.hardwareConcurrency || 0) > 0 && Number(navigator.hardwareConcurrency) <= 4;
+      const lowMemory = Number(navigator.deviceMemory || 0) > 0 && Number(navigator.deviceMemory) <= 4;
+      return Boolean(isMobileViewport || prefersReducedMotion || savesData || lowCpuCount || lowMemory);
+    }
+
+function syncVillageAnimationState() {
+      const impact = document.getElementById('impact');
+      if (!impact) return;
+      impact.classList.toggle('village-animation-paused', document.hidden || !villageDashboardState.isSectionVisible);
+    }
+
+function setupVillageAnimationBudget() {
+      const impact = document.getElementById('impact');
+      if (!impact) return;
+
+      impact.classList.toggle('village-low-motion', isVillageLowResourceDevice());
+
+      if (!villageDashboardState.animationObserver && 'IntersectionObserver' in window) {
+        villageDashboardState.animationObserver = new IntersectionObserver(function observeVillageImpact(entries) {
+          villageDashboardState.isSectionVisible = Boolean(entries[0]?.isIntersecting);
+          syncVillageAnimationState();
+        }, { rootMargin: '100px 0px' });
+        villageDashboardState.animationObserver.observe(impact);
+      } else if (!('IntersectionObserver' in window)) {
+        villageDashboardState.isSectionVisible = true;
+      }
+
+      if (!villageDashboardState.animationVisibilityBound) {
+        villageDashboardState.animationVisibilityBound = true;
+        document.addEventListener('visibilitychange', syncVillageAnimationState);
+      }
+      syncVillageAnimationState();
+    }
+
 function formatVillageWon(value) {
       const amount = Math.max(0, Math.round(Number(value || 0)));
       return `${amount.toLocaleString('ko-KR')}원`;
@@ -3276,6 +3325,7 @@ function renderVillageTimelineButtons() {
 
 function hydrateVillageDashboard(stats, months, isFallback) {
       villageDashboardState.stats = normalizeVillageStats(stats);
+      setupVillageAnimationBudget();
       updateCounter('stat-total-members', villageDashboardState.stats.count);
       updateCounter('stat-total-amount', villageDashboardState.stats.amount);
       updateCounter('stat-ind-members', villageDashboardState.stats.ind_count);
