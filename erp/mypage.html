@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.48 | Change: 2026-05-10 - Show payroll over-deduction settlement only on adjusted salary statements. -->
+<!-- Version: v1.0.49 | Change: 2026-06-15 - Show pending leave approval requests in the leave detail report. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.48 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.49 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -267,6 +267,8 @@ let mypageCalendarIcsSettings={enabled:false,feedToken:'',sourceCatalog:null};
 let lastAlertFocusTarget=null;
 const MYPAGE_LEAVE_TYPE_CONFIG_KEY='approval_leave_type_catalog_json';
 const MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot';
+const MYPAGE_LEAVE_RESERVED_STATUSES=Object.freeze(['완료','가승인','증빙확인중','실물결재대기','실물결재완료']);
+const MYPAGE_LEAVE_PENDING_STATUSES=Object.freeze(['진행중']);
 const MYPAGE_BUSINESS_TRIP_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,status,drafter_id,drafter_name,business_trip_snapshot';
 const MYPAGE_SCHEMA_FEATURE_CACHE_VERSION=1;
 const MYPAGE_SCHEMA_FEATURE_CACHE_TTL_MS=24*60*60*1000;
@@ -1723,6 +1725,7 @@ leaveSnapshotState={effectiveRemainDays:(r!==null?r:0),reservedDays:0,summary:{r
 renderLeaveBadge(leaveSnapshotState);
 }
 function getLeaveStatusBadgeHtml(status){
+if(status==='진행중') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">결재중</span>';
 if(status==='가승인') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">가승인</span>';
 if(status==='증빙확인중') return '<span class="badge bg-info text-dark ms-1" style="font-size:0.7em">증빙중</span>';
 if(status==='실물결재대기') return '<span class="badge bg-secondary ms-1" style="font-size:0.7em">실물대기</span>';
@@ -1730,7 +1733,11 @@ if(status==='실물결재완료') return '<span class="badge bg-success ms-1" st
 if(status==='완료') return '<span class="badge bg-primary ms-1" style="font-size:0.7em">완료</span>';
 return '';
 }
-function renderLeaveDocList(docs,emptyText){
+function renderLeaveDocList(docs,emptyText,options){
+const opts=options&&typeof options==='object'?options:{};
+const amountClass=String(opts.amountClass||'text-danger').trim();
+const amountPrefix=typeof opts.amountPrefix==='string'?opts.amountPrefix:'-';
+const amountSuffix=typeof opts.amountSuffix==='string'?opts.amountSuffix:'일';
 let html='<ul class="leave-list">';
 if(Array.isArray(docs)&&docs.length>0){
 docs.forEach(doc=>{
@@ -1739,13 +1746,41 @@ const periodLabel=period?` · ${escapeHtml(period)}`:'';
 const statusBadge=getLeaveStatusBadgeHtml(String(doc?.status||''));
 const createdAt=formatMypageKstDate(doc?.created_at,'-');
 const amount=Math.max(0,Number(doc?.amount||doc?._leave_amount||0));
-html+=`<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>${escapeHtml(formatMypageLeaveDocType(doc||doc?.doc_type||'휴가'))} ${statusBadge}${periodLabel}</span><span class="fw-bold text-danger">-${amount}일</span></div><div class="text-muted" style="font-size:0.75rem;">${createdAt}</div></li>`;
+html+=`<li class="border-bottom pb-1 mb-1"><div class="d-flex justify-content-between"><span>${escapeHtml(formatMypageLeaveDocType(doc||doc?.doc_type||'휴가'))} ${statusBadge}${periodLabel}</span><span class="fw-bold ${escapeHtml(amountClass)}">${escapeHtml(amountPrefix)}${amount}${escapeHtml(amountSuffix)}</span></div><div class="text-muted" style="font-size:0.75rem;">${createdAt}</div></li>`;
 });
 }else{
 html+=`<li class="text-muted">${emptyText||'- 없음 -'}</li>`;
 }
 html+='</ul>';
 return html;
+}
+function getMypagePendingLeaveDocs(docs){
+const rows=Array.isArray(docs)?docs:[];
+return rows.filter(function(doc){
+return MYPAGE_LEAVE_PENDING_STATUSES.includes(String(doc?.status||'').trim())&&isMypageDeductibleLeaveDoc(doc);
+});
+}
+function getMypagePendingLeaveDays(docs){
+return getMypagePendingLeaveDocs(docs).reduce(function(total,doc){
+return Math.round((total+Math.max(0,Number(doc?.amount||doc?._leave_amount||0)))*2)/2;
+},0);
+}
+function buildMypagePendingLeaveSectionHtml(docs){
+const pendingDocs=getMypagePendingLeaveDocs(docs);
+const pendingDays=getMypagePendingLeaveDays(pendingDocs);
+return `<h6>⏳ 결재 예정 내역 <span class="text-warning">${Number(pendingDays||0)}일 신청</span></h6><div class="small text-muted mb-2">결재 진행 중인 신청이며, 승인 전에는 잔여 연차에 반영되지 않습니다.</div>${renderLeaveDocList(pendingDocs,'- 없음 -',{amountClass:'text-warning',amountPrefix:'',amountSuffix:'일 신청'})}`;
+}
+function insertMypagePendingLeaveSection(container,docs){
+if(!container)return;
+const section=document.createElement('div');
+section.className='leave-section';
+section.innerHTML=buildMypagePendingLeaveSectionHtml(docs);
+const sections=container.querySelectorAll('.leave-section');
+if(sections.length>1){
+sections[1].insertAdjacentElement('afterend',section);
+}else{
+container.prepend(section);
+}
 }
 async function showLeaveDetail(){
 const el=document.getElementById('leaveDetailModal'),bd=el.querySelector('.modal-body');if(!el)return;
@@ -1754,14 +1789,15 @@ try{
 const{data:em}=await scopeMypageEmployee(_supabase.from('ref_employees').select('hire_date')).eq('emp_id',myInfo.emp_id).single();
 const{data:al}=await scopeMypageEmployee(_supabase.from('hr_leave_adj').select('*')).eq('emp_id',myInfo.emp_id).order('created_at',{ascending:false});
 let leaveDocs=[],summary={reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
+const leaveDetailStatuses=Array.from(new Set([...MYPAGE_LEAVE_RESERVED_STATUSES,...MYPAGE_LEAVE_PENDING_STATUSES]));
 if(window.LeaveLedger&&typeof window.LeaveLedger.fetchLeaveApprovals==='function'){
-leaveDocs=await window.LeaveLedger.fetchLeaveApprovals(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,statuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료']});
-summary=window.LeaveLedger.summarizeLeaveDocs(leaveDocs,{reservedStatuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'],includeToday:true,unknownAsReserved:false});
+leaveDocs=await window.LeaveLedger.fetchLeaveApprovals(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,statuses:leaveDetailStatuses});
+summary=window.LeaveLedger.summarizeLeaveDocs(leaveDocs,{reservedStatuses:MYPAGE_LEAVE_RESERVED_STATUSES,includeToday:true,unknownAsReserved:false});
 }else{
 const leaveSelect=mypageLeaveSnapshotSupported?'id,created_at,doc_type,title,content,amount,status,leave_snapshot':'id,created_at,doc_type,title,content,amount,status';
-const{data:ul}=await _supabase.from('ref_approval').select(leaveSelect).eq('drafter_id',myInfo.emp_id).in('status',['완료','가승인','증빙확인중','실물결재대기','실물결재완료']).ilike('doc_type','휴가%').order('created_at',{ascending:false});
+const{data:ul}=await _supabase.from('ref_approval').select(leaveSelect).eq('drafter_id',myInfo.emp_id).in('status',leaveDetailStatuses).ilike('doc_type','휴가%').order('created_at',{ascending:false});
 leaveDocs=(ul||[]).filter(doc=>isMypageDeductibleLeaveDoc(doc));
-summary={reservedDocs:[],pastOrUsedDocs:leaveDocs,unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
+summary={reservedDocs:[],pastOrUsedDocs:leaveDocs.filter(function(doc){return MYPAGE_LEAVE_RESERVED_STATUSES.includes(String(doc?.status||'').trim());}),unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
 }
 const leaveLedger=window.LeaveLedger||{};
 if(typeof leaveLedger.buildLeaveDetailReportHtml==='function'){
@@ -1772,11 +1808,13 @@ summary,
 formatDate:(value,fallback)=>formatMypageKstDate(value,fallback),
 formatLeaveDocType:(docOrType)=>formatMypageLeaveDocType(docOrType)
 });
+insertMypagePendingLeaveSection(bd,leaveDocs);
 }else{
 let h='<div class="d-flex flex-column gap-3">';
 let gh='<ul class="leave-list">';
 if(em&&em.hire_date){const hd=new Date(em.hire_date),n=new Date(),oy=new Date(hd);oy.setFullYear(oy.getFullYear()+1);if(n<oy){let m=(n.getFullYear()-hd.getFullYear())*12+(n.getMonth()-hd.getMonth());if(n.getDate()<hd.getDate())m--;gh+=`<li class="text-primary">🟢 1년 미만: ${Math.min(11,Math.max(0,m))}개</li>`}else{gh+=`<li class="text-muted">⚪ 1년 미만: 0개</li>`}if(n.getFullYear()>hd.getFullYear())gh+=`<li class="text-primary">🔵 회계연도(${n.getFullYear()}): 15개</li>`;else gh+=`<li class="text-muted">⚪ 회계연도: 0개</li>`}gh+='</ul>';h+=`<div class="leave-section"><h6>🎁 발생 내역</h6>${gh}</div>`;
 let ah='<ul class="leave-list">';if(al&&al.length>0)al.forEach(i=>{const c=(i.adj_type==='지급'||i.adj_type==='포상')?'text-success':'text-danger',s=(i.adj_type==='지급'||i.adj_type==='포상')?'+':'-';ah+=`<li><span class="${c} fw-bold">[${i.adj_type}]</span> ${i.reason||''} (${s}${i.days}일)</li>`});else ah+='<li class="text-muted">- 없음 -</li>';ah+='</ul>';h+=`<div class="leave-section"><h6>⚖️ 조정 내역</h6>${ah}</div>`;
+h+=`<div class="leave-section">${buildMypagePendingLeaveSectionHtml(leaveDocs)}</div>`;
 h+=`<div class="leave-section"><h6>🗓️ 결재완료(예정) 내역 <span class="text-primary">-${Number(summary.reservedDays||0)}일</span></h6>${renderLeaveDocList(summary.reservedDocs,'- 없음 -')}</div>`;
 h+=`<div class="leave-section"><h6>🎫 사용/처리 내역 <span class="text-danger">-${Number(summary.pastOrUsedDays||0)}일</span></h6>${renderLeaveDocList(summary.pastOrUsedDocs,'- 없음 -')}</div>`;
 if(Array.isArray(summary.unknownDateDocs)&&summary.unknownDateDocs.length>0){
