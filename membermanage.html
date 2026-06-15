@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.85
-Change: Notify tenant ERP admins when a member modifies or cancels a pending request.
+Version: v1.0.87
+Change: Load member asset totals and bounded recent dashboard history through one tenant-scoped RPC.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.85 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.87 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1382,6 +1382,7 @@ return new Intl.DateTimeFormat('sv-SE', { timeZone: KST_TZ_MEMBER, year: 'numeri
 }
 
 const DEFAULT_DIVIDEND_TAX_RATE = 0.154;
+const MEMBER_DASHBOARD_HISTORY_LIMIT = 100;
 function toFiniteNumber(value) {
 const num = Number(value);
 return Number.isFinite(num) ? num : 0;
@@ -2680,34 +2681,33 @@ applyMembermanageBranding();
 sessionStorage.setItem('activeMemberType', curMem.member_type);
 syncSocialLinkButtons();
 
-// 2. 모든 자산 데이터 병렬 조회 (Promise.all)
-const pLedger = scopeMemberTenant(_supabase.from('ref_members').select('*')).eq('member_id', curMem.member_id).order('deposit_date', { ascending: false });
-const pApps = scopeMemberTenant(_supabase.from('coop_applications').select('*')).eq('member_uid', uuid).order('created_at', { ascending: false });
+// 2. 정확한 누적 합계와 최근 이력을 tenant-scoped RPC 한 번으로 조회
+const { data: dashboardData, error: dashboardError } = await _supabase.rpc('get_member_portal_dashboard_data', {
+p_member_uuid: uuid,
+p_history_limit: MEMBER_DASHBOARD_HISTORY_LIMIT
+});
+if (dashboardError) throw dashboardError;
 
-const pDonations = scopeMemberTenant(_supabase.from('coop_donations')
-.select('*')
-.eq('member_id', curMem.member_id) 
-.order('donation_date', { ascending: false }));
-const pPoints = scopeMemberTenant(_supabase.from('coop_points').select('*')).eq('member_uid', uuid).order('created_at', { ascending: false });
-const pLegacyDividends = scopeMemberTenant(_supabase.from('coop_dividends').select('*')).eq('member_id', curMem.member_id).order('paid_at', { ascending: false });
-const pConfirmedDividends = fetchConfirmedDividendHistory(uuid);
-
-const [resLedger, resApps, resDonations, resPoints, resLegacyDividends, confirmedDividends] = await Promise.all([pLedger, pApps, pDonations, pPoints, pLegacyDividends, pConfirmedDividends]);
-
-const ledger = resLedger.data || [];
-const apps = resApps.data || [];
-const donations = resDonations.data || [];
-const points = resPoints.data || [];
-const dividends = mergeDividendHistoryRows(resLegacyDividends.data || [], confirmedDividends || []);
-
-// 3. 자산 총계 계산
+const recent = dashboardData?.recent || {};
+const ledger = Array.isArray(recent.ledger) ? recent.ledger : [];
+const apps = Array.isArray(recent.applications) ? recent.applications : [];
+const donations = Array.isArray(recent.donations) ? recent.donations : [];
+const points = Array.isArray(recent.points) ? recent.points : [];
+const dividends = mergeDividendHistoryRows(
+Array.isArray(recent.legacy_dividends) ? recent.legacy_dividends : [],
+Array.isArray(recent.confirmed_dividends) ? recent.confirmed_dividends : []
+);
 const assets = {
-total_capital: ledger.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
-total_donation: donations.reduce((acc, cur) => acc + Number(cur.amount || 0), 0),
-current_points: points.reduce((acc, cur) => acc + Number(cur.change_amount || 0), 0),
-total_dividend_gross: dividends.reduce((acc, cur) => acc + getDividendGross(cur), 0),
-total_dividend_tax: dividends.reduce((acc, cur) => acc + getDividendTax(cur), 0),
-total_dividend_net: dividends.reduce((acc, cur) => acc + getDividendNet(cur), 0)
+total_capital: Number(dashboardData?.assets?.total_capital || 0),
+total_donation: Number(dashboardData?.assets?.total_donation || 0),
+current_points: Number(dashboardData?.assets?.current_points || 0),
+total_dividend_gross: Number(dashboardData?.assets?.total_dividend_gross || 0),
+total_dividend_tax: Number(dashboardData?.assets?.total_dividend_tax || 0),
+total_dividend_net: Number(dashboardData?.assets?.total_dividend_net || 0)
+};
+const historyMeta = {
+limit: Number(dashboardData?.history_limit || MEMBER_DASHBOARD_HISTORY_LIMIT),
+counts: dashboardData?.counts || {}
 };
 curMem.total_capital = assets.total_capital; 
 
@@ -2730,7 +2730,7 @@ const officialIds = officials ? officials.map(r => r.id).filter(Boolean) : [];
 await loadCoopRuntimeModules();
 
 // 5. 렌더링 호출
-renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds);
+renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta);
 
 // [부가 기능 로드]
 if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
@@ -2929,7 +2929,9 @@ window.switchHallOfFameTab = switchHallOfFameTab;
 // =========================================================================
 
 // 전역 변수로 상세 내역 모달에서 쓸 데이터를 담아둡니다.
-let globalHistoryData = {};  
+let globalHistoryData = {};
+let globalAssetSummary = {};
+let globalHistoryMeta = { limit: MEMBER_DASHBOARD_HISTORY_LIMIT, counts: {} };
 let quickVoteActionUrl = 'vote/index.html?portal=1';
 let coopRuntimeModules = null;
 let currentMemberCoopId = null;
@@ -3788,7 +3790,7 @@ setVoteQuickCardContent({
 }
 
 // [수정] 대시보드 렌더링: 자산 카드 동적 생성 및 타임라인 통합 + 단체 정보 처리
-function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds) {
+function renderDashboard(member, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta) {
 // 1. 기본 정보 매핑 (기존 유지)
 renderMemberStatusBadge(member?.status);
 setText('infoMemberId', member.member_id || '-'); // 상단으로 이동된 조합원 번호
@@ -3865,6 +3867,8 @@ if (myRoles.includes('election_comm') && tabElec) tabElec.classList.remove('hidd
 
 // 데이터 전역 저장 (모달용)
 globalHistoryData = { ledger, donations, points, dividends };
+globalAssetSummary = assets || {};
+globalHistoryMeta = historyMeta || { limit: MEMBER_DASHBOARD_HISTORY_LIMIT, counts: {} };
 
 const assetRow = document.getElementById('assetSummaryRow');
 assetRow.innerHTML = ''; // 초기화
@@ -4181,6 +4185,20 @@ setQuickCardVisible(voteCard, false);
 setQuickCardVisible(solarCard, false);
 }
 
+function getHistoryModalRecentNotice(type, displayedCount) {
+const countKeyMap = {
+ledger: 'ledger',
+donation: 'donations',
+point: 'points',
+dividend: 'dividends',
+dividend_net: 'dividends'
+};
+const countKey = countKeyMap[type];
+const totalCount = Number(globalHistoryMeta?.counts?.[countKey] || 0);
+if (!countKey || totalCount <= Number(displayedCount || 0)) return '';
+return `<div class="text-muted fw-normal mt-1" style="font-size:0.78rem;">전체 ${totalCount.toLocaleString()}건 중 최근 ${Number(displayedCount || 0).toLocaleString()}건을 표시합니다.</div>`;
+}
+
 // [수정] 상세 내역 모달 (디자인 개선: 글자 확대, 여백 추가, 기부금 '구분' 제거)
 function openHistoryModal(type) {
 const titleEl = document.getElementById('historyModalTitle');
@@ -4199,7 +4217,7 @@ title = '💰 출자금 납입 상세';
 // 날짜 - 금액 (심플 모드)
 html += '<tr class="table-success"><th class="py-3 ps-3">날짜</th><th class="text-end py-3 pe-3">금액</th></tr></thead><tbody>';
 const data = globalHistoryData.ledger || [];
-total = data.reduce((a,c)=>a+Number(c.amount),0);
+total = Number(globalAssetSummary.total_capital || 0);
 
 if(data.length === 0) html += '<tr><td colspan="2" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
 else {
@@ -4210,14 +4228,14 @@ html += `<tr>
                </tr>`;
 });
 }
-summaryEl.innerHTML = `총 납입액: <span class="text-success fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span>원`;
+summaryEl.innerHTML = `총 납입액: <span class="text-success fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span>원${getHistoryModalRecentNotice(type, data.length)}`;
 
 } else if(type === 'donation') {
 title = '💖 기부금 납부 상세';
 // [수정 완료] '구분' 칼럼 제거 -> 날짜 - 금액만 표시
 html += '<tr class="table-danger"><th class="py-3 ps-3">날짜</th><th class="text-end py-3 pe-3">금액</th></tr></thead><tbody>';
 const data = globalHistoryData.donations || [];
-total = data.reduce((a,c)=>a+Number(c.amount),0);
+total = Number(globalAssetSummary.total_donation || 0);
 
 if(data.length === 0) html += '<tr><td colspan="2" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
 else {
@@ -4228,14 +4246,14 @@ html += `<tr>
                </tr>`;
 });
 }
-summaryEl.innerHTML = `총 기부액: <span class="text-danger fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span>원`;
+summaryEl.innerHTML = `총 기부액: <span class="text-danger fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span>원${getHistoryModalRecentNotice(type, data.length)}`;
 
 } else if(type === 'point') {
 title = '🪙 포인트 내역';
 // 상세 모드: 날짜 - 내용 - 변동
 html += '<tr class="table-warning"><th class="py-3 ps-3" style="width:30%">날짜</th><th class="py-3">내용</th><th class="text-end py-3 pe-3">변동</th></tr></thead><tbody>';
 const data = globalHistoryData.points || [];
-total = data.reduce((a,c)=>a+Number(c.change_amount),0);
+total = Number(globalAssetSummary.current_points || 0);
 
 if(data.length === 0) html += '<tr><td colspan="3" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
 else {
@@ -4250,15 +4268,15 @@ html += `<tr>
                </tr>`;
 });
 }
-summaryEl.innerHTML = `현재 잔액: <span class="text-dark fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span> P`;
+summaryEl.innerHTML = `현재 잔액: <span class="text-dark fs-5 fw-bold ms-2">${Number(total).toLocaleString()}</span> P${getHistoryModalRecentNotice(type, data.length)}`;
 
 } else if(type === 'dividend' || type === 'dividend_net') {
 title = (type === 'dividend_net') ? '📉 배당금(세후) 지급 내역' : '📈 배당금(세전) 지급 내역';
 html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급/예정일</th><th class="text-end py-3">세전</th><th class="text-end py-3">세액</th><th class="text-end py-3 pe-3">세후</th></tr></thead><tbody>';
 const data = globalHistoryData.dividends || [];
-const totalGross = data.reduce((a,c)=>a+getDividendGross(c),0);
-const totalTax = data.reduce((a,c)=>a+getDividendTax(c),0);
-const totalNet = data.reduce((a,c)=>a+getDividendNet(c),0);
+const totalGross = Number(globalAssetSummary.total_dividend_gross || 0);
+const totalTax = Number(globalAssetSummary.total_dividend_tax || 0);
+const totalNet = Number(globalAssetSummary.total_dividend_net || 0);
 total = (type === 'dividend_net') ? totalNet : totalGross;
 
 if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
@@ -4283,7 +4301,7 @@ html += `<tr>
 }
 summaryEl.innerHTML = `누적 세전: <span class="text-primary fs-6 fw-bold ms-2">${Number(totalGross).toLocaleString()}</span>원
  / 세액: <span class="text-danger fs-6 fw-bold ms-2">${Number(totalTax).toLocaleString()}</span>원
- / 세후: <span class="text-success fs-6 fw-bold ms-2">${Number(totalNet).toLocaleString()}</span>원`;
+ / 세후: <span class="text-success fs-6 fw-bold ms-2">${Number(totalNet).toLocaleString()}</span>원${getHistoryModalRecentNotice(type, data.length)}`;
 }
 
 html += '</tbody></table></div>';
@@ -6560,6 +6578,22 @@ console.warn('[partner-alert] admin telegram skipped:', error?.message || error,
 }
 } // End of notifyPartnerRequestAdmins
 
+async function logPartnerRequestClientFailure(targetMemberId, stage, error) {
+const safeTargetMemberId = String(targetMemberId || '').trim();
+if (!safeTargetMemberId || !_supabase) return;
+
+try {
+const { error: logError } = await _supabase.rpc('log_partner_request_client_failure', {
+p_target_member_id: safeTargetMemberId,
+p_stage: String(stage || 'unknown'),
+p_error_message: getPartnerApplicationErrorMessage(error)
+});
+if (logError) throw logError;
+} catch (logError) {
+console.warn('[partner-request] client failure log skipped:', logError?.message || logError, logError || {});
+}
+} // End of logPartnerRequestClientFailure
+
 function getPartnerApplicationErrorMessage(error) {
 const raw = String(error?.message || error || '').trim();
 if (!raw) return '알 수 없는 오류가 발생했습니다.';
@@ -6624,16 +6658,19 @@ if(!name || !desc) return showModal('단체명과 소개를 입력해주세요.'
 
 showConfirmModal('협력 단체 신청(수정)을 제출하시겠습니까?', async () => {
 showLoading(true, '처리 중...');
+let failureStage = 'rpc_call';
 
 try {
 // [3] 파일 업로드 (새 파일이 있는 경우만)
 if(fileInput.files.length > 0) {
+failureStage = 'logo_upload';
 const file = fileInput.files[0];
 logoUrl = await uploadPartnerLogoFile(file);
 }
 
 // [4] RPC 호출 (DB 저장)
 // p_target_member_id에 현재 보고 있는 프로필(curMem.member_id) 전달
+failureStage = 'rpc_call';
 const { data: result, error: rpcError } = await _supabase.rpc('request_partner_change', {
 p_target_member_id: curMem.member_id, 
 p_name: name,
@@ -6659,6 +6696,9 @@ showModal('오류: ' + result.message);
 } catch (e) {
 showLoading(false);
 console.error(e);
+logPartnerRequestClientFailure(curMem.member_id, failureStage, e).catch((logError) => {
+console.warn('[partner-request] client failure log skipped:', logError?.message || logError, logError || {});
+});
 showModal('처리 중 오류가 발생했습니다.\n' + getPartnerApplicationErrorMessage(e));
 }
 });
