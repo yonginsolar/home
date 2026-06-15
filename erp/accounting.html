@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.82 | Change: 2026-06-04 - Allow asset accounts in approval split reclassification. -->
+<!-- Version: v1.0.83 | Change: 2026-06-15 - Aggregate accounting dashboard data in a tenant-scoped RPC. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.82 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.83 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1056,6 +1056,8 @@ let prepayVatManual = false;
 let receivableCache = { vendors: [], balances: {}, incomeMap: {}, summary: { balance: 0, vat: 0 } };
 let receivableVatManual = false;
 let vatSummaryState = null;
+let accountingDashboardRefreshPromise = null;
+let accountingDashboardRefreshQueued = false;
 let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
@@ -4090,63 +4092,82 @@ function getDashboardYear() {
     return new Date().getFullYear();
 }
 
-async function refreshDashboard() {
-    const { data } = await _supabase.from('ac_journal').select('*');
-    if (!data) return;
+function buildAccountingDashboardVatSummary(period, vatInValue, vatOutValue) {
+    const vatIn = Number(vatInValue || 0);
+    const vatOut = Number(vatOutValue || 0);
+    return {
+        ...period,
+        vatIn,
+        vatOut,
+        net: vatIn - vatOut,
+        headline: formatVatSummaryHeadline(vatIn - vatOut)
+    };
+} // End of buildAccountingDashboardVatSummary
 
+async function refreshAccountingDashboardOnce() {
     const now = new Date();
     const todayKst = formatAccountingKstDate(now);
-    const selectedYear = String(getDashboardYear());
-
-    let rev = 0;         // 선택 연도 매출 합계
-    let exp = 0;         // 선택 연도 비용 합계
-    let ast = 0;         // 오늘 기준 총자산
-    let bankBalance = 0; // 보통예금 (전체 누적)
-
-    data.forEach(r => {
-        const db = Number(r.Debit || 0);
-        const cr = Number(r.Credit || 0);
-        if (!r.Date) return;
-
-        const rYear = r.Date.substring(0, 4);
-        const rMonth = Number(r.Date.substring(5, 7));
-
-        // 1. 오늘 기준 총자산 + 통장 잔고(오늘까지 누적)
-        if (r.Type === '자산') {
-            if (r.Date <= todayKst) ast += (db - cr);
-            if ((r.Account === '보통예금' || r.Account === '현금') && r.Date <= todayKst) {
-                bankBalance += (db - cr);
-            }
-        }
-
-        // 2. 매출/비용 (선택 연도 합계)
-        if (rYear === selectedYear) {
-            if (r.Type === '매출') rev += cr;
-            else if (r.Type === '비용') exp += db;
-        }
-
+    const selectedYear = getDashboardYear();
+    const { data, error } = await _supabase.rpc('get_accounting_dashboard_summary', {
+        p_selected_year: selectedYear,
+        p_as_of_date: todayKst
     });
 
-    buildPrepayCache(data);
-    buildReceivableCache(data);
+    if (error) {
+        console.error('회계 대시보드 집계 조회 실패:', error);
+        return;
+    }
 
-    const quarterVatSummary = calculateVatSummaryForPeriod(data, getCurrentQuarterVatPeriod(todayKst));
-    const halfYearVatSummary = calculateVatSummaryForPeriod(data, getCurrentHalfYearVatPeriod(todayKst));
+    const summary = data && typeof data === 'object' ? data : {};
+    const cacheRows = Array.isArray(summary.cache_rows) ? summary.cache_rows : [];
+    buildPrepayCache(cacheRows);
+    buildReceivableCache(cacheRows);
+
+    const quarterVatSummary = buildAccountingDashboardVatSummary(
+        getCurrentQuarterVatPeriod(todayKst),
+        summary.quarter_vat_in,
+        summary.quarter_vat_out
+    );
+    const halfYearVatSummary = buildAccountingDashboardVatSummary(
+        getCurrentHalfYearVatPeriod(todayKst),
+        summary.half_year_vat_in,
+        summary.half_year_vat_out
+    );
     vatSummaryState = {
         quarter: quarterVatSummary,
         halfYear: halfYearVatSummary
     };
 
     // UI 반영
-    document.getElementById("valRev").innerText = rev.toLocaleString();
-    document.getElementById("valExp").innerText = exp.toLocaleString();
-    document.getElementById("valAst").innerText = ast.toLocaleString();
-    document.getElementById("valCash").innerText = bankBalance.toLocaleString();
+    document.getElementById("valRev").innerText = Number(summary.revenue || 0).toLocaleString();
+    document.getElementById("valExp").innerText = Number(summary.expense || 0).toLocaleString();
+    document.getElementById("valAst").innerText = Number(summary.assets || 0).toLocaleString();
+    document.getElementById("valCash").innerText = Number(summary.bank_balance || 0).toLocaleString();
     document.getElementById("valVat").innerText = quarterVatSummary.headline;
     const vatTitleEl = document.getElementById("vatCardTitle");
     if (vatTitleEl) vatTitleEl.innerText = `🧾 이번 분기 부가세 (${quarterVatSummary.shortLabel})`;
     const vatHintEl = document.getElementById("valVatHint");
     if (vatHintEl) vatHintEl.innerText = `클릭하면 ${halfYearVatSummary.shortLabel} 누계를 확인합니다.`;
+} // End of refreshAccountingDashboardOnce
+
+async function refreshDashboard() {
+    if (accountingDashboardRefreshPromise) {
+        accountingDashboardRefreshQueued = true;
+        return accountingDashboardRefreshPromise;
+    }
+
+    accountingDashboardRefreshPromise = (async function runAccountingDashboardRefreshQueue() {
+        do {
+            accountingDashboardRefreshQueued = false;
+            await refreshAccountingDashboardOnce();
+        } while (accountingDashboardRefreshQueued);
+    })();
+
+    try {
+        await accountingDashboardRefreshPromise;
+    } finally {
+        accountingDashboardRefreshPromise = null;
+    }
 }
 
 // 4. 모달 및 UI 제어 로직

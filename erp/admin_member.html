@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.91
-Change: Merge the youngest age groups and show count and percentage labels above age bars.
+Version: v1.0.94
+Change: Keep idempotent batch uploads and match deposit Excel names independently of the current member page.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.91';
+window.ADMIN_MEMBER_VERSION = 'v1.0.94';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -459,7 +459,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
     <div class="card p-3 mb-3 border-0 bg-light">
         <div class="row g-2 align-items-center">
             <div class="col-md-2">
-                <select id="filter-status" class="form-select form-select-sm" onchange="fetchMembers()">
+                <select id="filter-status" class="form-select form-select-sm" onchange="resetMemberPageAndFetch()">
                     <option value="all" selected>상태: 전체</option>
                     <option value="정상">정상 (정조합원)</option>
                     <option value="승인대기">승인 대기</option>
@@ -468,7 +468,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             </div>
 
             <div class="col-md-2">
-                <select id="filter-type" class="form-select form-select-sm" onchange="fetchMembers()">
+                <select id="filter-type" class="form-select form-select-sm" onchange="resetMemberPageAndFetch()">
                     <option value="all">유형: 전체</option>
                     <option value="개인">개인</option>
                     <option value="단체">단체</option>
@@ -476,7 +476,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             </div>
 
             <div class="col-md-2">
-                <select id="sort-order" class="form-select form-select-sm" onchange="fetchMembers()">
+                <select id="sort-order" class="form-select form-select-sm" onchange="resetMemberPageAndFetch()">
                     <option value="name">이름순</option>
                     <option value="join_date">가입일순 (최신)</option>
                     <option value="capital">출자금순 (고액)</option>
@@ -485,8 +485,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
             <div class="col-md-4">
                 <div class="input-group input-group-sm">
-                    <input type="text" id="search-keyword" class="form-control" placeholder="이름 / 전화번호 / 조합원번호" onkeyup="if(event.key=='Enter') fetchMembers()">
-                    <button class="btn btn-secondary" onclick="fetchMembers()">검색</button>
+                    <input type="text" id="search-keyword" class="form-control" placeholder="이름 / 전화번호 / 조합원번호" onkeyup="if(event.key=='Enter') resetMemberPageAndFetch()">
+                    <button class="btn btn-secondary" onclick="resetMemberPageAndFetch()">검색</button>
                 </div>
             </div>
 
@@ -514,6 +514,19 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             </thead>
             <tbody id="memberListBody"></tbody>
         </table>
+    </div>
+    <div id="memberListPagination" class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3" style="display:none !important;">
+        <div id="memberListMeta" class="small text-muted"></div>
+        <div class="d-flex align-items-center gap-2">
+            <select id="memberPageSize" class="form-select form-select-sm" style="width:auto;" onchange="changeMemberPageSize(this.value)">
+                <option value="25" selected>25명씩</option>
+                <option value="50">50명씩</option>
+                <option value="100">100명씩</option>
+            </select>
+            <button id="memberPagePrev" class="btn btn-sm btn-outline-secondary" type="button" onclick="changeMemberPage(-1)">이전</button>
+            <span id="memberPageCurrent" class="small fw-bold text-nowrap">1 / 1</span>
+            <button id="memberPageNext" class="btn btn-sm btn-outline-secondary" type="button" onclick="changeMemberPage(1)">다음</button>
+        </div>
     </div>
 </div>
 
@@ -3604,6 +3617,10 @@ async function ensureBadgesReady() {
 // 전역 변수
 let g_members = [];
 let g_member_import_rows = [];
+let g_member_import_request_key = null;
+let g_member_page = 0;
+let g_member_page_size = 25;
+let g_member_total_count = 0;
 const ADMIN_MEMBER_SELECT_COLUMNS = [
     'id',
     'member_id',
@@ -3628,6 +3645,14 @@ const ADMIN_MEMBER_SELECT_COLUMNS = [
     'join_category',
     'manager_id'
 ].join(',');
+
+function createAdminBatchRequestKey(prefix) {
+const safePrefix = String(prefix || 'batch').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || 'batch';
+const randomPart = window.crypto && typeof window.crypto.randomUUID === 'function'
+  ? window.crypto.randomUUID()
+  : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+return `${safePrefix}:${randomPart}`;
+}
 // 전역 변수
 let g_plants = []; // [추가] 발전소 목록 기억용
 let g_powerGenerationLogs = [];
@@ -4433,6 +4458,7 @@ return `${normalized.slice(0, 8)}******`;
 
 function openMemberImportModal() {
 g_member_import_rows = [];
+g_member_import_request_key = null;
 const fileInput = document.getElementById('member-import-file');
 if (fileInput) fileInput.value = '';
 const filter = document.getElementById('member-import-filter');
@@ -4822,6 +4848,7 @@ reader.onload = async function(e) {
   }
 
   g_member_import_rows = json.map((row, index) => normalizeMemberImportRow(row, index));
+  g_member_import_request_key = createAdminBatchRequestKey('member-import');
   try {
     await applyMemberImportDuplicateChecks(g_member_import_rows);
   } catch (error) {
@@ -4852,46 +4879,51 @@ const validRows = g_member_import_rows.filter((row) => row.valid);
 if (validRows.length === 0) {
   return myAlert('등록 가능한 행이 없습니다.', 'warning');
 }
+if (validRows.length > 500) {
+  return myAlert('한 번에 등록할 수 있는 최대 건수는 500건입니다.', 'warning');
+}
 
 myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 등록하시겠습니까?`, async () => {
   showLoading(true);
-  let successCnt = 0;
-  let failCnt = 0;
-  const failLogs = [];
+  const invalidRows = g_member_import_rows.filter((row) => !row.valid);
+  const payload = validRows.map((row) => ({
+    row_no: row.rowNo,
+    name: row.name,
+    email: row.email,
+    phone: row.phone || null,
+    birth_date: row.birth_date || null,
+    member_type: row.member_type,
+    status: row.status,
+    address: row.address || null,
+    member_id: row.member_id || null,
+    join_category: row.join_category || '일반',
+    admin_memo: row.admin_memo || null,
+    rrn: row.member_type === '개인' ? row.rrn || null : null,
+    business_number: row.member_type === '단체' ? row.business_number || null : null,
+    corp_number: row.member_type === '단체' ? row.corp_number || null : null,
+    join_date: row.join_date || null
+  }));
+  const requestKey = g_member_import_request_key || createAdminBatchRequestKey('member-import');
+  g_member_import_request_key = requestKey;
+  const { data: result, error } = await _supabase.rpc('create_members_secure_batch', {
+    p_request_key: requestKey,
+    p_rows: payload
+  });
 
-  for (const row of g_member_import_rows) {
-    if (!row.valid) {
-      failCnt++;
-      failLogs.push(`${row.rowNo}행: ${row.errors.join(', ')}`);
-      continue;
-    }
-
-    const { error } = await _supabase.rpc('create_member_secure_v2', {
-      p_name: row.name,
-      p_email: row.email,
-      p_phone: row.phone || null,
-      p_birth_date: row.birth_date || null,
-      p_member_type: row.member_type,
-      p_status: row.status,
-      p_address: row.address || null,
-      p_member_id: row.member_id || null,
-      p_join_category: row.join_category || '일반',
-      p_admin_memo: row.admin_memo || null,
-      p_rrn: row.member_type === '개인' ? row.rrn || null : null,
-      p_business_number: row.member_type === '단체' ? row.business_number || null : null,
-      p_corp_number: row.member_type === '단체' ? row.corp_number || null : null,
-      p_join_date: row.join_date || null
-    });
-
-    if (error) {
-      console.error('member import failed', row, error);
-      failCnt++;
-      failLogs.push(`${row.rowNo}행: ${error.hint || error.message}`);
-    } else {
-      successCnt++;
-    }
+  if (error) {
+    showLoading(false);
+    console.error('member import batch failed', error);
+    myAlert(`일괄 등록 요청에 실패했습니다.\n${error.hint || error.message}`, 'error');
+    return;
   }
 
+  const successCnt = Number(result?.success_count || 0);
+  const serverFailureItems = Array.isArray(result?.items) ? result.items.filter((item) => !item?.ok) : [];
+  const failCnt = invalidRows.length + Number(result?.failure_count || 0);
+  const failLogs = [
+    ...invalidRows.map((row) => `${row.rowNo}행: ${row.errors.join(', ')}`),
+    ...serverFailureItems.map((item) => `${item.row_no || '-'}행: ${item.hint || item.message || '등록 실패'}`)
+  ];
   showLoading(false);
   const summary = [`등록 완료`, `성공: ${successCnt}건`, `실패: ${failCnt}건`];
   if (failLogs.length) summary.push('', failLogs.slice(0, 5).join('\n'));
@@ -4902,6 +4934,7 @@ myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 �
     fetchMembers();
   }
   g_member_import_rows = [];
+  g_member_import_request_key = null;
 });
 }
 
@@ -5043,7 +5076,7 @@ const file = input.files[0];
 if(!file) return;
 
 const reader = new FileReader();
-reader.onload = function(e) {
+reader.onload = async function(e) {
 const data = new Uint8Array(e.target.result);
 const workbook = XLSX.read(data, {type: 'array'});
 const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -5054,27 +5087,61 @@ tbody.innerHTML = '';
 
 if(json.length === 0) { tbody.innerHTML='<tr><td colspan="3">데이터가 없습니다.</td></tr>'; return; }
 
-json.forEach(row => {
-// 엑셀 칼럼명 유연하게 찾기
-const name = row['입금자'] || row['성명'] || row['보낸분'] || row['내용'];
-const amt = row['입금액'] || row['금액'] || row['거래금액'];
+const depositRows = json.map(function normalizeDepositMatchRow(row) {
+const rawName = row['입금자'] || row['성명'] || row['보낸분'] || row['내용'];
+const rawAmount = row['입금액'] || row['금액'] || row['거래금액'];
+return {
+name: String(rawName || '').trim(),
+amount: Number(String(rawAmount ?? '').replace(/,/g, '').trim())
+};
+}).filter(function keepDepositMatchRow(row) {
+return row.name && Number.isFinite(row.amount);
+});
 
-if(name && amt) {
-// 이름으로 매칭 시도
-const match = g_members.find(m => m.name === String(name).trim());
+const uniqueNames = [...new Set(depositRows.map(function takeDepositName(row) {
+return row.name;
+}))];
+const membersByName = new Map();
 
+if (uniqueNames.length > 0) {
+const { data: matchedMembers, error } = await scopeAdminTenant(_supabase
+.from('coop_members')
+.select('id,member_id,name'))
+.in('name', uniqueNames);
+
+if (error) {
+console.error('입금 매칭 조합원 조회 실패:', error);
+tbody.innerHTML = '<tr><td colspan="3" class="text-center text-danger py-4">조합원 정보를 불러오지 못했습니다.</td></tr>';
+return;
+}
+
+(matchedMembers || []).forEach(function groupMatchedMember(member) {
+const key = String(member.name || '').trim();
+if (!membersByName.has(key)) membersByName.set(key, []);
+membersByName.get(key).push(member);
+});
+}
+
+depositRows.forEach(function renderDepositMatchRow(row) {
+const matches = membersByName.get(row.name) || [];
 const tr = document.createElement('tr');
 const tdName = document.createElement('td');
 const tdAmt = document.createElement('td');
 const tdMatch = document.createElement('td');
 
-tdName.textContent = String(name);
-tdAmt.textContent = `${Number(amt).toLocaleString()}원`;
+tdName.textContent = row.name;
+tdAmt.textContent = `${row.amount.toLocaleString()}원`;
 
-if(match) {
+if(matches.length === 1) {
+const match = matches[0];
 const span = document.createElement('span');
 span.className = 'text-success fw-bold';
 span.textContent = `${match.name} (${match.member_id})`;
+tdMatch.appendChild(span);
+} else if (matches.length > 1) {
+const span = document.createElement('span');
+span.className = 'text-warning fw-bold';
+span.textContent = `동명이인 ${matches.length}명 (조합원번호 확인 필요)`;
 tdMatch.appendChild(span);
 } else {
 const span = document.createElement('span');
@@ -5087,7 +5154,6 @@ tr.appendChild(tdName);
 tr.appendChild(tdAmt);
 tr.appendChild(tdMatch);
 tbody.appendChild(tr);
-}
 });
 };
 reader.readAsArrayBuffer(file);
@@ -9245,7 +9311,50 @@ function renderChart(key, canvasId, type, data, titleText = null) {
 function setText(id, val) { const el = document.getElementById(id); if(el) el.innerText = val; }
 
 
-// [수정] 조합원 검색/목록 로드: DB 뷰(view_my_assets) 활용 최적화
+function renderMemberPagination() {
+    const wrap = document.getElementById('memberListPagination');
+    const meta = document.getElementById('memberListMeta');
+    const current = document.getElementById('memberPageCurrent');
+    const prev = document.getElementById('memberPagePrev');
+    const next = document.getElementById('memberPageNext');
+    if (!wrap || !meta || !current || !prev || !next) return;
+
+    if (!(g_member_total_count > 0)) {
+        wrap.style.setProperty('display', 'none', 'important');
+        return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(g_member_total_count / g_member_page_size));
+    const start = (g_member_page * g_member_page_size) + 1;
+    const end = Math.min(g_member_total_count, start + g_members.length - 1);
+    wrap.style.removeProperty('display');
+    meta.textContent = `전체 ${g_member_total_count.toLocaleString()}명 중 ${start.toLocaleString()}-${end.toLocaleString()}명`;
+    current.textContent = `${g_member_page + 1} / ${totalPages}`;
+    prev.disabled = g_member_page <= 0;
+    next.disabled = g_member_page >= totalPages - 1;
+} // End of renderMemberPagination
+
+function resetMemberPageAndFetch() {
+    g_member_page = 0;
+    fetchMembers();
+} // End of resetMemberPageAndFetch
+
+function changeMemberPage(direction) {
+    const totalPages = Math.max(1, Math.ceil(g_member_total_count / g_member_page_size));
+    const nextPage = Math.min(Math.max(g_member_page + Number(direction || 0), 0), totalPages - 1);
+    if (nextPage === g_member_page) return;
+    g_member_page = nextPage;
+    fetchMembers();
+} // End of changeMemberPage
+
+function changeMemberPageSize(value) {
+    const nextSize = [25, 50, 100].includes(Number(value)) ? Number(value) : 25;
+    g_member_page_size = nextSize;
+    g_member_page = 0;
+    fetchMembers();
+} // End of changeMemberPageSize
+
+// [수정] 조합원 검색/목록 로드: 서버 페이지네이션 + 전체 결과 기준 정렬
 async function fetchMembers() {
     // ✅ DOM 요소 단축 선택자
     const $ = (id) => document.getElementById(id);
@@ -9266,74 +9375,37 @@ async function fetchMembers() {
     try {
         if (typeof showLoading === 'function') showLoading(true);
 
-        // 2. coop_members 기본 조회 (필터링)
-        let q = scopeAdminTenant(_supabase
-            .from('coop_members')
-            .select(ADMIN_MEMBER_SELECT_COLUMNS));
-
-        // 2-1. 필터 및 정렬 적용
-        if (status && status !== 'all') q = q.eq('status', status);
-        if (type && type !== 'all') q = q.eq('member_type', type);
-
-        // 통합 키워드 검색 (이름, 전화번호, 조합원번호 OR 검색)
-        if (keyword) {
-            const safeKeyword = sanitizeOrKeyword(keyword);
-            if (safeKeyword) {
-                q = q.or(`member_id.ilike.%${safeKeyword}%,name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`);
-            }
-        }
-
-        // 정렬 조건 적용
-        if (sort === 'join_date') q = q.order('join_date', { ascending: false });
-        else if (sort === 'capital') { /* 출자금 정렬은 아래 병합 후 처리 필요하지만 일단 기본 정렬 */ }
-        else q = q.order('name', { ascending: true }); // 기본: 이름순
-
-        const { data: members, error } = await q;
+        const { data, error } = await _supabase.rpc('get_admin_member_page', {
+            p_keyword: keyword || null,
+            p_status: status === 'all' ? null : status,
+            p_member_type: type === 'all' ? null : type,
+            p_sort: sort,
+            p_page: g_member_page,
+            p_page_size: g_member_page_size
+        });
         if (error) throw error;
 
-        const list = Array.isArray(members) ? members : [];
-
-        // 3. [최적화 핵심] view_my_assets를 통한 출자금 조회
-        // 조회된 멤버들의 UUID만 추출
-        const memberUids = list.map(m => m.id).filter(Boolean);
-        let capitalMap = {};
-
-        if (memberUids.length > 0) {
-            // ★ 수정됨: ref_members 전체 조회 -> view_my_assets 요약 조회
-            const { data: assets, error: assetErr } = await _supabase
-                .from('view_my_assets')
-                .select('member_uid, total_capital') // 필요한 컬럼만
-                .in('member_uid', memberUids);       // 검색된 조합원들만 조회
-
-            if (!assetErr && assets) {
-                // UUID를 키(Key)로 하는 맵 생성 { "uuid-123": 500000, ... }
-                assets.forEach(row => {
-                    capitalMap[row.member_uid] = Number(row.total_capital || 0);
-                });
-            } else if (assetErr) {
-                console.error('자산 뷰 조회 실패(출자금 0으로 표시):', assetErr);
-            }
+        const list = Array.isArray(data?.rows) ? data.rows : [];
+        g_member_total_count = Number(data?.total_count || 0);
+        if (g_member_page > 0 && list.length === 0 && g_member_total_count > 0) {
+            g_member_page = Math.max(0, Math.ceil(g_member_total_count / g_member_page_size) - 1);
+            return fetchMembers();
         }
+        g_members = list.map(m => normalizeAdminMemberRow(m, m.total_capital || 0));
 
-        // 4. 데이터 병합 (Members + Capital)
-        g_members = list.map(m => normalizeAdminMemberRow(m, capitalMap[m.id] || 0));
-
-        // (옵션) 만약 정렬 기준이 '출자금순'이라면 JS 레벨에서 재정렬
-        if (sort === 'capital') {
-            g_members.sort((a, b) => b.total_capital - a.total_capital);
-        }
-
-        // 5. 화면 렌더링
+        // 3. 화면 렌더링
         if (!g_members.length) {
              if (!keyword && status === 'all' && type === 'all') {
                  renderNoMembersState();
              } else if (typeof renderMemberTable === 'function') {
                  renderMemberTable([]);
              }
+             renderMemberPagination();
              return;
         }
 
         renderMemberTable(g_members);
+        renderMemberPagination();
 
     } catch (err) {
         console.error(err);
@@ -9362,10 +9434,8 @@ function renderMemberTable(list) {
     return;
   }
 
-  // 문자열 이스케이프 (작은따옴표 깨짐 방지)
-  const esc = (v) => String(v ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-  list.forEach((m, idx) => {
+  const startIndex = g_member_page * g_member_page_size;
+  const rowsHtml = list.map((m, idx) => {
     const type = m.member_type || m.type || '-';
     const name = m.name || '-';
     const memberId = m.member_id || '';
@@ -9387,21 +9457,20 @@ function renderMemberTable(list) {
 
     // 클릭 시 넘길 키값 (UUID 우선)
     const keyForDetail = m.member_uid || m.uid || m.id || memberId;
-    const safeKey = esc(keyForDetail);
+    const safeKey = encodeURIComponent(String(keyForDetail || ''));
 
-    // ★ 핵심 변경: tr에 onclick 적용, style="cursor:pointer" 추가
-    tbody.innerHTML += `
-      <tr onclick="openMemberDetail('${safeKey}')" style="cursor: pointer;">
-        <td>${idx + 1}</td>
-        <td>${type}</td>
+    return `
+      <tr onclick="openMemberDetail(decodeURIComponent('${safeKey}'))" style="cursor: pointer;">
+        <td>${startIndex + idx + 1}</td>
+        <td>${escapeHtml(type)}</td>
         <td class="text-start">
-          <div class="fw-bold">${name}</div>
-          <div class="small text-muted">${memberId ? '(' + memberId + ')' : ''}</div>
+          <div class="fw-bold">${escapeHtml(name)}</div>
+          <div class="small text-muted">${memberId ? '(' + escapeHtml(memberId) + ')' : ''}</div>
         </td>
-        <td>${phone}</td>
+        <td>${escapeHtml(phone)}</td>
         <td>
-          <div class="small">${joinDate}</div>
-          <span class="badge ${statusBadgeClass}">${status}</span>
+          <div class="small">${escapeHtml(joinDate)}</div>
+          <span class="badge ${statusBadgeClass}">${escapeHtml(status)}</span>
         </td>
         <td class="fw-bold">${totalCapital}</td>
         <td>
@@ -9409,7 +9478,8 @@ function renderMemberTable(list) {
         </td>
       </tr>
     `;
-  });
+  }).join('');
+  tbody.innerHTML = rowsHtml;
 }
 
 function renderNoMembersState() {
@@ -9417,6 +9487,7 @@ function renderNoMembersState() {
   if (!tbody) return;
 
   g_members = [];
+  g_member_total_count = 0;
   tbody.innerHTML = `
     <tr>
       <td colspan="7" class="text-center text-muted py-5">
@@ -9428,6 +9499,7 @@ function renderNoMembersState() {
       </td>
     </tr>
   `;
+  renderMemberPagination();
 }
 
 
@@ -9438,6 +9510,8 @@ function renderEmptyState() {
   if (!tbody) return;
 
   g_members = [];
+  g_member_total_count = 0;
+  g_member_page = 0;
   tbody.innerHTML = `
     <tr>
       <td colspan="7" class="text-center text-muted py-5">
@@ -9445,6 +9519,7 @@ function renderEmptyState() {
       </td>
     </tr>
   `;
+  renderMemberPagination();
 }
 
 
@@ -12556,6 +12631,7 @@ async function downloadDividendWithholdingSummaryCsv() {
 } // End of downloadDividendWithholdingSummaryCsv
 
 let g_donation_excel_data = [];
+let g_donation_batch_request_key = null;
 
 function getDonationMethodLabel(method) {
     if (method === 'transfer') return '계좌이체';
@@ -12606,6 +12682,7 @@ function openDonationModal() {
     document.getElementById('dn-note').value = '';
 
     g_donation_excel_data = [];
+    g_donation_batch_request_key = null;
     document.getElementById('don-excel-file').value = '';
     document.getElementById('don-excel-preview').style.display = 'none';
     document.getElementById('don-excel-tbody').innerHTML = '';
@@ -12685,6 +12762,7 @@ function readDonationExcel(input) {
         }
 
         g_donation_excel_data = json;
+        g_donation_batch_request_key = createAdminBatchRequestKey('donation-import');
 
         const tbody = document.getElementById('don-excel-tbody');
         tbody.innerHTML = '';
@@ -12726,37 +12804,52 @@ async function submitDonationBatch() {
     myConfirm(`총 ${g_donation_excel_data.length}건의 자산수증이익을 등록하시겠습니까?\n시간이 조금 걸릴 수 있습니다.`, async () => {
         showLoading(true);
 
-        let successCnt = 0;
-        let failCnt = 0;
-
-        for (const row of g_donation_excel_data) {
+        let invalidCount = 0;
+        const payload = [];
+        g_donation_excel_data.forEach((row, index) => {
             const parsed = normalizeDonationBatchRow(row);
             if (!parsed.memberId || !parsed.donationDate || !Number.isFinite(parsed.amount) || parsed.amount <= 0) {
-                failCnt++;
-                continue;
+                invalidCount++;
+                return;
             }
-
-            const { error } = await _supabase.rpc('manage_donation_secure', {
-                p_id: null,
-                p_member_uid: null,
-                p_member_text_id: parsed.memberId,
-                p_amount: Math.trunc(parsed.amount),
-                p_date: parsed.donationDate,
-                p_method: parsed.method,
-                p_note: parsed.note
+            payload.push({
+                row_no: index + 2,
+                member_id: parsed.memberId,
+                amount: Math.trunc(parsed.amount),
+                donation_date: parsed.donationDate,
+                method: parsed.method,
+                note: parsed.note
             });
+        });
 
-            if (error) {
-                console.error(`자산수증이익 등록 실패 (${parsed.memberId}):`, error);
-                failCnt++;
-            } else {
-                successCnt++;
-            }
+        if (payload.length === 0) {
+            showLoading(false);
+            return myAlert('등록 가능한 행이 없습니다.', 'warning');
+        }
+        if (payload.length > 500) {
+            showLoading(false);
+            return myAlert('한 번에 등록할 수 있는 최대 건수는 500건입니다.', 'warning');
         }
 
+        const requestKey = g_donation_batch_request_key || createAdminBatchRequestKey('donation-import');
+        g_donation_batch_request_key = requestKey;
+        const { data: result, error } = await _supabase.rpc('create_donations_secure_batch', {
+            p_request_key: requestKey,
+            p_rows: payload
+        });
+
         showLoading(false);
+        if (error) {
+            console.error('자산수증이익 일괄 등록 실패:', error);
+            myAlert(`일괄 등록 요청에 실패했습니다.<br>${escapeHtml(error.message || error)}`, 'error');
+            return;
+        }
+
+        const successCnt = Number(result?.success_count || 0);
+        const failCnt = invalidCount + Number(result?.failure_count || 0);
         myAlert(`완료되었습니다.<br>성공: ${successCnt}건, 실패: ${failCnt}건`);
 
+        g_donation_batch_request_key = null;
         bootstrap.Modal.getInstance(document.getElementById('donationModal')).hide();
         fetchGlobalDonations();
     });
@@ -12831,6 +12924,7 @@ function openDividendModal() {
     // 엑셀 탭 초기화
     document.getElementById('div-excel-file').value = '';
     document.getElementById('div-excel-preview').style.display = 'none';
+    g_dividend_batch_request_key = null;
 
     // 첫 번째 탭 선택
     const firstTab = new bootstrap.Tab(document.querySelector('#dividendTab button[data-bs-target="#tab-div-single"]'));
@@ -12878,6 +12972,7 @@ async function submitDividendGrant() {
     });
 }
     let g_excel_data = []; // 업로드한 데이터 임시 저장
+    let g_dividend_batch_request_key = null;
 
 // 엑셀 양식 다운로드
 function downloadDividendTemplate() {
@@ -12910,6 +13005,7 @@ function readDividendExcel(input) {
         }
 
         g_excel_data = json; // 전역 변수에 저장
+        g_dividend_batch_request_key = createAdminBatchRequestKey('usage-reward-import');
 
         // 미리보기 렌더링 (최대 5개)
         const tbody = document.getElementById('div-excel-tbody');
@@ -12950,39 +13046,56 @@ async function submitDividendBatch() {
     myConfirm(`총 ${g_excel_data.length}건의 배당을 지급하시겠습니까?\n시간이 조금 걸릴 수 있습니다.`, async () => {
         showLoading(true);
 
-        let successCnt = 0;
-        let failCnt = 0;
+        let invalidCount = 0;
         const adminEmail = document.getElementById('adminProfile').innerText;
-
-        // ★ 한 건씩 순차 처리 (Batch RPC가 없으므로 반복 호출)
-        // 100건 이상이면 느릴 수 있지만 가장 안전함.
-        for (const row of g_excel_data) {
+        const payload = [];
+        g_excel_data.forEach((row, index) => {
             const id = row['조합원ID'] || row['ID'] || row['아이디'];
             const amt = row['금액'] || row['amount'];
             const reason = row['사유'] || row['비고'] || '일괄지급';
+            const amount = Number(String(amt ?? '').replace(/,/g, '').trim());
 
-            if(id && amt) {
-                const { error } = await _supabase.rpc('grant_dividend_manual', {
-                    p_member_text_id: String(id),
-                    p_amount: Number(amt),
-                    p_reason: String(reason),
-                    p_admin_email: adminEmail
+            if (id && Number.isFinite(amount) && amount !== 0) {
+                payload.push({
+                    row_no: index + 2,
+                    member_id: String(id).trim(),
+                    amount: Math.trunc(amount),
+                    reason: String(reason)
                 });
-
-                if(error) {
-                    console.error(`ID ${id} 실패:`, error);
-                    failCnt++;
-                } else {
-                    successCnt++;
-                }
             } else {
-                failCnt++;
+                invalidCount++;
             }
+        });
+
+        if (payload.length === 0) {
+            showLoading(false);
+            return myAlert('지급 가능한 행이 없습니다.', 'warning');
+        }
+        if (payload.length > 500) {
+            showLoading(false);
+            return myAlert('한 번에 지급할 수 있는 최대 건수는 500건입니다.', 'warning');
         }
 
+        const requestKey = g_dividend_batch_request_key || createAdminBatchRequestKey('usage-reward-import');
+        g_dividend_batch_request_key = requestKey;
+        const { data: result, error } = await _supabase.rpc('grant_usage_rewards_secure_batch', {
+            p_request_key: requestKey,
+            p_rows: payload,
+            p_admin_email: adminEmail
+        });
+
         showLoading(false);
+        if (error) {
+            console.error('이용고배당 일괄 지급 실패:', error);
+            myAlert(`일괄 지급 요청에 실패했습니다.<br>${escapeHtml(error.message || error)}`, 'error');
+            return;
+        }
+
+        const successCnt = Number(result?.success_count || 0);
+        const failCnt = invalidCount + Number(result?.failure_count || 0);
         myAlert(`완료되었습니다.<br>성공: ${successCnt}건, 실패: ${failCnt}건`);
 
+        g_dividend_batch_request_key = null;
         bootstrap.Modal.getInstance(document.getElementById('dividendModal')).hide();
         fetchGlobalDividends();
     });
