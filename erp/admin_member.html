@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.94
-Change: Keep idempotent batch uploads and match deposit Excel names independently of the current member page.
+Version: v1.0.95
+Change: Add administrator-visible partner request audit history in the site partner screen.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.94';
+window.ADMIN_MEMBER_VERSION = 'v1.0.95';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -92,6 +92,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .section-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .partner-logo-thumb { width: 72px; height: 44px; margin: 0 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: #fff; }
 .partner-logo-thumb img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; }
+.partner-request-log-message { max-width: 260px; white-space: normal; word-break: keep-all; }
+.partner-request-log-snapshot { font-size: 12px; color: #6c757d; margin-top: 2px; }
 .power-generation-summary-card { background: #fff; border: 1px solid #e9ecef; border-radius: 14px; padding: 16px 18px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04); height: 100%; }
 .power-generation-summary-card .label { font-size: 12px; color: #64748b; font-weight: 700; letter-spacing: 0.02em; }
 .power-generation-summary-card .value { font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2; }
@@ -1458,6 +1460,21 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="tab-pane fade" id="sub-partners">
+<ul class="nav nav-pills mb-3" id="partnerInnerTabs" role="tablist">
+<li class="nav-item" role="presentation">
+<button class="nav-link active" id="partner-manage-tab" data-bs-toggle="tab" data-bs-target="#partner-manage-pane" type="button" role="tab" aria-controls="partner-manage-pane" aria-selected="true">
+파트너 관리
+</button>
+</li>
+<li class="nav-item" role="presentation">
+<button class="nav-link" id="partner-request-log-tab" data-bs-toggle="tab" data-bs-target="#partner-request-log-pane" type="button" role="tab" aria-controls="partner-request-log-pane" aria-selected="false" onclick="fetchPartnerRequestLogs()">
+신청 이력
+</button>
+</li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane fade show active" id="partner-manage-pane" role="tabpanel" aria-labelledby="partner-manage-tab">
 <div class="card border-warning mb-4 shadow-sm">
 <div class="card-header bg-warning bg-opacity-10 fw-bold text-warning-emphasis">
 ⏳ 승인 대기 중인 신청
@@ -1485,6 +1502,36 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </thead>
 <tbody id="partnerActiveBody"></tbody>
 </table>
+</div>
+
+<div class="tab-pane fade" id="partner-request-log-pane" role="tabpanel" aria-labelledby="partner-request-log-tab">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+<div>
+<h5 class="fw-bold m-0">🧾 파트너 신청 이력</h5>
+<div class="small text-muted mt-1">최근 100건만 표시합니다. 신청자 내부 UUID는 화면에 표시하지 않습니다.</div>
+</div>
+<button class="btn btn-sm btn-outline-secondary" onclick="fetchPartnerRequestLogs()">새로고침</button>
+</div>
+<div class="table-responsive">
+<table class="table table-bordered bg-white align-middle">
+<thead class="table-light text-center">
+<tr>
+<th style="width:150px;">일시</th>
+<th style="width:90px;">결과</th>
+<th style="width:150px;">단계 / 종류</th>
+<th style="width:140px;">조합원번호</th>
+<th>단체명</th>
+<th>메시지</th>
+</tr>
+</thead>
+<tbody id="partnerRequestLogBody">
+<tr><td colspan="6" class="text-center text-muted py-4">신청 이력 탭을 열면 최근 이력을 불러옵니다.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="small text-muted text-end" id="partnerRequestLogSummary"></div>
+</div>
+</div>
 </div>
 
 <div class="tab-pane fade" id="sub-badges">
@@ -8111,6 +8158,112 @@ function bindPartnerBadgeSyncInput() {
     input.addEventListener('blur', queueRefresh);
     input.dataset.badgeSyncBound = '1';
 } // End of bindPartnerBadgeSyncInput
+
+const PARTNER_REQUEST_LOG_LIMIT = 100;
+
+function parsePartnerRequestSnapshot(value) {
+    if (!value) return {};
+    if (typeof value === 'object' && !Array.isArray(value)) return value;
+    if (typeof value !== 'string') return {};
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+} // End of parsePartnerRequestSnapshot
+
+function getPartnerRequestKindLabel(kind) {
+    const value = String(kind || '').trim();
+    if (value === 'new') return '신규 신청';
+    if (value === 'pending_update') return '대기 신청 수정';
+    if (value === 'active_update') return '수정 요청';
+    if (value === 'client_failure') return '화면 처리 실패';
+    return '확인 필요';
+} // End of getPartnerRequestKindLabel
+
+function getPartnerRequestStageLabel(stage) {
+    const value = String(stage || '').trim();
+    if (value === 'database_request') return '신청 저장';
+    if (value === 'logo_upload') return '로고 업로드';
+    if (value === 'rpc_call') return '신청 호출';
+    return '확인 필요';
+} // End of getPartnerRequestStageLabel
+
+function getPartnerRequestOutcomeBadge(outcome) {
+    const value = String(outcome || '').trim();
+    if (value === 'success') return '<span class="badge bg-success">성공</span>';
+    if (value === 'failure') return '<span class="badge bg-danger">실패</span>';
+    return '<span class="badge bg-secondary">확인</span>';
+} // End of getPartnerRequestOutcomeBadge
+
+function renderPartnerRequestLogs(rows) {
+    const tbody = document.getElementById('partnerRequestLogBody');
+    const summary = document.getElementById('partnerRequestLogSummary');
+    if (!tbody) return;
+
+    const list = Array.isArray(rows) ? rows : [];
+    if (summary) {
+        summary.textContent = list.length > 0
+            ? `최근 ${list.length.toLocaleString('ko-KR')}건 표시`
+            : '';
+    }
+
+    if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">아직 기록된 파트너 신청 이력이 없습니다.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = list.map((row) => {
+        const snapshot = parsePartnerRequestSnapshot(row.request_snapshot);
+        const partnerName = snapshot.partner_name || snapshot.name || '-';
+        const hasLogo = snapshot.has_logo === true ? '<div class="partner-request-log-snapshot">로고 포함</div>' : '';
+        const linkUrl = String(snapshot.link_url || '').trim();
+        const linkHint = linkUrl ? '<div class="partner-request-log-snapshot">링크 입력</div>' : '';
+        const message = String(row.message || '').trim() || '-';
+
+        return `
+            <tr>
+                <td class="text-center small">${escapeHtml(formatAdminMemberKstDateTimeSeconds(row.created_at, '-'))}</td>
+                <td class="text-center">${getPartnerRequestOutcomeBadge(row.outcome)}</td>
+                <td>
+                    <div class="fw-semibold">${escapeHtml(getPartnerRequestStageLabel(row.stage))}</div>
+                    <div class="small text-muted">${escapeHtml(getPartnerRequestKindLabel(row.request_kind))}</div>
+                </td>
+                <td class="text-center">${escapeHtml(row.target_member_id || '-')}</td>
+                <td>
+                    <div class="fw-semibold">${escapeHtml(partnerName)}</div>
+                    ${hasLogo}${linkHint}
+                </td>
+                <td class="partner-request-log-message">${escapeHtml(message)}</td>
+            </tr>`;
+    }).join('');
+} // End of renderPartnerRequestLogs
+
+async function fetchPartnerRequestLogs() {
+    const tbody = document.getElementById('partnerRequestLogBody');
+    const summary = document.getElementById('partnerRequestLogSummary');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">신청 이력을 불러오는 중...</td></tr>';
+    if (summary) summary.textContent = '';
+
+    try {
+        const { data, error } = await scopeAdminTenant(
+            _supabase
+                .from('site_partner_request_logs')
+                .select('id, target_member_id, request_kind, outcome, stage, message, request_snapshot, created_at')
+        )
+            .order('created_at', { ascending: false })
+            .limit(PARTNER_REQUEST_LOG_LIMIT);
+
+        if (error) throw error;
+        renderPartnerRequestLogs(data || []);
+    } catch (error) {
+        console.error('fetchPartnerRequestLogs failed:', error);
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">신청 이력을 불러오지 못했습니다.<br><small>${escapeHtml(error.message || error)}</small></td></tr>`;
+    }
+} // End of fetchPartnerRequestLogs
 
 // [수정] 파트너 목록 불러오기 (badges.js 활용)
 async function fetchPartners() {
