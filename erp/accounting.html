@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.83 | Change: 2026-06-15 - Aggregate accounting dashboard data in a tenant-scoped RPC. -->
+<!-- Version: v1.0.84 | Change: 2026-06-22 - Record bank interest with actual national and local withholding tax. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.83 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.84 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -213,7 +213,7 @@
         <div id="dynamicArea" class="mb-3"></div>
 
         <div class="mb-3"><label class="small text-muted">적요</label><input type="text" class="form-control ime-kr" id="inputDesc" required></div>
-        <div class="mb-2"><label class="small text-muted">금액 (합계)</label><input type="number" class="form-control form-control-lg" id="inputAmount" placeholder="0" required min="0"></div>
+        <div class="mb-2"><label class="small text-muted" id="inputAmountLabel">금액 (합계)</label><input type="number" class="form-control form-control-lg" id="inputAmount" placeholder="0" required min="0" step="1" oninput="handleAccountingAmountInput()"></div>
 
         <div class="d-flex justify-content-between align-items-center mt-3">
            <div class="d-flex align-items-center gap-2" id="cardOptionDiv">
@@ -580,7 +580,7 @@
       <div class="list-group list-group-flush small">
         <div class="list-group-item">4대보험 통합납부: 급여연동으로 잡힌 부채(예수금/미지급비용)를 상환하며 차액은 선급금/미지급금 정산대기로 누적합니다. 확정 전에는 즉시 잡이익/잡손실로 보내지 않습니다.</div>
         <div class="list-group-item">인적용역: 3.3% 또는 8.8% 원천징수를 자동 분개합니다.</div>
-        <div class="list-group-item">이자수익: 15.4% 원천징수액을 선납세금으로 자동 처리합니다.</div>
+        <div class="list-group-item">은행 이자수익: 세전 이자와 은행이 실제 공제한 법인세·법인지방소득세를 함께 입력하고, 실입금액과 선납세금을 자동 분개합니다.</div>
         <div class="list-group-item">대출상환: 입력 금액 중 이자를 분리해 이자비용/부채상환으로 나눕니다.</div>
         <div class="list-group-item">고급모드: 자산/부채/자본은 증감 방향과 상대계정을 직접 지정해야 하며, 기본 모드보다 정확한 분개가 가능합니다.</div>
         <div class="list-group-item">선급·미수 관리: 선급금(입력/차감)과 미수금(발생/회수)을 거래처별 잔액 기반으로 처리합니다.</div>
@@ -662,13 +662,28 @@
         </div>
         <div class="row g-2 mb-2">
           <div class="col-6">
-            <label class="small text-muted">기납부세액</label>
-            <input type="number" class="form-control" id="closingPrepaidTaxInput" min="0" step="1" value="0">
+            <label class="small text-muted">기납부 법인세(국세)</label>
+            <input type="number" class="form-control" id="closingPrepaidNationalTaxInput" min="0" step="1" value="0">
           </div>
           <div class="col-6">
-            <label class="small text-muted">예상 납부세액</label>
-            <input type="text" class="form-control bg-light" id="closingExpectedTaxPayable" readonly>
+            <label class="small text-muted">기납부 법인지방소득세</label>
+            <input type="number" class="form-control" id="closingPrepaidLocalTaxInput" min="0" step="1" value="0">
           </div>
+        </div>
+        <div class="small text-muted mb-2" id="closingPrepaidTaxLedgerHint">은행 이자 원천징수 원장을 불러오는 중입니다.</div>
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="small text-muted">예상 국세 납부액</label>
+            <input type="text" class="form-control bg-light" id="closingExpectedNationalTaxPayable" readonly>
+          </div>
+          <div class="col-6">
+            <label class="small text-muted">예상 지방세 납부액</label>
+            <input type="text" class="form-control bg-light" id="closingExpectedLocalTaxPayable" readonly>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="small text-muted">예상 합계 납부세액</label>
+          <input type="text" class="form-control bg-light" id="closingExpectedTaxPayable" readonly>
         </div>
         <div class="small text-muted mb-2" id="closingCapitalInfo">출자금/법정적립금 정보를 계산 중입니다.</div>
         <div class="alert alert-info small p-2">
@@ -1048,6 +1063,8 @@ let selectModal, reportModal, addModal, infoModal, alertModal, confirmModal, clo
 let myInfo = null, confirmCallback = null;
 let confirmReturnModalId = null, confirmAccepted = false;
 let closingTaxExpenseManual = false;
+let bankInterestTaxManual = false;
+let bankInterestRequestKey = '';
 let closingContext = null;
 let yearModalCallback = null;
 let lastReportParts = null;
@@ -1087,7 +1104,7 @@ const ACCOUNTING_REPORT_ACCOUNT_ALIAS_BY_COMPACT = {
     '잡이익': '잡이익',
     '잡손실': '잡손실'
 };
-const ACCOUNTING_REPORT_ASSET_ACCOUNTS = new Set(['부가세대급금', '보통예금', '현금', '선급금', '미수금']);
+const ACCOUNTING_REPORT_ASSET_ACCOUNTS = new Set(['부가세대급금', '보통예금', '현금', '선급금', '미수금', '선납세금', '선납법인세', '선납법인지방소득세']);
 const SALARY_EXPENSE_ACCOUNT = '임직원급여';
 const SALARY_EXPENSE_ACCOUNT_ALIASES = [SALARY_EXPENSE_ACCOUNT, '임직원 급여', '급여'];
 const SALARY_INSURANCE_EXPENSE_ACCOUNT = '4대보험회사분';
@@ -1260,7 +1277,27 @@ function buildTaxAdjustmentSummary(rows) {
     return summary;
 }
 
-function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 0, prepaidTax = 0) {
+function buildClosingPrepaidTaxSummary(rows) {
+    const summary = { national: 0, local: 0, legacy: 0 };
+
+    (rows || []).forEach((row) => {
+        const account = String(row?.Account || '').replace(/\s+/g, '');
+        const amount = Number(row?.Debit || 0) - Number(row?.Credit || 0);
+        if (!Number.isFinite(amount) || amount === 0) return;
+
+        if (account === '선납법인세') summary.national += amount;
+        else if (account === '선납법인지방소득세') summary.local += amount;
+        else if (account === '선납세금' || account === '이자원천징수액') summary.legacy += amount;
+    });
+
+    return {
+        national: Math.max(0, Math.round(summary.national)),
+        local: Math.max(0, Math.round(summary.local)),
+        legacy: Math.max(0, Math.round(summary.legacy))
+    };
+}
+
+function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 0, prepaidNationalTax = 0, prepaidLocalTax = 0) {
     const taxableBase = Math.max(0, Math.round(Number(preTaxNetIncome || 0) + Number(addBackFines || 0)));
     const nationalGross = getProgressiveTaxFromBrackets(taxableBase, COOP_CORPORATE_TAX_BRACKETS);
     const creditRequested = Math.max(0, Math.round(Number(taxCredit || 0)));
@@ -1268,8 +1305,12 @@ function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 
     const nationalAfterCredit = Math.max(0, nationalGross - creditApplied);
     const localTax = Math.round(nationalAfterCredit * 0.1);
     const recommendedExpense = nationalAfterCredit + localTax;
-    const prepaidApplied = Math.max(0, Math.round(Number(prepaidTax || 0)));
-    const expectedPayable = Math.max(0, recommendedExpense - prepaidApplied);
+    const prepaidNationalApplied = Math.max(0, Math.round(Number(prepaidNationalTax || 0)));
+    const prepaidLocalApplied = Math.max(0, Math.round(Number(prepaidLocalTax || 0)));
+    const prepaidApplied = prepaidNationalApplied + prepaidLocalApplied;
+    const expectedNationalPayable = Math.max(0, nationalAfterCredit - prepaidNationalApplied);
+    const expectedLocalPayable = Math.max(0, localTax - prepaidLocalApplied);
+    const expectedPayable = expectedNationalPayable + expectedLocalPayable;
 
     return {
         taxBase: taxableBase,
@@ -1279,7 +1320,11 @@ function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 
         creditRequested,
         creditApplied,
         recommendedExpense,
+        prepaidNationalApplied,
+        prepaidLocalApplied,
         prepaidApplied,
+        expectedNationalPayable,
+        expectedLocalPayable,
         expectedPayable
     };
 }
@@ -1523,7 +1568,8 @@ window.onload = async function() {
     document.getElementById("closingYearInput").addEventListener("change", refreshClosingContext);
     document.getElementById("closingLegalInput").addEventListener("input", handleClosingLegalInputChange);
     document.getElementById("closingTaxCreditInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
-    document.getElementById("closingPrepaidTaxInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
+    document.getElementById("closingPrepaidNationalTaxInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
+    document.getElementById("closingPrepaidLocalTaxInput").addEventListener("input", () => syncClosingFormState(false, { preserveManualTax: true }));
     document.getElementById("closingTaxExpenseInput").addEventListener("input", () => {
         closingTaxExpenseManual = true;
         syncClosingFormState(false, { preserveManualTax: true });
@@ -3566,6 +3612,104 @@ function getDateGuardMessage(dateStr) {
     return `입력 날짜: ${dateStr}\n${reasons.join('\n')}\n계속 진행할까요?`;
 }
 
+function calculateBankInterestTaxSuggestion(grossAmount) {
+    const gross = Number(grossAmount || 0);
+    if (!Number.isFinite(gross) || gross <= 0) {
+        return { corporateTax: 0, localTax: 0, netAmount: 0 };
+    }
+
+    let corporateTax = Math.floor(gross * 0.14);
+    if (corporateTax < 1000) corporateTax = 0;
+    const localTax = corporateTax > 0 ? Math.floor(corporateTax * 0.1) : 0;
+
+    return {
+        corporateTax,
+        localTax,
+        netAmount: gross - corporateTax - localTax
+    };
+}
+
+function calculateBankInterestAmounts(grossAmount, corporateTaxAmount, localTaxAmount) {
+    const gross = Number(grossAmount);
+    const corporateTax = Number(corporateTaxAmount);
+    const localTax = Number(localTaxAmount);
+
+    if (!Number.isInteger(gross) || gross <= 0) {
+        return { valid: false, error: '세전 이자수익은 1원 이상의 정수로 입력하세요.' };
+    }
+    if (!Number.isInteger(corporateTax) || corporateTax < 0) {
+        return { valid: false, error: '원천징수 법인세는 0원 이상의 정수로 입력하세요.' };
+    }
+    if (!Number.isInteger(localTax) || localTax < 0) {
+        return { valid: false, error: '법인지방소득세는 0원 이상의 정수로 입력하세요.' };
+    }
+    if ((corporateTax + localTax) > gross) {
+        return { valid: false, error: '원천징수세액 합계는 세전 이자수익을 초과할 수 없습니다.' };
+    }
+
+    return {
+        valid: true,
+        grossAmount: gross,
+        corporateTax,
+        localTax,
+        netAmount: gross - corporateTax - localTax
+    };
+}
+
+function syncBankInterestAmounts(options = {}) {
+    const grossEl = document.getElementById('inputAmount');
+    const corporateTaxEl = document.getElementById('interestCorporateTax');
+    const localTaxEl = document.getElementById('interestLocalTax');
+    const netEl = document.getElementById('interestNetAmount');
+    const hintEl = document.getElementById('interestAmountHint');
+    if (!grossEl || !corporateTaxEl || !localTaxEl || !netEl || !hintEl) return;
+
+    const gross = Number(grossEl.value || 0);
+    if (options.applySuggestion || !bankInterestTaxManual) {
+        const suggestion = calculateBankInterestTaxSuggestion(gross);
+        corporateTaxEl.value = String(suggestion.corporateTax);
+        localTaxEl.value = String(suggestion.localTax);
+    }
+
+    const corporateTax = Number(corporateTaxEl.value || 0);
+    const localTax = Number(localTaxEl.value || 0);
+    const amounts = calculateBankInterestAmounts(gross, corporateTax, localTax);
+    if (!amounts.valid) {
+        netEl.value = '';
+        hintEl.className = 'small text-danger mt-1';
+        hintEl.textContent = gross > 0 ? amounts.error : '세전 이자수익을 입력하면 추천 세액과 실입금액을 계산합니다.';
+        return;
+    }
+
+    netEl.value = String(amounts.netAmount);
+    hintEl.className = 'small text-muted mt-1';
+    hintEl.textContent = `${amounts.grossAmount.toLocaleString()}원 - 법인세 ${amounts.corporateTax.toLocaleString()}원 - 지방세 ${amounts.localTax.toLocaleString()}원 = 실입금 ${amounts.netAmount.toLocaleString()}원`;
+}
+
+function markBankInterestTaxManual() {
+    bankInterestTaxManual = true;
+    syncBankInterestAmounts();
+}
+
+function applyBankInterestTaxSuggestion() {
+    bankInterestTaxManual = false;
+    syncBankInterestAmounts({ applySuggestion: true });
+}
+
+function handleAccountingAmountInput() {
+    if (document.getElementById('specialMode')?.value === 'interest_inc') {
+        syncBankInterestAmounts();
+    }
+}
+
+function getBankInterestRequestKey() {
+    if (bankInterestRequestKey) return bankInterestRequestKey;
+    bankInterestRequestKey = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : `interest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    return bankInterestRequestKey;
+}
+
 function normalizeSpecialCode(raw) {
     if (!raw) return "";
     const rawStr = String(raw);
@@ -4195,6 +4339,9 @@ function resetAccountInput() {
     document.getElementById("hiddenCounterType").value = "";
     document.getElementById("dynamicArea").innerHTML = "";
     document.getElementById("cardOptionDiv").style.display = "none";
+    document.getElementById("inputAmountLabel").textContent = "금액 (합계)";
+    bankInterestTaxManual = false;
+    bankInterestRequestKey = '';
 }
 
 function openSelModal() {
@@ -4314,6 +4461,7 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
     const cardDiv = document.getElementById("cardOptionDiv");
 
     area.innerHTML = "";
+    document.getElementById("inputAmountLabel").textContent = "금액 (합계)";
     document.getElementById("hiddenCounterAccount").value = "";
     document.getElementById("hiddenCounterType").value = "";
 
@@ -4348,8 +4496,36 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
 
     // 2. SpecialType 값에 따른 UI 생성 (원본 로직 100% 유지)
     if (specialCode === "interest_inc") { // 이자수익
-        area.innerHTML += `<div class="special-box alert alert-primary p-2 mb-2"><small class="fw-bold">ℹ️ 이자수익 (원천징수 자동분개)</small><br>세전 이자총액을 입력하세요. (15.4% 자동 차감)</div>`;
+        document.getElementById("inputAmountLabel").textContent = "세전 이자수익";
+        bankInterestTaxManual = false;
+        bankInterestRequestKey = '';
+        area.innerHTML += `
+            <div class="special-box alert alert-primary p-2 mb-2">
+                <small class="fw-bold">은행 이자수익과 원천징수</small><br>
+                <span class="small">추천 세액은 참고값입니다. 은행 이자계산서나 거래 상세의 실제 법인세·지방세를 확인해 입력하세요.</span>
+            </div>
+            <div class="border rounded p-2 bg-white mb-2">
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="small text-muted">원천징수 법인세(국세)</label>
+                        <input type="number" class="form-control" id="interestCorporateTax" min="0" step="1" value="0" oninput="markBankInterestTaxManual()">
+                    </div>
+                    <div class="col-6">
+                        <label class="small text-muted">법인지방소득세</label>
+                        <input type="number" class="form-control" id="interestLocalTax" min="0" step="1" value="0" oninput="markBankInterestTaxManual()">
+                    </div>
+                    <div class="col-12">
+                        <label class="small text-muted">실제 통장 입금액</label>
+                        <input type="number" class="form-control bg-light fw-bold" id="interestNetAmount" value="0" readonly>
+                    </div>
+                </div>
+                <div class="d-grid mt-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="applyBankInterestTaxSuggestion()">14%·지방세 추천값 다시 적용</button>
+                </div>
+                <div class="small text-muted mt-1" id="interestAmountHint">세전 이자수익을 입력하면 추천 세액과 실입금액을 계산합니다.</div>
+            </div>`;
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
+        setTimeout(function() { syncBankInterestAmounts({ applySuggestion: true }); }, 0);
     }
     else if (specialCode === "salary" || specialCode === "retirement_pension") { // 급여, 퇴직연금
         area.innerHTML += `<div class="special-box alert alert-success p-2 mb-2"><small class="fw-bold">ℹ️ 인건비 처리</small><br>4대보험/세금 등은 급여연동 기능을 권장합니다.</div>`;
@@ -5141,6 +5317,78 @@ async function applyReceivableCollection() {
     renderReceivableVendorSelect();
 }
 
+function resetAccountingFormAfterSave() {
+    const wasAdvanced = document.getElementById("advModeToggle").checked;
+    document.getElementById("erpForm").reset();
+    document.getElementById("advModeToggle").checked = wasAdvanced;
+    toggleAdvancedMode();
+    document.getElementById("smNorm").checked = true;
+    document.getElementById("dynamicArea").innerHTML = "";
+    document.getElementById("specialMode").value = "";
+    document.getElementById("inputAmountLabel").textContent = "금액 (합계)";
+    bankInterestTaxManual = false;
+    bankInterestRequestKey = '';
+    toggleSettleMode();
+}
+
+function getBankInterestErrorMessage(error) {
+    const message = String(error?.message || error || '알 수 없는 오류');
+    if (message.includes('BANK_INTEREST_REQUEST_KEY_MISMATCH')) {
+        return '같은 저장 요청키로 이미 다른 내용이 반영되었습니다. 최근 전표를 확인한 뒤 다시 입력하세요.';
+    }
+    if (message.includes('WITHHOLDING_EXCEEDS_GROSS')) return '원천징수세액 합계가 세전 이자수익보다 큽니다.';
+    if (message.includes('COOP_CONTEXT_REQUIRED')) return '로그인한 조합 정보를 확인할 수 없습니다.';
+    return `은행 이자 전표 저장 실패: ${message}`;
+}
+
+async function submitBankInterestAccounting(ctx) {
+    const corporateTaxEl = document.getElementById('interestCorporateTax');
+    const localTaxEl = document.getElementById('interestLocalTax');
+    const amounts = calculateBankInterestAmounts(
+        ctx.totalAmt,
+        Number(corporateTaxEl?.value || 0),
+        Number(localTaxEl?.value || 0)
+    );
+    if (!ctx.fDate) return showAlert('오류', '전표일자를 입력하세요.');
+    if (!String(ctx.desc || '').trim()) return showAlert('오류', '은행 또는 이자 내역을 적요에 입력하세요.');
+    if (!amounts.valid) return showAlert('오류', amounts.error);
+
+    const submitBtn = document.getElementById('submitBtn');
+    const requestKey = getBankInterestRequestKey();
+    const writer = myInfo ? myInfo.emp_name : 'WebUser';
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+        const { data, error } = await _supabase.rpc('create_bank_interest_journal', {
+            p_entry_date: ctx.fDate,
+            p_project: ctx.project || '본사',
+            p_description: String(ctx.desc || '').trim(),
+            p_gross_amount: amounts.grossAmount,
+            p_corporate_tax: amounts.corporateTax,
+            p_local_tax: amounts.localTax,
+            p_request_key: requestKey,
+            p_operator: writer
+        });
+        if (error) return showAlert('오류', getBankInterestErrorMessage(error));
+
+        const result = data && typeof data === 'object' ? data : {};
+        await logAudit('accounting.bank_interest.submit', result.trans_id || null, '은행 이자수익 전표 저장', {
+            gross_amount: amounts.grossAmount,
+            corporate_tax: amounts.corporateTax,
+            local_tax: amounts.localTax,
+            net_amount: amounts.netAmount,
+            replayed: result.replayed === true
+        });
+        showAlert('완료', `은행 이자수익 ${amounts.grossAmount.toLocaleString()}원과 실입금 ${amounts.netAmount.toLocaleString()}원이 저장되었습니다.`);
+        resetAccountingFormAfterSave();
+        await refreshDashboard();
+    } catch (error) {
+        showAlert('오류', getBankInterestErrorMessage(error));
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
+}
+
 async function handleFormSubmit(e) {
     e.preventDefault();
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
@@ -5177,6 +5425,11 @@ async function submitAccounting(ctx) {
     if(settleMode === 'pre_expense') finalDesc = `[설립전] ${desc} (${payerName})`;
     if(settleMode === 'reimburse') finalDesc = `[정산] ${desc} (${payerName})`;
 
+    if (specialCode === 'interest_inc') {
+        await submitBankInterestAccounting(ctx);
+        return;
+    }
+
     // 부가세 계산
     let netAmount = totalAmt, vatAmount = 0;
     if (useVAT && type !== '자산' && settleMode !== 'reimburse' && !document.getElementById("vatCheck").disabled) {
@@ -5189,7 +5442,7 @@ async function submitAccounting(ctx) {
     const advancedEnabled = document.getElementById("advModeToggle")?.checked;
     const isAdvancedEntry = advancedEnabled && (type === "자산" || type === "부채" || type === "자본") && !specialCode && settleMode === "";
 
-    const hasSpecialHandler = ['insurance', 'loan_pay', 'labor', 'interest_inc'].includes(specialCode);
+    const hasSpecialHandler = ['insurance', 'loan_pay', 'labor'].includes(specialCode);
 
     // ==========================================
     // [1] 특수 분개 모드인지 확인 (Special Mode)
@@ -5226,13 +5479,6 @@ async function submitAccounting(ctx) {
             entries.push({ Date: fDate, Type: '비용', Account: item, Description: finalDesc, Debit: totalAmt, Credit: 0, Project: project, Operator: writer, Evidence_Type: '원천징수' });
             entries.push({ Date: fDate, Type: '부채', Account: '예수금', Description: `[${item}] 원천징수(${taxRate*100}%)`, Debit: 0, Credit: taxAmt, Project: project, Operator: writer, Evidence_Type: '내부기표' });
             entries.push({ Date: fDate, Type: '자산', Account: '보통예금', Description: finalDesc, Debit: 0, Credit: realPay, Project: project, Operator: writer, Evidence_Type: '금융거래' });
-        }
-        else if (specialCode === 'interest_inc') { // 이자수익
-            const taxAmt = Math.floor(totalAmt * 0.154 / 10) * 10;
-            const realIn = totalAmt - taxAmt;
-            entries.push({ Date: fDate, Type: '매출', Account: item, Description: finalDesc, Debit: 0, Credit: totalAmt, Project: project, Operator: writer, Evidence_Type: '금융거래' });
-            entries.push({ Date: fDate, Type: '자산', Account: '선납세금', Description: `[${item}] 원천징수`, Debit: taxAmt, Credit: 0, Project: project, Operator: writer, Evidence_Type: '원천징수' });
-            entries.push({ Date: fDate, Type: '자산', Account: '보통예금', Description: finalDesc, Debit: realIn, Credit: 0, Project: project, Operator: writer, Evidence_Type: '금융거래' });
         }
     }
     // ==========================================
@@ -5305,18 +5551,11 @@ async function submitAccounting(ctx) {
     else {
         await logAudit('accounting.submit', null, '전표 저장', { total: totalAmt, type, project, entries: entries.length });
         showAlert("완료", "저장되었습니다.");
-        const wasAdvanced = document.getElementById("advModeToggle").checked;
-        document.getElementById("erpForm").reset();
-        document.getElementById("advModeToggle").checked = wasAdvanced;
-        toggleAdvancedMode();
-        document.getElementById("smNorm").checked = true;
-        document.getElementById("dynamicArea").innerHTML = "";
-        document.getElementById("specialMode").value = "";
-        toggleSettleMode();
+        resetAccountingFormAfterSave();
         refreshDashboard();
     }
 }
-// End of handleFormSubmit
+// End of submitAccounting
   // ★ [신규] 2025년 급여 -> 개발비 대체 분개 (수동 실행용)
 async function runAssetCorrection2025() {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
@@ -5351,7 +5590,8 @@ async function openClosingModal() {
     document.getElementById("closingTaxExpenseInput").type = "number";
     document.getElementById("closingTaxExpenseInput").value = "0";
     document.getElementById("closingTaxCreditInput").value = "0";
-    document.getElementById("closingPrepaidTaxInput").value = "0";
+    document.getElementById("closingPrepaidNationalTaxInput").value = "0";
+    document.getElementById("closingPrepaidLocalTaxInput").value = "0";
     closingTaxExpenseManual = false;
     await refreshClosingContext();
     closingModal.show();
@@ -5370,6 +5610,7 @@ async function buildClosingContext(targetYear) {
     const balances = incomeSummary.balances;
     const preTaxNetIncome = incomeSummary.netIncome;
     const taxAdjust = buildTaxAdjustmentSummary(baseJournals);
+    const prepaidTaxSummary = buildClosingPrepaidTaxSummary(baseJournals);
 
     const { data: capRows } = await _supabase.from('ac_journal').select('*').eq('Account','출자금').lte('Date', endDate);
     const { data: legalRows } = await _supabase.from('ac_journal').select('*').eq('Account','법정적립금').lte('Date', endDate);
@@ -5390,7 +5631,8 @@ async function buildClosingContext(targetYear) {
         netIncome: preTaxNetIncome - closingSummary.taxExpense,
         taxExpense: closingSummary.taxExpense,
         taxAdjust,
-        taxEstimate: buildClosingTaxEstimate(preTaxNetIncome, taxAdjust.fines, 0, 0),
+        taxEstimate: buildClosingTaxEstimate(preTaxNetIncome, taxAdjust.fines, 0, prepaidTaxSummary.national, prepaidTaxSummary.local),
+        prepaidTaxSummary,
         isClosed: closingSummary.isClosed,
         existingLegal: closingSummary.legal,
         existingVoluntary: closingSummary.voluntary,
@@ -5424,8 +5666,12 @@ function getClosingTaxCreditValue() {
     return getClosingRoundedInputValue("closingTaxCreditInput");
 }
 
-function getClosingPrepaidTaxValue() {
-    return getClosingRoundedInputValue("closingPrepaidTaxInput");
+function getClosingPrepaidNationalTaxValue() {
+    return getClosingRoundedInputValue("closingPrepaidNationalTaxInput");
+}
+
+function getClosingPrepaidLocalTaxValue() {
+    return getClosingRoundedInputValue("closingPrepaidLocalTaxInput");
 }
 
 function syncClosingFormState(resetReserveValues = false, options = {}) {
@@ -5442,20 +5688,41 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
     const estCorpEl = document.getElementById("closingEstimatedCorporateTax");
     const estLocalEl = document.getElementById("closingEstimatedLocalTax");
     const taxCreditInput = document.getElementById("closingTaxCreditInput");
-    const prepaidTaxInput = document.getElementById("closingPrepaidTaxInput");
+    const prepaidNationalTaxInput = document.getElementById("closingPrepaidNationalTaxInput");
+    const prepaidLocalTaxInput = document.getElementById("closingPrepaidLocalTaxInput");
+    const prepaidTaxLedgerHintEl = document.getElementById("closingPrepaidTaxLedgerHint");
     const taxExpenseInput = document.getElementById("closingTaxExpenseInput");
     const taxExpenseHintEl = document.getElementById("closingTaxExpenseHint");
+    const expectedNationalPayableEl = document.getElementById("closingExpectedNationalTaxPayable");
+    const expectedLocalPayableEl = document.getElementById("closingExpectedLocalTaxPayable");
     const expectedPayableEl = document.getElementById("closingExpectedTaxPayable");
     const runBtn = document.getElementById("btnClosingRun");
     const taxCredit = getClosingTaxCreditValue();
-    const prepaidTax = getClosingPrepaidTaxValue();
-    const estimate = buildClosingTaxEstimate(closingContext.preTaxNetIncome, closingContext.taxAdjust?.fines || 0, taxCredit, prepaidTax);
+    const prepaidNationalTax = getClosingPrepaidNationalTaxValue();
+    const prepaidLocalTax = getClosingPrepaidLocalTaxValue();
+    const estimate = buildClosingTaxEstimate(
+        closingContext.preTaxNetIncome,
+        closingContext.taxAdjust?.fines || 0,
+        taxCredit,
+        prepaidNationalTax,
+        prepaidLocalTax
+    );
 
     closingContext.taxEstimate = estimate;
     if (taxBaseEl) taxBaseEl.value = estimate.taxBase.toLocaleString();
     if (estCorpEl) estCorpEl.value = estimate.nationalAfterCredit.toLocaleString();
     if (estLocalEl) estLocalEl.value = estimate.localTax.toLocaleString();
+    if (expectedNationalPayableEl) expectedNationalPayableEl.value = estimate.expectedNationalPayable.toLocaleString();
+    if (expectedLocalPayableEl) expectedLocalPayableEl.value = estimate.expectedLocalPayable.toLocaleString();
     if (expectedPayableEl) expectedPayableEl.value = estimate.expectedPayable.toLocaleString();
+    if (prepaidTaxLedgerHintEl) {
+        const ledger = closingContext.prepaidTaxSummary || { national: 0, local: 0, legacy: 0 };
+        const legacyText = ledger.legacy > 0
+            ? ` · 미분류 선납세금 ${ledger.legacy.toLocaleString()}원은 은행 자료를 확인해 위 국세·지방세에 직접 반영하세요.`
+            : '';
+        prepaidTaxLedgerHintEl.className = ledger.legacy > 0 ? 'small text-danger mb-2' : 'small text-muted mb-2';
+        prepaidTaxLedgerHintEl.textContent = `원장 자동값: 국세 ${ledger.national.toLocaleString()}원 · 지방세 ${ledger.local.toLocaleString()}원${legacyText}`;
+    }
     if (closingContext.isClosed) {
         closingTaxExpenseManual = false;
         if (readonlyInfoEl) readonlyInfoEl.textContent = `이미 ${closingContext.year}년도 결산이 완료되어 읽기 전용으로 표시합니다.`;
@@ -5464,17 +5731,14 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
             taxCreditInput.placeholder = '미저장';
             taxCreditInput.disabled = true;
         }
-        if (prepaidTaxInput) {
-            prepaidTaxInput.value = '';
-            prepaidTaxInput.placeholder = '미저장';
-            prepaidTaxInput.disabled = true;
-        }
+        if (prepaidNationalTaxInput) prepaidNationalTaxInput.disabled = true;
+        if (prepaidLocalTaxInput) prepaidLocalTaxInput.disabled = true;
         if (taxExpenseInput) {
             setClosingNumericInputDisplay(taxExpenseInput, closingContext.taxExpense || 0, true);
             taxExpenseInput.disabled = true;
         }
         if (taxExpenseHintEl) {
-            taxExpenseHintEl.innerText = `반영된 법인세비용 ${Math.round(Number(closingContext.taxExpense || 0)).toLocaleString()}원을 읽기 전용으로 표시합니다. 세액공제/기납부세액 입력값은 별도 저장되지 않습니다.`;
+            taxExpenseHintEl.innerText = `반영된 법인세비용 ${Math.round(Number(closingContext.taxExpense || 0)).toLocaleString()}원을 읽기 전용으로 표시합니다. 기납부세액은 해당 연도 원장 기준입니다.`;
         }
         if (runBtn) {
             runBtn.disabled = true;
@@ -5487,10 +5751,13 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
             taxCreditInput.placeholder = '';
             if (taxCreditInput.value === '') taxCreditInput.value = '0';
         }
-        if (prepaidTaxInput) {
-            prepaidTaxInput.disabled = false;
-            prepaidTaxInput.placeholder = '';
-            if (prepaidTaxInput.value === '') prepaidTaxInput.value = '0';
+        if (prepaidNationalTaxInput) {
+            prepaidNationalTaxInput.disabled = false;
+            if (prepaidNationalTaxInput.value === '') prepaidNationalTaxInput.value = '0';
+        }
+        if (prepaidLocalTaxInput) {
+            prepaidLocalTaxInput.disabled = false;
+            if (prepaidLocalTaxInput.value === '') prepaidLocalTaxInput.value = '0';
         }
         if ((!options.preserveManualTax || !closingTaxExpenseManual) && taxExpenseInput) {
             setClosingNumericInputDisplay(taxExpenseInput, estimate.recommendedExpense, false);
@@ -5502,8 +5769,8 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
         }
         if (taxExpenseHintEl) {
             taxExpenseHintEl.innerText = closingTaxExpenseManual
-                ? `자동 추천 ${estimate.recommendedExpense.toLocaleString()}원에서 수동 수정 중입니다. 기납부세액은 예상 납부세액에만 반영됩니다.`
-                : `자동 추천 ${estimate.recommendedExpense.toLocaleString()}원이 입력되었습니다. 수정할 수 있으며, 기납부세액은 예상 납부세액에만 반영됩니다.`;
+                ? `자동 추천 ${estimate.recommendedExpense.toLocaleString()}원에서 수동 수정 중입니다. 국세·지방세 기납부액은 각각의 예상 납부세액에 반영됩니다.`
+                : `자동 추천 ${estimate.recommendedExpense.toLocaleString()}원이 입력되었습니다. 국세·지방세 기납부액은 각각 원장에서 자동 제안되며 수정할 수 있습니다.`;
         }
         if (runBtn) {
             runBtn.disabled = false;
@@ -5575,6 +5842,8 @@ async function refreshClosingContext() {
 
     closingContext = await buildClosingContext(yearVal);
     const ctx = closingContext;
+    document.getElementById("closingPrepaidNationalTaxInput").value = String(ctx.prepaidTaxSummary?.national || 0);
+    document.getElementById("closingPrepaidLocalTaxInput").value = String(ctx.prepaidTaxSummary?.local || 0);
     document.getElementById("closingCapitalInfo").innerText = `출자금 누적: ${ctx.capitalTotal.toLocaleString()}원 · 법정적립금 누적: ${ctx.legalBalance.toLocaleString()}원 · 3배 기준 ${ctx.thresholdMet ? '충족' : '미충족'}`;
     syncClosingFormState(true);
 }
@@ -5599,8 +5868,9 @@ async function runClosingFromModal() {
     if (ctx.isClosed) return showAlert("알림", `이미 ${ctx.year}년도 결산이 완료되어 읽기 전용으로만 확인할 수 있습니다.`);
     const taxExpense = getClosingTaxExpenseValue();
     const taxCredit = getClosingTaxCreditValue();
-    const prepaidTax = getClosingPrepaidTaxValue();
-    const estimate = buildClosingTaxEstimate(ctx.preTaxNetIncome, ctx.taxAdjust?.fines || 0, taxCredit, prepaidTax);
+    const prepaidNationalTax = getClosingPrepaidNationalTaxValue();
+    const prepaidLocalTax = getClosingPrepaidLocalTaxValue();
+    const estimate = buildClosingTaxEstimate(ctx.preTaxNetIncome, ctx.taxAdjust?.fines || 0, taxCredit, prepaidNationalTax, prepaidLocalTax);
     const legal = getClosingRoundedInputValue("closingLegalInput");
     const vol = getClosingRoundedInputValue("closingVoluntaryInput");
 
@@ -5613,7 +5883,7 @@ async function runClosingFromModal() {
         if ((legal + vol) > ctx.netIncome) return showAlert("오류", "법정적립금 + 임의적립금이 당기순이익을 초과할 수 없습니다.");
     }
 
-    const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부세액: ${estimate.prepaidApplied.toLocaleString()}원\n예상 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
+    const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부 법인세(국세): ${estimate.prepaidNationalApplied.toLocaleString()}원\n기납부 법인지방소득세: ${estimate.prepaidLocalApplied.toLocaleString()}원\n예상 국세 납부액: ${estimate.expectedNationalPayable.toLocaleString()}원\n예상 지방세 납부액: ${estimate.expectedLocalPayable.toLocaleString()}원\n예상 합계 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
     const confirmAction = async () => {
         await executeClosing(ctx, legal, vol, taxExpense);
     };
