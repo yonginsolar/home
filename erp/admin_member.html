@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.96
-Change: Improve partner inner tab contrast with scoped text color and border styles.
+Version: v1.0.97
+Change: Show managed family links bidirectionally and render only birth dates in the family tab.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.96';
+window.ADMIN_MEMBER_VERSION = 'v1.0.97';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -2789,7 +2789,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <div class="tab-pane fade" id="md-tab-family">
 <div class="alert alert-light border small">
-<i class="bi bi-info-circle"></i> 이 조합원이 관리하는 <strong>가족(자녀)</strong>이나 <strong>단체</strong> 목록입니다.
+<i class="bi bi-info-circle"></i> 이 조합원과 연결된 <strong>가족(자녀)</strong>, <strong>보호자/관리자</strong>, <strong>단체</strong> 목록입니다.
 </div>
 <div class="d-flex justify-content-end mb-2">
 <button class="btn btn-sm btn-outline-dark" onclick="openRelationSelectModal()">+ 자녀/단체 추가</button>
@@ -10449,7 +10449,36 @@ loadConsultLogs(null);
 // 5. 자금 로드 (출자금, 기부금 등) - Phase 2에서는 '조회' 위주
 
 
-// [신규] 가족/단체 목록 로드 (내가 관리자인 계정 조회)
+function formatManagedFamilyBirthDisplay(member) {
+    if (String(member?.member_type || '').trim() === '단체') return '-';
+
+    const birthDateText = formatMemberExportBirthDateText(member?.birth_date);
+    if (birthDateText !== '-') return birthDateText;
+
+    return formatMemberExportBirthDateFromRrnDisplay(member?.rrn_display);
+} // End of formatManagedFamilyBirthDisplay
+
+function getManagedFamilyStatusClass(status) {
+    const value = String(status || '');
+    if (value === '승인대기') return 'bg-danger';
+    if (value === '탈퇴') return 'bg-secondary';
+    return 'bg-success';
+} // End of getManagedFamilyStatusClass
+
+function getManagedFamilyRelationBadge(relationKind, member) {
+    if (relationKind === 'parent') {
+        return '<span class="badge bg-primary">보호자/관리자</span>';
+    }
+    if (member?.member_type === '단체') {
+        return '<span class="badge bg-info">🏢 단체</span>';
+    }
+    if (member?.join_category === '가족') {
+        return '<span class="badge bg-warning text-dark">👶 자녀</span>';
+    }
+    return '<span class="badge bg-secondary">기타</span>';
+} // End of getManagedFamilyRelationBadge
+
+// [수정] 가족/단체 목록 로드 (내가 관리자인 계정 + 나를 관리하는 계정 조회)
 async function loadMemberFamily(parentId) {
     const tbody = document.getElementById('md-family-list');
     if (!tbody) return;
@@ -10457,22 +10486,70 @@ async function loadMemberFamily(parentId) {
     // 1. 로딩 표시
     tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></td></tr>';
 
-    // 2. DB 조회 (manager_id가 현재 보고 있는 조합원인 경우)
+    // 2. DB 조회
     // 뷰에는 manager_id가 없을 수 있으므로 원본 테이블을 조회합니다.
-    const { data: familyList, error } = await scopeAdminTenant(_supabase
+    const familySelect = 'id, name, birth_date, rrn_display, status, member_type, join_category, join_date, manager_id';
+    const { data: currentMember, error: currentError } = await scopeAdminTenant(_supabase
         .from('coop_members')
-        .select('id, name, rrn_display, status, member_type, join_category, join_date'))
-        .eq('manager_id', parentId)
-        .order('join_date', { ascending: false });
+        .select('id, manager_id')
+        .eq('id', parentId))
+        .maybeSingle();
 
-    if (error) {
-        console.error("가족 목록 로드 실패:", error);
+    if (currentError) {
+        console.error("현재 조합원 가족 연결 기준 로드 실패:", currentError);
         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger small py-3">데이터 로드 실패</td></tr>';
         return;
     }
 
+    const { data: childList, error: childError } = await scopeAdminTenant(_supabase
+        .from('coop_members')
+        .select(familySelect))
+        .eq('manager_id', parentId)
+        .order('join_date', { ascending: false });
+
+    if (childError) {
+        console.error("가족 목록 로드 실패:", childError);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger small py-3">데이터 로드 실패</td></tr>';
+        return;
+    }
+
+    let parentMember = null;
+    if (currentMember?.manager_id) {
+        const { data: parentData, error: parentError } = await scopeAdminTenant(_supabase
+            .from('coop_members')
+            .select(familySelect)
+            .eq('id', currentMember.manager_id))
+            .maybeSingle();
+
+        if (parentError) {
+            console.error("보호자/관리자 연결 로드 실패:", parentError);
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger small py-3">데이터 로드 실패</td></tr>';
+            return;
+        }
+        parentMember = parentData || null;
+    }
+
+    const familyRows = [];
+    if (parentMember) {
+        familyRows.push({
+            relationKind: 'parent',
+            member: parentMember,
+            managedId: parentId,
+            managerId: parentMember.id
+        });
+    }
+
+    (childList || []).forEach((member) => {
+        familyRows.push({
+            relationKind: 'child',
+            member,
+            managedId: member.id,
+            managerId: parentId
+        });
+    });
+
     // 3. 데이터 없음 처리
-    if (!familyList || familyList.length === 0) {
+    if (familyRows.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted small py-3">연결된 가족이나 단체가 없습니다.</td></tr>';
         return;
     }
@@ -10480,26 +10557,15 @@ async function loadMemberFamily(parentId) {
     // 4. 목록 렌더링
     tbody.innerHTML = '';
 
-    familyList.forEach(m => {
-        // 구분 뱃지 (자녀 vs 단체)
-        let typeBadge = '<span class="badge bg-secondary">기타</span>';
-        if (m.member_type === '단체') {
-            typeBadge = '<span class="badge bg-info">🏢 단체</span>';
-        } else if (m.join_category === '가족') {
-            typeBadge = '<span class="badge bg-warning text-dark">👶 자녀</span>';
-        }
-
-        // 주민번호/사업자번호 표시
-        const idNum = m.rrn_display || '-';
-
-        // 상태 뱃지
-        let statusClass = 'bg-success';
-        if (m.status === '승인대기') statusClass = 'bg-danger';
-        else if (m.status === '탈퇴') statusClass = 'bg-secondary';
-
+    familyRows.forEach(({ relationKind, member: m, managedId, managerId }) => {
+        const typeBadge = getManagedFamilyRelationBadge(relationKind, m);
+        const birthDisplay = formatManagedFamilyBirthDisplay(m);
+        const statusClass = getManagedFamilyStatusClass(m.status);
         const safeId = escapeJsString(m.id || '');
+        const safeManagedId = escapeJsString(managedId || '');
+        const safeManagerId = escapeJsString(managerId || '');
         const safeNameText = escapeHtml(m.name || '-');
-        const safeIdNum = escapeHtml(idNum);
+        const safeBirthDisplay = escapeHtml(birthDisplay);
         const safeStatus = escapeHtml(m.status || '-');
         const safeNameArg = escapeJsString(m.name || '');
         const safeTypeArg = escapeJsString(m.member_type || '');
@@ -10508,13 +10574,13 @@ async function loadMemberFamily(parentId) {
             <tr>
                 <td>${typeBadge}</td>
                 <td class="fw-bold">${safeNameText}</td>
-                <td class="small font-monospace">${safeIdNum}</td>
+                <td class="small">${safeBirthDisplay}</td>
                 <td><span class="badge ${statusClass}">${safeStatus}</span></td>
                 <td class="d-flex gap-1 justify-content-center flex-wrap">
                     <button type="button" class="btn btn-xs btn-outline-dark border" onclick="openMemberDetail('${safeId}')">
                         상세보기
                     </button>
-                    <button type="button" class="btn btn-xs btn-outline-danger border" onclick="confirmDisconnectManagedMember('${safeId}', '${safeNameArg}', '${safeTypeArg}')">
+                    <button type="button" class="btn btn-xs btn-outline-danger border" onclick="confirmDisconnectManagedMember('${safeManagedId}', '${safeNameArg}', '${safeTypeArg}', '${safeManagerId}')">
                         연결 해제
                     </button>
                 </td>
@@ -10546,9 +10612,11 @@ function getManagedLinkErrorMessage(error) {
     return message || '처리 중 오류가 발생했습니다.';
 }
 
-function confirmDisconnectManagedMember(managedId, managedName, memberType) {
-    const parentId = g_current_member_id || document.getElementById('md-uid')?.value || '';
-    if (!parentId) return myAlert('현재 상세 조합원 정보를 찾을 수 없습니다.', 'error');
+function confirmDisconnectManagedMember(managedId, managedName, memberType, managerId) {
+    const currentDetailId = g_current_member_id || document.getElementById('md-uid')?.value || '';
+    const resolvedManagerId = managerId || currentDetailId;
+    if (!currentDetailId) return myAlert('현재 상세 조합원 정보를 찾을 수 없습니다.', 'error');
+    if (!resolvedManagerId) return myAlert('관리자 연결 정보를 찾을 수 없습니다.', 'error');
     if (!managedId) return myAlert('연결된 계정 정보를 찾을 수 없습니다.', 'error');
 
     const typeLabel = String(memberType || '').includes('단체') ? '단체' : '개인/가족';
@@ -10559,7 +10627,7 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType) {
         showLoading(true);
         const { error } = await _supabase.rpc('disconnect_managed_member', {
             managed_uuid: managedId,
-            manager_uuid: parentId
+            manager_uuid: resolvedManagerId
         });
         showLoading(false);
 
@@ -10574,7 +10642,12 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType) {
             if (String(cached.member_type || '').includes('단체')) cached.rep_uuid = null;
         }
 
-        await loadMemberFamily(parentId);
+        const currentCached = findCachedAdminMember(currentDetailId);
+        if (currentCached && String(currentDetailId) === String(managedId)) {
+            currentCached.manager_id = null;
+        }
+
+        await loadMemberFamily(currentDetailId);
         myAlert('연결이 해제되었습니다.');
     });
 }
