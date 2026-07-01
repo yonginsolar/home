@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.87
-Change: Load member asset totals and bounded recent dashboard history through one tenant-scoped RPC.
+Version: v1.0.88
+Change: Add optional child email input and clarify minor child account wording in family registration.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.87 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.88 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1175,13 +1175,19 @@ oninput="autoHyphen(this)"> </div>
 </div>
 
 <div class="mb-2">
+<label class="small text-muted fw-bold">자녀 이메일 <span class="text-muted">(선택)</span></label>
+<input type="email" id="newFamEmail" class="form-control form-control-sm" placeholder="child@example.com" autocomplete="email">
+<div class="form-text x-small text-secondary">자녀 본인의 이메일이 있으면 입력해주세요. 없으면 비워두셔도 됩니다.</div>
+</div>
+
+<div class="mb-2">
 <label class="small text-muted fw-bold">초기 출자금 (필수)</label>
 <input type="number" id="newFamCapital" class="form-control form-control-sm" placeholder="최소 100,000원" step="10000">
 <div class="form-text x-small text-secondary">최소 10만원 이상, 1만원 단위로 입력해주세요.</div>
 </div>
 
 <div class="p-2 bg-light rounded border mb-3">
-<label class="small text-success fw-bold mb-1"><i class="bi bi-bank me-1"></i>배당금 수령 계좌 (본인 명의)</label>
+<label class="small text-success fw-bold mb-1"><i class="bi bi-bank me-1"></i>배당금 수령 계좌 (미성년 자녀 본인 명의)</label>
 <div class="row g-1">
 <div class="col-4">
 <input type="text" id="newFamBank" class="form-control form-control-sm" placeholder="은행명">
@@ -1190,6 +1196,7 @@ oninput="autoHyphen(this)"> </div>
 <input type="text" id="newFamAcc" class="form-control form-control-sm" placeholder="계좌번호 (-없이)">
 </div>
 </div>
+<div class="form-text x-small text-secondary">미성년 자녀 본인 명의 계좌를 입력해주세요. 자녀 명의 계좌가 없으면 사무국에 문의해주세요.</div>
 </div>
 
 <button class="btn btn-primary w-100 btn-sm fw-bold py-2" onclick="submitNewChild()">
@@ -5204,6 +5211,15 @@ async function openAddFamilyModal() {
 document.getElementById('familyModalOverlay').style.display = 'flex';
 document.getElementById('newFamName').value = '';
 document.getElementById('newFamId').value = '자동 생성 예정';
+document.getElementById('newFamRrn1').value = '';
+document.getElementById('newFamRrn2').value = '';
+document.getElementById('newFamEmail').value = '';
+document.getElementById('newFamRelSelect').value = '부';
+document.getElementById('newFamRelInput').value = '';
+document.getElementById('newFamRelInput').classList.add('hidden');
+document.getElementById('newFamCapital').value = '';
+document.getElementById('newFamBank').value = '';
+document.getElementById('newFamAcc').value = '';
 
 // 2. [추가] 탭 버튼 제어 (단체는 자녀 탭 숨김)
 const tabNewBtn = document.querySelectorAll('#famModalTabs .nav-item')[0]; // 자녀 탭
@@ -5412,6 +5428,7 @@ const rrn1 = document.getElementById('newFamRrn1').value;
 const rrn2 = document.getElementById('newFamRrn2').value;
 const capitalStr = document.getElementById('newFamCapital').value;
 const capital = Number(capitalStr);
+const email = document.getElementById('newFamEmail').value.trim().toLowerCase();
 
 // 관계 값 결정
 const relSelect = document.getElementById('newFamRelSelect').value;
@@ -5421,6 +5438,10 @@ const relationship = (relSelect === '직접입력') ? relInput : relSelect;
 // 2. [검증] 필수 입력
 if(!name || rrn1.length !== 6 || rrn2.length < 1 || !relationship) {
 return showModal('필수 정보를 모두 입력해주세요.');
+}
+
+if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+return showModal('자녀 이메일 형식이 올바르지 않습니다.');
 }
 
 // 3. [검증] 미성년자 여부
@@ -5438,7 +5459,7 @@ return showModal('출자금은 1만원 단위로 입력해주세요.');
 
 // 5. 동의서 모달 띄우기 (데이터 전달)
 openConsentModal({
-name, rrn1, rrn2, capital, relationship,
+name, rrn1, rrn2, email, capital, relationship,
 bank: document.getElementById('newFamBank').value,
 acc: document.getElementById('newFamAcc').value
 });
@@ -6389,6 +6410,7 @@ const params = {
 p_manager_id: getActiveMemberProfileId(), // 부모 UUID
 p_name: tempChildData.name,
 p_rrn_display: `${tempChildData.rrn1}-${tempChildData.rrn2}******`,
+p_email: tempChildData.email || '',
 p_phone: null,   // 자녀 폰번호 없음 (독립 시 입력)
 p_address: curMem.address, // 부모 주소 상속
 p_initial_capital: tempChildData.capital,
