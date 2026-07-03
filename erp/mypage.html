@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.50 | Change: 2026-06-18 - Show each leave snapshot item on the company calendar. -->
+<!-- Version: v1.0.51 | Change: 2026-07-03 - Add join D+ label and blurred cumulative salary summary. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.50 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.51 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -53,6 +53,14 @@ body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic'
 .editable-field{background-color:#fff;border:1px solid #ced4da;color:#000}
 .salary-blur{filter:blur(6px);transition:filter 0.3s;cursor:pointer;user-select:none}
 .salary-blur:hover{filter:blur(0)}
+.salary-blur:focus,.salary-blur.is-revealed{filter:blur(0);outline:2px solid rgba(13,110,253,.25);outline-offset:3px;border-radius:6px}
+.join-days-badge{display:inline-flex;align-items:center;gap:4px;margin-left:4px;padding:2px 7px;border-radius:999px;background:#eaf7ef;color:#198754;font-weight:800}
+.salary-total-card{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;border:1px solid rgba(13,110,253,.16);border-radius:16px;background:linear-gradient(135deg,#f8fbff,#ffffff);box-shadow:0 8px 24px rgba(15,23,42,.04)}
+.salary-total-label{font-size:.82rem;color:#64748b;font-weight:700}
+.salary-total-value{font-size:1.35rem;font-weight:900;color:#0d6efd;letter-spacing:-.04em}
+.salary-total-toggle{border:1px solid #dbeafe;background:#fff;color:#0d6efd;border-radius:999px;padding:4px 10px;font-size:.78rem;font-weight:800}
+.salary-total-toggle:hover{background:#eff6ff}
+.salary-total-toggle:disabled{opacity:.5;cursor:not-allowed}
 .amount-text{text-align:right;font-family:'Consolas',monospace;letter-spacing:-0.5px}
 #calendar{max-width:100%;margin:0 auto;font-size:0.9rem}
 .fc-event{cursor:pointer;border:none}
@@ -77,6 +85,8 @@ body{padding:18px 14px 28px}
 .profile-card{padding:18px;align-items:flex-start}
 .profile-icon{width:58px;height:58px;font-size:24px;margin-right:14px}
 .leave-badge{margin-left:0;margin-top:10px}
+.salary-total-card{align-items:flex-start;flex-direction:column}
+.salary-total-card .text-end{text-align:left!important}
 .mypage-loading-shell{background:white;border-radius:18px;padding:28px 24px;margin:0 auto 24px;box-shadow:0 8px 24px rgba(15,23,42,0.06);border:1px solid rgba(148,163,184,.16);text-align:center}
 .mypage-loading-shell .spinner-border{width:2.5rem;height:2.5rem}
 }
@@ -112,7 +122,7 @@ body{padding:18px 14px 28px}
 </div>
 </div>
 <div class="text-muted small">
-<span id="dspDept">-</span> | 입사일: <span id="dspJoin">-</span> (<span id="dspTenure" class="text-primary fw-bold">-</span>)
+<span id="dspDept">-</span> | 입사일: <span id="dspJoin">-</span> <span id="dspJoinDays" class="join-days-badge hidden"></span> (<span id="dspTenure" class="text-primary fw-bold">-</span>)
 </div>
 </div>
 </div>
@@ -168,6 +178,16 @@ body{padding:18px 14px 28px}
 <button class="btn btn-primary" onclick="searchSalary()">조회</button>
 </div>
 <button class="btn btn-sm btn-dark hidden" id="btnPrintSalary" onclick="printSalaryPopup()">🖨️ 인쇄하기</button>
+</div>
+<div class="salary-total-card" id="salaryTotalCard">
+<div>
+<div class="salary-total-label">현재까지 받은 총 급여 보기</div>
+<div class="small text-muted" id="salaryTotalMeta">급여명세서의 실수령액 합계를 불러오고 있습니다.</div>
+</div>
+<div class="text-end">
+<div><span class="salary-blur salary-total-value" id="salaryTotalNet" tabindex="0">0</span> 원</div>
+<button type="button" class="salary-total-toggle mt-1" id="salaryTotalToggle" onclick="toggleMypageSalaryTotalReveal()">보기</button>
+</div>
 </div>
 <div id="salaryResult" class="hidden mt-4">
 <div class="card p-4 shadow-sm border-0">
@@ -234,6 +254,36 @@ const KST_TZ_MYPAGE='Asia/Seoul';
 const formatMypageKstDate=(value,fallback='')=>{if(!value) return fallback; const d=new Date(value); if(Number.isNaN(d.getTime())) return fallback; return new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d)};
 const formatMypageKstMonth=(value=new Date())=>{const d=value instanceof Date?value:new Date(value); if(Number.isNaN(d.getTime())) return ''; return new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit'}).format(d)};
 const toUtcIsoFromKstInput=(value)=>{if(!value) return null; return new Date(`${value}:00+09:00`).toISOString()};
+const MYPAGE_DAY_MS=24*60*60*1000;
+function getMypageKstMidnightMs(value){
+const dateText=formatMypageKstDate(value,'');
+if(!dateText) return NaN;
+return new Date(`${dateText}T00:00:00+09:00`).getTime();
+} // End of getMypageKstMidnightMs
+function calculateMypageJoinDays(hireDateValue,endDateValue){
+const startMs=getMypageKstMidnightMs(hireDateValue);
+if(!Number.isFinite(startMs)) return null;
+const endMs=getMypageKstMidnightMs(endDateValue||new Date());
+if(!Number.isFinite(endMs)||endMs<startMs) return null;
+return Math.floor((endMs-startMs)/MYPAGE_DAY_MS)+1;
+} // End of calculateMypageJoinDays
+function renderMypageJoinDays(hireDateValue,endDateValue){
+const el=document.getElementById('dspJoinDays');
+if(!el) return;
+const days=calculateMypageJoinDays(hireDateValue,endDateValue);
+if(!days){
+el.textContent='';
+el.classList.add('hidden');
+return;
+}
+el.textContent=`D+${days.toLocaleString('ko-KR')}일`;
+el.title='입사일을 1일차로 계산합니다.';
+el.classList.remove('hidden');
+} // End of renderMypageJoinDays
+function parseMypageAmount(value){
+const amount=Number(String(value??0).replace(/,/g,''));
+return Number.isFinite(amount)?amount:0;
+} // End of parseMypageAmount
 function isMypageRetiredEmployee(){return !!String(myInfo?.resign_date||'').trim()}
 function getMypageCertificateMeta(){
 const retired=isMypageRetiredEmployee();
@@ -269,6 +319,7 @@ const MYPAGE_LEAVE_TYPE_CONFIG_KEY='approval_leave_type_catalog_json';
 const MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot';
 const MYPAGE_LEAVE_RESERVED_STATUSES=Object.freeze(['완료','가승인','증빙확인중','실물결재대기','실물결재완료']);
 const MYPAGE_LEAVE_PENDING_STATUSES=Object.freeze(['진행중']);
+const MYPAGE_SALARY_TOTAL_SELECT_COLUMNS='emp_id,year_month,pay_total,net_pay,ded_pension,ded_health,ded_care,ded_employ,ded_income,ded_local,ded_advance,ded_capital,payroll_tax_adjustment_income,payroll_tax_adjustment_local,co_total';
 const MYPAGE_BUSINESS_TRIP_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,status,drafter_id,drafter_name,business_trip_snapshot';
 const MYPAGE_SCHEMA_FEATURE_CACHE_VERSION=1;
 const MYPAGE_SCHEMA_FEATURE_CACHE_TTL_MS=24*60*60*1000;
@@ -1152,7 +1203,7 @@ document.getElementById("salaryMonth").value=formatMypageKstMonth();
 document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',function(e){renderCalendar()});
 await loadCompanyInfo();
 await loadMypageCalendarIcsSettings();
-await Promise.all([loadProfile(),loadEmergencyList(),loadNotices(),calculateLeave(),loadMypageTelegramLinkStatus(),loadMypageOvertimeSummary()]);
+await Promise.all([loadProfile(),loadEmergencyList(),loadNotices(),calculateLeave(),loadMypageTelegramLinkStatus(),loadMypageOvertimeSummary(),loadMypageSalaryTotal()]);
 applyMypageRuntimeProfileUi();
 }catch(error){
 console.error('[mypage] boot failed:', error);
@@ -1243,6 +1294,7 @@ async function loadProfile() {
     document.getElementById("dspRank").innerText = myInfo.position;
     document.getElementById("dspDept").innerText = myInfo.department;
     document.getElementById("dspJoin").innerText = myInfo.hire_date || '-';
+    renderMypageJoinDays(myInfo.hire_date,myInfo.resign_date);
     
     // 입력 폼 값 채우기
     document.getElementById("myName").value = myInfo.emp_name;
@@ -1909,6 +1961,70 @@ async function deleteEvent(){const i=document.getElementById("evtId").value;if(!
 showAlert("삭제되었습니다.");
 });
 }
+function toggleMypageSalaryTotalReveal(){
+const valueEl=document.getElementById('salaryTotalNet');
+const toggleBtn=document.getElementById('salaryTotalToggle');
+if(!valueEl) return;
+const nextState=!valueEl.classList.contains('is-revealed');
+valueEl.classList.toggle('is-revealed',nextState);
+if(toggleBtn){
+toggleBtn.textContent=nextState?'가리기':'보기';
+toggleBtn.setAttribute('aria-pressed',nextState?'true':'false');
+}
+} // End of toggleMypageSalaryTotalReveal
+async function buildMypageAdjustedSalaryRows(rows){
+if(!Array.isArray(rows)||rows.length===0) return [];
+if(!window.PayrollDurunuriModule) return rows;
+const months=Array.from(new Set(rows.map(function(row){return String(row?.year_month||'').trim()}).filter(Boolean)));
+const supportMapByMonth={};
+for(const ym of months){
+try{
+supportMapByMonth[ym]=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym);
+}catch(error){
+console.warn('Durunuri support load failed:',error?.message||error);
+supportMapByMonth[ym]={};
+}
+}
+return rows.map(function(row){
+const ym=String(row?.year_month||'').trim();
+return window.PayrollDurunuriModule.adjustSalaryRow({...row},supportMapByMonth[ym]||{});
+});
+} // End of buildMypageAdjustedSalaryRows
+async function loadMypageSalaryTotal(){
+const valueEl=document.getElementById('salaryTotalNet');
+const metaEl=document.getElementById('salaryTotalMeta');
+const toggleBtn=document.getElementById('salaryTotalToggle');
+if(!valueEl||!metaEl) return;
+valueEl.textContent='0';
+valueEl.classList.remove('is-revealed');
+metaEl.textContent='급여명세서의 실수령액 합계를 불러오고 있습니다.';
+if(toggleBtn){
+toggleBtn.textContent='보기';
+toggleBtn.setAttribute('aria-pressed','false');
+toggleBtn.disabled=true;
+}
+try{
+const {data,error}=await scopeMypageEmployee(_supabase.from('hr_salary').select(MYPAGE_SALARY_TOTAL_SELECT_COLUMNS)).eq('emp_id',myInfo.emp_id).order('year_month',{ascending:true});
+if(error) throw error;
+const rows=Array.isArray(data)?data:[];
+if(rows.length===0){
+metaEl.textContent='아직 저장된 급여명세서가 없습니다.';
+return;
+}
+const adjustedRows=await buildMypageAdjustedSalaryRows(rows);
+const totalNet=adjustedRows.reduce(function(sum,row){return sum+Math.round(parseMypageAmount(row?.net_pay))},0);
+valueEl.textContent=totalNet.toLocaleString('ko-KR');
+const firstYm=String(rows[0]?.year_month||'').trim();
+const lastYm=String(rows[rows.length-1]?.year_month||'').trim();
+metaEl.textContent=(firstYm&&lastYm)
+?`${firstYm} ~ ${lastYm} 급여명세서 실수령액 ${rows.length}건 합계`
+:`급여명세서 실수령액 ${rows.length}건 합계`;
+if(toggleBtn) toggleBtn.disabled=false;
+}catch(error){
+console.warn('loadMypageSalaryTotal failed:',error?.message||error);
+metaEl.textContent='총 급여 합계를 불러오지 못했습니다.';
+}
+} // End of loadMypageSalaryTotal
 async function searchSalary(){
 const ym=document.getElementById("salaryMonth").value;
 const{data,error}=await _supabase.from('hr_salary').select('*').eq('emp_id',myInfo.emp_id).eq('year_month',ym).maybeSingle();
