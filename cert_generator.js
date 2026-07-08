@@ -1,6 +1,6 @@
 /*
-Version: v1.0.10
-Change: Fix Korean amount text on certificates so large amounts like 9,940,000 print as 구백구십사만 instead of 구구사만.
+Version: v1.0.11
+Change: Remove donation receipt tax-credit pointer from page 1 and widen issuer signature spacing.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -597,7 +597,6 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
         const recipientWord = String(memberData.member_type || '').includes('단체') ? '귀사' : '귀하';
         const noticeText = `본 확인서는 당 조합으로 ${recipientWord}의 후원금이 정상적으로 입금되었음을 확인하는 용도로만 사용되며, 연말정산 및 법인세법에 따른 세액공제용 기부금 증빙 서류로 확인할 수 없습니다.`;
         doc.setFontSize(10);
-        doc.text("세액공제 관련 안내는 다음 페이지를 확인해 주세요.", 105, msgY + 8, { align: "center" });
         const issuerRows = [
             `발급기관: ${issuerName}`,
             `사업자등록번호: ${issuerBizNum}`
@@ -639,7 +638,7 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
             companyMinFontSize: 13,
             companyMaxLines: 3,
             companyLineHeight: 6.6,
-            gapBeforeChairman: 6,
+            gapBeforeChairman: 10,
             chairmanFontSize: 22,
             chairmanMinFontSize: 15,
             chairmanMaxLines: 2,
