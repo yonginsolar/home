@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.74
-Change: Make the power plant construction progress cards horizontally scrollable on desktop.
+Version: v1.0.75
+Change: Show direct and participation power project types on the public homepage.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.74 | index.html');</script>
+<script>console.log('[Version] v1.0.75 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -3401,11 +3401,12 @@ function renderPublicPowerStats(stats) {
       cumulativeEl.innerText = formatPublicPowerValue(stats.cumulative_total_kwh || 0);
       operatingEl.innerText = Number(stats.operating_plant_count || 0).toLocaleString('ko-KR');
 
-      const latestDateText = formatPublicPowerDate(stats.latest_generation_date);
-      stampEl.textContent = latestDateText
-        ? `최근 입력일 · ${latestDateText} 기준`
-        : '발전량 입력 대기 중';
-    }
+	      const latestDateText = formatPublicPowerDate(stats.latest_generation_date);
+              const participationCount = Number(stats.participating_project_count || 0);
+	      stampEl.textContent = latestDateText
+	        ? `최근 입력일 · ${latestDateText} 기준${participationCount > 0 ? ' · 참여형은 조합 참여분 반영' : ''}`
+	        : '발전량 입력 대기 중';
+	    }
 
 async function fetchPowerGenerationStats() {
       const { data, error } = await _client.rpc('get_public_power_generation_stats');
@@ -4438,12 +4439,54 @@ function openNoticeDetail(id) {
 }
 
 
-/* =================================================================
-   [기능 2] 발전소 (Power Plants) - 완전 동적화 & 단일 모달
-   ================================================================= */
+	/* =================================================================
+	   [기능 2] 발전소 (Power Plants) - 완전 동적화 & 단일 모달
+	   ================================================================= */
 
-// 1. 발전소 데이터 로드 및 분배
-async function fetchPlants() {
+    function normalizePublicPlantProjectType(value) {
+        return String(value || '').trim() === 'participation' ? 'participation' : 'direct';
+    }
+
+    function getPublicPlantTypeLabel(value) {
+        return normalizePublicPlantProjectType(value) === 'participation' ? '참여 발전형' : '직접 발전형';
+    }
+
+    function getPublicPlantTypeBadgeHtml(plant) {
+        const type = normalizePublicPlantProjectType(plant?.project_type);
+        const className = type === 'participation' ? 'bg-info text-dark' : 'bg-success';
+        return `<span class="badge ${className}">${escapeHtml(getPublicPlantTypeLabel(type))}</span>`;
+    }
+
+    function formatPublicPlantNumber(value, suffix) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return '-';
+        return `${num.toLocaleString('ko-KR', {
+            minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+            maximumFractionDigits: 2
+        })}${suffix || ''}`;
+    }
+
+    function getPublicParticipationSummary(plant) {
+        if (normalizePublicPlantProjectType(plant?.project_type) !== 'participation') return '';
+        const parts = [];
+        if (plant?.participation_capacity !== null && plant?.participation_capacity !== undefined && plant?.participation_capacity !== '') {
+            parts.push(`조합 참여 ${formatPublicPlantNumber(plant.participation_capacity, 'kW')}`);
+        }
+        if (plant?.participation_share_percent !== null && plant?.participation_share_percent !== undefined && plant?.participation_share_percent !== '') {
+            parts.push(`지분 ${formatPublicPlantNumber(plant.participation_share_percent, '%')}`);
+        }
+        return parts.join(' · ');
+    }
+
+    function getPublicPlantCapacityText(plant) {
+        const type = normalizePublicPlantProjectType(plant?.project_type);
+        const participationSummary = getPublicParticipationSummary(plant);
+        if (type === 'participation' && participationSummary) return participationSummary;
+        return `${formatPublicPlantNumber(plant?.capacity, 'kW')}`;
+    }
+
+	// 1. 발전소 데이터 로드 및 분배
+	async function fetchPlants() {
     const { data, error } = await (await scopePublicTenant(_client.from('site_power_plants').select('*').order('display_order')));
 
     if(error || !data) return;
@@ -4465,21 +4508,23 @@ async function fetchPlants() {
             let pfHtml = '';
             operatingPlants.forEach(p => {
                  // 이미지가 없으면 플레이스홀더 사용
-                 const imgUrl = safeUrl(p.image_url) || 'https://via.placeholder.com/800x600?text=Solar+Plant';
-                 const safePlantName = escapeHtml(p.name || '');
-                 const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
-                 const safeLocation = escapeHtml(p.location || '용인시');
-                 const safePlantId = encodeURIComponent(String(p.id || ''));
+	                 const imgUrl = safeUrl(p.image_url) || 'https://via.placeholder.com/800x600?text=Solar+Plant';
+	                 const safePlantName = escapeHtml(p.name || '');
+	                 const safeCapacity = escapeHtml(getPublicPlantCapacityText(p));
+	                 const safeLocation = escapeHtml(p.location || '용인시');
+	                 const safePlantId = encodeURIComponent(String(p.id || ''));
+                         const typeBadge = getPublicPlantTypeBadgeHtml(p);
 
-                 pfHtml += `
-                  <div class="col-lg-4 col-md-6 portfolio-item mb-4" data-aos="fade-up">
+	                 pfHtml += `
+	                  <div class="col-lg-4 col-md-6 portfolio-item mb-4" data-aos="fade-up">
                     <div class="portfolio-wrap shadow-sm rounded overflow-hidden">
                       <div style="height:250px; overflow:hidden;">
                         <img src="${imgUrl}" class="img-fluid w-100 h-100" style="object-fit:cover;" alt="${safePlantName}">
-                      </div>
-                      <div class="portfolio-info p-3 bg-white">
-                        <h4 class="fw-bold text-dark">${safePlantName}</h4>
-                        <p class="text-muted small mb-2">${safeCapacity}kW | ${safeLocation}</p>
+	                      </div>
+	                      <div class="portfolio-info p-3 bg-white">
+	                        <div class="mb-2">${typeBadge}</div>
+	                        <h4 class="fw-bold text-dark">${safePlantName}</h4>
+	                        <p class="text-muted small mb-2">${safeCapacity} | ${safeLocation}</p>
 
                         <div class="d-flex justify-content-between align-items-center mt-3">
                             <span class="badge bg-success">정상 가동 중</span>
@@ -4515,22 +4560,51 @@ function openPlantDetail(id) {
     imgEl.src = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
 
     // 2) 리스트 구성 (동적으로 생성)
-    const listContainer = document.getElementById('plant-modal-info-list');
-    const safeLocation = escapeHtml(p.location || '-');
-    const safeStatus = escapeHtml(p.status || '-');
-    const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
-    const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
-    let listHtml = `
-        <li class="list-group-item d-flex justify-content-between">
-          <span>설비 용량</span> <strong>${safeCapacity} kW</strong>
+	    const listContainer = document.getElementById('plant-modal-info-list');
+	    const safeLocation = escapeHtml(p.location || '-');
+	    const safeStatus = escapeHtml(p.status || '-');
+	    const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
+	    const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
+            const projectType = normalizePublicPlantProjectType(p.project_type);
+            const safeTypeLabel = escapeHtml(getPublicPlantTypeLabel(projectType));
+            const safeParticipationSummary = escapeHtml(getPublicParticipationSummary(p));
+            const safeOwnerName = escapeHtml(p.project_owner_name || '');
+            const safePublicNote = escapeHtml(p.public_note || '');
+	    let listHtml = `
+	        <li class="list-group-item d-flex justify-content-between">
+	          <span>사업 유형</span> <strong>${safeTypeLabel}</strong>
+	        </li>
+	        <li class="list-group-item d-flex justify-content-between">
+	          <span>${projectType === 'participation' ? '전체 사업 용량' : '설비 용량'}</span> <strong>${safeCapacity} kW</strong>
+	        </li>
+	        <li class="list-group-item d-flex justify-content-between">
+	          <span>위치</span> <span>${safeLocation}</span>
         </li>
         <li class="list-group-item d-flex justify-content-between">
-          <span>위치</span> <span>${safeLocation}</span>
-        </li>
-        <li class="list-group-item d-flex justify-content-between">
-          <span>진행 상태</span> <strong class="text-primary">${safeStatus}</strong>
-        </li>
-    `;
+	          <span>진행 상태</span> <strong class="text-primary">${safeStatus}</strong>
+	        </li>
+	    `;
+            if(projectType === 'participation') {
+                if(safeOwnerName) {
+                    listHtml += `
+	        <li class="list-group-item d-flex justify-content-between">
+	          <span>사업 주체</span> <span>${safeOwnerName}</span>
+	        </li>`;
+                }
+                if(safeParticipationSummary) {
+                    listHtml += `
+	        <li class="list-group-item d-flex justify-content-between">
+	          <span>조합 참여분</span> <strong>${safeParticipationSummary}</strong>
+	        </li>`;
+                }
+                if(safePublicNote) {
+                    listHtml += `
+	        <li class="list-group-item">
+	          <span class="d-block text-muted small mb-1">공개 설명</span>
+	          <span>${safePublicNote}</span>
+	        </li>`;
+                }
+            }
 
     // 완공일이 있으면 추가
     if(p.completion_date) {
@@ -4545,9 +4619,11 @@ function openPlantDetail(id) {
     const statusBox = document.getElementById('plant-modal-status-box');
     const linkBtn = document.getElementById('plant-modal-link');
 
-    if(p.status === '운영중') {
-        statusBox.className = "alert alert-success text-center";
-        statusBox.innerHTML = '<i class="bi bi-check-circle-fill"></i> 현재 정상적으로 전력을 생산하고 있습니다.';
+	    if(p.status === '운영중') {
+	        statusBox.className = "alert alert-success text-center";
+	        statusBox.innerHTML = projectType === 'participation'
+                ? '<i class="bi bi-check-circle-fill"></i> 참여 발전 프로젝트가 운영 단계입니다. 발전량은 조합 참여분 기준으로 반영됩니다.'
+                : '<i class="bi bi-check-circle-fill"></i> 현재 정상적으로 전력을 생산하고 있습니다.';
 
         // 모니터링 링크가 있으면 버튼 활성화
         if(p.monitor_url) {
@@ -4609,11 +4685,16 @@ function openPlantDetail(id) {
             const rate = Math.max(0, Math.min(100, Number.isFinite(rateValue) ? rateValue : 0));
             const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
             const safeName = escapeHtml(p.name || '');
-            const safeStatus = escapeHtml(p.status || '');
-            const safeLocation = escapeHtml(p.location || '미정');
-            const safeArea = escapeHtml(String(p.area || '-'));
-            const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
-            const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
+	            const safeStatus = escapeHtml(p.status || '');
+	            const safeLocation = escapeHtml(p.location || '미정');
+	            const safeArea = escapeHtml(String(p.area || '-'));
+	            const safeCapacity = escapeHtml(String(p.capacity ?? '-'));
+	            const safeCompletion = escapeHtml(String(p.completion_date || '미정'));
+                    const projectType = normalizePublicPlantProjectType(p.project_type);
+                    const typeBadge = getPublicPlantTypeBadgeHtml(p);
+                    const participationSummary = escapeHtml(getPublicParticipationSummary(p));
+                    const safeOwnerName = escapeHtml(p.project_owner_name || '');
+                    const safePublicNote = escapeHtml(p.public_note || '');
 
             // 단계 계산
             const s1 = rate >= 0 ? 'active' : '';   const c1 = (rate >= 0 && rate < 20) ? 'current' : '';
@@ -4641,19 +4722,23 @@ function openPlantDetail(id) {
                           </div>
                       </div>
                       <div class="col-md-7">
-                          <div class="d-flex align-items-center mb-2 progress-plant-title-row">
-                              <span class="badge bg-warning text-dark me-2">${safeStatus}</span>
-                              <h3>${safeName}</h3>
-                          </div>
+	                          <div class="d-flex align-items-center mb-2 progress-plant-title-row">
+	                              <span class="badge bg-warning text-dark me-2">${safeStatus}</span>
+	                                      <span class="me-2">${typeBadge}</span>
+	                              <h3>${safeName}</h3>
+	                          </div>
 
-                          <ul class="list-unstyled text-muted small mb-3">
-                              <li><i class="bi bi-geo-alt me-1"></i> 위치: ${safeLocation}</li>
-                              <li><i class="bi bi-aspect-ratio me-1"></i> 면적: ${safeArea}</li>
-                              <li><i class="bi bi-lightning-charge me-1"></i> 용량(예정): ${safeCapacity}kW</li>
-                              <li><i class="bi bi-calendar-check me-1"></i> 준공(예정): ${safeCompletion}</li>
-                          </ul>
+	                          <ul class="list-unstyled text-muted small mb-3">
+	                              <li><i class="bi bi-geo-alt me-1"></i> 위치: ${safeLocation}</li>
+	                              <li><i class="bi bi-aspect-ratio me-1"></i> 면적: ${safeArea}</li>
+	                              <li><i class="bi bi-lightning-charge me-1"></i> ${projectType === 'participation' ? '전체 사업 용량' : '용량(예정)'}: ${safeCapacity}kW</li>
+                                      ${projectType === 'participation' && safeOwnerName ? `<li><i class="bi bi-building me-1"></i> 사업 주체: ${safeOwnerName}</li>` : ''}
+                                      ${projectType === 'participation' && participationSummary ? `<li><i class="bi bi-people me-1"></i> 조합 참여분: ${participationSummary}</li>` : ''}
+	                              <li><i class="bi bi-calendar-check me-1"></i> 준공(예정): ${safeCompletion}</li>
+	                          </ul>
 
-                          <p class="mb-2 fw-bold text-dark" style="font-size:1.1rem;">${statusText}</p>
+	                          <p class="mb-2 fw-bold text-dark" style="font-size:1.1rem;">${statusText}</p>
+                                  ${projectType === 'participation' && safePublicNote ? `<p class="small text-muted mb-2">${safePublicNote}</p>` : ''}
 
                           <div class="progress progress-plant-bar">
                             <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar"
