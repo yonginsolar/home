@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.73
-Change: Pause offscreen village motion and limit animated elements on mobile and lower-power devices.
+Version: v1.0.74
+Change: Make the power plant construction progress cards horizontally scrollable on desktop.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.73 | index.html');</script>
+<script>console.log('[Version] v1.0.74 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -1598,8 +1598,7 @@ Change: Pause offscreen village motion and limit animated elements on mobile and
           <h2>Progress</h2>
           <p>발전소 <span>건립 현황</span></p>
         </div>
-        <div class="row justify-content-center" id="progress-container">
-            </div>
+        <div class="progress-scroll-shell" id="progress-container" aria-live="polite"></div>
       </div>
     </section>
 
@@ -4571,11 +4570,27 @@ function openPlantDetail(id) {
     new bootstrap.Modal(document.getElementById('plantDetailModal')).show();
 }
 
+    function scrollProgressPlants(direction) {
+        const viewport = document.getElementById('progress-scroll-viewport');
+        if (!viewport) return;
+
+        const firstCard = viewport.querySelector('.progress-plant-card');
+        const cardRect = firstCard ? firstCard.getBoundingClientRect() : null;
+        const baseDistance = cardRect ? cardRect.width + 24 : viewport.clientWidth * 0.85;
+        const scrollDirection = Number(direction || 1) < 0 ? -1 : 1;
+
+        viewport.scrollBy({
+            left: Math.round(baseDistance * scrollDirection),
+            behavior: 'smooth'
+        });
+    }
+
     // [수정] 건립 현황 (Progress) 그리기 함수
 // [수정] 건립 현황 그리기 (디자인 업그레이드 & 단계별 표시)
 // [수정] 건립 현황 그리기 (국장님 요청 디자인 + 단계별 활성화)
     function renderProgressSection(allPlants) {
-        const inProgressPlants = allPlants.filter(p => p.status !== '운영중');
+        const sourcePlants = Array.isArray(allPlants) ? allPlants : [];
+        const inProgressPlants = sourcePlants.filter(p => p.status !== '운영중');
         const section = document.getElementById('progress');
         const container = document.getElementById('progress-container');
 
@@ -4588,9 +4603,10 @@ function openPlantDetail(id) {
 
         section.style.display = 'block';
 
-        let html = '';
+        let cardHtml = '';
         inProgressPlants.forEach(p => {
-            const rate = p.progress_rate || 0;
+            const rateValue = Number(p.progress_rate || 0);
+            const rate = Math.max(0, Math.min(100, Number.isFinite(rateValue) ? rateValue : 0));
             const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
             const safeName = escapeHtml(p.name || '');
             const safeStatus = escapeHtml(p.status || '');
@@ -4614,20 +4630,20 @@ function openPlantDetail(id) {
             else if(c4) statusText = "발전소 착공 및 공사 중";
             else if(c5) statusText = "완공 및 설비 점검 중";
 
-            html += `
-            <div class="col-lg-8 col-md-10 mb-5" data-aos="fade-up">
-                <div class="count-box" style="padding: 30px; background: #fff; box-shadow: 0 0 30px rgba(0,0,0,0.08); border-radius: 8px;">
+            cardHtml += `
+            <article class="progress-plant-card" data-aos="fade-up">
+                <div class="count-box progress-plant-card-inner">
 
                   <div class="row align-items-center">
                       <div class="col-md-5 mb-3 mb-md-0">
-                          <div style="height:200px; border-radius:8px; overflow:hidden; border:1px solid #eee;">
-                              <img src="${img}" style="width:100%; height:100%; object-fit:cover;">
+                          <div class="progress-plant-image">
+                              <img src="${img}" alt="${safeName}">
                           </div>
                       </div>
                       <div class="col-md-7">
-                          <div class="d-flex align-items-center mb-2">
+                          <div class="d-flex align-items-center mb-2 progress-plant-title-row">
                               <span class="badge bg-warning text-dark me-2">${safeStatus}</span>
-                              <h3 style="font-weight: 700; font-size: 1.5rem; margin:0;">${safeName}</h3>
+                              <h3>${safeName}</h3>
                           </div>
 
                           <ul class="list-unstyled text-muted small mb-3">
@@ -4639,9 +4655,9 @@ function openPlantDetail(id) {
 
                           <p class="mb-2 fw-bold text-dark" style="font-size:1.1rem;">${statusText}</p>
 
-                          <div class="progress" style="height: 25px; border-radius: 15px; background-color: #f1f3f5;">
+                          <div class="progress progress-plant-bar">
                             <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar"
-                                 style="width: ${rate}%; font-size: 14px; font-weight:bold;"
+                                 style="width: ${rate}%;"
                                  aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100">
                                  진행률 ${rate}%
                             </div>
@@ -4657,10 +4673,30 @@ function openPlantDetail(id) {
                     <div class="step-item ${s5} ${c5}">완공</div>
                   </div>
                 </div>
-            </div>`;
+            </article>`;
         });
-        container.innerHTML = html;
-        setTimeout(() => AOS.refresh(), 100);
+        const controlClass = inProgressPlants.length > 1 ? '' : ' is-single';
+        container.innerHTML = `
+            <div class="progress-scroll-toolbar${controlClass}">
+                <div class="progress-scroll-hint">
+                    <i class="bi bi-arrow-left-right"></i>
+                    <span>가로로 넘기며 발전소별 진행 상황을 볼 수 있습니다.</span>
+                </div>
+                <div class="progress-scroll-controls" aria-label="발전소 건립 현황 이동">
+                    <button type="button" class="progress-scroll-button" onclick="scrollProgressPlants(-1)" aria-label="이전 발전소 건립 현황 보기">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <button type="button" class="progress-scroll-button" onclick="scrollProgressPlants(1)" aria-label="다음 발전소 건립 현황 보기">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="progress-scroll-viewport" id="progress-scroll-viewport">
+                ${cardHtml}
+            </div>`;
+        if (window.AOS && typeof AOS.refresh === 'function') {
+            setTimeout(function refreshProgressAos() { AOS.refresh(); }, 100);
+        }
     }
 
     // [3] 연혁
