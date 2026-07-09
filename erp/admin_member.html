@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.97
-Change: Show managed family links bidirectionally and render only birth dates in the family tab.
+Version: v1.0.98
+Change: Add direct/participation project type controls for power plants.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.97';
+window.ADMIN_MEMBER_VERSION = 'v1.0.98';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1339,7 +1339,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <button class="btn btn-sm btn-outline-primary" onclick="openPlantModal()">+ 발전소 추가</button>
 </div>
 <table class="table table-bordered bg-white">
-<thead><tr><th>순서</th><th>발전소명</th><th>용량(kW)</th><th>상태</th><th>모니터링</th><th>관리</th></tr></thead>
+<thead><tr><th>순서</th><th>유형</th><th>발전소명</th><th>용량(kW)</th><th>상태</th><th>모니터링</th><th>관리</th></tr></thead>
 <tbody id="plantListBody"></tbody>
 </table>
 </div>
@@ -1906,9 +1906,17 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="row">
 <div class="col-md-6 border-end">
 <h6 class="text-primary fw-bold mb-3">📌 기본 정보</h6>
+<div class="mb-2">
+<label class="form-label small">사업 유형</label>
+<select id="plant-project-type" class="form-select" onchange="togglePlantProjectTypeFields()">
+<option value="direct">직접 발전형</option>
+<option value="participation">참여 발전형</option>
+</select>
+<div class="form-text small">참여 발전형은 SPC 등 외부 프로젝트에 조합 참여분이 있는 경우 사용합니다.</div>
+</div>
 <div class="mb-2"><label class="form-label small">발전소명</label><input type="text" id="plant-name" class="form-control"></div>
 <div class="row">
-<div class="col-6 mb-2"><label class="form-label small">설비용량 (kW)</label><input type="number" id="plant-capacity" class="form-control" placeholder="0"></div>
+<div class="col-6 mb-2"><label class="form-label small" id="plant-capacity-label">설비용량 (kW)</label><input type="number" id="plant-capacity" class="form-control" placeholder="0"></div>
 <div class="col-6 mb-2"><label class="form-label small">순서</label><input type="number" id="plant-order" class="form-control"></div>
 </div>
 <div class="mb-2"><label class="form-label small">위치 (주소)</label><input type="text" id="plant-location" class="form-control" placeholder="예: 용인시 처인구..."></div>
@@ -1922,6 +1930,48 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <option value="공사중">공사중 (Progress)</option>
 <option value="준비중">준비중 (Progress)</option>
 </select>
+</div>
+<div id="plant-participation-fields" class="border rounded bg-light p-3 mb-3" style="display:none;">
+<h6 class="text-primary fw-bold mb-3">🤝 참여 발전형 정보</h6>
+<div class="row">
+<div class="col-6 mb-2">
+<label class="form-label small">참여 방식</label>
+<select id="plant-participation-method" class="form-select">
+<option value="equity">SPC 지분 참여</option>
+<option value="bond">채권/대여 참여</option>
+<option value="fund">펀드 참여</option>
+<option value="other">기타</option>
+</select>
+</div>
+<div class="col-6 mb-2">
+<label class="form-label small">사업 주체</label>
+<input type="text" id="plant-owner-name" class="form-control" placeholder="예: ○○SPC">
+</div>
+</div>
+<div class="row">
+<div class="col-6 mb-2">
+<label class="form-label small">조합 참여 용량(kW)</label>
+<input type="number" id="plant-participation-capacity" class="form-control" min="0" step="0.01" placeholder="예: 50">
+</div>
+<div class="col-6 mb-2">
+<label class="form-label small">조합 지분율(%)</label>
+<input type="number" id="plant-participation-share" class="form-control" min="0" max="100" step="0.01" placeholder="예: 12.5">
+</div>
+</div>
+<div class="mb-2">
+<label class="form-label small">발전량 반영 기준</label>
+<select id="plant-generation-calc-method" class="form-select">
+<option value="excluded">통계 제외</option>
+<option value="share_percent">전체 발전량 × 지분율</option>
+<option value="capacity_ratio">전체 발전량 × 참여용량/전체용량</option>
+<option value="direct_input">입력값을 조합 참여분으로 간주</option>
+</select>
+<div class="form-text small">홈페이지 발전 현황에 조합 참여분만 반영하기 위한 기준입니다.</div>
+</div>
+<div class="mb-0">
+<label class="form-label small">공개 설명</label>
+<textarea id="plant-public-note" class="form-control" rows="2" placeholder="홈페이지에 공개해도 되는 설명만 입력"></textarea>
+</div>
 </div>
 </div>
 
@@ -5565,13 +5615,90 @@ async function saveNotice() {
 // ================================================================
 
 // --- 발전소 ---
+function normalizePlantProjectType(value) {
+return String(value || '').trim() === 'participation' ? 'participation' : 'direct';
+}
+
+function getPlantProjectTypeLabel(value) {
+return normalizePlantProjectType(value) === 'participation' ? '참여 발전형' : '직접 발전형';
+}
+
+function getPlantProjectTypeBadgeHtml(plant) {
+const type = normalizePlantProjectType(plant?.project_type);
+const className = type === 'participation'
+? 'bg-info-subtle text-info border border-info-subtle'
+: 'bg-success-subtle text-success border border-success-subtle';
+return `<span class="badge ${className}">${escapeHtml(getPlantProjectTypeLabel(type))}</span>`;
+}
+
+function formatPlantNumber(value, suffix) {
+const num = Number(value);
+if (!Number.isFinite(num)) return '-';
+return `${num.toLocaleString('ko-KR', {
+minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+maximumFractionDigits: 2
+})}${suffix || ''}`;
+}
+
+function formatPlantGenerationCalcMethodLabel(method) {
+const normalized = String(method || '').trim();
+if (normalized === 'share_percent') return '지분율 반영';
+if (normalized === 'capacity_ratio') return '참여용량 반영';
+if (normalized === 'direct_input') return '직접 입력값';
+if (normalized === 'excluded') return '통계 제외';
+if (normalized === 'direct_full') return '전체 반영';
+return '미설정';
+}
+
+function getPlantParticipationSummary(plant) {
+if (normalizePlantProjectType(plant?.project_type) !== 'participation') return '';
+const parts = [];
+if (plant?.participation_capacity !== null && plant?.participation_capacity !== undefined && plant?.participation_capacity !== '') {
+parts.push(`참여용량 ${formatPlantNumber(plant.participation_capacity, 'kW')}`);
+}
+if (plant?.participation_share_percent !== null && plant?.participation_share_percent !== undefined && plant?.participation_share_percent !== '') {
+parts.push(`지분율 ${formatPlantNumber(plant.participation_share_percent, '%')}`);
+}
+parts.push(formatPlantGenerationCalcMethodLabel(plant?.generation_calc_method));
+return parts.join(' · ');
+}
+
+function getPowerGenerationPlantOptionLabel(plant) {
+const typeLabel = getPlantProjectTypeLabel(plant?.project_type);
+const calcLabel = formatPlantGenerationCalcMethodLabel(plant?.generation_calc_method || 'direct_full');
+return `${plant?.name || '-'} (${typeLabel} · ${calcLabel})`;
+}
+
+function readNullableNumberInput(id) {
+const el = document.getElementById(id);
+if (!el) return null;
+const raw = String(el.value || '').trim();
+if (raw === '') return null;
+const num = Number(raw);
+return Number.isFinite(num) ? num : null;
+}
+
+function setPlantInputValue(id, value) {
+const el = document.getElementById(id);
+if (el) el.value = value ?? '';
+}
+
+function togglePlantProjectTypeFields() {
+const type = normalizePlantProjectType(document.getElementById('plant-project-type')?.value);
+const fields = document.getElementById('plant-participation-fields');
+const capacityLabel = document.getElementById('plant-capacity-label');
+if (fields) fields.style.display = type === 'participation' ? 'block' : 'none';
+if (capacityLabel) capacityLabel.innerText = type === 'participation' ? '전체 사업 용량 (kW)' : '설비용량 (kW)';
+}
+
 // [수정] 발전소 목록 불러오기 (삭제 버튼 추가 + 전역변수 저장)
 async function fetchPlants() {
-const { data } = await scopeAdminTenant(_supabase.from('site_power_plants').select('*')).order('display_order');
+const { data, error } = await scopeAdminTenant(_supabase.from('site_power_plants').select('*')).order('display_order');
 const tbody = document.getElementById('plantListBody');
 tbody.innerHTML = '';
 
-if(!data) {
+if(error || !data) {
+if (error) console.error('[fetchPlants] failed:', error);
 g_plants = []; // 데이터 없으면 빈 배열
 updatePowerGenerationPlantOptions();
 return;
@@ -5579,16 +5706,31 @@ return;
 
 g_plants = data; // ★ 핵심: 목록을 전역 변수에 저장 (나중에 순서 계산할 때 씀)
 
+if(data.length === 0) {
+tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">등록된 발전소가 없습니다.</td></tr>';
+updatePowerGenerationPlantOptions();
+return;
+}
+
 data.forEach(p => {
+const monitorUrl = String(p.monitor_url || '').trim();
+const monitorHtml = monitorUrl
+? `<a href="${escapeHtml(monitorUrl)}" target="_blank" rel="noopener noreferrer" class="text-truncate" style="max-width:140px; display:inline-block;">${escapeHtml(monitorUrl)}</a>`
+: '-';
+const participationSummary = getPlantParticipationSummary(p);
 tbody.innerHTML += `<tr>
-                   <td>${p.display_order}</td>
-                   <td>${p.name}</td>
-                   <td>${p.capacity}kW</td>
-                   <td>${p.status}</td>
-                   <td><a href="${p.monitor_url||'#'}" target="_blank" class="text-truncate" style="max-width:100px; display:inline-block;">${p.monitor_url||'-'}</a></td>
+                   <td>${escapeHtml(String(p.display_order ?? ''))}</td>
+                   <td>${getPlantProjectTypeBadgeHtml(p)}</td>
                    <td>
-                       <button class="btn btn-sm btn-light" onclick="openPlantModal('${p.id}')">수정</button>
-                       <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeletePlant('${p.id}')">삭제</button>
+                       <div class="fw-semibold">${escapeHtml(p.name || '-')}</div>
+                       ${participationSummary ? `<div class="small text-muted">${escapeHtml(participationSummary)}</div>` : ''}
+                   </td>
+                   <td>${escapeHtml(formatPlantNumber(p.capacity, 'kW'))}</td>
+                   <td>${escapeHtml(p.status || '-')}</td>
+                   <td>${monitorHtml}</td>
+                   <td>
+                       <button class="btn btn-sm btn-light" onclick="openPlantModal('${escapeJsString(p.id)}')">수정</button>
+                       <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeletePlant('${escapeJsString(p.id)}')">삭제</button>
                    </td>
                </tr>`;
 });
@@ -6428,18 +6570,25 @@ document.getElementById('plant-file').value = '';
 if(id) {
 // 수정 모드
 const { data } = await scopeAdminTenant(_supabase.from('site_power_plants').select('*')).eq('id', id).single();
-if(data) {
-document.getElementById('plant-name').value = data.name;
-document.getElementById('plant-capacity').value = data.capacity;
-document.getElementById('plant-order').value = data.display_order;
-document.getElementById('plant-location').value = data.location || '';
-document.getElementById('plant-area').value = data.area || '';
-document.getElementById('plant-date').value = data.completion_date || '';
-document.getElementById('plant-status').value = data.status;
-document.getElementById('plant-url').value = data.monitor_url || '';
+	if(data) {
+	document.getElementById('plant-project-type').value = normalizePlantProjectType(data.project_type);
+	document.getElementById('plant-name').value = data.name;
+	document.getElementById('plant-capacity').value = data.capacity;
+	document.getElementById('plant-order').value = data.display_order;
+	document.getElementById('plant-location').value = data.location || '';
+	document.getElementById('plant-area').value = data.area || '';
+	document.getElementById('plant-date').value = data.completion_date || '';
+	document.getElementById('plant-status').value = data.status;
+	document.getElementById('plant-url').value = data.monitor_url || '';
+	document.getElementById('plant-participation-method').value = data.participation_method || 'equity';
+	document.getElementById('plant-generation-calc-method').value = data.generation_calc_method && data.generation_calc_method !== 'direct_full' ? data.generation_calc_method : 'excluded';
+	setPlantInputValue('plant-owner-name', data.project_owner_name);
+	setPlantInputValue('plant-participation-capacity', data.participation_capacity);
+	setPlantInputValue('plant-participation-share', data.participation_share_percent);
+	setPlantInputValue('plant-public-note', data.public_note);
 
-const rate = data.progress_rate || 0;
-document.getElementById('plant-progress').value = rate;
+	const rate = data.progress_rate || 0;
+	document.getElementById('plant-progress').value = rate;
 updateProgressLabel(rate);
 
 // ★ 이미지 처리 (원본 기억 + 현재 상태 설정)
@@ -6458,33 +6607,80 @@ preview.style.display = 'none';
 placeholder.style.display = 'block';
 }
 }
-} else {
-// 신규 모드
-const maxOrder = g_plants.length > 0 ? Math.max(...g_plants.map(p => p.display_order)) : 0;
-['plant-name','plant-capacity','plant-url','plant-location','plant-area','plant-date','plant-img-url','plant-img-original'].forEach(id => document.getElementById(id).value = '');
+	} else {
+	// 신규 모드
+	const maxOrder = g_plants.length > 0 ? Math.max(...g_plants.map(p => p.display_order)) : 0;
+	['plant-name','plant-capacity','plant-url','plant-location','plant-area','plant-date','plant-img-url','plant-img-original','plant-owner-name','plant-participation-capacity','plant-participation-share','plant-public-note'].forEach(id => document.getElementById(id).value = '');
 
-document.getElementById('plant-order').value = maxOrder + 1;
-document.getElementById('plant-status').value = '준비중';
-document.getElementById('plant-progress').value = 0;
+	document.getElementById('plant-project-type').value = 'direct';
+	document.getElementById('plant-participation-method').value = 'equity';
+	document.getElementById('plant-generation-calc-method').value = 'excluded';
+	document.getElementById('plant-order').value = maxOrder + 1;
+	document.getElementById('plant-status').value = '준비중';
+	document.getElementById('plant-progress').value = 0;
 updateProgressLabel(0);
 
 document.getElementById('plant-img-preview').style.display = 'none';
-document.getElementById('plant-img-placeholder').style.display = 'block';
-}
-toggleProgressSlider();
-new bootstrap.Modal(document.getElementById('plantModal')).show();
-}
+	document.getElementById('plant-img-placeholder').style.display = 'block';
+	}
+	toggleProgressSlider();
+	togglePlantProjectTypeFields();
+	new bootstrap.Modal(document.getElementById('plantModal')).show();
+	}
 
 // [기존 수정] 발전소 저장 (자동 삭제 로직 포함)
 async function savePlant() {
-const name = document.getElementById('plant-name').value;
+const name = String(document.getElementById('plant-name').value || '').trim();
 if (!name) { myAlert("발전소명을 입력해주세요.", 'warning'); return; }
 
-showLoading(true);
+const capVal = document.getElementById('plant-capacity').value;
+const orderVal = document.getElementById('plant-order').value;
+const capacity = (capVal === '' || isNaN(capVal)) ? 0 : Number(capVal);
+const order = (orderVal === '' || isNaN(orderVal)) ? 0 : Number(orderVal);
+const status = document.getElementById('plant-status').value;
+const progress = (status === '운영중') ? 100 : Number(document.getElementById('plant-progress').value);
+const projectType = normalizePlantProjectType(document.getElementById('plant-project-type').value);
+const participationMethod = document.getElementById('plant-participation-method').value || 'equity';
+const participationCapacity = readNullableNumberInput('plant-participation-capacity');
+const participationShare = readNullableNumberInput('plant-participation-share');
+const generationCalcMethod = projectType === 'direct'
+? 'direct_full'
+: (document.getElementById('plant-generation-calc-method').value || 'excluded');
+
+if (!Number.isFinite(capacity) || capacity < 0) {
+myAlert('설비용량은 0 이상으로 입력해주세요.', 'warning');
+return;
+}
+if (projectType === 'participation') {
+const hasParticipationCapacity = Number.isFinite(participationCapacity) && participationCapacity > 0;
+const hasParticipationShare = Number.isFinite(participationShare) && participationShare > 0;
+if (!hasParticipationCapacity && !hasParticipationShare) {
+myAlert('참여 발전형은 조합 참여 용량 또는 조합 지분율 중 하나를 입력해야 합니다.', 'warning');
+return;
+}
+if (participationCapacity !== null && (!Number.isFinite(participationCapacity) || participationCapacity < 0)) {
+myAlert('조합 참여 용량은 0 이상으로 입력해주세요.', 'warning');
+return;
+}
+if (participationShare !== null && (!Number.isFinite(participationShare) || participationShare <= 0 || participationShare > 100)) {
+myAlert('조합 지분율은 0보다 크고 100 이하로 입력해주세요.', 'warning');
+return;
+}
+if (generationCalcMethod === 'capacity_ratio' && (!hasParticipationCapacity || capacity <= 0)) {
+myAlert('참여용량 반영 기준을 쓰려면 전체 사업 용량과 조합 참여 용량을 모두 입력해야 합니다.', 'warning');
+return;
+}
+if (generationCalcMethod === 'share_percent' && !hasParticipationShare) {
+myAlert('지분율 반영 기준을 쓰려면 조합 지분율을 입력해야 합니다.', 'warning');
+return;
+}
+}
 
 const fileInput = document.getElementById('plant-file');
 const originalUrl = document.getElementById('plant-img-original').value; // 원래 있던 사진
 let finalImgUrl = document.getElementById('plant-img-url').value;      // 최종 저장될 사진 주소
+
+showLoading(true);
 
 // 1. 새 파일이 업로드된 경우
 if (fileInput.files.length > 0) {
@@ -6513,28 +6709,28 @@ await deleteOldFile(originalUrl);
 }
 
 // 3. DB 저장 (나머지는 기존과 동일)
-const capVal = document.getElementById('plant-capacity').value;
-const orderVal = document.getElementById('plant-order').value;
-
-const capacity = (capVal === '' || isNaN(capVal)) ? 0 : Number(capVal);
-const order = (orderVal === '' || isNaN(orderVal)) ? 0 : Number(orderVal);
-const status = document.getElementById('plant-status').value;
-const progress = (status === '운영중') ? 100 : Number(document.getElementById('plant-progress').value);
-
 const updates = {
 p_id: document.getElementById('plant-id').value || null,
-p_name: name,
-p_capacity: capacity,
-p_status: status,
-p_display_order: order,
+	p_name: name,
+	p_capacity: capacity,
+	p_status: status,
+	p_display_order: order,
 p_progress: progress,
 p_location: document.getElementById('plant-location').value,
 p_area: document.getElementById('plant-area').value,
 p_completion_date: document.getElementById('plant-date').value || null,
-p_image_url: finalImgUrl
+p_image_url: finalImgUrl,
+p_monitor_url: document.getElementById('plant-url').value || null,
+p_project_type: projectType,
+p_participation_method: projectType === 'participation' ? participationMethod : null,
+p_project_owner_name: projectType === 'participation' ? document.getElementById('plant-owner-name').value : null,
+p_participation_capacity: projectType === 'participation' ? participationCapacity : null,
+p_participation_share_percent: projectType === 'participation' ? participationShare : null,
+p_generation_calc_method: generationCalcMethod,
+p_public_note: projectType === 'participation' ? document.getElementById('plant-public-note').value : null
 };
 
-const { error } = await _supabase.rpc('upsert_plant_secure', updates);
+const { error } = await _supabase.rpc('upsert_plant_project_secure', updates);
 showLoading(false);
 
 if(error) {
@@ -6607,12 +6803,12 @@ const filterEl = document.getElementById('power-generation-plant-filter');
 const modalEl = document.getElementById('power-generation-plant');
 if (filterEl) {
 const current = filterEl.value;
-filterEl.innerHTML = '<option value="">전체 발전소</option>' + options.map((plant) => `<option value="${escapeHtml(String(plant.id || ''))}">${escapeHtml(plant.name || '-')}</option>`).join('');
+filterEl.innerHTML = '<option value="">전체 발전소</option>' + options.map((plant) => `<option value="${escapeHtml(String(plant.id || ''))}">${escapeHtml(getPowerGenerationPlantOptionLabel(plant))}</option>`).join('');
 if (current && options.some((plant) => String(plant.id) === current)) filterEl.value = current;
 }
 if (modalEl) {
 const current = modalEl.value;
-modalEl.innerHTML = options.map((plant) => `<option value="${escapeHtml(String(plant.id || ''))}">${escapeHtml(plant.name || '-')}</option>`).join('');
+modalEl.innerHTML = options.map((plant) => `<option value="${escapeHtml(String(plant.id || ''))}">${escapeHtml(getPowerGenerationPlantOptionLabel(plant))}</option>`).join('');
 if (current && options.some((plant) => String(plant.id) === current)) modalEl.value = current;
 }
 }
@@ -7057,8 +7253,9 @@ document.getElementById('power-generation-latest-date').innerText = stats.latest
 document.getElementById('power-generation-last-updated').innerText = stats.latest_logged_at
 ? `최근 반영 ${formatPowerGenerationDateTime(stats.latest_logged_at)}`
 : '아직 반영된 발전량 기록이 없습니다.';
+const participationCount = Number(stats.participating_project_count || 0);
 document.getElementById('power-generation-summary-note').innerText = stats.latest_generation_date
-? `홈페이지 발전 현황은 ${formatPowerGenerationDate(stats.latest_generation_date)} 입력값까지 집계합니다.`
+? `홈페이지 발전 현황은 ${formatPowerGenerationDate(stats.latest_generation_date)} 입력값까지 집계합니다.${participationCount > 0 ? ' 참여 발전형은 설정된 반영 기준으로 계산됩니다.' : ''}`
 : '발전량을 입력하면 홈페이지 발전 현황이 이 데이터를 기준으로 집계됩니다.';
 }
 
