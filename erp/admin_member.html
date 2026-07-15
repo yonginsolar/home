@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.98
-Change: Add direct/participation project type controls for power plants.
+Version: v1.0.99
+Change: Prompt to activate pending members after paid-in capital is saved.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.98';
+window.ADMIN_MEMBER_VERSION = 'v1.0.99';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -11178,6 +11178,72 @@ async function deleteFundData() {
 }
 
 
+function shouldPromptMemberActivationAfterCapitalSave(type, amount) {
+    const normalizedType = String(type || '').trim();
+    const currentStatus = String(document.getElementById('md-status')?.value || '').trim();
+    const numericAmount = Number(amount || 0);
+    return normalizedType === 'capital'
+        && currentStatus === '승인대기'
+        && Number.isFinite(numericAmount)
+        && numericAmount > 0;
+} // End of shouldPromptMemberActivationAfterCapitalSave
+
+function applyActivatedMemberStatusToAdminUi(memberTextId) {
+    const statusEl = document.getElementById('md-status');
+    if (statusEl) statusEl.value = '정상';
+
+    if (g_current_member_row) g_current_member_row.status = '정상';
+    if (Array.isArray(g_members)) {
+        g_members.forEach((member) => {
+            if (String(member?.member_id || '') === String(memberTextId || '')) {
+                member.status = '정상';
+            }
+        });
+    }
+} // End of applyActivatedMemberStatusToAdminUi
+
+function promptMemberActivationAfterCapitalSave(memberTextId, memberUid) {
+    const safeMemberTextId = String(memberTextId || '').trim();
+    if (!safeMemberTextId || safeMemberTextId === 'ID없음' || safeMemberTextId === '-') return;
+
+    const memberName = String(document.getElementById('md-name')?.value || '해당 조합원').trim() || '해당 조합원';
+    const message = `${memberName} 조합원의 첫 출자금 입금이 확인되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?`;
+
+    myConfirm(message, async () => {
+        showLoading(true);
+        const { data, error } = await _supabase.rpc('admin_activate_member_after_first_capital_secure', {
+            p_member_text_id: safeMemberTextId
+        });
+        showLoading(false);
+
+        if (error) {
+            myAlert('상태 변경 실패: ' + error.message, 'error');
+            return;
+        }
+
+        if (data?.activated === true) {
+            applyActivatedMemberStatusToAdminUi(safeMemberTextId);
+            myAlert(data.message || '조합원 상태가 정상(정조합원)으로 변경되었습니다.');
+            loadMemberFunds(memberUid, safeMemberTextId, true);
+            loadDashboard();
+            return;
+        }
+
+        myAlert(data?.message || '상태 변경 조건에 해당하지 않아 조합원 상태는 유지했습니다.', 'warning');
+    });
+} // End of promptMemberActivationAfterCapitalSave
+
+function runAfterFundEditorClosed(callback) {
+    const modalEl = document.getElementById('fundEditorModal');
+    const modalInstance = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+    if (modalEl && modalInstance && modalEl.classList.contains('show')) {
+        modalEl.addEventListener('hidden.bs.modal', callback, { once: true });
+        modalInstance.hide();
+        return;
+    }
+    callback();
+} // End of runAfterFundEditorClosed
+
 // [수정] 저장 실행 (Foreign Key 에러 방지 적용)
 async function saveFundData() {
     // 1. 폼 데이터 수집
@@ -11190,6 +11256,7 @@ async function saveFundData() {
     const amount = document.getElementById('fund-amount').value;
     const date = document.getElementById('fund-date').value;
     const note = document.getElementById('fund-note').value;
+    const shouldPromptActivation = shouldPromptMemberActivationAfterCapitalSave(type, amount);
 
     // 유효성 검사
     if (!amount || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
@@ -11241,16 +11308,19 @@ async function saveFundData() {
     if (error) {
         myAlert('저장 실패: ' + error.message, 'error');
     } else {
-        myAlert('성공적으로 저장되었습니다.');
-
-        // 에디터 모달 닫기
-        bootstrap.Modal.getInstance(document.getElementById('fundEditorModal')).hide();
-
         // 리스트 새로고침 (현재 보고 있는 조합원 자금 내역)
         loadMemberFunds(memberUid, memberTextId, true); // true = 리셋 후 로드
 
         // 대시보드 통계도 갱신 (금액이 변했으므로)
         loadDashboard();
+
+        runAfterFundEditorClosed(() => {
+            if (shouldPromptActivation) {
+                promptMemberActivationAfterCapitalSave(memberTextId, memberUid);
+                return;
+            }
+            myAlert('성공적으로 저장되었습니다.');
+        });
     }
 }
 
