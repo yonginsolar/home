@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.100
-Change: Show paid-in capital and donation totals in member fund details.
+Version: v1.0.101
+Change: Replace expanded fund tables with summary cards and date-filtered history.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.100';
+window.ADMIN_MEMBER_VERSION = 'v1.0.101';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -150,6 +150,22 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .external-news-thumb-admin { width: 74px; height: 48px; object-fit: cover; border-radius: 10px; border: 1px solid #e5e7eb; background: #f8fafc; }
 .external-news-sync-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .external-news-sync-summary .badge { font-size: 12px; }
+.fund-summary-card { height:100%; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
+.fund-summary-view { width:100%; min-height:154px; padding:18px; border:0; background:transparent; color:#0f172a; text-align:left; transition:background-color .18s ease; }
+.fund-summary-view:hover { background:#f8fafc; }
+.fund-summary-view:focus-visible { outline:3px solid rgba(37,99,235,.3); outline-offset:-3px; }
+.fund-summary-label { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#475569; font-size:.9rem; font-weight:800; }
+.fund-summary-amount { margin-top:14px; font-size:1.65rem; line-height:1.2; font-weight:900; letter-spacing:-.03em; }
+.fund-summary-meta { display:block; margin-top:8px; color:#64748b; font-size:.82rem; }
+.fund-summary-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; padding:10px 14px; border-top:1px solid #e2e8f0; background:#f8fafc; }
+.member-history-filter { padding:12px; margin-bottom:14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
+.member-history-filter .form-label { margin-bottom:4px; color:#475569; font-size:.78rem; font-weight:800; }
+.member-history-filter-actions { display:flex; flex-wrap:wrap; gap:6px; }
+@media (max-width:575.98px) {
+  .fund-summary-view { min-height:138px; padding:16px; }
+  .fund-summary-amount { font-size:1.45rem; }
+  .member-history-filter .btn { min-height:38px; }
+}
 </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.0">
 </head>
@@ -2795,32 +2811,31 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 
 <div class="tab-pane fade" id="md-tab-funds">
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-<h6 class="fw-bold m-0 text-success">💰 출자금 내역</h6>
-<div class="d-flex align-items-center gap-2">
-<span class="badge rounded-pill bg-success bg-opacity-10 text-success border border-success-subtle" id="md-capital-total" aria-live="polite">합계 0원</span>
-<button class="btn btn-sm btn-outline-success" onclick="openFundEditor('capital', null)">+ 출자금 추가</button>
+<div class="row g-3 mb-4">
+<div class="col-md-6">
+<div class="fund-summary-card">
+<button class="fund-summary-view" type="button" onclick="openHistoryModal('ledger')" aria-label="출자금 기간별 내역 보기">
+<span class="fund-summary-label"><span>💰 현재 출자금</span><span class="text-success">기간별 내역 ›</span></span>
+<span class="fund-summary-amount text-success d-block" id="md-capital-total" aria-live="polite">0 원</span>
+<span class="fund-summary-meta" id="md-capital-meta">등록된 내역 없음</span>
+</button>
+<div class="fund-summary-actions">
+<button class="btn btn-sm btn-outline-success" type="button" onclick="openFundEditor('capital', null)">+ 출자금 추가</button>
 </div>
 </div>
-<div class="table-responsive mb-4 border rounded" style="max-height: 200px;">
-<table class="table table-sm table-hover mb-0 text-center small">
-<thead class="table-light sticky-top"><tr><th>날짜</th><th>금액</th><th>비고</th><th>관리</th></tr></thead>
-<tbody id="md-capital-list"></tbody>
-</table>
 </div>
-
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-<h6 class="fw-bold m-0 text-primary">🎁 기부금 내역</h6>
-<div class="d-flex align-items-center gap-2">
-<span class="badge rounded-pill bg-primary bg-opacity-10 text-primary border border-primary-subtle" id="md-donation-total" aria-live="polite">합계 0원</span>
-<button class="btn btn-sm btn-outline-primary" onclick="openFundEditor('donation', null)">+ 기부금 추가</button>
+<div class="col-md-6">
+<div class="fund-summary-card">
+<button class="fund-summary-view" type="button" onclick="openHistoryModal('donation')" aria-label="기부금 기간별 내역 보기">
+<span class="fund-summary-label"><span>🎁 누적 기부금</span><span class="text-primary">기간별 내역 ›</span></span>
+<span class="fund-summary-amount text-primary d-block" id="md-donation-total" aria-live="polite">0 원</span>
+<span class="fund-summary-meta" id="md-donation-meta">등록된 내역 없음</span>
+</button>
+<div class="fund-summary-actions">
+<button class="btn btn-sm btn-outline-primary" type="button" onclick="openFundEditor('donation', null)">+ 기부금 추가</button>
 </div>
 </div>
-<div class="table-responsive mb-4 border rounded" style="max-height: 200px;">
-<table class="table table-sm table-hover mb-0 text-center small">
-<thead class="table-light sticky-top"><tr><th>날짜</th><th>금액</th><th>유형</th><th>비고</th><th>관리</th></tr></thead>
-<tbody id="md-donation-list"></tbody>
-</table>
+</div>
 </div>
 
 <div class="row">
@@ -5773,13 +5788,14 @@ let globalHistoryData = {
     points: [],
     dividends: []
 };
+let activeMemberHistoryType = '';
 
 function ensureMemberHistoryModal() {
     let modalEl = document.getElementById('memberHistoryModal');
     if (modalEl) return modalEl;
 
     document.body.insertAdjacentHTML('beforeend', `
-        <div class="modal fade" id="memberHistoryModal" tabindex="-1" aria-hidden="true">
+        <div class="modal fade" id="memberHistoryModal" tabindex="-1" aria-hidden="true" aria-labelledby="historyModalTitle">
             <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -5789,7 +5805,30 @@ function ensureMemberHistoryModal() {
                         </div>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
                     </div>
-                    <div class="modal-body" id="historyModalList"></div>
+                    <div class="modal-body">
+                        <div class="member-history-filter d-none" id="memberHistoryFilter">
+                            <div class="member-history-filter-actions mb-2">
+                                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="setMemberHistoryQuickRange('all')">전체 기간</button>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="setMemberHistoryQuickRange('current-year')">올해</button>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" onclick="setMemberHistoryQuickRange('previous-year')">지난해</button>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-sm-4">
+                                    <label class="form-label" for="memberHistoryDateFrom">시작일</label>
+                                    <input class="form-control form-control-sm" type="date" id="memberHistoryDateFrom">
+                                </div>
+                                <div class="col-sm-4">
+                                    <label class="form-label" for="memberHistoryDateTo">종료일</label>
+                                    <input class="form-control form-control-sm" type="date" id="memberHistoryDateTo">
+                                </div>
+                                <div class="col-sm-4 d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary flex-grow-1" type="button" onclick="applyMemberHistoryFilter()">조회</button>
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" onclick="setMemberHistoryQuickRange('all')">초기화</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="historyModalList"></div>
+                    </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-dark" data-bs-dismiss="modal">닫기</button>
                     </div>
@@ -5803,57 +5842,97 @@ function ensureMemberHistoryModal() {
     return modalEl;
 } // End of ensureMemberHistoryModal
 
-// [수정] 상세 내역 모달 열기 (기부금에서 '구분' 칼럼 제거됨)
-function openHistoryModal(type) {
-    const modalEl = ensureMemberHistoryModal();
+function getMemberHistoryDate(type, row) {
+    if (type === 'ledger') return String(row?.deposit_date || '').slice(0, 10);
+    if (type === 'donation') return String(row?.donation_date || '').slice(0, 10);
+    return '';
+} // End of getMemberHistoryDate
+
+function getFilteredMemberHistoryRows(type) {
+    const source = type === 'ledger'
+        ? globalHistoryData.ledger
+        : (type === 'donation' ? globalHistoryData.donations : []);
+    const from = String(document.getElementById('memberHistoryDateFrom')?.value || '');
+    const to = String(document.getElementById('memberHistoryDateTo')?.value || '');
+    return (Array.isArray(source) ? source : []).filter((row) => {
+        const date = getMemberHistoryDate(type, row);
+        if (!date) return !from && !to;
+        if (from && date < from) return false;
+        if (to && date > to) return false;
+        return true;
+    });
+} // End of getFilteredMemberHistoryRows
+
+function getFundPaymentMethodLabel(value) {
+    const safeValue = String(value || '').trim().toLowerCase();
+    if (safeValue === 'transfer') return '계좌이체';
+    if (safeValue === 'cash') return '현금';
+    if (safeValue === 'card') return '카드';
+    if (safeValue === 'etc') return '기타';
+    return safeValue || '-';
+} // End of getFundPaymentMethodLabel
+
+function renderMemberHistoryContent(type) {
     const titleEl = document.getElementById('historyModalTitle');
     const summaryEl = document.getElementById('historyModalSummary');
     const listEl = document.getElementById('historyModalList');
-    if (!modalEl || !titleEl || !summaryEl || !listEl) {
-        console.error('[openHistoryModal] history modal elements missing:', { modalEl, titleEl, summaryEl, listEl });
-        myAlert('상세 내역 모달을 열 수 없습니다. 화면을 새로고침한 뒤 다시 시도해주세요.', 'error');
-        return;
-    }
+    if (!titleEl || !summaryEl || !listEl) return;
 
     let title = '';
     let total = 0;
-    let html = '<table class="table table-sm table-striped small"><thead>';
+    let html = '<div class="table-responsive"><table class="table table-sm table-striped small"><thead>';
 
-    // 데이터 소스 선택
     if(type === 'ledger') {
         title = '출자금 납입 내역';
-        html += '<tr class="table-success"><th>날짜</th><th class="text-end">금액</th></tr></thead><tbody>';
-        const data = globalHistoryData.ledger || [];
-        total = data.reduce((a,c)=>a+Number(c.amount),0);
+        html += '<tr class="table-success"><th>날짜</th><th class="text-end">금액</th><th>입금자</th><th>비고</th><th class="text-end">관리</th></tr></thead><tbody>';
+        const data = getFilteredMemberHistoryRows(type);
+        total = calculateMemberFundTotal(data);
 
-        if(data.length === 0) html += '<tr><td colspan="2" class="text-center py-3">내역 없음</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-3 text-muted">해당 기간의 출자금 내역이 없습니다.</td></tr>';
         else {
             data.forEach(item => {
+                const amount = Number(item.amount || 0);
+                const amountClass = amount < 0 ? 'text-danger' : 'text-success';
+                const rowData = encodeURIComponent(JSON.stringify(item));
                 html += `<tr>
-                    <td>${formatAdminMemberKstDate(item.deposit_date)}</td>
-                    <td class="text-end fw-bold">${Number(item.amount).toLocaleString()}원</td>
+                    <td>${escapeHtml(formatAdminMemberKstDate(item.deposit_date))}</td>
+                    <td class="text-end fw-bold ${amountClass}">${amount.toLocaleString('ko-KR')}원</td>
+                    <td>${escapeHtml(item.depositor || '-')}</td>
+                    <td class="text-truncate" style="max-width:180px;" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
+                    <td class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('capital','${rowData}')">수정</button></td>
                 </tr>`;
             });
         }
-        summaryEl.innerText = `총 납입액: ${Number(total).toLocaleString()}원`;
+        const from = String(document.getElementById('memberHistoryDateFrom')?.value || '');
+        const to = String(document.getElementById('memberHistoryDateTo')?.value || '');
+        summaryEl.innerText = from || to
+            ? `${from || '최초'} ~ ${to || '현재'} · ${data.length.toLocaleString('ko-KR')}건 · 기간 내 변동 ${total.toLocaleString('ko-KR')}원`
+            : `현재 출자금 ${total.toLocaleString('ko-KR')}원 · 총 ${data.length.toLocaleString('ko-KR')}건`;
 
     } else if(type === 'donation') {
-        // [수정됨] 구분 칼럼 제거 -> 날짜, 금액만 표시
         title = '기부금 납부 내역';
-        html += '<tr class="table-danger"><th>날짜</th><th class="text-end">금액</th></tr></thead><tbody>';
-        const data = globalHistoryData.donations || [];
-        total = data.reduce((a,c)=>a+Number(c.amount),0);
+        html += '<tr class="table-primary"><th>날짜</th><th class="text-end">금액</th><th>입금 방식</th><th>비고</th><th class="text-end">관리</th></tr></thead><tbody>';
+        const data = getFilteredMemberHistoryRows(type);
+        total = calculateMemberFundTotal(data);
 
-        if(data.length === 0) html += '<tr><td colspan="2" class="text-center py-3">내역 없음</td></tr>'; // colspan 3->2로 변경
+        if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-3 text-muted">해당 기간의 기부금 내역이 없습니다.</td></tr>';
         else {
             data.forEach(item => {
+                const rowData = encodeURIComponent(JSON.stringify(item));
                 html += `<tr>
-                    <td>${item.donation_date}</td>
-                    <td class="text-end fw-bold">${Number(item.amount).toLocaleString()}원</td>
+                    <td>${escapeHtml(formatAdminMemberKstDate(item.donation_date))}</td>
+                    <td class="text-end fw-bold text-primary">${Number(item.amount || 0).toLocaleString('ko-KR')}원</td>
+                    <td>${escapeHtml(getFundPaymentMethodLabel(item.payment_method || item.type))}</td>
+                    <td class="text-truncate" style="max-width:180px;" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
+                    <td class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('donation','${rowData}')">수정</button></td>
                 </tr>`;
             });
         }
-        summaryEl.innerText = `총 기부액: ${Number(total).toLocaleString()}원`;
+        const from = String(document.getElementById('memberHistoryDateFrom')?.value || '');
+        const to = String(document.getElementById('memberHistoryDateTo')?.value || '');
+        summaryEl.innerText = from || to
+            ? `${from || '최초'} ~ ${to || '현재'} · ${data.length.toLocaleString('ko-KR')}건 · 기간 기부금 ${total.toLocaleString('ko-KR')}원`
+            : `누적 기부금 ${total.toLocaleString('ko-KR')}원 · 총 ${data.length.toLocaleString('ko-KR')}건`;
 
     } else if(type === 'point') {
         title = '이용실적 보상 적립/차감 내역';
@@ -5898,10 +5977,72 @@ function openHistoryModal(type) {
         summaryEl.innerText = `세후 합계: ${Number(total).toLocaleString()}원`;
     }
 
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
 
     titleEl.innerText = title;
     listEl.innerHTML = html;
+} // End of renderMemberHistoryContent
+
+function applyMemberHistoryFilter() {
+    if (!['ledger', 'donation'].includes(activeMemberHistoryType)) return;
+    const from = String(document.getElementById('memberHistoryDateFrom')?.value || '');
+    const to = String(document.getElementById('memberHistoryDateTo')?.value || '');
+    if (from && to && from > to) {
+        myAlert('조회 시작일은 종료일보다 늦을 수 없습니다.', 'warning');
+        return;
+    }
+    renderMemberHistoryContent(activeMemberHistoryType);
+} // End of applyMemberHistoryFilter
+
+function setMemberHistoryQuickRange(rangeKey) {
+    const fromEl = document.getElementById('memberHistoryDateFrom');
+    const toEl = document.getElementById('memberHistoryDateTo');
+    if (!fromEl || !toEl) return;
+
+    if (rangeKey === 'all') {
+        fromEl.value = '';
+        toEl.value = '';
+    } else {
+        const today = todayYmdKst();
+        const currentYear = Number(today.slice(0, 4));
+        const selectedYear = rangeKey === 'previous-year' ? currentYear - 1 : currentYear;
+        fromEl.value = `${selectedYear}-01-01`;
+        toEl.value = rangeKey === 'previous-year' ? `${selectedYear}-12-31` : today;
+    }
+    applyMemberHistoryFilter();
+} // End of setMemberHistoryQuickRange
+
+function openFundEditorFromHistory(type, rowDataStr) {
+    const historyModalEl = document.getElementById('memberHistoryModal');
+    const openEditor = function () {
+        openFundEditor(type, rowDataStr);
+    };
+    if (!historyModalEl || !historyModalEl.classList.contains('show')) {
+        openEditor();
+        return;
+    }
+
+    historyModalEl.addEventListener('hidden.bs.modal', openEditor, { once: true });
+    bootstrap.Modal.getOrCreateInstance(historyModalEl).hide();
+} // End of openFundEditorFromHistory
+
+function openHistoryModal(type) {
+    const modalEl = ensureMemberHistoryModal();
+    const filterEl = document.getElementById('memberHistoryFilter');
+    const fromEl = document.getElementById('memberHistoryDateFrom');
+    const toEl = document.getElementById('memberHistoryDateTo');
+    if (!modalEl || !filterEl || !fromEl || !toEl) {
+        console.error('[openHistoryModal] history modal elements missing');
+        myAlert('상세 내역 모달을 열 수 없습니다. 화면을 새로고침한 뒤 다시 시도해주세요.', 'error');
+        return;
+    }
+
+    activeMemberHistoryType = String(type || '');
+    const fundHistory = ['ledger', 'donation'].includes(activeMemberHistoryType);
+    filterEl.classList.toggle('d-none', !fundHistory);
+    fromEl.value = '';
+    toEl.value = '';
+    renderMemberHistoryContent(activeMemberHistoryType);
 
     // 조합원 상세 모달 위에서 다시 열릴 수 있으므로 별도 Bootstrap 모달로 띄운다.
     applyAdminMemberModalLayer(modalEl);
@@ -10928,9 +11069,13 @@ function resetMemberFundsSummaryCards() {
     const dividendMetaEl = document.getElementById('md-dividend-meta');
     const capitalTotalEl = document.getElementById('md-capital-total');
     const donationTotalEl = document.getElementById('md-donation-total');
+    const capitalMetaEl = document.getElementById('md-capital-meta');
+    const donationMetaEl = document.getElementById('md-donation-meta');
 
-    if (capitalTotalEl) capitalTotalEl.innerText = '합계 0원';
-    if (donationTotalEl) donationTotalEl.innerText = '합계 0원';
+    if (capitalTotalEl) capitalTotalEl.innerText = '0 원';
+    if (donationTotalEl) donationTotalEl.innerText = '0 원';
+    if (capitalMetaEl) capitalMetaEl.innerText = '등록된 내역 없음';
+    if (donationMetaEl) donationMetaEl.innerText = '등록된 내역 없음';
     if (pointTotalEl) pointTotalEl.innerText = '0 원';
     if (pointMetaEl) pointMetaEl.innerText = '이용실적 보상 원장 기준';
     if (dividendTotalEl) dividendTotalEl.innerText = '0 원';
@@ -11041,111 +11186,78 @@ function calculateMemberFundTotal(rows) {
     }, 0);
 } // End of calculateMemberFundTotal
 
-function updateMemberFundTotal(elementId, rows) {
-    const totalEl = document.getElementById(elementId);
-    if (!totalEl) return;
-    totalEl.innerText = `합계 ${calculateMemberFundTotal(rows).toLocaleString('ko-KR')}원`;
-} // End of updateMemberFundTotal
+function updateMemberFundSummary(type, rows) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const capital = type === 'capital';
+    const totalEl = document.getElementById(capital ? 'md-capital-total' : 'md-donation-total');
+    const metaEl = document.getElementById(capital ? 'md-capital-meta' : 'md-donation-meta');
+    const dateKey = capital ? 'deposit_date' : 'donation_date';
+    const total = calculateMemberFundTotal(safeRows);
+    const latestDate = safeRows.reduce((latest, row) => {
+        const date = String(row?.[dateKey] || '').slice(0, 10);
+        return date > latest ? date : latest;
+    }, '');
 
-// [수정] 자금 목록 로드 (조회 기준 변경: UUID -> Member ID 우선)
+    if (totalEl) totalEl.innerText = `${total.toLocaleString('ko-KR')} 원`;
+    if (metaEl) {
+        metaEl.innerText = safeRows.length > 0
+            ? `총 ${safeRows.length.toLocaleString('ko-KR')}건${latestDate ? ` · 최근 ${latestDate}` : ''}`
+            : '등록된 내역 없음';
+    }
+} // End of updateMemberFundSummary
+
+// 조합원 자금 요약과 상세 모달이 같은 조회 결과를 재사용한다.
 async function loadMemberFunds(uuid, textId, reset=false) {
     if (reset) resetMemberFundsSummaryCards();
 
-    // 1. 출자금 리스트 처리 (기존 유지)
-    const capListEl = document.getElementById('md-capital-list');
-    if (capListEl) {
-        if (reset) capListEl.innerHTML = '';
+    const safeTextId = String(textId || '').trim();
+    const hasTextId = !!safeTextId && !['ID없음', '-'].includes(safeTextId);
+    const safeUuid = String(uuid || '').trim();
 
-        if (textId && textId !== 'ID없음') {
-            const { data: caps, error: capErr } = await _supabase
-                .from('ref_members')
-                .select('*')
-                .eq('member_id', textId)
-                .order('deposit_date', {ascending: false});
+    const capitalPromise = hasTextId
+        ? _supabase
+            .from('ref_members')
+            .select('*')
+            .eq('member_id', safeTextId)
+            .order('deposit_date', { ascending: false })
+        : Promise.resolve({ data: [], error: null });
 
-            if (capErr) console.error("출자금 로드 실패:", capErr);
-            globalHistoryData.ledger = Array.isArray(caps) ? caps : [];
-            updateMemberFundTotal('md-capital-total', globalHistoryData.ledger);
-
-            capListEl.innerHTML = '';
-            if (!caps || caps.length === 0) {
-                capListEl.innerHTML = '<tr><td colspan="4" class="text-muted small py-3">내역 없음</td></tr>';
-            } else {
-                caps.forEach(c => {
-                    const json = encodeURIComponent(JSON.stringify(c));
-                    const safeNote = escapeHtml(c.note || '-');
-                    capListEl.innerHTML += `
-                        <tr>
-                            <td>${c.deposit_date}</td>
-                            <td class="fw-bold text-success">${Number(c.amount).toLocaleString()}</td>
-                            <td class="text-start text-truncate" style="max-width:100px;">${safeNote}</td>
-                            <td>
-                                <button class="btn btn-xs btn-light border" onclick="openFundEditor('capital','${json}')">수정</button>
-                            </td>
-                        </tr>`;
-                });
-            }
-        }
+    let donationQuery = null;
+    if (hasTextId) {
+        donationQuery = _supabase
+            .from('coop_donations')
+            .select('*')
+            .eq('member_id', safeTextId)
+            .order('donation_date', { ascending: false });
+    } else if (safeUuid) {
+        donationQuery = _supabase
+            .from('coop_donations')
+            .select('*')
+            .eq('member_uid', safeUuid)
+            .order('donation_date', { ascending: false });
     }
+    const donationPromise = donationQuery || Promise.resolve({ data: [], error: null });
 
-    // 2. ★ [핵심 수정] 기부금 리스트 처리
-    const donListEl = document.getElementById('md-donation-list');
-    if (donListEl) {
-        if (reset) donListEl.innerHTML = '';
+    const [capitalResult, donationResult] = await Promise.all([capitalPromise, donationPromise]);
+    if (capitalResult.error) console.error('출자금 로드 실패:', capitalResult.error);
+    if (donationResult.error) console.error('기부금 로드 실패:', donationResult.error);
 
-        // 기부금 조회 (coop_donations)
-        let query = _supabase.from('coop_donations').select('*').order('donation_date', {ascending: false});
+    globalHistoryData.ledger = Array.isArray(capitalResult.data) ? capitalResult.data : [];
+    globalHistoryData.donations = Array.isArray(donationResult.data) ? donationResult.data : [];
+    updateMemberFundSummary('capital', globalHistoryData.ledger);
+    updateMemberFundSummary('donation', globalHistoryData.donations);
 
-        // [변경 전 로직] UUID가 있으면 무조건 UUID로 검색해서 문제 발생
-        // if (uuid) query = query.eq('member_uid', uuid);
-        // else if (textId) query = query.eq('member_id', textId);
-
-        // [변경 후 로직] member_id(텍스트 ID)가 가장 확실하므로 이것을 최우선으로 검색
-        if (textId && textId !== 'ID없음' && textId !== '-') {
-            query = query.eq('member_id', textId);
-        }
-        // 텍스트 ID가 없는 특수한 경우에만 UUID 사용 (백업 로직)
-        else if (uuid) {
-            query = query.eq('member_uid', uuid);
-        }
-
-        const { data: dons, error: donErr } = await query;
-
-        if (donErr) console.error("기부금 로드 실패:", donErr);
-        globalHistoryData.donations = Array.isArray(dons) ? dons : [];
-        updateMemberFundTotal('md-donation-total', globalHistoryData.donations);
-
-        // 렌더링
-        donListEl.innerHTML = '';
-        if (!dons || dons.length === 0) {
-            donListEl.innerHTML = '<tr><td colspan="5" class="text-muted small py-3">내역 없음</td></tr>';
-        } else {
-            dons.forEach(d => {
-                const json = encodeURIComponent(JSON.stringify(d));
-                const safeNote = escapeHtml(d.note || '-');
-
-                // 결제 수단 뱃지
-                let methodBadge = '<span class="badge bg-light text-dark border">기타</span>';
-                if(d.type === 'transfer') methodBadge = '<span class="badge bg-info bg-opacity-10 text-dark">계좌</span>';
-                else if(d.type === 'card') methodBadge = '<span class="badge bg-warning bg-opacity-10 text-dark">카드</span>';
-                else if(d.type === 'cash') methodBadge = '<span class="badge bg-success bg-opacity-10 text-dark">현금</span>';
-
-                donListEl.innerHTML += `
-                    <tr>
-                        <td>${d.donation_date}</td>
-                        <td class="fw-bold text-primary">${Number(d.amount).toLocaleString()}</td>
-                        <td>${methodBadge}</td>
-                        <td class="text-start text-truncate" style="max-width:100px;">${safeNote}</td>
-                        <td>
-                            <button class="btn btn-xs btn-light border" onclick="openFundEditor('donation','${json}')">수정</button>
-                        </td>
-                    </tr>`;
-            });
-        }
+    if (capitalResult.error) {
+        const metaEl = document.getElementById('md-capital-meta');
+        if (metaEl) metaEl.innerText = '출자금 조회 실패';
+    }
+    if (donationResult.error) {
+        const metaEl = document.getElementById('md-donation-meta');
+        if (metaEl) metaEl.innerText = '기부금 조회 실패';
     }
 
     await loadMemberRewardAndDividendSummary(uuid, textId);
-}
+} // End of loadMemberFunds
 
 // [최종] 자금 내역 삭제 함수
 async function deleteFundData() {
@@ -11432,16 +11544,6 @@ function autoHyphen(target) {
 
 
 
-// [추가] 무한 스크롤 이벤트 핸들러
-function handleFundScroll(e) {
-const el = e.target;
-// 스크롤이 바닥에 거의 닿았을 때 (여유분 10px)
-if(el.scrollTop + el.clientHeight >= el.scrollHeight - 10) {
-const textId = document.getElementById('md-id-text').innerText;
-const uid = document.getElementById('md-uid').value;
-loadMemberFunds(uid, textId, false); // false = 추가 로드
-}
-}
 // 1. 단체 검색 모달 열기
 function openGroupSearch() {
 document.getElementById('group-search-input').value = '';
@@ -11733,12 +11835,6 @@ window.onload = async function() {
     // 3. 초기 탭 로드
     switchTab(getInitialAdminMemberTab());
 
-    // 4. 자금 내역 테이블 무한 스크롤 이벤트 연결
-    // 요소가 존재할 때만 이벤트 리스너 추가 (에러 방지)
-    const fundTableContainer = document.querySelector('#md-capital-list')?.closest('.table-responsive');
-    if(fundTableContainer) {
-        fundTableContainer.addEventListener('scroll', handleFundScroll);
-    }
 };
 
     // ================================================================
