@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.101
-Change: Replace expanded fund tables with summary cards and date-filtered history.
+Version: v1.0.102
+Change: Unify all fund summary cards and remove mobile horizontal scrolling.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.101';
+window.ADMIN_MEMBER_VERSION = 'v1.0.102';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -150,17 +150,36 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .external-news-thumb-admin { width: 74px; height: 48px; object-fit: cover; border-radius: 10px; border: 1px solid #e5e7eb; background: #f8fafc; }
 .external-news-sync-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .external-news-sync-summary .badge { font-size: 12px; }
-.fund-summary-card { height:100%; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
-.fund-summary-view { width:100%; min-height:154px; padding:18px; border:0; background:transparent; color:#0f172a; text-align:left; transition:background-color .18s ease; }
+.fund-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:1fr; gap:16px; width:100%; max-width:100%; }
+.fund-summary-card { display:flex; box-sizing:border-box; flex-direction:column; width:100%; min-width:0; height:100%; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
+.fund-summary-view { flex:1 1 auto; box-sizing:border-box; width:100%; min-width:0; min-height:154px; padding:18px; border:0; background:transparent; color:#0f172a; text-align:left; transition:background-color .18s ease; }
 .fund-summary-view:hover { background:#f8fafc; }
 .fund-summary-view:focus-visible { outline:3px solid rgba(37,99,235,.3); outline-offset:-3px; }
 .fund-summary-label { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#475569; font-size:.9rem; font-weight:800; }
+.fund-summary-label > span { min-width:0; }
 .fund-summary-amount { margin-top:14px; font-size:1.65rem; line-height:1.2; font-weight:900; letter-spacing:-.03em; }
 .fund-summary-meta { display:block; margin-top:8px; color:#64748b; font-size:.82rem; }
-.fund-summary-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; padding:10px 14px; border-top:1px solid #e2e8f0; background:#f8fafc; }
+.fund-summary-actions { display:flex; box-sizing:border-box; flex:0 0 52px; min-width:0; align-items:center; justify-content:flex-end; gap:8px; padding:8px 14px; border-top:1px solid #e2e8f0; background:#f8fafc; }
+.fund-summary-actions .fund-summary-hint { overflow-wrap:anywhere; text-align:right; }
 .member-history-filter { padding:12px; margin-bottom:14px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
 .member-history-filter .form-label { margin-bottom:4px; color:#475569; font-size:.78rem; font-weight:800; }
 .member-history-filter-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.member-history-table-wrap { width:100%; max-width:100%; overflow:visible; }
+.member-history-table { width:100%; max-width:100%; table-layout:fixed; margin-bottom:0; }
+.member-history-table th, .member-history-table td { overflow-wrap:anywhere; word-break:break-word; }
+.member-history-table .member-history-note { max-width:none; white-space:normal; }
+@media (max-width:991.98px) {
+  .fund-summary-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
+  .member-history-table, .member-history-table tbody { display:block; width:100%; }
+  .member-history-table thead { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .member-history-table tbody tr { display:block; box-sizing:border-box; width:100%; margin-bottom:10px; padding:8px 12px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; box-shadow:0 4px 12px rgba(15,23,42,.04); }
+  .member-history-table tbody tr:last-child { margin-bottom:0; }
+  .member-history-table tbody td { display:grid; box-sizing:border-box; grid-template-columns:84px minmax(0,1fr); gap:10px; width:100%; max-width:none !important; padding:6px 0; border:0; background:transparent; text-align:left !important; white-space:normal; }
+  .member-history-table tbody td::before { content:attr(data-label); color:#64748b; font-size:.76rem; font-weight:800; }
+  .member-history-table tbody td.member-history-empty { display:block; padding:18px 0; text-align:center !important; }
+  .member-history-table tbody td.member-history-empty::before { content:none; }
+  .member-history-table tbody td .btn { min-height:38px; }
+}
 @media (max-width:575.98px) {
   .fund-summary-view { min-height:138px; padding:16px; }
   .fund-summary-amount { font-size:1.45rem; }
@@ -2811,8 +2830,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 
 <div class="tab-pane fade" id="md-tab-funds">
-<div class="row g-3 mb-4">
-<div class="col-md-6">
+<div class="fund-summary-grid">
 <div class="fund-summary-card">
 <button class="fund-summary-view" type="button" onclick="openHistoryModal('ledger')" aria-label="출자금 기간별 내역 보기">
 <span class="fund-summary-label"><span>💰 현재 출자금</span><span class="text-success">기간별 내역 ›</span></span>
@@ -2823,8 +2841,6 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <button class="btn btn-sm btn-outline-success" type="button" onclick="openFundEditor('capital', null)">+ 출자금 추가</button>
 </div>
 </div>
-</div>
-<div class="col-md-6">
 <div class="fund-summary-card">
 <button class="fund-summary-view" type="button" onclick="openHistoryModal('donation')" aria-label="기부금 기간별 내역 보기">
 <span class="fund-summary-label"><span>🎁 누적 기부금</span><span class="text-primary">기간별 내역 ›</span></span>
@@ -2835,24 +2851,24 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <button class="btn btn-sm btn-outline-primary" type="button" onclick="openFundEditor('donation', null)">+ 기부금 추가</button>
 </div>
 </div>
+<div class="fund-summary-card">
+<button class="fund-summary-view" type="button" onclick="openHistoryModal('point')" aria-label="포인트 및 적립금 내역 보기">
+<span class="fund-summary-label"><span>🪙 포인트/적립금</span><span class="text-warning">내역 보기 ›</span></span>
+<span class="fund-summary-amount text-warning d-block" id="md-point-total" aria-live="polite">0 P</span>
+<span class="fund-summary-meta" id="md-point-meta">이용실적 보상 원장 기준</span>
+</button>
+<div class="fund-summary-actions">
+<span class="fund-summary-hint small text-muted">카드를 눌러 적립·차감 내역 확인</span>
 </div>
 </div>
-
-<div class="row">
-<div class="col-md-6">
-<h6 class="fw-bold text-warning">🪙 포인트/적립금</h6>
-<div class="border rounded p-3 text-center bg-light">
-<h4 class="fw-bold mb-0" id="md-point-total">0 P</h4>
-<small class="text-muted d-block mt-1" id="md-point-meta">이용실적 보상 원장 기준</small>
-<button class="btn btn-sm btn-link text-decoration-none" onclick="openHistoryModal('point')">내역 보기</button>
-</div>
-</div>
-<div class="col-md-6">
-<h6 class="fw-bold text-info">💵 확정 배당금</h6>
-<div class="border rounded p-3 text-center bg-light">
-<h4 class="fw-bold mb-0" id="md-dividend-total">0 원</h4>
-<small class="text-muted d-block mt-1" id="md-dividend-meta">미지급 세후금액 기준</small>
-<button class="btn btn-sm btn-link text-decoration-none" onclick="openHistoryModal('dividend')">확정 내역 보기</button>
+<div class="fund-summary-card">
+<button class="fund-summary-view" type="button" onclick="openHistoryModal('dividend')" aria-label="확정 배당금 내역 보기">
+<span class="fund-summary-label"><span>💵 확정 배당금</span><span class="text-info">내역 보기 ›</span></span>
+<span class="fund-summary-amount text-info d-block" id="md-dividend-total" aria-live="polite">0 원</span>
+<span class="fund-summary-meta" id="md-dividend-meta">미지급 세후금액 기준</span>
+</button>
+<div class="fund-summary-actions">
+<span class="fund-summary-hint small text-muted">카드를 눌러 확정 배당 내역 확인</span>
 </div>
 </div>
 </div>
@@ -5880,7 +5896,7 @@ function renderMemberHistoryContent(type) {
 
     let title = '';
     let total = 0;
-    let html = '<div class="table-responsive"><table class="table table-sm table-striped small"><thead>';
+    let html = '<div class="member-history-table-wrap"><table class="table table-sm table-striped small member-history-table"><thead>';
 
     if(type === 'ledger') {
         title = '출자금 납입 내역';
@@ -5888,18 +5904,18 @@ function renderMemberHistoryContent(type) {
         const data = getFilteredMemberHistoryRows(type);
         total = calculateMemberFundTotal(data);
 
-        if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-3 text-muted">해당 기간의 출자금 내역이 없습니다.</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="5" class="member-history-empty text-center py-3 text-muted">해당 기간의 출자금 내역이 없습니다.</td></tr>';
         else {
             data.forEach(item => {
                 const amount = Number(item.amount || 0);
                 const amountClass = amount < 0 ? 'text-danger' : 'text-success';
                 const rowData = encodeURIComponent(JSON.stringify(item));
                 html += `<tr>
-                    <td>${escapeHtml(formatAdminMemberKstDate(item.deposit_date))}</td>
-                    <td class="text-end fw-bold ${amountClass}">${amount.toLocaleString('ko-KR')}원</td>
-                    <td>${escapeHtml(item.depositor || '-')}</td>
-                    <td class="text-truncate" style="max-width:180px;" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
-                    <td class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('capital','${rowData}')">수정</button></td>
+                    <td data-label="날짜">${escapeHtml(formatAdminMemberKstDate(item.deposit_date))}</td>
+                    <td data-label="금액" class="text-end fw-bold ${amountClass}">${amount.toLocaleString('ko-KR')}원</td>
+                    <td data-label="입금자">${escapeHtml(item.depositor || '-')}</td>
+                    <td data-label="비고" class="member-history-note" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
+                    <td data-label="관리" class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('capital','${rowData}')">수정</button></td>
                 </tr>`;
             });
         }
@@ -5915,16 +5931,16 @@ function renderMemberHistoryContent(type) {
         const data = getFilteredMemberHistoryRows(type);
         total = calculateMemberFundTotal(data);
 
-        if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-3 text-muted">해당 기간의 기부금 내역이 없습니다.</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="5" class="member-history-empty text-center py-3 text-muted">해당 기간의 기부금 내역이 없습니다.</td></tr>';
         else {
             data.forEach(item => {
                 const rowData = encodeURIComponent(JSON.stringify(item));
                 html += `<tr>
-                    <td>${escapeHtml(formatAdminMemberKstDate(item.donation_date))}</td>
-                    <td class="text-end fw-bold text-primary">${Number(item.amount || 0).toLocaleString('ko-KR')}원</td>
-                    <td>${escapeHtml(getFundPaymentMethodLabel(item.payment_method || item.type))}</td>
-                    <td class="text-truncate" style="max-width:180px;" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
-                    <td class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('donation','${rowData}')">수정</button></td>
+                    <td data-label="날짜">${escapeHtml(formatAdminMemberKstDate(item.donation_date))}</td>
+                    <td data-label="금액" class="text-end fw-bold text-primary">${Number(item.amount || 0).toLocaleString('ko-KR')}원</td>
+                    <td data-label="입금 방식">${escapeHtml(getFundPaymentMethodLabel(item.payment_method || item.type))}</td>
+                    <td data-label="비고" class="member-history-note" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
+                    <td data-label="관리" class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('donation','${rowData}')">수정</button></td>
                 </tr>`;
             });
         }
@@ -5940,16 +5956,16 @@ function renderMemberHistoryContent(type) {
         const data = globalHistoryData.points || [];
         total = data.reduce((a,c)=>a+Number(c.change_amount),0);
 
-        if(data.length === 0) html += '<tr><td colspan="3" class="text-center py-3">내역 없음</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="3" class="member-history-empty text-center py-3">내역 없음</td></tr>';
         else {
             data.forEach(item => {
                 const isPlus = item.change_amount > 0;
                 const style = isPlus ? 'text-primary' : 'text-danger';
                 const sign = isPlus ? '+' : '';
                 html += `<tr>
-                    <td>${formatAdminMemberKstDate(item.created_at)}</td>
-                    <td>${escapeHtml(item.reason || item.transaction_type || '-')}</td>
-                    <td class="text-end fw-bold ${style}">${sign}${Number(item.change_amount).toLocaleString()}</td>
+                    <td data-label="날짜">${formatAdminMemberKstDate(item.created_at)}</td>
+                    <td data-label="내용">${escapeHtml(item.reason || item.transaction_type || '-')}</td>
+                    <td data-label="변동" class="text-end fw-bold ${style}">${sign}${Number(item.change_amount).toLocaleString()}</td>
                 </tr>`;
             });
         }
@@ -5961,16 +5977,16 @@ function renderMemberHistoryContent(type) {
         const data = globalHistoryData.dividends || [];
         total = data.reduce((a,c)=>a+Number(c.net_amount || c.total_amount || 0),0);
 
-        if(data.length === 0) html += '<tr><td colspan="6" class="text-center py-3">내역 없음</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="6" class="member-history-empty text-center py-3">내역 없음</td></tr>';
         else {
             data.forEach(item => {
                 html += `<tr>
-                    <td>${item.fiscal_year}년</td>
-                    <td class="text-start">${escapeHtml(item.title || '-')}</td>
-                    <td>${formatAdminMemberKstDate(item.paid_at || item.payment_due_date || item.payment_base_date)}</td>
-                    <td>${getDividendExportStatusBadge(item.payment_status || item.status || '-')}</td>
-                    <td class="text-end fw-bold">${Number(item.total_amount || item.gross_amount || 0).toLocaleString()}원</td>
-                    <td class="text-end fw-bold text-primary">${Number(item.net_amount || 0).toLocaleString()}원</td>
+                    <td data-label="연도">${item.fiscal_year}년</td>
+                    <td data-label="회차" class="text-start">${escapeHtml(item.title || '-')}</td>
+                    <td data-label="지급기준일">${formatAdminMemberKstDate(item.paid_at || item.payment_due_date || item.payment_base_date)}</td>
+                    <td data-label="상태">${getDividendExportStatusBadge(item.payment_status || item.status || '-')}</td>
+                    <td data-label="세전" class="text-end fw-bold">${Number(item.total_amount || item.gross_amount || 0).toLocaleString()}원</td>
+                    <td data-label="세후" class="text-end fw-bold text-primary">${Number(item.net_amount || 0).toLocaleString()}원</td>
                 </tr>`;
             });
         }
