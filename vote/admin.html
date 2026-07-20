@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.51
-Change: 2026-03-29 - Read coop branding from tenant company key/value rows instead of a missing ref_company_info.company_name column.
+Version: v1.0.53
+Change: Fix tenant-scoped Supabase read chains and replace indefinite dashboard loading with retry guidance.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.51 | admin.html');</script>
+    <script>console.log('[Version] v1.0.53 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -704,7 +704,7 @@ function safeUrl(value) {
         return '';
     }
 }
-    import { AdminService } from './AdminService.js';
+    import { AdminService } from './AdminService.js?v=20260615-1';
     import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js';
 
     const KST_TZ_VOTE_ADMIN = 'Asia/Seoul';
@@ -733,12 +733,55 @@ function safeUrl(value) {
     let currentCoopName = '';
     let currentElectionVoteSummary = null;
     let isCurrentElectionUncontestedAutoFlow = false;
+    let autoScheduleTimerId = null;
+    let autoSchedulePollingEnabled = false;
+    let autoScheduleInFlight = false;
+    let liveStatsPromise = null;
     const ELECTION_NOTICE_SEAL_FALLBACK_URL = '';
     const ELECTION_NOTICE_DOC_PREFIX = '공고 제';
     const ELECTION_NOTICE_CATEGORY = '선거공고';
     const ELECTION_NOTICE_TITLE = '당선인 공고문';
     const ELECTED_NOTICE_MAX_DOCNO_RETRY = 5;
     let isStatusTransitionInFlight = false;
+
+    function stopAutoSchedulePolling() {
+        autoSchedulePollingEnabled = false;
+        if (autoScheduleTimerId) {
+            clearTimeout(autoScheduleTimerId);
+            autoScheduleTimerId = null;
+        }
+    }
+
+    function scheduleAutoSchedulePolling(delayMs) {
+        if (!autoSchedulePollingEnabled) return;
+        if (autoScheduleTimerId) clearTimeout(autoScheduleTimerId);
+        autoScheduleTimerId = setTimeout(runAutoSchedulePolling, delayMs);
+    }
+
+    async function runAutoSchedulePolling() {
+        if (!autoSchedulePollingEnabled || autoScheduleInFlight) return;
+        autoScheduleInFlight = true;
+        try {
+            await checkAutoSchedule();
+        } finally {
+            autoScheduleInFlight = false;
+            const nextDelay = currentElectionData?.status === 'OPEN' ? 5000 : 30000;
+            scheduleAutoSchedulePolling(nextDelay);
+        }
+    }
+
+    function startAutoSchedulePolling() {
+        stopAutoSchedulePolling();
+        autoSchedulePollingEnabled = true;
+        scheduleAutoSchedulePolling(5000);
+    }
+
+    window.addEventListener('pagehide', stopAutoSchedulePolling);
+    document.addEventListener('visibilitychange', function handleVoteAdminVisibilityChange() {
+        if (!document.hidden && currentElectionData?.status === 'OPEN') {
+            updateLiveStats();
+        }
+    });
 
     const withTenantPayload = (payload) => {
         if (!currentCoopId || !payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
@@ -977,14 +1020,14 @@ function safeUrl(value) {
             scopeByTenant(
                 supabase
                     .from('districts')
+                    .select('id, name, vote_type, quota')
             )
-                .select('id, name, vote_type, quota')
                 .eq('election_id', currentElectionId),
             scopeByTenant(
                 supabase
                     .from('candidates')
+                    .select('id, district_id')
             )
-                .select('id, district_id')
                 .eq('election_id', currentElectionId)
                 .eq('status', 'APPROVED')
         ]);
@@ -1000,21 +1043,21 @@ function safeUrl(value) {
             scopeByTenant(
                 supabase
                     .from('districts')
+                    .select('id, name, vote_type, quota')
             )
-                .select('id, name, vote_type, quota')
                 .eq('election_id', currentElectionId),
             scopeByTenant(
                 supabase
                     .from('candidates')
+                    .select('id, district_id, member_uuid, name, symbol, birth_date, address, representative_name')
             )
-                .select('id, district_id, member_uuid, name, symbol, birth_date, address, representative_name')
                 .eq('election_id', currentElectionId)
                 .eq('status', 'APPROVED'),
             scopeByTenant(
                 supabase
                     .from('ballots')
+                    .select('district_id, candidate_id')
             )
-                .select('district_id, candidate_id')
                 .eq('election_id', currentElectionId)
         ]);
 
@@ -1108,8 +1151,8 @@ function safeUrl(value) {
             const { data: memberRows, error: memberErr } = await scopeByTenant(
                 supabase
                     .from('coop_members')
+                    .select('id, member_id, name')
             )
-                .select('id, member_id, name')
                 .in('id', uniqueWinnerMemberUuids);
             if (memberErr) throw memberErr;
             (memberRows || []).forEach((memberRow) => {
@@ -2307,11 +2350,48 @@ window.openElectionGateway = async () => {
             
             updateWorkflowUI(); // UI 상태 제어
 
-            // 자동 종료 체크 시작 (5초 주기)
-            if (window.timerInterval) clearInterval(window.timerInterval);
-            window.timerInterval = setInterval(checkAutoSchedule, 5000);
+            // 자동 종료 확인은 유지하되 이전 요청이 끝난 뒤 다음 확인을 예약한다.
+            startAutoSchedulePolling();
 
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            console.error('선거관리 대시보드 로드 실패:', e);
+            renderDashboardLoadError();
+        }
+    }
+
+    function renderDashboardLoadError() {
+        const titleEl = document.getElementById('election-title');
+        const statusEl = document.getElementById('election-status');
+        const periodEl = document.getElementById('election-period-detail');
+        const districtEl = document.getElementById('candidate-district-summary');
+
+        if (titleEl) titleEl.innerText = '선거 정보를 불러오지 못했습니다.';
+        if (statusEl) {
+            statusEl.innerText = '로드 실패';
+            statusEl.style.background = 'var(--danger-red)';
+        }
+        if (periodEl) {
+            periodEl.innerHTML = `
+                <div style="color:#b91c1c; margin-bottom:10px;">
+                    잠시 후 다시 시도해 주세요. 문제가 계속되면 관리자에게 문의해 주세요.
+                </div>
+                <button type="button" id="retry-election-dashboard" class="btn btn-outline btn-sm">
+                    다시 시도
+                </button>
+            `;
+        }
+        if (districtEl) {
+            districtEl.innerHTML = '<div style="font-size:0.85rem; color:#b91c1c;">선거구 정보를 불러오지 못했습니다.</div>';
+        }
+
+        const retryButton = document.getElementById('retry-election-dashboard');
+        if (retryButton) {
+            retryButton.addEventListener('click', function () {
+                retryButton.disabled = true;
+                retryButton.innerText = '다시 불러오는 중...';
+                startDashboard();
+            }, { once: true });
+        }
     }
 
 // [수정됨] 선거 정보 로드 및 상세 일정 표시
@@ -2485,9 +2565,8 @@ window.openElectionGateway = async () => {
         }
 
         // 2. 실시간 투표율 갱신 (투표 중일 때만 작동)
-        if (status === 'OPEN') {
-            // UI 업데이트 함수 호출 (기존 함수 재사용)
-            updateLiveStats();
+        if (currentElectionData?.status === 'OPEN' && !document.hidden) {
+            await updateLiveStats();
         }
     }
 
@@ -2499,12 +2578,14 @@ window.openElectionGateway = async () => {
 
     // [수정됨] 선거구 매핑 정보 로드 (관리용 필드 포함)
     async function loadDistrictsMap() {
-        const { data } = await scopeByTenant(
+        const { data, error } = await scopeByTenant(
             supabase
                 .from('districts')
+                .select('id, name, code, vote_type, quota, is_common')
         )
-            .select('id, name, code, vote_type, quota, is_common')
             .eq('election_id', currentElectionId);
+
+        if (error) throw error;
             
         if (data) {
             districtList = data; // 전체 데이터 저장 (로직 판단용)
@@ -2528,14 +2609,14 @@ window.loadVoterStats = async () => {
                 scopeByTenant(
                     supabase
                         .from('election_voters')
+                        .select('member_no, district_id, member_uuid')
                 )
-                    .select('member_no, district_id, member_uuid') 
                     .eq('election_id', currentElectionId),
                 scopeByTenant(
                     supabase
                         .from('vote_logs')
+                        .select('member_uuid')
                 )
-                    .select('member_uuid')
                     .eq('election_id', currentElectionId)
             ]);
 
@@ -2558,8 +2639,8 @@ window.loadVoterStats = async () => {
         const { data: members, error: memberError } = await scopeByTenant(
             supabase
                 .from('coop_members')
+                .select('member_id, name, phone')
         )
-            .select('member_id, name, phone')
             .in('member_id', memberNos);
 
         if(memberError) throw memberError;
@@ -2776,8 +2857,8 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
             const { data: member, error } = await scopeByTenant(
                 supabase
                     .from('coop_members')
+                    .select('*')
             )
-                .select('*')
                 .eq('member_id', memberNo)
                 .single();
 
@@ -2788,8 +2869,8 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
             const { count, error: logError } = await scopeByTenant(
                 supabase
                     .from('vote_logs')
+                    .select('*', { count: 'exact', head: true })
             )
-                .select('*', { count: 'exact', head: true }) // 데이터 없이 개수만 조회
                 .eq('election_id', currentElectionId)
                 .eq('member_uuid', member.id);
 
@@ -2876,8 +2957,8 @@ async function updateVoterDistrict() {
             const { data: memData } = await scopeByTenant(
                 supabase
                     .from('coop_members')
+                    .select('id')
             )
-                .select('id')
                 .eq('member_id', memberNo)
                 .single();
 
@@ -3377,8 +3458,8 @@ window.searchMembers = async () => {
             const { data: members, error } = await scopeByTenant(
                 supabase
                     .from('coop_members')
+                    .select('member_id, id, name, phone, address')
             )
-                .select('member_id, id, name, phone, address') 
                 .or(`name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`)
                 .limit(20);
 
@@ -4433,13 +4514,21 @@ window.finalizeNomination = async () => {
     };
 
     async function updateLiveStats() {
-        if(!currentElectionId) return;
-        try {
-            const stats = await service.getTurnoutStats(currentElectionId);
-            document.getElementById('live-turnout').innerText = `${stats.percent}%`;
-            document.getElementById('live-votes').innerText = stats.current;
-            document.getElementById('live-total').innerText = stats.total;
-        } catch(e) {}
+        if (!currentElectionId || document.hidden) return;
+        if (liveStatsPromise) return liveStatsPromise;
+
+        liveStatsPromise = (async function loadLiveStatsOnce() {
+            try {
+                const stats = await service.getTurnoutStats(currentElectionId);
+                document.getElementById('live-turnout').innerText = `${stats.percent}%`;
+                document.getElementById('live-votes').innerText = stats.current;
+                document.getElementById('live-total').innerText = stats.total;
+            } catch(e) {}
+        })().finally(function clearLiveStatsPromise() {
+            liveStatsPromise = null;
+        });
+
+        return liveStatsPromise;
     }
 
 // [수정됨] 개표함 열기 버튼 클릭 시
@@ -4491,20 +4580,23 @@ window.finalizeNomination = async () => {
             // 1. 정확한 스키마로 데이터 조회 (quota, vote_type 포함)
             const [distRes, candRes, ballotRes] = await Promise.all([
                 scopeByTenant(
-                    supabase.from('districts')
+                    supabase
+                        .from('districts')
+                        .select('id, name, is_common, quota, vote_type')
                 )
-                    .select('id, name, is_common, quota, vote_type') // quota: 선출인원, vote_type: 투표유형
                     .eq('election_id', currentElectionId),
                 scopeByTenant(
-                    supabase.from('candidates')
+                    supabase
+                        .from('candidates')
+                        .select('*')
                 )
-                    .select('*')
                     .eq('election_id', currentElectionId)
                     .eq('status', 'APPROVED'),
                 scopeByTenant(
-                    supabase.from('ballots')
+                    supabase
+                        .from('ballots')
+                        .select('district_id, candidate_id, choice')
                 )
-                    .select('district_id, candidate_id, choice')
                     .eq('election_id', currentElectionId)
             ]);
 
