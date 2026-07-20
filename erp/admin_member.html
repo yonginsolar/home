@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.102
-Change: Unify all fund summary cards and remove mobile horizontal scrolling.
+Version: v1.0.103
+Change: Restore detail-tab padding and enforce last-opened-first-closed modal behavior.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.102';
+window.ADMIN_MEMBER_VERSION = 'v1.0.103';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -2826,9 +2826,6 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 </div>
 
-</div>
-
-
 <div class="tab-pane fade" id="md-tab-funds">
 <div class="fund-summary-grid">
 <div class="fund-summary-card">
@@ -3603,6 +3600,60 @@ const ADMIN_MEMBER_MODAL_Z_INDEX = {
     customConfirmModal: 1085,
     customAlertModal: 1095
 };
+const ADMIN_MEMBER_MODAL_Z_INDEX_STEP = 20;
+let adminMemberModalOpenSequence = 0;
+let adminMemberModalCloseInProgress = false;
+
+function isAdminMemberManagedModal(modalEl) {
+    return !!(
+        modalEl instanceof HTMLElement &&
+        ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id]
+    );
+} // End of isAdminMemberManagedModal
+
+function markAdminMemberModalOpened(modalEl) {
+    if (!isAdminMemberManagedModal(modalEl)) return;
+    adminMemberModalOpenSequence += 1;
+    modalEl.dataset.adminMemberModalOpenOrder = String(adminMemberModalOpenSequence);
+    modalEl.dataset.adminMemberModalOpening = '1';
+} // End of markAdminMemberModalOpened
+
+function clearAdminMemberModalState(modalEl) {
+    if (!isAdminMemberManagedModal(modalEl)) return;
+    modalEl.removeAttribute('data-admin-member-modal-open-order');
+    modalEl.removeAttribute('data-admin-member-modal-opening');
+    modalEl.removeAttribute('data-admin-member-modal-close-after-shown');
+    modalEl.removeAttribute('inert');
+} // End of clearAdminMemberModalState
+
+function getOpenAdminMemberModals() {
+    return Array.from(document.querySelectorAll('.modal'))
+        .filter(function (modalEl) {
+            return isAdminMemberManagedModal(modalEl) && (
+                modalEl.classList.contains('show') ||
+                modalEl.dataset.adminMemberModalOpening === '1'
+            );
+        })
+        .sort(function (a, b) {
+            const orderA = Number(a.dataset.adminMemberModalOpenOrder || 0);
+            const orderB = Number(b.dataset.adminMemberModalOpenOrder || 0);
+            if (orderA !== orderB) return orderA - orderB;
+            return ADMIN_MEMBER_MODAL_Z_INDEX[a.id] - ADMIN_MEMBER_MODAL_Z_INDEX[b.id];
+        });
+} // End of getOpenAdminMemberModals
+
+function getAdminMemberModalZIndex(modalEl, index) {
+    const configuredZIndex = Number(ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id] || 1055);
+    const orderedZIndex = 1055 + (index * ADMIN_MEMBER_MODAL_Z_INDEX_STEP);
+    return Math.max(configuredZIndex, orderedZIndex);
+} // End of getAdminMemberModalZIndex
+
+function focusTopAdminMemberModal() {
+    const openModals = getOpenAdminMemberModals();
+    const topModal = openModals[openModals.length - 1];
+    if (!topModal || !topModal.classList.contains('show') || topModal.contains(document.activeElement)) return;
+    topModal.focus({ preventScroll: true });
+} // End of focusTopAdminMemberModal
 
 function applyAdminMemberModalLayer(modalEl) {
     if (!modalEl) return;
@@ -3614,54 +3665,116 @@ function applyAdminMemberModalLayer(modalEl) {
 }
 
 function syncAdminMemberModalLayers() {
-    const openModals = Array.from(document.querySelectorAll('.modal.show'))
-        .filter((modalEl) => ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id])
-        .sort((a, b) => ADMIN_MEMBER_MODAL_Z_INDEX[a.id] - ADMIN_MEMBER_MODAL_Z_INDEX[b.id]);
+    const openModals = getOpenAdminMemberModals();
 
-    openModals.forEach((modalEl) => {
-        modalEl.style.zIndex = String(ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id]);
+    openModals.forEach(function (modalEl, index) {
+        const isTopModal = index === openModals.length - 1;
+        modalEl.style.zIndex = String(getAdminMemberModalZIndex(modalEl, index));
+        if (isTopModal) modalEl.removeAttribute('inert');
+        else modalEl.setAttribute('inert', '');
     });
 
     const backdrops = Array.from(document.querySelectorAll('.modal-backdrop'));
-    backdrops.forEach((backdrop, index) => {
-        const modalEl = openModals[Math.min(index, openModals.length - 1)];
+    const managedBackdrops = backdrops.slice(Math.max(0, backdrops.length - openModals.length));
+    managedBackdrops.forEach(function (backdrop, index) {
+        const modalEl = openModals[index];
         if (!modalEl) return;
-        const zIndex = ADMIN_MEMBER_MODAL_Z_INDEX[modalEl.id];
+        const zIndex = getAdminMemberModalZIndex(modalEl, index);
         backdrop.style.zIndex = String(zIndex - 5);
         backdrop.dataset.modalFor = modalEl.id;
     });
-}
+} // End of syncAdminMemberModalLayers
+
+function stopAdminMemberModalEscape(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+} // End of stopAdminMemberModalEscape
+
+function handleAdminMemberModalEscape(event) {
+    if (event.key !== 'Escape' || event.isComposing) return;
+
+    const openModals = getOpenAdminMemberModals();
+    if (adminMemberModalCloseInProgress && openModals.length > 0) {
+        stopAdminMemberModalEscape(event);
+        return;
+    }
+    if (openModals.length <= 1) return;
+
+    stopAdminMemberModalEscape(event);
+    const topModal = openModals[openModals.length - 1];
+    const modalInstance = bootstrap.Modal.getInstance(topModal) || bootstrap.Modal.getOrCreateInstance(topModal);
+    const keyboardEnabled = topModal.getAttribute('data-bs-keyboard') !== 'false' && modalInstance?._config?.keyboard !== false;
+    if (!keyboardEnabled) return;
+
+    adminMemberModalCloseInProgress = true;
+    if (topModal.dataset.adminMemberModalOpening === '1') {
+        topModal.dataset.adminMemberModalCloseAfterShown = '1';
+        return;
+    }
+    modalInstance.hide();
+} // End of handleAdminMemberModalEscape
 
 function bindAdminMemberModalLayering() {
     if (window.__adminMemberModalLayeringBound) return;
 
-    document.addEventListener('show.bs.modal', (event) => {
+    document.addEventListener('show.bs.modal', function (event) {
+        markAdminMemberModalOpened(event.target);
         applyAdminMemberModalLayer(event.target);
     }, true);
 
-    document.addEventListener('shown.bs.modal', (event) => {
+    document.addEventListener('shown.bs.modal', function (event) {
+        const shouldCloseAfterShown = event.target?.dataset?.adminMemberModalCloseAfterShown === '1';
+        if (isAdminMemberManagedModal(event.target)) {
+            event.target.removeAttribute('data-admin-member-modal-opening');
+            event.target.removeAttribute('data-admin-member-modal-close-after-shown');
+        }
         applyAdminMemberModalLayer(event.target);
         syncAdminMemberModalLayers();
         if (document.querySelectorAll('.modal.show').length > 0) {
             document.body.classList.add('modal-open');
         }
+        if (shouldCloseAfterShown) {
+            setTimeout(function () {
+                const modalInstance = bootstrap.Modal.getInstance(event.target) || bootstrap.Modal.getOrCreateInstance(event.target);
+                modalInstance.hide();
+            }, 0);
+            return;
+        }
+        requestAnimationFrame(focusTopAdminMemberModal);
     }, true);
 
-    document.addEventListener('hide.bs.modal', (event) => {
+    document.addEventListener('hide.bs.modal', function (event) {
+        if (isAdminMemberManagedModal(event.target) && getOpenAdminMemberModals().length > 1) {
+            adminMemberModalCloseInProgress = true;
+        }
         moveFocusOutsideModal(event.target);
-        requestAnimationFrame(() => moveFocusOutsideModal(event.target));
+        requestAnimationFrame(function () {
+            moveFocusOutsideModal(event.target);
+        });
     }, true);
 
-    document.addEventListener('hidden.bs.modal', () => {
+    document.addEventListener('hidden.bs.modal', function (event) {
+        clearAdminMemberModalState(event.target);
+        adminMemberModalCloseInProgress = false;
         const openModals = Array.from(document.querySelectorAll('.modal.show'));
         if (openModals.length > 0) {
             document.body.classList.add('modal-open');
             syncAdminMemberModalLayers();
+            requestAnimationFrame(focusTopAdminMemberModal);
         }
     }, true);
 
+    document.addEventListener('hidePrevented.bs.modal', function () {
+        adminMemberModalCloseInProgress = false;
+        syncAdminMemberModalLayers();
+        requestAnimationFrame(focusTopAdminMemberModal);
+    }, true);
+
+    document.addEventListener('keydown', handleAdminMemberModalEscape, true);
+
     window.__adminMemberModalLayeringBound = true;
-}
+} // End of bindAdminMemberModalLayering
 bindAdminMemberModalLayering();
 
 let g_certGeneratorEnsurePromise = null;
