@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.99
-Change: Prompt to activate pending members after paid-in capital is saved.
+Version: v1.0.100
+Change: Show paid-in capital and donation totals in member fund details.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.99';
+window.ADMIN_MEMBER_VERSION = 'v1.0.100';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -2795,9 +2795,12 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 
 <div class="tab-pane fade" id="md-tab-funds">
-<div class="d-flex justify-content-between align-items-center mb-2">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
 <h6 class="fw-bold m-0 text-success">💰 출자금 내역</h6>
+<div class="d-flex align-items-center gap-2">
+<span class="badge rounded-pill bg-success bg-opacity-10 text-success border border-success-subtle" id="md-capital-total" aria-live="polite">합계 0원</span>
 <button class="btn btn-sm btn-outline-success" onclick="openFundEditor('capital', null)">+ 출자금 추가</button>
+</div>
 </div>
 <div class="table-responsive mb-4 border rounded" style="max-height: 200px;">
 <table class="table table-sm table-hover mb-0 text-center small">
@@ -2806,9 +2809,12 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </table>
 </div>
 
-<div class="d-flex justify-content-between align-items-center mb-2">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
 <h6 class="fw-bold m-0 text-primary">🎁 기부금 내역</h6>
+<div class="d-flex align-items-center gap-2">
+<span class="badge rounded-pill bg-primary bg-opacity-10 text-primary border border-primary-subtle" id="md-donation-total" aria-live="polite">합계 0원</span>
 <button class="btn btn-sm btn-outline-primary" onclick="openFundEditor('donation', null)">+ 기부금 추가</button>
+</div>
 </div>
 <div class="table-responsive mb-4 border rounded" style="max-height: 200px;">
 <table class="table table-sm table-hover mb-0 text-center small">
@@ -10920,7 +10926,11 @@ function resetMemberFundsSummaryCards() {
     const pointMetaEl = document.getElementById('md-point-meta');
     const dividendTotalEl = document.getElementById('md-dividend-total');
     const dividendMetaEl = document.getElementById('md-dividend-meta');
+    const capitalTotalEl = document.getElementById('md-capital-total');
+    const donationTotalEl = document.getElementById('md-donation-total');
 
+    if (capitalTotalEl) capitalTotalEl.innerText = '합계 0원';
+    if (donationTotalEl) donationTotalEl.innerText = '합계 0원';
     if (pointTotalEl) pointTotalEl.innerText = '0 원';
     if (pointMetaEl) pointMetaEl.innerText = '이용실적 보상 원장 기준';
     if (dividendTotalEl) dividendTotalEl.innerText = '0 원';
@@ -11024,6 +11034,19 @@ async function loadMemberRewardAndDividendSummary(uuid, textId) {
     }
 } // End of loadMemberRewardAndDividendSummary
 
+function calculateMemberFundTotal(rows) {
+    return (Array.isArray(rows) ? rows : []).reduce((total, row) => {
+        const amount = Number(row?.amount || 0);
+        return Number.isFinite(amount) ? total + amount : total;
+    }, 0);
+} // End of calculateMemberFundTotal
+
+function updateMemberFundTotal(elementId, rows) {
+    const totalEl = document.getElementById(elementId);
+    if (!totalEl) return;
+    totalEl.innerText = `합계 ${calculateMemberFundTotal(rows).toLocaleString('ko-KR')}원`;
+} // End of updateMemberFundTotal
+
 // [수정] 자금 목록 로드 (조회 기준 변경: UUID -> Member ID 우선)
 async function loadMemberFunds(uuid, textId, reset=false) {
     if (reset) resetMemberFundsSummaryCards();
@@ -11042,6 +11065,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
 
             if (capErr) console.error("출자금 로드 실패:", capErr);
             globalHistoryData.ledger = Array.isArray(caps) ? caps : [];
+            updateMemberFundTotal('md-capital-total', globalHistoryData.ledger);
 
             capListEl.innerHTML = '';
             if (!caps || caps.length === 0) {
@@ -11089,6 +11113,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
 
         if (donErr) console.error("기부금 로드 실패:", donErr);
         globalHistoryData.donations = Array.isArray(dons) ? dons : [];
+        updateMemberFundTotal('md-donation-total', globalHistoryData.donations);
 
         // 렌더링
         donListEl.innerHTML = '';
