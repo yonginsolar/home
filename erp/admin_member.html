@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.103
-Change: Restore detail-tab padding and enforce last-opened-first-closed modal behavior.
+Version: v1.0.104
+Change: Add a tenant-scoped applicant identity modal for extra-capital requests.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.103';
+window.ADMIN_MEMBER_VERSION = 'v1.0.104';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -455,6 +455,31 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
     </div>
 
 
+
+<div class="modal fade" id="applicationMemberModal" tabindex="-1" aria-labelledby="applicationMemberModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <div>
+                    <h5 class="modal-title fw-bold" id="applicationMemberModalLabel">
+                        <i class="bi bi-person-vcard me-1"></i> 신청자 정보 확인
+                    </h5>
+                    <div class="small text-muted mt-1">동명이인 확인을 위한 조합원 기본 정보입니다.</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+            </div>
+            <div class="modal-body" id="application-member-modal-body">
+                <div class="text-center text-muted py-5">
+                    <div class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></div>
+                    조합원 정보를 불러오는 중입니다.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="modal fade" id="proxyModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
@@ -3590,6 +3615,7 @@ function bindIssueDocModalFocusGuard() {
 bindIssueDocModalFocusGuard();
 
 const ADMIN_MEMBER_MODAL_Z_INDEX = {
+    applicationMemberModal: 1055,
     memberDetailModal: 1055,
     memberHistoryModal: 1065,
     issueDocModal: 1065,
@@ -13968,6 +13994,7 @@ function selectMemberForModal(id, name) {
 let g_apps = []; // 데이터 저장용
 let g_app_filter = 'pending'; // 현재 탭 상태
 let g_app_type_filter = 'extra'; // 추가출자 / 감자·탈퇴 / 전체
+let g_application_member_request_sequence = 0;
 
 // 1. 신청 목록 불러오기
 // [디버깅용] fetchApplications 함수
@@ -14032,6 +14059,25 @@ function renderAppList() {
         const safeName = escapeHtml(app.name || '');
         const safeMemberId = escapeHtml(app.member_id || '');
         const safeReason = app.reason ? escapeHtml(app.reason) : '-';
+        const safeAppIdArg = escapeJsString(String(app.id || ''));
+        const applicantCell = app.type === 'extra'
+            ? `
+                <button type="button"
+                        class="btn btn-link text-dark text-decoration-none text-start p-0"
+                        onclick="openApplicationMemberModal('${safeAppIdArg}')"
+                        aria-haspopup="dialog"
+                        aria-label="${safeName} 신청자 기본 정보 확인">
+                    <span class="d-block fw-bold">${safeName}</span>
+                    <span class="d-block small text-muted">${safeMemberId}</span>
+                    <span class="d-inline-flex align-items-center gap-1 small text-primary mt-1">
+                        <i class="bi bi-person-vcard" aria-hidden="true"></i> 정보 확인
+                    </span>
+                </button>
+            `
+            : `
+                <div class="fw-bold">${safeName}</div>
+                <small class="text-muted">${safeMemberId}</small>
+            `;
 
         // 상태 뱃지
         let statusBadge = `<span class="badge bg-secondary">${app.status}</span>`;
@@ -14068,8 +14114,7 @@ function renderAppList() {
                 <td>${dateStr}</td>
                 <td><span class="badge bg-light text-dark border">${typeMap[app.type] || app.type}</span></td>
                 <td class="text-start ps-4">
-                    <div class="fw-bold">${safeName}</div>
-                    <small class="text-muted">${safeMemberId}</small>
+                    ${applicantCell}
                 </td>
                 <td class="text-end fw-bold pe-3">${amountStr}</td>
                 <td class="text-start text-truncate" style="max-width: 200px;">${safeReason}</td>
@@ -14079,6 +14124,148 @@ function renderAppList() {
         `;
     });
 }
+
+function renderApplicationMemberModal(app, member, loadErrorMessage = '') {
+    const bodyEl = document.getElementById('application-member-modal-body');
+    if (!bodyEl) return;
+
+    const applicationName = String(app?.name || '').trim();
+    const applicationMemberId = String(app?.member_id || '').trim();
+    const currentName = String(member?.name || '').trim();
+    const currentMemberId = String(member?.member_id || '').trim();
+    const amountValue = Number(app?.amount || 0);
+    const amountText = Number.isFinite(amountValue) && amountValue > 0
+        ? `${amountValue.toLocaleString()}원`
+        : '-';
+    const applicationDate = formatAdminMemberKstDate(app?.created_at);
+    const identityMismatch = !!member && (
+        (applicationName && currentName && applicationName !== currentName) ||
+        (applicationMemberId && currentMemberId && applicationMemberId !== currentMemberId)
+    );
+
+    const noticeHtml = loadErrorMessage
+        ? `<div class="alert alert-danger small mb-3"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(loadErrorMessage)}</div>`
+        : !member
+        ? '<div class="alert alert-warning small mb-3"><i class="bi bi-exclamation-triangle me-1"></i>현재 조합원 명부에서 연결된 정보를 찾지 못했습니다. 신청서의 이름과 조합원 번호를 먼저 확인해주세요.</div>'
+        : identityMismatch
+        ? '<div class="alert alert-warning small mb-3"><i class="bi bi-exclamation-triangle me-1"></i>신청 당시 정보와 현재 조합원 명부의 이름 또는 조합원 번호가 다릅니다.</div>'
+        : '';
+
+    const memberFieldsHtml = member
+        ? `
+            <div class="row g-3">
+                <div class="col-12 col-sm-6">
+                    <div class="small text-muted mb-1">이름</div>
+                    <div class="fw-bold text-break">${escapeHtml(currentName || '-')}</div>
+                </div>
+                <div class="col-12 col-sm-6">
+                    <div class="small text-muted mb-1">조합원 번호</div>
+                    <div class="fw-bold text-break">${escapeHtml(currentMemberId || '-')}</div>
+                </div>
+                <div class="col-12 col-sm-6">
+                    <div class="small text-muted mb-1">전화번호</div>
+                    <div class="fw-semibold text-break">${escapeHtml(member.phone || '-')}</div>
+                </div>
+                <div class="col-12 col-sm-6">
+                    <div class="small text-muted mb-1">이메일</div>
+                    <div class="fw-semibold text-break">${escapeHtml(member.email || '-')}</div>
+                </div>
+                <div class="col-12">
+                    <div class="small text-muted mb-1">주소</div>
+                    <div class="fw-semibold text-break" style="white-space: pre-line;">${escapeHtml(member.address || '-')}</div>
+                </div>
+                <div class="col-6">
+                    <div class="small text-muted mb-1">조합원 유형</div>
+                    <div>${escapeHtml(member.member_type || '-')}</div>
+                </div>
+                <div class="col-6">
+                    <div class="small text-muted mb-1">현재 상태</div>
+                    <div>${escapeHtml(member.status || '-')}</div>
+                </div>
+            </div>
+        `
+        : `
+            <div class="row g-3">
+                <div class="col-12 col-sm-6">
+                    <div class="small text-muted mb-1">신청자 이름</div>
+                    <div class="fw-bold text-break">${escapeHtml(applicationName || '-')}</div>
+                </div>
+                <div class="col-12 col-sm-6">
+                    <div class="small text-muted mb-1">신청서 조합원 번호</div>
+                    <div class="fw-bold text-break">${escapeHtml(applicationMemberId || '-')}</div>
+                </div>
+            </div>
+        `;
+
+    bodyEl.innerHTML = `
+        <div class="alert alert-light border d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+            <span><span class="badge bg-primary me-1">추가출자</span>${escapeHtml(amountText)}</span>
+            <span class="small text-muted">신청일 ${escapeHtml(applicationDate || '-')}</span>
+        </div>
+        ${noticeHtml}
+        <div class="border rounded-3 p-3">
+            ${memberFieldsHtml}
+        </div>
+    `;
+} // End of renderApplicationMemberModal
+
+async function openApplicationMemberModal(appId) {
+    const safeAppId = String(appId || '').trim();
+    const app = g_apps.find(function (item) {
+        return String(item?.id || '') === safeAppId;
+    });
+    if (!app || app.type !== 'extra') {
+        myAlert('추가출자 신청 정보를 찾지 못했습니다. 목록을 새로고침한 뒤 다시 시도해주세요.', 'warning');
+        return;
+    }
+
+    const modalEl = document.getElementById('applicationMemberModal');
+    const bodyEl = document.getElementById('application-member-modal-body');
+    if (!modalEl || !bodyEl) return;
+
+    const requestSequence = ++g_application_member_request_sequence;
+    bodyEl.innerHTML = `
+        <div class="text-center text-muted py-5">
+            <div class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></div>
+            조합원 정보를 불러오는 중입니다.
+        </div>
+    `;
+
+    if (modalEl.dataset.applicationMemberResetBound !== '1') {
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            g_application_member_request_sequence += 1;
+        });
+        modalEl.dataset.applicationMemberResetBound = '1';
+    }
+
+    applyAdminMemberModalLayer(modalEl);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    const memberUid = String(app.member_uid || '').trim();
+    const memberId = String(app.member_id || '').trim();
+    if (!memberUid && !memberId) {
+        if (requestSequence === g_application_member_request_sequence) {
+            renderApplicationMemberModal(app, null);
+        }
+        return;
+    }
+
+    try {
+        let query = scopeAdminTenant(_supabase
+            .from('coop_members')
+            .select('id,member_id,name,member_type,phone,email,status,address'));
+        query = memberUid ? query.eq('id', memberUid) : query.eq('member_id', memberId);
+
+        const { data, error } = await query.maybeSingle();
+        if (error) throw error;
+        if (requestSequence !== g_application_member_request_sequence || !modalEl.classList.contains('show')) return;
+        renderApplicationMemberModal(app, data || null);
+    } catch (error) {
+        console.error('추가출자 신청자 기본 정보 조회 실패:', error);
+        if (requestSequence !== g_application_member_request_sequence || !modalEl.classList.contains('show')) return;
+        renderApplicationMemberModal(app, null, '조합원 기본 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+    }
+} // End of openApplicationMemberModal
 
 // 3. 상태 탭 전환 (대기중 / 전체)
 function filterAppList(mode) {
