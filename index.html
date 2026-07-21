@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.75
-Change: Show direct and participation power project types on the public homepage.
+Version: v1.0.76
+Change: Recover public plant sections from transient tenant-context and data read failures.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.75 | index.html');</script>
+<script>console.log('[Version] v1.0.76 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -2217,9 +2217,12 @@ Change: Show direct and participation power project types on the public homepage
       ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_ANON_KEY)
       : supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     window.__noticeModalScope = 'public';
+    let g_visible_site_coop_id = '';
     let g_visible_site_coop_id_promise = null;
+    let g_public_site_context = null;
     let g_public_site_context_promise = null;
     window.__PUBLIC_SITE_COOP_NAME__ = '용인모두의햇빛협동조합';
+    const PUBLIC_READ_RETRY_DELAYS_MS = Object.freeze([0, 350, 1000]);
 
     function normalizePublicCoopName(value) {
         return String(value || '').trim();
@@ -2249,17 +2252,24 @@ Change: Show direct and participation power project types on the public homepage
     }
 
     async function getPublicSiteContext() {
+        if (g_public_site_context) return g_public_site_context;
         if (!g_public_site_context_promise) {
             g_public_site_context_promise = (async () => {
                 const { data, error } = await _client.rpc('get_public_site_context');
-                if (error) {
-                    console.warn('getPublicSiteContext failed:', error);
-                    return null;
-                }
-                return normalizePublicSiteContext(data);
+                if (error) throw error;
+                const context = normalizePublicSiteContext(data);
+                if (!context?.coop_id) throw new Error('PUBLIC_SITE_CONTEXT_NOT_FOUND');
+                return context;
             })();
         }
-        return await g_public_site_context_promise;
+        try {
+            g_public_site_context = await g_public_site_context_promise;
+            return g_public_site_context;
+        } catch (error) {
+            g_public_site_context_promise = null;
+            console.warn('getPublicSiteContext failed:', error);
+            return null;
+        }
     }
 
     async function hydratePublicBranding() {
@@ -2269,22 +2279,64 @@ Change: Show direct and participation power project types on the public homepage
     }
 
     async function getVisibleSiteCoopId() {
+        if (g_visible_site_coop_id) return g_visible_site_coop_id;
+
+        const publicContext = await getPublicSiteContext();
+        const publicContextCoopId = String(publicContext?.coop_id || '').trim();
+        if (publicContextCoopId) {
+            g_visible_site_coop_id = publicContextCoopId;
+            return g_visible_site_coop_id;
+        }
+
         if (!g_visible_site_coop_id_promise) {
             g_visible_site_coop_id_promise = (async () => {
                 const { data, error } = await _client.rpc('get_visible_coop_id');
-                if (error) {
-                    console.warn('getVisibleSiteCoopId failed:', error);
-                    return null;
-                }
-                return data || null;
+                if (error) throw error;
+                const coopId = String(data || '').trim();
+                if (!coopId) throw new Error('VISIBLE_SITE_COOP_NOT_FOUND');
+                return coopId;
             })();
         }
-        return await g_visible_site_coop_id_promise;
+        try {
+            g_visible_site_coop_id = await g_visible_site_coop_id_promise;
+            return g_visible_site_coop_id;
+        } catch (error) {
+            g_visible_site_coop_id_promise = null;
+            console.warn('getVisibleSiteCoopId failed:', error);
+            return null;
+        }
     }
 
     async function scopePublicTenant(query) {
         const coopId = String(await getVisibleSiteCoopId() || '').trim();
-        return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
+        if (!coopId) throw new Error('PUBLIC_COOP_CONTEXT_UNAVAILABLE');
+        return query.eq('coop_id', coopId);
+    }
+
+    function waitForPublicReadRetry(delayMs) {
+        return new Promise(function (resolve) {
+            window.setTimeout(resolve, Math.max(0, Number(delayMs) || 0));
+        });
+    }
+
+    async function executePublicReadWithRetry(readFunction, label) {
+        let lastError = null;
+
+        for (let attempt = 0; attempt < PUBLIC_READ_RETRY_DELAYS_MS.length; attempt += 1) {
+            const delayMs = PUBLIC_READ_RETRY_DELAYS_MS[attempt];
+            if (delayMs > 0) await waitForPublicReadRetry(delayMs);
+
+            try {
+                const response = await readFunction();
+                if (response?.error) throw response.error;
+                return response;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        console.warn(`${label || 'public read'} failed after retry:`, lastError);
+        throw lastError || new Error('PUBLIC_READ_FAILED');
     }
 
     const HOME_SECTION_DEFAULT_ORDER = Object.freeze({
@@ -2773,7 +2825,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     AOS.refresh();
 
     // 2. 데이터 로드: 병렬 처리 (동시에 출발!)
-    await Promise.all([
+    const publicSectionLoadResults = await Promise.allSettled([
         fetchStats(),
         fetchPowerGenerationStats(),
         fetchPlants(),
@@ -2786,6 +2838,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         fetchAbout(),
         fetchPublicHallOfFame(PUBLIC_HOF_SCOPE.MONTHLY)
     ]);
+    publicSectionLoadResults.forEach(function (result) {
+        if (result.status === 'rejected') {
+            console.warn('Public section load failed:', result.reason);
+        }
+    });
 
     // 3. 모든 데이터가 다 들어온 뒤 최종 새로고침
     AOS.refresh();
@@ -2800,11 +2857,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // [신규 기능] DB 설정에 따라 섹션과 메뉴를 끄고 켜는 함수
     async function manageSections() {
-        const { data: sections, error } = await (await scopePublicTenant(
-            _client.from('site_sections').select('*').order('display_order', { ascending: true })
-        ));
+        let sections = null;
+        try {
+            const response = await executePublicReadWithRetry(async function () {
+                return await (await scopePublicTenant(
+                    _client.from('site_sections').select('*').order('display_order', { ascending: true })
+                ));
+            }, 'site_sections');
+            sections = response?.data || null;
+        } catch (error) {
+            return;
+        }
 
-        if (error || !sections) return;
+        if (!sections) return;
 
         applyPublicSectionOrder(sections);
 
@@ -4487,9 +4552,19 @@ function openNoticeDetail(id) {
 
 	// 1. 발전소 데이터 로드 및 분배
 	async function fetchPlants() {
-    const { data, error } = await (await scopePublicTenant(_client.from('site_power_plants').select('*').order('display_order')));
+    let data = null;
+    try {
+        const response = await executePublicReadWithRetry(async function () {
+            return await (await scopePublicTenant(
+                _client.from('site_power_plants').select('*').order('display_order')
+            ));
+        }, 'site_power_plants');
+        data = response?.data || null;
+    } catch (error) {
+        return;
+    }
 
-    if(error || !data) return;
+    if(!data) return;
 
     // 전역 변수에 저장 (모달에서 쓰기 위함)
     g_plants_list = data;
