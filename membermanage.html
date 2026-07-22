@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.91
-Change: Send an idempotent Kakao payment notice after a new extra-capital application is saved.
+Version: v1.0.92
+Change: Show member-visible dividend calculation and payment account details.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.91 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.92 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1492,11 +1492,18 @@ return merged;
 async function fetchConfirmedDividendHistory(memberUuid) {
 try {
 if (!_supabase || !memberUuid) return [];
+const { data: detailedData, error: detailedError } = await _supabase.rpc('list_my_dividend_history_v2', {
+p_member_uuid: memberUuid
+});
+if (!detailedError) {
+return Array.isArray(detailedData) ? detailedData.map(row => normalizeDividendHistoryRow(row, 'DIVIDEND_BATCH')) : [];
+}
+
 const { data, error } = await _supabase.rpc('list_my_dividend_history', {
 p_member_uuid: memberUuid
 });
 if (error) {
-console.warn('confirmed dividend history rpc unavailable:', error.message || error);
+console.warn('confirmed dividend history rpc unavailable:', detailedError?.message || error.message || error);
 return [];
 }
 return Array.isArray(data) ? data.map(row => normalizeDividendHistoryRow(row, 'DIVIDEND_BATCH')) : [];
@@ -4341,39 +4348,63 @@ summaryEl.innerHTML = `현재 잔액: <span class="text-dark fs-5 fw-bold ms-2">
 
 } else if(type === 'dividend' || type === 'dividend_net') {
 title = (type === 'dividend_net') ? '📉 배당금(세후) 지급 내역' : '📈 배당금(세전) 지급 내역';
-html += '<tr class="table-primary"><th class="py-3 ps-3">귀속년도</th><th class="py-3">지급/예정일</th><th class="text-end py-3">세전</th><th class="text-end py-3">세액</th><th class="text-end py-3 pe-3">세후</th></tr></thead><tbody>';
 const data = globalHistoryData.dividends || [];
 const totalGross = Number(globalAssetSummary.total_dividend_gross || 0);
 const totalTax = Number(globalAssetSummary.total_dividend_tax || 0);
 const totalNet = Number(globalAssetSummary.total_dividend_net || 0);
 total = (type === 'dividend_net') ? totalNet : totalGross;
 
-if(data.length === 0) html += '<tr><td colspan="5" class="text-center py-4 text-muted">내역이 없습니다.</td></tr>';
+html = '<div class="p-2 p-sm-3">';
+if(data.length === 0) html += '<div class="text-center py-4 text-muted">내역이 없습니다.</div>';
 else {
 data.forEach(item => {
 const gross = getDividendGross(item);
 const tax = getDividendTax(item);
 const net = getDividendNet(item);
+const capitalGross = toFiniteNumber(item.capital_dividend_gross);
+const usageGross = toFiniteNumber(item.usage_dividend_gross);
+const incomeTax = toFiniteNumber(item.income_tax_amount);
+const localIncomeTax = toFiniteNumber(item.local_income_tax_amount);
 const dateLabel = getDividendDateLabel(item);
 const statusLabel = getDividendPaymentStatusLabel(item);
-html += `<tr>
-                   <td class="py-3 ps-3 fw-bold">${item.fiscal_year}년</td>
-                   <td class="py-3 text-muted">
-                       <div>${getDividendDisplayDate(item)}</div>
-                       <div class="x-small">${dateLabel} · ${statusLabel}</div>
-                   </td>
-                   <td class="text-end fw-bold py-3 text-primary">+${Number(gross).toLocaleString()}</td>
-                   <td class="text-end fw-bold py-3 text-danger">-${Number(tax).toLocaleString()}</td>
-                   <td class="text-end fw-bold py-3 pe-3 text-success">+${Number(net).toLocaleString()}</td>
-               </tr>`;
+const accountDeadline = item.account_change_deadline ? formatMemberKstDateTime(item.account_change_deadline) : '-';
+const accountDisplay = item.payment_account_display || '미등록';
+const safeAccountDisplay = escapeHtml(accountDisplay);
+const accountWarning = accountDisplay === '미등록'
+? '<div class="alert alert-warning py-2 px-3 small mt-3 mb-0">지급 계좌가 등록되지 않았습니다. 계좌 마감 전까지 내 정보에서 등록해 주세요.</div>'
+: '';
+html += `<section class="border rounded-3 p-3 mb-3 bg-white shadow-sm">
+                   <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                       <div>
+                           <div class="fw-bold text-primary">${item.fiscal_year}년 배당금</div>
+                           <div class="small text-muted">${dateLabel} ${getDividendDisplayDate(item)} · ${statusLabel}</div>
+                       </div>
+                       <div class="fw-bold text-success text-end">${Number(net).toLocaleString()}원</div>
+                   </div>
+                   <div class="row g-2 small">
+                       <div class="col-6"><div class="bg-light rounded p-2 h-100"><div class="text-muted">출자금 배당</div><div class="fw-bold">${Number(capitalGross).toLocaleString()}원</div></div></div>
+                       <div class="col-6"><div class="bg-light rounded p-2 h-100"><div class="text-muted">이용실적 배당</div><div class="fw-bold">${Number(usageGross).toLocaleString()}원</div></div></div>
+                       <div class="col-6"><div class="border rounded p-2 h-100"><div class="text-muted">세전 배당금</div><div class="fw-bold text-primary">${Number(gross).toLocaleString()}원</div></div></div>
+                       <div class="col-6"><div class="border rounded p-2 h-100"><div class="text-muted">세후 지급액</div><div class="fw-bold text-success">${Number(net).toLocaleString()}원</div></div></div>
+                       <div class="col-6"><div class="border rounded p-2 h-100"><div class="text-muted">소득세</div><div class="fw-bold text-danger">${Number(incomeTax).toLocaleString()}원</div></div></div>
+                       <div class="col-6"><div class="border rounded p-2 h-100"><div class="text-muted">지방소득세</div><div class="fw-bold text-danger">${Number(localIncomeTax).toLocaleString()}원</div></div></div>
+                   </div>
+                   <div class="small mt-3 pt-3 border-top">
+                       <div class="d-flex justify-content-between gap-3"><span class="text-muted">지급 계좌</span><strong class="text-end">${safeAccountDisplay}</strong></div>
+                       <div class="d-flex justify-content-between gap-3 mt-1"><span class="text-muted">계좌 등록·변경 마감</span><strong class="text-end">${accountDeadline}</strong></div>
+                       <div class="d-flex justify-content-between gap-3 mt-1"><span class="text-muted">세액 합계</span><strong class="text-danger">${Number(tax).toLocaleString()}원</strong></div>
+                   </div>
+                   ${accountWarning}
+               </section>`;
 });
 }
+html += '</div>';
 summaryEl.innerHTML = `누적 세전: <span class="text-primary fs-6 fw-bold ms-2">${Number(totalGross).toLocaleString()}</span>원
  / 세액: <span class="text-danger fs-6 fw-bold ms-2">${Number(totalTax).toLocaleString()}</span>원
  / 세후: <span class="text-success fs-6 fw-bold ms-2">${Number(totalNet).toLocaleString()}</span>원${getHistoryModalRecentNotice(type, data.length)}`;
 }
 
-html += '</tbody></table></div>';
+if(type !== 'dividend' && type !== 'dividend_net') html += '</tbody></table></div>';
 
 titleEl.innerText = title;
 listEl.innerHTML = html;
