@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.105
-Change: Add deadline-locked dividend payment runs and notification handling.
+Version: v1.0.106
+Change: Add confirmed AlimTalk sending for manual capital reflections.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.105';
+window.ADMIN_MEMBER_VERSION = 'v1.0.106';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -168,6 +168,13 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .member-history-table { width:100%; max-width:100%; table-layout:fixed; margin-bottom:0; }
 .member-history-table th, .member-history-table td { overflow-wrap:anywhere; word-break:break-word; }
 .member-history-table .member-history-note { max-width:none; white-space:normal; }
+.member-history-manage-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+.capital-notification-summary { border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
+.capital-notification-summary-row { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:7px 0; border-bottom:1px solid #e2e8f0; }
+.capital-notification-summary-row:last-child { border-bottom:0; }
+.capital-notification-summary-label { flex:0 0 auto; color:#64748b; font-size:.78rem; font-weight:800; }
+.capital-notification-summary-value { min-width:0; color:#0f172a; font-size:.88rem; font-weight:800; overflow-wrap:anywhere; text-align:right; }
+.capital-notification-feedback { border-radius:10px; font-size:.8rem; line-height:1.45; }
 @media (max-width:991.98px) {
   .fund-summary-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
   .member-history-table, .member-history-table tbody { display:block; width:100%; }
@@ -179,6 +186,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
   .member-history-table tbody td.member-history-empty { display:block; padding:18px 0; text-align:center !important; }
   .member-history-table tbody td.member-history-empty::before { content:none; }
   .member-history-table tbody td .btn { min-height:38px; }
+  .member-history-manage-actions { justify-content:flex-start; }
 }
 @media (max-width:575.98px) {
   .fund-summary-view { min-height:138px; padding:16px; }
@@ -3071,6 +3079,48 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
   </div>
 </div>
 
+<div class="modal fade" id="capitalNotificationConfirmModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-labelledby="capitalNotificationConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header border-0 pb-1">
+        <div>
+          <h6 class="modal-title fw-bold mb-1" id="capitalNotificationConfirmTitle">출자금 반영 알림톡</h6>
+          <div class="small text-muted">출자금 원장 저장은 완료되었습니다.</div>
+        </div>
+      </div>
+      <div class="modal-body pt-2">
+        <div class="capital-notification-summary p-3" aria-live="polite">
+          <div class="capital-notification-summary-row">
+            <span class="capital-notification-summary-label">조합원</span>
+            <span class="capital-notification-summary-value" id="capitalNotificationMember">-</span>
+          </div>
+          <div class="capital-notification-summary-row">
+            <span class="capital-notification-summary-label">반영일</span>
+            <span class="capital-notification-summary-value" id="capitalNotificationDate">-</span>
+          </div>
+          <div class="capital-notification-summary-row">
+            <span class="capital-notification-summary-label">반영금액</span>
+            <span class="capital-notification-summary-value text-primary" id="capitalNotificationAmount">-</span>
+          </div>
+          <div class="capital-notification-summary-row">
+            <span class="capital-notification-summary-label">반영 후 출자금</span>
+            <span class="capital-notification-summary-value" id="capitalNotificationBalance">-</span>
+          </div>
+        </div>
+        <p class="small text-muted mt-3 mb-0">위 내용으로 조합원에게 공식 반영 안내를 보낼까요? 나중에 출자금 내역에서 다시 발송할 수 있습니다.</p>
+        <div class="capital-notification-feedback alert d-none mt-3 mb-0" id="capitalNotificationFeedback" role="status"></div>
+      </div>
+      <div class="modal-footer border-0 pt-0 d-flex gap-2">
+        <button type="button" class="btn btn-light flex-fill" id="capitalNotificationLaterButton">나중에 발송</button>
+        <button type="button" class="btn btn-primary flex-fill" id="capitalNotificationSendButton">
+          <span class="capital-notification-send-label">알림톡 발송</span>
+          <span class="spinner-border spinner-border-sm d-none" id="capitalNotificationSpinner" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="customAlertModal" tabindex="-1" style="z-index: 9999;">
 <div class="modal-dialog modal-dialog-centered modal-sm">
 <div class="modal-content text-center p-3 border-0 shadow">
@@ -3670,6 +3720,7 @@ const ADMIN_MEMBER_MODAL_Z_INDEX = {
     relationSelectModal: 1065,
     groupSearchModal: 1065,
     childRegisterModal: 1065,
+    capitalNotificationConfirmModal: 1085,
     customConfirmModal: 1085,
     customAlertModal: 1095
 };
@@ -6074,6 +6125,32 @@ function getFundPaymentMethodLabel(value) {
     return safeValue || '-';
 } // End of getFundPaymentMethodLabel
 
+function getCapitalNotificationStatusMeta(item) {
+    const status = String(item?.capital_notification_status || '').trim();
+    const errorCode = String(item?.capital_notification_error_code || '').trim();
+    if (!status) return null;
+    if (status === 'accepted') return { label: '알림 접수', className: 'text-bg-success', canSend: false };
+    if (status === 'processing') return { label: '발송 처리 중', className: 'text-bg-info', canSend: false };
+    if (status === 'unknown') return { label: '결과 확인 필요', className: 'text-bg-warning', canSend: false };
+    if (status === 'queued') return { label: '발송 대기', className: 'text-bg-info', canSend: false };
+    if (status === 'failed') return { label: '발송 실패', className: 'text-bg-danger', canSend: true };
+    if (status === 'skipped' && errorCode === 'MEMBER_PHONE_UNAVAILABLE') {
+        return { label: '전화번호 확인', className: 'text-bg-warning', canSend: true };
+    }
+    if (status === 'skipped') return { label: '미발송', className: 'text-bg-secondary', canSend: true };
+    return { label: '미발송', className: 'text-bg-secondary', canSend: true };
+} // End of getCapitalNotificationStatusMeta
+
+function renderCapitalNotificationHistoryControl(item) {
+    const statusMeta = getCapitalNotificationStatusMeta(item);
+    if (!statusMeta) return '';
+    const capitalId = Number(item?.id || 0);
+    const badgeHtml = `<span class="badge ${statusMeta.className}">${escapeHtml(statusMeta.label)}</span>`;
+    if (!statusMeta.canSend || !Number.isInteger(capitalId) || capitalId <= 0) return badgeHtml;
+    const buttonLabel = String(item?.capital_notification_status || '') === 'deferred' ? '알림톡 보내기' : '다시 보내기';
+    return `${badgeHtml}<button class="btn btn-sm btn-outline-primary" type="button" onclick="openCapitalNotificationFromHistory(${capitalId})">${buttonLabel}</button>`;
+} // End of renderCapitalNotificationHistoryControl
+
 function renderMemberHistoryContent(type) {
     const titleEl = document.getElementById('historyModalTitle');
     const summaryEl = document.getElementById('historyModalSummary');
@@ -6096,12 +6173,13 @@ function renderMemberHistoryContent(type) {
                 const amount = Number(item.amount || 0);
                 const amountClass = amount < 0 ? 'text-danger' : 'text-success';
                 const rowData = encodeURIComponent(JSON.stringify(item));
+                const notificationControl = renderCapitalNotificationHistoryControl(item);
                 html += `<tr>
                     <td data-label="날짜">${escapeHtml(formatAdminMemberKstDate(item.deposit_date))}</td>
                     <td data-label="금액" class="text-end fw-bold ${amountClass}">${amount.toLocaleString('ko-KR')}원</td>
                     <td data-label="입금자">${escapeHtml(item.depositor || '-')}</td>
                     <td data-label="비고" class="member-history-note" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
-                    <td data-label="관리" class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('capital','${rowData}')">수정</button></td>
+                    <td data-label="관리" class="text-end"><div class="member-history-manage-actions"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('capital','${rowData}')">수정</button>${notificationControl}</div></td>
                 </tr>`;
             });
         }
@@ -11424,6 +11502,12 @@ async function loadMemberFunds(uuid, textId, reset=false) {
             .order('deposit_date', { ascending: false })
         : Promise.resolve({ data: [], error: null });
 
+    const capitalNotificationPromise = hasTextId
+        ? _supabase.rpc('admin_list_member_capital_notification_status', {
+            p_member_text_id: safeTextId
+        })
+        : Promise.resolve({ data: [], error: null });
+
     let donationQuery = null;
     if (hasTextId) {
         donationQuery = _supabase
@@ -11440,11 +11524,31 @@ async function loadMemberFunds(uuid, textId, reset=false) {
     }
     const donationPromise = donationQuery || Promise.resolve({ data: [], error: null });
 
-    const [capitalResult, donationResult] = await Promise.all([capitalPromise, donationPromise]);
+    const [capitalResult, donationResult, capitalNotificationResult] = await Promise.all([
+        capitalPromise,
+        donationPromise,
+        capitalNotificationPromise
+    ]);
     if (capitalResult.error) console.error('출자금 로드 실패:', capitalResult.error);
     if (donationResult.error) console.error('기부금 로드 실패:', donationResult.error);
+    if (capitalNotificationResult.error) console.error('출자금 알림 상태 로드 실패:', capitalNotificationResult.error);
 
-    globalHistoryData.ledger = Array.isArray(capitalResult.data) ? capitalResult.data : [];
+    const capitalNotificationMap = new Map();
+    (Array.isArray(capitalNotificationResult.data) ? capitalNotificationResult.data : []).forEach(function (row) {
+        capitalNotificationMap.set(String(row?.capital_id || ''), row);
+    });
+    globalHistoryData.ledger = (Array.isArray(capitalResult.data) ? capitalResult.data : []).map(function (row) {
+        const notification = capitalNotificationMap.get(String(row?.id || ''));
+        if (!notification) return row;
+        return {
+            ...row,
+            capital_notification_status: notification.delivery_status,
+            capital_notification_error_code: notification.error_code,
+            capital_notification_requested_at: notification.requested_at,
+            capital_notification_accepted_at: notification.accepted_at,
+            capital_notification_attempt_count: notification.attempt_count
+        };
+    });
     globalHistoryData.donations = Array.isArray(donationResult.data) ? donationResult.data : [];
     updateMemberFundSummary('capital', globalHistoryData.ledger);
     updateMemberFundSummary('donation', globalHistoryData.donations);
@@ -11516,6 +11620,227 @@ async function deleteFundData() {
     });
 }
 
+let capitalNotificationPromptState = {
+    context: null,
+    onComplete: null,
+    sending: false
+};
+
+function normalizeCapitalNotificationPromptContext(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const capitalId = Number(source.capital_id || source.capitalId || 0);
+    const reflectionAmount = Number(source.reflection_amount || source.reflectionAmount || 0);
+    const balanceAfter = Number(source.balance_after || source.balanceAfter || 0);
+    return {
+        capitalId: Number.isInteger(capitalId) && capitalId > 0 ? capitalId : 0,
+        memberName: String(source.member_name || source.memberName || '조합원').trim() || '조합원',
+        memberTextId: String(source.member_text_id || source.memberTextId || '').trim(),
+        reflectionDate: String(source.reflection_date || source.reflectionDate || '').slice(0, 10),
+        reflectionAmount: Number.isFinite(reflectionAmount) ? reflectionAmount : 0,
+        balanceAfter: Number.isFinite(balanceAfter) ? balanceAfter : 0
+    };
+} // End of normalizeCapitalNotificationPromptContext
+
+function setCapitalNotificationFeedback(message, type) {
+    const feedbackEl = document.getElementById('capitalNotificationFeedback');
+    if (!feedbackEl) return;
+    const safeMessage = String(message || '').trim();
+    feedbackEl.className = `capital-notification-feedback alert mt-3 mb-0 alert-${type === 'danger' ? 'danger' : 'warning'}`;
+    feedbackEl.textContent = safeMessage;
+    feedbackEl.classList.toggle('d-none', !safeMessage);
+} // End of setCapitalNotificationFeedback
+
+function setCapitalNotificationSending(sending) {
+    capitalNotificationPromptState.sending = sending === true;
+    const laterButton = document.getElementById('capitalNotificationLaterButton');
+    const sendButton = document.getElementById('capitalNotificationSendButton');
+    const sendLabel = sendButton?.querySelector('.capital-notification-send-label');
+    const spinner = document.getElementById('capitalNotificationSpinner');
+    if (laterButton) laterButton.disabled = capitalNotificationPromptState.sending;
+    if (sendButton) sendButton.disabled = capitalNotificationPromptState.sending;
+    if (sendLabel) sendLabel.classList.toggle('d-none', capitalNotificationPromptState.sending);
+    if (spinner) spinner.classList.toggle('d-none', !capitalNotificationPromptState.sending);
+} // End of setCapitalNotificationSending
+
+function completeCapitalNotificationPrompt(result) {
+    if (capitalNotificationPromptState.sending) return;
+    const modalEl = document.getElementById('capitalNotificationConfirmModal');
+    const onComplete = capitalNotificationPromptState.onComplete;
+    capitalNotificationPromptState.onComplete = null;
+
+    const finish = function () {
+        capitalNotificationPromptState.context = null;
+        if (typeof onComplete !== 'function') return;
+        try {
+            Promise.resolve(onComplete(result || { outcome: 'deferred' })).catch(function (error) {
+                console.error('[capital notification] completion failed:', error);
+                myAlert('후속 화면 처리 중 오류가 발생했습니다: ' + (error?.message || error), 'error');
+            });
+        } catch (error) {
+            console.error('[capital notification] completion failed:', error);
+            myAlert('후속 화면 처리 중 오류가 발생했습니다: ' + (error?.message || error), 'error');
+        }
+    };
+
+    const modalInstance = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+    if (modalEl && modalInstance && modalEl.classList.contains('show')) {
+        modalEl.addEventListener('hidden.bs.modal', finish, { once: true });
+        moveFocusOutsideModal(modalEl);
+        modalInstance.hide();
+        return;
+    }
+    finish();
+} // End of completeCapitalNotificationPrompt
+
+function deferCapitalNotificationPrompt() {
+    completeCapitalNotificationPrompt({ outcome: 'deferred' });
+} // End of deferCapitalNotificationPrompt
+
+function openCapitalNotificationPrompt(context, onComplete) {
+    const normalized = normalizeCapitalNotificationPromptContext(context);
+    if (!normalized.capitalId) {
+        if (typeof onComplete === 'function') onComplete({ outcome: 'unavailable' });
+        return;
+    }
+
+    capitalNotificationPromptState.context = normalized;
+    capitalNotificationPromptState.onComplete = typeof onComplete === 'function' ? onComplete : null;
+    setCapitalNotificationSending(false);
+    setCapitalNotificationFeedback('', 'warning');
+
+    const memberEl = document.getElementById('capitalNotificationMember');
+    const dateEl = document.getElementById('capitalNotificationDate');
+    const amountEl = document.getElementById('capitalNotificationAmount');
+    const balanceEl = document.getElementById('capitalNotificationBalance');
+    if (memberEl) {
+        memberEl.textContent = normalized.memberTextId
+            ? `${normalized.memberName} (${normalized.memberTextId})`
+            : normalized.memberName;
+    }
+    if (dateEl) dateEl.textContent = normalized.reflectionDate || '-';
+    if (amountEl) amountEl.textContent = `${normalized.reflectionAmount.toLocaleString('ko-KR')}원`;
+    if (balanceEl) balanceEl.textContent = `${normalized.balanceAfter.toLocaleString('ko-KR')}원`;
+
+    const laterButton = document.getElementById('capitalNotificationLaterButton');
+    const sendButton = document.getElementById('capitalNotificationSendButton');
+    if (laterButton) laterButton.onclick = deferCapitalNotificationPrompt;
+    if (sendButton) sendButton.onclick = sendCapitalReflectionNotification;
+
+    const modalEl = document.getElementById('capitalNotificationConfirmModal');
+    applyAdminMemberModalLayer(modalEl);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+} // End of openCapitalNotificationPrompt
+
+function getCapitalNotificationOutcomeMessage(result) {
+    const outcome = String(result?.outcome || '').trim();
+    if (outcome === 'accepted') {
+        return { message: '출자금 반영 알림톡 발송이 접수되었습니다.', type: 'success' };
+    }
+    if (outcome === 'processing') {
+        return { message: '이미 발송 처리 중인 알림입니다. 출자금 내역에서 상태를 확인할 수 있습니다.', type: 'warning' };
+    }
+    if (outcome === 'unknown') {
+        return { message: '발송 결과를 확정할 수 없어 중복 발송을 막았습니다. 솔라피 발송 내역을 확인해주세요.', type: 'warning' };
+    }
+    if (outcome === 'unavailable') {
+        return { message: '출자금은 저장되었지만 알림 발송 정보를 준비하지 못했습니다.', type: 'warning' };
+    }
+    return { message: '출자금은 저장되었으며 알림톡은 나중에 출자금 내역에서 발송할 수 있습니다.', type: 'success' };
+} // End of getCapitalNotificationOutcomeMessage
+
+async function sendCapitalReflectionNotification() {
+    if (capitalNotificationPromptState.sending) return;
+    const context = capitalNotificationPromptState.context;
+    if (!context?.capitalId) {
+        setCapitalNotificationFeedback('발송할 출자금 내역을 확인할 수 없습니다.', 'danger');
+        return;
+    }
+
+    setCapitalNotificationFeedback('', 'warning');
+    setCapitalNotificationSending(true);
+    try {
+        const { data, error } = await _supabase.functions.invoke('send-capital-reflection-kakao', {
+            body: { capitalId: context.capitalId }
+        });
+        if (error) throw error;
+
+        if (data?.accepted === true) {
+            setCapitalNotificationSending(false);
+            completeCapitalNotificationPrompt({ outcome: 'accepted' });
+            return;
+        }
+
+        const skipped = String(data?.skipped || '').trim();
+        const deliveryStatus = String(data?.delivery_status || '').trim();
+        if (skipped === 'already_attempted' && ['accepted', 'processing', 'unknown'].includes(deliveryStatus)) {
+            setCapitalNotificationSending(false);
+            completeCapitalNotificationPrompt({ outcome: deliveryStatus });
+            return;
+        }
+        if (skipped === 'template_not_sendable') {
+            setCapitalNotificationFeedback('템플릿이 아직 발송 가능한 상태가 아닙니다. 검수 승인 후 이 내역에서 다시 보내주세요.', 'warning');
+            return;
+        }
+        if (skipped === 'member_phone_unavailable') {
+            setCapitalNotificationFeedback('조합원 전화번호가 없거나 형식이 올바르지 않습니다. 기본 정보를 수정한 뒤 다시 보내주세요.', 'warning');
+            return;
+        }
+        if (skipped === 'kakao_member_alerts_disabled') {
+            setCapitalNotificationFeedback('이 조합의 조합원 알림톡 기능이 꺼져 있습니다.', 'warning');
+            return;
+        }
+        if (skipped === 'kakao_capital_reflection_not_configured') {
+            setCapitalNotificationFeedback('출자금 반영 알림톡 설정이 완료되지 않았습니다.', 'warning');
+            return;
+        }
+        setCapitalNotificationFeedback('발송이 완료되지 않았습니다. 잠시 후 다시 시도해주세요.', 'warning');
+    } catch (error) {
+        console.error('[sendCapitalReflectionNotification] failed:', error);
+        setCapitalNotificationFeedback('알림톡 발송 요청에 실패했습니다: ' + (error?.message || error), 'danger');
+    } finally {
+        setCapitalNotificationSending(false);
+    }
+} // End of sendCapitalReflectionNotification
+
+function openCapitalNotificationFromHistory(capitalId) {
+    const numericCapitalId = Number(capitalId || 0);
+    const item = (Array.isArray(globalHistoryData.ledger) ? globalHistoryData.ledger : []).find(function (row) {
+        return Number(row?.id || 0) === numericCapitalId;
+    });
+    if (!item) {
+        myAlert('출자금 내역을 다시 불러온 뒤 시도해주세요.', 'warning');
+        return;
+    }
+
+    const context = {
+        capital_id: numericCapitalId,
+        member_name: String(document.getElementById('md-name')?.value || '조합원').trim() || '조합원',
+        member_text_id: String(document.getElementById('md-id-text')?.innerText || '').trim(),
+        reflection_date: item.deposit_date,
+        reflection_amount: item.amount,
+        balance_after: calculateMemberFundTotal(globalHistoryData.ledger)
+    };
+    openCapitalNotificationPrompt(context, async function (result) {
+        const memberUid = String(document.getElementById('md-uid')?.value || '').trim();
+        const memberTextId = String(document.getElementById('md-id-text')?.innerText || '').trim();
+        await loadMemberFunds(memberUid, memberTextId, true);
+        if (activeMemberHistoryType === 'ledger') renderMemberHistoryContent('ledger');
+        if (String(result?.outcome || '') !== 'deferred') {
+            const outcomeMessage = getCapitalNotificationOutcomeMessage(result);
+            myAlert(outcomeMessage.message, outcomeMessage.type);
+        }
+    });
+} // End of openCapitalNotificationFromHistory
+
+function continueAfterCapitalNotification(result, memberTextId, memberUid, shouldPromptActivation) {
+    const outcomeMessage = getCapitalNotificationOutcomeMessage(result);
+    if (shouldPromptActivation) {
+        promptMemberActivationAfterCapitalSave(memberTextId, memberUid, outcomeMessage.message);
+        return;
+    }
+    myAlert(outcomeMessage.message, outcomeMessage.type);
+} // End of continueAfterCapitalNotification
+
 
 function shouldPromptMemberActivationAfterCapitalSave(type, amount) {
     const normalizedType = String(type || '').trim();
@@ -11541,12 +11866,14 @@ function applyActivatedMemberStatusToAdminUi(memberTextId) {
     }
 } // End of applyActivatedMemberStatusToAdminUi
 
-function promptMemberActivationAfterCapitalSave(memberTextId, memberUid) {
+function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, prefixMessage) {
     const safeMemberTextId = String(memberTextId || '').trim();
     if (!safeMemberTextId || safeMemberTextId === 'ID없음' || safeMemberTextId === '-') return;
 
     const memberName = String(document.getElementById('md-name')?.value || '해당 조합원').trim() || '해당 조합원';
-    const message = `${memberName} 조합원의 첫 출자금 입금이 확인되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?`;
+    const safePrefix = String(prefixMessage || '').trim();
+    const activationMessage = `${memberName} 조합원의 첫 출자금 입금이 확인되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?`;
+    const message = safePrefix ? `${safePrefix}\n\n${activationMessage}` : activationMessage;
 
     myConfirm(message, async () => {
         showLoading(true);
@@ -11595,7 +11922,8 @@ async function saveFundData() {
     const amount = document.getElementById('fund-amount').value;
     const date = document.getElementById('fund-date').value;
     const note = document.getElementById('fund-note').value;
-    const shouldPromptActivation = shouldPromptMemberActivationAfterCapitalSave(type, amount);
+    const isNewCapital = type === 'capital' && idVal === null;
+    const shouldPromptActivation = isNewCapital && shouldPromptMemberActivationAfterCapitalSave(type, amount);
 
     // 유효성 검사
     if (!amount || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
@@ -11612,9 +11940,9 @@ async function saveFundData() {
 
     // 2. 타입별 파라미터 구성 (RPC 명세 준수)
     if (type === 'capital') {
-        rpcName = 'manage_capital_secure';
+        rpcName = 'admin_manage_capital_with_notification_secure';
         params = {
-            p_id: idVal,
+            p_id: idVal === null ? null : Number(idVal),
             p_member_text_id: memberTextId,  // 출자금은 text id 기준
             p_amount: Number(amount),
             p_date: date,
@@ -11640,7 +11968,7 @@ async function saveFundData() {
     }
 
     // 3. RPC 호출
-    const { error } = await _supabase.rpc(rpcName, params);
+    const { data, error } = await _supabase.rpc(rpcName, params);
 
     showLoading(false);
 
@@ -11654,6 +11982,17 @@ async function saveFundData() {
         loadDashboard();
 
         runAfterFundEditorClosed(() => {
+            if (isNewCapital && data?.capital_id) {
+                openCapitalNotificationPrompt(data, function (result) {
+                    continueAfterCapitalNotification(
+                        result,
+                        memberTextId,
+                        memberUid,
+                        shouldPromptActivation
+                    );
+                });
+                return;
+            }
             if (shouldPromptActivation) {
                 promptMemberActivationAfterCapitalSave(memberTextId, memberUid);
                 return;
