@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.107
-Change: Route financial AlimTalk calls through the authenticated ERP Edge helper.
+Version: v1.0.108
+Change: Process dividend AlimTalk queues automatically in sequential 50-recipient batches.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.107';
+window.ADMIN_MEMBER_VERSION = 'v1.0.108';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1058,8 +1058,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                         </div>
                         <div class="small text-muted mb-2" id="dividendNotificationSummary">알림 현황을 불러오지 않았습니다.</div>
                         <div class="d-grid gap-2">
-                            <button class="btn btn-sm btn-outline-primary" type="button" onclick="dispatchSelectedDividendNotifications('dividend_finalized')">확정 안내 대기분 처리</button>
-                            <button class="btn btn-sm btn-outline-success" type="button" onclick="dispatchSelectedDividendNotifications('dividend_paid')">지급완료 안내 대기분 처리</button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" data-dividend-notification-dispatch onclick="dispatchSelectedDividendNotifications('dividend_finalized')">확정 안내 대기분 자동 처리</button>
+                            <button class="btn btn-sm btn-outline-success" type="button" data-dividend-notification-dispatch onclick="dispatchSelectedDividendNotifications('dividend_paid')">지급완료 안내 대기분 자동 처리</button>
                         </div>
                     </div>
                 </div>
@@ -13309,14 +13309,18 @@ async function finalizeSelectedDividendBatch() {
             p_payment_due_date: paymentDueDate,
             p_account_change_deadline: null
         });
-        showLoading(false);
-
-        if (error) return myAlert('배당 확정 실패: ' + error.message, 'error');
+        if (error) {
+            showLoading(false);
+            return myAlert('배당 확정 실패: ' + error.message, 'error');
+        }
         const heldCount = Number(data?.held_item_count || 0);
         const deadline = data?.account_change_deadline ? formatAdminMemberKstDateTime(data.account_change_deadline) : '지급예정일 전날 23:59';
-        myAlert(`배당 회차가 확정되었습니다.\n계좌 등록·변경 마감: ${deadline}${heldCount > 0 ? `\n계좌 미등록 지급보류: ${heldCount.toLocaleString('ko-KR')}명` : ''}`);
-        dispatchDividendKakaoNotifications(batchId, 'dividend_finalized', false);
+        const notificationResult = await dispatchDividendKakaoNotifications(batchId, 'dividend_finalized', false);
+        showLoading(false);
         await fetchDividendManageBatches(false);
+        const notificationText = formatDividendNotificationDispatchResult(notificationResult);
+        const alertType = getDividendNotificationDispatchAlertType(notificationResult);
+        myAlert(`배당 회차가 확정되었습니다.\n계좌 등록·변경 마감: ${deadline}${heldCount > 0 ? `\n계좌 미등록 지급보류: ${heldCount.toLocaleString('ko-KR')}명` : ''}\n${notificationText}`, alertType);
     });
 } // End of finalizeSelectedDividendBatch
 
@@ -13549,7 +13553,7 @@ function renderDividendNotificationSummary() {
     }
     summaryEl.innerHTML = rows.map((row) => {
         const label = row.event_type === 'dividend_paid' ? '지급완료' : '확정';
-        return `<div><strong>${label}</strong> · 대기 ${Number(row.queued_count || 0).toLocaleString('ko-KR')} · 접수 ${Number(row.accepted_count || 0).toLocaleString('ko-KR')} · 실패 ${Number(row.failed_count || 0).toLocaleString('ko-KR')} · 결과확인 ${Number(row.unknown_count || 0).toLocaleString('ko-KR')}</div>`;
+        return `<div><strong>${label}</strong> · 대기 ${Number(row.queued_count || 0).toLocaleString('ko-KR')} · 처리중 ${Number(row.processing_count || 0).toLocaleString('ko-KR')} · 접수 ${Number(row.accepted_count || 0).toLocaleString('ko-KR')} · 실패 ${Number(row.failed_count || 0).toLocaleString('ko-KR')} · 결과확인 ${Number(row.unknown_count || 0).toLocaleString('ko-KR')} · 미발송 ${Number(row.skipped_count || 0).toLocaleString('ko-KR')}</div>`;
     }).join('');
 } // End of renderDividendNotificationSummary
 
@@ -13888,47 +13892,139 @@ async function confirmSelectedDividendPaymentRun() {
             p_failed_run_item_ids: failedIds,
             p_failure_reason: failedIds.length > 0 ? '은행 이체 결과에서 실패 확인' : null
         });
-        showLoading(false);
-        if (error) return myAlert('지급 결과 반영 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
+        if (error) {
+            showLoading(false);
+            return myAlert('지급 결과 반영 실패: ' + getDividendExportRpcErrorMessage(error), 'error');
+        }
 
-        dispatchDividendKakaoNotifications(g_dividend_export_state.selectedBatchId, 'dividend_paid', false);
+        const notificationResult = await dispatchDividendKakaoNotifications(g_dividend_export_state.selectedBatchId, 'dividend_paid', false);
+        showLoading(false);
         await fetchDividendExportBatches(false);
-        myAlert(`지급 결과를 반영했습니다.\n지급완료 ${Number(data?.paid_count || 0).toLocaleString('ko-KR')}명 · 실패 ${Number(data?.failed_count || 0).toLocaleString('ko-KR')}명 · 보류 ${Number(data?.held_count || 0).toLocaleString('ko-KR')}명`);
+        const notificationText = formatDividendNotificationDispatchResult(notificationResult);
+        const alertType = getDividendNotificationDispatchAlertType(notificationResult);
+        myAlert(`지급 결과를 반영했습니다.\n지급완료 ${Number(data?.paid_count || 0).toLocaleString('ko-KR')}명 · 실패 ${Number(data?.failed_count || 0).toLocaleString('ko-KR')}명 · 보류 ${Number(data?.held_count || 0).toLocaleString('ko-KR')}명\n${notificationText}`, alertType);
     });
 } // End of confirmSelectedDividendPaymentRun
+
+const DIVIDEND_NOTIFICATION_CLAIM_LIMIT = 50;
+
+function setDividendNotificationDispatchUi(isDispatching, message) {
+    document.querySelectorAll('[data-dividend-notification-dispatch]').forEach(function (button) {
+        button.disabled = Boolean(isDispatching);
+    });
+    const summaryEl = document.getElementById('dividendNotificationSummary');
+    if (summaryEl && message) summaryEl.textContent = message;
+} // End of setDividendNotificationDispatchUi
+
+function getDividendNotificationEventLabel(eventType) {
+    return eventType === 'dividend_paid' ? '지급완료' : '확정';
+} // End of getDividendNotificationEventLabel
+
+function getDividendNotificationSkipReasonText(reason) {
+    const safeReason = String(reason || '').trim();
+    if (safeReason === 'dividend_kakao_disabled') return '조합의 배당 알림톡 설정이 비활성 상태입니다.';
+    if (safeReason === 'dividend_kakao_not_configured') return '알림톡 템플릿 또는 발신번호 설정이 필요합니다.';
+    if (safeReason === 'template_not_sendable') return '알림톡 템플릿 검수가 완료되지 않아 대기열에 보관했습니다.';
+    return safeReason ? `발송 준비가 완료되지 않았습니다. (${safeReason})` : '';
+} // End of getDividendNotificationSkipReasonText
+
+function formatDividendNotificationDispatchResult(result) {
+    if (!result) return '알림톡 처리 결과를 확인하지 못했습니다.';
+    if (result.busy) return '다른 배당 알림을 처리 중이어서 이번 자동 처리는 시작하지 않았습니다.';
+    if (!result.ok) return `알림톡 자동 처리 실패: ${result.errorMessage || '알 수 없는 오류'}`;
+    if (result.skipReason) return getDividendNotificationSkipReasonText(result.skipReason);
+    if (Number(result.claimed || 0) <= 0) return '발송 대기 중인 알림톡이 없습니다.';
+    return `알림톡 자동 처리: ${Number(result.batchCount || 0).toLocaleString('ko-KR')}회 · 접수 ${Number(result.accepted || 0).toLocaleString('ko-KR')}건 · 실패 ${Number(result.failed || 0).toLocaleString('ko-KR')}건 · 결과확인 ${Number(result.unknown || 0).toLocaleString('ko-KR')}건 · 미발송 ${Number(result.skipped || 0).toLocaleString('ko-KR')}건`;
+} // End of formatDividendNotificationDispatchResult
+
+function getDividendNotificationDispatchAlertType(result) {
+    if (!result || result.busy || !result.ok || result.skipReason) return 'warning';
+    if (Number(result.failed || 0) > 0 || Number(result.unknown || 0) > 0 || Number(result.skipped || 0) > 0) return 'warning';
+    return 'success';
+} // End of getDividendNotificationDispatchAlertType
 
 async function dispatchDividendKakaoNotifications(batchId, eventType, showToast = true) {
     const safeBatchId = String(batchId || '').trim();
     const safeEventType = String(eventType || '').trim();
-    if (!safeBatchId || !['dividend_finalized', 'dividend_paid'].includes(safeEventType)) return;
+    if (!safeBatchId || !['dividend_finalized', 'dividend_paid'].includes(safeEventType)) {
+        return { ok: false, errorMessage: '배당 회차 또는 알림 종류가 올바르지 않습니다.' };
+    }
     if (g_dividend_export_state.notificationDispatching) {
         if (showToast) myAlert('배당 알림을 처리 중입니다. 잠시만 기다려주세요.', 'warning');
-        return;
+        return { ok: false, busy: true, errorMessage: '배당 알림 처리 중' };
     }
 
+    const eventLabel = getDividendNotificationEventLabel(safeEventType);
+    const outcome = {
+        ok: false,
+        busy: false,
+        batchCount: 0,
+        claimed: 0,
+        accepted: 0,
+        failed: 0,
+        unknown: 0,
+        skipped: 0,
+        skipReason: '',
+        errorMessage: ''
+    };
     g_dividend_export_state.notificationDispatching = true;
+    setDividendNotificationDispatchUi(true, `${eventLabel} 알림 자동 처리를 시작합니다.`);
     try {
-        const { data, error } = await invokeAdminMemberEdgeFunction('send-dividend-kakao', {
-            batchId: safeBatchId,
-            eventType: safeEventType,
-            limit: 50
-        });
-        if (error) throw error;
-        if (data?.skipped) {
-            if (showToast) myAlert(`알림톡을 발송하지 않았습니다: ${data.skipped}`, 'warning');
-        } else if (showToast) {
-            const accepted = Number(data?.accepted || 0);
-            const failed = Number(data?.failed || 0);
-            const moreText = data?.hasMore ? '\n대기분이 더 있으면 버튼을 한 번 더 눌러주세요.' : '';
-            myAlert(`알림톡 처리 완료: 접수 ${accepted.toLocaleString('ko-KR')}건 · 실패 ${failed.toLocaleString('ko-KR')}건${moreText}`);
+        let hasMore = true;
+        while (hasMore) {
+            setDividendNotificationDispatchUi(
+                true,
+                `${eventLabel} 알림 자동 처리 중 · ${outcome.batchCount + 1}차(최대 ${DIVIDEND_NOTIFICATION_CLAIM_LIMIT}건) 요청`
+            );
+            const { data, error } = await invokeAdminMemberEdgeFunction('send-dividend-kakao', {
+                batchId: safeBatchId,
+                eventType: safeEventType,
+                limit: DIVIDEND_NOTIFICATION_CLAIM_LIMIT
+            });
+            if (error) throw new Error(await getAdminMemberEdgeErrorMessage(error));
+            if (data?.ok === false) throw new Error(String(data?.detail || data?.error || '배당 알림 처리 실패'));
+
+            const claimed = Math.max(0, normalizeDividendExportNumber(data?.claimed));
+            const skipReason = typeof data?.skipped === 'string' ? String(data.skipped) : '';
+            outcome.claimed += claimed;
+            outcome.accepted += Math.max(0, normalizeDividendExportNumber(data?.accepted));
+            outcome.failed += Math.max(0, normalizeDividendExportNumber(data?.failed));
+            outcome.unknown += Math.max(0, normalizeDividendExportNumber(data?.unknown));
+            outcome.skipped += typeof data?.skipped === 'number' ? Math.max(0, normalizeDividendExportNumber(data.skipped)) : 0;
+            if (claimed > 0) outcome.batchCount += 1;
+
+            setDividendNotificationDispatchUi(
+                true,
+                `${eventLabel} 알림 자동 처리 중 · ${outcome.batchCount.toLocaleString('ko-KR')}회 · 접수 ${outcome.accepted.toLocaleString('ko-KR')}건 · 실패 ${outcome.failed.toLocaleString('ko-KR')}건`
+            );
+
+            if (skipReason) {
+                outcome.skipReason = skipReason;
+                break;
+            }
+            if (claimed <= 0) break;
+            hasMore = data?.hasMore === true;
         }
+        outcome.ok = true;
     } catch (error) {
         console.warn('[dividend-kakao] dispatch failed:', error);
-        if (showToast) myAlert('배당 알림톡 처리 실패: ' + (error?.message || error), 'error');
+        outcome.errorMessage = String(error?.message || error || '알 수 없는 오류');
     } finally {
         g_dividend_export_state.notificationDispatching = false;
-        if (String(g_dividend_export_state.selectedBatchId) === safeBatchId) await fetchDividendPaymentState();
+        setDividendNotificationDispatchUi(false, `${eventLabel} 알림 자동 처리가 끝났습니다.`);
+        if (String(g_dividend_export_state.selectedBatchId) === safeBatchId) {
+            try {
+                await fetchDividendPaymentState();
+            } catch (refreshError) {
+                console.warn('[dividend-kakao] summary refresh failed:', refreshError);
+            }
+        }
     }
+
+    if (showToast) {
+        myAlert(formatDividendNotificationDispatchResult(outcome), getDividendNotificationDispatchAlertType(outcome));
+    }
+    return outcome;
 } // End of dispatchDividendKakaoNotifications
 
 async function dispatchSelectedDividendNotifications(eventType) {
