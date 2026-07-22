@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.90
-Change: Improve family/group profile switching labels and restrict managed-account links to groups or minor children.
+Version: v1.0.91
+Change: Send an idempotent Kakao payment notice after a new extra-capital application is saved.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.90 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.91 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -4618,6 +4618,27 @@ console.warn(`[member-request-alert] ${safeEventType} admin telegram skipped:`, 
 }
 } // End of notifyMemberApplicationAdmins
 
+async function notifyExtraCapitalApplicantKakao(applicationId) {
+const safeApplicationId = Number(applicationId || 0);
+if (!Number.isInteger(safeApplicationId) || safeApplicationId <= 0) return;
+if (!_supabase?.functions || typeof _supabase.functions.invoke !== 'function') return;
+
+try {
+const { data, error } = await _supabase.functions.invoke('send-extra-capital-kakao', {
+body: {
+applicationId: safeApplicationId
+}
+});
+
+if (error) throw error;
+if (data && data.ok === false) {
+console.warn('[extra-capital-kakao] applicant notice skipped:', data);
+}
+} catch (error) {
+console.warn('[extra-capital-kakao] applicant notice skipped:', error?.message || error, error || {});
+}
+} // End of notifyExtraCapitalApplicantKakao
+
 async function submitApplication(type) {
 let amount = 0, reason = '';
 const totalCap = Number(curMem.total_capital || 0);
@@ -4689,6 +4710,12 @@ if(error) throw error;
 notifyMemberApplicationAdmins(createdApplication?.id).catch((notifyError) => {
 console.warn('[member-request-alert] application admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
 });
+
+if (type === 'extra') {
+notifyExtraCapitalApplicantKakao(createdApplication?.id).catch((notifyError) => {
+console.warn('[extra-capital-kakao] applicant notice skipped:', notifyError?.message || notifyError, notifyError || {});
+});
+}
 
 showModal('신청되었습니다.');
 
