@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.106
-Change: Add confirmed AlimTalk sending for manual capital reflections.
+Version: v1.0.107
+Change: Route financial AlimTalk calls through the authenticated ERP Edge helper.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.106';
+window.ADMIN_MEMBER_VERSION = 'v1.0.107';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -3355,6 +3355,11 @@ const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     }
 });
 const _supabaseEdge = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+        headers: {
+            'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase()
+        }
+    },
     auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -11759,8 +11764,8 @@ async function sendCapitalReflectionNotification() {
     setCapitalNotificationFeedback('', 'warning');
     setCapitalNotificationSending(true);
     try {
-        const { data, error } = await _supabase.functions.invoke('send-capital-reflection-kakao', {
-            body: { capitalId: context.capitalId }
+        const { data, error } = await invokeAdminMemberEdgeFunction('send-capital-reflection-kakao', {
+            capitalId: context.capitalId
         });
         if (error) throw error;
 
@@ -13903,12 +13908,10 @@ async function dispatchDividendKakaoNotifications(batchId, eventType, showToast 
 
     g_dividend_export_state.notificationDispatching = true;
     try {
-        const { data, error } = await _supabase.functions.invoke('send-dividend-kakao', {
-            body: {
-                batchId: safeBatchId,
-                eventType: safeEventType,
-                limit: 50
-            }
+        const { data, error } = await invokeAdminMemberEdgeFunction('send-dividend-kakao', {
+            batchId: safeBatchId,
+            eventType: safeEventType,
+            limit: 50
         });
         if (error) throw error;
         if (data?.skipped) {
