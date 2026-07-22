@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.85 | Change: 2026-06-22 - Truncate suggested bank interest withholding taxes to 10-won units. -->
+<!-- Version: v1.0.86 | Change: 2026-07-23 - Allow expense and asset accounts in approval reclassification. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.85 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.86 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -513,7 +513,7 @@
              <div class="d-flex justify-content-between align-items-center mb-2">
                <div>
                  <h6 class="fw-bold mb-1">🧩 전자결재 미분류 재분류</h6>
-                 <small class="text-muted">자동연동으로 생성된 `(차)미분류비용` 건을 비용 계정으로 대체분개합니다.</small>
+                 <small class="text-muted">자동연동으로 생성된 `(차)미분류비용` 건을 비용 또는 자산 계정으로 대체분개합니다.</small>
                </div>
                <button class="btn btn-outline-secondary btn-sm" onclick="loadApprovalUnclassifiedQueue()">새로고침</button>
              </div>
@@ -1085,7 +1085,7 @@ let durunuriSupportRowsCache = [];
 const AUTO_SYNC_UNDO_KEY = 'erp_auto_sync_last_undo_v1';
 const INSURANCE_PENDING_TAG = '[4대보험정산대기]';
 const KST_TZ_ACCOUNTING = 'Asia/Seoul';
-const APPROVAL_SPLIT_RECLASS_TARGET_TYPES = Object.freeze(['비용', '자산']);
+const APPROVAL_RECLASS_TARGET_TYPES = Object.freeze(['비용', '자산']);
 const COOP_CORPORATE_TAX_BRACKETS = [
     { limit: 2000000000, rate: 0.09, deduction: 0 },
     { limit: Infinity, rate: 0.12, deduction: 60000000 }
@@ -2025,20 +2025,6 @@ function buildApprovalDocTitleButtonHtml(text, docId, className = 'btn btn-link 
     return `<button type="button" class="${escapeHtml(className)}" onclick="openApprovalDocPreview(${safeDocId})">${safeText}</button>`;
 }
 
-function getApprovalReclassExpenseAccounts() {
-    const seen = new Set();
-    return (mData || [])
-        .filter((row) => String(row?.Type || '').trim() === '비용')
-        .map((row) => String(row?.Item || '').trim())
-        .filter((name) => {
-            if (!name || name === '미분류비용') return false;
-            if (seen.has(name)) return false;
-            seen.add(name);
-            return true;
-        })
-        .sort((a, b) => a.localeCompare(b, 'ko'));
-}
-
 function getApprovalReclassMasterRowsByTypes(allowedTypes) {
     const safeTypes = Array.isArray(allowedTypes)
         ? allowedTypes.map((type) => String(type || '').trim()).filter(Boolean)
@@ -2079,10 +2065,6 @@ function findApprovalReclassMasterRow(accountName, allowedTypes) {
     }) || null;
 } // End of findApprovalReclassMasterRow
 
-function findApprovalReclassExpenseMasterRow(accountName) {
-    return findApprovalReclassMasterRow(accountName, ['비용']);
-}
-
 function refreshApprovalReclassVatToggle(domKey) {
     const key = String(domKey || '').trim();
     if (!key) return;
@@ -2090,9 +2072,19 @@ function refreshApprovalReclassVatToggle(domKey) {
     const vatToggle = document.getElementById(`approvalReclassVat-${key}`);
     if (!accountInput || !vatToggle) return;
 
-    const accountRow = findApprovalReclassExpenseMasterRow(accountInput.value);
+    const accountTypeHint = String(accountInput.dataset.accountType || '').trim();
+    const accountRow = findApprovalReclassMasterRow(
+        accountInput.value,
+        accountTypeHint ? [accountTypeHint] : APPROVAL_RECLASS_TARGET_TYPES
+    );
     if (!accountRow) {
         vatToggle.disabled = false;
+        return;
+    }
+
+    if (String(accountRow.Type || '').trim() !== '비용') {
+        vatToggle.checked = false;
+        vatToggle.disabled = true;
         return;
     }
 
@@ -2107,12 +2099,17 @@ function refreshApprovalReclassVatToggle(domKey) {
     if (wasDisabled) vatToggle.checked = true;
 }
 
-function applyApprovalReclassAccountSelection(domKey, accountName) {
+function applyApprovalReclassAccountSelection(domKey, accountName, accountTypeValue = '') {
     const key = String(domKey || '').trim();
     if (!key) return;
     const inputEl = document.getElementById(`approvalReclassAccount-${key}`);
     if (!inputEl) return;
+    const accountRow = findApprovalReclassMasterRow(
+        accountName,
+        accountTypeValue ? [accountTypeValue] : APPROVAL_RECLASS_TARGET_TYPES
+    );
     inputEl.value = String(accountName || '').trim();
+    inputEl.dataset.accountType = String(accountRow?.Type || accountTypeValue || '').trim();
     refreshApprovalReclassVatToggle(key);
 }
 
@@ -2124,14 +2121,14 @@ function openApprovalReclassAccountPicker(domKey) {
     const item = approvalUnclassifiedIndex.get(key);
     if (!item) return showAlert("알림", "대상을 다시 선택해주세요. 목록을 새로고침합니다.");
 
-    const accounts = getApprovalReclassExpenseAccounts();
-    if (accounts.length === 0) return showAlert("오류", "비용 계정 마스터가 없어 선택할 수 없습니다. ac_master를 먼저 확인하세요.");
+    const accounts = getApprovalReclassMasterRowsByTypes(APPROVAL_RECLASS_TARGET_TYPES);
+    if (accounts.length === 0) return showAlert("오류", "비용/자산 계정 마스터가 없어 선택할 수 없습니다. ac_master를 먼저 확인하세요.");
 
     const currentInput = document.getElementById(`approvalReclassAccount-${key}`);
     const searchInput = document.getElementById("accountSearchInput");
     selectContext = {
         mode: 'approvalReclass',
-        forcedType: '비용',
+        allowedTypes: APPROVAL_RECLASS_TARGET_TYPES,
         domKey: key,
         projectOverride: item.project || ''
     };
@@ -2211,7 +2208,7 @@ function renderApprovalUnclassifiedQueue(items) {
     if (!listEl) return;
     const safeItems = Array.isArray(items) ? items : [];
     const editable = canPerform('accounting.edit');
-    const accounts = getApprovalReclassExpenseAccounts();
+    const accounts = getApprovalReclassMasterRowsByTypes(APPROVAL_RECLASS_TARGET_TYPES);
     const accountCount = accounts.length;
     const hasSelectableAccount = accountCount > 0;
 
@@ -2223,7 +2220,7 @@ function renderApprovalUnclassifiedQueue(items) {
     const summary = `<div class="small text-muted mb-2">대상 ${safeItems.length}건 · 미분류 합계 ${safeItems.reduce((sum, item) => sum + Number(item.amount || 0), 0).toLocaleString()}원</div>`;
     const warnNoAccount = hasSelectableAccount
         ? ''
-        : '<div class="small text-danger mb-2">비용 계정 마스터가 없어 재분류할 수 없습니다. ac_master를 먼저 확인하세요.</div>';
+        : '<div class="small text-danger mb-2">비용/자산 계정 마스터가 없어 재분류할 수 없습니다. ac_master를 먼저 확인하세요.</div>';
 
     const rowsHtml = safeItems.map((item) => {
         const safeDate = escapeHtml(item.date || '-');
@@ -2248,11 +2245,11 @@ function renderApprovalUnclassifiedQueue(items) {
                 </div>
                 <div class="small text-muted mb-2">${safeDate} · ${safeTransId} · ${safeProject} · ${safeOperator}</div>
                 <div class="d-flex gap-2 align-items-center">
-                    <input id="${inputId}" class="form-control form-control-sm" type="text" placeholder="계정 선택 필요" readonly${disabledAttr}>
+                    <input id="${inputId}" class="form-control form-control-sm" type="text" placeholder="비용 또는 자산 계정 선택" readonly${disabledAttr}>
                     <button id="${pickBtnId}" class="btn btn-sm btn-outline-secondary"${disabledAttr} onclick="openApprovalReclassAccountPicker('${item.domKey}')">계정 선택</button>
                     <div class="form-check form-check-inline mb-0">
                         <input class="form-check-input" type="checkbox" id="${vatId}" checked${disabledAttr}>
-                        <label class="form-check-label small" for="${vatId}">부가세 포함</label>
+                        <label class="form-check-label small" for="${vatId}">비용 부가세 포함</label>
                     </div>
                     <button id="${btnId}" class="btn btn-sm btn-outline-primary"${disabledAttr} onclick="submitApprovalUnclassifiedReclass('${item.domKey}')">재분류</button>
                     <button id="${splitBtnId}" class="btn btn-sm btn-outline-dark"${disabledAttr} onclick="openApprovalSplitReclassModal('${item.domKey}')">분할 재분류</button>
@@ -2279,15 +2276,25 @@ async function submitApprovalUnclassifiedReclass(rowKey) {
     const vatToggleEl = document.getElementById(`approvalReclassVat-${item.domKey}`);
     const actionBtn = document.getElementById(`approvalReclassBtn-${item.domKey}`);
     const targetAccount = String(inputEl?.value || '').trim();
-    if (!targetAccount) return showAlert("오류", "재분류할 비용 계정을 선택하세요.");
+    const targetTypeHint = String(inputEl?.dataset.accountType || '').trim();
+    if (!targetAccount) return showAlert("오류", "재분류할 비용 또는 자산 계정을 선택하세요.");
     if (targetAccount === '미분류비용') return showAlert("오류", "미분류비용 외 계정을 선택하세요.");
 
-    const accountRow = findApprovalReclassExpenseMasterRow(targetAccount);
+    const accountRow = findApprovalReclassMasterRow(
+        targetAccount,
+        targetTypeHint ? [targetTypeHint] : APPROVAL_RECLASS_TARGET_TYPES
+    );
     if (!accountRow) return showAlert("오류", "선택한 계정을 마스터에서 찾지 못했습니다. 목록을 새로고침 후 다시 시도하세요.");
+    const targetType = String(accountRow.Type || targetTypeHint || '').trim();
+    if (!APPROVAL_RECLASS_TARGET_TYPES.includes(targetType)) {
+        return showAlert("오류", "선택한 계정의 유형을 확인하세요.");
+    }
 
     const amount = Math.max(0, Number(item.amount || 0));
     if (!(amount > 0)) return showAlert("오류", "재분류 금액이 유효하지 않습니다.");
-    const useVat = Boolean(vatToggleEl?.checked) && !isTaxFreeMasterValue(accountRow.tax_free);
+    const useVat = targetType === '비용'
+        && Boolean(vatToggleEl?.checked)
+        && !isTaxFreeMasterValue(accountRow.tax_free);
     const netAmount = useVat ? Math.round(amount / 1.1) : amount;
     const vatAmount = useVat ? (amount - netAmount) : 0;
 
@@ -2313,7 +2320,7 @@ async function submitApprovalUnclassifiedReclass(rowKey) {
         const entries = [
             {
                 Date: txDate,
-                Type: '비용',
+                Type: targetType,
                 Account: targetAccount,
                 Description: taggedDesc,
                 Debit: netAmount,
@@ -2480,7 +2487,7 @@ function applyApprovalSplitReclassAccountSelection(rowId, accountName, accountTy
     const rows = Array.isArray(approvalSplitReclassState?.rows) ? approvalSplitReclassState.rows : [];
     const target = rows.find((row) => row.rowId === String(rowId || '').trim());
     if (!target) return;
-    const accountRow = findApprovalReclassMasterRow(accountName, APPROVAL_SPLIT_RECLASS_TARGET_TYPES);
+    const accountRow = findApprovalReclassMasterRow(accountName, APPROVAL_RECLASS_TARGET_TYPES);
     const accountType = String(accountRow?.Type || accountTypeValue || '').trim();
     target.accountType = accountType;
     target.account = String(accountName || '').trim();
@@ -2492,13 +2499,13 @@ function openApprovalSplitReclassAccountPicker(rowId) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const item = getApprovalSplitReclassItem();
     if (!item) return showAlert("알림", "대상을 다시 선택해주세요.");
-    const accounts = getApprovalReclassMasterRowsByTypes(APPROVAL_SPLIT_RECLASS_TARGET_TYPES);
+    const accounts = getApprovalReclassMasterRowsByTypes(APPROVAL_RECLASS_TARGET_TYPES);
     if (accounts.length === 0) return showAlert("오류", "비용/자산 계정 마스터가 없어 선택할 수 없습니다. ac_master를 먼저 확인하세요.");
     const searchInput = document.getElementById("accountSearchInput");
     const currentInput = document.getElementById(`approvalSplitReclassAccount-${rowId}`);
     selectContext = {
         mode: 'approvalSplitReclass',
-        allowedTypes: APPROVAL_SPLIT_RECLASS_TARGET_TYPES,
+        allowedTypes: APPROVAL_RECLASS_TARGET_TYPES,
         rowId: String(rowId || '').trim(),
         projectOverride: item.project || ''
     };
@@ -2556,11 +2563,11 @@ async function submitApprovalSplitReclass() {
 
         const accountRow = findApprovalReclassMasterRow(
             targetAccount,
-            targetTypeHint ? [targetTypeHint] : APPROVAL_SPLIT_RECLASS_TARGET_TYPES
+            targetTypeHint ? [targetTypeHint] : APPROVAL_RECLASS_TARGET_TYPES
         );
         if (!accountRow) return showAlert("오류", `선택한 계정(${targetAccount})을 마스터에서 찾지 못했습니다.`);
         const targetType = String(accountRow.Type || targetTypeHint || '').trim();
-        if (!APPROVAL_SPLIT_RECLASS_TARGET_TYPES.includes(targetType)) {
+        if (!APPROVAL_RECLASS_TARGET_TYPES.includes(targetType)) {
             return showAlert("오류", `선택한 계정(${targetAccount})의 유형을 확인하세요.`);
         }
 
@@ -4426,7 +4433,7 @@ function filterAccounts() {
             }
             if (selectContext && selectContext.mode === 'approvalReclass') {
                 const targetKey = String(selectContext.domKey || '').trim();
-                if (targetKey) applyApprovalReclassAccountSelection(targetKey, acc.Item);
+                if (targetKey) applyApprovalReclassAccountSelection(targetKey, acc.Item, acc.Type);
                 selectContext = null;
                 selectModal.hide();
                 return;
