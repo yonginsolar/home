@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.108
-Change: Process dividend AlimTalk queues automatically in sequential 50-recipient batches.
+Version: v1.0.109
+Change: Refresh capital notification status after the notification prompt completes.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.108';
+window.ADMIN_MEMBER_VERSION = 'v1.0.109';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -11980,15 +11980,25 @@ async function saveFundData() {
     if (error) {
         myAlert('저장 실패: ' + error.message, 'error');
     } else {
-        // 리스트 새로고침 (현재 보고 있는 조합원 자금 내역)
-        loadMemberFunds(memberUid, memberTextId, true); // true = 리셋 후 로드
+        const hasCapitalNotificationPrompt = isNewCapital && Boolean(data?.capital_id);
+        // 신규 출자금은 알림 선택이 끝난 뒤 원장과 알림 상태를 한 번에 다시 읽는다.
+        if (!hasCapitalNotificationPrompt) {
+            loadMemberFunds(memberUid, memberTextId, true);
+        }
 
         // 대시보드 통계도 갱신 (금액이 변했으므로)
         loadDashboard();
 
-        runAfterFundEditorClosed(() => {
-            if (isNewCapital && data?.capital_id) {
-                openCapitalNotificationPrompt(data, function (result) {
+        runAfterFundEditorClosed(function () {
+            if (hasCapitalNotificationPrompt) {
+                openCapitalNotificationPrompt(data, async function (result) {
+                    showLoading(true);
+                    try {
+                        await loadMemberFunds(memberUid, memberTextId, true);
+                        if (activeMemberHistoryType === 'ledger') renderMemberHistoryContent('ledger');
+                    } finally {
+                        showLoading(false);
+                    }
                     continueAfterCapitalNotification(
                         result,
                         memberTextId,
@@ -12005,7 +12015,7 @@ async function saveFundData() {
             myAlert('성공적으로 저장되었습니다.');
         });
     }
-}
+} // End of saveFundData
 
 
 // 1. [유틸] 알럿 -> 모달 대체
