@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.109
-Change: Refresh capital notification status after the notification prompt completes.
+Version: v1.0.110
+Change: Send the capital-reflection AlimTalk after an extra-capital approval.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.109';
+window.ADMIN_MEMBER_VERSION = 'v1.0.110';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -11753,6 +11753,103 @@ function getCapitalNotificationOutcomeMessage(result) {
     return { message: '출자금은 저장되었으며 알림톡은 나중에 출자금 내역에서 발송할 수 있습니다.', type: 'success' };
 } // End of getCapitalNotificationOutcomeMessage
 
+async function sendApprovedExtraCapitalNotification(capitalId) {
+    const numericCapitalId = Number(capitalId || 0);
+    if (!Number.isInteger(numericCapitalId) || numericCapitalId <= 0) {
+        return {
+            outcome: 'unavailable',
+            message: '승인과 장부 기록은 완료되었지만 알림톡 발송 대상 원장을 확인하지 못했습니다.',
+            type: 'warning'
+        };
+    }
+
+    try {
+        const { data, error } = await invokeAdminMemberEdgeFunction('send-capital-reflection-kakao', {
+            capitalId: numericCapitalId
+        });
+        if (error) {
+            const detail = await getAdminMemberEdgeErrorMessage(error);
+            return {
+                outcome: 'failed',
+                message: `승인과 장부 기록은 완료되었지만 알림톡 발송 요청에 실패했습니다. 출자금 내역에서 다시 보낼 수 있습니다.\n${detail}`,
+                type: 'warning'
+            };
+        }
+
+        if (data?.accepted === true) {
+            return {
+                outcome: 'accepted',
+                message: '출자금 반영 알림톡 발송이 접수되었습니다.',
+                type: 'success'
+            };
+        }
+
+        const skipped = String(data?.skipped || '').trim();
+        const deliveryStatus = String(data?.delivery_status || '').trim();
+        if (skipped === 'already_attempted' && deliveryStatus === 'accepted') {
+            return {
+                outcome: 'accepted',
+                message: '출자금 반영 알림톡은 이미 발송 접수되었습니다.',
+                type: 'success'
+            };
+        }
+        if (skipped === 'already_attempted' && deliveryStatus === 'processing') {
+            return {
+                outcome: 'processing',
+                message: '출자금 반영 알림톡이 이미 발송 처리 중입니다.',
+                type: 'warning'
+            };
+        }
+        if (skipped === 'already_attempted' && deliveryStatus === 'unknown') {
+            return {
+                outcome: 'unknown',
+                message: '알림톡 발송 결과를 확정할 수 없어 중복 발송을 막았습니다. 솔라피 발송 내역을 확인해주세요.',
+                type: 'warning'
+            };
+        }
+        if (skipped === 'template_not_sendable') {
+            return {
+                outcome: 'deferred',
+                message: '승인과 장부 기록은 완료되었지만 템플릿이 아직 발송 가능한 상태가 아닙니다. 출자금 내역에서 다시 보낼 수 있습니다.',
+                type: 'warning'
+            };
+        }
+        if (skipped === 'member_phone_unavailable') {
+            return {
+                outcome: 'deferred',
+                message: '승인과 장부 기록은 완료되었지만 조합원 전화번호가 없거나 형식이 올바르지 않아 알림톡을 보내지 못했습니다.',
+                type: 'warning'
+            };
+        }
+        if (skipped === 'kakao_member_alerts_disabled') {
+            return {
+                outcome: 'deferred',
+                message: '승인과 장부 기록은 완료되었지만 이 조합의 조합원 알림톡 기능이 꺼져 있습니다.',
+                type: 'warning'
+            };
+        }
+        if (skipped === 'kakao_capital_reflection_not_configured') {
+            return {
+                outcome: 'deferred',
+                message: '승인과 장부 기록은 완료되었지만 출자금 반영 알림톡 설정이 완료되지 않았습니다.',
+                type: 'warning'
+            };
+        }
+        return {
+            outcome: 'deferred',
+            message: '승인과 장부 기록은 완료되었지만 알림톡 발송이 완료되지 않았습니다. 출자금 내역에서 다시 보낼 수 있습니다.',
+            type: 'warning'
+        };
+    } catch (error) {
+        console.error('[sendApprovedExtraCapitalNotification] failed:', error);
+        return {
+            outcome: 'failed',
+            message: '승인과 장부 기록은 완료되었지만 알림톡 발송 요청 중 오류가 발생했습니다. 출자금 내역에서 다시 보낼 수 있습니다.',
+            type: 'warning'
+        };
+    }
+} // End of sendApprovedExtraCapitalNotification
+
 async function sendCapitalReflectionNotification() {
     if (capitalNotificationPromptState.sending) return;
     const context = capitalNotificationPromptState.context;
@@ -15094,27 +15191,50 @@ async function processApp(appId, action, type, amount) {
         else msg = "이 신청을 승인 처리하시겠습니까?";
     }
 
-    myConfirm(msg, async () => {
+    myConfirm(msg, async function () {
+        showLoading(true);
+        let resultData = null;
+        let processingError = null;
+        let notificationResult = null;
 
-    showLoading(true);
+        try {
+            const { data: authData, error: authError } = await _supabase.auth.getUser();
+            if (authError) throw authError;
+            if (!authData?.user?.id) throw new Error('로그인 세션을 확인할 수 없습니다.');
 
-    const { data, error } = await _supabase.rpc('admin_process_application', {
-        p_app_id: appId,
-        p_action: action,
-        p_admin_id: (await _supabase.auth.getUser()).data.user.id
+            const { data, error } = await _supabase.rpc('admin_process_application', {
+                p_app_id: appId,
+                p_action: action,
+                p_admin_id: authData.user.id
+            });
+            if (error) throw error;
+            resultData = data || {};
+
+            if (action === 'approve' && type === 'extra') {
+                notificationResult = await sendApprovedExtraCapitalNotification(resultData.ref_member_id);
+            }
+
+            fetchApplications(); // 목록 새로고침
+            loadDashboard();     // 대시보드 갱신
+        } catch (error) {
+            processingError = error;
+        } finally {
+            showLoading(false);
+        }
+
+        if (processingError) {
+            myAlert('처리 실패: ' + (processingError?.message || processingError), 'error');
+            return;
+        }
+
+        const resultMessage = String(resultData?.message || '처리되었습니다.');
+        if (notificationResult) {
+            myAlert(`${resultMessage}\n${notificationResult.message}`, notificationResult.type);
+            return;
+        }
+        myAlert(resultMessage, 'success');
     });
-
-    showLoading(false);
-
-    if (error) {
-        myAlert("처리 실패: " + error.message, 'error');
-    } else {
-        myAlert(data.message || "처리되었습니다.");
-        fetchApplications(); // 목록 새로고침
-        loadDashboard();     // 대시보드 갱신
-    }
-    });
-}
+} // End of processApp
 
 // 6. 뱃지 업데이트 (대시보드/사이드바/유형 탭)
 function updateAppBadges(pendingCountOverride = null) {
