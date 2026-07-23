@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.111
-Change: Clarify capital-notification badges and vertically center history controls.
+Version: v1.0.112
+Change: Collect and display a member-visible reason when an application is not approved.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.111';
+window.ADMIN_MEMBER_VERSION = 'v1.0.112';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -3135,6 +3135,45 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 </div>
 
+<div class="modal fade" id="applicationRejectionModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-labelledby="applicationRejectionModalTitle" aria-hidden="true">
+<div class="modal-dialog modal-dialog-centered">
+<div class="modal-content border-0 shadow">
+<div class="modal-header border-0 pb-1">
+<div>
+<h6 class="modal-title fw-bold mb-1" id="applicationRejectionModalTitle">신청 미승인 사유</h6>
+<div class="small text-muted">조합원에게 표시할 사유를 선택해 주세요.</div>
+</div>
+</div>
+<div class="modal-body pt-2">
+<div class="d-grid gap-2" role="radiogroup" aria-label="신청 미승인 사유 선택">
+<label class="form-check border rounded-3 p-3 m-0" for="application-rejection-duplicate">
+<input class="form-check-input" type="radio" name="applicationRejectionReason" id="application-rejection-duplicate" value="duplicate" onchange="syncApplicationRejectionReasonUI()">
+<span class="form-check-label fw-bold ms-1">중복 신청</span>
+</label>
+<label class="form-check border rounded-3 p-3 m-0" for="application-rejection-requester">
+<input class="form-check-input" type="radio" name="applicationRejectionReason" id="application-rejection-requester" value="requester" onchange="syncApplicationRejectionReasonUI()">
+<span class="form-check-label fw-bold ms-1">신청자 요청</span>
+</label>
+<label class="form-check border rounded-3 p-3 m-0" for="application-rejection-custom">
+<input class="form-check-input" type="radio" name="applicationRejectionReason" id="application-rejection-custom" value="custom" onchange="syncApplicationRejectionReasonUI()">
+<span class="form-check-label fw-bold ms-1">직접 입력</span>
+</label>
+</div>
+<div class="d-none mt-3" id="applicationRejectionCustomWrap">
+<label class="form-label small fw-bold" for="applicationRejectionCustomText">조합원에게 표시할 사유</label>
+<textarea class="form-control" id="applicationRejectionCustomText" rows="3" maxlength="500" placeholder="미승인 사유를 입력해 주세요." disabled></textarea>
+<div class="form-text">내부 메모나 개인정보는 입력하지 마세요. 최대 500자까지 표시됩니다.</div>
+</div>
+<div class="alert alert-danger d-none small mt-3 mb-0" id="applicationRejectionFeedback" role="alert"></div>
+</div>
+<div class="modal-footer border-0 pt-0 d-flex gap-2">
+<button type="button" class="btn btn-light flex-fill" id="applicationRejectionCancelButton" data-bs-dismiss="modal">취소</button>
+<button type="button" class="btn btn-danger flex-fill" id="applicationRejectionSubmitButton" onclick="submitApplicationRejection()">미승인 처리</button>
+</div>
+</div>
+</div>
+</div>
+
 <div class="modal fade" id="customConfirmModal" tabindex="-1" style="z-index: 9999;">
 <div class="modal-dialog modal-dialog-centered modal-sm">
 <div class="modal-content border-0 shadow">
@@ -3718,6 +3757,7 @@ bindIssueDocModalFocusGuard();
 
 const ADMIN_MEMBER_MODAL_Z_INDEX = {
     applicationMemberModal: 1055,
+    applicationRejectionModal: 1055,
     memberDetailModal: 1055,
     memberHistoryModal: 1065,
     issueDocModal: 1065,
@@ -14874,6 +14914,8 @@ let g_apps = []; // 데이터 저장용
 let g_app_filter = 'pending'; // 현재 탭 상태
 let g_app_type_filter = 'extra'; // 추가출자 / 감자·탈퇴 / 전체
 let g_application_member_request_sequence = 0;
+let g_application_rejection_context = null;
+let g_application_rejection_in_flight = false;
 
 // 1. 신청 목록 불러오기
 // [디버깅용] fetchApplications 함수
@@ -14938,6 +14980,7 @@ function renderAppList() {
         const safeName = escapeHtml(app.name || '');
         const safeMemberId = escapeHtml(app.member_id || '');
         const safeReason = app.reason ? escapeHtml(app.reason) : '-';
+        const safeRejectionReason = app.rejection_reason ? escapeHtml(app.rejection_reason) : '';
         const safeAppIdArg = escapeJsString(String(app.id || ''));
         const applicantCell = app.type === 'extra'
             ? `
@@ -14972,18 +15015,27 @@ function renderAppList() {
                 ? '<i class="bi bi-calendar-check"></i> 총회 승인 후 처리'
                 : '<i class="bi bi-check-lg"></i> 승인/확인';
             // ★ [승인/확인] 버튼 (클릭 시 DB 기록됨)
-            actionBtns = `
+            actionBtns = app.type === 'connect' ? `
                 <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">
                     ${approveButtonLabel}
                 </button>
                 <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="processApp(${app.id}, 'reject')">
-                    반려
+                    거절
+                </button>
+            ` : `
+                <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">
+                    ${approveButtonLabel}
+                </button>
+                <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="openApplicationRejectionModal(${app.id}, '${safeAppType}')">
+                    승인하지 않음
                 </button>
             `;
         } else if (app.status === 'approved') {
             statusBadge = `<span class="badge bg-success">처리완료</span>`;
         } else if (app.status === 'rejected') {
-            statusBadge = `<span class="badge bg-danger">반려됨</span>`;
+            statusBadge = app.type === 'connect'
+                ? `<span class="badge bg-danger">거절됨</span>`
+                : `<span class="badge bg-danger">신청 미승인</span><span class="d-block small text-danger mt-1">미승인 사유: ${safeRejectionReason || '기존 처리 건으로 사유 기록 없음'}</span>`;
         } else if (app.status === 'cancelled') {
             statusBadge = `<span class="badge bg-secondary">신청취소</span>`;
         }
@@ -15235,6 +15287,143 @@ async function processApp(appId, action, type, amount) {
         myAlert(resultMessage, 'success');
     });
 } // End of processApp
+
+function setApplicationRejectionFeedback(message) {
+    const feedbackEl = document.getElementById('applicationRejectionFeedback');
+    if (!feedbackEl) return;
+    const safeMessage = String(message || '').trim();
+    feedbackEl.textContent = safeMessage;
+    feedbackEl.classList.toggle('d-none', !safeMessage);
+} // End of setApplicationRejectionFeedback
+
+function setApplicationRejectionBusy(isBusy) {
+    g_application_rejection_in_flight = Boolean(isBusy);
+    const submitButton = document.getElementById('applicationRejectionSubmitButton');
+    const cancelButton = document.getElementById('applicationRejectionCancelButton');
+    if (submitButton) {
+        submitButton.disabled = g_application_rejection_in_flight;
+        submitButton.textContent = g_application_rejection_in_flight ? '처리 중...' : '미승인 처리';
+    }
+    if (cancelButton) cancelButton.disabled = g_application_rejection_in_flight;
+} // End of setApplicationRejectionBusy
+
+function syncApplicationRejectionReasonUI() {
+    const selected = document.querySelector('input[name="applicationRejectionReason"]:checked');
+    const customWrap = document.getElementById('applicationRejectionCustomWrap');
+    const customText = document.getElementById('applicationRejectionCustomText');
+    const isCustom = selected?.value === 'custom';
+    if (customWrap) customWrap.classList.toggle('d-none', !isCustom);
+    if (customText) {
+        customText.disabled = !isCustom;
+        if (!isCustom) customText.value = '';
+        if (isCustom) requestAnimationFrame(function () { customText.focus(); });
+    }
+    setApplicationRejectionFeedback('');
+} // End of syncApplicationRejectionReasonUI
+
+function openApplicationRejectionModal(appId, appType) {
+    const safeAppId = Number(appId || 0);
+    const safeAppType = String(appType || '').trim();
+    if (!Number.isInteger(safeAppId) || safeAppId <= 0) {
+        myAlert('신청 정보를 확인할 수 없습니다.', 'error');
+        return;
+    }
+    if (!['extra', 'reduction', 'withdraw'].includes(safeAppType)) {
+        myAlert('이 신청은 미승인 사유 처리 대상이 아닙니다.', 'error');
+        return;
+    }
+
+    g_application_rejection_context = { appId: safeAppId, appType: safeAppType };
+    document.querySelectorAll('input[name="applicationRejectionReason"]').forEach(function (input) {
+        input.checked = false;
+    });
+    const customText = document.getElementById('applicationRejectionCustomText');
+    if (customText) customText.value = '';
+    syncApplicationRejectionReasonUI();
+    setApplicationRejectionBusy(false);
+
+    const modalEl = document.getElementById('applicationRejectionModal');
+    if (!modalEl) return;
+    modalEl.addEventListener('shown.bs.modal', function () {
+        document.getElementById('application-rejection-duplicate')?.focus();
+    }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+} // End of openApplicationRejectionModal
+
+function getApplicationRejectionErrorMessage(error) {
+    const raw = String(error?.message || error || '').trim();
+    if (raw.includes('APPLICATION_REJECTION_REASON_REQUIRED')) return '미승인 사유를 선택해 주세요.';
+    if (raw.includes('APPLICATION_REJECTION_CUSTOM_REASON_REQUIRED')) return '직접 입력할 미승인 사유를 작성해 주세요.';
+    if (raw.includes('APPLICATION_REJECTION_REASON_TOO_LONG')) return '미승인 사유는 500자 이하로 입력해 주세요.';
+    if (raw.includes('APPLICATION_REJECTION_REASON_INVALID')) return '미승인 사유 선택값을 확인해 주세요.';
+    if (raw.includes('APPLICATION_REJECTION_ADMIN_REQUIRED')) return '조합 관리자만 신청을 미승인 처리할 수 있습니다.';
+    if (raw.includes('APPLICATION_NOT_PENDING')) return '이미 처리되었거나 미승인 처리할 수 없는 신청입니다.';
+    if (raw.includes('APPLICATION_NOT_FOUND_OR_FORBIDDEN')) return '신청을 찾을 수 없거나 처리 권한이 없습니다.';
+    return raw || '미승인 처리 중 오류가 발생했습니다.';
+} // End of getApplicationRejectionErrorMessage
+
+function closeApplicationRejectionModalThen(callback) {
+    const modalEl = document.getElementById('applicationRejectionModal');
+    if (!modalEl) {
+        callback();
+        return;
+    }
+    modalEl.addEventListener('hidden.bs.modal', callback, { once: true });
+    moveFocusOutsideModal(modalEl);
+    const modalInstance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+    modalInstance.hide();
+} // End of closeApplicationRejectionModalThen
+
+async function submitApplicationRejection() {
+    if (g_application_rejection_in_flight) return;
+    const context = g_application_rejection_context;
+    const selected = document.querySelector('input[name="applicationRejectionReason"]:checked');
+    const reasonCode = String(selected?.value || '').trim();
+    const customReason = String(document.getElementById('applicationRejectionCustomText')?.value || '').trim();
+
+    if (!context || !reasonCode) {
+        setApplicationRejectionFeedback('미승인 사유를 선택해 주세요.');
+        return;
+    }
+    if (reasonCode === 'custom' && !customReason) {
+        setApplicationRejectionFeedback('직접 입력할 미승인 사유를 작성해 주세요.');
+        document.getElementById('applicationRejectionCustomText')?.focus();
+        return;
+    }
+    if (customReason.length > 500) {
+        setApplicationRejectionFeedback('미승인 사유는 500자 이하로 입력해 주세요.');
+        return;
+    }
+
+    setApplicationRejectionFeedback('');
+    setApplicationRejectionBusy(true);
+
+    try {
+        const { data: authData, error: authError } = await _supabase.auth.getUser();
+        if (authError) throw authError;
+        if (!authData?.user?.id) throw new Error('로그인 세션을 확인할 수 없습니다.');
+
+        const { data, error } = await _supabase.rpc('admin_reject_application', {
+            p_app_id: context.appId,
+            p_admin_id: authData.user.id,
+            p_reason_code: reasonCode,
+            p_reason_detail: reasonCode === 'custom' ? customReason : null
+        });
+        if (error) throw error;
+
+        const resultMessage = String(data?.message || '신청 미승인 처리가 완료되었습니다.');
+        g_application_rejection_context = null;
+        closeApplicationRejectionModalThen(function () {
+            fetchApplications();
+            loadDashboard();
+            myAlert(resultMessage, 'success');
+        });
+    } catch (error) {
+        setApplicationRejectionFeedback(getApplicationRejectionErrorMessage(error));
+    } finally {
+        setApplicationRejectionBusy(false);
+    }
+} // End of submitApplicationRejection
 
 // 6. 뱃지 업데이트 (대시보드/사이드바/유형 탭)
 function updateAppBadges(pendingCountOverride = null) {
