@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.87 | Change: 2026-07-23 - Auto-include asset prepayments and simplify single-entry history. -->
+<!-- Version: v1.0.88 | Change: 2026-07-23 - Prevent donation sync truncation with a server-side snapshot. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.87 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.88 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1917,62 +1917,15 @@ function buildCashNetMap(rows, prefix) {
     return map;
 }
 
-function normalizeDonationLegacyLabel(value) {
-    let text = String(value || '').trim();
-    if (!text) return '';
-    text = text.replace(/^\[기부금\]\s*/, '').trim();
-    text = text.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
-    text = text.replace(/\/[A-Za-z_]+$/, '').trim();
-    text = text.replace(/\s*자산수증이익\s*$/, '').trim();
-    return text;
-}
+async function fetchDonationSyncSnapshot() {
+    const { data, error } = await _supabase.rpc('get_accounting_donation_sync_snapshot');
+    if (error) throw error;
 
-function buildDonationLegacyCashKey(dateValue, donorLabel, amount) {
-    const txDate = String(dateValue || '').trim();
-    const donor = normalizeDonationLegacyLabel(donorLabel);
-    const normalizedAmount = Math.max(0, Number(amount || 0));
-    if (!txDate || !donor || !(normalizedAmount > 0)) return '';
-    return `${txDate}::${donor}::${normalizedAmount}`;
-}
-
-function buildLegacyDonationCashNetMap(rows, donations) {
-    const legacyBucket = new Map();
-
-    (rows || []).forEach((row) => {
-        if (!isCashLikeAccount(row.Account)) return;
-        if (parseSourceIdFromTransId(row.Trans_ID, 'DON')) return;
-
-        const description = String(row.Description || '').trim();
-        if (!description || !description.endsWith('자산수증이익')) return;
-
-        const donorLabel = normalizeDonationLegacyLabel(description.replace(/\s*자산수증이익\s*$/, '').trim());
-        const delta = Number(row.Debit || 0) - Number(row.Credit || 0);
-        if (!(delta > 0)) return;
-
-        const key = buildDonationLegacyCashKey(row.Date, donorLabel, delta);
-        if (!key) return;
-        legacyBucket.set(key, (legacyBucket.get(key) || 0) + 1);
-    });
-
-    const result = new Map();
-    (donations || []).forEach((donation) => {
-        const sourceId = String(donation?.id || '').trim();
-        if (!sourceId) return;
-
-        const donorLabel = String(donation.member_id || donation.member_uid || '익명').trim();
-        const txDate = String(donation.donation_date || '').trim();
-        const desired = Math.max(0, Number(donation.amount || 0));
-        const key = buildDonationLegacyCashKey(txDate, donorLabel, desired);
-        if (!key) return;
-
-        const remain = Number(legacyBucket.get(key) || 0);
-        if (remain <= 0) return;
-
-        legacyBucket.set(key, remain - 1);
-        result.set(sourceId, desired);
-    });
-
-    return result;
+    const donations = Array.isArray(data?.donations) ? data.donations : [];
+    return {
+        donationCount: Number(data?.donation_count || donations.length),
+        donations
+    };
 }
 
 function parseApprovalSourceIdFromTransId(transId) {
@@ -6479,20 +6432,15 @@ function confirmSync(type) {
     // (4) 기부금 연동
     else if (type === 'donation') {
         (async () => {
-            const { data: previewDonations, error: previewDonationError } = await _supabase
-                .from('coop_donations')
-                .select('id,amount,note,donation_date,member_id,member_uid')
-                .order('donation_date', { ascending: true });
-            if (previewDonationError) return showAlert("오류", "미리보기 조회 실패: " + previewDonationError.message);
+            let previewSnapshot;
+            try {
+                previewSnapshot = await fetchDonationSyncSnapshot();
+            } catch (previewError) {
+                return showAlert("오류", "미리보기 조회 실패: " + previewError.message);
+            }
+
+            const previewDonations = previewSnapshot.donations;
             if (!previewDonations || previewDonations.length === 0) return showAlert("알림", "연동할 기부금 내역이 없습니다.");
-
-            const { data: previewDonRows, error: previewDonRowsError } = await _supabase
-                .from('ac_journal')
-                .select('Date,Description,Trans_ID,Account,Debit,Credit');
-            if (previewDonRowsError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewDonRowsError.message);
-
-            const previewCashNetMap = buildCashNetMap(previewDonRows || [], 'DON');
-            const previewLegacyCashNetMap = buildLegacyDonationCashNetMap(previewDonRows || [], previewDonations || []);
             let previewNew = 0;
             let previewCorrection = 0;
             let previewSkipDone = 0;
@@ -6501,7 +6449,7 @@ function confirmSync(type) {
                 const sourceId = String(row.id || '').trim();
                 if (!sourceId) return;
                 const desired = Math.max(0, Number(row.amount || 0));
-                const current = Number(previewCashNetMap.get(sourceId) || 0) + Number(previewLegacyCashNetMap.get(sourceId) || 0);
+                const current = Number(row.current_net || 0);
                 const hasDone = String(row.note || '').includes('[전표완료]');
                 if (current === desired) {
                     if (hasDone) previewSkipDone += 1;
@@ -6513,28 +6461,22 @@ function confirmSync(type) {
 
             const previewMsg = [
                 '기부금 연동 미리보기',
-                `- 대상 건수: ${previewDonations.length}건`,
+                `- 대상 건수: ${previewSnapshot.donationCount}건`,
                 `- 신규 전표: ${previewNew}건`,
                 `- 정정(취소+재기표): ${previewCorrection}건`,
                 `- 전표완료 스킵: ${previewSkipDone}건`
             ].join('\n');
 
             showConfirm("기부금 연동", previewMsg, async () => {
-            const { data: donations, error: fetchError } = await _supabase
-                .from('coop_donations')
-                .select('*')
-                .order('donation_date', { ascending: true });
+            let currentSnapshot;
+            try {
+                currentSnapshot = await fetchDonationSyncSnapshot();
+            } catch (fetchError) {
+                return showAlert("오류", "기부금 조회 실패: " + fetchError.message);
+            }
 
-            if (fetchError) return showAlert("오류", "기부금 조회 실패: " + fetchError.message);
+            const donations = currentSnapshot.donations;
             if (!donations || donations.length === 0) return showAlert("알림", "연동할 기부금 내역이 없습니다.");
-
-            const { data: existingRows, error: existingError } = await _supabase
-                .from('ac_journal')
-                .select('Date,Description,Trans_ID,Account,Debit,Credit');
-            if (existingError) return showAlert("오류", "기존 전표 확인 실패: " + existingError.message);
-
-            const cashNetMap = buildCashNetMap(existingRows || [], 'DON');
-            const legacyCashNetMap = buildLegacyDonationCashNetMap(existingRows || [], donations || []);
 
             let entries = [];
             let markTargets = [];
@@ -6547,7 +6489,7 @@ function confirmSync(type) {
                 if (!sourceId) return;
 
                 const desired = Math.max(0, Number(d.amount || 0));
-                const currentNet = Number(cashNetMap.get(sourceId) || 0) + Number(legacyCashNetMap.get(sourceId) || 0);
+                const currentNet = Number(d.current_net || 0);
                 const rawNote = d.note;
                 const currentNote = String(d.note || '').trim();
                 const hasDone = currentNote.includes('[전표완료]');
