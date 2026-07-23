@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.94
-Change: Clarify the supported scope of family and organization account management.
+Version: v1.0.95
+Change: Show a neutral not-approved status and its member-visible reason.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.94 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.95 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -4454,12 +4454,17 @@ const appTypeMap = { 'extra': '추가출자', 'reduction': '감자신청', 'with
 apps.forEach(app => {
 let statusBadge = '';
 let actionBtns = '';
+const safeApplicationReason = escapeHtml(app.reason || '');
+const safeRejectionReason = escapeHtml(app.rejection_reason || '');
+const isBusinessApplication = ['extra', 'reduction', 'withdraw'].includes(app.type);
 
 // (1) 상태 뱃지 결정
 if (app.status === 'approved') {
 statusBadge = '<span class="badge bg-success">승인</span>';
 } else if (app.status === 'rejected') {
-statusBadge = '<span class="badge bg-danger">반려</span>';
+statusBadge = isBusinessApplication
+? '<span class="badge bg-danger">신청 미승인</span>'
+: '<span class="badge bg-danger">거절됨</span>';
 } else if (app.status === 'cancelled') {
 statusBadge = '<span class="badge bg-secondary">취소됨</span>';
 } else {
@@ -4495,7 +4500,8 @@ html: `
                        </div>
                        <p class="small text-muted mb-0 mt-1">
                            ${app.amount > 0 ? Number(app.amount).toLocaleString()+'원' : ''} 
-                           ${app.reason ? '<br>사유: '+app.reason : ''}
+                           ${safeApplicationReason ? '<br>신청 사유: '+safeApplicationReason : ''}
+                           ${app.status === 'rejected' && isBusinessApplication ? '<br><span class="text-danger">미승인 사유: '+(safeRejectionReason || '기존 처리 건으로 사유 기록 없음')+'</span>' : ''}
                        </p>
                        ${actionBtns}
                    </div>
