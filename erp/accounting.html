@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.88 | Change: 2026-07-23 - Prevent donation sync truncation with a server-side snapshot. -->
+<!-- Version: v1.0.89 | Change: 2026-07-23 - Persist and apply the 4-insurance automatic-debit discount. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.88 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.89 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -578,7 +578,7 @@
         이 탭은 회계 화면에서 자동으로 처리되는 특수 로직을 요약합니다. 시간이 지나도 기준을 쉽게 되찾을 수 있게 간단히 정리해두었습니다.
       </div>
       <div class="list-group list-group-flush small">
-        <div class="list-group-item">4대보험 통합납부: 급여연동으로 잡힌 부채(예수금/미지급비용)를 상환하며 차액은 선급금/미지급금 정산대기로 누적합니다. 확정 전에는 즉시 잡이익/잡손실로 보내지 않습니다.</div>
+        <div class="list-group-item">4대보험 통합납부: 급여연동으로 잡힌 부채(예수금/미지급비용)를 상환합니다. 자동이체 감액을 켜면 고용보험 250원과 산재보험 250원을 4대보험회사분 비용에서 차감하며, 그 밖의 차액만 선급금/미지급금 정산대기로 누적합니다.</div>
         <div class="list-group-item">인적용역: 3.3% 또는 8.8% 원천징수를 자동 분개합니다.</div>
         <div class="list-group-item">은행 이자수익: 세전 이자와 은행이 실제 공제한 법인세·법인지방소득세를 함께 입력하고, 실입금액과 선납세금을 자동 분개합니다.</div>
         <div class="list-group-item">대출상환: 입력 금액 중 이자를 분리해 이자비용/부채상환으로 나눕니다.</div>
@@ -1084,6 +1084,17 @@ let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
 const AUTO_SYNC_UNDO_KEY = 'erp_auto_sync_last_undo_v1';
 const INSURANCE_PENDING_TAG = '[4대보험정산대기]';
+const INSURANCE_AUTO_DEBIT_DISCOUNT_TAG = '[4대보험 자동이체 감액]';
+const INSURANCE_AUTO_DEBIT_ENABLED_KEY = 'accounting_insurance_auto_debit_discount_enabled';
+const INSURANCE_AUTO_DEBIT_AMOUNT_KEY = 'accounting_insurance_auto_debit_discount_amount';
+const INSURANCE_AUTO_DEBIT_DEFAULT_AMOUNT = 500;
+let insuranceAutoDebitDiscountSetting = {
+    enabled: false,
+    amount: INSURANCE_AUTO_DEBIT_DEFAULT_AMOUNT,
+    loaded: false,
+    loadingPromise: null,
+    saving: false
+};
 const KST_TZ_ACCOUNTING = 'Asia/Seoul';
 const APPROVAL_RECLASS_TARGET_TYPES = Object.freeze(['비용', '자산']);
 const COOP_CORPORATE_TAX_BRACKETS = [
@@ -1109,6 +1120,184 @@ const SALARY_EXPENSE_ACCOUNT = '임직원급여';
 const SALARY_EXPENSE_ACCOUNT_ALIASES = [SALARY_EXPENSE_ACCOUNT, '임직원 급여', '급여'];
 const SALARY_INSURANCE_EXPENSE_ACCOUNT = '4대보험회사분';
 const SALARY_INSURANCE_EXPENSE_ACCOUNT_ALIASES = [SALARY_INSURANCE_EXPENSE_ACCOUNT, '세금과공과'];
+
+function parseAccountingBooleanSetting(value, fallbackValue) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    return fallbackValue === true;
+}
+
+function normalizeInsuranceAutoDebitDiscountAmount(value) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100000) {
+        return INSURANCE_AUTO_DEBIT_DEFAULT_AMOUNT;
+    }
+    return parsed;
+}
+
+function calculateInsurancePaymentAmounts(grossAmount, enabled, configuredDiscountAmount) {
+    const gross = Number(grossAmount);
+    if (!Number.isInteger(gross) || gross < 0) {
+        return {
+            valid: false,
+            error: '4대보험 고지·결재 금액은 0원 이상의 정수로 입력하세요.',
+            grossAmount: 0,
+            discountAmount: 0,
+            cashAmount: 0
+        };
+    }
+
+    const configured = normalizeInsuranceAutoDebitDiscountAmount(configuredDiscountAmount);
+    if (enabled === true && configured > 0 && gross > 0 && gross <= configured) {
+        return {
+            valid: false,
+            error: '4대보험 고지·결재 금액이 자동이체 감액액보다 커야 합니다.',
+            grossAmount: gross,
+            discountAmount: 0,
+            cashAmount: gross
+        };
+    }
+
+    const discountAmount = enabled === true && gross > 0 ? configured : 0;
+    return {
+        valid: true,
+        error: '',
+        grossAmount: gross,
+        discountAmount,
+        cashAmount: gross - discountAmount
+    };
+}
+
+async function loadInsuranceAutoDebitDiscountSetting(options = {}) {
+    if (insuranceAutoDebitDiscountSetting.loaded && options.force !== true) {
+        return { error: null, setting: insuranceAutoDebitDiscountSetting };
+    }
+    if (insuranceAutoDebitDiscountSetting.loadingPromise) {
+        return insuranceAutoDebitDiscountSetting.loadingPromise;
+    }
+
+    const coopId = String(myInfo?.coop_id || '').trim();
+    if (!coopId) {
+        return { error: new Error('조합 정보를 확인할 수 없습니다.'), setting: insuranceAutoDebitDiscountSetting };
+    }
+
+    insuranceAutoDebitDiscountSetting.loadingPromise = (async function fetchInsuranceAutoDebitSetting() {
+        const { data, error } = await _supabase
+            .from('ref_company_info')
+            .select('key,value')
+            .eq('coop_id', coopId)
+            .in('key', [INSURANCE_AUTO_DEBIT_ENABLED_KEY, INSURANCE_AUTO_DEBIT_AMOUNT_KEY]);
+
+        if (error) return { error, setting: insuranceAutoDebitDiscountSetting };
+
+        const settingMap = {};
+        (data || []).forEach(function mapInsuranceSetting(row) {
+            settingMap[String(row?.key || '')] = row?.value;
+        });
+        insuranceAutoDebitDiscountSetting.enabled = parseAccountingBooleanSetting(
+            settingMap[INSURANCE_AUTO_DEBIT_ENABLED_KEY],
+            false
+        );
+        insuranceAutoDebitDiscountSetting.amount = normalizeInsuranceAutoDebitDiscountAmount(
+            settingMap[INSURANCE_AUTO_DEBIT_AMOUNT_KEY]
+        );
+        insuranceAutoDebitDiscountSetting.loaded = true;
+        return { error: null, setting: insuranceAutoDebitDiscountSetting };
+    })();
+
+    try {
+        return await insuranceAutoDebitDiscountSetting.loadingPromise;
+    } finally {
+        insuranceAutoDebitDiscountSetting.loadingPromise = null;
+    }
+}
+
+function syncInsuranceAutoDebitDiscountUI(statusMessage, isError) {
+    const toggleEl = document.getElementById('insuranceAutoDebitDiscountToggle');
+    const statusEl = document.getElementById('insuranceAutoDebitDiscountStatus');
+    const netEl = document.getElementById('insuranceAutoDebitCashAmount');
+    const hintEl = document.getElementById('insuranceAutoDebitAmountHint');
+    const grossEl = document.getElementById('inputAmount');
+
+    if (toggleEl) {
+        toggleEl.checked = insuranceAutoDebitDiscountSetting.enabled === true;
+        toggleEl.disabled = insuranceAutoDebitDiscountSetting.saving || !canPerform('accounting.edit');
+    }
+    if (statusEl) {
+        statusEl.className = isError ? 'x-small text-danger' : 'x-small text-muted';
+        statusEl.textContent = statusMessage || (
+            insuranceAutoDebitDiscountSetting.enabled
+                ? '체크 상태가 조합 설정에 저장되어 다음 처리에도 유지됩니다.'
+                : '감액을 사용하지 않습니다. 체크하면 다음 처리부터 계속 적용됩니다.'
+        );
+    }
+
+    if (!netEl || !hintEl || !grossEl) return;
+    const amounts = calculateInsurancePaymentAmounts(
+        Number(grossEl.value || 0),
+        insuranceAutoDebitDiscountSetting.enabled,
+        insuranceAutoDebitDiscountSetting.amount
+    );
+    if (!amounts.valid) {
+        netEl.value = '';
+        hintEl.className = 'x-small text-danger mt-1';
+        hintEl.textContent = amounts.error;
+        return;
+    }
+
+    netEl.value = String(amounts.cashAmount);
+    hintEl.className = 'x-small text-muted mt-1';
+    hintEl.textContent = insuranceAutoDebitDiscountSetting.enabled
+        ? `${amounts.grossAmount.toLocaleString()}원 - 자동이체 감액 ${amounts.discountAmount.toLocaleString()}원 = 실출금 ${amounts.cashAmount.toLocaleString()}원`
+        : `자동이체 감액 미적용: 실출금 ${amounts.cashAmount.toLocaleString()}원`;
+}
+
+async function saveInsuranceAutoDebitDiscountSetting(enabled) {
+    if (!canPerform('accounting.edit')) {
+        syncInsuranceAutoDebitDiscountUI('회계 등록·수정 권한이 있어야 설정을 변경할 수 있습니다.', true);
+        return;
+    }
+    if (insuranceAutoDebitDiscountSetting.saving) return;
+
+    const previousEnabled = insuranceAutoDebitDiscountSetting.enabled === true;
+    insuranceAutoDebitDiscountSetting.enabled = enabled === true;
+    insuranceAutoDebitDiscountSetting.saving = true;
+    syncInsuranceAutoDebitDiscountUI('설정을 저장하는 중입니다.', false);
+
+    const { data, error } = await _supabase.rpc('erp_set_insurance_auto_debit_discount', {
+        p_enabled: insuranceAutoDebitDiscountSetting.enabled
+    });
+
+    insuranceAutoDebitDiscountSetting.saving = false;
+    if (error) {
+        insuranceAutoDebitDiscountSetting.enabled = previousEnabled;
+        syncInsuranceAutoDebitDiscountUI('설정 저장 실패: ' + error.message, true);
+        return;
+    }
+
+    const saved = Array.isArray(data) ? data[0] : data;
+    insuranceAutoDebitDiscountSetting.enabled = saved?.is_enabled === true;
+    insuranceAutoDebitDiscountSetting.amount = normalizeInsuranceAutoDebitDiscountAmount(
+        saved?.discount_amount
+    );
+    insuranceAutoDebitDiscountSetting.loaded = true;
+    await logAudit(
+        'accounting.insurance_auto_debit_discount_setting',
+        null,
+        '4대보험 자동이체 감액 설정 변경',
+        {
+            enabled: insuranceAutoDebitDiscountSetting.enabled,
+            amount: insuranceAutoDebitDiscountSetting.amount
+        }
+    );
+    syncInsuranceAutoDebitDiscountUI(
+        insuranceAutoDebitDiscountSetting.enabled
+            ? '저장됨: 앞으로 고용보험 250원 + 산재보험 250원을 계속 감액합니다.'
+            : '저장됨: 앞으로 자동이체 감액을 적용하지 않습니다.',
+        false
+    );
+}
 
 function normalizeAccountingReportAccountName(rowOrName, description = '') {
     const isRowObject = rowOrName && typeof rowOrName === 'object';
@@ -1595,6 +1784,11 @@ window.onload = async function() {
         redirectUrl: 'index.html'
     });
     if (!accountingRuntimeGate.ok) return;
+
+    const insuranceSettingResult = await loadInsuranceAutoDebitDiscountSetting();
+    if (insuranceSettingResult.error) {
+        console.warn('[Accounting] 4대보험 자동이체 감액 설정 조회 실패:', insuranceSettingResult.error.message);
+    }
 
     const today = new Date();
     document.getElementById('dateField').valueAsDate = today;
@@ -3304,11 +3498,18 @@ function buildApprovalInsuranceBaseDescription(doc) {
 }
 
 function appendApprovalInsuranceEntries(entries, payload) {
-    const amount = Math.max(0, Number(payload.amount || 0));
+    const grossAmount = Math.max(0, Number(payload.amount || 0));
     const bookYesu = Math.max(0, Number(payload.bookYesu || 0));
     const bookMigigeub = Math.max(0, Number(payload.bookMigigeub || 0));
     const bookTotal = bookYesu + bookMigigeub;
-    if (!(amount > 0) || !(bookTotal > 0)) return;
+    if (!(grossAmount > 0) || !(bookTotal > 0)) return;
+
+    const paymentAmounts = calculateInsurancePaymentAmounts(
+        grossAmount,
+        payload.discountEnabled === true,
+        payload.discountConfiguredAmount
+    );
+    if (!paymentAmounts.valid) throw new Error(paymentAmounts.error);
 
     const common = {
         Date: payload.date,
@@ -3317,7 +3518,7 @@ function appendApprovalInsuranceEntries(entries, payload) {
         Operator: payload.operator
     };
     const description = String(payload.description || '4대보험 납부').trim() || '4대보험 납부';
-    const diff = amount - bookTotal;
+    const diff = paymentAmounts.grossAmount - bookTotal;
 
     if (bookYesu > 0) {
         entries.push({ ...common, Type: '부채', Account: '예수금', Description: `${description} (직원분 상환)`, Debit: bookYesu, Credit: 0, Evidence_Type: '금융거래' });
@@ -3330,13 +3531,34 @@ function appendApprovalInsuranceEntries(entries, payload) {
     } else if (diff < 0) {
         entries.push({ ...common, Type: '부채', Account: '미지급금', Description: `${INSURANCE_PENDING_TAG} ${description} (미지급)`, Debit: 0, Credit: Math.abs(diff), Evidence_Type: '내부기표' });
     }
-    entries.push({ ...common, Type: '자산', Account: '보통예금', Description: description, Debit: 0, Credit: amount, Evidence_Type: '금융거래' });
+    if (paymentAmounts.discountAmount > 0) {
+        entries.push({
+            ...common,
+            Type: '비용',
+            Account: SALARY_INSURANCE_EXPENSE_ACCOUNT,
+            Description: `${INSURANCE_AUTO_DEBIT_DISCOUNT_TAG} ${description} (고용보험 250원 + 산재보험 250원)`,
+            Debit: 0,
+            Credit: paymentAmounts.discountAmount,
+            Evidence_Type: '내부기표'
+        });
+    }
+    entries.push({
+        ...common,
+        Type: '자산',
+        Account: '보통예금',
+        Description: description,
+        Debit: 0,
+        Credit: paymentAmounts.cashAmount,
+        Evidence_Type: '금융거래'
+    });
 }
 
 async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
     const plans = [];
     let totalAmount = 0;
     let insuranceCount = 0;
+    let insuranceDiscountTotal = 0;
+    let insuranceCashTotal = 0;
     let paymentCount = 0;
     let accrualCount = 0;
     let checkCardCount = 0;
@@ -3350,6 +3572,42 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         const journalDate = getApprovalJournalDate(doc, fallbackDate);
 
         if (isInsuranceApproval(doc)) {
+            const settingResult = await loadInsuranceAutoDebitDiscountSetting();
+            if (settingResult.error) {
+                const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+                return {
+                    plans: [],
+                    totalAmount: 0,
+                    insuranceCount: 0,
+                    insuranceDiscountTotal: 0,
+                    insuranceCashTotal: 0,
+                    paymentCount: 0,
+                    accrualCount: 0,
+                    checkCardCount: 0,
+                    error: new Error(`${label} 자동이체 감액 설정 조회 실패: ${settingResult.error.message}`)
+                };
+            }
+
+            const insuranceAmounts = calculateInsurancePaymentAmounts(
+                amount,
+                insuranceAutoDebitDiscountSetting.enabled,
+                insuranceAutoDebitDiscountSetting.amount
+            );
+            if (!insuranceAmounts.valid) {
+                const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+                return {
+                    plans: [],
+                    totalAmount: 0,
+                    insuranceCount: 0,
+                    insuranceDiscountTotal: 0,
+                    insuranceCashTotal: 0,
+                    paymentCount: 0,
+                    accrualCount: 0,
+                    checkCardCount: 0,
+                    error: new Error(`${label} 자동이체 감액 계산 실패: ${insuranceAmounts.error}`)
+                };
+            }
+
             const monthRange = parseApprovalInsuranceMonthRange(doc);
             if (!monthRange) {
                 const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
@@ -3387,9 +3645,15 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
                 operator,
                 bookYesu: Number(summary.data.totalYesu || 0),
                 bookMigigeub: Number(summary.data.totalMigigeub || 0),
-                periodLabel: summary.data.periodLabel
+                periodLabel: summary.data.periodLabel,
+                discountEnabled: insuranceAutoDebitDiscountSetting.enabled,
+                discountConfiguredAmount: insuranceAutoDebitDiscountSetting.amount,
+                discountAmount: insuranceAmounts.discountAmount,
+                cashAmount: insuranceAmounts.cashAmount
             });
             insuranceCount += 1;
+            insuranceDiscountTotal += insuranceAmounts.discountAmount;
+            insuranceCashTotal += insuranceAmounts.cashAmount;
             totalAmount += amount;
             continue;
         }
@@ -3437,7 +3701,17 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         totalAmount += amount;
     }
 
-    return { plans, totalAmount, insuranceCount, paymentCount, accrualCount, checkCardCount, error: null };
+    return {
+        plans,
+        totalAmount,
+        insuranceCount,
+        insuranceDiscountTotal,
+        insuranceCashTotal,
+        paymentCount,
+        accrualCount,
+        checkCardCount,
+        error: null
+    };
 }
 
 function appendApprovalEntriesFromPlan(entries, plan) {
@@ -3659,6 +3933,10 @@ function applyBankInterestTaxSuggestion() {
 function handleAccountingAmountInput() {
     if (document.getElementById('specialMode')?.value === 'interest_inc') {
         syncBankInterestAmounts();
+        return;
+    }
+    if (document.getElementById('specialMode')?.value === 'insurance') {
+        syncInsuranceAutoDebitDiscountUI();
     }
 }
 
@@ -4492,6 +4770,7 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
     }
     else if (specialCode === "insurance") { // 4대보험 납부 (부채 상환 및 차액 정산)
+        document.getElementById("inputAmountLabel").textContent = "4대보험 고지·결재 금액 (감액 전)";
         // 기본값: 지난달 (보통 10일에 납부하므로 지난달 귀속분)
         const now = new Date();
         now.setMonth(now.getMonth() - 1);
@@ -4527,16 +4806,33 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
                     <button class="btn btn-outline-secondary btn-sm" type="button" onclick="runInsurancePendingSettlement()">정산대기 일괄정산</button>
                 </div>
 
+                <div class="border rounded bg-white p-2 mb-2">
+                    <div class="form-check form-switch mb-1">
+                        <input class="form-check-input" type="checkbox" id="insuranceAutoDebitDiscountToggle" onchange="saveInsuranceAutoDebitDiscountSetting(this.checked)">
+                        <label class="form-check-label small fw-bold" for="insuranceAutoDebitDiscountToggle">4대보험 자동이체 감액 적용</label>
+                    </div>
+                    <div class="x-small text-muted mb-2">고용보험 250원 + 산재보험 250원, 매회 총 500원을 감액합니다.</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="small">예상 실제 통장 출금액</span>
+                        <input type="number" class="form-control form-control-sm bg-light fw-bold text-end" id="insuranceAutoDebitCashAmount" value="0" readonly style="max-width:160px;">
+                    </div>
+                    <div class="x-small text-muted mt-1" id="insuranceAutoDebitAmountHint">고지·결재 금액을 입력하면 실출금액을 계산합니다.</div>
+                    <div class="x-small text-muted mt-1" id="insuranceAutoDebitDiscountStatus">설정 상태를 확인하는 중입니다.</div>
+                </div>
+
                 <input type="hidden" id="hiddenBookVal" value="0">
                 <input type="hidden" id="hiddenYesu" value="0">
                 <input type="hidden" id="hiddenMigigeub" value="0">
 
-                <div class="form-text x-small text-danger fw-bold">* 아래 '금액' 란에 실제 통장 출금액을 입력하세요.<br>* 차액은 선급금/미지급금 정산대기로 누적하고, 확정 후 합산 정산하세요.</div>
+                <div class="form-text x-small text-danger fw-bold">* 아래 '금액' 란에는 감액 전 고지·결재 금액을 입력하세요.<br>* 체크 시 500원은 4대보험회사분 비용 차감, 나머지 차액만 선급금/미지급금 정산대기로 반영됩니다.</div>
             </div>`;
 
         // 부가세 체크 해제 및 비활성, 카드입력 숨김
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
-        setTimeout(() => refreshInsurancePendingSummary(), 0);
+        setTimeout(function initializeInsuranceSpecialMode() {
+            refreshInsurancePendingSummary();
+            syncInsuranceAutoDebitDiscountUI();
+        }, 0);
     }
     else if (specialCode === "loan_pay") { // 대출상환
         area.innerHTML += `<div class="special-box alert alert-warning p-2 mb-2"><small class="fw-bold">ℹ️ 대출 원리금 상환</small><div class="input-group input-group-sm mt-1"><span class="input-group-text">이자 포함분</span><input type="number" class="form-control" id="loanInterest" placeholder="이 중 이자는 얼마?" min="0" oninput="validNum(this)"></div></div>`;
@@ -5422,13 +5718,25 @@ async function submitAccounting(ctx) {
     // ==========================================
     if (hasSpecialHandler) {
         if (specialCode === 'insurance') { // 4대보험 납부
+            const settingResult = await loadInsuranceAutoDebitDiscountSetting();
+            if (settingResult.error) {
+                return showAlert("오류", "자동이체 감액 설정 조회 실패: " + settingResult.error.message);
+            }
+
+            const paymentAmounts = calculateInsurancePaymentAmounts(
+                totalAmt,
+                insuranceAutoDebitDiscountSetting.enabled,
+                insuranceAutoDebitDiscountSetting.amount
+            );
+            if (!paymentAmounts.valid) return showAlert("오류", paymentAmounts.error);
+
             const bookYesu = Number(document.getElementById("hiddenYesu").value);
             const bookMigigeub = Number(document.getElementById("hiddenMigigeub").value);
             const bookTotal = bookYesu + bookMigigeub;
 
             if (bookTotal === 0 && totalAmt > 0) return showAlert("오류", "먼저 [장부 조회] 버튼을 눌러 부채 내역을 불러오세요.");
 
-            const diff = totalAmt - bookTotal;
+            const diff = paymentAmounts.grossAmount - bookTotal;
 
             if (bookYesu > 0) entries.push({ Date: fDate, Type: '부채', Account: '예수금', Description: `${finalDesc} (직원분 상환)`, Debit: bookYesu, Credit: 0, Project: project, Operator: writer, Evidence_Type: '금융거래' });
             if (bookMigigeub > 0) entries.push({ Date: fDate, Type: '부채', Account: '미지급비용', Description: `${finalDesc} (회사분 상환)`, Debit: bookMigigeub, Credit: 0, Project: project, Operator: writer, Evidence_Type: '금융거래' });
@@ -5436,7 +5744,31 @@ async function submitAccounting(ctx) {
             if (diff > 0) entries.push({ Date: fDate, Type: '자산', Account: '선급금', Description: `${INSURANCE_PENDING_TAG} ${finalDesc} (선급)`, Debit: diff, Credit: 0, Project: project, Operator: writer, Evidence_Type: '내부기표' });
             else if (diff < 0) entries.push({ Date: fDate, Type: '부채', Account: '미지급금', Description: `${INSURANCE_PENDING_TAG} ${finalDesc} (미지급)`, Debit: 0, Credit: Math.abs(diff), Project: project, Operator: writer, Evidence_Type: '내부기표' });
 
-            entries.push({ Date: fDate, Type: '자산', Account: '보통예금', Description: finalDesc, Debit: 0, Credit: totalAmt, Project: project, Operator: writer, Evidence_Type: '금융거래' });
+            if (paymentAmounts.discountAmount > 0) {
+                entries.push({
+                    Date: fDate,
+                    Type: '비용',
+                    Account: SALARY_INSURANCE_EXPENSE_ACCOUNT,
+                    Description: `${INSURANCE_AUTO_DEBIT_DISCOUNT_TAG} ${finalDesc} (고용보험 250원 + 산재보험 250원)`,
+                    Debit: 0,
+                    Credit: paymentAmounts.discountAmount,
+                    Project: project,
+                    Operator: writer,
+                    Evidence_Type: '내부기표'
+                });
+            }
+
+            entries.push({
+                Date: fDate,
+                Type: '자산',
+                Account: '보통예금',
+                Description: finalDesc,
+                Debit: 0,
+                Credit: paymentAmounts.cashAmount,
+                Project: project,
+                Operator: writer,
+                Evidence_Type: '금융거래'
+            });
         }
         else if (specialCode === 'loan_pay') { // 대출상환
             const interest = Number(document.getElementById("loanInterest")?.value || 0);
@@ -6184,8 +6516,9 @@ function confirmSync(type) {
             const previewMsg = [
                 '전자결재 연동 미리보기',
                 `- 대상 건수: ${targetDocs.length}건`,
-                `- 예상 금액: ${totalAmount.toLocaleString()}원`,
-                `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, 대)보통예금`,
+                `- 예상 금액(4대보험은 감액 전): ${totalAmount.toLocaleString()}원`,
+                `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, (대)보통예금/4대보험회사분 감액`,
+                `- 4대보험 자동이체 감액: ${previewPlanResult.insuranceCount > 0 ? `${previewPlanResult.insuranceDiscountTotal.toLocaleString()}원 / 실출금 ${previewPlanResult.insuranceCashTotal.toLocaleString()}원` : '대상 없음'}`,
                 `- 즉시지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`
@@ -6228,7 +6561,7 @@ function confirmSync(type) {
                     trans_ids: collectTransIds(entries),
                     restores: []
                 });
-                showAlert("완료", `${runTargetDocs.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 즉시지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건`);
+                showAlert("완료", `${runTargetDocs.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 즉시지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
