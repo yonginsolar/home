@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.86 | Change: 2026-07-23 - Allow expense and asset accounts in approval reclassification. -->
+<!-- Version: v1.0.87 | Change: 2026-07-23 - Auto-include asset prepayments and simplify single-entry history. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.86 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.87 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -256,7 +256,7 @@
             <select class="form-select" id="prepayVendorSelect" onchange="onPrepayVendorChange()"></select>
             <input type="text" class="form-control mt-2 hidden" id="prepayVendorInput" placeholder="거래처명 직접 입력" oninput="onPrepayVendorChange()">
             <div class="small text-muted mt-1" id="prepayBalanceText">잔액 조회 중...</div>
-            <div class="small text-muted">팁: 선급금 입력 시 적요에 `[선급금-업체명]` 태그를 넣으면 자동 매칭이 더 정확합니다.</div>
+            <div class="small text-muted">자산/선급금 전표는 자동 반영됩니다. `[선급금-업체명]` 태그가 있으면 거래처를 우선 적용하고, 없으면 적요에서 거래처를 추정합니다.</div>
           </div>
 
           <div class="mb-3">
@@ -4674,8 +4674,18 @@ function extractVendorName(desc) {
     const tagged = extractTagValue(desc, '선급금-');
     if (tagged) return normalizeVendorName(tagged);
 
-    let cleaned = String(desc || "").replace(/\[[^\]]+\]/g, '');
-    cleaned = cleaned.replace(/선급금|충전|결제|사용분|사용/gi, '').trim();
+    const raw = String(desc || '').trim();
+    if (raw.includes('[선급금 정리]') || /^\[자산\]\s*선급금\s*$/i.test(raw)) {
+        return '기타 선급금';
+    }
+
+    let cleaned = raw.replace(/\[[^\]]+\]/g, '').trim();
+    const approvalTitleMatch = cleaned.match(/지출결의\s*\(([^)]+)\)/i);
+    if (approvalTitleMatch) cleaned = String(approvalTitleMatch[1] || '').trim();
+    cleaned = cleaned
+        .replace(/(?:선급금|충전|결제|사용분|사용)\s*$/gi, '')
+        .replace(/^[\s:()\-]+|[\s:()\-]+$/g, '')
+        .trim();
     if (!cleaned) return "미지정";
     return normalizeVendorName(cleaned);
 }
@@ -4683,6 +4693,9 @@ function extractVendorName(desc) {
 function shouldIncludePrepayCacheRow(row) {
     const desc = String(row?.Description || "");
     if (desc.includes(INSURANCE_PENDING_TAG)) return false;
+    if (String(row?.Type || '').trim() === '자산' && String(row?.Account || '').trim() === '선급금') {
+        return true;
+    }
     if (desc.startsWith('[') && !extractTagValue(desc, '선급금-')) return false;
     return true;
 }
@@ -7188,9 +7201,8 @@ function buildSingleEntryHistory(rows) {
             }
         });
 
-        // 단식 기본은 현금흐름 중심이지만, 자동연동 재분류(APR-RCLS)는 대체분개로 노출
-        const isApprovalReclass = String(group.transId || '').startsWith('APR-RCLS-');
-        if (cashDelta === 0 && !isApprovalReclass) return;
+        // 단식 보기는 실제 현금흐름만 표시하고 내부 재분류는 복식 원장에서 확인한다.
+        if (cashDelta === 0) return;
 
         let flow = '대체';
         if (cashDelta > 0) flow = '입금';
