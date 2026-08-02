@@ -103,6 +103,15 @@
     systemTheme.addListener(handleSystemThemeChange);
   }
 
+  window.addEventListener('storage', function (event) {
+    if (event.key !== STORAGE_KEY) return;
+    if (event.newValue === 'light' || event.newValue === 'dark') {
+      applyTheme(event.newValue, true);
+      return;
+    }
+    applyTheme(systemTheme.matches ? 'dark' : 'light', true);
+  });
+
   window.CoopTheme = Object.freeze({
     get: function () { return root.dataset.theme || preferredTheme(); },
     set: function (theme) {
