@@ -92,6 +92,7 @@
     toggleControl.className = 'site-theme-toggle';
     toggleControl.setAttribute('role', 'group');
     toggleControl.innerHTML = [
+      '<span class="site-theme-toggle__label" aria-hidden="true">화면 모드</span>',
       '<button type="button" class="site-theme-toggle__option" data-theme-mode="auto" aria-label="자동 모드">자동</button>',
       '<button type="button" class="site-theme-toggle__option" data-theme-mode="light" aria-label="주간 모드">주</button>',
       '<button type="button" class="site-theme-toggle__option" data-theme-mode="dark" aria-label="야간 모드">야</button>'
