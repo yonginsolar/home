@@ -6,7 +6,8 @@
   const script = document.currentScript;
   const showToggle = script?.dataset.themeToggle !== 'off';
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
-  let toggleButton = null;
+  let toggleControl = null;
+  let selectedMode = readStoredTheme() || 'auto';
 
   const pageKey = window.location.pathname
     .replace(/^\/+/, '')
@@ -31,8 +32,17 @@
     }
   }
 
+  function clearStoredTheme() {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch (_) {
+      // Storage can be unavailable in private or embedded browser contexts.
+    }
+  }
+
   function preferredTheme() {
-    return readStoredTheme() || (systemTheme.matches ? 'dark' : 'light');
+    if (selectedMode === 'light' || selectedMode === 'dark') return selectedMode;
+    return systemTheme.matches ? 'dark' : 'light';
   }
 
   function updateThemeColor(theme) {
@@ -46,13 +56,18 @@
   }
 
   function updateToggle(theme) {
-    if (!toggleButton) return;
-    const dark = theme === 'dark';
-    const label = dark ? '주간 모드로 전환' : '야간 모드로 전환';
-    toggleButton.setAttribute('aria-label', label);
-    toggleButton.title = label;
-    toggleButton.dataset.theme = theme;
-    toggleButton.querySelector('.site-theme-toggle__icon').textContent = dark ? '☀' : '☾';
+    if (!toggleControl) return;
+    const resolvedLabel = theme === 'dark' ? '야간' : '주간';
+    const modeLabel = selectedMode === 'auto' ? `자동 (현재 ${resolvedLabel})` : resolvedLabel;
+    toggleControl.setAttribute('aria-label', `화면 모드: ${modeLabel}`);
+    toggleControl.dataset.mode = selectedMode;
+    toggleControl.dataset.theme = theme;
+
+    toggleControl.querySelectorAll('[data-theme-mode]').forEach(function (button) {
+      const active = button.dataset.themeMode === selectedMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
   }
 
   function applyTheme(theme, notify) {
@@ -65,7 +80,7 @@
 
     if (notify) {
       window.dispatchEvent(new CustomEvent('coop-theme-change', {
-        detail: { theme: resolved }
+        detail: { theme: resolved, mode: selectedMode }
       }));
     }
   }
@@ -73,16 +88,27 @@
   function installToggle() {
     if (!showToggle || document.querySelector('.site-theme-toggle')) return;
 
-    toggleButton = document.createElement('button');
-    toggleButton.type = 'button';
-    toggleButton.className = 'site-theme-toggle';
-    toggleButton.innerHTML = '<span class="site-theme-toggle__icon" aria-hidden="true"></span>';
-    toggleButton.addEventListener('click', function () {
-      const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
-      writeStoredTheme(next);
-      applyTheme(next, true);
+    toggleControl = document.createElement('div');
+    toggleControl.className = 'site-theme-toggle';
+    toggleControl.setAttribute('role', 'group');
+    toggleControl.innerHTML = [
+      '<button type="button" class="site-theme-toggle__option" data-theme-mode="auto" aria-label="자동 모드">자동</button>',
+      '<button type="button" class="site-theme-toggle__option" data-theme-mode="light" aria-label="주간 모드">주</button>',
+      '<button type="button" class="site-theme-toggle__option" data-theme-mode="dark" aria-label="야간 모드">야</button>'
+    ].join('');
+    toggleControl.addEventListener('click', function (event) {
+      const button = event.target.closest('[data-theme-mode]');
+      if (!button || !toggleControl.contains(button)) return;
+
+      const mode = button.dataset.themeMode;
+      if (mode !== 'auto' && mode !== 'light' && mode !== 'dark') return;
+
+      selectedMode = mode;
+      if (mode === 'auto') clearStoredTheme();
+      else writeStoredTheme(mode);
+      applyTheme(preferredTheme(), true);
     });
-    document.body.appendChild(toggleButton);
+    document.body.appendChild(toggleControl);
     updateToggle(root.dataset.theme || preferredTheme());
   }
 
@@ -95,7 +121,7 @@
   }
 
   const handleSystemThemeChange = function () {
-    if (!readStoredTheme()) applyTheme(systemTheme.matches ? 'dark' : 'light', true);
+    if (selectedMode === 'auto') applyTheme(systemTheme.matches ? 'dark' : 'light', true);
   };
   if (typeof systemTheme.addEventListener === 'function') {
     systemTheme.addEventListener('change', handleSystemThemeChange);
@@ -106,22 +132,26 @@
   window.addEventListener('storage', function (event) {
     if (event.key !== STORAGE_KEY) return;
     if (event.newValue === 'light' || event.newValue === 'dark') {
-      applyTheme(event.newValue, true);
-      return;
+      selectedMode = event.newValue;
+    } else {
+      selectedMode = 'auto';
     }
-    applyTheme(systemTheme.matches ? 'dark' : 'light', true);
+    applyTheme(preferredTheme(), true);
   });
 
   window.CoopTheme = Object.freeze({
     get: function () { return root.dataset.theme || preferredTheme(); },
+    mode: function () { return selectedMode; },
     set: function (theme) {
       if (theme !== 'light' && theme !== 'dark') return;
+      selectedMode = theme;
       writeStoredTheme(theme);
       applyTheme(theme, true);
     },
     useSystem: function () {
-      try { window.localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-      applyTheme(systemTheme.matches ? 'dark' : 'light', true);
+      selectedMode = 'auto';
+      clearStoredTheme();
+      applyTheme(preferredTheme(), true);
     }
   });
 })();
