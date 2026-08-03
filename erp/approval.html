@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.33 | Change: 2026-05-27 - Hide business trip cancel action when a cancellation request already exists. -->
+<!-- Version: v1.2.34 | Change: 2026-08-03 - Keep business trip end date aligned with start date and prevent reversed ranges. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.33 | approval.html');</script>
+  <script>console.log('[Version] v1.2.34 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -489,11 +489,11 @@
             <div class="row g-2" id="businessTripApplyFields">
               <div class="col-md-6">
                 <label class="small text-muted fw-bold">출장 시작일</label>
-                <input type="date" class="form-control" id="businessTripStartDate" onchange="syncApprovalBusinessTripSummary()">
+                <input type="date" class="form-control" id="businessTripStartDate" onchange="handleApprovalBusinessTripStartDateChange()">
               </div>
               <div class="col-md-6">
                 <label class="small text-muted fw-bold">출장 종료일</label>
-                <input type="date" class="form-control" id="businessTripEndDate" onchange="syncApprovalBusinessTripSummary()">
+                <input type="date" class="form-control" id="businessTripEndDate" onchange="handleApprovalBusinessTripEndDateChange()">
               </div>
               <div class="col-12">
                 <label class="small text-muted fw-bold d-block mb-2">출장 구분</label>
@@ -4179,6 +4179,47 @@ function formatApprovalBusinessTripPeriodText(snapshot) {
     return `${baseDate}${periodLabel ? ` (${periodLabel})` : ''}`;
 } // End of formatApprovalBusinessTripPeriodText
 
+function syncApprovalBusinessTripDateConstraints(options = {}) {
+    const startDateEl = document.getElementById('businessTripStartDate');
+    const endDateEl = document.getElementById('businessTripEndDate');
+    if (!startDateEl || !endDateEl) {
+        return { startDate: '', endDate: '', adjusted: false };
+    }
+
+    const startDate = String(startDateEl.value || '').trim();
+    const previousStartDate = String(startDateEl.dataset.previousBusinessTripStartDate || '').trim();
+    let endDate = String(endDateEl.value || '').trim();
+    let adjusted = false;
+
+    if (startDate) {
+        endDateEl.min = startDate;
+        const followsPreviousSingleDay = !!previousStartDate && endDate === previousStartDate;
+        const shouldFollowChangedStart = options?.fromStartChange === true
+            && (!endDate || endDate < startDate || followsPreviousSingleDay);
+        const shouldRepairReversedRange = !!endDate && endDate < startDate;
+        if (shouldFollowChangedStart || shouldRepairReversedRange) {
+            endDateEl.value = startDate;
+            endDate = startDate;
+            adjusted = true;
+        }
+    } else {
+        endDateEl.removeAttribute('min');
+    }
+
+    startDateEl.dataset.previousBusinessTripStartDate = startDate;
+    return { startDate, endDate, adjusted };
+} // End of syncApprovalBusinessTripDateConstraints
+
+function handleApprovalBusinessTripStartDateChange() {
+    syncApprovalBusinessTripDateConstraints({ fromStartChange: true });
+    syncApprovalBusinessTripSummary();
+} // End of handleApprovalBusinessTripStartDateChange
+
+function handleApprovalBusinessTripEndDateChange() {
+    syncApprovalBusinessTripDateConstraints();
+    syncApprovalBusinessTripSummary();
+} // End of handleApprovalBusinessTripEndDateChange
+
 function buildApprovalBusinessTripSnapshot() {
     const startDate = String(document.getElementById('businessTripStartDate')?.value || '').trim();
     const endDate = String(document.getElementById('businessTripEndDate')?.value || '').trim();
@@ -4304,6 +4345,7 @@ function appendApprovalSalaryLedgerSnapshotSection(container, doc) {
 function syncApprovalBusinessTripSummary() {
     const summaryEl = document.getElementById('businessTripSummaryText');
     if (!summaryEl) return;
+    syncApprovalBusinessTripDateConstraints();
     const snapshot = buildApprovalBusinessTripSnapshot();
     const hasPeriod = snapshot.start_date && snapshot.end_date && snapshot.period_label;
     const locationText = snapshot.location ? ` / 장소: ${snapshot.location}` : '';
