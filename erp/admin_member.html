@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.114
-Change: Place meeting and education participation management inside member administration.
+Version: v1.0.115
+Change: Add per-member meeting and education participation history and use a white participation workspace.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.114';
+window.ADMIN_MEMBER_VERSION = 'v1.0.115';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -175,8 +175,16 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .capital-notification-summary-label { flex:0 0 auto; color:#64748b; font-size:.78rem; font-weight:800; }
 .capital-notification-summary-value { min-width:0; color:#0f172a; font-size:.88rem; font-weight:800; overflow-wrap:anywhere; text-align:right; }
 .capital-notification-feedback { border-radius:10px; font-size:.8rem; line-height:1.45; }
-.participation-admin-frame-wrap { min-height:760px; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#f5f7fb; box-shadow:0 8px 22px rgba(15,23,42,.05); }
-.participation-admin-frame { display:block; width:100%; height:calc(100vh - 175px); min-height:760px; border:0; background:#f5f7fb; }
+.participation-admin-frame-wrap { min-height:760px; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
+.participation-admin-frame { display:block; width:100%; height:calc(100vh - 175px); min-height:760px; border:0; background:#fff; }
+.admin-participation-history-list { display:flex; flex-direction:column; gap:12px; }
+.admin-participation-history-item { border:1px solid #e2e8f0; border-radius:14px; padding:14px 16px; background:#fff; }
+.admin-participation-history-meta { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:8px; color:#64748b; font-size:.82rem; }
+.admin-participation-status { display:inline-flex; align-items:center; border-radius:999px; padding:4px 9px; font-size:.75rem; font-weight:800; white-space:nowrap; }
+.admin-participation-status-attended { background:#dcfce7; color:#166534; }
+.admin-participation-status-absent { background:#fee2e2; color:#991b1b; }
+.admin-participation-status-excused { background:#fff7ed; color:#9a3412; }
+.admin-participation-status-pending { background:#f1f5f9; color:#475569; }
 @media (max-width:991.98px) {
   .fund-summary-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
   .member-history-table, .member-history-table tbody { display:block; width:100%; }
@@ -2809,6 +2817,11 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 📞 상담 이력
 </button>
 </li>
+<li class="nav-item">
+<button class="nav-link py-3" data-bs-toggle="tab" data-bs-target="#md-tab-participation" type="button" onclick="loadAdminMemberParticipationHistory()">
+📅 교육·회의 참여
+</button>
+</li>
 </ul>
 
 <div class="tab-content p-4">
@@ -3027,6 +3040,19 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <button class="btn btn-dark" onclick="addConsultLog()">등록</button>
 </div>
 <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 400px;" id="md-consult-list">
+</div>
+</div>
+
+<div class="tab-pane fade" id="md-tab-participation">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+<div>
+<h6 class="fw-bold mb-1">교육·회의 참여 이력</h6>
+<div class="small text-muted" id="md-participation-summary">탭을 선택하면 불러옵니다.</div>
+</div>
+<button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAdminMemberParticipationHistory(true)">새로고침</button>
+</div>
+<div class="admin-participation-history-list" id="md-participation-list">
+<div class="text-center text-muted py-5">교육·회의 참여 이력을 불러오려면 이 탭을 선택하세요.</div>
 </div>
 </div>
 </div>
@@ -10620,6 +10646,89 @@ async function fetchAdminMemberDetailRow(id) {
     return normalizeAdminMemberRow(data, totalCapital);
 }
 
+let adminMemberParticipationLoadedFor = null;
+
+function adminMemberParticipationTypeLabel(type) {
+    if (type === 'BOARD') return '이사회';
+    if (type === 'DELEGATE_ASSEMBLY') return '대의원 총회';
+    return '교육';
+} // End of adminMemberParticipationTypeLabel
+
+function adminMemberParticipationStatusLabel(status) {
+    if (status === 'ATTENDED') return '참석';
+    if (status === 'ABSENT') return '불참';
+    if (status === 'EXCUSED') return '사유 불참';
+    return '확인 전';
+} // End of adminMemberParticipationStatusLabel
+
+function adminMemberParticipationStatusClass(status) {
+    if (status === 'ATTENDED') return 'admin-participation-status-attended';
+    if (status === 'ABSENT') return 'admin-participation-status-absent';
+    if (status === 'EXCUSED') return 'admin-participation-status-excused';
+    return 'admin-participation-status-pending';
+} // End of adminMemberParticipationStatusClass
+
+function renderAdminMemberParticipationHistory(data) {
+    const list = document.getElementById('md-participation-list');
+    const summary = document.getElementById('md-participation-summary');
+    const events = Array.isArray(data?.events) ? data.events : [];
+    const total = Number(data?.total_count || events.length);
+    const attended = Number(data?.attended_count || 0);
+    if (summary) summary.textContent = `전체 ${total.toLocaleString('ko-KR')}건 · 참석 ${attended.toLocaleString('ko-KR')}건`;
+    if (!list) return;
+    if (events.length === 0) {
+        list.innerHTML = '<div class="text-center text-muted py-5">등록된 교육·회의 참여 이력이 없습니다.</div>';
+        return;
+    }
+    list.innerHTML = events.map(function(event) {
+        const status = String(event.attendance_status || 'PENDING');
+        const timeText = event.ends_at
+            ? `${formatAdminMemberKstDateTime(event.starts_at)} ~ ${formatAdminMemberKstDateTime(event.ends_at)}`
+            : formatAdminMemberKstDateTime(event.starts_at);
+        const signatureHtml = event.signature_required_snapshot
+            ? (event.signature_signed_at
+                ? `<span class="badge bg-success-subtle text-success-emphasis border">서명 완료 · ${escapeHtml(formatAdminMemberKstDateTime(event.signature_signed_at))}</span>`
+                : '<span class="badge bg-warning-subtle text-warning-emphasis border">미서명</span>')
+            : '';
+        const educationHtml = event.event_type === 'EDUCATION'
+            ? `<div class="small text-secondary mt-2">${event.instructor ? `<strong>강사</strong> ${escapeHtml(event.instructor)}<br>` : ''}${event.education_content ? `<strong>교육 내용</strong> ${escapeHtml(event.education_content)}` : ''}</div>`
+            : '';
+        const actualAttendeeHtml = event.actual_attendee_name
+            ? `<div class="small text-secondary mt-2"><strong>단체 실제 참석자</strong> ${escapeHtml(event.actual_attendee_name)}</div>`
+            : '';
+        return `
+            <article class="admin-participation-history-item">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div><div class="small text-muted mb-1">${escapeHtml(adminMemberParticipationTypeLabel(event.event_type))}</div><div class="fw-bold">${escapeHtml(event.title || '-')}</div></div>
+                    <span class="admin-participation-status ${adminMemberParticipationStatusClass(status)}">${adminMemberParticipationStatusLabel(status)}</span>
+                </div>
+                <div class="admin-participation-history-meta"><span>🗓️ ${escapeHtml(timeText)}</span><span>📍 ${escapeHtml(event.location || '-')}</span>${event.role_snapshot ? `<span>직책 ${escapeHtml(event.role_snapshot)}</span>` : ''}</div>
+                ${educationHtml}${actualAttendeeHtml}${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
+            </article>`;
+    }).join('');
+} // End of renderAdminMemberParticipationHistory
+
+async function loadAdminMemberParticipationHistory(forceReload = false) {
+    const memberUuid = g_current_member_id;
+    const list = document.getElementById('md-participation-list');
+    const summary = document.getElementById('md-participation-summary');
+    if (!memberUuid || !list || !summary) return;
+    if (!forceReload && String(adminMemberParticipationLoadedFor) === String(memberUuid)) return;
+    summary.textContent = '불러오는 중...';
+    list.innerHTML = '<div class="text-center text-muted py-5"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
+    try {
+        const { data, error } = await _supabase.rpc('participation_admin_get_member_history', { p_member_uuid:memberUuid });
+        if (error) throw error;
+        if (String(g_current_member_id) !== String(memberUuid)) return;
+        adminMemberParticipationLoadedFor = memberUuid;
+        renderAdminMemberParticipationHistory(data || {});
+    } catch (error) {
+        console.error('loadAdminMemberParticipationHistory failed:', error);
+        summary.textContent = '조회 실패';
+        list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '교육·회의 참여 이력을 불러오지 못했습니다.')}</div>`;
+    }
+} // End of loadAdminMemberParticipationHistory
+
 async function openMemberDetail(id) {
     // 1. 데이터 매칭
     let m = findCachedAdminMember(id);
@@ -10644,6 +10753,11 @@ async function openMemberDetail(id) {
 
     g_current_member_id = memberUid;
     g_current_member_row = m;
+    adminMemberParticipationLoadedFor = null;
+    const participationSummaryEl = document.getElementById('md-participation-summary');
+    const participationListEl = document.getElementById('md-participation-list');
+    if (participationSummaryEl) participationSummaryEl.textContent = '탭을 선택하면 불러옵니다.';
+    if (participationListEl) participationListEl.innerHTML = '<div class="text-center text-muted py-5">교육·회의 참여 이력을 불러오려면 이 탭을 선택하세요.</div>';
 
     // 2. UI 초기화 & 데이터 바인딩
     document.getElementById('md-uid').value = memberUid;

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.1 | Change: 2026-08-03 - Fix runtime authentication and support the member-admin embedded view. -->
+<!-- Version: v1.1.0 | Change: 2026-08-03 - Add manual meetings, editable rosters, deletion, and accurate signatures. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.1 | participation.html');</script>
+  <script>console.log('[Version] v1.1.0 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -27,9 +27,9 @@
   <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="./erp_runtime_guard.js"></script>
   <style>
-    :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --panel:#fff; --bg:#f5f7fb; }
+    :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --panel:#fff; --bg:#fff; }
     body { margin:0; background:var(--bg); color:var(--ink); font-family:'Segoe UI','Malgun Gothic',sans-serif; }
-    body.participation-embedded { background:transparent; }
+    body.participation-embedded { background:#fff; }
     body.participation-embedded .page-shell { max-width:none; padding:0; }
     body.participation-embedded .page-head { display:none; }
     .page-shell { max-width:1180px; margin:0 auto; padding:24px 18px 48px; }
@@ -127,7 +127,7 @@
           <option value="DELEGATE_ASSEMBLY">대의원 총회</option>
           <option value="EDUCATION">교육</option>
         </select>
-        <input type="search" class="form-control" id="eventSearch" placeholder="행사명·장소 검색">
+        <input type="search" class="form-control" id="eventSearch" placeholder="행사명·장소·참석자 검색">
         <button type="button" class="btn btn-outline-secondary" id="refreshBtn">새로고침</button>
         <button type="button" class="btn btn-primary" id="newEventBtn">행사 등록</button>
       </div>
@@ -189,11 +189,14 @@
               <div class="form-section-title mb-0">참석자</div>
               <div class="small text-muted" id="attendanceSummary">0명</div>
             </div>
-            <div class="hint-box mb-3" id="meetingImportHint">의사록을 선택하면 회의일 기준 임원·대의원 명단과 참석 여부를 채웁니다.</div>
-            <div class="d-none" id="educationMemberSearch">
+            <div class="hint-box mb-3 d-flex flex-wrap justify-content-between align-items-center gap-2" id="meetingImportHint">
+              <span>의사록을 선택하면 회의 명단을 가져옵니다. PDF·과거 회의는 수기 입력을 선택할 수 있습니다.</span>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="meetingRosterBtn">회의일 기준 명단 불러오기</button>
+            </div>
+            <div id="educationMemberSearch">
               <div class="input-group mb-2">
-                <input type="search" class="form-control" id="memberSearchInput" placeholder="조합원명·조합원번호 검색">
-                <button type="button" class="btn btn-outline-primary" id="memberSearchBtn">검색</button>
+                <input type="search" class="form-control" id="memberSearchInput" placeholder="참석자 조합원명·조합원번호 검색">
+                <button type="button" class="btn btn-outline-primary" id="memberSearchBtn">참석자 추가</button>
               </div>
               <div class="list-group mb-3" id="memberSearchResults"></div>
             </div>
@@ -218,6 +221,7 @@
           </div>
         </div>
         <div class="modal-footer">
+          <button type="button" class="btn btn-outline-danger me-auto d-none" id="deleteEventBtn">행사 삭제</button>
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">닫기</button>
           <button type="button" class="btn btn-primary" id="saveEventBtn">저장</button>
         </div>
@@ -380,7 +384,7 @@
       const names = attendanceMatch
         ? attendanceMatch[1].split(',').map(function(name) { return name.trim(); }).filter(Boolean)
         : [];
-      const additionalMatch = text.match(/다\.\s*출석자\s*\([^)]*\)\s*-\s*(.+?)(?=(?:라\.|마\.|3\.)\s*)/);
+      const additionalMatch = text.match(/다\.\s*(?:출석자|배석자)\s*\([^)]*\)\s*-\s*(.+?)(?=(?:라\.|마\.|3\.)\s*)/);
       const additionalNames = additionalMatch
         ? additionalMatch[1].split(',').map(function(name) { return name.trim(); }).filter(Boolean)
         : [];
@@ -397,13 +401,57 @@
       });
     } // End of activeOfficialsAtDate
 
-    function officialsAtDate(eventType, startsAtLocal) {
-      return activeOfficialsAtDate(startsAtLocal).filter(function(official) {
-        if (eventType === 'BOARD') {
-          return official.category === 'executive' && ['이사장', '이사'].includes(String(official.role || '').trim());
+    function isTargetOfficial(eventType, official) {
+      if (eventType === 'BOARD') {
+        return official?.category === 'executive' && ['이사장', '이사'].includes(String(official?.role || '').trim());
+      }
+      return official?.category === 'delegate';
+    } // End of isTargetOfficial
+
+    function officialCohortKey(official) {
+      return `${official?.term_start_date || ''}|${official?.real_end_date || official?.term_end_date || ''}`;
+    } // End of officialCohortKey
+
+    function dedupeOfficialsByMember(rows) {
+      const selected = new Map();
+      (rows || []).forEach(function(official) {
+        const key = String(official?.member_uuid || official?.member_id || official?.official_id || '');
+        if (!key) return;
+        const existing = selected.get(key);
+        if (!existing) {
+          selected.set(key, official);
+          return;
         }
-        return official.category === 'delegate';
-      }).sort(function(a, b) {
+        const existingRank = existing.category === 'executive' ? 0 : (existing.category === 'delegate' ? 1 : 2);
+        const nextRank = official.category === 'executive' ? 0 : (official.category === 'delegate' ? 1 : 2);
+        if (nextRank < existingRank || (nextRank === existingRank && Number(official.official_id) < Number(existing.official_id))) {
+          selected.set(key, official);
+        }
+      });
+      return Array.from(selected.values());
+    } // End of dedupeOfficialsByMember
+
+    function officialsAtDate(eventType, startsAtLocal, source = null) {
+      const allTargets = (dashboardData.officials || []).filter(function(official) {
+        return isTargetOfficial(eventType, official);
+      });
+      let selected = activeOfficialsAtDate(startsAtLocal).filter(function(official) {
+        return isTargetOfficial(eventType, official);
+      });
+      const signerIds = new Set((source?.signer_ids || []).map(String));
+      if (signerIds.size > 0) {
+        const signerOfficials = allTargets.filter(function(official) {
+          return signerIds.has(String(official.official_id));
+        });
+        const selectedIds = new Set(selected.map(function(official) { return String(official.official_id); }));
+        const hasMissingSigner = signerOfficials.some(function(official) { return !selectedIds.has(String(official.official_id)); });
+        if (hasMissingSigner || selected.length === 0) {
+          const cohortKeys = new Set(signerOfficials.map(officialCohortKey).filter(function(key) { return key !== '|'; }));
+          const cohortOfficials = allTargets.filter(function(official) { return cohortKeys.has(officialCohortKey(official)); });
+          if (cohortOfficials.length >= signerOfficials.length) selected = cohortOfficials;
+        }
+      }
+      return dedupeOfficialsByMember(selected).sort(function(a, b) {
         const aChair = String(a.role || '').trim() === '이사장' ? 0 : 1;
         const bChair = String(b.role || '').trim() === '이사장' ? 0 : 1;
         if (aChair !== bChair) return aChair - bChair;
@@ -411,10 +459,21 @@
       });
     } // End of officialsAtDate
 
+    function meetingOfficialsPool(eventType, startsAtLocal, source) {
+      const targets = officialsAtDate(eventType, startsAtLocal, source);
+      const cohortKeys = new Set(targets.map(officialCohortKey).filter(function(key) { return key !== '|'; }));
+      const related = (dashboardData.officials || []).filter(function(official) {
+        return cohortKeys.has(officialCohortKey(official));
+      });
+      return dedupeOfficialsByMember(activeOfficialsAtDate(startsAtLocal).concat(related));
+    } // End of meetingOfficialsPool
+
     function buildMeetingAttendees(source, eventType, parsed) {
-      const officials = officialsAtDate(eventType, parsed.startsAt);
+      const officials = officialsAtDate(eventType, parsed.startsAt, source);
       const parsedNames = new Set((parsed.attendeeNames || []).map(normalizePersonName));
       const matchedNames = new Set();
+      const signedOfficialIds = new Set((source?.signed_official_ids || []).map(String));
+      const signedMemberIds = new Set((source?.signed_member_ids || []).map(String));
       const attendees = officials.map(function(official) {
         const normalized = normalizePersonName(official.name);
         const attended = parsedNames.has(normalized);
@@ -435,12 +494,14 @@
           signature_required:Array.isArray(source?.signer_ids) && source.signer_ids.length > 0
             ? source.signer_ids.map(String).includes(String(official.official_id))
             : true,
-          signature_signed_at:null
+          signature_signed_at:signedOfficialIds.has(String(official.official_id)) || signedMemberIds.has(String(official.member_uuid))
+            ? 'SIGNED'
+            : null
         };
       });
       const targetMemberIds = new Set(attendees.map(function(row) { return String(row.member_id); }));
       const additionalParsedNames = new Set((parsed.additionalAttendeeNames || []).map(normalizePersonName));
-      const additionalOfficials = activeOfficialsAtDate(parsed.startsAt).filter(function(official) {
+      const additionalOfficials = meetingOfficialsPool(eventType, parsed.startsAt, source).filter(function(official) {
         return !targetMemberIds.has(String(official.member_uuid))
           && additionalParsedNames.has(normalizePersonName(official.name));
       });
@@ -463,7 +524,9 @@
           note:'',
           signature_required:Array.isArray(source?.signer_ids)
             && source.signer_ids.map(String).includes(String(official.official_id)),
-          signature_signed_at:null
+          signature_signed_at:signedOfficialIds.has(String(official.official_id)) || signedMemberIds.has(String(official.member_uuid))
+            ? 'SIGNED'
+            : null
         });
       });
       const unmatched = (parsed.attendeeNames || []).filter(function(name) {
@@ -493,7 +556,7 @@
       const rows = (dashboardData.events || []).filter(function(row) {
         if (type !== 'ALL' && row.event_type !== type) return false;
         if (!query) return true;
-        return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)}`.toLowerCase().includes(query);
+        return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)} ${row.attendee_search_text || ''}`.toLowerCase().includes(query);
       });
       if (rows.length === 0) {
         list.innerHTML = '<div class="empty-state">등록된 회의·교육이 없습니다.</div>';
@@ -534,7 +597,6 @@
       document.getElementById('sourceMinuteGroup').classList.toggle('d-none', education);
       document.getElementById('educationContentGroup').classList.toggle('d-none', !education);
       document.getElementById('instructorGroup').classList.toggle('d-none', !education);
-      document.getElementById('educationMemberSearch').classList.toggle('d-none', !education);
       document.getElementById('educationFilesSection').classList.toggle('d-none', !education);
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
       document.getElementById('endRequiredMark').classList.toggle('d-none', !education);
@@ -551,10 +613,11 @@
       }
       const docType = type === 'BOARD' ? 'MINUTES' : 'GENERAL_ASSEMBLY';
       const sources = (dashboardData.sources || []).filter(function(source) { return source.doc_type === docType; });
-      select.innerHTML = '<option value="">의사록을 선택하세요</option>' + sources.map(function(source) {
+      select.innerHTML = '<option value="">의사록을 선택하세요</option><option value="MANUAL">수기 입력 (의사록 연동 없음)</option>' + sources.map(function(source) {
         const linkedElsewhere = source.already_linked && String(source.id) !== String(selectedId || '');
         return `<option value="${escapeHtml(source.id)}" ${String(source.id) === String(selectedId) ? 'selected' : ''} ${linkedElsewhere ? 'disabled' : ''}>${escapeHtml(source.title)}${linkedElsewhere ? ' · 등록됨' : ''}</option>`;
       }).join('');
+      if (selectedId === 'MANUAL') select.value = 'MANUAL';
     } // End of renderSourceOptions
 
     function resetEventForm() {
@@ -572,6 +635,8 @@
       document.getElementById('memberSearchInput').value = '';
       document.getElementById('memberSearchResults').innerHTML = '';
       document.getElementById('currentFiles').innerHTML = '';
+      document.getElementById('deleteEventBtn').classList.add('d-none');
+      syncEventDateRange();
       showAlert('formAlert', '');
       setEventTypeUi('BOARD');
     } // End of resetEventForm
@@ -618,15 +683,17 @@
         document.getElementById('eventTitle').value = event.title || '';
         document.getElementById('eventStartsAt').value = toKstLocalInput(event.starts_at);
         document.getElementById('eventEndsAt').value = toKstLocalInput(event.ends_at);
+        syncEventDateRange();
         document.getElementById('eventLocation').value = event.location || '';
         document.getElementById('educationContent').value = event.education_content || '';
         document.getElementById('eventInstructor').value = event.instructor || '';
         document.getElementById('materialFiles').value = '';
         document.getElementById('photoFiles').value = '';
         document.getElementById('memberSearchResults').innerHTML = '';
+        document.getElementById('deleteEventBtn').classList.remove('d-none');
         showAlert('formAlert', '');
         setEventTypeUi(event.event_type);
-        renderSourceOptions(event.event_type, event.source_minute_id || '');
+        renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
         renderCurrentFiles();
         eventModalInstance.show();
       } catch (error) {
@@ -643,6 +710,12 @@
         renderAttendees();
         return;
       }
+      if (sourceId === 'MANUAL') {
+        formState.attendees = [];
+        showAlert('formAlert', '수기 입력 모드입니다. 일시·장소를 적고 명단을 불러오거나 참석자를 직접 추가하세요.', 'info');
+        renderAttendees();
+        return;
+      }
       const type = document.getElementById('eventType').value;
       const source = (dashboardData.sources || []).find(function(row) { return String(row.id) === String(sourceId); });
       if (!source) return;
@@ -650,6 +723,7 @@
       document.getElementById('eventTitle').value = source.title || '';
       document.getElementById('eventStartsAt').value = parsed.startsAt || '';
       document.getElementById('eventEndsAt').value = parsed.endsAt || '';
+      syncEventDateRange();
       document.getElementById('eventLocation').value = parsed.location || '';
       const built = buildMeetingAttendees(source, type, parsed);
       formState.attendees = built.attendees;
@@ -664,6 +738,44 @@
       if (messages.length === 0) showAlert('formAlert', '의사록에서 일시·장소·참석자를 가져왔습니다.', 'success');
       renderAttendees();
     } // End of handleSourceMinuteChange
+
+    function loadMeetingRosterFromDate() {
+      const type = document.getElementById('eventType').value;
+      if (type === 'EDUCATION') return;
+      const startsAt = document.getElementById('eventStartsAt').value;
+      if (!startsAt) {
+        showAlert('formAlert', '먼저 시작 일시를 입력하세요.', 'warning');
+        return;
+      }
+      const sourceId = document.getElementById('sourceMinute').value;
+      const source = (dashboardData.sources || []).find(function(row) { return String(row.id) === String(sourceId); }) || { signer_ids:[], signed_official_ids:[], signed_member_ids:[] };
+      const officials = officialsAtDate(type, startsAt, source);
+      const signedOfficialIds = new Set((source.signed_official_ids || []).map(String));
+      const signedMemberIds = new Set((source.signed_member_ids || []).map(String));
+      formState.attendees = officials.map(function(official) {
+        return {
+          member_id:official.member_uuid,
+          official_id:official.official_id,
+          name:official.name,
+          member_number:official.member_number,
+          member_type:official.member_type,
+          role:official.role,
+          is_target:true,
+          attendance_status:'PENDING',
+          check_in_method:'ADMIN',
+          checked_in_at:null,
+          actual_attendee_name:'',
+          note:'',
+          signature_required:Array.isArray(source.signer_ids) && source.signer_ids.map(String).includes(String(official.official_id)),
+          signature_signed_at:signedOfficialIds.has(String(official.official_id)) || signedMemberIds.has(String(official.member_uuid)) ? 'SIGNED' : null
+        };
+      });
+      showAlert('formAlert', officials.length > 0
+        ? `회의 대상 ${officials.length}명을 불러왔습니다. 참석 상태와 명단을 직접 조정하세요.`
+        : '해당 날짜의 임원·대의원 명단을 찾지 못했습니다. 아래 검색으로 직접 추가하세요.',
+      officials.length > 0 ? 'success' : 'warning');
+      renderAttendees();
+    } // End of loadMeetingRosterFromDate
 
     function renderAttendees() {
       const list = document.getElementById('attendeeList');
@@ -686,6 +798,9 @@
             ? '<span class="signature-chip signature-done">서명 완료</span>'
             : '<span class="signature-chip signature-wait">미서명</span>';
         }
+        const actualAttendeeHtml = String(row.member_type || '').includes('단체')
+          ? `<input type="text" class="form-control form-control-sm actual-attendee" data-actual-attendee value="${escapeHtml(row.actual_attendee_name || '')}" placeholder="단체 실제 참석자명">`
+          : '<span class="text-muted small text-center">-</span>';
         return `
           <div class="attendee-row" data-attendee-index="${index}">
             <div class="attendee-name">${escapeHtml(row.name)}${row.is_target === false ? ' <span class="badge text-bg-light">그 외 참석</span>' : ''}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}<br>${type === 'EDUCATION' ? '' : signatureHtml}</div></div>
@@ -695,8 +810,8 @@
               <option value="EXCUSED" ${row.attendance_status === 'EXCUSED' ? 'selected' : ''}>사유 불참</option>
               <option value="PENDING" ${row.attendance_status === 'PENDING' ? 'selected' : ''}>확인 전</option>
             </select>
-            <input type="text" class="form-control form-control-sm actual-attendee" data-actual-attendee value="${escapeHtml(row.actual_attendee_name || '')}" placeholder="실제 참석자명${String(row.member_type || '') === '단체' ? ' (단체)' : ' (선택)'}">
-            ${type === 'EDUCATION' ? '<button type="button" class="btn btn-sm btn-outline-danger" data-remove-attendee>제외</button>' : '<span></span>'}
+            ${actualAttendeeHtml}
+            <button type="button" class="btn btn-sm btn-outline-danger" data-remove-attendee>제외</button>
           </div>`;
       }).join('');
       list.querySelectorAll('[data-attendee-index]').forEach(function(rowEl) {
@@ -749,7 +864,7 @@
           formState.attendees.push({
             member_id:member.id, official_id:null, name:member.name,
             member_number:member.member_number || member.member_id,
-            member_type:member.member_type, role:'', attendance_status:'ATTENDED',
+            member_type:member.member_type, role:'', is_target:true, attendance_status:'ATTENDED',
             check_in_method:'ADMIN', checked_in_at:localInputToIso(document.getElementById('eventStartsAt').value),
             actual_attendee_name:'', note:'', signature_required:false, signature_signed_at:null
           });
@@ -826,21 +941,31 @@
       });
     } // End of renderCurrentFiles
 
+    function syncEventDateRange() {
+      const startInput = document.getElementById('eventStartsAt');
+      const endInput = document.getElementById('eventEndsAt');
+      const startValue = startInput.value;
+      endInput.min = startValue || '';
+      if (startValue && (!endInput.value || endInput.value < startValue)) {
+        endInput.value = startValue;
+      }
+    } // End of syncEventDateRange
+
     function validateEventForm() {
       const type = document.getElementById('eventType').value;
       const title = String(document.getElementById('eventTitle').value || '').trim();
       const startsAt = document.getElementById('eventStartsAt').value;
       const endsAt = document.getElementById('eventEndsAt').value;
       const location = String(document.getElementById('eventLocation').value || '').trim();
-      const sourceId = document.getElementById('sourceMinute').value || null;
+      const selectedSourceId = document.getElementById('sourceMinute').value || null;
+      const sourceId = selectedSourceId === 'MANUAL' ? null : selectedSourceId;
       const educationContent = String(document.getElementById('educationContent').value || '').trim();
       const instructor = String(document.getElementById('eventInstructor').value || '').trim();
       if (!title) throw new Error('행사명을 입력하세요.');
       if (!startsAt) throw new Error('시작 일시를 입력하세요.');
       if (!location) throw new Error('장소를 입력하세요.');
       if (endsAt && localInputToIso(endsAt) < localInputToIso(startsAt)) throw new Error('종료 일시는 시작 일시보다 빠를 수 없습니다.');
-      if (type !== 'EDUCATION' && !sourceId) throw new Error('원본 의사록을 선택하세요.');
-      if (type !== 'EDUCATION' && formState.attendees.length === 0) throw new Error('회의일 기준 임원·대의원 명단을 확인하지 못했습니다.');
+      if (type !== 'EDUCATION' && !selectedSourceId) throw new Error('원본 의사록 또는 수기 입력을 선택하세요.');
       if (type === 'EDUCATION') {
         if (!endsAt) throw new Error('교육 종료 일시를 입력하세요.');
         if (!educationContent) throw new Error('교육 내용을 입력하세요.');
@@ -870,12 +995,15 @@
           return {
             member_id:row.member_id,
             official_id:row.official_id,
+            is_target:row.is_target !== false,
             attendance_status:row.attendance_status,
             check_in_method:row.check_in_method || (values.type === 'EDUCATION' ? 'ADMIN' : 'MINUTES'),
             checked_in_at:row.attendance_status === 'ATTENDED'
               ? (row.checked_in_at || localInputToIso(values.startsAt))
               : null,
-            actual_attendee_name:String(row.actual_attendee_name || '').trim() || null,
+            actual_attendee_name:String(row.member_type || '').includes('단체')
+              ? (String(row.actual_attendee_name || '').trim() || null)
+              : null,
             note:String(row.note || '').trim() || null
           };
         });
@@ -917,6 +1045,35 @@
       }
     } // End of saveEvent
 
+    async function deleteEvent() {
+      if (!formState.eventId || formState.saving) return;
+      if (!window.confirm('이 회의·교육 기록을 삭제할까요? 참석 이력과 첨부파일도 함께 삭제됩니다.')) return;
+      formState.saving = true;
+      document.getElementById('saveEventBtn').disabled = true;
+      document.getElementById('deleteEventBtn').disabled = true;
+      showLoading(true, '행사를 삭제하는 중...');
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_delete_event', { p_event_id:formState.eventId });
+        if (error) throw error;
+        const storagePaths = Array.isArray(data?.storage_paths) ? data.storage_paths.filter(Boolean) : [];
+        let storageWarning = '';
+        if (storagePaths.length > 0) {
+          const { error:storageError } = await _supabase.storage.from(PARTICIPATION_BUCKET).remove(storagePaths);
+          if (storageError) storageWarning = ' 첨부파일 정리는 완료하지 못했으니 관리자에게 확인해 주세요.';
+        }
+        eventModalInstance.hide();
+        await loadDashboard(false);
+        showAlert('pageAlert', `회의·교육 기록을 삭제했습니다.${storageWarning}`, storageWarning ? 'warning' : 'success');
+      } catch (error) {
+        showAlert('formAlert', error?.message || '삭제하지 못했습니다.');
+      } finally {
+        formState.saving = false;
+        document.getElementById('saveEventBtn').disabled = false;
+        document.getElementById('deleteEventBtn').disabled = false;
+        showLoading(false);
+      }
+    } // End of deleteEvent
+
     async function loadDashboard(showCover = true) {
       if (showCover) showLoading(true, '참여 현황을 불러오는 중...');
       showAlert('pageAlert', '');
@@ -952,11 +1109,18 @@
         setEventTypeUi(event.target.value);
       });
       document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
+      document.getElementById('meetingRosterBtn').addEventListener('click', loadMeetingRosterFromDate);
+      document.getElementById('eventStartsAt').addEventListener('input', syncEventDateRange);
+      document.getElementById('eventEndsAt').addEventListener('input', function(event) {
+        const startValue = document.getElementById('eventStartsAt').value;
+        if (startValue && event.target.value && event.target.value < startValue) event.target.value = startValue;
+      });
       document.getElementById('memberSearchBtn').addEventListener('click', searchMembers);
       document.getElementById('memberSearchInput').addEventListener('keydown', function(event) {
         if (event.key === 'Enter') { event.preventDefault(); searchMembers(); }
       });
       document.getElementById('saveEventBtn').addEventListener('click', saveEvent);
+      document.getElementById('deleteEventBtn').addEventListener('click', deleteEvent);
 
       const { data:{ session } } = await _supabase.auth.getSession();
       if (!session?.user) {
