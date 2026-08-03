@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.7
-Change: 2026-03-29 - Validate candidate and manifesto image URLs before rendering.
+Version: v1.0.8
+Change: 2026-08-03 - Complete dark-mode coverage for ballot, notices, selections, and close fallback.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-03-29 - Validate candidate and manifesto image URLs before renderin
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>조합원 투표소</title>
-    <script>console.log('[Version] v1.0.7 | vote.html');</script>
+    <script>console.log('[Version] v1.0.8 | vote.html');</script>
     <link rel="stylesheet" href="style.css">
    <style>
 /* =========================================
@@ -324,7 +324,7 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
 }
 </style>
     <script src="../shared/theme.js?v=20260802-1"></script>
-    <link href="../shared/theme.css?v=20260802-1" rel="stylesheet">
+    <link href="../shared/theme.css?v=20260803-1" rel="stylesheet">
 </head>
 <body>
 
@@ -337,7 +337,7 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
         <header>
             <h1 id="election-title">조합원 투표소</h1>
             <p id="voter-info" style="color: #666; text-align: center;">회원 확인중...</p>
-            <div style="background: #f0fdf4; color: #166534; padding: 0.5rem; text-align: center; border-radius: 4px; margin-top: 0.5rem;">
+            <div class="district-notice" style="background: #f0fdf4; color: #166534; padding: 0.5rem; text-align: center; border-radius: 4px; margin-top: 0.5rem;">
                 <strong id="district-name">선거구 확인중</strong>
             </div>
         </header>
@@ -354,7 +354,7 @@ h1 { margin: 0 0 0.5rem 0; font-size: 1.8rem; color: var(--text-dark); }
 <div id="complete-container" class="container" style="text-align: center;">
     <h1 style="color: var(--primary-color);">투표 완료</h1>
     <p>소중한 한 표를 행사해 주셔서 감사합니다.</p>
-    <p style="color: #888; font-size: 0.9rem;">투표 결과는 마감 후 공개됩니다.</p>
+    <p class="vote-complete-note" style="color: #888; font-size: 0.9rem;">투표 결과는 마감 후 공개됩니다.</p>
     <button id="btn-close-final" class="btn-modal">창 닫기</button>
 </div>
 
@@ -511,12 +511,12 @@ function safeUrl(value, options = {}) {
 
             // 상태 뱃지
             const statusBadge = election.status === 'NOMINATION'
-                ? '<span style="color:orange;">[후보등록기간]</span>'
-                : '<span style="color:green;">[투표진행중]</span>';
+                ? '<span class="ballot-status nomination" style="color:orange;">[후보등록기간]</span>'
+                : '<span class="ballot-status open" style="color:green;">[투표진행중]</span>';
 
             btn.innerHTML = `
                 <h3 style="margin:0;">${safeElectionTitle}</h3>
-                <p style="margin:0.5rem 0 0 0; color:#666;">${statusBadge}</p>
+                <p class="ballot-status-text" style="margin:0.5rem 0 0 0; color:#666;">${statusBadge}</p>
             `;
             btn.onclick = () => loadElection(election);
             listDiv.appendChild(btn);
@@ -613,8 +613,9 @@ async function loadNextBallot() {
         // 1. 무투표 당선 안내 메시지
         if (info.isUncontested) {
             const noticeDiv = document.createElement('div');
+            noticeDiv.className = 'uncontested-notice';
             noticeDiv.style.cssText = 'background:#f0fdf4; padding:1rem; margin-bottom:1rem; border-radius:8px; text-align:center; color:#166534; border:1px solid #bbf7d0;';
-            noticeDiv.innerHTML = `<strong style="font-size:1.1rem;">🎉 무투표 당선 안내</strong><br><span style="font-size:0.9rem; color:#374151;">후보자 수(${info.candidates.length}명)가 선출 인원(${info.district.quota}명) 이내이므로<br>투표 절차 없이 당선이 확정되었습니다.<br>아래 후보자를 확인하시고 <strong>[확인]</strong> 버튼을 눌러주세요.</span>`;
+            noticeDiv.innerHTML = `<strong style="font-size:1.1rem;">🎉 무투표 당선 안내</strong><br><span class="uncontested-notice-detail" style="font-size:0.9rem; color:#374151;">후보자 수(${info.candidates.length}명)가 선출 인원(${info.district.quota}명) 이내이므로<br>투표 절차 없이 당선이 확정되었습니다.<br>아래 후보자를 확인하시고 <strong>[확인]</strong> 버튼을 눌러주세요.</span>`;
             ballotArea.appendChild(noticeDiv);
         }
 
@@ -623,7 +624,7 @@ async function loadNextBallot() {
             listDiv.className = 'candidate-list';
 
             if (!info.candidates || info.candidates.length === 0) {
-                ballotArea.innerHTML += '<div style="text-align:center; padding:3rem; color:#666;">등록된 후보자가 없습니다.</div>';
+                ballotArea.innerHTML += '<div class="vote-empty-state" style="text-align:center; padding:3rem; color:#666;">등록된 후보자가 없습니다.</div>';
                 return;
             }
 
@@ -635,6 +636,7 @@ async function loadNextBallot() {
 
                 // 무투표일 경우 선택 효과 제거 (보기 전용)
                 if (info.isUncontested) {
+                    card.classList.add('uncontested-candidate');
                     card.style.cursor = 'default';
                     card.style.borderColor = '#22c55e';
                     card.style.backgroundColor = '#f0fdf4';
@@ -694,7 +696,7 @@ async function loadNextBallot() {
                     <button type="button" class="btn-binary btn-yes" data-val="AGREE">찬성 (O)</button>
                     <button type="button" class="btn-binary btn-no" data-val="DISAGREE">반대 (X)</button>
                 </div>
-                <p style="text-align:center; margin-top:1rem; color:#666;">안건에 대한 찬성/반대를 선택해주세요.</p>
+                <p class="binary-help" style="text-align:center; margin-top:1rem; color:#666;">안건에 대한 찬성/반대를 선택해주세요.</p>
             `;
             ballotArea.querySelectorAll('.btn-binary').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -969,7 +971,7 @@ voteBtn.addEventListener('click', () => {
         setTimeout(() => {
             // 화면 내용을 싹 지우고 안내 문구 표시
             document.body.innerHTML = `
-                <div style="
+                <div class="vote-close-fallback" style="
                     display: flex;
                     flex-direction: column;
                     justify-content: center;
@@ -979,13 +981,13 @@ voteBtn.addEventListener('click', () => {
                     background: #f3f4f6;
                     font-family: sans-serif;
                 ">
-                    <div style="background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 90%;">
+                    <div class="vote-close-fallback-card" style="background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 90%;">
                         <h2 style="color: #2563eb; margin: 0 0 1rem 0;">투표가 완료되었습니다</h2>
-                        <p style="color: #4b5563; line-height: 1.6; margin-bottom: 2rem;">
+                        <p class="vote-close-fallback-copy" style="color: #4b5563; line-height: 1.6; margin-bottom: 2rem;">
                             브라우저 보안 정책으로 인해 창이 자동으로 닫히지 않았습니다.<br>
                             상단의 <strong>X</strong> 버튼을 눌러 창을 닫아주세요.
                         </p>
-                        <button onclick="history.back()" style="
+                        <button class="vote-close-fallback-button" onclick="history.back()" style="
                             padding: 0.8rem 1.5rem;
                             background: #e5e7eb;
                             border: none;

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: Escape district/candidate labels in live monitor to prevent XSS.
+Version: v1.0.3
+Change: Complete dark-mode graph coverage while retaining visibility-aware, non-overlapping polling.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <title>실시간 개표 상황실</title>
-    <script>console.log('[Version] v1.0.1 | monitor.html');</script>
+    <script>console.log('[Version] v1.0.3 | monitor.html');</script>
     <link rel="stylesheet" href="style.css">
     <style>
         .dashboard-card { background: white; padding: 2rem; margin-bottom: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -24,7 +24,7 @@ Change: Escape district/candidate labels in live monitor to prevent XSS.
     </style>
 
     <script src="../shared/theme.js?v=20260802-1"></script>
-    <link href="../shared/theme.css?v=20260802-1" rel="stylesheet">
+    <link href="../shared/theme.css?v=20260803-1" rel="stylesheet">
 </head>
 <body style="display:block; padding: 2rem;">
 
@@ -59,9 +59,57 @@ Change: Escape district/candidate labels in live monitor to prevent XSS.
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[ch]));
         }
-        import { AdminService } from './AdminService.js';
+        import { AdminService } from './AdminService.js?v=20260615-1';
         const service = new AdminService();
         let electionId = null;
+        let turnoutPollTimerId = null;
+        let turnoutPollEnabled = false;
+        let turnoutPollInFlight = false;
+
+        function clearTurnoutPollTimer() {
+            if (!turnoutPollTimerId) return;
+            clearTimeout(turnoutPollTimerId);
+            turnoutPollTimerId = null;
+        }
+
+        function stopTurnoutPolling() {
+            turnoutPollEnabled = false;
+            clearTurnoutPollTimer();
+        }
+
+        function scheduleTurnoutPolling(delayMs) {
+            if (!turnoutPollEnabled || document.hidden) return;
+            clearTurnoutPollTimer();
+            turnoutPollTimerId = setTimeout(runTurnoutPolling, delayMs);
+        }
+
+        async function runTurnoutPolling() {
+            if (!turnoutPollEnabled || document.hidden || turnoutPollInFlight) return;
+            turnoutPollInFlight = true;
+            try {
+                await updateTurnout();
+            } catch (error) {
+                console.error('투표율 갱신 실패:', error);
+            } finally {
+                turnoutPollInFlight = false;
+                scheduleTurnoutPolling(5000);
+            }
+        }
+
+        function startTurnoutPolling() {
+            stopTurnoutPolling();
+            turnoutPollEnabled = true;
+            scheduleTurnoutPolling(5000);
+        }
+
+        document.addEventListener('visibilitychange', function handleMonitorVisibilityChange() {
+            if (document.hidden) {
+                clearTurnoutPollTimer();
+            } else if (turnoutPollEnabled) {
+                scheduleTurnoutPolling(0);
+            }
+        });
+        window.addEventListener('pagehide', stopTurnoutPolling);
 
         async function init() {
             // 1. 선거 정보 로드
@@ -79,15 +127,15 @@ Change: Escape district/candidate labels in live monitor to prevent XSS.
             statusEl.innerText = `현재 상태: ${election.status}`;
             
             // 2. 투표율 업데이트 (즉시 실행)
-            updateTurnout();
+            await updateTurnout();
             
             // 3. 결과 공개 상태라면 결과 로드
             if (election.status === 'PUBLISHED') {
                 document.getElementById('result-section').style.display = 'block';
                 loadResults();
             } else if (election.status === 'OPEN') {
-                // 투표 중이면 5초마다 투표율 갱신 (폴링)
-                setInterval(updateTurnout, 5000);
+                // 투표 중이면 이전 요청이 끝난 뒤 다음 갱신을 예약한다.
+                startTurnoutPolling();
             }
         }
 

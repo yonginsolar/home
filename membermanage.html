@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.99
-Change: Split education and meeting history, add QR check-in, and show education photo galleries.
+Version: v1.0.100
+Change: Add dark-mode coverage and keyboard/mouse navigation to education photo galleries.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.99 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.100 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -506,12 +506,63 @@ padding: 18px;
 background: rgba(15,23,42,.92);
 }
 .participation-image-lightbox.show { display: flex; }
-.participation-image-lightbox img {
+.participation-image-lightbox-stage {
+position: relative;
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 10px;
 max-width: min(1100px, 94vw);
-max-height: 88vh;
+max-height: 92vh;
+}
+.participation-image-lightbox-stage img {
+max-width: min(1100px, 94vw);
+max-height: 84vh;
 object-fit: contain;
 border-radius: 10px;
 background: #fff;
+cursor: default;
+}
+.participation-image-lightbox-stage img.has-navigation { cursor: pointer; }
+.participation-image-lightbox-stage img.is-loading {
+opacity: .55;
+}
+.participation-image-lightbox-meta {
+min-height: 24px;
+padding: 4px 10px;
+border-radius: 999px;
+background: rgba(15,23,42,.72);
+color: #f8fafc;
+font-size: .8rem;
+line-height: 1.35;
+text-align: center;
+}
+.participation-image-lightbox-nav {
+position: fixed;
+top: 50%;
+z-index: 2;
+width: 48px;
+height: 48px;
+border: 1px solid rgba(255,255,255,.45);
+border-radius: 999px;
+background: rgba(255,255,255,.92);
+color: #0f172a;
+font-size: 1.65rem;
+line-height: 1;
+box-shadow: 0 8px 28px rgba(0,0,0,.35);
+transform: translateY(-50%);
+}
+.participation-image-lightbox-nav:hover,
+.participation-image-lightbox-nav:focus-visible {
+background: #fff;
+}
+.participation-image-lightbox-nav.prev { left: max(12px, env(safe-area-inset-left)); }
+.participation-image-lightbox-nav.next { right: max(12px, env(safe-area-inset-right)); }
+.participation-image-lightbox-nav[hidden],
+.participation-image-lightbox-meta[hidden] { display: none !important; }
+.participation-image-lightbox :is(button, img):focus-visible {
+outline: 3px solid #93c5fd;
+outline-offset: 3px;
 }
 .participation-image-lightbox-close {
 position: fixed;
@@ -525,6 +576,7 @@ background: #fff;
 color: #0f172a;
 font-size: 1.5rem;
 line-height: 1;
+z-index: 3;
 }
 .participation-history-item {
 border: 1px solid #e5e7eb;
@@ -559,6 +611,20 @@ overflow: hidden;
 text-align: left;
 display: flex;
 flex-direction: column;
+}
+
+@media (max-width: 640px) {
+.participation-image-lightbox { padding: 10px; }
+.participation-image-lightbox-stage,
+.participation-image-lightbox-stage img { max-width: 96vw; }
+.participation-image-lightbox-stage img { max-height: 80vh; }
+.participation-image-lightbox-nav {
+width: 44px;
+height: 44px;
+background: rgba(255,255,255,.86);
+}
+.participation-image-lightbox-nav.prev { left: max(8px, env(safe-area-inset-left)); }
+.participation-image-lightbox-nav.next { right: max(8px, env(safe-area-inset-right)); }
 }
 
 /* [명예의 전당] 게임 랭킹 카드 */
@@ -696,7 +762,7 @@ gtag('js', new Date());
 gtag('config', 'G-TR217L7JN9');
 </script>
 <script src="shared/theme.js?v=20260802-1"></script>
-<link href="shared/theme.css?v=20260802-1" rel="stylesheet">
+<link href="shared/theme.css?v=20260803-1" rel="stylesheet">
 </head>
 
 <body>
@@ -1393,10 +1459,10 @@ oninput="autoHyphen(this)"> </div>
 <button type="button" class="btn-close" id="participationHistoryCloseBtn" onclick="closeParticipationHistory()" aria-label="닫기"></button>
 </div>
 <div class="participation-history-tabs" role="tablist" aria-label="참여 이력 유형">
-<button type="button" class="participation-history-tab active" id="participationEducationTab" role="tab" aria-selected="true" onclick="switchParticipationHistoryTab('EDUCATION')">교육</button>
-<button type="button" class="participation-history-tab" id="participationMeetingTab" role="tab" aria-selected="false" onclick="switchParticipationHistoryTab('MEETING')">회의</button>
+<button type="button" class="participation-history-tab active" id="participationEducationTab" role="tab" aria-selected="true" aria-controls="participationHistoryList" tabindex="0" onclick="switchParticipationHistoryTab('EDUCATION')" onkeydown="handleParticipationHistoryTabKeydown(event)">교육</button>
+<button type="button" class="participation-history-tab" id="participationMeetingTab" role="tab" aria-selected="false" aria-controls="participationHistoryList" tabindex="-1" onclick="switchParticipationHistoryTab('MEETING')" onkeydown="handleParticipationHistoryTabKeydown(event)">회의</button>
 </div>
-<div class="participation-history-list" id="participationHistoryList">
+<div class="participation-history-list" id="participationHistoryList" role="tabpanel" aria-labelledby="participationEducationTab" tabindex="0">
 <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>
 </div>
 <div class="text-end border-top pt-3 mt-3">
@@ -1407,7 +1473,12 @@ oninput="autoHyphen(this)"> </div>
 
 <div id="participationImageLightbox" class="participation-image-lightbox" role="dialog" aria-modal="true" aria-label="교육 사진 크게 보기" aria-hidden="true">
 <button type="button" class="participation-image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기" onclick="closeParticipationImageLightbox()">&times;</button>
+<button type="button" class="participation-image-lightbox-nav prev" id="participationImageLightboxPrev" aria-label="이전 사진" hidden>&lsaquo;</button>
+<div class="participation-image-lightbox-stage">
 <img id="participationImageLightboxImage" alt="교육 사진 크게 보기">
+<div class="participation-image-lightbox-meta" id="participationImageLightboxMeta" aria-live="polite" hidden></div>
+</div>
+<button type="button" class="participation-image-lightbox-nav next" id="participationImageLightboxNext" aria-label="다음 사진" hidden>&rsaquo;</button>
 </div>
 
 <div id="boardViewModal" class="custom-modal-overlay">
@@ -4372,7 +4443,11 @@ let participationModalPreviousBodyOverflow = '';
 let participationHistoryData = { events:[] };
 let participationHistoryActiveTab = 'EDUCATION';
 let participationHistoryRenderVersion = 0;
+let participationHistoryReturnFocus = null;
 let participationImageReturnFocus = null;
+let participationImageGallery = [];
+let participationImageIndex = -1;
+let participationImageLoadVersion = 0;
 let pendingEducationQrCheckIn = false;
 const participationSignedUrlCache = new Map();
 
@@ -4442,8 +4517,12 @@ const meetingTab = document.getElementById('participationMeetingTab');
 const educationActive = participationHistoryActiveTab === 'EDUCATION';
 educationTab?.classList.toggle('active', educationActive);
 educationTab?.setAttribute('aria-selected', educationActive ? 'true' : 'false');
+educationTab?.setAttribute('tabindex', educationActive ? '0' : '-1');
 meetingTab?.classList.toggle('active', !educationActive);
 meetingTab?.setAttribute('aria-selected', educationActive ? 'false' : 'true');
+meetingTab?.setAttribute('tabindex', educationActive ? '-1' : '0');
+const list = document.getElementById('participationHistoryList');
+list?.setAttribute('aria-labelledby', educationActive ? 'participationEducationTab' : 'participationMeetingTab');
 } // End of syncParticipationHistoryTabs
 
 async function switchParticipationHistoryTab(tab) {
@@ -4451,6 +4530,26 @@ participationHistoryActiveTab = tab === 'MEETING' ? 'MEETING' : 'EDUCATION';
 syncParticipationHistoryTabs();
 await renderParticipationHistory(participationHistoryData);
 } // End of switchParticipationHistoryTab
+
+async function handleParticipationHistoryTabKeydown(event) {
+if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+event.preventDefault();
+const tabs = [
+document.getElementById('participationEducationTab'),
+document.getElementById('participationMeetingTab')
+].filter(Boolean);
+if (!tabs.length) return;
+const currentIndex = Math.max(0, tabs.indexOf(event.currentTarget));
+const targetIndex = event.key === 'Home'
+? 0
+: event.key === 'End'
+? tabs.length - 1
+: (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
+const useEducation = tabs[targetIndex]?.id === 'participationEducationTab';
+const targetTab = useEducation ? 'EDUCATION' : 'MEETING';
+await switchParticipationHistoryTab(targetTab);
+tabs[targetIndex]?.focus();
+} // End of handleParticipationHistoryTabKeydown
 
 async function renderParticipationHistory(data) {
 const renderVersion = ++participationHistoryRenderVersion;
@@ -4558,6 +4657,7 @@ const list = document.getElementById('participationHistoryList');
 const summary = document.getElementById('participationHistorySummary');
 const memberUuid = getActiveMemberProfileId();
 if (!overlay || !memberUuid) return showModal('현재 조합원 프로필을 확인하지 못했습니다.');
+participationHistoryReturnFocus = document.activeElement;
 participationModalPreviousBodyOverflow = document.body.style.overflow || '';
 document.body.style.overflow = 'hidden';
 overlay.style.display = 'flex';
@@ -4586,6 +4686,8 @@ closeParticipationImageLightbox();
 const overlay = document.getElementById('participationHistoryModal');
 if (overlay) overlay.style.display = 'none';
 document.body.style.overflow = participationModalPreviousBodyOverflow;
+if (participationHistoryReturnFocus && typeof participationHistoryReturnFocus.focus === 'function') participationHistoryReturnFocus.focus();
+participationHistoryReturnFocus = null;
 } // End of closeParticipationHistory
 
 async function openParticipationAttachment(storagePath) {
@@ -4599,18 +4701,123 @@ showModal('첨부파일을 열지 못했습니다.\n' + (error?.message || '잠�
 }
 } // End of openParticipationAttachment
 
+function syncParticipationImageLightboxControls() {
+const hasMultiple = participationImageGallery.length > 1;
+const previousButton = document.getElementById('participationImageLightboxPrev');
+const nextButton = document.getElementById('participationImageLightboxNext');
+const meta = document.getElementById('participationImageLightboxMeta');
+const image = document.getElementById('participationImageLightboxImage');
+if (previousButton) previousButton.hidden = !hasMultiple;
+if (nextButton) nextButton.hidden = !hasMultiple;
+if (image) {
+image.classList.toggle('has-navigation', hasMultiple);
+image.title = hasMultiple ? '사진의 왼쪽 또는 오른쪽을 눌러 이동' : '';
+}
+if (meta) {
+meta.hidden = !hasMultiple;
+meta.textContent = hasMultiple
+? `${participationImageIndex + 1} / ${participationImageGallery.length} · 사진 좌우 클릭 또는 방향키`
+: '';
+}
+} // End of syncParticipationImageLightboxControls
+
+function preloadParticipationImage(url) {
+return new Promise(function(resolve, reject) {
+const probe = new Image();
+probe.onload = function() { resolve(url); };
+probe.onerror = function() { reject(new Error('사진 데이터를 불러오지 못했습니다.')); };
+probe.src = url;
+});
+} // End of preloadParticipationImage
+
+async function resolveParticipationGalleryUrl(item, forceRefresh) {
+const existingUrl = String(item?.signedUrl || '').trim();
+if (existingUrl.startsWith('data:')) return existingUrl;
+if (forceRefresh) participationSignedUrlCache.delete(item.storagePath);
+const signedUrl = await getParticipationSignedUrl(item.storagePath);
+item.signedUrl = signedUrl;
+return signedUrl;
+} // End of resolveParticipationGalleryUrl
+
+async function showParticipationImageAt(index) {
+if (!participationImageGallery.length) return;
+const normalizedIndex = (Number(index) + participationImageGallery.length) % participationImageGallery.length;
+const item = participationImageGallery[normalizedIndex];
+const image = document.getElementById('participationImageLightboxImage');
+if (!image || !item) return;
+participationImageIndex = normalizedIndex;
+syncParticipationImageLightboxControls();
+const loadVersion = ++participationImageLoadVersion;
+image.classList.add('is-loading');
+try {
+let signedUrl = await resolveParticipationGalleryUrl(item, false);
+if (loadVersion !== participationImageLoadVersion) return;
+try {
+await preloadParticipationImage(signedUrl);
+} catch (firstError) {
+if (loadVersion !== participationImageLoadVersion) return;
+if (signedUrl.startsWith('data:')) throw firstError;
+signedUrl = await resolveParticipationGalleryUrl(item, true);
+await preloadParticipationImage(signedUrl);
+}
+if (loadVersion !== participationImageLoadVersion) return;
+item.signedUrl = signedUrl;
+image.alt = item.alt || `교육 사진 ${normalizedIndex + 1}`;
+image.src = signedUrl;
+} catch (error) {
+if (loadVersion !== participationImageLoadVersion) return;
+closeParticipationImageLightbox();
+showModal('사진을 열지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해주세요.'));
+} finally {
+if (loadVersion === participationImageLoadVersion) image.classList.remove('is-loading');
+}
+} // End of showParticipationImageAt
+
+function stepParticipationImage(delta) {
+if (participationImageGallery.length <= 1) return;
+showParticipationImageAt(participationImageIndex + Number(delta || 0));
+} // End of stepParticipationImage
+
 async function openParticipationImageLightbox(storagePath, triggerElement) {
 try {
-const signedUrl = await getParticipationSignedUrl(storagePath);
 const overlay = document.getElementById('participationImageLightbox');
 const image = document.getElementById('participationImageLightboxImage');
 if (!overlay || !image) return;
 participationImageReturnFocus = triggerElement || document.activeElement;
-image.src = signedUrl;
+const photoStrip = triggerElement?.closest?.('.participation-photo-strip');
+const galleryButtons = photoStrip
+? Array.from(photoStrip.querySelectorAll('button[data-participation-photo]'))
+: (triggerElement ? [triggerElement] : []);
+participationImageGallery = galleryButtons.map(function(button, index) {
+const thumbnail = button.querySelector('img');
+return {
+storagePath: String(button.dataset.participationPhoto || '').trim(),
+signedUrl: String(thumbnail?.currentSrc || thumbnail?.src || '').trim(),
+alt: String(button.title || thumbnail?.alt || `교육 사진 ${index + 1}`).trim(),
+trigger: button
+};
+}).filter(function(item) { return item.storagePath; });
+if (!participationImageGallery.length) {
+participationImageGallery = [{
+storagePath: String(storagePath || '').trim(),
+signedUrl: '',
+alt: '교육 사진 크게 보기',
+trigger: triggerElement || null
+}].filter(function(item) { return item.storagePath; });
+}
+if (!participationImageGallery.length) return;
+const requestedPath = String(storagePath || '').trim();
+const requestedIndex = participationImageGallery.findIndex(function(item) {
+return item.storagePath === requestedPath;
+});
+participationImageIndex = requestedIndex >= 0 ? requestedIndex : 0;
 overlay.classList.add('show');
 overlay.setAttribute('aria-hidden', 'false');
+syncParticipationImageLightboxControls();
 document.getElementById('participationImageLightboxClose')?.focus();
+await showParticipationImageAt(participationImageIndex);
 } catch (error) {
+closeParticipationImageLightbox();
 showModal('사진을 열지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해주세요.'));
 }
 } // End of openParticipationImageLightbox
@@ -4621,23 +4828,65 @@ const image = document.getElementById('participationImageLightboxImage');
 if (!overlay || !overlay.classList.contains('show')) return;
 overlay.classList.remove('show');
 overlay.setAttribute('aria-hidden', 'true');
+participationImageLoadVersion += 1;
 if (image) image.removeAttribute('src');
 if (participationImageReturnFocus && typeof participationImageReturnFocus.focus === 'function') participationImageReturnFocus.focus();
 participationImageReturnFocus = null;
+participationImageGallery = [];
+participationImageIndex = -1;
+syncParticipationImageLightboxControls();
 } // End of closeParticipationImageLightbox
 
 document.addEventListener('keydown', function(event) {
-if (event.key !== 'Escape') return;
 const imageOverlay = document.getElementById('participationImageLightbox');
 if (imageOverlay && imageOverlay.classList.contains('show')) {
+if (event.key === 'Tab') {
+const focusable = [
+document.getElementById('participationImageLightboxClose'),
+document.getElementById('participationImageLightboxPrev'),
+document.getElementById('participationImageLightboxNext')
+].filter(function(element) { return element && !element.hidden; });
+if (focusable.length) {
+event.preventDefault();
+event.stopImmediatePropagation();
+const currentIndex = focusable.indexOf(document.activeElement);
+const nextIndex = event.shiftKey
+? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+: (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+focusable[nextIndex].focus();
+}
+return;
+}
+if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+event.preventDefault();
+event.stopImmediatePropagation();
+stepParticipationImage(event.key === 'ArrowLeft' ? -1 : 1);
+return;
+}
+if (event.key !== 'Escape') return;
 event.preventDefault();
 event.stopImmediatePropagation();
 closeParticipationImageLightbox();
 return;
 }
+if (event.key !== 'Escape') return;
 const overlay = document.getElementById('participationHistoryModal');
 if (overlay && overlay.style.display === 'flex') closeParticipationHistory();
 }, true);
+
+document.getElementById('participationImageLightboxPrev')?.addEventListener('click', function() {
+stepParticipationImage(-1);
+});
+
+document.getElementById('participationImageLightboxNext')?.addEventListener('click', function() {
+stepParticipationImage(1);
+});
+
+document.getElementById('participationImageLightboxImage')?.addEventListener('click', function(event) {
+if (participationImageGallery.length <= 1) return;
+const rect = event.currentTarget.getBoundingClientRect();
+stepParticipationImage(event.clientX < rect.left + (rect.width / 2) ? -1 : 1);
+});
 
 document.getElementById('participationImageLightbox')?.addEventListener('click', function(event) {
 if (event.target === event.currentTarget) closeParticipationImageLightbox();

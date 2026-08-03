@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.19
-Change: 2026-04-01 - Resolve the active member profile within the current host coop instead of assuming auth.uid() matches coop_members.id.
+Version: v1.0.20
+Change: 2026-08-03 - Complete dark-mode coverage for election states, results, and fixed actions.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-04-01 - Resolve the active member profile within the current host c
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 포털</title>
-    <script>console.log('[Version] v1.0.19 | vote_login.html');</script>
+    <script>console.log('[Version] v1.0.20 | vote_login.html');</script>
     <style>
         /* [통합 디자인 시스템] */
         :root {
@@ -222,7 +222,7 @@ Change: 2026-04-01 - Resolve the active member profile within the current host c
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
     <script src="../shared/theme.js?v=20260802-1"></script>
-    <link href="../shared/theme.css?v=20260802-1" rel="stylesheet">
+    <link href="../shared/theme.css?v=20260803-1" rel="stylesheet">
 </head>
 <body>
 
@@ -251,7 +251,7 @@ Change: 2026-04-01 - Resolve the active member profile within the current host c
             <div class="district-tabs" id="district-tabs"></div>
 
             <div id="result-view" style="display:none;">
-                <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px; border: 1px solid #bbf7d0;">
+                <div class="vote-results-announcement" style="background: #f0fdf4; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px; border: 1px solid #bbf7d0;">
                     <h3 style="margin: 0 0 5px 0; color: #166534;">🎉 개표 결과 발표</h3>
                     <p style="margin: 0; font-size: 0.9rem; color: #15803d;">투표가 종료되어 결과를 공개합니다.</p>
                 </div>
@@ -1063,7 +1063,7 @@ Change: 2026-04-01 - Resolve the active member profile within the current host c
                 const safeTitle = escapeHtml(el.title || '');
 
                 return `
-                    <div style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer;" onclick="window.location.href='?id=${el.id}'">
+                    <div class="election-list-card" style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer;" onclick="window.location.href='?id=${el.id}'">
                         <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
                             <span style="background:${badgeColor}; color:white; padding:2px 8px; border-radius:12px; font-size:0.75rem;">${statusText}</span>
                             <span style="font-size:0.8rem; color:#666;">${formatVoteLoginKstDate(el.created_at)}</span>
@@ -1096,7 +1096,7 @@ Change: 2026-04-01 - Resolve the active member profile within the current host c
             const greetingEl = document.getElementById('user-greeting');
             const roleBadge = myRights.canVote ? '✅ 유권자' : '👁️ 참관인';
             if (!greetingEl.innerHTML.includes('유권자') && !greetingEl.innerHTML.includes('참관인')) {
-                greetingEl.innerHTML += ` <span style="font-size:0.8rem; background:#eee; padding:2px 6px; border-radius:4px; margin-left:5px;">${roleBadge}</span>`;
+                greetingEl.innerHTML += ` <span class="voter-role-badge" style="font-size:0.8rem; background:#eee; padding:2px 6px; border-radius:4px; margin-left:5px;">${roleBadge}</span>`;
             }
         }
 
@@ -1124,7 +1124,7 @@ Change: 2026-04-01 - Resolve the active member profile within the current host c
 
             candidateArea.style.display = 'block';
             candidateArea.innerHTML = `
-                <div style="padding:28px 18px; border:1px solid #e9d5ff; border-radius:12px; background:#faf5ff; text-align:center; color:#5b21b6;">
+                <div class="nomination-intake-notice" style="padding:28px 18px; border:1px solid #e9d5ff; border-radius:12px; background:#faf5ff; text-align:center; color:#5b21b6;">
                     <div style="font-size:1.1rem; font-weight:700; margin-bottom:8px;">📝 후보 등록 접수중</div>
                     <div style="font-size:0.92rem; line-height:1.6;">
                         공정한 투표를 위해 후보자 정보는 등록 마감 후 공개됩니다.<br>
@@ -1319,14 +1319,14 @@ function renderCandidates(filterDistId) {
                                 </div>
                              </div>`;
                 } else if (distState === DISTRICT_VOTE_STATE.NO_CANDIDATE) {
-                    html += `<div style="padding:30px; text-align:center; color:#92400e; background:#fffbeb;">후보 미등록 선거구입니다.</div>`;
+                    html += `<div class="no-candidate-notice" style="padding:30px; text-align:center; color:#92400e; background:#fffbeb;">후보 미등록 선거구입니다.</div>`;
                 } else if (distState === DISTRICT_VOTE_STATE.UNCONTESTED) {
                     const winnerBadges = distCands.map((candidate) => {
                         const safeName = escapeHtml(candidate.name || '-');
-                        return `<div style="background:white; padding:10px 18px; border-radius:12px; border:1px solid #bbf7d0; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:700; color:#166534;">${safeName}</div>`;
+                        return `<div class="uncontested-winner" style="background:white; padding:10px 18px; border-radius:12px; border:1px solid #bbf7d0; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:700; color:#166534;">${safeName}</div>`;
                     }).join('');
                     html += `
-                        <div style="padding: 24px; text-align: center; background: #f0fdf4;">
+                        <div class="uncontested-result" style="padding: 24px; text-align: center; background: #f0fdf4;">
                             <div style="font-size: 2.2rem; margin-bottom: 8px;">🎉</div>
                             <div style="font-weight: 800; color: #166534; font-size: 1.05rem;">전원 무투표 당선</div>
                             <div style="margin-top: 6px; font-size: 0.9rem; color: #15803d;">
@@ -1353,7 +1353,7 @@ function renderCandidates(filterDistId) {
                         const isWinner = winnerIdSet.has(r.id);
                         html += `<tr class="${isWinner ? 'winner-row' : ''}"><td style="width:40%; padding-left:15px;"><div style="font-weight:bold;">${isWinner ? '👑 ' : ''} ${r.name}</div><div style="font-size:0.75rem; color:#9ca3af;">기호 ${r.symbol || '-'}</div></td><td style="text-align:right; font-weight:bold;">${r.count}표</td><td style="padding-right:15px;"><div class="bar-bg"><div class="bar-fill" style="width:${r.percent}%; background:${isWinner ? '#2563eb' : '#cbd5e1'}"></div></div><div style="font-size:0.7rem; text-align:right;">${r.percent}%</div></td></tr>`;
                     });
-                    html += `</tbody></table><div style="padding:10px; text-align:right; font-size:0.8rem; background:#f8fafc;">총 투표수: ${totalVotes}표</div>`;
+                    html += `</tbody></table><div class="result-summary" style="padding:10px; text-align:right; font-size:0.8rem; background:#f8fafc;">총 투표수: ${totalVotes}표</div>`;
                 }
                 html += `</div>`;
             });
@@ -1432,11 +1432,11 @@ function renderCandidates(filterDistId) {
             const created = formatVoteLoginKstDate(el.created_at);
 
             return `
-                <div style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer; transition: transform 0.2s;" 
+                <div class="election-list-card" style="background:white; padding:15px; margin-bottom:10px; border-radius:10px; border:1px solid #eee; cursor:pointer; transition: transform 0.2s;"
                      onclick="window.location.href='?id=${el.id}'"
                      onmouseover="this.style.transform='scale(1.01)'" 
                      onmouseout="this.style.transform='scale(1)'">
-                    
+
                     <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
                         <span style="background:${badgeColor}; color:white; padding:3px 10px; border-radius:12px; font-size:0.75rem; font-weight:bold;">${statusText}</span>
                         <span style="font-size:0.8rem; color:#94a3b8;">등록일: ${created}</span>
