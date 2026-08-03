@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.34
+Version: v1.0.35
 Change: Route new-member Telegram alerts through the tenant-aware ERP admin DM channel.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.34 | signup.html');</script>
+  <script>console.log('[Version] v1.0.35 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -206,7 +206,7 @@ gtag('config', 'G-TR217L7JN9');
 <form id="joinForm" onsubmit="handleFormSubmit(event, this)" novalidate>
 
 <div class="col-12 mb-3">
-<label class="form-label fw-bold small">이메일 (인증됨)</label>
+<label class="form-label fw-bold small" id="lbl-email">이메일 (인증됨)</label>
 <input type="text" id="verifiedEmail" class="form-control bg-light" readonly style="color:#555; font-weight:bold;">
 </div>
 
@@ -224,6 +224,36 @@ gtag('config', 'G-TR217L7JN9');
 oninput="clearFieldWarning(this); syncAccountHolder(); resetMsg('nameMsg');" 
 onblur="validateName()">
 <div id="nameMsg" class="msg-box"></div>
+</div>
+
+<div class="col-12" id="group-contact-fields" style="display:none;">
+<div class="border rounded-4 p-3 bg-light-subtle">
+<div class="fw-bold small text-success mb-3">단체 대표자·담당자</div>
+<div class="row g-3">
+<div class="col-12 col-md-6">
+<label class="form-label fw-bold small" for="representativeName">대표자명</label>
+<input type="text" id="representativeName" class="form-control" maxlength="100" placeholder="단체 대표자 이름"
+oninput="clearFieldWarning(this); syncGroupContactFromRepresentative();">
+</div>
+<div class="col-12 col-md-6">
+<label class="form-label fw-bold small" for="contactName">담당자명</label>
+<input type="text" id="contactName" class="form-control" maxlength="100" placeholder="가입 및 연락 담당자 이름"
+oninput="clearFieldWarning(this);">
+</div>
+<div class="col-12 col-md-6">
+<label class="form-label fw-bold small" for="contactPosition">담당자 직함/역할</label>
+<input type="text" id="contactPosition" class="form-control" maxlength="100" placeholder="예: 대표, 사무국장, 회계담당"
+oninput="clearFieldWarning(this);">
+</div>
+<div class="col-12 col-md-6 d-flex align-items-end">
+<div class="form-check mb-2">
+<input class="form-check-input" type="checkbox" id="contactSameAsRepresentative" onchange="syncGroupContactFromRepresentative()">
+<label class="form-check-label small" for="contactSameAsRepresentative">대표자와 담당자가 같습니다</label>
+</div>
+</div>
+</div>
+<div class="form-text mt-2">담당자 정보는 연락 용도이며, 단체 계정 관리자 연결과는 별개입니다.</div>
+</div>
 </div>
 
 <div class="col-12">
@@ -266,7 +296,7 @@ onblur="validateBizNo()">
 </div>
 
 <div class="col-12">
-<label class="form-label fw-bold small">연락처</label>
+<label class="form-label fw-bold small" id="lbl-phone">연락처</label>
 <div class="d-flex gap-2">
 <input type="text" id="p1" value="010" class="form-control text-center" maxlength="3" required oninput="onlyNum(this); autoMove(this,'p2',3);">
 <input type="text" id="p2" class="form-control text-center" maxlength="4" required oninput="onlyNum(this); autoMove(this,'p3',4); clearFieldWarning(this);">
@@ -841,11 +871,17 @@ function toggleType(type) {
 const isInd = (type === '개인');
 document.getElementById('lbl-name').innerText = isInd ? "이름 (실명)" : "단체명 (법인/고유명)";
 document.getElementById('lbl-id').innerText = isInd ? "주민등록번호" : "사업자(고유)번호";
+document.getElementById('lbl-email').innerText = isInd ? "이메일 (인증됨)" : "담당자 이메일 (인증됨)";
+document.getElementById('lbl-phone').innerText = isInd ? "연락처" : "담당자 연락처";
 document.getElementById('userName').placeholder = isInd ? "성함을 입력하세요" : "단체명을 입력하세요";
 
 const boxRRN = document.getElementById('box-rrn');
 const boxCorp = document.getElementById('box-corp'); // ★ 추가된 제어
 const boxBiz = document.getElementById('box-biz');
+const groupContactFields = document.getElementById('group-contact-fields');
+const representativeName = document.getElementById('representativeName');
+const contactName = document.getElementById('contactName');
+const contactPosition = document.getElementById('contactPosition');
 
 // 메시지 박스도 토글
 const rrnMsg = document.getElementById('rrnMsg');
@@ -856,6 +892,7 @@ if(isInd) {
 boxRRN.style.setProperty('display', 'flex', 'important');
 boxCorp.style.setProperty('display', 'none', 'important'); // ★ 숨김
 boxBiz.style.setProperty('display', 'none', 'important');
+groupContactFields.style.display = 'none';
 rrnMsg.style.display = 'block';
 corpMsg.style.display = 'none'; // ★ 숨김
 bizMsg.style.display = 'none';
@@ -863,10 +900,14 @@ bizMsg.style.display = 'none';
 document.getElementById('rrn1').required = true; document.getElementById('rrn2').required = true;
 document.getElementById('corp1').required = false; document.getElementById('corp2').required = false;
 document.getElementById('biz1').required = false; document.getElementById('biz3').required = false;
+representativeName.required = false;
+contactName.required = false;
+contactPosition.required = false;
 } else {
 boxRRN.style.setProperty('display', 'none', 'important');
 boxCorp.style.setProperty('display', 'flex', 'important'); // ★ 보임
 boxBiz.style.setProperty('display', 'flex', 'important');
+groupContactFields.style.display = 'block';
 rrnMsg.style.display = 'none';
 corpMsg.style.display = 'block'; // ★ 보임
 bizMsg.style.display = 'block';
@@ -874,6 +915,9 @@ bizMsg.style.display = 'block';
 document.getElementById('rrn1').required = false; document.getElementById('rrn2').required = false;
 document.getElementById('corp1').required = true; document.getElementById('corp2').required = true;
 document.getElementById('biz1').required = true; document.getElementById('biz3').required = true;
+representativeName.required = true;
+contactName.required = true;
+contactPosition.required = true;
 }
 
 document.getElementById('orgNo').value = '';
@@ -885,6 +929,21 @@ syncAccountHolder();
 // 버튼 상태 초기화 (토글 시 잘못된 비활성화 풀기)
 document.getElementById('btnSubmit').disabled = false;
 }
+
+function syncGroupContactFromRepresentative() {
+const sameCheckbox = document.getElementById('contactSameAsRepresentative');
+const representativeInput = document.getElementById('representativeName');
+const contactInput = document.getElementById('contactName');
+if (!sameCheckbox || !representativeInput || !contactInput) return;
+
+const isSame = sameCheckbox.checked;
+contactInput.readOnly = isSame;
+contactInput.classList.toggle('bg-light', isSame);
+if (isSame) {
+contactInput.value = representativeInput.value;
+clearFieldWarning(contactInput);
+}
+} // End of syncGroupContactFromRepresentative
 
 // [5] 입력 검증 및 유틸
 function onlyNum(el) { el.value = el.value.replace(/[^0-9]/g, ''); }
@@ -1810,6 +1869,9 @@ member_type: userType,
 rrn_encrypted: userType === '개인' ? fullID : null,
 business_number: userType === '단체' ? document.getElementById('orgNo').value : null,
 corp_number: userType === '단체' ? document.getElementById('finalCorpNo').value : null,
+representative_name: userType === '단체' ? document.getElementById('representativeName').value.trim() : null,
+contact_name: userType === '단체' ? document.getElementById('contactName').value.trim() : null,
+contact_position: userType === '단체' ? document.getElementById('contactPosition').value.trim() : null,
 phone: document.getElementById('p1').value + '-' + p2.value + '-' + p3.value,
 email: document.getElementById('verifiedEmail').value,
 address:
@@ -1831,7 +1893,7 @@ is_agreed: true
 };
 
 // Supabase 전송
-const { data: createdMemberUuid, error } = await _supabase.rpc('create_public_signup_member_v2', {
+const { data: createdMemberUuid, error } = await _supabase.rpc('create_public_signup_member_v3', {
   p_coop_code: signupTenant.coop_code,
   p_name: insertData.name,
   p_member_type: insertData.member_type,
@@ -1848,6 +1910,9 @@ const { data: createdMemberUuid, error } = await _supabase.rpc('create_public_si
   p_account_holder: insertData.account_holder,
   p_join_path: insertData.join_path,
   p_kakao_id: insertData.kakao_id,
+  p_representative_name: insertData.representative_name,
+  p_contact_name: insertData.contact_name,
+  p_contact_position: insertData.contact_position,
   p_is_agreed: insertData.is_agreed
 });
 let finalInsertError = error;
