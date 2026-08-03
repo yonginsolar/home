@@ -9,8 +9,10 @@
   let toggleControl = null;
   let selectedMode = readStoredTheme() || 'auto';
 
-  const pageKey = window.location.pathname
+  const routePath = window.location.pathname
     .replace(/^\/+/, '')
+    .replace(/\/+$/, '');
+  const pageKey = (routePath && window.location.pathname.endsWith('/') ? `${routePath}/index` : routePath)
     .replace(/\.html$/i, '')
     .replace(/\//g, '-') || 'index';
   root.dataset.themePage = pageKey;
