@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.116
-Change: Refresh the embedded participation page for observer and white-background improvements.
+Version: v1.0.117
+Change: Mark education participation badges as automatically managed in member details.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.116';
+window.ADMIN_MEMBER_VERSION = 'v1.0.117';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -2918,14 +2918,14 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         </div>
 
         <div class="col-md-12">
-            <label class="form-label small fw-bold text-muted">🏅 보유 뱃지 (내부 관리용)</label>
+            <label class="form-label small fw-bold text-muted">🏅 보유 뱃지</label>
             <div class="card p-3 bg-light border-0" style="max-height:150px; overflow-y:auto;">
                 <div id="member-badge-checkboxes" class="d-flex flex-wrap gap-2">
                     <span class="text-muted small">로딩중...</span>
                 </div>
             </div>
             <div class="form-text x-small text-end">
-                * 체크박스를 변경하고 아래 '저장 완료'를 누르면 반영됩니다.
+                * 교육 참여 뱃지는 참석 이력에 따라 자동 관리되며, 나머지는 수정 후 저장하면 반영됩니다.
             </div>
         </div>
 
@@ -4217,6 +4217,7 @@ docs_url: 'https://support.huawei.com/enterprise/en/doc/EDOC1100440661/356f0ec1/
 ];
 
 let g_badges = []; // DB에서 불러온 뱃지 목록을 기억해둠
+const ADMIN_AUTO_MANAGED_BADGE_CODES = new Set(['educator', 'edu_master']);
 let g_siteActivities = [];
 let g_externalNewsAdmin = [];
 let isSavingActivity = false;
@@ -10853,6 +10854,7 @@ async function openMemberDetail(id) {
 
     // 4. 체크박스 그리기
     Badges.renderCheckboxes('member-badge-checkboxes', g_badges, myBadgeCodes);
+    markAutoManagedBadgeControls();
     // ============================================================
 
     // 5. 모달 설정 및 하위 데이터 로드 (기존 유지)
@@ -11130,6 +11132,25 @@ async function submitIssueDoc() {
 }
 
 
+function markAutoManagedBadgeControls() {
+    const badgeChecks = document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]');
+    badgeChecks.forEach(chk => {
+        const isAutoManaged = ADMIN_AUTO_MANAGED_BADGE_CODES.has(chk.value);
+        chk.dataset.autoManaged = isAutoManaged ? 'true' : 'false';
+        if (!isAutoManaged) return;
+
+        chk.disabled = true;
+        const label = chk.closest('.form-check')?.querySelector('label');
+        if (label && !label.querySelector('[data-auto-managed-badge-label]')) {
+            const autoLabel = document.createElement('span');
+            autoLabel.className = 'badge rounded-pill text-bg-info ms-1 fw-normal';
+            autoLabel.dataset.autoManagedBadgeLabel = 'true';
+            autoLabel.textContent = '자동';
+            label.appendChild(autoLabel);
+        }
+    });
+} // End of markAutoManagedBadgeControls
+
 function toggleEditMode(isEdit) {
     // 1. 일반 입력창 제어 (기존 로직)
     const inputs = document.querySelectorAll('#md-tab-basic input:not([type=checkbox]), #md-tab-basic select, #md-tab-basic textarea');
@@ -11150,7 +11171,8 @@ function toggleEditMode(isEdit) {
     // 수정 모드일 때만 체크박스 클릭 가능하게 설정
     const badgeChecks = document.querySelectorAll('#member-badge-checkboxes input[type="checkbox"]');
     badgeChecks.forEach(chk => {
-        chk.disabled = !isEdit;
+        const isAutoManaged = chk.dataset.autoManaged === 'true' || ADMIN_AUTO_MANAGED_BADGE_CODES.has(chk.value);
+        chk.disabled = !isEdit || isAutoManaged;
     });
 
     // 3. 버튼 및 UI 제어 (기존 로직 유지)
