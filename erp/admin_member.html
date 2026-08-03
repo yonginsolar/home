@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.113
-Change: Collect and display a member-visible reason when an application is not approved.
+Version: v1.0.114
+Change: Place meeting and education participation management inside member administration.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.113';
+window.ADMIN_MEMBER_VERSION = 'v1.0.114';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -175,6 +175,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .capital-notification-summary-label { flex:0 0 auto; color:#64748b; font-size:.78rem; font-weight:800; }
 .capital-notification-summary-value { min-width:0; color:#0f172a; font-size:.88rem; font-weight:800; overflow-wrap:anywhere; text-align:right; }
 .capital-notification-feedback { border-radius:10px; font-size:.8rem; line-height:1.45; }
+.participation-admin-frame-wrap { min-height:760px; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#f5f7fb; box-shadow:0 8px 22px rgba(15,23,42,.05); }
+.participation-admin-frame { display:block; width:100%; height:calc(100vh - 175px); min-height:760px; border:0; background:#f5f7fb; }
 @media (max-width:991.98px) {
   .fund-summary-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
   .member-history-table, .member-history-table tbody { display:block; width:100%; }
@@ -235,6 +237,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <a class="nav-link" onclick="switchTab('members')" id="nav-members" style="cursor:pointer;">
 <i class="bi bi-people-fill"></i> 조합원 명부
+</a>
+<a class="nav-link" onclick="switchTab('participation')" id="nav-participation" style="cursor:pointer;">
+<i class="bi bi-calendar2-check-fill"></i> 회의·교육 참여
 </a>
 <a class="nav-link" onclick="switchTab('funds-manage')" id="nav-funds-manage" style="cursor:pointer;">
     <i class="bi bi-piggy-bank-fill"></i> 자금 및 이용고 배당 관리
@@ -617,6 +622,23 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             <span id="memberPageCurrent" class="small fw-bold text-nowrap">1 / 1</span>
             <button id="memberPageNext" class="btn btn-sm btn-outline-secondary" type="button" onclick="changeMemberPage(1)">다음</button>
         </div>
+    </div>
+</div>
+
+<div class="tab-pane fade" id="tab-participation">
+    <div class="content-header mb-3">
+        <div>
+            <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">회의·교육 참여 관리</h3>
+            <div class="small text-muted mt-1">이사회·대의원총회·교육 참석과 서명 현황을 관리합니다.</div>
+        </div>
+    </div>
+    <div class="participation-admin-frame-wrap">
+        <iframe
+          id="participationAdminFrame"
+          class="participation-admin-frame"
+          title="회의·교육 참여 관리"
+          data-src="participation.html?embedded=1"
+          loading="lazy"></iframe>
     </div>
 </div>
 
@@ -3452,7 +3474,7 @@ const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   }
 })();
 const ADMIN_MEMBER_TABS = Object.freeze({
-    member_admin: ['members', 'funds-manage', 'applications', 'deposit'],
+    member_admin: ['members', 'participation', 'funds-manage', 'applications', 'deposit'],
     site_admin: ['notices', 'site'],
     documents_admin: ['site']
 });
@@ -9626,6 +9648,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-dashboard', dashboardEnabled],
 ['memberAdminCategory', memberAdminEnabled],
 ['nav-members', memberAdminEnabled],
+['nav-participation', memberAdminEnabled],
 ['nav-funds-manage', memberAdminEnabled],
 ['nav-applications', memberAdminEnabled],
 ['nav-deposit', memberAdminEnabled],
@@ -9736,6 +9759,9 @@ function switchTab(tabName) {
         // 회원 탭은 자동 조회 대신 '검색 유도 화면' 표시
         if(typeof renderEmptyState === 'function') renderEmptyState();
     }
+    else if (tabName === 'participation') {
+        initializeParticipationAdminTab();
+    }
     else if (tabName === 'notices') {
         fetchNotices();
     }
@@ -9768,6 +9794,13 @@ function switchTab(tabName) {
     }
 }
     // 'deposit'(입금매칭), 'site'(홈페이지관리) 등은 별도 초기 로드 함수 없이 UI만 전환됨
+
+function initializeParticipationAdminTab() {
+    const frame = document.getElementById('participationAdminFrame');
+    if (!frame || frame.getAttribute('src')) return;
+    const source = String(frame.dataset.src || '').trim();
+    if (source) frame.setAttribute('src', source);
+} // End of initializeParticipationAdminTab
 
 // [보조] 최근 N개월 라벨 생성 (YYYY-MM)
 function buildMonthLabels(monthCount = 12) {

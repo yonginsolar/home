@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.0 | Change: 2026-08-03 - Add board, delegate assembly, and education participation dashboard. -->
+<!-- Version: v1.0.1 | Change: 2026-08-03 - Fix runtime authentication and support the member-admin embedded view. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.0 | participation.html');</script>
+  <script>console.log('[Version] v1.0.1 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -29,6 +29,9 @@
   <style>
     :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --panel:#fff; --bg:#f5f7fb; }
     body { margin:0; background:var(--bg); color:var(--ink); font-family:'Segoe UI','Malgun Gothic',sans-serif; }
+    body.participation-embedded { background:transparent; }
+    body.participation-embedded .page-shell { max-width:none; padding:0; }
+    body.participation-embedded .page-head { display:none; }
     .page-shell { max-width:1180px; margin:0 auto; padding:24px 18px 48px; }
     .page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; }
     .page-head h1 { font-size:1.65rem; font-weight:800; margin:0 0 5px; }
@@ -235,7 +238,7 @@
   <script>
     // Keep the production anon key in one literal assignment so deployment secret checks
     // can compare this page with the other ERP pages without exposing privileged credentials.
-    const PARTICIPATION_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJIUzI1NiIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+    const PARTICIPATION_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
     const ERP_RUNTIME_HOST = window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase();
     const _supabase = window.supabase.createClient(SUPABASE_URL, PARTICIPATION_ANON_KEY, {
       global: { headers: { 'x-erp-host': ERP_RUNTIME_HOST } }
@@ -243,6 +246,13 @@
     const PARTICIPATION_BUCKET = 'participation-files';
     const KST_TIME_ZONE = 'Asia/Seoul';
     const FILE_SIZE_LIMIT = 20 * 1024 * 1024;
+    const PARTICIPATION_EMBEDDED = (() => {
+      try {
+        return new URLSearchParams(window.location.search || '').get('embedded') === '1';
+      } catch (_) {
+        return false;
+      }
+    })();
 
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
     let formState = { eventId:null, requestKey:null, attendees:[], currentFiles:[], saving:false };
@@ -930,6 +940,7 @@
     } // End of loadDashboard
 
     async function initParticipationPage() {
+      document.body.classList.toggle('participation-embedded', PARTICIPATION_EMBEDDED);
       eventModalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('eventModal'));
       document.getElementById('newEventBtn').addEventListener('click', openNewEvent);
       document.getElementById('refreshBtn').addEventListener('click', function() { loadDashboard(true); });
