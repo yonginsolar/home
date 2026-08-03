@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.98
-Change: Rename the member participation area to education and meeting participation history.
+Version: v1.0.99
+Change: Split education and meeting history, add QR check-in, and show education photo galleries.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.98 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.99 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -444,6 +444,87 @@ gap: 10px;
 max-height: min(58vh, 520px);
 overflow-y: auto;
 padding-right: 2px;
+}
+.participation-history-tabs {
+display: grid;
+grid-template-columns: repeat(2, minmax(0, 1fr));
+gap: 6px;
+padding: 4px;
+margin-bottom: 12px;
+border-radius: 12px;
+background: #f1f5f9;
+}
+.participation-history-tab {
+min-height: 42px;
+border: 0;
+border-radius: 9px;
+background: transparent;
+color: #475569;
+font-weight: 750;
+}
+.participation-history-tab.active {
+background: #fff;
+color: #0f172a;
+box-shadow: 0 2px 7px rgba(15,23,42,.08);
+}
+.participation-photo-strip {
+display: flex;
+gap: 8px;
+overflow-x: auto;
+padding: 2px 2px 8px;
+margin-top: 10px;
+scroll-snap-type: x proximity;
+-webkit-overflow-scrolling: touch;
+overscroll-behavior-inline: contain;
+}
+.participation-photo-thumb {
+flex: 0 0 112px;
+width: 112px;
+height: 76px;
+padding: 0;
+border: 1px solid #e5e7eb;
+border-radius: 10px;
+overflow: hidden;
+background: #f8fafc;
+cursor: zoom-in;
+scroll-snap-align: start;
+}
+.participation-photo-thumb img {
+display: block;
+width: 100%;
+height: 100%;
+object-fit: cover;
+}
+.participation-image-lightbox {
+position: fixed;
+inset: 0;
+z-index: 1080;
+display: none;
+align-items: center;
+justify-content: center;
+padding: 18px;
+background: rgba(15,23,42,.92);
+}
+.participation-image-lightbox.show { display: flex; }
+.participation-image-lightbox img {
+max-width: min(1100px, 94vw);
+max-height: 88vh;
+object-fit: contain;
+border-radius: 10px;
+background: #fff;
+}
+.participation-image-lightbox-close {
+position: fixed;
+top: 14px;
+right: 14px;
+width: 44px;
+height: 44px;
+border: 0;
+border-radius: 999px;
+background: #fff;
+color: #0f172a;
+font-size: 1.5rem;
+line-height: 1;
 }
 .participation-history-item {
 border: 1px solid #e5e7eb;
@@ -1311,6 +1392,10 @@ oninput="autoHyphen(this)"> </div>
 </div>
 <button type="button" class="btn-close" id="participationHistoryCloseBtn" onclick="closeParticipationHistory()" aria-label="닫기"></button>
 </div>
+<div class="participation-history-tabs" role="tablist" aria-label="참여 이력 유형">
+<button type="button" class="participation-history-tab active" id="participationEducationTab" role="tab" aria-selected="true" onclick="switchParticipationHistoryTab('EDUCATION')">교육</button>
+<button type="button" class="participation-history-tab" id="participationMeetingTab" role="tab" aria-selected="false" onclick="switchParticipationHistoryTab('MEETING')">회의</button>
+</div>
 <div class="participation-history-list" id="participationHistoryList">
 <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>
 </div>
@@ -1318,6 +1403,11 @@ oninput="autoHyphen(this)"> </div>
 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeParticipationHistory()">닫기</button>
 </div>
 </div>
+</div>
+
+<div id="participationImageLightbox" class="participation-image-lightbox" role="dialog" aria-modal="true" aria-label="교육 사진 크게 보기" aria-hidden="true">
+<button type="button" class="participation-image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기" onclick="closeParticipationImageLightbox()">&times;</button>
+<img id="participationImageLightboxImage" alt="교육 사진 크게 보기">
 </div>
 
 <div id="boardViewModal" class="custom-modal-overlay">
@@ -2861,8 +2951,9 @@ if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
 	}
 	
 	showOnly('dashboardSection');
+	await handlePendingEducationQrCheckIn(uuid);
 
-} catch (e) {
+	} catch (e) {
 console.error("Dashboard Load Error:", e);
 if (options && options.rethrowOnError) {
 if (e && (e.code === 'PGRST301' || e.status === 403)) {
@@ -4278,6 +4369,12 @@ async function hasPendingVoteTasks(memberUuid) {
 }
 
 let participationModalPreviousBodyOverflow = '';
+let participationHistoryData = { events:[] };
+let participationHistoryActiveTab = 'EDUCATION';
+let participationHistoryRenderVersion = 0;
+let participationImageReturnFocus = null;
+let pendingEducationQrCheckIn = false;
+const participationSignedUrlCache = new Map();
 
 function participationEventTypeLabel(type) {
 if (type === 'BOARD') return '이사회';
@@ -4321,20 +4418,83 @@ meta.classList.add('hidden');
 }
 } // End of loadParticipationCardSummary
 
-function renderParticipationHistory(data) {
+async function getParticipationSignedUrl(storagePath) {
+const safePath = String(storagePath || '').trim();
+if (!safePath) throw new Error('첨부파일 경로가 없습니다.');
+const cached = participationSignedUrlCache.get(safePath);
+if (cached && cached.expiresAt > Date.now()) return cached.request;
+const request = _supabase.storage.from(PARTICIPATION_FILES_BUCKET).createSignedUrl(safePath, 600)
+.then(function(result) {
+if (result.error || !result.data?.signedUrl) throw result.error || new Error('첨부파일 주소를 만들지 못했습니다.');
+return result.data.signedUrl;
+})
+.catch(function(error) {
+participationSignedUrlCache.delete(safePath);
+throw error;
+});
+participationSignedUrlCache.set(safePath, { request, expiresAt: Date.now() + 8 * 60 * 1000 });
+return request;
+} // End of getParticipationSignedUrl
+
+function syncParticipationHistoryTabs() {
+const educationTab = document.getElementById('participationEducationTab');
+const meetingTab = document.getElementById('participationMeetingTab');
+const educationActive = participationHistoryActiveTab === 'EDUCATION';
+educationTab?.classList.toggle('active', educationActive);
+educationTab?.setAttribute('aria-selected', educationActive ? 'true' : 'false');
+meetingTab?.classList.toggle('active', !educationActive);
+meetingTab?.setAttribute('aria-selected', educationActive ? 'false' : 'true');
+} // End of syncParticipationHistoryTabs
+
+async function switchParticipationHistoryTab(tab) {
+participationHistoryActiveTab = tab === 'MEETING' ? 'MEETING' : 'EDUCATION';
+syncParticipationHistoryTabs();
+await renderParticipationHistory(participationHistoryData);
+} // End of switchParticipationHistoryTab
+
+async function renderParticipationHistory(data) {
+const renderVersion = ++participationHistoryRenderVersion;
 const list = document.getElementById('participationHistoryList');
 const summary = document.getElementById('participationHistorySummary');
 const events = Array.isArray(data?.events) ? data.events : [];
-const total = Number(data?.total_count || events.length);
-const attended = Number(data?.attended_count || 0);
-if (summary) summary.textContent = `전체 ${total}건 · 참석 ${attended}건`;
+const educationCount = events.filter(function(event) { return event.event_type === 'EDUCATION'; }).length;
+const meetingCount = events.length - educationCount;
+const visibleEvents = events.filter(function(event) {
+return participationHistoryActiveTab === 'EDUCATION'
+? event.event_type === 'EDUCATION'
+: event.event_type !== 'EDUCATION';
+});
+if (summary) summary.textContent = `교육 ${educationCount}건 · 회의 ${meetingCount}건`;
 if (!list) return;
-if (events.length === 0) {
-list.innerHTML = '<div class="text-center text-muted py-5">등록된 회의·교육 참여 이력이 없습니다.</div>';
+if (visibleEvents.length === 0) {
+list.innerHTML = `<div class="text-center text-muted py-5">등록된 ${participationHistoryActiveTab === 'EDUCATION' ? '교육' : '회의'} 참여 이력이 없습니다.</div>`;
 return;
 }
-list.innerHTML = events.map(function(event) {
+
+list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>사진을 불러오는 중...</div>';
+const photoPaths = Array.from(new Set(visibleEvents.flatMap(function(event) {
+if (event.event_type !== 'EDUCATION') return [];
+return (Array.isArray(event.files) ? event.files : [])
+.filter(function(file) { return file.file_kind === 'PHOTO'; })
+.map(function(file) { return String(file.storage_path || '').trim(); })
+.filter(Boolean);
+})));
+const photoUrlRows = await Promise.all(photoPaths.map(async function(path) {
+try {
+return [path, await getParticipationSignedUrl(path)];
+} catch (_) {
+return [path, ''];
+}
+}));
+if (renderVersion !== participationHistoryRenderVersion) return;
+const photoUrlMap = new Map(photoUrlRows);
+
+list.innerHTML = visibleEvents.map(function(event) {
 const files = Array.isArray(event.files) ? event.files : [];
+const materials = files.filter(function(file) { return file.file_kind !== 'PHOTO'; });
+const photos = event.event_type === 'EDUCATION'
+? files.filter(function(file) { return file.file_kind === 'PHOTO'; })
+: [];
 const status = String(event.attendance_status || 'PENDING');
 const timeText = event.ends_at
 ? `${formatMemberKstDateTime(event.starts_at)} ~ ${formatMemberKstDateTime(event.ends_at)}`
@@ -4351,9 +4511,16 @@ const educationHtml = event.event_type === 'EDUCATION'
 const actualAttendeeHtml = event.actual_attendee_name
 ? `<div class="small text-secondary mt-2"><strong>실제 참석자</strong> ${escapeHtml(event.actual_attendee_name)}</div>`
 : '';
-const filesHtml = files.length > 0
-? `<div class="d-flex flex-wrap gap-2 mt-3">${files.map(function(file) {
-return `<button type="button" class="btn btn-sm btn-outline-secondary" data-participation-file="${escapeHtml(file.storage_path)}">${file.file_kind === 'PHOTO' ? '사진' : '자료'} · ${escapeHtml(file.original_name)}</button>`;
+const materialsHtml = materials.length > 0
+? `<div class="d-flex flex-wrap gap-2 mt-3">${materials.map(function(file) {
+return `<button type="button" class="btn btn-sm btn-outline-secondary" data-participation-file="${escapeHtml(file.storage_path)}">자료 · ${escapeHtml(file.original_name)}</button>`;
+}).join('')}</div>`
+: '';
+const photosHtml = photos.length > 0
+? `<div class="participation-photo-strip" aria-label="교육 사진">${photos.map(function(file, index) {
+const signedUrl = photoUrlMap.get(String(file.storage_path || '').trim()) || '';
+if (!signedUrl) return `<span class="participation-photo-thumb d-flex align-items-center justify-content-center text-muted x-small text-center px-2" title="${escapeHtml(file.original_name || '')}">미리보기<br>불가</span>`;
+return `<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(file.storage_path)}" title="${escapeHtml(file.original_name || `교육 사진 ${index + 1}`)}"><img src="${escapeHtml(signedUrl)}" alt="교육 사진 ${index + 1}" loading="lazy"></button>`;
 }).join('')}</div>`
 : '';
 return `
@@ -4369,12 +4536,18 @@ return `
 ${educationHtml}
 ${actualAttendeeHtml}
 ${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
-${filesHtml}
+${materialsHtml}
+${photosHtml}
 </article>`;
 }).join('');
 list.querySelectorAll('[data-participation-file]').forEach(function(button) {
 button.addEventListener('click', function() {
 openParticipationAttachment(button.dataset.participationFile);
+});
+});
+list.querySelectorAll('[data-participation-photo]').forEach(function(button) {
+button.addEventListener('click', function() {
+openParticipationImageLightbox(button.dataset.participationPhoto, button);
 });
 });
 } // End of renderParticipationHistory
@@ -4389,6 +4562,8 @@ participationModalPreviousBodyOverflow = document.body.style.overflow || '';
 document.body.style.overflow = 'hidden';
 overlay.style.display = 'flex';
 overlay.classList.remove('modal-depth-back');
+participationHistoryActiveTab = 'EDUCATION';
+syncParticipationHistoryTabs();
 if (summary) summary.textContent = '불러오는 중...';
 if (list) list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
 document.getElementById('participationHistoryCloseBtn')?.focus();
@@ -4397,7 +4572,8 @@ const { data, error } = await _supabase.rpc('participation_member_list', {
 p_member_uuid: memberUuid
 });
 if (error) throw error;
-renderParticipationHistory(data || {});
+participationHistoryData = data || { events:[] };
+await renderParticipationHistory(participationHistoryData);
 } catch (error) {
 console.error('openParticipationHistory failed:', error);
 if (summary) summary.textContent = '조회 실패';
@@ -4406,6 +4582,7 @@ if (list) list.innerHTML = `<div class="text-center text-danger py-5">${escapeHt
 } // End of openParticipationHistory
 
 function closeParticipationHistory() {
+closeParticipationImageLightbox();
 const overlay = document.getElementById('participationHistoryModal');
 if (overlay) overlay.style.display = 'none';
 document.body.style.overflow = participationModalPreviousBodyOverflow;
@@ -4415,20 +4592,129 @@ async function openParticipationAttachment(storagePath) {
 const safePath = String(storagePath || '').trim();
 if (!safePath) return;
 try {
-const { data, error } = await _supabase.storage.from(PARTICIPATION_FILES_BUCKET).createSignedUrl(safePath, 300);
-if (error) throw error;
-if (!data?.signedUrl) throw new Error('첨부파일 주소를 만들지 못했습니다.');
-window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+const signedUrl = await getParticipationSignedUrl(safePath);
+window.open(signedUrl, '_blank', 'noopener,noreferrer');
 } catch (error) {
 showModal('첨부파일을 열지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해주세요.'));
 }
 } // End of openParticipationAttachment
 
+async function openParticipationImageLightbox(storagePath, triggerElement) {
+try {
+const signedUrl = await getParticipationSignedUrl(storagePath);
+const overlay = document.getElementById('participationImageLightbox');
+const image = document.getElementById('participationImageLightboxImage');
+if (!overlay || !image) return;
+participationImageReturnFocus = triggerElement || document.activeElement;
+image.src = signedUrl;
+overlay.classList.add('show');
+overlay.setAttribute('aria-hidden', 'false');
+document.getElementById('participationImageLightboxClose')?.focus();
+} catch (error) {
+showModal('사진을 열지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해주세요.'));
+}
+} // End of openParticipationImageLightbox
+
+function closeParticipationImageLightbox() {
+const overlay = document.getElementById('participationImageLightbox');
+const image = document.getElementById('participationImageLightboxImage');
+if (!overlay || !overlay.classList.contains('show')) return;
+overlay.classList.remove('show');
+overlay.setAttribute('aria-hidden', 'true');
+if (image) image.removeAttribute('src');
+if (participationImageReturnFocus && typeof participationImageReturnFocus.focus === 'function') participationImageReturnFocus.focus();
+participationImageReturnFocus = null;
+} // End of closeParticipationImageLightbox
+
 document.addEventListener('keydown', function(event) {
 if (event.key !== 'Escape') return;
+const imageOverlay = document.getElementById('participationImageLightbox');
+if (imageOverlay && imageOverlay.classList.contains('show')) {
+event.preventDefault();
+event.stopImmediatePropagation();
+closeParticipationImageLightbox();
+return;
+}
 const overlay = document.getElementById('participationHistoryModal');
 if (overlay && overlay.style.display === 'flex') closeParticipationHistory();
+}, true);
+
+document.getElementById('participationImageLightbox')?.addEventListener('click', function(event) {
+if (event.target === event.currentTarget) closeParticipationImageLightbox();
 });
+
+function getPendingEducationQrToken() {
+try {
+const token = String(new URLSearchParams(window.location.search || '').get('education_checkin') || '').trim().toLowerCase();
+return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(token) ? token : '';
+} catch (_) {
+return '';
+}
+} // End of getPendingEducationQrToken
+
+function clearPendingEducationQrToken() {
+try {
+const url = new URL(window.location.href);
+url.searchParams.delete('education_checkin');
+window.history.replaceState({}, document.title, url.toString());
+} catch (_) {}
+} // End of clearPendingEducationQrToken
+
+async function handlePendingEducationQrCheckIn(memberUuid) {
+if (pendingEducationQrCheckIn) return;
+const rawToken = (() => {
+try { return String(new URLSearchParams(window.location.search || '').get('education_checkin') || '').trim(); }
+catch (_) { return ''; }
+})();
+if (!rawToken) return;
+const token = getPendingEducationQrToken();
+if (!token) {
+clearPendingEducationQrToken();
+showModal('올바르지 않은 교육 출석 QR입니다.');
+return;
+}
+
+pendingEducationQrCheckIn = true;
+showLoading(true, '교육 출석을 확인하는 중...');
+try {
+const { data, error } = await _supabase.rpc('participation_member_education_qr_check_in', {
+p_qr_token: token,
+p_member_uuid: memberUuid
+});
+if (error) throw error;
+const result = data || {};
+const status = String(result.status || 'INVALID');
+if (status === 'CHECKED_IN' || status === 'ALREADY_ATTENDED') {
+clearPendingEducationQrToken();
+await loadParticipationCardSummary(memberUuid);
+if (typeof Badges !== 'undefined') await Badges.render('badgeContainer', memberUuid, _supabase);
+const title = String(result.title || '교육');
+const count = Number(result.education_count || 0);
+showModal(status === 'ALREADY_ATTENDED'
+? `“${title}” 교육에 이미 참석 등록되어 있습니다.\n누적 교육 참석 ${count}회`
+: `“${title}” 교육 참석이 등록되었습니다.\n누적 교육 참석 ${count}회`);
+return;
+}
+if (status === 'NOT_OPEN') {
+clearPendingEducationQrToken();
+showModal(`“${String(result.title || '교육')}” 출석 QR은 아직 열리지 않았습니다.\n열림: ${formatMemberKstDateTime(result.opens_at)}`);
+return;
+}
+if (status === 'CLOSED') {
+clearPendingEducationQrToken();
+showModal(`“${String(result.title || '교육')}” 출석 시간이 종료되었습니다.\n종료: ${formatMemberKstDateTime(result.ends_at)}`);
+return;
+}
+clearPendingEducationQrToken();
+showModal('유효하지 않거나 새로 발급된 QR로 교체된 링크입니다.');
+} catch (error) {
+console.error('education QR check-in failed:', error);
+showModal('교육 출석을 등록하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 다시 시도해주세요.');
+} finally {
+pendingEducationQrCheckIn = false;
+showLoading(false);
+}
+} // End of handlePendingEducationQrCheckIn
 
 // [신규] 퀵 링크 카드 노출 제어
 function renderQuickLinks(member, myRoles, isOfficial, officialIds) {
