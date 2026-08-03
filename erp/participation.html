@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.0 | Change: 2026-08-03 - Add manual meetings, editable rosters, deletion, and accurate signatures. -->
+<!-- Version: v1.1.1 | Change: 2026-08-03 - Add observer entry and force a white participation background. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.0 | participation.html');</script>
+  <script>console.log('[Version] v1.1.1 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -98,8 +98,15 @@
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.0">
+  <style>
+    body.erp-unified.participation-white-background {
+      background:#fff !important;
+      background-image:none !important;
+    }
+    body.erp-unified.participation-white-background .page-shell { background:#fff; }
+  </style>
 </head>
-<body class="erp-unified">
+<body class="erp-unified participation-white-background">
   <main class="page-shell">
     <div class="page-head">
       <div>
@@ -196,8 +203,10 @@
             <div id="educationMemberSearch">
               <div class="input-group mb-2">
                 <input type="search" class="form-control" id="memberSearchInput" placeholder="참석자 조합원명·조합원번호 검색">
-                <button type="button" class="btn btn-outline-primary" id="memberSearchBtn">참석자 추가</button>
+                <button type="button" class="btn btn-outline-primary" id="memberSearchTargetBtn">참석자로 추가</button>
+                <button type="button" class="btn btn-outline-secondary" id="memberSearchObserverBtn">배석자로 추가</button>
               </div>
+              <div class="form-text mb-2">배석자는 참석 명단에는 기록하지만 회의 대상 인원·정족수에서는 제외합니다.</div>
               <div class="list-group mb-3" id="memberSearchResults"></div>
             </div>
             <div class="attendee-list" id="attendeeList"></div>
@@ -580,7 +589,7 @@
             </div>
             <div class="event-stats">
               <span class="stat-pill">참석 ${attended}/${target}</span>
-              ${additionalAttended > 0 ? `<span class="stat-pill">그 외 참석 ${additionalAttended}</span>` : ''}
+              ${additionalAttended > 0 ? `<span class="stat-pill">배석 ${additionalAttended}</span>` : ''}
               ${required > 0 ? `<span class="stat-pill">서명 ${signed}/${required}</span>` : ''}
               ${fileCount > 0 ? `<span class="stat-pill">첨부 ${fileCount}</span>` : ''}
               <button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">확인·수정</button>
@@ -786,9 +795,9 @@
       const additionalAttended = rows.filter(function(row) {
         return row.is_target === false && row.attendance_status === 'ATTENDED';
       }).length;
-      document.getElementById('attendanceSummary').textContent = `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 그 외 참석 ${additionalAttended}명` : ''}`;
+      document.getElementById('attendanceSummary').textContent = `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 배석 ${additionalAttended}명` : ''}`;
       if (rows.length === 0) {
-        list.innerHTML = `<div class="text-center text-muted py-4">${type === 'EDUCATION' ? '조합원을 검색해 참석자를 추가하세요.' : '의사록을 선택하세요.'}</div>`;
+        list.innerHTML = `<div class="text-center text-muted py-4">${type === 'EDUCATION' ? '조합원을 검색해 참석자를 추가하세요.' : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
         return;
       }
       list.innerHTML = rows.map(function(row, index) {
@@ -803,7 +812,7 @@
           : '<span class="text-muted small text-center">-</span>';
         return `
           <div class="attendee-row" data-attendee-index="${index}">
-            <div class="attendee-name">${escapeHtml(row.name)}${row.is_target === false ? ' <span class="badge text-bg-light">그 외 참석</span>' : ''}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}<br>${type === 'EDUCATION' ? '' : signatureHtml}</div></div>
+            <div class="attendee-name">${escapeHtml(row.name)}${row.is_target === false ? ' <span class="badge text-bg-light">배석자</span>' : ''}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}<br>${type === 'EDUCATION' ? '' : signatureHtml}</div></div>
             <select class="form-select form-select-sm" data-attendance-status>
               <option value="ATTENDED" ${row.attendance_status === 'ATTENDED' ? 'selected' : ''}>참석</option>
               <option value="ABSENT" ${row.attendance_status === 'ABSENT' ? 'selected' : ''}>불참</option>
@@ -835,7 +844,7 @@
       });
     } // End of renderAttendees
 
-    async function searchMembers() {
+    async function searchMembers(asObserver = false) {
       const query = String(document.getElementById('memberSearchInput').value || '').trim();
       const results = document.getElementById('memberSearchResults');
       if (!query) {
@@ -855,7 +864,8 @@
       }
       results.innerHTML = rows.map(function(member) {
         const added = formState.attendees.some(function(row) { return String(row.member_id) === String(member.id); });
-        return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-member-id="${escapeHtml(member.id)}" ${added ? 'disabled' : ''}><span><strong>${escapeHtml(member.name)}</strong><span class="text-muted small ms-2">${escapeHtml(member.member_number || member.member_id || '')}</span></span><span class="badge text-bg-light">${added ? '추가됨' : escapeHtml(member.member_type || '조합원')}</span></button>`;
+        const actionLabel = asObserver ? '배석자로 추가' : '참석자로 추가';
+        return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-member-id="${escapeHtml(member.id)}" ${added ? 'disabled' : ''}><span><strong>${escapeHtml(member.name)}</strong><span class="text-muted small ms-2">${escapeHtml(member.member_number || member.member_id || '')}</span></span><span class="badge text-bg-light">${added ? '추가됨' : actionLabel}</span></button>`;
       }).join('');
       results.querySelectorAll('[data-member-id]').forEach(function(button) {
         button.addEventListener('click', function() {
@@ -864,12 +874,12 @@
           formState.attendees.push({
             member_id:member.id, official_id:null, name:member.name,
             member_number:member.member_number || member.member_id,
-            member_type:member.member_type, role:'', is_target:true, attendance_status:'ATTENDED',
+            member_type:member.member_type, role:'', is_target:!asObserver, attendance_status:'ATTENDED',
             check_in_method:'ADMIN', checked_in_at:localInputToIso(document.getElementById('eventStartsAt').value),
             actual_attendee_name:'', note:'', signature_required:false, signature_signed_at:null
           });
           renderAttendees();
-          searchMembers();
+          searchMembers(asObserver);
         });
       });
     } // End of searchMembers
@@ -1115,9 +1125,10 @@
         const startValue = document.getElementById('eventStartsAt').value;
         if (startValue && event.target.value && event.target.value < startValue) event.target.value = startValue;
       });
-      document.getElementById('memberSearchBtn').addEventListener('click', searchMembers);
+      document.getElementById('memberSearchTargetBtn').addEventListener('click', function() { searchMembers(false); });
+      document.getElementById('memberSearchObserverBtn').addEventListener('click', function() { searchMembers(true); });
       document.getElementById('memberSearchInput').addEventListener('keydown', function(event) {
-        if (event.key === 'Enter') { event.preventDefault(); searchMembers(); }
+        if (event.key === 'Enter') { event.preventDefault(); searchMembers(false); }
       });
       document.getElementById('saveEventBtn').addEventListener('click', saveEvent);
       document.getElementById('deleteEventBtn').addEventListener('click', deleteEvent);
