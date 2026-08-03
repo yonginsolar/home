@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.95
-Change: Show a neutral not-approved status and its member-visible reason.
+Version: v1.0.96
+Change: Let managed group profiles review and update representative/contact details.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.95 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.96 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -737,7 +737,7 @@ NO. <span id="infoMemberId">-</span>
 </div>
 <div class="col-md-6">
 <div class="profile-summary-card">
-<div class="profile-summary-label">이메일</div>
+<div class="profile-summary-label" id="summaryEmailLabel">이메일</div>
 <div class="profile-summary-value" id="summaryEmail">-</div>
 </div>
 </div>
@@ -781,8 +781,29 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
+<div class="col-12 hidden" id="orgContactInfoGroup">
+<div class="row g-2">
+<div class="col-12 col-md-4">
+<label class="small text-muted">대표자명</label>
+<div id="viewRepresentativeNameBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">미입력</div>
+<input type="text" id="editRepresentativeName" class="readonly-text" style="display:none;" maxlength="100" placeholder="단체 대표자 이름">
+</div>
+<div class="col-12 col-md-4">
+<label class="small text-muted">담당자명</label>
+<div id="viewContactNameBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">미입력</div>
+<input type="text" id="editContactName" class="readonly-text" style="display:none;" maxlength="100" placeholder="가입 및 연락 담당자 이름">
+</div>
+<div class="col-12 col-md-4">
+<label class="small text-muted">담당자 직함/역할</label>
+<div id="viewContactPositionBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">미입력</div>
+<input type="text" id="editContactPosition" class="readonly-text" style="display:none;" maxlength="100" placeholder="예: 대표, 사무국장, 회계담당">
+</div>
+</div>
+<div class="form-text mt-1">연락 담당자 정보이며, 단체 계정을 관리하는 개인회원 연결과는 별개입니다.</div>
+</div>
+
 <div class="col-md-6"> 
-<label class="small text-muted">전화번호</label>
+<label class="small text-muted" id="profilePhoneLabel">전화번호</label>
 <div id="viewPhoneBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
 <input type="text" id="editPhone" class="readonly-text" style="display:none;" oninput="autoHyphen(this)" maxlength="13" placeholder="010-0000-0000">
 </div>
@@ -3878,16 +3899,22 @@ setText('infoMemberId', member.member_id || '-'); // 상단으로 이동된 조�
 const isGroup = (member.member_type === '단체'); // 단체 회원 여부 판단
 const personalGroup = document.getElementById('personalInfoGroup'); // 개인용(생년월일)
 const orgGroup = document.getElementById('orgInfoGroup');           // 단체용(사업자번호)
+const orgContactGroup = document.getElementById('orgContactInfoGroup');
 const summaryNameLabel = document.getElementById('summaryNameLabel');
+const summaryEmailLabel = document.getElementById('summaryEmailLabel');
+const profilePhoneLabel = document.getElementById('profilePhoneLabel');
 
 if (summaryNameLabel) {
 summaryNameLabel.textContent = isGroup ? '단체명' : '이름';
 }
+if (summaryEmailLabel) summaryEmailLabel.textContent = isGroup ? '담당자 이메일' : '이메일';
+if (profilePhoneLabel) profilePhoneLabel.textContent = isGroup ? '담당자 연락처' : '전화번호';
 
 if (isGroup) {
 // [단체] 생년월일 숨기고 사업자/법인번호 표시
 if (personalGroup) personalGroup.classList.add('hidden');
 if (orgGroup) orgGroup.classList.remove('hidden');
+if (orgContactGroup) orgContactGroup.classList.remove('hidden');
 
 // DB에서 가져온 business_number, corp_number 값 표시
 setText('viewBizNoBox', member.business_number || '-');
@@ -3895,6 +3922,13 @@ setVal('editBizNo', member.business_number); // 수정창에도 값 세팅
 
 setText('viewCorpNoBox', member.corp_number || '-');
 setVal('editCorpNo', member.corp_number);    // 수정창에도 값 세팅
+
+setText('viewRepresentativeNameBox', member.representative_name || '미입력');
+setVal('editRepresentativeName', member.representative_name || '');
+setText('viewContactNameBox', member.contact_name || '미입력');
+setVal('editContactName', member.contact_name || '');
+setText('viewContactPositionBox', member.contact_position || '미입력');
+setVal('editContactPosition', member.contact_position || '');
 
 // 파트너 신청 버튼 노출: 일반 사용자는 모듈 켜진 경우만, 관리자는 비활성 상태도 확인 가능
 const btnPartner = document.getElementById('menuBtnPartner');
@@ -3910,6 +3944,14 @@ loadPartnerInfo(member.member_id);
 // [개인] 사업자번호 숨기고 생년월일 표시
 if (personalGroup) personalGroup.classList.remove('hidden');
 if (orgGroup) orgGroup.classList.add('hidden');
+if (orgContactGroup) orgContactGroup.classList.add('hidden');
+
+setText('viewRepresentativeNameBox', '미입력');
+setVal('editRepresentativeName', '');
+setText('viewContactNameBox', '미입력');
+setVal('editContactName', '');
+setText('viewContactPositionBox', '미입력');
+setVal('editContactPosition', '');
 
 setText('infoBirth', formatBirthDate(member.rrn_display));
 
@@ -3919,7 +3961,7 @@ if(btnPartner) btnPartner.classList.add('hidden');
 }
 
 setText('summaryName', member.name);
-setText('summaryEmail', member.email || curAuth.email);
+setText('summaryEmail', member.email || (isGroup ? '-' : (curAuth?.email || '-')));
 
 // 공통 필드들
 setVal('editPhone', member.phone);
@@ -4788,13 +4830,23 @@ const bank = document.getElementById('editBankName').value;
 const accNo = document.getElementById('editAccountNo').value;
 const holder = document.getElementById('editHolder').value;
 
-const isGroup = !document.getElementById('orgInfoGroup').classList.contains('hidden');
+const isGroup = curMem?.member_type === '단체';
 let bizNo = null;
 let corpNo = null;
+let representativeName = null;
+let contactName = null;
+let contactPosition = null;
 
 if (isGroup) {
 bizNo = document.getElementById('editBizNo').value.trim();
 corpNo = document.getElementById('editCorpNo').value.trim();
+representativeName = document.getElementById('editRepresentativeName').value.trim();
+contactName = document.getElementById('editContactName').value.trim();
+contactPosition = document.getElementById('editContactPosition').value.trim();
+
+if (!representativeName) return showModal('대표자명을 입력해주세요.');
+if (!contactName) return showModal('담당자명을 입력해주세요.');
+if (!contactPosition) return showModal('담당자 직함 또는 역할을 입력해주세요.');
 
 // ★ [검증 1] 'hidden' 클래스가 없으면(=에러가 보이면) 저장 차단
 const bizErrVisible = !document.getElementById('bizNoError').classList.contains('hidden');
@@ -4859,7 +4911,7 @@ return showModal('오류 발생: ' + e.message);
 showConfirmModal('정보를 수정하시겠습니까?', async function() {
 showLoading(true, '저장 중...');
 
-const { error } = await _supabase.rpc('update_my_profile', {
+const { error } = await _supabase.rpc('update_my_profile_v2', {
 p_target_id: targetUuid, 
 p_phone: phone,
 p_address: fullAddr,
@@ -4867,13 +4919,16 @@ p_bank_name: bank,
 p_account_number: accNo,
 p_account_holder: holder,
 p_business_number: bizNo,
-p_corp_number: corpNo
+p_corp_number: corpNo,
+p_representative_name: representativeName,
+p_contact_name: contactName,
+p_contact_position: contactPosition
 });
 
 showLoading(false);
 
 if (error) {
-showModal('수정 실패: ' + error.message);
+showModal('수정 실패: ' + (error.hint || error.message));
 } else {
 showModal('수정되었습니다.');
 toggleEditMode(false);
@@ -5152,7 +5207,7 @@ setModalDepth(false);
 
 // [수정] 수정 모드 토글 (주소 상세창 숨김 처리 및 스마트 새로고침 유지)
 function toggleEditMode(isEdit) {
-const inputs = document.querySelectorAll('.readonly-text');
+const inputs = document.querySelectorAll('.readonly-text, .editable-input');
 const viewAddr = document.getElementById('viewAddressBox');
 const editAddr = document.getElementById('editAddressBox');
 const viewPhone = document.getElementById('viewPhoneBox');
@@ -5164,6 +5219,11 @@ const editBiz = document.getElementById('editBizNo');
 const viewCorp = document.getElementById('viewCorpNoBox');
 const editCorp = document.getElementById('editCorpNo');
 const isGroupVisible = !document.getElementById('orgInfoGroup').classList.contains('hidden');
+const groupContactFields = [
+{ view: document.getElementById('viewRepresentativeNameBox'), edit: document.getElementById('editRepresentativeName') },
+{ view: document.getElementById('viewContactNameBox'), edit: document.getElementById('editContactName') },
+{ view: document.getElementById('viewContactPositionBox'), edit: document.getElementById('editContactPosition') }
+];
 
 // 계좌번호 입력창
 const accInput = document.getElementById('editAccountNo');
@@ -5199,6 +5259,10 @@ viewBank.style.display = 'none'; editBank.style.display = 'flex';
 if(isGroupVisible) {
 viewBiz.style.display = 'none'; editBiz.style.display = 'block';
 viewCorp.style.display = 'none'; editCorp.style.display = 'block';
+groupContactFields.forEach(field => {
+if (field.view) field.view.style.display = 'none';
+if (field.edit) field.edit.style.display = 'block';
+});
 }
 document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'block');
 
@@ -5221,6 +5285,10 @@ viewPhone.style.display = 'block'; editPhone.style.display = 'none';
 viewBank.style.display = 'block'; editBank.style.display = 'none';
 viewBiz.style.display = 'block'; editBiz.style.display = 'none';
 viewCorp.style.display = 'block'; editCorp.style.display = 'none';
+groupContactFields.forEach(field => {
+if (field.view) field.view.style.display = 'block';
+if (field.edit) field.edit.style.display = 'none';
+});
 
 document.querySelectorAll('.edit-mode-only').forEach(el => el.style.display = 'none');
 
