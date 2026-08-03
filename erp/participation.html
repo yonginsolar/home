@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<!-- Version: v1.0.0 | Change: 2026-08-03 - Add board, delegate assembly, and education participation dashboard. -->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.0 | participation.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>회의·교육 참여 관리</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    window.__COOP_ROUTE_APP__ = 'erp';
+    (function enforceErpPathPrefix() {
+      var host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
+      if (/^erp\./.test(host)) return;
+      var path = String(window.location.pathname || '');
+      if (path === '/erp' || path === '/erp/' || path.indexOf('/erp/') === 0) return;
+      var targetPath = (path === '/' || path === '/index' || path === '/index.html')
+        ? '/erp/'
+        : '/erp' + (path.charAt(0) === '/' ? path : '/' + path);
+      var target = window.location.origin + targetPath + String(window.location.search || '') + String(window.location.hash || '');
+      if (target !== window.location.href) window.location.replace(target);
+    })();
+  </script>
+  <script src="/shared/route_guard.js?v=20260408-1"></script>
+  <script src="./erp_runtime_guard.js"></script>
+  <style>
+    :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --panel:#fff; --bg:#f5f7fb; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:'Segoe UI','Malgun Gothic',sans-serif; }
+    .page-shell { max-width:1180px; margin:0 auto; padding:24px 18px 48px; }
+    .page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; }
+    .page-head h1 { font-size:1.65rem; font-weight:800; margin:0 0 5px; }
+    .page-subtitle { color:var(--muted); font-size:.92rem; }
+    .summary-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+    .summary-card { background:var(--panel); border:1px solid var(--line); border-radius:15px; padding:16px; box-shadow:0 5px 18px rgba(15,23,42,.035); }
+    .summary-label { color:var(--muted); font-size:.79rem; font-weight:700; }
+    .summary-value { font-size:1.6rem; line-height:1.2; font-weight:850; margin-top:5px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:17px; padding:18px; box-shadow:0 8px 24px rgba(15,23,42,.04); }
+    .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+    .toolbar .form-control { min-width:210px; flex:1 1 250px; }
+    .toolbar .form-select { width:auto; min-width:150px; }
+    .event-list { display:grid; gap:11px; margin-top:15px; }
+    .event-row { border:1px solid var(--line); border-radius:14px; padding:15px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:center; }
+    .event-row:hover { border-color:#93c5fd; background:#fbfdff; }
+    .event-title { font-weight:800; font-size:1rem; margin-bottom:6px; }
+    .event-meta { display:flex; flex-wrap:wrap; gap:5px 13px; color:var(--muted); font-size:.85rem; }
+    .event-stats { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
+    .stat-pill { border:1px solid var(--line); background:#f8fafc; color:#334155; border-radius:999px; padding:5px 9px; font-size:.78rem; white-space:nowrap; }
+    .type-badge { display:inline-flex; border-radius:999px; padding:4px 9px; font-weight:750; font-size:.76rem; margin-right:7px; }
+    .type-board { background:#dbeafe; color:#1d4ed8; }
+    .type-delegate { background:#ede9fe; color:#6d28d9; }
+    .type-education { background:#dcfce7; color:#15803d; }
+    .empty-state { padding:44px 12px; text-align:center; color:var(--muted); }
+    .form-section { border:1px solid var(--line); border-radius:13px; padding:14px; margin-top:14px; }
+    .form-section-title { font-weight:800; margin-bottom:11px; }
+    .attendee-list { display:grid; gap:8px; max-height:340px; overflow:auto; padding-right:2px; }
+    .attendee-row { display:grid; grid-template-columns:minmax(170px,1.3fr) minmax(120px,.7fr) minmax(170px,1fr) auto; gap:8px; align-items:center; border:1px solid var(--line); border-radius:11px; padding:9px; background:#fff; }
+    .attendee-name { font-weight:750; min-width:0; }
+    .attendee-meta { color:var(--muted); font-size:.75rem; margin-top:2px; }
+    .signature-chip { display:inline-flex; align-items:center; border-radius:999px; padding:3px 7px; font-size:.72rem; font-weight:700; }
+    .signature-done { background:#dcfce7; color:#166534; }
+    .signature-wait { background:#fff7ed; color:#9a3412; }
+    .signature-none { background:#f1f5f9; color:#64748b; }
+    .current-file { display:flex; justify-content:space-between; gap:8px; align-items:center; border:1px solid var(--line); border-radius:9px; padding:8px 10px; margin-top:6px; font-size:.84rem; }
+    .loading-cover { position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; background:rgba(248,250,252,.82); backdrop-filter:blur(2px); }
+    .loading-cover.show { display:flex; }
+    .loading-box { background:#fff; border:1px solid var(--line); border-radius:15px; padding:20px 24px; box-shadow:0 15px 40px rgba(15,23,42,.16); text-align:center; }
+    .modal { --bs-modal-zindex:1055; }
+    .modal-backdrop { --bs-backdrop-zindex:1050; }
+    .modal-body { max-height:72vh; overflow-y:auto; }
+    .hint-box { background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:#475569; font-size:.83rem; }
+    @media (max-width:900px) {
+      .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .summary-card:last-child { grid-column:1 / -1; }
+      .attendee-row { grid-template-columns:1fr 130px; }
+      .attendee-row .actual-attendee { grid-column:1 / -1; }
+    }
+    @media (max-width:640px) {
+      .page-shell { padding:16px 12px 36px; }
+      .page-head { align-items:stretch; flex-direction:column; }
+      .page-head .btn { width:100%; }
+      .summary-grid { gap:8px; }
+      .summary-card { padding:13px; }
+      .summary-value { font-size:1.35rem; }
+      .panel { padding:13px; }
+      .event-row { grid-template-columns:1fr; }
+      .event-stats { justify-content:flex-start; }
+      .toolbar .form-select, .toolbar .btn { width:100%; }
+      .attendee-row { grid-template-columns:1fr; }
+      .attendee-row .actual-attendee { grid-column:auto; }
+      .modal-dialog { margin:.5rem; }
+      .modal-body { max-height:76vh; }
+    }
+  </style>
+  <link rel="stylesheet" href="./erp_theme.css?v=1.1.0">
+</head>
+<body class="erp-unified">
+  <main class="page-shell">
+    <div class="page-head">
+      <div>
+        <h1>회의·교육 참여 관리</h1>
+        <div class="page-subtitle">이사회와 대의원 총회는 의사록에서 가져오고, 교육은 직접 등록합니다.</div>
+      </div>
+      <button type="button" class="btn btn-outline-secondary" onclick="location.href='index.html'">ERP 메인</button>
+    </div>
+
+    <div id="pageAlert" class="alert d-none" role="alert"></div>
+
+    <section class="summary-grid" aria-label="참여 관리 요약">
+      <div class="summary-card"><div class="summary-label">전체 행사</div><div class="summary-value" id="summaryTotal">-</div></div>
+      <div class="summary-card"><div class="summary-label">이사회</div><div class="summary-value" id="summaryBoard">-</div></div>
+      <div class="summary-card"><div class="summary-label">대의원 총회</div><div class="summary-value" id="summaryDelegate">-</div></div>
+      <div class="summary-card"><div class="summary-label">교육</div><div class="summary-value" id="summaryEducation">-</div></div>
+      <div class="summary-card"><div class="summary-label">누적 참석</div><div class="summary-value" id="summaryAttended">-</div></div>
+    </section>
+
+    <section class="panel">
+      <div class="toolbar">
+        <select class="form-select" id="eventTypeFilter" aria-label="유형 필터">
+          <option value="ALL">전체 유형</option>
+          <option value="BOARD">이사회</option>
+          <option value="DELEGATE_ASSEMBLY">대의원 총회</option>
+          <option value="EDUCATION">교육</option>
+        </select>
+        <input type="search" class="form-control" id="eventSearch" placeholder="행사명·장소 검색">
+        <button type="button" class="btn btn-outline-secondary" id="refreshBtn">새로고침</button>
+        <button type="button" class="btn btn-primary" id="newEventBtn">행사 등록</button>
+      </div>
+      <div class="event-list" id="eventList"></div>
+    </section>
+  </main>
+
+  <div class="modal fade" id="eventModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="eventModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5 fw-bold" id="eventModalTitle">행사 등록</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+        </div>
+        <div class="modal-body">
+          <div id="formAlert" class="alert d-none" role="alert"></div>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label fw-bold" for="eventType">행사 유형</label>
+              <select class="form-select" id="eventType">
+                <option value="BOARD">이사회</option>
+                <option value="DELEGATE_ASSEMBLY">대의원 총회</option>
+                <option value="EDUCATION">교육</option>
+              </select>
+            </div>
+            <div class="col-md-8" id="sourceMinuteGroup">
+              <label class="form-label fw-bold" for="sourceMinute">원본 의사록</label>
+              <select class="form-select" id="sourceMinute"></select>
+              <div class="form-text">의사록 본문에서 일시·장소·참석자를 자동으로 가져옵니다.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-bold" for="eventTitle">행사명</label>
+              <input type="text" class="form-control" id="eventTitle" maxlength="200">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-bold" for="eventStartsAt">시작 일시</label>
+              <input type="datetime-local" class="form-control" id="eventStartsAt">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-bold" for="eventEndsAt">종료 일시 <span id="endRequiredMark" class="text-danger d-none">*</span></label>
+              <input type="datetime-local" class="form-control" id="eventEndsAt">
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-bold" for="eventLocation">장소</label>
+              <input type="text" class="form-control" id="eventLocation" maxlength="300">
+            </div>
+            <div class="col-md-8 d-none" id="educationContentGroup">
+              <label class="form-label fw-bold" for="educationContent">교육 내용</label>
+              <textarea class="form-control" id="educationContent" rows="3"></textarea>
+            </div>
+            <div class="col-md-4 d-none" id="instructorGroup">
+              <label class="form-label fw-bold" for="eventInstructor">강사</label>
+              <input type="text" class="form-control" id="eventInstructor" maxlength="200">
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+              <div class="form-section-title mb-0">참석자</div>
+              <div class="small text-muted" id="attendanceSummary">0명</div>
+            </div>
+            <div class="hint-box mb-3" id="meetingImportHint">의사록을 선택하면 회의일 기준 임원·대의원 명단과 참석 여부를 채웁니다.</div>
+            <div class="d-none" id="educationMemberSearch">
+              <div class="input-group mb-2">
+                <input type="search" class="form-control" id="memberSearchInput" placeholder="조합원명·조합원번호 검색">
+                <button type="button" class="btn btn-outline-primary" id="memberSearchBtn">검색</button>
+              </div>
+              <div class="list-group mb-3" id="memberSearchResults"></div>
+            </div>
+            <div class="attendee-list" id="attendeeList"></div>
+          </div>
+
+          <div class="form-section d-none" id="educationFilesSection">
+            <div class="form-section-title">교육 자료·사진 <span class="text-muted fw-normal small">(선택)</span></div>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" for="materialFiles">강의 자료</label>
+                <input type="file" class="form-control" id="materialFiles" multiple accept=".pdf,.doc,.docx,.ppt,.pptx">
+                <div class="form-text">파일당 최대 20MB</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="photoFiles">사진</label>
+                <input type="file" class="form-control" id="photoFiles" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif">
+                <div class="form-text">JPG, PNG, WebP, HEIC · 파일당 최대 20MB</div>
+              </div>
+            </div>
+            <div class="mt-3" id="currentFiles"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">닫기</button>
+          <button type="button" class="btn btn-primary" id="saveEventBtn">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="loading-cover" id="loadingCover" aria-live="polite" aria-busy="true">
+    <div class="loading-box">
+      <div class="spinner-border text-primary mb-2" role="status"></div>
+      <div id="loadingText">불러오는 중...</div>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+  </script>
+  <script>
+    // Keep the production anon key in one literal assignment so deployment secret checks
+    // can compare this page with the other ERP pages without exposing privileged credentials.
+    const PARTICIPATION_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJIUzI1NiIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+    const ERP_RUNTIME_HOST = window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase();
+    const _supabase = window.supabase.createClient(SUPABASE_URL, PARTICIPATION_ANON_KEY, {
+      global: { headers: { 'x-erp-host': ERP_RUNTIME_HOST } }
+    });
+    const PARTICIPATION_BUCKET = 'participation-files';
+    const KST_TIME_ZONE = 'Asia/Seoul';
+    const FILE_SIZE_LIMIT = 20 * 1024 * 1024;
+
+    let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
+    let formState = { eventId:null, requestKey:null, attendees:[], currentFiles:[], saving:false };
+    let eventModalInstance = null;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    } // End of escapeHtml
+
+    function showLoading(show, message) {
+      const cover = document.getElementById('loadingCover');
+      const text = document.getElementById('loadingText');
+      if (text && message) text.textContent = message;
+      cover?.classList.toggle('show', !!show);
+    } // End of showLoading
+
+    function showAlert(targetId, message, type = 'danger') {
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      if (!message) {
+        el.className = 'alert d-none';
+        el.textContent = '';
+        return;
+      }
+      el.className = `alert alert-${type}`;
+      el.textContent = String(message);
+    } // End of showAlert
+
+    function eventTypeLabel(type) {
+      if (type === 'BOARD') return '이사회';
+      if (type === 'DELEGATE_ASSEMBLY') return '대의원 총회';
+      return '교육';
+    } // End of eventTypeLabel
+
+    function eventTypeClass(type) {
+      if (type === 'BOARD') return 'type-board';
+      if (type === 'DELEGATE_ASSEMBLY') return 'type-delegate';
+      return 'type-education';
+    } // End of eventTypeClass
+
+    function attendanceLabel(status) {
+      if (status === 'ATTENDED') return '참석';
+      if (status === 'ABSENT') return '불참';
+      if (status === 'EXCUSED') return '사유 불참';
+      return '확인 전';
+    } // End of attendanceLabel
+
+    function formatKstDateTime(value, fallback = '-') {
+      if (!value) return fallback;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return fallback;
+      return new Intl.DateTimeFormat('ko-KR', {
+        timeZone:KST_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', hour12:false
+      }).format(date);
+    } // End of formatKstDateTime
+
+    function toKstLocalInput(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone:KST_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', hour12:false
+      }).formatToParts(date).reduce(function(acc, part) {
+        acc[part.type] = part.value;
+        return acc;
+      }, {});
+      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+    } // End of toKstLocalInput
+
+    function localInputToIso(value) {
+      const safe = String(value || '').trim();
+      if (!safe) return null;
+      const date = new Date(`${safe}:00+09:00`);
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    } // End of localInputToIso
+
+    function normalizePersonName(value) {
+      return String(value || '')
+        .replace(/\([^)]*\)/g, '')
+        .replace(/[·ㆍ]/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+    } // End of normalizePersonName
+
+    function minutePlainText(content) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(String(content || ''), 'text/html');
+      return String(doc.body?.textContent || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } // End of minutePlainText
+
+    function parseMinuteContent(source, eventType) {
+      const text = minutePlainText(source?.content || '');
+      const dateTimeMatch = text.match(/일시\s*:\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\([^)]*\))?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?(?:\s*(?:~|〜|-)\s*(\d{1,2})시(?:\s*(\d{1,2})분)?)?/);
+      let startsAt = '';
+      let endsAt = '';
+      if (dateTimeMatch) {
+        const year = dateTimeMatch[1];
+        const month = String(dateTimeMatch[2]).padStart(2, '0');
+        const day = String(dateTimeMatch[3]).padStart(2, '0');
+        const startHour = String(dateTimeMatch[4]).padStart(2, '0');
+        const startMinute = String(dateTimeMatch[5] || '0').padStart(2, '0');
+        startsAt = `${year}-${month}-${day}T${startHour}:${startMinute}`;
+        if (dateTimeMatch[6]) {
+          const endHour = String(dateTimeMatch[6]).padStart(2, '0');
+          const endMinute = String(dateTimeMatch[7] || '0').padStart(2, '0');
+          endsAt = `${year}-${month}-${day}T${endHour}:${endMinute}`;
+        }
+      }
+
+      const locationMatch = text.match(/장소\s*:\s*(.+?)(?=(?:2\.\s*참석자|참석자\s*현황|3\.\s*))/);
+      const location = locationMatch ? locationMatch[1].trim() : '';
+      const attendanceTitle = eventType === 'BOARD' ? '참석 이사' : '참석 대의원';
+      const attendancePattern = new RegExp(`나\\.\\s*${attendanceTitle}\\s*\\([^)]*\\)\\s*-\\s*(.+?)(?=(?:다\\.|라\\.|3\\.)\\s*)`);
+      const attendanceMatch = text.match(attendancePattern);
+      const names = attendanceMatch
+        ? attendanceMatch[1].split(',').map(function(name) { return name.trim(); }).filter(Boolean)
+        : [];
+      const additionalMatch = text.match(/다\.\s*출석자\s*\([^)]*\)\s*-\s*(.+?)(?=(?:라\.|마\.|3\.)\s*)/);
+      const additionalNames = additionalMatch
+        ? additionalMatch[1].split(',').map(function(name) { return name.trim(); }).filter(Boolean)
+        : [];
+      return { startsAt, endsAt, location, attendeeNames:names, additionalAttendeeNames:additionalNames, parsedText:text };
+    } // End of parseMinuteContent
+
+    function activeOfficialsAtDate(startsAtLocal) {
+      const date = String(startsAtLocal || '').slice(0, 10);
+      if (!date) return [];
+      return (dashboardData.officials || []).filter(function(official) {
+        const start = String(official.term_start_date || '');
+        const end = String(official.real_end_date || official.term_end_date || '');
+        return !!start && !!end && start <= date && end >= date;
+      });
+    } // End of activeOfficialsAtDate
+
+    function officialsAtDate(eventType, startsAtLocal) {
+      return activeOfficialsAtDate(startsAtLocal).filter(function(official) {
+        if (eventType === 'BOARD') {
+          return official.category === 'executive' && ['이사장', '이사'].includes(String(official.role || '').trim());
+        }
+        return official.category === 'delegate';
+      }).sort(function(a, b) {
+        const aChair = String(a.role || '').trim() === '이사장' ? 0 : 1;
+        const bChair = String(b.role || '').trim() === '이사장' ? 0 : 1;
+        if (aChair !== bChair) return aChair - bChair;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+      });
+    } // End of officialsAtDate
+
+    function buildMeetingAttendees(source, eventType, parsed) {
+      const officials = officialsAtDate(eventType, parsed.startsAt);
+      const parsedNames = new Set((parsed.attendeeNames || []).map(normalizePersonName));
+      const matchedNames = new Set();
+      const attendees = officials.map(function(official) {
+        const normalized = normalizePersonName(official.name);
+        const attended = parsedNames.has(normalized);
+        if (attended) matchedNames.add(normalized);
+        return {
+          member_id:official.member_uuid,
+          official_id:official.official_id,
+          name:official.name,
+          member_number:official.member_number,
+          member_type:official.member_type,
+          role:official.role,
+          is_target:true,
+          attendance_status:attended ? 'ATTENDED' : 'ABSENT',
+          check_in_method:'MINUTES',
+          checked_in_at:attended ? localInputToIso(parsed.startsAt) : null,
+          actual_attendee_name:'',
+          note:'',
+          signature_required:Array.isArray(source?.signer_ids) && source.signer_ids.length > 0
+            ? source.signer_ids.map(String).includes(String(official.official_id))
+            : true,
+          signature_signed_at:null
+        };
+      });
+      const targetMemberIds = new Set(attendees.map(function(row) { return String(row.member_id); }));
+      const additionalParsedNames = new Set((parsed.additionalAttendeeNames || []).map(normalizePersonName));
+      const additionalOfficials = activeOfficialsAtDate(parsed.startsAt).filter(function(official) {
+        return !targetMemberIds.has(String(official.member_uuid))
+          && additionalParsedNames.has(normalizePersonName(official.name));
+      });
+      additionalOfficials.forEach(function(official) {
+        const normalized = normalizePersonName(official.name);
+        matchedNames.add(normalized);
+        targetMemberIds.add(String(official.member_uuid));
+        attendees.push({
+          member_id:official.member_uuid,
+          official_id:official.official_id,
+          name:official.name,
+          member_number:official.member_number,
+          member_type:official.member_type,
+          role:official.role,
+          is_target:false,
+          attendance_status:'ATTENDED',
+          check_in_method:'MINUTES',
+          checked_in_at:localInputToIso(parsed.startsAt),
+          actual_attendee_name:'',
+          note:'',
+          signature_required:Array.isArray(source?.signer_ids)
+            && source.signer_ids.map(String).includes(String(official.official_id)),
+          signature_signed_at:null
+        });
+      });
+      const unmatched = (parsed.attendeeNames || []).filter(function(name) {
+        return !matchedNames.has(normalizePersonName(name));
+      }).concat((parsed.additionalAttendeeNames || []).filter(function(name) {
+        return !matchedNames.has(normalizePersonName(name));
+      }));
+      return { attendees, unmatched };
+    } // End of buildMeetingAttendees
+
+    function renderSummary() {
+      const events = dashboardData.events || [];
+      const countType = function(type) { return events.filter(function(row) { return row.event_type === type; }).length; };
+      document.getElementById('summaryTotal').textContent = events.length.toLocaleString();
+      document.getElementById('summaryBoard').textContent = countType('BOARD').toLocaleString();
+      document.getElementById('summaryDelegate').textContent = countType('DELEGATE_ASSEMBLY').toLocaleString();
+      document.getElementById('summaryEducation').textContent = countType('EDUCATION').toLocaleString();
+      document.getElementById('summaryAttended').textContent = events.reduce(function(sum, row) {
+        return sum + Number(row.attended_count || 0) + Number(row.additional_attended_count || 0);
+      }, 0).toLocaleString();
+    } // End of renderSummary
+
+    function renderEvents() {
+      const list = document.getElementById('eventList');
+      const type = document.getElementById('eventTypeFilter').value;
+      const query = String(document.getElementById('eventSearch').value || '').trim().toLowerCase();
+      const rows = (dashboardData.events || []).filter(function(row) {
+        if (type !== 'ALL' && row.event_type !== type) return false;
+        if (!query) return true;
+        return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)}`.toLowerCase().includes(query);
+      });
+      if (rows.length === 0) {
+        list.innerHTML = '<div class="empty-state">등록된 회의·교육이 없습니다.</div>';
+        return;
+      }
+      list.innerHTML = rows.map(function(row) {
+        const target = Number(row.total_target_count || 0);
+        const attended = Number(row.attended_count || 0);
+        const additionalAttended = Number(row.additional_attended_count || 0);
+        const required = Number(row.signature_required_count || 0);
+        const signed = Number(row.signature_signed_count || 0);
+        const fileCount = Number(row.material_count || 0) + Number(row.photo_count || 0);
+        const timeText = row.ends_at
+          ? `${formatKstDateTime(row.starts_at)} ~ ${formatKstDateTime(row.ends_at).split(' ').slice(-1)[0]}`
+          : formatKstDateTime(row.starts_at);
+        return `
+          <article class="event-row">
+            <div>
+              <div class="event-title"><span class="type-badge ${eventTypeClass(row.event_type)}">${eventTypeLabel(row.event_type)}</span>${escapeHtml(row.title)}</div>
+              <div class="event-meta"><span>🗓️ ${escapeHtml(timeText)}</span><span>📍 ${escapeHtml(row.location)}</span></div>
+            </div>
+            <div class="event-stats">
+              <span class="stat-pill">참석 ${attended}/${target}</span>
+              ${additionalAttended > 0 ? `<span class="stat-pill">그 외 참석 ${additionalAttended}</span>` : ''}
+              ${required > 0 ? `<span class="stat-pill">서명 ${signed}/${required}</span>` : ''}
+              ${fileCount > 0 ? `<span class="stat-pill">첨부 ${fileCount}</span>` : ''}
+              <button type="button" class="btn btn-sm btn-outline-primary" data-edit-event="${escapeHtml(row.id)}">확인·수정</button>
+            </div>
+          </article>`;
+      }).join('');
+      list.querySelectorAll('[data-edit-event]').forEach(function(button) {
+        button.addEventListener('click', function() { openEditEvent(button.dataset.editEvent); });
+      });
+    } // End of renderEvents
+
+    function setEventTypeUi(type) {
+      const education = type === 'EDUCATION';
+      document.getElementById('sourceMinuteGroup').classList.toggle('d-none', education);
+      document.getElementById('educationContentGroup').classList.toggle('d-none', !education);
+      document.getElementById('instructorGroup').classList.toggle('d-none', !education);
+      document.getElementById('educationMemberSearch').classList.toggle('d-none', !education);
+      document.getElementById('educationFilesSection').classList.toggle('d-none', !education);
+      document.getElementById('meetingImportHint').classList.toggle('d-none', education);
+      document.getElementById('endRequiredMark').classList.toggle('d-none', !education);
+      document.getElementById('eventType').disabled = !!formState.eventId;
+      renderSourceOptions(type);
+      renderAttendees();
+    } // End of setEventTypeUi
+
+    function renderSourceOptions(type, selectedId = '') {
+      const select = document.getElementById('sourceMinute');
+      if (type === 'EDUCATION') {
+        select.innerHTML = '';
+        return;
+      }
+      const docType = type === 'BOARD' ? 'MINUTES' : 'GENERAL_ASSEMBLY';
+      const sources = (dashboardData.sources || []).filter(function(source) { return source.doc_type === docType; });
+      select.innerHTML = '<option value="">의사록을 선택하세요</option>' + sources.map(function(source) {
+        const linkedElsewhere = source.already_linked && String(source.id) !== String(selectedId || '');
+        return `<option value="${escapeHtml(source.id)}" ${String(source.id) === String(selectedId) ? 'selected' : ''} ${linkedElsewhere ? 'disabled' : ''}>${escapeHtml(source.title)}${linkedElsewhere ? ' · 등록됨' : ''}</option>`;
+      }).join('');
+    } // End of renderSourceOptions
+
+    function resetEventForm() {
+      formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], currentFiles:[], saving:false };
+      document.getElementById('eventModalTitle').textContent = '행사 등록';
+      document.getElementById('eventType').value = 'BOARD';
+      document.getElementById('eventTitle').value = '';
+      document.getElementById('eventStartsAt').value = '';
+      document.getElementById('eventEndsAt').value = '';
+      document.getElementById('eventLocation').value = '';
+      document.getElementById('educationContent').value = '';
+      document.getElementById('eventInstructor').value = '';
+      document.getElementById('materialFiles').value = '';
+      document.getElementById('photoFiles').value = '';
+      document.getElementById('memberSearchInput').value = '';
+      document.getElementById('memberSearchResults').innerHTML = '';
+      document.getElementById('currentFiles').innerHTML = '';
+      showAlert('formAlert', '');
+      setEventTypeUi('BOARD');
+    } // End of resetEventForm
+
+    function openNewEvent() {
+      resetEventForm();
+      eventModalInstance.show();
+    } // End of openNewEvent
+
+    async function openEditEvent(eventId) {
+      showLoading(true, '행사 정보를 불러오는 중...');
+      showAlert('pageAlert', '');
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_get_event', { p_event_id:eventId });
+        if (error) throw error;
+        const event = data?.event || null;
+        if (!event) throw new Error('행사 정보를 찾을 수 없습니다.');
+        formState = {
+          eventId:event.id,
+          requestKey:event.request_key || crypto.randomUUID(),
+          attendees:(data.attendees || []).map(function(row) {
+            return {
+              member_id:row.member_id,
+              official_id:row.official_id_snapshot,
+              name:row.member_name_snapshot,
+              member_number:row.member_number_snapshot,
+              member_type:row.member_type_snapshot,
+              role:row.role_snapshot,
+              is_target:row.is_target !== false,
+              attendance_status:row.attendance_status,
+              check_in_method:row.check_in_method,
+              checked_in_at:row.checked_in_at,
+              actual_attendee_name:row.actual_attendee_name || '',
+              note:row.note || '',
+              signature_required:!!row.signature_required_snapshot,
+              signature_signed_at:row.signature_signed_at || null
+            };
+          }),
+          currentFiles:data.files || [],
+          saving:false
+        };
+        document.getElementById('eventModalTitle').textContent = '행사 확인·수정';
+        document.getElementById('eventType').value = event.event_type;
+        document.getElementById('eventTitle').value = event.title || '';
+        document.getElementById('eventStartsAt').value = toKstLocalInput(event.starts_at);
+        document.getElementById('eventEndsAt').value = toKstLocalInput(event.ends_at);
+        document.getElementById('eventLocation').value = event.location || '';
+        document.getElementById('educationContent').value = event.education_content || '';
+        document.getElementById('eventInstructor').value = event.instructor || '';
+        document.getElementById('materialFiles').value = '';
+        document.getElementById('photoFiles').value = '';
+        document.getElementById('memberSearchResults').innerHTML = '';
+        showAlert('formAlert', '');
+        setEventTypeUi(event.event_type);
+        renderSourceOptions(event.event_type, event.source_minute_id || '');
+        renderCurrentFiles();
+        eventModalInstance.show();
+      } catch (error) {
+        showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
+      } finally {
+        showLoading(false);
+      }
+    } // End of openEditEvent
+
+    function handleSourceMinuteChange() {
+      const sourceId = document.getElementById('sourceMinute').value;
+      if (!sourceId) {
+        formState.attendees = [];
+        renderAttendees();
+        return;
+      }
+      const type = document.getElementById('eventType').value;
+      const source = (dashboardData.sources || []).find(function(row) { return String(row.id) === String(sourceId); });
+      if (!source) return;
+      const parsed = parseMinuteContent(source, type);
+      document.getElementById('eventTitle').value = source.title || '';
+      document.getElementById('eventStartsAt').value = parsed.startsAt || '';
+      document.getElementById('eventEndsAt').value = parsed.endsAt || '';
+      document.getElementById('eventLocation').value = parsed.location || '';
+      const built = buildMeetingAttendees(source, type, parsed);
+      formState.attendees = built.attendees;
+      const missing = [];
+      if (!parsed.startsAt) missing.push('일시');
+      if (!parsed.location) missing.push('장소');
+      if (parsed.attendeeNames.length === 0) missing.push('참석자');
+      const messages = [];
+      if (missing.length > 0) messages.push(`자동 추출하지 못한 항목: ${missing.join(', ')}`);
+      if (built.unmatched.length > 0) messages.push(`명단과 자동 연결되지 않은 참석자: ${built.unmatched.join(', ')}`);
+      showAlert('formAlert', messages.join('\n'), messages.length > 0 ? 'warning' : 'success');
+      if (messages.length === 0) showAlert('formAlert', '의사록에서 일시·장소·참석자를 가져왔습니다.', 'success');
+      renderAttendees();
+    } // End of handleSourceMinuteChange
+
+    function renderAttendees() {
+      const list = document.getElementById('attendeeList');
+      const type = document.getElementById('eventType').value;
+      const rows = formState.attendees || [];
+      const targets = rows.filter(function(row) { return row.is_target !== false; });
+      const attended = targets.filter(function(row) { return row.attendance_status === 'ATTENDED'; }).length;
+      const additionalAttended = rows.filter(function(row) {
+        return row.is_target === false && row.attendance_status === 'ATTENDED';
+      }).length;
+      document.getElementById('attendanceSummary').textContent = `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 그 외 참석 ${additionalAttended}명` : ''}`;
+      if (rows.length === 0) {
+        list.innerHTML = `<div class="text-center text-muted py-4">${type === 'EDUCATION' ? '조합원을 검색해 참석자를 추가하세요.' : '의사록을 선택하세요.'}</div>`;
+        return;
+      }
+      list.innerHTML = rows.map(function(row, index) {
+        let signatureHtml = '<span class="signature-chip signature-none">서명 대상 아님</span>';
+        if (row.signature_required) {
+          signatureHtml = row.signature_signed_at
+            ? '<span class="signature-chip signature-done">서명 완료</span>'
+            : '<span class="signature-chip signature-wait">미서명</span>';
+        }
+        return `
+          <div class="attendee-row" data-attendee-index="${index}">
+            <div class="attendee-name">${escapeHtml(row.name)}${row.is_target === false ? ' <span class="badge text-bg-light">그 외 참석</span>' : ''}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}<br>${type === 'EDUCATION' ? '' : signatureHtml}</div></div>
+            <select class="form-select form-select-sm" data-attendance-status>
+              <option value="ATTENDED" ${row.attendance_status === 'ATTENDED' ? 'selected' : ''}>참석</option>
+              <option value="ABSENT" ${row.attendance_status === 'ABSENT' ? 'selected' : ''}>불참</option>
+              <option value="EXCUSED" ${row.attendance_status === 'EXCUSED' ? 'selected' : ''}>사유 불참</option>
+              <option value="PENDING" ${row.attendance_status === 'PENDING' ? 'selected' : ''}>확인 전</option>
+            </select>
+            <input type="text" class="form-control form-control-sm actual-attendee" data-actual-attendee value="${escapeHtml(row.actual_attendee_name || '')}" placeholder="실제 참석자명${String(row.member_type || '') === '단체' ? ' (단체)' : ' (선택)'}">
+            ${type === 'EDUCATION' ? '<button type="button" class="btn btn-sm btn-outline-danger" data-remove-attendee>제외</button>' : '<span></span>'}
+          </div>`;
+      }).join('');
+      list.querySelectorAll('[data-attendee-index]').forEach(function(rowEl) {
+        const index = Number(rowEl.dataset.attendeeIndex);
+        rowEl.querySelector('[data-attendance-status]')?.addEventListener('change', function(event) {
+          formState.attendees[index].attendance_status = event.target.value;
+          if (event.target.value === 'ATTENDED' && !formState.attendees[index].checked_in_at) {
+            formState.attendees[index].checked_in_at = localInputToIso(document.getElementById('eventStartsAt').value);
+            formState.attendees[index].check_in_method = type === 'EDUCATION' ? 'ADMIN' : 'MINUTES';
+          }
+          if (event.target.value !== 'ATTENDED') formState.attendees[index].checked_in_at = null;
+          renderAttendees();
+        });
+        rowEl.querySelector('[data-actual-attendee]')?.addEventListener('input', function(event) {
+          formState.attendees[index].actual_attendee_name = event.target.value;
+        });
+        rowEl.querySelector('[data-remove-attendee]')?.addEventListener('click', function() {
+          formState.attendees.splice(index, 1);
+          renderAttendees();
+        });
+      });
+    } // End of renderAttendees
+
+    async function searchMembers() {
+      const query = String(document.getElementById('memberSearchInput').value || '').trim();
+      const results = document.getElementById('memberSearchResults');
+      if (!query) {
+        results.innerHTML = '<div class="text-muted small p-2">검색어를 입력하세요.</div>';
+        return;
+      }
+      results.innerHTML = '<div class="text-muted small p-2">검색 중...</div>';
+      const { data, error } = await _supabase.rpc('participation_admin_search_members', { p_query:query, p_limit:30 });
+      if (error) {
+        results.innerHTML = `<div class="text-danger small p-2">${escapeHtml(error.message)}</div>`;
+        return;
+      }
+      const rows = Array.isArray(data) ? data : [];
+      if (rows.length === 0) {
+        results.innerHTML = '<div class="text-muted small p-2">검색 결과가 없습니다.</div>';
+        return;
+      }
+      results.innerHTML = rows.map(function(member) {
+        const added = formState.attendees.some(function(row) { return String(row.member_id) === String(member.id); });
+        return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-member-id="${escapeHtml(member.id)}" ${added ? 'disabled' : ''}><span><strong>${escapeHtml(member.name)}</strong><span class="text-muted small ms-2">${escapeHtml(member.member_number || member.member_id || '')}</span></span><span class="badge text-bg-light">${added ? '추가됨' : escapeHtml(member.member_type || '조합원')}</span></button>`;
+      }).join('');
+      results.querySelectorAll('[data-member-id]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          const member = rows.find(function(row) { return String(row.id) === String(button.dataset.memberId); });
+          if (!member) return;
+          formState.attendees.push({
+            member_id:member.id, official_id:null, name:member.name,
+            member_number:member.member_number || member.member_id,
+            member_type:member.member_type, role:'', attendance_status:'ATTENDED',
+            check_in_method:'ADMIN', checked_in_at:localInputToIso(document.getElementById('eventStartsAt').value),
+            actual_attendee_name:'', note:'', signature_required:false, signature_signed_at:null
+          });
+          renderAttendees();
+          searchMembers();
+        });
+      });
+    } // End of searchMembers
+
+    function validateFiles(files, kind) {
+      const rows = Array.from(files || []);
+      for (const file of rows) {
+        if (file.size > FILE_SIZE_LIMIT) throw new Error(`${file.name}: 파일 크기는 20MB 이하여야 합니다.`);
+        const extension = String(file.name || '').split('.').pop().toLowerCase();
+        if (kind === 'MATERIAL' && !['pdf','doc','docx','ppt','pptx'].includes(extension)) {
+          throw new Error(`${file.name}: 지원하지 않는 강의 자료 형식입니다.`);
+        }
+        if (kind === 'PHOTO' && !['jpg','jpeg','png','webp','heic','heif'].includes(extension)) {
+          throw new Error(`${file.name}: 지원하지 않는 사진 형식입니다.`);
+        }
+      }
+      return rows;
+    } // End of validateFiles
+
+    function safeStorageFileName(fileName) {
+      const normalized = String(fileName || 'file').normalize('NFC');
+      const extension = normalized.includes('.') ? `.${normalized.split('.').pop().toLowerCase()}` : '';
+      const base = normalized.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9가-힣_-]+/g, '_').slice(0, 80) || 'file';
+      return `${base}${extension}`;
+    } // End of safeStorageFileName
+
+    async function uploadEventFiles(eventId, kind, files) {
+      const rows = validateFiles(files, kind);
+      for (const file of rows) {
+        const path = `${dashboardData.coop_id}/${eventId}/${kind.toLowerCase()}/${crypto.randomUUID()}_${safeStorageFileName(file.name)}`;
+        const { error:uploadError } = await _supabase.storage.from(PARTICIPATION_BUCKET).upload(path, file, { upsert:false, cacheControl:'3600' });
+        if (uploadError) throw uploadError;
+        const { error:metaError } = await _supabase.rpc('participation_admin_add_file', {
+          p_event_id:eventId,
+          p_file_kind:kind,
+          p_storage_path:path,
+          p_original_name:file.name,
+          p_mime_type:file.type || null,
+          p_size_bytes:file.size
+        });
+        if (metaError) {
+          await _supabase.storage.from(PARTICIPATION_BUCKET).remove([path]);
+          throw metaError;
+        }
+      }
+    } // End of uploadEventFiles
+
+    async function openStoredFile(path) {
+      const { data, error } = await _supabase.storage.from(PARTICIPATION_BUCKET).createSignedUrl(path, 300);
+      if (error || !data?.signedUrl) {
+        showAlert('formAlert', error?.message || '첨부파일을 열지 못했습니다.');
+        return;
+      }
+      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    } // End of openStoredFile
+
+    function renderCurrentFiles() {
+      const container = document.getElementById('currentFiles');
+      const files = formState.currentFiles || [];
+      if (files.length === 0) {
+        container.innerHTML = '<div class="text-muted small">등록된 첨부파일이 없습니다.</div>';
+        return;
+      }
+      container.innerHTML = files.map(function(file) {
+        return `<div class="current-file"><span>${file.file_kind === 'PHOTO' ? '사진' : '자료'} · ${escapeHtml(file.original_name)}</span><button type="button" class="btn btn-sm btn-outline-secondary" data-open-file="${escapeHtml(file.storage_path)}">열기</button></div>`;
+      }).join('');
+      container.querySelectorAll('[data-open-file]').forEach(function(button) {
+        button.addEventListener('click', function() { openStoredFile(button.dataset.openFile); });
+      });
+    } // End of renderCurrentFiles
+
+    function validateEventForm() {
+      const type = document.getElementById('eventType').value;
+      const title = String(document.getElementById('eventTitle').value || '').trim();
+      const startsAt = document.getElementById('eventStartsAt').value;
+      const endsAt = document.getElementById('eventEndsAt').value;
+      const location = String(document.getElementById('eventLocation').value || '').trim();
+      const sourceId = document.getElementById('sourceMinute').value || null;
+      const educationContent = String(document.getElementById('educationContent').value || '').trim();
+      const instructor = String(document.getElementById('eventInstructor').value || '').trim();
+      if (!title) throw new Error('행사명을 입력하세요.');
+      if (!startsAt) throw new Error('시작 일시를 입력하세요.');
+      if (!location) throw new Error('장소를 입력하세요.');
+      if (endsAt && localInputToIso(endsAt) < localInputToIso(startsAt)) throw new Error('종료 일시는 시작 일시보다 빠를 수 없습니다.');
+      if (type !== 'EDUCATION' && !sourceId) throw new Error('원본 의사록을 선택하세요.');
+      if (type !== 'EDUCATION' && formState.attendees.length === 0) throw new Error('회의일 기준 임원·대의원 명단을 확인하지 못했습니다.');
+      if (type === 'EDUCATION') {
+        if (!endsAt) throw new Error('교육 종료 일시를 입력하세요.');
+        if (!educationContent) throw new Error('교육 내용을 입력하세요.');
+        if (!instructor) throw new Error('강사를 입력하세요.');
+      }
+      return { type, title, startsAt, endsAt, location, sourceId, educationContent, instructor };
+    } // End of validateEventForm
+
+    async function saveEvent() {
+      if (formState.saving) return;
+      showAlert('formAlert', '');
+      let values;
+      try {
+        values = validateEventForm();
+        validateFiles(document.getElementById('materialFiles').files, 'MATERIAL');
+        validateFiles(document.getElementById('photoFiles').files, 'PHOTO');
+      } catch (error) {
+        showAlert('formAlert', error.message || '입력 내용을 확인하세요.', 'warning');
+        return;
+      }
+
+      formState.saving = true;
+      document.getElementById('saveEventBtn').disabled = true;
+      showLoading(true, '행사를 저장하는 중...');
+      try {
+        const attendance = formState.attendees.map(function(row) {
+          return {
+            member_id:row.member_id,
+            official_id:row.official_id,
+            attendance_status:row.attendance_status,
+            check_in_method:row.check_in_method || (values.type === 'EDUCATION' ? 'ADMIN' : 'MINUTES'),
+            checked_in_at:row.attendance_status === 'ATTENDED'
+              ? (row.checked_in_at || localInputToIso(values.startsAt))
+              : null,
+            actual_attendee_name:String(row.actual_attendee_name || '').trim() || null,
+            note:String(row.note || '').trim() || null
+          };
+        });
+        const { data, error } = await _supabase.rpc('participation_admin_save_event', {
+          p_event_id:formState.eventId,
+          p_request_key:formState.requestKey,
+          p_event_type:values.type,
+          p_title:values.title,
+          p_source_minute_id:values.type === 'EDUCATION' ? null : values.sourceId,
+          p_starts_at:localInputToIso(values.startsAt),
+          p_ends_at:values.endsAt ? localInputToIso(values.endsAt) : null,
+          p_location:values.location,
+          p_education_content:values.type === 'EDUCATION' ? values.educationContent : null,
+          p_instructor:values.type === 'EDUCATION' ? values.instructor : null,
+          p_attendance:attendance
+        });
+        if (error) throw error;
+        const eventId = data?.event_id;
+        if (!eventId) throw new Error('저장된 행사 번호를 확인하지 못했습니다.');
+        const materialFiles = document.getElementById('materialFiles').files;
+        const photoFiles = document.getElementById('photoFiles').files;
+        if (materialFiles.length > 0) {
+          showLoading(true, '강의 자료를 업로드하는 중...');
+          await uploadEventFiles(eventId, 'MATERIAL', materialFiles);
+        }
+        if (photoFiles.length > 0) {
+          showLoading(true, '행사 사진을 업로드하는 중...');
+          await uploadEventFiles(eventId, 'PHOTO', photoFiles);
+        }
+        eventModalInstance.hide();
+        await loadDashboard(false);
+        showAlert('pageAlert', '회의·교육 참여 이력을 저장했습니다.', 'success');
+      } catch (error) {
+        showAlert('formAlert', error?.message || '저장하지 못했습니다.');
+      } finally {
+        formState.saving = false;
+        document.getElementById('saveEventBtn').disabled = false;
+        showLoading(false);
+      }
+    } // End of saveEvent
+
+    async function loadDashboard(showCover = true) {
+      if (showCover) showLoading(true, '참여 현황을 불러오는 중...');
+      showAlert('pageAlert', '');
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_get_dashboard');
+        if (error) throw error;
+        dashboardData = {
+          coop_id:data?.coop_id || null,
+          events:Array.isArray(data?.events) ? data.events : [],
+          sources:Array.isArray(data?.sources) ? data.sources : [],
+          officials:Array.isArray(data?.officials) ? data.officials : []
+        };
+        renderSummary();
+        renderEvents();
+      } catch (error) {
+        showAlert('pageAlert', error?.message || '참여 현황을 불러오지 못했습니다.');
+        document.getElementById('eventList').innerHTML = '<div class="empty-state text-danger">데이터를 불러오지 못했습니다.</div>';
+      } finally {
+        if (showCover) showLoading(false);
+      }
+    } // End of loadDashboard
+
+    async function initParticipationPage() {
+      eventModalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('eventModal'));
+      document.getElementById('newEventBtn').addEventListener('click', openNewEvent);
+      document.getElementById('refreshBtn').addEventListener('click', function() { loadDashboard(true); });
+      document.getElementById('eventTypeFilter').addEventListener('change', renderEvents);
+      document.getElementById('eventSearch').addEventListener('input', renderEvents);
+      document.getElementById('eventType').addEventListener('change', function(event) {
+        formState.attendees = [];
+        showAlert('formAlert', '');
+        setEventTypeUi(event.target.value);
+      });
+      document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
+      document.getElementById('memberSearchBtn').addEventListener('click', searchMembers);
+      document.getElementById('memberSearchInput').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') { event.preventDefault(); searchMembers(); }
+      });
+      document.getElementById('saveEventBtn').addEventListener('click', saveEvent);
+
+      const { data:{ session } } = await _supabase.auth.getSession();
+      if (!session?.user) {
+        location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
+        return;
+      }
+      const guard = await window.ErpRuntimeGuard.enforce(_supabase, {
+        moduleKeysAny:['member_admin','minutes'],
+        moduleLabel:'회의·교육 참여 관리',
+        redirectUrl:'index.html'
+      });
+      if (!guard.ok) return;
+      await loadDashboard(true);
+    } // End of initParticipationPage
+
+    window.addEventListener('DOMContentLoaded', initParticipationPage);
+  </script>
+</body>
+</html>

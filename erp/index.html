@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.44 | Change: 2026-05-19 - Route document administrators through governance hub for regulation authoring management. -->
+<!-- Version: v1.0.45 | Change: 2026-08-03 - Add meeting and education participation dashboard entry. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.43 | index.html');</script>
+  <script>console.log('[Version] v1.0.45 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -186,6 +186,11 @@
         <button class="btn btn-white btn-menu hidden" id="btnMemberAdmin" onclick="location.href='member_admin.html'">
             👥 <strong>조합원 관리</strong>
             <span class="d-block small text-muted">조합원 명부, 신청 처리, 입금 매칭</span>
+        </button>
+
+        <button class="btn btn-white btn-menu hidden" id="btnParticipation" onclick="location.href='participation.html'">
+            📅 <strong>회의·교육 참여 관리</strong>
+            <span class="d-block small text-muted">이사회·대의원 총회·교육 참석과 서명 현황</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnSiteAdmin" onclick="location.href='site_admin.html'">
@@ -1557,6 +1562,10 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         return siteOnly || hasPermission('member.admin') === true;
     })();
     const canOfficialsAdmin = canMemberAdmin;
+    const canParticipationAdmin = (() => {
+        if (canMemberAdmin === null && canSiteAdmin === null) return null;
+        return canMemberAdmin === true || canSiteAdmin === true;
+    })();
     const canDocumentAdmin = documentsEnabled && (hasAdminRoleFallback || canMemberAdmin === true || canSiteAdmin === true);
     const canAudit = hasPermission('audit.view');
     const canPerm = hasPermission('permission.manage');
@@ -1598,6 +1607,15 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         if (isAdmin) document.getElementById('btnMemberAdmin')?.classList.remove('hidden');
     } else if (canMemberAdmin) {
         document.getElementById('btnMemberAdmin')?.classList.remove('hidden');
+    }
+
+    const participationEnabled = memberAdminEnabled || minutesEnabled;
+    if (!participationEnabled) {
+        document.getElementById('btnParticipation')?.classList.add('hidden');
+    } else if (canParticipationAdmin === null) {
+        if (isAdmin) document.getElementById('btnParticipation')?.classList.remove('hidden');
+    } else if (hasAdminRoleFallback || canParticipationAdmin) {
+        document.getElementById('btnParticipation')?.classList.remove('hidden');
     }
 
     if (!siteAdminEnabled) {
@@ -1700,6 +1718,7 @@ const ERP_MENU_BUTTON_ORDER_IDS = [
     'btnAccounting',
     'btnAdmin',
     'btnMemberAdmin',
+    'btnParticipation',
     'btnSiteAdmin',
     'btnOfficialsAdmin',
     'btnGovernanceHub',

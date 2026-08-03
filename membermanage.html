@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.96
-Change: Let managed group profiles review and update representative/contact details.
+Version: v1.0.97
+Change: Let members review their board, delegate assembly, and education participation history.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.96 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.97 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -437,6 +437,47 @@ line-height: 22px;
 text-align: center;
 box-shadow: 0 2px 8px rgba(0,0,0,0.22);
 z-index: 2;
+}
+.participation-history-list {
+display: grid;
+gap: 10px;
+max-height: min(58vh, 520px);
+overflow-y: auto;
+padding-right: 2px;
+}
+.participation-history-item {
+border: 1px solid #e5e7eb;
+border-radius: 12px;
+padding: 12px;
+background: #fff;
+}
+.participation-history-meta {
+display: flex;
+flex-wrap: wrap;
+gap: 4px 12px;
+font-size: 0.78rem;
+color: #64748b;
+margin-top: 6px;
+}
+.participation-status-chip {
+display: inline-flex;
+border-radius: 999px;
+padding: 3px 8px;
+font-size: 0.72rem;
+font-weight: 700;
+}
+.participation-status-attended { background: #dcfce7; color: #166534; }
+.participation-status-absent { background: #fee2e2; color: #991b1b; }
+.participation-status-excused { background: #fff7ed; color: #9a3412; }
+.participation-status-pending { background: #f1f5f9; color: #475569; }
+#participationHistoryModal { z-index: 1060; }
+#participationHistoryModal .custom-modal-box {
+max-width: 720px;
+max-height: 86vh;
+overflow: hidden;
+text-align: left;
+display: flex;
+flex-direction: column;
 }
 
 /* [명예의 전당] 게임 랭킹 카드 */
@@ -876,6 +917,14 @@ NO. <span id="infoMemberId">-</span>
       <button onclick="openDocumentBox()" class="quick-btn btn btn-secondary">문서함 열기</button>
     </div>
   </div>
+  <div class="quick-col hidden">
+    <div id="quickParticipationCard" class="quick-card quick-green">
+      <div class="quick-title"><i class="bi bi-calendar2-check me-1"></i>참여 이력</div>
+      <div class="quick-desc" id="quickParticipationDesc">회의·교육 참석 기록 확인</div>
+      <div class="quick-meta hidden" id="quickParticipationMeta"></div>
+      <button onclick="openParticipationHistory()" class="quick-btn btn btn-success">참여 이력 보기</button>
+    </div>
+  </div>
 </div>
 
 <div class="dashboard-card mb-4" id="hallOfFameCard">
@@ -1249,6 +1298,24 @@ oninput="autoHyphen(this)"> </div>
 
 <div class="text-end mt-3 border-top pt-2">
 <button class="btn btn-link text-secondary text-decoration-none btn-sm" onclick="document.getElementById('familyModalOverlay').style.display='none'">닫기</button>
+</div>
+</div>
+</div>
+
+<div id="participationHistoryModal" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="participationHistoryTitle">
+<div class="custom-modal-box">
+<div class="d-flex justify-content-between align-items-center gap-3 border-bottom pb-3 mb-3">
+<div>
+<h5 id="participationHistoryTitle" class="fw-bold mb-1"><i class="bi bi-calendar2-check me-2 text-success"></i>나의 참여 이력</h5>
+<div class="small text-muted" id="participationHistorySummary">불러오는 중...</div>
+</div>
+<button type="button" class="btn-close" id="participationHistoryCloseBtn" onclick="closeParticipationHistory()" aria-label="닫기"></button>
+</div>
+<div class="participation-history-list" id="participationHistoryList">
+<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>
+</div>
+<div class="text-end border-top pt-3 mt-3">
+<button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeParticipationHistory()">닫기</button>
 </div>
 </div>
 </div>
@@ -2978,6 +3045,7 @@ let coopRuntimeModules = null;
 let currentMemberCoopId = null;
 const MEMBERMANAGE_BRANDING_CACHE_KEY = 'membermanage_branding_name';
 const DEFAULT_MEMBERMANAGE_COOP_NAME = '용인모두의햇빛협동조합';
+const PARTICIPATION_FILES_BUCKET = 'participation-files';
 let currentMemberCoopName = String(localStorage.getItem(MEMBERMANAGE_BRANDING_CACHE_KEY) || '').trim() || DEFAULT_MEMBERMANAGE_COOP_NAME;
 
 function isMemberPortalAdmin(member) {
@@ -4209,6 +4277,159 @@ async function hasPendingVoteTasks(memberUuid) {
     }
 }
 
+let participationModalPreviousBodyOverflow = '';
+
+function participationEventTypeLabel(type) {
+if (type === 'BOARD') return '이사회';
+if (type === 'DELEGATE_ASSEMBLY') return '대의원 총회';
+return '교육';
+} // End of participationEventTypeLabel
+
+function participationAttendanceLabel(status) {
+if (status === 'ATTENDED') return '참석';
+if (status === 'ABSENT') return '불참';
+if (status === 'EXCUSED') return '사유 불참';
+return '확인 전';
+} // End of participationAttendanceLabel
+
+function participationAttendanceClass(status) {
+if (status === 'ATTENDED') return 'participation-status-attended';
+if (status === 'ABSENT') return 'participation-status-absent';
+if (status === 'EXCUSED') return 'participation-status-excused';
+return 'participation-status-pending';
+} // End of participationAttendanceClass
+
+async function loadParticipationCardSummary(memberUuid) {
+const card = document.getElementById('quickParticipationCard');
+const desc = document.getElementById('quickParticipationDesc');
+const meta = document.getElementById('quickParticipationMeta');
+if (!card || !desc || !meta || !memberUuid) return;
+try {
+const { data, error } = await _supabase.rpc('participation_member_list', {
+p_member_uuid: memberUuid
+});
+if (error) throw error;
+const total = Number(data?.total_count || 0);
+const attended = Number(data?.attended_count || 0);
+desc.textContent = total > 0 ? `등록된 회의·교육 ${total}건` : '아직 등록된 참여 이력이 없습니다.';
+meta.textContent = total > 0 ? `참석 ${attended}건 · 전체 ${total}건` : '';
+meta.classList.toggle('hidden', total === 0);
+} catch (error) {
+console.warn('loadParticipationCardSummary failed:', error);
+desc.textContent = '회의·교육 참석 기록 확인';
+meta.classList.add('hidden');
+}
+} // End of loadParticipationCardSummary
+
+function renderParticipationHistory(data) {
+const list = document.getElementById('participationHistoryList');
+const summary = document.getElementById('participationHistorySummary');
+const events = Array.isArray(data?.events) ? data.events : [];
+const total = Number(data?.total_count || events.length);
+const attended = Number(data?.attended_count || 0);
+if (summary) summary.textContent = `전체 ${total}건 · 참석 ${attended}건`;
+if (!list) return;
+if (events.length === 0) {
+list.innerHTML = '<div class="text-center text-muted py-5">등록된 회의·교육 참여 이력이 없습니다.</div>';
+return;
+}
+list.innerHTML = events.map(function(event) {
+const files = Array.isArray(event.files) ? event.files : [];
+const status = String(event.attendance_status || 'PENDING');
+const timeText = event.ends_at
+? `${formatMemberKstDateTime(event.starts_at)} ~ ${formatMemberKstDateTime(event.ends_at)}`
+: formatMemberKstDateTime(event.starts_at);
+let signatureHtml = '';
+if (event.signature_required_snapshot) {
+signatureHtml = event.signature_signed_at
+? `<span class="badge bg-success-subtle text-success-emphasis border">서명 완료 · ${escapeHtml(formatMemberKstDateTime(event.signature_signed_at))}</span>`
+: '<span class="badge bg-warning-subtle text-warning-emphasis border">미서명</span>';
+}
+const educationHtml = event.event_type === 'EDUCATION'
+? `<div class="small text-secondary mt-2">${event.instructor ? `<strong>강사</strong> ${escapeHtml(event.instructor)}<br>` : ''}${event.education_content ? `<strong>교육 내용</strong> ${escapeHtml(event.education_content)}` : ''}</div>`
+: '';
+const actualAttendeeHtml = event.actual_attendee_name
+? `<div class="small text-secondary mt-2"><strong>실제 참석자</strong> ${escapeHtml(event.actual_attendee_name)}</div>`
+: '';
+const filesHtml = files.length > 0
+? `<div class="d-flex flex-wrap gap-2 mt-3">${files.map(function(file) {
+return `<button type="button" class="btn btn-sm btn-outline-secondary" data-participation-file="${escapeHtml(file.storage_path)}">${file.file_kind === 'PHOTO' ? '사진' : '자료'} · ${escapeHtml(file.original_name)}</button>`;
+}).join('')}</div>`
+: '';
+return `
+<article class="participation-history-item">
+<div class="d-flex justify-content-between align-items-start gap-2">
+<div>
+<div class="small text-muted mb-1">${escapeHtml(participationEventTypeLabel(event.event_type))}</div>
+<div class="fw-bold">${escapeHtml(event.title)}</div>
+</div>
+<span class="participation-status-chip ${participationAttendanceClass(status)}">${participationAttendanceLabel(status)}</span>
+</div>
+<div class="participation-history-meta"><span><i class="bi bi-calendar3 me-1"></i>${escapeHtml(timeText)}</span><span><i class="bi bi-geo-alt me-1"></i>${escapeHtml(event.location || '-')}</span></div>
+${educationHtml}
+${actualAttendeeHtml}
+${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
+${filesHtml}
+</article>`;
+}).join('');
+list.querySelectorAll('[data-participation-file]').forEach(function(button) {
+button.addEventListener('click', function() {
+openParticipationAttachment(button.dataset.participationFile);
+});
+});
+} // End of renderParticipationHistory
+
+async function openParticipationHistory() {
+const overlay = document.getElementById('participationHistoryModal');
+const list = document.getElementById('participationHistoryList');
+const summary = document.getElementById('participationHistorySummary');
+const memberUuid = getActiveMemberProfileId();
+if (!overlay || !memberUuid) return showModal('현재 조합원 프로필을 확인하지 못했습니다.');
+participationModalPreviousBodyOverflow = document.body.style.overflow || '';
+document.body.style.overflow = 'hidden';
+overlay.style.display = 'flex';
+overlay.classList.remove('modal-depth-back');
+if (summary) summary.textContent = '불러오는 중...';
+if (list) list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
+document.getElementById('participationHistoryCloseBtn')?.focus();
+try {
+const { data, error } = await _supabase.rpc('participation_member_list', {
+p_member_uuid: memberUuid
+});
+if (error) throw error;
+renderParticipationHistory(data || {});
+} catch (error) {
+console.error('openParticipationHistory failed:', error);
+if (summary) summary.textContent = '조회 실패';
+if (list) list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '참여 이력을 불러오지 못했습니다.')}</div>`;
+}
+} // End of openParticipationHistory
+
+function closeParticipationHistory() {
+const overlay = document.getElementById('participationHistoryModal');
+if (overlay) overlay.style.display = 'none';
+document.body.style.overflow = participationModalPreviousBodyOverflow;
+} // End of closeParticipationHistory
+
+async function openParticipationAttachment(storagePath) {
+const safePath = String(storagePath || '').trim();
+if (!safePath) return;
+try {
+const { data, error } = await _supabase.storage.from(PARTICIPATION_FILES_BUCKET).createSignedUrl(safePath, 300);
+if (error) throw error;
+if (!data?.signedUrl) throw new Error('첨부파일 주소를 만들지 못했습니다.');
+window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+} catch (error) {
+showModal('첨부파일을 열지 못했습니다.\n' + (error?.message || '잠시 후 다시 시도해주세요.'));
+}
+} // End of openParticipationAttachment
+
+document.addEventListener('keydown', function(event) {
+if (event.key !== 'Escape') return;
+const overlay = document.getElementById('participationHistoryModal');
+if (overlay && overlay.style.display === 'flex') closeParticipationHistory();
+});
+
 // [신규] 퀵 링크 카드 노출 제어
 function renderQuickLinks(member, myRoles, isOfficial, officialIds) {
 const isAdmin = isMemberPortalAdmin(member);
@@ -4217,6 +4438,7 @@ const voteCard = document.getElementById('quickVoteCard');
 const solarCard = document.getElementById('quickSolarCard');
 const minutesSignCard = document.getElementById('quickMinutesSignCard');
 const minutesViewCard = document.getElementById('quickMinutesViewCard');
+const participationCard = document.getElementById('quickParticipationCard');
 const signBadge = document.getElementById('signTodoBadge');
 const docBadge = document.getElementById('docTodoBadge');
 const minutesEnabled = isCoopRuntimeModuleEnabled('minutes');
@@ -4232,6 +4454,8 @@ const setQuickCardVisible = (cardEl, visible) => {
 
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 setQuickCardTodoState(minutesViewCard, docBadge, false);
+setQuickCardVisible(participationCard, true);
+loadParticipationCardSummary(member?.id || curMem?.id);
 
 setQuickCardButtonState(minutesSignCard, {
 descText: '서명 요청 확인',
