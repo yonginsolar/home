@@ -1205,7 +1205,7 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 <div class="d-grid gap-2">
 <button type="submit" class="btn btn-success fw-bold" id="educationQrQuickSubmit">간편 인증하고 출석하기</button>
-<button type="button" class="btn btn-link text-secondary" onclick="showEducationQrMode('choices')">다른 방법 선택</button>
+<button type="button" class="btn btn-link text-secondary" id="educationQrQuickAlternative" onclick="showEducationQrMode('choices')">다른 방법 선택</button>
 </div>
 </form>
 
@@ -1758,7 +1758,7 @@ NO. <span id="infoMemberId">-</span>
 <dt class="mb-1">수집 항목</dt>
 <dd class="text-secondary mb-3">이름, 휴대전화번호, 교육명, 출석일시, 만 14세 이상 확인 및 동의 일시</dd>
 <dt class="mb-1">보유기간</dt>
-<dd class="text-secondary mb-3">휴대전화번호는 수집일로부터 30일, 이름과 교육 참석 기록은 출석일로부터 3년간 보관합니다. 30일 이내 가입 신청과 연결되면 별도 출석 기록의 전화번호는 즉시 삭제하며, 3년 후 이름을 삭제하고 익명 참석 통계만 유지합니다.</dd>
+<dd class="text-secondary mb-3">휴대전화번호는 수집일로부터 30일, 이름과 교육 참석 기록은 출석일로부터 6개월 이내 보관합니다. 30일 이내 가입 신청과 연결되면 별도 출석 기록의 전화번호는 즉시 삭제하며, 보관기간이 지나면 이름을 삭제하고 익명 참석 통계만 유지합니다.</dd>
 <dt class="mb-1">동의 거부 및 불이익</dt>
 <dd class="text-secondary mb-3">동의를 거부할 수 있으나 비조합원 개인별 출석 기록과 향후 자동 연결은 이용할 수 없습니다.</dd>
 <dt class="mb-1">철회·삭제 요청</dt>
@@ -2330,6 +2330,11 @@ showModal("시스템 연결 오류");
 }
 
 const EDUCATION_GUEST_CONSENT_VERSION = 'education-guest-v1-2026-08-04';
+const HUMANITIES_INTEGRATION_URL = `${SUPABASE_URL}/functions/v1/erp-humanities-integration`;
+const COOP_PUBLISHABLE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+const HUMANITIES_CHECKIN_URL = 'https://wmynvcuedusjnufmhdqv.supabase.co/functions/v1/course-checkin';
+const HUMANITIES_PUBLISHABLE_KEY = 'sb_publishable_rXN3xjZ2aJGeb00QMEs1KQ_bChOdSRI';
+const HUMANITIES_CHECKIN_TERMS_VERSION = 'course-checkin-v1-2026-08-04';
 let educationQrContext = null;
 let educationGuestPrivacyReturnFocus = null;
 let educationGuestPrivacyPreviousBodyOverflow = '';
@@ -2347,6 +2352,44 @@ if (!status) return;
 status.textContent = '';
 status.className = 'education-qr-inline-status';
 } // End of clearEducationQrInlineStatus
+
+function getHumanitiesHandoffToken() {
+try {
+const token = String(new URLSearchParams(window.location.search || '').get('humanities_handoff') || '').trim().toLowerCase();
+return /^[0-9a-f]{64}$/.test(token) ? token : '';
+} catch (_) { return ''; }
+} // End of getHumanitiesHandoffToken
+
+function getHumanitiesQrToken() {
+try {
+const token = String(new URLSearchParams(window.location.search || '').get('humanities_qr') || '').trim().toLowerCase();
+return /^[0-9a-f]{64}$/.test(token) ? token : '';
+} catch (_) { return ''; }
+} // End of getHumanitiesQrToken
+
+function humanitiesReturnUrl(params = {}) {
+const qrToken = getHumanitiesQrToken();
+const url = new URL('https://humanities.yll.or.kr/index.html');
+if (qrToken) url.searchParams.set('checkin', qrToken);
+Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+return url.toString();
+} // End of humanitiesReturnUrl
+
+async function callEducationIntegration(url, apiKey, payload) {
+const response = await fetch(url, {
+method:'POST',
+headers:{ apikey:apiKey, Authorization:`Bearer ${apiKey}`, 'Content-Type':'application/json' },
+body:JSON.stringify(payload)
+});
+const result = await response.json().catch(() => ({}));
+if (!response.ok || result?.ok === false) {
+const error = new Error(String(result?.error || '교육 출석 연동에 실패했습니다.'));
+error.code = String(result?.code || 'INTEGRATION_FAILED');
+error.fallback = result?.fallback === true;
+throw error;
+}
+return result;
+} // End of callEducationIntegration
 
 function buildEducationQrSignupUrl() {
 const token = getPendingEducationQrToken();
@@ -2371,9 +2414,25 @@ if (mode === 'login') window.setTimeout(() => document.getElementById('emailInpu
 
 async function initializeEducationQrEntry() {
 const token = getPendingEducationQrToken();
+const humanitiesHandoff = getHumanitiesHandoffToken();
 const panel = document.getElementById('educationQrEntryPanel');
 const loginArea = document.getElementById('educationQrLoginAuthArea');
 if (!panel || !loginArea) return;
+
+if (humanitiesHandoff && getHumanitiesQrToken()) {
+panel.classList.remove('hidden');
+loginArea.classList.add('hidden');
+const title = document.getElementById('educationQrEntryTitle');
+const meta = document.getElementById('educationQrEntryMeta');
+const choices = document.getElementById('educationQrChoiceGrid');
+if (title) title.textContent = '모두의 인문학 연동 교육';
+if (meta) meta.textContent = '용인모두의햇빛협동조합 조합원 정보를 확인하면 같은 교육의 출석이 한 번 기록됩니다.';
+if (choices) choices.classList.add('hidden');
+document.getElementById('educationQrQuickAlternative')?.classList.add('hidden');
+showEducationQrMode('quick');
+setEducationQrInlineStatus('가입된 이름과 휴대전화번호를 정확히 입력해 주세요.', 'info');
+return;
+}
 
 if (!token) {
 panel.classList.add('hidden');
@@ -2383,6 +2442,7 @@ return;
 
 panel.classList.remove('hidden');
 loginArea.classList.add('hidden');
+document.getElementById('educationQrQuickAlternative')?.classList.remove('hidden');
 const title = document.getElementById('educationQrEntryTitle');
 const meta = document.getElementById('educationQrEntryMeta');
 const choices = document.getElementById('educationQrChoiceGrid');
@@ -2444,14 +2504,29 @@ return '';
 async function submitEducationQrQuickCheckIn(event) {
 event.preventDefault();
 const token = getPendingEducationQrToken();
+const humanitiesHandoff = getHumanitiesHandoffToken();
+const humanitiesQr = getHumanitiesQrToken();
 const name = String(document.getElementById('educationQrQuickName')?.value || '').trim();
 const phone = String(document.getElementById('educationQrQuickPhone')?.value || '').trim();
 const button = document.getElementById('educationQrQuickSubmit');
-if (!token || !name || !phone) return setEducationQrInlineStatus('이름과 휴대전화번호 전체를 입력해주세요.', 'warning');
+if ((!token && !(humanitiesHandoff && humanitiesQr)) || !name || !phone) return setEducationQrInlineStatus('이름과 휴대전화번호 전체를 입력해주세요.', 'warning');
 if (button?.disabled) return;
 if (button) button.disabled = true;
 clearEducationQrInlineStatus();
 try {
+if (humanitiesHandoff && humanitiesQr) {
+const partner = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
+action:'complete_member_handoff', handoff_token:humanitiesHandoff, participant_name:name, phone
+});
+await callEducationIntegration(HUMANITIES_CHECKIN_URL, HUMANITIES_PUBLISHABLE_KEY, {
+action:'partner_checkin', qr_token:humanitiesQr, partner_receipt:partner.receipt_token,
+participant_name:name, phone, age_confirmed:true, privacy_consent:true,
+terms_version:HUMANITIES_CHECKIN_TERMS_VERSION
+});
+setEducationQrInlineStatus('조합원 확인과 모두의 인문학 체크인이 완료되었습니다. 돌아가는 중입니다.', 'success');
+window.location.replace(humanitiesReturnUrl({ partner_status:'success' }));
+return;
+}
 const { data, error } = await _supabase.rpc('participation_public_education_quick_check_in', {
 p_qr_token: token,
 p_name: name,
@@ -2474,6 +2549,11 @@ return;
 }
 setEducationQrInlineStatus(message || '출석을 등록하지 못했습니다. QR과 입력값을 확인해주세요.', 'danger');
 } catch (error) {
+if (humanitiesHandoff && (error?.fallback === true || error?.code === 'MEMBER_NOT_FOUND')) {
+setEducationQrInlineStatus('조합원 정보를 찾을 수 없어 일반 체크인으로 전환됩니다.', 'warning');
+window.setTimeout(() => window.location.replace(humanitiesReturnUrl({ partner_fallback:'1' })), 700);
+return;
+}
 console.error('education QR quick check-in failed:', error?.message || error);
 setEducationQrInlineStatus('출석을 등록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
 } finally {
@@ -2513,7 +2593,7 @@ document.getElementById('educationQrChoiceGrid')?.classList.add('hidden');
 document.getElementById('educationQrGuestForm')?.classList.add('hidden');
 document.getElementById('educationQrGuestName').value = '';
 document.getElementById('educationQrGuestPhone').value = '';
-setEducationQrInlineStatus(`${message}\n전화번호는 30일, 이름과 참석 기록은 3년간 보관됩니다.`, 'success');
+setEducationQrInlineStatus(`${message}\n전화번호는 30일, 이름과 참석 기록은 6개월 이내 보관됩니다.`, 'success');
 return;
 }
 if (result.status === 'MEMBER_AUTH_REQUIRED') {

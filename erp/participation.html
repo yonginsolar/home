@@ -284,6 +284,41 @@
             </div>
           </div>
 
+          <div class="form-section d-none" id="humanitiesLinkSection">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+              <div class="form-section-title mb-0">모두의 인문학 연동</div>
+              <span class="badge text-bg-light border" id="humanitiesLinkBadge">미연동</span>
+            </div>
+            <p class="small text-muted">저장된 교육의 날짜·시간과 가까운 모두의 인문학 교육을 먼저 표시합니다. 선택 후 연동을 저장하면 하나의 출석을 양쪽 명단에서 확인할 수 있습니다.</p>
+            <div id="humanitiesLinkAlert" class="alert d-none" role="status"></div>
+            <div class="row g-3">
+              <div class="col-lg-7">
+                <label class="form-label fw-bold" for="humanitiesCourseSelect">연결할 교육</label>
+                <select class="form-select" id="humanitiesCourseSelect" disabled>
+                  <option value="">교육을 먼저 저장해 주세요.</option>
+                </select>
+              </div>
+              <div class="col-lg-5">
+                <label class="form-label fw-bold" for="humanitiesTelegramRecipient">Telegram 알림 수신자</label>
+                <select class="form-select" id="humanitiesTelegramRecipient" disabled>
+                  <option value="">연결된 수신자 없음</option>
+                </select>
+              </div>
+              <div class="col-12">
+                <label class="form-check">
+                  <input class="form-check-input" type="checkbox" id="humanitiesTelegramEnabled" disabled>
+                  <span class="form-check-label">이 교육의 온라인 체크인을 선택한 담당자에게 실시간 Telegram으로 알림</span>
+                </label>
+                <div class="form-text">기본값은 꺼짐입니다. 문자 알림은 모두의 인문학 관리자에서 별도로 켤 수 있습니다.</div>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button type="button" class="btn btn-sm btn-primary" id="saveHumanitiesLinkBtn" disabled>선택 교육과 연동</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshHumanitiesLinkBtn" disabled>후보 다시 찾기</button>
+              <button type="button" class="btn btn-sm btn-outline-danger d-none" id="unlinkHumanitiesBtn">연동 해제</button>
+            </div>
+          </div>
+
           <div class="form-section d-none" id="educationQrSection">
             <div class="form-section-title">교육 출석 QR</div>
             <div class="qr-panel">
@@ -372,6 +407,8 @@
       global: { headers: { 'x-erp-host': ERP_RUNTIME_HOST } }
     });
     const PARTICIPATION_BUCKET = 'participation-files';
+    const COOP_PUBLISHABLE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+    const HUMANITIES_INTEGRATION_URL = `${SUPABASE_URL}/functions/v1/erp-humanities-integration`;
     const KST_TIME_ZONE = 'Asia/Seoul';
     const FILE_SIZE_LIMIT = 20 * 1024 * 1024;
     const PARTICIPATION_EMBEDDED = (() => {
@@ -388,6 +425,7 @@
 
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
+    let humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false };
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let pendingGuestLinkId = null;
     let eventModalInstance = null;
@@ -822,6 +860,123 @@
       return `${PARTICIPATION_PUBLIC_ORIGIN}/membermanage.html?education_checkin=${encodeURIComponent(token)}`;
     } // End of educationQrLink
 
+    async function callHumanitiesIntegration(action, payload = {}) {
+      const { data:{ session } } = await _supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('ERP 관리자 로그인이 필요합니다.');
+      const response = await fetch(HUMANITIES_INTEGRATION_URL, {
+        method:'POST',
+        headers:{
+          apikey:COOP_PUBLISHABLE_KEY,
+          Authorization:`Bearer ${session.access_token}`,
+          'Content-Type':'application/json'
+        },
+        body:JSON.stringify({ action, event_id:formState.eventId, ...payload })
+      });
+      const result = await response.json().catch(function() { return {}; });
+      if (!response.ok || result?.ok !== true) throw new Error(result?.error || '모두의 인문학 연동 요청을 처리하지 못했습니다.');
+      return result;
+    } // End of callHumanitiesIntegration
+
+    function renderHumanitiesLink() {
+      const section = document.getElementById('humanitiesLinkSection');
+      const isEducation = document.getElementById('eventType').value === 'EDUCATION';
+      section.classList.toggle('d-none', !isEducation);
+      if (!isEducation) return;
+      const saved = !!formState.eventId;
+      const link = humanitiesLinkState.link;
+      const select = document.getElementById('humanitiesCourseSelect');
+      const recipient = document.getElementById('humanitiesTelegramRecipient');
+      const enabled = document.getElementById('humanitiesTelegramEnabled');
+      const badge = document.getElementById('humanitiesLinkBadge');
+      const saveButton = document.getElementById('saveHumanitiesLinkBtn');
+      const refreshButton = document.getElementById('refreshHumanitiesLinkBtn');
+      const unlinkButton = document.getElementById('unlinkHumanitiesBtn');
+      const candidates = humanitiesLinkState.candidates || [];
+      select.innerHTML = saved
+        ? '<option value="">연결할 모두의 인문학 교육을 선택하세요.</option>' + candidates.map(function(course) {
+            const difference = Number(course.time_difference_minutes || 0);
+            const proximity = difference === 0 ? '시간 일치' : `${difference.toLocaleString()}분 차이`;
+            return `<option value="${escapeHtml(course.id)}" ${String(link?.humanities_course_id || '') === String(course.id) ? 'selected' : ''}>${escapeHtml(formatKstDateTime(course.starts_at))} · ${escapeHtml(course.title)} · ${escapeHtml(proximity)}</option>`;
+          }).join('')
+        : '<option value="">교육을 먼저 저장해 주세요.</option>';
+      recipient.innerHTML = '<option value="">Telegram 사용 안 함</option>' + (humanitiesLinkState.telegramRecipients || []).map(function(item) {
+        const selected = String(link?.telegram_recipient_emp_id || '') === String(item.emp_id || '');
+        return `<option value="${escapeHtml(item.emp_id)}" ${selected ? 'selected' : ''}>${escapeHtml(item.emp_name || item.emp_id)}${item.position ? ` · ${escapeHtml(item.position)}` : ''}</option>`;
+      }).join('');
+      enabled.checked = link?.telegram_alert_enabled === true;
+      badge.textContent = link?.status === 'ACTIVE' ? '연동됨' : '미연동';
+      badge.className = `badge ${link?.status === 'ACTIVE' ? 'text-bg-success' : 'text-bg-light border'}`;
+      [select, recipient, enabled, saveButton, refreshButton].forEach(function(element) { element.disabled = !saved || humanitiesLinkState.loading; });
+      unlinkButton.classList.toggle('d-none', link?.status !== 'ACTIVE');
+      unlinkButton.disabled = humanitiesLinkState.loading;
+    } // End of renderHumanitiesLink
+
+    async function loadHumanitiesLink(showMessage = false) {
+      if (!formState.eventId || document.getElementById('eventType').value !== 'EDUCATION') {
+        humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false };
+        renderHumanitiesLink();
+        return;
+      }
+      humanitiesLinkState.loading = true;
+      renderHumanitiesLink();
+      try {
+        const result = await callHumanitiesIntegration('admin_get');
+        humanitiesLinkState = {
+          link:result.link || null,
+          candidates:Array.isArray(result.candidates) ? result.candidates : [],
+          telegramRecipients:Array.isArray(result.telegram_recipients) ? result.telegram_recipients : [],
+          loading:false
+        };
+        renderHumanitiesLink();
+        if (showMessage) showAlert('humanitiesLinkAlert', '날짜·시간이 가까운 교육 후보를 다시 불러왔습니다.', 'success');
+      } catch (error) {
+        humanitiesLinkState.loading = false;
+        renderHumanitiesLink();
+        showAlert('humanitiesLinkAlert', error?.message || '연동 정보를 불러오지 못했습니다.', 'danger');
+      }
+    } // End of loadHumanitiesLink
+
+    async function saveHumanitiesLink() {
+      const courseId = document.getElementById('humanitiesCourseSelect').value;
+      const telegramEnabled = document.getElementById('humanitiesTelegramEnabled').checked;
+      const telegramRecipient = document.getElementById('humanitiesTelegramRecipient').value;
+      if (!courseId) return showAlert('humanitiesLinkAlert', '연결할 모두의 인문학 교육을 선택해 주세요.', 'warning');
+      if (telegramEnabled && !telegramRecipient) return showAlert('humanitiesLinkAlert', 'Telegram 알림을 받을 담당자를 선택해 주세요.', 'warning');
+      humanitiesLinkState.loading = true;
+      renderHumanitiesLink();
+      try {
+        const result = await callHumanitiesIntegration('admin_save', {
+          humanities_course_id:courseId,
+          telegram_alert_enabled:telegramEnabled,
+          telegram_recipient_emp_id:telegramRecipient || null
+        });
+        humanitiesLinkState.link = result.link || null;
+        showAlert('humanitiesLinkAlert', '같은 교육으로 연동했습니다. 모두의 인문학 QR에서 조합원 확인 분기가 표시됩니다.', 'success');
+      } catch (error) {
+        showAlert('humanitiesLinkAlert', error?.message || '교육을 연동하지 못했습니다.', 'danger');
+      } finally {
+        humanitiesLinkState.loading = false;
+        renderHumanitiesLink();
+      }
+    } // End of saveHumanitiesLink
+
+    async function unlinkHumanities() {
+      if (!formState.eventId || !window.confirm('모두의 인문학 연동을 해제할까요? 기존 출석 기록은 삭제하지 않습니다.')) return;
+      humanitiesLinkState.loading = true;
+      renderHumanitiesLink();
+      try {
+        await callHumanitiesIntegration('admin_unlink');
+        humanitiesLinkState.link = null;
+        document.getElementById('humanitiesTelegramEnabled').checked = false;
+        showAlert('humanitiesLinkAlert', '연동을 해제했습니다. 기존 참가자 기록은 유지됩니다.', 'success');
+      } catch (error) {
+        showAlert('humanitiesLinkAlert', error?.message || '연동을 해제하지 못했습니다.', 'danger');
+      } finally {
+        humanitiesLinkState.loading = false;
+        renderHumanitiesLink();
+      }
+    } // End of unlinkHumanities
+
     function educationQrWindowText() {
       const startsAt = localInputToIso(document.getElementById('eventStartsAt').value);
       const endsAt = localInputToIso(document.getElementById('eventEndsAt').value);
@@ -1000,6 +1155,7 @@
       document.getElementById('educationContentGroup').classList.toggle('d-none', !education);
       document.getElementById('instructorGroup').classList.toggle('d-none', !education);
       document.getElementById('educationFilesSection').classList.toggle('d-none', !education);
+      document.getElementById('humanitiesLinkSection').classList.toggle('d-none', !education);
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
       document.getElementById('memberSearchObserverBtn').classList.toggle('d-none', education);
       document.getElementById('observerHelp').classList.toggle('d-none', education);
@@ -1008,6 +1164,7 @@
       renderSourceOptions(type);
       renderAttendees();
       renderEducationQr();
+      renderHumanitiesLink();
     } // End of setEventTypeUi
 
     function renderSourceOptions(type, selectedId = '') {
@@ -1028,6 +1185,7 @@
     function resetEventForm() {
       revokeNewPhotoPreviewUrls();
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
+      humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false };
       pendingGuestLinkId = null;
       document.getElementById('eventModalTitle').textContent = '행사 등록';
       document.getElementById('eventType').value = 'BOARD';
@@ -1110,6 +1268,7 @@
         setEventTypeUi(event.event_type);
         renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
         await renderCurrentFiles();
+        await loadHumanitiesLink(false);
         eventModalInstance.show();
       } catch (error) {
         showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
@@ -1760,6 +1919,9 @@
       document.getElementById('downloadEducationQrBtn').addEventListener('click', downloadEducationQr);
       document.getElementById('printEducationQrBtn').addEventListener('click', printEducationQr);
       document.getElementById('rotateEducationQrBtn').addEventListener('click', rotateEducationQr);
+      document.getElementById('saveHumanitiesLinkBtn').addEventListener('click', saveHumanitiesLink);
+      document.getElementById('refreshHumanitiesLinkBtn').addEventListener('click', function() { loadHumanitiesLink(true); });
+      document.getElementById('unlinkHumanitiesBtn').addEventListener('click', unlinkHumanities);
       document.getElementById('participationImageLightboxClose').addEventListener('click', closeImageLightbox);
       document.getElementById('participationImageLightbox').addEventListener('click', function(event) {
         if (event.target === event.currentTarget) closeImageLightbox();
@@ -1786,6 +1948,9 @@
         redirectUrl:'index.html'
       });
       if (!guard.ok) return;
+      if (new URLSearchParams(window.location.search || '').get('view') === 'education') {
+        document.getElementById('eventTypeFilter').value = 'EDUCATION';
+      }
       await loadDashboard(true);
     } // End of initParticipationPage
 
