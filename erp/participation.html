@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.6 | Change: 2026-08-04 - Add an A4 education attendance QR print layout. -->
+<!-- Version: v1.3.0 | Change: 2026-08-05 - Unify education import, fixed KST QR window, and manager-name notifications. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.6 | participation.html');</script>
+  <script>console.log('[Version] v1.3.0 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -76,6 +76,7 @@
     .qr-code-box { width:190px; min-height:190px; display:flex; align-items:center; justify-content:center; padding:5px; border:1px solid var(--line); border-radius:12px; background:#fff; }
     .qr-code-box canvas, .qr-code-box img { max-width:180px; height:auto !important; }
     .education-qr-print-sheet { display:none; }
+    .education-roster-print-sheet { display:none; }
     .image-lightbox { position:fixed; inset:0; z-index:2100; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(15,23,42,.9); }
     .image-lightbox.show { display:flex; }
     .image-lightbox img { max-width:min(1100px,94vw); max-height:88vh; object-fit:contain; border-radius:10px; background:#fff; }
@@ -146,6 +147,17 @@
       .education-qr-print-logo { display:block; max-width:52mm; max-height:14mm; object-fit:contain; }
       .education-qr-print-brand { font-size:13pt; font-weight:850; word-break:keep-all; }
       .education-qr-print-brand-sub { margin-top:1mm; color:#64748b; font-size:9pt; font-weight:600; }
+      body.print-with-roster > .education-roster-print-sheet {
+        display:block !important; width:210mm; min-height:297mm; box-sizing:border-box; padding:16mm;
+        color:#0f172a; background:#fff; break-before:page; page-break-before:always;
+        font-family:'Segoe UI','Malgun Gothic',sans-serif;
+      }
+      .education-roster-print-sheet h1 { margin:0 0 3mm; font-size:22pt; }
+      .education-roster-print-meta { margin-bottom:7mm; color:#475569; font-size:10.5pt; }
+      .education-roster-print-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:10pt; }
+      .education-roster-print-table th, .education-roster-print-table td { border:.3mm solid #94a3b8; padding:3mm; text-align:left; }
+      .education-roster-print-table th { background:#f1f5f9; font-weight:800; }
+      .education-roster-print-table .sign-cell { height:13mm; }
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.0">
@@ -161,23 +173,23 @@
   <main class="page-shell">
     <div class="page-head">
       <div>
-        <h1>교육 참가자·연동 관리</h1>
-        <div class="page-subtitle">모두의 인문학에서 넘어온 비회원·오타·미확인 참가자를 확인하고 교육 연동과 QR을 준비합니다.</div>
+        <h1 id="participationPageTitle">교육 관리</h1>
+        <div class="page-subtitle" id="participationPageSubtitle">교육 등록·불러오기부터 체크인과 비조합원 확인까지 한 곳에서 관리합니다.</div>
       </div>
       <button type="button" class="btn btn-outline-secondary" onclick="location.href='index.html'">ERP 메인</button>
     </div>
 
     <div id="pageAlert" class="alert d-none" role="alert"></div>
-    <div class="alert alert-info" role="note">
+    <div class="alert alert-info" role="note" id="participationPageGuide">
       아직 목록이 비어 있어도 정상입니다. 모두의 인문학 QR 체크인이 들어오면 확인이 필요한 외부 참가자가 교육 상세에 표시됩니다. 조합원과 회의 참석 이력의 기본 관리는 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 합니다.
     </div>
 
     <section class="summary-grid" aria-label="참여 관리 요약">
-      <div class="summary-card"><div class="summary-label">전체 행사</div><div class="summary-value" id="summaryTotal">-</div></div>
-      <div class="summary-card"><div class="summary-label">이사회</div><div class="summary-value" id="summaryBoard">-</div></div>
-      <div class="summary-card"><div class="summary-label">대의원 총회</div><div class="summary-value" id="summaryDelegate">-</div></div>
-      <div class="summary-card"><div class="summary-label">교육</div><div class="summary-value" id="summaryEducation">-</div></div>
-      <div class="summary-card"><div class="summary-label">올해 회의 참석률</div><div class="summary-value" id="summaryMeetingRate">-</div></div>
+      <div class="summary-card" id="summaryTotalCard"><div class="summary-label">전체</div><div class="summary-value" id="summaryTotal">-</div></div>
+      <div class="summary-card" id="summaryBoardCard"><div class="summary-label">이사회</div><div class="summary-value" id="summaryBoard">-</div></div>
+      <div class="summary-card" id="summaryDelegateCard"><div class="summary-label">대의원 총회</div><div class="summary-value" id="summaryDelegate">-</div></div>
+      <div class="summary-card" id="summaryEducationCard"><div class="summary-label">교육</div><div class="summary-value" id="summaryEducation">-</div></div>
+      <div class="summary-card" id="summaryMeetingRateCard"><div class="summary-label">올해 회의 참석률</div><div class="summary-value" id="summaryMeetingRate">-</div></div>
     </section>
 
     <section class="panel">
@@ -190,7 +202,20 @@
         </select>
         <input type="search" class="form-control" id="eventSearch" placeholder="교육명·장소·외부 참가자 검색">
         <button type="button" class="btn btn-outline-secondary" id="refreshBtn">새로고침</button>
-        <button type="button" class="btn btn-primary" id="newEventBtn">행사 등록</button>
+        <button type="button" class="btn btn-outline-primary" id="importHumanitiesCourseBtn">모두의 인문학에서 불러오기</button>
+        <button type="button" class="btn btn-primary" id="newEventBtn">신규 교육 입력</button>
+      </div>
+      <div class="border rounded-3 p-3 mb-3 d-none" id="humanitiesImportPanel">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div><strong>모두의 인문학 교육 불러오기</strong><div class="small text-muted">선택한 교육의 제목·일시·장소·강사를 ERP 교육으로 만들고 즉시 연동합니다.</div></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="closeHumanitiesImportBtn">닫기</button>
+        </div>
+        <div id="humanitiesImportAlert" class="alert d-none" role="status"></div>
+        <div class="input-group mb-3">
+          <input type="search" class="form-control" id="humanitiesImportSearch" maxlength="80" placeholder="교육명·강사·장소 검색 (비우면 예정 교육 전체)">
+          <button type="button" class="btn btn-outline-primary" id="searchHumanitiesImportBtn">검색</button>
+        </div>
+        <div class="list-group" id="humanitiesImportResults"><div class="text-muted small">검색 버튼을 눌러 교육을 불러오세요.</div></div>
       </div>
       <div class="event-list" id="eventList"></div>
     </section>
@@ -313,13 +338,7 @@
                   <option value="">연결된 수신자 없음</option>
                 </select>
               </div>
-              <div class="col-12">
-                <label class="form-check">
-                  <input class="form-check-input" type="checkbox" id="humanitiesTelegramEnabled" disabled>
-                  <span class="form-check-label">이 교육의 온라인 체크인을 선택한 담당자에게 실시간 Telegram으로 알림</span>
-                </label>
-                <div class="form-text">기본값은 꺼짐입니다. 문자 알림은 모두의 인문학 관리자에서 별도로 켤 수 있습니다.</div>
-              </div>
+              <div class="col-12"><div class="form-text">담당자 이름을 선택하면 그 관리자가 ERP에 연결해 둔 Telegram으로 알림을 보냅니다. 선택하지 않으면 협동조합 알림은 꺼집니다.</div></div>
               </div>
               <div class="d-flex flex-wrap gap-2 mt-3">
               <button type="button" class="btn btn-sm btn-primary" id="saveHumanitiesLinkBtn" disabled>선택 교육과 연동</button>
@@ -335,7 +354,7 @@
               <div class="qr-code-box" id="educationQrCode"><span class="text-muted small text-center px-2">교육을 먼저 저장하면 QR이 생성됩니다.</span></div>
               <div>
                 <div class="fw-bold mb-1" id="educationQrStatus">저장 후 사용할 수 있습니다.</div>
-                <div class="small text-muted mb-2" id="educationQrValidity">교육 시작일 00:00부터 종료 시각까지 출석할 수 있습니다.</div>
+                <div class="small text-muted mb-2" id="educationQrValidity">교육 시작 1시간 전부터 종료 1시간 후까지 출석할 수 있습니다.</div>
                 <div class="small text-break mb-3" id="educationQrLink"></div>
                 <div class="d-flex flex-wrap gap-2">
                   <button type="button" class="btn btn-sm btn-outline-primary d-none" id="copyEducationQrBtn">링크 복사</button>
@@ -354,6 +373,14 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="modal fade" id="educationPrintChoiceModal" tabindex="-1" aria-labelledby="educationPrintChoiceTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title fs-5 fw-bold" id="educationPrintChoiceTitle">QR·출석부 인쇄</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div>
+      <div class="modal-body"><p class="mb-2">QR 안내문만 인쇄할까요, 현재 참가자 출석부도 함께 인쇄할까요?</p><p class="small text-muted mb-0">출석부에는 이름과 가린 전화번호, 현장 서명칸을 표시합니다.</p></div>
+      <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-print-education-choice="qr">QR만 인쇄</button><button type="button" class="btn btn-primary" data-print-education-choice="bundle">QR + 출석부 인쇄</button></div>
+    </div></div>
   </div>
 
   <section class="education-qr-print-sheet" id="educationQrPrintSheet" aria-hidden="true">
@@ -393,6 +420,15 @@
     </footer>
   </section>
 
+  <section class="education-roster-print-sheet" id="educationRosterPrintSheet" aria-hidden="true">
+    <h1 id="educationRosterPrintTitle">교육 출석부</h1>
+    <div class="education-roster-print-meta" id="educationRosterPrintMeta"></div>
+    <table class="education-roster-print-table">
+      <thead><tr><th style="width:10%;">번호</th><th style="width:28%;">이름</th><th style="width:24%;">연락처</th><th>현장 서명·비고</th></tr></thead>
+      <tbody id="educationRosterPrintBody"></tbody>
+    </table>
+  </section>
+
   <div class="image-lightbox" id="participationImageLightbox" role="dialog" aria-modal="true" aria-label="교육 사진 크게 보기" aria-hidden="true">
     <button type="button" class="image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기">&times;</button>
     <img id="participationImageLightboxImage" alt="교육 사진 크게 보기">
@@ -428,6 +464,14 @@
         return false;
       }
     })();
+    const PARTICIPATION_VIEW = (() => {
+      try {
+        return new URLSearchParams(window.location.search || '').get('view') === 'meeting' ? 'meeting' : 'education';
+      } catch (_) {
+        return 'education';
+      }
+    })();
+    const PARTICIPATION_EDUCATION_VIEW = PARTICIPATION_VIEW === 'education';
     const PARTICIPATION_ROUTE_ORIGINS = window.CoopRouteGuard
       ? window.CoopRouteGuard.buildSiteOrigins(window.location)
       : { publicOrigin:window.location.origin };
@@ -436,6 +480,7 @@
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
     let humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
+    let humanitiesImportState = { courses:[], loading:false };
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let pendingGuestLinkId = null;
     let eventModalInstance = null;
@@ -807,7 +852,10 @@
       const meetingAttendedCount = meetingEvents.reduce(function(sum, row) {
         return sum + Math.max(Number(row.attended_count || 0), 0);
       }, 0);
-      document.getElementById('summaryTotal').textContent = events.length.toLocaleString();
+      const visibleEvents = events.filter(function(row) {
+        return PARTICIPATION_EDUCATION_VIEW ? row.event_type === 'EDUCATION' : ['BOARD', 'DELEGATE_ASSEMBLY'].includes(row.event_type);
+      });
+      document.getElementById('summaryTotal').textContent = visibleEvents.length.toLocaleString();
       document.getElementById('summaryBoard').textContent = countType('BOARD').toLocaleString();
       document.getElementById('summaryDelegate').textContent = countType('DELEGATE_ASSEMBLY').toLocaleString();
       document.getElementById('summaryEducation').textContent = countType('EDUCATION').toLocaleString();
@@ -827,12 +875,14 @@
       const type = document.getElementById('eventTypeFilter').value;
       const query = String(document.getElementById('eventSearch').value || '').trim().toLowerCase();
       const rows = (dashboardData.events || []).filter(function(row) {
+        if (PARTICIPATION_EDUCATION_VIEW && row.event_type !== 'EDUCATION') return false;
+        if (!PARTICIPATION_EDUCATION_VIEW && !['BOARD', 'DELEGATE_ASSEMBLY'].includes(row.event_type)) return false;
         if (type !== 'ALL' && row.event_type !== type) return false;
         if (!query) return true;
         return `${row.title || ''} ${row.location || ''} ${eventTypeLabel(row.event_type)} ${row.attendee_search_text || ''}`.toLowerCase().includes(query);
       });
       if (rows.length === 0) {
-        list.innerHTML = '<div class="empty-state">등록된 회의·교육이 없습니다.</div>';
+        list.innerHTML = `<div class="empty-state">등록된 ${PARTICIPATION_EDUCATION_VIEW ? '교육' : '회의'}이 없습니다.</div>`;
         return;
       }
       list.innerHTML = rows.map(function(row) {
@@ -887,6 +937,77 @@
       return result;
     } // End of callHumanitiesIntegration
 
+    function renderHumanitiesImportResults() {
+      const target = document.getElementById('humanitiesImportResults');
+      if (!target) return;
+      if (humanitiesImportState.loading) {
+        target.innerHTML = '<div class="text-muted small">모두의 인문학 교육을 불러오는 중입니다.</div>';
+        return;
+      }
+      const courses = humanitiesImportState.courses || [];
+      if (!courses.length) {
+        target.innerHTML = '<div class="text-muted small">조건에 맞는 예정 교육이 없습니다.</div>';
+        return;
+      }
+      target.innerHTML = courses.map(function(course) {
+        const venue = course.venue || {};
+        const instructor = course.instructor || {};
+        return `<div class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div><strong>${escapeHtml(course.title || '교육')}</strong><div class="small text-muted">${escapeHtml(formatKstDateTime(course.starts_at))} · ${escapeHtml(venue.name || '장소 미정')} · ${escapeHtml(instructor.name || '강사 미정')}</div></div>
+          <button type="button" class="btn btn-sm btn-primary" data-import-humanities-course="${escapeHtml(course.id)}">ERP로 불러오기</button>
+        </div>`;
+      }).join('');
+      target.querySelectorAll('[data-import-humanities-course]').forEach(function(button) {
+        button.addEventListener('click', function() { importHumanitiesCourse(button.dataset.importHumanitiesCourse, button); });
+      });
+    } // End of renderHumanitiesImportResults
+
+    async function searchHumanitiesImport() {
+      humanitiesImportState.loading = true;
+      showAlert('humanitiesImportAlert', '');
+      renderHumanitiesImportResults();
+      try {
+        const searchQuery = String(document.getElementById('humanitiesImportSearch').value || '').trim();
+        const result = await callHumanitiesIntegration('admin_course_search', { search_query:searchQuery });
+        humanitiesImportState.courses = Array.isArray(result.courses) ? result.courses : [];
+        showAlert('humanitiesImportAlert', `불러올 수 있는 교육 ${humanitiesImportState.courses.length.toLocaleString()}개를 찾았습니다.`, humanitiesImportState.courses.length ? 'success' : 'warning');
+      } catch (error) {
+        humanitiesImportState.courses = [];
+        showAlert('humanitiesImportAlert', error?.message || '교육 목록을 불러오지 못했습니다.', 'danger');
+      } finally {
+        humanitiesImportState.loading = false;
+        renderHumanitiesImportResults();
+      }
+    } // End of searchHumanitiesImport
+
+    async function importHumanitiesCourse(courseId, button) {
+      if (!courseId || humanitiesImportState.loading) return;
+      humanitiesImportState.loading = true;
+      button.disabled = true;
+      button.textContent = '불러오는 중...';
+      showAlert('humanitiesImportAlert', '');
+      try {
+        const result = await callHumanitiesIntegration('admin_import_course', { humanities_course_id:courseId });
+        if (!result.event_id) throw new Error('생성된 ERP 교육 번호를 확인하지 못했습니다.');
+        await loadDashboard(false);
+        document.getElementById('humanitiesImportPanel').classList.add('d-none');
+        await openEditEvent(result.event_id);
+        showAlert('formAlert', '모두의 인문학 교육을 ERP 교육으로 만들고 연동했습니다. 알림 담당자와 QR을 확인해 주세요.', 'success');
+      } catch (error) {
+        showAlert('humanitiesImportAlert', error?.message || '교육을 ERP로 불러오지 못했습니다.', 'danger');
+      } finally {
+        humanitiesImportState.loading = false;
+        button.disabled = false;
+        button.textContent = 'ERP로 불러오기';
+      }
+    } // End of importHumanitiesCourse
+
+    function openHumanitiesImport() {
+      document.getElementById('humanitiesImportPanel').classList.remove('d-none');
+      document.getElementById('humanitiesImportSearch').focus();
+      if (!humanitiesImportState.courses.length) searchHumanitiesImport();
+    } // End of openHumanitiesImport
+
     function renderHumanitiesLink() {
       const section = document.getElementById('humanitiesLinkSection');
       const isEducation = document.getElementById('eventType').value === 'EDUCATION';
@@ -896,7 +1017,6 @@
       const link = humanitiesLinkState.link;
       const select = document.getElementById('humanitiesCourseSelect');
       const recipient = document.getElementById('humanitiesTelegramRecipient');
-      const enabled = document.getElementById('humanitiesTelegramEnabled');
       const badge = document.getElementById('humanitiesLinkBadge');
       const openButton = document.getElementById('openHumanitiesLinkBtn');
       const controls = document.getElementById('humanitiesLinkControls');
@@ -922,10 +1042,9 @@
         const selected = String(link?.telegram_recipient_emp_id || '') === String(item.emp_id || '');
         return `<option value="${escapeHtml(item.emp_id)}" ${selected ? 'selected' : ''}>${escapeHtml(item.emp_name || item.emp_id)}${item.position ? ` · ${escapeHtml(item.position)}` : ''}</option>`;
       }).join('');
-      enabled.checked = link?.telegram_alert_enabled === true;
       badge.textContent = link?.status === 'ACTIVE' ? '연동됨' : humanitiesLinkState.loaded ? '미연동' : '확인 전';
       badge.className = `badge ${link?.status === 'ACTIVE' ? 'text-bg-success' : 'text-bg-light border'}`;
-      [select, recipient, enabled, saveButton, refreshButton, searchButton].forEach(function(element) { element.disabled = !saved || humanitiesLinkState.loading; });
+      [select, recipient, saveButton, refreshButton, searchButton].forEach(function(element) { element.disabled = !saved || humanitiesLinkState.loading; });
       unlinkButton.classList.toggle('d-none', link?.status !== 'ACTIVE');
       unlinkButton.disabled = humanitiesLinkState.loading;
     } // End of renderHumanitiesLink
@@ -972,16 +1091,13 @@
 
     async function saveHumanitiesLink() {
       const courseId = document.getElementById('humanitiesCourseSelect').value;
-      const telegramEnabled = document.getElementById('humanitiesTelegramEnabled').checked;
       const telegramRecipient = document.getElementById('humanitiesTelegramRecipient').value;
       if (!courseId) return showAlert('humanitiesLinkAlert', '연결할 모두의 인문학 교육을 선택해 주세요.', 'warning');
-      if (telegramEnabled && !telegramRecipient) return showAlert('humanitiesLinkAlert', 'Telegram 알림을 받을 담당자를 선택해 주세요.', 'warning');
       humanitiesLinkState.loading = true;
       renderHumanitiesLink();
       try {
         const result = await callHumanitiesIntegration('admin_save', {
           humanities_course_id:courseId,
-          telegram_alert_enabled:telegramEnabled,
           telegram_recipient_emp_id:telegramRecipient || null
         });
         humanitiesLinkState.link = result.link || null;
@@ -1001,7 +1117,6 @@
       try {
         await callHumanitiesIntegration('admin_unlink');
         humanitiesLinkState.link = null;
-        document.getElementById('humanitiesTelegramEnabled').checked = false;
         showAlert('humanitiesLinkAlert', '연동을 해제했습니다. 기존 참가자 기록은 유지됩니다.', 'success');
       } catch (error) {
         showAlert('humanitiesLinkAlert', error?.message || '연동을 해제하지 못했습니다.', 'danger');
@@ -1014,11 +1129,10 @@
     function educationQrWindowText() {
       const startsAt = localInputToIso(document.getElementById('eventStartsAt').value);
       const endsAt = localInputToIso(document.getElementById('eventEndsAt').value);
-      if (!startsAt || !endsAt) return '교육 시작일 00:00부터 종료 시각까지 출석할 수 있습니다.';
-      const startDate = new Intl.DateTimeFormat('ko-KR', {
-        timeZone:KST_TIME_ZONE, year:'numeric', month:'2-digit', day:'2-digit'
-      }).format(new Date(startsAt));
-      return `${startDate} 00:00부터 ${formatKstDateTime(endsAt)}까지 출석할 수 있습니다.`;
+      if (!startsAt || !endsAt) return '교육 시작 1시간 전부터 종료 1시간 후까지 출석할 수 있습니다.';
+      const openAt = new Date(new Date(startsAt).getTime() - 60 * 60_000).toISOString();
+      const closeAt = new Date(new Date(endsAt).getTime() + 60 * 60_000).toISOString();
+      return `${formatKstDateTime(openAt)}부터 ${formatKstDateTime(closeAt)}까지 출석할 수 있습니다.`;
     } // End of educationQrWindowText
 
     function renderEducationQr() {
@@ -1048,10 +1162,9 @@
       const endValue = localInputToIso(document.getElementById('eventEndsAt').value);
       const startValue = localInputToIso(document.getElementById('eventStartsAt').value);
       const now = Date.now();
-      const kstStartDate = startValue ? toKstLocalInput(startValue).slice(0, 10) : '';
-      const openAt = kstStartDate ? new Date(`${kstStartDate}T00:00:00+09:00`).getTime() : NaN;
-      const endAt = endValue ? new Date(endValue).getTime() : NaN;
-      status.textContent = Number.isFinite(endAt) && now > endAt
+      const openAt = startValue ? new Date(startValue).getTime() - 60 * 60_000 : NaN;
+      const closeAt = endValue ? new Date(endValue).getTime() + 60 * 60_000 : NaN;
+      status.textContent = Number.isFinite(closeAt) && now > closeAt
         ? '종료된 QR입니다.'
         : (Number.isFinite(openAt) && now < openAt ? '아직 열리지 않은 QR입니다.' : '현재 사용할 수 있는 QR입니다.');
       linkElement.textContent = link;
@@ -1125,7 +1238,31 @@
       row.classList.toggle('d-none', !safeValue);
     } // End of setEducationQrPrintOptionalRow
 
-    function printEducationQr() {
+    function openEducationPrintChoice() {
+      const link = educationQrLink(formState.qrToken);
+      if (document.getElementById('eventType').value !== 'EDUCATION' || !formState.eventId || !link) {
+        showAlert('formAlert', '저장된 교육의 출석 QR만 인쇄할 수 있습니다.', 'warning');
+        return;
+      }
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('educationPrintChoiceModal')).show();
+    } // End of openEducationPrintChoice
+
+    function renderEducationPrintRoster() {
+      const members = (formState.attendees || []).map(function(row) {
+        return { name:row.actual_attendee_name || row.name || '참가자', phone:row.member_number ? `조합원 ${row.member_number}` : '' };
+      });
+      const guests = (formState.guestAttendees || []).map(function(row) {
+        return { name:row.display_name || '비조합원 참가자', phone:row.phone_display || '' };
+      });
+      const rows = members.concat(guests);
+      document.getElementById('educationRosterPrintTitle').textContent = `${String(document.getElementById('eventTitle').value || '교육').trim()} 출석부`;
+      document.getElementById('educationRosterPrintMeta').textContent = `${educationQrPrintScheduleText()} · ${String(document.getElementById('eventLocation').value || '-').trim()} · ${participationBranding.companyName || '협동조합'}`;
+      document.getElementById('educationRosterPrintBody').innerHTML = (rows.length ? rows : [{ name:'', phone:'' }]).map(function(row, index) {
+        return `<tr><td>${index + 1}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.phone)}</td><td class="sign-cell"></td></tr>`;
+      }).join('');
+    } // End of renderEducationPrintRoster
+
+    function printEducationQr(includeRoster = false) {
       const link = educationQrLink(formState.qrToken);
       if (document.getElementById('eventType').value !== 'EDUCATION' || !formState.eventId || !link) {
         showAlert('formAlert', '저장된 교육의 출석 QR만 인쇄할 수 있습니다.', 'warning');
@@ -1159,6 +1296,9 @@
         correctLevel:window.QRCode.CorrectLevel.H
       });
       printSheet.setAttribute('aria-hidden', 'false');
+      document.body.classList.toggle('print-with-roster', includeRoster === true);
+      document.getElementById('educationRosterPrintSheet').setAttribute('aria-hidden', includeRoster ? 'false' : 'true');
+      if (includeRoster) renderEducationPrintRoster();
       window.requestAnimationFrame(function() {
         window.print();
       });
@@ -1195,7 +1335,7 @@
       document.getElementById('memberSearchObserverBtn').classList.toggle('d-none', education);
       document.getElementById('observerHelp').classList.toggle('d-none', education);
       document.getElementById('endRequiredMark').classList.toggle('d-none', !education);
-      document.getElementById('eventType').disabled = !!formState.eventId;
+      document.getElementById('eventType').disabled = !!formState.eventId || PARTICIPATION_EDUCATION_VIEW;
       renderSourceOptions(type);
       renderAttendees();
       renderEducationQr();
@@ -1222,8 +1362,8 @@
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
       humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
       pendingGuestLinkId = null;
-      document.getElementById('eventModalTitle').textContent = '행사 등록';
-      document.getElementById('eventType').value = 'BOARD';
+      document.getElementById('eventModalTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '신규 교육 입력' : '회의 등록';
+      document.getElementById('eventType').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'BOARD';
       document.getElementById('eventTitle').value = '';
       document.getElementById('eventStartsAt').value = '';
       document.getElementById('eventEndsAt').value = '';
@@ -1240,7 +1380,7 @@
       document.getElementById('deleteEventBtn').classList.add('d-none');
       syncEventDateRange();
       showAlert('formAlert', '');
-      setEventTypeUi('BOARD');
+      setEventTypeUi(PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'BOARD');
     } // End of resetEventForm
 
     function openNewEvent() {
@@ -1921,8 +2061,38 @@
 
     async function initParticipationPage() {
       document.body.classList.toggle('participation-embedded', PARTICIPATION_EMBEDDED);
+      document.getElementById('participationPageTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '교육 관리' : '회의 출석 관리';
+      document.getElementById('participationPageSubtitle').textContent = PARTICIPATION_EDUCATION_VIEW
+        ? '교육 신규 등록·모두의 인문학 불러오기, QR 체크인·알림과 비조합원 확인을 한 곳에서 관리합니다.'
+        : '이사회와 대의원 총회 참석·서명 현황을 문서관리 흐름에서 관리합니다.';
+      document.getElementById('participationPageGuide').innerHTML = PARTICIPATION_EDUCATION_VIEW
+        ? '모두의 인문학 교육은 한 번 불러오면 ERP 교육 생성과 연동이 함께 끝납니다. 조합원의 개인별 참여 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.'
+        : '회의 기본 자료는 문서관리에서 준비하고, 이 화면에서는 이사회·대의원 총회 출석과 서명을 관리합니다. 개인별 이력은 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 읽기 전용으로 확인합니다.';
+      const typeFilter = document.getElementById('eventTypeFilter');
+      const eventTypeSelect = document.getElementById('eventType');
+      if (PARTICIPATION_EDUCATION_VIEW) {
+        typeFilter.innerHTML = '<option value="EDUCATION">교육</option>';
+        typeFilter.classList.add('d-none');
+        eventTypeSelect.innerHTML = '<option value="EDUCATION">교육</option>';
+      } else {
+        typeFilter.innerHTML = '<option value="ALL">전체 회의</option><option value="BOARD">이사회</option><option value="DELEGATE_ASSEMBLY">대의원 총회</option>';
+        eventTypeSelect.innerHTML = '<option value="BOARD">이사회</option><option value="DELEGATE_ASSEMBLY">대의원 총회</option>';
+      }
+      document.getElementById('eventSearch').placeholder = PARTICIPATION_EDUCATION_VIEW ? '교육명·장소·외부 참가자 검색' : '회의명·장소 검색';
+      document.getElementById('newEventBtn').textContent = PARTICIPATION_EDUCATION_VIEW ? '신규 교육 입력' : '회의 등록';
+      document.getElementById('importHumanitiesCourseBtn').classList.toggle('d-none', !PARTICIPATION_EDUCATION_VIEW);
+      document.getElementById('summaryEducationCard').classList.toggle('d-none', !PARTICIPATION_EDUCATION_VIEW);
+      document.getElementById('summaryBoardCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
+      document.getElementById('summaryDelegateCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
+      document.getElementById('summaryMeetingRateCard').classList.toggle('d-none', PARTICIPATION_EDUCATION_VIEW);
       eventModalInstance = bootstrap.Modal.getOrCreateInstance(document.getElementById('eventModal'));
       document.getElementById('newEventBtn').addEventListener('click', openNewEvent);
+      document.getElementById('importHumanitiesCourseBtn').addEventListener('click', openHumanitiesImport);
+      document.getElementById('closeHumanitiesImportBtn').addEventListener('click', function() { document.getElementById('humanitiesImportPanel').classList.add('d-none'); });
+      document.getElementById('searchHumanitiesImportBtn').addEventListener('click', searchHumanitiesImport);
+      document.getElementById('humanitiesImportSearch').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') { event.preventDefault(); searchHumanitiesImport(); }
+      });
       document.getElementById('refreshBtn').addEventListener('click', function() { loadDashboard(true); });
       document.getElementById('eventTypeFilter').addEventListener('change', renderEvents);
       document.getElementById('eventSearch').addEventListener('input', renderEvents);
@@ -1952,7 +2122,13 @@
       document.getElementById('photoFiles').addEventListener('change', renderNewPhotoPreviews);
       document.getElementById('copyEducationQrBtn').addEventListener('click', copyEducationQrLink);
       document.getElementById('downloadEducationQrBtn').addEventListener('click', downloadEducationQr);
-      document.getElementById('printEducationQrBtn').addEventListener('click', printEducationQr);
+      document.getElementById('printEducationQrBtn').addEventListener('click', openEducationPrintChoice);
+      document.querySelectorAll('[data-print-education-choice]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          bootstrap.Modal.getInstance(document.getElementById('educationPrintChoiceModal'))?.hide();
+          printEducationQr(button.dataset.printEducationChoice === 'bundle');
+        });
+      });
       document.getElementById('rotateEducationQrBtn').addEventListener('click', rotateEducationQr);
       document.getElementById('openHumanitiesLinkBtn').addEventListener('click', openHumanitiesLinkSearch);
       document.getElementById('searchHumanitiesCourseBtn').addEventListener('click', function() { loadHumanitiesLink(true); });
@@ -1975,6 +2151,8 @@
       }, true);
       window.addEventListener('afterprint', function() {
         document.getElementById('educationQrPrintSheet').setAttribute('aria-hidden', 'true');
+        document.getElementById('educationRosterPrintSheet').setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('print-with-roster');
       });
 
       const { data:{ session } } = await _supabase.auth.getSession();
@@ -1983,14 +2161,12 @@
         return;
       }
       const guard = await window.ErpRuntimeGuard.enforce(_supabase, {
-        moduleKeysAny:['member_admin','minutes'],
-        moduleLabel:'회의·교육 참여 관리',
+        moduleKeysAny:[PARTICIPATION_EDUCATION_VIEW ? 'member_admin' : 'minutes'],
+        moduleLabel:PARTICIPATION_EDUCATION_VIEW ? '교육 관리' : '회의 출석 관리',
         redirectUrl:'index.html'
       });
       if (!guard.ok) return;
-      if (new URLSearchParams(window.location.search || '').get('view') === 'education') {
-        document.getElementById('eventTypeFilter').value = 'EDUCATION';
-      }
+      document.getElementById('eventTypeFilter').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL';
       await loadDashboard(true);
     } // End of initParticipationPage
 
