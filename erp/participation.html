@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.2 | Change: 2026-08-04 - Clear attendee search after adding a member. -->
+<!-- Version: v1.2.3 | Change: 2026-08-04 - Show QR check-in source and time in the admin attendee list. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.2 | participation.html');</script>
+  <script>console.log('[Version] v1.2.3 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -976,6 +976,14 @@
             ? '<span class="signature-chip signature-done">서명 완료</span>'
             : '<span class="signature-chip signature-wait">미서명</span>';
         }
+        const isQrCheckIn = type === 'EDUCATION'
+          && String(row.check_in_method || '').trim().toUpperCase() === 'QR';
+        const qrCheckInBadge = isQrCheckIn
+          ? ' <span class="badge rounded-pill bg-success-subtle text-success-emphasis border border-success-subtle">QR 체크인</span>'
+          : '';
+        const qrCheckInTimeHtml = isQrCheckIn && row.checked_in_at
+          ? `<br><span class="text-success">체크인 ${escapeHtml(formatKstDateTime(row.checked_in_at))}</span>`
+          : '';
         const actualAttendeeHtml = String(row.member_type || '').includes('단체')
           ? `<input type="text" class="form-control form-control-sm actual-attendee" data-actual-attendee value="${escapeHtml(row.actual_attendee_name || '')}" placeholder="단체 실제 참석자명">`
           : '<span class="text-muted small text-center">-</span>';
@@ -989,7 +997,7 @@
             </select>`;
         return `
           <div class="attendee-row" data-attendee-index="${index}">
-            <div class="attendee-name">${escapeHtml(row.name)}${type !== 'EDUCATION' && row.is_target === false ? ' <span class="badge text-bg-light">배석자</span>' : ''}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}<br>${type === 'EDUCATION' ? '' : signatureHtml}</div></div>
+            <div class="attendee-name">${escapeHtml(row.name)}${type !== 'EDUCATION' && row.is_target === false ? ' <span class="badge text-bg-light">배석자</span>' : ''}${qrCheckInBadge}<div class="attendee-meta">${escapeHtml(row.role || row.member_type || '')}${row.member_number ? ` · ${escapeHtml(row.member_number)}` : ''}${qrCheckInTimeHtml}${type === 'EDUCATION' ? '' : `<br>${signatureHtml}`}</div></div>
             ${statusHtml}
             ${actualAttendeeHtml}
             <button type="button" class="btn btn-sm btn-outline-danger" data-remove-attendee>제외</button>
