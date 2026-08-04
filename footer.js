@@ -97,8 +97,7 @@ document.addEventListener("DOMContentLoaded", function() {
             <div style="color:#ddd; font-size:14px; line-height:1.8;">
               <i class="bi bi-geo-alt me-2 text-success"></i> 경기 용인시 처인구 남사읍 상동로 28<br>
               <i class="bi bi-envelope me-2 text-success"></i> yonginsolar@gmail.com<br>
-              <i class="bi bi-phone me-2 text-success"></i> 010-2513-5736 (사무국)<br>
-              <i class="bi bi-bank me-2 text-success"></i> 신협 131-022-855516 용인모두의햇빛협동조합
+              <i class="bi bi-phone me-2 text-success"></i> 010-2513-5736 (사무국)
             </div>
           </div>
 

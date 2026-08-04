@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.5 | Change: 2026-08-04 - Show the current-year meeting attendance rate. -->
+<!-- Version: v1.2.6 | Change: 2026-08-04 - Add an A4 education attendance QR print layout. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.5 | participation.html');</script>
+  <script>console.log('[Version] v1.2.6 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -75,6 +75,7 @@
     .qr-panel { display:grid; grid-template-columns:auto minmax(0,1fr); gap:18px; align-items:center; }
     .qr-code-box { width:190px; min-height:190px; display:flex; align-items:center; justify-content:center; padding:5px; border:1px solid var(--line); border-radius:12px; background:#fff; }
     .qr-code-box canvas, .qr-code-box img { max-width:180px; height:auto !important; }
+    .education-qr-print-sheet { display:none; }
     .image-lightbox { position:fixed; inset:0; z-index:2100; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(15,23,42,.9); }
     .image-lightbox.show { display:flex; }
     .image-lightbox img { max-width:min(1100px,94vw); max-height:88vh; object-fit:contain; border-radius:10px; background:#fff; }
@@ -110,6 +111,41 @@
       .photo-thumb { flex-basis:112px; width:112px; height:78px; }
       .modal-dialog { margin:.5rem; }
       .modal-body { max-height:76vh; }
+    }
+    @media print {
+      @page { size:A4 portrait; margin:0; }
+      html, body { width:210mm; min-height:297mm; background:#fff !important; }
+      body > * { display:none !important; }
+      body > .education-qr-print-sheet {
+        display:flex !important;
+        width:210mm;
+        min-height:297mm;
+        box-sizing:border-box;
+        padding:14mm 16mm 12mm;
+        flex-direction:column;
+        color:#0f172a;
+        background:#fff;
+        font-family:'Segoe UI','Malgun Gothic',sans-serif;
+        -webkit-print-color-adjust:exact;
+        print-color-adjust:exact;
+      }
+      .education-qr-print-head { text-align:center; border-bottom:1.2mm solid #15803d; padding-bottom:5mm; }
+      .education-qr-print-kicker { margin:0 0 2mm; color:#15803d; font-size:11pt; font-weight:800; letter-spacing:.08em; }
+      .education-qr-print-title { margin:0; font-size:25pt; line-height:1.25; font-weight:850; word-break:keep-all; overflow-wrap:anywhere; }
+      .education-qr-print-meta { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3mm 7mm; margin-top:7mm; }
+      .education-qr-print-meta-row { display:grid; grid-template-columns:19mm minmax(0,1fr); gap:2mm; align-items:start; font-size:11pt; line-height:1.45; }
+      .education-qr-print-meta-label { color:#475569; font-weight:800; }
+      .education-qr-print-meta-value { font-weight:650; word-break:keep-all; overflow-wrap:anywhere; }
+      .education-qr-print-content { grid-column:1 / -1; }
+      .education-qr-print-main { display:flex; flex:1 1 auto; min-height:0; flex-direction:column; align-items:center; justify-content:center; padding:6mm 0 4mm; }
+      .education-qr-print-code { width:116mm; height:116mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; padding:4mm; border:1.2mm solid #0f172a; background:#fff; }
+      .education-qr-print-code canvas, .education-qr-print-code img { width:108mm !important; height:108mm !important; max-width:none !important; }
+      .education-qr-print-guide { margin:5mm 0 1.5mm; text-align:center; font-size:15pt; line-height:1.4; font-weight:850; }
+      .education-qr-print-validity { margin:0; text-align:center; color:#475569; font-size:10.5pt; line-height:1.45; }
+      .education-qr-print-foot { display:flex; align-items:center; justify-content:center; gap:4mm; min-height:18mm; padding-top:4mm; border-top:.3mm solid #cbd5e1; }
+      .education-qr-print-logo { display:block; max-width:52mm; max-height:14mm; object-fit:contain; }
+      .education-qr-print-brand { font-size:13pt; font-weight:850; word-break:keep-all; }
+      .education-qr-print-brand-sub { margin-top:1mm; color:#64748b; font-size:9pt; font-weight:600; }
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.0">
@@ -259,6 +295,7 @@
                 <div class="d-flex flex-wrap gap-2">
                   <button type="button" class="btn btn-sm btn-outline-primary d-none" id="copyEducationQrBtn">링크 복사</button>
                   <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="downloadEducationQrBtn">QR 이미지 저장</button>
+                  <button type="button" class="btn btn-sm btn-outline-success d-none" id="printEducationQrBtn">QR 안내문 인쇄</button>
                   <button type="button" class="btn btn-sm btn-outline-danger d-none" id="rotateEducationQrBtn">새 QR 만들기</button>
                 </div>
               </div>
@@ -273,6 +310,43 @@
       </div>
     </div>
   </div>
+
+  <section class="education-qr-print-sheet" id="educationQrPrintSheet" aria-hidden="true">
+    <header class="education-qr-print-head">
+      <p class="education-qr-print-kicker">교육 출석 QR</p>
+      <h1 class="education-qr-print-title" id="educationQrPrintTitle">교육</h1>
+    </header>
+    <div class="education-qr-print-meta">
+      <div class="education-qr-print-meta-row">
+        <span class="education-qr-print-meta-label">일시</span>
+        <span class="education-qr-print-meta-value" id="educationQrPrintSchedule">-</span>
+      </div>
+      <div class="education-qr-print-meta-row">
+        <span class="education-qr-print-meta-label">장소</span>
+        <span class="education-qr-print-meta-value" id="educationQrPrintLocation">-</span>
+      </div>
+      <div class="education-qr-print-meta-row d-none" id="educationQrPrintInstructorRow">
+        <span class="education-qr-print-meta-label">강사</span>
+        <span class="education-qr-print-meta-value" id="educationQrPrintInstructor"></span>
+      </div>
+      <div class="education-qr-print-meta-row education-qr-print-content d-none" id="educationQrPrintContentRow">
+        <span class="education-qr-print-meta-label">교육 내용</span>
+        <span class="education-qr-print-meta-value" id="educationQrPrintContent"></span>
+      </div>
+    </div>
+    <div class="education-qr-print-main">
+      <div class="education-qr-print-code" id="educationQrPrintCode" aria-label="교육 출석 QR 코드"></div>
+      <p class="education-qr-print-guide">휴대전화 카메라로 QR을 찍어 출석해 주세요.</p>
+      <p class="education-qr-print-validity" id="educationQrPrintValidity"></p>
+    </div>
+    <footer class="education-qr-print-foot">
+      <img class="education-qr-print-logo d-none" id="educationQrPrintLogo" alt="조합 로고">
+      <div>
+        <div class="education-qr-print-brand" id="educationQrPrintBrand">협동조합</div>
+        <div class="education-qr-print-brand-sub">이 QR은 위 교육의 출석 확인에만 사용됩니다.</div>
+      </div>
+    </footer>
+  </section>
 
   <div class="image-lightbox" id="participationImageLightbox" role="dialog" aria-modal="true" aria-label="교육 사진 크게 보기" aria-hidden="true">
     <button type="button" class="image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기">&times;</button>
@@ -314,6 +388,7 @@
 
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
+    let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let pendingGuestLinkId = null;
     let eventModalInstance = null;
     let lightboxReturnFocus = null;
@@ -328,6 +403,71 @@
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
     } // End of escapeHtml
+
+    function resolveParticipationLogoUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          const parsed = new URL(raw);
+          return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+        } catch (_) {
+          return '';
+        }
+      }
+      const path = raw.replace(/^\/+/, '');
+      if (!path || path.includes('..')) return '';
+      const { data } = _supabase.storage.from('assets').getPublicUrl(path);
+      return String(data?.publicUrl || '').trim();
+    } // End of resolveParticipationLogoUrl
+
+    function syncParticipationPrintBranding() {
+      const brand = document.getElementById('educationQrPrintBrand');
+      const logo = document.getElementById('educationQrPrintLogo');
+      if (brand) brand.textContent = participationBranding.companyName || '협동조합';
+      if (!logo) return;
+      const logoUrl = String(participationBranding.logoUrl || '').trim();
+      if (!logoUrl) {
+        logo.classList.add('d-none');
+        logo.removeAttribute('src');
+        return;
+      }
+      logo.onload = function() { logo.classList.remove('d-none'); };
+      logo.onerror = function() { logo.classList.add('d-none'); };
+      if (logo.src !== logoUrl) {
+        logo.classList.add('d-none');
+        logo.src = logoUrl;
+      } else if (logo.complete && logo.naturalWidth > 0) {
+        logo.classList.remove('d-none');
+      }
+    } // End of syncParticipationPrintBranding
+
+    async function loadParticipationBranding(coopId) {
+      const safeCoopId = String(coopId || '').trim();
+      if (!safeCoopId) return;
+      if (participationBranding.loaded && participationBranding.coopId === safeCoopId) return;
+      participationBranding = { coopId:safeCoopId, companyName:'협동조합', logoUrl:'', loaded:false };
+      try {
+        const { data, error } = await _supabase
+          .from('ref_company_info')
+          .select('key,value')
+          .eq('coop_id', safeCoopId)
+          .in('key', ['company_name', 'orgName', 'logo_horizontal_url']);
+        if (error) throw error;
+        const info = (data || []).reduce(function(acc, row) {
+          const key = String(row?.key || '').trim();
+          if (key) acc[key] = String(row?.value || '').trim();
+          return acc;
+        }, {});
+        participationBranding.companyName = info.company_name || info.orgName || '협동조합';
+        participationBranding.logoUrl = resolveParticipationLogoUrl(info.logo_horizontal_url);
+      } catch (error) {
+        console.warn('[participation-branding] 조합 인쇄 정보를 불러오지 못했습니다.', error?.message || error);
+      } finally {
+        participationBranding.loaded = true;
+        syncParticipationPrintBranding();
+      }
+    } // End of loadParticipationBranding
 
     function showLoading(show, message) {
       const cover = document.getElementById('loadingCover');
@@ -703,7 +843,7 @@
       const status = document.getElementById('educationQrStatus');
       const validity = document.getElementById('educationQrValidity');
       const linkElement = document.getElementById('educationQrLink');
-      const buttons = ['copyEducationQrBtn', 'downloadEducationQrBtn', 'rotateEducationQrBtn'];
+      const buttons = ['copyEducationQrBtn', 'downloadEducationQrBtn', 'printEducationQrBtn', 'rotateEducationQrBtn'];
       validity.textContent = educationQrWindowText();
       codeBox.innerHTML = '';
 
@@ -766,6 +906,74 @@
       link.download = `education_qr_${formState.eventId}.png`;
       link.click();
     } // End of downloadEducationQr
+
+    function educationQrPrintScheduleText() {
+      const startsAt = localInputToIso(document.getElementById('eventStartsAt').value);
+      const endsAt = localInputToIso(document.getElementById('eventEndsAt').value);
+      if (!startsAt) return '-';
+      if (!endsAt) return formatKstDateTime(startsAt);
+      const startLocal = toKstLocalInput(startsAt);
+      const endLocal = toKstLocalInput(endsAt);
+      const endText = startLocal.slice(0, 10) === endLocal.slice(0, 10)
+        ? new Intl.DateTimeFormat('ko-KR', {
+            timeZone:KST_TIME_ZONE, hour:'2-digit', minute:'2-digit', hour12:false
+          }).format(new Date(endsAt))
+        : formatKstDateTime(endsAt);
+      return `${formatKstDateTime(startsAt)} ~ ${endText}`;
+    } // End of educationQrPrintScheduleText
+
+    function summarizeEducationQrPrintContent(value, maxLength = 180) {
+      const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+      if (normalized.length <= maxLength) return normalized;
+      return `${normalized.slice(0, maxLength).trim()}…`;
+    } // End of summarizeEducationQrPrintContent
+
+    function setEducationQrPrintOptionalRow(rowId, valueId, value) {
+      const row = document.getElementById(rowId);
+      const target = document.getElementById(valueId);
+      const safeValue = String(value || '').trim();
+      target.textContent = safeValue;
+      row.classList.toggle('d-none', !safeValue);
+    } // End of setEducationQrPrintOptionalRow
+
+    function printEducationQr() {
+      const link = educationQrLink(formState.qrToken);
+      if (document.getElementById('eventType').value !== 'EDUCATION' || !formState.eventId || !link) {
+        showAlert('formAlert', '저장된 교육의 출석 QR만 인쇄할 수 있습니다.', 'warning');
+        return;
+      }
+      if (typeof window.QRCode !== 'function') {
+        showAlert('formAlert', 'QR 이미지를 만들지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.', 'warning');
+        return;
+      }
+
+      const printSheet = document.getElementById('educationQrPrintSheet');
+      const printCode = document.getElementById('educationQrPrintCode');
+      document.getElementById('educationQrPrintTitle').textContent = String(document.getElementById('eventTitle').value || '').trim() || '교육';
+      document.getElementById('educationQrPrintSchedule').textContent = educationQrPrintScheduleText();
+      document.getElementById('educationQrPrintLocation').textContent = String(document.getElementById('eventLocation').value || '').trim() || '-';
+      document.getElementById('educationQrPrintValidity').textContent = educationQrWindowText();
+      syncParticipationPrintBranding();
+      setEducationQrPrintOptionalRow('educationQrPrintInstructorRow', 'educationQrPrintInstructor', document.getElementById('eventInstructor').value);
+      setEducationQrPrintOptionalRow(
+        'educationQrPrintContentRow',
+        'educationQrPrintContent',
+        summarizeEducationQrPrintContent(document.getElementById('educationContent').value)
+      );
+      printCode.innerHTML = '';
+      new window.QRCode(printCode, {
+        text:link,
+        width:560,
+        height:560,
+        colorDark:'#0f172a',
+        colorLight:'#ffffff',
+        correctLevel:window.QRCode.CorrectLevel.H
+      });
+      printSheet.setAttribute('aria-hidden', 'false');
+      window.requestAnimationFrame(function() {
+        window.print();
+      });
+    } // End of printEducationQr
 
     async function rotateEducationQr() {
       if (!formState.eventId || formState.saving) return;
@@ -1506,6 +1714,7 @@
           sources:Array.isArray(data?.sources) ? data.sources : [],
           officials:Array.isArray(data?.officials) ? data.officials : []
         };
+        await loadParticipationBranding(dashboardData.coop_id);
         renderSummary();
         renderEvents();
       } catch (error) {
@@ -1549,6 +1758,7 @@
       document.getElementById('photoFiles').addEventListener('change', renderNewPhotoPreviews);
       document.getElementById('copyEducationQrBtn').addEventListener('click', copyEducationQrLink);
       document.getElementById('downloadEducationQrBtn').addEventListener('click', downloadEducationQr);
+      document.getElementById('printEducationQrBtn').addEventListener('click', printEducationQr);
       document.getElementById('rotateEducationQrBtn').addEventListener('click', rotateEducationQr);
       document.getElementById('participationImageLightboxClose').addEventListener('click', closeImageLightbox);
       document.getElementById('participationImageLightbox').addEventListener('click', function(event) {
@@ -1561,6 +1771,9 @@
           closeImageLightbox();
         }
       }, true);
+      window.addEventListener('afterprint', function() {
+        document.getElementById('educationQrPrintSheet').setAttribute('aria-hidden', 'true');
+      });
 
       const { data:{ session } } = await _supabase.auth.getSession();
       if (!session?.user) {

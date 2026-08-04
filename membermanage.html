@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.108
-Change: Complete the remaining mobile typography and touch-target improvements.
+Version: v1.0.109
+Change: Show the coop-specific deposit account beside the additional capital amount.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.108 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.109 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -391,6 +391,26 @@ background: #f8f9fa; border-color: #2E7D32; color: #2E7D32;
 }
 .menu-btn.active {
 background: #2E7D32; color: #fff; border-color: #2E7D32;
+}
+.extra-capital-account-card {
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 12px;
+padding: 12px;
+margin-bottom: 14px;
+border: 1px solid #bbf7d0;
+border-radius: 12px;
+background: #f0fdf4;
+color: #14532d;
+}
+.extra-capital-account-main { min-width: 0; }
+.extra-capital-account-label { font-size: .78rem; font-weight: 750; color: #15803d; }
+.extra-capital-account-value { margin-top: 3px; font-size: .96rem; line-height: 1.45; font-weight: 800; word-break: keep-all; overflow-wrap: anywhere; }
+.extra-capital-account-copy { flex: 0 0 auto; min-width: 44px; min-height: 44px; }
+@media (max-width: 480px) {
+.extra-capital-account-card { align-items: stretch; flex-direction: column; }
+.extra-capital-account-copy { width: 100%; }
 }
 
 /* [로딩] 오버레이 */
@@ -1559,6 +1579,15 @@ NO. <span id="infoMemberId">-</span>
 
 <div id="tabExtra" class="hidden">
 <h6 class="fw-bold mb-3">추가 출자 신청</h6>
+<div class="extra-capital-account-card" id="extraCapitalAccountCard" aria-live="polite">
+<div class="extra-capital-account-main">
+<div class="extra-capital-account-label"><i class="bi bi-bank me-1"></i>추가 출자금 입금 계좌</div>
+<div class="extra-capital-account-value" id="extraCapitalAccountValue">계좌 정보를 불러오는 중...</div>
+</div>
+<button type="button" class="btn btn-sm btn-outline-success extra-capital-account-copy hidden" id="copyExtraCapitalAccountBtn" onclick="copyExtraCapitalDepositAccount()">
+<i class="bi bi-copy me-1"></i>계좌번호 복사
+</button>
+</div>
 <div class="mb-3">
 <label class="form-label small">약정 금액 (1만원 단위)</label>
 <input type="number" id="exAmount" class="form-control" placeholder="금액 입력" step="10000">
@@ -3890,6 +3919,8 @@ let globalHistoryMeta = { limit: MEMBER_DASHBOARD_HISTORY_LIMIT, counts: {} };
 let quickVoteActionUrl = 'vote/index.html?portal=1';
 let coopRuntimeModules = null;
 let currentMemberCoopId = null;
+const EXTRA_CAPITAL_ACCOUNT_KEYS = ['member_capital_deposit_bank', 'member_capital_deposit_account', 'member_capital_deposit_holder'];
+let extraCapitalDepositAccountState = { coopId:null, data:null, promise:null };
 const MEMBERMANAGE_BRANDING_CACHE_KEY = 'membermanage_branding_name';
 const DEFAULT_MEMBERMANAGE_COOP_NAME = '용인모두의햇빛협동조합';
 const PARTICIPATION_FILES_BUCKET = 'participation-files';
@@ -6446,6 +6477,95 @@ reloadDashboard();
 });
 }
 
+function renderExtraCapitalDepositAccount(account) {
+const value = document.getElementById('extraCapitalAccountValue');
+const copyButton = document.getElementById('copyExtraCapitalAccountBtn');
+if (!value || !copyButton) return;
+if (!account) {
+value.textContent = '입금 계좌를 확인하지 못했습니다. 사무국에 문의해 주세요.';
+copyButton.classList.add('hidden');
+return;
+}
+value.textContent = `${account.bank} ${account.accountNumber} · 예금주 ${account.holder}`;
+copyButton.classList.remove('hidden');
+} // End of renderExtraCapitalDepositAccount
+
+async function loadExtraCapitalDepositAccount() {
+const value = document.getElementById('extraCapitalAccountValue');
+const copyButton = document.getElementById('copyExtraCapitalAccountBtn');
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+if (!coopId) {
+renderExtraCapitalDepositAccount(null);
+return null;
+}
+if (extraCapitalDepositAccountState.coopId === coopId && extraCapitalDepositAccountState.data) {
+renderExtraCapitalDepositAccount(extraCapitalDepositAccountState.data);
+return extraCapitalDepositAccountState.data;
+}
+if (extraCapitalDepositAccountState.coopId === coopId && extraCapitalDepositAccountState.promise) {
+return extraCapitalDepositAccountState.promise;
+}
+if (value) value.textContent = '계좌 정보를 불러오는 중...';
+if (copyButton) copyButton.classList.add('hidden');
+
+extraCapitalDepositAccountState = {
+coopId,
+data:null,
+promise:(async function fetchExtraCapitalDepositAccount() {
+try {
+const { data, error } = await _supabase
+.from('ref_company_info')
+.select('key,value')
+.eq('coop_id', coopId)
+.in('key', EXTRA_CAPITAL_ACCOUNT_KEYS);
+if (error) throw error;
+const info = (data || []).reduce((acc, row) => {
+const key = String(row?.key || '').trim();
+if (key) acc[key] = String(row?.value || '').trim();
+return acc;
+}, {});
+const account = {
+bank:info.member_capital_deposit_bank,
+accountNumber:info.member_capital_deposit_account,
+holder:info.member_capital_deposit_holder
+};
+if (!account.bank || !account.accountNumber || !account.holder) throw new Error('추가 출자 입금 계좌 설정이 없습니다.');
+extraCapitalDepositAccountState.data = account;
+renderExtraCapitalDepositAccount(account);
+return account;
+} catch (error) {
+console.warn('[extra-capital-account] 계좌 정보를 불러오지 못했습니다.', error?.message || error);
+renderExtraCapitalDepositAccount(null);
+return null;
+} finally {
+extraCapitalDepositAccountState.promise = null;
+}
+})()
+};
+return extraCapitalDepositAccountState.promise;
+} // End of loadExtraCapitalDepositAccount
+
+async function copyExtraCapitalDepositAccount() {
+const account = await loadExtraCapitalDepositAccount();
+if (!account?.accountNumber) return;
+try {
+if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+await navigator.clipboard.writeText(account.accountNumber);
+showModal('계좌번호를 복사했습니다.');
+} catch (_) {
+const copyTarget = document.createElement('textarea');
+copyTarget.value = account.accountNumber;
+copyTarget.setAttribute('readonly', '');
+copyTarget.style.position = 'fixed';
+copyTarget.style.opacity = '0';
+document.body.appendChild(copyTarget);
+copyTarget.select();
+const copied = document.execCommand('copy');
+copyTarget.remove();
+showModal(copied ? '계좌번호를 복사했습니다.' : `계좌번호: ${account.accountNumber}`);
+}
+} // End of copyExtraCapitalDepositAccount
+
 // [수정] 탭 전환 (감자 한도 체크 로직 포함)
 function toggleTab(type, btn) {
 if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
@@ -6466,6 +6586,10 @@ if(btn) btn.classList.add('active');
 const targetId = 'tab' + type.charAt(0).toUpperCase() + type.slice(1);
 const targetEl = document.getElementById(targetId);
 if(targetEl) targetEl.classList.remove('hidden');
+
+if(type === 'extra') {
+loadExtraCapitalDepositAccount();
+}
 
 if(type === 'reduction') {
 const total = Number(curMem.total_capital || 0);
