@@ -161,13 +161,16 @@
   <main class="page-shell">
     <div class="page-head">
       <div>
-        <h1>회의·교육 참여 관리</h1>
-        <div class="page-subtitle">이사회와 대의원 총회는 의사록에서 가져오고, 교육은 직접 등록합니다.</div>
+        <h1>교육 참가자·연동 관리</h1>
+        <div class="page-subtitle">모두의 인문학에서 넘어온 비회원·오타·미확인 참가자를 확인하고 교육 연동과 QR을 준비합니다.</div>
       </div>
       <button type="button" class="btn btn-outline-secondary" onclick="location.href='index.html'">ERP 메인</button>
     </div>
 
     <div id="pageAlert" class="alert d-none" role="alert"></div>
+    <div class="alert alert-info" role="note">
+      아직 목록이 비어 있어도 정상입니다. 모두의 인문학 QR 체크인이 들어오면 확인이 필요한 외부 참가자가 교육 상세에 표시됩니다. 조합원과 회의 참석 이력의 기본 관리는 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 합니다.
+    </div>
 
     <section class="summary-grid" aria-label="참여 관리 요약">
       <div class="summary-card"><div class="summary-label">전체 행사</div><div class="summary-value" id="summaryTotal">-</div></div>
@@ -183,9 +186,9 @@
           <option value="ALL">전체 유형</option>
           <option value="BOARD">이사회</option>
           <option value="DELEGATE_ASSEMBLY">대의원 총회</option>
-          <option value="EDUCATION">교육</option>
+          <option value="EDUCATION" selected>교육</option>
         </select>
-        <input type="search" class="form-control" id="eventSearch" placeholder="행사명·장소·참석자 검색">
+        <input type="search" class="form-control" id="eventSearch" placeholder="교육명·장소·외부 참가자 검색">
         <button type="button" class="btn btn-outline-secondary" id="refreshBtn">새로고침</button>
         <button type="button" class="btn btn-primary" id="newEventBtn">행사 등록</button>
       </div>
@@ -251,7 +254,7 @@
               <span>의사록을 선택하면 회의 명단을 가져옵니다. PDF·과거 회의는 수기 입력을 선택할 수 있습니다.</span>
               <button type="button" class="btn btn-sm btn-outline-secondary" id="meetingRosterBtn">회의일 기준 명단 불러오기</button>
             </div>
-            <div id="educationMemberSearch">
+            <div id="educationMemberSearch" class="d-none">
               <div class="input-group mb-2">
                 <input type="search" class="form-control" id="memberSearchInput" placeholder="참석자 조합원명·조합원번호 검색">
                 <button type="button" class="btn btn-outline-primary" id="memberSearchTargetBtn">참석자로 추가</button>
@@ -287,11 +290,17 @@
           <div class="form-section d-none" id="humanitiesLinkSection">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
               <div class="form-section-title mb-0">모두의 인문학 연동</div>
-              <span class="badge text-bg-light border" id="humanitiesLinkBadge">미연동</span>
+              <span class="badge text-bg-light border" id="humanitiesLinkBadge">확인 전</span>
             </div>
-            <p class="small text-muted">교육명 유사도와 시작 시간을 함께 비교해 1순위를 먼저 표시하고 다른 후보도 이어서 보여줍니다. 자동 연결하지 않으므로 내용을 확인한 뒤 직접 승인해 주세요.</p>
+            <p class="small text-muted">모든 교육이 자동으로 연결되지는 않습니다. 연결이 필요한 교육에서만 아래 버튼을 눌러 교육명과 시작 시간이 가까운 후보를 검색한 뒤 직접 승인하세요.</p>
             <div id="humanitiesLinkAlert" class="alert d-none" role="status"></div>
-            <div class="row g-3">
+            <button type="button" class="btn btn-sm btn-outline-primary" id="openHumanitiesLinkBtn" disabled>모두의 인문학 교육 찾기</button>
+            <div id="humanitiesLinkControls" class="d-none mt-3">
+              <div class="input-group mb-3">
+                <input type="search" class="form-control" id="humanitiesCourseSearch" maxlength="80" placeholder="교육명을 알고 있으면 검색어 입력 (선택)">
+                <button type="button" class="btn btn-outline-secondary" id="searchHumanitiesCourseBtn">후보 검색</button>
+              </div>
+              <div class="row g-3">
               <div class="col-lg-7">
                 <label class="form-label fw-bold" for="humanitiesCourseSelect">연결할 교육</label>
                 <select class="form-select" id="humanitiesCourseSelect" disabled>
@@ -311,11 +320,12 @@
                 </label>
                 <div class="form-text">기본값은 꺼짐입니다. 문자 알림은 모두의 인문학 관리자에서 별도로 켤 수 있습니다.</div>
               </div>
-            </div>
-            <div class="d-flex flex-wrap gap-2 mt-3">
+              </div>
+              <div class="d-flex flex-wrap gap-2 mt-3">
               <button type="button" class="btn btn-sm btn-primary" id="saveHumanitiesLinkBtn" disabled>선택 교육과 연동</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshHumanitiesLinkBtn" disabled>후보 다시 찾기</button>
               <button type="button" class="btn btn-sm btn-outline-danger d-none" id="unlinkHumanitiesBtn">연동 해제</button>
+              </div>
             </div>
           </div>
 
@@ -425,7 +435,7 @@
 
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
-    let humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false };
+    let humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let pendingGuestLinkId = null;
     let eventModalInstance = null;
@@ -888,10 +898,18 @@
       const recipient = document.getElementById('humanitiesTelegramRecipient');
       const enabled = document.getElementById('humanitiesTelegramEnabled');
       const badge = document.getElementById('humanitiesLinkBadge');
+      const openButton = document.getElementById('openHumanitiesLinkBtn');
+      const controls = document.getElementById('humanitiesLinkControls');
       const saveButton = document.getElementById('saveHumanitiesLinkBtn');
       const refreshButton = document.getElementById('refreshHumanitiesLinkBtn');
+      const searchButton = document.getElementById('searchHumanitiesCourseBtn');
       const unlinkButton = document.getElementById('unlinkHumanitiesBtn');
       const candidates = humanitiesLinkState.candidates || [];
+      controls.classList.toggle('d-none', !humanitiesLinkState.panelOpen);
+      openButton.disabled = !saved || humanitiesLinkState.loading;
+      openButton.textContent = humanitiesLinkState.loading
+        ? '교육 후보를 찾는 중...'
+        : (humanitiesLinkState.loaded ? '연동 후보 다시 열기' : '모두의 인문학 교육 찾기');
       select.innerHTML = saved
         ? '<option value="">연결할 모두의 인문학 교육을 선택하세요.</option>' + candidates.map(function(course) {
             const rank = Number(course.recommendation_rank || 0);
@@ -905,37 +923,52 @@
         return `<option value="${escapeHtml(item.emp_id)}" ${selected ? 'selected' : ''}>${escapeHtml(item.emp_name || item.emp_id)}${item.position ? ` · ${escapeHtml(item.position)}` : ''}</option>`;
       }).join('');
       enabled.checked = link?.telegram_alert_enabled === true;
-      badge.textContent = link?.status === 'ACTIVE' ? '연동됨' : '미연동';
+      badge.textContent = link?.status === 'ACTIVE' ? '연동됨' : humanitiesLinkState.loaded ? '미연동' : '확인 전';
       badge.className = `badge ${link?.status === 'ACTIVE' ? 'text-bg-success' : 'text-bg-light border'}`;
-      [select, recipient, enabled, saveButton, refreshButton].forEach(function(element) { element.disabled = !saved || humanitiesLinkState.loading; });
+      [select, recipient, enabled, saveButton, refreshButton, searchButton].forEach(function(element) { element.disabled = !saved || humanitiesLinkState.loading; });
       unlinkButton.classList.toggle('d-none', link?.status !== 'ACTIVE');
       unlinkButton.disabled = humanitiesLinkState.loading;
     } // End of renderHumanitiesLink
 
     async function loadHumanitiesLink(showMessage = false) {
       if (!formState.eventId || document.getElementById('eventType').value !== 'EDUCATION') {
-        humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false };
+        humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
         renderHumanitiesLink();
         return;
       }
+      humanitiesLinkState.panelOpen = true;
       humanitiesLinkState.loading = true;
       renderHumanitiesLink();
       try {
-        const result = await callHumanitiesIntegration('admin_get');
+        const searchQuery = String(document.getElementById('humanitiesCourseSearch').value || '').trim();
+        const result = await callHumanitiesIntegration('admin_get', { search_query:searchQuery });
         humanitiesLinkState = {
           link:result.link || null,
           candidates:Array.isArray(result.candidates) ? result.candidates : [],
           telegramRecipients:Array.isArray(result.telegram_recipients) ? result.telegram_recipients : [],
-          loading:false
+          loading:false,
+          panelOpen:true,
+          loaded:true
         };
         renderHumanitiesLink();
-        if (showMessage) showAlert('humanitiesLinkAlert', '날짜·시간이 가까운 교육 후보를 다시 불러왔습니다.', 'success');
+        if (showMessage) {
+          showAlert('humanitiesLinkAlert', humanitiesLinkState.candidates.length
+            ? `조건에 맞는 교육 후보 ${humanitiesLinkState.candidates.length.toLocaleString()}개를 찾았습니다.`
+            : '조건에 맞는 교육 후보를 찾지 못했습니다. 검색어를 지우거나 교육 일시를 확인해 주세요.',
+          humanitiesLinkState.candidates.length ? 'success' : 'warning');
+        }
       } catch (error) {
         humanitiesLinkState.loading = false;
         renderHumanitiesLink();
         showAlert('humanitiesLinkAlert', error?.message || '연동 정보를 불러오지 못했습니다.', 'danger');
       }
     } // End of loadHumanitiesLink
+
+    function openHumanitiesLinkSearch() {
+      humanitiesLinkState.panelOpen = true;
+      renderHumanitiesLink();
+      if (!humanitiesLinkState.loaded) loadHumanitiesLink(true);
+    } // End of openHumanitiesLinkSearch
 
     async function saveHumanitiesLink() {
       const courseId = document.getElementById('humanitiesCourseSelect').value;
@@ -1157,6 +1190,7 @@
       document.getElementById('instructorGroup').classList.toggle('d-none', !education);
       document.getElementById('educationFilesSection').classList.toggle('d-none', !education);
       document.getElementById('humanitiesLinkSection').classList.toggle('d-none', !education);
+      document.getElementById('educationMemberSearch').classList.toggle('d-none', education && !pendingGuestLinkId);
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
       document.getElementById('memberSearchObserverBtn').classList.toggle('d-none', education);
       document.getElementById('observerHelp').classList.toggle('d-none', education);
@@ -1186,7 +1220,7 @@
     function resetEventForm() {
       revokeNewPhotoPreviewUrls();
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
-      humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false };
+      humanitiesLinkState = { link:null, candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
       pendingGuestLinkId = null;
       document.getElementById('eventModalTitle').textContent = '행사 등록';
       document.getElementById('eventType').value = 'BOARD';
@@ -1269,7 +1303,6 @@
         setEventTypeUi(event.event_type);
         renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
         await renderCurrentFiles();
-        await loadHumanitiesLink(false);
         eventModalInstance.show();
       } catch (error) {
         showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
@@ -1366,7 +1399,7 @@
         ? `참석 ${(rows.length + guestRows.length).toLocaleString()}명${guestRows.length > 0 ? ` · 비조합원 ${guestRows.length.toLocaleString()}명` : ''}`
         : `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 배석 ${additionalAttended}명` : ''}`;
       if (rows.length === 0 && guestRows.length === 0) {
-        list.innerHTML = `<div class="text-center text-muted py-4">${type === 'EDUCATION' ? '조합원을 검색해 참석자를 추가하세요.' : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
+        list.innerHTML = `<div class="text-center text-muted py-4">${type === 'EDUCATION' ? '모두의 인문학 체크인이 들어오면 비회원·오타·미확인 참가자가 여기에 표시됩니다. 조합원 참가 이력은 조합원 관리에서 확인하세요.' : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
         return;
       }
       const memberHtml = rows.map(function(row, index) {
@@ -1454,6 +1487,7 @@
         const guestId = String(rowEl.dataset.guestCheckinId || '');
         rowEl.querySelector('[data-link-guest]')?.addEventListener('click', function() {
           pendingGuestLinkId = guestId;
+          document.getElementById('educationMemberSearch').classList.remove('d-none');
           document.getElementById('memberSearchInput').value = '';
           document.getElementById('memberSearchResults').innerHTML = '<div class="alert alert-info small mb-0">연결할 정상 조합원을 이름 또는 조합원번호로 검색해주세요.</div>';
           document.getElementById('memberSearchInput').focus();
@@ -1920,6 +1954,11 @@
       document.getElementById('downloadEducationQrBtn').addEventListener('click', downloadEducationQr);
       document.getElementById('printEducationQrBtn').addEventListener('click', printEducationQr);
       document.getElementById('rotateEducationQrBtn').addEventListener('click', rotateEducationQr);
+      document.getElementById('openHumanitiesLinkBtn').addEventListener('click', openHumanitiesLinkSearch);
+      document.getElementById('searchHumanitiesCourseBtn').addEventListener('click', function() { loadHumanitiesLink(true); });
+      document.getElementById('humanitiesCourseSearch').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') { event.preventDefault(); loadHumanitiesLink(true); }
+      });
       document.getElementById('saveHumanitiesLinkBtn').addEventListener('click', saveHumanitiesLink);
       document.getElementById('refreshHumanitiesLinkBtn').addEventListener('click', function() { loadHumanitiesLink(true); });
       document.getElementById('unlinkHumanitiesBtn').addEventListener('click', unlinkHumanities);
