@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.103
-Change: Improve mobile participation readability and add swipeable education photos.
+Version: v1.0.104
+Change: Show one contained education photo preview with a gallery count.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.103 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.104 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -512,32 +512,45 @@ color: #0f172a;
 box-shadow: 0 2px 7px rgba(15,23,42,.08);
 }
 .participation-photo-strip {
-display: flex;
-gap: 8px;
-overflow-x: auto;
-padding: 2px 2px 8px;
+position: relative;
+display: block;
+width: min(100%, 280px);
+overflow: hidden;
+padding: 0;
 margin-top: 10px;
-scroll-snap-type: x proximity;
--webkit-overflow-scrolling: touch;
-overscroll-behavior-inline: contain;
+border-radius: 12px;
 }
 .participation-photo-thumb {
-flex: 0 0 112px;
-width: 112px;
-height: 76px;
+display: block;
+width: 100%;
+height: 158px;
 padding: 0;
 border: 1px solid #e5e7eb;
 border-radius: 10px;
 overflow: hidden;
 background: #f8fafc;
 cursor: zoom-in;
-scroll-snap-align: start;
 }
 .participation-photo-thumb img {
 display: block;
 width: 100%;
 height: 100%;
 object-fit: cover;
+}
+.participation-photo-count {
+position: absolute;
+right: 8px;
+bottom: 8px;
+z-index: 1;
+max-width: calc(100% - 16px);
+padding: 5px 9px;
+border-radius: 999px;
+background: rgba(15,23,42,.82);
+color: #fff;
+font-size: .82rem;
+font-weight: 750;
+line-height: 1.3;
+pointer-events: none;
 }
 .participation-image-lightbox {
 position: fixed;
@@ -733,21 +746,17 @@ min-height: 44px;
 font-size: 1rem;
 }
 .participation-photo-strip {
-gap: 10px;
-margin-inline: -4px;
-padding: 4px 4px 10px;
-scroll-snap-type: x mandatory;
-scrollbar-width: none;
-touch-action: pan-x;
+width: min(100%, 260px);
+margin-inline: 0;
+padding: 0;
 }
-.participation-photo-strip::-webkit-scrollbar { display: none; }
 .participation-photo-thumb {
-flex-basis: min(76vw, 300px);
-width: min(76vw, 300px);
-height: 180px;
+width: 100%;
+height: 150px;
 border-radius: 12px;
-scroll-snap-align: center;
-scroll-snap-stop: always;
+}
+.participation-photo-count {
+font-size: .9rem;
 }
 .participation-image-lightbox { padding: 10px; }
 .participation-image-lightbox-stage,
@@ -5082,12 +5091,19 @@ const materialsHtml = materials.length > 0
 return `<button type="button" class="btn btn-sm btn-outline-secondary" data-participation-file="${escapeHtml(file.storage_path)}">자료 · ${escapeHtml(file.original_name)}</button>`;
 }).join('')}</div>`
 : '';
-const photosHtml = photos.length > 0
-? `<div class="participation-photo-strip" aria-label="교육 사진">${photos.map(function(file, index) {
-const signedUrl = photoUrlMap.get(String(file.storage_path || '').trim()) || '';
-if (!signedUrl) return `<span class="participation-photo-thumb d-flex align-items-center justify-content-center text-muted x-small text-center px-2" title="${escapeHtml(file.original_name || '')}">미리보기<br>불가</span>`;
-return `<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(file.storage_path)}" title="${escapeHtml(file.original_name || `교육 사진 ${index + 1}`)}"><img src="${escapeHtml(signedUrl)}" alt="교육 사진 ${index + 1}" loading="lazy"></button>`;
-}).join('')}</div>`
+const photoGalleryPayload = photos.map(function(file, index) {
+return {
+storagePath: String(file.storage_path || '').trim(),
+alt: String(file.original_name || `교육 사진 ${index + 1}`).trim()
+};
+}).filter(function(item) { return item.storagePath; });
+const firstPhoto = photoGalleryPayload[0] || null;
+const firstPhotoUrl = firstPhoto ? (photoUrlMap.get(firstPhoto.storagePath) || '') : '';
+const photosHtml = firstPhoto
+? `<div class="participation-photo-strip" aria-label="교육 사진 ${photoGalleryPayload.length}장">
+<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhoto.storagePath)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="교육 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
+<span class="participation-photo-count">사진 ${photoGalleryPayload.length}장 · 눌러 보기</span>
+</div>`
 : '';
 return `
 <article class="participation-history-item">
@@ -5282,15 +5298,35 @@ const image = document.getElementById('participationImageLightboxImage');
 if (!overlay || !image) return;
 participationImageReturnFocus = triggerElement || document.activeElement;
 const photoStrip = triggerElement?.closest?.('.participation-photo-strip');
+let galleryPayload = [];
+try {
+galleryPayload = JSON.parse(String(triggerElement?.dataset?.participationGallery || '[]'));
+} catch (_) {
+galleryPayload = [];
+}
+if (!Array.isArray(galleryPayload)) galleryPayload = [];
 const galleryButtons = photoStrip
 ? Array.from(photoStrip.querySelectorAll('button[data-participation-photo]'))
 : (triggerElement ? [triggerElement] : []);
-participationImageGallery = galleryButtons.map(function(button, index) {
-const thumbnail = button.querySelector('img');
+const thumbnail = triggerElement?.querySelector?.('img');
+participationImageGallery = galleryPayload.length > 0
+? galleryPayload.map(function(item, index) {
+const storagePath = String(item?.storagePath || '').trim();
+return {
+storagePath,
+signedUrl: storagePath === String(triggerElement?.dataset?.participationPhoto || '').trim()
+? String(thumbnail?.currentSrc || thumbnail?.src || '').trim()
+: '',
+alt: String(item?.alt || `교육 사진 ${index + 1}`).trim(),
+trigger: triggerElement || null
+};
+}).filter(function(item) { return item.storagePath; })
+: galleryButtons.map(function(button, index) {
+const buttonThumbnail = button.querySelector('img');
 return {
 storagePath: String(button.dataset.participationPhoto || '').trim(),
-signedUrl: String(thumbnail?.currentSrc || thumbnail?.src || '').trim(),
-alt: String(button.title || thumbnail?.alt || `교육 사진 ${index + 1}`).trim(),
+signedUrl: String(buttonThumbnail?.currentSrc || buttonThumbnail?.src || '').trim(),
+alt: String(button.title || buttonThumbnail?.alt || `교육 사진 ${index + 1}`).trim(),
 trigger: button
 };
 }).filter(function(item) { return item.storagePath; });
