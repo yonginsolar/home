@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.4 | Change: 2026-08-04 - Manage education QR guest attendance and member linking. -->
+<!-- Version: v1.2.5 | Change: 2026-08-04 - Show the current-year meeting attendance rate. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.4 | participation.html');</script>
+  <script>console.log('[Version] v1.2.5 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -138,7 +138,7 @@
       <div class="summary-card"><div class="summary-label">이사회</div><div class="summary-value" id="summaryBoard">-</div></div>
       <div class="summary-card"><div class="summary-label">대의원 총회</div><div class="summary-value" id="summaryDelegate">-</div></div>
       <div class="summary-card"><div class="summary-label">교육</div><div class="summary-value" id="summaryEducation">-</div></div>
-      <div class="summary-card"><div class="summary-label">누적 참석</div><div class="summary-value" id="summaryAttended">-</div></div>
+      <div class="summary-card"><div class="summary-label">올해 회의 참석률</div><div class="summary-value" id="summaryMeetingRate">-</div></div>
     </section>
 
     <section class="panel">
@@ -377,6 +377,16 @@
       }).format(date);
     } // End of formatKstDateTime
 
+    function getKstYear(value) {
+      const date = value ? new Date(value) : new Date();
+      if (Number.isNaN(date.getTime())) return null;
+      const year = Number(new Intl.DateTimeFormat('en-CA', {
+        timeZone:KST_TIME_ZONE,
+        year:'numeric'
+      }).format(date));
+      return Number.isInteger(year) ? year : null;
+    } // End of getKstYear
+
     function toKstLocalInput(value) {
       if (!value) return '';
       const date = new Date(value);
@@ -598,13 +608,30 @@
     function renderSummary() {
       const events = dashboardData.events || [];
       const countType = function(type) { return events.filter(function(row) { return row.event_type === type; }).length; };
+      const currentKstYear = getKstYear();
+      const meetingEvents = events.filter(function(row) {
+        return ['BOARD', 'DELEGATE_ASSEMBLY'].includes(row.event_type)
+          && getKstYear(row.starts_at) === currentKstYear;
+      });
+      const meetingTargetCount = meetingEvents.reduce(function(sum, row) {
+        return sum + Math.max(Number(row.total_target_count || 0), 0);
+      }, 0);
+      const meetingAttendedCount = meetingEvents.reduce(function(sum, row) {
+        return sum + Math.max(Number(row.attended_count || 0), 0);
+      }, 0);
       document.getElementById('summaryTotal').textContent = events.length.toLocaleString();
       document.getElementById('summaryBoard').textContent = countType('BOARD').toLocaleString();
       document.getElementById('summaryDelegate').textContent = countType('DELEGATE_ASSEMBLY').toLocaleString();
       document.getElementById('summaryEducation').textContent = countType('EDUCATION').toLocaleString();
-      document.getElementById('summaryAttended').textContent = events.reduce(function(sum, row) {
-        return sum + Number(row.attended_count || 0) + Number(row.additional_attended_count || 0);
-      }, 0).toLocaleString();
+      const meetingRateElement = document.getElementById('summaryMeetingRate');
+      meetingRateElement.textContent = meetingTargetCount > 0
+        ? `${((meetingAttendedCount / meetingTargetCount) * 100).toFixed(1)}%`
+        : '-';
+      const meetingRateDetail = meetingTargetCount > 0
+        ? `${meetingAttendedCount.toLocaleString()} / ${meetingTargetCount.toLocaleString()}명 · 배석 제외`
+        : '올해 등록된 이사회·대의원 총회 대상자가 없습니다.';
+      meetingRateElement.title = meetingRateDetail;
+      meetingRateElement.setAttribute('aria-label', `올해 회의 참석률 ${meetingRateElement.textContent}. ${meetingRateDetail}`);
     } // End of renderSummary
 
     function renderEvents() {
