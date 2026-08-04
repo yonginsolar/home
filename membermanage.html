@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.101
-Change: Keep education QR completion messages focused on the current event.
+Version: v1.0.102
+Change: Add education QR quick authentication and consent-based guest attendance.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.101 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.102 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -110,6 +110,50 @@ font-weight: 700;
 text-align: center;
 margin-bottom: 30px;
 color: #333;
+}
+.education-qr-panel {
+border: 1px solid #bbf7d0;
+background: #f0fdf4;
+border-radius: 16px;
+padding: 18px;
+margin-bottom: 20px;
+}
+.education-qr-choice-grid {
+display: grid;
+grid-template-columns: repeat(2, minmax(0, 1fr));
+gap: 10px;
+}
+.education-qr-choice-grid .btn {
+min-height: 48px;
+white-space: normal;
+}
+.education-qr-form {
+margin-top: 14px;
+padding-top: 14px;
+border-top: 1px solid #d1fae5;
+}
+.education-qr-inline-status {
+display: none;
+margin-top: 12px;
+padding: 10px 12px;
+border-radius: 10px;
+font-size: .875rem;
+}
+.education-qr-inline-status.show { display: block; }
+.education-qr-inline-status.info { color: #075985; background: #e0f2fe; }
+.education-qr-inline-status.success { color: #166534; background: #dcfce7; }
+.education-qr-inline-status.warning { color: #92400e; background: #fef3c7; }
+.education-qr-inline-status.danger { color: #991b1b; background: #fee2e2; }
+#educationGuestPrivacyModal { z-index: 1950; }
+#educationGuestPrivacyModal .custom-modal-box {
+max-width: 520px;
+text-align: left;
+max-height: min(78vh, 680px);
+overflow-y: auto;
+}
+@media (max-width: 430px) {
+.signup-wrapper { padding: 28px 18px; }
+.education-qr-choice-grid { grid-template-columns: 1fr; }
 }
 
 /* [모달] 커스텀 디자인 (Depth Effect) */
@@ -798,6 +842,65 @@ gtag('config', 'G-TR217L7JN9');
 <div class="signup-wrapper">
 <h2 class="form-title">조합원 공간</h2>
 
+<section id="educationQrEntryPanel" class="education-qr-panel hidden" aria-labelledby="educationQrEntryTitle">
+<div class="small text-success fw-bold mb-1">교육 QR 출석</div>
+<h3 class="h5 fw-bold mb-1" id="educationQrEntryTitle">교육 정보를 확인하는 중...</h3>
+<div class="small text-secondary mb-3" id="educationQrEntryMeta"></div>
+
+<div id="educationQrChoiceGrid" class="education-qr-choice-grid hidden">
+<button type="button" class="btn btn-outline-success fw-bold" onclick="showEducationQrMode('quick')">조합원 간편 인증</button>
+<button type="button" class="btn btn-dark fw-bold" onclick="showEducationQrMode('login')">조합원 로그인 인증</button>
+<a class="btn btn-outline-primary fw-bold d-flex align-items-center justify-content-center" id="educationQrSignupLink" href="signup.html">조합원 가입</a>
+<button type="button" class="btn btn-outline-secondary fw-bold" onclick="showEducationQrMode('guest')">교육만 기록</button>
+</div>
+
+<form id="educationQrQuickForm" class="education-qr-form hidden" onsubmit="submitEducationQrQuickCheckIn(event)">
+<div class="fw-bold mb-2">조합원 간편 인증</div>
+<div class="small text-secondary mb-3">가입된 이름과 휴대전화번호 전체가 정확히 일치해야 합니다.</div>
+<div class="mb-2">
+<label class="form-label small fw-bold" for="educationQrQuickName">이름</label>
+<input type="text" class="form-control" id="educationQrQuickName" maxlength="100" autocomplete="name" required>
+</div>
+<div class="mb-3">
+<label class="form-label small fw-bold" for="educationQrQuickPhone">휴대전화번호</label>
+<input type="tel" class="form-control" id="educationQrQuickPhone" maxlength="13" inputmode="tel" autocomplete="tel" placeholder="010-0000-0000" oninput="autoHyphen(this)" required>
+</div>
+<div class="d-grid gap-2">
+<button type="submit" class="btn btn-success fw-bold" id="educationQrQuickSubmit">간편 인증하고 출석하기</button>
+<button type="button" class="btn btn-link text-secondary" onclick="showEducationQrMode('choices')">다른 방법 선택</button>
+</div>
+</form>
+
+<form id="educationQrGuestForm" class="education-qr-form hidden" onsubmit="submitEducationQrGuestCheckIn(event)">
+<div class="fw-bold mb-2">비조합원 교육 출석 기록</div>
+<div class="small text-secondary mb-3">관리자 참석 명단에는 이름과 <span class="badge text-bg-light border">비조합원</span> 표시가 함께 나옵니다.</div>
+<div class="mb-2">
+<label class="form-label small fw-bold" for="educationQrGuestName">이름</label>
+<input type="text" class="form-control" id="educationQrGuestName" maxlength="100" autocomplete="name" required>
+</div>
+<div class="mb-3">
+<label class="form-label small fw-bold" for="educationQrGuestPhone">휴대전화번호</label>
+<input type="tel" class="form-control" id="educationQrGuestPhone" maxlength="13" inputmode="tel" autocomplete="tel" placeholder="010-0000-0000" oninput="autoHyphen(this)" required>
+</div>
+<div class="form-check mb-2">
+<input class="form-check-input" type="checkbox" id="educationQrGuestAge" required>
+<label class="form-check-label small" for="educationQrGuestAge">[필수] 만 14세 이상입니다.</label>
+</div>
+<div class="form-check mb-3">
+<input class="form-check-input" type="checkbox" id="educationQrGuestPrivacy" required>
+<label class="form-check-label small" for="educationQrGuestPrivacy">[필수] 교육 출석 기록을 위한 개인정보 수집·이용에 동의합니다.</label>
+<button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" onclick="openEducationGuestPrivacyModal()">자세히 보기</button>
+</div>
+<div class="d-grid gap-2">
+<button type="submit" class="btn btn-secondary fw-bold" id="educationQrGuestSubmit">비조합원으로 출석 기록</button>
+<button type="button" class="btn btn-link text-secondary" onclick="showEducationQrMode('choices')">다른 방법 선택</button>
+</div>
+</form>
+
+<div id="educationQrInlineStatus" class="education-qr-inline-status" role="status" aria-live="polite"></div>
+</section>
+
+<div id="educationQrLoginAuthArea">
 <div class="alert alert-light border d-flex align-items-center" role="alert">
 <i class="bi bi-info-circle-fill text-success fs-4 me-3"></i>
 <div>
@@ -854,6 +957,7 @@ gtag('config', 'G-TR217L7JN9');
 </button>
 <div class="text-center mt-2">
 <small class="text-muted">(기존에 카카오 또는 네이버를 연동한 조합원만 가능합니다)</small>
+</div>
 </div>
 </div>
 </div>
@@ -1294,6 +1398,27 @@ NO. <span id="infoMemberId">-</span>
 <div class="custom-modal-btn-group">
 <button id="btnModalNo" class="btn-modal btn-modal-no" onclick="closeCustomModal()">취소</button>
 <button id="btnModalYes" class="btn-modal btn-modal-yes">확인</button>
+</div>
+</div>
+</div>
+
+<div id="educationGuestPrivacyModal" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="educationGuestPrivacyTitle" aria-hidden="true">
+<div class="custom-modal-box">
+<h4 class="h5 fw-bold mb-3" id="educationGuestPrivacyTitle">비조합원 교육 출석 개인정보 수집·이용</h4>
+<dl class="small mb-3">
+<dt class="mb-1">수집·이용 목적</dt>
+<dd class="text-secondary mb-3">해당 교육의 개인별 출석 기록, 30일 이내 조합원 가입 신청 시 참여 이력 자동 연결, 관리자 참석 현황 확인</dd>
+<dt class="mb-1">수집 항목</dt>
+<dd class="text-secondary mb-3">이름, 휴대전화번호, 교육명, 출석일시, 만 14세 이상 확인 및 동의 일시</dd>
+<dt class="mb-1">보유기간</dt>
+<dd class="text-secondary mb-3">휴대전화번호는 수집일로부터 30일, 이름과 교육 참석 기록은 출석일로부터 3년간 보관합니다. 30일 이내 가입 신청과 연결되면 별도 출석 기록의 전화번호는 즉시 삭제하며, 3년 후 이름을 삭제하고 익명 참석 통계만 유지합니다.</dd>
+<dt class="mb-1">동의 거부 및 불이익</dt>
+<dd class="text-secondary mb-3">동의를 거부할 수 있으나 비조합원 개인별 출석 기록과 향후 자동 연결은 이용할 수 없습니다.</dd>
+<dt class="mb-1">철회·삭제 요청</dt>
+<dd class="text-secondary mb-0">보유기간 전 철회 또는 삭제를 원하면 조합 관리자나 사무실에 요청할 수 있습니다. 만 14세 미만은 이 방식으로 출석을 접수하지 않습니다.</dd>
+</dl>
+<div class="d-grid">
+<button type="button" class="btn btn-dark" id="educationGuestPrivacyClose" onclick="closeEducationGuestPrivacyModal()">확인</button>
 </div>
 </div>
 </div>
@@ -1855,6 +1980,246 @@ console.error("Supabase Init Error", e);
 showModal("시스템 연결 오류");
 }
 
+const EDUCATION_GUEST_CONSENT_VERSION = 'education-guest-v1-2026-08-04';
+let educationQrContext = null;
+let educationGuestPrivacyReturnFocus = null;
+let educationGuestPrivacyPreviousBodyOverflow = '';
+
+function setEducationQrInlineStatus(message, type = 'info') {
+const status = document.getElementById('educationQrInlineStatus');
+if (!status) return;
+status.textContent = String(message || '');
+status.className = `education-qr-inline-status ${type} show`;
+} // End of setEducationQrInlineStatus
+
+function clearEducationQrInlineStatus() {
+const status = document.getElementById('educationQrInlineStatus');
+if (!status) return;
+status.textContent = '';
+status.className = 'education-qr-inline-status';
+} // End of clearEducationQrInlineStatus
+
+function buildEducationQrSignupUrl() {
+const token = getPendingEducationQrToken();
+const url = new URL('signup.html', window.location.href);
+if (educationQrContext?.coop_code) url.searchParams.set('coop', educationQrContext.coop_code);
+if (token) url.searchParams.set('education_checkin', token);
+return url.toString();
+} // End of buildEducationQrSignupUrl
+
+function showEducationQrMode(mode) {
+const quickForm = document.getElementById('educationQrQuickForm');
+const guestForm = document.getElementById('educationQrGuestForm');
+const loginArea = document.getElementById('educationQrLoginAuthArea');
+if (quickForm) quickForm.classList.toggle('hidden', mode !== 'quick');
+if (guestForm) guestForm.classList.toggle('hidden', mode !== 'guest');
+if (loginArea) loginArea.classList.toggle('hidden', mode !== 'login');
+clearEducationQrInlineStatus();
+if (mode === 'quick') window.setTimeout(() => document.getElementById('educationQrQuickName')?.focus(), 0);
+if (mode === 'guest') window.setTimeout(() => document.getElementById('educationQrGuestName')?.focus(), 0);
+if (mode === 'login') window.setTimeout(() => document.getElementById('emailInput')?.focus(), 0);
+} // End of showEducationQrMode
+
+async function initializeEducationQrEntry() {
+const token = getPendingEducationQrToken();
+const panel = document.getElementById('educationQrEntryPanel');
+const loginArea = document.getElementById('educationQrLoginAuthArea');
+if (!panel || !loginArea) return;
+
+if (!token) {
+panel.classList.add('hidden');
+loginArea.classList.remove('hidden');
+return;
+}
+
+panel.classList.remove('hidden');
+loginArea.classList.add('hidden');
+const title = document.getElementById('educationQrEntryTitle');
+const meta = document.getElementById('educationQrEntryMeta');
+const choices = document.getElementById('educationQrChoiceGrid');
+if (title) title.textContent = '교육 정보를 확인하는 중...';
+if (meta) meta.textContent = '';
+if (choices) choices.classList.add('hidden');
+
+try {
+const { data, error } = await _supabase.rpc('participation_public_get_education_qr', { p_qr_token: token });
+if (error) throw error;
+const result = data || {};
+if (!result.ok || result.status === 'INVALID') {
+if (title) title.textContent = '유효하지 않은 교육 QR입니다.';
+setEducationQrInlineStatus('새로 발급된 QR을 다시 스캔하거나 관리자에게 확인해주세요.', 'danger');
+loginArea.classList.remove('hidden');
+return;
+}
+
+educationQrContext = result;
+if (title) title.textContent = String(result.title || '교육');
+if (meta) {
+const timeText = result.ends_at
+? `${formatMemberKstDateTime(result.starts_at)} ~ ${formatMemberKstDateTime(result.ends_at)}`
+: formatMemberKstDateTime(result.starts_at);
+meta.textContent = `${String(result.coop_name || '')} · ${timeText} · ${String(result.location || '-')}`;
+}
+
+if (result.status === 'NOT_OPEN') {
+setEducationQrInlineStatus(`출석 접수 전입니다. ${formatMemberKstDateTime(result.opens_at)}부터 접수할 수 있습니다.`, 'warning');
+return;
+}
+if (result.status === 'CLOSED') {
+setEducationQrInlineStatus(`출석 접수가 종료되었습니다. 종료: ${formatMemberKstDateTime(result.ends_at)}`, 'warning');
+return;
+}
+
+if (choices) choices.classList.remove('hidden');
+const signupLink = document.getElementById('educationQrSignupLink');
+if (signupLink) signupLink.href = buildEducationQrSignupUrl();
+showEducationQrMode('choices');
+} catch (error) {
+console.error('education QR public context failed:', error?.message || error);
+if (title) title.textContent = '교육 정보를 불러오지 못했습니다.';
+setEducationQrInlineStatus('연결 상태를 확인한 뒤 새로고침해주세요.', 'danger');
+loginArea.classList.remove('hidden');
+}
+} // End of initializeEducationQrEntry
+
+function educationQrResultMessage(result, successLabel) {
+const title = String(result?.title || educationQrContext?.title || '교육');
+const status = String(result?.status || 'INVALID');
+if (status === 'ALREADY_ATTENDED' || status === 'ALREADY_RECORDED') return `“${title}” 교육에 이미 참석 등록되어 있습니다.`;
+if (status === 'CHECKED_IN' || status === 'GUEST_RECORDED') return `“${title}” ${successLabel}`;
+if (status === 'NOT_OPEN') return `출석 접수 전입니다. ${formatMemberKstDateTime(result?.opens_at)}부터 접수할 수 있습니다.`;
+if (status === 'CLOSED') return `출석 접수가 종료되었습니다. 종료: ${formatMemberKstDateTime(result?.ends_at)}`;
+return '';
+} // End of educationQrResultMessage
+
+async function submitEducationQrQuickCheckIn(event) {
+event.preventDefault();
+const token = getPendingEducationQrToken();
+const name = String(document.getElementById('educationQrQuickName')?.value || '').trim();
+const phone = String(document.getElementById('educationQrQuickPhone')?.value || '').trim();
+const button = document.getElementById('educationQrQuickSubmit');
+if (!token || !name || !phone) return setEducationQrInlineStatus('이름과 휴대전화번호 전체를 입력해주세요.', 'warning');
+if (button?.disabled) return;
+if (button) button.disabled = true;
+clearEducationQrInlineStatus();
+try {
+const { data, error } = await _supabase.rpc('participation_public_education_quick_check_in', {
+p_qr_token: token,
+p_name: name,
+p_phone: phone
+});
+if (error) throw error;
+const result = data || {};
+const message = educationQrResultMessage(result, '교육 참석이 등록되었습니다.');
+if (result.ok && message) {
+clearPendingEducationQrToken();
+document.getElementById('educationQrChoiceGrid')?.classList.add('hidden');
+document.getElementById('educationQrQuickForm')?.classList.add('hidden');
+setEducationQrInlineStatus(message, 'success');
+return;
+}
+if (result.status === 'AUTH_FAILED') {
+showEducationQrMode('login');
+setEducationQrInlineStatus('입력한 정보로 간편 인증을 완료하지 못했습니다. 로그인 인증을 이용해주세요.', 'warning');
+return;
+}
+setEducationQrInlineStatus(message || '출석을 등록하지 못했습니다. QR과 입력값을 확인해주세요.', 'danger');
+} catch (error) {
+console.error('education QR quick check-in failed:', error?.message || error);
+setEducationQrInlineStatus('출석을 등록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
+} finally {
+if (button) button.disabled = false;
+}
+} // End of submitEducationQrQuickCheckIn
+
+async function submitEducationQrGuestCheckIn(event) {
+event.preventDefault();
+const token = getPendingEducationQrToken();
+const name = String(document.getElementById('educationQrGuestName')?.value || '').trim();
+const phone = String(document.getElementById('educationQrGuestPhone')?.value || '').trim();
+const ageConfirmed = document.getElementById('educationQrGuestAge')?.checked === true;
+const privacyConsent = document.getElementById('educationQrGuestPrivacy')?.checked === true;
+const button = document.getElementById('educationQrGuestSubmit');
+if (!token || !name || !phone) return setEducationQrInlineStatus('이름과 휴대전화번호 전체를 입력해주세요.', 'warning');
+if (!ageConfirmed) return setEducationQrInlineStatus('만 14세 이상 확인이 필요합니다.', 'warning');
+if (!privacyConsent) return setEducationQrInlineStatus('개인정보 수집·이용 동의가 필요합니다.', 'warning');
+if (button?.disabled) return;
+if (button) button.disabled = true;
+clearEducationQrInlineStatus();
+try {
+const { data, error } = await _supabase.rpc('participation_public_education_guest_check_in', {
+p_qr_token: token,
+p_name: name,
+p_phone: phone,
+p_age_confirmed: ageConfirmed,
+p_privacy_consent: privacyConsent,
+p_consent_version: EDUCATION_GUEST_CONSENT_VERSION
+});
+if (error) throw error;
+const result = data || {};
+const message = educationQrResultMessage(result, '교육 출석이 비조합원으로 기록되었습니다.');
+if (result.ok && message) {
+clearPendingEducationQrToken();
+document.getElementById('educationQrChoiceGrid')?.classList.add('hidden');
+document.getElementById('educationQrGuestForm')?.classList.add('hidden');
+document.getElementById('educationQrGuestName').value = '';
+document.getElementById('educationQrGuestPhone').value = '';
+setEducationQrInlineStatus(`${message}\n전화번호는 30일, 이름과 참석 기록은 3년간 보관됩니다.`, 'success');
+return;
+}
+if (result.status === 'MEMBER_AUTH_REQUIRED') {
+showEducationQrMode('login');
+setEducationQrInlineStatus('조합원 정보와 일치합니다. 간편 인증 또는 로그인 인증을 이용해주세요.', 'warning');
+return;
+}
+setEducationQrInlineStatus(message || '출석을 기록하지 못했습니다. QR과 입력값을 확인해주세요.', 'danger');
+} catch (error) {
+console.error('education QR guest check-in failed:', error?.message || error);
+setEducationQrInlineStatus('출석을 기록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
+} finally {
+if (button) button.disabled = false;
+}
+} // End of submitEducationQrGuestCheckIn
+
+function openEducationGuestPrivacyModal() {
+const modal = document.getElementById('educationGuestPrivacyModal');
+if (!modal) return;
+educationGuestPrivacyReturnFocus = document.activeElement;
+educationGuestPrivacyPreviousBodyOverflow = document.body.style.overflow || '';
+document.body.style.overflow = 'hidden';
+modal.style.display = 'flex';
+modal.setAttribute('aria-hidden', 'false');
+document.getElementById('educationGuestPrivacyClose')?.focus();
+} // End of openEducationGuestPrivacyModal
+
+function closeEducationGuestPrivacyModal() {
+const modal = document.getElementById('educationGuestPrivacyModal');
+if (!modal) return;
+modal.style.display = 'none';
+modal.setAttribute('aria-hidden', 'true');
+document.body.style.overflow = educationGuestPrivacyPreviousBodyOverflow;
+if (educationGuestPrivacyReturnFocus && typeof educationGuestPrivacyReturnFocus.focus === 'function') educationGuestPrivacyReturnFocus.focus();
+educationGuestPrivacyReturnFocus = null;
+} // End of closeEducationGuestPrivacyModal
+
+document.getElementById('educationGuestPrivacyModal')?.addEventListener('click', function(event) {
+if (event.target === event.currentTarget) closeEducationGuestPrivacyModal();
+});
+document.addEventListener('keydown', function(event) {
+const modal = document.getElementById('educationGuestPrivacyModal');
+if (!modal || modal.style.display !== 'flex') return;
+if (event.key === 'Escape') {
+event.preventDefault();
+event.stopImmediatePropagation();
+closeEducationGuestPrivacyModal();
+return;
+}
+if (event.key === 'Tab') {
+event.preventDefault();
+document.getElementById('educationGuestPrivacyClose')?.focus();
+}
+}, true);
+
 // [신규] URL로 전달된 토큰을 낚아채서 세션 복구하기
 async function handleManualSession() {
 const params = new URLSearchParams(window.location.search);
@@ -1981,6 +2346,8 @@ if (typeof showLoading === 'function') showLoading(false);
 showModal("시스템 오류: DB 연결 실패");
 return;
 }
+
+await initializeEducationQrEntry();
 
 // 3. 인증 상태 변경 감지
 _supabase.auth.onAuthStateChange(async (event, session) => {

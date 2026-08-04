@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.35
-Change: Route new-member Telegram alerts through the tenant-aware ERP admin DM channel.
+Version: v1.0.36
+Change: Preserve education QR context and register attendance with age and privacy confirmation.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.35 | signup.html');</script>
+  <script>console.log('[Version] v1.0.36 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -360,6 +360,18 @@ oninput="clearFieldWarning(this)">
 <input class="form-check-input" type="checkbox" id="agree3" required>
 <label class="form-check-label small" onclick="openTermSheet('risk')"><u>[필수] 출자금 손실 위험 및 환급 제한 등에 동의합니다.</u></label>
 </div>
+<div id="educationQrSignupConsent" class="border-top mt-3 pt-3" style="display:none;">
+<div class="small text-success fw-bold mb-2"><i class="bi bi-qr-code-scan me-1"></i>교육 QR 가입·출석</div>
+<div class="form-check mb-2">
+<input class="form-check-input" type="checkbox" id="agreeEducationAge">
+<label class="form-check-label small" for="agreeEducationAge">[필수] 만 14세 이상입니다.</label>
+</div>
+<div class="form-check mb-2">
+<input class="form-check-input" type="checkbox" id="agreeEducationAttendance">
+<label class="form-check-label small" onclick="openTermSheet('educationAttendance')"><u>[필수] 가입 신청과 함께 해당 교육의 출석을 기록하는 데 동의합니다.</u></label>
+</div>
+<div class="small text-muted">가입 신청 시 해당 교육 출석이 함께 접수되며, 승인 후 조합원 참여 이력으로 자동 전환됩니다.</div>
+</div>
 </div>
 
 <button type="submit" id="btnSubmit" class="btn btn-success w-100 py-3 mt-4 rounded-4 fw-bold fs-5">가입 신청하기 ☀️</button>
@@ -545,6 +557,25 @@ const firstLabel = host.split('.').filter(Boolean)[0] || '';
 if (!firstLabel || firstLabel === 'www') return '';
 return firstLabel;
 }
+
+function getSignupEducationQrToken() {
+try {
+const token = String(new URLSearchParams(window.location.search || '').get('education_checkin') || '').trim().toLowerCase();
+return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(token) ? token : '';
+} catch (_) {
+return '';
+}
+} // End of getSignupEducationQrToken
+
+function applySignupEducationQrContext() {
+const token = getSignupEducationQrToken();
+const section = document.getElementById('educationQrSignupConsent');
+const age = document.getElementById('agreeEducationAge');
+const attendance = document.getElementById('agreeEducationAttendance');
+if (section) section.style.display = token ? '' : 'none';
+if (age) age.required = !!token;
+if (attendance) attendance.required = !!token;
+} // End of applySignupEducationQrContext
 
 function isLocalSignupServerRuntime() {
 const host = String(window.location.hostname || '').trim().toLowerCase();
@@ -791,11 +822,11 @@ async function handleManualSession() {
 
         if (!error && data.session) {
             // 2. 주소창에서 토큰 흔적 지우기 (깔끔하게)
-            const coopCode = new URLSearchParams(window.location.search).get('coop');
-            const cleanUrl = coopCode
-              ? `${window.location.pathname}?coop=${encodeURIComponent(coopCode)}`
-              : window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
+            const cleanParams = new URLSearchParams(window.location.search);
+            cleanParams.delete('at');
+            cleanParams.delete('rt');
+            const cleanQuery = cleanParams.toString();
+            window.history.replaceState({}, document.title, cleanQuery ? `${window.location.pathname}?${cleanQuery}` : window.location.pathname);
             
             // 3. (중요) 기존 로직 트리거
             // onAuthStateChange가 돌겠지만, 확실하게 하기 위해 회원 체크 실행
@@ -818,6 +849,10 @@ content: "<b>제2조(목적)</b> 용인모두의햇빛협동조합(이하 ‘조
 risk: { 
 title: "출자금 및 배당 관련 중요 고지", 
 content: "1. 출자금은 예금자보호 대상이 아니며 원금 손실 가능성이 있음을 확인했습니다.\n\n2. 탈퇴(또는 제명) 전 중도 환급이 제한될 수 있음을 확인했습니다.\n\n3. 환급은 결산 및 총회 승인 등 절차 후 가능하며 지연·분할 지급될 수 있음을 확인했습니다.\n\n4. 배당은 총회 의결 및 경영성과에 따라 결정되며 없을 수 있음을 확인했습니다." 
+},
+educationAttendance: {
+title: "교육 QR 가입·출석 기록 동의",
+content: "가입 신청 완료 시 현재 QR의 교육 출석도 함께 접수됩니다.\n\n1. 이용 목적: 해당 교육 출석 기록 및 조합원 승인 후 참여 이력 자동 연결\n2. 이용 항목: 가입 신청서에 입력한 이름과 휴대전화번호, 교육명, 출석일시\n3. 보유기간: 가입 신청과 연결된 별도 출석 전화번호는 즉시 삭제하며, 이름과 교육 참석 기록은 출석일로부터 3년간 보관합니다. 3년 후에는 이름을 삭제하고 익명 참석 통계만 유지합니다.\n4. 동의 거부: 동의를 거부할 수 있으나 가입 신청과 동시에 해당 교육 출석을 기록하는 기능은 이용할 수 없습니다.\n\n만 14세 미만은 교육 QR 가입·출석 접수를 이용할 수 없습니다."
 }
 };
 
@@ -836,7 +871,7 @@ setTimeout(() => { overlay.style.display = 'none'; }, 300);
 
 // 약관 시트가 닫힐 때 자동 체크 로직
 if (id === 'sheet-terms' && currentTermType) {
-const map = { 'privacy': 'agree1', 'purpose': 'agree2', 'risk': 'agree3' };
+const map = { 'privacy': 'agree1', 'purpose': 'agree2', 'risk': 'agree3', 'educationAttendance': 'agreeEducationAttendance' };
 const boxId = map[currentTermType];
 if (boxId) document.getElementById(boxId).checked = true;
 currentTermType = null; // 초기화
@@ -1212,6 +1247,7 @@ return signupSessionCheckInFlight;
 // 2. 윈도우 로드 시에도 현재 세션을 한 번 확인해 모바일 인앱 브라우저의 auth 이벤트 누락을 보정
 window.onload = async function() {
 toggleType('개인'); 
+applySignupEducationQrContext();
   // [추가] 페이지가 열리자마자 "배달 온 토큰 있나요?" 하고 확인
 try {
 await ensureSignupTenant();
@@ -1632,7 +1668,9 @@ if (p2.value.length < 3) setError(p2);
 if (p3.value.length < 4) setError(p3);
 
 // (4) 약관 동의 체크
+const educationQrToken = getSignupEducationQrToken();
 const agrees = ['agree1', 'agree2', 'agree3'];
+if (educationQrToken) agrees.push('agreeEducationAge', 'agreeEducationAttendance');
 agrees.forEach((id) => {
 const chk = document.getElementById(id);
 const label = chk.nextElementSibling;
@@ -1893,7 +1931,7 @@ is_agreed: true
 };
 
 // Supabase 전송
-const { data: createdMemberUuid, error } = await _supabase.rpc('create_public_signup_member_v3', {
+const { data: signupResult, error } = await _supabase.rpc('create_public_signup_member_v4', {
   p_coop_code: signupTenant.coop_code,
   p_name: insertData.name,
   p_member_type: insertData.member_type,
@@ -1913,8 +1951,13 @@ const { data: createdMemberUuid, error } = await _supabase.rpc('create_public_si
   p_representative_name: insertData.representative_name,
   p_contact_name: insertData.contact_name,
   p_contact_position: insertData.contact_position,
-  p_is_agreed: insertData.is_agreed
+  p_is_agreed: insertData.is_agreed,
+  p_education_qr_token: educationQrToken || null,
+  p_education_age_confirmed: educationQrToken ? document.getElementById('agreeEducationAge').checked : false,
+  p_education_attendance_consent: educationQrToken ? document.getElementById('agreeEducationAttendance').checked : false
 });
+const createdMemberUuid = signupResult?.member_id || null;
+const educationSignupResult = signupResult?.education || null;
 let finalInsertError = error;
 
 if (error) {
@@ -1998,6 +2041,14 @@ btn.innerText = '가입 신청하기 ☀️';
     }
   } catch (kakaoError) {
     console.error('❌ 알림톡 발송 중 예외:', kakaoError);
+  }
+
+  const successModalCopy = document.getElementById('successModalCopy');
+  if (educationQrToken && successModalCopy) {
+    const educationRecorded = ['GUEST_RECORDED', 'ALREADY_RECORDED'].includes(String(educationSignupResult?.status || ''));
+    successModalCopy.innerHTML = educationRecorded
+      ? '가입 신청과 해당 교육 출석이 함께 접수되었습니다.<br>조합원 승인 후 참여 이력으로 자동 연결됩니다.'
+      : '가입 신청은 완료되었지만 교육 출석은 접수되지 않았습니다.<br>교육 관리자에게 출석 여부를 확인해주세요.';
   }
 
   // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
