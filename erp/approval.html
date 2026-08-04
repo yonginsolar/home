@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.34 | Change: 2026-08-03 - Keep business trip end date aligned with start date and prevent reversed ranges. -->
+<!-- Version: v1.2.35 | Change: 2026-08-04 - Preserve server notifications when Telegram delivery fails without creating duplicates. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.34 | approval.html');</script>
+  <script>console.log('[Version] v1.2.35 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -6119,7 +6119,7 @@ function getApprovalNotificationBaseUrl() {
 async function sendTelegramApprovalNotification(payload) {
     try {
         const targetEmpId = String(payload?.targetEmpId || '').trim();
-        if (!targetEmpId) return false;
+        if (!targetEmpId) return { telegramSent: false, notificationSaved: false };
         const erpBaseUrl = getApprovalNotificationBaseUrl();
         const { data: payloadData, error } = await invokeApprovalEdgeFunction('erp-approval-telegram-dm', {
                 mode: 'create_and_dispatch',
@@ -6132,16 +6132,22 @@ async function sendTelegramApprovalNotification(payload) {
         });
         if (error) {
             console.warn('[telegram] approval notification skipped:', normalizeApprovalEdgeInvokeError(error));
-            return false;
+            return { telegramSent: false, notificationSaved: false };
         }
         if (payloadData?.ok === false) {
             console.warn('[telegram] approval notification rejected:', payloadData);
-            return false;
+            return {
+                telegramSent: false,
+                notificationSaved: Number(payloadData?.notification_id || 0) > 0
+            };
         }
-        return true;
+        return {
+            telegramSent: payloadData?.sent !== false,
+            notificationSaved: Number(payloadData?.notification_id || 0) > 0
+        };
     } catch (e) {
         console.warn('[telegram] approval notification failed:', e);
-        return false;
+        return { telegramSent: false, notificationSaved: false };
     }
 } // End of sendTelegramApprovalNotification
 
@@ -6153,14 +6159,14 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
             safeMeta.event_key = buildApprovalNotificationEventKey(targetEmpId, title, linkUrl, safeMeta);
         }
 
-        const serverDispatched = await sendTelegramApprovalNotification({
+        const dispatchResult = await sendTelegramApprovalNotification({
             targetEmpId,
             title,
             message,
             linkUrl,
             meta: safeMeta
         });
-        if (!serverDispatched) {
+        if (!dispatchResult.notificationSaved) {
             const { error: insertError } = await _supabase
                 .from('erp_notifications')
                 .insert({
@@ -6173,9 +6179,14 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
                     created_by: myInfo?.emp_id || null
                 });
             if (insertError) throw insertError;
-            return { ok: true, telegramSent: false, fallbackInserted: true };
+            return { ok: true, telegramSent: false, fallbackInserted: true, appNotificationSaved: true };
         }
-        return { ok: true, telegramSent: true, fallbackInserted: false };
+        return {
+            ok: true,
+            telegramSent: dispatchResult.telegramSent,
+            fallbackInserted: false,
+            appNotificationSaved: true
+        };
     } catch (e) {
         console.warn('[notification] createNotification failed:', e);
         return { ok: false, telegramSent: false, fallbackInserted: false, error: e };
@@ -6188,7 +6199,7 @@ function buildApprovalSubmitNotice(firstApproverName, notificationResult) {
     if (result?.ok && result?.telegramSent === true) {
         return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\nTelegram 결재 요청 알림을 전송했습니다.`;
     }
-    if (result?.ok && result?.telegramSent === false && result?.fallbackInserted === true) {
+    if (result?.ok && result?.telegramSent === false && (result?.appNotificationSaved === true || result?.fallbackInserted === true)) {
         return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\nTelegram 전송은 실패했고 앱 알림만 저장했습니다.`;
     }
     if (result?.ok && result?.telegramSent === false && result?.fallbackInserted === false) {
@@ -10337,7 +10348,7 @@ async function processApprovalDoc(docId, action, reason = '') {
         relViewModal.hide();
     }
     await Promise.all([loadTodoList(), loadHistoryList()]);
-    const hasTelegramFallback = notificationResults.some((result) => result?.ok && result?.telegramSent === false && result?.fallbackInserted === true);
+    const hasTelegramFallback = notificationResults.some((result) => result?.ok && result?.telegramSent === false && (result?.appNotificationSaved === true || result?.fallbackInserted === true));
     const notices = [];
     if (leaveCancelSettlementNotice) notices.push(leaveCancelSettlementNotice);
     if (businessTripCancelSettlementNotice) notices.push(businessTripCancelSettlementNotice);
