@@ -289,7 +289,7 @@
               <div class="form-section-title mb-0">모두의 인문학 연동</div>
               <span class="badge text-bg-light border" id="humanitiesLinkBadge">미연동</span>
             </div>
-            <p class="small text-muted">저장된 교육의 날짜·시간과 가까운 모두의 인문학 교육을 먼저 표시합니다. 선택 후 연동을 저장하면 하나의 출석을 양쪽 명단에서 확인할 수 있습니다.</p>
+            <p class="small text-muted">교육명 유사도와 시작 시간을 함께 비교해 1순위를 먼저 표시하고 다른 후보도 이어서 보여줍니다. 자동 연결하지 않으므로 내용을 확인한 뒤 직접 승인해 주세요.</p>
             <div id="humanitiesLinkAlert" class="alert d-none" role="status"></div>
             <div class="row g-3">
               <div class="col-lg-7">
@@ -894,9 +894,10 @@
       const candidates = humanitiesLinkState.candidates || [];
       select.innerHTML = saved
         ? '<option value="">연결할 모두의 인문학 교육을 선택하세요.</option>' + candidates.map(function(course) {
-            const difference = Number(course.time_difference_minutes || 0);
-            const proximity = difference === 0 ? '시간 일치' : `${difference.toLocaleString()}분 차이`;
-            return `<option value="${escapeHtml(course.id)}" ${String(link?.humanities_course_id || '') === String(course.id) ? 'selected' : ''}>${escapeHtml(formatKstDateTime(course.starts_at))} · ${escapeHtml(course.title)} · ${escapeHtml(proximity)}</option>`;
+            const rank = Number(course.recommendation_rank || 0);
+            const prefix = rank === 1 ? '1순위 추천 · ' : rank > 1 ? `다른 추천 ${rank - 1} · ` : '';
+            const reason = course.recommendation_reason || `${Number(course.time_difference_minutes || 0).toLocaleString()}분 차이`;
+            return `<option value="${escapeHtml(course.id)}" ${String(link?.humanities_course_id || '') === String(course.id) ? 'selected' : ''}>${escapeHtml(prefix)}${escapeHtml(course.title)} · ${escapeHtml(formatKstDateTime(course.starts_at))} · ${escapeHtml(reason)}</option>`;
           }).join('')
         : '<option value="">교육을 먼저 저장해 주세요.</option>';
       recipient.innerHTML = '<option value="">Telegram 사용 안 함</option>' + (humanitiesLinkState.telegramRecipients || []).map(function(item) {
