@@ -1749,6 +1749,25 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
+<div id="humanitiesAccountLinkModal" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="humanitiesAccountLinkTitle" aria-hidden="true">
+<div class="custom-modal-box" style="text-align:left; max-width:520px;">
+<h5 class="fw-bold mb-2" id="humanitiesAccountLinkTitle">모두의 인문학 계정 연동</h5>
+<p class="small text-secondary">현재 로그인한 조합원 계정을 모두의 인문학 계정과 연결합니다. 두 서비스의 비밀번호와 로그인 세션은 서로 공유하지 않습니다.</p>
+<div class="border rounded p-3 mb-3">
+<p class="small fw-bold mb-2">선택정보 가져오기 동의</p>
+<p class="small text-secondary">선택한 항목만 모두의 인문학으로 전달합니다. 전체 주소와 주민등록번호 원문은 전달하지 않습니다.</p>
+<div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="humanitiesLinkBirthYear"><label class="form-check-label small" for="humanitiesLinkBirthYear">출생연도 가져오기</label></div>
+<div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="humanitiesLinkGender"><label class="form-check-label small" for="humanitiesLinkGender">성별 가져오기</label></div>
+<div class="form-check"><input class="form-check-input" type="checkbox" id="humanitiesLinkResidence"><label class="form-check-label small" for="humanitiesLinkResidence">거주지역(시·군·구, 읍·면·동까지만) 가져오기</label></div>
+</div>
+<div id="humanitiesAccountLinkStatus" class="small text-danger mb-2" role="status" aria-live="polite"></div>
+<div class="d-flex gap-2 justify-content-end">
+<button type="button" class="btn btn-outline-secondary" onclick="cancelHumanitiesAccountLink()">취소</button>
+<button type="button" class="btn btn-success fw-bold" id="humanitiesAccountLinkSubmit" onclick="completeHumanitiesAccountLink()">동의한 항목으로 연동하기</button>
+</div>
+</div>
+</div>
+
 <div id="educationGuestPrivacyModal" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="educationGuestPrivacyTitle" aria-hidden="true">
 <div class="custom-modal-box">
 <h4 class="h5 fw-bold mb-3" id="educationGuestPrivacyTitle">비조합원 교육 출석 개인정보 수집·이용</h4>
@@ -2338,6 +2357,8 @@ const HUMANITIES_CHECKIN_TERMS_VERSION = 'course-checkin-v1-2026-08-04';
 let educationQrContext = null;
 let educationGuestPrivacyReturnFocus = null;
 let educationGuestPrivacyPreviousBodyOverflow = '';
+let pendingHumanitiesCourseCheckIn = false;
+let pendingHumanitiesAccountLink = false;
 
 function setEducationQrInlineStatus(message, type = 'info') {
 const status = document.getElementById('educationQrInlineStatus');
@@ -2360,6 +2381,13 @@ return /^[0-9a-f]{64}$/.test(token) ? token : '';
 } catch (_) { return ''; }
 } // End of getHumanitiesHandoffToken
 
+function getHumanitiesAccountLinkToken() {
+try {
+const token = String(new URLSearchParams(window.location.search || '').get('humanities_account_link') || '').trim().toLowerCase();
+return /^[0-9a-f]{64}$/.test(token) ? token : '';
+} catch (_) { return ''; }
+} // End of getHumanitiesAccountLinkToken
+
 function getHumanitiesQrToken() {
 try {
 const token = String(new URLSearchParams(window.location.search || '').get('humanities_qr') || '').trim().toLowerCase();
@@ -2375,10 +2403,16 @@ Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, Strin
 return url.toString();
 } // End of humanitiesReturnUrl
 
-async function callEducationIntegration(url, apiKey, payload) {
+function humanitiesAccountLinkReturnUrl(params = {}) {
+const url = new URL('https://humanities.yll.or.kr/index.html');
+Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+return url.toString();
+} // End of humanitiesAccountLinkReturnUrl
+
+async function callEducationIntegration(url, apiKey, payload, accessToken = '') {
 const response = await fetch(url, {
 method:'POST',
-headers:{ apikey:apiKey, Authorization:`Bearer ${apiKey}`, 'Content-Type':'application/json' },
+headers:{ apikey:apiKey, Authorization:`Bearer ${accessToken || apiKey}`, 'Content-Type':'application/json' },
 body:JSON.stringify(payload)
 });
 const result = await response.json().catch(() => ({}));
@@ -2421,7 +2455,6 @@ if (!panel || !loginArea) return;
 
 if (humanitiesHandoff && getHumanitiesQrToken()) {
 panel.classList.remove('hidden');
-loginArea.classList.add('hidden');
 const title = document.getElementById('educationQrEntryTitle');
 const meta = document.getElementById('educationQrEntryMeta');
 const choices = document.getElementById('educationQrChoiceGrid');
@@ -2429,8 +2462,8 @@ if (title) title.textContent = '모두의 인문학 연동 교육';
 if (meta) meta.textContent = '용인모두의햇빛협동조합 조합원 정보를 확인하면 같은 교육의 출석이 한 번 기록됩니다.';
 if (choices) choices.classList.add('hidden');
 document.getElementById('educationQrQuickAlternative')?.classList.add('hidden');
-showEducationQrMode('quick');
-setEducationQrInlineStatus('가입된 이름과 휴대전화번호를 정확히 입력해 주세요.', 'info');
+showEducationQrMode('login');
+setEducationQrInlineStatus('조합원 계정으로 로그인하면 이름과 전화번호를 다시 입력하지 않고 출석합니다.', 'info');
 return;
 }
 
@@ -2560,6 +2593,86 @@ setEducationQrInlineStatus('출석을 등록하지 못했습니다. 잠시 후 �
 if (button) button.disabled = false;
 }
 } // End of submitEducationQrQuickCheckIn
+
+async function currentCoopAccessToken() {
+const { data, error } = await _supabase.auth.getSession();
+if (error || !data?.session?.access_token) throw new Error('조합원 로그인이 필요합니다.');
+return data.session.access_token;
+} // End of currentCoopAccessToken
+
+async function handlePendingHumanitiesCourseCheckIn() {
+if (pendingHumanitiesCourseCheckIn) return;
+const handoffToken = getHumanitiesHandoffToken();
+const humanitiesQr = getHumanitiesQrToken();
+if (!handoffToken || !humanitiesQr || !curAuth || !curMem) return;
+pendingHumanitiesCourseCheckIn = true;
+showLoading(true, '연동 교육 출석을 확인하는 중...');
+try {
+const accessToken = await currentCoopAccessToken();
+const partner = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
+action:'complete_authenticated_member_handoff', handoff_token:handoffToken
+}, accessToken);
+await callEducationIntegration(HUMANITIES_CHECKIN_URL, HUMANITIES_PUBLISHABLE_KEY, {
+action:'partner_checkin', qr_token:humanitiesQr, partner_receipt:partner.receipt_token,
+age_confirmed:true, privacy_consent:true, terms_version:HUMANITIES_CHECKIN_TERMS_VERSION
+});
+window.location.replace(humanitiesReturnUrl({ partner_status:'success' }));
+} catch (error) {
+console.error('authenticated humanities check-in failed:', error?.message || error);
+if (error?.fallback === true || error?.code === 'MEMBER_NOT_FOUND') {
+window.location.replace(humanitiesReturnUrl({ partner_fallback:'1' }));
+return;
+}
+setEducationQrInlineStatus(error?.message || '연동 교육 출석을 완료하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
+} finally {
+pendingHumanitiesCourseCheckIn = false;
+showLoading(false);
+}
+} // End of handlePendingHumanitiesCourseCheckIn
+
+function openHumanitiesAccountLinkModal() {
+const token = getHumanitiesAccountLinkToken();
+const modal = document.getElementById('humanitiesAccountLinkModal');
+if (!token || !modal || !curAuth || !curMem) return;
+document.getElementById('humanitiesAccountLinkStatus').textContent = '';
+modal.style.display = 'flex';
+modal.setAttribute('aria-hidden', 'false');
+} // End of openHumanitiesAccountLinkModal
+
+async function handlePendingHumanitiesAccountLink() {
+if (pendingHumanitiesAccountLink || !getHumanitiesAccountLinkToken() || !curAuth || !curMem) return;
+pendingHumanitiesAccountLink = true;
+try { openHumanitiesAccountLinkModal(); }
+finally { pendingHumanitiesAccountLink = false; }
+} // End of handlePendingHumanitiesAccountLink
+
+async function completeHumanitiesAccountLink() {
+const startToken = getHumanitiesAccountLinkToken();
+const button = document.getElementById('humanitiesAccountLinkSubmit');
+const status = document.getElementById('humanitiesAccountLinkStatus');
+if (!startToken || !button || button.disabled) return;
+button.disabled = true;
+if (status) status.textContent = '조합원 계정을 확인하는 중입니다.';
+try {
+const accessToken = await currentCoopAccessToken();
+const result = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
+action:'complete_account_link',
+start_token:startToken,
+consent_birth_year:document.getElementById('humanitiesLinkBirthYear')?.checked === true,
+consent_gender:document.getElementById('humanitiesLinkGender')?.checked === true,
+consent_residence:document.getElementById('humanitiesLinkResidence')?.checked === true
+}, accessToken);
+window.location.replace(humanitiesAccountLinkReturnUrl({ coop_link_receipt:result.receipt_token }));
+} catch (error) {
+console.error('humanities account link failed:', error?.message || error);
+if (status) status.textContent = error?.message || '계정 연동을 완료하지 못했습니다.';
+button.disabled = false;
+}
+} // End of completeHumanitiesAccountLink
+
+function cancelHumanitiesAccountLink() {
+window.location.replace(humanitiesAccountLinkReturnUrl({ coop_link_cancelled:'1' }));
+} // End of cancelHumanitiesAccountLink
 
 async function submitEducationQrGuestCheckIn(event) {
 event.preventDefault();
@@ -3840,6 +3953,8 @@ if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
 	
 	showOnly('dashboardSection');
 	await handlePendingEducationQrCheckIn(uuid);
+	await handlePendingHumanitiesCourseCheckIn();
+	await handlePendingHumanitiesAccountLink();
 
 	} catch (e) {
 console.error("Dashboard Load Error:", e);
