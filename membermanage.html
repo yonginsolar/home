@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.106
-Change: Enlarge mobile profile labels and account guidance.
+Version: v1.0.107
+Change: Enlarge mobile form text and place desktop education photos beside details.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.106 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.107 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -669,8 +669,65 @@ text-align: left;
 display: flex;
 flex-direction: column;
 }
+.participation-history-main,
+.participation-history-media {
+min-width: 0;
+}
+
+@media (min-width: 641px) {
+#participationHistoryModal .custom-modal-box {
+max-width: 920px;
+}
+.participation-history-item.education-with-photo {
+display: grid;
+grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+gap: 20px;
+align-items: start;
+padding: 18px;
+}
+.participation-history-item.education-with-photo .participation-photo-strip {
+width: 100%;
+margin-top: 0;
+}
+.participation-history-item.education-with-photo .participation-photo-thumb {
+height: 190px;
+}
+}
 
 @media (max-width: 640px) {
+.custom-modal-overlay:not(#participationHistoryModal) {
+align-items: flex-start;
+overflow-y: auto;
+overscroll-behavior-y: contain;
+padding: 12px;
+}
+.custom-modal-overlay:not(#participationHistoryModal) .custom-modal-box {
+width: 100%;
+max-height: calc(100dvh - 24px);
+margin: auto 0;
+padding: 22px 18px;
+overflow-y: auto;
+}
+.signup-wrapper :is(.small, small, .form-label, .form-text),
+.custom-modal-box :is(.small, small, .x-small, .form-label, .form-text),
+#dashboardSection label.small,
+#dashboardSection .form-label.small,
+#dashboardSection .form-text {
+font-size: 1rem !important;
+line-height: 1.55;
+}
+.custom-modal-box :is(.form-control, .form-select, .input-group-text),
+#dashboardSection :is(.form-control-sm, .form-select-sm),
+#dashboardSection .input-group-sm > :is(.form-control, .form-select, .input-group-text) {
+min-height: 46px;
+font-size: 1rem;
+}
+.custom-modal-box .btn:not(.btn-close),
+.custom-modal-box .btn-modal,
+.signup-wrapper .btn-sm {
+min-height: 44px;
+font-size: 1rem;
+}
 .profile-summary-card {
 padding: 14px 16px;
 }
@@ -5153,6 +5210,7 @@ alt: String(file.original_name || `교육 사진 ${index + 1}`).trim()
 }).filter(function(item) { return item.storagePath; });
 const firstPhoto = photoGalleryPayload[0] || null;
 const firstPhotoUrl = firstPhoto ? (photoUrlMap.get(firstPhoto.storagePath) || '') : '';
+const hasEducationPhoto = event.event_type === 'EDUCATION' && Boolean(firstPhoto);
 const photosHtml = firstPhoto
 ? `<div class="participation-photo-strip" aria-label="교육 사진 ${photoGalleryPayload.length}장">
 <button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhoto.storagePath)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="교육 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
@@ -5160,7 +5218,8 @@ const photosHtml = firstPhoto
 </div>`
 : '';
 return `
-<article class="participation-history-item">
+<article class="participation-history-item${hasEducationPhoto ? ' education-with-photo' : ''}">
+<div class="participation-history-main">
 <div class="d-flex justify-content-between align-items-start gap-2">
 <div>
 <div class="small text-muted mb-1">${escapeHtml(participationEventTypeLabel(event.event_type))}</div>
@@ -5173,7 +5232,8 @@ ${educationHtml}
 ${actualAttendeeHtml}
 ${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
 ${materialsHtml}
-${photosHtml}
+</div>
+${hasEducationPhoto ? `<div class="participation-history-media">${photosHtml}</div>` : photosHtml}
 </article>`;
 }).join('');
 list.querySelectorAll('[data-participation-file]').forEach(function(button) {
