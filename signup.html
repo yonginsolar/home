@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.36
-Change: Preserve education QR context and register attendance with age and privacy confirmation.
+Version: v1.0.37
+Change: Send only the new member UUID to the authenticated welcome-notification endpoint.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.36 | signup.html');</script>
+  <script>console.log('[Version] v1.0.37 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -1996,51 +1996,17 @@ btn.innerText = '가입 신청하기 ☀️';
     console.warn('[member-request-alert] signup admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
   });
 
-  // ===========================================
-  // 알림톡 발송 (Supabase Edge Function 호출)
-  // - 템플릿 검수 중엔 실패할 수 있으니 에러 본문을 최대한 뽑아봅니다.
-  // - 필요 없으면 아래 블록 전체를 주석 처리해도 됩니다.
-  // ===========================================
-  try {
-    const { data, error } = await _supabase.functions.invoke('send-welcome-kakao', {
-      body: {
-        name: nameInput.value,
-        phone: insertData.phone,
-        amount: Number(moneyVal)
-      }
-    });
-    // 에러가 있으면 상세 본문까지 최대한 확인
-    if (error) {
-      console.error('❌ 알림톡 발송 실패:', error);
-
-      let detail = null;
-
-      try {
-        // error.context 는 Response 객체일 수 있음
-        if (error.context) {
-          const res = error.context;      // Response
-          const cloned = res.clone();     // body 1회성 보호
-          const ct = res.headers?.get?.('content-type') || '';
-
-          if (ct.includes('application/json')) {
-            detail = await cloned.json();
-          } else {
-            const text = await cloned.text();
-            // JSON 문자열로 올 수도 있어 한번 더 파싱 시도
-            try { detail = JSON.parse(text); } catch { detail = { raw: text }; }
-          }
-        } else {
-          detail = { message: error.message, name: error.name };
-        }
-      } catch (e) {
-        console.error('응답 본문 읽기 실패:', e);
-        detail = { message: error.message, name: error.name };
-      }
-
-      console.error('에러 상세:', detail);
+  // 가입자 정보는 서버에 그대로 보관하며, 알림 함수에는 방금 생성된 UUID만 보냅니다.
+  // 함수가 로그인 이메일·생성 시각·협동조합을 다시 확인하고 발송 원장으로 중복을 막습니다.
+  if (createdMemberUuid) {
+    try {
+      const { error } = await _supabase.functions.invoke('send-welcome-kakao', {
+        body: { memberId: createdMemberUuid }
+      });
+      if (error) console.warn('[welcome-kakao] 가입은 완료됐지만 안내 발송을 확인하지 못했습니다.');
+    } catch (_) {
+      console.warn('[welcome-kakao] 가입은 완료됐지만 안내 발송을 확인하지 못했습니다.');
     }
-  } catch (kakaoError) {
-    console.error('❌ 알림톡 발송 중 예외:', kakaoError);
   }
 
   const successModalCopy = document.getElementById('successModalCopy');
