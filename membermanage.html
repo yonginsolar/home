@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.102
-Change: Add education QR quick authentication and consent-based guest attendance.
+Version: v1.0.103
+Change: Improve mobile participation readability and add swipeable education photos.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.102 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.103 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -658,10 +658,109 @@ flex-direction: column;
 }
 
 @media (max-width: 640px) {
+#participationHistoryModal {
+align-items: flex-start;
+padding: 0;
+overflow-y: auto;
+overscroll-behavior-y: contain;
+-webkit-overflow-scrolling: touch;
+}
+#participationHistoryModal .custom-modal-box {
+width: 100%;
+max-width: none;
+min-height: 100dvh;
+max-height: none;
+margin: 0;
+padding: max(20px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+border-radius: 0;
+overflow: visible;
+}
+#participationHistoryTitle {
+font-size: 1.3rem;
+line-height: 1.4;
+}
+#participationHistorySummary {
+font-size: 1rem !important;
+line-height: 1.5;
+}
+.participation-history-tabs {
+gap: 8px;
+padding: 5px;
+margin-bottom: 16px;
+}
+.participation-history-tab {
+min-height: 50px;
+font-size: 1.08rem;
+}
+.participation-history-list {
+max-height: none;
+overflow: visible;
+gap: 14px;
+padding: 0 0 16px;
+}
+.participation-history-item {
+padding: 16px;
+border-radius: 14px;
+}
+.participation-history-item .fw-bold {
+font-size: 1.1rem;
+line-height: 1.45;
+}
+.participation-history-item .small {
+font-size: 1rem !important;
+line-height: 1.6;
+}
+.participation-history-meta {
+display: grid;
+gap: 6px;
+font-size: 1rem;
+line-height: 1.55;
+margin-top: 10px;
+}
+.participation-status-chip {
+flex: 0 0 auto;
+padding: 6px 10px;
+font-size: .92rem;
+}
+.participation-history-item .badge {
+font-size: .92rem;
+line-height: 1.4;
+white-space: normal;
+text-align: left;
+}
+.participation-history-item [data-participation-file] {
+min-height: 44px;
+font-size: 1rem;
+}
+.participation-photo-strip {
+gap: 10px;
+margin-inline: -4px;
+padding: 4px 4px 10px;
+scroll-snap-type: x mandatory;
+scrollbar-width: none;
+touch-action: pan-x;
+}
+.participation-photo-strip::-webkit-scrollbar { display: none; }
+.participation-photo-thumb {
+flex-basis: min(76vw, 300px);
+width: min(76vw, 300px);
+height: 180px;
+border-radius: 12px;
+scroll-snap-align: center;
+scroll-snap-stop: always;
+}
 .participation-image-lightbox { padding: 10px; }
 .participation-image-lightbox-stage,
 .participation-image-lightbox-stage img { max-width: 96vw; }
 .participation-image-lightbox-stage img { max-height: 80vh; }
+.participation-image-lightbox-stage {
+touch-action: pan-y;
+user-select: none;
+-webkit-user-select: none;
+}
+.participation-image-lightbox-meta {
+font-size: .95rem;
+}
 .participation-image-lightbox-nav {
 width: 44px;
 height: 44px;
@@ -4815,6 +4914,7 @@ let participationImageReturnFocus = null;
 let participationImageGallery = [];
 let participationImageIndex = -1;
 let participationImageLoadVersion = 0;
+let participationImageSwipeStart = null;
 let pendingEducationQrCheckIn = false;
 const participationSignedUrlCache = new Map();
 
@@ -5083,7 +5183,7 @@ image.title = hasMultiple ? '사진의 왼쪽 또는 오른쪽을 눌러 이동'
 if (meta) {
 meta.hidden = !hasMultiple;
 meta.textContent = hasMultiple
-? `${participationImageIndex + 1} / ${participationImageGallery.length} · 사진 좌우 클릭 또는 방향키`
+? `${participationImageIndex + 1} / ${participationImageGallery.length} · 좌우로 밀어 사진 넘기기`
 : '';
 }
 } // End of syncParticipationImageLightboxControls
@@ -5145,6 +5245,36 @@ if (participationImageGallery.length <= 1) return;
 showParticipationImageAt(participationImageIndex + Number(delta || 0));
 } // End of stepParticipationImage
 
+function beginParticipationImageSwipe(event) {
+if (participationImageGallery.length <= 1 || event.touches?.length !== 1) {
+participationImageSwipeStart = null;
+return;
+}
+const touch = event.touches[0];
+participationImageSwipeStart = {
+x: touch.clientX,
+y: touch.clientY,
+startedAt: Date.now()
+};
+} // End of beginParticipationImageSwipe
+
+function endParticipationImageSwipe(event) {
+const start = participationImageSwipeStart;
+participationImageSwipeStart = null;
+if (!start || participationImageGallery.length <= 1) return;
+const touch = event.changedTouches?.[0];
+if (!touch) return;
+const deltaX = touch.clientX - start.x;
+const deltaY = touch.clientY - start.y;
+const elapsed = Date.now() - start.startedAt;
+if (elapsed > 800 || Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return;
+stepParticipationImage(deltaX < 0 ? 1 : -1);
+} // End of endParticipationImageSwipe
+
+function cancelParticipationImageSwipe() {
+participationImageSwipeStart = null;
+} // End of cancelParticipationImageSwipe
+
 async function openParticipationImageLightbox(storagePath, triggerElement) {
 try {
 const overlay = document.getElementById('participationImageLightbox');
@@ -5201,6 +5331,7 @@ if (participationImageReturnFocus && typeof participationImageReturnFocus.focus 
 participationImageReturnFocus = null;
 participationImageGallery = [];
 participationImageIndex = -1;
+participationImageSwipeStart = null;
 syncParticipationImageLightboxControls();
 } // End of closeParticipationImageLightbox
 
@@ -5258,6 +5389,10 @@ stepParticipationImage(event.clientX < rect.left + (rect.width / 2) ? -1 : 1);
 document.getElementById('participationImageLightbox')?.addEventListener('click', function(event) {
 if (event.target === event.currentTarget) closeParticipationImageLightbox();
 });
+
+document.querySelector('.participation-image-lightbox-stage')?.addEventListener('touchstart', beginParticipationImageSwipe, { passive: true });
+document.querySelector('.participation-image-lightbox-stage')?.addEventListener('touchend', endParticipationImageSwipe, { passive: true });
+document.querySelector('.participation-image-lightbox-stage')?.addEventListener('touchcancel', cancelParticipationImageSwipe, { passive: true });
 
 function getPendingEducationQrToken() {
 try {
