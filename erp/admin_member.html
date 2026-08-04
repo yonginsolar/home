@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.129
-Change: Harden administrator list rendering and external file links.
+Version: v1.0.130
+Change: Expand persistent-XSS escaping across legacy administrator lists.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.129';
+window.ADMIN_MEMBER_VERSION = 'v1.0.130';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -6196,7 +6196,7 @@ return;
 }
 
 data.forEach(p => {
-const monitorUrl = String(p.monitor_url || '').trim();
+const monitorUrl = normalizeAdminHttpUrl(p.monitor_url);
 const monitorHtml = monitorUrl
 ? `<a href="${escapeHtml(monitorUrl)}" target="_blank" rel="noopener noreferrer" class="text-truncate" style="max-width:140px; display:inline-block;">${escapeHtml(monitorUrl)}</a>`
 : '-';
@@ -6233,13 +6233,14 @@ const tbody = document.getElementById('historyListBody');
 tbody.innerHTML = '';
 if(!data) return;
 data.forEach(h => {
+const historyId = escapeJsString(String(h.id || ''));
 tbody.innerHTML += `<tr>
-                   <td>${h.event_date}</td>
-                   <td>${h.title}</td>
-                   <td>${h.content || ''}</td>
+                   <td>${escapeHtml(h.event_date || '')}</td>
+                   <td>${escapeHtml(h.title || '')}</td>
+                   <td>${escapeHtml(h.content || '')}</td>
                    <td>
-                       <button class="btn btn-sm btn-light" onclick="openSiteHistoryModal('${h.id}')">수정</button>
-                       <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteHistory('${h.id}')">삭제</button>
+                       <button class="btn btn-sm btn-light" onclick="openSiteHistoryModal('${historyId}')">수정</button>
+                       <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteHistory('${historyId}')">삭제</button>
                    </td>
                </tr>`;
 });
@@ -6779,6 +6780,8 @@ const sortedSections = getSortedSectionDrafts();
 tbody.innerHTML = '';
 
 sortedSections.forEach(sec => {
+const safeSectionIdText = escapeHtml(sec.id || '');
+const safeSectionIdArg = escapeJsString(sec.id || '');
 const checkedAttr = sec.is_visible ? 'checked' : '';
 const statusBadge = sec.is_visible
 ? '<span class="badge bg-success">공개중</span>'
@@ -6787,8 +6790,8 @@ const statusBadge = sec.is_visible
 const sectionIndex = sortedSections.findIndex((row) => row.id === sec.id);
 const moveControls = `
 <div class="btn-group btn-group-sm section-order-controls" role="group" aria-label="section-order">
-  <button type="button" class="btn btn-outline-secondary" ${sectionIndex <= 0 ? 'disabled' : ''} onclick="moveSectionOrder('${sec.id}', -1)">↑</button>
-  <button type="button" class="btn btn-outline-secondary" ${sectionIndex >= sortedSections.length - 1 ? 'disabled' : ''} onclick="moveSectionOrder('${sec.id}', 1)">↓</button>
+  <button type="button" class="btn btn-outline-secondary" ${sectionIndex <= 0 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', -1)">↑</button>
+  <button type="button" class="btn btn-outline-secondary" ${sectionIndex >= sortedSections.length - 1 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', 1)">↓</button>
 </div>
 `;
 
@@ -6796,8 +6799,8 @@ tbody.innerHTML += `
                    <tr>
                        <td class="align-middle text-center">${getSectionDisplayOrder(sec)}</td>
                        <td class="align-middle text-start ps-4">
-                           <span class="fw-bold text-dark">${sec.name}</span> <br>
-                           <small class="text-muted" style="font-size:0.85em;">ID: ${sec.id}</small>
+                           <span class="fw-bold text-dark">${escapeHtml(sec.name || '')}</span> <br>
+                           <small class="text-muted" style="font-size:0.85em;">ID: ${safeSectionIdText}</small>
                        </td>
                        <td class="align-middle text-center">${statusBadge}</td>
                        <td class="align-middle text-center">
@@ -6807,7 +6810,7 @@ tbody.innerHTML += `
                                <input class="form-check-input" type="checkbox" role="switch"
                                    style="cursor: pointer;"
                                    ${checkedAttr}
-                                   onchange="toggleSection('${sec.id}', this.checked)">
+                                   onchange="toggleSection('${safeSectionIdArg}', this.checked)">
                            </div>
                            </div>
                        </td>
@@ -8614,7 +8617,7 @@ return;
 
 g_siteActivities.forEach((row) => {
 const parsedActivity = parseActivityContentWithGallery(row.content || '', row.file_url || '');
-const coverUrl = String(parsedActivity.galleryUrls[0] || row.file_url || '').trim();
+const coverUrl = normalizeAdminHttpUrl(parsedActivity.galleryUrls[0] || row.file_url);
 const coverHtml = coverUrl
 ? `<img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(row.title || '활동 대표 사진')}" style="width:72px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;">`
 : '<span class="text-muted small">없음</span>';
@@ -9141,18 +9144,19 @@ async function fetchPartners() {
     else {
         pendingList.forEach(p => {
             const preview = resolvePartnerPendingPreview(p);
+            const partnerIdArg = escapeJsString(String(p.id || ''));
             const badgeClass = preview.badgeLabel === '수정 요청' ? 'bg-danger-subtle text-danger' : 'bg-warning-subtle text-warning-emphasis';
             pendingBody.innerHTML += `
                 <tr class="bg-warning bg-opacity-10">
                     <td class="align-middle fw-bold ps-3">
                         <div class="d-flex align-items-center gap-2">
-                            <span>${preview.name}</span>
-                            <span class="badge rounded-pill ${badgeClass}">${preview.badgeLabel}</span>
+                            <span>${escapeHtml(preview.name || '')}</span>
+                            <span class="badge rounded-pill ${badgeClass}">${escapeHtml(preview.badgeLabel || '')}</span>
                         </div>
                     </td>
-                    <td class="align-middle small text-muted">${preview.description}</td>
+                    <td class="align-middle small text-muted">${escapeHtml(preview.description || '')}</td>
                     <td class="align-middle text-end pe-3">
-                        <button class="btn btn-sm btn-primary" onclick="openPartnerModal('${p.id}')">${preview.badgeLabel === '수정 요청' ? '검토' : '승인'}</button>
+                        <button class="btn btn-sm btn-primary" onclick="openPartnerModal('${partnerIdArg}')">${preview.badgeLabel === '수정 요청' ? '검토' : '승인'}</button>
                     </td>
                 </tr>`;
         });
@@ -9162,6 +9166,7 @@ async function fetchPartners() {
     if(activeList.length === 0) activeBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">등록된 파트너가 없습니다.</td></tr>';
     else {
         activeList.forEach(p => {
+            const partnerIdArg = escapeJsString(String(p.id || ''));
             let badgesHtml = '';
             // ★ [핵심 변경] badges.js의 renderPill 사용
             if(p.badges && p.badges.length > 0) {
@@ -9170,8 +9175,9 @@ async function fetchPartners() {
                     badgesHtml += Badges.renderPill(b);
                 });
             }
-            const logo = p.logo_url
-                ? `<div class="partner-logo-thumb"><img src="${p.logo_url}" alt="${escapeHtml(p.name || '협력단체 로고')}"></div>`
+            const logoUrl = normalizeAdminHttpUrl(p.logo_url);
+            const logo = logoUrl
+                ? `<div class="partner-logo-thumb"><img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(p.name || '협력단체 로고')}"></div>`
                 : '-';
             const hasPending = hasPartnerPendingChanges(p.pending_changes);
             const pendingBadge = hasPending ? '<span class="badge rounded-pill bg-danger-subtle text-danger ms-2">수정 요청</span>' : '';
@@ -9181,17 +9187,17 @@ async function fetchPartners() {
 
             activeBody.innerHTML += `
                 <tr>
-                    <td class="text-center">${p.display_order}</td>
+                    <td class="text-center">${escapeHtml(p.display_order ?? '')}</td>
                     <td class="text-center">${logo}</td>
                     <td>
-                        <div class="fw-bold">${p.name}${pendingBadge}</div>
-                        <div class="small text-muted text-truncate" style="max-width:200px;">${p.description||'-'}</div>
+                        <div class="fw-bold">${escapeHtml(p.name || '')}${pendingBadge}</div>
+                        <div class="small text-muted text-truncate" style="max-width:200px;">${escapeHtml(p.description || '-')}</div>
                         ${pendingDesc}
                     </td>
                     <td>${badgesHtml}</td>
                     <td class="text-center">
-                        <button class="btn btn-sm btn-light" onclick="openPartnerModal('${p.id}')">${hasPending ? '검토' : '수정'}</button>
-                        <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeletePartner('${p.id}')">삭제</button>
+                        <button class="btn btn-sm btn-light" onclick="openPartnerModal('${partnerIdArg}')">${hasPending ? '검토' : '수정'}</button>
+                        <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeletePartner('${partnerIdArg}')">삭제</button>
                     </td>
                 </tr>`;
         });
@@ -9370,22 +9376,26 @@ async function fetchBadges() {
 
     tbody.innerHTML = '';
     g_badges.forEach(b => {
+        const badgeIdArg = escapeJsString(String(b.id || ''));
+        const badgeColor = ['primary','secondary','success','danger','warning','info','light','dark'].includes(String(b.color || '').toLowerCase())
+            ? String(b.color).toLowerCase()
+            : 'secondary';
         // 색상 표시용 뱃지 (Pill 아님, 관리용)
-        const colorBadge = `<span class="badge bg-${b.color} text-white">${b.color}</span>`;
+        const colorBadge = `<span class="badge bg-${badgeColor} text-white">${escapeHtml(b.color || badgeColor)}</span>`;
 
         tbody.innerHTML += `
             <tr>
-                <td>${b.display_order}</td>
-                <td class="fs-4">${b.icon || ''}</td>
+                <td>${escapeHtml(b.display_order ?? '')}</td>
+                <td class="fs-4">${escapeHtml(b.icon || '')}</td>
                 <td class="text-start">
-                    <div class="fw-bold">${b.name}</div>
-                    <div class="small text-muted">${b.description || '-'}</div>
+                    <div class="fw-bold">${escapeHtml(b.name || '')}</div>
+                    <div class="small text-muted">${escapeHtml(b.description || '-')}</div>
                 </td>
-                <td class="small font-monospace">${b.code}</td>
+                <td class="small font-monospace">${escapeHtml(b.code || '')}</td>
                 <td>${colorBadge}</td>
                 <td>
-                    <button class="btn btn-sm btn-light" onclick="openBadgeModal('${b.id}')">수정</button>
-                    <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteBadge('${b.id}')">삭제</button>
+                    <button class="btn btn-sm btn-light" onclick="openBadgeModal('${badgeIdArg}')">수정</button>
+                    <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteBadge('${badgeIdArg}')">삭제</button>
                 </td>
             </tr>
         `;
@@ -11411,10 +11421,10 @@ async function loadConsultLogs(uuid) { // uuid는 유지(호출부 호환), 내�
     listEl.innerHTML += `
       <div class="list-group-item bg-light border-0 mb-1 rounded">
         <div class="d-flex justify-content-between">
-          <small class="fw-bold text-dark">${log.author_email || '관리자'}</small>
-          <small class="text-muted" style="font-size:0.8em">${dateStr}</small>
+          <small class="fw-bold text-dark">${escapeHtml(log.author_email || '관리자')}</small>
+          <small class="text-muted" style="font-size:0.8em">${escapeHtml(dateStr)}</small>
         </div>
-        <div class="mt-1 text-secondary" style="font-size:0.9rem; white-space: pre-wrap;">${log.content}</div>
+        <div class="mt-1 text-secondary" style="font-size:0.9rem; white-space: pre-wrap;">${escapeHtml(log.content || '')}</div>
       </div>
     `;
   });
@@ -13025,7 +13035,7 @@ function renderLogTable(list) {
         const dateStr = formatAdminMemberKstDateTimeSeconds(log.created_at, '-');
 
         // 유형별 뱃지 스타일
-        let typeBadge = `<span class="badge bg-secondary">${log.action_type}</span>`;
+        let typeBadge = `<span class="badge bg-secondary">${escapeHtml(log.action_type || '')}</span>`;
         if (log.action_type === 'DOWNLOAD') typeBadge = `<span class="badge bg-danger">📥 다운로드</span>`;
         else if (log.action_type === 'EDIT') typeBadge = `<span class="badge bg-primary">✏️ 수정</span>`;
         else if (log.action_type === 'VIEW') typeBadge = `<span class="badge bg-light text-dark border">👁️ 조회</span>`;
@@ -13036,14 +13046,14 @@ function renderLogTable(list) {
 
         tbody.innerHTML += `
             <tr>
-                <td class="text-muted small">${dateStr}</td>
-                <td class="fw-bold text-dark">${email}</td>
+                <td class="text-muted small">${escapeHtml(dateStr)}</td>
+                <td class="fw-bold text-dark">${escapeHtml(email)}</td>
                 <td>${typeBadge}</td>
-                <td class="text-start">${log.target || '-'}</td>
-                <td class="text-start text-truncate" style="max-width: 300px;" title="${log.details}">
-                    ${log.details || '-'}
+                <td class="text-start">${escapeHtml(log.target || '-')}</td>
+                <td class="text-start text-truncate" style="max-width: 300px;" title="${escapeHtml(log.details || '')}">
+                    ${escapeHtml(log.details || '-')}
                 </td>
-                <td class="text-muted small">${log.ip_address || '-'}</td>
+                <td class="text-muted small">${escapeHtml(log.ip_address || '-')}</td>
             </tr>
         `;
     });
@@ -13129,14 +13139,14 @@ async function fetchGlobalDonations() {
 
         tbody.innerHTML += `
             <tr>
-                <td>${d.donation_date}</td>
+                <td>${escapeHtml(d.donation_date || '')}</td>
                 <td class="text-start ps-4">
-                    <span class="fw-bold">${name}</span>
-                    <small class="text-muted">(${d.member_id})</small>
+                    <span class="fw-bold">${escapeHtml(name)}</span>
+                    <small class="text-muted">(${escapeHtml(d.member_id || '')})</small>
                 </td>
                 <td class="fw-bold text-end pe-4">${Number(d.amount).toLocaleString()}</td>
                 <td>${methodBadge}</td>
-                <td class="text-start text-muted small">${d.note || '-'}</td>
+                <td class="text-start text-muted small">${escapeHtml(d.note || '-')}</td>
             </tr>
         `;
     });
@@ -13206,7 +13216,7 @@ async function fetchGlobalDividends() {
         const amt = Number(p.change_amount || 0);
 
         // 뱃지 처리
-        let typeBadge = `<span class="badge bg-light text-dark border">${p.transaction_type}</span>`;
+        let typeBadge = `<span class="badge bg-light text-dark border">${escapeHtml(p.transaction_type || '')}</span>`;
         let colorClass = 'text-dark';
         let sign = '';
 
@@ -13232,13 +13242,13 @@ async function fetchGlobalDividends() {
             <tr>
                 <td class="small text-secondary">${dateStr}</td>
                 <td class="fw-bold text-start ps-4">
-                    ${memberName}
-                    <span class="small text-muted ms-1">(${memberTextId})</span>
+                    ${escapeHtml(memberName)}
+                    <span class="small text-muted ms-1">(${escapeHtml(memberTextId)})</span>
                 </td>
                 <td>${typeBadge}</td>
                 <td class="text-end pe-4 ${colorClass}">${sign}${Math.abs(amt).toLocaleString()}</td>
-                <td class="text-start small text-truncate" style="max-width: 250px;" title="${p.reason || ''}">
-                    ${p.reason || '-'}
+                <td class="text-start small text-truncate" style="max-width: 250px;" title="${escapeHtml(p.reason || '')}">
+                    ${escapeHtml(p.reason || '-')}
                 </td>
             </tr>
         `;
@@ -15406,7 +15416,7 @@ function renderAppList() {
             `;
 
         // 상태 뱃지
-        let statusBadge = `<span class="badge bg-secondary">${app.status}</span>`;
+        let statusBadge = `<span class="badge bg-secondary">${escapeHtml(app.status || '')}</span>`;
         let actionBtns = '-';
 
         if (app.status === 'pending') {
