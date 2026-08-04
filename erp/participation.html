@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.1 | Change: 2026-08-05 - Move Humanities import into new education, hide ended QR, and print audited attendance. -->
+<!-- Version: v1.3.2 | Change: 2026-08-05 - Improve roster title scaling, confirmation wrapping, and Korean word breaks. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.1 | participation.html');</script>
+  <script>console.log('[Version] v1.3.2 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -155,23 +155,27 @@
       }
       .education-roster-print-page { width:210mm; min-height:297mm; box-sizing:border-box; padding:14mm; position:relative; break-after:page; page-break-after:always; }
       .education-roster-print-page:last-child { break-after:auto; page-break-after:auto; }
-      .education-roster-print-page h1 { margin:0; text-align:center; font-size:28pt; line-height:1.25; word-break:keep-all; overflow-wrap:anywhere; }
+      .education-roster-print-page h1 { margin:0 auto; max-width:100%; text-align:center; font-size:28pt; line-height:1.25; word-break:keep-all; overflow-wrap:anywhere; text-wrap:balance; }
+      .education-roster-print-page h1.title-medium { font-size:22pt; }
+      .education-roster-print-page h1.title-small { font-size:18pt; }
+      .education-roster-print-page h1.title-compact { font-size:15.5pt; }
       .education-roster-print-gap { height:8mm; }
       .education-roster-print-heading { margin-bottom:4mm; font-size:18pt; font-weight:850; }
       .education-roster-print-meta { display:grid; grid-template-columns:1fr 1fr; gap:3mm 8mm; margin-bottom:6mm; color:#334155; font-size:10.5pt; }
       .education-roster-print-meta strong { margin-right:2mm; color:#0f172a; }
       .education-roster-print-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:9.5pt; }
-      .education-roster-print-table th, .education-roster-print-table td { border:.3mm solid #64748b; padding:2mm; text-align:center; height:12mm; vertical-align:middle; }
+      .education-roster-print-table th, .education-roster-print-table td { border:.3mm solid #64748b; padding:2mm; text-align:center; height:12mm; vertical-align:middle; word-break:keep-all; overflow-wrap:anywhere; }
       .education-roster-print-table th { height:10mm; background:#f1f5f9; font-weight:800; }
       .education-roster-print-table th:nth-child(1), .education-roster-print-table td:nth-child(1) { width:11mm; }
       .education-roster-print-table th:nth-child(2), .education-roster-print-table td:nth-child(2) { width:43mm; }
       .education-roster-print-table th:nth-child(3), .education-roster-print-table td:nth-child(3) { width:32mm; }
       .education-roster-print-table th:nth-child(4), .education-roster-print-table td:nth-child(4) { width:58mm; }
       .education-roster-print-table th:nth-child(5), .education-roster-print-table td:nth-child(5) { width:28mm; }
+      .education-roster-print-table td.attendance-confirmation { font-size:8.3pt; line-height:1.3; }
       .education-roster-print-page-number { position:absolute; right:14mm; bottom:8mm; color:#64748b; font-size:9pt; }
     }
   </style>
-  <link rel="stylesheet" href="./erp_theme.css?v=1.1.0">
+  <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <style>
     body.erp-unified.participation-white-background {
       background:#fff !important;
@@ -1266,6 +1270,21 @@
       return `${checkedAt} · 관리자 확인(${adminName})`;
     } // End of educationAttendanceConfirmation
 
+    function educationAttendanceConfirmationHtml(value) {
+      return String(value || '-')
+        .split(/\s*·\s*/)
+        .map(function(part) { return escapeHtml(part || '-'); })
+        .join('<br>');
+    } // End of educationAttendanceConfirmationHtml
+
+    function educationRosterTitleClass(title) {
+      const length = Array.from(String(title || '')).length;
+      if (length > 42) return 'title-compact';
+      if (length > 28) return 'title-small';
+      if (length > 18) return 'title-medium';
+      return '';
+    } // End of educationRosterTitleClass
+
     function renderEducationPrintRoster() {
       const members = (formState.attendees || []).map(function(row) {
         return {
@@ -1297,9 +1316,9 @@
         const body = Array.from({ length:rowsPerPage }, function(__, rowIndex) {
           const index = pageStart + rowIndex;
           const row = rows[index] || {};
-          return `<tr><td>${index + 1}</td><td>${escapeHtml(row.name || '')}</td><td>${escapeHtml(row.identityCode || '')}</td><td>${escapeHtml(row.attendance || '')}</td><td>${escapeHtml(row.note || '')}</td></tr>`;
+          return `<tr><td>${index + 1}</td><td>${escapeHtml(row.name || '')}</td><td>${escapeHtml(row.identityCode || '')}</td><td class="attendance-confirmation">${educationAttendanceConfirmationHtml(row.attendance)}</td><td>${escapeHtml(row.note || '')}</td></tr>`;
         }).join('');
-        return `<section class="education-roster-print-page"><h1>${escapeHtml(title)}</h1><div class="education-roster-print-gap"></div><div class="education-roster-print-heading">참석부</div><div class="education-roster-print-meta"><div><strong>교육일시</strong>${escapeHtml(schedule)}</div><div><strong>장소</strong>${escapeHtml(location)}</div></div><table class="education-roster-print-table"><thead><tr><th>번호</th><th>성명(가나다순)</th><th>본인 확인 코드</th><th>참석 확인</th><th>비고</th></tr></thead><tbody>${body}</tbody></table><div class="education-roster-print-page-number">${pageIndex + 1} / ${pageCount} · ${escapeHtml(participationBranding.companyName || '협동조합')}</div></section>`;
+        return `<section class="education-roster-print-page"><h1 class="${educationRosterTitleClass(title)}">${escapeHtml(title)}</h1><div class="education-roster-print-gap"></div><div class="education-roster-print-heading">참석부</div><div class="education-roster-print-meta"><div><strong>교육일시</strong>${escapeHtml(schedule)}</div><div><strong>장소</strong>${escapeHtml(location)}</div></div><table class="education-roster-print-table"><thead><tr><th>번호</th><th>성명(가나다순)</th><th>본인 확인 코드</th><th>참석 확인</th><th>비고</th></tr></thead><tbody>${body}</tbody></table><div class="education-roster-print-page-number">${pageIndex + 1} / ${pageCount} · ${escapeHtml(participationBranding.companyName || '협동조합')}</div></section>`;
       }).join('');
     } // End of renderEducationPrintRoster
 
