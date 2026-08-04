@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.51 | Change: 2026-07-03 - Add join D+ label and blurred cumulative salary summary. -->
+<!-- Version: v1.0.52 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.51 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.52 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -28,7 +28,7 @@
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
 <script src="print_service.js?v=20260510-1324-1"></script>
 <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
 <script src="leave_ledger.js?v=20260409-1258-1"></script>
@@ -1173,14 +1173,12 @@ confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
 setupLeaveDetailModalFocusGuard();
 setupAlertModalFocusGuard();
 focusLeaveBadgeFallback();
-const stored=localStorage.getItem('erp_user');
-if(!stored){showAlert("로그인이 필요합니다.");location.href='index.html';return}
-const {data:authData,error:authError}=await _supabase.auth.getUser();
-if(authError||!authData?.user){
-await handleMypageSessionExpired('로그인 세션이 만료되었습니다.\n다시 로그인해 주세요.');
-return;
-}
-myInfo=JSON.parse(stored);
+const mypageUserGate=await window.ErpRuntimeGuard.requireUser(_supabase,{
+alertFn:function(msg){showAlert(msg);},
+redirectUrl:'index.html'
+});
+if(!mypageUserGate.ok)return;
+myInfo=mypageUserGate.user;
 permissionSet = await loadPermissions(myInfo);
 localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
 const hasMypageView = permissionSet.size > 0 ? permissionSet.has('mypage.view') : hasMypageRoleFallback();

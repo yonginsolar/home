@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.63
+Version: v1.0.64
 Change: 2026-06-02 - Add coop-level lunch time settings for hourly leave calculations.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.63 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.64 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -29,7 +29,7 @@ Change: 2026-06-02 - Add coop-level lunch time settings for hourly leave calcula
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -2460,9 +2460,12 @@ window.onload = async function() {
         detailPositionSelect.addEventListener('change', syncDetailAuthLevelFromPosition);
     }
 
-    const stored = localStorage.getItem('erp_user');
-    if (!stored) { location.href = 'index.html'; return; }
-    myInfo = JSON.parse(stored);
+    const hrUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+        alertFn: function(msg) { showAlert(msg); },
+        redirectUrl: 'index.html'
+    });
+    if (!hrUserGate.ok) return;
+    myInfo = hrUserGate.user;
     permissionSet = await loadPermissions(myInfo);
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     const hasHrAdmin = permissionSet.size > 0 ? permissionSet.has('hr.admin') : hasHrAdminRoleFallback();

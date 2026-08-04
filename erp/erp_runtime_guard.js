@@ -1,4 +1,5 @@
 window.ErpRuntimeGuard = {
+  version: '1.2.0',
   showInlineAlert: function(message) {
     const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
     try {
@@ -39,6 +40,173 @@ window.ErpRuntimeGuard = {
     if (error) throw error;
     return data || null;
   },
+  getErrorStatus: function(error) {
+    const value = Number(error?.status || error?.statusCode || error?.context?.status || 0);
+    return Number.isFinite(value) ? value : 0;
+  },
+  isAuthError: function(error) {
+    if (!error) return false;
+    const status = window.ErpRuntimeGuard.getErrorStatus(error);
+    const code = String(error?.code || error?.name || '').trim().toUpperCase();
+    const message = String(error?.message || error || '').trim().toUpperCase();
+    if (status === 401 || status === 403) return true;
+    if (code === 'PGRST301' || code === 'AUTHSESSIONMISSINGERROR') return true;
+    return message.includes('JWT EXPIRED')
+      || message.includes('INVALID JWT')
+      || message.includes('AUTH SESSION MISSING')
+      || message.includes('REFRESH TOKEN');
+  },
+  waitForRetry: function(delayMs) {
+    return new Promise(function(resolve) {
+      setTimeout(resolve, Math.max(0, Number(delayMs || 0)));
+    });
+  },
+  requestWithRetry: async function(requestFn, options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const attempts = Math.max(1, Number(opts.attempts || 2));
+    const delayMs = Math.max(0, Number(opts.delayMs || 180));
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await requestFn();
+      } catch (error) {
+        lastError = error;
+        if (window.ErpRuntimeGuard.isAuthError(error) || attempt >= attempts - 1) break;
+        await window.ErpRuntimeGuard.waitForRetry(delayMs);
+      }
+    }
+    throw lastError || new Error('ERP_REQUEST_FAILED');
+  },
+  getSessionState: async function(_supabase) {
+    try {
+      const { data, error } = await _supabase.auth.getSession();
+      if (error) throw error;
+      const session = data?.session || null;
+      if (!session?.user) {
+        return { ok: false, reason: 'auth_required', session: null, user: null, error: null };
+      }
+      return { ok: true, reason: null, session: session, user: session.user, error: null };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: window.ErpRuntimeGuard.isAuthError(error) ? 'auth_required' : 'auth_unavailable',
+        session: null,
+        user: null,
+        error: error
+      };
+    }
+  },
+  buildLoginRedirectUrl: function(redirectUrl, preserveNext) {
+    const fallback = String(redirectUrl || 'index.html').trim() || 'index.html';
+    let target = null;
+    try {
+      target = new URL(fallback, window.location.href);
+    } catch (_) {
+      return fallback;
+    }
+    const currentPath = String(window.location.pathname || '');
+    const targetPath = String(target.pathname || '');
+    const isAlreadyTarget = currentPath === targetPath;
+    if (preserveNext !== false && !isAlreadyTarget) {
+      target.searchParams.set('next', window.location.href);
+    }
+    return target.href;
+  },
+  redirectToLogin: function(options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    try {
+      localStorage.removeItem('erp_user');
+      localStorage.removeItem('erp_permissions');
+    } catch (_) {}
+    const targetUrl = window.ErpRuntimeGuard.buildLoginRedirectUrl(
+      opts.redirectUrl || 'index.html',
+      opts.preserveNext
+    );
+    window.location.replace(targetUrl);
+  },
+  getBoundEmployee: async function(_supabase) {
+    return window.ErpRuntimeGuard.requestWithRetry(async function() {
+      const { data, error } = await _supabase.rpc('erp_get_bound_login_employee');
+      if (error) throw error;
+      return data || null;
+    }, { attempts: 2, delayMs: 180 });
+  },
+  requireUser: async function(_supabase, options) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const alertFn = typeof opts.alertFn === 'function'
+      ? opts.alertFn
+      : function(msg) {
+          window.ErpRuntimeGuard.showInlineAlert(String(msg || '확인이 필요합니다.'));
+        };
+    const sessionState = await window.ErpRuntimeGuard.getSessionState(_supabase);
+    if (!sessionState.ok) {
+      if (sessionState.reason === 'auth_required') {
+        window.ErpRuntimeGuard.redirectToLogin(opts);
+      } else {
+        console.error('ErpRuntimeGuard session check failed:', sessionState.error);
+        alertFn('로그인 상태를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.');
+      }
+      return {
+        ok: false,
+        reason: sessionState.reason,
+        user: null,
+        authUser: null,
+        session: null,
+        error: sessionState.error
+      };
+    }
+
+    let employee = null;
+    try {
+      employee = await window.ErpRuntimeGuard.getBoundEmployee(_supabase);
+    } catch (error) {
+      console.error('ErpRuntimeGuard employee load failed:', error);
+      if (window.ErpRuntimeGuard.isAuthError(error)) {
+        window.ErpRuntimeGuard.redirectToLogin(opts);
+        return {
+          ok: false,
+          reason: 'auth_required',
+          user: null,
+          authUser: null,
+          session: null,
+          error: error
+        };
+      }
+      alertFn('직원 정보를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.');
+      return {
+        ok: false,
+        reason: 'employee_unavailable',
+        user: null,
+        authUser: sessionState.user,
+        session: sessionState.session,
+        error: error
+      };
+    }
+
+    if (!employee) {
+      window.ErpRuntimeGuard.redirectToLogin(opts);
+      return {
+        ok: false,
+        reason: 'employee_missing',
+        user: null,
+        authUser: sessionState.user,
+        session: sessionState.session,
+        error: null
+      };
+    }
+
+    try {
+      localStorage.setItem('erp_user', JSON.stringify(employee));
+    } catch (_) {}
+    return {
+      ok: true,
+      reason: null,
+      user: employee,
+      authUser: sessionState.user,
+      session: sessionState.session,
+      error: null
+    };
+  },
   isModuleEnabled: function(runtime, moduleKey) {
     if (!moduleKey) return true;
     if (!runtime || typeof runtime !== 'object') return false;
@@ -70,21 +238,22 @@ window.ErpRuntimeGuard = {
 
     let runtime = null;
     try {
-      runtime = await window.ErpRuntimeGuard.getRuntime(_supabase);
+      runtime = await window.ErpRuntimeGuard.requestWithRetry(function() {
+        return window.ErpRuntimeGuard.getRuntime(_supabase);
+      }, { attempts: 2, delayMs: 180 });
     } catch (error) {
       console.error('ErpRuntimeGuard.getRuntime failed:', error);
-      alertFn('조합 실행 정보를 확인하지 못했습니다. 다시 로그인해 주세요.');
-      setTimeout(function() {
-        location.href = redirectUrl;
-      }, 1200);
-      return { ok: false, reason: 'runtime_error', runtime: null, error: error };
+      if (window.ErpRuntimeGuard.isAuthError(error)) {
+        alertFn('로그인 세션이 만료되었습니다.\n다시 로그인해 주세요.');
+        window.ErpRuntimeGuard.redirectToLogin({ redirectUrl: redirectUrl });
+        return { ok: false, reason: 'auth_required', runtime: null, error: error };
+      }
+      alertFn('조합 실행 정보를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.');
+      return { ok: false, reason: 'runtime_unavailable', runtime: null, error: error };
     }
 
     if (!runtime || !runtime.coop_id) {
-      alertFn('조합 정보가 없어 페이지를 열 수 없습니다. 다시 로그인해 주세요.');
-      setTimeout(function() {
-        location.href = redirectUrl;
-      }, 1200);
+      alertFn('조합 실행 정보가 준비되지 않았습니다.\n잠시 후 새로고침해 주세요.');
       return { ok: false, reason: 'runtime_missing', runtime: runtime, error: null };
     }
 

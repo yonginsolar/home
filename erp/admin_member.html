@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.125
+Version: v1.0.126
 Change: Refresh the participation manager with education QR printing.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.125';
+window.ADMIN_MEMBER_VERSION = 'v1.0.126';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -38,7 +38,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.125';
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -12809,16 +12809,14 @@ async function saveChildMember() {
 // ================================================================
 window.onload = async function() {
 
-    const userStored = localStorage.getItem('erp_user');
-    let cachedRole = '';
-    if (userStored) {
-        try {
-            cachedRole = String(JSON.parse(userStored)?.role || '').toLowerCase();
-        } catch (_) { cachedRole = ''; }
-    }
+    const memberUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+        alertFn: function(msg) { myAlert(msg, 'error'); },
+        redirectUrl: 'index.html'
+    });
+    if (!memberUserGate.ok) return;
+    const cachedRole = String(memberUserGate.user?.role || '').toLowerCase();
     const cachedRoleIsAdmin = cachedRole === 'admin' || cachedRole === 'admin_all';
-    const { data: { session } } = await _supabase.auth.getSession();
-    const user = session ? session.user : null;
+    const user = memberUserGate.authUser || null;
     const permStored = localStorage.getItem('erp_permissions');
 
     if (user) {

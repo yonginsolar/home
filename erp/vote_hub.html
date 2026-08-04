@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.9 -->
+<!-- Version: v1.0.10 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.9 | vote_hub.html');</script>
+  <script>console.log('[Version] v1.0.10 | vote_hub.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -26,6 +26,7 @@
   })();
 </script>
   <script src="/shared/route_guard.js?v=20260403-1"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <style>
     body { background:#f8f9fa; padding:24px; font-family:'Segoe UI','Malgun Gothic',sans-serif; }
     .wrap { max-width:720px; margin:0 auto; }
@@ -100,10 +101,6 @@
         }
       }
     });
-
-    function readStoredUser() {
-      try { return JSON.parse(localStorage.getItem('erp_user') || 'null'); } catch (_) { return null; }
-    }
 
     function readStoredPermissions() {
       try {
@@ -192,20 +189,18 @@
     }
 
     async function init() {
-      const user = readStoredUser();
-      if (!user) {
-        location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
-        return;
-      }
+      const userGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+        redirectUrl: 'index.html'
+      });
+      if (!userGate.ok) return;
+      const user = userGate.user;
 
-      let runtime = null;
-      try {
-        runtime = await loadRuntime();
-      } catch (error) {
-        console.error('vote_hub runtime load failed:', error);
-        location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
-        return;
-      }
+      const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
+        moduleLabel: '선거/투표 관리',
+        redirectUrl: 'index.html'
+      });
+      if (!runtimeGate.ok) return;
+      const runtime = runtimeGate.runtime;
 
       if (!isModuleEnabled(runtime, 'vote')) {
         document.getElementById('emptyState')?.classList.remove('d-none');

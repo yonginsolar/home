@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.89 | Change: 2026-07-23 - Persist and apply the 4-insurance automatic-debit discount. -->
+<!-- Version: v1.0.90 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.89 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.90 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -26,7 +26,7 @@
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
 
   <style>
@@ -1764,9 +1764,12 @@ window.onload = async function() {
         syncClosingFormState(false, { preserveManualTax: true });
     });
 
-    const stored = localStorage.getItem('erp_user');
-    if(!stored) { location.href = 'index.html'; return; }
-    myInfo = JSON.parse(stored);
+    const accountingUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+        alertFn: function(msg) { showAlert(msg); },
+        redirectUrl: 'index.html'
+    });
+    if (!accountingUserGate.ok) return;
+    myInfo = accountingUserGate.user;
     permissionSet = await loadPermissions(myInfo);
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     const hasAccountingView = permissionSet.size > 0

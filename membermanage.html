@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.109
-Change: Show the coop-specific deposit account beside the additional capital amount.
+Version: v1.0.110
+Change: Keep token refresh events from rebooting the full member dashboard.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.109 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.110 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -2099,6 +2099,7 @@ let isBoardLoading = false;
 let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
 let portalBootInProgress = false;
+let portalBootReadyUserId = '';
 window.__memberAppLocks = { submitApplication: false, cancelApplication: false, modifyApplication: false, requestConnect: false, submitFamily: false, submitPost: false, disconnectRelation: false };
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
@@ -2283,6 +2284,7 @@ clearSupabaseAuthCache();
 await signOutSilently(_supabase);
 curAuth = null;
 curMem = null;
+portalBootReadyUserId = '';
 hidePortalRetryState();
 showOnly('loginSection');
 showLoading(false);
@@ -2704,11 +2706,31 @@ if (typeof showLoading === 'function') showLoading(false);
 if (session) {
 sessionStorage.removeItem(SESSION_EXPIRED_NOTICE_KEY);
 hidePortalRetryState();
+curAuth = session.user || curAuth;
+
+// 토큰 갱신과 사용자 메타데이터 변경은 현재 세션 정보만 교체한다.
+// 전체 조합원 대시보드는 최초 세션 또는 실제 로그인 때만 준비한다.
+if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+return;
+}
+
+const authUserId = String(session.user?.id || '').trim();
+const shouldBootPortal = event === 'INITIAL_SESSION' || event === 'SIGNED_IN';
+if (!shouldBootPortal) return;
+if (
+authUserId &&
+portalBootReadyUserId === authUserId &&
+hasPortalAuthenticatedUser()
+) {
+return;
+}
 // [로그인 상태] -> 데이터 로드 시작
 // 주의: 여기서 바로 showOnly('dashboardSection') 하지 않음.
 // 데이터가 텅 빈 화면이 보일 수 있으므로 loadDashboardData 완료 후 보여줌.
 handleLoginSuccess(session.user);
 } else {
+curAuth = null;
+portalBootReadyUserId = '';
 const shouldRecover =
 !suppressSessionExpiredHandling &&
 (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') &&
@@ -3251,6 +3273,7 @@ return dest.href;
 		if (typeof loadManagedProfiles === 'function') {
 		await loadManagedProfiles(rootMemberProfileId || claimRes.profile_id || user.id);
 		}
+		portalBootReadyUserId = String(user?.id || '').trim();
 		} catch (error) {
 		console.error('handleLoginSuccess failed:', error);
 		const kind = classifyPortalBootError(error);

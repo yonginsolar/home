@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.7
+Version: v1.0.8
 Change: 2026-04-22 - Align permission management with PC-first ERP workspace.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.7 | permissions.html');</script>
+  <script>console.log('[Version] v1.0.8 | permissions.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -29,7 +29,7 @@ Change: 2026-04-22 - Align permission management with PC-first ERP workspace.
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <style>
     body.erp-page-permissions { --erp-page-max-width: 1280px; }
     body { background-color: #f8f9fa; padding: 20px; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
@@ -147,9 +147,12 @@ function hasPermissionManagerRoleFallback() {
 
 window.onload = async function() {
   alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
-  const stored = localStorage.getItem('erp_user');
-  if (!stored) { location.href = 'index.html'; return; }
-  myInfo = JSON.parse(stored);
+  const permissionUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+    alertFn: function(msg) { showAlert(msg); },
+    redirectUrl: 'index.html'
+  });
+  if (!permissionUserGate.ok) return;
+  myInfo = permissionUserGate.user;
   permissionSet = await loadPermissions(myInfo);
   localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
   const canManagePermission = permissionSet.size > 0

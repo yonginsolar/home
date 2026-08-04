@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.13 | Change: 2026-05-19 - Add document-authoring management entry for regulation and bylaws administration. -->
+<!-- Version: v1.0.14 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.13 | governance.html');</script>
+  <script>console.log('[Version] v1.0.14 | governance.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -26,6 +26,7 @@
   })();
 </script>
   <script src="/shared/route_guard.js?v=20260403-1"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <style>
     body { background:#f8f9fa; padding:24px; font-family:'Segoe UI','Malgun Gothic',sans-serif; }
     .wrap { max-width:720px; margin:0 auto; }
@@ -95,10 +96,6 @@
       }
     });
 
-    function readStoredUser() {
-      try { return JSON.parse(localStorage.getItem('erp_user') || 'null'); } catch (_) { return null; }
-    }
-
     function readStoredPermissions() {
       try {
         const raw = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
@@ -164,20 +161,18 @@
     }
 
     async function init() {
-      const user = readStoredUser();
-      if (!user) {
-        location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
-        return;
-      }
+      const userGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+        redirectUrl: 'index.html'
+      });
+      if (!userGate.ok) return;
+      const user = userGate.user;
 
-      let runtime = null;
-      try {
-        runtime = await loadRuntime();
-      } catch (error) {
-        console.error('governance runtime load failed:', error);
-        location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
-        return;
-      }
+      const runtimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
+        moduleLabel: '문서관리',
+        redirectUrl: 'index.html'
+      });
+      if (!runtimeGate.ok) return;
+      const runtime = runtimeGate.runtime;
 
       const permissionSet = readStoredPermissions();
       const hasAdminRoleFallback = (user.role === 'admin' || user.role === 'admin_all');

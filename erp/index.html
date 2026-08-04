@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.46 | Change: 2026-08-03 - Move participation management into member administration. -->
+<!-- Version: v1.0.47 | Change: 2026-08-04 - Keep transient session checks on the loading screen instead of reopening login. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.46 | index.html');</script>
+  <script>console.log('[Version] v1.0.47 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -43,6 +43,7 @@
   })();
 </script>
   <script src="/shared/route_guard.js?v=20260408-1"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <script src="/shared/auth_broker_helper.js?v=20260404-1"></script>
   
   <style>
@@ -1181,17 +1182,26 @@ async function recoverFromExpiredSession() {
 window.onload = async function() {
     loginFormOpenedAt = Date.now();
     const hadAuthCache = hasSupabaseAuthCache();
-    const { data, error } = await _supabase.auth.getUser();
+    const sessionState = await window.ErpRuntimeGuard.getSessionState(_supabase);
 
-    if (error && hadAuthCache) {
+    if (!sessionState.ok && sessionState.reason === 'auth_required' && hadAuthCache) {
         await recoverFromExpiredSession();
         return;
     }
 
-    if (data?.user) {
-        currentAuthUser = data.user;
+    if (!sessionState.ok && sessionState.reason === 'auth_unavailable') {
+        console.error('ERP initial session check failed:', sessionState.error);
+        showScreen('loadingScreen');
+        const loadingText = document.querySelector('#loadingScreen p');
+        if (loadingText) loadingText.textContent = '로그인 상태를 확인하지 못했습니다. 연결 상태를 확인한 뒤 새로고침해 주세요.';
+        showAlert('로그인 상태를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.');
+        return;
+    }
+
+    if (sessionState.user) {
+        currentAuthUser = sessionState.user;
         sessionStorage.removeItem(ERP_SESSION_EXPIRED_NOTICE_KEY);
-        await loadUserInfo(data.user);
+        await loadUserInfo(sessionState.user);
     } else {
         currentAuthUser = null;
         showScreen('loginForm');
@@ -1226,11 +1236,28 @@ async function loadUserInfo(user) {
     let data = null;
     let error = null;
     try {
-        const boundEmployeeResult = await _supabase.rpc('erp_get_bound_login_employee');
+        const boundEmployeeResult = await window.ErpRuntimeGuard.requestWithRetry(async function() {
+            const result = await _supabase.rpc('erp_get_bound_login_employee');
+            if (result?.error) throw result.error;
+            return result;
+        }, { attempts: 2, delayMs: 180 });
         data = boundEmployeeResult?.data || null;
         error = boundEmployeeResult?.error || null;
     } catch (boundEmployeeException) {
         error = boundEmployeeException;
+    }
+
+    if (error && !window.ErpRuntimeGuard.isAuthError(error)) {
+        console.error('erp_get_bound_login_employee unavailable:', error);
+        showScreen('loadingScreen');
+        const loadingText = document.querySelector('#loadingScreen p');
+        if (loadingText) loadingText.textContent = '직원 정보를 확인하지 못했습니다. 연결 상태를 확인한 뒤 새로고침해 주세요.';
+        showAlert('직원 정보를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.');
+        return;
+    }
+    if (error && window.ErpRuntimeGuard.isAuthError(error)) {
+        await recoverFromExpiredSession();
+        return;
     }
 
     if (!data && isSocialLoginUser(user)) {
@@ -1240,10 +1267,19 @@ async function loadUserInfo(user) {
 
     if (error || !data) {
         try {
-            const { data: recoveryData, error: recoveryError } = await _supabase.rpc('erp_resolve_login_employee');
+            const recoveryResult = await window.ErpRuntimeGuard.requestWithRetry(async function() {
+                const result = await _supabase.rpc('erp_resolve_login_employee');
+                if (result?.error) throw result.error;
+                return result;
+            }, { attempts: 2, delayMs: 180 });
+            const recoveryData = recoveryResult?.data || null;
+            const recoveryError = recoveryResult?.error || null;
             if (!recoveryError && recoveryData?.ok === true) {
-                const retry = await _supabase
-                    .rpc('erp_get_bound_login_employee');
+                const retry = await window.ErpRuntimeGuard.requestWithRetry(async function() {
+                    const result = await _supabase.rpc('erp_get_bound_login_employee');
+                    if (result?.error) throw result.error;
+                    return result;
+                }, { attempts: 2, delayMs: 180 });
                 data = retry.data || null;
                 error = retry.error || null;
             } else if (await handleSocialLoginRecoveryFailure(user, recoveryData)) {
@@ -1257,6 +1293,15 @@ async function loadUserInfo(user) {
             }
         } catch (recoveryException) {
             console.error('erp_resolve_login_employee exception:', recoveryException);
+            if (!window.ErpRuntimeGuard.isAuthError(recoveryException)) {
+                showScreen('loadingScreen');
+                const loadingText = document.querySelector('#loadingScreen p');
+                if (loadingText) loadingText.textContent = '직원 연결 정보를 확인하지 못했습니다. 연결 상태를 확인한 뒤 새로고침해 주세요.';
+                showAlert('직원 연결 정보를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.');
+                return;
+            }
+            await recoverFromExpiredSession();
+            return;
         }
     }
 

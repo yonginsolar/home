@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.35 | Change: 2026-08-04 - Preserve server notifications when Telegram delivery fails without creating duplicates. -->
+<!-- Version: v1.2.36 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.35 | approval.html');</script>
+  <script>console.log('[Version] v1.2.36 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -27,7 +27,7 @@
   })();
 </script>
   <script src="/shared/route_guard.js?v=20260403-1"></script>
-  <script src="erp_runtime_guard.js"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js"></script>
@@ -6796,21 +6796,13 @@ window.onload = async function() {
     setupAttachmentDropZone();
     syncDelegationAvailabilityUi();
 
-    const stored = localStorage.getItem('erp_user');
-    if (!stored) { location.href = 'index.html'; return; }
-    myInfo = JSON.parse(stored);
-    const { data: authData, error: authError } = await _supabase.auth.getUser();
-    if (authError || !authData?.user) {
-        showAlert("로그인 세션이 만료되었습니다.\n다시 로그인해 주세요.", () => {
-            try {
-                localStorage.removeItem('erp_user');
-                localStorage.removeItem('erp_permissions');
-            } catch (_) { /* noop */ }
-            location.href = 'index.html';
-        });
-        return;
-    }
-    myAuthUserId = String(authData.user.id || '').trim();
+    const approvalUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
+        alertFn: function(msg) { showAlert(msg); },
+        redirectUrl: 'index.html'
+    });
+    if (!approvalUserGate.ok) return;
+    myInfo = approvalUserGate.user;
+    myAuthUserId = String(approvalUserGate.authUser?.id || '').trim();
     applyChairmanApprovalTabLayout();
     const cachedApprovalSummary = readApprovalSummaryCache();
     applyApprovalSummaryCacheToUi(cachedApprovalSummary);
