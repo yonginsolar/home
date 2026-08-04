@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.126
-Change: Refresh the participation manager with education QR printing.
+Version: v1.0.127
+Change: Replace the legacy login flash with a neutral authorization loading state.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.126';
+window.ADMIN_MEMBER_VERSION = 'v1.0.127';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -70,6 +70,12 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 /* 로그인 화면 & 유틸 */
 #login-gate { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; z-index: 9999; display: flex; justify-content: center; align-items: center; }
 .login-box { background: white; padding: 40px; border-radius: 15px; width: 100%; max-width: 400px; box-shadow: 0 15px 40px rgba(0,0,0,0.3); text-align: center; }
+#admin-boot-gate { position: fixed; inset: 0; z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 24px; background: #f8f9fa; }
+.admin-boot-card { width: min(420px, 100%); padding: 30px 24px; border: 1px solid rgba(15,23,42,.08); border-radius: 18px; background: #fff; box-shadow: 0 18px 44px rgba(15,23,42,.1); text-align: center; }
+.admin-boot-card h3 { margin: 16px 0 8px; color: #0f172a; font-size: 1.15rem; font-weight: 800; }
+.admin-boot-card p { margin: 0; color: #64748b; font-size: .92rem; line-height: 1.6; white-space: pre-line; word-break: keep-all; }
+.admin-boot-card.is-error { border-color: #fdba74; background: #fff7ed; }
+.admin-boot-card.is-error h3, .admin-boot-card.is-error p { color: #9a3412; }
 .hidden { display: none !important; }
 .table th { font-size: 13px; background-color: #f1f3f5; font-weight: 600; }
 .table td { font-size: 14px; vertical-align: middle; }
@@ -209,7 +215,15 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <body class="erp-unified erp-pc-workspace erp-page-admin-member">
 
-<div id="login-gate">
+<div id="admin-boot-gate" role="status" aria-live="polite" aria-busy="true">
+<div class="admin-boot-card" id="adminBootCard">
+<div class="spinner-border text-primary" aria-hidden="true"></div>
+<h3>관리 화면을 준비하고 있습니다</h3>
+<p id="adminBootMessage">로그인 상태와 권한을 확인하고 있습니다.</p>
+</div>
+</div>
+
+<div id="login-gate" class="hidden" aria-hidden="true">
 <div class="login-box">
 <h3 class="fw-bold mb-4">🔐 관리자 접속</h3>
 <div class="mb-3 text-start">
@@ -4313,7 +4327,7 @@ showLoading(false);
 
     if (error) {
     console.error("권한 조회 중 에러:", error);
-    myAlert("권한 정보를 확인할 수 없습니다.", 'error');
+    setAdminMemberBootMessage("권한 정보를 확인하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 주세요.", true);
     return;
     }
 
@@ -4347,6 +4361,13 @@ if (role === 'admin' || role === 'admin_all' || cachedRoleIsAdmin || hasScopedPe
 const loginGate = document.getElementById('login-gate');
 if (loginGate) loginGate.classList.add('hidden');
 
+const bootGate = document.getElementById('admin-boot-gate');
+if (bootGate) {
+bootGate.classList.add('hidden');
+bootGate.setAttribute('aria-hidden', 'true');
+bootGate.setAttribute('aria-busy', 'false');
+}
+
 // (2) 메인 시스템 노출
 const mainSystem = document.getElementById('main-system');
 if (mainSystem) mainSystem.classList.remove('hidden');
@@ -4369,6 +4390,19 @@ profileEl.innerText = user.email;
 location.href = 'index.html';
 }
 }
+
+function setAdminMemberBootMessage(message, isError) {
+const bootGate = document.getElementById('admin-boot-gate');
+const bootCard = document.getElementById('adminBootCard');
+const messageEl = document.getElementById('adminBootMessage');
+if (bootGate) {
+bootGate.classList.remove('hidden');
+bootGate.removeAttribute('aria-hidden');
+bootGate.setAttribute('aria-busy', isError ? 'false' : 'true');
+}
+if (bootCard) bootCard.classList.toggle('is-error', !!isError);
+if (messageEl) messageEl.textContent = String(message || '관리 화면을 준비하고 있습니다.');
+} // End of setAdminMemberBootMessage
 
 // [로그인] 매직링크 전송
 async function sendLoginLink() {
@@ -12809,8 +12843,9 @@ async function saveChildMember() {
 // ================================================================
 window.onload = async function() {
 
+    setAdminMemberBootMessage('로그인 상태와 권한을 확인하고 있습니다.', false);
     const memberUserGate = await window.ErpRuntimeGuard.requireUser(_supabase, {
-        alertFn: function(msg) { myAlert(msg, 'error'); },
+        alertFn: function(msg) { setAdminMemberBootMessage(msg, true); },
         redirectUrl: 'index.html'
     });
     if (!memberUserGate.ok) return;
@@ -12851,6 +12886,7 @@ window.onload = async function() {
     }
 
     // checkAdmin 내부에서 권한 확인 및 페이지 리다이렉트 처리
+    setAdminMemberBootMessage('관리 권한을 확인하고 있습니다.', false);
     await checkAdmin(user);
     const mainSystem = document.getElementById('main-system');
     if (mainSystem && mainSystem.classList.contains('hidden')) {
@@ -12868,7 +12904,7 @@ window.onload = async function() {
             : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
                 ? '홈페이지 관리'
                 : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? '문서관리' : '조합원/홈페이지 관리')),
-        alertFn: function(msg) { myAlert(msg, 'error'); },
+        alertFn: function(msg) { setAdminMemberBootMessage(msg, true); },
         redirectUrl: 'index.html'
     });
     if (!memberRuntimeGate.ok) {
