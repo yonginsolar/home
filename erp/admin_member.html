@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.128
-Change: Add board and general-assembly attendance management under member administration.
+Version: v1.0.129
+Change: Harden administrator list rendering and external file links.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.128';
+window.ADMIN_MEMBER_VERSION = 'v1.0.129';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -5751,9 +5751,10 @@ async function fetchNotices() {
         return;
     }
 
-    data.forEach(n => {
+    tbody.innerHTML = data.map(n => {
         // 날짜 포맷팅 (YYYY-MM-DD)
         const dateStr = formatAdminMemberKstDate(n.created_at);
+        const noticeId = String(n.id ?? '');
 
         // 팝업 여부 표시
         const popupBadge = n.is_popup ? '<span class="badge bg-danger">POP</span>' : '-';
@@ -5761,19 +5762,25 @@ async function fetchNotices() {
             ? '<span class="badge bg-success">조합원</span>'
             : '<span class="badge bg-secondary">전체</span>';
 
-        tbody.innerHTML += `
+        return `
             <tr>
-                <td>${dateStr}</td>
-                <td>${n.category}</td>
-                <td class="text-start fw-bold">${n.title}</td>
+                <td>${escapeHtml(dateStr)}</td>
+                <td>${escapeHtml(n.category || '')}</td>
+                <td class="text-start fw-bold">${escapeHtml(n.title || '')}</td>
                 <td>${visibilityBadge}</td>
                 <td>${popupBadge}</td>
-                <td>${n.status}</td>
+                <td>${escapeHtml(n.status || '')}</td>
                 <td>
-                    <button class="btn btn-sm btn-light border" onclick="openNoticeModal('${n.id}')">수정</button>
-                    <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteNotice('${n.id}')">삭제</button>
+                    <button class="btn btn-sm btn-light border" type="button" data-open-notice="${escapeHtml(noticeId)}">수정</button>
+                    <button class="btn btn-sm btn-outline-danger ms-1" type="button" data-delete-notice="${escapeHtml(noticeId)}">삭제</button>
                 </td>
             </tr>`;
+    }).join('');
+    tbody.querySelectorAll('[data-open-notice]').forEach((button) => {
+        button.addEventListener('click', () => openNoticeModal(button.dataset.openNotice));
+    });
+    tbody.querySelectorAll('[data-delete-notice]').forEach((button) => {
+        button.addEventListener('click', () => askDeleteNotice(button.dataset.deleteNotice));
     });
 }
 
@@ -5820,6 +5827,14 @@ function deriveNoticeFileName(url) {
     return fileName.replace(/_/g, ' ');
 }
 
+function normalizeAdminHttpUrl(value) {
+    try {
+        const parsed = new URL(String(value || '').trim(), window.location.origin);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+    } catch (_) {}
+    return '';
+}
+
 function renderNoticeFilePreview(urls, names) {
     const preview = document.getElementById('notice-file-preview');
     const list = document.getElementById('notice-file-list');
@@ -5832,11 +5847,19 @@ function renderNoticeFilePreview(urls, names) {
     }
 
     urls.forEach((url, idx) => {
-        if (!url) return;
+        const safeUrl = normalizeAdminHttpUrl(url);
+        if (!safeUrl) return;
         const rawName = (Array.isArray(names) && names[idx]) ? names[idx] : deriveNoticeFileName(url);
-        const safeName = escapeHtml(rawName);
-        const safeUrl = escapeHtml(url);
-        list.innerHTML += `<li class="mb-1"><a href="${safeUrl}" target="_blank" class="text-decoration-none">${safeName}</a></li>`;
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        item.className = 'mb-1';
+        link.className = 'text-decoration-none';
+        link.href = safeUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = String(rawName || '-');
+        item.appendChild(link);
+        list.appendChild(item);
     });
     preview.style.setProperty('display', 'block', 'important');
 }
@@ -8091,9 +8114,9 @@ return String(b?.updated_at || '').localeCompare(String(a?.updated_at || ''));
 }
 
 function buildDocFileButton(doc) {
-const fileUrl = String(doc?.file_url || '').trim();
+const fileUrl = normalizeAdminHttpUrl(doc?.file_url);
 return fileUrl
-? `<a href="${escapeHtml(fileUrl)}" target="_blank" class="btn btn-xs btn-outline-success"><i class="bi bi-file-pdf"></i> 보기</a>`
+? `<a href="${escapeHtml(fileUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-outline-success"><i class="bi bi-file-pdf"></i> 보기</a>`
 : '<span class="text-muted text-xs">없음</span>';
 }
 
@@ -9451,7 +9474,7 @@ tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">등�
 return;
 }
 
-list.forEach(f => {
+tbody.innerHTML = list.map(f => {
 const badge = f.is_visible
 ? '<span class="badge bg-success">공개</span>'
 : '<span class="badge bg-secondary">숨김</span>';
@@ -9459,22 +9482,29 @@ const badge = f.is_visible
 const answerPreview = f.answer && f.answer.length > 50
 ? f.answer.substring(0, 50) + '...'
 : f.answer;
+const faqId = String(f.id ?? '');
 
-tbody.innerHTML += `
+return `
            <tr>
-               <td class="text-center">${f.display_order}</td>
-               <td class="text-center"><span class="badge bg-light text-dark border">${f.category}</span></td>
+               <td class="text-center">${escapeHtml(f.display_order ?? '')}</td>
+               <td class="text-center"><span class="badge bg-light text-dark border">${escapeHtml(f.category || '')}</span></td>
                <td>
-                   <div class="fw-bold text-primary mb-1">Q. ${f.question}</div>
-                   <div class="small text-muted text-truncate" style="max-width:400px;">A. ${answerPreview}</div>
+                   <div class="fw-bold text-primary mb-1">Q. ${escapeHtml(f.question || '')}</div>
+                   <div class="small text-muted text-truncate" style="max-width:400px;">A. ${escapeHtml(answerPreview || '')}</div>
                </td>
                <td class="text-center">${badge}</td>
                <td class="text-center">
-                   <button class="btn btn-sm btn-light" onclick="openFaqModal('${f.id}')">수정</button>
-                   <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteFaq('${f.id}')">삭제</button>
+                   <button class="btn btn-sm btn-light" type="button" data-open-faq="${escapeHtml(faqId)}">수정</button>
+                   <button class="btn btn-sm btn-outline-danger ms-1" type="button" data-delete-faq="${escapeHtml(faqId)}">삭제</button>
                </td>
            </tr>
        `;
+}).join('');
+tbody.querySelectorAll('[data-open-faq]').forEach((button) => {
+    button.addEventListener('click', () => openFaqModal(button.dataset.openFaq));
+});
+tbody.querySelectorAll('[data-delete-faq]').forEach((button) => {
+    button.addEventListener('click', () => askDeleteFaq(button.dataset.deleteFaq));
 });
 }
 
