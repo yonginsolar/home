@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.7 | Change: 2026-08-05 - Limit direct participant registration to unlinked education records. -->
+<!-- Version: v1.3.8 | Change: 2026-08-05 - Clarify linked education attendance source after hiding direct registration. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.7 | participation.html');</script>
+  <script>console.log('[Version] v1.3.8 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1047,6 +1047,14 @@
         || !!pendingGuestLinkId
         || (!isSavedEducation || (linkStatusReady && !activeLink));
       document.getElementById('educationMemberSearch').classList.toggle('d-none', !showDirectRegistration);
+      const emptyState = document.querySelector('[data-education-empty-state]');
+      if (emptyState) {
+        emptyState.textContent = activeLink
+          ? '참가자는 모두의 인문학 QR 체크인 결과로 반영됩니다.'
+          : showDirectRegistration
+            ? '위 검색에서 조합원을 참가자로 등록할 수 있습니다. QR 체크인으로 확인된 비조합원도 여기에 표시됩니다.'
+            : '교육 연동 상태를 확인한 뒤 참가자 등록 방법을 표시합니다.';
+      }
     } // End of syncEducationMemberSearchVisibility
 
     function renderHumanitiesLink() {
@@ -1771,7 +1779,13 @@
         ? `참석 ${(rows.length + guestRows.length).toLocaleString()}명${guestRows.length > 0 ? ` · 비조합원 ${guestRows.length.toLocaleString()}명` : ''}`
         : `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 배석 ${additionalAttended}명` : ''}`;
       if (rows.length === 0 && guestRows.length === 0) {
-        list.innerHTML = `<div class="text-center text-muted py-4">${type === 'EDUCATION' ? '위 검색에서 조합원을 참가자로 등록할 수 있습니다. QR 체크인으로 확인된 비조합원도 여기에 표시됩니다.' : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
+        const activeHumanitiesLink = humanitiesLinkState.link?.status === 'ACTIVE';
+        const educationEmptyMessage = activeHumanitiesLink
+          ? '참가자는 모두의 인문학 QR 체크인 결과로 반영됩니다.'
+          : formState.eventId && !humanitiesLinkState.loaded
+            ? '교육 연동 상태를 확인한 뒤 참가자 등록 방법을 표시합니다.'
+            : '위 검색에서 조합원을 참가자로 등록할 수 있습니다. QR 체크인으로 확인된 비조합원도 여기에 표시됩니다.';
+        list.innerHTML = `<div class="text-center text-muted py-4" ${type === 'EDUCATION' ? 'data-education-empty-state' : ''}>${type === 'EDUCATION' ? educationEmptyMessage : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
         return;
       }
       const memberHtml = rows.map(function(row, index) {
