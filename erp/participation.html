@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.6 | Change: 2026-08-05 - Restore direct participant registration for standalone education records. -->
+<!-- Version: v1.3.7 | Change: 2026-08-05 - Limit direct participant registration to unlinked education records. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.6 | participation.html');</script>
+  <script>console.log('[Version] v1.3.7 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1038,10 +1038,22 @@
       if (!humanitiesImportState.courses.length) searchHumanitiesImport();
     } // End of openHumanitiesImport
 
+    function syncEducationMemberSearchVisibility() {
+      const isEducation = document.getElementById('eventType').value === 'EDUCATION';
+      const isSavedEducation = isEducation && !!formState.eventId;
+      const linkStatusReady = !isSavedEducation || humanitiesLinkState.loaded;
+      const activeLink = humanitiesLinkState.link?.status === 'ACTIVE';
+      const showDirectRegistration = !isEducation
+        || !!pendingGuestLinkId
+        || (!isSavedEducation || (linkStatusReady && !activeLink));
+      document.getElementById('educationMemberSearch').classList.toggle('d-none', !showDirectRegistration);
+    } // End of syncEducationMemberSearchVisibility
+
     function renderHumanitiesLink() {
       const section = document.getElementById('humanitiesLinkSection');
       const isEducation = document.getElementById('eventType').value === 'EDUCATION';
       const activeLink = humanitiesLinkState.link?.status === 'ACTIVE';
+      syncEducationMemberSearchVisibility();
       const showManualLinkControls = false;
       section.classList.toggle('d-none', !showManualLinkControls || !isEducation || activeLink);
       if (!showManualLinkControls || !isEducation || activeLink) return;
@@ -1539,7 +1551,7 @@
       document.getElementById('instructorGroup').classList.toggle('d-none', !education);
       document.getElementById('educationFilesSection').classList.toggle('d-none', !education);
       document.getElementById('humanitiesLinkSection').classList.add('d-none');
-      document.getElementById('educationMemberSearch').classList.remove('d-none');
+      syncEducationMemberSearchVisibility();
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
       document.getElementById('memberSearchObserverBtn').classList.toggle('d-none', education);
       document.getElementById('observerHelp').classList.toggle('d-none', education);
