@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.36 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
+<!-- Version: v1.2.37 | Change: 2026-08-06 - Preserve user-defined attachment order through preview, draft save, and submission. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.36 | approval.html');</script>
+  <script>console.log('[Version] v1.2.37 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -60,6 +60,50 @@
     .large-textarea { min-height: 500px; resize: vertical; line-height: 1.6; } /* 요청하신 대로 20줄 이상 확보 */
 
     .file-item { font-size: 0.9rem; background: #f8f9fa; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; border: 1px solid #eee; }
+    .approval-attachment-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .approval-attachment-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1 1 320px;
+    }
+    .approval-attachment-index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      color: #334155;
+      font-weight: 700;
+      font-size: 0.82rem;
+    }
+    .approval-attachment-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .approval-attachment-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .approval-attachment-order-actions .btn {
+      min-width: 38px;
+    }
+    @media (max-width: 575.98px) {
+      .approval-attachment-row { align-items: flex-start; flex-direction: column; }
+      .approval-attachment-actions { width: 100%; justify-content: flex-end; }
+    }
     .file-size { font-size: 0.8rem; color: #888; float: right; }
     .approval-draft-status {
       display: flex;
@@ -854,7 +898,8 @@
           <input type="file" class="form-control" id="attachFile" multiple accept=".pdf,.png,.jpg,.jpeg" onchange="updateFileList()">
           <div class="small text-muted mt-2" id="attachmentDropZoneText">여기로 파일을 끌어놓거나 위에서 선택하세요. 업로드는 PDF 또는 이미지(PNG, JPG, JPEG) 파일만 가능합니다.</div>
         </div>
-        <div id="fileListArea" class="mt-2"></div>
+        <div id="fileListArea" class="mt-2" role="list"></div>
+        <div class="small text-muted mt-2 hidden" id="attachmentOrderHint">첨부가 2개 이상이면 위·아래 버튼으로 순서를 바꿀 수 있습니다. 정렬 순서는 미리보기, 임시저장, 최종 상신 문서에 동일하게 적용됩니다.</div>
       </div>
 
       <div class="d-grid gap-2">
@@ -964,6 +1009,9 @@ let approvalDraftCache = [];
 let currentApprovalDraftId = null;
 let currentApprovalDraftUpdatedAt = '';
 let approvalDraftAttachmentRefs = [];
+let approvalAttachmentOrder = [];
+let approvalAttachmentLocalIdSequence = 0;
+const approvalAttachmentLocalIds = new WeakMap();
 let myAuthUserId = '';
 let activeApprovalTab = 'draft';
 let approvalDataLoadedAt = { todo: 0, history: 0 };
@@ -2315,6 +2363,7 @@ function resetApprovalComposerForm(options = {}) {
 
     clearApprovalDraftLocalFiles();
     approvalDraftAttachmentRefs = [];
+    resetApprovalAttachmentOrder();
     if (!keepDraftIdentity) {
         currentApprovalDraftId = null;
         currentApprovalDraftUpdatedAt = '';
@@ -2613,6 +2662,7 @@ async function loadApprovalDraftFromServer(draftId) {
         manualJeongyeolToggleTouched = !!payload?.jeongyeol?.touched;
         currentApprovalDraftId = safeDraftId;
         currentApprovalDraftUpdatedAt = draftRow?.updated_at || draftRow?.created_at || '';
+        resetApprovalAttachmentOrder();
         approvalDraftAttachmentRefs = (Array.isArray(draftRow?.attachment_links) ? draftRow.attachment_links : [])
             .map((item) => normalizeApprovalDraftAttachmentItem(item))
             .filter(Boolean);
@@ -2644,8 +2694,10 @@ async function saveApprovalDraft() {
         saveBtn.textContent = '저장 중...';
     }
 
-    const fileInput = document.getElementById('attachFile');
-    const pendingFiles = Array.from(fileInput?.files || []);
+    const orderedAttachments = getApprovalOrderedAttachmentDescriptors();
+    const pendingFiles = orderedAttachments
+        .filter((descriptor) => descriptor.kind === 'local')
+        .map((descriptor) => descriptor.file);
     let newlyUploadedAttachments = [];
     const validation = validateAttachments(pendingFiles);
     if (!validation.ok) {
@@ -2669,9 +2721,9 @@ async function saveApprovalDraft() {
         }
 
         let draftId = Number(currentApprovalDraftId || 0) || null;
-        let mergedAttachments = approvalDraftAttachmentRefs
-            .map((item) => normalizeApprovalDraftAttachmentItem(item))
-            .filter(Boolean);
+        let mergedAttachments = orderedAttachments
+            .filter((descriptor) => descriptor.kind === 'saved')
+            .map((descriptor) => descriptor.item);
         let payload = collectApprovalDraftFormPayload();
 
         if (!draftId) {
@@ -2685,12 +2737,19 @@ async function saveApprovalDraft() {
 
         if (pendingFiles.length > 0) {
             newlyUploadedAttachments = await uploadApprovalDraftAttachments(draftId, pendingFiles);
-            mergedAttachments = mergedAttachments.concat(newlyUploadedAttachments);
+            let uploadedIndex = 0;
+            mergedAttachments = orderedAttachments.map((descriptor) => {
+                if (descriptor.kind === 'saved') return descriptor.item;
+                const uploaded = newlyUploadedAttachments[uploadedIndex] || null;
+                uploadedIndex += 1;
+                return uploaded;
+            }).filter(Boolean);
         }
 
         payload = collectApprovalDraftFormPayload();
         await persistApprovalDraftRecord(draftId, payload, mergedAttachments);
         clearApprovalDraftLocalFiles();
+        resetApprovalAttachmentOrder();
         updateFileList();
         await fetchApprovalDraftList();
         renderApprovalDraftList();
@@ -2771,7 +2830,10 @@ async function removeSavedApprovalDraftAttachment(index) {
         approvalDraftAttachmentRefs.splice(index, 1);
         updateFileList();
         if (currentApprovalDraftId) {
-            await persistApprovalDraftRecord(currentApprovalDraftId, collectApprovalDraftFormPayload(), approvalDraftAttachmentRefs);
+            const orderedSavedAttachments = getApprovalOrderedAttachmentDescriptors()
+                .filter((descriptor) => descriptor.kind === 'saved')
+                .map((descriptor) => descriptor.item);
+            await persistApprovalDraftRecord(currentApprovalDraftId, collectApprovalDraftFormPayload(), orderedSavedAttachments);
             await fetchApprovalDraftList();
             renderApprovalDraftList();
         }
@@ -6692,6 +6754,87 @@ function mergeAttachmentFiles(existingFiles, incomingFiles) {
     return dataTransfer.files;
 }
 
+function getApprovalLocalAttachmentId(file) {
+    if (!file || (typeof file !== 'object' && typeof file !== 'function')) return '';
+    let localId = approvalAttachmentLocalIds.get(file);
+    if (!localId) {
+        approvalAttachmentLocalIdSequence += 1;
+        localId = `local:${approvalAttachmentLocalIdSequence}`;
+        approvalAttachmentLocalIds.set(file, localId);
+    }
+    return localId;
+} // End of getApprovalLocalAttachmentId
+
+function buildApprovalAttachmentDescriptors() {
+    const descriptors = [];
+    const savedOccurrences = new Map();
+    approvalDraftAttachmentRefs
+        .map((item) => normalizeApprovalDraftAttachmentItem(item))
+        .filter(Boolean)
+        .forEach((item, savedIndex) => {
+            const occurrence = Number(savedOccurrences.get(item.rawRef) || 0) + 1;
+            savedOccurrences.set(item.rawRef, occurrence);
+            descriptors.push({
+                id: `saved:${item.rawRef}:${occurrence}`,
+                kind: 'saved',
+                savedIndex,
+                item
+            });
+        });
+
+    const input = document.getElementById('attachFile');
+    Array.from(input?.files || []).forEach((file, localIndex) => {
+        const id = getApprovalLocalAttachmentId(file);
+        if (!id) return;
+        descriptors.push({
+            id,
+            kind: 'local',
+            localIndex,
+            file
+        });
+    });
+    return descriptors;
+} // End of buildApprovalAttachmentDescriptors
+
+function getApprovalOrderedAttachmentDescriptors() {
+    const descriptors = buildApprovalAttachmentDescriptors();
+    const descriptorById = new Map(descriptors.map((item) => [item.id, item]));
+    const usedIds = new Set();
+    const ordered = [];
+
+    approvalAttachmentOrder.forEach((id) => {
+        const descriptor = descriptorById.get(id);
+        if (!descriptor || usedIds.has(id)) return;
+        usedIds.add(id);
+        ordered.push(descriptor);
+    });
+    descriptors.forEach((descriptor) => {
+        if (usedIds.has(descriptor.id)) return;
+        usedIds.add(descriptor.id);
+        ordered.push(descriptor);
+    });
+    approvalAttachmentOrder = ordered.map((descriptor) => descriptor.id);
+    return ordered;
+} // End of getApprovalOrderedAttachmentDescriptors
+
+function resetApprovalAttachmentOrder() {
+    approvalAttachmentOrder = [];
+} // End of resetApprovalAttachmentOrder
+
+function moveApprovalAttachment(orderIndex, direction) {
+    const ordered = getApprovalOrderedAttachmentDescriptors();
+    const fromIndex = Number(orderIndex);
+    const delta = Number(direction);
+    const toIndex = fromIndex + delta;
+    if (!Number.isInteger(fromIndex) || !Number.isInteger(delta)) return;
+    if (fromIndex < 0 || fromIndex >= ordered.length || toIndex < 0 || toIndex >= ordered.length) return;
+
+    const nextOrder = ordered.map((descriptor) => descriptor.id);
+    [nextOrder[fromIndex], nextOrder[toIndex]] = [nextOrder[toIndex], nextOrder[fromIndex]];
+    approvalAttachmentOrder = nextOrder;
+    updateFileList();
+} // End of moveApprovalAttachment
+
 function updateAttachmentDropZoneUi() {
     const dropZone = document.getElementById('attachmentDropZone');
     const textEl = document.getElementById('attachmentDropZoneText');
@@ -8556,31 +8699,29 @@ function openAppDescPreview() {
 
 async function buildApprovalSubmitPreviewAttachments(previewDoc) {
     const attachments = [];
-    const fileInput = document.getElementById('attachFile');
-    Array.from(fileInput?.files || []).forEach((file) => {
-        if (!(file instanceof File)) return;
-        const objectUrl = URL.createObjectURL(file);
-        relViewObjectUrls.push(objectUrl);
+    getApprovalOrderedAttachmentDescriptors().forEach((descriptor) => {
+        if (descriptor.kind === 'local') {
+            const file = descriptor.file;
+            if (!(file instanceof File)) return;
+            const objectUrl = URL.createObjectURL(file);
+            relViewObjectUrls.push(objectUrl);
+            attachments.push({
+                rawRef: objectUrl,
+                previewUrl: objectUrl,
+                displayName: String(file.name || '첨부파일').trim() || '첨부파일',
+                size: Number(file.size || 0) || 0,
+                mimeType: String(file.type || '').trim()
+            });
+            return;
+        }
+        const item = descriptor.item;
         attachments.push({
-            rawRef: objectUrl,
-            previewUrl: objectUrl,
-            displayName: String(file.name || '첨부파일').trim() || '첨부파일',
-            size: Number(file.size || 0) || 0,
-            mimeType: String(file.type || '').trim()
+            rawRef: item.rawRef,
+            displayName: item.displayName,
+            size: Number(item.size || 0) || 0,
+            mimeType: String(item.mimeType || '').trim()
         });
     });
-
-    approvalDraftAttachmentRefs
-        .map((item) => normalizeApprovalDraftAttachmentItem(item))
-        .filter(Boolean)
-        .forEach((item) => {
-            attachments.push({
-                rawRef: item.rawRef,
-                displayName: item.displayName,
-                size: Number(item.size || 0) || 0,
-                mimeType: String(item.mimeType || '').trim()
-            });
-        });
 
     return attachments;
 } // End of buildApprovalSubmitPreviewAttachments
@@ -9980,6 +10121,7 @@ async function handleDraftSubmit(e) {
     }
     const validation = validateAttachments(fileInput.files);
     if (!validation.ok) return showAlert(validation.message);
+    const orderedAttachments = getApprovalOrderedAttachmentDescriptors();
 
     // 2. [자동 정렬] 결재선: 직급 역순 (하급자 -> 상급자)
     // auth_level 숫자가 큰 사람(9) -> 작은 사람(1)
@@ -9993,32 +10135,31 @@ async function handleDraftSubmit(e) {
     const uploadRollbackItems = [];
     const isSalaryExpenseDoc = mainType === '지출결의' && expenseSubType === '급여';
     try {
-        for (let i = 0; i < fileInput.files.length; i++) {
-            const file = fileInput.files[i];
-            const safeName = `${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-            const { error } = await _supabase.storage.from('attachments').upload(safeName, file);
-            if (error) throw error;
-            const rawRef = `attachments/${safeName}?display_name=${encodeURIComponent(file.name || safeName)}`;
-            uploadedUrls.push(rawRef);
-            uploadRollbackItems.push({ rawRef });
-        }
-
-        if (approvalDraftAttachmentRefs.length > 0) {
-            const copiedAttachments = await copyApprovalDraftAttachmentsForSubmit(approvalDraftAttachmentRefs);
-            copiedAttachments.fileRefs.forEach((rawRef) => {
+        for (const descriptor of orderedAttachments) {
+            if (descriptor.kind === 'local') {
+                const file = descriptor.file;
+                const safeName = `${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                const { error } = await _supabase.storage.from('attachments').upload(safeName, file);
+                if (error) throw error;
+                const rawRef = `attachments/${safeName}?display_name=${encodeURIComponent(file.name || safeName)}`;
                 uploadedUrls.push(rawRef);
                 uploadRollbackItems.push({ rawRef });
-            });
+                continue;
+            }
+
+            const copiedAttachments = await copyApprovalDraftAttachmentsForSubmit([descriptor.item]);
+            copiedAttachments.fileRefs.forEach((rawRef) => uploadedUrls.push(rawRef));
+            copiedAttachments.copiedObjects.forEach((item) => uploadRollbackItems.push(item));
         }
 
     } catch (error) {
         try {
             await deleteDraftAttachmentObjects(uploadRollbackItems);
         } catch (_) { /* noop */ }
-        const submitFileNames = Array.from(fileInput.files || []).map((file) => String(file?.name || '').trim()).filter(Boolean);
-        if (approvalDraftAttachmentRefs.length > 0) {
-            submitFileNames.push(`임시저장 첨부 ${approvalDraftAttachmentRefs.length}건`);
-        }
+        const submitFileNames = orderedAttachments.map((descriptor) => descriptor.kind === 'local'
+            ? String(descriptor.file?.name || '').trim()
+            : String(descriptor.item?.displayName || '').trim()
+        ).filter(Boolean);
         void notifyApprovalUploadFailure({
             error,
             contextKey: 'submit',
@@ -11455,49 +11596,66 @@ function updateFileList() {
     const area = document.getElementById("fileListArea");
     if (!area) return;
     area.innerHTML = "";
-    const input = document.getElementById("attachFile");
-    const files = Array.from(input?.files || []);
-    const savedAttachments = approvalDraftAttachmentRefs
-        .map((item) => normalizeApprovalDraftAttachmentItem(item))
-        .filter(Boolean);
+    const orderedAttachments = getApprovalOrderedAttachmentDescriptors();
+    const orderHint = document.getElementById('attachmentOrderHint');
+    if (orderHint) orderHint.classList.toggle('hidden', orderedAttachments.length < 2);
 
-    if (savedAttachments.length === 0 && files.length === 0) {
+    if (orderedAttachments.length === 0) {
         area.innerHTML = '<div class="small text-muted">선택된 첨부가 없습니다.</div>';
         updateAttachmentDropZoneUi();
         return;
     }
 
-    savedAttachments.forEach((item, idx) => {
+    orderedAttachments.forEach((descriptor, orderIndex) => {
         const row = document.createElement("div");
         row.className = "file-item";
-        const canPreview = canPreviewAttachment(item.displayName || item.rawRef || '');
-        const sizeLabel = item.size > 0 ? ` · ${formatAttachmentSize(item.size)}` : '';
+        row.setAttribute('role', 'listitem');
+        row.dataset.attachmentOrderIndex = String(orderIndex);
+        const isFirst = orderIndex === 0;
+        const isLast = orderIndex === orderedAttachments.length - 1;
+        let displayName = '첨부파일';
+        let sourceLabel = '';
+        let previewButton = '';
+        let removeButton = '';
+
+        if (descriptor.kind === 'saved') {
+            const item = descriptor.item;
+            const canPreview = canPreviewAttachment(item.displayName || item.rawRef || '');
+            const sizeLabel = item.size > 0 ? ` · ${formatAttachmentSize(item.size)}` : '';
+            displayName = item.displayName || '저장된 첨부';
+            sourceLabel = `서버 임시저장${sizeLabel}`;
+            previewButton = canPreview
+                ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openSavedApprovalDraftAttachmentPreview(${descriptor.savedIndex})">바로보기</button>`
+                : '';
+            removeButton = `<button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSavedApprovalDraftAttachment(${descriptor.savedIndex})">삭제</button>`;
+        } else {
+            const file = descriptor.file;
+            const canPreview = canPreviewAttachment(file.name || '', file.type || '');
+            displayName = file.name || '첨부파일';
+            sourceLabel = `이 기기에서만 선택됨${file.size ? ` · ${formatAttachmentSize(file.size)}` : ''}`;
+            previewButton = canPreview
+                ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openLocalAttachmentPreview(${descriptor.localIndex})">바로보기</button>`
+                : '';
+            removeButton = `<button type="button" class="btn btn-sm btn-outline-danger" onclick="removeLocalAttachment(${descriptor.localIndex})">제외</button>`;
+        }
+
         row.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center gap-2">
-                <span>☁️ ${escapeHtml(item.displayName || '저장된 첨부')} <span class="text-muted small">(서버 임시저장${escapeHtml(sizeLabel)})</span></span>
-                <div class="d-flex gap-2 flex-wrap justify-content-end">
-                    ${canPreview ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openSavedApprovalDraftAttachmentPreview(${idx})">바로보기</button>` : ''}
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSavedApprovalDraftAttachment(${idx})">삭제</button>
+            <div class="approval-attachment-row">
+                <div class="approval-attachment-summary">
+                    <span class="approval-attachment-index" aria-hidden="true">${orderIndex + 1}</span>
+                    <span class="approval-attachment-name">${descriptor.kind === 'saved' ? '☁️' : '📎'} ${escapeHtml(displayName)} <span class="text-muted small">(${escapeHtml(sourceLabel)})</span></span>
+                </div>
+                <div class="approval-attachment-actions">
+                    <div class="btn-group approval-attachment-order-actions" role="group" aria-label="${escapeHtml(displayName)} 순서 변경">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveApprovalAttachment(${orderIndex}, -1)" aria-label="${escapeHtml(displayName)} 위로 이동" title="위로 이동"${isFirst ? ' disabled' : ''}>↑</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveApprovalAttachment(${orderIndex}, 1)" aria-label="${escapeHtml(displayName)} 아래로 이동" title="아래로 이동"${isLast ? ' disabled' : ''}>↓</button>
+                    </div>
+                    ${previewButton}
+                    ${removeButton}
                 </div>
             </div>
         `;
         area.appendChild(row);
-    });
-
-    files.forEach((f, idx) => {
-        const item = document.createElement("div");
-        item.className = "file-item";
-        const canPreview = canPreviewAttachment(f.name);
-        item.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center gap-2">
-                <span>📎 ${escapeHtml(f.name)} <span class="text-muted small">(이 기기에서만 선택됨${escapeHtml(f.size ? ` · ${formatAttachmentSize(f.size)}` : '')})</span></span>
-                <div class="d-flex gap-2 flex-wrap justify-content-end">
-                    ${canPreview ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openLocalAttachmentPreview(${idx})">바로보기</button>` : ''}
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeLocalAttachment(${idx})">제외</button>
-                </div>
-            </div>
-        `;
-        area.appendChild(item);
     });
     updateAttachmentDropZoneUi();
 }
