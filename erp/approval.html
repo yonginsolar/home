@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.40 | Change: 2026-08-06 - Add structured four-insurance expense input with optional Durunuri support. -->
+<!-- Version: v1.2.41 | Change: 2026-08-06 - Improve four-insurance readability and deduct Durunuri support. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.40 | approval.html');</script>
+  <script>console.log('[Version] v1.2.41 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -47,6 +47,53 @@
     }
     .approval-leave-mixed-row + .approval-leave-mixed-row {
       margin-top: 8px;
+    }
+    .approval-insurance-panel {
+      border: 1px solid #dbe4ee;
+      border-radius: 14px;
+      background: #fff;
+      padding: 18px;
+    }
+    .approval-insurance-section {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      background: #f8fafc;
+      padding: 14px;
+    }
+    .approval-insurance-section + .approval-insurance-section { margin-top: 14px; }
+    .approval-insurance-section-title { color: #1e293b; font-weight: 700; margin-bottom: 10px; }
+    .approval-insurance-method {
+      min-height: 31px;
+      display: flex;
+      align-items: center;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #eef6ff;
+      color: #0f3d75;
+      font-weight: 700;
+      padding: 6px 10px;
+    }
+    .approval-insurance-summary {
+      border: 1px solid #b9d7c6;
+      border-radius: 12px;
+      background: #f2fbf6;
+      color: #174b2c;
+      padding: 14px;
+      line-height: 1.65;
+    }
+    .approval-insurance-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px 16px;
+    }
+    .approval-insurance-summary.is-invalid {
+      border-color: #f1aeb5;
+      background: #fff5f5;
+      color: #842029;
+    }
+    @media (max-width: 575.98px) {
+      .approval-insurance-panel { padding: 14px; }
+      .approval-insurance-summary-grid { grid-template-columns: 1fr; }
     }
 
     /* 결재선 스타일 */
@@ -592,58 +639,70 @@
                 <button type="button" class="btn btn-sm btn-outline-primary w-100" id="btnLoadPayroll" onclick="loadSalaryLedgerForExpense()">📊 급여대장 불러오기</button>
               </div>
               <div class="col-12 hidden" id="divInsuranceExpense">
-                <div class="border rounded bg-white p-3">
-                  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                    <strong>4대보험 고지서</strong>
-                    <span class="small text-muted">보험별 금액은 두루누리 지원금이 이미 반영된 실제 납부액을 입력합니다.</span>
+                <div class="approval-insurance-panel">
+                  <div class="mb-3">
+                    <div class="fw-bold fs-6">4대보험 납부 내역</div>
+                    <div class="text-muted mt-1">고지 금액을 입력하면 두루누리 지원금을 차감해 결재 금액을 자동 계산합니다.</div>
                   </div>
-                  <div class="row g-2">
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insuranceBillingMonth">귀속월</label>
-                      <input type="month" class="form-control form-control-sm" id="insuranceBillingMonth" onchange="syncApprovalInsuranceExpenseTotal()">
-                    </div>
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insuranceDueDate">납부일 (선택)</label>
-                      <input type="date" class="form-control form-control-sm" id="insuranceDueDate">
-                    </div>
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insurancePension">국민연금</label>
-                      <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insurancePension" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
-                    </div>
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insuranceHealth">건강보험</label>
-                      <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceHealth" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
-                    </div>
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insuranceCare">장기요양보험</label>
-                      <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceCare" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
-                    </div>
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insuranceEmployment">고용보험</label>
-                      <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceEmployment" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
-                    </div>
-                    <div class="col-sm-4">
-                      <label class="small text-muted" for="insuranceIndustrial">산재보험</label>
-                      <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceIndustrial" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                  <div class="approval-insurance-section">
+                    <div class="approval-insurance-section-title">기본 정보</div>
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="insuranceBillingMonth">귀속월</label>
+                        <input type="month" class="form-control" id="insuranceBillingMonth" onchange="handleApprovalInsuranceBillingMonthChange()">
+                      </div>
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1">납부일</label>
+                        <div class="approval-insurance-method">자동이체 (10일 인출)</div>
+                        <input type="hidden" id="insuranceDueDate">
+                      </div>
                     </div>
                   </div>
-                  <div class="border-top mt-3 pt-3">
-                    <div class="small fw-bold mb-2">두루누리 지원금 (선택·정보 기록용)</div>
-                    <div class="row g-2">
-                      <div class="col-sm-4">
-                        <label class="small text-muted" for="insuranceDurunuriPension">국민연금 지원</label>
-                        <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceDurunuriPension" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+
+                  <div class="approval-insurance-section">
+                    <div class="approval-insurance-section-title">보험료 고지 금액</div>
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="insuranceHealth">건강보험 <span class="fw-normal">(장기요양 포함)</span></label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceHealth" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                        <input type="hidden" id="insuranceCare" value="">
                       </div>
-                      <div class="col-sm-4">
-                        <label class="small text-muted" for="insuranceDurunuriEmployment">실업급여 지원</label>
-                        <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceDurunuriEmployment" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="insurancePension">국민연금</label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insurancePension" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
                       </div>
-                      <div class="col-sm-4">
-                        <label class="small text-muted" for="insuranceDurunuriStability">고용안정·직업능력개발 지원</label>
-                        <input type="number" min="0" step="1" class="form-control form-control-sm text-end insurance-expense-money" id="insuranceDurunuriStability" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="insuranceEmployment">고용보험</label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceEmployment" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                      </div>
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="insuranceIndustrial">산재보험</label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceIndustrial" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
                       </div>
                     </div>
-                    <div class="small text-muted mt-2">지원금은 자동으로 다시 차감하지 않고, 향후 급여·두루누리 대조에 쓸 근거로 보관합니다.</div>
+                  </div>
+
+                  <div class="approval-insurance-section">
+                    <div class="approval-insurance-section-title">두루누리 지원금 <span class="text-muted fw-normal">(선택)</span></div>
+                    <div class="row g-3">
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1" for="insuranceDurunuriPension">국민연금 지원금</label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceDurunuriPension" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1" for="insuranceDurunuriEmployment">실업급여 지원금</label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceDurunuriEmployment" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1" for="insuranceDurunuriStability">고용안정·직업능력개발 지원금</label>
+                        <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceDurunuriStability" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
+                      </div>
+                    </div>
+                    <div class="text-muted mt-2">국민연금 지원금은 국민연금에서, 실업급여와 고용안정 지원금은 고용보험에서 차감합니다.</div>
+                  </div>
+
+                  <div class="approval-insurance-summary mt-3" id="insurancePaymentSummary" aria-live="polite">
+                    보험료를 입력하면 결재 금액이 표시됩니다.
                   </div>
                 </div>
               </div>
@@ -2672,6 +2731,7 @@ async function loadApprovalDraftFromServer(draftId) {
             if (element) element.value = String(fields[fieldKey] || '').trim();
         });
         if (String(fields.expense_sub_type || '').trim() === '4대보험') {
+            normalizeApprovalLegacyInsuranceCareInput();
             syncApprovalInsuranceExpenseTotal();
         }
         const noticeReceiverEl = document.getElementById('noticeReceiver');
@@ -3865,6 +3925,7 @@ function isApprovalAutoGeneratedTemplateContent(content) {
         if (getApprovalAutoGeneratedBodyList().includes(value)) return true;
         if (value.includes('[급여대장 연동]')) return true;
         if (value.includes('급여 지급을 위해 지출결의를 상신합니다.')) return true;
+        if (value.includes('4대보험 납부를 위해 지출결의를 상신합니다.')) return true;
         if (value.includes('시간외 근로 신청') && value.includes('업무 내용:') && value.includes('수행 사유:') && value.includes('완료 예정 업무:')) return true;
     }
     return false;
@@ -4413,6 +4474,67 @@ function parseApprovalInsuranceWon(value) {
     return Math.round(amount);
 } // End of parseApprovalInsuranceWon
 
+function buildApprovalInsuranceDueDate(billingMonth) {
+    const matched = String(billingMonth || '').trim().match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+    if (!matched) return '';
+    const year = Number(matched[1]);
+    const month = Number(matched[2]);
+    const dueMonth = month === 12 ? 1 : month + 1;
+    const dueYear = month === 12 ? year + 1 : year;
+    return `${dueYear}-${String(dueMonth).padStart(2, '0')}-10`;
+} // End of buildApprovalInsuranceDueDate
+
+function normalizeApprovalLegacyInsuranceCareInput() {
+    const healthInput = document.getElementById('insuranceHealth');
+    const careInput = document.getElementById('insuranceCare');
+    const legacyCare = parseApprovalInsuranceWon(careInput?.value);
+    if (!(legacyCare > 0)) return;
+    if (healthInput) {
+        healthInput.value = String(parseApprovalInsuranceWon(healthInput.value) + legacyCare);
+    }
+    if (careInput) careInput.value = '';
+} // End of normalizeApprovalLegacyInsuranceCareInput
+
+function getApprovalInsuranceComputedAmounts(insurance) {
+    const premiums = insurance?.premiums || {};
+    const support = insurance?.durunuri_support || {};
+    const gross = {
+        health: parseApprovalInsuranceWon(premiums.health) + parseApprovalInsuranceWon(premiums.care),
+        pension: parseApprovalInsuranceWon(premiums.pension),
+        employment: parseApprovalInsuranceWon(premiums.employment),
+        industrial: parseApprovalInsuranceWon(premiums.industrial)
+    };
+    const supportPension = parseApprovalInsuranceWon(support.pension);
+    const supportEmployment = parseApprovalInsuranceWon(support.employment) + parseApprovalInsuranceWon(support.stability);
+    const usesGrossDeduction = String(insurance?.calculation_mode || '') === 'gross_minus_durunuri'
+        || (insurance?.net_premiums && typeof insurance.net_premiums === 'object');
+    const net = usesGrossDeduction
+        ? {
+            health: gross.health,
+            pension: Math.max(0, gross.pension - supportPension),
+            employment: Math.max(0, gross.employment - supportEmployment),
+            industrial: gross.industrial
+        }
+        : { ...gross };
+    const grossTotal = gross.health + gross.pension + gross.employment + gross.industrial;
+    const enteredSupportTotal = supportPension + supportEmployment;
+    const appliedSupportTotal = usesGrossDeduction
+        ? Math.min(gross.pension, supportPension) + Math.min(gross.employment, supportEmployment)
+        : 0;
+    return {
+        gross,
+        net,
+        supportPension,
+        supportEmployment,
+        enteredSupportTotal,
+        appliedSupportTotal,
+        grossTotal,
+        totalAmount: net.health + net.pension + net.employment + net.industrial,
+        pensionSupportExceeded: supportPension > gross.pension,
+        employmentSupportExceeded: supportEmployment > gross.employment
+    };
+} // End of getApprovalInsuranceComputedAmounts
+
 function collectApprovalInsuranceExpenseInput() {
     const pension = parseApprovalInsuranceWon(document.getElementById('insurancePension')?.value);
     const health = parseApprovalInsuranceWon(document.getElementById('insuranceHealth')?.value);
@@ -4422,9 +4544,16 @@ function collectApprovalInsuranceExpenseInput() {
     const durunuriPension = parseApprovalInsuranceWon(document.getElementById('insuranceDurunuriPension')?.value);
     const durunuriEmployment = parseApprovalInsuranceWon(document.getElementById('insuranceDurunuriEmployment')?.value);
     const durunuriStability = parseApprovalInsuranceWon(document.getElementById('insuranceDurunuriStability')?.value);
-    return {
-        billing_month: String(document.getElementById('insuranceBillingMonth')?.value || '').trim(),
-        due_date: String(document.getElementById('insuranceDueDate')?.value || '').trim() || null,
+    const billingMonth = String(document.getElementById('insuranceBillingMonth')?.value || '').trim();
+    const dueDate = buildApprovalInsuranceDueDate(billingMonth);
+    const dueDateInput = document.getElementById('insuranceDueDate');
+    if (dueDateInput) dueDateInput.value = dueDate;
+    const insurance = {
+        calculation_mode: 'gross_minus_durunuri',
+        payment_method: '자동이체',
+        payment_day: 10,
+        billing_month: billingMonth,
+        due_date: dueDate || null,
         premiums: {
             pension,
             health,
@@ -4438,26 +4567,90 @@ function collectApprovalInsuranceExpenseInput() {
             stability: durunuriStability,
             total: durunuriPension + durunuriEmployment + durunuriStability
         },
-        total_amount: pension + health + care + employment + industrial
+        gross_total: pension + health + care + employment + industrial
     };
+    const computed = getApprovalInsuranceComputedAmounts(insurance);
+    insurance.net_premiums = { ...computed.net };
+    insurance.durunuri_support.applied_total = computed.appliedSupportTotal;
+    insurance.total_amount = computed.totalAmount;
+    return insurance;
 } // End of collectApprovalInsuranceExpenseInput
+
+function validateApprovalInsuranceExpense(insurance) {
+    const computed = getApprovalInsuranceComputedAmounts(insurance);
+    const errors = [];
+    if (computed.pensionSupportExceeded) errors.push('국민연금 지원금은 국민연금 고지 금액보다 클 수 없습니다.');
+    if (computed.employmentSupportExceeded) errors.push('실업급여·고용안정 지원금 합계는 고용보험 고지 금액보다 클 수 없습니다.');
+    return { ok: errors.length === 0, errors, computed };
+} // End of validateApprovalInsuranceExpense
 
 function syncApprovalInsuranceExpenseTotal() {
     const state = collectApprovalInsuranceExpenseInput();
+    const validation = validateApprovalInsuranceExpense(state);
     const amountInput = document.getElementById('appAmount');
     const summary = document.getElementById('payrollSummary');
+    const detailSummary = document.getElementById('insurancePaymentSummary');
     if (amountInput) amountInput.value = state.total_amount > 0 ? String(state.total_amount) : '';
-    if (summary) {
+    if (summary && detailSummary) {
+        summary.className = 'hidden';
+        summary.textContent = '';
+    } else if (summary) {
         const monthLabel = state.billing_month ? `${state.billing_month} / ` : '';
-        const supportLabel = state.durunuri_support.total > 0
-            ? ` / 두루누리 지원금 ${formatMoney(state.durunuri_support.total)}원(정보 기록)`
+        const supportLabel = validation.computed.appliedSupportTotal > 0
+            ? ` / 두루누리 ${formatMoney(validation.computed.appliedSupportTotal)}원 차감`
             : '';
-        summary.className = 'small text-muted';
-        summary.textContent = `${monthLabel}총 납부액 ${formatMoney(state.total_amount)}원${supportLabel}`;
+        summary.className = validation.ok ? 'text-success fw-bold' : 'text-danger fw-bold';
+        summary.textContent = validation.ok
+            ? `${monthLabel}결재 금액 ${formatMoney(state.total_amount)}원${supportLabel}`
+            : validation.errors.join(' ');
+    }
+    if (detailSummary) {
+        detailSummary.classList.toggle('is-invalid', !validation.ok);
+        if (!validation.ok) {
+            detailSummary.textContent = validation.errors.join(' ');
+        } else {
+            const net = validation.computed.net;
+            const supportText = validation.computed.appliedSupportTotal > 0
+                ? `두루누리 차감 ${formatMoney(validation.computed.appliedSupportTotal)}원 · `
+                : '';
+            detailSummary.innerHTML = [
+                `<div class="fw-bold mb-1">결재 금액 ${formatMoney(state.total_amount)}원</div>`,
+                '<div class="approval-insurance-summary-grid">',
+                `<div>건강보험 ${formatMoney(net.health)}원</div>`,
+                `<div>국민연금 ${formatMoney(net.pension)}원</div>`,
+                `<div>고용보험 ${formatMoney(net.employment)}원</div>`,
+                `<div>산재보험 ${formatMoney(net.industrial)}원</div>`,
+                '</div>',
+                `<div class="mt-1">고지 합계 ${formatMoney(validation.computed.grossTotal)}원 · ${supportText}자동이체 (10일 인출)</div>`
+            ].join('');
+        }
     }
     syncApprovalTitleInput('지출결의');
     return state;
 } // End of syncApprovalInsuranceExpenseTotal
+
+function buildApprovalInsuranceDefaultBody(billingMonth) {
+    const normalizedMonth = /^\d{4}-\d{2}$/.test(String(billingMonth || '')) ? String(billingMonth) : '';
+    const monthLabel = normalizedMonth ? formatYearMonthLabel(normalizedMonth) : '';
+    const prefix = monthLabel ? `${monthLabel} ` : '';
+    return `${prefix}4대보험 납부를 위해 지출결의를 상신합니다.`;
+} // End of buildApprovalInsuranceDefaultBody
+
+function syncApprovalInsuranceDefaultBody(options = {}) {
+    const currentDesc = getApprovalEditorContent();
+    const canReplace = options.force === true
+        || !String(currentDesc || '').trim()
+        || isApprovalAutoGeneratedTemplateContent(currentDesc);
+    if (!canReplace) return false;
+    const billingMonth = String(document.getElementById('insuranceBillingMonth')?.value || '').trim();
+    setApprovalEditorContent(buildApprovalInsuranceDefaultBody(billingMonth));
+    return true;
+} // End of syncApprovalInsuranceDefaultBody
+
+function handleApprovalInsuranceBillingMonthChange() {
+    syncApprovalInsuranceExpenseTotal();
+    syncApprovalInsuranceDefaultBody();
+} // End of handleApprovalInsuranceBillingMonthChange
 
 function resetApprovalInsuranceExpenseUi(clearValues = false) {
     const wrap = document.getElementById('divInsuranceExpense');
@@ -4469,28 +4662,31 @@ function resetApprovalInsuranceExpenseUi(clearValues = false) {
     });
     const billingMonth = document.getElementById('insuranceBillingMonth');
     const dueDate = document.getElementById('insuranceDueDate');
+    const detailSummary = document.getElementById('insurancePaymentSummary');
     if (billingMonth) billingMonth.value = '';
     if (dueDate) dueDate.value = '';
+    if (detailSummary) {
+        detailSummary.classList.remove('is-invalid');
+        detailSummary.textContent = '보험료를 입력하면 결재 금액이 표시됩니다.';
+    }
 } // End of resetApprovalInsuranceExpenseUi
 
 function buildApprovalInsuranceAppendText(insurance) {
     if (!insurance || typeof insurance !== 'object') return '';
-    const premiums = insurance.premiums || {};
-    const support = insurance.durunuri_support || {};
+    const computed = getApprovalInsuranceComputedAmounts(insurance);
     const lines = [
         '[4대보험 고지서 입력]',
         `- 귀속월: ${insurance.billing_month || '-'}`,
-        `- 납부일: ${insurance.due_date || '미입력'}`,
-        `- 국민연금: ${formatMoney(premiums.pension || 0)}원`,
-        `- 건강보험: ${formatMoney(premiums.health || 0)}원`,
-        `- 장기요양보험: ${formatMoney(premiums.care || 0)}원`,
-        `- 고용보험: ${formatMoney(premiums.employment || 0)}원`,
-        `- 산재보험: ${formatMoney(premiums.industrial || 0)}원`,
+        '- 납부일: 자동이체 (10일 인출)',
+        `- 건강보험(장기요양 포함): ${formatMoney(computed.net.health)}원`,
+        `- 국민연금: ${formatMoney(computed.net.pension)}원`,
+        `- 고용보험: ${formatMoney(computed.net.employment)}원`,
+        `- 산재보험: ${formatMoney(computed.net.industrial)}원`,
         `- 총 납부액: ${formatMoney(insurance.total_amount || 0)}원`
     ];
-    if (Number(support.total || 0) > 0) {
+    if (computed.enteredSupportTotal > 0) {
         lines.push(
-            `- 두루누리 지원금(정보): 국민연금 ${formatMoney(support.pension || 0)}원 / 실업급여 ${formatMoney(support.employment || 0)}원 / 고용안정·직업능력개발 ${formatMoney(support.stability || 0)}원`
+            `- 두루누리 차감: 국민연금 ${formatMoney(computed.supportPension)}원 / 고용보험 ${formatMoney(computed.supportEmployment)}원 / 합계 ${formatMoney(computed.appliedSupportTotal)}원`
         );
     }
     return lines.join('\n');
@@ -7783,12 +7979,15 @@ function handleExpenseSubTypeChange() {
         resetApprovalExpensePaymentUi();
         const billingMonth = document.getElementById('insuranceBillingMonth');
         if (billingMonth && !billingMonth.value) billingMonth.value = formatApprovalKstMonth();
+        const dueDate = document.getElementById('insuranceDueDate');
+        if (dueDate) dueDate.value = buildApprovalInsuranceDueDate(billingMonth?.value || '');
         if (amountLabel) amountLabel.innerText = "4대보험 총 납부액 (원)";
         if (amountInput) {
             amountInput.placeholder = "보험별 금액 합계로 자동 입력";
             amountInput.readOnly = true;
             amountInput.dataset.insuranceAutoAmount = '1';
         }
+        syncApprovalInsuranceDefaultBody();
         syncApprovalInsuranceExpenseTotal();
         updateJeongyeolUi();
         return;
@@ -7812,6 +8011,10 @@ function handleExpenseSubTypeChange() {
         }
         if (amountLabel) amountLabel.innerText = "금액 (원)";
         if (amountInput) amountInput.placeholder = "0";
+        const currentDesc = getApprovalEditorContent();
+        if (isApprovalAutoGeneratedTemplateContent(currentDesc)) {
+            setApprovalEditorContent('아래와 같이 지출결의를 상신하오니 승인하여 주시기 바랍니다.');
+        }
         handleExpensePaymentMethodChange();
         updateJeongyeolUi();
         syncApprovalTitleInput('지출결의');
@@ -7844,11 +8047,7 @@ function handleExpenseSubTypeChange() {
         amountInput.readOnly = false;
     }
     const currentDesc = getApprovalEditorContent();
-    if (
-        !currentDesc.trim()
-        || currentDesc.includes("지출하고자 하오니 승인하여")
-        || currentDesc.includes("지출결의를 상신하오니 승인하여")
-    ) {
+    if (!currentDesc.trim() || isApprovalAutoGeneratedTemplateContent(currentDesc)) {
         const ymLabel = formatYearMonthLabel(monthInput?.value || '');
         setApprovalEditorContent(`${ymLabel} 급여 지급을 위해 지출결의를 상신합니다.`);
     }
@@ -9056,6 +9255,8 @@ function buildApprovalSubmitPreviewData() {
             expenseSnapshotPayload = buildApprovalExpenseSnapshot();
             const insurance = expenseSnapshotPayload?.insurance;
             if (!insurance?.billing_month) throw new Error('4대보험 귀속월을 선택하세요.');
+            const insuranceValidation = validateApprovalInsuranceExpense(insurance);
+            if (!insuranceValidation.ok) throw new Error(insuranceValidation.errors[0]);
             if (!(Number(insurance.total_amount || 0) > 0)) throw new Error('보험별 납부액을 하나 이상 입력하세요.');
             subType = '지출결의(4대보험)';
             title = getApprovalResolvedTitle(mainType, `4대보험 지출결의 (${insurance.billing_month})`);
@@ -10277,6 +10478,8 @@ async function handleDraftSubmit(e) {
             expenseSnapshotPayload = buildApprovalExpenseSnapshot();
             const insurance = expenseSnapshotPayload?.insurance;
             if (!insurance?.billing_month) return showAlert('4대보험 귀속월을 선택하세요.');
+            const insuranceValidation = validateApprovalInsuranceExpense(insurance);
+            if (!insuranceValidation.ok) return showAlert(insuranceValidation.errors[0]);
             if (!(Number(insurance.total_amount || 0) > 0)) return showAlert('보험별 납부액을 하나 이상 입력하세요.');
             subType = '지출결의(4대보험)';
             title = getApprovalResolvedTitle(mainType, `4대보험 지출결의 (${insurance.billing_month})`);
