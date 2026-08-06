@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.90 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
+<!-- Version: v1.0.91 | Change: 2026-08-06 - Limit capital and donation auto-sync to the open accounting period. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.90 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.91 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2114,14 +2114,137 @@ function buildCashNetMap(rows, prefix) {
     return map;
 }
 
-async function fetchDonationSyncSnapshot() {
-    const { data, error } = await _supabase.rpc('get_accounting_donation_sync_snapshot');
+function normalizeAccountingSyncDate(value) {
+    const raw = String(value || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+}
+
+function buildAccountingSyncRpcParams(options = {}) {
+    return {
+        p_start_date: normalizeAccountingSyncDate(options.startDate),
+        p_end_date: normalizeAccountingSyncDate(options.endDate)
+    };
+}
+
+function formatAccountingSyncPeriod(snapshot) {
+    const start = normalizeAccountingSyncDate(snapshot?.syncStart);
+    const end = normalizeAccountingSyncDate(snapshot?.syncEnd);
+    if (start && end) return `${start} ~ ${end}`;
+    if (start) return `${start} 이후`;
+    if (end) return `${end}까지`;
+    return '결산 이력 없음 · 전체 기간';
+}
+
+async function fetchCapitalSyncSnapshot(options = {}) {
+    const { data, error } = await _supabase.rpc(
+        'get_accounting_capital_sync_snapshot_v2',
+        buildAccountingSyncRpcParams(options)
+    );
+    if (error) throw error;
+
+    const members = Array.isArray(data?.members) ? data.members : [];
+    return {
+        capitalCount: Number(data?.capital_count || members.length),
+        members,
+        latestClosedYear: Number(data?.latest_closed_year) || null,
+        syncStart: normalizeAccountingSyncDate(data?.sync_start),
+        syncEnd: normalizeAccountingSyncDate(data?.sync_end)
+    };
+}
+
+function summarizeCapitalSyncSnapshot(snapshot) {
+    const summary = {
+        targetCount: Number(snapshot?.capitalCount || 0),
+        newCount: 0,
+        correctionCount: 0,
+        markOnlyCount: 0,
+        completedCount: 0,
+        legacySkipCount: 0,
+        pendingCount: 0
+    };
+
+    (snapshot?.members || []).forEach((member) => {
+        const sourceId = String(member?.id || '').trim();
+        if (!sourceId) return;
+        const desired = Math.max(0, Number(member.amount || 0));
+        const current = Number(member.current_net || 0);
+        const isFinal = String(member.status || '') === '전표완료';
+
+        if (isFinal && current === 0) {
+            summary.legacySkipCount += 1;
+        } else if (current === desired) {
+            if (!isFinal && desired > 0) summary.markOnlyCount += 1;
+            else summary.completedCount += 1;
+        } else if (!isFinal && current === 0 && desired > 0) {
+            summary.newCount += 1;
+        } else {
+            summary.correctionCount += 1;
+        }
+    });
+
+    summary.pendingCount = summary.newCount + summary.correctionCount + summary.markOnlyCount;
+    return summary;
+}
+
+async function fetchDonationSyncSnapshot(options = {}) {
+    const { data, error } = await _supabase.rpc(
+        'get_accounting_donation_sync_snapshot_v2',
+        buildAccountingSyncRpcParams(options)
+    );
     if (error) throw error;
 
     const donations = Array.isArray(data?.donations) ? data.donations : [];
     return {
         donationCount: Number(data?.donation_count || donations.length),
-        donations
+        donations,
+        latestClosedYear: Number(data?.latest_closed_year) || null,
+        syncStart: normalizeAccountingSyncDate(data?.sync_start),
+        syncEnd: normalizeAccountingSyncDate(data?.sync_end)
+    };
+}
+
+function summarizeDonationSyncSnapshot(snapshot) {
+    const summary = {
+        targetCount: Number(snapshot?.donationCount || 0),
+        newCount: 0,
+        correctionCount: 0,
+        markOnlyCount: 0,
+        completedCount: 0,
+        pendingCount: 0
+    };
+
+    (snapshot?.donations || []).forEach((row) => {
+        const sourceId = String(row?.id || '').trim();
+        if (!sourceId) return;
+        const desired = Math.max(0, Number(row.amount || 0));
+        const current = Number(row.current_net || 0);
+        const hasDone = String(row.note || '').includes('[전표완료]');
+
+        if (current === desired) {
+            if (!hasDone && desired > 0) summary.markOnlyCount += 1;
+            else summary.completedCount += 1;
+        } else if (current === 0 && !hasDone && desired > 0) {
+            summary.newCount += 1;
+        } else {
+            summary.correctionCount += 1;
+        }
+    });
+
+    summary.pendingCount = summary.newCount + summary.correctionCount + summary.markOnlyCount;
+    return summary;
+}
+
+async function checkAccountingFundSyncBeforeClosing(year) {
+    const startDate = `${year}-01-01`;
+    const endDate = `${year}-12-31`;
+    const [capitalSnapshot, donationSnapshot] = await Promise.all([
+        fetchCapitalSyncSnapshot({ startDate, endDate }),
+        fetchDonationSyncSnapshot({ startDate, endDate })
+    ]);
+
+    return {
+        capital: summarizeCapitalSyncSnapshot(capitalSnapshot),
+        donation: summarizeDonationSyncSnapshot(donationSnapshot)
     };
 }
 
@@ -6191,6 +6314,32 @@ async function runClosingFromModal() {
         if ((legal + vol) > ctx.netIncome) return showAlert("오류", "법정적립금 + 임의적립금이 당기순이익을 초과할 수 없습니다.");
     }
 
+    let fundSyncCheck;
+    try {
+        fundSyncCheck = await checkAccountingFundSyncBeforeClosing(ctx.year);
+    } catch (syncCheckError) {
+        return showAlert(
+            "결산 전 자동연동 확인 실패",
+            "출자금·기부금 연동 상태를 확인하지 못해 결산을 중단했습니다.\n" + (syncCheckError?.message || '알 수 없는 오류')
+        );
+    }
+
+    const pendingCapital = Number(fundSyncCheck?.capital?.pendingCount || 0);
+    const pendingDonation = Number(fundSyncCheck?.donation?.pendingCount || 0);
+    if (pendingCapital > 0 || pendingDonation > 0) {
+        const capital = fundSyncCheck.capital;
+        const donation = fundSyncCheck.donation;
+        return showAlert(
+            "결산 전 자동연동 필요",
+            [
+                `${ctx.year}년 출자금·기부금 자동연동을 먼저 완료해 주세요.`,
+                `- 출자금: 신규 ${capital.newCount}건 · 정정 ${capital.correctionCount}건 · 처리표시 ${capital.markOnlyCount}건`,
+                `- 기부금: 신규 ${donation.newCount}건 · 정정 ${donation.correctionCount}건 · 처리표시 ${donation.markOnlyCount}건`,
+                '자동연동을 다시 실행한 뒤 결산을 진행할 수 있습니다.'
+            ].join('\n')
+        );
+    }
+
     const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부 법인세(국세): ${estimate.prepaidNationalApplied.toLocaleString()}원\n기납부 법인지방소득세: ${estimate.prepaidLocalApplied.toLocaleString()}원\n예상 국세 납부액: ${estimate.expectedNationalPayable.toLocaleString()}원\n예상 지방세 납부액: ${estimate.expectedLocalPayable.toLocaleString()}원\n예상 합계 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
     const confirmAction = async () => {
         await executeClosing(ctx, legal, vol, taxExpense);
@@ -6574,63 +6723,39 @@ function confirmSync(type) {
 // (3) 출자금 연동
     else if (type === 'capital') {
         (async () => {
-            const { data: previewMembers, error: previewMemberError } = await _supabase
-                .from('ref_members')
-                .select('id,amount,status')
-                .in('status', ['완료', '전표완료']);
-            if (previewMemberError) return showAlert("오류", "미리보기 조회 실패: " + previewMemberError.message);
-            if (!previewMembers || previewMembers.length === 0) return showAlert("알림", "처리할 출자금 내역이 없습니다.");
-
-            const { data: previewCapRows, error: previewCapError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'CAP-%');
-            if (previewCapError) return showAlert("오류", "미리보기 전표 조회 실패: " + previewCapError.message);
-
-            const previewCashNetMap = buildCashNetMap(previewCapRows || [], 'CAP');
-            let previewNew = 0;
-            let previewCorrection = 0;
-            let previewLegacySkip = 0;
-
-            previewMembers.forEach((member) => {
-                const sourceId = String(member.id || '').trim();
-                if (!sourceId) return;
-                const desired = Math.max(0, Number(member.amount || 0));
-                const current = Number(previewCashNetMap.get(sourceId) || 0);
-                const isFinal = String(member.status || '') === '전표완료';
-                if (isFinal && current === 0) { previewLegacySkip += 1; return; }
-                if (current === desired) return;
-                if (!isFinal && current === 0 && desired > 0) previewNew += 1;
-                else previewCorrection += 1;
-            });
+            let previewSnapshot;
+            try {
+                previewSnapshot = await fetchCapitalSyncSnapshot();
+            } catch (previewError) {
+                return showAlert("오류", "미리보기 조회 실패: " + previewError.message);
+            }
+            const previewMembers = previewSnapshot.members;
+            if (!previewMembers || previewMembers.length === 0) return showAlert("알림", "열린 회계기간에 처리할 출자금 내역이 없습니다.");
+            const previewSummary = summarizeCapitalSyncSnapshot(previewSnapshot);
 
             const previewMsg = [
                 '출자금 연동 미리보기',
-                `- 대상 건수: ${previewMembers.length}건`,
-                `- 신규 전표: ${previewNew}건`,
-                `- 정정(취소+재기표): ${previewCorrection}건`,
-                `- 레거시 연결불가: ${previewLegacySkip}건`
+                `- 열린 기간: ${formatAccountingSyncPeriod(previewSnapshot)}`,
+                `- 대상 건수: ${previewSummary.targetCount}건`,
+                `- 신규 전표: ${previewSummary.newCount}건`,
+                `- 정정(취소+재기표): ${previewSummary.correctionCount}건`,
+                `- 처리표시만 반영: ${previewSummary.markOnlyCount}건`,
+                `- 레거시 연결불가: ${previewSummary.legacySkipCount}건`
             ].join('\n');
 
             showConfirm("출자금 연동", previewMsg, async () => {
-            const { data: members, error: fetchError } = await _supabase
-                .from('ref_members')
-                .select('*')
-                .in('status', ['완료', '전표완료']);
-
-            if (fetchError) return showAlert("오류", "데이터 조회 실패: " + fetchError.message);
-            if (!members || members.length === 0) return showAlert("알림", "처리할 출자금 내역이 없습니다.");
+            let currentSnapshot;
+            try {
+                currentSnapshot = await fetchCapitalSyncSnapshot();
+            } catch (fetchError) {
+                return showAlert("오류", "출자금 조회 실패: " + fetchError.message);
+            }
+            const members = currentSnapshot.members;
+            if (!members || members.length === 0) return showAlert("알림", "열린 회계기간에 처리할 출자금 내역이 없습니다.");
             const memberStatusBefore = new Map(
                 members.map((member) => [String(member.id), String(member.status || '')])
             );
 
-            const { data: capRows, error: capError } = await _supabase
-                .from('ac_journal')
-                .select('Trans_ID,Account,Debit,Credit')
-                .like('Trans_ID', 'CAP-%');
-            if (capError) return showAlert("오류", "기존 전표 확인 실패: " + capError.message);
-
-            const cashNetMap = buildCashNetMap(capRows || [], 'CAP');
             let entries = [];
             let markIds = [];
             let newCount = 0;
@@ -6642,7 +6767,7 @@ function confirmSync(type) {
                 if (!sourceId) return;
 
                 const desired = Math.max(0, Number(m.amount || 0));
-                const currentNet = Number(cashNetMap.get(sourceId) || 0);
+                const currentNet = Number(m.current_net || 0);
                 const isFinal = String(m.status || '') === '전표완료';
                 const txDate = m.deposit_date || today;
                 const descBase = `[출자] ${m.depositor || m.member_id || sourceId}`;
@@ -6753,7 +6878,7 @@ function confirmSync(type) {
                 });
             }
 
-            const baseMsg = `신규 ${newCount}건, 정정 ${correctionCount}건 처리`;
+            const baseMsg = `${formatAccountingSyncPeriod(currentSnapshot)}\n신규 ${newCount}건, 정정 ${correctionCount}건, 처리표시 ${uniqueMarkIds.length}건`;
             if (legacySkipCount > 0) {
                 showAlert("완료", `${baseMsg}\n(레거시 전표 연결 불가 ${legacySkipCount}건은 자동정정에서 제외됨)`);
             } else {
@@ -6776,31 +6901,17 @@ function confirmSync(type) {
             }
 
             const previewDonations = previewSnapshot.donations;
-            if (!previewDonations || previewDonations.length === 0) return showAlert("알림", "연동할 기부금 내역이 없습니다.");
-            let previewNew = 0;
-            let previewCorrection = 0;
-            let previewSkipDone = 0;
-
-            previewDonations.forEach((row) => {
-                const sourceId = String(row.id || '').trim();
-                if (!sourceId) return;
-                const desired = Math.max(0, Number(row.amount || 0));
-                const current = Number(row.current_net || 0);
-                const hasDone = String(row.note || '').includes('[전표완료]');
-                if (current === desired) {
-                    if (hasDone) previewSkipDone += 1;
-                    return;
-                }
-                if (current === 0 && !hasDone && desired > 0) previewNew += 1;
-                else previewCorrection += 1;
-            });
+            if (!previewDonations || previewDonations.length === 0) return showAlert("알림", "열린 회계기간에 연동할 기부금 내역이 없습니다.");
+            const previewSummary = summarizeDonationSyncSnapshot(previewSnapshot);
 
             const previewMsg = [
                 '기부금 연동 미리보기',
-                `- 대상 건수: ${previewSnapshot.donationCount}건`,
-                `- 신규 전표: ${previewNew}건`,
-                `- 정정(취소+재기표): ${previewCorrection}건`,
-                `- 전표완료 스킵: ${previewSkipDone}건`
+                `- 열린 기간: ${formatAccountingSyncPeriod(previewSnapshot)}`,
+                `- 대상 건수: ${previewSummary.targetCount}건`,
+                `- 신규 전표: ${previewSummary.newCount}건`,
+                `- 정정(취소+재기표): ${previewSummary.correctionCount}건`,
+                `- 처리표시만 반영: ${previewSummary.markOnlyCount}건`,
+                `- 전표완료: ${previewSummary.completedCount}건`
             ].join('\n');
 
             showConfirm("기부금 연동", previewMsg, async () => {
@@ -6812,7 +6923,7 @@ function confirmSync(type) {
             }
 
             const donations = currentSnapshot.donations;
-            if (!donations || donations.length === 0) return showAlert("알림", "연동할 기부금 내역이 없습니다.");
+            if (!donations || donations.length === 0) return showAlert("알림", "열린 회계기간에 연동할 기부금 내역이 없습니다.");
 
             let entries = [];
             let markTargets = [];
@@ -6936,9 +7047,9 @@ function confirmSync(type) {
                 }
             } else {
                 if (legacySkipCount > 0) {
-                    showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
+                    showAlert("성공", `${formatAccountingSyncPeriod(currentSnapshot)}\n기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료\n전표완료 스킵 ${legacySkipCount}건`);
                 } else {
-                    showAlert("성공", `기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료`);
+                    showAlert("성공", `${formatAccountingSyncPeriod(currentSnapshot)}\n기부금 연동 완료: 신규 ${createdCount}건, 정정 ${correctedCount}건\n처리표시 ${doneCount}건 완료`);
                 }
             }
             refreshDashboard();
