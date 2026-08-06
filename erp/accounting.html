@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.95 | Change: 2026-08-06 - Auto-allocate approved Durunuri support to eligible employees. -->
+<!-- Version: v1.0.96 | Change: 2026-08-06 - Move manual Durunuri entry to the admin-only exception tool. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.95 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.96 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -482,15 +482,6 @@
                </div>
              </div>
           </div>
-          <div class="card p-3 border-start border-5 border-primary-subtle bg-white">
-             <div class="d-flex justify-content-between align-items-center">
-               <div>
-                 <h6 class="fw-bold mb-1">🧾 두루누리 직원별 입력</h6>
-                 <small class="text-muted">근로자/사업주 지원분을 입력하면 익월 급여·회계 연동에 자동 반영됩니다.</small>
-               </div>
-               <button class="btn btn-outline-primary btn-sm" onclick="openDurunuriSupportModal()">입력</button>
-             </div>
-          </div>
 	          <div class="card p-3 border-start border-5 border-warning bg-light">
 	             <div class="d-flex justify-content-between align-items-center">
 	               <div><h6 class="fw-bold mb-1">📝 전자결재 연동</h6><small class="text-muted">완료/실물결재완료 지출결의서 불러오기 · 급여는 다음 달 10일 지급</small></div>
@@ -584,7 +575,17 @@
         <div class="list-group-item">대출상환: 입력 금액 중 이자를 분리해 이자비용/부채상환으로 나눕니다.</div>
         <div class="list-group-item">고급모드: 자산/부채/자본은 증감 방향과 상대계정을 직접 지정해야 하며, 기본 모드보다 정확한 분개가 가능합니다.</div>
         <div class="list-group-item">선급·미수 관리: 선급금(입력/차감)과 미수금(발생/회수)을 거래처별 잔액 기반으로 처리합니다.</div>
+        <div class="list-group-item">두루누리 지원금: 직원 관리에서 지원 대상과 확인 누계를 설정하고, 4대보험 지출결의 승인 후 전자결재 자동연동을 실행하면 직원별로 자동 배분됩니다.</div>
         <div class="list-group-item">연말결산: 법정적립금은 출자금 납입총액의 3배에 도달할 때까지 순이익의 10% 이상 적립이 필요합니다.</div>
+      </div>
+      <div class="mt-4 hidden" id="durunuriExceptionTool">
+        <details class="border rounded bg-light p-3">
+          <summary class="fw-bold" style="cursor:pointer;">관리자용 보정 도구</summary>
+          <div class="small text-muted mt-2 mb-3">
+            두루누리 정상 처리는 전자결재 자동연동을 사용합니다. 아래 기능은 자동연동 이전의 과거 자료를 입력하거나 불가피한 예외를 조정할 때만 사용하세요.
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="openDurunuriSupportModal()">두루누리 과거자료·예외 조정</button>
+        </details>
       </div>
     </div>
   </div>
@@ -746,7 +747,7 @@
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h6 class="modal-title fw-bold">🧾 두루누리 직원별 지원금 입력</h6>
+        <h6 class="modal-title fw-bold">🧾 두루누리 과거자료·예외 조정</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -764,7 +765,7 @@
           </div>
         </div>
         <div class="small text-muted mb-2">
-          4대보험 지출결의가 승인된 뒤 회계 자동연동을 실행하면 지원 대상으로 등록된 직원에게 급여대장 기준으로 자동 배분됩니다. 이 화면은 과거 자료 입력과 예외 조정에 사용합니다.
+          정상 월은 이 화면에서 입력하지 않습니다. 4대보험 지출결의 승인 후 회계 자동연동을 실행하면 지원 대상으로 등록된 직원에게 급여대장 기준으로 자동 배분됩니다. 이 화면은 자동연동 이전의 과거 자료 입력과 불가피한 예외 조정에만 사용하세요.
         </div>
         <div class="border rounded bg-light p-3 mb-3">
           <div class="row g-3">
@@ -826,7 +827,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-        <button class="btn btn-primary" onclick="saveDurunuriSupportRows()">저장</button>
+        <button class="btn btn-primary" onclick="saveDurunuriSupportRows()">예외 조정 저장</button>
       </div>
     </div>
   </div>
@@ -1795,6 +1796,10 @@ window.onload = async function() {
     myInfo = accountingUserGate.user;
     permissionSet = await loadPermissions(myInfo);
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
+    const durunuriExceptionTool = document.getElementById('durunuriExceptionTool');
+    if (durunuriExceptionTool) {
+        durunuriExceptionTool.classList.toggle('hidden', !canPerform('accounting.edit'));
+    }
     const hasAccountingView = permissionSet.size > 0
         ? permissionSet.has('accounting.view')
         : hasAccountingRoleFallback('accounting.view');
@@ -2970,6 +2975,7 @@ async function submitApprovalSplitReclass() {
 }
 
 async function openDurunuriSupportModal() {
+    if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
     const sourceEl = document.getElementById('durunuriSourceMonth');
     const applyEl = document.getElementById('durunuriApplyMonth');
     if (sourceEl && !sourceEl.value) {
