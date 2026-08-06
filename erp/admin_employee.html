@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.64
-Change: 2026-06-02 - Add coop-level lunch time settings for hourly leave calculations.
+Version: v1.0.65
+Change: 2026-08-06 - Add admin-only Durunuri eligibility and 36-month tracking.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.64 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.65 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -35,7 +35,7 @@ Change: 2026-06-02 - Add coop-level lunch time settings for hourly leave calcula
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="print_service.js?v=20260510-1324-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260806-1237-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260409-1258-1"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -223,6 +223,51 @@ Change: 2026-06-02 - Add coop-level lunch time settings for hourly leave calcula
           <div class="section-title">💰 연봉 계약</div>
           <div class="view-mode"><label class="small text-muted">현재 연봉</label><div class="d-flex align-items-center gap-2"><span class="fs-5 fw-bold" id="viewSalary">******</span><i class="bi bi-eye text-primary cursor-pointer" onclick="toggleSalaryVisibility()"></i></div><div class="mt-2"><label class="small text-muted">적용 시작일: </label><span class="fw-bold" id="viewSalaryDate">-</span></div></div>
           <div class="edit-mode"><div class="mb-2"><label class="small text-muted">연봉 총액 (원)</label><input type="number" id="editSalary" class="form-control fw-bold"></div><div class="mb-2"><label class="small text-muted">적용 시작일</label><input type="date" id="salaryApplyDate" class="form-control"></div></div>
+        </div>
+      </div>
+
+      <div class="col-12" id="durunuriEligibilityCardWrap">
+        <div class="info-card border border-primary-subtle">
+          <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+            <div>
+              <div class="section-title mb-1">🧾 두루누리 지원 관리</div>
+              <div class="small text-muted">공단에서 확인한 누적 지원 개월과 기준월을 기록합니다. 이후 ERP에 실제 반영된 월만 더해 최대 36개월을 계산합니다.</div>
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch" id="durunuriEligibilityEnabled" onchange="syncDurunuriEligibilityUi()">
+              <label class="form-check-label fw-bold" for="durunuriEligibilityEnabled">지원 대상</label>
+            </div>
+          </div>
+          <div class="row g-3" id="durunuriEligibilityFields">
+            <div class="col-md-3">
+              <label class="small text-muted fw-bold" for="durunuriConfirmedMonths">확인된 누적 지원 개월</label>
+              <input type="number" min="0" max="36" step="1" class="form-control" id="durunuriConfirmedMonths" value="0" oninput="syncDurunuriEligibilityUi()">
+            </div>
+            <div class="col-md-3">
+              <label class="small text-muted fw-bold" for="durunuriConfirmedThroughMonth">확인 기준월</label>
+              <input type="month" class="form-control" id="durunuriConfirmedThroughMonth">
+            </div>
+            <div class="col-md-3">
+              <label class="small text-muted fw-bold" for="durunuriVerificationMethod">확인 방법</label>
+              <select class="form-select" id="durunuriVerificationMethod">
+                <option value="공단 조회">공단 조회</option>
+                <option value="고지서 확인">고지서 확인</option>
+                <option value="기타">기타</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="small text-muted fw-bold">지원 현황</label>
+              <div class="form-control bg-light fw-bold" id="durunuriEligibilitySummary">미설정</div>
+            </div>
+            <div class="col-12">
+              <label class="small text-muted fw-bold" for="durunuriEligibilityNote">확인 메모 <span class="fw-normal">(선택)</span></label>
+              <input type="text" class="form-control" id="durunuriEligibilityNote" maxlength="500" placeholder="예: 국민연금공단 조회 결과 확인">
+            </div>
+          </div>
+          <div class="small text-muted mt-3" id="durunuriEligibilityHelp">지원 대상을 켜면 확인 기준월을 반드시 입력해야 합니다.</div>
+          <div class="d-flex justify-content-end mt-3">
+            <button type="button" class="btn btn-outline-primary" id="btnSaveDurunuriEligibility" onclick="saveDurunuriEligibilityProfile()">두루누리 설정 저장</button>
+          </div>
         </div>
       </div>
 
@@ -747,6 +792,7 @@ let currentPayrollTaxProfile = { familyCount: 1, childCount: 0, withholdingRate:
 let confirmCallback = null; let currentSalaryDataForPrint = null;
 let currentEmployeeLeaveSnapshot = null;
 let currentDurunuriSupport = { emp_support: 0, biz_support: 0, apply_month: '', source_month: '' };
+let currentDurunuriEligibility = null;
 let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal, adminLeaveDetailModal, bulkLeaveModal;
 let hasCheckedExpired = false;
 let myInfo = null;
@@ -2340,6 +2386,7 @@ function applyHrRuntimeProfileUi() {
     const leaveTypeSection = document.getElementById('workforceLiteLeaveTypeSection');
     const durunuriEmpEl = document.getElementById('durunuriEmpSupport');
     const durunuriRow = durunuriEmpEl ? durunuriEmpEl.closest('.row.g-2.mt-1') : null;
+    const durunuriEligibilityCardWrap = document.getElementById('durunuriEligibilityCardWrap');
 
     if (pageTitle) pageTitle.textContent = '👥 직원 및 설정 관리';
     if (pageSubtitle) pageSubtitle.textContent = isLite ? '직원 정보·전자결재 설정 관리' : '직원 정보·급여·근태·전자결재 설정 관리';
@@ -2361,6 +2408,7 @@ function applyHrRuntimeProfileUi() {
     if (durunuriRow) {
         durunuriRow.classList.toggle('d-none', isLite);
     }
+    if (durunuriEligibilityCardWrap) durunuriEligibilityCardWrap.classList.toggle('d-none', isLite);
 
     if (isLite) {
         if (taxPane) taxPane.classList.remove('show', 'active');
@@ -2536,6 +2584,126 @@ function getDurunuriModuleAdmin() {
     if (isHrWorkforceLiteProfile()) return null;
     if (window.PayrollDurunuriModule) return window.PayrollDurunuriModule;
     return null;
+}
+
+function resetDurunuriEligibilityProfileUi() {
+    currentDurunuriEligibility = null;
+    const enabledEl = document.getElementById('durunuriEligibilityEnabled');
+    const monthsEl = document.getElementById('durunuriConfirmedMonths');
+    const throughEl = document.getElementById('durunuriConfirmedThroughMonth');
+    const methodEl = document.getElementById('durunuriVerificationMethod');
+    const noteEl = document.getElementById('durunuriEligibilityNote');
+    if (enabledEl) enabledEl.checked = false;
+    if (monthsEl) monthsEl.value = '0';
+    if (throughEl) throughEl.value = '';
+    if (methodEl) methodEl.value = '공단 조회';
+    if (noteEl) noteEl.value = '';
+    syncDurunuriEligibilityUi();
+}
+
+function syncDurunuriEligibilityUi() {
+    const enabled = document.getElementById('durunuriEligibilityEnabled')?.checked === true;
+    const fields = document.getElementById('durunuriEligibilityFields');
+    const monthsEl = document.getElementById('durunuriConfirmedMonths');
+    const summaryEl = document.getElementById('durunuriEligibilitySummary');
+    const helpEl = document.getElementById('durunuriEligibilityHelp');
+    const confirmed = Math.min(36, Math.max(0, Math.round(Number(monthsEl?.value || 0))));
+    const tracked = Math.max(0, Number(currentDurunuriEligibility?.tracked_supported_months || 0));
+    const used = Math.min(36, confirmed + tracked);
+    const remaining = Math.max(0, 36 - used);
+    if (fields) fields.classList.toggle('opacity-50', !enabled);
+    if (summaryEl) {
+        summaryEl.textContent = enabled
+            ? `확인 ${confirmed}개월 + ERP ${tracked}개월 / 잔여 ${remaining}개월`
+            : '지원 대상 아님 (기록 보존)';
+        summaryEl.classList.toggle('text-danger', enabled && remaining === 0);
+    }
+    if (helpEl) {
+        const verified = currentDurunuriEligibility?.verified_at
+            ? ` 마지막 확인 ${new Date(currentDurunuriEligibility.verified_at).toLocaleString('ko-KR')}`
+            : '';
+        helpEl.textContent = enabled
+            ? `확인 기준월 이후 ERP에 실제 반영된 월만 추가 집계합니다.${verified}`
+            : '다시 켜더라도 누적 개월과 확인 기록은 유지됩니다.';
+    }
+}
+
+async function loadDurunuriEligibilityProfile(empId) {
+    resetDurunuriEligibilityProfileUi();
+    const module = getDurunuriModuleAdmin();
+    const helpEl = document.getElementById('durunuriEligibilityHelp');
+    if (!module || !empId) return;
+    try {
+        const state = await module.getEligibilityState(_supabase, empId, '');
+        currentDurunuriEligibility = state;
+        if (!state) {
+            syncDurunuriEligibilityUi();
+            return;
+        }
+        const enabledEl = document.getElementById('durunuriEligibilityEnabled');
+        const monthsEl = document.getElementById('durunuriConfirmedMonths');
+        const throughEl = document.getElementById('durunuriConfirmedThroughMonth');
+        const methodEl = document.getElementById('durunuriVerificationMethod');
+        const noteEl = document.getElementById('durunuriEligibilityNote');
+        if (enabledEl) enabledEl.checked = state.is_enabled === true;
+        if (monthsEl) monthsEl.value = String(state.confirmed_supported_months || 0);
+        if (throughEl) throughEl.value = state.confirmed_through_month || '';
+        if (methodEl) methodEl.value = ['공단 조회', '고지서 확인', '기타'].includes(state.verification_method)
+            ? state.verification_method
+            : '기타';
+        if (noteEl) noteEl.value = state.note || '';
+        syncDurunuriEligibilityUi();
+    } catch (e) {
+        currentDurunuriEligibility = null;
+        if (helpEl) helpEl.textContent = '두루누리 원장을 불러오지 못했습니다: ' + (e?.message || e);
+    }
+}
+
+async function saveDurunuriEligibilityProfile() {
+    const module = getDurunuriModuleAdmin();
+    if (!module) return showAlert('두루누리 모듈을 불러오지 못했습니다.');
+    if (!currentEmpId) return showAlert('직원 정보를 확인할 수 없습니다.');
+    const enabled = document.getElementById('durunuriEligibilityEnabled')?.checked === true;
+    const confirmedMonths = Math.round(Number(document.getElementById('durunuriConfirmedMonths')?.value || 0));
+    const confirmedThroughMonth = String(document.getElementById('durunuriConfirmedThroughMonth')?.value || '').trim();
+    const verificationMethod = String(document.getElementById('durunuriVerificationMethod')?.value || '공단 조회').trim();
+    const note = String(document.getElementById('durunuriEligibilityNote')?.value || '').trim();
+    if (!Number.isInteger(confirmedMonths) || confirmedMonths < 0 || confirmedMonths > 36) {
+        return showAlert('확인된 누적 지원 개월은 0~36 사이의 정수로 입력하세요.');
+    }
+    if (enabled && !/^\d{4}-\d{2}$/.test(confirmedThroughMonth)) {
+        return showAlert('지원 대상자는 확인 기준월을 입력해야 합니다.');
+    }
+    const saveBtn = document.getElementById('btnSaveDurunuriEligibility');
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+        await module.saveEligibilityProfile(_supabase, {
+            coop_id: myInfo?.coop_id || null,
+            emp_id: currentEmpId,
+            is_enabled: enabled,
+            confirmed_supported_months: confirmedMonths,
+            confirmed_through_month: confirmedThroughMonth || null,
+            verification_method: verificationMethod,
+            note,
+            verified_by_emp_id: myInfo?.emp_id || null
+        });
+        await logHrAudit(
+            'hr.durunuri.eligibility_update',
+            `${currentEmpName || currentEmpId} 두루누리 지원 설정 변경`,
+            {
+                is_enabled: enabled,
+                confirmed_supported_months: confirmedMonths,
+                confirmed_through_month: confirmedThroughMonth || null,
+                verification_method: verificationMethod
+            }
+        );
+        await loadDurunuriEligibilityProfile(currentEmpId);
+        showAlert('두루누리 지원 설정을 저장했습니다.');
+    } catch (e) {
+        showAlert('두루누리 설정 저장 실패: ' + (e?.message || e));
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+    }
 }
 
 function resetDurunuriSupportState() {
@@ -4263,6 +4431,7 @@ async function openDetail(u) {
     const area = document.getElementById("btnResignArea");
     if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
     else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; loadSalaryData(); loadLeave(); }
+    await loadDurunuriEligibilityProfile(u.emp_id);
     detailModal.show();
 }
 

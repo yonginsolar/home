@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.94 | Change: 2026-08-06 - Require completed salary approval before posting and correct insurance liability calculation. -->
+<!-- Version: v1.0.95 | Change: 2026-08-06 - Auto-allocate approved Durunuri support to eligible employees. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.94 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.95 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -27,7 +27,7 @@
   })();
 </script>
   <script src="erp_runtime_guard.js?v=20260804-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260409-1335-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260806-1237-1"></script>
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
@@ -764,7 +764,7 @@
           </div>
         </div>
         <div class="small text-muted mb-2">
-          근로자 지원분은 익월 급여 공제에서 차감(실지급 가산)되고, 사업주 지원분은 익월 4대보험 회사부담분에서 차감됩니다.
+          4대보험 지출결의가 승인된 뒤 회계 자동연동을 실행하면 지원 대상으로 등록된 직원에게 급여대장 기준으로 자동 배분됩니다. 이 화면은 과거 자료 입력과 예외 조정에 사용합니다.
         </div>
         <div class="border rounded bg-light p-3 mb-3">
           <div class="row g-3">
@@ -812,12 +812,14 @@
               <tr>
                 <th style="width: 120px;">사번</th>
                 <th>이름</th>
+                <th style="width: 190px;">지원 현황</th>
                 <th style="width: 170px;">근로자 지원분</th>
                 <th style="width: 170px;">사업주 지원분</th>
+                <th style="min-width: 220px;">예외 조정 사유</th>
               </tr>
             </thead>
             <tbody id="durunuriSupportBody">
-              <tr><td colspan="4" class="text-center text-muted py-3">직원을 불러오는 중입니다.</td></tr>
+              <tr><td colspan="6" class="text-center text-muted py-3">지원 대상 직원을 불러오는 중입니다.</td></tr>
             </tbody>
           </table>
         </div>
@@ -3039,7 +3041,9 @@ function allocateDurunuriAmount(totalAmount, items, weightSelector) {
 function syncDurunuriSupportCacheFromInputs() {
     const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
     const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
+    const memoInputs = Array.from(document.querySelectorAll('.durunuri-memo-input'));
     const bizByIndex = new Map(bizInputs.map((el) => [Number(el.dataset.index), el]));
+    const memoByIndex = new Map(memoInputs.map((el) => [Number(el.dataset.index), el]));
 
     empInputs.forEach((empEl) => {
         const index = Number(empEl.dataset.index);
@@ -3048,7 +3052,8 @@ function syncDurunuriSupportCacheFromInputs() {
         durunuriSupportRowsCache[index] = {
             ...durunuriSupportRowsCache[index],
             emp_support: parseDurunuriWon(empEl.value),
-            biz_support: parseDurunuriWon(bizEl?.value)
+            biz_support: parseDurunuriWon(bizEl?.value),
+            memo: String(memoByIndex.get(index)?.value || '').trim()
         };
     });
 }
@@ -3096,6 +3101,11 @@ function setDurunuriSupportInputValues(empAllocations, bizAllocations) {
         const index = Number(input.dataset.index);
         input.value = parseDurunuriWon(bizAllocations[index] || 0);
     });
+    durunuriSupportRowsCache = durunuriSupportRowsCache.map((row, index) => ({
+        ...row,
+        suggested_emp_support: parseDurunuriWon(empAllocations[index] || 0),
+        suggested_biz_support: parseDurunuriWon(bizAllocations[index] || 0)
+    }));
     updateDurunuriSupportSummaryFromInputs();
 }
 
@@ -3117,6 +3127,8 @@ function applyDurunuriTotalCalculator() {
 function applyDurunuriInvoiceCalculator() {
     const rows = Array.isArray(durunuriSupportRowsCache) ? durunuriSupportRowsCache : [];
     if (rows.length === 0) return showAlert('알림', '먼저 목록을 불러오세요.');
+    const module = getDurunuriModuleOrNull();
+    if (!module) return showAlert('오류', '두루누리 모듈을 불러오지 못했습니다.');
 
     const pensionTotal = parseDurunuriWon(document.getElementById('durunuriInvoicePensionSupport')?.value);
     const unemploymentTotal = parseDurunuriWon(document.getElementById('durunuriInvoiceUnemploymentSupport')?.value);
@@ -3125,23 +3137,14 @@ function applyDurunuriInvoiceCalculator() {
         return showAlert('알림', '고지서의 사회보험료 지원금 금액을 입력하세요.');
     }
 
-    const pensionSplit = splitDurunuriSharedSupport(pensionTotal);
-    const unemploymentSplit = splitDurunuriSharedSupport(unemploymentTotal);
-    const empPension = allocateDurunuriAmount(pensionSplit.emp, rows, (row) => row.ded_pension);
-    const bizPension = allocateDurunuriAmount(pensionSplit.biz, rows, (row) => row.ded_pension);
-    if (!empPension || !bizPension) {
-        return showAlert('알림', '국민연금 지원금을 배분할 급여대장 국민연금 공제액이 없습니다.');
-    }
-
-    const empUnemployment = allocateDurunuriAmount(unemploymentSplit.emp, rows, (row) => row.ded_employ);
-    const bizUnemployment = allocateDurunuriAmount(unemploymentSplit.biz, rows, (row) => row.ded_employ);
-    const bizStability = allocateDurunuriAmount(stabilityTotal, rows, (row) => row.ded_employ);
-    if (!empUnemployment || !bizUnemployment || !bizStability) {
-        return showAlert('알림', '고용보험 지원금을 배분할 급여대장 고용보험 공제액이 없습니다.');
-    }
-
-    const empAllocations = rows.map((_, index) => (empPension[index] || 0) + (empUnemployment[index] || 0));
-    const bizAllocations = rows.map((_, index) => (bizPension[index] || 0) + (bizUnemployment[index] || 0) + (bizStability[index] || 0));
+    const allocation = module.calculateInvoiceAllocations(rows, {
+        pension: pensionTotal,
+        unemployment: unemploymentTotal,
+        stability: stabilityTotal
+    });
+    if (allocation.error) return showAlert('알림', allocation.error.message);
+    const empAllocations = allocation.rows.map((row) => row.emp_support);
+    const bizAllocations = allocation.rows.map((row) => row.biz_support);
     setDurunuriSupportInputValues(empAllocations, bizAllocations);
 }
 
@@ -3151,8 +3154,8 @@ function renderDurunuriSupportRows(items) {
     if (!tbody || !summary) return;
     const safeItems = Array.isArray(items) ? items : [];
     if (safeItems.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">표시할 직원이 없습니다.</td></tr>';
-        summary.textContent = '대상 직원이 없습니다.';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">직원 관리에서 두루누리 지원 대상과 확인 기준월을 먼저 설정하세요.</td></tr>';
+        summary.textContent = '선택한 귀속월에 배분 가능한 지원 대상 직원이 없습니다.';
         updateDurunuriCalculatorHint([]);
         return;
     }
@@ -3161,10 +3164,20 @@ function renderDurunuriSupportRows(items) {
         const empName = escapeHtml(item.emp_name || '-');
         const empSupport = Math.max(0, Number(item.emp_support || 0));
         const bizSupport = Math.max(0, Number(item.biz_support || 0));
+        const memo = escapeHtml(item.memo || '');
+        const eligibility = item.eligibility || {};
+        const confirmed = Math.max(0, Number(eligibility.confirmed_supported_months || 0));
+        const tracked = Math.max(0, Number(eligibility.tracked_before_source_month || 0));
+        const remaining = Math.max(0, Number(eligibility.remaining_before_source_month || 0));
+        const statusClass = remaining > 0 ? 'text-primary' : 'text-danger';
         return `
             <tr>
                 <td>${empId}</td>
                 <td>${empName}</td>
+                <td>
+                    <div class="small fw-bold ${statusClass}">잔여 ${remaining}개월</div>
+                    <div class="x-small text-muted">확인 ${confirmed} + ERP ${tracked}</div>
+                </td>
                 <td>
                     <input
                         type="number"
@@ -3187,6 +3200,16 @@ function renderDurunuriSupportRows(items) {
                         oninput="updateDurunuriSupportSummaryFromInputs()"
                     >
                 </td>
+                <td>
+                    <input
+                        type="text"
+                        maxlength="500"
+                        class="form-control form-control-sm durunuri-memo-input"
+                        data-index="${index}"
+                        value="${memo}"
+                        placeholder="자동 계산 후 직접 고친 경우 필수"
+                    >
+                </td>
             </tr>
         `;
     }).join('');
@@ -3207,62 +3230,38 @@ async function refreshDurunuriSupportRows() {
     const applyMonth = addAccountingMonths(sourceMonth, 1);
     if (!applyMonth) return showAlert('오류', '급여 반영월 계산에 실패했습니다.');
     if (applyEl) applyEl.value = applyMonth;
-    if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">목록을 불러오는 중입니다.</td></tr>';
+    if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">지원 대상 목록을 불러오는 중입니다.</td></tr>';
     if (summaryEl) summaryEl.textContent = '로딩 중...';
     updateDurunuriCalculatorHint([]);
 
-    const coopId = String(myInfo?.coop_id || '').trim();
-    const [
-        { data: employees, error: empError },
-        { data: salaryRows, error: salaryError },
-        supportMap
-    ] = await Promise.all([
-        _supabase
-            .from('ref_employees')
-            .select('emp_id,emp_name,resign_date')
-            .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
-            .order('emp_id', { ascending: true }),
-        _supabase
-            .from('hr_salary')
-            .select('emp_id,ded_pension,ded_employ,co_total')
-            .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
-            .eq('year_month', sourceMonth),
-        module.getSupportMap(_supabase, applyMonth)
-    ]);
-    if (empError) return showAlert('오류', '직원 목록 조회 실패: ' + empError.message);
-    if (salaryError) return showAlert('오류', '급여대장 조회 실패: ' + salaryError.message);
-
-    const salaryByEmpId = new Map((Array.isArray(salaryRows) ? salaryRows : []).map((row) => [
-        String(row.emp_id || '').trim(),
-        row
-    ]));
-
-    const rows = (Array.isArray(employees) ? employees : [])
-        .filter((row) => String(row?.emp_id || '').trim())
-        .map((row) => {
-            const empId = String(row.emp_id || '').trim();
-            const support = supportMap?.[empId] || null;
-            const salary = salaryByEmpId.get(empId) || {};
-            return {
-                emp_id: empId,
-                emp_name: String(row.emp_name || '').trim(),
-                emp_support: Math.max(0, Number(support?.emp_support || 0)),
-                biz_support: Math.max(0, Number(support?.biz_support || 0)),
-                ded_pension: Math.max(0, Number(salary.ded_pension || 0)),
-                ded_employ: Math.max(0, Number(salary.ded_employ || 0)),
-                co_total: Math.max(0, Number(salary.co_total || 0))
-            };
-        });
-
-    durunuriSupportRowsCache = rows;
-    renderDurunuriSupportRows(rows);
+    try {
+        const result = await module.loadEligiblePayrollRows(_supabase, sourceMonth);
+        const rows = (result.rows || []).map((row) => ({
+            ...row,
+            initial_emp_support: parseDurunuriWon(row.emp_support),
+            initial_biz_support: parseDurunuriWon(row.biz_support),
+            suggested_emp_support: parseDurunuriWon(row.emp_support),
+            suggested_biz_support: parseDurunuriWon(row.biz_support)
+        }));
+        durunuriSupportRowsCache = rows;
+        renderDurunuriSupportRows(rows);
+        if (summaryEl && result.excluded?.length) {
+            summaryEl.textContent += ` · 조건 미충족 ${result.excluded.length}명 제외`;
+        }
+    } catch (e) {
+        durunuriSupportRowsCache = [];
+        if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">지원 대상 원장을 불러오지 못했습니다.</td></tr>';
+        if (summaryEl) summaryEl.textContent = '조회 실패: ' + (e?.message || e);
+    }
 }
 
 function collectDurunuriSupportRowsFromInputs() {
     syncDurunuriSupportCacheFromInputs();
     const empInputs = Array.from(document.querySelectorAll('.durunuri-emp-input'));
     const bizInputs = Array.from(document.querySelectorAll('.durunuri-biz-input'));
+    const memoInputs = Array.from(document.querySelectorAll('.durunuri-memo-input'));
     const bizByIndex = new Map(bizInputs.map((el) => [Number(el.dataset.index), el]));
+    const memoByIndex = new Map(memoInputs.map((el) => [Number(el.dataset.index), el]));
 
     return empInputs.map((empEl) => {
         const index = Number(empEl.dataset.index);
@@ -3272,7 +3271,10 @@ function collectDurunuriSupportRowsFromInputs() {
             emp_id: String(base.emp_id || '').trim(),
             emp_name: String(base.emp_name || '').trim(),
             emp_support: parseDurunuriWon(empEl.value),
-            biz_support: parseDurunuriWon(bizEl?.value)
+            biz_support: parseDurunuriWon(bizEl?.value),
+            expected_emp_support: parseDurunuriWon(base.suggested_emp_support ?? base.initial_emp_support),
+            expected_biz_support: parseDurunuriWon(base.suggested_biz_support ?? base.initial_biz_support),
+            memo: String(memoByIndex.get(index)?.value || '').trim()
         };
     }).filter((row) => row.emp_id);
 }
@@ -3287,6 +3289,13 @@ async function saveDurunuriSupportRows() {
 
     const rows = collectDurunuriSupportRowsFromInputs();
     if (rows.length === 0) return showAlert('알림', '저장할 직원 데이터가 없습니다.');
+    const missingReason = rows.find((row) => (
+        row.emp_support !== row.expected_emp_support
+        || row.biz_support !== row.expected_biz_support
+    ) && !row.memo);
+    if (missingReason) {
+        return showAlert('알림', `${missingReason.emp_name || missingReason.emp_id}님의 자동 계산값을 직접 수정했습니다. 예외 조정 사유를 입력하세요.`);
+    }
 
     try {
         const result = await module.saveSupportBatch(_supabase, {
@@ -3294,6 +3303,7 @@ async function saveDurunuriSupportRows() {
             apply_month: applyMonth,
             actor_emp_id: myInfo?.emp_id || null,
             actor_name: myInfo?.emp_name || null,
+            origin: 'manual_exception',
             rows
         });
         await refreshDurunuriSupportRows();
@@ -3500,6 +3510,42 @@ function normalizeApprovalExpenseSnapshot(doc) {
         insurance: raw.insurance && typeof raw.insurance === 'object' ? raw.insurance : null
     };
 } // End of normalizeApprovalExpenseSnapshot
+
+function getApprovalDurunuriSupportInput(doc) {
+    const insurance = normalizeApprovalExpenseSnapshot(doc).insurance || {};
+    const support = insurance.durunuri_support && typeof insurance.durunuri_support === 'object'
+        ? insurance.durunuri_support
+        : {};
+    return {
+        pension: parseDurunuriWon(support.pension),
+        unemployment: parseDurunuriWon(support.employment),
+        stability: parseDurunuriWon(support.stability)
+    };
+} // End of getApprovalDurunuriSupportInput
+
+function getDurunuriSupportInputTotal(input) {
+    const safe = input && typeof input === 'object' ? input : {};
+    return parseDurunuriWon(safe.pension)
+        + parseDurunuriWon(safe.unemployment)
+        + parseDurunuriWon(safe.stability);
+} // End of getDurunuriSupportInputTotal
+
+async function buildApprovalDurunuriPlan(doc, monthRange) {
+    const support = getApprovalDurunuriSupportInput(doc);
+    if (!(getDurunuriSupportInputTotal(support) > 0)) return null;
+    if (!monthRange || monthRange.startYm !== monthRange.endYm) {
+        throw new Error('두루누리 지원금이 있는 4대보험 지출결의는 귀속월을 한 달로 지정해야 합니다.');
+    }
+    const module = getDurunuriModuleOrNull();
+    if (!module) throw new Error('두루누리 자동 배분 모듈을 불러오지 못했습니다.');
+    const result = await module.buildApprovalSupportPlan(_supabase, {
+        source_month: monthRange.startYm,
+        approval_id: doc?.id,
+        support
+    });
+    if (result?.error) throw result.error;
+    return result;
+} // End of buildApprovalDurunuriPlan
 
 function getApprovalMergedText(doc) {
     return `${doc?.doc_type || ''} ${doc?.title || ''} ${doc?.content || ''}`.replace(/\s+/g, ' ').trim();
@@ -3825,9 +3871,11 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
     let insuranceCount = 0;
     let insuranceDiscountTotal = 0;
     let insuranceCashTotal = 0;
+    let durunuriEmployeeCount = 0;
     let paymentCount = 0;
     let accrualCount = 0;
     let checkCardCount = 0;
+    const durunuriSourceMonths = new Set();
 
     for (const doc of (docs || [])) {
         const amount = Math.max(0, Number(doc?.amount || 0));
@@ -3887,6 +3935,31 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
                 continue;
             }
 
+            let durunuriPlan = null;
+            try {
+                durunuriPlan = await buildApprovalDurunuriPlan(doc, monthRange);
+            } catch (durunuriError) {
+                const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: `두루누리 자동 배분 보류: ${durunuriError?.message || durunuriError}`
+                });
+                continue;
+            }
+            if (durunuriPlan?.source_month) {
+                if (durunuriSourceMonths.has(durunuriPlan.source_month)) {
+                    const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+                    blockedDocs.push({
+                        id: doc?.id,
+                        label,
+                        reason: `${durunuriPlan.source_month} 두루누리 지원금 지출결의가 이번 연동 대상에 둘 이상 있어 중복 배분을 막았습니다.`
+                    });
+                    continue;
+                }
+                durunuriSourceMonths.add(durunuriPlan.source_month);
+            }
+
             plans.push({
                 kind: 'insurance',
                 amount,
@@ -3901,11 +3974,14 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
                 discountEnabled: insuranceAutoDebitDiscountSetting.enabled,
                 discountConfiguredAmount: insuranceAutoDebitDiscountSetting.amount,
                 discountAmount: insuranceAmounts.discountAmount,
-                cashAmount: insuranceAmounts.cashAmount
+                cashAmount: insuranceAmounts.cashAmount,
+                approvalId: doc?.id,
+                durunuriPlan
             });
             insuranceCount += 1;
             insuranceDiscountTotal += insuranceAmounts.discountAmount;
             insuranceCashTotal += insuranceAmounts.cashAmount;
+            durunuriEmployeeCount += Array.isArray(durunuriPlan?.rows) ? durunuriPlan.rows.length : 0;
             totalAmount += amount;
             continue;
         }
@@ -4012,6 +4088,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         insuranceCount,
         insuranceDiscountTotal,
         insuranceCashTotal,
+        durunuriEmployeeCount,
         paymentCount,
         accrualCount,
         checkCardCount,
@@ -4051,6 +4128,56 @@ function appendApprovalEntriesFromPlan(entries, plan) {
     }
     appendApprovalAccrualEntries(entries, plan);
 }
+
+async function saveApprovalDurunuriPlans(plans) {
+    const module = getDurunuriModuleOrNull();
+    const targets = (Array.isArray(plans) ? plans : []).filter((plan) => Array.isArray(plan?.durunuriPlan?.rows) && plan.durunuriPlan.rows.length > 0);
+    if (targets.length === 0) return { ids: [], employeeCount: 0 };
+    if (!module) throw new Error('두루누리 자동 배분 모듈을 불러오지 못했습니다.');
+    const ids = [];
+    let employeeCount = 0;
+    try {
+        for (const plan of targets) {
+            const supportPlan = plan.durunuriPlan;
+            const result = await module.saveSupportBatch(_supabase, {
+                coop_id: myInfo?.coop_id || null,
+                source_month: supportPlan.source_month,
+                apply_month: supportPlan.apply_month,
+                actor_emp_id: myInfo?.emp_id || null,
+                actor_name: myInfo?.emp_name || null,
+                origin: 'approval_auto_sync',
+                source_approval_id: plan.approvalId,
+                rows: supportPlan.rows
+            });
+            ids.push(...(Array.isArray(result?.ids) ? result.ids : []));
+            employeeCount += supportPlan.rows.length;
+        }
+        return { ids, employeeCount };
+    } catch (error) {
+        error.insertedDurunuriAuditIds = ids;
+        throw error;
+    }
+} // End of saveApprovalDurunuriPlans
+
+async function rollbackApprovalSyncWrites(transIds, durunuriAuditIds) {
+    const failures = [];
+    const module = getDurunuriModuleOrNull();
+    const auditIds = Array.isArray(durunuriAuditIds) ? durunuriAuditIds.filter((id) => id != null) : [];
+    if (auditIds.length > 0) {
+        try {
+            if (!module) throw new Error('두루누리 모듈 없음');
+            await module.removeSupportAuditRows(_supabase, auditIds);
+        } catch (e) {
+            failures.push('두루누리 기록: ' + (e?.message || e));
+        }
+    }
+    const safeTransIds = Array.from(new Set((Array.isArray(transIds) ? transIds : []).map((value) => String(value || '').trim()).filter(Boolean)));
+    if (safeTransIds.length > 0) {
+        const { error } = await _supabase.from('ac_journal').delete().in('Trans_ID', safeTransIds);
+        if (error) failures.push('회계 전표: ' + error.message);
+    }
+    return failures;
+} // End of rollbackApprovalSyncWrites
 
 function appendDividendCashDeltaEntries(entries, payload) {
     const amount = Math.abs(Number(payload.cashDelta || 0));
@@ -6890,6 +7017,7 @@ function confirmSync(type) {
                 `- 예상 금액(4대보험은 감액 전): ${totalAmount.toLocaleString()}원`,
                 `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, (대)보통예금/4대보험회사분 감액`,
                 `- 4대보험 자동이체 감액: ${previewPlanResult.insuranceCount > 0 ? `${previewPlanResult.insuranceDiscountTotal.toLocaleString()}원 / 실출금 ${previewPlanResult.insuranceCashTotal.toLocaleString()}원` : '대상 없음'}`,
+                `- 두루누리 직원 자동 배분: ${previewPlanResult.durunuriEmployeeCount || 0}명 (지원금 입력 문서만)`,
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
@@ -6927,18 +7055,47 @@ function confirmSync(type) {
 
                 if (entries.length === 0) return showAlert("알림", "연동 대상 금액이 없어 생성할 전표가 없습니다.");
 
-                const { error: insertError } = await _supabase.from('ac_journal').insert(entries);
+                const { data: insertedJournalRows, error: insertError } = await _supabase
+                    .from('ac_journal')
+                    .insert(entries)
+                    .select('Trans_ID');
                 if (insertError) return showAlert("오류", "전표 저장 실패: " + insertError.message);
+
+                const insertedTransIds = Array.from(new Set((insertedJournalRows || [])
+                    .map((row) => String(row?.Trans_ID || '').trim())
+                    .filter(Boolean)));
+                let durunuriWrite = { ids: [], employeeCount: 0 };
+                try {
+                    durunuriWrite = await saveApprovalDurunuriPlans(runPlanResult.plans);
+                } catch (durunuriError) {
+                    const auditIds = Array.isArray(durunuriError?.insertedDurunuriAuditIds)
+                        ? durunuriError.insertedDurunuriAuditIds
+                        : [];
+                    const rollbackFailures = await rollbackApprovalSyncWrites(insertedTransIds, auditIds);
+                    if (rollbackFailures.length > 0) {
+                        setLastAutoSyncUndo({
+                            type: 'approval_rollback_pending',
+                            label: '전자결재 자동연동 부분 롤백',
+                            created_at: new Date().toISOString(),
+                            trans_ids: insertedTransIds,
+                            durunuri_audit_ids: auditIds,
+                            restores: []
+                        });
+                        return showAlert("부분 완료", `두루누리 배분 실패 후 자동 롤백 일부가 실패했습니다.\n${rollbackFailures.join('\n')}\n관리자가 즉시 확인해야 합니다.`);
+                    }
+                    return showAlert("오류", `두루누리 배분 실패로 이번 전자결재 전표를 모두 되돌렸습니다: ${durunuriError?.message || durunuriError}`);
+                }
 
                 setLastAutoSyncUndo({
                     type: 'approval',
                     label: '전자결재 연동',
                     created_at: new Date().toISOString(),
                     trans_ids: collectTransIds(entries),
+                    durunuri_audit_ids: durunuriWrite.ids,
                     restores: []
                 });
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
-                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
@@ -7628,11 +7785,19 @@ function confirmSync(type) {
         const transIds = Array.isArray(undoState.trans_ids)
             ? Array.from(new Set(undoState.trans_ids.map((value) => String(value || '').trim()).filter(Boolean)))
             : [];
+        const durunuriAuditIds = Array.isArray(undoState.durunuri_audit_ids)
+            ? undoState.durunuri_audit_ids.filter((id) => id != null)
+            : [];
         const restores = Array.isArray(undoState.restores) ? undoState.restores : [];
         const label = String(undoState.label || undoState.type || '자동연동');
 
-        showConfirm("자동연동 직전 취소", `${label} 내역을 되돌리시겠습니까?\n전표 ${transIds.length}건 + 상태복원 ${restores.length}건`, async () => {
-            if (transIds.length > 0) {
+        showConfirm("자동연동 직전 취소", `${label} 내역을 되돌리시겠습니까?\n전표 ${transIds.length}건 + 두루누리 기록 ${durunuriAuditIds.length}건 + 상태복원 ${restores.length}건`, async () => {
+            if (durunuriAuditIds.length > 0) {
+                const rollbackFailures = await rollbackApprovalSyncWrites(transIds, durunuriAuditIds);
+                if (rollbackFailures.length > 0) {
+                    return showAlert("부분 완료", `자동연동 취소 일부가 실패했습니다.\n${rollbackFailures.join('\n')}\n기록은 재확인을 위해 유지합니다.`);
+                }
+            } else if (transIds.length > 0) {
                 const { error: deleteError } = await _supabase
                     .from('ac_journal')
                     .delete()
