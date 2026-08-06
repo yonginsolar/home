@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.93 | Change: 2026-08-06 - Consume structured four-insurance approval snapshots. -->
+<!-- Version: v1.0.94 | Change: 2026-08-06 - Require completed salary approval before posting and correct insurance liability calculation. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.93 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.94 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -475,7 +475,7 @@
           </div>
           <div class="card p-3 border-start border-5 border-info bg-light">
              <div class="d-flex justify-content-between align-items-center">
-               <div><h6 class="fw-bold mb-1">💼 급여 대장 연동</h6><small class="text-muted">HR_Salary → 회계 전표</small></div>
+               <div><h6 class="fw-bold mb-1">💼 급여 대장 연동</h6><small class="text-muted">완료된 급여 지출결의 확인 후 HR_Salary → 월말 발생전표</small></div>
                <div class="d-flex align-items-center gap-2">
                    <input type="month" id="salaryMonth" class="form-control form-control-sm" style="width: 130px;">
                    <button class="btn btn-info btn-sm text-white" onclick="confirmSync('salary')">실행</button>
@@ -493,7 +493,7 @@
           </div>
 	          <div class="card p-3 border-start border-5 border-warning bg-light">
 	             <div class="d-flex justify-content-between align-items-center">
-	               <div><h6 class="fw-bold mb-1">📝 전자결재 연동</h6><small class="text-muted">완료/실물결재완료 지출결의서 불러오기</small></div>
+	               <div><h6 class="fw-bold mb-1">📝 전자결재 연동</h6><small class="text-muted">완료/실물결재완료 지출결의서 불러오기 · 급여는 다음 달 10일 지급</small></div>
 	               <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">실행</button>
 	             </div>
 	          </div>
@@ -1626,11 +1626,26 @@ async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
 
     const { data, error } = await _supabase
         .from('hr_salary')
-        .select('year_month,emp_id,pay_total,ded_pension,ded_health,ded_care,ded_employ,ded_income,ded_local,ded_advance,ded_capital,ded_total,co_total')
+        .select('year_month,emp_id,is_accounted,pay_total,ded_pension,ded_health,ded_care,ded_employ,ded_income,ded_local,ded_advance,ded_capital,ded_total,co_total')
         .in('year_month', months);
     if (error) return { data: null, error };
     if (!data || data.length === 0) {
         return { data: null, error: new Error(`${periodLabel} 급여대장 데이터가 없습니다. 급여 연동을 먼저 진행했는지 확인하세요.`) };
+    }
+
+    const availableMonths = new Set((data || []).map((row) => normalizeAccountingYm(row.year_month)).filter(Boolean));
+    const missingMonths = months.filter((ym) => !availableMonths.has(ym));
+    if (missingMonths.length > 0) {
+        return { data: null, error: new Error(`${missingMonths.join(', ')} 급여대장 데이터가 없습니다.`) };
+    }
+    const unaccountedMonths = months.filter((ym) =>
+        (data || []).some((row) => normalizeAccountingYm(row.year_month) === ym && row.is_accounted !== true)
+    );
+    if (unaccountedMonths.length > 0) {
+        return {
+            data: null,
+            error: new Error(`${unaccountedMonths.join(', ')} 급여 지출결재 완료와 급여대장 회계 연동을 먼저 진행하세요.`)
+        };
     }
 
     const adjustedRows = [];
@@ -1645,8 +1660,14 @@ async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
     let totalYesu = 0;
     let totalMigigeub = 0;
     rowsForSum.forEach((row) => {
-        totalYesu += Number(row.ded_total || 0);
-        totalMigigeub += Number(row.co_total || 0);
+        const employeeInsuranceRaw =
+            Number(row.ded_pension || 0) +
+            Number(row.ded_health || 0) +
+            Number(row.ded_care || 0) +
+            Number(row.ded_employ || 0);
+        const employeeSupport = Math.max(0, Number(row.durunuri_emp_support || 0));
+        totalYesu += Math.max(0, employeeInsuranceRaw - employeeSupport);
+        totalMigigeub += Math.max(0, Number(row.co_total || 0));
     });
 
     const totalBook = totalYesu + totalMigigeub;
@@ -3495,6 +3516,112 @@ function isSalaryLikeApproval(doc) {
     return !isInsuranceApproval(doc) && /급여|salary|원천세|퇴직연금|인건비/.test(merged);
 }
 
+function isSalaryExpenseApproval(doc) {
+    const docType = String(doc?.doc_type || '').replace(/\s+/g, '');
+    return !!doc?.salary_ledger_snapshot || docType === '지출결의(급여)';
+} // End of isSalaryExpenseApproval
+
+function getApprovalSalaryMonth(doc) {
+    const snapshot = doc?.salary_ledger_snapshot;
+    const directMonth = normalizeAccountingYm(snapshot?.year_month || snapshot?.state?.yearMonth || snapshot?.state?.year_month);
+    if (directMonth) return directMonth;
+    const merged = getApprovalMergedText(doc);
+    const matched = merged.match(/(20\d{2})\s*(?:년|[-./])\s*(0?[1-9]|1[0-2])\s*월?/u);
+    return matched ? buildAccountingYmFromParts(matched[1], matched[2]) : '';
+} // End of getApprovalSalaryMonth
+
+function getSalaryScheduledPaymentDate(ym) {
+    const nextYm = addAccountingMonths(normalizeAccountingYm(ym), 1);
+    return buildAccountingDateFromYmDay(nextYm, 10, '');
+} // End of getSalaryScheduledPaymentDate
+
+function summarizeSalaryRowsForApproval(rows) {
+    return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+        acc.empCount += 1;
+        acc.pay += Math.max(0, Number(row?.pay_total || 0));
+        acc.ded += Math.max(0, Number(row?.ded_total || 0));
+        acc.net += Math.max(0, Number(row?.net_pay || 0));
+        return acc;
+    }, { empCount: 0, pay: 0, ded: 0, net: 0 });
+} // End of summarizeSalaryRowsForApproval
+
+function getApprovalSalarySnapshotSummary(doc) {
+    const state = doc?.salary_ledger_snapshot?.state;
+    if (!state || typeof state !== 'object') return null;
+    const rows = Array.isArray(state.rows) ? state.rows : [];
+    if (rows.length === 0 && state.empCount == null && state.payTotal == null && state.dedTotal == null && state.netTotal == null) {
+        return null;
+    }
+    const rowSummary = summarizeSalaryRowsForApproval(rows);
+    return {
+        empCount: Number(state.empCount ?? rowSummary.empCount),
+        pay: Number(state.payTotal ?? rowSummary.pay),
+        ded: Number(state.dedTotal ?? rowSummary.ded),
+        net: Number(state.netTotal ?? rowSummary.net ?? doc?.amount ?? 0)
+    };
+} // End of getApprovalSalarySnapshotSummary
+
+function isSameSalaryApprovalSummary(approved, current) {
+    if (!approved || !current) return false;
+    return Number(approved.empCount || 0) === Number(current.empCount || 0)
+        && Number(approved.pay || 0) === Number(current.pay || 0)
+        && Number(approved.ded || 0) === Number(current.ded || 0)
+        && Number(approved.net || 0) === Number(current.net || 0);
+} // End of isSameSalaryApprovalSummary
+
+async function findCompletedSalaryApprovalForMonth(ym, currentSummary) {
+    const normalizedYm = normalizeAccountingYm(ym);
+    const coopId = String(myInfo?.coop_id || '').trim();
+    if (!normalizedYm || !coopId) {
+        return { doc: null, error: new Error('급여 귀속월 또는 조합 정보를 확인하지 못했습니다.') };
+    }
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id,doc_type,status,amount,title,created_at,processed_at,approval_line,salary_ledger_snapshot')
+        .eq('coop_id', coopId)
+        .in('status', ['완료', '실물결재완료'])
+        .ilike('doc_type', '%급여%')
+        .order('created_at', { ascending: false })
+        .limit(100);
+    if (error) return { doc: null, error };
+
+    const monthDocs = (data || []).filter((doc) => getApprovalSalaryMonth(doc) === normalizedYm);
+    if (monthDocs.length === 0) {
+        return { doc: null, error: new Error(`${normalizedYm} 급여 지출결의가 아직 완료되지 않았습니다.`) };
+    }
+
+    const expectedNet = Math.max(0, Number(currentSummary?.net || 0));
+    const amountMatchedDocs = monthDocs.filter((doc) => Number(doc?.amount || 0) === expectedNet);
+    const exactDoc = amountMatchedDocs.find((doc) => {
+        const approvedSummary = getApprovalSalarySnapshotSummary(doc);
+        return !approvedSummary || isSameSalaryApprovalSummary(approvedSummary, currentSummary);
+    });
+    if (!exactDoc) {
+        return {
+            doc: null,
+            error: new Error(`${normalizedYm} 결재 완료 후 급여대장이 변경되었습니다. 현재 급여대장으로 급여 지출결의를 다시 상신해 완료하세요.`)
+        };
+    }
+
+    return { doc: exactDoc, error: null };
+} // End of findCompletedSalaryApprovalForMonth
+
+async function getSalaryAccrualPostingState(ym) {
+    const normalizedYm = normalizeAccountingYm(ym);
+    if (!normalizedYm) return { data: null, error: new Error('급여 귀속월 형식을 확인하세요.') };
+    const { data, error } = await _supabase
+        .from('ac_journal')
+        .select('Trans_ID,Account,Debit,Credit')
+        .like('Trans_ID', `SAL-${normalizedYm}%`);
+    if (error) return { data: null, error };
+    const rows = Array.isArray(data) ? data : [];
+    const netPayable = rows
+        .filter((row) => String(row?.Account || '').trim() === '미지급금')
+        .reduce((sum, row) => sum + Number(row?.Credit || 0) - Number(row?.Debit || 0), 0);
+    return { data: { rows, netPayable: Math.max(0, netPayable) }, error: null };
+} // End of getSalaryAccrualPostingState
+
 function buildAccountingYmFromParts(year, month) {
     const y = Number(year);
     const m = Number(month);
@@ -3789,14 +3916,66 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
         const descBase = `${cardPrefix}${doc?.title || doc?.doc_type || '지출결의'}`;
         if (isSalaryLikeApproval(doc)) {
+            let salaryMonth = '';
+            let paymentDate = journalDate;
+            if (isSalaryExpenseApproval(doc)) {
+                salaryMonth = getApprovalSalaryMonth(doc);
+                const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+                if (!salaryMonth) {
+                    blockedDocs.push({
+                        id: doc?.id,
+                        label,
+                        reason: '급여 귀속월을 확인하지 못했습니다. 급여대장이 포함된 지출결의인지 확인하세요.'
+                    });
+                    continue;
+                }
+
+                const accrualState = await getSalaryAccrualPostingState(salaryMonth);
+                if (accrualState.error) {
+                    blockedDocs.push({
+                        id: doc?.id,
+                        label,
+                        reason: `급여 발생전표 확인 실패: ${accrualState.error.message}`
+                    });
+                    continue;
+                }
+                if (!accrualState.data.rows.length) {
+                    blockedDocs.push({
+                        id: doc?.id,
+                        label,
+                        reason: `${salaryMonth} 급여대장 연동을 먼저 실행해 월말 발생전표를 만드세요.`
+                    });
+                    continue;
+                }
+                if (Number(accrualState.data.netPayable || 0) !== amount) {
+                    blockedDocs.push({
+                        id: doc?.id,
+                        label,
+                        reason: `결재 실지급액(${amount.toLocaleString()}원)과 급여 발생전표 미지급금(${Number(accrualState.data.netPayable || 0).toLocaleString()}원)이 다릅니다.`
+                    });
+                    continue;
+                }
+
+                const scheduledPaymentDate = getSalaryScheduledPaymentDate(salaryMonth);
+                paymentDate = [journalDate, scheduledPaymentDate].filter(Boolean).sort().pop() || journalDate;
+                if (paymentDate && fallbackDate < paymentDate) {
+                    blockedDocs.push({
+                        id: doc?.id,
+                        label,
+                        reason: `급여 지급일 ${paymentDate}에 지급전표를 연동할 수 있습니다. 결재 완료와 월말 발생전표는 그대로 유지됩니다.`
+                    });
+                    continue;
+                }
+            }
             plans.push({
                 kind: 'payment',
                 amount,
-                date: journalDate,
+                date: paymentDate,
                 description: `[전자결재-지급] ${descBase}`,
                 transId,
                 project: '본사',
-                operator
+                operator,
+                salaryMonth
             });
             paymentCount += 1;
         } else {
@@ -6468,6 +6647,16 @@ function confirmSync(type) {
                 return acc;
             }, { pay: 0, ded: 0, net: 0, co: 0 });
 
+            const previewApprovalCheck = await findCompletedSalaryApprovalForMonth(ym, {
+                empCount: previewAdjustedRows.length,
+                pay: previewDesired.pay,
+                ded: previewDesired.ded,
+                net: previewDesired.net
+            });
+            if (previewApprovalCheck.error) {
+                return showAlert("급여 결재 확인", previewApprovalCheck.error.message);
+            }
+
             const { data: previewSalRows, error: previewSalRowsError } = await _supabase
                 .from('ac_journal')
                 .select('Trans_ID')
@@ -6482,6 +6671,8 @@ function confirmSync(type) {
                 `- 공제총액: ${previewDesired.ded.toLocaleString()}원`,
                 `- 실지급액: ${previewDesired.net.toLocaleString()}원`,
                 `- 회사부담분: ${previewDesired.co.toLocaleString()}원`,
+                `- 확인된 지출결의: #${previewApprovalCheck.doc.id} (${previewApprovalCheck.doc.status})`,
+                `- 지급 예정일: ${getSalaryScheduledPaymentDate(ym)} (전자결재 연동에서 지급전표 생성)`,
                 `- 처리 방식: ${hasPosted ? '기존 SAL 전표 정정(취소 후 재기표)' : '신규 SAL 전표 생성'}`
             ].join('\n');
 
@@ -6513,6 +6704,16 @@ function confirmSync(type) {
                 desired.net += Math.max(0, Number(row.net_pay || 0));
                 desired.co += Math.max(0, Number(row.co_total || 0));
             });
+
+            const approvalCheck = await findCompletedSalaryApprovalForMonth(ym, {
+                empCount: adjustedSalaries.length,
+                pay: desired.pay,
+                ded: desired.ded,
+                net: desired.net
+            });
+            if (approvalCheck.error) {
+                return showAlert("급여 결재 확인", approvalCheck.error.message);
+            }
 
             const { data: salRows, error: salError } = await _supabase
                 .from('ac_journal')
@@ -6657,7 +6858,7 @@ function confirmSync(type) {
             const coopId = String(myInfo?.coop_id || '').trim();
             const { data: approvals, error: previewError } = await _supabase
                 .from('ref_approval')
-                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot')
+                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot,salary_ledger_snapshot')
                 .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                 .in('status', ['완료', '실물결재완료'])
                 .ilike('doc_type', '%지출%');
@@ -6689,7 +6890,7 @@ function confirmSync(type) {
                 `- 예상 금액(4대보험은 감액 전): ${totalAmount.toLocaleString()}원`,
                 `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, (대)보통예금/4대보험회사분 감액`,
                 `- 4대보험 자동이체 감액: ${previewPlanResult.insuranceCount > 0 ? `${previewPlanResult.insuranceDiscountTotal.toLocaleString()}원 / 실출금 ${previewPlanResult.insuranceCashTotal.toLocaleString()}원` : '대상 없음'}`,
-                `- 즉시지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
+                `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
                 previewPlanResult.blockedDocs.length > 0 ? `- 보류 사유\n${formatApprovalSyncBlockedDocs(previewPlanResult.blockedDocs)}` : ''
@@ -6698,7 +6899,7 @@ function confirmSync(type) {
             showConfirm("전자결재 연동", previewMsg, async () => {
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
-                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot')
+                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot,salary_ledger_snapshot')
                     .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                     .in('status', ['완료', '실물결재완료'])
                     .ilike('doc_type', '%지출%');
@@ -6737,7 +6938,7 @@ function confirmSync(type) {
                     restores: []
                 });
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
-                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 즉시지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
