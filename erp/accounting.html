@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.92 | Change: 2026-08-06 - Keep runnable expense approvals syncing when an insurance approval is waiting for payroll. -->
+<!-- Version: v1.0.93 | Change: 2026-08-06 - Consume structured four-insurance approval snapshots. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.92 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.93 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -3461,18 +3461,22 @@ function normalizeApprovalExpenseSnapshot(doc) {
     const raw = doc?.expense_snapshot;
     if (!raw || typeof raw !== 'object') {
         return {
+            expense_sub_type: '',
             payment_method: 'auto',
             payment_method_label: '자동(즉시지급)',
             card_alias: '',
-            card_company: ''
+            card_company: '',
+            insurance: null
         };
     }
     const paymentMethod = String(raw.payment_method || 'auto').trim();
     return {
+        expense_sub_type: String(raw.expense_sub_type || '').trim(),
         payment_method: ['credit_card', 'check_card'].includes(paymentMethod) ? paymentMethod : 'auto',
         payment_method_label: String(raw.payment_method_label || '').trim(),
         card_alias: String(raw.card_alias || '').trim(),
-        card_company: String(raw.card_company || '').trim()
+        card_company: String(raw.card_company || '').trim(),
+        insurance: raw.insurance && typeof raw.insurance === 'object' ? raw.insurance : null
     };
 } // End of normalizeApprovalExpenseSnapshot
 
@@ -3481,7 +3485,9 @@ function getApprovalMergedText(doc) {
 }
 
 function isInsuranceApproval(doc) {
-    return /4대보험/.test(getApprovalMergedText(doc));
+    const snapshot = normalizeApprovalExpenseSnapshot(doc);
+    return snapshot.expense_sub_type === '4대보험'
+        || /4대보험/.test(getApprovalMergedText(doc));
 }
 
 function isSalaryLikeApproval(doc) {
@@ -3530,6 +3536,9 @@ function getApprovalBaseKstInfo(doc) {
 }
 
 function parseApprovalInsuranceMonthRange(doc) {
+    const snapshot = normalizeApprovalExpenseSnapshot(doc);
+    const snapshotMonth = normalizeAccountingYm(snapshot.insurance?.billing_month);
+    if (snapshotMonth) return { startYm: snapshotMonth, endYm: snapshotMonth };
     const merged = getApprovalMergedText(doc);
     if (!merged) return null;
     const baseInfo = getApprovalBaseKstInfo(doc);
@@ -3582,6 +3591,9 @@ function parseApprovalInsuranceMonthRange(doc) {
 } // End of parseApprovalInsuranceMonthRange
 
 function parseApprovalInsurancePaymentDate(doc, fallbackDate) {
+    const snapshot = normalizeApprovalExpenseSnapshot(doc);
+    const snapshotDueDate = String(snapshot.insurance?.due_date || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(snapshotDueDate)) return snapshotDueDate;
     const rawText = `${doc?.title || ''}\n${doc?.content || ''}`;
     const explicitYearDate = rawText.match(/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
     if (explicitYearDate) {
