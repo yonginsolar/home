@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.91 | Change: 2026-08-06 - Limit capital and donation auto-sync to the open accounting period. -->
+<!-- Version: v1.0.92 | Change: 2026-08-06 - Keep runnable expense approvals syncing when an insurance approval is waiting for payroll. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.91 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.92 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -3681,6 +3681,7 @@ function appendApprovalInsuranceEntries(entries, payload) {
 
 async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
     const plans = [];
+    const blockedDocs = [];
     let totalAmount = 0;
     let insuranceCount = 0;
     let insuranceDiscountTotal = 0;
@@ -3701,17 +3702,12 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
             const settingResult = await loadInsuranceAutoDebitDiscountSetting();
             if (settingResult.error) {
                 const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
-                return {
-                    plans: [],
-                    totalAmount: 0,
-                    insuranceCount: 0,
-                    insuranceDiscountTotal: 0,
-                    insuranceCashTotal: 0,
-                    paymentCount: 0,
-                    accrualCount: 0,
-                    checkCardCount: 0,
-                    error: new Error(`${label} 자동이체 감액 설정 조회 실패: ${settingResult.error.message}`)
-                };
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: `자동이체 감액 설정 조회 실패: ${settingResult.error.message}`
+                });
+                continue;
             }
 
             const insuranceAmounts = calculateInsurancePaymentAmounts(
@@ -3721,44 +3717,35 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
             );
             if (!insuranceAmounts.valid) {
                 const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
-                return {
-                    plans: [],
-                    totalAmount: 0,
-                    insuranceCount: 0,
-                    insuranceDiscountTotal: 0,
-                    insuranceCashTotal: 0,
-                    paymentCount: 0,
-                    accrualCount: 0,
-                    checkCardCount: 0,
-                    error: new Error(`${label} 자동이체 감액 계산 실패: ${insuranceAmounts.error}`)
-                };
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: `자동이체 감액 계산 실패: ${insuranceAmounts.error}`
+                });
+                continue;
             }
 
             const monthRange = parseApprovalInsuranceMonthRange(doc);
             if (!monthRange) {
                 const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
-                return {
-                    plans: [],
-                    totalAmount: 0,
-                    insuranceCount: 0,
-                    paymentCount: 0,
-                    accrualCount: 0,
-                    error: new Error(`${label} 문서에서 4대보험 납부분 월범위를 읽지 못했습니다. 예: 3월 또는 11월~1월 형식이 필요합니다.`)
-                };
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: '4대보험 납부분 월범위를 읽지 못했습니다. 예: 3월 또는 11월~1월 형식이 필요합니다.'
+                });
+                continue;
             }
 
             const targetMonths = listAccountingMonthRange(monthRange.startYm, monthRange.endYm);
             const summary = await getInsuranceLiabilitySummaryByMonths(targetMonths);
             if (summary.error) {
                 const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
-                return {
-                    plans: [],
-                    totalAmount: 0,
-                    insuranceCount: 0,
-                    paymentCount: 0,
-                    accrualCount: 0,
-                    error: new Error(`${label} 보험 분개 계산 실패: ${summary.error.message}`)
-                };
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: `보험 분개 계산 보류: ${summary.error.message}`
+                });
+                continue;
             }
 
             plans.push({
@@ -3829,6 +3816,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
 
     return {
         plans,
+        blockedDocs,
         totalAmount,
         insuranceCount,
         insuranceDiscountTotal,
@@ -3839,6 +3827,18 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         error: null
     };
 }
+
+function formatApprovalSyncBlockedDocs(blockedDocs) {
+    const docs = Array.isArray(blockedDocs) ? blockedDocs : [];
+    if (docs.length === 0) return '';
+    const visible = docs.slice(0, 3).map((item) => {
+        const label = String(item?.label || `전자결재 ${item?.id || ''}`).trim();
+        const reason = String(item?.reason || '연동 조건을 확인해야 합니다.').trim();
+        return `  · ${label}: ${reason}`;
+    });
+    if (docs.length > visible.length) visible.push(`  · 외 ${docs.length - visible.length}건`);
+    return visible.join('\n');
+} // End of formatApprovalSyncBlockedDocs
 
 function appendApprovalEntriesFromPlan(entries, plan) {
     if (!plan || !plan.kind) return;
@@ -6663,18 +6663,25 @@ function confirmSync(type) {
 
             const previewPlanResult = await buildApprovalSyncPlans(targetDocs, today, writer);
             if (previewPlanResult.error) return showAlert("오류", "전자결재 연동 미리보기 실패: " + previewPlanResult.error.message);
+            if (previewPlanResult.plans.length === 0) {
+                const blockedDetail = formatApprovalSyncBlockedDocs(previewPlanResult.blockedDocs);
+                return showAlert("알림", `지금 연동할 수 있는 문서가 없습니다.\n- 보류: ${previewPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+            }
             const totalAmount = previewPlanResult.totalAmount;
 
             const previewMsg = [
                 '전자결재 연동 미리보기',
-                `- 대상 건수: ${targetDocs.length}건`,
+                `- 미연동 완료 문서: ${targetDocs.length}건`,
+                `- 지금 연동: ${previewPlanResult.plans.length}건`,
+                `- 조건 확인 후 다시 연동: ${previewPlanResult.blockedDocs.length}건`,
                 `- 예상 금액(4대보험은 감액 전): ${totalAmount.toLocaleString()}원`,
                 `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, (대)보통예금/4대보험회사분 감액`,
                 `- 4대보험 자동이체 감액: ${previewPlanResult.insuranceCount > 0 ? `${previewPlanResult.insuranceDiscountTotal.toLocaleString()}원 / 실출금 ${previewPlanResult.insuranceCashTotal.toLocaleString()}원` : '대상 없음'}`,
                 `- 즉시지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
-                `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`
-            ].join('\n');
+                `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
+                previewPlanResult.blockedDocs.length > 0 ? `- 보류 사유\n${formatApprovalSyncBlockedDocs(previewPlanResult.blockedDocs)}` : ''
+            ].filter(Boolean).join('\n');
 
             showConfirm("전자결재 연동", previewMsg, async () => {
                 const { data: runApprovals, error: runFetchError } = await _supabase
@@ -6697,6 +6704,10 @@ function confirmSync(type) {
 
                 const runPlanResult = await buildApprovalSyncPlans(runTargetDocs, today, writer);
                 if (runPlanResult.error) return showAlert("오류", "전자결재 연동 실패: " + runPlanResult.error.message);
+                if (runPlanResult.plans.length === 0) {
+                    const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
+                    return showAlert("알림", `지금 연동할 수 있는 문서가 없습니다.\n- 보류: ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                }
 
                 let entries = [];
                 runPlanResult.plans.forEach((plan) => appendApprovalEntriesFromPlan(entries, plan));
@@ -6713,7 +6724,8 @@ function confirmSync(type) {
                     trans_ids: collectTransIds(entries),
                     restores: []
                 });
-                showAlert("완료", `${runTargetDocs.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 즉시지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건`);
+                const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
+                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 즉시지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
