@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.130
-Change: Expand persistent-XSS escaping across legacy administrator lists.
+Version: v1.0.131
+Change: Prevent duplicate donation/dividend member-search modal backdrops.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.130';
+window.ADMIN_MEMBER_VERSION = 'v1.0.131';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -14812,7 +14812,7 @@ function openDonationModal() {
     const firstTab = new bootstrap.Tab(document.querySelector('#donationTab button[data-bs-target="#tab-don-single"]'));
     firstTab.show();
 
-    new bootstrap.Modal(document.getElementById('donationModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).show();
 }
 
 async function submitDonationGrant() {
@@ -14849,7 +14849,7 @@ async function submitDonationGrant() {
         }
 
         myAlert('자산수증이익이 등록되었습니다.');
-        bootstrap.Modal.getInstance(document.getElementById('donationModal')).hide();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).hide();
         fetchGlobalDonations();
     });
 } // End of submitDonationGrant
@@ -14971,7 +14971,7 @@ async function submitDonationBatch() {
         myAlert(`완료되었습니다.<br>성공: ${successCnt}건, 실패: ${failCnt}건`);
 
         g_donation_batch_request_key = null;
-        bootstrap.Modal.getInstance(document.getElementById('donationModal')).hide();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('donationModal')).hide();
         fetchGlobalDonations();
     });
 }
@@ -15051,7 +15051,7 @@ function openDividendModal() {
     const firstTab = new bootstrap.Tab(document.querySelector('#dividendTab button[data-bs-target="#tab-div-single"]'));
     firstTab.show();
 
-    new bootstrap.Modal(document.getElementById('dividendModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dividendModal')).show();
 }
 
 // 4. 이용고배당 지급 실행 (RPC)
@@ -15087,7 +15087,7 @@ async function submitDividendGrant() {
             myAlert("처리 실패: " + error.message, "error");
         } else {
             myAlert("이용고배당 적용이 완료되었습니다.");
-            bootstrap.Modal.getInstance(document.getElementById('dividendModal')).hide();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('dividendModal')).hide();
             fetchGlobalDividends(); // 목록 새로고침
         }
     });
@@ -15217,27 +15217,44 @@ async function submitDividendBatch() {
         myAlert(`완료되었습니다.<br>성공: ${successCnt}건, 실패: ${failCnt}건`);
 
         g_dividend_batch_request_key = null;
-        bootstrap.Modal.getInstance(document.getElementById('dividendModal')).hide();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('dividendModal')).hide();
         fetchGlobalDividends();
     });
 }
-    let g_search_target = ''; // 검색 요청한 출처 (dividend 등)
+let g_search_target = ''; // 검색 요청한 출처 (dividend 등)
+let g_member_search_open_sequence = 0;
+let g_member_search_request_sequence = 0;
+let g_member_search_pending_keyword = '';
 
 // 검색 모달 열기
 function openMemberSearch(target) {
     g_search_target = target;
+    const modalEl = document.getElementById('memberSearchModal');
+    const modalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const openSequence = ++g_member_search_open_sequence;
     const seedKeyword = getMemberSearchSeed(target);
     document.getElementById('ms-keyword').value = seedKeyword;
     document.getElementById('ms-result-list').innerHTML = '<div class="text-center py-4 text-muted x-small">이름을 입력하세요.</div>';
-    new bootstrap.Modal(document.getElementById('memberSearchModal')).show();
-    setTimeout(() => {
+    g_member_search_request_sequence += 1;
+    g_member_search_pending_keyword = '';
+
+    const focusAndSearch = () => {
+        if (openSequence !== g_member_search_open_sequence || !modalEl.classList.contains('show')) return;
         const keywordEl = document.getElementById('ms-keyword');
         keywordEl.focus();
         if (seedKeyword) {
             keywordEl.select();
             searchMemberForModal();
         }
-    }, 500);
+    };
+
+    if (modalEl.classList.contains('show')) {
+        requestAnimationFrame(focusAndSearch);
+        return;
+    }
+
+    modalEl.addEventListener('shown.bs.modal', focusAndSearch, { once: true });
+    modalInstance.show();
 } // End of openMemberSearch
 
 function getMemberSearchSeed(target) {
@@ -15260,8 +15277,13 @@ function clearDonationMemberSelection() {
 function searchMemberForModal() {
     const keyword = document.getElementById('ms-keyword').value.trim();
     const listEl = document.getElementById('ms-result-list');
+    const modalEl = document.getElementById('memberSearchModal');
 
     if(!keyword) return;
+    if (g_member_search_pending_keyword === keyword) return;
+
+    const requestSequence = ++g_member_search_request_sequence;
+    g_member_search_pending_keyword = keyword;
 
     // g_members가 비어있다면 한번 로드 시도 (또는 DB 직접 조회)
     // 여기서는 안전하게 RPC 대신 DB 직접 조회 (이름만)
@@ -15275,6 +15297,13 @@ function searchMemberForModal() {
         .ilike('name', `%${keyword}%`)
         .limit(10)
         .then(({ data, error }) => {
+            if (
+                requestSequence !== g_member_search_request_sequence ||
+                !modalEl.classList.contains('show') ||
+                document.getElementById('ms-keyword').value.trim() !== keyword
+            ) return;
+            g_member_search_pending_keyword = '';
+
             if(error || !data || data.length === 0) {
                 listEl.innerHTML = '<div class="text-center py-3 text-muted x-small">검색 결과가 없습니다.</div>';
                 return;
@@ -15306,6 +15335,7 @@ function searchMemberForModal() {
 
 // 조합원 선택 시 처리
 function selectMemberForModal(id, name) {
+    const searchTarget = g_search_target;
     if(g_search_target === 'dividend') {
         document.getElementById('dv-member-id').value = id;
         document.getElementById('dv-member-name').value = name;
@@ -15316,8 +15346,18 @@ function selectMemberForModal(id, name) {
     }
     // 다른 곳에서 쓸 경우 else if 추가
 
-    // 모달 닫기
-    bootstrap.Modal.getInstance(document.getElementById('memberSearchModal')).hide();
+    g_member_search_request_sequence += 1;
+    g_member_search_pending_keyword = '';
+    const modalEl = document.getElementById('memberSearchModal');
+    const returnFocusEl = searchTarget === 'donation'
+        ? document.getElementById('dn-member-name')
+        : document.getElementById('dv-member-name');
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        if (returnFocusEl && returnFocusEl.closest('.modal')?.classList.contains('show')) {
+            returnFocusEl.focus({ preventScroll: true });
+        }
+    }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
 }
 
     // ================================================================
