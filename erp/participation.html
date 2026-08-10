@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.9 | Change: 2026-08-07 - Add a direct return path to member administration. -->
+<!-- Version: v1.3.10 | Change: 2026-08-10 - Add roster scans and normalize upload MIME types. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.9 | participation.html');</script>
+  <script>console.log('[Version] v1.3.10 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -237,7 +237,7 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
         </div>
         <div class="modal-body">
-          <div id="formAlert" class="alert d-none" role="alert"></div>
+          <div id="formAlert" class="alert d-none" role="alert" tabindex="-1"></div>
           <div class="border rounded-3 p-3 mb-3 d-none" id="humanitiesImportSection">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
               <div><strong>모두의 인문학에서 불러오기</strong><div class="small text-muted">용인모두의햇빛협동조합 교육만 불러옵니다. 입력칸에 불러온 뒤 필요한 내용을 수정하고 저장하세요.</div></div>
@@ -329,7 +329,7 @@
               <div id="humanitiesSourceResources"><div class="text-muted small">공개 자료를 불러오는 중입니다.</div></div>
             </div>
             <details class="education-files-details" id="erpInternalFilesDetails" open>
-              <summary id="erpInternalFilesSummary">교육 자료·사진 <span class="text-muted fw-normal small">(선택)</span></summary>
+              <summary id="erpInternalFilesSummary">교육 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(선택)</span></summary>
               <div class="row g-3 mt-1">
                 <div class="col-md-6">
                   <label class="form-label" for="materialFiles">강의 자료</label>
@@ -340,6 +340,11 @@
                   <label class="form-label" for="photoFiles">사진</label>
                   <input type="file" class="form-control" id="photoFiles" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif">
                   <div class="form-text">JPG, PNG, WebP, HEIC · 파일당 최대 20MB</div>
+                </div>
+                <div class="col-12">
+                  <label class="form-label" for="rosterScanFiles">출석부 스캔본</label>
+                  <input type="file" class="form-control" id="rosterScanFiles" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif">
+                  <div class="form-text">서명된 출석부 PDF 또는 촬영·스캔 이미지 · 파일당 최대 20MB · 관리자만 등록할 수 있습니다.</div>
                 </div>
               </div>
               <div class="mt-3" id="currentFiles"></div>
@@ -1115,8 +1120,8 @@
       const summary = document.getElementById('erpInternalFilesSummary');
       const activeLink = humanitiesLinkState.link?.status === 'ACTIVE';
       summary.innerHTML = activeLink
-        ? '협동조합 내부 자료·사진 <span class="text-muted fw-normal small">(필요한 경우만)</span>'
-        : '교육 자료·사진 <span class="text-muted fw-normal small">(선택)</span>';
+        ? '협동조합 내부 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(필요한 경우만)</span>'
+        : '교육 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(선택)</span>';
       if (resetOpen) details.open = !activeLink || (formState.currentFiles || []).length > 0;
     } // End of syncEducationFileSections
 
@@ -1606,6 +1611,7 @@
       document.getElementById('eventInstructor').value = '';
       document.getElementById('materialFiles').value = '';
       document.getElementById('photoFiles').value = '';
+      document.getElementById('rosterScanFiles').value = '';
       document.getElementById('memberSearchInput').value = '';
       document.getElementById('memberSearchResults').innerHTML = '';
       document.getElementById('currentFiles').innerHTML = '';
@@ -1678,6 +1684,7 @@
         document.getElementById('eventInstructor').value = event.instructor || '';
         document.getElementById('materialFiles').value = '';
         document.getElementById('photoFiles').value = '';
+        document.getElementById('rosterScanFiles').value = '';
         document.getElementById('newPhotoPreviews').innerHTML = '';
         document.getElementById('newPhotoPreviewsWrap').classList.add('d-none');
         document.getElementById('memberSearchResults').innerHTML = '';
@@ -1991,6 +1998,9 @@
         if (kind === 'PHOTO' && !['jpg','jpeg','png','webp','heic','heif'].includes(extension)) {
           throw new Error(`${file.name}: 지원하지 않는 사진 형식입니다.`);
         }
+        if (kind === 'ROSTER_SCAN' && !['pdf','jpg','jpeg','png','webp','heic','heif'].includes(extension)) {
+          throw new Error(`${file.name}: 지원하지 않는 출석부 스캔 형식입니다.`);
+        }
       }
       return rows;
     } // End of validateFiles
@@ -2002,18 +2012,51 @@
       return `${base}${extension}`;
     } // End of safeStorageFileName
 
+    function storageContentType(file) {
+      const extension = String(file?.name || '').split('.').pop().toLowerCase();
+      const contentTypes = {
+        pdf:'application/pdf',
+        doc:'application/msword',
+        docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ppt:'application/vnd.ms-powerpoint',
+        pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp',
+        heic:'image/heic', heif:'image/heif'
+      };
+      return contentTypes[extension] || String(file?.type || '').trim() || 'application/octet-stream';
+    } // End of storageContentType
+
+    function uploadErrorMessage(error, fileName) {
+      const message = String(error?.message || error?.error || '').trim();
+      if (/mime type|content.?type|not supported/i.test(message)) {
+        return `${fileName}: 파일 형식을 확인하지 못했습니다. PDF, 문서 또는 지원 이미지인지 확인해 주세요.`;
+      }
+      if (/maximum|too large|size limit|payload too large/i.test(message)) {
+        return `${fileName}: 파일 크기는 20MB 이하여야 합니다.`;
+      }
+      if (/row-level security|permission|not authorized|unauthorized/i.test(message)) {
+        return `${fileName}: 현재 계정의 교육 파일 업로드 권한을 확인하지 못했습니다.`;
+      }
+      return `${fileName}: 업로드하지 못했습니다.${message ? ` (${message})` : ''}`;
+    } // End of uploadErrorMessage
+
     async function uploadEventFiles(eventId, kind, files) {
       const rows = validateFiles(files, kind);
       for (const file of rows) {
         const path = `${dashboardData.coop_id}/${eventId}/${kind.toLowerCase()}/${crypto.randomUUID()}_${safeStorageFileName(file.name)}`;
-        const { error:uploadError } = await _supabase.storage.from(PARTICIPATION_BUCKET).upload(path, file, { upsert:false, cacheControl:'3600' });
-        if (uploadError) throw uploadError;
+        const contentType = storageContentType(file);
+        const { error:uploadError } = await _supabase.storage.from(PARTICIPATION_BUCKET).upload(path, file, {
+          upsert:false,
+          cacheControl:'3600',
+          contentType
+        });
+        if (uploadError) throw new Error(uploadErrorMessage(uploadError, file.name));
         const { error:metaError } = await _supabase.rpc('participation_admin_add_file', {
           p_event_id:eventId,
           p_file_kind:kind,
           p_storage_path:path,
           p_original_name:file.name,
-          p_mime_type:file.type || null,
+          p_mime_type:contentType,
           p_size_bytes:file.size
         });
         if (metaError) {
@@ -2111,8 +2154,9 @@
         syncEducationFileSections(true);
         return;
       }
-      const materials = files.filter(function(file) { return file.file_kind !== 'PHOTO'; });
+      const materials = files.filter(function(file) { return file.file_kind === 'MATERIAL'; });
       const photos = files.filter(function(file) { return file.file_kind === 'PHOTO'; });
+      const rosterScans = files.filter(function(file) { return file.file_kind === 'ROSTER_SCAN'; });
       const photoRows = await Promise.all(photos.map(async function(file) {
         try {
           return { file, url:await getSignedFileUrl(file.storage_path) };
@@ -2131,7 +2175,12 @@
             return `<button type="button" class="photo-thumb" data-stored-photo-index="${index}" title="${escapeHtml(row.file.original_name || `교육 사진 ${index + 1}`)}"><img src="${escapeHtml(row.url)}" alt="교육 사진 ${index + 1}" loading="lazy"></button>`;
           }).join('')}</div>`
         : '';
-      container.innerHTML = materialHtml + photoHtml;
+      const rosterScanHtml = rosterScans.length > 0
+        ? `<div class="small fw-bold mt-3 mb-1">등록된 출석부 스캔본</div>${rosterScans.map(function(file) {
+            return `<div class="current-file"><span>${escapeHtml(file.original_name)}</span><button type="button" class="btn btn-sm btn-outline-secondary" data-open-file="${escapeHtml(file.storage_path)}">열기</button></div>`;
+          }).join('')}`
+        : '';
+      container.innerHTML = materialHtml + photoHtml + rosterScanHtml;
       container.querySelectorAll('[data-open-file]').forEach(function(button) {
         button.addEventListener('click', function() { openStoredFile(button.dataset.openFile); });
       });
@@ -2191,6 +2240,7 @@
         values = validateEventForm();
         validateFiles(document.getElementById('materialFiles').files, 'MATERIAL');
         validateFiles(document.getElementById('photoFiles').files, 'PHOTO');
+        validateFiles(document.getElementById('rosterScanFiles').files, 'ROSTER_SCAN');
       } catch (error) {
         showAlert('formAlert', error.message || '입력 내용을 확인하세요.', 'warning');
         return;
@@ -2250,6 +2300,7 @@
         if (!eventId) throw new Error('저장된 행사 번호를 확인하지 못했습니다.');
         const materialFiles = document.getElementById('materialFiles').files;
         const photoFiles = document.getElementById('photoFiles').files;
+        const rosterScanFiles = document.getElementById('rosterScanFiles').files;
         if (materialFiles.length > 0) {
           showLoading(true, '강의 자료를 업로드하는 중...');
           await uploadEventFiles(eventId, 'MATERIAL', materialFiles);
@@ -2258,18 +2309,25 @@
           showLoading(true, '행사 사진을 업로드하는 중...');
           await uploadEventFiles(eventId, 'PHOTO', photoFiles);
         }
+        if (rosterScanFiles.length > 0) {
+          showLoading(true, '출석부 스캔본을 업로드하는 중...');
+          await uploadEventFiles(eventId, 'ROSTER_SCAN', rosterScanFiles);
+        }
         await loadDashboard(false);
         if (values.type === 'EDUCATION') {
           await openEditEvent(eventId);
           showAlert('formAlert', importingHumanities
             ? '모두의 인문학 교육을 수정한 내용으로 저장하고 연동했습니다.'
-            : '교육을 저장했습니다. 아래 출석 QR과 사진 미리보기를 확인할 수 있습니다.', 'success');
+            : '교육을 저장했습니다. 첨부파일과 출석 QR을 확인할 수 있습니다.', 'success');
         } else {
           eventModalInstance.hide();
           showAlert('pageAlert', '회의 참여 이력을 저장했습니다.', 'success');
         }
       } catch (error) {
         showAlert('formAlert', error?.message || '저장하지 못했습니다.');
+        const alert = document.getElementById('formAlert');
+        document.querySelector('#eventModal .modal-body')?.scrollTo({ top:0, behavior:'smooth' });
+        window.setTimeout(function() { alert?.focus(); }, 180);
       } finally {
         formState.saving = false;
         document.getElementById('saveEventBtn').disabled = false;
