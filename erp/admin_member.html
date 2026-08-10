@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.131
-Change: Prevent duplicate donation/dividend member-search modal backdrops.
+Version: v1.0.132
+Change: Split each member's education and meeting history with attendance counts.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.131';
+window.ADMIN_MEMBER_VERSION = 'v1.0.132';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -184,10 +184,19 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .participation-admin-frame-wrap { min-height:760px; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
 .participation-admin-frame { display:block; width:100%; height:calc(100vh - 175px); min-height:760px; border:0; background:#fff; }
 .admin-participation-history-list { display:flex; flex-direction:column; gap:12px; }
+.admin-participation-history-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:5px; margin-bottom:14px; border-radius:13px; background:#f1f5f9; }
+.admin-participation-history-tab { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; min-height:58px; padding:8px 10px; border:0; border-radius:10px; background:transparent; color:#475569; }
+.admin-participation-history-tab:hover { color:#0f172a; }
+.admin-participation-history-tab.active { background:#fff; color:#0f172a; box-shadow:0 2px 8px rgba(15,23,42,.09); }
+.admin-participation-history-tab:focus-visible { outline:3px solid rgba(37,99,235,.28); outline-offset:2px; }
+.admin-participation-history-tab-label { font-weight:800; }
+.admin-participation-history-tab-count { font-size:.78rem; line-height:1.35; color:#64748b; }
+.admin-participation-history-tab.active .admin-participation-history-tab-count { color:#2563eb; font-weight:700; }
 .admin-participation-history-item { border:1px solid #e2e8f0; border-radius:14px; padding:14px 16px; background:#fff; }
 .admin-participation-history-meta { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:8px; color:#64748b; font-size:.82rem; }
 .admin-participation-status { display:inline-flex; align-items:center; border-radius:999px; padding:4px 9px; font-size:.75rem; font-weight:800; white-space:nowrap; }
 .admin-participation-status-attended { background:#dcfce7; color:#166534; }
+.admin-participation-status-observer { background:#dbeafe; color:#1e40af; }
 .admin-participation-status-absent { background:#fee2e2; color:#991b1b; }
 .admin-participation-status-excused { background:#fff7ed; color:#9a3412; }
 .admin-participation-status-pending { background:#f1f5f9; color:#475569; }
@@ -3048,7 +3057,17 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAdminMemberParticipationHistory(true)">새로고침</button>
 </div>
-<div class="admin-participation-history-list" id="md-participation-list">
+<div class="admin-participation-history-tabs" role="tablist" aria-label="조합원 참여 이력 유형">
+<button type="button" class="admin-participation-history-tab active" id="md-participation-tab-education" role="tab" aria-selected="true" aria-controls="md-participation-list" tabindex="0" onclick="switchAdminMemberParticipationTab('EDUCATION')" onkeydown="handleAdminMemberParticipationTabKeydown(event)">
+<span class="admin-participation-history-tab-label">교육</span>
+<span class="admin-participation-history-tab-count" id="md-participation-education-count">참석 -회</span>
+</button>
+<button type="button" class="admin-participation-history-tab" id="md-participation-tab-meeting" role="tab" aria-selected="false" aria-controls="md-participation-list" tabindex="-1" onclick="switchAdminMemberParticipationTab('MEETING')" onkeydown="handleAdminMemberParticipationTabKeydown(event)">
+<span class="admin-participation-history-tab-label">회의</span>
+<span class="admin-participation-history-tab-count" id="md-participation-meeting-count">참석 -회 · 배석 -회</span>
+</button>
+</div>
+<div class="admin-participation-history-list" id="md-participation-list" role="tabpanel" aria-labelledby="md-participation-tab-education" tabindex="0">
 <div class="text-center text-muted py-5">교육·회의 참여 이력을 불러오려면 이 탭을 선택하세요.</div>
 </div>
 </div>
@@ -10696,6 +10715,8 @@ async function fetchAdminMemberDetailRow(id) {
 }
 
 let adminMemberParticipationLoadedFor = null;
+let adminMemberParticipationData = { events:[] };
+let adminMemberParticipationActiveTab = 'EDUCATION';
 
 function adminMemberParticipationTypeLabel(type) {
     if (type === 'BOARD') return '이사회';
@@ -10703,33 +10724,92 @@ function adminMemberParticipationTypeLabel(type) {
     return '교육';
 } // End of adminMemberParticipationTypeLabel
 
-function adminMemberParticipationStatusLabel(status) {
+function adminMemberParticipationStatusLabel(status, eventType, isTarget) {
+    if (status === 'ATTENDED' && eventType !== 'EDUCATION' && isTarget === false) return '배석';
     if (status === 'ATTENDED') return '참석';
     if (status === 'ABSENT') return '불참';
     if (status === 'EXCUSED') return '사유 불참';
     return '확인 전';
 } // End of adminMemberParticipationStatusLabel
 
-function adminMemberParticipationStatusClass(status) {
+function adminMemberParticipationStatusClass(status, eventType, isTarget) {
+    if (status === 'ATTENDED' && eventType !== 'EDUCATION' && isTarget === false) return 'admin-participation-status-observer';
     if (status === 'ATTENDED') return 'admin-participation-status-attended';
     if (status === 'ABSENT') return 'admin-participation-status-absent';
     if (status === 'EXCUSED') return 'admin-participation-status-excused';
     return 'admin-participation-status-pending';
 } // End of adminMemberParticipationStatusClass
 
+function syncAdminMemberParticipationTabs() {
+    const educationTab = document.getElementById('md-participation-tab-education');
+    const meetingTab = document.getElementById('md-participation-tab-meeting');
+    const educationActive = adminMemberParticipationActiveTab === 'EDUCATION';
+    educationTab?.classList.toggle('active', educationActive);
+    educationTab?.setAttribute('aria-selected', educationActive ? 'true' : 'false');
+    educationTab?.setAttribute('tabindex', educationActive ? '0' : '-1');
+    meetingTab?.classList.toggle('active', !educationActive);
+    meetingTab?.setAttribute('aria-selected', educationActive ? 'false' : 'true');
+    meetingTab?.setAttribute('tabindex', educationActive ? '-1' : '0');
+    document.getElementById('md-participation-list')?.setAttribute(
+        'aria-labelledby',
+        educationActive ? 'md-participation-tab-education' : 'md-participation-tab-meeting'
+    );
+} // End of syncAdminMemberParticipationTabs
+
+function switchAdminMemberParticipationTab(tab) {
+    adminMemberParticipationActiveTab = tab === 'MEETING' ? 'MEETING' : 'EDUCATION';
+    syncAdminMemberParticipationTabs();
+    renderAdminMemberParticipationHistory(adminMemberParticipationData);
+} // End of switchAdminMemberParticipationTab
+
+function handleAdminMemberParticipationTabKeydown(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [
+        document.getElementById('md-participation-tab-education'),
+        document.getElementById('md-participation-tab-meeting')
+    ].filter(Boolean);
+    if (!tabs.length) return;
+    const currentIndex = Math.max(0, tabs.indexOf(event.currentTarget));
+    const targetIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+            ? tabs.length - 1
+            : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
+    const targetTab = tabs[targetIndex]?.id === 'md-participation-tab-meeting' ? 'MEETING' : 'EDUCATION';
+    switchAdminMemberParticipationTab(targetTab);
+    tabs[targetIndex]?.focus();
+} // End of handleAdminMemberParticipationTabKeydown
+
 function renderAdminMemberParticipationHistory(data) {
     const list = document.getElementById('md-participation-list');
     const summary = document.getElementById('md-participation-summary');
     const events = Array.isArray(data?.events) ? data.events : [];
-    const total = Number(data?.total_count || events.length);
-    const attended = Number(data?.attended_count || 0);
-    if (summary) summary.textContent = `전체 ${total.toLocaleString('ko-KR')}건 · 참석 ${attended.toLocaleString('ko-KR')}건`;
+    const educationEvents = events.filter(function(event) { return event.event_type === 'EDUCATION'; });
+    const meetingEvents = events.filter(function(event) { return event.event_type !== 'EDUCATION'; });
+    const educationAttendedCount = educationEvents.filter(function(event) { return String(event.attendance_status) === 'ATTENDED'; }).length;
+    const meetingAttendedCount = meetingEvents.filter(function(event) {
+        return String(event.attendance_status) === 'ATTENDED' && event.is_target !== false;
+    }).length;
+    const meetingObserverCount = meetingEvents.filter(function(event) {
+        return String(event.attendance_status) === 'ATTENDED' && event.is_target === false;
+    }).length;
+    const educationCount = document.getElementById('md-participation-education-count');
+    const meetingCount = document.getElementById('md-participation-meeting-count');
+    if (educationCount) educationCount.textContent = `참석 ${educationAttendedCount.toLocaleString('ko-KR')}회`;
+    if (meetingCount) meetingCount.textContent = `참석 ${meetingAttendedCount.toLocaleString('ko-KR')}회 · 배석 ${meetingObserverCount.toLocaleString('ko-KR')}회`;
+    const visibleEvents = adminMemberParticipationActiveTab === 'EDUCATION' ? educationEvents : meetingEvents;
+    if (summary) {
+        summary.textContent = adminMemberParticipationActiveTab === 'EDUCATION'
+            ? `교육 참석 ${educationAttendedCount.toLocaleString('ko-KR')}회 · 등록 ${educationEvents.length.toLocaleString('ko-KR')}건`
+            : `회의 참석 ${meetingAttendedCount.toLocaleString('ko-KR')}회 · 배석 ${meetingObserverCount.toLocaleString('ko-KR')}회 · 등록 ${meetingEvents.length.toLocaleString('ko-KR')}건`;
+    }
     if (!list) return;
-    if (events.length === 0) {
-        list.innerHTML = '<div class="text-center text-muted py-5">등록된 교육·회의 참여 이력이 없습니다.</div>';
+    if (visibleEvents.length === 0) {
+        list.innerHTML = `<div class="text-center text-muted py-5">등록된 ${adminMemberParticipationActiveTab === 'EDUCATION' ? '교육' : '회의'} 참여 이력이 없습니다.</div>`;
         return;
     }
-    list.innerHTML = events.map(function(event) {
+    list.innerHTML = visibleEvents.map(function(event) {
         const status = String(event.attendance_status || 'PENDING');
         const timeText = event.ends_at
             ? `${formatAdminMemberKstDateTime(event.starts_at)} ~ ${formatAdminMemberKstDateTime(event.ends_at)}`
@@ -10749,7 +10829,7 @@ function renderAdminMemberParticipationHistory(data) {
             <article class="admin-participation-history-item">
                 <div class="d-flex justify-content-between align-items-start gap-2">
                     <div><div class="small text-muted mb-1">${escapeHtml(adminMemberParticipationTypeLabel(event.event_type))}</div><div class="fw-bold">${escapeHtml(event.title || '-')}</div></div>
-                    <span class="admin-participation-status ${adminMemberParticipationStatusClass(status)}">${adminMemberParticipationStatusLabel(status)}</span>
+                    <span class="admin-participation-status ${adminMemberParticipationStatusClass(status, event.event_type, event.is_target)}">${adminMemberParticipationStatusLabel(status, event.event_type, event.is_target)}</span>
                 </div>
                 <div class="admin-participation-history-meta"><span>🗓️ ${escapeHtml(timeText)}</span><span>📍 ${escapeHtml(event.location || '-')}</span>${event.role_snapshot ? `<span>직책 ${escapeHtml(event.role_snapshot)}</span>` : ''}</div>
                 ${educationHtml}${actualAttendeeHtml}${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
@@ -10770,7 +10850,8 @@ async function loadAdminMemberParticipationHistory(forceReload = false) {
         if (error) throw error;
         if (String(g_current_member_id) !== String(memberUuid)) return;
         adminMemberParticipationLoadedFor = memberUuid;
-        renderAdminMemberParticipationHistory(data || {});
+        adminMemberParticipationData = data || { events:[] };
+        renderAdminMemberParticipationHistory(adminMemberParticipationData);
     } catch (error) {
         console.error('loadAdminMemberParticipationHistory failed:', error);
         summary.textContent = '조회 실패';
@@ -10803,10 +10884,17 @@ async function openMemberDetail(id) {
     g_current_member_id = memberUid;
     g_current_member_row = m;
     adminMemberParticipationLoadedFor = null;
+    adminMemberParticipationData = { events:[] };
+    adminMemberParticipationActiveTab = 'EDUCATION';
+    syncAdminMemberParticipationTabs();
     const participationSummaryEl = document.getElementById('md-participation-summary');
     const participationListEl = document.getElementById('md-participation-list');
+    const participationEducationCountEl = document.getElementById('md-participation-education-count');
+    const participationMeetingCountEl = document.getElementById('md-participation-meeting-count');
     if (participationSummaryEl) participationSummaryEl.textContent = '탭을 선택하면 불러옵니다.';
     if (participationListEl) participationListEl.innerHTML = '<div class="text-center text-muted py-5">교육·회의 참여 이력을 불러오려면 이 탭을 선택하세요.</div>';
+    if (participationEducationCountEl) participationEducationCountEl.textContent = '참석 -회';
+    if (participationMeetingCountEl) participationMeetingCountEl.textContent = '참석 -회 · 배석 -회';
 
     // 2. UI 초기화 & 데이터 바인딩
     document.getElementById('md-uid').value = memberUid;
