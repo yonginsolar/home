@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.0
-Change: Add multi-select land categories, custom area range, and admin candidate reviews.
+Version: v1.3.0
+Change: Add on-demand Yongin public-land search for city, province, and national land.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.0 | map.html | municipal-land-reviews-20260810');</script>
+  <script>console.log('[Version] v1.3.0 | map.html | on-demand-public-land-search-20260810');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>경기 태양광 부지 분석 (Full Version)</title>
@@ -41,7 +41,7 @@ Change: Add multi-select land categories, custom area range, and admin candidate
         .search-input { border: none; outline: none; flex: 1; font-size: 15px; cursor: pointer; }
 
         /* 레이어 컨트롤 (우측) */
-        .layer-control { top: 70px; right: 10px; width: 260px; max-height: 75vh; overflow-y: auto; padding: 15px; }
+        .layer-control { top: 70px; right: 10px; width: 300px; max-height: 78vh; overflow-y: auto; padding: 15px; }
         .layer-control h4 { margin: 0 0 12px; font-size: 15px; font-weight: 700; border-bottom: 2px solid #222; padding-bottom: 8px; }
         
         details { margin-bottom: 8px; border-bottom: 1px solid #f0f0f0; padding-bottom: 5px; }
@@ -60,23 +60,40 @@ Change: Add multi-select land categories, custom area range, and admin candidate
         .city-land-filter label { display: block; margin-bottom: 3px; font-size: 11px; font-weight: 700; color: #315541; }
         .city-land-filter-label { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 700; color: #315541; }
         .city-land-filter select { width: 100%; padding: 7px 8px; border: 1px solid #bdd6c6; border-radius: 5px; background: #fff; color: #22362a; font-size: 12px; }
-        .city-land-category-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 6px; }
-        .city-land-category-grid label { display: flex; align-items: center; gap: 5px; min-height: 28px; margin: 0; padding: 4px 6px; border: 1px solid #d7e8dd; border-radius: 5px; background: #fff; font-weight: 500; cursor: pointer; }
-        .city-land-category-grid input { margin: 0; }
+        .city-land-checkbox-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 6px; }
+        .city-land-checkbox-grid label { display: flex; align-items: center; gap: 5px; min-height: 28px; margin: 0; padding: 4px 6px; border: 1px solid #d7e8dd; border-radius: 5px; background: #fff; font-weight: 500; cursor: pointer; }
+        .city-land-checkbox-grid input { margin: 0; }
+        .city-land-owner-grid label { grid-column: span 2; }
+        .city-land-owner-count { margin-left: auto; color: #6c7b72; font-size: 10px; white-space: nowrap; }
+        .city-land-owner-dot { width: 9px; height: 9px; flex: 0 0 9px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.12); }
+        .city-land-owner-dot.city { background: #178f4c; }
+        .city-land-owner-dot.province { background: #2f6fd0; }
+        .city-land-owner-dot.national { background: #7a4fc2; }
         .city-land-area-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 5px; align-items: center; }
         .city-land-area-range input { width: 100%; min-width: 0; padding: 7px 6px; border: 1px solid #bdd6c6; border-radius: 5px; background: #fff; color: #22362a; font-size: 12px; }
         .city-land-area-range span { color: #52705d; font-size: 12px; }
         .city-land-review-help { margin-top: 8px; padding: 7px; border-radius: 5px; background: #eef1ef; color: #58635c; font-size: 11px; line-height: 1.4; word-break: keep-all; }
         .city-land-boundary-toggle { display: flex; align-items: center; margin-top: 9px; font-size: 11px; color: #315541; cursor: pointer; }
         .city-land-boundary-toggle input { margin-right: 7px; }
-        .city-land-actions { display: flex; gap: 6px; margin-top: 9px; }
+        .city-land-large-warning { margin-top: 8px; padding: 8px; border: 1px solid #e7b45d; border-radius: 6px; background: #fff7e8; color: #79501b; font-size: 11px; line-height: 1.45; word-break: keep-all; }
+        .city-land-large-warning[hidden] { display: none; }
+        .city-land-large-warning label { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; font-weight: 700; cursor: pointer; }
+        .city-land-large-warning input { margin-top: 2px; }
+        .city-land-actions { display: grid; grid-template-columns: 1.35fr 1fr; gap: 6px; margin-top: 9px; }
         .city-land-actions button { width: 100%; padding: 7px; border: 1px solid #178f4c; border-radius: 5px; background: #fff; color: #146b3a; font-size: 11px; font-weight: 700; cursor: pointer; }
         .city-land-actions button:hover { background: #e8f6ed; }
+        .city-land-actions button.primary { background: #178f4c; color: #fff; }
+        .city-land-actions button.primary:hover { background: #11723c; }
+        .city-land-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
         .city-land-status { margin-top: 8px; padding: 7px; border-radius: 5px; background: #e8f6ed; color: #235d3a; font-size: 11px; line-height: 1.4; word-break: keep-all; }
         .city-land-status.error { background: #fff0f0; color: #a12f2f; }
+        .city-land-status.warning { background: #fff7e8; color: #79501b; }
         .city-land-marker { background: transparent; border: none; }
         .city-land-marker-dot { display: block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; background: #e2a300; box-shadow: 0 1px 5px rgba(0,0,0,0.45); }
-        .city-land-marker-dot.priority { background: #178f4c; }
+        .city-land-marker-dot.owner-city { background: #178f4c; }
+        .city-land-marker-dot.owner-province { background: #2f6fd0; }
+        .city-land-marker-dot.owner-national { background: #7a4fc2; }
+        .city-land-marker-dot.priority { outline: 2px solid rgba(226, 163, 0, 0.9); outline-offset: 1px; }
         .city-land-marker-dot.excluded { background: #8a918c; box-shadow: 0 1px 5px rgba(0,0,0,0.32); }
         .city-land-cluster { background: rgba(23, 143, 76, 0.25); }
         .city-land-cluster div { background: rgba(23, 143, 76, 0.82); color: #fff; }
@@ -191,56 +208,71 @@ Change: Add multi-select land categories, custom area range, and admin candidate
     <div class="ui-box layer-control">
         <h4>🗺️ 태양광 부지 분석 데이터</h4>
         <details open class="city-land-details">
-            <summary>🏛️ 용인시 시유지 후보</summary>
+            <summary>🏛️ 용인시 국공유지 후보 검색</summary>
             <div class="layer-item">
-                <label><span class="chip chip-green"></span><input id="cityLandLayerToggle" type="checkbox" onchange="toggleMunicipalLandLayer(this)"> 1차 후보 2,982필지</label>
+                <label><span class="chip chip-green"></span><input id="cityLandLayerToggle" type="checkbox" onchange="togglePublicLandSearch(this)"> 검색 조건 열기</label>
             </div>
-            <p class="city-land-notice">소유자 원문이 ‘용인시’인 공개 필지 중 현장조사 우선 대상을 표시합니다. 설치 가능 확정 자료가 아닙니다.</p>
+            <p class="city-land-notice">용인시 관내 용인시유지·경기도유지·국유지의 1차 조사 후보입니다. 조건을 선택하고 검색해야 지도 데이터를 불러옵니다.</p>
             <div id="cityLandControls" class="city-land-controls" hidden>
                 <div class="city-land-filter">
-                    <label for="cityLandDistrictFilter">지역</label>
-                    <select id="cityLandDistrictFilter" onchange="applyMunicipalLandFilters()">
-                        <option value="all">3개 구 전체</option>
-                        <option value="처인구">처인구</option>
-                        <option value="기흥구">기흥구</option>
-                        <option value="수지구">수지구</option>
-                    </select>
+                    <span id="cityLandOwnerLabel" class="city-land-filter-label">소유구분(복수 선택)</span>
+                    <div id="cityLandOwnerFilter" class="city-land-checkbox-grid city-land-owner-grid" role="group" aria-labelledby="cityLandOwnerLabel">
+                        <label><input type="checkbox" value="city" checked onchange="markPublicLandSearchDirty()"><span class="city-land-owner-dot city"></span>용인시유지 <span class="city-land-owner-count" data-owner-count="city">2,982필지</span></label>
+                        <label><input type="checkbox" value="province" onchange="markPublicLandSearchDirty()"><span class="city-land-owner-dot province"></span>경기도유지 <span class="city-land-owner-count" data-owner-count="province">확인 중</span></label>
+                        <label><input type="checkbox" value="national" onchange="markPublicLandSearchDirty()"><span class="city-land-owner-dot national"></span>국유지 <span class="city-land-owner-count" data-owner-count="national">확인 중</span></label>
+                    </div>
+                </div>
+                <div class="city-land-filter">
+                    <span id="cityLandDistrictLabel" class="city-land-filter-label">지역(복수 선택)</span>
+                    <div id="cityLandDistrictFilter" class="city-land-checkbox-grid" role="group" aria-labelledby="cityLandDistrictLabel">
+                        <label><input type="checkbox" value="all" checked onchange="handlePublicLandCheckboxChange(this, 'cityLandDistrictFilter')">전체</label>
+                        <label><input type="checkbox" value="처인구" onchange="handlePublicLandCheckboxChange(this, 'cityLandDistrictFilter')">처인구</label>
+                        <label><input type="checkbox" value="기흥구" onchange="handlePublicLandCheckboxChange(this, 'cityLandDistrictFilter')">기흥구</label>
+                        <label><input type="checkbox" value="수지구" onchange="handlePublicLandCheckboxChange(this, 'cityLandDistrictFilter')">수지구</label>
+                    </div>
                 </div>
                 <div class="city-land-filter">
                     <span id="cityLandCategoryLabel" class="city-land-filter-label">지목(복수 선택)</span>
-                    <div id="cityLandCategoryFilter" class="city-land-category-grid" role="group" aria-labelledby="cityLandCategoryLabel">
-                        <label><input type="checkbox" value="all" checked onchange="handleMunicipalLandCategoryChange(this)"> 전체</label>
-                        <label><input type="checkbox" value="주차장" onchange="handleMunicipalLandCategoryChange(this)"> 주차장</label>
-                        <label><input type="checkbox" value="잡종지" onchange="handleMunicipalLandCategoryChange(this)"> 잡종지</label>
-                        <label><input type="checkbox" value="대" onchange="handleMunicipalLandCategoryChange(this)"> 대</label>
-                        <label><input type="checkbox" value="체육용지" onchange="handleMunicipalLandCategoryChange(this)"> 체육용지</label>
-                        <label><input type="checkbox" value="공장용지" onchange="handleMunicipalLandCategoryChange(this)"> 공장용지</label>
-                        <label><input type="checkbox" value="창고용지" onchange="handleMunicipalLandCategoryChange(this)"> 창고용지</label>
-                        <label><input type="checkbox" value="도로" onchange="handleMunicipalLandCategoryChange(this)"> 도로</label>
-                        <label><input type="checkbox" value="공원" onchange="handleMunicipalLandCategoryChange(this)"> 공원</label>
-                        <label><input type="checkbox" value="other" onchange="handleMunicipalLandCategoryChange(this)"> 기타</label>
+                    <div id="cityLandCategoryFilter" class="city-land-checkbox-grid" role="group" aria-labelledby="cityLandCategoryLabel">
+                        <label><input type="checkbox" value="all" checked onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">전체</label>
+                        <label><input type="checkbox" value="주차장" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">주차장</label>
+                        <label><input type="checkbox" value="잡종지" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">잡종지</label>
+                        <label><input type="checkbox" value="대" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">대</label>
+                        <label><input type="checkbox" value="체육용지" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">체육용지</label>
+                        <label><input type="checkbox" value="공장용지" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">공장용지</label>
+                        <label><input type="checkbox" value="창고용지" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">창고용지</label>
+                        <label><input type="checkbox" value="도로" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">도로</label>
+                        <label><input type="checkbox" value="공원" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">공원</label>
+                        <label><input type="checkbox" value="other" onchange="handlePublicLandCheckboxChange(this, 'cityLandCategoryFilter')">기타</label>
                     </div>
                 </div>
                 <div class="city-land-filter">
                     <span class="city-land-filter-label">면적 범위(㎡)</span>
                     <div class="city-land-area-range">
-                        <input id="cityLandMinimumArea" type="number" min="0" step="0.1" inputmode="decimal" placeholder="최소" aria-label="최소 면적" oninput="scheduleMunicipalLandFilters()" onchange="applyMunicipalLandFilters()">
+                        <input id="cityLandMinimumArea" type="number" min="0" step="0.1" inputmode="decimal" placeholder="최소" aria-label="최소 면적" oninput="markPublicLandSearchDirty()">
                         <span>~</span>
-                        <input id="cityLandMaximumArea" type="number" min="0" step="0.1" inputmode="decimal" placeholder="최대" aria-label="최대 면적" oninput="scheduleMunicipalLandFilters()" onchange="applyMunicipalLandFilters()">
+                        <input id="cityLandMaximumArea" type="number" min="0" step="0.1" inputmode="decimal" placeholder="최대" aria-label="최대 면적" oninput="markPublicLandSearchDirty()">
                     </div>
                 </div>
                 <div class="city-land-filter">
                     <label for="cityLandPriorityFilter">검토 우선순위</label>
-                    <select id="cityLandPriorityFilter" onchange="applyMunicipalLandFilters()">
+                    <select id="cityLandPriorityFilter" onchange="markPublicLandSearchDirty()">
                         <option value="35">1차 후보 전체</option>
                         <option value="60">점수 60 이상</option>
                         <option value="Y">우선 후보 Y만</option>
                     </select>
                 </div>
-                <label class="city-land-boundary-toggle"><input id="cityLandTop30Toggle" type="checkbox" onchange="applyMunicipalLandFilters()"> 상위 30개 필지 경계 표시</label>
+                <label class="city-land-boundary-toggle"><input id="cityLandTop30Toggle" type="checkbox" onchange="markPublicLandSearchDirty()"> 용인시유지 상위 30개 필지 경계 표시</label>
+                <div id="cityLandLargeScopeWarning" class="city-land-large-warning" hidden>
+                    <div id="cityLandLargeScopeText">선택 범위가 커서 많은 필지를 불러올 수 있습니다.</div>
+                    <label><input id="cityLandLargeScopeConfirm" type="checkbox"> 많은 필지를 불러올 수 있음을 확인했습니다.</label>
+                </div>
                 <div id="cityLandReviewHelp" class="city-land-review-help" hidden>관리자 검토 기록이 적용됩니다. 추천 제외 필지는 삭제하지 않고 회색으로 계속 표시합니다.</div>
-                <div class="city-land-actions"><button type="button" onclick="fitMunicipalLandResults()">표시 범위로 이동</button></div>
-                <div id="cityLandStatus" class="city-land-status" role="status" aria-live="polite">레이어를 준비하고 있습니다.</div>
+                <div class="city-land-actions">
+                    <button id="cityLandSearchButton" class="primary" type="button" onclick="searchPublicLandCandidates()">선택 조건으로 검색</button>
+                    <button id="cityLandFitButton" type="button" onclick="fitPublicLandResults()" disabled>결과로 이동</button>
+                </div>
+                <div id="cityLandStatus" class="city-land-status" role="status" aria-live="polite">조건을 선택하고 검색을 눌러 주세요.</div>
             </div>
         </details>
         <details open><summary>🚫 규제 요인 (설치 제한)</summary>
@@ -1060,7 +1092,7 @@ function searchAddressForModal() {
 
 
     </script>
-<script src="assets/js/yongin-city-land-map.js?v=20260810-3"></script>
+<script src="assets/js/yongin-city-land-map.js?v=20260810-4"></script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
