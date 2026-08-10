@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.3
-Change: Mark interactive map utility as noindex and add description metadata.
+Version: v1.1.0
+Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 parcel boundaries.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.3 | map.html');</script>
+  <script>console.log('[Version] v1.1.0 | map.html | municipal-land-candidates-20260810');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>경기 태양광 부지 분석 (Full Version)</title>
@@ -51,6 +51,33 @@ Change: Mark interactive map utility as noindex and add description metadata.
         .layer-item input { margin-right: 8px; transform: scale(1.1); }
         .chip { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
         .chip-red { background: #ff4444; } .chip-blue { background: #4444ff; } .chip-yell { background: #ffaa00; }
+        .chip-green { background: #178f4c; }
+        .city-land-details { border: 1px solid #cce6d7; border-radius: 7px; padding: 9px; background: #f6fcf8; }
+        .city-land-details summary { color: #146b3a; }
+        .city-land-notice { margin: 4px 0 8px; font-size: 11px; line-height: 1.45; color: #52645a; word-break: keep-all; }
+        .city-land-controls[hidden] { display: none; }
+        .city-land-filter { margin-top: 7px; }
+        .city-land-filter label { display: block; margin-bottom: 3px; font-size: 11px; font-weight: 700; color: #315541; }
+        .city-land-filter select { width: 100%; padding: 7px 8px; border: 1px solid #bdd6c6; border-radius: 5px; background: #fff; color: #22362a; font-size: 12px; }
+        .city-land-boundary-toggle { display: flex; align-items: center; margin-top: 9px; font-size: 11px; color: #315541; cursor: pointer; }
+        .city-land-boundary-toggle input { margin-right: 7px; }
+        .city-land-actions { display: flex; gap: 6px; margin-top: 9px; }
+        .city-land-actions button { width: 100%; padding: 7px; border: 1px solid #178f4c; border-radius: 5px; background: #fff; color: #146b3a; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .city-land-actions button:hover { background: #e8f6ed; }
+        .city-land-status { margin-top: 8px; padding: 7px; border-radius: 5px; background: #e8f6ed; color: #235d3a; font-size: 11px; line-height: 1.4; word-break: keep-all; }
+        .city-land-status.error { background: #fff0f0; color: #a12f2f; }
+        .city-land-marker { background: transparent; border: none; }
+        .city-land-marker-dot { display: block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; background: #e2a300; box-shadow: 0 1px 5px rgba(0,0,0,0.45); }
+        .city-land-marker-dot.priority { background: #178f4c; }
+        .city-land-cluster { background: rgba(23, 143, 76, 0.25); }
+        .city-land-cluster div { background: rgba(23, 143, 76, 0.82); color: #fff; }
+        .city-land-popup { min-width: 210px; color: #25322b; }
+        .city-land-popup h4 { margin: 0 0 7px; font-size: 14px; line-height: 1.4; word-break: keep-all; }
+        .city-land-popup-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: 12px; }
+        .city-land-popup-row span:first-child { color: #637269; }
+        .city-land-popup-reason { margin-top: 8px; padding: 7px; border-radius: 5px; background: #f2f7f4; font-size: 11px; line-height: 1.45; word-break: keep-all; }
+        .city-land-popup-note { margin-top: 7px; font-size: 10px; line-height: 1.4; color: #758078; word-break: keep-all; }
+        .city-land-popup-action { width: 100%; margin-top: 8px; padding: 7px; border: none; border-radius: 5px; background: #2c3e50; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
 
         /* 추천 목록 패널 (탭 기능 복구) */
         .suggestion-panel { bottom: 30px; left: 20px; width: 340px; max-height: 55vh; display: flex; flex-direction: column; transition: transform 0.3s ease; }
@@ -147,7 +174,59 @@ Change: Mark interactive map utility as noindex and add description metadata.
     <div id="map"></div>
 
     <div class="ui-box layer-control">
-        <h4>🗺️ 기후/규제 분석 데이터</h4>
+        <h4>🗺️ 태양광 부지 분석 데이터</h4>
+        <details open class="city-land-details">
+            <summary>🏛️ 용인시 시유지 후보</summary>
+            <div class="layer-item">
+                <label><span class="chip chip-green"></span><input id="cityLandLayerToggle" type="checkbox" onchange="toggleMunicipalLandLayer(this)"> 1차 후보 2,982필지</label>
+            </div>
+            <p class="city-land-notice">소유자 원문이 ‘용인시’인 공개 필지 중 현장조사 우선 대상을 표시합니다. 설치 가능 확정 자료가 아닙니다.</p>
+            <div id="cityLandControls" class="city-land-controls" hidden>
+                <div class="city-land-filter">
+                    <label for="cityLandDistrictFilter">지역</label>
+                    <select id="cityLandDistrictFilter" onchange="applyMunicipalLandFilters()">
+                        <option value="all">3개 구 전체</option>
+                        <option value="처인구">처인구</option>
+                        <option value="기흥구">기흥구</option>
+                        <option value="수지구">수지구</option>
+                    </select>
+                </div>
+                <div class="city-land-filter">
+                    <label for="cityLandCategoryFilter">지목</label>
+                    <select id="cityLandCategoryFilter" onchange="applyMunicipalLandFilters()">
+                        <option value="all">전체 지목</option>
+                        <option value="주차장">주차장</option>
+                        <option value="잡종지">잡종지</option>
+                        <option value="대">대</option>
+                        <option value="체육용지">체육용지</option>
+                        <option value="공장용지">공장용지</option>
+                        <option value="창고용지">창고용지</option>
+                        <option value="도로">도로</option>
+                        <option value="공원">공원</option>
+                    </select>
+                </div>
+                <div class="city-land-filter">
+                    <label for="cityLandAreaFilter">최소 면적</label>
+                    <select id="cityLandAreaFilter" onchange="applyMunicipalLandFilters()">
+                        <option value="0">제한 없음</option>
+                        <option value="1000">1,000㎡ 이상</option>
+                        <option value="3000">3,000㎡ 이상</option>
+                        <option value="5000">5,000㎡ 이상</option>
+                    </select>
+                </div>
+                <div class="city-land-filter">
+                    <label for="cityLandPriorityFilter">검토 우선순위</label>
+                    <select id="cityLandPriorityFilter" onchange="applyMunicipalLandFilters()">
+                        <option value="35">1차 후보 전체</option>
+                        <option value="60">점수 60 이상</option>
+                        <option value="Y">우선 후보 Y만</option>
+                    </select>
+                </div>
+                <label class="city-land-boundary-toggle"><input id="cityLandTop30Toggle" type="checkbox" onchange="applyMunicipalLandFilters()"> 상위 30개 필지 경계 표시</label>
+                <div class="city-land-actions"><button type="button" onclick="fitMunicipalLandResults()">표시 범위로 이동</button></div>
+                <div id="cityLandStatus" class="city-land-status" role="status" aria-live="polite">레이어를 준비하고 있습니다.</div>
+            </div>
+        </details>
         <details open><summary>🚫 규제 요인 (설치 제한)</summary>
             <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('slope_15', this)"> 경사도 15도 이상</label></div>
             <div class="layer-item"><label><span class="chip chip-red"></span><input type="checkbox" onchange="toggleLayer('landslide', this)"> 산사태 1등급</label></div>
@@ -305,13 +384,18 @@ Change: Mark interactive map utility as noindex and add description metadata.
         }
 
 window.onload = function() {
-    // [추가] 카카오 라이브러리 로드 후 Geocoder 객체 생성
-    kakao.maps.load(function() {
-        kakaoGeocoder = new kakao.maps.services.Geocoder();
-    });
-    
+    // 지도와 공개 데이터는 주소 검색 SDK 상태와 무관하게 먼저 사용할 수 있어야 한다.
     initMap();
     fetchAndRenderSuggestions();
+
+    // 카카오 SDK가 허용된 도메인에서 정상 로드됐을 때만 주소 검색을 활성화한다.
+    if (window.kakao?.maps?.load && window.kakao?.maps?.services?.Geocoder) {
+        kakao.maps.load(function() {
+            kakaoGeocoder = new kakao.maps.services.Geocoder();
+        });
+    } else {
+        console.warn('[Map] 카카오 주소 검색 SDK를 사용할 수 없어 지도 기능만 시작합니다.');
+    }
 };
         
 
@@ -339,6 +423,7 @@ window.onload = function() {
                 zoom: 13,
                 layers: [vworldBase] // 기본: 일반 지도
             });
+            window.yonginSolarMap = map;
 
             // 우측 상단 배경지도 전환 컨트롤
             const baseMaps = {
@@ -958,6 +1043,7 @@ function searchAddressForModal() {
 
 
     </script>
+<script src="assets/js/yongin-city-land-map.js?v=20260810-1"></script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
