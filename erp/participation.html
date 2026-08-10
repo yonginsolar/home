@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.10 | Change: 2026-08-10 - Add roster scans and normalize upload MIME types. -->
+<!-- Version: v1.3.11 | Change: 2026-08-10 - Use ASCII-only Storage object keys for uploaded files. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.10 | participation.html');</script>
+  <script>console.log('[Version] v1.3.11 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2008,7 +2008,15 @@
     function safeStorageFileName(fileName) {
       const normalized = String(fileName || 'file').normalize('NFC');
       const extension = normalized.includes('.') ? `.${normalized.split('.').pop().toLowerCase()}` : '';
-      const base = normalized.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9가-힣_-]+/g, '_').slice(0, 80) || 'file';
+      const base = normalized
+        .replace(/\.[^.]+$/, '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\x00-\x7F]/g, '_')
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^[-_]+|[-_]+$/g, '')
+        .slice(0, 80) || 'file';
       return `${base}${extension}`;
     } // End of safeStorageFileName
 
@@ -2036,6 +2044,9 @@
       }
       if (/row-level security|permission|not authorized|unauthorized/i.test(message)) {
         return `${fileName}: 현재 계정의 교육 파일 업로드 권한을 확인하지 못했습니다.`;
+      }
+      if (/invalid.?key/i.test(message)) {
+        return `${fileName}: 안전한 내부 파일 경로를 만들지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.`;
       }
       return `${fileName}: 업로드하지 못했습니다.${message ? ` (${message})` : ''}`;
     } // End of uploadErrorMessage
