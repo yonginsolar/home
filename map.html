@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.3.0
-Change: Add on-demand Yongin public-land search for city, province, and national land.
+Version: v1.4.0
+Change: Separate official PNU parcel addresses from reference reverse-geocoded map-click addresses.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.0 | map.html | on-demand-public-land-search-20260810');</script>
+  <script>console.log('[Version] v1.4.0 | map.html | official-pnu-address-clarity-20260810');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>경기 태양광 부지 분석 (Full Version)</title>
@@ -98,6 +98,7 @@ Change: Add on-demand Yongin public-land search for city, province, and national
         .city-land-cluster { background: rgba(23, 143, 76, 0.25); }
         .city-land-cluster div { background: rgba(23, 143, 76, 0.82); color: #fff; }
         .city-land-popup { min-width: 210px; color: #25322b; }
+        .city-land-popup-address-label { margin-bottom: 3px; color: #2f6fd0; font-size: 11px; font-weight: 800; }
         .city-land-popup h4 { margin: 0 0 7px; font-size: 14px; line-height: 1.4; word-break: keep-all; }
         .city-land-popup-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: 12px; }
         .city-land-popup-row span:first-child { color: #637269; }
@@ -110,6 +111,12 @@ Change: Add on-demand Yongin public-land search for city, province, and national
         .city-land-review-save { width: 100%; margin-top: 7px; padding: 7px; border: none; border-radius: 5px; background: #58635c; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
         .city-land-review-save:disabled { opacity: 0.55; cursor: wait; }
         .city-land-review-message { min-height: 16px; margin-top: 5px; color: #52645a; font-size: 11px; line-height: 1.35; }
+        .map-click-popup { min-width: 220px; max-width: 280px; padding: 3px; color: #25322b; }
+        .map-click-popup h4 { margin: 0 0 7px; font-size: 14px; line-height: 1.4; }
+        .map-click-popup-row { margin-top: 6px; font-size: 12px; line-height: 1.45; word-break: keep-all; }
+        .map-click-popup-row span { display: block; color: #637269; font-size: 11px; font-weight: 700; }
+        .map-click-popup-note { margin-top: 8px; padding: 7px; border-radius: 5px; background: #fff7e8; color: #79501b; font-size: 11px; line-height: 1.45; word-break: keep-all; }
+        .map-click-popup-action { width: 100%; margin-top: 8px; padding: 7px; border: none; border-radius: 5px; background: #2c3e50; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
 
         /* 추천 목록 패널 (탭 기능 복구) */
         .suggestion-panel { bottom: 30px; left: 20px; width: 340px; max-height: 55vh; display: flex; flex-direction: column; transition: transform 0.3s ease; }
@@ -432,6 +439,77 @@ Change: Add on-demand Yongin public-land search for city, province, and national
                 .replace(/'/g, '&#39;');
         }
 
+        function clearMapClickSelection() {
+            if (tempMarker && map?.hasLayer(tempMarker)) map.removeLayer(tempMarker);
+            tempMarker = null;
+        }
+        window.clearMapClickSelection = clearMapClickSelection;
+
+        function lookupReferenceAddress(lat, lng) {
+            return new Promise((resolve, reject) => {
+                if (!kakaoGeocoder || !window.kakao?.maps?.services?.Status) {
+                    reject(new Error('카카오 주소 변환 서비스가 아직 준비되지 않았습니다.'));
+                    return;
+                }
+                kakaoGeocoder.coord2Address(lng, lat, function(result, status) {
+                    if (status !== window.kakao.maps.services.Status.OK || !result?.length) {
+                        reject(new Error('선택한 좌표의 주소를 확인하지 못했습니다.'));
+                        return;
+                    }
+                    const first = result[0] || {};
+                    resolve({
+                        jibunAddress: first.address?.address_name || '',
+                        roadAddress: first.road_address?.address_name || ''
+                    });
+                });
+            });
+        }
+
+        function buildMapClickPopup(lat, lng, addressInfo) {
+            const popupEl = document.createElement('div');
+            popupEl.className = 'map-click-popup';
+
+            const titleEl = document.createElement('h4');
+            titleEl.textContent = '지도에서 선택한 위치';
+            popupEl.appendChild(titleEl);
+
+            if (addressInfo.jibunAddress) {
+                const jibunRow = document.createElement('div');
+                jibunRow.className = 'map-click-popup-row';
+                const label = document.createElement('span');
+                label.textContent = '좌표 변환 지번주소';
+                jibunRow.append(label, document.createTextNode(addressInfo.jibunAddress));
+                popupEl.appendChild(jibunRow);
+            }
+
+            if (addressInfo.roadAddress) {
+                const roadRow = document.createElement('div');
+                roadRow.className = 'map-click-popup-row';
+                const label = document.createElement('span');
+                label.textContent = '좌표 변환 도로명주소';
+                roadRow.append(label, document.createTextNode(addressInfo.roadAddress));
+                popupEl.appendChild(roadRow);
+            }
+
+            const noteEl = document.createElement('div');
+            noteEl.className = 'map-click-popup-note';
+            noteEl.textContent = '카카오 주소 서비스의 좌표 변환 결과로 참고용입니다. 국공유지 후보 마커의 공식 PNU 지번과는 별도로 확인해 주세요.';
+            popupEl.appendChild(noteEl);
+
+            const registrationAddress = addressInfo.jibunAddress || addressInfo.roadAddress;
+            const btnEl = document.createElement('button');
+            btnEl.type = 'button';
+            btnEl.className = 'map-click-popup-action';
+            btnEl.textContent = '이 위치를 사용자 추천으로 등록';
+            btnEl.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                openRegModalWithLoc(lat, lng, registrationAddress);
+            });
+            popupEl.appendChild(btnEl);
+            return popupEl;
+        }
+
 window.onload = function() {
     // 지도와 공개 데이터는 주소 검색 SDK 상태와 무관하게 먼저 사용할 수 있어야 한다.
     initMap();
@@ -485,50 +563,26 @@ window.onload = function() {
             clusterGroup = L.markerClusterGroup();
             map.addLayer(clusterGroup);
 
-            // [이벤트] 지도 클릭 시 핀 찍기 및 주소 확인
+            // [이벤트] 지도 빈 곳 클릭 시 참고용 좌표 변환 주소 확인
             map.on('click', async function(e) {
                 const { lat, lng } = e.latlng;
-                
-                if (tempMarker) map.removeLayer(tempMarker);
-                tempMarker = L.marker([lat, lng]).addTo(map).bindPopup("주소 확인 중...").openPopup();
+                clearMapClickSelection();
+                const selectedMarker = L.marker([lat, lng], { bubblingMouseEvents: false })
+                    .addTo(map)
+                    .bindPopup('참고 주소 확인 중...')
+                    .openPopup();
+                tempMarker = selectedMarker;
 
                 try {
-                    // OSM Nominatim 역지오코딩 (무료)
-                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
-                    const data = await res.json();
-                    const addr = data.display_name;
-                    
-                    const popupEl = document.createElement('div');
-                    popupEl.style.textAlign = 'center';
-                    popupEl.style.padding = '5px';
-
-                    const titleEl = document.createElement('strong');
-                    titleEl.textContent = '선택한 위치';
-
-                    const addrEl = document.createElement('span');
-                    addrEl.textContent = addr;
-
-                    const btnEl = document.createElement('button');
-                    btnEl.type = 'button';
-                    btnEl.textContent = '여기 등록하기';
-                    btnEl.style.marginTop = '8px';
-                    btnEl.style.padding = '5px 10px';
-                    btnEl.style.cursor = 'pointer';
-                    btnEl.style.background = '#2c3e50';
-                    btnEl.style.color = 'white';
-                    btnEl.style.border = 'none';
-                    btnEl.style.borderRadius = '4px';
-                    btnEl.addEventListener('click', () => openRegModalWithLoc(lat, lng, addr));
-
-                    popupEl.appendChild(titleEl);
-                    popupEl.appendChild(document.createElement('br'));
-                    popupEl.appendChild(addrEl);
-                    popupEl.appendChild(document.createElement('br'));
-                    popupEl.appendChild(btnEl);
-
-                    tempMarker.setPopupContent(popupEl);
+                    const addressInfo = await lookupReferenceAddress(lat, lng);
+                    if (tempMarker !== selectedMarker || !map.hasLayer(selectedMarker)) return;
+                    selectedMarker.setPopupContent(buildMapClickPopup(lat, lng, addressInfo));
                 } catch(err) {
-                    tempMarker.setPopupContent("주소를 가져올 수 없습니다.");
+                    if (tempMarker !== selectedMarker || !map.hasLayer(selectedMarker)) return;
+                    const message = document.createElement('div');
+                    message.className = 'map-click-popup-note';
+                    message.textContent = `${err?.message || '주소를 가져올 수 없습니다.'} 지도에서 다시 선택해 주세요.`;
+                    selectedMarker.setPopupContent(message);
                 }
             });
         }
@@ -1092,7 +1146,7 @@ function searchAddressForModal() {
 
 
     </script>
-<script src="assets/js/yongin-city-land-map.js?v=20260810-4"></script>
+<script src="assets/js/yongin-city-land-map.js?v=20260810-5"></script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>

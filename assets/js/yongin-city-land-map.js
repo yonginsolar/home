@@ -1,5 +1,5 @@
 /*
- * Version: v1.2.0
+ * Version: v1.3.0
  * On-demand Yongin public-land solar candidate search for map.html.
  */
 (function () {
@@ -235,9 +235,12 @@
         const container = document.createElement('div');
         container.className = 'city-land-popup';
 
+        const addressLabel = document.createElement('div');
+        addressLabel.className = 'city-land-popup-address-label';
+        addressLabel.textContent = '공식 지번 · PNU 기준';
         const title = document.createElement('h4');
         title.textContent = properties.address || '용인시 국공유지 후보';
-        container.appendChild(title);
+        container.append(addressLabel, title);
         container.appendChild(popupRow('소유구분', properties.owner_type || '미확인'));
         container.appendChild(popupRow('소유기관', properties.owner_label || '미확인'));
         if (properties.manager) container.appendChild(popupRow('관리기관', properties.manager));
@@ -253,7 +256,7 @@
 
         const note = document.createElement('div');
         note.className = 'city-land-popup-note';
-        note.textContent = `공개자료 기준 ${properties.source_date || '2026-08-10'} · 설치 가능 확정이 아닌 조사 우선순위 · 위치는 필지 내부 대표점`;
+        note.textContent = `공개자료 기준 ${properties.source_date || '2026-08-10'} · 주소는 공식 공개 PNU 지번 · 위치는 해당 필지 내부 대표점 · 설치 가능 확정이 아닌 조사 우선순위`;
         container.appendChild(note);
 
         if (state.canReview) {
@@ -519,7 +522,12 @@
                 icon: markerIcon(ownerKey, isPriority, isExcluded),
                 title: properties.address || '용인시 국공유지 후보',
                 keyboard: true,
-                riseOnHover: true
+                riseOnHover: true,
+                bubblingMouseEvents: false
+            });
+            marker.on('click', event => {
+                if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
+                if (typeof window.clearMapClickSelection === 'function') window.clearMapClickSelection();
             });
             marker.bindPopup(() => buildPopup(feature, latLng), { maxWidth: 320 });
             markers.push(marker);
@@ -657,5 +665,5 @@
     window.handlePublicLandCheckboxChange = handlePublicLandCheckboxChange;
     window.searchPublicLandCandidates = searchPublicLandCandidates;
     window.fitPublicLandResults = fitPublicLandResults;
-    console.log('[Version] v1.2.0 | yongin-city-land-map.js | on-demand public-land owner search');
+    console.log('[Version] v1.3.0 | yongin-city-land-map.js | official PNU address clarity');
 })();
