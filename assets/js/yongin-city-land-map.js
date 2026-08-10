@@ -1,5 +1,5 @@
 /*
- * Version: v1.3.0
+ * Version: v1.4.0
  * On-demand Yongin public-land solar candidate search for map.html.
  */
 (function () {
@@ -8,6 +8,7 @@
     const DATA_VERSION = '20260810-3';
     const INDEX_URL = `assets/data/yongin-public-land-index.json?v=${DATA_VERSION}`;
     const TOP30_URL = `assets/data/yongin-city-land-solar-top30.geojson?v=${DATA_VERSION}`;
+    const PARCEL_BOUNDARY_URL = 'https://gris.gg.go.kr:8888/grisgis/rest/services/bdsMap_Cbnd/MapServer/5/query';
     const DATASETS = Object.freeze({
         city: {
             label: '용인시유지',
@@ -41,6 +42,10 @@
         reviewUserId: null,
         clusterGroup: null,
         boundaryGroup: null,
+        focusedBoundaryGroup: null,
+        boundaryCache: new Map(),
+        referenceAddressCache: new Map(),
+        focusedBoundaryPnu: null,
         markerIcons: {},
         markerByPnu: new Map(),
         activeFilters: null,
@@ -49,7 +54,8 @@
         currentExcludedCount: 0,
         visibleBounds: null,
         pendingLargeSignature: null,
-        searchDirty: true
+        searchDirty: true,
+        resultMode: 'filter'
     };
 
     function getMap() {
@@ -90,6 +96,7 @@
             });
         }
         if (!state.boundaryGroup) state.boundaryGroup = L.layerGroup();
+        if (!state.focusedBoundaryGroup) state.focusedBoundaryGroup = L.layerGroup();
     }
 
     function validateFeatureCollection(payload, expectedGeometry) {
@@ -228,6 +235,49 @@
         return row;
     }
 
+    function compactAddress(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/대한민국|경기도/g, '')
+            .replace(/[\s,()]/g, '');
+    }
+
+    function officialParcelKey(address) {
+        const match = String(address || '').match(/([^\s]+(?:동|리|가))\s+(산\s*)?(\d+(?:-\d+)?)/);
+        if (!match) return '';
+        return compactAddress(`${match[1]}${match[2] || ''}${match[3]}`);
+    }
+
+    function appendReferenceAddressCheck(container, feature, latLng) {
+        if (!latLng || typeof window.lookupMapReferenceAddress !== 'function') return;
+        const check = document.createElement('div');
+        check.className = 'city-land-address-check';
+        check.textContent = '일반 주소 서비스의 참고 결과와 대조하는 중입니다.';
+        container.appendChild(check);
+
+        const cacheKey = `${Number(latLng.lat).toFixed(7)},${Number(latLng.lng).toFixed(7)}`;
+        if (!state.referenceAddressCache.has(cacheKey)) {
+            state.referenceAddressCache.set(cacheKey, Promise.resolve(window.lookupMapReferenceAddress(latLng.lat, latLng.lng)));
+        }
+        state.referenceAddressCache.get(cacheKey)
+            .then(addressInfo => {
+                const officialAddress = feature?.properties?.address || '';
+                const officialKey = officialParcelKey(officialAddress);
+                const referenceAddress = addressInfo?.jibunAddress || addressInfo?.roadAddress || '';
+                const referenceKey = compactAddress(referenceAddress);
+                const matches = Boolean(officialKey && referenceKey.includes(officialKey));
+                check.classList.toggle('match', matches);
+                check.classList.toggle('mismatch', !matches);
+                check.textContent = matches
+                    ? `일반 주소 참고 결과도 공식 지번과 일치합니다: ${referenceAddress}`
+                    : `일반 주소 참고 결과는 “${referenceAddress || '확인 불가'}”로 공식 지번과 다릅니다. 필지 판단은 위 공식 지번과 공식 경계를 기준으로 해 주세요.`;
+            })
+            .catch(() => {
+                state.referenceAddressCache.delete(cacheKey);
+                check.textContent = '일반 주소 서비스의 참고 결과는 현재 대조할 수 없습니다. 필지 판단은 위 공식 지번과 공식 경계를 기준으로 해 주세요.';
+            });
+    }
+
     function buildPopup(feature, latLng) {
         const properties = feature.properties || {};
         const review = candidateReview(feature);
@@ -258,6 +308,7 @@
         note.className = 'city-land-popup-note';
         note.textContent = `공개자료 기준 ${properties.source_date || '2026-08-10'} · 주소는 공식 공개 PNU 지번 · 위치는 해당 필지 내부 대표점 · 설치 가능 확정이 아닌 조사 우선순위`;
         container.appendChild(note);
+        appendReferenceAddressCheck(container, feature, latLng);
 
         if (state.canReview) {
             const reviewBox = document.createElement('div');
@@ -426,6 +477,216 @@
         return total;
     }
 
+    async function loadParcelBoundary(pnu) {
+        const normalizedPnu = String(pnu || '');
+        if (!/^\d{19}$/.test(normalizedPnu)) throw new Error('공식 필지번호(PNU)가 올바르지 않습니다.');
+        if (state.boundaryCache.has(normalizedPnu)) return state.boundaryCache.get(normalizedPnu);
+
+        const params = new URLSearchParams({
+            where: `PNU='${normalizedPnu}'`,
+            outFields: 'PNU,JIBUN_NM,JIMOK',
+            returnGeometry: 'true',
+            outSR: '4326',
+            f: 'geojson'
+        });
+        const response = await fetch(`${PARCEL_BOUNDARY_URL}?${params.toString()}`, {
+            cache: 'no-store',
+            credentials: 'omit'
+        });
+        if (!response.ok) throw new Error(`공식 필지 경계를 불러오지 못했습니다. (${response.status})`);
+        const payload = await response.json();
+        const boundary = payload?.features?.find(item => {
+            const returnedPnu = String(item?.properties?.PNU || item?.properties?.pnu || '');
+            return returnedPnu === normalizedPnu && String(item?.geometry?.type || '').includes('Polygon');
+        });
+        if (!boundary) throw new Error('공식 연속지적도에서 해당 필지 경계를 찾지 못했습니다.');
+        state.boundaryCache.set(normalizedPnu, boundary);
+        return boundary;
+    }
+
+    async function showFocusedParcelBoundary(feature, options = {}) {
+        const mapInstance = getMap();
+        const pnu = String(feature?.properties?.pnu || '');
+        if (!mapInstance || !/^\d{19}$/.test(pnu)) return false;
+        ensureLayerGroups();
+        state.focusedBoundaryPnu = pnu;
+        state.focusedBoundaryGroup.clearLayers();
+        if (mapInstance.hasLayer(state.focusedBoundaryGroup)) mapInstance.removeLayer(state.focusedBoundaryGroup);
+
+        try {
+            const boundary = await loadParcelBoundary(pnu);
+            if (state.focusedBoundaryPnu !== pnu) return false;
+            const layer = L.geoJSON(boundary, {
+                style: {
+                    color: '#d43b2f',
+                    weight: 4,
+                    opacity: 0.95,
+                    fillColor: '#ffd34d',
+                    fillOpacity: 0.2
+                }
+            });
+            state.focusedBoundaryGroup.addLayer(layer).addTo(mapInstance);
+            if (options.fit !== false && layer.getBounds().isValid()) {
+                mapInstance.fitBounds(layer.getBounds().pad(0.35), { maxZoom: 19, animate: true });
+            }
+            return true;
+        } catch (error) {
+            if (state.focusedBoundaryPnu !== pnu) return false;
+            console.error('[PublicLandBoundary]', error);
+            setStatus(`${feature?.properties?.address || '선택한 필지'} 마커는 표시했지만 공식 필지 경계를 불러오지 못했습니다. 잠시 후 다시 눌러 주세요.`, 'warning');
+            return false;
+        }
+    }
+
+    function normalizedParcelQuery(value) {
+        return compactAddress(value).replace(/[._]/g, '');
+    }
+
+    function parcelMatchScore(feature, rawQuery) {
+        const properties = feature?.properties || {};
+        const pnu = String(properties.pnu || '');
+        const query = normalizedParcelQuery(rawQuery);
+        const pnuQuery = String(rawQuery || '').replace(/\D/g, '');
+        const address = normalizedParcelQuery(properties.address || '');
+        if (/^\d{19}$/.test(pnuQuery) && pnu === pnuQuery) return 0;
+        if (address === query) return 1;
+        if (address.endsWith(query)) return 2;
+        if (address.includes(query)) return 3;
+        if (pnuQuery.length >= 6 && pnu.includes(pnuQuery)) return 4;
+        return Number.POSITIVE_INFINITY;
+    }
+
+    function setKeywordResultsMessage(message, type = 'normal') {
+        const container = document.getElementById('cityLandKeywordResults');
+        if (!container) return;
+        container.replaceChildren();
+        container.hidden = false;
+        container.classList.toggle('error', type === 'error');
+        const summary = document.createElement('div');
+        summary.className = 'city-land-keyword-summary';
+        summary.textContent = message;
+        container.appendChild(summary);
+    }
+
+    function focusedFilters(feature) {
+        return {
+            owners: new Set([feature?.properties?._ownerKey || 'city']),
+            districts: null,
+            categories: null,
+            minimumArea: 0,
+            maximumArea: Number.POSITIVE_INFINITY,
+            invalidAreaRange: false,
+            priority: '35',
+            showTop30: false
+        };
+    }
+
+    async function selectKeywordCandidate(feature) {
+        if (!feature) return;
+        const properties = feature.properties || {};
+        state.resultMode = 'keyword';
+        renderCandidates([feature], focusedFilters(feature));
+        state.searchDirty = false;
+        const marker = state.markerByPnu.get(String(properties.pnu || ''));
+        if (typeof window.clearMapClickSelection === 'function') window.clearMapClickSelection();
+        const boundaryShown = await showFocusedParcelBoundary(feature, { fit: true });
+        if (marker) {
+            const openPopup = () => marker.openPopup();
+            if (state.clusterGroup?.zoomToShowLayer) state.clusterGroup.zoomToShowLayer(marker, openPopup);
+            else openPopup();
+        }
+        setKeywordResultsMessage(boundaryShown
+            ? `선택됨: ${properties.address || properties.pnu} · 빨간 선은 공식 연속지적도 필지 경계입니다.`
+            : `선택됨: ${properties.address || properties.pnu} · 마커는 표시했지만 공식 필지 경계는 불러오지 못했습니다.`);
+    }
+
+    function renderKeywordMatches(matches, totalCount, rawQuery) {
+        const container = document.getElementById('cityLandKeywordResults');
+        if (!container) return;
+        container.replaceChildren();
+        container.hidden = false;
+        container.classList.remove('error');
+        const summary = document.createElement('div');
+        summary.className = 'city-land-keyword-summary';
+        summary.textContent = totalCount > matches.length
+            ? `“${rawQuery}” 검색 결과 ${numberFormat.format(totalCount)}건 중 상위 ${matches.length}건입니다. 읍·면·동과 지번을 함께 입력하면 더 정확합니다.`
+            : `“${rawQuery}” 검색 결과 ${numberFormat.format(totalCount)}건입니다. 정확한 필지를 선택해 주세요.`;
+        container.appendChild(summary);
+        matches.forEach(({ feature }) => {
+            const properties = feature.properties || {};
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'city-land-keyword-result';
+            const title = document.createElement('strong');
+            title.textContent = properties.address || properties.pnu;
+            const meta = document.createElement('span');
+            meta.textContent = `${properties.owner_type || '소유 미확인'} · ${properties.land_category || '지목 미확인'} · ${numberFormat.format(Number(properties.area_sqm || 0))}㎡ · PNU ${properties.pnu}`;
+            button.append(title, meta);
+            button.addEventListener('click', () => selectKeywordCandidate(feature));
+            container.appendChild(button);
+        });
+    }
+
+    async function searchPublicLandByKeyword() {
+        const input = document.getElementById('cityLandParcelKeyword');
+        const button = document.getElementById('cityLandKeywordButton');
+        const toggle = document.getElementById('cityLandLayerToggle');
+        const rawQuery = String(input?.value || '').trim();
+        const normalizedQuery = normalizedParcelQuery(rawQuery);
+        if (!toggle?.checked) return;
+        if (normalizedQuery.length < 3) {
+            setKeywordResultsMessage('읍·면·동을 포함한 지번 또는 19자리 PNU를 세 글자 이상 입력해 주세요.', 'error');
+            input?.focus();
+            return;
+        }
+        if (button) {
+            button.disabled = true;
+            button.textContent = '찾는 중';
+        }
+        setKeywordResultsMessage('용인시 국공유지 공개 후보 전체에서 공식 지번·PNU를 찾는 중입니다.');
+        setStatus('지번 빠른 찾기를 위해 소유구분 3종 데이터를 불러오는 중입니다.');
+        try {
+            await Promise.all([Promise.all(Object.keys(DATASETS).map(loadOwnerData)), ensureReviewAccess()]);
+            const deduplicated = new Map();
+            Object.keys(DATASETS).forEach(ownerKey => {
+                for (const feature of state.candidatesByOwner.get(ownerKey)?.features || []) {
+                    const pnu = String(feature?.properties?.pnu || '');
+                    if (pnu && !deduplicated.has(pnu)) deduplicated.set(pnu, feature);
+                }
+            });
+            const ranked = [...deduplicated.values()]
+                .map(feature => ({ feature, score: parcelMatchScore(feature, rawQuery) }))
+                .filter(item => Number.isFinite(item.score))
+                .sort((left, right) => left.score - right.score
+                    || String(left.feature?.properties?.address || '').localeCompare(String(right.feature?.properties?.address || ''), 'ko'));
+            if (!ranked.length) {
+                clearRenderedResults();
+                setKeywordResultsMessage(`“${rawQuery}”와 일치하는 필지를 공개 후보 데이터에서 찾지 못했습니다. 전체 공식 토지대장이 아니라 1차 조사 후보 데이터임을 참고해 주세요.`, 'error');
+                setStatus('일치하는 공개 후보 필지가 없습니다.', 'warning');
+                return;
+            }
+            const visibleMatches = ranked.slice(0, 20);
+            const bestMatches = ranked.filter(item => item.score === ranked[0].score);
+            renderKeywordMatches(visibleMatches, ranked.length, rawQuery);
+            if (bestMatches.length === 1 && ranked[0].score <= 2) {
+                await selectKeywordCandidate(ranked[0].feature);
+            } else {
+                clearRenderedResults();
+                setStatus(`${numberFormat.format(ranked.length)}개 후보 중 정확한 지번을 선택해 주세요. 아직 지도에는 표시하지 않았습니다.`);
+            }
+        } catch (error) {
+            console.error('[PublicLandKeywordSearch]', error);
+            clearRenderedResults();
+            setKeywordResultsMessage(error?.message || '지번·PNU 검색을 완료하지 못했습니다.', 'error');
+            setStatus(error?.message || '지번·PNU 검색을 완료하지 못했습니다.', 'error');
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = '지번 찾기';
+            }
+        }
+    }
+
     function clearRenderedResults() {
         const mapInstance = getMap();
         if (state.clusterGroup) state.clusterGroup.clearLayers();
@@ -433,12 +694,18 @@
             state.boundaryGroup.clearLayers();
             if (mapInstance?.hasLayer(state.boundaryGroup)) mapInstance.removeLayer(state.boundaryGroup);
         }
+        if (state.focusedBoundaryGroup) {
+            state.focusedBoundaryGroup.clearLayers();
+            if (mapInstance?.hasLayer(state.focusedBoundaryGroup)) mapInstance.removeLayer(state.focusedBoundaryGroup);
+        }
+        state.focusedBoundaryPnu = null;
         state.markerByPnu.clear();
         state.activeFilters = null;
         state.currentFeatures = [];
         state.currentOwnerCounts = new Map();
         state.currentExcludedCount = 0;
         state.visibleBounds = null;
+        state.resultMode = 'filter';
         const fitButton = document.getElementById('cityLandFitButton');
         if (fitButton) fitButton.disabled = true;
     }
@@ -509,6 +776,9 @@
         const ownerCounts = new Map();
         state.clusterGroup.clearLayers();
         state.markerByPnu.clear();
+        state.focusedBoundaryPnu = null;
+        state.focusedBoundaryGroup.clearLayers();
+        if (mapInstance.hasLayer(state.focusedBoundaryGroup)) mapInstance.removeLayer(state.focusedBoundaryGroup);
 
         features.forEach(feature => {
             const coordinates = feature.geometry.coordinates;
@@ -528,6 +798,7 @@
             marker.on('click', event => {
                 if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
                 if (typeof window.clearMapClickSelection === 'function') window.clearMapClickSelection();
+                showFocusedParcelBoundary(feature, { fit: true });
             });
             marker.bindPopup(() => buildPopup(feature, latLng), { maxWidth: 320 });
             markers.push(marker);
@@ -554,7 +825,11 @@
             .join(' · ');
         const reviewSummary = state.canReview ? ` · 추천 제외 ${numberFormat.format(state.currentExcludedCount)}필지(회색)` : '';
         const prefix = ownerSummary ? `${ownerSummary} · ` : '';
-        setStatus(`${prefix}총 ${numberFormat.format(state.currentFeatures.length)}필지 표시${reviewSummary} · 금색 테두리는 우선 검토 후보입니다.`);
+        const clusterSummary = state.currentFeatures.length > 1
+            ? ' · 여러 필지는 확대 전 숫자 원으로 묶이며 숫자 원을 누르면 확대됩니다.'
+            : '';
+        const modeSummary = state.resultMode === 'keyword' ? '지번 빠른 찾기 · ' : '';
+        setStatus(`${modeSummary}${prefix}총 ${numberFormat.format(state.currentFeatures.length)}필지 표시${reviewSummary} · 금색 테두리는 우선 검토 후보입니다.${clusterSummary}`);
     }
 
     function updateVisibleReviewCounts() {
@@ -613,6 +888,7 @@
                 }
             }
             const filteredFeatures = [...deduplicated.values()].filter(feature => matchesFilters(feature, filters));
+            state.resultMode = 'filter';
             renderCandidates(filteredFeatures, filters);
             state.searchDirty = false;
         } catch (error) {
@@ -664,6 +940,7 @@
     window.markPublicLandSearchDirty = markPublicLandSearchDirty;
     window.handlePublicLandCheckboxChange = handlePublicLandCheckboxChange;
     window.searchPublicLandCandidates = searchPublicLandCandidates;
+    window.searchPublicLandByKeyword = searchPublicLandByKeyword;
     window.fitPublicLandResults = fitPublicLandResults;
-    console.log('[Version] v1.3.0 | yongin-city-land-map.js | official PNU address clarity');
+    console.log('[Version] v1.4.0 | yongin-city-land-map.js | parcel keyword search and official boundary');
 })();

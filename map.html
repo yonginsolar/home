@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.4.0
-Change: Separate official PNU parcel addresses from reference reverse-geocoded map-click addresses.
+Version: v1.5.0
+Change: Add official parcel/PNU search, selected parcel boundaries, and address-source mismatch guidance.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.4.0 | map.html | official-pnu-address-clarity-20260810');</script>
+  <script>console.log('[Version] v1.5.0 | map.html | public-land-parcel-search-20260811');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>경기 태양광 부지 분석 (Full Version)</title>
@@ -56,6 +56,19 @@ Change: Separate official PNU parcel addresses from reference reverse-geocoded m
         .city-land-details summary { color: #146b3a; }
         .city-land-notice { margin: 4px 0 8px; font-size: 11px; line-height: 1.45; color: #52645a; word-break: keep-all; }
         .city-land-controls[hidden] { display: none; }
+        .city-land-keyword-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+        .city-land-keyword-search input { width: 100%; min-width: 0; padding: 8px; border: 1px solid #8ab79a; border-radius: 5px; background: #fff; color: #22362a; font-size: 12px; }
+        .city-land-keyword-search button { padding: 7px 10px; border: 1px solid #146b3a; border-radius: 5px; background: #146b3a; color: #fff; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+        .city-land-keyword-search button:disabled { opacity: 0.55; cursor: wait; }
+        .city-land-keyword-help { margin: 5px 0 0; color: #5f7167; font-size: 11px; line-height: 1.4; word-break: keep-all; }
+        .city-land-keyword-results { margin-top: 6px; padding: 6px; border: 1px solid #cce0d3; border-radius: 6px; background: #fff; }
+        .city-land-keyword-results[hidden] { display: none; }
+        .city-land-keyword-results.error { border-color: #e7b2b2; background: #fff6f6; color: #962f2f; }
+        .city-land-keyword-summary { margin: 1px 2px 6px; color: #466151; font-size: 11px; line-height: 1.4; word-break: keep-all; }
+        .city-land-keyword-result { width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d7e8dd; border-radius: 5px; background: #f8fcf9; color: #26382d; text-align: left; cursor: pointer; }
+        .city-land-keyword-result:hover, .city-land-keyword-result:focus-visible { border-color: #178f4c; background: #eef8f1; outline: none; }
+        .city-land-keyword-result strong { display: block; font-size: 11px; line-height: 1.4; word-break: keep-all; }
+        .city-land-keyword-result span { display: block; margin-top: 2px; color: #64756b; font-size: 10px; line-height: 1.35; word-break: keep-all; }
         .city-land-filter { margin-top: 7px; }
         .city-land-filter label { display: block; margin-bottom: 3px; font-size: 11px; font-weight: 700; color: #315541; }
         .city-land-filter-label { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 700; color: #315541; }
@@ -104,6 +117,9 @@ Change: Separate official PNU parcel addresses from reference reverse-geocoded m
         .city-land-popup-row span:first-child { color: #637269; }
         .city-land-popup-reason { margin-top: 8px; padding: 7px; border-radius: 5px; background: #f2f7f4; font-size: 11px; line-height: 1.45; word-break: keep-all; }
         .city-land-popup-note { margin-top: 7px; font-size: 10px; line-height: 1.4; color: #758078; word-break: keep-all; }
+        .city-land-address-check { margin-top: 7px; padding: 7px; border-radius: 5px; background: #eef6ff; color: #315b81; font-size: 11px; line-height: 1.45; word-break: keep-all; }
+        .city-land-address-check.mismatch { border: 1px solid #e7b45d; background: #fff7e8; color: #79501b; }
+        .city-land-address-check.match { background: #e8f6ed; color: #235d3a; }
         .city-land-popup-action { width: 100%; margin-top: 8px; padding: 7px; border: none; border-radius: 5px; background: #2c3e50; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
         .city-land-review-box { margin-top: 9px; padding: 8px; border: 1px solid #d5ddd7; border-radius: 6px; background: #f8faf8; }
         .city-land-review-box label { display: flex; align-items: center; gap: 6px; color: #4b5650; font-size: 11px; font-weight: 700; }
@@ -207,7 +223,7 @@ Change: Separate official PNU parcel addresses from reference reverse-geocoded m
 
     <div class="ui-box search-box">
         <span style="font-size:18px; margin-right:10px;">🔍</span>
-        <input type="text" class="search-input" id="mainSearchInput" placeholder="주소 검색 (엔터) 또는 지도 클릭..." readonly onclick="searchAddressGlobal()">
+        <input type="text" class="search-input" id="mainSearchInput" placeholder="도로명·건물주소 검색 또는 지도 클릭..." aria-label="도로명 및 건물 주소 검색" readonly onclick="searchAddressGlobal()">
     </div>
 
     <div id="map"></div>
@@ -221,6 +237,15 @@ Change: Separate official PNU parcel addresses from reference reverse-geocoded m
             </div>
             <p class="city-land-notice">용인시 관내 용인시유지·경기도유지·국유지의 1차 조사 후보입니다. 조건을 선택하고 검색해야 지도 데이터를 불러옵니다.</p>
             <div id="cityLandControls" class="city-land-controls" hidden>
+                <div class="city-land-filter">
+                    <label for="cityLandParcelKeyword">지번·PNU 빠른 찾기</label>
+                    <div class="city-land-keyword-search">
+                        <input id="cityLandParcelKeyword" type="search" autocomplete="off" placeholder="예: 풍덕천동 607-59 또는 19자리 PNU" onkeydown="if (event.key === 'Enter') { event.preventDefault(); searchPublicLandByKeyword(); }">
+                        <button id="cityLandKeywordButton" type="button" onclick="searchPublicLandByKeyword()">지번 찾기</button>
+                    </div>
+                    <p class="city-land-keyword-help">일반 주소 검색과 달리 아래 선택 조건과 별도로 소유구분 3종의 공식 지번·PNU를 직접 찾고, 선택한 필지의 공식 경계를 표시합니다.</p>
+                    <div id="cityLandKeywordResults" class="city-land-keyword-results" role="status" aria-live="polite" hidden></div>
+                </div>
                 <div class="city-land-filter">
                     <span id="cityLandOwnerLabel" class="city-land-filter-label">소유구분(복수 선택)</span>
                     <div id="cityLandOwnerFilter" class="city-land-checkbox-grid city-land-owner-grid" role="group" aria-labelledby="cityLandOwnerLabel">
@@ -464,6 +489,7 @@ Change: Separate official PNU parcel addresses from reference reverse-geocoded m
                 });
             });
         }
+        window.lookupMapReferenceAddress = lookupReferenceAddress;
 
         function buildMapClickPopup(lat, lng, addressInfo) {
             const popupEl = document.createElement('div');
@@ -1146,7 +1172,7 @@ function searchAddressForModal() {
 
 
     </script>
-<script src="assets/js/yongin-city-land-map.js?v=20260810-5"></script>
+<script src="assets/js/yongin-city-land-map.js?v=20260811-1"></script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
