@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.52 | Change: 2026-08-04 - Use the shared ERP session gate during menu navigation. -->
+<!-- Version: v1.0.53 | Change: 2026-08-10 - Replace blocked browser OpenAPI introspection with authenticated column probes. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.52 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.53 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -321,7 +321,7 @@ const MYPAGE_LEAVE_RESERVED_STATUSES=Object.freeze(['완료','가승인','증빙
 const MYPAGE_LEAVE_PENDING_STATUSES=Object.freeze(['진행중']);
 const MYPAGE_SALARY_TOTAL_SELECT_COLUMNS='emp_id,year_month,pay_total,net_pay,ded_pension,ded_health,ded_care,ded_employ,ded_income,ded_local,ded_advance,ded_capital,payroll_tax_adjustment_income,payroll_tax_adjustment_local,co_total';
 const MYPAGE_BUSINESS_TRIP_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,status,drafter_id,drafter_name,business_trip_snapshot';
-const MYPAGE_SCHEMA_FEATURE_CACHE_VERSION=1;
+const MYPAGE_SCHEMA_FEATURE_CACHE_VERSION=2;
 const MYPAGE_SCHEMA_FEATURE_CACHE_TTL_MS=24*60*60*1000;
 const MYPAGE_COMPANY_INFO_CACHE_VERSION=1;
 const MYPAGE_COMPANY_INFO_CACHE_TTL_MS=10*60*1000;
@@ -664,24 +664,34 @@ business_trip_snapshot:!!features.business_trip_snapshot
 }catch(_){
 }
 }
-async function fetchMypageSchemaFeaturesFromOpenApi(){
-const response=await fetch(`${SUPABASE_URL}/rest/v1/?apikey=${encodeURIComponent(SUPABASE_KEY)}`,{headers:{Accept:'application/openapi+json'}});
-if(!response.ok) throw new Error(`MYPAGE_OPENAPI_FETCH_${response.status}`);
-const openapi=await response.json();
-const properties=openapi?.definitions?.ref_approval?.properties||{};
+async function probeMypageApprovalColumn(columnName){
+const safeColumn=String(columnName||'').trim();
+if(!['leave_snapshot','business_trip_snapshot'].includes(safeColumn)) throw new Error('MYPAGE_SCHEMA_COLUMN_INVALID');
+const{error}=await _supabase.from('ref_approval').select(safeColumn,{head:true}).limit(0);
+if(!error) return true;
+const errorCode=String(error.code||'').trim();
+if(errorCode==='42703'||errorCode==='PGRST204') return false;
+throw error;
+}
+async function fetchMypageSchemaFeaturesFromDataApi(){
+const[leaveSnapshot,businessTripSnapshot]=await Promise.all([
+probeMypageApprovalColumn('leave_snapshot'),
+probeMypageApprovalColumn('business_trip_snapshot')
+]);
 return{
-leave_snapshot:!!properties.leave_snapshot,
-business_trip_snapshot:!!properties.business_trip_snapshot
+leave_snapshot:leaveSnapshot,
+business_trip_snapshot:businessTripSnapshot
 };
 }
 async function loadMypageSchemaFeatures(){
 const cached=readMypageSchemaFeatureCache();
 if(cached) return cached;
 try{
-const fresh=await fetchMypageSchemaFeaturesFromOpenApi();
+const fresh=await fetchMypageSchemaFeaturesFromDataApi();
 writeMypageSchemaFeatureCache(fresh);
 return fresh;
-}catch(_){
+}catch(error){
+console.warn('[mypage] schema feature probe failed:',String(error?.code||error?.message||'unknown'));
 return{
 leave_snapshot:false,
 business_trip_snapshot:false
