@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.1.0
-Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 parcel boundaries.
+Version: v1.2.0
+Change: Add multi-select land categories, custom area range, and admin candidate reviews.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.0 | map.html | municipal-land-candidates-20260810');</script>
+  <script>console.log('[Version] v1.2.0 | map.html | municipal-land-reviews-20260810');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>경기 태양광 부지 분석 (Full Version)</title>
@@ -58,7 +58,15 @@ Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 par
         .city-land-controls[hidden] { display: none; }
         .city-land-filter { margin-top: 7px; }
         .city-land-filter label { display: block; margin-bottom: 3px; font-size: 11px; font-weight: 700; color: #315541; }
+        .city-land-filter-label { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 700; color: #315541; }
         .city-land-filter select { width: 100%; padding: 7px 8px; border: 1px solid #bdd6c6; border-radius: 5px; background: #fff; color: #22362a; font-size: 12px; }
+        .city-land-category-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 6px; }
+        .city-land-category-grid label { display: flex; align-items: center; gap: 5px; min-height: 28px; margin: 0; padding: 4px 6px; border: 1px solid #d7e8dd; border-radius: 5px; background: #fff; font-weight: 500; cursor: pointer; }
+        .city-land-category-grid input { margin: 0; }
+        .city-land-area-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 5px; align-items: center; }
+        .city-land-area-range input { width: 100%; min-width: 0; padding: 7px 6px; border: 1px solid #bdd6c6; border-radius: 5px; background: #fff; color: #22362a; font-size: 12px; }
+        .city-land-area-range span { color: #52705d; font-size: 12px; }
+        .city-land-review-help { margin-top: 8px; padding: 7px; border-radius: 5px; background: #eef1ef; color: #58635c; font-size: 11px; line-height: 1.4; word-break: keep-all; }
         .city-land-boundary-toggle { display: flex; align-items: center; margin-top: 9px; font-size: 11px; color: #315541; cursor: pointer; }
         .city-land-boundary-toggle input { margin-right: 7px; }
         .city-land-actions { display: flex; gap: 6px; margin-top: 9px; }
@@ -69,6 +77,7 @@ Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 par
         .city-land-marker { background: transparent; border: none; }
         .city-land-marker-dot { display: block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; background: #e2a300; box-shadow: 0 1px 5px rgba(0,0,0,0.45); }
         .city-land-marker-dot.priority { background: #178f4c; }
+        .city-land-marker-dot.excluded { background: #8a918c; box-shadow: 0 1px 5px rgba(0,0,0,0.32); }
         .city-land-cluster { background: rgba(23, 143, 76, 0.25); }
         .city-land-cluster div { background: rgba(23, 143, 76, 0.82); color: #fff; }
         .city-land-popup { min-width: 210px; color: #25322b; }
@@ -78,6 +87,12 @@ Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 par
         .city-land-popup-reason { margin-top: 8px; padding: 7px; border-radius: 5px; background: #f2f7f4; font-size: 11px; line-height: 1.45; word-break: keep-all; }
         .city-land-popup-note { margin-top: 7px; font-size: 10px; line-height: 1.4; color: #758078; word-break: keep-all; }
         .city-land-popup-action { width: 100%; margin-top: 8px; padding: 7px; border: none; border-radius: 5px; background: #2c3e50; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .city-land-review-box { margin-top: 9px; padding: 8px; border: 1px solid #d5ddd7; border-radius: 6px; background: #f8faf8; }
+        .city-land-review-box label { display: flex; align-items: center; gap: 6px; color: #4b5650; font-size: 11px; font-weight: 700; }
+        .city-land-review-box textarea { width: 100%; min-height: 66px; margin-top: 7px; padding: 7px; resize: vertical; border: 1px solid #cbd5ce; border-radius: 5px; font: inherit; font-size: 12px; line-height: 1.45; }
+        .city-land-review-save { width: 100%; margin-top: 7px; padding: 7px; border: none; border-radius: 5px; background: #58635c; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .city-land-review-save:disabled { opacity: 0.55; cursor: wait; }
+        .city-land-review-message { min-height: 16px; margin-top: 5px; color: #52645a; font-size: 11px; line-height: 1.35; }
 
         /* 추천 목록 패널 (탭 기능 복구) */
         .suggestion-panel { bottom: 30px; left: 20px; width: 340px; max-height: 55vh; display: flex; flex-direction: column; transition: transform 0.3s ease; }
@@ -192,27 +207,27 @@ Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 par
                     </select>
                 </div>
                 <div class="city-land-filter">
-                    <label for="cityLandCategoryFilter">지목</label>
-                    <select id="cityLandCategoryFilter" onchange="applyMunicipalLandFilters()">
-                        <option value="all">전체 지목</option>
-                        <option value="주차장">주차장</option>
-                        <option value="잡종지">잡종지</option>
-                        <option value="대">대</option>
-                        <option value="체육용지">체육용지</option>
-                        <option value="공장용지">공장용지</option>
-                        <option value="창고용지">창고용지</option>
-                        <option value="도로">도로</option>
-                        <option value="공원">공원</option>
-                    </select>
+                    <span id="cityLandCategoryLabel" class="city-land-filter-label">지목(복수 선택)</span>
+                    <div id="cityLandCategoryFilter" class="city-land-category-grid" role="group" aria-labelledby="cityLandCategoryLabel">
+                        <label><input type="checkbox" value="all" checked onchange="handleMunicipalLandCategoryChange(this)"> 전체</label>
+                        <label><input type="checkbox" value="주차장" onchange="handleMunicipalLandCategoryChange(this)"> 주차장</label>
+                        <label><input type="checkbox" value="잡종지" onchange="handleMunicipalLandCategoryChange(this)"> 잡종지</label>
+                        <label><input type="checkbox" value="대" onchange="handleMunicipalLandCategoryChange(this)"> 대</label>
+                        <label><input type="checkbox" value="체육용지" onchange="handleMunicipalLandCategoryChange(this)"> 체육용지</label>
+                        <label><input type="checkbox" value="공장용지" onchange="handleMunicipalLandCategoryChange(this)"> 공장용지</label>
+                        <label><input type="checkbox" value="창고용지" onchange="handleMunicipalLandCategoryChange(this)"> 창고용지</label>
+                        <label><input type="checkbox" value="도로" onchange="handleMunicipalLandCategoryChange(this)"> 도로</label>
+                        <label><input type="checkbox" value="공원" onchange="handleMunicipalLandCategoryChange(this)"> 공원</label>
+                        <label><input type="checkbox" value="other" onchange="handleMunicipalLandCategoryChange(this)"> 기타</label>
+                    </div>
                 </div>
                 <div class="city-land-filter">
-                    <label for="cityLandAreaFilter">최소 면적</label>
-                    <select id="cityLandAreaFilter" onchange="applyMunicipalLandFilters()">
-                        <option value="0">제한 없음</option>
-                        <option value="1000">1,000㎡ 이상</option>
-                        <option value="3000">3,000㎡ 이상</option>
-                        <option value="5000">5,000㎡ 이상</option>
-                    </select>
+                    <span class="city-land-filter-label">면적 범위(㎡)</span>
+                    <div class="city-land-area-range">
+                        <input id="cityLandMinimumArea" type="number" min="0" step="0.1" inputmode="decimal" placeholder="최소" aria-label="최소 면적" oninput="scheduleMunicipalLandFilters()" onchange="applyMunicipalLandFilters()">
+                        <span>~</span>
+                        <input id="cityLandMaximumArea" type="number" min="0" step="0.1" inputmode="decimal" placeholder="최대" aria-label="최대 면적" oninput="scheduleMunicipalLandFilters()" onchange="applyMunicipalLandFilters()">
+                    </div>
                 </div>
                 <div class="city-land-filter">
                     <label for="cityLandPriorityFilter">검토 우선순위</label>
@@ -223,6 +238,7 @@ Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 par
                     </select>
                 </div>
                 <label class="city-land-boundary-toggle"><input id="cityLandTop30Toggle" type="checkbox" onchange="applyMunicipalLandFilters()"> 상위 30개 필지 경계 표시</label>
+                <div id="cityLandReviewHelp" class="city-land-review-help" hidden>관리자 검토 기록이 적용됩니다. 추천 제외 필지는 삭제하지 않고 회색으로 계속 표시합니다.</div>
                 <div class="city-land-actions"><button type="button" onclick="fitMunicipalLandResults()">표시 범위로 이동</button></div>
                 <div id="cityLandStatus" class="city-land-status" role="status" aria-live="polite">레이어를 준비하고 있습니다.</div>
             </div>
@@ -317,6 +333,7 @@ Change: Add Yongin municipal-land solar candidate layer, filters, and top-30 par
         const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
         const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        window.yonginSolarSupabase = sb;
 
   // 기존: const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); 바로 아래
 
@@ -1043,7 +1060,7 @@ function searchAddressForModal() {
 
 
     </script>
-<script src="assets/js/yongin-city-land-map.js?v=20260810-1"></script>
+<script src="assets/js/yongin-city-land-map.js?v=20260810-3"></script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
