@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.50 | Change: 2026-08-05 - Move board and general-assembly attendance into member administration. -->
+<!-- Version: v1.0.51 | Change: 2026-08-10 - Show live task counts on ERP menu cards. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.50 | index.html');</script>
+  <script>console.log('[Version] v1.0.51 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -58,8 +58,10 @@
         padding: 20px; 
     }
     .main-card { width: 100%; max-width: 400px; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }
-    .btn-menu { text-align: left; padding: 15px; margin-bottom: 10px; transition: transform 0.2s; border: 1px solid #eee; }
+    .btn-menu { position: relative; text-align: left; padding: 15px; margin-bottom: 10px; transition: transform 0.2s; border: 1px solid #eee; }
     .btn-menu:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(0,0,0,0.05); background-color: #f8f9fa; }
+    .btn-menu.has-attention { border-color: rgba(220,53,69,.42); box-shadow: 0 0 0 2px rgba(220,53,69,.08); }
+    .menu-attention-badge { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 4px 9px; border-radius: 999px; background: #dc3545; color: #fff; font-size: .78rem; font-weight: 800; line-height: 1; box-shadow: 0 4px 10px rgba(220,53,69,.2); }
     .hidden { display: none !important; }
     .profile-box { background: #e3f2fd; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; }
     .btn-kakao { background: #FEE500; border: none; border-radius: 10px; font-weight: bold; color: #3a1d1d; }
@@ -166,6 +168,7 @@
       <div class="d-grid gap-2" id="menuButtons">
         <button class="btn btn-white btn-menu" id="btnApproval" onclick="location.href='approval.html'">
           📝 <strong>전자결재</strong>
+          <span class="menu-attention-badge hidden" id="approvalTaskBadge" aria-live="polite"></span>
           <span class="d-block small text-muted">휴가·품의·공문 기안과 승인/반려</span>
         </button>
 
@@ -186,6 +189,7 @@
 
         <button class="btn btn-white btn-menu hidden" id="btnMemberAdmin" onclick="location.href='admin_member.html?scope=member_admin&amp;tab=dashboard'">
             👥 <strong>조합원 관리</strong>
+            <span class="menu-attention-badge hidden" id="memberAdminTaskBadge" aria-live="polite"></span>
             <span class="d-block small text-muted">조합원 명부, 신청 처리, 입금 매칭</span>
         </button>
 
@@ -1378,6 +1382,7 @@ async function loadUserInfo(user) {
 
     document.getElementById('patchNoteArea')?.classList.remove('hidden');
     showScreen('menuArea');
+    void loadMainMenuTaskAttention();
 }
 
 async function loadPermissions(user) {
@@ -1435,6 +1440,74 @@ async function loadCoopRuntime() {
         return null;
     }
 }
+
+function setMenuTaskAttention(buttonId, badgeId, count, detailLabel) {
+    const button = document.getElementById(buttonId);
+    const badge = document.getElementById(badgeId);
+    if (!button || !badge) return;
+    const safeCount = Math.max(0, Number(count || 0) || 0);
+    const hasTasks = safeCount > 0;
+    badge.textContent = hasTasks ? (safeCount > 99 ? '99+' : String(safeCount)) : '';
+    badge.classList.toggle('hidden', !hasTasks);
+    button.classList.toggle('has-attention', hasTasks);
+    if (hasTasks) {
+        const label = String(detailLabel || '처리할 일').trim() || '처리할 일';
+        badge.title = label.includes('건') ? label : `${label} ${safeCount.toLocaleString('ko-KR')}건`;
+        badge.setAttribute('aria-label', badge.title);
+        button.title = badge.title;
+    } else {
+        badge.removeAttribute('title');
+        badge.removeAttribute('aria-label');
+        button.removeAttribute('title');
+    }
+} // End of setMenuTaskAttention
+
+async function fetchTenantPendingCount(tableName, statusValue) {
+    const coopId = String(myInfo?.coop_id || '').trim();
+    if (!coopId) throw new Error('ERP_COOP_ID_REQUIRED');
+    const allowedTables = new Set(['coop_applications']);
+    if (!allowedTables.has(tableName)) throw new Error('ERP_TASK_TABLE_NOT_ALLOWED');
+    const { count, error } = await _supabase
+        .from(tableName)
+        .select('*', { count: 'exact', head: true })
+        .eq('coop_id', coopId)
+        .eq('status', statusValue);
+    if (error) throw error;
+    return Math.max(0, Number(count || 0) || 0);
+} // End of fetchTenantPendingCount
+
+async function loadApprovalTaskAttention() {
+    const button = document.getElementById('btnApproval');
+    if (!button || button.classList.contains('hidden')) return;
+    try {
+        const { data, error } = await _supabase.rpc('erp_get_approval_bootstrap_summary');
+        if (error) throw error;
+        setMenuTaskAttention('btnApproval', 'approvalTaskBadge', data?.todo_count, '내 결재 대기');
+    } catch (error) {
+        console.warn('ERP approval task count unavailable:', String(error?.code || error?.message || 'unknown'));
+        setMenuTaskAttention('btnApproval', 'approvalTaskBadge', 0, '내 결재 대기');
+    }
+} // End of loadApprovalTaskAttention
+
+async function loadMemberAdminTaskAttention() {
+    const button = document.getElementById('btnMemberAdmin');
+    if (!button || button.classList.contains('hidden')) return;
+    try {
+        const pendingRequests = await fetchTenantPendingCount('coop_applications', 'pending');
+        setMenuTaskAttention('btnMemberAdmin', 'memberAdminTaskBadge', pendingRequests, '처리 대기 업무 신청');
+    } catch (error) {
+        console.warn('ERP member task count unavailable:', String(error?.code || error?.message || 'unknown'));
+        setMenuTaskAttention('btnMemberAdmin', 'memberAdminTaskBadge', 0, '조합원 관리 할 일');
+    }
+} // End of loadMemberAdminTaskAttention
+
+async function loadMainMenuTaskAttention() {
+    if (!myInfo || retiredGraceAccess) return;
+    await Promise.allSettled([
+        loadApprovalTaskAttention(),
+        loadMemberAdminTaskAttention()
+    ]);
+} // End of loadMainMenuTaskAttention
 
 function hasPermission(key) {
     if (!permissionSet || permissionSet.size === 0) return null; // fallback to legacy rules
