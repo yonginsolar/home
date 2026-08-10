@@ -5,7 +5,7 @@ Change: 2026-04-01 - Respect localhost-only public_host override so local QA can
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.2';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZHFsd3hncWdzdm5hd21obGZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxODQ3NDIsImV4cCI6MjA4Mjc2MDc0Mn0.UKUvMOl58KuDH24seC3oSgla7mK5lr-vXjqtpalnl6k';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
 
 function getRuntimeHost() {
   if (typeof window === 'undefined' || !window.location) return '';
@@ -35,7 +35,7 @@ const globalHeaders = {};
 const runtimeHost = getRuntimeHost();
 if (runtimeHost) globalHeaders['x-public-host'] = runtimeHost;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   global: {
     headers: globalHeaders
   }
