@@ -1,11 +1,11 @@
 /*
- * Version: v1.7.0
+ * Version: v1.7.1
  * On-demand Gyeonggi public-land solar candidate search for map.html.
  */
 (function () {
     'use strict';
 
-    const DATA_VERSION = '20260811-3';
+    const DATA_VERSION = '20260811-4';
     const INDEX_URL = `assets/data/gyeonggi-public-land-index.json?v=${DATA_VERSION}`;
     const TOP30_URL = `assets/data/yongin-city-land-solar-top30.geojson?v=${DATA_VERSION}`;
     const PARCEL_BOUNDARY_URL = 'https://gris.gg.go.kr:8888/grisgis/rest/services/bdsMap_Cbnd/MapServer/5/query';
@@ -266,15 +266,25 @@
         return state.reviews.get(String(feature?.properties?.pnu || '')) || null;
     }
 
-    function popupRow(label, value) {
+    function popupRow(label, value, className = '') {
         const row = document.createElement('div');
         row.className = 'city-land-popup-row';
+        if (className) row.classList.add(className);
         const labelElement = document.createElement('span');
         labelElement.textContent = label;
         const valueElement = document.createElement('strong');
         valueElement.textContent = value;
         row.append(labelElement, valueElement);
         return row;
+    }
+
+    function ownershipSourceSummary(properties) {
+        const agency = String(properties.source_agency || '경기도').trim();
+        const dataset = String(properties.source_dataset || '경기부동산포털 국공유지조회').trim();
+        const source = dataset.includes('경기부동산포털')
+            ? '경기부동산포털'
+            : `${agency} ${dataset}`.trim();
+        return `${source} · ${properties.source_date || '2026-08-11'} 조회`;
     }
 
     function popupDetails(label, className = '') {
@@ -347,8 +357,9 @@
         container.appendChild(popupRow('소유구분', properties.owner_type || '미확인'));
         container.appendChild(popupRow('소유기관', properties.owner_label || '미확인'));
         container.appendChild(popupRow(
-            '소유 근거',
-            `${properties.source_agency || '경기도'} ${properties.source_dataset || '경기부동산포털 국공유지조회'} · ${properties.source_date || '2026-08-11'} 조회`
+            '소유근거',
+            ownershipSourceSummary(properties),
+            'source'
         ));
         if (properties.manager) container.appendChild(popupRow('관리기관', properties.manager));
         container.appendChild(popupRow('지목', properties.land_category || '미확인'));
@@ -982,7 +993,7 @@
             },
             onEachFeature(feature, layer) {
                 const center = layer.getBounds ? layer.getBounds().getCenter() : null;
-                layer.bindPopup(() => buildPopup(feature, center));
+                layer.bindPopup(() => buildPopup(feature, center), { maxWidth: 340 });
             }
         });
         state.boundaryGroup.addLayer(geoJsonLayer);
@@ -1022,7 +1033,7 @@
                 if (typeof window.clearMapClickSelection === 'function') window.clearMapClickSelection();
                 showFocusedParcelBoundary(feature, { fit: true });
             });
-            marker.bindPopup(() => buildPopup(feature, latLng), { maxWidth: 320 });
+            marker.bindPopup(() => buildPopup(feature, latLng), { maxWidth: 340 });
             markers.push(marker);
             state.markerByPnu.set(String(properties.pnu || ''), marker);
             ownerCounts.set(ownerKey, Number(ownerCounts.get(ownerKey) || 0) + 1);
@@ -1174,5 +1185,5 @@
     window.searchPublicLandCandidates = searchPublicLandCandidates;
     window.searchPublicLandByKeyword = searchPublicLandByKeyword;
     window.fitPublicLandResults = fitPublicLandResults;
-    console.log('[Version] v1.7.0 | yongin-city-land-map.js | Gyeonggi partitions, score help, installed-solar PNU match');
+    console.log('[Version] v1.7.1 | yongin-city-land-map.js | single-line compact ownership source row');
 })();
