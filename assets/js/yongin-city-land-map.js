@@ -1,40 +1,36 @@
 /*
- * Version: v1.5.0
- * On-demand Yongin public-land solar candidate search for map.html.
+ * Version: v1.7.0
+ * On-demand Gyeonggi public-land solar candidate search for map.html.
  */
 (function () {
     'use strict';
 
-    const DATA_VERSION = '20260811-1';
-    const INDEX_URL = `assets/data/yongin-public-land-index.json?v=${DATA_VERSION}`;
+    const DATA_VERSION = '20260811-3';
+    const INDEX_URL = `assets/data/gyeonggi-public-land-index.json?v=${DATA_VERSION}`;
     const TOP30_URL = `assets/data/yongin-city-land-solar-top30.geojson?v=${DATA_VERSION}`;
     const PARCEL_BOUNDARY_URL = 'https://gris.gg.go.kr:8888/grisgis/rest/services/bdsMap_Cbnd/MapServer/5/query';
     const PARCEL_PROJECT_URL = 'https://gris.gg.go.kr:8888/grisgis/rest/services/Utilities/Geometry/GeometryServer/project';
     const DATASETS = Object.freeze({
-        city: {
-            label: '용인시유지',
-            ownerLabel: '용인시',
-            url: `assets/data/yongin-city-land-solar-candidates.geojson?v=${DATA_VERSION}`
+        municipal: {
+            label: '시·군유지',
+            ownerLabel: '해당 시·군'
         },
         province: {
             label: '경기도유지',
-            ownerLabel: '경기도',
-            url: `assets/data/yongin-province-land-solar-candidates.geojson?v=${DATA_VERSION}`
+            ownerLabel: '경기도'
         },
         national: {
             label: '국유지',
-            ownerLabel: '대한민국',
-            url: `assets/data/yongin-national-land-solar-candidates.geojson?v=${DATA_VERSION}`
+            ownerLabel: '대한민국'
         }
     });
-    const DISTRICTS = ['처인구', '기흥구', '수지구'];
     const primaryLandCategories = new Set(['주차장', '잡종지', '대', '체육용지', '공장용지', '창고용지', '도로', '공원']);
     const numberFormat = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 1 });
     const state = {
         index: null,
         indexPromise: null,
-        candidatesByOwner: new Map(),
-        loadingByOwner: new Map(),
+        candidatesByPartition: new Map(),
+        loadingByPartition: new Map(),
         top30: null,
         top30Promise: null,
         reviewPromise: null,
@@ -53,6 +49,7 @@
         currentFeatures: [],
         currentOwnerCounts: new Map(),
         currentExcludedCount: 0,
+        currentInstalledSolarCount: 0,
         visibleBounds: null,
         pendingLargeSignature: null,
         searchDirty: true,
@@ -122,6 +119,35 @@
         return feature;
     }
 
+    function renderMunicipalityOptions(payload) {
+        const container = document.getElementById('cityLandMunicipalityFilter');
+        if (!container || container.dataset.ready === 'true') return;
+        container.replaceChildren();
+        const addOption = (value, name, checked = false) => {
+            const label = document.createElement('label');
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.value = value;
+            input.checked = checked;
+            input.addEventListener('change', () => handlePublicLandCheckboxChange(input, 'cityLandMunicipalityFilter'));
+            label.append(input, document.createTextNode(name));
+            container.appendChild(label);
+        };
+        addOption('all', '경기도 전체', false);
+        const municipalities = [...(payload.municipalities || [])].sort((left, right) => {
+            const leftCode = String(left.code);
+            const rightCode = String(right.code);
+            if (leftCode === '41460') return -1;
+            if (rightCode === '41460') return 1;
+            return String(left.name).localeCompare(String(right.name), 'ko');
+        });
+        for (const municipality of municipalities) {
+            const isDefault = String(municipality.code) === '41460';
+            addOption(String(municipality.code), `${municipality.name}${isDefault ? ' (기본)' : ''}`, isDefault);
+        }
+        container.dataset.ready = 'true';
+    }
+
     async function loadIndex() {
         if (state.index) return state.index;
         if (state.indexPromise) return state.indexPromise;
@@ -133,6 +159,7 @@
                     throw new Error('검색 인덱스 형식이 올바르지 않습니다.');
                 }
                 state.index = payload;
+                renderMunicipalityOptions(payload);
                 Object.keys(DATASETS).forEach(ownerKey => {
                     const count = Number(payload.layers?.[ownerKey]?.feature_count || 0);
                     document.querySelectorAll(`[data-owner-count="${ownerKey}"]`).forEach(element => {
@@ -145,20 +172,27 @@
         return state.indexPromise;
     }
 
-    async function loadOwnerData(ownerKey) {
+    function partitionKey(municipalityCode, ownerKey) {
+        return `${municipalityCode}:${ownerKey}`;
+    }
+
+    async function loadPartition(municipalityCode, ownerKey) {
         if (!DATASETS[ownerKey]) throw new Error('지원하지 않는 소유구분입니다.');
-        if (state.candidatesByOwner.has(ownerKey)) return state.candidatesByOwner.get(ownerKey);
-        if (state.loadingByOwner.has(ownerKey)) return state.loadingByOwner.get(ownerKey);
-        const promise = fetch(DATASETS[ownerKey].url, { cache: 'force-cache' })
+        const key = partitionKey(municipalityCode, ownerKey);
+        if (state.candidatesByPartition.has(key)) return state.candidatesByPartition.get(key);
+        if (state.loadingByPartition.has(key)) return state.loadingByPartition.get(key);
+        const partition = state.index?.layers?.[ownerKey]?.partitions?.[municipalityCode];
+        if (!partition?.file) throw new Error(`${municipalityCode} ${DATASETS[ownerKey].label} 검색 파일을 찾지 못했습니다.`);
+        const promise = fetch(`assets/data/${partition.file}?v=${DATA_VERSION}`, { cache: 'force-cache' })
             .then(async response => {
                 if (!response.ok) throw new Error(`${DATASETS[ownerKey].label} 데이터를 불러오지 못했습니다. (${response.status})`);
                 const payload = validateFeatureCollection(await response.json(), 'Point');
                 payload.features.forEach(feature => normalizeFeature(feature, ownerKey));
-                state.candidatesByOwner.set(ownerKey, payload);
+                state.candidatesByPartition.set(key, payload);
                 return payload;
             })
-            .finally(() => { state.loadingByOwner.delete(ownerKey); });
-        state.loadingByOwner.set(ownerKey, promise);
+            .finally(() => { state.loadingByPartition.delete(key); });
+        state.loadingByPartition.set(key, promise);
         return promise;
     }
 
@@ -169,7 +203,13 @@
             .then(async response => {
                 if (!response.ok) throw new Error(`상위 30개 필지 경계를 불러오지 못했습니다. (${response.status})`);
                 const payload = validateFeatureCollection(await response.json(), 'Polygon');
-                payload.features.forEach(feature => normalizeFeature(feature, 'city'));
+                payload.features.forEach(feature => {
+                    feature.properties = feature.properties || {};
+                    feature.properties.municipality_code = '41460';
+                    feature.properties.municipality = '용인시';
+                    feature.properties.owner_label = feature.properties.owner_label || '용인시';
+                    normalizeFeature(feature, 'municipal');
+                });
                 state.top30 = payload;
                 return payload;
             })
@@ -204,12 +244,13 @@
         return state.reviewPromise;
     }
 
-    function markerIcon(ownerKey, isPriority, isExcluded = false) {
-        const key = `${ownerKey}:${isPriority ? 'priority' : 'review'}:${isExcluded ? 'excluded' : 'included'}`;
+    function markerIcon(ownerKey, isPriority, isExcluded = false, isInstalledSolar = false) {
+        const key = `${ownerKey}:${isPriority ? 'priority' : 'review'}:${isExcluded ? 'excluded' : 'included'}:${isInstalledSolar ? 'installed' : 'unknown'}`;
         if (!state.markerIcons[key]) {
             const classes = ['city-land-marker-dot', `owner-${ownerKey}`];
             if (isPriority) classes.push('priority');
             if (isExcluded) classes.push('excluded');
+            if (isInstalledSolar) classes.push('installed-solar');
             state.markerIcons[key] = L.divIcon({
                 className: 'city-land-marker',
                 html: `<span class="${classes.join(' ')}"></span>`,
@@ -301,14 +342,24 @@
         addressLabel.className = 'city-land-popup-address-label';
         addressLabel.textContent = '공식 지번 · PNU 기준';
         const title = document.createElement('h4');
-        title.textContent = properties.address || '용인시 국공유지 후보';
+        title.textContent = properties.address || '경기도 국공유지 후보';
         container.append(addressLabel, title);
         container.appendChild(popupRow('소유구분', properties.owner_type || '미확인'));
         container.appendChild(popupRow('소유기관', properties.owner_label || '미확인'));
+        container.appendChild(popupRow(
+            '소유 근거',
+            `${properties.source_agency || '경기도'} ${properties.source_dataset || '경기부동산포털 국공유지조회'} · ${properties.source_date || '2026-08-11'} 조회`
+        ));
         if (properties.manager) container.appendChild(popupRow('관리기관', properties.manager));
         container.appendChild(popupRow('지목', properties.land_category || '미확인'));
         container.appendChild(popupRow('면적', `${numberFormat.format(Number(properties.area_sqm || 0))}㎡`));
         container.appendChild(popupRow('우선순위', isExcluded ? `추천 제외 · ${Number(properties.priority_score || 0)}점` : `${properties.solar_candidate || '검토필요'} · ${Number(properties.priority_score || 0)}점`));
+        if (typeof properties.installed_solar_match === 'boolean') {
+            const installedValue = properties.installed_solar_match
+                ? `경기도 공개 ${(properties.installed_solar_analysis_years || []).join('·') || '2024'}년 항공영상 PNU 일치 · ${numberFormat.format(Number(properties.installed_solar_count || 0))}개 · 탐지면적 ${numberFormat.format(Number(properties.installed_solar_area_sqm || 0))}㎡`
+                : '경기도 공개 2024년 항공영상 자료 PNU 일치 없음';
+            container.appendChild(popupRow('태양광 현황', installedValue));
+        }
         if (properties.rank) container.appendChild(popupRow('상위 후보', `${properties.rank}위`));
 
         const reason = document.createElement('div');
@@ -319,8 +370,16 @@
         const referenceDetails = popupDetails('참고');
         const note = document.createElement('div');
         note.className = 'city-land-popup-note';
-        note.textContent = `공개자료 기준 ${properties.source_date || '2026-08-10'} · 주소는 공식 공개 PNU 지번 · 위치는 해당 필지 내부 대표점 · 설치 가능 확정이 아닌 조사 우선순위`;
+        note.textContent = `${properties.source_agency || '경기도'} ${properties.source_dataset || '경기부동산포털 국공유지조회'} 공개 응답을 ${properties.source_date || '2026-08-11'}에 조회해 소유구분·소유기관을 표시했습니다. 주소는 공식 공개 PNU 지번, 위치는 연속지적도 필지 내부 대표점입니다. 현재 법적 소유와 설치 가능성은 토지대장·등기·현장조사로 다시 확인해야 합니다.`;
         referenceDetails.body.appendChild(note);
+        if (typeof properties.installed_solar_match === 'boolean') {
+            const installedNote = document.createElement('div');
+            installedNote.className = 'city-land-popup-note';
+            installedNote.textContent = properties.installed_solar_match
+                ? '기설치 표시는 경기도 공식 2024년 항공영상 AI 판독자료와 PNU가 정확히 일치한 결과입니다. 현재 발전사업 허가·가동 상태는 별도 확인해야 합니다.'
+                : '기설치 공개자료와 PNU가 일치하지 않았습니다. 항공영상 기준일 이후 설치나 PNU 미기재 자료가 있을 수 있으므로 미설치 확정으로 사용하지 마세요.';
+            referenceDetails.body.appendChild(installedNote);
+        }
         let referenceLoaded = false;
         referenceDetails.details.addEventListener('toggle', () => {
             if (!referenceDetails.details.open || referenceLoaded) return;
@@ -412,7 +471,7 @@
             const marker = state.markerByPnu.get(pnu);
             if (marker) {
                 const isPriority = properties.solar_candidate === 'Y' || Number(properties.priority_score || 0) >= 60;
-                marker.setIcon(markerIcon(properties._ownerKey || 'city', isPriority, Boolean(data.is_excluded)));
+                marker.setIcon(markerIcon(properties._ownerKey || 'municipal', isPriority, Boolean(data.is_excluded), properties.installed_solar_match === true));
             }
             updateVisibleReviewCounts();
             renderBoundaries(state.activeFilters);
@@ -440,6 +499,12 @@
         return new Set(inputs.filter(input => input.value !== 'all' && input.checked).map(input => input.value));
     }
 
+    function selectedMunicipalities() {
+        const selected = selectedGroupValues('cityLandMunicipalityFilter');
+        if (selected) return selected;
+        return new Set((state.index?.municipalities || []).map(item => String(item.code)));
+    }
+
     function currentFilters() {
         const minimumAreaInput = document.getElementById('cityLandMinimumArea');
         const maximumAreaInput = document.getElementById('cityLandMaximumArea');
@@ -447,12 +512,13 @@
         const maximumArea = maximumAreaInput?.value === '' ? Number.POSITIVE_INFINITY : Math.max(0, Number(maximumAreaInput?.value || 0));
         return {
             owners: selectedOwners(),
-            districts: selectedGroupValues('cityLandDistrictFilter'),
+            municipalities: selectedMunicipalities(),
             categories: selectedGroupValues('cityLandCategoryFilter'),
             minimumArea,
             maximumArea,
             invalidAreaRange: maximumArea < minimumArea,
             priority: document.getElementById('cityLandPriorityFilter')?.value || '35',
+            installedSolar: document.getElementById('cityLandInstalledSolarFilter')?.value || 'all',
             showTop30: Boolean(document.getElementById('cityLandTop30Toggle')?.checked)
         };
     }
@@ -461,11 +527,12 @@
         const serializeSet = value => value ? [...value].sort().join(',') : 'all';
         return [
             serializeSet(filters.owners),
-            serializeSet(filters.districts),
+            serializeSet(filters.municipalities),
             serializeSet(filters.categories),
             filters.minimumArea,
             Number.isFinite(filters.maximumArea) ? filters.maximumArea : 'max',
             filters.priority,
+            filters.installedSolar,
             filters.showTop30 ? 'top30' : 'points'
         ].join('|');
     }
@@ -473,7 +540,7 @@
     function matchesFilters(feature, filters) {
         const properties = feature.properties || {};
         if (!filters.owners.has(properties._ownerKey)) return false;
-        if (filters.districts && !filters.districts.has(properties.district)) return false;
+        if (!filters.municipalities.has(String(properties.municipality_code || ''))) return false;
         if (filters.categories) {
             const category = properties.land_category || '';
             const matchesNamedCategory = filters.categories.has(category);
@@ -482,6 +549,8 @@
         }
         const area = Number(properties.area_sqm || 0);
         if (area < filters.minimumArea || area > filters.maximumArea) return false;
+        if (filters.installedSolar === 'matched' && properties.installed_solar_match !== true) return false;
+        if (filters.installedSolar === 'unmatched' && properties.installed_solar_match === true) return false;
         if (filters.priority === 'Y') return properties.solar_candidate === 'Y';
         return Number(properties.priority_score || 0) >= Number(filters.priority || 35);
     }
@@ -492,9 +561,9 @@
         for (const ownerKey of filters.owners) {
             const layer = state.index.layers?.[ownerKey];
             if (!layer) continue;
-            const districts = filters.districts ? [...filters.districts] : DISTRICTS;
-            for (const district of districts) {
-                const categories = layer.district_category_counts?.[district] || {};
+            for (const municipalityCode of filters.municipalities) {
+                const partition = layer.partitions?.[municipalityCode];
+                const categories = partition?.category_counts || {};
                 if (!filters.categories) {
                     total += Object.values(categories).reduce((sum, count) => sum + Number(count || 0), 0);
                     continue;
@@ -511,6 +580,44 @@
             }
         }
         return total;
+    }
+
+    function selectedPartitionPairs(filters) {
+        const pairs = [];
+        for (const municipalityCode of filters.municipalities) {
+            for (const ownerKey of filters.owners) {
+                pairs.push({ municipalityCode, ownerKey });
+            }
+        }
+        return pairs;
+    }
+
+    async function loadSelectedPartitions(pairs, concurrency = 6) {
+        const queue = [...pairs];
+        const workerCount = Math.min(Math.max(1, concurrency), queue.length);
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (queue.length) {
+                const pair = queue.shift();
+                if (!pair) return;
+                await loadPartition(pair.municipalityCode, pair.ownerKey);
+            }
+        });
+        await Promise.all(workers);
+    }
+
+    function keywordMunicipalityCodes(rawQuery) {
+        const digits = String(rawQuery || '').replace(/\D/g, '');
+        if (/^\d{19}$/.test(digits)) {
+            const match = (state.index?.municipalities || []).find(item =>
+                (item.sgg_codes || []).map(String).includes(digits.slice(0, 5))
+            );
+            if (match) return new Set([String(match.code)]);
+        }
+        const compactQuery = compactAddress(rawQuery);
+        const matches = (state.index?.municipalities || []).filter(item =>
+            compactQuery.includes(compactAddress(item.name))
+        );
+        return matches.length === 1 ? new Set([String(matches[0].code)]) : null;
     }
 
     async function loadParcelBoundary(pnu) {
@@ -636,13 +743,14 @@
 
     function focusedFilters(feature) {
         return {
-            owners: new Set([feature?.properties?._ownerKey || 'city']),
-            districts: null,
+            owners: new Set([feature?.properties?._ownerKey || 'municipal']),
+            municipalities: new Set([String(feature?.properties?.municipality_code || '')]),
             categories: null,
             minimumArea: 0,
             maximumArea: Number.POSITIVE_INFINITY,
             invalidAreaRange: false,
             priority: '35',
+            installedSolar: 'all',
             showTop30: false
         };
     }
@@ -705,17 +813,38 @@
             input?.focus();
             return;
         }
+        try {
+            await loadIndex();
+        } catch (error) {
+            setKeywordResultsMessage(error?.message || '검색 정보를 불러오지 못했습니다.', 'error');
+            return;
+        }
+        const filters = currentFilters();
+        if (!filters.owners.size || !filters.municipalities.size) {
+            setKeywordResultsMessage('시·군과 소유구분을 한 개 이상 선택해 주세요.', 'error');
+            return;
+        }
+        const allMunicipalities = document.querySelector('#cityLandMunicipalityFilter input[value="all"]');
+        if (allMunicipalities?.checked) {
+            const narrowed = keywordMunicipalityCodes(rawQuery);
+            if (!narrowed) {
+                setKeywordResultsMessage('경기도 전체를 한꺼번에 읽지 않도록 시·군명까지 입력하거나 찾을 시·군을 먼저 선택해 주세요.', 'error');
+                return;
+            }
+            filters.municipalities = narrowed;
+        }
         if (button) {
             button.disabled = true;
             button.textContent = '찾는 중';
         }
-        setKeywordResultsMessage('용인시 국공유지 공개 후보 전체에서 공식 지번·PNU를 찾는 중입니다.');
-        setStatus('지번 빠른 찾기를 위해 소유구분 3종 데이터를 불러오는 중입니다.');
+        const pairs = selectedPartitionPairs(filters);
+        setKeywordResultsMessage(`선택한 ${filters.municipalities.size}개 시·군의 공개 후보에서 공식 지번·PNU를 찾는 중입니다.`);
+        setStatus('선택한 시·군과 소유구분 데이터만 불러오는 중입니다.');
         try {
-            await Promise.all([Promise.all(Object.keys(DATASETS).map(loadOwnerData)), ensureReviewAccess()]);
+            await Promise.all([loadSelectedPartitions(pairs), ensureReviewAccess()]);
             const deduplicated = new Map();
-            Object.keys(DATASETS).forEach(ownerKey => {
-                for (const feature of state.candidatesByOwner.get(ownerKey)?.features || []) {
+            pairs.forEach(({ municipalityCode, ownerKey }) => {
+                for (const feature of state.candidatesByPartition.get(partitionKey(municipalityCode, ownerKey))?.features || []) {
                     const pnu = String(feature?.properties?.pnu || '');
                     if (pnu && !deduplicated.has(pnu)) deduplicated.set(pnu, feature);
                 }
@@ -770,6 +899,7 @@
         state.currentFeatures = [];
         state.currentOwnerCounts = new Map();
         state.currentExcludedCount = 0;
+        state.currentInstalledSolarCount = 0;
         state.visibleBounds = null;
         state.resultMode = 'filter';
         const fitButton = document.getElementById('cityLandFitButton');
@@ -785,6 +915,14 @@
     }
 
     function markPublicLandSearchDirty() {
+        const top30 = document.getElementById('cityLandTop30Toggle');
+        const selected = selectedGroupValues('cityLandMunicipalityFilter');
+        const municipalOwner = document.querySelector('#cityLandOwnerFilter input[value="municipal"]');
+        const top30Available = Boolean(selected?.has('41460') && municipalOwner?.checked);
+        if (top30) {
+            top30.disabled = !top30Available;
+            if (!top30Available) top30.checked = false;
+        }
         state.searchDirty = true;
         clearRenderedResults();
         resetLargeWarning();
@@ -804,14 +942,32 @@
         markPublicLandSearchDirty();
     }
 
+    function togglePublicLandScoreHelp(button) {
+        const help = document.getElementById('cityLandScoreHelp');
+        if (!help) return;
+        help.hidden = !help.hidden;
+        button?.setAttribute('aria-expanded', String(!help.hidden));
+    }
+
     function renderBoundaries(filters) {
         const mapInstance = getMap();
         if (!mapInstance || !state.boundaryGroup) return;
         state.boundaryGroup.clearLayers();
-        if (!filters?.showTop30 || !filters.owners.has('city') || !state.top30) {
+        if (!filters?.showTop30 || !filters.owners.has('municipal') || !filters.municipalities.has('41460') || !state.top30) {
             if (mapInstance.hasLayer(state.boundaryGroup)) mapInstance.removeLayer(state.boundaryGroup);
             return;
         }
+        const currentByPnu = new Map(state.currentFeatures.map(feature => [String(feature?.properties?.pnu || ''), feature.properties]));
+        state.top30.features.forEach(feature => {
+            const current = currentByPnu.get(String(feature?.properties?.pnu || ''));
+            if (current) Object.assign(feature.properties, {
+                installed_solar_match: current.installed_solar_match,
+                installed_solar_count: current.installed_solar_count,
+                installed_solar_area_sqm: current.installed_solar_area_sqm,
+                installed_solar_analysis_years: current.installed_solar_analysis_years,
+                installed_solar_types: current.installed_solar_types
+            });
+        });
         const filteredFeatures = state.top30.features.filter(feature => matchesFilters(feature, filters));
         const geoJsonLayer = L.geoJSON({ type: 'FeatureCollection', features: filteredFeatures }, {
             style(feature) {
@@ -851,12 +1007,12 @@
             const latLng = L.latLng(Number(coordinates[1]), Number(coordinates[0]));
             if (!Number.isFinite(latLng.lat) || !Number.isFinite(latLng.lng)) return;
             const properties = feature.properties || {};
-            const ownerKey = properties._ownerKey || 'city';
+            const ownerKey = properties._ownerKey || 'municipal';
             const isExcluded = Boolean(candidateReview(feature)?.is_excluded);
             const isPriority = properties.solar_candidate === 'Y' || Number(properties.priority_score || 0) >= 60;
             const marker = L.marker(latLng, {
-                icon: markerIcon(ownerKey, isPriority, isExcluded),
-                title: properties.address || '용인시 국공유지 후보',
+                icon: markerIcon(ownerKey, isPriority, isExcluded, properties.installed_solar_match === true),
+                title: properties.address || '경기도 국공유지 후보',
                 keyboard: true,
                 riseOnHover: true,
                 bubblingMouseEvents: false
@@ -878,6 +1034,7 @@
         state.currentFeatures = features;
         state.currentOwnerCounts = ownerCounts;
         state.currentExcludedCount = features.filter(feature => candidateReview(feature)?.is_excluded).length;
+        state.currentInstalledSolarCount = features.filter(feature => feature?.properties?.installed_solar_match === true).length;
         state.visibleBounds = bounds.length ? L.latLngBounds(bounds) : null;
         renderBoundaries(filters);
         const fitButton = document.getElementById('cityLandFitButton');
@@ -890,12 +1047,15 @@
             .map(([ownerKey, count]) => `${DATASETS[ownerKey]?.label || ownerKey} ${numberFormat.format(count)}`)
             .join(' · ');
         const reviewSummary = state.canReview ? ` · 추천 제외 ${numberFormat.format(state.currentExcludedCount)}필지(회색)` : '';
+        const installedSummary = state.currentInstalledSolarCount
+            ? ` · 기설치 공개자료 PNU 일치 ${numberFormat.format(state.currentInstalledSolarCount)}필지(청록색 중심점)`
+            : '';
         const prefix = ownerSummary ? `${ownerSummary} · ` : '';
         const clusterSummary = state.currentFeatures.length > 1
             ? ' · 여러 필지는 확대 전 숫자 원으로 묶이며 숫자 원을 누르면 확대됩니다.'
             : '';
         const modeSummary = state.resultMode === 'keyword' ? '지번 빠른 찾기 · ' : '';
-        setStatus(`${modeSummary}${prefix}총 ${numberFormat.format(state.currentFeatures.length)}필지 표시${reviewSummary} · 금색 테두리는 우선 검토 후보입니다.${clusterSummary}`);
+        setStatus(`${modeSummary}${prefix}총 ${numberFormat.format(state.currentFeatures.length)}필지 표시${reviewSummary}${installedSummary} · 금색 테두리는 우선 검토 후보입니다.${clusterSummary}`);
     }
 
     function updateVisibleReviewCounts() {
@@ -941,13 +1101,18 @@
             if (warning) warning.hidden = true;
             setStatus(`${[...filters.owners].map(key => DATASETS[key].label).join('·')} 데이터를 필요한 만큼 불러오는 중입니다.`);
             if (searchButton) searchButton.textContent = '데이터 불러오는 중';
-            const loadPromises = [...filters.owners].map(loadOwnerData);
-            if (filters.showTop30 && filters.owners.has('city')) loadPromises.push(loadTop30());
-            await Promise.all([Promise.all(loadPromises), ensureReviewAccess()]);
+            if (!filters.municipalities.size) {
+                setStatus('시·군을 한 개 이상 선택해 주세요.', 'error');
+                return;
+            }
+            const pairs = selectedPartitionPairs(filters);
+            const supportingLoads = [ensureReviewAccess()];
+            if (filters.showTop30 && filters.owners.has('municipal') && filters.municipalities.has('41460')) supportingLoads.push(loadTop30());
+            await Promise.all([loadSelectedPartitions(pairs), ...supportingLoads]);
 
             const deduplicated = new Map();
-            for (const ownerKey of filters.owners) {
-                const collection = state.candidatesByOwner.get(ownerKey);
+            for (const { municipalityCode, ownerKey } of pairs) {
+                const collection = state.candidatesByPartition.get(partitionKey(municipalityCode, ownerKey));
                 for (const feature of collection?.features || []) {
                     const pnu = String(feature?.properties?.pnu || '');
                     if (pnu && !deduplicated.has(pnu)) deduplicated.set(pnu, feature);
@@ -1005,8 +1170,9 @@
     window.togglePublicLandSearch = togglePublicLandSearch;
     window.markPublicLandSearchDirty = markPublicLandSearchDirty;
     window.handlePublicLandCheckboxChange = handlePublicLandCheckboxChange;
+    window.togglePublicLandScoreHelp = togglePublicLandScoreHelp;
     window.searchPublicLandCandidates = searchPublicLandCandidates;
     window.searchPublicLandByKeyword = searchPublicLandByKeyword;
     window.fitPublicLandResults = fitPublicLandResults;
-    console.log('[Version] v1.5.0 | yongin-city-land-map.js | corrected cadastral coordinates and compact popup accordions');
+    console.log('[Version] v1.7.0 | yongin-city-land-map.js | Gyeonggi partitions, score help, installed-solar PNU match');
 })();
