@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.116
-Change: Show education material downloads while keeping roster scans administrator-only.
+Version: v1.0.117
+Change: Preserve Humanities optional attendance consent through the cooperative check-in handoff without exposing raw fields.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.116 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.117 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -2417,11 +2417,20 @@ return /^[0-9a-f]{64}$/.test(token) ? token : '';
 } catch (_) { return ''; }
 } // End of getHumanitiesQrToken
 
+function getHumanitiesOptionalToken() {
+try {
+const token = String(new URLSearchParams(window.location.search || '').get('humanities_optional') || '').trim().toLowerCase();
+return /^[0-9a-f]{64}$/.test(token) ? token : '';
+} catch (_) { return ''; }
+} // End of getHumanitiesOptionalToken
+
 function humanitiesReturnUrl(params = {}) {
 const qrToken = getHumanitiesQrToken();
 const url = new URL('https://humanities.yll.or.kr/index.html');
 if (qrToken) url.searchParams.set('checkin', qrToken);
-Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+Object.entries(params).forEach(([key, value]) => {
+if (value !== undefined && value !== null && String(value) !== '') url.searchParams.set(key, String(value));
+});
 return url.toString();
 } // End of humanitiesReturnUrl
 
@@ -2573,13 +2582,16 @@ if (humanitiesHandoff && humanitiesQr) {
 const partner = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
 action:'complete_member_handoff', handoff_token:humanitiesHandoff, participant_name:name, phone
 });
-await callEducationIntegration(HUMANITIES_CHECKIN_URL, HUMANITIES_PUBLISHABLE_KEY, {
+const humanitiesResult = await callEducationIntegration(HUMANITIES_CHECKIN_URL, HUMANITIES_PUBLISHABLE_KEY, {
 action:'partner_checkin', qr_token:humanitiesQr, partner_receipt:partner.receipt_token,
 participant_name:name, phone, age_confirmed:true, privacy_consent:true,
-terms_version:HUMANITIES_CHECKIN_TERMS_VERSION
+terms_version:HUMANITIES_CHECKIN_TERMS_VERSION,
+optional_handoff_token:getHumanitiesOptionalToken() || null
 });
 setEducationQrInlineStatus('조합원 확인과 모두의 인문학 체크인이 완료되었습니다. 돌아가는 중입니다.', 'success');
-window.location.replace(humanitiesReturnUrl({ partner_status:'success' }));
+window.location.replace(humanitiesReturnUrl({
+partner_status:'success', optional_warning:humanitiesResult?.optional_info_save_failed === true ? '1' : null
+}));
 return;
 }
 const { data, error } = await _supabase.rpc('participation_public_education_quick_check_in', {
@@ -2606,7 +2618,9 @@ setEducationQrInlineStatus(message || '출석을 등록하지 못했습니다. Q
 } catch (error) {
 if (humanitiesHandoff && (error?.fallback === true || error?.code === 'MEMBER_NOT_FOUND')) {
 setEducationQrInlineStatus('조합원 정보를 찾을 수 없어 일반 체크인으로 전환됩니다.', 'warning');
-window.setTimeout(() => window.location.replace(humanitiesReturnUrl({ partner_fallback:'1' })), 700);
+window.setTimeout(() => window.location.replace(humanitiesReturnUrl({
+partner_fallback:'1', optional_handoff:getHumanitiesOptionalToken() || null
+})), 700);
 return;
 }
 console.error('education QR quick check-in failed:', error?.message || error);
@@ -2634,15 +2648,20 @@ const accessToken = await currentCoopAccessToken();
 const partner = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
 action:'complete_authenticated_member_handoff', handoff_token:handoffToken
 }, accessToken);
-await callEducationIntegration(HUMANITIES_CHECKIN_URL, HUMANITIES_PUBLISHABLE_KEY, {
+const humanitiesResult = await callEducationIntegration(HUMANITIES_CHECKIN_URL, HUMANITIES_PUBLISHABLE_KEY, {
 action:'partner_checkin', qr_token:humanitiesQr, partner_receipt:partner.receipt_token,
-age_confirmed:true, privacy_consent:true, terms_version:HUMANITIES_CHECKIN_TERMS_VERSION
+age_confirmed:true, privacy_consent:true, terms_version:HUMANITIES_CHECKIN_TERMS_VERSION,
+optional_handoff_token:getHumanitiesOptionalToken() || null
 });
-window.location.replace(humanitiesReturnUrl({ partner_status:'success' }));
+window.location.replace(humanitiesReturnUrl({
+partner_status:'success', optional_warning:humanitiesResult?.optional_info_save_failed === true ? '1' : null
+}));
 } catch (error) {
 console.error('authenticated humanities check-in failed:', error?.message || error);
 if (error?.fallback === true || error?.code === 'MEMBER_NOT_FOUND') {
-window.location.replace(humanitiesReturnUrl({ partner_fallback:'1' }));
+window.location.replace(humanitiesReturnUrl({
+partner_fallback:'1', optional_handoff:getHumanitiesOptionalToken() || null
+}));
 return;
 }
 setEducationQrInlineStatus(error?.message || '연동 교육 출석을 완료하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
