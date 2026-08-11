@@ -1,14 +1,15 @@
 /*
- * Version: v1.4.0
+ * Version: v1.5.0
  * On-demand Yongin public-land solar candidate search for map.html.
  */
 (function () {
     'use strict';
 
-    const DATA_VERSION = '20260810-3';
+    const DATA_VERSION = '20260811-1';
     const INDEX_URL = `assets/data/yongin-public-land-index.json?v=${DATA_VERSION}`;
     const TOP30_URL = `assets/data/yongin-city-land-solar-top30.geojson?v=${DATA_VERSION}`;
     const PARCEL_BOUNDARY_URL = 'https://gris.gg.go.kr:8888/grisgis/rest/services/bdsMap_Cbnd/MapServer/5/query';
+    const PARCEL_PROJECT_URL = 'https://gris.gg.go.kr:8888/grisgis/rest/services/Utilities/Geometry/GeometryServer/project';
     const DATASETS = Object.freeze({
         city: {
             label: '용인시유지',
@@ -235,6 +236,17 @@
         return row;
     }
 
+    function popupDetails(label, className = '') {
+        const details = document.createElement('details');
+        details.className = `city-land-popup-details ${className}`.trim();
+        const summary = document.createElement('summary');
+        summary.textContent = label;
+        const body = document.createElement('div');
+        body.className = 'city-land-popup-details-body';
+        details.append(summary, body);
+        return { details, summary, body };
+    }
+
     function compactAddress(value) {
         return String(value || '')
             .toLowerCase()
@@ -304,13 +316,24 @@
         reason.textContent = properties.candidate_reason || '현장조사와 규제 확인이 필요한 1차 후보입니다.';
         container.appendChild(reason);
 
+        const referenceDetails = popupDetails('참고');
         const note = document.createElement('div');
         note.className = 'city-land-popup-note';
         note.textContent = `공개자료 기준 ${properties.source_date || '2026-08-10'} · 주소는 공식 공개 PNU 지번 · 위치는 해당 필지 내부 대표점 · 설치 가능 확정이 아닌 조사 우선순위`;
-        container.appendChild(note);
-        appendReferenceAddressCheck(container, feature, latLng);
+        referenceDetails.body.appendChild(note);
+        let referenceLoaded = false;
+        referenceDetails.details.addEventListener('toggle', () => {
+            if (!referenceDetails.details.open || referenceLoaded) return;
+            referenceLoaded = true;
+            appendReferenceAddressCheck(referenceDetails.body, feature, latLng);
+        });
+        container.appendChild(referenceDetails.details);
 
         if (state.canReview) {
+            const reviewDetails = popupDetails(
+                review?.is_excluded ? '검토 기록 입력 · 추천 제외됨' : (review?.note ? '검토 기록 입력 · 메모 있음' : '추천 제외·메모 입력'),
+                'review'
+            );
             const reviewBox = document.createElement('div');
             reviewBox.className = 'city-land-review-box';
             const excludedLabel = document.createElement('label');
@@ -332,9 +355,17 @@
             const message = document.createElement('div');
             message.className = 'city-land-review-message';
             message.setAttribute('role', 'status');
-            saveButton.addEventListener('click', () => saveCandidateReview(feature, memo.value, excludedInput.checked, saveButton, message));
+            saveButton.addEventListener('click', () => saveCandidateReview(
+                feature,
+                memo.value,
+                excludedInput.checked,
+                saveButton,
+                message,
+                reviewDetails.summary
+            ));
             reviewBox.append(excludedLabel, memo, saveButton, message);
-            container.appendChild(reviewBox);
+            reviewDetails.body.appendChild(reviewBox);
+            container.appendChild(reviewDetails.details);
         }
 
         if (latLng && typeof window.openRegModalWithLoc === 'function') {
@@ -352,7 +383,7 @@
         return container;
     }
 
-    async function saveCandidateReview(feature, noteValue, isExcluded, saveButton, message) {
+    async function saveCandidateReview(feature, noteValue, isExcluded, saveButton, message, summary) {
         const client = getSupabaseClient();
         const pnu = String(feature?.properties?.pnu || '');
         if (!client || !state.canReview || !state.reviewUserId || !/^\d{19}$/.test(pnu)) {
@@ -386,6 +417,11 @@
             updateVisibleReviewCounts();
             renderBoundaries(state.activeFilters);
             message.textContent = data.is_excluded ? '저장했습니다. 이 필지는 회색으로 표시됩니다.' : '검토 기록을 저장했습니다.';
+            if (summary) {
+                summary.textContent = data.is_excluded
+                    ? '검토 기록 입력 · 추천 제외됨'
+                    : (data.note ? '검토 기록 입력 · 메모 있음' : '추천 제외·메모 입력');
+            }
         } catch (error) {
             console.error('[PublicLandReviewSave]', error);
             message.textContent = '저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -486,8 +522,8 @@
             where: `PNU='${normalizedPnu}'`,
             outFields: 'PNU,JIBUN_NM,JIMOK',
             returnGeometry: 'true',
-            outSR: '4326',
-            f: 'geojson'
+            outSR: '2097',
+            f: 'json'
         });
         const response = await fetch(`${PARCEL_BOUNDARY_URL}?${params.toString()}`, {
             cache: 'no-store',
@@ -495,11 +531,41 @@
         });
         if (!response.ok) throw new Error(`공식 필지 경계를 불러오지 못했습니다. (${response.status})`);
         const payload = await response.json();
-        const boundary = payload?.features?.find(item => {
-            const returnedPnu = String(item?.properties?.PNU || item?.properties?.pnu || '');
-            return returnedPnu === normalizedPnu && String(item?.geometry?.type || '').includes('Polygon');
+        const parcel = payload?.features?.find(item => {
+            const returnedPnu = String(item?.attributes?.PNU || item?.attributes?.pnu || '');
+            return returnedPnu === normalizedPnu && Array.isArray(item?.geometry?.rings);
         });
-        if (!boundary) throw new Error('공식 연속지적도에서 해당 필지 경계를 찾지 못했습니다.');
+        if (!parcel) throw new Error('공식 연속지적도에서 해당 필지 경계를 찾지 못했습니다.');
+
+        const projectParams = new URLSearchParams({
+            f: 'json',
+            inSR: '5174',
+            outSR: '4326',
+            geometries: JSON.stringify({
+                geometryType: 'esriGeometryPolygon',
+                geometries: [parcel.geometry]
+            })
+        });
+        const projectResponse = await fetch(PARCEL_PROJECT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+            body: projectParams.toString(),
+            cache: 'no-store',
+            credentials: 'omit'
+        });
+        if (!projectResponse.ok) throw new Error(`공식 필지 좌표를 변환하지 못했습니다. (${projectResponse.status})`);
+        const projectedPayload = await projectResponse.json();
+        const projectedGeometry = projectedPayload?.geometries?.[0];
+        if (!Array.isArray(projectedGeometry?.rings)) throw new Error('공식 필지 좌표 변환 결과가 올바르지 않습니다.');
+        const boundary = {
+            type: 'Feature',
+            id: normalizedPnu,
+            properties: parcel.attributes || {},
+            geometry: {
+                type: 'Polygon',
+                coordinates: projectedGeometry.rings
+            }
+        };
         state.boundaryCache.set(normalizedPnu, boundary);
         return boundary;
     }
@@ -527,7 +593,7 @@
             });
             state.focusedBoundaryGroup.addLayer(layer).addTo(mapInstance);
             if (options.fit !== false && layer.getBounds().isValid()) {
-                mapInstance.fitBounds(layer.getBounds().pad(0.35), { maxZoom: 19, animate: true });
+                mapInstance.fitBounds(layer.getBounds().pad(0.7), { maxZoom: 17, animate: true });
             }
             return true;
         } catch (error) {
@@ -942,5 +1008,5 @@
     window.searchPublicLandCandidates = searchPublicLandCandidates;
     window.searchPublicLandByKeyword = searchPublicLandByKeyword;
     window.fitPublicLandResults = fitPublicLandResults;
-    console.log('[Version] v1.4.0 | yongin-city-land-map.js | parcel keyword search and official boundary');
+    console.log('[Version] v1.5.0 | yongin-city-land-map.js | corrected cadastral coordinates and compact popup accordions');
 })();
