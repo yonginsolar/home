@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.10 -->
+<!-- Version: v1.1.11 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.1.10 | platform_admin.html');</script>
+  <script>console.log('[Version] v1.1.11 | platform_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -659,7 +659,7 @@
         limits: [
           '공용 서브도메인 사용',
           '관리자 1명',
-          '조합원 관리 / 인사·전자결재 / 문서관리 제외'
+          '조합원 관리 / 교육·행사 / 인사·전자결재 / 회의·문서 관리 제외'
         ]
       },
       basePlan: {
@@ -672,8 +672,8 @@
       },
       modulePricing: [
         { key: 'workforce', name: '인사·전자결재', monthlyFee: null, priceLabel: '미정', scope: '직원관리, 결재, 마이페이지, 휴가' },
-        { key: 'minutes', name: '회의/공문', monthlyFee: null, priceLabel: '미정', scope: '회의록, 공문 관리' },
-        { key: 'document_bundle', name: '문서함·전자서명', monthlyFee: null, priceLabel: '미정', scope: '문서 열람, 자료실 운영, 서명 요청, 서명 수집' },
+        { key: 'education', name: '교육·행사 관리', monthlyFee: null, priceLabel: '미정', scope: '교육·행사 등록, 참가자, QR 체크인, 알림, 자료·사진·참석부 관리' },
+        { key: 'governance_bundle', name: '회의·문서 관리', monthlyFee: null, priceLabel: '미정', scope: '회의 출석·배석, 회의록·공문·총회 자료, 문서함, 전자서명' },
         { key: 'kakao', name: '카카오 연동', monthlyFee: null, priceLabel: '별도 협의', scope: '조합별 채널/앱 설정에 따라 별도 협의' }
       ]
     });
@@ -820,6 +820,13 @@
           scopes: ['관리 화면: member_admin.html → admin_member.html', '제어 탭: 조합원 명부 / 자금 관리 / 신청 처리 / 입금 매칭', '연결 기능: 선거 생성 / 선거 관리 / 후보 등록 / 투표 포털']
         },
         {
+          groupKey: 'education',
+          title: '교육·행사 관리',
+          description: '교육과 행사를 등록하고 참가자, QR 체크인, 알림, 자료·사진, 참석부를 한 곳에서 관리합니다.',
+          moduleKeys: ['education'],
+          scopes: ['운영 화면: participation.html?view=education', '공통 참여 엔진: coop_participation_events / attendees', '연결 기능: 모두의 인문학 교육 불러오기·연동']
+        },
+        {
           groupKey: 'accounting',
           title: '회계관리',
           description: '회계 입력, 장부, 자동연동, 결산 관련 기능',
@@ -827,18 +834,11 @@
           scopes: ['회계 화면: accounting.html']
         },
         {
-          groupKey: 'minutes',
-          title: '회의/공문',
-          description: '회의록, 공문, 총회 자료 작성 및 공개 관리',
-          moduleKeys: ['minutes'],
-          scopes: ['의사록: minutes/minutes_admin.html', '공문: minutes/notices_admin.html', '총회 자료: minutes/materials_admin.html', '통합 화면: minutes/admin_minutes.html']
-        },
-        {
-          groupKey: 'documents',
-          title: '문서함·전자서명',
-          description: '공개 문서, 총회 자료, 규정 문서 열람과 임원/대의원 전자서명',
-          moduleKeys: ['documents', 'signature'],
-          scopes: ['문서함 화면: minutes/minutes_view.html', '전자서명 화면: minutes/minutes_sign.html']
+          groupKey: 'governance_bundle',
+          title: '회의·문서 관리',
+          description: '회의 출석부터 회의록·공문·총회 자료, 문서함과 전자서명까지 한 흐름으로 운영합니다.',
+          moduleKeys: ['minutes', 'documents', 'signature'],
+          scopes: ['회의 출석: participation.html?view=meeting', '회의·공문: minutes/admin_minutes.html', '문서함: minutes/minutes_view.html', '전자서명: minutes/minutes_sign.html']
         },
         {
           groupKey: 'audit',
@@ -938,8 +938,8 @@
         };
       }
 
-      if (normalizedKey === 'minutes') {
-        const optionPlan = findPricingModule('minutes') || {};
+      if (normalizedKey === 'education') {
+        const optionPlan = findPricingModule('education') || {};
         return {
           groupKey: normalizedKey,
           groupName: optionPlan.name || normalizedKey,
@@ -953,14 +953,14 @@
         };
       }
 
-      if (['documents', 'signature'].includes(normalizedKey)) {
-        const optionPlan = findPricingModule('document_bundle') || {};
+      if (['governance_bundle', 'minutes', 'documents', 'signature'].includes(normalizedKey)) {
+        const optionPlan = findPricingModule('governance_bundle') || {};
         return {
-          groupKey: 'document_bundle',
-          groupName: optionPlan.name || '문서함·전자서명',
+          groupKey: 'governance_bundle',
+          groupName: optionPlan.name || '회의·문서 관리',
           monthlyFee: null,
           amountLabel: getPricingAmountLabel(optionPlan),
-          badgeLabel: `${optionPlan.name || '문서함·전자서명'} · ${getPricingAmountLabel(optionPlan)}`,
+          badgeLabel: `${optionPlan.name || '회의·문서 관리'} · ${getPricingAmountLabel(optionPlan)}`,
           note: optionPlan.scope || '옵션 모듈',
           badgeClass: 'unpriced',
           amountClass: 'unpriced',
@@ -1716,7 +1716,7 @@
           el.checked = true;
           return;
         }
-        if (runtimeProfile === 'workforce_lite' && (key === 'accounting' || key === 'site_admin' || key === 'member_admin')) {
+        if (key === 'education' || (runtimeProfile === 'workforce_lite' && (key === 'accounting' || key === 'site_admin' || key === 'member_admin'))) {
           el.checked = false;
           return;
         }
