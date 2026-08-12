@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.117
-Change: Preserve Humanities optional attendance consent through the cooperative check-in handoff without exposing raw fields.
+Version: v1.0.118
+Change: Open linked meeting minutes from participation history after server-side access checks.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.117 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.118 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -714,6 +714,76 @@ flex-direction: column;
 .participation-history-media {
 min-width: 0;
 }
+.participation-meeting-title {
+display: inline-flex;
+align-items: center;
+gap: 6px;
+max-width: 100%;
+padding: 0;
+border: 0;
+background: transparent;
+color: #0f766e;
+font: inherit;
+font-weight: 700;
+text-align: left;
+text-decoration: underline;
+text-decoration-thickness: 1px;
+text-underline-offset: 3px;
+cursor: pointer;
+word-break: keep-all;
+overflow-wrap: anywhere;
+}
+.participation-meeting-title:hover { color: #115e59; }
+.participation-meeting-title:focus-visible {
+outline: 3px solid #99f6e4;
+outline-offset: 3px;
+border-radius: 4px;
+}
+#participationDocumentModal { z-index: 1080; }
+#participationDocumentModal .custom-modal-box {
+width: min(92%, 760px);
+max-width: 760px;
+max-height: 84vh;
+padding: 22px;
+text-align: left;
+display: flex;
+flex-direction: column;
+overflow: hidden;
+}
+.participation-document-meta {
+display: flex;
+flex-wrap: wrap;
+gap: 6px 12px;
+font-size: .86rem;
+color: #64748b;
+}
+.participation-document-content {
+min-height: 160px;
+margin-top: 16px;
+padding: 18px;
+border: 1px solid #e2e8f0;
+border-radius: 12px;
+background: #f8fafc;
+overflow: auto;
+line-height: 1.7;
+word-break: keep-all;
+overflow-wrap: anywhere;
+}
+.participation-document-content :is(h1, h2, h3, h4, h5, h6, p, li, td, th) {
+word-break: keep-all;
+overflow-wrap: anywhere;
+}
+.participation-document-content table {
+display: block;
+max-width: 100%;
+overflow-x: auto;
+border-collapse: collapse;
+}
+.participation-document-content :is(td, th) {
+padding: 7px 9px;
+border: 1px solid #cbd5e1;
+}
+.participation-document-content a { color: #0f766e; }
 
 @media (min-width: 641px) {
 #participationHistoryModal .custom-modal-box {
@@ -938,6 +1008,17 @@ margin: 0;
 padding: max(20px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
 border-radius: 0;
 overflow: visible;
+}
+#participationDocumentModal .custom-modal-box {
+width: 100%;
+max-width: none;
+max-height: calc(100dvh - 24px);
+padding: 20px 16px;
+}
+.participation-document-content {
+min-height: 120px;
+padding: 14px;
+font-size: 1rem;
 }
 #participationHistoryTitle {
 font-size: 1.3rem;
@@ -1979,6 +2060,27 @@ oninput="autoHyphen(this)"> </div>
 </div>
 <div class="text-end border-top pt-3 mt-3">
 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeParticipationHistory()">닫기</button>
+</div>
+</div>
+</div>
+
+<div id="participationDocumentModal" class="custom-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="participationDocumentTitle" aria-hidden="true">
+<div class="custom-modal-box">
+<div class="d-flex justify-content-between align-items-start gap-3 border-bottom pb-3">
+<div class="min-w-0">
+<div class="small text-success fw-bold mb-1"><i class="bi bi-journal-text me-1" aria-hidden="true"></i>회의록 미리보기</div>
+<h5 id="participationDocumentTitle" class="fw-bold mb-2 text-break">회의록</h5>
+<div id="participationDocumentMeta" class="participation-document-meta" aria-live="polite"></div>
+</div>
+<button type="button" class="btn-close flex-shrink-0" id="participationDocumentCloseBtn" onclick="closeParticipationDocument()" aria-label="닫기"></button>
+</div>
+<div id="participationDocumentContent" class="participation-document-content" aria-live="polite">
+<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>회의록을 불러오는 중...</div>
+</div>
+<div class="d-flex flex-wrap justify-content-end gap-2 border-top pt-3 mt-3">
+<button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeParticipationDocument()">닫기</button>
+<a id="participationDocumentFullLink" class="btn btn-outline-primary btn-sm" href="minutes/minutes_view.html" hidden><i class="bi bi-folder2-open me-1" aria-hidden="true"></i>문서함에서 전체보기</a>
+<a id="participationDocumentSignLink" class="btn btn-success btn-sm" href="minutes/minutes_sign.html" hidden><i class="bi bi-pen me-1" aria-hidden="true"></i>전자서명 하러 가기</a>
 </div>
 </div>
 </div>
@@ -5419,6 +5521,7 @@ let participationHistoryData = { events:[] };
 let participationHistoryActiveTab = 'EDUCATION';
 let participationHistoryRenderVersion = 0;
 let participationHistoryReturnFocus = null;
+let participationDocumentReturnFocus = null;
 let participationImageReturnFocus = null;
 let participationImageGallery = [];
 let participationImageIndex = -1;
@@ -5602,6 +5705,9 @@ alt: String(file.original_name || `교육 사진 ${index + 1}`).trim()
 const firstPhoto = photoGalleryPayload[0] || null;
 const firstPhotoUrl = firstPhoto ? (photoUrlMap.get(firstPhoto.storagePath) || '') : '';
 const hasEducationPhoto = event.event_type === 'EDUCATION' && Boolean(firstPhoto);
+const titleHtml = event.event_type !== 'EDUCATION' && event.document_available === true
+? `<button type="button" class="participation-meeting-title" data-participation-document="${escapeHtml(event.event_id)}" aria-label="${escapeHtml(event.title)} 회의록 보기"><span>${escapeHtml(event.title)}</span><i class="bi bi-box-arrow-up-right small" aria-hidden="true"></i></button>`
+: `<div class="fw-bold">${escapeHtml(event.title)}</div>`;
 const photosHtml = firstPhoto
 ? `<div class="participation-photo-strip" aria-label="교육 사진 ${photoGalleryPayload.length}장">
 <button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhoto.storagePath)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="교육 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
@@ -5614,7 +5720,7 @@ return `
 <div class="d-flex justify-content-between align-items-start gap-2">
 <div>
 <div class="small text-muted mb-1">${escapeHtml(participationEventTypeLabel(event.event_type))}</div>
-<div class="fw-bold">${escapeHtml(event.title)}</div>
+${titleHtml}
 </div>
 <span class="participation-status-chip ${participationAttendanceClass(status, event.event_type, event.is_target)}">${participationAttendanceLabel(status, event.event_type, event.is_target)}</span>
 </div>
@@ -5637,7 +5743,152 @@ button.addEventListener('click', function() {
 openParticipationImageLightbox(button.dataset.participationPhoto, button);
 });
 });
+list.querySelectorAll('[data-participation-document]').forEach(function(button) {
+button.addEventListener('click', function() {
+openParticipationDocument(button.dataset.participationDocument, button);
+});
+});
 } // End of renderParticipationHistory
+
+function participationDocumentTypeLabel(type) {
+if (type === 'GENERAL_ASSEMBLY') return '총회 의사록';
+if (type === 'MINUTES') return '회의록';
+return '문서';
+} // End of participationDocumentTypeLabel
+
+function participationDocumentStatusLabel(status) {
+if (status === 'OPEN') return '서명 진행 중';
+if (status === 'CLOSED') return '완료';
+return String(status || '상태 확인');
+} // End of participationDocumentStatusLabel
+
+function sanitizeParticipationDocumentHtml(rawHtml) {
+const source = String(rawHtml || '');
+const parser = new DOMParser();
+const parsed = parser.parseFromString(source, 'text/html');
+const allowedTags = new Set([
+'A', 'B', 'BR', 'BLOCKQUOTE', 'DIV', 'EM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+'HR', 'I', 'LI', 'OL', 'P', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'U', 'UL'
+]);
+const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META']);
+Array.from(parsed.body.querySelectorAll('*')).forEach(function(node) {
+const tag = node.tagName;
+if (!allowedTags.has(tag)) {
+if (blockedTags.has(tag)) {
+node.remove();
+return;
+}
+const parent = node.parentNode;
+if (!parent) return;
+while (node.firstChild) parent.insertBefore(node.firstChild, node);
+parent.removeChild(node);
+return;
+}
+Array.from(node.attributes).forEach(function(attribute) {
+const name = attribute.name.toLowerCase();
+const allowed = tag === 'A'
+? ['href', 'target', 'rel', 'title']
+: (tag === 'TD' || tag === 'TH' ? ['colspan', 'rowspan'] : []);
+if (!allowed.includes(name)) node.removeAttribute(attribute.name);
+});
+if (tag === 'A') {
+const rawHref = String(node.getAttribute('href') || '').trim();
+let safeHref = '';
+if (/^(mailto:|tel:)/i.test(rawHref)) safeHref = rawHref;
+else {
+try {
+const url = new URL(rawHref, window.location.origin);
+if (url.protocol === 'http:' || url.protocol === 'https:') safeHref = url.href;
+} catch (_) {}
+}
+if (safeHref) {
+node.setAttribute('href', safeHref);
+node.setAttribute('target', '_blank');
+node.setAttribute('rel', 'noopener noreferrer');
+} else {
+node.removeAttribute('href');
+node.removeAttribute('target');
+node.removeAttribute('rel');
+}
+}
+});
+if (parsed.body.children.length === 0 && parsed.body.textContent.trim()) {
+return `<p>${escapeHtml(parsed.body.textContent).replace(/\r?\n/g, '<br>')}</p>`;
+}
+return parsed.body.innerHTML;
+} // End of sanitizeParticipationDocumentHtml
+
+async function openParticipationDocument(eventId, trigger) {
+const safeEventId = String(eventId || '').trim();
+const memberUuid = getActiveMemberProfileId();
+const overlay = document.getElementById('participationDocumentModal');
+const title = document.getElementById('participationDocumentTitle');
+const meta = document.getElementById('participationDocumentMeta');
+const content = document.getElementById('participationDocumentContent');
+const fullLink = document.getElementById('participationDocumentFullLink');
+const signLink = document.getElementById('participationDocumentSignLink');
+if (!overlay || !memberUuid || !/^[0-9a-f-]{36}$/i.test(safeEventId)) return;
+participationDocumentReturnFocus = trigger || document.activeElement;
+document.getElementById('participationHistoryModal')?.classList.add('modal-depth-back');
+overlay.style.display = 'flex';
+overlay.setAttribute('aria-hidden', 'false');
+if (title) title.textContent = '회의록';
+if (meta) meta.textContent = '';
+if (content) content.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>회의록을 불러오는 중...</div>';
+if (fullLink) fullLink.hidden = true;
+if (signLink) signLink.hidden = true;
+document.getElementById('participationDocumentCloseBtn')?.focus();
+try {
+const { data, error } = await _supabase.rpc('participation_member_document_preview', {
+p_member_uuid: memberUuid,
+p_event_id: safeEventId
+});
+if (error) throw error;
+if (!data?.available || !data?.document_id) {
+closeParticipationDocument(false);
+showModal('연결된 회의록이 없거나 현재 열람할 수 없습니다.');
+return;
+}
+if (title) title.textContent = data.title || '회의록';
+const metaParts = [
+participationDocumentTypeLabel(data.doc_type),
+participationDocumentStatusLabel(data.status),
+data.created_at ? `작성 ${formatMemberKstDateTime(data.created_at)}` : ''
+].filter(Boolean);
+if (data.signature_signed_at) metaParts.push(`서명 완료 ${formatMemberKstDateTime(data.signature_signed_at)}`);
+if (meta) meta.textContent = metaParts.join(' · ');
+const safeContent = sanitizeParticipationDocumentHtml(data.content || '');
+if (content) content.innerHTML = safeContent || '<div class="text-muted">등록된 회의록 내용이 없습니다.</div>';
+const encodedId = encodeURIComponent(String(data.document_id));
+if (fullLink) {
+fullLink.href = `minutes/minutes_view.html?id=${encodedId}`;
+fullLink.hidden = false;
+}
+if (signLink) {
+signLink.href = `minutes/minutes_sign.html?id=${encodedId}`;
+signLink.hidden = data.can_open_signature !== true;
+}
+} catch (error) {
+console.error('openParticipationDocument failed:', error);
+closeParticipationDocument(false);
+showModal('회의록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+}
+} // End of openParticipationDocument
+
+function closeParticipationDocument(restoreFocus = true) {
+const overlay = document.getElementById('participationDocumentModal');
+if (overlay) {
+overlay.style.display = 'none';
+overlay.setAttribute('aria-hidden', 'true');
+}
+document.getElementById('participationHistoryModal')?.classList.remove('modal-depth-back');
+if (restoreFocus && participationDocumentReturnFocus && typeof participationDocumentReturnFocus.focus === 'function') participationDocumentReturnFocus.focus();
+participationDocumentReturnFocus = null;
+} // End of closeParticipationDocument
+
+document.getElementById('participationDocumentModal')?.addEventListener('click', function(event) {
+if (event.target === event.currentTarget) closeParticipationDocument();
+});
 
 async function openParticipationHistory() {
 const overlay = document.getElementById('participationHistoryModal');
@@ -5670,6 +5921,7 @@ if (list) list.innerHTML = `<div class="text-center text-danger py-5">${escapeHt
 } // End of openParticipationHistory
 
 function closeParticipationHistory() {
+closeParticipationDocument(false);
 closeParticipationImageLightbox();
 const overlay = document.getElementById('participationHistoryModal');
 if (overlay) overlay.style.display = 'none';
@@ -5877,6 +6129,28 @@ syncParticipationImageLightboxControls();
 } // End of closeParticipationImageLightbox
 
 document.addEventListener('keydown', function(event) {
+const documentOverlay = document.getElementById('participationDocumentModal');
+if (documentOverlay && documentOverlay.style.display === 'flex') {
+if (event.key === 'Escape') {
+event.preventDefault();
+event.stopImmediatePropagation();
+closeParticipationDocument();
+return;
+}
+if (event.key === 'Tab') {
+const focusable = Array.from(documentOverlay.querySelectorAll('button:not([disabled]), a[href]:not([hidden])'));
+if (focusable.length) {
+const currentIndex = focusable.indexOf(document.activeElement);
+const nextIndex = event.shiftKey
+? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+: (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+event.preventDefault();
+event.stopImmediatePropagation();
+focusable[nextIndex].focus();
+}
+}
+return;
+}
 const imageOverlay = document.getElementById('participationImageLightbox');
 if (imageOverlay && imageOverlay.classList.contains('show')) {
 if (event.key === 'Tab') {
