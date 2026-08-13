@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.118
-Change: Open linked meeting minutes from participation history after server-side access checks.
+Version: v1.0.119
+Change: Show public Humanities photos and learning resources in linked education participation history.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.118 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.119 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -5592,6 +5592,50 @@ participationSignedUrlCache.set(safePath, { request, expiresAt: Date.now() + 8 *
 return request;
 } // End of getParticipationSignedUrl
 
+async function loadMemberLinkedHumanitiesResources(memberUuid) {
+if (!memberUuid) return { resourcesByEvent:{}, warningsByEvent:{} };
+try {
+const accessToken = await currentCoopAccessToken();
+const result = await callEducationIntegration(HUMANITIES_INTEGRATION_URL, COOP_PUBLISHABLE_KEY, {
+action:'member_linked_resources', member_uuid:memberUuid
+}, accessToken);
+return {
+resourcesByEvent: result?.resources_by_event && typeof result.resources_by_event === 'object'
+? result.resources_by_event
+: {},
+warningsByEvent: result?.warnings_by_event && typeof result.warnings_by_event === 'object'
+? result.warnings_by_event
+: {}
+};
+} catch (error) {
+console.warn('linked Humanities resources unavailable:', error?.code || error?.message || error);
+return { resourcesByEvent:{}, warningsByEvent:{} };
+}
+} // End of loadMemberLinkedHumanitiesResources
+
+function mergeMemberLinkedHumanitiesResources(history, linkedPayload) {
+const resourcesByEvent = linkedPayload?.resourcesByEvent || {};
+const warningsByEvent = linkedPayload?.warningsByEvent || {};
+const events = (Array.isArray(history?.events) ? history.events : []).map(function(event) {
+const eventId = String(event?.event_id || '');
+const localFiles = Array.isArray(event?.files) ? event.files : [];
+const linkedFiles = Array.isArray(resourcesByEvent[eventId]) ? resourcesByEvent[eventId] : [];
+const seen = new Set();
+const files = [...localFiles, ...linkedFiles].filter(function(file) {
+const key = String(file?.external_url || file?.storage_path || file?.id || '').trim();
+if (!key || seen.has(key)) return false;
+seen.add(key);
+return true;
+});
+return {
+...event,
+files,
+humanities_source_warning: String(warningsByEvent[eventId] || '')
+};
+});
+return { ...(history || {}), events };
+} // End of mergeMemberLinkedHumanitiesResources
+
 function syncParticipationHistoryTabs() {
 const educationTab = document.getElementById('participationEducationTab');
 const meetingTab = document.getElementById('participationMeetingTab');
@@ -5655,7 +5699,7 @@ list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-
 const photoPaths = Array.from(new Set(visibleEvents.flatMap(function(event) {
 if (event.event_type !== 'EDUCATION') return [];
 return (Array.isArray(event.files) ? event.files : [])
-.filter(function(file) { return file.file_kind === 'PHOTO'; })
+.filter(function(file) { return file.file_kind === 'PHOTO' && !file.external_url; })
 .map(function(file) { return String(file.storage_path || '').trim(); })
 .filter(Boolean);
 })));
@@ -5693,26 +5737,38 @@ const actualAttendeeHtml = event.actual_attendee_name
 : '';
 const materialsHtml = materials.length > 0
 ? `<div class="d-flex flex-wrap gap-2 mt-3">${materials.map(function(file) {
-return `<button type="button" class="btn btn-sm btn-outline-primary" data-participation-file="${escapeHtml(file.storage_path)}"><i class="bi bi-download me-1" aria-hidden="true"></i>강의자료 다운로드 · ${escapeHtml(file.original_name)}</button>`;
+const externalUrl = safeUrl(file.external_url || '');
+const resourceType = String(file.resource_type || 'file');
+const resourceLabel = resourceType === 'video' ? '영상 보기' : resourceType === 'link' ? '관련 링크' : externalUrl ? '강의자료 열기' : '강의자료 다운로드';
+const sourceLabel = file.source === 'HUMANITIES' ? '<span class="badge text-bg-light border ms-1">모두의 인문학</span>' : '';
+if (externalUrl) {
+return `<button type="button" class="btn btn-sm btn-outline-primary" data-participation-external-url="${escapeHtml(externalUrl)}"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>${escapeHtml(resourceLabel)} · ${escapeHtml(file.original_name)}${sourceLabel}</button>`;
+}
+return `<button type="button" class="btn btn-sm btn-outline-primary" data-participation-file="${escapeHtml(file.storage_path)}"><i class="bi bi-download me-1" aria-hidden="true"></i>${escapeHtml(resourceLabel)} · ${escapeHtml(file.original_name)}</button>`;
 }).join('')}</div>`
 : '';
 const photoGalleryPayload = photos.map(function(file, index) {
 return {
 storagePath: String(file.storage_path || '').trim(),
+externalUrl: safeUrl(file.external_url || ''),
 alt: String(file.original_name || `교육 사진 ${index + 1}`).trim()
 };
-}).filter(function(item) { return item.storagePath; });
+}).filter(function(item) { return item.storagePath || item.externalUrl; });
 const firstPhoto = photoGalleryPayload[0] || null;
-const firstPhotoUrl = firstPhoto ? (photoUrlMap.get(firstPhoto.storagePath) || '') : '';
+const firstPhotoKey = firstPhoto ? (firstPhoto.externalUrl || firstPhoto.storagePath) : '';
+const firstPhotoUrl = firstPhoto ? (firstPhoto.externalUrl || photoUrlMap.get(firstPhoto.storagePath) || '') : '';
 const hasEducationPhoto = event.event_type === 'EDUCATION' && Boolean(firstPhoto);
 const titleHtml = event.event_type !== 'EDUCATION' && event.document_available === true
 ? `<button type="button" class="participation-meeting-title" data-participation-document="${escapeHtml(event.event_id)}" aria-label="${escapeHtml(event.title)} 회의록 보기"><span>${escapeHtml(event.title)}</span><i class="bi bi-box-arrow-up-right small" aria-hidden="true"></i></button>`
 : `<div class="fw-bold">${escapeHtml(event.title)}</div>`;
 const photosHtml = firstPhoto
 ? `<div class="participation-photo-strip" aria-label="교육 사진 ${photoGalleryPayload.length}장">
-<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhoto.storagePath)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="교육 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
-<span class="participation-photo-count">사진 ${photoGalleryPayload.length}장 · 눌러 보기</span>
+<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhotoKey)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="교육 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
+<span class="participation-photo-count">사진 ${photoGalleryPayload.length}장 · 눌러 보기${photos.some(function(file) { return file.source === 'HUMANITIES'; }) ? ' · 모두의 인문학' : ''}</span>
 </div>`
+: '';
+const sourceWarningHtml = event.humanities_source_warning
+? `<div class="small text-secondary mt-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>${escapeHtml(event.humanities_source_warning)}</div>`
 : '';
 return `
 <article class="participation-history-item${hasEducationPhoto ? ' education-with-photo' : ''}">
@@ -5729,6 +5785,7 @@ ${educationHtml}
 ${actualAttendeeHtml}
 ${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
 ${materialsHtml}
+${sourceWarningHtml}
 </div>
 ${hasEducationPhoto ? `<div class="participation-history-media">${photosHtml}</div>` : photosHtml}
 </article>`;
@@ -5736,6 +5793,12 @@ ${hasEducationPhoto ? `<div class="participation-history-media">${photosHtml}</d
 list.querySelectorAll('[data-participation-file]').forEach(function(button) {
 button.addEventListener('click', function() {
 openParticipationAttachment(button.dataset.participationFile);
+});
+});
+list.querySelectorAll('[data-participation-external-url]').forEach(function(button) {
+button.addEventListener('click', function() {
+const url = safeUrl(button.dataset.participationExternalUrl || '');
+if (url) window.open(url, '_blank', 'noopener,noreferrer');
 });
 });
 list.querySelectorAll('[data-participation-photo]').forEach(function(button) {
@@ -5911,7 +5974,8 @@ const { data, error } = await _supabase.rpc('participation_member_list', {
 p_member_uuid: memberUuid
 });
 if (error) throw error;
-participationHistoryData = data || { events:[] };
+const linkedResources = await loadMemberLinkedHumanitiesResources(memberUuid);
+participationHistoryData = mergeMemberLinkedHumanitiesResources(data || { events:[] }, linkedResources);
 await renderParticipationHistory(participationHistoryData);
 } catch (error) {
 console.error('openParticipationHistory failed:', error);
@@ -5971,6 +6035,8 @@ probe.src = url;
 } // End of preloadParticipationImage
 
 async function resolveParticipationGalleryUrl(item, forceRefresh) {
+const externalUrl = safeUrl(item?.externalUrl || '');
+if (externalUrl) return externalUrl;
 const existingUrl = String(item?.signedUrl || '').trim();
 if (existingUrl.startsWith('data:')) return existingUrl;
 if (forceRefresh) participationSignedUrlCache.delete(item.storagePath);
@@ -6069,36 +6135,45 @@ const thumbnail = triggerElement?.querySelector?.('img');
 participationImageGallery = galleryPayload.length > 0
 ? galleryPayload.map(function(item, index) {
 const storagePath = String(item?.storagePath || '').trim();
+const externalUrl = safeUrl(item?.externalUrl || '');
+const itemKey = externalUrl || storagePath;
 return {
 storagePath,
-signedUrl: storagePath === String(triggerElement?.dataset?.participationPhoto || '').trim()
+externalUrl,
+signedUrl: itemKey === String(triggerElement?.dataset?.participationPhoto || '').trim()
 ? String(thumbnail?.currentSrc || thumbnail?.src || '').trim()
 : '',
 alt: String(item?.alt || `교육 사진 ${index + 1}`).trim(),
 trigger: triggerElement || null
 };
-}).filter(function(item) { return item.storagePath; })
+}).filter(function(item) { return item.storagePath || item.externalUrl; })
 : galleryButtons.map(function(button, index) {
 const buttonThumbnail = button.querySelector('img');
+const resourceKey = String(button.dataset.participationPhoto || '').trim();
+const externalUrl = safeUrl(resourceKey);
 return {
-storagePath: String(button.dataset.participationPhoto || '').trim(),
+storagePath: externalUrl ? '' : resourceKey,
+externalUrl,
 signedUrl: String(buttonThumbnail?.currentSrc || buttonThumbnail?.src || '').trim(),
 alt: String(button.title || buttonThumbnail?.alt || `교육 사진 ${index + 1}`).trim(),
 trigger: button
 };
-}).filter(function(item) { return item.storagePath; });
+}).filter(function(item) { return item.storagePath || item.externalUrl; });
 if (!participationImageGallery.length) {
+const fallbackKey = String(storagePath || '').trim();
+const fallbackExternalUrl = safeUrl(fallbackKey);
 participationImageGallery = [{
-storagePath: String(storagePath || '').trim(),
+storagePath: fallbackExternalUrl ? '' : fallbackKey,
+externalUrl: fallbackExternalUrl,
 signedUrl: '',
 alt: '교육 사진 크게 보기',
 trigger: triggerElement || null
-}].filter(function(item) { return item.storagePath; });
+}].filter(function(item) { return item.storagePath || item.externalUrl; });
 }
 if (!participationImageGallery.length) return;
 const requestedPath = String(storagePath || '').trim();
 const requestedIndex = participationImageGallery.findIndex(function(item) {
-return item.storagePath === requestedPath;
+return (item.externalUrl || item.storagePath) === requestedPath;
 });
 participationImageIndex = requestedIndex >= 0 ? requestedIndex : 0;
 overlay.classList.add('show');
