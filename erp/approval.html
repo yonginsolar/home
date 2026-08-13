@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.42 | Change: 2026-08-06 - Add a structured four-insurance table for approvers. -->
+<!-- Version: v1.2.43 | Change: 2026-08-13 - Default the leave end date to the start date and prevent reverse ranges. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.42 | approval.html');</script>
+  <script>console.log('[Version] v1.2.43 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -829,9 +829,9 @@
                   <span class="badge bg-primary">잔여 연차: <span id="remainDaysBadge">조회중...</span>일</span>
                 </div>
                 <div class="input-group mb-2">
-                  <input type="date" class="form-control" id="leaveStart" onchange="calcLeaveDays()">
+                  <input type="date" class="form-control" id="leaveStart" onchange="handleApprovalLeaveDateRangeChange()">
                   <span class="input-group-text">~</span>
-                  <input type="date" class="form-control" id="leaveEnd" onchange="calcLeaveDays()">
+                  <input type="date" class="form-control" id="leaveEnd" onchange="handleApprovalLeaveDateRangeChange()">
                 </div>
             </div>
 
@@ -2835,6 +2835,8 @@ async function loadApprovalDraftFromServer(draftId) {
         if (mixedStartSlotEl) mixedStartSlotEl.value = normalizeApprovalMixedLeaveSlot(fields.leave_range_start_slot || 'full') === 'pm' ? 'pm' : 'full';
         if (mixedEndSlotEl) mixedEndSlotEl.value = normalizeApprovalMixedLeaveSlot(fields.leave_range_end_slot || 'full') === 'am' ? 'am' : 'full';
         if (mixedSameSlotEl) mixedSameSlotEl.value = normalizeApprovalMixedLeaveSlot(fields.leave_range_same_day_slot || 'full');
+        syncApprovalLeaveEndDate('leaveStart', 'leaveEnd');
+        syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
         const restoredMixedItems = normalizeApprovalMixedLeaveItems(fields.leave_items);
         const hasLegacyMixedItems = restoredMixedItems.length > 0 && !String(fields.leave_range_start || '').trim() && !String(fields.leave_range_end || '').trim();
         renderApprovalLeaveMixedItems(restoredMixedItems);
@@ -3416,10 +3418,31 @@ function syncApprovalLeaveInputMode() {
     if (mixedDayTitle) mixedDayTitle.textContent = `📅 ${label} 사용 내역`;
     if (singleDayTitle) singleDayTitle.textContent = `📅 ${label} 날짜`;
     if (halfDayTitle) halfDayTitle.textContent = `📅 ${label} 날짜`;
+    syncApprovalLeaveEndDate('leaveStart', 'leaveEnd');
+    syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
     if (mode === 'mixed_days') ensureApprovalLeaveMixedInputState();
     if (getCurrentApprovalCategory() === '휴가') {
         syncApprovalTitleInput('휴가');
     }
+}
+
+function syncApprovalLeaveEndDate(startId, endId) {
+    const startEl = document.getElementById(startId);
+    const endEl = document.getElementById(endId);
+    if (!startEl || !endEl) return false;
+
+    const startValue = String(startEl.value || '').trim();
+    const endValue = String(endEl.value || '').trim();
+    endEl.min = startValue;
+
+    if (!startValue || (endValue && endValue >= startValue)) return false;
+    endEl.value = startValue;
+    return true;
+}
+
+function handleApprovalLeaveDateRangeChange() {
+    syncApprovalLeaveEndDate('leaveStart', 'leaveEnd');
+    calcLeaveDays();
 }
 
 function normalizeApprovalMixedLeaveSlot(value) {
@@ -3475,6 +3498,7 @@ function syncApprovalMixedRangeUi() {
 }
 
 function handleApprovalMixedRangeChange() {
+    syncApprovalLeaveEndDate('mixedLeaveStartDate', 'mixedLeaveEndDate');
     syncApprovalMixedRangeUi();
     if (!isApprovalMixedLeaveDetailMode()) calcLeaveDays();
 }
