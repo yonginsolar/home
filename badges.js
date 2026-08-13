@@ -1,5 +1,5 @@
-/* Version: v1.1.0
-Change: 2026-08-13 - Show earned badges and only the next goal in each progression track.
+/* Version: v1.1.1
+Change: 2026-08-13 - Avoid global section spacing in grouped badge rows.
 */
 /**
  * badges.js
@@ -247,10 +247,10 @@ const Badges = {
             }).join("");
 
             return `
-                <section class="badge-group-section" aria-label="${this._utils.escapeAttr(groupLabel)}">
+                <div class="badge-group-section" role="group" aria-label="${this._utils.escapeAttr(groupLabel)}">
                     <div class="badge-group-heading">${this._utils.escapeHtml(groupLabel)}</div>
                     <div class="badge-group-row scroll-hide">${cards}</div>
-                </section>`;
+                </div>`;
         }).join("");
     },
 
