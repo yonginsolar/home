@@ -1,5 +1,5 @@
-/* Version: v1.0.4
-Change: 2026-03-31 - Expose Badges on window/globalThis so duplicate loader checks do not reinsert the same script.
+/* Version: v1.1.0
+Change: 2026-08-13 - Show earned badges and only the next goal in each progression track.
 */
 /**
  * badges.js
@@ -12,6 +12,18 @@ Change: 2026-03-31 - Expose Badges on window/globalThis so duplicate loader chec
 const Badges = {
     // 내부 캐시 저장소
     _allBadgesCache: null,
+
+    _collectionGroups: {
+        celebration: { label: "처음과 기념일", order: 10 },
+        education: { label: "교육 참여", order: 20 },
+        capital: { label: "출자금", order: 30 },
+        extra_capital: { label: "추가 출자", order: 40 },
+        anniversary: { label: "함께한 시간", order: 50 },
+        event: { label: "특별한 참여", order: 60 },
+        honor: { label: "활동 기록", order: 70 },
+        role: { label: "역할과 공적", order: 80 },
+        challenge: { label: "다음 도전", order: 90 }
+    },
 
     // ============================================================
     // [Core] 내부 유틸리티 (중복 제거 및 로직 중앙화)
@@ -76,6 +88,45 @@ const Badges = {
                 bg: bgCode,     // 실제 Hex 컬러
                 fg: fgCode      // 대비되는 텍스트 컬러
             };
+        },
+
+        collectionGroupKey: (badge) => {
+            const track = String(badge?.progress_track || "").trim();
+            if (Badges._collectionGroups[track]) return track;
+            const group = String(badge?.badge_group || "challenge").trim();
+            return Badges._collectionGroups[group] ? group : "challenge";
+        },
+
+        formatProgressValue: (value, unit) => {
+            const numberValue = Number(value || 0);
+            if (!Number.isFinite(numberValue)) return "0";
+            if (unit === "원" && Math.abs(numberValue) >= 10000) {
+                const manWon = numberValue / 10000;
+                const digits = Number.isInteger(manWon) ? 0 : 1;
+                return `${manWon.toLocaleString("ko-KR", { maximumFractionDigits: digits })}만원`;
+            }
+            return `${numberValue.toLocaleString("ko-KR")}${unit || ""}`;
+        },
+
+        selectVisibleFallback: (badges) => {
+            const rows = Array.isArray(badges) ? badges : [];
+            const firstUnearnedTier = new Map();
+            rows.forEach((badge) => {
+                const track = String(badge?.progress_track || "").trim();
+                if (!track || badge?.is_earned) return;
+                const tier = Number(badge?.progress_tier || 0);
+                if (!tier) return;
+                const previous = firstUnearnedTier.get(track);
+                if (!previous || tier < previous) firstUnearnedTier.set(track, tier);
+            });
+            return rows.filter((badge) => {
+                if (badge?.is_earned) return true;
+                if (badge?.locked_visibility === "always") return true;
+                const track = String(badge?.progress_track || "").trim();
+                return badge?.locked_visibility === "next"
+                    && track
+                    && Number(badge?.progress_tier || 0) === firstUnearnedTier.get(track);
+            });
         }
     },
 
@@ -94,6 +145,7 @@ const Badges = {
         const { data, error } = await supabase
             .from("site_badges")
             .select("*")
+            .eq("is_active", true)
             .order("display_order", { ascending: true });
 
         if (error) {
@@ -105,68 +157,101 @@ const Badges = {
         return data || [];
     },
 
-// ============================================================
+    // ============================================================
     // 2. 뱃지 현황판 렌더링 (정보창 표시 & 클릭 선택 방식)
     // ============================================================
     async render(containerId, memberUid, supabase) {
         const container = document.getElementById(containerId);
-        const infoBox = document.getElementById('selectedBadgeInfo'); // 정보창
         if (!container) return;
 
-        // 전체 뱃지 로드
-        const allBadges = await this.getAll(supabase);
-        if (!allBadges.length) {
-            container.innerHTML = '<div class="text-muted small text-center w-100">등록된 뱃지가 없습니다.</div>';
+        container.innerHTML = '<div class="text-muted small text-center w-100 py-3"><span class="spinner-border spinner-border-sm me-1"></span>배지를 정리하는 중...</div>';
+
+        let collection = [];
+        const { data: collectionData, error: collectionError } = await supabase.rpc("get_member_badge_collection", {
+            p_member_uid: memberUid
+        });
+
+        if (!collectionError && Array.isArray(collectionData)) {
+            collection = collectionData;
+        } else {
+            console.warn("단계형 뱃지 로딩 실패, 호환 조회로 전환:", collectionError);
+            const allBadges = await this.getAll(supabase);
+            const { data: myBadges, error: myBadgeError } = await supabase
+                .from("coop_member_badges")
+                .select("badge_id, granted_at")
+                .eq("member_uid", memberUid);
+            if (myBadgeError) console.warn("내 뱃지 호환 조회 실패:", myBadgeError);
+            const myBadgeMap = new Map((myBadges || []).map((badge) => [badge.badge_id, badge.granted_at]));
+            collection = this._utils.selectVisibleFallback(allBadges.map((badge) => ({
+                ...badge,
+                is_earned: myBadgeMap.has(badge.id),
+                granted_at: myBadgeMap.get(badge.id) || null,
+                progress_value: null
+            })));
+        }
+
+        if (!collection.length) {
+            container.innerHTML = '<div class="text-muted small text-center w-100 py-3">아직 표시할 배지가 없습니다.</div>';
             return;
         }
 
-        // 내 뱃지 로드
-        const { data: myBadges, error } = await supabase
-            .from("coop_member_badges")
-            .select("badge_id, granted_at")
-            .eq("member_uid", memberUid);
-
-        const myBadgeSet = new Set((myBadges ?? []).map(b => b.badge_id));
-        const myBadgeMap = new Map((myBadges ?? []).map(b => [b.badge_id, b.granted_at]));
-
-        let html = '';
-        
-        allBadges.forEach(badge => {
-            const hasBadge = myBadgeSet.has(badge.id);
-            let dateStr = "";
-            let descStr = badge.description || "설명 없음";
-            
-            if (hasBadge) {
-                const d = this._utils.parseDate(myBadgeMap.get(badge.id));
-                dateStr = d ? d.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : "알 수 없음";
-            } else {
-                descStr = "🔒 " + (badge.description || "미획득");
-            }
-
-            const { bg, fg } = this._utils.resolveStyle(badge.color);
-            const style = hasBadge
-                ? `background-color: ${bg}; color: ${fg}; box-shadow: 0 2px 5px rgba(0,0,0,0.2);`
-                : `background-color: #f0f0f0; color: #ccc; filter: grayscale(100%); opacity: 0.6;`;
-
-            // 데이터 속성(dataset)에 정보 저장
-            html += `
-                <div class="badge-item text-center p-2 rounded cursor-pointer user-select-none"
-                     style="width: 80px; min-width: 80px; ${style} transition: transform 0.2s;"
-                     data-name="${this._utils.escapeAttr(badge.name)}"
-                     data-icon="${this._utils.escapeAttr(badge.icon || "🏅")}"
-                     data-has="${hasBadge}"
-                     data-date="${dateStr}"
-                     data-desc="${this._utils.escapeAttr(descStr)}"
-                     onclick="Badges.selectBadge(this)">
-                    
-                    <div style="font-size: 1.5rem;">${this._utils.escapeHtml(badge.icon || "🏅")}</div>
-                    <div style="font-size: 0.7rem; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                        ${this._utils.escapeHtml(badge.name)}
-                    </div>
-                </div>`;
+        const grouped = new Map();
+        collection.forEach((badge) => {
+            const key = this._utils.collectionGroupKey(badge);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(badge);
         });
 
-        container.innerHTML = html;
+        const sortedGroups = Array.from(grouped.entries()).sort((a, b) => {
+            return (this._collectionGroups[a[0]]?.order || 999) - (this._collectionGroups[b[0]]?.order || 999);
+        });
+
+        container.innerHTML = sortedGroups.map(([groupKey, badges]) => {
+            const groupLabel = this._collectionGroups[groupKey]?.label || "배지";
+            const cards = badges.map((badge) => {
+                const hasBadge = badge.is_earned === true;
+                const d = hasBadge ? this._utils.parseDate(badge.granted_at) : null;
+                const dateStr = d ? d.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" }) : "";
+                const descStr = badge.description || (hasBadge ? "획득한 배지입니다." : "다음 도전 배지입니다.");
+                const { bg, fg } = this._utils.resolveStyle(badge.color);
+                const style = hasBadge
+                    ? `background-color:${bg};color:${fg};box-shadow:0 2px 7px rgba(15,23,42,.18);`
+                    : "background-color:#f1f5f9;color:#64748b;border:1px dashed #cbd5e1;";
+                const current = Number(badge.progress_value || 0);
+                const target = Number(badge.progress_target || 0);
+                const progressText = !hasBadge && target > 0
+                    ? `${this._utils.formatProgressValue(current, badge.progress_unit)} / ${this._utils.formatProgressValue(target, badge.progress_unit)}`
+                    : "";
+                const progressPercent = target > 0 ? Math.max(0, Math.min(100, Math.round((current / target) * 100))) : 0;
+                const progressMarkup = progressText ? `
+                    <div class="badge-progress-label">${this._utils.escapeHtml(progressText)}</div>
+                    <div class="badge-progress-track" aria-hidden="true"><span style="width:${progressPercent}%"></span></div>` : "";
+                const earnedMarkup = hasBadge ? '<span class="badge-earned-mark" aria-label="획득 완료"><i class="bi bi-check-lg"></i></span>' : "";
+                return `
+                    <button type="button" class="badge-item text-center rounded user-select-none"
+                            style="${style}"
+                            data-name="${this._utils.escapeAttr(badge.name)}"
+                            data-icon="${this._utils.escapeAttr(badge.icon || "🏅")}"
+                            data-has="${hasBadge}"
+                            data-date="${this._utils.escapeAttr(dateStr)}"
+                            data-desc="${this._utils.escapeAttr(descStr)}"
+                            data-group="${this._utils.escapeAttr(groupLabel)}"
+                            data-progress="${this._utils.escapeAttr(progressText)}"
+                            aria-label="${this._utils.escapeAttr(`${badge.name} ${hasBadge ? "획득 완료" : "다음 도전"}`)}"
+                            onclick="Badges.selectBadge(this)">
+                        ${earnedMarkup}
+                        <div class="badge-item-icon">${this._utils.escapeHtml(badge.icon || "🏅")}</div>
+                        <div class="badge-item-name">${this._utils.escapeHtml(badge.name)}</div>
+                        ${progressMarkup}
+                    </button>`;
+            }).join("");
+
+            return `
+                <section class="badge-group-section" aria-label="${this._utils.escapeAttr(groupLabel)}">
+                    <div class="badge-group-heading">${this._utils.escapeHtml(groupLabel)}</div>
+                    <div class="badge-group-row scroll-hide">${cards}</div>
+                </section>`;
+        }).join("");
     },
 
     // [신규] 뱃지 클릭 시 정보창 업데이트 함수
@@ -183,18 +268,24 @@ const Badges = {
         const has = element.dataset.has === 'true';
         const date = element.dataset.date;
         const desc = element.dataset.desc;
+        const group = element.dataset.group;
+        const progress = element.dataset.progress;
         const infoBox = document.getElementById('selectedBadgeInfo');
+        if (!infoBox) return;
         const safeIcon = this._utils.escapeHtml(icon || '');
         const safeName = this._utils.escapeHtml(name || '');
         const safeDate = this._utils.escapeHtml(date || '');
         const safeDesc = this._utils.escapeHtml(desc || '');
         const safePlainDesc = this._utils.escapeHtml(String(desc || '').replace(/^🔒\s*/, ''));
+        const safeGroup = this._utils.escapeHtml(group || '배지');
+        const safeProgress = this._utils.escapeHtml(progress || '');
 
         // 4. 정보창 내용 업데이트
         if(has) {
             infoBox.innerHTML = `
                 <div class="fs-1 mb-1">${safeIcon}</div>
                 <h6 class="fw-bold text-dark">${safeName}</h6>
+                <div class="badge-detail-group mb-2">${safeGroup}</div>
                 <div class="text-success small fw-bold mb-2">🎉 ${safeDate} 획득</div>
                 <div class="text-secondary small">${safeDesc}</div>
             `;
@@ -202,7 +293,9 @@ const Badges = {
             infoBox.innerHTML = `
                 <div class="fs-1 mb-1 opacity-50">${safeIcon}</div>
                 <h6 class="fw-bold text-muted">${safeName}</h6>
-                <div class="text-muted small mb-1">미획득</div>
+                <div class="badge-detail-group mb-2">${safeGroup}</div>
+                <div class="text-muted small mb-1">다음 도전</div>
+                ${safeProgress ? `<div class="text-primary small fw-bold mb-2">현재 ${safeProgress}</div>` : ''}
                 <div class="text-secondary small bg-white p-2 rounded d-inline-block border">조건: ${safePlainDesc}</div>
             `;
         }
