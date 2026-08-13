@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.7.1
-Change: Keep the public-land ownership source and lookup date on one compact popup row.
+Version: v1.7.2
+Change: Load Kakao Maps services through its asynchronous loader to avoid parser-blocking document.write warnings.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.7.1 | map.html | public-land-source-row-20260811');</script>
+  <script>console.log('[Version] v1.7.2 | map.html | kakao-sdk-async-loader-20260814');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>경기 태양광 부지 분석 (Full Version)</title>
@@ -18,7 +18,7 @@ Change: Keep the public-land ownership source and lookup date on one compact pop
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
     <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
-    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services"></script>
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=50b1b1d7f4f02eadaf4cd37d61c78e73&libraries=services&autoload=false"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
     <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
@@ -584,10 +584,14 @@ window.onload = function() {
     initMap();
     fetchAndRenderSuggestions();
 
-    // 카카오 SDK가 허용된 도메인에서 정상 로드됐을 때만 주소 검색을 활성화한다.
-    if (window.kakao?.maps?.load && window.kakao?.maps?.services?.Geocoder) {
+    // autoload=false에서는 SDK 본체와 services가 준비된 뒤 콜백이 실행된다.
+    if (typeof window.kakao?.maps?.load === 'function') {
         kakao.maps.load(function() {
-            kakaoGeocoder = new kakao.maps.services.Geocoder();
+            if (window.kakao?.maps?.services?.Geocoder) {
+                kakaoGeocoder = new kakao.maps.services.Geocoder();
+            } else {
+                console.warn('[Map] 카카오 주소 변환 서비스를 준비하지 못해 지도 기능만 유지합니다.');
+            }
         });
     } else {
         console.warn('[Map] 카카오 주소 검색 SDK를 사용할 수 없어 지도 기능만 시작합니다.');
