@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.14 | Change: 2026-08-13 - Add education QR and combined roster printing actions. -->
+<!-- Version: v1.3.15 | Change: 2026-08-13 - Keep the QR instructor on one line and remove duplicate footer copy. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.14 | participation.html');</script>
+  <script>console.log('[Version] v1.3.15 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -140,6 +140,8 @@
       .education-qr-print-meta-row { display:grid; grid-template-columns:19mm minmax(0,1fr); gap:2mm; align-items:start; font-size:11pt; line-height:1.45; }
       .education-qr-print-meta-label { color:#475569; font-weight:800; }
       .education-qr-print-meta-value { font-weight:650; word-break:keep-all; overflow-wrap:anywhere; }
+      .education-qr-print-instructor { grid-column:1 / -1; }
+      .education-qr-print-instructor .education-qr-print-meta-value { white-space:nowrap; overflow-wrap:normal; letter-spacing:-.04em; }
       .education-qr-print-content { grid-column:1 / -1; }
       .education-qr-print-main { display:flex; flex:1 1 auto; min-height:0; flex-direction:column; align-items:center; justify-content:center; padding:6mm 0 4mm; }
       .education-qr-print-code { width:116mm; height:116mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; padding:4mm; border:1.2mm solid #0f172a; background:#fff; }
@@ -148,8 +150,6 @@
       .education-qr-print-validity { margin:0; text-align:center; color:#475569; font-size:11pt; line-height:1.45; }
       .education-qr-print-foot { display:flex; align-items:center; justify-content:center; gap:4mm; min-height:18mm; padding-top:4mm; border-top:.3mm solid #cbd5e1; }
       .education-qr-print-logo { display:block; max-width:52mm; max-height:14mm; object-fit:contain; }
-      .education-qr-print-brand { font-size:13pt; font-weight:850; word-break:keep-all; }
-      .education-qr-print-brand-sub { margin-top:1mm; color:#64748b; font-size:11pt; font-weight:600; }
       body.print-roster-only > .education-qr-print-sheet { display:none !important; }
       body.print-roster-only > .education-roster-print-sheet,
       body.print-with-roster > .education-roster-print-sheet {
@@ -438,7 +438,7 @@
         <span class="education-qr-print-meta-label">장소</span>
         <span class="education-qr-print-meta-value" id="educationQrPrintLocation">-</span>
       </div>
-      <div class="education-qr-print-meta-row d-none" id="educationQrPrintInstructorRow">
+      <div class="education-qr-print-meta-row education-qr-print-instructor d-none" id="educationQrPrintInstructorRow">
         <span class="education-qr-print-meta-label">강사</span>
         <span class="education-qr-print-meta-value" id="educationQrPrintInstructor"></span>
       </div>
@@ -454,10 +454,6 @@
     </div>
     <footer class="education-qr-print-foot">
       <img class="education-qr-print-logo d-none" id="educationQrPrintLogo" alt="조합 로고">
-      <div>
-        <div class="education-qr-print-brand" id="educationQrPrintBrand">협동조합</div>
-        <div class="education-qr-print-brand-sub">이 QR은 위 교육의 출석 확인에만 사용됩니다.</div>
-      </div>
     </footer>
   </section>
 
@@ -552,9 +548,7 @@
     } // End of resolveParticipationLogoUrl
 
     function syncParticipationPrintBranding() {
-      const brand = document.getElementById('educationQrPrintBrand');
       const logo = document.getElementById('educationQrPrintLogo');
-      if (brand) brand.textContent = participationBranding.companyName || '협동조합';
       if (!logo) return;
       const logoUrl = String(participationBranding.logoUrl || '').trim();
       if (!logoUrl) {
@@ -1422,6 +1416,19 @@
       row.classList.toggle('d-none', !safeValue);
     } // End of setEducationQrPrintOptionalRow
 
+    function fitEducationQrPrintInstructor() {
+      const target = document.getElementById('educationQrPrintInstructor');
+      if (!target) return;
+      target.style.removeProperty('transform');
+      target.style.removeProperty('transform-origin');
+      const availableWidth = Number(target.clientWidth || 0);
+      const contentWidth = Number(target.scrollWidth || 0);
+      if (!availableWidth || contentWidth <= availableWidth) return;
+      const scale = Math.max(0.78, Math.min(1, availableWidth / contentWidth));
+      target.style.transformOrigin = 'left center';
+      target.style.transform = `scaleX(${scale})`;
+    } // End of fitEducationQrPrintInstructor
+
     function educationAttendanceConfirmation(row) {
       const method = String(row?.check_in_method || '').trim().toUpperCase();
       const checkedAt = row?.checked_in_at ? formatKstDateTime(row.checked_in_at) : '시간 기록 없음';
@@ -1535,6 +1542,7 @@
       document.getElementById('educationRosterPrintSheet').setAttribute('aria-hidden', includeRoster ? 'false' : 'true');
       if (includeRoster) renderEducationPrintRoster();
       window.requestAnimationFrame(function() {
+        fitEducationQrPrintInstructor();
         window.print();
       });
     } // End of printEducationQr
@@ -2505,6 +2513,9 @@
         }
       }, true);
       window.addEventListener('afterprint', function() {
+        const qrInstructor = document.getElementById('educationQrPrintInstructor');
+        qrInstructor?.style.removeProperty('transform');
+        qrInstructor?.style.removeProperty('transform-origin');
         document.getElementById('educationQrPrintSheet').setAttribute('aria-hidden', 'true');
         document.getElementById('educationRosterPrintSheet').setAttribute('aria-hidden', 'true');
         document.body.classList.remove('print-with-roster');
