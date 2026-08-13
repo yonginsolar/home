@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.13 | Change: 2026-08-12 - Add member-only education registration and background Humanities matching. -->
+<!-- Version: v1.3.14 | Change: 2026-08-13 - Add education QR and combined roster printing actions. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.13 | participation.html');</script>
+  <script>console.log('[Version] v1.3.14 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -394,7 +394,7 @@
           <div class="form-section d-none" id="educationQrSection">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
               <div class="form-section-title mb-0">교육 출석</div>
-              <button type="button" class="btn btn-sm btn-outline-success d-none" id="printEducationQrBtn">참석부 출력</button>
+              <button type="button" class="btn btn-sm btn-outline-success d-none" id="printEducationRosterBtn">참석부 출력</button>
             </div>
             <div class="alert alert-success d-none mb-0" id="humanitiesLinkedQrMessage">모두의 인문학에서 불러온 교육입니다. 현장 체크인은 모두의 인문학 QR을 사용하고, ERP 참석부는 계속 출력할 수 있습니다.</div>
             <div class="alert alert-light border d-none mb-0" id="educationQrEndedMessage">종료된 교육이라 체크인 QR은 숨겼습니다. 참석부는 계속 출력할 수 있습니다.</div>
@@ -405,6 +405,8 @@
                 <div class="small text-muted mb-2" id="educationQrValidity">교육 시작 1시간 전부터 종료 1시간 후까지 출석할 수 있습니다.</div>
                 <div class="small text-break mb-3" id="educationQrLink"></div>
                 <div class="d-flex flex-wrap gap-2">
+                  <button type="button" class="btn btn-sm btn-success d-none" id="printEducationQrBtn">출석 QR 인쇄</button>
+                  <button type="button" class="btn btn-sm btn-outline-success d-none" id="printEducationQrWithRosterBtn">QR + 참석부 인쇄</button>
                   <button type="button" class="btn btn-sm btn-outline-primary d-none" id="copyEducationQrBtn">링크 복사</button>
                   <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="downloadEducationQrBtn">QR 이미지 저장</button>
                   <button type="button" class="btn btn-sm btn-outline-danger d-none" id="rotateEducationQrBtn">새 QR 만들기</button>
@@ -1305,15 +1307,15 @@
       const qrPanel = document.getElementById('educationQrPanel');
       const linkedMessage = document.getElementById('humanitiesLinkedQrMessage');
       const endedMessage = document.getElementById('educationQrEndedMessage');
-      const printButton = document.getElementById('printEducationQrBtn');
+      const rosterPrintButton = document.getElementById('printEducationRosterBtn');
       const status = document.getElementById('educationQrStatus');
       const validity = document.getElementById('educationQrValidity');
       const linkElement = document.getElementById('educationQrLink');
-      const buttons = ['copyEducationQrBtn', 'downloadEducationQrBtn', 'rotateEducationQrBtn'];
+      const buttons = ['printEducationQrBtn', 'printEducationQrWithRosterBtn', 'copyEducationQrBtn', 'downloadEducationQrBtn', 'rotateEducationQrBtn'];
       validity.textContent = educationQrWindowText();
       codeBox.innerHTML = '';
       codeBox.removeAttribute('title');
-      printButton.classList.toggle('d-none', !formState.eventId);
+      rosterPrintButton.classList.toggle('d-none', !formState.eventId);
       const activeHumanitiesLink = humanitiesLinkState.link?.status === 'ACTIVE';
       linkedMessage.classList.toggle('d-none', !activeHumanitiesLink);
       if (activeHumanitiesLink) {
@@ -1488,6 +1490,7 @@
       }
       syncParticipationPrintBranding();
       renderEducationPrintRoster();
+      document.body.classList.remove('print-with-roster');
       document.body.classList.add('print-roster-only');
       document.getElementById('educationRosterPrintSheet').setAttribute('aria-hidden', 'false');
       window.requestAnimationFrame(function() { window.print(); });
@@ -1527,6 +1530,7 @@
         correctLevel:window.QRCode.CorrectLevel.H
       });
       printSheet.setAttribute('aria-hidden', 'false');
+      document.body.classList.remove('print-roster-only');
       document.body.classList.toggle('print-with-roster', includeRoster === true);
       document.getElementById('educationRosterPrintSheet').setAttribute('aria-hidden', includeRoster ? 'false' : 'true');
       if (includeRoster) renderEducationPrintRoster();
@@ -2477,7 +2481,9 @@
       document.getElementById('photoFiles').addEventListener('change', renderNewPhotoPreviews);
       document.getElementById('copyEducationQrBtn').addEventListener('click', copyEducationQrLink);
       document.getElementById('downloadEducationQrBtn').addEventListener('click', downloadEducationQr);
-      document.getElementById('printEducationQrBtn').addEventListener('click', printEducationRoster);
+      document.getElementById('printEducationRosterBtn').addEventListener('click', printEducationRoster);
+      document.getElementById('printEducationQrBtn').addEventListener('click', function() { printEducationQr(false); });
+      document.getElementById('printEducationQrWithRosterBtn').addEventListener('click', function() { printEducationQr(true); });
       document.getElementById('rotateEducationQrBtn').addEventListener('click', rotateEducationQr);
       document.getElementById('openHumanitiesLinkBtn').addEventListener('click', openHumanitiesLinkSearch);
       document.getElementById('searchHumanitiesCourseBtn').addEventListener('click', function() { loadHumanitiesLink(true); });
