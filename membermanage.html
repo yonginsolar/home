@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.121
-Change: Prevent global section spacing from stretching grouped badge rows.
+Version: v1.0.122
+Change: Restore the original single-row horizontal badge collection with swipe and arrow controls.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.121 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.122 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -41,7 +41,7 @@ allowKakaoApp: true
 <script src="cert_generator.js?v=20260407_01"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
-<script src="badges.js?v=20260813-2"></script>
+<script src="badges.js?v=20260813-3"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
@@ -1178,44 +1178,32 @@ color: #1d4ed8;
 
 /* [배지] 획득 기록 + 트랙별 다음 도전 */
 .badge-collection {
-display: grid;
-gap: 16px;
-min-width: 0;
-}
-.badge-group-section {
-min-width: 0;
-height: auto !important;
-min-height: 0 !important;
-margin: 0 !important;
-padding: 0 !important;
-overflow: visible !important;
-scroll-margin-top: 0 !important;
-}
-.badge-group-heading {
-font-weight: 800;
-font-size: .86rem;
-color: #475569;
-margin-bottom: 7px;
-}
-.badge-group-row {
 display: flex;
 align-items: stretch;
+flex-wrap: nowrap;
 gap: 12px;
+min-width: 0;
 overflow-x: auto;
-padding: 2px 2px 8px;
+overflow-y: hidden;
+padding: 4px 2px 10px;
 scroll-behavior: smooth;
+scroll-snap-type: x proximity;
+-webkit-overflow-scrolling: touch;
+overscroll-behavior-inline: contain;
 }
 .badge-item {
 position: relative;
 appearance: none;
 width: 112px;
 min-width: 112px;
+flex: 0 0 112px;
 min-height: 118px;
 padding: 12px 9px;
 border: 1px solid transparent;
 font: inherit;
 cursor: pointer;
 transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+scroll-snap-align: start;
 }
 .badge-item:hover {
 transform: translateY(-2px);
@@ -1272,9 +1260,6 @@ height: 100%;
 border-radius: inherit;
 background: #16a34a;
 }
-html[data-theme="dark"][data-theme-page="membermanage"] .badge-group-heading {
-color: #cbd5e1;
-}
 html[data-theme="dark"][data-theme-page="membermanage"] .badge-item[data-has="false"] {
 background-color: #1e293b !important;
 color: #cbd5e1 !important;
@@ -1307,7 +1292,7 @@ display: none !important;
 /* [뱃지 컨테이너] 버튼 배치를 위해 relative 설정 */
 .badge-wrapper {
 position: relative;
-padding: 0;
+padding: 0 36px;
 }
 
 /* [스크롤 버튼] 좌우 화살표 */
@@ -1767,9 +1752,11 @@ NO. <span id="infoMemberId">-</span>
 </div>
 
 <div class="badge-wrapper">
-<div id="badgeContainer" class="badge-collection" aria-live="polite">
+<button type="button" class="badge-scroll-btn left" onclick="scrollBadges(-260)" aria-label="이전 배지 보기"><i class="bi bi-chevron-left" aria-hidden="true"></i></button>
+<div id="badgeContainer" class="badge-collection scroll-hide" aria-live="polite" aria-label="나의 배지 목록">
 <span class="spinner-border spinner-border-sm"></span> 로딩 중...
 </div>
+<button type="button" class="badge-scroll-btn right" onclick="scrollBadges(260)" aria-label="다음 배지 보기"><i class="bi bi-chevron-right" aria-hidden="true"></i></button>
 </div>
 
 <div id="selectedBadgeInfo">

@@ -1,5 +1,5 @@
-/* Version: v1.1.1
-Change: 2026-08-13 - Avoid global section spacing in grouped badge rows.
+/* Version: v1.1.2
+Change: 2026-08-13 - Restore the original single-row horizontal badge collection.
 */
 /**
  * badges.js
@@ -206,9 +206,9 @@ const Badges = {
             return (this._collectionGroups[a[0]]?.order || 999) - (this._collectionGroups[b[0]]?.order || 999);
         });
 
-        container.innerHTML = sortedGroups.map(([groupKey, badges]) => {
+        container.innerHTML = sortedGroups.flatMap(([groupKey, badges]) => {
             const groupLabel = this._collectionGroups[groupKey]?.label || "배지";
-            const cards = badges.map((badge) => {
+            return badges.map((badge) => {
                 const hasBadge = badge.is_earned === true;
                 const d = hasBadge ? this._utils.parseDate(badge.granted_at) : null;
                 const dateStr = d ? d.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" }) : "";
@@ -244,13 +244,7 @@ const Badges = {
                         <div class="badge-item-name">${this._utils.escapeHtml(badge.name)}</div>
                         ${progressMarkup}
                     </button>`;
-            }).join("");
-
-            return `
-                <div class="badge-group-section" role="group" aria-label="${this._utils.escapeAttr(groupLabel)}">
-                    <div class="badge-group-heading">${this._utils.escapeHtml(groupLabel)}</div>
-                    <div class="badge-group-row scroll-hide">${cards}</div>
-                </div>`;
+            });
         }).join("");
     },
 
