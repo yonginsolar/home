@@ -1,5 +1,5 @@
-/* Version: v1.1.2
-Change: 2026-08-13 - Restore the original single-row horizontal badge collection.
+/* Version: v1.1.3
+Change: 2026-08-13 - Remove the redundant earned checkmark from badge cards.
 */
 /**
  * badges.js
@@ -226,7 +226,6 @@ const Badges = {
                 const progressMarkup = progressText ? `
                     <div class="badge-progress-label">${this._utils.escapeHtml(progressText)}</div>
                     <div class="badge-progress-track" aria-hidden="true"><span style="width:${progressPercent}%"></span></div>` : "";
-                const earnedMarkup = hasBadge ? '<span class="badge-earned-mark" aria-label="획득 완료"><i class="bi bi-check-lg"></i></span>' : "";
                 return `
                     <button type="button" class="badge-item text-center rounded user-select-none"
                             style="${style}"
@@ -239,7 +238,6 @@ const Badges = {
                             data-progress="${this._utils.escapeAttr(progressText)}"
                             aria-label="${this._utils.escapeAttr(`${badge.name} ${hasBadge ? "획득 완료" : "다음 도전"}`)}"
                             onclick="Badges.selectBadge(this)">
-                        ${earnedMarkup}
                         <div class="badge-item-icon">${this._utils.escapeHtml(badge.icon || "🏅")}</div>
                         <div class="badge-item-name">${this._utils.escapeHtml(badge.name)}</div>
                         ${progressMarkup}
