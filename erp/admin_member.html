@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.133
+Version: v1.0.134
 Change: Split each member's education and meeting history with attendance counts.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.133';
+window.ADMIN_MEMBER_VERSION = 'v1.0.134';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -10529,6 +10529,9 @@ function renderMemberTable(list) {
       status === '정상' ? 'bg-success' :
       (status === '탈퇴' || status === '제명') ? 'bg-secondary' :
       'bg-light text-dark border';
+    const welcomeNotificationHtml = status === '승인대기'
+      ? renderPendingWelcomeNotificationStatus(m)
+      : '';
 
     // 클릭 시 넘길 키값 (UUID 우선)
     const keyForDetail = m.member_uid || m.uid || m.id || memberId;
@@ -10548,6 +10551,7 @@ function renderMemberTable(list) {
         <td>
           <div class="small">${escapeHtml(joinDate)}</div>
           <span class="badge ${statusBadgeClass}">${escapeHtml(status)}</span>
+          ${welcomeNotificationHtml}
         </td>
         <td class="fw-bold">${totalCapital}</td>
         <td>
@@ -10558,6 +10562,29 @@ function renderMemberTable(list) {
   }).join('');
   tbody.innerHTML = rowsHtml;
 }
+
+function renderPendingWelcomeNotificationStatus(member) {
+  const rawStatus = String(member?.welcome_notification_status || '').trim().toLowerCase();
+  const isSent = member?.is_welcome_sent === true || rawStatus === 'accepted';
+  const views = {
+    accepted: { label: '가입 알림톡 발송완료', className: 'bg-success' },
+    processing: { label: '가입 알림톡 처리중', className: 'bg-primary' },
+    unknown: { label: '가입 알림톡 결과 확인 필요', className: 'bg-warning text-dark' },
+    failed: { label: '가입 알림톡 발송 실패', className: 'bg-danger' },
+    skipped: { label: '가입 알림톡 미발송', className: 'bg-secondary' },
+    deferred: { label: '가입 알림톡 발송 보류', className: 'bg-secondary' },
+    not_sent: { label: '가입 알림톡 미발송', className: 'bg-light text-dark border' }
+  };
+  const view = isSent ? views.accepted : (views[rawStatus] || views.not_sent);
+  const updatedAt = String(member?.welcome_notification_updated_at || '').trim();
+  const updatedLabel = updatedAt ? formatAdminMemberKstDateTime(updatedAt) : '';
+  return `
+    <div class="mt-1">
+      <span class="badge ${view.className}">${view.label}</span>
+      ${updatedLabel ? `<div class="small text-muted mt-1">${escapeHtml(updatedLabel)}</div>` : ''}
+    </div>
+  `;
+} // End of renderPendingWelcomeNotificationStatus
 
 function renderNoMembersState() {
   const tbody = document.getElementById('memberListBody');
