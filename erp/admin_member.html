@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.132
+Version: v1.0.133
 Change: Split each member's education and meeting history with attendance counts.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.132';
+window.ADMIN_MEMBER_VERSION = 'v1.0.133';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -610,7 +610,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
             <div class="col-md-4">
                 <div class="input-group input-group-sm">
-                    <input type="text" id="search-keyword" class="form-control" placeholder="이름 / 전화번호 / 조합원번호" onkeyup="if(event.key=='Enter') resetMemberPageAndFetch()">
+                    <input type="text" id="search-keyword" class="form-control" placeholder="이름 / 별칭 / 전화번호 / 조합원번호" onkeyup="if(event.key=='Enter') resetMemberPageAndFetch()">
                     <button class="btn btn-secondary" onclick="resetMemberPageAndFetch()">검색</button>
                 </div>
             </div>
@@ -2837,8 +2837,20 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
     <div class="row g-3 mb-3">
         <div class="col-md-3">
-            <label class="form-label small fw-bold text-muted" id="md-name-label">이름</label>
+            <label class="form-label small fw-bold text-muted" id="md-name-label">이름(입금·세무 기준)</label>
             <input type="text" id="md-name" class="form-control fw-bold">
+        </div>
+        <div class="col-md-3" id="md-preferred-name-group">
+            <label class="form-label small fw-bold text-muted">별칭</label>
+            <input type="text" id="md-preferred-name" class="form-control" maxlength="100" placeholder="예: 나무와나">
+            <div class="form-text x-small">가입·입금·세무·증명서에는 사용하지 않습니다.</div>
+        </div>
+        <div class="col-md-3" id="md-preferred-position-group">
+            <label class="form-label small fw-bold text-muted">별칭 위치</label>
+            <select id="md-preferred-name-position" class="form-select">
+                <option value="before">이름 앞 (나무와나 이정희)</option>
+                <option value="after">이름 뒤 (이정희 나무와나)</option>
+            </select>
         </div>
         <div class="col-md-3">
             <label class="form-label small fw-bold text-muted" id="md-phone-label">연락처</label>
@@ -4157,6 +4169,8 @@ const ADMIN_MEMBER_SELECT_COLUMNS = [
     'id',
     'member_id',
     'name',
+    'preferred_name',
+    'preferred_name_position',
     'member_type',
     'phone',
     'email',
@@ -10418,7 +10432,7 @@ async function fetchMembers() {
     try {
         if (typeof showLoading === 'function') showLoading(true);
 
-        const { data, error } = await _supabase.rpc('get_admin_member_page_v2', {
+        const { data, error } = await _supabase.rpc('get_admin_member_page_v3', {
             p_keyword: keyword || null,
             p_status: status === 'all' ? null : status,
             p_member_type: type === 'all' ? null : type,
@@ -10484,6 +10498,11 @@ function renderMemberTable(list) {
     const memberId = m.member_id || '';
     const phone = m.phone || '-';
     const isGroup = String(type).includes('단체');
+    const preferredName = String(m.preferred_name || '').trim();
+    const preferredPositionLabel = m.preferred_name_position === 'after' ? '이름 뒤' : '이름 앞';
+    const preferredNameHtml = !isGroup && preferredName
+      ? `<div class="small text-muted mt-1"><span class="badge text-bg-light border me-1">별칭</span>${escapeHtml(preferredName)} · ${preferredPositionLabel}</div>`
+      : '';
     const representativeName = m.representative_name || '미입력';
     const contactLabel = [m.contact_name, m.contact_position].filter(Boolean).join(' · ') || '미입력';
     const managerLabel = m.manager_name
@@ -10521,6 +10540,7 @@ function renderMemberTable(list) {
         <td>${escapeHtml(type)}</td>
         <td class="text-start">
           <div class="fw-bold">${escapeHtml(name)}</div>
+          ${preferredNameHtml}
           <div class="small text-muted">${memberId ? '(' + escapeHtml(memberId) + ')' : ''}</div>
         </td>
         <td>${escapeHtml(phone)}</td>
@@ -10598,6 +10618,15 @@ function normalizeAdminMemberRow(row, totalCapital) {
     };
 }
 
+function getAdminMemberDisplayName(member) {
+    const name = String(member?.name || '').trim();
+    const preferredName = String(member?.preferred_name || '').trim();
+    if (!preferredName || String(member?.member_type || '').includes('단체')) return name;
+    return member?.preferred_name_position === 'after'
+        ? `${name} ${preferredName}`.trim()
+        : `${preferredName} ${name}`.trim();
+}
+
 function findCachedAdminMember(id) {
     const safeId = String(id || '').trim();
     if (!safeId || !Array.isArray(g_members)) return null;
@@ -10641,9 +10670,14 @@ function syncMemberDetailTypeLayout() {
     const nameLabel = document.getElementById('md-name-label');
     const phoneLabel = document.getElementById('md-phone-label');
     const emailLabel = document.getElementById('md-email-label');
-    if (nameLabel) nameLabel.textContent = isGroup ? '단체명' : '이름';
+    if (nameLabel) nameLabel.textContent = isGroup ? '단체명' : '이름(입금·세무 기준)';
     if (phoneLabel) phoneLabel.textContent = isGroup ? '담당자 연락처' : '연락처';
     if (emailLabel) emailLabel.textContent = isGroup ? '담당자 이메일' : '이메일';
+
+    const preferredNameGroup = document.getElementById('md-preferred-name-group');
+    const preferredPositionGroup = document.getElementById('md-preferred-position-group');
+    if (preferredNameGroup) preferredNameGroup.style.display = isGroup ? 'none' : '';
+    if (preferredPositionGroup) preferredPositionGroup.style.display = isGroup ? 'none' : '';
 
     ['md-corp-num', 'md-biz-num'].forEach(id => {
         const input = document.getElementById(id);
@@ -10898,7 +10932,7 @@ async function openMemberDetail(id) {
 
     // 2. UI 초기화 & 데이터 바인딩
     document.getElementById('md-uid').value = memberUid;
-    document.getElementById('md-title').innerText = `${m.name} 님 상세`;
+    document.getElementById('md-title').innerText = `${getAdminMemberDisplayName(m) || m.name} 님 상세`;
     document.getElementById('md-id-text').innerText = m.member_id || 'ID없음';
 
     let typeStr = m.member_type || m.type || '개인';
@@ -10906,6 +10940,8 @@ async function openMemberDetail(id) {
 
     // 폼 값 채우기
     document.getElementById('md-name').value = m.name || '';
+    document.getElementById('md-preferred-name').value = m.preferred_name || '';
+    document.getElementById('md-preferred-name-position').value = m.preferred_name_position === 'after' ? 'after' : 'before';
     document.getElementById('md-phone').value = m.phone || '';
     document.getElementById('md-email').value = m.email || '';
     document.getElementById('md-email-original').value = m.email || '';
@@ -11391,6 +11427,12 @@ async function saveMemberBasic() {
             const contactPosition = isGroup
                 ? (document.getElementById('md-contact-position').value || '').trim()
                 : '';
+            const preferredName = isGroup
+                ? null
+                : (document.getElementById('md-preferred-name').value || '').trim() || null;
+            const preferredNamePosition = isGroup
+                ? 'before'
+                : (document.getElementById('md-preferred-name-position').value || 'before');
 
             if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
                 throw new Error('이메일 형식이 올바르지 않습니다.');
@@ -11417,10 +11459,12 @@ async function saveMemberBasic() {
                 p_business_number: bizNum,
                 p_representative_name: isGroup ? representativeName : null,
                 p_contact_name: isGroup ? contactName : null,
-                p_contact_position: isGroup ? contactPosition : null
+                p_contact_position: isGroup ? contactPosition : null,
+                p_preferred_name: preferredName,
+                p_preferred_name_position: preferredNamePosition
             };
 
-            const { error: basicError } = await _supabase.rpc('update_member_details_secure_v2', updates);
+            const { error: basicError } = await _supabase.rpc('update_member_details_secure_v3', updates);
             if (basicError) throw basicError;
             document.getElementById('md-email-original').value = emailInput;
 

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.123
+Version: v1.0.124
 Change: Remove the redundant earned checkmark while retaining color and accessible status labels.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.123 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.124 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -4442,6 +4442,15 @@ return String(member?.member_type || '').trim() === '단체'
 || String(member?.member_type || '').trim() === 'organization';
 } // End of isMemberGroupRecord
 
+function getMemberPreferredDisplayName(member) {
+const name = String(member?.name || '').trim();
+const preferredName = String(member?.preferred_name || '').trim();
+if (!preferredName || isMemberGroupRecord(member)) return name;
+return member?.preferred_name_position === 'after'
+? `${name} ${preferredName}`.trim()
+: `${preferredName} ${name}`.trim();
+} // End of getMemberPreferredDisplayName
+
 function getMemberBirthDateFromRecord(member) {
 const directBirth = String(member?.birth_date || '').trim();
 if (/^\d{4}-\d{2}-\d{2}$/.test(directBirth)) {
@@ -4486,8 +4495,9 @@ const memberId = String(member.id || '').trim();
 const isRoot = rootId && memberId === rootId;
 if (isRoot) return '나(개인)';
 if (isMemberGroupRecord(member)) return `${member.name || '단체'}(단체)`;
-if (isMemberMinorRecord(member) || String(member.join_category || '') === '가족') return `${member.name || '자녀'}(자녀)`;
-return `${member.name || '개인'}(개인)`;
+const displayName = getMemberPreferredDisplayName(member);
+if (isMemberMinorRecord(member) || String(member.join_category || '') === '가족') return `${displayName || '자녀'}(자녀)`;
+return `${displayName || '개인'}(개인)`;
 } // End of getProfileSwitcherLabel
 
 function updateCurrentProfileSwitcherLabel(member = curMem) {
@@ -5353,7 +5363,9 @@ const btnPartner = document.getElementById('menuBtnPartner');
 if(btnPartner) btnPartner.classList.add('hidden');
 }
 
-setText('summaryName', member.name);
+const preferredDisplayName = getMemberPreferredDisplayName(member);
+setText('summaryName', preferredDisplayName || member.name);
+if (!isGroup) setText('headerUserName', preferredDisplayName || member.name);
 setText('summaryEmail', member.email || (isGroup ? '-' : (curAuth?.email || '-')));
 
 // 공통 필드들
@@ -8174,7 +8186,7 @@ const activeMember = (curMem && String(curMem.id || '') === String(profileId))
 ? curMem
 : (await scopeMemberTenant(_supabase
     .from('coop_members')
-    .select('id, name, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at'))
+    .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at'))
     .eq('id', profileId)
     .maybeSingle()).data;
 
@@ -8189,7 +8201,7 @@ const relationRows = [];
 if (familyRootId && String(familyRootId) !== String(activeMember.id)) {
 const { data: managerRow, error: managerError } = await scopeMemberTenant(_supabase
     .from('coop_members')
-    .select('id, name, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status'))
+    .select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status'))
     .eq('id', familyRootId)
     .maybeSingle();
 if (managerError) throw managerError;
@@ -8206,7 +8218,7 @@ can_disconnect: true
 
 const { data: managedRows, error: managedError } = await _supabase
 .from('coop_members')
-.select('id, name, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at')
+.select('id, name, preferred_name, preferred_name_position, member_id, member_type, join_category, manager_id, rep_uuid, rrn_display, birth_date, status, created_at')
 .eq('coop_id', coopId)
 .eq('manager_id', familyRootId)
 .order('created_at', { ascending: true });
@@ -8231,7 +8243,7 @@ return;
 
 let html = '<ul class="list-group list-group-flush">';
 relationRows.forEach((f) => {
-const safeName = escapeHtml(f.name || '');
+const safeName = escapeHtml(getMemberPreferredDisplayName(f) || f.name || '');
 const safeMemberId = escapeHtml(f.member_id || '승인 대기중');
 const isActiveManagedLink = f.relation_kind === 'manager';
 const actionTargetId = isActiveManagedLink ? f.manager_id_for_action : (f.managed_id || f.id);
