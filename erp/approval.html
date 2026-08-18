@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.43 | Change: 2026-08-13 - Default the leave end date to the start date and prevent reverse ranges. -->
+<!-- Version: v1.2.44 | Change: 2026-08-18 - Add linked increase and decrease expense approvals. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.43 | approval.html');</script>
+  <script>console.log('[Version] v1.2.44 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -693,6 +693,20 @@
              <input type="hidden" id="relDocId">
           </div>
         </div>
+        <div class="col-12 mb-3 hidden" id="divExpenseAdjustment">
+          <label class="small text-muted fw-bold">지출결의 구분</label>
+          <div class="card p-3 border-0 bg-light">
+            <div class="btn-group btn-group-sm w-100" role="group" aria-label="지출결의 구분">
+              <input type="radio" class="btn-check" name="expenseAdjustmentMode" id="expenseAdjustmentNew" value="new" autocomplete="off" checked onchange="handleExpenseAdjustmentModeChange()">
+              <label class="btn btn-outline-secondary" for="expenseAdjustmentNew">신규</label>
+              <input type="radio" class="btn-check" name="expenseAdjustmentMode" id="expenseAdjustmentIncrease" value="increase" autocomplete="off" onchange="handleExpenseAdjustmentModeChange()">
+              <label class="btn btn-outline-primary" for="expenseAdjustmentIncrease">＋ 증액</label>
+              <input type="radio" class="btn-check" name="expenseAdjustmentMode" id="expenseAdjustmentDecrease" value="decrease" autocomplete="off" onchange="handleExpenseAdjustmentModeChange()">
+              <label class="btn btn-outline-warning" for="expenseAdjustmentDecrease">－ 감액</label>
+            </div>
+            <div class="small text-muted mt-2" id="expenseAdjustmentHelp">신규 지출결의는 필요하면 관련 품의서를 연결할 수 있습니다.</div>
+          </div>
+        </div>
         <div class="col-12 mb-3 hidden" id="divSalaryExpense">
           <label class="small text-muted fw-bold">지출 상세</label>
           <div class="card p-3 border-0 bg-light">
@@ -1153,7 +1167,7 @@
 <div class="modal fade" id="confirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header py-2"><h6 class="modal-title fw-bold" id="confirmTitle">확인</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body text-center py-4" id="confirmBody" style="white-space: pre-wrap;"></div><div class="modal-footer justify-content-center p-1 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger btn-sm" id="confirmOkBtn">확인</button></div></div></div></div>
 <div class="modal fade" id="promptModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header py-2"><h6 class="modal-title fw-bold" id="promptTitle">입력</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body py-3"><div class="small text-muted mb-2" id="promptBody" style="white-space: pre-wrap;"></div><input type="text" id="promptInput" class="form-control" placeholder=""></div><div class="modal-footer justify-content-center p-1 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="promptOkBtn">확인</button></div></div></div></div>
 <div class="modal fade" id="approvalActionModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold" id="approvalActionModalTitle">결재 처리</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="small text-muted mb-2" id="approvalActionModalGuide">결재 메모를 남길 수 있습니다.</div><textarea id="approvalActionReason" class="form-control" rows="5" placeholder="처리 메모를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-primary btn-sm" id="btnApprovalActionSubmit" onclick="submitApprovalActionModal()">처리</button></div></div></div></div>
-<div class="modal fade" id="relSearchModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">관련 품의서 검색</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="input-group mb-3"><input type="text" class="form-control" id="relKeyword" placeholder="제목, 내용 또는 작성자" onkeyup="if(event.key==='Enter') runRelSearch()"><button type="button" class="btn btn-outline-secondary" onclick="runRelSearch()">검색</button></div><div class="list-group" id="relResultList" style="max-height:400px; overflow-y:auto;"></div></div></div></div></div>
+<div class="modal fade" id="relSearchModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold" id="relSearchModalTitle">관련 품의서 검색</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="input-group mb-3"><input type="text" class="form-control" id="relKeyword" placeholder="제목, 내용 또는 작성자" onkeyup="if(event.key==='Enter') runRelSearch()"><button type="button" class="btn btn-outline-secondary" onclick="runRelSearch()">검색</button></div><div class="list-group" id="relResultList" style="max-height:400px; overflow-y:auto;"></div></div></div></div></div>
 <div class="modal fade" id="relViewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-xl"><div class="modal-content"><div class="modal-header bg-light"><h6 class="modal-title fw-bold" id="relViewModalTitle">📄 문서 내용</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="relViewContent" class="p-3">Loading...</div></div><div class="modal-footer justify-content-between p-2 border-0 hidden" id="relViewModalFooter"><div class="small text-muted" id="relViewActionHint"></div><div class="d-flex gap-2" id="relViewActionButtons"></div></div></div></div></div>
 <div class="modal fade" id="physicalRejectModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">⛔ 실물결재 반려</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted fw-bold mb-2">반려 사유</label><textarea id="physicalRejectReason" class="form-control" rows="5" placeholder="반려 사유를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger btn-sm" id="btnPhysicalRejectSubmit" onclick="submitPhysicalReject()">반려 처리</button></div></div></div></div>
 <div class="modal fade" id="cancelDraftModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h6 class="modal-title fw-bold">🗑️ 상신 취소</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="small text-muted fw-bold mb-2">취소 사유</label><textarea id="cancelDraftReason" class="form-control" rows="4" placeholder="취소 사유를 입력하세요."></textarea></div><div class="modal-footer p-2 border-0"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button><button type="button" class="btn btn-danger btn-sm" id="btnCancelDraftSubmit" onclick="submitDraftCancel()">취소 확정</button></div></div></div></div>
@@ -1264,6 +1278,7 @@ let approvalOvertimePolicy = null;
 let approvalLastCategory = '';
 let approvalLeaveCancelCandidates = [];
 let approvalBusinessTripCancelCandidates = [];
+let approvalExpenseAdjustmentSelectedDoc = null;
 let pendingApprovalAction = null;
 let modalStackSequence = 0;
 let approvalCardData = [];
@@ -1282,6 +1297,12 @@ const APPROVAL_LEAVE_RESERVED_STATUSES = Object.freeze(['완료', '가승인', '
 const APPROVAL_LEAVE_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
 const APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES = Object.freeze(['완료', '실물결재완료']);
 const APPROVAL_BUSINESS_TRIP_CANCEL_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
+const APPROVAL_EXPENSE_ADJUSTMENT_COMPLETED_STATUSES = Object.freeze(['완료', '실물결재완료']);
+const APPROVAL_EXPENSE_ADJUSTMENT_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
+const APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES = Object.freeze({
+    increase: '지출결의(증액)',
+    decrease: '지출결의(감액)'
+});
 const APPROVAL_BUSINESS_TRIP_CANCEL_LOOKBACK_DAYS = 7;
 const APPROVAL_DEFAULT_LEAVE_TYPE_CATALOG = Object.freeze([
     { id: 'annual', label: '연차', enabled: true, deductible: true, duration_mode: 'mixed_days', aliases: ['연차'] },
@@ -1522,6 +1543,256 @@ function setApprovalRelatedDocLabel(docId, labelText) {
     }
 } // End of setApprovalRelatedDocLabel
 
+function normalizeApprovalExpenseAdjustmentMode(value) {
+    const safeValue = String(value || '').trim().toLowerCase();
+    return safeValue === 'increase' || safeValue === 'decrease' ? safeValue : 'new';
+} // End of normalizeApprovalExpenseAdjustmentMode
+
+function getApprovalExpenseAdjustmentMode() {
+    const selected = document.querySelector('input[name="expenseAdjustmentMode"]:checked');
+    return normalizeApprovalExpenseAdjustmentMode(selected?.value || 'new');
+} // End of getApprovalExpenseAdjustmentMode
+
+function setApprovalExpenseAdjustmentMode(mode, options = {}) {
+    const safeMode = normalizeApprovalExpenseAdjustmentMode(mode);
+    const radioEl = document.querySelector(`input[name="expenseAdjustmentMode"][value="${safeMode}"]`);
+    if (radioEl) radioEl.checked = true;
+    if (options.silent !== true) handleExpenseAdjustmentModeChange();
+    return safeMode;
+} // End of setApprovalExpenseAdjustmentMode
+
+function isApprovalExpenseAdjustmentDocType(docType) {
+    const safeType = String(docType || '').trim();
+    return Object.values(APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES).includes(safeType);
+} // End of isApprovalExpenseAdjustmentDocType
+
+function getApprovalExpenseAdjustmentType(docOrType) {
+    if (docOrType && typeof docOrType === 'object') {
+        const snapshotType = normalizeApprovalExpenseAdjustmentMode(docOrType?.expense_snapshot?.adjustment_type);
+        if (snapshotType !== 'new') return snapshotType;
+        return getApprovalExpenseAdjustmentType(docOrType.doc_type);
+    }
+    const safeType = String(docOrType || '').trim();
+    if (safeType === APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES.increase) return 'increase';
+    if (safeType === APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES.decrease) return 'decrease';
+    return 'new';
+} // End of getApprovalExpenseAdjustmentType
+
+function getApprovalExpenseSnapshotMeta(doc) {
+    const snapshot = doc?.expense_snapshot;
+    return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : {};
+} // End of getApprovalExpenseSnapshotMeta
+
+function isApprovalExpenseAdjustmentOriginalDoc(doc) {
+    return !!doc
+        && String(doc.doc_type || '').trim() === '지출결의'
+        && APPROVAL_EXPENSE_ADJUSTMENT_COMPLETED_STATUSES.includes(String(doc.status || '').trim())
+        && Number(doc.amount || 0) > 0
+        && !isApprovalExpenseAdjustmentDocType(doc.doc_type);
+} // End of isApprovalExpenseAdjustmentOriginalDoc
+
+function calculateApprovalExpenseAdjustmentBalance(originalDoc, adjustmentRows = []) {
+    const originalAmount = Math.max(0, Number(originalDoc?.amount || 0));
+    let completedIncrease = 0;
+    let completedDecrease = 0;
+    let reservedDecrease = 0;
+    (Array.isArray(adjustmentRows) ? adjustmentRows : []).forEach((row) => {
+        const amount = Math.max(0, Number(row?.amount || 0));
+        const type = getApprovalExpenseAdjustmentType(row);
+        const status = String(row?.status || '').trim();
+        const isCompleted = APPROVAL_EXPENSE_ADJUSTMENT_COMPLETED_STATUSES.includes(status);
+        if (type === 'increase' && isCompleted) completedIncrease += amount;
+        if (type === 'decrease' && isCompleted) completedDecrease += amount;
+        if (type === 'decrease' && !isCompleted && APPROVAL_EXPENSE_ADJUSTMENT_ACTIVE_STATUSES.includes(status)) {
+            reservedDecrease += amount;
+        }
+    });
+    const effectiveAmount = Math.max(0, originalAmount + completedIncrease - completedDecrease);
+    const availableDecrease = Math.max(0, effectiveAmount - reservedDecrease);
+    return {
+        original_amount: originalAmount,
+        completed_increase: completedIncrease,
+        completed_decrease: completedDecrease,
+        reserved_decrease: reservedDecrease,
+        effective_amount: effectiveAmount,
+        available_decrease: availableDecrease
+    };
+} // End of calculateApprovalExpenseAdjustmentBalance
+
+function buildApprovalExpenseAdjustmentTargetLabel(doc, balance = null) {
+    if (!doc) return '선택된 원결재가 없습니다.';
+    const safeBalance = balance || doc?._expense_adjustment_balance || calculateApprovalExpenseAdjustmentBalance(doc, []);
+    const docNo = String(doc.doc_no || '').trim();
+    const title = String(doc.title || '지출결의').trim();
+    const prefix = docNo ? `${docNo} · ` : '';
+    return `${prefix}${title} · 원결재 ${formatMoney(safeBalance.original_amount)}원 · 현재 ${formatMoney(safeBalance.effective_amount)}원 · 감액 가능 ${formatMoney(safeBalance.available_decrease)}원`;
+} // End of buildApprovalExpenseAdjustmentTargetLabel
+
+function buildApprovalExpenseAdjustmentAppendText(targetDoc, adjustmentMode, amount, balance = null) {
+    if (!targetDoc) return '';
+    const safeMode = normalizeApprovalExpenseAdjustmentMode(adjustmentMode);
+    if (safeMode === 'new') return '';
+    const safeBalance = balance || targetDoc?._expense_adjustment_balance || calculateApprovalExpenseAdjustmentBalance(targetDoc, []);
+    const safeAmount = Math.max(0, Number(amount || 0));
+    const modeLabel = safeMode === 'decrease' ? '감액' : '증액';
+    const afterAmount = safeMode === 'decrease'
+        ? Math.max(0, safeBalance.effective_amount - safeAmount)
+        : safeBalance.effective_amount + safeAmount;
+    return [
+        `[${modeLabel} 대상 원결재]`,
+        `- 원문서 ID: ${targetDoc.id}`,
+        `- 원문서 제목: ${String(targetDoc.title || '지출결의').trim()}`,
+        `- 원결재 금액: ${formatMoney(safeBalance.original_amount)}원`,
+        `- 현재 유효 금액: ${formatMoney(safeBalance.effective_amount)}원`,
+        `- ${modeLabel} 금액: ${formatMoney(safeAmount)}원`,
+        `- 반영 후 유효 금액: ${formatMoney(afterAmount)}원`
+    ].join('\n');
+} // End of buildApprovalExpenseAdjustmentAppendText
+
+async function fetchApprovalExpenseAdjustmentRows(originalDocIds, options = {}) {
+    const ids = Array.from(new Set((Array.isArray(originalDocIds) ? originalDocIds : [originalDocIds])
+        .map((id) => toPositiveDocId(id))
+        .filter(Boolean)));
+    if (ids.length === 0) return [];
+    let query = _supabase
+        .from('ref_approval')
+        .select('id,related_doc_id,doc_type,status,amount,expense_snapshot')
+        .eq('coop_id', getApprovalScopedCoopId())
+        .in('related_doc_id', ids)
+        .in('doc_type', Object.values(APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES))
+        .in('status', APPROVAL_EXPENSE_ADJUSTMENT_ACTIVE_STATUSES);
+    const excludeDocId = toPositiveDocId(options.excludeDocId);
+    if (excludeDocId) query = query.neq('id', excludeDocId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+} // End of fetchApprovalExpenseAdjustmentRows
+
+async function annotateApprovalExpenseAdjustmentBalances(list) {
+    const docs = Array.isArray(list) ? list : [];
+    if (docs.length === 0) return [];
+    const adjustmentRows = await fetchApprovalExpenseAdjustmentRows(docs.map((doc) => doc?.id));
+    const rowsByOriginal = new Map();
+    adjustmentRows.forEach((row) => {
+        const key = String(row?.related_doc_id || '').trim();
+        if (!rowsByOriginal.has(key)) rowsByOriginal.set(key, []);
+        rowsByOriginal.get(key).push(row);
+    });
+    return docs.map((doc) => ({
+        ...doc,
+        _expense_adjustment_balance: calculateApprovalExpenseAdjustmentBalance(doc, rowsByOriginal.get(String(doc?.id || '').trim()) || [])
+    }));
+} // End of annotateApprovalExpenseAdjustmentBalances
+
+async function loadApprovalExpenseAdjustmentTargetDoc(targetDocId, adjustmentMode, options = {}) {
+    const safeDocId = toPositiveDocId(targetDocId);
+    const safeMode = normalizeApprovalExpenseAdjustmentMode(adjustmentMode);
+    const requestedAmount = Math.max(0, Number(options.amount || 0));
+    if (!safeDocId) return { ok: false, message: '증액·감액할 원결재를 먼저 선택하세요.', targetDoc: null, balance: null };
+    if (safeMode === 'new') return { ok: false, message: '증액 또는 감액 구분을 선택하세요.', targetDoc: null, balance: null };
+
+    const { data, error } = await _supabase
+        .from('ref_approval')
+        .select('id,created_at,doc_no,doc_type,title,content,amount,status,drafter_id,drafter_name,approval_line,expense_snapshot,related_doc_id')
+        .eq('coop_id', getApprovalScopedCoopId())
+        .eq('id', safeDocId)
+        .maybeSingle();
+    if (error || !data) return { ok: false, message: '원결재 문서를 찾을 수 없습니다.', targetDoc: null, balance: null };
+    if (!isApprovalExpenseAdjustmentOriginalDoc(data)) {
+        return { ok: false, message: '완료된 일반 지출결의만 증액·감액할 수 있습니다.', targetDoc: null, balance: null };
+    }
+    if (options.checkPermission !== false && !canProxyApprovalForEmpId(data.drafter_id)) {
+        return { ok: false, message: '현재 계정으로 이 원결재의 증액·감액 결의를 상신할 수 없습니다.', targetDoc: null, balance: null };
+    }
+
+    try {
+        const rows = await fetchApprovalExpenseAdjustmentRows([safeDocId], { excludeDocId: options.excludeDocId });
+        const balance = calculateApprovalExpenseAdjustmentBalance(data, rows);
+        const targetDoc = { ...data, _expense_adjustment_balance: balance };
+        if (safeMode === 'decrease' && requestedAmount > balance.available_decrease) {
+            return {
+                ok: false,
+                message: `감액 가능액은 ${formatMoney(balance.available_decrease)}원입니다. 진행 중 감액도 차감해 계산했습니다.`,
+                targetDoc,
+                balance
+            };
+        }
+        return { ok: true, message: '', targetDoc, balance };
+    } catch (balanceError) {
+        return { ok: false, message: `원결재 누적 금액을 확인하지 못했습니다: ${balanceError.message}`, targetDoc: null, balance: null };
+    }
+} // End of loadApprovalExpenseAdjustmentTargetDoc
+
+function getApprovalExpenseAdjustmentSelectedDoc() {
+    const relatedDocId = toPositiveDocId(document.getElementById('relDocId')?.value || '');
+    if (!relatedDocId || !approvalExpenseAdjustmentSelectedDoc) return null;
+    return Number(approvalExpenseAdjustmentSelectedDoc.id) === relatedDocId ? approvalExpenseAdjustmentSelectedDoc : null;
+} // End of getApprovalExpenseAdjustmentSelectedDoc
+
+function applyApprovalExpenseAdjustmentTarget(doc, balance = null, options = {}) {
+    if (!doc) return false;
+    const safeBalance = balance || doc?._expense_adjustment_balance || calculateApprovalExpenseAdjustmentBalance(doc, []);
+    approvalExpenseAdjustmentSelectedDoc = { ...doc, _expense_adjustment_balance: safeBalance };
+    setApprovalRelatedDocLabel(doc.id, buildApprovalExpenseAdjustmentTargetLabel(doc, safeBalance));
+
+    const snapshot = getApprovalExpenseSnapshotMeta(doc);
+    const paymentModeEl = document.getElementById('expensePaymentMethod');
+    const cardSelectEl = document.getElementById('expenseCardSelect');
+    const originalPaymentMethod = normalizeApprovalCardTypeValue(snapshot.payment_method || snapshot.card_type);
+    const originalPaymentMode = String(snapshot.payment_mode || '').trim() === 'card' || originalPaymentMethod ? 'card' : 'auto';
+    if (paymentModeEl) paymentModeEl.value = originalPaymentMode;
+    if (cardSelectEl) cardSelectEl.value = originalPaymentMode === 'card' ? String(snapshot.card_alias || '').trim() : '';
+    handleExpensePaymentMethodChange();
+
+    const mode = getApprovalExpenseAdjustmentMode();
+    const modeLabel = mode === 'decrease' ? '감액' : '증액';
+    const helpEl = document.getElementById('expenseAdjustmentHelp');
+    if (helpEl) {
+        const settlementGuide = mode === 'decrease' ? ' 취소·환급이 확정된 금액만 상신하세요.' : '';
+        helpEl.textContent = `${modeLabel} 대상: ${buildApprovalExpenseAdjustmentTargetLabel(doc, safeBalance)}${settlementGuide}`;
+    }
+    syncApprovalRelatedDocUi('지출결의');
+    syncApprovalTitleInput('지출결의', { force: options.forceTitle === true });
+
+    if (options.keepBody !== true) {
+        const currentBody = String(getApprovalEditorContent() || '').trim();
+        if (!currentBody || isApprovalAutoGeneratedTemplateContent(currentBody)) {
+            setApprovalEditorContent(`아래 원결재 금액을 ${modeLabel}하고자 하오니 승인하여 주시기 바랍니다.\n\n[원결재]\n- 제목: ${String(doc.title || '지출결의').trim()}\n- 원결재 금액: ${formatMoney(safeBalance.original_amount)}원\n- 현재 유효 금액: ${formatMoney(safeBalance.effective_amount)}원`);
+        }
+    }
+    return true;
+} // End of applyApprovalExpenseAdjustmentTarget
+
+function handleExpenseAdjustmentModeChange(options = {}) {
+    const mode = getApprovalExpenseAdjustmentMode();
+    const expenseSubTypeEl = document.getElementById('expenseSubType');
+    const helpEl = document.getElementById('expenseAdjustmentHelp');
+    const isAdjustment = mode !== 'new';
+
+    if (expenseSubTypeEl) {
+        if (isAdjustment) expenseSubTypeEl.value = '일반';
+        expenseSubTypeEl.disabled = isAdjustment;
+    }
+    if (isAdjustment) {
+        handleExpenseSubTypeChange();
+        if (helpEl && !getApprovalExpenseAdjustmentSelectedDoc()) {
+            helpEl.textContent = mode === 'decrease'
+                ? '감액할 완료 지출결의를 원결재 찾기에서 선택하세요. 취소·환급이 확정된 금액만 상신합니다.'
+                : '증액할 완료 지출결의를 원결재 찾기에서 선택하세요.';
+        }
+    } else {
+        approvalExpenseAdjustmentSelectedDoc = null;
+        if (helpEl) helpEl.textContent = '신규 지출결의는 필요하면 관련 품의서를 연결할 수 있습니다.';
+    }
+
+    if (options.keepRelatedDoc !== true) {
+        approvalExpenseAdjustmentSelectedDoc = null;
+        setApprovalRelatedDocLabel('', '');
+    }
+    syncApprovalRelatedDocUi('지출결의');
+    syncApprovalTitleInput('지출결의', { force: options.forceTitle === true });
+} // End of handleExpenseAdjustmentModeChange
+
 function isApprovalLeaveCancelCategory(docType) {
     return String(docType || '').trim() === '휴가취소';
 } // End of isApprovalLeaveCancelCategory
@@ -1661,12 +1932,22 @@ function syncApprovalRelatedDocUi(type) {
     if (!labelEl || !searchBtn || !selectWrapEl || !selectEl || !helpEl) return;
 
     if (safeType === '지출결의') {
-        labelEl.textContent = '관련 근거 (품의서)';
-        searchBtn.textContent = '🔍 문서 찾기';
+        const adjustmentMode = getApprovalExpenseAdjustmentMode();
+        const isAdjustment = adjustmentMode !== 'new';
+        labelEl.textContent = isAdjustment ? `${adjustmentMode === 'decrease' ? '감액' : '증액'} 대상 원결재` : '관련 근거 (품의서)';
+        searchBtn.textContent = isAdjustment ? '🔍 원결재 찾기' : '🔍 문서 찾기';
         searchBtn.classList.remove('hidden');
         selectWrapEl.classList.add('hidden');
-        helpEl.classList.add('hidden');
-        helpEl.textContent = '';
+        if (isAdjustment) {
+            const selectedDoc = getApprovalExpenseAdjustmentSelectedDoc();
+            helpEl.textContent = selectedDoc
+                ? buildApprovalExpenseAdjustmentTargetLabel(selectedDoc, selectedDoc._expense_adjustment_balance)
+                : '완료된 일반 지출결의를 선택해야 상신할 수 있습니다.';
+            helpEl.classList.remove('hidden');
+        } else {
+            helpEl.classList.add('hidden');
+            helpEl.textContent = '';
+        }
         return;
     }
 
@@ -2305,6 +2586,7 @@ function collectApprovalDraftFormPayload() {
             amount: String(document.getElementById('appAmount')?.value || '').trim(),
             related_doc_id: String(document.getElementById('relDocId')?.value || '').trim(),
             related_doc_label: String(document.getElementById('relDocName')?.textContent || '').trim(),
+            expense_adjustment_mode: getApprovalExpenseAdjustmentMode(),
             expense_sub_type: String(document.getElementById('expenseSubType')?.value || '').trim(),
             expense_payment_method: String(document.getElementById('expensePaymentMethod')?.value || '').trim(),
             expense_card_alias: String(document.getElementById('expenseCardSelect')?.value || '').trim(),
@@ -2578,6 +2860,7 @@ function resetApprovalComposerForm(options = {}) {
     manualJeongyeolToggleTouched = false;
     approvalLineTemplateAutoApplied = false;
     approvalLastCategory = '';
+    approvalExpenseAdjustmentSelectedDoc = null;
 
     setApprovalRelatedDocLabel('', '');
     setApprovalEditorContent('');
@@ -2595,6 +2878,7 @@ function resetApprovalComposerForm(options = {}) {
     if (payrollMonthInput) payrollMonthInput.value = formatApprovalKstMonth();
     if (expensePaymentMethodEl) expensePaymentMethodEl.value = 'auto';
     if (expenseCardSelectEl) expenseCardSelectEl.value = '';
+    setApprovalExpenseAdjustmentMode('new', { silent: true });
     if (jeongyeolToggleEl) jeongyeolToggleEl.checked = false;
     renderApprovalLeaveMixedItems([]);
     setApprovalLeaveMixedDetailMode(false, { populateFromRange: false });
@@ -2752,6 +3036,21 @@ async function loadApprovalDraftFromServer(draftId) {
         setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
         handleCategoryChange();
 
+        if (effectiveCategory === '지출결의') {
+            const restoredAdjustmentMode = normalizeApprovalExpenseAdjustmentMode(fields.expense_adjustment_mode);
+            setApprovalExpenseAdjustmentMode(restoredAdjustmentMode, { silent: true });
+            handleExpenseAdjustmentModeChange({ keepRelatedDoc: true });
+            const restoredRelatedDocId = toPositiveDocId(fields.related_doc_id);
+            if (restoredAdjustmentMode !== 'new' && restoredRelatedDocId) {
+                const targetResult = await loadApprovalExpenseAdjustmentTargetDoc(restoredRelatedDocId, restoredAdjustmentMode, { checkPermission: false });
+                if (targetResult.ok && targetResult.targetDoc) {
+                    applyApprovalExpenseAdjustmentTarget(targetResult.targetDoc, targetResult.balance, { keepBody: true });
+                } else {
+                    setApprovalRelatedDocLabel(restoredRelatedDocId, String(fields.related_doc_label || '').trim());
+                }
+            }
+        }
+
         const proposalSubjectEl = document.getElementById('proposalSubject');
         const noticeSubjectEl = document.getElementById('noticeSubject');
         if (proposalSubjectEl) {
@@ -2815,7 +3114,7 @@ async function loadApprovalDraftFromServer(draftId) {
         setApprovalEditorContent(String(payload?.body || '').trim());
 
         setApprovalRelatedDocLabel(String(fields.related_doc_id || '').trim(), String(fields.related_doc_label || '').trim());
-        if (effectiveCategory === '휴가취소' || effectiveCategory === '출장취소') {
+        if (effectiveCategory === '휴가취소' || effectiveCategory === '출장취소' || effectiveCategory === '지출결의') {
             syncApprovalRelatedDocUi(effectiveCategory);
         }
 
@@ -4936,12 +5235,19 @@ function buildApprovalInsurancePrintSectionHtml(doc) {
 function buildApprovalExpenseSnapshot() {
     const expenseSubType = String(document.getElementById('expenseSubType')?.value || '일반').trim() || '일반';
     if (expenseSubType === '급여') return null;
-    const paymentMode = String(document.getElementById('expensePaymentMethod')?.value || 'auto').trim() || 'auto';
+    const adjustmentType = getApprovalExpenseAdjustmentMode();
+    const adjustmentTarget = adjustmentType !== 'new' ? getApprovalExpenseAdjustmentSelectedDoc() : null;
+    const originalSnapshot = adjustmentTarget ? getApprovalExpenseSnapshotMeta(adjustmentTarget) : {};
+    const originalPaymentMethod = normalizeApprovalCardTypeValue(originalSnapshot.payment_method || originalSnapshot.card_type);
+    const paymentMode = adjustmentTarget
+        ? (String(originalSnapshot.payment_mode || '').trim() === 'card' || originalPaymentMethod ? 'card' : 'auto')
+        : (String(document.getElementById('expensePaymentMethod')?.value || 'auto').trim() || 'auto');
     const cardAlias = paymentMode === 'card'
-        ? String(document.getElementById('expenseCardSelect')?.value || '').trim()
+        ? String(adjustmentTarget ? originalSnapshot.card_alias : document.getElementById('expenseCardSelect')?.value || '').trim()
         : '';
     const matchedCard = getSelectedApprovalCardRow();
-    const cardType = normalizeApprovalCardTypeValue(matchedCard?.card_type);
+    const originalCardType = originalPaymentMethod;
+    const cardType = adjustmentTarget ? originalCardType : normalizeApprovalCardTypeValue(matchedCard?.card_type);
     const paymentMethod = paymentMode === 'card' ? (cardType || 'auto') : 'auto';
     const insurance = expenseSubType === '4대보험'
         ? collectApprovalInsuranceExpenseInput()
@@ -4953,10 +5259,14 @@ function buildApprovalExpenseSnapshot() {
         payment_method: paymentMethod,
         payment_method_label: getApprovalExpensePaymentMethodLabel(paymentMethod),
         card_alias: cardAlias || null,
-        card_company: String(matchedCard?.card_company || '').trim() || null,
+        card_company: String(adjustmentTarget ? originalSnapshot.card_company : matchedCard?.card_company || '').trim() || null,
         card_type: cardType || null,
         card_type_label: getApprovalExpensePaymentMethodLabel(cardType),
         insurance,
+        adjustment_type: adjustmentType === 'new' ? null : adjustmentType,
+        original_approval_id: adjustmentTarget ? Number(adjustmentTarget.id) : null,
+        original_approval_title: adjustmentTarget ? String(adjustmentTarget.title || '').trim() || null : null,
+        original_approval_amount: adjustmentTarget ? Number(adjustmentTarget.amount || 0) : null,
         saved_at: new Date().toISOString()
     };
 } // End of buildApprovalExpenseSnapshot
@@ -5666,6 +5976,18 @@ function toKoreanWonText(value) {
 }
 
 function getApprovalAmountDisplayPayload(doc) {
+    const adjustmentType = getApprovalExpenseAdjustmentType(doc);
+    if (adjustmentType !== 'new') {
+        const amount = Math.max(0, Number(doc?.amount || 0));
+        const modeLabel = adjustmentType === 'decrease' ? '감액' : '증액';
+        const originalTitle = String(doc?.expense_snapshot?.original_approval_title || '').trim();
+        return {
+            showAmount: true,
+            labelText: `${modeLabel} 금액`,
+            mainText: `${amount.toLocaleString()}원`,
+            subText: originalTitle ? `원결재: ${originalTitle}` : '원결재 연결 문서'
+        };
+    }
     if (isApprovalBusinessTripCancelDocType(doc?.doc_type || doc)) {
         const targetDoc = doc?._related_doc || null;
         const targetLabel = targetDoc ? buildApprovalBusinessTripCancelTargetLabel(targetDoc, { includeStatus: false }) : '원 출장신청';
@@ -8792,6 +9114,10 @@ function syncRelViewActionArea(doc) {
     if (canStartBusinessTripCancelFromDoc(doc)) {
         actions.push(`<button type="button" class="btn btn-outline-warning btn-sm" onclick="startBusinessTripCancelFromDoc(${Number(doc.id)})">↩️ 출장취소</button>`);
     }
+    if (canStartApprovalExpenseAdjustmentFromDoc(doc)) {
+        actions.push(`<button type="button" class="btn btn-outline-primary btn-sm" onclick="startApprovalExpenseAdjustmentFromDoc(${Number(doc.id)}, 'increase')">＋ 증액결의</button>`);
+        actions.push(`<button type="button" class="btn btn-outline-warning btn-sm" onclick="startApprovalExpenseAdjustmentFromDoc(${Number(doc.id)}, 'decrease')">－ 감액결의</button>`);
+    }
 
     const context = getApprovalDocProcessContext(doc);
     if (context.canProcess) {
@@ -8890,6 +9216,10 @@ function canStartBusinessTripCancelFromDoc(doc) {
     if (!isApprovalBusinessTripInCancelWindow(doc)) return false;
     return canProxyApprovalForEmpId(doc.drafter_id);
 } // End of canStartBusinessTripCancelFromDoc
+
+function canStartApprovalExpenseAdjustmentFromDoc(doc) {
+    return isApprovalExpenseAdjustmentOriginalDoc(doc) && canProxyApprovalForEmpId(doc.drafter_id);
+} // End of canStartApprovalExpenseAdjustmentFromDoc
 
 function decorateTodoDelegation(doc) {
     const curApprover = normalizeApprovalEmpId(doc?.current_approver);
@@ -8994,6 +9324,13 @@ function buildApprovalGeneratedTitle(mainType) {
         return `${safeType} 신청`;
     }
     if (safeType === '지출결의') {
+        const adjustmentMode = getApprovalExpenseAdjustmentMode();
+        if (adjustmentMode !== 'new') {
+            const targetDoc = getApprovalExpenseAdjustmentSelectedDoc();
+            const modeLabel = adjustmentMode === 'decrease' ? '감액' : '증액';
+            const targetTitle = String(targetDoc?.title || '').trim();
+            return targetTitle ? `[${modeLabel}] ${targetTitle}` : `${modeLabel} 지출결의`;
+        }
         const expenseMode = String(document.getElementById('expenseSubType')?.value || '일반').trim();
         const payrollMonthValue = String(document.getElementById('payrollMonth')?.value || '').trim();
         if (expenseMode === '급여' && payrollMonthValue) {
@@ -9124,6 +9461,7 @@ function handleCategoryChange() {
     const divBusinessTrip = document.getElementById("divBusinessTripSection");
     const divAmt = document.getElementById("divAmount");
     const divRel = document.getElementById("divRelDoc"); // [New]
+    const divExpenseAdjustment = document.getElementById("divExpenseAdjustment");
     const divSalaryExpense = document.getElementById("divSalaryExpense");
     const divNoticeReceiver = document.getElementById("divNoticeReceiver");
     const divNoticeVia = document.getElementById("divNoticeVia");
@@ -9148,6 +9486,7 @@ function handleCategoryChange() {
     divOvertime.classList.add("hidden");
     divBusinessTrip.classList.add("hidden");
     divRel.classList.add("hidden"); // [New]
+    divExpenseAdjustment.classList.add("hidden");
     divSalaryExpense.classList.add("hidden");
     divNoticeReceiver.classList.add("hidden");
     divNoticeVia.classList.add("hidden");
@@ -9263,6 +9602,7 @@ function handleCategoryChange() {
     }
     else if (type === '지출결의') { // [New] 지출결의일 때 관련문서 UI 오픈
         divRel.classList.remove("hidden");
+        divExpenseAdjustment.classList.remove("hidden");
         divProposalSubject.classList.remove("hidden");
         if (canUseSalaryExpense()) {
             divSalaryExpense.classList.remove("hidden");
@@ -9270,6 +9610,7 @@ function handleCategoryChange() {
         } else {
             resetSalaryExpenseUi();
         }
+        handleExpenseAdjustmentModeChange({ keepRelatedDoc: !typeChanged });
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (
             !currentDesc
@@ -9404,6 +9745,7 @@ function buildApprovalSubmitPreviewData() {
     }
 
     const expenseSubType = String(document.getElementById("expenseSubType")?.value || '일반').trim();
+    const expenseAdjustmentMode = getApprovalExpenseAdjustmentMode();
     const payrollMonth = String(document.getElementById("payrollMonth")?.value || '').trim();
     let subType = mainType;
     let finalAmt = Number(document.getElementById("appAmount")?.value || 0);
@@ -9478,7 +9820,21 @@ function buildApprovalSubmitPreviewData() {
         finalAmt = attendanceSnapshotPayload.total_hours;
         title = getApprovalResolvedTitle(mainType, `시간외근로 신청 (${attendanceSnapshotPayload.work_date} · ${attendanceSnapshotPayload.total_hours}시간)`);
     } else if (mainType === '지출결의') {
-        if (expenseSubType === '급여') {
+        if (expenseAdjustmentMode !== 'new') {
+            const adjustmentTarget = getApprovalExpenseAdjustmentSelectedDoc();
+            if (!adjustmentTarget) throw new Error('증액·감액할 원결재를 먼저 선택하세요.');
+            finalAmt = Number(document.getElementById("appAmount")?.value || 0);
+            if (!(finalAmt > 0)) throw new Error(`${expenseAdjustmentMode === 'decrease' ? '감액' : '증액'} 금액을 입력하세요.`);
+            const balance = adjustmentTarget._expense_adjustment_balance || calculateApprovalExpenseAdjustmentBalance(adjustmentTarget, []);
+            if (expenseAdjustmentMode === 'decrease' && finalAmt > balance.available_decrease) {
+                throw new Error(`감액 가능액은 ${formatMoney(balance.available_decrease)}원입니다.`);
+            }
+            subType = APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES[expenseAdjustmentMode];
+            expenseSnapshotPayload = buildApprovalExpenseSnapshot();
+            const modeLabel = expenseAdjustmentMode === 'decrease' ? '감액' : '증액';
+            title = getApprovalResolvedTitle(mainType, `[${modeLabel}] ${String(adjustmentTarget.title || '지출결의').trim()}`);
+            appendDesc += `\n\n${buildApprovalExpenseAdjustmentAppendText(adjustmentTarget, expenseAdjustmentMode, finalAmt, balance)}`;
+        } else if (expenseSubType === '급여') {
             if (!payrollMonth) throw new Error('급여 귀속월을 선택하세요.');
             if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
                 throw new Error('급여대장을 먼저 불러와주세요.');
@@ -9605,6 +9961,8 @@ async function loadApprovalRelatedDocById(docId) {
 
 function getApprovalRelatedDocSectionTitle(parentDoc) {
     const rawType = String(parentDoc?.doc_type || parentDoc || '').trim();
+    const adjustmentType = getApprovalExpenseAdjustmentType(parentDoc);
+    if (adjustmentType !== 'new') return `${adjustmentType === 'decrease' ? '감액' : '증액'} 대상 원결재`;
     if (isLeaveCancelApprovalDoc(rawType)) return '취소 대상 휴가';
     if (isApprovalBusinessTripCancelDocType(rawType)) return '취소 대상 출장';
     return '집행 근거 (연동 품의서)';
@@ -10576,6 +10934,7 @@ async function handleDraftSubmit(e) {
         return showAlert('현재 조합에서 사용하지 않는 문서유형입니다. 설정에서 사용 여부를 확인하세요.');
     }
     const expenseSubType = document.getElementById("expenseSubType")?.value || '일반';
+    const expenseAdjustmentMode = getApprovalExpenseAdjustmentMode();
     const payrollMonth = document.getElementById("payrollMonth")?.value || '';
     let subType = mainType;
     let finalAmt = document.getElementById("appAmount").value || 0;
@@ -10699,7 +11058,24 @@ async function handleDraftSubmit(e) {
         title = getApprovalResolvedTitle(mainType, `시간외근로 신청 (${attendanceSnapshotPayload.work_date} · ${attendanceSnapshotPayload.total_hours}시간)`);
     }
     else if (mainType === '지출결의') {
-        if (expenseSubType === '급여') {
+        if (expenseAdjustmentMode !== 'new') {
+            finalAmt = Number(document.getElementById("appAmount").value || 0);
+            if (!(finalAmt > 0)) return showAlert(`${expenseAdjustmentMode === 'decrease' ? '감액' : '증액'} 금액을 입력하세요.`);
+            const selectedTargetDocId = document.getElementById('relDocId')?.value || '';
+            const adjustmentTargetResult = await loadApprovalExpenseAdjustmentTargetDoc(selectedTargetDocId, expenseAdjustmentMode, {
+                amount: finalAmt,
+                checkPermission: true
+            });
+            if (!adjustmentTargetResult.ok || !adjustmentTargetResult.targetDoc) {
+                return showAlert(adjustmentTargetResult.message || '증액·감액할 원결재를 확인하지 못했습니다.');
+            }
+            applyApprovalExpenseAdjustmentTarget(adjustmentTargetResult.targetDoc, adjustmentTargetResult.balance, { keepBody: true });
+            subType = APPROVAL_EXPENSE_ADJUSTMENT_DOC_TYPES[expenseAdjustmentMode];
+            expenseSnapshotPayload = buildApprovalExpenseSnapshot();
+            const modeLabel = expenseAdjustmentMode === 'decrease' ? '감액' : '증액';
+            title = getApprovalResolvedTitle(mainType, `[${modeLabel}] ${String(adjustmentTargetResult.targetDoc.title || '지출결의').trim()}`);
+            appendDesc += `\n\n${buildApprovalExpenseAdjustmentAppendText(adjustmentTargetResult.targetDoc, expenseAdjustmentMode, finalAmt, adjustmentTargetResult.balance)}`;
+        } else if (expenseSubType === '급여') {
             if (!canUseSalaryExpense()) return showAlert("급여 연동 권한이 없습니다.");
             if (!payrollMonth) return showAlert("급여 귀속월을 선택하세요.");
             if (!salaryExpenseState || !salaryExpenseState.loaded || salaryExpenseState.yearMonth !== payrollMonth) {
@@ -11369,6 +11745,61 @@ function hasMeaningfulApprovalDraftContentForReplacement() {
     const noticeSubject = String(document.getElementById('noticeSubject')?.value || '').trim();
     return !!noticeSubject;
 } // End of hasMeaningfulApprovalDraftContentForReplacement
+
+async function startApprovalExpenseAdjustmentFromDoc(docId, adjustmentMode) {
+    const safeDocId = toPositiveDocId(docId);
+    const safeMode = normalizeApprovalExpenseAdjustmentMode(adjustmentMode);
+    if (!safeDocId || safeMode === 'new') return showAlert('증액·감액할 원결재를 확인하지 못했습니다.');
+
+    const targetResult = await loadApprovalExpenseAdjustmentTargetDoc(safeDocId, safeMode, { checkPermission: true });
+    if (!targetResult.ok || !targetResult.targetDoc) {
+        return showAlert(targetResult.message || '원결재를 확인하지 못했습니다.');
+    }
+
+    const modeLabel = safeMode === 'decrease' ? '감액' : '증액';
+    if (hasMeaningfulApprovalDraftContentForReplacement()) {
+        const ok = await showConfirm(`현재 작성 중인 내용이 있습니다.\n${modeLabel} 지출결의서로 바꾸시겠습니까?`, {
+            title: `${modeLabel} 지출결의`,
+            okText: '바꾸기',
+            okClass: 'btn-primary'
+        });
+        if (!ok) return;
+    }
+
+    const relViewModalEl = document.getElementById('relViewModal');
+    if (relViewModal && relViewModalEl?.classList.contains('show')) {
+        relViewModal.hide();
+        await waitForModalHidden(relViewModalEl);
+    }
+
+    resetApprovalComposerForm({ skipAutoRefresh: true });
+    const targetDoc = targetResult.targetDoc;
+    const isSelfDraft = normalizeApprovalEmpId(targetDoc.drafter_id) === normalizeApprovalEmpId(myInfo?.emp_id);
+    const proxyCheckEl = document.getElementById('chkProxy');
+    const proxyTargetEl = document.getElementById('proxyTargetSelect');
+    if (!isSelfDraft) {
+        if (proxyCheckEl && !proxyCheckEl.checked) proxyCheckEl.checked = true;
+        toggleProxyMode({ skipAutoRefresh: true });
+        if (proxyTargetEl) proxyTargetEl.value = String(targetDoc.drafter_id || '').trim();
+    } else if (proxyCheckEl?.checked) {
+        proxyCheckEl.checked = false;
+        toggleProxyMode({ skipAutoRefresh: true });
+    }
+
+    const categoryEl = document.getElementById('appCategory');
+    if (categoryEl) categoryEl.value = '지출결의';
+    handleCategoryChange();
+    setApprovalExpenseAdjustmentMode(safeMode, { silent: true });
+    handleExpenseAdjustmentModeChange({ forceTitle: true });
+    applyApprovalExpenseAdjustmentTarget(targetDoc, targetResult.balance, { forceTitle: true });
+    const amountEl = document.getElementById('appAmount');
+    if (amountEl) {
+        amountEl.value = '';
+        amountEl.focus();
+    }
+    switchTab('draft');
+    showAlert(`${modeLabel} 지출결의서가 준비되었습니다. ${modeLabel} 금액과 사유를 입력하고 결재선을 확인한 뒤 상신하세요.`);
+} // End of startApprovalExpenseAdjustmentFromDoc
 
 async function startBusinessTripCancelFromDoc(docId) {
     const safeDocId = toPositiveDocId(docId);
@@ -12238,7 +12669,8 @@ function renderDocs(target, list, isTodo) {
         let relBtn = "";
         const relId = toPositiveDocId(doc.related_doc_id);
         if (relId) {
-            relBtn = `<button type="button" class="btn btn-sm btn-outline-info ms-2" style="font-size: 0.75rem;" onclick="openRelView(${relId})">🔗 근거문서 보기</button>`;
+            const relLabel = getApprovalExpenseAdjustmentType(doc) !== 'new' ? '원결재 보기' : '근거문서 보기';
+            relBtn = `<button type="button" class="btn btn-sm btn-outline-info ms-2" style="font-size: 0.75rem;" onclick="openRelView(${relId})">🔗 ${relLabel}</button>`;
         }
 
         let btnHtml = "";
@@ -12277,6 +12709,10 @@ function renderDocs(target, list, isTodo) {
             }
             if (canStartBusinessTripCancelFromDoc(doc)) {
                 actions.push(`<button type="button" class="btn btn-sm btn-outline-warning me-1" onclick="startBusinessTripCancelFromDoc(${Number(doc.id)})">↩️ 출장취소</button>`);
+            }
+            if (canStartApprovalExpenseAdjustmentFromDoc(doc)) {
+                actions.push(`<button type="button" class="btn btn-sm btn-outline-primary me-1" onclick="startApprovalExpenseAdjustmentFromDoc(${Number(doc.id)}, 'increase')">＋ 증액</button>`);
+                actions.push(`<button type="button" class="btn btn-sm btn-outline-warning me-1" onclick="startApprovalExpenseAdjustmentFromDoc(${Number(doc.id)}, 'decrease')">－ 감액</button>`);
             }
 
             if (doc.status === '가승인' && doc.drafter_id === myInfo.emp_id) {
@@ -13063,6 +13499,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 1. 검색 모달 열기
 function openRelSearch() {
+    const adjustmentMode = getCurrentDraftMainType() === '지출결의' ? getApprovalExpenseAdjustmentMode() : 'new';
+    const isAdjustment = adjustmentMode !== 'new';
+    const modalTitleEl = document.getElementById('relSearchModalTitle');
+    const keywordEl = document.getElementById('relKeyword');
+    if (modalTitleEl) modalTitleEl.textContent = isAdjustment
+        ? `${adjustmentMode === 'decrease' ? '감액' : '증액'} 대상 원결재 검색`
+        : '관련 품의서 검색';
+    if (keywordEl) keywordEl.placeholder = isAdjustment ? '원결재 제목, 내용 또는 작성자' : '제목, 내용 또는 작성자';
     document.getElementById("relKeyword").value = "";
     document.getElementById("relResultList").innerHTML = "";
     relSearchModal.show();
@@ -13078,13 +13522,15 @@ async function runRelSearch() {
 
     // 내 부서 찾기 (ref_employees 이용 안 하고 allUsers에서 찾음)
     const myDept = myInfo.department;
+    const adjustmentMode = getCurrentDraftMainType() === '지출결의' ? getApprovalExpenseAdjustmentMode() : 'new';
+    const isAdjustment = adjustmentMode !== 'new';
 
-    // 쿼리: status in (완료, 실물결재완료), doc_type=일반품의
+    // 신규 지출은 품의서를, 증액·감액은 완료된 일반 지출결의를 검색한다.
     let query = _supabase.from('ref_approval')
         .select('*')
         .eq('coop_id', getApprovalScopedCoopId())
         .in('status', ['완료', '실물결재완료'])
-        .eq('doc_type', '일반품의') // 품의서만 검색
+        .eq('doc_type', isAdjustment ? '지출결의' : '일반품의')
         .order('created_at', {ascending: false})
         .limit(20);
 
@@ -13102,7 +13548,7 @@ async function runRelSearch() {
 
     // 부서 필터링 (클라이언트 사이드)
     // allUsers 배열을 활용해 작성자의 부서를 확인
-    const filtered = data.filter(doc => {
+    let filtered = data.filter(doc => {
         const drafter = allUsers.find(u => u.emp_id === doc.drafter_id);
         // 작성자가 없거나(퇴사), 부서가 같거나, 내가 관리자면 통과
         const withinDept = !drafter || drafter.department === myDept || (myInfo.role === 'admin' || myInfo.role === 'admin_all');
@@ -13114,8 +13560,19 @@ async function runRelSearch() {
         return title.includes(loweredKey) || content.includes(loweredKey) || drafterName.includes(loweredKey);
     });
 
+    if (isAdjustment && filtered.length > 0) {
+        try {
+            filtered = await annotateApprovalExpenseAdjustmentBalances(filtered);
+        } catch (balanceError) {
+            listEl.textContent = `원결재 누적 금액 조회 오류: ${balanceError.message}`;
+            return;
+        }
+    }
+
     if (filtered.length === 0) {
-        listEl.innerHTML = '<div class="p-3 text-center text-muted">검색 결과가 없습니다. (완료/실물결재완료 품의서만 조회됨)</div>';
+        listEl.innerHTML = isAdjustment
+            ? '<div class="p-3 text-center text-muted">선택할 수 있는 완료 일반 지출결의가 없습니다.</div>'
+            : '<div class="p-3 text-center text-muted">검색 결과가 없습니다. (완료/실물결재완료 품의서만 조회됨)</div>';
         return;
     }
 
@@ -13135,7 +13592,10 @@ async function runRelSearch() {
         header.appendChild(date);
         const meta = document.createElement("small");
         meta.className = "text-muted";
-        meta.textContent = `${doc.drafter_name || ''} | ${formatApprovalAmountInline(doc)}`;
+        const balance = doc?._expense_adjustment_balance;
+        meta.textContent = isAdjustment && balance
+            ? `${doc.drafter_name || ''} | 원결재 ${formatMoney(balance.original_amount)}원 | 현재 ${formatMoney(balance.effective_amount)}원 | 감액 가능 ${formatMoney(balance.available_decrease)}원`
+            : `${doc.drafter_name || ''} | ${formatApprovalAmountInline(doc)}`;
         item.appendChild(header);
         item.appendChild(meta);
         item.onclick = () => selectRelDoc(doc);
@@ -13144,7 +13604,17 @@ async function runRelSearch() {
 }
 
 // 3. 문서 선택
-function selectRelDoc(doc) {
+async function selectRelDoc(doc) {
+    const adjustmentMode = getCurrentDraftMainType() === '지출결의' ? getApprovalExpenseAdjustmentMode() : 'new';
+    if (adjustmentMode !== 'new') {
+        const targetResult = await loadApprovalExpenseAdjustmentTargetDoc(doc?.id, adjustmentMode, { checkPermission: true });
+        if (!targetResult.ok || !targetResult.targetDoc) {
+            return showAlert(targetResult.message || '원결재를 선택할 수 없습니다.');
+        }
+        applyApprovalExpenseAdjustmentTarget(targetResult.targetDoc, targetResult.balance, { forceTitle: true });
+        relSearchModal.hide();
+        return;
+    }
     document.getElementById("relDocId").value = doc.id;
     const nameEl = document.getElementById("relDocName");
     nameEl.textContent = `연동됨 ${doc.title || ''} (${doc.drafter_name || ''})`;

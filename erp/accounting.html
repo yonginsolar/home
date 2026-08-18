@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.96 | Change: 2026-08-06 - Move manual Durunuri entry to the admin-only exception tool. -->
+<!-- Version: v1.0.97 | Change: 2026-08-18 - Post linked increase and decrease approval adjustments. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.96 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.97 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -3494,6 +3494,20 @@ function appendApprovalImmediateExpenseEntries(entries, payload) {
     entries.push({ ...common, Type: '자산', Account: '보통예금', Debit: 0, Credit: amount, Evidence_Type: '금융거래' });
 } // End of appendApprovalImmediateExpenseEntries
 
+function appendApprovalImmediateExpenseReversalEntries(entries, payload) {
+    const amount = Math.max(0, Number(payload.amount || 0));
+    if (!(amount > 0)) return;
+    const common = {
+        Date: payload.date,
+        Description: payload.description,
+        Trans_ID: payload.transId,
+        Project: payload.project || '본사',
+        Operator: payload.operator
+    };
+    entries.push({ ...common, Type: '자산', Account: '보통예금', Debit: amount, Credit: 0, Evidence_Type: '금융거래' });
+    entries.push({ ...common, Type: '비용', Account: '미분류비용', Debit: 0, Credit: amount });
+} // End of appendApprovalImmediateExpenseReversalEntries
+
 function normalizeApprovalExpenseSnapshot(doc) {
     const raw = doc?.expense_snapshot;
     if (!raw || typeof raw !== 'object') {
@@ -3503,7 +3517,10 @@ function normalizeApprovalExpenseSnapshot(doc) {
             payment_method_label: '자동(즉시지급)',
             card_alias: '',
             card_company: '',
-            insurance: null
+            insurance: null,
+            adjustment_type: '',
+            original_approval_id: null,
+            original_approval_title: ''
         };
     }
     const paymentMethod = String(raw.payment_method || 'auto').trim();
@@ -3513,9 +3530,88 @@ function normalizeApprovalExpenseSnapshot(doc) {
         payment_method_label: String(raw.payment_method_label || '').trim(),
         card_alias: String(raw.card_alias || '').trim(),
         card_company: String(raw.card_company || '').trim(),
-        insurance: raw.insurance && typeof raw.insurance === 'object' ? raw.insurance : null
+        insurance: raw.insurance && typeof raw.insurance === 'object' ? raw.insurance : null,
+        adjustment_type: ['increase', 'decrease'].includes(String(raw.adjustment_type || '').trim()) ? String(raw.adjustment_type || '').trim() : '',
+        original_approval_id: Number.isInteger(Number(raw.original_approval_id)) && Number(raw.original_approval_id) > 0 ? Number(raw.original_approval_id) : null,
+        original_approval_title: String(raw.original_approval_title || '').trim()
     };
 } // End of normalizeApprovalExpenseSnapshot
+
+const ACCOUNTING_APPROVAL_ADJUSTMENT_COMPLETED_STATUSES = Object.freeze(['완료', '실물결재완료']);
+const ACCOUNTING_APPROVAL_ADJUSTMENT_ACTIVE_STATUSES = Object.freeze(['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료']);
+
+function getAccountingApprovalAdjustmentType(doc) {
+    const snapshotType = String(normalizeApprovalExpenseSnapshot(doc).adjustment_type || '').trim();
+    if (snapshotType === 'increase' || snapshotType === 'decrease') return snapshotType;
+    const docType = String(doc?.doc_type || '').trim();
+    if (docType === '지출결의(증액)') return 'increase';
+    if (docType === '지출결의(감액)') return 'decrease';
+    return '';
+} // End of getAccountingApprovalAdjustmentType
+
+function calculateAccountingApprovalAdjustmentBalance(originalDoc, rows) {
+    const originalAmount = Math.max(0, Number(originalDoc?.amount || 0));
+    let completedIncrease = 0;
+    let completedDecrease = 0;
+    let reservedDecrease = 0;
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const amount = Math.max(0, Number(row?.amount || 0));
+        const type = getAccountingApprovalAdjustmentType(row);
+        const status = String(row?.status || '').trim();
+        const completed = ACCOUNTING_APPROVAL_ADJUSTMENT_COMPLETED_STATUSES.includes(status);
+        if (type === 'increase' && completed) completedIncrease += amount;
+        if (type === 'decrease' && completed) completedDecrease += amount;
+        if (type === 'decrease' && !completed && ACCOUNTING_APPROVAL_ADJUSTMENT_ACTIVE_STATUSES.includes(status)) reservedDecrease += amount;
+    });
+    const effectiveAmount = Math.max(0, originalAmount + completedIncrease - completedDecrease);
+    return {
+        originalAmount,
+        effectiveAmount,
+        availableDecrease: Math.max(0, effectiveAmount - reservedDecrease)
+    };
+} // End of calculateAccountingApprovalAdjustmentBalance
+
+async function validateAccountingApprovalAdjustmentDoc(doc) {
+    const adjustmentType = getAccountingApprovalAdjustmentType(doc);
+    if (!adjustmentType) return { ok: true, adjustmentType: '', originalDoc: null, balance: null };
+    const snapshot = normalizeApprovalExpenseSnapshot(doc);
+    const originalId = Number(doc?.related_doc_id || snapshot.original_approval_id || 0);
+    if (!Number.isInteger(originalId) || originalId <= 0) {
+        return { ok: false, reason: '원결재 연결 정보가 없습니다.', adjustmentType, originalDoc: null, balance: null };
+    }
+
+    const coopId = String(myInfo?.coop_id || '').trim();
+    const { data: originalDoc, error: originalError } = await _supabase
+        .from('ref_approval')
+        .select('id,doc_type,status,amount,title,expense_snapshot')
+        .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
+        .eq('id', originalId)
+        .maybeSingle();
+    if (originalError || !originalDoc) {
+        return { ok: false, reason: `원결재 조회 실패: ${originalError?.message || '문서를 찾을 수 없음'}`, adjustmentType, originalDoc: null, balance: null };
+    }
+    if (String(originalDoc.doc_type || '').trim() !== '지출결의' || !ACCOUNTING_APPROVAL_ADJUSTMENT_COMPLETED_STATUSES.includes(String(originalDoc.status || '').trim())) {
+        return { ok: false, reason: '완료된 일반 지출결의만 증액·감액할 수 있습니다.', adjustmentType, originalDoc, balance: null };
+    }
+
+    const { data: adjustmentRows, error: adjustmentError } = await _supabase
+        .from('ref_approval')
+        .select('id,doc_type,status,amount,expense_snapshot')
+        .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
+        .eq('related_doc_id', originalId)
+        .in('doc_type', ['지출결의(증액)', '지출결의(감액)'])
+        .in('status', ACCOUNTING_APPROVAL_ADJUSTMENT_ACTIVE_STATUSES)
+        .neq('id', Number(doc?.id || 0));
+    if (adjustmentError) {
+        return { ok: false, reason: `누적 증감액 조회 실패: ${adjustmentError.message}`, adjustmentType, originalDoc, balance: null };
+    }
+    const balance = calculateAccountingApprovalAdjustmentBalance(originalDoc, adjustmentRows || []);
+    const amount = Math.max(0, Number(doc?.amount || 0));
+    if (adjustmentType === 'decrease' && amount > balance.availableDecrease) {
+        return { ok: false, reason: `감액 가능액 ${balance.availableDecrease.toLocaleString()}원을 초과했습니다.`, adjustmentType, originalDoc, balance };
+    }
+    return { ok: true, reason: '', adjustmentType, originalDoc, balance };
+} // End of validateAccountingApprovalAdjustmentDoc
 
 function getApprovalDurunuriSupportInput(doc) {
     const insurance = normalizeApprovalExpenseSnapshot(doc).insurance || {};
@@ -3881,6 +3977,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
     let paymentCount = 0;
     let accrualCount = 0;
     let checkCardCount = 0;
+    let adjustmentIncreaseCount = 0;
+    let adjustmentDecreaseCount = 0;
     const durunuriSourceMonths = new Set();
 
     for (const doc of (docs || [])) {
@@ -3890,6 +3988,45 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         const transId = `APR-${doc.id}`;
         const operator = doc?.drafter_name || writer;
         const journalDate = getApprovalJournalDate(doc, fallbackDate);
+
+        const adjustmentType = getAccountingApprovalAdjustmentType(doc);
+        if (adjustmentType) {
+            const adjustmentState = await validateAccountingApprovalAdjustmentDoc(doc);
+            const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+            if (!adjustmentState.ok) {
+                blockedDocs.push({ id: doc?.id, label, reason: adjustmentState.reason || '원결재 증감액을 확인하지 못했습니다.' });
+                continue;
+            }
+            const expenseSnapshot = normalizeApprovalExpenseSnapshot(doc);
+            const paymentMethod = String(expenseSnapshot.payment_method || 'auto').trim();
+            const cardAlias = String(expenseSnapshot.card_alias || '').trim();
+            const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
+            const modeLabel = adjustmentType === 'decrease' ? '감액' : '증액';
+            const originalTitle = String(adjustmentState.originalDoc?.title || expenseSnapshot.original_approval_title || '원결재').trim();
+            let kind = 'direct_payment';
+            if (adjustmentType === 'decrease') {
+                kind = paymentMethod === 'credit_card' ? 'accrual_reversal' : 'direct_payment_reversal';
+            } else if (paymentMethod === 'credit_card') {
+                kind = 'accrual';
+            } else if (paymentMethod === 'check_card') {
+                kind = 'check_card';
+            }
+            plans.push({
+                kind,
+                amount,
+                date: journalDate,
+                description: `[전자결재-${modeLabel}] ${cardPrefix}${originalTitle}`,
+                transId,
+                project: '본사',
+                operator,
+                adjustmentType,
+                originalApprovalId: adjustmentState.originalDoc?.id || null
+            });
+            if (adjustmentType === 'decrease') adjustmentDecreaseCount += 1;
+            else adjustmentIncreaseCount += 1;
+            totalAmount += amount;
+            continue;
+        }
 
         if (isInsuranceApproval(doc)) {
             const settingResult = await loadInsuranceAutoDebitDiscountSetting();
@@ -4098,6 +4235,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         paymentCount,
         accrualCount,
         checkCardCount,
+        adjustmentIncreaseCount,
+        adjustmentDecreaseCount,
         error: null
     };
 }
@@ -4130,6 +4269,14 @@ function appendApprovalEntriesFromPlan(entries, plan) {
     }
     if (plan.kind === 'check_card') {
         appendApprovalImmediateExpenseEntries(entries, plan);
+        return;
+    }
+    if (plan.kind === 'accrual_reversal') {
+        appendApprovalAccrualReversalEntries(entries, plan);
+        return;
+    }
+    if (plan.kind === 'direct_payment_reversal') {
+        appendApprovalImmediateExpenseReversalEntries(entries, plan);
         return;
     }
     appendApprovalAccrualEntries(entries, plan);
@@ -6991,7 +7138,7 @@ function confirmSync(type) {
             const coopId = String(myInfo?.coop_id || '').trim();
             const { data: approvals, error: previewError } = await _supabase
                 .from('ref_approval')
-                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot,salary_ledger_snapshot')
+                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot')
                 .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                 .in('status', ['완료', '실물결재완료'])
                 .ilike('doc_type', '%지출%');
@@ -7027,13 +7174,15 @@ function confirmSync(type) {
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
+                `- 증액결의: ${previewPlanResult.adjustmentIncreaseCount || 0}건 (원결재 결제수단 기준 추가 전표)`,
+                `- 감액결의: ${previewPlanResult.adjustmentDecreaseCount || 0}건 (원결재 전표의 반대 방향)`,
                 previewPlanResult.blockedDocs.length > 0 ? `- 보류 사유\n${formatApprovalSyncBlockedDocs(previewPlanResult.blockedDocs)}` : ''
             ].filter(Boolean).join('\n');
 
             showConfirm("전자결재 연동", previewMsg, async () => {
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
-                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,expense_snapshot,salary_ledger_snapshot')
+                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot')
                     .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                     .in('status', ['완료', '실물결재완료'])
                     .ilike('doc_type', '%지출%');
@@ -7101,7 +7250,7 @@ function confirmSync(type) {
                     restores: []
                 });
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
-                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
