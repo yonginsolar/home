@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.125
-Change: Load participation history by type in three-item keyset pages, with education first and meetings on demand.
+Version: v1.0.126
+Change: Show private board and assembly photo galleries in meeting participation history.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.125 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.126 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -797,18 +797,18 @@ border: 1px solid #cbd5e1;
 #participationHistoryModal .custom-modal-box {
 max-width: 920px;
 }
-.participation-history-item.education-with-photo {
+.participation-history-item.with-photo {
 display: grid;
 grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
 gap: 20px;
 align-items: start;
 padding: 18px;
 }
-.participation-history-item.education-with-photo .participation-photo-strip {
+.participation-history-item.with-photo .participation-photo-strip {
 width: 100%;
 margin-top: 0;
 }
-.participation-history-item.education-with-photo .participation-photo-thumb {
+.participation-history-item.with-photo .participation-photo-thumb {
 height: 190px;
 }
 }
@@ -2182,11 +2182,11 @@ oninput="autoHyphen(this)"> </div>
 </div>
 </div>
 
-<div id="participationImageLightbox" class="participation-image-lightbox" role="dialog" aria-modal="true" aria-label="교육 사진 크게 보기" aria-hidden="true">
+<div id="participationImageLightbox" class="participation-image-lightbox" role="dialog" aria-modal="true" aria-label="행사 사진 크게 보기" aria-hidden="true">
 <button type="button" class="participation-image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기" onclick="closeParticipationImageLightbox()">&times;</button>
 <button type="button" class="participation-image-lightbox-nav prev" id="participationImageLightboxPrev" aria-label="이전 사진" hidden>&lsaquo;</button>
 <div class="participation-image-lightbox-stage">
-<img id="participationImageLightboxImage" alt="교육 사진 크게 보기">
+<img id="participationImageLightboxImage" alt="행사 사진 크게 보기">
 <div class="participation-image-lightbox-loading" role="status" aria-live="polite">로딩 중…</div>
 <div class="participation-image-lightbox-meta" id="participationImageLightboxMeta" aria-live="polite" hidden></div>
 </div>
@@ -5976,7 +5976,6 @@ return;
 
 list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>사진을 불러오는 중...</div>';
 const photoPaths = Array.from(new Set(visibleEvents.flatMap(function(event) {
-if (event.event_type !== 'EDUCATION') return [];
 return (Array.isArray(event.files) ? event.files : [])
 .filter(function(file) { return file.file_kind === 'PHOTO' && !file.external_url; })
 .map(function(file) { return String(file.storage_path || '').trim(); })
@@ -5994,10 +5993,10 @@ const photoUrlMap = new Map(photoUrlRows);
 
 list.innerHTML = visibleEvents.map(function(event) {
 const files = Array.isArray(event.files) ? event.files : [];
-const materials = files.filter(function(file) { return file.file_kind === 'MATERIAL'; });
-const photos = event.event_type === 'EDUCATION'
-? files.filter(function(file) { return file.file_kind === 'PHOTO'; })
+const materials = event.event_type === 'EDUCATION'
+? files.filter(function(file) { return file.file_kind === 'MATERIAL'; })
 : [];
+const photos = files.filter(function(file) { return file.file_kind === 'PHOTO'; });
 const status = String(event.attendance_status || 'PENDING');
 const timeText = event.ends_at
 ? `${formatMemberKstDateTime(event.starts_at)} ~ ${formatMemberKstDateTime(event.ends_at)}`
@@ -6026,23 +6025,24 @@ return `<button type="button" class="btn btn-sm btn-outline-primary" data-partic
 return `<button type="button" class="btn btn-sm btn-outline-primary" data-participation-file="${escapeHtml(file.storage_path)}"><i class="bi bi-download me-1" aria-hidden="true"></i>${escapeHtml(resourceLabel)} · ${escapeHtml(file.original_name)}</button>`;
 }).join('')}</div>`
 : '';
+const eventTypeLabel = participationEventTypeLabel(event.event_type);
 const photoGalleryPayload = photos.map(function(file, index) {
 return {
 storagePath: String(file.storage_path || '').trim(),
 externalUrl: safeUrl(file.external_url || ''),
-alt: String(file.original_name || `교육 사진 ${index + 1}`).trim()
+alt: String(file.original_name || `${eventTypeLabel} 사진 ${index + 1}`).trim()
 };
 }).filter(function(item) { return item.storagePath || item.externalUrl; });
 const firstPhoto = photoGalleryPayload[0] || null;
 const firstPhotoKey = firstPhoto ? (firstPhoto.externalUrl || firstPhoto.storagePath) : '';
 const firstPhotoUrl = firstPhoto ? (firstPhoto.externalUrl || photoUrlMap.get(firstPhoto.storagePath) || '') : '';
-const hasEducationPhoto = event.event_type === 'EDUCATION' && Boolean(firstPhoto);
+const hasPhoto = Boolean(firstPhoto);
 const titleHtml = event.event_type !== 'EDUCATION' && event.document_available === true
 ? `<button type="button" class="participation-meeting-title" data-participation-document="${escapeHtml(event.event_id)}" aria-label="${escapeHtml(event.title)} 회의록 보기"><span>${escapeHtml(event.title)}</span><i class="bi bi-box-arrow-up-right small" aria-hidden="true"></i></button>`
 : `<div class="fw-bold">${escapeHtml(event.title)}</div>`;
 const photosHtml = firstPhoto
-? `<div class="participation-photo-strip" aria-label="교육 사진 ${photoGalleryPayload.length}장">
-<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhotoKey)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="교육 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
+? `<div class="participation-photo-strip" aria-label="${escapeHtml(eventTypeLabel)} 사진 ${photoGalleryPayload.length}장">
+<button type="button" class="participation-photo-thumb" data-participation-photo="${escapeHtml(firstPhotoKey)}" data-participation-gallery="${escapeHtml(JSON.stringify(photoGalleryPayload))}" title="${escapeHtml(firstPhoto.alt)}" aria-label="${escapeHtml(eventTypeLabel)} 사진 ${photoGalleryPayload.length}장 보기">${firstPhotoUrl ? `<img src="${escapeHtml(firstPhotoUrl)}" alt="${escapeHtml(firstPhoto.alt)}" loading="lazy">` : '<span class="d-flex w-100 h-100 align-items-center justify-content-center text-muted">사진 미리보기</span>'}</button>
 <span class="participation-photo-count">사진 ${photoGalleryPayload.length}장 · 눌러 보기${photos.some(function(file) { return file.source === 'HUMANITIES'; }) ? ' · 모두의 인문학' : ''}</span>
 </div>`
 : '';
@@ -6050,7 +6050,7 @@ const sourceWarningHtml = event.humanities_source_warning
 ? `<div class="small text-secondary mt-2"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>${escapeHtml(event.humanities_source_warning)}</div>`
 : '';
 return `
-<article class="participation-history-item${hasEducationPhoto ? ' education-with-photo' : ''}">
+<article class="participation-history-item${hasPhoto ? ' with-photo' : ''}">
 <div class="participation-history-main">
 <div class="d-flex justify-content-between align-items-start gap-2">
 <div>
@@ -6066,7 +6066,7 @@ ${signatureHtml ? `<div class="mt-2">${signatureHtml}</div>` : ''}
 ${materialsHtml}
 ${sourceWarningHtml}
 </div>
-${hasEducationPhoto ? `<div class="participation-history-media">${photosHtml}</div>` : photosHtml}
+${hasPhoto ? `<div class="participation-history-media">${photosHtml}</div>` : photosHtml}
 </article>`;
 }).join('');
 list.querySelectorAll('[data-participation-file]').forEach(function(button) {
@@ -6343,7 +6343,7 @@ await preloadParticipationImage(signedUrl);
 }
 if (loadVersion !== participationImageLoadVersion) return;
 item.signedUrl = signedUrl;
-image.alt = item.alt || `교육 사진 ${normalizedIndex + 1}`;
+image.alt = item.alt || `행사 사진 ${normalizedIndex + 1}`;
 image.src = signedUrl;
 } catch (error) {
 if (loadVersion !== participationImageLoadVersion) return;
@@ -6418,7 +6418,7 @@ externalUrl,
 signedUrl: itemKey === String(triggerElement?.dataset?.participationPhoto || '').trim()
 ? String(thumbnail?.currentSrc || thumbnail?.src || '').trim()
 : '',
-alt: String(item?.alt || `교육 사진 ${index + 1}`).trim(),
+alt: String(item?.alt || `행사 사진 ${index + 1}`).trim(),
 trigger: triggerElement || null
 };
 }).filter(function(item) { return item.storagePath || item.externalUrl; })
@@ -6430,7 +6430,7 @@ return {
 storagePath: externalUrl ? '' : resourceKey,
 externalUrl,
 signedUrl: String(buttonThumbnail?.currentSrc || buttonThumbnail?.src || '').trim(),
-alt: String(button.title || buttonThumbnail?.alt || `교육 사진 ${index + 1}`).trim(),
+alt: String(button.title || buttonThumbnail?.alt || `행사 사진 ${index + 1}`).trim(),
 trigger: button
 };
 }).filter(function(item) { return item.storagePath || item.externalUrl; });
@@ -6441,7 +6441,7 @@ participationImageGallery = [{
 storagePath: fallbackExternalUrl ? '' : fallbackKey,
 externalUrl: fallbackExternalUrl,
 signedUrl: '',
-alt: '교육 사진 크게 보기',
+alt: '행사 사진 크게 보기',
 trigger: triggerElement || null
 }].filter(function(item) { return item.storagePath || item.externalUrl; });
 }

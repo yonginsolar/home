@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.15 | Change: 2026-08-13 - Keep the QR instructor on one line and remove duplicate footer copy. -->
+<!-- Version: v1.3.16 | Change: 2026-08-21 - Add privacy-safe board and assembly photo uploads. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.15 | participation.html');</script>
+  <script>console.log('[Version] v1.3.16 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -332,17 +332,17 @@
             <details class="education-files-details" id="erpInternalFilesDetails" open>
               <summary id="erpInternalFilesSummary">교육 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(선택)</span></summary>
               <div class="row g-3 mt-1">
-                <div class="col-md-6">
+                <div class="col-md-6" id="materialFilesGroup">
                   <label class="form-label" for="materialFiles">강의 자료</label>
                   <input type="file" class="form-control" id="materialFiles" multiple accept=".pdf,.doc,.docx,.ppt,.pptx">
                   <div class="form-text">파일당 최대 20MB</div>
                 </div>
-                <div class="col-md-6">
-                  <label class="form-label" for="photoFiles">사진</label>
+                <div class="col-md-6" id="photoFilesGroup">
+                  <label class="form-label" for="photoFiles" id="photoFilesLabel">사진</label>
                   <input type="file" class="form-control" id="photoFiles" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif">
-                  <div class="form-text">JPG, PNG, WebP, HEIC · 파일당 최대 20MB</div>
+                  <div class="form-text" id="photoFilesHelp">JPG, PNG, WebP, HEIC · 파일당 최대 20MB · 업로드 전에 위치·촬영기기 정보가 제거됩니다.</div>
                 </div>
-                <div class="col-12">
+                <div class="col-12" id="rosterScanFilesGroup">
                   <label class="form-label" for="rosterScanFiles">출석부 스캔본</label>
                   <input type="file" class="form-control" id="rosterScanFiles" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif">
                   <div class="form-text">서명된 출석부 PDF 또는 촬영·스캔 이미지 · 파일당 최대 20MB · 관리자만 등록할 수 있습니다.</div>
@@ -461,9 +461,9 @@
     <div id="educationRosterPrintPages"></div>
   </section>
 
-  <div class="image-lightbox" id="participationImageLightbox" role="dialog" aria-modal="true" aria-label="교육 사진 크게 보기" aria-hidden="true">
+  <div class="image-lightbox" id="participationImageLightbox" role="dialog" aria-modal="true" aria-label="행사 사진 크게 보기" aria-hidden="true">
     <button type="button" class="image-lightbox-close" id="participationImageLightboxClose" aria-label="닫기">&times;</button>
-    <img id="participationImageLightboxImage" alt="교육 사진 크게 보기">
+    <img id="participationImageLightboxImage" alt="행사 사진 크게 보기">
   </div>
 
   <div class="loading-cover" id="loadingCover" aria-live="polite" aria-busy="true">
@@ -490,6 +490,7 @@
     const HUMANITIES_PUBLIC_ORIGIN = 'https://humanities.yll.or.kr';
     const KST_TIME_ZONE = 'Asia/Seoul';
     const FILE_SIZE_LIMIT = 20 * 1024 * 1024;
+    const PHOTO_MAX_DIMENSION = 4096;
     const PARTICIPATION_EMBEDDED = (() => {
       try {
         return new URLSearchParams(window.location.search || '').get('embedded') === '1';
@@ -1109,11 +1110,17 @@
     function syncEducationFileSections(resetOpen = false) {
       const details = document.getElementById('erpInternalFilesDetails');
       const summary = document.getElementById('erpInternalFilesSummary');
+      const isEducation = document.getElementById('eventType').value === 'EDUCATION';
       const activeLink = humanitiesLinkState.link?.status === 'ACTIVE';
-      summary.innerHTML = activeLink
-        ? '협동조합 내부 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(필요한 경우만)</span>'
-        : '교육 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(선택)</span>';
-      if (resetOpen) details.open = !activeLink || (formState.currentFiles || []).length > 0;
+      if (isEducation) {
+        summary.innerHTML = activeLink
+          ? '협동조합 내부 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(필요한 경우만)</span>'
+          : '교육 자료·사진·출석부 스캔본 <span class="text-muted fw-normal small">(선택)</span>';
+        if (resetOpen) details.open = !activeLink || (formState.currentFiles || []).length > 0;
+        return;
+      }
+      summary.innerHTML = '회의 사진 <span class="text-muted fw-normal small">(선택 · 해당 회의 참여자에게만 표시)</span>';
+      if (resetOpen) details.open = true;
     } // End of syncEducationFileSections
 
     function renderHumanitiesResources(resetInternalFiles = false) {
@@ -1572,7 +1579,14 @@
       document.getElementById('sourceMinuteGroup').classList.toggle('d-none', education);
       document.getElementById('educationContentGroup').classList.toggle('d-none', !education);
       document.getElementById('instructorGroup').classList.toggle('d-none', !education);
-      document.getElementById('educationFilesSection').classList.toggle('d-none', !education);
+      document.getElementById('educationFilesSection').classList.remove('d-none');
+      document.getElementById('materialFilesGroup').classList.toggle('d-none', !education);
+      document.getElementById('rosterScanFilesGroup').classList.toggle('d-none', !education);
+      document.getElementById('photoFilesGroup').classList.remove('d-none');
+      document.getElementById('photoFilesLabel').textContent = education ? '교육 사진' : '회의 사진';
+      document.getElementById('photoFilesHelp').textContent = education
+        ? 'JPG, PNG, WebP, HEIC · 파일당 최대 20MB · 업로드 전에 위치·촬영기기 정보가 제거됩니다.'
+        : '이사회·총회 현장 사진을 여러 장 선택할 수 있습니다. 파일당 최대 20MB이며 위치·촬영기기 정보는 업로드 전에 제거됩니다.';
       document.getElementById('humanitiesLinkSection').classList.add('d-none');
       syncEducationMemberSearchVisibility();
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
@@ -1584,6 +1598,7 @@
       renderAttendees();
       renderHumanitiesLink();
       renderHumanitiesResources();
+      syncEducationFileSections(true);
       renderEducationQr();
     } // End of setEventTypeUi
 
@@ -2064,6 +2079,83 @@
       return contentTypes[extension] || String(file?.type || '').trim() || 'application/octet-stream';
     } // End of storageContentType
 
+    function decodePhotoWithImageElement(file) {
+      return new Promise(function(resolve, reject) {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = function() {
+          resolve({ source:image, width:image.naturalWidth, height:image.naturalHeight, close:function() { URL.revokeObjectURL(objectUrl); } });
+        };
+        image.onerror = function() {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error(`${file.name}: 이 브라우저에서 사진을 안전하게 변환하지 못했습니다. HEIC 사진이면 사진 앱에서 JPG로 내보낸 뒤 다시 선택해 주세요.`));
+        };
+        image.src = objectUrl;
+      });
+    } // End of decodePhotoWithImageElement
+
+    async function decodePhotoForSanitizing(file) {
+      if (typeof createImageBitmap === 'function') {
+        let bitmap = null;
+        try {
+          bitmap = await createImageBitmap(file, { imageOrientation:'from-image' });
+        } catch (_) {
+          try { bitmap = await createImageBitmap(file); } catch (_) {}
+        }
+        if (bitmap) {
+          return { source:bitmap, width:bitmap.width, height:bitmap.height, close:function() { bitmap.close?.(); } };
+        }
+      }
+      return decodePhotoWithImageElement(file);
+    } // End of decodePhotoForSanitizing
+
+    function canvasToPhotoBlob(canvas, contentType, quality) {
+      return new Promise(function(resolve, reject) {
+        canvas.toBlob(function(blob) {
+          if (blob) resolve(blob);
+          else reject(new Error('사진의 개인정보를 제거한 파일을 만들지 못했습니다.'));
+        }, contentType, quality);
+      });
+    } // End of canvasToPhotoBlob
+
+    async function sanitizePhotoForUpload(file) {
+      const decoded = await decodePhotoForSanitizing(file);
+      try {
+        const sourceWidth = Number(decoded.width || 0);
+        const sourceHeight = Number(decoded.height || 0);
+        if (!sourceWidth || !sourceHeight) throw new Error(`${file.name}: 사진 크기를 확인하지 못했습니다.`);
+        const scale = Math.min(1, PHOTO_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+        const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const context = canvas.getContext('2d', { alpha:true });
+        if (!context) throw new Error(`${file.name}: 사진 변환 화면을 만들지 못했습니다.`);
+        context.drawImage(decoded.source, 0, 0, targetWidth, targetHeight);
+
+        const originalType = String(file.type || storageContentType(file)).toLowerCase();
+        const outputType = originalType === 'image/png'
+          ? 'image/png'
+          : originalType === 'image/webp' ? 'image/webp' : 'image/jpeg';
+        let blob = await canvasToPhotoBlob(canvas, outputType, outputType === 'image/png' ? undefined : 0.9);
+        let finalType = String(blob.type || outputType).toLowerCase();
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(finalType)) {
+          blob = await canvasToPhotoBlob(canvas, 'image/jpeg', 0.9);
+          finalType = 'image/jpeg';
+        }
+        if (blob.size > FILE_SIZE_LIMIT) throw new Error(`${file.name}: 개인정보 제거 후 파일 크기가 20MB를 초과합니다.`);
+        const extension = finalType === 'image/png' ? 'png' : finalType === 'image/webp' ? 'webp' : 'jpg';
+        const baseName = String(file.name || 'photo').replace(/\.[^.]+$/, '') || 'photo';
+        return new File([blob], `${baseName}.${extension}`, {
+          type:finalType,
+          lastModified:Number(file.lastModified || Date.now())
+        });
+      } finally {
+        decoded.close?.();
+      }
+    } // End of sanitizePhotoForUpload
+
     function uploadErrorMessage(error, fileName) {
       const message = String(error?.message || error?.error || '').trim();
       if (/mime type|content.?type|not supported/i.test(message)) {
@@ -2073,7 +2165,7 @@
         return `${fileName}: 파일 크기는 20MB 이하여야 합니다.`;
       }
       if (/row-level security|permission|not authorized|unauthorized/i.test(message)) {
-        return `${fileName}: 현재 계정의 교육 파일 업로드 권한을 확인하지 못했습니다.`;
+        return `${fileName}: 현재 계정의 행사 파일 업로드 권한을 확인하지 못했습니다.`;
       }
       if (/invalid.?key/i.test(message)) {
         return `${fileName}: 안전한 내부 파일 경로를 만들지 못했습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.`;
@@ -2084,9 +2176,10 @@
     async function uploadEventFiles(eventId, kind, files) {
       const rows = validateFiles(files, kind);
       for (const file of rows) {
-        const path = `${dashboardData.coop_id}/${eventId}/${kind.toLowerCase()}/${crypto.randomUUID()}_${safeStorageFileName(file.name)}`;
-        const contentType = storageContentType(file);
-        const { error:uploadError } = await _supabase.storage.from(PARTICIPATION_BUCKET).upload(path, file, {
+        const uploadFile = kind === 'PHOTO' ? await sanitizePhotoForUpload(file) : file;
+        const path = `${dashboardData.coop_id}/${eventId}/${kind.toLowerCase()}/${crypto.randomUUID()}_${safeStorageFileName(uploadFile.name)}`;
+        const contentType = storageContentType(uploadFile);
+        const { error:uploadError } = await _supabase.storage.from(PARTICIPATION_BUCKET).upload(path, uploadFile, {
           upsert:false,
           cacheControl:'3600',
           contentType
@@ -2098,7 +2191,7 @@
           p_storage_path:path,
           p_original_name:file.name,
           p_mime_type:contentType,
-          p_size_bytes:file.size
+          p_size_bytes:uploadFile.size
         });
         if (metaError) {
           await _supabase.storage.from(PARTICIPATION_BUCKET).remove([path]);
@@ -2177,7 +2270,7 @@
         return { file, url };
       });
       strip.innerHTML = previews.map(function(preview, index) {
-        return `<button type="button" class="photo-thumb" data-new-photo-index="${index}" title="${escapeHtml(preview.file.name)}"><img src="${escapeHtml(preview.url)}" alt="선택한 교육 사진 ${index + 1}" loading="lazy"></button>`;
+        return `<button type="button" class="photo-thumb" data-new-photo-index="${index}" title="${escapeHtml(preview.file.name)}"><img src="${escapeHtml(preview.url)}" alt="선택한 행사 사진 ${index + 1}" loading="lazy"></button>`;
       }).join('');
       strip.querySelectorAll('[data-new-photo-index]').forEach(function(button) {
         button.addEventListener('click', function() {
@@ -2213,7 +2306,7 @@
       const photoHtml = photos.length > 0
         ? `<div class="small fw-bold mt-3 mb-2">등록된 사진</div><div class="photo-strip">${photoRows.map(function(row, index) {
             if (!row.url) return `<span class="photo-thumb d-flex align-items-center justify-content-center text-muted small text-center px-2" title="${escapeHtml(row.file.original_name || '')}">미리보기<br>불가</span>`;
-            return `<button type="button" class="photo-thumb" data-stored-photo-index="${index}" title="${escapeHtml(row.file.original_name || `교육 사진 ${index + 1}`)}"><img src="${escapeHtml(row.url)}" alt="교육 사진 ${index + 1}" loading="lazy"></button>`;
+            return `<button type="button" class="photo-thumb" data-stored-photo-index="${index}" title="${escapeHtml(row.file.original_name || `행사 사진 ${index + 1}`)}"><img src="${escapeHtml(row.url)}" alt="행사 사진 ${index + 1}" loading="lazy"></button>`;
           }).join('')}</div>`
         : '';
       const rosterScanHtml = rosterScans.length > 0
