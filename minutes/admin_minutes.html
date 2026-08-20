@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.64
-Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeting metadata and signer footer.
+Version: v1.2.65
+Change: 2026-08-21 - Validate board meeting notice intervals and times; align the electronic signer block.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.64 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.65 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -306,6 +306,7 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
                     <div class="input-group">
                         <label for="in-meeting-date">회의 일자</label>
                         <input type="date" id="in-meeting-date" class="form-control">
+                        <small class="text-muted" id="meeting-date-help">공고일로부터 최소 7일 뒤부터 선택할 수 있습니다.</small>
                     </div>
                     <div class="input-group">
                         <label for="in-start-time">시작 시각</label>
@@ -1399,6 +1400,80 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
             return `${year}년 ${month}월 ${day}일${includeWeekday ? ` (${weekday})` : ''}`;
         }
 
+        function parseMinuteDateInput(rawDate) {
+            const match = String(rawDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!match) return null;
+            const year = Number(match[1]);
+            const month = Number(match[2]);
+            const day = Number(match[3]);
+            const date = new Date(year, month - 1, day, 12, 0, 0);
+            if (
+                Number.isNaN(date.getTime())
+                || date.getFullYear() !== year
+                || date.getMonth() !== month - 1
+                || date.getDate() !== day
+            ) return null;
+            return date;
+        }
+
+        function formatMinuteDateInput(date) {
+            if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function addMinuteCalendarDays(rawDate, days) {
+            const date = parseMinuteDateInput(rawDate);
+            if (!date) return '';
+            date.setDate(date.getDate() + Number(days || 0));
+            return formatMinuteDateInput(date);
+        }
+
+        function getBoardMinuteScheduleError({ noticeDate, meetingDate, startTime, endTime }) {
+            const minimumMeetingDate = addMinuteCalendarDays(noticeDate, 7);
+            if (noticeDate && meetingDate && minimumMeetingDate && meetingDate < minimumMeetingDate) {
+                return `회의 일자는 공고일로부터 최소 7일 뒤인 ${formatMinuteLocalDate(minimumMeetingDate)}부터 가능합니다.`;
+            }
+            if (startTime && endTime && endTime <= startTime) {
+                return '종료 시각은 시작 시각보다 늦어야 합니다.';
+            }
+            return '';
+        }
+
+        function syncBoardMinuteScheduleConstraints() {
+            const noticeInput = document.getElementById('in-notice-date');
+            const meetingInput = document.getElementById('in-meeting-date');
+            const startInput = document.getElementById('in-start-time');
+            const endInput = document.getElementById('in-end-time');
+            const meetingHelp = document.getElementById('meeting-date-help');
+            const noticeDate = noticeInput?.value || '';
+            const meetingDate = meetingInput?.value || '';
+            const startTime = startInput?.value || '';
+            const endTime = endInput?.value || '';
+            const minimumMeetingDate = addMinuteCalendarDays(noticeDate, 7);
+
+            if (meetingInput) {
+                meetingInput.min = minimumMeetingDate;
+                const dateError = noticeDate && meetingDate && minimumMeetingDate && meetingDate < minimumMeetingDate
+                    ? `회의 일자는 ${formatMinuteLocalDate(minimumMeetingDate)}부터 선택할 수 있습니다.`
+                    : '';
+                meetingInput.setCustomValidity(dateError);
+            }
+            if (meetingHelp) {
+                meetingHelp.textContent = minimumMeetingDate
+                    ? `공고일로부터 7일 뒤인 ${formatMinuteLocalDate(minimumMeetingDate)}부터 선택할 수 있습니다.`
+                    : '공고일로부터 최소 7일 뒤부터 선택할 수 있습니다.';
+            }
+            if (endInput) {
+                endInput.min = startTime;
+                endInput.setCustomValidity(startTime && endTime && endTime <= startTime
+                    ? '종료 시각은 시작 시각보다 늦어야 합니다.'
+                    : '');
+            }
+        }
+
         function setStructuredMinuteDateDefaults({ force = false } = {}) {
             const dateParts = new Intl.DateTimeFormat('en-US', {
                 timeZone: KST_TZ_MINUTES_ADMIN,
@@ -1408,10 +1483,13 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
             }).formatToParts(new Date());
             const partMap = Object.fromEntries(dateParts.map(part => [part.type, part.value]));
             const currentKstDate = `${partMap.year}-${partMap.month}-${partMap.day}`;
-            ['in-notice-date', 'in-meeting-date'].forEach((id) => {
-                const input = document.getElementById(id);
-                if (input && (force || !input.value)) input.value = currentKstDate;
-            });
+            const noticeInput = document.getElementById('in-notice-date');
+            const meetingInput = document.getElementById('in-meeting-date');
+            if (noticeInput && (force || !noticeInput.value)) noticeInput.value = currentKstDate;
+            if (meetingInput && (force || !meetingInput.value)) {
+                meetingInput.value = addMinuteCalendarDays(noticeInput?.value || currentKstDate, 7);
+            }
+            syncBoardMinuteScheduleConstraints();
         }
 
         async function buildBoardMinuteDraft() {
@@ -1432,6 +1510,8 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
             if (!noticeDate) return { error: '공고일을 입력하세요.' };
             if (!meetingDate) return { error: '회의 일자를 입력하세요.' };
             if (!startTime) return { error: '회의 시작 시각을 입력하세요.' };
+            const scheduleError = getBoardMinuteScheduleError({ noticeDate, meetingDate, startTime, endTime });
+            if (scheduleError) return { error: scheduleError };
             if (!location) return { error: '회의 장소를 입력하세요.' };
             if (!directors.length) return { error: '현직 이사 명단을 확인하지 못했습니다.' };
             if (!attendees.length) return { error: '참석 이사를 1명 이상 체크하세요.' };
@@ -1447,7 +1527,16 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
             const signatureRows = attendees.map((off) => {
                 const name = escapeHtml(getOfficialName(off));
                 const role = getRoleLabel(off).includes('이사장') ? '의장 이사장' : '이사';
-                return `<div style="min-width:210px; margin:8pt 12pt; text-align:center; white-space:nowrap;"><strong>${role} ${name}</strong> (서명)</div>`;
+                const spacedName = escapeHtml(buildSpacedOfficialName(getOfficialName(off)));
+                return `
+                    <div style="display:grid; grid-template-columns:84pt minmax(0, 1fr); align-items:center; column-gap:10pt; min-height:48pt; page-break-inside:avoid;">
+                        <strong style="text-align:right; font-size:11pt; white-space:nowrap;">${role}</strong>
+                        <span style="display:flex; align-items:center; min-width:0; min-height:48pt; font-size:11pt; white-space:nowrap;">
+                            <strong style="letter-spacing:0.18em;">${spacedName || name}</strong>
+                            <span style="margin-left:8pt; color:#475569;">(서명)</span>
+                        </span>
+                    </div>
+                `;
             }).join('');
 
             const content = `
@@ -1477,7 +1566,7 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
                     <div style="margin-top:28pt; page-break-inside:avoid; font-size:11pt;">
                         <p style="margin:0 0 7pt; text-align:center;">${escapeHtml(formatMinuteLocalDate(meetingDate))}</p>
                         <p style="margin:0 0 14pt; text-align:center; font-size:13pt; font-weight:800;">${escapeHtml(orgName)}</p>
-                        <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:4pt 12pt;">${signatureRows}</div>
+                        <div style="width:58%; max-width:360pt; margin-left:auto;">${signatureRows}</div>
                     </div>
                 </div>
             `.trim();
@@ -2962,6 +3051,10 @@ Change: 2026-08-21 - Add structured board-minutes authoring with automatic meeti
             allOfficials = await MinutesService.getOfficials();
             renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
             setStructuredMinuteDateDefaults();
+            ['in-notice-date', 'in-meeting-date', 'in-start-time', 'in-end-time'].forEach((id) => {
+                document.getElementById(id)?.addEventListener('input', syncBoardMinuteScheduleConstraints);
+                document.getElementById(id)?.addEventListener('change', syncBoardMinuteScheduleConstraints);
+            });
             initializeMinuteEditor();
             initializeMinuteEditModalClose();
             applyAdminMinutesScopeUi();
