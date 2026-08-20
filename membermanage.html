@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.124
-Change: Remove the redundant earned checkmark while retaining color and accessible status labels.
+Version: v1.0.125
+Change: Load participation history by type in three-item keyset pages, with education first and meetings on demand.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.124 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.125 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -508,6 +508,14 @@ gap: 10px;
 max-height: min(58vh, 520px);
 overflow-y: auto;
 padding-right: 2px;
+}
+.participation-history-load-more {
+display: flex;
+justify-content: center;
+padding-top: 12px;
+}
+.participation-history-load-more .btn {
+min-width: 180px;
 }
 .participation-history-tabs {
 display: grid;
@@ -2143,6 +2151,9 @@ oninput="autoHyphen(this)"> </div>
 </div>
 <div class="participation-history-list" id="participationHistoryList" role="tabpanel" aria-labelledby="participationEducationTab" tabindex="0">
 <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>
+</div>
+<div class="participation-history-load-more" id="participationHistoryLoadMoreWrap" hidden>
+<button type="button" class="btn btn-outline-success btn-sm" id="participationHistoryLoadMoreBtn" onclick="loadMoreParticipationHistory()">3개 더 보기</button>
 </div>
 <div class="text-end border-top pt-3 mt-3">
 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeParticipationHistory()">닫기</button>
@@ -5615,9 +5626,16 @@ async function hasPendingVoteTasks(memberUuid) {
 }
 
 let participationModalPreviousBodyOverflow = '';
+const PARTICIPATION_HISTORY_PAGE_SIZE = 3;
 let participationHistoryData = { events:[] };
 let participationHistoryActiveTab = 'EDUCATION';
 let participationHistoryRenderVersion = 0;
+let participationHistorySessionVersion = 0;
+let participationHistoryMemberUuid = null;
+let participationHistoryCounts = { education:null, meeting:null, total:null, attended:null };
+let participationHumanitiesPayload = null;
+let participationHumanitiesRequest = null;
+let participationHistoryPages = createEmptyParticipationHistoryPages();
 let participationHistoryReturnFocus = null;
 let participationDocumentReturnFocus = null;
 let participationImageReturnFocus = null;
@@ -5627,6 +5645,28 @@ let participationImageLoadVersion = 0;
 let participationImageSwipeStart = null;
 let pendingEducationQrCheckIn = false;
 const participationSignedUrlCache = new Map();
+
+function createParticipationHistoryPageState() {
+return { events:[], loaded:false, loading:false, hasMore:false, cursor:null, request:null };
+} // End of createParticipationHistoryPageState
+
+function createEmptyParticipationHistoryPages() {
+return {
+EDUCATION: createParticipationHistoryPageState(),
+MEETING: createParticipationHistoryPageState()
+};
+} // End of createEmptyParticipationHistoryPages
+
+function resetParticipationHistoryState(memberUuid) {
+participationHistorySessionVersion += 1;
+participationHistoryMemberUuid = memberUuid || null;
+participationHistoryCounts = { education:null, meeting:null, total:null, attended:null };
+participationHistoryPages = createEmptyParticipationHistoryPages();
+participationHistoryData = { events:[] };
+participationHumanitiesPayload = null;
+participationHumanitiesRequest = null;
+participationHistoryRenderVersion += 1;
+} // End of resetParticipationHistoryState
 
 function participationEventTypeLabel(type) {
 if (type === 'BOARD') return '이사회';
@@ -5656,8 +5696,12 @@ const desc = document.getElementById('quickParticipationDesc');
 const meta = document.getElementById('quickParticipationMeta');
 if (!card || !desc || !meta || !memberUuid) return;
 try {
-const { data, error } = await _supabase.rpc('participation_member_list', {
-p_member_uuid: memberUuid
+const { data, error } = await _supabase.rpc('participation_member_history_page', {
+p_member_uuid: memberUuid,
+p_history_type: 'EDUCATION',
+p_page_size: 1,
+p_before_starts_at: null,
+p_before_event_id: null
 });
 if (error) throw error;
 const total = Number(data?.total_count || 0);
@@ -5734,6 +5778,136 @@ humanities_source_warning: String(warningsByEvent[eventId] || '')
 return { ...(history || {}), events };
 } // End of mergeMemberLinkedHumanitiesResources
 
+function updateParticipationHistoryCounts(data) {
+if (!data || typeof data !== 'object') return;
+const normalizeCount = function(value, fallback) {
+const parsed = Number(value);
+return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+participationHistoryCounts = {
+education: normalizeCount(data.education_count, participationHistoryCounts.education),
+meeting: normalizeCount(data.meeting_count, participationHistoryCounts.meeting),
+total: normalizeCount(data.total_count, participationHistoryCounts.total),
+attended: normalizeCount(data.attended_count, participationHistoryCounts.attended)
+};
+} // End of updateParticipationHistoryCounts
+
+function syncParticipationHistoryLoadMore() {
+const wrap = document.getElementById('participationHistoryLoadMoreWrap');
+const button = document.getElementById('participationHistoryLoadMoreBtn');
+const state = participationHistoryPages[participationHistoryActiveTab];
+if (!wrap || !button || !state) return;
+const show = state.loaded && (state.hasMore || (state.loading && state.events.length > 0));
+wrap.hidden = !show;
+button.disabled = state.loading;
+button.innerHTML = state.loading
+? '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>불러오는 중...'
+: `${participationHistoryActiveTab === 'EDUCATION' ? '교육' : '회의'} 3개 더 보기`;
+} // End of syncParticipationHistoryLoadMore
+
+async function ensureParticipationHumanitiesResources(memberUuid) {
+if (!memberUuid || participationHumanitiesPayload) return participationHumanitiesPayload;
+if (participationHumanitiesRequest) return participationHumanitiesRequest;
+const sessionVersion = participationHistorySessionVersion;
+participationHumanitiesRequest = loadMemberLinkedHumanitiesResources(memberUuid)
+.then(function(payload) {
+if (sessionVersion !== participationHistorySessionVersion || String(participationHistoryMemberUuid) !== String(memberUuid)) return null;
+participationHumanitiesPayload = payload || { resourcesByEvent:{}, warningsByEvent:{} };
+const educationState = participationHistoryPages.EDUCATION;
+educationState.events = mergeMemberLinkedHumanitiesResources({ events:educationState.events }, participationHumanitiesPayload).events;
+if (participationHistoryActiveTab === 'EDUCATION' && educationState.loaded) {
+renderParticipationHistory();
+}
+return participationHumanitiesPayload;
+})
+.catch(function(error) {
+console.warn('ensureParticipationHumanitiesResources failed:', error?.message || error);
+return null;
+})
+.finally(function() {
+if (sessionVersion === participationHistorySessionVersion) participationHumanitiesRequest = null;
+});
+return participationHumanitiesRequest;
+} // End of ensureParticipationHumanitiesResources
+
+async function loadParticipationHistoryPage(historyType, { append = false } = {}) {
+const safeType = historyType === 'MEETING' ? 'MEETING' : 'EDUCATION';
+const state = participationHistoryPages[safeType];
+const memberUuid = participationHistoryMemberUuid;
+if (!state || !memberUuid) return false;
+if (state.request) return state.request;
+if (append && !state.hasMore) return true;
+
+const sessionVersion = participationHistorySessionVersion;
+state.loading = true;
+if (!append && participationHistoryActiveTab === safeType) {
+const list = document.getElementById('participationHistoryList');
+if (list) list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
+participationHistoryRenderVersion += 1;
+}
+syncParticipationHistoryLoadMore();
+
+state.request = (async function() {
+try {
+const cursor = append ? state.cursor : null;
+const { data, error } = await _supabase.rpc('participation_member_history_page', {
+p_member_uuid: memberUuid,
+p_history_type: safeType,
+p_page_size: PARTICIPATION_HISTORY_PAGE_SIZE,
+p_before_starts_at: cursor?.startsAt || null,
+p_before_event_id: cursor?.eventId || null
+});
+if (error) throw error;
+if (sessionVersion !== participationHistorySessionVersion) return false;
+
+updateParticipationHistoryCounts(data);
+let incomingEvents = Array.isArray(data?.events) ? data.events : [];
+if (safeType === 'EDUCATION' && participationHumanitiesPayload) {
+incomingEvents = mergeMemberLinkedHumanitiesResources({ events:incomingEvents }, participationHumanitiesPayload).events;
+}
+const existingEvents = append ? state.events : [];
+const seen = new Set(existingEvents.map(function(event) { return String(event?.event_id || ''); }));
+const mergedEvents = [...existingEvents];
+incomingEvents.forEach(function(event) {
+const eventId = String(event?.event_id || '');
+if (!eventId || seen.has(eventId)) return;
+seen.add(eventId);
+mergedEvents.push(event);
+});
+state.events = mergedEvents;
+state.loaded = true;
+state.hasMore = data?.has_more === true;
+const lastEvent = state.events[state.events.length - 1] || null;
+state.cursor = lastEvent ? { startsAt:lastEvent.starts_at, eventId:lastEvent.event_id } : null;
+
+if (participationHistoryActiveTab === safeType) {
+participationHistoryData = { events:state.events };
+await renderParticipationHistory();
+}
+if (safeType === 'EDUCATION' && !participationHumanitiesPayload) {
+void ensureParticipationHumanitiesResources(memberUuid);
+}
+return true;
+} catch (error) {
+console.error('loadParticipationHistoryPage failed:', error);
+if (sessionVersion === participationHistorySessionVersion && participationHistoryActiveTab === safeType) {
+const list = document.getElementById('participationHistoryList');
+if (list && state.events.length === 0) {
+list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '참여 이력을 불러오지 못했습니다.')}</div>`;
+}
+}
+return false;
+} finally {
+if (sessionVersion === participationHistorySessionVersion) {
+state.loading = false;
+state.request = null;
+syncParticipationHistoryLoadMore();
+}
+}
+})();
+return state.request;
+} // End of loadParticipationHistoryPage
+
 function syncParticipationHistoryTabs() {
 const educationTab = document.getElementById('participationEducationTab');
 const meetingTab = document.getElementById('participationMeetingTab');
@@ -5751,8 +5925,18 @@ list?.setAttribute('aria-labelledby', educationActive ? 'participationEducationT
 async function switchParticipationHistoryTab(tab) {
 participationHistoryActiveTab = tab === 'MEETING' ? 'MEETING' : 'EDUCATION';
 syncParticipationHistoryTabs();
-await renderParticipationHistory(participationHistoryData);
+const state = participationHistoryPages[participationHistoryActiveTab];
+if (state?.loaded) {
+participationHistoryData = { events:state.events };
+await renderParticipationHistory();
+return;
+}
+await loadParticipationHistoryPage(participationHistoryActiveTab);
 } // End of switchParticipationHistoryTab
+
+async function loadMoreParticipationHistory() {
+await loadParticipationHistoryPage(participationHistoryActiveTab, { append:true });
+} // End of loadMoreParticipationHistory
 
 async function handleParticipationHistoryTabKeydown(event) {
 if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -5774,22 +5958,19 @@ await switchParticipationHistoryTab(targetTab);
 tabs[targetIndex]?.focus();
 } // End of handleParticipationHistoryTabKeydown
 
-async function renderParticipationHistory(data) {
+async function renderParticipationHistory() {
 const renderVersion = ++participationHistoryRenderVersion;
 const list = document.getElementById('participationHistoryList');
 const summary = document.getElementById('participationHistorySummary');
-const events = Array.isArray(data?.events) ? data.events : [];
-const educationCount = events.filter(function(event) { return event.event_type === 'EDUCATION'; }).length;
-const meetingCount = events.length - educationCount;
-const visibleEvents = events.filter(function(event) {
-return participationHistoryActiveTab === 'EDUCATION'
-? event.event_type === 'EDUCATION'
-: event.event_type !== 'EDUCATION';
-});
-if (summary) summary.textContent = `교육 ${educationCount}건 · 회의 ${meetingCount}건`;
+const state = participationHistoryPages[participationHistoryActiveTab] || createParticipationHistoryPageState();
+const visibleEvents = Array.isArray(state.events) ? state.events : [];
+const educationCount = participationHistoryCounts.education;
+const meetingCount = participationHistoryCounts.meeting;
+if (summary) summary.textContent = `교육 ${educationCount ?? '-'}건 · 회의 ${meetingCount ?? '-'}건`;
 if (!list) return;
 if (visibleEvents.length === 0) {
 list.innerHTML = `<div class="text-center text-muted py-5">등록된 ${participationHistoryActiveTab === 'EDUCATION' ? '교육' : '회의'} 참여 이력이 없습니다.</div>`;
+syncParticipationHistoryLoadMore();
 return;
 }
 
@@ -5909,6 +6090,7 @@ button.addEventListener('click', function() {
 openParticipationDocument(button.dataset.participationDocument, button);
 });
 });
+syncParticipationHistoryLoadMore();
 } // End of renderParticipationHistory
 
 function participationDocumentTypeLabel(type) {
@@ -6063,18 +6245,13 @@ document.body.style.overflow = 'hidden';
 overlay.style.display = 'flex';
 overlay.classList.remove('modal-depth-back');
 participationHistoryActiveTab = 'EDUCATION';
+resetParticipationHistoryState(memberUuid);
 syncParticipationHistoryTabs();
 if (summary) summary.textContent = '불러오는 중...';
 if (list) list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
 document.getElementById('participationHistoryCloseBtn')?.focus();
 try {
-const { data, error } = await _supabase.rpc('participation_member_list', {
-p_member_uuid: memberUuid
-});
-if (error) throw error;
-const linkedResources = await loadMemberLinkedHumanitiesResources(memberUuid);
-participationHistoryData = mergeMemberLinkedHumanitiesResources(data || { events:[] }, linkedResources);
-await renderParticipationHistory(participationHistoryData);
+await loadParticipationHistoryPage('EDUCATION');
 } catch (error) {
 console.error('openParticipationHistory failed:', error);
 if (summary) summary.textContent = '조회 실패';
