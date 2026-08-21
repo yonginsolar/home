@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.134
-Change: Split each member's education and meeting history with attendance counts.
+Version: v1.0.135
+Change: Link activity news to meeting and education records and reuse their photos without re-uploading.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.134';
+window.ADMIN_MEMBER_VERSION = 'v1.0.135';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -2542,6 +2542,23 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <input type="hidden" id="activity-cover-original">
 <input type="hidden" id="activity-cover-url">
 <input type="hidden" id="activity-cover-removed" value="0">
+<input type="hidden" id="activity-source-event-id">
+
+<div class="border rounded-3 bg-light p-3 mb-3">
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+<div>
+<div class="small fw-bold text-success">회의·교육 기록 연동</div>
+<div class="small text-muted">참여 관리에 올린 사진은 여기서 선택하면 다시 업로드하지 않고 홈페이지 공개용으로 안전하게 복사합니다.</div>
+</div>
+</div>
+<div class="input-group input-group-sm">
+<select class="form-select" id="activity-source-event-select" aria-label="연동할 회의·교육 선택">
+<option value="">연동하지 않고 직접 작성</option>
+</select>
+<button type="button" class="btn btn-outline-success" id="activity-source-event-load-btn" onclick="loadSelectedActivitySourceEvent()">기본정보·사진 불러오기</button>
+</div>
+<div class="form-text" id="activity-source-event-help">최근 회의·교육 중 사진이 있는 기록을 선택할 수 있습니다.</div>
+</div>
 
 <div class="row g-3 mb-3">
 <div class="col-md-8">
@@ -4253,6 +4270,7 @@ let g_externalNewsAdmin = [];
 let isSavingActivity = false;
 let activityGalleryItems = [];
 let activityGalleryObjectUrls = [];
+let activityParticipationEvents = [];
 let g_fund_page = 0; // [추가] 무한 스크롤 페이지 번호
 const PAGE_SIZE = 20; // [추가] 한 번에 불러올 개수
 
@@ -8542,8 +8560,10 @@ return;
 
 placeholderEl.style.display = 'none';
 gridEl.innerHTML = activityGalleryItems.map((item, index) => {
-const src = item.kind === 'file' ? item.objectUrl : item.url;
-const pendingBadge = item.kind === 'file' ? '<span class="activity-gallery-pending-badge">추가 예정</span>' : '';
+const src = item.kind === 'file' ? item.objectUrl : (item.kind === 'participation' ? item.previewUrl : item.url);
+const pendingBadge = item.kind === 'file'
+? '<span class="activity-gallery-pending-badge">추가 예정</span>'
+: (item.kind === 'participation' ? '<span class="activity-gallery-pending-badge">참여 관리 사진</span>' : '');
 const coverBadge = index === 0 ? '<span class="activity-gallery-cover-badge">대표사진</span>' : '';
 const coverButton = index === 0
 ? ''
@@ -8625,6 +8645,187 @@ document.getElementById('activity-cover-removed').value = '1';
 setActivityGalleryItemsFromUrls([]);
 }
 
+function getActivitySourceEventId() {
+return String(document.getElementById('activity-source-event-id')?.value || '').trim();
+}
+
+function setActivitySourceEventId(eventId) {
+const safeId = String(eventId || '').trim();
+const hidden = document.getElementById('activity-source-event-id');
+const select = document.getElementById('activity-source-event-select');
+if (hidden) hidden.value = safeId;
+if (select) select.value = safeId;
+}
+
+function formatActivitySourceEventDate(startsAt) {
+try {
+return new Intl.DateTimeFormat('en-CA', {
+timeZone:'Asia/Seoul', year:'numeric', month:'2-digit', day:'2-digit'
+}).format(new Date(startsAt));
+} catch (_) {
+return '';
+}
+}
+
+function activitySourceTypeLabel(type) {
+if (type === 'BOARD') return '이사회';
+if (type === 'DELEGATE_ASSEMBLY') return '대의원 총회';
+return '교육';
+}
+
+async function loadActivityParticipationEvents(selectedId = '') {
+const select = document.getElementById('activity-source-event-select');
+const help = document.getElementById('activity-source-event-help');
+if (!select) return [];
+try {
+const { data, error } = await _supabase.rpc('participation_admin_get_dashboard');
+if (error) throw error;
+activityParticipationEvents = Array.isArray(data?.events) ? data.events : [];
+const linkedByEvent = new Map((g_siteActivities || []).map((row) => [String(row.source_participation_event_id || ''), row]));
+select.innerHTML = '<option value="">연동하지 않고 직접 작성</option>' + activityParticipationEvents.map((event) => {
+const linked = linkedByEvent.get(String(event.id || ''));
+const linkedElsewhere = linked && String(linked.id || '') !== String(document.getElementById('activity-id')?.value || '');
+const photoCount = Number(event.photo_count || 0);
+const date = formatActivitySourceEventDate(event.starts_at);
+return `<option value="${escapeHtml(event.id)}" ${String(event.id) === String(selectedId) ? 'selected' : ''} ${linkedElsewhere ? 'disabled' : ''}>${escapeHtml(date)} · ${escapeHtml(activitySourceTypeLabel(event.event_type))} · ${escapeHtml(event.title || '')} · 사진 ${photoCount}장${linkedElsewhere ? ' · 소식 작성됨' : ''}</option>`;
+}).join('');
+if (selectedId) select.value = String(selectedId);
+if (help) help.textContent = activityParticipationEvents.length
+? '참여 관리의 사진을 선택하면 공개용 사진을 자동으로 준비하며, 원본 회의록의 상세 안건·참석자·결정 내용은 가져오지 않습니다.'
+: '연동할 회의·교육 기록이 없습니다.';
+return activityParticipationEvents;
+} catch (error) {
+activityParticipationEvents = [];
+select.innerHTML = '<option value="">회의·교육 기록을 불러오지 못했습니다</option>';
+if (help) help.textContent = error?.message || '회의·교육 기록을 불러오지 못했습니다.';
+return [];
+}
+} // End of loadActivityParticipationEvents
+
+async function getActivityParticipationPhotoPreview(file) {
+const externalUrl = normalizeAdminHttpUrl(file?.external_url || '');
+if (externalUrl) return externalUrl;
+const path = String(file?.storage_path || '').trim();
+if (!path) return '';
+const { data, error } = await _supabase.storage.from('participation-files').createSignedUrl(path, 600);
+if (error) throw error;
+return String(data?.signedUrl || '').trim();
+} // End of getActivityParticipationPhotoPreview
+
+function buildActivitySourceSummary(event) {
+const typeLabel = activitySourceTypeLabel(event?.event_type);
+const location = String(event?.location || '').trim();
+return `${event?.title || typeLabel}${typeLabel === '교육' ? '을 진행했습니다.' : '를 개최했습니다.'}${location ? `\n\n장소: ${location}` : ''}`;
+} // End of buildActivitySourceSummary
+
+async function applyActivitySourceEvent(eventId, { prefill = true } = {}) {
+const safeId = String(eventId || '').trim();
+if (!safeId) {
+setActivitySourceEventId('');
+return;
+}
+const { data, error } = await _supabase.rpc('participation_admin_get_event_media', { p_event_id:safeId });
+if (error) throw error;
+const event = data?.event || activityParticipationEvents.find((row) => String(row.id) === safeId);
+if (!event) throw new Error('연동할 회의·교육 기록을 찾지 못했습니다.');
+setActivitySourceEventId(safeId);
+
+if (prefill) {
+const titleEl = document.getElementById('activity-title');
+const dateEl = document.getElementById('activity-date');
+const contentEl = document.getElementById('activity-content');
+if (!String(titleEl.value || '').trim()) titleEl.value = event.title || '';
+if (!String(dateEl.value || '').trim()) dateEl.value = formatActivitySourceEventDate(event.starts_at) || getAdminMemberKstDateString();
+if (!String(contentEl.value || '').trim()) contentEl.value = buildActivitySourceSummary(event);
+}
+
+const photos = (Array.isArray(data?.files) ? data.files : []).filter((file) => file.file_kind === 'PHOTO');
+const existingKeys = new Set(activityGalleryItems.map((item) => String(item.externalUrl || item.fileId || item.url || '').trim()).filter(Boolean));
+for (const file of photos) {
+const externalUrl = normalizeAdminHttpUrl(file.external_url || '');
+if (externalUrl) {
+if (!existingKeys.has(externalUrl)) {
+activityGalleryItems.push({ kind:'url', url:externalUrl, sourceEventId:safeId, sourceFileId:file.id || null });
+existingKeys.add(externalUrl);
+}
+continue;
+}
+const fileId = String(file.id || '').trim();
+if (!fileId || existingKeys.has(fileId)) continue;
+const previewUrl = await getActivityParticipationPhotoPreview(file);
+activityGalleryItems.push({
+kind:'participation',
+fileId,
+storagePath:String(file.storage_path || '').trim(),
+originalName:String(file.original_name || 'meeting-photo.jpg'),
+mimeType:String(file.mime_type || 'image/jpeg'),
+previewUrl,
+sourceEventId:safeId
+});
+existingKeys.add(fileId);
+}
+renderActivityCoverPreview();
+const help = document.getElementById('activity-source-event-help');
+if (help) help.textContent = photos.length
+? `${event.title || '행사'}의 사진 ${photos.length}장을 불러왔습니다. 저장할 때 공개용 주소를 준비합니다.`
+: `${event.title || '행사'}에는 등록된 사진이 없습니다. 기본정보만 연동했습니다.`;
+} // End of applyActivitySourceEvent
+
+async function loadSelectedActivitySourceEvent() {
+const eventId = String(document.getElementById('activity-source-event-select')?.value || '').trim();
+showLoading(true);
+try {
+await applyActivitySourceEvent(eventId, { prefill:true });
+} catch (error) {
+myAlert('회의·교육 기록을 불러오지 못했습니다: ' + (error?.message || error), 'error');
+} finally {
+showLoading(false);
+}
+} // End of loadSelectedActivitySourceEvent
+
+function activityPublishedPhotoExtension(item) {
+const mime = String(item?.mimeType || '').toLowerCase();
+if (mime === 'image/png') return 'png';
+if (mime === 'image/webp') return 'webp';
+if (mime === 'image/heic') return 'heic';
+if (mime === 'image/heif') return 'heif';
+const extension = String(item?.storagePath || '').split('.').pop().toLowerCase();
+return ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(extension) ? extension : 'jpg';
+} // End of activityPublishedPhotoExtension
+
+async function publishActivityParticipationPhoto(item) {
+const fileId = String(item?.fileId || '').trim();
+const storagePath = String(item?.storagePath || '').trim();
+if (!fileId || !storagePath) throw new Error('참여 관리 사진 경로를 확인하지 못했습니다.');
+const destinationPath = `site-activities/participation_${fileId}.${activityPublishedPhotoExtension(item)}`;
+const { error } = await _supabase.storage.from('participation-files').copy(
+storagePath,
+destinationPath,
+{ destinationBucket:'assets' }
+);
+const duplicate = error && /duplicate|already exists|resource already exists/i.test(String(error.message || error.error || ''));
+if (error && !duplicate) throw error;
+const { data } = _supabase.storage.from('assets').getPublicUrl(destinationPath);
+const url = String(data?.publicUrl || '').trim();
+if (!url) throw new Error('공개용 사진 주소를 만들지 못했습니다.');
+return { url, created:!error };
+} // End of publishActivityParticipationPhoto
+
+async function deleteActivityPhotoIfUnreferenced(url) {
+const safeUrl = normalizeAdminHttpUrl(url || '');
+if (!safeUrl) return false;
+try {
+const { data, error } = await _supabase.rpc('site_activity_media_reference_count', { p_url:safeUrl });
+if (error) throw error;
+if (Number(data || 0) > 0) return false;
+await deleteOldFile(safeUrl);
+return true;
+} catch (error) {
+console.warn('[deleteActivityPhotoIfUnreferenced] preserved photo:', error?.message || error);
+return false;
+}
+} // End of deleteActivityPhotoIfUnreferenced
+
 async function fetchActivities() {
 const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
   .eq('category', 'activity')
@@ -8673,7 +8874,7 @@ tbody.innerHTML += `<tr>
 });
 }
 
-async function openActivityModal(id) {
+async function openActivityModal(id, sourceEventId = '') {
 document.getElementById('activity-id').value = id || '';
 document.getElementById('activity-cover-file').value = '';
 document.getElementById('activity-cover-removed').value = '0';
@@ -8682,7 +8883,9 @@ document.getElementById('activity-title').value = '';
 document.getElementById('activity-date').value = getAdminMemberKstDateString();
 document.getElementById('activity-content').value = '';
 document.getElementById('activity-visible').checked = true;
+setActivitySourceEventId('');
 setActivityGalleryItemsFromUrls([]);
+let linkedSourceId = String(sourceEventId || '').trim();
 
 if (id) {
 const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
@@ -8701,6 +8904,18 @@ document.getElementById('activity-content').value = normalizeActivityContentForE
 document.getElementById('activity-visible').checked = data.is_current !== false;
 document.getElementById('activity-cover-original').value = JSON.stringify(parsedActivity.galleryUrls);
 setActivityGalleryItemsFromUrls(parsedActivity.galleryUrls);
+linkedSourceId = String(data.source_participation_event_id || linkedSourceId || '').trim();
+}
+}
+
+await loadActivityParticipationEvents(linkedSourceId);
+setActivitySourceEventId(linkedSourceId);
+if (!id && linkedSourceId) {
+try {
+await applyActivitySourceEvent(linkedSourceId, { prefill:true });
+} catch (error) {
+myAlert('연동할 회의·교육 기록을 불러오지 못했습니다: ' + (error?.message || error), 'error');
+return;
 }
 }
 
@@ -8734,29 +8949,31 @@ if (uploadedUrl) {
 uploadedNewUrls.push(uploadedUrl);
 finalGalleryUrls.push(uploadedUrl);
 }
+} else if (item?.kind === 'participation') {
+const published = await publishActivityParticipationPhoto(item);
+if (published.created) uploadedNewUrls.push(published.url);
+finalGalleryUrls.push(published.url);
 }
 }
 const normalizedFinalGalleryUrls = normalizeActivityGalleryUrls(finalGalleryUrls);
 const finalCoverUrl = normalizedFinalGalleryUrls[0] || '';
 const finalContent = buildActivityContentWithGallery(content, normalizedFinalGalleryUrls);
 
-const { error } = await _supabase.rpc('upsert_document_secure', {
+const { error } = await _supabase.rpc('site_activity_upsert_secure', {
 p_id: id,
-p_category: 'activity',
 p_title: title,
 p_date: eventDate,
 p_content: finalContent,
-p_version: null,
 p_file_url: finalCoverUrl || null,
 p_is_current: document.getElementById('activity-visible').checked,
-p_access_scope: 'PUBLIC'
+p_source_participation_event_id: getActivitySourceEventId() || null
 });
 
 if (error) throw error;
 
 const urlsToDelete = originalUrls.filter((url) => !normalizedFinalGalleryUrls.includes(url));
 for (const url of urlsToDelete) {
-await deleteOldFile(url);
+await deleteActivityPhotoIfUnreferenced(url);
 }
 
 bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).hide();
@@ -8793,7 +9010,7 @@ if (error) throw error;
 
 const parsedActivity = parseActivityContentWithGallery(data?.content || '', data?.file_url || '');
 for (const url of parsedActivity.galleryUrls) {
-await deleteOldFile(url);
+await deleteActivityPhotoIfUnreferenced(url);
 }
 
 await fetchActivities();
@@ -9795,6 +10012,22 @@ function getInitialAdminMemberTab() {
   if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') return 'site';
   return 'dashboard';
 }
+
+async function openAdminMemberActivityDeepLink() {
+try {
+const params = new URLSearchParams(window.location.search || '');
+if (params.get('sub') !== 'activities' || getInitialAdminMemberTab() !== 'site') return;
+selectAdminMemberSiteSubTab('sub-activities');
+await fetchActivities();
+const sourceEventId = String(params.get('activity_event') || '').trim();
+if (!sourceEventId) return;
+const existing = (g_siteActivities || []).find((row) => String(row.source_participation_event_id || '') === sourceEventId);
+await openActivityModal(existing?.id || null, sourceEventId);
+} catch (error) {
+console.error('[openAdminMemberActivityDeepLink] failed:', error);
+myAlert('우리 소식 작성 화면을 열지 못했습니다: ' + (error?.message || error), 'error');
+}
+} // End of openAdminMemberActivityDeepLink
 
 
 // 숫자 애니메이션 효과 함수
@@ -13100,6 +13333,7 @@ window.onload = async function() {
 
     // 3. 초기 탭 로드
     switchTab(getInitialAdminMemberTab());
+    await openAdminMemberActivityDeepLink();
 
 };
 

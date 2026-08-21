@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.126
-Change: Show private board and assembly photo galleries in meeting participation history.
+Version: v1.0.127
+Change: Load participation history continuously while scrolling and reuse linked public activity photos.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.126 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.127 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -509,13 +509,14 @@ max-height: min(58vh, 520px);
 overflow-y: auto;
 padding-right: 2px;
 }
-.participation-history-load-more {
+.participation-history-infinite-status {
 display: flex;
 justify-content: center;
-padding-top: 12px;
-}
-.participation-history-load-more .btn {
-min-width: 180px;
+align-items: center;
+min-height: 44px;
+padding: 10px 6px 4px;
+color: #64748b;
+font-size: .82rem;
 }
 .participation-history-tabs {
 display: grid;
@@ -1046,8 +1047,9 @@ min-height: 50px;
 font-size: 1.08rem;
 }
 .participation-history-list {
-max-height: none;
-overflow: visible;
+max-height: min(62dvh, 620px);
+overflow-y: auto;
+overscroll-behavior: contain;
 gap: 14px;
 padding: 0 0 16px;
 }
@@ -2151,9 +2153,6 @@ oninput="autoHyphen(this)"> </div>
 </div>
 <div class="participation-history-list" id="participationHistoryList" role="tabpanel" aria-labelledby="participationEducationTab" tabindex="0">
 <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>
-</div>
-<div class="participation-history-load-more" id="participationHistoryLoadMoreWrap" hidden>
-<button type="button" class="btn btn-outline-success btn-sm" id="participationHistoryLoadMoreBtn" onclick="loadMoreParticipationHistory()">3개 더 보기</button>
 </div>
 <div class="text-end border-top pt-3 mt-3">
 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeParticipationHistory()">닫기</button>
@@ -5631,6 +5630,7 @@ let participationHistoryData = { events:[] };
 let participationHistoryActiveTab = 'EDUCATION';
 let participationHistoryRenderVersion = 0;
 let participationHistorySessionVersion = 0;
+let participationHistoryInfiniteObserver = null;
 let participationHistoryMemberUuid = null;
 let participationHistoryCounts = { education:null, meeting:null, total:null, attended:null };
 let participationHumanitiesPayload = null;
@@ -5658,6 +5658,10 @@ MEETING: createParticipationHistoryPageState()
 } // End of createEmptyParticipationHistoryPages
 
 function resetParticipationHistoryState(memberUuid) {
+if (participationHistoryInfiniteObserver) {
+participationHistoryInfiniteObserver.disconnect();
+participationHistoryInfiniteObserver = null;
+}
 participationHistorySessionVersion += 1;
 participationHistoryMemberUuid = memberUuid || null;
 participationHistoryCounts = { education:null, meeting:null, total:null, attended:null };
@@ -5792,18 +5796,40 @@ attended: normalizeCount(data.attended_count, participationHistoryCounts.attende
 };
 } // End of updateParticipationHistoryCounts
 
-function syncParticipationHistoryLoadMore() {
-const wrap = document.getElementById('participationHistoryLoadMoreWrap');
-const button = document.getElementById('participationHistoryLoadMoreBtn');
+function syncParticipationHistoryInfiniteScroll() {
+const list = document.getElementById('participationHistoryList');
 const state = participationHistoryPages[participationHistoryActiveTab];
-if (!wrap || !button || !state) return;
-const show = state.loaded && (state.hasMore || (state.loading && state.events.length > 0));
-wrap.hidden = !show;
-button.disabled = state.loading;
-button.innerHTML = state.loading
-? '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>불러오는 중...'
-: `${participationHistoryActiveTab === 'EDUCATION' ? '교육' : '회의'} 3개 더 보기`;
-} // End of syncParticipationHistoryLoadMore
+if (!list || !state) return;
+if (participationHistoryInfiniteObserver) {
+participationHistoryInfiniteObserver.disconnect();
+participationHistoryInfiniteObserver = null;
+}
+let sentinel = document.getElementById('participationHistoryInfiniteSentinel');
+if (!state.loaded || (!state.hasMore && !state.loading)) {
+sentinel?.remove();
+return;
+}
+if (!sentinel) {
+sentinel = document.createElement('div');
+sentinel.id = 'participationHistoryInfiniteSentinel';
+sentinel.className = 'participation-history-infinite-status';
+sentinel.setAttribute('role', 'status');
+sentinel.setAttribute('aria-live', 'polite');
+list.appendChild(sentinel);
+}
+sentinel.innerHTML = state.loading
+? '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>다음 참여 이력을 불러오는 중...'
+: '<span>아래로 스크롤하면 다음 참여 이력이 이어집니다.</span>';
+if (!state.hasMore || state.loading || typeof IntersectionObserver !== 'function') return;
+const root = getComputedStyle(list).overflowY === 'auto' ? list : null;
+participationHistoryInfiniteObserver = new IntersectionObserver(function(entries) {
+if (!entries.some(function(entry) { return entry.isIntersecting; })) return;
+participationHistoryInfiniteObserver?.disconnect();
+participationHistoryInfiniteObserver = null;
+void loadParticipationHistoryPage(participationHistoryActiveTab, { append:true });
+}, { root, rootMargin:'160px 0px', threshold:0.01 });
+participationHistoryInfiniteObserver.observe(sentinel);
+} // End of syncParticipationHistoryInfiniteScroll
 
 async function ensureParticipationHumanitiesResources(memberUuid) {
 if (!memberUuid || participationHumanitiesPayload) return participationHumanitiesPayload;
@@ -5845,12 +5871,12 @@ const list = document.getElementById('participationHistoryList');
 if (list) list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
 participationHistoryRenderVersion += 1;
 }
-syncParticipationHistoryLoadMore();
+syncParticipationHistoryInfiniteScroll();
 
 state.request = (async function() {
 try {
 const cursor = append ? state.cursor : null;
-const { data, error } = await _supabase.rpc('participation_member_history_page', {
+const { data, error } = await _supabase.rpc('participation_member_history_page_v2', {
 p_member_uuid: memberUuid,
 p_history_type: safeType,
 p_page_size: PARTICIPATION_HISTORY_PAGE_SIZE,
@@ -5866,6 +5892,7 @@ if (safeType === 'EDUCATION' && participationHumanitiesPayload) {
 incomingEvents = mergeMemberLinkedHumanitiesResources({ events:incomingEvents }, participationHumanitiesPayload).events;
 }
 const existingEvents = append ? state.events : [];
+const appendStartIndex = existingEvents.length;
 const seen = new Set(existingEvents.map(function(event) { return String(event?.event_id || ''); }));
 const mergedEvents = [...existingEvents];
 incomingEvents.forEach(function(event) {
@@ -5882,7 +5909,7 @@ state.cursor = lastEvent ? { startsAt:lastEvent.starts_at, eventId:lastEvent.eve
 
 if (participationHistoryActiveTab === safeType) {
 participationHistoryData = { events:state.events };
-await renderParticipationHistory();
+await renderParticipationHistory({ append:append && appendStartIndex > 0, startIndex:appendStartIndex });
 }
 if (safeType === 'EDUCATION' && !participationHumanitiesPayload) {
 void ensureParticipationHumanitiesResources(memberUuid);
@@ -5901,7 +5928,7 @@ return false;
 if (sessionVersion === participationHistorySessionVersion) {
 state.loading = false;
 state.request = null;
-syncParticipationHistoryLoadMore();
+syncParticipationHistoryInfiniteScroll();
 }
 }
 })();
@@ -5934,10 +5961,6 @@ return;
 await loadParticipationHistoryPage(participationHistoryActiveTab);
 } // End of switchParticipationHistoryTab
 
-async function loadMoreParticipationHistory() {
-await loadParticipationHistoryPage(participationHistoryActiveTab, { append:true });
-} // End of loadMoreParticipationHistory
-
 async function handleParticipationHistoryTabKeydown(event) {
 if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
 event.preventDefault();
@@ -5958,7 +5981,7 @@ await switchParticipationHistoryTab(targetTab);
 tabs[targetIndex]?.focus();
 } // End of handleParticipationHistoryTabKeydown
 
-async function renderParticipationHistory() {
+async function renderParticipationHistory({ append = false, startIndex = 0 } = {}) {
 const renderVersion = ++participationHistoryRenderVersion;
 const list = document.getElementById('participationHistoryList');
 const summary = document.getElementById('participationHistorySummary');
@@ -5970,12 +5993,16 @@ if (summary) summary.textContent = `교육 ${educationCount ?? '-'}건 · 회의
 if (!list) return;
 if (visibleEvents.length === 0) {
 list.innerHTML = `<div class="text-center text-muted py-5">등록된 ${participationHistoryActiveTab === 'EDUCATION' ? '교육' : '회의'} 참여 이력이 없습니다.</div>`;
-syncParticipationHistoryLoadMore();
+syncParticipationHistoryInfiniteScroll();
 return;
 }
 
+const renderEvents = append ? visibleEvents.slice(Math.max(0, startIndex)) : visibleEvents;
+document.getElementById('participationHistoryInfiniteSentinel')?.remove();
+if (!append) {
 list.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>사진을 불러오는 중...</div>';
-const photoPaths = Array.from(new Set(visibleEvents.flatMap(function(event) {
+}
+const photoPaths = Array.from(new Set(renderEvents.flatMap(function(event) {
 return (Array.isArray(event.files) ? event.files : [])
 .filter(function(file) { return file.file_kind === 'PHOTO' && !file.external_url; })
 .map(function(file) { return String(file.storage_path || '').trim(); })
@@ -5991,7 +6018,7 @@ return [path, ''];
 if (renderVersion !== participationHistoryRenderVersion) return;
 const photoUrlMap = new Map(photoUrlRows);
 
-list.innerHTML = visibleEvents.map(function(event) {
+const historyCardsHtml = renderEvents.map(function(event) {
 const files = Array.isArray(event.files) ? event.files : [];
 const materials = event.event_type === 'EDUCATION'
 ? files.filter(function(file) { return file.file_kind === 'MATERIAL'; })
@@ -6069,28 +6096,30 @@ ${sourceWarningHtml}
 ${hasPhoto ? `<div class="participation-history-media">${photosHtml}</div>` : photosHtml}
 </article>`;
 }).join('');
+if (append) list.insertAdjacentHTML('beforeend', historyCardsHtml);
+else list.innerHTML = historyCardsHtml;
 list.querySelectorAll('[data-participation-file]').forEach(function(button) {
-button.addEventListener('click', function() {
+button.onclick = function() {
 openParticipationAttachment(button.dataset.participationFile);
-});
+};
 });
 list.querySelectorAll('[data-participation-external-url]').forEach(function(button) {
-button.addEventListener('click', function() {
+button.onclick = function() {
 const url = safeUrl(button.dataset.participationExternalUrl || '');
 if (url) window.open(url, '_blank', 'noopener,noreferrer');
-});
+};
 });
 list.querySelectorAll('[data-participation-photo]').forEach(function(button) {
-button.addEventListener('click', function() {
+button.onclick = function() {
 openParticipationImageLightbox(button.dataset.participationPhoto, button);
-});
+};
 });
 list.querySelectorAll('[data-participation-document]').forEach(function(button) {
-button.addEventListener('click', function() {
+button.onclick = function() {
 openParticipationDocument(button.dataset.participationDocument, button);
+};
 });
-});
-syncParticipationHistoryLoadMore();
+syncParticipationHistoryInfiniteScroll();
 } // End of renderParticipationHistory
 
 function participationDocumentTypeLabel(type) {
@@ -6260,6 +6289,10 @@ if (list) list.innerHTML = `<div class="text-center text-danger py-5">${escapeHt
 } // End of openParticipationHistory
 
 function closeParticipationHistory() {
+if (participationHistoryInfiniteObserver) {
+participationHistoryInfiniteObserver.disconnect();
+participationHistoryInfiniteObserver = null;
+}
 closeParticipationDocument(false);
 closeParticipationImageLightbox();
 const overlay = document.getElementById('participationHistoryModal');
