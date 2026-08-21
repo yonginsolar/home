@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.66
-Change: 2026-08-21 - Add structured general-assembly attendance and four-person named-seal selection.
+Version: v1.2.67
+Change: 2026-08-21 - Resolve the assembly chairperson across separate executive and delegate records.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-08-21 - Add structured general-assembly attendance and four-person 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.66 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.67 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -2020,7 +2020,14 @@ Change: 2026-08-21 - Add structured general-assembly attendance and four-person 
 
         function isGeneralAssemblyChairperson(off) {
             const role = getRoleLabel(off);
-            return role.includes('이사장') || role.includes('의장');
+            if (role.includes('이사장') || role.includes('의장')) return true;
+            const memberId = String(off?.member_id || '').trim();
+            if (!memberId) return false;
+            return (Array.isArray(allOfficials) ? allOfficials : []).some((candidate) => {
+                if (String(candidate?.member_id || '').trim() !== memberId) return false;
+                const candidateRole = getRoleLabel(candidate);
+                return candidateRole.includes('이사장') || candidateRole.includes('의장');
+            });
         }
 
         function getOfficialName(off) {
