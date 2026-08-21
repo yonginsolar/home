@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.18 | Change: 2026-08-21 - Recommend only activity photos whose meeting type, round, and date match. -->
+<!-- Version: v1.3.19 | Change: 2026-08-21 - Preserve actual attendee names for group delegates and directors. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.18 | participation.html');</script>
+  <script>console.log('[Version] v1.3.19 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -877,6 +877,11 @@
         .trim();
     } // End of normalizePersonName
 
+    function isGroupMemberType(value) {
+      const memberType = String(value || '').trim().toLowerCase();
+      return memberType.includes('단체') || memberType === 'organization' || memberType === 'corporate';
+    } // End of isGroupMemberType
+
     function minutePlainText(content) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(String(content || ''), 'text/html');
@@ -886,9 +891,27 @@
         .trim();
     } // End of minutePlainText
 
+    function parseMinuteAttendeeEntries(rawValue) {
+      return String(rawValue || '')
+        .replace(/^\s*\d+\s*명\s*[·ㆍ]\s*/, '')
+        .split(/\s*,\s*/)
+        .map(function(rawName) {
+          const value = String(rawName || '').trim();
+          const actualMatch = value.match(/^(.+?)\s+\(([^()]+)\)$/);
+          return {
+            name:actualMatch ? actualMatch[1].trim() : value,
+            actualAttendeeName:actualMatch ? actualMatch[2].trim() : '',
+            displayName:value
+          };
+        })
+        .filter(function(entry) { return entry.name && entry.name !== '없음'; });
+    } // End of parseMinuteAttendeeEntries
+
     function parseMinuteContent(source, eventType) {
       const text = minutePlainText(source?.content || '');
-      const dateTimeMatch = text.match(/일시\s*:\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\([^)]*\))?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?(?:\s*(?:~|〜|-)\s*(\d{1,2})시(?:\s*(\d{1,2})분)?)?/);
+      const legacyDateTimeMatch = text.match(/일시\s*:\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:\([^)]*\))?\s*(\d{1,2})시(?:\s*(\d{1,2})분)?(?:\s*(?:~|〜|-)\s*(\d{1,2})시(?:\s*(\d{1,2})분)?)?/);
+      const structuredDateTimeMatch = text.match(/일시\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:\([^)]*\))?\s*(\d{1,2}):(\d{2})(?:\s*(?:~|〜|-)\s*(\d{1,2}):(\d{2}))?/);
+      const dateTimeMatch = legacyDateTimeMatch || structuredDateTimeMatch;
       let startsAt = '';
       let endsAt = '';
       if (dateTimeMatch) {
@@ -905,19 +928,28 @@
         }
       }
 
-      const locationMatch = text.match(/장소\s*:\s*(.+?)(?=(?:2\.\s*참석자|참석자\s*현황|3\.\s*))/);
+      const locationMatch = text.match(/장소\s*:?\s*(.+?)(?=(?:2\.\s*(?:참석\s*현황|참석자\s*현황)|참석자\s*현황|3\.\s*))/);
       const location = locationMatch ? locationMatch[1].trim() : '';
       const attendanceTitle = eventType === 'BOARD' ? '참석 이사' : '참석 대의원';
       const attendancePattern = new RegExp(`나\\.\\s*${attendanceTitle}\\s*\\([^)]*\\)\\s*-\\s*(.+?)(?=(?:다\\.|라\\.|3\\.)\\s*)`);
-      const attendanceMatch = text.match(attendancePattern);
-      const names = attendanceMatch
-        ? attendanceMatch[1].split(',').map(function(name) { return name.trim(); }).filter(Boolean)
-        : [];
+      const structuredNextLabel = eventType === 'BOARD' ? '배석자' : '그 밖의 출석자·배석자';
+      const structuredAttendancePattern = new RegExp(`${attendanceTitle}\\s+(?:\\d+\\s*명\\s*[·ㆍ]\\s*)?(.+?)(?=${structuredNextLabel}\\s+)`);
+      const attendanceMatch = text.match(attendancePattern) || text.match(structuredAttendancePattern);
+      const attendeeEntries = parseMinuteAttendeeEntries(attendanceMatch ? attendanceMatch[1] : '');
       const additionalMatch = text.match(/다\.\s*(?:출석자|배석자)\s*\([^)]*\)\s*-\s*(.+?)(?=(?:라\.|마\.|3\.)\s*)/);
-      const additionalNames = additionalMatch
-        ? additionalMatch[1].split(',').map(function(name) { return name.trim(); }).filter(Boolean)
-        : [];
-      return { startsAt, endsAt, location, attendeeNames:names, additionalAttendeeNames:additionalNames, parsedText:text };
+      const structuredAdditionalPattern = new RegExp(`${structuredNextLabel}\\s+(.+?)(?=3\\.\\s*(?:회의|총회)\\s*내용)`);
+      const resolvedAdditionalMatch = additionalMatch || text.match(structuredAdditionalPattern);
+      const additionalAttendeeEntries = parseMinuteAttendeeEntries(resolvedAdditionalMatch ? resolvedAdditionalMatch[1] : '');
+      return {
+        startsAt,
+        endsAt,
+        location,
+        attendeeNames:attendeeEntries.map(function(entry) { return entry.name; }),
+        attendeeEntries,
+        additionalAttendeeNames:additionalAttendeeEntries.map(function(entry) { return entry.name; }),
+        additionalAttendeeEntries,
+        parsedText:text
+      };
     } // End of parseMinuteContent
 
     function activeOfficialsAtDate(startsAtLocal) {
@@ -999,13 +1031,20 @@
 
     function buildMeetingAttendees(source, eventType, parsed) {
       const officials = officialsAtDate(eventType, parsed.startsAt, source);
-      const parsedNames = new Set((parsed.attendeeNames || []).map(normalizePersonName));
+      const attendeeEntries = Array.isArray(parsed.attendeeEntries)
+        ? parsed.attendeeEntries
+        : (parsed.attendeeNames || []).map(function(name) { return { name, actualAttendeeName:'', displayName:name }; });
+      const attendeeEntryMap = new Map(attendeeEntries.map(function(entry) {
+        return [normalizePersonName(entry.name), entry];
+      }));
+      const parsedNames = new Set(attendeeEntryMap.keys());
       const matchedNames = new Set();
       const signedOfficialIds = new Set((source?.signed_official_ids || []).map(String));
       const signedMemberIds = new Set((source?.signed_member_ids || []).map(String));
       const attendees = officials.map(function(official) {
         const normalized = normalizePersonName(official.name);
         const attended = parsedNames.has(normalized);
+        const parsedEntry = attendeeEntryMap.get(normalized) || null;
         if (attended) matchedNames.add(normalized);
         return {
           member_id:official.member_uuid,
@@ -1018,7 +1057,9 @@
           attendance_status:attended ? 'ATTENDED' : 'ABSENT',
           check_in_method:'MINUTES',
           checked_in_at:attended ? localInputToIso(parsed.startsAt) : null,
-          actual_attendee_name:'',
+          actual_attendee_name:attended && isGroupMemberType(official.member_type)
+            ? String(parsedEntry?.actualAttendeeName || '').trim()
+            : '',
           note:'',
           signature_required:Array.isArray(source?.signer_ids) && source.signer_ids.length > 0
             ? source.signer_ids.map(String).includes(String(official.official_id))
@@ -1029,13 +1070,20 @@
         };
       });
       const targetMemberIds = new Set(attendees.map(function(row) { return String(row.member_id); }));
-      const additionalParsedNames = new Set((parsed.additionalAttendeeNames || []).map(normalizePersonName));
+      const additionalEntries = Array.isArray(parsed.additionalAttendeeEntries)
+        ? parsed.additionalAttendeeEntries
+        : (parsed.additionalAttendeeNames || []).map(function(name) { return { name, actualAttendeeName:'', displayName:name }; });
+      const additionalEntryMap = new Map(additionalEntries.map(function(entry) {
+        return [normalizePersonName(entry.name), entry];
+      }));
+      const additionalParsedNames = new Set(additionalEntryMap.keys());
       const additionalOfficials = meetingOfficialsPool(eventType, parsed.startsAt, source).filter(function(official) {
         return !targetMemberIds.has(String(official.member_uuid))
           && additionalParsedNames.has(normalizePersonName(official.name));
       });
       additionalOfficials.forEach(function(official) {
         const normalized = normalizePersonName(official.name);
+        const parsedEntry = additionalEntryMap.get(normalized) || null;
         matchedNames.add(normalized);
         targetMemberIds.add(String(official.member_uuid));
         attendees.push({
@@ -1049,7 +1097,9 @@
           attendance_status:'ATTENDED',
           check_in_method:'MINUTES',
           checked_in_at:localInputToIso(parsed.startsAt),
-          actual_attendee_name:'',
+          actual_attendee_name:isGroupMemberType(official.member_type)
+            ? String(parsedEntry?.actualAttendeeName || '').trim()
+            : '',
           note:'',
           signature_required:Array.isArray(source?.signer_ids)
             && source.signer_ids.map(String).includes(String(official.official_id)),
@@ -1058,11 +1108,11 @@
             : null
         });
       });
-      const unmatched = (parsed.attendeeNames || []).filter(function(name) {
-        return !matchedNames.has(normalizePersonName(name));
-      }).concat((parsed.additionalAttendeeNames || []).filter(function(name) {
-        return !matchedNames.has(normalizePersonName(name));
-      }));
+      const unmatched = attendeeEntries.filter(function(entry) {
+        return !matchedNames.has(normalizePersonName(entry.name));
+      }).concat(additionalEntries.filter(function(entry) {
+        return !matchedNames.has(normalizePersonName(entry.name));
+      })).map(function(entry) { return entry.displayName || entry.name; });
       return { attendees, unmatched };
     } // End of buildMeetingAttendees
 
@@ -2046,9 +2096,13 @@
         const qrCheckInTimeHtml = (isQrCheckIn || isQuickCheckIn || isGuestLinked) && row.checked_in_at
           ? `<br><span class="text-success">체크인 ${escapeHtml(formatKstDateTime(row.checked_in_at))}</span>`
           : '';
-        const actualAttendeeHtml = String(row.member_type || '').includes('단체')
-          ? `<input type="text" class="form-control form-control-sm actual-attendee" data-actual-attendee value="${escapeHtml(row.actual_attendee_name || '')}" placeholder="단체 실제 참석자명">`
-          : '<span class="text-muted small text-center">-</span>';
+        const groupMember = isGroupMemberType(row.member_type);
+        const actualAttendeeEnabled = groupMember && (type === 'EDUCATION' || row.attendance_status === 'ATTENDED');
+        const actualAttendeeHtml = actualAttendeeEnabled
+          ? `<input type="text" class="form-control form-control-sm actual-attendee" data-actual-attendee value="${escapeHtml(row.actual_attendee_name || '')}" maxlength="100" autocomplete="off" placeholder="실제 참석자명" aria-label="${escapeHtml(row.name)} 실제 참석자명">`
+          : groupMember
+            ? '<span class="text-muted small text-center">참석 선택 시 입력</span>'
+            : '<span class="text-muted small text-center">-</span>';
         const statusHtml = type === 'EDUCATION'
           ? '<span class="badge text-bg-success justify-self-center">참석</span>'
           : `<select class="form-select form-select-sm" data-attendance-status>
@@ -2095,7 +2149,10 @@
             formState.attendees[index].checked_in_by = null;
             formState.attendees[index].checked_in_by_name_snapshot = '';
           }
-          if (event.target.value !== 'ATTENDED') formState.attendees[index].checked_in_at = null;
+          if (event.target.value !== 'ATTENDED') {
+            formState.attendees[index].checked_in_at = null;
+            formState.attendees[index].actual_attendee_name = '';
+          }
           renderAttendees();
         });
         rowEl.querySelector('[data-actual-attendee]')?.addEventListener('input', function(event) {
@@ -2565,6 +2622,14 @@
       if (!location) throw new Error('장소를 입력하세요.');
       if (endsAt && localInputToIso(endsAt) < localInputToIso(startsAt)) throw new Error('종료 일시는 시작 일시보다 빠를 수 없습니다.');
       if (type !== 'EDUCATION' && !selectedSourceId) throw new Error('원본 의사록 또는 수기 입력을 선택하세요.');
+      if (type !== 'EDUCATION') {
+        const missingGroupAttendee = (formState.attendees || []).find(function(row) {
+          return isGroupMemberType(row.member_type)
+            && row.attendance_status === 'ATTENDED'
+            && !String(row.actual_attendee_name || '').trim();
+        });
+        if (missingGroupAttendee) throw new Error(`${missingGroupAttendee.name}의 실제 참석자명을 입력하세요.`);
+      }
       if (type === 'EDUCATION') {
         if (!endsAt) throw new Error('교육 종료 일시를 입력하세요.');
         if (!educationContent) throw new Error('교육 내용을 입력하세요.');
@@ -2603,7 +2668,8 @@
             checked_in_at:education || row.attendance_status === 'ATTENDED'
               ? (row.checked_in_at || localInputToIso(values.startsAt))
               : null,
-            actual_attendee_name:String(row.member_type || '').includes('단체')
+            actual_attendee_name:isGroupMemberType(row.member_type)
+              && (education || row.attendance_status === 'ATTENDED')
               ? (String(row.actual_attendee_name || '').trim() || null)
               : null,
             note:String(row.note || '').trim() || null

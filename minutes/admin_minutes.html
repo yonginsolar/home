@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.67
-Change: 2026-08-21 - Resolve the assembly chairperson across separate executive and delegate records.
+Version: v1.2.68
+Change: 2026-08-21 - Capture the actual attendee when a group delegate or director attends.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.67 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.68 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -116,6 +116,33 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             line-height: 1.55;
         }
         .director-snapshot strong { color: #0f172a; }
+        .structured-official-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .structured-official-option {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 7px;
+            padding: 6px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: #f8fafc;
+        }
+        .structured-official-check,
+        .structured-actual-attendee {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .structured-actual-attendee[hidden] { display: none; }
+        .structured-actual-attendee input {
+            width: 9.5rem;
+            min-width: 0;
+            padding: 5px 8px;
+        }
         @media (max-width: 640px) {
             .structured-minute-grid { grid-template-columns: 1fr; }
         }
@@ -333,12 +360,12 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             </div>
             <div class="input-group" id="assembly-attendee-section" hidden>
                 <label>참석 대의원</label>
-                <div id="assembly-attendee-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
-                <small class="text-muted" id="assembly-attendee-help">실제 참석 대의원을 체크하세요.</small>
+                <div id="assembly-attendee-list" class="structured-official-list"></div>
+                <small class="text-muted" id="assembly-attendee-help">실제 참석 대의원을 체크하세요. 단체는 실제 참석자명도 입력합니다.</small>
             </div>
             <div class="input-group" id="signer-section">
                 <label id="signer-label">참석 이사 · 전자서명 대상</label>
-                <div id="signer-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+                <div id="signer-list" class="structured-official-list"></div>
                 <small class="text-muted" id="signer-help">참석한 이사를 체크하면 문서의 참석 이사와 전자서명 대상에 함께 반영됩니다.</small>
             </div>
             <div class="input-group">
@@ -603,7 +630,7 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.46';
+        import { MinutesService } from './MinutesService.js?v=1.0.47';
         import { supabase } from '../shared/supabase-client.js';
 
         function getErpHomeUrl() {
@@ -1392,6 +1419,65 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
                 .filter(Boolean);
         }
 
+        function isGroupOfficial(off) {
+            const memberType = String(
+                off?.member_type
+                || off?.member_type_snapshot
+                || off?.coop_members?.member_type
+                || ''
+            ).trim().toLowerCase();
+            return memberType.includes('단체') || memberType === 'organization' || memberType === 'corporate';
+        }
+
+        function getStructuredActualAttendeeInput(officialId, attendanceInputName) {
+            return Array.from(document.querySelectorAll('input[data-structured-actual-attendee]')).find((input) => (
+                String(input.dataset.officialId || '') === String(officialId || '')
+                && String(input.dataset.attendanceInput || '') === String(attendanceInputName || '')
+            )) || null;
+        }
+
+        function syncStructuredActualAttendeeInput(checkbox) {
+            if (!checkbox) return;
+            const input = getStructuredActualAttendeeInput(checkbox.value, checkbox.name);
+            const field = input?.closest('[data-structured-actual-field]') || null;
+            if (!input || !field) return;
+            const attended = !!checkbox.checked;
+            field.hidden = !attended;
+            input.required = attended;
+            if (!attended) input.setCustomValidity('');
+        }
+
+        function getStructuredActualAttendeeName(off, attendanceInputName) {
+            return String(getStructuredActualAttendeeInput(off?.id, attendanceInputName)?.value || '').trim();
+        }
+
+        function getStructuredGroupAttendeeError(attendees, attendanceInputName) {
+            const missing = (Array.isArray(attendees) ? attendees : []).find((off) => (
+                isGroupOfficial(off) && !getStructuredActualAttendeeName(off, attendanceInputName)
+            ));
+            return missing ? `${getOfficialName(missing)}의 실제 참석자명을 입력하세요.` : '';
+        }
+
+        function formatStructuredAttendeeName(off, attendanceInputName) {
+            const officialName = getOfficialName(off);
+            if (!isGroupOfficial(off)) return officialName;
+            const actualName = getStructuredActualAttendeeName(off, attendanceInputName);
+            return actualName ? `${officialName} (${actualName})` : officialName;
+        }
+
+        function renderStructuredActualAttendeeField(off, attendanceInputName) {
+            if (!isGroupOfficial(off)) return '';
+            const id = escapeHtml(String(off?.id || ''));
+            const name = escapeHtml(getOfficialName(off));
+            return `
+                <label class="structured-actual-attendee" data-structured-actual-field hidden>
+                    <span aria-hidden="true">(</span>
+                    <input type="text" class="form-control" data-structured-actual-attendee data-official-id="${id}" data-attendance-input="${escapeHtml(attendanceInputName)}" maxlength="100" autocomplete="off" placeholder="실제 참석자명" aria-label="${name} 실제 참석자명">
+                    <span aria-hidden="true">)</span>
+                </label>
+            `;
+        }
+
         function getGeneralAssemblySelectionError(delegates, attendeeIds, signerIds) {
             const safeDelegates = Array.isArray(delegates) ? delegates : [];
             const safeAttendeeIds = Array.from(new Set((Array.isArray(attendeeIds) ? attendeeIds : []).map(String)));
@@ -1549,12 +1635,14 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             if (!location) return { error: '회의 장소를 입력하세요.' };
             if (!directors.length) return { error: '현직 이사 명단을 확인하지 못했습니다.' };
             if (!attendees.length) return { error: '참석 이사를 1명 이상 체크하세요.' };
+            const groupAttendeeError = getStructuredGroupAttendeeError(attendees, 'signerIds');
+            if (groupAttendeeError) return { error: groupAttendeeError };
             if (!bodyHtml) return { error: '폐회 선언까지 회의 내용을 입력하세요.' };
 
             const companyInfo = await loadNoticeCompanyInfo();
             const orgName = String(companyInfo?.orgName || companyInfo?.company_name || '용인모두의햇빛협동조합').trim();
             const directorNames = directors.map(getOfficialName).filter(Boolean);
-            const attendeeNames = attendees.map(getOfficialName).filter(Boolean);
+            const attendeeNames = attendees.map(off => formatStructuredAttendeeName(off, 'signerIds')).filter(Boolean);
             const noticeDateLabel = formatMinuteLocalDate(noticeDate);
             const meetingDateLabel = formatMinuteLocalDate(meetingDate, true);
             const timeLabel = endTime ? `${startTime} ~ ${endTime}` : `${startTime}부터`;
@@ -1634,12 +1722,14 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             if (!location) return { error: '총회 장소를 입력하세요.' };
             const selectionError = getGeneralAssemblySelectionError(delegates, attendeeIds, signerIds);
             if (selectionError) return { error: selectionError };
+            const groupAttendeeError = getStructuredGroupAttendeeError(attendees, 'assemblyAttendeeIds');
+            if (groupAttendeeError) return { error: groupAttendeeError };
             if (!bodyHtml) return { error: '폐회 선언까지 총회 내용을 입력하세요.' };
 
             const companyInfo = await loadNoticeCompanyInfo();
             const orgName = String(companyInfo?.orgName || companyInfo?.company_name || '용인모두의햇빛협동조합').trim();
             const delegateNames = delegates.map(getOfficialName).filter(Boolean);
-            const attendeeNames = attendees.map(getOfficialName).filter(Boolean);
+            const attendeeNames = attendees.map(off => formatStructuredAttendeeName(off, 'assemblyAttendeeIds')).filter(Boolean);
             const noticeDateLabel = formatMinuteLocalDate(noticeDate);
             const meetingDateLabel = formatMinuteLocalDate(meetingDate, true);
             const timeLabel = endTime ? `${startTime} ~ ${endTime}` : `${startTime}부터`;
@@ -2110,6 +2200,8 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
                 chairmanInput.disabled = true;
             }
 
+            document.querySelectorAll('input[name="assemblyAttendeeIds"]').forEach(syncStructuredActualAttendeeInput);
+
             signerInputs.forEach((input) => {
                 if (input === chairmanInput) return;
                 const enabled = attendeeIds.has(String(input.value));
@@ -2123,7 +2215,7 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             const signerCount = getSelectedSignerIds().length;
             const attendeeHelp = document.getElementById('assembly-attendee-help');
             const signerHelp = document.getElementById('signer-help');
-            if (attendeeHelp) attendeeHelp.textContent = `참석 대의원 ${attendeeCount}명 · 의장인 이사장은 기본 포함됩니다.`;
+            if (attendeeHelp) attendeeHelp.textContent = `참석 대의원 ${attendeeCount}명 · 의장인 이사장은 기본 포함되며 단체는 실제 참석자명을 입력합니다.`;
             if (signerHelp) {
                 const remaining = Math.max(0, 4 - signerCount);
                 signerHelp.textContent = remaining
@@ -2144,10 +2236,13 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
                 const name = escapeHtml(getOfficialName(off));
                 const isChairperson = isGeneralAssemblyChairperson(off);
                 return `
-                    <label style="display:flex; align-items:center; gap:6px; border:1px solid #e5e7eb; padding:6px 10px; border-radius:999px; background:#f8fafc;">
-                        <input type="checkbox" name="assemblyAttendeeIds" value="${id}" ${isChairperson ? 'checked disabled' : ''}>
-                        <span>${name}${isChairperson ? ' (의장·기본)' : ''}</span>
-                    </label>
+                    <div class="structured-official-option">
+                        <label class="structured-official-check">
+                            <input type="checkbox" name="assemblyAttendeeIds" value="${id}" ${isChairperson ? 'checked disabled' : ''}>
+                            <span>${name}${isChairperson ? ' (의장·기본)' : ''}</span>
+                        </label>
+                        ${renderStructuredActualAttendeeField(off, 'assemblyAttendeeIds')}
+                    </div>
                 `;
             }).join('');
             wrap.querySelectorAll('input[name="assemblyAttendeeIds"]').forEach((input) => {
@@ -2178,7 +2273,7 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             } else {
                 targets = sortDirectorOrder(officials.filter(isDirectorRole));
                 if (labelEl) labelEl.innerText = '참석 이사 · 전자서명 대상';
-                if (helpEl) helpEl.innerText = '참석한 이사를 체크하면 문서의 참석 이사와 전자서명 대상에 함께 반영됩니다.';
+                if (helpEl) helpEl.innerText = '참석한 이사를 체크하면 문서와 전자서명 대상에 함께 반영됩니다. 단체는 실제 참석자명도 입력합니다.';
             }
 
             if (targets.length == 0) {
@@ -2193,10 +2288,13 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
                 const role = escapeHtml(getRoleLabel(o) || (isGeneral ? '대의원' : ''));
                 const isChairperson = isGeneral && isGeneralAssemblyChairperson(o);
                 return `
-                    <label style="display:flex; align-items:center; gap:6px; border:1px solid #e5e7eb; padding:6px 10px; border-radius:999px; background:#f8fafc;">
-                        <input type="checkbox" name="signerIds" value="${id}" data-chairperson="${isChairperson ? 'true' : 'false'}" ${isChairperson ? 'checked disabled' : ''} ${isGeneral && !isChairperson ? 'disabled' : ''}>
-                        <span>${name} ${isChairperson ? '(의장·기본)' : (role ? `(${role})` : '')}</span>
-                    </label>
+                    <div class="structured-official-option">
+                        <label class="structured-official-check">
+                            <input type="checkbox" name="signerIds" value="${id}" data-chairperson="${isChairperson ? 'true' : 'false'}" ${isChairperson ? 'checked disabled' : ''} ${isGeneral && !isChairperson ? 'disabled' : ''}>
+                            <span>${name} ${isChairperson ? '(의장·기본)' : (role ? `(${role})` : '')}</span>
+                        </label>
+                        ${isGeneral ? '' : renderStructuredActualAttendeeField(o, 'signerIds')}
+                    </div>
                 `;
             }).join('');
             if (isGeneral) {
@@ -2214,6 +2312,10 @@ Change: 2026-08-21 - Resolve the assembly chairperson across separate executive 
             } else {
                 const attendeeWrap = document.getElementById('assembly-attendee-list');
                 if (attendeeWrap) attendeeWrap.innerHTML = '';
+                wrap.querySelectorAll('input[name="signerIds"]').forEach((input) => {
+                    input.addEventListener('change', () => syncStructuredActualAttendeeInput(input));
+                    syncStructuredActualAttendeeInput(input);
+                });
             }
             updateStructuredMinuteForm(docType);
         }

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.46
-Change: 2026-05-21 - Normalize uploaded attachment filenames for Korean downloads.
+Version: v1.0.47
+Change: 2026-08-21 - Include member type when loading officials for group attendee names.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -271,21 +271,22 @@ async function getOfficials() {
 
     const filtered = data.filter(o => !('status' in o) || o.status === 'active');
     const memberIds = filtered.map(o => o.member_id).filter(Boolean);
-    const nameMap = {};
+    const memberMap = {};
     if (memberIds.length > 0) {
         const { data: members } = await scopeByCoop(supabase
             .from('coop_members')
-            .select('member_id, name')
+            .select('member_id, name, member_type')
             .in('member_id', memberIds), coopId);
         if (Array.isArray(members)) {
-            members.forEach(m => { nameMap[m.member_id] = m.name; });
+            members.forEach(m => { memberMap[m.member_id] = m; });
         }
     }
     return filtered.map(o => ({
         ...o,
         role: o.role || o.position || o.category || '',
         position: o.position || o.role || o.category || '',
-        name: nameMap[o.member_id] || ''
+        name: memberMap[o.member_id]?.name || '',
+        member_type: memberMap[o.member_id]?.member_type || ''
     }));
 }
 
