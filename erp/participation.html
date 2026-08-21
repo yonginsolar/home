@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.17 | Change: 2026-08-21 - Reuse public activity photos and hand meetings off to the news editor. -->
+<!-- Version: v1.3.18 | Change: 2026-08-21 - Recommend only activity photos whose meeting type, round, and date match. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.17 | participation.html');</script>
+  <script>console.log('[Version] v1.3.18 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -600,11 +600,14 @@
         : 999;
       const eventRound = String(event?.title || '').match(/제\s*(\d+)\s*차/)?.[1] || '';
       const rowRound = String(row?.title || '').match(/제\s*(\d+)\s*차/)?.[1] || '';
+      const normalizedEventTitle = String(event?.title || '').replace(/\[[^\]]+\]/g, ' ').replace(/용인모두의햇빛협동조합/g, ' ').replace(/\s+/g, ' ').trim();
+      const normalizedRowTitle = String(row?.title || '').replace(/\[[^\]]+\]/g, ' ').replace(/용인모두의햇빛협동조합/g, ' ').replace(/\s+/g, ' ').trim();
       const typeMatch = event?.event_type === 'BOARD'
         ? /이사회/.test(String(row?.title || '')) && eventRound && eventRound === rowRound
         : event?.event_type === 'DELEGATE_ASSEMBLY'
-          ? /대의원.*총회/.test(String(row?.title || ''))
-          : true;
+          ? /대의원.*총회/.test(String(row?.title || '')) && (!eventRound || !rowRound || eventRound === rowRound)
+          : normalizedEventTitle.length >= 4 && normalizedRowTitle.length >= 4
+            && (normalizedRowTitle.includes(normalizedEventTitle) || normalizedEventTitle.includes(normalizedRowTitle));
       return (String(row?.source_participation_event_id || '') === String(event?.id || '') ? -1000 : 0)
         + (typeMatch ? -100 : 0)
         + dateGap;
@@ -661,7 +664,7 @@
         }).filter(function(row) {
           if (!row.gallery_urls.length) return false;
           if (query) return `${row.title || ''} ${row.event_date || ''}`.toLowerCase().includes(query);
-          return row.score <= 7 || String(row.source_participation_event_id || '') === String(formState.eventId);
+          return row.score <= -93 || String(row.source_participation_event_id || '') === String(formState.eventId);
         }).sort(function(a, b) {
           return a.score - b.score || String(b.event_date || '').localeCompare(String(a.event_date || ''));
         }).slice(0, query ? 20 : 8);
