@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.135
-Change: Link activity news to meeting and education records and reuse their photos without re-uploading.
+Version: v1.0.136
+Change: Reuse selected activity news as history milestones without duplicating text or photos.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.135';
+window.ADMIN_MEMBER_VERSION = 'v1.0.136';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -156,6 +156,15 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .external-news-thumb-admin { width: 74px; height: 48px; object-fit: cover; border-radius: 10px; border: 1px solid #e5e7eb; background: #f8fafc; }
 .external-news-sync-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .external-news-sync-summary .badge { font-size: 12px; }
+.site-history-table-wrap { width:100%; max-width:100%; overflow-x:auto; border:1px solid #dee2e6; background:#fff; }
+.site-history-table { min-width:900px; table-layout:fixed; margin-bottom:0; }
+.site-history-table th, .site-history-table td { min-width:0; }
+.site-history-date { white-space:nowrap; }
+.site-history-title { min-width:0; font-weight:700; overflow-wrap:anywhere; word-break:break-word; }
+.site-history-content-preview { display:-webkit-box; overflow:hidden; max-height:3.2em; line-height:1.6; white-space:pre-line; overflow-wrap:anywhere; word-break:break-word; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.site-history-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.site-history-linked-row { background:#f8fff9; }
+.activity-history-title-wrap { border-left:3px solid #198754; }
 .fund-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:1fr; gap:16px; width:100%; max-width:100%; }
 .fund-summary-card { display:flex; box-sizing:border-box; flex-direction:column; width:100%; min-width:0; height:100%; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
 .fund-summary-view { flex:1 1 auto; box-sizing:border-box; width:100%; min-width:0; min-height:154px; padding:18px; border:0; background:transparent; color:#0f172a; text-align:left; transition:background-color .18s ease; }
@@ -1624,10 +1633,13 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="d-flex justify-content-end mb-2">
 <button class="btn btn-sm btn-outline-primary" onclick="openSiteHistoryModal()">+ 연혁 추가</button>
 </div>
-<table class="table table-bordered bg-white">
+<div class="site-history-table-wrap rounded">
+<table class="table table-bordered bg-white site-history-table">
+<colgroup><col style="width:125px"><col style="width:280px"><col><col style="width:185px"></colgroup>
 <thead><tr><th>날짜</th><th>제목</th><th>내용</th><th>관리</th></tr></thead>
 <tbody id="historyListBody"></tbody>
 </table>
+</div>
 </div>
 
 <div class="tab-pane fade" id="sub-partners">
@@ -2419,7 +2431,11 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <input type="hidden" id="hist-id">
 <div class="mb-3"><label class="form-label small">날짜</label><input type="date" id="hist-date" class="form-control"></div>
 <div class="mb-3"><label class="form-label small">제목</label><input type="text" id="hist-title" class="form-control"></div>
-<div class="mb-3"><label class="form-label small">내용 (선택)</label><textarea id="hist-content" class="form-control" rows="3"></textarea></div>
+<div class="mb-3">
+<label class="form-label small">내용 (선택)</label>
+<textarea id="hist-content" class="form-control" rows="3" oninput="updateSiteHistoryContentCounter()"></textarea>
+<div class="form-text d-flex justify-content-between gap-2"><span>연혁은 핵심 1~2줄을 권장하며, 긴 내용은 자동으로 안전하게 줄바꿈됩니다.</span><span class="text-nowrap" id="hist-content-count">0자</span></div>
+</div>
 </div>
 <div class="modal-footer"><button class="btn btn-primary" onclick="saveSiteHistory()">저장</button></div>
 </div>
@@ -2568,6 +2584,19 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="col-md-4">
 <label class="form-label small fw-bold text-muted">활동일</label>
 <input type="date" id="activity-date" class="form-control">
+</div>
+</div>
+
+<div class="border rounded-3 bg-light p-3 mb-3 activity-history-title-wrap">
+<div class="form-check">
+<input class="form-check-input" type="checkbox" id="activity-history-milestone" onchange="syncActivityHistoryMilestoneUi()">
+<label class="form-check-label fw-bold text-success" for="activity-history-milestone">주요 연혁으로도 표시</label>
+<div class="small text-muted mt-1">별도 연혁이나 사진을 복사하지 않고 이 우리 소식을 전체 연혁에서 함께 사용합니다. 최근 우리 소식 3건에 보이는 동안에는 연혁 첫 목록에서 중복 노출하지 않습니다.</div>
+</div>
+<div class="mt-3 hidden" id="activity-history-title-area">
+<label class="form-label small fw-bold text-muted" for="activity-history-title">연혁용 짧은 제목 (선택)</label>
+<input type="text" id="activity-history-title" class="form-control" maxlength="120" placeholder="비워두면 우리 소식 제목을 그대로 사용합니다.">
+<div class="form-text">예: 용인시민신문 업무협약 체결</div>
 </div>
 </div>
 
@@ -6277,22 +6306,42 @@ updatePowerGenerationPlantOptions();
 
 
 // --- 연혁 ---
-// 연혁 목록 불러오기 (삭제 버튼 추가됨)
+// 독립 연혁과 우리 소식에서 재사용하는 주요 연혁을 함께 불러온다.
 async function fetchHistory() {
-const { data } = await scopeAdminTenant(_supabase.from('site_documents').select('*')).eq('category','history').order('event_date', {ascending:false});
+const { data, error } = await scopeAdminTenant(_supabase.from('site_documents').select('*'))
+  .in('category', ['history', 'activity'])
+  .order('event_date', {ascending:false})
+  .order('updated_at', {ascending:false});
 const tbody = document.getElementById('historyListBody');
 tbody.innerHTML = '';
-if(!data) return;
-data.forEach(h => {
+if (error) {
+console.error('[fetchHistory] failed:', error);
+tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-danger">연혁을 불러오지 못했습니다.</td></tr>';
+return;
+}
+const historyRows = (Array.isArray(data) ? data : []).filter((row) => row.category === 'history' || row.is_history_milestone === true);
+if (historyRows.length === 0) {
+tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">등록된 연혁이 없습니다.</td></tr>';
+return;
+}
+historyRows.forEach(h => {
 const historyId = escapeJsString(String(h.id || ''));
-tbody.innerHTML += `<tr>
-                   <td>${escapeHtml(h.event_date || '')}</td>
-                   <td>${escapeHtml(h.title || '')}</td>
-                   <td>${escapeHtml(h.content || '')}</td>
-                   <td>
-                       <button class="btn btn-sm btn-light" onclick="openSiteHistoryModal('${historyId}')">수정</button>
-                       <button class="btn btn-sm btn-outline-danger ms-1" onclick="askDeleteHistory('${historyId}')">삭제</button>
-                   </td>
+const isLinkedActivity = h.category === 'activity' && h.is_history_milestone === true;
+const displayTitle = isLinkedActivity ? (h.history_title || h.title || '') : (h.title || '');
+const rawContent = isLinkedActivity
+? '우리 소식의 상세 내용과 사진을 재사용합니다.'
+: String(h.content || '');
+const contentTitle = escapeHtml(rawContent.replace(/\s+/g, ' ').trim());
+const linkedBadge = isLinkedActivity ? '<span class="badge bg-warning text-dark ms-2">우리 소식 연동</span>' : '';
+const actions = isLinkedActivity
+? `<button class="btn btn-sm btn-outline-success" onclick="openActivityModal('${historyId}')">우리 소식 수정</button>`
+: `<button class="btn btn-sm btn-light" onclick="openSiteHistoryModal('${historyId}')">수정</button>
+   <button class="btn btn-sm btn-outline-danger" onclick="askDeleteHistory('${historyId}')">삭제</button>`;
+tbody.innerHTML += `<tr class="${isLinkedActivity ? 'site-history-linked-row' : ''}">
+                   <td class="site-history-date">${escapeHtml(h.event_date || '')}</td>
+                   <td><div class="site-history-title">${escapeHtml(displayTitle)}${linkedBadge}</div></td>
+                   <td><div class="site-history-content-preview" title="${contentTitle}">${escapeHtml(rawContent)}</div></td>
+                   <td><div class="site-history-actions">${actions}</div></td>
                </tr>`;
 });
 }
@@ -6619,6 +6668,15 @@ function isHistoryRowMatched(saved, expected) {
     return savedDate === expectedDate && savedTitle === expectedTitle && savedContent === expectedContent;
 }
 
+function updateSiteHistoryContentCounter() {
+    const content = document.getElementById('hist-content')?.value || '';
+    const counter = document.getElementById('hist-content-count');
+    if (!counter) return;
+    counter.textContent = `${content.length}자`;
+    counter.classList.toggle('text-warning', content.length > 120);
+    counter.classList.toggle('fw-bold', content.length > 120);
+}
+
 // [수정] 사이트 연혁 모달 열기 (이름 변경: openSiteHistoryModal)
 async function openSiteHistoryModal(id) {
     currentHistoryEditId = id || null;
@@ -6649,6 +6707,8 @@ async function openSiteHistoryModal(id) {
         // 날짜는 오늘 날짜로 기본 세팅
         document.getElementById('hist-date').value = getAdminMemberKstDateString();
     }
+
+    updateSiteHistoryContentCounter();
 
     // HTML 모달 ID는 기존 그대로 'historyModal' 사용
     bootstrap.Modal.getOrCreateInstance(document.getElementById('historyModal')).show();
@@ -8858,12 +8918,15 @@ const coverHtml = coverUrl
 const visibleBadge = row.is_current
 ? '<span class="badge bg-success">공개중</span>'
 : '<span class="badge bg-secondary">숨김</span>';
+const historyBadge = row.is_history_milestone
+? '<span class="badge bg-warning text-dark ms-2">연혁</span>'
+: '';
 const summaryPreview = escapeHtml(toPlainSummaryPreview(parsedActivity.body, 88));
 
 tbody.innerHTML += `<tr>
 <td class="text-center">${escapeHtml(row.event_date || '-')}</td>
 <td class="text-center">${coverHtml}</td>
-<td class="text-start fw-bold">${escapeHtml(row.title || '-')}</td>
+<td class="text-start fw-bold">${escapeHtml(row.title || '-')}${historyBadge}</td>
 <td class="text-center">${visibleBadge}</td>
 <td class="text-start small">${summaryPreview}</td>
 <td class="text-center">
@@ -8883,6 +8946,8 @@ document.getElementById('activity-title').value = '';
 document.getElementById('activity-date').value = getAdminMemberKstDateString();
 document.getElementById('activity-content').value = '';
 document.getElementById('activity-visible').checked = true;
+document.getElementById('activity-history-milestone').checked = false;
+document.getElementById('activity-history-title').value = '';
 setActivitySourceEventId('');
 setActivityGalleryItemsFromUrls([]);
 let linkedSourceId = String(sourceEventId || '').trim();
@@ -8902,12 +8967,15 @@ document.getElementById('activity-title').value = data.title || '';
 document.getElementById('activity-date').value = data.event_date || getAdminMemberKstDateString();
 document.getElementById('activity-content').value = normalizeActivityContentForEditor(parsedActivity.body || '');
 document.getElementById('activity-visible').checked = data.is_current !== false;
+document.getElementById('activity-history-milestone').checked = data.is_history_milestone === true;
+document.getElementById('activity-history-title').value = data.history_title || '';
 document.getElementById('activity-cover-original').value = JSON.stringify(parsedActivity.galleryUrls);
 setActivityGalleryItemsFromUrls(parsedActivity.galleryUrls);
 linkedSourceId = String(data.source_participation_event_id || linkedSourceId || '').trim();
 }
 }
 
+syncActivityHistoryMilestoneUi();
 await loadActivityParticipationEvents(linkedSourceId);
 setActivitySourceEventId(linkedSourceId);
 if (!id && linkedSourceId) {
@@ -8922,6 +8990,14 @@ return;
 bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).show();
 }
 
+function syncActivityHistoryMilestoneUi() {
+const checked = document.getElementById('activity-history-milestone')?.checked === true;
+const area = document.getElementById('activity-history-title-area');
+const input = document.getElementById('activity-history-title');
+if (area) area.classList.toggle('hidden', !checked);
+if (input) input.disabled = !checked;
+}
+
 async function saveActivity() {
 if (isSavingActivity) return;
 
@@ -8932,6 +9008,9 @@ if (!title) return myAlert('제목을 입력하세요.', 'warning');
 if (!eventDate) return myAlert('활동일을 입력하세요.', 'warning');
 
 const id = document.getElementById('activity-id').value || null;
+const isHistoryMilestone = document.getElementById('activity-history-milestone')?.checked === true;
+const historyTitle = (document.getElementById('activity-history-title')?.value || '').trim();
+if (historyTitle.length > 120) return myAlert('연혁용 제목은 120자 이내로 입력하세요.', 'warning');
 const originalUrls = normalizeActivityGalleryUrls(safeParseArray(document.getElementById('activity-cover-original').value));
 let uploadedNewUrls = [];
 
@@ -8959,14 +9038,16 @@ const normalizedFinalGalleryUrls = normalizeActivityGalleryUrls(finalGalleryUrls
 const finalCoverUrl = normalizedFinalGalleryUrls[0] || '';
 const finalContent = buildActivityContentWithGallery(content, normalizedFinalGalleryUrls);
 
-const { error } = await _supabase.rpc('site_activity_upsert_secure', {
+const { error } = await _supabase.rpc('site_activity_upsert_secure_v2', {
 p_id: id,
 p_title: title,
 p_date: eventDate,
 p_content: finalContent,
 p_file_url: finalCoverUrl || null,
 p_is_current: document.getElementById('activity-visible').checked,
-p_source_participation_event_id: getActivitySourceEventId() || null
+p_source_participation_event_id: getActivitySourceEventId() || null,
+p_is_history_milestone: isHistoryMilestone,
+p_history_title: isHistoryMilestone ? (historyTitle || null) : null
 });
 
 if (error) throw error;
@@ -8979,7 +9060,7 @@ await deleteActivityPhotoIfUnreferenced(url);
 bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).hide();
 releaseActivityCoverPreviewObjectUrl();
 activityGalleryItems = [];
-await fetchActivities();
+await Promise.all([fetchActivities(), fetchHistory()]);
 myAlert('활동 내역이 저장되었습니다.');
 } catch (e) {
 console.error('[saveActivity] failed:', e);

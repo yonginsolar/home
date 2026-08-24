@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.79
-Change: Add a bounded scroll fallback for the plant progress entrance animation.
+Version: v1.0.80
+Change: Reuse selected activity news as history milestones without duplicating recent homepage content.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.79 | index.html');</script>
+<script>console.log('[Version] v1.0.80 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -68,7 +68,7 @@ Change: Add a bounded scroll fallback for the plant progress entrance animation.
 
   <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
 
-  <link href="style.css?v=20260824-1" rel="stylesheet">
+  <link href="style.css?v=20260824-2" rel="stylesheet">
   <style>
     .hero-cert-badge {
       display: inline-flex;
@@ -2827,13 +2827,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     AOS.refresh();
 
     // 2. 데이터 로드: 병렬 처리 (동시에 출발!)
+    const activityHistoryLoad = fetchActivities().then(fetchHistory);
     const publicSectionLoadResults = await Promise.allSettled([
         fetchStats(),
         fetchPowerGenerationStats(),
         fetchPlants(),
-        fetchActivities(),
+        activityHistoryLoad,
         fetchAllExternalNews(),
-        fetchHistory(),
         fetchPartners(),
         fetchNotices(),
         fetchFaqs(),
@@ -4960,18 +4960,27 @@ function openPlantDetail(id) {
       const container = document.getElementById('history-container');
       if(!container) return;
 
-      // 1. 데이터 가져오기
-      const { data: docs, error } = await _client.rpc('get_public_history');
+      // 기존 탭과의 배포 호환성을 위해 v2가 없을 때 기존 독립 연혁으로 안전하게 대체한다.
+      let { data: docs, error } = await _client.rpc('get_public_history_v2');
+      if (error) {
+        const fallback = await _client.rpc('get_public_history');
+        docs = fallback.data;
+        error = fallback.error;
+      }
 
       if (error || !docs || docs.length === 0) {
         container.innerHTML = '<div class="col-12 text-center text-muted py-3">등록된 연혁이 없습니다.</div>';
         return;
       }
 
-      // 2. 보여줄 개수 설정 (기본 3개)
+      // 최근 우리 소식 3건에 이미 보이는 주요 사건은 첫 연혁 3건에서는 제외한다.
+      // 전체 연혁을 펼치면 빠짐없이 원래 날짜 순서로 표시한다.
       const INITIAL_SHOW = 3;
-      const visibleDocs = docs.slice(0, INITIAL_SHOW); // 앞의 3개
-      const hiddenDocs = docs.slice(INITIAL_SHOW);     // 나머지 전부
+      const recentActivityIds = new Set(g_activity_list.map((item) => String(item?.id || '')).filter(Boolean));
+      const initialCandidates = docs.filter((doc) => !(doc.category === 'activity' && recentActivityIds.has(String(doc.id || ''))));
+      const visibleDocs = initialCandidates.slice(0, INITIAL_SHOW);
+      const visibleIds = new Set(visibleDocs.map((doc) => String(doc.id || '')));
+      const hiddenDocs = docs.filter((doc) => !visibleIds.has(String(doc.id || '')));
 
       let html = '';
 
@@ -5004,10 +5013,14 @@ function openPlantDetail(id) {
     // [보조 함수] 연혁 아이템 HTML 생성기 (코드 중복 방지)
 // [보조 함수] 연혁 아이템 HTML 생성기 (스마트 포맷팅 적용)
     function createHistoryItemHtml(doc) {
-        // ★ 여기서 텍스트를 HTML로 예쁘게 변환합니다.
-        const formattedContent = formatTextToHtml(doc.content);
+        const isLinkedActivity = doc.category === 'activity' && doc.is_history_milestone === true;
+        const formattedContent = isLinkedActivity ? '' : formatTextToHtml(doc.content);
         const safeDate = escapeHtml(String(doc.event_date || '').replaceAll('-','.'));
-        const safeTitle = escapeHtml(doc.title || '');
+        const safeTitle = escapeHtml((isLinkedActivity ? (doc.history_title || doc.title) : doc.title) || '');
+        const encodedActivityId = encodeURIComponent(String(doc.id || ''));
+        const linkedActivityButton = isLinkedActivity
+          ? `<button type="button" class="history-related-news-link" onclick="openActivityDetail(decodeURIComponent('${escapeHtml(encodedActivityId)}'), this)"><i class="bi bi-journal-richtext"></i><span>관련 우리 소식 보기</span></button>`
+          : '';
 
         return `
           <div class="col-lg-8 offset-lg-2" data-aos="fade-up">
@@ -5015,7 +5028,8 @@ function openPlantDetail(id) {
               <div class="timeline-date">${safeDate}</div>
               <div class="timeline-content">
                 <h4>${safeTitle}</h4>
-                ${formattedContent ? `<div class="text-muted">${formattedContent}</div>` : ''}
+                ${formattedContent ? `<div class="text-muted history-description">${formattedContent}</div>` : ''}
+                ${linkedActivityButton}
               </div>
             </div>
           </div>
