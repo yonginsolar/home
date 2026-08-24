@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.77
-Change: Keep dynamically rendered plant progress cards visible across browsers.
+Version: v1.0.78
+Change: Restore a failure-safe entrance animation for plant progress cards.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.77 | index.html');</script>
+<script>console.log('[Version] v1.0.78 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -68,7 +68,7 @@ Change: Keep dynamically rendered plant progress cards visible across browsers.
 
   <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
 
-  <link href="style.css" rel="stylesheet">
+  <link href="style.css?v=20260824-1" rel="stylesheet">
   <style>
     .hero-cert-badge {
       display: inline-flex;
@@ -4738,6 +4738,58 @@ function openPlantDetail(id) {
         });
     }
 
+    let g_progress_reveal_observer = null;
+
+    function clearProgressRevealObserver() {
+        if (!g_progress_reveal_observer) return;
+        g_progress_reveal_observer.disconnect();
+        g_progress_reveal_observer = null;
+    }
+
+    function playProgressReveal(section) {
+        const title = section?.querySelector('.section-title');
+        const cards = Array.from(section?.querySelectorAll('.progress-plant-card') || []);
+        const targets = [title, ...cards].filter(Boolean);
+
+        targets.forEach((target, index) => {
+            const delayMs = Math.min(index * 90, 270);
+            target.style.setProperty('--progress-reveal-delay', `${delayMs}ms`);
+            target.classList.add('progress-reveal-active');
+
+            let cleaned = false;
+            let cleanupTimer = null;
+            const cleanup = function cleanupProgressReveal() {
+                if (cleaned) return;
+                cleaned = true;
+                target.removeEventListener('animationend', cleanup);
+                if (cleanupTimer !== null) window.clearTimeout(cleanupTimer);
+                target.classList.remove('progress-reveal-active');
+                target.style.removeProperty('--progress-reveal-delay');
+            };
+            target.addEventListener('animationend', cleanup, { once: true });
+            cleanupTimer = window.setTimeout(cleanup, 1500);
+        });
+    }
+
+    function setupProgressReveal(section) {
+        clearProgressRevealObserver();
+        if (!section?.querySelector('.progress-plant-card')) return;
+
+        const reduceMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+        if (reduceMotion || !('IntersectionObserver' in window)) return;
+
+        g_progress_reveal_observer = new IntersectionObserver(function revealProgressWhenVisible(entries) {
+            const entry = entries[0];
+            if (!entry?.isIntersecting) return;
+            clearProgressRevealObserver();
+            playProgressReveal(section);
+        }, {
+            threshold: 0.12,
+            rootMargin: '0px 0px -8% 0px'
+        });
+        g_progress_reveal_observer.observe(section);
+    }
+
     // [수정] 건립 현황 (Progress) 그리기 함수
 // [수정] 건립 현황 그리기 (디자인 업그레이드 & 단계별 표시)
 // [수정] 건립 현황 그리기 (국장님 요청 디자인 + 단계별 활성화)
@@ -4750,6 +4802,7 @@ function openPlantDetail(id) {
         if (!section || !container) return;
 
         if (inProgressPlants.length === 0) {
+            clearProgressRevealObserver();
             section.style.display = 'none';
             return;
         }
@@ -4856,6 +4909,7 @@ function openPlantDetail(id) {
             <div class="progress-scroll-viewport" id="progress-scroll-viewport">
                 ${cardHtml}
             </div>`;
+        setupProgressReveal(section);
         if (window.location.hash === '#progress') {
             window.requestAnimationFrame(function revealLinkedProgressSection() {
                 section.scrollIntoView({ block: 'start' });
