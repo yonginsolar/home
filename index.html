@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.78
-Change: Restore a failure-safe entrance animation for plant progress cards.
+Version: v1.0.79
+Change: Add a bounded scroll fallback for the plant progress entrance animation.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.78 | index.html');</script>
+<script>console.log('[Version] v1.0.79 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -4739,11 +4739,18 @@ function openPlantDetail(id) {
     }
 
     let g_progress_reveal_observer = null;
+    let g_progress_reveal_fallback_cleanup = null;
 
     function clearProgressRevealObserver() {
-        if (!g_progress_reveal_observer) return;
-        g_progress_reveal_observer.disconnect();
-        g_progress_reveal_observer = null;
+        if (g_progress_reveal_observer) {
+            g_progress_reveal_observer.disconnect();
+            g_progress_reveal_observer = null;
+        }
+        if (g_progress_reveal_fallback_cleanup) {
+            const cleanup = g_progress_reveal_fallback_cleanup;
+            g_progress_reveal_fallback_cleanup = null;
+            cleanup();
+        }
     }
 
     function playProgressReveal(section) {
@@ -4776,18 +4783,44 @@ function openPlantDetail(id) {
         if (!section?.querySelector('.progress-plant-card')) return;
 
         const reduceMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-        if (reduceMotion || !('IntersectionObserver' in window)) return;
+        if (reduceMotion) return;
 
-        g_progress_reveal_observer = new IntersectionObserver(function revealProgressWhenVisible(entries) {
-            const entry = entries[0];
-            if (!entry?.isIntersecting) return;
+        if ('IntersectionObserver' in window) {
+            g_progress_reveal_observer = new IntersectionObserver(function revealProgressWhenVisible(entries) {
+                const entry = entries[0];
+                if (!entry?.isIntersecting) return;
+                clearProgressRevealObserver();
+                playProgressReveal(section);
+            }, {
+                threshold: 0.12,
+                rootMargin: '0px 0px -8% 0px'
+            });
+            g_progress_reveal_observer.observe(section);
+            return;
+        }
+
+        let frameId = null;
+        const checkVisibility = function checkProgressRevealVisibility() {
+            frameId = null;
+            const rect = section.getBoundingClientRect();
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+            if (rect.bottom < 0 || rect.top > viewportHeight * 0.92) return;
             clearProgressRevealObserver();
             playProgressReveal(section);
-        }, {
-            threshold: 0.12,
-            rootMargin: '0px 0px -8% 0px'
-        });
-        g_progress_reveal_observer.observe(section);
+        };
+        const queueVisibilityCheck = function queueProgressRevealVisibilityCheck() {
+            if (frameId !== null) return;
+            frameId = window.requestAnimationFrame(checkVisibility);
+        };
+        g_progress_reveal_fallback_cleanup = function cleanupProgressRevealFallback() {
+            window.removeEventListener('scroll', queueVisibilityCheck);
+            window.removeEventListener('resize', queueVisibilityCheck);
+            if (frameId !== null) window.cancelAnimationFrame(frameId);
+            frameId = null;
+        };
+        window.addEventListener('scroll', queueVisibilityCheck, { passive: true });
+        window.addEventListener('resize', queueVisibilityCheck);
+        queueVisibilityCheck();
     }
 
     // [수정] 건립 현황 (Progress) 그리기 함수
