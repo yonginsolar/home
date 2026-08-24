@@ -1,6 +1,6 @@
 /*
-Version: v1.0.9
-Change: Sanitize home patch note list rendering and delete actions.
+Version: v1.0.10
+Change: Make patch-note opening and saving safe against rapid repeated taps.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -194,6 +194,8 @@ if (typeof window !== 'undefined') {
 
 let patchNoteLastFocus = null;
 let patchNoteFocusGuardBound = false;
+let patchNoteOpenPromise = null;
+let patchNoteSavePromise = null;
 
 function ensurePatchNoteFocusGuard(modalEl) {
   if (!modalEl || patchNoteFocusGuardBound) return;
@@ -291,7 +293,7 @@ const patchNoteModalHTML = `
             <input type="text" id="pnTitle" class="form-control form-control-sm mb-2" placeholder="패치 제목 (예: 급여 연동 기능 추가)">
             <textarea id="pnContent" class="form-control form-control-sm mb-2" rows="4" placeholder="상세 내용 (HTML 태그 사용 가능)&#13;&#10;- 기능 A 추가&#13;&#10;- 버그 B 수정"></textarea>
             <div class="d-grid">
-                <button class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장 및 배포</button>
+                <button type="button" id="btnSavePatchNote" class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장 및 배포</button>
             </div>
         </div>
 
@@ -336,32 +338,41 @@ async function loadCurrentVersion() {
 }
 
 // 2. 패치노트 모달 열기
-async function openPatchModal() {
+function openPatchModal() {
     // 모달 요소 찾기
     const modalEl = document.getElementById('patchNoteModal');
     if (!modalEl) {
         console.error("패치노트 모달 HTML이 없습니다.");
-        return;
+        return Promise.resolve();
     }
-    const modal = new bootstrap.Modal(modalEl);
-    patchNoteLastFocus = document.activeElement;
-    ensurePatchNoteFocusGuard(modalEl);
-    
-    // 관리자 체크 (작성 버튼 표시 여부)
-    checkAdminPermission();
-    
-    // 작성 폼 초기화 (숨김 처리 및 오늘 날짜 세팅)
-    const formEl = document.getElementById("patchWriteForm");
-    if(formEl) formEl.classList.add("hidden");
-    
-    const dateEl = document.getElementById("pnDate");
-    if(dateEl) dateEl.value = formatPatchKstDate();
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    if (modalEl.classList.contains('show')) return Promise.resolve();
+    if (patchNoteOpenPromise) return patchNoteOpenPromise;
 
-    // 리스트 로딩
-    await loadPatchList();
-    
-    // 모달 띄우기
-    modal.show();
+    patchNoteOpenPromise = (async () => {
+        patchNoteLastFocus = document.activeElement;
+        ensurePatchNoteFocusGuard(modalEl);
+
+        // 관리자 체크 (작성 버튼 표시 여부)
+        checkAdminPermission();
+
+        // 작성 폼 초기화 (숨김 처리 및 오늘 날짜 세팅)
+        const formEl = document.getElementById("patchWriteForm");
+        if(formEl) formEl.classList.add("hidden");
+
+        const dateEl = document.getElementById("pnDate");
+        if(dateEl) dateEl.value = formatPatchKstDate();
+
+        // 리스트 로딩
+        await loadPatchList();
+
+        // 모달 띄우기
+        if (!modalEl.classList.contains('show')) modal.show();
+    })().finally(() => {
+        patchNoteOpenPromise = null;
+    });
+
+    return patchNoteOpenPromise;
 }
 
 // 3. 리스트 불러오기
@@ -425,39 +436,64 @@ async function loadPatchList() {
 }
 
 // 4. 새 패치노트 저장 (관리자용)
-async function savePatchNote() {
+function savePatchNote() {
+    if (patchNoteSavePromise) return patchNoteSavePromise;
+
     const version = document.getElementById("pnVersion").value;
     const date = document.getElementById("pnDate").value;
     const title = document.getElementById("pnTitle").value;
     const content = document.getElementById("pnContent").value;
     const isMajor = document.getElementById("pnMajor").checked;
 
-    if(!version || !title || !content) return showAlert("내용을 모두 입력해주세요.");
+    if(!version || !title || !content) {
+        showAlert("내용을 모두 입력해주세요.");
+        return Promise.resolve();
+    }
 
-    // 테이블명 변경: sys_home_patch_note
-    const { error } = await _client.from('sys_home_patch_note').insert({
-        version: version,
-        release_date: date,
-        title: title,
-        content: content,
-        is_major: isMajor
+    const saveButton = document.getElementById('btnSavePatchNote');
+    const originalLabel = saveButton?.textContent || '💾 저장 및 배포';
+
+    patchNoteSavePromise = (async () => {
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.setAttribute('aria-busy', 'true');
+            saveButton.textContent = '저장 중…';
+        }
+
+        // 테이블명 변경: sys_home_patch_note
+        const { error } = await _client.from('sys_home_patch_note').insert({
+            version: version,
+            release_date: date,
+            title: title,
+            content: content,
+            is_major: isMajor
+        });
+
+        if(error) {
+            showAlert("저장 실패: " + error.message);
+            console.error(error);
+        } else {
+            showAlert("업데이트 되었습니다!");
+            // 입력창 초기화
+            document.getElementById("pnVersion").value = "";
+            document.getElementById("pnTitle").value = "";
+            document.getElementById("pnContent").value = "";
+            document.getElementById("patchWriteForm").classList.add("hidden"); // 폼 닫기
+
+            // 리스트 새로고침
+            await loadPatchList();
+            loadCurrentVersion();
+        }
+    })().finally(() => {
+        if (saveButton) {
+            saveButton.disabled = false;
+            saveButton.removeAttribute('aria-busy');
+            saveButton.textContent = originalLabel;
+        }
+        patchNoteSavePromise = null;
     });
 
-    if(error) {
-        showAlert("저장 실패: " + error.message);
-        console.error(error);
-    } else {
-        showAlert("업데이트 되었습니다!");
-        // 입력창 초기화
-        document.getElementById("pnVersion").value = "";
-        document.getElementById("pnTitle").value = "";
-        document.getElementById("pnContent").value = "";
-        document.getElementById("patchWriteForm").classList.add("hidden"); // 폼 닫기
-        
-        // 리스트 새로고침
-        await loadPatchList();
-        loadCurrentVersion(); 
-    }
+    return patchNoteSavePromise;
 }
 
 // 5. 패치노트 삭제 (관리자용)

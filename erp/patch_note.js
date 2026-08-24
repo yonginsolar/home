@@ -1,5 +1,5 @@
-/* Version: v1.0.5
-Change: 2026-03-29 - Sanitize ERP patch note list rendering and delete actions.
+/* Version: v1.0.6
+Change: 2026-08-24 - Make patch-note opening and saving safe against rapid repeated taps.
 */
 /**
  * [File: patch_note.js]
@@ -40,7 +40,7 @@ const patchNoteModalHTML = `
             <input type="text" id="pnTitle" class="form-control form-control-sm mb-2" placeholder="패치 제목 (예: 급여 연동 기능 추가)">
             <textarea id="pnContent" class="form-control form-control-sm mb-2" rows="4" placeholder="상세 내용 (HTML 태그 사용 가능)&#13;&#10;- 기능 A 추가&#13;&#10;- 버그 B 수정"></textarea>
             <div class="d-grid">
-                <button class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장 및 배포</button>
+                <button type="button" id="btnSavePatchNote" class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장 및 배포</button>
             </div>
         </div>
 
@@ -100,6 +100,8 @@ let patchConfirmCallback = null;
 
 let patchNoteLastFocus = null;
 let patchNoteFocusBound = false;
+let patchNoteOpenPromise = null;
+let patchNoteSavePromise = null;
 
 function escapePatchHtml(value = '') {
     return String(value ?? '')
@@ -238,22 +240,32 @@ async function loadCurrentVersion() {
 }
 
 // 2. 패치노트 모달 열기
-async function openPatchModal() {
+function openPatchModal() {
     const modalEl = document.getElementById('patchNoteModal');
-    const modal = new bootstrap.Modal(modalEl);
-    patchNoteLastFocus = document.activeElement;
-    ensurePatchNoteFocusGuard(modalEl);
-    
-    // 관리자 체크 (localStorage 확인)
-    checkAdminPermission();
-    
-    // 작성 폼 초기화
-    document.getElementById("patchWriteForm").classList.add("hidden");
-    document.getElementById("pnDate").value = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); // 오늘 날짜 (KST)
+    if (!modalEl) return Promise.resolve();
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    if (modalEl.classList.contains('show')) return Promise.resolve();
+    if (patchNoteOpenPromise) return patchNoteOpenPromise;
 
-    // 리스트 로딩
-    await loadPatchList();
-    modal.show();
+    patchNoteOpenPromise = (async () => {
+        patchNoteLastFocus = document.activeElement;
+        ensurePatchNoteFocusGuard(modalEl);
+
+        // 관리자 체크 (localStorage 확인)
+        checkAdminPermission();
+
+        // 작성 폼 초기화
+        document.getElementById("patchWriteForm").classList.add("hidden");
+        document.getElementById("pnDate").value = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); // 오늘 날짜 (KST)
+
+        // 리스트 로딩
+        await loadPatchList();
+        if (!modalEl.classList.contains('show')) modal.show();
+    })().finally(() => {
+        patchNoteOpenPromise = null;
+    });
+
+    return patchNoteOpenPromise;
 }
 
 // 3. 리스트 불러오기 (재사용 가능하도록 분리)
@@ -307,7 +319,9 @@ async function loadPatchList() {
 }
 
 // 4. 새 패치노트 저장 (관리자용)
-async function savePatchNote() {
+function savePatchNote() {
+    if (patchNoteSavePromise) return patchNoteSavePromise;
+
     const version = document.getElementById("pnVersion").value;
     const date = document.getElementById("pnDate").value;
     const title = document.getElementById("pnTitle").value;
@@ -316,29 +330,49 @@ async function savePatchNote() {
 
     if(!version || !title || !content) {
         patchShowAlert("내용을 모두 입력해주세요.");
-        return;
+        return Promise.resolve();
     }
 
-    const { error } = await _supabase.from('sys_patch_notes').insert({
-        version: version,
-        release_date: date,
-        title: title,
-        content: content,
-        is_major: isMajor
+    const saveButton = document.getElementById('btnSavePatchNote');
+    const originalLabel = saveButton?.textContent || '💾 저장 및 배포';
+
+    patchNoteSavePromise = (async () => {
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.setAttribute('aria-busy', 'true');
+            saveButton.textContent = '저장 중…';
+        }
+
+        const { error } = await _supabase.from('sys_patch_notes').insert({
+            version: version,
+            release_date: date,
+            title: title,
+            content: content,
+            is_major: isMajor
+        });
+
+        if(error) {
+            patchShowAlert("저장 실패: " + error.message);
+        } else {
+            patchShowAlert("업데이트 되었습니다!");
+            // 폼 초기화 및 리스트 갱신
+            document.getElementById("pnVersion").value = "";
+            document.getElementById("pnTitle").value = "";
+            document.getElementById("pnContent").value = "";
+            document.getElementById("patchWriteForm").classList.add("hidden");
+            await loadPatchList();
+            loadCurrentVersion(); // 메인화면 버전 텍스트도 갱신
+        }
+    })().finally(() => {
+        if (saveButton) {
+            saveButton.disabled = false;
+            saveButton.removeAttribute('aria-busy');
+            saveButton.textContent = originalLabel;
+        }
+        patchNoteSavePromise = null;
     });
 
-    if(error) {
-        patchShowAlert("저장 실패: " + error.message);
-    } else {
-        patchShowAlert("업데이트 되었습니다!");
-        // 폼 초기화 및 리스트 갱신
-        document.getElementById("pnVersion").value = "";
-        document.getElementById("pnTitle").value = "";
-        document.getElementById("pnContent").value = "";
-        document.getElementById("patchWriteForm").classList.add("hidden");
-        await loadPatchList();
-        loadCurrentVersion(); // 메인화면 버전 텍스트도 갱신
-    }
+    return patchNoteSavePromise;
 }
 
 // 5. 패치노트 삭제 (관리자용)
