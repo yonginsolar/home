@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.138
-Change: Explain that linked activity milestones continue after the latest three items via history expansion.
+Version: v1.0.139
+Change: Replace arbitrary power-plant progress percentages with the canonical six-stage workflow.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.138';
+window.ADMIN_MEMBER_VERSION = 'v1.0.139';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -2156,17 +2156,16 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div id="plant-progress-area" style="display:none;">
 <h6 class="text-primary fw-bold mb-3">🚧 진행 상황</h6>
 <div class="p-3 bg-light rounded mb-3">
-<label class="d-flex justify-content-between small fw-bold">
-<span>진행률</span> <span class="text-primary" id="plant-progress-label">0%</span>
-</label>
-<input type="range" id="plant-progress" class="form-range" min="0" max="100" step="1" oninput="updateProgressLabel(this.value)">
-<div class="d-flex justify-content-between text-muted mt-1" style="font-size:0.7em;">
-<span onclick="setProg(0)" style="cursor:pointer">설립</span>
-<span onclick="setProg(25)" style="cursor:pointer">부지</span>
-<span onclick="setProg(50)" style="cursor:pointer">인허가</span>
-<span onclick="setProg(75)" style="cursor:pointer">착공</span>
-<span onclick="setProg(100)" style="cursor:pointer">완공</span>
-</div>
+<label for="plant-progress" class="form-label small fw-bold">현재 단계</label>
+<select id="plant-progress" class="form-select" onchange="updateProgressLabel(this.value)">
+<option value="0">후보지 선정</option>
+<option value="20">부지 확보</option>
+<option value="40">인허가</option>
+<option value="60">착공·시공</option>
+<option value="80">사용전검사·계통연계</option>
+<option value="100">완공·상업운전</option>
+</select>
+<div class="form-text mt-2" id="plant-progress-label">현재: 후보지 선정 · 다음: 부지 확보</div>
 </div>
 </div>
 
@@ -7260,23 +7259,32 @@ new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
 // [수정] 통합 삭제 실행 함수 (중복 선언 해결 & 뱃지 삭제 추가)
 // [수정] 통합 삭제 실행 함수 (중복 선언 해결 & 뱃지 삭제 추가)
 
-// [신규] 슬라이더 움직일 때 단계 이름 표시
-function updateProgressLabel(val) {
-const v = Number(val);
-let step = '';
-if (v < 20) step = '조합설립 단계';
-else if (v < 40) step = '부지선정 단계';
-else if (v < 60) step = '인허가 단계';
-else if (v < 80) step = '착공/공사 단계';
-else step = '완공/운영 단계';
+const ADMIN_PLANT_PROGRESS_STAGES = Object.freeze([
+Object.freeze({ value: 0, title: '후보지 선정' }),
+Object.freeze({ value: 20, title: '부지 확보' }),
+Object.freeze({ value: 40, title: '인허가' }),
+Object.freeze({ value: 60, title: '착공·시공' }),
+Object.freeze({ value: 80, title: '사용전검사·계통연계' }),
+Object.freeze({ value: 100, title: '완공·상업운전' })
+]);
 
-document.getElementById('plant-progress-label').innerText = `${v}% (${step})`;
+function normalizeAdminPlantProgress(val) {
+const numericValue = Number(val);
+const safeValue = Math.max(0, Math.min(100, Number.isFinite(numericValue) ? numericValue : 0));
+const stageValue = safeValue === 30 ? 0 : safeValue;
+let normalizedValue = 0;
+ADMIN_PLANT_PROGRESS_STAGES.forEach(stage => {
+if (stageValue >= stage.value) normalizedValue = stage.value;
+});
+return normalizedValue;
 }
 
-// [신규] 글씨 클릭하면 슬라이더 이동
-function setProg(val) {
-document.getElementById('plant-progress').value = val;
-updateProgressLabel(val);
+function updateProgressLabel(val) {
+const normalizedValue = normalizeAdminPlantProgress(val);
+const stageIndex = ADMIN_PLANT_PROGRESS_STAGES.findIndex(stage => stage.value === normalizedValue);
+const currentStage = ADMIN_PLANT_PROGRESS_STAGES[stageIndex];
+const nextStage = ADMIN_PLANT_PROGRESS_STAGES[stageIndex + 1];
+document.getElementById('plant-progress-label').innerText = `현재: ${currentStage.title} · 다음: ${nextStage ? nextStage.title : '운영 발전소로 전환'}`;
 }
 
 
@@ -7337,7 +7345,7 @@ const { data } = await scopeAdminTenant(_supabase.from('site_power_plants').sele
 	setPlantInputValue('plant-participation-share', data.participation_share_percent);
 	setPlantInputValue('plant-public-note', data.public_note);
 
-	const rate = data.progress_rate || 0;
+	const rate = normalizeAdminPlantProgress(data.progress_rate);
 	document.getElementById('plant-progress').value = rate;
 updateProgressLabel(rate);
 

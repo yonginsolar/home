@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.82
-Change: Show the latest three history items first, then expand the same descending date sequence.
+Version: v1.0.83
+Change: Show only the current and next power-plant construction stages using the six-stage workflow.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.82 | index.html');</script>
+<script>console.log('[Version] v1.0.83 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -68,7 +68,7 @@ Change: Show the latest three history items first, then expand the same descendi
 
   <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
 
-  <link href="style.css?v=20260824-2" rel="stylesheet">
+  <link href="style.css?v=20260824-3" rel="stylesheet">
   <style>
     .hero-cert-badge {
       display: inline-flex;
@@ -4823,9 +4823,37 @@ function openPlantDetail(id) {
         queueVisibilityCheck();
     }
 
-    // [수정] 건립 현황 (Progress) 그리기 함수
-// [수정] 건립 현황 그리기 (디자인 업그레이드 & 단계별 표시)
-// [수정] 건립 현황 그리기 (국장님 요청 디자인 + 단계별 활성화)
+    const PUBLIC_PLANT_PROGRESS_STAGES = Object.freeze([
+        Object.freeze({ value: 0, title: '후보지 선정' }),
+        Object.freeze({ value: 20, title: '부지 확보' }),
+        Object.freeze({ value: 40, title: '인허가' }),
+        Object.freeze({ value: 60, title: '착공·시공' }),
+        Object.freeze({ value: 80, title: '사용전검사·계통연계' }),
+        Object.freeze({ value: 100, title: '완공·상업운전' })
+    ]);
+
+    function getPublicPlantProgressStage(progressRate) {
+        const numericRate = Number(progressRate);
+        const safeRate = Math.max(0, Math.min(100, Number.isFinite(numericRate) ? numericRate : 0));
+        const stageRate = safeRate === 30 ? 0 : safeRate;
+        let stageIndex = 0;
+
+        PUBLIC_PLANT_PROGRESS_STAGES.forEach((stage, index) => {
+            if (stageRate >= stage.value) stageIndex = index;
+        });
+
+        const current = PUBLIC_PLANT_PROGRESS_STAGES[stageIndex];
+        const next = PUBLIC_PLANT_PROGRESS_STAGES[stageIndex + 1];
+        return {
+            currentTitle: current.title,
+            nextTitle: next ? next.title : '운영 발전소로 전환',
+            position: stageIndex + 1,
+            total: PUBLIC_PLANT_PROGRESS_STAGES.length,
+            barWidth: ((stageIndex + 1) / PUBLIC_PLANT_PROGRESS_STAGES.length) * 100
+        };
+    }
+
+    // [수정] 건립 현황 그리기: 현재 상황과 다음 단계만 간결하게 표시
     function renderProgressSection(allPlants) {
         const sourcePlants = Array.isArray(allPlants) ? allPlants : [];
         const inProgressPlants = sourcePlants.filter(p => p.status !== '운영중');
@@ -4844,8 +4872,7 @@ function openPlantDetail(id) {
 
         let cardHtml = '';
         inProgressPlants.forEach(p => {
-            const rateValue = Number(p.progress_rate || 0);
-            const rate = Math.max(0, Math.min(100, Number.isFinite(rateValue) ? rateValue : 0));
+            const stage = getPublicPlantProgressStage(p.progress_rate);
             const img = safeUrl(p.image_url) || 'https://via.placeholder.com/800x400?text=No+Image';
             const safeName = escapeHtml(p.name || '');
 	            const safeStatus = escapeHtml(p.status || '');
@@ -4858,21 +4885,6 @@ function openPlantDetail(id) {
                     const participationSummary = escapeHtml(getPublicParticipationSummary(p));
                     const safeOwnerName = escapeHtml(p.project_owner_name || '');
                     const safePublicNote = escapeHtml(p.public_note || '');
-
-            // 단계 계산
-            const s1 = rate >= 0 ? 'active' : '';   const c1 = (rate >= 0 && rate < 20) ? 'current' : '';
-            const s2 = rate >= 20 ? 'active' : '';  const c2 = (rate >= 20 && rate < 40) ? 'current' : '';
-            const s3 = rate >= 40 ? 'active' : '';  const c3 = (rate >= 40 && rate < 60) ? 'current' : '';
-            const s4 = rate >= 60 ? 'active' : '';  const c4 = (rate >= 60 && rate < 80) ? 'current' : '';
-            const s5 = rate >= 80 ? 'active' : '';  const c5 = (rate >= 80) ? 'current' : '';
-
-            // 상태 텍스트
-            let statusText = "건립 추진 중";
-            if(c1) statusText = "조합 설립 및 초기 준비";
-            else if(c2) statusText = "발전소 부지 선정 중";
-            else if(c3) statusText = "인허가 절차 진행 중";
-            else if(c4) statusText = "발전소 착공 및 공사 중";
-            else if(c5) statusText = "완공 및 설비 점검 중";
 
             cardHtml += `
             <article class="progress-plant-card">
@@ -4900,25 +4912,28 @@ function openPlantDetail(id) {
 	                              <li><i class="bi bi-calendar-check me-1"></i> 준공(예정): ${safeCompletion}</li>
 	                          </ul>
 
-	                          <p class="mb-2 fw-bold text-dark" style="font-size:1.1rem;">${statusText}</p>
-                                  ${projectType === 'participation' && safePublicNote ? `<p class="small text-muted mb-2">${safePublicNote}</p>` : ''}
+                                  ${projectType === 'participation' && safePublicNote ? `<p class="small text-muted mb-3">${safePublicNote}</p>` : ''}
+
+                                  <div class="progress-stage-summary" aria-label="발전소 건립 단계">
+                                      <div class="progress-stage-card is-current">
+                                          <span class="progress-stage-label">현재 상황</span>
+                                          <strong class="progress-stage-title">${stage.currentTitle}</strong>
+                                      </div>
+                                      <i class="bi bi-chevron-right progress-stage-arrow" aria-hidden="true"></i>
+                                      <div class="progress-stage-card is-next">
+                                          <span class="progress-stage-label">다음 단계</span>
+                                          <strong class="progress-stage-title">${stage.nextTitle}</strong>
+                                      </div>
+                                  </div>
 
                           <div class="progress progress-plant-bar">
                             <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar"
-                                 style="width: ${rate}%;"
-                                 aria-valuenow="${rate}" aria-valuemin="0" aria-valuemax="100">
-                                 진행률 ${rate}%
+                                 style="width: ${stage.barWidth}%;"
+                                 aria-valuenow="${stage.position}" aria-valuemin="1" aria-valuemax="${stage.total}">
+                                 ${stage.position} / ${stage.total}단계
                             </div>
                           </div>
                       </div>
-                  </div>
-
-                  <div class="d-flex justify-content-between step-container mt-4">
-                    <div class="step-item ${s1} ${c1}">조합설립</div>
-                    <div class="step-item ${s2} ${c2}">부지선정</div>
-                    <div class="step-item ${s3} ${c3}">인허가</div>
-                    <div class="step-item ${s4} ${c4}">착공</div>
-                    <div class="step-item ${s5} ${c5}">완공</div>
                   </div>
                 </div>
             </article>`;
