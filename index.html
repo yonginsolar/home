@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.81
-Change: Show the complete history in one descending date sequence without a separate hidden group.
+Version: v1.0.82
+Change: Show the latest three history items first, then expand the same descending date sequence.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.81 | index.html');</script>
+<script>console.log('[Version] v1.0.82 | index.html');</script>
 <script>
   console.log('%c☀️ 용인모두의햇빛협동조합 ☀️', 'background:#0f172a;color:#fbbf24;font-size:18px;font-weight:800;padding:6px 10px;border-radius:10px;letter-spacing:0.5px;');
   console.log('%c제미나이가 큰 줄기를 잡고', 'color:#0f172a;font-size:13px;font-weight:600;');
@@ -4974,7 +4974,7 @@ function openPlantDetail(id) {
       }
 
       // 공개 RPC의 정렬에만 의존하지 않고 화면에서도 날짜 내림차순을 보장한다.
-      // 연혁은 일부를 숨기지 않고 처음부터 전체를 한 흐름으로 표시한다.
+      // 최신 3건과 나머지를 같은 정렬 결과에서 잘라 더 보기 뒤에도 날짜순이 이어지게 한다.
       const orderedDocs = [...docs].sort((a, b) => {
         const dateOrder = String(b.event_date || '').localeCompare(String(a.event_date || ''));
         if (dateOrder !== 0) return dateOrder;
@@ -4983,7 +4983,21 @@ function openPlantDetail(id) {
         return String(a.id || '').localeCompare(String(b.id || ''));
       });
 
-      container.innerHTML = orderedDocs.map(createHistoryItemHtml).join('');
+      const initialDocs = orderedDocs.slice(0, 3);
+      const hiddenDocs = orderedDocs.slice(3);
+      let historyHtml = initialDocs.map(createHistoryItemHtml).join('');
+
+      if (hiddenDocs.length > 0) {
+        historyHtml += `<div id="history-hidden-area" style="display:none;">${hiddenDocs.map(createHistoryItemHtml).join('')}</div>`;
+        historyHtml += `
+          <div class="col-12 text-center mt-4" id="history-more-wrap">
+            <button type="button" id="history-more-btn" class="btn btn-outline-success px-4" aria-expanded="false" aria-controls="history-hidden-area" onclick="toggleHistoryMore()">
+              연혁 더 보기 <i class="bi bi-chevron-down ms-1"></i>
+            </button>
+          </div>`;
+      }
+
+      container.innerHTML = historyHtml;
     }
 
     // [보조 함수] 연혁 아이템 HTML 생성기 (코드 중복 방지)
@@ -5050,6 +5064,21 @@ function openPlantDetail(id) {
 
         if (inList) html += '</ul>'; // 마지막에 리스트가 열려있으면 닫음
         return html;
+    }
+
+    function toggleHistoryMore() {
+        const hiddenArea = document.getElementById('history-hidden-area');
+        const button = document.getElementById('history-more-btn');
+        const buttonWrap = document.getElementById('history-more-wrap');
+        if (!hiddenArea || !button) return;
+
+        hiddenArea.style.display = 'contents';
+        hiddenArea.classList.add('animate__animated', 'animate__fadeIn');
+        button.setAttribute('aria-expanded', 'true');
+        if (buttonWrap) buttonWrap.style.display = 'none';
+        if (window.AOS && typeof window.AOS.refresh === 'function') {
+            window.AOS.refresh();
+        }
     }
 
 // [보조 함수] 숫자 애니메이션 및 쉼표 찍기
