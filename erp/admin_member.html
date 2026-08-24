@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.139
-Change: Replace arbitrary power-plant progress percentages with the canonical six-stage workflow.
+Version: v1.0.140
+Change: Review automatically linked normal group members before their first public partner listing.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.139';
+window.ADMIN_MEMBER_VERSION = 'v1.0.140';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1658,6 +1658,10 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <div class="tab-content">
 <div class="tab-pane fade show active" id="partner-manage-pane" role="tabpanel" aria-labelledby="partner-manage-tab">
+<div class="alert alert-primary border-primary-subtle small mb-3">
+<div class="fw-bold mb-1">단체 정조합원 자동 연동</div>
+<div>단체가 정조합원으로 승인되면 홈페이지 노출 후보로 자동 등록됩니다. 최초 공개는 이 화면에서 관리자가 승인해야 하며, 정조합원 상태가 아니면 홈페이지에서 자동으로 제외됩니다.</div>
+</div>
 <div class="card border-warning mb-4 shadow-sm">
 <div class="card-header bg-warning bg-opacity-10 fw-bold text-warning-emphasis">
 ⏳ 승인 대기 중인 신청
@@ -2657,6 +2661,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 <div class="modal-body">
 <input type="hidden" id="pt-id">
+<input type="hidden" id="pt-member-eligible">
 
 <div class="row g-3">
 <div class="col-md-7">
@@ -2670,6 +2675,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <input type="text" id="pt-member-id" class="form-control" placeholder="선택">
 </div>
 </div>
+<div id="pt-member-link-status" class="small mb-2"></div>
 
 <div class="mb-2">
 <label class="form-label small fw-bold">한 줄 소개</label>
@@ -9485,17 +9491,21 @@ async function fetchPartners() {
             const preview = resolvePartnerPendingPreview(p);
             const partnerIdArg = escapeJsString(String(p.id || ''));
             const badgeClass = preview.badgeLabel === '수정 요청' ? 'bg-danger-subtle text-danger' : 'bg-warning-subtle text-warning-emphasis';
+            const autoLinkedBadge = p.auto_linked === true
+                ? '<span class="badge rounded-pill bg-primary-subtle text-primary">정조합원 자동 연동</span>'
+                : '';
             pendingBody.innerHTML += `
                 <tr class="bg-warning bg-opacity-10">
                     <td class="align-middle fw-bold ps-3">
                         <div class="d-flex align-items-center gap-2">
                             <span>${escapeHtml(preview.name || '')}</span>
                             <span class="badge rounded-pill ${badgeClass}">${escapeHtml(preview.badgeLabel || '')}</span>
+                            ${autoLinkedBadge}
                         </div>
                     </td>
                     <td class="align-middle small text-muted">${escapeHtml(preview.description || '')}</td>
                     <td class="align-middle text-end pe-3">
-                        <button class="btn btn-sm btn-primary" onclick="openPartnerModal('${partnerIdArg}')">${preview.badgeLabel === '수정 요청' ? '검토' : '승인'}</button>
+                        <button class="btn btn-sm btn-primary" onclick="openPartnerModal('${partnerIdArg}')">${preview.badgeLabel === '수정 요청' ? '검토' : '검토·승인'}</button>
                     </td>
                 </tr>`;
         });
@@ -9523,13 +9533,18 @@ async function fetchPartners() {
             const pendingDesc = hasPending
                 ? `<div class="small text-danger-emphasis mt-1">승인 대기 중인 수정 요청이 있습니다.</div>`
                 : '';
+            const memberLinkBadge = p.member_id
+                ? (p.member_eligible === false
+                    ? '<span class="badge rounded-pill bg-danger-subtle text-danger ms-2">정조합원 자격 확인 필요 · 홈페이지 제외</span>'
+                    : '<span class="badge rounded-pill bg-primary-subtle text-primary ms-2">단체 조합원 연동</span>')
+                : '';
 
             activeBody.innerHTML += `
                 <tr>
                     <td class="text-center">${escapeHtml(p.display_order ?? '')}</td>
                     <td class="text-center">${logo}</td>
                     <td>
-                        <div class="fw-bold">${escapeHtml(p.name || '')}${pendingBadge}</div>
+                        <div class="fw-bold">${escapeHtml(p.name || '')}${pendingBadge}${memberLinkBadge}</div>
                         <div class="small text-muted text-truncate" style="max-width:200px;">${escapeHtml(p.description || '-')}</div>
                         ${pendingDesc}
                     </td>
@@ -9574,6 +9589,22 @@ async function openPartnerModal(id) {
             document.getElementById('pt-link').value = displayData.link_url || '';
             document.getElementById('pt-status').value = displayData.status || 'active';
             document.getElementById('pt-order').value = displayData.display_order || 99;
+            document.getElementById('pt-member-eligible').value = data.member_id ? String(data.member_eligible !== false) : '';
+
+            const memberLinkStatus = document.getElementById('pt-member-link-status');
+            if (data.member_id && data.member_eligible === false) {
+                memberLinkStatus.className = 'small mb-2 text-danger fw-semibold';
+                memberLinkStatus.textContent = '현재 정상 상태의 단체 조합원이 아니므로 승인(노출)할 수 없습니다.';
+            } else if (data.auto_linked === true) {
+                memberLinkStatus.className = 'small mb-2 text-primary fw-semibold';
+                memberLinkStatus.textContent = '정조합원 승인으로 자동 연결된 후보입니다. 내용을 확인한 뒤 최초 공개를 승인하세요.';
+            } else if (data.member_id) {
+                memberLinkStatus.className = 'small mb-2 text-success fw-semibold';
+                memberLinkStatus.textContent = '정상 상태의 단체 조합원과 연결되어 있습니다.';
+            } else {
+                memberLinkStatus.className = 'small mb-2 text-muted';
+                memberLinkStatus.textContent = '조합원 번호가 없는 수동 등록 파트너입니다.';
+            }
 
             // 알림 메시지 (수정 요청인 경우 표시)
             const header = document.querySelector('#partnerModal .modal-header h5');
@@ -9600,6 +9631,10 @@ async function openPartnerModal(id) {
         document.getElementById('pt-link').value = '';
         document.getElementById('pt-status').value = 'active'; // 관리자가 직접 등록하니 active 기본
         document.getElementById('pt-order').value = 99;
+        document.getElementById('pt-member-eligible').value = '';
+        const memberLinkStatus = document.getElementById('pt-member-link-status');
+        memberLinkStatus.className = 'small mb-2 text-muted';
+        memberLinkStatus.textContent = '조합원 번호를 연결하면 정상 상태의 단체 조합원인지 서버에서 확인합니다.';
 
         document.querySelector('#partnerModal .modal-header h5').innerText = '🤝 협력 단체 등록';
         bindPartnerBadgeSyncInput();
@@ -9615,6 +9650,10 @@ async function openPartnerModal(id) {
 async function savePartner() {
 const name = document.getElementById('pt-name').value;
 if(!name) return myAlert('단체명을 입력하세요.', 'warning');
+const requestedStatus = document.getElementById('pt-status').value;
+if (requestedStatus === 'active' && document.getElementById('pt-member-eligible').value === 'false') {
+return myAlert('정상 상태의 단체 조합원만 홈페이지 공개를 승인할 수 있습니다.', 'warning');
+}
 
 // ★ [핵심] 빈 문자열 ID를 NULL로 변환 (BigInt/UUID 에러 방지)
 let idVal = document.getElementById('pt-id').value;
@@ -9649,14 +9688,14 @@ p_logo_url: finalImgUrl,
 p_display_order: Number(document.getElementById('pt-order').value),
 p_description: document.getElementById('pt-desc').value,
 p_member_id: document.getElementById('pt-member-id').value,
-p_status: document.getElementById('pt-status').value,
+p_status: requestedStatus,
 p_badges: []
 };
 
 const { error } = await _supabase.rpc('upsert_partner_secure', updates);
 showLoading(false);
 
-if(error) myAlert('저장 실패: ' + error.message, 'error');
+if(error) myAlert('저장 실패: ' + (error.hint || error.message), 'error');
 else {
 bootstrap.Modal.getInstance(document.getElementById('partnerModal')).hide();
 fetchPartners();
