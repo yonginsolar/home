@@ -1,6 +1,6 @@
 /*
-Version: v1.0.10
-Change: 2026-03-16 - Use shared Supabase client instead of importing through ElectionService.
+Version: v1.0.11
+Change: Fetch turnout counts in parallel to reduce polling latency.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -125,21 +125,26 @@ export class AdminService {
     // RLS 때문에 일반 유저는 못 쓰는 쿼리
     async getTurnoutStats(electionId) {
         const coopId = await getRuntimeCoopId();
-        // 전체 유권자 수 (명부 기준)
-        const { count: totalVoters } = await scopeByTenant(supabase
-            .from('election_voters')
-            .select('*', { count: 'exact', head: true }), coopId)
-            .eq('election_id', electionId);
+        const [voterResult, voteResult] = await Promise.all([
+            scopeByTenant(supabase
+                .from('election_voters')
+                .select('*', { count: 'exact', head: true }), coopId)
+                .eq('election_id', electionId),
+            scopeByTenant(supabase
+                .from('vote_logs')
+                .select('*', { count: 'exact', head: true }), coopId)
+                .eq('election_id', electionId)
+        ]);
 
-        // 투표 참여자 수 (로그 기준)
-        const { count: currentVotes } = await scopeByTenant(supabase
-            .from('vote_logs')
-            .select('*', { count: 'exact', head: true }), coopId)
-            .eq('election_id', electionId);
+        if (voterResult.error) throw voterResult.error;
+        if (voteResult.error) throw voteResult.error;
+
+        const totalVoters = voterResult.count || 0;
+        const currentVotes = voteResult.count || 0;
 
         return {
-            total: totalVoters || 0,
-            current: currentVotes || 0,
+            total: totalVoters,
+            current: currentVotes,
             percent: totalVoters ? ((currentVotes / totalVoters) * 100).toFixed(1) : 0
         };
     }
