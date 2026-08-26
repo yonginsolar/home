@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.19 | Change: 2026-08-21 - Preserve actual attendee names for group delegates and directors. -->
+<!-- Version: v1.3.20 | Change: 2026-08-26 - Add privacy-safe manual education attendees and verified member linking. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.19 | participation.html');</script>
+  <script>console.log('[Version] v1.3.20 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -308,9 +308,26 @@
                 <button type="button" class="btn btn-outline-primary" id="memberSearchTargetBtn">참석자로 추가</button>
                 <button type="button" class="btn btn-outline-secondary" id="memberSearchObserverBtn">배석자로 추가</button>
               </div>
-              <div class="form-text mb-2 d-none" id="educationMemberHelp">ERP에서는 정상 조합원만 교육 참가자로 직접 추가할 수 있습니다.</div>
+              <div class="form-text mb-2 d-none" id="educationMemberHelp">정상 조합원은 검색해서 추가하고, 아직 조합원이 아닌 참석자는 아래 수기 명부에 따로 기록합니다.</div>
               <div class="form-text mb-2" id="observerHelp">배석자는 참석 명단에는 기록하지만 회의 대상 인원·정족수에서는 제외합니다.</div>
               <div class="list-group mb-3" id="memberSearchResults"></div>
+            </div>
+            <div class="border rounded-3 p-3 mb-3 d-none" id="manualEducationAttendeeSection">
+              <div class="fw-bold mb-1">비조합원 참석자 수기 추가</div>
+              <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                  <label class="form-label small mb-1" for="manualAttendeeName">이름</label>
+                  <input type="text" class="form-control" id="manualAttendeeName" maxlength="100" autocomplete="off" placeholder="참석자 이름">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label small mb-1" for="manualAttendeeNote">비고 <span class="text-muted">(선택)</span></label>
+                  <input type="text" class="form-control" id="manualAttendeeNote" maxlength="300" autocomplete="off" placeholder="소속·구분 등 꼭 필요한 내용만 입력">
+                </div>
+                <div class="col-md-2 d-grid">
+                  <button type="button" class="btn btn-outline-success" id="addManualAttendeeBtn">수기 추가</button>
+                </div>
+              </div>
+              <div class="form-text mt-2" id="manualAttendeeHelp">교육을 먼저 저장하면 비조합원 참석자를 추가할 수 있습니다. 이름과 비고는 교육일로부터 최대 6개월 뒤 삭제되며, QR 개인정보 동의 기록과는 별도로 관리됩니다.</div>
             </div>
             <div class="attendee-list" id="attendeeList"></div>
           </div>
@@ -527,12 +544,13 @@
     const PARTICIPATION_PUBLIC_ORIGIN = String(PARTICIPATION_ROUTE_ORIGINS.publicOrigin || 'https://www.yonginsolar.kr').replace(/\/+$/, '');
 
     let dashboardData = { coop_id:null, events:[], sources:[], officials:[] };
-    let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
+    let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
     let humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
     let humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
     let siteActivityPhotoRows = [];
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let pendingGuestLinkId = null;
+    let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
     let lightboxReturnFocus = null;
     let newPhotoPreviewUrls = [];
@@ -1303,6 +1321,19 @@
       }
     } // End of syncEducationMemberSearchVisibility
 
+    function syncManualEducationAttendeeUi() {
+      const section = document.getElementById('manualEducationAttendeeSection');
+      const button = document.getElementById('addManualAttendeeBtn');
+      const help = document.getElementById('manualAttendeeHelp');
+      const isEducation = document.getElementById('eventType').value === 'EDUCATION';
+      section.classList.toggle('d-none', !isEducation);
+      if (!isEducation) return;
+      button.disabled = !formState.eventId || formState.saving;
+      help.textContent = formState.eventId
+        ? 'QR 개인정보 동의 기록과 별도로 관리합니다. 이름과 비고는 교육일로부터 최대 6개월 뒤 삭제하며, 가입 후에는 관리자가 같은 사람인지 확인하고 연결합니다.'
+        : '교육을 먼저 저장하면 비조합원 참석자를 추가할 수 있습니다. 저장이 끝나면 이 입력칸이 바로 활성화됩니다.';
+    } // End of syncManualEducationAttendeeUi
+
     function renderHumanitiesLink() {
       const section = document.getElementById('humanitiesLinkSection');
       const isEducation = document.getElementById('eventType').value === 'EDUCATION';
@@ -1723,7 +1754,15 @@
           note:''
         };
       });
-      const rows = members.concat(guests).sort(function(a, b) {
+      const manualAttendees = (formState.manualAttendees || []).map(function(row) {
+        return {
+          name:row.display_name || '비조합원 참가자',
+          identityCode:'비조합원',
+          attendance:`수기 · ${row.checked_in_at ? formatKstDateTime(row.checked_in_at) : '시간 기록 없음'}`,
+          note:row.note || ''
+        };
+      });
+      const rows = members.concat(guests, manualAttendees).sort(function(a, b) {
         return String(a.name || '').localeCompare(String(b.name || ''), 'ko', { sensitivity:'base' });
       });
       const rowsPerPage = 15;
@@ -1835,6 +1874,7 @@
         : '이사회·총회 현장 사진을 여러 장 선택할 수 있습니다. 파일당 최대 20MB이며 위치·촬영기기 정보는 업로드 전에 제거됩니다.';
       document.getElementById('humanitiesLinkSection').classList.add('d-none');
       syncEducationMemberSearchVisibility();
+      syncManualEducationAttendeeUi();
       document.getElementById('meetingImportHint').classList.toggle('d-none', education);
       document.getElementById('memberSearchObserverBtn').classList.toggle('d-none', education);
       document.getElementById('observerHelp').classList.toggle('d-none', education);
@@ -1866,11 +1906,12 @@
 
     function resetEventForm() {
       revokeNewPhotoPreviewUrls();
-      formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], currentFiles:[], qrToken:null, saving:false };
+      formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
       humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
       humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
       siteActivityPhotoRows = [];
       pendingGuestLinkId = null;
+      pendingManualAttendeeLinkId = null;
       document.getElementById('eventModalTitle').textContent = PARTICIPATION_EDUCATION_VIEW ? '신규 교육 입력' : '회의 등록';
       document.getElementById('eventType').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'BOARD';
       document.getElementById('eventTitle').value = '';
@@ -1884,6 +1925,8 @@
       document.getElementById('rosterScanFiles').value = '';
       document.getElementById('memberSearchInput').value = '';
       document.getElementById('memberSearchResults').innerHTML = '';
+      document.getElementById('manualAttendeeName').value = '';
+      document.getElementById('manualAttendeeNote').value = '';
       document.getElementById('currentFiles').innerHTML = '';
       document.getElementById('newPhotoPreviews').innerHTML = '';
       document.getElementById('newPhotoPreviewsWrap').classList.add('d-none');
@@ -1940,6 +1983,9 @@
             };
           }),
           guestAttendees:Array.isArray(data.guest_attendees) ? data.guest_attendees : [],
+          manualAttendees:Array.isArray(data.manual_attendees) ? data.manual_attendees : [],
+          manualRequestKey:null,
+          manualRequestPayload:'',
           currentFiles:Array.isArray(mediaData?.files) ? mediaData.files : (data.files || []),
           qrToken:event.qr_token || null,
           saving:false
@@ -1948,6 +1994,7 @@
         humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
         siteActivityPhotoRows = [];
         pendingGuestLinkId = null;
+        pendingManualAttendeeLinkId = null;
         document.getElementById('eventModalTitle').textContent = '행사 확인·수정';
         document.getElementById('eventType').value = event.event_type;
         document.getElementById('eventTitle').value = event.title || '';
@@ -1963,6 +2010,8 @@
         document.getElementById('newPhotoPreviews').innerHTML = '';
         document.getElementById('newPhotoPreviewsWrap').classList.add('d-none');
         document.getElementById('memberSearchResults').innerHTML = '';
+        document.getElementById('manualAttendeeName').value = '';
+        document.getElementById('manualAttendeeNote').value = '';
         document.getElementById('siteActivityPhotoSearch').value = '';
         document.getElementById('siteActivityPhotoCandidates').innerHTML = '<div class="text-muted small">추천 소식을 찾는 중입니다.</div>';
         document.getElementById('deleteEventBtn').classList.remove('d-none');
@@ -2057,15 +2106,16 @@
       const type = document.getElementById('eventType').value;
       const rows = formState.attendees || [];
       const guestRows = type === 'EDUCATION' ? (formState.guestAttendees || []) : [];
+      const manualRows = type === 'EDUCATION' ? (formState.manualAttendees || []) : [];
       const targets = rows.filter(function(row) { return row.is_target !== false; });
       const attended = targets.filter(function(row) { return row.attendance_status === 'ATTENDED'; }).length;
       const additionalAttended = rows.filter(function(row) {
         return row.is_target === false && row.attendance_status === 'ATTENDED';
       }).length;
       document.getElementById('attendanceSummary').textContent = type === 'EDUCATION'
-        ? `참석 ${(rows.length + guestRows.length).toLocaleString()}명${guestRows.length > 0 ? ` · 비조합원 ${guestRows.length.toLocaleString()}명` : ''}`
+        ? `참석 ${(rows.length + guestRows.length + manualRows.length).toLocaleString()}명${guestRows.length + manualRows.length > 0 ? ` · 비조합원 ${(guestRows.length + manualRows.length).toLocaleString()}명` : ''}`
         : `대상 ${targets.length}명 · 참석 ${attended}명${additionalAttended > 0 ? ` · 배석 ${additionalAttended}명` : ''}`;
-      if (rows.length === 0 && guestRows.length === 0) {
+      if (rows.length === 0 && guestRows.length === 0 && manualRows.length === 0) {
         const activeHumanitiesLink = humanitiesLinkState.link?.status === 'ACTIVE';
         const educationEmptyMessage = activeHumanitiesLink
           ? '모두의 인문학 QR에서 정보가 정확히 일치한 조합원과 위 검색으로 추가한 조합원이 표시됩니다.'
@@ -2138,7 +2188,27 @@
             </div>
           </div>`;
       }).join('');
-      list.innerHTML = memberHtml + guestHtml;
+      const manualHtml = manualRows.map(function(row) {
+        const anonymous = row.record_status === 'ANONYMIZED';
+        const displayName = anonymous ? '비조합원 참석' : (row.display_name || '비조합원 참석');
+        const retention = anonymous
+          ? '이름·비고 삭제 완료'
+          : `이름·비고 보관 ${formatKstDateTime(row.name_expires_at)}까지`;
+        const note = !anonymous && row.note
+          ? `<br><span class="text-secondary">비고 ${escapeHtml(row.note)}</span>`
+          : '';
+        return `
+          <div class="attendee-row" data-manual-attendee-id="${escapeHtml(row.id)}">
+            <div class="attendee-name">${escapeHtml(displayName)} <span class="badge text-bg-light border">비조합원 · 관리자 수기</span><div class="attendee-meta">교육일 기준 참석 · ${escapeHtml(retention)}${note}<br>등록 확인 ${escapeHtml(row.created_by_name_snapshot || '관리자')}</div></div>
+            <span class="badge text-bg-success justify-self-center">참석</span>
+            <span class="small text-secondary text-center">${anonymous ? '개인 식별정보 없음' : '가입 승인 후 관리자 확인 연결'}</span>
+            <div class="d-flex gap-1 justify-content-end">
+              ${anonymous ? '' : '<button type="button" class="btn btn-sm btn-outline-primary" data-link-manual-attendee>조합원 연결</button>'}
+              <button type="button" class="btn btn-sm btn-outline-danger" data-delete-manual-attendee>제외</button>
+            </div>
+          </div>`;
+      }).join('');
+      list.innerHTML = memberHtml + guestHtml + manualHtml;
       list.querySelectorAll('[data-attendee-index]').forEach(function(rowEl) {
         const index = Number(rowEl.dataset.attendeeIndex);
         rowEl.querySelector('[data-attendance-status]')?.addEventListener('change', function(event) {
@@ -2167,6 +2237,7 @@
         const guestId = String(rowEl.dataset.guestCheckinId || '');
         rowEl.querySelector('[data-link-guest]')?.addEventListener('click', function() {
           pendingGuestLinkId = guestId;
+          pendingManualAttendeeLinkId = null;
           document.getElementById('educationMemberSearch').classList.remove('d-none');
           document.getElementById('memberSearchInput').value = '';
           document.getElementById('memberSearchResults').innerHTML = '<div class="alert alert-info small mb-0">연결할 정상 조합원을 이름 또는 조합원번호로 검색해주세요.</div>';
@@ -2176,7 +2247,130 @@
           deleteGuestCheckIn(guestId);
         });
       });
+      list.querySelectorAll('[data-manual-attendee-id]').forEach(function(rowEl) {
+        const manualAttendeeId = String(rowEl.dataset.manualAttendeeId || '');
+        rowEl.querySelector('[data-link-manual-attendee]')?.addEventListener('click', function() {
+          pendingManualAttendeeLinkId = manualAttendeeId;
+          pendingGuestLinkId = null;
+          document.getElementById('educationMemberSearch').classList.remove('d-none');
+          document.getElementById('memberSearchInput').value = '';
+          document.getElementById('memberSearchResults').innerHTML = '<div class="alert alert-info small mb-0">이 수기 기록과 같은 사람인지 확인할 정상 조합원을 검색해 선택해 주세요. 이름만 같다고 자동 연결되지는 않습니다.</div>';
+          document.getElementById('memberSearchInput').focus();
+        });
+        rowEl.querySelector('[data-delete-manual-attendee]')?.addEventListener('click', function() {
+          deleteManualEducationAttendee(manualAttendeeId);
+        });
+      });
     } // End of renderAttendees
+
+    async function addManualEducationAttendee() {
+      if (!formState.eventId || document.getElementById('eventType').value !== 'EDUCATION') {
+        showAlert('formAlert', '교육을 먼저 저장한 뒤 비조합원 참석자를 추가해 주세요.', 'warning');
+        return;
+      }
+      if (formState.saving) return;
+      const nameInput = document.getElementById('manualAttendeeName');
+      const noteInput = document.getElementById('manualAttendeeNote');
+      const displayName = String(nameInput.value || '').replace(/\s+/g, ' ').trim();
+      const note = String(noteInput.value || '').replace(/\s+/g, ' ').trim();
+      if (!displayName) {
+        showAlert('formAlert', '비조합원 참석자의 이름을 입력해 주세요.', 'warning');
+        nameInput.focus();
+        return;
+      }
+      const requestPayload = `${displayName}\u0000${note}`;
+      if (!formState.manualRequestKey || formState.manualRequestPayload !== requestPayload) {
+        formState.manualRequestKey = crypto.randomUUID();
+        formState.manualRequestPayload = requestPayload;
+      }
+      const eventId = formState.eventId;
+      formState.saving = true;
+      syncManualEducationAttendeeUi();
+      showLoading(true, '비조합원 참석자를 수기 명부에 추가하는 중...');
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_add_manual_education_attendee', {
+          p_event_id:eventId,
+          p_display_name:displayName,
+          p_note:note || null,
+          p_request_key:formState.manualRequestKey
+        });
+        if (error) throw error;
+        nameInput.value = '';
+        noteInput.value = '';
+        formState.manualRequestKey = null;
+        formState.manualRequestPayload = '';
+        formState.saving = false;
+        await loadDashboard(false);
+        await openEditEvent(eventId);
+        showAlert(
+          'formAlert',
+          data?.duplicate ? '이미 처리된 요청이라 기존 수기 참석자 기록을 그대로 확인했습니다.' : '비조합원 참석자를 수기 명부에 추가했습니다.',
+          data?.duplicate ? 'info' : 'success'
+        );
+      } catch (error) {
+        const message = String(error?.message || '비조합원 참석자를 추가하지 못했습니다.');
+        showAlert('formAlert', message.includes('RETENTION_EXPIRED')
+          ? '교육일로부터 6개월이 지나 이름을 새로 보관할 수 없습니다.'
+          : message, 'danger');
+      } finally {
+        formState.saving = false;
+        syncManualEducationAttendeeUi();
+        showLoading(false);
+      }
+    } // End of addManualEducationAttendee
+
+    async function deleteManualEducationAttendee(manualAttendeeId) {
+      if (!manualAttendeeId || !window.confirm('이 수기 교육 참석 기록을 명단에서 제외할까요?')) return;
+      const eventId = formState.eventId;
+      showLoading(true, '수기 참석 기록을 제외하는 중...');
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_delete_manual_education_attendee', {
+          p_manual_attendee_id:manualAttendeeId
+        });
+        if (error) throw error;
+        if (!data?.deleted) throw new Error('이미 연결·삭제되었거나 찾을 수 없는 수기 참석 기록입니다.');
+        pendingManualAttendeeLinkId = null;
+        await loadDashboard(false);
+        await openEditEvent(eventId);
+        showAlert('formAlert', '수기 참석 기록을 명단에서 제외했습니다.', 'success');
+      } catch (error) {
+        showAlert('formAlert', error?.message || '수기 참석 기록을 제외하지 못했습니다.', 'danger');
+      } finally {
+        showLoading(false);
+      }
+    } // End of deleteManualEducationAttendee
+
+    async function linkManualEducationAttendeeToMember(manualAttendeeId, memberId) {
+      if (!manualAttendeeId || !memberId) return;
+      const eventId = formState.eventId;
+      showLoading(true, '수기 참석 기록을 조합원 이력과 연결하는 중...');
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_link_manual_education_attendee', {
+          p_manual_attendee_id:manualAttendeeId,
+          p_member_uuid:memberId
+        });
+        if (error) throw error;
+        if (!data?.linked) {
+          const status = String(data?.status || '');
+          if (status === 'MANUAL_ATTENDEE_EXPIRED') throw new Error('이름 보관기간이 지나 익명화된 기록은 조합원과 연결할 수 없습니다.');
+          if (status === 'ACTIVE_MEMBER_NOT_FOUND') throw new Error('승인이 끝난 정상 조합원만 연결할 수 있습니다.');
+          throw new Error('정상 조합원과 연결할 수 없는 수기 참석 기록입니다.');
+        }
+        pendingManualAttendeeLinkId = null;
+        document.getElementById('memberSearchInput').value = '';
+        document.getElementById('memberSearchResults').innerHTML = '';
+        await loadDashboard(false);
+        await openEditEvent(eventId);
+        showAlert('formAlert', data?.already_linked
+          ? '이미 이 조합원과 연결된 기록입니다.'
+          : '수기 참석 기록을 조합원의 과거 교육 이력과 연결하고 뱃지를 다시 계산했습니다.',
+        data?.already_linked ? 'info' : 'success');
+      } catch (error) {
+        showAlert('formAlert', error?.message || '조합원 참여 이력과 연결하지 못했습니다.', 'danger');
+      } finally {
+        showLoading(false);
+      }
+    } // End of linkManualEducationAttendeeToMember
 
     async function deleteGuestCheckIn(guestId) {
       if (!guestId || !window.confirm('이 비조합원 교육 출석 기록을 제외할까요?')) return;
@@ -2187,6 +2381,7 @@
         if (error) throw error;
         if (!data?.deleted) throw new Error('이미 처리되었거나 찾을 수 없는 출석 기록입니다.');
         pendingGuestLinkId = null;
+        pendingManualAttendeeLinkId = null;
         await loadDashboard(false);
         await openEditEvent(eventId);
         showAlert('formAlert', '비조합원 출석 기록을 제외했습니다.', 'success');
@@ -2209,6 +2404,7 @@
         if (error) throw error;
         if (!data?.linked) throw new Error('정상 조합원과 연결할 수 없는 기록입니다.');
         pendingGuestLinkId = null;
+        pendingManualAttendeeLinkId = null;
         document.getElementById('memberSearchInput').value = '';
         document.getElementById('memberSearchResults').innerHTML = '';
         await loadDashboard(false);
@@ -2243,9 +2439,9 @@
       }
       results.innerHTML = rows.map(function(member) {
         const added = formState.attendees.some(function(row) { return String(row.member_id) === String(member.id); });
-        const linkingGuest = !!pendingGuestLinkId;
-        const actionLabel = linkingGuest ? '이 기록과 연결' : observer ? '배석자로 추가' : '참석자로 추가';
-        return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-member-id="${escapeHtml(member.id)}" ${added && !linkingGuest ? 'disabled' : ''}><span><strong>${escapeHtml(member.name)}</strong><span class="text-muted small ms-2">${escapeHtml(member.member_number || member.member_id || '')}</span></span><span class="badge text-bg-light">${added && !linkingGuest ? '추가됨' : actionLabel}</span></button>`;
+        const linkingRecord = !!pendingGuestLinkId || !!pendingManualAttendeeLinkId;
+        const actionLabel = linkingRecord ? '이 기록과 연결' : observer ? '배석자로 추가' : '참석자로 추가';
+        return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" data-member-id="${escapeHtml(member.id)}" ${added && !linkingRecord ? 'disabled' : ''}><span><strong>${escapeHtml(member.name)}</strong><span class="text-muted small ms-2">${escapeHtml(member.member_number || member.member_id || '')}</span></span><span class="badge text-bg-light">${added && !linkingRecord ? '추가됨' : actionLabel}</span></button>`;
       }).join('');
       results.querySelectorAll('[data-member-id]').forEach(function(button) {
         button.addEventListener('click', async function() {
@@ -2253,6 +2449,10 @@
           if (!member) return;
           if (pendingGuestLinkId) {
             await linkGuestCheckInToMember(pendingGuestLinkId, member.id);
+            return;
+          }
+          if (pendingManualAttendeeLinkId) {
+            await linkManualEducationAttendeeToMember(pendingManualAttendeeLinkId, member.id);
             return;
           }
           if (type === 'EDUCATION' && formState.eventId) {
@@ -2849,6 +3049,13 @@
       document.getElementById('memberSearchObserverBtn').addEventListener('click', function() { searchMembers(true); });
       document.getElementById('memberSearchInput').addEventListener('keydown', function(event) {
         if (event.key === 'Enter') { event.preventDefault(); searchMembers(false); }
+      });
+      document.getElementById('addManualAttendeeBtn').addEventListener('click', addManualEducationAttendee);
+      document.getElementById('manualAttendeeName').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') { event.preventDefault(); addManualEducationAttendee(); }
+      });
+      document.getElementById('manualAttendeeNote').addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') { event.preventDefault(); addManualEducationAttendee(); }
       });
       document.getElementById('saveEventBtn').addEventListener('click', saveEvent);
       document.getElementById('deleteEventBtn').addEventListener('click', deleteEvent);
