@@ -165,13 +165,13 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       global: { headers: { 'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').toLowerCase() } }
     });
-    const state = { questions:[], loading:false, saving:false, deleting:false, statsLoading:false, deleteId:'', searchTimer:0 };
+    const state = { questions:[], loading:false, loadSeq:0, saving:false, deleting:false, statsLoading:false, deleteId:'', searchTimer:0 };
     const $ = (id) => document.getElementById(id);
     const questionModal = bootstrap.Modal.getOrCreateInstance($('questionModal'));
     const statsModal = bootstrap.Modal.getOrCreateInstance($('statsModal'));
@@ -221,7 +221,7 @@
     }
 
     async function loadQuestions() {
-      if (state.loading) return;
+      const loadSeq=++state.loadSeq;
       state.loading=true;
       $('listLoading').classList.remove('d-none');
       $('questionList').classList.add('d-none');
@@ -231,12 +231,15 @@
         const status=$('statusFilter').value || null;
         const {data,error}=await client.rpc('quiz_admin_list_questions',{p_search:search||null,p_status:status});
         if(error) throw error;
+        if(loadSeq!==state.loadSeq)return;
         state.questions=Array.isArray(data)?data:[];
         renderQuestions();
       } catch(error) {
+        if(loadSeq!==state.loadSeq)return;
         console.error(`[quiz-admin ${VERSION}] list failed`,error);
         showAlert(errorMessage(error,'문제 목록을 불러오지 못했습니다.'));
       } finally {
+        if(loadSeq!==state.loadSeq)return;
         state.loading=false;
         $('listLoading').classList.add('d-none');
       }
