@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.53 | Change: 2026-08-24 - Load the rapid-tap-safe ERP patch-note runtime. -->
+<!-- Version: v1.0.54 | Change: 2026-08-27 - Add private pilot quiz management for the approved account. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.53 | index.html');</script>
+  <script>console.log('[Version] v1.0.54 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -203,6 +203,11 @@
             <span class="d-block small text-muted">공지, 사이트 컨텐츠, FAQ 운영</span>
         </button>
 
+        <button class="btn btn-white btn-menu hidden" id="btnQuizAdmin" onclick="location.href='quiz_admin.html'">
+            ☀️ <strong>퀴즈 관리</strong>
+            <span class="d-block small text-muted">문제·정답·해설과 선택지별 응답 통계 관리</span>
+        </button>
+
         <button class="btn btn-white btn-menu hidden" id="btnOfficialsAdmin" onclick="location.href='officials_admin.html'">
             🖋️ <strong>임원·대의원·선관위원 관리</strong>
             <span class="d-block small text-muted">조합원 연동, 직책·임기 관리, 전자서명·선거 공통 원천</span>
@@ -375,6 +380,7 @@ let myInfo = null;
 let permissionSet = new Set();
 let platformContext = null;
 let coopRuntime = null;
+let quizPilotAllowed = false;
 let retiredGraceAccess = false;
 let suppressSessionExpiredHandling = false;
 let loginFormOpenedAt = Date.now();
@@ -1357,6 +1363,7 @@ async function loadUserInfo(user) {
     permissionSet = await loadPermissions(data);
     platformContext = await loadPlatformContext();
     coopRuntime = await loadCoopRuntime();
+    quizPilotAllowed = await loadQuizPilotAccess();
     applyErpBranding(coopRuntime?.coop_name || '');
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
 
@@ -1438,6 +1445,23 @@ async function loadCoopRuntime() {
     } catch (err) {
         console.error('get_my_erp_runtime exception:', err);
         return null;
+    }
+}
+
+async function loadQuizPilotAccess() {
+    try {
+        const { data, error } = await _supabase.rpc('quiz_pilot_get_context');
+        if (error) {
+            const code = String(error?.code || '');
+            if (code !== 'PGRST202' && code !== '42883') {
+                console.warn('quiz_pilot_get_context failed:', code || error?.message || error);
+            }
+            return false;
+        }
+        return data?.allowed === true;
+    } catch (error) {
+        console.warn('quiz pilot access check unavailable:', String(error?.code || error?.message || 'unknown'));
+        return false;
     }
 }
 
@@ -1746,6 +1770,18 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         document.getElementById('btnSiteAdmin')?.classList.remove('hidden');
     }
 
+    document.getElementById('btnQuizAdmin')?.classList.add('hidden');
+    if (
+        siteAdminEnabled
+        && quizPilotAllowed
+        && (
+            (canSiteAdmin === null && isAdmin)
+            || canSiteAdmin === true
+        )
+    ) {
+        document.getElementById('btnQuizAdmin')?.classList.remove('hidden');
+    }
+
     if (!officialsAdminEnabled) {
         document.getElementById('btnOfficialsAdmin')?.classList.add('hidden');
     } else if (canOfficialsAdmin === null) {
@@ -1838,6 +1874,7 @@ const ERP_MENU_BUTTON_ORDER_IDS = [
     'btnMemberAdmin',
     'btnEducationParticipants',
     'btnSiteAdmin',
+    'btnQuizAdmin',
     'btnOfficialsAdmin',
     'btnGovernanceHub',
     'btnMinutesAdmin',

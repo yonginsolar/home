@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <meta name="theme-color" content="#f6f7f2">
+  <title>햇빛 퀴즈 시험 운영 | 용인모두의햇빛협동조합</title>
+  <link rel="stylesheet" href="shared/theme.css?v=20260802-1">
+  <script src="shared/theme.js?v=20260802-1"></script>
+  <script src="shared/route_guard.js?v=20260804-1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+  <style>
+    :root {
+      --quiz-bg: #f6f7f2;
+      --quiz-surface: #ffffff;
+      --quiz-soft: #eef5e8;
+      --quiz-text: #17211a;
+      --quiz-muted: #647267;
+      --quiz-line: #dce5dc;
+      --quiz-primary: #19723a;
+      --quiz-primary-strong: #0d5729;
+      --quiz-accent: #f5c342;
+      --quiz-correct: #0c7a3d;
+      --quiz-correct-bg: #e6f7ec;
+      --quiz-wrong: #b62b34;
+      --quiz-wrong-bg: #fff0f1;
+      --quiz-shadow: 0 22px 70px rgba(29, 57, 37, .12);
+    }
+    html[data-theme="dark"] {
+      --quiz-bg: #0b1210;
+      --quiz-surface: #141d18;
+      --quiz-soft: #1b2a20;
+      --quiz-text: #edf6ef;
+      --quiz-muted: #a7b5aa;
+      --quiz-line: #2b3b30;
+      --quiz-primary: #63d28a;
+      --quiz-primary-strong: #a4edbc;
+      --quiz-accent: #ffd866;
+      --quiz-correct: #78e39c;
+      --quiz-correct-bg: #183624;
+      --quiz-wrong: #ff9aa1;
+      --quiz-wrong-bg: #3b2023;
+      --quiz-shadow: 0 24px 80px rgba(0, 0, 0, .34);
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: var(--quiz-bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--quiz-text);
+      background:
+        radial-gradient(circle at 8% 2%, rgba(245, 195, 66, .16), transparent 25rem),
+        radial-gradient(circle at 96% 28%, rgba(52, 168, 83, .13), transparent 30rem),
+        var(--quiz-bg);
+      font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      line-height: 1.6;
+    }
+    button, input { font: inherit; }
+    button { touch-action: manipulation; }
+    .shell { width: min(760px, calc(100% - 28px)); margin: 0 auto; padding: 38px 0 110px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--quiz-text); text-decoration: none; font-weight: 850; }
+    .brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 14px; background: linear-gradient(145deg, #ffe282, #f5bd31); font-size: 22px; box-shadow: 0 8px 20px rgba(190, 133, 15, .2); }
+    .pilot-chip { padding: 6px 10px; border: 1px solid var(--quiz-line); border-radius: 999px; color: var(--quiz-muted); background: color-mix(in srgb, var(--quiz-surface) 88%, transparent); font-size: 12px; font-weight: 800; }
+    .card { border: 1px solid var(--quiz-line); border-radius: 28px; background: var(--quiz-surface); box-shadow: var(--quiz-shadow); overflow: hidden; }
+    .hero { padding: clamp(28px, 6vw, 52px); }
+    .eyebrow { margin: 0 0 10px; color: var(--quiz-primary); font-size: 13px; font-weight: 900; letter-spacing: .04em; }
+    h1 { margin: 0; font-size: clamp(30px, 7vw, 54px); line-height: 1.13; letter-spacing: -.045em; }
+    h2 { margin: 0; font-size: clamp(24px, 5vw, 34px); line-height: 1.3; letter-spacing: -.025em; }
+    p { margin: 0; }
+    .hero-copy { margin-top: 18px; color: var(--quiz-muted); font-size: 16px; }
+    .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 26px 0; }
+    .feature { padding: 15px 12px; border-radius: 18px; background: var(--quiz-soft); text-align: center; }
+    .feature strong { display: block; color: var(--quiz-primary-strong); font-size: 15px; }
+    .feature span { display: block; margin-top: 3px; color: var(--quiz-muted); font-size: 12px; }
+    .notice { margin-top: 18px; padding: 14px 16px; border: 1px dashed var(--quiz-line); border-radius: 16px; color: var(--quiz-muted); font-size: 13px; }
+    .button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 50px; padding: 0 22px; border: 0; border-radius: 15px; cursor: pointer; font-weight: 850; transition: transform .16s ease, opacity .16s ease, box-shadow .16s ease; }
+    .button:hover:not(:disabled) { transform: translateY(-1px); }
+    .button:focus-visible, .option:focus-visible { outline: 3px solid color-mix(in srgb, var(--quiz-primary) 38%, transparent); outline-offset: 3px; }
+    .button:disabled { cursor: wait; opacity: .58; }
+    .button-primary { color: #fff; background: linear-gradient(135deg, #1b7c40, #0d5c2b); box-shadow: 0 12px 26px rgba(13, 92, 43, .22); }
+    html[data-theme="dark"] .button-primary { color: #07130b; background: linear-gradient(135deg, #75dc98, #4fbe75); }
+    .button-secondary { color: var(--quiz-text); background: var(--quiz-soft); border: 1px solid var(--quiz-line); }
+    .button-ghost { min-height: 42px; padding: 0 14px; color: var(--quiz-muted); background: transparent; border: 1px solid var(--quiz-line); }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    .actions .button-primary { flex: 1 1 220px; }
+    .state { padding: clamp(30px, 7vw, 58px); text-align: center; }
+    .state-icon { margin-bottom: 15px; font-size: 44px; }
+    .state p { margin-top: 12px; color: var(--quiz-muted); }
+    .state .actions { justify-content: center; }
+    .hidden { display: none !important; }
+    .quiz-head { padding: 24px clamp(22px, 5vw, 40px) 0; }
+    .progress-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--quiz-muted); font-size: 13px; font-weight: 800; }
+    .progress-track { flex: 1; height: 8px; overflow: hidden; border-radius: 999px; background: var(--quiz-soft); }
+    .progress-fill { height: 100%; width: 20%; border-radius: inherit; background: linear-gradient(90deg, var(--quiz-accent), var(--quiz-primary)); transition: width .25s ease; }
+    .question-wrap { padding: 28px clamp(22px, 5vw, 40px) 38px; }
+    .question-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 13px; }
+    .tag { display: inline-flex; align-items: center; min-height: 27px; padding: 0 10px; border-radius: 999px; background: var(--quiz-soft); color: var(--quiz-primary-strong); font-size: 12px; font-weight: 850; }
+    .tag-review { background: color-mix(in srgb, var(--quiz-accent) 22%, var(--quiz-surface)); color: var(--quiz-text); }
+    .question { margin: 0 0 25px; font-size: clamp(22px, 5vw, 31px); line-height: 1.4; letter-spacing: -.025em; }
+    .options { display: grid; gap: 11px; }
+    .option { display: grid; grid-template-columns: 38px 1fr; align-items: center; gap: 12px; width: 100%; min-height: 62px; padding: 12px 16px; border: 1px solid var(--quiz-line); border-radius: 17px; color: var(--quiz-text); background: var(--quiz-surface); cursor: pointer; text-align: left; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+    .option:hover:not(:disabled) { border-color: var(--quiz-primary); background: var(--quiz-soft); transform: translateY(-1px); }
+    .option:disabled { cursor: default; opacity: .72; }
+    .option-key { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--quiz-soft); color: var(--quiz-primary-strong); font-weight: 900; }
+    .option.is-correct { border-color: var(--quiz-correct); background: var(--quiz-correct-bg); opacity: 1; }
+    .option.is-correct .option-key { background: var(--quiz-correct); color: #fff; }
+    .option.is-wrong { border-color: var(--quiz-wrong); background: var(--quiz-wrong-bg); opacity: 1; }
+    .option.is-wrong .option-key { background: var(--quiz-wrong); color: #fff; }
+    .feedback { margin-top: 20px; padding: 20px; border: 1px solid var(--quiz-line); border-radius: 18px; background: var(--quiz-soft); }
+    .feedback-title { margin-bottom: 7px; font-size: 17px; font-weight: 900; }
+    .feedback-title.correct { color: var(--quiz-correct); }
+    .feedback-title.wrong { color: var(--quiz-wrong); }
+    .feedback p { color: var(--quiz-text); }
+    .source { margin-top: 9px; color: var(--quiz-muted); font-size: 12px; }
+    .source a { color: var(--quiz-primary); }
+    .next-row { display: flex; justify-content: flex-end; margin-top: 20px; }
+    .result { padding: clamp(28px, 7vw, 52px); }
+    .score { display: flex; align-items: baseline; gap: 9px; margin: 20px 0 6px; }
+    .score strong { color: var(--quiz-primary); font-size: clamp(52px, 14vw, 86px); line-height: 1; letter-spacing: -.06em; }
+    .score span { color: var(--quiz-muted); font-size: 18px; font-weight: 800; }
+    .result-copy { color: var(--quiz-muted); }
+    .badge-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 25px; }
+    .badge-card { min-height: 125px; padding: 18px 12px; border: 1px solid var(--quiz-line); border-radius: 18px; background: var(--quiz-soft); text-align: center; }
+    .badge-card.is-locked { filter: grayscale(1); opacity: .5; }
+    .badge-icon { font-size: 30px; }
+    .badge-name { margin-top: 5px; font-size: 14px; font-weight: 900; }
+    .badge-progress { color: var(--quiz-muted); font-size: 11px; }
+    .history { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--quiz-line); }
+    .history h3 { margin: 0 0 12px; font-size: 17px; }
+    .history-list { display: grid; gap: 8px; }
+    .history-row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 13px; background: var(--quiz-soft); font-size: 13px; }
+    .history-row span { color: var(--quiz-muted); }
+    .dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgba(3, 10, 6, .58); }
+    .dialog { width: min(480px, 100%); padding: 28px; border: 1px solid var(--quiz-line); border-radius: 24px; background: var(--quiz-surface); box-shadow: 0 28px 90px rgba(0, 0, 0, .35); }
+    .dialog h2 { font-size: 25px; }
+    .dialog p { margin-top: 12px; color: var(--quiz-muted); }
+    .dialog .actions .button { flex: 1 1 130px; }
+    .spinner { width: 38px; height: 38px; margin: 0 auto 18px; border: 4px solid var(--quiz-line); border-top-color: var(--quiz-primary); border-radius: 50%; animation: spin .75s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 600px) {
+      .shell { width: min(100% - 18px, 760px); padding-top: 18px; }
+      .topbar { padding: 0 5px; }
+      .brand span:last-child { font-size: 14px; }
+      .feature-grid, .badge-list { grid-template-columns: 1fr; }
+      .feature { display: flex; align-items: center; justify-content: space-between; text-align: left; }
+      .badge-card { min-height: 0; display: grid; grid-template-columns: 42px 1fr auto; align-items: center; text-align: left; }
+      .badge-name, .badge-progress { margin: 0; }
+      .site-theme-toggle { bottom: 12px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: .001ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="index.html" aria-label="용인모두의햇빛협동조합 홈페이지">
+        <span class="brand-mark" aria-hidden="true">☀️</span>
+        <span>용인모두의햇빛협동조합</span>
+      </a>
+      <span class="pilot-chip">비공개 시험 운영</span>
+    </header>
+
+    <section class="card state" id="loadingView" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <h1 style="font-size:28px">퀴즈를 준비하고 있어요</h1>
+      <p>로그인과 시험 참여 권한을 확인하는 중입니다.</p>
+    </section>
+
+    <section class="card state hidden" id="lockedView" aria-live="polite">
+      <div class="state-icon" id="lockedIcon" aria-hidden="true">🔐</div>
+      <h1 id="lockedTitle" style="font-size:30px">로그인이 필요합니다</h1>
+      <p id="lockedMessage">시험 운영 참여 계정으로 로그인해 주세요.</p>
+      <div class="actions">
+        <button type="button" class="button button-primary" id="loginButton">조합원 로그인</button>
+        <a class="button button-secondary" href="index.html">홈페이지로</a>
+      </div>
+    </section>
+
+    <section class="card hero hidden" id="introView">
+      <p class="eyebrow">🌱 시험 운영에 초대됐어요</p>
+      <h1>햇빛 상식,<br>가볍게 풀어볼까요?</h1>
+      <p class="hero-copy"><strong id="memberName"></strong>님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.</p>
+      <div class="feature-grid" aria-label="퀴즈 특징">
+        <div class="feature"><strong>5문제</strong><span>한 번에 가볍게</span></div>
+        <div class="feature"><strong>바로 해설</strong><span>고른 뒤 즉시 확인</span></div>
+        <div class="feature"><strong>복습 배려</strong><span>덜 본 문제부터</span></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="button button-primary" id="startButton">퀴즈 시작하기 ☀️</button>
+      </div>
+      <p class="notice">현재는 관리자 검토를 위한 비공개 시험판입니다. 참여 횟수와 답변 기록은 서비스 개선을 위해 저장되며, 배당 점수나 금액은 저장하지 않습니다.</p>
+      <div class="history hidden" id="introHistory">
+        <h3>나의 최근 기록</h3>
+        <div class="history-list" id="introHistoryList"></div>
+      </div>
+    </section>
+
+    <section class="card hidden" id="quizView" aria-live="polite">
+      <div class="quiz-head">
+        <div class="progress-row">
+          <span id="progressLabel">1 / 5</span>
+          <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+          <span id="correctSoFar">정답 0</span>
+        </div>
+      </div>
+      <div class="question-wrap">
+        <div class="question-meta">
+          <span class="tag" id="categoryTag"></span>
+          <span class="tag tag-review hidden" id="reviewTag">🔄 복습 문제</span>
+        </div>
+        <h2 class="question" id="questionText"></h2>
+        <div class="options" id="optionsList"></div>
+        <div class="feedback hidden" id="feedbackBox">
+          <div class="feedback-title" id="feedbackTitle"></div>
+          <p id="feedbackText"></p>
+          <div class="source hidden" id="feedbackSource"></div>
+        </div>
+        <div class="next-row hidden" id="nextRow">
+          <button type="button" class="button button-primary" id="nextButton">다음 문제</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card result hidden" id="resultView" aria-live="polite">
+      <p class="eyebrow" id="resultEyebrow">🎉 한 판 완료!</p>
+      <h1 style="font-size:clamp(30px,7vw,48px)">오늘의 햇빛 감각</h1>
+      <div class="score"><strong id="resultScore">0</strong><span id="resultTotal">/ 5문제</span></div>
+      <p class="result-copy" id="resultCopy"></p>
+      <div class="badge-list" id="badgeList"></div>
+      <div class="actions">
+        <button type="button" class="button button-primary" id="retryButton">다른 문제 풀기</button>
+        <button type="button" class="button button-secondary" id="backToIntroButton">첫 화면으로</button>
+      </div>
+      <div class="history hidden" id="resultHistory">
+        <h3>최근 참여</h3>
+        <div class="history-list" id="resultHistoryList"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="dialog-backdrop hidden" id="hofDialog" role="dialog" aria-modal="true" aria-labelledby="hofTitle">
+    <div class="dialog">
+      <p class="eyebrow">🏆 퀴즈 명예의 전당</p>
+      <h2 id="hofTitle">와, 처음 본 5문제를 모두 맞혔어요!</h2>
+      <p>시험 운영 중에는 공개하지 않고 동의 여부만 안전하게 기록합니다. 나중에 명예의 전당을 열게 되면 이름을 부드럽게 가려 축하 기록으로 소개할 수 있어요. 기록에 동의할까요?</p>
+      <div class="actions">
+        <button type="button" class="button button-secondary" id="hofDeclineButton">이번에는 괜찮아요</button>
+        <button type="button" class="button button-primary" id="hofConsentButton">기록에 동의해요 🎊</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="dialog-backdrop hidden" id="messageDialog" role="alertdialog" aria-modal="true" aria-labelledby="messageTitle">
+    <div class="dialog">
+      <h2 id="messageTitle">확인이 필요합니다</h2>
+      <p id="messageText"></p>
+      <div class="actions"><button type="button" class="button button-primary" id="messageCloseButton">확인</button></div>
+    </div>
+  </div>
+
+  <script>
+  (() => {
+    'use strict';
+
+    const VERSION = '0.1.0';
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+    const REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
+    const client = window.CoopRouteGuard?.createSupabaseClient
+      ? window.CoopRouteGuard.createSupabaseClient(window.supabase, SUPABASE_URL, SUPABASE_KEY)
+      : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+          global: { headers: { 'x-public-host': String(location.hostname || '').toLowerCase() } }
+        });
+
+    const state = {
+      context: null,
+      summary: null,
+      attemptId: '',
+      questions: [],
+      index: 0,
+      feedbackByItem: new Map(),
+      startBusy: false,
+      answerBusy: false,
+      completeBusy: false,
+      consentBusy: false
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const views = ['loadingView', 'lockedView', 'introView', 'quizView', 'resultView'];
+
+    function showView(id) {
+      views.forEach((viewId) => $(viewId).classList.toggle('hidden', viewId !== id));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function rpcErrorMessage(error, fallback) {
+      const message = String(error?.message || error || '');
+      if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED')) return '현재 계정은 시험 운영 참여 계정이 아닙니다.';
+      if (message.includes('QUIZ_NOT_ENOUGH_PUBLISHED_QUESTIONS')) return '공개 준비가 끝난 문제가 아직 부족합니다.';
+      if (message.includes('QUIZ_ANSWER_ALREADY_LOCKED')) return '이미 선택한 답은 바꿀 수 없습니다.';
+      if (message.includes('JWT') || error?.status === 401) return '로그인 시간이 만료되었습니다. 다시 로그인해 주세요.';
+      return fallback || '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+    }
+
+    function showMessage(message, title = '확인이 필요합니다') {
+      $('messageTitle').textContent = title;
+      $('messageText').textContent = message;
+      $('messageDialog').classList.remove('hidden');
+      $('messageCloseButton').focus();
+    }
+
+    function closeMessage() { $('messageDialog').classList.add('hidden'); }
+
+    function loginUrl() {
+      const target = new URL('membermanage.html', location.href);
+      target.searchParams.set('next', location.href);
+      return target.href;
+    }
+
+    function getRequestKey() {
+      let key = '';
+      try { key = sessionStorage.getItem(REQUEST_KEY_STORAGE) || ''; } catch (_) {}
+      if (!/^[0-9a-f-]{36}$/i.test(key)) {
+        key = crypto.randomUUID();
+        try { sessionStorage.setItem(REQUEST_KEY_STORAGE, key); } catch (_) {}
+      }
+      return key;
+    }
+
+    function clearRequestKey() {
+      try { sessionStorage.removeItem(REQUEST_KEY_STORAGE); } catch (_) {}
+    }
+
+    function formatKst(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '-';
+      return new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      }).format(date);
+    }
+
+    async function loadSummary() {
+      const { data, error } = await client.rpc('quiz_pilot_get_my_summary');
+      if (error) throw error;
+      state.summary = data || {};
+      renderHistory('introHistory', 'introHistoryList');
+    }
+
+    function renderHistory(sectionId, listId) {
+      const rows = Array.isArray(state.summary?.recent_attempts) ? state.summary.recent_attempts.slice(0, 5) : [];
+      const section = $(sectionId);
+      const list = $(listId);
+      list.replaceChildren();
+      if (!rows.length) {
+        section.classList.add('hidden');
+        return;
+      }
+      rows.forEach((row) => {
+        const item = document.createElement('div');
+        item.className = 'history-row';
+        const score = document.createElement('strong');
+        score.textContent = `${Number(row.correct_count || 0)} / ${Number(row.total_questions || 5)} 정답`;
+        const when = document.createElement('span');
+        when.textContent = formatKst(row.completed_at);
+        item.append(score, when);
+        list.appendChild(item);
+      });
+      section.classList.remove('hidden');
+    }
+
+    async function boot() {
+      showView('loadingView');
+      try {
+        const { data: sessionData, error: sessionError } = await client.auth.getSession();
+        if (sessionError) throw sessionError;
+        if (!sessionData?.session?.user) {
+          $('lockedIcon').textContent = '🔐';
+          $('lockedTitle').textContent = '로그인이 필요합니다';
+          $('lockedMessage').textContent = '시험 운영 참여 계정으로 로그인해 주세요.';
+          $('loginButton').classList.remove('hidden');
+          showView('lockedView');
+          return;
+        }
+
+        const { data, error } = await client.rpc('quiz_pilot_get_context');
+        if (error) throw error;
+        state.context = data || {};
+        if (state.context.allowed !== true) {
+          $('lockedIcon').textContent = '🌱';
+          $('lockedTitle').textContent = '지금은 초대 시험 중입니다';
+          $('lockedMessage').textContent = '현재 계정에는 아직 퀴즈 시험 참여 권한이 없습니다.';
+          $('loginButton').classList.add('hidden');
+          showView('lockedView');
+          return;
+        }
+
+        $('memberName').textContent = String(state.context.member_name || '조합원');
+        await loadSummary();
+        showView('introView');
+      } catch (error) {
+        console.error(`[quiz ${VERSION}] boot failed`, error);
+        $('lockedIcon').textContent = '⚠️';
+        $('lockedTitle').textContent = '퀴즈를 불러오지 못했습니다';
+        $('lockedMessage').textContent = rpcErrorMessage(error, '연결 상태를 확인한 뒤 새로고침해 주세요.');
+        $('loginButton').classList.add('hidden');
+        showView('lockedView');
+      }
+    }
+
+    async function startQuiz() {
+      if (state.startBusy) return;
+      state.startBusy = true;
+      $('startButton').disabled = true;
+      $('retryButton').disabled = true;
+      try {
+        let requestKey = getRequestKey();
+        let { data, error } = await client.rpc('quiz_pilot_start_attempt', { p_request_key: requestKey });
+        if (error) throw error;
+        if (data?.status === 'COMPLETED') {
+          clearRequestKey();
+          requestKey = getRequestKey();
+          const retry = await client.rpc('quiz_pilot_start_attempt', { p_request_key: requestKey });
+          if (retry.error) throw retry.error;
+          data = retry.data;
+        }
+        const questions = Array.isArray(data?.questions) ? data.questions : [];
+        if (questions.length !== 5) throw new Error('QUIZ_QUESTION_SET_INVALID');
+        state.attemptId = String(data.attempt_id || '');
+        state.questions = questions;
+        state.feedbackByItem.clear();
+        const firstUnanswered = questions.findIndex((item) => item.answered !== true);
+        state.index = firstUnanswered >= 0 ? firstUnanswered : 0;
+        renderQuestion();
+        showView('quizView');
+      } catch (error) {
+        console.error(`[quiz ${VERSION}] start failed`, error);
+        showMessage(rpcErrorMessage(error, '퀴즈를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.'));
+      } finally {
+        state.startBusy = false;
+        $('startButton').disabled = false;
+        $('retryButton').disabled = false;
+      }
+    }
+
+    function renderQuestion() {
+      const question = state.questions[state.index];
+      if (!question) return;
+      const answeredCount = state.questions.filter((item) => item.answered === true).length;
+      const correctCount = Array.from(state.feedbackByItem.values()).filter((item) => item.is_correct === true).length;
+      $('progressLabel').textContent = `${state.index + 1} / ${state.questions.length}`;
+      $('progressFill').style.width = `${((state.index + 1) / state.questions.length) * 100}%`;
+      $('correctSoFar').textContent = `답변 ${answeredCount} · 정답 ${correctCount}`;
+      $('categoryTag').textContent = question.category || '햇빛 상식';
+      $('reviewTag').classList.toggle('hidden', question.is_review !== true);
+      $('questionText').textContent = question.prompt || '';
+      $('optionsList').replaceChildren();
+      $('feedbackBox').classList.add('hidden');
+      $('nextRow').classList.add('hidden');
+
+      const options = Array.isArray(question.options) ? question.options : [];
+      options.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'option';
+        button.dataset.optionKey = String(option.key || '');
+        button.setAttribute('aria-label', `${option.key}. ${option.label}`);
+        const key = document.createElement('span');
+        key.className = 'option-key';
+        key.textContent = String(option.key || '');
+        const label = document.createElement('span');
+        label.textContent = String(option.label || '');
+        button.append(key, label);
+        button.addEventListener('click', () => answerCurrent(String(option.key || '')));
+        $('optionsList').appendChild(button);
+      });
+
+      const cachedFeedback = state.feedbackByItem.get(question.item_id);
+      if (cachedFeedback) {
+        showFeedback(question, cachedFeedback);
+      } else if (question.answered === true && question.selected_option_key) {
+        void recoverFeedback(question);
+      }
+    }
+
+    async function recoverFeedback(question) {
+      if (state.answerBusy) return;
+      state.answerBusy = true;
+      setOptionsDisabled(true);
+      try {
+        const { data, error } = await client.rpc('quiz_pilot_answer', {
+          p_attempt_id: state.attemptId,
+          p_item_id: question.item_id,
+          p_selected_option_key: question.selected_option_key
+        });
+        if (error) throw error;
+        state.feedbackByItem.set(question.item_id, data);
+        showFeedback(question, data);
+      } catch (error) {
+        console.error(`[quiz ${VERSION}] feedback recovery failed`, error);
+        showMessage(rpcErrorMessage(error));
+      } finally {
+        state.answerBusy = false;
+      }
+    }
+
+    function setOptionsDisabled(disabled) {
+      $('optionsList').querySelectorAll('.option').forEach((button) => { button.disabled = disabled; });
+    }
+
+    async function answerCurrent(optionKey) {
+      if (state.answerBusy) return;
+      const question = state.questions[state.index];
+      if (!question || question.answered === true) return;
+      state.answerBusy = true;
+      setOptionsDisabled(true);
+      try {
+        const { data, error } = await client.rpc('quiz_pilot_answer', {
+          p_attempt_id: state.attemptId,
+          p_item_id: question.item_id,
+          p_selected_option_key: optionKey
+        });
+        if (error) throw error;
+        question.answered = true;
+        question.selected_option_key = optionKey;
+        state.feedbackByItem.set(question.item_id, data);
+        showFeedback(question, data);
+        const answeredCount = state.questions.filter((item) => item.answered === true).length;
+        const correctCount = Array.from(state.feedbackByItem.values()).filter((item) => item.is_correct === true).length;
+        $('correctSoFar').textContent = `답변 ${answeredCount} · 정답 ${correctCount}`;
+      } catch (error) {
+        console.error(`[quiz ${VERSION}] answer failed`, error);
+        setOptionsDisabled(false);
+        showMessage(rpcErrorMessage(error));
+      } finally {
+        state.answerBusy = false;
+      }
+    }
+
+    function showFeedback(question, feedback) {
+      setOptionsDisabled(true);
+      $('optionsList').querySelectorAll('.option').forEach((button) => {
+        const key = button.dataset.optionKey;
+        button.classList.toggle('is-correct', key === feedback.correct_option_key);
+        button.classList.toggle('is-wrong', key === feedback.selected_option_key && feedback.is_correct !== true);
+      });
+      $('feedbackTitle').textContent = feedback.is_correct === true ? '정답이에요! ☀️' : '괜찮아요, 해설로 알아가요 🌱';
+      $('feedbackTitle').className = `feedback-title ${feedback.is_correct === true ? 'correct' : 'wrong'}`;
+      $('feedbackText').textContent = String(feedback.explanation || '');
+      const source = $('feedbackSource');
+      source.replaceChildren();
+      if (feedback.source_label) {
+        source.append(document.createTextNode(`참고: ${feedback.source_label}`));
+        if (feedback.source_url) {
+          try {
+            const url = new URL(feedback.source_url);
+            if (url.protocol === 'https:') {
+              source.append(document.createTextNode(' · '));
+              const link = document.createElement('a');
+              link.href = url.href;
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+              link.textContent = '자료 열기';
+              source.append(link);
+            }
+          } catch (_) {}
+        }
+        source.classList.remove('hidden');
+      } else {
+        source.classList.add('hidden');
+      }
+      $('feedbackBox').classList.remove('hidden');
+      $('nextButton').textContent = state.index === state.questions.length - 1 ? '결과 보기 🎉' : '다음 문제';
+      $('nextRow').classList.remove('hidden');
+      $('nextButton').focus();
+    }
+
+    async function goNext() {
+      const question = state.questions[state.index];
+      if (!question?.answered || state.answerBusy || state.completeBusy) return;
+      if (state.index < state.questions.length - 1) {
+        state.index += 1;
+        renderQuestion();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      await completeQuiz();
+    }
+
+    async function completeQuiz() {
+      if (state.completeBusy) return;
+      state.completeBusy = true;
+      $('nextButton').disabled = true;
+      try {
+        const { data, error } = await client.rpc('quiz_pilot_complete_attempt', { p_attempt_id: state.attemptId });
+        if (error) throw error;
+        clearRequestKey();
+        await loadSummary();
+        renderResult(data || {});
+        showView('resultView');
+        if (data?.hall_of_fame_eligible === true && data?.hall_of_fame_consent == null) {
+          setTimeout(() => {
+            $('hofDialog').classList.remove('hidden');
+            $('hofConsentButton').focus();
+          }, 250);
+        }
+      } catch (error) {
+        console.error(`[quiz ${VERSION}] complete failed`, error);
+        showMessage(rpcErrorMessage(error, '결과를 저장하지 못했습니다. 잠시 후 다시 눌러 주세요.'));
+      } finally {
+        state.completeBusy = false;
+        $('nextButton').disabled = false;
+      }
+    }
+
+    function renderResult(result) {
+      const correct = Number(result.correct_count || 0);
+      const total = Number(result.total_questions || 5);
+      $('resultScore').textContent = String(correct);
+      $('resultTotal').textContent = `/ ${total}문제`;
+      $('resultCopy').textContent = correct === total
+        ? '완벽해요! 오늘 만난 햇빛 상식을 모두 정확히 짚었어요.'
+        : correct >= 4
+          ? '거의 다 왔어요. 오늘 읽은 해설이 다음 복습에서 든든한 힌트가 될 거예요.'
+          : '점수보다 알아가는 과정이 더 중요해요. 다음 판에서는 덜 본 문제와 복습 문제를 고르게 만나게 됩니다.';
+      const badges = Array.isArray(state.summary?.badges) ? state.summary.badges : [];
+      const list = $('badgeList');
+      list.replaceChildren();
+      badges.forEach((badge) => {
+        const card = document.createElement('div');
+        card.className = `badge-card${badge.earned === true ? '' : ' is-locked'}`;
+        const icon = document.createElement('div');
+        icon.className = 'badge-icon';
+        icon.textContent = String(badge.icon || '🌱');
+        const name = document.createElement('div');
+        name.className = 'badge-name';
+        name.textContent = String(badge.name || '퀴즈 뱃지');
+        const progress = document.createElement('div');
+        progress.className = 'badge-progress';
+        progress.textContent = badge.earned === true ? '달성!' : `${Number(badge.progress || 0)} / ${Number(badge.target || 1)}`;
+        card.append(icon, name, progress);
+        list.appendChild(card);
+      });
+      renderHistory('resultHistory', 'resultHistoryList');
+    }
+
+    async function saveHofConsent(consent) {
+      if (state.consentBusy) return;
+      state.consentBusy = true;
+      $('hofConsentButton').disabled = true;
+      $('hofDeclineButton').disabled = true;
+      try {
+        const { error } = await client.rpc('quiz_pilot_set_hall_of_fame_consent', {
+          p_attempt_id: state.attemptId,
+          p_consent: consent
+        });
+        if (error) throw error;
+        $('hofDialog').classList.add('hidden');
+        showMessage(consent ? '동의가 기록되었습니다. 정식 공개 전에는 명예의 전당에 표시되지 않습니다.' : '공개 기록에 동의하지 않은 것으로 저장했습니다.', consent ? '축하 기록을 보관했어요 🎊' : '선택을 저장했어요');
+      } catch (error) {
+        console.error(`[quiz ${VERSION}] consent failed`, error);
+        showMessage(rpcErrorMessage(error, '선택을 저장하지 못했습니다. 다시 시도해 주세요.'));
+      } finally {
+        state.consentBusy = false;
+        $('hofConsentButton').disabled = false;
+        $('hofDeclineButton').disabled = false;
+      }
+    }
+
+    $('loginButton').addEventListener('click', () => { location.href = loginUrl(); });
+    $('startButton').addEventListener('click', startQuiz);
+    $('retryButton').addEventListener('click', startQuiz);
+    $('backToIntroButton').addEventListener('click', () => { renderHistory('introHistory', 'introHistoryList'); showView('introView'); });
+    $('nextButton').addEventListener('click', goNext);
+    $('hofConsentButton').addEventListener('click', () => saveHofConsent(true));
+    $('hofDeclineButton').addEventListener('click', () => saveHofConsent(false));
+    $('messageCloseButton').addEventListener('click', closeMessage);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !$('messageDialog').classList.contains('hidden')) closeMessage();
+    });
+
+    console.log(`[Version] quiz.html v${VERSION}`);
+    void boot();
+  })();
+  </script>
+</body>
+</html>
