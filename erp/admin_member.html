@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.141
-Change: Reuse modal instances after asynchronous admin lookups to prevent rapid-tap backdrop stacking.
+Version: v1.0.142
+Change: Load each member's quiz participation only from the member detail participation tabs.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.141';
+window.ADMIN_MEMBER_VERSION = 'v1.0.142';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -193,7 +193,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .participation-admin-frame-wrap { min-height:760px; overflow:hidden; border:1px solid #e2e8f0; border-radius:16px; background:#fff; box-shadow:0 8px 22px rgba(15,23,42,.05); }
 .participation-admin-frame { display:block; width:100%; height:calc(100vh - 175px); min-height:760px; border:0; background:#fff; }
 .admin-participation-history-list { display:flex; flex-direction:column; gap:12px; }
-.admin-participation-history-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:5px; margin-bottom:14px; border-radius:13px; background:#f1f5f9; }
+.admin-participation-history-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:5px; margin-bottom:14px; border-radius:13px; background:#f1f5f9; }
 .admin-participation-history-tab { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; min-height:58px; padding:8px 10px; border:0; border-radius:10px; background:transparent; color:#475569; }
 .admin-participation-history-tab:hover { color:#0f172a; }
 .admin-participation-history-tab.active { background:#fff; color:#0f172a; box-shadow:0 2px 8px rgba(15,23,42,.09); }
@@ -209,6 +209,11 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .admin-participation-status-absent { background:#fee2e2; color:#991b1b; }
 .admin-participation-status-excused { background:#fff7ed; color:#9a3412; }
 .admin-participation-status-pending { background:#f1f5f9; color:#475569; }
+.admin-member-quiz-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.admin-member-quiz-stat { min-width:0; padding:12px 13px; border:1px solid #dbe7df; border-radius:12px; background:#f7fbf8; }
+.admin-member-quiz-stat span { display:block; color:#64748b; font-size:.75rem; font-weight:750; }
+.admin-member-quiz-stat strong { display:block; margin-top:3px; color:#14532d; font-size:1.05rem; overflow-wrap:anywhere; }
+.admin-member-quiz-attempt-meta { display:flex; flex-wrap:wrap; gap:7px 13px; margin-top:8px; color:#64748b; font-size:.8rem; }
 @media (max-width:991.98px) {
   .fund-summary-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
   .member-history-table, .member-history-table tbody { display:block; width:100%; }
@@ -226,6 +231,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
   .fund-summary-view { min-height:138px; padding:16px; }
   .fund-summary-amount { font-size:1.45rem; }
   .member-history-filter .btn { min-height:38px; }
+  .admin-member-quiz-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
@@ -2876,7 +2882,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </li>
 <li class="nav-item">
 <button class="nav-link py-3" data-bs-toggle="tab" data-bs-target="#md-tab-participation" type="button" onclick="loadAdminMemberParticipationHistory()">
-📅 교육·회의 참여
+📅 교육·회의·퀴즈 참여
 </button>
 </li>
 </ul>
@@ -3115,10 +3121,10 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="tab-pane fade" id="md-tab-participation">
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
 <div>
-<h6 class="fw-bold mb-1">교육·회의 참여 이력</h6>
+<h6 class="fw-bold mb-1">교육·회의·퀴즈 참여 이력</h6>
 <div class="small text-muted" id="md-participation-summary">탭을 선택하면 불러옵니다.</div>
 </div>
-<button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAdminMemberParticipationHistory(true)">새로고침</button>
+<button type="button" class="btn btn-sm btn-outline-secondary" onclick="reloadAdminMemberParticipationActiveTab()">새로고침</button>
 </div>
 <div class="admin-participation-history-tabs" role="tablist" aria-label="조합원 참여 이력 유형">
 <button type="button" class="admin-participation-history-tab active" id="md-participation-tab-education" role="tab" aria-selected="true" aria-controls="md-participation-list" tabindex="0" onclick="switchAdminMemberParticipationTab('EDUCATION')" onkeydown="handleAdminMemberParticipationTabKeydown(event)">
@@ -3129,9 +3135,13 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <span class="admin-participation-history-tab-label">회의</span>
 <span class="admin-participation-history-tab-count" id="md-participation-meeting-count">참석 -회 · 배석 -회</span>
 </button>
+<button type="button" class="admin-participation-history-tab" id="md-participation-tab-quiz" role="tab" aria-selected="false" aria-controls="md-participation-list" tabindex="-1" onclick="switchAdminMemberParticipationTab('QUIZ')" onkeydown="handleAdminMemberParticipationTabKeydown(event)">
+<span class="admin-participation-history-tab-label">퀴즈</span>
+<span class="admin-participation-history-tab-count" id="md-participation-quiz-count">완료 -회 · 정답률 -%</span>
+</button>
 </div>
 <div class="admin-participation-history-list" id="md-participation-list" role="tabpanel" aria-labelledby="md-participation-tab-education" tabindex="0">
-<div class="text-center text-muted py-5">교육·회의 참여 이력을 불러오려면 이 탭을 선택하세요.</div>
+<div class="text-center text-muted py-5">교육·회의·퀴즈 참여 이력을 불러오려면 이 탭을 선택하세요.</div>
 </div>
 </div>
 </div>
@@ -11139,6 +11149,8 @@ async function fetchAdminMemberDetailRow(id) {
 let adminMemberParticipationLoadedFor = null;
 let adminMemberParticipationData = { events:[] };
 let adminMemberParticipationActiveTab = 'EDUCATION';
+let adminMemberQuizLoadedFor = null;
+let adminMemberQuizData = { attempts:[] };
 
 function adminMemberParticipationTypeLabel(type) {
     if (type === 'BOARD') return '이사회';
@@ -11163,33 +11175,48 @@ function adminMemberParticipationStatusClass(status, eventType, isTarget) {
 } // End of adminMemberParticipationStatusClass
 
 function syncAdminMemberParticipationTabs() {
-    const educationTab = document.getElementById('md-participation-tab-education');
-    const meetingTab = document.getElementById('md-participation-tab-meeting');
-    const educationActive = adminMemberParticipationActiveTab === 'EDUCATION';
-    educationTab?.classList.toggle('active', educationActive);
-    educationTab?.setAttribute('aria-selected', educationActive ? 'true' : 'false');
-    educationTab?.setAttribute('tabindex', educationActive ? '0' : '-1');
-    meetingTab?.classList.toggle('active', !educationActive);
-    meetingTab?.setAttribute('aria-selected', educationActive ? 'false' : 'true');
-    meetingTab?.setAttribute('tabindex', educationActive ? '-1' : '0');
+    const tabMap = {
+        EDUCATION: document.getElementById('md-participation-tab-education'),
+        MEETING: document.getElementById('md-participation-tab-meeting'),
+        QUIZ: document.getElementById('md-participation-tab-quiz')
+    };
+    Object.entries(tabMap).forEach(function([tabName, tabElement]) {
+        const isActive = adminMemberParticipationActiveTab === tabName;
+        tabElement?.classList.toggle('active', isActive);
+        tabElement?.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        tabElement?.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
     document.getElementById('md-participation-list')?.setAttribute(
         'aria-labelledby',
-        educationActive ? 'md-participation-tab-education' : 'md-participation-tab-meeting'
+        `md-participation-tab-${adminMemberParticipationActiveTab.toLowerCase()}`
     );
 } // End of syncAdminMemberParticipationTabs
 
 function switchAdminMemberParticipationTab(tab) {
-    adminMemberParticipationActiveTab = tab === 'MEETING' ? 'MEETING' : 'EDUCATION';
+    adminMemberParticipationActiveTab = ['EDUCATION', 'MEETING', 'QUIZ'].includes(tab) ? tab : 'EDUCATION';
     syncAdminMemberParticipationTabs();
+    if (adminMemberParticipationActiveTab === 'QUIZ') {
+        void loadAdminMemberQuizHistory();
+        return;
+    }
     renderAdminMemberParticipationHistory(adminMemberParticipationData);
 } // End of switchAdminMemberParticipationTab
+
+function reloadAdminMemberParticipationActiveTab() {
+    if (adminMemberParticipationActiveTab === 'QUIZ') {
+        void loadAdminMemberQuizHistory(true);
+        return;
+    }
+    void loadAdminMemberParticipationHistory(true);
+} // End of reloadAdminMemberParticipationActiveTab
 
 function handleAdminMemberParticipationTabKeydown(event) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const tabs = [
         document.getElementById('md-participation-tab-education'),
-        document.getElementById('md-participation-tab-meeting')
+        document.getElementById('md-participation-tab-meeting'),
+        document.getElementById('md-participation-tab-quiz')
     ].filter(Boolean);
     if (!tabs.length) return;
     const currentIndex = Math.max(0, tabs.indexOf(event.currentTarget));
@@ -11198,7 +11225,11 @@ function handleAdminMemberParticipationTabKeydown(event) {
         : event.key === 'End'
             ? tabs.length - 1
             : (currentIndex + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length;
-    const targetTab = tabs[targetIndex]?.id === 'md-participation-tab-meeting' ? 'MEETING' : 'EDUCATION';
+    const targetTab = ({
+        'md-participation-tab-education':'EDUCATION',
+        'md-participation-tab-meeting':'MEETING',
+        'md-participation-tab-quiz':'QUIZ'
+    })[tabs[targetIndex]?.id] || 'EDUCATION';
     switchAdminMemberParticipationTab(targetTab);
     tabs[targetIndex]?.focus();
 } // End of handleAdminMemberParticipationTabKeydown
@@ -11220,6 +11251,10 @@ function renderAdminMemberParticipationHistory(data) {
     const meetingCount = document.getElementById('md-participation-meeting-count');
     if (educationCount) educationCount.textContent = `참석 ${educationAttendedCount.toLocaleString('ko-KR')}회`;
     if (meetingCount) meetingCount.textContent = `참석 ${meetingAttendedCount.toLocaleString('ko-KR')}회 · 배석 ${meetingObserverCount.toLocaleString('ko-KR')}회`;
+    if (adminMemberParticipationActiveTab === 'QUIZ') {
+        renderAdminMemberQuizHistory(adminMemberQuizData);
+        return;
+    }
     const visibleEvents = adminMemberParticipationActiveTab === 'EDUCATION' ? educationEvents : meetingEvents;
     if (summary) {
         summary.textContent = adminMemberParticipationActiveTab === 'EDUCATION'
@@ -11281,6 +11316,93 @@ async function loadAdminMemberParticipationHistory(forceReload = false) {
     }
 } // End of loadAdminMemberParticipationHistory
 
+function formatAdminMemberQuizPercent(value) {
+    return `${Number(value || 0).toLocaleString('ko-KR', { maximumFractionDigits:1 })}%`;
+} // End of formatAdminMemberQuizPercent
+
+function renderAdminMemberQuizHistory(data) {
+    const list = document.getElementById('md-participation-list');
+    const summary = document.getElementById('md-participation-summary');
+    const count = document.getElementById('md-participation-quiz-count');
+    if (!list || !summary) return;
+
+    const attempts = Array.isArray(data?.attempts) ? data.attempts : [];
+    const completedAttempts = Number(data?.completed_attempts || 0);
+    const answerCount = Number(data?.answer_count || 0);
+    const correctRate = formatAdminMemberQuizPercent(data?.correct_rate);
+    const perfectAttempts = Number(data?.perfect_attempts || 0);
+    const inProgressAttempts = Number(data?.in_progress_attempts || 0);
+    if (count) count.textContent = `완료 ${completedAttempts.toLocaleString('ko-KR')}회 · 정답률 ${correctRate}`;
+    summary.textContent = `퀴즈 완료 ${completedAttempts.toLocaleString('ko-KR')}회 · 누적 답변 ${answerCount.toLocaleString('ko-KR')}회 · 정답률 ${correctRate}`;
+
+    const latestCompleted = data?.latest_completed_at
+        ? formatAdminMemberKstDateTime(data.latest_completed_at)
+        : '아직 없음';
+    const summaryHtml = `
+        <div class="admin-member-quiz-summary" aria-label="선택한 조합원의 퀴즈 참여 요약">
+            <div class="admin-member-quiz-stat"><span>완료</span><strong>${completedAttempts.toLocaleString('ko-KR')}회</strong></div>
+            <div class="admin-member-quiz-stat"><span>누적 답변</span><strong>${answerCount.toLocaleString('ko-KR')}회</strong></div>
+            <div class="admin-member-quiz-stat"><span>정답률</span><strong>${escapeHtml(correctRate)}</strong></div>
+            <div class="admin-member-quiz-stat"><span>만점</span><strong>${perfectAttempts.toLocaleString('ko-KR')}회</strong></div>
+            <div class="admin-member-quiz-stat"><span>진행 중</span><strong>${inProgressAttempts.toLocaleString('ko-KR')}회</strong></div>
+            <div class="admin-member-quiz-stat"><span>최근 완료</span><strong>${escapeHtml(latestCompleted)}</strong></div>
+        </div>`;
+
+    if (attempts.length === 0) {
+        list.innerHTML = `${summaryHtml}<div class="text-center text-muted py-5">완료한 퀴즈 기록이 없습니다.</div>`;
+        return;
+    }
+
+    const attemptHtml = attempts.map(function(attempt) {
+        const totalQuestions = Number(attempt.total_questions || 0);
+        const correctCount = Number(attempt.correct_count || 0);
+        const reviewCount = Number(attempt.review_count || 0);
+        const hallOfFame = attempt.hall_of_fame_consent === true
+            ? '<span class="badge bg-warning-subtle text-warning-emphasis border">🏆 명예의 전당 공개 동의</span>'
+            : attempt.is_perfect
+                ? '<span class="badge bg-light text-secondary border">명예의 전당 미동의</span>'
+                : '';
+        const challenge = attempt.challenge_selected === true
+            ? '<span class="badge bg-info-subtle text-info-emphasis border">✨ 도전문제 포함</span>'
+            : '';
+        return `
+            <article class="admin-participation-history-item">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div><div class="small text-muted mb-1">${escapeHtml(formatAdminMemberKstDateTime(attempt.completed_at))}</div><div class="fw-bold">${correctCount.toLocaleString('ko-KR')} / ${totalQuestions.toLocaleString('ko-KR')} 정답</div></div>
+                    <span class="admin-participation-status ${attempt.is_perfect ? 'admin-participation-status-attended' : 'admin-participation-status-pending'}">${attempt.is_perfect ? '만점' : escapeHtml(formatAdminMemberQuizPercent(attempt.correct_rate))}</span>
+                </div>
+                <div class="admin-member-quiz-attempt-meta"><span>답변 ${Number(attempt.answer_count || 0).toLocaleString('ko-KR')}개</span><span>복습 문제 ${reviewCount.toLocaleString('ko-KR')}개</span>${attempt.challenge_count ? `<span>도전문제 ${Number(attempt.challenge_count).toLocaleString('ko-KR')}개</span>` : ''}</div>
+                ${hallOfFame || challenge ? `<div class="d-flex flex-wrap gap-2 mt-2">${hallOfFame}${challenge}</div>` : ''}
+            </article>`;
+    }).join('');
+    list.innerHTML = `${summaryHtml}<div class="small text-muted mt-3">최근 완료 기록 ${attempts.length.toLocaleString('ko-KR')}건${data?.history_limit ? ` · 최대 ${Number(data.history_limit).toLocaleString('ko-KR')}건 표시` : ''}</div>${attemptHtml}`;
+} // End of renderAdminMemberQuizHistory
+
+async function loadAdminMemberQuizHistory(forceReload = false) {
+    const memberUuid = g_current_member_id;
+    const list = document.getElementById('md-participation-list');
+    const summary = document.getElementById('md-participation-summary');
+    if (!memberUuid || !list || !summary) return;
+    if (!forceReload && String(adminMemberQuizLoadedFor) === String(memberUuid)) {
+        renderAdminMemberQuizHistory(adminMemberQuizData);
+        return;
+    }
+    summary.textContent = '퀴즈 참여 기록을 불러오는 중...';
+    list.innerHTML = '<div class="text-center text-muted py-5"><span class="spinner-border spinner-border-sm me-2"></span>퀴즈 참여 기록을 불러오는 중...</div>';
+    try {
+        const { data, error } = await _supabase.rpc('quiz_admin_get_member_detail', { p_member_id:memberUuid });
+        if (error) throw error;
+        if (String(g_current_member_id) !== String(memberUuid)) return;
+        adminMemberQuizLoadedFor = memberUuid;
+        adminMemberQuizData = data || { attempts:[] };
+        renderAdminMemberQuizHistory(adminMemberQuizData);
+    } catch (error) {
+        console.error('loadAdminMemberQuizHistory failed:', error);
+        summary.textContent = '퀴즈 참여 기록 조회 실패';
+        list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '퀴즈 참여 기록을 불러오지 못했습니다.')}</div>`;
+    }
+} // End of loadAdminMemberQuizHistory
+
 async function openMemberDetail(id) {
     // 1. 데이터 매칭
     let m = findCachedAdminMember(id);
@@ -11308,15 +11430,19 @@ async function openMemberDetail(id) {
     adminMemberParticipationLoadedFor = null;
     adminMemberParticipationData = { events:[] };
     adminMemberParticipationActiveTab = 'EDUCATION';
+    adminMemberQuizLoadedFor = null;
+    adminMemberQuizData = { attempts:[] };
     syncAdminMemberParticipationTabs();
     const participationSummaryEl = document.getElementById('md-participation-summary');
     const participationListEl = document.getElementById('md-participation-list');
     const participationEducationCountEl = document.getElementById('md-participation-education-count');
     const participationMeetingCountEl = document.getElementById('md-participation-meeting-count');
+    const participationQuizCountEl = document.getElementById('md-participation-quiz-count');
     if (participationSummaryEl) participationSummaryEl.textContent = '탭을 선택하면 불러옵니다.';
-    if (participationListEl) participationListEl.innerHTML = '<div class="text-center text-muted py-5">교육·회의 참여 이력을 불러오려면 이 탭을 선택하세요.</div>';
+    if (participationListEl) participationListEl.innerHTML = '<div class="text-center text-muted py-5">교육·회의·퀴즈 참여 이력을 불러오려면 이 탭을 선택하세요.</div>';
     if (participationEducationCountEl) participationEducationCountEl.textContent = '참석 -회';
     if (participationMeetingCountEl) participationMeetingCountEl.textContent = '참석 -회 · 배석 -회';
+    if (participationQuizCountEl) participationQuizCountEl.textContent = '완료 -회 · 정답률 -%';
 
     // 2. UI 초기화 & 데이터 바인딩
     document.getElementById('md-uid').value = memberUid;
