@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.47 | Change: 2026-08-27 - Match social-insurance notice breakdown and leave wording. -->
+<!-- Version: v1.2.48 | Change: 2026-08-27 - Add a shared notice-count helper and align employment-insurance inputs. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.47 | approval.html');</script>
+  <script>console.log('[Version] v1.2.48 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -88,6 +88,23 @@
       border-bottom: 1px dashed #dbe4ee;
     }
     .approval-insurance-notice-count .form-text { margin: 0; }
+    .approval-insurance-base-count {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 150px;
+      align-items: end;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding: 12px 14px;
+      border: 1px solid #bfdbfe;
+      border-radius: 10px;
+      background: #eff6ff;
+    }
+    .approval-insurance-base-count .form-text { margin: 0; color: #475569; }
+    .approval-insurance-money-field {
+      display: flex;
+      flex-direction: column;
+    }
+    .approval-insurance-money-field > .form-control { margin-top: auto; }
     .approval-insurance-method {
       min-height: 31px;
       display: flex;
@@ -186,6 +203,7 @@
       .approval-insurance-panel { padding: 14px; }
       .approval-insurance-summary-grid { grid-template-columns: 1fr; }
       .approval-insurance-notice-count { grid-template-columns: minmax(0, 1fr) 96px; }
+      .approval-insurance-base-count { grid-template-columns: minmax(0, 1fr) 108px; padding: 12px; }
       .approval-insurance-document-header { display: block; }
       .approval-insurance-document-meta { margin-top: 4px; text-align: left; }
       .approval-insurance-scroll-hint { display: block; }
@@ -775,6 +793,16 @@
                   <div class="approval-insurance-section">
                     <div class="approval-insurance-section-title">보험별 고지서 입력</div>
                     <div class="text-muted mb-3">고지서의 고지인원과 금액을 항목별로 그대로 옮겨 적으세요. 지원금과 충당·수납액은 결재 금액에서 자동으로 차감됩니다.</div>
+                    <div class="approval-insurance-base-count">
+                      <div>
+                        <label class="fw-bold mb-1" for="insuranceNoticeCountBase">기준 고지인원</label>
+                        <div class="form-text">입력하면 아래 네 보험의 고지인원이 한 번에 채워집니다. 적용한 뒤에는 보험별 인원을 각각 다르게 수정할 수 있습니다.</div>
+                      </div>
+                      <div class="input-group">
+                        <input type="number" min="0" step="1" inputmode="numeric" class="form-control text-end" id="insuranceNoticeCountBase" placeholder="예: 2" oninput="applyApprovalInsuranceBaseNoticeCount()">
+                        <span class="input-group-text">명</span>
+                      </div>
+                    </div>
                     <div class="row g-3">
                       <div class="col-xl-6">
                         <div class="approval-insurance-notice-card">
@@ -837,19 +865,19 @@
                             </div>
                           </div>
                           <div class="row g-2">
-                            <div class="col-sm-6">
+                            <div class="col-sm-6 approval-insurance-money-field">
                               <label class="text-muted fw-bold mb-1" for="insuranceEmployment">실업급여보험료</label>
                               <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceEmployment" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
                             </div>
-                            <div class="col-sm-6">
+                            <div class="col-sm-6 approval-insurance-money-field">
                               <label class="text-muted fw-bold mb-1" for="insuranceEmploymentStability">고용안정·직업능력개발보험료</label>
                               <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceEmploymentStability" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
                             </div>
-                            <div class="col-sm-6">
+                            <div class="col-sm-6 approval-insurance-money-field">
                               <label class="text-muted fw-bold mb-1" for="insuranceDurunuriEmployment">실업급여 지원금 <span class="fw-normal">(두루누리)</span></label>
                               <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceDurunuriEmployment" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
                             </div>
-                            <div class="col-sm-6">
+                            <div class="col-sm-6 approval-insurance-money-field">
                               <label class="text-muted fw-bold mb-1" for="insuranceDurunuriStability">고용안정·직업능력개발 지원금 <span class="fw-normal">(두루누리)</span></label>
                               <input type="number" min="0" step="1" class="form-control text-end insurance-expense-money" id="insuranceDurunuriStability" placeholder="0" oninput="syncApprovalInsuranceExpenseTotal()">
                             </div>
@@ -2732,6 +2760,7 @@ function collectApprovalDraftFormPayload() {
             insurance_durunuri_employment: String(document.getElementById('insuranceDurunuriEmployment')?.value || '').trim(),
             insurance_durunuri_stability: String(document.getElementById('insuranceDurunuriStability')?.value || '').trim(),
             insurance_pension_offset_receipts: String(document.getElementById('insurancePensionOffsetReceipts')?.value || '').trim(),
+            insurance_notice_count_base: String(document.getElementById('insuranceNoticeCountBase')?.value || '').trim(),
             insurance_notice_count_health_care: String(document.getElementById('insuranceNoticeCountHealthCare')?.value || '').trim(),
             insurance_notice_count_pension: String(document.getElementById('insuranceNoticeCountPension')?.value || '').trim(),
             insurance_notice_count_employment: String(document.getElementById('insuranceNoticeCountEmployment')?.value || '').trim(),
@@ -3233,6 +3262,7 @@ async function loadApprovalDraftFromServer(draftId) {
             insuranceDurunuriEmployment: 'insurance_durunuri_employment',
             insuranceDurunuriStability: 'insurance_durunuri_stability',
             insurancePensionOffsetReceipts: 'insurance_pension_offset_receipts',
+            insuranceNoticeCountBase: 'insurance_notice_count_base',
             insuranceNoticeCountHealthCare: 'insurance_notice_count_health_care',
             insuranceNoticeCountPension: 'insurance_notice_count_pension',
             insuranceNoticeCountEmployment: 'insurance_notice_count_employment',
@@ -5005,6 +5035,7 @@ const APPROVAL_INSURANCE_FIELD_IDS = Object.freeze([
     'insuranceDurunuriEmployment',
     'insuranceDurunuriStability',
     'insurancePensionOffsetReceipts',
+    'insuranceNoticeCountBase',
     'insuranceNoticeCountHealthCare',
     'insuranceNoticeCountPension',
     'insuranceNoticeCountEmployment',
@@ -5024,6 +5055,22 @@ function parseApprovalInsuranceNoticeCount(value) {
     if (!Number.isInteger(count) || count < 0) return null;
     return count;
 } // End of parseApprovalInsuranceNoticeCount
+
+function applyApprovalInsuranceBaseNoticeCount() {
+    const baseInput = document.getElementById('insuranceNoticeCountBase');
+    const baseCount = parseApprovalInsuranceNoticeCount(baseInput?.value);
+    if (baseCount == null) return;
+    [
+        'insuranceNoticeCountHealthCare',
+        'insuranceNoticeCountPension',
+        'insuranceNoticeCountEmployment',
+        'insuranceNoticeCountIndustrial'
+    ].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.value = String(baseCount);
+    });
+    syncApprovalInsuranceExpenseTotal();
+} // End of applyApprovalInsuranceBaseNoticeCount
 
 function buildApprovalInsuranceDueDate(billingMonth) {
     const matched = String(billingMonth || '').trim().match(/^(\d{4})-(0[1-9]|1[0-2])$/);
@@ -5136,6 +5183,7 @@ function collectApprovalInsuranceExpenseInput() {
         billing_month: billingMonth,
         due_date: dueDate || null,
         notice_counts: {
+            base: parseApprovalInsuranceNoticeCount(document.getElementById('insuranceNoticeCountBase')?.value),
             health_care: parseApprovalInsuranceNoticeCount(document.getElementById('insuranceNoticeCountHealthCare')?.value),
             pension: parseApprovalInsuranceNoticeCount(document.getElementById('insuranceNoticeCountPension')?.value),
             employment: parseApprovalInsuranceNoticeCount(document.getElementById('insuranceNoticeCountEmployment')?.value),
