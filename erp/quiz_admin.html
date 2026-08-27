@@ -18,7 +18,13 @@
     .page-title { margin:0; font-size:clamp(27px,4vw,40px); font-weight:850; letter-spacing:-.035em; }
     .page-copy { margin:8px 0 0; color:var(--quiz-admin-muted); }
     .pilot-label { display:inline-flex; align-items:center; gap:6px; margin-bottom:8px; padding:5px 9px; border-radius:999px; color:#755300; background:#fff3c4; font-size:12px; font-weight:800; }
-    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px auto; gap:10px; margin-bottom:18px; padding:16px; border:1px solid var(--quiz-admin-line); border-radius:18px; background:#fff; box-shadow:0 10px 35px rgba(26,56,34,.06); }
+    .toolbar { margin-bottom:18px; padding:18px; border:1px solid var(--quiz-admin-line); border-radius:18px; background:#fff; box-shadow:0 10px 35px rgba(26,56,34,.06); }
+    .toolbar-head { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:12px; }
+    .toolbar-title { margin:0; font-size:16px; font-weight:850; }
+    .search-line { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:9px; }
+    .filter-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:9px; margin-top:10px; }
+    .filter-field label { display:block; margin:0 0 5px; color:var(--quiz-admin-muted); font-size:11px; font-weight:800; }
+    .toolbar-help { margin:10px 0 0; color:var(--quiz-admin-muted); font-size:12px; line-height:1.55; }
     .overview-panel { margin-bottom:22px; padding:20px; border:1px solid var(--quiz-admin-line); border-radius:20px; background:#fff; box-shadow:0 10px 35px rgba(26,56,34,.06); }
     .overview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
     .overview-title { margin:0; font-size:20px; font-weight:850; }
@@ -52,6 +58,8 @@
     .explanation p { margin:0; font-size:14px; }
     .card-footer-line { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:13px; color:var(--quiz-admin-muted); font-size:12px; }
     .empty, .loading-panel { padding:60px 24px; border:1px dashed #cbd8ce; border-radius:20px; background:#fff; text-align:center; color:var(--quiz-admin-muted); }
+    .pagination-panel { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:18px; }
+    .pagination-copy { min-width:145px; color:var(--quiz-admin-muted); font-size:13px; font-weight:750; text-align:center; }
     .modal-content { border:0; border-radius:22px; overflow:hidden; box-shadow:0 28px 90px rgba(0,0,0,.2); }
     .modal-header { padding:20px 24px; background:#f8faf8; }
     .modal-body { padding:24px; }
@@ -80,7 +88,9 @@
     @media (max-width:760px) {
       .page-head { display:block; }
       .page-head-actions { margin-top:14px; }
-      .toolbar { grid-template-columns:1fr; }
+      .toolbar-head { align-items:flex-start; }
+      .search-line, .filter-grid { grid-template-columns:1fr; }
+      .search-line .btn { width:100%; }
       .overview-head { display:block; }
       .overview-head .btn { width:100%; margin-top:10px; }
       .member-detail-guide { display:block; }
@@ -143,12 +153,32 @@
       </section>
 
       <section class="toolbar" aria-label="문제 검색과 필터">
-        <div><label class="visually-hidden" for="searchInput">문제 검색</label><input class="form-control" id="searchInput" type="search" placeholder="문제, 선택지, 해설, 분류 검색"></div>
-        <div><label class="visually-hidden" for="statusFilter">상태 필터</label><select class="form-select" id="statusFilter"><option value="">전체 상태</option><option value="PUBLISHED">출제 중</option><option value="DRAFT">작성 중</option><option value="ARCHIVED">삭제됨</option></select></div>
-        <button type="button" class="btn btn-success" id="addQuestionButton">＋ 새 문제</button>
+        <div class="toolbar-head">
+          <div>
+            <h2 class="toolbar-title">🔎 문제 찾기</h2>
+            <div class="toolbar-help mt-1">문제 목록은 자동으로 불러오지 않습니다. 검색어나 필터를 정한 뒤 검색해 주세요.</div>
+          </div>
+          <button type="button" class="btn btn-success flex-shrink-0" id="addQuestionButton">＋ 새 문제</button>
+        </div>
+        <form id="questionSearchForm" novalidate>
+          <div class="search-line">
+            <div><label class="visually-hidden" for="searchInput">문제 검색</label><input class="form-control" id="searchInput" type="search" maxlength="100" autocomplete="off" placeholder="문제, 선택지, 해설, 분류 또는 관리 번호"></div>
+            <button type="submit" class="btn btn-success" id="searchButton">검색</button>
+            <button type="button" class="btn btn-outline-secondary" id="resetSearchButton">초기화</button>
+          </div>
+          <div class="filter-grid">
+            <div class="filter-field"><label for="statusFilter">상태</label><select class="form-select" id="statusFilter"><option value="">전체 상태</option><option value="PUBLISHED">출제 중</option><option value="DRAFT">작성 중</option><option value="ARCHIVED">삭제됨</option></select></div>
+            <div class="filter-field"><label for="difficultyFilter">난이도</label><select class="form-select" id="difficultyFilter"><option value="">전체 난이도</option><option value="EASY">쉬움</option><option value="NORMAL">보통</option><option value="CHALLENGE">도전</option></select></div>
+            <div class="filter-field"><label for="answerFilter">답변 기록</label><select class="form-select" id="answerFilter"><option value="">전체 문제</option><option value="HAS_ANSWERS">답변 있음</option><option value="NO_ANSWERS">답변 없음</option></select></div>
+            <div class="filter-field"><label for="minAnswersFilter">최소 답변 수</label><select class="form-select" id="minAnswersFilter"><option value="0">제한 없음</option><option value="1">1회 이상</option><option value="5">5회 이상</option><option value="10">10회 이상</option><option value="30">30회 이상</option></select></div>
+            <div class="filter-field"><label for="rankFilter">정답률 구간</label><select class="form-select" id="rankFilter"><option value="">전체 구간</option><option value="BOTTOM_10">낮은 하위 10%</option><option value="BOTTOM_25">낮은 하위 25%</option><option value="TOP_25">높은 상위 25%</option><option value="TOP_10">높은 상위 10%</option></select></div>
+            <div class="filter-field"><label for="sortFilter">정렬</label><select class="form-select" id="sortFilter"><option value="UPDATED_DESC">최근 수정순</option><option value="SOURCE_ASC">관리 번호순</option><option value="ANSWERS_DESC">답변 많은 순</option><option value="RATE_ASC">정답률 낮은 순</option><option value="RATE_DESC">정답률 높은 순</option></select></div>
+          </div>
+          <p class="toolbar-help" id="rankHelp">상·하위 구간은 답변이 있는 문제끼리 비교하고, 같은 정답률은 함께 포함합니다. 최소 답변 수를 같이 쓰면 표본이 너무 적은 문제를 걸러낼 수 있습니다.</p>
+        </form>
       </section>
 
-      <section class="summary-strip" aria-label="문제 현황">
+      <section class="summary-strip d-none" id="resultSummary" aria-label="검색한 문제 현황">
         <div class="summary-card"><span>검색 결과</span><strong id="summaryTotal">0</strong></div>
         <div class="summary-card"><span>출제 중</span><strong id="summaryPublished">0</strong></div>
         <div class="summary-card"><span>전체 답변</span><strong id="summaryAnswers">0</strong></div>
@@ -157,7 +187,13 @@
 
       <section id="listLoading" class="loading-panel d-none" aria-live="polite"><div class="spinner-border spinner-border-sm text-success me-2" role="status"></div>문제를 불러오는 중입니다.</section>
       <section class="question-list" id="questionList"></section>
+      <section class="empty" id="searchPromptPanel"><div class="fs-2 mb-2">🗂️</div><strong>아직 문제 목록을 불러오지 않았습니다.</strong><div class="small mt-1">검색어를 입력하거나 필터를 고른 뒤 <code>검색</code>을 누르세요.</div></section>
       <section class="empty d-none" id="emptyPanel"><div class="fs-2 mb-2">🔎</div><strong>조건에 맞는 문제가 없습니다.</strong><div class="small mt-1">검색어 또는 상태 필터를 바꿔 보세요.</div></section>
+      <nav class="pagination-panel d-none" id="paginationPanel" aria-label="문제 검색 결과 페이지">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="previousPageButton">← 이전</button>
+        <span class="pagination-copy" id="paginationCopy">1 / 1페이지</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="nextPageButton">다음 →</button>
+      </nav>
     </div>
   </main>
 
@@ -209,13 +245,17 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.4.0';
+    const VERSION = '1.5.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       global: { headers: { 'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').toLowerCase() } }
     });
-    const state = { questions:[], overall:null, loading:false, overallLoading:false, loadSeq:0, saving:false, deleting:false, statsLoading:false, deleteId:'', searchTimer:0 };
+    const state = {
+      questions:[], overall:null, loading:false, overallLoading:false, loadSeq:0,
+      saving:false, deleting:false, statsLoading:false, deleteId:'',
+      hasSearched:false, query:null, page:1, pageCount:0, totalCount:0
+    };
     const $ = (id) => document.getElementById(id);
     const questionModal = bootstrap.Modal.getOrCreateInstance($('questionModal'));
     const statsModal = bootstrap.Modal.getOrCreateInstance($('statsModal'));
@@ -240,6 +280,7 @@
       if (message.includes('QUIZ_ADMIN_PERMISSION_REQUIRED')) return '퀴즈 문제를 관리할 ERP 권한이 없습니다.';
       if (message.includes('QUIZ_SOURCE_NUMBER_DUPLICATE')) return '이미 사용 중인 관리 번호입니다. 다른 번호를 입력하거나 비워 주세요.';
       if (message.includes('QUIZ_OPTIONS') || message.includes('QUIZ_OPTION')) return '선택지를 확인해 주세요. 선택지는 2~6개이고 정답 하나를 골라야 합니다.';
+      if (message.includes('QUIZ_SEARCH') || message.includes('QUIZ_PAGE') || message.includes('QUIZ_SORT') || message.includes('QUIZ_RANK') || message.includes('QUIZ_ANSWER_SCOPE') || message.includes('QUIZ_MIN_ANSWERS') || message.includes('QUIZ_DIFFICULTY_FILTER')) return '검색어나 필터 조건을 다시 확인해 주세요.';
       if (message.includes('JWT') || error?.status === 401) return '로그인 시간이 만료되었습니다. ERP에서 다시 로그인해 주세요.';
       return fallback || '요청을 처리하지 못했습니다.';
     }
@@ -258,7 +299,7 @@
         if (context?.allowed !== true) throw new Error('QUIZ_PILOT_ACCESS_REQUIRED');
         $('bootPanel').classList.add('d-none');
         $('mainPanel').classList.remove('d-none');
-        await Promise.all([loadOverallStats(),loadQuestions()]);
+        await loadOverallStats();
       } catch (error) {
         console.error(`[quiz-admin ${VERSION}] boot failed`,error);
         $('bootPanel').innerHTML=`<div class="fs-2 mb-2">🔒</div><strong>${escapeHtml(errorMessage(error,'퀴즈 관리 화면을 열지 못했습니다.'))}</strong><div class="mt-3"><a class="btn btn-outline-secondary" href="index.html">ERP 메인으로</a></div>`;
@@ -305,43 +346,118 @@
       $('overallRepeatMembers').textContent=`${Number(stats.repeat_participants||0).toLocaleString('ko-KR')}명`;
     }
 
-    async function loadQuestions() {
+    function readQuestionQuery() {
+      return {
+        p_search:$('searchInput').value.trim()||null,
+        p_status:$('statusFilter').value||null,
+        p_difficulty:$('difficultyFilter').value||null,
+        p_answer_scope:$('answerFilter').value||null,
+        p_rank_scope:$('rankFilter').value||null,
+        p_min_answers:Number($('minAnswersFilter').value||0),
+        p_sort:$('sortFilter').value||'UPDATED_DESC',
+        p_page_size:20
+      };
+    }
+
+    function setQuestionSearchBusy(busy) {
+      $('searchButton').disabled=busy;
+      $('resetSearchButton').disabled=busy;
+      $('previousPageButton').disabled=busy||state.page<=1;
+      $('nextPageButton').disabled=busy||state.pageCount===0||state.page>=state.pageCount;
+    }
+
+    async function searchQuestions(event) {
+      event?.preventDefault();
+      if(state.loading)return;
+      state.query=readQuestionQuery();
+      state.hasSearched=true;
+      await loadQuestions(1);
+    }
+
+    async function loadQuestions(page=1) {
+      if(!state.hasSearched||!state.query)return;
+      const requestedPage=Math.max(1,Number(page)||1);
       const loadSeq=++state.loadSeq;
       state.loading=true;
+      setQuestionSearchBusy(true);
       $('listLoading').classList.remove('d-none');
       $('questionList').classList.add('d-none');
       $('emptyPanel').classList.add('d-none');
+      $('searchPromptPanel').classList.add('d-none');
+      $('paginationPanel').classList.add('d-none');
       try {
-        const search=$('searchInput').value.trim();
-        const status=$('statusFilter').value || null;
-        const {data,error}=await client.rpc('quiz_admin_list_questions',{p_search:search||null,p_status:status});
-        if(error) throw error;
+        const {data,error}=await client.rpc('quiz_admin_search_questions',{
+          ...state.query,
+          p_page:requestedPage
+        });
+        if(error)throw error;
         if(loadSeq!==state.loadSeq)return;
-        state.questions=Array.isArray(data)?data:[];
-        renderQuestions();
+        const payload=data&&typeof data==='object'?data:{};
+        const pageCount=Math.max(0,Number(payload.page_count)||0);
+        if(pageCount>0&&requestedPage>pageCount) {
+          await loadQuestions(pageCount);
+          return;
+        }
+        renderQuestions(payload);
       } catch(error) {
         if(loadSeq!==state.loadSeq)return;
-        console.error(`[quiz-admin ${VERSION}] list failed`,error);
+        console.error(`[quiz-admin ${VERSION}] search failed`,error);
         showAlert(errorMessage(error,'문제 목록을 불러오지 못했습니다.'));
       } finally {
         if(loadSeq!==state.loadSeq)return;
         state.loading=false;
         $('listLoading').classList.add('d-none');
+        setQuestionSearchBusy(false);
       }
     }
 
-    function renderQuestions() {
+    function renderQuestions(payload) {
       const list=$('questionList');
+      const summary=payload?.summary&&typeof payload.summary==='object'?payload.summary:{};
+      state.questions=Array.isArray(payload?.items)?payload.items:[];
+      state.page=Math.max(1,Number(payload?.page)||1);
+      state.pageCount=Math.max(0,Number(payload?.page_count)||0);
+      state.totalCount=Math.max(0,Number(summary.total_count)||0);
       list.replaceChildren();
-      const totalAnswers=state.questions.reduce((sum,q)=>sum+Number(q.answer_count||0),0);
-      const totalCorrect=state.questions.reduce((sum,q)=>sum+Number(q.correct_count||0),0);
-      $('summaryTotal').textContent=String(state.questions.length);
-      $('summaryPublished').textContent=String(state.questions.filter(q=>q.status==='PUBLISHED').length);
-      $('summaryAnswers').textContent=totalAnswers.toLocaleString('ko-KR');
-      $('summaryRate').textContent=`${totalAnswers?Math.round(totalCorrect*1000/totalAnswers)/10:0}%`;
-      if(!state.questions.length) { $('emptyPanel').classList.remove('d-none'); list.classList.add('d-none'); return; }
+      $('summaryTotal').textContent=state.totalCount.toLocaleString('ko-KR');
+      $('summaryPublished').textContent=Number(summary.published_count||0).toLocaleString('ko-KR');
+      $('summaryAnswers').textContent=Number(summary.answer_count||0).toLocaleString('ko-KR');
+      $('summaryRate').textContent=formatPercent(summary.correct_rate);
+      $('resultSummary').classList.remove('d-none');
+      $('searchPromptPanel').classList.add('d-none');
+      if(!state.questions.length) {
+        $('emptyPanel').classList.remove('d-none');
+        list.classList.add('d-none');
+        $('paginationPanel').classList.add('d-none');
+        return;
+      }
+      $('emptyPanel').classList.add('d-none');
       state.questions.forEach(question=>list.appendChild(buildQuestionCard(question)));
       list.classList.remove('d-none');
+      $('paginationCopy').textContent=`${state.page.toLocaleString('ko-KR')} / ${state.pageCount.toLocaleString('ko-KR')}페이지 · 총 ${state.totalCount.toLocaleString('ko-KR')}문제`;
+      $('paginationPanel').classList.remove('d-none');
+      setQuestionSearchBusy(false);
+    }
+
+    function resetQuestionSearch() {
+      ++state.loadSeq;
+      $('questionSearchForm').reset();
+      state.questions=[];
+      state.hasSearched=false;
+      state.query=null;
+      state.page=1;
+      state.pageCount=0;
+      state.totalCount=0;
+      state.loading=false;
+      $('questionList').replaceChildren();
+      $('questionList').classList.add('d-none');
+      $('resultSummary').classList.add('d-none');
+      $('listLoading').classList.add('d-none');
+      $('emptyPanel').classList.add('d-none');
+      $('paginationPanel').classList.add('d-none');
+      $('searchPromptPanel').classList.remove('d-none');
+      setQuestionSearchBusy(false);
+      $('searchInput').focus();
     }
 
     function buildQuestionCard(q) {
@@ -482,7 +598,7 @@
         const {error}=await client.rpc('quiz_admin_save_question',payload);
         if(error)throw error;
         questionModal.hide();
-        await loadQuestions();
+        if(state.hasSearched)await loadQuestions(state.page);
         showAlert(payload.p_question_id?'문제를 수정했습니다. 과거 답변 통계는 수정 전 문제 내용과 함께 그대로 보존됩니다.':'새 문제를 추가했습니다.','저장 완료 ☀️');
       } catch(error) { console.error(`[quiz-admin ${VERSION}] save failed`,error); showFormError(errorMessage(error,'문제를 저장하지 못했습니다.')); }
       finally { state.saving=false; $('saveQuestionButton').disabled=false; $('saveQuestionButton').textContent='저장'; }
@@ -495,7 +611,7 @@
       try {
         const {data,error}=await client.rpc('quiz_admin_archive_question',{p_question_id:state.deleteId});
         if(error)throw error;
-        deleteModal.hide(); state.deleteId=''; await loadQuestions();
+        deleteModal.hide(); state.deleteId=''; if(state.hasSearched)await loadQuestions(state.page);
         showAlert(`문제를 삭제 상태로 옮겼습니다. 기존 답변 ${Number(data?.preserved_answer_count||0).toLocaleString('ko-KR')}건은 통계를 위해 보존했습니다.`,'삭제 완료');
       } catch(error) { console.error(`[quiz-admin ${VERSION}] delete failed`,error); showAlert(errorMessage(error,'문제를 삭제하지 못했습니다.')); }
       finally { state.deleting=false; $('confirmDeleteButton').disabled=false; $('confirmDeleteButton').textContent='삭제'; }
@@ -533,8 +649,25 @@
     $('typeInput').addEventListener('change',handleTypeChange);
     $('questionForm').addEventListener('submit',saveQuestion);
     $('confirmDeleteButton').addEventListener('click',deleteQuestion);
-    $('searchInput').addEventListener('input',()=>{clearTimeout(state.searchTimer);state.searchTimer=setTimeout(loadQuestions,280);});
-    $('statusFilter').addEventListener('change',loadQuestions);
+    $('questionSearchForm').addEventListener('submit',searchQuestions);
+    $('resetSearchButton').addEventListener('click',resetQuestionSearch);
+    $('rankFilter').addEventListener('change',()=>{
+      const rank=$('rankFilter').value;
+      if(!rank)return;
+      $('answerFilter').value='HAS_ANSWERS';
+      if(Number($('minAnswersFilter').value||0)===0)$('minAnswersFilter').value='1';
+      $('sortFilter').value=rank.startsWith('BOTTOM_')?'RATE_ASC':'RATE_DESC';
+    });
+    $('answerFilter').addEventListener('change',()=>{
+      if($('answerFilter').value!=='NO_ANSWERS')return;
+      $('rankFilter').value='';
+      $('minAnswersFilter').value='0';
+    });
+    $('minAnswersFilter').addEventListener('change',()=>{
+      if(Number($('minAnswersFilter').value||0)>0&&$('answerFilter').value==='NO_ANSWERS')$('answerFilter').value='HAS_ANSWERS';
+    });
+    $('previousPageButton').addEventListener('click',()=>{ if(!state.loading&&state.page>1)void loadQuestions(state.page-1); });
+    $('nextPageButton').addEventListener('click',()=>{ if(!state.loading&&state.page<state.pageCount)void loadQuestions(state.page+1); });
     $('refreshStatsButton').addEventListener('click',()=>void loadOverallStats());
     $('questionList').addEventListener('click',(event)=>{
       const button=event.target.closest('[data-action]'); if(!button)return;
