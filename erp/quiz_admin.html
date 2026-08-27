@@ -19,6 +19,21 @@
     .page-copy { margin:8px 0 0; color:var(--quiz-admin-muted); }
     .pilot-label { display:inline-flex; align-items:center; gap:6px; margin-bottom:8px; padding:5px 9px; border-radius:999px; color:#755300; background:#fff3c4; font-size:12px; font-weight:800; }
     .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) 180px auto; gap:10px; margin-bottom:18px; padding:16px; border:1px solid var(--quiz-admin-line); border-radius:18px; background:#fff; box-shadow:0 10px 35px rgba(26,56,34,.06); }
+    .overview-panel { margin-bottom:22px; padding:20px; border:1px solid var(--quiz-admin-line); border-radius:20px; background:#fff; box-shadow:0 10px 35px rgba(26,56,34,.06); }
+    .overview-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:16px; }
+    .overview-title { margin:0; font-size:20px; font-weight:850; }
+    .overview-copy { margin:5px 0 0; color:var(--quiz-admin-muted); font-size:13px; }
+    .overall-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .overall-card { min-width:0; padding:15px; border:1px solid var(--quiz-admin-line); border-radius:15px; background:#f8fbf9; }
+    .overall-card span { display:block; color:var(--quiz-admin-muted); font-size:12px; font-weight:750; }
+    .overall-card strong { display:block; margin-top:4px; font-size:24px; line-height:1.2; }
+    .member-stats { margin-top:18px; padding-top:18px; border-top:1px solid var(--quiz-admin-line); }
+    .member-stats-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .member-stats-title { margin:0; font-size:16px; font-weight:850; }
+    .member-filter { width:min(280px,100%); }
+    .member-state { display:inline-flex; align-items:center; min-height:25px; padding:0 9px; border-radius:999px; font-size:11px; font-weight:850; }
+    .member-state.is-done { color:#0c6030; background:#eaf8ee; }
+    .member-state.is-waiting { color:#73510b; background:#fff5cf; }
     .summary-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:18px; }
     .summary-card { padding:16px; border:1px solid var(--quiz-admin-line); border-radius:16px; background:#fff; }
     .summary-card span { display:block; color:var(--quiz-admin-muted); font-size:12px; font-weight:700; }
@@ -71,6 +86,9 @@
       .page-head { display:block; }
       .page-head-actions { margin-top:14px; }
       .toolbar { grid-template-columns:1fr; }
+      .overview-head, .member-stats-head { display:block; }
+      .overview-head .btn, .member-filter { width:100%; margin-top:10px; }
+      .overall-grid { grid-template-columns:repeat(2,1fr); }
       .summary-strip { grid-template-columns:repeat(2,1fr); }
       .question-top { display:block; }
       .question-actions { justify-content:flex-start; margin-top:14px; }
@@ -99,6 +117,44 @@
     </section>
 
     <div id="mainPanel" class="d-none">
+      <section class="overview-panel" id="overallPanel" aria-labelledby="overallTitle">
+        <div class="overview-head">
+          <div>
+            <h2 class="overview-title" id="overallTitle">📈 시험 운영 전체 현황</h2>
+            <p class="overview-copy" id="overallScopeCopy">비공개 시험 대상자 기준으로 참여와 정답 기록을 계산합니다.</p>
+          </div>
+          <button type="button" class="btn btn-outline-success btn-sm" id="refreshStatsButton">새로고침</button>
+        </div>
+        <div id="overallLoading" class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm text-success me-2" role="status"></span>전체 통계를 불러오는 중입니다.</div>
+        <div id="overallContent" class="d-none">
+          <div class="overall-grid" aria-label="퀴즈 전체 통계">
+            <div class="overall-card"><span>시험 대상</span><strong id="overallEligible">0명</strong></div>
+            <div class="overall-card"><span>참여 조합원</span><strong id="overallParticipants">0명</strong></div>
+            <div class="overall-card"><span>시험 대상 참여율</span><strong id="overallParticipationRate">0%</strong></div>
+            <div class="overall-card"><span>완료한 퀴즈</span><strong id="overallAttempts">0회</strong></div>
+            <div class="overall-card"><span>누적 답변</span><strong id="overallAnswers">0회</strong></div>
+            <div class="overall-card"><span>전체 정답률</span><strong id="overallCorrectRate">0%</strong></div>
+            <div class="overall-card"><span>만점 조합원</span><strong id="overallPerfectMembers">0명</strong></div>
+            <div class="overall-card"><span>2회 이상 참여</span><strong id="overallRepeatMembers">0명</strong></div>
+          </div>
+          <div class="member-stats">
+            <div class="member-stats-head">
+              <h3 class="member-stats-title">👥 시험 대상자별 참여 기록</h3>
+              <input class="form-control form-control-sm member-filter" id="memberStatsFilter" type="search" placeholder="이름 또는 조합원 번호 검색">
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>조합원</th><th>참여 여부</th><th class="text-end">완료</th><th class="text-end">답변</th><th class="text-end">정답률</th><th class="text-end">만점</th><th>최근 참여</th></tr></thead>
+                <tbody id="memberStatsBody"></tbody>
+              </table>
+            </div>
+            <div class="text-muted small text-center py-3 d-none" id="memberStatsEmpty">조건에 맞는 시험 대상자가 없습니다.</div>
+            <p class="form-help mt-3 mb-0">이름과 개인 기록은 퀴즈 관리 권한이 있는 관리자에게만 보입니다. 현재 참여율의 분모는 전체 조합원이 아니라 비공개 시험 대상자입니다.</p>
+          </div>
+        </div>
+        <div id="overallError" class="alert alert-danger d-none mb-0"></div>
+      </section>
+
       <section class="toolbar" aria-label="문제 검색과 필터">
         <div><label class="visually-hidden" for="searchInput">문제 검색</label><input class="form-control" id="searchInput" type="search" placeholder="문제, 선택지, 해설, 분류 검색"></div>
         <div><label class="visually-hidden" for="statusFilter">상태 필터</label><select class="form-select" id="statusFilter"><option value="">전체 상태</option><option value="PUBLISHED">출제 중</option><option value="DRAFT">작성 중</option><option value="ARCHIVED">삭제됨</option></select></div>
@@ -165,13 +221,13 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.0.1';
+    const VERSION = '1.1.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       global: { headers: { 'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').toLowerCase() } }
     });
-    const state = { questions:[], loading:false, loadSeq:0, saving:false, deleting:false, statsLoading:false, deleteId:'', searchTimer:0 };
+    const state = { questions:[], overall:null, loading:false, overallLoading:false, loadSeq:0, saving:false, deleting:false, statsLoading:false, deleteId:'', searchTimer:0 };
     const $ = (id) => document.getElementById(id);
     const questionModal = bootstrap.Modal.getOrCreateInstance($('questionModal'));
     const statsModal = bootstrap.Modal.getOrCreateInstance($('statsModal'));
@@ -213,11 +269,71 @@
         if (context?.allowed !== true) throw new Error('QUIZ_PILOT_ACCESS_REQUIRED');
         $('bootPanel').classList.add('d-none');
         $('mainPanel').classList.remove('d-none');
-        await loadQuestions();
+        await Promise.all([loadOverallStats(),loadQuestions()]);
       } catch (error) {
         console.error(`[quiz-admin ${VERSION}] boot failed`,error);
         $('bootPanel').innerHTML=`<div class="fs-2 mb-2">🔒</div><strong>${escapeHtml(errorMessage(error,'퀴즈 관리 화면을 열지 못했습니다.'))}</strong><div class="mt-3"><a class="btn btn-outline-secondary" href="index.html">ERP 메인으로</a></div>`;
       }
+    }
+
+    function formatPercent(value) { return `${Number(value||0).toLocaleString('ko-KR',{maximumFractionDigits:1})}%`; }
+
+    async function loadOverallStats() {
+      if(state.overallLoading)return;
+      state.overallLoading=true;
+      $('refreshStatsButton').disabled=true;
+      $('overallLoading').classList.remove('d-none');
+      $('overallContent').classList.add('d-none');
+      $('overallError').classList.add('d-none');
+      try {
+        const {data,error}=await client.rpc('quiz_admin_get_overall_stats');
+        if(error)throw error;
+        state.overall=data||{};
+        renderOverallStats();
+        $('overallLoading').classList.add('d-none');
+        $('overallContent').classList.remove('d-none');
+      } catch(error) {
+        console.error(`[quiz-admin ${VERSION}] overall stats failed`,error);
+        $('overallLoading').classList.add('d-none');
+        $('overallError').textContent=errorMessage(error,'전체 참여 통계를 불러오지 못했습니다.');
+        $('overallError').classList.remove('d-none');
+      } finally {
+        state.overallLoading=false;
+        $('refreshStatsButton').disabled=false;
+      }
+    }
+
+    function renderOverallStats() {
+      const stats=state.overall||{};
+      $('overallScopeCopy').textContent=`${String(stats.scope_label||'비공개 시험 대상')} ${Number(stats.eligible_count||0).toLocaleString('ko-KR')}명을 기준으로 참여와 정답 기록을 계산합니다.`;
+      $('overallEligible').textContent=`${Number(stats.eligible_count||0).toLocaleString('ko-KR')}명`;
+      $('overallParticipants').textContent=`${Number(stats.participant_count||0).toLocaleString('ko-KR')}명`;
+      $('overallParticipationRate').textContent=formatPercent(stats.participation_rate);
+      $('overallAttempts').textContent=`${Number(stats.completed_attempts||0).toLocaleString('ko-KR')}회`;
+      $('overallAnswers').textContent=`${Number(stats.answer_count||0).toLocaleString('ko-KR')}회`;
+      $('overallCorrectRate').textContent=formatPercent(stats.correct_rate);
+      $('overallPerfectMembers').textContent=`${Number(stats.perfect_participants||0).toLocaleString('ko-KR')}명`;
+      $('overallRepeatMembers').textContent=`${Number(stats.repeat_participants||0).toLocaleString('ko-KR')}명`;
+      renderMemberStats();
+    }
+
+    function renderMemberStats() {
+      const keyword=$('memberStatsFilter').value.trim().toLocaleLowerCase('ko-KR');
+      const rows=(Array.isArray(state.overall?.member_rows)?state.overall.member_rows:[]).filter(row=>{
+        if(!keyword)return true;
+        return `${row.member_name||''} ${row.member_number||''}`.toLocaleLowerCase('ko-KR').includes(keyword);
+      });
+      const body=$('memberStatsBody');
+      body.innerHTML=rows.map(row=>`<tr>
+        <td><strong>${escapeHtml(row.member_name||'이름 미입력')}</strong><div class="text-muted small">${escapeHtml(row.member_number||'조합원 번호 없음')}</div></td>
+        <td><span class="member-state ${row.participated?'is-done':'is-waiting'}">${row.participated?'참여':'미참여'}</span></td>
+        <td class="text-end">${Number(row.completed_attempts||0).toLocaleString('ko-KR')}회</td>
+        <td class="text-end">${Number(row.answer_count||0).toLocaleString('ko-KR')}회</td>
+        <td class="text-end fw-bold">${formatPercent(row.correct_rate)}</td>
+        <td class="text-end">${Number(row.perfect_attempts||0).toLocaleString('ko-KR')}회</td>
+        <td>${escapeHtml(formatKst(row.last_completed_at))}</td>
+      </tr>`).join('');
+      $('memberStatsEmpty').classList.toggle('d-none',rows.length!==0);
     }
 
     async function loadQuestions() {
@@ -446,6 +562,8 @@
     $('confirmDeleteButton').addEventListener('click',deleteQuestion);
     $('searchInput').addEventListener('input',()=>{clearTimeout(state.searchTimer);state.searchTimer=setTimeout(loadQuestions,280);});
     $('statusFilter').addEventListener('change',loadQuestions);
+    $('refreshStatsButton').addEventListener('click',()=>void loadOverallStats());
+    $('memberStatsFilter').addEventListener('input',renderMemberStats);
     $('questionList').addEventListener('click',(event)=>{
       const button=event.target.closest('[data-action]'); if(!button)return;
       const card=button.closest('[data-question-id]'); const q=findQuestion(card?.dataset.questionId); if(!q)return;

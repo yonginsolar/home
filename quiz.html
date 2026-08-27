@@ -78,6 +78,12 @@
     .feature { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 19px; border-radius: 18px; background: var(--quiz-soft); text-align: left; }
     .feature strong { display: block; color: var(--quiz-primary-strong); font-size: 17px; }
     .feature span { display: block; margin: 0; color: var(--quiz-muted); font-size: 14px; }
+    .my-summary { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--quiz-line); }
+    .my-summary h3 { margin: 0 0 10px; font-size: 16px; }
+    .my-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .my-summary-card { min-width: 0; padding: 13px 10px; border-radius: 14px; background: var(--quiz-soft); text-align: center; }
+    .my-summary-card span { display: block; color: var(--quiz-muted); font-size: 11px; font-weight: 800; }
+    .my-summary-card strong { display: block; margin-top: 3px; color: var(--quiz-primary-strong); font-size: 18px; }
     .button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 50px; padding: 0 22px; border: 0; border-radius: 15px; cursor: pointer; font-weight: 850; transition: transform .16s ease, opacity .16s ease, box-shadow .16s ease; }
     .button:hover:not(:disabled) { transform: translateY(-1px); }
     .button:focus-visible, .option:focus-visible { outline: 3px solid color-mix(in srgb, var(--quiz-primary) 38%, transparent); outline-offset: 3px; }
@@ -149,6 +155,7 @@
       .topbar-actions { gap: 6px; }
       .portal-link, .pilot-chip { padding-right: 9px; padding-left: 9px; font-size: 11px; }
       .feature-grid, .badge-list { grid-template-columns: 1fr; }
+      .my-summary-grid { grid-template-columns: repeat(2, 1fr); }
       .badge-card { min-height: 0; display: grid; grid-template-columns: 42px 1fr auto; align-items: center; text-align: left; }
       .badge-name, .badge-progress { margin: 0; }
       .site-theme-toggle { bottom: 12px; }
@@ -191,6 +198,15 @@
       <p class="hero-copy"><strong id="memberName"></strong>님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.</p>
       <div class="feature-grid" aria-label="퀴즈 특징">
         <div class="feature"><strong>5문제</strong><span>한 번에 가볍게</span></div>
+      </div>
+      <div class="my-summary hidden" id="mySummary" aria-labelledby="mySummaryTitle">
+        <h3 id="mySummaryTitle">📊 나의 누적 기록</h3>
+        <div class="my-summary-grid">
+          <div class="my-summary-card"><span>참여</span><strong id="myAttempts">0회</strong></div>
+          <div class="my-summary-card"><span>답변</span><strong id="myAnswers">0문제</strong></div>
+          <div class="my-summary-card"><span>정답률</span><strong id="myCorrectRate">0%</strong></div>
+          <div class="my-summary-card"><span>만점</span><strong id="myPerfect">0회</strong></div>
+        </div>
       </div>
       <div class="actions">
         <button type="button" class="button button-primary" id="startButton">퀴즈 시작하기 ☀️</button>
@@ -268,7 +284,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '0.1.2';
+    const VERSION = '0.1.3';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
@@ -351,7 +367,18 @@
       const { data, error } = await client.rpc('quiz_pilot_get_my_summary');
       if (error) throw error;
       state.summary = data || {};
+      renderMySummary();
       renderHistory('introHistory', 'introHistoryList');
+    }
+
+    function renderMySummary() {
+      const summary=state.summary||{};
+      const attempts=Number(summary.completed_attempts||0);
+      $('myAttempts').textContent=`${attempts.toLocaleString('ko-KR')}회`;
+      $('myAnswers').textContent=`${Number(summary.answer_count||0).toLocaleString('ko-KR')}문제`;
+      $('myCorrectRate').textContent=`${Number(summary.correct_rate||0).toLocaleString('ko-KR',{maximumFractionDigits:1})}%`;
+      $('myPerfect').textContent=`${Number(summary.perfect_attempts||0).toLocaleString('ko-KR')}회`;
+      $('mySummary').classList.toggle('hidden',attempts===0);
     }
 
     function openHofConsent(attemptId, delay = 0) {
