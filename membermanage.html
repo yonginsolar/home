@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.131
-Change: Integrate the private quiz into quick links and add the private sunlight hall of fame tabs.
+Version: v1.0.132
+Change: Simplify the private quiz card and balance six quick links into a 3-by-2 desktop grid.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.131 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.132 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -441,6 +441,11 @@ margin: 0;
 }
 .quick-links-grid .quick-col { width: 100%; min-width: 0; }
 .quick-links-grid .quick-col.hidden { display: none; }
+@media (min-width: 992px) {
+.quick-links-grid.quick-count-six {
+grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+}
 .quick-card {
 background: #fff;
 border: 1px solid #e5e7eb;
@@ -1780,7 +1785,6 @@ NO. <span id="infoMemberId">-</span>
     <div id="quizPilotCard" class="quick-card quick-sun hidden" aria-hidden="true" aria-labelledby="quizPilotTitle">
       <div class="quick-title" id="quizPilotTitle"><i class="bi bi-sun-fill me-1" aria-hidden="true"></i>햇빛 퀴즈</div>
       <div class="quick-stage-badge"><i class="bi bi-lock-fill me-1" aria-hidden="true"></i>나만 보는 비공개 시험판</div>
-      <div class="quick-desc" id="quizPilotDescription">5문제를 가볍게 풀어보세요.</div>
       <a class="quick-btn btn btn-success" id="quizPilotLink" href="quiz.html"><i class="bi bi-lightning-charge-fill me-1" aria-hidden="true"></i>퀴즈 시작하기</a>
     </div>
   </div>
@@ -4342,6 +4346,16 @@ isLoading: false
 let quizPilotContextPromise = null;
 let quizPilotContextAuthUserId = '';
 
+function updateQuickLinksLayout() {
+const grid = document.getElementById('quickLinksRow');
+if (!grid) return;
+const visibleCount = Array.from(grid.children).filter(column => (
+column.classList.contains('quick-col') && !column.classList.contains('hidden')
+)).length;
+grid.classList.toggle('quick-count-six', visibleCount === 6);
+grid.dataset.visibleCount = String(visibleCount);
+} // End of updateQuickLinksLayout
+
 function setQuizPilotEntryVisible(visible, context = null) {
 const card = document.getElementById('quizPilotCard');
 if (!card) return;
@@ -4350,14 +4364,7 @@ const wrapper = card.parentElement;
 if (wrapper) wrapper.classList.toggle('hidden', !allowed);
 card.classList.toggle('hidden', !allowed);
 card.setAttribute('aria-hidden', allowed ? 'false' : 'true');
-if (!allowed) return;
-
-const questionCount = Math.max(0, Number(context.published_question_count || 0));
-const questionsPerAttempt = Math.max(1, Number(context.questions_per_attempt || 5));
-const description = document.getElementById('quizPilotDescription');
-if (description) {
-description.textContent = `현재 ${questionCount}개 문제 중 ${questionsPerAttempt}개가 출제됩니다.`;
-}
+updateQuickLinksLayout();
 } // End of setQuizPilotEntryVisible
 
 function configureHallOfFameForPilot(allowed) {
@@ -5169,6 +5176,7 @@ const setQuickCardVisible = (cardEl, visible) => {
     const wrapper = cardEl.parentElement;
     if (wrapper) wrapper.classList.toggle('hidden', !visible);
     cardEl.classList.toggle('hidden', !visible);
+    updateQuickLinksLayout();
 };
 
 const portalUrl = 'vote/index.html?portal=1';
@@ -6854,6 +6862,7 @@ const setQuickCardVisible = (cardEl, visible) => {
     const wrapper = cardEl.parentElement;
     if (wrapper) wrapper.classList.toggle('hidden', !visible);
     cardEl.classList.toggle('hidden', !visible);
+    updateQuickLinksLayout();
 };
 
 setQuickCardTodoState(minutesSignCard, signBadge, false);
@@ -9946,6 +9955,7 @@ const setQuickCardVisible = (cardEl, visible) => {
     const wrapper = cardEl.parentElement;
     if (wrapper) wrapper.classList.toggle('hidden', !visible);
     cardEl.classList.toggle('hidden', !visible);
+    updateQuickLinksLayout();
 };
 
 try {
