@@ -184,8 +184,9 @@
             <div class="row g-3">
               <div class="col-md-2"><label class="form-label" for="sourceNumber">관리 번호</label><input class="form-control" id="sourceNumber" type="number" min="1" max="32767" placeholder="선택"><div class="form-help mt-1">비워도 됩니다.</div></div>
               <div class="col-md-4"><label class="form-label required" for="categoryInput">분류</label><input class="form-control" id="categoryInput" maxlength="100" required placeholder="예: 태양광 오해와 진실"></div>
-              <div class="col-md-3"><label class="form-label required" for="typeInput">문제 유형</label><select class="form-select" id="typeInput" required><option value="OX">O/X</option><option value="MULTIPLE_CHOICE">객관식</option></select></div>
-              <div class="col-md-3"><label class="form-label required" for="statusInput">상태</label><select class="form-select" id="statusInput" required><option value="DRAFT">작성 중</option><option value="PUBLISHED">출제 중</option><option value="ARCHIVED">삭제됨</option></select></div>
+              <div class="col-md-2"><label class="form-label required" for="typeInput">문제 유형</label><select class="form-select" id="typeInput" required><option value="OX">O/X</option><option value="MULTIPLE_CHOICE">객관식</option></select></div>
+              <div class="col-md-2"><label class="form-label required" for="difficultyInput">난이도</label><select class="form-select" id="difficultyInput" required><option value="EASY">쉬움</option><option value="NORMAL">보통</option><option value="CHALLENGE">도전</option></select><div class="form-help mt-1">도전은 4/4 정답 시 15% 확률로만 나옵니다.</div></div>
+              <div class="col-md-2"><label class="form-label required" for="statusInput">상태</label><select class="form-select" id="statusInput" required><option value="DRAFT">작성 중</option><option value="PUBLISHED">출제 중</option><option value="ARCHIVED">삭제됨</option></select></div>
               <div class="col-12"><label class="form-label required" for="promptInput">문제</label><textarea class="form-control" id="promptInput" rows="3" maxlength="1000" required></textarea></div>
               <div class="col-12">
                 <div class="d-flex justify-content-between align-items-center gap-2 mb-2"><label class="form-label required mb-0">선택지와 정답</label><button type="button" class="btn btn-outline-success btn-sm" id="addOptionButton">＋ 선택지 추가</button></div>
@@ -221,7 +222,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -239,6 +240,7 @@
     }
     function statusLabel(status) { return ({PUBLISHED:'출제 중',DRAFT:'작성 중',ARCHIVED:'삭제됨'})[status] || status || '-'; }
     function typeLabel(type) { return type === 'OX' ? 'O/X' : '객관식'; }
+    function difficultyLabel(difficulty) { return ({EASY:'쉬움',NORMAL:'보통',CHALLENGE:'✨ 도전'})[difficulty] || difficulty || '쉬움'; }
     function formatKst(value) {
       if (!value) return '-';
       const date = new Date(value);
@@ -388,6 +390,7 @@
               ${q.source_number?`<span class="pill">#${Number(q.source_number)}</span>`:''}
               <span class="pill">${escapeHtml(q.category)}</span>
               <span class="pill">${typeLabel(q.question_type)}</span>
+              <span class="pill">${difficultyLabel(q.difficulty)}</span>
               <span class="pill pill-status-${escapeHtml(q.status)}">${statusLabel(q.status)}</span>
               <span class="pill">수정 ${Number(q.revision_no||1)}판</span>
             </div>
@@ -413,6 +416,7 @@
       $('questionId').value='';
       $('questionModalTitle').textContent='새 문제 추가';
       $('typeInput').value='OX';
+      $('difficultyInput').value='EASY';
       $('statusInput').value='DRAFT';
       clearFormError();
       renderOptionEditor([{key:'O',label:'O'},{key:'X',label:'X'}],'O');
@@ -427,6 +431,7 @@
       $('sourceNumber').value=q.source_number??'';
       $('categoryInput').value=q.category||'';
       $('typeInput').value=q.question_type||'OX';
+      $('difficultyInput').value=q.difficulty||'EASY';
       $('statusInput').value=q.status||'DRAFT';
       $('promptInput').value=q.prompt||'';
       $('explanationInput').value=q.explanation||'';
@@ -485,6 +490,7 @@
       return {
         p_question_id:$('questionId').value||null,
         p_source_number:sourceNumberRaw?Number(sourceNumberRaw):null,
+        p_difficulty:$('difficultyInput').value,
         p_category:$('categoryInput').value.trim(),
         p_question_type:$('typeInput').value,
         p_prompt:$('promptInput').value.trim(),

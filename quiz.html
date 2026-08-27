@@ -107,6 +107,7 @@
     .question-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 13px; }
     .tag { display: inline-flex; align-items: center; min-height: 27px; padding: 0 10px; border-radius: 999px; background: var(--quiz-soft); color: var(--quiz-primary-strong); font-size: 12px; font-weight: 850; }
     .tag-review { background: color-mix(in srgb, var(--quiz-accent) 22%, var(--quiz-surface)); color: var(--quiz-text); }
+    .tag-challenge { border: 1px solid color-mix(in srgb, #f1ad12 62%, var(--quiz-line)); background:color-mix(in srgb, #ffd86b 26%, var(--quiz-surface)); color:color-mix(in srgb, #8a5700 82%, var(--quiz-text)); }
     .question { margin: 0 0 25px; font-size: clamp(22px, 5vw, 31px); line-height: 1.4; letter-spacing: -.025em; }
     .options { display: grid; gap: 11px; }
     .option { display: grid; grid-template-columns: 38px 1fr; align-items: center; gap: 12px; width: 100%; min-height: 62px; padding: 12px 16px; border: 1px solid var(--quiz-line); border-radius: 17px; color: var(--quiz-text); background: var(--quiz-surface); cursor: pointer; text-align: left; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
@@ -229,6 +230,7 @@
         <div class="question-meta">
           <span class="tag" id="categoryTag"></span>
           <span class="tag tag-review hidden" id="reviewTag">🔄 복습 문제</span>
+          <span class="tag tag-challenge hidden" id="challengeTag">✨ 도전 문제 · 이것까지 알아요?</span>
         </div>
         <h2 class="question" id="questionText"></h2>
         <div class="options" id="optionsList"></div>
@@ -284,7 +286,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '0.1.3';
+    const VERSION = '0.2.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
@@ -304,6 +306,7 @@
       feedbackByItem: new Map(),
       startBusy: false,
       answerBusy: false,
+      fifthBusy: false,
       completeBusy: false,
       consentBusy: false
     };
@@ -319,7 +322,9 @@
     function rpcErrorMessage(error, fallback) {
       const message = String(error?.message || error || '');
       if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED')) return '현재 계정은 시험 운영 참여 계정이 아닙니다.';
-      if (message.includes('QUIZ_NOT_ENOUGH_PUBLISHED_QUESTIONS')) return '공개 준비가 끝난 문제가 아직 부족합니다.';
+      if (message.includes('QUIZ_NOT_ENOUGH_PUBLISHED_QUESTIONS') || message.includes('QUIZ_NOT_ENOUGH_REGULAR_QUESTIONS')) return '공개 준비가 끝난 문제가 아직 부족합니다.';
+      if (message.includes('QUIZ_FIRST_FOUR_NOT_COMPLETED')) return '앞의 네 문제를 모두 푼 뒤 마지막 문제를 만날 수 있습니다.';
+      if (message.includes('QUIZ_FIFTH_QUESTION_UNAVAILABLE')) return '마지막 문제를 준비하지 못했습니다. 잠시 후 다시 눌러 주세요.';
       if (message.includes('QUIZ_ANSWER_ALREADY_LOCKED')) return '이미 선택한 답은 바꿀 수 없습니다.';
       if (message.includes('JWT') || error?.status === 401) return '로그인 시간이 만료되었습니다. 다시 로그인해 주세요.';
       return fallback || '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -476,11 +481,14 @@
           data = retry.data;
         }
         const questions = Array.isArray(data?.questions) ? data.questions : [];
-        if (questions.length !== 5) throw new Error('QUIZ_QUESTION_SET_INVALID');
+        if (questions.length < 4 || questions.length > 5) throw new Error('QUIZ_QUESTION_SET_INVALID');
         state.attemptId = String(data.attempt_id || '');
         state.questions = questions;
         state.feedbackByItem.clear();
-        const firstUnanswered = questions.findIndex((item) => item.answered !== true);
+        if (state.questions.length === 4 && state.questions.every((item) => item.answered === true)) {
+          await ensureFifthQuestion();
+        }
+        const firstUnanswered = state.questions.findIndex((item) => item.answered !== true);
         state.index = firstUnanswered >= 0 ? firstUnanswered : 0;
         renderQuestion();
         showView('quizView');
@@ -497,13 +505,15 @@
     function renderQuestion() {
       const question = state.questions[state.index];
       if (!question) return;
+      const totalQuestions = 5;
       const answeredCount = state.questions.filter((item) => item.answered === true).length;
       const correctCount = Array.from(state.feedbackByItem.values()).filter((item) => item.is_correct === true).length;
-      $('progressLabel').textContent = `${state.index + 1} / ${state.questions.length}`;
-      $('progressFill').style.width = `${((state.index + 1) / state.questions.length) * 100}%`;
+      $('progressLabel').textContent = `${state.index + 1} / ${totalQuestions}`;
+      $('progressFill').style.width = `${((state.index + 1) / totalQuestions) * 100}%`;
       $('correctSoFar').textContent = `답변 ${answeredCount} · 정답 ${correctCount}`;
       $('categoryTag').textContent = question.category || '햇빛 상식';
       $('reviewTag').classList.toggle('hidden', question.is_review !== true);
+      $('challengeTag').classList.toggle('hidden', question.is_challenge !== true);
       $('questionText').textContent = question.prompt || '';
       $('optionsList').replaceChildren();
       $('feedbackBox').classList.add('hidden');
@@ -595,7 +605,9 @@
         button.classList.toggle('is-correct', key === feedback.correct_option_key);
         button.classList.toggle('is-wrong', key === feedback.selected_option_key && feedback.is_correct !== true);
       });
-      $('feedbackTitle').textContent = feedback.is_correct === true ? '정답이에요! ☀️' : '괜찮아요, 해설로 알아가요 🌱';
+      $('feedbackTitle').textContent = question.is_challenge === true
+        ? (feedback.is_correct === true ? '이것까지 알아요? 대단해요! ☀️' : '도전 문제였어요! 알아가는 것만으로 충분해요 🌱')
+        : (feedback.is_correct === true ? '정답이에요! ☀️' : '괜찮아요, 해설로 알아가요 🌱');
       $('feedbackTitle').className = `feedback-title ${feedback.is_correct === true ? 'correct' : 'wrong'}`;
       $('feedbackText').textContent = String(feedback.explanation || '');
       const source = $('feedbackSource');
@@ -621,14 +633,28 @@
         source.classList.add('hidden');
       }
       $('feedbackBox').classList.remove('hidden');
-      $('nextButton').textContent = state.index === state.questions.length - 1 ? '결과 보기 🎉' : '다음 문제';
+      $('nextButton').textContent = state.questions.length === 4 && state.index === 3
+        ? '마지막 문제 만나기 ☀️'
+        : state.index === state.questions.length - 1 ? '결과 보기 🎉' : '다음 문제';
       $('nextRow').classList.remove('hidden');
       $('nextButton').focus();
     }
 
     async function goNext() {
       const question = state.questions[state.index];
-      if (!question?.answered || state.answerBusy || state.completeBusy) return;
+      if (!question?.answered || state.answerBusy || state.fifthBusy || state.completeBusy) return;
+      if (state.questions.length === 4 && state.index === 3) {
+        try {
+          await ensureFifthQuestion();
+          state.index = 4;
+          renderQuestion();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (error) {
+          console.error(`[quiz ${VERSION}] fifth question failed`, error);
+          showMessage(rpcErrorMessage(error, '마지막 문제를 준비하지 못했습니다. 잠시 후 다시 눌러 주세요.'));
+        }
+        return;
+      }
       if (state.index < state.questions.length - 1) {
         state.index += 1;
         renderQuestion();
@@ -636,6 +662,23 @@
         return;
       }
       await completeQuiz();
+    }
+
+    async function ensureFifthQuestion() {
+      if (state.questions.length >= 5) return state.questions[4];
+      if (state.fifthBusy) throw new Error('QUIZ_FIFTH_QUESTION_BUSY');
+      state.fifthBusy = true;
+      $('nextButton').disabled = true;
+      try {
+        const { data, error } = await client.rpc('quiz_pilot_get_fifth_question', { p_attempt_id: state.attemptId });
+        if (error) throw error;
+        if (!data?.item_id || Number(data.position) !== 5) throw new Error('QUIZ_FIFTH_QUESTION_INVALID');
+        state.questions.push(data);
+        return data;
+      } finally {
+        state.fifthBusy = false;
+        $('nextButton').disabled = false;
+      }
     }
 
     async function completeQuiz() {
@@ -664,9 +707,15 @@
     function renderResult(result) {
       const correct = Number(result.correct_count || 0);
       const total = Number(result.total_questions || 5);
+      const challenge = state.questions.some((question) => question.is_challenge === true);
+      const challengeCorrect = state.questions.some((question) => question.is_challenge === true && state.feedbackByItem.get(question.item_id)?.is_correct === true);
       $('resultScore').textContent = String(correct);
       $('resultTotal').textContent = `/ ${total}문제`;
-      $('resultCopy').textContent = correct === total
+      $('resultCopy').textContent = challengeCorrect
+        ? '이것까지 알아요? 도전문제까지 정확히 맞혔어요! ☀️'
+        : challenge
+          ? '오늘은 깜짝 도전문제까지 만났어요. 어려운 내용을 하나 더 알아간 것만으로도 충분해요.'
+          : correct === total
         ? '완벽해요! 오늘 만난 햇빛 상식을 모두 정확히 짚었어요.'
         : correct >= 4
           ? '거의 다 왔어요. 오늘 읽은 해설이 다음 복습에서 든든한 힌트가 될 거예요.'
