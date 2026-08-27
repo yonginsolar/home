@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.129
-Change: Load the rapid-tap-safe patch-note modal runtime.
+Version: v1.0.130
+Change: Show the private sunlight quiz entry only to the approved pilot account.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.129 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.130 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1186,6 +1186,89 @@ font-size: 0.96rem;
 color: #1d4ed8;
 }
 
+/* [비공개 시험] 서버가 허용한 계정에만 표시되는 햇빛 퀴즈 진입 카드 */
+.quiz-pilot-card {
+position: relative;
+overflow: hidden;
+background-image:
+radial-gradient(circle at 92% 12%, rgba(245, 195, 66, .28), transparent 10rem),
+linear-gradient(135deg, #f4fbef 0%, #fffaf0 100%);
+border-color: #cfe3c7;
+}
+.quiz-pilot-card::after {
+content: '☀️';
+position: absolute;
+right: 18px;
+bottom: -18px;
+font-size: 92px;
+line-height: 1;
+opacity: .1;
+pointer-events: none;
+}
+.quiz-pilot-content {
+position: relative;
+z-index: 1;
+display: flex;
+align-items: center;
+justify-content: space-between;
+gap: 22px;
+}
+.quiz-pilot-copy { min-width: 0; }
+.quiz-pilot-eyebrow {
+display: inline-flex;
+align-items: center;
+min-height: 26px;
+padding: 0 10px;
+margin-bottom: 9px;
+border: 1px solid #c8dfbf;
+border-radius: 999px;
+background: rgba(255, 255, 255, .72);
+color: #24663a;
+font-size: .76rem;
+font-weight: 800;
+}
+.quiz-pilot-title {
+margin: 0;
+color: #163e26;
+font-size: 1.2rem;
+font-weight: 850;
+}
+.quiz-pilot-desc {
+margin: 7px 0 0;
+color: #597063;
+font-size: .9rem;
+line-height: 1.55;
+}
+.quiz-pilot-action {
+position: relative;
+z-index: 1;
+flex: 0 0 auto;
+min-height: 44px;
+padding-inline: 18px;
+font-weight: 800;
+}
+html[data-theme="dark"][data-theme-page="membermanage"] #quizPilotCard {
+background-image:
+radial-gradient(circle at 92% 12%, rgba(255, 216, 102, .16), transparent 10rem),
+linear-gradient(135deg, #15251a 0%, #262218 100%) !important;
+border-color: #40583f !important;
+}
+html[data-theme="dark"][data-theme-page="membermanage"] #quizPilotCard .quiz-pilot-eyebrow {
+background: rgba(21, 37, 26, .86);
+border-color: #49664b;
+color: #9ee3ad;
+}
+html[data-theme="dark"][data-theme-page="membermanage"] #quizPilotCard .quiz-pilot-title {
+color: var(--theme-text) !important;
+}
+html[data-theme="dark"][data-theme-page="membermanage"] #quizPilotCard .quiz-pilot-desc {
+color: var(--theme-muted) !important;
+}
+@media (max-width: 575.98px) {
+.quiz-pilot-content { align-items: stretch; flex-direction: column; gap: 16px; }
+.quiz-pilot-action { width: 100%; }
+}
+
 /* [배지] 획득 기록 + 트랙별 다음 도전 */
 .badge-collection {
 display: flex;
@@ -1712,6 +1795,19 @@ NO. <span id="infoMemberId">-</span>
     </div>
   </div>
 </div>
+
+<section class="dashboard-card quiz-pilot-card mb-4 hidden" id="quizPilotCard" aria-hidden="true" aria-labelledby="quizPilotTitle">
+<div class="quiz-pilot-content">
+<div class="quiz-pilot-copy">
+<span class="quiz-pilot-eyebrow"><i class="bi bi-lock-fill me-1" aria-hidden="true"></i>나만 보는 비공개 시험판</span>
+<h5 class="quiz-pilot-title" id="quizPilotTitle">☀️ 햇빛 퀴즈를 시험해 보세요</h5>
+<p class="quiz-pilot-desc" id="quizPilotDescription">승인된 문제 5개를 풀고 바로 해설을 확인할 수 있습니다.</p>
+</div>
+<a class="btn btn-success quiz-pilot-action" id="quizPilotLink" href="quiz.html">
+<i class="bi bi-lightning-charge-fill me-1" aria-hidden="true"></i>퀴즈 시작하기
+</a>
+</div>
+</section>
 
 <div class="dashboard-card mb-4" id="hallOfFameCard">
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom pb-2">
@@ -4265,6 +4361,51 @@ monthlySeasonKey: '',
 isLoading: false
 };
 
+let quizPilotContextPromise = null;
+let quizPilotContextAuthUserId = '';
+
+function setQuizPilotEntryVisible(visible, context = null) {
+const card = document.getElementById('quizPilotCard');
+if (!card) return;
+const allowed = visible === true && context?.allowed === true;
+card.classList.toggle('hidden', !allowed);
+card.setAttribute('aria-hidden', allowed ? 'false' : 'true');
+if (!allowed) return;
+
+const memberName = String(context.member_name || '').trim();
+const questionCount = Math.max(0, Number(context.published_question_count || 0));
+const questionsPerAttempt = Math.max(1, Number(context.questions_per_attempt || 5));
+const description = document.getElementById('quizPilotDescription');
+if (description) {
+description.textContent = `${memberName ? `${memberName} 님, ` : ''}현재 ${questionCount}개 문제 중 ${questionsPerAttempt}개가 출제됩니다. 답을 고르면 바로 해설을 볼 수 있어요.`;
+}
+} // End of setQuizPilotEntryVisible
+
+async function loadQuizPilotEntry() {
+const authUserId = String(curAuth?.id || '').trim();
+if (!_supabase || !authUserId) {
+setQuizPilotEntryVisible(false);
+return;
+}
+
+if (!quizPilotContextPromise || quizPilotContextAuthUserId !== authUserId) {
+quizPilotContextAuthUserId = authUserId;
+quizPilotContextPromise = _supabase.rpc('quiz_pilot_get_context')
+.then(({ data, error }) => {
+if (error) throw error;
+return data || {};
+})
+.catch((error) => {
+console.warn('quiz pilot entry check unavailable:', String(error?.code || error?.message || 'unknown'));
+return { allowed: false };
+});
+}
+
+const context = await quizPilotContextPromise;
+if (String(curAuth?.id || '').trim() !== authUserId) return;
+setQuizPilotEntryVisible(context?.allowed === true, context);
+} // End of loadQuizPilotEntry
+
 function getCurrentKstMonthKey() {
 const now = new Date();
 const yyyy = new Intl.DateTimeFormat('en-CA', { timeZone: KST_TZ_MEMBER, year: 'numeric' }).format(now);
@@ -5459,6 +5600,7 @@ assetRow.appendChild(div);
 // [신규] 퀵 링크 카드 렌더링 (선거/태양광/회의록)
 renderQuickLinks(member, myRoles, isOfficial, officialIds);
 loadHallOfFame(HOF_SCOPE.MONTHLY);
+void loadQuizPilotEntry();
 
 // ----------------------------------------------------
 // [3] 타임라인 렌더링 (통합)
