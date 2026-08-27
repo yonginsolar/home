@@ -101,13 +101,13 @@
   <main class="page-shell">
     <header class="page-head">
       <div>
-        <span class="pilot-label">🧪 비공개 시험 운영</span>
+        <span class="pilot-label">☀️ 조합원 공개 운영</span>
         <h1 class="page-title">☀️ 퀴즈 관리</h1>
         <p class="page-copy">문제·정답·해설을 관리하고, 참가자가 어떤 답을 골랐는지 문제별로 확인합니다.</p>
       </div>
       <div class="page-head-actions d-flex gap-2 flex-wrap">
         <a class="btn btn-outline-secondary" href="index.html">← ERP 메인</a>
-        <a class="btn btn-outline-success" href="../quiz.html" target="_blank" rel="noopener">시험 화면</a>
+        <a class="btn btn-outline-success" href="../quiz.html" target="_blank" rel="noopener">조합원 퀴즈</a>
       </div>
     </header>
 
@@ -120,17 +120,17 @@
       <section class="overview-panel" id="overallPanel" aria-labelledby="overallTitle">
         <div class="overview-head">
           <div>
-            <h2 class="overview-title" id="overallTitle">📈 시험 운영 전체 현황</h2>
-            <p class="overview-copy" id="overallScopeCopy">비공개 시험 대상자 기준으로 참여와 정답 기록을 계산합니다.</p>
+            <h2 class="overview-title" id="overallTitle">📈 조합원 퀴즈 운영 현황</h2>
+            <p class="overview-copy" id="overallScopeCopy">정상 조합원 기준으로 참여와 정답 기록을 계산합니다.</p>
           </div>
           <button type="button" class="btn btn-outline-success btn-sm" id="refreshStatsButton">새로고침</button>
         </div>
         <div id="overallLoading" class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm text-success me-2" role="status"></span>전체 통계를 불러오는 중입니다.</div>
         <div id="overallContent" class="d-none">
           <div class="overall-grid" aria-label="퀴즈 전체 통계">
-            <div class="overall-card"><span>시험 대상</span><strong id="overallEligible">0명</strong></div>
+            <div class="overall-card"><span>정상 조합원</span><strong id="overallEligible">0명</strong></div>
             <div class="overall-card"><span>참여 조합원</span><strong id="overallParticipants">0명</strong></div>
-            <div class="overall-card"><span>시험 대상 참여율</span><strong id="overallParticipationRate">0%</strong></div>
+            <div class="overall-card"><span>조합원 참여율</span><strong id="overallParticipationRate">0%</strong></div>
             <div class="overall-card"><span>완료한 퀴즈</span><strong id="overallAttempts">0회</strong></div>
             <div class="overall-card"><span>누적 답변</span><strong id="overallAnswers">0회</strong></div>
             <div class="overall-card"><span>전체 정답률</span><strong id="overallCorrectRate">0%</strong></div>
@@ -139,7 +139,7 @@
           </div>
           <div class="member-stats">
             <div class="member-stats-head">
-              <h3 class="member-stats-title">👥 시험 대상자별 참여 기록</h3>
+              <h3 class="member-stats-title">👥 조합원별 참여 기록</h3>
               <input class="form-control form-control-sm member-filter" id="memberStatsFilter" type="search" placeholder="이름 또는 조합원 번호 검색">
             </div>
             <div class="table-responsive">
@@ -148,8 +148,8 @@
                 <tbody id="memberStatsBody"></tbody>
               </table>
             </div>
-            <div class="text-muted small text-center py-3 d-none" id="memberStatsEmpty">조건에 맞는 시험 대상자가 없습니다.</div>
-            <p class="form-help mt-3 mb-0">이름과 개인 기록은 퀴즈 관리 권한이 있는 관리자에게만 보입니다. 현재 참여율의 분모는 전체 조합원이 아니라 비공개 시험 대상자입니다.</p>
+            <div class="text-muted small text-center py-3 d-none" id="memberStatsEmpty">조건에 맞는 조합원이 없습니다.</div>
+            <p class="form-help mt-3 mb-0">이름과 개인 기록은 퀴즈 관리 권한이 있는 관리자에게만 보입니다. 참여율은 현재 정상 조합원 전체를 기준으로 계산합니다.</p>
           </div>
         </div>
         <div id="overallError" class="alert alert-danger d-none mb-0"></div>
@@ -222,7 +222,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.2.0';
+    const VERSION = '1.3.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -249,7 +249,7 @@
     }
     function errorMessage(error, fallback) {
       const message = String(error?.message || error || '');
-      if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED')) return '현재 계정에는 비공개 퀴즈 시험 관리 권한이 없습니다.';
+      if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED') || message.includes('QUIZ_ACTIVE_MEMBER_REQUIRED')) return '현재 계정은 정상 조합원으로 확인되지 않습니다.';
       if (message.includes('QUIZ_ADMIN_PERMISSION_REQUIRED')) return '퀴즈 문제를 관리할 ERP 권한이 없습니다.';
       if (message.includes('QUIZ_SOURCE_NUMBER_DUPLICATE')) return '이미 사용 중인 관리 번호입니다. 다른 번호를 입력하거나 비워 주세요.';
       if (message.includes('QUIZ_OPTIONS') || message.includes('QUIZ_OPTION')) return '선택지를 확인해 주세요. 선택지는 2~6개이고 정답 하나를 골라야 합니다.';
@@ -307,7 +307,7 @@
 
     function renderOverallStats() {
       const stats=state.overall||{};
-      $('overallScopeCopy').textContent=`${String(stats.scope_label||'비공개 시험 대상')} ${Number(stats.eligible_count||0).toLocaleString('ko-KR')}명을 기준으로 참여와 정답 기록을 계산합니다.`;
+      $('overallScopeCopy').textContent=`${String(stats.scope_label||'정상 조합원')} ${Number(stats.eligible_count||0).toLocaleString('ko-KR')}명을 기준으로 참여와 정답 기록을 계산합니다.`;
       $('overallEligible').textContent=`${Number(stats.eligible_count||0).toLocaleString('ko-KR')}명`;
       $('overallParticipants').textContent=`${Number(stats.participant_count||0).toLocaleString('ko-KR')}명`;
       $('overallParticipationRate').textContent=formatPercent(stats.participation_rate);

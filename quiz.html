@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <meta name="theme-color" content="#f6f7f2">
-  <title>햇빛 퀴즈 시험 운영 | 용인모두의햇빛협동조합</title>
+  <title>햇빛 퀴즈 | 용인모두의햇빛협동조합</title>
   <link rel="stylesheet" href="shared/theme.css?v=20260802-1">
   <script src="shared/theme.js?v=20260802-1"></script>
   <script src="shared/route_guard.js?v=20260804-1"></script>
@@ -173,20 +173,20 @@
       </a>
       <div class="topbar-actions">
         <a class="portal-link" href="membermanage.html">← 조합원 관리</a>
-        <span class="pilot-chip">비공개 시험 운영</span>
+        <span class="pilot-chip">조합원 전용</span>
       </div>
     </header>
 
     <section class="card state" id="loadingView" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
       <h1 style="font-size:28px">퀴즈를 준비하고 있어요</h1>
-      <p>로그인과 시험 참여 권한을 확인하는 중입니다.</p>
+      <p>로그인과 정상 조합원 상태를 확인하는 중입니다.</p>
     </section>
 
     <section class="card state hidden" id="lockedView" aria-live="polite">
       <div class="state-icon" id="lockedIcon" aria-hidden="true">🔐</div>
       <h1 id="lockedTitle" style="font-size:30px">로그인이 필요합니다</h1>
-      <p id="lockedMessage">시험 운영 참여 계정으로 로그인해 주세요.</p>
+      <p id="lockedMessage">정상 조합원 계정으로 로그인해 주세요.</p>
       <div class="actions">
         <button type="button" class="button button-primary" id="loginButton">조합원 로그인</button>
         <a class="button button-secondary" href="index.html">홈페이지로</a>
@@ -194,7 +194,7 @@
     </section>
 
     <section class="card hero hidden" id="introView">
-      <p class="eyebrow">🌱 시험 운영에 초대됐어요</p>
+      <p class="eyebrow">☀️ 조합원 햇빛 퀴즈</p>
       <h1>햇빛 상식,<br>가볍게 풀어볼까요?</h1>
       <p class="hero-copy"><strong id="memberName"></strong>님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.</p>
       <div class="feature-grid" aria-label="퀴즈 특징">
@@ -266,7 +266,7 @@
     <div class="dialog">
       <p class="eyebrow">🏆 퀴즈 명예의 전당</p>
       <h2 id="hofTitle">와, 이번 5문제를 모두 맞혔어요!</h2>
-      <p>시험 운영 중에는 공개하지 않고 동의 여부만 안전하게 기록합니다. 나중에 명예의 전당을 열게 되면 이름을 부드럽게 가려 축하 기록으로 소개할 수 있어요. 기록에 동의할까요?</p>
+      <p>동의하면 햇빛 명예의 전당에 축하 기록을 남겨요. 다른 조합원에게는 이름 가운데 글자를 부드럽게 가려 표시합니다. 기록에 동의할까요?</p>
       <div class="actions">
         <button type="button" class="button button-secondary" id="hofDeclineButton">이번에는 괜찮아요</button>
         <button type="button" class="button button-primary" id="hofConsentButton">기록에 동의해요 🎊</button>
@@ -286,7 +286,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '0.2.0';
+    const VERSION = '0.3.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
@@ -321,7 +321,7 @@
 
     function rpcErrorMessage(error, fallback) {
       const message = String(error?.message || error || '');
-      if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED')) return '현재 계정은 시험 운영 참여 계정이 아닙니다.';
+      if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED') || message.includes('QUIZ_ACTIVE_MEMBER_REQUIRED')) return '현재 계정은 정상 조합원으로 확인되지 않습니다.';
       if (message.includes('QUIZ_NOT_ENOUGH_PUBLISHED_QUESTIONS') || message.includes('QUIZ_NOT_ENOUGH_REGULAR_QUESTIONS')) return '공개 준비가 끝난 문제가 아직 부족합니다.';
       if (message.includes('QUIZ_FIRST_FOUR_NOT_COMPLETED')) return '앞의 네 문제를 모두 푼 뒤 마지막 문제를 만날 수 있습니다.';
       if (message.includes('QUIZ_FIFTH_QUESTION_UNAVAILABLE')) return '마지막 문제를 준비하지 못했습니다. 잠시 후 다시 눌러 주세요.';
@@ -432,7 +432,7 @@
         if (!sessionData?.session?.user) {
           $('lockedIcon').textContent = '🔐';
           $('lockedTitle').textContent = '로그인이 필요합니다';
-          $('lockedMessage').textContent = '시험 운영 참여 계정으로 로그인해 주세요.';
+          $('lockedMessage').textContent = '정상 조합원 계정으로 로그인해 주세요.';
           $('loginButton').classList.remove('hidden');
           showView('lockedView');
           return;
@@ -443,8 +443,8 @@
         state.context = data || {};
         if (state.context.allowed !== true) {
           $('lockedIcon').textContent = '🌱';
-          $('lockedTitle').textContent = '지금은 초대 시험 중입니다';
-          $('lockedMessage').textContent = '현재 계정에는 아직 퀴즈 시험 참여 권한이 없습니다.';
+          $('lockedTitle').textContent = '정상 조합원 확인이 필요합니다';
+          $('lockedMessage').textContent = '승인대기·탈퇴 상태이거나 조합원 정보와 로그인이 연결되지 않은 계정은 참여할 수 없습니다.';
           $('loginButton').classList.add('hidden');
           showView('lockedView');
           return;
