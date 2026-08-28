@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.48 | Change: 2026-08-27 - Add a shared notice-count helper and align employment-insurance inputs. -->
+<!-- Version: v1.2.49 | Change: 2026-08-28 - Apply multi-date leave by date and year. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.48 | approval.html');</script>
+  <script>console.log('[Version] v1.2.49 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -30,7 +30,7 @@
   <script src="erp_runtime_guard.js?v=20260804-1"></script>
   <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
-  <script src="leave_ledger.js"></script>
+  <script src="leave_ledger.js?v=20260828-0335-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
 
   <style>
@@ -10572,9 +10572,15 @@ function getApprovalAdvanceLeaveSummary(leaveType) {
         if (typeof leaveLedger.isDeductibleLeaveDoc === 'function' && !leaveLedger.isDeductibleLeaveDoc(doc)) return sum;
         const status = String(doc?.status || '').trim();
         if (!reservedStatuses.includes(status)) return sum;
-        const startIso = typeof leaveLedger.getLeaveStartIso === 'function' ? leaveLedger.getLeaveStartIso(doc) : '';
-        if (!startIso.startsWith(`${requestedYear}-`)) return sum;
-        return sum + Number(doc?.amount || doc?._leave_amount || 0);
+        const rows = typeof leaveLedger.getLeaveAllocationRows === 'function'
+            ? leaveLedger.getLeaveAllocationRows(doc)
+            : [doc];
+        return sum + rows.reduce((rowSum, row) => {
+            const startIso = typeof leaveLedger.getLeaveStartIso === 'function' ? leaveLedger.getLeaveStartIso(row) : '';
+            if (!startIso.startsWith(`${requestedYear}-`)) return rowSum;
+            const amount = row?._leave_amount != null ? row._leave_amount : row?.amount;
+            return rowSum + Number(amount || 0);
+        }, 0);
     }, 0);
 
     return {
