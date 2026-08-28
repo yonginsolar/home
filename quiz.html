@@ -173,7 +173,7 @@
         <span>용인모두의햇빛협동조합</span>
       </a>
       <div class="topbar-actions">
-        <a class="portal-link" id="portalLink" href="membermanage.html">← 조합원 관리</a>
+        <a class="portal-link" id="portalLink" href="index.html" aria-label="홈페이지로 뒤로가기">← 뒤로가기</a>
         <span class="pilot-chip" id="modeChip">접속 확인 중</span>
       </div>
     </header>
@@ -291,7 +291,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '0.5.1';
+    const VERSION = '0.5.2';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const MEMBER_REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
@@ -325,6 +325,47 @@
 
     const $ = (id) => document.getElementById(id);
     const views = ['loadingView', 'lockedView', 'introView', 'quizView', 'resultView'];
+    const QUIZ_RETURN_TARGETS = Object.freeze({
+      home: Object.freeze({ href: 'index.html', label: '홈페이지' }),
+      membermanage: Object.freeze({ href: 'membermanage.html', label: '조합원 관리' })
+    });
+
+    function getQuizReturnTarget() {
+      let requestedSource = '';
+      try {
+        requestedSource = String(new URLSearchParams(location.search).get('from') || '').trim().toLowerCase();
+      } catch (_) {
+        requestedSource = '';
+      }
+      if (Object.prototype.hasOwnProperty.call(QUIZ_RETURN_TARGETS, requestedSource)) {
+        return QUIZ_RETURN_TARGETS[requestedSource];
+      }
+
+      try {
+        const referrer = new URL(document.referrer);
+        const referrerPath = referrer.pathname.replace(/\/+$/, '') || '/';
+        if (referrer.origin === location.origin && /\/membermanage(?:\.html)?$/.test(referrerPath)) {
+          return QUIZ_RETURN_TARGETS.membermanage;
+        }
+        if (referrer.origin === location.origin && (referrerPath === '/' || /\/index(?:\.html)?$/.test(referrerPath))) {
+          return QUIZ_RETURN_TARGETS.home;
+        }
+      } catch (_) {}
+
+      return QUIZ_RETURN_TARGETS.home;
+    }
+
+    const quizReturnTarget = getQuizReturnTarget();
+
+    function configureReturnLink() {
+      const link = $('portalLink');
+      link.textContent = '← 뒤로가기';
+      link.href = quizReturnTarget.href;
+      link.setAttribute('aria-label', `${quizReturnTarget.label}로 뒤로가기`);
+      link.title = `${quizReturnTarget.label}로 돌아가기`;
+    }
+
+    configureReturnLink();
 
     function showView(id) {
       views.forEach((viewId) => $(viewId).classList.toggle('hidden', viewId !== id));
@@ -482,8 +523,7 @@
     function configureModeUi() {
       const memberMode = isMemberMode();
       $('modeChip').textContent = memberMode ? '조합원 기록 모드' : '누구나 참여';
-      $('portalLink').textContent = memberMode ? '← 조합원 관리' : '조합원 로그인·관리';
-      $('portalLink').href = memberMode ? 'membermanage.html' : loginUrl();
+      configureReturnLink();
       $('introEyebrow').textContent = memberMode ? '☀️ 조합원 햇빛 퀴즈' : '🌍 누구나 즐기는 햇빛 퀴즈';
       $('introCopy').textContent = memberMode
         ? `${String(state.context?.member_name || '조합원')}님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.`
