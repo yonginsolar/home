@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <meta name="robots" content="index,follow">
   <meta name="theme-color" content="#f6f7f2">
   <title>햇빛 퀴즈 | 용인모두의햇빛협동조합</title>
   <link rel="stylesheet" href="shared/theme.css?v=20260802-1">
@@ -142,6 +142,7 @@
     .history-list { display: grid; gap: 8px; }
     .history-row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 13px; background: var(--quiz-soft); font-size: 13px; }
     .history-row span { color: var(--quiz-muted); }
+    .mode-note { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--quiz-line); border-radius: 15px; background: color-mix(in srgb, var(--quiz-accent) 12%, var(--quiz-surface)); color: var(--quiz-muted); font-size: 13px; }
     .dialog-backdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgba(3, 10, 6, .58); }
     .dialog { width: min(480px, 100%); padding: 28px; border: 1px solid var(--quiz-line); border-radius: 24px; background: var(--quiz-surface); box-shadow: 0 28px 90px rgba(0, 0, 0, .35); }
     .dialog h2 { font-size: 25px; }
@@ -172,15 +173,15 @@
         <span>용인모두의햇빛협동조합</span>
       </a>
       <div class="topbar-actions">
-        <a class="portal-link" href="membermanage.html">← 조합원 관리</a>
-        <span class="pilot-chip">조합원 전용</span>
+        <a class="portal-link" id="portalLink" href="membermanage.html">← 조합원 관리</a>
+        <span class="pilot-chip" id="modeChip">접속 확인 중</span>
       </div>
     </header>
 
     <section class="card state" id="loadingView" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
       <h1 style="font-size:28px">퀴즈를 준비하고 있어요</h1>
-      <p>로그인과 정상 조합원 상태를 확인하는 중입니다.</p>
+      <p>조합원 기록 모드와 공개 체험 모드를 확인하는 중입니다.</p>
     </section>
 
     <section class="card state hidden" id="lockedView" aria-live="polite">
@@ -194,9 +195,9 @@
     </section>
 
     <section class="card hero hidden" id="introView">
-      <p class="eyebrow">☀️ 조합원 햇빛 퀴즈</p>
+      <p class="eyebrow" id="introEyebrow">☀️ 조합원 햇빛 퀴즈</p>
       <h1>햇빛 상식,<br>가볍게 풀어볼까요?</h1>
-      <p class="hero-copy"><strong id="memberName"></strong>님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.</p>
+      <p class="hero-copy" id="introCopy"><strong id="memberName"></strong>님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.</p>
       <div class="feature-grid" aria-label="퀴즈 특징">
         <div class="feature"><strong>5문제</strong><span>한 번에 가볍게</span></div>
       </div>
@@ -211,7 +212,9 @@
       </div>
       <div class="actions">
         <button type="button" class="button button-primary" id="startButton">퀴즈 시작하기 ☀️</button>
+        <a class="button button-secondary hidden" id="introLoginLink" href="membermanage.html">조합원 로그인하고 기록 남기기</a>
       </div>
+      <p class="mode-note hidden" id="publicModeNote">공개 체험은 이름이나 연락처를 받지 않으며 개인 배지·명예의 전당·조합원 참여 이력에 포함하지 않습니다.</p>
       <div class="history hidden" id="introHistory">
         <h3>나의 최근 기록</h3>
         <div class="history-list" id="introHistoryList"></div>
@@ -250,10 +253,12 @@
       <h1 style="font-size:clamp(30px,7vw,48px)">오늘의 햇빛 감각</h1>
       <div class="score"><strong id="resultScore">0</strong><span id="resultTotal">/ 5문제</span></div>
       <p class="result-copy" id="resultCopy"></p>
+      <p class="mode-note hidden" id="publicResultNote">이번 체험은 개인 기록으로 저장되지 않았습니다. 조합원으로 로그인하면 다음 참여부터 배지와 참여 이력을 남길 수 있습니다.</p>
       <div class="badge-list" id="badgeList"></div>
       <div class="actions">
         <button type="button" class="button button-primary" id="retryButton">다른 문제 풀기</button>
         <button type="button" class="button button-secondary" id="backToIntroButton">첫 화면으로</button>
+        <a class="button button-secondary hidden" id="resultLoginLink" href="membermanage.html">조합원 로그인하고 기록 남기기</a>
       </div>
       <div class="history hidden" id="resultHistory">
         <h3>최근 참여</h3>
@@ -286,10 +291,11 @@
   (() => {
     'use strict';
 
-    const VERSION = '0.3.0';
+    const VERSION = '0.4.0';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
-    const REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
+    const MEMBER_REQUEST_KEY_STORAGE = 'yongin_quiz_pilot_request_key_v1';
+    const PUBLIC_REQUEST_KEY_STORAGE = 'yongin_quiz_public_request_key_v1';
     const client = window.CoopRouteGuard?.createSupabaseClient
       ? window.CoopRouteGuard.createSupabaseClient(window.supabase, SUPABASE_URL, SUPABASE_KEY)
       : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -297,9 +303,11 @@
         });
 
     const state = {
+      mode: 'PUBLIC',
       context: null,
       summary: null,
       attemptId: '',
+      requestKey: '',
       hofConsentAttemptId: '',
       questions: [],
       index: 0,
@@ -326,6 +334,8 @@
       if (message.includes('QUIZ_FIRST_FOUR_NOT_COMPLETED')) return '앞의 네 문제를 모두 푼 뒤 마지막 문제를 만날 수 있습니다.';
       if (message.includes('QUIZ_FIFTH_QUESTION_UNAVAILABLE')) return '마지막 문제를 준비하지 못했습니다. 잠시 후 다시 눌러 주세요.';
       if (message.includes('QUIZ_ANSWER_ALREADY_LOCKED')) return '이미 선택한 답은 바꿀 수 없습니다.';
+      if (message.includes('QUIZ_PUBLIC_START_RATE_LIMITED')) return '지금 참여가 잠시 몰렸습니다. 잠깐 기다린 뒤 다시 시작해 주세요.';
+      if (message.includes('QUIZ_PUBLIC_ATTEMPT_EXPIRED')) return '공개 체험 시간이 지나 새 문제로 다시 시작해야 합니다.';
       if (message.includes('JWT') || error?.status === 401) return '로그인 시간이 만료되었습니다. 다시 로그인해 주세요.';
       return fallback || '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
     }
@@ -345,18 +355,49 @@
       return target.href;
     }
 
+    function requestKeyStorage() {
+      return state.mode === 'MEMBER' ? MEMBER_REQUEST_KEY_STORAGE : PUBLIC_REQUEST_KEY_STORAGE;
+    }
+
     function getRequestKey() {
       let key = '';
-      try { key = sessionStorage.getItem(REQUEST_KEY_STORAGE) || ''; } catch (_) {}
+      const storageKey = requestKeyStorage();
+      try { key = sessionStorage.getItem(storageKey) || ''; } catch (_) {}
       if (!/^[0-9a-f-]{36}$/i.test(key)) {
         key = crypto.randomUUID();
-        try { sessionStorage.setItem(REQUEST_KEY_STORAGE, key); } catch (_) {}
+        try { sessionStorage.setItem(storageKey, key); } catch (_) {}
       }
       return key;
     }
 
     function clearRequestKey() {
-      try { sessionStorage.removeItem(REQUEST_KEY_STORAGE); } catch (_) {}
+      try { sessionStorage.removeItem(requestKeyStorage()); } catch (_) {}
+      state.requestKey = '';
+    }
+
+    function isMemberMode() { return state.mode === 'MEMBER'; }
+
+    function configureModeUi() {
+      const memberMode = isMemberMode();
+      $('modeChip').textContent = memberMode ? '조합원 기록 모드' : '누구나 참여';
+      $('portalLink').textContent = memberMode ? '← 조합원 관리' : '조합원 로그인·관리';
+      $('portalLink').href = memberMode ? 'membermanage.html' : loginUrl();
+      $('introEyebrow').textContent = memberMode ? '☀️ 조합원 햇빛 퀴즈' : '🌍 누구나 즐기는 햇빛 퀴즈';
+      $('introCopy').textContent = memberMode
+        ? `${String(state.context?.member_name || '조합원')}님께 매회 5문제를 보여드려요. 맞고 틀린 결과보다, 해설을 읽으며 에너지 전환을 편하게 알아가는 퀴즈입니다.`
+        : '로그인 없이 5문제를 바로 풀 수 있어요. 답을 고른 뒤 정답과 해설을 읽으며 에너지 전환을 편하게 알아가 보세요.';
+      $('startButton').textContent = memberMode ? '퀴즈 시작하기 ☀️' : '공개 체험 시작하기 ☀️';
+      $('introLoginLink').classList.toggle('hidden', memberMode);
+      $('introLoginLink').href = loginUrl();
+      $('publicModeNote').classList.toggle('hidden', memberMode);
+      $('publicResultNote').classList.toggle('hidden', memberMode);
+      $('resultLoginLink').classList.toggle('hidden', memberMode);
+      $('resultLoginLink').href = loginUrl();
+      $('mySummary').classList.toggle('hidden', !memberMode || Number(state.summary?.completed_attempts || 0) === 0);
+      if (!memberMode) {
+        $('introHistory').classList.add('hidden');
+        $('resultHistory').classList.add('hidden');
+      }
     }
 
     function formatKst(value) {
@@ -369,6 +410,7 @@
     }
 
     async function loadSummary() {
+      if (!isMemberMode()) return;
       const { data, error } = await client.rpc('quiz_pilot_get_my_summary');
       if (error) throw error;
       state.summary = data || {};
@@ -429,31 +471,30 @@
       try {
         const { data: sessionData, error: sessionError } = await client.auth.getSession();
         if (sessionError) throw sessionError;
-        if (!sessionData?.session?.user) {
-          $('lockedIcon').textContent = '🔐';
-          $('lockedTitle').textContent = '로그인이 필요합니다';
-          $('lockedMessage').textContent = '정상 조합원 계정으로 로그인해 주세요.';
-          $('loginButton').classList.remove('hidden');
-          showView('lockedView');
-          return;
+        const signedIn = Boolean(sessionData?.session?.user);
+        let memberContext = null;
+        if (signedIn) {
+          const memberResult = await client.rpc('quiz_pilot_get_context');
+          if (!memberResult.error) memberContext = memberResult.data || {};
         }
 
-        const { data, error } = await client.rpc('quiz_pilot_get_context');
-        if (error) throw error;
-        state.context = data || {};
-        if (state.context.allowed !== true) {
-          $('lockedIcon').textContent = '🌱';
-          $('lockedTitle').textContent = '정상 조합원 확인이 필요합니다';
-          $('lockedMessage').textContent = '승인대기·탈퇴 상태이거나 조합원 정보와 로그인이 연결되지 않은 계정은 참여할 수 없습니다.';
-          $('loginButton').classList.add('hidden');
-          showView('lockedView');
-          return;
+        if (memberContext?.allowed === true) {
+          state.mode = 'MEMBER';
+          state.context = memberContext;
+          $('memberName').textContent = String(state.context.member_name || '조합원');
+          await loadSummary();
+        } else {
+          const { data: publicContext, error: publicError } = await client.rpc('quiz_public_get_context');
+          if (publicError) throw publicError;
+          state.mode = 'PUBLIC';
+          state.context = publicContext || {};
+          state.summary = null;
+          if (state.context.allowed !== true) throw new Error('QUIZ_NOT_ENOUGH_REGULAR_QUESTIONS');
         }
 
-        $('memberName').textContent = String(state.context.member_name || '조합원');
-        await loadSummary();
+        configureModeUi();
         showView('introView');
-        openPendingHofConsent();
+        if (isMemberMode()) openPendingHofConsent();
       } catch (error) {
         console.error(`[quiz ${VERSION}] boot failed`, error);
         $('lockedIcon').textContent = '⚠️';
@@ -471,12 +512,15 @@
       $('retryButton').disabled = true;
       try {
         let requestKey = getRequestKey();
-        let { data, error } = await client.rpc('quiz_pilot_start_attempt', { p_request_key: requestKey });
+        state.requestKey = requestKey;
+        const startRpc = isMemberMode() ? 'quiz_pilot_start_attempt' : 'quiz_public_start_attempt';
+        let { data, error } = await client.rpc(startRpc, { p_request_key: requestKey });
         if (error) throw error;
         if (data?.status === 'COMPLETED') {
           clearRequestKey();
           requestKey = getRequestKey();
-          const retry = await client.rpc('quiz_pilot_start_attempt', { p_request_key: requestKey });
+          state.requestKey = requestKey;
+          const retry = await client.rpc(startRpc, { p_request_key: requestKey });
           if (retry.error) throw retry.error;
           data = retry.data;
         }
@@ -549,11 +593,14 @@
       state.answerBusy = true;
       setOptionsDisabled(true);
       try {
-        const { data, error } = await client.rpc('quiz_pilot_answer', {
+        const answerRpc = isMemberMode() ? 'quiz_pilot_answer' : 'quiz_public_answer';
+        const answerArgs = {
           p_attempt_id: state.attemptId,
           p_item_id: question.item_id,
           p_selected_option_key: question.selected_option_key
-        });
+        };
+        if (!isMemberMode()) answerArgs.p_request_key = state.requestKey || getRequestKey();
+        const { data, error } = await client.rpc(answerRpc, answerArgs);
         if (error) throw error;
         state.feedbackByItem.set(question.item_id, data);
         showFeedback(question, data);
@@ -576,11 +623,14 @@
       state.answerBusy = true;
       setOptionsDisabled(true);
       try {
-        const { data, error } = await client.rpc('quiz_pilot_answer', {
+        const answerRpc = isMemberMode() ? 'quiz_pilot_answer' : 'quiz_public_answer';
+        const answerArgs = {
           p_attempt_id: state.attemptId,
           p_item_id: question.item_id,
           p_selected_option_key: optionKey
-        });
+        };
+        if (!isMemberMode()) answerArgs.p_request_key = state.requestKey || getRequestKey();
+        const { data, error } = await client.rpc(answerRpc, answerArgs);
         if (error) throw error;
         question.answered = true;
         question.selected_option_key = optionKey;
@@ -670,7 +720,10 @@
       state.fifthBusy = true;
       $('nextButton').disabled = true;
       try {
-        const { data, error } = await client.rpc('quiz_pilot_get_fifth_question', { p_attempt_id: state.attemptId });
+        const fifthRpc = isMemberMode() ? 'quiz_pilot_get_fifth_question' : 'quiz_public_get_fifth_question';
+        const fifthArgs = { p_attempt_id: state.attemptId };
+        if (!isMemberMode()) fifthArgs.p_request_key = state.requestKey || getRequestKey();
+        const { data, error } = await client.rpc(fifthRpc, fifthArgs);
         if (error) throw error;
         if (!data?.item_id || Number(data.position) !== 5) throw new Error('QUIZ_FIFTH_QUESTION_INVALID');
         state.questions.push(data);
@@ -686,13 +739,16 @@
       state.completeBusy = true;
       $('nextButton').disabled = true;
       try {
-        const { data, error } = await client.rpc('quiz_pilot_complete_attempt', { p_attempt_id: state.attemptId });
+        const completeRpc = isMemberMode() ? 'quiz_pilot_complete_attempt' : 'quiz_public_complete_attempt';
+        const completeArgs = { p_attempt_id: state.attemptId };
+        if (!isMemberMode()) completeArgs.p_request_key = state.requestKey || getRequestKey();
+        const { data, error } = await client.rpc(completeRpc, completeArgs);
         if (error) throw error;
         clearRequestKey();
-        await loadSummary();
+        if (isMemberMode()) await loadSummary();
         renderResult(data || {});
         showView('resultView');
-        if (data?.hall_of_fame_eligible === true && data?.hall_of_fame_consent == null) {
+        if (isMemberMode() && data?.hall_of_fame_eligible === true && data?.hall_of_fame_consent == null) {
           openHofConsent(data.attempt_id || state.attemptId, 250);
         }
       } catch (error) {
@@ -711,6 +767,7 @@
       const challengeCorrect = state.questions.some((question) => question.is_challenge === true && state.feedbackByItem.get(question.item_id)?.is_correct === true);
       $('resultScore').textContent = String(correct);
       $('resultTotal').textContent = `/ ${total}문제`;
+      $('resultEyebrow').textContent = isMemberMode() ? '🎉 한 판 완료!' : '🎉 공개 체험 완료!';
       $('resultCopy').textContent = challengeCorrect
         ? '이것까지 알아요? 도전문제까지 정확히 맞혔어요! ☀️'
         : challenge
@@ -719,9 +776,12 @@
         ? '완벽해요! 오늘 만난 햇빛 상식을 모두 정확히 짚었어요.'
         : correct >= 4
           ? '거의 다 왔어요. 오늘 읽은 해설이 다음 복습에서 든든한 힌트가 될 거예요.'
-          : '점수보다 알아가는 과정이 더 중요해요. 다음 판에서는 덜 본 문제와 복습 문제를 고르게 만나게 됩니다.';
+          : isMemberMode()
+            ? '점수보다 알아가는 과정이 더 중요해요. 다음 판에서는 덜 본 문제와 복습 문제를 고르게 만나게 됩니다.'
+            : '점수보다 알아가는 과정이 더 중요해요. 해설에서 새로 만난 내용을 편하게 기억해 주세요.';
       const badges = Array.isArray(state.summary?.badges) ? state.summary.badges : [];
       const list = $('badgeList');
+      list.classList.toggle('hidden', !isMemberMode());
       list.replaceChildren();
       badges.forEach((badge) => {
         const card = document.createElement('div');
@@ -738,7 +798,8 @@
         card.append(icon, name, progress);
         list.appendChild(card);
       });
-      renderHistory('resultHistory', 'resultHistoryList');
+      if (isMemberMode()) renderHistory('resultHistory', 'resultHistoryList');
+      configureModeUi();
     }
 
     async function saveHofConsent(consent) {
