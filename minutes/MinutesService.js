@@ -1,6 +1,6 @@
 /*
-Version: v1.0.47
-Change: 2026-08-21 - Include member type when loading officials for group attendee names.
+Version: v1.0.48
+Change: 2026-08-28 - Include signature row IDs so document viewers can request separate low-resolution previews.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -528,7 +528,16 @@ async function listSignaturesByMinuteId(minuteId) {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('doc_signatures')
-        .select('official_id, signature_url, signed_at')
+        .select('id, official_id, signature_url, signed_at')
+        .eq('minute_id', minuteId), coopId);
+    return { data, error };
+}
+
+async function listSignatureStatusesByMinuteId(minuteId) {
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase
+        .from('doc_signatures')
+        .select('id, official_id, signed_at')
         .eq('minute_id', minuteId), coopId);
     return { data, error };
 }
@@ -686,6 +695,7 @@ export const MinutesService = {
     getMinuteById,
     listSignaturesForMinutes,
     listSignaturesByMinuteId,
+    listSignatureStatusesByMinuteId,
     listPendingSignMinutes,
     createMinute,
     findMinuteByDocNoAndType,

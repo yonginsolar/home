@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.28
-Change: 2026-08-28 - Render the signature pad with dark background and light strokes in dark mode without changing stored signatures.
+Version: v1.2.29
+Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electronic signature is saved.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-08-28 - Render the signature pad with dark background and light str
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.28 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.29 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -380,7 +380,8 @@ Change: 2026-08-28 - Render the signature pad with dark background and light str
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.46';
+        import { MinutesService } from './MinutesService.js?v=1.0.48';
+        import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -869,7 +870,7 @@ Change: 2026-08-28 - Render the signature pad with dark background and light str
                 pendingSignAfterPad = false;
                 const uploaded = await uploadSignatureImage(dataUrl);
                 if (!uploaded) return;
-                submitSignature(uploaded);
+                await submitSignature(uploaded, dataUrl, { removeUploadedRawOnFailure: true });
             }
         }
         window.saveSignaturePad = saveSignaturePad;
@@ -1464,29 +1465,77 @@ async function openDocumentById(id) {
 
 
 
-        async function removeSignatureFile(signatureUrl) {
-            if (!signatureUrl) return;
-            const raw = String(signatureUrl).trim();
-            if (!raw) return;
+        function parseSignatureStorageReference(signatureUrl) {
+            const raw = String(signatureUrl || '').trim();
+            if (!raw) return null;
             if (raw.startsWith('http')) {
-                const match = raw.match(/\/storage\/v1\/object\/(public|sign)\/([^/]+)\/(.+)$/);
-                if (match) {
-                    const bucket = match[2];
-                    const path = match[3];
-                    await supabase.storage.from(bucket).remove([path]);
-                }
-                return;
+                const match = raw.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/);
+                if (!match) return null;
+                let path = String(match[2] || '').split('?')[0];
+                try { path = decodeURIComponent(path); } catch (_) {}
+                return { bucket: match[1], path };
             }
-            await supabase.storage.from('attachments').remove([raw.replace(/^\/+/, '')]);
+            const cleaned = raw.replace(/^\/+/, '');
+            if (cleaned.startsWith('attachments/')) {
+                return { bucket: 'attachments', path: cleaned.slice('attachments/'.length) };
+            }
+            return { bucket: 'attachments', path: cleaned };
         }
 
-        async function submitSignature(signatureUrl) {
+        async function resolveSignaturePreviewSource(signatureUrl) {
+            const raw = String(signatureUrl || '').trim();
+            if (!raw) return '';
+            if (raw.startsWith('data:image/')) return raw;
+            const storageRef = parseSignatureStorageReference(raw);
+            if (!storageRef) return safeUrl(raw) || '';
+            const { data, error } = await MinutesService.createSignedUrl(storageRef.bucket, storageRef.path, 900);
+            if (error || !data?.signedUrl) throw new Error(error?.message || '서명 원본을 안전하게 읽지 못했습니다.');
+            return data.signedUrl;
+        }
+
+        async function removeSignatureFile(signatureUrl) {
+            const storageRef = parseSignatureStorageReference(signatureUrl);
+            if (!storageRef) return;
+            if (storageRef.bucket !== 'attachments' || !storageRef.path.startsWith('signatures/')) return;
+            await supabase.storage.from('attachments').remove([storageRef.path]);
+        }
+
+        async function removeSignaturePreviewFile(minuteId, officialId, signatureId) {
+            const previewPath = getSignaturePreviewPath(minuteId, officialId, signatureId);
+            if (!previewPath) return;
+            await supabase.storage.from(SIGNATURE_PREVIEW_BUCKET).remove([previewPath]);
+        }
+
+        async function submitSignature(signatureUrl, previewSource = signatureUrl, options = {}) {
             const signingOfficialId = Number(myOfficialId || 0);
             if (!signingOfficialId) {
                 showToast('서명 가능한 임원 정보를 찾지 못했습니다.');
                 return;
             }
+            const signatureId = crypto.randomUUID();
+            const previewPath = getSignaturePreviewPath(currentMinuteId, signingOfficialId, signatureId);
+            let previewUploaded = false;
+
+            try {
+                const sourceUrl = await resolveSignaturePreviewSource(previewSource);
+                const previewBlob = await createSignaturePreviewBlob(sourceUrl);
+                const { error: previewError } = await supabase.storage
+                    .from(SIGNATURE_PREVIEW_BUCKET)
+                    .upload(previewPath, previewBlob, {
+                        contentType: 'image/png',
+                        cacheControl: '3600',
+                        upsert: false
+                    });
+                if (previewError) throw previewError;
+                previewUploaded = true;
+            } catch (previewError) {
+                if (options.removeUploadedRawOnFailure) await removeSignatureFile(signatureUrl);
+                showToast('서명 열람본 생성 실패: ' + (previewError?.message || 'Unknown error'));
+                return;
+            }
+
             const { error } = await MinutesService.insertSignature({
+                id: signatureId,
                 minute_id: currentMinuteId,
                 official_id: signingOfficialId,
                 member_uuid: myAuthId,
@@ -1494,6 +1543,8 @@ async function openDocumentById(id) {
             });
 
             if (error) {
+                if (previewUploaded) await removeSignaturePreviewFile(currentMinuteId, signingOfficialId, signatureId);
+                if (options.removeUploadedRawOnFailure) await removeSignatureFile(signatureUrl);
                 const msg = (error.message || '').toLowerCase();
                 if (error.status === 409 || msg.includes('conflict')) {
                     forceSignedOnce = true;
@@ -1574,8 +1625,9 @@ async function openDocumentById(id) {
                 ? String(deletedRows[0]?.signature_url || '').trim()
                 : '';
             const signatureUrlToRemove = deletedSignatureUrl || String(mySig?.signature_url || '').trim();
-            if (!error && signatureUrlToRemove) {
-                await removeSignatureFile(signatureUrlToRemove);
+            if (!error) {
+                await removeSignaturePreviewFile(currentMinuteId, cancelOfficialId, mySig?.id);
+                if (signatureUrlToRemove) await removeSignatureFile(signatureUrlToRemove);
             }
             if (error) {
                 showToast('서명 취소 실패: ' + error.message);

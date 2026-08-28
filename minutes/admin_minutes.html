@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.68
-Change: 2026-08-21 - Capture the actual attendee when a group delegate or director attends.
+Version: v1.2.69
+Change: 2026-08-28 - Add a re-runnable tool that creates private low-resolution previews for existing signatures.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-08-21 - Capture the actual attendee when a group delegate or direct
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.68 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.69 | admin_minutes.html');</script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -435,7 +435,9 @@ Change: 2026-08-21 - Capture the actual attendee when a group delegate or direct
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:12px;">
                 <button type="button" class="btn btn-gray" onclick="refreshMinutesManageList()">새로고침</button>
                 <button type="button" class="btn btn-gray" onclick="copySignatureLoginLink()">서명자 로그인 링크 복사</button>
+                <button type="button" class="btn btn-gray" id="signature-preview-backfill-btn" onclick="backfillSignaturePreviews()">서명 열람본 점검</button>
             </div>
+            <div id="signature-preview-backfill-status" class="text-muted" style="display:none; margin:-4px 0 12px; line-height:1.6;"></div>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
                 <input type="text" id="minutes-search" class="form-control" placeholder="제목/문서번호/유형 검색">
                 <button class="btn btn-gray" onclick="loadMinutes()">검색</button>
@@ -630,7 +632,8 @@ Change: 2026-08-21 - Capture the actual attendee when a group delegate or direct
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.47';
+        import { MinutesService } from './MinutesService.js?v=1.0.48';
+        import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
         function getErpHomeUrl() {
@@ -2346,6 +2349,102 @@ Change: 2026-08-21 - Capture the actual attendee when a group delegate or direct
             if (!error && data?.signedUrl) return data.signedUrl;
             return '';
         }
+
+        async function signaturePreviewExists(previewPath) {
+            const parts = String(previewPath || '').split('/').filter(Boolean);
+            const fileName = parts.pop() || '';
+            const folder = parts.join('/');
+            if (!folder || !fileName) return false;
+            const { data, error } = await supabase.storage
+                .from(SIGNATURE_PREVIEW_BUCKET)
+                .list(folder, { limit: 10, search: fileName });
+            if (error) throw error;
+            return (Array.isArray(data) ? data : []).some((item) => String(item?.name || '') === fileName);
+        }
+
+        window.backfillSignaturePreviews = async () => {
+            const ok = await showConfirm('기존 전자서명 원본은 그대로 두고, 문서함 열람용 96×48픽셀 사본을 비공개 저장소에 생성할까요? 이미 만든 열람본은 건너뜁니다.');
+            if (!ok) return;
+
+            const button = document.getElementById('signature-preview-backfill-btn');
+            const status = document.getElementById('signature-preview-backfill-status');
+            if (button) button.disabled = true;
+            if (status) {
+                status.style.display = 'block';
+                status.textContent = '서명 자료를 확인하는 중입니다…';
+            }
+
+            let created = 0;
+            let skipped = 0;
+            let failed = 0;
+            const failures = [];
+
+            try {
+                const { data: rows, error } = await supabase
+                    .from('doc_signatures')
+                    .select('id,minute_id,official_id,signature_url,signed_at')
+                    .order('signed_at', { ascending: true });
+                if (error) throw error;
+
+                const signatures = Array.isArray(rows) ? rows : [];
+                for (let index = 0; index < signatures.length; index += 1) {
+                    const row = signatures[index];
+                    const previewPath = getSignaturePreviewPath(row.minute_id, row.official_id, row.id);
+                    if (status) status.textContent = `서명 열람본 점검 중… ${index + 1}/${signatures.length}`;
+                    if (!previewPath) {
+                        failed += 1;
+                        failures.push(`${row.id}: 경로 생성 실패`);
+                        continue;
+                    }
+
+                    try {
+                        if (await signaturePreviewExists(previewPath)) {
+                            skipped += 1;
+                            continue;
+                        }
+                        const sourceUrl = await resolveSignatureUrl(row.signature_url);
+                        if (!sourceUrl) throw new Error('서명 원본을 읽지 못했습니다.');
+                        const previewBlob = await createSignaturePreviewBlob(sourceUrl);
+                        const { error: uploadError } = await supabase.storage
+                            .from(SIGNATURE_PREVIEW_BUCKET)
+                            .upload(previewPath, previewBlob, {
+                                contentType: 'image/png',
+                                cacheControl: '3600',
+                                upsert: false
+                            });
+                        if (uploadError) {
+                            const message = String(uploadError.message || '').toLowerCase();
+                            if (uploadError.statusCode === '409' || uploadError.status === 409 || message.includes('already exists')) {
+                                skipped += 1;
+                                continue;
+                            }
+                            throw uploadError;
+                        }
+                        created += 1;
+                    } catch (rowError) {
+                        failed += 1;
+                        failures.push(`${row.id}: ${rowError?.message || 'Unknown error'}`);
+                    }
+                }
+
+                const summary = `점검 완료 · 새로 생성 ${created}건 · 기존 열람본 ${skipped}건 · 실패 ${failed}건`;
+                if (status) status.textContent = summary;
+                if (failed > 0) {
+                    console.warn('[admin_minutes] signature preview backfill failures:', failures);
+                    showToast(`${summary}. 실패 내역은 콘솔에서 확인해 주세요.`);
+                } else {
+                    showToast(summary);
+                }
+                return { created, skipped, failed, failures };
+            } catch (error) {
+                const message = error?.message || 'Unknown error';
+                if (status) status.textContent = `점검 실패 · ${message}`;
+                showToast('서명 열람본 점검 실패: ' + message);
+                return { created, skipped, failed: failed + 1, failures: [...failures, message] };
+            } finally {
+                if (button) button.disabled = false;
+            }
+        };
 
         function getSignerPoolByDocType(docType) {
             const officials = Array.isArray(allOfficials) ? allOfficials : [];

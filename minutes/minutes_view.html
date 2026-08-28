@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-	    Version: v1.0.64
-	    Change: 2026-08-28 - Remove dark signature-image boxes while keeping light strokes in dark mode.
+	    Version: v1.0.65
+	    Change: 2026-08-28 - Show fixed low-resolution signature previews without delivering original signature images.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.64 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.65 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -72,7 +72,48 @@
         .signatures-chip.missing { background: #f1f5f9; color: #64748b; }
         .signatures-item { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px; background:#f8fafc; border:1px solid #e5e7eb; }
         .signatures-item.missing { opacity: 0.6; }
-        .signatures-img { width:40px; height:40px; border-radius:50%; border:1px solid #e5e7eb; object-fit:contain; background:#fff; }
+        .signature-preview-shell {
+            display: inline-flex;
+            width: 96px;
+            height: 48px;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fff;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            vertical-align: middle;
+        }
+        .signature-preview-shell.inline-signature-shell { margin-left: 8px; }
+        .signatures-img,
+        .inline-signature-img {
+            display: block;
+            width: 96px;
+            height: 48px;
+            object-fit: contain;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-user-drag: none;
+        }
+        .inline-signature-status {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 8px;
+            padding: 3px 8px;
+            border: 1px solid #bbf7d0;
+            border-radius: 999px;
+            background: #f0fdf4;
+            color: #166534;
+            font-size: 0.72rem;
+            font-weight: 800;
+            line-height: 1.2;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
         .signatures-name { font-size:0.85rem; font-weight:700; color:#0f172a; }
         .signatures-status { font-size:0.75rem; color:#64748b; }
         .attachments-list button {
@@ -304,10 +345,17 @@
         html[data-theme="dark"] .signatures-status {
             color: var(--theme-text-muted) !important;
         }
-        html[data-theme="dark"] :is(.signatures-img[src], .inline-signature-img) {
+        html[data-theme="dark"] .inline-signature-status {
+            background: rgba(22, 101, 52, 0.24) !important;
+            border-color: rgba(134, 239, 172, 0.42) !important;
+            color: #bbf7d0 !important;
+        }
+        html[data-theme="dark"] .signature-preview-shell {
             background: transparent !important;
             border-color: transparent !important;
-            filter: grayscale(1) invert(1);
+        }
+        html[data-theme="dark"] :is(.signatures-img, .inline-signature-img) {
+            filter: invert(1) hue-rotate(180deg);
         }
     </style>
 </head>
@@ -334,7 +382,8 @@
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.46';
+        import { MinutesService } from './MinutesService.js?v=1.0.48';
+        import { SIGNATURE_PREVIEW_BUCKET, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_VIEW = 'Asia/Seoul';
@@ -343,6 +392,20 @@
             const d = new Date(value);
             if (Number.isNaN(d.getTime())) return '-';
             return d.toLocaleDateString('ko-KR', { timeZone: KST_TZ_MINUTES_VIEW });
+        };
+        const formatMinutesViewKstDateTime = (value) => {
+            if (!value) return '시각 미기록';
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return '시각 미기록';
+            return d.toLocaleString('ko-KR', {
+                timeZone: KST_TZ_MINUTES_VIEW,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            });
         };
         const getDocTypeLabel = (docType) => {
             if (docType === 'NOTICE') return '공지';
@@ -776,28 +839,12 @@
             return { bucket: match[2], path: String(match[3] || '').split('?')[0] };
         }
 
-        async function resolveSignatureUrl(rawUrl) {
-            if (!rawUrl) return null;
-            const trimmed = String(rawUrl).trim();
-            if (!trimmed) return null;
-            if (trimmed.startsWith('http')) {
-                const parsed = parseStorageUrl(trimmed);
-                if (parsed) {
-                    const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 3600);
-                    if (!error && data?.signedUrl) return data.signedUrl;
-                }
-                return trimmed;
-            }
-            const cleanedPath = trimmed.replace(/^\/+/, '');
-            const { data, error } = await supabase.storage.from('attachments').createSignedUrl(cleanedPath, 3600);
-            if (!error && data?.signedUrl) return data.signedUrl;
-            try {
-                const { data: blob, error: dlErr } = await supabase.storage.from('attachments').download(cleanedPath);
-                if (!dlErr && blob) {
-                    return URL.createObjectURL(blob);
-                }
-            } catch (e) { /* ignore */ }
-            return null;
+        async function resolveSignaturePreviewUrl(doc, signature) {
+            const previewPath = getSignaturePreviewPath(doc?.id, signature?.official_id, signature?.id);
+            if (!previewPath) return '';
+            const { data, error } = await MinutesService.createSignedUrl(SIGNATURE_PREVIEW_BUCKET, previewPath, 900);
+            if (error || !data?.signedUrl) return '';
+            return safeUrl(data.signedUrl);
         }
 
         function getRequiredSignerIds(doc, officials) {
@@ -837,9 +884,8 @@
             return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         }
 
-        function appendMinuteSignatureImageToOfficialName(rootNode, official, signedUrl) {
-            const safeSignedUrl = safeUrl(signedUrl);
-            if (!rootNode || !official?.name || !safeSignedUrl) return false;
+        function appendMinuteSignaturePreviewToOfficialName(rootNode, official, previewUrl) {
+            if (!rootNode || !official?.name) return false;
             const compactName = buildCompactOfficialName(official.name);
             if (!compactName) return false;
 
@@ -872,24 +918,32 @@
             if (before) fragment.appendChild(document.createTextNode(before));
             fragment.appendChild(document.createTextNode(matched));
 
-            const img = document.createElement('img');
-            img.className = 'inline-signature-img';
-            img.src = safeSignedUrl;
-            img.alt = '서명';
-            img.style.width = '56px';
-            img.style.height = '56px';
-            img.style.objectFit = 'contain';
-            img.style.verticalAlign = 'middle';
-            img.style.marginLeft = '8px';
-            img.style.background = '#fff';
-            fragment.appendChild(img);
+            if (previewUrl) {
+                const shell = document.createElement('span');
+                shell.className = 'signature-preview-shell inline-signature-shell';
+                shell.setAttribute('aria-label', `${official.name} 전자서명 열람본`);
+                const image = document.createElement('img');
+                image.className = 'inline-signature-img';
+                image.src = previewUrl;
+                image.alt = `${official.name} 전자서명 열람본`;
+                image.loading = 'lazy';
+                image.draggable = false;
+                shell.appendChild(image);
+                fragment.appendChild(shell);
+            } else {
+                const status = document.createElement('span');
+                status.className = 'inline-signature-status';
+                status.textContent = '전자서명 완료';
+                status.setAttribute('aria-label', `${official.name} 전자서명 완료`);
+                fragment.appendChild(status);
+            }
 
             if (after) fragment.appendChild(document.createTextNode(after));
             targetNode.parentNode?.replaceChild(fragment, targetNode);
             return true;
         }
 
-        async function injectInlineSignatureImages(contentHtml, doc, officials, signatures) {
+        async function injectInlineSignaturePreviews(contentHtml, doc, officials, signatures) {
             if (!doc || !doc.requires_sign || doc.doc_type === 'NOTICE') {
                 return { html: String(contentHtml || ''), injected: false };
             }
@@ -909,11 +963,9 @@
                 const official = (Array.isArray(officials) ? officials : []).find(o => String(o.id) === String(id));
                 if (!official) continue;
                 const signature = sigMap.get(String(id));
-                if (!signature?.signature_url) continue;
-                const signedUrl = await resolveSignatureUrl(signature.signature_url);
-                const safe = safeUrl(signedUrl);
-                if (!safe) continue;
-                if (appendMinuteSignatureImageToOfficialName(parsed.body, official, safe)) {
+                if (!signature) continue;
+                const previewUrl = await resolveSignaturePreviewUrl(doc, signature);
+                if (appendMinuteSignaturePreviewToOfficialName(parsed.body, official, previewUrl)) {
                     injectedCount += 1;
                 }
             }
@@ -924,16 +976,10 @@
             };
         }
 
-        async function renderSignatures(doc, officials, signatures, options = {}) {
+        async function renderSignatures(doc, officials, signatures) {
             const panel = document.getElementById('signatures-panel');
             const list = document.getElementById('signatures-list');
             if (!panel || !list) return;
-
-            if (options.hidePanel === true) {
-                panel.style.display = 'none';
-                list.innerHTML = '';
-                return;
-            }
 
             if (!doc || doc.doc_type === 'NOTICE' || !doc.requires_sign) {
                 panel.style.display = 'none';
@@ -953,25 +999,24 @@
             const sigList = Array.isArray(signatures) ? signatures : [];
             const sigMap = new Map(sigList.map(s => [String(s.official_id), s]));
 
-            const cards = await Promise.all(required.map(async id => {
+            const cards = await Promise.all(required.map(async (id) => {
                 const off = allOfficials.find(o => String(o.id) === String(id));
                 const name = escapeHtml(off?.name || off?.coop_members?.name || '임원');
+                const role = escapeHtml(off?.role || off?.position || off?.category || '');
                 const sig = sigMap.get(String(id));
                 const isSigned = !!sig;
-                let imgHtml = '';
-                if (sig?.signature_url) {
-                    const signedUrl = await resolveSignatureUrl(sig.signature_url);
-                    const safe = safeUrl(signedUrl);
-                    if (safe) {
-                        imgHtml = `<img class="signatures-img" src="${safe}" alt="서명">`;
-                    }
-                }
-                const statusText = isSigned ? '서명 완료' : '미서명';
+                const previewUrl = isSigned ? await resolveSignaturePreviewUrl(doc, sig) : '';
+                const previewHtml = previewUrl
+                    ? `<span class="signature-preview-shell"><img class="signatures-img" src="${previewUrl}" alt="${name} 전자서명 열람본" loading="lazy" draggable="false"></span>`
+                    : (isSigned ? '<span class="inline-signature-status" style="margin-left:0;">전자서명 완료</span>' : '');
+                const statusText = isSigned
+                    ? `전자서명 완료 · ${escapeHtml(formatMinutesViewKstDateTime(sig.signed_at))}`
+                    : '미서명';
                 return `
                     <div class="signatures-item ${isSigned ? '' : 'missing'}">
-                        ${imgHtml || '<div class="signatures-img"></div>'}
+                        ${previewHtml}
                         <div>
-                            <div class="signatures-name">${name}</div>
+                            <div class="signatures-name">${name}${role ? ` · ${role}` : ''}</div>
                             <div class="signatures-status">${statusText}</div>
                         </div>
                     </div>
@@ -1665,16 +1710,14 @@
 
             const signaturesTask = (async () => {
                 const [{ data: signatures }, officials] = await Promise.all([
-                    MinutesService.listSignaturesByMinuteId(targetId),
+                    MinutesService.listSignatureStatusesByMinuteId(targetId),
                     MinutesService.getOfficials()
                 ]);
                 if (doc.doc_type !== 'NOTICE' && doc.content) {
                     const sanitizedContent = sanitizeHtml(doc.content || '');
-                    const inlineResult = await injectInlineSignatureImages(sanitizedContent, doc, officials || [], signatures || []);
+                    const inlineResult = await injectInlineSignaturePreviews(sanitizedContent, doc, officials || [], signatures || []);
                     detailContent.innerHTML = inlineResult.html || '<div style="color:#94a3b8;">내용이 없습니다.</div>';
-                    await renderSignatures(doc, officials || [], signatures || [], {
-                        hidePanel: !!(doc.published_at && isMinuteSignatureFullyCompleted(doc, officials || [], signatures || []) && inlineResult.injected)
-                    });
+                    await renderSignatures(doc, officials || [], signatures || []);
                 } else {
                     await renderSignatures(doc, officials || [], signatures || []);
                 }
