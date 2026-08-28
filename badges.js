@@ -1,5 +1,5 @@
-/* Version: v1.1.3
-Change: 2026-08-13 - Remove the redundant earned checkmark from badge cards.
+/* Version: v1.2.0
+Change: 2026-08-28 - Show the highest earned tier, the next challenge, and birthday badges only on birthdays.
 */
 /**
  * badges.js
@@ -16,13 +16,14 @@ const Badges = {
     _collectionGroups: {
         celebration: { label: "처음과 기념일", order: 10 },
         education: { label: "교육 참여", order: 20 },
-        capital: { label: "출자금", order: 30 },
-        extra_capital: { label: "추가 출자", order: 40 },
-        anniversary: { label: "함께한 시간", order: 50 },
-        event: { label: "특별한 참여", order: 60 },
-        honor: { label: "활동 기록", order: 70 },
-        role: { label: "역할과 공적", order: 80 },
-        challenge: { label: "다음 도전", order: 90 }
+        quiz: { label: "햇빛 퀴즈", order: 30 },
+        capital: { label: "출자금", order: 40 },
+        extra_capital: { label: "추가 출자", order: 50 },
+        anniversary: { label: "함께한 시간", order: 60 },
+        event: { label: "특별한 참여", order: 70 },
+        honor: { label: "활동 기록", order: 80 },
+        role: { label: "역할과 공적", order: 90 },
+        challenge: { label: "다음 도전", order: 100 }
     },
 
     // ============================================================
@@ -108,24 +109,67 @@ const Badges = {
             return `${numberValue.toLocaleString("ko-KR")}${unit || ""}`;
         },
 
+        displayTrack: (badge) => {
+            if (badge?.code === "newbie" || badge?.progress_track === "anniversary") return "membership_time";
+            const track = String(badge?.progress_track || "").trim();
+            return ["education", "quiz", "capital", "extra_capital"].includes(track) ? track : "";
+        },
+
+        displayTier: (badge) => badge?.code === "newbie" ? 0 : Number(badge?.progress_tier || 0),
+
+        kstMonthDay: (value) => {
+            const date = Badges._utils.parseDate(value);
+            if (!date) return "";
+            const parts = new Intl.DateTimeFormat("en-US", {
+                timeZone: "Asia/Seoul",
+                month: "2-digit",
+                day: "2-digit"
+            }).formatToParts(date);
+            const month = parts.find(part => part.type === "month")?.value || "";
+            const day = parts.find(part => part.type === "day")?.value || "";
+            return month && day ? `${month}-${day}` : "";
+        },
+
         selectVisibleFallback: (badges) => {
             const rows = Array.isArray(badges) ? badges : [];
-            const firstUnearnedTier = new Map();
+            const highestEarnedTier = new Map();
             rows.forEach((badge) => {
-                const track = String(badge?.progress_track || "").trim();
-                if (!track || badge?.is_earned) return;
-                const tier = Number(badge?.progress_tier || 0);
-                if (!tier) return;
-                const previous = firstUnearnedTier.get(track);
-                if (!previous || tier < previous) firstUnearnedTier.set(track, tier);
+                const track = Badges._utils.displayTrack(badge);
+                if (!track || !badge?.is_earned) return;
+                const tier = Badges._utils.displayTier(badge);
+                const previous = highestEarnedTier.get(track);
+                if (previous === undefined || tier > previous) highestEarnedTier.set(track, tier);
             });
+
+            const nextUnearnedTier = new Map();
+            rows.forEach((badge) => {
+                const track = Badges._utils.displayTrack(badge);
+                if (!track || badge?.is_earned || badge?.locked_visibility !== "next") return;
+                const tier = Badges._utils.displayTier(badge);
+                const highest = highestEarnedTier.get(track) ?? -1;
+                if (tier <= highest) return;
+                const previous = nextUnearnedTier.get(track);
+                if (previous === undefined || tier < previous) nextUnearnedTier.set(track, tier);
+            });
+
+            const todayMonthDay = Badges._utils.kstMonthDay(new Date());
             return rows.filter((badge) => {
+                if (badge?.code === "BIRTHDAY") {
+                    return badge?.is_earned
+                        && todayMonthDay
+                        && Badges._utils.kstMonthDay(badge?.granted_at) === todayMonthDay;
+                }
+
+                const track = Badges._utils.displayTrack(badge);
+                if (track) {
+                    const tier = Badges._utils.displayTier(badge);
+                    if (badge?.is_earned) return tier === highestEarnedTier.get(track);
+                    return badge?.locked_visibility === "next" && tier === nextUnearnedTier.get(track);
+                }
+
                 if (badge?.is_earned) return true;
                 if (badge?.locked_visibility === "always") return true;
-                const track = String(badge?.progress_track || "").trim();
-                return badge?.locked_visibility === "next"
-                    && track
-                    && Number(badge?.progress_tier || 0) === firstUnearnedTier.get(track);
+                return false;
             });
         }
     },
