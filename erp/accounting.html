@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.97 | Change: 2026-08-18 - Post linked increase and decrease approval adjustments. -->
+<!-- Version: v1.0.98 | Change: 2026-08-31 - Apply year-specific general corporate tax rates. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.97 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.98 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -634,7 +634,7 @@
           <input type="text" class="form-control bg-light" id="closingNetIncome" readonly>
         </div>
         <div class="alert alert-warning small p-2 mb-2">
-          조합법인 특례를 적용해 법인세를 추정 계산합니다. 국세는 조합법인 특례 세율, 법인지방소득세는 지방세법 표준세율을 사용하며 세액공제는 국세에만 차감합니다.
+          결산 연도에 맞는 일반 법인세율로 추정 계산합니다. 법인지방소득세는 과세표준에 지방세법 표준세율을 별도로 적용하며 세액공제·감면 입력값은 국세에만 차감합니다.
         </div>
         <div class="row g-2 mb-2">
           <div class="col-6">
@@ -1100,16 +1100,30 @@ let insuranceAutoDebitDiscountSetting = {
 };
 const KST_TZ_ACCOUNTING = 'Asia/Seoul';
 const APPROVAL_RECLASS_TARGET_TYPES = Object.freeze(['비용', '자산']);
-const COOP_CORPORATE_TAX_BRACKETS = [
-    { limit: 2000000000, rate: 0.09, deduction: 0 },
-    { limit: Infinity, rate: 0.12, deduction: 60000000 }
-];
-const LOCAL_CORPORATE_TAX_BRACKETS = [
+const GENERAL_CORPORATE_TAX_BRACKETS_2023_TO_2025 = Object.freeze([
+    { limit: 200000000, rate: 0.09, deduction: 0 },
+    { limit: 20000000000, rate: 0.19, deduction: 20000000 },
+    { limit: 300000000000, rate: 0.21, deduction: 420000000 },
+    { limit: Infinity, rate: 0.24, deduction: 9420000000 }
+]);
+const GENERAL_LOCAL_CORPORATE_TAX_BRACKETS_2023_TO_2025 = Object.freeze([
+    { limit: 200000000, rate: 0.009, deduction: 0 },
+    { limit: 20000000000, rate: 0.019, deduction: 2000000 },
+    { limit: 300000000000, rate: 0.021, deduction: 42000000 },
+    { limit: Infinity, rate: 0.024, deduction: 942000000 }
+]);
+const GENERAL_CORPORATE_TAX_BRACKETS_2026_PLUS = Object.freeze([
+    { limit: 200000000, rate: 0.10, deduction: 0 },
+    { limit: 20000000000, rate: 0.20, deduction: 20000000 },
+    { limit: 300000000000, rate: 0.22, deduction: 420000000 },
+    { limit: Infinity, rate: 0.25, deduction: 9420000000 }
+]);
+const GENERAL_LOCAL_CORPORATE_TAX_BRACKETS_2026_PLUS = Object.freeze([
     { limit: 200000000, rate: 0.01, deduction: 0 },
     { limit: 20000000000, rate: 0.02, deduction: 2000000 },
-    { limit: 300000000000, rate: 0.022, deduction: 39800000 },
-    { limit: Infinity, rate: 0.025, deduction: 655800000 }
-];
+    { limit: 300000000000, rate: 0.022, deduction: 42000000 },
+    { limit: Infinity, rate: 0.025, deduction: 942000000 }
+]);
 const ACCOUNTING_REPORT_ACCOUNT_ALIAS_BY_COMPACT = {
     '부가세대급금': '부가세대급금',
     '부가세예수금': '부가세예수금',
@@ -1447,6 +1461,25 @@ function getProgressiveTaxFromBrackets(baseAmount, brackets) {
     return 0;
 }
 
+function getGeneralCorporateTaxRateSet(targetYear) {
+    const year = Number(targetYear);
+    if (!Number.isInteger(year) || year < 2023) {
+        throw new Error('2023년 이전 결산은 자동 세율 계산을 지원하지 않습니다.');
+    }
+    if (year >= 2026) {
+        return {
+            year,
+            national: GENERAL_CORPORATE_TAX_BRACKETS_2026_PLUS,
+            local: GENERAL_LOCAL_CORPORATE_TAX_BRACKETS_2026_PLUS
+        };
+    }
+    return {
+        year,
+        national: GENERAL_CORPORATE_TAX_BRACKETS_2023_TO_2025,
+        local: GENERAL_LOCAL_CORPORATE_TAX_BRACKETS_2023_TO_2025
+    };
+} // End of getGeneralCorporateTaxRateSet
+
 function buildTaxAdjustmentSummary(rows) {
     const summary = { fines: 0, noProof: 0, donations: 0, entertain: 0 };
 
@@ -1489,13 +1522,14 @@ function buildClosingPrepaidTaxSummary(rows) {
     };
 }
 
-function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 0, prepaidNationalTax = 0, prepaidLocalTax = 0) {
+function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 0, prepaidNationalTax = 0, prepaidLocalTax = 0, targetYear = new Date().getFullYear()) {
     const taxableBase = Math.max(0, Math.round(Number(preTaxNetIncome || 0) + Number(addBackFines || 0)));
-    const nationalGross = getProgressiveTaxFromBrackets(taxableBase, COOP_CORPORATE_TAX_BRACKETS);
+    const rateSet = getGeneralCorporateTaxRateSet(targetYear);
+    const nationalGross = getProgressiveTaxFromBrackets(taxableBase, rateSet.national);
     const creditRequested = Math.max(0, Math.round(Number(taxCredit || 0)));
     const creditApplied = Math.min(creditRequested, nationalGross);
     const nationalAfterCredit = Math.max(0, nationalGross - creditApplied);
-    const localTax = Math.round(nationalAfterCredit * 0.1);
+    const localTax = getProgressiveTaxFromBrackets(taxableBase, rateSet.local);
     const recommendedExpense = nationalAfterCredit + localTax;
     const prepaidNationalApplied = Math.max(0, Math.round(Number(prepaidNationalTax || 0)));
     const prepaidLocalApplied = Math.max(0, Math.round(Number(prepaidLocalTax || 0)));
@@ -1505,6 +1539,7 @@ function buildClosingTaxEstimate(preTaxNetIncome, addBackFines = 0, taxCredit = 
     const expectedPayable = expectedNationalPayable + expectedLocalPayable;
 
     return {
+        taxYear: rateSet.year,
         taxBase: taxableBase,
         nationalGross,
         nationalAfterCredit,
@@ -6533,7 +6568,7 @@ async function buildClosingContext(targetYear) {
         netIncome: preTaxNetIncome - closingSummary.taxExpense,
         taxExpense: closingSummary.taxExpense,
         taxAdjust,
-        taxEstimate: buildClosingTaxEstimate(preTaxNetIncome, taxAdjust.fines, 0, prepaidTaxSummary.national, prepaidTaxSummary.local),
+        taxEstimate: buildClosingTaxEstimate(preTaxNetIncome, taxAdjust.fines, 0, prepaidTaxSummary.national, prepaidTaxSummary.local, targetYear),
         prepaidTaxSummary,
         isClosed: closingSummary.isClosed,
         existingLegal: closingSummary.legal,
@@ -6607,7 +6642,8 @@ function syncClosingFormState(resetReserveValues = false, options = {}) {
         closingContext.taxAdjust?.fines || 0,
         taxCredit,
         prepaidNationalTax,
-        prepaidLocalTax
+        prepaidLocalTax,
+        closingContext.year
     );
 
     closingContext.taxEstimate = estimate;
@@ -6772,7 +6808,7 @@ async function runClosingFromModal() {
     const taxCredit = getClosingTaxCreditValue();
     const prepaidNationalTax = getClosingPrepaidNationalTaxValue();
     const prepaidLocalTax = getClosingPrepaidLocalTaxValue();
-    const estimate = buildClosingTaxEstimate(ctx.preTaxNetIncome, ctx.taxAdjust?.fines || 0, taxCredit, prepaidNationalTax, prepaidLocalTax);
+    const estimate = buildClosingTaxEstimate(ctx.preTaxNetIncome, ctx.taxAdjust?.fines || 0, taxCredit, prepaidNationalTax, prepaidLocalTax, ctx.year);
     const legal = getClosingRoundedInputValue("closingLegalInput");
     const vol = getClosingRoundedInputValue("closingVoluntaryInput");
 
@@ -8674,7 +8710,7 @@ async function printReport() {
     const balanceSheetNetIncome = hasClosingCarryforward ? 0 : netIncome;
     const totalLiabEquity = tLiab + tEquity + balanceSheetNetIncome;
     const taxBase = netIncome + taxAdjust.fines;
-    const taxEstimate = buildClosingTaxEstimate(netIncome, taxAdjust.fines, 0, 0);
+    const taxEstimate = buildClosingTaxEstimate(netIncome, taxAdjust.fines, 0, 0, 0, selYear);
     const totalSurplus = netIncome;
     const totalAppropriation = surplus.legal + surplus.voluntary;
     const carriedForward = totalSurplus - totalAppropriation;
@@ -8846,7 +8882,7 @@ async function printReport() {
             <tr><td class="rpt-indent">과태료/벌금 (손금불산입)</td><td class="rpt-amt">${taxAdjust.fines.toLocaleString()}</td></tr>
             <tr><td class="rpt-indent">접대비 한도초과 (별도계산필요)</td><td class="rpt-amt text-muted">(${taxAdjust.entertain.toLocaleString()})</td></tr>
             <tr><td class="bg-light fw-bold text-danger">3. 과세표준 (1+2)</td><td class="rpt-amt fw-bold text-danger">${taxBase.toLocaleString()}</td></tr>
-            <tr><td class="bg-light fw-bold">4. 추정 법인세(국세, 조합법인 특례)</td><td class="rpt-amt fw-bold">${taxEstimate.nationalGross.toLocaleString()}</td></tr>
+            <tr><td class="bg-light fw-bold">4. 추정 법인세(국세, 일반 법인세율)</td><td class="rpt-amt fw-bold">${taxEstimate.nationalGross.toLocaleString()}</td></tr>
             <tr><td class="bg-light fw-bold">5. 추정 법인지방소득세</td><td class="rpt-amt fw-bold">${taxEstimate.localTax.toLocaleString()}</td></tr>
             <tr><td class="bg-light fw-bold">6. 추정 합계세액</td><td class="rpt-amt fw-bold">${taxEstimate.recommendedExpense.toLocaleString()}</td></tr>
         </table>
