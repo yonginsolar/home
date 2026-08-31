@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.54 | Change: 2026-08-28 - Group leave history by year and split mixed dates. -->
+<!-- Version: v1.0.55 | Change: 2026-08-31 - Show gross, deductions, and net pay on the mypage screen. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.54 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.55 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -55,12 +55,27 @@ body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic'
 .salary-blur:hover{filter:blur(0)}
 .salary-blur:focus,.salary-blur.is-revealed{filter:blur(0);outline:2px solid rgba(13,110,253,.25);outline-offset:3px;border-radius:6px}
 .join-days-badge{display:inline-flex;align-items:center;gap:4px;margin-left:4px;padding:2px 7px;border-radius:999px;background:#eaf7ef;color:#198754;font-weight:800}
-.salary-total-card{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;border:1px solid rgba(13,110,253,.16);border-radius:16px;background:linear-gradient(135deg,#f8fbff,#ffffff);box-shadow:0 8px 24px rgba(15,23,42,.04)}
+.salary-total-card{margin-bottom:14px;padding:16px;border:1px solid rgba(13,110,253,.16);border-radius:16px;background:linear-gradient(135deg,#f8fbff,#ffffff);box-shadow:0 8px 24px rgba(15,23,42,.04)}
+.salary-total-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
 .salary-total-label{font-size:.82rem;color:#64748b;font-weight:700}
+.salary-total-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.salary-total-metric{min-width:0;padding:12px 14px;border:1px solid rgba(148,163,184,.22);border-radius:13px;background:rgba(255,255,255,.88)}
+.salary-total-metric-label{display:block;margin-bottom:5px;color:#64748b;font-size:.78rem;font-weight:800}
+.salary-total-metric-value{display:flex;align-items:baseline;justify-content:flex-end;gap:4px;white-space:nowrap}
 .salary-total-value{font-size:1.35rem;font-weight:900;color:#0d6efd;letter-spacing:-.04em}
+.salary-total-metric--gross .salary-total-value{color:#0f766e}
+.salary-total-metric--ded .salary-total-value{color:#b42318}
+.salary-total-unit{color:#64748b;font-size:.82rem;font-weight:700}
 .salary-total-toggle{border:1px solid #dbeafe;background:#fff;color:#0d6efd;border-radius:999px;padding:4px 10px;font-size:.78rem;font-weight:800}
 .salary-total-toggle:hover{background:#eff6ff}
 .salary-total-toggle:disabled{opacity:.5;cursor:not-allowed}
+.salary-month-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.salary-month-summary-item{min-width:0;padding:14px;border:1px solid rgba(148,163,184,.24);border-radius:13px;background:#f8fafc;text-align:center}
+.salary-month-summary-item--net{border-color:rgba(13,110,253,.28);background:rgba(13,110,253,.08)}
+.salary-month-summary-label{display:block;margin-bottom:5px;color:#64748b;font-size:.8rem;font-weight:800}
+.salary-month-summary-value{display:flex;align-items:baseline;justify-content:center;gap:4px;font-size:1.15rem;font-weight:900;color:#0f172a;white-space:nowrap}
+.salary-month-summary-item--ded .salary-month-summary-value{color:#b42318}
+.salary-month-summary-item--net .salary-month-summary-value{color:#0d6efd}
 .amount-text{text-align:right;font-family:'Consolas',monospace;letter-spacing:-0.5px}
 #calendar{max-width:100%;margin:0 auto;font-size:0.9rem}
 .fc-event{cursor:pointer;border:none}
@@ -85,8 +100,9 @@ body{padding:18px 14px 28px}
 .profile-card{padding:18px;align-items:flex-start}
 .profile-icon{width:58px;height:58px;font-size:24px;margin-right:14px}
 .leave-badge{margin-left:0;margin-top:10px}
-.salary-total-card{align-items:flex-start;flex-direction:column}
-.salary-total-card .text-end{text-align:left!important}
+.salary-total-header{align-items:center}
+.salary-total-metrics,.salary-month-summary{grid-template-columns:1fr}
+.salary-total-metric-value{justify-content:flex-start}
 .mypage-loading-shell{background:white;border-radius:18px;padding:28px 24px;margin:0 auto 24px;box-shadow:0 8px 24px rgba(15,23,42,0.06);border:1px solid rgba(148,163,184,.16);text-align:center}
 .mypage-loading-shell .spinner-border{width:2.5rem;height:2.5rem}
 }
@@ -180,13 +196,26 @@ body{padding:18px 14px 28px}
 <button class="btn btn-sm btn-dark hidden" id="btnPrintSalary" onclick="printSalaryPopup()">🖨️ 인쇄하기</button>
 </div>
 <div class="salary-total-card" id="salaryTotalCard">
+<div class="salary-total-header">
 <div>
 <div class="salary-total-label">현재까지 받은 총 급여 보기</div>
-<div class="small text-muted" id="salaryTotalMeta">급여명세서의 실수령액 합계를 불러오고 있습니다.</div>
+<div class="small text-muted" id="salaryTotalMeta">급여명세서 합계를 불러오고 있습니다.</div>
 </div>
-<div class="text-end">
-<div><span class="salary-blur salary-total-value" id="salaryTotalNet" tabindex="0">0</span> 원</div>
-<button type="button" class="salary-total-toggle mt-1" id="salaryTotalToggle" onclick="toggleMypageSalaryTotalReveal()">보기</button>
+<button type="button" class="salary-total-toggle" id="salaryTotalToggle" aria-controls="salaryTotalGross salaryTotalDed salaryTotalNet" aria-pressed="false" onclick="toggleMypageSalaryTotalReveal()">보기</button>
+</div>
+<div class="salary-total-metrics" aria-label="누적 급여 합계">
+<div class="salary-total-metric salary-total-metric--gross">
+<span class="salary-total-metric-label">지급총액 (공제 전)</span>
+<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalGross" tabindex="0">0</span><span class="salary-total-unit">원</span></div>
+</div>
+<div class="salary-total-metric salary-total-metric--ded">
+<span class="salary-total-metric-label">공제총액</span>
+<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalDed" tabindex="0">0</span><span class="salary-total-unit">원</span></div>
+</div>
+<div class="salary-total-metric salary-total-metric--net">
+<span class="salary-total-metric-label">실수령액 (공제 후)</span>
+<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalNet" tabindex="0">0</span><span class="salary-total-unit">원</span></div>
+</div>
 </div>
 </div>
 <div id="salaryResult" class="hidden mt-4">
@@ -196,9 +225,19 @@ body{padding:18px 14px 28px}
 <div class="col-6"><table class="table table-bordered"><thead class="table-light"><tr><th colspan="2" class="text-primary text-center">지급</th></tr></thead><tbody id="tbl_pay_body"></tbody></table></div>
 <div class="col-6"><table class="table table-bordered"><thead class="table-light"><tr><th colspan="2" class="text-danger text-center">공제</th></tr></thead><tbody id="tbl_ded_body"></tbody></table></div>
 </div>
-<div class="p-3 bg-primary bg-opacity-10 rounded text-center border border-primary mt-3">
-<span class="text-primary me-2 fw-bold">실 수령액</span>
-<h3 class="fw-bold m-0 d-inline-block"><span class="salary-blur" id="v_net">0</span> 원</h3>
+<div class="salary-month-summary" aria-label="월 급여 요약">
+<div class="salary-month-summary-item salary-month-summary-item--gross">
+<span class="salary-month-summary-label">지급총액 (공제 전)</span>
+<div class="salary-month-summary-value"><span class="salary-blur" id="v_gross">0</span><span class="salary-total-unit">원</span></div>
+</div>
+<div class="salary-month-summary-item salary-month-summary-item--ded">
+<span class="salary-month-summary-label">공제총액</span>
+<div class="salary-month-summary-value"><span class="salary-blur" id="v_ded">0</span><span class="salary-total-unit">원</span></div>
+</div>
+<div class="salary-month-summary-item salary-month-summary-item--net">
+<span class="salary-month-summary-label">실수령액 (공제 후)</span>
+<div class="salary-month-summary-value"><span class="salary-blur" id="v_net">0</span><span class="salary-total-unit">원</span></div>
+</div>
 </div>
 </div>
 </div>
@@ -1970,11 +2009,11 @@ showAlert("삭제되었습니다.");
 });
 }
 function toggleMypageSalaryTotalReveal(){
-const valueEl=document.getElementById('salaryTotalNet');
+const valueEls=Array.from(document.querySelectorAll('#salaryTotalCard .salary-total-value'));
 const toggleBtn=document.getElementById('salaryTotalToggle');
-if(!valueEl) return;
-const nextState=!valueEl.classList.contains('is-revealed');
-valueEl.classList.toggle('is-revealed',nextState);
+if(valueEls.length===0) return;
+const nextState=!valueEls[0].classList.contains('is-revealed');
+valueEls.forEach(function(valueEl){valueEl.classList.toggle('is-revealed',nextState)});
 if(toggleBtn){
 toggleBtn.textContent=nextState?'가리기':'보기';
 toggleBtn.setAttribute('aria-pressed',nextState?'true':'false');
@@ -1999,13 +2038,15 @@ return window.PayrollDurunuriModule.adjustSalaryRow({...row},supportMapByMonth[y
 });
 } // End of buildMypageAdjustedSalaryRows
 async function loadMypageSalaryTotal(){
-const valueEl=document.getElementById('salaryTotalNet');
+const grossEl=document.getElementById('salaryTotalGross');
+const dedEl=document.getElementById('salaryTotalDed');
+const netEl=document.getElementById('salaryTotalNet');
 const metaEl=document.getElementById('salaryTotalMeta');
 const toggleBtn=document.getElementById('salaryTotalToggle');
-if(!valueEl||!metaEl) return;
-valueEl.textContent='0';
-valueEl.classList.remove('is-revealed');
-metaEl.textContent='급여명세서의 실수령액 합계를 불러오고 있습니다.';
+const valueEls=[grossEl,dedEl,netEl].filter(Boolean);
+if(valueEls.length!==3||!metaEl) return;
+valueEls.forEach(function(valueEl){valueEl.textContent='0';valueEl.classList.remove('is-revealed')});
+metaEl.textContent='급여명세서 합계를 불러오고 있습니다.';
 if(toggleBtn){
 toggleBtn.textContent='보기';
 toggleBtn.setAttribute('aria-pressed','false');
@@ -2020,13 +2061,20 @@ metaEl.textContent='아직 저장된 급여명세서가 없습니다.';
 return;
 }
 const adjustedRows=await buildMypageAdjustedSalaryRows(rows);
-const totalNet=adjustedRows.reduce(function(sum,row){return sum+Math.round(parseMypageAmount(row?.net_pay))},0);
-valueEl.textContent=totalNet.toLocaleString('ko-KR');
+const totals=adjustedRows.reduce(function(acc,row){
+acc.gross+=Math.round(parseMypageAmount(row?.pay_total));
+acc.ded+=Math.round(parseMypageAmount(row?.ded_total));
+acc.net+=Math.round(parseMypageAmount(row?.net_pay));
+return acc;
+},{gross:0,ded:0,net:0});
+grossEl.textContent=totals.gross.toLocaleString('ko-KR');
+dedEl.textContent=totals.ded.toLocaleString('ko-KR');
+netEl.textContent=totals.net.toLocaleString('ko-KR');
 const firstYm=String(rows[0]?.year_month||'').trim();
 const lastYm=String(rows[rows.length-1]?.year_month||'').trim();
 metaEl.textContent=(firstYm&&lastYm)
-?`${firstYm} ~ ${lastYm} 급여명세서 실수령액 ${rows.length}건 합계`
-:`급여명세서 실수령액 ${rows.length}건 합계`;
+?`${firstYm} ~ ${lastYm} 급여명세서 ${rows.length}건 합계`
+:`급여명세서 ${rows.length}건 합계`;
 if(toggleBtn) toggleBtn.disabled=false;
 }catch(error){
 console.warn('loadMypageSalaryTotal failed:',error?.message||error);
@@ -2052,12 +2100,14 @@ const d=[['ded_pension','국민연금'],['ded_health','건강보험'],['ded_care
 if(payrollTaxAdjustmentTotal>0)d.splice(6,0,['__payroll_tax_adjustment','원천세 과공제 정산',-payrollTaxAdjustmentTotal]);
 let ph="";
 p.forEach(i=>ph+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(adjusted[i[0]]||0)}</span></td></tr>`);
-ph+=`<tr><td class="bg-light fw-bold">지급계</td><td class="amount-text text-primary fw-bold"><span class="salary-blur">${f(adjusted.pay_total)}</span></td></tr>`;
+ph+=`<tr><td class="bg-light fw-bold">지급계 (공제 전)</td><td class="amount-text text-primary fw-bold"><span class="salary-blur">${f(adjusted.pay_total)}</span></td></tr>`;
 document.getElementById("tbl_pay_body").innerHTML=ph;
 let dh="";
 d.forEach(i=>{const value=i[0]==='__payroll_tax_adjustment'?i[2]:(adjusted[i[0]]||0);dh+=`<tr><td>${i[1]}</td><td class="amount-text"><span class="salary-blur">${f(value)}</span></td></tr>`});
 dh+=`<tr><td class="bg-light fw-bold">공제계</td><td class="amount-text text-danger fw-bold"><span class="salary-blur">${f(adjusted.ded_total)}</span></td></tr>`;
 document.getElementById("tbl_ded_body").innerHTML=dh;
+document.getElementById("v_gross").innerText=f(adjusted.pay_total)
+document.getElementById("v_ded").innerText=f(adjusted.ded_total)
 document.getElementById("v_net").innerText=f(adjusted.net_pay)
 }
 // [수정됨] 급여명세서 인쇄 (PrintService 호출)
