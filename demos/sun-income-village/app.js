@@ -163,6 +163,25 @@
     try { localStorage.setItem('sun-village-lite-theme', safeMode); } catch (_) {}
   }
 
+  function renderScopeGuards() {
+    const locked = selectedVillage === 'all';
+    ['members', 'accounting', 'approvals', 'governance'].forEach((view) => {
+      const panel = $(`[data-view-panel="${view}"]`);
+      if (!panel) return;
+      panel.classList.toggle('scope-unselected', locked);
+      const label = $('[data-scope-label]', panel);
+      const lockMessage = $('[data-scope-lock]', panel);
+      const createButton = $('.page-heading [data-demo-action]', panel);
+      if (label) label.textContent = locked ? '마을을 선택해야 상세 자료가 열립니다' : `${villages[selectedVillage].name} 자료만 표시 중`;
+      if (lockMessage) lockMessage.hidden = !locked;
+      if (createButton) {
+        createButton.disabled = locked;
+        createButton.setAttribute('aria-disabled', locked ? 'true' : 'false');
+      }
+      $$('[data-scope-village]', panel).forEach((button) => button.classList.toggle('active', button.dataset.scopeVillage === selectedVillage));
+    });
+  }
+
   function renderDashboard() {
     const keys = selectedKeys();
     const label = selectedVillage === 'all' ? '관리 중인 마을' : '현재 관리 대상';
@@ -203,6 +222,15 @@
   }
 
   function renderMembers() {
+    if (selectedVillage === 'all') {
+      $('#memberRows').innerHTML = '';
+      $('#memberCount').textContent = '마을 선택 필요';
+      $('#memberTotal').textContent = '-';
+      $('#fullMemberTotal').textContent = '-';
+      $('#payeeTotal').textContent = '-';
+      $('#memberReviewTotal').textContent = '-';
+      return;
+    }
     const query = ($('#memberSearch')?.value || '').trim().toLowerCase();
     const filtered = members.filter((member) => {
       const statusMatch = memberFilter === 'all' || member.status === memberFilter;
@@ -222,6 +250,16 @@
   }
 
   function renderAccounting() {
+    if (selectedVillage === 'all') {
+      $('#accountBalance').textContent = '-';
+      $('#accountRevenue').textContent = '-';
+      $('#accountExpense').textContent = '-';
+      $('#reconcileState').textContent = '대기';
+      $('#reconcileNote').textContent = '마을 선택 필요';
+      $('#ledgerCount').textContent = '마을 선택 필요';
+      $('#ledgerRows').innerHTML = '';
+      return;
+    }
     const rows = ledger.filter(matchesVillage);
     $('#accountBalance').textContent = compactWon(sumVillage('balance'));
     $('#accountRevenue').textContent = compactWon(sumVillage('revenue'));
@@ -233,6 +271,15 @@
   }
 
   function renderApprovals() {
+    if (selectedVillage === 'all') {
+      $('#approvalPending').textContent = '-';
+      $('#approvalReview').textContent = '-';
+      $('#approvalDone').textContent = '-';
+      $('#approvalLinked').textContent = '-';
+      $('#approvalCount').textContent = '마을 선택 필요';
+      $('#approvalList').innerHTML = '';
+      return;
+    }
     const rows = approvals.filter(matchesVillage);
     const waiting = rows.filter((item) => item.status === '대기').length;
     const review = rows.filter((item) => item.status === '검토 중').length;
@@ -265,6 +312,14 @@
   }
 
   function renderGovernance() {
+    if (selectedVillage === 'all') {
+      activeMeetingId = null;
+      $('#meetingCount').textContent = '마을 선택 필요';
+      $('#meetingList').innerHTML = '';
+      $('#meetingDetail').innerHTML = '';
+      $('#documentRows').innerHTML = '';
+      return;
+    }
     const rows = meetings.filter(matchesVillage);
     $('#meetingCount').textContent = `${rows.length}건`;
     $('#meetingList').innerHTML = rows.length ? rows.map((meeting) => `<button type="button" class="meeting-item ${meeting.id === activeMeetingId ? 'active' : ''}" data-meeting-id="${meeting.id}"><time datetime="${meeting.date}"><strong>${meeting.day}</strong><span>${meeting.month}</span></time><div><span class="meeting-type ${meeting.type === '총회' ? 'general' : ''}">${meeting.type}</span><h3>${meeting.title}</h3><p>${villages[meeting.village].short} · ${meeting.place}</p></div><span>›</span></button>`).join('') : '<div class="empty-state">표시할 회의가 없습니다.</div>';
@@ -274,6 +329,7 @@
   }
 
   function renderAll() {
+    renderScopeGuards();
     renderDashboard();
     renderMembers();
     renderAccounting();
@@ -286,7 +342,7 @@
     $('#villageSelect').value = selectedVillage;
     activeMeetingId = null;
     renderAll();
-    if (notify) showToast(selectedVillage === 'all' ? '전체 마을 자료를 함께 봅니다.' : `${villages[selectedVillage].name} 자료만 표시합니다.`);
+    if (notify) showToast(selectedVillage === 'all' ? '전체 운영 현황으로 돌아갑니다. 상세 업무는 마을을 선택해야 합니다.' : `${villages[selectedVillage].name} 자료만 표시합니다.`);
   }
 
   function bindEvents() {
@@ -301,6 +357,8 @@
       renderMembers();
     }));
     document.addEventListener('click', (event) => {
+      const scopeButton = event.target.closest('[data-scope-village]');
+      if (scopeButton) setVillage(scopeButton.dataset.scopeVillage);
       const villageButton = event.target.closest('[data-select-village]');
       if (villageButton) setVillage(villageButton.dataset.selectVillage);
       const meetingButton = event.target.closest('[data-meeting-id]');
