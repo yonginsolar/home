@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.99 | Change: 2026-08-31 - Apply year-specific general corporate tax rates. -->
+<!-- Version: v1.0.100 | Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.99 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.100 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -27,7 +27,7 @@
   })();
 </script>
   <script src="erp_runtime_guard.js?v=20260804-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260806-1237-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260901-1"></script>
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
@@ -753,11 +753,11 @@
       <div class="modal-body">
         <div class="row g-2 mb-2">
           <div class="col-md-4">
-            <label class="small text-muted">지원 귀속월(보험료 납부월)</label>
+            <label class="small text-muted">4대보험 귀속월</label>
             <input type="month" class="form-control form-control-sm" id="durunuriSourceMonth">
           </div>
           <div class="col-md-4">
-            <label class="small text-muted">급여 반영월(익월)</label>
+            <label class="small text-muted">급여 반영월(같은 귀속월)</label>
             <input type="month" class="form-control form-control-sm bg-light" id="durunuriApplyMonth" readonly>
           </div>
           <div class="col-md-4 d-flex align-items-end">
@@ -1637,14 +1637,25 @@ function getDurunuriModuleOrNull() {
     return null;
 }
 
-async function applyDurunuriAdjustmentsByMonth(rows, ym) {
+async function applyDurunuriAdjustmentsByMonth(rows, ym, options = {}) {
     const baseRows = Array.isArray(rows) ? rows : [];
     const module = getDurunuriModuleOrNull();
     if (!module || !ym) return baseRows;
     try {
+        if (options.syncApproved === true) {
+            if (typeof module.syncApprovedSupportForMonth !== 'function') {
+                throw new Error('두루누리 자동 연동 모듈을 불러오지 못했습니다.');
+            }
+            await module.syncApprovedSupportForMonth(_supabase, ym, {
+                coop_id: myInfo?.coop_id || '',
+                emp_id: myInfo?.emp_id || '',
+                emp_name: myInfo?.emp_name || ''
+            });
+        }
         const supportMap = await module.getSupportMap(_supabase, ym);
         return module.adjustSalaryRows(baseRows, supportMap);
     } catch (e) {
+        if (options.strict === true) throw e;
         console.warn('Durunuri support load failed:', e?.message || e);
         return baseRows;
     }
@@ -1690,7 +1701,12 @@ async function getInsuranceLiabilitySummaryByMonths(targetMonths) {
     for (const ym of months) {
         const monthRows = (data || []).filter((row) => String(row.year_month || '') === ym);
         if (!monthRows.length) continue;
-        const monthAdjustedRows = await applyDurunuriAdjustmentsByMonth(monthRows, ym);
+        let monthAdjustedRows;
+        try {
+            monthAdjustedRows = await applyDurunuriAdjustmentsByMonth(monthRows, ym, { syncApproved: true, strict: true });
+        } catch (supportError) {
+            return { data: null, error: new Error(`${ym} 두루누리 지원금 연동 실패: ${supportError?.message || supportError}`) };
+        }
         adjustedRows.push(...monthAdjustedRows);
     }
     const rowsForSum = adjustedRows.length > 0 ? adjustedRows : data;
@@ -3017,7 +3033,7 @@ async function openDurunuriSupportModal() {
         sourceEl.value = addAccountingMonths(formatAccountingKstMonth(new Date()), -1);
     }
     if (applyEl && sourceEl) {
-        applyEl.value = addAccountingMonths(sourceEl.value, 1);
+        applyEl.value = sourceEl.value;
     }
     if (!durunuriModal) return;
     durunuriModal.show();
@@ -3268,7 +3284,7 @@ async function refreshDurunuriSupportRows() {
     const summaryEl = document.getElementById('durunuriSupportSummary');
     const sourceMonth = String(sourceEl?.value || '').trim();
     if (!sourceMonth) return showAlert('알림', '지원 귀속월을 선택하세요.');
-    const applyMonth = addAccountingMonths(sourceMonth, 1);
+    const applyMonth = sourceMonth;
     if (!applyMonth) return showAlert('오류', '급여 반영월 계산에 실패했습니다.');
     if (applyEl) applyEl.value = applyMonth;
     if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">지원 대상 목록을 불러오는 중입니다.</td></tr>';
@@ -6953,7 +6969,12 @@ function confirmSync(type) {
             if (previewSalaryError) return showAlert("오류", "미리보기 조회 실패: " + previewSalaryError.message);
             if (!previewSalaries || previewSalaries.length === 0) return showAlert("알림", "급여 데이터가 없습니다.");
 
-            const previewAdjustedRows = await applyDurunuriAdjustmentsByMonth(previewSalaries, ym);
+            let previewAdjustedRows;
+            try {
+                previewAdjustedRows = await applyDurunuriAdjustmentsByMonth(previewSalaries, ym, { syncApproved: true, strict: true });
+            } catch (supportError) {
+                return showAlert("두루누리 연동 확인", `같은 귀속월 지원금을 반영하지 못해 급여 회계 연동을 중단했습니다.\n${supportError?.message || supportError}`);
+            }
 
             const previewDesired = previewAdjustedRows.reduce((acc, row) => {
                 acc.pay += Math.max(0, Number(row.pay_total || 0));
@@ -7002,7 +7023,12 @@ function confirmSync(type) {
                 .eq('year_month', ym);
             if(fetchError) return showAlert("오류", "급여 데이터 조회 실패: " + fetchError.message);
             if(!salaries || salaries.length === 0) return showAlert("알림", "급여 데이터가 없습니다.");
-            const adjustedSalaries = await applyDurunuriAdjustmentsByMonth(salaries, ym);
+            let adjustedSalaries;
+            try {
+                adjustedSalaries = await applyDurunuriAdjustmentsByMonth(salaries, ym, { syncApproved: true, strict: true });
+            } catch (supportError) {
+                return showAlert("두루누리 연동 확인", `같은 귀속월 지원금을 반영하지 못해 급여 회계 연동을 중단했습니다.\n${supportError?.message || supportError}`);
+            }
 
             const desired = {
                 pay: 0,

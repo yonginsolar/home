@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.49 | Change: 2026-08-28 - Apply multi-date leave by date and year. -->
+<!-- Version: v1.2.50 | Change: 2026-09-01 - Sync approved Durunuri support to the same payroll month. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.49 | approval.html');</script>
+  <script>console.log('[Version] v1.2.50 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -28,7 +28,7 @@
 </script>
   <script src="/shared/route_guard.js?v=20260403-1"></script>
   <script src="erp_runtime_guard.js?v=20260804-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260508-1249-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260828-0335-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
@@ -6498,6 +6498,21 @@ async function fetchPreviewBlob(rawRef, expiresSec = 3600) {
 
 async function fetchSalaryLedgerRowsByMonth(ym) {
     if (!ym) return { rows: [], error: null };
+    if (!window.PayrollDurunuriModule || typeof window.PayrollDurunuriModule.syncApprovedSupportForMonth !== 'function') {
+        return { rows: [], error: new Error('두루누리 자동 연동 모듈을 불러오지 못했습니다. 화면을 새로고침한 뒤 다시 시도하세요.') };
+    }
+    try {
+        await window.PayrollDurunuriModule.syncApprovedSupportForMonth(_supabase, ym, {
+            coop_id: myInfo?.coop_id || '',
+            emp_id: myInfo?.emp_id || '',
+            emp_name: myInfo?.emp_name || ''
+        });
+    } catch (syncError) {
+        return {
+            rows: [],
+            error: new Error(`같은 귀속월 두루누리 지원금을 급여대장에 반영하지 못했습니다. ${syncError?.message || syncError}`)
+        };
+    }
     const { data, error } = await _supabase
         .from('hr_salary')
         .select('year_month, emp_id, emp_name, work_description, work_days, work_hours, pay_basic, pay_meal, pay_car, pay_child, pay_position, pay_service, pay_overtime, pay_bonus, pay_total, ded_pension, ded_health, ded_care, ded_employ, ded_income, ded_local, ded_advance, ded_capital, ded_total, net_pay, payroll_tax_adjustment_income, payroll_tax_adjustment_local, payroll_tax_adjustment_note')

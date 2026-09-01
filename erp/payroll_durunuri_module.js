@@ -71,7 +71,9 @@
       biz_support: toNonNegativeInt(safeDetail.biz_support),
       memo: String(safeDetail.memo || '').trim(),
       origin: String(safeDetail.origin || '').trim(),
-      source_approval_id: safeDetail.source_approval_id == null ? null : String(safeDetail.source_approval_id)
+      source_approval_id: safeDetail.source_approval_id == null ? null : String(safeDetail.source_approval_id),
+      application_rule: String(safeDetail.application_rule || '').trim(),
+      allocation_version: toNonNegativeInt(safeDetail.allocation_version)
     };
   }
 
@@ -313,12 +315,12 @@
     var remainingTotal = Math.max(0, MAX_SUPPORT_MONTHS - usedTotal);
     var remainingBefore = Math.max(0, MAX_SUPPORT_MONTHS - usedBefore);
     var enabled = normalized.is_enabled === true;
+    var sourceWithinConfirmedPeriod = !!targetMonth && !!baselineMonth && targetMonth <= baselineMonth;
     var sourceAfterBaseline = !!targetMonth && !!baselineMonth && targetMonth > baselineMonth;
     var reason = '';
     if (!enabled) reason = '직원 관리에서 지원 대상을 켜지 않았습니다.';
     else if (!baselineMonth) reason = '확인 기준월이 없습니다.';
-    else if (targetMonth && !sourceAfterBaseline && !hasCurrentSupport) reason = '선택한 귀속월이 확인 기준월 이후가 아닙니다.';
-    else if (remainingBefore <= 0 && !hasCurrentSupport) reason = '확인된 지원 기간이 36개월에 도달했습니다.';
+    else if (sourceAfterBaseline && remainingBefore <= 0 && !hasCurrentSupport) reason = '확인된 지원 기간이 36개월에 도달했습니다.';
 
     return Object.assign({}, normalized, {
       used_supported_months: usedTotal,
@@ -328,7 +330,12 @@
       tracked_supported_months: afterBaseline.size,
       tracked_before_source_month: beforeTarget.size,
       has_current_support: hasCurrentSupport,
-      eligible_for_source_month: enabled && !!baselineMonth && (!targetMonth || sourceAfterBaseline) && (remainingBefore > 0 || hasCurrentSupport),
+      eligible_for_source_month: enabled && !!baselineMonth && (
+        !targetMonth
+        || sourceWithinConfirmedPeriod
+        || hasCurrentSupport
+        || (sourceAfterBaseline && remainingBefore > 0)
+      ),
       ineligible_reason: reason
     });
   }
@@ -360,7 +367,7 @@
   async function loadEligiblePayrollRows(supabase, sourceMonth) {
     var sourceYm = normalizeMonth(sourceMonth);
     if (!sourceYm) throw new Error('지원 귀속월 형식이 올바르지 않습니다. (YYYY-MM)');
-    var applyYm = nextMonth(sourceYm);
+    var applyYm = sourceYm;
     var coopId = getCurrentCoopId();
     var states = await loadEligibilityStates(supabase, sourceYm);
     var stateByEmpId = new Map(states.map(function (state) { return [state.emp_id, state]; }));
@@ -493,7 +500,7 @@
     var support = input.support && typeof input.support === 'object' ? input.support : {};
     var enteredTotal = toNonNegativeInt(support.pension) + toNonNegativeInt(support.unemployment) + toNonNegativeInt(support.stability);
     if (!(enteredTotal > 0)) {
-      return { source_month: sourceMonth, apply_month: nextMonth(sourceMonth), rows: [], entered_total: 0, employee_total: 0, business_total: 0, error: null };
+      return { source_month: sourceMonth, apply_month: sourceMonth, rows: [], entered_total: 0, employee_total: 0, business_total: 0, error: null };
     }
     var eligible = await loadEligiblePayrollRows(supabase, sourceMonth);
     if (eligible.rows.length === 0) {
@@ -529,7 +536,9 @@
       return Object.assign({}, row, {
         memo: approvalId ? '전자결재 #' + approvalId + ' 승인 후 자동 배분' : '4대보험 승인 후 자동 배분',
         origin: 'approval_auto_sync',
-        source_approval_id: approvalId || null
+        source_approval_id: approvalId || null,
+        application_rule: 'same_month',
+        allocation_version: 2
       });
     });
     allocation.source_month = sourceMonth;
@@ -584,7 +593,9 @@
           origin: String(row && row.origin || input.origin || 'manual').trim(),
           source_approval_id: row && row.source_approval_id != null
             ? String(row.source_approval_id)
-            : (input.source_approval_id != null ? String(input.source_approval_id) : null)
+            : (input.source_approval_id != null ? String(input.source_approval_id) : null),
+          application_rule: String(row && row.application_rule || input.application_rule || (sourceMonth === applyMonth ? 'same_month' : 'next_month_legacy')).trim(),
+          allocation_version: toNonNegativeInt(row && row.allocation_version || input.allocation_version || (sourceMonth === applyMonth ? 2 : 1))
         }
       });
     });
@@ -608,6 +619,104 @@
     var response = await supabase.from('erp_audit_logs').delete().in('id', safeIds);
     if (response.error) throw response.error;
     return { removed: safeIds.length };
+  }
+
+  function normalizeApprovalExpenseSnapshot(value) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        var parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (_) {}
+    }
+    return {};
+  }
+
+  function getApprovalInsuranceSupport(approval) {
+    var snapshot = normalizeApprovalExpenseSnapshot(approval && approval.expense_snapshot);
+    var insurance = snapshot.insurance && typeof snapshot.insurance === 'object' ? snapshot.insurance : {};
+    var support = insurance.durunuri_support && typeof insurance.durunuri_support === 'object'
+      ? insurance.durunuri_support
+      : {};
+    return {
+      billing_month: normalizeMonth(insurance.billing_month || ''),
+      pension: toNonNegativeInt(support.pension),
+      unemployment: toNonNegativeInt(support.employment),
+      stability: toNonNegativeInt(support.stability)
+    };
+  }
+
+  async function fetchCompletedInsuranceApproval(supabase, billingMonth) {
+    if (!supabase) throw new Error('supabase client is required');
+    var ym = normalizeMonth(billingMonth);
+    if (!ym) throw new Error('4대보험 귀속월 형식이 올바르지 않습니다. (YYYY-MM)');
+    var coopId = getCurrentCoopId();
+    var response = await supabase
+      .from('ref_approval')
+      .select('id,doc_no,doc_type,title,status,created_at,processed_at,drafter_id,drafter_name,expense_snapshot')
+      .eq('coop_id', String(coopId || '').trim() || '00000000-0000-0000-0000-000000000000')
+      .in('status', ['완료', '실물결재완료'])
+      .in('doc_type', ['지출결의(4대보험)', '지출결의'])
+      .filter('expense_snapshot->>expense_sub_type', 'eq', '4대보험')
+      .filter('expense_snapshot->insurance->>billing_month', 'eq', ym)
+      .order('processed_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(2);
+    if (response.error) throw response.error;
+    var matches = (Array.isArray(response.data) ? response.data : []).filter(function (approval) {
+      var snapshot = normalizeApprovalExpenseSnapshot(approval && approval.expense_snapshot);
+      var support = getApprovalInsuranceSupport(approval);
+      return String(snapshot.expense_sub_type || '').trim() === '4대보험'
+        && support.billing_month === ym
+        && (support.pension + support.unemployment + support.stability) > 0;
+    });
+    if (matches.length > 1) {
+      throw new Error(ym + ' 귀속 두루누리 지원금이 있는 완료 4대보험 결재가 둘 이상입니다. 중복 결재 여부를 먼저 확인하세요.');
+    }
+    return matches[0] || null;
+  }
+
+  async function syncApprovedSupportForMonth(supabase, billingMonth, actor) {
+    var ym = normalizeMonth(billingMonth);
+    if (!ym) throw new Error('급여 귀속월 형식이 올바르지 않습니다. (YYYY-MM)');
+    var approval = await fetchCompletedInsuranceApproval(supabase, ym);
+    if (!approval) {
+      return { approval_id: null, source_month: ym, apply_month: ym, changed: 0, inserted: 0, ids: [], rows: [] };
+    }
+    var support = getApprovalInsuranceSupport(approval);
+    var plan = await buildApprovalSupportPlan(supabase, {
+      source_month: ym,
+      approval_id: approval.id,
+      support: support
+    });
+    if (plan && plan.error) throw plan.error;
+    var safeActor = actor && typeof actor === 'object' ? actor : {};
+    var saved = await saveSupportBatch(supabase, {
+      coop_id: String(safeActor.coop_id || getCurrentCoopId()).trim(),
+      source_month: ym,
+      apply_month: ym,
+      actor_emp_id: String(safeActor.emp_id || '').trim(),
+      actor_name: String(safeActor.emp_name || '').trim(),
+      origin: 'approved_insurance_same_month_sync',
+      source_approval_id: approval.id,
+      application_rule: 'same_month',
+      allocation_version: 2,
+      rows: (Array.isArray(plan && plan.rows) ? plan.rows : []).map(function (row) {
+        return Object.assign({}, row, {
+          origin: 'approved_insurance_same_month_sync',
+          application_rule: 'same_month',
+          allocation_version: 2
+        });
+      })
+    });
+    return Object.assign({}, saved, {
+      approval_id: approval.id,
+      source_month: ym,
+      apply_month: ym,
+      employee_total: toNonNegativeInt(plan && plan.employee_total),
+      business_total: toNonNegativeInt(plan && plan.business_total),
+      rows: Array.isArray(plan && plan.rows) ? plan.rows : []
+    });
   }
 
   global.PayrollDurunuriModule = {
@@ -639,6 +748,9 @@
     calculateInvoiceAllocations: calculateInvoiceAllocations,
     buildApprovalSupportPlan: buildApprovalSupportPlan,
     saveSupportBatch: saveSupportBatch,
-    removeSupportAuditRows: removeSupportAuditRows
+    removeSupportAuditRows: removeSupportAuditRows,
+    getApprovalInsuranceSupport: getApprovalInsuranceSupport,
+    fetchCompletedInsuranceApproval: fetchCompletedInsuranceApproval,
+    syncApprovedSupportForMonth: syncApprovedSupportForMonth
   };
 })(window);

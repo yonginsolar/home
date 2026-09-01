@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.66
-Change: 2026-08-28 - Group leave history by year and split mixed dates.
+Version: v1.0.67
+Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.66 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.67 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -35,7 +35,7 @@ Change: 2026-08-28 - Group leave history by year and split mixed dates.
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="print_service.js?v=20260510-1324-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
-  <script src="payroll_durunuri_module.js?v=20260806-1237-1"></script>
+  <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260828-0335-1"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -392,7 +392,8 @@ Change: 2026-08-28 - Group leave history by year and split mixed dates.
   <div class="row g-2">
     <div class="col-4">
       <label class="small text-muted">식대 (비과세)</label>
-      <input type="number" id="payMeal" class="form-control" value="0" oninput="recalcSalaryComponents()">
+      <input type="number" id="payMeal" class="form-control" value="0" min="0" oninput="handleSalaryMealInput()">
+      <div class="form-text x-small" id="salaryMealCarryHelp">직전 달 급여를 확인하면 식비를 자동으로 불러옵니다.</div>
     </div>
     <div class="col-4">
       <label class="small text-muted">차량유지비</label>
@@ -413,15 +414,15 @@ Change: 2026-08-28 - Group leave history by year and split mixed dates.
   </div>
   <div class="row g-2 mt-1">
     <div class="col-6">
-      <label class="small text-muted">두루누리 근로자 지원분 (익월 자동반영)</label>
+      <label class="small text-muted">두루누리 근로자 지원분 (같은 귀속월 반영)</label>
       <input type="number" id="durunuriEmpSupport" class="form-control bg-light text-primary fw-bold" value="0" readonly>
     </div>
     <div class="col-6">
-      <label class="small text-muted">두루누리 사업주 지원분 (익월 자동반영)</label>
+      <label class="small text-muted">두루누리 사업주 지원분 (같은 귀속월 반영)</label>
       <input type="number" id="durunuriBizSupport" class="form-control bg-light text-primary fw-bold" value="0" readonly>
     </div>
     <div class="col-12">
-      <div class="form-text">회계관리 > 자동연동 > 두루누리 직원별 입력에서 저장한 값이 해당 귀속월 급여 계산/출력에 자동 반영됩니다.</div>
+      <div class="form-text">완료된 같은 귀속월 4대보험 결재의 지원금이 해당 월 급여 계산·급여대장·회계 연동에 자동 반영됩니다.</div>
     </div>
   </div>
 <div class="d-flex gap-2 mt-3">
@@ -793,6 +794,8 @@ let confirmCallback = null; let currentSalaryDataForPrint = null;
 let currentEmployeeLeaveSnapshot = null;
 let currentDurunuriSupport = { emp_support: 0, biz_support: 0, apply_month: '', source_month: '' };
 let currentDurunuriEligibility = null;
+let salaryMealCarryForward = { sourceMonth: '', sourceAmount: 0, found: false, userEdited: false, existing: false };
+let salarySaveInFlight = false;
 let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal, adminLeaveDetailModal, bulkLeaveModal;
 let hasCheckedExpired = false;
 let myInfo = null;
@@ -2584,6 +2587,19 @@ function getDurunuriModuleAdmin() {
     if (isHrWorkforceLiteProfile()) return null;
     if (window.PayrollDurunuriModule) return window.PayrollDurunuriModule;
     return null;
+}
+
+async function syncApprovedDurunuriForAdminMonth(ym) {
+    if (isHrWorkforceLiteProfile()) return { approval_id: null, inserted: 0 };
+    const module = getDurunuriModuleAdmin();
+    if (!module || typeof module.syncApprovedSupportForMonth !== 'function') {
+        throw new Error('두루누리 자동 연동 모듈을 불러오지 못했습니다. 화면을 새로고침한 뒤 다시 시도하세요.');
+    }
+    return module.syncApprovedSupportForMonth(_supabase, ym, {
+        coop_id: myInfo?.coop_id || getAdminEmployeeScopedCoopId(),
+        emp_id: myInfo?.emp_id || '',
+        emp_name: myInfo?.emp_name || ''
+    });
 }
 
 function resetDurunuriEligibilityProfileUi() {
@@ -4713,6 +4729,7 @@ async function loadSalaryData() {
         if (workHoursInput) workHoursInput.value = '';
         setSalaryWorkMetaHelpText('귀속월을 선택하면 근로일수/근로시간 기본값을 계산합니다.');
         setSalaryTaxAdjustmentInputs();
+        setSalaryMealCarryState();
         resetDurunuriSupportState();
         return;
     }
@@ -4772,6 +4789,13 @@ async function loadSalaryData() {
         document.getElementById("payCar").value = saved.pay_car;
         document.getElementById("payChild").value = saved.pay_child;
         document.getElementById("payBonus").value = saved.pay_bonus;
+        setSalaryMealCarryState({
+            sourceMonth: month,
+            sourceAmount: Number(saved.pay_meal || 0),
+            found: true,
+            userEdited: false,
+            existing: true
+        });
 
         badge.innerText = "확정됨(저장완료)";
         badge.className = "badge bg-primary"; // 색상 변경
@@ -4809,11 +4833,19 @@ async function loadSalaryData() {
     } else {
         // [데이터 없음] -> 신규 등록 모드
         const monthlyTotal = Math.floor(currentAnnualSalary / 12);
+        const previousMeal = await getAdminEmployeePreviousMonthMeal(currentEmpId, month);
         document.getElementById("payTotalFixed").value = monthlyTotal;
-        document.getElementById("payMeal").value = 0;
+        document.getElementById("payMeal").value = previousMeal.found ? previousMeal.amount : 0;
         document.getElementById("payCar").value = 0;
         document.getElementById("payChild").value = 0;
         document.getElementById("payBonus").value = 0;
+        setSalaryMealCarryState({
+            sourceMonth: previousMeal.sourceMonth,
+            sourceAmount: previousMeal.amount,
+            found: previousMeal.found,
+            userEdited: false,
+            existing: false
+        });
 
         badge.innerText = "미저장 (자동계산)";
         badge.className = "badge bg-secondary";
@@ -4870,6 +4902,75 @@ function recalcSalaryComponents() {
     const basic = total - (meal + car + child);
     document.getElementById("payBasic").value = basic > 0 ? basic : 0;
     syncSalaryTaxPreview();
+}
+
+function addAdminEmployeeSalaryMonths(ym, delta) {
+    const matched = String(ym || '').trim().match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+    if (!matched) return '';
+    const cursor = new Date(Date.UTC(Number(matched[1]), Number(matched[2]) - 1, 1));
+    cursor.setUTCMonth(cursor.getUTCMonth() + Number(delta || 0));
+    return `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatAdminEmployeeWon(value) {
+    return `${Math.max(0, Math.round(Number(value || 0))).toLocaleString('ko-KR')}원`;
+}
+
+function setSalaryMealCarryState(nextState = {}) {
+    salaryMealCarryForward = {
+        sourceMonth: String(nextState.sourceMonth || '').trim(),
+        sourceAmount: Math.max(0, Math.round(Number(nextState.sourceAmount || 0))),
+        found: nextState.found === true,
+        userEdited: nextState.userEdited === true,
+        existing: nextState.existing === true
+    };
+    updateSalaryMealCarryHelp();
+}
+
+function updateSalaryMealCarryHelp() {
+    const helpEl = document.getElementById('salaryMealCarryHelp');
+    if (!helpEl) return;
+    const state = salaryMealCarryForward;
+    if (state.existing) {
+        helpEl.textContent = '이미 저장된 이 달의 식비입니다. 급여 확정 전에 금액을 다시 확인합니다.';
+    } else if (state.found && !state.userEdited) {
+        helpEl.textContent = `${state.sourceMonth} 급여의 식비 ${formatAdminEmployeeWon(state.sourceAmount)}을 불러왔습니다.`;
+    } else if (state.found) {
+        helpEl.textContent = `${state.sourceMonth} 급여에서 불러온 뒤 직접 수정한 금액입니다.`;
+    } else if (state.userEdited) {
+        helpEl.textContent = '직전 달 급여 자료가 없어 직접 입력한 금액입니다.';
+    } else {
+        helpEl.textContent = '직전 달 급여 자료가 없어 식비를 자동으로 채우지 않았습니다.';
+    }
+}
+
+function handleSalaryMealInput() {
+    salaryMealCarryForward.userEdited = true;
+    updateSalaryMealCarryHelp();
+    recalcSalaryComponents();
+}
+
+async function getAdminEmployeePreviousMonthMeal(empId, month) {
+    const sourceMonth = addAdminEmployeeSalaryMonths(month, -1);
+    const safeEmpId = String(empId || '').trim();
+    if (!safeEmpId || !sourceMonth) return { found: false, sourceMonth, amount: 0 };
+    const { data, error } = await scopeEmployeeTenant(
+        _supabase
+            .from('hr_salary')
+            .select('pay_meal,year_month')
+            .eq('emp_id', safeEmpId)
+            .eq('year_month', sourceMonth)
+            .limit(1)
+    ).maybeSingle();
+    if (error) {
+        console.warn('Previous month meal allowance load failed:', error.message || error);
+        return { found: false, sourceMonth, amount: 0 };
+    }
+    return {
+        found: !!data,
+        sourceMonth,
+        amount: Math.max(0, Math.round(Number(data?.pay_meal || 0)))
+    };
 }
 
 function roundAdminEmployeeWorkMetric(value) {
@@ -5117,8 +5218,43 @@ async function getAdminEmployeeRecentWorkDescription(empId, month) {
     return recentRow ? String(recentRow.work_description || '').trim() : '';
 }
 
-// [수정] 급여 확정 및 저장 (연도별 요율 적용)
-async function saveSalary() {
+function saveSalary() {
+    const month = String(document.getElementById("salaryMonth")?.value || '').trim();
+    if (!month) return showAlert("귀속월을 선택해주세요.");
+    if (!currentEmpId) return showAlert("직원을 먼저 선택해주세요.");
+    if (salarySaveInFlight) return;
+
+    const meal = Number(document.getElementById('payMeal')?.value || 0);
+    if (!Number.isFinite(meal) || meal < 0) return showAlert('식비는 0원 이상으로 입력해주세요.');
+
+    const state = salaryMealCarryForward;
+    let mealExplanation = '직접 입력하거나 확인한 금액';
+    if (!state.existing && state.found && !state.userEdited && Math.round(meal) === state.sourceAmount) {
+        mealExplanation = `${state.sourceMonth} 급여에서 불러온 금액`;
+    } else if (state.existing) {
+        mealExplanation = '이 달에 이미 저장된 금액';
+    } else if (!state.found) {
+        mealExplanation = '직전 달 급여 자료가 없어 현재 입력된 금액';
+    }
+
+    const actionLabel = state.existing ? '수정 저장' : '급여 확정';
+    showConfirm(
+        `💾 ${actionLabel} 확인`,
+        `${month} ${currentEmpName || ''}\n식비: ${formatAdminEmployeeWon(meal)}\n(${mealExplanation})\n\n이 금액으로 ${actionLabel}하시겠습니까?`,
+        async function() {
+            if (salarySaveInFlight) return;
+            salarySaveInFlight = true;
+            try {
+                await persistSalary();
+            } finally {
+                salarySaveInFlight = false;
+            }
+        }
+    );
+}
+
+// [수정] 확인을 거친 급여 저장 (연도별 요율 적용)
+async function persistSalary() {
     const month = document.getElementById("salaryMonth").value;
     if (!month) return showAlert("귀속월을 선택해주세요.");
 
@@ -5231,8 +5367,16 @@ async function saveSalary() {
         if(rpcError) {
             showAlert("급여는 저장됐으나, 회사부담금 계산 실패: " + rpcError.message);
         } else {
-            showAlert(`${month} 급여 확정 및 회사부담금 계산 완료.`);
-            loadSalaryData(); // 화면 갱신
+            try {
+                const syncResult = await syncApprovedDurunuriForAdminMonth(month);
+                const supportNote = syncResult?.approval_id
+                    ? ` 완료된 같은 귀속월 4대보험 결재(#${syncResult.approval_id})의 두루누리 지원금도 반영했습니다.`
+                    : '';
+                showAlert(`${month} 급여 확정 및 회사부담금 계산 완료.${supportNote}`);
+            } catch (syncError) {
+                showAlert(`급여와 회사부담금은 저장됐지만 두루누리 지원금 연동에 실패했습니다.\n${syncError?.message || syncError}\n회계 반영을 진행하지 말고 원인을 확인해주세요.`);
+            }
+            await loadSalaryData(); // 화면 갱신
         }
     }
 }
@@ -5905,6 +6049,12 @@ async function printLedger() {
     const ym = document.getElementById("ledgerMonth").value;
     if(!ym) return showAlert("연월을 선택하세요.");
     ledgerModal.hide();
+
+    try {
+        await syncApprovedDurunuriForAdminMonth(ym);
+    } catch (syncError) {
+        return showAlert(`같은 귀속월 두루누리 지원금을 급여대장에 반영하지 못했습니다.\n${syncError?.message || syncError}`);
+    }
 
     // 1. 데이터 조회
     const { data: list, error } = await scopeEmployeeTenant(_supabase.from('hr_salary').select('*')).eq('year_month', ym).order('emp_name');
