@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.103 | Change: 2026-09-01 - Render approval descriptions as plain text and group recent journals into debit/credit ledger cards. -->
+<!-- Version: v1.0.104 | Change: 2026-09-01 - Improve auto-sync summaries and show reclassified approval journals as final debit/credit results. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.103 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.104 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -58,6 +58,23 @@
         .history-ledger-table .history-ledger-account { width: 31%; }
         .history-ledger-table .history-ledger-amount { width: 19%; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .history-ledger-table tfoot td { background: #f8fafc; font-weight: 800; border-top: 2px solid #94a3b8; }
+        .history-ledger-reclass-note { color: #475569; background: #f1f5f9; border: 1px solid #dbeafe; border-radius: 8px; padding: 7px 9px; }
+
+        .message-modal-summary .modal-dialog { width: min(900px, calc(100vw - 2rem)); max-width: 900px; }
+        .message-modal-summary .modal-body { max-height: min(68vh, 640px); overflow-y: auto; }
+        .message-modal-body.is-compact { text-align: center; white-space: pre-wrap; }
+        .message-modal-body.is-summary { text-align: left; white-space: normal; background: #f8fafc; }
+        .message-summary-intro { font-size: 1rem; font-weight: 800; color: #0f172a; background: #e0f2fe; border: 1px solid #bae6fd; border-radius: 10px; padding: 11px 13px; margin-bottom: 12px; }
+        .message-summary-list { display: grid; gap: 8px; }
+        .message-summary-row { display: grid; grid-template-columns: minmax(190px, 0.85fr) minmax(0, 1.4fr); gap: 14px; align-items: start; background: #fff; border: 1px solid #e2e8f0; border-radius: 9px; padding: 10px 12px; }
+        .message-summary-label { color: #475569; font-weight: 700; }
+        .message-summary-value { min-width: 0; color: #0f172a; font-weight: 700; overflow-wrap: anywhere; }
+        .message-summary-note { color: #475569; background: #fff; border-left: 4px solid #94a3b8; border-radius: 8px; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+        @media (max-width: 575.98px) {
+            .message-modal-summary .modal-dialog { width: calc(100vw - 1rem); margin: 0.5rem; }
+            .message-summary-row { grid-template-columns: 1fr; gap: 4px; }
+        }
 
     /* 리포트 스타일 */
     #reportContent { font-family: "Malgun Gothic", serif; font-size: 12px; }
@@ -603,8 +620,8 @@
   </div>
 </div>
 
-<div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header border-0 pb-0"><h6 class="modal-title fw-bold" id="alertTitle">알림</h6></div><div class="modal-body text-center py-4" id="alertBody" style="white-space: pre-wrap;">내용</div><div class="modal-footer border-0 pt-0 justify-content-center"><button type="button" class="btn btn-primary btn-sm w-50" data-bs-dismiss="modal">확인</button></div></div></div></div>
-<div class="modal fade" id="confirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm"><div class="modal-content"><div class="modal-header border-0 pb-0"><h6 class="modal-title fw-bold" id="confirmTitle">확인</h6></div><div class="modal-body text-center py-4" id="confirmBody" style="white-space: pre-wrap;">진행하시겠습니까?</div><div class="modal-footer border-0 pt-0 justify-content-center gap-2"><button type="button" class="btn btn-secondary btn-sm w-40" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger btn-sm w-40" id="btnConfirmYes">확인</button></div></div></div></div>
+<div class="modal fade" id="alertModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-sm" id="alertDialog"><div class="modal-content"><div class="modal-header border-0 pb-0"><h6 class="modal-title fw-bold" id="alertTitle">알림</h6></div><div class="modal-body py-4 message-modal-body is-compact" id="alertBody">내용</div><div class="modal-footer border-0 pt-0 justify-content-center"><button type="button" class="btn btn-primary btn-sm px-4" data-bs-dismiss="modal">확인</button></div></div></div></div>
+<div class="modal fade" id="confirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-sm" id="confirmDialog"><div class="modal-content"><div class="modal-header border-0 pb-0"><h6 class="modal-title fw-bold" id="confirmTitle">확인</h6></div><div class="modal-body py-4 message-modal-body is-compact" id="confirmBody">진행하시겠습니까?</div><div class="modal-footer border-0 pt-0 justify-content-center gap-2"><button type="button" class="btn btn-secondary btn-sm px-4" data-bs-dismiss="modal">취소</button><button type="button" class="btn btn-danger btn-sm px-4" id="btnConfirmYes">확인</button></div></div></div></div>
 
 <div class="modal fade" id="yearModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-sm">
@@ -1986,7 +2003,68 @@ function canPerform(permissionKey) {
     if (permissionSet && permissionSet.size > 0) return permissionSet.has(permissionKey);
     return hasAccountingRoleFallback(permissionKey);
 }
-function showAlert(t,m) {
+function shouldUseMessageSummary(title, message, options = {}) {
+    if (options?.layout === 'summary') return true;
+    const lines = String(message || '').split('\n').map((line) => line.trim()).filter(Boolean);
+    if (lines.some((line) => /미리보기/.test(line))) return true;
+    return ['완료', '성공', '부분 완료'].includes(String(title || '').trim()) && lines.length >= 4;
+}
+
+function renderMessageModalBody(modalId, dialogId, bodyId, title, message, options = {}) {
+    const modalEl = document.getElementById(modalId);
+    const dialogEl = document.getElementById(dialogId);
+    const bodyEl = document.getElementById(bodyId);
+    if (!modalEl || !dialogEl || !bodyEl) return;
+
+    const text = String(message || '');
+    const useSummary = shouldUseMessageSummary(title, text, options);
+    modalEl.classList.toggle('message-modal-summary', useSummary);
+    dialogEl.classList.toggle('modal-sm', !useSummary);
+    dialogEl.classList.toggle('modal-lg', useSummary);
+    bodyEl.classList.toggle('is-compact', !useSummary);
+    bodyEl.classList.toggle('is-summary', useSummary);
+    bodyEl.replaceChildren();
+
+    if (!useSummary) {
+        bodyEl.textContent = text;
+        return;
+    }
+
+    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+    const firstLine = lines[0] || String(title || '확인');
+    const introEl = document.createElement('div');
+    introEl.className = 'message-summary-intro';
+    introEl.textContent = firstLine;
+    bodyEl.appendChild(introEl);
+
+    const listEl = document.createElement('div');
+    listEl.className = 'message-summary-list';
+    lines.slice(1).forEach((rawLine) => {
+        const line = rawLine.replace(/^[-•]\s*/, '').trim();
+        const colonIndex = line.indexOf(':');
+        if (colonIndex > 0) {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'message-summary-row';
+            const labelEl = document.createElement('div');
+            labelEl.className = 'message-summary-label';
+            labelEl.textContent = line.slice(0, colonIndex).trim();
+            const valueEl = document.createElement('div');
+            valueEl.className = 'message-summary-value';
+            valueEl.textContent = line.slice(colonIndex + 1).trim() || '-';
+            rowEl.append(labelEl, valueEl);
+            listEl.appendChild(rowEl);
+            return;
+        }
+
+        const noteEl = document.createElement('div');
+        noteEl.className = 'message-summary-note';
+        noteEl.textContent = line;
+        listEl.appendChild(noteEl);
+    });
+    bodyEl.appendChild(listEl);
+}
+
+function showAlert(t,m,options = {}) {
     let title = "알림";
     let msg = "";
     if (m === undefined) {
@@ -1996,12 +2074,12 @@ function showAlert(t,m) {
         msg = m || "";
     }
     document.getElementById("alertTitle").innerText = title;
-    document.getElementById("alertBody").textContent = msg;
+    renderMessageModalBody('alertModal', 'alertDialog', 'alertBody', title, msg, options);
     alertModal.show();
 }
 function showConfirm(t,m,cb,options = {}) {
     document.getElementById("confirmTitle").innerText = t;
-    document.getElementById("confirmBody").textContent = m || "";
+    renderMessageModalBody('confirmModal', 'confirmDialog', 'confirmBody', t, m || "", options);
     confirmCallback = cb;
     confirmReturnModalId = options?.returnModalId || null;
     confirmAccepted = false;
@@ -8530,30 +8608,104 @@ function buildDoubleEntryHistory(rows) {
         grouped.get(key).rows.push(row);
     });
 
-    const items = Array.from(grouped.values()).map((group) => {
-        const cashRow = group.rows.find((row) => isCashLikeAccount(row?.Account));
-        const representative = cashRow || group.rows[0] || {};
+    const displayGroups = [];
+    const consumedKeys = new Set();
+    Array.from(grouped.entries()).forEach(([key, group]) => {
+        if (consumedKeys.has(key)) return;
+        const reclassSourceId = parseApprovalReclassSourceIdFromTransId(group.transId);
+        const originalKeyForReclass = reclassSourceId ? `T:APR-${reclassSourceId}` : '';
+        if (reclassSourceId && grouped.has(originalKeyForReclass)) {
+            // 원전표 차례에서 두 전표를 한 번만 통합한다.
+            return;
+        }
+
+        const sourceId = parseApprovalSourceIdFromTransId(group.transId);
+        const isExactApprovalSource = Boolean(sourceId) && group.transId === `APR-${sourceId}`;
+        const reclassKey = isExactApprovalSource ? `T:APR-RCLS-${sourceId}` : '';
+        const reclassGroup = reclassKey ? grouped.get(reclassKey) : null;
+        if (reclassGroup) {
+            consumedKeys.add(key);
+            consumedKeys.add(reclassKey);
+            displayGroups.push({
+                ...group,
+                rows: [...group.rows, ...reclassGroup.rows],
+                primaryRows: group.rows,
+                relatedTransIds: [group.transId, reclassGroup.transId],
+                actualTransactionCount: 2,
+                classificationStatus: 'completed',
+                usesNetPresentation: true,
+                sortIndex: Math.min(group.sortIndex, reclassGroup.sortIndex)
+            });
+            return;
+        }
+
+        consumedKeys.add(key);
+        displayGroups.push({
+            ...group,
+            primaryRows: group.rows,
+            relatedTransIds: group.transId ? [group.transId] : [],
+            actualTransactionCount: 1,
+            classificationStatus: reclassSourceId ? 'reclass-only' : '',
+            usesNetPresentation: false
+        });
+    });
+
+    const items = displayGroups.map((group) => {
+        const primaryRows = Array.isArray(group.primaryRows) && group.primaryRows.length > 0
+            ? group.primaryRows
+            : group.rows;
+        const cashRow = primaryRows.find((row) => isCashLikeAccount(row?.Account));
+        const representative = cashRow || primaryRows[0] || group.rows[0] || {};
         const debits = [];
         const credits = [];
         let debitTotal = 0;
         let creditTotal = 0;
 
-        group.rows.forEach((row) => {
-            const debit = Number(row?.Debit || 0);
-            const credit = Number(row?.Credit || 0);
-            const base = {
-                type: String(row?.Type || '').trim(),
-                account: String(row?.Account || '계정 없음').trim() || '계정 없음'
-            };
-            if (debit !== 0) {
-                debits.push({ ...base, amount: debit });
-                debitTotal += debit;
-            }
-            if (credit !== 0) {
-                credits.push({ ...base, amount: credit });
-                creditTotal += credit;
-            }
-        });
+        if (group.usesNetPresentation) {
+            const netByAccount = new Map();
+            group.rows.forEach((row) => {
+                const type = String(row?.Type || '').trim();
+                const account = String(row?.Account || '계정 없음').trim() || '계정 없음';
+                const accountKey = `${type}||${account}`;
+                if (!netByAccount.has(accountKey)) netByAccount.set(accountKey, { type, account, net: 0 });
+                netByAccount.get(accountKey).net += Number(row?.Debit || 0) - Number(row?.Credit || 0);
+            });
+            netByAccount.forEach((entry) => {
+                if (Math.abs(entry.net) < 0.5) return;
+                if (entry.net > 0) {
+                    debits.push({ type: entry.type, account: entry.account, amount: entry.net });
+                    debitTotal += entry.net;
+                } else {
+                    credits.push({ type: entry.type, account: entry.account, amount: Math.abs(entry.net) });
+                    creditTotal += Math.abs(entry.net);
+                }
+            });
+        } else {
+            group.rows.forEach((row) => {
+                const debit = Number(row?.Debit || 0);
+                const credit = Number(row?.Credit || 0);
+                const base = {
+                    type: String(row?.Type || '').trim(),
+                    account: String(row?.Account || '계정 없음').trim() || '계정 없음'
+                };
+                if (debit !== 0) {
+                    debits.push({ ...base, amount: debit });
+                    debitTotal += debit;
+                }
+                if (credit !== 0) {
+                    credits.push({ ...base, amount: credit });
+                    creditTotal += credit;
+                }
+            });
+        }
+
+        const sourceId = parseApprovalSourceIdFromTransId(group.transId);
+        let classificationStatus = group.classificationStatus || '';
+        const hasUnclassifiedBalance = [...debits, ...credits]
+            .some((entry) => entry.account === '미분류비용' && Number(entry.amount || 0) > 0);
+        if (!classificationStatus && sourceId && group.transId === `APR-${sourceId}` && hasUnclassifiedBalance) {
+            classificationStatus = 'pending';
+        }
 
         return {
             id: group.id,
@@ -8566,6 +8718,9 @@ function buildDoubleEntryHistory(rows) {
             debitTotal,
             creditTotal,
             rowCount: group.rows.length,
+            actualTransactionCount: Number(group.actualTransactionCount || 1),
+            relatedTransIds: Array.isArray(group.relatedTransIds) ? group.relatedTransIds : [],
+            classificationStatus,
             sortIndex: group.sortIndex
         };
     });
@@ -8593,6 +8748,7 @@ function renderHistoryDouble(rows) {
         const safeDesc = escapeHtml(item.description || '일반 전표');
         const safeOperator = escapeHtml(item.operator);
         const safeTransId = escapeHtml(item.transId || '');
+        const safeRelatedTransIds = item.relatedTransIds.map((value) => escapeHtml(value)).join(' + ');
         const approvalDocId = parseApprovalDocIdFromTransId(item.transId);
         const titleHtml = approvalDocId
             ? buildApprovalDocTitleButtonHtml(
@@ -8622,20 +8778,33 @@ function renderHistoryDouble(rows) {
         const balanceBadge = balanced
             ? '<span class="badge text-bg-success">차대 일치</span>'
             : '<span class="badge text-bg-warning">차대 확인</span>';
+        let classificationBadge = '';
+        let classificationNote = '';
+        if (item.classificationStatus === 'completed') {
+            classificationBadge = '<span class="badge text-bg-primary">재분류 완료</span>';
+            classificationNote = '<div class="small mt-2 history-ledger-reclass-note">원전표와 재분류 전표를 합산한 최종 계정입니다. 실제 전표는 그대로 보존됩니다.</div>';
+        } else if (item.classificationStatus === 'pending') {
+            classificationBadge = '<span class="badge text-bg-warning">분류 대기</span>';
+        } else if (item.classificationStatus === 'reclass-only') {
+            classificationBadge = '<span class="badge text-bg-secondary">재분류 전표</span>';
+        }
         const idAttr = escapeHtml(item.id || '');
-        const deleteButton = item.transId || item.id
+        const deleteButton = item.actualTransactionCount === 1 && (item.transId || item.id)
             ? `<button class="btn btn-sm btn-outline-danger" data-id="${idAttr}" data-trans-id="${safeTransId}" onclick="deleteTxByButton(this)">전표 삭제</button>`
             : '';
+        const transMeta = safeRelatedTransIds || safeTransId;
+        const transactionCountMeta = item.actualTransactionCount > 1 ? ` · 실제 전표 ${item.actualTransactionCount}건` : '';
 
         el.innerHTML += `
             <div class="list-group-item history-ledger-entry mb-3 rounded border">
                 <div class="history-ledger-head d-flex justify-content-between align-items-start gap-3">
                     <div class="flex-grow-1">
                         <div>${titleHtml}</div>
-                        <div class="small text-muted mt-1">${safeDate} · ${safeOperator}${safeTransId ? ` · ${safeTransId}` : ''} · 분개 ${item.rowCount}행</div>
+                        <div class="small text-muted mt-1">${safeDate} · ${safeOperator}${transMeta ? ` · ${transMeta}` : ''}${transactionCountMeta} · 분개 ${item.rowCount}행</div>
                         ${detailHtml}
+                        ${classificationNote}
                     </div>
-                    <div class="d-flex align-items-center gap-2 flex-shrink-0">${balanceBadge}${deleteButton}</div>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0 flex-wrap justify-content-end">${classificationBadge}${balanceBadge}${deleteButton}</div>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm history-ledger-table mb-0" aria-label="${safeDate} 복식 전표">
@@ -8662,7 +8831,10 @@ function renderHistoryDouble(rows) {
         `;
     });
     const displayedRows = items.reduce((sum, item) => sum + Number(item.rowCount || 0), 0);
-    if (metaEl) metaEl.textContent = `복식 ${items.length}건 · 분개 ${displayedRows}행`;
+    const actualTransactions = items.reduce((sum, item) => sum + Number(item.actualTransactionCount || 1), 0);
+    const reclassifiedCount = items.filter((item) => item.classificationStatus === 'completed').length;
+    const reclassMeta = reclassifiedCount > 0 ? ` · 재분류 통합 ${reclassifiedCount}건` : '';
+    if (metaEl) metaEl.textContent = `복식 ${items.length}건 · 실제 전표 ${actualTransactions}건 · 분개 ${displayedRows}행${reclassMeta}`;
 }
 
 async function deleteTx(id, transId) {
