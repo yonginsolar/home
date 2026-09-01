@@ -1,0 +1,171 @@
+<!doctype html>
+<!-- Version: v1.0.0 | Change: 2026-09-01 - Add an authenticated ERP launcher for the Sun Income Village demo. -->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <meta name="color-scheme" content="light dark">
+  <title>햇빛소득마을 데모 | ERP</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+  <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
+  <script src="../shared/route_guard.js?v=20260408-1"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --shell-bg: #f3f7f3;
+      --surface: #ffffff;
+      --line: #dce7dd;
+      --ink: #17251b;
+      --muted: #66736a;
+      --green: #246d37;
+      --green-soft: #eaf5ec;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body { background: var(--shell-bg); color: var(--ink); font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    button, a { font: inherit; }
+    .boot-panel { display: grid; min-height: 100vh; place-items: center; padding: 24px; text-align: center; }
+    .boot-card { width: min(440px, 100%); padding: 30px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: 0 18px 54px rgba(31, 70, 42, .12); }
+    .boot-icon { display: grid; width: 58px; height: 58px; margin: 0 auto 15px; place-items: center; border-radius: 18px; background: var(--green-soft); font-size: 30px; }
+    .boot-card h1 { margin: 0; font-size: 24px; }
+    .boot-card p { margin: 10px 0 0; color: var(--muted); line-height: 1.65; }
+    .spinner { width: 28px; height: 28px; margin: 20px auto 0; border: 3px solid #dbe9de; border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
+    .boot-error { margin-top: 18px; padding: 13px; border-radius: 13px; background: #fff2f2; color: #a12f36; line-height: 1.55; }
+    .boot-link { display: inline-flex; min-height: 42px; margin-top: 16px; padding: 0 15px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 11px; color: var(--green); background: var(--surface); font-weight: 800; text-decoration: none; }
+    .demo-shell { display: none; min-height: 100vh; grid-template-rows: auto minmax(0, 1fr); }
+    .demo-shell.ready { display: grid; }
+    .erp-demo-bar { display: flex; min-height: 58px; padding: 9px 16px; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .erp-demo-title { min-width: 0; }
+    .erp-demo-title strong, .erp-demo-title span { display: block; }
+    .erp-demo-title strong { font-size: 16px; }
+    .erp-demo-title span { margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .back-link { display: inline-flex; min-height: 40px; padding: 0 13px; flex: 0 0 auto; align-items: center; border: 1px solid var(--line); border-radius: 11px; color: var(--green); background: var(--green-soft); font-size: 13px; font-weight: 850; text-decoration: none; }
+    .demo-frame { width: 100%; height: 100%; min-height: 0; border: 0; background: #edf4ee; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: dark) {
+      :root { --shell-bg:#0b1410; --surface:#132019; --line:#2e4034; --ink:#eef5ef; --muted:#b2c0b6; --green:#84c889; --green-soft:#1b3422; }
+    }
+    @media (max-width: 620px) {
+      .erp-demo-bar { min-height: 54px; padding-inline: 10px; }
+      .erp-demo-title span { max-width: 205px; }
+      .back-link { min-height: 38px; padding-inline: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="boot-panel" id="bootPanel" aria-live="polite">
+    <div class="boot-card">
+      <div class="boot-icon" aria-hidden="true">🌻</div>
+      <h1>햇빛소득마을 데모</h1>
+      <p id="bootMessage">ERP 로그인과 관리자 권한을 확인하고 있습니다.</p>
+      <div class="spinner" id="bootSpinner" aria-label="확인 중"></div>
+      <div class="boot-error" id="bootError" hidden></div>
+      <a class="boot-link" id="bootBackLink" href="index.html" hidden>← ERP 메인</a>
+    </div>
+  </section>
+
+  <section class="demo-shell" id="demoShell">
+    <header class="erp-demo-bar">
+      <div class="erp-demo-title">
+        <strong>🌻 햇빛소득마을 운영 데모</strong>
+        <span>화면의 마을·주민·발전소·금액은 모두 시연용 가상 데이터입니다.</span>
+      </div>
+      <a class="back-link" href="index.html">← ERP 메인</a>
+    </header>
+    <iframe class="demo-frame" id="demoFrame" title="햇빛소득마을 운영 데모"></iframe>
+  </section>
+
+  <script>
+  (() => {
+    'use strict';
+    const VERSION = '1.0.0';
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      global: {
+        headers: {
+          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase()
+        }
+      }
+    });
+
+    const bootPanel = document.getElementById('bootPanel');
+    const demoShell = document.getElementById('demoShell');
+    const demoFrame = document.getElementById('demoFrame');
+    const bootMessage = document.getElementById('bootMessage');
+    const bootSpinner = document.getElementById('bootSpinner');
+    const bootError = document.getElementById('bootError');
+    const bootBackLink = document.getElementById('bootBackLink');
+
+    function isAdminFallback(user) {
+      const role = String(user?.role || '').trim().toLowerCase();
+      const position = String(user?.position || '').trim();
+      return role === 'admin' || role === 'admin_all' || position === '국장';
+    }
+
+    async function loadSiteAdminPermission(user) {
+      const coopId = String(user?.coop_id || '').trim();
+      const roleKey = String(user?.role || '').trim();
+      const positionKey = String(user?.position || '').trim();
+      if (!coopId || (!roleKey && !positionKey)) return false;
+      const roleKeys = [roleKey, positionKey].filter(Boolean);
+      if (roleKey === 'admin') roleKeys.push('admin_all');
+      if (roleKey === 'admin_all') roleKeys.push('admin');
+      const { data, error } = await client
+        .from('erp_role_permissions')
+        .select('permission_key')
+        .eq('coop_id', coopId)
+        .in('scope', ['role', 'position'])
+        .in('role_key', roleKeys)
+        .eq('is_enabled', true);
+      if (error) throw error;
+      const permissions = new Set((Array.isArray(data) ? data : []).map((row) => String(row?.permission_key || '').trim()).filter(Boolean));
+      return {
+        hasSiteAdmin: permissions.has('site.admin') || permissions.has('member.admin'),
+        isLegacyEmpty: permissions.size === 0
+      };
+    }
+
+    function showError(message) {
+      bootMessage.textContent = '데모를 열지 못했습니다.';
+      bootSpinner.hidden = true;
+      bootError.textContent = String(message || '권한을 확인한 뒤 다시 시도해 주세요.');
+      bootError.hidden = false;
+      bootBackLink.hidden = false;
+    }
+
+    async function boot() {
+      try {
+        const userGate = await window.ErpRuntimeGuard.requireUser(client, {
+          alertFn: showError,
+          redirectUrl: 'index.html'
+        });
+        if (!userGate.ok) return;
+        const runtimeGate = await window.ErpRuntimeGuard.enforce(client, {
+          moduleKey: 'site_admin',
+          moduleLabel: '햇빛소득마을 데모',
+          alertFn: showError,
+          redirectUrl: 'index.html'
+        });
+        if (!runtimeGate.ok) return;
+        const permission = await loadSiteAdminPermission(userGate.user);
+        if (!permission.hasSiteAdmin && !(permission.isLegacyEmpty && isAdminFallback(userGate.user))) {
+          showError('홈페이지 관리 권한이 있는 ERP 관리자만 이 데모를 열 수 있습니다.');
+          return;
+        }
+        demoFrame.src = '../demos/sun-income-village/index.html#dashboard';
+        bootPanel.hidden = true;
+        demoShell.classList.add('ready');
+      } catch (error) {
+        console.error(`[sun-income-village-demo ${VERSION}] boot failed`, error);
+        showError('로그인 또는 관리자 권한을 확인하지 못했습니다. ERP 메인에서 다시 열어 주세요.');
+      }
+    }
+
+    boot();
+  })();
+  </script>
+</body>
+</html>
