@@ -1,6 +1,27 @@
 (() => {
   'use strict';
 
+  function enforceHostedErpEntry() {
+    const host = String(window.location.hostname || '').trim().toLowerCase();
+    const isHosted = host === 'yonginsolar.kr' || host === 'www.yonginsolar.kr' || host === 'erp.yonginsolar.kr';
+    if (!isHosted) return true;
+    let openedByErpLauncher = false;
+    try {
+      const parentPath = window.parent !== window ? String(window.parent.location.pathname || '') : '';
+      openedByErpLauncher = /\/(?:erp\/)?sun_income_village_demo(?:\.html)?\/?$/.test(parentPath);
+    } catch (_) {
+      openedByErpLauncher = false;
+    }
+    if (openedByErpLauncher) return true;
+    const launcherPath = host === 'erp.yonginsolar.kr'
+      ? '/sun_income_village_demo.html'
+      : '/erp/sun_income_village_demo.html';
+    window.location.replace(launcherPath);
+    return false;
+  }
+
+  if (!enforceHostedErpEntry()) return;
+
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const views = new Set(['dashboard', 'residents', 'plant', 'finance', 'governance', 'disclosure']);
