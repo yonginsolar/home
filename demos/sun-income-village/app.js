@@ -155,7 +155,7 @@
     $$('.meeting-item').forEach((button) => button.classList.toggle('active', button.dataset.meeting === key));
     const panel = $('#meetingDetail');
     panel.innerHTML = `
-      <div class="panel-heading"><div><span class="panel-kicker">선택한 회의</span><h2>${detail.title}</h2></div><span class="status-badge status-ready">${detail.status}</span></div>
+      <div class="panel-heading"><div><span class="panel-kicker">기존 문서·서명 관리</span><h2>${detail.title}</h2></div><span class="status-badge status-ready">${detail.status}</span></div>
       <dl class="detail-list"><div><dt>회의 구분</dt><dd>${detail.type}</dd></div><div><dt>일시·장소</dt><dd>${detail.date}</dd></div><div><dt>참석 대상</dt><dd>${detail.target}</dd></div><div><dt>주요 안건</dt><dd>${detail.agenda}</dd></div></dl>
       <div class="document-links"><button type="button" data-demo-action="document">📄 사전 설명자료 <span>작성 중</span></button><button type="button" data-demo-action="document">🗒️ 참석부 <span>자동 생성</span></button><button type="button" data-demo-action="document">✍️ 회의 결과 확인 <span>회의 후</span></button></div>`;
   }
@@ -210,11 +210,14 @@
       const demoAction = event.target.closest('[data-demo-action]');
       if (!demoAction) return;
       const messages = {
+        'erp-members': '조합원·임원·대의원 명부는 기존 ERP를 그대로 쓰고, 마을 주민·세대 정보와 필요한 대상만 연결합니다.',
+        'erp-accounting': '수입·비용·지출결의·전자결재·결산은 기존 ERP에서 처리하고, 확정된 배분 결과만 마을 전용 화면과 연결합니다.',
+        'erp-activities': '교육·행사·선거·참여 현황은 기존 ERP 공통 기능을 그대로 사용합니다.',
         'add-resident': '실제 구축 시 주민 등록·엑셀 불러오기·중복 확인 흐름을 연결합니다.',
         'add-site': '실제 구축 시 부지 계약·도면·인허가 문서를 함께 등록합니다.',
         'new-meeting': '실제 구축 시 참석 대상과 정족수, 자료·전자서명을 함께 설정합니다.',
         'document': '회의 자리에서 필요한 문서 형식과 공개 범위를 확인할 예정입니다.',
-        'documents': '문서함 전체 화면은 기존 조합 모듈을 바탕으로 연결할 수 있습니다.',
+        'documents': '이 화면의 문서는 기존 ERP 문서함·전자서명 기능에서 그대로 관리합니다.',
         'public-doc': '주민에게 공개할 자료와 조합 내부 원본을 분리하는 예시입니다.',
         'public-question': '문의·이의신청 접수 방식은 현장에서 실제 운영 흐름을 확인합니다.'
       };
