@@ -13,9 +13,7 @@
       openedByErpLauncher = false;
     }
     if (openedByErpLauncher) return true;
-    const launcherPath = host === 'erp.yonginsolar.kr'
-      ? '/sun_income_village_demo.html'
-      : '/erp/sun_income_village_demo.html';
+    const launcherPath = host === 'erp.yonginsolar.kr' ? '/sun_income_village_demo.html' : '/erp/sun_income_village_demo.html';
     window.location.replace(launcherPath);
     return false;
   }
@@ -24,45 +22,109 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const views = new Set([
-    'dashboard',
-    'residents',
-    'plant',
-    'finance',
-    'erp-members',
-    'erp-accounting',
-    'erp-activities',
-    'governance',
-    'disclosure'
-  ]);
-  let activeView = 'dashboard';
+  const views = new Set(['dashboard', 'members', 'accounting', 'approvals', 'governance']);
+  let selectedVillage = 'all';
+  let memberFilter = 'all';
+  let activeMeetingId = null;
   let toastTimer = null;
-  let consentFilter = 'all';
 
-  const residents = [
-    { name: '김햇빛', household: '가온 1세대', resident: '충족 · 12년', consent: '동의', member: '정조합원', payee: '포함', note: '확인 완료' },
-    { name: '이마을', household: '가온 2세대', resident: '충족 · 8년', consent: '동의', member: '가입 신청', payee: '검토', note: '출자금 확인' },
-    { name: '박에너지', household: '가온 3세대', resident: '충족 · 4년', consent: '미확인', member: '비조합원', payee: '검토', note: '전화 연결 안 됨' },
-    { name: '최공동', household: '가온 4세대', resident: '충족 · 18년', consent: '동의', member: '정조합원', payee: '포함', note: '세대 대표' },
-    { name: '정투명', household: '가온 5세대', resident: '보완 · 10개월', consent: '보류', member: '비조합원', payee: '제외', note: '거주기간 확인' },
-    { name: '윤새봄', household: '가온 6세대', resident: '충족 · 2년', consent: '동의', member: '정조합원', payee: '포함', note: '전자 동의' },
-    { name: '한그루', household: '가온 7세대', resident: '충족 · 15년', consent: '미확인', member: '비조합원', payee: '검토', note: '방문 예정' },
-    { name: '오누리', household: '가온 8세대', resident: '충족 · 6년', consent: '동의', member: '정조합원', payee: '포함', note: '확인 완료' },
-    { name: '강바람', household: '가온 9세대', resident: '충족 · 3년', consent: '동의', member: '비조합원', payee: '포함', note: '주민 혜택 대상' },
-    { name: '서들녘', household: '가온 10세대', resident: '충족 · 21년', consent: '보류', member: '정조합원', payee: '검토', note: '배분안 설명 요청' }
+  const villages = {
+    gaon: { name: '가온리 햇빛소득마을', short: '가온리', status: '운영 중', capacity: 200, members: 82, fullMembers: 76, payees: 72, review: 6, balance: 76450000, revenue: 7850000, expense: 1280000, generation: 21400 },
+    deulkkot: { name: '들꽃리 햇빛소득마을', short: '들꽃리', status: '운영 중', capacity: 150, members: 67, fullMembers: 61, payees: 58, review: 6, balance: 48900000, revenue: 6120000, expense: 660000, generation: 16800 },
+    solsaem: { name: '솔샘리 햇빛소득마을', short: '솔샘리', status: '준비 중', capacity: 100, members: 49, fullMembers: 41, payees: 39, review: 8, balance: 26350000, revenue: 0, expense: 4200000, generation: 0 }
+  };
+
+  const members = [
+    { name: '김햇빛', village: 'gaon', type: '개인', role: '이사', capital: 3000000, payee: true, status: '정조합원' },
+    { name: '이마을', village: 'gaon', type: '주민', role: '세대대표', capital: 1000000, payee: false, status: '확인 필요' },
+    { name: '최공동', village: 'gaon', type: '개인', role: '대의원', capital: 5000000, payee: true, status: '정조합원' },
+    { name: '정들꽃', village: 'deulkkot', type: '개인', role: '이사장', capital: 5000000, payee: true, status: '정조합원' },
+    { name: '박공동', village: 'deulkkot', type: '단체', role: '조합원', capital: 10000000, payee: true, status: '정조합원' },
+    { name: '윤새봄', village: 'deulkkot', type: '주민', role: '가입 신청', capital: 1000000, payee: false, status: '확인 필요' },
+    { name: '한솔샘', village: 'solsaem', type: '개인', role: '준비위원', capital: 2000000, payee: true, status: '정조합원' },
+    { name: '오햇살', village: 'solsaem', type: '주민', role: '서류 보완', capital: 0, payee: false, status: '확인 필요' }
   ];
 
-  const meetingDetails = {
-    briefing: {
-      title: '수익 활용 원칙 설명과 의견수렴', status: '자료 준비 중', type: '주민 설명회', date: '2026.09.12 19:00 · 마을회관', target: '기준 주민 175명', agenda: '개인배분·공동복지·적립금 비율 의견수렴'
-    },
-    board: {
-      title: '금융 조건·시공 범위 검토', status: '안건 정리 중', type: '이사회', date: '2026.09.19 18:30 · 조합 사무실', target: '이사 5명 · 감사 열람', agenda: '금융기관 조건과 시공 범위 비교·검토'
-    },
-    general: {
-      title: '사업계획과 차입 한도 의결', status: '소집 준비', type: '임시총회', date: '2026.10.10 14:00 · 마을회관', target: '의결권 있는 조합원', agenda: '사업계획, 예산과 차입금 한도 의결'
+  const ledger = [
+    { date: '09.01', village: 'gaon', description: '8월 전력판매 수입', debit: '보통예금', credit: '전력판매수익', amount: 7850000, approval: '연결 완료' },
+    { date: '09.01', village: 'deulkkot', description: '8월 전력판매 수입', debit: '보통예금', credit: '전력판매수익', amount: 6120000, approval: '연결 완료' },
+    { date: '09.02', village: 'gaon', description: '발전소 정기점검비', debit: '유지보수비', credit: '보통예금', amount: 1280000, approval: '결재 2026-41' },
+    { date: '09.02', village: 'deulkkot', description: '발전소 재산종합보험', debit: '보험료', credit: '보통예금', amount: 660000, approval: '결재 2026-38' },
+    { date: '09.02', village: 'solsaem', description: '개발행위허가 용역비', debit: '건설중인자산', credit: '보통예금', amount: 4200000, approval: '결재 2026-12' }
+  ];
+
+  const approvals = [
+    { id: 'A-042', village: 'gaon', kind: '지출결의', title: '인버터 정기점검비 지급', detail: '점검보고서·세금계산서 첨부', amount: 1280000, status: '검토 중', linked: false, icon: '🧾' },
+    { id: 'A-041', village: 'gaon', kind: '일반결재', title: '3분기 운영보고서 확정', detail: '발전량·수입·유지보수 내역', amount: 0, status: '승인 완료', linked: false, icon: '📗' },
+    { id: 'A-039', village: 'deulkkot', kind: '지출결의', title: '발전소 보험료 지급', detail: '보험증권·납입안내서 첨부', amount: 660000, status: '승인 완료', linked: true, icon: '🛡️' },
+    { id: 'A-038', village: 'deulkkot', kind: '계약결재', title: '제초관리 연간계약', detail: '견적서 2건 비교 필요', amount: 1800000, status: '대기', linked: false, icon: '📝' },
+    { id: 'A-013', village: 'solsaem', kind: '지출결의', title: '개발행위허가 보완 용역', detail: '보완 요청서·용역 산출내역', amount: 4200000, status: '승인 완료', linked: true, icon: '📐' },
+    { id: 'A-014', village: 'solsaem', kind: '일반결재', title: '부지 사용협약 검토', detail: '토지 사용기간·갱신조건 확인', amount: 0, status: '대기', linked: false, icon: '🏞️' }
+  ];
+
+  const meetings = [
+    { id: 'M-gaon-1', village: 'gaon', type: '이사회', date: '2026-09-08', day: '8', month: '9월', title: '3분기 운영실적과 유지보수비 의결', place: '가온리 마을회관', target: '이사 5명 · 감사 1명', agenda: '발전량·전력판매 수입 보고, 정기점검비 의결', signed: 0, signers: 5, state: '소집 완료' },
+    { id: 'M-gaon-2', village: 'gaon', type: '총회', date: '2026-08-22', day: '22', month: '8월', title: '상반기 결산 및 운영보고', place: '가온리 마을회관', target: '정조합원 76명', agenda: '상반기 결산 승인과 운영현황 보고', signed: 4, signers: 4, state: '서명 완료' },
+    { id: 'M-deul-1', village: 'deulkkot', type: '이사회', date: '2026-09-12', day: '12', month: '9월', title: '제초관리 계약과 보험료 보고', place: '들꽃리 경로당', target: '이사 4명 · 감사 1명', agenda: '연간 제초계약 업체 선정과 보험 가입 보고', signed: 0, signers: 4, state: '안건 준비' },
+    { id: 'M-sol-1', village: 'solsaem', type: '총회', date: '2026-09-20', day: '20', month: '9월', title: '부지 사용협약과 사업계획 의결', place: '솔샘리 마을회관', target: '정조합원 41명', agenda: '부지 사용협약, 사업비와 차입 한도 의결', signed: 0, signers: 4, state: '소집 준비' }
+  ];
+
+  const documents = [
+    { village: 'gaon', title: '상반기 결산 및 운영보고 총회 의사록', date: '2026.08.22', signature: '4/4', status: '완료' },
+    { village: 'deulkkot', title: '제7차 이사회 의사록', date: '2026.08.19', signature: '4/4', status: '완료' },
+    { village: 'solsaem', title: '설립준비위원회 회의록', date: '2026.08.15', signature: '3/4', status: '서명 중' }
+  ];
+
+  const tasks = [
+    { village: 'gaon', priority: '검토', type: 'normal', title: '정기점검비 지출결의 확인', note: '결재 A-042 · 이사장 검토 중' },
+    { village: 'deulkkot', priority: '확인', type: 'normal', title: '제초관리 계약 견적 비교', note: '결재 A-038 · 견적서 1건 추가 필요' },
+    { village: 'solsaem', priority: '회의', type: '', title: '총회 소집통지 발송', note: '9월 20일 총회 · 정조합원 41명' },
+    { village: 'solsaem', priority: '보완', type: '', title: '구성원 가입서류 8명 확인', note: '주민등록·출자금 납입 상태 점검' }
+  ];
+
+  const recent = [
+    { village: 'gaon', icon: '📒', title: '전력판매 수입 전표 반영', note: '9월 1일 · 785만원' },
+    { village: 'deulkkot', icon: '✅', title: '발전소 보험료 결재 완료', note: '9월 2일 · 회계 연결 완료' },
+    { village: 'gaon', icon: '✍️', title: '상반기 총회 의사록 서명 완료', note: '8월 23일 · 서명 4/4' },
+    { village: 'solsaem', icon: '👥', title: '가입 신청 3명 접수', note: '8월 31일 · 서류 확인 중' }
+  ];
+
+  function selectedKeys() {
+    return selectedVillage === 'all' ? Object.keys(villages) : [selectedVillage];
+  }
+
+  function matchesVillage(item) {
+    return selectedVillage === 'all' || item.village === selectedVillage;
+  }
+
+  function sumVillage(field) {
+    return selectedKeys().reduce((sum, key) => sum + Number(villages[key][field] || 0), 0);
+  }
+
+  function won(value) {
+    return `${Number(value || 0).toLocaleString('ko-KR')}원`;
+  }
+
+  function compactWon(value) {
+    const amount = Number(value || 0);
+    if (amount >= 100000000) {
+      const billions = Math.floor(amount / 100000000);
+      const rest = Math.round((amount % 100000000) / 10000);
+      return rest ? `${billions}억 ${rest.toLocaleString('ko-KR')}만원` : `${billions}억원`;
     }
-  };
+    return `${Math.round(amount / 10000).toLocaleString('ko-KR')}만원`;
+  }
+
+  function statusBadge(status) {
+    const type = status === '승인 완료' || status === '완료' || status === '운영 중' || status === '서명 완료'
+      ? 'status-done'
+      : status === '검토 중' || status === '서명 중'
+        ? 'status-review'
+        : status === '대기' || status === '준비 중'
+          ? 'status-wait'
+          : 'status-progress';
+    return `<span class="status-badge ${type}">${status}</span>`;
+  }
 
   function showToast(message) {
     const toast = $('#toast');
@@ -70,12 +132,11 @@
     toast.textContent = message;
     toast.classList.add('show');
     window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2800);
+    toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2600);
   }
 
-  function setView(nextView, options = {}) {
-    if (!views.has(nextView)) nextView = 'dashboard';
-    activeView = nextView;
+  function setView(view, options = {}) {
+    const nextView = views.has(view) ? view : 'dashboard';
     $$('[data-view-panel]').forEach((panel) => {
       const active = panel.dataset.viewPanel === nextView;
       panel.hidden = !active;
@@ -84,9 +145,7 @@
     $$('[data-view]').forEach((button) => {
       const active = button.dataset.view === nextView;
       button.classList.toggle('active', active);
-      if (button.classList.contains('nav-item')) {
-        active ? button.setAttribute('aria-current', 'page') : button.removeAttribute('aria-current');
-      }
+      if (button.classList.contains('nav-item')) button.setAttribute('aria-current', active ? 'page' : 'false');
     });
     if (!options.skipHistory) history.replaceState(null, '', `#${nextView}`);
     window.scrollTo({ top: 0, behavior: options.instant ? 'auto' : 'smooth' });
@@ -98,149 +157,176 @@
 
   function applyTheme(mode) {
     const safeMode = ['auto', 'light', 'dark'].includes(mode) ? mode : 'auto';
-    const resolved = safeMode === 'auto' ? currentSystemTheme() : safeMode;
-    document.documentElement.dataset.theme = resolved;
+    document.documentElement.dataset.theme = safeMode === 'auto' ? currentSystemTheme() : safeMode;
     document.documentElement.dataset.themeMode = safeMode;
     $$('[data-theme-mode]').forEach((button) => button.classList.toggle('active', button.dataset.themeMode === safeMode));
-    try { localStorage.setItem('sun-village-demo-theme', safeMode); } catch (_) {}
+    try { localStorage.setItem('sun-village-lite-theme', safeMode); } catch (_) {}
   }
 
-  function statusBadge(value, type) {
-    return `<span class="small-badge ${type}">${value}</span>`;
+  function renderDashboard() {
+    const keys = selectedKeys();
+    const label = selectedVillage === 'all' ? '관리 중인 마을' : '현재 관리 대상';
+    const villageName = selectedVillage === 'all' ? null : villages[selectedVillage].name;
+    $('#dashboardDescription').textContent = villageName
+      ? `햇살에너지협동조합이 ${villageName}의 오늘 할 일을 확인합니다.`
+      : '햇살에너지협동조합이 관리하는 3개 마을의 오늘 할 일을 확인합니다.';
+    $('#metricVillageLabel').textContent = label;
+    $('#metricVillages').textContent = selectedVillage === 'all' ? `${keys.length}곳` : villages[selectedVillage].short;
+    $('#metricVillageNote').textContent = selectedVillage === 'all' ? '운영 2 · 준비 1' : `${villages[selectedVillage].capacity}kW · ${villages[selectedVillage].status}`;
+    $('#metricMembers').textContent = `${sumVillage('members')}명`;
+    $('#metricMembersNote').textContent = `정조합원 ${sumVillage('fullMembers')}명`;
+    $('#metricBalance').textContent = compactWon(sumVillage('balance'));
+    const pending = approvals.filter((item) => matchesVillage(item) && (item.status === '대기' || item.status === '검토 중')).length;
+    $('#metricPending').textContent = `${pending}건`;
+    $('#metricPendingNote').textContent = pending ? '검토가 필요한 문서' : '대기 문서 없음';
+
+    $('#villageList').innerHTML = keys.map((key) => {
+      const village = villages[key];
+      return `<button class="village-row ${selectedVillage === key ? 'active' : ''}" type="button" data-select-village="${key}">
+        <span class="village-symbol">🌻</span><span class="village-name"><strong>${village.name}</strong><small>${village.capacity}kW · ${village.status}</small></span>
+        <span class="village-data"><span>구성원</span><b>${village.members}명</b></span><span class="village-data"><span>통장 잔액</span><b>${compactWon(village.balance)}</b></span><span class="village-data"><span>이번 달 수입</span><b>${compactWon(village.revenue)}</b></span>${statusBadge(village.status)}
+      </button>`;
+    }).join('');
+    $('#villageCount').textContent = `${keys.length}곳`;
+
+    const filteredTasks = tasks.filter(matchesVillage);
+    $('#taskList').innerHTML = filteredTasks.length ? filteredTasks.map((task) => `<li><span class="task-priority ${task.type}">${task.priority}</span><div><strong>${villages[task.village].short} · ${task.title}</strong><small>${task.note}</small></div></li>`).join('') : '<li class="empty-state">처리할 업무가 없습니다.</li>';
+    $('#taskCount').textContent = `${filteredTasks.length}건`;
+
+    $('#plantRows').innerHTML = keys.map((key) => {
+      const village = villages[key];
+      return `<tr><td><strong>${village.name}</strong></td><td>${village.capacity}kW</td><td>${village.generation ? `${village.generation.toLocaleString('ko-KR')}kWh` : '상업운전 전'}</td><td class="money">${village.revenue ? won(village.revenue) : '-'}</td><td>${statusBadge(village.status)}</td></tr>`;
+    }).join('');
+
+    const filteredRecent = recent.filter(matchesVillage);
+    $('#recentList').innerHTML = filteredRecent.map((item) => `<li><span class="recent-icon">${item.icon}</span><div><strong>${villages[item.village].short} · ${item.title}</strong><small>${item.note}</small></div></li>`).join('');
   }
 
-  function renderResidents() {
-    const query = ($('#residentSearch')?.value || '').trim().toLowerCase();
-    const filtered = residents.filter((resident) => {
-      const matchesFilter = consentFilter === 'all' || resident.consent === consentFilter;
-      const haystack = Object.values(resident).join(' ').toLowerCase();
-      return matchesFilter && (!query || haystack.includes(query));
+  function renderMembers() {
+    const query = ($('#memberSearch')?.value || '').trim().toLowerCase();
+    const filtered = members.filter((member) => {
+      const statusMatch = memberFilter === 'all' || member.status === memberFilter;
+      const text = `${member.name} ${villages[member.village].name} ${member.type} ${member.role} ${member.status}`.toLowerCase();
+      return matchesVillage(member) && statusMatch && (!query || text.includes(query));
     });
-    const body = $('#residentRows');
-    if (!body) return;
-    body.innerHTML = filtered.length ? filtered.map((resident) => {
-      const consentType = resident.consent === '동의' ? 'yes' : resident.consent === '미확인' ? 'pending' : 'hold';
-      const memberType = resident.member === '정조합원' ? 'yes' : resident.member === '가입 신청' ? 'pending' : 'no';
-      const payeeType = resident.payee === '포함' ? 'yes' : resident.payee === '검토' ? 'pending' : 'no';
-      return `<tr>
-        <td><div class="person-cell"><span class="avatar">${resident.name.slice(0, 1)}</span><strong>${resident.name}</strong></div></td>
-        <td>${resident.household}</td><td>${resident.resident}</td>
-        <td>${statusBadge(resident.consent, consentType)}</td><td>${statusBadge(resident.member, memberType)}</td>
-        <td>${statusBadge(resident.payee, payeeType)}</td><td>${resident.note}</td>
-      </tr>`;
-    }).join('') : '<tr><td colspan="7">조건에 맞는 가상 주민이 없습니다.</td></tr>';
-    $('#residentCount').textContent = `${filtered.length}명 표시`;
+    $('#memberRows').innerHTML = filtered.length ? filtered.map((member) => `<tr>
+      <td><div class="person-cell"><span class="avatar">${member.name.slice(0, 1)}</span><strong>${member.name}</strong></div></td>
+      <td>${villages[member.village].short}</td><td><strong>${member.type}</strong><small>${member.role}</small></td><td class="money">${won(member.capital)}</td>
+      <td><span class="small-badge ${member.payee ? 'yes' : 'pending'}">${member.payee ? '포함' : '확인 필요'}</span></td><td><span class="small-badge ${member.status === '정조합원' ? 'yes' : 'pending'}">${member.status}</span></td>
+    </tr>`).join('') : '<tr><td colspan="6" class="empty-state">조건에 맞는 가상 구성원이 없습니다.</td></tr>';
+    $('#memberCount').textContent = `${filtered.length}명 표시`;
+    $('#memberTotal').textContent = `${sumVillage('members')}명`;
+    $('#fullMemberTotal').textContent = `${sumVillage('fullMembers')}명`;
+    $('#payeeTotal').textContent = `${sumVillage('payees')}명`;
+    $('#memberReviewTotal').textContent = `${sumVillage('review')}명`;
   }
 
-  function wonLabel(value) {
-    return `${Math.round(value / 10000).toLocaleString('ko-KR')}만원`;
+  function renderAccounting() {
+    const rows = ledger.filter(matchesVillage);
+    $('#accountBalance').textContent = compactWon(sumVillage('balance'));
+    $('#accountRevenue').textContent = compactWon(sumVillage('revenue'));
+    $('#accountExpense').textContent = compactWon(sumVillage('expense'));
+    $('#reconcileState').textContent = '완료';
+    $('#reconcileNote').textContent = '차이 0원';
+    $('#ledgerCount').textContent = `${rows.length}건`;
+    $('#ledgerRows').innerHTML = rows.map((entry) => `<tr><td>${entry.date}</td><td>${villages[entry.village].short}</td><td><strong>${entry.description}</strong></td><td>${entry.debit}</td><td>${entry.credit}</td><td class="money">${won(entry.amount)}</td><td><span class="small-badge yes">${entry.approval}</span></td></tr>`).join('');
   }
 
-  function updateRatios() {
-    const fields = $$('[data-ratio]');
-    const values = Object.fromEntries(fields.map((field) => [field.dataset.ratio, Math.max(0, Math.min(100, Number(field.value) || 0))]));
-    fields.forEach((field) => { field.value = values[field.dataset.ratio]; });
-    const total = values.personal + values.welfare + values.reserve;
-    const totalBadge = $('#ratioTotal');
-    const message = $('#ratioMessage');
-    totalBadge.textContent = `합계 ${total}%`;
-    const valid = total === 100;
-    totalBadge.style.background = valid ? 'var(--green-soft)' : 'var(--orange-soft)';
-    totalBadge.style.color = valid ? 'var(--green)' : 'var(--red)';
-    message.textContent = valid ? '합계가 100%입니다. 세 방식의 장단점을 비교해 보세요.' : `합계를 100%로 맞춰 주세요. 현재 ${total}%입니다.`;
-    message.classList.toggle('valid', valid);
-    const amount = 36000000;
-    $('#personalAmount').textContent = wonLabel(amount * values.personal / 100);
-    $('#welfareAmount').textContent = wonLabel(amount * values.welfare / 100);
-    $('#reserveAmount').textContent = wonLabel(amount * values.reserve / 100);
-    $('#ratioBar').innerHTML = [
-      ['personal', '개인', values.personal], ['welfare', '복지', values.welfare], ['reserve', '적립', values.reserve]
-    ].filter(([, , value]) => value > 0).map(([key, label, value]) => `<span class="bar ${key}" style="width:${value}%">${label} ${value}%</span>`).join('');
-    $('#ratioBar').setAttribute('aria-label', `개인 ${values.personal}%, 공동복지 ${values.welfare}%, 적립 ${values.reserve}%`);
+  function renderApprovals() {
+    const rows = approvals.filter(matchesVillage);
+    const waiting = rows.filter((item) => item.status === '대기').length;
+    const review = rows.filter((item) => item.status === '검토 중').length;
+    const done = rows.filter((item) => item.status === '승인 완료').length;
+    const linked = rows.filter((item) => item.linked).length;
+    $('#approvalPending').textContent = `${waiting}건`;
+    $('#approvalReview').textContent = `${review}건`;
+    $('#approvalDone').textContent = `${done}건`;
+    $('#approvalLinked').textContent = `${linked}건`;
+    $('#approvalCount').textContent = `${rows.length}건`;
+    $('#approvalList').innerHTML = rows.length ? rows.map((item) => `<article class="approval-item">
+      <span class="approval-icon">${item.icon}</span><div class="approval-copy"><small>${villages[item.village].short} · ${item.kind} · ${item.id}</small><strong>${item.title}</strong><p>${item.detail}</p></div>
+      <div class="approval-amount"><span>금액</span><strong>${item.amount ? won(item.amount) : '해당 없음'}</strong></div>${statusBadge(item.status)}
+    </article>`).join('') : '<div class="empty-state">표시할 결재 문서가 없습니다.</div>';
   }
 
-  function renderMeeting(key) {
-    const detail = meetingDetails[key];
-    if (!detail) return;
-    $$('.meeting-item').forEach((button) => button.classList.toggle('active', button.dataset.meeting === key));
-    const panel = $('#meetingDetail');
-    panel.innerHTML = `
-      <div class="panel-heading"><div><span class="panel-kicker">기존 문서·서명 관리</span><h2>${detail.title}</h2></div><span class="status-badge status-ready">${detail.status}</span></div>
-      <dl class="detail-list"><div><dt>회의 구분</dt><dd>${detail.type}</dd></div><div><dt>일시·장소</dt><dd>${detail.date}</dd></div><div><dt>참석 대상</dt><dd>${detail.target}</dd></div><div><dt>주요 안건</dt><dd>${detail.agenda}</dd></div></dl>
-      <div class="document-links"><button type="button" data-demo-action="document">📄 사전 설명자료 <span>작성 중</span></button><button type="button" data-demo-action="document">🗒️ 참석부 <span>자동 생성</span></button><button type="button" data-demo-action="document">✍️ 회의 결과 확인 <span>회의 후</span></button></div>`;
+  function renderMeetingDetail(id) {
+    const available = meetings.filter(matchesVillage);
+    const meeting = available.find((item) => item.id === id) || available[0];
+    activeMeetingId = meeting?.id || null;
+    $$('.meeting-item').forEach((button) => button.classList.toggle('active', button.dataset.meetingId === activeMeetingId));
+    if (!meeting) {
+      $('#meetingDetail').innerHTML = '<div class="empty-state">표시할 회의가 없습니다.</div>';
+      return;
+    }
+    const percent = meeting.signers ? Math.round((meeting.signed / meeting.signers) * 100) : 0;
+    $('#meetingDetail').innerHTML = `<div class="panel-heading"><div><span class="panel-kicker">${villages[meeting.village].name}</span><h2>${meeting.title}</h2></div>${statusBadge(meeting.state)}</div>
+      <dl class="detail-list"><div><dt>회의 구분</dt><dd>${meeting.type}</dd></div><div><dt>일시·장소</dt><dd>${meeting.date} · ${meeting.place}</dd></div><div><dt>참석 대상</dt><dd>${meeting.target}</dd></div><div><dt>주요 안건</dt><dd>${meeting.agenda}</dd></div></dl>
+      <div class="signature-box"><div><strong>의사록 전자서명</strong><span>회의 종료 후 지정된 서명자에게 요청합니다.</span></div><div class="signature-progress"><b>${meeting.signed}/${meeting.signers}명</b><div><i style="width:${percent}%"></i></div></div></div>`;
   }
 
-  function updateQuestionProgress() {
-    const checks = $$('.question-list input[type="checkbox"]');
-    const count = checks.filter((check) => check.checked).length;
-    $('#questionProgressBar').style.width = `${(count / checks.length) * 100}%`;
-    $('#questionProgressText').textContent = `${count} / ${checks.length} 확인`;
-    try { localStorage.setItem('sun-village-demo-questions', JSON.stringify(checks.map((check) => check.checked))); } catch (_) {}
+  function renderGovernance() {
+    const rows = meetings.filter(matchesVillage);
+    $('#meetingCount').textContent = `${rows.length}건`;
+    $('#meetingList').innerHTML = rows.length ? rows.map((meeting) => `<button type="button" class="meeting-item ${meeting.id === activeMeetingId ? 'active' : ''}" data-meeting-id="${meeting.id}"><time datetime="${meeting.date}"><strong>${meeting.day}</strong><span>${meeting.month}</span></time><div><span class="meeting-type ${meeting.type === '총회' ? 'general' : ''}">${meeting.type}</span><h3>${meeting.title}</h3><p>${villages[meeting.village].short} · ${meeting.place}</p></div><span>›</span></button>`).join('') : '<div class="empty-state">표시할 회의가 없습니다.</div>';
+    renderMeetingDetail(activeMeetingId);
+    const docs = documents.filter(matchesVillage);
+    $('#documentRows').innerHTML = docs.length ? docs.map((doc) => `<tr><td>${villages[doc.village].short}</td><td><strong>${doc.title}</strong></td><td>${doc.date}</td><td>${doc.signature}</td><td>${statusBadge(doc.status)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty-state">표시할 의사록이 없습니다.</td></tr>';
   }
 
-  function restoreQuestions() {
-    try {
-      const saved = JSON.parse(localStorage.getItem('sun-village-demo-questions') || '[]');
-      $$('.question-list input[type="checkbox"]').forEach((check, index) => { check.checked = Boolean(saved[index]); });
-    } catch (_) {}
-    updateQuestionProgress();
+  function renderAll() {
+    renderDashboard();
+    renderMembers();
+    renderAccounting();
+    renderApprovals();
+    renderGovernance();
   }
 
-  function openQuestions() {
-    const dialog = $('#questionsDialog');
-    if (dialog?.showModal) dialog.showModal();
+  function setVillage(key, notify = true) {
+    selectedVillage = key === 'all' || villages[key] ? key : 'all';
+    $('#villageSelect').value = selectedVillage;
+    activeMeetingId = null;
+    renderAll();
+    if (notify) showToast(selectedVillage === 'all' ? '전체 마을 자료를 함께 봅니다.' : `${villages[selectedVillage].name} 자료만 표시합니다.`);
   }
 
   function bindEvents() {
     $$('[data-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
     $$('[data-view-link]').forEach((link) => link.addEventListener('click', (event) => { event.preventDefault(); setView(link.dataset.viewLink); }));
     $$('[data-theme-mode]').forEach((button) => button.addEventListener('click', () => applyTheme(button.dataset.themeMode)));
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (document.documentElement.dataset.themeMode === 'auto') applyTheme('auto');
-    });
-    $('#openQuestions')?.addEventListener('click', openQuestions);
-    $('#openQuestionsSecondary')?.addEventListener('click', openQuestions);
-    $$('.question-list input[type="checkbox"]').forEach((check) => check.addEventListener('change', updateQuestionProgress));
-    $('#residentSearch')?.addEventListener('input', renderResidents);
-    $$('[data-consent-filter]').forEach((button) => button.addEventListener('click', () => {
-      consentFilter = button.dataset.consentFilter;
-      $$('[data-consent-filter]').forEach((chip) => chip.classList.toggle('active', chip === button));
-      renderResidents();
+    $('#villageSelect').addEventListener('change', (event) => setVillage(event.target.value));
+    $('#memberSearch').addEventListener('input', renderMembers);
+    $$('[data-member-filter]').forEach((button) => button.addEventListener('click', () => {
+      memberFilter = button.dataset.memberFilter;
+      $$('[data-member-filter]').forEach((chip) => chip.classList.toggle('active', chip === button));
+      renderMembers();
     }));
-    $$('[data-ratio]').forEach((field) => field.addEventListener('input', updateRatios));
-    $$('[data-ratio-preset]').forEach((button) => button.addEventListener('click', () => {
-      const [personal, welfare, reserve] = button.dataset.ratioPreset.split(',');
-      $('[data-ratio="personal"]').value = personal;
-      $('[data-ratio="welfare"]').value = welfare;
-      $('[data-ratio="reserve"]').value = reserve;
-      updateRatios();
-    }));
-    $$('.meeting-item').forEach((button) => button.addEventListener('click', () => renderMeeting(button.dataset.meeting)));
     document.addEventListener('click', (event) => {
+      const villageButton = event.target.closest('[data-select-village]');
+      if (villageButton) setVillage(villageButton.dataset.selectVillage);
+      const meetingButton = event.target.closest('[data-meeting-id]');
+      if (meetingButton) renderMeetingDetail(meetingButton.dataset.meetingId);
       const demoAction = event.target.closest('[data-demo-action]');
       if (!demoAction) return;
       const messages = {
-        'add-resident': '실제 구축 시 주민 등록·엑셀 불러오기·중복 확인 흐름을 연결합니다.',
-        'add-site': '실제 구축 시 부지 계약·도면·인허가 문서를 함께 등록합니다.',
-        'new-meeting': '실제 구축 시 참석 대상과 정족수, 자료·전자서명을 함께 설정합니다.',
-        'document': '회의 자리에서 필요한 문서 형식과 공개 범위를 확인할 예정입니다.',
-        'documents': '이 화면의 문서는 기존 ERP 문서함·전자서명 기능에서 그대로 관리합니다.',
-        'public-doc': '주민에게 공개할 자료와 조합 내부 원본을 분리하는 예시입니다.',
-        'public-question': '문의·이의신청 접수 방식은 현장에서 실제 운영 흐름을 확인합니다.'
+        'new-member': '실제 도입 시 가입 신청·출자금 확인·승인 순서로 구성원을 등록합니다.',
+        'new-journal': '실제 도입 시 통장 거래를 불러오거나 차변·대변 전표를 직접 입력합니다.',
+        'new-approval': '실제 도입 시 지출결의·계약·일반결재 양식 중 하나를 선택합니다.',
+        'new-meeting': '실제 도입 시 참석 대상·안건·서명자를 지정해 회의를 등록합니다.'
       };
-      showToast(messages[demoAction.dataset.demoAction] || '시연용 버튼입니다. 현장 의견을 반영해 실제 기능 범위를 정합니다.');
+      showToast(messages[demoAction.dataset.demoAction] || '시연용 기능입니다. 실제 도입 범위는 운영협동조합과 협의해 정합니다.');
     });
     window.addEventListener('hashchange', () => setView(location.hash.slice(1), { skipHistory: true, instant: true }));
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (document.documentElement.dataset.themeMode === 'auto') applyTheme('auto');
+    });
   }
 
   function init() {
     let savedTheme = 'auto';
-    try { savedTheme = localStorage.getItem('sun-village-demo-theme') || 'auto'; } catch (_) {}
+    try { savedTheme = localStorage.getItem('sun-village-lite-theme') || 'auto'; } catch (_) {}
     applyTheme(savedTheme);
-    renderResidents();
-    updateRatios();
-    restoreQuestions();
     bindEvents();
+    setVillage('all', false);
     const initial = location.hash.slice(1);
     setView(views.has(initial) ? initial : 'dashboard', { skipHistory: true, instant: true });
   }
