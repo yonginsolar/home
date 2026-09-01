@@ -24,7 +24,17 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const views = new Set(['dashboard', 'residents', 'plant', 'finance', 'governance', 'disclosure']);
+  const views = new Set([
+    'dashboard',
+    'residents',
+    'plant',
+    'finance',
+    'erp-members',
+    'erp-accounting',
+    'erp-activities',
+    'governance',
+    'disclosure'
+  ]);
   let activeView = 'dashboard';
   let toastTimer = null;
   let consentFilter = 'all';
@@ -210,9 +220,6 @@
       const demoAction = event.target.closest('[data-demo-action]');
       if (!demoAction) return;
       const messages = {
-        'erp-members': '조합원·임원·대의원 명부는 기존 ERP를 그대로 쓰고, 마을 주민·세대 정보와 필요한 대상만 연결합니다.',
-        'erp-accounting': '수입·비용·지출결의·전자결재·결산은 기존 ERP에서 처리하고, 확정된 배분 결과만 마을 전용 화면과 연결합니다.',
-        'erp-activities': '교육·행사·선거·참여 현황은 기존 ERP 공통 기능을 그대로 사용합니다.',
         'add-resident': '실제 구축 시 주민 등록·엑셀 불러오기·중복 확인 흐름을 연결합니다.',
         'add-site': '실제 구축 시 부지 계약·도면·인허가 문서를 함께 등록합니다.',
         'new-meeting': '실제 구축 시 참석 대상과 정족수, 자료·전자서명을 함께 설정합니다.',
