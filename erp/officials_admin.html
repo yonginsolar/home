@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.19 -->
+<!-- Version: v1.0.20 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.19 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.20 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -305,7 +305,7 @@
           </div>
         </div>
       </div>
-      <div class="helper mt-2">종료일이 비어 있으면 시작일 기준 2년으로 자동 계산합니다.</div>
+      <div class="helper mt-2">종료일이 비어 있으면 2년 뒤 같은 날짜의 전날로 자동 계산합니다. 해당 날짜가 없으면 그 달 말일을 적용합니다.</div>
       <div class="modal-footer px-0 pb-0 mt-3">
         <button class="btn btn-outline-secondary" type="button" onclick="resetOfficialForm()">초기화</button>
         <button class="btn btn-primary" type="button" onclick="saveOfficial()">등록</button>
@@ -394,7 +394,7 @@
       <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
         <button type="button" class="btn btn-outline-primary btn-sm" id="previewElectionImportBtn" onclick="previewElectionImport()">미리보기</button>
         <button type="button" class="btn btn-primary btn-sm" id="saveElectionImportBtn" onclick="saveElectionImport()" disabled>불러와 저장</button>
-        <div class="helper">저장 직책은 한 번에 하나로 적용됩니다. 임기 종료일이 비어 있으면 시작일 기준 2년으로 자동 계산합니다.</div>
+        <div class="helper">저장 직책은 한 번에 하나로 적용됩니다. 임기 종료일이 비어 있으면 2년 뒤 같은 날짜의 전날로 자동 계산합니다. 해당 날짜가 없으면 그 달 말일을 적용합니다.</div>
       </div>
       <div class="form-check mb-3 d-none" id="importRegisteredWrap">
         <input class="form-check-input" type="checkbox" id="importIsRegistered">
@@ -1485,12 +1485,20 @@
 
     function computeAutoTermEndDate(termStartDate) {
       const raw = String(termStartDate || '').trim();
-      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(raw)) return '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
       const [year, month, day] = raw.split('-').map((v) => Number(v));
+      const startMonthLastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > startMonthLastDay) return '';
+
       const endYear = year + 2;
       const lastDay = new Date(Date.UTC(endYear, month, 0)).getUTCDate();
-      const endDay = Math.min(day, lastDay);
-      return `${endYear}-${String(month).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+      if (day > lastDay) {
+        return `${endYear}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      }
+
+      const anniversary = new Date(Date.UTC(endYear, month - 1, day));
+      anniversary.setUTCDate(anniversary.getUTCDate() - 1);
+      return anniversary.toISOString().slice(0, 10);
     }
 
     function escapeHtml(value) {

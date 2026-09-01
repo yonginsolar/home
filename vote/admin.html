@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.53
+Version: v1.0.54
 Change: Fix tenant-scoped Supabase read chains and replace indefinite dashboard loading with retry guidance.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: Fix tenant-scoped Supabase read chains and replace indefinite dashboard 
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.53 | admin.html');</script>
+    <script>console.log('[Version] v1.0.54 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -1832,12 +1832,18 @@ function safeUrl(value) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
 
         const [year, month, day] = raw.split('-').map((v) => Number(v));
+        const startMonthLastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > startMonthLastDay) return '';
+
         const endYear = year + 2;
         const lastDay = new Date(Date.UTC(endYear, month, 0)).getUTCDate();
-        const endDay = Math.min(day, lastDay);
-        const mm = String(month).padStart(2, '0');
-        const dd = String(endDay).padStart(2, '0');
-        return `${endYear}-${mm}-${dd}`;
+        if (day > lastDay) {
+            return `${endYear}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        }
+
+        const anniversary = new Date(Date.UTC(endYear, month - 1, day));
+        anniversary.setUTCDate(anniversary.getUTCDate() - 1);
+        return anniversary.toISOString().slice(0, 10);
     }
 
     function applyAutoOfficialTermEndDate({ force = false } = {}) {
@@ -1897,7 +1903,7 @@ function safeUrl(value) {
                     </div>
                 </div>
                 <div style="margin-bottom:10px; padding:8px; border:1px solid #dbeafe; border-radius:6px; background:#eff6ff; color:#1e3a8a; font-size:0.82rem;">
-                    정관 제29조에 의거하여, 임기 종료일 미입력 시 시작일 기준 2년으로 자동 계산됩니다.
+                    임기 종료일을 비우면 2년 뒤 같은 날짜의 전날로 자동 계산됩니다. 해당 날짜가 없으면 그 달 말일을 적용합니다.
                 </div>
                 <div id="official-save-error" style="margin-bottom:10px;"></div>
                 <div style="max-height:320px; overflow:auto; border:1px solid #e5e7eb; border-radius:8px;">
@@ -2018,7 +2024,7 @@ function safeUrl(value) {
                         await service.logAction(
                             currentElectionId,
                             'ELECTED_OFFICIALS_SAVE',
-                            `당선자 저장: 대상 ${saveResult.targetCount}명, 신규 ${saveResult.insertedCount}명, 기존 ${saveResult.skippedCount}명, 임기 ${termStartDate}~${termEndDate} (정관 제29조 기준, 작업자: ${currentUserEmail})`
+                            `당선자 저장: 대상 ${saveResult.targetCount}명, 신규 ${saveResult.insertedCount}명, 기존 ${saveResult.skippedCount}명, 임기 ${termStartDate}~${termEndDate} (2년 임기 종료일 자동 계산, 작업자: ${currentUserEmail})`
                         );
 
                         window.closeModal();
