@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.1.0 | Change: 2026-09-01 - Present the demo as a village extension attached to the cooperative ERP. -->
+<!-- Version: v1.1.1 | Change: 2026-09-01 - Stop endless permission loading with a timeout, clear error, and retry action. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -33,7 +33,9 @@
     .boot-card p { margin: 10px 0 0; color: var(--muted); line-height: 1.65; }
     .spinner { width: 28px; height: 28px; margin: 20px auto 0; border: 3px solid #dbe9de; border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
     .boot-error { margin-top: 18px; padding: 13px; border-radius: 13px; background: #fff2f2; color: #a12f36; line-height: 1.55; }
-    .boot-link { display: inline-flex; min-height: 42px; margin-top: 16px; padding: 0 15px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 11px; color: var(--green); background: var(--surface); font-weight: 800; text-decoration: none; }
+    .boot-actions { display: flex; margin-top: 16px; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .boot-link, .boot-retry { display: inline-flex; min-height: 42px; padding: 0 15px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 11px; color: var(--green); background: var(--surface); font-weight: 800; text-decoration: none; cursor: pointer; }
+    .boot-retry { border-color: var(--green); background: var(--green); color: #fff; }
     .demo-shell { display: none; min-height: 100vh; grid-template-rows: auto minmax(0, 1fr); }
     .demo-shell.ready { display: grid; }
     .erp-demo-bar { display: flex; min-height: 58px; padding: 9px 16px; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
@@ -62,7 +64,10 @@
       <p id="bootMessage">ERP 로그인과 관리자 권한을 확인하고 있습니다.</p>
       <div class="spinner" id="bootSpinner" aria-label="확인 중"></div>
       <div class="boot-error" id="bootError" hidden></div>
-      <a class="boot-link" id="bootBackLink" href="index.html" hidden>← ERP 메인</a>
+      <div class="boot-actions" id="bootActions" hidden>
+        <button class="boot-retry" id="bootRetry" type="button">다시 확인</button>
+        <a class="boot-link" id="bootBackLink" href="index.html">← ERP 메인</a>
+      </div>
     </div>
   </section>
 
@@ -80,16 +85,10 @@
   <script>
   (() => {
     'use strict';
-    const VERSION = '1.1.0';
+    const VERSION = '1.1.1';
+    const REQUEST_TIMEOUT_MS = 12000;
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
-    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-      global: {
-        headers: {
-          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase()
-        }
-      }
-    });
 
     const bootPanel = document.getElementById('bootPanel');
     const demoShell = document.getElementById('demoShell');
@@ -97,7 +96,57 @@
     const bootMessage = document.getElementById('bootMessage');
     const bootSpinner = document.getElementById('bootSpinner');
     const bootError = document.getElementById('bootError');
-    const bootBackLink = document.getElementById('bootBackLink');
+    const bootActions = document.getElementById('bootActions');
+    const bootRetry = document.getElementById('bootRetry');
+    let client = null;
+    let bootInFlight = false;
+    let bootAttempt = 0;
+
+    function getClient() {
+      if (client) return client;
+      if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+        const error = new Error('SUPABASE_LIBRARY_UNAVAILABLE');
+        error.code = 'SUPABASE_LIBRARY_UNAVAILABLE';
+        throw error;
+      }
+      client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        global: {
+          headers: {
+            'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase()
+          }
+        }
+      });
+      return client;
+    }
+
+    async function withTimeout(task, label) {
+      let timer = null;
+      try {
+        return await Promise.race([
+          Promise.resolve(task),
+          new Promise((_, reject) => {
+            timer = window.setTimeout(() => {
+              const error = new Error(`${label || 'REQUEST'}_TIMEOUT`);
+              error.code = 'ERP_DEMO_REQUEST_TIMEOUT';
+              reject(error);
+            }, REQUEST_TIMEOUT_MS);
+          })
+        ]);
+      } finally {
+        if (timer) window.clearTimeout(timer);
+      }
+    }
+
+    function resetBootUi(message) {
+      bootPanel.hidden = false;
+      demoShell.classList.remove('ready');
+      bootMessage.textContent = String(message || 'ERP 로그인과 관리자 권한을 확인하고 있습니다.');
+      bootSpinner.hidden = false;
+      bootError.hidden = true;
+      bootError.textContent = '';
+      bootActions.hidden = true;
+      bootRetry.disabled = false;
+    }
 
     function isAdminFallback(user) {
       const role = String(user?.role || '').trim().toLowerCase();
@@ -129,28 +178,46 @@
     }
 
     function showError(message) {
+      bootPanel.hidden = false;
+      demoShell.classList.remove('ready');
       bootMessage.textContent = '데모를 열지 못했습니다.';
       bootSpinner.hidden = true;
       bootError.textContent = String(message || '권한을 확인한 뒤 다시 시도해 주세요.');
       bootError.hidden = false;
-      bootBackLink.hidden = false;
+      bootActions.hidden = false;
     }
 
     async function boot() {
+      if (bootInFlight) return;
+      bootInFlight = true;
+      const attempt = ++bootAttempt;
+      resetBootUi();
       try {
-        const userGate = await window.ErpRuntimeGuard.requireUser(client, {
+        if (!window.ErpRuntimeGuard || typeof window.ErpRuntimeGuard.requireUser !== 'function') {
+          const error = new Error('ERP_RUNTIME_GUARD_UNAVAILABLE');
+          error.code = 'ERP_RUNTIME_GUARD_UNAVAILABLE';
+          throw error;
+        }
+        const supabaseClient = getClient();
+        bootMessage.textContent = 'ERP 로그인 상태를 확인하고 있습니다.';
+        const userGate = await withTimeout(window.ErpRuntimeGuard.requireUser(supabaseClient, {
           alertFn: showError,
           redirectUrl: 'index.html'
-        });
+        }), 'LOGIN_CHECK');
+        if (attempt !== bootAttempt) return;
         if (!userGate.ok) return;
-        const runtimeGate = await window.ErpRuntimeGuard.enforce(client, {
+        bootMessage.textContent = '조합과 사용 가능한 기능을 확인하고 있습니다.';
+        const runtimeGate = await withTimeout(window.ErpRuntimeGuard.enforce(supabaseClient, {
           moduleKey: 'site_admin',
           moduleLabel: '햇빛소득마을 데모',
           alertFn: showError,
           redirectUrl: 'index.html'
-        });
+        }), 'RUNTIME_CHECK');
+        if (attempt !== bootAttempt) return;
         if (!runtimeGate.ok) return;
-        const permission = await loadSiteAdminPermission(userGate.user);
+        bootMessage.textContent = '이 데모를 볼 수 있는 권한인지 확인하고 있습니다.';
+        const permission = await withTimeout(loadSiteAdminPermission(userGate.user), 'PERMISSION_CHECK');
+        if (attempt !== bootAttempt) return;
         if (!permission.hasSiteAdmin && !(permission.isLegacyEmpty && isAdminFallback(userGate.user))) {
           showError('홈페이지 관리 권한이 있는 ERP 관리자만 이 데모를 열 수 있습니다.');
           return;
@@ -160,10 +227,21 @@
         demoShell.classList.add('ready');
       } catch (error) {
         console.error(`[sun-income-village-demo ${VERSION}] boot failed`, error);
-        showError('로그인 또는 관리자 권한을 확인하지 못했습니다. ERP 메인에서 다시 열어 주세요.');
+        if (error?.code === 'ERP_DEMO_REQUEST_TIMEOUT') {
+          showError('권한 확인 응답이 12초 안에 오지 않았습니다.\n인터넷 연결을 확인한 뒤 다시 확인해 주세요.');
+        } else if (error?.code === 'SUPABASE_LIBRARY_UNAVAILABLE') {
+          showError('로그인 확인 프로그램을 불러오지 못했습니다.\n콘텐츠 차단 기능이나 인터넷 연결을 확인한 뒤 다시 확인해 주세요.');
+        } else if (error?.code === 'ERP_RUNTIME_GUARD_UNAVAILABLE') {
+          showError('ERP 권한 확인 프로그램을 불러오지 못했습니다.\n페이지를 새로고침하거나 다시 확인해 주세요.');
+        } else {
+          showError('로그인 또는 관리자 권한을 확인하지 못했습니다. ERP 메인에서 다시 열어 주세요.');
+        }
+      } finally {
+        if (attempt === bootAttempt) bootInFlight = false;
       }
     }
 
+    bootRetry.addEventListener('click', boot);
     boot();
   })();
   </script>
