@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.102 | Change: 2026-09-01 - Clarify that withholding journals start on the planned actual payment date. -->
+<!-- Version: v1.0.103 | Change: 2026-09-01 - Render approval descriptions as plain text and group recent journals into debit/credit ledger cards. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.102 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.103 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -46,6 +46,18 @@
     .btn-report { width: 100%; font-weight: bold; border-radius: 10px; }
 	    .readonly-input { background-color: #f8f9fa; cursor: pointer; }
 	    .history-mode .btn { min-width: 94px; }
+        .history-plain-description { white-space: pre-line; overflow-wrap: anywhere; }
+        .history-ledger-entry { padding: 0; overflow: hidden; }
+        .history-ledger-head { padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+        .history-ledger-table { min-width: 620px; table-layout: fixed; }
+        .history-ledger-table th,
+        .history-ledger-table td { padding: 8px 10px; border-color: #e2e8f0; }
+        .history-ledger-table .history-ledger-side { text-align: center; font-weight: 800; letter-spacing: 0.04em; }
+        .history-ledger-table .history-ledger-side-debit { background: #eff6ff !important; color: #1d4ed8; }
+        .history-ledger-table .history-ledger-side-credit { background: #fff1f2 !important; color: #be123c; }
+        .history-ledger-table .history-ledger-account { width: 31%; }
+        .history-ledger-table .history-ledger-amount { width: 19%; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .history-ledger-table tfoot td { background: #f8fafc; font-weight: 800; border-top: 2px solid #94a3b8; }
 
     /* 리포트 스타일 */
     #reportContent { font-family: "Malgun Gothic", serif; font-size: 12px; }
@@ -8268,7 +8280,8 @@ function loadHistory() {
     updateHistoryViewButtons();
     el.innerHTML = "로딩 중...";
     if (metaEl) metaEl.textContent = '';
-    const rowLimit = historyViewMode === 'single' ? 140 : 20;
+    // 복식 원장은 원시 분개를 거래별로 묶은 뒤 최근 20건을 보여주므로 충분한 행을 먼저 읽는다.
+    const rowLimit = 160;
     _supabase
         .from('ac_journal')
         .select('*')
@@ -8316,8 +8329,35 @@ function cleanTagPrefix(text) {
         .trim();
 }
 
+function accountingHistoryToPlainText(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    // 전자결재 리치 텍스트의 구조는 줄바꿈과 목록 기호만 남기고 실행 가능한 마크업은 버린다.
+    const lineAware = raw
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+        .replace(/<\s*br\b[^>]*>/gi, '\n')
+        .replace(/<\s*li\b[^>]*>/gi, '• ')
+        .replace(/<\s*\/\s*(?:p|div|li|ol|ul|h[1-6]|tr)\s*>/gi, '\n')
+        .replace(/<\/?[a-z][^>]*>/gi, ' ')
+        .replace(/<![^>]*>/g, ' ');
+    const decoder = document.createElement('textarea');
+    decoder.innerHTML = lineAware;
+    return String(decoder.value || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/ *\n */g, '\n')
+        .replace(/\n{2,}/g, '\n')
+        .trim();
+}
+
+function cleanHistoryDescription(value) {
+    return cleanTagPrefix(accountingHistoryToPlainText(value));
+}
+
 function inferCashbookLabel(description, flow) {
-    const raw = String(description || '').trim();
+    const raw = accountingHistoryToPlainText(description);
     if (!raw) {
         return flow === '입금' ? '입금' : (flow === '지출' ? '지출' : '대체');
     }
@@ -8384,7 +8424,9 @@ function buildSingleEntryHistory(rows) {
         const inAmount = cashDelta > 0 ? cashDelta : 0;
         const outAmount = cashDelta < 0 ? Math.abs(cashDelta) : 0;
         const transferAmount = flow === '대체' ? amount : 0;
-        const label = inferCashbookLabel(desc, flow);
+        const label = group.transId && group.transId.startsWith('APR-')
+            ? (flow === '지출' ? '전자결재 지출' : '전자결재')
+            : inferCashbookLabel(desc, flow);
         list.push({
             id: group.id,
             transId: group.transId,
@@ -8436,7 +8478,7 @@ function renderHistorySingle(rows) {
             approvalDocId,
             'btn btn-link p-0 text-start fw-bold text-decoration-none align-baseline'
         );
-        const descText = escapeHtml(cleanTagPrefix(item.desc || ''));
+        const descText = escapeHtml(cleanHistoryDescription(item.desc || ''));
         const operatorText = escapeHtml(item.operator);
         const transText = item.transId ? ` · ${escapeHtml(item.transId)}` : '';
         const inAmountText = item.inAmount > 0 ? `${Number(item.inAmount).toLocaleString()}원` : '-';
@@ -8451,7 +8493,7 @@ function renderHistorySingle(rows) {
                     <div class="flex-grow-1">
                         <div class="fw-bold mb-1">${labelText}</div>
                         <div class="small text-muted">${dateText} · ${operatorText}${transText}</div>
-                        ${descText ? `<div class="small text-muted mt-1">${descText}</div>` : ''}
+                        ${descText ? `<div class="small text-muted mt-1 history-plain-description">${descText}</div>` : ''}
                     </div>
                     <div class="text-end">
                         <div class="small text-primary">들어옴: <b>${inAmountText}</b></div>
@@ -8469,42 +8511,158 @@ function renderHistorySingle(rows) {
     if (metaEl) metaEl.textContent = `단식 ${items.length}건 · 들어옴 ${totalIn.toLocaleString()}원 · 나감 ${totalOut.toLocaleString()}원 · 대체 ${totalTransfer.toLocaleString()}원`;
 }
 
+function buildDoubleEntryHistory(rows) {
+    const grouped = new Map();
+    (rows || []).forEach((row, index) => {
+        const transId = row?.Trans_ID ? String(row.Trans_ID).trim() : '';
+        const legacyKey = [row?.Date, row?.Description, row?.Project, row?.Operator]
+            .map((value) => String(value || '').trim())
+            .join('|');
+        const key = transId ? `T:${transId}` : `L:${legacyKey || index}`;
+        if (!grouped.has(key)) {
+            grouped.set(key, {
+                id: row?.id || '',
+                transId,
+                rows: [],
+                sortIndex: index
+            });
+        }
+        grouped.get(key).rows.push(row);
+    });
+
+    const items = Array.from(grouped.values()).map((group) => {
+        const cashRow = group.rows.find((row) => isCashLikeAccount(row?.Account));
+        const representative = cashRow || group.rows[0] || {};
+        const debits = [];
+        const credits = [];
+        let debitTotal = 0;
+        let creditTotal = 0;
+
+        group.rows.forEach((row) => {
+            const debit = Number(row?.Debit || 0);
+            const credit = Number(row?.Credit || 0);
+            const base = {
+                type: String(row?.Type || '').trim(),
+                account: String(row?.Account || '계정 없음').trim() || '계정 없음'
+            };
+            if (debit !== 0) {
+                debits.push({ ...base, amount: debit });
+                debitTotal += debit;
+            }
+            if (credit !== 0) {
+                credits.push({ ...base, amount: credit });
+                creditTotal += credit;
+            }
+        });
+
+        return {
+            id: group.id,
+            transId: group.transId,
+            date: String(representative.Date || ''),
+            description: cleanHistoryDescription(representative.Description || ''),
+            operator: String(representative.Operator || '작성자 미상'),
+            debits,
+            credits,
+            debitTotal,
+            creditTotal,
+            rowCount: group.rows.length,
+            sortIndex: group.sortIndex
+        };
+    });
+
+    items.sort((a, b) => {
+        if (a.date === b.date) return a.sortIndex - b.sortIndex;
+        return a.date < b.date ? 1 : -1;
+    });
+    return items;
+}
+
 function renderHistoryDouble(rows) {
     const el = document.getElementById("historyList");
     const metaEl = document.getElementById("historyMeta");
+    const items = buildDoubleEntryHistory(rows).slice(0, 20);
     el.innerHTML = "";
-    if (!rows || rows.length === 0) {
+    if (items.length === 0) {
         el.innerHTML = `<div class="list-group-item text-muted small">표시할 전표가 없습니다.</div>`;
-        if (metaEl) metaEl.textContent = '복식 0행';
+        if (metaEl) metaEl.textContent = '복식 0건';
         return;
     }
-    rows.forEach((item) => {
-        const amt = Number(item.Debit || 0) + Number(item.Credit || 0);
-        const safeType = escapeHtml(item.Type);
-        const safeAccount = escapeHtml(item.Account);
-        const safeDesc = escapeHtml(item.Description);
-        const safeDate = escapeHtml(item.Date);
-        const transId = item.Trans_ID ? String(item.Trans_ID) : "";
-        const approvalDocId = parseApprovalDocIdFromTransId(transId);
-        const safeTransId = escapeHtml(transId);
+
+    items.forEach((item) => {
+        const safeDate = escapeHtml(item.date || '-');
+        const safeDesc = escapeHtml(item.description || '일반 전표');
+        const safeOperator = escapeHtml(item.operator);
+        const safeTransId = escapeHtml(item.transId || '');
+        const approvalDocId = parseApprovalDocIdFromTransId(item.transId);
+        const titleHtml = approvalDocId
+            ? buildApprovalDocTitleButtonHtml(
+                `전자결재 문서 #${approvalDocId}`,
+                approvalDocId,
+                'btn btn-link p-0 text-start fw-bold text-decoration-none align-baseline'
+            )
+            : `<span class="fw-bold">${safeDesc}</span>`;
+        const detailHtml = approvalDocId && item.description
+            ? `<div class="small text-muted mt-1 history-plain-description">${safeDesc}</div>`
+            : '';
+        const maxLines = Math.max(item.debits.length, item.credits.length, 1);
+        const ledgerRows = [];
+        for (let index = 0; index < maxLines; index += 1) {
+            const debit = item.debits[index];
+            const credit = item.credits[index];
+            ledgerRows.push(`
+                <tr>
+                    <td class="history-ledger-account">${debit ? `<b>${escapeHtml(debit.account)}</b><div class="small text-muted">${escapeHtml(debit.type)}</div>` : ''}</td>
+                    <td class="history-ledger-amount">${debit ? `${Number(debit.amount).toLocaleString()}원` : ''}</td>
+                    <td class="history-ledger-account">${credit ? `<b>${escapeHtml(credit.account)}</b><div class="small text-muted">${escapeHtml(credit.type)}</div>` : ''}</td>
+                    <td class="history-ledger-amount">${credit ? `${Number(credit.amount).toLocaleString()}원` : ''}</td>
+                </tr>
+            `);
+        }
+        const balanced = Math.abs(item.debitTotal - item.creditTotal) < 0.5;
+        const balanceBadge = balanced
+            ? '<span class="badge text-bg-success">차대 일치</span>'
+            : '<span class="badge text-bg-warning">차대 확인</span>';
         const idAttr = escapeHtml(item.id || '');
-        const transAttr = safeTransId;
-        const descHtml = approvalDocId
-            ? buildApprovalDocTitleButtonHtml(item.Description || '전자결재 문서', approvalDocId)
-            : `<small>${safeDesc}</small>`;
+        const deleteButton = item.transId || item.id
+            ? `<button class="btn btn-sm btn-outline-danger" data-id="${idAttr}" data-trans-id="${safeTransId}" onclick="deleteTxByButton(this)">전표 삭제</button>`
+            : '';
+
         el.innerHTML += `
-            <div class="list-group-item d-flex justify-content-between">
-                <div>
-                    <small class="text-muted me-2">${safeDate}</small>
-                    <span class="badge bg-secondary me-1">${safeType}</span>
-                    <b>${safeAccount}</b> ${descHtml}
-                    ${safeTransId ? `<small class="text-muted ms-1">(${safeTransId})</small>` : ''}
+            <div class="list-group-item history-ledger-entry mb-3 rounded border">
+                <div class="history-ledger-head d-flex justify-content-between align-items-start gap-3">
+                    <div class="flex-grow-1">
+                        <div>${titleHtml}</div>
+                        <div class="small text-muted mt-1">${safeDate} · ${safeOperator}${safeTransId ? ` · ${safeTransId}` : ''} · 분개 ${item.rowCount}행</div>
+                        ${detailHtml}
+                    </div>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">${balanceBadge}${deleteButton}</div>
                 </div>
-                <div class="fw-bold">${amt.toLocaleString()} <span class="text-danger cursor-pointer" data-id="${idAttr}" data-trans-id="${transAttr}" onclick="deleteTxByButton(this)">×</span></div>
+                <div class="table-responsive">
+                    <table class="table table-sm history-ledger-table mb-0" aria-label="${safeDate} 복식 전표">
+                        <thead>
+                            <tr>
+                                <th colspan="2" class="history-ledger-side history-ledger-side-debit">차변</th>
+                                <th colspan="2" class="history-ledger-side history-ledger-side-credit">대변</th>
+                            </tr>
+                            <tr>
+                                <th>계정과목</th><th class="text-end">금액</th>
+                                <th>계정과목</th><th class="text-end">금액</th>
+                            </tr>
+                        </thead>
+                        <tbody>${ledgerRows.join('')}</tbody>
+                        <tfoot>
+                            <tr>
+                                <td>차변 합계</td><td class="history-ledger-amount">${Number(item.debitTotal).toLocaleString()}원</td>
+                                <td>대변 합계</td><td class="history-ledger-amount">${Number(item.creditTotal).toLocaleString()}원</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
             </div>
         `;
     });
-    if (metaEl) metaEl.textContent = `복식 ${rows.length}행`;
+    const displayedRows = items.reduce((sum, item) => sum + Number(item.rowCount || 0), 0);
+    if (metaEl) metaEl.textContent = `복식 ${items.length}건 · 분개 ${displayedRows}행`;
 }
 
 async function deleteTx(id, transId) {
