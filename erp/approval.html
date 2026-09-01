@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.50 | Change: 2026-09-01 - Sync approved Durunuri support to the same payroll month. -->
+<!-- Version: v1.2.51 | Change: 2026-09-01 - Respect the jeongyeol setting and route the secretary general's leave directly to the chairperson. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.50 | approval.html');</script>
+  <script>console.log('[Version] v1.2.51 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1107,7 +1107,7 @@
         </div>
       </div>
 
-      <div class="mb-3">
+      <div class="mb-3 hidden" id="secretaryJeongyeolPanel">
         <label class="small text-muted fw-bold">전결 설정</label>
         <div class="card p-3 border-0 bg-light mb-2">
           <div class="form-check form-switch">
@@ -1380,8 +1380,9 @@ let manualJeongyeolToggleTouched = false;
 let jeongyeolLockReasonLabel = '';
 let approvalRuntimeProfile = 'legacy_full';
 let approvalCompanyInfo = {};
-let approvalSecretaryJeongyeolEnabled = true;
+let approvalSecretaryJeongyeolEnabled = false;
 let approvalSecretaryAttendanceEnabled = true;
+let approvalCompanyInfoRemoteConfirmed = false;
 let approvalLeaveTypeCatalog = null;
 let approvalDocRuleCatalog = {};
 let approvalLeaveSnapshotSupported = false;
@@ -3611,7 +3612,7 @@ function parseApprovalNumber(value, fallback = 0) {
 }
 
 function isApprovalJeongyeolFeatureEnabled() {
-    return approvalSecretaryJeongyeolEnabled === true;
+    return approvalCompanyInfoRemoteConfirmed && approvalSecretaryJeongyeolEnabled === true;
 }
 
 function isApprovalAttendanceJeongyeolEnabled() {
@@ -4511,7 +4512,7 @@ function applyApprovalRuntimeProfileUi() {
     const isLite = isApprovalWorkforceLiteProfile();
     const categoryEl = document.getElementById('appCategory');
     const historyTypeEl = document.getElementById('historyDocTypeFilter');
-    const jeongyeolCard = document.getElementById('chkSecretaryJeongyeol')?.closest('.mb-3');
+    const jeongyeolCard = document.getElementById('secretaryJeongyeolPanel');
     const monthlyPanel = document.getElementById('secretaryMonthlyReportPanel');
 
     renderApprovalCategoryOptions();
@@ -4528,7 +4529,7 @@ function applyApprovalRuntimeProfileUi() {
         jeongyeolCard.classList.toggle('hidden', !canShowJeongyeolCard);
     }
     if (monthlyPanel) {
-        monthlyPanel.classList.toggle('hidden', !isCurrentUserSecretaryGeneral() || (isLite && !isApprovalJeongyeolFeatureEnabled()));
+        monthlyPanel.classList.toggle('hidden', !isCurrentUserSecretaryGeneral() || !isApprovalJeongyeolFeatureEnabled());
     }
     syncApprovalLeaveInputMode();
 }
@@ -4536,6 +4537,7 @@ function applyApprovalRuntimeProfileUi() {
 async function loadApprovalCompanyInfo() {
     const schemaFeaturePromise = loadApprovalSchemaFeatures();
     const coopId = String(myInfo?.coop_id || '').trim();
+    approvalCompanyInfoRemoteConfirmed = false;
     const cachedCompanyInfo = readApprovalCompanyInfoCache(coopId);
     if (!coopId) {
         applyApprovalCompanyInfoState({});
@@ -4677,7 +4679,7 @@ function writeApprovalCompanyInfoCache(coopId, infoMap = {}) {
 
 function applyApprovalCompanyInfoState(infoMap = {}) {
     approvalCompanyInfo = { ...(infoMap || {}) };
-    approvalSecretaryJeongyeolEnabled = parseApprovalBoolean(approvalCompanyInfo['approval_secretary_jeongyeol_enabled'], true);
+    approvalSecretaryJeongyeolEnabled = parseApprovalBoolean(approvalCompanyInfo['approval_secretary_jeongyeol_enabled'], false);
     approvalSecretaryAttendanceEnabled = parseApprovalBoolean(approvalCompanyInfo['approval_secretary_attendance_enabled'], true);
     approvalDocRuleCatalog = parseApprovalDocRuleCatalog(approvalCompanyInfo[APPROVAL_DOC_RULE_CONFIG_KEY]);
     approvalOvertimePolicy = parseApprovalOvertimePolicy(approvalCompanyInfo[APPROVAL_OVERTIME_POLICY_KEY]);
@@ -4710,6 +4712,7 @@ async function refreshApprovalCompanyInfo(coopId) {
         }
         applyApprovalCompanyInfoState(nextInfo);
         writeApprovalCompanyInfoCache(coopId, nextInfo);
+        approvalCompanyInfoRemoteConfirmed = true;
         applyApprovalRuntimeProfileUi();
         return nextInfo;
     } catch (error) {
@@ -5833,6 +5836,11 @@ function buildDefaultApprovalLineTemplate() {
 
     const targetUser = getApprovalLineTargetEmpInfo();
     const targetEmpId = String(targetUser?.emp_id || '').trim();
+    if (currentType === '휴가' && isSecretaryGeneralUserInfo(targetUser)) {
+        const chairman = getChairmanApprover();
+        const chairmanEmpId = String(chairman?.emp_id || '').trim();
+        return chairmanEmpId && chairmanEmpId !== targetEmpId ? [chairman] : [];
+    }
     const configuredLine = buildConfiguredApprovalLineTemplate();
     const departmentLead = getDepartmentLeadApproverForTarget(targetUser);
     const fallbackExecutives = [
@@ -6038,7 +6046,7 @@ function applyJeongyeolLineDecision(decision, options = {}) {
 function updateJeongyeolUi() {
     const hintEl = document.getElementById('jeongyeolHint');
     const toggleEl = document.getElementById('chkSecretaryJeongyeol');
-    const jeongyeolCard = toggleEl?.closest('.mb-3');
+    const jeongyeolCard = document.getElementById('secretaryJeongyeolPanel');
     const mainType = getCurrentDraftMainType();
     const attendanceTargetType = isApprovalAttendanceJeongyeolTargetType(mainType);
     if (jeongyeolCard) {
@@ -11007,6 +11015,9 @@ function formatJeongyeolAmountLabel(doc) {
 }
 
 async function buildJeongyeolMonthlyDraft() {
+    if (!isApprovalJeongyeolFeatureEnabled()) {
+        return showAlert('현재 운영에서는 전결 기능을 사용하지 않습니다.');
+    }
     if (!isCurrentUserSecretaryGeneral()) {
         return showAlert('사무국장만 전결 월간보고를 만들 수 있습니다.');
     }
@@ -11434,7 +11445,7 @@ async function handleDraftSubmit(e) {
         if (!proposalTitle) return showAlert("일반품의 제목을 입력하세요.");
         title = getApprovalResolvedTitle(mainType, proposalTitle);
         subType = '일반품의';
-        if (proposalTitle.startsWith(`${JEONGYEOL_MONTHLY_TITLE_PREFIX} (`)) {
+        if (isApprovalJeongyeolFeatureEnabled() && proposalTitle.startsWith(`${JEONGYEOL_MONTHLY_TITLE_PREFIX} (`)) {
             subType = JEONGYEOL_MONTHLY_DOC_TYPE;
         }
     }
