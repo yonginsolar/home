@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.51 | Change: 2026-09-01 - Respect the jeongyeol setting and route the secretary general's leave directly to the chairperson. -->
+<!-- Version: v1.2.52 | Change: 2026-09-01 - Add payroll withholding filing/payment approval with national and local tax separation. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.51 | approval.html');</script>
+  <script>console.log('[Version] v1.2.52 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -134,6 +134,61 @@
       background: #fff5f5;
       color: #842029;
     }
+    .approval-withholding-panel {
+      border: 1px solid #d7e3f4;
+      border-radius: 14px;
+      background: #fff;
+      padding: 18px;
+    }
+    .approval-withholding-section {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      background: #f8fafc;
+      padding: 14px;
+    }
+    .approval-withholding-section + .approval-withholding-section { margin-top: 14px; }
+    .approval-withholding-section-title { color: #1e293b; font-weight: 700; margin-bottom: 10px; }
+    .approval-withholding-readonly {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #fff;
+      color: #334155;
+      padding: 7px 10px;
+    }
+    .approval-withholding-result {
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #1e3a5f;
+      padding: 14px;
+      line-height: 1.65;
+    }
+    .approval-withholding-result.is-warning {
+      border-color: #facc15;
+      background: #fffbeb;
+      color: #713f12;
+    }
+    .approval-withholding-result.is-invalid {
+      border-color: #f1aeb5;
+      background: #fff5f5;
+      color: #842029;
+    }
+    .approval-withholding-document {
+      margin-top: 16px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .approval-withholding-document-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #cbd5e1;
+      background: #f8fafc;
+    }
+    .approval-withholding-document table { margin: 0; }
     .approval-insurance-document {
       margin-top: 16px;
       border: 1px solid #cbd5e1;
@@ -201,6 +256,7 @@
     }
     @media (max-width: 575.98px) {
       .approval-insurance-panel { padding: 14px; }
+      .approval-withholding-panel { padding: 14px; }
       .approval-insurance-summary-grid { grid-template-columns: 1fr; }
       .approval-insurance-notice-count { grid-template-columns: minmax(0, 1fr) 96px; }
       .approval-insurance-base-count { grid-template-columns: minmax(0, 1fr) 108px; padding: 12px; }
@@ -210,7 +266,9 @@
     }
     @media print {
       .approval-insurance-document,
-      .approval-insurance-document * { font-size: 11pt !important; }
+      .approval-insurance-document *,
+      .approval-withholding-document,
+      .approval-withholding-document * { font-size: 11pt !important; }
     }
 
     /* 결재선 스타일 */
@@ -761,6 +819,7 @@
                   <option value="일반">일반 지출</option>
                   <option value="급여">급여 (급여대장 연동)</option>
                   <option value="4대보험">4대보험 (고지서 입력)</option>
+                  <option value="원천세">급여 원천세 (신고·납부)</option>
                 </select>
               </div>
               <div class="col-sm-4 hidden" id="divPayrollMonth">
@@ -905,6 +964,67 @@
                   <div class="approval-insurance-summary mt-3" id="insurancePaymentSummary" aria-live="polite">
                     보험료를 입력하면 결재 금액이 표시됩니다.
                   </div>
+                </div>
+              </div>
+              <div class="col-12 hidden" id="divWithholdingExpense">
+                <div class="approval-withholding-panel">
+                  <div class="mb-3">
+                    <div class="fw-bold fs-6">급여 원천세 신고·납부</div>
+                    <div class="text-muted mt-1">신고·납부월을 선택하면 전전월 급여 결재에서 전월 지급분의 소득세와 지방소득세를 불러옵니다.</div>
+                  </div>
+                  <div class="approval-withholding-section">
+                    <div class="approval-withholding-section-title">신고 기준</div>
+                    <div class="row g-3">
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1" for="withholdingFilingMonth">신고·납부월</label>
+                        <input type="month" class="form-control" id="withholdingFilingMonth" onchange="handleApprovalWithholdingMonthChange()">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1">급여 지급월</label>
+                        <div class="approval-withholding-readonly" id="withholdingPaymentMonthLabel">-</div>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1">급여 귀속월</label>
+                        <div class="approval-withholding-readonly" id="withholdingSalaryMonthLabel">-</div>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="text-muted fw-bold mb-1" for="withholdingDueDate">납부 예정일</label>
+                        <input type="date" class="form-control" id="withholdingDueDate" onchange="handleApprovalWithholdingManualChange()">
+                        <div class="form-text">기본은 신고·납부월 10일입니다. 휴일 연장이나 실제 납부일에 맞게 바꿀 수 있습니다.</div>
+                      </div>
+                      <div class="col-md-8 d-flex align-items-end">
+                        <button type="button" class="btn btn-outline-primary w-100" id="btnLoadWithholding" onclick="loadApprovalWithholdingExpense()">🧾 급여 원천세 계산</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="approval-withholding-section hidden" id="withholdingAmountSection">
+                    <div class="approval-withholding-section-title">신고·납부 금액 확인</div>
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="withholdingNationalTax">국세 · 근로소득세</label>
+                        <div class="input-group"><input type="number" min="0" step="1" class="form-control text-end" id="withholdingNationalTax" oninput="handleApprovalWithholdingManualChange()"><span class="input-group-text">원</span></div>
+                        <div class="form-text" id="withholdingNationalBasis">급여 결재에서 계산 전입니다.</div>
+                      </div>
+                      <div class="col-md-6">
+                        <label class="text-muted fw-bold mb-1" for="withholdingLocalTax">지방세 · 지방소득세</label>
+                        <div class="input-group"><input type="number" min="0" step="1" class="form-control text-end" id="withholdingLocalTax" oninput="handleApprovalWithholdingManualChange()"><span class="input-group-text">원</span></div>
+                        <div class="form-text" id="withholdingLocalBasis">급여 결재에서 계산 전입니다.</div>
+                      </div>
+                      <div class="col-12 hidden" id="withholdingAdjustmentReasonWrap">
+                        <label class="text-muted fw-bold mb-1" for="withholdingAdjustmentReason">계산액과 실제 신고액이 다른 이유</label>
+                        <textarea class="form-control" id="withholdingAdjustmentReason" rows="2" oninput="handleApprovalWithholdingManualChange()" placeholder="예: 홈택스 신고 결과에 따라 실제 납부액을 조정"></textarea>
+                      </div>
+                      <div class="col-12">
+                        <div class="form-check">
+                          <input class="form-check-input" type="checkbox" id="withholdingPaymentConfirmed" onchange="handleApprovalWithholdingManualChange()">
+                          <label class="form-check-label" for="withholdingPaymentConfirmed">위 급여가 실제 지급되었음을 확인했습니다.</label>
+                        </div>
+                        <div class="form-text" id="withholdingPaymentCheckHelp">급여 지급 회계전표가 확인되면 자동으로 체크됩니다.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="approval-withholding-result mt-3" id="withholdingSummary" aria-live="polite">신고·납부월을 선택하고 급여 원천세 계산을 눌러주세요.</div>
+                  <div class="small text-muted mt-2">상신할 때 홈택스·위택스 신고/납부 증빙을 첨부하세요. 두 문서를 한 PDF로 합친 경우에도 첨부 1개로 인정합니다.</div>
                 </div>
               </div>
               <div class="col-sm-4 hidden" id="divExpensePaymentMethod">
@@ -1342,6 +1462,7 @@ let pendingPhysicalRejectDocId = null;
 let pendingCancelDocId = null;
 let pendingEvidenceDocId = null;
 let salaryExpenseState = null;
+let withholdingExpenseState = null;
 let physicalRejectModalInstance = null;
 let cancelDraftModalInstance = null;
 let evidenceUploadModalInstance = null;
@@ -1506,6 +1627,20 @@ const formatYearMonthLabel = (ym) => {
     if (!/^\d{4}-\d{2}$/.test(String(ym || ''))) return ym || '-';
     const [y, m] = String(ym).split('-');
     return `${y}년 ${Number(m)}월`;
+};
+const addApprovalMonths = (ym, offset) => {
+    const safeYm = String(ym || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(safeYm)) return '';
+    const [year, month] = safeYm.split('-').map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return '';
+    const date = new Date(Date.UTC(year, month - 1 + Number(offset || 0), 1));
+    return `${String(date.getUTCFullYear()).padStart(4, '0')}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+const buildApprovalMonthDay = (ym, day = 10) => {
+    const safeYm = String(ym || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(safeYm)) return '';
+    const safeDay = Math.max(1, Math.min(28, Number(day || 10)));
+    return `${safeYm}-${String(safeDay).padStart(2, '0')}`;
 };
 const formatMoney = (value) => Number(value || 0).toLocaleString();
 const APPROVAL_DRAFT_LIMIT = 10;
@@ -2749,6 +2884,12 @@ function collectApprovalDraftFormPayload() {
             expense_payment_method: String(document.getElementById('expensePaymentMethod')?.value || '').trim(),
             expense_card_alias: String(document.getElementById('expenseCardSelect')?.value || '').trim(),
             payroll_month: String(document.getElementById('payrollMonth')?.value || '').trim(),
+            withholding_filing_month: String(document.getElementById('withholdingFilingMonth')?.value || '').trim(),
+            withholding_due_date: String(document.getElementById('withholdingDueDate')?.value || '').trim(),
+            withholding_national_tax: String(document.getElementById('withholdingNationalTax')?.value || '').trim(),
+            withholding_local_tax: String(document.getElementById('withholdingLocalTax')?.value || '').trim(),
+            withholding_adjustment_reason: String(document.getElementById('withholdingAdjustmentReason')?.value || '').trim(),
+            withholding_payment_confirmed: !!document.getElementById('withholdingPaymentConfirmed')?.checked,
             insurance_billing_month: String(document.getElementById('insuranceBillingMonth')?.value || '').trim(),
             insurance_due_date: String(document.getElementById('insuranceDueDate')?.value || '').trim(),
             insurance_pension: String(document.getElementById('insurancePension')?.value || '').trim(),
@@ -3015,6 +3156,7 @@ function resetApprovalComposerForm(options = {}) {
     }
 
     salaryExpenseState = null;
+    withholdingExpenseState = null;
     finalApprovers = [];
     finalRefs = [];
     tempSelection = [];
@@ -3249,6 +3391,25 @@ async function loadApprovalDraftFromServer(draftId) {
         const payrollMonthEl = document.getElementById('payrollMonth');
         if (payrollMonthEl && String(fields.payroll_month || '').trim()) {
             payrollMonthEl.value = String(fields.payroll_month || '').trim();
+        }
+        if (String(fields.expense_sub_type || '').trim() === '원천세') {
+            const filingMonthEl = document.getElementById('withholdingFilingMonth');
+            if (filingMonthEl && String(fields.withholding_filing_month || '').trim()) {
+                filingMonthEl.value = String(fields.withholding_filing_month || '').trim();
+                handleApprovalWithholdingMonthChange();
+                await loadApprovalWithholdingExpense();
+                const dueDateEl = document.getElementById('withholdingDueDate');
+                const nationalEl = document.getElementById('withholdingNationalTax');
+                const localEl = document.getElementById('withholdingLocalTax');
+                const reasonEl = document.getElementById('withholdingAdjustmentReason');
+                const paymentConfirmedEl = document.getElementById('withholdingPaymentConfirmed');
+                if (dueDateEl && String(fields.withholding_due_date || '').trim()) dueDateEl.value = String(fields.withholding_due_date || '').trim();
+                if (nationalEl && String(fields.withholding_national_tax || '').trim()) nationalEl.value = String(fields.withholding_national_tax || '').trim();
+                if (localEl && String(fields.withholding_local_tax || '').trim()) localEl.value = String(fields.withholding_local_tax || '').trim();
+                if (reasonEl) reasonEl.value = String(fields.withholding_adjustment_reason || '').trim();
+                if (paymentConfirmedEl && !paymentConfirmedEl.disabled) paymentConfirmedEl.checked = fields.withholding_payment_confirmed === true;
+                syncApprovalWithholdingExpenseTotal();
+            }
         }
         const insuranceDraftFieldMap = {
             insuranceBillingMonth: 'insurance_billing_month',
@@ -5512,6 +5673,367 @@ function buildApprovalInsurancePrintSectionHtml(doc) {
     `;
 } // End of buildApprovalInsurancePrintSectionHtml
 
+function getApprovalWithholdingPeriod(filingMonth = '') {
+    const filing = String(filingMonth || '').trim();
+    return {
+        filing_month: /^\d{4}-\d{2}$/.test(filing) ? filing : '',
+        payment_month: addApprovalMonths(filing, -1),
+        salary_month: addApprovalMonths(filing, -2),
+        due_date: buildApprovalMonthDay(filing, 10)
+    };
+} // End of getApprovalWithholdingPeriod
+
+function resetApprovalWithholdingExpenseUi(keepMonth = true) {
+    withholdingExpenseState = null;
+    const monthEl = document.getElementById('withholdingFilingMonth');
+    if (!keepMonth && monthEl) monthEl.value = '';
+    const period = getApprovalWithholdingPeriod(monthEl?.value || '');
+    const paymentLabel = document.getElementById('withholdingPaymentMonthLabel');
+    const salaryLabel = document.getElementById('withholdingSalaryMonthLabel');
+    const dueDateEl = document.getElementById('withholdingDueDate');
+    if (paymentLabel) paymentLabel.textContent = period.payment_month ? formatYearMonthLabel(period.payment_month) : '-';
+    if (salaryLabel) salaryLabel.textContent = period.salary_month ? formatYearMonthLabel(period.salary_month) : '-';
+    if (dueDateEl) dueDateEl.value = period.due_date;
+    ['withholdingNationalTax', 'withholdingLocalTax', 'withholdingAdjustmentReason'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const paymentConfirmed = document.getElementById('withholdingPaymentConfirmed');
+    if (paymentConfirmed) {
+        paymentConfirmed.checked = false;
+        paymentConfirmed.disabled = false;
+    }
+    const amountSection = document.getElementById('withholdingAmountSection');
+    if (amountSection) amountSection.classList.add('hidden');
+    const reasonWrap = document.getElementById('withholdingAdjustmentReasonWrap');
+    if (reasonWrap) reasonWrap.classList.add('hidden');
+    const summary = document.getElementById('withholdingSummary');
+    if (summary) {
+        summary.className = 'approval-withholding-result mt-3';
+        summary.textContent = period.filing_month
+            ? '급여 원천세 계산을 눌러 결재 완료된 급여대장에서 금액을 불러오세요.'
+            : '신고·납부월을 선택하고 급여 원천세 계산을 눌러주세요.';
+    }
+    const amountInput = document.getElementById('appAmount');
+    if (amountInput?.dataset.withholdingAutoAmount === '1') amountInput.value = '';
+    if (amountInput) delete amountInput.dataset.withholdingAutoAmount;
+} // End of resetApprovalWithholdingExpenseUi
+
+function handleApprovalWithholdingMonthChange() {
+    resetApprovalWithholdingExpenseUi(true);
+    syncApprovalTitleInput('지출결의');
+} // End of handleApprovalWithholdingMonthChange
+
+function getApprovalWithholdingRowsFromSalaryDoc(doc) {
+    const snapshot = doc?.salary_ledger_snapshot;
+    const rows = Array.isArray(snapshot?.state?.rows) ? snapshot.state.rows : [];
+    return rows.map((row) => ({
+        emp_id: String(row?.emp_id || '').trim(),
+        emp_name: String(row?.emp_name || '').trim(),
+        ded_income: Math.round(Number(row?.ded_income || 0)),
+        ded_local: Math.round(Number(row?.ded_local || 0)),
+        adjustment_income: Math.round(Number(row?.payroll_tax_adjustment_income || 0)),
+        adjustment_local: Math.round(Number(row?.payroll_tax_adjustment_local || 0)),
+        net_pay: Math.round(Number(row?.net_pay || 0))
+    }));
+} // End of getApprovalWithholdingRowsFromSalaryDoc
+
+async function findApprovalWithholdingDuplicate(paymentMonth, options = {}) {
+    const safePaymentMonth = String(paymentMonth || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(safePaymentMonth)) return null;
+    const excludeDocId = Number(options.excludeDocId || 0);
+    const { data, error } = await scopeApprovalTenant(_supabase
+        .from('ref_approval')
+        .select('id,doc_type,status,title,content,expense_snapshot,created_at'))
+        .in('status', ['진행중', '가승인', '증빙확인중', '실물결재대기', '완료', '실물결재완료'])
+        .ilike('doc_type', '%지출%')
+        .order('created_at', { ascending: false })
+        .limit(250);
+    if (error) throw error;
+    const [year, month] = safePaymentMonth.split('-');
+    const legacyMonthPattern = new RegExp(`${year}\\s*년\\s*${Number(month)}\\s*월`, 'u');
+    return (Array.isArray(data) ? data : []).find((row) => {
+        if (excludeDocId > 0 && Number(row?.id || 0) === excludeDocId) return false;
+        const snapshotMonth = String(row?.expense_snapshot?.withholding_tax?.payment_month || '').trim();
+        if (snapshotMonth === safePaymentMonth) return true;
+        const merged = `${row?.title || ''} ${row?.content || ''}`;
+        return /원천세|근로소득세/u.test(merged) && legacyMonthPattern.test(merged);
+    }) || null;
+} // End of findApprovalWithholdingDuplicate
+
+async function loadApprovalWithholdingExpense() {
+    if (!canUseSalaryExpense()) return showAlert('급여 원천세 연동은 관리자/회계 권한에서만 사용할 수 있습니다.');
+    const filingMonth = String(document.getElementById('withholdingFilingMonth')?.value || '').trim();
+    const period = getApprovalWithholdingPeriod(filingMonth);
+    if (!period.filing_month) return showAlert('신고·납부월을 선택하세요.');
+
+    const btn = document.getElementById('btnLoadWithholding');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '계산 중...';
+    }
+    try {
+        const { data: salaryDocs, error: salaryDocError } = await scopeApprovalTenant(_supabase
+            .from('ref_approval')
+            .select('id,doc_no,doc_type,status,title,amount,created_at,processed_at,salary_ledger_snapshot'))
+            .eq('doc_type', '지출결의(급여)')
+            .in('status', ['완료', '실물결재완료'])
+            .order('created_at', { ascending: false })
+            .limit(60);
+        if (salaryDocError) throw salaryDocError;
+        const sourceDoc = (Array.isArray(salaryDocs) ? salaryDocs : []).find((doc) => {
+            const sourceMonth = String(doc?.salary_ledger_snapshot?.year_month || doc?.salary_ledger_snapshot?.state?.yearMonth || '').trim();
+            return sourceMonth === period.salary_month && getApprovalWithholdingRowsFromSalaryDoc(doc).length > 0;
+        });
+        if (!sourceDoc) {
+            throw new Error(`${formatYearMonthLabel(period.salary_month)} 급여 지출결의 완료본을 찾지 못했습니다. 급여 결재를 먼저 완료하세요.`);
+        }
+
+        const rows = getApprovalWithholdingRowsFromSalaryDoc(sourceDoc);
+        const sumBy = (key) => rows.reduce((sum, row) => sum + Number(row?.[key] || 0), 0);
+        const calculatedIncome = Math.round(sumBy('ded_income'));
+        const calculatedLocal = Math.round(sumBy('ded_local'));
+        const adjustmentIncome = Math.round(sumBy('adjustment_income'));
+        const adjustmentLocal = Math.round(sumBy('adjustment_local'));
+        const proposedNational = Math.max(0, calculatedIncome - adjustmentIncome);
+        const proposedLocal = Math.max(0, calculatedLocal - adjustmentLocal);
+
+        const [{ data: paymentRows, error: paymentError }, duplicateDoc] = await Promise.all([
+            _supabase.from('ac_journal')
+                .select('Trans_ID,Date,Account,Debit,Credit')
+                .eq('Trans_ID', `APR-${sourceDoc.id}`)
+                .eq('Account', '보통예금')
+                .gt('Credit', 0),
+            findApprovalWithholdingDuplicate(period.payment_month)
+        ]);
+        if (paymentError) throw paymentError;
+        const paymentPosted = Array.isArray(paymentRows) && paymentRows.length > 0;
+        const paymentDate = paymentPosted ? String(paymentRows[0]?.Date || '').trim() : '';
+
+        withholdingExpenseState = {
+            loaded: true,
+            ...period,
+            source_salary_approval_id: Number(sourceDoc.id),
+            source_salary_approval_no: String(sourceDoc.doc_no || '').trim(),
+            source_salary_approval_title: String(sourceDoc.title || '').trim(),
+            source_salary_approval_status: String(sourceDoc.status || '').trim(),
+            employee_count: rows.length,
+            rows,
+            calculated_income_tax: calculatedIncome,
+            calculated_local_tax: calculatedLocal,
+            adjustment_income: adjustmentIncome,
+            adjustment_local: adjustmentLocal,
+            proposed_national_tax: proposedNational,
+            proposed_local_tax: proposedLocal,
+            source_payment_posted: paymentPosted,
+            source_payment_date: paymentDate || null,
+            duplicate_doc: duplicateDoc || null
+        };
+
+        const nationalEl = document.getElementById('withholdingNationalTax');
+        const localEl = document.getElementById('withholdingLocalTax');
+        if (nationalEl) nationalEl.value = String(proposedNational);
+        if (localEl) localEl.value = String(proposedLocal);
+        const nationalBasis = document.getElementById('withholdingNationalBasis');
+        const localBasis = document.getElementById('withholdingLocalBasis');
+        if (nationalBasis) nationalBasis.textContent = `급여 공제 ${formatMoney(calculatedIncome)}원${adjustmentIncome > 0 ? ` − 정산 ${formatMoney(adjustmentIncome)}원` : ''}`;
+        if (localBasis) localBasis.textContent = `급여 공제 ${formatMoney(calculatedLocal)}원${adjustmentLocal > 0 ? ` − 정산 ${formatMoney(adjustmentLocal)}원` : ''}`;
+        const paymentConfirmed = document.getElementById('withholdingPaymentConfirmed');
+        if (paymentConfirmed) {
+            paymentConfirmed.checked = paymentPosted;
+            paymentConfirmed.disabled = paymentPosted;
+        }
+        const paymentHelp = document.getElementById('withholdingPaymentCheckHelp');
+        if (paymentHelp) {
+            paymentHelp.textContent = paymentPosted
+                ? `급여 지급 회계전표 확인됨${paymentDate ? ` · ${paymentDate}` : ''}`
+                : '급여 지급 회계전표를 찾지 못했습니다. 실제 지급을 확인한 뒤 직접 체크하세요.';
+        }
+        document.getElementById('withholdingAmountSection')?.classList.remove('hidden');
+        syncApprovalWithholdingExpenseTotal();
+    } catch (error) {
+        resetApprovalWithholdingExpenseUi(true);
+        const summary = document.getElementById('withholdingSummary');
+        if (summary) {
+            summary.className = 'approval-withholding-result is-invalid mt-3';
+            summary.textContent = error?.message || String(error);
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🧾 급여 원천세 계산';
+        }
+    }
+} // End of loadApprovalWithholdingExpense
+
+function syncApprovalWithholdingExpenseTotal() {
+    const state = withholdingExpenseState;
+    if (!state?.loaded) return;
+    const national = Math.max(0, Math.round(Number(document.getElementById('withholdingNationalTax')?.value || 0)));
+    const local = Math.max(0, Math.round(Number(document.getElementById('withholdingLocalTax')?.value || 0)));
+    const total = national + local;
+    const changed = national !== Number(state.proposed_national_tax || 0) || local !== Number(state.proposed_local_tax || 0);
+    const reasonWrap = document.getElementById('withholdingAdjustmentReasonWrap');
+    if (reasonWrap) reasonWrap.classList.toggle('hidden', !changed);
+    const amountInput = document.getElementById('appAmount');
+    if (amountInput) {
+        amountInput.value = String(total);
+        amountInput.readOnly = true;
+        amountInput.dataset.withholdingAutoAmount = '1';
+    }
+    const paymentConfirmed = !!document.getElementById('withholdingPaymentConfirmed')?.checked;
+    const duplicate = state.duplicate_doc;
+    const summary = document.getElementById('withholdingSummary');
+    if (summary) {
+        summary.className = duplicate
+            ? 'approval-withholding-result is-invalid mt-3'
+            : (!paymentConfirmed ? 'approval-withholding-result is-warning mt-3' : 'approval-withholding-result mt-3');
+        const sourceLabel = state.source_salary_approval_no
+            ? `${state.source_salary_approval_no} · ${state.source_salary_approval_title}`
+            : `#${state.source_salary_approval_id} · ${state.source_salary_approval_title}`;
+        const duplicateLine = duplicate
+            ? `<br><strong>중복 상신 차단:</strong> #${escapeHtml(duplicate.id)} ${escapeHtml(duplicate.title || '원천세 지출결의')} (${escapeHtml(duplicate.status || '')})가 이미 있습니다.`
+            : '';
+        const paymentLine = paymentConfirmed
+            ? '급여 지급 확인 완료'
+            : '<strong>급여 실제 지급 확인이 필요합니다.</strong>';
+        summary.innerHTML = `근거: ${escapeHtml(sourceLabel)}<br>국세 <strong>${formatMoney(national)}원</strong> + 지방세 <strong>${formatMoney(local)}원</strong> = 총 <strong>${formatMoney(total)}원</strong><br>${paymentLine}${duplicateLine}`;
+    }
+    const periodLabel = formatYearMonthLabel(state.payment_month);
+    const currentBody = String(getApprovalEditorContent() || '').trim();
+    if (!currentBody || isApprovalAutoGeneratedTemplateContent(currentBody) || currentBody.includes('[급여 원천세 연동]')) {
+        setApprovalEditorContent(`${periodLabel} 지급분 급여 원천세 신고·납부를 위해 지출결의를 상신합니다.\n\n[급여 원천세 연동]\n- 급여 귀속월: ${formatYearMonthLabel(state.salary_month)}\n- 급여 지급월: ${periodLabel}\n- 신고·납부월: ${formatYearMonthLabel(state.filing_month)}\n- 국세(근로소득세): ${formatMoney(national)}원\n- 지방세(지방소득세): ${formatMoney(local)}원\n- 합계: ${formatMoney(total)}원`);
+    }
+    syncApprovalTitleInput('지출결의');
+    updateJeongyeolUi();
+} // End of syncApprovalWithholdingExpenseTotal
+
+function handleApprovalWithholdingManualChange() {
+    syncApprovalWithholdingExpenseTotal();
+} // End of handleApprovalWithholdingManualChange
+
+function collectApprovalWithholdingExpenseInput() {
+    const state = withholdingExpenseState;
+    if (!state?.loaded) return null;
+    const national = Math.max(0, Math.round(Number(document.getElementById('withholdingNationalTax')?.value || 0)));
+    const local = Math.max(0, Math.round(Number(document.getElementById('withholdingLocalTax')?.value || 0)));
+    return {
+        filing_month: String(state.filing_month || '').trim(),
+        payment_month: String(state.payment_month || '').trim(),
+        salary_month: String(state.salary_month || '').trim(),
+        due_date: String(document.getElementById('withholdingDueDate')?.value || state.due_date || '').trim(),
+        source_salary_approval_id: Number(state.source_salary_approval_id || 0) || null,
+        source_salary_approval_no: String(state.source_salary_approval_no || '').trim() || null,
+        source_salary_approval_title: String(state.source_salary_approval_title || '').trim() || null,
+        source_salary_approval_status: String(state.source_salary_approval_status || '').trim() || null,
+        employee_count: Math.max(0, Number(state.employee_count || 0)),
+        calculated_income_tax: Math.round(Number(state.calculated_income_tax || 0)),
+        calculated_local_tax: Math.round(Number(state.calculated_local_tax || 0)),
+        adjustment_income: Math.round(Number(state.adjustment_income || 0)),
+        adjustment_local: Math.round(Number(state.adjustment_local || 0)),
+        proposed_national_tax: Math.round(Number(state.proposed_national_tax || 0)),
+        proposed_local_tax: Math.round(Number(state.proposed_local_tax || 0)),
+        actual_national_tax: national,
+        actual_local_tax: local,
+        total_amount: national + local,
+        source_payment_posted: state.source_payment_posted === true,
+        source_payment_date: String(state.source_payment_date || '').trim() || null,
+        payment_confirmed: !!document.getElementById('withholdingPaymentConfirmed')?.checked,
+        adjustment_reason: String(document.getElementById('withholdingAdjustmentReason')?.value || '').trim() || null
+    };
+} // End of collectApprovalWithholdingExpenseInput
+
+function validateApprovalWithholdingExpense(input) {
+    const value = input && typeof input === 'object' ? input : {};
+    const errors = [];
+    if (!/^\d{4}-\d{2}$/.test(String(value.filing_month || ''))) errors.push('신고·납부월을 확인하세요.');
+    if (!/^\d{4}-\d{2}$/.test(String(value.payment_month || ''))) errors.push('급여 지급월을 확인하세요.');
+    if (!/^\d{4}-\d{2}$/.test(String(value.salary_month || ''))) errors.push('급여 귀속월을 확인하세요.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.due_date || ''))) errors.push('납부 예정일을 확인하세요.');
+    if (!(Number(value.source_salary_approval_id || 0) > 0)) errors.push('근거 급여 지출결의를 다시 불러오세요.');
+    if (!(Number(value.total_amount || 0) > 0)) errors.push('국세와 지방세 납부액을 확인하세요.');
+    if (value.payment_confirmed !== true) errors.push('급여가 실제 지급되었는지 확인하고 체크하세요.');
+    const changed = Number(value.actual_national_tax || 0) !== Number(value.proposed_national_tax || 0)
+        || Number(value.actual_local_tax || 0) !== Number(value.proposed_local_tax || 0);
+    if (changed && !String(value.adjustment_reason || '').trim()) errors.push('계산액과 실제 신고액이 다른 이유를 입력하세요.');
+    return { ok: errors.length === 0, errors };
+} // End of validateApprovalWithholdingExpense
+
+function buildApprovalWithholdingAppendText(input) {
+    const value = input && typeof input === 'object' ? input : {};
+    return [
+        `[급여 원천세 신고·납부] ${formatYearMonthLabel(value.payment_month)} 지급분`,
+        `- 급여 귀속월: ${formatYearMonthLabel(value.salary_month)}`,
+        `- 신고·납부월: ${formatYearMonthLabel(value.filing_month)}`,
+        `- 납부 예정일: ${value.due_date || '-'}`,
+        `- 국세(근로소득세): ${formatMoney(value.actual_national_tax)}원`,
+        `- 지방세(지방소득세): ${formatMoney(value.actual_local_tax)}원`,
+        `- 합계: ${formatMoney(value.total_amount)}원`,
+        value.adjustment_reason ? `- 신고액 조정 사유: ${value.adjustment_reason}` : ''
+    ].filter(Boolean).join('\n');
+} // End of buildApprovalWithholdingAppendText
+
+function getApprovalWithholdingSnapshot(doc) {
+    const snapshot = doc?.expense_snapshot;
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+    const value = snapshot.withholding_tax;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const docType = String(doc?.doc_type || '').trim();
+    if (String(snapshot.expense_sub_type || '').trim() !== '원천세' && !docType.includes('(원천세)')) return null;
+    return value;
+} // End of getApprovalWithholdingSnapshot
+
+function stripApprovalWithholdingTextAppendix(content, doc) {
+    const rawContent = String(content || '');
+    if (!getApprovalWithholdingSnapshot(doc)) return rawContent;
+    return rawContent.replace(/\n{0,2}\[급여 원천세 신고·납부\][\s\S]*$/u, '').trimEnd();
+} // End of stripApprovalWithholdingTextAppendix
+
+function appendApprovalWithholdingSnapshotSection(container, doc) {
+    if (!container) return false;
+    const value = getApprovalWithholdingSnapshot(doc);
+    if (!value) return false;
+    const section = document.createElement('section');
+    section.className = 'approval-withholding-document';
+    section.setAttribute('aria-label', '급여 원천세 신고·납부 요약');
+    section.innerHTML = `
+      <div class="approval-withholding-document-header">
+        <div class="fw-bold">급여 원천세 신고·납부 요약</div>
+        <div class="small text-muted mt-1">${escapeHtml(formatYearMonthLabel(value.payment_month))} 지급분 · ${escapeHtml(formatYearMonthLabel(value.filing_month))} 신고·납부 · 예정일 ${escapeHtml(value.due_date || '-')}</div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle mb-0">
+          <thead class="table-light"><tr><th>구분</th><th class="text-end">급여 계산액</th><th class="text-end">정산 반영</th><th class="text-end">실제 신고·납부액</th></tr></thead>
+          <tbody>
+            <tr><th>국세 · 근로소득세</th><td class="text-end">${formatMoney(value.calculated_income_tax)}원</td><td class="text-end">${formatMoney(value.adjustment_income)}원</td><td class="text-end fw-bold">${formatMoney(value.actual_national_tax)}원</td></tr>
+            <tr><th>지방세 · 지방소득세</th><td class="text-end">${formatMoney(value.calculated_local_tax)}원</td><td class="text-end">${formatMoney(value.adjustment_local)}원</td><td class="text-end fw-bold">${formatMoney(value.actual_local_tax)}원</td></tr>
+          </tbody>
+          <tfoot><tr class="table-primary"><th colspan="3">합계</th><td class="text-end fw-bold">${formatMoney(value.total_amount)}원</td></tr></tfoot>
+        </table>
+      </div>
+      ${value.adjustment_reason ? `<div class="p-3 small"><strong>신고액 조정 사유:</strong> ${escapeHtml(value.adjustment_reason)}</div>` : ''}
+    `;
+    container.appendChild(section);
+    return true;
+} // End of appendApprovalWithholdingSnapshotSection
+
+function buildApprovalWithholdingPrintSectionHtml(doc) {
+    const value = getApprovalWithholdingSnapshot(doc);
+    if (!value) return '';
+    return `
+      <div class="section-title">급여 원천세 신고·납부 요약</div>
+      <table class="insurance-print-table" aria-label="급여 원천세 신고·납부 요약">
+        <thead><tr><th>구분</th><th>급여 계산액</th><th>정산 반영</th><th>실제 신고·납부액</th></tr></thead>
+        <tbody>
+          <tr><th>국세 · 근로소득세</th><td>${escapeHtml(`${formatMoney(value.calculated_income_tax)}원`)}</td><td>${escapeHtml(`${formatMoney(value.adjustment_income)}원`)}</td><td>${escapeHtml(`${formatMoney(value.actual_national_tax)}원`)}</td></tr>
+          <tr><th>지방세 · 지방소득세</th><td>${escapeHtml(`${formatMoney(value.calculated_local_tax)}원`)}</td><td>${escapeHtml(`${formatMoney(value.adjustment_local)}원`)}</td><td>${escapeHtml(`${formatMoney(value.actual_local_tax)}원`)}</td></tr>
+        </tbody>
+        <tfoot><tr><th colspan="3">${escapeHtml(`${formatYearMonthLabel(value.payment_month)} 지급분 · 납부 예정일 ${value.due_date || '-'}`)}</th><td>${escapeHtml(`${formatMoney(value.total_amount)}원`)}</td></tr></tfoot>
+      </table>
+      ${value.adjustment_reason ? `<div class="content-box" style="min-height:0;"><strong>신고액 조정 사유:</strong> ${escapeHtml(value.adjustment_reason)}</div>` : ''}
+    `;
+} // End of buildApprovalWithholdingPrintSectionHtml
+
 function buildApprovalExpenseSnapshot() {
     const expenseSubType = String(document.getElementById('expenseSubType')?.value || '일반').trim() || '일반';
     if (expenseSubType === '급여') return null;
@@ -5532,6 +6054,9 @@ function buildApprovalExpenseSnapshot() {
     const insurance = expenseSubType === '4대보험'
         ? collectApprovalInsuranceExpenseInput()
         : null;
+    const withholdingTax = expenseSubType === '원천세'
+        ? collectApprovalWithholdingExpenseInput()
+        : null;
     return {
         kind: 'expense',
         expense_sub_type: expenseSubType,
@@ -5543,6 +6068,7 @@ function buildApprovalExpenseSnapshot() {
         card_type: cardType || null,
         card_type_label: getApprovalExpensePaymentMethodLabel(cardType),
         insurance,
+        withholding_tax: withholdingTax,
         adjustment_type: adjustmentType === 'new' ? null : adjustmentType,
         original_approval_id: adjustmentTarget ? Number(adjustmentTarget.id) : null,
         original_approval_title: adjustmentTarget ? String(adjustmentTarget.title || '').trim() || null : null,
@@ -8762,7 +9288,7 @@ function handleExpensePaymentMethodChange() {
     if (cardWrap) cardWrap.classList.toggle('hidden', !requiresCard);
     if (cardEl) cardEl.required = requiresCard;
 
-    if (mode === '급여' || mode === '4대보험' || !summary) return;
+    if (mode === '급여' || mode === '4대보험' || mode === '원천세' || !summary) return;
     summary.className = 'small text-muted';
     if (!requiresCard) {
         summary.textContent = '자동(기존 방식)을 선택하면 일반 지출은 발생전표로 연동됩니다.';
@@ -8792,10 +9318,12 @@ function resetSalaryExpenseUi() {
     const summary = document.getElementById("payrollSummary");
     const amountLabel = document.getElementById("amountLabel");
     const amountInput = document.getElementById("appAmount");
+    const withholdingWrap = document.getElementById('divWithholdingExpense');
     if (select) select.value = '일반';
     if (divMonth) divMonth.classList.add("hidden");
     if (divLoad) divLoad.classList.add("hidden");
     if (divMethod) divMethod.classList.add("hidden");
+    if (withholdingWrap) withholdingWrap.classList.add('hidden');
     resetApprovalExpensePaymentUi();
     if (summary) {
         summary.className = "small text-muted";
@@ -8806,8 +9334,10 @@ function resetSalaryExpenseUi() {
         amountInput.placeholder = "0";
         amountInput.readOnly = false;
         delete amountInput.dataset.insuranceAutoAmount;
+        delete amountInput.dataset.withholdingAutoAmount;
     }
     resetApprovalInsuranceExpenseUi(true);
+    resetApprovalWithholdingExpenseUi(false);
     updateJeongyeolUi();
 } // End of resetSalaryExpenseUi
 
@@ -8832,13 +9362,54 @@ function handleExpenseSubTypeChange() {
     const amountInput = document.getElementById("appAmount");
     const monthInput = document.getElementById("payrollMonth");
     const insuranceWrap = document.getElementById('divInsuranceExpense');
+    const withholdingWrap = document.getElementById('divWithholdingExpense');
+
+    if (mode === '원천세') {
+        salaryExpenseState = null;
+        if (!canUseSalaryExpense()) {
+            if (select) select.value = '일반';
+            if (withholdingWrap) withholdingWrap.classList.add('hidden');
+            if (divMethod) divMethod.classList.remove('hidden');
+            handleExpensePaymentMethodChange();
+            return showAlert('급여 원천세 연동은 관리자/회계 권한에서만 사용할 수 있습니다.');
+        }
+        if (divMonth) divMonth.classList.add('hidden');
+        if (divLoad) divLoad.classList.add('hidden');
+        if (divMethod) divMethod.classList.add('hidden');
+        if (insuranceWrap) insuranceWrap.classList.add('hidden');
+        if (withholdingWrap) withholdingWrap.classList.remove('hidden');
+        resetApprovalExpensePaymentUi();
+        const filingMonthEl = document.getElementById('withholdingFilingMonth');
+        if (filingMonthEl && !filingMonthEl.value) filingMonthEl.value = formatApprovalKstMonth();
+        if (!withholdingExpenseState?.loaded || withholdingExpenseState.filing_month !== filingMonthEl?.value) {
+            resetApprovalWithholdingExpenseUi(true);
+        } else {
+            syncApprovalWithholdingExpenseTotal();
+        }
+        if (amountLabel) amountLabel.innerText = '원천세 총 납부액 (원)';
+        if (amountInput) {
+            amountInput.placeholder = '국세·지방세 합계로 자동 입력';
+            amountInput.readOnly = true;
+            amountInput.dataset.withholdingAutoAmount = '1';
+        }
+        const currentDesc = String(getApprovalEditorContent() || '').trim();
+        if (!currentDesc || isApprovalAutoGeneratedTemplateContent(currentDesc)) {
+            const paymentMonth = getApprovalWithholdingPeriod(filingMonthEl?.value || '').payment_month;
+            setApprovalEditorContent(`${formatYearMonthLabel(paymentMonth)} 지급분 급여 원천세 신고·납부를 위해 지출결의를 상신합니다.`);
+        }
+        updateJeongyeolUi();
+        syncApprovalTitleInput('지출결의');
+        return;
+    }
 
     if (mode === '4대보험') {
         salaryExpenseState = null;
+        withholdingExpenseState = null;
         if (divMonth) divMonth.classList.add("hidden");
         if (divLoad) divLoad.classList.add("hidden");
         if (divMethod) divMethod.classList.add("hidden");
         if (insuranceWrap) insuranceWrap.classList.remove('hidden');
+        if (withholdingWrap) withholdingWrap.classList.add('hidden');
         resetApprovalExpensePaymentUi();
         const billingMonth = document.getElementById('insuranceBillingMonth');
         if (billingMonth && !billingMonth.value) billingMonth.value = formatApprovalKstMonth();
@@ -8857,14 +9428,18 @@ function handleExpenseSubTypeChange() {
     }
 
     if (insuranceWrap) insuranceWrap.classList.add('hidden');
+    if (withholdingWrap) withholdingWrap.classList.add('hidden');
     if (amountInput) {
         if (amountInput.dataset.insuranceAutoAmount === '1') amountInput.value = '';
         delete amountInput.dataset.insuranceAutoAmount;
+        if (amountInput.dataset.withholdingAutoAmount === '1') amountInput.value = '';
+        delete amountInput.dataset.withholdingAutoAmount;
         amountInput.readOnly = false;
     }
 
     if (mode !== '급여') {
         salaryExpenseState = null;
+        withholdingExpenseState = null;
         if (divMonth) divMonth.classList.add("hidden");
         if (divLoad) divLoad.classList.add("hidden");
         if (divMethod) divMethod.classList.remove("hidden");
@@ -8894,6 +9469,8 @@ function handleExpenseSubTypeChange() {
         syncApprovalTitleInput('지출결의');
         return showAlert("급여 연동은 관리자/회계 권한에서만 사용할 수 있습니다.");
     }
+
+    withholdingExpenseState = null;
 
     if (monthInput && !monthInput.value) monthInput.value = formatApprovalKstMonth();
     if (divMonth) divMonth.classList.remove("hidden");
@@ -9640,6 +10217,11 @@ function buildApprovalGeneratedTitle(mainType) {
             const insuranceMonth = String(document.getElementById('insuranceBillingMonth')?.value || '').trim();
             return insuranceMonth ? `4대보험 지출결의 (${insuranceMonth})` : '4대보험 지출결의';
         }
+        if (expenseMode === '원천세') {
+            const filingMonth = String(document.getElementById('withholdingFilingMonth')?.value || '').trim();
+            const paymentMonth = getApprovalWithholdingPeriod(filingMonth).payment_month;
+            return paymentMonth ? `원천세 신고·납부 (${paymentMonth} 지급분)` : '급여 원천세 신고·납부';
+        }
         return '지출결의';
     }
     if (safeType === '공문') {
@@ -10162,6 +10744,19 @@ function buildApprovalSubmitPreviewData() {
             title = getApprovalResolvedTitle(mainType, `4대보험 지출결의 (${insurance.billing_month})`);
             finalAmt = Number(insurance.total_amount || 0);
             appendDesc += `\n\n${buildApprovalInsuranceAppendText(insurance)}`;
+        } else if (expenseSubType === '원천세') {
+            expenseSnapshotPayload = buildApprovalExpenseSnapshot();
+            const withholdingTax = expenseSnapshotPayload?.withholding_tax;
+            const withholdingValidation = validateApprovalWithholdingExpense(withholdingTax);
+            if (!withholdingValidation.ok) throw new Error(withholdingValidation.errors[0]);
+            if (withholdingExpenseState?.duplicate_doc) {
+                const duplicate = withholdingExpenseState.duplicate_doc;
+                throw new Error(`#${duplicate.id} ${duplicate.title || '원천세 지출결의'} (${duplicate.status || ''})가 이미 있어 같은 지급월을 다시 상신할 수 없습니다.`);
+            }
+            subType = '지출결의(원천세)';
+            title = getApprovalResolvedTitle(mainType, `원천세 신고·납부 (${withholdingTax.payment_month} 지급분)`);
+            finalAmt = Number(withholdingTax.total_amount || 0);
+            appendDesc += `\n\n${buildApprovalWithholdingAppendText(withholdingTax)}`;
         } else {
             expenseSnapshotPayload = buildApprovalExpenseSnapshot();
             title = getApprovalResolvedTitle(mainType, '지출결의');
@@ -10376,7 +10971,7 @@ async function openApprovalSubmitPreview() {
             memoBox.innerHTML = `<div class="small fw-bold text-muted mb-2">결재 요청 메모 (내부)</div>${escapeHtml(noticeParts.approvalMemo).replace(/\n/g, '<br>')}`;
             contentEl.appendChild(memoBox);
         }
-        const displayContent = stripApprovalInsuranceTextAppendix(previewDoc.content || '', previewDoc);
+        const displayContent = stripApprovalWithholdingTextAppendix(stripApprovalInsuranceTextAppendix(previewDoc.content || '', previewDoc), previewDoc);
         if (allowHtmlPreview) {
             const contentSource = isNoticeDoc ? (noticeParts?.publicBody || '') : displayContent;
             contentBox.innerHTML = renderApprovalContent(contentSource, true);
@@ -10403,6 +10998,7 @@ async function openApprovalSubmitPreview() {
         contentEl.appendChild(document.createElement("hr"));
         contentEl.appendChild(contentBox);
         appendApprovalInsuranceSnapshotSection(contentEl, previewDoc);
+        appendApprovalWithholdingSnapshotSection(contentEl, previewDoc);
         contentEl.appendChild(amountEl);
         appendApprovalSalaryLedgerSnapshotSection(contentEl, previewDoc);
         await appendApprovalRelatedDocSection(contentEl, previewDoc);
@@ -11416,6 +12012,24 @@ async function handleDraftSubmit(e) {
             title = getApprovalResolvedTitle(mainType, `4대보험 지출결의 (${insurance.billing_month})`);
             finalAmt = Number(insurance.total_amount || 0);
             appendDesc += `\n\n${buildApprovalInsuranceAppendText(insurance)}`;
+        } else if (expenseSubType === '원천세') {
+            expenseSnapshotPayload = buildApprovalExpenseSnapshot();
+            const withholdingTax = expenseSnapshotPayload?.withholding_tax;
+            const withholdingValidation = validateApprovalWithholdingExpense(withholdingTax);
+            if (!withholdingValidation.ok) return showAlert(withholdingValidation.errors[0]);
+            let duplicateDoc = null;
+            try {
+                duplicateDoc = await findApprovalWithholdingDuplicate(withholdingTax.payment_month);
+            } catch (duplicateError) {
+                return showAlert(`원천세 중복 여부를 확인하지 못했습니다: ${duplicateError.message}`);
+            }
+            if (duplicateDoc) {
+                return showAlert(`#${duplicateDoc.id} ${duplicateDoc.title || '원천세 지출결의'} (${duplicateDoc.status || ''})가 이미 있어 같은 지급월을 다시 상신할 수 없습니다.`);
+            }
+            subType = '지출결의(원천세)';
+            title = getApprovalResolvedTitle(mainType, `원천세 신고·납부 (${withholdingTax.payment_month} 지급분)`);
+            finalAmt = Number(withholdingTax.total_amount || 0);
+            appendDesc += `\n\n${buildApprovalWithholdingAppendText(withholdingTax)}`;
         } else {
             expenseSnapshotPayload = buildApprovalExpenseSnapshot();
             const paymentMode = String(expenseSnapshotPayload?.payment_mode || 'auto').trim();
@@ -11529,6 +12143,9 @@ async function handleDraftSubmit(e) {
     const fileInput = document.getElementById("attachFile");
     if (isApprovalDocRuleEnabled(mainType, 'require_attachment') && (fileInput.files.length + approvalDraftAttachmentRefs.length) === 0) {
         return showAlert('첨부파일이 필수입니다.');
+    }
+    if (mainType === '지출결의' && expenseSubType === '원천세' && (fileInput.files.length + approvalDraftAttachmentRefs.length) === 0) {
+        return showAlert('원천세 신고·납부 결재에는 홈택스·위택스 신고 또는 납부 증빙을 1개 이상 첨부하세요. 두 문서를 합친 PDF도 사용할 수 있습니다.');
     }
     const validation = validateAttachments(fileInput.files);
     if (!validation.ok) return showAlert(validation.message);
@@ -11651,7 +12268,12 @@ async function handleDraftSubmit(e) {
         try {
             await deleteDraftAttachmentObjects(uploadRollbackItems);
         } catch (_) { /* noop */ }
-        showAlert("상신 실패: " + error.message);
+        const errorText = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''}`;
+        if (expenseSubType === '원천세' && (/23505/.test(errorText) || /ref_approval_unique_withholding_payment_month/.test(errorText))) {
+            showAlert('같은 급여 지급월의 원천세 결재가 방금 먼저 등록되었습니다. 결재함에서 기존 문서를 확인하세요.');
+        } else {
+            showAlert("상신 실패: " + error.message);
+        }
         btn.disabled = false;
         btn.innerText = "상신하기";
         return;
@@ -13243,10 +13865,10 @@ function buildPhysicalPrintHtml(doc) {
         : { approvalMemo: '', publicBody: String(doc.content || '') };
     const noticePublicBody = isNoticeDoc ? noticeParts.publicBody : String(doc.content || '');
     const noticeApprovalMemo = isNoticeDoc ? noticeParts.approvalMemo : '';
-    const renderedBodySource = stripApprovalInsuranceTextAppendix(
+    const renderedBodySource = stripApprovalWithholdingTextAppendix(stripApprovalInsuranceTextAppendix(
         isNoticeDoc ? (noticePublicBody || '') : (doc.content || ''),
         doc
-    );
+    ), doc);
     const allowHtmlPrintContent = isApprovalHtmlEditorType(rawType) || isNoticeDoc;
     const renderedContent = allowHtmlPrintContent
         ? renderApprovalContent(renderedBodySource, true)
@@ -13288,6 +13910,7 @@ function buildPhysicalPrintHtml(doc) {
           `
         : '';
     const insuranceSectionHtml = buildApprovalInsurancePrintSectionHtml(doc);
+    const withholdingSectionHtml = buildApprovalWithholdingPrintSectionHtml(doc);
 
     let rawTitle = String(doc.title || '');
     if (rawDrafter) {
@@ -13516,6 +14139,7 @@ function buildPhysicalPrintHtml(doc) {
             <div class="section-title">${safeSectionHeading}</div>
             <div class="content-box">${renderedContent || emptyText}</div>
             ${insuranceSectionHtml}
+            ${withholdingSectionHtml}
             ${relatedDocSectionHtml}
             ${attachmentSectionHtml}
             <div class="footer-row">
@@ -14184,7 +14808,7 @@ async function openRelView(docId) {
         memoBox.innerHTML = `<div class="small fw-bold text-muted mb-2">결재 요청 메모 (내부)</div>${escapeHtml(noticeParts.approvalMemo).replace(/\n/g, '<br>')}`;
         contentEl.appendChild(memoBox);
     }
-    const displayContent = stripApprovalInsuranceTextAppendix(data.content || '', data);
+    const displayContent = stripApprovalWithholdingTextAppendix(stripApprovalInsuranceTextAppendix(data.content || '', data), data);
     if (allowHtmlContent) {
         const contentSource = isNoticeDoc ? (noticeParts?.publicBody || '') : displayContent;
         contentBox.innerHTML = renderApprovalContent(contentSource, true);
@@ -14203,6 +14827,7 @@ async function openRelView(docId) {
     contentEl.appendChild(hr);
     contentEl.appendChild(contentBox);
     appendApprovalInsuranceSnapshotSection(contentEl, data);
+    appendApprovalWithholdingSnapshotSection(contentEl, data);
     contentEl.appendChild(amountEl);
     appendApprovalSalaryLedgerSnapshotSection(contentEl, data);
     await appendApprovalRelatedDocSection(contentEl, data);

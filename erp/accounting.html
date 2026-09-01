@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.100 | Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month. -->
+<!-- Version: v1.0.101 | Change: 2026-09-01 - Post payroll withholding payments as separate national and local tax liability settlements. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.100 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.101 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -3531,6 +3531,28 @@ function appendApprovalPaymentEntries(entries, payload) {
     entries.push({ ...common, Type: '자산', Account: '보통예금', Debit: 0, Credit: amount });
 }
 
+function appendApprovalWithholdingTaxEntries(entries, payload) {
+    const national = Math.max(0, Math.round(Number(payload.nationalAmount || 0)));
+    const local = Math.max(0, Math.round(Number(payload.localAmount || 0)));
+    const common = {
+        Date: payload.date,
+        Trans_ID: payload.transId,
+        Project: payload.project || '본사',
+        Operator: payload.operator
+    };
+    const paymentMonthLabel = normalizeAccountingYm(payload.paymentMonth) || '지급월 미확인';
+    if (national > 0) {
+        const description = `[급여원천세-국세] ${paymentMonthLabel} 지급분 근로소득세 납부`;
+        entries.push({ ...common, Type: '부채', Account: '예수금', Description: description, Debit: national, Credit: 0 });
+        entries.push({ ...common, Type: '자산', Account: '보통예금', Description: description, Debit: 0, Credit: national, Evidence_Type: '금융거래' });
+    }
+    if (local > 0) {
+        const description = `[급여원천세-지방세] ${paymentMonthLabel} 지급분 지방소득세 납부`;
+        entries.push({ ...common, Type: '부채', Account: '예수금', Description: description, Debit: local, Credit: 0 });
+        entries.push({ ...common, Type: '자산', Account: '보통예금', Description: description, Debit: 0, Credit: local, Evidence_Type: '금융거래' });
+    }
+} // End of appendApprovalWithholdingTaxEntries
+
 function appendApprovalImmediateExpenseEntries(entries, payload) {
     const amount = Math.max(0, Number(payload.amount || 0));
     if (!(amount > 0)) return;
@@ -3569,6 +3591,7 @@ function normalizeApprovalExpenseSnapshot(doc) {
             card_alias: '',
             card_company: '',
             insurance: null,
+            withholding_tax: null,
             adjustment_type: '',
             original_approval_id: null,
             original_approval_title: ''
@@ -3582,6 +3605,7 @@ function normalizeApprovalExpenseSnapshot(doc) {
         card_alias: String(raw.card_alias || '').trim(),
         card_company: String(raw.card_company || '').trim(),
         insurance: raw.insurance && typeof raw.insurance === 'object' ? raw.insurance : null,
+        withholding_tax: raw.withholding_tax && typeof raw.withholding_tax === 'object' ? raw.withholding_tax : null,
         adjustment_type: ['increase', 'decrease'].includes(String(raw.adjustment_type || '').trim()) ? String(raw.adjustment_type || '').trim() : '',
         original_approval_id: Number.isInteger(Number(raw.original_approval_id)) && Number(raw.original_approval_id) > 0 ? Number(raw.original_approval_id) : null,
         original_approval_title: String(raw.original_approval_title || '').trim()
@@ -3710,9 +3734,114 @@ function isInsuranceApproval(doc) {
         || /4대보험/.test(getApprovalMergedText(doc));
 }
 
+function isWithholdingTaxApproval(doc) {
+    const snapshot = normalizeApprovalExpenseSnapshot(doc);
+    const merged = getApprovalMergedText(doc);
+    return snapshot.expense_sub_type === '원천세'
+        || String(doc?.doc_type || '').trim() === '지출결의(원천세)'
+        || (!isSalaryExpenseApproval(doc) && /원천세|근로소득세/u.test(merged));
+} // End of isWithholdingTaxApproval
+
+function parseApprovalWithholdingPaymentMonth(doc) {
+    const direct = normalizeAccountingYm(normalizeApprovalExpenseSnapshot(doc).withholding_tax?.payment_month);
+    if (direct) return direct;
+    const merged = getApprovalMergedText(doc);
+    const matched = merged.match(/(20\d{2})\s*(?:년|[-./])\s*(0?[1-9]|1[0-2])\s*월?/u);
+    return matched ? buildAccountingYmFromParts(matched[1], matched[2]) : '';
+} // End of parseApprovalWithholdingPaymentMonth
+
+async function buildAccountingWithholdingTaxState(doc) {
+    const expenseSnapshot = normalizeApprovalExpenseSnapshot(doc);
+    const snapshot = expenseSnapshot.withholding_tax && typeof expenseSnapshot.withholding_tax === 'object'
+        ? expenseSnapshot.withholding_tax
+        : null;
+    const amount = Math.max(0, Math.round(Number(doc?.amount || 0)));
+    const paymentMonth = parseApprovalWithholdingPaymentMonth(doc);
+    if (!paymentMonth) return { error: new Error('원천세 급여 지급월을 확인하지 못했습니다.'), data: null };
+
+    if (snapshot) {
+        const nationalAmount = Math.max(0, Math.round(Number(snapshot.actual_national_tax || 0)));
+        const localAmount = Math.max(0, Math.round(Number(snapshot.actual_local_tax || 0)));
+        const filingMonth = normalizeAccountingYm(snapshot.filing_month);
+        const salaryMonth = normalizeAccountingYm(snapshot.salary_month);
+        const dueDate = String(snapshot.due_date || '').trim();
+        if (filingMonth !== addAccountingMonths(paymentMonth, 1)) {
+            return { error: new Error('원천세 신고·납부월과 급여 지급월의 관계가 맞지 않습니다.'), data: null };
+        }
+        if (salaryMonth !== addAccountingMonths(paymentMonth, -1)) {
+            return { error: new Error('원천세 근거 급여 귀속월과 지급월의 관계가 맞지 않습니다.'), data: null };
+        }
+        if (snapshot.payment_confirmed !== true) {
+            return { error: new Error('급여 실제 지급 확인이 저장되지 않았습니다.'), data: null };
+        }
+        if (!(nationalAmount + localAmount > 0) || nationalAmount + localAmount !== amount) {
+            return { error: new Error(`결재 금액 ${amount.toLocaleString()}원과 국세·지방세 합계 ${(nationalAmount + localAmount).toLocaleString()}원이 다릅니다.`), data: null };
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+            return { error: new Error('원천세 납부 예정일을 확인하지 못했습니다.'), data: null };
+        }
+        return {
+            error: null,
+            data: { paymentMonth, salaryMonth, filingMonth, dueDate, nationalAmount, localAmount, legacy: false }
+        };
+    }
+
+    const salaryMonth = addAccountingMonths(paymentMonth, -1);
+    const coopId = String(myInfo?.coop_id || '').trim();
+    const { data: salaryDocs, error: salaryDocError } = await _supabase
+        .from('ref_approval')
+        .select('id,status,salary_ledger_snapshot,created_at')
+        .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
+        .eq('doc_type', '지출결의(급여)')
+        .in('status', ['완료', '실물결재완료'])
+        .order('created_at', { ascending: false })
+        .limit(60);
+    if (salaryDocError) return { error: salaryDocError, data: null };
+    const sourceDoc = (Array.isArray(salaryDocs) ? salaryDocs : []).find((row) => {
+        const sourceMonth = normalizeAccountingYm(row?.salary_ledger_snapshot?.year_month || row?.salary_ledger_snapshot?.state?.yearMonth);
+        return sourceMonth === salaryMonth && Array.isArray(row?.salary_ledger_snapshot?.state?.rows);
+    });
+    let taxRows = Array.isArray(sourceDoc?.salary_ledger_snapshot?.state?.rows)
+        ? sourceDoc.salary_ledger_snapshot.state.rows
+        : [];
+    if (taxRows.length === 0) {
+        const { data: salaryRows, error: salaryRowsError } = await _supabase
+            .from('hr_salary')
+            .select('ded_income,ded_local,payroll_tax_adjustment_income,payroll_tax_adjustment_local')
+            .eq('year_month', salaryMonth);
+        if (salaryRowsError) return { error: salaryRowsError, data: null };
+        taxRows = Array.isArray(salaryRows) ? salaryRows : [];
+    }
+    if (taxRows.length === 0) {
+        return { error: new Error(`${salaryMonth} 급여 원천세 근거를 찾지 못했습니다.`), data: null };
+    }
+    const sumBy = (key) => taxRows.reduce((sum, row) => sum + Number(row?.[key] || 0), 0);
+    const nationalAmount = Math.max(0, Math.round(sumBy('ded_income') - sumBy('payroll_tax_adjustment_income')));
+    const localAmount = Math.max(0, Math.round(sumBy('ded_local') - sumBy('payroll_tax_adjustment_local')));
+    if (!(nationalAmount + localAmount > 0) || nationalAmount + localAmount !== amount) {
+        return {
+            error: new Error(`기존 원천세 결재 금액 ${amount.toLocaleString()}원과 ${salaryMonth} 급여의 국세·지방세 합계 ${(nationalAmount + localAmount).toLocaleString()}원이 달라 자동 분리하지 않았습니다.`),
+            data: null
+        };
+    }
+    const filingMonth = addAccountingMonths(paymentMonth, 1);
+    return {
+        error: null,
+        data: {
+            paymentMonth,
+            salaryMonth,
+            filingMonth,
+            dueDate: buildAccountingDateFromYmDay(filingMonth, 10, ''),
+            nationalAmount,
+            localAmount,
+            legacy: true
+        }
+    };
+} // End of buildAccountingWithholdingTaxState
+
 function isSalaryLikeApproval(doc) {
     const merged = getApprovalMergedText(doc).toLowerCase();
-    return !isInsuranceApproval(doc) && /급여|salary|원천세|퇴직연금|인건비/.test(merged);
+    return !isInsuranceApproval(doc) && !isWithholdingTaxApproval(doc) && /급여|salary|퇴직연금|인건비/.test(merged);
 }
 
 function isSalaryExpenseApproval(doc) {
@@ -4025,6 +4154,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
     let insuranceDiscountTotal = 0;
     let insuranceCashTotal = 0;
     let durunuriEmployeeCount = 0;
+    let withholdingTaxCount = 0;
     let paymentCount = 0;
     let accrualCount = 0;
     let checkCardCount = 0;
@@ -4075,6 +4205,46 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
             });
             if (adjustmentType === 'decrease') adjustmentDecreaseCount += 1;
             else adjustmentIncreaseCount += 1;
+            totalAmount += amount;
+            continue;
+        }
+
+        if (isWithholdingTaxApproval(doc)) {
+            const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
+            const withholdingState = await buildAccountingWithholdingTaxState(doc);
+            if (withholdingState.error || !withholdingState.data) {
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: `원천세 분리 전표 확인 실패: ${withholdingState.error?.message || '계산 결과 없음'}`
+                });
+                continue;
+            }
+            const tax = withholdingState.data;
+            if (tax.dueDate && fallbackDate < tax.dueDate) {
+                blockedDocs.push({
+                    id: doc?.id,
+                    label,
+                    reason: `원천세 납부 예정일 ${tax.dueDate}부터 국세·지방세 지급전표를 연동할 수 있습니다.`
+                });
+                continue;
+            }
+            plans.push({
+                kind: 'withholding_tax',
+                amount,
+                nationalAmount: tax.nationalAmount,
+                localAmount: tax.localAmount,
+                paymentMonth: tax.paymentMonth,
+                salaryMonth: tax.salaryMonth,
+                filingMonth: tax.filingMonth,
+                date: tax.dueDate || journalDate,
+                description: label,
+                transId,
+                project: '본사',
+                operator,
+                legacy: tax.legacy === true
+            });
+            withholdingTaxCount += 1;
             totalAmount += amount;
             continue;
         }
@@ -4283,6 +4453,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer) {
         insuranceDiscountTotal,
         insuranceCashTotal,
         durunuriEmployeeCount,
+        withholdingTaxCount,
         paymentCount,
         accrualCount,
         checkCardCount,
@@ -4312,6 +4483,10 @@ function appendApprovalEntriesFromPlan(entries, plan) {
     }
     if (plan.kind === 'payment') {
         appendApprovalPaymentEntries(entries, plan);
+        return;
+    }
+    if (plan.kind === 'withholding_tax') {
+        appendApprovalWithholdingTaxEntries(entries, plan);
         return;
     }
     if (plan.kind === 'direct_payment') {
@@ -7233,6 +7408,7 @@ function confirmSync(type) {
                 `- 4대보험 납부전표: ${previewPlanResult.insuranceCount}건 (차)예수금/미지급비용/선급금, (대)보통예금/4대보험회사분 감액`,
                 `- 4대보험 자동이체 감액: ${previewPlanResult.insuranceCount > 0 ? `${previewPlanResult.insuranceDiscountTotal.toLocaleString()}원 / 실출금 ${previewPlanResult.insuranceCashTotal.toLocaleString()}원` : '대상 없음'}`,
                 `- 두루누리 직원 자동 배분: ${previewPlanResult.durunuriEmployeeCount || 0}명 (지원금 입력 문서만)`,
+                `- 급여 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 국세·지방세 별도 표시`,
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
@@ -7312,7 +7488,7 @@ function confirmSync(type) {
                     restores: []
                 });
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
-                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 급여 원천세 분리전표 ${runPlanResult.withholdingTaxCount || 0}건\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
