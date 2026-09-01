@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.56 | Change: 2026-09-01 - Add aggregate cooperative participation analytics. -->
+<!-- Version: v1.0.57 | Change: 2026-09-01 - Align quiz management with the homepage module. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.56 | index.html');</script>
+  <script>console.log('[Version] v1.0.57 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -385,7 +385,6 @@ let myInfo = null;
 let permissionSet = new Set();
 let platformContext = null;
 let coopRuntime = null;
-let quizPilotAllowed = false;
 let retiredGraceAccess = false;
 let suppressSessionExpiredHandling = false;
 let loginFormOpenedAt = Date.now();
@@ -1368,7 +1367,6 @@ async function loadUserInfo(user) {
     permissionSet = await loadPermissions(data);
     platformContext = await loadPlatformContext();
     coopRuntime = await loadCoopRuntime();
-    quizPilotAllowed = await loadQuizPilotAccess();
     applyErpBranding(coopRuntime?.coop_name || '');
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
 
@@ -1450,23 +1448,6 @@ async function loadCoopRuntime() {
     } catch (err) {
         console.error('get_my_erp_runtime exception:', err);
         return null;
-    }
-}
-
-async function loadQuizPilotAccess() {
-    try {
-        const { data, error } = await _supabase.rpc('quiz_pilot_get_context');
-        if (error) {
-            const code = String(error?.code || '');
-            if (code !== 'PGRST202' && code !== '42883') {
-                console.warn('quiz_pilot_get_context failed:', code || error?.message || error);
-            }
-            return false;
-        }
-        return data?.allowed === true;
-    } catch (error) {
-        console.warn('quiz pilot access check unavailable:', String(error?.code || error?.message || 'unknown'));
-        return false;
     }
 }
 
@@ -1788,7 +1769,6 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     document.getElementById('btnQuizAdmin')?.classList.add('hidden');
     if (
         siteAdminEnabled
-        && quizPilotAllowed
         && (
             (canSiteAdmin === null && isAdmin)
             || canSiteAdmin === true

@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Version: v1.5.2 | Change: 2026-09-01 - Use ERP site-admin access instead of the retired quiz pilot gate. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -245,7 +246,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.1';
+    const VERSION = '1.5.2';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -276,7 +277,7 @@
     }
     function errorMessage(error, fallback) {
       const message = String(error?.message || error || '');
-      if (message.includes('QUIZ_PILOT_ACCESS_REQUIRED') || message.includes('QUIZ_ACTIVE_MEMBER_REQUIRED')) return '현재 계정은 정조합원으로 확인되지 않습니다.';
+      if (message.includes('QUIZ_ACTIVE_MEMBER_REQUIRED')) return '현재 계정은 정조합원으로 확인되지 않습니다.';
       if (message.includes('QUIZ_ADMIN_PERMISSION_REQUIRED')) return '퀴즈 문제를 관리할 ERP 권한이 없습니다.';
       if (message.includes('QUIZ_SOURCE_NUMBER_DUPLICATE')) return '이미 사용 중인 관리 번호입니다. 다른 번호를 입력하거나 비워 주세요.';
       if (message.includes('QUIZ_OPTIONS') || message.includes('QUIZ_OPTION')) return '선택지를 확인해 주세요. 선택지는 2~6개이고 정답 하나를 골라야 합니다.';
@@ -294,9 +295,6 @@
         if (!userGate.ok) return;
         const runtimeGate = await window.ErpRuntimeGuard.enforce(client,{moduleKey:'site_admin',moduleLabel:'퀴즈 관리',alertFn:showAlert,redirectUrl:'index.html'});
         if (!runtimeGate.ok) return;
-        const { data: context, error: contextError } = await client.rpc('quiz_pilot_get_context');
-        if (contextError) throw contextError;
-        if (context?.allowed !== true) throw new Error('QUIZ_PILOT_ACCESS_REQUIRED');
         $('bootPanel').classList.add('d-none');
         $('mainPanel').classList.remove('d-none');
         await loadOverallStats();
