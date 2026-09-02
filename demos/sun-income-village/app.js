@@ -22,16 +22,16 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const views = new Set(['dashboard', 'members', 'accounting', 'approvals', 'governance', 'rules', 'plant-finance']);
+  const views = new Set(['dashboard', 'operations-fees', 'members', 'accounting', 'approvals', 'governance', 'rules', 'plant-finance']);
   let selectedVillage = 'all';
   let memberFilter = 'all';
   let activeMeetingId = null;
   let toastTimer = null;
 
   const villages = {
-    gaon: { name: '가온리 햇빛소득마을', short: '가온리', status: '운영 중', capacity: 200, members: 82, fullMembers: 76, payees: 72, review: 6, balance: 76450000, revenue: 7850000, expense: 1280000, generation: 21400 },
-    deulkkot: { name: '들꽃리 햇빛소득마을', short: '들꽃리', status: '운영 중', capacity: 150, members: 67, fullMembers: 61, payees: 58, review: 6, balance: 48900000, revenue: 6120000, expense: 660000, generation: 16800 },
-    solsaem: { name: '솔샘리 햇빛소득마을', short: '솔샘리', status: '준비 중', capacity: 100, members: 49, fullMembers: 41, payees: 39, review: 8, balance: 26350000, revenue: 0, expense: 4200000, generation: 0 }
+    gaon: { name: '가온리 햇빛소득마을', short: '가온리', manager: '김운영', status: '운영 중', capacity: 200, members: 82, fullMembers: 76, payees: 72, review: 6, balance: 76450000, revenue: 7850000, expense: 1280000, generation: 21400, reconcileState: '통장 일치', reconcileDifference: 0, unsigned: 0, feeState: '입금 완료' },
+    deulkkot: { name: '들꽃리 햇빛소득마을', short: '들꽃리', manager: '이관리', status: '운영 중', capacity: 150, members: 67, fullMembers: 61, payees: 58, review: 6, balance: 48900000, revenue: 6120000, expense: 660000, generation: 16800, reconcileState: '통장 일치', reconcileDifference: 0, unsigned: 0, feeState: '청구 완료' },
+    solsaem: { name: '솔샘리 햇빛소득마을', short: '솔샘리', manager: '김운영', status: '준비 중', capacity: 100, members: 49, fullMembers: 41, payees: 39, review: 8, balance: 26350000, revenue: 0, expense: 4200000, generation: 0, reconcileState: '확인 필요', reconcileDifference: 120000, unsigned: 1, feeState: '입금 대기' }
   };
 
   const members = [
@@ -124,6 +124,18 @@
     }
   };
 
+  const operationContracts = [
+    { village: 'gaon', manager: '김운영', start: '2026.01.01', setupFee: 300000, setupState: '납부 완료', monthlyFee: 80000, monthlyNote: 'VAT 별도', messagePolicy: '사용량 실비', billingDay: '매월 5일', status: '운영 중' },
+    { village: 'deulkkot', manager: '이관리', start: '2026.02.01', setupFee: 300000, setupState: '납부 완료', monthlyFee: 80000, monthlyNote: 'VAT 별도', messagePolicy: '사용량 실비', billingDay: '매월 5일', status: '운영 중' },
+    { village: 'solsaem', manager: '김운영', start: '2026.08.20', setupFee: 300000, setupState: '입금 대기', monthlyFee: 80000, monthlyNote: '운영 개시 후 · VAT 별도', messagePolicy: '사용량 실비', billingDay: '운영 개시일', status: '구축 중' }
+  ];
+
+  const operationBillings = [
+    { village: 'gaon', kind: '9월 이용료', baseAmount: 80000, messageAmount: 18500, due: '2026.09.05', status: '입금 완료', received: 108350 },
+    { village: 'deulkkot', kind: '9월 이용료', baseAmount: 80000, messageAmount: 12400, due: '2026.09.05', status: '청구 완료', received: 0 },
+    { village: 'solsaem', kind: '초기 설정비', baseAmount: 300000, messageAmount: 0, due: '2026.09.10', status: '입금 대기', received: 0 }
+  ];
+
   const tasks = [
     { village: 'gaon', priority: '검토', type: 'normal', title: '정기점검비 지출결의 확인', note: '결재 A-042 · 이사장 검토 중' },
     { village: 'deulkkot', priority: '확인', type: 'normal', title: '제초관리 계약 견적 비교', note: '결재 A-038 · 견적서 1건 추가 필요' },
@@ -164,12 +176,18 @@
     return `${Math.round(amount / 10000).toLocaleString('ko-KR')}만원`;
   }
 
+  function billingAmounts(item) {
+    const supply = Number(item.baseAmount || 0) + Number(item.messageAmount || 0);
+    const vat = Math.round(supply * 0.1);
+    return { supply, vat, total: supply + vat };
+  }
+
   function statusBadge(status) {
-    const type = status === '승인 완료' || status === '완료' || status === '운영 중' || status === '서명 완료' || status === '시행 중' || status === '정산 완료'
+    const type = status === '승인 완료' || status === '완료' || status === '운영 중' || status === '서명 완료' || status === '시행 중' || status === '정산 완료' || status === '통장 일치' || status === '입금 완료'
       ? 'status-done'
-      : status === '검토 중' || status === '서명 중'
+      : status === '검토 중' || status === '서명 중' || status === '확인 필요'
         ? 'status-review'
-        : status === '대기' || status === '준비 중'
+        : status === '대기' || status === '준비 중' || status === '청구 완료' || status === '입금 대기'
           ? 'status-wait'
           : 'status-progress';
     return `<span class="status-badge ${type}">${status}</span>`;
@@ -248,6 +266,14 @@
     $('#metricPending').textContent = `${pending}건`;
     $('#metricPendingNote').textContent = pending ? '검토가 필요한 문서' : '대기 문서 없음';
 
+    $('#controlRows').innerHTML = keys.map((key) => {
+      const village = villages[key];
+      const approvalPending = approvals.filter((item) => item.village === key && (item.status === '대기' || item.status === '검토 중')).length;
+      const difference = Number(village.reconcileDifference || 0);
+      return `<tr><td><strong>${village.name}</strong><small>담당 ${village.manager}</small></td><td>${statusBadge(village.reconcileState)}<small>${difference ? `차이 ${won(difference)}` : '차이 0원'}</small></td><td class="money">${won(village.revenue)}</td><td class="money">${won(village.expense)}</td><td><span class="work-count ${approvalPending ? 'needs-attention' : ''}">${approvalPending}건</span></td><td><span class="work-count ${village.unsigned ? 'needs-attention' : ''}">${village.unsigned}건</span></td><td>${statusBadge(village.feeState)}</td><td><div class="table-actions"><button type="button" data-open-village="${key}" data-open-view="accounting">회계</button><button type="button" data-open-village="${key}" data-open-view="approvals">결재</button></div></td></tr>`;
+    }).join('');
+    $('#controlCount').textContent = `${keys.length}곳`;
+
     $('#villageList').innerHTML = keys.map((key) => {
       const village = villages[key];
       return `<button class="village-row ${selectedVillage === key ? 'active' : ''}" type="button" data-select-village="${key}">
@@ -268,6 +294,28 @@
 
     const filteredRecent = recent.filter(matchesVillage);
     $('#recentList').innerHTML = filteredRecent.map((item) => `<li><span class="recent-icon">${item.icon}</span><div><strong>${villages[item.village].short} · ${item.title}</strong><small>${item.note}</small></div></li>`).join('');
+  }
+
+  function renderOperationFees() {
+    const contracts = operationContracts.filter(matchesVillage);
+    const billings = operationBillings.filter(matchesVillage);
+    const active = contracts.filter((item) => item.status === '운영 중').length;
+    const billingTotal = billings.reduce((sum, item) => sum + billingAmounts(item).total, 0);
+    const receivedTotal = billings.reduce((sum, item) => sum + Number(item.received || 0), 0);
+    const overdueTotal = billings.filter((item) => item.status === '연체').reduce((sum, item) => sum + Math.max(0, billingAmounts(item).total - Number(item.received || 0)), 0);
+
+    $('#feeActiveContracts').textContent = `${active}/${contracts.length}건`;
+    $('#feeBillingTotal').textContent = won(billingTotal);
+    $('#feeReceivedTotal').textContent = won(receivedTotal);
+    $('#feeOutstandingTotal').textContent = won(Math.max(0, billingTotal - receivedTotal));
+    $('#feeOverdueNote').textContent = `연체 ${won(overdueTotal)}`;
+    $('#contractCount').textContent = `${contracts.length}건`;
+    $('#contractRows').innerHTML = contracts.length ? contracts.map((item) => `<tr><td><strong>${villages[item.village].name}</strong></td><td>${item.manager}</td><td>${item.start}</td><td class="money"><strong>${won(item.setupFee)}</strong><small>${item.setupState} · VAT 별도</small></td><td class="money"><strong>${won(item.monthlyFee)}</strong><small>${item.monthlyNote}</small></td><td>${item.messagePolicy}</td><td>${item.billingDay}</td><td>${statusBadge(item.status)}</td></tr>`).join('') : '<tr><td colspan="8" class="empty-state">표시할 운영 계약이 없습니다.</td></tr>';
+    $('#billingCount').textContent = `${billings.length}건`;
+    $('#billingRows').innerHTML = billings.length ? billings.map((item) => {
+      const amounts = billingAmounts(item);
+      return `<tr><td><strong>${villages[item.village].name}</strong></td><td>${item.kind}</td><td class="money">${won(item.baseAmount)}</td><td class="money">${won(item.messageAmount)}</td><td class="money">${won(amounts.vat)}</td><td class="money">${won(amounts.total)}</td><td>${item.due}</td><td>${statusBadge(item.status)}</td><td><button class="table-link" type="button" data-open-village="${item.village}" data-open-view="accounting">장부 열기</button></td></tr>`;
+    }).join('') : '<tr><td colspan="9" class="empty-state">표시할 청구 내역이 없습니다.</td></tr>';
   }
 
   function renderMembers() {
@@ -313,8 +361,9 @@
     $('#accountBalance').textContent = compactWon(sumVillage('balance'));
     $('#accountRevenue').textContent = compactWon(sumVillage('revenue'));
     $('#accountExpense').textContent = compactWon(sumVillage('expense'));
-    $('#reconcileState').textContent = '완료';
-    $('#reconcileNote').textContent = '차이 0원';
+    const village = villages[selectedVillage];
+    $('#reconcileState').textContent = village.reconcileState;
+    $('#reconcileNote').textContent = village.reconcileDifference ? `차이 ${won(village.reconcileDifference)}` : '차이 0원';
     $('#ledgerCount').textContent = `${rows.length}건`;
     $('#ledgerRows').innerHTML = rows.map((entry) => `<tr><td>${entry.date}</td><td>${villages[entry.village].short}</td><td><strong>${entry.description}</strong></td><td>${entry.debit}</td><td>${entry.credit}</td><td class="money">${won(entry.amount)}</td><td><span class="small-badge yes">${entry.approval}</span></td></tr>`).join('');
   }
@@ -437,6 +486,7 @@
   function renderAll() {
     renderScopeGuards();
     renderDashboard();
+    renderOperationFees();
     renderMembers();
     renderAccounting();
     renderApprovals();
@@ -471,6 +521,15 @@
       if (villageButton) setVillage(villageButton.dataset.selectVillage);
       const meetingButton = event.target.closest('[data-meeting-id]');
       if (meetingButton) renderMeetingDetail(meetingButton.dataset.meetingId);
+      const openVillageButton = event.target.closest('[data-open-village]');
+      if (openVillageButton) {
+        const key = openVillageButton.dataset.openVillage;
+        const nextView = openVillageButton.dataset.openView || 'dashboard';
+        setVillage(key, false);
+        setView(nextView);
+        showToast(`${villages[key].name}의 ${nextView === 'accounting' ? '회계' : '결재'} 상세 업무를 엽니다.`);
+        return;
+      }
       const demoAction = event.target.closest('[data-demo-action]');
       if (!demoAction) return;
       const messages = {
@@ -479,7 +538,8 @@
         'new-approval': '실제 도입 시 지출결의·계약·일반결재 양식 중 하나를 선택합니다.',
         'new-meeting': '실제 도입 시 참석 대상·안건·정관에 맞는 서명자를 지정해 회의를 등록합니다.',
         'new-rule': '실제 도입 시 문서 종류·의결 근거·시행일을 적고 이전 버전을 보존합니다.',
-        'new-revenue-plan': '실제 도입 시 판매수입에서 운영비·세금·대출·적립금을 먼저 반영한 뒤 활용계획을 작성합니다.'
+        'new-revenue-plan': '실제 도입 시 판매수입에서 운영비·세금·대출·적립금을 먼저 반영한 뒤 활용계획을 작성합니다.',
+        'new-contract': '실제 도입 시 계약 기간·초기 설정비·월 이용료·별도 실비와 청구일을 등록하고 변경 이력을 보존합니다.'
       };
       showToast(messages[demoAction.dataset.demoAction] || '시연용 기능입니다. 실제 도입 범위는 운영협동조합과 협의해 정합니다.');
     });
