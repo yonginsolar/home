@@ -22,7 +22,7 @@
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const views = new Set(['dashboard', 'members', 'accounting', 'approvals', 'governance']);
+  const views = new Set(['dashboard', 'members', 'accounting', 'approvals', 'governance', 'rules', 'plant-finance']);
   let selectedVillage = 'all';
   let memberFilter = 'all';
   let activeMeetingId = null;
@@ -63,10 +63,10 @@
   ];
 
   const meetings = [
-    { id: 'M-gaon-1', village: 'gaon', type: '이사회', date: '2026-09-08', day: '8', month: '9월', title: '3분기 운영실적과 유지보수비 의결', place: '가온리 마을회관', target: '이사 5명 · 감사 1명', agenda: '발전량·전력판매 수입 보고, 정기점검비 의결', signed: 0, signers: 5, state: '소집 완료' },
-    { id: 'M-gaon-2', village: 'gaon', type: '총회', date: '2026-08-22', day: '22', month: '8월', title: '상반기 결산 및 운영보고', place: '가온리 마을회관', target: '정조합원 76명', agenda: '상반기 결산 승인과 운영현황 보고', signed: 4, signers: 4, state: '서명 완료' },
-    { id: 'M-deul-1', village: 'deulkkot', type: '이사회', date: '2026-09-12', day: '12', month: '9월', title: '제초관리 계약과 보험료 보고', place: '들꽃리 경로당', target: '이사 4명 · 감사 1명', agenda: '연간 제초계약 업체 선정과 보험 가입 보고', signed: 0, signers: 4, state: '안건 준비' },
-    { id: 'M-sol-1', village: 'solsaem', type: '총회', date: '2026-09-20', day: '20', month: '9월', title: '부지 사용협약과 사업계획 의결', place: '솔샘리 마을회관', target: '정조합원 41명', agenda: '부지 사용협약, 사업비와 차입 한도 의결', signed: 0, signers: 4, state: '소집 준비' }
+    { id: 'M-gaon-1', village: 'gaon', type: '이사회', date: '2026-09-08', day: '8', month: '9월', title: '3분기 운영실적과 유지보수비 의결', place: '가온리 마을회관', target: '이사 5명 · 감사 1명', agenda: '발전량·전력판매 수입 보고, 정기점검비 의결', signatureRule: '정관에 따라 의장·출석 이사 지정', disclosure: '서명 완료 후 공개', signed: 0, signers: 5, state: '소집 완료' },
+    { id: 'M-gaon-2', village: 'gaon', type: '총회', date: '2026-08-22', day: '22', month: '8월', title: '상반기 결산 및 운영보고', place: '가온리 마을회관', target: '정조합원 76명', agenda: '상반기 결산 승인과 운영현황 보고', signatureRule: '의장 + 총회에서 선출한 조합원 3명', disclosure: '조합원 열람 가능', signed: 4, signers: 4, state: '서명 완료' },
+    { id: 'M-deul-1', village: 'deulkkot', type: '이사회', date: '2026-09-12', day: '12', month: '9월', title: '제초관리 계약과 보험료 보고', place: '들꽃리 경로당', target: '이사 4명 · 감사 1명', agenda: '연간 제초계약 업체 선정과 보험 가입 보고', signatureRule: '정관에 따라 의장·출석 이사 지정', disclosure: '서명 완료 후 공개', signed: 0, signers: 4, state: '안건 준비' },
+    { id: 'M-sol-1', village: 'solsaem', type: '총회', date: '2026-09-20', day: '20', month: '9월', title: '부지 사용협약과 사업계획 의결', place: '솔샘리 마을회관', target: '정조합원 41명', agenda: '부지 사용협약, 사업비와 차입 한도 의결', signatureRule: '의장 + 총회에서 선출한 조합원 3명', disclosure: '의결·서명 후 공개', signed: 0, signers: 4, state: '소집 준비' }
   ];
 
   const documents = [
@@ -74,6 +74,55 @@
     { village: 'deulkkot', title: '제7차 이사회 의사록', date: '2026.08.19', signature: '4/4', status: '완료' },
     { village: 'solsaem', title: '설립준비위원회 회의록', date: '2026.08.15', signature: '3/4', status: '서명 중' }
   ];
+
+  const rules = [
+    { village: 'gaon', type: '정관', title: '가온리햇빛협동조합 정관', version: '제3차', resolution: '2026 정기총회', effective: '2026.03.01', isPublic: true, status: '시행 중', revisions: 3 },
+    { village: 'gaon', type: '규약', title: '조합원 가입·탈퇴 규약', version: '제1차', resolution: '2025 임시총회', effective: '2025.07.15', isPublic: true, status: '시행 중', revisions: 1 },
+    { village: 'gaon', type: '규정', title: '이사회 운영 및 의사록 규정', version: '제2차', resolution: '제5차 이사회', effective: '2026.05.20', isPublic: true, status: '시행 중', revisions: 2 },
+    { village: 'gaon', type: '규정', title: '잉여금·시설 수선적립금 운영규정', version: '초안', resolution: '제8차 이사회 상정', effective: '-', isPublic: false, status: '의결 준비', revisions: 0 },
+    { village: 'deulkkot', type: '정관', title: '들꽃리햇빛협동조합 정관', version: '제2차', resolution: '2026 정기총회', effective: '2026.02.21', isPublic: true, status: '시행 중', revisions: 2 },
+    { village: 'deulkkot', type: '규약', title: '마을공동사업 수익금 활용규약', version: '제1차', resolution: '2026 정기총회', effective: '2026.02.21', isPublic: true, status: '시행 중', revisions: 1 },
+    { village: 'deulkkot', type: '규정', title: '발전소 유지관리 규정', version: '제1차', resolution: '제4차 이사회', effective: '2026.04.01', isPublic: true, status: '시행 중', revisions: 1 },
+    { village: 'solsaem', type: '정관', title: '솔샘리햇빛협동조합 정관안', version: '설립안', resolution: '창립총회 상정', effective: '-', isPublic: false, status: '의결 준비', revisions: 0 },
+    { village: 'solsaem', type: '규약', title: '구성원 가입 및 출자 규약안', version: '초안', resolution: '창립총회 상정', effective: '-', isPublic: false, status: '검토 중', revisions: 0 },
+    { village: 'solsaem', type: '규정', title: '부지·발전소 운영규정안', version: '초안', resolution: '설립준비위원회', effective: '-', isPublic: false, status: '검토 중', revisions: 0 }
+  ];
+
+  const plantFinancePlans = {
+    gaon: {
+      period: '2026년 8월', forecastSales: 94200000, operatingCost: 16800000, tax: 4500000, loan: 28000000, statutoryReserve: 4500000, repairReserve: 12000000,
+      availability: '99.2%', settlement: '정산 완료', nextInspection: '2026.11.15', incident: '가동중단 0시간', maintenance: '11월 인버터 정밀점검 예정 · 예상비 320만원',
+      uses: [
+        { stage: '먼저 반영', title: '발전소 운영·유지비', planned: 16800000, executed: 10100000, decision: '2026 사업예산', status: '집행 중' },
+        { stage: '먼저 반영', title: '세금 납부 재원', planned: 4500000, executed: 2800000, decision: '세금계산 반영', status: '확인 중' },
+        { stage: '먼저 반영', title: '대출 원리금 상환', planned: 28000000, executed: 18700000, decision: '대출상환계획', status: '정상 상환' },
+        { stage: '적립', title: '법정적립금', planned: 4500000, executed: 4500000, decision: '2026 정기총회', status: '적립 완료' },
+        { stage: '적립', title: '시설 수선·교체 임의적립금', planned: 12000000, executed: 8000000, decision: '2026 정기총회', status: '적립 중' },
+        { stage: '활용', title: '마을공동사업', planned: 10000000, executed: 6000000, decision: '제6차 이사회', status: '집행 중' },
+        { stage: '활용', title: '조합원 배당 계획', planned: 12000000, executed: 0, decision: '결산 후 총회', status: '확정 전' },
+        { stage: '이월', title: '다음 연도 이월', planned: 6400000, executed: 0, decision: '결산 후 확정', status: '예정' }
+      ]
+    },
+    deulkkot: {
+      period: '2026년 8월', forecastSales: 73440000, operatingCost: 12000000, tax: 3200000, loan: 20000000, statutoryReserve: 3800000, repairReserve: 9000000,
+      availability: '98.7%', settlement: '정산 완료', nextInspection: '2026.10.04', incident: '가동중단 2.5시간', maintenance: '10월 구조물·배선 정기점검 예정 · 예상비 180만원',
+      uses: [
+        { stage: '먼저 반영', title: '발전소 운영·유지비', planned: 12000000, executed: 7200000, decision: '2026 사업예산', status: '집행 중' },
+        { stage: '먼저 반영', title: '세금 납부 재원', planned: 3200000, executed: 1900000, decision: '세금계산 반영', status: '확인 중' },
+        { stage: '먼저 반영', title: '대출 원리금 상환', planned: 20000000, executed: 13300000, decision: '대출상환계획', status: '정상 상환' },
+        { stage: '적립', title: '법정적립금', planned: 3800000, executed: 3800000, decision: '2026 정기총회', status: '적립 완료' },
+        { stage: '적립', title: '시설 수선·교체 임의적립금', planned: 9000000, executed: 5000000, decision: '2026 정기총회', status: '적립 중' },
+        { stage: '활용', title: '마을공동사업', planned: 8000000, executed: 4500000, decision: '제5차 이사회', status: '집행 중' },
+        { stage: '활용', title: '조합원 배당 계획', planned: 11000000, executed: 0, decision: '결산 후 총회', status: '확정 전' },
+        { stage: '이월', title: '다음 연도 이월', planned: 6440000, executed: 0, decision: '결산 후 확정', status: '예정' }
+      ]
+    },
+    solsaem: {
+      period: '상업운전 준비', forecastSales: 0, operatingCost: 0, tax: 0, loan: 0, statutoryReserve: 0, repairReserve: 0,
+      availability: '-', settlement: '운전 전', nextInspection: '사용전검사 일정 미정', incident: '발전자료 없음', maintenance: '상업운전 후 장기 유지관리와 시설 수선·교체 적립계획을 작성합니다.',
+      uses: []
+    }
+  };
 
   const tasks = [
     { village: 'gaon', priority: '검토', type: 'normal', title: '정기점검비 지출결의 확인', note: '결재 A-042 · 이사장 검토 중' },
@@ -116,7 +165,7 @@
   }
 
   function statusBadge(status) {
-    const type = status === '승인 완료' || status === '완료' || status === '운영 중' || status === '서명 완료'
+    const type = status === '승인 완료' || status === '완료' || status === '운영 중' || status === '서명 완료' || status === '시행 중' || status === '정산 완료'
       ? 'status-done'
       : status === '검토 중' || status === '서명 중'
         ? 'status-review'
@@ -165,7 +214,7 @@
 
   function renderScopeGuards() {
     const locked = selectedVillage === 'all';
-    ['members', 'accounting', 'approvals', 'governance'].forEach((view) => {
+    ['members', 'accounting', 'approvals', 'governance', 'rules', 'plant-finance'].forEach((view) => {
       const panel = $(`[data-view-panel="${view}"]`);
       if (!panel) return;
       panel.classList.toggle('scope-unselected', locked);
@@ -307,7 +356,7 @@
     }
     const percent = meeting.signers ? Math.round((meeting.signed / meeting.signers) * 100) : 0;
     $('#meetingDetail').innerHTML = `<div class="panel-heading"><div><span class="panel-kicker">${villages[meeting.village].name}</span><h2>${meeting.title}</h2></div>${statusBadge(meeting.state)}</div>
-      <dl class="detail-list"><div><dt>회의 구분</dt><dd>${meeting.type}</dd></div><div><dt>일시·장소</dt><dd>${meeting.date} · ${meeting.place}</dd></div><div><dt>참석 대상</dt><dd>${meeting.target}</dd></div><div><dt>주요 안건</dt><dd>${meeting.agenda}</dd></div></dl>
+      <dl class="detail-list"><div><dt>회의 구분</dt><dd>${meeting.type}</dd></div><div><dt>일시·장소</dt><dd>${meeting.date} · ${meeting.place}</dd></div><div><dt>참석 대상</dt><dd>${meeting.target}</dd></div><div><dt>주요 안건</dt><dd>${meeting.agenda}</dd></div><div><dt>의사록 서명 기준</dt><dd>${meeting.signatureRule}</dd></div><div><dt>열람·공개</dt><dd>${meeting.disclosure}</dd></div></dl>
       <div class="signature-box"><div><strong>의사록 전자서명</strong><span>회의 종료 후 지정된 서명자에게 요청합니다.</span></div><div class="signature-progress"><b>${meeting.signed}/${meeting.signers}명</b><div><i style="width:${percent}%"></i></div></div></div>`;
   }
 
@@ -328,6 +377,63 @@
     $('#documentRows').innerHTML = docs.length ? docs.map((doc) => `<tr><td>${villages[doc.village].short}</td><td><strong>${doc.title}</strong></td><td>${doc.date}</td><td>${doc.signature}</td><td>${statusBadge(doc.status)}</td></tr>`).join('') : '<tr><td colspan="5" class="empty-state">표시할 의사록이 없습니다.</td></tr>';
   }
 
+  function renderRules() {
+    if (selectedVillage === 'all') {
+      $('#ruleCurrentTotal').textContent = '-';
+      $('#ruleRevisionTotal').textContent = '-';
+      $('#rulePublicTotal').textContent = '-';
+      $('#ruleReviewTotal').textContent = '-';
+      $('#ruleCount').textContent = '마을 선택 필요';
+      $('#ruleRows').innerHTML = '';
+      return;
+    }
+    const rows = rules.filter(matchesVillage);
+    const reviewCount = rows.filter((item) => item.status !== '시행 중').length;
+    $('#ruleCurrentTotal').textContent = `${rows.filter((item) => item.status === '시행 중').length}건`;
+    $('#ruleRevisionTotal').textContent = `${rows.reduce((sum, item) => sum + Number(item.revisions || 0), 0)}회`;
+    $('#rulePublicTotal').textContent = `${rows.filter((item) => item.isPublic).length}건`;
+    $('#ruleReviewTotal').textContent = `${reviewCount}건`;
+    $('#ruleCount').textContent = `${rows.length}건`;
+    $('#ruleRows').innerHTML = rows.length ? rows.map((item) => `<tr><td><span class="small-badge ${item.type === '정관' ? 'yes' : 'no'}">${item.type}</span></td><td><strong>${item.title}</strong></td><td>${item.version}</td><td>${item.resolution}</td><td>${item.effective}</td><td>${item.isPublic ? '<span class="small-badge yes">공개</span>' : '<span class="small-badge pending">준비 중</span>'}</td><td>${statusBadge(item.status)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty-state">등록된 가상 문서가 없습니다.</td></tr>';
+  }
+
+  function renderPlantFinance() {
+    if (selectedVillage === 'all') {
+      $('#planSales').textContent = '-';
+      $('#planOperating').textContent = '-';
+      $('#planLoan').textContent = '-';
+      $('#planReserve').textContent = '-';
+      $('#plantSettlementState').textContent = '마을 선택 필요';
+      $('#plantOperationDetail').innerHTML = '';
+      $('#maintenanceAlert').innerHTML = '';
+      $('#moneyFlow').innerHTML = '';
+      $('#revenueUseCount').textContent = '마을 선택 필요';
+      $('#revenueUseRows').innerHTML = '';
+      return;
+    }
+    const village = villages[selectedVillage];
+    const plan = plantFinancePlans[selectedVillage];
+    const operatingAndTax = plan.operatingCost + plan.tax;
+    const reserves = plan.statutoryReserve + plan.repairReserve;
+    const availableAfterReserve = Math.max(0, plan.forecastSales - operatingAndTax - plan.loan - reserves);
+    $('#planSales').textContent = compactWon(plan.forecastSales);
+    $('#planOperating').textContent = compactWon(operatingAndTax);
+    $('#planLoan').textContent = compactWon(plan.loan);
+    $('#planReserve').textContent = compactWon(reserves);
+    $('#plantSettlementState').textContent = plan.settlement;
+    $('#plantOperationDetail').innerHTML = `<div><dt>자료 기준</dt><dd>${plan.period}</dd></div><div><dt>설비용량</dt><dd>${village.capacity}kW</dd></div><div><dt>월 발전량</dt><dd>${village.generation ? `${village.generation.toLocaleString('ko-KR')}kWh` : '-'}</dd></div><div><dt>가동률</dt><dd>${plan.availability}</dd></div><div><dt>전력판매 수입</dt><dd>${village.revenue ? won(village.revenue) : '-'}</dd></div><div><dt>장애·중단</dt><dd>${plan.incident}</dd></div><div><dt>다음 점검</dt><dd>${plan.nextInspection}</dd></div><div><dt>정산 상태</dt><dd>${plan.settlement}</dd></div>`;
+    $('#maintenanceAlert').innerHTML = `<span>🔧</span><div><strong>유지관리 일정</strong><p>${plan.maintenance}</p></div>`;
+    const flowSteps = [
+      { label: '예상 판매수입', amount: plan.forecastSales, note: '발전·정산자료' },
+      { label: '운영비·세금·대출', amount: operatingAndTax + plan.loan, note: '먼저 반영' },
+      { label: '법정·수선 적립금', amount: reserves, note: '총회 의결' },
+      { label: '활용·배당·이월', amount: availableAfterReserve, note: '남은 재원' }
+    ];
+    $('#moneyFlow').innerHTML = flowSteps.map((step, index) => `<div class="money-flow-step"><span>${index + 1}</span><div><small>${step.note}</small><strong>${step.label}</strong><b>${compactWon(step.amount)}</b></div></div>${index < flowSteps.length - 1 ? '<i aria-hidden="true">↓</i>' : ''}`).join('');
+    $('#revenueUseCount').textContent = plan.uses.length ? `${plan.uses.length}개 항목` : '상업운전 후 작성';
+    $('#revenueUseRows').innerHTML = plan.uses.length ? plan.uses.map((item) => `<tr><td><span class="small-badge ${item.stage === '적립' ? 'yes' : item.stage === '먼저 반영' ? 'pending' : 'no'}">${item.stage}</span></td><td><strong>${item.title}</strong></td><td class="money">${won(item.planned)}</td><td class="money">${won(item.executed)}</td><td class="money">${won(Math.max(0, item.planned - item.executed))}</td><td><strong>${item.decision}</strong><small>${item.status}</small></td></tr>`).join('') : '<tr><td colspan="6" class="empty-state">상업운전과 첫 결산자료가 생기면 수익금 활용계획을 작성합니다.</td></tr>';
+  }
+
   function renderAll() {
     renderScopeGuards();
     renderDashboard();
@@ -335,6 +441,8 @@
     renderAccounting();
     renderApprovals();
     renderGovernance();
+    renderRules();
+    renderPlantFinance();
   }
 
   function setVillage(key, notify = true) {
@@ -369,7 +477,9 @@
         'new-member': '실제 도입 시 가입 신청·출자금 확인·승인 순서로 구성원을 등록합니다.',
         'new-journal': '실제 도입 시 통장 거래를 불러오거나 차변·대변 전표를 직접 입력합니다.',
         'new-approval': '실제 도입 시 지출결의·계약·일반결재 양식 중 하나를 선택합니다.',
-        'new-meeting': '실제 도입 시 참석 대상·안건·서명자를 지정해 회의를 등록합니다.'
+        'new-meeting': '실제 도입 시 참석 대상·안건·정관에 맞는 서명자를 지정해 회의를 등록합니다.',
+        'new-rule': '실제 도입 시 문서 종류·의결 근거·시행일을 적고 이전 버전을 보존합니다.',
+        'new-revenue-plan': '실제 도입 시 판매수입에서 운영비·세금·대출·적립금을 먼저 반영한 뒤 활용계획을 작성합니다.'
       };
       showToast(messages[demoAction.dataset.demoAction] || '시연용 기능입니다. 실제 도입 범위는 운영협동조합과 협의해 정합니다.');
     });
