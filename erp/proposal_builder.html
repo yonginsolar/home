@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.0.0 | Change: 2026-09-04 - Add editable parking solar proposal builder. -->
+<!-- Version: v1.1.0 | Change: 2026-09-04 - Add photo target-zone editor and existing-installation context control. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -84,12 +84,23 @@
     .file-name { margin-top: 7px; overflow-wrap: anywhere; color: var(--green); font-size: 11px; font-weight: 750; }
     .switch-row { display: flex; align-items: flex-start; gap: 9px; margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
     .switch-row input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--green); }
+    .overlay-tools { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+    .overlay-tools .field { margin-bottom: 9px; }
+    .overlay-button-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .overlay-button-row .btn { min-height: 36px; padding: 0 10px; font-size: 12px; }
+    .overlay-button-row .btn.active { border-color: var(--sun); background: #fff2cd; color: #704400; }
+    .overlay-button-row .btn:disabled { opacity: .46; cursor: not-allowed; }
+    .overlay-count { margin-left: auto; color: var(--green); font-size: 12px; font-weight: 850; }
+    .existing-toggle { min-height: 42px; margin: 0 0 11px; padding: 9px 11px; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+    .existing-toggle input { flex: 0 0 auto; margin-top: 0; }
+    .field input:disabled { opacity: .66; cursor: not-allowed; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-color-scheme: dark) {
       :root { --bg:#0c1510; --surface:#132019; --surface-soft:#0f1b14; --line:#304237; --ink:#edf5ef; --muted:#b2c0b6; --green:#7bc887; --green-soft:#193322; --sun:#f4b84b; --danger:#ffabab; --shadow:0 18px 48px rgba(0,0,0,.28); }
       .boot-error { background:#321b1d; }
       .btn.primary { color:#102016; }
       .btn.sunny { background:#3b2d10; color:#ffd78c; border-color:#795d25; }
+      .overlay-button-row .btn.active { background:#3b2d10; color:#ffd78c; border-color:#795d25; }
       .preview-status { background:#192227; border-color:#334047; color:#c3ced3; }
       .preview-pane { background:#222d32; }
     }
@@ -107,6 +118,7 @@
       .back-link { min-height: 38px; padding-inline: 10px; }
       .editor { padding: 11px; }
       .grid-2 { grid-template-columns: 1fr; }
+      .overlay-count { width: 100%; margin-left: 0; }
       .editor-actions { bottom: -11px; margin: 4px -11px -11px; padding: 11px; }
     }
   </style>
@@ -129,7 +141,7 @@
   <main class="app-shell" id="appShell">
     <header class="topbar">
       <div class="title-wrap">
-        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.0.0</span></strong>
+        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.1.0</span></strong>
         <span>남사읍행정복지센터 제안서의 18쪽 구성과 계산식을 재사용합니다.</span>
       </div>
       <div class="top-actions">
@@ -179,12 +191,29 @@
             <label for="siteImage">대상지 사진 또는 위성사진</label>
             <input id="siteImage" name="siteImage" type="file" accept="image/png,image/jpeg,image/webp">
             <div class="file-name" id="siteImageName">남사읍 예시 위성사진 사용 중</div>
-            <span class="help">새 사진을 올리면 남사읍 사진의 구역 표시선은 자동으로 숨겨집니다. 사진은 서버에 저장하지 않고 생성한 파일 안에 포함합니다.</span>
+            <span class="help">새 사진을 올리면 남사읍 예시 표시는 자동으로 숨겨집니다. 사진은 서버에 저장하지 않고 생성한 파일 안에 포함합니다.</span>
+            <div class="overlay-tools">
+              <div class="field">
+                <label for="siteOverlayLabel">사진 위 대상지 표시 문구</label>
+                <input id="siteOverlayLabel" name="siteOverlayLabel" type="text" value="신규 설치 검토 대상지" maxlength="40">
+              </div>
+              <div class="overlay-button-row">
+                <button class="btn" id="addOverlayButton" type="button">+ 대상지 영역 추가</button>
+                <button class="btn" id="deleteOverlayButton" type="button" disabled>선택 영역 삭제</button>
+                <button class="btn" id="clearOverlayButton" type="button" disabled>모두 지우기</button>
+                <span class="overlay-count" id="overlayCount">0개 표시</span>
+              </div>
+              <span class="help">영역 추가를 누른 뒤 3쪽 사진에서 대상지를 드래그하세요. 만든 영역은 옮기거나 오른쪽 아래 점을 드래그해 크기를 바꿀 수 있습니다.</span>
+            </div>
           </div>
         </section>
 
         <section class="section">
           <h2>2. 설치 용량</h2>
+          <label class="switch-row existing-toggle">
+            <input id="hasExistingInstallation" name="hasExistingInstallation" type="checkbox" checked>
+            <span><b>기존 설치 설비 있음</b><br>없으면 체크를 해제하세요. 기존 설비 관련 문장과 계산 항목이 제안서에서 빠집니다.</span>
+          </label>
           <div class="grid-2">
             <div class="field">
               <label for="mandatoryKw">전체 의무용량(kW)</label>
@@ -192,7 +221,7 @@
             </div>
             <div class="field">
               <label for="existingKw">기존 설치용량(kW)</label>
-              <input id="existingKw" name="existingKw" type="number" min="0" step="0.1" value="57" required>
+              <input id="existingKw" name="existingKw" type="number" min="0.1" step="0.1" value="57" required>
             </div>
           </div>
           <div class="field">
@@ -312,6 +341,6 @@
     </div>
   </main>
 
-  <script src="proposal_builder.js?v=1.0.0"></script>
+  <script src="proposal_builder.js?v=1.1.0"></script>
 </body>
 </html>

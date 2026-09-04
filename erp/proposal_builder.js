@@ -1,8 +1,8 @@
-/* Version: v1.0.0 | 2026-09-04 | Editable parking solar proposal builder. */
+/* Version: v1.1.0 | 2026-09-04 | Photo target-zone editor and existing-installation context control. */
 (() => {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.0.0';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -10,7 +10,7 @@
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const DRAFT_FIELDS = [
     'proposalDate', 'proposalVersion', 'facilityName', 'regionFull', 'regionShort', 'siteAddress',
-    'mandatoryKw', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
+    'siteOverlayLabel', 'mandatoryKw', 'hasExistingInstallation', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
     'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
     'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
     'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay'
@@ -20,6 +20,11 @@
     client: null,
     templateHtml: '',
     siteImageDataUrl: '',
+    customOverlays: [],
+    selectedOverlayId: '',
+    overlayDrawMode: false,
+    overlaySequence: 0,
+    lastExistingKw: 57,
     editMode: false,
     manualDirty: false,
     renderTimer: 0,
@@ -42,6 +47,13 @@
     remainingKw: document.getElementById('remainingKw'),
     siteImage: document.getElementById('siteImage'),
     siteImageName: document.getElementById('siteImageName'),
+    siteOverlayLabel: document.getElementById('siteOverlayLabel'),
+    addOverlayButton: document.getElementById('addOverlayButton'),
+    deleteOverlayButton: document.getElementById('deleteOverlayButton'),
+    clearOverlayButton: document.getElementById('clearOverlayButton'),
+    overlayCount: document.getElementById('overlayCount'),
+    hasExistingInstallation: document.getElementById('hasExistingInstallation'),
+    existingKw: document.getElementById('existingKw'),
     keepNamsaOverlay: document.getElementById('keepNamsaOverlay'),
     applyButton: document.getElementById('applyButton'),
     editButton: document.getElementById('editButton'),
@@ -198,7 +210,8 @@
 
   function readModel() {
     const mandatoryKw = numberValue('mandatoryKw');
-    const existingKw = numberValue('existingKw');
+    const hasExistingInstallation = Boolean(el.hasExistingInstallation.checked);
+    const existingKw = hasExistingInstallation ? numberValue('existingKw') : 0;
     const remainingKw = Math.max(mandatoryKw - existingKw, 0);
     const model = {
       proposalDate: textValue('proposalDate'),
@@ -207,7 +220,9 @@
       regionFull: textValue('regionFull'),
       regionShort: textValue('regionShort'),
       siteAddress: textValue('siteAddress'),
+      siteOverlayLabel: textValue('siteOverlayLabel') || '신규 설치 검토 대상지',
       mandatoryKw,
+      hasExistingInstallation,
       existingKw,
       remainingKw,
       expandedMinKw: numberValue('expandedMinKw'),
@@ -237,7 +252,10 @@
       throw new Error('제안일, 대상 시설, 지역명과 주소를 모두 입력해 주세요.');
     }
     if (model.mandatoryKw < 0 || model.existingKw < 0 || model.expandedMinKw <= 0 || model.expandedKw <= 0) {
-      throw new Error('설치 용량은 0보다 큰 값으로 확인해 주세요.');
+      throw new Error('설치 용량 값을 확인해 주세요.');
+    }
+    if (model.hasExistingInstallation && model.existingKw <= 0) {
+      throw new Error('기존 설비가 있으면 기존 설치용량을 0보다 크게 입력해 주세요.');
     }
     if (model.expandedMinKw > model.expandedKw) {
       throw new Error('확대안 범위 시작 용량은 수지 비교 확대안 용량보다 클 수 없습니다.');
@@ -336,6 +354,134 @@
     ];
   }
 
+  function slideAt(doc, oneBasedPage) {
+    return doc.querySelectorAll('.slide')[oneBasedPage - 1] || null;
+  }
+
+  function removeClosestByText(root, selector, pattern) {
+    [...(root?.querySelectorAll(selector) || [])].forEach((node) => {
+      if (pattern.test(String(node.textContent || '').replace(/\s+/g, ' ').trim())) node.remove();
+    });
+  }
+
+  function applyNoExistingInstallationContext(doc, model) {
+    if (model.hasExistingInstallation && model.existingKw > 0) return;
+    const kw = `${trimNumber(model.mandatoryKw)}kW`;
+    const remaining = `${trimNumber(model.remainingKw)}kW`;
+
+    const siteSlide = slideAt(doc, 3);
+    siteSlide?.querySelectorAll('.existing-label, .existing-zone').forEach((node) => node.remove());
+    removeClosestByText(siteSlide, 'li', /(남측 )?기존 태양광|기존 .*설비의 소유|기존 .*설비/);
+
+    const statusSlide = slideAt(doc, 4);
+    const statusTitle = statusSlide?.querySelector('h2');
+    if (statusTitle) statusTitle.innerHTML = `전체 의무용량은 ${kw}이며, <strong>필요 설치용량도 ${remaining}</strong>입니다`;
+    const formula = [...(statusSlide?.querySelectorAll('div') || [])]
+      .find((node) => /grid-template-columns:\s*1fr 64px 1fr 64px 1fr/.test(node.getAttribute('style') || ''));
+    if (formula) {
+      const parts = [...formula.children];
+      parts[1]?.remove();
+      parts[2]?.remove();
+      formula.style.gridTemplateColumns = '1fr 64px 1fr';
+      const requiredBox = parts[4];
+      const requiredLabels = requiredBox?.querySelectorAll('.small') || [];
+      if (requiredLabels[0]) requiredLabels[0].textContent = '필요 설치용량';
+      if (requiredLabels[1]) requiredLabels[1].textContent = '법정 의무 이행에 필요한 전체 용량';
+    }
+    const statusCards = statusSlide?.querySelectorAll('.grid-2 > .card') || [];
+    const firstCard = statusCards[0];
+    const secondCard = statusCards[1];
+    if (firstCard?.querySelector('h3')) firstCard.querySelector('h3').textContent = `${remaining}를 설치하면`;
+    const firstLead = firstCard?.querySelector('.lead');
+    if (firstLead) firstLead.textContent = `의무용량 ${kw}를 채울 수 있습니다.`;
+    const secondText = secondCard?.querySelector('p');
+    if (secondText) secondText.textContent = `${remaining}는 법이 요구하는 전체 설치용량입니다. 어느 주차면을 얼마나 덮을지는 주민이 체감할 편익을 기준으로 한 번 더 판단할 필요가 있습니다.`;
+    const source = statusSlide?.querySelector('.source');
+    if (source) source.textContent = `용량 현황: 전체 의무 ${kw} · 신규 설치 ${remaining}(제공받은 현황 기준). 관계 부서의 대상 시설과 용량 확인 후 최종 확정합니다.`;
+
+    const comparisonSlide = slideAt(doc, 6);
+    const comparisonHeaders = comparisonSlide?.querySelectorAll('.table th') || [];
+    if (comparisonHeaders[1]) comparisonHeaders[1].textContent = `의무 이행안 · 신규 ${remaining}`;
+    if (comparisonHeaders[2]) comparisonHeaders[2].textContent = `주민복지 확대안 · 신규 약 ${trimNumber(model.expandedMinKw)}~${trimNumber(model.expandedKw)}kW 내외`;
+    [...(comparisonSlide?.querySelectorAll('td') || [])].forEach((cell) => {
+      cell.textContent = String(cell.textContent || '').replace(/\s*·\s*기존 설비 인정/g, '');
+    });
+
+    const safetySlide = slideAt(doc, 12);
+    [...(safetySlide?.querySelectorAll('p') || [])].forEach((paragraph) => {
+      if (paragraph.textContent.includes('청사와 기존 설비에 어울리는')) {
+        paragraph.textContent = paragraph.textContent.replace('청사와 기존 설비에 어울리는', '청사와 주변 환경에 어울리는');
+      }
+    });
+    removeClosestByText(safetySlide, '.note.warning', /기존 태양광 설비와 신규 설비/);
+
+    const scaleSlide = slideAt(doc, 13);
+    const firstScaleCard = scaleSlide?.querySelector('.grid-3 > .card');
+    const firstScaleLabel = firstScaleCard?.querySelector('.stat-label');
+    if (firstScaleLabel) firstScaleLabel.textContent = '필요 설치용량';
+    const firstScaleText = firstScaleCard?.querySelector('p');
+    if (firstScaleText) firstScaleText.textContent = '전체 의무용량과 같은 신규 설치량';
+    removeClosestByText(scaleSlide, 'tbody tr', /기존 .*자료|기존 설비|신·구 설비/);
+  }
+
+  function renderCustomOverlays(doc, model) {
+    const shell = doc.querySelector('.photo-shell');
+    if (!shell) return;
+    state.customOverlays.forEach((overlay, index) => {
+      shell.appendChild(createOverlayElement(doc, overlay, model.siteOverlayLabel, index));
+    });
+  }
+
+  function createOverlayElement(doc, overlay, baseLabel, index) {
+    const zone = doc.createElement('div');
+    zone.className = 'proposal-custom-zone';
+    zone.dataset.overlayId = overlay.id;
+    updateOverlayElement(zone, overlay);
+    const label = doc.createElement('span');
+    label.className = 'proposal-custom-zone-label';
+    label.textContent = state.customOverlays.length > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
+    const handle = doc.createElement('i');
+    handle.className = 'proposal-zone-handle';
+    handle.setAttribute('aria-hidden', 'true');
+    zone.append(label, handle);
+    return zone;
+  }
+
+  function updateOverlayElement(zone, overlay) {
+    zone.style.left = `${overlay.x}%`;
+    zone.style.top = `${overlay.y}%`;
+    zone.style.width = `${overlay.width}%`;
+    zone.style.height = `${overlay.height}%`;
+  }
+
+  function appendBuilderStyles(doc) {
+    const documentStyle = doc.createElement('style');
+    documentStyle.id = 'proposalBuilderDocumentStyle';
+    documentStyle.textContent = `
+      .proposal-custom-zone { position:absolute; z-index:4; border:4px dashed #ff8a00; background:rgba(255,183,61,.20); box-shadow:0 0 0 2px rgba(255,255,255,.78) inset; }
+      .proposal-custom-zone-label { position:absolute; left:8px; top:8px; max-width:calc(100% - 16px); padding:5px 9px; border-radius:7px; background:rgba(91,47,0,.88); color:#fff; font-size:15px; line-height:1.25; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      @media print { .proposal-zone-handle { display:none !important; } .proposal-custom-zone { outline:0 !important; } }
+    `;
+    doc.head.appendChild(documentStyle);
+
+    const previewStyle = doc.createElement('style');
+    previewStyle.id = 'proposalBuilderPreviewStyle';
+    previewStyle.textContent = `
+      .control-bar { display:none !important; }
+      @media screen {
+        [data-proposal-editable="true"] { cursor:text; border-radius:4px; transition:background .15s, outline-color .15s; }
+        [data-proposal-editable="true"]:hover { outline:2px dashed rgba(8,127,91,.38); outline-offset:3px; }
+        [data-proposal-editable="true"]:focus { outline:3px solid rgba(245,160,0,.66); outline-offset:3px; background:rgba(255,244,214,.74); }
+        .proposal-custom-zone { cursor:move; touch-action:none; }
+        .proposal-custom-zone.is-selected { outline:4px solid #087f5b; outline-offset:3px; }
+        .proposal-zone-handle { position:absolute; right:-10px; bottom:-10px; width:22px; height:22px; border:3px solid #fff; border-radius:50%; background:#087f5b; box-shadow:0 2px 7px rgba(0,0,0,.3); cursor:nwse-resize; }
+        .photo-shell.proposal-zone-draw-mode { cursor:crosshair; touch-action:none; outline:5px solid rgba(245,160,0,.75); outline-offset:4px; }
+      }
+      @media print { [data-proposal-editable="true"] { outline:0 !important; background:transparent !important; } }
+    `;
+    doc.head.appendChild(previewStyle);
+  }
+
   function buildPreviewDocument(model) {
     const doc = new DOMParser().parseFromString(state.templateHtml, 'text/html');
     doc.querySelectorAll('script').forEach((node) => node.remove());
@@ -355,19 +501,9 @@
       const caption = doc.querySelector('.photo-caption');
       if (caption) caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
     }
-
-    const previewStyle = doc.createElement('style');
-    previewStyle.id = 'proposalBuilderPreviewStyle';
-    previewStyle.textContent = `
-      .control-bar { display:none !important; }
-      @media screen {
-        [data-proposal-editable="true"] { cursor:text; border-radius:4px; transition:background .15s, outline-color .15s; }
-        [data-proposal-editable="true"]:hover { outline:2px dashed rgba(8,127,91,.38); outline-offset:3px; }
-        [data-proposal-editable="true"]:focus { outline:3px solid rgba(245,160,0,.66); outline-offset:3px; background:rgba(255,244,214,.74); }
-      }
-      @media print { [data-proposal-editable="true"] { outline:0 !important; background:transparent !important; } }
-    `;
-    doc.head.appendChild(previewStyle);
+    applyNoExistingInstallationContext(doc, model);
+    renderCustomOverlays(doc, model);
+    appendBuilderStyles(doc);
     return '<!doctype html>\n' + doc.documentElement.outerHTML;
   }
 
@@ -405,6 +541,212 @@
     el.previewStatus.classList.toggle('dirty', Boolean(dirty));
   }
 
+  function roundCoordinate(value) {
+    return Math.round(value * 100) / 100;
+  }
+
+  function clamp(value, minimum, maximum) {
+    return Math.min(Math.max(value, minimum), maximum);
+  }
+
+  function overlayById(id) {
+    return state.customOverlays.find((overlay) => overlay.id === id) || null;
+  }
+
+  function refreshOverlayLabels(doc) {
+    const baseLabel = textValue('siteOverlayLabel') || '신규 설치 검토 대상지';
+    doc?.querySelectorAll('.proposal-custom-zone').forEach((zone, index) => {
+      const label = zone.querySelector('.proposal-custom-zone-label');
+      if (label) label.textContent = state.customOverlays.length > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
+    });
+  }
+
+  function updateOverlayControls(doc = el.previewFrame.contentDocument) {
+    const count = state.customOverlays.length;
+    const hasSelection = Boolean(state.selectedOverlayId && overlayById(state.selectedOverlayId));
+    const showSampleTarget = Boolean(el.keepNamsaOverlay.checked && !state.siteImageDataUrl && count === 0);
+    const showSampleExisting = Boolean(el.keepNamsaOverlay.checked && !state.siteImageDataUrl && el.hasExistingInstallation.checked);
+    el.overlayCount.textContent = `${count}개 표시`;
+    el.deleteOverlayButton.disabled = !hasSelection;
+    el.clearOverlayButton.disabled = count === 0;
+    el.addOverlayButton.classList.toggle('active', state.overlayDrawMode);
+    el.addOverlayButton.textContent = state.overlayDrawMode ? '영역 추가 취소' : '+ 대상지 영역 추가';
+    doc?.querySelectorAll('.proposal-custom-zone').forEach((zone) => {
+      zone.classList.toggle('is-selected', zone.dataset.overlayId === state.selectedOverlayId);
+    });
+    doc?.querySelectorAll('.zone-label, .zone').forEach((node) => {
+      node.style.display = showSampleTarget ? '' : 'none';
+    });
+    doc?.querySelectorAll('.existing-label, .existing-zone').forEach((node) => {
+      node.style.display = showSampleExisting ? '' : 'none';
+    });
+    doc?.querySelector('.photo-shell')?.classList.toggle('proposal-zone-draw-mode', state.overlayDrawMode);
+  }
+
+  function pointerPercent(event, shell) {
+    const rect = shell.getBoundingClientRect();
+    return {
+      x: clamp((event.clientX - rect.left) / rect.width * 100, 0, 100),
+      y: clamp((event.clientY - rect.top) / rect.height * 100, 0, 100)
+    };
+  }
+
+  function bindOverlayEditor(doc) {
+    const shell = doc?.querySelector('.photo-shell');
+    if (!shell) return;
+    let action = null;
+
+    const selectOverlay = (id) => {
+      state.selectedOverlayId = overlayById(id) ? id : '';
+      updateOverlayControls(doc);
+    };
+
+    shell.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const zone = event.target.closest?.('.proposal-custom-zone');
+      const handle = event.target.closest?.('.proposal-zone-handle');
+      const point = pointerPercent(event, shell);
+
+      if (state.overlayDrawMode) {
+        const overlay = {
+          id: `zone-${Date.now()}-${++state.overlaySequence}`,
+          x: roundCoordinate(point.x),
+          y: roundCoordinate(point.y),
+          width: 0,
+          height: 0
+        };
+        state.customOverlays.push(overlay);
+        state.selectedOverlayId = overlay.id;
+        const element = createOverlayElement(doc, overlay, textValue('siteOverlayLabel') || '신규 설치 검토 대상지', state.customOverlays.length - 1);
+        shell.appendChild(element);
+        action = { type: 'draw', overlay, element, start: point };
+        refreshOverlayLabels(doc);
+        updateOverlayControls(doc);
+        event.preventDefault();
+        return;
+      }
+
+      if (!zone) {
+        selectOverlay('');
+        return;
+      }
+
+      const overlay = overlayById(zone.dataset.overlayId);
+      if (!overlay) return;
+      selectOverlay(overlay.id);
+      action = {
+        type: handle ? 'resize' : 'move',
+        overlay,
+        element: zone,
+        start: point,
+        origin: { x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height }
+      };
+      event.preventDefault();
+      event.stopPropagation();
+    });
+
+    doc.addEventListener('pointermove', (event) => {
+      if (!action) return;
+      const point = pointerPercent(event, shell);
+      const { overlay, origin, start } = action;
+      if (action.type === 'draw') {
+        overlay.x = roundCoordinate(Math.min(start.x, point.x));
+        overlay.y = roundCoordinate(Math.min(start.y, point.y));
+        overlay.width = roundCoordinate(Math.abs(point.x - start.x));
+        overlay.height = roundCoordinate(Math.abs(point.y - start.y));
+      } else if (action.type === 'move') {
+        overlay.x = roundCoordinate(clamp(origin.x + point.x - start.x, 0, 100 - origin.width));
+        overlay.y = roundCoordinate(clamp(origin.y + point.y - start.y, 0, 100 - origin.height));
+      } else {
+        overlay.width = roundCoordinate(clamp(origin.width + point.x - start.x, 3, 100 - origin.x));
+        overlay.height = roundCoordinate(clamp(origin.height + point.y - start.y, 3, 100 - origin.y));
+      }
+      updateOverlayElement(action.element, overlay);
+      event.preventDefault();
+    });
+
+    doc.addEventListener('pointerup', (event) => {
+      if (!action) return;
+      const finished = action;
+      action = null;
+      if (finished.type === 'draw') {
+        state.overlayDrawMode = false;
+        if (finished.overlay.width < 3 || finished.overlay.height < 3) {
+          state.customOverlays = state.customOverlays.filter((overlay) => overlay.id !== finished.overlay.id);
+          state.selectedOverlayId = '';
+          finished.element.remove();
+          setStatus('영역이 너무 작아 추가하지 않았습니다. 대상지를 조금 더 크게 드래그해 주세요.', true);
+        } else {
+          setStatus('대상지 영역을 표시했습니다. 영역을 드래그해 옮기거나 오른쪽 아래 점으로 크기를 조절할 수 있습니다.');
+        }
+      } else {
+        setStatus('대상지 표시 위치를 반영했습니다. PDF와 HTML에도 같은 위치로 저장됩니다.');
+      }
+      refreshOverlayLabels(doc);
+      updateOverlayControls(doc);
+      event.preventDefault();
+    });
+
+    updateOverlayControls(doc);
+  }
+
+  function toggleOverlayDrawMode() {
+    const doc = el.previewFrame.contentDocument;
+    const shell = doc?.querySelector('.photo-shell');
+    if (!shell) {
+      setStatus('3쪽 대상지 사진이 준비된 뒤 다시 눌러 주세요.', true);
+      return;
+    }
+    state.overlayDrawMode = !state.overlayDrawMode;
+    if (state.overlayDrawMode) {
+      state.selectedOverlayId = '';
+      shell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setStatus('3쪽 사진에서 설치 검토 대상지를 드래그해 표시하세요. 여러 곳이면 영역 추가를 다시 눌러 반복할 수 있습니다.');
+    } else {
+      setStatus('대상지 영역 추가를 취소했습니다.');
+    }
+    updateOverlayControls(doc);
+  }
+
+  function deleteSelectedOverlay() {
+    if (!state.selectedOverlayId) return;
+    const id = state.selectedOverlayId;
+    state.customOverlays = state.customOverlays.filter((overlay) => overlay.id !== id);
+    state.selectedOverlayId = '';
+    const doc = el.previewFrame.contentDocument;
+    doc?.querySelector(`.proposal-custom-zone[data-overlay-id="${CSS.escape(id)}"]`)?.remove();
+    refreshOverlayLabels(doc);
+    updateOverlayControls(doc);
+    setStatus('선택한 대상지 표시를 삭제했습니다.');
+  }
+
+  function clearOverlays() {
+    if (!state.customOverlays.length) return;
+    if (!window.confirm('사진 위에 만든 대상지 표시를 모두 지울까요?')) return;
+    state.customOverlays = [];
+    state.selectedOverlayId = '';
+    state.overlayDrawMode = false;
+    const doc = el.previewFrame.contentDocument;
+    doc?.querySelectorAll('.proposal-custom-zone').forEach((node) => node.remove());
+    updateOverlayControls(doc);
+    setStatus('사진 위 대상지 표시를 모두 지웠습니다.');
+  }
+
+  function syncExistingInstallationUi({ restoreValue = false } = {}) {
+    const hasExisting = Boolean(el.hasExistingInstallation.checked);
+    const currentValue = Number(el.existingKw.value);
+    if (!hasExisting) {
+      if (Number.isFinite(currentValue) && currentValue > 0) state.lastExistingKw = currentValue;
+      el.existingKw.value = '0';
+      el.existingKw.disabled = true;
+      el.existingKw.required = false;
+    } else {
+      el.existingKw.disabled = false;
+      el.existingKw.required = true;
+      if (restoreValue && (!(currentValue > 0))) el.existingKw.value = String(state.lastExistingKw || 57);
+    }
+  }
+
   function renderPreview({ force = false } = {}) {
     if (!state.templateHtml) return;
     if (state.manualDirty && force) {
@@ -427,6 +769,7 @@
           state.manualDirty = true;
           setStatus('직접 고친 문구가 있습니다. 입력값을 다시 반영하면 이 수정은 사라집니다.', true);
         });
+        bindOverlayEditor(doc);
         applyEditMode();
       };
       el.previewFrame.srcdoc = buildPreviewDocument(model);
@@ -513,6 +856,12 @@
     if (!sourceDoc) throw new Error('미리보기가 아직 준비되지 않았습니다.');
     const doc = sourceDoc.cloneNode(true);
     doc.getElementById('proposalBuilderPreviewStyle')?.remove();
+    doc.querySelectorAll('.proposal-zone-handle').forEach((node) => node.remove());
+    doc.querySelectorAll('.proposal-custom-zone').forEach((node) => {
+      node.classList.remove('is-selected');
+      node.removeAttribute('data-overlay-id');
+    });
+    doc.querySelectorAll('.proposal-zone-draw-mode').forEach((node) => node.classList.remove('proposal-zone-draw-mode'));
     doc.querySelectorAll('script').forEach((node) => node.remove());
     doc.querySelectorAll('*').forEach((node) => {
       node.removeAttribute('contenteditable');
@@ -581,6 +930,9 @@
       return;
     }
     state.siteImageDataUrl = await dataUrlFromBlob(file);
+    state.customOverlays = [];
+    state.selectedOverlayId = '';
+    state.overlayDrawMode = false;
     el.siteImageName.textContent = file.name;
     el.keepNamsaOverlay.checked = false;
     saveDraft();
@@ -592,10 +944,15 @@
     el.form.reset();
     localStorage.removeItem(DRAFT_KEY);
     state.siteImageDataUrl = '';
+    state.customOverlays = [];
+    state.selectedOverlayId = '';
+    state.overlayDrawMode = false;
     state.editMode = false;
     state.manualDirty = false;
     el.siteImage.value = '';
     el.siteImageName.textContent = '남사읍 예시 위성사진 사용 중';
+    syncExistingInstallationUi();
+    updateOverlayControls();
     renderPreview();
   }
 
@@ -606,6 +963,8 @@
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage) return;
+      if (event.target === el.hasExistingInstallation) syncExistingInstallationUi({ restoreValue: true });
+      if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
       saveDraft();
       scheduleRender();
@@ -616,6 +975,9 @@
         setStatus('사진을 읽지 못했습니다. 다른 파일을 선택해 주세요.', true);
       });
     });
+    el.addOverlayButton.addEventListener('click', toggleOverlayDrawMode);
+    el.deleteOverlayButton.addEventListener('click', deleteSelectedOverlay);
+    el.clearOverlayButton.addEventListener('click', clearOverlays);
     el.editButton.addEventListener('click', () => {
       state.editMode = !state.editMode;
       applyEditMode();
@@ -668,6 +1030,8 @@
       state.templateHtml = await response.text();
       if (!state.templateHtml.includes('class="slide')) throw new Error('TEMPLATE_INVALID');
       restoreDraft();
+      syncExistingInstallationUi();
+      updateOverlayControls();
       bindEvents();
       el.bootSpinner.hidden = true;
       el.bootActions.hidden = true;
