@@ -1,0 +1,317 @@
+<!doctype html>
+<!-- Version: v1.0.0 | Change: 2026-09-04 - Add editable parking solar proposal builder. -->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <meta name="color-scheme" content="light dark">
+  <title>제안서 만들기 | 협동조합 ERP</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+  <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
+  <script src="../shared/route_guard.js?v=20260408-1"></script>
+  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #eef4f0;
+      --surface: #ffffff;
+      --surface-soft: #f7faf8;
+      --line: #d8e5dc;
+      --ink: #17251b;
+      --muted: #657269;
+      --green: #1d6b3a;
+      --green-soft: #e8f4eb;
+      --sun: #c97a00;
+      --danger: #a53737;
+      --shadow: 0 18px 48px rgba(34, 67, 44, .13);
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--ink); font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+    button, input, select, textarea { font: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    .boot-panel { display: grid; min-height: 100vh; padding: 24px; place-items: center; text-align: center; }
+    .boot-card { width: min(440px, 100%); padding: 30px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: var(--shadow); }
+    .boot-icon { display: grid; width: 58px; height: 58px; margin: 0 auto 15px; place-items: center; border-radius: 18px; background: var(--green-soft); font-size: 30px; }
+    .boot-card h1 { margin: 0; font-size: 24px; }
+    .boot-card p { margin: 10px 0 0; color: var(--muted); line-height: 1.65; }
+    .spinner { width: 28px; height: 28px; margin: 20px auto 0; border: 3px solid #dbe9de; border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
+    .boot-error { margin-top: 18px; padding: 13px; border-radius: 13px; background: #fff2f2; color: var(--danger); line-height: 1.55; white-space: pre-line; }
+    .boot-actions { display: flex; margin-top: 16px; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .boot-link, .boot-retry { display: inline-flex; min-height: 42px; padding: 0 15px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 11px; color: var(--green); background: var(--surface); font-weight: 800; text-decoration: none; cursor: pointer; }
+    .boot-retry { border-color: var(--green); background: var(--green); color: #fff; }
+    .app-shell { display: none; min-height: 100vh; grid-template-rows: auto minmax(0, 1fr); }
+    .app-shell.ready { display: grid; }
+    .topbar { position: sticky; top: 0; z-index: 30; display: flex; min-height: 64px; padding: 10px 16px; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(12px); }
+    .title-wrap { min-width: 0; }
+    .title-wrap strong, .title-wrap span { display: block; }
+    .title-wrap strong { font-size: 17px; }
+    .title-wrap span { margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .top-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .btn, .back-link { display: inline-flex; min-height: 40px; padding: 0 14px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 11px; color: var(--ink); background: var(--surface); font-weight: 800; text-decoration: none; cursor: pointer; }
+    .btn:hover, .back-link:hover { border-color: #9ebca7; }
+    .btn.primary { border-color: var(--green); background: var(--green); color: #fff; }
+    .btn.sunny { border-color: #e8b85a; background: #fff2cd; color: #704400; }
+    .workspace { display: grid; min-height: 0; grid-template-columns: minmax(330px, 400px) minmax(0, 1fr); }
+    .editor { min-height: 0; padding: 16px; overflow: auto; border-right: 1px solid var(--line); background: var(--surface-soft); }
+    .intro { margin-bottom: 14px; padding: 14px 15px; border: 1px solid #cfe2d4; border-radius: 15px; background: var(--green-soft); color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .intro strong { color: var(--ink); }
+    .section { margin-bottom: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+    .section h2 { margin: 0 0 13px; font-size: 15px; }
+    details.section { padding: 0; }
+    details.section summary { padding: 15px; cursor: pointer; font-size: 15px; font-weight: 850; list-style-position: inside; }
+    details.section[open] summary { border-bottom: 1px solid var(--line); }
+    details.section .details-body { padding: 15px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+    .field { min-width: 0; margin-bottom: 11px; }
+    .field:last-child { margin-bottom: 0; }
+    .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 42px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); outline: none; }
+    .field textarea { min-height: 74px; resize: vertical; line-height: 1.5; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 14%, transparent); }
+    .field input[readonly] { background: var(--surface-soft); color: var(--green); font-weight: 850; }
+    .help { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .editor-actions { position: sticky; bottom: -16px; z-index: 12; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px -16px -16px; padding: 13px 16px 16px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 94%, transparent); backdrop-filter: blur(10px); }
+    .editor-actions .primary { grid-column: 1 / -1; }
+    .preview-pane { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: #ced8dd; }
+    .preview-status { display: flex; min-height: 42px; padding: 8px 14px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #bdc9ce; background: #edf3f5; color: #526168; font-size: 12px; }
+    .status-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status-copy.dirty { color: #925600; font-weight: 800; }
+    .page-count { flex: 0 0 auto; font-weight: 850; }
+    .preview-frame { width: 100%; height: 100%; min-height: calc(100vh - 106px); border: 0; background: #dfe7eb; }
+    .file-name { margin-top: 7px; overflow-wrap: anywhere; color: var(--green); font-size: 11px; font-weight: 750; }
+    .switch-row { display: flex; align-items: flex-start; gap: 9px; margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .switch-row input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--green); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0c1510; --surface:#132019; --surface-soft:#0f1b14; --line:#304237; --ink:#edf5ef; --muted:#b2c0b6; --green:#7bc887; --green-soft:#193322; --sun:#f4b84b; --danger:#ffabab; --shadow:0 18px 48px rgba(0,0,0,.28); }
+      .boot-error { background:#321b1d; }
+      .btn.primary { color:#102016; }
+      .btn.sunny { background:#3b2d10; color:#ffd78c; border-color:#795d25; }
+      .preview-status { background:#192227; border-color:#334047; color:#c3ced3; }
+      .preview-pane { background:#222d32; }
+    }
+    @media (max-width: 920px) {
+      .workspace { grid-template-columns: 1fr; }
+      .editor { overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
+      .preview-frame { min-height: 72vh; }
+      .topbar { align-items: flex-start; }
+      .title-wrap span { max-width: 48vw; }
+    }
+    @media (max-width: 620px) {
+      .topbar { position: static; padding: 9px 10px; }
+      .title-wrap span { display: none; }
+      .top-actions .btn { display: none; }
+      .back-link { min-height: 38px; padding-inline: 10px; }
+      .editor { padding: 11px; }
+      .grid-2 { grid-template-columns: 1fr; }
+      .editor-actions { bottom: -11px; margin: 4px -11px -11px; padding: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="boot-panel" id="bootPanel" aria-live="polite">
+    <div class="boot-card">
+      <div class="boot-icon" aria-hidden="true">📑</div>
+      <h1>제안서 만들기</h1>
+      <p id="bootMessage">ERP 로그인과 관리자 권한을 확인하고 있습니다.</p>
+      <div class="spinner" id="bootSpinner" aria-label="확인 중"></div>
+      <div class="boot-error" id="bootError" hidden></div>
+      <div class="boot-actions" id="bootActions" hidden>
+        <button class="boot-retry" id="bootRetry" type="button">다시 확인</button>
+        <a class="boot-link" href="index.html">← ERP 메인</a>
+      </div>
+    </div>
+  </section>
+
+  <main class="app-shell" id="appShell">
+    <header class="topbar">
+      <div class="title-wrap">
+        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.0.0</span></strong>
+        <span>남사읍행정복지센터 제안서의 18쪽 구성과 계산식을 재사용합니다.</span>
+      </div>
+      <div class="top-actions">
+        <button class="btn" id="printTopButton" type="button">🖨️ PDF 저장</button>
+        <a class="back-link" href="index.html">← ERP 메인</a>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <form class="editor" id="proposalForm" autocomplete="off">
+        <div class="intro">
+          <strong>사용 순서</strong><br>
+          대상지·용량·사진을 넣으면 계산과 문구가 18쪽에 반영됩니다. 숫자 확인이 끝나면 <b>최종 문구 수정</b>을 켜서 미리보기 문장을 직접 고친 뒤 PDF나 HTML로 저장하세요.
+        </div>
+
+        <section class="section">
+          <h2>1. 제안서 기본 정보</h2>
+          <div class="grid-2">
+            <div class="field">
+              <label for="proposalDate">제안일</label>
+              <input id="proposalDate" name="proposalDate" type="date" value="2026-09-04" required>
+            </div>
+            <div class="field">
+              <label for="proposalVersion">문서 버전</label>
+              <input id="proposalVersion" name="proposalVersion" type="text" value="v1.0" maxlength="16" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="facilityName">대상 시설명</label>
+            <input id="facilityName" name="facilityName" type="text" value="남사읍행정복지센터" maxlength="80" required>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="regionFull">지역명</label>
+              <input id="regionFull" name="regionFull" type="text" value="남사읍" maxlength="30" required>
+            </div>
+            <div class="field">
+              <label for="regionShort">본문용 짧은 이름</label>
+              <input id="regionShort" name="regionShort" type="text" value="남사" maxlength="20" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="siteAddress">대상지 주소</label>
+            <input id="siteAddress" name="siteAddress" type="text" value="경기 용인시 처인구 남사읍 내기로 22" maxlength="120" required>
+          </div>
+          <div class="field">
+            <label for="siteImage">대상지 사진 또는 위성사진</label>
+            <input id="siteImage" name="siteImage" type="file" accept="image/png,image/jpeg,image/webp">
+            <div class="file-name" id="siteImageName">남사읍 예시 위성사진 사용 중</div>
+            <span class="help">새 사진을 올리면 남사읍 사진의 구역 표시선은 자동으로 숨겨집니다. 사진은 서버에 저장하지 않고 생성한 파일 안에 포함합니다.</span>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>2. 설치 용량</h2>
+          <div class="grid-2">
+            <div class="field">
+              <label for="mandatoryKw">전체 의무용량(kW)</label>
+              <input id="mandatoryKw" name="mandatoryKw" type="number" min="0" step="0.1" value="119" required>
+            </div>
+            <div class="field">
+              <label for="existingKw">기존 설치용량(kW)</label>
+              <input id="existingKw" name="existingKw" type="number" min="0" step="0.1" value="57" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="remainingKw">추가 의무용량(kW) · 자동 계산</label>
+            <input id="remainingKw" name="remainingKw" type="text" value="62" readonly>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="expandedMinKw">확대안 범위 시작(kW)</label>
+              <input id="expandedMinKw" name="expandedMinKw" type="number" min="0" step="0.1" value="100" required>
+            </div>
+            <div class="field">
+              <label for="expandedKw">수지 비교 확대안(kW)</label>
+              <input id="expandedKw" name="expandedKw" type="number" min="0.1" step="0.1" value="120" required>
+            </div>
+          </div>
+        </section>
+
+        <details class="section">
+          <summary>3. 수지 계산 가정</summary>
+          <div class="details-body">
+            <div class="grid-2">
+              <div class="field">
+                <label for="unitCostManwon">공사비(만원/kW)</label>
+                <input id="unitCostManwon" name="unitCostManwon" type="number" min="1" step="1" value="180" required>
+              </div>
+              <div class="field">
+                <label for="salePriceWon">판매단가(원/kWh)</label>
+                <input id="salePriceWon" name="salePriceWon" type="number" min="1" step="1" value="170" required>
+              </div>
+              <div class="field">
+                <label for="sunHours">일평균 발전시간</label>
+                <input id="sunHours" name="sunHours" type="number" min="0.1" max="24" step="0.1" value="3.6" required>
+              </div>
+              <div class="field">
+                <label for="operationPct">연 운영·수선충당(사업비 %)</label>
+                <input id="operationPct" name="operationPct" type="number" min="0" max="100" step="0.1" value="2" required>
+              </div>
+              <div class="field">
+                <label for="returnPct">지역환원(매출 %)</label>
+                <input id="returnPct" name="returnPct" type="number" min="0" max="100" step="0.1" value="5" required>
+              </div>
+            </div>
+            <span class="help">금융비용·세금·부지사용료·계통보강비·부가세는 이 예비 계산에 포함하지 않습니다.</span>
+          </div>
+        </details>
+
+        <details class="section">
+          <summary>4. 일정·조합 현황·연락처</summary>
+          <div class="details-body">
+            <div class="grid-2">
+              <div class="field">
+                <label for="constructionMonth">착공 목표(계약 후 개월)</label>
+                <input id="constructionMonth" name="constructionMonth" type="number" min="1" max="24" step="1" value="4" required>
+              </div>
+              <div class="field">
+                <label for="completionMinMonth">완공 목표 시작(개월)</label>
+                <input id="completionMinMonth" name="completionMinMonth" type="number" min="1" max="36" step="1" value="6" required>
+              </div>
+              <div class="field">
+                <label for="completionMaxMonth">완공 목표 끝(개월)</label>
+                <input id="completionMaxMonth" name="completionMaxMonth" type="number" min="1" max="36" step="1" value="7" required>
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label for="memberTotal">정조합원(명)</label>
+                <input id="memberTotal" name="memberTotal" type="number" min="0" step="1" value="257" required>
+              </div>
+              <div class="field">
+                <label for="shareCapitalManwon">납입출자금(만원)</label>
+                <input id="shareCapitalManwon" name="shareCapitalManwon" type="number" min="0" step="1" value="5960" required>
+              </div>
+              <div class="field">
+                <label for="individualMembers">개인 조합원(명)</label>
+                <input id="individualMembers" name="individualMembers" type="number" min="0" step="1" value="242" required>
+              </div>
+              <div class="field">
+                <label for="organizationMembers">단체 조합원(곳)</label>
+                <input id="organizationMembers" name="organizationMembers" type="number" min="0" step="1" value="15" required>
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label for="chairPhone">이사장 연락처</label>
+                <input id="chairPhone" name="chairPhone" type="text" value="010-9025-6911" maxlength="30">
+              </div>
+              <div class="field">
+                <label for="officePhone">사무국 연락처</label>
+                <input id="officePhone" name="officePhone" type="text" value="010-2513-5736" maxlength="30">
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <label class="switch-row">
+          <input id="keepNamsaOverlay" name="keepNamsaOverlay" type="checkbox" checked>
+          <span><b>남사읍 예시 사진의 주차열 표시선 유지</b><br>다른 대상지 사진을 올리면 자동으로 꺼집니다.</span>
+        </label>
+
+        <div class="editor-actions">
+          <button class="btn primary" id="applyButton" type="submit">🔄 입력값을 18쪽에 반영</button>
+          <button class="btn sunny" id="editButton" type="button">✍️ 최종 문구 수정</button>
+          <button class="btn" id="printButton" type="button">🖨️ PDF 저장</button>
+          <button class="btn" id="downloadButton" type="button">⬇️ HTML 저장</button>
+          <button class="btn" id="resetButton" type="button">↩️ 남사 예시로 초기화</button>
+        </div>
+      </form>
+
+      <section class="preview-pane" aria-label="제안서 미리보기">
+        <div class="preview-status">
+          <span class="status-copy" id="previewStatus">제안서 템플릿을 준비하고 있습니다.</span>
+          <span class="page-count" id="pageCount">18쪽</span>
+        </div>
+        <iframe class="preview-frame" id="previewFrame" title="제안서 18쪽 미리보기"></iframe>
+      </section>
+    </div>
+  </main>
+
+  <script src="proposal_builder.js?v=1.0.0"></script>
+</body>
+</html>

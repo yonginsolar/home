@@ -1,0 +1,697 @@
+/* Version: v1.0.0 | 2026-09-04 | Editable parking solar proposal builder. */
+(() => {
+  'use strict';
+
+  const VERSION = '1.0.0';
+  const REQUEST_TIMEOUT_MS = 12000;
+  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.0.0';
+  const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
+  const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+  const DRAFT_FIELDS = [
+    'proposalDate', 'proposalVersion', 'facilityName', 'regionFull', 'regionShort', 'siteAddress',
+    'mandatoryKw', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
+    'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
+    'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
+    'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay'
+  ];
+
+  const state = {
+    client: null,
+    templateHtml: '',
+    siteImageDataUrl: '',
+    editMode: false,
+    manualDirty: false,
+    renderTimer: 0,
+    bootInFlight: false,
+    bootAttempt: 0
+  };
+
+  const el = {
+    bootPanel: document.getElementById('bootPanel'),
+    bootMessage: document.getElementById('bootMessage'),
+    bootSpinner: document.getElementById('bootSpinner'),
+    bootError: document.getElementById('bootError'),
+    bootActions: document.getElementById('bootActions'),
+    bootRetry: document.getElementById('bootRetry'),
+    appShell: document.getElementById('appShell'),
+    form: document.getElementById('proposalForm'),
+    previewFrame: document.getElementById('previewFrame'),
+    previewStatus: document.getElementById('previewStatus'),
+    pageCount: document.getElementById('pageCount'),
+    remainingKw: document.getElementById('remainingKw'),
+    siteImage: document.getElementById('siteImage'),
+    siteImageName: document.getElementById('siteImageName'),
+    keepNamsaOverlay: document.getElementById('keepNamsaOverlay'),
+    applyButton: document.getElementById('applyButton'),
+    editButton: document.getElementById('editButton'),
+    printButton: document.getElementById('printButton'),
+    printTopButton: document.getElementById('printTopButton'),
+    downloadButton: document.getElementById('downloadButton'),
+    resetButton: document.getElementById('resetButton')
+  };
+
+  function getClient() {
+    if (state.client) return state.client;
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+      const error = new Error('SUPABASE_LIBRARY_UNAVAILABLE');
+      error.code = 'SUPABASE_LIBRARY_UNAVAILABLE';
+      throw error;
+    }
+    state.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      global: {
+        headers: {
+          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase()
+        }
+      }
+    });
+    return state.client;
+  }
+
+  async function withTimeout(task, label) {
+    let timer = 0;
+    try {
+      return await Promise.race([
+        Promise.resolve(task),
+        new Promise((_, reject) => {
+          timer = window.setTimeout(() => {
+            const error = new Error(`${label || 'REQUEST'}_TIMEOUT`);
+            error.code = 'PROPOSAL_BUILDER_REQUEST_TIMEOUT';
+            reject(error);
+          }, REQUEST_TIMEOUT_MS);
+        })
+      ]);
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+  }
+
+  function isAdminFallback(user) {
+    const role = String(user?.role || '').trim().toLowerCase();
+    const position = String(user?.position || '').trim();
+    return role === 'admin' || role === 'admin_all' || position === '국장';
+  }
+
+  async function loadSiteAdminPermission(user) {
+    const coopId = String(user?.coop_id || '').trim();
+    const roleKey = String(user?.role || '').trim();
+    const positionKey = String(user?.position || '').trim();
+    if (!coopId || (!roleKey && !positionKey)) return { hasSiteAdmin: false, isLegacyEmpty: false };
+    const roleKeys = [...new Set([roleKey, positionKey].filter(Boolean))];
+    if (roleKey === 'admin') roleKeys.push('admin_all');
+    if (roleKey === 'admin_all') roleKeys.push('admin');
+    const { data, error } = await state.client
+      .from('erp_role_permissions')
+      .select('permission_key')
+      .eq('coop_id', coopId)
+      .in('scope', ['role', 'position'])
+      .in('role_key', roleKeys)
+      .eq('is_enabled', true);
+    if (error) throw error;
+    const permissions = new Set((Array.isArray(data) ? data : [])
+      .map((row) => String(row?.permission_key || '').trim())
+      .filter(Boolean));
+    return {
+      hasSiteAdmin: permissions.has('site.admin') || permissions.has('member.admin'),
+      isLegacyEmpty: permissions.size === 0
+    };
+  }
+
+  function resetBootUi(message) {
+    el.bootPanel.hidden = false;
+    el.appShell.classList.remove('ready');
+    el.bootMessage.textContent = String(message || 'ERP 로그인과 관리자 권한을 확인하고 있습니다.');
+    el.bootSpinner.hidden = false;
+    el.bootError.hidden = true;
+    el.bootError.textContent = '';
+    el.bootActions.hidden = true;
+    el.bootRetry.disabled = false;
+  }
+
+  function showBootError(message) {
+    el.bootPanel.hidden = false;
+    el.appShell.classList.remove('ready');
+    el.bootMessage.textContent = '제안서 만들기를 열지 못했습니다.';
+    el.bootSpinner.hidden = true;
+    el.bootError.textContent = String(message || '권한을 확인한 뒤 다시 시도해 주세요.');
+    el.bootError.hidden = false;
+    el.bootActions.hidden = false;
+  }
+
+  function numberValue(id) {
+    const value = Number(document.getElementById(id)?.value);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function textValue(id) {
+    return String(document.getElementById(id)?.value || '').trim();
+  }
+
+  function trimNumber(value, maximumFractionDigits = 1) {
+    return Number(value).toLocaleString('ko-KR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits
+    });
+  }
+
+  function formatDate(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[1]}.${match[2]}.${match[3]}` : String(value || '').replaceAll('-', '.');
+  }
+
+  function formatProjectCost(won) {
+    const manwon = Math.round(won / 10000);
+    if (manwon < 10000) return `${manwon.toLocaleString('ko-KR')}만원`;
+    const eok = Math.floor(manwon / 10000);
+    const rest = manwon % 10000;
+    return rest ? `${eok}억 ${rest.toLocaleString('ko-KR')}만원` : `${eok}억원`;
+  }
+
+  function formatApproxManwon(won, suffix = '') {
+    return `약 ${Math.round(won / 10000).toLocaleString('ko-KR')}만원${suffix}`;
+  }
+
+  function calculateFinance(capacityKw, model) {
+    const projectCost = capacityKw * model.unitCostManwon * 10000;
+    const annualGeneration = capacityKw * model.sunHours * 365;
+    const annualRevenue = annualGeneration * model.salePriceWon;
+    const localReturn = annualRevenue * model.returnPct / 100;
+    const operationReserve = projectCost * model.operationPct / 100;
+    const annualCash = annualRevenue - localReturn - operationReserve;
+    const payback = annualCash > 0 ? projectCost / annualCash : 0;
+    let twentyYearCash = 0;
+    for (let year = 0; year < 20; year += 1) {
+      const degradedRevenue = annualRevenue * Math.pow(0.995, year);
+      twentyYearCash += degradedRevenue * (1 - model.returnPct / 100) - operationReserve;
+    }
+    return {
+      projectCost,
+      annualGeneration,
+      annualRevenue,
+      localReturn,
+      operationReserve,
+      annualCash,
+      payback,
+      twentyYearResidual: twentyYearCash - projectCost
+    };
+  }
+
+  function readModel() {
+    const mandatoryKw = numberValue('mandatoryKw');
+    const existingKw = numberValue('existingKw');
+    const remainingKw = Math.max(mandatoryKw - existingKw, 0);
+    const model = {
+      proposalDate: textValue('proposalDate'),
+      proposalVersion: textValue('proposalVersion') || 'v1.0',
+      facilityName: textValue('facilityName'),
+      regionFull: textValue('regionFull'),
+      regionShort: textValue('regionShort'),
+      siteAddress: textValue('siteAddress'),
+      mandatoryKw,
+      existingKw,
+      remainingKw,
+      expandedMinKw: numberValue('expandedMinKw'),
+      expandedKw: numberValue('expandedKw'),
+      unitCostManwon: numberValue('unitCostManwon'),
+      salePriceWon: numberValue('salePriceWon'),
+      sunHours: numberValue('sunHours'),
+      operationPct: numberValue('operationPct'),
+      returnPct: numberValue('returnPct'),
+      constructionMonth: Math.round(numberValue('constructionMonth')),
+      completionMinMonth: Math.round(numberValue('completionMinMonth')),
+      completionMaxMonth: Math.round(numberValue('completionMaxMonth')),
+      memberTotal: Math.round(numberValue('memberTotal')),
+      shareCapitalManwon: Math.round(numberValue('shareCapitalManwon')),
+      individualMembers: Math.round(numberValue('individualMembers')),
+      organizationMembers: Math.round(numberValue('organizationMembers')),
+      chairPhone: textValue('chairPhone'),
+      officePhone: textValue('officePhone'),
+      keepNamsaOverlay: Boolean(el.keepNamsaOverlay.checked)
+    };
+    el.remainingKw.value = trimNumber(remainingKw);
+    return model;
+  }
+
+  function validateModel(model) {
+    if (!model.proposalDate || !model.facilityName || !model.regionFull || !model.regionShort || !model.siteAddress) {
+      throw new Error('제안일, 대상 시설, 지역명과 주소를 모두 입력해 주세요.');
+    }
+    if (model.mandatoryKw < 0 || model.existingKw < 0 || model.expandedMinKw <= 0 || model.expandedKw <= 0) {
+      throw new Error('설치 용량은 0보다 큰 값으로 확인해 주세요.');
+    }
+    if (model.expandedMinKw > model.expandedKw) {
+      throw new Error('확대안 범위 시작 용량은 수지 비교 확대안 용량보다 클 수 없습니다.');
+    }
+    if (model.unitCostManwon <= 0 || model.salePriceWon <= 0 || model.sunHours <= 0) {
+      throw new Error('공사비, 판매단가와 발전시간은 0보다 커야 합니다.');
+    }
+    if (model.returnPct < 0 || model.returnPct > 100 || model.operationPct < 0 || model.operationPct > 100) {
+      throw new Error('운영·수선충당률과 지역환원율은 0~100 사이여야 합니다.');
+    }
+    if (model.constructionMonth <= 0 || model.completionMinMonth < model.constructionMonth || model.completionMaxMonth < model.completionMinMonth) {
+      throw new Error('완공 목표는 착공 목표보다 뒤여야 하고, 완공 시작은 완공 끝보다 늦을 수 없습니다.');
+    }
+  }
+
+  function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function createReplacer(entries) {
+    const map = new Map(entries.filter(([from]) => from).sort((a, b) => b[0].length - a[0].length));
+    const pattern = new RegExp([...map.keys()].map(escapeRegExp).join('|'), 'g');
+    return (value) => String(value || '').replace(pattern, (matched) => map.get(matched));
+  }
+
+  function replaceDocumentText(doc, replaceText) {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      const parentTag = node.parentElement?.tagName;
+      if (parentTag === 'STYLE' || parentTag === 'SCRIPT') return;
+      node.nodeValue = replaceText(node.nodeValue);
+    });
+    doc.querySelectorAll('[alt], [title]').forEach((node) => {
+      ['alt', 'title'].forEach((name) => {
+        if (node.hasAttribute(name)) node.setAttribute(name, replaceText(node.getAttribute(name)));
+      });
+    });
+  }
+
+  function buildReplacementEntries(model) {
+    const baseFinance = calculateFinance(model.remainingKw, model);
+    const expandedFinance = calculateFinance(model.expandedKw, model);
+    const minExpandedGeneration = model.expandedMinKw * model.sunHours * 365;
+    const maxExpandedGeneration = model.expandedKw * model.sunHours * 365;
+    const constructionPrepStart = Math.max(1, model.constructionMonth - 2);
+    const constructionPrepEnd = Math.max(constructionPrepStart, model.constructionMonth - 1);
+    const dateDisplay = formatDate(model.proposalDate);
+    const kw = (value) => `${trimNumber(value)}kW`;
+    const percent = (value) => `${trimNumber(value)}%`;
+    return [
+      ['남사읍행정복지센터', model.facilityName],
+      ['경기 용인시 처인구 남사읍 내기로 22', model.siteAddress],
+      ['100~120kW', `${trimNumber(model.expandedMinKw)}~${trimNumber(model.expandedKw)}kW`],
+      ['13.1~15.8만kWh', `${trimNumber(minExpandedGeneration / 10000)}~${trimNumber(maxExpandedGeneration / 10000)}만kWh`],
+      ['1억 1,160만원', formatProjectCost(baseFinance.projectCost)],
+      ['2억 1,600만원', formatProjectCost(expandedFinance.projectCost)],
+      ['81,468kWh', `${Math.round(baseFinance.annualGeneration).toLocaleString('ko-KR')}kWh`],
+      ['157,680kWh', `${Math.round(expandedFinance.annualGeneration).toLocaleString('ko-KR')}kWh`],
+      ['약 1,385만원', formatApproxManwon(baseFinance.annualRevenue)],
+      ['약 2,681만원', formatApproxManwon(expandedFinance.annualRevenue)],
+      ['약 69만원/년', formatApproxManwon(baseFinance.localReturn, '/년')],
+      ['약 134만원/년', formatApproxManwon(expandedFinance.localReturn, '/년')],
+      ['약 223만원/년', formatApproxManwon(baseFinance.operationReserve, '/년')],
+      ['약 432만원/년', formatApproxManwon(expandedFinance.operationReserve, '/년')],
+      ['약 1,093만원', formatApproxManwon(baseFinance.annualCash)],
+      ['약 2,115만원', formatApproxManwon(expandedFinance.annualCash)],
+      ['약 10.2년', baseFinance.payback > 0 ? `약 ${baseFinance.payback.toFixed(1)}년` : '산정 불가'],
+      ['약 0.95억원', `약 ${(baseFinance.twentyYearResidual / 100000000).toFixed(2)}억원`],
+      ['약 1.83억원', `약 ${(expandedFinance.twentyYearResidual / 100000000).toFixed(2)}억원`],
+      ['180만원/kW', `${trimNumber(model.unitCostManwon)}만원/kW`],
+      ['일평균 3.6시간', `일평균 ${trimNumber(model.sunHours)}시간`],
+      ['판매단가 170원/kWh', `판매단가 ${trimNumber(model.salePriceWon, 0)}원/kWh`],
+      ['170원/kWh', `${trimNumber(model.salePriceWon, 0)}원/kWh`],
+      ['사업비의 2%', `사업비의 ${percent(model.operationPct)}`],
+      ['매출의 5%', `매출의 ${percent(model.returnPct)}`],
+      ['계약 후 2~3개월', `계약 후 ${constructionPrepStart}~${constructionPrepEnd}개월`],
+      ['4개월 차', `${model.constructionMonth}개월 차`],
+      ['6~7개월', `${model.completionMinMonth}~${model.completionMaxMonth}개월`],
+      ['119kW', kw(model.mandatoryKw)],
+      ['57kW', kw(model.existingKw)],
+      ['62kW', kw(model.remainingKw)],
+      ['120kW', kw(model.expandedKw)],
+      ['제안서 v1.6', `제안서 ${model.proposalVersion}`],
+      ['2026.09.03', dateDisplay],
+      ['257명', `${model.memberTotal.toLocaleString('ko-KR')}명`],
+      ['5,960만원', `${model.shareCapitalManwon.toLocaleString('ko-KR')}만원`],
+      ['242 + 15', `${model.individualMembers.toLocaleString('ko-KR')} + ${model.organizationMembers.toLocaleString('ko-KR')}`],
+      ['개인 242명', `개인 ${model.individualMembers.toLocaleString('ko-KR')}명`],
+      ['단체 조합원 15곳', `단체 조합원 ${model.organizationMembers.toLocaleString('ko-KR')}곳`],
+      ['010-9025-6911', model.chairPhone],
+      ['010-2513-5736', model.officePhone],
+      ['남사읍', model.regionFull],
+      ['남사', model.regionShort]
+    ];
+  }
+
+  function buildPreviewDocument(model) {
+    const doc = new DOMParser().parseFromString(state.templateHtml, 'text/html');
+    doc.querySelectorAll('script').forEach((node) => node.remove());
+    doc.title = `${model.facilityName} 주차장 햇빛발전소 제안서`;
+    const replaceText = createReplacer(buildReplacementEntries(model));
+    replaceDocumentText(doc, replaceText);
+
+    const siteImage = doc.querySelector('.photo-shell img');
+    if (siteImage) {
+      siteImage.setAttribute('src', state.siteImageDataUrl || 'proposal_assets/namsa-site-map.png');
+      siteImage.setAttribute('alt', `${model.facilityName} 대상지 사진`);
+    }
+    if (!model.keepNamsaOverlay || state.siteImageDataUrl) {
+      doc.querySelectorAll('.zone-label, .zone, .existing-label, .existing-zone').forEach((node) => {
+        node.style.display = 'none';
+      });
+      const caption = doc.querySelector('.photo-caption');
+      if (caption) caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
+    }
+
+    const previewStyle = doc.createElement('style');
+    previewStyle.id = 'proposalBuilderPreviewStyle';
+    previewStyle.textContent = `
+      .control-bar { display:none !important; }
+      @media screen {
+        [data-proposal-editable="true"] { cursor:text; border-radius:4px; transition:background .15s, outline-color .15s; }
+        [data-proposal-editable="true"]:hover { outline:2px dashed rgba(8,127,91,.38); outline-offset:3px; }
+        [data-proposal-editable="true"]:focus { outline:3px solid rgba(245,160,0,.66); outline-offset:3px; background:rgba(255,244,214,.74); }
+      }
+      @media print { [data-proposal-editable="true"] { outline:0 !important; background:transparent !important; } }
+    `;
+    doc.head.appendChild(previewStyle);
+    return '<!doctype html>\n' + doc.documentElement.outerHTML;
+  }
+
+  function editableCandidates(doc) {
+    const selector = 'h1, h2, h3, h4, p, li, td, th, .cover-kicker, .subtitle, .date, .banner, .note';
+    return [...doc.querySelectorAll(selector)]
+      .filter((node) => !node.closest('.control-bar') && !node.closest('.page') && !node.closest('.version'))
+      .filter((node) => !node.parentElement?.closest(selector));
+  }
+
+  function applyEditMode() {
+    const doc = el.previewFrame.contentDocument;
+    if (!doc) return;
+    doc.querySelectorAll('[data-proposal-editable="true"]').forEach((node) => {
+      node.removeAttribute('contenteditable');
+      node.removeAttribute('spellcheck');
+      node.removeAttribute('data-proposal-editable');
+    });
+    if (state.editMode) {
+      editableCandidates(doc).forEach((node) => {
+        node.setAttribute('contenteditable', 'true');
+        node.setAttribute('spellcheck', 'true');
+        node.setAttribute('data-proposal-editable', 'true');
+      });
+      el.editButton.textContent = '✅ 문구 수정 마치기';
+      setStatus('수정할 문장을 미리보기에서 눌러 직접 고치세요. 수정 내용은 PDF와 HTML에 그대로 반영됩니다.', true);
+    } else {
+      el.editButton.textContent = '✍️ 최종 문구 수정';
+      setStatus(state.manualDirty ? '직접 고친 문구가 미리보기에 남아 있습니다. PDF 또는 HTML로 저장할 수 있습니다.' : '입력값과 자동 계산을 반영했습니다.');
+    }
+  }
+
+  function setStatus(message, dirty = false) {
+    el.previewStatus.textContent = String(message || '');
+    el.previewStatus.classList.toggle('dirty', Boolean(dirty));
+  }
+
+  function renderPreview({ force = false } = {}) {
+    if (!state.templateHtml) return;
+    if (state.manualDirty && force) {
+      const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 18쪽을 다시 만들까요?');
+      if (!overwrite) return;
+    }
+    if (!el.form.reportValidity()) return;
+    try {
+      const model = readModel();
+      validateModel(model);
+      saveDraft();
+      state.manualDirty = false;
+      setStatus('18쪽 미리보기를 다시 만들고 있습니다.');
+      el.previewFrame.onload = () => {
+        const doc = el.previewFrame.contentDocument;
+        const slideCount = doc?.querySelectorAll('.slide').length || 0;
+        el.pageCount.textContent = `${slideCount}쪽`;
+        doc?.addEventListener('input', (event) => {
+          if (!event.target?.closest?.('[data-proposal-editable="true"]')) return;
+          state.manualDirty = true;
+          setStatus('직접 고친 문구가 있습니다. 입력값을 다시 반영하면 이 수정은 사라집니다.', true);
+        });
+        applyEditMode();
+      };
+      el.previewFrame.srcdoc = buildPreviewDocument(model);
+    } catch (error) {
+      console.error(`[proposal-builder ${VERSION}] render failed`, error);
+      setStatus(error?.message || '제안서를 만들지 못했습니다. 입력값을 확인해 주세요.', true);
+    }
+  }
+
+  function scheduleRender() {
+    window.clearTimeout(state.renderTimer);
+    if (state.editMode || state.manualDirty) {
+      setStatus('입력값이 바뀌었습니다. 직접 고친 문구를 유지하려면 먼저 파일로 저장하고, 새로 반영하려면 위 버튼을 누르세요.', true);
+      return;
+    }
+    state.renderTimer = window.setTimeout(() => renderPreview(), 280);
+  }
+
+  function saveDraft() {
+    const draft = {};
+    DRAFT_FIELDS.forEach((id) => {
+      const input = document.getElementById(id);
+      if (!input) return;
+      draft[id] = input.type === 'checkbox' ? input.checked : input.value;
+    });
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+      console.warn(`[proposal-builder ${VERSION}] draft save skipped`, error);
+    }
+  }
+
+  function restoreDraft() {
+    try {
+      const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+      if (!draft || typeof draft !== 'object') return;
+      DRAFT_FIELDS.forEach((id) => {
+        const input = document.getElementById(id);
+        if (!input || !(id in draft)) return;
+        if (input.type === 'checkbox') input.checked = Boolean(draft[id]);
+        else input.value = String(draft[id]);
+      });
+    } catch (error) {
+      console.warn(`[proposal-builder ${VERSION}] draft restore skipped`, error);
+    }
+  }
+
+  function sanitizeFilename(value) {
+    return String(value || '')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 120) || 'proposal';
+  }
+
+  function dataUrlFromBlob(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error || new Error('FILE_READ_FAILED'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function inlineImages(doc) {
+    const images = [...doc.querySelectorAll('img')];
+    await Promise.all(images.map(async (image) => {
+      const source = image.getAttribute('src') || '';
+      if (!source || source.startsWith('data:')) return;
+      try {
+        const absoluteUrl = new URL(source, window.location.href).href;
+        const response = await fetch(absoluteUrl, { credentials: 'same-origin' });
+        if (!response.ok) throw new Error(`IMAGE_HTTP_${response.status}`);
+        image.setAttribute('src', await dataUrlFromBlob(await response.blob()));
+      } catch (error) {
+        console.warn(`[proposal-builder ${VERSION}] image inline skipped`, source, error);
+      }
+    }));
+  }
+
+  async function buildDownloadHtml() {
+    const sourceDoc = el.previewFrame.contentDocument;
+    if (!sourceDoc) throw new Error('미리보기가 아직 준비되지 않았습니다.');
+    const doc = sourceDoc.cloneNode(true);
+    doc.getElementById('proposalBuilderPreviewStyle')?.remove();
+    doc.querySelectorAll('script').forEach((node) => node.remove());
+    doc.querySelectorAll('*').forEach((node) => {
+      node.removeAttribute('contenteditable');
+      node.removeAttribute('spellcheck');
+      node.removeAttribute('data-proposal-editable');
+      [...node.attributes].forEach((attribute) => {
+        if (/^on/i.test(attribute.name)) node.removeAttribute(attribute.name);
+      });
+    });
+    const controlBar = doc.querySelector('.control-bar');
+    if (controlBar) controlBar.innerHTML = '<button type="button" onclick="window.print()">인쇄 · PDF 저장</button>';
+    await inlineImages(doc);
+    return '<!doctype html>\n' + doc.documentElement.outerHTML;
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function downloadHtml() {
+    el.downloadButton.disabled = true;
+    setStatus('사진까지 포함한 HTML 파일을 만들고 있습니다.');
+    try {
+      const model = readModel();
+      const html = await buildDownloadHtml();
+      const datePart = model.proposalDate.replaceAll('-', '');
+      const filename = `${sanitizeFilename(`${datePart}_${model.facilityName}_주차장_햇빛발전소_제안서_${model.proposalVersion}`)}.html`;
+      downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), filename);
+      setStatus('HTML 파일을 저장했습니다. 파일만 옮겨도 사진을 포함한 제안서가 열립니다.');
+    } catch (error) {
+      console.error(`[proposal-builder ${VERSION}] download failed`, error);
+      setStatus(error?.message || 'HTML 파일을 만들지 못했습니다.', true);
+    } finally {
+      el.downloadButton.disabled = false;
+    }
+  }
+
+  function printProposal() {
+    const frameWindow = el.previewFrame.contentWindow;
+    if (!frameWindow) {
+      setStatus('미리보기가 아직 준비되지 않았습니다.', true);
+      return;
+    }
+    frameWindow.focus();
+    frameWindow.print();
+  }
+
+  async function handleSiteImageChange() {
+    const file = el.siteImage.files?.[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
+      el.siteImage.value = '';
+      setStatus('PNG, JPG 또는 WebP 사진만 사용할 수 있습니다.', true);
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      el.siteImage.value = '';
+      setStatus('사진은 12MB 이하로 선택해 주세요.', true);
+      return;
+    }
+    state.siteImageDataUrl = await dataUrlFromBlob(file);
+    el.siteImageName.textContent = file.name;
+    el.keepNamsaOverlay.checked = false;
+    saveDraft();
+    scheduleRender();
+  }
+
+  function resetSample() {
+    if (!window.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?')) return;
+    el.form.reset();
+    localStorage.removeItem(DRAFT_KEY);
+    state.siteImageDataUrl = '';
+    state.editMode = false;
+    state.manualDirty = false;
+    el.siteImage.value = '';
+    el.siteImageName.textContent = '남사읍 예시 위성사진 사용 중';
+    renderPreview();
+  }
+
+  function bindEvents() {
+    el.form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      renderPreview({ force: true });
+    });
+    el.form.addEventListener('input', (event) => {
+      if (event.target === el.siteImage) return;
+      readModel();
+      saveDraft();
+      scheduleRender();
+    });
+    el.siteImage.addEventListener('change', () => {
+      handleSiteImageChange().catch((error) => {
+        console.error(`[proposal-builder ${VERSION}] image load failed`, error);
+        setStatus('사진을 읽지 못했습니다. 다른 파일을 선택해 주세요.', true);
+      });
+    });
+    el.editButton.addEventListener('click', () => {
+      state.editMode = !state.editMode;
+      applyEditMode();
+    });
+    el.printButton.addEventListener('click', printProposal);
+    el.printTopButton.addEventListener('click', printProposal);
+    el.downloadButton.addEventListener('click', downloadHtml);
+    el.resetButton.addEventListener('click', resetSample);
+  }
+
+  async function boot() {
+    if (state.bootInFlight) return;
+    state.bootInFlight = true;
+    const attempt = ++state.bootAttempt;
+    resetBootUi();
+    try {
+      if (!window.ErpRuntimeGuard || typeof window.ErpRuntimeGuard.requireUser !== 'function') {
+        const error = new Error('ERP_RUNTIME_GUARD_UNAVAILABLE');
+        error.code = 'ERP_RUNTIME_GUARD_UNAVAILABLE';
+        throw error;
+      }
+      const client = getClient();
+      el.bootMessage.textContent = 'ERP 로그인 상태를 확인하고 있습니다.';
+      const userGate = await withTimeout(window.ErpRuntimeGuard.requireUser(client, {
+        alertFn: showBootError,
+        redirectUrl: 'index.html'
+      }), 'LOGIN_CHECK');
+      if (attempt !== state.bootAttempt || !userGate.ok) return;
+
+      el.bootMessage.textContent = '조합과 사용 가능한 기능을 확인하고 있습니다.';
+      const runtimeGate = await withTimeout(window.ErpRuntimeGuard.enforce(client, {
+        moduleKey: 'site_admin',
+        moduleLabel: '제안서 만들기',
+        alertFn: showBootError,
+        redirectUrl: 'index.html'
+      }), 'RUNTIME_CHECK');
+      if (attempt !== state.bootAttempt || !runtimeGate.ok) return;
+
+      el.bootMessage.textContent = '제안서를 만들 수 있는 관리자 권한인지 확인하고 있습니다.';
+      const permission = await withTimeout(loadSiteAdminPermission(userGate.user), 'PERMISSION_CHECK');
+      if (attempt !== state.bootAttempt) return;
+      if (!permission.hasSiteAdmin && !(permission.isLegacyEmpty && isAdminFallback(userGate.user))) {
+        showBootError('홈페이지 관리 권한이 있는 ERP 관리자만 제안서를 만들 수 있습니다.');
+        return;
+      }
+
+      el.bootMessage.textContent = '18쪽 제안서 원본을 불러오고 있습니다.';
+      const response = await withTimeout(fetch(TEMPLATE_URL, { credentials: 'same-origin', cache: 'no-store' }), 'TEMPLATE');
+      if (!response.ok) throw new Error(`TEMPLATE_HTTP_${response.status}`);
+      state.templateHtml = await response.text();
+      if (!state.templateHtml.includes('class="slide')) throw new Error('TEMPLATE_INVALID');
+      restoreDraft();
+      bindEvents();
+      el.bootSpinner.hidden = true;
+      el.bootActions.hidden = true;
+      el.bootPanel.hidden = true;
+      el.appShell.classList.add('ready');
+      renderPreview();
+    } catch (error) {
+      console.error(`[proposal-builder ${VERSION}] boot failed`, error);
+      if (error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT') {
+        showBootError('권한 또는 제안서 원본 확인이 12초 안에 끝나지 않았습니다.\n인터넷 연결을 확인한 뒤 다시 시도해 주세요.');
+      } else if (error?.code === 'SUPABASE_LIBRARY_UNAVAILABLE') {
+        showBootError('로그인 확인 프로그램을 불러오지 못했습니다.\n콘텐츠 차단 기능이나 인터넷 연결을 확인해 주세요.');
+      } else if (error?.code === 'ERP_RUNTIME_GUARD_UNAVAILABLE') {
+        showBootError('ERP 권한 확인 프로그램을 불러오지 못했습니다.\n페이지를 새로고침해 주세요.');
+      } else if (/^TEMPLATE_/.test(String(error?.message || ''))) {
+        showBootError('제안서 원본을 불러오지 못했습니다.\n잠시 뒤 다시 확인해 주세요.');
+      } else {
+        showBootError('로그인 또는 관리자 권한을 확인하지 못했습니다. ERP 메인에서 다시 열어 주세요.');
+      }
+    } finally {
+      if (attempt === state.bootAttempt) state.bootInFlight = false;
+    }
+  }
+
+  el.bootRetry.addEventListener('click', boot);
+  boot();
+})();
