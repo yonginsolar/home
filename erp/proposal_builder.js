@@ -1,10 +1,10 @@
-/* Version: v1.3.0 | 2026-09-04 | Drag rotation handle and resident-acceptance copy. */
+/* Version: v1.3.1 | 2026-09-04 | Drag rotation handle and stable resident-acceptance copy. */
 (() => {
   'use strict';
 
-  const VERSION = '1.3.0';
+  const VERSION = '1.3.1';
   const REQUEST_TIMEOUT_MS = 12000;
-  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.0';
+  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
