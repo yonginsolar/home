@@ -1,16 +1,16 @@
-/* Version: v1.1.0 | 2026-09-04 | Photo target-zone editor and existing-installation context control. */
+/* Version: v1.2.0 | 2026-09-04 | Editable site notes, target-zone rotation and resident participation copy. */
 (() => {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   const REQUEST_TIMEOUT_MS = 12000;
-  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.0.0';
+  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.1.0';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const DRAFT_FIELDS = [
     'proposalDate', 'proposalVersion', 'facilityName', 'regionFull', 'regionShort', 'siteAddress',
-    'siteOverlayLabel', 'mandatoryKw', 'hasExistingInstallation', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
+    'siteOverlayLabel', 'siteFeatureLines', 'siteCheckLines', 'mandatoryKw', 'hasExistingInstallation', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
     'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
     'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
     'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay'
@@ -52,6 +52,8 @@
     deleteOverlayButton: document.getElementById('deleteOverlayButton'),
     clearOverlayButton: document.getElementById('clearOverlayButton'),
     overlayCount: document.getElementById('overlayCount'),
+    overlayAngle: document.getElementById('overlayAngle'),
+    resetOverlayAngleButton: document.getElementById('resetOverlayAngleButton'),
     hasExistingInstallation: document.getElementById('hasExistingInstallation'),
     existingKw: document.getElementById('existingKw'),
     keepNamsaOverlay: document.getElementById('keepNamsaOverlay'),
@@ -159,6 +161,14 @@
     return String(document.getElementById(id)?.value || '').trim();
   }
 
+  function lineValues(id) {
+    return textValue(id)
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
   function trimNumber(value, maximumFractionDigits = 1) {
     return Number(value).toLocaleString('ko-KR', {
       minimumFractionDigits: 0,
@@ -221,6 +231,8 @@
       regionShort: textValue('regionShort'),
       siteAddress: textValue('siteAddress'),
       siteOverlayLabel: textValue('siteOverlayLabel') || '신규 설치 검토 대상지',
+      siteFeatureLines: lineValues('siteFeatureLines'),
+      siteCheckLines: lineValues('siteCheckLines'),
       mandatoryKw,
       hasExistingInstallation,
       existingKw,
@@ -259,6 +271,9 @@
     }
     if (model.expandedMinKw > model.expandedKw) {
       throw new Error('확대안 범위 시작 용량은 수지 비교 확대안 용량보다 클 수 없습니다.');
+    }
+    if (model.expandedKw < model.remainingKw) {
+      throw new Error('수지 비교 확대안 용량은 법정 의무 이행에 필요한 용량보다 작을 수 없습니다.');
     }
     if (model.unitCostManwon <= 0 || model.salePriceWon <= 0 || model.sunHours <= 0) {
       throw new Error('공사비, 판매단가와 발전시간은 0보다 커야 합니다.');
@@ -300,7 +315,8 @@
   function buildReplacementEntries(model) {
     const baseFinance = calculateFinance(model.remainingKw, model);
     const expandedFinance = calculateFinance(model.expandedKw, model);
-    const minExpandedGeneration = model.expandedMinKw * model.sunHours * 365;
+    const effectiveExpandedMinKw = Math.max(model.expandedMinKw, model.remainingKw);
+    const minExpandedGeneration = effectiveExpandedMinKw * model.sunHours * 365;
     const maxExpandedGeneration = model.expandedKw * model.sunHours * 365;
     const constructionPrepStart = Math.max(1, model.constructionMonth - 2);
     const constructionPrepEnd = Math.max(constructionPrepStart, model.constructionMonth - 1);
@@ -310,7 +326,7 @@
     return [
       ['남사읍행정복지센터', model.facilityName],
       ['경기 용인시 처인구 남사읍 내기로 22', model.siteAddress],
-      ['100~120kW', `${trimNumber(model.expandedMinKw)}~${trimNumber(model.expandedKw)}kW`],
+      ['100~120kW', `${trimNumber(effectiveExpandedMinKw)}~${trimNumber(model.expandedKw)}kW`],
       ['13.1~15.8만kWh', `${trimNumber(minExpandedGeneration / 10000)}~${trimNumber(maxExpandedGeneration / 10000)}만kWh`],
       ['1억 1,160만원', formatProjectCost(baseFinance.projectCost)],
       ['2억 1,600만원', formatProjectCost(expandedFinance.projectCost)],
@@ -364,6 +380,25 @@
     });
   }
 
+  function replaceListByHeading(slide, headingText, lines, fallbackText, replaceText) {
+    const card = [...(slide?.querySelectorAll('.card') || [])]
+      .find((node) => String(node.querySelector('h3')?.textContent || '').trim() === headingText);
+    const list = card?.querySelector('ul');
+    if (!list) return;
+    const values = lines.length ? lines : [fallbackText];
+    list.replaceChildren(...values.map((value) => {
+      const item = list.ownerDocument.createElement('li');
+      item.textContent = replaceText(value);
+      return item;
+    }));
+  }
+
+  function applySiteDetailLists(doc, model, replaceText) {
+    const siteSlide = slideAt(doc, 3);
+    replaceListByHeading(siteSlide, '현장 특징', model.siteFeatureLines, '현장조사 후 내용을 입력합니다.', replaceText);
+    replaceListByHeading(siteSlide, '먼저 확인할 자료', model.siteCheckLines, '현장조사에 필요한 자료를 확인합니다.', replaceText);
+  }
+
   function applyNoExistingInstallationContext(doc, model) {
     if (model.hasExistingInstallation && model.existingKw > 0) return;
     const kw = `${trimNumber(model.mandatoryKw)}kW`;
@@ -375,7 +410,7 @@
 
     const statusSlide = slideAt(doc, 4);
     const statusTitle = statusSlide?.querySelector('h2');
-    if (statusTitle) statusTitle.innerHTML = `전체 의무용량은 ${kw}이며, <strong>필요 설치용량도 ${remaining}</strong>입니다`;
+    if (statusTitle) statusTitle.innerHTML = `법정 최소기준은 ${kw}이며, <strong>최종 설치용량은 현장 검토로 확정</strong>합니다`;
     const formula = [...(statusSlide?.querySelectorAll('div') || [])]
       .find((node) => /grid-template-columns:\s*1fr 64px 1fr 64px 1fr/.test(node.getAttribute('style') || ''));
     if (formula) {
@@ -383,26 +418,37 @@
       parts[1]?.remove();
       parts[2]?.remove();
       formula.style.gridTemplateColumns = '1fr 64px 1fr';
+      if (parts[3]) parts[3].textContent = '→';
       const requiredBox = parts[4];
       const requiredLabels = requiredBox?.querySelectorAll('.small') || [];
-      if (requiredLabels[0]) requiredLabels[0].textContent = '필요 설치용량';
-      if (requiredLabels[1]) requiredLabels[1].textContent = '법정 의무 이행에 필요한 전체 용량';
+      const requiredValue = requiredBox?.querySelector('.big-inline');
+      if (requiredLabels[0]) requiredLabels[0].textContent = '최종 설계용량';
+      if (requiredValue) {
+        requiredValue.textContent = '기본설계 후 확정';
+        requiredValue.style.fontSize = '30px';
+      }
+      if (requiredLabels[1]) requiredLabels[1].textContent = '현장·계통·주민편익을 함께 검토';
     }
     const statusCards = statusSlide?.querySelectorAll('.grid-2 > .card') || [];
     const firstCard = statusCards[0];
     const secondCard = statusCards[1];
-    if (firstCard?.querySelector('h3')) firstCard.querySelector('h3').textContent = `${remaining}를 설치하면`;
+    if (firstCard?.querySelector('h3')) firstCard.querySelector('h3').textContent = '법정 최소기준';
     const firstLead = firstCard?.querySelector('.lead');
-    if (firstLead) firstLead.textContent = `의무용량 ${kw}를 채울 수 있습니다.`;
+    if (firstLead) firstLead.textContent = `${kw}는 법에서 요구하는 설치 기준입니다.`;
+    const firstTexts = firstCard?.querySelectorAll('p') || [];
+    if (firstTexts[1]) firstTexts[1].textContent = '현장 여건을 확인해 최소한 의무용량 이상으로 설계합니다.';
+    if (secondCard?.querySelector('h3')) secondCard.querySelector('h3').textContent = '주민편익까지 함께 검토';
     const secondText = secondCard?.querySelector('p');
-    if (secondText) secondText.textContent = `${remaining}는 법이 요구하는 전체 설치용량입니다. 어느 주차면을 얼마나 덮을지는 주민이 체감할 편익을 기준으로 한 번 더 판단할 필요가 있습니다.`;
+    if (secondText) secondText.textContent = '법정 기준만 맞추는 데서 끝내지 않고 그늘 면수, 차량 동선, 계통 여건과 사업성을 함께 비교해 최종 설계용량을 정합니다.';
+    const statusBanner = statusSlide?.querySelector('.banner');
+    if (statusBanner) statusBanner.innerHTML = `법정 최소기준과 전면 차양 확대안을 함께 비교해 <span>주민편익과 사업성을 균형 있게 검토</span>해 주시길 제안합니다.`;
     const source = statusSlide?.querySelector('.source');
-    if (source) source.textContent = `용량 현황: 전체 의무 ${kw} · 신규 설치 ${remaining}(제공받은 현황 기준). 관계 부서의 대상 시설과 용량 확인 후 최종 확정합니다.`;
+    if (source) source.textContent = `용량 현황: 전체 의무 ${kw}(제공받은 현황 기준). 신규 설치용량은 현장조사·계통 검토와 기본설계 후 최종 확정합니다.`;
 
     const comparisonSlide = slideAt(doc, 6);
     const comparisonHeaders = comparisonSlide?.querySelectorAll('.table th') || [];
     if (comparisonHeaders[1]) comparisonHeaders[1].textContent = `의무 이행안 · 신규 ${remaining}`;
-    if (comparisonHeaders[2]) comparisonHeaders[2].textContent = `주민복지 확대안 · 신규 약 ${trimNumber(model.expandedMinKw)}~${trimNumber(model.expandedKw)}kW 내외`;
+    if (comparisonHeaders[2]) comparisonHeaders[2].textContent = `주민복지 확대안 · 신규 약 ${trimNumber(Math.max(model.expandedMinKw, model.remainingKw))}~${trimNumber(model.expandedKw)}kW 내외`;
     [...(comparisonSlide?.querySelectorAll('td') || [])].forEach((cell) => {
       cell.textContent = String(cell.textContent || '').replace(/\s*·\s*기존 설비 인정/g, '');
     });
@@ -418,9 +464,9 @@
     const scaleSlide = slideAt(doc, 13);
     const firstScaleCard = scaleSlide?.querySelector('.grid-3 > .card');
     const firstScaleLabel = firstScaleCard?.querySelector('.stat-label');
-    if (firstScaleLabel) firstScaleLabel.textContent = '필요 설치용량';
+    if (firstScaleLabel) firstScaleLabel.textContent = '법정 최소기준';
     const firstScaleText = firstScaleCard?.querySelector('p');
-    if (firstScaleText) firstScaleText.textContent = '전체 의무용량과 같은 신규 설치량';
+    if (firstScaleText) firstScaleText.textContent = '현장조사·계통 검토 전의 최소 검토값';
     removeClosestByText(scaleSlide, 'tbody tr', /기존 .*자료|기존 설비|신·구 설비/);
   }
 
@@ -452,6 +498,8 @@
     zone.style.top = `${overlay.y}%`;
     zone.style.width = `${overlay.width}%`;
     zone.style.height = `${overlay.height}%`;
+    zone.style.transform = `rotate(${Number(overlay.angle) || 0}deg)`;
+    zone.style.transformOrigin = 'center center';
   }
 
   function appendBuilderStyles(doc) {
@@ -488,6 +536,7 @@
     doc.title = `${model.facilityName} 주차장 햇빛발전소 제안서`;
     const replaceText = createReplacer(buildReplacementEntries(model));
     replaceDocumentText(doc, replaceText);
+    applySiteDetailLists(doc, model, replaceText);
 
     const siteImage = doc.querySelector('.photo-shell img');
     if (siteImage) {
@@ -563,12 +612,16 @@
 
   function updateOverlayControls(doc = el.previewFrame.contentDocument) {
     const count = state.customOverlays.length;
-    const hasSelection = Boolean(state.selectedOverlayId && overlayById(state.selectedOverlayId));
+    const selectedOverlay = state.selectedOverlayId ? overlayById(state.selectedOverlayId) : null;
+    const hasSelection = Boolean(selectedOverlay);
     const showSampleTarget = Boolean(el.keepNamsaOverlay.checked && !state.siteImageDataUrl && count === 0);
     const showSampleExisting = Boolean(el.keepNamsaOverlay.checked && !state.siteImageDataUrl && el.hasExistingInstallation.checked);
     el.overlayCount.textContent = `${count}개 표시`;
     el.deleteOverlayButton.disabled = !hasSelection;
     el.clearOverlayButton.disabled = count === 0;
+    el.overlayAngle.disabled = !hasSelection;
+    el.resetOverlayAngleButton.disabled = !hasSelection;
+    el.overlayAngle.value = String(hasSelection ? Number(selectedOverlay.angle) || 0 : 0);
     el.addOverlayButton.classList.toggle('active', state.overlayDrawMode);
     el.addOverlayButton.textContent = state.overlayDrawMode ? '영역 추가 취소' : '+ 대상지 영역 추가';
     doc?.querySelectorAll('.proposal-custom-zone').forEach((zone) => {
@@ -613,7 +666,8 @@
           x: roundCoordinate(point.x),
           y: roundCoordinate(point.y),
           width: 0,
-          height: 0
+          height: 0,
+          angle: 0
         };
         state.customOverlays.push(overlay);
         state.selectedOverlayId = overlay.id;
@@ -718,6 +772,24 @@
     refreshOverlayLabels(doc);
     updateOverlayControls(doc);
     setStatus('선택한 대상지 표시를 삭제했습니다.');
+  }
+
+  function updateSelectedOverlayAngle() {
+    const overlay = overlayById(state.selectedOverlayId);
+    if (!overlay) return;
+    const numericAngle = Number(el.overlayAngle.value);
+    overlay.angle = roundCoordinate(clamp(Number.isFinite(numericAngle) ? numericAngle : 0, -180, 180));
+    el.overlayAngle.value = String(overlay.angle);
+    const doc = el.previewFrame.contentDocument;
+    const zone = doc?.querySelector(`.proposal-custom-zone[data-overlay-id="${CSS.escape(overlay.id)}"]`);
+    if (zone) updateOverlayElement(zone, overlay);
+    setStatus(`선택한 대상지 표시를 ${trimNumber(overlay.angle)}°로 회전했습니다.`);
+  }
+
+  function resetSelectedOverlayAngle() {
+    if (!overlayById(state.selectedOverlayId)) return;
+    el.overlayAngle.value = '0';
+    updateSelectedOverlayAngle();
   }
 
   function clearOverlays() {
@@ -963,6 +1035,7 @@
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage) return;
+      if (event.target === el.overlayAngle) return;
       if (event.target === el.hasExistingInstallation) syncExistingInstallationUi({ restoreValue: true });
       if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
@@ -978,6 +1051,8 @@
     el.addOverlayButton.addEventListener('click', toggleOverlayDrawMode);
     el.deleteOverlayButton.addEventListener('click', deleteSelectedOverlay);
     el.clearOverlayButton.addEventListener('click', clearOverlays);
+    el.overlayAngle.addEventListener('input', updateSelectedOverlayAngle);
+    el.resetOverlayAngleButton.addEventListener('click', resetSelectedOverlayAngle);
     el.editButton.addEventListener('click', () => {
       state.editMode = !state.editMode;
       applyEditMode();
