@@ -1,10 +1,10 @@
-/* Version: v1.2.0 | 2026-09-04 | Editable site notes, target-zone rotation and resident participation copy. */
+/* Version: v1.3.0 | 2026-09-04 | Drag rotation handle and resident-acceptance copy. */
 (() => {
   'use strict';
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
   const REQUEST_TIMEOUT_MS = 12000;
-  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.1.0';
+  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.0';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -489,7 +489,10 @@
     const handle = doc.createElement('i');
     handle.className = 'proposal-zone-handle';
     handle.setAttribute('aria-hidden', 'true');
-    zone.append(label, handle);
+    const rotateHandle = doc.createElement('i');
+    rotateHandle.className = 'proposal-zone-rotate-handle';
+    rotateHandle.setAttribute('aria-hidden', 'true');
+    zone.append(label, handle, rotateHandle);
     return zone;
   }
 
@@ -508,7 +511,7 @@
     documentStyle.textContent = `
       .proposal-custom-zone { position:absolute; z-index:4; border:4px dashed #ff8a00; background:rgba(255,183,61,.20); box-shadow:0 0 0 2px rgba(255,255,255,.78) inset; }
       .proposal-custom-zone-label { position:absolute; left:8px; top:8px; max-width:calc(100% - 16px); padding:5px 9px; border-radius:7px; background:rgba(91,47,0,.88); color:#fff; font-size:15px; line-height:1.25; font-weight:850; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      @media print { .proposal-zone-handle { display:none !important; } .proposal-custom-zone { outline:0 !important; } }
+      @media print { .proposal-zone-handle, .proposal-zone-rotate-handle { display:none !important; } .proposal-custom-zone { outline:0 !important; } }
     `;
     doc.head.appendChild(documentStyle);
 
@@ -523,6 +526,9 @@
         .proposal-custom-zone { cursor:move; touch-action:none; }
         .proposal-custom-zone.is-selected { outline:4px solid #087f5b; outline-offset:3px; }
         .proposal-zone-handle { position:absolute; right:-10px; bottom:-10px; width:22px; height:22px; border:3px solid #fff; border-radius:50%; background:#087f5b; box-shadow:0 2px 7px rgba(0,0,0,.3); cursor:nwse-resize; }
+        .proposal-zone-rotate-handle { position:absolute; left:50%; top:-38px; width:28px; height:28px; transform:translateX(-50%); border:4px solid #fff; border-radius:50%; background:#f5a000; box-shadow:0 2px 8px rgba(0,0,0,.34); cursor:grab; touch-action:none; }
+        .proposal-zone-rotate-handle::after { content:""; position:absolute; left:50%; top:24px; width:4px; height:14px; transform:translateX(-50%); border-radius:3px; background:#f5a000; }
+        .proposal-zone-rotate-handle:active { cursor:grabbing; }
         .photo-shell.proposal-zone-draw-mode { cursor:crosshair; touch-action:none; outline:5px solid rgba(245,160,0,.75); outline-offset:4px; }
       }
       @media print { [data-proposal-editable="true"] { outline:0 !important; background:transparent !important; } }
@@ -598,6 +604,17 @@
     return Math.min(Math.max(value, minimum), maximum);
   }
 
+  function normalizeAngle(value) {
+    let angle = Number(value) || 0;
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
+    return roundCoordinate(angle);
+  }
+
+  function pointerAngle(event, center) {
+    return Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
+  }
+
   function overlayById(id) {
     return state.customOverlays.find((overlay) => overlay.id === id) || null;
   }
@@ -658,6 +675,7 @@
       if (event.button !== 0) return;
       const zone = event.target.closest?.('.proposal-custom-zone');
       const handle = event.target.closest?.('.proposal-zone-handle');
+      const rotateHandle = event.target.closest?.('.proposal-zone-rotate-handle');
       const point = pointerPercent(event, shell);
 
       if (state.overlayDrawMode) {
@@ -688,12 +706,19 @@
       const overlay = overlayById(zone.dataset.overlayId);
       if (!overlay) return;
       selectOverlay(overlay.id);
+      const shellRect = shell.getBoundingClientRect();
+      const center = {
+        x: shellRect.left + (overlay.x + overlay.width / 2) / 100 * shellRect.width,
+        y: shellRect.top + (overlay.y + overlay.height / 2) / 100 * shellRect.height
+      };
       action = {
-        type: handle ? 'resize' : 'move',
+        type: rotateHandle ? 'rotate' : handle ? 'resize' : 'move',
         overlay,
         element: zone,
         start: point,
-        origin: { x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height }
+        center,
+        startPointerAngle: pointerAngle(event, center),
+        origin: { x: overlay.x, y: overlay.y, width: overlay.width, height: overlay.height, angle: Number(overlay.angle) || 0 }
       };
       event.preventDefault();
       event.stopPropagation();
@@ -703,7 +728,10 @@
       if (!action) return;
       const point = pointerPercent(event, shell);
       const { overlay, origin, start } = action;
-      if (action.type === 'draw') {
+      if (action.type === 'rotate') {
+        overlay.angle = normalizeAngle(origin.angle + pointerAngle(event, action.center) - action.startPointerAngle);
+        el.overlayAngle.value = String(overlay.angle);
+      } else if (action.type === 'draw') {
         overlay.x = roundCoordinate(Math.min(start.x, point.x));
         overlay.y = roundCoordinate(Math.min(start.y, point.y));
         overlay.width = roundCoordinate(Math.abs(point.x - start.x));
@@ -711,7 +739,7 @@
       } else if (action.type === 'move') {
         overlay.x = roundCoordinate(clamp(origin.x + point.x - start.x, 0, 100 - origin.width));
         overlay.y = roundCoordinate(clamp(origin.y + point.y - start.y, 0, 100 - origin.height));
-      } else {
+      } else if (action.type === 'resize') {
         overlay.width = roundCoordinate(clamp(origin.width + point.x - start.x, 3, 100 - origin.x));
         overlay.height = roundCoordinate(clamp(origin.height + point.y - start.y, 3, 100 - origin.y));
       }
@@ -733,6 +761,8 @@
         } else {
           setStatus('대상지 영역을 표시했습니다. 영역을 드래그해 옮기거나 오른쪽 아래 점으로 크기를 조절할 수 있습니다.');
         }
+      } else if (finished.type === 'rotate') {
+        setStatus(`대상지 표시를 ${trimNumber(finished.overlay.angle)}°로 돌렸습니다. PDF와 HTML에도 같은 각도로 저장됩니다.`);
       } else {
         setStatus('대상지 표시 위치를 반영했습니다. PDF와 HTML에도 같은 위치로 저장됩니다.');
       }
@@ -928,7 +958,7 @@
     if (!sourceDoc) throw new Error('미리보기가 아직 준비되지 않았습니다.');
     const doc = sourceDoc.cloneNode(true);
     doc.getElementById('proposalBuilderPreviewStyle')?.remove();
-    doc.querySelectorAll('.proposal-zone-handle').forEach((node) => node.remove());
+    doc.querySelectorAll('.proposal-zone-handle, .proposal-zone-rotate-handle').forEach((node) => node.remove());
     doc.querySelectorAll('.proposal-custom-zone').forEach((node) => {
       node.classList.remove('is-selected');
       node.removeAttribute('data-overlay-id');
