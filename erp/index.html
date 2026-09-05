@@ -292,11 +292,12 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <div class="small text-muted mb-3">보이는 모듈만 순서를 바꿉니다. 이 브라우저에서 현재 조합 기준으로 저장됩니다.</div>
+          <div class="small text-muted mb-2">보이는 모듈만 순서를 바꿉니다. 저장한 순서는 현재 조합의 모든 컴퓨터에 함께 적용됩니다.</div>
+          <div class="small mb-3" id="menuOrderStatus" role="status" aria-live="polite"></div>
           <div class="d-grid gap-2" id="menuOrderList"></div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline-secondary btn-sm" type="button" onclick="resetMenuOrder()">기본 순서로</button>
+          <button class="btn btn-outline-secondary btn-sm" id="btnResetMenuOrder" type="button" onclick="resetMenuOrder()">기본 순서로</button>
           <button class="btn btn-primary btn-sm" type="button" data-bs-dismiss="modal">닫기</button>
         </div>
       </div>
@@ -409,6 +410,10 @@ let employeeMatchModalInstance = null;
 let employeeMatchCandidates = [];
 let employeeMatchActiveUser = null;
 let employeeMatchClaimInFlight = false;
+let menuOrderCache = [];
+let menuOrderLoadedFromServer = false;
+let menuOrderSaving = false;
+let menuOrderCanCustomize = false;
 
 function normalizeErpBrandName(value) {
     return String(value || '').trim();
@@ -1397,6 +1402,7 @@ async function loadUserInfo(user) {
     if (elTeam) elTeam.innerText = data.department || "-";
     if (elRank) elRank.innerText = data.position || "";
 
+    await loadSharedMenuOrder(canCustomizeMenuOrder(data, platformContext));
     applyMenuPermissions(data, platformContext, coopRuntime);
     updateSocialLinkUi(user);
 
@@ -1561,25 +1567,145 @@ function getMenuOrderStorageKey() {
     return `erp_menu_order:${coopId}`;
 }
 
-function readMenuOrder() {
+function normalizeMenuOrder(order) {
+    const defaults = getDefaultMenuOrder();
+    const knownIds = new Set(defaults);
+    const seen = new Set();
+    const normalized = [];
+    if (Array.isArray(order)) {
+        order.forEach(rawId => {
+            const id = String(rawId || '').trim();
+            if (!knownIds.has(id) || seen.has(id)) return;
+            seen.add(id);
+            normalized.push(id);
+        });
+    }
+    defaults.forEach(id => {
+        if (!seen.has(id)) normalized.push(id);
+    });
+    return normalized;
+}
+
+function readLegacyMenuOrder() {
     try {
         const raw = localStorage.getItem(getMenuOrderStorageKey());
         const parsed = JSON.parse(raw || '[]');
-        if (!Array.isArray(parsed)) return getDefaultMenuOrder();
-        const knownIds = new Set(getDefaultMenuOrder());
-        const filtered = parsed.filter(id => knownIds.has(id));
-        getDefaultMenuOrder().forEach(id => {
-            if (!filtered.includes(id)) filtered.push(id);
-        });
-        return filtered;
+        return normalizeMenuOrder(parsed);
     } catch (err) {
-        console.warn('readMenuOrder failed:', err);
+        console.warn('readLegacyMenuOrder failed:', err);
         return getDefaultMenuOrder();
     }
 }
 
-function saveMenuOrder(order) {
-    localStorage.setItem(getMenuOrderStorageKey(), JSON.stringify(order));
+function readMenuOrder() {
+    return normalizeMenuOrder(menuOrderCache.length ? menuOrderCache : readLegacyMenuOrder());
+}
+
+function cacheMenuOrder(order) {
+    menuOrderCache = normalizeMenuOrder(order);
+    try {
+        localStorage.setItem(getMenuOrderStorageKey(), JSON.stringify(menuOrderCache));
+    } catch (err) {
+        console.warn('cacheMenuOrder local fallback failed:', err);
+    }
+    return menuOrderCache;
+}
+
+function isSameMenuOrder(left, right) {
+    const a = normalizeMenuOrder(left);
+    const b = normalizeMenuOrder(right);
+    return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+function setMenuOrderStatus(message, tone = 'muted') {
+    const status = document.getElementById('menuOrderStatus');
+    if (!status) return;
+    status.className = `small mb-3 text-${tone}`;
+    status.textContent = message || '';
+}
+
+function canCustomizeMenuOrder(user = myInfo, platformCtx = platformContext) {
+    if (!user || retiredGraceAccess) return false;
+    return (
+        user.role === 'admin' ||
+        user.role === 'admin_all' ||
+        user.position === '국장' ||
+        hasPermission('member.admin') === true ||
+        hasPermission('site.admin') === true ||
+        platformCtx?.is_platform_admin === true
+    );
+}
+
+async function saveSharedMenuOrder(order, { quiet = false, onlyIfMissing = false } = {}) {
+    if (!menuOrderCanCustomize || menuOrderSaving) return { ok: false, changed: false };
+    const normalized = normalizeMenuOrder(order);
+    menuOrderSaving = true;
+    setMenuOrderStatus('조합 공용 순서를 저장하고 있습니다…', 'primary');
+    renderMenuOrderList();
+    try {
+        const { data, error } = await _supabase.rpc('erp_save_menu_order', {
+            p_menu_order: normalized,
+            p_only_if_missing: onlyIfMissing
+        });
+        if (error) throw error;
+        const savedOrder = Array.isArray(data?.menu_order)
+            ? data.menu_order
+            : (Array.isArray(data) ? data : normalized);
+        cacheMenuOrder(savedOrder);
+        menuOrderLoadedFromServer = true;
+        applyMenuOrder();
+        const changed = data?.changed !== false;
+        setMenuOrderStatus(
+            changed
+                ? '저장되었습니다. 다른 컴퓨터에서도 같은 순서가 표시됩니다.'
+                : '다른 컴퓨터에서 먼저 저장한 조합 공용 순서를 불러왔습니다.',
+            'success'
+        );
+        return { ok: true, changed };
+    } catch (err) {
+        console.error('saveSharedMenuOrder failed:', err);
+        setMenuOrderStatus('저장하지 못했습니다. 기존 공용 순서는 그대로 유지됩니다.', 'danger');
+        if (!quiet) showAlert('모듈 순서를 저장하지 못했습니다.\n연결 상태를 확인한 뒤 다시 시도해 주세요.');
+        return { ok: false, changed: false };
+    } finally {
+        menuOrderSaving = false;
+        renderMenuOrderList();
+    }
+}
+
+async function loadSharedMenuOrder(canCustomize) {
+    menuOrderCanCustomize = canCustomize === true;
+    const legacyOrder = readLegacyMenuOrder();
+    cacheMenuOrder(legacyOrder);
+    try {
+        const { data, error } = await _supabase.rpc('erp_get_menu_order');
+        if (error) throw error;
+        if (Array.isArray(data)) {
+            cacheMenuOrder(data);
+            menuOrderLoadedFromServer = true;
+            setMenuOrderStatus('조합 공용 순서를 불러왔습니다.', 'success');
+            return;
+        }
+
+        const defaultOrder = getDefaultMenuOrder();
+        if (menuOrderCanCustomize && !isSameMenuOrder(legacyOrder, defaultOrder)) {
+            const migrated = await saveSharedMenuOrder(legacyOrder, { quiet: true, onlyIfMissing: true });
+            if (migrated.ok) {
+                if (migrated.changed && isSameMenuOrder(readMenuOrder(), legacyOrder)) {
+                    setMenuOrderStatus('이 컴퓨터의 기존 순서를 조합 공용 순서로 옮겼습니다.', 'success');
+                }
+                return;
+            }
+        }
+
+        cacheMenuOrder(defaultOrder);
+        menuOrderLoadedFromServer = true;
+        setMenuOrderStatus('아직 저장된 공용 순서가 없어 기본 순서를 사용합니다.', 'muted');
+    } catch (err) {
+        console.warn('loadSharedMenuOrder failed; using local fallback:', err);
+        menuOrderLoadedFromServer = false;
+        setMenuOrderStatus('공용 순서를 불러오지 못해 이 컴퓨터에 남아 있던 순서를 표시합니다.', 'warning');
+    }
 }
 
 function applyMenuOrder() {
@@ -1605,6 +1731,7 @@ function getVisibleMenuButtonIds() {
 }
 
 function updateMenuOrderButtonVisibility(canCustomize) {
+    menuOrderCanCustomize = canCustomize === true;
     const btn = document.getElementById('btnMenuOrder');
     if (!btn) return;
     if (canCustomize && getVisibleMenuButtonIds().length > 1) btn.classList.remove('hidden');
@@ -1628,18 +1755,20 @@ function renderMenuOrderList() {
         row.innerHTML = `
           <strong>${getMenuButtonLabel(id)}</strong>
           <div class="menu-order-controls">
-            <button type="button" class="btn btn-outline-secondary btn-sm" ${index === 0 ? 'disabled' : ''} data-dir="-1" data-id="${id}">↑</button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" ${index === orderedVisibleIds.length - 1 ? 'disabled' : ''} data-dir="1" data-id="${id}">↓</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" ${(menuOrderSaving || index === 0) ? 'disabled' : ''} data-dir="-1" data-id="${id}">↑</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" ${(menuOrderSaving || index === orderedVisibleIds.length - 1) ? 'disabled' : ''} data-dir="1" data-id="${id}">↓</button>
           </div>
         `;
         listEl.appendChild(row);
     });
     listEl.querySelectorAll('button[data-id]').forEach(btn => {
-        btn.addEventListener('click', () => moveMenuOrderItem(btn.dataset.id, Number(btn.dataset.dir || '0')));
+        btn.addEventListener('click', () => { void moveMenuOrderItem(btn.dataset.id, Number(btn.dataset.dir || '0')); });
     });
+    const resetButton = document.getElementById('btnResetMenuOrder');
+    if (resetButton) resetButton.disabled = menuOrderSaving;
 }
 
-function moveMenuOrderItem(id, direction) {
+async function moveMenuOrderItem(id, direction) {
     const order = readMenuOrder();
     const visibleIds = order.filter(menuId => {
         const el = document.getElementById(menuId);
@@ -1653,9 +1782,7 @@ function moveMenuOrderItem(id, direction) {
     if (fromIndex < 0 || toIndex < 0) return;
     const next = order.slice();
     [next[fromIndex], next[toIndex]] = [next[toIndex], next[fromIndex]];
-    saveMenuOrder(next);
-    applyMenuOrder();
-    renderMenuOrderList();
+    await saveSharedMenuOrder(next);
 }
 
 function openMenuOrderModal() {
@@ -1664,10 +1791,8 @@ function openMenuOrderModal() {
     if (menuOrderModalInstance) menuOrderModalInstance.show();
 }
 
-function resetMenuOrder() {
-    saveMenuOrder(getDefaultMenuOrder());
-    applyMenuOrder();
-    renderMenuOrderList();
+async function resetMenuOrder() {
+    await saveSharedMenuOrder(getDefaultMenuOrder());
 }
 
 function applyMenuPermissions(user, platformCtx, runtime) {
@@ -1850,12 +1975,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     if (platformCtx && platformCtx.is_platform_admin === true) document.getElementById('btnPlatform')?.classList.remove('hidden');
 
     applyMenuOrder();
-    updateMenuOrderButtonVisibility(
-        hasAdminRoleFallback ||
-        canMemberAdmin === true ||
-        canSiteAdmin === true ||
-        platformCtx?.is_platform_admin === true
-    );
+    updateMenuOrderButtonVisibility(canCustomizeMenuOrder(user, platformCtx));
 }
 
 function showScreen(id) {
