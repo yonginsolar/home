@@ -1,4 +1,4 @@
-/* Version: v1.4.5 | Explicit local apply drafts and verified private ERP snapshots. */
+/* Version: v1.5.0 | Public/school proposal starts are separated while storage stays shared. */
 (() => {
   'use strict';
   const TABLE = 'erp_proposals';
@@ -11,7 +11,7 @@
     const select = byId('proposalSiteSelect'), name = byId('savedProposalName'), status = byId('libraryStatus');
     const save = byId('saveSiteButton'), copy = byId('copySiteButton');
     const form = byId('proposalForm');
-    let current = null, rows = [], busy = false, dirty = false, pending = null, available = false;
+    let current = null, rows = [], busy = false, dirty = false, pending = null, available = false, presetFilter = 'public';
     // localStorage holds only the server ID. Explicit apply drafts use account-scoped IndexedDB.
     const resumeKey = hooks.userId ? `yonginsolar.erp.proposal-current.v1.${hooks.coopId}.${hooks.userId}` : '';
     let resumeId = '', rememberFailed = false;
@@ -53,19 +53,34 @@
     function options() {
       const selected = select.value;
       select.replaceChildren(new Option('대상지를 선택해 주세요', ''));
-      const presets = document.createElement('optgroup'); presets.label = '기본 대상지 · 새 제안서 시작';
-      window.ProposalPresets.items.forEach((site) => presets.append(new Option(site.name, `preset:${site.id}`)));
+      const isSchool = presetFilter === 'school';
+      const presets = document.createElement('optgroup');
+      presets.label = isSchool ? '학교 기본 대상지 · 새 제안서 시작' : '공공기관 기본 대상지 · 새 제안서 시작';
+      window.ProposalPresets.items
+        .filter((site) => site.fields.facilityType === presetFilter)
+        .forEach((site) => presets.append(new Option(site.name, `preset:${site.id}`)));
       select.append(presets);
       const saved = document.createElement('optgroup'); saved.label = 'ERP에 저장한 제안서 · 최근 200개';
       rows.forEach((row) => saved.append(new Option(row.name, `saved:${row.id}`)));
       if (current && !rows.some((row) => row.id === current.id)) saved.append(new Option(current.name, `saved:${current.id}`));
       select.append(saved); select.value = selected;
     }
+    function setPresetFilter(next) {
+      presetFilter = next === 'school' ? 'school' : 'public';
+      byId('publicProposalKindButton').classList.toggle('active', presetFilter === 'public');
+      byId('schoolProposalKindButton').classList.toggle('active', presetFilter === 'school');
+      byId('proposalSiteSelectLabel').textContent = presetFilter === 'school'
+        ? '학교 기본 대상지 또는 저장한 제안서'
+        : '공공기관 기본 대상지 또는 저장한 제안서';
+      byId('newSiteButton').textContent = presetFilter === 'school' ? '+ 새 학교 추가' : '+ 새 공공시설 추가';
+      select.value = '';
+      options();
+    }
     async function refresh() {
       const { data, error } = await request(hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).order('updated_at', { ascending: false }).limit(200));
       if (error) throw error;
       rows = data || []; available = true; options();
-      say(`저장한 제안서 ${rows.length}개 · 기본 대상지 7곳. 사진과 최종 수정 문구도 함께 보관합니다.`);
+      say(`저장한 제안서 ${rows.length}개 · 공공기관 3곳 · 학교 4곳. 사진과 최종 수정 문구도 함께 보관합니다.`);
     }
     async function run(action) {
       if (busy) return;
@@ -167,11 +182,15 @@
       say(`「${title}」 저장 완료. 새로고침해도 사진과 수정 내용이 함께 열립니다.${rememberNotice()}`);
     }
     options();
+    byId('publicProposalKindButton').addEventListener('click', () => setPresetFilter('public'));
+    byId('schoolProposalKindButton').addEventListener('click', () => setPresetFilter('school'));
     byId('loadSiteButton').addEventListener('click', () => run(load));
     byId('newSiteButton').addEventListener('click', () => run(async () => {
       if (!mayReplace()) return;
-      await hooks.newSite(); await detach(); name.value = ''; dirty = true;
-      say('새 대상지를 시작합니다. 이름과 정보를 입력한 뒤 저장해 주세요.');
+      await hooks.newSite({ fields: window.ProposalPresets.blank(presetFilter) }); await detach(); name.value = ''; dirty = true;
+      say(presetFilter === 'school'
+        ? '새 학교 제안서를 시작합니다. 학교 정보와 설치 계획을 입력해 저장해 주세요.'
+        : '새 공공시설 제안서를 시작합니다. 대상지 정보를 입력해 저장해 주세요.');
     }));
     save.addEventListener('click', () => run(() => persist(false)));
     copy.addEventListener('click', () => run(() => persist(true)));

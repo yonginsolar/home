@@ -1,8 +1,8 @@
-/* Version: v1.4.6 | 2026-09-07 | Facility-based PDF default filename. */
+/* Version: v1.5.0 | 2026-09-07 | School public-project complement and education proposal. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.6';
+  const VERSION = '1.5.0';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -15,7 +15,8 @@
     'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
     'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
     'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay',
-    'visitDirector', 'visitDirectorPhone', 'statsAsOf'
+    'visitDirector', 'visitDirectorPhone', 'statsAsOf',
+    'schoolPublicProgramStatus', 'schoolPublicProgramKw', 'schoolInstallArea'
   ];
 
   const state = {
@@ -251,6 +252,9 @@
       regionShort: textValue('regionShort'),
       siteAddress: textValue('siteAddress'),
       facilityType: textValue('facilityType'),
+      schoolPublicProgramStatus: textValue('schoolPublicProgramStatus') || 'checking',
+      schoolPublicProgramKw: textValue('schoolPublicProgramKw') === '' ? null : numberValue('schoolPublicProgramKw'),
+      schoolInstallArea: textValue('schoolInstallArea') || 'both',
       siteProposalNote: textValue('siteProposalNote'),
       existingKnown,
       noMandatory,
@@ -312,6 +316,9 @@
     }
     if (model.constructionMonth <= 0 || model.completionMinMonth < model.constructionMonth || model.completionMaxMonth < model.completionMinMonth) {
       throw new Error('완공 목표는 착공 목표보다 뒤여야 하고, 완공 시작은 완공 끝보다 늦을 수 없습니다.');
+    }
+    if (model.facilityType === 'school' && model.schoolPublicProgramKw !== null && model.schoolPublicProgramKw <= 0) {
+      throw new Error('학교 자가소비형 계획 용량은 0보다 크게 입력하거나 비워 주세요.');
     }
   }
 
@@ -906,6 +913,18 @@
     document.getElementById('existingInstallationStatus').value = !known ? 'unknown' : hasExisting ? 'installed' : 'none';
   }
 
+  function syncSchoolPlanningUi() {
+    const isSchool = textValue('facilityType') === 'school';
+    document.getElementById('schoolPlanningSection').hidden = !isSchool;
+    document.getElementById('capacitySectionNumber').textContent = isSchool ? '3.' : '2.';
+    document.getElementById('financeSectionNumber').textContent = isSchool ? '4.' : '3.';
+    document.getElementById('operationsSectionNumber').textContent = isSchool ? '5.' : '4.';
+    const status = textValue('schoolPublicProgramStatus') || 'checking';
+    const capacity = document.getElementById('schoolPublicProgramKw');
+    capacity.disabled = !isSchool || status === 'none';
+    if (status === 'none') capacity.value = '';
+  }
+
   function renderPreview({ force = false } = {}) {
     if (!state.templateHtml) return false;
     if (state.manualDirty && force) {
@@ -1046,7 +1065,11 @@
   }
 
   function setFields(fields) {
-    fields = { visitDirector: '', visitDirectorPhone: '', statsAsOf: '', ...fields };
+    fields = {
+      visitDirector: '', visitDirectorPhone: '', statsAsOf: '',
+      schoolPublicProgramStatus: 'checking', schoolPublicProgramKw: '', schoolInstallArea: 'both',
+      ...fields
+    };
     DRAFT_FIELDS.forEach((id) => {
       if (!(id in fields)) return;
       const input = document.getElementById(id);
@@ -1055,6 +1078,7 @@
     });
     normalizeExistingZero();
     syncExistingInstallationUi();
+    syncSchoolPlanningUi();
     invalidateDirectorContact('보관한 연락처를 유지합니다. 최신 번호가 필요하면 다시 불러오기를 눌러 주세요.');
   }
 
@@ -1463,6 +1487,7 @@
         el.hasExistingInstallation.checked = status === 'installed';
         syncExistingInstallationUi({ restoreValue: status === 'installed' });
       }
+      if (event.target.id === 'facilityType' || event.target.id === 'schoolPublicProgramStatus') syncSchoolPlanningUi();
       if (event.target === el.existingKw) normalizeExistingZero();
       if (['memberTotal','shareCapitalManwon','individualMembers','organizationMembers'].includes(event.target.id)) document.getElementById('statsAsOf').value = '';
       if ([el.hasExistingInstallation, document.getElementById('existingInstallationKnown'), document.getElementById('mandatoryKnown'), document.getElementById('noMandatory')].includes(event.target)) syncExistingInstallationUi({ restoreValue: true });
@@ -1546,6 +1571,7 @@
       state.draftKey = `${DRAFT_KEY}.${userGate.user.coop_id}`;
       const hadDraft = restoreDraft();
       syncExistingInstallationUi();
+      syncSchoolPlanningUi();
       updateOverlayControls();
       bindEvents();
       el.bootSpinner.hidden = true;

@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.4.6 | Change: 2026-09-07 - Facility-based PDF default filename. -->
+<!-- Version: v1.5.0 | Change: 2026-09-07 - School proposal: public-project complement, education and school safety. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -95,6 +95,10 @@
     .overlay-angle-row .field { margin: 0; }
     .overlay-angle-row .btn { min-height: 42px; padding-inline: 11px; font-size: 12px; }
     .existing-toggle { min-height: 42px; margin: 0 0 11px; padding: 9px 11px; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+    .proposal-kind-picker { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-bottom:13px; }
+    .proposal-kind-button { min-height:64px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-soft); color:var(--ink); font-weight:850; line-height:1.35; cursor:pointer; }
+    .proposal-kind-button span { display:block; margin-top:3px; color:var(--muted); font-size:11px; font-weight:650; }
+    .proposal-kind-button.active { border-color:var(--green); background:var(--green-soft); box-shadow:0 0 0 2px color-mix(in srgb, var(--green) 14%, transparent); }
     .existing-toggle input { flex: 0 0 auto; margin-top: 0; }
     .field input:disabled { opacity: .66; cursor: not-allowed; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -144,8 +148,8 @@
   <main class="app-shell" id="appShell">
     <header class="topbar">
       <div class="title-wrap">
-        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.4.6</span></strong>
-        <span>남사읍행정복지센터 제안서의 18쪽 구성과 계산식을 재사용합니다.</span>
+        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.5.0</span></strong>
+        <span>공공기관·주차장용과 학교용을 구분해 18쪽 제안서를 만듭니다.</span>
       </div>
       <div class="top-actions">
         <button class="btn" id="printTopButton" type="button">🖨️ PDF 저장</button>
@@ -157,18 +161,22 @@
       <form class="editor" id="proposalForm" autocomplete="off">
         <div class="intro">
           <strong>사용 순서</strong><br>
-          대상지·용량·사진을 넣으면 계산과 문구가 18쪽에 반영됩니다. 숫자 확인이 끝나면 <b>최종 문구 수정</b>을 켜서 미리보기 문장을 직접 고친 뒤 PDF나 HTML로 저장하세요.
+          먼저 공공기관용 또는 학교용을 고른 뒤 대상지·용량·사진을 입력하세요. 숫자 확인이 끝나면 <b>최종 문구 수정</b>을 켜서 미리보기 문장을 직접 고친 뒤 PDF나 HTML로 저장하세요.
         </div>
 
         <section class="section" data-library-controls>
           <h2>📂 대상지 선택·저장</h2>
+          <div class="proposal-kind-picker" aria-label="새 제안서 유형 선택">
+            <button class="proposal-kind-button active" id="publicProposalKindButton" type="button">🏛️ 공공기관·주차장용<span>의무용량·차양·주민편익 중심</span></button>
+            <button class="proposal-kind-button" id="schoolProposalKindButton" type="button">🏫 학교용<span>공공사업 보완·교육·학교 안전 중심</span></button>
+          </div>
           <div class="field">
-            <label for="proposalSiteSelect">기본 대상지 또는 저장한 제안서</label>
+            <label for="proposalSiteSelect" id="proposalSiteSelectLabel">공공기관 기본 대상지 또는 저장한 제안서</label>
             <select id="proposalSiteSelect"><option value="">선택해 주세요</option></select>
           </div>
           <div class="overlay-button-row">
             <button class="btn" id="loadSiteButton" type="button">선택한 내용 불러오기</button>
-            <button class="btn" id="newSiteButton" type="button">+ 새 대상지 추가</button>
+            <button class="btn" id="newSiteButton" type="button">+ 새 공공시설 추가</button>
           </div>
           <div class="field" style="margin-top:12px">
             <label for="savedProposalName">저장할 이름</label>
@@ -262,8 +270,37 @@
           </div>
         </section>
 
+        <section class="section" id="schoolPlanningSection" hidden>
+          <h2>2. 학교 태양광 계획</h2>
+          <div class="field">
+            <label for="schoolPublicProgramStatus">교육부·교육청 자가소비형 사업 현황</label>
+            <select id="schoolPublicProgramStatus">
+              <option value="checking">확인 중</option>
+              <option value="planned">선정·설계 또는 설치 예정</option>
+              <option value="completed">설치 완료</option>
+              <option value="none">별도 계획 없음</option>
+            </select>
+            <span class="help">2026년 햇빛이음학교 시범사업의 ‘50kW 내외’를 모든 학교의 고정 기준으로 자동 적용하지 않습니다. 해당 학교의 실제 선정·설계 자료를 확인해 입력하세요.</span>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="schoolPublicProgramKw">자가소비형 계획·설치 용량(kW) · 선택</label>
+              <input id="schoolPublicProgramKw" type="number" min="0.1" step="0.1" placeholder="확인된 경우만 입력">
+            </div>
+            <div class="field">
+              <label for="schoolInstallArea">시민발전 설치 검토 공간</label>
+              <select id="schoolInstallArea">
+                <option value="both">옥상·주차장 모두 검토</option>
+                <option value="roof">옥상 중심</option>
+                <option value="parking">주차장 중심</option>
+              </select>
+            </div>
+          </div>
+          <span class="help">기존 설비와 공공사업 예정 구역을 우선 반영한 뒤, 추가로 활용 가능한 공간에 별도 시민발전소를 제안합니다.</span>
+        </section>
+
         <section class="section">
-          <h2>2. 설치 용량</h2>
+          <h2><span id="capacitySectionNumber">2.</span> 설치 용량</h2>
           <label class="switch-row existing-toggle"><input id="noMandatory" type="checkbox"><span><b>의무 설치 없는 사업</b><br>학교 등 자발적 설치 제안은 의무 대응 문구 대신 설치·운영·교육 목적을 반영합니다.</span></label>
           <div class="field" id="voluntaryCapacityField" hidden><label for="voluntaryBaseKw">기준 설치안 용량(kW) · 자발적 설치</label><input id="voluntaryBaseKw" type="number" min="0.1" step="0.1" placeholder="현장조사 후 입력"></div>
           <label class="switch-row existing-toggle"><input id="mandatoryKnown" type="checkbox" checked><span><b>의무용량 확인됨</b><br>미확인이면 체크를 해제하세요. 0kW로 추정하지 않습니다.</span></label>
@@ -301,7 +338,7 @@
         </section>
 
         <details class="section">
-          <summary>3. 수지 계산 가정</summary>
+          <summary><span id="financeSectionNumber">3.</span> 수지 계산 가정</summary>
           <div class="details-body">
             <div class="grid-2">
               <div class="field">
@@ -330,7 +367,7 @@
         </details>
 
         <details class="section">
-          <summary>4. 일정·조합 현황·연락처</summary>
+          <summary><span id="operationsSectionNumber">4.</span> 일정·조합 현황·연락처</summary>
           <div class="details-body">
             <button class="btn" type="button" id="refreshCoopStatsButton">🔄 최신 조합 현황 불러오기</button>
             <p class="help" id="coopStatsStatus" role="status">홈페이지와 같은 집계값을 불러옵니다. 저장한 제안서는 저장 당시 숫자를 유지합니다.</p>
@@ -413,10 +450,10 @@
     </div>
   </main>
 
-  <script src="proposal_presets.js?v=1.4.0"></script>
+  <script src="proposal_presets.js?v=1.5.0"></script>
   <script src="proposal_drafts.js?v=1.4.5"></script>
-  <script src="proposal_library.js?v=1.4.5"></script>
-  <script src="proposal_sections.js?v=1.4.3"></script>
-  <script src="proposal_builder.js?v=1.4.6"></script>
+  <script src="proposal_library.js?v=1.5.0"></script>
+  <script src="proposal_sections.js?v=1.5.0"></script>
+  <script src="proposal_builder.js?v=1.5.0"></script>
 </body>
 </html>
