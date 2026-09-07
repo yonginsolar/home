@@ -1,8 +1,8 @@
-/* Sun-income-village existing ERP tenant hub v3.0.1 */
+/* Sun-income-village existing ERP tenant hub v3.0.2 */
 (() => {
   'use strict';
 
-  const VERSION = '3.0.1';
+  const VERSION = '3.0.2';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -10,10 +10,14 @@
   const number = value => Number(value || 0).toLocaleString('ko-KR');
   const money = value => `${number(value)}원`;
   const statusLabel = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', ended: '종료' };
+  const HANDOFF_PARAM = 'workspace_handoff';
+  const HANDOFF_SOURCE_PARAM = 'workspace_source';
+  const HANDOFF_MODE_PARAM = 'workspace_mode';
   let client = null;
   let context = null;
   let canCreateCooperative = false;
   let loading = false;
+  let openingWorkspaceId = '';
 
   function setMessage(text, isError = false) {
     const el = $('message');
@@ -28,6 +32,9 @@
     if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
     if (raw.includes('AUTH_REQUIRED')) return 'ERP 로그인이 필요합니다.';
+    if (raw.includes('POPUP_BLOCKED')) return '새 탭을 열지 못했습니다. 이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.';
+    if (raw.includes('HANDOFF_TIMEOUT')) return '로그인 연결 시간이 초과되었습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
+    if (raw.includes('ACCESS')) return '이 마을 ERP를 운영할 권한이 없습니다. 담당자 배정 상태를 확인해 주세요.';
     if (raw.includes('COOP_CODE_ALREADY_EXISTS') || error?.code === '23505') return '같은 운영 공간이 이미 만들어져 있는지 목록을 확인해 주세요.';
     return '처리를 마치지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
   }
@@ -74,6 +81,130 @@
     }
   }
 
+  function normalizeWorkspaceOrigin(raw) {
+    try {
+      const parsed = new URL(String(raw || '').trim());
+      const host = String(parsed.hostname || '').trim().toLowerCase().replace(/\.$/, '');
+      const isAllowedHost = host === 'yonginsolar.kr'
+        || host === 'www.yonginsolar.kr'
+        || host.endsWith('.yonginsolar.kr')
+        || host.endsWith('.coopco.kr');
+      if (parsed.protocol !== 'https:' || !isAllowedHost) return '';
+      return parsed.origin;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function createHandoffNonce() {
+    const bytes = new Uint8Array(24);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  }
+
+  function validatePreparedWorkspace(prepared, row) {
+    try {
+      const targetUrl = new URL(String(prepared?.workspace_url || ''));
+      const listedUrl = new URL(String(row?.workspace_url || ''));
+      if (normalizeWorkspaceOrigin(targetUrl.origin) !== targetUrl.origin) return null;
+      if (targetUrl.hostname.toLowerCase() !== listedUrl.hostname.toLowerCase()) return null;
+      if (String(prepared?.target_coop_id || '') !== String(row?.coop_id || '')) return null;
+      targetUrl.pathname = '/erp/';
+      targetUrl.search = '';
+      targetUrl.hash = '';
+      return targetUrl;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function handoffSessionToTab(targetTab, targetUrl) {
+    const { data, error } = await getClient().auth.getSession();
+    const session = data?.session || null;
+    if (error || !session?.access_token || !session?.refresh_token) {
+      throw error || new Error('AUTH_REQUIRED');
+    }
+
+    const nonce = createHandoffNonce();
+    const handoffUrl = new URL(targetUrl.href);
+    handoffUrl.searchParams.set(HANDOFF_PARAM, nonce);
+    handoffUrl.searchParams.set(HANDOFF_SOURCE_PARAM, window.location.origin);
+    handoffUrl.searchParams.set(HANDOFF_MODE_PARAM, 'open');
+    const targetOrigin = handoffUrl.origin;
+
+    return new Promise((resolve, reject) => {
+      let sessionSent = false;
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        window.removeEventListener('message', handleMessage);
+        callback(value);
+      };
+      const handleMessage = event => {
+        if (settled || event.source !== targetTab || event.origin !== targetOrigin) return;
+        const payload = event.data && typeof event.data === 'object' ? event.data : {};
+        if (payload.nonce !== nonce) return;
+        if (payload.type === 'erp-workspace-session-request' && !sessionSent) {
+          if (payload.targetOrigin !== targetOrigin) return;
+          sessionSent = true;
+          targetTab.postMessage({
+            type: 'erp-workspace-session',
+            nonce,
+            accessToken: session.access_token,
+            refreshToken: session.refresh_token
+          }, targetOrigin);
+          return;
+        }
+        if (payload.type === 'erp-workspace-session-ready') finish(resolve, true);
+      };
+      const timeoutId = window.setTimeout(() => finish(reject, new Error('WORKSPACE_HANDOFF_TIMEOUT')), 20000);
+      window.addEventListener('message', handleMessage);
+      targetTab.location.replace(handoffUrl.href);
+    });
+  }
+
+  async function openVillageWorkspace(coopId, trigger) {
+    const safeCoopId = String(coopId || '').trim();
+    if (!safeCoopId || openingWorkspaceId) return;
+    const row = (Array.isArray(context?.villages) ? context.villages : [])
+      .find(item => String(item?.coop_id || '') === safeCoopId);
+    if (!row || row.service_status !== 'active') return;
+
+    const targetTab = window.open('about:blank', '_blank');
+    if (!targetTab) {
+      setMessage(friendly(new Error('WORKSPACE_POPUP_BLOCKED')), true);
+      return;
+    }
+
+    openingWorkspaceId = safeCoopId;
+    const originalLabel = trigger?.textContent || '이 마을조합 ERP 열기';
+    if (trigger) {
+      trigger.disabled = true;
+      trigger.textContent = '로그인 연결 중…';
+    }
+    setMessage(`${row.coop_name} ERP에 로그인 상태를 연결하고 있습니다…`);
+
+    try {
+      const prepared = await rpc('sun_village_prepare_workspace_switch', { p_target_coop_id: safeCoopId });
+      const targetUrl = validatePreparedWorkspace(prepared, row);
+      if (!targetUrl) throw new Error('WORKSPACE_TARGET_VALIDATION_FAILED');
+      await handoffSessionToTab(targetTab, targetUrl);
+      setMessage(`${row.coop_name} ERP를 새 탭에서 열었습니다.`);
+    } catch (error) {
+      console.error(`[sun-village-hub ${VERSION}] workspace open failed`, error);
+      try { targetTab.close(); } catch (_) {}
+      setMessage(friendly(error), true);
+    } finally {
+      openingWorkspaceId = '';
+      if (trigger) {
+        trigger.disabled = false;
+        trigger.textContent = originalLabel;
+      }
+    }
+  }
+
   function renderSummary(villages) {
     $('villageCount').textContent = number(villages.length);
     $('memberCount').textContent = number(villages.reduce((sum, row) => sum + Number(row.member_count || 0), 0));
@@ -102,7 +233,7 @@
         <div class="module-line"><strong>기존 ERP 연결</strong><span>조합원 · 임원 · 복식회계 · 전자결재 · 총회·이사회 · 문서·전자서명 (${coreEnabled}/6)</span></div>
         <div class="managed-actions">
           ${active
-            ? `<a class="button primary" href="${esc(row.workspace_url)}">이 마을조합 ERP 열기</a>`
+            ? `<button type="button" class="button primary" data-open-workspace="${esc(row.coop_id)}">이 마을조합 ERP 열기</button>`
             : '<button type="button" disabled>웹 주소 연결 후 열 수 있습니다</button>'}
           <span>월 이용료 ${money(row.monthly_fee)}${row.vat_separate ? ' · 부가세 별도' : ''}</span>
         </div>
@@ -118,6 +249,9 @@
       ? villages.map(renderVillage).join('')
       : `<div class="empty"><strong>아직 연결된 마을조합이 없습니다.</strong><p>${canCreateCooperative ? '마을조합 운영 공간을 추가하면 기존 ERP의 전체 업무 틀이 빈 장부로 준비됩니다.' : '새 마을조합 운영 공간은 플랫폼 관리자에게 요청해 주세요.'}</p>${canCreateCooperative ? '<button type="button" class="primary" data-open-create>첫 마을조합 추가</button>' : ''}</div>`;
     $('villageList').querySelector('[data-open-create]')?.addEventListener('click', openCreate);
+    $('villageList').querySelectorAll('[data-open-workspace]').forEach(button => {
+      button.addEventListener('click', () => openVillageWorkspace(button.dataset.openWorkspace, button));
+    });
     $('content').hidden = false;
   }
 

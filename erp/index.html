@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.65 | Change: 2026-09-07 - Add safe multi-village workspace switching for assigned staff and total administrators. -->
+<!-- Version: v1.0.66 | Change: 2026-09-08 - Show village switching only inside village ERP and support hub session handoff. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.65 | index.html');</script>
+  <script>console.log('[Version] v1.0.66 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -396,6 +396,7 @@ const SUPABASE_PROJECT_REF = 'ifdqlwxgqgsvnawmhlfc';
 const ERP_SESSION_EXPIRED_NOTICE_KEY = 'erp_session_expired_notice_v1';
 const ERP_WORKSPACE_HANDOFF_PARAM = 'workspace_handoff';
 const ERP_WORKSPACE_SOURCE_PARAM = 'workspace_source';
+const ERP_WORKSPACE_MODE_PARAM = 'workspace_mode';
 const MAGICLINK_RATE_KEY = 'erp_magiclink_rate_v1';
 const MAGICLINK_COOLDOWN_MS = 60 * 1000;
 const MAGICLINK_MIN_PAGE_AGE_MS = 1200;
@@ -436,7 +437,11 @@ let workspaceSwitchInFlight = false;
 let workspaceHandoffReceiverActive = false;
 
 function normalizeErpBrandName(value) {
-    return String(value || '').trim();
+    return String(value || '')
+        .trim()
+        .replace(/\s+ERP\s+데모$/i, '')
+        .replace(/\s+ERP$/i, '')
+        .trim();
 } // End of normalizeErpBrandName
 
 function applyErpBranding(coopName) {
@@ -467,6 +472,7 @@ function clearWorkspaceHandoffParams() {
         const cleanUrl = new URL(window.location.href);
         cleanUrl.searchParams.delete(ERP_WORKSPACE_HANDOFF_PARAM);
         cleanUrl.searchParams.delete(ERP_WORKSPACE_SOURCE_PARAM);
+        cleanUrl.searchParams.delete(ERP_WORKSPACE_MODE_PARAM);
         window.history.replaceState({}, document.title, `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
         return cleanUrl.href;
     } catch (_) {
@@ -478,6 +484,7 @@ function installWorkspaceHandoffReceiver() {
     const params = new URLSearchParams(window.location.search || '');
     const nonce = String(params.get(ERP_WORKSPACE_HANDOFF_PARAM) || '').trim();
     const sourceOrigin = normalizeWorkspaceOrigin(params.get(ERP_WORKSPACE_SOURCE_PARAM));
+    const handoffMode = params.get(ERP_WORKSPACE_MODE_PARAM) === 'open' ? 'open' : 'switch';
     if (!nonce && !sourceOrigin) return false;
 
     const nonceValid = /^[A-Za-z0-9_-]{24,96}$/.test(nonce);
@@ -513,9 +520,13 @@ function installWorkspaceHandoffReceiver() {
             settled = true;
             window.clearTimeout(timeoutId);
             window.removeEventListener('message', receiveSession);
-            clearWorkspaceHandoffParams();
+            const cleanUrl = clearWorkspaceHandoffParams();
             window.opener.postMessage({ type: 'erp-workspace-session-ready', nonce }, sourceOrigin);
-            window.setTimeout(() => window.close(), 180);
+            if (handoffMode === 'open') {
+                window.setTimeout(() => window.location.replace(cleanUrl), 80);
+            } else {
+                window.setTimeout(() => window.close(), 180);
+            }
         } catch (error) {
             console.error('Workspace session handoff failed:', error);
             settled = true;
@@ -570,14 +581,18 @@ function handleWorkspaceSelectionChange() {
 } // End of handleWorkspaceSelectionChange
 
 function renderWorkspaceSwitcher(context) {
-    workspaceSwitchContext = context && typeof context === 'object' ? context : null;
+    const incomingContext = context && typeof context === 'object' ? context : null;
+    const allWorkspaces = Array.isArray(incomingContext?.workspaces) ? incomingContext.workspaces : [];
+    const currentWorkspace = allWorkspaces.find(item => item?.is_current === true) || null;
+    const villageWorkspaces = allWorkspaces.filter(item => item?.is_management_coop !== true);
+    workspaceSwitchContext = incomingContext ? { ...incomingContext, workspaces: villageWorkspaces } : null;
     const wrapper = document.getElementById('workspaceSwitcher');
     const select = document.getElementById('workspaceSelect');
     const badge = document.getElementById('workspaceTotalAdminBadge');
     if (!wrapper || !select) return;
 
     const workspaces = getWorkspaceOptions();
-    if (context?.enabled !== true || workspaces.length < 2) {
+    if (!currentWorkspace || currentWorkspace.is_management_coop === true || workspaces.length === 0) {
         wrapper.classList.add('hidden');
         select.replaceChildren();
         return;
@@ -587,14 +602,13 @@ function renderWorkspaceSwitcher(context) {
     workspaces.forEach(item => {
         const option = document.createElement('option');
         option.value = String(item.coop_id || '');
-        const prefix = item.is_management_coop === true ? '운영협동조합 · ' : '';
         const suffix = item.is_switchable === true ? '' : ` · ${item.service_status === 'preparing' ? '준비 중' : '이동 불가'}`;
-        option.textContent = `${prefix}${item.coop_name || '이름 없는 운영 공간'}${suffix}`;
+        option.textContent = `${normalizeErpBrandName(item.coop_name) || '이름 없는 운영 공간'}${suffix}`;
         option.disabled = item.is_switchable !== true && item.is_current !== true;
         option.selected = item.is_current === true;
         select.appendChild(option);
     });
-    badge?.classList.toggle('hidden', context?.is_total_admin !== true);
+    badge?.classList.toggle('hidden', incomingContext?.is_total_admin !== true);
     wrapper.classList.remove('hidden');
     handleWorkspaceSelectionChange();
 } // End of renderWorkspaceSwitcher
