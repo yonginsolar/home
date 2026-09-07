@@ -1,4 +1,4 @@
-/* Version: v1.4.0 | Private immutable snapshots + optimistic concurrency. No auth changes. */
+/* Version: v1.4.4 | Resume verified private snapshots after reload. No auth changes. */
 (() => {
   'use strict';
   const TABLE = 'erp_proposals';
@@ -12,9 +12,33 @@
     const save = byId('saveSiteButton'), copy = byId('copySiteButton');
     const form = byId('proposalForm');
     let current = null, rows = [], busy = false, dirty = false, pending = null, available = false;
+    // Only an identifier lives in this browser; photos remain in authenticated private storage.
+    const resumeKey = hooks.userId ? `yonginsolar.erp.proposal-current.v1.${hooks.coopId}.${hooks.userId}` : '';
+    let resumeId = '', rememberFailed = false;
+    try { resumeId = resumeKey ? localStorage.getItem(resumeKey) || '' : ''; } catch (_) { rememberFailed = true; }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resumeId)) resumeId = '';
+    const hadSavedSession = Boolean(resumeId);
     const say = (message) => { status.textContent = message; };
     const markDirty = () => { dirty = true; pending = null; say('수정한 내용은 아직 ERP에 저장되지 않았습니다.'); };
-    function detach() { current = null; pending = null; dirty = false; copy.disabled = true; name.value = ''; save.textContent = '💾 새 이름으로 저장'; }
+    const remember = (id) => {
+      if (!resumeKey) return;
+      try { if (id) localStorage.setItem(resumeKey, id); else localStorage.removeItem(resumeKey); rememberFailed = false; }
+      catch (_) { rememberFailed = true; }
+    };
+    const rememberNotice = () => rememberFailed ? ' 이 브라우저는 마지막 작업을 기억하지 못하므로, 새로고침 후 보관함에서 직접 불러와 주세요.' : '';
+    function assertRestored() {
+      if (resumeId) throw new Error('마지막 저장본을 아직 불러오지 못했습니다. 「목록 새로고침」으로 다시 시도하거나 다른 제안서를 불러와 주세요. 새 작업은 「새 대상지 추가」로 시작할 수 있습니다.');
+    }
+    const request = async (promise) => {
+      let timer;
+      try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('보관함 응답이 늦습니다. 연결을 확인한 뒤 다시 시도해 주세요.')), 12000); })]); }
+      finally { clearTimeout(timer); }
+    };
+    function detach() {
+      current = null; pending = null; dirty = false; resumeId = ''; remember('');
+      save.disabled = false; copy.disabled = true; byId('printTopButton').disabled = false;
+      name.value = ''; save.textContent = '💾 새 이름으로 저장'; select.value = '';
+    }
     function options() {
       const selected = select.value;
       select.replaceChildren(new Option('대상지를 선택해 주세요', ''));
@@ -23,32 +47,38 @@
       select.append(presets);
       const saved = document.createElement('optgroup'); saved.label = 'ERP에 저장한 제안서 · 최근 200개';
       rows.forEach((row) => saved.append(new Option(row.name, `saved:${row.id}`)));
+      if (current && !rows.some((row) => row.id === current.id)) saved.append(new Option(current.name, `saved:${current.id}`));
       select.append(saved); select.value = selected;
     }
     async function refresh() {
-      const { data, error } = await hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).order('updated_at', { ascending: false }).limit(200);
+      const { data, error } = await request(hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).order('updated_at', { ascending: false }).limit(200));
       if (error) throw error;
       rows = data || []; available = true; options();
       say(`저장한 제안서 ${rows.length}개 · 기본 대상지 7곳. 사진과 최종 수정 문구도 함께 보관합니다.`);
     }
     async function run(action) {
       if (busy) return;
-      busy = true; form.inert = true; byId('printTopButton').disabled = true;
+      busy = true; form.inert = true; byId('previewFrame').inert = true; byId('printTopButton').disabled = true;
       try { await action(); }
       catch (error) {
         const code = String(error?.code || '');
         say(code === '23505' ? '같은 이름의 제안서가 있습니다. 다른 이름으로 저장하거나 기존 제안서를 불러와 수정해 주세요.'
           : error?.message?.match(/[가-힣]/) ? error.message : 'ERP 보관함에 연결하지 못했습니다. 내용은 현재 화면에 남아 있습니다. 연결을 확인하고 다시 시도해 주세요.');
+        if (resumeId) say(`${status.textContent} 마지막 저장본은 변경하지 않았습니다. 「목록 새로고침」을 눌러 다시 불러와 주세요.`);
         console.warn('[proposal-library] operation failed', code || 'REQUEST_FAILED');
-      } finally { busy = false; form.inert = false; byId('printTopButton').disabled = false; }
+      } finally {
+        busy = false; form.inert = false; byId('previewFrame').inert = false;
+        save.disabled = Boolean(resumeId); copy.disabled = Boolean(resumeId) || !current;
+        byId('printTopButton').disabled = Boolean(resumeId);
+      }
     }
     function mayReplace() {
       return !(dirty || hooks.isDirty()) || window.confirm('현재 화면의 저장하지 않은 변경을 버리고 다른 대상지를 불러올까요? 보관하려면 취소 후 먼저 저장해 주세요.');
     }
     async function readSnapshot(row) {
-      const { data, error } = await hooks.client.storage.from(BUCKET).download(row.object_path);
+      const { data, error } = await request(hooks.client.storage.from(BUCKET).download(row.object_path));
       if (error) throw error;
-      const bytes = await data.arrayBuffer();
+      const bytes = await request(data.arrayBuffer());
       if (bytes.byteLength > 20 * 1024 * 1024 || await hash(bytes) !== row.sha256) throw new Error('저장 파일의 무결성 확인에 실패했습니다. 현재 내용을 유지합니다.');
       return JSON.parse(new TextDecoder().decode(bytes));
     }
@@ -63,16 +93,22 @@
         say('기본 대상지를 불러왔습니다. 주소·사진·설치 계획을 보완하고 이름을 정해 저장하세요.');
         return;
       }
-      // Resolve current metadata, not a stale list item, before restoring.
-      const { data: row, error } = await hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).eq('id', value.slice(6)).single();
+      await loadSaved(value.slice(6));
+    }
+    async function loadSaved(id) {
+      // Resolve current metadata, even outside the recent-200 list, before restoring.
+      const { data: row, error } = await request(hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).eq('id', id).single());
       if (error) throw error;
+      if (!row) throw new Error('저장한 제안서를 찾을 수 없거나 열람 권한이 없습니다. 보관함에서 다른 제안서를 선택해 주세요.');
       const snapshot = await readSnapshot(row);
       await hooks.restore(snapshot);
       current = row; pending = null; dirty = false; name.value = row.name;
+      resumeId = ''; remember(row.id); options(); select.value = `saved:${row.id}`;
       copy.disabled = false; save.textContent = '💾 변경 내용 저장';
-      say(`「${row.name}」을 사진·표시 영역·수정 문구와 함께 불러왔습니다.`);
+      say(`「${row.name}」을 사진·표시 영역·수정 문구와 함께 불러왔습니다.${rememberNotice()}`);
     }
     async function persist(asCopy) {
+      assertRestored();
       const title = name.value.trim();
       if (!title) { say('저장할 이름을 입력해 주세요.'); return; }
       if (!available) await refresh();
@@ -109,11 +145,13 @@
         else if (target.expected && !result.error) throw new Error('다른 컴퓨터에서 이 제안서를 수정했습니다. 현재 내용을 보관하려면 이름을 바꿔 「사본으로 저장」하세요. 기존 자료는 덮어쓰지 않았습니다.');
         else throw result.error || new Error('저장 결과를 확인하지 못했습니다. 같은 이름으로 다시 시도하면 중복 없이 확인합니다.');
       }
-      current = row; pending = null; dirty = false; copy.disabled = false; save.textContent = '💾 변경 내용 저장';
       // Verify the committed file too; metadata success alone is not sufficient.
       await readSnapshot(row);
-      await refresh(); select.value = `saved:${row.id}`;
-      say(`「${title}」 저장 완료. 다른 컴퓨터에서도 같은 내용으로 불러올 수 있습니다.`);
+      current = row; pending = null; dirty = false; copy.disabled = false; save.textContent = '💾 변경 내용 저장';
+      remember(row.id);
+      rows = [row, ...rows.filter((item) => item.id !== row.id)].slice(0, 200);
+      options(); select.value = `saved:${row.id}`;
+      say(`「${title}」 저장 완료. 새로고침해도 사진과 수정 내용이 함께 열립니다.${rememberNotice()}`);
     }
     options();
     byId('loadSiteButton').addEventListener('click', () => run(load));
@@ -124,11 +162,18 @@
     }));
     save.addEventListener('click', () => run(() => persist(false)));
     copy.addEventListener('click', () => run(() => persist(true)));
-    byId('refreshSitesButton').addEventListener('click', () => run(refresh));
+    const refreshAndResume = async () => {
+      // Reopen the user's exact saved ID first; a failed list refresh cannot lose the photo.
+      if (resumeId) { if (!mayReplace()) return; await loadSaved(resumeId); }
+      const message = status.textContent;
+      await refresh();
+      if (current && !dirty) { select.value = `saved:${current.id}`; say(message); }
+    };
+    byId('refreshSitesButton').addEventListener('click', () => run(refreshAndResume));
     name.addEventListener('input', markDirty);
     window.addEventListener('beforeunload', (event) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
-    run(refresh);
-    return { markDirty, detach };
+    const ready = run(refreshAndResume);
+    return { markDirty, detach, ready, hadSavedSession, assertRestored };
   }
   window.ProposalLibrary = Object.freeze({ init });
 })();

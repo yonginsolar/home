@@ -1,8 +1,8 @@
-/* Version: v1.4.3 | 2026-09-07 | Registered director contact autofill with existing ERP permissions. */
+/* Version: v1.4.4 | 2026-09-07 | Restore saved photos after reload; remove photo captions. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.3';
+  const VERSION = '1.4.4';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -520,6 +520,7 @@
     applySiteDetailLists(doc, model, replaceText);
 
     const siteImage = doc.querySelector('.photo-shell img');
+    doc.querySelectorAll('.photo-caption').forEach((node) => node.remove());
     if (siteImage) {
       siteImage.setAttribute('src', state.siteImageDataUrl || (state.useSamplePhoto ? 'proposal_assets/namsa-site-map.png' : 'proposal_assets/site-photo-placeholder.svg'));
       siteImage.setAttribute('alt', `${model.facilityName} 대상지 사진`);
@@ -528,8 +529,6 @@
       doc.querySelectorAll('.zone-label, .zone, .existing-label, .existing-zone').forEach((node) => {
         node.style.display = 'none';
       });
-      const caption = doc.querySelector('.photo-caption');
-      if (caption) caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
     }
     applyNoExistingInstallationContext(doc, model);
     applySiteContext(doc, model);
@@ -556,7 +555,6 @@
     const put = (page, selector, text) => { const node = slideAt(doc, page)?.querySelector(selector); if (node) node.textContent = text; };
     const kw = (n) => n === null ? '확인 필요' : `${trimNumber(n)}kW`;
     const unconfirmed = model.remainingKw === null || model.noMandatory;
-    if (!state.siteImageDataUrl && !state.useSamplePhoto) put(3, '.photo-caption', '대상지 사진 미등록 · 사진과 설치 검토 범위를 확인 후 반영합니다.');
     put(12, '.safety-grid .card:nth-child(5) p', '시설과 주변 환경에 어울리는 색상·높이·야간조명을 적용합니다.');
     // Region replacement must never move the cooperative or its officers to the target site.
     if (model.siteProposalNote) {
@@ -1307,6 +1305,7 @@
   }
 
   async function prepareOutput() {
+    state.library?.assertRestored();
     if (state.copyRestoreMismatch) throw new Error('저장된 수정 문구를 모두 복원하지 못했습니다. 원본 보호를 위해 저장·출력을 중지했습니다.');
     await state.imageLoadPromise;
     const contactRequest = state.directorContactRequest;
@@ -1391,11 +1390,7 @@
     siteImage.src = dataUrl;
     siteImage.alt = `${textValue('facilityName')} 대상지 사진`;
     doc.querySelectorAll('.proposal-custom-zone').forEach((zone) => zone.remove());
-    const caption = doc.querySelector('.photo-caption');
-    if (caption) {
-      caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
-      if ('copyBase' in caption.dataset) caption.dataset.copyBase = caption.textContent;
-    }
+    doc.querySelectorAll('.photo-caption').forEach((node) => node.remove());
     updateOverlayControls(doc);
     setStatus('대상지 사진을 반영했습니다. PDF와 HTML에도 이 사진이 들어갑니다.', state.manualDirty);
   }
@@ -1545,9 +1540,11 @@
       el.appShell.classList.add('ready');
       renderPreview();
       state.library = window.ProposalLibrary.init({ client, coopId: userGate.user.coop_id,
+        userId: userGate.authUser?.id || userGate.user.emp_id,
         snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,
         isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
-      if (!hadDraft) void refreshCoopStats();
+      await state.library.ready;
+      if (!hadDraft && !state.library.hadSavedSession) void refreshCoopStats();
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] boot failed`, error);
       if (error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT') {
