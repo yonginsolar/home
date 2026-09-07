@@ -1,8 +1,8 @@
-/* Version: v1.4.4 | 2026-09-07 | Restore saved photos after reload; remove photo captions. */
+/* Version: v1.4.5 | 2026-09-07 | Keep explicit apply drafts including photos in this browser. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.4';
+  const VERSION = '1.4.5';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -907,14 +907,14 @@
   }
 
   function renderPreview({ force = false } = {}) {
-    if (!state.templateHtml) return;
+    if (!state.templateHtml) return false;
     if (state.manualDirty && force) {
       const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 18쪽을 다시 만들까요?');
-      if (!overwrite) return;
+      if (!overwrite) return false;
       state.loadedCopyEdits = [];
       state.copyRestoreMismatch = false;
     }
-    if (!el.form.reportValidity()) return;
+    if (!el.form.reportValidity()) return false;
     try {
       const model = readModel();
       validateModel(model);
@@ -956,9 +956,11 @@
         };
         el.previewFrame.srcdoc = html;
       });
+      return true;
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] render failed`, error);
       setStatus(error?.message || '제안서를 만들지 못했습니다. 입력값을 확인해 주세요.', true);
+      return false;
     }
   }
 
@@ -1395,8 +1397,9 @@
     setStatus('대상지 사진을 반영했습니다. PDF와 HTML에도 이 사진이 들어갑니다.', state.manualDirty);
   }
 
-  function resetSample() {
+  async function resetSample() {
     if (!window.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?')) return;
+    await state.library.resetLocally(() => {
     el.form.reset();
     state.documentEpoch = (state.documentEpoch || 0) + 1;
     state.useSamplePhoto = true;
@@ -1404,7 +1407,6 @@
     state.photoName = '';
     state.loadedCopyEdits = [];
     state.copyRestoreMismatch = false;
-    state.library?.detach();
     localStorage.removeItem(state.draftKey);
     state.siteImageDataUrl = '';
     state.imageSequence += 1;
@@ -1419,6 +1421,7 @@
     syncExistingInstallationUi();
     updateOverlayControls();
     renderPreview();
+    });
   }
 
   function bindEvents() {
@@ -1426,7 +1429,7 @@
     state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
-      renderPreview({ force: true });
+      void state.library?.applyLocally(() => renderPreview({ force: true }));
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage) return;
@@ -1496,7 +1499,7 @@
         error.code = 'ERP_RUNTIME_GUARD_UNAVAILABLE';
         throw error;
       }
-      if (!window.ProposalPresets || !window.ProposalLibrary || !window.ProposalSections) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
+      if (!window.ProposalPresets || !window.ProposalLibrary || !window.ProposalSections || !window.ProposalDrafts) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
       const client = getClient();
       el.bootMessage.textContent = 'ERP 로그인 상태를 확인하고 있습니다.';
       const userGate = await withTimeout(window.ErpRuntimeGuard.requireUser(client, {
@@ -1544,7 +1547,7 @@
         snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,
         isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
       await state.library.ready;
-      if (!hadDraft && !state.library.hadSavedSession) void refreshCoopStats();
+      if (!hadDraft && !state.library.hadSavedSession && !state.library.hadLocalDraft) void refreshCoopStats();
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] boot failed`, error);
       if (error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT') {
