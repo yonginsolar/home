@@ -1,0 +1,192 @@
+/* Sun-income-village existing ERP tenant hub v3.0.0 */
+(() => {
+  'use strict';
+
+  const VERSION = '3.0.0';
+  const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const number = value => Number(value || 0).toLocaleString('ko-KR');
+  const money = value => `${number(value)}원`;
+  const statusLabel = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', ended: '종료' };
+  let client = null;
+  let context = null;
+  let loading = false;
+
+  function setMessage(text, isError = false) {
+    const el = $('message');
+    el.textContent = String(text || '');
+    el.classList.toggle('error', isError);
+  }
+
+  function friendly(error) {
+    const raw = String(error?.message || error || '');
+    if (raw.includes('MANAGEMENT_ADMIN_REQUIRED') || error?.code === '42501') return '햇빛소득마을 전체 운영을 맡은 관리자만 이 화면을 열 수 있습니다.';
+    if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
+    if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
+    if (raw.includes('AUTH_REQUIRED')) return 'ERP 로그인이 필요합니다.';
+    if (raw.includes('COOP_CODE_ALREADY_EXISTS') || error?.code === '23505') return '같은 운영 공간이 이미 만들어져 있는지 목록을 확인해 주세요.';
+    return '처리를 마치지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
+  }
+
+  function initTheme() {
+    let saved = 'auto';
+    try { saved = localStorage.getItem('coop-color-theme') || 'auto'; } catch (_) {}
+    if (![...$('theme').options].some(option => option.value === saved)) saved = 'auto';
+    $('theme').value = saved;
+    const apply = () => {
+      const mode = $('theme').value;
+      document.documentElement.dataset.theme = mode === 'auto'
+        ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : mode;
+      try { localStorage.setItem('coop-color-theme', mode); } catch (_) {}
+    };
+    $('theme').addEventListener('change', apply);
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', apply);
+    apply();
+  }
+
+  function getClient() {
+    if (client) return client;
+    if (!window.supabase?.createClient) throw new Error('SUPABASE_LIBRARY_UNAVAILABLE');
+    client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      global: {
+        headers: {
+          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').toLowerCase()
+        }
+      }
+    });
+    return client;
+  }
+
+  async function rpc(name, args = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const { data, error } = await getClient().rpc(name, args).abortSignal(controller.signal);
+      if (error) throw error;
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function renderSummary(villages) {
+    $('villageCount').textContent = number(villages.length);
+    $('memberCount').textContent = number(villages.reduce((sum, row) => sum + Number(row.member_count || 0), 0));
+    $('approvalCount').textContent = number(villages.reduce((sum, row) => sum + Number(row.approval_pending_count || 0), 0));
+    $('minutesCount').textContent = number(villages.reduce((sum, row) => sum + Number(row.minutes_count || 0), 0));
+  }
+
+  function renderVillage(row) {
+    const active = row.service_status === 'active';
+    const capacity = row.capacity_kw === null || row.capacity_kw === undefined ? '미입력' : `${number(row.capacity_kw)} kW`;
+    const coreEnabled = ['member_admin','accounting','approval','minutes','documents','signature']
+      .filter(key => row.modules?.[key] !== false).length;
+    return `
+      <article class="managed-card panel">
+        <div class="managed-head">
+          <div><span class="badge status-${esc(row.service_status)}">${esc(statusLabel[row.service_status] || row.service_status)}</span><h3>${esc(row.coop_name)}</h3><p>${esc(row.address || '주소 미입력')}</p></div>
+          <span class="capacity">${esc(capacity)}</span>
+        </div>
+        <div class="mini-stats">
+          <span><strong>${number(row.member_count)}</strong>조합원</span>
+          <span><strong>${number(row.official_count)}</strong>임원</span>
+          <span><strong>${number(row.approval_pending_count)}</strong>결재 대기</span>
+          <span><strong>${number(row.journal_count)}</strong>회계 전표</span>
+          <span><strong>${number(row.minutes_count)}</strong>문서·의사록</span>
+        </div>
+        <div class="module-line"><strong>기존 ERP 연결</strong><span>조합원 · 임원 · 복식회계 · 전자결재 · 총회·이사회 · 문서·전자서명 (${coreEnabled}/6)</span></div>
+        <div class="managed-actions">
+          ${active
+            ? `<a class="button primary" href="${esc(row.workspace_url)}">이 마을조합 ERP 열기</a>`
+            : '<button type="button" disabled>웹 주소 연결 후 열 수 있습니다</button>'}
+          <span>월 이용료 ${money(row.monthly_fee)}${row.vat_separate ? ' · 부가세 별도' : ''}</span>
+        </div>
+      </article>`;
+  }
+
+  function render() {
+    const villages = Array.isArray(context?.villages) ? context.villages : [];
+    $('managerTitle').textContent = `${context?.managing_coop_name || '운영협동조합'}의 햇빛소득마을 운영`;
+    renderSummary(villages);
+    $('villageList').innerHTML = villages.length
+      ? villages.map(renderVillage).join('')
+      : `<div class="empty"><strong>아직 연결된 마을조합이 없습니다.</strong><p>마을조합 운영 공간을 추가하면 기존 ERP의 전체 업무 틀이 빈 장부로 준비됩니다.</p><button type="button" class="primary" data-open-create>첫 마을조합 추가</button></div>`;
+    $('villageList').querySelector('[data-open-create]')?.addEventListener('click', openCreate);
+    $('content').hidden = false;
+  }
+
+  async function load() {
+    if (loading) return;
+    loading = true;
+    $('reload').disabled = true;
+    setMessage('마을조합별 기존 ERP 현황을 불러오고 있습니다…');
+    try {
+      context = await rpc('sun_village_management_context');
+      render();
+      setMessage('');
+    } catch (error) {
+      console.error(`[sun-village-hub ${VERSION}] load failed`, error);
+      setMessage(friendly(error), true);
+    } finally {
+      loading = false;
+      $('reload').disabled = false;
+    }
+  }
+
+  function openCreate() {
+    $('createForm').reset();
+    $('createError').hidden = true;
+    $('createError').textContent = '';
+    $('createDialog').showModal();
+  }
+
+  async function createVillage(event) {
+    event.preventDefault();
+    if (loading) return;
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const name = String(values.coop_name || '').trim();
+    if (!confirm(`${name}의 독립된 조합원 명부·장부·결재·문서 공간을 만들까요?\n\n기존 운영협동조합 자료는 복사되지 않습니다.`)) return;
+    loading = true;
+    $('createSubmit').disabled = true;
+    $('createError').hidden = true;
+    try {
+      await rpc('sun_village_create_cooperative', {
+        p_coop_name: name,
+        p_address: String(values.address || '').trim(),
+        p_biz_num: String(values.biz_num || '').trim() || null,
+        p_plant_capacity_kw: String(values.plant_capacity_kw || '').trim() === '' ? null : Number(values.plant_capacity_kw)
+      });
+      $('createDialog').close();
+      await load();
+      setMessage(`${name}의 기존 ERP 운영 공간을 만들었습니다. 웹 주소 연결이 완료되면 목록에서 바로 열 수 있습니다.`);
+    } catch (error) {
+      console.error(`[sun-village-hub ${VERSION}] create failed`, error);
+      $('createError').textContent = friendly(error);
+      $('createError').hidden = false;
+    } finally {
+      loading = false;
+      $('createSubmit').disabled = false;
+    }
+  }
+
+  async function boot() {
+    initTheme();
+    $('openCreate').addEventListener('click', openCreate);
+    $('closeCreate').addEventListener('click', () => $('createDialog').close());
+    $('reload').addEventListener('click', load);
+    $('createForm').addEventListener('submit', createVillage);
+    try {
+      const gate = await window.ErpRuntimeGuard.requireUser(getClient(), { redirectUrl: 'index.html' });
+      if (!gate.ok) return;
+      await load();
+    } catch (error) {
+      console.error(`[sun-village-hub ${VERSION}] boot failed`, error);
+      setMessage(friendly(error), true);
+    }
+  }
+
+  boot();
+})();

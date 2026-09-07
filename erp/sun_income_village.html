@@ -1,43 +1,84 @@
 <!doctype html>
+<!-- Version: v3.0.0 | Change: 2026-09-07 - Manage sun-income villages as ordinary tenants of the existing cooperative ERP. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <meta name="color-scheme" content="light dark">
-  <meta name="sun-village-version" content="1.0.2">
-  <title>햇빛소득마을 운영관리</title>
-  <link rel="stylesheet" href="sun_income_village.css?v=1.0.0">
+  <meta name="sun-village-version" content="3.0.0">
+  <title>햇빛소득마을 운영관리 | 협동조합 ERP</title>
+  <link rel="stylesheet" href="sun_income_village.css?v=3.0.0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" defer></script>
+  <script>window.__COOP_ROUTE_APP__='erp';</script>
   <script src="../shared/route_guard.js?v=20260408-1" defer></script>
-  <script src="sun_income_village.js?v=1.0.2" defer></script>
+  <script src="erp_runtime_guard.js?v=20260804-1" defer></script>
+  <script src="sun_income_village_hub.js?v=3.0.0" defer></script>
 </head>
 <body>
   <a class="skip" href="#content">본문으로 바로가기</a>
   <header class="topbar">
-    <div class="brand"><span aria-hidden="true">🌻</span><div><strong>햇빛소득마을 운영관리</strong><small>협동조합 ERP 간편형 · 운영용 1차 · v1.0.2</small></div></div>
-    <div class="tools"><label>화면모드 <select id="theme"><option value="auto">자동</option><option value="light">낮</option><option value="dark">밤</option></select></label><a href="sun_income_village_demo.html">데모 보기</a><a href="index.html">ERP 메인</a></div>
+    <div class="brand"><span aria-hidden="true">🌻</span><div><strong>햇빛소득마을 운영관리</strong><small>기존 협동조합 ERP에 마을조합별 운영 공간을 연결합니다 · v3.0.0</small></div></div>
+    <div class="tools">
+      <label>화면모드 <select id="theme"><option value="auto">자동</option><option value="light">낮</option><option value="dark">밤</option></select></label>
+      <a href="sun_income_village_demo.html">기존 기획 데모</a>
+      <a href="index.html">ERP 메인</a>
+    </div>
   </header>
-  <div id="message" class="message" role="status" aria-live="polite">로그인을 확인하고 있습니다…</div>
-  <section id="welcome" class="welcome" hidden></section>
-  <div id="workspace" hidden>
-    <section class="scopebar" aria-label="현재 작업 범위">
-      <label>운영협동조합 <select id="operator" aria-label="운영협동조합"></select></label>
-      <label>관리 대상 <select id="village" aria-label="관리 대상 마을"><option value="">전체 운영 현황</option></select></label>
-      <strong id="scopeLabel">전체 운영 현황</strong><button id="reload" type="button">새로고침</button>
+
+  <div id="message" class="message" role="status" aria-live="polite">기존 ERP 로그인과 관리 권한을 확인하고 있습니다…</div>
+
+  <main id="content" class="hub" tabindex="-1" hidden>
+    <section class="hero panel">
+      <div>
+        <span class="eyebrow">운영협동조합 통합 관제</span>
+        <h1 id="managerTitle">햇빛소득마을 협동조합 운영</h1>
+        <p>각 마을은 독립된 협동조합 장부와 명부를 사용합니다. 이 화면에서는 전체 현황을 보고, 실제 업무는 선택한 마을의 기존 ERP에서 처리합니다.</p>
+      </div>
+      <button type="button" class="primary" id="openCreate">마을조합 운영 공간 추가</button>
     </section>
-    <div class="layout"><nav id="nav" aria-label="업무 메뉴"></nav><main id="content" tabindex="-1"></main></div>
-  </div>
-  <dialog id="editor" aria-labelledby="editorTitle">
-    <form id="editorForm">
-      <div class="dialog-head"><h2 id="editorTitle"></h2><button type="button" id="closeEditor" aria-label="닫기">닫기</button></div>
-      <p id="editorScope" class="scope-note"></p>
-      <div id="editorFields" class="form-grid"></div>
-      <p id="editorError" class="error" role="alert" hidden></p>
-      <div class="dialog-actions"><button id="save" class="primary" type="submit">이 마을에 저장</button></div>
+
+    <section class="cards summary" aria-label="전체 운영 현황">
+      <article class="panel stat"><strong id="villageCount">0</strong><span>관리 마을조합</span></article>
+      <article class="panel stat"><strong id="memberCount">0</strong><span>전체 조합원</span></article>
+      <article class="panel stat"><strong id="approvalCount">0</strong><span>결재 대기</span></article>
+      <article class="panel stat"><strong id="minutesCount">0</strong><span>보관 문서·의사록</span></article>
+    </section>
+
+    <section class="panel architecture">
+      <div class="section-head"><div><h2>기존 ERP를 그대로 사용합니다</h2><p class="muted">별도의 간이 명부나 용돈기입장을 만들지 않습니다.</p></div></div>
+      <div class="core-grid">
+        <article><span>👥</span><strong>조합원·임원</strong><small>개인·단체 조합원, 가입상태, 출자금, 이사장·이사·감사와 임기</small></article>
+        <article><span>📚</span><strong>복식회계</strong><small>계정과목, 차변·대변 전표, 증빙, 결산과 통장 대조</small></article>
+        <article><span>✅</span><strong>전자결재</strong><small>실제 직원·임원의 결재선, 상신, 승인·반려와 문서 보관</small></article>
+        <article><span>📝</span><strong>총회·이사회</strong><small>소집, 참석, 안건, 의사록, 문서함과 전자서명</small></article>
+        <article><span>📜</span><strong>정관·규정</strong><small>정관·규약·규정과 의결 문서를 마을조합별로 보관</small></article>
+        <article><span>⚡</span><strong>마을 전용 업무</strong><small>발전·정산, 적립금·주민환원, 운영계약·수수료는 전용 기능으로 연결</small></article>
+      </div>
+    </section>
+
+    <section class="section-head list-head">
+      <div><h2>마을조합별 운영 공간</h2><p class="muted">자료가 섞이지 않도록 마을조합을 선택한 뒤 해당 ERP를 엽니다.</p></div>
+      <button type="button" id="reload">새로고침</button>
+    </section>
+    <section id="villageList" class="managed-grid" aria-live="polite"></section>
+  </main>
+
+  <dialog id="createDialog" aria-labelledby="createTitle">
+    <form id="createForm">
+      <div class="dialog-head"><h2 id="createTitle">마을조합 운영 공간 추가</h2><button type="button" id="closeCreate">닫기</button></div>
+      <p class="scope-note">새 공간은 기존 ERP의 조합원·회계·결재·회의·문서 기능을 그대로 사용합니다. 내부 코드와 웹 주소는 시스템이 자동으로 만듭니다.</p>
+      <div class="form-grid">
+        <label class="field full"><span>마을조합 이름</span><input name="coop_name" required maxlength="120" placeholder="예: ○○리 햇빛협동조합"></label>
+        <label class="field full"><span>주소</span><input name="address" maxlength="300" placeholder="마을 또는 사무소 주소"></label>
+        <label class="field"><span>사업자등록번호</span><input name="biz_num" maxlength="30" autocomplete="off" placeholder="있는 경우 입력"></label>
+        <label class="field"><span>발전소 설비용량(kW)</span><input name="plant_capacity_kw" type="number" min="0" step="0.001" inputmode="decimal" placeholder="있는 경우 입력"></label>
+      </div>
+      <p id="createError" class="error" hidden></p>
+      <div class="dialog-actions"><button type="submit" class="primary" id="createSubmit">기존 ERP 운영 공간 만들기</button></div>
     </form>
   </dialog>
-  <dialog id="detail" aria-labelledby="detailTitle"><div class="dialog-head"><h2 id="detailTitle">상세 내용</h2><button id="closeDetail" type="button">닫기</button></div><div id="detailBody"></div></dialog>
+
   <noscript>이 화면은 JavaScript가 필요합니다.</noscript>
 </body>
 </html>
