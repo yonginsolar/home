@@ -1,7 +1,7 @@
-/* Sun village operations v1.0.0 — actual server persistence, not demo data. */
+/* Sun village operations v1.0.1 — actual server persistence, not demo data. */
 (() => {
   'use strict';
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const F = (key, label, type = 'text', options = {}) => ({key, label, type, ...options});
   const TYPES = {
     member: {label:'👥 구성원', title:'성명 / 단체명', date:'가입·등록일', amount:'출자금 기록액', help:'조합원과 주민을 구분합니다. 주민등록번호·계좌번호는 이 화면에서 받지 않습니다. 출자금은 등록 정보이며 장부에 자동 반영되지 않습니다.', fields:[F('phone','휴대전화번호','tel',{max:30}),F('member_type','구성원 구분','select',{items:['조합원','주민','임원']}),F('status','가입 상태','select',{items:['가입 대기','정조합원','탈퇴']}),F('position','직책','text',{max:80}),F('note','참고사항','textarea',{max:2000})]},
@@ -31,7 +31,7 @@
   if (typeof document==='undefined') return;
   const $=id=>document.getElementById(id);
   const s={client:null,context:null,op:null,village:'',villages:[],kind:'dashboard',rows:[],staff:null,page:0,query:'',archived:false,readSeq:0,busy:false,editor:null,dirty:false,request:null,uncertain:false};
-  const ERRORS={LOGIN_REQUIRED:'로그인이 필요합니다.',ACCESS_DENIED:'이 마을을 처리할 권한이 없습니다. 담당자 배정을 확인해 주세요.',ADMIN_REQUIRED:'2단계 인증을 마친 전체 관리자만 사용할 수 있습니다.',MFA_REQUIRED:'전체 관리자는 2단계 인증을 완료해 주세요.',VERSION_CONFLICT:'다른 곳에서 먼저 수정한 자료입니다. 입력한 내용을 복사해 보관한 뒤 닫고 새로고침하여 최신 내용에 반영해 주세요.',REQUEST_REUSED:'저장 요청 정보가 달라졌습니다. 목록에서 저장 여부를 먼저 확인해 주세요.',VILLAGE_REQUIRED:'먼저 마을을 선택해 주세요.',VILLAGE_INACTIVE:'운영이 중지된 마을은 자료를 변경할 수 없습니다.',LAST_ADMIN:'마지막 전체 관리자는 해제할 수 없습니다. 다른 전체 관리자를 먼저 등록해 주세요.',VERIFIED_ACCOUNT_NOT_FOUND:'이메일 인증을 완료한 기존 계정을 찾지 못했습니다. 가입한 이메일을 확인해 주세요.',VALID_APPROVER_REQUIRED:'본인 외에 이 마을에 배정된 결재권자를 선택해 주세요.',RECORD_LOCKED:'상신·승인되었거나 보관된 자료는 이 방법으로 수정할 수 없습니다.',NOT_ASSIGNED_APPROVER:'이 문서에 지정된 결재권자만 처리할 수 있습니다.',INVALID_MEETING_DATES:'공고일은 회의일 이후일 수 없고, 종료 시간은 시작 시간보다 앞설 수 없습니다.',INVALID_CONTRACT_DATES:'계약 종료일은 시작일 이후여야 합니다.',OVERPAYMENT:'입금액이 청구 합계보다 많습니다.',APPROVAL_AUTHORITY_CONFIRMATION_REQUIRED:'마을의 정관·규정 또는 위임에 따른 결재권을 확인해 주세요.',AMOUNT_REQUIRED:'거래 금액은 0원보다 커야 합니다.'};
+  const ERRORS={LOGIN_REQUIRED:'로그인이 필요합니다.',ACCESS_DENIED:'이 마을을 처리할 권한이 없습니다. 담당자 배정을 확인해 주세요.',ADMIN_REQUIRED:'전체 관리자만 사용할 수 있습니다.',VERSION_CONFLICT:'다른 곳에서 먼저 수정한 자료입니다. 입력한 내용을 복사해 보관한 뒤 닫고 새로고침하여 최신 내용에 반영해 주세요.',REQUEST_REUSED:'저장 요청 정보가 달라졌습니다. 목록에서 저장 여부를 먼저 확인해 주세요.',VILLAGE_REQUIRED:'먼저 마을을 선택해 주세요.',VILLAGE_INACTIVE:'운영이 중지된 마을은 자료를 변경할 수 없습니다.',LAST_ADMIN:'마지막 전체 관리자는 해제할 수 없습니다. 다른 전체 관리자를 먼저 등록해 주세요.',VERIFIED_ACCOUNT_NOT_FOUND:'이메일 인증을 완료한 기존 계정을 찾지 못했습니다. 가입한 이메일을 확인해 주세요.',VALID_APPROVER_REQUIRED:'본인 외에 이 마을에 배정된 결재권자를 선택해 주세요.',RECORD_LOCKED:'상신·승인되었거나 보관된 자료는 이 방법으로 수정할 수 없습니다.',NOT_ASSIGNED_APPROVER:'이 문서에 지정된 결재권자만 처리할 수 있습니다.',INVALID_MEETING_DATES:'공고일은 회의일 이후일 수 없고, 종료 시간은 시작 시간보다 앞설 수 없습니다.',INVALID_CONTRACT_DATES:'계약 종료일은 시작일 이후여야 합니다.',OVERPAYMENT:'입금액이 청구 합계보다 많습니다.',APPROVAL_AUTHORITY_CONFIRMATION_REQUIRED:'마을의 정관·규정 또는 위임에 따른 결재권을 확인해 주세요.',AMOUNT_REQUIRED:'거래 금액은 0원보다 커야 합니다.'};
   function friendly(error) {
     const msg=String(error?.message||error||'');
     const key=Object.keys(ERRORS).find(k=>msg.includes(k));
@@ -104,11 +104,10 @@
   }
   function showWelcome(){
     $('workspace').hidden=true;$('welcome').hidden=false;
-    $('welcome').innerHTML=`<h1>마을 운영을 시작해 볼까요?</h1><p>이곳은 실제로 자료를 저장하는 운영용 화면입니다. 데모의 가상 마을이나 기존 조합의 명부·장부는 자동으로 복사하지 않습니다.</p><div class="notice">처음 시작하는 전체 관리자는 2단계 인증이 필요합니다. 직원은 관리자가 계정을 등록하고 담당 마을을 배정한 후 사용할 수 있습니다.</div>${s.context.setup_coops.length?`<label class="field"><span>시작할 운영협동조합</span><select id="setupCoop">${s.context.setup_coops.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label><div class="toolbar">${button('setup','운영 공간 만들기','class="primary"')}</div>`:'<p>아직 배정된 운영 공간이 없습니다. 전체 관리자에게 이 계정의 이메일을 알려주고 담당 마을 배정을 요청해 주세요.</p>'}<a href="sun_income_village_demo.html">가상 자료로 데모 먼저 보기</a>`;
+    $('welcome').innerHTML=`<h1>마을 운영을 시작해 볼까요?</h1><p>이곳은 실제로 자료를 저장하는 운영용 화면입니다. 데모의 가상 마을이나 기존 조합의 명부·장부는 자동으로 복사하지 않습니다.</p>${s.context.setup_coops.length?`<label class="field"><span>시작할 운영협동조합</span><select id="setupCoop">${s.context.setup_coops.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label><div class="toolbar">${button('setup','운영 공간 만들기','class="primary"')}</div>`:'<p>아직 배정된 운영 공간이 없습니다. 전체 관리자에게 이 계정의 이메일을 알려주고 담당 마을 배정을 요청해 주세요.</p>'}<a href="sun_income_village_demo.html">가상 자료로 데모 먼저 보기</a>`;
   }
   async function openOperator(){
     s.readSeq++;s.rows=[];s.villages=[];s.village='';s.page=0;s.query='';$('content').replaceChildren();
-    if(s.op.needs_mfa){$('workspace').hidden=true;$('welcome').hidden=false;$('welcome').innerHTML='<h1>전체 관리자 2단계 인증</h1><p>여러 마을의 개인정보와 권한을 관리하는 계정입니다. 인증 앱의 일회용 코드를 확인한 뒤 운영 자료를 열 수 있습니다.</p>'+button('mfa','2단계 인증하기','class="primary"');message('');return;}
     $('welcome').hidden=true;$('workspace').hidden=false;await refreshVillages();await load();
   }
   async function refreshVillages(){
@@ -122,7 +121,7 @@
     const sum=k=>villages.reduce((a,v)=>a+Number(v[k]||0),0);
     return `<h1>운영 현황</h1><p class="muted">전체 흐름을 살펴보고, 한 마을씩 선택해 업무를 처리하세요.</p><div class="cards"><div class="panel stat"><span>관리 마을</span><strong>${villages.length}곳</strong></div><div class="panel stat"><span>정조합원 등록</span><strong>${sum('members')}명</strong></div><div class="panel stat"><span>결재 대기</span><strong>${sum('pending')}건</strong></div></div><p class="hint">아래 금액은 출납장에 기록된 누적 입출금입니다. 통장 잔액·매출·결산상 이익과 다릅니다.</p>${villages.length?`<div class="table-wrap"><table><thead><tr><th>마을</th><th>정조합원</th><th>누적 수입</th><th>누적 지출</th><th>결재 대기</th><th>열기</th></tr></thead><tbody>${villages.map(v=>`<tr><td>${esc(v.name)}${v.active?'':' <span class="badge">운영 중지</span>'}</td><td>${v.members}명</td><td class="money">${money(v.income)}</td><td class="money">${money(v.expense)}</td><td>${v.pending}건</td><td>${button('chooseVillage','업무 열기',`data-id="${v.id}"`)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty"><h2>아직 등록된 마을이 없습니다.</h2><p>실제 마을을 등록하면 여기에 운영 현황이 모입니다.</p>'+ (isAdmin()?button('newVillage','첫 마을 등록','class="primary"'):'담당 마을 배정을 기다려 주세요.')+'</div>'}`;
   }
-  function guide(){return `<h1>처음 사용하는 분께</h1><section class="panel"><h2>🌻 데모와 다른 점</h2><p>운영용에서는 입력한 자료가 서버에 저장되어 다른 컴퓨터에서도 이어서 사용할 수 있습니다. 데모는 기존의 가상 시연 화면으로 그대로 남아 있습니다.</p><h2>🏡 시작 순서</h2><ol><li>전체 관리자가 2단계 인증 후 운영 공간과 실제 마을을 등록합니다.</li><li>이메일 인증을 완료한 개인 계정을 담당자로 등록하고 맡을 마을과 열람·수정 권한을 배정합니다.</li><li>상단에서 마을을 선택한 뒤 구성원·장부·회의록 등 자료를 등록합니다.</li><li>저장 대상 마을을 확인하고 저장합니다. 수정 전 자료는 전체 관리자의 변경 이력에서 확인할 수 있습니다.</li></ol><h2>✅ 결재는 별도로 권한 확인</h2><p>전체 관리자라고 해서 자동으로 결재권자가 되지는 않습니다. 마을 배정에서 실제 정관·규정 또는 위임에 따른 결재권을 확인한 사람에게만 권한을 부여합니다. 본인 상신 건을 스스로 승인할 수 없습니다.</p><h2>📌 이번 1차의 범위</h2><p>실제 자료 등록·수정·보관, 단일 결재권자 승인·반려, 페이지별 CSV 저장과 변경 이력을 제공합니다. 회의록은 작성·보관용입니다. 전자서명, 증빙 파일 업로드, 복식부기 자동 전표, 메시지 발송, 세금계산서 발행은 아직 연결하지 않았습니다.</p><p>마을의 장부와 운영협동조합의 수수료 원장은 별개입니다. 정산액·수익금 계획·청구를 입력했다고 다른 장부에 금액이 자동 반영되지 않습니다.</p><h2>🔒 자료 보호</h2><p>담당하지 않는 마을은 저장소에서도 접근을 막습니다. 전체 관리자는 2단계 인증이 필수입니다. 이름·연락처는 필요한 범위에서만 수집하고 주민등록번호·계좌번호 등 민감한 내용은 메모에 적지 마세요. CSV로 내려받은 자료도 안전하게 보관해 주세요.</p></section>`;}
+  function guide(){return `<h1>처음 사용하는 분께</h1><section class="panel"><h2>🌻 데모와 다른 점</h2><p>운영용에서는 입력한 자료가 서버에 저장되어 다른 컴퓨터에서도 이어서 사용할 수 있습니다. 데모는 기존의 가상 시연 화면으로 그대로 남아 있습니다.</p><h2>🏡 시작 순서</h2><ol><li>기존 ERP 관리자 계정으로 운영 공간과 실제 마을을 등록합니다.</li><li>이메일 인증을 완료한 개인 계정을 담당자로 등록하고 맡을 마을과 열람·수정 권한을 배정합니다.</li><li>상단에서 마을을 선택한 뒤 구성원·장부·회의록 등 자료를 등록합니다.</li><li>저장 대상 마을을 확인하고 저장합니다. 수정 전 자료는 전체 관리자의 변경 이력에서 확인할 수 있습니다.</li></ol><h2>✅ 결재는 별도로 권한 확인</h2><p>전체 관리자라고 해서 자동으로 결재권자가 되지는 않습니다. 마을 배정에서 실제 정관·규정 또는 위임에 따른 결재권을 확인한 사람에게만 권한을 부여합니다. 본인 상신 건을 스스로 승인할 수 없습니다.</p><h2>📌 이번 1차의 범위</h2><p>실제 자료 등록·수정·보관, 단일 결재권자 승인·반려, 페이지별 CSV 저장과 변경 이력을 제공합니다. 회의록은 작성·보관용입니다. 전자서명, 증빙 파일 업로드, 복식부기 자동 전표, 메시지 발송, 세금계산서 발행은 아직 연결하지 않았습니다.</p><p>마을의 장부와 운영협동조합의 수수료 원장은 별개입니다. 정산액·수익금 계획·청구를 입력했다고 다른 장부에 금액이 자동 반영되지 않습니다.</p><h2>🔒 자료 보호</h2><p>ERP 로그인, 운영협동조합 관리자·담당자 확인과 마을별 권한 검사는 계속 적용됩니다. 이름·연락처는 필요한 범위에서만 수집하고 주민등록번호·계좌번호 등 민감한 내용은 메모에 적지 마세요. CSV로 내려받은 자료도 안전하게 보관해 주세요.</p></section>`;}
   async function load(){
     const seq=++s.readSeq;nav();s.rows=[];$('content').innerHTML='<p class="muted">자료를 불러오고 있습니다…</p>';message('');
     try{
@@ -142,7 +141,7 @@
     return `<h1>${meta.label}</h1><p class="muted">${esc(meta.help)}</p>${!selectedVillage().active?'<div class="notice">운영 중지된 마을입니다. 자료를 읽을 수 있지만 변경할 수 없습니다.</div>':''}<form id="searchForm" class="toolbar"><input type="search" name="query" id="query" aria-label="이름 또는 제목 검색" placeholder="이름 또는 제목 검색" maxlength="100" value="${esc(s.query)}"><button type="submit">검색</button><label class="check"><input type="checkbox" id="archived" ${s.archived?'checked':''}>보관 자료 포함</label>${button('export','현재 페이지 CSV',rows.length?'':'disabled')}${canWrite()?button('newRecord','+ 새로 등록','class="primary"'):''}</form>${rows.length?`<div class="table-wrap"><table><thead><tr><th>${esc(meta.date)}</th><th>${esc(meta.title)}</th><th>구분 / 상태</th>${meta.amount?'<th>'+esc(meta.amount)+'</th>':''}<th>상세</th></tr></thead><tbody>${rows.slice(0,30).map(r=>`<tr><td>${esc(meta.month?r.record_date.slice(0,7):r.record_date)}</td><td class="title">${esc(r.title)}</td><td>${esc(r.data.status||r.data.direction||r.data.category||r.data.meeting_type||r.data.settlement||r.data.document_type||r.data.invoice_state||'')} <span class="badge">${STATE[r.state]}</span></td>${meta.amount?`<td class="money">${money(r.amount)}${s.kind==='bill'?`<small class="muted"><br>청구 합계 ${money(r.amount+r.data.message_cost+r.data.vat)}<br>미수 ${money(r.amount+r.data.message_cost+r.data.vat-r.data.paid)}</small>`:''}</td>`:''}<td>${button('detail','열기',`data-id="${r.id}"`)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">'+(s.query?'검색 결과가 없습니다. 검색어를 바꿔 주세요.':'아직 등록된 자료가 없습니다.')+'</div>'}${pager(rows)}`;
   }
   function settings(){
-    return `<h1>마을·담당자 설정</h1><p class="muted">실제 마을과 개인별 계정을 연결합니다. 전체 관리자도 결재권은 별도로 배정해야 합니다.</p><div class="toolbar">${button('newVillage','+ 마을 등록','class="primary"')}${button('newStaff','+ 담당자 등록')}</div><h2>🏡 등록된 마을</h2><div class="staff-grid">${s.villages.map(v=>`<section class="panel"><h3>${esc(v.name)}</h3><p>${esc(v.code)} · ${v.active?'운영 중':'운영 중지'}<br>${esc(v.address)}</p>${button('editVillage','마을 수정',`data-id="${v.id}"`)} ${button('assign','담당자 배정',`data-id="${v.id}" ${v.active?'':'disabled'}`)}<div>${s.staff.assignments.filter(a=>a.village_id===v.id).map(a=>`<p class="hint">${esc(s.staff.staff.find(u=>u.user_id===a.user_id)?.display_name||'담당자')} · ${a.access_level==='manager'?'자료 수정':'열람'}${a.can_approve?' · 결재권':''} ${button('editAssignment','변경',`data-id="${v.id}" data-user="${a.user_id}" ${v.active?'':'disabled'}`)}</p>`).join('')}</div></section>`).join('')||'<p>아직 마을이 없습니다.</p>'}</div><h2>👥 운영 담당자</h2><div class="staff-grid">${s.staff.staff.map(u=>`<section class="panel"><h3>${esc(u.display_name)}</h3><p>${u.role==='admin'?'전체 관리자 (2단계 인증 필수)':'담당자'} · ${u.active?'사용 중':'사용 중지'}</p>${button('editStaff','계정 설정 변경',`data-id="${u.user_id}" data-version="${u.version}"`)}</section>`).join('')}</div><div class="notice">직원 등록은 이메일 인증을 완료한 기존 계정만 가능합니다. 이 화면에서 초대 문자·이메일을 보내거나 공용 계정을 만들지 않습니다. 실제 담당자에게 개인 계정의 가입 이메일을 확인해 주세요.</div>`;
+    return `<h1>마을·담당자 설정</h1><p class="muted">실제 마을과 개인별 계정을 연결합니다. 전체 관리자도 결재권은 별도로 배정해야 합니다.</p><div class="toolbar">${button('newVillage','+ 마을 등록','class="primary"')}${button('newStaff','+ 담당자 등록')}</div><h2>🏡 등록된 마을</h2><div class="staff-grid">${s.villages.map(v=>`<section class="panel"><h3>${esc(v.name)}</h3><p>${esc(v.code)} · ${v.active?'운영 중':'운영 중지'}<br>${esc(v.address)}</p>${button('editVillage','마을 수정',`data-id="${v.id}"`)} ${button('assign','담당자 배정',`data-id="${v.id}" ${v.active?'':'disabled'}`)}<div>${s.staff.assignments.filter(a=>a.village_id===v.id).map(a=>`<p class="hint">${esc(s.staff.staff.find(u=>u.user_id===a.user_id)?.display_name||'담당자')} · ${a.access_level==='manager'?'자료 수정':'열람'}${a.can_approve?' · 결재권':''} ${button('editAssignment','변경',`data-id="${v.id}" data-user="${a.user_id}" ${v.active?'':'disabled'}`)}</p>`).join('')}</div></section>`).join('')||'<p>아직 마을이 없습니다.</p>'}</div><h2>👥 운영 담당자</h2><div class="staff-grid">${s.staff.staff.map(u=>`<section class="panel"><h3>${esc(u.display_name)}</h3><p>${u.role==='admin'?'전체 관리자':'담당자'} · ${u.active?'사용 중':'사용 중지'}</p>${button('editStaff','계정 설정 변경',`data-id="${u.user_id}" data-version="${u.version}"`)}</section>`).join('')}</div><div class="notice">직원 등록은 이메일 인증을 완료한 기존 계정만 가능합니다. 이 화면에서 초대 문자·이메일을 보내거나 공용 계정을 만들지 않습니다. 실제 담당자에게 개인 계정의 가입 이메일을 확인해 주세요.</div>`;
   }
   const ACTION_LABEL={create_operator:'운영 공간 생성',save_village:'마을 저장',save_staff:'담당자 저장',assign:'마을 권한 배정',unassign:'마을 배정 해제',save_record:'자료 저장',archive:'자료 보관',restore:'자료 복원',submit:'결재 상신',decide:'승인·반려'};
   function auditList(rows){return `<h1>변경 이력</h1><p class="muted">${s.village?'선택한 마을':'전체 마을'}의 저장·수정·권한 변경을 최근 순서로 봅니다. 수정 전·후 내용을 확인할 수 있으며 이력을 덮어쓰거나 삭제할 수 없습니다.</p><div class="table-wrap"><table><thead><tr><th>일시</th><th>마을</th><th>처리자</th><th>내용</th><th>기록</th></tr></thead><tbody>${rows.slice(0,30).map(r=>`<tr><td>${esc(new Date(r.occurred_at).toLocaleString('ko-KR'))}</td><td>${esc(s.villages.find(v=>v.id===r.village_id)?.name||'운영 설정')}</td><td>${esc(r.actor_name||'담당자')}</td><td>${esc(ACTION_LABEL[r.action]||r.action)}<br>${esc(r.after_row?.title||r.after_row?.name||'')}</td><td>${button('auditDetail','전후 보기',`data-id="${r.id}"`)}</td></tr>`).join('')}</tbody></table></div>${pager(rows)}`;}
@@ -172,7 +171,7 @@
     showEditor({mode:'record',kind,row,id:row?.id||crypto.randomUUID(),title:(row?'수정 · ':'신규 · ')+meta.label,html:fields.map(f=>field(f,defaults[f.key]??'')).join('')+`<p class="hint field full">${esc(meta.help)}</p>`,version:row?.version||0});
   }
   function newVillage(v=null){showEditor({mode:'village',row:v,id:v?.id||crypto.randomUUID(),version:v?.version||0,village:'',title:v?'마을 정보 수정':'실제 마을 등록',scope:s.op.name+'의 관리 마을을 등록합니다.',html:field(F('name','마을·마을조합 이름','text',{required:true,max:120}),v?.name)+field(F('code','관리 코드','text',{required:true,max:30,help:'영문·숫자·밑줄·붙임표, 30자 이내. 마을마다 다른 코드를 사용합니다.'}),v?.code)+field(F('address','주소','text',{max:300}),v?.address)+(v?field(F('active','운영 상태','select',{items:[{value:'true',label:'운영 중'},{value:'false',label:'운영 중지 (자료 보존·읽기 전용)'}]}),String(v.active)):'')});}
-  function newStaff(u=null){showEditor({mode:'staff',row:u,version:u?.version||0,title:u?'담당자 계정 설정':'담당자 등록',html:field(F('email','인증을 완료한 계정 이메일','email',{required:true,max:254,help:u?'기존 담당자의 가입 이메일을 다시 입력해 정확한 계정을 확인합니다.':'해당 담당자가 사용하는 개인 계정의 가입 이메일'}))+field(F('display_name','화면에 표시할 이름','text',{required:true,max:80}),u?.display_name)+field(F('role','운영 권한','select',{items:[{value:'staff',label:'담당자 (배정된 마을만)'},{value:'admin',label:'전체 관리자 (모든 마을 · 2단계 인증 필수)'}]}),u?.role||'staff')+field(F('active','계정 사용','select',{items:[{value:'true',label:'사용 중'},{value:'false',label:'사용 중지'}]}),String(u?.active??true)),scope:'담당자 권한 변경은 기록으로 남습니다. 마을별 결재권은 따로 배정합니다.'});}
+  function newStaff(u=null){showEditor({mode:'staff',row:u,version:u?.version||0,title:u?'담당자 계정 설정':'담당자 등록',html:field(F('email','인증을 완료한 계정 이메일','email',{required:true,max:254,help:u?'기존 담당자의 가입 이메일을 다시 입력해 정확한 계정을 확인합니다.':'해당 담당자가 사용하는 개인 계정의 가입 이메일'}))+field(F('display_name','화면에 표시할 이름','text',{required:true,max:80}),u?.display_name)+field(F('role','운영 권한','select',{items:[{value:'staff',label:'담당자 (배정된 마을만)'},{value:'admin',label:'전체 관리자 (모든 마을)'}]}),u?.role||'staff')+field(F('active','계정 사용','select',{items:[{value:'true',label:'사용 중'},{value:'false',label:'사용 중지'}]}),String(u?.active??true)),scope:'담당자 권한 변경은 기록으로 남습니다. 마을별 결재권은 따로 배정합니다.'});}
   function assign(village,user=''){
     const a=s.staff.assignments.find(a=>a.village_id===village&&a.user_id===user);
     showEditor({mode:'assign',row:a,village,version:a?.version||0,title:'마을 담당자 배정',scope:s.villages.find(v=>v.id===village).name+'의 담당 권한을 설정합니다.',html:field(F('user_id','담당자','select',{required:true,items:s.staff.staff.filter(u=>u.active&&(!user||u.user_id===user)).map(u=>({value:u.user_id,label:u.display_name}))}),user)+field(F('access_level','자료 접근','select',{items:[{value:'viewer',label:'열람만'},{value:'manager',label:'등록·수정 가능'}]}),a?.access_level||'viewer')+field(F('can_approve','이 마을의 결재권','select',{items:[{value:'false',label:'없음'},{value:'true',label:'결재권 있음'}]}),String(a?.can_approve||false))+'<label class="check field full"><input type="checkbox" name="authority_confirmed" value="true">결재권을 부여하는 경우, 이 마을의 정관·규정 또는 위임에 따른 권한을 확인했습니다.</label>'+(a?'<label class="check field full"><input type="checkbox" name="remove" value="true">이 담당자의 마을 배정을 해제합니다.</label>':'')});
@@ -205,7 +204,6 @@
   async function submitEditor(event){
     event.preventDefault();if(s.busy||!s.editor)return;
     const e=s.editor;const values=Object.fromEntries(new FormData($('editorForm')));
-    if(e.mode==='mfa'){await verifyMfa(values);return;}
     let action,payload;
     if(s.uncertain){({action,payload}=s.request);}
     else{
@@ -229,38 +227,6 @@
       if(uncertain){s.uncertain=true;$('editorFields').querySelectorAll('input,select,textarea').forEach(n=>n.disabled=true);$('save').textContent='같은 요청으로 저장 결과 확인';}
       $('editorError').textContent=uncertain?'서버의 저장 결과를 아직 확인하지 못했습니다. 아래 버튼으로 같은 요청을 다시 확인하세요. 중복 등록되지 않도록 입력값은 잠시 잠갔습니다.':friendly(error);$('editorError').hidden=false;
     }finally{s.busy=false;$('save').disabled=false;}
-  }
-  async function startMfa(){
-    if(s.busy||$('editor').open)return;
-    message('2단계 인증 수단을 확인하고 있습니다…');
-    const {data,error}=await s.client.auth.mfa.listFactors();if(error)throw error;
-    const factors=data.totp.filter(f=>f.status==='verified');
-    if(factors.length){showEditor({mode:'mfa',factorId:factors[0].id,title:'2단계 인증',scope:'인증 앱에 표시된 6자리 코드를 직접 입력해 주세요.',html:field(F('code','인증 코드','password',{required:true,max:6})),saveLabel:'인증하고 열기'});}
-    else{
-      // Enrollment is an explicit user action. Do not create factors on page load.
-      showEditor({mode:'mfaEnroll',title:'인증 앱 등록',scope:'전체 관리자 보호를 위한 최초 설정입니다.',html:'<p class="field full">휴대전화의 인증 앱으로 QR 코드를 등록합니다. 등록은 아래 버튼을 눌렀을 때만 시작되며 비밀번호나 인증 코드는 문서·로그에 남기지 않습니다.</p>'+button('enrollMfa','인증 앱 등록 시작','class="primary"')});$('save').hidden=true;
-    }
-    message('');
-  }
-  async function enrollMfa(){
-    if(s.busy)return;s.busy=true;
-    try{
-      const {data,error}=await s.client.auth.mfa.enroll({factorType:'totp',friendlyName:'햇빛소득마을 관리자 '+new Date().toISOString().slice(0,10)});if(error)throw error;
-      const qr=data.totp.qr_code;
-      // Supabase supplies a data URL. Never insert returned SVG markup as HTML.
-      const src=qr.startsWith('data:image/')?qr:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(qr);
-      s.editor.mode='mfa';s.editor.factorId=data.id;
-      $('editorFields').innerHTML='<div class="field full"><p>인증 앱에서 아래 QR을 스캔한 뒤 코드를 입력해 주세요. QR은 다른 사람에게 보내지 마세요.</p><img class="qr" alt="인증 앱 등록용 QR" src="'+esc(src)+'"></div>'+field(F('code','인증 코드','password',{required:true,max:6}));$('save').hidden=false;$('save').textContent='인증하고 열기';
-    }finally{s.busy=false;}
-  }
-  async function verifyMfa(values){
-    if(!/^\d{6}$/.test(values.code||'')){$('editorError').textContent='6자리 숫자를 입력해 주세요.';$('editorError').hidden=false;return;}
-    s.busy=true;$('save').disabled=true;
-    try{
-      const {error}=await s.client.auth.mfa.challengeAndVerify({factorId:s.editor.factorId,code:values.code});if(error)throw error;
-      $('editorFields').replaceChildren();$('editor').close();s.dirty=false;s.editor=null;s.busy=false;await boot();
-    }catch(_){$('editorError').textContent='인증 코드가 맞지 않거나 만료되었습니다. 인증 앱의 현재 코드를 다시 입력해 주세요.';$('editorError').hidden=false;}
-    finally{s.busy=false;$('save').disabled=false;}
   }
   function closeEditor(){
     if(s.busy)return;
@@ -298,10 +264,7 @@
       else if(action==='export')exportPage();
       else if(action==='next'||action==='prev'){s.page+=action==='next'?1:-1;await load();}
       else if(action==='auditDetail'&&row){$('detailTitle').textContent=ACTION_LABEL[row.action]||'변경 기록';$('detailBody').innerHTML='<h2>변경 전</h2>'+snapshotHtml(row.before_row)+'<hr><h2>변경 후</h2>'+snapshotHtml(row.after_row);$('detail').showModal();}
-      else if(action==='mfa')await startMfa();
-      else if(action==='enrollMfa')await enrollMfa();
       else if(action==='setup'){
-        if(s.context.aal!=='aal2'){await startMfa();return;}
         const coop=$('setupCoop').value;showEditor({mode:'setup',coop,title:'운영 공간 만들기',scope:s.context.setup_coops.find(c=>c.id===coop).name+'의 운영 공간을 만듭니다.',html:field(F('display_name','전체 관리자 표시 이름','text',{required:true,max:80}))+'<p class="field full hint">기존 명부·회계 자료는 복사되지 않으며, 마을을 등록하기 전에는 빈 화면으로 시작합니다.</p>',saveLabel:'빈 운영 공간 생성'});
       }
     }catch(e){message(friendly(e),true);if($('editor').open){$('editorError').textContent=friendly(e);$('editorError').hidden=false;}}
