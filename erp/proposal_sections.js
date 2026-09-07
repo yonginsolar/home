@@ -1,6 +1,23 @@
-/* Version: v1.4.2 | Capacity-page reflow, director profiles and aligned closing contacts. */
+/* Version: v1.4.3 | Preserve proposal copy while refreshing registered director contacts. */
 (() => {
   'use strict';
+  function renderContacts(doc, m) {
+    const contact = doc.querySelectorAll('.slide')[17]?.querySelector('.contact');
+    if (!contact) throw new Error('CONTACT_PREVIEW_NOT_READY');
+    const orgName = contact.children[0].textContent, address = contact.children[1].textContent;
+    const people = [['이사장', '김민정', m.chairPhone], ...(m.visitDirector ? [['이사', m.visitDirector, m.visitDirectorPhone]] : []), ['사무국장', '김민호', m.officePhone]];
+    const org = doc.createElement('b'); org.textContent = orgName;
+    const location = doc.createElement('span'); location.textContent = address;
+    contact.replaceChildren(org, location, ...people.flatMap(([role, name, phone]) => {
+      const label = doc.createElement('b'); label.className = 'contact-person-label';
+      const roleText = doc.createElement('span'); roleText.className = 'contact-person-role'; roleText.textContent = role + ' ';
+      const nameText = doc.createElement('span'); nameText.className = 'contact-person-name'; nameText.textContent = name;
+      label.append(roleText, nameText);
+      const value = doc.createElement('span'); value.className = 'contact-person-phone'; value.textContent = phone;
+      return [label, value];
+    }));
+    Object.assign(contact.style, { fontSize: '12pt', padding: '14px 22px', marginTop: '16px', gap: '7px 22px' });
+  }
   function renderStats(doc, m) {
     const slide = doc.querySelectorAll('.slide')[8];
     if (!slide) throw new Error('STATS_PREVIEW_NOT_READY');
@@ -160,21 +177,8 @@
       const node = sourceWalker.currentNode;
       node.nodeValue = node.nodeValue.replace('이사 명단과 그 밖의 경력은 2026.09.03 조합 임원 원장 및 보유자료 기준입니다.', '이사 명단과 그 밖의 경력은 조합 임원 원장 및 제공자료 기준입니다(2026.09.07 소개 이력 보완).');
     }
-    const contact = page(18).querySelector('.contact');
-    const orgName = contact.children[0].textContent, address = contact.children[1].textContent;
-    const people = [['이사장', '김민정', m.chairPhone], ...(m.visitDirector ? [['이사', m.visitDirector, m.visitDirectorPhone]] : []), ['사무국장', '김민호', m.officePhone]];
-    const org = doc.createElement('b'); org.textContent = orgName;
-    const location = doc.createElement('span'); location.textContent = address;
-    contact.replaceChildren(org, location, ...people.flatMap(([role, name, phone]) => {
-      const label = doc.createElement('b'); label.className = 'contact-person-label';
-      const roleText = doc.createElement('span'); roleText.className = 'contact-person-role'; roleText.textContent = role + ' ';
-      const nameText = doc.createElement('span'); nameText.className = 'contact-person-name'; nameText.textContent = name;
-      label.append(roleText, nameText);
-      const value = doc.createElement('span'); value.className = 'contact-person-phone'; value.textContent = phone;
-      return [label, value];
-    }));
-    Object.assign(contact.style, { fontSize: '12pt', padding: '14px 22px', marginTop: '16px', gap: '7px 22px' });
+    renderContacts(doc, m);
     renderStats(doc, m);
   }
-  window.ProposalSections = Object.freeze({ render, renderStats });
+  window.ProposalSections = Object.freeze({ render, renderStats, renderContacts });
 })();

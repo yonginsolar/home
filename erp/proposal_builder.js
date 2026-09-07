@@ -1,8 +1,8 @@
-/* Version: v1.4.2 | 2026-09-07 | Capacity-page reflow, director profiles and aligned closing contacts. */
+/* Version: v1.4.3 | 2026-09-07 | Registered director contact autofill with existing ERP permissions. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.2';
+  const VERSION = '1.4.3';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -20,6 +20,9 @@
 
   const state = {
     client: null,
+    coopId: '',
+    directorContactRequest: null,
+    directorPhoneRevision: 0,
     templateHtml: '',
     siteImageDataUrl: '',
     imageLoadPromise: Promise.resolve(),
@@ -1052,6 +1055,86 @@
     });
     normalizeExistingZero();
     syncExistingInstallationUi();
+    invalidateDirectorContact('보관한 연락처를 유지합니다. 최신 번호가 필요하면 다시 불러오기를 눌러 주세요.');
+  }
+
+  function invalidateDirectorContact(message = '') {
+    state.directorPhoneRevision += 1;
+    state.directorContactRequest = null;
+    document.getElementById('refreshDirectorPhoneButton').disabled = !textValue('visitDirector');
+    document.getElementById('directorPhoneStatus').textContent = message;
+  }
+
+  function syncDirectorContactPreview() {
+    if (state.editMode || state.manualDirty) {
+      if (!el.previewFrame.contentDocument?.querySelector('.contact')) {
+        scheduleRender();
+        return;
+      }
+      const model = readModel();
+      // Only this contact changes. Do not acknowledge unrelated pending form edits.
+      const displayed = state.previewFields || {};
+      window.ProposalSections.renderContacts(el.previewFrame.contentDocument, {
+        ...model, chairPhone: displayed.chairPhone ?? model.chairPhone, officePhone: displayed.officePhone ?? model.officePhone
+      });
+      if (state.previewFields) {
+        state.previewFields.visitDirector = model.visitDirector;
+        state.previewFields.visitDirectorPhone = model.visitDirectorPhone;
+      }
+    } else scheduleRender();
+  }
+
+  function refreshDirectorPhone() {
+    const button = document.getElementById('refreshDirectorPhoneButton');
+    const status = document.getElementById('directorPhoneStatus');
+    const name = textValue('visitDirector'), coopId = state.coopId;
+    if (!name) { invalidateDirectorContact('동행 이사를 선택해 주세요.'); return Promise.resolve(); }
+    if (!coopId) { status.textContent = 'ERP 로그인 확인 후 연락처를 불러올 수 있습니다. 직접 입력한 번호는 유지합니다.'; return Promise.resolve(); }
+    const epoch = state.documentEpoch || 0, revision = state.directorPhoneRevision;
+    const previous = state.directorContactRequest;
+    if (previous && previous.name === name && previous.coopId === coopId && previous.epoch === epoch && previous.revision === revision) return previous.promise;
+    const phoneInput = document.getElementById('visitDirectorPhone');
+    const before = phoneInput.value;
+    const request = { name, coopId, epoch, revision, promise: null };
+    state.directorContactRequest = request;
+    const current = () => state.directorContactRequest === request && state.coopId === coopId && (state.documentEpoch || 0) === epoch && state.directorPhoneRevision === revision && textValue('visitDirector') === name && phoneInput.value === before;
+    button.disabled = true; status.textContent = '선택한 이사의 등록 연락처를 불러오고 있습니다…';
+    request.promise = (async () => {
+      try {
+        const client = getClient();
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+        const officials = await withTimeout(client.from('coop_officials').select('member_id')
+          .eq('coop_id', coopId).eq('category', 'executive').eq('role', '이사').eq('status', 'active').eq('name', name)
+          .lte('term_start_date', today).gte('term_end_date', today)
+          .or(`real_end_date.is.null,real_end_date.gte.${today}`).limit(2), 'DIRECTOR_IDENTITY');
+        if (!current()) return;
+        if (officials.error) throw new Error('CONTACT_UNAVAILABLE');
+        const rows = Array.isArray(officials.data) ? officials.data : [];
+        if (rows.length !== 1 || !rows[0].member_id) throw new Error(rows.length > 1 ? 'CONTACT_AMBIGUOUS' : 'CONTACT_NOT_FOUND');
+        const member = await withTimeout(client.from('coop_members').select('phone')
+          .eq('coop_id', coopId).eq('member_id', rows[0].member_id).limit(2), 'DIRECTOR_PHONE');
+        if (!current()) return;
+        if (member.error) throw new Error('CONTACT_UNAVAILABLE');
+        const matches = Array.isArray(member.data) ? member.data : [];
+        const phone = matches.length === 1 && typeof matches[0].phone === 'string' ? matches[0].phone.trim() : '';
+        if (!phone || phone.length > 30 || !/^[0-9+().\s-]+$/.test(phone)) throw new Error('CONTACT_NOT_FOUND');
+        phoneInput.value = phone;
+        state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
+        status.textContent = '등록된 연락처를 입력했습니다. 제안서에 사용할 번호인지 확인하고 필요하면 직접 수정해 주세요.';
+      } catch (error) {
+        if (!current()) return;
+        status.textContent = error?.message === 'CONTACT_AMBIGUOUS'
+          ? '같은 이름의 현재 이사가 여러 건이어서 번호를 자동 선택하지 않았습니다. 확인 후 직접 입력해 주세요.'
+          : '등록 번호가 없거나 조회할 수 없습니다. 기존 입력값은 유지했습니다. 직접 입력하거나 나중에 다시 불러와 주세요.';
+        // Do not log phone numbers, member records, or server error payloads.
+      } finally {
+        if (state.directorContactRequest === request) {
+          state.directorContactRequest = null;
+          button.disabled = !textValue('visitDirector');
+        }
+      }
+    })();
+    return request.promise;
   }
 
   async function captureSnapshot() {
@@ -1226,6 +1309,9 @@
   async function prepareOutput() {
     if (state.copyRestoreMismatch) throw new Error('저장된 수정 문구를 모두 복원하지 못했습니다. 원본 보호를 위해 저장·출력을 중지했습니다.');
     await state.imageLoadPromise;
+    const contactRequest = state.directorContactRequest;
+    if (contactRequest) await contactRequest.promise;
+    if (state.directorContactRequest) throw new Error('이사 연락처를 불러오는 중입니다. 입력이 끝난 뒤 다시 저장해 주세요.');
     if (state.imageLoadError) throw state.imageLoadError;
     if (!el.form.reportValidity()) throw new Error('입력값을 확인한 뒤 다시 저장해 주세요.');
     validateModel(readModel());
@@ -1319,6 +1405,7 @@
     el.form.reset();
     state.documentEpoch = (state.documentEpoch || 0) + 1;
     state.useSamplePhoto = true;
+    invalidateDirectorContact('동행 이사를 선택하면 등록된 연락처를 불러옵니다.');
     state.photoName = '';
     state.loadedCopyEdits = [];
     state.copyRestoreMismatch = false;
@@ -1351,6 +1438,16 @@
       if (event.target === el.overlayAngle) return;
       if (event.target.closest('[data-library-controls]')) return;
       state.library?.markDirty();
+      if (event.target.id === 'visitDirector') {
+        invalidateDirectorContact();
+        document.getElementById('visitDirectorPhone').value = '';
+        syncDirectorContactPreview();
+        void refreshDirectorPhone();
+      }
+      if (event.target.id === 'visitDirectorPhone') {
+        invalidateDirectorContact('직접 입력한 번호를 사용합니다. 등록 번호로 바꾸려면 다시 불러오기를 눌러 주세요.');
+        syncDirectorContactPreview();
+      }
       if (event.target.id === 'existingInstallationStatus') {
         const status = event.target.value;
         document.getElementById('existingInstallationKnown').checked = status !== 'unknown';
@@ -1363,7 +1460,7 @@
       if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
       saveDraft();
-      scheduleRender();
+      if (!['visitDirector', 'visitDirectorPhone'].includes(event.target.id)) scheduleRender();
     });
     el.siteImage.addEventListener('change', () => {
       state.imageLoadError = null;
@@ -1390,6 +1487,7 @@
     el.downloadButton.addEventListener('click', downloadHtml);
     el.resetButton.addEventListener('click', resetSample);
     document.getElementById('refreshCoopStatsButton').addEventListener('click', () => refreshCoopStats());
+    document.getElementById('refreshDirectorPhoneButton').addEventListener('click', () => { void refreshDirectorPhone(); });
   }
 
   async function boot() {
@@ -1428,6 +1526,8 @@
         showBootError('홈페이지 관리 권한이 있는 ERP 관리자만 제안서를 만들 수 있습니다.');
         return;
       }
+
+      state.coopId = String(userGate.user.coop_id || '').trim();
 
       el.bootMessage.textContent = '18쪽 제안서 원본을 불러오고 있습니다.';
       const response = await withTimeout(fetch(TEMPLATE_URL, { credentials: 'same-origin', cache: 'no-store' }), 'TEMPLATE');
