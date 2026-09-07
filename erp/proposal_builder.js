@@ -1,8 +1,8 @@
-/* Version: v1.3.1 | 2026-09-04 | Drag rotation handle and stable resident-acceptance copy. */
+/* Version: v1.3.2 | 2026-09-07 | Reliable photo exports and decimal rotation input. */
 (() => {
   'use strict';
 
-  const VERSION = '1.3.1';
+  const VERSION = '1.3.2';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -20,6 +20,12 @@
     client: null,
     templateHtml: '',
     siteImageDataUrl: '',
+    imageLoadPromise: Promise.resolve(),
+    imageLoadError: null,
+    imageSequence: 0,
+    previewReady: Promise.resolve(),
+    resolvePreviewReady: null,
+    exportInFlight: false,
     customOverlays: [],
     selectedOverlayId: '',
     overlayDrawMode: false,
@@ -804,16 +810,21 @@
     setStatus('선택한 대상지 표시를 삭제했습니다.');
   }
 
-  function updateSelectedOverlayAngle() {
+  function updateSelectedOverlayAngle({ commit = false } = {}) {
     const overlay = overlayById(state.selectedOverlayId);
     if (!overlay) return;
-    const numericAngle = Number(el.overlayAngle.value);
-    overlay.angle = roundCoordinate(clamp(Number.isFinite(numericAngle) ? numericAngle : 0, -180, 180));
-    el.overlayAngle.value = String(overlay.angle);
+    const numericAngle = el.overlayAngle.valueAsNumber;
+    // Do not rewrite an unfinished '-', decimal point, or trailing zero while typing.
+    if (Number.isFinite(numericAngle)) {
+      overlay.angle = roundCoordinate(clamp(numericAngle, -180, 180));
+    } else if (!commit) {
+      return;
+    }
+    if (commit) el.overlayAngle.value = String(overlay.angle);
     const doc = el.previewFrame.contentDocument;
     const zone = doc?.querySelector(`.proposal-custom-zone[data-overlay-id="${CSS.escape(overlay.id)}"]`);
     if (zone) updateOverlayElement(zone, overlay);
-    setStatus(`선택한 대상지 표시를 ${trimNumber(overlay.angle)}°로 회전했습니다.`);
+    setStatus(`선택한 대상지 표시를 ${trimNumber(overlay.angle, 2)}°로 회전했습니다.`);
   }
 
   function resetSelectedOverlayAngle() {
@@ -859,22 +870,28 @@
     try {
       const model = readModel();
       validateModel(model);
+      const html = buildPreviewDocument(model);
       saveDraft();
       state.manualDirty = false;
       setStatus('18쪽 미리보기를 다시 만들고 있습니다.');
-      el.previewFrame.onload = () => {
-        const doc = el.previewFrame.contentDocument;
-        const slideCount = doc?.querySelectorAll('.slide').length || 0;
-        el.pageCount.textContent = `${slideCount}쪽`;
-        doc?.addEventListener('input', (event) => {
-          if (!event.target?.closest?.('[data-proposal-editable="true"]')) return;
-          state.manualDirty = true;
-          setStatus('직접 고친 문구가 있습니다. 입력값을 다시 반영하면 이 수정은 사라집니다.', true);
-        });
-        bindOverlayEditor(doc);
-        applyEditMode();
-      };
-      el.previewFrame.srcdoc = buildPreviewDocument(model);
+      state.resolvePreviewReady?.();
+      state.previewReady = new Promise((resolve) => {
+        state.resolvePreviewReady = resolve;
+        el.previewFrame.onload = () => {
+          const doc = el.previewFrame.contentDocument;
+          const slideCount = doc?.querySelectorAll('.slide').length || 0;
+          el.pageCount.textContent = `${slideCount}쪽`;
+          doc?.addEventListener('input', (event) => {
+            if (!event.target?.closest?.('[data-proposal-editable="true"]')) return;
+            state.manualDirty = true;
+            setStatus('직접 고친 문구가 있습니다. 입력값을 다시 반영하면 이 수정은 사라집니다.', true);
+          });
+          bindOverlayEditor(doc);
+          applyEditMode();
+          resolve();
+        };
+        el.previewFrame.srcdoc = html;
+      });
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] render failed`, error);
       setStatus(error?.message || '제안서를 만들지 못했습니다. 입력값을 확인해 주세요.', true);
@@ -883,11 +900,15 @@
 
   function scheduleRender() {
     window.clearTimeout(state.renderTimer);
+    state.renderTimer = 0;
     if (state.editMode || state.manualDirty) {
       setStatus('입력값이 바뀌었습니다. 직접 고친 문구를 유지하려면 먼저 파일로 저장하고, 새로 반영하려면 위 버튼을 누르세요.', true);
       return;
     }
-    state.renderTimer = window.setTimeout(() => renderPreview(), 280);
+    state.renderTimer = window.setTimeout(() => {
+      state.renderTimer = 0;
+      renderPreview();
+    }, 280);
   }
 
   function saveDraft() {
@@ -953,8 +974,7 @@
     }));
   }
 
-  async function buildDownloadHtml() {
-    const sourceDoc = el.previewFrame.contentDocument;
+  async function buildDownloadHtml(sourceDoc) {
     if (!sourceDoc) throw new Error('미리보기가 아직 준비되지 않았습니다.');
     const doc = sourceDoc.cloneNode(true);
     doc.getElementById('proposalBuilderPreviewStyle')?.remove();
@@ -991,11 +1011,12 @@
   }
 
   async function downloadHtml() {
-    el.downloadButton.disabled = true;
+    if (state.exportInFlight) return;
+    setExportBusy(true);
     setStatus('사진까지 포함한 HTML 파일을 만들고 있습니다.');
     try {
       const model = readModel();
-      const html = await buildDownloadHtml();
+      const html = await buildDownloadHtml(await prepareOutput());
       const datePart = model.proposalDate.replaceAll('-', '');
       const filename = `${sanitizeFilename(`${datePart}_${model.facilityName}_주차장_햇빛발전소_제안서_${model.proposalVersion}`)}.html`;
       downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), filename);
@@ -1004,41 +1025,99 @@
       console.error(`[proposal-builder ${VERSION}] download failed`, error);
       setStatus(error?.message || 'HTML 파일을 만들지 못했습니다.', true);
     } finally {
-      el.downloadButton.disabled = false;
+      setExportBusy(false);
     }
   }
 
-  function printProposal() {
-    const frameWindow = el.previewFrame.contentWindow;
-    if (!frameWindow) {
-      setStatus('미리보기가 아직 준비되지 않았습니다.', true);
-      return;
+  function setExportBusy(busy) {
+    state.exportInFlight = busy;
+    [el.printButton, el.printTopButton, el.downloadButton].forEach((button) => { button.disabled = busy; });
+  }
+
+  async function waitForPreview() {
+    let pending;
+    do {
+      pending = state.previewReady;
+      await pending;
+    } while (pending !== state.previewReady);
+  }
+
+  async function prepareOutput() {
+    await state.imageLoadPromise;
+    if (state.imageLoadError) throw state.imageLoadError;
+    if (state.renderTimer) {
+      window.clearTimeout(state.renderTimer);
+      state.renderTimer = 0;
+      if (!state.editMode && !state.manualDirty) renderPreview();
     }
-    frameWindow.focus();
-    frameWindow.print();
+    await withTimeout(waitForPreview(), 'PREVIEW');
+    const doc = el.previewFrame.contentDocument;
+    if (!doc?.querySelector('.slide')) throw new Error('미리보기가 아직 준비되지 않았습니다.');
+    await withTimeout(Promise.all([...doc.images].map(async (image) => {
+      try {
+        await image.decode();
+      } catch {
+        throw new Error('제안서 사진을 불러오지 못했습니다. 사진과 인터넷 연결을 확인한 뒤 다시 출력해 주세요.');
+      }
+    })), 'IMAGES');
+    await withTimeout(doc.fonts.ready, 'FONTS');
+    return doc;
+  }
+
+  async function printProposal() {
+    if (state.exportInFlight) return;
+    setExportBusy(true);
+    setStatus('사진과 제안서 준비가 끝나면 인쇄 창을 엽니다.');
+    try {
+      await prepareOutput();
+      el.previewFrame.contentWindow.focus();
+      el.previewFrame.contentWindow.print();
+    } catch (error) {
+      setStatus(error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT'
+        ? '사진과 제안서 준비에 시간이 걸리고 있습니다. 잠시 뒤 다시 출력해 주세요.'
+        : error?.message || '인쇄를 준비하지 못했습니다.', true);
+    } finally {
+      setExportBusy(false);
+    }
   }
 
   async function handleSiteImageChange() {
+    const sequence = ++state.imageSequence;
     const file = el.siteImage.files?.[0];
     if (!file) return;
     if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
       el.siteImage.value = '';
-      setStatus('PNG, JPG 또는 WebP 사진만 사용할 수 있습니다.', true);
-      return;
+      throw new Error('PNG, JPG 또는 WebP 사진만 사용할 수 있습니다.');
     }
     if (file.size > 12 * 1024 * 1024) {
       el.siteImage.value = '';
-      setStatus('사진은 12MB 이하로 선택해 주세요.', true);
-      return;
+      throw new Error('사진은 12MB 이하로 선택해 주세요.');
     }
-    state.siteImageDataUrl = await dataUrlFromBlob(file);
+    const dataUrl = await dataUrlFromBlob(file);
+    const image = new Image();
+    image.src = dataUrl;
+    await image.decode();
+    if (sequence !== state.imageSequence) return;
+    state.siteImageDataUrl = dataUrl;
     state.customOverlays = [];
     state.selectedOverlayId = '';
     state.overlayDrawMode = false;
     el.siteImageName.textContent = file.name;
     el.keepNamsaOverlay.checked = false;
     saveDraft();
-    scheduleRender();
+    // Replace only the photo so manual copy edits and invalid/unfinished fields cannot block it.
+    await withTimeout(waitForPreview(), 'PREVIEW');
+    if (sequence !== state.imageSequence) return;
+    const doc = el.previewFrame.contentDocument;
+    const siteImage = doc?.querySelector('.photo-shell img');
+    if (!siteImage) throw new Error('대상지 사진 영역이 아직 준비되지 않았습니다.');
+    siteImage.src = dataUrl;
+    siteImage.alt = `${textValue('facilityName')} 대상지 사진`;
+    doc.querySelectorAll('.proposal-custom-zone').forEach((zone) => zone.remove());
+    const caption = doc.querySelector('.photo-caption');
+    if (caption) caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
+    updateOverlayControls(doc);
+    setStatus('대상지 사진을 반영했습니다. PDF와 HTML에도 이 사진이 들어갑니다.', state.manualDirty);
   }
 
   function resetSample() {
@@ -1046,6 +1125,8 @@
     el.form.reset();
     localStorage.removeItem(DRAFT_KEY);
     state.siteImageDataUrl = '';
+    state.imageSequence += 1;
+    state.imageLoadError = null;
     state.customOverlays = [];
     state.selectedOverlayId = '';
     state.overlayDrawMode = false;
@@ -1073,15 +1154,20 @@
       scheduleRender();
     });
     el.siteImage.addEventListener('change', () => {
-      handleSiteImageChange().catch((error) => {
+      state.imageLoadError = null;
+      const sequence = state.imageSequence + 1;
+      state.imageLoadPromise = handleSiteImageChange().catch((error) => {
+        if (sequence !== state.imageSequence) return;
+        state.imageLoadError = new Error(error?.message?.includes('사진') ? error.message : '사진을 읽지 못했습니다. 다른 파일을 선택해 주세요.');
         console.error(`[proposal-builder ${VERSION}] image load failed`, error);
-        setStatus('사진을 읽지 못했습니다. 다른 파일을 선택해 주세요.', true);
+        setStatus(state.imageLoadError.message, true);
       });
     });
     el.addOverlayButton.addEventListener('click', toggleOverlayDrawMode);
     el.deleteOverlayButton.addEventListener('click', deleteSelectedOverlay);
     el.clearOverlayButton.addEventListener('click', clearOverlays);
     el.overlayAngle.addEventListener('input', updateSelectedOverlayAngle);
+    el.overlayAngle.addEventListener('change', () => updateSelectedOverlayAngle({ commit: true }));
     el.resetOverlayAngleButton.addEventListener('click', resetSelectedOverlayAngle);
     el.editButton.addEventListener('click', () => {
       state.editMode = !state.editMode;
