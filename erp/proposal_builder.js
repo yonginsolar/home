@@ -1,14 +1,15 @@
-/* Version: v1.3.2 | 2026-09-07 | Reliable photo exports and decimal rotation input. */
+/* Version: v1.4.0 | 2026-09-07 | Named proposals, site presets and unconfirmed-capacity handling. */
 (() => {
   'use strict';
 
-  const VERSION = '1.3.2';
+  const VERSION = '1.4.0';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const DRAFT_FIELDS = [
+    'facilityType', 'siteProposalNote', 'mandatoryKnown', 'existingInstallationKnown', 'noMandatory', 'voluntaryBaseKw',
     'proposalDate', 'proposalVersion', 'facilityName', 'regionFull', 'regionShort', 'siteAddress',
     'siteOverlayLabel', 'siteFeatureLines', 'siteCheckLines', 'mandatoryKw', 'hasExistingInstallation', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
     'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
@@ -37,6 +38,11 @@
     bootInFlight: false,
     bootAttempt: 0
   };
+  state.useSamplePhoto = true;
+  state.photoName = '';
+  state.library = null;
+  state.loadedCopyEdits = [];
+  state.draftKey = DRAFT_KEY;
 
   const el = {
     bootPanel: document.getElementById('bootPanel'),
@@ -225,10 +231,12 @@
   }
 
   function readModel() {
-    const mandatoryKw = numberValue('mandatoryKw');
+    const noMandatory = document.getElementById('noMandatory').checked;
+    const mandatoryKw = !noMandatory && document.getElementById('mandatoryKnown').checked && textValue('mandatoryKw') !== '' ? numberValue('mandatoryKw') : null;
+    const existingKnown = document.getElementById('existingInstallationKnown').checked;
     const hasExistingInstallation = Boolean(el.hasExistingInstallation.checked);
     const existingKw = hasExistingInstallation ? numberValue('existingKw') : 0;
-    const remainingKw = Math.max(mandatoryKw - existingKw, 0);
+    const remainingKw = noMandatory ? (textValue('voluntaryBaseKw') ? numberValue('voluntaryBaseKw') : null) : (mandatoryKw !== null && existingKnown ? Math.max(mandatoryKw - existingKw, 0) : null);
     const model = {
       proposalDate: textValue('proposalDate'),
       proposalVersion: textValue('proposalVersion') || 'v1.0',
@@ -236,6 +244,10 @@
       regionFull: textValue('regionFull'),
       regionShort: textValue('regionShort'),
       siteAddress: textValue('siteAddress'),
+      facilityType: textValue('facilityType'),
+      siteProposalNote: textValue('siteProposalNote'),
+      existingKnown,
+      noMandatory,
       siteOverlayLabel: textValue('siteOverlayLabel') || '신규 설치 검토 대상지',
       siteFeatureLines: lineValues('siteFeatureLines'),
       siteCheckLines: lineValues('siteCheckLines'),
@@ -243,8 +255,8 @@
       hasExistingInstallation,
       existingKw,
       remainingKw,
-      expandedMinKw: numberValue('expandedMinKw'),
-      expandedKw: numberValue('expandedKw'),
+      expandedMinKw: textValue('expandedMinKw') === '' ? null : numberValue('expandedMinKw'),
+      expandedKw: textValue('expandedKw') === '' ? null : numberValue('expandedKw'),
       unitCostManwon: numberValue('unitCostManwon'),
       salePriceWon: numberValue('salePriceWon'),
       sunHours: numberValue('sunHours'),
@@ -261,24 +273,25 @@
       officePhone: textValue('officePhone'),
       keepNamsaOverlay: Boolean(el.keepNamsaOverlay.checked)
     };
-    el.remainingKw.value = trimNumber(remainingKw);
+    el.remainingKw.value = remainingKw === null ? '확인 필요' : trimNumber(remainingKw);
+    document.querySelector('label[for="remainingKw"]').textContent = noMandatory ? '기준 설치안 용량(kW)' : '추가 의무용량(kW) · 자동 계산';
     return model;
   }
 
   function validateModel(model) {
-    if (!model.proposalDate || !model.facilityName || !model.regionFull || !model.regionShort || !model.siteAddress) {
-      throw new Error('제안일, 대상 시설, 지역명과 주소를 모두 입력해 주세요.');
+    if (!model.proposalDate || !model.facilityName || !model.regionFull || !model.regionShort) {
+      throw new Error('제안일, 대상 시설과 지역명을 입력해 주세요.');
     }
-    if (model.mandatoryKw < 0 || model.existingKw < 0 || model.expandedMinKw <= 0 || model.expandedKw <= 0) {
+    if (model.mandatoryKw < 0 || model.existingKw < 0 || (model.expandedMinKw !== null && model.expandedMinKw <= 0) || (model.expandedKw !== null && model.expandedKw <= 0)) {
       throw new Error('설치 용량 값을 확인해 주세요.');
     }
     if (model.hasExistingInstallation && model.existingKw <= 0) {
       throw new Error('기존 설비가 있으면 기존 설치용량을 0보다 크게 입력해 주세요.');
     }
-    if (model.expandedMinKw > model.expandedKw) {
+    if (model.expandedMinKw !== null && model.expandedKw !== null && model.expandedMinKw > model.expandedKw) {
       throw new Error('확대안 범위 시작 용량은 수지 비교 확대안 용량보다 클 수 없습니다.');
     }
-    if (model.expandedKw < model.remainingKw) {
+    if (model.expandedKw !== null && model.remainingKw !== null && model.expandedKw < model.remainingKw) {
       throw new Error('수지 비교 확대안 용량은 법정 의무 이행에 필요한 용량보다 작을 수 없습니다.');
     }
     if (model.unitCostManwon <= 0 || model.salePriceWon <= 0 || model.sunHours <= 0) {
@@ -327,11 +340,18 @@
     const constructionPrepStart = Math.max(1, model.constructionMonth - 2);
     const constructionPrepEnd = Math.max(constructionPrepStart, model.constructionMonth - 1);
     const dateDisplay = formatDate(model.proposalDate);
-    const kw = (value) => `${trimNumber(value)}kW`;
+    const kw = (value) => value === null ? '확인 필요' : `${trimNumber(value)}kW`;
     const percent = (value) => `${trimNumber(value)}%`;
     return [
+      ['이동·남사읍 반도체 국가산단', '용인 반도체 국가산단'],
+      ['남사에 뿌리 둔 조합', '용인에 뿌리 둔 조합'],
+      ['남사읍에서 LED 조명과', '용인시 남사읍에서 LED 조명과'],
+      ['경기 용인시 처인구 남사읍 상동로 28', '경기 용인시 처인구 남사읍 상동로 28'],
+      ['남사읍에 기반을 둔 지역 협동조합', '용인에 기반을 둔 지역 협동조합'],
+      ['용인시 남사읍', model.facilityType === 'school' ? '학교·교육청' : '시설 관리 주체'],
+      ['WHY NOW, WHY NAMSA', 'WHY SOLAR, WHY NOW'],
       ['남사읍행정복지센터', model.facilityName],
-      ['경기 용인시 처인구 남사읍 내기로 22', model.siteAddress],
+      ['경기 용인시 처인구 남사읍 내기로 22', model.siteAddress || '대상지 주소 확인 필요'],
       ['100~120kW', `${trimNumber(effectiveExpandedMinKw)}~${trimNumber(model.expandedKw)}kW`],
       ['13.1~15.8만kWh', `${trimNumber(minExpandedGeneration / 10000)}~${trimNumber(maxExpandedGeneration / 10000)}만kWh`],
       ['1억 1,160만원', formatProjectCost(baseFinance.projectCost)],
@@ -354,6 +374,7 @@
       ['판매단가 170원/kWh', `판매단가 ${trimNumber(model.salePriceWon, 0)}원/kWh`],
       ['170원/kWh', `${trimNumber(model.salePriceWon, 0)}원/kWh`],
       ['사업비의 2%', `사업비의 ${percent(model.operationPct)}`],
+      ['매출 5%', `매출 ${percent(model.returnPct)}`],
       ['매출의 5%', `매출의 ${percent(model.returnPct)}`],
       ['계약 후 2~3개월', `계약 후 ${constructionPrepStart}~${constructionPrepEnd}개월`],
       ['4개월 차', `${model.constructionMonth}개월 차`],
@@ -401,8 +422,8 @@
 
   function applySiteDetailLists(doc, model, replaceText) {
     const siteSlide = slideAt(doc, 3);
-    replaceListByHeading(siteSlide, '현장 특징', model.siteFeatureLines, '현장조사 후 내용을 입력합니다.', replaceText);
-    replaceListByHeading(siteSlide, '먼저 확인할 자료', model.siteCheckLines, '현장조사에 필요한 자료를 확인합니다.', replaceText);
+    replaceListByHeading(siteSlide, '현장 특징', model.siteFeatureLines, '현장조사 후 내용을 입력합니다.', (value) => value);
+    replaceListByHeading(siteSlide, '먼저 확인할 자료', model.siteCheckLines, '현장조사에 필요한 자료를 확인합니다.', (value) => value);
   }
 
   function applyNoExistingInstallationContext(doc, model) {
@@ -552,7 +573,7 @@
 
     const siteImage = doc.querySelector('.photo-shell img');
     if (siteImage) {
-      siteImage.setAttribute('src', state.siteImageDataUrl || 'proposal_assets/namsa-site-map.png');
+      siteImage.setAttribute('src', state.siteImageDataUrl || (state.useSamplePhoto ? 'proposal_assets/namsa-site-map.png' : 'proposal_assets/site-photo-placeholder.svg'));
       siteImage.setAttribute('alt', `${model.facilityName} 대상지 사진`);
     }
     if (!model.keepNamsaOverlay || state.siteImageDataUrl) {
@@ -563,9 +584,138 @@
       if (caption) caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
     }
     applyNoExistingInstallationContext(doc, model);
+    applySiteContext(doc, model);
     renderCustomOverlays(doc, model);
     appendBuilderStyles(doc);
+    editableCandidates(doc).forEach((node, index) => {
+      node.dataset.copyId = String(index);
+      node.dataset.copyBase = node.textContent;
+    });
+    state.loadedCopyEdits.forEach((edit) => {
+      const node = doc.querySelector(`[data-copy-id="${Number(edit.index)}"]`);
+      if (!node || node.dataset.copyBase !== edit.baseText || typeof edit.text !== 'string') return;
+      node.textContent = edit.text;
+      node.style.whiteSpace = 'pre-line';
+    });
     return '<!doctype html>\n' + doc.documentElement.outerHTML;
+  }
+
+  function applySiteContext(doc, model) {
+    const put = (page, selector, text) => { const node = slideAt(doc, page)?.querySelector(selector); if (node) node.textContent = text; };
+    const kw = (n) => n === null ? '확인 필요' : `${trimNumber(n)}kW`;
+    const unconfirmed = model.remainingKw === null || model.noMandatory;
+    const expandedUnknown = model.expandedKw === null || model.expandedMinKw === null;
+    if (!state.siteImageDataUrl && !state.useSamplePhoto) put(3, '.photo-caption', '대상지 사진 미등록 · 사진과 설치 검토 범위를 확인 후 반영합니다.');
+    put(12, '.safety-grid .card:nth-child(5) p', '시설과 주변 환경에 어울리는 색상·높이·야간조명을 적용합니다.');
+    put(13, 'tbody tr:first-child td:first-child', '설치 검토 구역 실측');
+    put(13, 'tbody tr:last-child td:last-child', '기준 설치안과 확대안의 총비용·편익 비교');
+    if (!state.useSamplePhoto) put(4, '.law-box:nth-child(3) .small:last-child', '기존 설치 현황 기준');
+    // A supplied mandatory total does not prove the existing installation has been surveyed.
+    if (unconfirmed) {
+      const frame = slideAt(doc, 4).querySelector('.frame');
+      frame.querySelector('h2').textContent = '설치 현황을 확인하고, 필요한 용량과 이용자 편익을 함께 검토합니다';
+      const formula = frame.querySelector('.law-box').parentElement;
+      formula.style.gridTemplateColumns = '1fr 1fr 1fr';
+      formula.replaceChildren(...[
+        ['제공받은 의무용량', kw(model.mandatoryKw)],
+        ['기존 설치 현황', model.existingKnown ? kw(model.existingKw) : '확인 필요'],
+        ['추가 의무용량', '현황 확인 후 산정']
+      ].map(([label, value]) => {
+        const box = doc.createElement('div'); box.className = 'law-box';
+        const title = doc.createElement('div'); title.className = 'small'; title.textContent = label;
+        const number = doc.createElement('div'); number.className = 'big-inline'; number.style.fontSize = '26px'; number.textContent = value;
+        box.append(title, number); return box;
+      }));
+      put(4, '.grid-2 .card:first-child h3', '확인된 값과 조사할 항목 구분');
+      put(4, '.grid-2 .card:first-child .lead', model.mandatoryKw === null ? '의무 적용 여부와 용량은 아직 확인 전입니다.' : `제공받은 전체 의무용량은 ${kw(model.mandatoryKw)}입니다.`);
+      put(4, '.grid-2 .card:first-child p:last-child', '기존 설비 유무와 의무 이행 인정용량을 확인한 뒤 추가 설치용량을 산정합니다.');
+      put(4, '.grid-2 .card:nth-child(2) h3', '이용자 편익까지 함께 검토');
+      put(4, '.grid-2 .card:nth-child(2) p', '그늘 면수, 보행·차량 동선, 구조 안전과 계통 여건을 함께 검토해 설치 범위를 제안합니다.');
+      put(4, '.banner', '확인되지 않은 용량은 추정하지 않고, 현장조사와 관계 기관 협의 후 설계에 반영합니다.');
+      put(4, '.source', '의무용량은 제공받은 현황을 반영합니다. 적용 여부·산정 기준·기존 설비의 인정용량은 관계 기관 확인 후 확정합니다.');
+      put(6, '.table th:nth-child(2)', '기준 설치안 · 용량 확인 후 산정');
+      put(6, '.table tbody tr:first-child td:nth-child(2)', '의무 적용 여부와 필요한 설치 범위 확인');
+      put(6, '.grid-2 .card:first-child p', '필요한 설치 범위와 전면 차양형을 같은 기본설계에서 비교한 뒤, 이용자 편익·사업비·계통 여건을 보고 확정합니다.');
+      put(13, '.grid-3 .card:first-child .stat-label', '추가 의무용량');
+      put(13, '.grid-3 .card:first-child .stat', '확인 필요');
+      put(13, '.grid-3 .card:first-child p', '의무 적용 여부와 기존 설치 현황을 먼저 확인');
+    }
+    if (expandedUnknown) {
+      put(6, '.table th:nth-child(3)', '전면 차양 검토안 · 현장조사 후 산정');
+      const cards = slideAt(doc, 13).querySelectorAll('.grid-3 .card');
+      [cards[1], cards[2]].forEach((card) => {
+        const stat = card?.querySelector('.stat'); if (stat) stat.textContent = '산정 전';
+        const text = card?.querySelector('p'); if (text) text.textContent = '현장조사·기본설계로 용량 확정 후 계산';
+      });
+    }
+    if (unconfirmed || expandedUnknown) {
+      put(14, 'h2', '설치용량을 확인한 뒤, 같은 가정으로 예상 수지를 비교합니다');
+      [model.remainingKw, model.expandedKw].forEach((capacity, index) => {
+        const card = slideAt(doc, 14).querySelectorAll('.financial-compare > .card')[index];
+        if (capacity === null) {
+          card.querySelector('h3').textContent = index === 0 ? '기준 설치안 · 용량 확인 필요' : '전면 차양안 · 용량 확인 필요';
+          card.querySelectorAll('td:nth-child(2)').forEach((cell) => { cell.textContent = '용량 확인 후 산정'; });
+        }
+      });
+    }
+    // Region replacement must never move the cooperative or its officers to the target site.
+    if (model.siteProposalNote) {
+      const slide = slideAt(doc, 5);
+      const banner = slide.querySelector('.banner');
+      banner.textContent = model.siteProposalNote;
+      banner.style.cssText += ';font-size:16px;line-height:1.5;padding:15px 20px;overflow-wrap:anywhere';
+      slide.querySelector('h2').textContent = '대상지에 맞는 설치 범위와 함께 검토할 제안을 담았습니다';
+    } else if (unconfirmed) put(5, 'h2', '필요한 설치 범위와 함께 전면 차양형도 검토해 주십시오');
+    if (model.facilityType === 'school' || model.mandatoryKw === null) {
+      put(2, '.grid-3 .card:nth-child(3) h3', '시설 여건에 맞는 에너지 전환');
+      put(2, '.grid-3 .card:nth-child(3) p', '시설의 이용 목적과 안전 기준을 먼저 확인하고, 재생에너지 생산과 그늘·비가림을 함께 제공하는 방안을 검토합니다. 의무 적용 여부는 별도로 확인합니다.');
+      put(2, '.banner', '이용자의 일상에 도움이 되는 햇빛쉼터와 지역 재생에너지 생산을 함께 제안합니다.');
+    }
+    if (model.facilityType === 'school') {
+      put(2, '.lead', `${model.facilityName}의 주차공간을 학생·교직원의 안전과 교육활동에 지장이 없도록 검토하고, 그늘과 재생에너지를 함께 제공하는 방안을 제안합니다.`);
+      put(7, '.flow .step:first-child p', '학교 부지 사용, 교육활동·안전 기준과 관계 기관 절차 협의');
+      put(13, '.note', '사업비·금융조건·수익성은 조합이 검토합니다. 학교의 사업비 부담을 전제하지 않으며, 부지 사용 조건과 기본설계 확인 후 재원조달안을 별도 제시합니다.');
+      put(15, 'h2', '학교 부지의 소유·관리와 사용 절차를 먼저 확인합니다');
+      put(15, '.contract-callout h3', '학교·교육청과 협의해 적합한 사업 구조를 정합니다');
+      put(15, '.contract-callout p', '학교시설의 사용 목적과 교육활동을 우선하고, 소유·관리 주체가 정한 절차에 따라 부지 사용과 계약 방식을 검토할 것을 제안합니다.');
+      put(15, '.grid-2 .card:first-child h3', '소유·관리와 적용 규정 확인');
+      put(15, '.grid-2 .card:first-child p', '시설 소유자와 재산 관리 주체, 학교시설 사용 조건, 안전 기준 및 필요한 심사·협의 절차를 확인합니다.');
+      put(15, '.grid-2 .card:nth-child(2) h3', '교육활동과 장기 운영 보호');
+      put(15, '.grid-2 .card:nth-child(2) p', '통학·보행 동선, 공사 일정, 유지관리 출입, 보험과 시설 복구 책임을 학교와 협의해 명확히 합니다.');
+      put(15, '.note', '시 소유 공영주차장을 전제로 한 조례나 수의계약 가능성을 학교에 그대로 적용하지 않습니다. 관계 기관의 검토를 거쳐 계약 방식을 확정합니다.');
+      put(15, '.source', '협의할 자료: 학교시설 소유·관리 현황, 재산 사용 기준, 설치 계획과 안전·유지관리 방안.');
+      put(2, '.grid-3 .card:nth-child(3) h3', '발전소와 함께하는 에너지 교육');
+      put(2, '.grid-3 .card:nth-child(3) p', '조합이 태양광·에너지 전환·기후 교육을 함께 진행할 수 있습니다. 학생 눈높이에 맞는 교육 대상·횟수·일정은 학교와 협의합니다.');
+      put(7, '.participation-support .card:first-child h3', '조합과 함께하는 에너지·기후 교육');
+      put(7, '.participation-support .card:first-child p', '학교 발전소를 에너지 전환을 이해하는 계기로 활용하고, 조합이 태양광 발전 원리·기후·지역 에너지 전환 교육을 함께 진행할 수 있습니다. 수업 대상·횟수·일정과 안전한 교육 방식은 학교와 협의합니다.');
+      put(17, '.frame > .card.sunny h3', '학교 연계 운영 예시 · 조합과 함께하는 에너지 교육');
+      put(17, '.frame > .card.sunny p', '발전소 운영 자료를 활용한 에너지·기후 교육을 함께 기획할 수 있습니다. 설비 점검·보수는 전문 인력이 맡고 학생의 설비 접근은 학교 안전 기준에 따릅니다.');
+      put(17, '.frame > .card.sunny > div:first-child', '☀');
+    }
+    if (model.noMandatory) {
+      put(4, 'h2', '의무 설치가 아닌, 시설의 편익과 에너지 전환을 위한 제안입니다');
+      put(4, '.law-box:first-child .small', '사업 성격');
+      put(4, '.law-box:first-child .big-inline', '자발적 설치');
+      put(4, '.law-box:nth-child(3) .small', '기준 설치안');
+      put(4, '.law-box:nth-child(3) .big-inline', kw(model.remainingKw));
+      put(4, '.grid-2 .card:first-child h3', '의무량 대신 필요한 편익에서 출발');
+      put(4, '.grid-2 .card:first-child .lead', '의무 설치량을 채우기 위한 사업이 아닙니다.');
+      put(4, '.grid-2 .card:first-child p:last-child', '시설 이용자의 그늘·비가림과 재생에너지 생산을 고려해 적정 설치 규모를 정합니다.');
+      put(4, '.source', '본 제안은 의무 설치 없는 사업을 전제로 작성했습니다. 설치용량은 현장조사와 시설 관리 주체 협의 후 확정합니다.');
+      put(6, '.table th:nth-child(2)', `기준 설치안 · ${kw(model.remainingKw)}`);
+      put(6, '.table tbody tr:first-child td:nth-child(2)', '시설 이용 편익과 적정 규모 확보');
+      put(13, '.grid-3 .card:first-child .stat-label', '기준 설치안');
+      put(13, '.grid-3 .card:first-child .stat', kw(model.remainingKw));
+      put(13, '.grid-3 .card:first-child p', '의무량이 아닌 자발적 설치 검토 규모');
+      put(14, '.financial-compare .card:first-child h3', `기준 설치안 · ${kw(model.remainingKw)}`);
+    }
+    // Per-card payback must not reuse the first scenario when only one capacity is known.
+    [model.remainingKw, model.expandedKw].forEach((capacity, index) => {
+      if (capacity === null) return;
+      const cell = slideAt(doc, 14).querySelectorAll('.financial-compare > .card')[index]?.querySelector('tr:nth-child(7) td:nth-child(2)');
+      const finance = calculateFinance(capacity, model);
+      if (cell) cell.textContent = finance.payback > 0 ? `약 ${finance.payback.toFixed(1)}년` : '산정 불가';
+    });
   }
 
   function editableCandidates(doc) {
@@ -637,8 +787,8 @@
     const count = state.customOverlays.length;
     const selectedOverlay = state.selectedOverlayId ? overlayById(state.selectedOverlayId) : null;
     const hasSelection = Boolean(selectedOverlay);
-    const showSampleTarget = Boolean(el.keepNamsaOverlay.checked && !state.siteImageDataUrl && count === 0);
-    const showSampleExisting = Boolean(el.keepNamsaOverlay.checked && !state.siteImageDataUrl && el.hasExistingInstallation.checked);
+    const showSampleTarget = Boolean(state.useSamplePhoto && el.keepNamsaOverlay.checked && !state.siteImageDataUrl && count === 0);
+    const showSampleExisting = Boolean(state.useSamplePhoto && el.keepNamsaOverlay.checked && !state.siteImageDataUrl && el.hasExistingInstallation.checked);
     el.overlayCount.textContent = `${count}개 표시`;
     el.deleteOverlayButton.disabled = !hasSelection;
     el.clearOverlayButton.disabled = count === 0;
@@ -755,6 +905,7 @@
 
     doc.addEventListener('pointerup', (event) => {
       if (!action) return;
+      state.library?.markDirty();
       const finished = action;
       action = null;
       if (finished.type === 'draw') {
@@ -800,6 +951,7 @@
 
   function deleteSelectedOverlay() {
     if (!state.selectedOverlayId) return;
+    state.library?.markDirty();
     const id = state.selectedOverlayId;
     state.customOverlays = state.customOverlays.filter((overlay) => overlay.id !== id);
     state.selectedOverlayId = '';
@@ -821,6 +973,7 @@
       return;
     }
     if (commit) el.overlayAngle.value = String(overlay.angle);
+    state.library?.markDirty();
     const doc = el.previewFrame.contentDocument;
     const zone = doc?.querySelector(`.proposal-custom-zone[data-overlay-id="${CSS.escape(overlay.id)}"]`);
     if (zone) updateOverlayElement(zone, overlay);
@@ -836,6 +989,7 @@
   function clearOverlays() {
     if (!state.customOverlays.length) return;
     if (!window.confirm('사진 위에 만든 대상지 표시를 모두 지울까요?')) return;
+    state.library?.markDirty();
     state.customOverlays = [];
     state.selectedOverlayId = '';
     state.overlayDrawMode = false;
@@ -846,6 +1000,13 @@
   }
 
   function syncExistingInstallationUi({ restoreValue = false } = {}) {
+    const noMandatory = document.getElementById('noMandatory').checked;
+    document.getElementById('voluntaryCapacityField').hidden = !noMandatory;
+    document.getElementById('mandatoryKnown').disabled = noMandatory;
+    const known = document.getElementById('existingInstallationKnown').checked;
+    el.hasExistingInstallation.disabled = !known;
+    if (!known) el.hasExistingInstallation.checked = false;
+    document.getElementById('mandatoryKw').disabled = noMandatory || !document.getElementById('mandatoryKnown').checked;
     const hasExisting = Boolean(el.hasExistingInstallation.checked);
     const currentValue = Number(el.existingKw.value);
     if (!hasExisting) {
@@ -856,7 +1017,7 @@
     } else {
       el.existingKw.disabled = false;
       el.existingKw.required = true;
-      if (restoreValue && (!(currentValue > 0))) el.existingKw.value = String(state.lastExistingKw || 57);
+      if (restoreValue && (!(currentValue > 0))) el.existingKw.value = state.lastExistingKw > 0 ? String(state.lastExistingKw) : '';
     }
   }
 
@@ -865,14 +1026,17 @@
     if (state.manualDirty && force) {
       const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 18쪽을 다시 만들까요?');
       if (!overwrite) return;
+      state.loadedCopyEdits = [];
+      state.copyRestoreMismatch = false;
     }
     if (!el.form.reportValidity()) return;
     try {
       const model = readModel();
       validateModel(model);
       const html = buildPreviewDocument(model);
+      state.previewFields = collectFields();
       saveDraft();
-      state.manualDirty = false;
+      state.manualDirty = state.loadedCopyEdits.length > 0;
       setStatus('18쪽 미리보기를 다시 만들고 있습니다.');
       state.resolvePreviewReady?.();
       state.previewReady = new Promise((resolve) => {
@@ -884,7 +1048,22 @@
           doc?.addEventListener('input', (event) => {
             if (!event.target?.closest?.('[data-proposal-editable="true"]')) return;
             state.manualDirty = true;
+            state.library?.markDirty();
             setStatus('직접 고친 문구가 있습니다. 입력값을 다시 반영하면 이 수정은 사라집니다.', true);
+          });
+          doc?.addEventListener('paste', (event) => {
+            const target = event.target?.closest?.('[data-proposal-editable="true"]');
+            if (!target) return;
+            event.preventDefault();
+            const selection = doc.getSelection();
+            if (!selection?.rangeCount || !target.contains(selection.anchorNode)) return;
+            const range = selection.getRangeAt(0);
+            if (!target.contains(range.endContainer)) return;
+            const text = doc.createTextNode(event.clipboardData?.getData('text/plain') || '');
+            range.deleteContents(); range.insertNode(text); range.setStartAfter(text); range.collapse(true);
+            selection.removeAllRanges(); selection.addRange(range);
+            target.style.whiteSpace = 'pre-line';
+            state.manualDirty = true; state.library?.markDirty();
           });
           bindOverlayEditor(doc);
           applyEditMode();
@@ -919,16 +1098,85 @@
       draft[id] = input.type === 'checkbox' ? input.checked : input.value;
     });
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      localStorage.setItem(state.draftKey, JSON.stringify({ ...draft, useSamplePhoto: state.useSamplePhoto }));
     } catch (error) {
       console.warn(`[proposal-builder ${VERSION}] draft save skipped`, error);
     }
   }
 
+  function collectFields() {
+    return Object.fromEntries(DRAFT_FIELDS.map((id) => {
+      const input = document.getElementById(id);
+      return [id, input.type === 'checkbox' ? input.checked : input.value];
+    }));
+  }
+
+  function setFields(fields) {
+    DRAFT_FIELDS.forEach((id) => {
+      if (!(id in fields)) return;
+      const input = document.getElementById(id);
+      if (input.type === 'checkbox') input.checked = fields[id] === true;
+      else input.value = String(fields[id] ?? '').slice(0, input.maxLength > 0 ? input.maxLength : 1000);
+    });
+    syncExistingInstallationUi();
+  }
+
+  async function captureSnapshot() {
+    const doc = await prepareOutput();
+    const copyEdits = [...doc.querySelectorAll('[data-copy-id]')]
+      .filter((node) => node.textContent !== node.dataset.copyBase)
+      .map((node) => ({ index: Number(node.dataset.copyId), baseText: node.dataset.copyBase, text: node.innerText }));
+    if (copyEdits.length > 400 || copyEdits.some((edit) => edit.text.length > 20000)) throw new Error('직접 수정한 문구가 저장 가능한 길이를 넘었습니다. 문장을 나누거나 길이를 줄여 주세요.');
+    return { format: 1, builderVersion: VERSION, fields: collectFields(),
+      photo: state.siteImageDataUrl, photoName: state.photoName,
+      useSamplePhoto: state.useSamplePhoto, overlays: structuredClone(state.customOverlays), copyEdits };
+  }
+
+  async function restoreSnapshot(snapshot) {
+    if (snapshot?.format !== 1 || !snapshot.fields || typeof snapshot.fields !== 'object') throw new Error('지원하지 않는 제안서 저장 형식입니다.');
+    const photo = typeof snapshot.photo === 'string' ? snapshot.photo : '';
+    if (photo && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(photo) || photo.length > 17 * 1024 * 1024)) throw new Error('저장된 사진 형식을 확인할 수 없습니다.');
+    if (photo) { const image = new Image(); image.src = photo; await image.decode(); }
+    const overlays = (Array.isArray(snapshot.overlays) ? snapshot.overlays : []).slice(0, 20).map((overlay, index) => ({
+      id: `restored-${index + 1}`, x: clamp(Number(overlay.x) || 0, 0, 100), y: clamp(Number(overlay.y) || 0, 0, 100),
+      width: clamp(Number(overlay.width) || 10, 1, 100), height: clamp(Number(overlay.height) || 10, 1, 100), angle: normalizeAngle(overlay.angle)
+    }));
+    const copyEdits = (Array.isArray(snapshot.copyEdits) ? snapshot.copyEdits : []).filter((edit) => Number.isInteger(edit.index) && edit.index >= 0 && typeof edit.baseText === 'string' && typeof edit.text === 'string' && edit.text.length <= 20000).slice(0, 400);
+    window.clearTimeout(state.renderTimer); state.renderTimer = 0;
+    state.imageSequence += 1;
+    state.imageLoadError = null; state.imageLoadPromise = Promise.resolve();
+    state.siteImageDataUrl = photo; state.photoName = String(snapshot.photoName || '').slice(0, 250);
+    state.useSamplePhoto = snapshot.useSamplePhoto === true;
+    state.customOverlays = overlays; state.selectedOverlayId = ''; state.overlayDrawMode = false;
+    state.loadedCopyEdits = copyEdits; state.manualDirty = false; state.editMode = false;
+    state.copyRestoreMismatch = false;
+    state.lastExistingKw = Number(snapshot.fields.existingKw) || 0;
+    setFields(snapshot.fields);
+    el.siteImage.value = '';
+    el.siteImageName.textContent = photo ? state.photoName || '저장한 대상지 사진' : state.useSamplePhoto ? '남사읍 예시 위성사진 사용 중' : '대상지 사진 미등록';
+    renderPreview();
+    await withTimeout(waitForPreview(), 'PREVIEW');
+    updateOverlayControls();
+    const restoredCount = [...el.previewFrame.contentDocument.querySelectorAll('[data-copy-id]')].filter((node) => node.textContent !== node.dataset.copyBase).length;
+    if (restoredCount !== copyEdits.length) {
+      state.copyRestoreMismatch = true;
+      throw new Error('서식이 달라 일부 수정 문구를 적용하지 못했습니다. 보관함 원본은 유지했습니다. 덮어쓰지 말고 관리자에게 알려 주세요.');
+    }
+  }
+
+  async function startSite(preset) {
+    const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()) };
+    if (!fields.facilityName) fields.facilityName = '새 대상지';
+    await restoreSnapshot({ format: 1, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
+    document.getElementById('facilityName').focus();
+  }
+
   function restoreDraft() {
     try {
-      const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+      const legacy = /^(www\.)?yonginsolar\.kr$/.test(location.hostname) ? localStorage.getItem(DRAFT_KEY) : null;
+      const draft = JSON.parse(localStorage.getItem(state.draftKey) || legacy || 'null');
       if (!draft || typeof draft !== 'object') return;
+      state.useSamplePhoto = draft.useSamplePhoto ?? (draft.facilityName === '남사읍행정복지센터');
       DRAFT_FIELDS.forEach((id) => {
         const input = document.getElementById(id);
         if (!input || !(id in draft)) return;
@@ -969,7 +1217,7 @@
         if (!response.ok) throw new Error(`IMAGE_HTTP_${response.status}`);
         image.setAttribute('src', await dataUrlFromBlob(await response.blob()));
       } catch (error) {
-        console.warn(`[proposal-builder ${VERSION}] image inline skipped`, source, error);
+        throw new Error('사진을 HTML 파일 안에 포함하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 저장해 주세요.');
       }
     }));
   }
@@ -989,6 +1237,8 @@
       node.removeAttribute('contenteditable');
       node.removeAttribute('spellcheck');
       node.removeAttribute('data-proposal-editable');
+      node.removeAttribute('data-copy-id');
+      node.removeAttribute('data-copy-base');
       [...node.attributes].forEach((attribute) => {
         if (/^on/i.test(attribute.name)) node.removeAttribute(attribute.name);
       });
@@ -1043,8 +1293,14 @@
   }
 
   async function prepareOutput() {
+    if (state.copyRestoreMismatch) throw new Error('저장된 수정 문구를 모두 복원하지 못했습니다. 원본 보호를 위해 저장·출력을 중지했습니다.');
     await state.imageLoadPromise;
     if (state.imageLoadError) throw state.imageLoadError;
+    if (!el.form.reportValidity()) throw new Error('입력값을 확인한 뒤 다시 저장해 주세요.');
+    validateModel(readModel());
+    const changedFields = JSON.stringify(collectFields()) !== JSON.stringify(state.previewFields);
+    if (changedFields && (state.editMode || state.manualDirty)) throw new Error('입력값이 미리보기와 다릅니다. 「입력값을 18쪽에 반영」 후 문구를 확인하고 저장해 주세요.');
+    if (changedFields && !state.renderTimer) renderPreview();
     if (state.renderTimer) {
       window.clearTimeout(state.renderTimer);
       state.renderTimer = 0;
@@ -1099,11 +1355,15 @@
     await image.decode();
     if (sequence !== state.imageSequence) return;
     state.siteImageDataUrl = dataUrl;
+    state.photoName = file.name;
+    state.useSamplePhoto = false;
+    state.library?.markDirty();
     state.customOverlays = [];
     state.selectedOverlayId = '';
     state.overlayDrawMode = false;
     el.siteImageName.textContent = file.name;
     el.keepNamsaOverlay.checked = false;
+    if (state.previewFields) state.previewFields.keepNamsaOverlay = false;
     saveDraft();
     // Replace only the photo so manual copy edits and invalid/unfinished fields cannot block it.
     await withTimeout(waitForPreview(), 'PREVIEW');
@@ -1115,7 +1375,10 @@
     siteImage.alt = `${textValue('facilityName')} 대상지 사진`;
     doc.querySelectorAll('.proposal-custom-zone').forEach((zone) => zone.remove());
     const caption = doc.querySelector('.photo-caption');
-    if (caption) caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
+    if (caption) {
+      caption.textContent = '업로드한 대상지 사진 · 설치 범위와 경계는 현장조사와 설계로 확정';
+      if ('copyBase' in caption.dataset) caption.dataset.copyBase = caption.textContent;
+    }
     updateOverlayControls(doc);
     setStatus('대상지 사진을 반영했습니다. PDF와 HTML에도 이 사진이 들어갑니다.', state.manualDirty);
   }
@@ -1123,7 +1386,12 @@
   function resetSample() {
     if (!window.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?')) return;
     el.form.reset();
-    localStorage.removeItem(DRAFT_KEY);
+    state.useSamplePhoto = true;
+    state.photoName = '';
+    state.loadedCopyEdits = [];
+    state.copyRestoreMismatch = false;
+    state.library?.detach();
+    localStorage.removeItem(state.draftKey);
     state.siteImageDataUrl = '';
     state.imageSequence += 1;
     state.imageLoadError = null;
@@ -1140,6 +1408,8 @@
   }
 
   function bindEvents() {
+    if (state.eventsBound) return;
+    state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
       renderPreview({ force: true });
@@ -1147,7 +1417,9 @@
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage) return;
       if (event.target === el.overlayAngle) return;
-      if (event.target === el.hasExistingInstallation) syncExistingInstallationUi({ restoreValue: true });
+      if (event.target.closest('[data-library-controls]')) return;
+      state.library?.markDirty();
+      if ([el.hasExistingInstallation, document.getElementById('existingInstallationKnown'), document.getElementById('mandatoryKnown'), document.getElementById('noMandatory')].includes(event.target)) syncExistingInstallationUi({ restoreValue: true });
       if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
       saveDraft();
@@ -1190,6 +1462,7 @@
         error.code = 'ERP_RUNTIME_GUARD_UNAVAILABLE';
         throw error;
       }
+      if (!window.ProposalPresets || !window.ProposalLibrary) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
       const client = getClient();
       el.bootMessage.textContent = 'ERP 로그인 상태를 확인하고 있습니다.';
       const userGate = await withTimeout(window.ErpRuntimeGuard.requireUser(client, {
@@ -1220,6 +1493,7 @@
       if (!response.ok) throw new Error(`TEMPLATE_HTTP_${response.status}`);
       state.templateHtml = await response.text();
       if (!state.templateHtml.includes('class="slide')) throw new Error('TEMPLATE_INVALID');
+      state.draftKey = `${DRAFT_KEY}.${userGate.user.coop_id}`;
       restoreDraft();
       syncExistingInstallationUi();
       updateOverlayControls();
@@ -1229,6 +1503,9 @@
       el.bootPanel.hidden = true;
       el.appShell.classList.add('ready');
       renderPreview();
+      state.library = window.ProposalLibrary.init({ client, coopId: userGate.user.coop_id,
+        snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,
+        isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] boot failed`, error);
       if (error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT') {
