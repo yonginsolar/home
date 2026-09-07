@@ -1,8 +1,8 @@
-/* Version: v1.4.5 | 2026-09-07 | Keep explicit apply drafts including photos in this browser. */
+/* Version: v1.4.6 | 2026-09-07 | Facility-based PDF default filename. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.5';
+  const VERSION = '1.4.6';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -514,7 +514,6 @@
   function buildPreviewDocument(model) {
     const doc = new DOMParser().parseFromString(state.templateHtml, 'text/html');
     doc.querySelectorAll('script').forEach((node) => node.remove());
-    doc.title = `${model.facilityName} 주차장 햇빛발전소 제안서`;
     const replaceText = createReplacer(buildReplacementEntries(model));
     replaceDocumentText(doc, replaceText);
     applySiteDetailLists(doc, model, replaceText);
@@ -548,6 +547,7 @@
       node.textContent = edit.text;
       node.style.whiteSpace = 'pre-line';
     });
+    doc.title = pdfDocumentTitle(model.facilityName);
     return '<!doctype html>\n' + doc.documentElement.outerHTML;
   }
 
@@ -1211,6 +1211,13 @@
       .slice(0, 120) || 'proposal';
   }
 
+  function pdfDocumentTitle(facilityName) {
+    const facility = String(facilityName || '').normalize('NFC')
+      .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').trim() || '대상 시설';
+    // Keep the requested spaces; the PDF printer adds the .pdf extension.
+    return `태양광 발전사업제안서_${facility}_용인모두의햇빛협동조합`;
+  }
+
   function dataUrlFromBlob(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -1343,7 +1350,11 @@
     setExportBusy(true);
     setStatus('사진과 제안서 준비가 끝나면 인쇄 창을 엽니다.');
     try {
-      await prepareOutput();
+      const doc = await prepareOutput();
+      const title = pdfDocumentTitle(state.previewFields.facilityName);
+      // PDF printers may use either the top-level page title or the printed frame title.
+      document.title = title;
+      doc.title = title;
       el.previewFrame.contentWindow.focus();
       el.previewFrame.contentWindow.print();
     } catch (error) {
