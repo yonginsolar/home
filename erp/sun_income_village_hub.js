@@ -1,8 +1,8 @@
-/* Sun-income-village existing ERP tenant hub v3.0.0 */
+/* Sun-income-village existing ERP tenant hub v3.0.1 */
 (() => {
   'use strict';
 
-  const VERSION = '3.0.0';
+  const VERSION = '3.0.1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -12,6 +12,7 @@
   const statusLabel = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', ended: '종료' };
   let client = null;
   let context = null;
+  let canCreateCooperative = false;
   let loading = false;
 
   function setMessage(text, isError = false) {
@@ -22,6 +23,7 @@
 
   function friendly(error) {
     const raw = String(error?.message || error || '');
+    if (raw.includes('PLATFORM_ADMIN_REQUIRED')) return '새 마을조합 운영 공간은 플랫폼 관리자만 만들 수 있습니다.';
     if (raw.includes('MANAGEMENT_ADMIN_REQUIRED') || error?.code === '42501') return '햇빛소득마을 전체 운영을 맡은 관리자만 이 화면을 열 수 있습니다.';
     if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
@@ -83,7 +85,7 @@
     const active = row.service_status === 'active';
     const capacity = row.capacity_kw === null || row.capacity_kw === undefined ? '미입력' : `${number(row.capacity_kw)} kW`;
     const coreEnabled = ['member_admin','accounting','approval','minutes','documents','signature']
-      .filter(key => row.modules?.[key] !== false).length;
+      .filter(key => row.modules?.[key] === true).length;
     return `
       <article class="managed-card panel">
         <div class="managed-head">
@@ -95,7 +97,7 @@
           <span><strong>${number(row.official_count)}</strong>임원</span>
           <span><strong>${number(row.approval_pending_count)}</strong>결재 대기</span>
           <span><strong>${number(row.journal_count)}</strong>회계 전표</span>
-          <span><strong>${number(row.minutes_count)}</strong>문서·의사록</span>
+          <span><strong>${number(row.minutes_count)}</strong>의사록</span>
         </div>
         <div class="module-line"><strong>기존 ERP 연결</strong><span>조합원 · 임원 · 복식회계 · 전자결재 · 총회·이사회 · 문서·전자서명 (${coreEnabled}/6)</span></div>
         <div class="managed-actions">
@@ -110,10 +112,11 @@
   function render() {
     const villages = Array.isArray(context?.villages) ? context.villages : [];
     $('managerTitle').textContent = `${context?.managing_coop_name || '운영협동조합'}의 햇빛소득마을 운영`;
+    $('openCreate').hidden = !canCreateCooperative;
     renderSummary(villages);
     $('villageList').innerHTML = villages.length
       ? villages.map(renderVillage).join('')
-      : `<div class="empty"><strong>아직 연결된 마을조합이 없습니다.</strong><p>마을조합 운영 공간을 추가하면 기존 ERP의 전체 업무 틀이 빈 장부로 준비됩니다.</p><button type="button" class="primary" data-open-create>첫 마을조합 추가</button></div>`;
+      : `<div class="empty"><strong>아직 연결된 마을조합이 없습니다.</strong><p>${canCreateCooperative ? '마을조합 운영 공간을 추가하면 기존 ERP의 전체 업무 틀이 빈 장부로 준비됩니다.' : '새 마을조합 운영 공간은 플랫폼 관리자에게 요청해 주세요.'}</p>${canCreateCooperative ? '<button type="button" class="primary" data-open-create>첫 마을조합 추가</button>' : ''}</div>`;
     $('villageList').querySelector('[data-open-create]')?.addEventListener('click', openCreate);
     $('content').hidden = false;
   }
@@ -125,6 +128,12 @@
     setMessage('마을조합별 기존 ERP 현황을 불러오고 있습니다…');
     try {
       context = await rpc('sun_village_management_context');
+      try {
+        canCreateCooperative = await rpc('is_platform_admin') === true;
+      } catch (capabilityError) {
+        canCreateCooperative = false;
+        console.warn(`[sun-village-hub ${VERSION}] create capability unavailable`, capabilityError);
+      }
       render();
       setMessage('');
     } catch (error) {
