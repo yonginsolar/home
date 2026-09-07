@@ -1,8 +1,8 @@
-/* Version: v1.4.0 | 2026-09-07 | Named proposals, site presets and unconfirmed-capacity handling. */
+/* Version: v1.4.1 | 2026-09-07 | Capacity scenarios, visit contacts and live public statistics. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.0';
+  const VERSION = '1.4.1';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -14,7 +14,8 @@
     'siteOverlayLabel', 'siteFeatureLines', 'siteCheckLines', 'mandatoryKw', 'hasExistingInstallation', 'existingKw', 'expandedMinKw', 'expandedKw', 'unitCostManwon', 'salePriceWon',
     'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
     'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
-    'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay'
+    'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay',
+    'visitDirector', 'visitDirectorPhone', 'statsAsOf'
   ];
 
   const state = {
@@ -87,7 +88,8 @@
     state.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       global: {
         headers: {
-          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase()
+          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase(),
+          'x-public-host': window.CoopRouteGuard?.getErpRuntimeHost(location) || String(location.hostname || '').trim().toLowerCase()
         }
       }
     });
@@ -231,6 +233,7 @@
   }
 
   function readModel() {
+    normalizeExistingZero();
     const noMandatory = document.getElementById('noMandatory').checked;
     const mandatoryKw = !noMandatory && document.getElementById('mandatoryKnown').checked && textValue('mandatoryKw') !== '' ? numberValue('mandatoryKw') : null;
     const existingKnown = document.getElementById('existingInstallationKnown').checked;
@@ -266,11 +269,14 @@
       completionMinMonth: Math.round(numberValue('completionMinMonth')),
       completionMaxMonth: Math.round(numberValue('completionMaxMonth')),
       memberTotal: Math.round(numberValue('memberTotal')),
-      shareCapitalManwon: Math.round(numberValue('shareCapitalManwon')),
+      shareCapitalManwon: numberValue('shareCapitalManwon'),
       individualMembers: Math.round(numberValue('individualMembers')),
       organizationMembers: Math.round(numberValue('organizationMembers')),
       chairPhone: textValue('chairPhone'),
       officePhone: textValue('officePhone'),
+      visitDirector: textValue('visitDirector'),
+      visitDirectorPhone: textValue('visitDirectorPhone'),
+      statsAsOf: textValue('statsAsOf'),
       keepNamsaOverlay: Boolean(el.keepNamsaOverlay.checked)
     };
     el.remainingKw.value = remainingKw === null ? '확인 필요' : trimNumber(remainingKw);
@@ -288,11 +294,12 @@
     if (model.hasExistingInstallation && model.existingKw <= 0) {
       throw new Error('기존 설비가 있으면 기존 설치용량을 0보다 크게 입력해 주세요.');
     }
+    if (model.noMandatory && model.remainingKw !== null && model.remainingKw <= 0) throw new Error('자발적 사업의 기준 설치용량은 0보다 크게 입력하거나 비워 주세요.');
     if (model.expandedMinKw !== null && model.expandedKw !== null && model.expandedMinKw > model.expandedKw) {
       throw new Error('확대안 범위 시작 용량은 수지 비교 확대안 용량보다 클 수 없습니다.');
     }
     if (model.expandedKw !== null && model.remainingKw !== null && model.expandedKw < model.remainingKw) {
-      throw new Error('수지 비교 확대안 용량은 법정 의무 이행에 필요한 용량보다 작을 수 없습니다.');
+      throw new Error('제안 신규 설치용량은 기준 설치용량보다 작을 수 없습니다.');
     }
     if (model.unitCostManwon <= 0 || model.salePriceWon <= 0 || model.sunHours <= 0) {
       throw new Error('공사비, 판매단가와 발전시간은 0보다 커야 합니다.');
@@ -386,7 +393,7 @@
       ['제안서 v1.6', `제안서 ${model.proposalVersion}`],
       ['2026.09.03', dateDisplay],
       ['257명', `${model.memberTotal.toLocaleString('ko-KR')}명`],
-      ['5,960만원', `${model.shareCapitalManwon.toLocaleString('ko-KR')}만원`],
+      ['5,960만원', `${model.shareCapitalManwon.toLocaleString('ko-KR', { maximumFractionDigits: 4 })}만원`],
       ['242 + 15', `${model.individualMembers.toLocaleString('ko-KR')} + ${model.organizationMembers.toLocaleString('ko-KR')}`],
       ['개인 242명', `개인 ${model.individualMembers.toLocaleString('ko-KR')}명`],
       ['단체 조합원 15곳', `단체 조합원 ${model.organizationMembers.toLocaleString('ko-KR')}곳`],
@@ -427,74 +434,12 @@
   }
 
   function applyNoExistingInstallationContext(doc, model) {
-    if (model.hasExistingInstallation && model.existingKw > 0) return;
-    const kw = `${trimNumber(model.mandatoryKw)}kW`;
-    const remaining = `${trimNumber(model.remainingKw)}kW`;
-
-    const siteSlide = slideAt(doc, 3);
-    siteSlide?.querySelectorAll('.existing-label, .existing-zone').forEach((node) => node.remove());
-    removeClosestByText(siteSlide, 'li', /(남측 )?기존 태양광|기존 .*설비의 소유|기존 .*설비/);
-
-    const statusSlide = slideAt(doc, 4);
-    const statusTitle = statusSlide?.querySelector('h2');
-    if (statusTitle) statusTitle.innerHTML = `법정 최소기준은 ${kw}이며, <strong>최종 설치용량은 현장 검토로 확정</strong>합니다`;
-    const formula = [...(statusSlide?.querySelectorAll('div') || [])]
-      .find((node) => /grid-template-columns:\s*1fr 64px 1fr 64px 1fr/.test(node.getAttribute('style') || ''));
-    if (formula) {
-      const parts = [...formula.children];
-      parts[1]?.remove();
-      parts[2]?.remove();
-      formula.style.gridTemplateColumns = '1fr 64px 1fr';
-      if (parts[3]) parts[3].textContent = '→';
-      const requiredBox = parts[4];
-      const requiredLabels = requiredBox?.querySelectorAll('.small') || [];
-      const requiredValue = requiredBox?.querySelector('.big-inline');
-      if (requiredLabels[0]) requiredLabels[0].textContent = '최종 설계용량';
-      if (requiredValue) {
-        requiredValue.textContent = '기본설계 후 확정';
-        requiredValue.style.fontSize = '30px';
-      }
-      if (requiredLabels[1]) requiredLabels[1].textContent = '현장·계통·주민편익을 함께 검토';
-    }
-    const statusCards = statusSlide?.querySelectorAll('.grid-2 > .card') || [];
-    const firstCard = statusCards[0];
-    const secondCard = statusCards[1];
-    if (firstCard?.querySelector('h3')) firstCard.querySelector('h3').textContent = '법정 최소기준';
-    const firstLead = firstCard?.querySelector('.lead');
-    if (firstLead) firstLead.textContent = `${kw}는 법에서 요구하는 설치 기준입니다.`;
-    const firstTexts = firstCard?.querySelectorAll('p') || [];
-    if (firstTexts[1]) firstTexts[1].textContent = '현장 여건을 확인해 최소한 의무용량 이상으로 설계합니다.';
-    if (secondCard?.querySelector('h3')) secondCard.querySelector('h3').textContent = '주민편익까지 함께 검토';
-    const secondText = secondCard?.querySelector('p');
-    if (secondText) secondText.textContent = '법정 기준만 맞추는 데서 끝내지 않고 그늘 면수, 차량 동선, 계통 여건과 사업성을 함께 비교해 최종 설계용량을 정합니다.';
-    const statusBanner = statusSlide?.querySelector('.banner');
-    if (statusBanner) statusBanner.innerHTML = `법정 최소기준과 전면 차양 확대안을 함께 비교해 <span>주민편익과 사업성을 균형 있게 검토</span>해 주시길 제안합니다.`;
-    const source = statusSlide?.querySelector('.source');
-    if (source) source.textContent = `용량 현황: 전체 의무 ${kw}(제공받은 현황 기준). 신규 설치용량은 현장조사·계통 검토와 기본설계 후 최종 확정합니다.`;
-
-    const comparisonSlide = slideAt(doc, 6);
-    const comparisonHeaders = comparisonSlide?.querySelectorAll('.table th') || [];
-    if (comparisonHeaders[1]) comparisonHeaders[1].textContent = `의무 이행안 · 신규 ${remaining}`;
-    if (comparisonHeaders[2]) comparisonHeaders[2].textContent = `주민복지 확대안 · 신규 약 ${trimNumber(Math.max(model.expandedMinKw, model.remainingKw))}~${trimNumber(model.expandedKw)}kW 내외`;
-    [...(comparisonSlide?.querySelectorAll('td') || [])].forEach((cell) => {
-      cell.textContent = String(cell.textContent || '').replace(/\s*·\s*기존 설비 인정/g, '');
-    });
-
-    const safetySlide = slideAt(doc, 12);
-    [...(safetySlide?.querySelectorAll('p') || [])].forEach((paragraph) => {
-      if (paragraph.textContent.includes('청사와 기존 설비에 어울리는')) {
-        paragraph.textContent = paragraph.textContent.replace('청사와 기존 설비에 어울리는', '청사와 주변 환경에 어울리는');
-      }
-    });
-    removeClosestByText(safetySlide, '.note.warning', /기존 태양광 설비와 신규 설비/);
-
-    const scaleSlide = slideAt(doc, 13);
-    const firstScaleCard = scaleSlide?.querySelector('.grid-3 > .card');
-    const firstScaleLabel = firstScaleCard?.querySelector('.stat-label');
-    if (firstScaleLabel) firstScaleLabel.textContent = '법정 최소기준';
-    const firstScaleText = firstScaleCard?.querySelector('p');
-    if (firstScaleText) firstScaleText.textContent = '현장조사·계통 검토 전의 최소 검토값';
-    removeClosestByText(scaleSlide, 'tbody tr', /기존 .*자료|기존 설비|신·구 설비/);
+    if (model.hasExistingInstallation) return;
+    const site = slideAt(doc, 3);
+    site?.querySelectorAll('.existing-label, .existing-zone').forEach(node => node.remove());
+    removeClosestByText(site, 'li', /(남측 )?기존 태양광|기존 .*설비의 소유|기존 .*설비/);
+    removeClosestByText(slideAt(doc, 12), '.note.warning', /기존 태양광 설비와 신규 설비/);
+    removeClosestByText(slideAt(doc, 13), 'tbody tr', /기존 .*자료|기존 설비|신·구 설비/);
   }
 
   function renderCustomOverlays(doc, model) {
@@ -592,8 +537,12 @@
       node.dataset.copyBase = node.textContent;
     });
     state.loadedCopyEdits.forEach((edit) => {
-      const node = doc.querySelector(`[data-copy-id="${Number(edit.index)}"]`);
-      if (!node || node.dataset.copyBase !== edit.baseText || typeof edit.text !== 'string') return;
+      let node = doc.querySelector(`[data-copy-id="${Number(edit.index)}"]`);
+      if (!node || node.dataset.copyBase !== edit.baseText) {
+        const matches = [...doc.querySelectorAll('[data-copy-id]')].filter(candidate => candidate.dataset.copyBase === edit.baseText);
+        node = matches.length === 1 ? matches[0] : null;
+      }
+      if (!node || typeof edit.text !== 'string') return;
       node.textContent = edit.text;
       node.style.whiteSpace = 'pre-line';
     });
@@ -604,60 +553,8 @@
     const put = (page, selector, text) => { const node = slideAt(doc, page)?.querySelector(selector); if (node) node.textContent = text; };
     const kw = (n) => n === null ? '확인 필요' : `${trimNumber(n)}kW`;
     const unconfirmed = model.remainingKw === null || model.noMandatory;
-    const expandedUnknown = model.expandedKw === null || model.expandedMinKw === null;
     if (!state.siteImageDataUrl && !state.useSamplePhoto) put(3, '.photo-caption', '대상지 사진 미등록 · 사진과 설치 검토 범위를 확인 후 반영합니다.');
     put(12, '.safety-grid .card:nth-child(5) p', '시설과 주변 환경에 어울리는 색상·높이·야간조명을 적용합니다.');
-    put(13, 'tbody tr:first-child td:first-child', '설치 검토 구역 실측');
-    put(13, 'tbody tr:last-child td:last-child', '기준 설치안과 확대안의 총비용·편익 비교');
-    if (!state.useSamplePhoto) put(4, '.law-box:nth-child(3) .small:last-child', '기존 설치 현황 기준');
-    // A supplied mandatory total does not prove the existing installation has been surveyed.
-    if (unconfirmed) {
-      const frame = slideAt(doc, 4).querySelector('.frame');
-      frame.querySelector('h2').textContent = '설치 현황을 확인하고, 필요한 용량과 이용자 편익을 함께 검토합니다';
-      const formula = frame.querySelector('.law-box').parentElement;
-      formula.style.gridTemplateColumns = '1fr 1fr 1fr';
-      formula.replaceChildren(...[
-        ['제공받은 의무용량', kw(model.mandatoryKw)],
-        ['기존 설치 현황', model.existingKnown ? kw(model.existingKw) : '확인 필요'],
-        ['추가 의무용량', '현황 확인 후 산정']
-      ].map(([label, value]) => {
-        const box = doc.createElement('div'); box.className = 'law-box';
-        const title = doc.createElement('div'); title.className = 'small'; title.textContent = label;
-        const number = doc.createElement('div'); number.className = 'big-inline'; number.style.fontSize = '26px'; number.textContent = value;
-        box.append(title, number); return box;
-      }));
-      put(4, '.grid-2 .card:first-child h3', '확인된 값과 조사할 항목 구분');
-      put(4, '.grid-2 .card:first-child .lead', model.mandatoryKw === null ? '의무 적용 여부와 용량은 아직 확인 전입니다.' : `제공받은 전체 의무용량은 ${kw(model.mandatoryKw)}입니다.`);
-      put(4, '.grid-2 .card:first-child p:last-child', '기존 설비 유무와 의무 이행 인정용량을 확인한 뒤 추가 설치용량을 산정합니다.');
-      put(4, '.grid-2 .card:nth-child(2) h3', '이용자 편익까지 함께 검토');
-      put(4, '.grid-2 .card:nth-child(2) p', '그늘 면수, 보행·차량 동선, 구조 안전과 계통 여건을 함께 검토해 설치 범위를 제안합니다.');
-      put(4, '.banner', '확인되지 않은 용량은 추정하지 않고, 현장조사와 관계 기관 협의 후 설계에 반영합니다.');
-      put(4, '.source', '의무용량은 제공받은 현황을 반영합니다. 적용 여부·산정 기준·기존 설비의 인정용량은 관계 기관 확인 후 확정합니다.');
-      put(6, '.table th:nth-child(2)', '기준 설치안 · 용량 확인 후 산정');
-      put(6, '.table tbody tr:first-child td:nth-child(2)', '의무 적용 여부와 필요한 설치 범위 확인');
-      put(6, '.grid-2 .card:first-child p', '필요한 설치 범위와 전면 차양형을 같은 기본설계에서 비교한 뒤, 이용자 편익·사업비·계통 여건을 보고 확정합니다.');
-      put(13, '.grid-3 .card:first-child .stat-label', '추가 의무용량');
-      put(13, '.grid-3 .card:first-child .stat', '확인 필요');
-      put(13, '.grid-3 .card:first-child p', '의무 적용 여부와 기존 설치 현황을 먼저 확인');
-    }
-    if (expandedUnknown) {
-      put(6, '.table th:nth-child(3)', '전면 차양 검토안 · 현장조사 후 산정');
-      const cards = slideAt(doc, 13).querySelectorAll('.grid-3 .card');
-      [cards[1], cards[2]].forEach((card) => {
-        const stat = card?.querySelector('.stat'); if (stat) stat.textContent = '산정 전';
-        const text = card?.querySelector('p'); if (text) text.textContent = '현장조사·기본설계로 용량 확정 후 계산';
-      });
-    }
-    if (unconfirmed || expandedUnknown) {
-      put(14, 'h2', '설치용량을 확인한 뒤, 같은 가정으로 예상 수지를 비교합니다');
-      [model.remainingKw, model.expandedKw].forEach((capacity, index) => {
-        const card = slideAt(doc, 14).querySelectorAll('.financial-compare > .card')[index];
-        if (capacity === null) {
-          card.querySelector('h3').textContent = index === 0 ? '기준 설치안 · 용량 확인 필요' : '전면 차양안 · 용량 확인 필요';
-          card.querySelectorAll('td:nth-child(2)').forEach((cell) => { cell.textContent = '용량 확인 후 산정'; });
-        }
-      });
-    }
     // Region replacement must never move the cooperative or its officers to the target site.
     if (model.siteProposalNote) {
       const slide = slideAt(doc, 5);
@@ -692,30 +589,7 @@
       put(17, '.frame > .card.sunny p', '발전소 운영 자료를 활용한 에너지·기후 교육을 함께 기획할 수 있습니다. 설비 점검·보수는 전문 인력이 맡고 학생의 설비 접근은 학교 안전 기준에 따릅니다.');
       put(17, '.frame > .card.sunny > div:first-child', '☀');
     }
-    if (model.noMandatory) {
-      put(4, 'h2', '의무 설치가 아닌, 시설의 편익과 에너지 전환을 위한 제안입니다');
-      put(4, '.law-box:first-child .small', '사업 성격');
-      put(4, '.law-box:first-child .big-inline', '자발적 설치');
-      put(4, '.law-box:nth-child(3) .small', '기준 설치안');
-      put(4, '.law-box:nth-child(3) .big-inline', kw(model.remainingKw));
-      put(4, '.grid-2 .card:first-child h3', '의무량 대신 필요한 편익에서 출발');
-      put(4, '.grid-2 .card:first-child .lead', '의무 설치량을 채우기 위한 사업이 아닙니다.');
-      put(4, '.grid-2 .card:first-child p:last-child', '시설 이용자의 그늘·비가림과 재생에너지 생산을 고려해 적정 설치 규모를 정합니다.');
-      put(4, '.source', '본 제안은 의무 설치 없는 사업을 전제로 작성했습니다. 설치용량은 현장조사와 시설 관리 주체 협의 후 확정합니다.');
-      put(6, '.table th:nth-child(2)', `기준 설치안 · ${kw(model.remainingKw)}`);
-      put(6, '.table tbody tr:first-child td:nth-child(2)', '시설 이용 편익과 적정 규모 확보');
-      put(13, '.grid-3 .card:first-child .stat-label', '기준 설치안');
-      put(13, '.grid-3 .card:first-child .stat', kw(model.remainingKw));
-      put(13, '.grid-3 .card:first-child p', '의무량이 아닌 자발적 설치 검토 규모');
-      put(14, '.financial-compare .card:first-child h3', `기준 설치안 · ${kw(model.remainingKw)}`);
-    }
-    // Per-card payback must not reuse the first scenario when only one capacity is known.
-    [model.remainingKw, model.expandedKw].forEach((capacity, index) => {
-      if (capacity === null) return;
-      const cell = slideAt(doc, 14).querySelectorAll('.financial-compare > .card')[index]?.querySelector('tr:nth-child(7) td:nth-child(2)');
-      const finance = calculateFinance(capacity, model);
-      if (cell) cell.textContent = finance.payback > 0 ? `약 ${finance.payback.toFixed(1)}년` : '산정 불가';
-    });
+    window.ProposalSections.render(doc, model, { slideAt, trimNumber, calculateFinance, formatProjectCost, formatApproxManwon });
   }
 
   function editableCandidates(doc) {
@@ -999,6 +873,15 @@
     setStatus('사진 위 대상지 표시를 모두 지웠습니다.');
   }
 
+  function normalizeExistingZero() {
+    if (document.getElementById('existingInstallationKnown').checked && el.existingKw.value.trim() !== '' && Number(el.existingKw.value) === 0) {
+      el.hasExistingInstallation.checked = false;
+      document.getElementById('existingInstallationStatus').value = 'none';
+      el.existingKw.required = false;
+      el.existingKw.disabled = true;
+    }
+  }
+
   function syncExistingInstallationUi({ restoreValue = false } = {}) {
     const noMandatory = document.getElementById('noMandatory').checked;
     document.getElementById('voluntaryCapacityField').hidden = !noMandatory;
@@ -1011,7 +894,7 @@
     const currentValue = Number(el.existingKw.value);
     if (!hasExisting) {
       if (Number.isFinite(currentValue) && currentValue > 0) state.lastExistingKw = currentValue;
-      el.existingKw.value = '0';
+      el.existingKw.value = known ? '0' : '';
       el.existingKw.disabled = true;
       el.existingKw.required = false;
     } else {
@@ -1019,6 +902,7 @@
       el.existingKw.required = true;
       if (restoreValue && (!(currentValue > 0))) el.existingKw.value = state.lastExistingKw > 0 ? String(state.lastExistingKw) : '';
     }
+    document.getElementById('existingInstallationStatus').value = !known ? 'unknown' : hasExisting ? 'installed' : 'none';
   }
 
   function renderPreview({ force = false } = {}) {
@@ -1111,13 +995,62 @@
     }));
   }
 
+  async function refreshCoopStats() {
+    const button = document.getElementById('refreshCoopStatsButton');
+    const status = document.getElementById('coopStatsStatus');
+    if (state.statsLoading) return;
+    state.statsLoading = true; button.disabled = true;
+    const epoch = state.documentEpoch || 0;
+    const before = JSON.stringify(collectFields());
+    const manualAtStart = state.manualDirty, editAtStart = state.editMode;
+    status.textContent = '홈페이지의 최신 조합 현황을 불러오고 있습니다…';
+    try {
+      const client = getClient();
+      const timeline = await withTimeout(client.rpc('get_public_village_timeline'), 'COOP_STATS');
+      const months = Array.isArray(timeline.data?.months) ? timeline.data.months.filter(month => /^\d{4}-\d{2}$/.test(month.key)).sort((a,b) => a.key.localeCompare(b.key)) : [];
+      let stats = !timeline.error && months.length ? months[months.length - 1] : null;
+      let asOf = stats?.cutoff_date || '';
+      if (!stats) {
+        const fallback = await withTimeout(client.rpc('get_public_stats'), 'COOP_STATS');
+        if (fallback.error) throw fallback.error;
+        stats = fallback.data;
+        asOf = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+      }
+      const valid = ['count','ind_count','grp_count','amount'].every(key => stats?.[key] !== null && stats?.[key] !== undefined && Number.isSafeInteger(Number(stats[key])) && Number(stats[key]) >= 0);
+      if (!valid || Number(stats.count) !== Number(stats.ind_count) + Number(stats.grp_count)) throw new Error('INVALID_PUBLIC_STATS');
+      if (epoch !== (state.documentEpoch || 0) || before !== JSON.stringify(collectFields()) || state.manualDirty !== manualAtStart || state.editMode !== editAtStart) {
+        status.textContent = '불러오는 동안 제안서가 변경되어 최신 수치를 덮어쓰지 않았습니다. 다시 불러와 주세요.';
+        return;
+      }
+      const imported = { memberTotal: Number(stats.count), individualMembers: Number(stats.ind_count), organizationMembers: Number(stats.grp_count), shareCapitalManwon: Number(stats.amount) / 10000, statsAsOf: /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : '' };
+      // Update only the statistics on page 9; keep manually edited copy elsewhere.
+      if (state.manualDirty || state.editMode) window.ProposalSections.renderStats(el.previewFrame.contentDocument, imported);
+      document.getElementById('memberTotal').value = stats.count;
+      document.getElementById('individualMembers').value = stats.ind_count;
+      document.getElementById('organizationMembers').value = stats.grp_count;
+      document.getElementById('shareCapitalManwon').value = Number(stats.amount) / 10000;
+      document.getElementById('statsAsOf').value = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : '';
+      state.library?.markDirty(); saveDraft();
+      if (state.manualDirty || state.editMode) {
+        const fields = collectFields();
+        for (const key of Object.keys(imported)) if (state.previewFields) state.previewFields[key] = fields[key];
+      } else renderPreview();
+      status.textContent = `${asOf} 기준 · 정조합원 ${Number(stats.count).toLocaleString('ko-KR')}명 · 출자금 ${Number(stats.amount).toLocaleString('ko-KR')}원. 보관하려면 제안서를 저장해 주세요.`;
+    } catch (error) {
+      status.textContent = '최신 현황을 불러오지 못했습니다. 기존 입력값은 유지했습니다. 연결을 확인한 뒤 다시 시도해 주세요.';
+      console.warn('[proposal-builder] public stats unavailable', String(error?.code || 'REQUEST_FAILED'));
+    } finally { state.statsLoading = false; button.disabled = false; }
+  }
+
   function setFields(fields) {
+    fields = { visitDirector: '', visitDirectorPhone: '', statsAsOf: '', ...fields };
     DRAFT_FIELDS.forEach((id) => {
       if (!(id in fields)) return;
       const input = document.getElementById(id);
       if (input.type === 'checkbox') input.checked = fields[id] === true;
       else input.value = String(fields[id] ?? '').slice(0, input.maxLength > 0 ? input.maxLength : 1000);
     });
+    normalizeExistingZero();
     syncExistingInstallationUi();
   }
 
@@ -1142,6 +1075,7 @@
       width: clamp(Number(overlay.width) || 10, 1, 100), height: clamp(Number(overlay.height) || 10, 1, 100), angle: normalizeAngle(overlay.angle)
     }));
     const copyEdits = (Array.isArray(snapshot.copyEdits) ? snapshot.copyEdits : []).filter((edit) => Number.isInteger(edit.index) && edit.index >= 0 && typeof edit.baseText === 'string' && typeof edit.text === 'string' && edit.text.length <= 20000).slice(0, 400);
+    state.documentEpoch = (state.documentEpoch || 0) + 1;
     window.clearTimeout(state.renderTimer); state.renderTimer = 0;
     state.imageSequence += 1;
     state.imageLoadError = null; state.imageLoadPromise = Promise.resolve();
@@ -1165,9 +1099,10 @@
   }
 
   async function startSite(preset) {
-    const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()) };
+    const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()), visitDirector: '', visitDirectorPhone: '' };
     if (!fields.facilityName) fields.facilityName = '새 대상지';
     await restoreSnapshot({ format: 1, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
+    await refreshCoopStats();
     document.getElementById('facilityName').focus();
   }
 
@@ -1177,12 +1112,8 @@
       const draft = JSON.parse(localStorage.getItem(state.draftKey) || legacy || 'null');
       if (!draft || typeof draft !== 'object') return;
       state.useSamplePhoto = draft.useSamplePhoto ?? (draft.facilityName === '남사읍행정복지센터');
-      DRAFT_FIELDS.forEach((id) => {
-        const input = document.getElementById(id);
-        if (!input || !(id in draft)) return;
-        if (input.type === 'checkbox') input.checked = Boolean(draft[id]);
-        else input.value = String(draft[id]);
-      });
+      setFields(draft);
+      return true;
     } catch (error) {
       console.warn(`[proposal-builder ${VERSION}] draft restore skipped`, error);
     }
@@ -1386,6 +1317,7 @@
   function resetSample() {
     if (!window.confirm('입력값과 직접 수정한 문구를 지우고 남사읍 예시로 돌아갈까요?')) return;
     el.form.reset();
+    state.documentEpoch = (state.documentEpoch || 0) + 1;
     state.useSamplePhoto = true;
     state.photoName = '';
     state.loadedCopyEdits = [];
@@ -1419,6 +1351,14 @@
       if (event.target === el.overlayAngle) return;
       if (event.target.closest('[data-library-controls]')) return;
       state.library?.markDirty();
+      if (event.target.id === 'existingInstallationStatus') {
+        const status = event.target.value;
+        document.getElementById('existingInstallationKnown').checked = status !== 'unknown';
+        el.hasExistingInstallation.checked = status === 'installed';
+        syncExistingInstallationUi({ restoreValue: status === 'installed' });
+      }
+      if (event.target === el.existingKw) normalizeExistingZero();
+      if (['memberTotal','shareCapitalManwon','individualMembers','organizationMembers'].includes(event.target.id)) document.getElementById('statsAsOf').value = '';
       if ([el.hasExistingInstallation, document.getElementById('existingInstallationKnown'), document.getElementById('mandatoryKnown'), document.getElementById('noMandatory')].includes(event.target)) syncExistingInstallationUi({ restoreValue: true });
       if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
@@ -1449,6 +1389,7 @@
     el.printTopButton.addEventListener('click', printProposal);
     el.downloadButton.addEventListener('click', downloadHtml);
     el.resetButton.addEventListener('click', resetSample);
+    document.getElementById('refreshCoopStatsButton').addEventListener('click', () => refreshCoopStats());
   }
 
   async function boot() {
@@ -1462,7 +1403,7 @@
         error.code = 'ERP_RUNTIME_GUARD_UNAVAILABLE';
         throw error;
       }
-      if (!window.ProposalPresets || !window.ProposalLibrary) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
+      if (!window.ProposalPresets || !window.ProposalLibrary || !window.ProposalSections) throw new Error('PROPOSAL_LIBRARY_SCRIPT_UNAVAILABLE');
       const client = getClient();
       el.bootMessage.textContent = 'ERP 로그인 상태를 확인하고 있습니다.';
       const userGate = await withTimeout(window.ErpRuntimeGuard.requireUser(client, {
@@ -1494,7 +1435,7 @@
       state.templateHtml = await response.text();
       if (!state.templateHtml.includes('class="slide')) throw new Error('TEMPLATE_INVALID');
       state.draftKey = `${DRAFT_KEY}.${userGate.user.coop_id}`;
-      restoreDraft();
+      const hadDraft = restoreDraft();
       syncExistingInstallationUi();
       updateOverlayControls();
       bindEvents();
@@ -1506,6 +1447,7 @@
       state.library = window.ProposalLibrary.init({ client, coopId: userGate.user.coop_id,
         snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,
         isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
+      if (!hadDraft) void refreshCoopStats();
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] boot failed`, error);
       if (error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT') {
