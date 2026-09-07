@@ -1,8 +1,8 @@
-/* Version: v1.4.1 | 2026-09-07 | Capacity scenarios, visit contacts and live public statistics. */
+/* Version: v1.4.2 | 2026-09-07 | Capacity-page reflow, director profiles and aligned closing contacts. */
 (() => {
   'use strict';
 
-  const VERSION = '1.4.1';
+  const VERSION = '1.4.2';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';

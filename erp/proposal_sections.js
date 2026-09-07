@@ -1,4 +1,4 @@
-/* Version: v1.4.1 | One capacity model for narrative, comparison and finance. */
+/* Version: v1.4.2 | Capacity-page reflow, director profiles and aligned closing contacts. */
 (() => {
   'use strict';
   function renderStats(doc, m) {
@@ -45,7 +45,21 @@
       .proposal-capacity-summary .grid-2 p { font-size:13pt; line-height:1.4; }
       .proposal-capacity-summary .grid-2 .lead { font-size:15pt !important; line-height:1.4; }
       .proposal-capacity-summary .banner { font-size:14pt; padding:12px 18px; margin-top:12px !important; }
-      .proposal-capacity-summary .source { font-size:11.25pt; margin-bottom:0; }`;
+      .proposal-capacity-summary .source { font-size:11.25pt; margin-bottom:0; }
+      .proposal-capacity-summary.capacity-two-column .capacity-figures { align-items:stretch !important; }
+      .proposal-capacity-summary.capacity-two-column .law-box { min-height:116px; padding:16px 20px; display:flex; flex-direction:column; justify-content:center; gap:6px; }
+      .proposal-capacity-summary.capacity-two-column .law-box:last-child { background:var(--sun-soft); border-color:#efcd71; }
+      .proposal-capacity-summary.capacity-two-column .big-inline { font-size:32pt; line-height:1.2; }
+      .proposal-capacity-summary.capacity-two-column .big-inline.capacity-value-long { font-size:24pt; }
+      .proposal-capacity-summary.capacity-two-column .grid-2 { flex:1 0 auto; align-items:stretch; }
+      .proposal-capacity-summary.capacity-two-column .grid-2 .card { display:flex; flex-direction:column; justify-content:center; padding:18px 22px; }
+      .proposal-capacity-summary.capacity-two-column .grid-2 p { font-size:14pt; line-height:1.45; }
+      .proposal-capacity-summary.capacity-two-column .grid-2 .lead { font-size:16pt !important; line-height:1.4; }
+      .proposal-capacity-summary.capacity-two-column .source { margin-top:14px; }
+      .closing .contact { align-items:baseline; max-width:100%; }
+      .closing .contact-person-label { display:grid; grid-template-columns:4em minmax(0,1fr); column-gap:12pt; align-items:baseline; }
+      .closing .contact-person-role, .closing .contact-person-name { white-space:nowrap; }
+      .closing .contact-person-phone { overflow-wrap:anywhere; }`;
     doc.head.append(styles);
 
     put(4, 'h2', m.noMandatory ? '시설 여건에 맞는 자발적 설치를 제안합니다'
@@ -53,17 +67,21 @@
       : proposed === null ? `의무 ${kw(m.mandatoryKw)}를 기준으로, 설치 범위를 검토합니다`
       : `의무 ${kw(m.mandatoryKw)}를 바탕으로, 신규 ${range} 설치를 제안합니다`);
     const formula = page(4).querySelector('.law-box').parentElement;
+    formula.classList.add('capacity-figures');
     formula.style.margin = '12px 0 16px';
     const cards = m.noMandatory ? [[baseLabel, kw(base)], ['제안 신규 설치용량', range]]
       : [['전체 의무용량', kw(m.mandatoryKw)],
         ...(m.hasExistingInstallation ? [['기설치 용량', kw(m.existingKw)], ['남은 의무용량', kw(base)]]
           : !m.existingKnown ? [['기설치 현황', '조사 중']] : []),
         ['제안 신규 설치용량', range]];
+    page(4).classList.toggle('capacity-two-column', cards.length === 2);
     formula.style.gridTemplateColumns = `repeat(${cards.length}, minmax(0,1fr))`;
     formula.replaceChildren(...cards.map(([label, value]) => {
       const box = doc.createElement('div'); box.className = 'law-box';
       const small = doc.createElement('div'); small.className = 'small'; small.textContent = label;
-      const big = doc.createElement('div'); big.className = 'big-inline'; big.style.fontSize = '22pt'; big.textContent = value;
+      const big = doc.createElement('div'); big.className = 'big-inline'; big.textContent = value;
+      if (cards.length !== 2) big.style.fontSize = '22pt';
+      if (value.length > 14) big.classList.add('capacity-value-long');
       box.append(small, big); return box;
     }));
     put(4, '.grid-2 .card:first-child h3', m.noMandatory ? '시설 이용 목적에 맞는 설치' : '설치 기준');
@@ -112,32 +130,50 @@
       card.querySelectorAll('td:nth-child(2)').forEach((cell, row) => { cell.textContent = values[row]; });
     });
 
-    // Adjust only requested names; keep the other directors and verified careers.
+    // Change profile positions, not font sizes. Careers were supplied by the
+    // cooperative on 2026-09-07; never carry a former person's biography over.
+    const profileReplacements = new Map([
+      ['신소영 이사', { name: '이수재 이사', careers: ['라현한방병원 총괄본부장', '사회적협동조합 에버그린 이사'] }],
+      ['정진화 이사', { name: '이재범 이사', careers: ['사회적협동조합 에버그린 이사'] }]
+    ]);
     page(10).querySelectorAll('h3').forEach(node => {
-      if (/^(신소영|정진화) 이사$/.test(node.textContent.trim())) node.style.fontSize = '11pt';
+      const profile = profileReplacements.get(node.textContent.trim());
+      if (!profile) return;
+      node.textContent = profile.name;
+      const career = node.closest('.card').querySelector('p');
+      career.replaceChildren(...profile.careers.flatMap((text, index) => {
+        const line = doc.createElement('span'); line.className = 'career-org'; line.textContent = text;
+        return index ? [doc.createElement('br'), line] : [line];
+      }));
     });
     const boardNote = [...page(10).querySelectorAll('.note')].find(node => node.textContent.includes('함께하는 이사'));
     if (boardNote) {
       const walker = doc.createTreeWalker(boardNote, 4); const nodes = [];
       while (walker.nextNode()) nodes.push(walker.currentNode);
       nodes.forEach(node => {
-        if (!/이수재|이재범/.test(node.nodeValue)) return;
-        const fragment = doc.createDocumentFragment();
-        node.nodeValue.split(/(이수재|이재범)/).forEach(text => {
-          if (!/^(이수재|이재범)$/.test(text)) fragment.append(doc.createTextNode(text));
-          else { const name = doc.createElement('strong'); name.style.cssText = 'font-size:18pt;line-height:1.45'; name.textContent = text; fragment.append(name); }
-        });
-        node.replaceWith(fragment);
+        node.nodeValue = node.nodeValue.replace(/이수재/g, '신소영').replace(/이재범/g, '정진화');
       });
+    }
+    const boardSource = page(10).querySelector('.source');
+    const sourceWalker = doc.createTreeWalker(boardSource, 4);
+    while (sourceWalker.nextNode()) {
+      const node = sourceWalker.currentNode;
+      node.nodeValue = node.nodeValue.replace('이사 명단과 그 밖의 경력은 2026.09.03 조합 임원 원장 및 보유자료 기준입니다.', '이사 명단과 그 밖의 경력은 조합 임원 원장 및 제공자료 기준입니다(2026.09.07 소개 이력 보완).');
     }
     const contact = page(18).querySelector('.contact');
     const orgName = contact.children[0].textContent, address = contact.children[1].textContent;
-    const people = [['이사장 김민정', m.chairPhone], ...(m.visitDirector ? [[`이사 ${m.visitDirector}`, m.visitDirectorPhone]] : []), ['사무국장 김민호', m.officePhone]];
-    contact.replaceChildren(...[[orgName, address], ...people].flatMap(([name, phone]) => {
-      const label = doc.createElement('b'); label.textContent = name;
-      const value = doc.createElement('span'); value.textContent = phone; return [label, value];
+    const people = [['이사장', '김민정', m.chairPhone], ...(m.visitDirector ? [['이사', m.visitDirector, m.visitDirectorPhone]] : []), ['사무국장', '김민호', m.officePhone]];
+    const org = doc.createElement('b'); org.textContent = orgName;
+    const location = doc.createElement('span'); location.textContent = address;
+    contact.replaceChildren(org, location, ...people.flatMap(([role, name, phone]) => {
+      const label = doc.createElement('b'); label.className = 'contact-person-label';
+      const roleText = doc.createElement('span'); roleText.className = 'contact-person-role'; roleText.textContent = role + ' ';
+      const nameText = doc.createElement('span'); nameText.className = 'contact-person-name'; nameText.textContent = name;
+      label.append(roleText, nameText);
+      const value = doc.createElement('span'); value.className = 'contact-person-phone'; value.textContent = phone;
+      return [label, value];
     }));
-    contact.style.cssText += ';font-size:12pt;padding:14px 22px;margin-top:16px;gap:7px 22px';
+    Object.assign(contact.style, { fontSize: '12pt', padding: '14px 22px', marginTop: '16px', gap: '7px 22px' });
     renderStats(doc, m);
   }
   window.ProposalSections = Object.freeze({ render, renderStats });
