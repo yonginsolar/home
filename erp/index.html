@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.64 | Change: 2026-09-07 - Open persistent sun-village operations; preserve separate demo. -->
+<!-- Version: v1.0.65 | Change: 2026-09-07 - Add safe multi-village workspace switching for assigned staff and total administrators. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.64 | index.html');</script>
+  <script>console.log('[Version] v1.0.65 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -80,6 +80,10 @@
     .employee-match-meta { font-size: 0.83rem; color: #6b7280; }
     .employee-match-reasons { font-size: 0.82rem; color: #1d4ed8; }
     .employee-match-disabled { opacity: 0.7; }
+    .workspace-switcher { margin-top: 14px; padding: 12px; border: 1px solid rgba(37,99,235,.18); border-radius: 12px; background: rgba(255,255,255,.68); }
+    .workspace-switcher-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--erp-ink, #0f172a); }
+    .workspace-switcher .form-select { min-width: 0; }
+    .workspace-switcher-status { min-height: 1.25rem; margin-top: 7px; color: var(--erp-muted, #64748b); }
     body.erp-menu-screen .main-card { text-align: left; }
     body.erp-menu-screen #erpBrandTitle,
     body.erp-menu-screen #currentVersionArea { text-align: center; }
@@ -145,6 +149,17 @@
         <h5 class="fw-bold mb-1" id="userName">홍길동 님</h5>
         <span class="badge bg-primary" id="userTeam">기획팀</span>
         <span class="text-muted small ms-1" id="userRank">과장</span>
+        <div class="workspace-switcher hidden" id="workspaceSwitcher">
+          <div class="workspace-switcher-label">
+            <strong class="small">🏘️ 현재 운영 공간</strong>
+            <span class="badge text-bg-primary hidden" id="workspaceTotalAdminBadge">총괄 관리자</span>
+          </div>
+          <div class="input-group input-group-sm">
+            <select class="form-select" id="workspaceSelect" aria-label="전환할 햇빛소득마을 선택" onchange="handleWorkspaceSelectionChange()"></select>
+            <button class="btn btn-primary" id="btnWorkspaceSwitch" type="button" onclick="switchWorkspace()" disabled>선택한 마을로 이동</button>
+          </div>
+          <div class="workspace-switcher-status small" id="workspaceSwitchStatus" role="status" aria-live="polite"></div>
+        </div>
         <div class="mt-3">
           <div class="small text-muted hidden social-link-hint" id="kakaoLinkHint"></div>
           <button class="btn btn-outline-warning btn-sm hidden mt-2 me-2" id="btnLinkKakao" onclick="startKakaoLinking()">
@@ -379,6 +394,8 @@ const ERP_INDEX_URL = new URL('index.html', `${ERP_RUNTIME_BASE_URL}/`).href;
 const ERP_AUTH_DEST_KEY = 'erp_auth_destination';
 const SUPABASE_PROJECT_REF = 'ifdqlwxgqgsvnawmhlfc';
 const ERP_SESSION_EXPIRED_NOTICE_KEY = 'erp_session_expired_notice_v1';
+const ERP_WORKSPACE_HANDOFF_PARAM = 'workspace_handoff';
+const ERP_WORKSPACE_SOURCE_PARAM = 'workspace_source';
 const MAGICLINK_RATE_KEY = 'erp_magiclink_rate_v1';
 const MAGICLINK_COOLDOWN_MS = 60 * 1000;
 const MAGICLINK_MIN_PAGE_AGE_MS = 1200;
@@ -414,6 +431,9 @@ let menuOrderCache = [];
 let menuOrderLoadedFromServer = false;
 let menuOrderSaving = false;
 let menuOrderCanCustomize = false;
+let workspaceSwitchContext = null;
+let workspaceSwitchInFlight = false;
+let workspaceHandoffReceiverActive = false;
 
 function normalizeErpBrandName(value) {
     return String(value || '').trim();
@@ -425,6 +445,287 @@ function applyErpBranding(coopName) {
     const titleEl = document.getElementById('erpBrandTitle');
     if (titleEl) titleEl.textContent = `⚡ ${safeName} ERP`;
 } // End of applyErpBranding
+
+function normalizeWorkspaceOrigin(raw) {
+    try {
+        const parsed = new URL(String(raw || '').trim());
+        const host = String(parsed.hostname || '').trim().toLowerCase().replace(/\.$/, '');
+        const isLocal = host === 'localhost' || host === '127.0.0.1';
+        const isAllowedHost = host === 'yonginsolar.kr'
+            || host === 'www.yonginsolar.kr'
+            || host.endsWith('.yonginsolar.kr')
+            || host.endsWith('.coopco.kr');
+        if ((!isLocal && parsed.protocol !== 'https:') || (!isAllowedHost && !isLocal)) return '';
+        return parsed.origin;
+    } catch (_) {
+        return '';
+    }
+} // End of normalizeWorkspaceOrigin
+
+function clearWorkspaceHandoffParams() {
+    try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete(ERP_WORKSPACE_HANDOFF_PARAM);
+        cleanUrl.searchParams.delete(ERP_WORKSPACE_SOURCE_PARAM);
+        window.history.replaceState({}, document.title, `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        return cleanUrl.href;
+    } catch (_) {
+        return ERP_INDEX_URL;
+    }
+} // End of clearWorkspaceHandoffParams
+
+function installWorkspaceHandoffReceiver() {
+    const params = new URLSearchParams(window.location.search || '');
+    const nonce = String(params.get(ERP_WORKSPACE_HANDOFF_PARAM) || '').trim();
+    const sourceOrigin = normalizeWorkspaceOrigin(params.get(ERP_WORKSPACE_SOURCE_PARAM));
+    if (!nonce && !sourceOrigin) return false;
+
+    const nonceValid = /^[A-Za-z0-9_-]{24,96}$/.test(nonce);
+    if (!nonceValid || !sourceOrigin || !window.opener) {
+        clearWorkspaceHandoffParams();
+        return false;
+    }
+
+    workspaceHandoffReceiverActive = true;
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', receiveSession);
+        const cleanUrl = clearWorkspaceHandoffParams();
+        window.location.replace(cleanUrl);
+    }, 15000);
+
+    async function receiveSession(event) {
+        if (settled || event.source !== window.opener || event.origin !== sourceOrigin) return;
+        const payload = event.data && typeof event.data === 'object' ? event.data : {};
+        if (payload.type !== 'erp-workspace-session' || payload.nonce !== nonce) return;
+        const accessToken = String(payload.accessToken || '').trim();
+        const refreshToken = String(payload.refreshToken || '').trim();
+        if (!accessToken || !refreshToken) return;
+
+        try {
+            const { data, error } = await _supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+            });
+            if (error || !data?.session?.user) throw error || new Error('WORKSPACE_SESSION_NOT_CREATED');
+            settled = true;
+            window.clearTimeout(timeoutId);
+            window.removeEventListener('message', receiveSession);
+            clearWorkspaceHandoffParams();
+            window.opener.postMessage({ type: 'erp-workspace-session-ready', nonce }, sourceOrigin);
+            window.setTimeout(() => window.close(), 180);
+        } catch (error) {
+            console.error('Workspace session handoff failed:', error);
+            settled = true;
+            window.clearTimeout(timeoutId);
+            window.removeEventListener('message', receiveSession);
+            const cleanUrl = clearWorkspaceHandoffParams();
+            window.location.replace(cleanUrl);
+        }
+    }
+
+    window.addEventListener('message', receiveSession);
+    window.opener.postMessage({
+        type: 'erp-workspace-session-request',
+        nonce,
+        targetOrigin: window.location.origin
+    }, sourceOrigin);
+    return true;
+} // End of installWorkspaceHandoffReceiver
+
+function createWorkspaceHandoffNonce() {
+    const bytes = new Uint8Array(24);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+} // End of createWorkspaceHandoffNonce
+
+function setWorkspaceSwitchStatus(message, tone = 'muted') {
+    const status = document.getElementById('workspaceSwitchStatus');
+    if (!status) return;
+    status.className = `workspace-switcher-status small text-${tone}`;
+    status.textContent = String(message || '');
+} // End of setWorkspaceSwitchStatus
+
+function getWorkspaceOptions() {
+    return Array.isArray(workspaceSwitchContext?.workspaces) ? workspaceSwitchContext.workspaces : [];
+} // End of getWorkspaceOptions
+
+function handleWorkspaceSelectionChange() {
+    const select = document.getElementById('workspaceSelect');
+    const button = document.getElementById('btnWorkspaceSwitch');
+    const selected = getWorkspaceOptions().find(item => String(item.coop_id || '') === String(select?.value || ''));
+    const canMove = !!selected && selected.is_current !== true && selected.is_switchable === true && !workspaceSwitchInFlight;
+    if (button) button.disabled = !canMove;
+    if (!selected) {
+        setWorkspaceSwitchStatus('전환할 운영 공간을 선택해 주세요.');
+    } else if (selected.is_current === true) {
+        setWorkspaceSwitchStatus('현재 이 운영 공간을 보고 있습니다.', 'primary');
+    } else if (selected.is_switchable !== true) {
+        setWorkspaceSwitchStatus('전용 주소 확인과 운영 준비가 끝난 뒤 이동할 수 있습니다.', 'warning');
+    } else {
+        setWorkspaceSwitchStatus(`${selected.coop_name} ERP로 이동할 수 있습니다.`);
+    }
+} // End of handleWorkspaceSelectionChange
+
+function renderWorkspaceSwitcher(context) {
+    workspaceSwitchContext = context && typeof context === 'object' ? context : null;
+    const wrapper = document.getElementById('workspaceSwitcher');
+    const select = document.getElementById('workspaceSelect');
+    const badge = document.getElementById('workspaceTotalAdminBadge');
+    if (!wrapper || !select) return;
+
+    const workspaces = getWorkspaceOptions();
+    if (context?.enabled !== true || workspaces.length < 2) {
+        wrapper.classList.add('hidden');
+        select.replaceChildren();
+        return;
+    }
+
+    select.replaceChildren();
+    workspaces.forEach(item => {
+        const option = document.createElement('option');
+        option.value = String(item.coop_id || '');
+        const prefix = item.is_management_coop === true ? '운영협동조합 · ' : '';
+        const suffix = item.is_switchable === true ? '' : ` · ${item.service_status === 'preparing' ? '준비 중' : '이동 불가'}`;
+        option.textContent = `${prefix}${item.coop_name || '이름 없는 운영 공간'}${suffix}`;
+        option.disabled = item.is_switchable !== true && item.is_current !== true;
+        option.selected = item.is_current === true;
+        select.appendChild(option);
+    });
+    badge?.classList.toggle('hidden', context?.is_total_admin !== true);
+    wrapper.classList.remove('hidden');
+    handleWorkspaceSelectionChange();
+} // End of renderWorkspaceSwitcher
+
+async function loadWorkspaceSwitchContext() {
+    try {
+        const { data, error } = await _supabase.rpc('sun_village_workspace_context');
+        if (error) throw error;
+        renderWorkspaceSwitcher(data || null);
+    } catch (error) {
+        console.warn('sun_village_workspace_context unavailable:', String(error?.code || error?.message || error || 'unknown'));
+        renderWorkspaceSwitcher(null);
+    }
+} // End of loadWorkspaceSwitchContext
+
+function validatePreparedWorkspace(prepared, selected) {
+    try {
+        const targetUrl = new URL(String(prepared?.workspace_url || ''));
+        const expectedHost = String(selected?.hostname || '').trim().toLowerCase();
+        if (normalizeWorkspaceOrigin(targetUrl.origin) !== targetUrl.origin) return null;
+        if (!expectedHost || targetUrl.hostname.toLowerCase() !== expectedHost) return null;
+        if (String(prepared?.target_coop_id || '') !== String(selected?.coop_id || '')) return null;
+        targetUrl.pathname = '/erp/';
+        targetUrl.search = '';
+        targetUrl.hash = '';
+        return targetUrl;
+    } catch (_) {
+        return null;
+    }
+} // End of validatePreparedWorkspace
+
+async function transferWorkspaceSession(targetUrl) {
+    const { data, error } = await _supabase.auth.getSession();
+    const session = data?.session || null;
+    if (error || !session?.access_token || !session?.refresh_token) {
+        throw error || new Error('ERP_LOGIN_SESSION_REQUIRED');
+    }
+
+    const nonce = createWorkspaceHandoffNonce();
+    const handoffUrl = new URL(targetUrl.href);
+    handoffUrl.searchParams.set(ERP_WORKSPACE_HANDOFF_PARAM, nonce);
+    handoffUrl.searchParams.set(ERP_WORKSPACE_SOURCE_PARAM, window.location.origin);
+    const targetOrigin = handoffUrl.origin;
+    const popup = window.open('about:blank', 'erp_workspace_handoff', 'popup,width=520,height=680');
+    if (!popup) throw new Error('WORKSPACE_POPUP_BLOCKED');
+
+    return new Promise((resolve, reject) => {
+        let sessionSent = false;
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timeoutId);
+            window.removeEventListener('message', handleMessage);
+            callback(value);
+        };
+        const handleMessage = event => {
+            if (settled || event.source !== popup || event.origin !== targetOrigin) return;
+            const payload = event.data && typeof event.data === 'object' ? event.data : {};
+            if (payload.nonce !== nonce) return;
+            if (payload.type === 'erp-workspace-session-request' && !sessionSent) {
+                if (payload.targetOrigin !== targetOrigin) return;
+                sessionSent = true;
+                popup.postMessage({
+                    type: 'erp-workspace-session',
+                    nonce,
+                    accessToken: session.access_token,
+                    refreshToken: session.refresh_token
+                }, targetOrigin);
+                return;
+            }
+            if (payload.type === 'erp-workspace-session-ready') {
+                finish(resolve, true);
+            }
+        };
+        const timeoutId = window.setTimeout(() => {
+            try { popup.close(); } catch (_) {}
+            finish(reject, new Error('WORKSPACE_HANDOFF_TIMEOUT'));
+        }, 18000);
+        window.addEventListener('message', handleMessage);
+        popup.location.replace(handoffUrl.href);
+    });
+} // End of transferWorkspaceSession
+
+async function switchWorkspace() {
+    if (workspaceSwitchInFlight) return;
+    const select = document.getElementById('workspaceSelect');
+    const button = document.getElementById('btnWorkspaceSwitch');
+    const selected = getWorkspaceOptions().find(item => String(item.coop_id || '') === String(select?.value || ''));
+    if (!selected || selected.is_current === true || selected.is_switchable !== true) return;
+
+    workspaceSwitchInFlight = true;
+    if (select) select.disabled = true;
+    if (button) button.disabled = true;
+    setWorkspaceSwitchStatus(`${selected.coop_name} 권한과 주소를 확인하고 있습니다…`, 'primary');
+
+    try {
+        const { data, error } = await _supabase.rpc('sun_village_prepare_workspace_switch', {
+            p_target_coop_id: selected.coop_id
+        });
+        if (error) throw error;
+        const targetUrl = validatePreparedWorkspace(data, selected);
+        if (!targetUrl) throw new Error('WORKSPACE_TARGET_VALIDATION_FAILED');
+
+        if (targetUrl.origin !== window.location.origin) {
+            setWorkspaceSwitchStatus('로그인 상태를 새 운영 공간으로 안전하게 옮기는 중입니다…', 'primary');
+            await transferWorkspaceSession(targetUrl);
+            try { _supabase.auth.stopAutoRefresh(); } catch (_) {}
+            clearSupabaseAuthCache();
+            localStorage.removeItem('erp_user');
+            localStorage.removeItem('erp_permissions');
+        }
+        window.location.replace(targetUrl.href);
+    } catch (error) {
+        console.error('Workspace switch failed:', error);
+        const code = String(error?.code || error?.message || error || '').toUpperCase();
+        if (code.includes('POPUP_BLOCKED')) {
+            showAlert('마을 전환 창을 열지 못했습니다.\n이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.');
+        } else if (code.includes('NOT_ACTIVE') || code.includes('DOMAIN_NOT_VERIFIED')) {
+            showAlert('아직 운영 준비가 끝나지 않은 마을입니다.\n전용 주소 확인 후 다시 시도해 주세요.');
+        } else if (code.includes('ACCESS')) {
+            showAlert('이 마을을 운영할 권한이 없습니다.\n총괄 관리자 또는 담당자 배정 상태를 확인해 주세요.');
+        } else {
+            showAlert('마을을 전환하지 못했습니다.\n연결 상태를 확인한 뒤 다시 시도해 주세요.');
+        }
+        setWorkspaceSwitchStatus('현재 운영 공간은 그대로 유지됩니다.', 'danger');
+        workspaceSwitchInFlight = false;
+        if (select) select.disabled = false;
+        handleWorkspaceSelectionChange();
+    }
+} // End of switchWorkspace
 
 async function loadErpPublicContext() {
     try {
@@ -1213,7 +1514,15 @@ async function recoverFromExpiredSession() {
     showSessionExpiredNoticeOnce();
 }
 
+workspaceHandoffReceiverActive = installWorkspaceHandoffReceiver();
+
 window.onload = async function() {
+    if (workspaceHandoffReceiverActive) {
+        showScreen('loadingScreen');
+        const loadingText = document.querySelector('#loadingScreen p');
+        if (loadingText) loadingText.textContent = '선택한 마을의 로그인 상태를 연결하고 있습니다...';
+        return;
+    }
     loginFormOpenedAt = Date.now();
     const hadAuthCache = hasSupabaseAuthCache();
     const sessionState = await window.ErpRuntimeGuard.getSessionState(_supabase);
@@ -1263,7 +1572,7 @@ async function loadUserInfo(user) {
     const authUserId = user?.id || null;
     if (!authUserId) {
         showAlert("로그인 사용자 식별값이 없습니다.\n다시 로그인해주세요.");
-        await signOutSilently(_supabase); 
+        await signOutSilently(_supabase);
         showScreen('loginForm'); 
         return;
     }
@@ -1353,7 +1662,7 @@ async function loadUserInfo(user) {
         // (프로젝트에 사용 중인 모달 함수명을 사용하세요. 예: showModal, openAlertModal 등)
         showAlert(blockedMessage);
 
-        await signOutSilently(_supabase); 
+        await signOutSilently(_supabase);
         showScreen('loginForm'); 
         return;
     }
@@ -1405,6 +1714,7 @@ async function loadUserInfo(user) {
     await loadSharedMenuOrder(canCustomizeMenuOrder(data, platformContext));
     applyMenuPermissions(data, platformContext, coopRuntime);
     updateSocialLinkUi(user);
+    await loadWorkspaceSwitchContext();
 
     document.getElementById('patchNoteArea')?.classList.remove('hidden');
     showScreen('menuArea');
@@ -2204,16 +2514,16 @@ async function startKakaoLogin() {
     }
 
     try {
-        const { error } = await _supabase.auth.signInWithOAuth({ 
-            provider: 'kakao', 
-            options: { 
+        const { error } = await _supabase.auth.signInWithOAuth({
+            provider: 'kakao',
+            options: {
                 redirectTo: redirectUrl,
                 scopes: 'account_email phone_number profile_nickname',
                 queryParams: {
                     access_type: 'offline',
                     prompt: 'login'
                 }
-            } 
+            }
         });
         if (error) throw error;
     } catch (error) {
