@@ -1,8 +1,8 @@
-/* Sun-income-village existing ERP tenant hub v3.0.3 */
+/* Sun-income-village existing ERP tenant hub v3.1.0 */
 (() => {
   'use strict';
 
-  const VERSION = '3.0.3';
+  const VERSION = '3.1.0';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -10,6 +10,12 @@
   const number = value => Number(value || 0).toLocaleString('ko-KR');
   const money = value => `${number(value)}원`;
   const statusLabel = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', ended: '종료' };
+  const accountingModeLabel = { outsourced: '회계사무실 위탁', shared: '공동 처리', self: '자체 회계' };
+  const accountingModeHelp = {
+    outsourced: '기본 수입·지출, 전자결재 연동과 최근 거래를 중심으로 사용합니다.',
+    shared: '조합이 자료와 기본 장부를 정리하고 회계사무실이 검토·확정합니다.',
+    self: '계정과목, 고급 분개, 감가상각과 연말결산까지 직접 처리합니다.'
+  };
   const HANDOFF_PARAM = 'workspace_handoff';
   const HANDOFF_SOURCE_PARAM = 'workspace_source';
   const HANDOFF_MODE_PARAM = 'workspace_mode';
@@ -18,6 +24,7 @@
   let canCreateCooperative = false;
   let loading = false;
   let openingWorkspaceId = '';
+  let savingAccountingModeId = '';
 
   function setMessage(text, isError = false) {
     const el = $('message');
@@ -31,6 +38,7 @@
     if (raw.includes('MANAGEMENT_ADMIN_REQUIRED') || error?.code === '42501') return '햇빛소득마을 전체 운영을 맡은 관리자만 이 화면을 열 수 있습니다.';
     if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
+    if (raw.includes('INVALID_ACCOUNTING_OPERATION_MODE')) return '회계 처리 방식을 다시 선택해 주세요.';
     if (raw.includes('AUTH_REQUIRED')) return 'ERP 로그인이 필요합니다.';
     if (raw.includes('POPUP_BLOCKED')) return '새 탭을 열지 못했습니다. 이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.';
     if (raw.includes('HANDOFF_TIMEOUT')) return '로그인 연결 시간이 초과되었습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
@@ -237,6 +245,10 @@
     const capacity = row.capacity_kw === null || row.capacity_kw === undefined ? '미입력' : `${number(row.capacity_kw)} kW`;
     const coreEnabled = ['member_admin','accounting','approval','minutes','documents','signature']
       .filter(key => row.modules?.[key] === true).length;
+    const accountingMode = accountingModeLabel[row.accounting_operation_mode] ? row.accounting_operation_mode : 'outsourced';
+    const accountingModeOptions = Object.entries(accountingModeLabel)
+      .map(([value, label]) => `<option value="${value}"${value === accountingMode ? ' selected' : ''}>${esc(label)}</option>`)
+      .join('');
     return `
       <article class="managed-card panel">
         <div class="managed-head">
@@ -251,6 +263,14 @@
           <span><strong>${number(row.minutes_count)}</strong>의사록</span>
         </div>
         <div class="module-line"><strong>기존 ERP 연결</strong><span>조합원 · 임원 · 복식회계 · 전자결재 · 총회·이사회 · 문서·전자서명 (${coreEnabled}/6)</span></div>
+        <div class="accounting-mode-box">
+          <label for="accounting-mode-${esc(row.coop_id)}"><strong>회계 처리 방식</strong></label>
+          <div class="accounting-mode-actions">
+            <select id="accounting-mode-${esc(row.coop_id)}" data-accounting-mode="${esc(row.coop_id)}" aria-describedby="accounting-mode-help-${esc(row.coop_id)}">${accountingModeOptions}</select>
+            <button type="button" data-save-accounting-mode="${esc(row.coop_id)}"${savingAccountingModeId ? ' disabled' : ''}>회계 방식 저장</button>
+          </div>
+          <small id="accounting-mode-help-${esc(row.coop_id)}">${esc(accountingModeHelp[accountingMode])}</small>
+        </div>
         <div class="managed-actions">
           ${active
             ? `<button type="button" class="button primary" data-open-workspace="${esc(row.coop_id)}">이 마을조합 ERP 열기</button>`
@@ -272,7 +292,59 @@
     $('villageList').querySelectorAll('[data-open-workspace]').forEach(button => {
       button.addEventListener('click', () => openVillageWorkspace(button.dataset.openWorkspace, button));
     });
+    $('villageList').querySelectorAll('[data-accounting-mode]').forEach(select => {
+      select.addEventListener('change', () => {
+        const mode = accountingModeLabel[select.value] ? select.value : 'outsourced';
+        const help = $(`accounting-mode-help-${select.dataset.accountingMode}`);
+        if (help) help.textContent = accountingModeHelp[mode];
+      });
+    });
+    $('villageList').querySelectorAll('[data-save-accounting-mode]').forEach(button => {
+      button.addEventListener('click', () => saveAccountingMode(button.dataset.saveAccountingMode, button));
+    });
     $('content').hidden = false;
+  }
+
+  async function saveAccountingMode(coopId, trigger) {
+    const safeCoopId = String(coopId || '').trim();
+    if (!safeCoopId || savingAccountingModeId) return;
+    const row = (Array.isArray(context?.villages) ? context.villages : [])
+      .find(item => String(item?.coop_id || '') === safeCoopId);
+    const select = document.querySelector(`[data-accounting-mode="${CSS.escape(safeCoopId)}"]`);
+    const mode = String(select?.value || '');
+    if (!row || !accountingModeLabel[mode]) return;
+    if (row.accounting_operation_mode === mode) {
+      setMessage(`${row.coop_name}은 이미 ${accountingModeLabel[mode]} 방식입니다.`);
+      return;
+    }
+
+    savingAccountingModeId = safeCoopId;
+    const originalLabel = trigger?.textContent || '회계 방식 저장';
+    if (trigger) {
+      trigger.disabled = true;
+      trigger.textContent = '저장 중…';
+    }
+    setMessage(`${row.coop_name}의 회계 처리 방식을 저장하고 있습니다…`);
+    try {
+      await rpc('sun_village_set_accounting_operation_mode', {
+        p_village_coop_id: safeCoopId,
+        p_accounting_operation_mode: mode
+      });
+      // 새 목록을 그리기 전에 저장 상태를 해제해야 새로 생성된 버튼이
+      // 비활성 상태로 남지 않는다.
+      savingAccountingModeId = '';
+      await load();
+      setMessage(`${row.coop_name}의 회계 처리 방식을 ${accountingModeLabel[mode]}(으)로 저장했습니다. 기존 회계 자료는 그대로 유지됩니다.`);
+    } catch (error) {
+      console.error(`[sun-village-hub ${VERSION}] accounting mode save failed`, error);
+      setMessage(friendly(error), true);
+    } finally {
+      savingAccountingModeId = '';
+      if (trigger?.isConnected) {
+        trigger.disabled = false;
+        trigger.textContent = originalLabel;
+      }
+    }
   }
 
   async function load() {
@@ -316,11 +388,12 @@
     $('createSubmit').disabled = true;
     $('createError').hidden = true;
     try {
-      await rpc('sun_village_create_cooperative', {
+      await rpc('sun_village_create_cooperative_v2', {
         p_coop_name: name,
         p_address: String(values.address || '').trim(),
         p_biz_num: String(values.biz_num || '').trim() || null,
-        p_plant_capacity_kw: String(values.plant_capacity_kw || '').trim() === '' ? null : Number(values.plant_capacity_kw)
+        p_plant_capacity_kw: String(values.plant_capacity_kw || '').trim() === '' ? null : Number(values.plant_capacity_kw),
+        p_accounting_operation_mode: String(values.accounting_operation_mode || 'outsourced')
       });
       $('createDialog').close();
       await load();
