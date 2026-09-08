@@ -1,4 +1,4 @@
-/* Version: v1.5.0 | Public/school proposal starts are separated while storage stays shared. */
+/* Version: v1.5.1 | The top public/school choice is the single source for the document type. */
 (() => {
   'use strict';
   const TABLE = 'erp_proposals';
@@ -11,7 +11,8 @@
     const select = byId('proposalSiteSelect'), name = byId('savedProposalName'), status = byId('libraryStatus');
     const save = byId('saveSiteButton'), copy = byId('copySiteButton');
     const form = byId('proposalForm');
-    let current = null, rows = [], busy = false, dirty = false, pending = null, available = false, presetFilter = 'public';
+    let current = null, rows = [], busy = false, dirty = false, pending = null, available = false;
+    let presetFilter = hooks.getFacilityType?.() === 'school' ? 'school' : 'public';
     // localStorage holds only the server ID. Explicit apply drafts use account-scoped IndexedDB.
     const resumeKey = hooks.userId ? `yonginsolar.erp.proposal-current.v1.${hooks.coopId}.${hooks.userId}` : '';
     let resumeId = '', rememberFailed = false;
@@ -65,7 +66,7 @@
       if (current && !rows.some((row) => row.id === current.id)) saved.append(new Option(current.name, `saved:${current.id}`));
       select.append(saved); select.value = selected;
     }
-    function setPresetFilter(next) {
+    function setPresetFilter(next, { syncDocument = true, resetSelection = true } = {}) {
       presetFilter = next === 'school' ? 'school' : 'public';
       byId('publicProposalKindButton').classList.toggle('active', presetFilter === 'public');
       byId('schoolProposalKindButton').classList.toggle('active', presetFilter === 'school');
@@ -73,8 +74,9 @@
         ? '학교 기본 대상지 또는 저장한 제안서'
         : '공공기관 기본 대상지 또는 저장한 제안서';
       byId('newSiteButton').textContent = presetFilter === 'school' ? '+ 새 학교 추가' : '+ 새 공공시설 추가';
-      select.value = '';
+      if (resetSelection) select.value = '';
       options();
+      if (syncDocument && hooks.setFacilityType?.(presetFilter)) markDirty();
     }
     async function refresh() {
       const { data, error } = await request(hooks.client.from(TABLE).select(COLUMNS).eq('coop_id', hooks.coopId).order('updated_at', { ascending: false }).limit(200));
@@ -115,7 +117,9 @@
       if (value.startsWith('preset:')) {
         const preset = window.ProposalPresets.items.find((site) => `preset:${site.id}` === value);
         if (!preset) return;
-        await hooks.newSite(preset); await detach(); name.value = preset.name; dirty = true;
+        await hooks.newSite(preset);
+        setPresetFilter(preset.fields.facilityType, { syncDocument: false, resetSelection: false });
+        await detach(); name.value = preset.name; dirty = true;
         say('기본 대상지를 불러왔습니다. 주소·사진·설치 계획을 보완하고 이름을 정해 저장하세요.');
         return;
       }
@@ -128,6 +132,7 @@
       if (!row) throw new Error('저장한 제안서를 찾을 수 없거나 열람 권한이 없습니다. 보관함에서 다른 제안서를 선택해 주세요.');
       const snapshot = await readSnapshot(row);
       await hooks.restore(snapshot);
+      setPresetFilter(snapshot?.fields?.facilityType, { syncDocument: false, resetSelection: false });
       await clearLocalDraft();
       current = row; pending = null; dirty = false; name.value = row.name;
       resumeId = ''; remember(row.id); options(); select.value = `saved:${row.id}`;
@@ -181,7 +186,7 @@
       options(); select.value = `saved:${row.id}`;
       say(`「${title}」 저장 완료. 새로고침해도 사진과 수정 내용이 함께 열립니다.${rememberNotice()}`);
     }
-    options();
+    setPresetFilter(presetFilter, { syncDocument: false, resetSelection: false });
     byId('publicProposalKindButton').addEventListener('click', () => setPresetFilter('public'));
     byId('schoolProposalKindButton').addEventListener('click', () => setPresetFilter('school'));
     byId('loadSiteButton').addEventListener('click', () => run(load));
@@ -209,6 +214,7 @@
         serverChanged = check.data.revision !== draft.current.revision;
       }
       await hooks.restore(draft.snapshot);
+      setPresetFilter(draft.snapshot?.fields?.facilityType, { syncDocument: false, resetSelection: false });
       current = draft.current || null; name.value = String(draft.name || '').slice(0, 100);
       pending = null; dirty = true; hadLocalDraft = true; localRestorePending = false; resumeId = '';
       remember(current?.id || ''); options(); select.value = current ? `saved:${current.id}` : '';

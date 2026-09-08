@@ -1,8 +1,8 @@
-/* Version: v1.5.1 | 2026-09-08 | Clarify Park Hyeong-young's current board role and former/cooperative consulting career. */
+/* Version: v1.5.2 | 2026-09-08 | Keep the top public/school choice synchronized with the basic-information type. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.1';
+  const VERSION = '1.5.2';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -925,6 +925,17 @@
     if (status === 'none') capacity.value = '';
   }
 
+  function setFacilityTypeFromPicker(value) {
+    const input = document.getElementById('facilityType');
+    const next = value === 'school' ? 'school' : 'public';
+    if (input.value === next) return false;
+    input.value = next;
+    syncSchoolPlanningUi();
+    saveDraft();
+    scheduleRender();
+    return true;
+  }
+
   function renderPreview({ force = false } = {}) {
     if (!state.templateHtml) return false;
     if (state.manualDirty && force) {
@@ -1582,6 +1593,7 @@
       state.library = window.ProposalLibrary.init({ client, coopId: userGate.user.coop_id,
         userId: userGate.authUser?.id || userGate.user.emp_id,
         snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,
+        getFacilityType: () => textValue('facilityType'), setFacilityType: setFacilityTypeFromPicker,
         isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
       await state.library.ready;
       if (!hadDraft && !state.library.hadSavedSession && !state.library.hadLocalDraft) void refreshCoopStats();
