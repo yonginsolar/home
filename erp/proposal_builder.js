@@ -1,10 +1,10 @@
-/* Version: v1.5.0 | 2026-09-07 | School public-project complement and education proposal. */
+/* Version: v1.5.1 | 2026-09-08 | Clarify Park Hyeong-young's current board role and former/cooperative consulting career. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.0';
+  const VERSION = '1.5.1';
   const REQUEST_TIMEOUT_MS = 12000;
-  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.1';
+  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
