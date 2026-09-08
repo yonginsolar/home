@@ -1,8 +1,8 @@
-/* Sun-income-village existing ERP tenant hub v3.1.0 */
+/* Sun-income-village management hub v3.2.0 */
 (() => {
   'use strict';
 
-  const VERSION = '3.1.0';
+  const VERSION = '3.2.0';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -12,9 +12,9 @@
   const statusLabel = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', ended: '종료' };
   const accountingModeLabel = { outsourced: '회계사무실 위탁', shared: '공동 처리', self: '자체 회계' };
   const accountingModeHelp = {
-    outsourced: '기본 수입·지출, 전자결재 연동과 최근 거래를 중심으로 사용합니다.',
-    shared: '조합이 자료와 기본 장부를 정리하고 회계사무실이 검토·확정합니다.',
-    self: '계정과목, 고급 분개, 감가상각과 연말결산까지 직접 처리합니다.'
+    outsourced: '승인된 수입·지출 자료와 지급 내역을 중심으로 기록합니다.',
+    shared: '기본 장부와 보고서를 함께 관리하고, 결산은 회계사무실과 나눠 처리합니다.',
+    self: '계정과목부터 감가상각과 결산까지 조합에서 직접 관리합니다.'
   };
   const HANDOFF_PARAM = 'workspace_handoff';
   const HANDOFF_SOURCE_PARAM = 'workspace_source';
@@ -34,15 +34,15 @@
 
   function friendly(error) {
     const raw = String(error?.message || error || '');
-    if (raw.includes('PLATFORM_ADMIN_REQUIRED')) return '새 마을조합 운영 공간은 플랫폼 관리자만 만들 수 있습니다.';
+    if (raw.includes('PLATFORM_ADMIN_REQUIRED')) return '마을조합 추가 권한이 있는 관리자만 처리할 수 있습니다.';
     if (raw.includes('MANAGEMENT_ADMIN_REQUIRED') || error?.code === '42501') return '햇빛소득마을 전체 운영을 맡은 관리자만 이 화면을 열 수 있습니다.';
     if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
     if (raw.includes('INVALID_ACCOUNTING_OPERATION_MODE')) return '회계 처리 방식을 다시 선택해 주세요.';
-    if (raw.includes('AUTH_REQUIRED')) return 'ERP 로그인이 필요합니다.';
+    if (raw.includes('AUTH_REQUIRED')) return '로그인이 필요합니다.';
     if (raw.includes('POPUP_BLOCKED')) return '새 탭을 열지 못했습니다. 이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.';
     if (raw.includes('HANDOFF_TIMEOUT')) return '로그인 연결 시간이 초과되었습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
-    if (raw.includes('ACCESS')) return '이 마을 ERP를 운영할 권한이 없습니다. 담당자 배정 상태를 확인해 주세요.';
+    if (raw.includes('ACCESS')) return '이 마을조합을 관리할 권한이 없습니다. 담당자 배정 상태를 확인해 주세요.';
     if (raw.includes('COOP_CODE_ALREADY_EXISTS') || error?.code === '23505') return '같은 운영 공간이 이미 만들어져 있는지 목록을 확인해 주세요.';
     return '처리를 마치지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
   }
@@ -207,19 +207,19 @@
     }
 
     openingWorkspaceId = safeCoopId;
-    const originalLabel = trigger?.textContent || '이 마을조합 ERP 열기';
+    const originalLabel = trigger?.textContent || '업무 화면 열기';
     if (trigger) {
       trigger.disabled = true;
       trigger.textContent = '로그인 연결 중…';
     }
-    setMessage(`${row.coop_name} ERP에 로그인 상태를 연결하고 있습니다…`);
+    setMessage(`${row.coop_name} 업무 화면을 준비하고 있습니다…`);
 
     try {
       const prepared = await rpc('sun_village_prepare_workspace_switch', { p_target_coop_id: safeCoopId });
       const targetUrl = validatePreparedWorkspace(prepared, row);
       if (!targetUrl) throw new Error('WORKSPACE_TARGET_VALIDATION_FAILED');
       await handoffSessionToTab(targetTab, targetUrl);
-      setMessage(`${row.coop_name} ERP를 새 탭에서 열었습니다.`);
+      setMessage(`${row.coop_name} 업무 화면을 새 탭에서 열었습니다.`);
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] workspace open failed`, error);
       try { targetTab.close(); } catch (_) {}
@@ -262,7 +262,7 @@
           <span><strong>${number(row.journal_count)}</strong>회계 전표</span>
           <span><strong>${number(row.minutes_count)}</strong>의사록</span>
         </div>
-        <div class="module-line"><strong>기존 ERP 연결</strong><span>조합원 · 임원 · 복식회계 · 전자결재 · 총회·이사회 · 문서·전자서명 (${coreEnabled}/6)</span></div>
+        <div class="module-line"><strong>사용 기능</strong><span>조합원 · 임원 · 복식회계 · 전자결재 · 총회·이사회 · 문서·전자서명 (${coreEnabled}/6)</span></div>
         <div class="accounting-mode-box">
           <label for="accounting-mode-${esc(row.coop_id)}"><strong>회계 처리 방식</strong></label>
           <div class="accounting-mode-actions">
@@ -273,8 +273,8 @@
         </div>
         <div class="managed-actions">
           ${active
-            ? `<button type="button" class="button primary" data-open-workspace="${esc(row.coop_id)}">이 마을조합 ERP 열기</button>`
-            : '<button type="button" disabled>웹 주소 연결 후 열 수 있습니다</button>'}
+            ? `<button type="button" class="button primary" data-open-workspace="${esc(row.coop_id)}">업무 화면 열기</button>`
+            : '<button type="button" disabled>준비가 끝나면 열 수 있습니다</button>'}
           <span>월 이용료 ${money(row.monthly_fee)}${row.vat_separate ? ' · 부가세 별도' : ''}</span>
         </div>
       </article>`;
@@ -287,7 +287,7 @@
     renderSummary(villages);
     $('villageList').innerHTML = villages.length
       ? villages.map(renderVillage).join('')
-      : `<div class="empty"><strong>아직 연결된 마을조합이 없습니다.</strong><p>${canCreateCooperative ? '마을조합 운영 공간을 추가하면 기존 ERP의 전체 업무 틀이 빈 장부로 준비됩니다.' : '새 마을조합 운영 공간은 플랫폼 관리자에게 요청해 주세요.'}</p>${canCreateCooperative ? '<button type="button" class="primary" data-open-create>첫 마을조합 추가</button>' : ''}</div>`;
+      : `<div class="empty"><strong>아직 관리 중인 마을조합이 없습니다.</strong><p>${canCreateCooperative ? '마을조합을 추가하면 구성원·회계·결재·회의 업무를 시작할 수 있습니다.' : '마을조합 추가 권한이 있는 관리자에게 요청해 주세요.'}</p>${canCreateCooperative ? '<button type="button" class="primary" data-open-create>첫 마을조합 추가</button>' : ''}</div>`;
     $('villageList').querySelector('[data-open-create]')?.addEventListener('click', openCreate);
     $('villageList').querySelectorAll('[data-open-workspace]').forEach(button => {
       button.addEventListener('click', () => openVillageWorkspace(button.dataset.openWorkspace, button));
@@ -334,7 +334,7 @@
       // 비활성 상태로 남지 않는다.
       savingAccountingModeId = '';
       await load();
-      setMessage(`${row.coop_name}의 회계 처리 방식을 ${accountingModeLabel[mode]}(으)로 저장했습니다. 기존 회계 자료는 그대로 유지됩니다.`);
+      setMessage(`${row.coop_name}의 회계 처리 방식을 ${accountingModeLabel[mode]}(으)로 저장했습니다. 저장된 회계 자료는 그대로 유지됩니다.`);
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] accounting mode save failed`, error);
       setMessage(friendly(error), true);
@@ -351,7 +351,7 @@
     if (loading) return;
     loading = true;
     $('reload').disabled = true;
-    setMessage('마을조합별 기존 ERP 현황을 불러오고 있습니다…');
+    setMessage('마을조합 현황을 불러오고 있습니다…');
     try {
       context = await rpc('sun_village_management_context');
       try {
@@ -383,7 +383,7 @@
     if (loading) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const name = String(values.coop_name || '').trim();
-    if (!confirm(`${name}의 독립된 조합원 명부·장부·결재·문서 공간을 만들까요?\n\n기존 운영협동조합 자료는 복사되지 않습니다.`)) return;
+    if (!confirm(`${name}을 추가할까요?\n\n다른 조합의 자료와 섞이지 않도록 별도로 준비됩니다.`)) return;
     loading = true;
     $('createSubmit').disabled = true;
     $('createError').hidden = true;
@@ -397,7 +397,7 @@
       });
       $('createDialog').close();
       await load();
-      setMessage(`${name}의 기존 ERP 운영 공간을 만들었습니다. 웹 주소 연결이 완료되면 목록에서 바로 열 수 있습니다.`);
+      setMessage(`${name}을 추가했습니다. 준비가 끝나면 목록에서 업무 화면을 열 수 있습니다.`);
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] create failed`, error);
       $('createError').textContent = friendly(error);
