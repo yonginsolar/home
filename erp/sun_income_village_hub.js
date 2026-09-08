@@ -1,8 +1,8 @@
-/* Sun-income-village existing ERP tenant hub v3.0.2 */
+/* Sun-income-village existing ERP tenant hub v3.0.3 */
 (() => {
   'use strict';
 
-  const VERSION = '3.0.2';
+  const VERSION = '3.0.3';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -119,10 +119,20 @@
   }
 
   async function handoffSessionToTab(targetTab, targetUrl) {
-    const { data, error } = await getClient().auth.getSession();
-    const session = data?.session || null;
+    const auth = getClient().auth;
+    let { data, error } = await auth.getSession();
+    let session = data?.session || null;
     if (error || !session?.access_token || !session?.refresh_token) {
       throw error || new Error('AUTH_REQUIRED');
+    }
+
+    const expiresAtMs = Number(session.expires_at || 0) * 1000;
+    if (!expiresAtMs || expiresAtMs <= Date.now() + (2 * 60 * 1000)) {
+      const refreshed = await auth.refreshSession();
+      if (refreshed.error || !refreshed.data?.session?.access_token || !refreshed.data?.session?.refresh_token) {
+        throw refreshed.error || new Error('AUTH_REQUIRED');
+      }
+      session = refreshed.data.session;
     }
 
     const nonce = createHandoffNonce();
@@ -142,7 +152,7 @@
         window.removeEventListener('message', handleMessage);
         callback(value);
       };
-      const handleMessage = event => {
+      const handleMessage = async event => {
         if (settled || event.source !== targetTab || event.origin !== targetOrigin) return;
         const payload = event.data && typeof event.data === 'object' ? event.data : {};
         if (payload.nonce !== nonce) return;
@@ -157,7 +167,17 @@
           }, targetOrigin);
           return;
         }
-        if (payload.type === 'erp-workspace-session-ready') finish(resolve, true);
+        if (payload.type === 'erp-workspace-session-ready') {
+          const accessToken = String(payload.accessToken || '').trim();
+          const refreshToken = String(payload.refreshToken || '').trim();
+          if (!accessToken || !refreshToken) return;
+          const synced = await auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          if (synced.error || !synced.data?.session?.user) {
+            finish(reject, synced.error || new Error('WORKSPACE_SOURCE_SESSION_SYNC_FAILED'));
+            return;
+          }
+          finish(resolve, true);
+        }
       };
       const timeoutId = window.setTimeout(() => finish(reject, new Error('WORKSPACE_HANDOFF_TIMEOUT')), 20000);
       window.addEventListener('message', handleMessage);
