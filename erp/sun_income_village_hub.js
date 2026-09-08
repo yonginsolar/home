@@ -1,8 +1,8 @@
-/* Sun-income-village management hub v3.2.0 */
+/* Sun-income-village management hub v3.2.1 */
 (() => {
   'use strict';
 
-  const VERSION = '3.2.0';
+  const VERSION = '3.2.1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -242,7 +242,10 @@
 
   function renderVillage(row) {
     const active = row.service_status === 'active';
-    const capacity = row.capacity_kw === null || row.capacity_kw === undefined ? '미입력' : `${number(row.capacity_kw)} kW`;
+    const rawAddress = String(row.address || '').trim();
+    const address = /데모 전용|실제 마을 자료 없음/.test(rawAddress) ? '' : rawAddress;
+    const hasCapacity = row.capacity_kw !== null && row.capacity_kw !== undefined && Number.isFinite(Number(row.capacity_kw));
+    const capacity = hasCapacity ? `${number(row.capacity_kw)} kW` : '';
     const coreEnabled = ['member_admin','accounting','approval','minutes','documents','signature']
       .filter(key => row.modules?.[key] === true).length;
     const accountingMode = accountingModeLabel[row.accounting_operation_mode] ? row.accounting_operation_mode : 'outsourced';
@@ -252,8 +255,8 @@
     return `
       <article class="managed-card panel">
         <div class="managed-head">
-          <div><span class="badge status-${esc(row.service_status)}">${esc(statusLabel[row.service_status] || row.service_status)}</span><h3>${esc(row.coop_name)}</h3><p>${esc(row.address || '주소 미입력')}</p></div>
-          <span class="capacity">${esc(capacity)}</span>
+          <div><span class="badge status-${esc(row.service_status)}">${esc(statusLabel[row.service_status] || row.service_status)}</span><h3>${esc(row.coop_name)}</h3>${address ? `<p>${esc(address)}</p>` : ''}</div>
+          ${capacity ? `<span class="capacity">${esc(capacity)}</span>` : ''}
         </div>
         <div class="mini-stats">
           <span><strong>${number(row.member_count)}</strong>조합원</span>
