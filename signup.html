@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.39
-Change: Refresh the shared login broker helper for yonginsun.kr.
+Version: v1.0.40
+Change: Let site/member tenants start with the form and verify email inline by OTP.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.39 | signup.html');</script>
+  <script>console.log('[Version] v1.0.40 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -151,20 +151,20 @@ gtag('config', 'G-TR217L7JN9');
 <div class="mobile-view-container">
 <div class="signup-content">
 
-<div id="step-gate" class="text-center pt-5">
+<div id="step-gate" class="text-center pt-5" style="display:none;">
 <span class="step-emoji">☀️</span>
 <h1 style="font-family:'GmarketSans'; font-weight:700; font-size:1.5rem;">함께 지구를 구해요!</h1>
 <p id="gateWelcomeText" class="text-muted mb-5">조합 가입을 환영합니다 🌱</p>
 
 <div class="d-grid gap-3">
-<div class="gate-card" onclick="startKakaoSignup()">
+<div class="gate-card" id="signup-kakao-option" onclick="startKakaoSignup()" hidden>
 <div class="d-flex align-items-center justify-content-center gap-2">
 <i class="bi bi-chat-fill" style="color:#3c1e1e;"></i> <span>카카오로 3초 만에 시작</span>
 
 </div>
 <center></center><small class="text-muted">* 개인 조합원</small>
 </div>
-<div class="gate-card" onclick="startNaverSignup()">
+<div class="gate-card" id="signup-naver-option" onclick="startNaverSignup()" hidden>
 <div class="d-flex align-items-center justify-content-center gap-2">
 <span class="naver-mark" aria-hidden="true">N</span> <span>네이버로 3초 만에 시작</span>
 
@@ -205,9 +205,19 @@ gtag('config', 'G-TR217L7JN9');
 
 <form id="joinForm" onsubmit="handleFormSubmit(event, this)" novalidate>
 
-<div class="col-12 mb-3">
+<div class="col-12 mb-3" id="signup-email-field-row">
 <label class="form-label fw-bold small" id="lbl-email">이메일 (인증됨)</label>
-<input type="text" id="verifiedEmail" class="form-control bg-light" readonly style="color:#555; font-weight:bold;">
+<div class="input-group">
+<input type="email" id="verifiedEmail" class="form-control bg-light" readonly style="color:#555; font-weight:bold;" oninput="handleDeferredSignupEmailChanged(this)">
+<button type="button" class="btn btn-outline-success" id="btnDeferredSignupOtp" onclick="sendDeferredSignupOtp()" hidden>인증코드 받기</button>
+</div>
+<div id="deferred-signup-otp-area" class="mt-2" hidden>
+<div class="input-group">
+<input type="text" id="deferred-signup-otp-input" class="form-control" placeholder="이메일로 받은 인증코드" inputmode="numeric" autocomplete="one-time-code" onkeyup="if(event.key==='Enter') verifyDeferredSignupOtp()">
+<button type="button" class="btn btn-dark" id="btnVerifyDeferredSignupOtp" onclick="verifyDeferredSignupOtp()">코드 확인</button>
+</div>
+</div>
+<p id="deferred-signup-email-status" class="small mt-2 mb-0" hidden></p>
 </div>
 
 <div class="btn-group w-100 mb-4" role="group">
@@ -295,7 +305,7 @@ onblur="validateBizNo()">
 <input type="hidden" id="orgNo"> 
 </div>
 
-<div class="col-12">
+<div class="col-12" id="signup-phone-field-row">
 <label class="form-label fw-bold small" id="lbl-phone">연락처</label>
 <div class="d-flex gap-2">
 <input type="text" id="p1" value="010" class="form-control text-center" maxlength="3" required oninput="onlyNum(this); autoMove(this,'p2',3);">
@@ -376,7 +386,7 @@ oninput="clearFieldWarning(this)">
 </div>
 <div class="small text-muted">가입 신청 시 해당 교육 출석이 함께 접수되며, 승인 후 조합원 참여 이력으로 자동 전환됩니다.</div>
 </div>
-<div class="small text-muted mt-2">자세한 내용은 <a href="privacy.html" target="_blank" rel="noopener">개인정보 처리방침</a>에서 언제든지 확인할 수 있습니다.</div>
+<div class="small text-muted mt-2" id="signup-privacy-policy-link">자세한 내용은 <a href="privacy.html" target="_blank" rel="noopener">개인정보 처리방침</a>에서 언제든지 확인할 수 있습니다.</div>
 </div>
 
 <button type="submit" id="btnSubmit" class="btn btn-success w-100 py-3 mt-4 rounded-4 fw-bold fs-5">가입 신청하기 ☀️</button>
@@ -513,11 +523,40 @@ return signupAuthInitialStateReady;
 // End of waitForSignupAuthInitialState
 
 let signupTenant = null;
+let signupPublicSettings = null;
+let signupPublicSettingsPromise = null;
+
+function isDeferredSignupProfile() {
+const runtimeHost = String(getSignupPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
+return String(signupPublicSettings?.runtime_profile || '') === 'site_member'
+|| runtimeHost === 'yonginsun.coopco.kr'
+|| runtimeHost === 'yonginsun.kr'
+|| runtimeHost === 'www.yonginsun.kr';
+}
+
+async function loadSignupPublicSettings() {
+if (signupPublicSettings) return signupPublicSettings;
+if (!signupPublicSettingsPromise) {
+signupPublicSettingsPromise = (async () => {
+const { data, error } = await _supabase.rpc('get_public_home_settings');
+if (error) throw error;
+signupPublicSettings = Array.isArray(data) ? (data[0] || null) : (data || null);
+return signupPublicSettings;
+})().catch((error) => {
+signupPublicSettingsPromise = null;
+console.warn('[signup] public settings lookup failed:', error);
+return null;
+});
+}
+return signupPublicSettingsPromise;
+}
+
 const signupTenantLoader = BootGuard.createSuccessCachedTask(async () => {
 const { data: contextData, error: contextError } = await _supabase.rpc('get_public_signup_context');
 const contextResolved = Array.isArray(contextData) ? contextData[0] : contextData;
 if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
 signupTenant = contextResolved;
+await loadSignupPublicSettings();
 applySignupTenantBranding();
 return contextResolved;
 }
@@ -533,10 +572,14 @@ throw error || contextError || new Error('SIGNUP_COOP_NOT_FOUND');
 }
 
 signupTenant = resolved;
+await loadSignupPublicSettings();
 applySignupTenantBranding();
 return resolved;
 });
 let pendingSignupOtpEmail = '';
+let deferredSignupEmailVerified = false;
+let deferredSignupVerifiedEmail = '';
+let deferredSignupFormInitialized = false;
 
 function isPrivateLanSignupHost(hostname) {
 const parts = String(hostname || '').trim().toLowerCase().split('.');
@@ -653,6 +696,64 @@ if (!signupTenant?.coop_name) return;
 Object.keys(termsData).forEach((key) => {
 termsData[key].content = termsData[key].content.replaceAll('용인모두의햇빛협동조합', signupTenant.coop_name);
 });
+if (isDeferredSignupProfile()) {
+termsData.privacy.content = termsData.privacy.content.replace('\n3. 선택 항목: 추천인, 선택한 간편로그인 식별정보', '\n3. 선택 항목: 추천인');
+}
+}
+
+function updateSignupEmailLabel(isPersonal) {
+const label = document.getElementById('lbl-email');
+if (!label) return;
+const prefix = isPersonal ? '이메일' : '담당자 이메일';
+if (isDeferredSignupProfile()) {
+label.textContent = `${prefix}${deferredSignupEmailVerified ? ' (인증됨)' : ''}`;
+return;
+}
+label.textContent = `${prefix} (인증됨)`;
+}
+
+function applySignupProfileOptions() {
+const deferred = isDeferredSignupProfile();
+const gate = document.getElementById('step-gate');
+const kakaoOption = document.getElementById('signup-kakao-option');
+const naverOption = document.getElementById('signup-naver-option');
+const privacyLink = document.getElementById('signup-privacy-policy-link');
+const emailRow = document.getElementById('signup-email-field-row');
+const phoneRow = document.getElementById('signup-phone-field-row');
+const emailInput = document.getElementById('verifiedEmail');
+const sendButton = document.getElementById('btnDeferredSignupOtp');
+
+if (kakaoOption) kakaoOption.hidden = deferred;
+if (naverOption) naverOption.hidden = deferred;
+if (privacyLink) privacyLink.hidden = deferred;
+if (gate && !deferred && document.getElementById('step-form')?.style.display !== 'block') gate.style.display = '';
+if (window.__AUTH_BROKER_CONFIG__?.enabledProviders) {
+window.__AUTH_BROKER_CONFIG__.enabledProviders.kakao = !deferred;
+window.__AUTH_BROKER_CONFIG__.enabledProviders['custom:naver'] = !deferred;
+}
+
+if (deferred) {
+if (emailRow && phoneRow && emailRow.previousElementSibling !== phoneRow) {
+phoneRow.insertAdjacentElement('afterend', emailRow);
+}
+if (emailInput) {
+emailInput.readOnly = false;
+emailInput.required = true;
+emailInput.classList.remove('bg-light');
+emailInput.style.color = '';
+}
+if (sendButton) sendButton.hidden = false;
+} else {
+if (emailInput) {
+emailInput.readOnly = true;
+emailInput.required = false;
+emailInput.classList.add('bg-light');
+}
+if (sendButton) sendButton.hidden = true;
+}
+
+const isPersonal = document.querySelector('input[name="userType"]:checked')?.value !== '단체';
+updateSignupEmailLabel(isPersonal);
 }
 
 function buildSignupAuthCallbackUrl(nextTarget, extraParams = {}) {
@@ -713,6 +814,7 @@ if (successAccountBox) successAccountBox.style.display = 'none';
 if (successKakaoBox) successKakaoBox.style.display = 'none';
 }
 
+applySignupProfileOptions();
 applyTenantTerms();
 }
 
@@ -782,6 +884,8 @@ clearSignupTenantRetryState();
 return resolved;
 } catch (error) {
 signupTenant = null;
+signupPublicSettings = null;
+signupPublicSettingsPromise = null;
 signupTenantLoader.reset();
 const kind = BootGuard.classifyError(error, {
 fatalMessages: ['SIGNUP_COOP_CONTEXT_MISSING', 'SIGNUP_COOP_NOT_FOUND']
@@ -917,7 +1021,7 @@ function toggleType(type) {
 const isInd = (type === '개인');
 document.getElementById('lbl-name').innerText = isInd ? "이름 (실명)" : "단체명 (법인/고유명)";
 document.getElementById('lbl-id').innerText = isInd ? "주민등록번호" : "사업자(고유)번호";
-document.getElementById('lbl-email').innerText = isInd ? "이메일 (인증됨)" : "담당자 이메일 (인증됨)";
+updateSignupEmailLabel(isInd);
 document.getElementById('lbl-phone').innerText = isInd ? "연락처" : "담당자 연락처";
 document.getElementById('userName').placeholder = isInd ? "성함을 입력하세요" : "단체명을 입력하세요";
 
@@ -1133,6 +1237,125 @@ btn.disabled = false;
 }
 }
 
+function normalizeSignupEmail(value) {
+return String(value || '').trim().toLowerCase();
+}
+
+function setDeferredSignupEmailStatus(message, state = 'muted') {
+const status = document.getElementById('deferred-signup-email-status');
+if (!status) return;
+status.hidden = !message;
+status.textContent = message || '';
+status.className = `small mt-2 mb-0 ${state === 'success' ? 'text-success' : state === 'error' ? 'text-danger' : 'text-muted'}`;
+}
+
+function handleDeferredSignupEmailChanged(input) {
+if (!isDeferredSignupProfile()) return;
+clearFieldWarning(input);
+const currentEmail = normalizeSignupEmail(input?.value);
+if (currentEmail === deferredSignupVerifiedEmail && deferredSignupEmailVerified) return;
+deferredSignupEmailVerified = false;
+deferredSignupVerifiedEmail = '';
+document.getElementById('deferred-signup-otp-area')?.setAttribute('hidden', '');
+document.getElementById('deferred-signup-otp-input').value = '';
+setDeferredSignupEmailStatus('', 'muted');
+updateSignupEmailLabel(document.querySelector('input[name="userType"]:checked')?.value !== '단체');
+}
+
+function completeDeferredSignupEmailVerification(session) {
+if (!isDeferredSignupProfile()) return false;
+const sessionEmail = normalizeSignupEmail(session?.user?.email);
+const input = document.getElementById('verifiedEmail');
+const enteredEmail = normalizeSignupEmail(input?.value);
+if (!sessionEmail || (enteredEmail && enteredEmail !== sessionEmail)) return false;
+if (input && !enteredEmail) input.value = sessionEmail;
+deferredSignupVerifiedEmail = sessionEmail;
+deferredSignupEmailVerified = true;
+document.getElementById('deferred-signup-otp-area')?.setAttribute('hidden', '');
+const otpInput = document.getElementById('deferred-signup-otp-input');
+if (otpInput) otpInput.value = '';
+setDeferredSignupEmailStatus('이메일 인증이 완료되었습니다.', 'success');
+updateSignupEmailLabel(document.querySelector('input[name="userType"]:checked')?.value !== '단체');
+return true;
+}
+
+async function sendDeferredSignupOtp() {
+try {
+await ensureSignupTenant();
+if (!isDeferredSignupProfile()) return;
+const input = document.getElementById('verifiedEmail');
+const email = normalizeSignupEmail(input?.value);
+const button = document.getElementById('btnDeferredSignupOtp');
+if (!email || !input?.checkValidity()) {
+input?.classList.add('is-invalid-field');
+input?.focus();
+return setDeferredSignupEmailStatus('사용하실 이메일 주소를 정확히 입력해 주세요.', 'error');
+}
+if (deferredSignupEmailVerified && email === deferredSignupVerifiedEmail) {
+return setDeferredSignupEmailStatus('이미 인증된 이메일입니다.', 'success');
+}
+
+button.disabled = true;
+button.textContent = '확인 중…';
+const exists = await runSignupDuplicateCheck('email', email);
+if (exists) {
+const modal = document.getElementById('alreadyMemberModal');
+if (modal) modal.style.display = 'flex';
+return;
+}
+
+button.textContent = '발송 중…';
+const { error } = await _supabase.auth.signInWithOtp({
+email,
+options: { shouldCreateUser: true }
+});
+if (error) throw error;
+
+pendingSignupOtpEmail = email;
+deferredSignupEmailVerified = false;
+deferredSignupVerifiedEmail = '';
+document.getElementById('deferred-signup-otp-area')?.removeAttribute('hidden');
+setDeferredSignupEmailStatus('이메일로 보낸 인증코드를 입력해 주세요.', 'muted');
+const otpInput = document.getElementById('deferred-signup-otp-input');
+if (otpInput) otpInput.focus();
+button.textContent = '코드 다시 받기';
+} catch (error) {
+console.warn('[signup] deferred OTP send failed:', error);
+setDeferredSignupEmailStatus(error?.message || '인증코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.', 'error');
+} finally {
+const button = document.getElementById('btnDeferredSignupOtp');
+if (button) {
+button.disabled = false;
+if (button.textContent === '확인 중…' || button.textContent === '발송 중…') button.textContent = '인증코드 받기';
+}
+}
+}
+
+async function verifyDeferredSignupOtp() {
+const email = normalizeSignupEmail(pendingSignupOtpEmail || document.getElementById('verifiedEmail')?.value);
+const token = String(document.getElementById('deferred-signup-otp-input')?.value || '').trim();
+const button = document.getElementById('btnVerifyDeferredSignupOtp');
+if (!email) return setDeferredSignupEmailStatus('먼저 이메일을 입력해 주세요.', 'error');
+if (!token) return setDeferredSignupEmailStatus('이메일로 받은 인증코드를 입력해 주세요.', 'error');
+
+button.disabled = true;
+button.textContent = '확인 중…';
+try {
+const { data, error } = await _supabase.auth.verifyOtp({ email, token, type: 'email' });
+if (error) throw error;
+const session = data?.session || (await _supabase.auth.getSession()).data?.session || null;
+if (!session || !completeDeferredSignupEmailVerification(session)) {
+throw new Error('인증된 이메일과 입력한 이메일이 일치하지 않습니다.');
+}
+} catch (error) {
+console.warn('[signup] deferred OTP verification failed:', error);
+setDeferredSignupEmailStatus(error?.message || '인증코드를 확인하지 못했습니다.', 'error');
+} finally {
+button.disabled = false;
+button.textContent = '코드 확인';
+}
+}
+
 async function verifySignupOtp() {
 const email = String(pendingSignupOtpEmail || document.getElementById('init-email')?.value || '').trim().toLowerCase();
 const token = String(document.getElementById('signup-otp-input')?.value || '').trim();
@@ -1188,6 +1411,10 @@ window.setTimeout(async () => {
 try {
 await ensureSignupTenant();
 if (reason) console.debug('[signup] auth session check queued:', reason);
+if (isDeferredSignupProfile() && deferredSignupFormInitialized) {
+completeDeferredSignupEmailVerification(session);
+return;
+}
 await checkExistingMember(session);
 } catch (tenantError) {
 console.warn('signup auth session handling failed:', tenantError);
@@ -1217,6 +1444,9 @@ await ensureSignupTenant();
 const { data, error } = await _supabase.auth.getSession();
 if (error || !data?.session) return false;
 if (reason) console.debug('[signup] resuming from current session:', reason);
+if (isDeferredSignupProfile() && deferredSignupFormInitialized) {
+return completeDeferredSignupEmailVerification(data.session);
+}
 await checkExistingMember(data.session);
 return true;
 } catch (error) {
@@ -1274,6 +1504,15 @@ return;
 }
 const manualSessionHandled = await handleManualSession();
 if (manualSessionHandled) return;
+if (isDeferredSignupProfile()) {
+const { data } = await _supabase.auth.getSession();
+if (data?.session) {
+await checkExistingMember(data.session);
+} else {
+showApplicationForm(null);
+}
+return;
+}
 await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
 };
 
@@ -1458,7 +1697,7 @@ function showApplicationForm(session) {
 document.getElementById('step-gate').style.display = 'none';
 document.getElementById('step-form').style.display = 'block';
 
-const user = session.user;
+const user = session?.user || {};
 const providerLabel = getSignupProviderLabel(user);
 const isPersonalOnlySocial = isSignupKakaoUser(user) || isSignupNaverUser(user);
 
@@ -1483,6 +1722,11 @@ if(emailInput && user.email) {
 emailInput.value = user.email;
 }
 
+deferredSignupFormInitialized = isDeferredSignupProfile();
+if (deferredSignupFormInitialized && user.email) {
+completeDeferredSignupEmailVerification(session);
+}
+
 // 2. 이름 자동 입력
 const socialName = getSignupSocialName(user);
 if(socialName) {
@@ -1503,6 +1747,10 @@ if (socialPhone) fillSignupPhoneInputs(socialPhone);
 async function startKakaoSignup() {
     try {
         await ensureSignupTenant();
+        if (isDeferredSignupProfile()) {
+            openResultModal('이 조합은 가입 신청서 안에서 이메일 인증코드를 확인합니다.', true);
+            return;
+        }
         if (await resumeSignupFromCurrentSession('before-kakao-oauth')) return;
         if (isFileSignupRuntime()) {
             openResultModal('file:// 환경에서는 카카오 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
@@ -1558,6 +1806,10 @@ async function startKakaoSignup() {
 async function startNaverSignup() {
     try {
         await ensureSignupTenant();
+        if (isDeferredSignupProfile()) {
+            openResultModal('이 조합은 가입 신청서 안에서 이메일 인증코드를 확인합니다.', true);
+            return;
+        }
         if (await resumeSignupFromCurrentSession('before-naver-oauth')) return;
         if (isFileSignupRuntime()) {
             openResultModal('file:// 환경에서는 네이버 간편가입을 테스트할 수 없습니다.\n로컬 서버(http://localhost...)로 열어 다시 시도해 주세요.', true);
@@ -1723,6 +1975,27 @@ openResultModal(
 true
 );
 return;
+}
+
+if (isDeferredSignupProfile()) {
+const enteredEmail = normalizeSignupEmail(document.getElementById('verifiedEmail')?.value);
+let authenticatedEmail = '';
+try {
+const { data, error } = await _supabase.auth.getUser();
+if (error) throw error;
+authenticatedEmail = normalizeSignupEmail(data?.user?.email);
+} catch (error) {
+console.warn('[signup] verified email check failed:', error);
+}
+if (!deferredSignupEmailVerified || !enteredEmail || enteredEmail !== deferredSignupVerifiedEmail || enteredEmail !== authenticatedEmail) {
+const emailInput = document.getElementById('verifiedEmail');
+emailInput?.classList.add('is-invalid-field');
+emailInput?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+emailInput?.focus();
+setDeferredSignupEmailStatus('이메일 인증코드를 확인한 뒤 가입 신청을 완료해 주세요.', 'error');
+openResultModal('가입 신청 전에 이메일 인증코드를 확인해 주세요.', true);
+return;
+}
 }
 
 // =========================================================

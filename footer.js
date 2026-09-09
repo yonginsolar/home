@@ -1,6 +1,6 @@
 /*
-Version: v1.0.3
-Change: Apply tenant-specific organization and contact details in the shared footer.
+Version: v1.0.4
+Change: Keep unfinished legal documents and release notes hidden for site/member tenants.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -61,6 +61,14 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   const email = String(settings?.contact_email || '').trim();
   const address = String(settings?.contact_address || '').trim();
   const isSiteMemberProfile = String(settings?.runtime_profile || '') === 'site_member';
+  const policyLinks = document.getElementById('footer-policy-links');
+  window.__PUBLIC_LEGAL_DOCS_ENABLED__ = !isSiteMemberProfile;
+  window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ = !isSiteMemberProfile;
+  if (policyLinks) policyLinks.hidden = isSiteMemberProfile;
+  if (isSiteMemberProfile) {
+    document.getElementById('termsModal')?.remove();
+    document.getElementById('patchNoteModal')?.remove();
+  }
   if (coopName) {
     const nameEl = document.getElementById('footer-coop-name');
     const copyrightEl = document.getElementById('footer-copyright-name');
@@ -115,7 +123,7 @@ document.addEventListener("DOMContentLoaded", function() {
             </ul>
           </div>
 
-          <div class="col-lg-3 col-md-6 footer-links">
+          <div class="col-lg-3 col-md-6 footer-links" id="footer-policy-links" hidden>
             <h4>정보 및 정책</h4>
             <ul>
               <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
@@ -291,4 +299,20 @@ document.addEventListener("DOMContentLoaded", function() {
 
     // (2) 모달 넣기 (body 맨 끝에 추가)
     document.body.insertAdjacentHTML('beforeend', modalsHtml);
+
+    // 공유 푸터를 쓰더라도 다른 조합 주소에는 본 조합의 정책 문서를 노출하지 않는다.
+    const footerHost = String(window.location.hostname || '').toLowerCase();
+    const useMainCoopPolicy = window.location.protocol === 'file:'
+      || footerHost === 'localhost'
+      || footerHost === '127.0.0.1'
+      || footerHost === 'yonginsolar.kr'
+      || footerHost === 'www.yonginsolar.kr';
+    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = useMainCoopPolicy;
+    window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ = useMainCoopPolicy;
+    const policyLinks = document.getElementById('footer-policy-links');
+    if (policyLinks) policyLinks.hidden = !useMainCoopPolicy;
+    if (!useMainCoopPolicy) {
+      document.getElementById('termsModal')?.remove();
+      document.getElementById('patchNoteModal')?.remove();
+    }
 });

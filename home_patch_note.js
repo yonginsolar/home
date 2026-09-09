@@ -1,6 +1,6 @@
 /*
-Version: v1.0.10
-Change: Make patch-note opening and saving safe against rapid repeated taps.
+Version: v1.0.11
+Change: Do not load or open shared patch notes when the tenant profile disables them.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -319,6 +319,7 @@ document.body.insertAdjacentHTML('beforeend', patchNoteModalHTML);
 
 // 1. 최신 버전 조회 (index.html 하단 표시용 - 필요 시 사용)
 async function loadCurrentVersion() {
+    if (window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ === false) return;
     if (typeof _client === 'undefined') return;
 
     // 테이블명 변경: sys_home_patch_note
@@ -339,6 +340,7 @@ async function loadCurrentVersion() {
 
 // 2. 패치노트 모달 열기
 function openPatchModal() {
+    if (window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ === false) return Promise.resolve();
     // 모달 요소 찾기
     const modalEl = document.getElementById('patchNoteModal');
     if (!modalEl) {
@@ -377,6 +379,7 @@ function openPatchModal() {
 
 // 3. 리스트 불러오기
 async function loadPatchList() {
+    if (window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ === false) return;
     const listEl = document.getElementById("patchList");
     if (!listEl) return;
     

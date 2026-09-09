@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.0
-Change: 2026-08-24 - Publish the cooperative-wide privacy policy and revision history.
+Version: v1.0.1
+Change: Prevent another cooperative's policy from appearing on tenant domains.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.0 | privacy.html');</script>
+  <script>console.log('[Version] v1.0.1 | privacy.html'); document.documentElement.classList.add('privacy-tenant-pending');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="용인모두의햇빛협동조합 홈페이지, 조합원 포털, ERP, 전자서명, 선거 서비스의 개인정보 처리방침입니다.">
@@ -16,6 +16,8 @@ Change: 2026-08-24 - Publish the cooperative-wide privacy policy and revision hi
   <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" rel="stylesheet">
   <script src="shared/theme.js?v=20260802-1"></script>
   <link href="shared/theme.css?v=20260829-1" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+  <script src="shared/route_guard.js?v=20260421-1"></script>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--theme-bg); color: var(--theme-text); font-family: Pretendard, "Apple SD Gothic Neo", sans-serif; line-height: 1.75; }
@@ -44,12 +46,16 @@ Change: 2026-08-24 - Publish the cooperative-wide privacy policy and revision hi
     .contact > div { padding: 14px 16px; background: var(--theme-surface-alt); border: 1px solid var(--theme-border); border-radius: 12px; }
     .history { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
     .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; background: #166534; color: #fff; font-size: .82rem; font-weight: 800; }
+    html.privacy-tenant-pending body { visibility: hidden; }
+    .policy-pending-card { max-width: 760px; margin: 12vh auto 0; text-align: center; }
+    .policy-pending-card p { color: var(--theme-muted); }
+    .policy-pending-card a { display: inline-flex; margin-top: 10px; padding: 10px 16px; border-radius: 10px; background: #166534; color: #fff; font-weight: 800; text-decoration: none; }
     @media (max-width: 640px) { .topbar { align-items: flex-start; } .wrap { width: min(100% - 20px, 1120px); padding-top: 18px; } }
     @media print { .site-theme-toggle { display: none !important; } body { background: #fff !important; color: #111 !important; font-size: 11pt; } .wrap { width: 100%; padding: 0; } .hero, section { box-shadow: none; break-inside: avoid; } th, td, p, li, .small { font-size: 11pt !important; } a { color: #111; text-decoration: none; } }
   </style>
 </head>
 <body>
-  <main class="wrap">
+  <main class="wrap" id="privacy-policy-content">
     <div class="topbar">
       <a class="home" href="index.html">← 용인모두의햇빛협동조합</a>
       <div class="version"><span class="badge">현행</span><br>버전 2026.08.24 · 시행 2026.08.24</div>
@@ -173,5 +179,66 @@ Change: 2026-08-24 - Publish the cooperative-wide privacy policy and revision hi
       <p class="small">주요 변경: 적용 범위를 ERP·서명·선거까지 확대, Supabase·암호화 백업 등 실제 보안 구조 반영, 주민등록번호 처리 근거 분리, 처리위탁·분석·국외 처리와 보유기간 정비.</p>
     </section>
   </main>
+  <script>
+    (async function resolvePrivacyPolicyTenant() {
+      const MAIN_COOP_NAME = '용인모두의햇빛협동조합';
+      const mainHosts = new Set(['yonginsolar.kr', 'www.yonginsolar.kr', 'localhost', '127.0.0.1']);
+      const runtimeHost = String(window.CoopRouteGuard?.getPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
+      const reveal = () => document.documentElement.classList.remove('privacy-tenant-pending');
+      const showPending = (coopName = '협동조합') => {
+        const safeName = String(coopName || '협동조합').trim() || '협동조합';
+        document.title = `개인정보 처리방침 준비 중 - ${safeName}`;
+        document.querySelector('meta[name="robots"]')?.setAttribute('content', 'noindex,nofollow');
+        document.querySelector('meta[name="description"]')?.setAttribute('content', `${safeName}의 개인정보 처리방침은 준비 중입니다.`);
+        document.querySelector('link[rel="canonical"]')?.remove();
+        const main = document.getElementById('privacy-policy-content');
+        if (main) {
+          main.replaceChildren();
+          const card = document.createElement('section');
+          card.className = 'policy-pending-card';
+          const title = document.createElement('h1');
+          title.textContent = '개인정보 처리방침을 준비하고 있습니다';
+          const message = document.createElement('p');
+          message.textContent = `${safeName}에서 확정한 문서만 공개하겠습니다.`;
+          const home = document.createElement('a');
+          home.href = 'index.html';
+          home.textContent = '홈페이지로 돌아가기';
+          card.append(title, message, home);
+          main.appendChild(card);
+        }
+        reveal();
+      };
+
+      if (mainHosts.has(runtimeHost) || window.location.protocol === 'file:') {
+        reveal();
+        return;
+      }
+
+      try {
+        const client = window.CoopRouteGuard?.createSupabaseClient
+          ? window.CoopRouteGuard.createSupabaseClient(
+              window.supabase,
+              'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
+              'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
+            )
+          : window.supabase.createClient(
+              'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
+              'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
+            );
+        const { data, error } = await client.rpc('get_public_home_settings');
+        if (error) throw error;
+        const settings = Array.isArray(data) ? data[0] : data;
+        const coopName = String(settings?.coop_name || '').trim();
+        if (String(settings?.runtime_profile || '') === 'site_member' || (coopName && coopName !== MAIN_COOP_NAME)) {
+          showPending(coopName);
+          return;
+        }
+        reveal();
+      } catch (error) {
+        console.warn('[privacy] tenant policy lookup failed:', error);
+        showPending();
+      }
+    })();
+  </script>
 </body>
 </html>
