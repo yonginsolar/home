@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.40
-Change: Let site/member tenants start with the form and verify email inline by OTP.
+Version: v1.0.41
+Change: Let Yongin Solar email applicants start with the form and verify email inline by OTP.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.40 | signup.html');</script>
+  <script>console.log('[Version] v1.0.41 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -580,6 +580,12 @@ let pendingSignupOtpEmail = '';
 let deferredSignupEmailVerified = false;
 let deferredSignupVerifiedEmail = '';
 let deferredSignupFormInitialized = false;
+let yonginInlineEmailSelected = false;
+
+function isInlineEmailSignupMode() {
+return isDeferredSignupProfile()
+|| (signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE && yonginInlineEmailSelected);
+}
 
 function isPrivateLanSignupHost(hostname) {
 const parts = String(hostname || '').trim().toLowerCase().split('.');
@@ -705,11 +711,31 @@ function updateSignupEmailLabel(isPersonal) {
 const label = document.getElementById('lbl-email');
 if (!label) return;
 const prefix = isPersonal ? '이메일' : '담당자 이메일';
-if (isDeferredSignupProfile()) {
+if (isInlineEmailSignupMode()) {
 label.textContent = `${prefix}${deferredSignupEmailVerified ? ' (인증됨)' : ''}`;
 return;
 }
 label.textContent = `${prefix} (인증됨)`;
+}
+
+function applyInlineEmailSignupControls() {
+if (!isInlineEmailSignupMode()) return;
+const emailRow = document.getElementById('signup-email-field-row');
+const phoneRow = document.getElementById('signup-phone-field-row');
+const emailInput = document.getElementById('verifiedEmail');
+const sendButton = document.getElementById('btnDeferredSignupOtp');
+
+if (emailRow && phoneRow && emailRow.previousElementSibling !== phoneRow) {
+phoneRow.insertAdjacentElement('afterend', emailRow);
+}
+if (emailInput) {
+emailInput.readOnly = false;
+emailInput.required = true;
+emailInput.classList.remove('bg-light');
+emailInput.style.color = '';
+}
+if (sendButton) sendButton.hidden = false;
+updateSignupEmailLabel(document.querySelector('input[name="userType"]:checked')?.value !== '단체');
 }
 
 function applySignupProfileOptions() {
@@ -718,8 +744,6 @@ const gate = document.getElementById('step-gate');
 const kakaoOption = document.getElementById('signup-kakao-option');
 const naverOption = document.getElementById('signup-naver-option');
 const privacyLink = document.getElementById('signup-privacy-policy-link');
-const emailRow = document.getElementById('signup-email-field-row');
-const phoneRow = document.getElementById('signup-phone-field-row');
 const emailInput = document.getElementById('verifiedEmail');
 const sendButton = document.getElementById('btnDeferredSignupOtp');
 
@@ -733,16 +757,7 @@ window.__AUTH_BROKER_CONFIG__.enabledProviders['custom:naver'] = !deferred;
 }
 
 if (deferred) {
-if (emailRow && phoneRow && emailRow.previousElementSibling !== phoneRow) {
-phoneRow.insertAdjacentElement('afterend', emailRow);
-}
-if (emailInput) {
-emailInput.readOnly = false;
-emailInput.required = true;
-emailInput.classList.remove('bg-light');
-emailInput.style.color = '';
-}
-if (sendButton) sendButton.hidden = false;
+applyInlineEmailSignupControls();
 } else {
 if (emailInput) {
 emailInput.readOnly = true;
@@ -1179,7 +1194,14 @@ hint.style.color = "red";
 }
 
 // [6] 초기화 및 매직링크
-function showEmailInput() { document.getElementById('email-gate-input').style.display = 'block'; }
+function showEmailInput() {
+yonginInlineEmailSelected = signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE;
+if (!yonginInlineEmailSelected) {
+document.getElementById('email-gate-input').style.display = 'block';
+return;
+}
+showApplicationForm(null);
+}
 
 // [수정] 성공/실패 모달 제어 함수 (전역 사용을 위해 함수로 분리)
 function openResultModal(message, isError = false) {
@@ -1250,7 +1272,7 @@ status.className = `small mt-2 mb-0 ${state === 'success' ? 'text-success' : sta
 }
 
 function handleDeferredSignupEmailChanged(input) {
-if (!isDeferredSignupProfile()) return;
+if (!isInlineEmailSignupMode()) return;
 clearFieldWarning(input);
 const currentEmail = normalizeSignupEmail(input?.value);
 if (currentEmail === deferredSignupVerifiedEmail && deferredSignupEmailVerified) return;
@@ -1263,7 +1285,7 @@ updateSignupEmailLabel(document.querySelector('input[name="userType"]:checked')?
 }
 
 function completeDeferredSignupEmailVerification(session) {
-if (!isDeferredSignupProfile()) return false;
+if (!isInlineEmailSignupMode()) return false;
 const sessionEmail = normalizeSignupEmail(session?.user?.email);
 const input = document.getElementById('verifiedEmail');
 const enteredEmail = normalizeSignupEmail(input?.value);
@@ -1282,7 +1304,7 @@ return true;
 async function sendDeferredSignupOtp() {
 try {
 await ensureSignupTenant();
-if (!isDeferredSignupProfile()) return;
+if (!isInlineEmailSignupMode()) return;
 const input = document.getElementById('verifiedEmail');
 const email = normalizeSignupEmail(input?.value);
 const button = document.getElementById('btnDeferredSignupOtp');
@@ -1411,7 +1433,7 @@ window.setTimeout(async () => {
 try {
 await ensureSignupTenant();
 if (reason) console.debug('[signup] auth session check queued:', reason);
-if (isDeferredSignupProfile() && deferredSignupFormInitialized) {
+if (deferredSignupFormInitialized) {
 completeDeferredSignupEmailVerification(session);
 return;
 }
@@ -1444,7 +1466,7 @@ await ensureSignupTenant();
 const { data, error } = await _supabase.auth.getSession();
 if (error || !data?.session) return false;
 if (reason) console.debug('[signup] resuming from current session:', reason);
-if (isDeferredSignupProfile() && deferredSignupFormInitialized) {
+if (deferredSignupFormInitialized) {
 return completeDeferredSignupEmailVerification(data.session);
 }
 await checkExistingMember(data.session);
@@ -1722,7 +1744,8 @@ if(emailInput && user.email) {
 emailInput.value = user.email;
 }
 
-deferredSignupFormInitialized = isDeferredSignupProfile();
+deferredSignupFormInitialized = isInlineEmailSignupMode();
+if (deferredSignupFormInitialized) applyInlineEmailSignupControls();
 if (deferredSignupFormInitialized && user.email) {
 completeDeferredSignupEmailVerification(session);
 }
@@ -1977,7 +2000,7 @@ true
 return;
 }
 
-if (isDeferredSignupProfile()) {
+if (deferredSignupFormInitialized) {
 const enteredEmail = normalizeSignupEmail(document.getElementById('verifiedEmail')?.value);
 let authenticatedEmail = '';
 try {
