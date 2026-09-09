@@ -1,6 +1,6 @@
 /*
-Version: v1.0.2
-Change: Link to the canonical cooperative privacy policy instead of duplicating it in a modal.
+Version: v1.0.3
+Change: Apply tenant-specific organization and contact details in the shared footer.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -52,6 +52,42 @@ if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
     document.body.appendChild(overlay);
   };
 }
+
+window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
+  const coopName = String(settings?.coop_name || window.__PUBLIC_SITE_COOP_NAME__ || '').trim();
+  const contactName = String(settings?.contact_name || '').trim();
+  const contactRole = String(settings?.contact_role || '').trim();
+  const phone = String(settings?.contact_phone || '').trim();
+  const email = String(settings?.contact_email || '').trim();
+  const address = String(settings?.contact_address || '').trim();
+  const isSiteMemberProfile = String(settings?.runtime_profile || '') === 'site_member';
+  if (coopName) {
+    const nameEl = document.getElementById('footer-coop-name');
+    const copyrightEl = document.getElementById('footer-copyright-name');
+    if (nameEl) nameEl.textContent = coopName;
+    if (copyrightEl) copyrightEl.textContent = coopName;
+  }
+
+  const phoneSuffix = [contactRole, contactName].filter(Boolean).join(' ');
+  const phoneEl = document.getElementById('footer-contact-phone');
+  const emailEl = document.getElementById('footer-contact-email');
+  const addressEl = document.getElementById('footer-contact-address');
+  if (phoneEl && phone) phoneEl.textContent = phoneSuffix ? `${phone} (${phoneSuffix})` : phone;
+  if (emailEl && email) emailEl.textContent = email;
+  if (addressEl && address) addressEl.textContent = address;
+
+  if (isSiteMemberProfile) {
+    const phoneRow = document.getElementById('footer-contact-phone-row');
+    const emailRow = document.getElementById('footer-contact-email-row');
+    const addressRow = document.getElementById('footer-contact-address-row');
+    const pending = document.getElementById('footer-contact-pending');
+    if (phoneRow) phoneRow.hidden = !phone;
+    if (emailRow) emailRow.hidden = !email;
+    if (addressRow) addressRow.hidden = !address;
+    if (pending) pending.hidden = !!(phone || email || address);
+  }
+};
+
 document.addEventListener("DOMContentLoaded", function() {
     
     // 1. 푸터 HTML
@@ -61,7 +97,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <div class="row">
           
           <div class="col-lg-3 col-md-6 footer-contact">
-            <h3>용인모두의햇빛협동조합</h3>
+            <h3 id="footer-coop-name">용인모두의햇빛협동조합</h3>
             <p>
               햇빛은 누구에게나 공평합니다.<br>
               시민의 힘으로 만드는<br>
@@ -94,10 +130,11 @@ document.addEventListener("DOMContentLoaded", function() {
 <div class="col-lg-4 col-md-6 footer-newsletter">
             <h4>Contact Us</h4>
             <p class="mb-3">궁금한 점이 있으신가요? 언제든 연락주세요.</p>
-            <div style="color:#ddd; font-size:14px; line-height:1.8;">
-              <i class="bi bi-geo-alt me-2 text-success"></i> 경기 용인시 처인구 남사읍 상동로 28<br>
-              <i class="bi bi-envelope me-2 text-success"></i> yonginsolar@gmail.com<br>
-              <i class="bi bi-phone me-2 text-success"></i> 010-2513-5736 (사무국)
+            <div style="color:#ddd; font-size:14px; line-height:1.8;" id="footer-contact-details">
+              <div id="footer-contact-address-row"><i class="bi bi-geo-alt me-2 text-success"></i> <span id="footer-contact-address">경기 용인시 처인구 남사읍 상동로 28</span></div>
+              <div id="footer-contact-email-row"><i class="bi bi-envelope me-2 text-success"></i> <span id="footer-contact-email">yonginsolar@gmail.com</span></div>
+              <div id="footer-contact-phone-row"><i class="bi bi-phone me-2 text-success"></i> <span id="footer-contact-phone">010-2513-5736 (사무국)</span></div>
+              <div id="footer-contact-pending" hidden>공식 연락처를 준비하고 있습니다.</div>
             </div>
           </div>
 
@@ -108,7 +145,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <div class="container d-md-flex py-4">
       <div class="me-md-auto text-center text-md-start">
         <div class="copyright">
-          &copy; Copyright <strong><span>용인모두의햇빛협동조합</span></strong>. All Rights Reserved
+          &copy; Copyright <strong><span id="footer-copyright-name">용인모두의햇빛협동조합</span></strong>. All Rights Reserved
         </div>
         <div class="credits">
           Designed by <a href="https://bootstrapmade.com/">BootstrapMade</a>
