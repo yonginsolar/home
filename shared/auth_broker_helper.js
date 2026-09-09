@@ -1,6 +1,6 @@
 /*
-Version: v1.0.4
-Change: Defer signup auth-state callbacks outside Supabase's auth lock on the signup page.
+Version: v1.0.5
+Change: Allow the yonginsun.kr public and ERP hosts to return safely from the shared social-login broker.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -11,11 +11,15 @@ Change: Defer signup auth-state callbacks outside Supabase's auth lock on the si
     'yonginsolar.kr': true,
     'www.yonginsolar.kr': true,
     'erp.yonginsolar.kr': true,
+    'yonginsun.kr': true,
+    'www.yonginsun.kr': true,
+    'erp.yonginsun.kr': true,
     'auth.coopco.kr': true
   };
 
   var ALLOWED_HOST_SUFFIXES = [
     '.yonginsolar.kr',
+    '.yonginsun.kr',
     '.coopco.kr'
   ];
 
