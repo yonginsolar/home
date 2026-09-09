@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.5.2 | Change: 2026-09-08 - Use the top proposal type as the single source for the basic-information type. -->
+<!-- Version: v1.5.3 | Change: 2026-09-09 - Support multiple registered directors and manually entered companions. -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -99,6 +99,16 @@
     .proposal-kind-button { min-height:64px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-soft); color:var(--ink); font-weight:850; line-height:1.35; cursor:pointer; }
     .proposal-kind-button span { display:block; margin-top:3px; color:var(--muted); font-size:11px; font-weight:650; }
     .proposal-kind-button.active { border-color:var(--green); background:var(--green-soft); box-shadow:0 0 0 2px color-mix(in srgb, var(--green) 14%, transparent); }
+    .companion-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; color:var(--muted); font-size:12px; font-weight:800; }
+    .companion-count { color:var(--green); white-space:nowrap; }
+    .companion-directors { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin-bottom:11px; }
+    .companion-checkbox { display:flex; min-width:0; min-height:38px; padding:7px 8px; align-items:center; gap:7px; border:1px solid var(--line); border-radius:9px; background:var(--surface-soft); color:var(--ink); font-size:12px; font-weight:750; cursor:pointer; }
+    .companion-checkbox input { width:17px; height:17px; margin:0; accent-color:var(--green); }
+    .companion-list { display:grid; gap:8px; margin:0 0 10px; }
+    .companion-row { display:grid; grid-template-columns:minmax(92px,.8fr) minmax(130px,1.2fr) auto; gap:7px; align-items:end; padding:9px; border:1px solid var(--line); border-radius:11px; background:var(--surface-soft); }
+    .companion-row .field { margin:0; }
+    .companion-fixed-name { display:flex; min-height:42px; padding:9px 10px; align-items:center; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); font-weight:800; }
+    .companion-remove { min-width:42px; min-height:42px; padding:0 10px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--danger); font-weight:850; cursor:pointer; }
     .existing-toggle input { flex: 0 0 auto; margin-top: 0; }
     .field input:disabled { opacity: .66; cursor: not-allowed; }
     .field select:disabled { opacity: 1; cursor: default; background: var(--surface-soft); color: var(--green); font-weight: 850; -webkit-text-fill-color: var(--green); }
@@ -126,6 +136,10 @@
       .back-link { min-height: 38px; padding-inline: 10px; }
       .editor { padding: 11px; }
       .grid-2 { grid-template-columns: 1fr; }
+      .companion-directors { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .companion-row { grid-template-columns:1fr auto; }
+      .companion-row .companion-phone-field { grid-column:1 / 2; }
+      .companion-row .companion-remove { grid-column:2; grid-row:1 / span 2; align-self:stretch; }
       .overlay-count { width: 100%; margin-left: 0; }
       .editor-actions { bottom: -11px; margin: 4px -11px -11px; padding: 11px; }
     }
@@ -149,7 +163,7 @@
   <main class="app-shell" id="appShell">
     <header class="topbar">
       <div class="title-wrap">
-        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.5.2</span></strong>
+        <strong>📑 제안서 만들기 <span id="appVersion" style="display:inline;color:var(--muted);font-size:11px">v1.5.3</span></strong>
         <span>공공기관·주차장용과 학교용을 구분해 18쪽 제안서를 만듭니다.</span>
       </div>
       <div class="top-actions">
@@ -416,14 +430,34 @@
                 <input id="officePhone" name="officePhone" type="text" value="010-2513-5736" maxlength="30">
               </div>
             </div>
-            <div class="grid-2">
-              <div class="field"><label for="visitDirector">동행 이사 · 마지막 쪽 표시</label><select id="visitDirector"><option value="">동행 이사 표시 안 함</option><option>곽선진</option><option>김명애</option><option>김재술</option><option>민순기</option><option>박유진</option><option>박형영</option><option>백소영</option><option>신소영</option><option>오호영</option><option>이수재</option><option>이재범</option><option>정진화</option></select></div>
-              <div class="field"><label for="visitDirectorPhone">동행 이사 전화번호</label><input id="visitDirectorPhone" type="tel" maxlength="30" placeholder="이사를 선택하면 등록된 연락처를 불러옵니다" aria-describedby="directorPhoneStatus"></div>
+            <div data-companion-controls>
+              <div class="companion-heading"><span>등록 이사 선택 · 여러 명 가능</span><strong class="companion-count" id="visitCompanionCount">동행자 0명</strong></div>
+              <div class="companion-directors" id="visitDirectorChoices" role="group" aria-label="동행 이사 선택">
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="곽선진"><span>곽선진</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="김명애"><span>김명애</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="김재술"><span>김재술</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="민순기"><span>민순기</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="박유진"><span>박유진</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="박형영"><span>박형영</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="백소영"><span>백소영</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="신소영"><span>신소영</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="오호영"><span>오호영</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="이수재"><span>이수재</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="이재범"><span>이재범</span></label>
+                <label class="companion-checkbox"><input type="checkbox" data-visit-director value="정진화"><span>정진화</span></label>
+              </div>
+              <input id="visitCompanionsJson" type="hidden" value="[]">
+              <input id="visitDirector" type="hidden" value="">
+              <input id="visitDirectorPhone" type="hidden" value="">
+              <div class="companion-list" id="visitCompanionRows" aria-label="동행자 이름과 연락처"></div>
+              <div class="overlay-button-row">
+                <button class="btn" type="button" id="addVisitCompanionButton">+ 다른 동행자 추가</button>
+                <button class="btn" type="button" id="refreshDirectorPhonesButton" disabled>🔄 선택한 이사 등록 번호 다시 불러오기</button>
+              </div>
+              <p class="help" id="directorPhoneStatus" role="status" aria-live="polite">이사를 체크하면 ERP에 등록된 연락처를 자동 입력합니다. 이사가 아닌 동행자는 이름과 전화번호를 직접 추가할 수 있습니다.</p>
+              <p class="help">보관한 제안서를 열 때는 당시 번호를 유지합니다. ‘다시 불러오기’를 누르면 선택한 이사의 등록 번호만 갱신하며, 임원·조합원 원장은 수정하지 않습니다.</p>
+              <span class="help">마지막 쪽에는 이사장 → 선택한 이사 → 직접 추가한 동행자 → 사무국장 순서로 표시됩니다.</span>
             </div>
-            <button class="btn" type="button" id="refreshDirectorPhoneButton" disabled>🔄 등록 번호로 다시 불러오기</button>
-            <p class="help" id="directorPhoneStatus" role="status" aria-live="polite">이사를 선택하면 ERP에 등록된 연락처를 자동 입력합니다. 제안서에서 직접 수정할 수 있습니다.</p>
-            <p class="help">보관한 제안서를 열 때는 당시 번호를 유지합니다. ‘다시 불러오기’를 누르면 등록된 번호로 바뀌며, 임원·조합원 원장의 연락처는 수정하지 않습니다.</p>
-            <span class="help">마지막 쪽 연락처는 이사장 → 동행 이사 → 사무국장 순서입니다. 이사를 선택하지 않으면 해당 행은 나오지 않습니다.</span>
           </div>
         </details>
 
@@ -455,7 +489,7 @@
   <script src="proposal_presets.js?v=1.5.0"></script>
   <script src="proposal_drafts.js?v=1.4.5"></script>
   <script src="proposal_library.js?v=1.5.1"></script>
-  <script src="proposal_sections.js?v=1.5.0"></script>
-  <script src="proposal_builder.js?v=1.5.2"></script>
+  <script src="proposal_sections.js?v=1.5.1"></script>
+  <script src="proposal_builder.js?v=1.5.3"></script>
 </body>
 </html>

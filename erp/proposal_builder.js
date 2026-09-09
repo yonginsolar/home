@@ -1,13 +1,14 @@
-/* Version: v1.5.2 | 2026-09-08 | Keep the top public/school choice synchronized with the basic-information type. */
+/* Version: v1.5.3 | 2026-09-09 | Support multiple directors and manually entered proposal companions. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.2';
+  const VERSION = '1.5.3';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+  const DIRECTOR_NAMES = ['곽선진', '김명애', '김재술', '민순기', '박유진', '박형영', '백소영', '신소영', '오호영', '이수재', '이재범', '정진화'];
   const DRAFT_FIELDS = [
     'facilityType', 'siteProposalNote', 'mandatoryKnown', 'existingInstallationKnown', 'noMandatory', 'voluntaryBaseKw',
     'proposalDate', 'proposalVersion', 'facilityName', 'regionFull', 'regionShort', 'siteAddress',
@@ -15,7 +16,7 @@
     'sunHours', 'operationPct', 'returnPct', 'constructionMonth', 'completionMinMonth',
     'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
     'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay',
-    'visitDirector', 'visitDirectorPhone', 'statsAsOf',
+    'visitCompanionsJson', 'visitDirector', 'visitDirectorPhone', 'statsAsOf',
     'schoolPublicProgramStatus', 'schoolPublicProgramKw', 'schoolInstallArea'
   ];
 
@@ -187,6 +188,112 @@
       .slice(0, 8);
   }
 
+  function normalizeVisitCompanions(value, { keepBlank = false } = {}) {
+    let raw = value;
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw || '[]'); } catch (_) { raw = []; }
+    }
+    if (!Array.isArray(raw)) return [];
+    const directorSet = new Set(DIRECTOR_NAMES);
+    const seenDirectors = new Set();
+    return raw.slice(0, 24).flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const kind = entry.kind === 'director' ? 'director' : 'other';
+      const name = String(entry.name || '').trim().slice(0, 80);
+      const phone = String(entry.phone || '').trim().slice(0, 30);
+      if (kind === 'director') {
+        if (!directorSet.has(name) || seenDirectors.has(name)) return [];
+        seenDirectors.add(name);
+      } else if (!keepBlank && !name) return [];
+      return [{ kind, name, phone }];
+    });
+  }
+
+  function readVisitCompanions(keepBlank = false) {
+    return normalizeVisitCompanions(document.getElementById('visitCompanionsJson')?.value, { keepBlank });
+  }
+
+  function syncVisitCompanionStorage(rows) {
+    const normalized = normalizeVisitCompanions(rows, { keepBlank: true });
+    document.getElementById('visitCompanionsJson').value = JSON.stringify(normalized);
+    const firstDirector = normalized.find((entry) => entry.kind === 'director');
+    document.getElementById('visitDirector').value = firstDirector?.name || '';
+    document.getElementById('visitDirectorPhone').value = firstDirector?.phone || '';
+    document.getElementById('visitCompanionCount').textContent = `동행자 ${normalized.filter((entry) => entry.kind === 'director' || entry.name).length}명`;
+    document.getElementById('refreshDirectorPhonesButton').disabled = !normalized.some((entry) => entry.kind === 'director');
+    return normalized;
+  }
+
+  function makeCompanionField(labelText, input) {
+    const field = document.createElement('div');
+    field.className = `field${input.dataset.companionField === 'phone' ? ' companion-phone-field' : ''}`;
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    field.append(label, input);
+    return field;
+  }
+
+  function renderVisitCompanionEditor() {
+    const rows = syncVisitCompanionStorage(readVisitCompanions(true));
+    const selected = new Set(rows.filter((entry) => entry.kind === 'director').map((entry) => entry.name));
+    document.querySelectorAll('[data-visit-director]').forEach((input) => { input.checked = selected.has(input.value); });
+    const container = document.getElementById('visitCompanionRows');
+    container.replaceChildren(...rows.map((entry, index) => {
+      const row = document.createElement('div');
+      row.className = 'companion-row';
+      row.dataset.companionIndex = String(index);
+      row.dataset.companionKind = entry.kind;
+      if (entry.kind === 'director') {
+        const nameField = document.createElement('div');
+        nameField.className = 'field';
+        const label = document.createElement('label'); label.textContent = '동행 이사';
+        const name = document.createElement('div'); name.className = 'companion-fixed-name'; name.textContent = entry.name;
+        name.dataset.companionName = entry.name;
+        nameField.append(label, name); row.append(nameField);
+      } else {
+        const name = document.createElement('input');
+        name.type = 'text'; name.maxLength = 80; name.value = entry.name;
+        name.placeholder = '이름'; name.autocomplete = 'off'; name.dataset.companionField = 'name';
+        row.append(makeCompanionField('다른 동행자 이름', name));
+      }
+      const phone = document.createElement('input');
+      phone.type = 'tel'; phone.maxLength = 30; phone.value = entry.phone;
+      phone.placeholder = entry.kind === 'director' ? '등록 번호를 불러오거나 직접 입력' : '전화번호';
+      phone.autocomplete = 'off'; phone.dataset.companionField = 'phone';
+      row.append(makeCompanionField('전화번호', phone));
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.className = 'companion-remove'; remove.dataset.removeCompanion = String(index);
+      remove.textContent = '삭제'; remove.setAttribute('aria-label', `${entry.name || '동행자'} 삭제`);
+      row.append(remove);
+      return row;
+    }));
+  }
+
+  function setVisitCompanions(rows, { render = true } = {}) {
+    const normalized = syncVisitCompanionStorage(rows);
+    if (render) renderVisitCompanionEditor();
+    return normalized;
+  }
+
+  function restoreVisitCompanions(fields) {
+    const stored = normalizeVisitCompanions(fields?.visitCompanionsJson, { keepBlank: true });
+    const legacyName = String(fields?.visitDirector || '').trim();
+    const rows = stored.length ? stored : (DIRECTOR_NAMES.includes(legacyName)
+      ? [{ kind: 'director', name: legacyName, phone: String(fields?.visitDirectorPhone || '').trim().slice(0, 30) }]
+      : []);
+    setVisitCompanions(rows);
+  }
+
+  function rowsFromCompanionEditor() {
+    return [...document.querySelectorAll('#visitCompanionRows .companion-row')].map((row) => ({
+      kind: row.dataset.companionKind === 'director' ? 'director' : 'other',
+      name: row.dataset.companionKind === 'director'
+        ? String(row.querySelector('[data-companion-name]')?.dataset.companionName || '')
+        : String(row.querySelector('[data-companion-field="name"]')?.value || ''),
+      phone: String(row.querySelector('[data-companion-field="phone"]')?.value || '')
+    }));
+  }
+
   function trimNumber(value, maximumFractionDigits = 1) {
     return Number(value).toLocaleString('ko-KR', {
       minimumFractionDigits: 0,
@@ -281,6 +388,7 @@
       organizationMembers: Math.round(numberValue('organizationMembers')),
       chairPhone: textValue('chairPhone'),
       officePhone: textValue('officePhone'),
+      visitCompanions: readVisitCompanions(false),
       visitDirector: textValue('visitDirector'),
       visitDirectorPhone: textValue('visitDirectorPhone'),
       statsAsOf: textValue('statsAsOf'),
@@ -1077,26 +1185,31 @@
 
   function setFields(fields) {
     fields = {
-      visitDirector: '', visitDirectorPhone: '', statsAsOf: '',
+      visitCompanionsJson: '', visitDirector: '', visitDirectorPhone: '', statsAsOf: '',
       schoolPublicProgramStatus: 'checking', schoolPublicProgramKw: '', schoolInstallArea: 'both',
       ...fields
     };
     DRAFT_FIELDS.forEach((id) => {
       if (!(id in fields)) return;
       const input = document.getElementById(id);
+      if (id === 'visitCompanionsJson') {
+        input.value = String(fields[id] ?? '').slice(0, 10000);
+        return;
+      }
       if (input.type === 'checkbox') input.checked = fields[id] === true;
       else input.value = String(fields[id] ?? '').slice(0, input.maxLength > 0 ? input.maxLength : 1000);
     });
+    restoreVisitCompanions(fields);
     normalizeExistingZero();
     syncExistingInstallationUi();
     syncSchoolPlanningUi();
-    invalidateDirectorContact('보관한 연락처를 유지합니다. 최신 번호가 필요하면 다시 불러오기를 눌러 주세요.');
+    invalidateDirectorContact('보관한 연락처를 유지합니다. 선택한 이사의 최신 번호가 필요하면 다시 불러오기를 눌러 주세요.');
   }
 
   function invalidateDirectorContact(message = '') {
     state.directorPhoneRevision += 1;
     state.directorContactRequest = null;
-    document.getElementById('refreshDirectorPhoneButton').disabled = !textValue('visitDirector');
+    document.getElementById('refreshDirectorPhonesButton').disabled = !readVisitCompanions(true).some((entry) => entry.kind === 'director');
     document.getElementById('directorPhoneStatus').textContent = message;
   }
 
@@ -1113,49 +1226,76 @@
         ...model, chairPhone: displayed.chairPhone ?? model.chairPhone, officePhone: displayed.officePhone ?? model.officePhone
       });
       if (state.previewFields) {
+        state.previewFields.visitCompanionsJson = document.getElementById('visitCompanionsJson').value;
         state.previewFields.visitDirector = model.visitDirector;
         state.previewFields.visitDirectorPhone = model.visitDirectorPhone;
       }
     } else scheduleRender();
   }
 
-  function refreshDirectorPhone() {
-    const button = document.getElementById('refreshDirectorPhoneButton');
+  function refreshDirectorPhones({ force = false } = {}) {
+    const button = document.getElementById('refreshDirectorPhonesButton');
     const status = document.getElementById('directorPhoneStatus');
-    const name = textValue('visitDirector'), coopId = state.coopId;
-    if (!name) { invalidateDirectorContact('동행 이사를 선택해 주세요.'); return Promise.resolve(); }
+    const companions = readVisitCompanions(true), coopId = state.coopId;
+    const names = companions.filter((entry) => entry.kind === 'director' && (force || !entry.phone)).map((entry) => entry.name);
+    if (!companions.some((entry) => entry.kind === 'director')) { invalidateDirectorContact('동행 이사를 한 명 이상 선택해 주세요.'); return Promise.resolve(); }
+    if (!names.length) { status.textContent = '선택한 이사의 연락처가 모두 입력되어 있습니다. 최신 등록 번호로 바꾸려면 다시 불러오기 버튼을 누르세요.'; return Promise.resolve(); }
     if (!coopId) { status.textContent = 'ERP 로그인 확인 후 연락처를 불러올 수 있습니다. 직접 입력한 번호는 유지합니다.'; return Promise.resolve(); }
     const epoch = state.documentEpoch || 0, revision = state.directorPhoneRevision;
+    const before = document.getElementById('visitCompanionsJson').value;
     const previous = state.directorContactRequest;
-    if (previous && previous.name === name && previous.coopId === coopId && previous.epoch === epoch && previous.revision === revision) return previous.promise;
-    const phoneInput = document.getElementById('visitDirectorPhone');
-    const before = phoneInput.value;
-    const request = { name, coopId, epoch, revision, promise: null };
+    const requestKey = JSON.stringify(names);
+    if (previous && previous.requestKey === requestKey && previous.force === force && previous.coopId === coopId && previous.epoch === epoch && previous.revision === revision) return previous.promise;
+    const request = { requestKey, force, coopId, epoch, revision, promise: null };
     state.directorContactRequest = request;
-    const current = () => state.directorContactRequest === request && state.coopId === coopId && (state.documentEpoch || 0) === epoch && state.directorPhoneRevision === revision && textValue('visitDirector') === name && phoneInput.value === before;
-    button.disabled = true; status.textContent = '선택한 이사의 등록 연락처를 불러오고 있습니다…';
+    const current = () => state.directorContactRequest === request && state.coopId === coopId && (state.documentEpoch || 0) === epoch && state.directorPhoneRevision === revision && document.getElementById('visitCompanionsJson').value === before;
+    button.disabled = true; status.textContent = names.length > 1 ? `선택한 이사 ${names.length}명의 등록 연락처를 불러오고 있습니다…` : '선택한 이사의 등록 연락처를 불러오고 있습니다…';
     request.promise = (async () => {
       try {
         const client = getClient();
         const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
-        const officials = await withTimeout(client.from('coop_officials').select('member_id')
-          .eq('coop_id', coopId).eq('category', 'executive').eq('role', '이사').eq('status', 'active').eq('name', name)
+        const officials = await withTimeout(client.from('coop_officials').select('name,member_id')
+          .eq('coop_id', coopId).eq('category', 'executive').eq('role', '이사').eq('status', 'active').in('name', names)
           .lte('term_start_date', today).gte('term_end_date', today)
-          .or(`real_end_date.is.null,real_end_date.gte.${today}`).limit(2), 'DIRECTOR_IDENTITY');
+          .or(`real_end_date.is.null,real_end_date.gte.${today}`).limit(Math.max(2, names.length * 2)), 'DIRECTOR_IDENTITY');
         if (!current()) return;
         if (officials.error) throw new Error('CONTACT_UNAVAILABLE');
-        const rows = Array.isArray(officials.data) ? officials.data : [];
-        if (rows.length !== 1 || !rows[0].member_id) throw new Error(rows.length > 1 ? 'CONTACT_AMBIGUOUS' : 'CONTACT_NOT_FOUND');
-        const member = await withTimeout(client.from('coop_members').select('phone')
-          .eq('coop_id', coopId).eq('member_id', rows[0].member_id).limit(2), 'DIRECTOR_PHONE');
+        const officialsByName = new Map();
+        for (const row of Array.isArray(officials.data) ? officials.data : []) {
+          if (!names.includes(row?.name) || !row?.member_id) continue;
+          const ids = officialsByName.get(row.name) || new Set(); ids.add(row.member_id); officialsByName.set(row.name, ids);
+        }
+        const identityByName = new Map();
+        for (const name of names) {
+          const ids = [...(officialsByName.get(name) || [])];
+          if (ids.length === 1) identityByName.set(name, ids[0]);
+        }
+        const memberIds = [...new Set(identityByName.values())];
+        if (!memberIds.length) throw new Error([...officialsByName.values()].some((ids) => ids.size > 1) ? 'CONTACT_AMBIGUOUS' : 'CONTACT_NOT_FOUND');
+        const member = await withTimeout(client.from('coop_members').select('member_id,phone')
+          .eq('coop_id', coopId).in('member_id', memberIds).limit(Math.max(2, memberIds.length * 2)), 'DIRECTOR_PHONE');
         if (!current()) return;
         if (member.error) throw new Error('CONTACT_UNAVAILABLE');
         const matches = Array.isArray(member.data) ? member.data : [];
-        const phone = matches.length === 1 && typeof matches[0].phone === 'string' ? matches[0].phone.trim() : '';
-        if (!phone || phone.length > 30 || !/^[0-9+().\s-]+$/.test(phone)) throw new Error('CONTACT_NOT_FOUND');
-        phoneInput.value = phone;
+        const phoneByMemberId = new Map();
+        for (const row of matches) {
+          const phone = typeof row?.phone === 'string' ? row.phone.trim() : '';
+          if (row?.member_id && phone && phone.length <= 30 && /^[0-9+().\s-]+$/.test(phone)) phoneByMemberId.set(row.member_id, phone);
+        }
+        let imported = 0;
+        const unresolved = [];
+        const updated = companions.map((entry) => {
+          if (entry.kind !== 'director' || !names.includes(entry.name)) return entry;
+          const phone = phoneByMemberId.get(identityByName.get(entry.name));
+          if (!phone) { unresolved.push(entry.name); return entry; }
+          imported += 1; return { ...entry, phone };
+        });
+        if (!imported) throw new Error([...officialsByName.values()].some((ids) => ids.size > 1) ? 'CONTACT_AMBIGUOUS' : 'CONTACT_NOT_FOUND');
+        setVisitCompanions(updated);
         state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
-        status.textContent = '등록된 연락처를 입력했습니다. 제안서에 사용할 번호인지 확인하고 필요하면 직접 수정해 주세요.';
+        status.textContent = unresolved.length
+          ? `${imported}명의 등록 연락처를 입력했습니다. ${unresolved.length}명은 등록 번호를 확인할 수 없어 기존 입력값을 유지했습니다.`
+          : `${imported}명의 등록 연락처를 입력했습니다. 제안서에 사용할 번호인지 확인하고 필요하면 직접 수정해 주세요.`;
       } catch (error) {
         if (!current()) return;
         status.textContent = error?.message === 'CONTACT_AMBIGUOUS'
@@ -1165,7 +1305,7 @@
       } finally {
         if (state.directorContactRequest === request) {
           state.directorContactRequest = null;
-          button.disabled = !textValue('visitDirector');
+          button.disabled = !readVisitCompanions(true).some((entry) => entry.kind === 'director');
         }
       }
     })();
@@ -1217,7 +1357,7 @@
   }
 
   async function startSite(preset) {
-    const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()), visitDirector: '', visitDirectorPhone: '' };
+    const fields = { ...collectFields(), ...(preset?.fields || window.ProposalPresets.blank()), visitCompanionsJson: '[]', visitDirector: '', visitDirectorPhone: '' };
     if (!fields.facilityName) fields.facilityName = '새 대상지';
     await restoreSnapshot({ format: 1, fields, photo: '', overlays: [], copyEdits: [], useSamplePhoto: false });
     await refreshCoopStats();
@@ -1354,7 +1494,7 @@
     await state.imageLoadPromise;
     const contactRequest = state.directorContactRequest;
     if (contactRequest) await contactRequest.promise;
-    if (state.directorContactRequest) throw new Error('이사 연락처를 불러오는 중입니다. 입력이 끝난 뒤 다시 저장해 주세요.');
+    if (state.directorContactRequest) throw new Error('동행 이사 연락처를 불러오는 중입니다. 입력이 끝난 뒤 다시 저장해 주세요.');
     if (state.imageLoadError) throw state.imageLoadError;
     if (!el.form.reportValidity()) throw new Error('입력값을 확인한 뒤 다시 저장해 주세요.');
     validateModel(readModel());
@@ -1449,7 +1589,8 @@
     el.form.reset();
     state.documentEpoch = (state.documentEpoch || 0) + 1;
     state.useSamplePhoto = true;
-    invalidateDirectorContact('동행 이사를 선택하면 등록된 연락처를 불러옵니다.');
+    setVisitCompanions([]);
+    invalidateDirectorContact('동행 이사를 체크하면 등록된 연락처를 불러옵니다.');
     state.photoName = '';
     state.loadedCopyEdits = [];
     state.copyRestoreMismatch = false;
@@ -1481,17 +1622,8 @@
       if (event.target === el.siteImage) return;
       if (event.target === el.overlayAngle) return;
       if (event.target.closest('[data-library-controls]')) return;
+      if (event.target.closest('[data-companion-controls]')) return;
       state.library?.markDirty();
-      if (event.target.id === 'visitDirector') {
-        invalidateDirectorContact();
-        document.getElementById('visitDirectorPhone').value = '';
-        syncDirectorContactPreview();
-        void refreshDirectorPhone();
-      }
-      if (event.target.id === 'visitDirectorPhone') {
-        invalidateDirectorContact('직접 입력한 번호를 사용합니다. 등록 번호로 바꾸려면 다시 불러오기를 눌러 주세요.');
-        syncDirectorContactPreview();
-      }
       if (event.target.id === 'existingInstallationStatus') {
         const status = event.target.value;
         document.getElementById('existingInstallationKnown').checked = status !== 'unknown';
@@ -1505,7 +1637,48 @@
       if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
       saveDraft();
-      if (!['visitDirector', 'visitDirectorPhone'].includes(event.target.id)) scheduleRender();
+      scheduleRender();
+    });
+    document.getElementById('visitDirectorChoices').addEventListener('change', (event) => {
+      const checkbox = event.target.closest('[data-visit-director]');
+      if (!checkbox) return;
+      invalidateDirectorContact();
+      const rows = readVisitCompanions(true).filter((entry) => !(entry.kind === 'director' && entry.name === checkbox.value));
+      if (checkbox.checked) rows.push({ kind: 'director', name: checkbox.value, phone: '' });
+      setVisitCompanions(rows);
+      state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
+      if (checkbox.checked) void refreshDirectorPhones();
+    });
+    document.getElementById('addVisitCompanionButton').addEventListener('click', () => {
+      invalidateDirectorContact('이름과 전화번호를 입력해 주세요.');
+      const rows = readVisitCompanions(true);
+      if (rows.length >= 24) {
+        document.getElementById('directorPhoneStatus').textContent = '동행자는 한 제안서에 최대 24명까지 넣을 수 있습니다.';
+        return;
+      }
+      rows.push({ kind: 'other', name: '', phone: '' });
+      setVisitCompanions(rows);
+      state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
+      document.querySelector('#visitCompanionRows .companion-row:last-child [data-companion-field="name"]')?.focus();
+    });
+    document.getElementById('visitCompanionRows').addEventListener('input', (event) => {
+      if (!event.target.matches('[data-companion-field]')) return;
+      invalidateDirectorContact(event.target.dataset.companionField === 'phone'
+        ? '직접 입력한 번호를 사용합니다. 선택한 이사의 등록 번호로 바꾸려면 다시 불러오기를 눌러 주세요.'
+        : '입력한 동행자 이름을 마지막 쪽에 표시합니다.');
+      syncVisitCompanionStorage(rowsFromCompanionEditor());
+      state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
+    });
+    document.getElementById('visitCompanionRows').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-remove-companion]');
+      if (!button) return;
+      const index = Number(button.dataset.removeCompanion);
+      const rows = readVisitCompanions(true);
+      if (!Number.isInteger(index) || !rows[index]) return;
+      const removed = rows.splice(index, 1)[0];
+      invalidateDirectorContact(`${removed.name || '동행자'}을(를) 목록에서 뺐습니다.`);
+      setVisitCompanions(rows);
+      state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
     });
     el.siteImage.addEventListener('change', () => {
       state.imageLoadError = null;
@@ -1532,7 +1705,7 @@
     el.downloadButton.addEventListener('click', downloadHtml);
     el.resetButton.addEventListener('click', resetSample);
     document.getElementById('refreshCoopStatsButton').addEventListener('click', () => refreshCoopStats());
-    document.getElementById('refreshDirectorPhoneButton').addEventListener('click', () => { void refreshDirectorPhone(); });
+    document.getElementById('refreshDirectorPhonesButton').addEventListener('click', () => { void refreshDirectorPhones({ force: true }); });
   }
 
   async function boot() {
@@ -1581,6 +1754,7 @@
       if (!state.templateHtml.includes('class="slide')) throw new Error('TEMPLATE_INVALID');
       state.draftKey = `${DRAFT_KEY}.${userGate.user.coop_id}`;
       const hadDraft = restoreDraft();
+      renderVisitCompanionEditor();
       syncExistingInstallationUi();
       syncSchoolPlanningUi();
       updateOverlayControls();

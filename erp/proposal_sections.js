@@ -1,13 +1,20 @@
-/* Version: v1.5.0 | A distinct school proposal story complements public self-consumption with citizen generation. */
+/* Version: v1.5.1 | Render any number of proposal companions without shrinking print text below 11pt. */
 (() => {
   'use strict';
   function renderContacts(doc, m) {
     const contact = doc.querySelectorAll('.slide')[17]?.querySelector('.contact');
     if (!contact) throw new Error('CONTACT_PREVIEW_NOT_READY');
     const orgName = contact.children[0].textContent, address = contact.children[1].textContent;
-    const people = [['이사장', '김민정', m.chairPhone], ...(m.visitDirector ? [['이사', m.visitDirector, m.visitDirectorPhone]] : []), ['사무국장', '김민호', m.officePhone]];
-    const org = doc.createElement('b'); org.textContent = orgName;
-    const location = doc.createElement('span'); location.textContent = address;
+    const companions = Array.isArray(m.visitCompanions)
+      ? m.visitCompanions.filter((entry) => entry && typeof entry === 'object' && String(entry.name || '').trim()).slice(0, 24)
+      : (m.visitDirector ? [{ kind: 'director', name: m.visitDirector, phone: m.visitDirectorPhone }] : []);
+    const people = [
+      ['이사장', '김민정', m.chairPhone],
+      ...companions.map((entry) => [entry.kind === 'director' ? '이사' : '동행', String(entry.name || '').trim(), String(entry.phone || '').trim()]),
+      ['사무국장', '김민호', m.officePhone]
+    ];
+    const org = doc.createElement('b'); org.className = 'contact-org'; org.textContent = orgName;
+    const location = doc.createElement('span'); location.className = 'contact-address'; location.textContent = address;
     contact.replaceChildren(org, location, ...people.flatMap(([role, name, phone]) => {
       const label = doc.createElement('b'); label.className = 'contact-person-label';
       const roleText = doc.createElement('span'); roleText.className = 'contact-person-role'; roleText.textContent = role + ' ';
@@ -16,7 +23,14 @@
       const value = doc.createElement('span'); value.className = 'contact-person-phone'; value.textContent = phone;
       return [label, value];
     }));
-    Object.assign(contact.style, { fontSize: '12pt', padding: '14px 22px', marginTop: '16px', gap: '7px 22px' });
+    contact.classList.toggle('contact-many', people.length > 4);
+    contact.classList.toggle('contact-crowded', people.length > 8);
+    Object.assign(contact.style, {
+      fontSize: people.length > 8 ? '11pt' : '12pt',
+      padding: people.length > 8 ? '9px 14px' : '14px 22px',
+      marginTop: people.length > 8 ? '10px' : '16px',
+      gap: people.length > 8 ? '4px 14px' : '7px 22px'
+    });
   }
   function renderStats(doc, m) {
     const slide = doc.querySelectorAll('.slide')[8];
@@ -300,9 +314,15 @@
       .proposal-capacity-summary.capacity-two-column .grid-2 .lead { font-size:16pt !important; line-height:1.4; }
       .proposal-capacity-summary.capacity-two-column .source { margin-top:14px; }
       .closing .contact { align-items:baseline; max-width:100%; }
-      .closing .contact-person-label { display:grid; grid-template-columns:4em minmax(0,1fr); column-gap:12pt; align-items:baseline; }
-      .closing .contact-person-role, .closing .contact-person-name { white-space:nowrap; }
-      .closing .contact-person-phone { overflow-wrap:anywhere; }`;
+      .closing .contact-person-label { display:grid; min-width:0; grid-template-columns:4em minmax(0,1fr); column-gap:12pt; align-items:baseline; }
+      .closing .contact-person-role { white-space:nowrap; }
+      .closing .contact-person-name { min-width:0; overflow-wrap:anywhere; }
+      .closing .contact-person-phone { min-width:0; overflow-wrap:anywhere; }
+      .closing .contact.contact-many { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr); }
+      .closing .contact.contact-many .contact-org { grid-column:1 / 2; }
+      .closing .contact.contact-many .contact-address { grid-column:2 / -1; }
+      .closing .contact.contact-crowded .contact-person-label { column-gap:7pt; }
+      .closing .contact.contact-crowded .contact-person-phone { line-height:1.25; }`;
     doc.head.append(styles);
 
     put(4, 'h2', m.noMandatory ? '시설 여건에 맞는 자발적 설치를 제안합니다'
