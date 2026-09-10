@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.147
-Change: Add tenant organization, capital guidance, and legal-document settings for the site/member profile.
+Version: v1.0.148
+Change: Keep site/member organization settings visible and remove unsupported homepage sections.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.147';
+window.ADMIN_MEMBER_VERSION = 'v1.0.148';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -283,6 +283,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <a class="nav-link" onclick="switchTab('members')" id="nav-members" style="cursor:pointer;">
 <i class="bi bi-people-fill"></i> 조합원 명부
+</a>
+<a class="nav-link hidden" onclick="openMemberCertificateSettingsModal()" id="nav-org-settings" style="cursor:pointer;">
+<i class="bi bi-building-gear"></i> 조합 기본 설정
 </a>
 <a class="nav-link" onclick="location.href='participation?view=meeting'" id="nav-meeting-participation" style="cursor:pointer;">
 <i class="bi bi-calendar2-check-fill"></i> 이사회·총회 참석 관리
@@ -7336,6 +7339,21 @@ is_visible: true
 })
 ]);
 
+const SITE_MEMBER_REMOVED_SECTION_IDS = Object.freeze([
+'calculator',
+'ops-system',
+'game-hall'
+]);
+
+function isSiteMemberRemovedSection(sectionId) {
+return isAdminMemberSiteProfile()
+&& SITE_MEMBER_REMOVED_SECTION_IDS.includes(String(sectionId || '').trim());
+}
+
+function getRequiredSiteSectionsForCurrentProfile() {
+return REQUIRED_SITE_SECTIONS.filter((section) => !isSiteMemberRemovedSection(section?.id));
+}
+
 const SECTION_VISUAL_ORDER = Object.freeze({
 hero: 1,
 about: 2,
@@ -7486,18 +7504,20 @@ renderSectionSeedHint('섹션 목록을 불러오지 못했습니다. 잠시 후
 return;
 }
 
+const visibleData = (Array.isArray(data) ? data : []).filter((section) => !isSiteMemberRemovedSection(section?.id));
+const requiredSections = getRequiredSiteSectionsForCurrentProfile();
 const tbody = document.getElementById('sectionListBody');
 tbody.innerHTML = '';
 renderSectionSeedHint('', true);
 
-if (!data || data.length === 0) {
+if (visibleData.length === 0) {
 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3">섹션 정보가 없습니다.</td></tr>';
-renderSectionSeedButton(REQUIRED_SITE_SECTIONS);
+renderSectionSeedButton(requiredSections);
 renderSectionSeedHint('site_sections가 비어 있어 필수 홈페이지 섹션을 표시할 수 없습니다. 먼저 누락 섹션 등록을 실행하세요.', true);
 return;
 }
 
-const sortedSections = [...data].sort((a, b) => {
+const sortedSections = [...visibleData].sort((a, b) => {
 const aOrder = getSectionDisplayOrder(a);
 const bOrder = getSectionDisplayOrder(b);
 if (aOrder !== bOrder) return aOrder - bOrder;
@@ -7507,7 +7527,7 @@ return String(a.id || '').localeCompare(String(b.id || ''));
 g_siteSections = sortedSections;
 g_sectionDrafts = sortedSections.map((sec) => ({ ...sec, display_order: getSectionDisplayOrder(sec), is_visible: sec.is_visible === true }));
 
-const missingRequiredSections = REQUIRED_SITE_SECTIONS.filter((requiredSec) => (
+const missingRequiredSections = requiredSections.filter((requiredSec) => (
 !sortedSections.some((sec) => sec && sec.id === requiredSec.id)
 ));
 renderSectionSeedButton(missingRequiredSections);
@@ -7524,7 +7544,7 @@ const btn = document.getElementById('btnSeedRequiredSections');
 if (btn) btn.disabled = true;
 
 try {
-for (const section of REQUIRED_SITE_SECTIONS) {
+for (const section of getRequiredSiteSectionsForCurrentProfile()) {
 const { error } = await _supabase.rpc('upsert_site_section_secure', {
 p_id: section.id,
 p_name: section.name,
@@ -10837,6 +10857,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-dashboard', dashboardEnabled],
 ['memberAdminCategory', memberAdminEnabled],
 ['nav-members', memberAdminEnabled],
+['nav-org-settings', isSiteMemberProfile && memberAdminEnabled],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
 ['nav-applications', memberAdminEnabled],
