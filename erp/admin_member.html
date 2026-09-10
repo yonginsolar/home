@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.146
-Change: Simplify the site/member profile detail view to basic information, capital, and consultation history.
+Version: v1.0.147
+Change: Add tenant organization, capital guidance, and legal-document settings for the site/member profile.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.146';
+window.ADMIN_MEMBER_VERSION = 'v1.0.147';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -592,7 +592,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">조합원 명부</h3>
         <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-dark hidden" id="member-certificate-settings-button" onclick="openMemberCertificateSettingsModal()">🖋️ 출자증서 설정</button>
+            <button class="btn btn-sm btn-outline-dark hidden" id="member-certificate-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button>
             <button class="btn btn-sm btn-primary" onclick="openCreateMemberModal()">+ 조합원 등록</button>
         </div>
     </div>
@@ -673,42 +673,74 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="modal fade" id="memberCertificateSettingsModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="memberCertificateSettingsTitle" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header bg-light">
         <div>
-          <h6 class="modal-title fw-bold mb-1" id="memberCertificateSettingsTitle">🖋️ 출자증서 발급 설정</h6>
-          <div class="small text-muted">이 조합이 발급하는 출자증서에만 적용됩니다.</div>
+          <h6 class="modal-title fw-bold mb-1" id="memberCertificateSettingsTitle">🏢 조합 기본 설정</h6>
+          <div class="small text-muted">공식 정보, 출자증서와 출자금 입금 안내에 사용합니다.</div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
       </div>
       <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label small fw-bold" for="member-certificate-chairman-name">이사장 성명</label>
-          <input type="text" class="form-control" id="member-certificate-chairman-name" maxlength="80" autocomplete="off">
-        </div>
-        <div class="mb-3">
-          <label class="form-label small fw-bold" for="member-certificate-share-unit">출자 1좌 금액</label>
-          <div class="input-group">
-            <input type="number" class="form-control" id="member-certificate-share-unit" min="1" step="1" inputmode="numeric">
-            <span class="input-group-text">원</span>
+        <section class="border rounded p-3 mb-3">
+          <h6 class="fw-bold mb-3">🏢 조합 공식 정보</h6>
+          <div class="row g-3">
+            <div class="col-md-8"><label class="form-label small fw-bold" for="member-org-address">주소</label><input type="text" class="form-control" id="member-org-address" maxlength="240"></div>
+            <div class="col-md-4"><label class="form-label small fw-bold" for="member-org-contact">전화번호</label><input type="tel" class="form-control" id="member-org-contact" maxlength="40"></div>
+            <div class="col-md-7"><label class="form-label small fw-bold" for="member-org-email">이메일</label><input type="email" class="form-control" id="member-org-email" maxlength="160"></div>
+            <div class="col-md-5"><label class="form-label small fw-bold" for="member-org-business-number">사업자등록번호</label><input type="text" class="form-control" id="member-org-business-number" maxlength="30" inputmode="numeric"></div>
+            <div class="col-12">
+              <label class="form-label small fw-bold" for="member-org-logo-file">가로형 로고</label>
+              <input type="file" class="form-control" id="member-org-logo-file" accept="image/png,image/jpeg,image/webp" onchange="previewMemberOrgLogo()">
+              <div class="form-text">PNG·JPG·WebP 이미지, 5MB 이하</div>
+              <div class="border rounded bg-light p-3 mt-2 text-center hidden" id="member-org-logo-preview-wrap">
+                <img id="member-org-logo-preview" alt="가로형 조합 로고 미리보기" style="max-width:360px;max-height:100px;object-fit:contain;">
+                <div class="small text-muted mt-2" id="member-org-logo-status"></div>
+              </div>
+              <div class="small text-muted mt-2" id="member-org-logo-empty">등록된 가로형 로고가 없습니다.</div>
+              <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="clearMemberOrgLogo()">로고 사용 안 함</button>
+            </div>
           </div>
-          <div class="form-text">출자증서의 출자좌수 계산에 사용합니다.</div>
-        </div>
-        <div class="mb-0">
-          <label class="form-label small fw-bold" for="member-certificate-seal-file">조합 직인</label>
-          <input type="file" class="form-control" id="member-certificate-seal-file" accept="image/png,image/jpeg,image/webp" onchange="previewMemberCertificateSeal()">
-          <div class="form-text">PNG·JPG·WebP 이미지, 5MB 이하</div>
-          <div class="border rounded bg-light p-3 mt-2 text-center hidden" id="member-certificate-seal-preview-wrap">
-            <img id="member-certificate-seal-preview" alt="조합 직인 미리보기" style="max-width:120px;max-height:120px;object-fit:contain;">
-            <div class="small text-muted mt-2" id="member-certificate-seal-status"></div>
+        </section>
+
+        <section class="border rounded p-3 mb-3">
+          <h6 class="fw-bold mb-3">🖋️ 출자증서</h6>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small fw-bold" for="member-certificate-chairman-name">이사장 성명</label>
+              <input type="text" class="form-control" id="member-certificate-chairman-name" maxlength="80" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-bold" for="member-certificate-share-unit">출자 1좌 금액</label>
+              <div class="input-group"><input type="number" class="form-control" id="member-certificate-share-unit" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div>
+              <div class="form-text">출자증서의 출자좌수 계산에 사용합니다.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label small fw-bold" for="member-certificate-seal-file">조합 직인</label>
+              <input type="file" class="form-control" id="member-certificate-seal-file" accept="image/png,image/jpeg,image/webp" onchange="previewMemberCertificateSeal()">
+              <div class="form-text">PNG·JPG·WebP 이미지, 5MB 이하</div>
+              <div class="border rounded bg-light p-3 mt-2 text-center hidden" id="member-certificate-seal-preview-wrap">
+                <img id="member-certificate-seal-preview" alt="조합 직인 미리보기" style="max-width:120px;max-height:120px;object-fit:contain;">
+                <div class="small text-muted mt-2" id="member-certificate-seal-status"></div>
+              </div>
+              <div class="small text-muted mt-2" id="member-certificate-seal-empty">등록된 직인이 없습니다.</div>
+            </div>
           </div>
-          <div class="small text-muted mt-2" id="member-certificate-seal-empty">등록된 직인이 없습니다.</div>
-        </div>
+        </section>
+
+        <section class="border rounded p-3">
+          <h6 class="fw-bold mb-3">🏦 출자금 입금 안내</h6>
+          <div class="row g-3">
+            <div class="col-md-3"><label class="form-label small fw-bold" for="member-org-deposit-bank">은행</label><input type="text" class="form-control" id="member-org-deposit-bank" maxlength="80"></div>
+            <div class="col-md-5"><label class="form-label small fw-bold" for="member-org-deposit-account">계좌번호</label><input type="text" class="form-control" id="member-org-deposit-account" maxlength="100" inputmode="numeric"></div>
+            <div class="col-md-4"><label class="form-label small fw-bold" for="member-org-deposit-holder">예금주</label><input type="text" class="form-control" id="member-org-deposit-holder" maxlength="80"></div>
+          </div>
+        </section>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-        <button type="button" class="btn btn-primary" id="member-certificate-settings-save" onclick="saveMemberCertificateSettings()">저장</button>
+        <button type="button" class="btn btn-primary" id="member-certificate-settings-save" onclick="saveMemberCertificateSettings()">조합 기본 설정 저장</button>
       </div>
     </div>
   </div>
@@ -1409,7 +1441,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="tab-pane fade" id="tab-site">
-<div class="content-header"><h3 id="site-content-title">🖥️ 홈페이지 컨텐츠 관리</h3></div>
+<div class="content-header"><h3 id="site-content-title">🖥️ 홈페이지 컨텐츠 관리</h3><button type="button" class="btn btn-sm btn-outline-dark hidden" id="site-org-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button></div>
 <div class="alert alert-light border small py-2 px-3" id="site-documents-moved-note">
 <i class="bi bi-folder2-open me-1"></i>
 정관·규약·규정 원본과 개정 이력은 <strong>문서관리 &gt; 규정·정관 관리</strong>에서 관리합니다.
@@ -1425,6 +1457,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </li>
 <li class="nav-item" id="site-home-settings-nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-home-settings" onclick="setTimeout(fetchHomeSettings,100)">메인 화면</a>
+</li>
+<li class="nav-item hidden" id="site-legal-nav-item">
+<a class="nav-link" data-bs-toggle="tab" href="#sub-legal" onclick="setTimeout(fetchSiteLegalDocuments,100)">이용약관·개인정보</a>
 </li>
 <li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-about" onclick="fetchAboutSettings()">조합 소개 (About)</a>
@@ -1576,6 +1611,48 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="d-flex justify-content-end mb-4"><button type="button" class="btn btn-primary px-4" id="btn-save-home-settings" onclick="saveHomeSettings()"><i class="bi bi-check2-circle me-1"></i>메인 화면 저장</button></div>
+</div>
+
+<div class="tab-pane fade" id="sub-legal">
+<div class="alert alert-info small">
+<i class="bi bi-info-circle-fill"></i> 작성 중에는 비공개로 저장할 수 있습니다. 시행일과 확정 내용이 준비된 문서만 공개할 수 있고, 공개된 문서만 홈페이지 아래쪽에 나타납니다.
+</div>
+<div class="row g-4">
+<div class="col-xl-6">
+<div class="card border-0 shadow-sm h-100">
+<div class="card-body d-flex flex-column">
+<h5 class="fw-bold mb-3">📄 서비스 이용약관</h5>
+<label class="form-label small fw-bold" for="site-legal-terms-effective-date">시행일</label>
+<input type="date" class="form-control mb-3" id="site-legal-terms-effective-date">
+<label class="form-label small fw-bold" for="site-legal-terms-content">약관 내용</label>
+<textarea class="form-control flex-grow-1" id="site-legal-terms-content" rows="20" maxlength="100000" placeholder="확정한 이용약관 전문을 입력해 주세요."></textarea>
+<div class="form-check form-switch mt-3">
+<input class="form-check-input" type="checkbox" id="site-legal-terms-published">
+<label class="form-check-label fw-bold" for="site-legal-terms-published">홈페이지에 공개</label>
+</div>
+<div class="small text-muted mt-2" id="site-legal-terms-status">저장된 문서가 없습니다.</div>
+</div>
+<div class="card-footer bg-white text-end"><button type="button" class="btn btn-primary" id="site-legal-terms-save" onclick="saveSiteLegalDocument('terms')">이용약관 저장</button></div>
+</div>
+</div>
+<div class="col-xl-6">
+<div class="card border-0 shadow-sm h-100">
+<div class="card-body d-flex flex-column">
+<h5 class="fw-bold mb-3">🛡️ 개인정보 처리방침</h5>
+<label class="form-label small fw-bold" for="site-legal-privacy-effective-date">시행일</label>
+<input type="date" class="form-control mb-3" id="site-legal-privacy-effective-date">
+<label class="form-label small fw-bold" for="site-legal-privacy-content">처리방침 내용</label>
+<textarea class="form-control flex-grow-1" id="site-legal-privacy-content" rows="20" maxlength="100000" placeholder="확정한 개인정보 처리방침 전문을 입력해 주세요."></textarea>
+<div class="form-check form-switch mt-3">
+<input class="form-check-input" type="checkbox" id="site-legal-privacy-published">
+<label class="form-check-label fw-bold" for="site-legal-privacy-published">홈페이지에 공개</label>
+</div>
+<div class="small text-muted mt-2" id="site-legal-privacy-status">저장된 문서가 없습니다.</div>
+</div>
+<div class="card-footer bg-white text-end"><button type="button" class="btn btn-primary" id="site-legal-privacy-save" onclick="saveSiteLegalDocument('privacy')">개인정보 처리방침 저장</button></div>
+</div>
+</div>
+</div>
 </div>
 
 <div class="tab-pane fade" id="sub-about">
@@ -3703,8 +3780,12 @@ let permissionSet = new Set();
 let pendingAdminOtpEmail = '';
 let g_adminMemberRuntime = null;
 const MEMBER_CERTIFICATE_SEAL_PREFIX = 'company-seals';
+const MEMBER_ORG_LOGO_PREFIX = 'coop-branding';
 let memberCertificateSealStoragePath = '';
 let memberCertificateSealPreviewObjectUrl = '';
+let memberOrgLogoUrl = '';
+let memberOrgOriginalLogoUrl = '';
+let memberOrgLogoPreviewObjectUrl = '';
 const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   try {
     const params = new URLSearchParams(window.location.search || '');
@@ -4006,29 +4087,99 @@ function previewMemberCertificateSeal() {
     }
 } // End of previewMemberCertificateSeal
 
+function revokeMemberOrgLogoPreview() {
+    if (!memberOrgLogoPreviewObjectUrl) return;
+    try { URL.revokeObjectURL(memberOrgLogoPreviewObjectUrl); } catch (_) {}
+    memberOrgLogoPreviewObjectUrl = '';
+} // End of revokeMemberOrgLogoPreview
+
+function renderMemberOrgLogoPreview(url, statusText) {
+    const wrap = document.getElementById('member-org-logo-preview-wrap');
+    const image = document.getElementById('member-org-logo-preview');
+    const status = document.getElementById('member-org-logo-status');
+    const empty = document.getElementById('member-org-logo-empty');
+    const safeUrl = String(url || '').trim();
+    if (!wrap || !image || !status || !empty) return;
+    if (safeUrl) {
+        image.src = safeUrl;
+        status.textContent = statusText || '현재 등록된 가로형 로고';
+        wrap.classList.remove('hidden');
+        empty.classList.add('hidden');
+    } else {
+        image.removeAttribute('src');
+        status.textContent = '';
+        wrap.classList.add('hidden');
+        empty.classList.remove('hidden');
+    }
+} // End of renderMemberOrgLogoPreview
+
+function validateMemberOrgLogoFile(file) {
+    if (!file) return;
+    const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    if (!allowedTypes.has(String(file.type || '').toLowerCase())) {
+        throw new Error('가로형 로고는 PNG, JPG 또는 WebP 이미지로 올려주세요.');
+    }
+    if (Number(file.size || 0) > 5 * 1024 * 1024) {
+        throw new Error('가로형 로고 이미지는 5MB 이하로 올려주세요.');
+    }
+} // End of validateMemberOrgLogoFile
+
+function previewMemberOrgLogo() {
+    const input = document.getElementById('member-org-logo-file');
+    const file = input?.files?.[0] || null;
+    if (!file) return;
+    try {
+        validateMemberOrgLogoFile(file);
+        revokeMemberOrgLogoPreview();
+        memberOrgLogoPreviewObjectUrl = URL.createObjectURL(file);
+        renderMemberOrgLogoPreview(memberOrgLogoPreviewObjectUrl, `선택한 파일: ${file.name}`);
+    } catch (error) {
+        if (input) input.value = '';
+        renderMemberOrgLogoPreview(memberOrgLogoUrl, memberOrgLogoUrl ? '현재 등록된 가로형 로고' : '');
+        myAlert(error?.message || error, 'warning');
+    }
+} // End of previewMemberOrgLogo
+
+function clearMemberOrgLogo() {
+    const input = document.getElementById('member-org-logo-file');
+    if (input) input.value = '';
+    revokeMemberOrgLogoPreview();
+    memberOrgLogoUrl = '';
+    renderMemberOrgLogoPreview('', '');
+} // End of clearMemberOrgLogo
+
 async function openMemberCertificateSettingsModal() {
     if (!isAdminMemberSiteProfile()) return;
     const chairmanInput = document.getElementById('member-certificate-chairman-name');
     const shareUnitInput = document.getElementById('member-certificate-share-unit');
-    const fileInput = document.getElementById('member-certificate-seal-file');
-    if (!chairmanInput || !shareUnitInput || !fileInput) return;
+    const sealFileInput = document.getElementById('member-certificate-seal-file');
+    const logoFileInput = document.getElementById('member-org-logo-file');
+    if (!chairmanInput || !shareUnitInput || !sealFileInput || !logoFileInput) return;
 
     showLoading(true);
     try {
         revokeMemberCertificateSealPreview();
-        fileInput.value = '';
+        revokeMemberOrgLogoPreview();
+        sealFileInput.value = '';
+        logoFileInput.value = '';
         memberCertificateSealStoragePath = '';
-        const { data, error } = await scopeAdminTenant(
-            _supabase
-                .from('ref_company_info')
-                .select('key, value')
-                .in('key', ['chairman_name', 'ceoName', 'seal_url', 'member_export_share_unit_amount'])
-        );
+        memberOrgLogoUrl = '';
+        memberOrgOriginalLogoUrl = '';
+        const { data, error } = await _supabase.rpc('get_my_site_member_org_settings');
         if (error) throw error;
-        const config = new Map((data || []).map((row) => [String(row.key || '').trim(), String(row.value || '').trim()]));
-        chairmanInput.value = config.get('chairman_name') || config.get('ceoName') || '';
-        shareUnitInput.value = config.get('member_export_share_unit_amount') || '';
-        memberCertificateSealStoragePath = config.get('seal_url') || '';
+        const config = data && typeof data === 'object' ? data : {};
+        chairmanInput.value = String(config.chairman_name || config.ceoName || '');
+        shareUnitInput.value = String(config.member_export_share_unit_amount || '');
+        document.getElementById('member-org-address').value = String(config.company_address || '');
+        document.getElementById('member-org-contact').value = String(config.company_contact || '');
+        document.getElementById('member-org-email').value = String(config.company_email || '');
+        document.getElementById('member-org-business-number').value = String(config.bizNum || '');
+        document.getElementById('member-org-deposit-bank').value = String(config.member_capital_deposit_bank || '');
+        document.getElementById('member-org-deposit-account').value = String(config.member_capital_deposit_account || '');
+        document.getElementById('member-org-deposit-holder').value = String(config.member_capital_deposit_holder || '');
+        memberCertificateSealStoragePath = String(config.seal_url || '').trim();
+        memberOrgLogoUrl = String(config.logo_horizontal_url || '').trim();
+        memberOrgOriginalLogoUrl = memberOrgLogoUrl;
 
         let previewUrl = '';
         if (memberCertificateSealStoragePath) {
@@ -4043,11 +4194,16 @@ async function openMemberCertificateSettingsModal() {
             }
         }
         renderMemberCertificateSealPreview(previewUrl, '현재 등록된 조합 직인');
+        if (memberOrgLogoUrl && !/^https?:\/\//i.test(memberOrgLogoUrl)) {
+            const { data: publicData } = _supabase.storage.from('assets').getPublicUrl(memberOrgLogoUrl);
+            memberOrgLogoUrl = String(publicData?.publicUrl || memberOrgLogoUrl).trim();
+        }
+        renderMemberOrgLogoPreview(memberOrgLogoUrl, '현재 등록된 가로형 로고');
         const modalEl = document.getElementById('memberCertificateSettingsModal');
         applyAdminMemberModalLayer(modalEl);
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     } catch (error) {
-        myAlert('출자증서 설정을 불러오지 못했습니다: ' + (error?.message || error), 'error');
+        myAlert('조합 기본 설정을 불러오지 못했습니다: ' + (error?.message || error), 'error');
     } finally {
         showLoading(false);
     }
@@ -4057,28 +4213,30 @@ async function saveMemberCertificateSettings() {
     if (!isAdminMemberSiteProfile()) return;
     const coopId = String(await getAdminMemberCoopId() || '').trim();
     const chairmanName = String(document.getElementById('member-certificate-chairman-name')?.value || '').trim();
-    const shareUnitAmount = Math.trunc(Number(document.getElementById('member-certificate-share-unit')?.value || 0));
-    const fileInput = document.getElementById('member-certificate-seal-file');
-    const file = getMemberCertificateSealFile();
+    const shareUnitRaw = String(document.getElementById('member-certificate-share-unit')?.value || '').trim();
+    const shareUnitAmount = shareUnitRaw ? Math.trunc(Number(shareUnitRaw)) : null;
+    const sealFileInput = document.getElementById('member-certificate-seal-file');
+    const sealFile = getMemberCertificateSealFile();
+    const logoFileInput = document.getElementById('member-org-logo-file');
+    const logoFile = logoFileInput?.files?.[0] || null;
     if (!coopId) return myAlert('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.', 'error');
-    if (!chairmanName) return myAlert('출자증서에 표시할 이사장 성명을 입력해 주세요.', 'warning');
-    if (!Number.isInteger(shareUnitAmount) || shareUnitAmount <= 0) return myAlert('출자 1좌 금액을 정확히 입력해 주세요.', 'warning');
+    if (shareUnitAmount !== null && (!Number.isInteger(shareUnitAmount) || shareUnitAmount <= 0)) return myAlert('출자 1좌 금액을 정확히 입력해 주세요.', 'warning');
     try {
-        validateMemberCertificateSealFile(file);
+        validateMemberCertificateSealFile(sealFile);
+        validateMemberOrgLogoFile(logoFile);
     } catch (error) {
         return myAlert(error?.message || error, 'warning');
-    }
-    if (!file && !memberCertificateSealStoragePath) {
-        return myAlert('출자증서에 사용할 조합 직인 이미지를 올려주세요.', 'warning');
     }
 
     const saveButton = document.getElementById('member-certificate-settings-save');
     if (saveButton) saveButton.disabled = true;
     showLoading(true);
+    let newlyUploadedLogoUrl = '';
+    const previousLogoUrl = memberOrgOriginalLogoUrl;
     try {
         let sealPath = memberCertificateSealStoragePath;
-        if (file) {
-            const uploadFile = await convertMemberCertificateSealToPng(file);
+        if (sealFile) {
+            const uploadFile = await convertMemberCertificateSealToPng(sealFile);
             sealPath = `${MEMBER_CERTIFICATE_SEAL_PREFIX}/${coopId}/company_seal`;
             const { error: uploadError } = await _supabase.storage.from('attachments').upload(sealPath, uploadFile, {
                 upsert: true,
@@ -4088,26 +4246,45 @@ async function saveMemberCertificateSettings() {
             if (uploadError) throw uploadError;
         }
 
-        const settings = [
-            { coop_id: coopId, key: 'chairman_name', value: chairmanName },
-            { coop_id: coopId, key: 'ceoName', value: chairmanName },
-            { coop_id: coopId, key: 'member_export_share_unit_amount', value: String(shareUnitAmount) },
-            { coop_id: coopId, key: 'seal_url', value: sealPath }
-        ];
-        const { error: saveError } = await _supabase
-            .from('ref_company_info')
-            .upsert(settings, { onConflict: 'coop_id,key' });
+        let logoUrl = memberOrgLogoUrl;
+        if (logoFile) {
+            newlyUploadedLogoUrl = await uploadFileToStorage(logoFile, `${MEMBER_ORG_LOGO_PREFIX}/${coopId}`);
+            logoUrl = newlyUploadedLogoUrl;
+        }
+
+        const read = (id) => String(document.getElementById(id)?.value || '').trim();
+        const { error: saveError } = await _supabase.rpc('upsert_site_member_org_settings', {
+            p_chairman_name: chairmanName,
+            p_share_unit_amount: shareUnitAmount,
+            p_seal_url: sealPath,
+            p_company_address: read('member-org-address'),
+            p_company_contact: read('member-org-contact'),
+            p_company_email: read('member-org-email'),
+            p_business_number: read('member-org-business-number'),
+            p_logo_horizontal_url: logoUrl,
+            p_deposit_bank: read('member-org-deposit-bank'),
+            p_deposit_account: read('member-org-deposit-account'),
+            p_deposit_holder: read('member-org-deposit-holder')
+        });
         if (saveError) throw saveError;
 
         memberCertificateSealStoragePath = sealPath;
-        if (fileInput) fileInput.value = '';
+        memberOrgLogoUrl = logoUrl;
+        memberOrgOriginalLogoUrl = logoUrl;
+        if (sealFileInput) sealFileInput.value = '';
+        if (logoFileInput) logoFileInput.value = '';
         revokeMemberCertificateSealPreview();
+        revokeMemberOrgLogoPreview();
+        if (newlyUploadedLogoUrl && previousLogoUrl && previousLogoUrl !== newlyUploadedLogoUrl) {
+            await deleteOldFile(previousLogoUrl);
+        }
         const modalEl = document.getElementById('memberCertificateSettingsModal');
         const modal = bootstrap.Modal.getInstance(modalEl);
         if (modal) modal.hide();
-        myAlert('출자증서 발급 설정이 저장되었습니다.', 'success');
+        myAlert('조합 공식 정보, 출자증서와 입금 안내 설정을 저장했습니다.', 'success');
     } catch (error) {
-        myAlert('출자증서 설정 저장 실패: ' + (error?.message || error), 'error');
+        if (newlyUploadedLogoUrl) await deleteOldFile(newlyUploadedLogoUrl);
+        myAlert('조합 기본 설정 저장 실패: ' + (error?.message || error), 'error');
     } finally {
         showLoading(false);
         if (saveButton) saveButton.disabled = false;
@@ -7611,6 +7788,67 @@ if (button) button.disabled = false;
 }
 }
 
+function setSiteLegalDocumentForm(documentType, value) {
+const safeType = documentType === 'privacy' ? 'privacy' : 'terms';
+const doc = value && typeof value === 'object' ? value : {};
+const content = document.getElementById(`site-legal-${safeType}-content`);
+const effectiveDate = document.getElementById(`site-legal-${safeType}-effective-date`);
+const published = document.getElementById(`site-legal-${safeType}-published`);
+const status = document.getElementById(`site-legal-${safeType}-status`);
+if (content) content.value = String(doc.content || '');
+if (effectiveDate) effectiveDate.value = String(doc.effective_date || '');
+if (published) published.checked = doc.is_published === true;
+if (status) {
+const updatedText = doc.updated_at ? ` · 마지막 저장 ${formatAdminMemberKstDateTime(doc.updated_at)}` : '';
+status.textContent = doc.is_published === true ? `홈페이지 공개 중${updatedText}` : (doc.updated_at ? `비공개로 저장됨${updatedText}` : '저장된 문서가 없습니다.');
+status.classList.toggle('text-success', doc.is_published === true);
+}
+} // End of setSiteLegalDocumentForm
+
+async function fetchSiteLegalDocuments() {
+if (!isAdminMemberSiteProfile()) return;
+try {
+const { data, error } = await _supabase.rpc('get_my_site_legal_documents');
+if (error) throw error;
+setSiteLegalDocumentForm('terms', data?.terms || {});
+setSiteLegalDocumentForm('privacy', data?.privacy || {});
+} catch (error) {
+console.error('[fetchSiteLegalDocuments] failed:', error);
+myAlert('이용약관과 개인정보 처리방침을 불러오지 못했습니다: ' + (error?.message || error), 'warning');
+}
+} // End of fetchSiteLegalDocuments
+
+async function saveSiteLegalDocument(documentType) {
+if (!isAdminMemberSiteProfile()) return;
+const safeType = documentType === 'privacy' ? 'privacy' : 'terms';
+const content = String(document.getElementById(`site-legal-${safeType}-content`)?.value || '');
+const effectiveDate = String(document.getElementById(`site-legal-${safeType}-effective-date`)?.value || '').trim();
+const isPublished = document.getElementById(`site-legal-${safeType}-published`)?.checked === true;
+const button = document.getElementById(`site-legal-${safeType}-save`);
+if (isPublished && (!effectiveDate || content.trim().length < 100)) {
+return myAlert('홈페이지에 공개하려면 시행일과 100자 이상의 확정 내용을 입력해 주세요.', 'warning');
+}
+if (button) button.disabled = true;
+showLoading(true);
+try {
+const { data, error } = await _supabase.rpc('upsert_site_legal_document', {
+p_document_type: safeType,
+p_content: content,
+p_effective_date: effectiveDate || null,
+p_is_published: isPublished
+});
+if (error) throw error;
+setSiteLegalDocumentForm(safeType, data || {});
+myAlert(`${safeType === 'terms' ? '이용약관' : '개인정보 처리방침'}을 ${isPublished ? '저장하고 공개했습니다.' : '비공개로 저장했습니다.'}`, 'success');
+} catch (error) {
+console.error('[saveSiteLegalDocument] failed:', error);
+myAlert('공개 문서 저장 실패: ' + (error?.message || error), 'error');
+} finally {
+showLoading(false);
+if (button) button.disabled = false;
+}
+} // End of saveSiteLegalDocument
+
 async function fetchAboutSettings() {
 const { data, error } = await scopeAdminTenant(_supabase.from('site_about').select('*')).limit(1);
 if(error) { console.error(error); return; }
@@ -10617,8 +10855,11 @@ el.classList.toggle('hidden', !enabled);
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-badges-nav-item', !isSiteMemberProfile],
+['site-legal-nav-item', isSiteMemberProfile],
+['site-org-settings-button', isSiteMemberProfile && siteAdminEnabled],
 ['sub-external-news', !isSiteMemberProfile],
-['sub-badges', !isSiteMemberProfile]
+['sub-badges', !isSiteMemberProfile],
+['sub-legal', isSiteMemberProfile]
 ].forEach(([id, enabled]) => {
 const el = document.getElementById(id);
 if (el) el.classList.toggle('hidden', !enabled);

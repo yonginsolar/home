@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: Prevent another cooperative's policy from appearing on tenant domains.
+Version: v1.0.2
+Change: Load a published tenant privacy policy without exposing another cooperative's document.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.1 | privacy.html'); document.documentElement.classList.add('privacy-tenant-pending');</script>
+  <script>console.log('[Version] v1.0.2 | privacy.html'); document.documentElement.classList.add('privacy-tenant-pending');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="용인모두의햇빛협동조합 홈페이지, 조합원 포털, ERP, 전자서명, 선거 서비스의 개인정보 처리방침입니다.">
@@ -50,6 +50,7 @@ Change: Prevent another cooperative's policy from appearing on tenant domains.
     .policy-pending-card { max-width: 760px; margin: 12vh auto 0; text-align: center; }
     .policy-pending-card p { color: var(--theme-muted); }
     .policy-pending-card a { display: inline-flex; margin-top: 10px; padding: 10px 16px; border-radius: 10px; background: #166534; color: #fff; font-weight: 800; text-decoration: none; }
+    .tenant-policy-text { white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; }
     @media (max-width: 640px) { .topbar { align-items: flex-start; } .wrap { width: min(100% - 20px, 1120px); padding-top: 18px; } }
     @media print { .site-theme-toggle { display: none !important; } body { background: #fff !important; color: #111 !important; font-size: 11pt; } .wrap { width: 100%; padding: 0; } .hero, section { box-shadow: none; break-inside: avoid; } th, td, p, li, .small { font-size: 11pt !important; } a { color: #111; text-decoration: none; } }
   </style>
@@ -208,6 +209,43 @@ Change: Prevent another cooperative's policy from appearing on tenant domains.
         }
         reveal();
       };
+      const showPublished = (documentData, fallbackName = '협동조합') => {
+        const coopName = String(documentData?.coop_name || fallbackName || '협동조합').trim() || '협동조합';
+        const content = String(documentData?.content || '').trim();
+        if (!content) return showPending(coopName);
+        const effectiveDate = String(documentData?.effective_date || '').trim();
+        document.title = `개인정보 처리방침 - ${coopName}`;
+        document.querySelector('meta[name="robots"]')?.setAttribute('content', 'index,follow,max-snippet:-1');
+        document.querySelector('meta[name="description"]')?.setAttribute('content', `${coopName}의 개인정보 처리방침입니다.`);
+        document.querySelector('link[rel="canonical"]')?.remove();
+        const main = document.getElementById('privacy-policy-content');
+        if (!main) return reveal();
+        main.replaceChildren();
+        const topbar = document.createElement('div');
+        topbar.className = 'topbar';
+        const home = document.createElement('a');
+        home.className = 'home';
+        home.href = 'index.html';
+        home.textContent = `← ${coopName}`;
+        const version = document.createElement('div');
+        version.className = 'version';
+        version.textContent = effectiveDate ? `시행 ${effectiveDate}` : '';
+        topbar.append(home, version);
+        const hero = document.createElement('header');
+        hero.className = 'hero';
+        const title = document.createElement('h1');
+        title.textContent = '개인정보 처리방침';
+        const summary = document.createElement('p');
+        summary.textContent = `${coopName}이 공개한 개인정보 처리방침입니다.`;
+        hero.append(title, summary);
+        const section = document.createElement('section');
+        const body = document.createElement('div');
+        body.className = 'tenant-policy-text';
+        body.textContent = content;
+        section.appendChild(body);
+        main.append(topbar, hero, section);
+        reveal();
+      };
 
       if (mainHosts.has(runtimeHost) || window.location.protocol === 'file:') {
         reveal();
@@ -230,7 +268,10 @@ Change: Prevent another cooperative's policy from appearing on tenant domains.
         const settings = Array.isArray(data) ? data[0] : data;
         const coopName = String(settings?.coop_name || '').trim();
         if (String(settings?.runtime_profile || '') === 'site_member' || (coopName && coopName !== MAIN_COOP_NAME)) {
-          showPending(coopName);
+          const { data: policy, error: policyError } = await client.rpc('get_public_site_legal_document', { p_document_type: 'privacy' });
+          if (policyError) throw policyError;
+          if (policy?.content) showPublished(policy, coopName);
+          else showPending(coopName);
           return;
         }
         reveal();

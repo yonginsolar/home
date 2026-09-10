@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.140
-Change: Load the cooperative-specific contribution certificate issuer settings.
+Version: v1.0.141
+Change: Remove the free board and partner exposure request from the site/member profile.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.140 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.141 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1963,7 +1963,7 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
-<div class="dashboard-card mb-4">
+<div class="dashboard-card mb-4" id="memberFreeBoardCard">
 <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
 <div class="d-flex gap-2 align-items-center">
 <h5 class="fw-bold m-0"><i class="bi bi-chat-dots-fill me-2"></i>자유게시판</h5>
@@ -2391,7 +2391,7 @@ oninput="autoHyphen(this)">
 <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" onclick="closeDaumPostcode()" alt="닫기 버튼">
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="footer.js?v=1.0.4"></script>
+<script src="footer.js?v=1.0.5"></script>
 <script src="home_patch_note.js?v=1.0.11"></script>
 <script src="notice_modal.js?v=20260323-2"></script>
 
@@ -4258,7 +4258,7 @@ checkSolarMapVisibility(myRoles);
 if (!isSiteMemberPortalProfile() && typeof loadFamilyList === 'function') loadFamilyList(uuid);
 if (typeof loadMiniNotices === 'function') loadMiniNotices();
 if (!isSiteMemberPortalProfile() && typeof checkIncomingConnects === 'function') checkIncomingConnects();
-	loadBoard('free', null, 20); 
+if (!isSiteMemberPortalProfile()) loadBoard('free', null, 20);
 	
 	if (!isSiteMemberPortalProfile() && typeof Badges !== 'undefined') {
 	await ensureProfileBadgesGranted(uuid);
@@ -5190,7 +5190,7 @@ childBankLabel.innerHTML = siteMemberProfile
 }
 const certificateTitle = document.getElementById('memberContributionCertificateTitle');
 if (certificateTitle) certificateTitle.textContent = siteMemberProfile ? '출자증서' : '출자 증명서';
-['memberBadgeCollectionCard', 'memberFamilyAccountCard', 'hallOfFameCard'].forEach((id) => {
+['memberBadgeCollectionCard', 'memberFamilyAccountCard', 'hallOfFameCard', 'memberFreeBoardCard'].forEach((id) => {
 const element = document.getElementById(id);
 if (element) element.classList.toggle('hidden', siteMemberProfile);
 });
@@ -5198,6 +5198,8 @@ if (element) element.classList.toggle('hidden', siteMemberProfile);
 const element = document.getElementById(id);
 if (element) element.classList.toggle('hidden', siteMemberProfile);
 });
+const partnerMenu = document.getElementById('menuBtnPartner');
+if (partnerMenu && siteMemberProfile) partnerMenu.classList.add('hidden');
 document.querySelectorAll('.social-link-state').forEach((element) => {
 element.classList.toggle('hidden', siteMemberProfile);
 });
@@ -5583,7 +5585,7 @@ setVal('editContactPosition', member.contact_position || '');
 const btnPartner = document.getElementById('menuBtnPartner');
 const siteAdminEnabled = isCoopRuntimeModuleEnabled('site_admin');
 if(btnPartner) {
-const canShowPartner = !!(siteAdminEnabled || isMemberPortalAdmin(member));
+const canShowPartner = !isSiteMemberPortalProfile() && !!(siteAdminEnabled || isMemberPortalAdmin(member));
 btnPartner.classList.toggle('hidden', !canShowPartner);
 if (canShowPartner && siteAdminEnabled) {
 loadPartnerInfo(member.member_id);
@@ -7733,6 +7735,7 @@ showModal(copied ? '계좌번호를 복사했습니다.' : `계좌번호: ${acco
 
 // [수정] 탭 전환 (감자 한도 체크 로직 포함)
 function toggleTab(type, btn) {
+if (type === 'partner' && isSiteMemberPortalProfile()) return;
 if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
 showModal('현재 조합에서 홈페이지 관리 모듈 사용이 중지되었습니다.');
 return;

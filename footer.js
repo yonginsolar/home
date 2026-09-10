@@ -1,6 +1,6 @@
 /*
-Version: v1.0.4
-Change: Keep unfinished legal documents and release notes hidden for site/member tenants.
+Version: v1.0.5
+Change: Show each tenant legal link only after that cooperative publishes the document.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -53,6 +53,47 @@ if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
   };
 }
 
+window.loadFooterSiteLegalStatus = async function loadFooterSiteLegalStatus() {
+  const policyLinks = document.getElementById('footer-policy-links');
+  const termsRow = document.getElementById('footer-terms-row');
+  const privacyRow = document.getElementById('footer-privacy-row');
+  const patchRow = document.getElementById('footer-patch-row');
+  try {
+    const client = window.CoopRouteGuard?.createSupabaseClient
+      ? window.CoopRouteGuard.createSupabaseClient(
+          window.supabase,
+          'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
+          'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
+        )
+      : window.supabase.createClient(
+          'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
+          'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
+        );
+    const { data, error } = await client.rpc('get_public_site_legal_status');
+    if (error) throw error;
+    const hasTerms = data?.terms === true;
+    const hasPrivacy = data?.privacy === true;
+    const termsLink = termsRow?.querySelector('a');
+    if (termsLink) {
+      termsLink.href = 'terms.html';
+      termsLink.removeAttribute('data-bs-toggle');
+      termsLink.removeAttribute('data-bs-target');
+    }
+    if (termsRow) termsRow.hidden = !hasTerms;
+    if (privacyRow) privacyRow.hidden = !hasPrivacy;
+    if (patchRow) patchRow.hidden = true;
+    if (policyLinks) policyLinks.hidden = !(hasTerms || hasPrivacy);
+    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = hasTerms || hasPrivacy;
+  } catch (error) {
+    console.warn('[footer] tenant legal status lookup failed:', error);
+    if (termsRow) termsRow.hidden = true;
+    if (privacyRow) privacyRow.hidden = true;
+    if (patchRow) patchRow.hidden = true;
+    if (policyLinks) policyLinks.hidden = true;
+    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = false;
+  }
+};
+
 window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   const coopName = String(settings?.coop_name || window.__PUBLIC_SITE_COOP_NAME__ || '').trim();
   const contactName = String(settings?.contact_name || '').trim();
@@ -68,6 +109,7 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   if (isSiteMemberProfile) {
     document.getElementById('termsModal')?.remove();
     document.getElementById('patchNoteModal')?.remove();
+    window.loadFooterSiteLegalStatus();
   }
   if (coopName) {
     const nameEl = document.getElementById('footer-coop-name');
@@ -126,9 +168,9 @@ document.addEventListener("DOMContentLoaded", function() {
           <div class="col-lg-3 col-md-6 footer-links" id="footer-policy-links" hidden>
             <h4>정보 및 정책</h4>
             <ul>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
-              <li><i class="bi bi-chevron-right text-success"></i> <a href="privacy.html">개인정보 처리방침</a></li>
-              <li>
+              <li id="footer-terms-row"><i class="bi bi-chevron-right text-success"></i> <a href="#" data-bs-toggle="modal" data-bs-target="#termsModal">이용약관</a></li>
+              <li id="footer-privacy-row"><i class="bi bi-chevron-right text-success"></i> <a href="privacy.html">개인정보 처리방침</a></li>
+              <li id="footer-patch-row">
   <i class="bi bi-chevron-right text-success"></i> 
   <a href="javascript:void(0)" onclick="openPatchModal()">패치노트</a>
 </li>
