@@ -1,8 +1,8 @@
-/* Version: v1.5.3 | 2026-09-09 | Support multiple directors and manually entered proposal companions. */
+/* Version: v1.5.4 | 2026-09-10 | Per-area labels and explicit text confirmation without per-keystroke preview rebuilds. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.3';
+  const VERSION = '1.5.4';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -40,6 +40,7 @@
     lastExistingKw: 57,
     editMode: false,
     manualDirty: false,
+    formPending: false,
     renderTimer: 0,
     bootInFlight: false,
     bootAttempt: 0
@@ -70,6 +71,7 @@
     deleteOverlayButton: document.getElementById('deleteOverlayButton'),
     clearOverlayButton: document.getElementById('clearOverlayButton'),
     overlayCount: document.getElementById('overlayCount'),
+    selectedOverlayLabel: document.getElementById('selectedOverlayLabel'),
     overlayAngle: document.getElementById('overlayAngle'),
     resetOverlayAngleButton: document.getElementById('resetOverlayAngleButton'),
     hasExistingInstallation: document.getElementById('hasExistingInstallation'),
@@ -568,6 +570,29 @@
     });
   }
 
+  function fallbackOverlayLabel(baseLabel, index, count = state.customOverlays.length) {
+    const base = String(baseLabel || '').trim().slice(0, 40) || '신규 설치 검토 대상지';
+    return count > 1 ? `${base} ${index + 1}`.slice(0, 40) : base;
+  }
+
+  function displayedOverlayLabel(overlay, index, baseLabel) {
+    return String(overlay?.label || '').trim().slice(0, 40) || fallbackOverlayLabel(baseLabel, index);
+  }
+
+  function pendingOverlayLabel(overlay, index, baseLabel) {
+    if (Object.prototype.hasOwnProperty.call(overlay || {}, 'draftLabel')) return String(overlay.draftLabel || '').slice(0, 40);
+    return displayedOverlayLabel(overlay, index, baseLabel);
+  }
+
+  function commitPendingOverlayLabels() {
+    const baseLabel = textValue('siteOverlayLabel') || '신규 설치 검토 대상지';
+    state.customOverlays.forEach((overlay, index) => {
+      if (!Object.prototype.hasOwnProperty.call(overlay, 'draftLabel')) return;
+      overlay.label = String(overlay.draftLabel || '').trim().slice(0, 40) || fallbackOverlayLabel(baseLabel, index);
+      delete overlay.draftLabel;
+    });
+  }
+
   function createOverlayElement(doc, overlay, baseLabel, index) {
     const zone = doc.createElement('div');
     zone.className = 'proposal-custom-zone';
@@ -575,7 +600,7 @@
     updateOverlayElement(zone, overlay);
     const label = doc.createElement('span');
     label.className = 'proposal-custom-zone-label';
-    label.textContent = state.customOverlays.length > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
+    label.textContent = displayedOverlayLabel(overlay, index, baseLabel);
     const handle = doc.createElement('i');
     handle.className = 'proposal-zone-handle';
     handle.setAttribute('aria-hidden', 'true');
@@ -769,7 +794,7 @@
     const baseLabel = textValue('siteOverlayLabel') || '신규 설치 검토 대상지';
     doc?.querySelectorAll('.proposal-custom-zone').forEach((zone, index) => {
       const label = zone.querySelector('.proposal-custom-zone-label');
-      if (label) label.textContent = state.customOverlays.length > 1 ? `${baseLabel} ${index + 1}` : baseLabel;
+      if (label) label.textContent = displayedOverlayLabel(state.customOverlays[index], index, baseLabel);
     });
   }
 
@@ -782,6 +807,10 @@
     el.overlayCount.textContent = `${count}개 표시`;
     el.deleteOverlayButton.disabled = !hasSelection;
     el.clearOverlayButton.disabled = count === 0;
+    el.selectedOverlayLabel.disabled = !hasSelection;
+    el.selectedOverlayLabel.value = hasSelection
+      ? pendingOverlayLabel(selectedOverlay, state.customOverlays.indexOf(selectedOverlay), textValue('siteOverlayLabel'))
+      : '';
     el.overlayAngle.disabled = !hasSelection;
     el.resetOverlayAngleButton.disabled = !hasSelection;
     el.overlayAngle.value = String(hasSelection ? Number(selectedOverlay.angle) || 0 : 0);
@@ -825,17 +854,20 @@
       const point = pointerPercent(event, shell);
 
       if (state.overlayDrawMode) {
+        const overlayIndex = state.customOverlays.length;
+        const baseLabel = textValue('siteOverlayLabel') || '신규 설치 검토 대상지';
         const overlay = {
           id: `zone-${Date.now()}-${++state.overlaySequence}`,
           x: roundCoordinate(point.x),
           y: roundCoordinate(point.y),
           width: 0,
           height: 0,
-          angle: 0
+          angle: 0,
+          label: fallbackOverlayLabel(baseLabel, overlayIndex, overlayIndex + 1)
         };
         state.customOverlays.push(overlay);
         state.selectedOverlayId = overlay.id;
-        const element = createOverlayElement(doc, overlay, textValue('siteOverlayLabel') || '신규 설치 검토 대상지', state.customOverlays.length - 1);
+        const element = createOverlayElement(doc, overlay, baseLabel, overlayIndex);
         shell.appendChild(element);
         action = { type: 'draw', overlay, element, start: point };
         refreshOverlayLabels(doc);
@@ -970,6 +1002,17 @@
     setStatus(`선택한 대상지 표시를 ${trimNumber(overlay.angle, 2)}°로 회전했습니다.`);
   }
 
+  function stageSelectedOverlayLabel() {
+    const overlay = overlayById(state.selectedOverlayId);
+    if (!overlay) return;
+    overlay.draftLabel = String(el.selectedOverlayLabel.value || '').slice(0, 40);
+    state.formPending = true;
+    state.library?.markDirty();
+    window.clearTimeout(state.renderTimer);
+    state.renderTimer = 0;
+    setStatus('영역 이름을 입력했습니다. 「문구 확인」을 누르면 3쪽 사진과 PDF에 반영됩니다.', true);
+  }
+
   function resetSelectedOverlayAngle() {
     if (!overlayById(state.selectedOverlayId)) return;
     el.overlayAngle.value = '0';
@@ -1044,8 +1087,12 @@
     return true;
   }
 
-  function renderPreview({ force = false } = {}) {
+  function renderPreview({ force = false, applyPending = false } = {}) {
     if (!state.templateHtml) return false;
+    if (state.formPending && !applyPending) {
+      setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 18쪽에 한 번에 반영됩니다.', true);
+      return false;
+    }
     if (state.manualDirty && force) {
       const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 18쪽을 다시 만들까요?');
       if (!overwrite) return false;
@@ -1056,8 +1103,10 @@
     try {
       const model = readModel();
       validateModel(model);
+      if (applyPending) commitPendingOverlayLabels();
       const html = buildPreviewDocument(model);
       state.previewFields = collectFields();
+      state.formPending = false;
       saveDraft();
       state.manualDirty = state.loadedCopyEdits.length > 0;
       setStatus('18쪽 미리보기를 다시 만들고 있습니다.');
@@ -1105,6 +1154,10 @@
   function scheduleRender() {
     window.clearTimeout(state.renderTimer);
     state.renderTimer = 0;
+    if (state.formPending) {
+      setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 18쪽에 한 번에 반영됩니다.', true);
+      return;
+    }
     if (state.editMode || state.manualDirty) {
       setStatus('입력값이 바뀌었습니다. 직접 고친 문구를 유지하려면 먼저 파일로 저장하고, 새로 반영하려면 위 버튼을 누르세요.', true);
       return;
@@ -1165,14 +1218,14 @@
       }
       const imported = { memberTotal: Number(stats.count), individualMembers: Number(stats.ind_count), organizationMembers: Number(stats.grp_count), shareCapitalManwon: Number(stats.amount) / 10000, statsAsOf: /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : '' };
       // Update only the statistics on page 9; keep manually edited copy elsewhere.
-      if (state.manualDirty || state.editMode) window.ProposalSections.renderStats(el.previewFrame.contentDocument, imported);
+      if (state.manualDirty || state.editMode || state.formPending) window.ProposalSections.renderStats(el.previewFrame.contentDocument, imported);
       document.getElementById('memberTotal').value = stats.count;
       document.getElementById('individualMembers').value = stats.ind_count;
       document.getElementById('organizationMembers').value = stats.grp_count;
       document.getElementById('shareCapitalManwon').value = Number(stats.amount) / 10000;
       document.getElementById('statsAsOf').value = /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : '';
       state.library?.markDirty(); saveDraft();
-      if (state.manualDirty || state.editMode) {
+      if (state.manualDirty || state.editMode || state.formPending) {
         const fields = collectFields();
         for (const key of Object.keys(imported)) if (state.previewFields) state.previewFields[key] = fields[key];
       } else renderPreview();
@@ -1184,6 +1237,7 @@
   }
 
   function setFields(fields) {
+    state.formPending = false;
     fields = {
       visitCompanionsJson: '', visitDirector: '', visitDirectorPhone: '', statsAsOf: '',
       schoolPublicProgramStatus: 'checking', schoolPublicProgramKw: '', schoolInstallArea: 'both',
@@ -1330,7 +1384,8 @@
     if (photo) { const image = new Image(); image.src = photo; await image.decode(); }
     const overlays = (Array.isArray(snapshot.overlays) ? snapshot.overlays : []).slice(0, 20).map((overlay, index) => ({
       id: `restored-${index + 1}`, x: clamp(Number(overlay.x) || 0, 0, 100), y: clamp(Number(overlay.y) || 0, 0, 100),
-      width: clamp(Number(overlay.width) || 10, 1, 100), height: clamp(Number(overlay.height) || 10, 1, 100), angle: normalizeAngle(overlay.angle)
+      width: clamp(Number(overlay.width) || 10, 1, 100), height: clamp(Number(overlay.height) || 10, 1, 100), angle: normalizeAngle(overlay.angle),
+      label: typeof overlay.label === 'string' ? overlay.label.trim().slice(0, 40) : ''
     }));
     const copyEdits = (Array.isArray(snapshot.copyEdits) ? snapshot.copyEdits : []).filter((edit) => Number.isInteger(edit.index) && edit.index >= 0 && typeof edit.baseText === 'string' && typeof edit.text === 'string' && edit.text.length <= 20000).slice(0, 400);
     state.documentEpoch = (state.documentEpoch || 0) + 1;
@@ -1341,6 +1396,7 @@
     state.useSamplePhoto = snapshot.useSamplePhoto === true;
     state.customOverlays = overlays; state.selectedOverlayId = ''; state.overlayDrawMode = false;
     state.loadedCopyEdits = copyEdits; state.manualDirty = false; state.editMode = false;
+    state.formPending = false;
     state.copyRestoreMismatch = false;
     state.lastExistingKw = Number(snapshot.fields.existingKw) || 0;
     setFields(snapshot.fields);
@@ -1499,12 +1555,9 @@
     if (!el.form.reportValidity()) throw new Error('입력값을 확인한 뒤 다시 저장해 주세요.');
     validateModel(readModel());
     const changedFields = JSON.stringify(collectFields()) !== JSON.stringify(state.previewFields);
-    if (changedFields && (state.editMode || state.manualDirty)) throw new Error('입력값이 미리보기와 다릅니다. 「입력값을 18쪽에 반영」 후 문구를 확인하고 저장해 주세요.');
-    if (changedFields && !state.renderTimer) renderPreview();
-    if (state.renderTimer) {
-      window.clearTimeout(state.renderTimer);
-      state.renderTimer = 0;
-      if (!state.editMode && !state.manualDirty) renderPreview();
+    const pendingOverlayLabel = state.customOverlays.some((overlay) => Object.prototype.hasOwnProperty.call(overlay, 'draftLabel'));
+    if (changedFields || state.formPending || pendingOverlayLabel) {
+      throw new Error('입력값이 미리보기와 다릅니다. 「문구 확인」을 누른 뒤 미리보기를 확인하고 저장해 주세요.');
     }
     await withTimeout(waitForPreview(), 'PREVIEW');
     const doc = el.previewFrame.contentDocument;
@@ -1603,6 +1656,7 @@
     state.overlayDrawMode = false;
     state.editMode = false;
     state.manualDirty = false;
+    state.formPending = false;
     el.siteImage.value = '';
     el.siteImageName.textContent = '남사읍 예시 위성사진 사용 중';
     syncExistingInstallationUi();
@@ -1611,16 +1665,23 @@
     });
   }
 
+  function isDeferredFormEntry(target) {
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return false;
+    if (target instanceof HTMLTextAreaElement) return true;
+    return ['text', 'tel', 'number', 'date', 'email', 'url'].includes(String(target.type || 'text').toLowerCase());
+  }
+
   function bindEvents() {
     if (state.eventsBound) return;
     state.eventsBound = true;
     el.form.addEventListener('submit', (event) => {
       event.preventDefault();
-      void state.library?.applyLocally(() => renderPreview({ force: true }));
+      void state.library?.applyLocally(() => renderPreview({ force: true, applyPending: true }));
     });
     el.form.addEventListener('input', (event) => {
       if (event.target === el.siteImage) return;
       if (event.target === el.overlayAngle) return;
+      if (event.target === el.selectedOverlayLabel) return;
       if (event.target.closest('[data-library-controls]')) return;
       if (event.target.closest('[data-companion-controls]')) return;
       state.library?.markDirty();
@@ -1637,7 +1698,14 @@
       if (event.target === el.existingKw && numberValue('existingKw') > 0) state.lastExistingKw = numberValue('existingKw');
       readModel();
       saveDraft();
-      scheduleRender();
+      if (isDeferredFormEntry(event.target)) {
+        state.formPending = true;
+        window.clearTimeout(state.renderTimer);
+        state.renderTimer = 0;
+        setStatus('입력 중에는 미리보기를 새로 만들지 않습니다. 「문구 확인」을 누르면 18쪽에 한 번에 반영됩니다.', true);
+      } else {
+        scheduleRender();
+      }
     });
     document.getElementById('visitDirectorChoices').addEventListener('change', (event) => {
       const checkbox = event.target.closest('[data-visit-director]');
@@ -1667,7 +1735,9 @@
         ? '직접 입력한 번호를 사용합니다. 선택한 이사의 등록 번호로 바꾸려면 다시 불러오기를 눌러 주세요.'
         : '입력한 동행자 이름을 마지막 쪽에 표시합니다.');
       syncVisitCompanionStorage(rowsFromCompanionEditor());
+      state.formPending = true;
       state.library?.markDirty(); saveDraft(); syncDirectorContactPreview();
+      setStatus('동행자 문구를 입력했습니다. 「문구 확인」을 누르면 마지막 쪽에 한 번에 반영됩니다.', true);
     });
     document.getElementById('visitCompanionRows').addEventListener('click', (event) => {
       const button = event.target.closest('[data-remove-companion]');
@@ -1693,6 +1763,7 @@
     el.addOverlayButton.addEventListener('click', toggleOverlayDrawMode);
     el.deleteOverlayButton.addEventListener('click', deleteSelectedOverlay);
     el.clearOverlayButton.addEventListener('click', clearOverlays);
+    el.selectedOverlayLabel.addEventListener('input', stageSelectedOverlayLabel);
     el.overlayAngle.addEventListener('input', updateSelectedOverlayAngle);
     el.overlayAngle.addEventListener('change', () => updateSelectedOverlayAngle({ commit: true }));
     el.resetOverlayAngleButton.addEventListener('click', resetSelectedOverlayAngle);
