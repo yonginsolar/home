@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.150
-Change: Distinguish managed child profiles from unsent public-signup welcome notifications.
+Version: v1.0.151
+Change: Manage the member-and-capital homepage section for site/member profiles.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.150';
+window.ADMIN_MEMBER_VERSION = 'v1.0.151';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -7340,6 +7340,15 @@ is_visible: true
 })
 ]);
 
+const SITE_MEMBER_REQUIRED_SITE_SECTIONS = Object.freeze([
+Object.freeze({
+id: 'impact',
+name: '조합원·출자금 현황',
+display_order: 3,
+is_visible: true
+})
+]);
+
 const SITE_MEMBER_REMOVED_SECTION_IDS = Object.freeze([
 'calculator',
 'ops-system',
@@ -7352,12 +7361,16 @@ return isAdminMemberSiteProfile()
 }
 
 function getRequiredSiteSectionsForCurrentProfile() {
-return REQUIRED_SITE_SECTIONS.filter((section) => !isSiteMemberRemovedSection(section?.id));
+const requiredSections = isAdminMemberSiteProfile()
+? [...REQUIRED_SITE_SECTIONS, ...SITE_MEMBER_REQUIRED_SITE_SECTIONS]
+: [...REQUIRED_SITE_SECTIONS];
+return requiredSections.filter((section) => !isSiteMemberRemovedSection(section?.id));
 }
 
 const SECTION_VISUAL_ORDER = Object.freeze({
 hero: 1,
 about: 2,
+impact: 3,
 progress: 3,
 status: 4,
 portfolio: 5,
@@ -7432,6 +7445,9 @@ const statusBadge = sec.is_visible
 : '<span class="badge bg-secondary">숨김</span>';
 
 const sectionIndex = sortedSections.findIndex((row) => row.id === sec.id);
+const sectionDisplayName = isAdminMemberSiteProfile() && sec.id === 'impact'
+? '조합원·출자금 현황'
+: (sec.name || '');
 const moveControls = `
 <div class="btn-group btn-group-sm section-order-controls" role="group" aria-label="section-order">
   <button type="button" class="btn btn-outline-secondary" ${sectionIndex <= 0 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', -1)">↑</button>
@@ -7443,7 +7459,7 @@ tbody.innerHTML += `
                    <tr>
                        <td class="align-middle text-center">${getSectionDisplayOrder(sec)}</td>
                        <td class="align-middle text-start ps-4">
-                           <span class="fw-bold text-dark">${escapeHtml(sec.name || '')}</span> <br>
+                           <span class="fw-bold text-dark">${escapeHtml(sectionDisplayName)}</span> <br>
                            <small class="text-muted" style="font-size:0.85em;">ID: ${safeSectionIdText}</small>
                        </td>
                        <td class="align-middle text-center">${statusBadge}</td>
