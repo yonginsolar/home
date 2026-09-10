@@ -1,6 +1,6 @@
 /*
-Version: v1.0.5
-Change: Show each tenant legal link only after that cooperative publishes the document.
+Version: v1.0.6
+Change: Keep the shared footer cooperative name in sync with the active site/member profile.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -94,6 +94,15 @@ window.loadFooterSiteLegalStatus = async function loadFooterSiteLegalStatus() {
   }
 };
 
+window.applyFooterCoopName = function applyFooterCoopName(value) {
+  const coopName = String(value || window.__PUBLIC_SITE_COOP_NAME__ || '').trim();
+  if (!coopName) return;
+  const nameEl = document.getElementById('footer-coop-name');
+  const copyrightEl = document.getElementById('footer-copyright-name');
+  if (nameEl) nameEl.textContent = coopName;
+  if (copyrightEl) copyrightEl.textContent = coopName;
+};
+
 window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   const coopName = String(settings?.coop_name || window.__PUBLIC_SITE_COOP_NAME__ || '').trim();
   const contactName = String(settings?.contact_name || '').trim();
@@ -111,12 +120,7 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
     document.getElementById('patchNoteModal')?.remove();
     window.loadFooterSiteLegalStatus();
   }
-  if (coopName) {
-    const nameEl = document.getElementById('footer-coop-name');
-    const copyrightEl = document.getElementById('footer-copyright-name');
-    if (nameEl) nameEl.textContent = coopName;
-    if (copyrightEl) copyrightEl.textContent = coopName;
-  }
+  if (coopName) window.applyFooterCoopName(coopName);
 
   const phoneSuffix = [contactRole, contactName].filter(Boolean).join(' ');
   const phoneEl = document.getElementById('footer-contact-phone');
@@ -337,6 +341,7 @@ document.addEventListener("DOMContentLoaded", function() {
     const footerElement = document.getElementById("footer");
     if (footerElement) {
         footerElement.innerHTML = footerHtml;
+        window.applyFooterCoopName(window.__PUBLIC_SITE_COOP_NAME__);
     }
 
     // (2) 모달 넣기 (body 맨 끝에 추가)
