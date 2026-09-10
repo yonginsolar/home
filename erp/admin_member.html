@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.151
-Change: Manage the member-and-capital homepage section for site/member profiles.
+Version: v1.0.152
+Change: Hide unavailable document and partner-request routes in site/member profiles.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.151';
+window.ADMIN_MEMBER_VERSION = 'v1.0.152';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1446,7 +1446,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <div class="tab-pane fade" id="tab-site">
 <div class="content-header"><h3 id="site-content-title">🖥️ 홈페이지 컨텐츠 관리</h3><button type="button" class="btn btn-sm btn-outline-dark hidden" id="site-org-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button></div>
-<div class="alert alert-light border small py-2 px-3" id="site-documents-moved-note">
+<div class="alert alert-light border small py-2 px-3 hidden" id="site-documents-moved-note">
 <i class="bi bi-folder2-open me-1"></i>
 정관·규약·규정 원본과 개정 이력은 <strong>문서관리 &gt; 규정·정관 관리</strong>에서 관리합니다.
 <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="location.href='admin_member.html?scope=documents_admin&tab=site'">규정·정관 관리로 이동</button>
@@ -10813,6 +10813,8 @@ return cachedRoleIsAdmin;
 function canAccessAdminMemberTab(tabName) {
 const safeTab = String(tabName || '').trim();
 if (!safeTab) return true;
+const knownTabs = new Set(['dashboard', ...ADMIN_MEMBER_TABS.member_admin, ...ADMIN_MEMBER_TABS.site_admin]);
+if (!knownTabs.has(safeTab)) return false;
 if (isAdminMemberSiteProfile() && safeTab === 'funds-manage') return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin' && safeTab === 'dashboard') return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' && safeTab !== 'site') return false;
@@ -10841,6 +10843,7 @@ link.classList.toggle('active', href === safeSubTabId);
 
 function applyAdminMemberSiteScopeUi() {
 const documentsScope = ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin';
+const documentsAdminEnabled = isAdminMemberRuntimeModuleEnabled('documents') && hasAdminMemberScopePermission('documents_admin');
 const titleEl = document.getElementById('site-content-title');
 if (titleEl) titleEl.textContent = documentsScope ? '📚 규정·정관 관리' : '🖥️ 홈페이지 컨텐츠 관리';
 
@@ -10848,7 +10851,7 @@ const tabsEl = document.getElementById('site-content-tabs');
 if (tabsEl) tabsEl.classList.toggle('hidden', documentsScope);
 
 const movedNoteEl = document.getElementById('site-documents-moved-note');
-if (movedNoteEl) movedNoteEl.classList.toggle('hidden', documentsScope);
+if (movedNoteEl) movedNoteEl.classList.toggle('hidden', documentsScope || !documentsAdminEnabled);
 
 const docsNavItem = document.getElementById('site-docs-nav-item');
 if (docsNavItem) docsNavItem.classList.toggle('hidden', !documentsScope);
@@ -10894,10 +10897,12 @@ el.classList.toggle('hidden', !enabled);
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-badges-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', isSiteMemberProfile],
+['partnerInnerTabs', !isSiteMemberProfile],
 ['site-org-settings-button', isSiteMemberProfile && siteAdminEnabled],
 ['sub-external-news', !isSiteMemberProfile],
 ['sub-badges', !isSiteMemberProfile],
-['sub-legal', isSiteMemberProfile]
+['sub-legal', isSiteMemberProfile],
+['partner-request-log-pane', !isSiteMemberProfile]
 ].forEach(([id, enabled]) => {
 const el = document.getElementById(id);
 if (el) el.classList.toggle('hidden', !enabled);
