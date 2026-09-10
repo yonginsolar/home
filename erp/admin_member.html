@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.145
-Change: Trim unconfirmed finance UI and location-composition charts from the site/member profile.
+Version: v1.0.146
+Change: Simplify the site/member profile detail view to basic information, capital, and consultation history.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.145';
+window.ADMIN_MEMBER_VERSION = 'v1.0.146';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -43,7 +43,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.145';
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="/cert_generator.js?v=20260708_01"></script>
+<script src="/cert_generator.js?v=20260910_01"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 
@@ -592,6 +592,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">조합원 명부</h3>
         <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-dark hidden" id="member-certificate-settings-button" onclick="openMemberCertificateSettingsModal()">🖋️ 출자증서 설정</button>
             <button class="btn btn-sm btn-primary" onclick="openCreateMemberModal()">+ 조합원 등록</button>
         </div>
     </div>
@@ -669,6 +670,48 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             <button id="memberPageNext" class="btn btn-sm btn-outline-secondary" type="button" onclick="changeMemberPage(1)">다음</button>
         </div>
     </div>
+</div>
+
+<div class="modal fade" id="memberCertificateSettingsModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="memberCertificateSettingsTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-light">
+        <div>
+          <h6 class="modal-title fw-bold mb-1" id="memberCertificateSettingsTitle">🖋️ 출자증서 발급 설정</h6>
+          <div class="small text-muted">이 조합이 발급하는 출자증서에만 적용됩니다.</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label small fw-bold" for="member-certificate-chairman-name">이사장 성명</label>
+          <input type="text" class="form-control" id="member-certificate-chairman-name" maxlength="80" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold" for="member-certificate-share-unit">출자 1좌 금액</label>
+          <div class="input-group">
+            <input type="number" class="form-control" id="member-certificate-share-unit" min="1" step="1" inputmode="numeric">
+            <span class="input-group-text">원</span>
+          </div>
+          <div class="form-text">출자증서의 출자좌수 계산에 사용합니다.</div>
+        </div>
+        <div class="mb-0">
+          <label class="form-label small fw-bold" for="member-certificate-seal-file">조합 직인</label>
+          <input type="file" class="form-control" id="member-certificate-seal-file" accept="image/png,image/jpeg,image/webp" onchange="previewMemberCertificateSeal()">
+          <div class="form-text">PNG·JPG·WebP 이미지, 5MB 이하</div>
+          <div class="border rounded bg-light p-3 mt-2 text-center hidden" id="member-certificate-seal-preview-wrap">
+            <img id="member-certificate-seal-preview" alt="조합 직인 미리보기" style="max-width:120px;max-height:120px;object-fit:contain;">
+            <div class="small text-muted mt-2" id="member-certificate-seal-status"></div>
+          </div>
+          <div class="small text-muted mt-2" id="member-certificate-seal-empty">등록된 직인이 없습니다.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button type="button" class="btn btn-primary" id="member-certificate-settings-save" onclick="saveMemberCertificateSettings()">저장</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="tab-pane fade" id="tab-funds-manage">
@@ -2950,7 +2993,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 💰 출자/배당/자금
 </button>
 </li>
-<li class="nav-item">
+<li class="nav-item" id="member-detail-family-tab-item">
 <button class="nav-link py-3" data-bs-toggle="tab" data-bs-target="#md-tab-family" type="button">
 👨‍👩‍👧‍👦 가족/단체 연결
 </button>
@@ -2960,7 +3003,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 📞 상담 이력
 </button>
 </li>
-<li class="nav-item">
+<li class="nav-item" id="member-detail-participation-tab-item">
 <button class="nav-link py-3" data-bs-toggle="tab" data-bs-target="#md-tab-participation" type="button" onclick="loadAdminMemberParticipationHistory()">
 📅 교육·회의·퀴즈 참여
 </button>
@@ -3053,7 +3096,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                     </div>
                 </div>
                 <div class="form-text x-small mt-1 text-end">* 단체 정보는 하이픈(-)을 포함하여 입력해주세요.</div>
-                <div class="mt-3 p-2 rounded border bg-light">
+                <div class="mt-3 p-2 rounded border bg-light" id="member-detail-account-manager-panel">
                     <span class="small fw-bold text-muted">계정 관리자</span>
                     <span class="small ms-2" id="md-account-manager">미연결</span>
                     <div class="form-text mt-1">연락 담당자와 별개이며, 개인회원 연결은 ‘가족/단체 연결’ 탭에서 관리합니다.</div>
@@ -3072,7 +3115,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 style="display:none;">
         </div>
 
-        <div class="col-md-12">
+        <div class="col-md-12" id="member-detail-badges-group">
             <label class="form-label small fw-bold text-muted">🏅 보유 뱃지</label>
             <div class="card p-3 bg-light border-0" style="max-height:150px; overflow-y:auto;">
                 <div id="member-badge-checkboxes" class="d-flex flex-wrap gap-2">
@@ -3110,15 +3153,15 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                         <input type="text" id="md-bank-account" class="form-control" placeholder="숫자만 입력">
                     </div>
                 </div>
-                <div class="col-md-2 text-end pt-3">
+                <div class="col-md-2 text-end pt-3" id="member-detail-sns-status-column">
                     <small class="text-muted fw-bold" id="md-sns-status" style="font-size:0.75rem;">SNS 미연동</small>
                 </div>
             </div>
         </div>
     </div> <div class="d-flex justify-content-between mt-4">
         <div class="d-flex gap-2">
-            <button class="btn btn-outline-dark btn-sm" onclick="openIssueDocModal('capital')">🖨️ 출자증명서</button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="openIssueDocModal('donation')">🧾 기부금 수령 확인서</button>
+            <button class="btn btn-outline-dark btn-sm" id="member-detail-capital-certificate-button" onclick="openIssueDocModal('capital')">🖨️ 출자증명서</button>
+            <button class="btn btn-outline-secondary btn-sm" id="member-detail-donation-certificate-button" onclick="openIssueDocModal('donation')">🧾 기부금 수령 확인서</button>
         </div>
         <button id="btn-edit-mode" class="btn btn-primary px-4" onclick="toggleEditMode(true)">✏️ 정보 수정</button>
         <div id="btn-save-group" style="display:none;">
@@ -3141,7 +3184,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <button class="btn btn-sm btn-outline-success" type="button" onclick="openFundEditor('capital', null)">+ 출자금 추가</button>
 </div>
 </div>
-<div class="fund-summary-card">
+<div class="fund-summary-card" id="member-detail-donation-card">
 <button class="fund-summary-view" type="button" onclick="openHistoryModal('donation')" aria-label="기부금 기간별 내역 보기">
 <span class="fund-summary-label"><span>🎁 누적 기부금</span><span class="text-primary">기간별 내역 ›</span></span>
 <span class="fund-summary-amount text-primary d-block" id="md-donation-total" aria-live="polite">0 원</span>
@@ -3659,6 +3702,9 @@ const _supabaseEdge = supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_K
 let permissionSet = new Set();
 let pendingAdminOtpEmail = '';
 let g_adminMemberRuntime = null;
+const MEMBER_CERTIFICATE_SEAL_PREFIX = 'company-seals';
+let memberCertificateSealStoragePath = '';
+let memberCertificateSealPreviewObjectUrl = '';
 const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   try {
     const params = new URLSearchParams(window.location.search || '');
@@ -3872,6 +3918,201 @@ async function withAdminTenantPayload(payload) {
     if (!coopId || Object.prototype.hasOwnProperty.call(payload, 'coop_id')) return payload;
     return { ...payload, coop_id: coopId };
 }
+
+function revokeMemberCertificateSealPreview() {
+    if (!memberCertificateSealPreviewObjectUrl) return;
+    try { URL.revokeObjectURL(memberCertificateSealPreviewObjectUrl); } catch (_) {}
+    memberCertificateSealPreviewObjectUrl = '';
+} // End of revokeMemberCertificateSealPreview
+
+function renderMemberCertificateSealPreview(url, statusText) {
+    const wrap = document.getElementById('member-certificate-seal-preview-wrap');
+    const image = document.getElementById('member-certificate-seal-preview');
+    const status = document.getElementById('member-certificate-seal-status');
+    const empty = document.getElementById('member-certificate-seal-empty');
+    const safeUrl = String(url || '').trim();
+    if (!wrap || !image || !status || !empty) return;
+    if (safeUrl) {
+        image.src = safeUrl;
+        status.textContent = statusText || '현재 등록된 조합 직인';
+        wrap.classList.remove('hidden');
+        empty.classList.add('hidden');
+    } else {
+        image.removeAttribute('src');
+        status.textContent = '';
+        wrap.classList.add('hidden');
+        empty.classList.remove('hidden');
+    }
+} // End of renderMemberCertificateSealPreview
+
+function getMemberCertificateSealFile() {
+    return document.getElementById('member-certificate-seal-file')?.files?.[0] || null;
+} // End of getMemberCertificateSealFile
+
+function validateMemberCertificateSealFile(file) {
+    if (!file) return;
+    const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    if (!allowedTypes.has(String(file.type || '').toLowerCase())) {
+        throw new Error('직인은 PNG, JPG 또는 WebP 이미지로 올려주세요.');
+    }
+    if (Number(file.size || 0) > 5 * 1024 * 1024) {
+        throw new Error('직인 이미지는 5MB 이하로 올려주세요.');
+    }
+} // End of validateMemberCertificateSealFile
+
+async function convertMemberCertificateSealToPng(file) {
+    if (!file || String(file.type || '').toLowerCase() === 'image/png') return file;
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        const image = await new Promise((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error('직인 이미지를 읽을 수 없습니다.'));
+            element.src = objectUrl;
+        });
+        const maxSide = 1600;
+        const ratio = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * ratio));
+        canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * ratio));
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('직인 이미지 변환을 준비할 수 없습니다.');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve, reject) => {
+            canvas.toBlob((value) => value ? resolve(value) : reject(new Error('직인 이미지를 변환하지 못했습니다.')), 'image/png');
+        });
+        return new File([blob], 'company_seal.png', { type: 'image/png' });
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+} // End of convertMemberCertificateSealToPng
+
+function previewMemberCertificateSeal() {
+    const fileInput = document.getElementById('member-certificate-seal-file');
+    const file = getMemberCertificateSealFile();
+    if (!file) {
+        renderMemberCertificateSealPreview('', '');
+        return;
+    }
+    try {
+        validateMemberCertificateSealFile(file);
+        revokeMemberCertificateSealPreview();
+        memberCertificateSealPreviewObjectUrl = URL.createObjectURL(file);
+        renderMemberCertificateSealPreview(memberCertificateSealPreviewObjectUrl, `선택한 파일: ${file.name}`);
+    } catch (error) {
+        if (fileInput) fileInput.value = '';
+        renderMemberCertificateSealPreview('', '');
+        myAlert(error?.message || error, 'warning');
+    }
+} // End of previewMemberCertificateSeal
+
+async function openMemberCertificateSettingsModal() {
+    if (!isAdminMemberSiteProfile()) return;
+    const chairmanInput = document.getElementById('member-certificate-chairman-name');
+    const shareUnitInput = document.getElementById('member-certificate-share-unit');
+    const fileInput = document.getElementById('member-certificate-seal-file');
+    if (!chairmanInput || !shareUnitInput || !fileInput) return;
+
+    showLoading(true);
+    try {
+        revokeMemberCertificateSealPreview();
+        fileInput.value = '';
+        memberCertificateSealStoragePath = '';
+        const { data, error } = await scopeAdminTenant(
+            _supabase
+                .from('ref_company_info')
+                .select('key, value')
+                .in('key', ['chairman_name', 'ceoName', 'seal_url', 'member_export_share_unit_amount'])
+        );
+        if (error) throw error;
+        const config = new Map((data || []).map((row) => [String(row.key || '').trim(), String(row.value || '').trim()]));
+        chairmanInput.value = config.get('chairman_name') || config.get('ceoName') || '';
+        shareUnitInput.value = config.get('member_export_share_unit_amount') || '';
+        memberCertificateSealStoragePath = config.get('seal_url') || '';
+
+        let previewUrl = '';
+        if (memberCertificateSealStoragePath) {
+            if (/^https?:\/\//i.test(memberCertificateSealStoragePath)) {
+                previewUrl = memberCertificateSealStoragePath;
+            } else {
+                const { data: signedData, error: signedError } = await _supabase.storage
+                    .from('attachments')
+                    .createSignedUrl(memberCertificateSealStoragePath, 900);
+                if (signedError) throw signedError;
+                previewUrl = String(signedData?.signedUrl || '').trim();
+            }
+        }
+        renderMemberCertificateSealPreview(previewUrl, '현재 등록된 조합 직인');
+        const modalEl = document.getElementById('memberCertificateSettingsModal');
+        applyAdminMemberModalLayer(modalEl);
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    } catch (error) {
+        myAlert('출자증서 설정을 불러오지 못했습니다: ' + (error?.message || error), 'error');
+    } finally {
+        showLoading(false);
+    }
+} // End of openMemberCertificateSettingsModal
+
+async function saveMemberCertificateSettings() {
+    if (!isAdminMemberSiteProfile()) return;
+    const coopId = String(await getAdminMemberCoopId() || '').trim();
+    const chairmanName = String(document.getElementById('member-certificate-chairman-name')?.value || '').trim();
+    const shareUnitAmount = Math.trunc(Number(document.getElementById('member-certificate-share-unit')?.value || 0));
+    const fileInput = document.getElementById('member-certificate-seal-file');
+    const file = getMemberCertificateSealFile();
+    if (!coopId) return myAlert('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.', 'error');
+    if (!chairmanName) return myAlert('출자증서에 표시할 이사장 성명을 입력해 주세요.', 'warning');
+    if (!Number.isInteger(shareUnitAmount) || shareUnitAmount <= 0) return myAlert('출자 1좌 금액을 정확히 입력해 주세요.', 'warning');
+    try {
+        validateMemberCertificateSealFile(file);
+    } catch (error) {
+        return myAlert(error?.message || error, 'warning');
+    }
+    if (!file && !memberCertificateSealStoragePath) {
+        return myAlert('출자증서에 사용할 조합 직인 이미지를 올려주세요.', 'warning');
+    }
+
+    const saveButton = document.getElementById('member-certificate-settings-save');
+    if (saveButton) saveButton.disabled = true;
+    showLoading(true);
+    try {
+        let sealPath = memberCertificateSealStoragePath;
+        if (file) {
+            const uploadFile = await convertMemberCertificateSealToPng(file);
+            sealPath = `${MEMBER_CERTIFICATE_SEAL_PREFIX}/${coopId}/company_seal`;
+            const { error: uploadError } = await _supabase.storage.from('attachments').upload(sealPath, uploadFile, {
+                upsert: true,
+                contentType: 'image/png',
+                cacheControl: '3600'
+            });
+            if (uploadError) throw uploadError;
+        }
+
+        const settings = [
+            { coop_id: coopId, key: 'chairman_name', value: chairmanName },
+            { coop_id: coopId, key: 'ceoName', value: chairmanName },
+            { coop_id: coopId, key: 'member_export_share_unit_amount', value: String(shareUnitAmount) },
+            { coop_id: coopId, key: 'seal_url', value: sealPath }
+        ];
+        const { error: saveError } = await _supabase
+            .from('ref_company_info')
+            .upsert(settings, { onConflict: 'coop_id,key' });
+        if (saveError) throw saveError;
+
+        memberCertificateSealStoragePath = sealPath;
+        if (fileInput) fileInput.value = '';
+        revokeMemberCertificateSealPreview();
+        const modalEl = document.getElementById('memberCertificateSettingsModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+        myAlert('출자증서 발급 설정이 저장되었습니다.', 'success');
+    } catch (error) {
+        myAlert('출자증서 설정 저장 실패: ' + (error?.message || error), 'error');
+    } finally {
+        showLoading(false);
+        if (saveButton) saveButton.disabled = false;
+    }
+} // End of saveMemberCertificateSettings
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -4248,11 +4489,11 @@ async function ensureCertGeneratorReady() {
             const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
             const publicOrigin = String(routeOrigins?.publicOrigin || '').trim().replace(/\/+$/, '');
             const remoteFallback = /^https?:\/\//i.test(publicOrigin)
-                ? `${publicOrigin}/cert_generator.js?v=20260708_01`
-                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260708_01';
+                ? `${publicOrigin}/cert_generator.js?v=20260910_01`
+                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260910_01';
             const candidates = [
-                '/cert_generator.js?v=20260708_01',
-                '../cert_generator.js?v=20260708_01',
+                '/cert_generator.js?v=20260910_01',
+                '../cert_generator.js?v=20260910_01',
                 remoteFallback
             ];
             for (const src of candidates) {
@@ -6547,6 +6788,7 @@ function getCapitalNotificationStatusMeta(item) {
 } // End of getCapitalNotificationStatusMeta
 
 function renderCapitalNotificationHistoryControl(item) {
+    if (isAdminMemberSiteProfile()) return '';
     const statusMeta = getCapitalNotificationStatusMeta(item);
     if (!statusMeta) return '';
     const capitalId = Number(item?.id || 0);
@@ -10269,6 +10511,10 @@ if (!modules || !(moduleKey in modules)) return true;
 return modules[moduleKey] !== false;
 }
 
+function isAdminMemberSiteProfile() {
+return String(g_adminMemberRuntime?.runtime_profile || '') === 'site_member';
+}
+
 function hasAdminMemberScopePermission(scopeKey) {
 const safeScope = String(scopeKey || '').trim();
 let cachedRole = '';
@@ -10292,6 +10538,7 @@ return cachedRoleIsAdmin;
 function canAccessAdminMemberTab(tabName) {
 const safeTab = String(tabName || '').trim();
 if (!safeTab) return true;
+if (isAdminMemberSiteProfile() && safeTab === 'funds-manage') return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin' && safeTab === 'dashboard') return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' && safeTab !== 'site') return false;
 if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin' && ADMIN_MEMBER_TABS.site_admin.includes(safeTab)) return false;
@@ -10341,7 +10588,7 @@ if (activePane?.id === 'sub-docs') selectAdminMemberSiteSubTab('sub-sections');
 
 function applyAdminMemberRuntimeUi(runtime) {
 g_adminMemberRuntime = runtime && typeof runtime === 'object' ? runtime : null;
-const isSiteMemberProfile = String(g_adminMemberRuntime?.runtime_profile || '') === 'site_member';
+const isSiteMemberProfile = isAdminMemberSiteProfile();
 const memberAdminEnabled = isAdminMemberRuntimeModuleEnabled('member_admin') && hasAdminMemberScopePermission('member_admin') && ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin';
 const meetingParticipationEnabled = memberAdminEnabled && isAdminMemberRuntimeModuleEnabled('minutes');
 const voteEnabled = memberAdminEnabled && isAdminMemberRuntimeModuleEnabled('vote');
@@ -10353,7 +10600,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['memberAdminCategory', memberAdminEnabled],
 ['nav-members', memberAdminEnabled],
 ['nav-meeting-participation', meetingParticipationEnabled],
-['nav-funds-manage', memberAdminEnabled],
+['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
 ['nav-applications', memberAdminEnabled],
 ['nav-deposit', memberAdminEnabled],
 ['nav-vote-hub', voteEnabled],
@@ -10396,15 +10643,40 @@ if (fundsTitle) fundsTitle.textContent = isSiteMemberProfile ? '💰 운영자�
 });
 
 const detailFundsTab = document.getElementById('member-detail-funds-tab');
-if (detailFundsTab) detailFundsTab.textContent = isSiteMemberProfile ? '💰 출자/자금' : '💰 출자/배당/자금';
+if (detailFundsTab) detailFundsTab.textContent = isSiteMemberProfile ? '💰 출자금' : '💰 출자/배당/자금';
 const detailBankHeading = document.getElementById('member-detail-bank-heading');
 if (detailBankHeading) detailBankHeading.textContent = isSiteMemberProfile ? '🏦 환급 계좌 정보' : '🏦 환급/배당 계좌 정보';
 const faqFinanceCategory = document.getElementById('faq-finance-category');
 if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '출자/자금' : '출자/배당';
-['member-detail-point-card', 'member-detail-dividend-card'].forEach((id) => {
+[
+  'member-detail-donation-card',
+  'member-detail-point-card',
+  'member-detail-dividend-card',
+  'member-detail-donation-certificate-button',
+  'member-detail-family-tab-item',
+  'member-detail-participation-tab-item',
+  'md-tab-family',
+  'md-tab-participation',
+  'member-detail-account-manager-panel',
+  'member-detail-badges-group',
+  'member-detail-sns-status-column'
+].forEach((id) => {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('hidden', isSiteMemberProfile);
 });
+const preferredNameInput = document.getElementById('md-preferred-name');
+if (preferredNameInput) preferredNameInput.placeholder = isSiteMemberProfile ? '' : '예: 나무와나';
+const preferredNamePosition = document.getElementById('md-preferred-name-position');
+if (preferredNamePosition) {
+  const beforeOption = preferredNamePosition.querySelector('option[value="before"]');
+  const afterOption = preferredNamePosition.querySelector('option[value="after"]');
+  if (beforeOption) beforeOption.textContent = isSiteMemberProfile ? '이름 앞' : '이름 앞 (나무와나 이정희)';
+  if (afterOption) afterOption.textContent = isSiteMemberProfile ? '이름 뒤' : '이름 뒤 (이정희 나무와나)';
+}
+const certificateSettingsButton = document.getElementById('member-certificate-settings-button');
+if (certificateSettingsButton) certificateSettingsButton.classList.toggle('hidden', !isSiteMemberProfile);
+const capitalCertificateButton = document.getElementById('member-detail-capital-certificate-button');
+if (capitalCertificateButton) capitalCertificateButton.textContent = isSiteMemberProfile ? '🖨️ 출자증서' : '🖨️ 출자증명서';
 
 const capitalChartColumn = document.getElementById('dashboard-capital-chart-column');
 if (capitalChartColumn) {
@@ -11228,6 +11500,7 @@ function renderMemberTable(list) {
 }
 
 function renderPendingWelcomeNotificationStatus(member) {
+  if (isAdminMemberSiteProfile()) return '';
   const rawStatus = String(member?.welcome_notification_status || '').trim().toLowerCase();
   const isSent = member?.is_welcome_sent === true || rawStatus === 'accepted';
   const views = {
@@ -11804,43 +12077,37 @@ async function openMemberDetail(id) {
     if (m.naver_id) snsHtml += '<span class="badge bg-success"><span class="naver-mark naver-mark-inverse me-1" aria-hidden="true">N</span> Naver</span>';
     document.getElementById('md-sns-status').innerHTML = snsHtml || '<span class="text-muted small">SNS 미연동</span>';
 
-    // ============================================================
-    // ★ [추가됨] 뱃지 데이터 로드 (숫자 ID -> 문자 Code 변환)
-    // ============================================================
+    if (!isAdminMemberSiteProfile()) {
+        await ensureBadgesReady();
+        if (!g_badges || g_badges.length === 0) {
+            g_badges = await Badges.getAll(_supabase);
+        }
 
-    await ensureBadgesReady();
+        const { data: myRows, error: badgeError } = await _supabase
+            .from('coop_member_badges')
+            .select('badge_id')
+            .eq('member_uid', memberUid);
 
-    // 1. 전체 뱃지 로드
-    if (!g_badges || g_badges.length === 0) {
-        g_badges = await Badges.getAll(_supabase);
+        let myBadgeCodes = [];
+        if (myRows && !badgeError) {
+            myBadgeCodes = myRows.map(row => {
+                const match = g_badges.find(b => b.id == row.badge_id);
+                return match ? match.code : null;
+            }).filter(code => code !== null);
+        }
+
+        Badges.renderCheckboxes('member-badge-checkboxes', g_badges, myBadgeCodes);
+        markAutoManagedBadgeControls();
+    } else {
+        const badgeContainer = document.getElementById('member-badge-checkboxes');
+        if (badgeContainer) badgeContainer.innerHTML = '';
     }
-
-    // 2. DB에서 이 회원의 badge_id(숫자) 조회
-    const { data: myRows, error: badgeError } = await _supabase
-        .from('coop_member_badges')
-        .select('badge_id')
-        .eq('member_uid', memberUid);
-
-    // 3. 변환: 숫자(badge_id)를 가진 g_badges를 찾아 Code 추출
-    let myBadgeCodes = [];
-    if (myRows && !badgeError) {
-        myBadgeCodes = myRows.map(row => {
-            // g_badges의 id와 row.badge_id를 비교 (타입 변환 고려 == 사용)
-            const match = g_badges.find(b => b.id == row.badge_id);
-            return match ? match.code : null;
-        }).filter(code => code !== null);
-    }
-
-    // 4. 체크박스 그리기
-    Badges.renderCheckboxes('member-badge-checkboxes', g_badges, myBadgeCodes);
-    markAutoManagedBadgeControls();
-    // ============================================================
 
     // 5. 모달 설정 및 하위 데이터 로드 (기존 유지)
     toggleEditMode(false);
     loadMemberFunds(memberUid, m.member_id, true);
     loadConsultLogs(memberUid);
-    loadMemberFamily(memberUid);
+    if (!isAdminMemberSiteProfile()) loadMemberFamily(memberUid);
 
     const basicTabBtn = document.querySelector('#memberDetailTab [data-bs-target="#md-tab-basic"]');
     if (basicTabBtn && bootstrap.Tab) {
@@ -11911,7 +12178,9 @@ function openIssueDocModal(docType) {
     const name = g_current_member_row.name || '-';
     const memberId = g_current_member_row.member_id || 'ID없음';
     typeEl.value = docType;
-    titleEl.textContent = docType === 'donation' ? '기부금 수령 확인서 발급 기준 설정' : '출자증명서 발급 기준 설정';
+    titleEl.textContent = docType === 'donation'
+        ? '기부금 수령 확인서 발급 기준 설정'
+        : (isAdminMemberSiteProfile() ? '출자증서 발급 기준 설정' : '출자증명서 발급 기준 설정');
     memberEl.textContent = `${name} (${memberId})`;
     modeEl.value = 'cutoff';
     dateEl.value = todayYmdKst();
@@ -12044,6 +12313,9 @@ async function submitIssueDoc() {
             id: g_current_member_id
         };
         const chairmanName = await fetchChairmanName();
+        if (isAdminMemberSiteProfile() && (!chairmanName || chairmanName === '이사장')) {
+            throw new Error('출자증서 발급 전에 출자증서 설정에서 이사장 성명을 등록해주세요.');
+        }
 
         if (docType === 'donation') {
             if (typeof generateDonationReceipt !== 'function') {
@@ -12087,7 +12359,8 @@ async function submitIssueDoc() {
 
             await generateContributionCert(memberData, amount, cert.cert_number, chairmanName, _supabase, {
                 issueDate: mode === 'cutoff' ? cutoffDate : null,
-                coopId: String(g_adminMemberRuntime?.coop_id || '').trim() || null
+                coopId: String(g_adminMemberRuntime?.coop_id || '').trim() || null,
+                requireSeal: isAdminMemberSiteProfile()
             });
         }
 
@@ -12275,30 +12548,24 @@ async function saveMemberBasic() {
             if (basicError) throw basicError;
             document.getElementById('md-email-original').value = emailInput;
 
-            // ============================================================
-            // ★ [추가됨] 뱃지 저장 (문자 Code -> 숫자 ID 변환)
-            // ============================================================
+            if (!isAdminMemberSiteProfile()) {
+                const selectedCodes = [];
+                document.querySelectorAll('#member-badge-checkboxes input:checked').forEach(cb => {
+                    selectedCodes.push(cb.value);
+                });
 
-            // 1. 체크된 값(Code) 수집
-            const selectedCodes = [];
-            document.querySelectorAll('#member-badge-checkboxes input:checked').forEach(cb => {
-                selectedCodes.push(cb.value);
-            });
+                const selectedIds = selectedCodes.map(code => {
+                    const match = g_badges.find(b => b.code === code);
+                    return match ? Number(match.id) : null;
+                }).filter(id => id !== null);
 
-            // 2. 변환: Code -> ID(숫자)
-            const selectedIds = selectedCodes.map(code => {
-                const match = g_badges.find(b => b.code === code);
-                return match ? Number(match.id) : null;
-            }).filter(id => id !== null);
+                const { error: badgeError } = await _supabase.rpc('sync_member_badges', {
+                    p_member_uid: memberUid,
+                    p_badge_ids: selectedIds
+                });
 
-            // 3. 동기화 RPC 호출
-            const { error: badgeError } = await _supabase.rpc('sync_member_badges', {
-                p_member_uid: memberUid,
-                p_badge_ids: selectedIds
-            });
-
-            if (badgeError) throw new Error('뱃지 동기화 실패: ' + badgeError.message);
-            // ============================================================
+                if (badgeError) throw new Error('뱃지 동기화 실패: ' + badgeError.message);
+            }
 
             showLoading(false);
             myAlert('저장되었습니다.');
@@ -12835,20 +13102,20 @@ async function loadMemberFunds(uuid, textId, reset=false) {
             .order('deposit_date', { ascending: false })
         : Promise.resolve({ data: [], error: null });
 
-    const capitalNotificationPromise = hasTextId
+    const capitalNotificationPromise = hasTextId && !isAdminMemberSiteProfile()
         ? _supabase.rpc('admin_list_member_capital_notification_status', {
             p_member_text_id: safeTextId
         })
         : Promise.resolve({ data: [], error: null });
 
     let donationQuery = null;
-    if (hasTextId) {
+    if (!isAdminMemberSiteProfile() && hasTextId) {
         donationQuery = _supabase
             .from('coop_donations')
             .select('*')
             .eq('member_id', safeTextId)
             .order('donation_date', { ascending: false });
-    } else if (safeUuid) {
+    } else if (!isAdminMemberSiteProfile() && safeUuid) {
         donationQuery = _supabase
             .from('coop_donations')
             .select('*')
@@ -12885,7 +13152,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
     });
     globalHistoryData.donations = Array.isArray(donationResult.data) ? donationResult.data : [];
     updateMemberFundSummary('capital', globalHistoryData.ledger);
-    updateMemberFundSummary('donation', globalHistoryData.donations);
+    if (!isAdminMemberSiteProfile()) updateMemberFundSummary('donation', globalHistoryData.donations);
 
     if (capitalResult.error) {
         const metaEl = document.getElementById('md-capital-meta');
@@ -12896,7 +13163,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
         if (metaEl) metaEl.innerText = '기부금 조회 실패';
     }
 
-    await loadMemberRewardAndDividendSummary(uuid, textId);
+    if (!isAdminMemberSiteProfile()) await loadMemberRewardAndDividendSummary(uuid, textId);
 } // End of loadMemberFunds
 
 // [최종] 자금 내역 삭제 함수
@@ -13348,14 +13615,16 @@ function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, capital
     }
 
     const memberName = String(document.getElementById('md-name')?.value || '해당 조합원').trim() || '해당 조합원';
-    const message = `${memberName} 조합원의 첫 출자금이 저장되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?\n\n정상 전환 후 가입 완료 알림톡 발송 여부를 선택할 수 있습니다.`;
+    const message = isAdminMemberSiteProfile()
+        ? `${memberName} 조합원의 첫 출자금이 저장되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?`
+        : `${memberName} 조합원의 첫 출자금이 저장되었습니다.\n조합원 상태를 정상(정조합원)으로 변경할까요?\n\n정상 전환 후 가입 완료 알림톡 발송 여부를 선택할 수 있습니다.`;
 
     myConfirm(message, async () => {
         showLoading(true);
-        const { data, error } = await _supabase.rpc('admin_activate_member_after_first_capital_secure', {
-            p_member_text_id: safeMemberTextId,
-            p_capital_id: capitalId
-        });
+        const activationParams = isAdminMemberSiteProfile()
+            ? { p_member_text_id: safeMemberTextId }
+            : { p_member_text_id: safeMemberTextId, p_capital_id: capitalId };
+        const { data, error } = await _supabase.rpc('admin_activate_member_after_first_capital_secure', activationParams);
         showLoading(false);
 
         if (error) {
@@ -13374,7 +13643,7 @@ function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, capital
             }
             loadDashboard();
 
-            if (data?.notification_available === true && Number(data?.capital_id || 0) > 0) {
+            if (!isAdminMemberSiteProfile() && data?.notification_available === true && Number(data?.capital_id || 0) > 0) {
                 openCapitalNotificationPrompt(data, async function (result) {
                     showLoading(true);
                     try {
@@ -13388,7 +13657,12 @@ function promptMemberActivationAfterCapitalSave(memberTextId, memberUid, capital
                 return;
             }
 
-            myAlert(data.message || '조합원 상태가 정상(정조합원)으로 변경되었습니다. 가입 완료 알림은 출자금 내역에서 확인해주세요.', 'warning');
+            myAlert(
+                isAdminMemberSiteProfile()
+                    ? '조합원 상태가 정상(정조합원)으로 변경되었습니다.'
+                    : (data.message || '조합원 상태가 정상(정조합원)으로 변경되었습니다. 가입 완료 알림은 출자금 내역에서 확인해주세요.'),
+                isAdminMemberSiteProfile() ? 'success' : 'warning'
+            );
             return;
         }
 
@@ -13436,7 +13710,9 @@ async function saveFundData() {
 
     // 2. 타입별 파라미터 구성 (RPC 명세 준수)
     if (type === 'capital') {
-        rpcName = 'admin_manage_capital_with_notification_secure';
+        rpcName = isAdminMemberSiteProfile()
+            ? 'admin_manage_capital_without_notification_secure'
+            : 'admin_manage_capital_with_notification_secure';
         params = {
             p_id: idVal === null ? null : Number(idVal),
             p_member_text_id: memberTextId,  // 출자금은 text id 기준
@@ -13472,7 +13748,8 @@ async function saveFundData() {
         myAlert('저장 실패: ' + error.message, 'error');
     } else {
         const requiresActivation = isNewCapital && data?.requires_activation === true;
-        const hasCapitalNotificationPrompt = isNewCapital
+        const hasCapitalNotificationPrompt = !isAdminMemberSiteProfile()
+            && isNewCapital
             && !requiresActivation
             && Boolean(data?.capital_id)
             && data?.notification_event_type === 'capital_reflection';
@@ -16662,7 +16939,7 @@ async function processApp(appId, action, type, amount) {
             if (error) throw error;
             resultData = data || {};
 
-            if (action === 'approve' && type === 'extra') {
+            if (!isAdminMemberSiteProfile() && action === 'approve' && type === 'extra') {
                 notificationResult = await sendApprovedExtraCapitalNotification(resultData.ref_member_id);
             }
 

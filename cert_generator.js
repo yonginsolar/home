@@ -1,6 +1,6 @@
 /*
-Version: v1.0.11
-Change: Remove donation receipt tax-credit pointer from page 1 and widen issuer signature spacing.
+Version: v1.0.12
+Change: Use each cooperative's configured share-unit amount and optionally require its registered seal.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -247,6 +247,7 @@ async function buildCertCompanyPrintProfile(supabaseClient, options = {}) {
         bizNum: trimCertCompanyValue(info?.bizNum),
         logoPath: trimCertCompanyValue(info?.logo_horizontal_url),
         sealPath: trimCertCompanyValue(info?.seal_url),
+        shareUnitAmount: Number(info?.member_export_share_unit_amount || 0),
         logoDataUrl: '',
         logoRatio: 0,
         sealDataUrl: ''
@@ -322,6 +323,9 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         const sealDataUrl = companyProfile.sealDataUrl || null;
         const logoDataUrl = companyProfile.logoDataUrl || null;
         const logoRatio = Number(companyProfile.logoRatio || 0);
+        if (options?.requireSeal === true && !sealDataUrl) {
+            throw new Error('출자증서 발급 전에 출자증서 설정에서 조합 직인을 등록해주세요.');
+        }
 
 
         // -----------------------------------------------------------
@@ -373,7 +377,12 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             displayValue = birthStr;
         }
 
-        const shares = Math.floor(totalAmount / 10000);
+        const configuredShareUnitAmount = Math.trunc(Number(companyProfile.shareUnitAmount || 0));
+        const shareUnitAmount = configuredShareUnitAmount > 0 ? configuredShareUnitAmount : 10000;
+        const shares = totalAmount / shareUnitAmount;
+        const shareCountText = Number.isInteger(shares)
+            ? shares.toLocaleString('ko-KR')
+            : shares.toLocaleString('ko-KR', { maximumFractionDigits: 3 });
 
         // [타이틀]
         doc.setFontSize(32);
@@ -418,7 +427,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         drawRow(1, nameLabel, memberData.name);
         drawRow(2, displayLabel, displayValue); // [UPDATE] 위에서 설정한 변수 사용
         drawRow(3, "가 입 연 월 일", memberData.join_date || '-');
-        drawRow(4, "출 자 좌 수", `${shares.toLocaleString()} 좌 (1좌 10,000원)`);
+        drawRow(4, "출 자 좌 수", `${shareCountText} 좌 (1좌 ${shareUnitAmount.toLocaleString('ko-KR')}원)`);
         drawRow(5, "출 자 금 액", `${totalAmount.toLocaleString()} 원`);
 
         // [하단 문구]
@@ -596,7 +605,7 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
         doc.text("위 금액을 수령하였음을 확인합니다.", 105, msgY, { align: "center" });
         const recipientWord = String(memberData.member_type || '').includes('단체') ? '귀사' : '귀하';
         const noticeText = `본 확인서는 당 조합으로 ${recipientWord}의 후원금이 정상적으로 입금되었음을 확인하는 용도로만 사용되며, 연말정산 및 법인세법에 따른 세액공제용 기부금 증빙 서류로 확인할 수 없습니다.`;
-        doc.setFontSize(10);
+        doc.setFontSize(11);
         const issuerRows = [
             `발급기관: ${issuerName}`,
             `사업자등록번호: ${issuerBizNum}`
@@ -669,7 +678,7 @@ async function generateDonationReceipt(memberData, totalAmount, criteria, receip
         doc.setFillColor(248, 249, 250);
         doc.setDrawColor(220, 223, 226);
         doc.roundedRect(20, noticeBoxY, 170, noticeBoxH, 2, 2, 'FD');
-        doc.setFontSize(10.5);
+        doc.setFontSize(11);
         doc.text(noticePageLines, 25, noticeBoxY + 5.5, { lineHeightFactor: 1.35 });
 
         if (details.length > 0) {

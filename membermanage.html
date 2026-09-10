@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.138
-Change: Keep the site/member profile within its confirmed member-service scope.
+Version: v1.0.140
+Change: Load the cooperative-specific contribution certificate issuer settings.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.138 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.140 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -38,7 +38,7 @@ allowKakaoApp: true
 <script src="shared/browser_env_guard.js?v=20260421-3"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="cert_generator.js?v=20260407_01"></script>
+<script src="cert_generator.js?v=20260910_01"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 <script src="badges.js?v=20260828-1"></script>
@@ -1816,7 +1816,7 @@ NO. <span id="infoMemberId">-</span>
 </div>
 </div>
 
-<div class="dashboard-card mb-4">
+<div class="dashboard-card mb-4" id="memberBadgeCollectionCard">
 <div class="border-bottom pb-2 mb-3">
 <h5 class="fw-bold mb-1">나의 배지 컬렉션</h5>
 <p class="small text-muted mb-0">획득한 배지와 각 분야에서 이어갈 다음 도전만 보여드립니다.</p>
@@ -1943,7 +1943,7 @@ NO. <span id="infoMemberId">-</span>
 </div>
 
 <div id="tabCert" class="hidden text-center py-3">
-<h6 class="fw-bold">출자 증명서</h6>
+<h6 class="fw-bold" id="memberContributionCertificateTitle">출자 증명서</h6>
 <p class="small text-muted">현재 납입된 출자금을 기준으로<br>PDF 증명서를 생성합니다.</p>
 <button class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert()">
 <i class="bi bi-download me-2"></i>다운로드
@@ -1975,7 +1975,7 @@ NO. <span id="infoMemberId">-</span>
 <div id="boardList" style="min-height: 200px;"></div>
 </div>
 
-<div class="dashboard-card mb-4">
+<div class="dashboard-card mb-4" id="memberFamilyAccountCard">
 <div class="d-flex justify-content-between align-items-center mb-2">
 <h5 class="fw-bold m-0"><i class="bi bi-people-fill me-2"></i>가족/단체 계정 관리</h5>
 <button class="btn btn-sm btn-outline-secondary" onclick="openAddFamilyModal()">+ 추가</button>
@@ -3626,6 +3626,8 @@ return dest.href;
 		async function ensureLoginBadgesGranted() {
 		  try {
 		    if (!_supabase || !curAuth || !curAuth.id) return;
+		    if (!coopRuntimeProfile) await loadCoopRuntimeModules();
+		    if (isSiteMemberPortalProfile()) return;
 
 	    const key = `login_badges_granted:${curAuth.id}`;
 	    if (sessionStorage.getItem(key) === '1') return;
@@ -3653,6 +3655,8 @@ return dest.href;
 		async function ensureProfileBadgesGranted(profileUid) {
 		  try {
 		    if (!_supabase || !curAuth || !curAuth.id || !profileUid) return;
+		    if (!coopRuntimeProfile) await loadCoopRuntimeModules();
+		    if (isSiteMemberPortalProfile()) return;
 
 		    // 본인은 기존 로직(ensureLoginBadgesGranted)에서 처리
 		    if (profileUid === getRootMemberProfileId()) return;
@@ -4251,12 +4255,12 @@ if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
 checkElectionVisibility(curMem, myRoles);
 
 checkSolarMapVisibility(myRoles);
-if (typeof loadFamilyList === 'function') loadFamilyList(uuid);
+if (!isSiteMemberPortalProfile() && typeof loadFamilyList === 'function') loadFamilyList(uuid);
 if (typeof loadMiniNotices === 'function') loadMiniNotices();
-if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
+if (!isSiteMemberPortalProfile() && typeof checkIncomingConnects === 'function') checkIncomingConnects();
 	loadBoard('free', null, 20); 
 	
-	if (typeof Badges !== 'undefined') {
+	if (!isSiteMemberPortalProfile() && typeof Badges !== 'undefined') {
 	await ensureProfileBadgesGranted(uuid);
 	await Badges.render('badgeContainer', uuid, _supabase);
 
@@ -4267,9 +4271,11 @@ if (typeof checkIncomingConnects === 'function') checkIncomingConnects();
 	}
 	
 	showOnly('dashboardSection');
-	await handlePendingEducationQrCheckIn(uuid);
+	if (!isSiteMemberPortalProfile()) await handlePendingEducationQrCheckIn(uuid);
+	if (!isSiteMemberPortalProfile()) {
 	await handlePendingHumanitiesCourseCheckIn();
 	await handlePendingHumanitiesAccountLink();
+	}
 
 	} catch (e) {
 console.error("Dashboard Load Error:", e);
@@ -4375,6 +4381,12 @@ if (tabs) tabs.classList.toggle('hidden', !hallOfFameState.pilotAllowed);
 }
 
 async function loadQuizPilotEntry() {
+if (isSiteMemberPortalProfile()) {
+setQuizPilotEntryVisible(false);
+const hallCard = document.getElementById('hallOfFameCard');
+if (hallCard) hallCard.classList.add('hidden');
+return;
+}
 const authUserId = String(curAuth?.id || '').trim();
 if (!_supabase || !authUserId) {
 setQuizPilotEntryVisible(false);
@@ -4565,6 +4577,7 @@ return !!(member && member.role === 'admin');
 }
 
 function shouldShowModuleEntryToMember(moduleKey, member) {
+if (isSiteMemberPortalProfile()) return isCoopRuntimeModuleEnabled(moduleKey);
 return isCoopRuntimeModuleEnabled(moduleKey) || isMemberPortalAdmin(member);
 }
 
@@ -5175,6 +5188,26 @@ childBankLabel.innerHTML = siteMemberProfile
 ? '<i class="bi bi-bank me-1"></i>자녀 계좌 정보 (미성년 자녀 본인 명의)'
 : '<i class="bi bi-bank me-1"></i>배당금 수령 계좌 (미성년 자녀 본인 명의)';
 }
+const certificateTitle = document.getElementById('memberContributionCertificateTitle');
+if (certificateTitle) certificateTitle.textContent = siteMemberProfile ? '출자증서' : '출자 증명서';
+['memberBadgeCollectionCard', 'memberFamilyAccountCard', 'hallOfFameCard'].forEach((id) => {
+const element = document.getElementById(id);
+if (element) element.classList.toggle('hidden', siteMemberProfile);
+});
+['profileSwitcher', 'btnLinkKakao', 'btnLinkNaver'].forEach((id) => {
+const element = document.getElementById(id);
+if (element) element.classList.toggle('hidden', siteMemberProfile);
+});
+document.querySelectorAll('.social-link-state').forEach((element) => {
+element.classList.toggle('hidden', siteMemberProfile);
+});
+['quickParticipationCard', 'quizPilotCard'].forEach((id) => {
+const card = document.getElementById(id);
+if (!card) return;
+card.classList.toggle('hidden', siteMemberProfile);
+if (card.parentElement) card.parentElement.classList.toggle('hidden', siteMemberProfile);
+});
+updateQuickLinksLayout();
 }
 
 function isCoopRuntimeModuleEnabled(moduleKey) {
@@ -5197,6 +5230,12 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
     updateQuickLinksLayout();
 };
+
+if (isSiteMemberPortalProfile()) {
+setQuickCardVisible(voteCard, false);
+setQuickCardTodoState(voteCard, voteBadge, false);
+return;
+}
 
 const portalUrl = 'vote/index.html?portal=1';
 const isAdmin = isMemberPortalAdmin(member);
@@ -5599,8 +5638,11 @@ if (myRoles.includes('election_comm') && tabElec) tabElec.classList.remove('hidd
 // ----------------------------------------------------
 
 // 데이터 전역 저장 (모달용)
-const visibleDividends = isSiteMemberPortalProfile() ? [] : dividends;
-globalHistoryData = { ledger, donations, points, dividends: visibleDividends };
+const siteMemberProfile = isSiteMemberPortalProfile();
+const visibleDonations = siteMemberProfile ? [] : donations;
+const visiblePoints = siteMemberProfile ? [] : points;
+const visibleDividends = siteMemberProfile ? [] : dividends;
+globalHistoryData = { ledger, donations: visibleDonations, points: visiblePoints, dividends: visibleDividends };
 globalAssetSummary = assets || {};
 globalHistoryMeta = historyMeta || { limit: MEMBER_DASHBOARD_HISTORY_LIMIT, counts: {} };
 
@@ -5614,17 +5656,17 @@ const activeAssets = [];
 activeAssets.push({ title: '총 납입 출자금', val: assets.total_capital, unit: '원', icon: 'bi-piggy-bank', color: '#2E7D32', type: 'ledger' });
 
 // 2. 기부금
-if(assets.total_donation > 0 || donations.length > 0) {
+if(!siteMemberProfile && (assets.total_donation > 0 || visibleDonations.length > 0)) {
 activeAssets.push({ title: '누적 기부금', val: assets.total_donation, unit: '원', icon: 'bi-heart-fill', color: '#E91E63', type: 'donation' });
 }
 
 // 3. 포인트
-if(assets.current_points !== 0 || points.length > 0) {
+if(!siteMemberProfile && (assets.current_points !== 0 || visiblePoints.length > 0)) {
 activeAssets.push({ title: '보유 포인트', val: assets.current_points, unit: 'P', icon: 'bi-coin', color: '#FF9800', type: 'point' });
 }
 
 // 4. 배당금
-if(!isSiteMemberPortalProfile() && (assets.total_dividend_gross > 0 || assets.total_dividend_net > 0 || dividends.length > 0)) {
+if(!siteMemberProfile && (assets.total_dividend_gross > 0 || assets.total_dividend_net > 0 || visibleDividends.length > 0)) {
 activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend_gross, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
 activeAssets.push({ title: '배당금(세후)', val: assets.total_dividend_net, unit: '원', icon: 'bi-cash-coin', color: '#1565C0', type: 'dividend_net' });
 }
@@ -5661,7 +5703,7 @@ void loadQuizPilotEntry();
 // ----------------------------------------------------
 // [3] 타임라인 렌더링 (통합)
 // ----------------------------------------------------
-renderTimeline(ledger, apps, donations, points, visibleDividends);
+renderTimeline(ledger, apps, visibleDonations, visiblePoints, visibleDividends);
 }
 
 // [신규] 전자서명 요청 존재 여부 확인 (임원용)
@@ -5897,6 +5939,12 @@ const card = document.getElementById('quickParticipationCard');
 const desc = document.getElementById('quickParticipationDesc');
 const meta = document.getElementById('quickParticipationMeta');
 if (!card || !desc || !meta || !memberUuid) return;
+if (isSiteMemberPortalProfile()) {
+card.classList.add('hidden');
+if (card.parentElement) card.parentElement.classList.add('hidden');
+updateQuickLinksLayout();
+return;
+}
 try {
 const { data, error } = await _supabase.rpc('participation_member_history_page', {
 p_member_uuid: memberUuid,
@@ -6887,8 +6935,8 @@ const setQuickCardVisible = (cardEl, visible) => {
 
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 setQuickCardTodoState(minutesViewCard, docBadge, false);
-setQuickCardVisible(participationCard, true);
-loadParticipationCardSummary(member?.id || curMem?.id);
+setQuickCardVisible(participationCard, !isSiteMemberPortalProfile());
+if (!isSiteMemberPortalProfile()) loadParticipationCardSummary(member?.id || curMem?.id);
 
 setQuickCardButtonState(minutesSignCard, {
 descText: '서명 요청 확인',
@@ -6901,7 +6949,7 @@ buttonText: '문서함 열기',
 buttonClassName: 'quick-btn btn btn-secondary'
 });
 
-if (!documentsEnabled && isAdmin) {
+if (!isSiteMemberPortalProfile() && !documentsEnabled && isAdmin) {
 setQuickCardVisible(minutesViewCard, true);
 setQuickCardButtonState(minutesViewCard, {
 descText: '현재 조합에서 문서함 모듈이 꺼져 있습니다.',
@@ -6910,7 +6958,7 @@ buttonClassName: 'quick-btn btn btn-outline-secondary'
 });
 }
 
-if (!signatureEnabled && isAdmin) {
+if (!isSiteMemberPortalProfile() && !signatureEnabled && isAdmin) {
 setQuickCardVisible(minutesSignCard, true);
 setQuickCardButtonState(minutesSignCard, {
 descText: '현재 조합에서 전자서명 모듈이 꺼져 있습니다.',
@@ -7758,7 +7806,10 @@ p_amount: finalTotal
 if (error) throw error;
 
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
-await generateContributionCert(curMem, finalTotal, cert.cert_number, '', _supabase, { coopId });
+await generateContributionCert(curMem, finalTotal, cert.cert_number, '', _supabase, {
+coopId,
+requireSeal: isSiteMemberPortalProfile()
+});
 
 showLoading(false);
 
@@ -9980,6 +10031,11 @@ const setQuickCardVisible = (cardEl, visible) => {
     cardEl.classList.toggle('hidden', !visible);
     updateQuickLinksLayout();
 };
+
+if (isSiteMemberPortalProfile()) {
+setQuickCardVisible(card, false);
+return;
+}
 
 try {
 // 1. 관리자/임원 권한 확인 (프리패스 조건)
