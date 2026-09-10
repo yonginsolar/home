@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.141
-Change: Remove the free board and partner exposure request from the site/member profile.
+Version: v1.0.142
+Change: Scope member portal branding by public host and authenticated cooperative.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.141 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.142 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -3204,6 +3204,7 @@ showModal("시스템 오류: DB 연결 실패");
 return;
 }
 
+await hydrateMembermanagePublicBranding();
 await initializeEducationQrEntry();
 
 // 3. 인증 상태 변경 감지
@@ -4567,10 +4568,47 @@ let coopRuntimeProfile = '';
 let currentMemberCoopId = null;
 const EXTRA_CAPITAL_ACCOUNT_KEYS = ['member_capital_deposit_bank', 'member_capital_deposit_account', 'member_capital_deposit_holder'];
 let extraCapitalDepositAccountState = { coopId:null, data:null, promise:null };
-const MEMBERMANAGE_BRANDING_CACHE_KEY = 'membermanage_branding_name';
+const MEMBERMANAGE_BRANDING_CACHE_PREFIX = 'membermanage_branding_name_v2';
 const DEFAULT_MEMBERMANAGE_COOP_NAME = '용인모두의햇빛협동조합';
 const PARTICIPATION_FILES_BUCKET = 'participation-files';
-let currentMemberCoopName = String(localStorage.getItem(MEMBERMANAGE_BRANDING_CACHE_KEY) || '').trim() || DEFAULT_MEMBERMANAGE_COOP_NAME;
+
+function getMembermanageBrandingHost() {
+const routeHost = window.CoopRouteGuard?.getPublicRuntimeHost
+? window.CoopRouteGuard.getPublicRuntimeHost(window.location)
+: window.location.hostname;
+return String(routeHost || '').trim().toLowerCase().replace(/\.$/, '');
+}
+
+function getMembermanageBrandingCacheKey(coopId = '') {
+const host = getMembermanageBrandingHost() || 'unknown-host';
+const tenant = String(coopId || '').trim() || 'public-host';
+return `${MEMBERMANAGE_BRANDING_CACHE_PREFIX}:${host}:${tenant}`;
+}
+
+function readMembermanageBrandingCache(coopId = '') {
+try {
+return String(localStorage.getItem(getMembermanageBrandingCacheKey(coopId)) || '').trim();
+} catch (_) {
+return '';
+}
+}
+
+function writeMembermanageBrandingCache(coopName, coopId = '') {
+const safeName = String(coopName || '').trim();
+if (!safeName) return;
+try {
+localStorage.setItem(getMembermanageBrandingCacheKey(), safeName);
+if (coopId) localStorage.setItem(getMembermanageBrandingCacheKey(coopId), safeName);
+} catch (_) {}
+}
+
+function getMembermanageFallbackCoopName() {
+const host = getMembermanageBrandingHost();
+const mainHosts = new Set(['yonginsolar.kr', 'www.yonginsolar.kr', 'erp.yonginsolar.kr']);
+return !host || mainHosts.has(host) ? DEFAULT_MEMBERMANAGE_COOP_NAME : '협동조합';
+}
+
+let currentMemberCoopName = readMembermanageBrandingCache();
 
 function isMemberPortalAdmin(member) {
 return !!(member && member.role === 'admin');
@@ -4729,7 +4767,8 @@ setProfileDetailsExpanded(next);
 async function loadMembermanageBranding() {
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 if (!coopId) return currentMemberCoopName;
-if (currentMemberCoopName) return currentMemberCoopName;
+const tenantCachedName = readMembermanageBrandingCache(coopId);
+if (tenantCachedName) currentMemberCoopName = tenantCachedName;
 try {
 const { data, error } = await _supabase
 .from('ref_company_info')
@@ -4756,7 +4795,7 @@ if (coopError) throw coopError;
 currentMemberCoopName = String(coopRow?.coop_name || '').trim();
 }
 if (currentMemberCoopName) {
-localStorage.setItem(MEMBERMANAGE_BRANDING_CACHE_KEY, currentMemberCoopName);
+writeMembermanageBrandingCache(currentMemberCoopName, coopId);
 }
 return currentMemberCoopName;
 } catch (e) {
@@ -4765,8 +4804,26 @@ return currentMemberCoopName;
 }
 }
 
+async function hydrateMembermanagePublicBranding() {
+if (!_supabase) return currentMemberCoopName;
+try {
+const { data, error } = await _supabase.rpc('get_public_site_context');
+if (error) throw error;
+const context = Array.isArray(data) ? data[0] : data;
+const coopName = String(context?.coop_name || '').trim();
+if (!coopName) return currentMemberCoopName;
+currentMemberCoopName = coopName;
+writeMembermanageBrandingCache(coopName, context?.coop_id || '');
+applyMembermanageBranding();
+return currentMemberCoopName;
+} catch (e) {
+console.warn('hydrateMembermanagePublicBranding failed:', e);
+return currentMemberCoopName;
+}
+}
+
 function applyMembermanageBranding() {
-const coopName = String(currentMemberCoopName || '').trim() || DEFAULT_MEMBERMANAGE_COOP_NAME;
+const coopName = String(currentMemberCoopName || '').trim() || getMembermanageFallbackCoopName();
 const pageTitle = coopName ? `조합원 관리 - ${coopName}` : '조합원 관리';
 document.title = pageTitle;
 const headerCoopLink = document.getElementById('headerCoopLink');
