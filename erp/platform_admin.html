@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.16 | Change: 2026-09-10 - Add a focused site/member module view and per-module administrator assignment. -->
+<!-- Version: v1.1.17 | Change: 2026-09-10 - Add new administrator registration and allow multiple administrators per module. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.1.16 | platform_admin.html');</script>
+  <script>console.log('[Version] v1.1.17 | platform_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -190,6 +190,49 @@
       gap: 8px;
       align-items: center;
     }
+    .admin-roster {
+      display: grid;
+      gap: 8px;
+    }
+    .admin-roster-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 12px 14px;
+      border: 1px solid rgba(15, 23, 42, 0.10);
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+    .admin-roster-name {
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .admin-roster-meta {
+      margin-top: 3px;
+      color: #64748b;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .admin-roster-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .admin-access-controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px 14px;
+      margin-top: 9px;
+    }
+    .admin-create-box {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed rgba(15, 23, 42, 0.14);
+    }
     .billing-summary {
       margin-top: 16px;
       border-top: 1px dashed rgba(15, 23, 42, 0.12);
@@ -314,6 +357,12 @@
       }
       .module-grid {
         grid-template-columns: 1fr;
+      }
+      .admin-roster-item {
+        flex-direction: column;
+      }
+      .admin-roster-badges {
+        justify-content: flex-start;
       }
       .pricing-grid {
         grid-template-columns: 1fr;
@@ -539,7 +588,7 @@
                     <div class="col-md-9">
                       <div class="section-title mb-1">운영 프로필</div>
                       <label class="muted-label" for="manageRuntimeProfileSelect">프로필 선택</label>
-                      <select class="form-select" id="manageRuntimeProfileSelect">
+                      <select class="form-select" id="manageRuntimeProfileSelect" onchange="syncNewAdminModuleOptions()">
                         <option value="site_member">홈페이지·조합원 관리</option>
                         <option value="workforce_lite">인사·전자결재 중심</option>
                         <option value="legacy_full">전체 기능</option>
@@ -565,6 +614,60 @@
                     </div>
                     <div class="col-md-3 d-grid">
                       <button class="btn btn-primary" type="button" id="btnSavePrimaryAdmin" onclick="savePrimaryAdmin()">대표 관리자 저장</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="panel-card mb-0">
+                  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-2 mb-3">
+                    <div>
+                      <div class="section-title mb-1">관리자 관리</div>
+                      <div class="form-hint">새 관리자를 등록하고 로그인 연결 상태와 담당 업무를 확인합니다.</div>
+                    </div>
+                    <div class="form-hint">비밀번호는 만들지 않습니다. 등록된 이메일로 본인이 OTP 로그인을 완료합니다.</div>
+                  </div>
+
+                  <div id="manageAdminRoster" class="admin-roster">
+                    <div class="empty-box">관리자 목록을 불러오는 중입니다.</div>
+                  </div>
+
+                  <div class="admin-create-box">
+                    <div class="fw-bold mb-2">새 관리자 추가</div>
+                    <div class="row g-2 align-items-end">
+                      <div class="col-md-3">
+                        <label class="muted-label" for="manageNewAdminNameInput">이름</label>
+                        <input class="form-control" id="manageNewAdminNameInput" maxlength="80" autocomplete="off" placeholder="홍길동">
+                      </div>
+                      <div class="col-md-5">
+                        <label class="muted-label" for="manageNewAdminEmailInput">이메일</label>
+                        <input type="email" class="form-control" id="manageNewAdminEmailInput" maxlength="254" autocomplete="off" placeholder="admin@example.org">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="muted-label" for="manageNewAdminPhoneInput">휴대전화 <span class="text-muted">(선택)</span></label>
+                        <input type="tel" class="form-control" id="manageNewAdminPhoneInput" maxlength="20" autocomplete="off" inputmode="tel" placeholder="010-0000-0000">
+                      </div>
+                    </div>
+
+                    <div id="manageNewAdminModuleOptions" class="mt-3 hidden">
+                      <div class="muted-label mb-2">등록과 함께 업무 권한 부여 <span class="text-muted">(선택)</span></div>
+                      <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check">
+                          <input class="form-check-input" type="checkbox" id="manageNewAdminMemberModule" onchange="updateNewAdminAssignmentWarning()">
+                          <label class="form-check-label" for="manageNewAdminMemberModule">조합원 관리</label>
+                        </div>
+                        <div class="form-check">
+                          <input class="form-check-input" type="checkbox" id="manageNewAdminSiteModule" onchange="updateNewAdminAssignmentWarning()">
+                          <label class="form-check-label" for="manageNewAdminSiteModule">홈페이지 관리</label>
+                        </div>
+                      </div>
+                      <div class="form-hint mt-2" id="manageNewAdminAssignmentWarning">업무를 선택하지 않으면 관리자만 등록되고, 관리자 목록에서 나중에 권한을 줄 수 있습니다.</div>
+                    </div>
+
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mt-3">
+                      <div class="form-hint">내부 사원번호와 계정 식별값은 시스템이 자동으로 생성합니다.</div>
+                      <button class="btn btn-primary" type="button" id="btnCreateCoopAdmin" onclick="createCoopAdmin()">관리자 등록</button>
                     </div>
                   </div>
                 </div>
@@ -1392,7 +1495,10 @@
       document.getElementById('manageDomainTableWrap').innerHTML = '<div class="empty-box">도메인 정보를 불러오는 중입니다.</div>';
       document.getElementById('manageModuleGrid').innerHTML = '<div class="empty-box">모듈 정보를 불러오는 중입니다.</div>';
       document.getElementById('manageAdminSelect').innerHTML = '<option>불러오는 중...</option>';
+      document.getElementById('manageAdminRoster').innerHTML = '<div class="empty-box">관리자 목록을 불러오는 중입니다.</div>';
       selectedCoopModuleAdminOptions = [];
+      resetNewAdminForm();
+      syncNewAdminModuleOptions();
       setManageStatus('', '');
       if (!coopManageModal) coopManageModal = new bootstrap.Modal(document.getElementById('coopManageModal'));
       coopManageModal.show();
@@ -1437,6 +1543,7 @@
 
         selectedCoopModuleAdminOptions = Array.isArray(moduleAdminRes.data) ? moduleAdminRes.data : [];
         renderAdminCandidates(Array.isArray(adminRes.data) ? adminRes.data : []);
+        renderAdminRoster();
         renderModuleGrid(Array.isArray(moduleRes.data) ? moduleRes.data : []);
         renderDomainRoutes(Array.isArray(domainRes.data) ? domainRes.data : []);
       } catch (err) {
@@ -1662,32 +1769,178 @@
       if (String(selectedCoop?.runtime_profile || '') !== 'site_member') return '';
       if (!['member_admin', 'site_admin'].includes(moduleKey)) return '';
 
-      const assigned = selectedCoopModuleAdminOptions.find((row) => (
+      const assignedAdmins = selectedCoopModuleAdminOptions.filter((row) => (
         Array.isArray(row?.assigned_modules) && row.assigned_modules.includes(moduleKey)
       ));
-      const label = moduleKey === 'member_admin' ? '조합원 관리 담당 관리자' : '홈페이지 관리 담당 관리자';
-      const options = selectedCoopModuleAdminOptions.map((row) => {
-        const linked = row?.is_login_linked === true;
-        const roleLabel = row?.role === 'admin_all' ? '대표 관리자' : '관리자';
-        const selected = String(row?.emp_id || '') === String(assigned?.emp_id || '') ? 'selected' : '';
-        const disabled = linked ? '' : 'disabled';
-        const linkedLabel = linked ? '' : ' / 로그인 연결 필요';
-        return `<option value="${escapeHtml(row?.emp_id || '')}" ${selected} ${disabled}>${escapeHtml(row?.emp_name || row?.email || '이름 미등록')} / ${escapeHtml(roleLabel + linkedLabel)}</option>`;
-      }).join('');
+      const label = moduleKey === 'member_admin' ? '조합원 관리 권한' : '홈페이지 관리 권한';
+      const names = assignedAdmins.map((row) => {
+        const loginLabel = row?.is_login_linked === true ? '' : ' (첫 로그인 대기)';
+        return `${row?.emp_name || row?.email || '이름 미등록'}${loginLabel}`;
+      });
 
       return `
         <div class="module-admin-panel">
-          <label class="muted-label" for="moduleAdminSelect-${escapeHtml(moduleKey)}">${escapeHtml(label)}</label>
-          <div class="module-admin-actions">
-            <select class="form-select form-select-sm" id="moduleAdminSelect-${escapeHtml(moduleKey)}">
-              <option value="">담당 관리자 선택</option>
-              ${options}
-            </select>
-            <button class="btn btn-outline-primary btn-sm" type="button" id="btnSaveModuleAdmin-${escapeHtml(moduleKey)}" onclick="saveModuleAdmin('${escapeJsString(moduleKey)}')">담당자 저장</button>
-          </div>
-          <div class="form-hint mt-2">같은 관리자를 두 업무에 모두 지정하거나 서로 다른 관리자로 나눌 수 있습니다.</div>
+          <div class="muted-label">${escapeHtml(label)}을 가진 관리자</div>
+          <div class="fw-bold mt-1">${escapeHtml(names.join(', ') || '지정된 관리자 없음')}</div>
+          <div class="form-hint mt-2">여러 명을 지정할 수 있습니다. 위 관리자 관리 목록에서 사람별 권한을 변경합니다.</div>
         </div>
       `;
+    }
+
+    function getAdminModuleLabel(moduleKey) {
+      if (moduleKey === 'member_admin') return '조합원 관리';
+      if (moduleKey === 'site_admin') return '홈페이지 관리';
+      return moduleKey || '';
+    }
+
+    function renderAdminRoster() {
+      const wrap = document.getElementById('manageAdminRoster');
+      if (!wrap) return;
+      const rows = Array.isArray(selectedCoopModuleAdminOptions) ? selectedCoopModuleAdminOptions : [];
+      if (!rows.length) {
+        wrap.innerHTML = '<div class="empty-box">등록된 활성 관리자가 없습니다.</div>';
+        return;
+      }
+      wrap.innerHTML = rows.map((row) => {
+        const modules = Array.isArray(row?.assigned_modules) ? row.assigned_modules : [];
+        const roleLabel = row?.role === 'admin_all' ? '대표 관리자' : '관리자';
+        const linked = row?.is_login_linked === true;
+        const empId = String(row?.emp_id || '');
+        const memberChecked = modules.includes('member_admin') ? 'checked' : '';
+        const siteChecked = modules.includes('site_admin') ? 'checked' : '';
+        const moduleControls = String(selectedCoop?.runtime_profile || '') === 'site_member' ? `
+          <div class="admin-access-controls">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="adminMemberAccess-${escapeHtml(empId)}" ${memberChecked}>
+              <label class="form-check-label" for="adminMemberAccess-${escapeHtml(empId)}">조합원 관리</label>
+            </div>
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="adminSiteAccess-${escapeHtml(empId)}" ${siteChecked}>
+              <label class="form-check-label" for="adminSiteAccess-${escapeHtml(empId)}">홈페이지 관리</label>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" type="button" id="btnSaveAdminAccess-${escapeHtml(empId)}" onclick="saveAdminModuleAccess('${escapeJsString(empId)}')">권한 저장</button>
+          </div>
+        ` : '';
+        return `
+          <div class="admin-roster-item">
+            <div>
+              <div class="admin-roster-name">${escapeHtml(row?.emp_name || '이름 미등록')}</div>
+              <div class="admin-roster-meta">${escapeHtml(row?.email || '이메일 미등록')}</div>
+            </div>
+            <div>
+              <div class="admin-roster-badges">
+                <span class="badge-soft ${row?.role === 'admin_all' ? '' : 'off'}">${escapeHtml(roleLabel)}</span>
+                <span class="badge-soft ${linked ? '' : 'off'}">${linked ? '로그인 연결됨' : '첫 로그인 대기'}</span>
+              </div>
+              ${moduleControls}
+            </div>
+          </div>
+        `;
+      }).join('');
+      updateNewAdminAssignmentWarning();
+    }
+
+    function resetNewAdminForm() {
+      ['manageNewAdminNameInput', 'manageNewAdminEmailInput', 'manageNewAdminPhoneInput'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+      });
+      ['manageNewAdminMemberModule', 'manageNewAdminSiteModule'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.checked = false;
+      });
+      updateNewAdminAssignmentWarning();
+    }
+
+    function syncNewAdminModuleOptions() {
+      const wrap = document.getElementById('manageNewAdminModuleOptions');
+      if (!wrap) return;
+      const profile = document.getElementById('manageRuntimeProfileSelect')?.value || selectedCoop?.runtime_profile || '';
+      const visible = profile === 'site_member';
+      wrap.classList.toggle('hidden', !visible);
+      if (!visible) {
+        document.getElementById('manageNewAdminMemberModule').checked = false;
+        document.getElementById('manageNewAdminSiteModule').checked = false;
+      }
+      updateNewAdminAssignmentWarning();
+    }
+
+    function updateNewAdminAssignmentWarning() {
+      const hint = document.getElementById('manageNewAdminAssignmentWarning');
+      if (!hint) return;
+      const selectedModuleKeys = [];
+      if (document.getElementById('manageNewAdminMemberModule')?.checked) selectedModuleKeys.push('member_admin');
+      if (document.getElementById('manageNewAdminSiteModule')?.checked) selectedModuleKeys.push('site_admin');
+      if (!selectedModuleKeys.length) {
+        hint.textContent = '업무를 선택하지 않으면 관리자만 등록되고, 관리자 목록에서 나중에 권한을 줄 수 있습니다.';
+        hint.className = 'form-hint mt-2';
+        return;
+      }
+      hint.textContent = `기존 관리자 권한은 유지하고 새 관리자에게 ${selectedModuleKeys.map(getAdminModuleLabel).join(', ')} 권한을 추가합니다.`;
+      hint.className = 'form-hint mt-2 text-primary fw-bold';
+    }
+
+    function getCreateCoopAdminErrorMessage(error) {
+      const message = String(error?.message || error || '');
+      if (message.includes('ADMIN_EMAIL_ALREADY_EXISTS')) return '이 조합에 같은 이메일로 등록된 사람이 있습니다. 관리자 목록과 이메일을 확인해 주세요.';
+      if (message.includes('ADMIN_AUTH_ALREADY_LINKED')) return '이 이메일의 로그인 계정이 이미 이 조합의 다른 관리자와 연결되어 있습니다.';
+      if (message.includes('INVALID_ADMIN_EMAIL')) return '이메일 형식을 확인해 주세요.';
+      if (message.includes('INVALID_ADMIN_PHONE')) return '휴대전화번호는 숫자 10~11자리로 입력해 주세요.';
+      if (message.includes('SITE_MEMBER_PROFILE_REQUIRED')) return '담당 업무 바로 지정은 홈페이지·조합원 관리 운영 구성에서만 사용할 수 있습니다.';
+      if (message.includes('PLATFORM_ADMIN_REQUIRED')) return '통합 관리자만 새 관리자를 등록할 수 있습니다.';
+      return message || '관리자를 등록하지 못했습니다.';
+    }
+
+    async function createCoopAdmin() {
+      if (!selectedCoop?.coop_id || createCoopAdmin._inFlight) return;
+      const name = String(document.getElementById('manageNewAdminNameInput')?.value || '').trim();
+      const email = String(document.getElementById('manageNewAdminEmailInput')?.value || '').trim().toLowerCase();
+      const phone = String(document.getElementById('manageNewAdminPhoneInput')?.value || '').trim();
+      const assignMemberAdmin = document.getElementById('manageNewAdminMemberModule')?.checked === true;
+      const assignSiteAdmin = document.getElementById('manageNewAdminSiteModule')?.checked === true;
+
+      if (!name || !email) {
+        setManageStatus('새 관리자의 이름과 이메일을 입력해 주세요.', 'alert-danger');
+        return;
+      }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        setManageStatus('이메일 형식을 확인해 주세요.', 'alert-danger');
+        return;
+      }
+
+      createCoopAdmin._inFlight = true;
+      setManageStatus('', '');
+      setLoadingState('btnCreateCoopAdmin', true, '등록 중...');
+      try {
+        const { data, error } = await _supabase.rpc('platform_create_coop_admin', {
+          p_coop_id: selectedCoop.coop_id,
+          p_admin_name: name,
+          p_admin_email: email,
+          p_admin_phone: phone || null,
+          p_assign_member_admin: assignMemberAdmin,
+          p_assign_site_admin: assignSiteAdmin
+        });
+        if (error) throw error;
+        if (!data?.ok) throw new Error('관리자 등록 결과를 확인하지 못했습니다.');
+
+        const linkedMessage = data.is_login_linked
+          ? '기존 인증 계정과 바로 연결되었습니다.'
+          : '첫 이메일 OTP 로그인 전까지 연결 대기 상태입니다.';
+        const moduleLabels = Array.isArray(data.assigned_modules)
+          ? data.assigned_modules.map(getAdminModuleLabel).filter(Boolean)
+          : [];
+        const moduleMessage = moduleLabels.length ? ` 담당 업무: ${moduleLabels.join(', ')}.` : '';
+        resetNewAdminForm();
+        await loadManageModalData(false);
+        await loadCoopList();
+        setManageStatus(`${data.emp_name || name} 관리자를 등록했습니다. ${linkedMessage}${moduleMessage}`, 'alert-success');
+      } catch (error) {
+        console.error('createCoopAdmin failed:', error);
+        setManageStatus(`관리자 등록 실패: ${getCreateCoopAdminErrorMessage(error)}`, 'alert-danger');
+      } finally {
+        createCoopAdmin._inFlight = false;
+        setLoadingState('btnCreateCoopAdmin', false, '등록 중...');
+      }
     }
 
     function renderAdminCandidates(list) {
@@ -1770,6 +2023,7 @@
         });
         if (error) throw error;
         selectedCoop.runtime_profile = data.runtime_profile;
+        syncNewAdminModuleOptions();
         setManageStatus(`운영 프로필을 ${getProfileDisplayLabel(data.runtime_profile)}로 저장했습니다.`, 'alert-success');
         await loadManageModalData(false);
         await loadCoopList();
@@ -1814,32 +2068,40 @@
       }
     }
 
-    async function saveModuleAdmin(moduleKey) {
-      if (!selectedCoop || !selectedCoop.coop_id) return;
-      const safeModuleKey = String(moduleKey || '').trim();
-      const select = document.getElementById(`moduleAdminSelect-${safeModuleKey}`);
-      const targetEmpId = String(select?.value || '').trim();
-      if (!targetEmpId) {
-        setManageStatus('담당 관리자를 선택해주세요.', 'alert-danger');
-        return;
-      }
-
-      const buttonId = `btnSaveModuleAdmin-${safeModuleKey}`;
+    async function saveAdminModuleAccess(empId) {
+      if (!selectedCoop?.coop_id) return;
+      const safeEmpId = String(empId || '').trim();
+      if (!safeEmpId) return;
+      const memberAccess = document.getElementById(`adminMemberAccess-${safeEmpId}`)?.checked === true;
+      const siteAccess = document.getElementById(`adminSiteAccess-${safeEmpId}`)?.checked === true;
+      const buttonId = `btnSaveAdminAccess-${safeEmpId}`;
       setManageStatus('', '');
       setLoadingState(buttonId, true, '저장 중...');
       try {
-        const { data, error } = await _supabase.rpc('platform_assign_coop_module_admin', {
+        const { data, error } = await _supabase.rpc('platform_set_coop_admin_modules', {
           p_coop_id: selectedCoop.coop_id,
-          p_module_key: safeModuleKey,
-          p_emp_id: targetEmpId
+          p_emp_id: safeEmpId,
+          p_member_admin: memberAccess,
+          p_site_admin: siteAccess
         });
         if (error) throw error;
-        const moduleLabel = safeModuleKey === 'member_admin' ? '조합원 관리' : '홈페이지 관리';
-        setManageStatus(`${moduleLabel} 담당 관리자를 ${data.emp_name || data.email}로 저장했습니다.`, 'alert-success');
+        const modules = Array.isArray(data?.assigned_modules)
+          ? data.assigned_modules.map(getAdminModuleLabel).filter(Boolean)
+          : [];
+        const moduleLabel = modules.length ? modules.join(', ') : '별도 업무 없음';
+        const loginLabel = data?.is_login_linked ? '' : ' 첫 OTP 로그인 후 실제 접근이 열립니다.';
         await loadManageModalData(false);
-      } catch (err) {
-        console.error('saveModuleAdmin failed:', err);
-        setManageStatus(`담당 관리자 저장 실패: ${err.message}`, 'alert-danger');
+        setManageStatus(`${data?.emp_name || data?.email || '관리자'}의 업무 권한을 저장했습니다: ${moduleLabel}.${loginLabel}`, 'alert-success');
+      } catch (error) {
+        console.error('saveAdminModuleAccess failed:', error);
+        const rawMessage = String(error?.message || error || '');
+        const friendlyMessage = rawMessage.includes('MODULE_ADMIN_AT_LEAST_ONE_REQUIRED:member_admin')
+          ? '조합원 관리 권한을 가진 관리자가 최소 한 명은 있어야 합니다. 다른 관리자에게 먼저 권한을 주세요.'
+          : rawMessage.includes('MODULE_ADMIN_AT_LEAST_ONE_REQUIRED:site_admin')
+            ? '홈페이지 관리 권한을 가진 관리자가 최소 한 명은 있어야 합니다. 다른 관리자에게 먼저 권한을 주세요.'
+            : rawMessage;
+        setManageStatus(`관리자 권한 저장 실패: ${friendlyMessage}`, 'alert-danger');
+        await loadManageModalData(false);
       } finally {
         setLoadingState(buttonId, false, '저장 중...');
       }
