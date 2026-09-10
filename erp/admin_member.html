@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.144
-Change: Enforce the assigned administrator for the site/member profile.
+Version: v1.0.145
+Change: Trim unconfirmed finance UI and location-composition charts from the site/member profile.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.144';
+window.ADMIN_MEMBER_VERSION = 'v1.0.145';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -326,7 +326,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="main-content">
-<div class="erp-mobile-scope-note">
+<div class="erp-mobile-scope-note" id="adminMemberPcWorkNote">
   <strong>통합 관리자 화면은 PC 기준입니다.</strong><br>
   조합원 대량 수정, 자금/배당, 홈페이지 컨텐츠, 발전량·RSS 관리처럼 표와 파일을 많이 다루는 작업은 PC에서 처리하고, 모바일에서는 승인·확인 중심 화면을 사용하세요.
 </div>
@@ -387,7 +387,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
      </div>
     <div class="row g-3 mb-4">
-        <div class="col-lg-6">
+        <div class="col-lg-6" id="dashboard-capital-chart-column">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white fw-bold border-0 pt-3 ps-3">
                     📊 월별 출자금 및 감자 현황
@@ -397,7 +397,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-lg-3">
+        <div class="col-md-6 col-lg-3" id="dashboard-yongin-composition-column">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white fw-bold border-0 pt-3 ps-3">
                     👥 조합원 구성 (용인)
@@ -407,7 +407,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-lg-3">
+        <div class="col-md-6 col-lg-3" id="dashboard-gyeonggi-composition-column">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white fw-bold border-0 pt-3 ps-3">
                     👥 조합원 구성 (경기도)
@@ -673,7 +673,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <div class="tab-pane fade" id="tab-funds-manage">
     <div class="content-header">
-        <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">💰 운영자금 및 배당 관리</h3>
+        <h3 class="fw-bold m-0" id="funds-manage-title" style="font-family:'GmarketSans';">💰 운영자금 및 배당 관리</h3>
     </div>
 
     <ul class="nav nav-tabs mb-4">
@@ -683,17 +683,17 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             </button>
         </li>
         <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sub-tab-dividends" type="button" onclick="fetchGlobalDividends()">
+            <button class="nav-link" id="funds-usage-ledger-tab" data-bs-toggle="tab" data-bs-target="#sub-tab-dividends" type="button" onclick="fetchGlobalDividends()">
                 📈 이용실적 보상 원장
             </button>
         </li>
         <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sub-tab-dividend-batches" type="button" onclick="initializeDividendBatchTab()">
+            <button class="nav-link" id="funds-dividend-batches-tab" data-bs-toggle="tab" data-bs-target="#sub-tab-dividend-batches" type="button" onclick="initializeDividendBatchTab()">
                 <i class="bi bi-diagram-3 me-1"></i> 배당 회차 관리
             </button>
         </li>
         <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#sub-tab-dividend-exports" type="button" onclick="initializeDividendExportTab()">
+            <button class="nav-link" id="funds-dividend-exports-tab" data-bs-toggle="tab" data-bs-target="#sub-tab-dividend-exports" type="button" onclick="initializeDividendExportTab()">
                 <i class="bi bi-download me-1"></i> 확정 배당 파일
             </button>
         </li>
@@ -2893,7 +2893,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <label class="form-label small fw-bold">카테고리</label>
 <select id="faq-category" class="form-select">
 <option value="가입/탈퇴">가입/탈퇴</option>
-<option value="출자/배당">출자/배당</option>
+<option value="출자/배당" id="faq-finance-category">출자/배당</option>
 <option value="발전소">발전소</option>
 <option value="활동">활동</option>
 <option value="기타">기타</option>
@@ -2946,7 +2946,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </button>
 </li>
 <li class="nav-item">
-<button class="nav-link py-3" data-bs-toggle="tab" data-bs-target="#md-tab-funds" type="button">
+<button class="nav-link py-3" id="member-detail-funds-tab" data-bs-toggle="tab" data-bs-target="#md-tab-funds" type="button">
 💰 출자/배당/자금
 </button>
 </li>
@@ -3094,7 +3094,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         </div>
 
         <div class="col-md-12">
-            <h6 class="fw-bold small text-primary mb-2">🏦 환급/배당 계좌 정보</h6>
+            <h6 class="fw-bold small text-primary mb-2" id="member-detail-bank-heading">🏦 환급/배당 계좌 정보</h6>
             <div class="row g-2 align-items-center bg-light p-3 rounded border">
                 <div class="col-md-3">
                     <label class="small text-muted">은행명</label>
@@ -3151,7 +3151,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <button class="btn btn-sm btn-outline-primary" type="button" onclick="openFundEditor('donation', null)">+ 기부금 추가</button>
 </div>
 </div>
-<div class="fund-summary-card">
+<div class="fund-summary-card" id="member-detail-point-card">
 <button class="fund-summary-view" type="button" onclick="openHistoryModal('point')" aria-label="포인트 및 적립금 내역 보기">
 <span class="fund-summary-label"><span>🪙 포인트/적립금</span><span class="text-warning">내역 보기 ›</span></span>
 <span class="fund-summary-amount text-warning d-block" id="md-point-total" aria-live="polite">0 P</span>
@@ -3161,7 +3161,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <span class="fund-summary-hint small text-muted">카드를 눌러 적립·차감 내역 확인</span>
 </div>
 </div>
-<div class="fund-summary-card">
+<div class="fund-summary-card" id="member-detail-dividend-card">
 <button class="fund-summary-view" type="button" onclick="openHistoryModal('dividend')" aria-label="확정 배당금 내역 보기">
 <span class="fund-summary-label"><span>💵 확정 배당금</span><span class="text-info">내역 보기 ›</span></span>
 <span class="fund-summary-amount text-info d-block" id="md-dividend-total" aria-live="polite">0 원</span>
@@ -10376,6 +10376,51 @@ el.classList.toggle('hidden', !enabled);
 const el = document.getElementById(id);
 if (el) el.classList.toggle('hidden', !enabled);
 });
+
+const fundsNav = document.getElementById('nav-funds-manage');
+if (fundsNav) {
+  fundsNav.innerHTML = isSiteMemberProfile
+    ? '<i class="bi bi-piggy-bank-fill"></i> 운영자금 관리'
+    : '<i class="bi bi-piggy-bank-fill"></i> 자금 및 이용고 배당 관리';
+}
+const fundsTitle = document.getElementById('funds-manage-title');
+if (fundsTitle) fundsTitle.textContent = isSiteMemberProfile ? '💰 운영자금 관리' : '💰 운영자금 및 배당 관리';
+['funds-usage-ledger-tab', 'funds-dividend-batches-tab', 'funds-dividend-exports-tab'].forEach((id) => {
+  const el = document.getElementById(id);
+  const item = el?.closest('li');
+  if (item) item.classList.toggle('hidden', isSiteMemberProfile);
+});
+['sub-tab-dividends', 'sub-tab-dividend-batches', 'sub-tab-dividend-exports'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden', isSiteMemberProfile);
+});
+
+const detailFundsTab = document.getElementById('member-detail-funds-tab');
+if (detailFundsTab) detailFundsTab.textContent = isSiteMemberProfile ? '💰 출자/자금' : '💰 출자/배당/자금';
+const detailBankHeading = document.getElementById('member-detail-bank-heading');
+if (detailBankHeading) detailBankHeading.textContent = isSiteMemberProfile ? '🏦 환급 계좌 정보' : '🏦 환급/배당 계좌 정보';
+const faqFinanceCategory = document.getElementById('faq-finance-category');
+if (faqFinanceCategory) faqFinanceCategory.textContent = isSiteMemberProfile ? '출자/자금' : '출자/배당';
+['member-detail-point-card', 'member-detail-dividend-card'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden', isSiteMemberProfile);
+});
+
+const capitalChartColumn = document.getElementById('dashboard-capital-chart-column');
+if (capitalChartColumn) {
+  capitalChartColumn.classList.toggle('col-lg-6', !isSiteMemberProfile);
+  capitalChartColumn.classList.toggle('col-12', isSiteMemberProfile);
+}
+['dashboard-yongin-composition-column', 'dashboard-gyeonggi-composition-column'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden', isSiteMemberProfile);
+});
+const pcWorkNote = document.getElementById('adminMemberPcWorkNote');
+if (pcWorkNote) {
+  pcWorkNote.innerHTML = isSiteMemberProfile
+    ? '<strong>통합 관리자 화면은 PC 기준입니다.</strong><br>조합원 대량 수정, 홈페이지 컨텐츠처럼 표와 파일을 많이 다루는 작업은 PC에서 처리하고, 모바일에서는 확인 중심으로 사용하세요.'
+    : '<strong>통합 관리자 화면은 PC 기준입니다.</strong><br>조합원 대량 수정, 자금/배당, 홈페이지 컨텐츠, 발전량·RSS 관리처럼 표와 파일을 많이 다루는 작업은 PC에서 처리하고, 모바일에서는 승인·확인 중심 화면을 사용하세요.';
+}
 if (isSiteMemberProfile) {
 const activeSitePane = document.querySelector('#tab-site .tab-content > .tab-pane.show.active');
 if (activeSitePane && ['sub-external-news', 'sub-badges'].includes(activeSitePane.id)) {
@@ -10871,24 +10916,26 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
             }]
         }, `📉 총 감자액(반환): ${Number(stats.capital_reduction || 0).toLocaleString()}원`);
 
-        // (2) 지역 분포 차트 (Pie Chart)
-        const locationStats = await fetchDashboardLocationStats() || buildFallbackDashboardLocationStats(stats.location || {});
-        const yonginLocationChartData = buildDashboardLocationChartData(locationStats.yongin, DASHBOARD_YONGIN_LOCATION_LABEL_ORDER);
-        renderChart('location', 'chart-location', 'doughnut', {
-            labels: yonginLocationChartData.labels,
-            datasets: [{
-                data: yonginLocationChartData.data,
-                backgroundColor: yonginLocationChartData.colors
-            }]
-        });
-        const gyeonggiLocationChartData = buildDashboardLocationChartData(locationStats.gyeonggi, DASHBOARD_GYEONGGI_LOCATION_LABEL_ORDER);
-        renderChart('locationGyeonggi', 'chart-location-gyeonggi', 'doughnut', {
-            labels: gyeonggiLocationChartData.labels,
-            datasets: [{
-                data: gyeonggiLocationChartData.data,
-                backgroundColor: gyeonggiLocationChartData.colors
-            }]
-        });
+        // (2) 지역 분포 차트 (전체 ERP에서만 사용)
+        if (String(g_adminMemberRuntime?.runtime_profile || '') !== 'site_member') {
+            const locationStats = await fetchDashboardLocationStats() || buildFallbackDashboardLocationStats(stats.location || {});
+            const yonginLocationChartData = buildDashboardLocationChartData(locationStats.yongin, DASHBOARD_YONGIN_LOCATION_LABEL_ORDER);
+            renderChart('location', 'chart-location', 'doughnut', {
+                labels: yonginLocationChartData.labels,
+                datasets: [{
+                    data: yonginLocationChartData.data,
+                    backgroundColor: yonginLocationChartData.colors
+                }]
+            });
+            const gyeonggiLocationChartData = buildDashboardLocationChartData(locationStats.gyeonggi, DASHBOARD_GYEONGGI_LOCATION_LABEL_ORDER);
+            renderChart('locationGyeonggi', 'chart-location-gyeonggi', 'doughnut', {
+                labels: gyeonggiLocationChartData.labels,
+                datasets: [{
+                    data: gyeonggiLocationChartData.data,
+                    backgroundColor: gyeonggiLocationChartData.colors
+                }]
+            });
+        }
 
         // (3) 연령대 분포 (Bar Chart)
         // 0대와 10대는 화면에서 10대로 합치고 숫자 순서로 정렬한다.

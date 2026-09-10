@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.137
-Change: Refresh the tenant-aware footer and hide unavailable shared policy content.
+Version: v1.0.138
+Change: Keep the site/member profile within its confirmed member-service scope.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.137 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.138 | membermanage.html');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -1718,7 +1718,7 @@ NO. <span id="infoMemberId">-</span>
 </div>
 
 <div class="col-12 border-top pt-2 mt-2">
-<label class="small text-success fw-bold">환급/배당 계좌</label>
+<label class="small text-success fw-bold" id="profileBankLabel">환급/배당 계좌</label>
 <div id="viewBankBox" class="fw-bold p-1 border-bottom" style="min-height: 30px;">-</div>
 <div id="editBankBox" class="row g-2" style="display:none;">
 <div class="col-4">
@@ -2172,7 +2172,7 @@ oninput="autoHyphen(this)"> </div>
 </div>
 
 <div class="p-2 bg-light rounded border mb-3">
-<label class="small text-success fw-bold mb-1"><i class="bi bi-bank me-1"></i>배당금 수령 계좌 (미성년 자녀 본인 명의)</label>
+<label class="small text-success fw-bold mb-1" id="childBankLabel"><i class="bi bi-bank me-1"></i>배당금 수령 계좌 (미성년 자녀 본인 명의)</label>
 <div class="row g-1">
 <div class="col-4">
 <input type="text" id="newFamBank" class="form-control form-control-sm" placeholder="은행명">
@@ -4551,6 +4551,7 @@ let globalAssetSummary = {};
 let globalHistoryMeta = { limit: MEMBER_DASHBOARD_HISTORY_LIMIT, counts: {} };
 let quickVoteActionUrl = 'vote/index.html?portal=1';
 let coopRuntimeModules = null;
+let coopRuntimeProfile = '';
 let currentMemberCoopId = null;
 const EXTRA_CAPITAL_ACCOUNT_KEYS = ['member_capital_deposit_bank', 'member_capital_deposit_account', 'member_capital_deposit_holder'];
 let extraCapitalDepositAccountState = { coopId:null, data:null, promise:null };
@@ -5149,11 +5150,30 @@ const { data, error } = await _supabase.rpc('get_my_erp_runtime');
 if (error) throw error;
 const modules = data && data.modules && typeof data.modules === 'object' ? data.modules : {};
 coopRuntimeModules = modules;
+coopRuntimeProfile = String(data?.runtime_profile || '').trim();
+applyMemberPortalRuntimeUi();
 return modules;
 } catch (e) {
 console.warn('loadCoopRuntimeModules failed:', e);
 coopRuntimeModules = null;
+coopRuntimeProfile = '';
 return null;
+}
+}
+
+function isSiteMemberPortalProfile() {
+return coopRuntimeProfile === 'site_member';
+}
+
+function applyMemberPortalRuntimeUi() {
+const siteMemberProfile = isSiteMemberPortalProfile();
+const profileBankLabel = document.getElementById('profileBankLabel');
+if (profileBankLabel) profileBankLabel.textContent = siteMemberProfile ? '환급 계좌' : '환급/배당 계좌';
+const childBankLabel = document.getElementById('childBankLabel');
+if (childBankLabel) {
+childBankLabel.innerHTML = siteMemberProfile
+? '<i class="bi bi-bank me-1"></i>자녀 계좌 정보 (미성년 자녀 본인 명의)'
+: '<i class="bi bi-bank me-1"></i>배당금 수령 계좌 (미성년 자녀 본인 명의)';
 }
 }
 
@@ -5579,7 +5599,8 @@ if (myRoles.includes('election_comm') && tabElec) tabElec.classList.remove('hidd
 // ----------------------------------------------------
 
 // 데이터 전역 저장 (모달용)
-globalHistoryData = { ledger, donations, points, dividends };
+const visibleDividends = isSiteMemberPortalProfile() ? [] : dividends;
+globalHistoryData = { ledger, donations, points, dividends: visibleDividends };
 globalAssetSummary = assets || {};
 globalHistoryMeta = historyMeta || { limit: MEMBER_DASHBOARD_HISTORY_LIMIT, counts: {} };
 
@@ -5603,7 +5624,7 @@ activeAssets.push({ title: '보유 포인트', val: assets.current_points, unit:
 }
 
 // 4. 배당금
-if(assets.total_dividend_gross > 0 || assets.total_dividend_net > 0 || dividends.length > 0) {
+if(!isSiteMemberPortalProfile() && (assets.total_dividend_gross > 0 || assets.total_dividend_net > 0 || dividends.length > 0)) {
 activeAssets.push({ title: '배당금(세전)', val: assets.total_dividend_gross, unit: '원', icon: 'bi-graph-up-arrow', color: '#1976D2', type: 'dividend' });
 activeAssets.push({ title: '배당금(세후)', val: assets.total_dividend_net, unit: '원', icon: 'bi-cash-coin', color: '#1565C0', type: 'dividend_net' });
 }
@@ -5640,7 +5661,7 @@ void loadQuizPilotEntry();
 // ----------------------------------------------------
 // [3] 타임라인 렌더링 (통합)
 // ----------------------------------------------------
-renderTimeline(ledger, apps, donations, points, dividends);
+renderTimeline(ledger, apps, donations, points, visibleDividends);
 }
 
 // [신규] 전자서명 요청 존재 여부 확인 (임원용)
@@ -9341,6 +9362,9 @@ let tempChildData = null; // 데이터를 잠시 담아둘 변수
 function openConsentModal(data) {
 tempChildData = data; // 데이터 임시 저장
 const safeApplicantName = escapeHtml(data?.name || '');
+const memberRightsText = isSiteMemberPortalProfile()
+? '출자금 납입, 손실 발생 시 책임, 총회 의결권'
+: '출자금 납입, 이용고 배당, 손실 발생 시 책임, 총회 의결권';
 
 // 모달 내용 생성 (PDF 텍스트 + 체크박스)
 // 체크박스 라벨은 요청하신 대로 길게, 내용은 수정해서 쓰시면 됩니다.
@@ -9349,7 +9373,7 @@ const content = `
            <h6 class="fw-bold text-center mb-3">[미성년자 조합원 가입 법정대리인 동의서]</h6>
            
            <p>1. <b>가입 동의:</b> 본인은 신청인(${safeApplicantName})의 법정대리인으로서 귀 협동조합 가입에 동의합니다.</p>
-           <p>2. <b>내용 확인:</b> 본인은 신청인이 조합원 가입으로 발생하는 권리와 의무, 출자금 납입, 이용고 배당, 손실 발생 시 책임, 총회 의결권 등에 대해 잘 알고 있음을 확인합니다.</p>
+           <p>2. <b>내용 확인:</b> 본인은 신청인이 조합원 가입으로 발생하는 권리와 의무, ${memberRightsText} 등에 대해 잘 알고 있음을 확인합니다.</p>
            <p>3. <b>개인정보 활용:</b> 위 동의서와 관련해 조합에 가입되어 있지 않은 법정대리인의 개인정보 활용에 동의합니다.</p>
            <hr>
            <p class="small text-muted">수집 항목: 이름, 주민등록번호, 전화번호, 이메일, 주소, 관계<br>보유 기간: 수집·이용 목적 달성 시까지. 단, 관련 법령의 규정에 의하여 개인정보를 보유할 필요가 있는 경우, 해당 법령에서 정한 기간까지.</p>
