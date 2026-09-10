@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.70 | Change: 2026-09-09 - Show tenant branding before login and allow yonginsun.kr return paths. -->
+<!-- Version: v1.0.71 | Change: 2026-09-10 - Keep the site/member profile menu focused and honor module-specific administrators. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.70 | index.html');</script>
+  <script>console.log('[Version] v1.0.71 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -43,7 +43,7 @@
   })();
 </script>
   <script src="/shared/route_guard.js?v=20260408-1"></script>
-  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <script src="erp_runtime_guard.js?v=20260910-1"></script>
   <script src="/shared/auth_broker_helper.js?v=20260909-1"></script>
   
   <style>
@@ -2145,6 +2145,11 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     const officialsAdminEnabled = memberAdminEnabled || signatureEnabled;
     const auditEnabled = isModuleEnabled(runtime, 'audit');
     const permissionEnabled = isModuleEnabled(runtime, 'permission');
+    const isSiteMemberProfile = String(runtime?.runtime_profile || '') === 'site_member';
+    const moduleAccess = runtime?.module_access && typeof runtime.module_access === 'object'
+        ? runtime.module_access
+        : {};
+    const isAssignedModuleAdmin = (moduleKey) => !isSiteMemberProfile || moduleAccess[moduleKey] === true;
 
     const canApproval = hasPermission('approval.view');
     const canMypage = hasPermission('mypage.view');
@@ -2166,6 +2171,27 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         if (mypageEnabled && (canMypage === null || canMypage === true)) {
             document.getElementById('btnMypage')?.classList.remove('hidden');
         }
+        applyMenuOrder();
+        updateMenuOrderButtonVisibility(false);
+        return;
+    }
+
+    if (isSiteMemberProfile) {
+        ERP_MENU_BUTTON_ORDER_IDS.forEach(id => document.getElementById(id)?.classList.add('hidden'));
+
+        const canOpenMemberAdmin = memberAdminEnabled
+            && isAssignedModuleAdmin('member_admin')
+            && isAdmin;
+        const canOpenSiteAdmin = siteAdminEnabled
+            && isAssignedModuleAdmin('site_admin')
+            && isAdmin;
+        const canOpenAudit = auditEnabled
+            && ((canAudit === null && hasAdminRoleFallback) || canAudit === true);
+
+        if (canOpenMemberAdmin) document.getElementById('btnMemberAdmin')?.classList.remove('hidden');
+        if (canOpenSiteAdmin) document.getElementById('btnSiteAdmin')?.classList.remove('hidden');
+        if (canOpenAudit) document.getElementById('btnAudit')?.classList.remove('hidden');
+
         applyMenuOrder();
         updateMenuOrderButtonVisibility(false);
         return;

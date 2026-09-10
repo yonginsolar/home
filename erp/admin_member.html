@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.143
-Change: Add tenant-specific homepage hero, participation image and contact settings.
+Version: v1.0.144
+Change: Enforce the assigned administrator for the site/member profile.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.143';
+window.ADMIN_MEMBER_VERSION = 'v1.0.144';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -38,7 +38,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.143';
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <script src="erp_runtime_guard.js?v=20260910-1"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -10277,6 +10277,11 @@ try {
     if (userStored) cachedRole = String(JSON.parse(userStored)?.role || '').toLowerCase();
 } catch (_) { cachedRole = ''; }
 const cachedRoleIsAdmin = cachedRole === 'admin' || cachedRole === 'admin_all';
+if (
+    String(g_adminMemberRuntime?.runtime_profile || '') === 'site_member'
+    && ['member_admin', 'site_admin'].includes(safeScope)
+    && g_adminMemberRuntime?.module_access?.[safeScope] === true
+) return cachedRoleIsAdmin;
 if (!permissionSet || permissionSet.size === 0) return cachedRoleIsAdmin;
 if (safeScope === 'member_admin') return permissionSet.has('member.admin');
 if (safeScope === 'site_admin') return permissionSet.has('site.admin') || permissionSet.has('member.admin');
@@ -13754,6 +13759,28 @@ window.onload = async function() {
     const cachedRoleIsAdmin = cachedRole === 'admin' || cachedRole === 'admin_all';
     const user = memberUserGate.authUser || null;
     const permStored = localStorage.getItem('erp_permissions');
+    const runtimeModuleKeys = ADMIN_MEMBER_PAGE_SCOPE === 'member_admin'
+        ? ['member_admin']
+        : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
+            ? ['site_admin']
+            : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? ['documents'] : ['site_admin', 'member_admin']));
+    const memberRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
+        moduleKey: runtimeModuleKeys.length === 1 ? runtimeModuleKeys[0] : '',
+        moduleKeysAny: runtimeModuleKeys.length > 1 ? runtimeModuleKeys : [],
+        moduleLabel: ADMIN_MEMBER_PAGE_SCOPE === 'member_admin'
+            ? '조합원 관리'
+            : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
+                ? '홈페이지 관리'
+                : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? '문서관리' : '조합원/홈페이지 관리')),
+        alertFn: function(msg) { setAdminMemberBootMessage(msg, true); },
+        redirectUrl: 'index.html'
+    });
+    if (!memberRuntimeGate.ok) return;
+    const hasAssignedSiteMemberAccess = String(memberRuntimeGate.runtime?.runtime_profile || '') === 'site_member'
+        && runtimeModuleKeys.length === 1
+        && ['member_admin', 'site_admin'].includes(runtimeModuleKeys[0])
+        && memberRuntimeGate.runtime?.module_access?.[runtimeModuleKeys[0]] === true
+        && cachedRoleIsAdmin;
 
     if (user) {
         try {
@@ -13770,14 +13797,16 @@ window.onload = async function() {
     }
     if (permissionSet && permissionSet.size > 0) {
         let hasAdminAccess = cachedRoleIsAdmin;
-        if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
-            hasAdminAccess = permissionSet.has('member.admin');
-        } else if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin') {
-            hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
-        } else if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
-            hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
-        } else {
-            hasAdminAccess = permissionSet.has('member.admin') || permissionSet.has('site.admin');
+        if (!hasAssignedSiteMemberAccess) {
+            if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
+                hasAdminAccess = permissionSet.has('member.admin');
+            } else if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin') {
+                hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
+            } else if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
+                hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
+            } else {
+                hasAdminAccess = permissionSet.has('member.admin') || permissionSet.has('site.admin');
+            }
         }
         if (!hasAdminAccess) {
             myAlert('⛔ 접근 권한이 없습니다.', 'error');
@@ -13791,24 +13820,6 @@ window.onload = async function() {
     await checkAdmin(user);
     const mainSystem = document.getElementById('main-system');
     if (mainSystem && mainSystem.classList.contains('hidden')) {
-        return;
-    }
-    const runtimeModuleKeys = ADMIN_MEMBER_PAGE_SCOPE === 'member_admin'
-        ? ['member_admin']
-        : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
-            ? ['site_admin']
-            : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? ['documents'] : ['site_admin', 'member_admin']));
-    const memberRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
-        moduleKeysAny: runtimeModuleKeys,
-        moduleLabel: ADMIN_MEMBER_PAGE_SCOPE === 'member_admin'
-            ? '조합원 관리'
-            : (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin'
-                ? '홈페이지 관리'
-                : (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' ? '문서관리' : '조합원/홈페이지 관리')),
-        alertFn: function(msg) { setAdminMemberBootMessage(msg, true); },
-        redirectUrl: 'index.html'
-    });
-    if (!memberRuntimeGate.ok) {
         return;
     }
     applyAdminMemberRuntimeUi(memberRuntimeGate.runtime);

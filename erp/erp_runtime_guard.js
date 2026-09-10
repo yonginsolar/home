@@ -1,5 +1,5 @@
 window.ErpRuntimeGuard = {
-  version: '1.2.0',
+  version: '1.3.0',
   showInlineAlert: function(message) {
     const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
     try {
@@ -221,6 +221,24 @@ window.ErpRuntimeGuard = {
       return window.ErpRuntimeGuard.isModuleEnabled(runtime, moduleKey);
     });
   },
+  isModuleAssigned: function(runtime, moduleKey) {
+    const safeKey = String(moduleKey || '').trim();
+    if (!safeKey) return true;
+    if (String(runtime?.runtime_profile || '') !== 'site_member') return true;
+    if (!['member_admin', 'site_admin'].includes(safeKey)) return true;
+    const access = runtime?.module_access && typeof runtime.module_access === 'object'
+      ? runtime.module_access
+      : {};
+    return access[safeKey] === true;
+  },
+  isAnyModuleAssigned: function(runtime, moduleKeys) {
+    const keys = Array.isArray(moduleKeys) ? moduleKeys : [];
+    if (keys.length === 0) return true;
+    return keys.some(function(moduleKey) {
+      return window.ErpRuntimeGuard.isModuleEnabled(runtime, moduleKey)
+        && window.ErpRuntimeGuard.isModuleAssigned(runtime, moduleKey);
+    });
+  },
   enforce: async function(_supabase, options) {
     const opts = options && typeof options === 'object' ? options : {};
     const moduleKey = String(opts.moduleKey || '').trim();
@@ -282,12 +300,28 @@ window.ErpRuntimeGuard = {
       return { ok: false, reason: 'module_disabled', runtime: runtime, error: null };
     }
 
+    if (moduleKey && !window.ErpRuntimeGuard.isModuleAssigned(runtime, moduleKey)) {
+      alertFn(moduleLabel + ' 담당 관리자로 지정되지 않았습니다.\n통합 관리자에게 담당자 지정을 요청해주세요.');
+      setTimeout(function() {
+        location.href = redirectUrl;
+      }, 1200);
+      return { ok: false, reason: 'module_admin_required', runtime: runtime, error: null };
+    }
+
     if (moduleKeysAny.length > 0 && !window.ErpRuntimeGuard.isAnyModuleEnabled(runtime, moduleKeysAny)) {
       alertFn(moduleLabel + ' 모듈 사용이 중지되었습니다.\n통합 관리자에게 문의해주세요.');
       setTimeout(function() {
         location.href = redirectUrl;
       }, 1200);
       return { ok: false, reason: 'module_group_disabled', runtime: runtime, error: null };
+    }
+
+    if (moduleKeysAny.length > 0 && !window.ErpRuntimeGuard.isAnyModuleAssigned(runtime, moduleKeysAny)) {
+      alertFn(moduleLabel + ' 담당 관리자로 지정되지 않았습니다.\n통합 관리자에게 담당자 지정을 요청해주세요.');
+      setTimeout(function() {
+        location.href = redirectUrl;
+      }, 1200);
+      return { ok: false, reason: 'module_admin_required', runtime: runtime, error: null };
     }
 
     return { ok: true, reason: null, runtime: runtime, error: null };
