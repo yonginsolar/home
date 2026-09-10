@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.152
-Change: Hide unavailable document and partner-request routes in site/member profiles.
+Version: v1.0.153
+Change: Add tenant-scoped image upload and preview to the homepage About editor.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.152';
+window.ADMIN_MEMBER_VERSION = 'v1.0.153';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1684,11 +1684,17 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="form-text text-muted">줄바꿈 입력 시 자동으로 &lt;li&gt;로 변환됩니다.</div>
 </div>
 <div class="mb-3">
-<label class="form-label small fw-bold">이미지 URL</label>
-<input type="text" id="admin-about-img" class="form-control" oninput="queueTotalPreviewUpdate()">
+<label class="form-label small fw-bold" for="admin-about-img-file">소개 이미지</label>
+<input type="file" id="admin-about-img-file" class="form-control" accept="image/*" onchange="previewAboutImageFile()">
+<input type="hidden" id="admin-about-img">
+<div class="form-text">가로형 사진을 권장하며, 10MB 이하 이미지 파일을 올릴 수 있습니다.</div>
+<div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+<button type="button" id="admin-about-img-clear" class="btn btn-sm btn-outline-secondary" onclick="clearAboutImage()">사진 사용 안 함</button>
+<span id="admin-about-img-status" class="small text-muted">저장된 사진이 없습니다.</span>
+</div>
 </div>
 <div class="d-flex justify-content-end">
-<button class="btn btn-primary btn-sm px-4" onclick="saveAboutSettings()">저장하기</button>
+<button type="button" id="btn-save-about-settings" class="btn btn-primary btn-sm px-4" onclick="saveAboutSettings()">저장하기</button>
 </div>
 </div>
 
@@ -1699,7 +1705,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <p id="prev-subtitle" class="text-muted fst-italic"></p>
 <ul id="prev-list" class="list-unstyled mb-3"></ul>
 <p id="prev-content"></p>
-<img id="prev-img" src="" alt="about preview" style="max-width:100%; border-radius:8px; display:none;">
+<img id="prev-img" src="" alt="조합 소개 이미지 미리보기" style="max-width:100%; border-radius:8px; display:none;">
 </div>
 </div>
 </div>
@@ -7886,24 +7892,95 @@ if (button) button.disabled = false;
 }
 } // End of saveSiteLegalDocument
 
+let g_aboutSettingsSaving = false;
+let g_aboutOriginalImageUrl = '';
+let g_aboutPreviewObjectUrl = '';
+
+function revokeAboutPreviewObjectUrl() {
+if (!g_aboutPreviewObjectUrl) return;
+URL.revokeObjectURL(g_aboutPreviewObjectUrl);
+g_aboutPreviewObjectUrl = '';
+}
+
+function setAboutImageStatus(message) {
+const status = document.getElementById('admin-about-img-status');
+if (status) status.textContent = String(message || '');
+}
+
+function previewAboutImageFile() {
+const input = document.getElementById('admin-about-img-file');
+const file = input?.files?.[0] || null;
+if (!file) return;
+if (!file.type.startsWith('image/')) {
+input.value = '';
+revokeAboutPreviewObjectUrl();
+setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
+updateTotalPreview();
+return myAlert('이미지 파일만 올릴 수 있습니다.', 'warning');
+}
+if (file.size > 10 * 1024 * 1024) {
+input.value = '';
+revokeAboutPreviewObjectUrl();
+setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
+updateTotalPreview();
+return myAlert('사진은 10MB 이하로 올려 주세요.', 'warning');
+}
+revokeAboutPreviewObjectUrl();
+g_aboutPreviewObjectUrl = URL.createObjectURL(file);
+setAboutImageStatus('새 사진을 선택했습니다. 저장하면 홈페이지에 반영됩니다.');
+updateTotalPreview();
+}
+
+function clearAboutImage() {
+const fileInput = document.getElementById('admin-about-img-file');
+const urlInput = document.getElementById('admin-about-img');
+if (fileInput) fileInput.value = '';
+if (urlInput) urlInput.value = '';
+revokeAboutPreviewObjectUrl();
+setAboutImageStatus('사진을 사용하지 않도록 선택했습니다. 저장하면 홈페이지에 반영됩니다.');
+updateTotalPreview();
+}
+
+function isManagedAboutImageUrl(url, coopId) {
+const safeUrl = String(url || '');
+const safeCoopId = String(coopId || '').trim();
+return Boolean(safeCoopId && safeUrl.includes(`/assets/site-home/${safeCoopId}/about/`));
+}
+
+async function deleteManagedAboutImage(url, coopId) {
+if (!isManagedAboutImageUrl(url, coopId)) return;
+try {
+const rawPath = String(url).split('/assets/')[1]?.split('?')[0] || '';
+const path = decodeURIComponent(rawPath);
+if (!path) return;
+const { error } = await _supabase.storage.from('assets').remove([path]);
+if (error) console.warn('[deleteManagedAboutImage] cleanup failed:', error.message || error);
+} catch (error) {
+console.warn('[deleteManagedAboutImage] cleanup failed:', error);
+}
+}
+
 async function fetchAboutSettings() {
 const { data, error } = await scopeAdminTenant(_supabase.from('site_about').select('*')).limit(1);
 if(error) { console.error(error); return; }
-const row = Array.isArray(data) ? data[0] : data;
-if(row) {
+const row = (Array.isArray(data) ? data[0] : data) || {};
 const titleEl = document.getElementById('admin-about-title');
 const subtitleEl = document.getElementById('admin-about-subtitle');
 const contentEl = document.getElementById('admin-about-content');
 const listEl = document.getElementById('admin-about-list');
 const imgEl = document.getElementById('admin-about-img');
+const fileEl = document.getElementById('admin-about-img-file');
 if (!titleEl || !subtitleEl || !contentEl || !listEl || !imgEl) return;
+revokeAboutPreviewObjectUrl();
+if (fileEl) fileEl.value = '';
 titleEl.value = row.title || '';
 subtitleEl.value = row.subtitle || '';
 contentEl.value = row.content || '';
 listEl.value = row.list_items || '';
 imgEl.value = row.image_url || '';
+g_aboutOriginalImageUrl = imgEl.value;
+setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
 if (typeof updateTotalPreview === 'function') updateTotalPreview();
-}
 }
 
 
@@ -7929,7 +8006,7 @@ const title = document.getElementById('admin-about-title').value;
 const subtitle = document.getElementById('admin-about-subtitle').value;
 const content = document.getElementById('admin-about-content').value;
 const listText = document.getElementById('admin-about-list').value;
-const imgUrl = document.getElementById('admin-about-img').value;
+const imgUrl = g_aboutPreviewObjectUrl || document.getElementById('admin-about-img').value;
 
 document.getElementById('prev-title').innerHTML = title;
 document.getElementById('prev-subtitle').innerHTML = subtitle;
@@ -7963,28 +8040,56 @@ else { imgEl.style.display = 'none'; }
 
 // [수정] 소개글 저장하기 (모달 적용)
 async function saveAboutSettings() {
+if (g_aboutSettingsSaving) return;
+g_aboutSettingsSaving = true;
+const saveButton = document.getElementById('btn-save-about-settings');
+const fileInput = document.getElementById('admin-about-img-file');
+const imageUrlInput = document.getElementById('admin-about-img');
+const file = fileInput?.files?.[0] || null;
+const previousImageUrl = g_aboutOriginalImageUrl;
+let newlyUploadedImageUrl = '';
+if (saveButton) saveButton.disabled = true;
+showLoading(true);
+try {
+if (file && !file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
+if (file && file.size > 10 * 1024 * 1024) throw new Error('사진은 10MB 이하로 올려 주세요.');
+
+const coopId = String(await getAdminMemberCoopId() || '').trim();
+if (!coopId) throw new Error('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
+if (file) {
+newlyUploadedImageUrl = await uploadFileToStorage(file, `site-home/${coopId}/about`);
+if (imageUrlInput) imageUrlInput.value = newlyUploadedImageUrl;
+}
+
 const updates = {
 p_title: document.getElementById('admin-about-title').value,
 p_subtitle: document.getElementById('admin-about-subtitle').value,
 p_content: document.getElementById('admin-about-content').value,
 p_list_items: document.getElementById('admin-about-list').value,
-p_image_url: document.getElementById('admin-about-img').value
+p_image_url: String(imageUrlInput?.value || '').trim()
 };
-
-showLoading(true);
 const { error } = await _supabase.rpc('upsert_about_secure', updates);
+if (error) throw error;
+
+const savedImageUrl = updates.p_image_url;
+g_aboutOriginalImageUrl = savedImageUrl;
+if (previousImageUrl && previousImageUrl !== savedImageUrl) {
+await deleteManagedAboutImage(previousImageUrl, coopId);
+}
+document.getElementById('commonAlertText').innerText = '조합 소개를 저장했습니다.';
+bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
+await fetchAboutSettings();
+} catch (error) {
+if (newlyUploadedImageUrl) {
+const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
+await deleteManagedAboutImage(newlyUploadedImageUrl, coopId);
+}
+document.getElementById('commonAlertText').innerText = '저장 실패: ' + (error?.message || error);
+bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
+} finally {
 showLoading(false);
-
-if(error) {
-// 에러도 모달로 띄우면 좋겠죠? (내용 바꿔서 재활용)
-document.getElementById('commonAlertText').innerText = '저장 실패: ' + error.message;
-bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
-} else {
-// 성공 모달 띄우기
-document.getElementById('commonAlertText').innerText = '성공적으로 저장되었습니다!';
-bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
-
-fetchAboutSettings(); // 저장 후 다시 불러오기
+g_aboutSettingsSaving = false;
+if (saveButton) saveButton.disabled = false;
 }
 }
 // [보조 함수] 상태에 따라 슬라이더 숨기기/보이기
