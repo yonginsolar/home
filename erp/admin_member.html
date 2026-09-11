@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.157
-Change: Fix citizen-coop certificate cutoff totals and align historical join dates with contribution dates.
+Version: v1.0.158
+Change: Fix citizen-coop secure member-export capital snapshots and refresh certificate spacing.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.157';
+window.ADMIN_MEMBER_VERSION = 'v1.0.158';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -45,7 +45,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.157';
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="/cert_generator.js?v=20260911_01"></script>
+<script src="/cert_generator.js?v=20260911_02"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 
@@ -4677,11 +4677,11 @@ async function ensureCertGeneratorReady() {
             const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
             const publicOrigin = String(routeOrigins?.publicOrigin || '').trim().replace(/\/+$/, '');
             const remoteFallback = /^https?:\/\//i.test(publicOrigin)
-                ? `${publicOrigin}/cert_generator.js?v=20260911_01`
-                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260911_01';
+                ? `${publicOrigin}/cert_generator.js?v=20260911_02`
+                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260911_02';
             const candidates = [
-                '/cert_generator.js?v=20260911_01',
-                '../cert_generator.js?v=20260911_01',
+                '/cert_generator.js?v=20260911_02',
+                '../cert_generator.js?v=20260911_02',
                 remoteFallback
             ];
             for (const src of candidates) {
@@ -5367,18 +5367,23 @@ async function fetchMemberCapitalSnapshotByDate(cutoffDate) {
     const safeCutoffDate = String(cutoffDate || '').trim();
     const snapshotMap = {};
     if (!safeCutoffDate) return snapshotMap;
-    const { data, error } = await scopeAdminTenant(
-        _supabase
-            .from('ref_members')
-            .select('member_id, amount')
-            .lte('deposit_date', safeCutoffDate)
-    );
+    const snapshotRequest = isAdminMemberSiteProfile()
+        ? _supabase.rpc('member_export_capital_snapshot_secure', { p_cutoff_date: safeCutoffDate })
+        : scopeAdminTenant(
+            _supabase
+                .from('ref_members')
+                .select('member_id, amount')
+                .lte('deposit_date', safeCutoffDate)
+        );
+    const { data, error } = await snapshotRequest;
     if (error) throw error;
     (data || []).forEach((row) => {
         const memberId = String(row.member_id || '').trim();
         if (!memberId) return;
-        const amount = Number(row.amount || 0);
-        snapshotMap[memberId] = (snapshotMap[memberId] || 0) + amount;
+        const amount = Number(row.total_capital ?? row.amount ?? 0);
+        snapshotMap[memberId] = isAdminMemberSiteProfile()
+            ? amount
+            : (snapshotMap[memberId] || 0) + amount;
     });
     return snapshotMap;
 } // End of fetchMemberCapitalSnapshotByDate

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.13
-Change: Use cooperative-neutral charter wording on contribution certificates.
+Version: v1.0.14
+Change: Add breathing room between the cooperative name and chairman line on contribution certificates.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -457,7 +457,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             companyMinFontSize: 13,
             companyMaxLines: 3,
             companyLineHeight: 7,
-            gapBeforeChairman: 7,
+            gapBeforeChairman: 11,
             chairmanFontSize: 22,
             chairmanMinFontSize: 15,
             chairmanMaxLines: 2,
