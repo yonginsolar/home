@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.155
-Change: Load site-member contribution details through a tenant-scoped administrator endpoint.
+Version: v1.0.156
+Change: Fix citizen-coop certificate cutoff totals and align historical join dates with contribution dates.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.155';
+window.ADMIN_MEMBER_VERSION = 'v1.0.156';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -45,7 +45,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.155';
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="/cert_generator.js?v=20260910_01"></script>
+<script src="/cert_generator.js?v=20260911_01"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 
@@ -4677,11 +4677,11 @@ async function ensureCertGeneratorReady() {
             const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
             const publicOrigin = String(routeOrigins?.publicOrigin || '').trim().replace(/\/+$/, '');
             const remoteFallback = /^https?:\/\//i.test(publicOrigin)
-                ? `${publicOrigin}/cert_generator.js?v=20260910_01`
-                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260910_01';
+                ? `${publicOrigin}/cert_generator.js?v=20260911_01`
+                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260911_01';
             const candidates = [
-                '/cert_generator.js?v=20260910_01',
-                '../cert_generator.js?v=20260910_01',
+                '/cert_generator.js?v=20260911_01',
+                '../cert_generator.js?v=20260911_01',
                 remoteFallback
             ];
             for (const src of candidates) {
@@ -12646,13 +12646,18 @@ async function calcIssueAmountByCriteria(docType, mode, cutoffDate, manualAmount
         throw new Error('출자증명서 발급에는 조합원 번호(member_id)가 필요합니다.');
     }
 
-    const { data, error } = await _supabase
-        .from('ref_members')
-        .select('amount')
-        .eq('member_id', memberId)
-        .lte('deposit_date', cutoffDate);
+    const capitalRequest = isAdminMemberSiteProfile()
+        ? _supabase.rpc('admin_list_member_capital_secure', { p_member_text_id: memberId })
+        : _supabase
+            .from('ref_members')
+            .select('amount, deposit_date')
+            .eq('member_id', memberId)
+            .lte('deposit_date', cutoffDate);
+    const { data, error } = await capitalRequest;
     if (error) throw error;
-    return (data || []).reduce((acc, row) => acc + Number(row.amount || 0), 0);
+    return (data || [])
+        .filter((row) => !isAdminMemberSiteProfile() || !row.deposit_date || row.deposit_date <= cutoffDate)
+        .reduce((acc, row) => acc + Number(row.amount || 0), 0);
 }
 
 async function fetchDonationRowsForReceipt(memberRow, periodFrom, periodTo) {
@@ -13313,7 +13318,13 @@ function openFundEditor(type, rowDataStr) {
     // 필드 초기화
     document.getElementById('fund-edit-type').value = type;
     document.getElementById('fund-edit-id').value = '';
-    document.getElementById('fund-date').value = getAdminMemberKstDateString();
+    const memberJoinDate = String(g_current_member_row?.join_date || '').slice(0, 10);
+    document.getElementById('fund-date').value = type === 'capital'
+        && !rowDataStr
+        && isAdminMemberSiteProfile()
+        && /^\d{4}-\d{2}-\d{2}$/.test(memberJoinDate)
+        ? memberJoinDate
+        : getAdminMemberKstDateString();
     document.getElementById('fund-amount').value = '';
     document.getElementById('fund-note').value = '';
     document.getElementById('fund-depositor').value = '';

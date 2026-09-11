@@ -1,6 +1,6 @@
 /*
-Version: v1.0.12
-Change: Use each cooperative's configured share-unit amount and optionally require its registered seal.
+Version: v1.0.13
+Change: Use cooperative-neutral charter wording on contribution certificates.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -443,7 +443,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         });
         doc.setFontSize(14);
         const charterLineY = introLayout.endY + 10;
-        doc.text("정관 제19조 제1항에 따라 이 증서를 드립니다.", 105, charterLineY, { align: "center" });
+        doc.text("정관에 따라 이 증서를 드립니다.", 105, charterLineY, { align: "center" });
 
         // [발급일]
         doc.setFontSize(15);

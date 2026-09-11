@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.44
-Change: Remove social signup choices from the citizen-sunlight tenant before the signup UI opens.
+Version: v1.0.45
+Change: Accept citizen-coop email as contact information without an OTP while preserving the main cooperative's email verification.
 -->
 <html lang="ko"> 
 <head>
@@ -595,6 +595,10 @@ return isDeferredSignupProfile()
 || (signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE && yonginInlineEmailSelected);
 }
 
+function requiresInlineSignupEmailVerification() {
+return signupTenant?.coop_code === DEFAULT_SIGNUP_COOP_CODE && yonginInlineEmailSelected;
+}
+
 function isPrivateLanSignupHost(hostname) {
 const parts = String(hostname || '').trim().toLowerCase().split('.');
 const octets = parts.map((part) => (/^\d+$/.test(part) ? Number(part) : NaN));
@@ -719,6 +723,10 @@ function updateSignupEmailLabel(isPersonal) {
 const label = document.getElementById('lbl-email');
 if (!label) return;
 const prefix = isPersonal ? '이메일' : '담당자 이메일';
+if (isDeferredSignupProfile()) {
+label.textContent = prefix;
+return;
+}
 if (isInlineEmailSignupMode()) {
 label.textContent = `${prefix}${deferredSignupEmailVerified ? ' (인증됨)' : ''}`;
 return;
@@ -742,7 +750,11 @@ emailInput.required = true;
 emailInput.classList.remove('bg-light');
 emailInput.style.color = '';
 }
-if (sendButton) sendButton.hidden = false;
+if (sendButton) sendButton.hidden = !requiresInlineSignupEmailVerification();
+if (isDeferredSignupProfile()) {
+document.getElementById('deferred-signup-otp-area')?.setAttribute('hidden', '');
+setDeferredSignupEmailStatus('', 'muted');
+}
 updateSignupEmailLabel(document.querySelector('input[name="userType"]:checked')?.value !== '단체');
 }
 
@@ -1288,6 +1300,7 @@ status.className = `small mt-2 mb-0 ${state === 'success' ? 'text-success' : sta
 function handleDeferredSignupEmailChanged(input) {
 if (!isInlineEmailSignupMode()) return;
 clearFieldWarning(input);
+if (isDeferredSignupProfile()) return;
 const currentEmail = normalizeSignupEmail(input?.value);
 if (currentEmail === deferredSignupVerifiedEmail && deferredSignupEmailVerified) return;
 deferredSignupEmailVerified = false;
@@ -1299,7 +1312,7 @@ updateSignupEmailLabel(document.querySelector('input[name="userType"]:checked')?
 }
 
 function completeDeferredSignupEmailVerification(session) {
-if (!isInlineEmailSignupMode()) return false;
+if (!requiresInlineSignupEmailVerification()) return false;
 const sessionEmail = normalizeSignupEmail(session?.user?.email);
 const input = document.getElementById('verifiedEmail');
 const enteredEmail = normalizeSignupEmail(input?.value);
@@ -1318,7 +1331,7 @@ return true;
 async function sendDeferredSignupOtp() {
 try {
 await ensureSignupTenant();
-if (!isInlineEmailSignupMode()) return;
+if (!requiresInlineSignupEmailVerification()) return;
 const input = document.getElementById('verifiedEmail');
 const email = normalizeSignupEmail(input?.value);
 const button = document.getElementById('btnDeferredSignupOtp');
@@ -1541,12 +1554,7 @@ return;
 const manualSessionHandled = await handleManualSession();
 if (manualSessionHandled) return;
 if (isDeferredSignupProfile()) {
-const { data } = await _supabase.auth.getSession();
-if (data?.session) {
-await checkExistingMember(data.session);
-} else {
 showApplicationForm(null);
-}
 return;
 }
 await checkCurrentSignupSessionOnLoad({ reason: 'load', showFailure: true });
@@ -1785,7 +1793,7 @@ async function startKakaoSignup() {
     try {
         await ensureSignupTenant();
         if (isDeferredSignupProfile()) {
-            openResultModal('이 조합은 가입 신청서 안에서 이메일 인증코드를 확인합니다.', true);
+            openResultModal('시민조합 가입은 간편로그인 없이 신청서에 이메일을 직접 입력합니다.', true);
             return;
         }
         if (await resumeSignupFromCurrentSession('before-kakao-oauth')) return;
@@ -1844,7 +1852,7 @@ async function startNaverSignup() {
     try {
         await ensureSignupTenant();
         if (isDeferredSignupProfile()) {
-            openResultModal('이 조합은 가입 신청서 안에서 이메일 인증코드를 확인합니다.', true);
+            openResultModal('시민조합 가입은 간편로그인 없이 신청서에 이메일을 직접 입력합니다.', true);
             return;
         }
         if (await resumeSignupFromCurrentSession('before-naver-oauth')) return;
@@ -2014,7 +2022,7 @@ true
 return;
 }
 
-if (deferredSignupFormInitialized) {
+if (requiresInlineSignupEmailVerification()) {
 const enteredEmail = normalizeSignupEmail(document.getElementById('verifiedEmail')?.value);
 let authenticatedEmail = '';
 try {
@@ -2213,7 +2221,7 @@ const { data: { session } } = await _supabase.auth.getSession();
 let joinPath = '홈페이지';
 let kakaoId = null;
 
-if (session) {
+if (session && !isDeferredSignupProfile()) {
 if (isSignupKakaoUser(session.user)) {
 joinPath = '간편가입(카카오)';
 kakaoId = getSignupIdentityProviderId(session.user, 'kakao') || null;
