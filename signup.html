@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.43
-Change: Use tenant-scoped head branding and suppress the legacy favicon on the citizen-sunlight domain.
+Version: v1.0.44
+Change: Remove social signup choices from the citizen-sunlight tenant before the signup UI opens.
 -->
 <html lang="ko"> 
 <head>
@@ -30,11 +30,13 @@ Change: Use tenant-scoped head branding and suppress the legacy favicon on the c
 <link href="style.css" rel="stylesheet">
 
 <script>
+const signupSocialProvidersEnabled = !Boolean(window.CoopTenantHead?.isCitizenTenant);
+document.documentElement.dataset.signupSocial = signupSocialProvidersEnabled ? 'enabled' : 'disabled';
 window.__AUTH_BROKER_CONFIG__ = {
 origin: 'https://auth.coopco.kr',
 enabledProviders: {
-  kakao: true,
-  'custom:naver': true
+  kakao: signupSocialProvidersEnabled,
+  'custom:naver': signupSocialProvidersEnabled
 },
 supportedModes: ['login']
 };
@@ -130,6 +132,11 @@ line-height: 1;
 letter-spacing: -0.06em;
 vertical-align: -0.18em;
 box-shadow: inset 0 -1px 0 rgba(0,0,0,0.12);
+}
+
+html[data-signup-social="disabled"] #signup-kakao-option,
+html[data-signup-social="disabled"] #signup-naver-option {
+display: none !important;
 }
 
 </style>
@@ -748,8 +755,13 @@ const privacyLink = document.getElementById('signup-privacy-policy-link');
 const emailInput = document.getElementById('verifiedEmail');
 const sendButton = document.getElementById('btnDeferredSignupOtp');
 
-if (kakaoOption) kakaoOption.hidden = deferred;
-if (naverOption) naverOption.hidden = deferred;
+if (deferred) {
+if (kakaoOption) kakaoOption.remove();
+if (naverOption) naverOption.remove();
+} else {
+if (kakaoOption) kakaoOption.hidden = false;
+if (naverOption) naverOption.hidden = false;
+}
 if (privacyLink) privacyLink.hidden = deferred;
 if (gate && !deferred && document.getElementById('step-form')?.style.display !== 'block') gate.style.display = '';
 if (window.__AUTH_BROKER_CONFIG__?.enabledProviders) {
