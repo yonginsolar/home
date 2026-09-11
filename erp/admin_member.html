@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.154
-Change: Suppress the legacy favicon on the citizen-sunlight administration host.
+Version: v1.0.155
+Change: Load site-member contribution details through a tenant-scoped administrator endpoint.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.154';
+window.ADMIN_MEMBER_VERSION = 'v1.0.155';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -12073,6 +12073,25 @@ async function resolveMemberAccountManagerLabel(member) {
     }
 }
 
+function fetchAdminMemberCapitalRows(memberTextId) {
+    const safeMemberTextId = String(memberTextId || '').trim();
+    if (!safeMemberTextId || ['ID없음', '-'].includes(safeMemberTextId)) {
+        return Promise.resolve({ data: [], error: null });
+    }
+
+    if (isAdminMemberSiteProfile()) {
+        return _supabase.rpc('admin_list_member_capital_secure', {
+            p_member_text_id: safeMemberTextId
+        });
+    }
+
+    return _supabase
+        .from('ref_members')
+        .select('*')
+        .eq('member_id', safeMemberTextId)
+        .order('deposit_date', { ascending: false });
+} // End of fetchAdminMemberCapitalRows
+
 async function fetchAdminMemberDetailRow(id) {
     const safeId = String(id || '').trim();
     if (!safeId) return null;
@@ -12091,9 +12110,16 @@ async function fetchAdminMemberDetailRow(id) {
     }
     if (!data) return null;
 
-    let totalCapital = 0;
+    let totalCapital = Number(data.total_capital || 0);
     const memberUid = data.id || data.member_uid || data.uid || null;
-    if (memberUid) {
+    if (isAdminMemberSiteProfile() && data.member_id) {
+        const { data: capitalRows, error: capitalError } = await fetchAdminMemberCapitalRows(data.member_id);
+        if (!capitalError) {
+            totalCapital = calculateMemberFundTotal(capitalRows);
+        } else {
+            console.error('조합원 상세 출자금 보안 조회 실패:', capitalError);
+        }
+    } else if (memberUid) {
         const { data: asset, error: assetError } = await _supabase
             .from('view_my_assets')
             .select('total_capital')
@@ -13492,13 +13518,7 @@ async function loadMemberFunds(uuid, textId, reset=false) {
     const hasTextId = !!safeTextId && !['ID없음', '-'].includes(safeTextId);
     const safeUuid = String(uuid || '').trim();
 
-    const capitalPromise = hasTextId
-        ? _supabase
-            .from('ref_members')
-            .select('*')
-            .eq('member_id', safeTextId)
-            .order('deposit_date', { ascending: false })
-        : Promise.resolve({ data: [], error: null });
+    const capitalPromise = fetchAdminMemberCapitalRows(safeTextId);
 
     const capitalNotificationPromise = hasTextId && !isAdminMemberSiteProfile()
         ? _supabase.rpc('admin_list_member_capital_notification_status', {
