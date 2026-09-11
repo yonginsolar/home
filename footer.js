@@ -1,6 +1,6 @@
 /*
-Version: v1.0.6
-Change: Keep the shared footer cooperative name in sync with the active site/member profile.
+Version: v1.0.7
+Change: Show the active site/member cooperative's public capital-deposit account in the shared footer.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -110,6 +110,9 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   const phone = String(settings?.contact_phone || '').trim();
   const email = String(settings?.contact_email || '').trim();
   const address = String(settings?.contact_address || '').trim();
+  const depositBank = String(settings?.member_capital_deposit_bank || '').trim();
+  const depositAccount = String(settings?.member_capital_deposit_account || '').trim();
+  const depositHolder = String(settings?.member_capital_deposit_holder || '').trim();
   const isSiteMemberProfile = String(settings?.runtime_profile || '') === 'site_member';
   const policyLinks = document.getElementById('footer-policy-links');
   window.__PUBLIC_LEGAL_DOCS_ENABLED__ = !isSiteMemberProfile;
@@ -126,9 +129,18 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   const phoneEl = document.getElementById('footer-contact-phone');
   const emailEl = document.getElementById('footer-contact-email');
   const addressEl = document.getElementById('footer-contact-address');
+  const depositRow = document.getElementById('footer-deposit-row');
+  const depositEl = document.getElementById('footer-deposit-account');
   if (phoneEl && phone) phoneEl.textContent = phoneSuffix ? `${phone} (${phoneSuffix})` : phone;
   if (emailEl && email) emailEl.textContent = email;
   if (addressEl && address) addressEl.textContent = address;
+
+  const hasDepositAccount = isSiteMemberProfile && !!(depositBank && depositAccount);
+  if (depositEl && hasDepositAccount) {
+    const holderSuffix = depositHolder ? ` (예금주: ${depositHolder})` : '';
+    depositEl.textContent = `출자금 입금: ${depositBank} ${depositAccount}${holderSuffix}`;
+  }
+  if (depositRow) depositRow.hidden = !hasDepositAccount;
 
   if (isSiteMemberProfile) {
     const phoneRow = document.getElementById('footer-contact-phone-row');
@@ -188,6 +200,7 @@ document.addEventListener("DOMContentLoaded", function() {
               <div id="footer-contact-address-row"><i class="bi bi-geo-alt me-2 text-success"></i> <span id="footer-contact-address">경기 용인시 처인구 남사읍 상동로 28</span></div>
               <div id="footer-contact-email-row"><i class="bi bi-envelope me-2 text-success"></i> <span id="footer-contact-email">yonginsolar@gmail.com</span></div>
               <div id="footer-contact-phone-row"><i class="bi bi-phone me-2 text-success"></i> <span id="footer-contact-phone">010-2513-5736 (사무국)</span></div>
+              <div id="footer-deposit-row" hidden><i class="bi bi-bank me-2 text-success"></i> <span id="footer-deposit-account"></span></div>
               <div id="footer-contact-pending" hidden>공식 연락처를 준비하고 있습니다.</div>
             </div>
           </div>

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.45
-Change: Accept citizen-coop email as contact information without an OTP while preserving the main cooperative's email verification.
+Version: v1.0.46
+Change: Show the citizen cooperative's configured capital-deposit account before and after signup.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.43 | signup.html');</script>
+  <script>console.log('[Version] v1.0.46 | signup.html');</script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -346,6 +346,14 @@ onblur="checkPhoneDuplicateServer()">
 <div id="moneyHint" class="small mt-1" style="color:#666;"></div>
 </div>
 
+<div class="col-12" id="signupDepositGuide" hidden>
+<div class="border rounded-4 p-3" style="background:#f6fbf7; border-color:#cfe8d4 !important;">
+<div class="fw-bold small text-success mb-1"><i class="bi bi-bank me-1"></i>조합 출자금 입금 계좌</div>
+<div id="signupDepositAccountLine" class="fw-semibold"></div>
+<div id="signupDepositHolderLine" class="small text-muted mt-1"></div>
+</div>
+</div>
+
 <div class="col-12 bg-light p-3 rounded-4 mt-2">
 <label class="fw-bold small mb-2">배당금 계좌</label>
 <select id="bankName" class="form-select mb-2" onchange="handleBankChange(this); clearFieldWarning(this)" required>
@@ -430,7 +438,7 @@ oninput="clearFieldWarning(this)">
 <h3 class="fw-bold mt-3">가입 신청 완료</h3>
 <p id="successModalCopy" class="text-muted small">신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.</p>
 <div id="successAccountBox" class="p-3 bg-light rounded-3 text-start small mb-3" style="display:none;">
-🏦 <b>신협 131-022-855516</b><br>(예금주: 용인모두의햇빛협동조합)
+🏦 <b id="successDepositAccount">신협 131-022-855516</b><br><span id="successDepositHolder">(예금주: 용인모두의햇빛협동조합)</span>
 </div>
 <div id="successKakaoBox" class="kakao-box" style="display:none;"><a id="successKakaoLink" href="https://invite.kakao.com/tc/cLtR3LGLQX" target="_blank" class="kakao-link-btn">📢 카카오톡 팀채팅방 참여하기</a></div>
 <button class="btn btn-success w-100" onclick="location.href='index.html'">홈으로 이동</button>
@@ -821,6 +829,36 @@ url.searchParams.set(key, String(value));
 return url.toString();
 }
 
+function getSignupPublicDepositAccount() {
+const settings = signupPublicSettings && typeof signupPublicSettings === 'object'
+? signupPublicSettings
+: {};
+return {
+bank: String(settings.member_capital_deposit_bank || '').trim(),
+account: String(settings.member_capital_deposit_account || '').trim(),
+holder: String(settings.member_capital_deposit_holder || '').trim()
+};
+}
+
+function applySignupPublicDepositAccount() {
+const guide = document.getElementById('signupDepositGuide');
+const accountLine = document.getElementById('signupDepositAccountLine');
+const holderLine = document.getElementById('signupDepositHolderLine');
+const successAccount = document.getElementById('successDepositAccount');
+const successHolder = document.getElementById('successDepositHolder');
+const deposit = getSignupPublicDepositAccount();
+const canShow = isDeferredSignupProfile() && !!(deposit.bank && deposit.account);
+
+if (guide) guide.hidden = !canShow;
+if (!canShow) return false;
+
+if (accountLine) accountLine.textContent = `${deposit.bank} ${deposit.account}`;
+if (holderLine) holderLine.textContent = deposit.holder ? `예금주: ${deposit.holder}` : '';
+if (successAccount) successAccount.textContent = `${deposit.bank} ${deposit.account}`;
+if (successHolder) successHolder.textContent = deposit.holder ? `(예금주: ${deposit.holder})` : '';
+return true;
+}
+
 function applySignupTenantBranding() {
 if (!signupTenant?.coop_name) return;
 
@@ -842,6 +880,7 @@ const successModalCopy = document.getElementById('successModalCopy');
 const successAccountBox = document.getElementById('successAccountBox');
 const successKakaoBox = document.getElementById('successKakaoBox');
 const successKakaoLink = document.getElementById('successKakaoLink');
+const hasPublicDepositAccount = applySignupPublicDepositAccount();
 
 if (signupTenant.coop_code === DEFAULT_SIGNUP_COOP_CODE) {
 if (successModalCopy) successModalCopy.innerHTML = '신청이 성공적으로 접수되었습니다.<br>10일 이내로 출자금 입금 부탁드립니다.';
@@ -849,8 +888,12 @@ if (successAccountBox) successAccountBox.style.display = '';
 if (successKakaoBox) successKakaoBox.style.display = '';
 if (successKakaoLink) successKakaoLink.href = DEFAULT_SIGNUP_KAKAO_URL;
 } else {
-if (successModalCopy) successModalCopy.textContent = '신청이 성공적으로 접수되었습니다.';
-if (successAccountBox) successAccountBox.style.display = 'none';
+if (successModalCopy) {
+successModalCopy.innerHTML = hasPublicDepositAccount
+? '신청이 성공적으로 접수되었습니다.<br>아래 계좌로 출자금을 입금해 주세요.'
+: '신청이 성공적으로 접수되었습니다.';
+}
+if (successAccountBox) successAccountBox.style.display = hasPublicDepositAccount ? '' : 'none';
 if (successKakaoBox) successKakaoBox.style.display = 'none';
 }
 
