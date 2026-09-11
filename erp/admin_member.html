@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.156
+Version: v1.0.157
 Change: Fix citizen-coop certificate cutoff totals and align historical join dates with contribution dates.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.156';
+window.ADMIN_MEMBER_VERSION = 'v1.0.157';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -14176,6 +14176,15 @@ async function saveFundData() {
     if (error) {
         myAlert('저장 실패: ' + error.message, 'error');
     } else {
+        if (type === 'capital' && isAdminMemberSiteProfile() && data?.member_join_date) {
+            const nextJoinDate = String(data.member_join_date).slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(nextJoinDate)) {
+                if (g_current_member_row) g_current_member_row.join_date = nextJoinDate;
+                const cachedMember = findCachedAdminMember(memberUid) || findCachedAdminMember(memberTextId);
+                if (cachedMember) cachedMember.join_date = nextJoinDate;
+                renderMemberTable(g_members);
+            }
+        }
         const requiresActivation = isNewCapital && data?.requires_activation === true;
         const hasCapitalNotificationPrompt = !isAdminMemberSiteProfile()
             && isNewCapital
