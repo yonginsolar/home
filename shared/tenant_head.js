@@ -1,6 +1,6 @@
 /*
-Version: v1.0.0
-Change: Keep the Yongin Citizen Sunlight tenant head metadata neutral and suppress the legacy favicon.
+Version: v1.0.1
+Change: Use the shared sun favicon across cooperative modules.
 */
 (function applyTenantHead(global) {
   'use strict';
@@ -15,8 +15,6 @@ Change: Keep the Yongin Citizen Sunlight tenant head metadata neutral and suppre
   const isCitizenTenant = citizenHosts.has(host);
   const oldName = '용인모두의햇빛협동조합';
   const coopName = '용인시민햇빛발전협동조합';
-  const currentScript = document.currentScript;
-  const keepDefaultFavicon = String(currentScript?.dataset?.defaultFavicon || 'legacy') !== 'none';
 
   function replaceLegacyText(value) {
     return String(value || '')
@@ -50,16 +48,11 @@ Change: Keep the Yongin Citizen Sunlight tenant head metadata neutral and suppre
 
   const favicon = document.createElement('link');
   favicon.rel = 'icon';
-  if (isCitizenTenant) {
-    favicon.type = 'image/svg+xml';
-    favicon.href = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1 1%22%3E%3C/svg%3E';
-    favicon.dataset.tenantFavicon = 'blank';
-    document.head.appendChild(favicon);
-  } else if (keepDefaultFavicon) {
-    favicon.type = 'image/png';
-    favicon.href = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co/storage/v1/object/public/assets/favicon.png';
-    document.head.appendChild(favicon);
-  }
+  favicon.type = 'image/svg+xml';
+  favicon.sizes = 'any';
+  favicon.href = '/shared/sun_favicon.svg?v=1.0.0';
+  favicon.dataset.tenantFavicon = 'sun';
+  document.head.appendChild(favicon);
 
   global.CoopTenantHead = Object.freeze({
     host,
