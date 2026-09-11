@@ -1,4 +1,4 @@
-/* Version: v1.5.1 | Render any number of proposal companions without shrinking print text below 11pt. */
+/* Version: v1.5.5 | School proposal capacity and copy branch by Sunlink School status. */
 (() => {
   'use strict';
   function renderContacts(doc, m) {
@@ -26,7 +26,7 @@
     contact.classList.toggle('contact-many', people.length > 4);
     contact.classList.toggle('contact-crowded', people.length > 8);
     Object.assign(contact.style, {
-      fontSize: people.length > 8 ? '11pt' : '12pt',
+      fontSize: people.length > 8 ? '11.1pt' : '12pt',
       padding: people.length > 8 ? '9px 14px' : '14px 22px',
       marginTop: people.length > 8 ? '10px' : '16px',
       gap: people.length > 8 ? '4px 14px' : '7px 22px'
@@ -86,14 +86,22 @@
     const put = (n, selector, text) => { const node = page(n)?.querySelector(selector); if (node) node.textContent = text; };
     const kw = (value) => value === null ? '용량 확인 중' : `${trimNumber(value)}kW`;
     const area = ({ roof: '옥상', parking: '주차장', both: '옥상·주차장' })[m.schoolInstallArea] || '옥상·주차장';
-    const proposed = m.expandedKw;
-    const rangeStart = proposed === null ? null : Math.max(m.expandedMinKw ?? proposed, m.remainingKw ?? 0);
-    const range = proposed === null ? '현장조사 후 산정' : rangeStart === proposed ? kw(proposed) : `${trimNumber(rangeStart)}~${kw(proposed)}`;
-    const existing = !m.existingKnown ? '현황 확인 중' : m.hasExistingInstallation ? kw(m.existingKw) : '기설치 없음';
-    const publicProgram = m.schoolPublicProgramStatus === 'none' ? '별도 계획 없음'
-      : m.schoolPublicProgramStatus === 'completed' ? (m.schoolPublicProgramKw === null ? '설치 완료 · 용량 확인' : `${kw(m.schoolPublicProgramKw)} 설치 완료`)
-      : m.schoolPublicProgramStatus === 'planned' ? (m.schoolPublicProgramKw === null ? '선정·설계 중 · 용량 협의' : `${kw(m.schoolPublicProgramKw)} 계획`)
-      : '선정·설계 여부 확인 중';
+    const statusKnown = m.schoolPublicProgramStatus !== 'checking';
+    const hasSunlinkSchool = m.schoolPublicProgramStatus === 'completed' || m.schoolPublicProgramStatus === 'planned';
+    const sunlinkKw = hasSunlinkSchool ? 50 : 0;
+    const totalProposed = m.expandedKw;
+    const totalRangeStart = totalProposed === null ? null : Math.max(m.expandedMinKw ?? totalProposed, m.remainingKw ?? 0);
+    const totalRange = totalProposed === null ? '현장조사 후 산정' : totalRangeStart === totalProposed ? kw(totalProposed) : `${trimNumber(totalRangeStart)}~${kw(totalProposed)}`;
+    const proposed = totalProposed === null || !statusKnown ? null : Math.max(totalProposed - sunlinkKw, 0);
+    const rangeStart = proposed === null ? null : Math.max((totalRangeStart ?? totalProposed) - sunlinkKw, 0);
+    const range = !statusKnown ? '햇빛이음학교 확인 후 산정'
+      : proposed === null ? '현장조사 후 산정'
+      : proposed === 0 ? '추가 가능용량 없음'
+      : rangeStart === proposed ? kw(proposed) : `${trimNumber(rangeStart)}~${kw(proposed)}`;
+    const publicProgram = m.schoolPublicProgramStatus === 'none' ? '해당 없음'
+      : m.schoolPublicProgramStatus === 'completed' ? '50kW 설치 완료'
+      : m.schoolPublicProgramStatus === 'planned' ? '50kW 설치 예정'
+      : '해당 여부 확인 중';
 
     doc.body.classList.add('school-proposal');
     const style = doc.createElement('style');
@@ -113,28 +121,32 @@
 
     put(2, '.eyebrow', 'WHY SCHOOL, WHY TOGETHER');
     setEmphasis(doc, page(2).querySelector('h2'), '학교의 에너지전환을 ', '교육과 지역 참여로 넓힐 수 있습니다', '', { lineBreak: true });
-    put(2, '.lead', `${m.facilityName}의 기존 설비와 교육부·교육청의 자가소비형 계획을 우선 반영하고, 추가로 활용할 수 있는 ${area}에는 별도 시민발전소를 조성하는 방안을 제안합니다.`);
+    put(2, '.lead', hasSunlinkSchool
+      ? `${m.facilityName}의 햇빛이음학교 50kW를 먼저 반영하고, ${area}에서 추가로 활용할 수 있는 나머지 용량에는 시민발전소를 조성하는 방안을 제안합니다.`
+      : m.schoolPublicProgramStatus === 'none'
+        ? `${m.facilityName}은 햇빛이음학교 50kW를 따로 떼어 둘 필요가 없으므로, 활용 가능한 ${area} 전체를 시민발전소로 조성하는 방안을 제안합니다.`
+        : `${m.facilityName}의 햇빛이음학교 선정·설치 여부를 먼저 확인하고, 결과에 따라 50kW 반영 여부와 시민발전 규모를 정확히 나누어 제안합니다.`);
     const p2cards = [...page(2).querySelectorAll('.grid-3 .card')];
-    [['학교가 직접 쓰는 전기', '자가소비형 태양광은 학교의 전기구매를 줄이고 학생들이 가까이에서 에너지전환을 접하게 합니다.'],
-      ['남는 공간의 발전 기회', '기존·계획 설비 구역을 제외한 추가 공간은 별도 시민발전사업으로 검토해 재생에너지 생산을 더 넓힐 수 있습니다.'],
+    [[hasSunlinkSchool ? '햇빛이음 50kW 우선 반영' : m.schoolPublicProgramStatus === 'none' ? '50kW 별도 배정 없음' : '햇빛이음 여부 먼저 확인', hasSunlinkSchool ? '설치 완료·예정인 50kW는 학교가 직접 쓰는 자가소비형 설비로 구분합니다.' : m.schoolPublicProgramStatus === 'none' ? '별도 공공사업 구역을 남겨 두지 않고 전체 활용 가능 면적을 시민발전으로 검토합니다.' : '선정·설치 여부를 확인하기 전에는 50kW를 임의로 더하거나 빼지 않습니다.'],
+      ['학교 공간의 발전 기회', hasSunlinkSchool ? '햇빛이음학교 50kW를 제외한 추가 공간을 시민발전사업으로 검토해 재생에너지 생산을 더 넓힙니다.' : m.schoolPublicProgramStatus === 'none' ? '옥상과 주차장의 활용 가능한 공간 전체를 조사해 발전 규모를 정합니다.' : '확인 결과에 따라 50kW를 반영하거나 전체 가능 공간을 시민발전으로 제안합니다.'],
       ['수업으로 이어지는 발전소', '발전량 자료와 태양광 원리를 교과·동아리·체험활동에 활용하도록 조합이 교육을 함께 기획합니다.']
     ].forEach(([title, body], index) => { p2cards[index].querySelector('h3').textContent = title; p2cards[index].querySelector('p').textContent = body; });
-    put(2, '.banner', '공공 자가소비형 사업과 시민참여형 발전사업이 각자의 역할을 나누어 학교의 에너지전환 효과를 넓히는 구성을 제안합니다.');
+    put(2, '.banner', hasSunlinkSchool ? '햇빛이음학교 50kW와 시민참여형 추가 발전이 서로 겹치지 않도록 나누어 학교의 에너지전환 효과를 넓힙니다.' : m.schoolPublicProgramStatus === 'none' ? '별도 공공사업이 없는 학교는 활용 가능한 공간 전체를 시민참여형 발전으로 검토합니다.' : '햇빛이음학교 여부를 확인한 뒤 학교별 상황에 맞는 한 가지 용량안으로 정리합니다.');
     const p2source = page(2).querySelector('.source');
     p2source.replaceChildren(doc.createTextNode('정책 참고: '));
     const moe = doc.createElement('a'); moe.href = 'https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=105428&lev=0&m=020402&opType=N&s=moe&statusYN=W'; moe.textContent = '교육부 2026년 햇빛이음학교 시범사업 발표';
-    p2source.append(moe, doc.createTextNode(' · 학교별 50kW 내외는 2026년 시범사업 기준이며, 대상 학교의 실제 계획과 용량은 별도로 확인합니다.'));
+    p2source.append(moe, doc.createTextNode(' · 이 제안서는 햇빛이음학교 설치 완료·예정 학교에만 50kW를 반영합니다.'));
 
     setEmphasis(doc, page(3).querySelector('h2'), '대상지와 ', `${area}의 추가 활용 가능 공간`);
 
     put(4, '.eyebrow', 'SCHOOL SOLAR PLAN');
-    setEmphasis(doc, page(4).querySelector('h2'), '기존·공공사업을 먼저 반영하고, ', '추가 공간을 시민발전으로 연결합니다');
+    setEmphasis(doc, page(4).querySelector('h2'), hasSunlinkSchool ? '햇빛이음학교 50kW를 반영하고, ' : m.schoolPublicProgramStatus === 'none' ? '학교의 활용 가능한 공간 전체를 ' : '햇빛이음학교 여부를 확인한 뒤 ', hasSunlinkSchool ? '나머지 용량을 시민발전으로 연결합니다' : m.schoolPublicProgramStatus === 'none' ? '시민발전으로 연결합니다' : '시민발전 용량을 확정합니다');
     const figures = page(4).querySelector('.capacity-figures');
     figures.className = 'school-capacity-figures';
     const boxes = [
-      ['기존 태양광', existing, '설비 위치·소유·계량 방식 확인'],
-      ['교육부·교육청 자가소비형', publicProgram, '선정·설계 구역을 먼저 확보'],
-      ['시민참여형 신규 발전', range, `${area}의 추가 활용 공간 조사`]
+      ['햇빛이음학교', publicProgram, hasSunlinkSchool ? '50kW 자동 반영' : m.schoolPublicProgramStatus === 'none' ? '별도 용량을 남겨 두지 않음' : '확인 전에는 용량 미반영'],
+      ['학교 전체 활용 가능용량', totalRange, `${area} 실측·배치 기준`],
+      ['시민참여형 신규 발전', range, hasSunlinkSchool ? '전체 가능용량에서 50kW를 뺀 규모' : m.schoolPublicProgramStatus === 'none' ? '전체 가능용량을 그대로 반영' : '햇빛이음학교 확인 뒤 계산']
     ];
     figures.replaceChildren(...boxes.map(([label, value, detail], index) => {
       const box = doc.createElement('div'); box.className = `law-box${index === 2 ? ' sunny' : ''}`;
@@ -144,24 +156,24 @@
       box.append(small, big, note); return box;
     }));
     put(4, '.grid-2 .card:first-child h3', '배치의 우선순위');
-    put(4, '.grid-2 .card:first-child .lead', '기존 설비와 확정된 공공사업 구역, 교육활동에 필요한 공간을 먼저 보호합니다.');
-    put(4, '.grid-2 .card:first-child p:last-child', '겹치지 않는 추가 공간만 시민발전 후보지로 조사합니다.');
+    put(4, '.grid-2 .card:first-child .lead', hasSunlinkSchool ? '햇빛이음학교 50kW와 교육활동에 필요한 공간을 먼저 보호합니다.' : m.schoolPublicProgramStatus === 'none' ? '교육활동과 안전에 필요한 공간을 제외하고 발전에 쓸 수 있는 전체 면적을 조사합니다.' : '햇빛이음학교 여부와 교육활동에 필요한 공간을 먼저 확인합니다.');
+    put(4, '.grid-2 .card:first-child p:last-child', hasSunlinkSchool ? '50kW와 겹치지 않는 나머지 공간만 시민발전 후보지로 조사합니다.' : m.schoolPublicProgramStatus === 'none' ? '별도 50kW 구역을 남겨 두지 않고 활용 가능한 공간 전체를 후보지로 봅니다.' : '확인 결과에 따라 50kW를 제외하거나 전체 공간을 후보지로 봅니다.');
     put(4, '.grid-2 .card:nth-child(2) h3', '용량을 정하는 방법');
-    put(4, '.grid-2 .card:nth-child(2) p', `전체 가능 면적에서 기존·계획 구역과 통학·소방·유지관리 공간을 제외한 뒤 ${area}의 실제 배치로 신규 용량을 산정합니다.`);
-    put(4, '.banner', '50kW를 일괄 차감하지 않고, 학교별 확정 설계와 현장조사를 기준으로 시민발전 규모를 정합니다.');
+    put(4, '.grid-2 .card:nth-child(2) p', hasSunlinkSchool ? `학교 전체 활용 가능용량에서 햇빛이음학교 50kW를 빼고, ${area}의 실제 배치로 시민발전 용량을 산정합니다.` : m.schoolPublicProgramStatus === 'none' ? `${area}에서 통학·소방·유지관리 공간을 제외한 전체 활용 가능용량을 시민발전 규모로 산정합니다.` : `햇빛이음학교 여부를 확인한 뒤 ${area}의 실제 배치로 시민발전 용량을 산정합니다.`);
+    put(4, '.banner', hasSunlinkSchool ? `전체 ${totalRange} 중 햇빛이음학교 50kW를 먼저 반영하고, 나머지 ${range}를 시민발전으로 검토합니다.` : m.schoolPublicProgramStatus === 'none' ? `햇빛이음학교가 없는 학교이므로 전체 활용 가능용량 ${totalRange}를 시민발전으로 검토합니다.` : '햇빛이음학교 여부가 확인되기 전에는 50kW를 임의로 적용하지 않습니다.');
     put(4, '.source', '입력한 학교 현황은 제안 준비용입니다. 공공사업 선정·설계 자료, 학교 전력부하, 구조·방수·계통 검토 후 최종 확정합니다.');
 
     put(5, '.eyebrow', 'COMPLEMENTARY MODEL');
-    setEmphasis(doc, page(5).querySelector('h2'), '자가소비만으로 놓칠 수 있는 ', '공간과 발전 기회를 보완합니다');
+    setEmphasis(doc, page(5).querySelector('h2'), hasSunlinkSchool ? '자가소비 50kW 뒤에 남는 ' : m.schoolPublicProgramStatus === 'none' ? '일부 설치에 머물지 않고 ' : '학교별 사업 현황을 확인해 ', hasSunlinkSchool ? '공간과 발전 기회를 시민발전으로 잇습니다' : m.schoolPublicProgramStatus === 'none' ? '활용 가능한 공간 전체를 발전에 씁니다' : '공간과 발전 기회를 놓치지 않습니다');
     const halves = [...page(5).querySelectorAll('.thermo > div')];
-    halves[0].querySelector('h3').textContent = '공공 자가소비형의 역할과 한계';
-    setList(doc, halves[0], ['학교가 쓰는 전기를 현장에서 생산해 전기구매를 줄입니다.', '방학·주말처럼 전력수요가 낮은 때에는 발전량을 충분히 활용하지 못할 수 있습니다.', '자가소비 수요에 맞춘 용량만 계획하면 설치 가능한 공간이 남을 수 있습니다.']);
-    halves[1].querySelector('h3').textContent = '시민참여형 발전이 보완하는 부분';
-    setList(doc, halves[1], ['공공사업 구역 밖의 추가 공간에 별도 발전소를 조성합니다.', '자체 생산 전력을 별도로 계량·판매해 재생에너지 생산을 확대합니다.', '주민 출자와 지역환원으로 학교와 마을이 성과를 함께 나눕니다.']);
+    halves[0].querySelector('h3').textContent = hasSunlinkSchool ? '햇빛이음학교 50kW의 역할과 한계' : m.schoolPublicProgramStatus === 'none' ? '일부 용량만 설치할 때의 한계' : '먼저 확인할 햇빛이음학교 현황';
+    setList(doc, halves[0], hasSunlinkSchool ? ['학교가 쓰는 전기를 현장에서 생산해 전기구매를 줄입니다.', '방학·주말처럼 전력수요가 낮은 때에는 발전량을 충분히 활용하지 못할 수 있습니다.', '50kW만 설치하면 발전에 쓸 수 있는 옥상·주차장 공간이 남을 수 있습니다.'] : m.schoolPublicProgramStatus === 'none' ? ['학교에 햇빛이음학교 50kW가 따로 설치되거나 계획돼 있지 않습니다.', '일부 용량만 설치하면 발전에 쓸 수 있는 옥상·주차장 공간이 남습니다.', '설계·계통 여건이 허용하는 전체 공간을 한 번에 검토하는 편이 효율적입니다.'] : ['선정·설계 또는 설치 자료가 있는지 학교·교육청에 확인합니다.', '확인 전에는 50kW를 설치된 것으로 보거나 시민발전 용량에서 빼지 않습니다.', '결과가 확인되면 한 가지 용량안으로 다시 계산합니다.']);
+    halves[1].querySelector('h3').textContent = hasSunlinkSchool ? '나머지를 시민발전으로 연결하면' : m.schoolPublicProgramStatus === 'none' ? '전체를 시민발전으로 활용하면' : '확인 뒤 시민발전을 설계하면';
+    setList(doc, halves[1], [hasSunlinkSchool ? '햇빛이음학교 50kW 밖의 추가 공간에 별도 발전소를 조성합니다.' : m.schoolPublicProgramStatus === 'none' ? '안전과 교육활동에 필요한 공간을 뺀 전체 가능 면적에 발전소를 조성합니다.' : '햇빛이음학교가 있으면 50kW를 빼고, 없으면 전체 가능용량을 반영합니다.', '생산 전력을 별도로 계량·판매해 재생에너지 생산을 확대합니다.', '주민 출자와 지역환원으로 학교와 마을이 성과를 함께 나눕니다.']);
     const p5cards = [...page(5).querySelectorAll('.grid-4 .card')];
-    [['공공사업 우선', '확정된 자가소비형 계획과 필요한 공간을 먼저 반영합니다.'], ['별도 설비·계량', '정부 설비의 잉여전력을 재판매하지 않고 별도 발전소로 운영합니다.'], ['공간 활용 확대', '남은 옥상·주차장의 발전 가능성을 현장조사로 확인합니다.'], ['교육·지역환원', '발전자료는 교육에, 수익 일부는 합의한 지역사업에 연결합니다.']]
+    [[hasSunlinkSchool ? '50kW 우선 반영' : m.schoolPublicProgramStatus === 'none' ? '전체 공간 검토' : '현황 먼저 확인', hasSunlinkSchool ? '햇빛이음학교 50kW와 필요한 공간을 먼저 반영합니다.' : m.schoolPublicProgramStatus === 'none' ? '50kW를 따로 떼지 않고 전체 가능 면적을 조사합니다.' : '선정·설치 자료를 확인한 뒤 용량을 계산합니다.'], ['별도 설비·계량', hasSunlinkSchool ? '햇빛이음학교 설비와 시민발전소를 구분해 운영합니다.' : '시민발전소의 생산 전력을 별도로 계량·판매합니다.'], ['공간 활용 확대', hasSunlinkSchool ? '50kW 밖의 옥상·주차장 발전 가능성을 확인합니다.' : '옥상·주차장의 전체 발전 가능성을 현장조사로 확인합니다.'], ['교육·지역환원', '발전자료는 교육에, 수익 일부는 합의한 지역사업에 연결합니다.']]
       .forEach(([title, body], index) => { p5cards[index].querySelector('h3').textContent = title; p5cards[index].querySelector('p').textContent = body; });
-    put(5, '.banner', m.siteProposalNote || '학교가 직접 쓰는 전기는 공공사업으로, 추가 공간의 햇빛은 별도 시민발전사업으로 활용하는 구성을 제안합니다.');
+    put(5, '.banner', m.siteProposalNote || (hasSunlinkSchool ? '햇빛이음학교 50kW는 그대로 존중하고, 그 밖의 공간을 별도 시민발전사업으로 활용하는 구성을 제안합니다.' : m.schoolPublicProgramStatus === 'none' ? '활용 가능한 학교 공간 전체를 시민발전사업으로 검토해 발전 기회를 놓치지 않는 구성을 제안합니다.' : '햇빛이음학교 여부를 확인한 뒤 50kW 반영 여부와 시민발전 규모를 정확히 나누겠습니다.'));
 
     put(6, '.eyebrow', 'ENERGY EDUCATION');
     setEmphasis(doc, page(6).querySelector('h2'), '설치로 끝나지 않고 ', '학생이 보고 배우는 발전소로 운영합니다');
@@ -213,15 +225,15 @@
       safetyNote = doc.createElement('div'); safetyNote.className = 'note warning'; safetyNote.style.marginTop = '16px';
       page(12).querySelector('.safety-grid').after(safetyNote);
     }
-    safetyNote.textContent = '기존 설비, 공공 자가소비형 설비와 시민발전 설비의 구역·계량점·소유·운영 책임을 도면과 협약으로 구분해 고장·정산·시설공사 때 혼선을 막습니다.';
+    safetyNote.textContent = hasSunlinkSchool ? '햇빛이음학교 50kW와 시민발전 설비의 구역·계량점·소유·운영 책임을 도면과 협약으로 구분해 고장·정산·시설공사 때 혼선을 막습니다.' : m.schoolPublicProgramStatus === 'none' ? '기존 설비가 있다면 시민발전 설비와 구역·계량점·소유·운영 책임을 구분하고, 전체 활용 공간의 안전·유지관리 계획을 도면과 협약으로 정합니다.' : '햇빛이음학교 여부를 먼저 확인하고, 확인된 설비와 시민발전 설비의 구역·계량점·소유·운영 책임을 구분합니다.';
 
-    put(13, 'h2', '공공계획과 학교 여건을 확인한 뒤 시민발전 규모를 확정합니다');
+    put(13, 'h2', hasSunlinkSchool ? '햇빛이음학교 50kW를 제외한 시민발전 규모를 확인합니다' : m.schoolPublicProgramStatus === 'none' ? '학교의 전체 활용 가능용량을 시민발전 규모로 확인합니다' : '햇빛이음학교 여부를 확인한 뒤 시민발전 규모를 확정합니다');
     const scale = [...page(13).querySelectorAll('.grid-3 > .card')];
-    [['공공 자가소비형 현황', publicProgram, '선정·설계·설치 자료로 실제 구역 확인'], ['시민발전 신규 제안', range, `${area}의 추가 활용 공간 기준`], ['시민발전 연간 발전량', proposed === null ? '용량 입력 후 산정' : `${trimNumber(proposed * m.sunHours * 365 / 10000)}만kWh`, proposed === null ? '신규 용량을 입력하면 계산합니다.' : `${kw(proposed)} × 일평균 ${trimNumber(m.sunHours)}시간 × 365일`]]
+    [['햇빛이음학교', publicProgram, hasSunlinkSchool ? '50kW를 시민발전 용량에서 제외' : m.schoolPublicProgramStatus === 'none' ? '50kW 차감 없이 전체 용량 반영' : '확인 전에는 수지 산정 보류'], ['시민발전 신규 제안', range, hasSunlinkSchool ? `${area} 전체 가능용량에서 50kW를 뺀 규모` : m.schoolPublicProgramStatus === 'none' ? `${area} 전체 활용 가능용량` : '햇빛이음학교 확인 뒤 계산'], ['시민발전 연간 발전량', proposed === null ? '용량 확인 후 산정' : proposed === 0 ? '추가 발전 없음' : `${trimNumber(proposed * m.sunHours * 365 / 10000)}만kWh`, proposed === null ? '햇빛이음학교 여부와 전체 가능용량을 확인하면 계산합니다.' : proposed === 0 ? '전체 가능용량이 햇빛이음학교 50kW 이하입니다.' : `${kw(proposed)} × 일평균 ${trimNumber(m.sunHours)}시간 × 365일`]]
       .forEach(([label, value, detail], index) => { scale[index].querySelector('.stat-label').textContent = label; scale[index].querySelector('.stat').textContent = value; scale[index].querySelector('.stat').style.fontSize = value.length > 14 ? '20pt' : '28pt'; scale[index].querySelector('p').textContent = detail; });
     replaceTable(doc, page(13).querySelector('.table'), ['확정 전 확인', '확인 이유', '결과에 따른 조정'], [
       [`${area} 실측`, '교육활동·통학·소방·유지관리 공간을 제외해야 함', '시민발전 배치와 신규 용량 확정'],
-      ['기존·공공사업 자료', '설치·계획 구역과 계량·소유 관계 확인', '세 설비의 공간과 책임 분리'],
+      ['햇빛이음학교 자료', '설치 완료·예정 여부와 50kW 구역 확인', '50kW 반영 여부와 시민발전 공간 확정'],
       ['구조·방수·시설계획', '하중·누수와 예정된 지붕 보수공사 확인', '공법·공사 시기·이동 책임 조정'],
       ['한전 계통·실견적', '접속 가능 용량과 공사비가 수지에 영향', '용량·재원·일정 최종 조정']
     ]);
@@ -232,30 +244,30 @@
     const financeCards = [...finance.children];
     financeCards.slice(1).forEach((card) => card.remove());
     finance.style.gridTemplateColumns = '1fr'; finance.style.maxWidth = '820px'; finance.style.margin = '0 auto';
-    const financeCard = financeCards[0]; financeCard.querySelector('h3').textContent = `시민발전 신규 설치안 · ${kw(proposed)}`;
-    let values = Array(8).fill('용량 입력 후 산정');
-    if (proposed !== null) {
+    const financeCard = financeCards[0]; financeCard.querySelector('h3').textContent = `시민발전 신규 설치안 · ${range}`;
+    let values = Array(8).fill(statusKnown ? '용량 입력 후 산정' : '햇빛이음학교 확인 후 산정');
+    if (proposed !== null && proposed > 0) {
       const result = calculateFinance(proposed, m);
       values = [formatProjectCost(result.projectCost), `${Math.round(result.annualGeneration).toLocaleString('ko-KR')}kWh`, formatApproxManwon(result.annualRevenue), formatApproxManwon(result.localReturn, '/년'), formatApproxManwon(result.operationReserve, '/년'), formatApproxManwon(result.annualCash), result.payback > 0 ? `약 ${result.payback.toFixed(1)}년` : '산정 불가', `약 ${(result.twentyYearResidual / 100000000).toFixed(2)}억원`];
     }
     financeCard.querySelectorAll('td:nth-child(2)').forEach((cell, index) => { cell.textContent = values[index]; });
-    put(14, '.note.warning', `이 표는 별도 시민발전소의 예비 수지입니다. 공공 자가소비형 설비의 전기요금 절감액은 섞지 않았습니다. 사업비는 ${trimNumber(m.unitCostManwon)}만원/kW 가정이며 옥상형·주차장형 공법, 금융비용·세금·부지사용료·계통보강비·부가세를 반영해 다시 계산합니다.`);
+    put(14, '.note.warning', `${hasSunlinkSchool ? '이 표는 학교 전체 활용 가능용량에서 햇빛이음학교 50kW를 뺀 시민발전소의 예비 수지입니다. 햇빛이음학교의 전기요금 절감액은 섞지 않았습니다.' : m.schoolPublicProgramStatus === 'none' ? '이 표는 햇빛이음학교 50kW를 차감하지 않고 전체 활용 가능용량을 반영한 시민발전소의 예비 수지입니다.' : '햇빛이음학교 여부가 확인되면 50kW 반영 여부에 맞춰 시민발전소의 예비 수지를 계산합니다.'} 사업비는 ${trimNumber(m.unitCostManwon)}만원/kW 가정이며 옥상형·주차장형 공법, 금융비용·세금·부지사용료·계통보강비·부가세를 반영해 다시 계산합니다.`);
 
     put(15, '.eyebrow', 'SCHOOL FACILITY & CONTRACT');
     setEmphasis(doc, page(15).querySelector('h2'), '법적 검토 근거 위에서 ', '학교·교육청 절차를 먼저 확인합니다');
     put(15, '.contract-callout h3', '학교의 교육활동과 재산관리 원칙에 맞는 사용·계약 방식을 협의합니다.');
     put(15, '.contract-callout p', '신재생에너지법 제26조는 국가·지방자치단체의 재산을 신재생에너지 사업에 사용하는 근거를 두고 있습니다. 다만 학교별 소유·관리 주체와 교육청 규정에 따라 허가·대부·계약 절차를 검토합니다.');
-    put(15, '.grid-2 .card:first-child h3', '사업 병행 가능성 확인');
-    put(15, '.grid-2 .card:first-child p', '공공 자가소비형 사업과 별도 시민발전사업이 같은 학교 안에서 병행 가능한지 학교·교육청의 계획과 재산관리 기준으로 확인합니다.');
+    put(15, '.grid-2 .card:first-child h3', hasSunlinkSchool ? '두 사업의 병행 가능성 확인' : m.schoolPublicProgramStatus === 'none' ? '전체 공간의 사용 절차 확인' : '햇빛이음학교 여부 먼저 확인');
+    put(15, '.grid-2 .card:first-child p', hasSunlinkSchool ? '햇빛이음학교 50kW와 별도 시민발전사업이 같은 학교 안에서 병행 가능한지 학교·교육청의 계획과 재산관리 기준으로 확인합니다.' : m.schoolPublicProgramStatus === 'none' ? '별도 공공사업 예정 구역 없이 활용 가능한 학교 공간 전체를 시민발전사업에 사용할 수 있는지 재산관리 기준으로 확인합니다.' : '햇빛이음학교 선정·설치 여부를 학교·교육청에 확인한 뒤 50kW 반영 여부와 계약 구조를 확정합니다.');
     put(15, '.grid-2 .card:nth-child(2) h3', '장기 운영과 시설공사 보호');
     put(15, '.grid-2 .card:nth-child(2) p', '사용기간·사용료, 보험, 유지관리 출입, 지붕 보수 때 이동·재설치, 계약 종료 시 철거·원상복구 책임을 문서로 정합니다.');
     put(15, '.note.warning', '수의계약이나 장기 사용기간이 자동으로 보장된다는 뜻은 아닙니다. 학교시설의 권한과 적용 규정, 공공사업과의 관계를 확인한 뒤 계약 구조를 확정합니다.');
     put(15, '.source', '검토 근거: 신재생에너지법 제26조 · 학교시설 소유·관리 현황 · 교육청 재산 사용 기준 · 학교별 설치계획과 안전·유지관리 방안.');
 
     put(16, 'h2', `학교 일정에 맞춰 ${m.constructionMonth}개월 차 착공, ${m.completionMinMonth}~${m.completionMaxMonth}개월 내 완공을 목표로 합니다`);
-    put(16, '.lead', '계약에 앞서 기존 설비와 공공사업 계획을 확인하고, 수업·시험·행사에 지장이 적은 공사 시기를 학교와 함께 정합니다.');
+    put(16, '.lead', `${hasSunlinkSchool ? '계약에 앞서 햇빛이음학교 50kW의 위치와 일정을 반영하고' : m.schoolPublicProgramStatus === 'none' ? '계약에 앞서 전체 활용 가능 공간을 확인하고' : '계약에 앞서 햇빛이음학교 여부를 확인하고'}, 수업·시험·행사에 지장이 적은 공사 시기를 학교와 함께 정합니다.`);
     const schedule = [...page(16).querySelectorAll('.schedule-flow .step')];
-    [[`협의 후 0~4주`, '기존·공공사업 자료, 소유·관리, 교육일정과 후보 공간 확인'], [`협의 후 2~3개월`, '옥상 구조·방수, 전기부하·계량, 한전 계통과 실시설계'], [`약 ${m.constructionMonth}개월 차`, '학교·교육청 절차와 계통 조건 확정 후 자재 발주·착공'], ['착공 후 6~8주', '학생 동선을 분리하고 학교와 합의한 시간·기간에 시공'], [`약 ${m.completionMinMonth}~${m.completionMaxMonth}개월`, '사용전검사, 계통연계, 시운전과 운영·교육자료 인계']]
+    [[`협의 후 0~4주`, `${hasSunlinkSchool ? '햇빛이음학교 50kW 자료' : m.schoolPublicProgramStatus === 'none' ? '전체 활용 가능 공간' : '햇빛이음학교 여부'}, 소유·관리, 교육일정과 후보 공간 확인`], [`협의 후 2~3개월`, '옥상 구조·방수, 전기부하·계량, 한전 계통과 실시설계'], [`약 ${m.constructionMonth}개월 차`, '학교·교육청 절차와 계통 조건 확정 후 자재 발주·착공'], ['착공 후 6~8주', '학생 동선을 분리하고 학교와 합의한 시간·기간에 시공'], [`약 ${m.completionMinMonth}~${m.completionMaxMonth}개월`, '사용전검사, 계통연계, 시운전과 운영·교육자료 인계']]
       .forEach(([title, body], index) => { schedule[index].querySelector('h3').textContent = title; schedule[index].querySelector('p').textContent = body; });
     put(16, '.banner', `목표 일정 · 사전협의 → 약 ${m.constructionMonth}개월 차 착공 → 착공 후 6~8주 공사 → 약 ${m.completionMinMonth}~${m.completionMaxMonth}개월 내 완공`);
     put(16, '.grid-2 .card:first-child h3', '학교 일정 우선');
@@ -274,7 +286,7 @@
     put(17, '.banner', '공사는 끝나도 학교생활과 발전소 운영은 계속됩니다. 학교가 안심할 수 있도록 조합과 전문업체가 책임 범위를 분명히 하겠습니다.');
 
     setEmphasis(doc, page(18).querySelector('h2'), `${m.facilityName}에서 시작한 에너지전환을`, '학교와 마을이 함께 키우는 사업으로 제안합니다.', '', { lineBreak: true });
-    put(18, '.lead', '학교의 공공 태양광 계획을 존중하고, 추가 공간은 시민의 참여·에너지교육·지역사회 환원으로 연결하겠습니다.');
+    put(18, '.lead', hasSunlinkSchool ? '햇빛이음학교 50kW를 존중하고, 나머지 공간은 시민의 참여·에너지교육·지역사회 환원으로 연결하겠습니다.' : m.schoolPublicProgramStatus === 'none' ? '활용 가능한 학교 공간 전체를 시민의 참여·에너지교육·지역사회 환원으로 연결하겠습니다.' : '햇빛이음학교 여부를 확인해 학교에 맞는 시민발전 규모를 정하고, 에너지교육과 지역사회 환원으로 연결하겠습니다.');
   }
   function render(doc, m, helpers) {
     const { slideAt, trimNumber, calculateFinance, formatProjectCost, formatApproxManwon } = helpers;

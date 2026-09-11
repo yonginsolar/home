@@ -1,4 +1,4 @@
-/* Version: v1.5.0 | School presets separate public self-consumption plans from citizen generation. */
+/* Version: v1.5.5 | School presets require an explicit Sunlink School status before reserving 50kW. */
 (() => {
   'use strict';
   const common = {
@@ -12,9 +12,9 @@
   };
   const schoolDefaults = {
     facilityType: 'school', noMandatory: true,
-    siteFeatureLines: '학생·교직원의 안전과 교육활동을 우선하는 배치 검토\n옥상과 주차장의 추가 활용 가능 공간 검토\n기존 설비와 교육부·교육청 사업 예정 구역 우선 반영',
-    siteCheckLines: '학교·교육청의 소유·관리 및 부지 사용 절차\n기존 설비와 교육부·교육청 설치계획·설계 구역\n옥상 구조·방수와 통학·보행·소방 동선\n자가소비 부하·별도 계량·한전 계통 여건',
-    siteProposalNote: '학교가 직접 사용하는 전기는 공공 자가소비형 사업으로 절감하고, 추가로 활용할 수 있는 공간은 별도 시민발전소로 연결해 에너지교육과 지역사회 환원까지 넓히는 방안을 제안합니다.'
+    siteFeatureLines: '학생·교직원의 안전과 교육활동을 우선하는 배치 검토\n옥상과 주차장의 전체 활용 가능 공간 검토\n햇빛이음학교 적용 여부와 기존 설비 구역 확인',
+    siteCheckLines: '학교·교육청의 소유·관리 및 부지 사용 절차\n햇빛이음학교 선정·설치 여부와 실제 구역\n옥상 구조·방수와 통학·보행·소방 동선\n별도 계량·한전 계통 여건',
+    siteProposalNote: ''
   };
   const items = [
     { id: 'mohyeon', name: '모현 다목적복지관', mandatoryKw: '118',

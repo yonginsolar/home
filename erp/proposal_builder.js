@@ -1,8 +1,8 @@
-/* Version: v1.5.4 | 2026-09-10 | Per-area labels and explicit text confirmation without per-keystroke preview rebuilds. */
+/* Version: v1.5.5 | 2026-09-11 | School proposals reserve 50kW only for confirmed Sunlink Schools. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.4';
+  const VERSION = '1.5.5';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -353,6 +353,7 @@
     const hasExistingInstallation = Boolean(el.hasExistingInstallation.checked);
     const existingKw = hasExistingInstallation ? numberValue('existingKw') : 0;
     const remainingKw = noMandatory ? (textValue('voluntaryBaseKw') ? numberValue('voluntaryBaseKw') : null) : (mandatoryKw !== null && existingKnown ? Math.max(mandatoryKw - existingKw, 0) : null);
+    const schoolPublicProgramStatus = textValue('schoolPublicProgramStatus') || 'checking';
     const model = {
       proposalDate: textValue('proposalDate'),
       proposalVersion: textValue('proposalVersion') || 'v1.0',
@@ -361,8 +362,8 @@
       regionShort: textValue('regionShort'),
       siteAddress: textValue('siteAddress'),
       facilityType: textValue('facilityType'),
-      schoolPublicProgramStatus: textValue('schoolPublicProgramStatus') || 'checking',
-      schoolPublicProgramKw: textValue('schoolPublicProgramKw') === '' ? null : numberValue('schoolPublicProgramKw'),
+      schoolPublicProgramStatus,
+      schoolPublicProgramKw: ['completed', 'planned'].includes(schoolPublicProgramStatus) ? 50 : schoolPublicProgramStatus === 'none' ? 0 : null,
       schoolInstallArea: textValue('schoolInstallArea') || 'both',
       siteProposalNote: textValue('siteProposalNote'),
       existingKnown,
@@ -427,8 +428,8 @@
     if (model.constructionMonth <= 0 || model.completionMinMonth < model.constructionMonth || model.completionMaxMonth < model.completionMinMonth) {
       throw new Error('완공 목표는 착공 목표보다 뒤여야 하고, 완공 시작은 완공 끝보다 늦을 수 없습니다.');
     }
-    if (model.facilityType === 'school' && model.schoolPublicProgramKw !== null && model.schoolPublicProgramKw <= 0) {
-      throw new Error('학교 자가소비형 계획 용량은 0보다 크게 입력하거나 비워 주세요.');
+    if (model.facilityType === 'school' && ['completed', 'planned'].includes(model.schoolPublicProgramStatus) && model.schoolPublicProgramKw !== 50) {
+      throw new Error('햇빛이음학교 반영용량을 확인해 주세요.');
     }
   }
 
@@ -1072,8 +1073,11 @@
     document.getElementById('operationsSectionNumber').textContent = isSchool ? '5.' : '4.';
     const status = textValue('schoolPublicProgramStatus') || 'checking';
     const capacity = document.getElementById('schoolPublicProgramKw');
-    capacity.disabled = !isSchool || status === 'none';
-    if (status === 'none') capacity.value = '';
+    capacity.disabled = !isSchool;
+    capacity.value = status === 'completed' || status === 'planned' ? '50' : status === 'none' ? '0' : '';
+    document.querySelector('label[for="voluntaryBaseKw"]').textContent = isSchool ? '전체 활용 기준용량(kW) · 선택' : '기준 설치안 용량(kW) · 자발적 설치';
+    document.querySelector('label[for="expandedMinKw"]').textContent = isSchool ? '전체 활용 가능 범위 시작(kW) · 선택' : '제안 설치 범위 시작(kW) · 선택';
+    document.querySelector('label[for="expandedKw"]').textContent = isSchool ? '학교 전체 활용 가능용량(kW) · 수지 계산 기준' : '제안 신규 설치용량(kW) · 수지 계산 기준';
   }
 
   function setFacilityTypeFromPicker(value) {
