@@ -1,4 +1,4 @@
-/* Version: v1.5.5 | 2026-09-11 | School proposals reserve 50kW only for confirmed Sunlink Schools. */
+/* Version: v1.5.6 | 2026-09-11 | Sunlink status affects calculations but stays out of the proposal's opening narrative. */
 (() => {
   'use strict';
 
@@ -476,7 +476,7 @@
       ['남사읍에서 LED 조명과', '용인시 남사읍에서 LED 조명과'],
       ['경기 용인시 처인구 남사읍 상동로 28', '경기 용인시 처인구 남사읍 상동로 28'],
       ['남사읍에 기반을 둔 지역 협동조합', '용인에 기반을 둔 지역 협동조합'],
-      ['용인시 남사읍', model.facilityType === 'school' ? '학교·교육청' : '시설 관리 주체'],
+      ['용인시 남사읍', model.facilityType === 'school' ? '학교' : '시설 관리 주체'],
       ['WHY NOW, WHY NAMSA', 'WHY SOLAR, WHY NOW'],
       ['남사읍행정복지센터', model.facilityName],
       ['경기 용인시 처인구 남사읍 내기로 22', model.siteAddress || '대상지 주소 확인 필요'],
@@ -712,10 +712,10 @@
     }
     if (model.facilityType === 'school') {
       put(2, '.lead', `${model.facilityName}의 주차공간을 학생·교직원의 안전과 교육활동에 지장이 없도록 검토하고, 그늘과 재생에너지를 함께 제공하는 방안을 제안합니다.`);
-      put(7, '.flow .step:first-child p', '학교 부지 사용, 교육활동·안전 기준과 관계 기관 절차 협의');
+      put(7, '.flow .step:first-child p', '학교 부지 사용, 교육활동·안전 기준과 필요한 절차 협의');
       put(13, '.note', '사업비·금융조건·수익성은 조합이 검토합니다. 학교의 사업비 부담을 전제하지 않으며, 부지 사용 조건과 기본설계 확인 후 재원조달안을 별도 제시합니다.');
       put(15, 'h2', '학교 부지의 소유·관리와 사용 절차를 먼저 확인합니다');
-      put(15, '.contract-callout h3', '학교·교육청과 협의해 적합한 사업 구조를 정합니다');
+      put(15, '.contract-callout h3', '학교와 협의해 적합한 사업 구조를 정합니다');
       put(15, '.contract-callout p', '학교시설의 사용 목적과 교육활동을 우선하고, 소유·관리 주체가 정한 절차에 따라 부지 사용과 계약 방식을 검토할 것을 제안합니다.');
       put(15, '.grid-2 .card:first-child h3', '소유·관리와 적용 규정 확인');
       put(15, '.grid-2 .card:first-child p', '시설 소유자와 재산 관리 주체, 학교시설 사용 조건, 안전 기준 및 필요한 심사·협의 절차를 확인합니다.');

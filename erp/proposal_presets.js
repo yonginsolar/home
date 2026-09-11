@@ -1,4 +1,4 @@
-/* Version: v1.5.5 | School presets require an explicit Sunlink School status before reserving 50kW. */
+/* Version: v1.5.6 | School presets avoid assuming or foregrounding another solar program. */
 (() => {
   'use strict';
   const common = {
@@ -12,8 +12,8 @@
   };
   const schoolDefaults = {
     facilityType: 'school', noMandatory: true,
-    siteFeatureLines: '학생·교직원의 안전과 교육활동을 우선하는 배치 검토\n옥상과 주차장의 전체 활용 가능 공간 검토\n햇빛이음학교 적용 여부와 기존 설비 구역 확인',
-    siteCheckLines: '학교·교육청의 소유·관리 및 부지 사용 절차\n햇빛이음학교 선정·설치 여부와 실제 구역\n옥상 구조·방수와 통학·보행·소방 동선\n별도 계량·한전 계통 여건',
+    siteFeatureLines: '학생·교직원의 안전과 교육활동을 우선하는 배치 검토\n옥상과 주차장의 전체 활용 가능 공간 검토\n기존 설비와 향후 시설계획을 반영한 배치 검토',
+    siteCheckLines: '학교의 소유·관리 및 부지 사용 절차\n기존·계획 설비의 위치와 실제 사용 가능 구역\n옥상 구조·방수와 통학·보행·소방 동선\n별도 계량·한전 계통 여건',
     siteProposalNote: ''
   };
   const items = [
