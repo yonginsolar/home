@@ -1,8 +1,8 @@
-/* Version: v1.5.6 | 2026-09-11 | Sunlink status affects calculations but stays out of the proposal's opening narrative. */
+/* Version: v1.5.7 | 2026-09-11 | Sunlink status affects calculations but stays out of the proposal's opening narrative. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.5';
+  const VERSION = '1.5.7';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -1105,6 +1105,7 @@
     }
     if (!el.form.reportValidity()) return false;
     try {
+      refreshDocumentMetadata();
       const model = readModel();
       validateModel(model);
       if (applyPending) commitPendingOverlayLabels();
@@ -1186,6 +1187,22 @@
     }
   }
 
+  function refreshDocumentMetadata(doc = null, now = new Date()) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(now).map(({ type, value }) => [type, value]));
+    const date = `${parts.year}-${parts.month}-${parts.day}`;
+    const version = `v${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
+    document.getElementById('proposalDate').value = date;
+    document.getElementById('proposalVersion').value = version;
+    if (doc) {
+      doc.querySelector('.version').textContent = `제안서 ${version} · ${formatDate(date)}`;
+      state.previewFields.proposalDate = date;
+      state.previewFields.proposalVersion = version;
+    }
+  }
+
   function collectFields() {
     return Object.fromEntries(DRAFT_FIELDS.map((id) => {
       const input = document.getElementById(id);
@@ -1257,6 +1274,7 @@
       if (input.type === 'checkbox') input.checked = fields[id] === true;
       else input.value = String(fields[id] ?? '').slice(0, input.maxLength > 0 ? input.maxLength : 1000);
     });
+    refreshDocumentMetadata();
     restoreVisitCompanions(fields);
     normalizeExistingZero();
     syncExistingInstallationUi();
@@ -1521,8 +1539,8 @@
     setExportBusy(true);
     setStatus('사진까지 포함한 HTML 파일을 만들고 있습니다.');
     try {
-      const model = readModel();
       const html = await buildDownloadHtml(await prepareOutput());
+      const model = readModel();
       const datePart = model.proposalDate.replaceAll('-', '');
       const filename = `${sanitizeFilename(`${datePart}_${model.facilityName}_주차장_햇빛발전소_제안서_${model.proposalVersion}`)}.html`;
       downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), filename);
@@ -1574,6 +1592,7 @@
       }
     })), 'IMAGES');
     await withTimeout(doc.fonts.ready, 'FONTS');
+    refreshDocumentMetadata(doc);
     return doc;
   }
 

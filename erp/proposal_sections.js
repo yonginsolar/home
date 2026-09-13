@@ -1,4 +1,4 @@
-/* Version: v1.5.6 | Sunlink status is calculation-only up front and appears once in a later comparison. */
+/* Version: v1.5.7 | Sunlink status is calculation-only up front and appears once in a later comparison. */
 (() => {
   'use strict';
   function renderContacts(doc, m) {
@@ -107,7 +107,14 @@
       .school-proposal .school-capacity-figures .big-inline { font-size:22pt; line-height:1.2; }
       .school-proposal .school-capacity-figures .small:last-child { margin-top:6px; line-height:1.35; }
       .school-proposal .financial-compare { grid-template-columns:1fr; max-width:820px; margin:0 auto; }
-      .school-proposal .school-source { font-size:11.25pt; line-height:1.45; }`;
+      .school-proposal .school-source { font-size:11.25pt; line-height:1.45; }
+      .school-model .thermo { flex-shrink:0; margin-bottom:12px; }
+      .school-model .thermo > div { padding:16px 22px; min-height:0; }
+      .school-model .thermo .icon { display:none; }
+      .school-model .thermo li { font-size:13.5pt; line-height:1.45; }
+      .school-model .grid-4 .card { padding:16px; }
+      .school-model .grid-4 p { margin-bottom:0; }
+      .school-model .banner { font-size:14pt; line-height:1.4; padding:14px 20px; }`;
     doc.head.append(style);
 
     put(1, '.cover-kicker', '학교 에너지전환 · 시민참여 · 교육 연계 제안');
@@ -154,6 +161,7 @@
     put(4, '.banner', hasSunlinkSchool ? `확인된 설비계획과 겹치지 않는 ${range}를 시민발전 규모로 제안합니다.` : m.schoolPublicProgramStatus === 'none' ? `활용 가능한 ${area} 전체를 조사해 ${totalRange} 규모의 시민발전을 제안합니다.` : '활용 가능한 공간을 빠짐없이 조사해 학교에 맞는 시민발전 규모를 제안합니다.');
     put(4, '.source', '입력한 용량은 제안 준비용입니다. 학교 전력·시설자료, 구조·방수·안전·계통 검토 후 최종 확정합니다.');
 
+    page(5).classList.add('school-model');
     put(5, '.eyebrow', 'CITIZEN SOLAR MODEL');
     setEmphasis(doc, page(5).querySelector('h2'), '발전소를 설치하는 데서 그치지 않고 ', '지역의 참여와 성과로 연결합니다');
     const halves = [...page(5).querySelectorAll('.thermo > div')];
