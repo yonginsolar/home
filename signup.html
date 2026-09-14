@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.47
-Change: Load the shared sun favicon for cooperative modules.
+Version: v1.0.48
+Change: 2026-09-14 - Main-coop student guardian consent and exact-age safeguards.
 -->
 <html lang="ko"> 
 <head>
-  <script>console.log('[Version] v1.0.47 | signup.html');</script>
+  <script>console.log('[Version] v1.0.48 | signup.html');</script>
+  <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>조합원 가입 | 용인모두의햇빛협동조합</title>
@@ -405,6 +406,16 @@ oninput="clearFieldWarning(this)">
 <div class="small text-muted mt-2" id="signup-privacy-policy-link">자세한 내용은 <a href="privacy.html" target="_blank" rel="noopener">개인정보 처리방침</a>에서 언제든지 확인할 수 있습니다.</div>
 </div>
 
+<section id="guardianSignupFields" class="border rounded-4 p-3 mt-4" hidden>
+<h5 class="fw-bold">법정대리인 동의</h5>
+<p class="small">만 14~18세는 법정대리인의 동의가 필요합니다. 부모님 등 법정대리인에게 먼저 말씀드린 뒤, 안내를 받으실 이름과 휴대전화번호를 입력해 주세요.</p>
+<label for="signupGuardianName" class="form-label small fw-bold">법정대리인 이름</label>
+<input id="signupGuardianName" class="form-control mb-3" maxlength="60" autocomplete="off">
+<label for="signupGuardianPhone" class="form-label small fw-bold">법정대리인 휴대전화번호</label>
+<input id="signupGuardianPhone" class="form-control" type="tel" inputmode="tel" maxlength="13" autocomplete="off" placeholder="010-0000-0000">
+<p class="small text-muted mt-2 mb-0">가입 신청 후 이 번호로 동의 요청 알림톡을 보냅니다. 알림톡을 받지 못하는 경우 문자로 안내합니다. 동의와 사무국 확인이 끝난 뒤 가입 승인이 진행됩니다.</p>
+<p class="small mb-0 mt-2"><a href="tel:01025135736">사무국장 김민호(010-2513-5736)</a></p>
+</section>
 <button type="submit" id="btnSubmit" class="btn btn-success w-100 py-3 mt-4 rounded-4 fw-bold fs-5">가입 신청하기 ☀️</button>
 </form>
 </div>
@@ -487,6 +498,23 @@ const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let joinSubmitInFlight = false;
+let guardianSubmissionId = crypto.randomUUID();
+try { guardianSubmissionId=sessionStorage.getItem('guardian-signup-request-v1')||guardianSubmissionId;sessionStorage.setItem('guardian-signup-request-v1',guardianSubmissionId); } catch(_) {}
+const signupValidationErrors = new Set();
+function signupMinorAge() {
+return MinorSignup.ageFromRrn(document.getElementById('rrn1').value+document.getElementById('rrn2').value);
+}
+function refreshGuardianFields() {
+const personal=document.querySelector('input[name="userType"]:checked')?.value==='개인';
+const age=personal?signupMinorAge():null;
+const main=signupTenant?.coop_code==='yongin-modu-sunlight';
+const needed=main && age!==null && age>=14 && age<19;
+document.getElementById('guardianSignupFields').hidden=!needed;
+['signupGuardianName','signupGuardianPhone'].forEach(id=>document.getElementById(id).required=needed);
+const ageBlocked=personal && age!==null && (main?age<14:age<19);
+document.getElementById('btnSubmit').disabled=joinSubmitInFlight || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
+return needed;
+}
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
 const DEFAULT_SIGNUP_KAKAO_URL = 'https://invite.kakao.com/tc/cLtR3LGLQX';
 const PUBLIC_AUTH_DEST_KEY = 'public_auth_destination';
@@ -1167,7 +1195,7 @@ resetMsg('corpMsg');
 
 syncAccountHolder();
 // 버튼 상태 초기화 (토글 시 잘못된 비활성화 풀기)
-document.getElementById('btnSubmit').disabled = false;
+refreshGuardianFields();
 }
 
 function syncGroupContactFromRepresentative() {
@@ -1991,6 +2019,27 @@ setError(input);
 // (3) 특정 로직 검증 (이름, 전화번호 길이 등)
 const userType = document.querySelector('input[name="userType"]:checked').value;
 const nameInput = document.getElementById('userName');
+const needsGuardian=refreshGuardianFields();
+if(userType==='개인') {
+ const age=signupMinorAge();
+ if(age===null || (signupTenant.coop_code===DEFAULT_SIGNUP_COOP_CODE ? age<14 : age<19)) {
+  openResultModal(age===null?'주민등록번호의 생년월일을 확인해 주세요.':age<14&&signupTenant.coop_code===DEFAULT_SIGNUP_COOP_CODE?'만 14세 미만의 가입은 사무국장 김민호(010-2513-5736)에게 문의해 주세요.':'미성년자 가입은 법정대리인 계정에서 진행해 주세요.',true);
+  return;
+ }
+}
+if(needsGuardian) {
+ const receipt=await _supabase.rpc('guardian_signup_receipt',{p_submission_id:guardianSubmissionId});
+ if(receipt.error) {openResultModal('기존 신청 여부를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',true);return;}
+ if(receipt.data?.member_id) {openResultModal('이미 가입 신청이 접수되어 있습니다. 법정대리인 동의와 사무국 확인 후 가입 승인이 진행됩니다.',false);return;}
+ const guardianName=document.getElementById('signupGuardianName').value.trim();
+ const guardianPhone=document.getElementById('signupGuardianPhone').value.replace(/\D/g,'');
+ const ownPhone=['p1','p2','p3'].map(id=>document.getElementById(id).value).join('').replace(/\D/g,'');
+ if(guardianName.length<2 || !/^01[016789][0-9]{7,8}$/.test(guardianPhone) || guardianPhone===ownPhone) {
+  openResultModal('법정대리인 이름과 연락처를 확인해 주세요. 신청자 본인의 번호 대신 법정대리인의 번호가 필요합니다.',true);return;
+ }
+ const readiness=await _supabase.rpc('guardian_signup_status');
+ if(readiness.error || readiness.data!==true) {openResultModal('법정대리인 동의 안내를 준비 중입니다. 가입은 사무국장 김민호(010-2513-5736)에게 문의해 주세요.',true);return;}
+}
 
 if (userType === '단체') {
 await validateBizNo();
@@ -2311,7 +2360,7 @@ is_agreed: true
 };
 
 // Supabase 전송
-const { data: signupResult, error } = await _supabase.rpc('create_public_signup_member_v5', {
+const signupArguments = {
   p_coop_code: signupTenant.coop_code,
   p_name: insertData.name,
   p_member_type: insertData.member_type,
@@ -2338,7 +2387,13 @@ const { data: signupResult, error } = await _supabase.rpc('create_public_signup_
   p_education_qr_token: educationQrToken || null,
   p_education_age_confirmed: educationQrToken ? document.getElementById('agreeEducationAge').checked : false,
   p_education_attendance_consent: educationQrToken ? document.getElementById('agreeEducationAttendance').checked : false
-});
+};
+const { data: signupResult, error } = await _supabase.rpc(needsGuardian?'create_public_signup_member_v6':'create_public_signup_member_v5', needsGuardian ? {
+ p_signup:signupArguments,
+ p_guardian_name:document.getElementById('signupGuardianName').value.trim(),
+ p_guardian_phone:document.getElementById('signupGuardianPhone').value,
+ p_submission_id:guardianSubmissionId
+}:signupArguments);
 const createdMemberUuid = signupResult?.member_id || null;
 const educationSignupResult = signupResult?.education || null;
 let finalInsertError = error;
@@ -2348,7 +2403,7 @@ const code = String(error.code || '');
 const errText = `${error.message || ''} ${error.details || ''}`.toLowerCase();
 const isUniqueConflict = code === '23505' || errText.includes('duplicate key');
 
-if (isUniqueConflict) {
+if (isUniqueConflict && !needsGuardian) {
 const { data: existingMember, error: existingErr } = await _supabase.rpc('check_duplicate_signup', {
   check_field: 'email',
   check_value: insertData.email,
@@ -2362,7 +2417,7 @@ finalInsertError = null;
 }
 
 if (finalInsertError) {
-console.error(finalInsertError);
+console.warn('[signup] 가입 신청 저장 결과 확인 필요');
 
 // ★ 변경: 실패해도 모달 띄우기 (실패 모달)
 openResultModal(
@@ -2381,7 +2436,7 @@ btn.innerText = '가입 신청하기 ☀️';
 
   // 가입자 정보는 서버에 그대로 보관하며, 알림 함수에는 방금 생성된 UUID만 보냅니다.
   // 함수가 로그인 이메일·생성 시각·협동조합을 다시 확인하고 발송 원장으로 중복을 막습니다.
-  if (createdMemberUuid) {
+  if (createdMemberUuid && !needsGuardian) {
     try {
       const { error } = await _supabase.functions.invoke('send-welcome-kakao', {
         body: { memberId: createdMemberUuid }
@@ -2393,7 +2448,8 @@ btn.innerText = '가입 신청하기 ☀️';
   }
 
   const successModalCopy = document.getElementById('successModalCopy');
-  if (educationQrToken && successModalCopy) {
+  if(needsGuardian && successModalCopy) successModalCopy.textContent='법정대리인 연락처로 동의 요청을 보내드립니다. 법정대리인 동의, 사무국 확인과 출자금 납입 확인 후 가입이 승인됩니다.';
+  if (educationQrToken && successModalCopy && !needsGuardian) {
     const educationRecorded = ['GUEST_RECORDED', 'ALREADY_RECORDED'].includes(String(educationSignupResult?.status || ''));
     successModalCopy.innerHTML = educationRecorded
       ? '가입 신청과 해당 교육 출석이 함께 접수되었습니다.<br>조합원 승인 후 참여 이력으로 자동 연결됩니다.'
@@ -2402,13 +2458,14 @@ btn.innerText = '가입 신청하기 ☀️';
 
   // 성공 시 모달 띄우기 (기존 유지 - 성공 모달)
   openResultModal(
-    "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
+    needsGuardian ? '✅ 가입 신청이 접수되었습니다.\n법정대리인에게 동의 요청 알림톡을 보내드립니다. 동의와 사무국 확인 후 가입 승인이 진행됩니다.' : "✅ 가입 신청이 완료되었습니다.\n담당자가 확인 후 안내드리겠습니다.",
     false
   );
 }
 
 } finally {
 joinSubmitInFlight = false;
+refreshGuardianFields();
 }
 }
 
@@ -2422,7 +2479,8 @@ el.style.display = 'block';
 }
 // 에러면 가입 버튼 비활성화
 const btn = document.getElementById('btnSubmit');
-if(isError) btn.disabled = true; 
+if(isError) signupValidationErrors.add(elId); else signupValidationErrors.delete(elId);
+refreshGuardianFields();
 }
 
 // [신규] 메시지 초기화 및 버튼 활성화 (다시 입력 시 호출)
@@ -2432,7 +2490,8 @@ if(el) {
 el.innerText = "";
 el.style.display = 'none';
 }
-document.getElementById('btnSubmit').disabled = false;
+signupValidationErrors.delete(elId);
+refreshGuardianFields();
 }
 
 function resetSignupBizValidationState() {
@@ -2479,15 +2538,11 @@ return;
 }
 
 // 2. 미성년자 검사
-const firstDigit = parseInt(r2.charAt(0));
-const prefix = (firstDigit === 1 || firstDigit === 2 || firstDigit === 5 || firstDigit === 6) ? 19 : 20;
-const birthYear = parseInt(prefix + r1.substring(0, 2));
-const today = new Date();
-let age = today.getFullYear() - birthYear;
-// 생일 지났는지 체크 (단순화)
-if (today.getFullYear() > birthYear + 19) { /* 성인 */ } 
-else if (age < 19) {
-setMsg('rrnMsg', "⛔ 미성년자는 부모님 계정 관리 페이지에서 가입 신청을 할 수 있습니다.", true);
+const age=signupMinorAge();
+const mainSignup=signupTenant?.coop_code===DEFAULT_SIGNUP_COOP_CODE;
+refreshGuardianFields();
+if(age===null || (mainSignup?age<14:age<19)) {
+setMsg('rrnMsg', age===null?'생년월일을 확인해 주세요.':age<14&&mainSignup?'만 14세 미만의 가입은 사무국장 김민호(010-2513-5736)에게 문의해 주세요.':'미성년자는 부모님 계정 관리 페이지에서 가입 신청을 할 수 있습니다.',true);
 return;
 }
 
