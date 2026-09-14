@@ -1,8 +1,8 @@
-/* Version: v1.5.8 | 2026-09-11 | Sunlink status affects calculations but stays out of the proposal's opening narrative. */
+/* Version: v1.5.9 | 2026-09-14 | Keep the site photo and overlays in one proportional viewport for PDF/HTML output. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.8';
+  const VERSION = '1.5.9';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -27,6 +27,7 @@
     directorPhoneRevision: 0,
     templateHtml: '',
     siteImageDataUrl: '',
+    photoAspectRatio: 0,
     imageLoadPromise: Promise.resolve(),
     imageLoadError: null,
     imageSequence: 0,
@@ -652,6 +653,37 @@
     doc.head.appendChild(previewStyle);
   }
 
+  function validPhotoAspectRatio(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0.25 && value <= 4 ? value : 0;
+  }
+
+  function applyPhotoAspectRatio(doc, ratio) {
+    const shell = doc?.querySelector('.photo-shell');
+    if (!shell || !validPhotoAspectRatio(ratio)) return false;
+    // Percent overlays and object-fit cover must use the SAME content-box ratio.
+    // Grid stretching on A4 used to change only the photo's crop, not the markers.
+    Object.assign(shell.style, {
+      aspectRatio: String(ratio), boxSizing: 'content-box', alignSelf: 'start', height: 'auto'
+    });
+    return true;
+  }
+
+  function lockPhotoGeometry(doc) {
+    if (validPhotoAspectRatio(state.photoAspectRatio)) return applyPhotoAspectRatio(doc, state.photoAspectRatio);
+    const shell = doc?.querySelector('.photo-shell');
+    if (!shell || !doc.defaultView || doc.defaultView.matchMedia?.('print').matches) return false;
+    const rect = shell.getBoundingClientRect();
+    const css = doc.defaultView.getComputedStyle(shell);
+    const width = rect.width - parseFloat(css.borderLeftWidth) - parseFloat(css.borderRightWidth);
+    const height = rect.height - parseFloat(css.borderTopWidth) - parseFloat(css.borderBottomWidth);
+    const ratio = validPhotoAspectRatio(width / height);
+    if (!ratio || width <= 0 || height <= 0) return false;
+    // Legacy snapshots lack this value: preserve their current SCREEN crop and
+    // percentage coordinates rather than reinterpreting them as image pixels.
+    state.photoAspectRatio = ratio;
+    return applyPhotoAspectRatio(doc, ratio);
+  }
+
   function buildPreviewDocument(model) {
     const doc = new DOMParser().parseFromString(state.templateHtml, 'text/html');
     doc.querySelectorAll('script').forEach((node) => node.remove());
@@ -674,6 +706,7 @@
     applySiteContext(doc, model);
     renderCustomOverlays(doc, model);
     appendBuilderStyles(doc);
+    applyPhotoAspectRatio(doc, state.photoAspectRatio);
     editableCandidates(doc).forEach((node, index) => {
       node.dataset.copyId = String(index);
       node.dataset.copyBase = node.textContent;
@@ -1118,8 +1151,11 @@
       state.resolvePreviewReady?.();
       state.previewReady = new Promise((resolve) => {
         state.resolvePreviewReady = resolve;
-        el.previewFrame.onload = () => {
+        el.previewFrame.onload = async () => {
           const doc = el.previewFrame.contentDocument;
+          await doc?.fonts?.ready;
+          if (doc !== el.previewFrame.contentDocument) { resolve(); return; }
+          lockPhotoGeometry(doc);
           const slideCount = doc?.querySelectorAll('.slide').length || 0;
           el.pageCount.textContent = `${slideCount}쪽`;
           doc?.addEventListener('input', (event) => {
@@ -1396,7 +1432,8 @@
     if (copyEdits.length > 400 || copyEdits.some((edit) => edit.text.length > 20000)) throw new Error('직접 수정한 문구가 저장 가능한 길이를 넘었습니다. 문장을 나누거나 길이를 줄여 주세요.');
     return { format: 1, builderVersion: VERSION, fields: collectFields(),
       photo: state.siteImageDataUrl, photoName: state.photoName,
-      useSamplePhoto: state.useSamplePhoto, overlays: structuredClone(state.customOverlays), copyEdits };
+      useSamplePhoto: state.useSamplePhoto, photoAspectRatio: state.photoAspectRatio,
+      overlays: structuredClone(state.customOverlays), copyEdits };
   }
 
   async function restoreSnapshot(snapshot) {
@@ -1415,6 +1452,7 @@
     state.imageSequence += 1;
     state.imageLoadError = null; state.imageLoadPromise = Promise.resolve();
     state.siteImageDataUrl = photo; state.photoName = String(snapshot.photoName || '').slice(0, 250);
+    state.photoAspectRatio = validPhotoAspectRatio(snapshot.photoAspectRatio);
     state.useSamplePhoto = snapshot.useSamplePhoto === true;
     state.customOverlays = overlays; state.selectedOverlayId = ''; state.overlayDrawMode = false;
     state.loadedCopyEdits = copyEdits; state.manualDirty = false; state.editMode = false;
@@ -1592,6 +1630,7 @@
       }
     })), 'IMAGES');
     await withTimeout(doc.fonts.ready, 'FONTS');
+    if (!lockPhotoGeometry(doc)) throw new Error('대상지 사진의 배치를 확인하지 못했습니다. 미리보기를 다시 연 뒤 출력해 주세요.');
     refreshDocumentMetadata(doc);
     return doc;
   }
@@ -1672,6 +1711,7 @@
     state.copyRestoreMismatch = false;
     localStorage.removeItem(state.draftKey);
     state.siteImageDataUrl = '';
+    state.photoAspectRatio = 0;
     state.imageSequence += 1;
     state.imageLoadError = null;
     state.customOverlays = [];
