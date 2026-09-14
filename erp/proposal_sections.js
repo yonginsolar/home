@@ -1,4 +1,4 @@
-/* Version: v1.5.7 | Sunlink status is calculation-only up front and appears once in a later comparison. */
+/* Version: v1.5.8 | Sunlink status is calculation-only up front and appears once in a later comparison. */
 (() => {
   'use strict';
   function renderContacts(doc, m) {
@@ -194,8 +194,8 @@
       .forEach(([title, body], index) => { steps[index].querySelector('h3').textContent = title; steps[index].querySelector('p').textContent = body; });
     put(7, '.participation-support .card:first-child h3', '지역 주민이 함께해 수용성을 높입니다');
     put(7, '.participation-support .card:first-child p', '용인 주민과 시민사회가 이미 조합원으로 참여하고 있습니다. 학교·학부모·주민의 질문을 가까이에서 듣고 설명하며, 사업 과정의 의견을 설계와 운영에 반영하겠습니다.');
-    put(7, '.participation-support .card:nth-child(2) h3', '참여와 교육의 대상을 구분합니다');
-    put(7, '.participation-support .card:nth-child(2) p', '지역 주민과 단체에는 조합원 가입·출자 참여 기회를 열고, 학생에게는 투자 권유가 아닌 에너지·기후 교육과 발전자료 학습 기회를 제공합니다.');
+    put(7, '.participation-support .card:nth-child(2) h3', '학생과 학부모도 조합원으로 함께합니다');
+    put(7, '.participation-support .card:nth-child(2) p', '학생과 학부모도 조합원으로 참여할 수 있습니다. 미성년자는 법정대리인의 동의 등 필요한 절차를 거쳐 가입·출자하고, 조합의 정관과 배당 의결에 따라 사업의 성과를 함께 나눌 수 있습니다. 교육 참여는 가입·출자 여부와 관계없이 열려 있습니다.');
     put(7, '.note.warning', '주민 설명회가 필요하면 조합원과 실무자가 참여해 사업 구조·안전·운영·지역환원을 설명하고 질문에 답하겠습니다. 학교의 공식 의사결정과 학부모·지역 의견수렴 절차를 존중합니다.');
 
     put(8, 'h2', '발전소 수익 일부를 학교와 지역의 에너지전환에 연결합니다');

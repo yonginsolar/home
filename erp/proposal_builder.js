@@ -1,8 +1,8 @@
-/* Version: v1.5.7 | 2026-09-11 | Sunlink status affects calculations but stays out of the proposal's opening narrative. */
+/* Version: v1.5.8 | 2026-09-11 | Sunlink status affects calculations but stays out of the proposal's opening narrative. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.7';
+  const VERSION = '1.5.8';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
