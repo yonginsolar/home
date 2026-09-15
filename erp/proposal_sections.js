@@ -1,8 +1,8 @@
-/* Version: v1.6.0 | School benefits first; four-way cooperation, school returns and public-school procedures. */
+/* Version: v1.6.1 | School constituent wording, wider space review and role-first director names. */
 (() => {
   'use strict';
   function renderContacts(doc, m) {
-    const contact = doc.querySelectorAll('.slide')[17]?.querySelector('.contact');
+    const contact = doc.querySelector('.slide.closing .contact');
     if (!contact) throw new Error('CONTACT_PREVIEW_NOT_READY');
     const orgName = contact.children[0].textContent, address = contact.children[1].textContent;
     const companions = Array.isArray(m.visitCompanions)
@@ -156,11 +156,17 @@
       .school-contract .grid-2 .card { padding:14px 18px; }
       .school-contract h3 { font-size:16pt; }
       .school-contract p { font-size:12pt; line-height:1.45; margin-bottom:0; }
-      .school-policy { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:center; margin-top:16px; }
-      .school-policy .policy-evidence { margin:0; padding:13px; border:1px solid var(--line); border-radius:12px; background:white; }
-      .school-policy img { display:block; width:100%; height:auto; }
-      .school-policy figcaption { font-size:11.25pt; color:var(--muted); margin:8px 0 4px; }
-      .school-policy .contract-callout { margin:0; padding:15px 18px; }
+      .school-policy { margin-top:18px; }
+      .school-policy .contract-callout { margin:0; padding:24px; }
+      .school-policy .contract-callout p { font-size:14pt; line-height:1.6; }
+      .school-contract .grid-2 { flex:1; align-items:stretch; }
+      .school-contract .grid-2 .card { display:flex; flex-direction:column; justify-content:center; }
+      .school-policy-source .frame { align-items:center; padding:30px 48px 36px; }
+      .school-policy-source .eyebrow { width:980px; max-width:100%; margin-bottom:8px; }
+      .school-policy-source .policy-evidence { width:980px; max-width:100%; margin:0; }
+      .school-policy-source img { display:block; width:100%; height:auto; }
+      .school-policy-source .policy-body { margin-top:12px; }
+      .school-policy-source figcaption { font-size:11.25pt; line-height:1.4; color:var(--muted); margin-top:12px; }
       .school-contract .note { font-size:11.25pt; line-height:1.45; padding:11px 16px; margin-top:14px !important; }
       .school-contract .source { font-size:11.25pt; margin-top:10px; }
       .school-closing .frame { justify-content:center; }
@@ -198,7 +204,7 @@
     put(2, '.lead', `${m.facilityName}의 ${area} 등 유휴공간을 활용하고, 발전수익 일부를 학생과 학교를 위해 사용하는 태양광 발전사업을 제안합니다.`);
     const p2cards = [...page(2).querySelectorAll('.grid-3 .card')];
     [['학교 설치비 부담 없음', '조합이 사업비를 조달하고 설계·공사를 추진합니다. 학교에 발전소 설치 공사비를 요청하지 않는 방식입니다.'],
-      ['학생과 학교를 위한 환원', '발전수익 일부를 학교에 환원해 교육·학생 활동 등 학교가 필요로 하는 분야를 지원하는 방안을 협의합니다.'],
+      ['학생과 학교를 위한 환원', '발전수익 일부를 학교에 환원해 교육·학생 활동 등 학교 구성원들이 필요로 하는 분야를 지원하는 방안을 협의합니다.'],
       ['수업으로 이어지는 발전소', '발전자료와 태양광 원리를 교과·동아리·체험활동에 활용하도록 조합과 지역 활동가가 교육을 함께 기획합니다.']
     ].forEach(([title, body], index) => { p2cards[index].querySelector('h3').textContent = title; p2cards[index].querySelector('p').textContent = body; });
     put(2, '.banner', '학교는 공간 활용을 협의하고, 조합은 사업비 조달과 운영을 맡아 발전의 성과를 학교와 나누는 방식입니다.');
@@ -213,7 +219,7 @@
     figures.className = 'school-capacity-figures';
     figures.style.gridTemplateColumns = 'repeat(3, minmax(0,1fr))';
     const boxes = [
-      ['설치 검토 공간', area, '안전·교육활동·시설계획을 함께 반영'],
+      ['설치 검토 공간', '옥상·주차장·스탠드 등', '안전·교육활동·시설계획을 고려해 다양한 공간 검토'],
       ['학교 전체 활용 가능용량', totalRange, `${area} 실측·배치 기준`],
       ['시민참여형 신규 발전', range, hasSunlinkSchool ? '확인된 기존·계획 설비를 반영한 신규 규모' : m.schoolPublicProgramStatus === 'none' ? '전체 활용 가능용량을 반영한 규모' : '현장자료 확인 뒤 확정']
     ];
@@ -269,7 +275,7 @@
     const hubTitle = doc.createElement('h3'); hubTitle.textContent = '학교 태양광 발전사업';
     const hubText = doc.createElement('p'); hubText.textContent = '학교 혜택 · 안전 · 교육';
     hub.append(hubTitle, hubText);
-    const partners = [['학교', '공간 활용과 교육 연계, 학생 안전·학교 일정 협의'], ['우리 조합', '사업비 조달, 사업 추진, 운영·환원 관리'], ['전문 시공·운영 업체', '설계·시공·검사, 보험·점검·보수'], ['학교·지역 공동체', '학생·학부모·주민 의견 수렴, 교육 협력과 희망자 참여']];
+    const partners = [['학교', '공간 활용과 교육 연계, 학생 안전·학교 일정 협의'], ['용인모두의햇빛협동조합', '사업비 조달, 사업 추진, 운영·환원 관리'], ['전문 시공·운영 업체', '설계·시공·검사, 보험·점검·보수'], ['학교·지역 공동체', '학생·학부모·주민 의견 수렴, 교육 협력과 희망자 참여']];
     const lines = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
     lines.setAttribute('viewBox', '0 0 1000 200'); lines.setAttribute('preserveAspectRatio', 'none');
     lines.setAttribute('class', 'partnership-lines'); lines.setAttribute('aria-hidden', 'true');
@@ -367,21 +373,23 @@
     const policy = doc.createElement('div'); policy.className = 'school-policy';
     const evidence = doc.createElement('figure'); evidence.className = 'policy-evidence';
     const link = doc.createElement('a'); link.href = policyUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const image = doc.createElement('img'); image.src = 'proposal_assets/moe-school-solar-20260226-title.png';
+    const image = doc.createElement('img'); image.src = 'proposal_assets/moe-school-solar-20260226-heading.png';
     image.alt = '교육부 보도자료 제목: 학교 태양광, 탄소중립과 생태전환교육을 잇다'; link.append(image);
-    const caption = doc.createElement('figcaption'); caption.textContent = '교육부 · 2026.02.26 보도자료 제목 발췌';
-    const description = doc.createElement('p'); description.textContent = '학교 태양광 확대와 교육 연계를 함께 추진하는 정책 방향입니다. 이미지를 누르면 원문을 볼 수 있습니다.';
-    evidence.append(link, caption, description);
+    const bodyImage = doc.createElement('img'); bodyImage.className = 'policy-body';
+    bodyImage.src = 'proposal_assets/moe-school-solar-20260226-body.png';
+    bodyImage.alt = '교육부 실제 보도자료 본문 발췌: 학교 태양광 확대와 생태전환교육 연계, 2026년 시범사업의 자가소비 설비 계획';
+    const caption = doc.createElement('figcaption'); caption.textContent = '출처: 교육부(www.moe.go.kr), 2026.02.26 보도자료 · 제목과 본문 일부 발췌 · 공공누리 제1유형';
+    evidence.append(link, bodyImage, caption);
     const comparison = page(15).querySelector('.contract-callout');
     comparison.querySelector('h3').textContent = '공공예산 사업과 조합 제안의 차이';
     comparison.querySelector('p').textContent = hasSunlinkSchool
       ? `햇빛이음학교로 ${sunlinkStateText} 약 50kW는 반영합니다. 그 밖의 공간은 조합 재원으로 검토하고, 전력을 별도로 판매해 학교 환원·교육에 연결하는 제안입니다.`
       : '햇빛이음학교는 공공예산 절차를 거쳐 2026년 시범 기준 학교당 약 50kW의 자가소비 설비와 교육 연계를 지원합니다. 우리 제안은 조합 재원으로 공간을 더 넓게 검토하고, 전력을 판매해 학교 환원·교육에 연결하는 방식입니다.';
-    policy.append(evidence, comparison);
+    policy.append(comparison);
     page(15).querySelector('.grid-2').after(policy);
     put(15, '.note.warning', '자가소비 설비는 방학·주말의 전력수요에 따라 활용 효과가 달라집니다. 판매형 설비는 별도 계량·계통 조건을 확인해 운영합니다. 공식 자료는 정책 배경이며, 본 사업의 승인이나 특정 계약 방식의 보장을 뜻하지 않습니다.');
     const policySource = page(15).querySelector('.source');
-    const sourceLink = doc.createElement('a'); sourceLink.href = policyUrl; sourceLink.textContent = '출처: 교육부 「햇빛이음학교 사업 추진계획」(2026.02.26) · 원문 보기';
+    const sourceLink = doc.createElement('a'); sourceLink.href = policyUrl; sourceLink.textContent = '출처: 교육부 「햇빛이음학교 사업 추진계획」(2026.02.26)';
     policySource.replaceChildren(sourceLink);
 
     put(16, 'h2', `학교 일정에 맞춰 ${m.constructionMonth}개월 차 착공, ${m.completionMinMonth}~${m.completionMaxMonth}개월 내 완공을 목표로 합니다`);
@@ -416,6 +424,15 @@
       card.append(h3, doc.createElement('ul')); setList(doc, card, lines); closingGrid.append(card);
     });
     page(18).querySelector('.lead').after(closingGrid);
+    // Insert only after all base-page edits. Keep the closing/contact page last.
+    const sourcePage = doc.createElement('section'); sourcePage.className = 'slide school-policy-source';
+    const sourceTop = doc.createElement('div'); sourceTop.className = 'topline';
+    const sourceFrame = doc.createElement('div'); sourceFrame.className = 'frame';
+    const sourceHeading = doc.createElement('div'); sourceHeading.className = 'eyebrow'; sourceHeading.textContent = '정책 참고 · 교육부 보도자료';
+    const sourceNumber = doc.createElement('div'); sourceNumber.className = 'page';
+    sourceFrame.append(sourceHeading, evidence); sourcePage.append(sourceTop, sourceFrame, sourceNumber);
+    page(15).after(sourcePage);
+    doc.querySelectorAll('.slide').forEach((slide, index) => { slide.querySelector('.page').textContent = String(index + 1); });
   }
   function render(doc, m, helpers) {
     const { slideAt, trimNumber, calculateFinance, formatProjectCost, formatApproxManwon } = helpers;
@@ -549,6 +566,9 @@
         const line = doc.createElement('span'); line.className = 'career-org'; line.textContent = text;
         return index ? [doc.createElement('br'), line] : [line];
       }));
+    });
+    page(10).querySelectorAll('h3').forEach(node => {
+      node.textContent = node.textContent.trim().replace(/^(.+) 이사$/, '이사 $1');
     });
     const boardNote = [...page(10).querySelectorAll('.note')].find(node => node.textContent.includes('함께하는 이사'));
     if (boardNote) {

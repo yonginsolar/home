@@ -1,8 +1,8 @@
-/* Version: v1.6.0 | 2026-09-15 | School-benefit proposal and backward-compatible multi-area planning. */
+/* Version: v1.6.1 | 2026-09-15 | Refine school proposal wording and role-first director names. */
 (() => {
   'use strict';
 
-  const VERSION = '1.6.0';
+  const VERSION = '1.6.1';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.3';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -1142,11 +1142,11 @@
   function renderPreview({ force = false, applyPending = false } = {}) {
     if (!state.templateHtml) return false;
     if (state.formPending && !applyPending) {
-      setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 18쪽에 한 번에 반영됩니다.', true);
+      setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 제안서 전체에 한 번에 반영됩니다.', true);
       return false;
     }
     if (state.manualDirty && force) {
-      const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 18쪽을 다시 만들까요?');
+      const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 제안서 전체를 다시 만들까요?');
       if (!overwrite) return false;
       state.loadedCopyEdits = [];
       state.copyRestoreMismatch = false;
@@ -1162,7 +1162,7 @@
       state.formPending = false;
       saveDraft();
       state.manualDirty = state.loadedCopyEdits.length > 0;
-      setStatus('18쪽 미리보기를 다시 만들고 있습니다.');
+      setStatus('제안서 미리보기를 다시 만들고 있습니다.');
       state.resolvePreviewReady?.();
       state.previewReady = new Promise((resolve) => {
         state.resolvePreviewReady = resolve;
@@ -1211,7 +1211,7 @@
     window.clearTimeout(state.renderTimer);
     state.renderTimer = 0;
     if (state.formPending) {
-      setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 18쪽에 한 번에 반영됩니다.', true);
+      setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 제안서 전체에 한 번에 반영됩니다.', true);
       return;
     }
     if (state.editMode || state.manualDirty) {
@@ -1782,7 +1782,7 @@
         state.formPending = true;
         window.clearTimeout(state.renderTimer);
         state.renderTimer = 0;
-        setStatus('입력 중에는 미리보기를 새로 만들지 않습니다. 「문구 확인」을 누르면 18쪽에 한 번에 반영됩니다.', true);
+        setStatus('입력 중에는 미리보기를 새로 만들지 않습니다. 「문구 확인」을 누르면 제안서 전체에 한 번에 반영됩니다.', true);
       } else {
         scheduleRender();
       }
@@ -1898,7 +1898,7 @@
 
       state.coopId = String(userGate.user.coop_id || '').trim();
 
-      el.bootMessage.textContent = '18쪽 제안서 원본을 불러오고 있습니다.';
+      el.bootMessage.textContent = '제안서 원본을 불러오고 있습니다.';
       const response = await withTimeout(fetch(TEMPLATE_URL, { credentials: 'same-origin', cache: 'no-store' }), 'TEMPLATE');
       if (!response.ok) throw new Error(`TEMPLATE_HTTP_${response.status}`);
       state.templateHtml = await response.text();
