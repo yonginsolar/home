@@ -1,4 +1,4 @@
-/* Version: v1.5.6 | School presets avoid assuming or foregrounding another solar program. */
+/* Version: v1.6.0 | School benefits and candidate stands; Hyeonam is a public school. */
 (() => {
   'use strict';
   const common = {
@@ -8,12 +8,12 @@
     siteProposalNote: '', mandatoryKnown: false, mandatoryKw: '', noMandatory: false, voluntaryBaseKw: '',
     existingInstallationKnown: false, hasExistingInstallation: false, existingKw: '',
     expandedMinKw: '', expandedKw: '', keepNamsaOverlay: false, useSamplePhoto: false,
-    schoolPublicProgramStatus: 'checking', schoolPublicProgramKw: '', schoolInstallArea: 'both'
+    schoolPublicProgramStatus: 'checking', schoolPublicProgramKw: '', schoolInstallArea: 'both', schoolOtherArea: '', schoolOwnership: 'unknown'
   };
   const schoolDefaults = {
-    facilityType: 'school', noMandatory: true,
-    siteFeatureLines: '학생·교직원의 안전과 교육활동을 우선하는 배치 검토\n옥상과 주차장의 전체 활용 가능 공간 검토\n기존 설비와 향후 시설계획을 반영한 배치 검토',
-    siteCheckLines: '학교의 소유·관리 및 부지 사용 절차\n기존·계획 설비의 위치와 실제 사용 가능 구역\n옥상 구조·방수와 통학·보행·소방 동선\n별도 계량·한전 계통 여건',
+    facilityType: 'school', noMandatory: true, schoolInstallArea: 'roof,parking,stands',
+    siteFeatureLines: '학생·교직원의 안전과 교육활동을 우선하는 배치 검토\n옥상·주차장·운동장 스탠드 등 활용 후보 공간 검토\n기존 설비와 향후 시설계획을 반영한 배치 검토',
+    siteCheckLines: '학교의 소유·관리 및 부지 사용 절차\n기존·계획 설비의 위치와 실제 사용 가능 구역\n구조·방수·관람석 안전과 통학·보행·소방 동선\n별도 계량·한전 계통 여건',
     siteProposalNote: ''
   };
   const items = [
@@ -27,7 +27,8 @@
       siteFeatureLines: '제2공영주차장과 제1공영주차장의 연계 사업 검토\n두 주차장의 이용 동선과 그늘 확보를 함께 검토',
       siteProposalNote: '제2공영주차장의 의무용량은 제공받은 자료 기준 103kW입니다. 제1공영주차장도 함께 조사해 설계·시공·유지관리를 연계하는 방안을 제안합니다. 제1공영주차장의 용량은 별도로 확인하며, 103kW를 두 곳의 합산 의무량으로 보지는 않습니다.' },
     ...['현암고등학교', '흥덕고등학교', '홍천고등학교', '지곡초등학교'].map((name, index) => ({
-      id: ['hyeonam', 'heungdeok', 'hongcheon', 'jigok'][index], name, ...schoolDefaults
+      id: ['hyeonam', 'heungdeok', 'hongcheon', 'jigok'][index], name, ...schoolDefaults,
+      schoolOwnership: index === 0 ? 'public' : 'unknown'
     }))
   ].map((item) => Object.freeze({ id: item.id, name: item.name, fields: Object.freeze({
     ...common, ...item, facilityName: item.name, mandatoryKnown: Boolean(item.mandatoryKw)

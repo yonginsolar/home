@@ -1,10 +1,10 @@
-/* Version: v1.5.9 | 2026-09-14 | Keep the site photo and overlays in one proportional viewport for PDF/HTML output. */
+/* Version: v1.6.0 | 2026-09-15 | School-benefit proposal and backward-compatible multi-area planning. */
 (() => {
   'use strict';
 
-  const VERSION = '1.5.9';
+  const VERSION = '1.6.0';
   const REQUEST_TIMEOUT_MS = 12000;
-  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.2';
+  const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.3';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -17,7 +17,7 @@
     'completionMaxMonth', 'memberTotal', 'shareCapitalManwon', 'individualMembers',
     'organizationMembers', 'chairPhone', 'officePhone', 'keepNamsaOverlay',
     'visitCompanionsJson', 'visitDirector', 'visitDirectorPhone', 'statsAsOf',
-    'schoolPublicProgramStatus', 'schoolPublicProgramKw', 'schoolInstallArea'
+    'schoolPublicProgramStatus', 'schoolPublicProgramKw', 'schoolInstallArea', 'schoolOtherArea', 'schoolOwnership'
   ];
 
   const state = {
@@ -366,6 +366,8 @@
       schoolPublicProgramStatus,
       schoolPublicProgramKw: ['completed', 'planned'].includes(schoolPublicProgramStatus) ? 50 : schoolPublicProgramStatus === 'none' ? 0 : null,
       schoolInstallArea: textValue('schoolInstallArea') || 'both',
+      schoolOtherArea: textValue('schoolOtherArea'),
+      schoolOwnership: textValue('schoolOwnership') || 'unknown',
       siteProposalNote: textValue('siteProposalNote'),
       existingKnown,
       noMandatory,
@@ -1098,9 +1100,22 @@
     document.getElementById('existingInstallationStatus').value = !known ? 'unknown' : hasExisting ? 'installed' : 'none';
   }
 
+  function syncSchoolAreaUi(fromSelection = false) {
+    const field = document.getElementById('schoolInstallArea');
+    const options = [...document.querySelectorAll('[data-school-area]')];
+    if (fromSelection) {
+      field.value = options.filter((option) => option.checked).map((option) => option.dataset.schoolArea).join(',') || 'unspecified';
+    } else {
+      const saved = field.value === 'both' ? ['roof', 'parking'] : String(field.value || 'both').split(',');
+      options.forEach((option) => { option.checked = saved.includes(option.dataset.schoolArea); });
+    }
+    document.getElementById('schoolOtherAreaField').hidden = !options.some((option) => option.dataset.schoolArea === 'other' && option.checked);
+  }
+
   function syncSchoolPlanningUi() {
     const isSchool = textValue('facilityType') === 'school';
     document.getElementById('schoolPlanningSection').hidden = !isSchool;
+    syncSchoolAreaUi();
     document.getElementById('capacitySectionNumber').textContent = isSchool ? '3.' : '2.';
     document.getElementById('financeSectionNumber').textContent = isSchool ? '4.' : '3.';
     document.getElementById('operationsSectionNumber').textContent = isSchool ? '5.' : '4.';
@@ -1298,6 +1313,7 @@
     fields = {
       visitCompanionsJson: '', visitDirector: '', visitDirectorPhone: '', statsAsOf: '',
       schoolPublicProgramStatus: 'checking', schoolPublicProgramKw: '', schoolInstallArea: 'both',
+      schoolOtherArea: '', schoolOwnership: fields.facilityName === '현암고등학교' ? 'public' : 'unknown',
       ...fields
     };
     DRAFT_FIELDS.forEach((id) => {
@@ -1748,6 +1764,7 @@
       if (event.target.closest('[data-library-controls]')) return;
       if (event.target.closest('[data-companion-controls]')) return;
       state.library?.markDirty();
+      if (event.target.matches('[data-school-area]')) syncSchoolAreaUi(true);
       if (event.target.id === 'existingInstallationStatus') {
         const status = event.target.value;
         document.getElementById('existingInstallationKnown').checked = status !== 'unknown';
