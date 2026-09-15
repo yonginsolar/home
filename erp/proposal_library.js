@@ -1,4 +1,4 @@
-/* Version: v1.5.1 | The top public/school choice is the single source for the document type. */
+/* Version: v1.5.2 | Local apply confirmation supports variable proposal page counts. */
 (() => {
   'use strict';
   const TABLE = 'erp_proposals';
@@ -234,7 +234,7 @@
       const verified = await window.ProposalDrafts.read(draftKey);
       if (verified?.sha256 !== sha256 || verified?.payload !== payload) throw new Error('임시 보관 결과를 확인하지 못했습니다. 다른 탭의 작업 여부를 확인하고 다시 반영해 주세요.');
       localDraftPresent = true; dirty = true;
-      say('입력값과 사진을 18쪽에 반영하고 이 브라우저에 임시 보관했습니다. 새로고침 후에도 다시 열립니다. 다른 컴퓨터에서 사용할 때는 ERP에 이름을 붙여 저장해 주세요.');
+      say('입력값과 사진을 제안서에 반영하고 이 브라우저에 임시 보관했습니다. 새로고침 후에도 다시 열립니다. 다른 컴퓨터에서 사용할 때는 ERP에 이름을 붙여 저장해 주세요.');
     });
     const refreshAndResume = async () => {
       if (localRestorePending) await restoreLocalDraft();
