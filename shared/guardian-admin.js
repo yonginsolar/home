@@ -1,10 +1,10 @@
-/* 2026-09-14 v1.0.0. Authorized detail-only load; no bulk guardian directory. */
+/* 2026-09-15 v1.0.1. Authorized detail-only load; resend reason is optional. */
 window.GuardianAdmin={
  async load(client,memberId,currentMember){
   const el=id=>document.getElementById('md-guardian'+(id?'-'+id:''));
   el('').hidden=true;
   ['status','details','delivery','terms'].forEach(id=>el(id).textContent='');
-  ['name','phone','note'].forEach(id=>el(id).value='');
+  ['name','phone'].forEach(id=>el(id).value='');
   el('review').hidden=true;
   const states={pending:'법정대리인 동의 대기',consented:'법정대리인 동의 접수',declined:'동의하지 않음 — 승인 보류',expired:'동의 링크 만료 — 다시 요청 필요',superseded:'신청 내용 변경 — 새 동의 필요'};
   const delivery={queued:'발송 대기',sending:'발송 처리 중',accepted:'솔라피 접수 완료',failed:'발송 접수 실패',unknown:'결과 불명 — 솔라피 확인 필요',skipped:'발송 취소'};
@@ -13,7 +13,7 @@ window.GuardianAdmin={
    if(busy || currentMember()!==memberId)return;
    busy=true;el('').querySelectorAll('button').forEach(b=>b.disabled=true);
    try{
-    const {data,error}=await client.rpc('guardian_admin_action',{p_member_id:memberId,p_action:action,p_guardian_name:el('name').value,p_guardian_phone:el('phone').value,p_note:el('note').value});
+    const {data,error}=await client.rpc('guardian_admin_action',{p_member_id:memberId,p_action:action,p_guardian_name:el('name').value,p_guardian_phone:el('phone').value});
     if(currentMember()!==memberId)return;
     if(error)throw error;
     el('').hidden=!data.required;if(!data.required)return;
@@ -23,7 +23,6 @@ window.GuardianAdmin={
     el('terms').textContent=['representative','membership','privacy','notice'].map(k=>data.consent_text[k]).join('\n\n');
     el('name').value=data.guardian_name;el('phone').value=data.guardian_phone;
     el('review').hidden=data.status!=='consented'||!!data.reviewed_at;
-    if(action==='reissue')el('note').value='';
    }catch(error){
     if(currentMember()!==memberId)return;
     el('').hidden=false;
