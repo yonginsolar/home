@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.150
-Change: Load the shared sun favicon for cooperative modules.
+Version: v1.0.151
+Change: Separate legal representative direct registration consent and receipt records.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.150 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.151 | membermanage.html');</script>
+<script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>조합원 관리</title>
@@ -9481,6 +9482,16 @@ return age < 19;
 let tempChildData = null; // 데이터를 잠시 담아둘 변수
 
 function openConsentModal(data) {
+const directHost = String(window.CoopRouteGuard?.getPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
+if (['www.yonginsolar.kr','yonginsolar.kr','localhost','127.0.0.1'].includes(directHost) && !isSiteMemberPortalProfile()) {
+return window.ChildDirectConsent.open({client:_supabase,data,onError:showModal,onSuccess:async()=>{
+document.getElementById('familyModalOverlay').style.display='none';
+tempChildData=null;
+showModal('가입 신청과 법정대리인 동의가 접수되었습니다.\n출자금 납입과 사무국 확인 후 가입이 승인됩니다.\n신협 131-022-855516 (용인모두의햇빛협동조합)\n신청 후 10일 이내, 가입 신청자 이름으로 입금해 주세요. 이미 납부했다면 다시 입금하지 않으셔도 됩니다.');
+await loadDashboardData(getPreferredDashboardProfileId());
+if(typeof loadManagedProfiles==='function') await loadManagedProfiles(getRootMemberProfileId() || curAuth?.id);
+}});
+}
 tempChildData = data; // 데이터 임시 저장
 const safeApplicantName = escapeHtml(data?.name || '');
 const memberRightsText = isSiteMemberPortalProfile()
