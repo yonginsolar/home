@@ -1,5 +1,5 @@
-/* 2026-09-14 v1.0.0. Keep token in memory only, never analytics/storage/query string. */
-console.info('[Version] v1.0.0 | guardian_consent.html');
+/* 2026-09-15 v1.0.1. Compact and legacy tokens; memory only, never analytics/storage/query string. */
+console.info('[Version] v1.0.1 | guardian_consent.html');
 (() => {
   const token = new URLSearchParams(location.hash.slice(1)).get('token') || '';
   history.replaceState(null, '', location.pathname); // Do not retain capability in browser history.
@@ -31,7 +31,7 @@ console.info('[Version] v1.0.0 | guardian_consent.html');
   el('cancelDecline').addEventListener('click',()=>el('declineConfirm').hidden=true);
   el('confirmDecline').addEventListener('click',()=>void respond('decline'));
   if (!token) {el('message').textContent='받으신 알림톡이나 문자의 신청 확인 링크로 이 화면을 다시 열어 주세요. 안내를 찾을 수 없다면 아래 사무국 연락처로 문의해 주세요.';return;}
-  if (!/^[0-9a-f-]{36}\.[0-9a-f]{64}$/.test(token)) {el('message').textContent=errors.LINK_UNAVAILABLE;return;}
+  if (!/^(?:[A-Za-z0-9_-]{43}|[0-9a-f-]{36}\.[0-9a-f]{64})$/.test(token)) {el('message').textContent=errors.LINK_UNAVAILABLE;return;}
   call('preview').then(data=>{
     el('student').textContent=data.student_name;el('amount').textContent=Number(data.amount).toLocaleString('ko-KR')+'원';
     version=data.terms.version;
