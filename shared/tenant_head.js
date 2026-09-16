@@ -1,6 +1,6 @@
 /*
-Version: v1.0.1
-Change: Use the shared sun favicon across cooperative modules.
+Version: v1.0.2
+Change: Preserve citizen-domain server-rendered social metadata and sun image.
 */
 (function applyTenantHead(global) {
   'use strict';
@@ -33,8 +33,12 @@ Change: Use the shared sun favicon across cooperative modules.
 
     document.querySelectorAll('meta[content]').forEach((meta) => {
       const key = String(meta.getAttribute('name') || meta.getAttribute('property') || '').toLowerCase();
-      if (key === 'og:image' || key === 'twitter:image' || key === 'naver-site-verification') {
-        meta.remove();
+      if (key === 'og:image' || key === 'twitter:image') {
+        meta.setAttribute('content', 'https://yonginsun.kr/shared/sun_share.png?v=20260916-1');
+        return;
+      }
+      if (key === 'naver-site-verification') {
+        if (meta.getAttribute('content') !== 'f9190043f3e2a3761d1b2546bc2b7998f8aa7c23') meta.remove();
         return;
       }
       const content = meta.getAttribute('content');
