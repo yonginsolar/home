@@ -4,7 +4,7 @@ const CITIZEN_HOSTS = new Set([
 const CITIZEN_PUBLIC_HOSTS = new Set(['yonginsun.kr', 'www.yonginsun.kr']);
 const CITIZEN_ORIGIN = 'https://yonginsun.kr';
 const COOP_NAME = '용인시민햇빛발전협동조합';
-const BRAND_VERSION = '20260916-4';
+const BRAND_VERSION = '20260916-5';
 const IMAGE_PATH = '/shared/sun_share.png';
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
@@ -27,6 +27,33 @@ const CITIZEN_SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>${CITIZEN_ORIGIN}/</loc></url>
   <url><loc>${CITIZEN_ORIGIN}/signup</loc></url>
 </urlset>
+`;
+
+const CITIZEN_RSS = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>${COOP_NAME}</title>
+    <link>${CITIZEN_ORIGIN}/</link>
+    <description><![CDATA[${COOP_NAME}의 조합 소개와 조합원 가입 안내입니다.]]></description>
+    <language>ko-KR</language>
+    <lastBuildDate>Wed, 16 Sep 2026 04:00:00 GMT</lastBuildDate>
+    <atom:link href="${CITIZEN_ORIGIN}/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>${COOP_NAME} 홈페이지</title>
+      <link>${CITIZEN_ORIGIN}/</link>
+      <guid isPermaLink="true">${CITIZEN_ORIGIN}/</guid>
+      <pubDate>Wed, 16 Sep 2026 04:00:00 GMT</pubDate>
+      <description><![CDATA[${COOP_NAME}의 조합 소개, 시민참여형 태양광 활동과 조합원 참여 안내를 확인할 수 있습니다.]]></description>
+    </item>
+    <item>
+      <title>조합원 가입 안내</title>
+      <link>${CITIZEN_ORIGIN}/signup</link>
+      <guid isPermaLink="true">${CITIZEN_ORIGIN}/signup</guid>
+      <pubDate>Wed, 16 Sep 2026 04:00:00 GMT</pubDate>
+      <description><![CDATA[${COOP_NAME} 조합원 가입 신청에 필요한 정보와 출자 참여 절차를 확인하고 온라인으로 가입을 신청할 수 있습니다.]]></description>
+    </item>
+  </channel>
+</rss>
 `;
 
 function textResponse(request, body, contentType, status = 200) {
@@ -65,6 +92,7 @@ function metadata(url) {
     + meta('name','apple-mobile-web-app-title',COOP_NAME)
     + meta('name','citizen-brand-version',BRAND_VERSION)
     + meta('name','naver-site-verification','f70e8afa4d0653dd97262e5ace51522cdecb34d1')
+    + '<link rel="alternate" type="application/rss+xml" title="' + escapeHtml(COOP_NAME) + ' RSS" href="' + CITIZEN_ORIGIN + '/rss.xml">'
     + meta('property','og:type','website')
     + meta('property','og:site_name',COOP_NAME)
     + meta('property','og:title',title)
@@ -105,6 +133,9 @@ export default {
       return textResponse(request, 'Not Found\n', 'text/plain; charset=utf-8', 404);
     }
     if (url.pathname === '/rss.xml' || url.pathname === '/feed.xml') {
+      if (CITIZEN_PUBLIC_HOSTS.has(hostname)) {
+        return textResponse(request, CITIZEN_RSS, 'application/rss+xml; charset=utf-8');
+      }
       return textResponse(request, 'Not Found\n', 'text/plain; charset=utf-8', 404);
     }
     if (url.pathname === '/favicon.ico' || url.pathname === '/apple-touch-icon.png') {
@@ -136,7 +167,7 @@ export default {
     }
     const rewritten = new HTMLRewriter()
       .on('head', { element(element) { element.prepend(metadata(url), {html:true}); } })
-      .on('head title, head link[rel="canonical"], head link[rel*="icon"], head script[type="application/ld+json"]', new RemoveElementHandler())
+      .on('head title, head link[rel="canonical"], head link[rel*="icon"], head link[rel="alternate"][type="application/rss+xml"], head script[type="application/ld+json"]', new RemoveElementHandler())
       .on('head meta', { element(element) {
         const name = (element.getAttribute('name') || element.getAttribute('property') || '').toLowerCase();
         if (element.hasAttribute('charset') || name.startsWith('og:') || name.startsWith('twitter:') || [
