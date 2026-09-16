@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.75 | Change: 2026-09-11 - Load the shared sun favicon for cooperative modules. -->
+<!-- Version: v1.0.76 | Change: 2026-09-16 - Owning-cooperative festival receipt management entry. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.75 | index.html');</script>
+  <script>console.log('[Version] v1.0.76 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -228,6 +228,11 @@
         <button class="btn btn-white btn-menu hidden" id="btnQuizAdmin" onclick="location.href='quiz_admin.html'">
             ☀️ <strong>퀴즈 관리</strong>
             <span class="d-block small text-muted">문제·정답·해설과 선택지별 응답 통계 관리</span>
+        </button>
+
+        <button class="btn btn-white btn-menu hidden" id="btnFestivalReceipts" onclick="location.href='festival_receipts.html'">
+            🧾 <strong>축제 현금영수증</strong>
+            <span class="d-block small text-muted">체험비 현금영수증 신청 내역과 인쇄용 안내판</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnProposalBuilder" onclick="location.href='proposal_builder.html'">
@@ -2129,6 +2134,16 @@ async function resetMenuOrder() {
 }
 
 function applyMenuPermissions(user, platformCtx, runtime) {
+    const festivalHost = ['www.yonginsolar.kr','yonginsolar.kr','erp.yonginsolar.kr'].includes(location.hostname);
+    document.getElementById('btnFestivalReceipts')?.classList.add('hidden');
+    if (festivalHost && String(runtime?.runtime_profile || 'legacy_full') === 'legacy_full' && !retiredGraceAccess) {
+        _supabase.rpc('festival_receipts_admin', { p_action: 'access', p_data: {} }).then(({data,error}) => {
+            if (!error && data?.allowed && !retiredGraceAccess) {
+                document.getElementById('btnFestivalReceipts')?.classList.remove('hidden');
+                applyMenuOrder();
+            }
+        }).catch(() => { /* Keep the menu closed if access cannot be confirmed. */ });
+    }
     const isAdmin = (user.role === 'admin' || user.role === 'admin_all' || user.position === '국장');
     const isManager = user.role === 'manager' || user.position === '이사';
     const hasAdminRoleFallback = (user.role === 'admin' || user.role === 'admin_all');
@@ -2371,6 +2386,7 @@ const ERP_MENU_BUTTON_ORDER_IDS = [
     'btnEducationParticipants',
     'btnSiteAdmin',
     'btnQuizAdmin',
+    'btnFestivalReceipts',
     'btnProposalBuilder',
     'btnSunVillageDemo',
     'btnOfficialsAdmin',
