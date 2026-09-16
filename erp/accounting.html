@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.106 | Change: 2026-09-08 - Sync approved payroll accrual and payment through one workflow. -->
+<!-- Version: v1.0.107 | Change: 2026-09-16 - Exclude pre-launch and already-paid salary approvals from sync candidates. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.106 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.107 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -4033,6 +4033,16 @@ function isSalaryExpenseApproval(doc) {
     return !!doc?.salary_ledger_snapshot || docType === '지출결의(급여)';
 } // End of isSalaryExpenseApproval
 
+// 승인 급여의 발생·지급 전표를 전자결재 연동 한 곳에서 처리하기 시작한 운영 시점.
+// 이 시점 전 결재는 기존 방식으로 이미 마감됐으므로 새 자동연동 후보로 소급하지 않는다.
+const SALARY_APPROVAL_UNIFIED_SYNC_STARTED_AT = Date.parse('2026-09-08T00:00:00+09:00');
+
+function isSalaryApprovalBeforeUnifiedSync(doc) {
+    const completedAt = Date.parse(String(doc?.processed_at || doc?.created_at || '').trim());
+    if (!Number.isFinite(completedAt)) return false;
+    return completedAt < SALARY_APPROVAL_UNIFIED_SYNC_STARTED_AT;
+} // End of isSalaryApprovalBeforeUnifiedSync
+
 function getApprovalSalaryMonth(doc) {
     const snapshot = doc?.salary_ledger_snapshot;
     const directMonth = normalizeAccountingYm(snapshot?.year_month || snapshot?.state?.yearMonth || snapshot?.state?.year_month);
@@ -4827,6 +4837,8 @@ function getApprovalSyncTargetState(approvals, existingTransIds) {
     const salaryMonthsSeen = new Set();
     const targetDocs = docs.filter((doc) => {
         if (!isSalaryExpenseApproval(doc)) return !existing.has(`APR-${doc?.id}`);
+        if (isSalaryApprovalBeforeUnifiedSync(doc)) return false;
+        if (existing.has(`APR-${doc?.id}`)) return false;
         const salaryMonth = getApprovalSalaryMonth(doc);
         if (!salaryMonth) return true;
         if (salaryMonthsSeen.has(salaryMonth)) return false;
