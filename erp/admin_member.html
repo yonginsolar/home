@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.162
-Change: 2026-09-15 - Separate direct legal representative consent evidence.
+Version: v1.0.163
+Change: 2026-09-16 - Guardian receipt status and legacy application notice.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.162';
+window.ADMIN_MEMBER_VERSION = 'v1.0.163';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -15,7 +15,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.162';
   </script>
 <meta charset="utf-8">
 <script src="../shared/guardian-admin.js?v=20260915-2" defer></script>
-<script src="../shared/child_direct_admin.js?v=20260915-1" defer></script>
+<script src="../shared/child_direct_admin.js?v=20260916-1" defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
 <title>☀️ 협동조합 통합 관리자</title>
@@ -11912,17 +11912,14 @@ function renderMemberTable(list) {
     `;
   }).join('');
   tbody.innerHTML = rowsHtml;
+  if (!isAdminMemberSiteProfile()) void window.ChildDirectAdmin?.loadList(_supabase, tbody);
 }
 
 function renderPendingWelcomeNotificationStatus(member) {
   if (isAdminMemberSiteProfile()) return '';
   const isManagedFamilyProfile = Boolean(String(member?.manager_id || '').trim());
   if (isManagedFamilyProfile) {
-    return `
-      <div class="mt-1">
-        <span class="badge bg-secondary">가입 알림톡 발송 대상 아님</span>
-      </div>
-    `;
+    return window.ChildDirectAdmin?.placeholder(member) || '';
   }
   const rawStatus = String(member?.welcome_notification_status || '').trim().toLowerCase();
   const isSent = member?.is_welcome_sent === true || rawStatus === 'accepted';
