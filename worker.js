@@ -1,12 +1,51 @@
 const CITIZEN_HOSTS = new Set([
   'yonginsun.kr', 'www.yonginsun.kr', 'erp.yonginsun.kr', 'yonginsun.coopco.kr'
 ]);
+const CITIZEN_PUBLIC_HOSTS = new Set(['yonginsun.kr', 'www.yonginsun.kr']);
+const CITIZEN_ORIGIN = 'https://yonginsun.kr';
 const COOP_NAME = '용인시민햇빛발전협동조합';
-const BRAND_VERSION = '20260916-1';
+const BRAND_VERSION = '20260916-2';
 const IMAGE_PATH = '/shared/sun_share.png';
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
 })[char]);
+
+const CITIZEN_ROBOTS = `User-agent: *
+Allow: /
+Disallow: /erp
+Disallow: /membermanage
+Disallow: /auth_callback
+Disallow: /vote
+Disallow: /minutes/
+Disallow: /bak/
+
+Sitemap: ${CITIZEN_ORIGIN}/sitemap.xml
+`;
+
+const CITIZEN_SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${CITIZEN_ORIGIN}/</loc></url>
+  <url><loc>${CITIZEN_ORIGIN}/signup</loc></url>
+</urlset>
+`;
+
+function textResponse(request, body, contentType, status = 200) {
+  return new Response(request.method === 'HEAD' ? null : body, {
+    status,
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': status === 200 ? 'public, max-age=300' : 'public, max-age=60',
+      'X-Content-Type-Options': 'nosniff'
+    }
+  });
+}
+
+function shouldNoIndex(hostname, pathname) {
+  if (!CITIZEN_PUBLIC_HOSTS.has(hostname)) return true;
+  const normalizedPath = pathname.toLowerCase().replace(/\.html$/i, '');
+  return ['/erp', '/membermanage', '/auth_callback', '/vote', '/minutes', '/bak', '/terms', '/privacy']
+    .some(prefix => normalizedPath === prefix || normalizedPath.startsWith(prefix + '/'));
+}
 
 function metadata(url) {
   const path = url.pathname.replace(/\/+$/, '').replace(/\.html$/i, '') || '/';
@@ -51,8 +90,22 @@ class RemoveElementHandler { element(element) { element.remove(); } }
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (!CITIZEN_HOSTS.has(url.hostname.toLowerCase().replace(/\.$/, ''))) {
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+    if (!CITIZEN_HOSTS.has(hostname)) {
       return env.ASSETS.fetch(request);
+    }
+    if (url.pathname === '/robots.txt') {
+      const body = CITIZEN_PUBLIC_HOSTS.has(hostname) ? CITIZEN_ROBOTS : 'User-agent: *\nDisallow: /\n';
+      return textResponse(request, body, 'text/plain; charset=utf-8');
+    }
+    if (url.pathname === '/sitemap.xml') {
+      if (CITIZEN_PUBLIC_HOSTS.has(hostname)) {
+        return textResponse(request, CITIZEN_SITEMAP, 'application/xml; charset=utf-8');
+      }
+      return textResponse(request, 'Not Found\n', 'text/plain; charset=utf-8', 404);
+    }
+    if (url.pathname === '/rss.xml' || url.pathname === '/feed.xml') {
+      return textResponse(request, 'Not Found\n', 'text/plain; charset=utf-8', 404);
     }
     if (url.pathname === '/favicon.ico' || url.pathname === '/apple-touch-icon.png') {
       const iconUrl = new URL(request.url);
@@ -84,6 +137,9 @@ export default {
     rewritten.headers.delete('content-length');
     rewritten.headers.set('X-Citizen-Brand-Version', BRAND_VERSION);
     rewritten.headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+    if (shouldNoIndex(hostname, url.pathname)) {
+      rewritten.headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    }
     return rewritten;
   }
 };
