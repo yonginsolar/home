@@ -4,7 +4,7 @@ const CITIZEN_HOSTS = new Set([
 const CITIZEN_PUBLIC_HOSTS = new Set(['yonginsun.kr', 'www.yonginsun.kr']);
 const CITIZEN_ORIGIN = 'https://yonginsun.kr';
 const COOP_NAME = '용인시민햇빛발전협동조합';
-const BRAND_VERSION = '20260916-3';
+const BRAND_VERSION = '20260916-4';
 const IMAGE_PATH = '/shared/sun_share.png';
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
@@ -64,7 +64,7 @@ function metadata(url) {
     + meta('name','application-name',COOP_NAME)
     + meta('name','apple-mobile-web-app-title',COOP_NAME)
     + meta('name','citizen-brand-version',BRAND_VERSION)
-    + meta('name','naver-site-verification','f9190043f3e2a3761d1b2546bc2b7998f8aa7c23')
+    + meta('name','naver-site-verification','f70e8afa4d0653dd97262e5ace51522cdecb34d1')
     + meta('property','og:type','website')
     + meta('property','og:site_name',COOP_NAME)
     + meta('property','og:title',title)
