@@ -4,7 +4,7 @@ const CITIZEN_HOSTS = new Set([
 const CITIZEN_PUBLIC_HOSTS = new Set(['yonginsun.kr', 'www.yonginsun.kr']);
 const CITIZEN_ORIGIN = 'https://yonginsun.kr';
 const COOP_NAME = '용인시민햇빛발전협동조합';
-const BRAND_VERSION = '20260916-2';
+const BRAND_VERSION = '20260916-3';
 const IMAGE_PATH = '/shared/sun_share.png';
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
@@ -113,15 +113,27 @@ export default {
       return env.ASSETS.fetch(new Request(iconUrl, request));
     }
     const pathLeaf = url.pathname.split('/').pop() || '';
+    const headRequest = request.method === 'HEAD';
     let assetRequest = request;
     if (!pathLeaf.includes('.') || /\.html?$/i.test(pathLeaf)) {
       const headers = new Headers(request.headers);
       headers.delete('if-none-match');
       headers.delete('if-modified-since');
-      assetRequest = new Request(request, {headers});
+      assetRequest = new Request(request, {method: headRequest ? 'GET' : request.method, headers});
     }
     const response = await env.ASSETS.fetch(assetRequest);
     if (!(response.headers.get('content-type') || '').toLowerCase().includes('text/html')) return response;
+    if (headRequest) {
+      const headers = new Headers(response.headers);
+      headers.delete('etag');
+      headers.delete('content-length');
+      headers.set('X-Citizen-Brand-Version', BRAND_VERSION);
+      headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+      if (shouldNoIndex(hostname, url.pathname)) {
+        headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+      }
+      return new Response(null, {status: response.status, statusText: response.statusText, headers});
+    }
     const rewritten = new HTMLRewriter()
       .on('head', { element(element) { element.prepend(metadata(url), {html:true}); } })
       .on('head title, head link[rel="canonical"], head link[rel*="icon"], head script[type="application/ld+json"]', new RemoveElementHandler())
