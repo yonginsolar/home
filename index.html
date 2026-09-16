@@ -1559,7 +1559,8 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
   gtag('config', 'G-TR217L7JN9');
 </script>
   <script src="shared/theme.js?v=20260802-1"></script>
-  <link href="shared/theme.css?v=20260916-2" rel="stylesheet">
+  <script src="shared/partner_logo_theme.js?v=20260917-1"></script>
+  <link href="shared/theme.css?v=20260917-1" rel="stylesheet">
 </head>
 
 <body>
@@ -2140,7 +2141,10 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
       <div class="modal-body text-center pt-0 pb-5 px-4">
 
         <div class="partner-modal-logo-stage mb-3 d-flex align-items-center justify-content-center">
-            <img id="pt-modal-logo" src="" alt="Logo" class="img-fluid" style="max-height: 80px; display:none;">
+            <span id="pt-modal-logo-renderer" class="partner-logo-renderer partner-modal-logo-renderer" style="display:none;">
+              <img id="pt-modal-logo" src="" alt="Logo" crossorigin="anonymous" class="partner-logo-original img-fluid">
+              <img src="" alt="" aria-hidden="true" class="partner-logo-cleaned img-fluid">
+            </span>
             <h3 id="pt-modal-text-logo" class="fw-bold text-dark m-0" style="display:none; font-family:'GmarketSans'; word-break: keep-all;"></h3>
         </div>
 
@@ -5455,7 +5459,10 @@ function openPlantDetail(id) {
            const safePartnerId = escapeJsString(p.id || '');
            // 리스트 화면: 로고 있으면 이미지, 없으면 텍스트
            const content = safeLogo
-               ? `<img src="${safeLogo}" class="img-fluid" alt="${safeName}">`
+               ? `<span class="partner-logo-renderer" data-logo-url="${escapeHtml(safeLogo)}">
+                    <img crossorigin="anonymous" src="${safeLogo}" class="partner-logo-original img-fluid" alt="${safeName}">
+                    <img src="" class="partner-logo-cleaned img-fluid" alt="" aria-hidden="true">
+                  </span>`
                : `<span class="partner-text">${safeName}</span>`;
 
            // ★ 카드 디자인 적용 (col-6 col-md-4 col-lg-3 + partner-card 클래스)
@@ -5469,6 +5476,7 @@ function openPlantDetail(id) {
        });
 
        container.innerHTML = html;
+       window.PartnerLogoTheme?.enhanceAll(container);
     }
 
     // [상세 모달 열기]
@@ -5477,6 +5485,7 @@ function openPlantDetail(id) {
         if(!p) return;
 
         const imgEl = document.getElementById('pt-modal-logo');
+        const logoRendererEl = document.getElementById('pt-modal-logo-renderer');
         const textLogoEl = document.getElementById('pt-modal-text-logo');
         const nameEl = document.getElementById('pt-modal-name');
 
@@ -5485,10 +5494,12 @@ function openPlantDetail(id) {
         const modalLogo = p.logo_url ? safeUrl(p.logo_url) : null;
         if(modalLogo) {
             imgEl.src = modalLogo;
-            imgEl.style.display = 'block';
+            imgEl.alt = p.name || '단체 로고';
+            logoRendererEl.style.display = 'flex';
+            window.PartnerLogoTheme?.enhance(logoRendererEl, modalLogo);
             textLogoEl.style.display = 'none';
         } else {
-            imgEl.style.display = 'none';
+            logoRendererEl.style.display = 'none';
             textLogoEl.innerText = p.name || '';
             textLogoEl.style.display = 'block';
         }
