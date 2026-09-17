@@ -1,6 +1,6 @@
 /*
-Version: v1.0.48
-Change: 2026-08-28 - Include signature row IDs so document viewers can request separate low-resolution previews.
+Version: v1.0.49
+Change: 2026-09-17 - Store new meeting attachments below the current cooperative path for tenant isolation.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -403,6 +403,10 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
 
 	async function uploadMinuteFiles(fileList) {
 	    if (!fileList || fileList.length === 0) return { urls: [], error: null };
+	    const coopId = await getRuntimeCoopId();
+	    if (!coopId) {
+	        return { urls: [], error: { message: '조합 정보를 확인할 수 없어 첨부파일을 저장하지 못했습니다.' } };
+	    }
 	    const urls = [];
 	    for (const file of fileList) {
 	        const name = normalizeAttachmentFileName(file.name || '');
@@ -411,7 +415,7 @@ async function markDocumentBoxSeen(targetId = null, seenAt = null) {
 	            return { urls: [], error: { message: `PDF만 업로드할 수 있습니다: ${name}` } };
 	        }
 	        const safeName = `${crypto.randomUUID()}_${name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-	        const storagePath = `minutes/${safeName}`;
+	        const storagePath = `minutes/${coopId}/${safeName}`;
 	        const { error } = await supabase.storage.from('attachments').upload(storagePath, file);
 	        if (error) return { urls: [], error };
 	        // Store a storage reference (not a public URL). Viewer resolves to a signed URL later.
