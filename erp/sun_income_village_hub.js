@@ -1,14 +1,13 @@
-/* Sun-income-village management hub v3.2.1 */
+/* Sun-income-village management hub v3.2.2 */
 (() => {
   'use strict';
 
-  const VERSION = '3.2.1';
+  const VERSION = '3.2.2';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const number = value => Number(value || 0).toLocaleString('ko-KR');
-  const money = value => `${number(value)}원`;
   const statusLabel = { preparing: '준비 중', active: '운영 중', paused: '일시 중지', ended: '종료' };
   const accountingModeLabel = { outsourced: '회계사무실 위탁', shared: '공동 처리', self: '자체 회계' };
   const accountingModeHelp = {
@@ -278,7 +277,6 @@
           ${active
             ? `<button type="button" class="button primary" data-open-workspace="${esc(row.coop_id)}">업무 화면 열기</button>`
             : '<button type="button" disabled>준비가 끝나면 열 수 있습니다</button>'}
-          <span>월 이용료 ${money(row.monthly_fee)}${row.vat_separate ? ' · 부가세 별도' : ''}</span>
         </div>
       </article>`;
   }
