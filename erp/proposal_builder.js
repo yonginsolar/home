@@ -1,8 +1,8 @@
-/* Version: v1.6.3 | 2026-09-17 | Ignore legacy whitespace-only copy edits while preserving substantive edits. */
+/* Version: v1.6.4 | 2026-09-17 | Let users explicitly migrate incompatible legacy copy to the latest template. */
 (() => {
   'use strict';
 
-  const VERSION = '1.6.3';
+  const VERSION = '1.6.4';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -1154,8 +1154,10 @@
       setStatus('입력한 내용을 확인하고 「문구 확인」을 누르면 제안서 전체에 한 번에 반영됩니다.', true);
       return false;
     }
-    if (state.manualDirty && force) {
-      const overwrite = window.confirm('미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 제안서 전체를 다시 만들까요?');
+    if ((state.manualDirty || state.copyRestoreMismatch) && force) {
+      const overwrite = window.confirm(state.copyRestoreMismatch
+        ? '저장한 제안서의 직접 수정 문구 중 현재 서식과 맞지 않는 항목이 있습니다. 입력값·사진·표시 영역은 유지하고 최신 서식으로 다시 만들까요?'
+        : '미리보기에서 직접 수정한 문구가 있습니다. 입력값 기준으로 제안서 전체를 다시 만들까요?');
       if (!overwrite) return false;
       state.loadedCopyEdits = [];
       state.copyRestoreMismatch = false;
@@ -1496,7 +1498,6 @@
     const restoredCount = [...el.previewFrame.contentDocument.querySelectorAll('[data-copy-id]')].filter((node) => node.textContent !== node.dataset.copyBase).length;
     if (restoredCount !== copyEdits.length) {
       state.copyRestoreMismatch = true;
-      throw new Error('서식이 달라 일부 수정 문구를 적용하지 못했습니다. 보관함 원본은 유지했습니다. 덮어쓰지 말고 관리자에게 알려 주세요.');
     }
   }
 
@@ -1930,6 +1931,7 @@
       state.library = window.ProposalLibrary.init({ client, coopId: userGate.user.coop_id,
         userId: userGate.authUser?.id || userGate.user.emp_id,
         snapshot: captureSnapshot, restore: restoreSnapshot, newSite: startSite,
+        hasRestoreMismatch: () => state.copyRestoreMismatch,
         getFacilityType: () => textValue('facilityType'), setFacilityType: setFacilityTypeFromPicker,
         isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
       await state.library.ready;

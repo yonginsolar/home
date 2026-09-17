@@ -1,4 +1,4 @@
-/* Version: v1.5.2 | Local apply confirmation supports variable proposal page counts. */
+/* Version: v1.5.3 | Incompatible legacy copy can be explicitly migrated to the latest template. */
 (() => {
   'use strict';
   const TABLE = 'erp_proposals';
@@ -137,7 +137,9 @@
       current = row; pending = null; dirty = false; name.value = row.name;
       resumeId = ''; remember(row.id); options(); select.value = `saved:${row.id}`;
       copy.disabled = false; save.textContent = '💾 변경 내용 저장';
-      say(`「${row.name}」을 사진·표시 영역·수정 문구와 함께 불러왔습니다.${rememberNotice()}`);
+      say(hooks.hasRestoreMismatch?.()
+        ? `「${row.name}」의 입력값·사진·표시 영역을 불러왔습니다. 현재 서식과 맞지 않는 옛 수정 문구가 있어 저장·출력은 중지했습니다. 「문구 확인」을 누르면 사진과 표시 영역을 유지한 채 최신 서식으로 전환할 수 있습니다.${rememberNotice()}`
+        : `「${row.name}」을 사진·표시 영역·수정 문구와 함께 불러왔습니다.${rememberNotice()}`);
     }
     async function persist(asCopy) {
       assertRestored();
