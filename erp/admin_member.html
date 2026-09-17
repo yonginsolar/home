@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.167
-Change: 2026-09-17 - Link withdrawal refund decisions to general assembly minutes and show full refund amounts.
+Version: v1.0.169
+Change: 2026-09-17 - Separate withdrawal deemed-dividend tax review from ordinary dividends before payment.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.167';
+window.ADMIN_MEMBER_VERSION = 'v1.0.169';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -511,8 +511,15 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         </ul>
 
         <div id="app-governance-notice" class="alert alert-warning border-warning d-none mb-3">
-            <div class="fw-bold"><i class="bi bi-calendar-check me-1"></i> 탈퇴와 출자금 환급은 서로 다른 단계입니다.</div>
-            <div class="small mt-1">탈퇴 효력 처리 → 다음 회계연도 총회 의결 → 실제 환급 지급 순서로 기록합니다. 탈퇴 효력만 처리해도 조합원 자격은 종료되며, 출자금은 지급일까지 환급 대기로 남습니다.</div>
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+                <div>
+                    <div class="fw-bold"><i class="bi bi-calendar-check me-1"></i> 탈퇴와 출자금 반환은 서로 다른 단계입니다.</div>
+                    <div class="small mt-1">탈퇴 효력 처리 → 다음 회계연도 총회 의결 → 실제 반환 지급 순서로 기록합니다. 총회 확정액이 0원이면 송금 없이 지분 정산이 끝납니다.</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-dark flex-shrink-0" onclick="downloadWithdrawalBankTransferXlsx()">
+                    <i class="bi bi-file-earmark-spreadsheet me-1"></i> 신협 대량이체 XLSX
+                </button>
+            </div>
         </div>
 
         <ul class="nav nav-tabs mb-3" id="app-status-tabs">
@@ -568,11 +575,24 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 </div>
 
                 <div id="withdrawalDecisionFields" class="d-none">
-                    <div class="alert alert-info small">총회 의결을 기록하면 출자금이 환급 미지급금으로 전환됩니다. 실제 은행 잔액은 지급 완료 전까지 변하지 않습니다.</div>
+                    <div class="alert alert-info small">탈퇴 시점 출자금은 참고 기준입니다. 탈퇴 회계연도 말의 자산·부채와 정관상 지분 범위를 반영해 총회가 확정한 실제 반환액을 입력하세요. 0원도 기록할 수 있습니다.</div>
                     <label class="form-label small fw-bold" for="withdrawalMeetingDate">총회 의결일</label>
                     <input type="date" class="form-control mb-2" id="withdrawalMeetingDate">
-                    <label class="form-label small fw-bold" for="withdrawalDecisionAmount">의결 환급액</label>
-                    <input type="number" class="form-control mb-2" id="withdrawalDecisionAmount" readonly>
+                    <label class="form-label small fw-bold" for="withdrawalCapitalBaseline">탈퇴 시점 출자금 <span class="text-muted fw-normal">(참고)</span></label>
+                    <input type="text" class="form-control mb-2" id="withdrawalCapitalBaseline" readonly>
+                    <label class="form-label small fw-bold" for="withdrawalDecisionAmount">총회 확정 반환액</label>
+                    <div class="input-group mb-1">
+                        <input type="number" class="form-control" id="withdrawalDecisionAmount" min="0" step="1" inputmode="numeric" oninput="updateWithdrawalDecisionAmountState()">
+                        <button type="button" class="btn btn-outline-secondary" onclick="applyWithdrawalDecisionPreset('baseline')">기준액 적용</button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="applyWithdrawalDecisionPreset('none')">반환 없음</button>
+                    </div>
+                    <div class="form-text mb-2" id="withdrawalDecisionAdjustment">탈퇴 시점 출자금과 같은 금액입니다.</div>
+                    <div class="alert alert-warning small d-none mb-2" id="withdrawalDecisionTaxNotice">
+                        납입출자금을 넘는 금액은 세무상 의제배당 검토 대상입니다. 총회 의결을 저장한 뒤 <b>배당 관리 → 지급·세무 자료 → 탈퇴 지분환급 의제배당</b>에서 원천세를 확인해야 은행 지급 대상으로 전환됩니다.
+                    </div>
+                    <label class="form-label small fw-bold" for="withdrawalDecisionCalculationNote">반환액 산정 근거 <span class="text-danger d-none" id="withdrawalDecisionCalculationRequired">(필수)</span></label>
+                    <textarea class="form-control mb-2" id="withdrawalDecisionCalculationNote" rows="2" placeholder="예: 2026년도 말 재무상태와 조합원 지분 산정 결과"></textarea>
+                    <div class="form-text mb-2">탈퇴 시점 출자금과 다른 금액이면 결산·지분 산정 근거를 남겨주세요.</div>
                     <div id="withdrawalDecisionMinutesGroup" class="d-none mb-2">
                         <label class="form-label small fw-bold" for="withdrawalDecisionMinutesId">총회 의사록</label>
                         <div class="input-group">
@@ -593,7 +613,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 </div>
 
                 <div id="withdrawalPaymentFields" class="d-none">
-                    <div class="alert alert-danger small">실제 송금이 끝난 뒤에만 완료 처리해주세요. 처리하면 출자금 원장 차감과 미지급금 지급 전표가 함께 기록됩니다.</div>
+                    <div class="alert alert-danger small">실제 송금이 끝난 뒤에만 완료 처리해주세요. 의제배당 초과분이 있으면 원천세를 뺀 실지급액 기준으로 미지급금 지급 전표가 기록됩니다.</div>
                     <label class="form-label small fw-bold" for="withdrawalPaymentDate">실제 지급일</label>
                     <input type="date" class="form-control" id="withdrawalPaymentDate">
                 </div>
@@ -1287,6 +1307,95 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <div class="card border-primary-subtle shadow-sm mt-4">
+                <div class="card-header bg-primary bg-opacity-10 d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-2">
+                    <div>
+                        <h6 class="fw-bold mb-1">🧾 탈퇴 지분환급 의제배당</h6>
+                        <div class="small text-muted">납입출자금을 초과한 지분환급만 별도로 검토합니다. 정기 출자배당·이용고배당 통계에는 합치지 않습니다.</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-sm btn-outline-primary" type="button" onclick="fetchWithdrawalDeemedDividendReviews(true)">
+                            <i class="bi bi-arrow-clockwise"></i> 새로고침
+                        </button>
+                        <button class="btn btn-sm btn-outline-dark" type="button" onclick="downloadWithdrawalDeemedDividendTaxLedgerXlsx()">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> 세무 검토 장부 XLSX
+                        </button>
+                    </div>
+                </div>
+                <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>총회 의결일</th>
+                                <th>조합원</th>
+                                <th class="text-end">총 반환액</th>
+                                <th class="text-end">의제배당 검토액</th>
+                                <th class="text-end">원천세</th>
+                                <th class="text-end">실지급액</th>
+                                <th>상태</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="withdrawalDeemedDividendBody">
+                            <tr><td colspan="8" class="text-center text-muted py-4">지급·세무 자료 탭을 열면 조회합니다.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="withdrawalDeemedDividendTaxModal" tabindex="-1" aria-labelledby="withdrawalDeemedDividendTaxModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <div>
+                    <h5 class="modal-title fw-bold" id="withdrawalDeemedDividendTaxModalLabel">탈퇴 지분환급 의제배당 세무 검토</h5>
+                    <div class="small opacity-75 mt-1" id="withdrawalDeemedDividendTaxMember">-</div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="닫기"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="withdrawalDeemedDividendTaxId">
+                <div class="alert alert-warning small">
+                    이 금액은 정기 배당 회차에 포함하지 않습니다. 다만 납입출자금 취득가액을 넘는 부분은 의제배당이 될 수 있으므로 원천세를 확인한 뒤 실지급액을 확정합니다.
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">의제배당 검토액</label>
+                        <input type="text" class="form-control" id="withdrawalDeemedDividendGross" readonly>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">수령인 구분</label>
+                        <input type="text" class="form-control" id="withdrawalDeemedDividendMemberType" readonly>
+                    </div>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold" for="withdrawalDeemedDividendIncomeTax">소득세</label>
+                        <input type="number" min="0" step="1" class="form-control text-end" id="withdrawalDeemedDividendIncomeTax" oninput="syncWithdrawalDeemedDividendTaxNet()">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold" for="withdrawalDeemedDividendLocalTax">지방소득세</label>
+                        <input type="number" min="0" step="1" class="form-control text-end" id="withdrawalDeemedDividendLocalTax" oninput="syncWithdrawalDeemedDividendTaxNet()">
+                    </div>
+                </div>
+                <div class="form-text mb-3" id="withdrawalDeemedDividendTaxHelp">개인 조합원은 일반 배당 원천징수율 14%와 그 소득세의 10%를 참고값으로 넣습니다. 실제 적용 여부와 세율은 검토 후 확정하세요.</div>
+                <div class="border rounded bg-light p-3 mb-3 d-flex justify-content-between align-items-center">
+                    <span class="small fw-bold">은행 실지급 예정액</span>
+                    <span class="fw-bold text-primary" id="withdrawalDeemedDividendNet">0원</span>
+                </div>
+                <label class="form-label small fw-bold" for="withdrawalDeemedDividendTaxNote">세무 검토 근거</label>
+                <textarea class="form-control" id="withdrawalDeemedDividendTaxNote" rows="3" placeholder="예: 개인 조합원, 의제배당 초과분에 소득세 14%와 지방소득세 1.4% 적용"></textarea>
+                <div class="form-text">단체 조합원, 비과세 또는 원천징수하지 않는 판단이라면 그 근거를 적고 세액을 직접 입력해주세요.</div>
+                <div class="small text-danger mt-2 d-none" id="withdrawalDeemedDividendTaxFeedback"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary fw-bold" id="withdrawalDeemedDividendTaxSubmit" onclick="submitWithdrawalDeemedDividendTaxReview()">검토 확정</button>
             </div>
         </div>
     </div>
@@ -15824,8 +15933,177 @@ const g_dividend_export_state = {
     selectedPaymentRunId: '',
     paymentRunItems: [],
     notificationSummary: [],
-    notificationDispatching: false
+    notificationDispatching: false,
+    withdrawalDeemedDividendRows: []
 };
+
+function getWithdrawalDeemedDividendRow(withdrawalId) {
+    return g_dividend_export_state.withdrawalDeemedDividendRows.find((row) => String(row.withdrawal_id) === String(withdrawalId)) || null;
+}
+
+function getWithdrawalDeemedDividendStatusBadge(row) {
+    if (row?.tax_status === 'review_pending') return '<span class="badge bg-warning text-dark">세무 검토 대기</span>';
+    if (row?.workflow_status === 'refunded') return '<span class="badge bg-success">지급 완료</span>';
+    if (row?.tax_status === 'confirmed') return '<span class="badge bg-primary bg-opacity-10 text-primary">세무 검토 완료</span>';
+    return '<span class="badge bg-light text-dark border">상태 확인</span>';
+}
+
+function renderWithdrawalDeemedDividendReviews() {
+    const body = document.getElementById('withdrawalDeemedDividendBody');
+    if (!body) return;
+    const rows = Array.isArray(g_dividend_export_state.withdrawalDeemedDividendRows)
+        ? g_dividend_export_state.withdrawalDeemedDividendRows
+        : [];
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">의제배당 검토 대상인 탈퇴 지분환급이 없습니다.</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map((row) => {
+        const taxTotal = Number(row.income_tax_amount || 0) + Number(row.local_tax_amount || 0);
+        const action = row.tax_status === 'review_pending'
+            ? `<button class="btn btn-xs btn-primary" type="button" onclick="openWithdrawalDeemedDividendTaxModal('${escapeJsString(row.withdrawal_id)}')">원천세 검토</button>`
+            : '<span class="text-muted">확정됨</span>';
+        return `
+            <tr>
+                <td>${escapeHtml(formatDividendExportDateValue(row.decision_meeting_date))}</td>
+                <td><div class="fw-bold">${escapeHtml(row.member_name || '-')}</div><div class="x-small text-muted">${escapeHtml(row.member_no || '-')} · ${escapeHtml(row.member_type || '-')}</div></td>
+                <td class="text-end">${escapeHtml(formatDividendExportMoney(row.gross_return_amount))}</td>
+                <td class="text-end fw-bold text-primary">${escapeHtml(formatDividendExportMoney(row.deemed_dividend_gross_amount))}</td>
+                <td class="text-end">${escapeHtml(formatDividendExportMoney(taxTotal))}</td>
+                <td class="text-end fw-bold">${escapeHtml(formatDividendExportMoney(row.net_payment_amount))}</td>
+                <td>${getWithdrawalDeemedDividendStatusBadge(row)}</td>
+                <td>${action}</td>
+            </tr>`;
+    }).join('');
+}
+
+async function fetchWithdrawalDeemedDividendReviews(showToast = false) {
+    const body = document.getElementById('withdrawalDeemedDividendBody');
+    if (!body) return [];
+    body.innerHTML = '<tr><td colspan="8" class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary"></div></td></tr>';
+    const { data, error } = await _supabase.rpc('admin_list_withdrawal_deemed_dividend_reviews');
+    if (error) {
+        body.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-4">${escapeHtml(error.message || '조회 실패')}</td></tr>`;
+        if (showToast) myAlert('탈퇴 지분환급 의제배당 조회 실패: ' + (error.message || error), 'error');
+        return [];
+    }
+    g_dividend_export_state.withdrawalDeemedDividendRows = Array.isArray(data) ? data : [];
+    renderWithdrawalDeemedDividendReviews();
+    if (showToast) myAlert('탈퇴 지분환급 의제배당 목록을 새로 불러왔습니다.');
+    return g_dividend_export_state.withdrawalDeemedDividendRows;
+}
+
+function syncWithdrawalDeemedDividendTaxNet() {
+    const withdrawalId = document.getElementById('withdrawalDeemedDividendTaxId')?.value || '';
+    const row = getWithdrawalDeemedDividendRow(withdrawalId);
+    const grossReturn = Math.max(0, Math.trunc(Number(row?.gross_return_amount || 0)));
+    const deemedGross = Math.max(0, Math.trunc(Number(row?.deemed_dividend_gross_amount || 0)));
+    const incomeTax = Math.max(0, Math.trunc(Number(document.getElementById('withdrawalDeemedDividendIncomeTax')?.value || 0)));
+    const localTax = Math.max(0, Math.trunc(Number(document.getElementById('withdrawalDeemedDividendLocalTax')?.value || 0)));
+    const taxTotal = incomeTax + localTax;
+    const net = Math.max(0, grossReturn - taxTotal);
+    const netEl = document.getElementById('withdrawalDeemedDividendNet');
+    const feedback = document.getElementById('withdrawalDeemedDividendTaxFeedback');
+    if (netEl) netEl.textContent = `${net.toLocaleString('ko-KR')}원`;
+    if (feedback) {
+        const invalid = taxTotal > deemedGross;
+        feedback.textContent = invalid ? '원천세 합계는 의제배당 검토액을 넘을 수 없습니다.' : '';
+        feedback.classList.toggle('d-none', !invalid);
+    }
+    return { incomeTax, localTax, taxTotal, net, valid: taxTotal <= deemedGross };
+}
+
+function openWithdrawalDeemedDividendTaxModal(withdrawalId) {
+    const row = getWithdrawalDeemedDividendRow(withdrawalId);
+    if (!row || row.tax_status !== 'review_pending') {
+        myAlert('세무 검토 대상을 다시 불러온 뒤 시도해주세요.', 'warning');
+        return;
+    }
+    const gross = Math.max(0, Math.trunc(Number(row.deemed_dividend_gross_amount || 0)));
+    const isIndividual = String(row.member_type || '').trim() === '개인';
+    const suggestedIncomeTax = isIndividual ? Math.floor(gross * 0.14) : 0;
+    const suggestedLocalTax = isIndividual ? Math.floor(suggestedIncomeTax * 0.1) : 0;
+    document.getElementById('withdrawalDeemedDividendTaxId').value = row.withdrawal_id;
+    document.getElementById('withdrawalDeemedDividendTaxMember').textContent = `${row.member_name || '-'} · ${row.member_no || '-'}`;
+    document.getElementById('withdrawalDeemedDividendGross').value = `${gross.toLocaleString('ko-KR')}원`;
+    document.getElementById('withdrawalDeemedDividendMemberType').value = row.member_type || '-';
+    document.getElementById('withdrawalDeemedDividendIncomeTax').value = String(suggestedIncomeTax);
+    document.getElementById('withdrawalDeemedDividendLocalTax').value = String(suggestedLocalTax);
+    document.getElementById('withdrawalDeemedDividendTaxNote').value = isIndividual
+        ? '개인 조합원 · 의제배당 검토액에 일반 배당 원천징수율 참고'
+        : '';
+    const help = document.getElementById('withdrawalDeemedDividendTaxHelp');
+    if (help) help.textContent = isIndividual
+        ? '개인 조합원 참고값으로 소득세 14%와 그 소득세의 10%를 넣었습니다. 실제 적용 여부와 세율을 검토한 뒤 확정하세요.'
+        : '단체 조합원은 수령인 유형에 따라 원천징수 여부가 달라질 수 있어 세액을 자동 제안하지 않습니다. 세무 검토 후 직접 입력하세요.';
+    document.getElementById('withdrawalDeemedDividendTaxFeedback').classList.add('d-none');
+    syncWithdrawalDeemedDividendTaxNet();
+    const modalEl = document.getElementById('withdrawalDeemedDividendTaxModal');
+    applyAdminMemberModalLayer(modalEl);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function submitWithdrawalDeemedDividendTaxReview() {
+    const withdrawalId = Number(document.getElementById('withdrawalDeemedDividendTaxId')?.value || 0);
+    const note = String(document.getElementById('withdrawalDeemedDividendTaxNote')?.value || '').trim();
+    const amounts = syncWithdrawalDeemedDividendTaxNet();
+    const feedback = document.getElementById('withdrawalDeemedDividendTaxFeedback');
+    const submit = document.getElementById('withdrawalDeemedDividendTaxSubmit');
+    if (!withdrawalId) return myAlert('세무 검토 대상을 다시 선택해주세요.', 'warning');
+    if (!amounts.valid) return myAlert('원천세 합계를 다시 확인해주세요.', 'warning');
+    if (!note) return myAlert('적용 세율이나 비원천징수 판단의 검토 근거를 입력해주세요.', 'warning');
+    submit.disabled = true;
+    showLoading(true);
+    try {
+        const { data, error } = await _supabase.rpc('admin_confirm_withdrawal_deemed_dividend_tax', {
+            p_withdrawal_id: withdrawalId,
+            p_income_tax_amount: amounts.incomeTax,
+            p_local_tax_amount: amounts.localTax,
+            p_tax_note: note
+        });
+        if (error) throw error;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('withdrawalDeemedDividendTaxModal')).hide();
+        await Promise.all([fetchWithdrawalDeemedDividendReviews(false), fetchApplications()]);
+        await loadDashboard();
+        myAlert(data?.message || '의제배당 세무 검토를 확정했습니다.', 'success');
+    } catch (error) {
+        feedback.textContent = error?.hint || error?.message || String(error);
+        feedback.classList.remove('d-none');
+    } finally {
+        showLoading(false);
+        submit.disabled = false;
+    }
+}
+
+async function downloadWithdrawalDeemedDividendTaxLedgerXlsx() {
+    const rows = await fetchWithdrawalDeemedDividendReviews(false);
+    if (!rows.length) return myAlert('내려받을 탈퇴 지분환급 의제배당 내역이 없습니다.', 'warning');
+    const sheetRows = [
+        ['총회 의결일', '조합원번호', '조합원명', '조합원구분', '총 반환액', '출자원금 반환분', '의제배당 검토액', '소득세', '지방소득세', '실지급액', '세무검토상태', '세무검토근거', '지급일'],
+        ...rows.map((row) => [
+            formatDividendExportDateValue(row.decision_meeting_date, ''),
+            row.member_no || '',
+            row.member_name || '',
+            row.member_type || '',
+            Math.trunc(Number(row.gross_return_amount || 0)),
+            Math.trunc(Number(row.capital_refund_amount || 0)),
+            Math.trunc(Number(row.deemed_dividend_gross_amount || 0)),
+            Math.trunc(Number(row.income_tax_amount || 0)),
+            Math.trunc(Number(row.local_tax_amount || 0)),
+            Math.trunc(Number(row.net_payment_amount || 0)),
+            row.tax_status || '',
+            row.tax_note || '',
+            formatDividendExportDateValue(row.payment_date, '')
+        ])
+    ];
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    applyDividendExportSheetWidths(sheet, [14, 14, 14, 12, 14, 16, 18, 12, 14, 14, 16, 42, 14]);
+    XLSX.utils.book_append_sheet(workbook, sheet, '탈퇴의제배당');
+    const today = getAdminMemberKstDateString().replace(/-/g, '');
+    XLSX.writeFile(workbook, `탈퇴지분환급_의제배당_세무검토_${today}.xlsx`);
+    myAlert(`탈퇴 지분환급 의제배당 세무 검토 장부 ${rows.length.toLocaleString('ko-KR')}건을 만들었습니다.`);
+}
 
 function normalizeDividendExportNumber(value) {
     const n = Number(value ?? 0);
@@ -16059,7 +16337,10 @@ function renderDividendExportBatches() {
 async function initializeDividendExportTab() {
     if (g_dividend_export_state.initialized) return;
     g_dividend_export_state.initialized = true;
-    await fetchDividendExportBatches(false);
+    await Promise.all([
+        fetchDividendExportBatches(false),
+        fetchWithdrawalDeemedDividendReviews(false)
+    ]);
 } // End of initializeDividendExportTab
 
 async function fetchDividendExportBatches(showToast = false) {
@@ -17280,7 +17561,7 @@ function isApplicationWorkPending(app) {
     if (app.status === 'pending') return true;
     if (app.type !== 'withdraw') return false;
     const workflow = g_withdrawal_workflows.get(String(app.id || '')) || null;
-    return ['refund_calculation_pending', 'refund_payment_pending'].includes(String(workflow?.workflow_status || ''));
+    return ['refund_calculation_pending', 'deemed_dividend_review_pending', 'refund_payment_pending'].includes(String(workflow?.workflow_status || ''));
 }
 
 // 2. 화면 렌더링 (필터 적용)
@@ -17360,14 +17641,18 @@ function renderAppList() {
                 .join(' · ');
             const stageLabel = stage === 'refund_calculation_pending'
                 ? '탈퇴 완료 · 총회 의결 대기'
+                : stage === 'deemed_dividend_review_pending'
+                ? '총회 의결 완료 · 의제배당 세무 검토 대기'
                 : stage === 'refund_payment_pending'
                 ? '총회 의결 완료 · 지급 대기'
                 : stage === 'refunded'
-                ? '환급 완료'
+                ? (withdrawal.settlement_without_payment ? '반환 없음 · 지분 정산 완료' : '반환 지급 완료')
                 : '처리 상태 확인 필요';
             statusBadge = `<span class="badge ${stage === 'refunded' ? 'bg-success' : 'bg-info text-dark'}">${escapeHtml(stageLabel)}</span><span class="d-block small text-muted mt-1">탈퇴 효력일 ${escapeHtml(formatAdminMemberKstDate(withdrawal.effective_date))}</span>${decisionMinutesLabel ? `<span class="d-block small text-primary mt-1"><i class="bi bi-journal-check"></i> ${escapeHtml(decisionMinutesLabel)}</span>` : ''}`;
             if (stage === 'refund_calculation_pending') {
                 actionBtns = `<button class="btn btn-sm btn-info fw-bold py-0" onclick="openWithdrawalWorkflowModal('decision', ${app.id})"><i class="bi bi-people"></i> 총회 의결 기록</button>`;
+            } else if (stage === 'deemed_dividend_review_pending') {
+                actionBtns = `<button class="btn btn-sm btn-outline-primary fw-bold py-0" onclick="document.getElementById('funds-dividend-exports-tab')?.click()"><i class="bi bi-receipt"></i> 배당 세무 검토로 이동</button>`;
             } else if (stage === 'refund_payment_pending') {
                 actionBtns = `<button class="btn btn-sm btn-danger fw-bold py-0" onclick="openWithdrawalWorkflowModal('payment', ${app.id})"><i class="bi bi-bank"></i> 환급 지급 완료</button>`;
             }
@@ -17606,6 +17891,160 @@ function syncWithdrawalDecisionReferenceMode() {
     if (referenceGroup) referenceGroup.classList.toggle('d-none', hasSelectedMinutes);
 }
 
+function getWithdrawalDecisionBaselineAmount() {
+    const amountEl = document.getElementById('withdrawalDecisionAmount');
+    const value = Number(amountEl?.dataset?.baseline || 0);
+    return Number.isFinite(value) ? Math.max(Math.trunc(value), 0) : 0;
+}
+
+function updateWithdrawalDecisionAmountState() {
+    const amountEl = document.getElementById('withdrawalDecisionAmount');
+    const adjustmentEl = document.getElementById('withdrawalDecisionAdjustment');
+    const requiredEl = document.getElementById('withdrawalDecisionCalculationRequired');
+    const taxNoticeEl = document.getElementById('withdrawalDecisionTaxNotice');
+    if (!amountEl || !adjustmentEl) return;
+
+    const baseline = getWithdrawalDecisionBaselineAmount();
+    const amount = Number(amountEl.value);
+    const validAmount = amountEl.value !== '' && Number.isFinite(amount) && Number.isInteger(amount) && amount >= 0;
+    const difference = validAmount ? amount - baseline : 0;
+    const differs = validAmount && difference !== 0;
+
+    adjustmentEl.classList.remove('text-success', 'text-danger', 'text-primary');
+    if (!validAmount) {
+        adjustmentEl.textContent = '0원 이상의 정수 금액을 입력해주세요.';
+        adjustmentEl.classList.add('text-danger');
+    } else if (amount === 0) {
+        adjustmentEl.textContent = `반환 없음 · 탈퇴 시점 출자금 ${baseline.toLocaleString('ko-KR')}원은 지분 정산으로 소멸합니다.`;
+        adjustmentEl.classList.add('text-danger');
+    } else if (difference === 0) {
+        adjustmentEl.textContent = '탈퇴 시점 출자금과 같은 금액입니다.';
+        adjustmentEl.classList.add('text-success');
+    } else if (difference > 0) {
+        adjustmentEl.textContent = `탈퇴 시점 출자금보다 ${difference.toLocaleString('ko-KR')}원 많습니다.`;
+        adjustmentEl.classList.add('text-primary');
+    } else {
+        adjustmentEl.textContent = `탈퇴 시점 출자금보다 ${Math.abs(difference).toLocaleString('ko-KR')}원 적습니다.`;
+        adjustmentEl.classList.add('text-danger');
+    }
+    if (requiredEl) requiredEl.classList.toggle('d-none', !differs);
+    if (taxNoticeEl) taxNoticeEl.classList.toggle('d-none', !(validAmount && difference > 0));
+}
+
+function applyWithdrawalDecisionPreset(mode) {
+    const amountEl = document.getElementById('withdrawalDecisionAmount');
+    if (!amountEl) return;
+    amountEl.value = mode === 'none' ? '0' : String(getWithdrawalDecisionBaselineAmount());
+    updateWithdrawalDecisionAmountState();
+    amountEl.focus({ preventScroll: true });
+}
+
+function normalizeWithdrawalTransferBankName(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const compact = raw.replace(/\s+/g, '').toLowerCase();
+    const aliases = {
+        '국민': 'KB국민은행',
+        '국민은행': 'KB국민은행',
+        'kb국민': 'KB국민은행',
+        'kb국민은행': 'KB국민은행',
+        '기업': 'IBK기업은행',
+        '기업은행': 'IBK기업은행',
+        'ibk기업': 'IBK기업은행',
+        'ibk기업은행': 'IBK기업은행',
+        '농협은행': 'NH농협은행',
+        'nh농협': 'NH농협은행',
+        'nh농협은행': 'NH농협은행',
+        '신한': '신한은행',
+        '우리': '우리은행',
+        '하나': '하나은행',
+        '하나은행': '하나은행',
+        '대구': 'iM뱅크 (구)대구',
+        '대구은행': 'iM뱅크 (구)대구',
+        'im뱅크': 'iM뱅크 (구)대구',
+        '토스': '토스뱅크',
+        '카카오': '카카오뱅크',
+        '신용협동조합': '신협'
+    };
+    const normalized = aliases[compact] || raw;
+    const allowed = new Set(DIVIDEND_BANK_TRANSFER_SAMPLE_BANK_NAMES
+        .map((bankName) => String(bankName || '').trim())
+        .filter((bankName) => bankName && !bankName.startsWith('*')));
+    return allowed.has(normalized) ? normalized : '';
+}
+
+async function downloadWithdrawalBankTransferXlsx() {
+    myConfirm(
+        '총회 확정 후 아직 지급하지 않은 탈퇴 건을 신협 대량이체 파일로 내려받습니다. 의제배당 초과분이 있는 건은 세무 검토가 끝난 뒤 원천세를 뺀 실지급액만 포함됩니다.\n\n은행에 올리기 전에 대상자·계좌·금액을 다시 확인하시겠습니까?',
+        async function () {
+            showLoading(true);
+            try {
+                const { data, error } = await _supabase.rpc('admin_get_withdrawal_refund_bank_export_rows');
+                if (error) throw error;
+
+                const sourceRows = Array.isArray(data) ? data : [];
+                const heldRows = [];
+                const readyRows = [];
+                sourceRows.forEach((row) => {
+                    const normalizedBankName = normalizeWithdrawalTransferBankName(row?.bank_name);
+                    const amount = Math.trunc(Number(row?.transfer_amount || 0));
+                    if (!row?.export_ready || !normalizedBankName || amount <= 0) {
+                        heldRows.push({
+                            ...row,
+                            hold_reason: row?.hold_reason || (!normalizedBankName ? '신협 양식 은행명 확인 필요' : '반환액 확인 필요')
+                        });
+                        return;
+                    }
+                    readyRows.push({ ...row, normalized_bank_name: normalizedBankName, transfer_amount: amount });
+                });
+
+                if (!readyRows.length) {
+                    const heldMessage = heldRows.length
+                        ? `\n계좌 또는 은행명 확인이 필요한 보류 ${heldRows.length.toLocaleString('ko-KR')}건이 있습니다.`
+                        : '';
+                    myAlert(`현재 내려받을 반환 지급 대상이 없습니다.${heldMessage}`, 'warning');
+                    return;
+                }
+
+                const transferSheetRows = [
+                    ['입금은행', '입금계좌', '이체금액(원)', '입금계좌 예금주', '내통장표시내용', '받는분통장표시내용'],
+                    ...readyRows.map((row) => [
+                        row.normalized_bank_name,
+                        String(row.bank_account || '').replace(/\s+/g, ''),
+                        row.transfer_amount,
+                        String(row.bank_holder || row.member_name || '').trim(),
+                        String(row.debit_memo || `${row.member_name || ''}환급`).trim(),
+                        String(row.credit_memo || '탈퇴지분정산').trim()
+                    ])
+                ];
+                const bankNameSheetRows = DIVIDEND_BANK_TRANSFER_SAMPLE_BANK_NAMES.map((bankName) => [bankName]);
+                const workbook = XLSX.utils.book_new();
+                const transferSheet = XLSX.utils.aoa_to_sheet(transferSheetRows);
+                const bankNameSheet = XLSX.utils.aoa_to_sheet(bankNameSheetRows);
+                applyDividendExportSheetWidths(transferSheet, [16, 22, 14, 18, 18, 22]);
+                applyDividendExportSheetWidths(bankNameSheet, [24]);
+                XLSX.utils.book_append_sheet(workbook, transferSheet, '대량이체');
+                XLSX.utils.book_append_sheet(workbook, bankNameSheet, '은행명');
+
+                const today = getAdminMemberKstDateString().replace(/-/g, '');
+                XLSX.writeFile(workbook, `탈퇴지분정산_신협대량이체_${today}.xlsx`);
+
+                const totalAmount = readyRows.reduce((sum, row) => sum + row.transfer_amount, 0);
+                const withheldTaxTotal = readyRows.reduce((sum, row) => sum + Number(row.income_tax_amount || 0) + Number(row.local_tax_amount || 0), 0);
+                myAlert(
+                    `신협 대량이체 파일을 만들었습니다.\n이체 대상 ${readyRows.length.toLocaleString('ko-KR')}건 · 실지급 ${totalAmount.toLocaleString('ko-KR')}원${withheldTaxTotal > 0 ? `\n의제배당 원천세 별도 관리 ${withheldTaxTotal.toLocaleString('ko-KR')}원` : ''}${heldRows.length ? `\n계좌 또는 은행명 확인으로 제외 ${heldRows.length.toLocaleString('ko-KR')}건` : ''}\n\n실제 이체가 끝난 뒤 각 건의 반환 지급 완료를 처리해주세요.`,
+                    heldRows.length ? 'warning' : 'success'
+                );
+            } catch (error) {
+                const message = String(error?.hint || error?.message || error || '알 수 없는 오류');
+                myAlert('신협 대량이체 파일 생성 실패: ' + message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+    );
+}
+
 function renderWithdrawalGeneralAssemblyMinutesOptions() {
     const selectEl = document.getElementById('withdrawalDecisionMinutesId');
     const helpEl = document.getElementById('withdrawalDecisionMinutesHelp');
@@ -17702,7 +18141,13 @@ function openWithdrawalWorkflowModal(action, applicationId) {
     if (action === 'decision') {
         document.getElementById('withdrawalMeetingDate').value = '';
         document.getElementById('withdrawalMeetingDate').min = workflow?.claim_available_on || '';
-        document.getElementById('withdrawalDecisionAmount').value = Number(workflow?.capital_balance_at_exit || 0);
+        const baseline = Math.max(Math.trunc(Number(workflow?.capital_balance_at_exit || 0)), 0);
+        const decisionAmountEl = document.getElementById('withdrawalDecisionAmount');
+        decisionAmountEl.dataset.baseline = String(baseline);
+        decisionAmountEl.value = String(baseline);
+        document.getElementById('withdrawalCapitalBaseline').value = `${baseline.toLocaleString('ko-KR')}원`;
+        document.getElementById('withdrawalDecisionCalculationNote').value = '';
+        updateWithdrawalDecisionAmountState();
         document.getElementById('withdrawalDecisionReference').value = '';
         const minutesSelect = document.getElementById('withdrawalDecisionMinutesId');
         if (minutesSelect) minutesSelect.value = '';
@@ -17735,20 +18180,30 @@ async function submitWithdrawalWorkflow() {
         params = { p_application_id: applicationId, p_effective_date: date };
     } else if (action === 'decision') {
         const date = document.getElementById('withdrawalMeetingDate').value;
-        const amount = Number(document.getElementById('withdrawalDecisionAmount').value || 0);
+        const amountRaw = document.getElementById('withdrawalDecisionAmount').value;
+        const amount = Number(amountRaw);
+        const baseline = getWithdrawalDecisionBaselineAmount();
+        const calculationNote = document.getElementById('withdrawalDecisionCalculationNote').value.trim();
         const minutesDocId = isAdminMemberRuntimeModuleEnabled('minutes')
             ? String(document.getElementById('withdrawalDecisionMinutesId')?.value || '').trim()
             : '';
         const reference = document.getElementById('withdrawalDecisionReference').value.trim();
         if (!date) return myAlert('총회 의결일을 입력해주세요.', 'warning');
+        if (amountRaw === '' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount < 0) {
+            return myAlert('총회가 확정한 반환액을 0원 이상의 정수로 입력해주세요.', 'warning');
+        }
+        if (amount !== baseline && !calculationNote) {
+            return myAlert('탈퇴 시점 출자금과 다른 금액을 확정한 결산·지분 산정 근거를 입력해주세요.', 'warning');
+        }
         if (!minutesDocId && !reference) return myAlert('총회 의사록을 선택하거나 의결 근거를 입력해주세요.', 'warning');
-        rpcName = 'admin_record_withdrawal_refund_decision_v2';
+        rpcName = 'admin_record_withdrawal_refund_decision_v4';
         params = {
             p_withdrawal_id: withdrawalId,
             p_meeting_date: date,
             p_decision_amount: amount,
             p_decision_reference: reference || null,
-            p_minutes_doc_id: minutesDocId || null
+            p_minutes_doc_id: minutesDocId || null,
+            p_calculation_note: calculationNote || null
         };
     } else if (action === 'payment') {
         const date = document.getElementById('withdrawalPaymentDate').value;

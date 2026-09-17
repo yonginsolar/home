@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.152
-Change: Add staged withdrawal/refund status, refund-account readiness, and former-member rejoin access.
+Version: v1.0.154
+Change: Separate withdrawal capital refund, deemed-dividend tax review, and net payment details.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.152 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.154 | membermanage.html');</script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9508,6 +9508,7 @@ el.classList.add('hidden');
 function formatFormerWorkflowStatus(status) {
 const labels = {
 refund_calculation_pending: '총회 의결 전 · 환급액 산정 대기',
+deemed_dividend_review_pending: '총회 의결 완료 · 초과분 세무 검토 중',
 refund_payment_pending: '총회 의결 완료 · 지급 대기',
 refunded: '환급 완료',
 cancelled: '절차 취소'
@@ -9530,15 +9531,30 @@ const statusBadge = document.getElementById('formerMemberStatusBadge');
 if (identity) identity.textContent = `${data?.member_name || '-'} · ${data?.member_id || '-'}`;
 if (effectiveDate) effectiveDate.textContent = formatMemberKstDate(data?.effective_date);
 if (capital) capital.textContent = `${Number(data?.capital_balance_at_exit || 0).toLocaleString()}원`;
-if (workflow) workflow.textContent = formatFormerWorkflowStatus(data?.workflow_status);
+if (workflow) {
+workflow.textContent = data?.settlement_without_payment
+? '반환 없음 · 지분 정산 완료'
+: formatFormerWorkflowStatus(data?.workflow_status);
+}
 if (statusBadge) statusBadge.textContent = data?.member_status || '탈퇴';
 
 const lines = [];
 if (data?.claim_available_on) lines.push(`환급 청구 가능일: ${formatMemberKstDate(data.claim_available_on)}`);
 if (data?.claim_expires_on) lines.push(`청구권 확인 기한: ${formatMemberKstDate(data.claim_expires_on)}`);
 if (data?.decision_meeting_date) lines.push(`총회 의결일: ${formatMemberKstDate(data.decision_meeting_date)}`);
-if (data?.decision_amount !== null && data?.decision_amount !== undefined) lines.push(`의결 환급액: ${Number(data.decision_amount || 0).toLocaleString()}원`);
-if (data?.payment_date) lines.push(`환급 지급일: ${formatMemberKstDate(data.payment_date)}`);
+if (data?.decision_amount !== null && data?.decision_amount !== undefined) lines.push(`총회 확정 반환액: ${Number(data.decision_amount || 0).toLocaleString()}원`);
+if (Number(data?.capital_refund_amount || 0) > 0) lines.push(`출자원금 반환분: ${Number(data.capital_refund_amount || 0).toLocaleString()}원`);
+if (Number(data?.deemed_dividend_gross_amount || 0) > 0) {
+lines.push(`출자금 초과 반환분(의제배당 검토): ${Number(data.deemed_dividend_gross_amount || 0).toLocaleString()}원`);
+const withheldTax = Number(data?.deemed_dividend_income_tax_amount || 0) + Number(data?.deemed_dividend_local_tax_amount || 0);
+if (String(data?.deemed_dividend_tax_status || '') === 'confirmed') {
+lines.push(`원천세: ${withheldTax.toLocaleString()}원`);
+lines.push(`은행 실지급액: ${Number(data?.net_payment_amount || 0).toLocaleString()}원`);
+}
+}
+if (data?.decision_calculation_note) lines.push(`산정 근거: ${data.decision_calculation_note}`);
+if (data?.settlement_without_payment) lines.push('총회 확정액이 0원이므로 은행 송금 없이 정산 완료');
+else if (data?.payment_date) lines.push(`환급 지급일: ${formatMemberKstDate(data.payment_date)}`);
 if (detail) detail.textContent = lines.length > 0 ? lines.join(' · ') : '탈퇴 효력 처리 후 총회 의결과 환급 지급 상황이 이곳에 표시됩니다.';
 if (rejoinPanel) rejoinPanel.classList.toggle('hidden', !data?.can_request_rejoin);
 
