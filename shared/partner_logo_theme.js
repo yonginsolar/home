@@ -1,6 +1,6 @@
 /*
-Version: v1.0.0
-Change: Remove uniform light backgrounds from partner logos while preserving original logo colors.
+Version: v1.0.1
+Change: Keep the cleaned logo as the only visible and accessible variant after background removal.
 */
 (function partnerLogoThemeFactory(global) {
   'use strict';
@@ -140,12 +140,30 @@ Change: Remove uniform light backgrounds from partner logos while preserving ori
     const normalized = String(url || '').trim();
     wrapper.dataset.partnerLogoSource = normalized;
     wrapper.classList.remove('is-background-cleaned');
+    const originalImage = wrapper.querySelector('.partner-logo-original');
     const cleanedImage = wrapper.querySelector('.partner-logo-cleaned');
+    const accessibleAlt = String(originalImage?.alt || wrapper.dataset.partnerLogoAlt || '');
+    if (accessibleAlt) wrapper.dataset.partnerLogoAlt = accessibleAlt;
+    if (originalImage) {
+      originalImage.style.removeProperty('display');
+      originalImage.removeAttribute('aria-hidden');
+    }
+    if (cleanedImage) {
+      cleanedImage.alt = '';
+      cleanedImage.setAttribute('aria-hidden', 'true');
+    }
     if (!normalized || !cleanedImage) return false;
 
     const variant = await getVariant(normalized);
     if (wrapper.dataset.partnerLogoSource !== normalized || !variant.processed) return false;
     cleanedImage.src = variant.cleanedUrl;
+    if (originalImage) {
+      cleanedImage.alt = accessibleAlt;
+      cleanedImage.removeAttribute('aria-hidden');
+      originalImage.alt = '';
+      originalImage.setAttribute('aria-hidden', 'true');
+      originalImage.style.setProperty('display', 'none', 'important');
+    }
     wrapper.classList.add('is-background-cleaned');
     return true;
   }
