@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.165
-Change: 2026-09-17 - Add staged withdrawal, refund accounting, former-member, and rejoin workflow.
+Version: v1.0.166
+Change: 2026-09-17 - Show outstanding reduction and withdrawal returns on the dashboard and sidebar.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.165';
+window.ADMIN_MEMBER_VERSION = 'v1.0.166';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -64,6 +64,10 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .nav-link { color: rgba(255,255,255,0.75); padding: 12px 15px; margin-bottom: 5px; border-radius: 8px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; }
 .nav-link:hover, .nav-link.active { background: rgba(255,255,255,0.1); color: white; font-weight: 600; }
 .nav-link i { margin-right: 12px; font-size: 1.1rem; }
+.sidebar-return-link { align-items: flex-start; }
+.sidebar-return-link .sidebar-return-copy { min-width: 0; flex: 1; }
+.sidebar-return-link .sidebar-return-meta { display: block; margin-top: 2px; color: rgba(255,255,255,0.56); font-size: 0.72rem; line-height: 1.25; white-space: normal; }
+.sidebar-return-link:hover .sidebar-return-meta, .sidebar-return-link.active .sidebar-return-meta { color: rgba(255,255,255,0.82); }
 .menu-category { font-size: 0.75rem; text-transform: uppercase; color: rgba(255,255,255,0.4); margin: 20px 15px 10px; font-weight: 700; letter-spacing: 1px; }
 
 /* 메인 컨텐츠 영역 */
@@ -301,6 +305,14 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
     <i class="bi bi-inbox-fill"></i> 업무 신청 관리
     <span id="sidebar-app-badge" class="badge bg-danger ms-auto hidden">0</span>
 </a>
+<a class="nav-link sidebar-return-link" onclick="openCapitalReturnManagement()" id="nav-capital-returns" style="cursor:pointer;">
+    <i class="bi bi-arrow-counterclockwise"></i>
+    <span class="sidebar-return-copy">
+        <span>감자·탈퇴 관리</span>
+        <small class="sidebar-return-meta" id="sidebar-return-amount">처리 중 반환액 확인</small>
+    </span>
+    <span id="sidebar-return-badge" class="badge bg-warning text-dark ms-2 hidden">0명</span>
+</a>
 <a class="nav-link" onclick="switchTab('deposit')" id="nav-deposit" style="cursor:pointer;">
 <i class="bi bi-cash-coin"></i> 입금 매칭
 </a>
@@ -382,12 +394,26 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
             </div>
         </div>
 
-        <div class="col-md-6 col-lg-3">
+        <div class="col-md-6 col-lg-6">
             <div class="card bg-danger bg-opacity-10 border-0 shadow-sm h-100" style="cursor:pointer;" onclick="switchTab('applications')">
                 <div class="card-body p-4">
                     <h6 class="text-danger fw-bold mb-2">처리 대기 신청</h6>
                     <h2 class="display-6 fw-bold mb-0 text-danger" id="dash-app-pending">0건</h2>
                     <div class="small text-muted mt-2">출자/감자/탈퇴 요청</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 col-lg-6">
+            <div class="card bg-warning bg-opacity-10 border-0 shadow-sm h-100" style="cursor:pointer;" onclick="openCapitalReturnManagement()">
+                <div class="card-body p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="text-dark fw-bold mb-0">출자금 반환 추적</h6>
+                        <i class="bi bi-arrow-right-circle text-warning"></i>
+                    </div>
+                    <h2 class="fs-3 fw-bold mb-1" id="dash-return-summary">0명 · 0원</h2>
+                    <div class="small text-muted" id="dash-return-breakdown">감자 0명 · 탈퇴 0명</div>
+                    <div class="small text-danger mt-2" id="dash-return-stages">신규 확인 0건 · 총회 대기 0건 · 지급 대기 0건</div>
                 </div>
             </div>
         </div>
@@ -10958,6 +10984,20 @@ function goToPendingMembers() {
   }, 80);
 }
 
+function openCapitalReturnManagement() {
+  g_app_type_filter = 'governance';
+  g_app_filter = 'pending';
+  switchTab('applications');
+  filterAppType('governance');
+  filterAppList('pending');
+
+  document.querySelectorAll('.sidebar-menu .nav-link').forEach(function (el) {
+    el.classList.remove('active');
+  });
+  const returnNav = document.getElementById('nav-capital-returns');
+  if (returnNav) returnNav.classList.add('active');
+}
+
 function isAdminMemberRuntimeModuleEnabled(moduleKey) {
 const modules = g_adminMemberRuntime && typeof g_adminMemberRuntime.modules === 'object'
 ? g_adminMemberRuntime.modules
@@ -11061,6 +11101,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],
 ['nav-applications', memberAdminEnabled],
+['nav-capital-returns', memberAdminEnabled],
 ['nav-deposit', memberAdminEnabled],
 ['nav-vote-hub', voteEnabled],
 ['siteOpsCategory', siteAdminEnabled || documentsAdminEnabled],
@@ -11365,6 +11406,66 @@ async function fetchPendingApplicationCount() {
     return count || 0;
 }
 
+function toSafeReturnSummaryNumber(value) {
+    const number = Number(value || 0);
+    return Number.isFinite(number) && number > 0 ? Math.trunc(number) : 0;
+}
+
+function updateMemberReturnSummary(summary) {
+    const source = summary && typeof summary === 'object' ? summary : {};
+    const personCount = toSafeReturnSummaryNumber(source.person_count);
+    const expectedAmount = toSafeReturnSummaryNumber(source.expected_amount);
+    const reductionPeople = toSafeReturnSummaryNumber(source.reduction_person_count);
+    const reductionAmount = toSafeReturnSummaryNumber(source.reduction_expected_amount);
+    const withdrawalPeople = toSafeReturnSummaryNumber(source.withdrawal_person_count);
+    const withdrawalAmount = toSafeReturnSummaryNumber(source.withdrawal_expected_amount);
+    const newRequests = toSafeReturnSummaryNumber(source.new_request_count);
+    const meetingPending = toSafeReturnSummaryNumber(source.meeting_pending_count);
+    const paymentPending = toSafeReturnSummaryNumber(source.payment_pending_count);
+
+    setText('dash-return-summary', `${personCount.toLocaleString('ko-KR')}명 · ${expectedAmount.toLocaleString('ko-KR')}원`);
+    setText(
+        'dash-return-breakdown',
+        `감자 ${reductionPeople.toLocaleString('ko-KR')}명 · ${reductionAmount.toLocaleString('ko-KR')}원 / 탈퇴 ${withdrawalPeople.toLocaleString('ko-KR')}명 · ${withdrawalAmount.toLocaleString('ko-KR')}원`
+    );
+    setText(
+        'dash-return-stages',
+        `신규 확인 ${newRequests.toLocaleString('ko-KR')}건 · 총회 대기 ${meetingPending.toLocaleString('ko-KR')}건 · 지급 대기 ${paymentPending.toLocaleString('ko-KR')}건`
+    );
+
+    const sidebarBadge = document.getElementById('sidebar-return-badge');
+    if (sidebarBadge) {
+        sidebarBadge.textContent = `${personCount.toLocaleString('ko-KR')}명`;
+        sidebarBadge.classList.toggle('hidden', personCount <= 0);
+    }
+    setText(
+        'sidebar-return-amount',
+        personCount > 0 ? `예상 ${expectedAmount.toLocaleString('ko-KR')}원` : '처리 중 반환 없음'
+    );
+}
+
+function markMemberReturnSummaryUnavailable() {
+    setText('dash-return-summary', '확인 필요');
+    setText('dash-return-breakdown', '감자·탈퇴 반환 현황을 불러오지 못했습니다.');
+    setText('dash-return-stages', '감자·탈퇴 관리에서 다시 확인해주세요.');
+    setText('sidebar-return-amount', '현황 확인 필요');
+    const sidebarBadge = document.getElementById('sidebar-return-badge');
+    if (sidebarBadge) sidebarBadge.classList.add('hidden');
+}
+
+async function fetchMemberReturnSummary() {
+    try {
+        const { data, error } = await _supabase.rpc('admin_get_member_return_summary');
+        if (error) throw error;
+        updateMemberReturnSummary(data || {});
+        return data || {};
+    } catch (error) {
+        console.error('감자·탈퇴 반환 현황 조회 실패:', error);
+        markMemberReturnSummaryUnavailable();
+        return null;
+    }
+}
+
 const DASHBOARD_YONGIN_LOCATION_LABEL_ORDER = Object.freeze(['수지구', '기흥구', '처인구', '그 외']);
 const DASHBOARD_GYEONGGI_LOCATION_LABEL_ORDER = Object.freeze(['경기도내', '그 외']);
 const DASHBOARD_LOCATION_COLORS = Object.freeze({
@@ -11629,6 +11730,7 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
     // 1. [신규] 업무 신청 대기 건수 즉시 표시 (탭 클릭 없이)
     const pendingAppCount = await fetchPendingApplicationCount();
     if (typeof pendingAppCount === 'number') updateAppBadges(pendingAppCount);
+    await fetchMemberReturnSummary();
 
     // 2. [신규] 통계 차트 데이터 로드
     const { data: stats, error: statError } = await _supabase.rpc('get_dashboard_stats');
@@ -14673,7 +14775,11 @@ window.onload = async function() {
     }
 
     // 3. 초기 탭 로드
-    switchTab(getInitialAdminMemberTab());
+    const initialTab = getInitialAdminMemberTab();
+    switchTab(initialTab);
+    if (initialTab !== 'dashboard' && canAccessAdminMemberTab('applications')) {
+        fetchMemberReturnSummary();
+    }
     await openAdminMemberActivityDeepLink();
 
 };
@@ -17150,6 +17256,15 @@ async function fetchApplications() {
 
     renderAppList();
     updateAppBadges();
+    fetchMemberReturnSummary();
+}
+
+function isApplicationWorkPending(app) {
+    if (!app || typeof app !== 'object') return false;
+    if (app.status === 'pending') return true;
+    if (app.type !== 'withdraw') return false;
+    const workflow = g_withdrawal_workflows.get(String(app.id || '')) || null;
+    return ['refund_calculation_pending', 'refund_payment_pending'].includes(String(workflow?.workflow_status || ''));
 }
 
 // 2. 화면 렌더링 (필터 적용)
@@ -17164,7 +17279,7 @@ function renderAppList() {
             : g_app_type_filter === 'governance'
             ? ['reduction', 'withdraw', 'rejoin'].includes(item.type)
             : true;
-        const matchesStatus = g_app_filter === 'pending' ? item.status === 'pending' : true;
+        const matchesStatus = g_app_filter === 'pending' ? isApplicationWorkPending(item) : true;
         return matchesType && matchesStatus;
     });
 
@@ -17765,9 +17880,9 @@ function updateAppBadges(pendingCountOverride = null) {
         const el = document.getElementById(id);
         if (el) el.innerText = count;
     };
-    setTypeCount('app-type-extra-count', g_apps.filter(a => a.type === 'extra' && a.status === 'pending').length);
-    setTypeCount('app-type-governance-count', g_apps.filter(a => ['reduction', 'withdraw', 'rejoin'].includes(a.type) && a.status === 'pending').length);
-    setTypeCount('app-type-all-count', g_apps.filter(a => a.status === 'pending').length);
+    setTypeCount('app-type-extra-count', g_apps.filter(a => a.type === 'extra' && isApplicationWorkPending(a)).length);
+    setTypeCount('app-type-governance-count', g_apps.filter(a => ['reduction', 'withdraw', 'rejoin'].includes(a.type) && isApplicationWorkPending(a)).length);
+    setTypeCount('app-type-all-count', g_apps.filter(isApplicationWorkPending).length);
 } // End of updateAppBadges
 
 // ================================================================
