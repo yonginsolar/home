@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.170
-Change: 2026-09-17 - Route confirmed capital returns and dividends through expense approval before accounting and bank export.
+Version: v1.0.171
+Change: 2026-09-17 - Match withdrawal refunds to each cooperative's enabled approval and accounting modules.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.170';
+window.ADMIN_MEMBER_VERSION = 'v1.0.171';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -613,7 +613,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 </div>
 
                 <div id="withdrawalPaymentFields" class="d-none">
-                    <div class="alert alert-danger small">실제 송금이 끝난 뒤에만 완료 처리해주세요. 의제배당 초과분이 있으면 원천세를 뺀 실지급액 기준으로 미지급금 지급 전표가 기록됩니다.</div>
+                    <div class="alert alert-danger small" id="withdrawalPaymentNotice">실제 송금이 끝난 뒤에만 완료 처리해주세요. 의제배당 초과분이 있으면 원천세를 뺀 실지급액 기준으로 미지급금 지급 전표가 기록됩니다.</div>
                     <label class="form-label small fw-bold" for="withdrawalPaymentDate">실제 지급일</label>
                     <input type="date" class="form-control" id="withdrawalPaymentDate">
                 </div>
@@ -11134,6 +11134,12 @@ function isAdminMemberSiteProfile() {
 return String(g_adminMemberRuntime?.runtime_profile || '') === 'site_member';
 }
 
+function usesAdminMemberFullPayoutWorkflow() {
+return !isAdminMemberSiteProfile()
+    && isAdminMemberRuntimeModuleEnabled('approval')
+    && isAdminMemberRuntimeModuleEnabled('accounting');
+}
+
 function hasAdminMemberScopePermission(scopeKey) {
 const safeScope = String(scopeKey || '').trim();
 let cachedRole = '';
@@ -16043,6 +16049,25 @@ function openWithdrawalDeemedDividendTaxModal(withdrawalId) {
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
+async function openWithdrawalDeemedDividendTaxFromApplication(withdrawalId) {
+    showLoading(true);
+    try {
+        const rows = await fetchWithdrawalDeemedDividendReviews(false);
+        const row = Array.isArray(rows)
+            ? rows.find((item) => String(item?.withdrawal_id) === String(withdrawalId))
+            : null;
+        if (!row) {
+            myAlert('의제배당 세무 검토 대상을 찾지 못했습니다. 목록을 새로고침한 뒤 다시 시도해주세요.', 'warning');
+            return;
+        }
+        openWithdrawalDeemedDividendTaxModal(withdrawalId);
+    } catch (error) {
+        myAlert('의제배당 세무 검토 정보를 불러오지 못했습니다: ' + (error?.message || error), 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
 async function submitWithdrawalDeemedDividendTaxReview() {
     const withdrawalId = Number(document.getElementById('withdrawalDeemedDividendTaxId')?.value || 0);
     const note = String(document.getElementById('withdrawalDeemedDividendTaxNote')?.value || '').trim();
@@ -17656,9 +17681,12 @@ function renderAppList() {
             if (stage === 'refund_calculation_pending') {
                 actionBtns = `<button class="btn btn-sm btn-info fw-bold py-0" onclick="openWithdrawalWorkflowModal('decision', ${app.id})"><i class="bi bi-people"></i> 총회 의결 기록</button>`;
             } else if (stage === 'deemed_dividend_review_pending') {
-                actionBtns = `<button class="btn btn-sm btn-outline-primary fw-bold py-0" onclick="document.getElementById('funds-dividend-exports-tab')?.click()"><i class="bi bi-receipt"></i> 배당 세무 검토로 이동</button>`;
+                actionBtns = usesAdminMemberFullPayoutWorkflow()
+                    ? `<button class="btn btn-sm btn-outline-primary fw-bold py-0" onclick="document.getElementById('funds-dividend-exports-tab')?.click()"><i class="bi bi-receipt"></i> 배당 세무 검토로 이동</button>`
+                    : `<button class="btn btn-sm btn-outline-primary fw-bold py-0" onclick="openWithdrawalDeemedDividendTaxFromApplication('${escapeJsString(withdrawal.withdrawal_id)}')"><i class="bi bi-receipt"></i> 원천세 검토</button>`;
             } else if (stage === 'refund_payment_pending') {
-                actionBtns = `<button class="btn btn-sm btn-danger fw-bold py-0" onclick="openWithdrawalWorkflowModal('payment', ${app.id})"><i class="bi bi-bank"></i> 환급 지급 완료</button>`;
+                const paymentLabel = usesAdminMemberFullPayoutWorkflow() ? '환급 지급 완료' : '수동 송금 확인';
+                actionBtns = `<button class="btn btn-sm btn-danger fw-bold py-0" onclick="openWithdrawalWorkflowModal('payment', ${app.id})"><i class="bi bi-bank"></i> ${paymentLabel}</button>`;
             }
         } else if (app.status === 'pending') {
             statusBadge = `<span class="badge bg-warning text-dark">대기중</span>`;
@@ -17978,8 +18006,12 @@ function normalizeWithdrawalTransferBankName(value) {
 }
 
 async function downloadWithdrawalBankTransferXlsx() {
+    const fullWorkflow = usesAdminMemberFullPayoutWorkflow();
+    const readinessText = fullWorkflow
+        ? '총회 반환액 확정, 출자금 반환 지출결의 승인과 회계 연동까지 마친 미지급 건'
+        : '총회 반환액 확정과 필요한 원천세 검토를 마친 미지급 건';
     myConfirm(
-        '총회 반환액 확정, 출자금 반환 지출결의 승인과 회계 연동까지 마친 미지급 건을 신협 대량이체 파일로 내려받습니다. 의제배당 초과분이 있는 건은 세무 검토가 끝난 뒤 원천세를 뺀 실지급액만 포함됩니다.\n\n은행에 올리기 전에 대상자·계좌·금액을 다시 확인하시겠습니까?',
+        `${readinessText}을 신협 대량이체 파일로 내려받습니다. 의제배당 초과분이 있는 건은 세무 검토가 끝난 뒤 원천세를 뺀 실지급액만 포함됩니다.\n\n은행에 올리기 전에 대상자·계좌·금액을 다시 확인하시겠습니까?`,
         async function () {
             showLoading(true);
             try {
@@ -18006,7 +18038,10 @@ async function downloadWithdrawalBankTransferXlsx() {
                     const heldMessage = heldRows.length
                         ? `\n계좌 또는 은행명 확인이 필요한 보류 ${heldRows.length.toLocaleString('ko-KR')}건이 있습니다.`
                         : '';
-                    myAlert(`현재 내려받을 반환 지급 대상이 없습니다. 출자금 반환 지출결의 완료와 회계관리의 전자결재 연동 여부를 확인해주세요.${heldMessage}`, 'warning');
+                    const emptyGuide = fullWorkflow
+                        ? '출자금 반환 지출결의 완료와 회계관리의 전자결재 연동 여부를 확인해주세요.'
+                        : '총회 반환액 확정, 원천세 검토와 환급계좌 등록 여부를 확인해주세요.';
+                    myAlert(`현재 내려받을 반환 지급 대상이 없습니다. ${emptyGuide}${heldMessage}`, 'warning');
                     return;
                 }
 
@@ -18122,10 +18157,13 @@ function openWithdrawalWorkflowModal(action, applicationId) {
         return;
     }
 
+    const fullWorkflow = usesAdminMemberFullPayoutWorkflow();
     const config = {
         effect: { title: '탈퇴 효력 처리', submit: '탈퇴 효력 확정' },
         decision: { title: '총회 의결 및 반환액 확정', submit: '반환액 확정' },
-        payment: { title: '환급 지급 완료', submit: '지급 및 회계 처리 완료' }
+        payment: fullWorkflow
+            ? { title: '환급 지급 완료', submit: '지급 및 회계 처리 완료' }
+            : { title: '수동 송금 확인', submit: '송금 완료 기록' }
     }[action];
     if (!config) return;
 
@@ -18139,6 +18177,12 @@ function openWithdrawalWorkflowModal(action, applicationId) {
     document.getElementById('withdrawalEffectFields').classList.toggle('d-none', action !== 'effect');
     document.getElementById('withdrawalDecisionFields').classList.toggle('d-none', action !== 'decision');
     document.getElementById('withdrawalPaymentFields').classList.toggle('d-none', action !== 'payment');
+    const paymentNotice = document.getElementById('withdrawalPaymentNotice');
+    if (paymentNotice) {
+        paymentNotice.textContent = fullWorkflow
+            ? '실제 송금이 끝난 뒤에만 완료 처리해주세요. 의제배당 초과분이 있으면 원천세를 뺀 실지급액 기준으로 미지급금 지급 전표가 기록됩니다.'
+            : '은행 이체를 실제로 마친 뒤 기록해주세요. 조합원 출자 내역과 감사 로그에는 남지만, 사용하지 않는 회계 전표는 만들지 않습니다.';
+    }
 
     const today = formatAdminMemberKstDate(new Date(), '');
     if (action === 'effect') document.getElementById('withdrawalEffectiveDate').value = today;
@@ -18151,6 +18195,12 @@ function openWithdrawalWorkflowModal(action, applicationId) {
         decisionAmountEl.value = String(baseline);
         document.getElementById('withdrawalCapitalBaseline').value = `${baseline.toLocaleString('ko-KR')}원`;
         document.getElementById('withdrawalDecisionCalculationNote').value = '';
+        const taxNotice = document.getElementById('withdrawalDecisionTaxNotice');
+        if (taxNotice) {
+            taxNotice.innerHTML = fullWorkflow
+                ? '납입출자금을 넘는 금액은 세무상 의제배당 검토 대상입니다. 총회 의결을 저장한 뒤 <b>배당 관리 → 지급·세무 자료 → 탈퇴 지분환급 의제배당</b>에서 원천세를 확인해야 은행 지급 대상으로 전환됩니다.'
+                : '납입출자금을 넘는 금액은 세무상 의제배당 검토 대상입니다. 총회 의결을 저장한 뒤 <b>업무 신청 관리 → 감자·탈퇴 관리</b>에서 원천세를 확인해야 은행 지급 대상으로 전환됩니다.';
+        }
         updateWithdrawalDecisionAmountState();
         document.getElementById('withdrawalDecisionReference').value = '';
         const minutesSelect = document.getElementById('withdrawalDecisionMinutesId');
