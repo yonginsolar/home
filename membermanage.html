@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.151
-Change: Separate legal representative direct registration consent and receipt records.
+Version: v1.0.152
+Change: Add staged withdrawal/refund status, refund-account readiness, and former-member rejoin access.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.151 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.152 | membermanage.html');</script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1570,6 +1570,38 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 </div>
 
+<div id="formerMemberSection" class="hidden">
+<div class="dashboard-card mb-4">
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 border-bottom pb-3 mb-3">
+<div>
+<div class="small text-secondary mb-1">탈퇴 후 이용 화면</div>
+<h4 class="fw-bold mb-1"><i class="bi bi-clipboard-check me-2"></i>탈퇴·출자금 환급 현황</h4>
+<p class="small text-muted mb-0">조합원 전용 기능은 종료되며, 환급 처리 상황과 재가입 신청만 확인할 수 있습니다.</p>
+</div>
+<span class="badge rounded-pill bg-secondary" id="formerMemberStatusBadge">탈퇴</span>
+</div>
+
+<div class="row g-3 mb-3">
+<div class="col-12 col-md-6"><div class="border rounded-3 p-3 h-100"><div class="small text-muted">이름 · 조합원 번호</div><div class="fw-bold mt-1" id="formerMemberIdentity">-</div></div></div>
+<div class="col-12 col-md-6"><div class="border rounded-3 p-3 h-100"><div class="small text-muted">탈퇴 효력일</div><div class="fw-bold mt-1" id="formerEffectiveDate">-</div></div></div>
+<div class="col-12 col-md-6"><div class="border rounded-3 p-3 h-100"><div class="small text-muted">탈퇴 당시 출자금</div><div class="fw-bold mt-1" id="formerCapitalBalance">-</div></div></div>
+<div class="col-12 col-md-6"><div class="border rounded-3 p-3 h-100"><div class="small text-muted">현재 처리 단계</div><div class="fw-bold mt-1" id="formerWorkflowStatus">-</div></div></div>
+</div>
+
+<div class="alert alert-light border small mb-3" id="formerWorkflowDetail">처리 정보를 불러오는 중입니다.</div>
+
+<div class="border rounded-3 p-3 hidden" id="formerRejoinPanel">
+<h6 class="fw-bold mb-2"><i class="bi bi-arrow-repeat me-1"></i>재가입 신청</h6>
+<p class="small text-muted">이전 출자금 환급이 끝난 뒤 새 출자 약정으로 다시 가입할 수 있습니다. 과거 조합원 기간과 새 가입 기간은 별도로 보관됩니다.</p>
+<label class="form-label small fw-bold" for="formerRejoinAmount">새 출자 약정금</label>
+<input class="form-control mb-2" type="number" id="formerRejoinAmount" min="100000" step="10000" value="100000">
+<label class="form-label small fw-bold" for="formerRejoinReason">메모 (선택)</label>
+<textarea class="form-control mb-3" id="formerRejoinReason" rows="2" placeholder="재가입 신청과 함께 전할 내용이 있으면 적어주세요."></textarea>
+<button type="button" class="btn btn-success w-100 fw-bold" onclick="submitFormerMemberRejoin()">재가입 신청</button>
+</div>
+</div>
+</div>
+
 <div id="dashboardSection" class="hidden">
 
 <div id="birthdayBanner" onclick="fireConfetti()">
@@ -1890,6 +1922,11 @@ NO. <span id="infoMemberId">-</span>
 
 <div id="tabWithdraw" class="hidden">
 <h6 class="fw-bold text-danger mb-3">탈퇴 신청</h6>
+<div class="alert alert-warning small" id="withdrawRefundAccountNotice">
+<div class="fw-bold mb-1"><i class="bi bi-bank me-1"></i>환급 계좌 확인</div>
+<div id="withdrawRefundAccountMessage">등록 상태를 확인하는 중입니다.</div>
+<button type="button" class="btn btn-sm btn-outline-dark mt-2 hidden" id="withdrawRefundAccountButton" onclick="goToRefundAccountSetup()">내 정보에서 계좌 입력</button>
+</div>
 <div class="mb-3">
 <label class="form-label small">탈퇴 사유</label>
 <textarea id="wdReason" class="form-control" rows="3" placeholder="사유를 입력해주세요"></textarea>
@@ -1900,7 +1937,7 @@ NO. <span id="infoMemberId">-</span>
 탈퇴 시 출자금은 다음년도 총회 승인 후<br>환급됨을 확인하였습니다.
 </label>
 </div>
-<button class="btn btn-dark w-100 fw-bold" onclick="submitApplication('withdraw')">탈퇴 신청</button>
+<button class="btn btn-dark w-100 fw-bold" id="withdrawSubmitButton" onclick="submitApplication('withdraw')">탈퇴 신청</button>
 </div>
 
 <div id="tabPartner" class="hidden">
@@ -2417,6 +2454,7 @@ let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
 let portalBootInProgress = false;
 let portalBootReadyUserId = '';
+let memberAccessContext = null;
 window.__memberAppLocks = { submitApplication: false, cancelApplication: false, modifyApplication: false, requestConnect: false, submitFamily: false, submitPost: false, disconnectRelation: false };
 const KST_TZ_MEMBER = 'Asia/Seoul';
 function formatMemberKstDate(value, fallback = '-') {
@@ -3242,6 +3280,7 @@ handleLoginSuccess(session.user);
 } else {
 curAuth = null;
 portalBootReadyUserId = '';
+memberAccessContext = null;
 const shouldRecover =
 !suppressSessionExpiredHandling &&
 (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') &&
@@ -3764,6 +3803,21 @@ return dest.href;
 		}
 
 		rootMemberProfileId = claimRes.profile_id || null;
+
+		const { data: accessContext, error: accessContextError } = await _supabase.rpc('get_my_member_access_context');
+		if (accessContextError) throw accessContextError;
+		memberAccessContext = accessContext || null;
+
+		if (['former', 'expelled'].includes(String(memberAccessContext?.access_mode || ''))) {
+		document.getElementById('headerLogoutBtn').classList.remove('hidden');
+		await renderFormerMemberPortal();
+		portalBootReadyUserId = String(user?.id || '').trim();
+		return;
+		}
+
+		if (!['current', 'pending'].includes(String(memberAccessContext?.access_mode || ''))) {
+		throw new Error('현재 이용 가능한 조합원 상태를 확인하지 못했습니다. 사무국에 문의해주세요.');
+		}
 
 		await ensureLoginBadgesGranted();
 
@@ -7534,6 +7588,16 @@ if (!activeProfileId) {
 throw new Error('현재 조합원 프로필을 확인하지 못했습니다. 다시 로그인 후 시도해주세요.');
 }
 
+let createdApplication = null;
+if (type === 'withdraw') {
+const { data, error } = await _supabase.rpc('request_member_withdrawal', { p_reason: reason });
+if (error) throw error;
+createdApplication = { id: data?.application_id };
+if (data?.replayed) {
+showModal('이미 탈퇴 신청이 접수되어 있습니다.\n처리 결과를 기다려주세요.');
+return;
+}
+} else {
 const { data: existingPending, error: pendingErr } = await scopeMemberTenant(_supabase
 .from('coop_applications')
 .select('id'))
@@ -7551,7 +7615,7 @@ showModal('이미 동일한 신청이 접수되어 있습니다.\n처리 결과�
 return;
 }
 
-const { data: createdApplication, error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
+const { data, error } = await _supabase.from('coop_applications').insert(withMemberTenantPayload({
 member_uid: activeProfileId,
 member_id: curMem.member_id,
 name: curMem.name,
@@ -7560,8 +7624,9 @@ amount: amount,
 reason: reason,
 status: 'pending'
 })).select('id').single();
-
 if(error) throw error;
+createdApplication = data;
+}
 
 notifyMemberApplicationAdmins(createdApplication?.id).catch((notifyError) => {
 console.warn('[member-request-alert] application admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
@@ -7585,7 +7650,7 @@ if(document.getElementById('checkWdAgree')) document.getElementById('checkWdAgre
 // ★ 핵심: 스마트 새로고침
 reloadDashboard();
 } catch (error) {
-showModal('오류: ' + error.message);
+showModal('오류: ' + (error?.hint || error?.message || error));
 } finally {
 showLoading(false);
 window.__memberAppLocks.submitApplication = false;
@@ -7706,6 +7771,9 @@ if (error) {
 showModal('수정 실패: ' + (error.hint || error.message));
 } else {
 showModal('수정되었습니다.');
+curMem.bank_name = bank || curMem.bank_name;
+curMem.account_number = accNo || curMem.account_number;
+curMem.account_holder = holder || curMem.account_holder;
 toggleEditMode(false);
 reloadDashboard(); 
 }
@@ -7801,7 +7869,38 @@ showModal(copied ? '계좌번호를 복사했습니다.' : `계좌번호: ${acco
 }
 } // End of copyExtraCapitalDepositAccount
 
-// [수정] 탭 전환 (감자 한도 체크 로직 포함)
+function hasRefundAccountLocally() {
+return Boolean(
+String(curMem?.bank_name || '').trim()
+&& String(curMem?.account_number || '').trim()
+&& String(curMem?.account_holder || '').trim()
+);
+}
+
+function syncWithdrawRefundAccountUi() {
+const ready = hasRefundAccountLocally();
+const message = document.getElementById('withdrawRefundAccountMessage');
+const setupButton = document.getElementById('withdrawRefundAccountButton');
+const submitButton = document.getElementById('withdrawSubmitButton');
+if (message) {
+message.textContent = ready
+? `${curMem.bank_name} 환급 계좌가 등록되어 있습니다. 계좌번호 전체는 이 화면에 표시하지 않습니다.`
+: '환급받을 계좌가 등록되어 있지 않습니다. 탈퇴 신청 전에 내 정보에서 계좌를 입력해주세요.';
+}
+if (setupButton) setupButton.classList.toggle('hidden', ready);
+if (submitButton) submitButton.disabled = !ready;
+}
+
+function goToRefundAccountSetup() {
+toggleEditMode(true);
+const bankInput = document.getElementById('editBankName');
+if (bankInput) {
+bankInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
+}
+}
+
+// [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
 function toggleTab(type, btn) {
 if (type === 'partner' && isSiteMemberPortalProfile()) return;
 if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
@@ -7825,6 +7924,10 @@ if(targetEl) targetEl.classList.remove('hidden');
 
 if(type === 'extra') {
 loadExtraCapitalDepositAccount();
+}
+
+if(type === 'withdraw') {
+syncWithdrawRefundAccountUi();
 }
 
 if(type === 'reduction') {
@@ -9386,7 +9489,7 @@ setModalDepth(false); // 뎁스 복구
 // [수정] 화면 전환 유틸리티: style 제어 방식 폐기 -> classList 제어 방식 도입
 function showOnly(sectionId) {
 // 제어할 대상 섹션 ID 목록 (명시적으로 지정하여 안전성 확보)
-const sections = ['loginSection', 'dashboardSection'];
+const sections = ['loginSection', 'dashboardSection', 'formerMemberSection'];
 
 sections.forEach(id => {
 const el = document.getElementById(id);
@@ -9398,6 +9501,73 @@ el.classList.remove('hidden');
 } else {
 // 보이면 안 되는 섹션은 hidden 클래스 '추가'
 el.classList.add('hidden');
+}
+});
+}
+
+function formatFormerWorkflowStatus(status) {
+const labels = {
+refund_calculation_pending: '총회 의결 전 · 환급액 산정 대기',
+refund_payment_pending: '총회 의결 완료 · 지급 대기',
+refunded: '환급 완료',
+cancelled: '절차 취소'
+};
+return labels[String(status || '')] || '처리 기록 확인 중';
+}
+
+async function renderFormerMemberPortal() {
+const { data, error } = await _supabase.rpc('get_my_former_member_summary');
+if (error) throw error;
+
+const identity = document.getElementById('formerMemberIdentity');
+const effectiveDate = document.getElementById('formerEffectiveDate');
+const capital = document.getElementById('formerCapitalBalance');
+const workflow = document.getElementById('formerWorkflowStatus');
+const detail = document.getElementById('formerWorkflowDetail');
+const rejoinPanel = document.getElementById('formerRejoinPanel');
+const statusBadge = document.getElementById('formerMemberStatusBadge');
+
+if (identity) identity.textContent = `${data?.member_name || '-'} · ${data?.member_id || '-'}`;
+if (effectiveDate) effectiveDate.textContent = formatMemberKstDate(data?.effective_date);
+if (capital) capital.textContent = `${Number(data?.capital_balance_at_exit || 0).toLocaleString()}원`;
+if (workflow) workflow.textContent = formatFormerWorkflowStatus(data?.workflow_status);
+if (statusBadge) statusBadge.textContent = data?.member_status || '탈퇴';
+
+const lines = [];
+if (data?.claim_available_on) lines.push(`환급 청구 가능일: ${formatMemberKstDate(data.claim_available_on)}`);
+if (data?.claim_expires_on) lines.push(`청구권 확인 기한: ${formatMemberKstDate(data.claim_expires_on)}`);
+if (data?.decision_meeting_date) lines.push(`총회 의결일: ${formatMemberKstDate(data.decision_meeting_date)}`);
+if (data?.decision_amount !== null && data?.decision_amount !== undefined) lines.push(`의결 환급액: ${Number(data.decision_amount || 0).toLocaleString()}원`);
+if (data?.payment_date) lines.push(`환급 지급일: ${formatMemberKstDate(data.payment_date)}`);
+if (detail) detail.textContent = lines.length > 0 ? lines.join(' · ') : '탈퇴 효력 처리 후 총회 의결과 환급 지급 상황이 이곳에 표시됩니다.';
+if (rejoinPanel) rejoinPanel.classList.toggle('hidden', !data?.can_request_rejoin);
+
+showOnly('formerMemberSection');
+}
+
+async function submitFormerMemberRejoin() {
+const amount = Number(document.getElementById('formerRejoinAmount')?.value || 0);
+const reason = String(document.getElementById('formerRejoinReason')?.value || '').trim();
+if (amount < 100000 || amount % 10000 !== 0) {
+showModal('새 출자 약정금은 10만원 이상, 1만원 단위로 입력해주세요.');
+return;
+}
+
+showConfirmModal('재가입을 신청하시겠습니까? 이전 조합원 기간과 새 가입 기간은 별도로 기록됩니다.', async function () {
+showLoading(true, '재가입 신청 중...');
+try {
+const { data, error } = await _supabase.rpc('request_member_rejoin', {
+p_amount: amount,
+p_reason: reason || null
+});
+if (error) throw error;
+await notifyMemberApplicationAdmins(data?.application_id, 'application');
+showModal(data?.replayed ? '이미 접수된 재가입 신청이 있습니다.' : '재가입 신청이 접수되었습니다. 사무국의 확인을 기다려주세요.');
+await renderFormerMemberPortal();
+} catch (error) {
+showModal('재가입 신청 오류: ' + (error?.hint || error?.message || error));
+} finally {
+showLoading(false);
 }
 });
 }

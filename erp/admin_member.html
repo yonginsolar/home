@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.164
-Change: 2026-09-17 - Fix proxy applications for member profiles and hide withdrawal amount.
+Version: v1.0.165
+Change: 2026-09-17 - Add staged withdrawal, refund accounting, former-member, and rejoin workflow.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.164';
+window.ADMIN_MEMBER_VERSION = 'v1.0.165';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -485,8 +485,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         </ul>
 
         <div id="app-governance-notice" class="alert alert-warning border-warning d-none mb-3">
-            <div class="fw-bold"><i class="bi bi-calendar-check me-1"></i> 감자·탈퇴 신청은 총회 승인 대상입니다.</div>
-            <div class="small mt-1">정기총회 승인과 반환금 지급을 완료한 뒤 처리해주세요. 접수된 신청은 총회 처리 전까지 대기 상태로 보관할 수 있습니다.</div>
+            <div class="fw-bold"><i class="bi bi-calendar-check me-1"></i> 탈퇴와 출자금 환급은 서로 다른 단계입니다.</div>
+            <div class="small mt-1">탈퇴 효력 처리 → 다음 회계연도 총회 의결 → 실제 환급 지급 순서로 기록합니다. 탈퇴 효력만 처리해도 조합원 자격은 종료되며, 출자금은 지급일까지 환급 대기로 남습니다.</div>
         </div>
 
         <ul class="nav nav-tabs mb-3" id="app-status-tabs">
@@ -518,7 +518,53 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 </table>
             </div>
         </div>
+</div>
+
+<div class="modal fade" id="withdrawalWorkflowModal" tabindex="-1" aria-labelledby="withdrawalWorkflowModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <div>
+                    <h5 class="modal-title fw-bold" id="withdrawalWorkflowModalLabel">탈퇴 처리</h5>
+                    <div class="small opacity-75 mt-1" id="withdrawalWorkflowMember">-</div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="닫기"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="withdrawalWorkflowAction">
+                <input type="hidden" id="withdrawalWorkflowApplicationId">
+                <input type="hidden" id="withdrawalWorkflowId">
+
+                <div id="withdrawalEffectFields" class="d-none">
+                    <div class="alert alert-warning small">이 단계에서 조합원 자격이 종료됩니다. 출자금 차감이나 송금은 아직 발생하지 않습니다.</div>
+                    <label class="form-label small fw-bold" for="withdrawalEffectiveDate">탈퇴 효력일</label>
+                    <input type="date" class="form-control" id="withdrawalEffectiveDate">
+                </div>
+
+                <div id="withdrawalDecisionFields" class="d-none">
+                    <div class="alert alert-info small">총회 의결을 기록하면 출자금이 환급 미지급금으로 전환됩니다. 실제 은행 잔액은 지급 완료 전까지 변하지 않습니다.</div>
+                    <label class="form-label small fw-bold" for="withdrawalMeetingDate">총회 의결일</label>
+                    <input type="date" class="form-control mb-2" id="withdrawalMeetingDate">
+                    <label class="form-label small fw-bold" for="withdrawalDecisionAmount">의결 환급액</label>
+                    <input type="number" class="form-control mb-2" id="withdrawalDecisionAmount" readonly>
+                    <label class="form-label small fw-bold" for="withdrawalDecisionReference">의결 근거</label>
+                    <input type="text" class="form-control" id="withdrawalDecisionReference" placeholder="예: 2027년 정기총회 제3호 의안">
+                </div>
+
+                <div id="withdrawalPaymentFields" class="d-none">
+                    <div class="alert alert-danger small">실제 송금이 끝난 뒤에만 완료 처리해주세요. 처리하면 출자금 원장 차감과 미지급금 지급 전표가 함께 기록됩니다.</div>
+                    <label class="form-label small fw-bold" for="withdrawalPaymentDate">실제 지급일</label>
+                    <input type="date" class="form-control" id="withdrawalPaymentDate">
+                </div>
+                <div class="small text-danger mt-2 d-none" id="withdrawalWorkflowFeedback"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary fw-bold" id="withdrawalWorkflowSubmit" onclick="submitWithdrawalWorkflow()">처리</button>
+            </div>
+        </div>
     </div>
+</div>
 
 
 
@@ -584,7 +630,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                     </div>
                 </div>
                 <div class="alert alert-info small py-2 d-none" id="proxy-withdraw-note">
-                    탈퇴 신청은 금액을 입력하지 않습니다. 총회 승인 후 처리하면 현재 출자금 잔액 전액이 반환금으로 반영됩니다.
+                    탈퇴 신청은 금액을 입력하지 않습니다. 접수 후 환급계좌 등록을 확인하고 탈퇴 효력일을 먼저 처리합니다.
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-bold">비고 (필수)</label>
@@ -17053,6 +17099,7 @@ function selectMemberForModal(id, name) {
 // ================================================================
 
 let g_apps = []; // 데이터 저장용
+let g_withdrawal_workflows = new Map();
 let g_app_filter = 'pending'; // 현재 탭 상태
 let g_app_type_filter = 'extra'; // 추가출자 / 감자·탈퇴 / 전체
 let g_application_member_request_sequence = 0;
@@ -17071,11 +17118,15 @@ async function fetchApplications() {
 
     tbody.innerHTML = '<tr><td colspan="7" class="py-5"><div class="spinner-border spinner-border-sm text-primary"></div> 로딩중...</td></tr>';
 
-    const { data, error } = await scopeAdminTenant(_supabase
-        .from('coop_applications')
-        .select('*'))
-        .order('created_at', { ascending: false })
-        .limit(100);
+    const [applicationsResult, withdrawalResult] = await Promise.all([
+        scopeAdminTenant(_supabase
+            .from('coop_applications')
+            .select('*'))
+            .order('created_at', { ascending: false })
+            .limit(100),
+        _supabase.rpc('admin_list_member_exit_workflows')
+    ]);
+    const { data, error } = applicationsResult;
 
     // 2. DB 응답 확인
     if (error) {
@@ -17086,6 +17137,14 @@ async function fetchApplications() {
 
 
     g_apps = data || [];
+    if (withdrawalResult.error) {
+        console.error('탈퇴 처리 현황 조회 실패:', withdrawalResult.error);
+        g_withdrawal_workflows = new Map();
+    } else {
+        g_withdrawal_workflows = new Map((Array.isArray(withdrawalResult.data) ? withdrawalResult.data : []).map(function (row) {
+            return [String(row.application_id), row];
+        }));
+    }
 
     // 3. 렌더링 직전 데이터 확인
 
@@ -17103,7 +17162,7 @@ function renderAppList() {
         const matchesType = g_app_type_filter === 'extra'
             ? item.type === 'extra'
             : g_app_type_filter === 'governance'
-            ? ['reduction', 'withdraw'].includes(item.type)
+            ? ['reduction', 'withdraw', 'rejoin'].includes(item.type)
             : true;
         const matchesStatus = g_app_filter === 'pending' ? item.status === 'pending' : true;
         return matchesType && matchesStatus;
@@ -17114,15 +17173,16 @@ function renderAppList() {
         return;
     }
 
-    const typeMap = { 'extra': '추가출자', 'reduction': '감자', 'withdraw': '탈퇴', 'connect': '계정연결' };
+    const typeMap = { 'extra': '추가출자', 'reduction': '감자', 'withdraw': '탈퇴', 'rejoin': '재가입', 'connect': '계정연결' };
 
     list.forEach(app => {
         const dateStr = formatAdminMemberKstDate(app.created_at);
-        const amountStr = app.amount ? Number(app.amount).toLocaleString() + '원' : '-';
+        const amountStr = app.type === 'withdraw' ? '-' : app.amount ? Number(app.amount).toLocaleString() + '원' : '-';
         const safeName = escapeHtml(app.name || '');
         const safeMemberId = escapeHtml(app.member_id || '');
         const safeReason = app.reason ? escapeHtml(app.reason) : '-';
         const safeRejectionReason = app.rejection_reason ? escapeHtml(app.rejection_reason) : '';
+        const withdrawal = g_withdrawal_workflows.get(String(app.id || '')) || null;
         const safeAppIdArg = escapeJsString(String(app.id || ''));
         const applicantCell = app.type === 'extra'
             ? `
@@ -17147,30 +17207,47 @@ function renderAppList() {
         let statusBadge = `<span class="badge bg-secondary">${escapeHtml(app.status || '')}</span>`;
         let actionBtns = '-';
 
-        if (app.status === 'pending') {
+        if (app.type === 'withdraw' && app.status === 'pending') {
+            const accountReady = Boolean(withdrawal?.refund_account_ready);
+            statusBadge = `<span class="badge bg-warning text-dark">탈퇴 신청 대기</span><span class="d-block small mt-1 ${accountReady ? 'text-success' : 'text-danger'}">환급계좌 ${accountReady ? '등록됨' : '미등록'}</span>`;
+            actionBtns = `
+                <button class="btn btn-sm btn-warning fw-bold py-0" ${accountReady ? `onclick="openWithdrawalWorkflowModal('effect', ${app.id})"` : 'disabled'}>
+                    <i class="bi bi-box-arrow-right"></i> 탈퇴 효력 처리
+                </button>
+                <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="openApplicationRejectionModal(${app.id}, 'withdraw')">승인하지 않음</button>
+            `;
+        } else if (app.type === 'withdraw' && app.status === 'approved' && withdrawal) {
+            const stage = String(withdrawal.workflow_status || '');
+            const stageLabel = stage === 'refund_calculation_pending'
+                ? '탈퇴 완료 · 총회 의결 대기'
+                : stage === 'refund_payment_pending'
+                ? '총회 의결 완료 · 지급 대기'
+                : stage === 'refunded'
+                ? '환급 완료'
+                : '처리 상태 확인 필요';
+            statusBadge = `<span class="badge ${stage === 'refunded' ? 'bg-success' : 'bg-info text-dark'}">${escapeHtml(stageLabel)}</span><span class="d-block small text-muted mt-1">탈퇴 효력일 ${escapeHtml(formatAdminMemberKstDate(withdrawal.effective_date))}</span>`;
+            if (stage === 'refund_calculation_pending') {
+                actionBtns = `<button class="btn btn-sm btn-info fw-bold py-0" onclick="openWithdrawalWorkflowModal('decision', ${app.id})"><i class="bi bi-people"></i> 총회 의결 기록</button>`;
+            } else if (stage === 'refund_payment_pending') {
+                actionBtns = `<button class="btn btn-sm btn-danger fw-bold py-0" onclick="openWithdrawalWorkflowModal('payment', ${app.id})"><i class="bi bi-bank"></i> 환급 지급 완료</button>`;
+            }
+        } else if (app.status === 'pending') {
             statusBadge = `<span class="badge bg-warning text-dark">대기중</span>`;
             const safeAppType = escapeJsString(app.type || '');
-            const approveButtonClass = app.type === 'extra' ? 'btn-primary' : ['reduction', 'withdraw'].includes(app.type) ? 'btn-warning' : 'btn-primary';
+            const approveButtonClass = app.type === 'extra' ? 'btn-primary' : app.type === 'reduction' ? 'btn-warning' : 'btn-primary';
             const approveButtonLabel = app.type === 'extra'
                 ? '<i class="bi bi-cash-coin"></i> 입금 확인·승인'
-                : ['reduction', 'withdraw'].includes(app.type)
+                : app.type === 'reduction'
                 ? '<i class="bi bi-calendar-check"></i> 총회 승인 후 처리'
+                : app.type === 'rejoin'
+                ? '<i class="bi bi-arrow-repeat"></i> 재가입 승인'
                 : '<i class="bi bi-check-lg"></i> 승인/확인';
-            // ★ [승인/확인] 버튼 (클릭 시 DB 기록됨)
             actionBtns = app.type === 'connect' ? `
-                <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">
-                    ${approveButtonLabel}
-                </button>
-                <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="processApp(${app.id}, 'reject')">
-                    거절
-                </button>
+                <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">${approveButtonLabel}</button>
+                <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="processApp(${app.id}, 'reject')">거절</button>
             ` : `
-                <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">
-                    ${approveButtonLabel}
-                </button>
-                <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="openApplicationRejectionModal(${app.id}, '${safeAppType}')">
-                    승인하지 않음
-                </button>
+                <button class="btn btn-sm ${approveButtonClass} fw-bold py-0" onclick="processApp(${app.id}, 'approve', '${safeAppType}', ${app.amount})">${approveButtonLabel}</button>
+                <button class="btn btn-sm btn-outline-danger py-0 ms-1" onclick="openApplicationRejectionModal(${app.id}, '${safeAppType}')">승인하지 않음</button>
             `;
         } else if (app.status === 'approved') {
             statusBadge = `<span class="badge bg-success">처리완료</span>`;
@@ -17372,6 +17449,104 @@ function filterAppType(mode) {
     renderAppList();
 } // End of filterAppType
 
+function openWithdrawalWorkflowModal(action, applicationId) {
+    const app = g_apps.find((item) => Number(item?.id) === Number(applicationId));
+    const workflow = g_withdrawal_workflows.get(String(applicationId || '')) || null;
+    if (!app || app.type !== 'withdraw') {
+        myAlert('탈퇴 신청 정보를 찾지 못했습니다. 목록을 새로고침한 뒤 다시 시도해주세요.', 'error');
+        return;
+    }
+
+    if (action === 'effect' && !workflow?.refund_account_ready) {
+        myAlert('환급 계좌가 등록되지 않았습니다. 조합원 정보에서 은행·계좌번호·예금주를 먼저 입력해주세요.', 'warning');
+        return;
+    }
+
+    const config = {
+        effect: { title: '탈퇴 효력 처리', submit: '탈퇴 효력 확정' },
+        decision: { title: '총회 의결 기록', submit: '의결 및 회계 전표 기록' },
+        payment: { title: '환급 지급 완료', submit: '지급 및 회계 처리 완료' }
+    }[action];
+    if (!config) return;
+
+    document.getElementById('withdrawalWorkflowAction').value = action;
+    document.getElementById('withdrawalWorkflowApplicationId').value = app.id;
+    document.getElementById('withdrawalWorkflowId').value = workflow?.withdrawal_id || '';
+    document.getElementById('withdrawalWorkflowModalLabel').textContent = config.title;
+    document.getElementById('withdrawalWorkflowMember').textContent = `${app.name || '-'} · ${app.member_id || '-'}`;
+    document.getElementById('withdrawalWorkflowSubmit').textContent = config.submit;
+    document.getElementById('withdrawalWorkflowFeedback').classList.add('d-none');
+    document.getElementById('withdrawalEffectFields').classList.toggle('d-none', action !== 'effect');
+    document.getElementById('withdrawalDecisionFields').classList.toggle('d-none', action !== 'decision');
+    document.getElementById('withdrawalPaymentFields').classList.toggle('d-none', action !== 'payment');
+
+    const today = formatAdminMemberKstDate(new Date(), '');
+    if (action === 'effect') document.getElementById('withdrawalEffectiveDate').value = today;
+    if (action === 'decision') {
+        document.getElementById('withdrawalMeetingDate').value = '';
+        document.getElementById('withdrawalMeetingDate').min = workflow?.claim_available_on || '';
+        document.getElementById('withdrawalDecisionAmount').value = Number(workflow?.capital_balance_at_exit || 0);
+        document.getElementById('withdrawalDecisionReference').value = '';
+    }
+    if (action === 'payment') {
+        document.getElementById('withdrawalPaymentDate').value = today;
+        document.getElementById('withdrawalPaymentDate').min = workflow?.decision_meeting_date || '';
+    }
+
+    const modalEl = document.getElementById('withdrawalWorkflowModal');
+    applyAdminMemberModalLayer(modalEl);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function submitWithdrawalWorkflow() {
+    const action = document.getElementById('withdrawalWorkflowAction').value;
+    const applicationId = Number(document.getElementById('withdrawalWorkflowApplicationId').value || 0);
+    const withdrawalId = Number(document.getElementById('withdrawalWorkflowId').value || 0);
+    const feedback = document.getElementById('withdrawalWorkflowFeedback');
+    const submitButton = document.getElementById('withdrawalWorkflowSubmit');
+    let rpcName = '';
+    let params = {};
+
+    if (action === 'effect') {
+        const date = document.getElementById('withdrawalEffectiveDate').value;
+        if (!date) return myAlert('탈퇴 효력일을 입력해주세요.', 'warning');
+        rpcName = 'admin_confirm_withdrawal_effective';
+        params = { p_application_id: applicationId, p_effective_date: date };
+    } else if (action === 'decision') {
+        const date = document.getElementById('withdrawalMeetingDate').value;
+        const amount = Number(document.getElementById('withdrawalDecisionAmount').value || 0);
+        const reference = document.getElementById('withdrawalDecisionReference').value.trim();
+        if (!date || !reference) return myAlert('총회 의결일과 의결 근거를 입력해주세요.', 'warning');
+        rpcName = 'admin_record_withdrawal_refund_decision';
+        params = { p_withdrawal_id: withdrawalId, p_meeting_date: date, p_decision_amount: amount, p_decision_reference: reference };
+    } else if (action === 'payment') {
+        const date = document.getElementById('withdrawalPaymentDate').value;
+        if (!date) return myAlert('실제 지급일을 입력해주세요.', 'warning');
+        rpcName = 'admin_complete_withdrawal_refund';
+        params = { p_withdrawal_id: withdrawalId, p_payment_date: date };
+    } else {
+        return;
+    }
+
+    submitButton.disabled = true;
+    feedback.classList.add('d-none');
+    showLoading(true);
+    try {
+        const { data, error } = await _supabase.rpc(rpcName, params);
+        if (error) throw error;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('withdrawalWorkflowModal')).hide();
+        await fetchApplications();
+        await loadDashboard();
+        myAlert(data?.message || '처리되었습니다.', 'success');
+    } catch (error) {
+        feedback.textContent = error?.hint || error?.message || String(error);
+        feedback.classList.remove('d-none');
+    } finally {
+        showLoading(false);
+        submitButton.disabled = false;
+    }
+}
+
 // 5. 승인/반려 실행 (핵심)
 async function processApp(appId, action, type, amount) {
     let msg = "";
@@ -17381,7 +17556,8 @@ async function processApp(appId, action, type, amount) {
         // 승인 시 안내 메시지
         if (type === 'extra') msg = `[추가 출자] ${Number(amount).toLocaleString()}원 입금을 확인하셨습니까?\n승인 시 출자금 원장에 '입금' 기록됩니다.`;
         else if (type === 'reduction') msg = `[감자] 총회 승인과 ${Number(amount).toLocaleString()}원 반환금 지급을 모두 완료하셨습니까?\n처리 시 출자금 원장에 '차감(-)' 기록됩니다.`;
-        else if (type === 'withdraw') msg = `[탈퇴] 총회 승인과 반환금 지급을 모두 완료하셨습니까?\n처리 시 출자금 원장에 '전액 차감' 기록됩니다.`;
+        else if (type === 'withdraw') return myAlert('탈퇴는 탈퇴 효력 처리 → 총회 의결 → 환급 지급 순서로 처리해주세요.', 'warning');
+        else if (type === 'rejoin') msg = `[재가입] ${Number(amount).toLocaleString()}원 새 출자 약정으로 승인하시겠습니까?\n승인 후 실제 출자금 납입을 확인하면 정조합원으로 전환됩니다.`;
         else msg = "이 신청을 승인 처리하시겠습니까?";
     }
 
@@ -17470,7 +17646,7 @@ function openApplicationRejectionModal(appId, appType) {
         myAlert('신청 정보를 확인할 수 없습니다.', 'error');
         return;
     }
-    if (!['extra', 'reduction', 'withdraw'].includes(safeAppType)) {
+    if (!['extra', 'reduction', 'withdraw', 'rejoin'].includes(safeAppType)) {
         myAlert('이 신청은 미승인 사유 처리 대상이 아닙니다.', 'error');
         return;
     }
@@ -17590,7 +17766,7 @@ function updateAppBadges(pendingCountOverride = null) {
         if (el) el.innerText = count;
     };
     setTypeCount('app-type-extra-count', g_apps.filter(a => a.type === 'extra' && a.status === 'pending').length);
-    setTypeCount('app-type-governance-count', g_apps.filter(a => ['reduction', 'withdraw'].includes(a.type) && a.status === 'pending').length);
+    setTypeCount('app-type-governance-count', g_apps.filter(a => ['reduction', 'withdraw', 'rejoin'].includes(a.type) && a.status === 'pending').length);
     setTypeCount('app-type-all-count', g_apps.filter(a => a.status === 'pending').length);
 } // End of updateAppBadges
 
