@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.171
+Version: v1.0.172
 Change: 2026-09-17 - Match withdrawal refunds to each cooperative's enabled approval and accounting modules.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.171';
+window.ADMIN_MEMBER_VERSION = 'v1.0.172';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -5091,6 +5091,10 @@ if (path) await _supabase.storage.from('assets').remove([path]);
 
 // [신규] 관리자 활동 로그 기록
 async function logAdminAction(type, target, details) {
+    // site_member 조합은 조합별 erp_audit_logs를 사용한다.
+    // 주 조합 전용 legacy admin_logs에 기록을 시도하면 RLS 오류와 교차 조합 혼동이 생긴다.
+    if (isAdminMemberSiteProfile()) return;
+
     // 1. 현재 접속자 확인
     const userEmail = document.getElementById('adminProfile')
         ? document.getElementById('adminProfile').innerText
@@ -14924,6 +14928,11 @@ const LOG_PAGE_SIZE = 20;
 
 // 1. 로그 뷰어 모달 열기
 function openAdminLogModal() {
+    if (isAdminMemberSiteProfile()) {
+        location.href = 'audit_logs.html';
+        return;
+    }
+
     // 초기화: 첫 페이지, 필터 초기화, 검색어 초기화
     g_log_page = 0;
     document.getElementById('log-filter-type').value = 'all';
