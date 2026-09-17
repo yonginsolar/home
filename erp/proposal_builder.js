@@ -1,8 +1,8 @@
-/* Version: v1.6.2 | 2026-09-16 | Refresh proposal template with council membership wording. */
+/* Version: v1.6.3 | 2026-09-17 | Ignore legacy whitespace-only copy edits while preserving substantive edits. */
 (() => {
   'use strict';
 
-  const VERSION = '1.6.2';
+  const VERSION = '1.6.3';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -727,6 +727,15 @@
     return '<!doctype html>\n' + doc.documentElement.outerHTML;
   }
 
+  function normalizeCopyMeaning(value) {
+    return String(value ?? '')
+      .replace(/[\s\u00a0\u200b-\u200d\ufeff]+/g, '');
+  }
+
+  function isSubstantiveCopyEdit(edit) {
+    return normalizeCopyMeaning(edit?.baseText) !== normalizeCopyMeaning(edit?.text);
+  }
+
   function applySiteContext(doc, model) {
     const put = (page, selector, text) => { const node = slideAt(doc, page)?.querySelector(selector); if (node) node.textContent = text; };
     const kw = (n) => n === null ? '확인 필요' : `${trimNumber(n)}kW`;
@@ -1443,8 +1452,8 @@
   async function captureSnapshot() {
     const doc = await prepareOutput();
     const copyEdits = [...doc.querySelectorAll('[data-copy-id]')]
-      .filter((node) => node.textContent !== node.dataset.copyBase)
-      .map((node) => ({ index: Number(node.dataset.copyId), baseText: node.dataset.copyBase, text: node.innerText }));
+      .map((node) => ({ index: Number(node.dataset.copyId), baseText: node.dataset.copyBase, text: node.innerText }))
+      .filter(isSubstantiveCopyEdit);
     if (copyEdits.length > 400 || copyEdits.some((edit) => edit.text.length > 20000)) throw new Error('직접 수정한 문구가 저장 가능한 길이를 넘었습니다. 문장을 나누거나 길이를 줄여 주세요.');
     return { format: 1, builderVersion: VERSION, fields: collectFields(),
       photo: state.siteImageDataUrl, photoName: state.photoName,
@@ -1462,7 +1471,10 @@
       width: clamp(Number(overlay.width) || 10, 1, 100), height: clamp(Number(overlay.height) || 10, 1, 100), angle: normalizeAngle(overlay.angle),
       label: typeof overlay.label === 'string' ? overlay.label.trim().slice(0, 40) : ''
     }));
-    const copyEdits = (Array.isArray(snapshot.copyEdits) ? snapshot.copyEdits : []).filter((edit) => Number.isInteger(edit.index) && edit.index >= 0 && typeof edit.baseText === 'string' && typeof edit.text === 'string' && edit.text.length <= 20000).slice(0, 400);
+    const copyEdits = (Array.isArray(snapshot.copyEdits) ? snapshot.copyEdits : [])
+      .filter((edit) => Number.isInteger(edit.index) && edit.index >= 0 && typeof edit.baseText === 'string' && typeof edit.text === 'string' && edit.text.length <= 20000)
+      .filter(isSubstantiveCopyEdit)
+      .slice(0, 400);
     state.documentEpoch = (state.documentEpoch || 0) + 1;
     window.clearTimeout(state.renderTimer); state.renderTimer = 0;
     state.imageSequence += 1;
