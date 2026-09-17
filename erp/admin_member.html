@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.163
-Change: 2026-09-16 - Guardian receipt status and legacy application notice.
+Version: v1.0.164
+Change: 2026-09-17 - Fix proxy applications for member profiles and hide withdrawal amount.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.163';
+window.ADMIN_MEMBER_VERSION = 'v1.0.164';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -572,16 +572,19 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                 <div class="row g-2 mb-2">
                     <div class="col-6">
                         <label class="form-label small fw-bold">신청 유형</label>
-                        <select id="proxy-type" class="form-select">
+                        <select id="proxy-type" class="form-select" onchange="syncProxyApplicationFields()">
                             <option value="extra">추가 출자</option>
                             <option value="reduction">감자 (반환)</option>
                             <option value="withdraw">탈퇴 신청</option>
                         </select>
                     </div>
-                    <div class="col-6">
+                    <div class="col-6" id="proxy-amount-field">
                         <label class="form-label small fw-bold">금액</label>
                         <input type="number" id="proxy-amount" class="form-control" placeholder="0">
                     </div>
+                </div>
+                <div class="alert alert-info small py-2 d-none" id="proxy-withdraw-note">
+                    탈퇴 신청은 금액을 입력하지 않습니다. 총회 승인 후 처리하면 현재 출자금 잔액 전액이 반환금으로 반영됩니다.
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-bold">비고 (필수)</label>
@@ -17600,10 +17603,26 @@ function openProxyModal() {
     document.getElementById('proxy-member-name').value = '';
     document.getElementById('proxy-member-uid').value = '';
     document.getElementById('proxy-member-id').value = '';
+    document.getElementById('proxy-type').value = 'extra';
     document.getElementById('proxy-amount').value = '';
     document.getElementById('proxy-reason').value = '';
+    syncProxyApplicationFields();
     new bootstrap.Modal(document.getElementById('proxyModal')).show();
 }
+
+function syncProxyApplicationFields() {
+    const typeEl = document.getElementById('proxy-type');
+    const amountEl = document.getElementById('proxy-amount');
+    const amountFieldEl = document.getElementById('proxy-amount-field');
+    const withdrawNoteEl = document.getElementById('proxy-withdraw-note');
+    if (!typeEl || !amountEl || !amountFieldEl || !withdrawNoteEl) return;
+
+    const isWithdrawal = typeEl.value === 'withdraw';
+    amountFieldEl.classList.toggle('d-none', isWithdrawal);
+    withdrawNoteEl.classList.toggle('d-none', !isWithdrawal);
+    amountEl.disabled = isWithdrawal;
+    if (isWithdrawal) amountEl.value = '';
+} // End of syncProxyApplicationFields
 
 // 멤버 검색
 async function searchProxyMember() {
@@ -17635,11 +17654,12 @@ async function submitProxyData() {
     const mid = document.getElementById('proxy-member-id').value; // 텍스트 ID
     const nameStr = document.getElementById('proxy-member-name').value.split(' (')[0]; // 이름만 추출
     const type = document.getElementById('proxy-type').value;
-    const amount = document.getElementById('proxy-amount').value;
+    const rawAmount = document.getElementById('proxy-amount').value;
+    const amount = type === 'withdraw' ? 0 : Number(rawAmount || 0);
     const reason = document.getElementById('proxy-reason').value;
 
     if (!uid) return myAlert("신청자를 먼저 검색해주세요.", 'warning');
-    if (type !== 'withdraw' && (!amount || amount <= 0)) return myAlert("금액을 입력해주세요.", 'warning');
+    if (type !== 'withdraw' && amount <= 0) return myAlert("금액을 입력해주세요.", 'warning');
     if (!reason) return myAlert("비고란에 접수 사유(전화 등)를 입력해주세요.", 'warning');
 
     showLoading(true);
@@ -17650,7 +17670,7 @@ async function submitProxyData() {
         member_id: mid,
         name: nameStr,
         type: type,
-        amount: Number(amount || 0),
+        amount: amount,
         reason: '[대리접수] ' + reason,
         status: 'pending'
     }));
