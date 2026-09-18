@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<!-- Version: v1.0.0 | Change: 2026-09-18 - Add meeting package builder for assembly and board documents. -->
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>회의 꾸러미 만들기</title>
+  <script>console.log('[Version] v1.0.0 | meeting_workspace.html');</script>
+  <script src="/erp/erp_runtime_guard.js?v=20260804-1"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg:#f4f7fb; --card:#fff; --line:#dbe3ee; --ink:#172033; --muted:#64748b;
+      --brand:#ea580c; --brand-soft:#fff7ed; --blue:#2563eb; --danger:#b91c1c;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:'Pretendard','Noto Sans KR','Apple SD Gothic Neo',sans-serif; }
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; }
+    .shell { max-width:1440px; margin:0 auto; padding:22px; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:18px; }
+    .topbar h1 { margin:0; font-size:1.45rem; }
+    .topbar p { margin:5px 0 0; color:var(--muted); line-height:1.55; }
+    .top-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .btn { border:1px solid var(--line); border-radius:9px; padding:9px 13px; background:#fff; color:#253047; font-weight:700; }
+    .btn:hover { background:#f8fafc; }
+    .btn-primary { border-color:var(--blue); background:var(--blue); color:#fff; }
+    .btn-primary:hover { background:#1d4ed8; }
+    .btn-brand { border-color:var(--brand); background:var(--brand); color:#fff; }
+    .btn-danger { border-color:#fecaca; background:#fff1f2; color:var(--danger); }
+    .btn-small { padding:7px 10px; font-size:.86rem; }
+    .workspace { display:grid; grid-template-columns:300px minmax(0,1fr); gap:18px; align-items:start; }
+    .panel { background:var(--card); border:1px solid var(--line); border-radius:15px; box-shadow:0 5px 18px rgba(15,23,42,.04); }
+    .sidebar { position:sticky; top:18px; overflow:hidden; }
+    .panel-head { padding:17px 18px; border-bottom:1px solid var(--line); }
+    .panel-head h2,.panel-head h3 { margin:0; font-size:1rem; }
+    .package-list { max-height:calc(100vh - 190px); overflow:auto; padding:10px; }
+    .package-item { width:100%; text-align:left; padding:13px; border:1px solid transparent; background:transparent; border-radius:11px; margin-bottom:6px; }
+    .package-item:hover { background:#f8fafc; }
+    .package-item.active { border-color:#fdba74; background:var(--brand-soft); }
+    .package-item strong { display:block; line-height:1.4; }
+    .package-item small { display:block; margin-top:5px; color:var(--muted); line-height:1.45; }
+    .status { display:inline-flex; border-radius:999px; padding:3px 8px; font-size:.72rem; font-weight:800; background:#e2e8f0; color:#475569; }
+    .status.READY { background:#dbeafe; color:#1d4ed8; }
+    .status.FINAL { background:#dcfce7; color:#166534; }
+    .empty { padding:34px 18px; color:var(--muted); text-align:center; line-height:1.65; }
+    .editor { min-width:0; }
+    .editor-placeholder { padding:65px 24px; text-align:center; color:var(--muted); }
+    .editor-header { padding:18px 20px 0; }
+    .editor-header-row { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+    .editor-header h2 { margin:0; font-size:1.22rem; }
+    .editor-header .meta { color:var(--muted); margin-top:5px; font-size:.88rem; }
+    .step-tabs { display:flex; gap:8px; padding:18px 20px 0; overflow:auto; }
+    .step-tab { white-space:nowrap; border:1px solid var(--line); background:#fff; border-radius:999px; padding:9px 13px; font-weight:800; color:#475569; }
+    .step-tab.active { background:#172033; color:#fff; border-color:#172033; }
+    .step-panel { display:none; padding:20px; }
+    .step-panel.active { display:block; }
+    .section-card { border:1px solid var(--line); border-radius:13px; padding:17px; margin-bottom:15px; background:#fff; }
+    .section-card h3 { margin:0 0 14px; font-size:1.02rem; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .form-grid.three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .field { min-width:0; }
+    .field.full { grid-column:1/-1; }
+    label { display:block; font-size:.87rem; font-weight:800; margin-bottom:6px; }
+    input,select,textarea { width:100%; border:1px solid #cbd5e1; border-radius:9px; padding:10px 11px; background:#fff; color:#172033; }
+    textarea { min-height:92px; resize:vertical; line-height:1.55; }
+    input:focus,select:focus,textarea:focus,.rich-editor:focus { outline:none; border-color:#60a5fa; box-shadow:0 0 0 3px rgba(96,165,250,.16); }
+    .help { color:var(--muted); font-size:.8rem; line-height:1.55; margin-top:5px; }
+    .notice { border:1px solid #fed7aa; background:var(--brand-soft); color:#9a3412; border-radius:11px; padding:11px 13px; line-height:1.55; font-size:.88rem; margin-bottom:15px; }
+    .official-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+    .official-choice { display:flex; align-items:flex-start; gap:8px; border:1px solid var(--line); border-radius:10px; padding:10px; line-height:1.35; }
+    .official-choice input { width:auto; margin-top:2px; }
+    .official-choice small { display:block; color:var(--muted); margin-top:2px; }
+    .agenda-card { border:1px solid var(--line); border-radius:13px; padding:15px; margin-bottom:12px; background:#fbfdff; }
+    .agenda-head { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+    .agenda-number { width:30px; height:30px; flex:0 0 auto; border-radius:50%; display:grid; place-items:center; background:#172033; color:#fff; font-weight:800; }
+    .agenda-head select { width:140px; }
+    .agenda-head input { flex:1; }
+    .agenda-actions { display:flex; gap:5px; }
+    .agenda-actions button { border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 9px; }
+    .agenda-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .agenda-details textarea { min-height:80px; }
+    .bottom-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:wrap; margin-top:15px; }
+    .document-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }
+    .doc-tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
+    .doc-tab { border:1px solid var(--line); border-radius:9px; padding:9px 12px; background:#fff; font-weight:800; }
+    .doc-tab.active { background:#ffedd5; border-color:#fb923c; color:#9a3412; }
+    .rich-toolbar { display:flex; flex-wrap:wrap; gap:6px; padding:9px; border:1px solid var(--line); border-bottom:0; border-radius:10px 10px 0 0; background:#f8fafc; }
+    .rich-toolbar button { border:1px solid var(--line); background:#fff; border-radius:7px; padding:6px 9px; }
+    .rich-editor { min-height:520px; border:1px solid var(--line); border-radius:0 0 10px 10px; padding:28px; background:#fff; line-height:1.72; overflow:auto; }
+    .rich-editor h1 { font-size:2rem; margin:0 0 1.1em; }
+    .rich-editor h2 { font-size:1.35rem; margin:1.4em 0 .6em; }
+    .rich-editor h3 { font-size:1.08rem; margin:1.1em 0 .45em; }
+    .rich-editor table { width:100%; border-collapse:collapse; margin:12px 0; }
+    .rich-editor th,.rich-editor td { border:1px solid #9ca3af; padding:8px; vertical-align:top; }
+    .rich-editor .doc-cover { min-height:780px; display:flex; flex-direction:column; justify-content:center; border-bottom:2px solid #f97316; margin-bottom:28px; }
+    .rich-editor .doc-cover .accent { color:#ea580c; }
+    .rich-editor .speaker { border-left:4px solid #fdba74; padding:7px 11px; margin:8px 0; background:#fff7ed; }
+    .rich-editor .page-break { border-top:1px dashed #94a3b8; margin:28px 0; }
+    .publication-box { margin-top:15px; border:1px solid #bbf7d0; background:#f0fdf4; border-radius:11px; padding:13px; color:#166534; line-height:1.55; }
+    .toast { position:fixed; right:22px; bottom:22px; max-width:min(420px,calc(100vw - 44px)); padding:12px 16px; border-radius:11px; background:#172033; color:#fff; opacity:0; transform:translateY(12px); pointer-events:none; transition:.2s; z-index:30; }
+    .toast.show { opacity:1; transform:translateY(0); }
+    .modal { position:fixed; inset:0; background:rgba(15,23,42,.5); display:none; align-items:center; justify-content:center; padding:20px; z-index:40; }
+    .modal.show { display:flex; }
+    .modal-card { width:min(560px,100%); background:#fff; border-radius:16px; padding:21px; box-shadow:0 20px 60px rgba(15,23,42,.24); }
+    .modal-card h2 { margin:0 0 8px; font-size:1.2rem; }
+    .modal-card p { color:var(--muted); line-height:1.6; }
+    @media (max-width:1000px) {
+      .workspace { grid-template-columns:1fr; }
+      .sidebar { position:static; }
+      .package-list { max-height:260px; }
+      .official-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width:680px) {
+      .shell { padding:13px; }
+      .topbar,.editor-header-row { align-items:stretch; flex-direction:column; }
+      .top-actions { justify-content:flex-start; }
+      .form-grid,.form-grid.three,.agenda-details,.official-grid { grid-template-columns:1fr; }
+      .agenda-head { flex-wrap:wrap; }
+      .agenda-head select { width:calc(100% - 40px); }
+      .agenda-head input { flex-basis:100%; }
+      .rich-editor { padding:17px; min-height:420px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>🗂️ 총회·이사회 회의 꾸러미</h1>
+        <p>기본정보와 안건을 한 번만 적고 자료집, 진행 시나리오, 의사록 초안을 함께 만듭니다.</p>
+      </div>
+      <div class="top-actions">
+        <button type="button" class="btn" id="backToDocuments">회의·문서 관리</button>
+        <button type="button" class="btn btn-brand" id="newPackageButton">+ 새 회의 준비</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="panel sidebar">
+        <div class="panel-head"><h2>준비 중인 회의</h2></div>
+        <div class="package-list" id="packageList"><div class="empty">목록을 불러오는 중입니다.</div></div>
+      </aside>
+
+      <section class="panel editor" id="editorPanel">
+        <div class="editor-placeholder" id="editorPlaceholder">
+          왼쪽에서 회의를 선택하거나 <strong>새 회의 준비</strong>를 눌러 시작하세요.
+        </div>
+        <div id="editorBody" hidden>
+          <div class="editor-header">
+            <div class="editor-header-row">
+              <div>
+                <h2 id="editorTitle">회의 준비</h2>
+                <div class="meta" id="editorMeta"></div>
+              </div>
+              <div class="top-actions">
+                <span class="status" id="editorStatus">초안</span>
+                <button type="button" class="btn btn-small btn-danger" id="deletePackageButton">삭제</button>
+              </div>
+            </div>
+          </div>
+
+          <nav class="step-tabs" aria-label="회의 준비 단계">
+            <button type="button" class="step-tab active" data-step="info">1. 기본정보</button>
+            <button type="button" class="step-tab" data-step="agendas">2. 안건</button>
+            <button type="button" class="step-tab" data-step="documents">3. 문서 만들기</button>
+          </nav>
+
+          <section class="step-panel active" data-panel="info">
+            <div class="notice">공고일과 회의일은 최소 7일 간격으로 확인합니다. 비공개 준비 메모는 자료집·시나리오·의사록에 자동으로 들어가지 않습니다.</div>
+            <div class="section-card">
+              <h3>회의 기본정보</h3>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="meetingType">회의 종류</label>
+                  <select id="meetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select>
+                </div>
+                <div class="field">
+                  <label for="meetingNumber">회차</label>
+                  <input id="meetingNumber" placeholder="예: 제7차 / 제2차 정기">
+                </div>
+                <div class="field full">
+                  <label for="meetingTitle">회의 제목</label>
+                  <input id="meetingTitle" placeholder="예: 2027년 제2차 정기 대의원총회">
+                </div>
+              </div>
+              <div class="form-grid three" style="margin-top:14px;">
+                <div class="field"><label for="noticeDate">공고일</label><input type="date" id="noticeDate"></div>
+                <div class="field"><label for="meetingDate">회의일</label><input type="date" id="meetingDate"></div>
+                <div class="field"><label for="meetingLocation">장소</label><input id="meetingLocation" placeholder="예: 조합 사무실"></div>
+                <div class="field"><label for="startTime">시작 시각</label><input type="time" id="startTime"></div>
+                <div class="field"><label for="endTime">종료 시각</label><input type="time" id="endTime"></div>
+                <div class="field"><label for="facilitatorName">진행·설명 담당</label><input id="facilitatorName" placeholder="예: 사무국장 김민호"></div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <h3>참석·서명 기준</h3>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="chairOfficial">의장</label>
+                  <select id="chairOfficial"><option value="">선택하세요</option></select>
+                </div>
+                <div class="field">
+                  <label for="eligibleCount" id="eligibleCountLabel">재적 이사 수</label>
+                  <input type="number" min="0" id="eligibleCount">
+                  <div class="help">현재 임원·대의원 명단을 기준으로 자동 채우며 필요하면 회의 당시 수치로 고칠 수 있습니다.</div>
+                </div>
+                <div class="field full">
+                  <label id="attendeeLabel">참석 이사</label>
+                  <div class="official-grid" id="attendeeOfficials"></div>
+                </div>
+                <div class="field full" id="signerField">
+                  <label id="signerLabel">전자서명 대상</label>
+                  <div class="official-grid" id="signerOfficials"></div>
+                  <div class="help" id="signerHelp">이사회는 참석 이사를 기본 서명 대상으로 사용합니다.</div>
+                </div>
+                <div class="field full"><label for="observers">배석자</label><textarea id="observers" placeholder="이름을 쉼표 또는 줄바꿈으로 구분해 입력하세요."></textarea></div>
+              </div>
+            </div>
+
+            <div class="section-card">
+              <h3>진행 문구와 준비 메모</h3>
+              <div class="form-grid">
+                <div class="field"><label for="openingMessage">개회 문구</label><textarea id="openingMessage" placeholder="비워 두면 기본 개회 문구를 만듭니다."></textarea></div>
+                <div class="field"><label for="closingMessage">폐회 문구</label><textarea id="closingMessage" placeholder="비워 두면 기본 폐회 문구를 만듭니다."></textarea></div>
+                <div class="field full"><label for="privateNotes">비공개 준비 메모</label><textarea id="privateNotes" placeholder="떠오른 안건, 확인할 일, 담당자 메모 등을 적어 두세요. 생성 문서에는 포함되지 않습니다."></textarea></div>
+              </div>
+            </div>
+            <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveInfoButton">기본정보 저장</button></div>
+          </section>
+
+          <section class="step-panel" data-panel="agendas">
+            <div class="notice">보고·의결·논의 안건을 나눠 적습니다. 안건의 원문은 자료집, 시나리오, 의사록 초안에 함께 쓰이므로 반복 입력할 필요가 없습니다.</div>
+            <div id="agendaList"></div>
+            <button type="button" class="btn" id="addAgendaButton">+ 안건 추가</button>
+            <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveAgendasButton">안건 저장</button></div>
+          </section>
+
+          <section class="step-panel" data-panel="documents">
+            <div class="notice">먼저 기본정보와 안건을 저장한 뒤 초안을 만드세요. 자동 생성 뒤에도 아래 편집기에서 문구를 직접 고칠 수 있습니다.</div>
+            <div class="document-toolbar">
+              <button type="button" class="btn btn-brand" id="generateAllButton">자료집·시나리오·의사록 초안 만들기</button>
+              <button type="button" class="btn" id="saveDocumentButton">현재 문서 저장</button>
+              <button type="button" class="btn" id="printDocumentButton">인쇄·PDF 저장</button>
+            </div>
+            <div class="doc-tabs">
+              <button type="button" class="doc-tab active" data-document="MATERIALS">📚 회의 자료</button>
+              <button type="button" class="doc-tab" data-document="SCENARIO">🎙️ 진행 시나리오</button>
+              <button type="button" class="doc-tab" data-document="MINUTES">📝 의사록 초안</button>
+            </div>
+            <div class="field" style="margin-bottom:10px;"><label for="documentTitle">문서 제목</label><input id="documentTitle"></div>
+            <div class="rich-toolbar" aria-label="문서 편집 도구">
+              <button type="button" data-command="formatBlock" data-value="h2">큰 제목</button>
+              <button type="button" data-command="formatBlock" data-value="h3">작은 제목</button>
+              <button type="button" data-command="formatBlock" data-value="p">본문</button>
+              <button type="button" data-command="bold">굵게</button>
+              <button type="button" data-command="insertUnorderedList">목록</button>
+              <button type="button" data-command="insertOrderedList">번호 목록</button>
+            </div>
+            <div id="documentEditor" class="rich-editor" contenteditable="true" data-placeholder="초안을 생성하면 여기에 표시됩니다."></div>
+            <div class="publication-box" id="publicationBox">
+              <strong>전자서명 연결</strong><br>
+              의사록 문구를 최종 확인한 뒤 기존 전자서명 문서로 넘길 수 있습니다. 넘긴 뒤에는 서명 화면과 문서함의 기존 절차를 그대로 사용합니다.
+              <div class="bottom-actions"><button type="button" class="btn btn-primary" id="publishMinuteButton">의사록을 전자서명 문서로 넘기기</button></div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="modal" id="newPackageModal" role="dialog" aria-modal="true" aria-labelledby="newPackageTitle">
+    <div class="modal-card">
+      <h2 id="newPackageTitle">새 회의 준비</h2>
+      <p>회의 종류와 제목만 먼저 정하고, 나머지는 작업공간에서 이어서 입력합니다.</p>
+      <div class="form-grid">
+        <div class="field"><label for="newMeetingType">회의 종류</label><select id="newMeetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select></div>
+        <div class="field"><label for="newMeetingNumber">회차</label><input id="newMeetingNumber" placeholder="예: 제7차"></div>
+        <div class="field full"><label for="newMeetingTitle">회의 제목</label><input id="newMeetingTitle" placeholder="예: 2026년 제7차 이사회"></div>
+      </div>
+      <div class="bottom-actions"><button type="button" class="btn" id="cancelNewPackage">취소</button><button type="button" class="btn btn-brand" id="createPackageButton">만들기</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="./meeting_workspace.js?v=1.0.0"></script>
+</body>
+</html>
