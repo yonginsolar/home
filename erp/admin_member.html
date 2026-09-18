@@ -6,7 +6,7 @@ Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML 
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.179';
+window.ADMIN_MEMBER_VERSION = 'v1.0.180';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8463,12 +8463,6 @@ const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
-const initialSettings = await collectHomePreviewSettings(false);
-const initialJson = JSON.stringify(initialSettings);
-const initialBytes = new TextEncoder().encode(initialJson);
-let initialBinary = '';
-initialBytes.forEach((byte) => { initialBinary += String.fromCharCode(byte); });
-url.searchParams.set('home_preview_payload', btoa(initialBinary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''));
 if (g_homePreviewChannel) g_homePreviewChannel.close();
 g_homePreviewChannel = null;
 if (typeof BroadcastChannel === 'function') {
@@ -8478,6 +8472,13 @@ g_homePreviewChannel = new BroadcastChannel(`coop-home-preview-${channelId}`);
 g_homePreviewChannel.addEventListener('message', (event) => {
 if (event.data?.type === 'coop-home-preview-ready') window.setTimeout(sendHomePreviewSettings, 0);
 });
+} else if (!frame?.contentWindow) {
+const initialSettings = await collectHomePreviewSettings(false);
+const initialJson = JSON.stringify(initialSettings);
+const initialBytes = new TextEncoder().encode(initialJson);
+let initialBinary = '';
+initialBytes.forEach((byte) => { initialBinary += String.fromCharCode(byte); });
+url.searchParams.set('home_preview_payload', btoa(initialBinary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''));
 }
 if (frame) {
 g_homePreviewSourceWindow = null;
