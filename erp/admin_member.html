@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.186
-Change: 2026-09-19 - Simplify homepage format cards to one meaningful hero preview each.
+Version: v1.0.187
+Change: 2026-09-19 - Keep approval-originated official documents out of notice management.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.186';
+window.ADMIN_MEMBER_VERSION = 'v1.0.187';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1738,6 +1738,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="content-header">
 <h3>📢 공지사항 관리</h3>
 <button class="btn btn-primary btn-sm" onclick="openNoticeModal()"><i class="bi bi-pencil"></i> 공지 작성</button>
+</div>
+<div class="alert alert-info small py-2">
+<i class="bi bi-info-circle-fill"></i> 전자결재에서 승인된 공문은 이 목록에 표시하지 않습니다. 공문 관리에서 확인해 주세요.
 </div>
 <div class="card border-0 shadow-sm">
 <div class="table-responsive">
@@ -6813,12 +6816,23 @@ reader.readAsArrayBuffer(file);
 // ================================================================
 // [기능 3] 공지사항 관리
 // ================================================================
-// [수정] 공지사항 목록 불러오기 (삭제 버튼 추가됨)
+// 직접 작성한 공지만 불러옵니다. 전자결재에서 승인된 공문은 공문 관리에서 다룹니다.
 async function fetchNotices() {
-    // 읽기는 public 정책이 있어서 바로 select 가능
-    const { data } = await scopeAdminTenant(_supabase.from('coop_notices').select('*')).order('created_at', {ascending:false});
     const tbody = document.getElementById('noticeListBody');
     tbody.innerHTML = '';
+
+    const { data, error } = await scopeAdminTenant(
+        _supabase
+            .from('coop_notices')
+            .select('id,title,category,status,is_popup,is_members_only,created_at')
+            .is('source_approval_id', null)
+    ).order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('공지사항 목록 로딩 실패:', error);
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-3">공지사항을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</td></tr>';
+        return;
+    }
 
     if(!data || data.length===0) {
         tbody.innerHTML='<tr><td colspan="7" class="text-center py-3">글이 없습니다.</td></tr>';
