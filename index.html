@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.100
+Version: v1.0.101
 Change: Keep the primary cooperative's descriptive SEO title after tenant hydration.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.100 | index.html');</script>
+<script>console.log('[Version] v1.0.101 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2748,6 +2748,17 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
             applyPublicHomeSettings(settings);
             if (window.AOS?.refreshHard) window.AOS.refreshHard();
         };
+        const initialPreviewPayload = new URLSearchParams(window.location.search).get('home_preview_payload');
+        if (initialPreviewPayload) {
+            try {
+                const padded = initialPreviewPayload.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (initialPreviewPayload.length % 4)) % 4);
+                const binary = atob(padded);
+                const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+                applyHomePreviewDraft(JSON.parse(new TextDecoder().decode(bytes)));
+            } catch (error) {
+                console.warn('[home preview] initial payload failed:', error);
+            }
+        }
         window.addEventListener('message', (event) => {
             if (event.source !== window.parent || !isTrustedHomePreviewOrigin(event.origin)) return;
             if (event.data?.type !== 'coop-home-preview-settings') return;

@@ -6,7 +6,7 @@ Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML 
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.178';
+window.ADMIN_MEMBER_VERSION = 'v1.0.179';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8356,7 +8356,7 @@ reader.readAsDataURL(file);
 });
 }
 
-async function collectHomePreviewSettings() {
+async function collectHomePreviewSettings(includeLocalFiles = true) {
 const payload = collectHomeSettingsPayload();
 const settings = {
 ...g_homeSettingsRecord,
@@ -8386,7 +8386,7 @@ contact_phone: payload.p_contact_phone,
 contact_email: payload.p_contact_email,
 contact_address: payload.p_contact_address
 };
-for (const kind of ['hero', 'impact']) {
+if (includeLocalFiles) for (const kind of ['hero', 'impact']) {
 const file = document.getElementById(`site-home-${kind}-image-file`)?.files?.[0] || null;
 if (file) settings[`${kind}_image_url`] = await readHomePreviewFile(file);
 }
@@ -8463,6 +8463,12 @@ const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
+const initialSettings = await collectHomePreviewSettings(false);
+const initialJson = JSON.stringify(initialSettings);
+const initialBytes = new TextEncoder().encode(initialJson);
+let initialBinary = '';
+initialBytes.forEach((byte) => { initialBinary += String.fromCharCode(byte); });
+url.searchParams.set('home_preview_payload', btoa(initialBinary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''));
 if (g_homePreviewChannel) g_homePreviewChannel.close();
 g_homePreviewChannel = null;
 if (typeof BroadcastChannel === 'function') {
