@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.29
-Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electronic signature is saved.
+Version: v1.2.30
+Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report and lock it when signing starts.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.29 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.30 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -311,6 +311,21 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
         html[data-theme="dark"] .signature-pad {
             filter: grayscale(1) invert(1);
         }
+        #detail-content.audit-editing {
+            outline:3px solid #fb923c;
+            outline-offset:4px;
+            background:#fffdf7;
+        }
+        .audit-edit-help {
+            display:none;
+            margin:12px 0 0;
+            padding:10px 12px;
+            border-radius:9px;
+            background:#fff7ed;
+            color:#9a3412;
+            line-height:1.55;
+        }
+        .audit-edit-help.show { display:block; }
     </style>
 </head>
 <body>
@@ -342,12 +357,16 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
             </div>
             <div class="detail-meta" id="detail-meta">-</div>
             <div class="detail-content" id="detail-content"></div>
+            <div class="audit-edit-help" id="audit-edit-help">감사보고서 본문을 직접 고친 뒤 저장하세요. 첫 전자서명이 들어가면 감사보고서 내용은 더 이상 바꿀 수 없습니다.</div>
             <div class="attachment-panel" id="attachment-panel">
                 <div class="attachment-title">첨부파일</div>
                 <div class="attachment-list" id="attachment-list"></div>
             </div>
             <div class="status-line" id="detail-status"></div>
             <div class="sign-actions">
+                <button id="btn-edit-audit" class="btn-outline" style="display:none;" onclick="editAuditReport()">감사보고서 수정</button>
+                <button id="btn-save-audit" class="btn-sign" style="display:none;" onclick="saveAuditReport()">수정 내용 저장</button>
+                <button id="btn-cancel-audit" class="btn-outline" style="display:none;" onclick="cancelAuditEdit()">수정 취소</button>
                 <button id="btn-sign" class="btn-sign" disabled onclick="handleSign()">서명하기</button>
                 <button id="btn-cancel-sign" class="btn-outline" style="display:none;" onclick="cancelSignature()">서명 취소</button>
             </div>
@@ -380,7 +399,7 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
 
     <script src="/erp/erp_runtime_guard.js"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.49';
+        import { MinutesService } from './MinutesService.js?v=1.0.50';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -395,6 +414,7 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
             if (docType === 'NOTICE') return '공지';
             if (docType === 'GENERAL_ASSEMBLY') return '총회 의사록';
             if (docType === 'MINUTES') return '이사회 의사록';
+            if (docType === 'AUDIT_REPORT') return '감사보고서';
             return '의사록';
         };
 
@@ -512,6 +532,9 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
         let isAdminUser = false;
         let confirmResolve = null;
         let currentMinuteId = null;
+        let currentMinuteDoc = null;
+        let auditEditing = false;
+        let auditOriginalContent = '';
         let alreadySignedOnce = false;
         let forceSignedOnce = false;
         let signatureCanvas = null;
@@ -1149,6 +1172,7 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
         };
 
         function showList() {
+            if (auditEditing) cancelAuditEdit();
             document.getElementById('detail-panel').classList.add('hidden');
             document.getElementById('list-panel').style.display = 'block';
             setDetailModePill(false);
@@ -1232,12 +1256,9 @@ Change: 2026-08-28 - Create a private 96x48 viewing preview whenever an electron
                 if (myOfficialIds.length > 0) {
                     const officials = await MinutesService.getOfficials();
                     targets = targets.filter(t => {
-                        if (t.doc_type === 'MINUTES' || t.doc_type === 'GENERAL_ASSEMBLY') {
-                            const signerIds = resolveSignerIdsForDoc(t, officials);
-                            const relevantIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(t));
-                            return signerIds.some(id => relevantIds.includes(String(id)));
-                        }
-                        return true;
+                        const signerIds = resolveSignerIdsForDoc(t, officials);
+                        const relevantIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(t));
+                        return signerIds.length === 0 || signerIds.some(id => relevantIds.includes(String(id)));
                     });
                 }
 
@@ -1353,12 +1374,18 @@ async function openDocumentById(id) {
                     return;
                 }
                 currentMinuteId = id;
+                currentMinuteDoc = doc;
+                auditEditing = false;
+                auditOriginalContent = String(doc.content || '');
 
                 document.getElementById('detail-title').textContent = doc.title
                     ? `${getDocTypeLabel(doc.doc_type)} · ${doc.title}`
                     : getDocTypeLabel(doc.doc_type);
                 document.getElementById('detail-meta').textContent = `작성일: ${formatMinutesSignKstDate(doc.created_at)}`;
                 document.getElementById('detail-content').innerHTML = sanitizeHtml(doc.content || '');
+                document.getElementById('detail-content').contentEditable = 'false';
+                document.getElementById('detail-content').classList.remove('audit-editing');
+                document.getElementById('audit-edit-help').classList.remove('show');
                 await renderAttachments(doc);
 
                 await updateSignStatus(doc);
@@ -1375,11 +1402,17 @@ async function openDocumentById(id) {
             const statusEl = document.getElementById('detail-status');
             const btn = document.getElementById('btn-sign');
             const cancelBtn = document.getElementById('btn-cancel-sign');
+            const editAuditBtn = document.getElementById('btn-edit-audit');
+            const saveAuditBtn = document.getElementById('btn-save-audit');
+            const cancelAuditBtn = document.getElementById('btn-cancel-audit');
 
             setDetailModePill(false);
             btn.disabled = true;
             btn.innerText = '서명하기';
             if (cancelBtn) cancelBtn.style.display = 'none';
+            if (editAuditBtn) editAuditBtn.style.display = 'none';
+            if (saveAuditBtn) saveAuditBtn.style.display = 'none';
+            if (cancelAuditBtn) cancelAuditBtn.style.display = 'none';
             btn.style.display = 'inline-flex';
 
             if (!doc.requires_sign || doc.doc_type === 'NOTICE') {
@@ -1429,8 +1462,8 @@ async function openDocumentById(id) {
                 myOfficialId = Number(signingOfficialId);
             }
 
-            if ((doc.doc_type === 'MINUTES' || doc.doc_type === 'GENERAL_ASSEMBLY')
-                && !signerIds.some(id => relevantIds.includes(String(id)))) {
+            const assignedToMe = signerIds.length === 0 || signerIds.some(id => relevantIds.includes(String(id)));
+            if (!assignedToMe) {
                 statusEl.innerText = '서명 대상이 아닙니다.';
                 btn.innerText = '서명 대상 아님';
                 return;
@@ -1449,6 +1482,11 @@ async function openDocumentById(id) {
                 btn.style.display = 'none';
                 if (cancelBtn) cancelBtn.style.display = 'none';
                 return;
+            }
+
+            if (String(doc.doc_type || '').toUpperCase() === 'AUDIT_REPORT'
+                && Array.isArray(signatures) && signatures.length === 0 && editAuditBtn) {
+                editAuditBtn.style.display = 'inline-flex';
             }
 
             if (!mySealUrl) {
@@ -1589,14 +1627,77 @@ async function openDocumentById(id) {
             }
         } // End of notifySignatureCompletionIfNeeded
 
+        function leaveAuditEditMode({ restore = false } = {}) {
+            const editor = document.getElementById('detail-content');
+            if (restore) editor.innerHTML = sanitizeHtml(auditOriginalContent || '');
+            editor.contentEditable = 'false';
+            editor.classList.remove('audit-editing');
+            document.getElementById('audit-edit-help')?.classList.remove('show');
+            document.getElementById('btn-save-audit')?.style.setProperty('display', 'none');
+            document.getElementById('btn-cancel-audit')?.style.setProperty('display', 'none');
+            auditEditing = false;
+        }
+
+        async function editAuditReport() {
+            if (!currentMinuteId || String(currentMinuteDoc?.doc_type || '').toUpperCase() !== 'AUDIT_REPORT') return;
+            const { data: signatures, error } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
+            if (error) return showToast('서명 상태를 확인하지 못했습니다.');
+            if (currentMinuteDoc.status !== 'OPEN' || (signatures || []).length > 0) {
+                showToast('전자서명이 시작된 감사보고서는 수정할 수 없습니다.');
+                await updateSignStatus(currentMinuteDoc);
+                return;
+            }
+            const editor = document.getElementById('detail-content');
+            auditOriginalContent = editor.innerHTML;
+            auditEditing = true;
+            editor.contentEditable = 'true';
+            editor.classList.add('audit-editing');
+            document.getElementById('audit-edit-help')?.classList.add('show');
+            document.getElementById('btn-edit-audit')?.style.setProperty('display', 'none');
+            document.getElementById('btn-sign')?.style.setProperty('display', 'none');
+            document.getElementById('btn-cancel-sign')?.style.setProperty('display', 'none');
+            document.getElementById('btn-save-audit')?.style.setProperty('display', 'inline-flex');
+            document.getElementById('btn-cancel-audit')?.style.setProperty('display', 'inline-flex');
+            editor.focus();
+        }
+
+        async function saveAuditReport() {
+            if (!auditEditing || !currentMinuteId) return;
+            const editor = document.getElementById('detail-content');
+            const safeContent = sanitizeHtml(editor.innerHTML || '');
+            if (!safeContent.trim()) return showToast('감사보고서 내용을 입력해 주세요.');
+            const { error } = await MinutesService.updateMyAuditReport(currentMinuteId, safeContent);
+            if (error) {
+                showToast('감사보고서 저장 실패: ' + (error.message || '확인할 수 없는 오류'));
+                return;
+            }
+            auditOriginalContent = safeContent;
+            currentMinuteDoc = { ...currentMinuteDoc, content: safeContent };
+            editor.innerHTML = safeContent;
+            leaveAuditEditMode();
+            await updateSignStatus(currentMinuteDoc);
+            showToast('감사보고서 수정 내용을 저장했습니다.');
+        }
+
+        function cancelAuditEdit() {
+            if (!auditEditing) return;
+            leaveAuditEditMode({ restore: true });
+            if (currentMinuteDoc) updateSignStatus(currentMinuteDoc);
+        }
+
+        window.editAuditReport = editAuditReport;
+        window.saveAuditReport = saveAuditReport;
+        window.cancelAuditEdit = cancelAuditEdit;
+
         window.handleSign = async () => {
             if (!currentMinuteId) return;
+            if (auditEditing) return showToast('감사보고서 수정 내용을 먼저 저장하거나 취소해 주세요.');
             if (alreadySignedOnce) {
                 showToast('이미 서명 완료된 문서입니다.');
                 return;
             }
             if (myOfficialIds.length === 0) return showToast('임원 계정만 서명이 가능합니다.');
-            const ok = await showConfirm('이 의사록의 내용을 확인하였으며, 등록된 서명으로 날인하시겠습니까?');
+            const ok = await showConfirm(`이 ${getDocTypeLabel(currentMinuteDoc?.doc_type)}의 내용을 확인하였으며, 등록된 서명으로 날인하시겠습니까?`);
             if (!ok) return;
 
             if (!mySealUrl) {

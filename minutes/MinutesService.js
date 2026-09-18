@@ -1,6 +1,6 @@
 /*
-Version: v1.0.49
-Change: 2026-09-17 - Store new meeting attachments below the current cooperative path for tenant isolation.
+Version: v1.0.50
+Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report through a guarded RPC.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -635,6 +635,14 @@ async function insertSignature(payload) {
     return await supabase.from('doc_signatures').insert(withTenantPayload(payload, coopId));
 }
 
+async function updateMyAuditReport(minuteId, content) {
+    if (!minuteId) return { data: null, error: { message: '감사보고서 문서를 찾을 수 없습니다.' } };
+    return await supabase.rpc('update_my_audit_report', {
+        p_minute_id: minuteId,
+        p_content: String(content || '')
+    });
+}
+
 async function deleteSignature(minuteId, officialId) {
     if (!minuteId || !officialId) return { error: { message: 'missing ids' } };
     return await supabase.rpc('cancel_my_signature', {
@@ -709,6 +717,7 @@ export const MinutesService = {
     togglePublish,
     deleteMinute,
     insertSignature,
+    updateMyAuditReport,
     deleteSignature,
     createSignedUrl
 };

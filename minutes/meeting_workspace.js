@@ -1,11 +1,11 @@
 /*
-Version: v1.1.1
-Change: 2026-09-18 - Fully clear hidden assembly state in board mode and style chapter previews as A4 pages.
+Version: v1.2.0
+Change: 2026-09-18 - Link the regular-assembly agenda to prior minutes, closing, audit, dividends and capital returns.
 */
 import { supabase } from '../shared/supabase-client.js';
-import { MinutesService } from './MinutesService.js?v=1.0.49';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.0.2';
-import { buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.0.0';
+import { MinutesService } from './MinutesService.js?v=1.0.50';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.1.0';
+import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.1.0';
 
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
@@ -23,6 +23,7 @@ const state = {
   current: null,
   agendas: [],
   documents: new Map(),
+  sourceContext: null,
   activeDocument: 'MATERIALS',
   currentStep: 'info',
   documentDirty: false,
@@ -213,6 +214,7 @@ function fillInfoForm() {
   $('closingMessage').value = row.closing_message || '';
   $('documentNotes').value = row.document_notes || '';
   $('privateNotes').value = row.private_notes || '';
+  $('fiscalYear').value = row.fiscal_year || defaultFiscalYear(row);
   renderChairOptions(row.chair_official_id);
   $('eligibleCountLabel').textContent = row.meeting_type === 'GENERAL_ASSEMBLY' ? '재적 대의원 수' : '재적 이사 수';
   updateDocumentModeLabels();
@@ -246,6 +248,10 @@ function renderAgendaList() {
         <div class="field"><label>진행 참고</label><textarea data-field="scenario_notes" placeholder="질의 순서, 소개할 사람, 주의할 점">${escapeHtml(row.scenario_notes || '')}</textarea></div>
         <div class="field"><label>의결 문구 초안</label><textarea data-field="decision_draft" placeholder="보고 안건이면 비워도 됩니다.">${escapeHtml(row.decision_draft || '')}</textarea></div>
         <div class="field" style="grid-column:1/-1;"><label>문서에 넣을 안건 메모</label><textarea data-field="document_notes" placeholder="회의자료와 시나리오에 함께 남길 보충 설명이나 메모를 적으세요.">${escapeHtml(row.document_notes || '')}</textarea></div>
+        <label class="comparison-option" ${state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? '' : 'hidden'}>
+          <input type="checkbox" data-field="requires_article_comparison" ${row.requires_article_comparison === true ? 'checked' : ''}>
+          <span><strong>신구조문 대비표 포함</strong><small>정관·규약·규정을 바꾸는 안건일 때만 선택하세요. 기본값은 사용하지 않음입니다.</small></span>
+        </label>
         <div class="field" style="grid-column:1/-1;"><label>비공개 안건 메모</label><textarea data-field="private_notes" placeholder="확인할 일과 내부 메모. 문서에는 자동 포함되지 않습니다.">${escapeHtml(row.private_notes || '')}</textarea></div>
       </div>
     </article>
@@ -269,17 +275,80 @@ function collectAgendasFromDom() {
       decision_result: row.decision_result || '',
       discussion_notes: row.discussion_notes || '',
       document_notes: value('document_notes'),
-      private_notes: value('private_notes')
+      private_notes: value('private_notes'),
+      requires_article_comparison: card.querySelector('[data-field="requires_article_comparison"]')?.checked === true
     };
   });
 }
 
 function updateDocumentModeLabels() {
   const assembly = $('meetingType').value === 'GENERAL_ASSEMBLY';
+  $('fiscalYearField').hidden = !assembly;
+  $('assemblySourcePanel').hidden = !assembly;
   $('materialsTab').textContent = assembly ? '📚 총회 자료집' : '📄 이사회 회의자료';
+  $('agendaModeNotice').textContent = assembly
+    ? '총회는 전차 회의록·감사·결산·조건부 배당·조건부 출자금 반환·사업계획을 기본 순서로 자동 구성합니다. 여기에는 그 밖에 추가로 심의할 의안만 적으세요.'
+    : '보고·의결·논의할 안건을 적으면 한 장짜리 이사회 회의자료와 진행 시나리오에 반영됩니다.';
   $('documentModeNotice').textContent = assembly
-    ? '기존 2026 총회 HTML 자료집 순서대로 챕터가 준비됩니다. 왼쪽에서 한 챕터씩 골라 수정하고 전체 자료집으로 저장·인쇄할 수 있습니다.'
+    ? '정기총회 기본 순서는 전차 회의록 확인 → 감사보고서 → 결산보고서 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획 → 추가 의안입니다.'
     : '기존 제6차 이사회 문서를 기준으로 한 장짜리 회의자료와 진행 시나리오를 준비합니다.';
+  if (assembly) renderAssemblySourceStatus();
+}
+
+function defaultFiscalYear(row = state.current) {
+  const meetingDateYear = Number(String(row?.meeting_date || '').slice(0, 4));
+  if (meetingDateYear >= 1901) return meetingDateYear - 1;
+  const titleYear = Number(String(row?.title || '').match(/(?:19|20)\d{2}/)?.[0]);
+  return titleYear >= 1901 ? titleYear - 1 : new Date().getFullYear() - 1;
+}
+
+function renderAssemblySourceStatus() {
+  const panel = $('assemblySourcePanel');
+  if (!panel || panel.hidden) return;
+  const source = state.sourceContext;
+  if (!source) {
+    $('assemblySourceStatus').innerHTML = '<div class="source-empty">총회 연동 자료를 확인하는 중입니다.</div>';
+    $('prepareAuditButton').disabled = true;
+    $('openAuditButton').hidden = true;
+    return;
+  }
+  const closing = source.closing || {};
+  const audit = source.audit_report;
+  const prior = source.previous_minute;
+  const dividends = Array.isArray(source.dividend_batches) ? source.dividend_batches : [];
+  const returns = Array.isArray(source.capital_returns) ? source.capital_returns : [];
+  const auditorNames = state.officials
+    .filter(row => officialRole(row) === '감사')
+    .map(officialName)
+    .filter(Boolean);
+  const auditSigned = Number(audit?.signature_count || 0);
+  const auditTotal = Array.isArray(audit?.signer_ids) ? audit.signer_ids.length : auditorNames.length;
+  const cards = [
+    ['전차 총회 의사록', prior ? `연결됨 · ${prior.title || '전차 의사록'}` : '확인 필요 · 문서함에서 찾지 못함', !!prior],
+    [`${source.fiscal_year}년도 결산`, closing.is_closed ? '결산 완료 · 감사 검토 가능' : '가결산 · 회계관리에서 결산 완료 필요', !!closing.is_closed],
+    ['감사보고서', audit ? `${audit.status === 'CLOSED' ? '서명 완료' : '검토·서명 중'} · ${auditSigned}/${auditTotal}명` : `작성 전 · 감사 ${auditorNames.length}명`, audit?.status === 'CLOSED'],
+    ['배당·이익처분', dividends.length ? `${dividends.length}개 배당안 자동 포함` : '해당 자료 없음 · 의안 자동 제외', true],
+    ['감자·탈퇴 반환', returns.length ? `${returns.length}건 자동 포함` : '총회 의결 대기 없음 · 의안 자동 제외', true]
+  ];
+  $('assemblySourceStatus').innerHTML = cards.map(([label, detail, ok]) => `
+    <div class="source-status-card"><span class="source-status-icon ${ok ? 'ok' : 'wait'}">${ok ? '✓' : '!'}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>
+  `).join('');
+  $('prepareAuditButton').disabled = !closing.is_closed;
+  $('prepareAuditButton').textContent = audit ? '감사보고서 초안 갱신·서명 화면 열기' : '감사보고서 작성·전자검토 요청';
+  $('openAuditButton').hidden = !audit?.id;
+}
+
+async function loadAssemblySources({ render = true } = {}) {
+  if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY') {
+    state.sourceContext = null;
+    if (render) renderAssemblySourceStatus();
+    return null;
+  }
+  const { data, error } = await MeetingPackageService.getAssemblySources(state.current.id);
+  if (error) throw error;
+  state.sourceContext = data || null;
+  if (render) renderAssemblySourceStatus();
+  return state.sourceContext;
 }
 
 function chapterMode() {
@@ -412,13 +481,18 @@ function generatedDocumentRows() {
     agendas: state.agendas,
     coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
     company: state.company,
-    chairName
+    chairName,
+    officials: state.officials,
+    sourceContext: state.sourceContext
   });
 }
 
 function collectPackageDraftPayload() {
   return {
     meeting_type: $('meetingType').value,
+    fiscal_year: $('meetingType').value === 'GENERAL_ASSEMBLY'
+      ? Number($('fiscalYear').value || defaultFiscalYear())
+      : null,
     meeting_number: $('meetingNumber').value.trim() || null,
     title: $('meetingTitle').value.trim() || state.current?.title || '회의',
     notice_date: $('noticeDate').value || null,
@@ -500,8 +574,39 @@ async function saveInfo({ quiet = false } = {}) {
   if (index >= 0) state.packages[index] = { ...state.packages[index], ...data };
   renderPackages();
   renderEditorHeader();
+  await loadAssemblySources();
+  refreshAutoDrafts({ render: state.currentStep === 'documents' });
   if (!quiet) showToast('기본정보를 저장했습니다.');
   return true;
+}
+
+async function prepareAuditReport() {
+  if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY') return;
+  await saveInfo({ quiet: true });
+  const source = await loadAssemblySources();
+  if (!source?.closing?.is_closed) {
+    throw new Error(`${source?.fiscal_year || $('fiscalYear').value}년도 결산을 회계관리에서 완료한 뒤 감사에게 보내 주세요.`);
+  }
+  const title = `${source.fiscal_year}년도 감사보고서`;
+  const content = sanitizeHtml(buildAuditReportDraft({
+    row: state.current,
+    coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
+    officials: state.officials,
+    sourceContext: source
+  }));
+  const { data, error } = await MeetingPackageService.prepareAuditReport(state.current.id, { title, content });
+  if (error) throw error;
+  await loadAssemblySources();
+  refreshAutoDrafts({ render: state.currentStep === 'documents' });
+  const minuteId = data?.id || state.sourceContext?.audit_report?.id;
+  if (minuteId) window.open(`/minutes/minutes_sign.html?minuteId=${encodeURIComponent(minuteId)}`, '_blank', 'noopener');
+  showToast('감사보고서를 감사 전자검토·서명 문서로 준비했습니다.', 3600);
+}
+
+function openAuditReport() {
+  const minuteId = state.sourceContext?.audit_report?.id;
+  if (!minuteId) return showToast('먼저 감사보고서를 준비해 주세요.');
+  window.open(`/minutes/minutes_sign.html?minuteId=${encodeURIComponent(minuteId)}`, '_blank', 'noopener');
 }
 
 async function saveAgendas({ quiet = false } = {}) {
@@ -607,6 +712,7 @@ async function openPackage(id) {
     state.current = data.package;
     state.agendas = data.agendas || [];
     state.documents = new Map((data.documents || []).map(row => [row.document_type, row]));
+    state.sourceContext = null;
     state.activeDocument = 'MATERIALS';
     state.documentDirty = false;
     $('editorPlaceholder').hidden = true;
@@ -614,6 +720,7 @@ async function openPackage(id) {
     renderEditorHeader();
     fillInfoForm();
     renderAgendaList();
+    await loadAssemblySources();
     refreshAutoDrafts({ render: false });
     renderActiveDocument();
     renderPackages();
@@ -632,6 +739,7 @@ async function createPackage() {
     meeting_type: type,
     title,
     meeting_number: $('newMeetingNumber').value.trim() || null,
+    fiscal_year: type === 'GENERAL_ASSEMBLY' ? new Date().getFullYear() - 1 : null,
     eligible_count: candidates.length,
     chair_official_id: chair?.id || null
   });
@@ -654,6 +762,7 @@ async function deletePackage() {
   state.current = null;
   state.agendas = [];
   state.documents.clear();
+  state.sourceContext = null;
   $('editorBody').hidden = true;
   $('editorPlaceholder').hidden = false;
   await loadPackages();
@@ -672,7 +781,7 @@ function switchStep(step) {
 
 function addAgenda() {
   state.agendas = collectAgendasFromDom();
-  state.agendas.push({ agenda_kind:'DECISION', title:'', summary:'', background:'', proposal_text:'', office_report:'', scenario_notes:'', decision_draft:'', decision_result:'', discussion_notes:'', document_notes:'', private_notes:'' });
+  state.agendas.push({ agenda_kind:'DECISION', title:'', summary:'', background:'', proposal_text:'', office_report:'', scenario_notes:'', decision_draft:'', decision_result:'', discussion_notes:'', document_notes:'', private_notes:'', requires_article_comparison:false });
   renderAgendaList();
   scheduleAutoDraftRefresh();
   document.querySelector('.agenda-card:last-child input[data-field="title"]')?.focus();
@@ -778,6 +887,13 @@ function bindEvents() {
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
   $('saveAgendasButton').addEventListener('click', () => runAction(saveAgendas));
   $('generateAllButton').addEventListener('click', () => runAction(generateAllDocuments));
+  $('refreshAssemblySourcesButton').addEventListener('click', () => runAction(async () => {
+    await loadAssemblySources();
+    refreshAutoDrafts({ render: state.currentStep === 'documents' });
+    showToast('총회 연동 자료를 다시 확인했습니다.');
+  }));
+  $('prepareAuditButton').addEventListener('click', () => runAction(prepareAuditReport));
+  $('openAuditButton').addEventListener('click', openAuditReport);
   $('saveDocumentButton').addEventListener('click', () => runAction(saveActiveDocument));
   $('printDocumentButton').addEventListener('click', printActiveDocument);
   $('printChapterButton').addEventListener('click', printCurrentChapter);
@@ -808,6 +924,8 @@ function bindEvents() {
     $('eligibleCount').value = candidates.length;
     $('eligibleCountLabel').textContent = $('meetingType').value === 'GENERAL_ASSEMBLY' ? '재적 대의원 수' : '재적 이사 수';
     updateDocumentModeLabels();
+    state.sourceContext = null;
+    renderAgendaList();
     scheduleAutoDraftRefresh();
   });
   $('chairOfficial').addEventListener('change', scheduleAutoDraftRefresh);

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.2
-Change: 2026-09-18 - Load prior meeting titles for editable sequence suggestions and store document-facing notes.
+Version: v1.1.0
+Change: 2026-09-18 - Load regular-assembly source data and prepare the auditor-editable electronic audit report.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -117,6 +117,7 @@ async function saveAgendas(packageId, agendas) {
     discussion_notes: row.discussion_notes || null,
     document_notes: row.document_notes || null,
     private_notes: row.private_notes || null,
+    requires_article_comparison: row.requires_article_comparison === true,
     sort_order: index
   }));
 
@@ -186,6 +187,24 @@ async function createMinuteFromPackage(packageId, payload) {
   return { data: data || null, error };
 }
 
+async function getAssemblySources(packageId) {
+  const { data, error } = await supabase.rpc('get_meeting_package_assembly_sources', {
+    p_package_id: packageId
+  });
+  return { data: data || null, error };
+}
+
+async function prepareAuditReport(packageId, payload) {
+  const { data, error } = await supabase
+    .rpc('prepare_meeting_audit_report', {
+      p_package_id: packageId,
+      p_title: payload.title,
+      p_content: payload.content
+    })
+    .single();
+  return { data: data || null, error };
+}
+
 export const MeetingPackageService = {
   getRuntime,
   listPackages,
@@ -196,5 +215,7 @@ export const MeetingPackageService = {
   deletePackage,
   saveAgendas,
   saveDocument,
-  createMinuteFromPackage
+  createMinuteFromPackage,
+  getAssemblySources,
+  prepareAuditReport
 };

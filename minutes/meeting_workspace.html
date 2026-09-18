@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.1 | Change: 2026-09-18 - Prevent stale assembly chapters in board mode and restore A4 chapter preview styling. -->
+<!-- Version: v1.2.0 | Change: 2026-09-18 - Add regular-assembly source status and auditor review/signature preparation. -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.1.1 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.2.0 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20260804-1"></script>
   <style>
     :root {
@@ -82,7 +82,25 @@
     .agenda-actions button { border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 9px; }
     .agenda-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
     .agenda-details textarea { min-height:80px; }
+    .comparison-option { grid-column:1/-1; display:flex; align-items:flex-start; gap:9px; border:1px solid #fed7aa; border-radius:10px; padding:11px 12px; background:#fff7ed; cursor:pointer; }
+    .comparison-option[hidden] { display:none; }
+    .comparison-option input { width:18px; height:18px; margin-top:2px; }
+    .comparison-option span { display:grid; gap:2px; }
+    .comparison-option small { color:var(--muted); line-height:1.45; }
     .bottom-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:wrap; margin-top:15px; }
+    .assembly-source-panel { margin-bottom:14px; border:1px solid #bae6fd; border-radius:13px; padding:14px; background:#f0f9ff; }
+    .assembly-source-panel[hidden] { display:none; }
+    .assembly-source-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:11px; }
+    .assembly-source-head h3 { margin:0 0 4px; }
+    .assembly-source-head p { margin:0; color:var(--muted); line-height:1.5; font-size:.86rem; }
+    .assembly-source-status { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .source-status-card { display:flex; gap:9px; align-items:flex-start; border:1px solid #dbeafe; border-radius:10px; padding:10px; background:#fff; }
+    .source-status-card:last-child:nth-child(odd) { grid-column:1/-1; }
+    .source-status-card small { display:block; color:var(--muted); margin-top:3px; line-height:1.45; }
+    .source-status-icon { flex:0 0 25px; width:25px; height:25px; display:grid; place-items:center; border-radius:50%; font-weight:900; }
+    .source-status-icon.ok { background:#dcfce7; color:#166534; }
+    .source-status-icon.wait { background:#fef3c7; color:#92400e; }
+    .assembly-source-actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:11px; }
     .document-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }
     .doc-tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
     .doc-tab { border:1px solid var(--line); border-radius:9px; padding:9px 12px; background:#fff; font-weight:800; }
@@ -153,7 +171,8 @@
       .shell { padding:13px; }
       .topbar,.editor-header-row { align-items:stretch; flex-direction:column; }
       .top-actions { justify-content:flex-start; }
-      .form-grid,.form-grid.three,.agenda-details,.official-grid { grid-template-columns:1fr; }
+      .form-grid,.form-grid.three,.agenda-details,.official-grid,.assembly-source-status { grid-template-columns:1fr; }
+      .source-status-card:last-child:nth-child(odd) { grid-column:auto; }
       .agenda-head { flex-wrap:wrap; }
       .agenda-head select { width:calc(100% - 40px); }
       .agenda-head input { flex-basis:100%; }
@@ -226,6 +245,11 @@
                   <label for="meetingTitle">회의 제목</label>
                   <input id="meetingTitle" placeholder="예: 2027년 제2차 정기 대의원총회">
                 </div>
+                <div class="field" id="fiscalYearField" hidden>
+                  <label for="fiscalYear">결산 대상 연도</label>
+                  <input type="number" min="1900" max="2100" id="fiscalYear" placeholder="예: 2026">
+                  <div class="help">감사보고서·결산보고서·배당안을 불러올 회계연도입니다.</div>
+                </div>
               </div>
               <div class="form-grid three" style="margin-top:14px;">
                 <div class="field"><label for="noticeDate">공고일</label><input type="date" id="noticeDate"></div>
@@ -265,7 +289,7 @@
           </section>
 
           <section class="step-panel" data-panel="agendas">
-            <div class="notice">보고·의결·논의 안건을 나눠 적습니다. 이사회는 기존 한 장짜리 회의자료와 시나리오에, 총회는 기존 자료집 순서와 시나리오에 반영됩니다.</div>
+            <div class="notice" id="agendaModeNotice">보고·의결·논의할 안건을 적으면 회의자료와 진행 시나리오에 반영됩니다.</div>
             <div id="agendaList"></div>
             <button type="button" class="btn" id="addAgendaButton">+ 안건 추가</button>
             <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveAgendasButton">안건 저장</button></div>
@@ -273,6 +297,18 @@
 
           <section class="step-panel" data-panel="documents">
             <div class="notice" id="documentModeNotice">이사회는 기존 회의자료와 시나리오 형식으로 준비합니다. 총회 자료집은 기존 HTML 순서대로 챕터를 골라 한 부분씩 수정할 수 있습니다.</div>
+            <section class="assembly-source-panel" id="assemblySourcePanel" hidden>
+              <div class="assembly-source-head">
+                <div><h3>총회 연동 자료</h3><p>문서함·회계·배당·감자·탈퇴 관리에서 총회에 필요한 자료를 확인합니다. 없는 조건부 안건은 자료집에서 자동으로 빠집니다.</p></div>
+                <button type="button" class="btn btn-small" id="refreshAssemblySourcesButton">자료 다시 확인</button>
+              </div>
+              <div class="assembly-source-status" id="assemblySourceStatus"><div class="source-empty">총회 연동 자료를 확인하는 중입니다.</div></div>
+              <div class="assembly-source-actions">
+                <button type="button" class="btn btn-primary" id="prepareAuditButton">감사보고서 작성·전자검토 요청</button>
+                <button type="button" class="btn" id="openAuditButton" hidden>감사보고서 열기</button>
+              </div>
+              <div class="help" style="margin-top:8px;">감사보고서는 결산 완료 자료를 기준으로 만들며, 감사가 직접 수정할 수 있습니다. 한 명이라도 서명하면 본문과 서명 대상은 잠겨 이후 변경할 수 없습니다.</div>
+            </section>
             <div class="document-toolbar">
               <span class="draft-sync">입력 내용 자동 반영</span>
               <button type="button" class="btn btn-brand" id="generateAllButton">입력 내용으로 준비문서 다시 만들기</button>
@@ -295,7 +331,7 @@
             <div id="documentEditor" class="rich-editor" contenteditable="true" data-placeholder="회의 기본정보를 입력하면 초안이 표시됩니다."></div>
             <div id="chapterLayout" class="chapter-layout" hidden>
               <aside class="chapter-sidebar">
-                <div class="chapter-sidebar-head"><strong>총회 자료집 순서</strong><div class="help">기존 2026 총회 자료집 순서를 바탕으로 만든 초안입니다. 챕터를 고쳐 쓰거나 추가·삭제·이동할 수 있습니다.</div></div>
+                <div class="chapter-sidebar-head"><strong>총회 자료집 순서</strong><div class="help">조합 업무자료를 연결한 정기총회 초안입니다. 챕터를 고쳐 쓰거나 추가·삭제·이동할 수 있습니다.</div></div>
                 <div id="chapterList" class="chapter-list"></div>
               </aside>
               <div class="chapter-editor-wrap">
@@ -332,6 +368,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.1.1"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.2.0"></script>
 </body>
 </html>
