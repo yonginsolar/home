@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.2 | Change: 2026-09-18 - Align ERP authentication and atomic electronic-signature publication. -->
+<!-- Version: v1.0.3 | Change: 2026-09-18 - Suggest editable meeting numbers, move attendance to minutes, and show live drafts. -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.0.2 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.0.3 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20260804-1"></script>
   <style>
     :root {
@@ -99,6 +99,7 @@
     .rich-editor .speaker { border-left:4px solid #fdba74; padding:7px 11px; margin:8px 0; background:#fff7ed; }
     .rich-editor .page-break { border-top:1px dashed #94a3b8; margin:28px 0; }
     .publication-box { margin-top:15px; border:1px solid #bbf7d0; background:#f0fdf4; border-radius:11px; padding:13px; color:#166534; line-height:1.55; }
+    .draft-sync { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:5px 9px; background:#eff6ff; color:#1d4ed8; font-size:.78rem; font-weight:800; }
     .toast { position:fixed; right:22px; bottom:22px; max-width:min(420px,calc(100vw - 44px)); padding:12px 16px; border-radius:11px; background:#172033; color:#fff; opacity:0; transform:translateY(12px); pointer-events:none; transition:.2s; z-index:30; }
     .toast.show { opacity:1; transform:translateY(0); }
     .modal { position:fixed; inset:0; background:rgba(15,23,42,.5); display:none; align-items:center; justify-content:center; padding:20px; z-index:40; }
@@ -164,11 +165,11 @@
           <nav class="step-tabs" aria-label="회의 준비 단계">
             <button type="button" class="step-tab active" data-step="info">1. 기본정보</button>
             <button type="button" class="step-tab" data-step="agendas">2. 안건</button>
-            <button type="button" class="step-tab" data-step="documents">3. 문서 만들기</button>
+            <button type="button" class="step-tab" data-step="documents">3. 문서·의사록</button>
           </nav>
 
           <section class="step-panel active" data-panel="info">
-            <div class="notice">공고일과 회의일은 최소 7일 간격으로 확인합니다. 비공개 준비 메모는 자료집·시나리오·의사록에 자동으로 들어가지 않습니다.</div>
+            <div class="notice">회차와 제목은 앞선 회의를 참고해 자동 제안하지만 언제든 고칠 수 있습니다. 참석자는 회의가 끝난 뒤 의사록 단계에서 입력합니다.</div>
             <div class="section-card">
               <h3>회의 기본정보</h3>
               <div class="form-grid">
@@ -178,7 +179,8 @@
                 </div>
                 <div class="field">
                   <label for="meetingNumber">회차</label>
-                  <input id="meetingNumber" placeholder="예: 제7차 / 제2차 정기">
+                  <input id="meetingNumber" placeholder="예: 2026-7회">
+                  <div class="help">같은 해의 기존 이사회·총회를 보고 다음 회차를 제안합니다. 실제 회차와 다르면 바로 수정하세요.</div>
                 </div>
                 <div class="field full">
                   <label for="meetingTitle">회의 제목</label>
@@ -196,7 +198,7 @@
             </div>
 
             <div class="section-card">
-              <h3>참석·서명 기준</h3>
+              <h3>회의 구성 기준</h3>
               <div class="form-grid">
                 <div class="field">
                   <label for="chairOfficial">의장</label>
@@ -207,16 +209,6 @@
                   <input type="number" min="0" id="eligibleCount">
                   <div class="help">현재 임원·대의원 명단을 기준으로 자동 채우며 필요하면 회의 당시 수치로 고칠 수 있습니다.</div>
                 </div>
-                <div class="field full">
-                  <label id="attendeeLabel">참석 이사</label>
-                  <div class="official-grid" id="attendeeOfficials"></div>
-                </div>
-                <div class="field full" id="signerField">
-                  <label id="signerLabel">전자서명 대상</label>
-                  <div class="official-grid" id="signerOfficials"></div>
-                  <div class="help" id="signerHelp">이사회는 참석 이사를 기본 서명 대상으로 사용합니다.</div>
-                </div>
-                <div class="field full"><label for="observers">배석자</label><textarea id="observers" placeholder="이름을 쉼표 또는 줄바꿈으로 구분해 입력하세요."></textarea></div>
               </div>
             </div>
 
@@ -225,6 +217,7 @@
               <div class="form-grid">
                 <div class="field"><label for="openingMessage">개회 문구</label><textarea id="openingMessage" placeholder="비워 두면 기본 개회 문구를 만듭니다."></textarea></div>
                 <div class="field"><label for="closingMessage">폐회 문구</label><textarea id="closingMessage" placeholder="비워 두면 기본 폐회 문구를 만듭니다."></textarea></div>
+                <div class="field full"><label for="documentNotes">문서에 넣을 메모</label><textarea id="documentNotes" placeholder="자료, 진행 시나리오와 의사록 초안에 함께 남길 내용을 적으세요."></textarea><div class="help">입력한 내용은 세 문서의 메모 항목에 반영됩니다.</div></div>
                 <div class="field full"><label for="privateNotes">비공개 준비 메모</label><textarea id="privateNotes" placeholder="떠오른 안건, 확인할 일, 담당자 메모 등을 적어 두세요. 생성 문서에는 포함되지 않습니다."></textarea></div>
               </div>
             </div>
@@ -239,9 +232,27 @@
           </section>
 
           <section class="step-panel" data-panel="documents">
-            <div class="notice">먼저 기본정보와 안건을 저장한 뒤 초안을 만드세요. 자동 생성 뒤에도 아래 편집기에서 문구를 직접 고칠 수 있습니다.</div>
+            <div class="notice">세 문서 초안은 처음부터 준비되어 있습니다. 기본정보·안건·문서 메모를 입력하면 직접 편집하지 않은 초안에 바로 반영됩니다.</div>
+            <div class="section-card">
+              <h3>회의 후 의사록 정보</h3>
+              <div class="help" style="margin:-6px 0 14px;">참석자와 배석자는 회의가 끝난 뒤 입력하세요. 전자서명 대상도 실제 참석 결과를 확인한 뒤 정합니다.</div>
+              <div class="form-grid">
+                <div class="field full">
+                  <label id="attendeeLabel">참석 이사</label>
+                  <div class="official-grid" id="attendeeOfficials"></div>
+                </div>
+                <div class="field full" id="signerField">
+                  <label id="signerLabel">전자서명 대상</label>
+                  <div class="official-grid" id="signerOfficials"></div>
+                  <div class="help" id="signerHelp">실제 참석한 이사를 확인한 뒤 서명 대상을 선택하세요.</div>
+                </div>
+                <div class="field full"><label for="observers">배석자</label><textarea id="observers" placeholder="이름을 쉼표 또는 줄바꿈으로 구분해 입력하세요."></textarea></div>
+              </div>
+              <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveAttendanceButton">참석·서명 정보 저장</button></div>
+            </div>
             <div class="document-toolbar">
-              <button type="button" class="btn btn-brand" id="generateAllButton">자료집·시나리오·의사록 초안 만들기</button>
+              <span class="draft-sync">입력 내용 자동 반영</span>
+              <button type="button" class="btn btn-brand" id="generateAllButton">입력 내용으로 세 초안 다시 만들기</button>
               <button type="button" class="btn" id="saveDocumentButton">현재 문서 저장</button>
               <button type="button" class="btn" id="printDocumentButton">인쇄·PDF 저장</button>
             </div>
@@ -259,7 +270,7 @@
               <button type="button" data-command="insertUnorderedList">목록</button>
               <button type="button" data-command="insertOrderedList">번호 목록</button>
             </div>
-            <div id="documentEditor" class="rich-editor" contenteditable="true" data-placeholder="초안을 생성하면 여기에 표시됩니다."></div>
+            <div id="documentEditor" class="rich-editor" contenteditable="true" data-placeholder="회의 기본정보를 입력하면 초안이 표시됩니다."></div>
             <div class="publication-box" id="publicationBox">
               <strong>전자서명 연결</strong><br>
               의사록 문구를 최종 확인한 뒤 기존 전자서명 문서로 넘길 수 있습니다. 넘긴 뒤에는 서명 화면과 문서함의 기존 절차를 그대로 사용합니다.
@@ -274,16 +285,16 @@
   <div class="modal" id="newPackageModal" role="dialog" aria-modal="true" aria-labelledby="newPackageTitle">
     <div class="modal-card">
       <h2 id="newPackageTitle">새 회의 준비</h2>
-      <p>회의 종류와 제목만 먼저 정하고, 나머지는 작업공간에서 이어서 입력합니다.</p>
+      <p>회의 종류를 고르면 기존 회의를 기준으로 다음 회차와 제목을 제안합니다. 제안값은 지금 또는 작업공간에서 언제든 수정할 수 있습니다.</p>
       <div class="form-grid">
         <div class="field"><label for="newMeetingType">회의 종류</label><select id="newMeetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select></div>
-        <div class="field"><label for="newMeetingNumber">회차</label><input id="newMeetingNumber" placeholder="예: 제7차"></div>
+        <div class="field"><label for="newMeetingNumber">회차</label><input id="newMeetingNumber" placeholder="예: 2026-7회"></div>
         <div class="field full"><label for="newMeetingTitle">회의 제목</label><input id="newMeetingTitle" placeholder="예: 2026년 제7차 이사회"></div>
       </div>
       <div class="bottom-actions"><button type="button" class="btn" id="cancelNewPackage">취소</button><button type="button" class="btn btn-brand" id="createPackageButton">만들기</button></div>
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.0.2"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.0.3"></script>
 </body>
 </html>

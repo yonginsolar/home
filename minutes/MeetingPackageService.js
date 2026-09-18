@@ -1,6 +1,6 @@
 /*
-Version: v1.0.1
-Change: 2026-09-18 - Publish a meeting-package minute through one atomic, idempotent server operation.
+Version: v1.0.2
+Change: 2026-09-18 - Load prior meeting titles for editable sequence suggestions and store document-facing notes.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -28,9 +28,22 @@ async function listPackages() {
   const { data, error } = await scope(
     supabase
       .from('meeting_packages')
-      .select('id,meeting_type,title,meeting_number,meeting_date,location,status,published_minute_id,updated_at'),
+      .select('id,meeting_type,title,meeting_number,meeting_date,location,status,published_minute_id,created_at,updated_at'),
     coopId
   ).order('updated_at', { ascending: false });
+  return { data: data || [], error };
+}
+
+async function listMeetingHistory() {
+  const { coop_id: coopId } = await getRuntime();
+  const { data, error } = await scope(
+    supabase
+      .from('minutes')
+      .select('title,doc_type,created_at'),
+    coopId
+  )
+    .order('created_at', { ascending: false })
+    .limit(500);
   return { data: data || [], error };
 }
 
@@ -102,6 +115,7 @@ async function saveAgendas(packageId, agendas) {
     decision_draft: row.decision_draft || null,
     decision_result: row.decision_result || null,
     discussion_notes: row.discussion_notes || null,
+    document_notes: row.document_notes || null,
     private_notes: row.private_notes || null,
     sort_order: index
   }));
@@ -175,6 +189,7 @@ async function createMinuteFromPackage(packageId, payload) {
 export const MeetingPackageService = {
   getRuntime,
   listPackages,
+  listMeetingHistory,
   getPackage,
   createPackage,
   updatePackage,
