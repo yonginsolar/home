@@ -5542,11 +5542,33 @@ function openPlantDetail(id) {
         }
 
         // 2. 텍스트
+        const setAboutPlainText = (element, rawValue) => {
+            if (!element) return;
+            const raw = String(rawValue || '');
+            let value = raw;
+            if (/<\/?(?:p|br|strong|b|em|i|u|h[1-6]|ul|ol|li|blockquote|a)\b/i.test(raw)) {
+                const doc = new DOMParser().parseFromString(`<div>${sanitizeHtml(raw)}</div>`, 'text/html');
+                const root = doc.body.firstElementChild;
+                if (!root) {
+                    element.replaceChildren();
+                    return;
+                }
+                root.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+                value = String(root.textContent || '');
+            }
+            value = value.replace(/\u00a0/g, ' ').trim();
+            element.replaceChildren();
+            value.split(/\r?\n/).forEach((part, index) => {
+                if (index > 0) element.appendChild(document.createElement('br'));
+                if (part) element.appendChild(document.createTextNode(part));
+            });
+        };
+
         const titleEl = document.getElementById('about-title');
-        if(titleEl) titleEl.innerHTML = sanitizeHtml(defaultData.title || '');
+        setAboutPlainText(titleEl, defaultData.title || '');
 
         const subEl = document.getElementById('about-subtitle');
-        if(subEl) subEl.innerHTML = sanitizeHtml(defaultData.subtitle || '');
+        setAboutPlainText(subEl, defaultData.subtitle || '');
 
         const contentEl = document.getElementById('about-content');
         if(contentEl) contentEl.innerHTML = sanitizeHtml(defaultData.content || '');

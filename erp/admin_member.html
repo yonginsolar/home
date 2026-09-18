@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.173
-Change: 2026-09-18 - Add homepage layouts, official certifications, and a visual About editor.
+Version: v1.0.174
+Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML to visual text fields.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.173';
+window.ADMIN_MEMBER_VERSION = 'v1.0.174';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1926,7 +1926,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="col-lg-6">
 <div class="mb-2">
 <label class="form-label small fw-bold">제목</label>
-<input type="text" id="admin-about-title" class="form-control" oninput="queueTotalPreviewUpdate()">
+<textarea id="admin-about-title" class="form-control" rows="2" maxlength="180" oninput="queueTotalPreviewUpdate()"></textarea>
+<div class="form-text">줄을 바꾸면 홈페이지 제목에도 같은 위치에서 줄이 바뀝니다. HTML 코드는 입력하지 않아도 됩니다.</div>
 </div>
 <div class="mb-2">
 <label class="form-label small fw-bold">부제목</label>
@@ -8256,6 +8257,23 @@ node.setAttribute('rel', 'noopener noreferrer');
 return root.innerHTML.trim();
 }
 
+function aboutHtmlToEditableText(rawHtml) {
+const raw = String(rawHtml || '');
+if (!/<\/?(?:p|br|strong|b|em|i|u|h[1-6]|ul|ol|li|blockquote|a)\b/i.test(raw)) {
+return raw.replace(/\u00a0/g, ' ').replace(/\r\n/g, '\n').trim();
+}
+const doc = new DOMParser().parseFromString(`<div>${sanitizeAboutHtml(raw)}</div>`, 'text/html');
+const root = doc.body.firstElementChild;
+if (!root) return '';
+root.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+return String(root.textContent || '')
+.replace(/\u00a0/g, ' ')
+.replace(/[ \t]+\n/g, '\n')
+.replace(/\n[ \t]+/g, '\n')
+.replace(/\n{3,}/g, '\n\n')
+.trim();
+}
+
 async function ensureAboutRichEditor() {
 if (!window.ApprovalRichEditor) throw new Error('편집기를 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
 await window.ApprovalRichEditor.loadTiptapModules();
@@ -8447,8 +8465,8 @@ const fileEl = document.getElementById('admin-about-img-file');
 if (!titleEl || !subtitleEl || !contentEl || !listEl || !imgEl) return;
 revokeAboutPreviewObjectUrl();
 if (fileEl) fileEl.value = '';
-titleEl.value = row.title || '';
-subtitleEl.value = row.subtitle || '';
+titleEl.value = aboutHtmlToEditableText(row.title || '');
+subtitleEl.value = aboutHtmlToEditableText(row.subtitle || '');
 contentEl.value = row.content || '';
 listEl.value = row.list_items || '';
 imgEl.value = row.image_url || '';
@@ -8542,8 +8560,8 @@ if (imageUrlInput) imageUrlInput.value = newlyUploadedImageUrl;
 }
 
 const updates = {
-p_title: document.getElementById('admin-about-title').value,
-p_subtitle: document.getElementById('admin-about-subtitle').value,
+p_title: String(document.getElementById('admin-about-title').value || '').replace(/\r\n/g, '\n').trim(),
+p_subtitle: String(document.getElementById('admin-about-subtitle').value || '').replace(/\r\n/g, '\n').trim(),
 p_content: sanitizeAboutHtml(document.getElementById('admin-about-content').value),
 p_list_items: document.getElementById('admin-about-list').value,
 p_image_url: String(imageUrlInput?.value || '').trim()
