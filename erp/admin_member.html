@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.172
-Change: 2026-09-17 - Match withdrawal refunds to each cooperative's enabled approval and accounting modules.
+Version: v1.0.173
+Change: 2026-09-18 - Add homepage layouts, official certifications, and a visual About editor.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.172';
+window.ADMIN_MEMBER_VERSION = 'v1.0.173';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -44,6 +44,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.172';
 </script>
   <script src="erp_runtime_guard.js?v=20260910-1"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="approval_rich_editor.js?v=20260918-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -127,6 +128,33 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 }
 .partner-request-log-message { max-width: 260px; white-space: normal; word-break: keep-all; }
 .partner-request-log-snapshot { font-size: 12px; color: #6c757d; margin-top: 2px; }
+.home-template-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.home-template-card { position:relative; display:block; height:100%; padding:18px; border:2px solid #e2e8f0; border-radius:16px; background:#fff; cursor:pointer; transition:.18s ease; }
+.home-template-card:hover { border-color:#93c5fd; transform:translateY(-1px); }
+.home-template-card:has(input:checked) { border-color:#2563eb; background:#eff6ff; box-shadow:0 8px 22px rgba(37,99,235,.12); }
+.home-template-card input { position:absolute; top:14px; right:14px; }
+.home-template-preview { height:82px; margin-bottom:13px; border-radius:11px; overflow:hidden; background:#dbeafe; display:grid; gap:5px; padding:9px; }
+.home-template-preview span { display:block; border-radius:5px; background:rgba(255,255,255,.9); }
+.home-template-preview.community { grid-template-columns:1.2fr .8fr; grid-template-rows:1fr 1fr; background:linear-gradient(135deg,#14532d,#facc15); }
+.home-template-preview.community span:first-child { grid-row:1 / 3; }
+.home-template-preview.simple { grid-template-columns:1fr 1fr; grid-template-rows:1.25fr .75fr; background:linear-gradient(135deg,#e0f2fe,#dcfce7); }
+.home-template-preview.simple span:first-child { grid-column:1 / 3; }
+.home-template-preview.brand { grid-template-columns:.8fr 1.2fr; grid-template-rows:1fr 1fr 1fr; background:linear-gradient(135deg,#172554,#7c3aed); }
+.home-template-preview.brand span:first-child { grid-row:1 / 4; }
+.home-template-title { padding-right:24px; font-weight:800; color:#0f172a; }
+.home-template-description { margin-top:5px; color:#64748b; font-size:12px; line-height:1.55; word-break:keep-all; }
+.about-editor-shell { border:1px solid #cbd5e1; border-radius:12px; background:#fff; overflow:hidden; }
+.about-editor-toolbar { display:flex; flex-wrap:wrap; gap:6px; padding:9px; border-bottom:1px solid #e2e8f0; background:#f8fafc; }
+.about-editor-toolbar .btn.active { color:#fff; background:#2563eb; border-color:#2563eb; }
+.about-editor-toolbar .form-select { width:auto; min-width:112px; }
+.about-editor-surface { min-height:220px; padding:16px; color:#0f172a; line-height:1.75; }
+.about-editor-surface .ProseMirror { min-height:188px; outline:none; }
+.about-editor-surface .ProseMirror p:last-child { margin-bottom:0; }
+.about-list-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
+.about-list-actions { display:flex; gap:4px; }
+.certification-logo-thumb { width:64px; height:46px; border:1px solid #e2e8f0; border-radius:8px; object-fit:contain; background:#fff; }
+.certification-empty { padding:32px 16px; text-align:center; color:#64748b; }
+@media (max-width: 991.98px) { .home-template-grid { grid-template-columns:1fr; } }
 .power-generation-summary-card { background: #fff; border: 1px solid #e9ecef; border-radius: 14px; padding: 16px 18px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04); height: 100%; }
 .power-generation-summary-card .label { font-size: 12px; color: #64748b; font-weight: 700; letter-spacing: 0.02em; }
 .power-generation-summary-card .value { font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2; }
@@ -1671,6 +1699,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <a class="nav-link" data-bs-toggle="tab" href="#sub-about" onclick="fetchAboutSettings()">조합 소개 (About)</a>
 </li>
 <li class="nav-item">
+<a class="nav-link" data-bs-toggle="tab" href="#sub-certifications" onclick="setTimeout(fetchSiteCertifications,100)">🏆 공식 인증·지정</a>
+</li>
+<li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-plants" onclick="setTimeout(fetchPlants,100)">
 발전소 현황
 </a>
@@ -1749,10 +1780,37 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 
 <div class="card border-0 shadow-sm mb-4">
 <div class="card-body">
+<h5 class="fw-bold mb-1">🎨 홈페이지 형식</h5>
+<p class="text-muted small mb-3">같은 내용과 사진을 유지하면서 홈페이지의 표현 방식만 바꿉니다. 저장하기 전까지 공개 화면에는 반영되지 않습니다.</p>
+<div class="home-template-grid" role="radiogroup" aria-label="홈페이지 형식 선택">
+<label class="home-template-card">
+<input class="form-check-input" type="radio" name="site-home-template" value="community">
+<span class="home-template-preview community" aria-hidden="true"><span></span><span></span><span></span></span>
+<span class="home-template-title">시민참여형</span>
+<span class="home-template-description d-block">조합원·출자금과 지역 참여 현황을 풍부하게 보여줍니다. 용인모두의햇빛협동조합의 현재 형식입니다.</span>
+</label>
+<label class="home-template-card">
+<input class="form-check-input" type="radio" name="site-home-template" value="simple">
+<span class="home-template-preview simple" aria-hidden="true"><span></span><span></span><span></span></span>
+<span class="home-template-title">간결형</span>
+<span class="home-template-description d-block">큰 배너와 핵심 숫자, 소개와 소식을 단정하게 배치합니다. 콘텐츠가 많지 않은 조합에도 잘 맞습니다.</span>
+</label>
+<label class="home-template-card">
+<input class="form-check-input" type="radio" name="site-home-template" value="brand">
+<span class="home-template-preview brand" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+<span class="home-template-title">브랜드형</span>
+<span class="home-template-description d-block">대표 사진, 조합의 철학과 공식 인증을 앞세웁니다. 사회적기업·마을기업 등 정체성을 강조할 때 적합합니다.</span>
+</label>
+</div>
+</div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+<div class="card-body">
 <h5 class="fw-bold mb-3">🌞 메인 배너</h5>
 <div class="row g-3">
 <div class="col-lg-7">
-<div class="mb-3"><label class="form-label fw-bold">제목</label><input type="text" class="form-control" id="site-home-hero-title" maxlength="120"></div>
+<div class="mb-3"><label class="form-label fw-bold">제목</label><textarea class="form-control" id="site-home-hero-title" rows="2" maxlength="120"></textarea><div class="form-text">줄을 바꾸면 공개 홈페이지 제목에도 같은 위치에서 줄이 바뀝니다.</div></div>
 <div class="mb-3"><label class="form-label fw-bold">강조할 문구</label><input type="text" class="form-control" id="site-home-hero-highlight" maxlength="60"><div class="form-text">제목 안에 있는 문구를 입력하면 해당 부분에 강조색을 적용합니다.</div></div>
 <div class="mb-3"><label class="form-label fw-bold">설명</label><textarea class="form-control" id="site-home-hero-subtitle" rows="3" maxlength="240"></textarea></div>
 <div class="row g-3">
@@ -1862,9 +1920,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="tab-pane fade" id="sub-about">
-<div class="alert alert-info small">
-<i class="bi bi-info-circle-fill"></i> 소개글은 HTML 입력을 허용합니다. 리스트는 줄바꿈 또는 <code>&lt;li&gt;</code> HTML로 입력할 수 있습니다.
-</div>
+<div class="alert alert-info small"><i class="bi bi-info-circle-fill"></i> 코드를 입력하지 않고 문서처럼 작성할 수 있습니다. 기존 소개글의 글자와 기본 서식은 편집기로 불러옵니다.</div>
 
 <div class="row g-3">
 <div class="col-lg-6">
@@ -1877,13 +1933,26 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <input type="text" id="admin-about-subtitle" class="form-control" oninput="queueTotalPreviewUpdate()">
 </div>
 <div class="mb-2">
-<label class="form-label small fw-bold">본문 (HTML 허용)</label>
-<textarea id="admin-about-content" class="form-control" rows="6" oninput="queueTotalPreviewUpdate()"></textarea>
+<label class="form-label small fw-bold">본문</label>
+<textarea id="admin-about-content" class="d-none" rows="6"></textarea>
+<div class="about-editor-shell">
+<div class="about-editor-toolbar" id="admin-about-toolbar">
+<select class="form-select form-select-sm" data-approval-editor-select="block" aria-label="문단 형식"><option value="paragraph">본문</option><option value="heading2">큰 소제목</option><option value="heading3">작은 소제목</option></select>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bold" aria-label="굵게"><i class="bi bi-type-bold"></i></button>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="italic" aria-label="기울임"><i class="bi bi-type-italic"></i></button>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bulletList" aria-label="글머리표"><i class="bi bi-list-ul"></i></button>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="orderedList" aria-label="번호 목록"><i class="bi bi-list-ol"></i></button>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="link" aria-label="링크"><i class="bi bi-link-45deg"></i></button>
+<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="clean" aria-label="서식 지우기"><i class="bi bi-eraser"></i></button>
+</div>
+<div id="admin-about-editor" class="about-editor-surface"></div>
+</div>
 </div>
 <div class="mb-2">
-<label class="form-label small fw-bold">리스트 항목</label>
-<textarea id="admin-about-list" class="form-control" rows="4" placeholder="줄바꿈으로 여러 항목 입력\n또는 <li>...</li> HTML" oninput="queueTotalPreviewUpdate()"></textarea>
-<div class="form-text text-muted">줄바꿈 입력 시 자동으로 &lt;li&gt;로 변환됩니다.</div>
+<div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label small fw-bold mb-0">주요 내용</label><button type="button" class="btn btn-sm btn-outline-primary" onclick="addAboutListItem()"><i class="bi bi-plus-lg"></i> 항목 추가</button></div>
+<textarea id="admin-about-list" class="d-none" rows="4"></textarea>
+<div id="admin-about-list-editor" class="d-grid gap-2"></div>
+<div class="form-text text-muted">항목을 추가하고 화살표로 순서를 바꿀 수 있습니다.</div>
 </div>
 <div class="mb-3">
 <label class="form-label small fw-bold" for="admin-about-img-file">소개 이미지</label>
@@ -1908,6 +1977,34 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <ul id="prev-list" class="list-unstyled mb-3"></ul>
 <p id="prev-content"></p>
 <img id="prev-img" src="" alt="조합 소개 이미지 미리보기" style="max-width:100%; border-radius:8px; display:none;">
+</div>
+</div>
+</div>
+</div>
+
+<div class="tab-pane fade" id="sub-certifications">
+<div class="alert alert-info small"><i class="bi bi-award-fill"></i> 사회적기업·예비사회적기업·마을기업 등 조합이 받은 공식 인증과 지정을 관리합니다. 게임·활동 뱃지와는 별도이며, 공개한 항목만 홈페이지에 표시됩니다.</div>
+<div class="row g-4">
+<div class="col-xl-7">
+<div class="card border-0 shadow-sm h-100">
+<div class="card-header bg-white d-flex justify-content-between align-items-center"><strong>등록된 인증·지정</strong><button type="button" class="btn btn-sm btn-outline-secondary" onclick="fetchSiteCertifications()"><i class="bi bi-arrow-clockwise"></i> 새로고침</button></div>
+<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>순서</th><th>인증·지정</th><th>공개</th><th>대표</th><th>관리</th></tr></thead><tbody id="site-certification-list"><tr><td colspan="5" class="certification-empty">인증·지정 정보를 불러오지 않았습니다.</td></tr></tbody></table></div>
+</div>
+</div>
+<div class="col-xl-5">
+<div class="card border-0 shadow-sm">
+<div class="card-body">
+<h5 class="fw-bold mb-3" id="site-certification-form-title">➕ 인증·지정 추가</h5>
+<input type="hidden" id="site-certification-id">
+<input type="hidden" id="site-certification-image-url">
+<div class="mb-3"><label class="form-label fw-bold">명칭</label><input type="text" class="form-control" id="site-certification-name" maxlength="120" placeholder="예: 경기형 예비사회적기업"></div>
+<div class="row g-2 mb-3"><div class="col-md-7"><label class="form-label fw-bold">발급·지정 기관</label><input type="text" class="form-control" id="site-certification-issuer" maxlength="120" placeholder="예: 경기도"></div><div class="col-md-5"><label class="form-label fw-bold">인증번호</label><input type="text" class="form-control" id="site-certification-number" maxlength="120"></div></div>
+<div class="row g-2 mb-3"><div class="col-md-6"><label class="form-label fw-bold">지정일</label><input type="date" class="form-control" id="site-certification-issued-on"></div><div class="col-md-6"><label class="form-label fw-bold">유효기간 종료</label><input type="date" class="form-control" id="site-certification-valid-until"></div></div>
+<div class="mb-3"><label class="form-label fw-bold">공식 안내 링크</label><input type="url" class="form-control" id="site-certification-public-url" placeholder="https://"></div>
+<div class="mb-3"><label class="form-label fw-bold">로고·인증 이미지</label><input type="file" class="form-control" id="site-certification-image-file" accept="image/*"><div class="d-flex justify-content-between align-items-center gap-2 mt-2"><div class="form-text mt-0" id="site-certification-image-status">선택 사항이며 10MB 이하 이미지를 사용합니다.</div><button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSiteCertificationImage()">이미지 사용 안 함</button></div></div>
+<div class="row g-2 align-items-center mb-3"><div class="col-md-4"><label class="form-label fw-bold">표시 순서</label><input type="number" class="form-control" id="site-certification-order" value="100" min="0" max="10000"></div><div class="col-md-8 pt-md-4"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="site-certification-visible" checked><label class="form-check-label" for="site-certification-visible">홈페이지에 공개</label></div><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="site-certification-featured"><label class="form-check-label" for="site-certification-featured">메인 배너에도 대표 인증으로 표시</label></div></div></div>
+<div class="d-flex justify-content-between gap-2"><button type="button" class="btn btn-outline-secondary" onclick="resetSiteCertificationForm()">새로 입력</button><button type="button" class="btn btn-primary" id="site-certification-save" onclick="saveSiteCertification()"><i class="bi bi-check2-circle"></i> 저장</button></div>
+</div>
 </div>
 </div>
 </div>
@@ -7957,6 +8054,12 @@ if (label) label.textContent = `${value}%`;
 }
 
 function setHomeSettingsForm(settings) {
+const template = ['community', 'simple', 'brand'].includes(String(settings?.home_template || ''))
+? String(settings.home_template)
+: (String(settings?.runtime_profile || '') === 'legacy_full' ? 'community' : 'simple');
+document.querySelectorAll('input[name="site-home-template"]').forEach((input) => {
+input.checked = input.value === template;
+});
 const valueMap = {
 'site-home-hero-title': settings?.hero_title,
 'site-home-hero-highlight': settings?.hero_highlight,
@@ -8024,6 +8127,7 @@ document.getElementById(`site-home-${kind}-image-url`).value = uploadedUrl;
 
 const read = (id) => String(document.getElementById(id)?.value || '').trim();
 const payload = {
+p_home_template: String(document.querySelector('input[name="site-home-template"]:checked')?.value || 'simple'),
 p_hero_title: read('site-home-hero-title'),
 p_hero_highlight: read('site-home-hero-highlight'),
 p_hero_subtitle: read('site-home-hero-subtitle'),
@@ -8046,7 +8150,7 @@ p_contact_phone: read('site-home-contact-phone'),
 p_contact_email: read('site-home-contact-email'),
 p_contact_address: read('site-home-contact-address')
 };
-const { data, error } = await _supabase.rpc('upsert_site_home_settings', payload);
+const { data, error } = await _supabase.rpc('upsert_site_home_settings_v2', payload);
 if (error) throw error;
 setHomeSettingsForm(data || payload);
 myAlert('메인 화면과 연락처 설정을 저장했습니다.');
@@ -8124,6 +8228,145 @@ if (button) button.disabled = false;
 let g_aboutSettingsSaving = false;
 let g_aboutOriginalImageUrl = '';
 let g_aboutPreviewObjectUrl = '';
+let g_aboutEditorBridge = null;
+
+function sanitizeAboutHtml(rawHtml) {
+const allowedTags = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'A']);
+const doc = new DOMParser().parseFromString(`<div>${String(rawHtml || '')}</div>`, 'text/html');
+const root = doc.body.firstElementChild;
+if (!root) return '';
+Array.from(root.querySelectorAll('*')).forEach((node) => {
+if (!allowedTags.has(node.tagName)) {
+node.replaceWith(...Array.from(node.childNodes));
+return;
+}
+Array.from(node.attributes).forEach((attr) => {
+const name = attr.name.toLowerCase();
+if (node.tagName === 'A' && name === 'href') {
+const href = String(attr.value || '').trim();
+if (!/^(https?:\/\/|mailto:|tel:|#|\/)/i.test(href)) node.removeAttribute(attr.name);
+return;
+}
+node.removeAttribute(attr.name);
+});
+if (node.tagName === 'A' && node.hasAttribute('href')) {
+node.setAttribute('rel', 'noopener noreferrer');
+}
+});
+return root.innerHTML.trim();
+}
+
+async function ensureAboutRichEditor() {
+if (!window.ApprovalRichEditor) throw new Error('편집기를 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
+await window.ApprovalRichEditor.loadTiptapModules();
+if (!g_aboutEditorBridge) {
+g_aboutEditorBridge = window.ApprovalRichEditor.createTiptapBridge({
+source: '#admin-about-content',
+editor: '#admin-about-editor',
+toolbar: '#admin-about-toolbar',
+placeholder: '조합을 소개하는 글을 입력해 주세요.',
+normalizeHtml: sanitizeAboutHtml,
+askText: async (label, options) => window.prompt(label, options?.value || ''),
+showMessage: (message) => myAlert(message, 'warning')
+});
+const surface = document.getElementById('admin-about-editor');
+if (surface && !surface.dataset.previewBound) {
+surface.dataset.previewBound = '1';
+surface.addEventListener('input', queueTotalPreviewUpdate);
+}
+}
+g_aboutEditorBridge.ensure();
+return g_aboutEditorBridge;
+}
+
+function parseAboutListItems(rawValue) {
+const raw = String(rawValue || '').trim();
+if (!raw) return [];
+if (/<li[\s>]/i.test(raw)) {
+const doc = new DOMParser().parseFromString(`<ul>${raw}</ul>`, 'text/html');
+return Array.from(doc.querySelectorAll('li')).map((item) => String(item.textContent || '').trim()).filter(Boolean);
+}
+return raw.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function syncAboutListSource() {
+const values = Array.from(document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]'))
+.map((input) => String(input.value || '').trim()).filter(Boolean);
+const source = document.getElementById('admin-about-list');
+if (source) source.value = values.join('\n');
+queueTotalPreviewUpdate();
+}
+
+function renderAboutListEditor(items) {
+const container = document.getElementById('admin-about-list-editor');
+if (!container) return;
+container.replaceChildren();
+const values = Array.isArray(items) ? items : [];
+if (values.length === 0) {
+const empty = document.createElement('div');
+empty.className = 'border rounded bg-light text-muted small p-3 text-center';
+empty.textContent = '등록된 주요 내용이 없습니다. 필요한 경우 항목을 추가해 주세요.';
+container.appendChild(empty);
+return;
+}
+values.forEach((value, index) => {
+const row = document.createElement('div');
+row.className = 'about-list-row';
+const input = document.createElement('input');
+input.type = 'text';
+input.className = 'form-control';
+input.value = value;
+input.dataset.aboutListItem = '1';
+input.maxLength = 240;
+input.addEventListener('input', syncAboutListSource);
+const actions = document.createElement('div');
+actions.className = 'about-list-actions';
+[
+['위로', 'bi-arrow-up', () => moveAboutListItem(index, -1)],
+['아래로', 'bi-arrow-down', () => moveAboutListItem(index, 1)],
+['삭제', 'bi-trash', () => removeAboutListItem(index)]
+].forEach(([label, icon, handler]) => {
+const button = document.createElement('button');
+button.type = 'button';
+button.className = label === '삭제' ? 'btn btn-sm btn-outline-danger' : 'btn btn-sm btn-outline-secondary';
+button.setAttribute('aria-label', label);
+button.innerHTML = `<i class="bi ${icon}"></i>`;
+button.addEventListener('click', handler);
+actions.appendChild(button);
+});
+row.append(input, actions);
+container.appendChild(row);
+});
+}
+
+function getAboutListEditorValues() {
+return Array.from(document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]')).map((input) => String(input.value || '').trim()).filter(Boolean);
+}
+
+function addAboutListItem() {
+const values = getAboutListEditorValues();
+values.push('');
+renderAboutListEditor(values);
+const inputs = document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]');
+inputs[inputs.length - 1]?.focus();
+syncAboutListSource();
+}
+
+function moveAboutListItem(index, direction) {
+const values = getAboutListEditorValues();
+const target = index + direction;
+if (target < 0 || target >= values.length) return;
+[values[index], values[target]] = [values[target], values[index]];
+renderAboutListEditor(values);
+syncAboutListSource();
+}
+
+function removeAboutListItem(index) {
+const values = getAboutListEditorValues();
+values.splice(index, 1);
+renderAboutListEditor(values);
+syncAboutListSource();
+}
 
 function revokeAboutPreviewObjectUrl() {
 if (!g_aboutPreviewObjectUrl) return;
@@ -8190,8 +8433,10 @@ console.warn('[deleteManagedAboutImage] cleanup failed:', error);
 }
 
 async function fetchAboutSettings() {
+try {
+await ensureAboutRichEditor();
 const { data, error } = await scopeAdminTenant(_supabase.from('site_about').select('*')).limit(1);
-if(error) { console.error(error); return; }
+if(error) throw error;
 const row = (Array.isArray(data) ? data[0] : data) || {};
 const titleEl = document.getElementById('admin-about-title');
 const subtitleEl = document.getElementById('admin-about-subtitle');
@@ -8209,7 +8454,13 @@ listEl.value = row.list_items || '';
 imgEl.value = row.image_url || '';
 g_aboutOriginalImageUrl = imgEl.value;
 setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
+g_aboutEditorBridge.syncFromSource();
+renderAboutListEditor(parseAboutListItems(listEl.value));
 if (typeof updateTotalPreview === 'function') updateTotalPreview();
+} catch (error) {
+console.error('[fetchAboutSettings] failed:', error);
+myAlert('조합 소개를 불러오지 못했습니다: ' + (error?.message || error), 'warning');
+}
 }
 
 
@@ -8237,9 +8488,9 @@ const content = document.getElementById('admin-about-content').value;
 const listText = document.getElementById('admin-about-list').value;
 const imgUrl = g_aboutPreviewObjectUrl || document.getElementById('admin-about-img').value;
 
-document.getElementById('prev-title').innerHTML = title;
-document.getElementById('prev-subtitle').innerHTML = subtitle;
-document.getElementById('prev-content').innerHTML = content;
+document.getElementById('prev-title').textContent = title;
+document.getElementById('prev-subtitle').textContent = subtitle;
+document.getElementById('prev-content').innerHTML = sanitizeAboutHtml(content);
 
 const listEl = document.getElementById('prev-list');
 // ★ 핵심: 미리보기 박스에도 'list-unstyled' 적용 (점 제거)
@@ -8250,16 +8501,13 @@ listEl.innerHTML = '';
 listEl.style.display = 'none';
 } else {
 listEl.style.display = 'block';
-if (listText.includes('<li')) {
-listEl.innerHTML = listText;
-} else {
-let html = '';
-listText.split('\n').forEach(item => {
-// 아이콘 없이 깔끔하게
-if(item.trim()) html += `<li class="mb-1">${item.trim()}</li>`;
+listEl.replaceChildren();
+parseAboutListItems(listText).forEach((item) => {
+const li = document.createElement('li');
+li.className = 'mb-1';
+li.textContent = item;
+listEl.appendChild(li);
 });
-listEl.innerHTML = html;
-}
 }
 
 const imgEl = document.getElementById('prev-img');
@@ -8280,6 +8528,9 @@ let newlyUploadedImageUrl = '';
 if (saveButton) saveButton.disabled = true;
 showLoading(true);
 try {
+await ensureAboutRichEditor();
+g_aboutEditorBridge.syncToSource();
+syncAboutListSource();
 if (file && !file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
 if (file && file.size > 10 * 1024 * 1024) throw new Error('사진은 10MB 이하로 올려 주세요.');
 
@@ -8293,7 +8544,7 @@ if (imageUrlInput) imageUrlInput.value = newlyUploadedImageUrl;
 const updates = {
 p_title: document.getElementById('admin-about-title').value,
 p_subtitle: document.getElementById('admin-about-subtitle').value,
-p_content: document.getElementById('admin-about-content').value,
+p_content: sanitizeAboutHtml(document.getElementById('admin-about-content').value),
 p_list_items: document.getElementById('admin-about-list').value,
 p_image_url: String(imageUrlInput?.value || '').trim()
 };
@@ -8320,6 +8571,233 @@ showLoading(false);
 g_aboutSettingsSaving = false;
 if (saveButton) saveButton.disabled = false;
 }
+}
+
+let g_siteCertifications = [];
+let g_siteCertificationSaving = false;
+
+function formatCertificationDate(value) {
+const safe = String(value || '').slice(0, 10);
+return safe || '—';
+}
+
+function resetSiteCertificationForm() {
+[
+'site-certification-id', 'site-certification-name', 'site-certification-issuer',
+'site-certification-number', 'site-certification-issued-on', 'site-certification-valid-until',
+'site-certification-image-url', 'site-certification-public-url'
+].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+const file = document.getElementById('site-certification-image-file');
+if (file) file.value = '';
+const order = document.getElementById('site-certification-order');
+if (order) order.value = '100';
+const visible = document.getElementById('site-certification-visible');
+if (visible) visible.checked = true;
+const featured = document.getElementById('site-certification-featured');
+if (featured) featured.checked = false;
+const title = document.getElementById('site-certification-form-title');
+if (title) title.textContent = '➕ 인증·지정 추가';
+const status = document.getElementById('site-certification-image-status');
+if (status) status.textContent = '선택 사항이며 10MB 이하 이미지를 사용합니다.';
+const imageUrl = document.getElementById('site-certification-image-url');
+if (imageUrl) delete imageUrl.dataset.originalUrl;
+}
+
+function clearSiteCertificationImage() {
+const file = document.getElementById('site-certification-image-file');
+const url = document.getElementById('site-certification-image-url');
+if (file) file.value = '';
+if (url) url.value = '';
+const status = document.getElementById('site-certification-image-status');
+if (status) status.textContent = '이미지를 사용하지 않도록 선택했습니다. 저장하면 반영됩니다.';
+}
+
+function editSiteCertification(id) {
+const item = g_siteCertifications.find((row) => String(row.id) === String(id));
+if (!item) return;
+const set = (fieldId, value) => { const el = document.getElementById(fieldId); if (el) el.value = value == null ? '' : String(value); };
+set('site-certification-id', item.id);
+set('site-certification-name', item.name);
+set('site-certification-issuer', item.issuer);
+set('site-certification-number', item.certificate_no);
+set('site-certification-issued-on', formatCertificationDate(item.issued_on).replace('—', ''));
+set('site-certification-valid-until', formatCertificationDate(item.valid_until).replace('—', ''));
+set('site-certification-image-url', item.image_url);
+set('site-certification-public-url', item.public_url);
+set('site-certification-order', item.display_order ?? 100);
+const imageUrl = document.getElementById('site-certification-image-url');
+if (imageUrl) imageUrl.dataset.originalUrl = String(item.image_url || '');
+const file = document.getElementById('site-certification-image-file');
+if (file) file.value = '';
+const visible = document.getElementById('site-certification-visible');
+if (visible) visible.checked = item.is_visible === true;
+const featured = document.getElementById('site-certification-featured');
+if (featured) featured.checked = item.is_featured === true;
+const title = document.getElementById('site-certification-form-title');
+if (title) title.textContent = '✏️ 인증·지정 수정';
+const status = document.getElementById('site-certification-image-status');
+if (status) status.textContent = item.image_url ? '현재 등록된 이미지가 있습니다.' : '등록된 이미지가 없습니다.';
+document.getElementById('site-certification-name')?.focus();
+}
+
+function renderSiteCertifications() {
+const tbody = document.getElementById('site-certification-list');
+if (!tbody) return;
+tbody.replaceChildren();
+if (g_siteCertifications.length === 0) {
+const row = document.createElement('tr');
+const cell = document.createElement('td');
+cell.colSpan = 5;
+cell.className = 'certification-empty';
+cell.textContent = '등록된 공식 인증·지정 정보가 없습니다.';
+row.appendChild(cell);
+tbody.appendChild(row);
+return;
+}
+g_siteCertifications.forEach((item) => {
+const row = document.createElement('tr');
+const order = document.createElement('td');
+order.textContent = String(item.display_order ?? 100);
+const info = document.createElement('td');
+const wrap = document.createElement('div');
+wrap.className = 'd-flex align-items-center gap-2';
+if (item.image_url) {
+const img = document.createElement('img');
+img.className = 'certification-logo-thumb';
+img.src = item.image_url;
+img.alt = '';
+wrap.appendChild(img);
+}
+const copy = document.createElement('div');
+const name = document.createElement('strong');
+name.textContent = item.name;
+const meta = document.createElement('div');
+meta.className = 'small text-muted';
+meta.textContent = [item.issuer, item.certificate_no, item.valid_until ? `유효기간 ${formatCertificationDate(item.valid_until)}` : ''].filter(Boolean).join(' · ');
+copy.append(name, meta);
+wrap.appendChild(copy);
+info.appendChild(wrap);
+const visible = document.createElement('td');
+visible.textContent = item.is_visible ? '공개' : '비공개';
+const featured = document.createElement('td');
+featured.textContent = item.is_featured ? '대표' : '—';
+const actions = document.createElement('td');
+const edit = document.createElement('button');
+edit.type = 'button'; edit.className = 'btn btn-sm btn-outline-primary me-1'; edit.textContent = '수정';
+edit.addEventListener('click', () => editSiteCertification(item.id));
+const remove = document.createElement('button');
+remove.type = 'button'; remove.className = 'btn btn-sm btn-outline-danger'; remove.textContent = '삭제';
+remove.addEventListener('click', () => askDeleteSiteCertification(item.id));
+actions.append(edit, remove);
+row.append(order, info, visible, featured, actions);
+tbody.appendChild(row);
+});
+}
+
+async function fetchSiteCertifications() {
+try {
+const { data, error } = await _supabase.rpc('get_my_site_certifications');
+if (error) throw error;
+g_siteCertifications = Array.isArray(data) ? data : [];
+renderSiteCertifications();
+} catch (error) {
+console.error('[fetchSiteCertifications] failed:', error);
+myAlert('공식 인증·지정 정보를 불러오지 못했습니다: ' + (error?.message || error), 'warning');
+}
+}
+
+function isManagedCertificationImageUrl(url, coopId) {
+return Boolean(String(coopId || '').trim() && String(url || '').includes(`/assets/site-home/${String(coopId).trim()}/certifications/`));
+}
+
+async function deleteManagedCertificationImage(url, coopId) {
+if (!isManagedCertificationImageUrl(url, coopId)) return;
+try {
+const rawPath = String(url).split('/assets/')[1]?.split('?')[0] || '';
+const path = decodeURIComponent(rawPath);
+if (path) await _supabase.storage.from('assets').remove([path]);
+} catch (error) {
+console.warn('[deleteManagedCertificationImage] cleanup failed:', error);
+}
+}
+
+async function saveSiteCertification() {
+if (g_siteCertificationSaving) return;
+const read = (id) => String(document.getElementById(id)?.value || '').trim();
+const name = read('site-certification-name');
+if (!name) return myAlert('인증·지정 명칭을 입력해 주세요.', 'warning');
+const issuedOn = read('site-certification-issued-on');
+const validUntil = read('site-certification-valid-until');
+if (issuedOn && validUntil && validUntil < issuedOn) return myAlert('유효기간 종료일은 지정일보다 앞설 수 없습니다.', 'warning');
+const publicUrl = read('site-certification-public-url');
+if (publicUrl && !/^https:\/\//i.test(publicUrl)) return myAlert('공식 안내 링크는 https:// 주소로 입력해 주세요.', 'warning');
+
+g_siteCertificationSaving = true;
+const button = document.getElementById('site-certification-save');
+if (button) button.disabled = true;
+showLoading(true);
+let uploadedUrl = '';
+const imageUrlInput = document.getElementById('site-certification-image-url');
+const previousImageUrl = String(imageUrlInput?.dataset.originalUrl || '');
+try {
+const coopId = String(await getAdminMemberCoopId() || '').trim();
+if (!coopId) throw new Error('조합 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
+const file = document.getElementById('site-certification-image-file')?.files?.[0] || null;
+if (file) {
+if (!file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
+if (file.size > 10 * 1024 * 1024) throw new Error('이미지는 10MB 이하로 올려 주세요.');
+uploadedUrl = await uploadFileToStorage(file, `site-home/${coopId}/certifications`);
+if (imageUrlInput) imageUrlInput.value = uploadedUrl;
+}
+const { error } = await _supabase.rpc('upsert_my_site_certification', {
+p_id: read('site-certification-id') || null,
+p_name: name,
+p_issuer: read('site-certification-issuer'),
+p_certificate_no: read('site-certification-number'),
+p_issued_on: issuedOn || null,
+p_valid_until: validUntil || null,
+p_image_url: read('site-certification-image-url') || null,
+p_public_url: publicUrl || null,
+p_is_featured: document.getElementById('site-certification-featured')?.checked === true,
+p_is_visible: document.getElementById('site-certification-visible')?.checked === true,
+p_display_order: Number(read('site-certification-order') || 100)
+});
+if (error) throw error;
+const savedImageUrl = read('site-certification-image-url');
+if (previousImageUrl && previousImageUrl !== savedImageUrl) await deleteManagedCertificationImage(previousImageUrl, coopId);
+resetSiteCertificationForm();
+await fetchSiteCertifications();
+myAlert('공식 인증·지정 정보를 저장했습니다.');
+} catch (error) {
+if (uploadedUrl) await deleteManagedCertificationImage(uploadedUrl, String(g_adminMemberRuntime?.coop_id || ''));
+console.error('[saveSiteCertification] failed:', error);
+myAlert('공식 인증·지정 저장 실패: ' + (error?.message || error), 'error');
+} finally {
+showLoading(false);
+g_siteCertificationSaving = false;
+if (button) button.disabled = false;
+}
+}
+
+function askDeleteSiteCertification(id) {
+const item = g_siteCertifications.find((row) => String(row.id) === String(id));
+if (!item) return;
+myConfirm(`‘${item.name}’ 인증·지정 정보를 삭제하시겠습니까?`, async () => {
+showLoading(true);
+try {
+const { error } = await _supabase.rpc('delete_my_site_certification', { p_id: id });
+if (error) throw error;
+await deleteManagedCertificationImage(item.image_url, String(g_adminMemberRuntime?.coop_id || ''));
+resetSiteCertificationForm();
+await fetchSiteCertifications();
+myAlert('공식 인증·지정 정보를 삭제했습니다.');
+} catch (error) {
+console.error('[deleteSiteCertification] failed:', error);
+myAlert('삭제 실패: ' + (error?.message || error), 'error');
+} finally {
+showLoading(false);
+}
+});
 }
 // [보조 함수] 상태에 따라 슬라이더 숨기기/보이기
 function toggleProgressSlider() {
