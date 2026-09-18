@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.97
+Version: v1.0.98
 Change: Keep the primary cooperative's descriptive SEO title after tenant hydration.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.97 | index.html');</script>
+<script>console.log('[Version] v1.0.98 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2686,10 +2686,13 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
         }
     }
 
+    let g_homePreviewDraftApplied = false;
+
     async function hydratePublicHomeSettings() {
         try {
             const { data, error } = await _client.rpc('get_public_home_settings');
             if (error) throw error;
+            if (isHomePreviewMode && g_homePreviewDraftApplied) return;
             applyPublicHomeSettings(data || {});
         } catch (error) {
             console.warn('hydratePublicHomeSettings failed:', error);
@@ -2744,6 +2747,7 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
             if (event.data?.type !== 'coop-home-preview-settings') return;
             const settings = event.data.settings;
             if (!settings || typeof settings !== 'object') return;
+            g_homePreviewDraftApplied = true;
             applyPublicHomeSettings(settings);
             if (window.AOS?.refreshHard) window.AOS.refreshHard();
         });
