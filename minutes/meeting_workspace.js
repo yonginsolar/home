@@ -1,6 +1,6 @@
 /*
-Version: v1.0.0
-Change: 2026-09-18 - Build assembly/board materials, scenario and minutes from one meeting package.
+Version: v1.0.1
+Change: 2026-09-18 - Reuse the proven minutes-admin session flow so ERP users are not redirected back to the main screen.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.49';
@@ -694,9 +694,12 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  const userGate = await window.ErpRuntimeGuard.requireUser(supabase, { redirectUrl:`/erp/?next=${encodeURIComponent(location.href)}` });
-  if (!userGate.ok) return;
-  state.session = (await supabase.auth.getSession()).data.session;
+  state.session = await MinutesService.getSession();
+  if (!state.session) {
+    showToast('로그인이 필요합니다.');
+    location.href = `/erp/?next=${encodeURIComponent(location.href)}`;
+    return;
+  }
   const runtimeGate = await window.ErpRuntimeGuard.enforce(supabase, {
     moduleKey:'minutes', moduleLabel:'회의 꾸러미', redirectUrl:`/erp/?next=${encodeURIComponent(location.href)}`, alertFn:showToast
   });
