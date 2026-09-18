@@ -1,16 +1,17 @@
 /*
-Version: v1.0.3
-Change: 2026-09-18 - Suggest editable meeting sequences, move attendance to the minutes stage, and keep live document drafts.
+Version: v1.1.0
+Change: 2026-09-18 - Make this a pre-meeting workspace with source-based board documents and a chapter editor for the assembly booklet.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.49';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.0.2';
+import { buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.0.0';
 
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
 const KIND_LABEL = { REPORT: '보고 안건', DECISION: '의결 안건', DISCUSSION: '논의 안건', OTHER: '기타 안건' };
-const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '진행 시나리오', MINUTES: '의사록 초안' };
-const STATUS_LABEL = { DRAFT: '초안', READY: '문서 준비', FINAL: '전자서명 연결' };
+const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '진행 시나리오' };
+const STATUS_LABEL = { DRAFT: '초안', READY: '회의 전 문서 준비', FINAL: '완료' };
 
 const state = {
   session: null,
@@ -25,6 +26,8 @@ const state = {
   activeDocument: 'MATERIALS',
   currentStep: 'info',
   documentDirty: false,
+  chapters: [],
+  activeChapterId: null,
   loading: false,
   autoDraftTimer: null
 };
@@ -52,10 +55,6 @@ function sanitizeHtml(value) {
     });
   });
   return doc.body.firstElementChild?.innerHTML || '';
-}
-
-function textBlocks(value) {
-  return escapeHtml(String(value || '').trim()).replace(/\n/g, '<br>');
 }
 
 function formatDate(value) {
@@ -151,16 +150,6 @@ function officialById(id) {
   return state.officials.find(row => String(row.id) === String(id)) || null;
 }
 
-function namesByIds(ids) {
-  return (Array.isArray(ids) ? ids : []).map(officialById).filter(Boolean).map(officialName);
-}
-
-function selectedIds(containerId) {
-  return [...document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)]
-    .map(input => Number(input.value))
-    .filter(Number.isFinite);
-}
-
 function currentTypeOfficials(type) {
   if (type === 'GENERAL_ASSEMBLY') return state.officials.filter(row => row.category === 'delegate');
   return state.officials.filter(row => row.category === 'executive' && ['이사장', '이사'].includes(officialRole(row)));
@@ -208,29 +197,6 @@ function renderChairOptions(selectedId = null) {
   `).join('');
 }
 
-function renderOfficialChecks() {
-  const type = $('meetingType').value;
-  const candidates = currentTypeOfficials(type);
-  const attendeeSet = new Set((state.current?.attendee_official_ids || []).map(Number));
-  const signerSet = new Set((state.current?.signer_official_ids || []).map(Number));
-  const chairId = Number(state.current?.chair_official_id || 0);
-  if (chairId) signerSet.add(chairId);
-  const choice = (row, set, kind) => `
-    <label class="official-choice">
-      <input type="checkbox" name="${kind}" value="${row.id}" ${set.has(Number(row.id)) ? 'checked' : ''}>
-      <span><strong>${escapeHtml(officialName(row))}</strong><small>${escapeHtml(officialRole(row))}</small></span>
-    </label>`;
-  $('attendeeOfficials').innerHTML = candidates.length ? candidates.map(row => choice(row, attendeeSet, 'attendee')).join('') : '<div class="help">등록된 현직 명단이 없습니다.</div>';
-  $('signerOfficials').innerHTML = candidates.length ? candidates.map(row => choice(row, signerSet, 'signer')).join('') : '<div class="help">등록된 현직 명단이 없습니다.</div>';
-  const isAssembly = type === 'GENERAL_ASSEMBLY';
-  $('eligibleCountLabel').textContent = isAssembly ? '재적 대의원 수' : '재적 이사 수';
-  $('attendeeLabel').textContent = isAssembly ? '참석 대의원' : '참석 이사';
-  $('signerLabel').textContent = isAssembly ? '기명날인인·전자서명 대상' : '전자서명 대상';
-  $('signerHelp').textContent = isAssembly
-    ? '참석 대의원과 별개로 이사장과 기명날인인을 선택하세요. 이사장은 기본 포함합니다.'
-    : '참석한 이사를 기본 서명 대상으로 사용하되 필요하면 따로 조정할 수 있습니다.';
-}
-
 function fillInfoForm() {
   const row = state.current;
   $('meetingType').value = row.meeting_type;
@@ -243,13 +209,13 @@ function fillInfoForm() {
   $('endTime').value = row.end_time ? String(row.end_time).slice(0, 5) : '';
   $('facilitatorName').value = row.facilitator_name || '';
   $('eligibleCount').value = row.eligible_count ?? currentTypeOfficials(row.meeting_type).length;
-  $('observers').value = row.observers || '';
   $('openingMessage').value = row.opening_message || '';
   $('closingMessage').value = row.closing_message || '';
   $('documentNotes').value = row.document_notes || '';
   $('privateNotes').value = row.private_notes || '';
   renderChairOptions(row.chair_official_id);
-  renderOfficialChecks();
+  $('eligibleCountLabel').textContent = row.meeting_type === 'GENERAL_ASSEMBLY' ? '재적 대의원 수' : '재적 이사 수';
+  updateDocumentModeLabels();
 }
 
 function renderAgendaList() {
@@ -279,9 +245,7 @@ function renderAgendaList() {
         <div class="field"><label>사무국 설명</label><textarea data-field="office_report" placeholder="진행 시나리오의 설명 담당 문구">${escapeHtml(row.office_report || '')}</textarea></div>
         <div class="field"><label>진행 참고</label><textarea data-field="scenario_notes" placeholder="질의 순서, 소개할 사람, 주의할 점">${escapeHtml(row.scenario_notes || '')}</textarea></div>
         <div class="field"><label>의결 문구 초안</label><textarea data-field="decision_draft" placeholder="보고 안건이면 비워도 됩니다.">${escapeHtml(row.decision_draft || '')}</textarea></div>
-        <div class="field"><label>실제 의결·처리 결과</label><textarea data-field="decision_result" placeholder="회의 후 채워 의사록에 반영합니다.">${escapeHtml(row.decision_result || '')}</textarea></div>
-        <div class="field"><label>주요 질의·논의</label><textarea data-field="discussion_notes" placeholder="회의 후 핵심 논의 내용을 정리합니다.">${escapeHtml(row.discussion_notes || '')}</textarea></div>
-        <div class="field" style="grid-column:1/-1;"><label>문서에 넣을 안건 메모</label><textarea data-field="document_notes" placeholder="세 문서에 함께 남길 보충 설명이나 메모를 적으세요.">${escapeHtml(row.document_notes || '')}</textarea></div>
+        <div class="field" style="grid-column:1/-1;"><label>문서에 넣을 안건 메모</label><textarea data-field="document_notes" placeholder="회의자료와 시나리오에 함께 남길 보충 설명이나 메모를 적으세요.">${escapeHtml(row.document_notes || '')}</textarea></div>
         <div class="field" style="grid-column:1/-1;"><label>비공개 안건 메모</label><textarea data-field="private_notes" placeholder="확인할 일과 내부 메모. 문서에는 자동 포함되지 않습니다.">${escapeHtml(row.private_notes || '')}</textarea></div>
       </div>
     </article>
@@ -302,154 +266,144 @@ function collectAgendasFromDom() {
       office_report: value('office_report'),
       scenario_notes: value('scenario_notes'),
       decision_draft: value('decision_draft'),
-      decision_result: value('decision_result'),
-      discussion_notes: value('discussion_notes'),
+      decision_result: row.decision_result || '',
+      discussion_notes: row.discussion_notes || '',
       document_notes: value('document_notes'),
       private_notes: value('private_notes')
     };
   });
 }
 
+function updateDocumentModeLabels() {
+  const assembly = $('meetingType').value === 'GENERAL_ASSEMBLY';
+  $('materialsTab').textContent = assembly ? '📚 총회 자료집' : '📄 이사회 회의자료';
+  $('documentModeNotice').textContent = assembly
+    ? '기존 2026 총회 HTML 자료집 순서대로 챕터가 준비됩니다. 왼쪽에서 한 챕터씩 골라 수정하고 전체 자료집으로 저장·인쇄할 수 있습니다.'
+    : '기존 제6차 이사회 문서를 기준으로 한 장짜리 회의자료와 진행 시나리오를 준비합니다.';
+}
+
+function chapterMode() {
+  return Boolean(state.current && usesChapterEditor(state.current.meeting_type, state.activeDocument));
+}
+
+function parseChapters(content) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${String(content || '')}</div>`, 'text/html');
+  return [...doc.querySelectorAll('section.meeting-chapter[data-chapter-id]')].map((section, index) => ({
+    id: section.dataset.chapterId || `chapter-${index + 1}`,
+    title: section.dataset.chapterTitle || `챕터 ${index + 1}`,
+    className: section.className || 'meeting-chapter',
+    html: section.innerHTML
+  }));
+}
+
+function composeChapters() {
+  return state.chapters.map((chapter) => `<section class="${escapeHtml(chapter.className || 'meeting-chapter')}" data-chapter-id="${escapeHtml(chapter.id)}" data-chapter-title="${escapeHtml(chapter.title)}">${sanitizeHtml(chapter.html)}</section>`).join('');
+}
+
+function activeChapterIndex() {
+  return Math.max(0, state.chapters.findIndex(chapter => chapter.id === state.activeChapterId));
+}
+
+function rememberActiveChapter() {
+  if (!chapterMode() || !state.chapters.length || !$('chapterEditor')) return;
+  const index = activeChapterIndex();
+  state.chapters[index] = {
+    ...state.chapters[index],
+    title: $('chapterTitle').value.trim() || `챕터 ${index + 1}`,
+    html: sanitizeHtml($('chapterEditor').innerHTML)
+  };
+}
+
+function renderChapterList() {
+  $('chapterList').innerHTML = state.chapters.map((chapter, index) => `
+    <button type="button" class="chapter-item ${chapter.id === state.activeChapterId ? 'active' : ''}" data-chapter-id="${escapeHtml(chapter.id)}">
+      <span>${index + 1}</span><strong>${escapeHtml(chapter.title)}</strong>
+    </button>`).join('');
+}
+
+function renderActiveChapter() {
+  if (!state.chapters.length) {
+    $('chapterTitle').value = '';
+    $('chapterEditor').innerHTML = '<p>자료집 챕터가 없습니다.</p>';
+    $('chapterPosition').textContent = '';
+    renderChapterList();
+    return;
+  }
+  const index = activeChapterIndex();
+  const chapter = state.chapters[index];
+  state.activeChapterId = chapter.id;
+  $('chapterTitle').value = chapter.title;
+  $('chapterEditor').innerHTML = sanitizeHtml(chapter.html);
+  $('chapterPosition').textContent = `${index + 1} / ${state.chapters.length}`;
+  $('previousChapterButton').disabled = index === 0;
+  $('nextChapterButton').disabled = index >= state.chapters.length - 1;
+  $('moveChapterUpButton').disabled = index === 0;
+  $('moveChapterDownButton').disabled = index >= state.chapters.length - 1;
+  renderChapterList();
+}
+
 function renderActiveDocument() {
   const doc = state.documents.get(state.activeDocument) || {};
   $('documentTitle').value = doc.title || defaultDocumentTitle(state.activeDocument);
-  $('documentEditor').innerHTML = sanitizeHtml(doc.content_html || '');
+  const useChapters = chapterMode();
+  $('documentEditor').hidden = useChapters;
+  $('chapterLayout').hidden = !useChapters;
+  if (useChapters) {
+    state.chapters = parseChapters(doc.content_html || '');
+    if (!state.chapters.length) {
+      const generated = generatedDocumentRows().find(row => row.type === 'MATERIALS');
+      state.chapters = parseChapters(generated?.content || '');
+      const legacyContent = sanitizeHtml(doc.content_html || '').trim();
+      if (legacyContent) {
+        state.chapters.push({
+          id: `legacy-draft-${Date.now()}`,
+          title: '이전 자료 초안',
+          className: 'meeting-chapter chapter-legacy',
+          html: `<h1>이전 자료 초안</h1>${legacyContent}`
+        });
+      }
+    }
+    if (!state.chapters.some(chapter => chapter.id === state.activeChapterId)) state.activeChapterId = state.chapters[0]?.id || null;
+    renderActiveChapter();
+  } else {
+    state.chapters = [];
+    state.activeChapterId = null;
+    $('documentEditor').innerHTML = sanitizeHtml(doc.content_html || '');
+  }
   state.documentDirty = false;
   document.querySelectorAll('.doc-tab').forEach(button => button.classList.toggle('active', button.dataset.document === state.activeDocument));
-  $('publicationBox').style.display = state.activeDocument === 'MINUTES' ? '' : 'none';
 }
 
 function rememberActiveDocument() {
   if (!state.current) return;
   const existing = state.documents.get(state.activeDocument) || {};
+  if (chapterMode()) rememberActiveChapter();
   state.documents.set(state.activeDocument, {
     ...existing,
     document_type: state.activeDocument,
     title: $('documentTitle').value.trim() || defaultDocumentTitle(state.activeDocument),
-    content_html: sanitizeHtml($('documentEditor').innerHTML),
+    content_html: chapterMode() ? sanitizeHtml(composeChapters()) : sanitizeHtml($('documentEditor').innerHTML),
     manually_edited: state.documentDirty || existing.manually_edited === true
   });
 }
 
 function defaultDocumentTitle(type) {
   const title = state.current?.title || '회의';
-  if (type === 'MATERIALS') return `${title} 자료`;
-  if (type === 'SCENARIO') return `${title} 진행 시나리오`;
-  return `${title} 의사록`;
-}
-
-function meetingMetaTable(row, { includeAttendance = false } = {}) {
-  const attendeeNames = namesByIds(row.attendee_official_ids);
-  const membershipLabel = row.meeting_type === 'GENERAL_ASSEMBLY' ? '대의원' : '이사';
-  return `<table><tbody>
-    ${row.meeting_number ? `<tr><th style="width:22%;">회차</th><td>${escapeHtml(row.meeting_number)}</td></tr>` : ''}
-    <tr><th style="width:22%;">일시</th><td>${escapeHtml(formatDate(row.meeting_date))} ${escapeHtml(String(row.start_time || '').slice(0,5))}${row.end_time ? ` ~ ${escapeHtml(String(row.end_time).slice(0,5))}` : ''}</td></tr>
-    <tr><th>장소</th><td>${escapeHtml(row.location || '-')}</td></tr>
-    <tr><th>재적 ${membershipLabel}</th><td>${Number(row.eligible_count || 0)}명</td></tr>
-    ${includeAttendance ? `<tr><th>참석 ${membershipLabel}</th><td>${attendeeNames.length ? `${attendeeNames.length}명 (${escapeHtml(attendeeNames.join(', '))})` : '회의 후 입력'}</td></tr>` : ''}
-    ${includeAttendance && row.observers ? `<tr><th>배석</th><td>${textBlocks(row.observers)}</td></tr>` : ''}
-  </tbody></table>`;
-}
-
-function agendaOrdinal(row, index) {
-  if (row.agenda_kind === 'REPORT') return `보고 제${index + 1}호`;
-  if (row.agenda_kind === 'DECISION') return `의결 제${index + 1}호`;
-  if (row.agenda_kind === 'DISCUSSION') return `논의 제${index + 1}호`;
-  return `기타 제${index + 1}호`;
-}
-
-function buildMaterials() {
-  const row = state.current;
-  const coopName = state.runtime?.coop_name || state.company.company_name || '협동조합';
-  const agendaList = state.agendas.map((agenda, index) => `<li><strong>${escapeHtml(agendaOrdinal(agenda, index))}</strong> ${escapeHtml(agenda.title)}</li>`).join('');
-  const detail = state.agendas.map((agenda, index) => `
-    <section class="agenda-section">
-      <h2>${escapeHtml(agendaOrdinal(agenda, index))}. ${escapeHtml(agenda.title)}</h2>
-      ${agenda.summary ? `<p><strong>주요 내용</strong><br>${textBlocks(agenda.summary)}</p>` : ''}
-      ${agenda.background ? `<h3>제안 배경</h3><p>${textBlocks(agenda.background)}</p>` : ''}
-      ${agenda.proposal_text ? `<h3>${agenda.agenda_kind === 'REPORT' ? '보고 내용' : '제안 내용'}</h3><p>${textBlocks(agenda.proposal_text)}</p>` : ''}
-      ${agenda.decision_draft ? `<h3>의결 문구(안)</h3><p>${textBlocks(agenda.decision_draft)}</p>` : ''}
-      ${agenda.document_notes ? `<h3>안건 메모</h3><p>${textBlocks(agenda.document_notes)}</p>` : ''}
-    </section><div class="page-break"></div>`).join('');
-  return `<div class="doc-cover">
-    <div class="accent" style="font-size:1.15em;font-weight:800;">${escapeHtml(coopName)}</div>
-    <h1>${escapeHtml(row.title)}</h1>
-    <p style="font-size:1.12em;"><strong>일시</strong> ${escapeHtml(formatDate(row.meeting_date))} ${escapeHtml(String(row.start_time || '').slice(0,5))}<br><strong>장소</strong> ${escapeHtml(row.location || '-')}</p>
-  </div>
-  <h2>회의 개요</h2>${meetingMetaTable(row)}
-  ${row.document_notes ? `<h2>회의 메모</h2><p>${textBlocks(row.document_notes)}</p>` : ''}
-  <h2>회의 순서</h2><ol>${agendaList || '<li>등록된 안건이 없습니다.</li>'}</ol>
-  <div class="page-break"></div>${detail}`;
-}
-
-function buildScenario() {
-  const row = state.current;
-  const chair = officialById(row.chair_official_id);
-  const chairName = chair ? `${officialRole(chair)} ${officialName(chair)}` : '의장';
-  const facilitator = row.facilitator_name || '사무국';
-  const attendeeCount = (row.attendee_official_ids || []).length;
-  const agendaBlocks = state.agendas.map((agenda, index) => {
-    const ordinal = agendaOrdinal(agenda, index);
-    if (agenda.agenda_kind === 'REPORT') {
-      return `<h2>${escapeHtml(ordinal)}. ${escapeHtml(agenda.title)}</h2>
-        <p class="speaker"><strong>의장</strong> ${escapeHtml(agenda.title)} 보고를 진행하겠습니다. ${escapeHtml(facilitator)}께서 설명해 주시기 바랍니다.</p>
-        <p class="speaker"><strong>${escapeHtml(facilitator)}</strong> ${textBlocks(agenda.office_report || agenda.proposal_text || agenda.summary || '자료에 따라 보고드리겠습니다.')}</p>
-        <p class="speaker"><strong>의장</strong> 보고 내용에 대해 질문이나 의견 있으십니까?</p>
-        ${agenda.scenario_notes ? `<p><strong>진행 참고</strong><br>${textBlocks(agenda.scenario_notes)}</p>` : ''}
-        ${agenda.document_notes ? `<p><strong>안건 메모</strong><br>${textBlocks(agenda.document_notes)}</p>` : ''}`;
-    }
-    return `<h2>${escapeHtml(ordinal)}. ${escapeHtml(agenda.title)}</h2>
-      <p class="speaker"><strong>의장</strong> ${escapeHtml(ordinal)} 「${escapeHtml(agenda.title)}」을 상정합니다.</p>
-      <p class="speaker"><strong>${escapeHtml(facilitator)}</strong> ${textBlocks(agenda.office_report || agenda.proposal_text || agenda.summary || '자료에 따라 제안 설명을 드리겠습니다.')}</p>
-      <p class="speaker"><strong>의장</strong> 설명 잘 들었습니다. 질문이나 의견 있으십니까?</p>
-      <p class="speaker"><strong>의장</strong> 더 이상 의견이 없으시면 ${escapeHtml(agenda.title)}을 의결하도록 하겠습니다.</p>
-      <p class="speaker"><strong>의장</strong> ${textBlocks(agenda.decision_draft || '원안대로 승인하는 데 이의 없으십니까?')}</p>
-      ${agenda.scenario_notes ? `<p><strong>진행 참고</strong><br>${textBlocks(agenda.scenario_notes)}</p>` : ''}
-      ${agenda.document_notes ? `<p><strong>안건 메모</strong><br>${textBlocks(agenda.document_notes)}</p>` : ''}`;
-  }).join('<div class="page-break"></div>');
-  return `<h1>${escapeHtml(row.title)} 진행 시나리오</h1>
-    ${meetingMetaTable(row)}
-    <p><strong>진행</strong> ${escapeHtml(chairName)}</p>
-    ${row.document_notes ? `<p><strong>회의 메모</strong><br>${textBlocks(row.document_notes)}</p>` : ''}
-    <h2>개회 선언</h2>
-    <p class="speaker"><strong>의장</strong> ${textBlocks(row.opening_message || (attendeeCount > 0 ? `바쁘신 일정에도 참석해 주신 여러분께 감사드립니다. 재적 ${Number(row.eligible_count || 0)}명 중 ${attendeeCount}명이 참석하여 성원이 충족되었습니다. 지금부터 ${row.title}를 개회하겠습니다.` : `바쁘신 일정에도 참석해 주신 여러분께 감사드립니다. 재적 ${Number(row.eligible_count || 0)}명 중 참석 인원을 확인하여 성원 여부를 보고한 뒤 ${row.title}를 개회하겠습니다.`))}</p>
-    ${agendaBlocks || '<p>등록된 안건이 없습니다.</p>'}
-    <div class="page-break"></div><h2>폐회 선언</h2>
-    <p class="speaker"><strong>의장</strong> ${textBlocks(row.closing_message || '이상으로 모든 안건 처리를 마쳤습니다. 참석해 주신 여러분께 감사드리며 폐회를 선언합니다.')}</p>`;
-}
-
-function buildMinutes() {
-  const row = state.current;
-  const coopName = state.runtime?.coop_name || state.company.company_name || '협동조합';
-  const signerNames = namesByIds(row.signer_official_ids);
-  const agendaBlocks = state.agendas.map((agenda, index) => `
-    <h2>${escapeHtml(agendaOrdinal(agenda, index))}. ${escapeHtml(agenda.title)}</h2>
-    ${agenda.summary || agenda.proposal_text ? `<p><strong>제안·보고 내용</strong><br>${textBlocks(agenda.summary || agenda.proposal_text)}</p>` : ''}
-    <p><strong>주요 질의·논의</strong><br>${textBlocks(agenda.discussion_notes || '회의 후 주요 논의 내용을 입력하세요.')}</p>
-    <p><strong>${agenda.agenda_kind === 'REPORT' ? '처리 결과' : '의결 결과'}</strong><br>${textBlocks(agenda.decision_result || (agenda.agenda_kind === 'REPORT' ? '보고를 마침.' : '회의 후 실제 의결 결과를 입력하세요.'))}</p>
-    ${agenda.document_notes ? `<p><strong>안건 메모</strong><br>${textBlocks(agenda.document_notes)}</p>` : ''}
-  `).join('');
-  return `<h1>${escapeHtml(row.title)} 의사록</h1>
-    ${meetingMetaTable(row, { includeAttendance: true })}
-    <p><strong>의장</strong> ${escapeHtml((officialById(row.chair_official_id) && `${officialRole(officialById(row.chair_official_id))} ${officialName(officialById(row.chair_official_id))}`) || '-')}</p>
-    ${row.document_notes ? `<p><strong>회의 메모</strong><br>${textBlocks(row.document_notes)}</p>` : ''}
-    <h2>개회 및 성원 보고</h2><p>${textBlocks(row.opening_message || ((row.attendee_official_ids || []).length > 0 ? `재적 ${Number(row.eligible_count || 0)}명 중 ${(row.attendee_official_ids || []).length}명이 참석하여 성원이 충족되었음을 확인하고 개회를 선언하다.` : '회의 후 참석자를 입력하면 성원 보고 문구가 완성됩니다.'))}</p>
-    ${agendaBlocks || '<p>등록된 안건이 없습니다.</p>'}
-    <h2>폐회</h2><p>${textBlocks(row.closing_message || '모든 안건의 심의를 마치고 폐회를 선언하다.')}</p>
-    <p style="text-align:center;margin-top:3em;">${escapeHtml(formatDate(row.meeting_date))}</p>
-    <p style="text-align:center;font-weight:800;font-size:1.15em;">${escapeHtml(coopName)}</p>
-    <div style="margin:2em 0 0 auto;max-width:430px;">
-      <h3>전자서명 대상</h3>
-      ${signerNames.map(name => `<p style="display:flex;justify-content:space-between;"><span>${escapeHtml(name)}</span><span>(전자서명)</span></p>`).join('') || '<p>서명 대상을 선택하세요.</p>'}
-    </div>`;
+  if (type === 'MATERIALS') return state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? `${title} 자료집` : `${title} 회의자료`;
+  return `${title} 진행 시나리오`;
 }
 
 function generatedDocumentRows() {
-  return [
-    { type:'MATERIALS', title:defaultDocumentTitle('MATERIALS'), content:buildMaterials() },
-    { type:'SCENARIO', title:defaultDocumentTitle('SCENARIO'), content:buildScenario() },
-    { type:'MINUTES', title:defaultDocumentTitle('MINUTES'), content:buildMinutes() }
-  ];
+  const chair = officialById(state.current?.chair_official_id);
+  const chairName = chair ? `${officialRole(chair)} ${officialName(chair)}` : '의장';
+  return buildPreMeetingDocuments({
+    row: state.current,
+    agendas: state.agendas,
+    coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
+    company: state.company,
+    chairName
+  });
 }
 
 function collectPackageDraftPayload() {
@@ -465,9 +419,6 @@ function collectPackageDraftPayload() {
     chair_official_id: $('chairOfficial').value ? Number($('chairOfficial').value) : null,
     facilitator_name: $('facilitatorName').value.trim() || null,
     eligible_count: $('eligibleCount').value === '' ? null : Number($('eligibleCount').value),
-    attendee_official_ids: selectedIds('attendeeOfficials'),
-    signer_official_ids: selectedIds('signerOfficials'),
-    observers: $('observers').value.trim() || null,
     opening_message: $('openingMessage').value.trim() || null,
     closing_message: $('closingMessage').value.trim() || null,
     document_notes: $('documentNotes').value.trim() || null,
@@ -584,7 +535,9 @@ async function generateAllDocuments() {
   renderActiveDocument();
   await loadPackages();
   renderPackages();
-  showToast('세 문서 초안을 만들었습니다. 문구를 확인하고 필요하면 바로 고치세요.', 3200);
+  showToast(state.current.meeting_type === 'GENERAL_ASSEMBLY'
+    ? '총회 자료집 챕터와 진행 시나리오를 다시 만들었습니다.'
+    : '이사회 회의자료와 진행 시나리오를 다시 만들었습니다.', 3200);
 }
 
 async function saveActiveDocument() {
@@ -615,30 +568,23 @@ function printActiveDocument() {
   const title = escapeHtml(row.title || defaultDocumentTitle(state.activeDocument));
   popup.document.open();
   popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>
-    @page{size:A4;margin:18mm 16mm 18mm;}*{box-sizing:border-box}body{margin:0;color:#111;font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:11pt;line-height:1.65}h1{font-size:24pt;line-height:1.3;margin:0 0 18pt}h2{font-size:16pt;line-height:1.4;margin:18pt 0 8pt}h3{font-size:12.5pt;margin:13pt 0 6pt}p,li,td,th{font-size:11pt}table{width:100%;border-collapse:collapse;margin:10pt 0}th,td{border:1px solid #666;padding:7pt;vertical-align:top}.doc-cover{min-height:245mm;display:flex;flex-direction:column;justify-content:center;page-break-after:always;border-bottom:2pt solid #f97316}.accent{color:#ea580c}.speaker{border-left:3pt solid #fb923c;padding:6pt 8pt;margin:7pt 0;background:#fff7ed}.page-break{page-break-after:always;border:0;height:0;margin:0}.agenda-section{break-inside:avoid}a{color:#111;text-decoration:none}@media print{button{display:none}}
+    @page{size:A4;margin:18mm 16mm 18mm;}*{box-sizing:border-box}body{margin:0;color:#111;font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:11pt;line-height:1.58}h1{font-size:24pt;line-height:1.3;margin:0 0 18pt}h2{font-size:16pt;line-height:1.4;margin:18pt 0 8pt}h3{font-size:12.5pt;margin:13pt 0 6pt}p,li,td,th{font-size:11pt}table{width:100%;border-collapse:collapse;margin:10pt 0}th,td{border:1px solid #666;padding:7pt;vertical-align:top}.speaker{border-left:3pt solid #fb923c;padding:6pt 8pt;margin:7pt 0;background:#fff7ed}.action{background:#fff7ed;color:#9a3412;padding:6pt 8pt}.source-agenda-row{display:grid;grid-template-columns:95pt 1fr;gap:3pt 9pt;padding:5pt 0;border-bottom:.5pt solid #ccc}.source-agenda-row small{grid-column:2}.board-one-paper h1{text-align:center;font-size:19pt}.board-one-paper h2{font-size:13pt;margin:10pt 0 4pt}.board-one-paper .source-agenda-row{padding:3pt 0}.meeting-chapter{min-height:245mm;page-break-after:always}.meeting-chapter:last-child{page-break-after:auto}.assembly-cover,.assembly-back{min-height:240mm;display:flex;flex-direction:column;justify-content:center}.assembly-cover .org-name{color:#ea580c;font-size:15pt;font-weight:800}.assembly-cover h1,.assembly-back h1{font-size:36pt}.assembly-cover dl{margin-top:40pt;display:grid;grid-template-columns:55pt 1fr;gap:8pt}.assembly-cover dt{font-weight:800}a{color:#111;text-decoration:none}@media print{button{display:none}}
   </style></head><body>${sanitizeHtml(row.content_html)}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\/script></body></html>`);
   popup.document.close();
 }
 
-async function publishMinute() {
-  if (!state.current) return;
-  await saveInfo({ quiet: true });
-  rememberActiveDocument();
-  const doc = state.documents.get('MINUTES');
-  if (!doc?.content_html) throw new Error('먼저 의사록 초안을 만들어 주세요.');
-  if (!state.current.signer_official_ids?.length) throw new Error('회의 후 의사록 정보에서 전자서명 대상을 선택하세요.');
-  if (!window.confirm('현재 의사록을 기존 전자서명 문서로 넘길까요? 넘긴 뒤에는 서명자 화면에서 서명이 시작됩니다.')) return;
-  const { data, error } = await MeetingPackageService.createMinuteFromPackage(state.current.id, {
-    title: doc.title || defaultDocumentTitle('MINUTES'),
-    content: sanitizeHtml(doc.content_html)
-  });
-  if (error) throw error;
-  state.current.published_minute_id = data.id;
-  state.current.status = 'FINAL';
-  renderEditorHeader();
-  await loadPackages();
-  renderPackages();
-  showToast(data.already_created ? '이미 전자서명 문서로 연결되어 있습니다.' : '전자서명 문서를 만들었습니다.', 3000);
+function printCurrentChapter() {
+  if (!chapterMode() || !state.chapters.length) return;
+  rememberActiveChapter();
+  const chapter = state.chapters[activeChapterIndex()];
+  const popup = window.open('', '_blank');
+  if (!popup) return showToast('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해 주세요.');
+  popup.opener = null;
+  popup.document.open();
+  popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(chapter.title)}</title><style>
+    @page{size:A4;margin:18mm 16mm 18mm}*{box-sizing:border-box}body{margin:0;color:#111;font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:11pt;line-height:1.58}h1{font-size:24pt;line-height:1.3;margin:0 0 18pt}h2{font-size:16pt;margin:18pt 0 8pt}h3{font-size:12.5pt;margin:13pt 0 6pt}p,li,td,th{font-size:11pt}table{width:100%;border-collapse:collapse;margin:10pt 0}th,td{border:1px solid #666;padding:7pt;vertical-align:top}.assembly-cover,.assembly-back{min-height:240mm;display:flex;flex-direction:column;justify-content:center}.assembly-cover .org-name{color:#ea580c;font-size:15pt;font-weight:800}.assembly-cover h1,.assembly-back h1{font-size:36pt}.assembly-cover dl{margin-top:40pt;display:grid;grid-template-columns:55pt 1fr;gap:8pt}.assembly-cover dt{font-weight:800}
+  </style></head><body>${sanitizeHtml(chapter.html)}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),250));<\/script></body></html>`);
+  popup.document.close();
 }
 
 async function openPackage(id) {
@@ -677,15 +623,16 @@ async function createPackage() {
     title,
     meeting_number: $('newMeetingNumber').value.trim() || null,
     eligible_count: candidates.length,
-    chair_official_id: chair?.id || null,
-    signer_official_ids: chair ? [Number(chair.id)] : []
+    chair_official_id: chair?.id || null
   });
   if (error) throw error;
   $('newPackageModal').classList.remove('show');
   $('newMeetingTitle').value = '';
   $('newMeetingNumber').value = '';
   await loadPackages(data.id);
-  showToast('새 회의 준비 공간과 세 문서 초안을 만들었습니다.');
+  showToast(type === 'GENERAL_ASSEMBLY'
+    ? '새 총회 준비 공간과 자료집·시나리오 초안을 만들었습니다.'
+    : '새 이사회 준비 공간과 회의자료·시나리오 초안을 만들었습니다.');
 }
 
 async function deletePackage() {
@@ -739,6 +686,65 @@ function handleAgendaAction(button) {
   scheduleAutoDraftRefresh();
 }
 
+function selectChapter(id) {
+  if (!chapterMode()) return;
+  rememberActiveChapter();
+  state.activeChapterId = id;
+  renderActiveChapter();
+}
+
+function moveChapter(offset) {
+  if (!chapterMode() || !state.chapters.length) return;
+  rememberActiveChapter();
+  const index = activeChapterIndex();
+  const target = index + offset;
+  if (target < 0 || target >= state.chapters.length) return;
+  [state.chapters[index], state.chapters[target]] = [state.chapters[target], state.chapters[index]];
+  state.documentDirty = true;
+  renderActiveChapter();
+}
+
+function stepChapter(offset) {
+  if (!chapterMode() || !state.chapters.length) return;
+  rememberActiveChapter();
+  const target = activeChapterIndex() + offset;
+  if (target < 0 || target >= state.chapters.length) return;
+  state.activeChapterId = state.chapters[target].id;
+  renderActiveChapter();
+}
+
+function addChapter() {
+  if (!chapterMode()) return;
+  rememberActiveChapter();
+  const id = `custom-${Date.now()}`;
+  const index = activeChapterIndex();
+  state.chapters.splice(index + 1, 0, {
+    id,
+    title: '새 챕터',
+    className: 'meeting-chapter chapter-custom',
+    html: '<h1>새 챕터</h1><p>내용을 입력하세요.</p>'
+  });
+  state.activeChapterId = id;
+  state.documentDirty = true;
+  renderActiveChapter();
+  $('chapterTitle').select();
+}
+
+function deleteChapter() {
+  if (!chapterMode() || !state.chapters.length) return;
+  const index = activeChapterIndex();
+  const title = state.chapters[index].title;
+  if (!window.confirm(`「${title}」 챕터를 자료집에서 뺄까요? 저장하기 전까지는 새로고침하면 되돌릴 수 있습니다.`)) return;
+  state.chapters.splice(index, 1);
+  state.activeChapterId = state.chapters[Math.min(index, state.chapters.length - 1)]?.id || null;
+  state.documentDirty = true;
+  renderActiveChapter();
+}
+
+function activeRichEditor() {
+  return chapterMode() ? $('chapterEditor') : $('documentEditor');
+}
+
 async function runAction(action) {
   if (state.loading) return;
   setBusy(true);
@@ -760,16 +766,21 @@ function bindEvents() {
   $('createPackageButton').addEventListener('click', () => runAction(createPackage));
   $('deletePackageButton').addEventListener('click', () => runAction(deletePackage));
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
-  $('saveAttendanceButton').addEventListener('click', () => runAction(async () => {
-    await saveInfo({ quiet: true });
-    refreshAutoDrafts();
-    showToast('참석·서명 정보를 저장하고 의사록 초안에 반영했습니다.');
-  }));
   $('saveAgendasButton').addEventListener('click', () => runAction(saveAgendas));
   $('generateAllButton').addEventListener('click', () => runAction(generateAllDocuments));
   $('saveDocumentButton').addEventListener('click', () => runAction(saveActiveDocument));
   $('printDocumentButton').addEventListener('click', printActiveDocument);
-  $('publishMinuteButton').addEventListener('click', () => runAction(publishMinute));
+  $('printChapterButton').addEventListener('click', printCurrentChapter);
+  $('previousChapterButton').addEventListener('click', () => stepChapter(-1));
+  $('nextChapterButton').addEventListener('click', () => stepChapter(1));
+  $('addChapterButton').addEventListener('click', addChapter);
+  $('moveChapterUpButton').addEventListener('click', () => moveChapter(-1));
+  $('moveChapterDownButton').addEventListener('click', () => moveChapter(1));
+  $('deleteChapterButton').addEventListener('click', deleteChapter);
+  $('chapterList').addEventListener('click', event => {
+    const button = event.target.closest('[data-chapter-id]');
+    if (button) selectChapter(button.dataset.chapterId);
+  });
   $('addAgendaButton').addEventListener('click', addAgenda);
   $('packageList').addEventListener('click', event => {
     const button = event.target.closest('[data-package-id]');
@@ -783,33 +794,36 @@ function bindEvents() {
   }));
   $('meetingType').addEventListener('change', () => {
     const candidates = currentTypeOfficials($('meetingType').value);
-    const chairId = $('chairOfficial').value ? Number($('chairOfficial').value) : null;
-    state.current = { ...state.current, meeting_type:$('meetingType').value, attendee_official_ids:[], signer_official_ids:chairId ? [chairId] : [] };
+    state.current = { ...state.current, meeting_type:$('meetingType').value };
     $('eligibleCount').value = candidates.length;
-    renderOfficialChecks();
+    $('eligibleCountLabel').textContent = $('meetingType').value === 'GENERAL_ASSEMBLY' ? '재적 대의원 수' : '재적 이사 수';
+    updateDocumentModeLabels();
     scheduleAutoDraftRefresh();
   });
-  $('chairOfficial').addEventListener('change', () => {
-    const target = document.querySelector(`#signerOfficials input[value="${CSS.escape($('chairOfficial').value)}"]`);
-    if (target) target.checked = true;
-    scheduleAutoDraftRefresh();
-  });
+  $('chairOfficial').addEventListener('change', scheduleAutoDraftRefresh);
   $('agendaList').addEventListener('click', event => {
     const button = event.target.closest('[data-agenda-action]');
     if (button) handleAgendaAction(button);
   });
   $('editorBody').addEventListener('input', event => {
-    if (event.target === $('documentEditor') || event.target === $('documentTitle') || event.target.closest('#documentEditor')) return;
+    if (event.target === $('documentEditor') || event.target === $('documentTitle') || event.target === $('chapterEditor') || event.target === $('chapterTitle') || event.target.closest('#documentEditor,#chapterEditor')) return;
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
   });
   $('editorBody').addEventListener('change', event => {
-    if (event.target === $('documentTitle')) return;
+    if (event.target === $('documentTitle') || event.target === $('chapterTitle')) return;
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
   });
   $('documentEditor').addEventListener('input', () => { state.documentDirty = true; });
+  $('chapterEditor').addEventListener('input', () => { state.documentDirty = true; });
+  $('chapterTitle').addEventListener('input', () => {
+    state.documentDirty = true;
+    const index = activeChapterIndex();
+    if (state.chapters[index]) state.chapters[index].title = $('chapterTitle').value;
+    renderChapterList();
+  });
   $('documentTitle').addEventListener('input', () => { state.documentDirty = true; });
   document.querySelectorAll('.rich-toolbar [data-command]').forEach(button => button.addEventListener('click', () => {
-    $('documentEditor').focus();
+    activeRichEditor().focus();
     document.execCommand(button.dataset.command, false, button.dataset.value || null);
     state.documentDirty = true;
   }));
