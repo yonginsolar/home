@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.96
+Version: v1.0.97
 Change: Keep the primary cooperative's descriptive SEO title after tenant hydration.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.96 | index.html');</script>
+<script>console.log('[Version] v1.0.97 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -774,6 +774,26 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
       line-height: 1.2;
       text-shadow: 0 2px 14px rgba(0, 0, 0, 0.18);
     }
+    .impact-region-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      padding: 0 18px 18px;
+    }
+    .impact-region-card {
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 16px;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.12);
+      text-align: center;
+    }
+    .impact-region-card span { display:block; color:rgba(255,255,255,.8); font-size:.82rem; font-weight:700; }
+    .impact-region-card strong { display:block; margin-top:4px; color:#fff; font-size:1.45rem; line-height:1.2; }
+    .impact-region-card small { display:block; margin-top:5px; color:rgba(255,255,255,.7); font-size:.72rem; }
+    .impact-region-grid[hidden] { display:none !important; }
+    #impact:not(.impact-regions-mode) .impact-region-grid { display:none !important; }
     #impact.site-member-impact-simple .village-impact-actions .btn-get-started {
       border-color: #fff;
       color: #176b47;
@@ -940,6 +960,9 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
       #impact.site-member-impact-simple .village-summary-value {
         font-size: clamp(1.75rem, 9vw, 2.5rem);
       }
+      .impact-region-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0 12px 12px; gap:9px; }
+      .impact-region-card { padding:13px 10px; }
+      .impact-region-card strong { font-size:1.2rem; }
     }
     /* =========================================
    모바일 헤더 로그인/버튼 줄바꿈 방지 패치
@@ -1783,6 +1806,7 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
               <span class="village-summary-meta" id="village-selected-summary">마을 지도를 준비하고 있습니다.</span>
             </div>
           </div>
+          <div class="impact-region-grid" id="public-impact-region-grid" aria-label="지역별 조합원 현황" hidden></div>
         </div>
 
         <div class="village-impact-actions">
@@ -2531,6 +2555,8 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
         }
         if (hero && settings.hero_image_url) {
             hero.style.setProperty('--hero-background-image', `url(${JSON.stringify(String(settings.hero_image_url))})`);
+        } else if (hero) {
+            hero.style.removeProperty('--hero-background-image');
         }
         if (hero) {
             hero.style.setProperty('--hero-background-position', String(settings.hero_image_position || 'center'));
@@ -2538,8 +2564,11 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
             hero.style.setProperty('--hero-text-align', String(settings.hero_text_align || 'center'));
         }
         if (heroCta) {
-            if (settings.hero_cta_label) heroCta.textContent = settings.hero_cta_label;
-            if (settings.hero_cta_url) heroCta.href = settings.hero_cta_url;
+            const heroLabel = String(settings.hero_cta_label || '').trim();
+            const heroUrl = String(settings.hero_cta_url || '').trim();
+            if (heroLabel) heroCta.textContent = heroLabel;
+            if (heroUrl) heroCta.href = heroUrl;
+            heroCta.hidden = !(heroLabel && heroUrl);
         }
 
         const isSiteMemberProfile = String(settings.runtime_profile || '') === 'site_member';
@@ -2557,14 +2586,22 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
         const impactDescription = document.getElementById('public-impact-description');
         const impactImage = document.getElementById('public-impact-image');
         const impactCta = document.getElementById('public-impact-cta');
+        const impactMode = ['total', 'regions', 'village'].includes(String(settings.impact_display_mode || ''))
+            ? String(settings.impact_display_mode)
+            : 'total';
+        window.__PUBLIC_IMPACT_MODE__ = impactMode;
+        window.__PUBLIC_IMPACT_REGIONS__ = Array.isArray(settings.impact_regions) ? settings.impact_regions : [];
         if (impactKicker && settings.impact_kicker) impactKicker.textContent = settings.impact_kicker;
         if (impactTitle && settings.impact_title) impactTitle.textContent = settings.impact_title;
         if (impactDescription && settings.impact_description) impactDescription.textContent = settings.impact_description;
         if (impact) {
-            const useSimpleImpact = homeTemplate === 'simple';
-            const useBrandImpact = homeTemplate === 'brand';
+            const useSimpleImpact = impactMode !== 'village';
+            const useBrandImpact = useSimpleImpact && homeTemplate === 'brand';
+            impact.hidden = settings.impact_visible === false;
+            if (settings.impact_visible !== false) impact.style.removeProperty('display');
             impact.classList.toggle('site-member-impact-simple', useSimpleImpact);
             impact.classList.toggle('brand-impact', useBrandImpact);
+            impact.classList.toggle('impact-regions-mode', impactMode === 'regions');
             impact.style.setProperty('--impact-image-position', String(settings.impact_image_position || 'center'));
             if (useSimpleImpact || useBrandImpact) {
                 impact.classList.remove('tenant-impact-image');
@@ -2573,15 +2610,28 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
                 } else {
                     impact.style.removeProperty('--impact-background-image');
                 }
-            } else if (impactImage && settings.impact_image_url) {
-                impactImage.src = settings.impact_image_url;
-                impact.classList.add('tenant-impact-image');
+            } else {
+                impact.style.removeProperty('--impact-background-image');
+                if (impactImage && settings.impact_image_url) {
+                    impactImage.src = settings.impact_image_url;
+                    impact.classList.add('tenant-impact-image');
+                } else {
+                    impact.classList.remove('tenant-impact-image');
+                }
             }
         }
+        renderImpactRegionCards(
+            impactMode === 'regions'
+                ? window.__PUBLIC_IMPACT_REGIONS__.map((label) => ({ label, count: null }))
+                : []
+        );
         if (impactCta) {
+            const impactLabel = String(settings.impact_cta_label || '').trim();
+            const impactUrl = String(settings.impact_cta_url || '').trim();
             const label = impactCta.querySelector('span');
-            if (label && settings.impact_cta_label) label.textContent = settings.impact_cta_label;
-            if (settings.impact_cta_url) impactCta.href = settings.impact_cta_url;
+            if (label && impactLabel) label.textContent = impactLabel;
+            if (impactUrl) impactCta.href = impactUrl;
+            impactCta.hidden = !(impactLabel && impactUrl);
         }
 
         if (isSiteMemberProfile) {
@@ -2644,6 +2694,64 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
         } catch (error) {
             console.warn('hydratePublicHomeSettings failed:', error);
         }
+    }
+
+    function renderImpactRegionCards(regions) {
+        const grid = document.getElementById('public-impact-region-grid');
+        if (!grid) return;
+        const items = Array.isArray(regions) ? regions : [];
+        grid.replaceChildren();
+        items.forEach((item) => {
+            const label = String(item?.label ?? item ?? '').trim();
+            if (!label) return;
+            const card = document.createElement('div');
+            card.className = 'impact-region-card';
+            const name = document.createElement('span');
+            name.textContent = label;
+            const value = document.createElement('strong');
+            const count = Number(item?.count);
+            value.textContent = Number.isFinite(count) ? `${Math.max(0, count).toLocaleString('ko-KR')}명` : '저장 후 집계';
+            card.append(name, value);
+            if (!Number.isFinite(count)) {
+                const note = document.createElement('small');
+                note.textContent = '미리보기에서는 배치만 확인할 수 있습니다.';
+                card.appendChild(note);
+            }
+            grid.appendChild(card);
+        });
+        grid.hidden = grid.childElementCount === 0;
+    }
+
+    function normalizePreviewHostname(value) {
+        return String(value || '').toLowerCase().replace(/^(www|erp)\./, '');
+    }
+
+    function isTrustedHomePreviewOrigin(origin) {
+        try {
+            const incoming = new URL(origin);
+            if (incoming.protocol !== window.location.protocol) return false;
+            return normalizePreviewHostname(incoming.hostname) === normalizePreviewHostname(window.location.hostname);
+        } catch (_) {
+            return false;
+        }
+    }
+
+    const isHomePreviewMode = new URLSearchParams(window.location.search).get('home_preview') === '1';
+    if (isHomePreviewMode) {
+        document.documentElement.dataset.homePreview = 'true';
+        window.addEventListener('message', (event) => {
+            if (event.source !== window.parent || !isTrustedHomePreviewOrigin(event.origin)) return;
+            if (event.data?.type !== 'coop-home-preview-settings') return;
+            const settings = event.data.settings;
+            if (!settings || typeof settings !== 'object') return;
+            applyPublicHomeSettings(settings);
+            if (window.AOS?.refreshHard) window.AOS.refreshHard();
+        });
+        document.addEventListener('click', (event) => {
+            const link = event.target.closest('a[href]');
+            if (!link) return;
+            event.preventDefault();
+        }, true);
     }
 
     function formatPublicCertificationDate(value) {
@@ -3257,7 +3365,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 // [1] 통계 데이터 (수정됨: 공개 함수 RPC 호출)
 // [1] 통계 데이터 (업그레이드 버전)
 async function fetchStats() {
-      if (window.__PUBLIC_SITE_MEMBER_PROFILE__ === true) {
+      const impactMode = String(window.__PUBLIC_IMPACT_MODE__ || (window.__PUBLIC_SITE_MEMBER_PROFILE__ === true ? 'total' : 'village'));
+      if (impactMode !== 'village') {
         const { data: stats, error: statsError } = await _client.rpc('get_public_stats');
         const normalizedStats = (!statsError && stats)
           ? normalizeVillageStats(stats)
@@ -3269,6 +3378,18 @@ async function fetchStats() {
         updateCounter('stat-grp-members', normalizedStats.grp_count);
         g_total_amount = normalizedStats.amount;
         setupCalculator(g_total_amount);
+        updatePublicStatsTimestamp(new Date());
+        if (impactMode === 'regions') {
+          const { data: regionPayload, error: regionError } = await _client.rpc('get_public_impact_region_stats');
+          if (regionError) {
+            console.warn('get_public_impact_region_stats failed:', regionError);
+            renderImpactRegionCards((window.__PUBLIC_IMPACT_REGIONS__ || []).map((label) => ({ label, count: 0 })));
+          } else {
+            renderImpactRegionCards(regionPayload?.regions || []);
+          }
+        } else {
+          renderImpactRegionCards([]);
+        }
         return;
       }
 
