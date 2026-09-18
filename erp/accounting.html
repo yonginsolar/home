@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.109 | Change: 2026-09-17 - Post approved capital-return and dividend accruals through one accounting sync. -->
+<!-- Version: v1.0.110 | Change: 2026-09-19 - Save the exact generated closing report for general-assembly booklets. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.109 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.110 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -9832,13 +9832,13 @@ async function printReport() {
 
     const bsHtml = `
         <div class="rpt-sec">1. 재무상태표 (Balance Sheet)</div>
-        <div style="text-align:right; font-size:11px;">(단위: 원)</div>
+        <div style="text-align:right; font-size:11pt;">(단위: 원)</div>
         <table class="rpt-tbl"><colgroup><col width="25%"><col width="25%"><col width="25%"><col width="25%"></colgroup><tr><th colspan="2">자 산</th><th colspan="2">부채 및 자본</th></tr><tr style="vertical-align:top;"><td colspan="2"><div style="font-weight:bold; margin-bottom:5px;">[유동자산]</div>${renderLines(assetList, asset)}<div class="d-flex justify-content-between border-top mt-2 pt-2 fw-bold bg-light"><span>자산총계</span><span>${tAsset.toLocaleString()}</span></div></td><td colspan="2"><div style="font-weight:bold; margin-bottom:5px;">[부채]</div>${renderLines(liabList, liab)}${yesuNoteHtml}<div class="fw-bold mt-3 mb-1 text-end border-top">부채총계: ${tLiab.toLocaleString()}</div><div style="font-weight:bold; margin-top:10px; margin-bottom:5px;">[자본]</div>${renderLines(equityList, equity)}${bsNetIncomeHtml}<div class="d-flex justify-content-between border-top mt-2 pt-2 fw-bold bg-light"><span>부채/자본 총계</span><span>${totalLiabEquity.toLocaleString()}</span></div></td></tr></table>
     `;
 
     const plHtml = `
         <div class="rpt-sec mt-4">2. 손익계산서 (Income Statement)</div>
-        <div style="text-align:right; font-size:11px;">(단위: 원)</div>
+        <div style="text-align:right; font-size:11pt;">(단위: 원)</div>
         <table class="rpt-tbl">
             <tr><th>계정과목</th><th>코드</th><th>금액</th></tr>
             <tr class="bg-light"><td class="fw-bold">I. 매출액</td><td></td><td class="rpt-amt fw-bold">${tRev.toLocaleString()}</td></tr>
@@ -9854,7 +9854,7 @@ async function printReport() {
 
     const surplusHtml = `
         <div class="rpt-sec mt-4 text-primary">3. 이익잉여금처분계산서 (Proposal)</div>
-        <div style="text-align:right; font-size:11px;">(단위: 원)</div>
+        <div style="text-align:right; font-size:11pt;">(단위: 원)</div>
         <table class="rpt-tbl mt-2">
             <tr><th class="bg-light">과목</th><th class="bg-light">금액</th></tr>
             <tr><td class="fw-bold">I. 처분전 이익잉여금</td><td class="rpt-amt fw-bold">${totalSurplus.toLocaleString()}</td></tr>
@@ -9944,19 +9944,93 @@ async function printReport() {
         totalLiabEquity
     });
 
+    const statementRows = (list, amounts) => (list || []).map((row) => ({
+        name: row.name,
+        standard: row.standard || '',
+        code: row.code || '',
+        amount: Number(amounts[row.name] || 0)
+    })).filter((row) => row.amount !== 0);
+    const reportPayload = {
+        schema_version: 1,
+        source: 'accounting_closing_report',
+        range_text: rangeText,
+        summary: {
+            fiscal_year: selYear,
+            period_start: startDate,
+            period_end: endDate,
+            is_closed: hasClosingCarryforward,
+            assets: statementRows(assetList, asset),
+            liabilities: statementRows(liabList, liab),
+            equity: statementRows(equityList, equity),
+            revenue: statementRows(revList, rev),
+            expenses: statementRows(expList, exp),
+            other_revenue: statementRows(otherRevList, otherRev),
+            total_assets: tAsset,
+            total_liabilities: tLiab,
+            total_equity: tEquity,
+            total_revenue: tRev,
+            total_expenses: tExp,
+            total_other_revenue: tOtherRev,
+            operating_income: operatingIncome,
+            net_income: netIncome,
+            legal_reserve: surplus.legal,
+            voluntary_reserve: surplus.voluntary,
+            total_appropriation: totalAppropriation,
+            carried_forward: carriedForward,
+            capital,
+            member_count: memberCount
+        },
+        sections: {
+            header_html: headerHtml,
+            tax_html: taxHtml,
+            balance_sheet_html: bsHtml,
+            income_statement_html: plHtml,
+            surplus_html: surplusHtml
+        }
+    };
+    const snapshotResult = await _supabase.rpc('save_accounting_closing_report_snapshot', {
+        p_fiscal_year: selYear,
+        p_period_start: startDate,
+        p_period_end: endDate,
+        p_report_payload: reportPayload
+    });
+    const snapshotWarning = snapshotResult.error
+        ? `<div class="alert alert-danger"><strong>총회 자료집 연동 저장 실패</strong><br>${e(snapshotResult.error.message || '결산보고서 스냅샷을 저장하지 못했습니다.')}</div>`
+        : `<div class="alert alert-success no-print"><strong>총회 자료집 연동 완료</strong><br>${selYear}년도 결산보고서 생성 결과를 그대로 저장했습니다.</div>`;
+
     lastReportParts = {
         headerHtml,
         bsHtml,
         plHtml,
         surplusHtml,
         taxHtml,
+        reportPayload,
+        snapshot: snapshotResult.data || null,
         csvHeaders,
         csvRows,
         csvFileName: `closing_report_${selYear}.csv`
     };
-    document.getElementById("reportContent").innerHTML = reportHtml;
+    document.getElementById("reportContent").innerHTML = snapshotWarning + reportHtml;
     reportModal.show();
 }
+
+const CLOSING_REPORT_PRINT_CSS = `
+@page{size:A4;margin:18mm 16mm 18mm}
+*{box-sizing:border-box}
+body{padding:0;font-family:'Malgun Gothic',serif;font-size:11pt;line-height:1.55;color:#111}
+.rpt-title{text-align:center;font-size:20pt;font-weight:bold;margin:15pt 0;text-decoration:underline}
+.rpt-header-tbl{width:100%;border:2px solid #000;border-collapse:collapse;margin-bottom:20pt}
+.rpt-header-tbl th{background:#eee;padding:7pt;border:1px solid #000;text-align:center;width:15%;font-weight:bold}
+.rpt-header-tbl td{padding:7pt;border:1px solid #000}
+.rpt-sec{font-size:15pt;font-weight:bold;margin:15pt 0 8pt;border-bottom:2px solid #555;padding-bottom:5pt}
+.rpt-tbl{width:100%;border-collapse:collapse;margin-bottom:15pt;border:2px solid #000}
+.rpt-tbl th,.rpt-tbl td{border:1px solid #000;padding:7pt;font-size:11pt}
+.rpt-tbl th{background:#f8f9fa;text-align:center}
+.rpt-amt{text-align:right;font-family:'Consolas',monospace}
+.rpt-indent{padding-left:16pt!important}
+.small{font-size:11pt!important}
+@media print{.page-break{page-break-before:always}.bg-light{background-color:#f8f9fa!important;-webkit-print-color-adjust:exact}.no-print{display:none!important}}
+`;
 
 function printAllReports() {
     if (!lastReportParts) return showAlert("알림", "먼저 결산 보고서를 생성하세요.");
@@ -9976,14 +10050,14 @@ function printAllReports() {
         <div class="rpt-title">이익잉여금처분계산서</div>
         ${surplusHtml}
     `;
-    w.document.write(`<html><head><title>결산보고서</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>body{padding:40px; font-family:'Malgun Gothic', serif;} .rpt-title{text-align:center; font-size:24px; font-weight:bold; margin:20px 0 20px 0; text-decoration:underline;} .rpt-header-tbl{width:100%; border:2px solid #000; border-collapse:collapse; margin-bottom:30px;} .rpt-header-tbl th{background:#eee; padding:8px; border:1px solid #000; text-align:center; width:15%; font-weight:bold;} .rpt-header-tbl td{padding:8px; border:1px solid #000;} .rpt-sec{font-size:18px; font-weight:bold; margin:20px 0 10px 0; border-bottom:2px solid #555; padding-bottom:5px;} .rpt-tbl{width:100%; border-collapse:collapse; margin-bottom:20px; border:2px solid #000;} .rpt-tbl th, .rpt-tbl td{border:1px solid #000; padding:8px; font-size:14px;} .rpt-tbl th{background:#f8f9fa; text-align:center;} .rpt-amt{text-align:right; font-family:'Consolas', monospace;} .rpt-indent{padding-left:20px !important;} @media print{ .page-break{page-break-before:always;} .bg-light{background-color:#f8f9fa !important; -webkit-print-color-adjust:exact;} }</style></head><body>${fullHtml}</body></html>`);
+    w.document.write(`<html><head><title>결산보고서</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>${CLOSING_REPORT_PRINT_CSS}</style></head><body>${fullHtml}</body></html>`);
     w.document.close();
     setTimeout(() => { w.focus(); w.print(); w.close(); }, 500);
 }
 
 function realPrint() {
     const w = window.open();
-    w.document.write(`<html><head><title>결산보고서</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>body{padding:40px; font-family:'Malgun Gothic', serif;} .rpt-title{text-align:center; font-size:28px; font-weight:bold; margin-bottom:30px; text-decoration:underline;} .rpt-header-tbl{width:100%; border:2px solid #000; border-collapse:collapse; margin-bottom:30px;} .rpt-header-tbl th{background:#eee; padding:8px; border:1px solid #000; text-align:center; width:15%; font-weight:bold;} .rpt-header-tbl td{padding:8px; border:1px solid #000;} .rpt-sec{font-size:18px; font-weight:bold; margin:20px 0 10px 0; border-bottom:2px solid #555; padding-bottom:5px;} .rpt-tbl{width:100%; border-collapse:collapse; margin-bottom:20px; border:2px solid #000;} .rpt-tbl th, .rpt-tbl td{border:1px solid #000; padding:8px; font-size:14px;} .rpt-tbl th{background:#f8f9fa; text-align:center;} .rpt-amt{text-align:right; font-family:'Consolas', monospace;} .rpt-indent{padding-left:20px !important;} @media print{ .page-break{page-break-before:always;} .bg-light{background-color:#f8f9fa !important; -webkit-print-color-adjust:exact;} }</style></head><body>${document.getElementById("reportContent").innerHTML}</body></html>`);
+    w.document.write(`<html><head><title>결산보고서</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>${CLOSING_REPORT_PRINT_CSS}</style></head><body>${document.getElementById("reportContent").innerHTML}</body></html>`);
     w.document.close();
     setTimeout(() => { w.focus(); w.print(); w.close(); }, 500);
 }

@@ -1,6 +1,6 @@
 /*
-Version: v1.1.1
-Change: 2026-09-18 - Render every assigned auditor on a separate electronic-signature line.
+Version: v1.3.0
+Change: 2026-09-19 - Leave unavailable automatic sources empty so a private PDF can be inserted instead.
 */
 
 const safe = (value) => String(value ?? '')
@@ -25,6 +25,16 @@ const timeText = (row) => {
   const end = String(row.end_time || '').slice(0, 5);
   if (!start) return '시간 미정';
   return end ? `${safe(start)} ~ ${safe(end)}` : safe(start);
+};
+
+const dateTimeText = (value) => {
+  if (!value) return '서명 시각 미기록';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return safe(value);
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(date);
 };
 
 const chapter = (id, title, body, kind = 'body') => `
@@ -125,6 +135,15 @@ function sourceRowsTable(rows, totalLabel = '') {
 
 function previousMinuteBill(source) {
   const prior = source?.previous_minute;
+  const signatures = Array.isArray(prior?.signatures) ? prior.signatures : [];
+  const signatureRows = signatures.length
+    ? signatures.map((signature) => `<div class="book-signature-card">
+        <span class="book-signature-preview" data-signature-preview-path="${safe(signature.preview_path || '')}">
+          <span>전자서명 완료</span>
+        </span>
+        <div><strong>${safe(signature.signer_name || '서명자')}</strong>${signature.signer_role ? ` · ${safe(signature.signer_role)}` : ''}<small>${safe(dateTimeText(signature.signed_at))}</small></div>
+      </div>`).join('')
+    : '<p class="book-signature-empty">저장된 전자서명이 없습니다.</p>';
   return {
     key: 'previous-minute',
     title: '전차 총회 의사록 확인의 건',
@@ -133,14 +152,12 @@ function previousMinuteBill(source) {
       ? `문서함의 「${prior.title || '전차 총회 의사록'}」을 전차 회의록으로 확인합니다.`
       : '문서함에서 앞선 총회 의사록을 찾지 못했습니다. 총회 전에 전차 의사록을 확인해 연결해 주세요.',
     decision: '전차 총회 의사록을 원안대로 확인하여 승인하고자 합니다.',
-    attachments: [chapter(
+    attachments: prior ? [chapter(
       'previous-minute-source',
-      prior ? `전차 회의록 · ${prior.title}` : '전차 회의록 확인',
-      prior
-        ? `<h1>전차 총회 의사록</h1><p class="source-caption">문서함에서 불러온 문서 · ${safe(prior.title || '')}${prior.doc_no ? ` · ${safe(prior.doc_no)}` : ''}</p><div class="linked-minute">${prior.content || '<p>본문이 없습니다.</p>'}</div>`
-        : sourceAttachment('전차 총회 의사록', '문서함에 총회 의사록이 등록되면 가장 최근 문서를 자동으로 불러옵니다.'),
+      `전차 회의록 · ${prior.title}`,
+      `<h1>전차 총회 의사록</h1><p class="source-caption">문서함에서 불러온 문서 · ${safe(prior.title || '')}${prior.doc_no ? ` · ${safe(prior.doc_no)}` : ''}</p><div class="linked-minute">${prior.content || '<p>본문이 없습니다.</p>'}</div><section class="book-signature-section"><h2>전자서명 확인</h2><p>아래 정보는 문서함에 보관된 전차 총회 의사록의 전자서명 기록입니다.</p><div class="book-signature-grid">${signatureRows}</div></section>`,
       'minutes'
-    )]
+    )] : []
   };
 }
 
@@ -194,51 +211,53 @@ export function buildAuditReportDraft({ row, coopName, officials, sourceContext 
 }
 
 function closingReportChapters(sourceContext) {
-  const closing = sourceContext?.closing || {};
-  const fiscalYear = Number(sourceContext?.fiscal_year || closing.fiscal_year || new Date().getFullYear() - 1);
-  const status = closing.is_closed ? '결산 완료' : '가결산 · 결산 실행 전';
-  const netIncome = Number(closing.net_income || 0);
+  const report = sourceContext?.closing_report;
+  const fiscalYear = Number(sourceContext?.fiscal_year || new Date().getFullYear() - 1);
+  const sections = report?.report_payload?.sections || {};
+  const generatedAt = report?.generated_at ? dateTimeText(report.generated_at) : '';
+  if (!report || !sections.balance_sheet_html || !sections.income_statement_html) {
+    return [];
+  }
+  const caption = `<p class="source-caption">회계관리에서 ${safe(generatedAt)} 생성·저장한 결산보고서</p>`;
   return [
-    chapter('closing-balance-sheet', `${fiscalYear}년 재무상태표`, `<h1>${fiscalYear}년 재무상태표</h1>
-      <p class="source-caption">ERP 회계관리에서 불러온 ${safe(status)} 자료 · 단위: 원</p>
-      <h2>자산</h2>${sourceRowsTable(closing.assets, '자산총계')}
-      <h2>부채</h2>${sourceRowsTable(closing.liabilities, '부채총계')}
-      <h2>자본</h2>${sourceRowsTable(closing.equity, '자본총계')}`, 'financial'),
-    chapter('closing-income-statement', `${fiscalYear}년 손익계산서`, `<h1>${fiscalYear}년 손익계산서</h1>
-      <p class="source-caption">ERP 회계관리에서 불러온 ${safe(status)} 자료 · 단위: 원</p>
-      <h2>매출</h2>${sourceRowsTable(closing.revenue, '매출 합계')}
-      <h2>영업외수익</h2>${sourceRowsTable(closing.other_revenue, '영업외수익 합계')}
-      <h2>비용</h2>${sourceRowsTable(closing.expenses, '비용 합계')}
-      <table><tbody><tr><th>당기순이익(손실)</th><td class="amount"><strong>${money(netIncome)}</strong></td></tr></tbody></table>`, 'financial')
+    chapter('closing-tax-adjustment', `${fiscalYear}년 재무제표 및 조정명세서`, `<h1>${fiscalYear}년도 결산보고서</h1>${caption}<div class="closing-report-snapshot"><div class="rpt-title">재무제표 및 조정명세서</div>${sections.header_html || ''}${sections.tax_html || ''}</div>`, 'financial'),
+    chapter('closing-balance-sheet', `${fiscalYear}년 재무상태표`, `<h1>${fiscalYear}년 재무상태표</h1>${caption}<div class="closing-report-snapshot">${sections.balance_sheet_html || ''}</div>`, 'financial'),
+    chapter('closing-income-statement', `${fiscalYear}년 손익계산서`, `<h1>${fiscalYear}년 손익계산서</h1>${caption}<div class="closing-report-snapshot">${sections.income_statement_html || ''}</div>`, 'financial'),
+    chapter('closing-surplus-statement', `${fiscalYear}년 이익잉여금처분계산서`, `<h1>${fiscalYear}년 이익잉여금처분계산서</h1>${caption}<div class="closing-report-snapshot">${sections.surplus_html || ''}</div>`, 'financial')
   ];
 }
 
 function auditBill({ row, coopName, officials, sourceContext }) {
   const audit = sourceContext?.audit_report;
-  const auditContent = audit?.content || buildAuditReportDraft({ row, coopName, officials, sourceContext });
+  const auditContent = audit?.content || (sourceContext?.closing_report
+    ? buildAuditReportDraft({ row, coopName, officials, sourceContext })
+    : '');
   const statusText = audit
     ? `${audit.status === 'CLOSED' ? '감사 전자서명 완료' : '감사 전자검토·서명 진행 중'} · ${Number(audit.signature_count || 0)}/${Array.isArray(audit.signer_ids) ? audit.signer_ids.length : 0}명`
-    : 'ERP에서 감사에게 전자검토를 요청하기 전 초안';
+    : '';
   return {
     key: 'audit-report',
     title: '감사보고서 승인의 건',
     background: '결산자료와 업무 집행에 대한 감사의 검토 결과를 보고받고 승인하기 위함입니다.',
-    proposal: `${statusText}입니다. 감사가 수정하고 전자서명한 최종 보고서를 기준으로 심의합니다.`,
+    proposal: statusText ? `${statusText}입니다. 감사가 수정하고 전자서명한 최종 보고서를 기준으로 심의합니다.` : '',
     decision: '감사보고서를 원안대로 승인하고자 합니다.',
-    attachments: [chapter('audit-report', '감사보고서', `<p class="source-caption">${safe(statusText)}</p>${auditContent}`, 'audit')]
+    attachments: auditContent
+      ? [chapter('audit-report', '감사보고서', `${statusText ? `<p class="source-caption">${safe(statusText)}</p>` : ''}${auditContent}`, 'audit')]
+      : []
   };
 }
 
 function closingBill(sourceContext) {
   const closing = sourceContext?.closing || {};
+  const report = sourceContext?.closing_report;
   const year = Number(sourceContext?.fiscal_year || closing.fiscal_year || new Date().getFullYear() - 1);
   return {
     key: 'closing-report',
     title: `${year}년도 결산보고서 승인의 건`,
     background: `${year}년도 조합의 재무상태와 운영성과를 확정하고 총회의 승인을 받기 위함입니다.`,
-    proposal: closing.is_closed
-      ? `ERP 회계관리에서 결산 완료된 재무상태표와 손익계산서를 불러왔습니다. 당기순손익은 ${money(closing.net_income)}입니다.`
-      : `현재 자료는 결산 실행 전 가결산입니다. 감사 요청과 총회 자료 확정 전에 회계관리에서 ${year}년도 결산을 완료해야 합니다.`,
+    proposal: report
+      ? `회계관리에서 실제 생성·저장한 결산보고서를 그대로 불러왔습니다. ${closing.is_closed ? `당기순손익은 ${money(closing.net_income)}입니다.` : '현재 저장본은 결산 완료 전 자료이므로 총회 확정 전에 다시 생성해야 합니다.'}`
+      : '',
     decision: `${year}년도 결산보고서를 원안대로 승인하고자 합니다.`,
     attachments: closingReportChapters(sourceContext)
   };
@@ -351,6 +370,9 @@ function additionalAgendaBill(agenda, index) {
 }
 
 export function buildAssemblyAgendaPlan({ row, agendas, coopName, officials, sourceContext }) {
+  if (row?.assembly_kind === 'EXTRAORDINARY') {
+    return (agendas || []).map(additionalAgendaBill).filter(Boolean).map((item, index) => ({ ...item, number: index + 1 }));
+  }
   return [
     previousMinuteBill(sourceContext),
     auditBill({ row, coopName, officials, sourceContext }),
@@ -392,6 +414,7 @@ export function buildAssemblyMaterials({ row, agendas, coopName, company, offici
   const plan = buildAssemblyAgendaPlan({ row, agendas, coopName, officials, sourceContext });
   const chapters = [
     chapter('cover', '표지', `<div class="assembly-cover"><p class="org-name">${safe(coopName)}</p><p>${safe(String(row.meeting_date || '').slice(0, 4) || new Date().getFullYear())}년도</p><h1>${safe(row.title)}</h1><dl><dt>일시</dt><dd>${dateText(row.meeting_date)} ${timeText(row)}</dd><dt>장소</dt><dd>${safe(row.location || '미정')}</dd></dl></div>`, 'cover'),
+    chapter('inside-cover', '표지 안쪽 빈 면', '<div class="assembly-inside-cover" aria-label="책자 표지 안쪽 빈 면"></div>', 'inside-cover'),
     chapter('order', '총회 순서', assemblyOrder(row, plan), 'order'),
     ...plan.flatMap((item) => [
       chapter(`bill-${item.number}-${item.key}`, `제${item.number}호 의안 ${item.title}`, assemblyBill(item), 'bill'),

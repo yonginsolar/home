@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.1 | Change: 2026-09-18 - Support separate electronic-signature lines for multiple auditors. -->
+<!-- Version: v1.4.1 | Change: 2026-09-19 - Add regular/extraordinary assembly flow and verified private PDF booklet inserts. -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.2.1 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.4.1 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20260804-1"></script>
   <style>
     :root {
@@ -130,9 +130,21 @@
     .chapter-actions { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; }
     .chapter-actions .btn { padding:7px 10px; font-size:.82rem; }
     .chapter-position { margin-left:auto; color:var(--muted); font-size:.82rem; align-self:center; }
+    .pdf-attachment-panel { margin:0 0 12px; padding:11px; border:1px solid #bae6fd; border-radius:10px; background:#f0f9ff; }
+    .pdf-attachment-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+    .pdf-attachment-panel-head strong { display:block; font-size:.88rem; }
+    .pdf-attachment-panel-head small { display:block; margin-top:3px; color:var(--muted); line-height:1.45; }
+    .pdf-attachment-list { display:grid; gap:7px; margin-top:9px; }
+    .pdf-attachment-row { display:flex; align-items:center; gap:9px; padding:8px 9px; border:1px solid #dbeafe; border-radius:8px; background:#fff; }
+    .pdf-attachment-row .pdf-icon { flex:0 0 28px; height:28px; display:grid; place-items:center; border-radius:7px; background:#fee2e2; }
+    .pdf-attachment-row .pdf-meta { min-width:0; flex:1; }
+    .pdf-attachment-row .pdf-meta strong,.pdf-attachment-row .pdf-meta small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pdf-attachment-row .pdf-meta small { margin-top:2px; color:var(--muted); font-size:.76rem; }
+    .pdf-attachment-empty { color:var(--muted); font-size:.8rem; line-height:1.45; }
     #chapterEditor { width:min(100%,794px); min-height:1123px; margin:0 auto; padding:64px 58px; border-radius:2px; box-shadow:0 8px 28px rgba(15,23,42,.10); overflow:visible; }
     #chapterEditor.chapter-cover,#chapterEditor.chapter-back { padding:48px 52px; }
     .rich-editor .meeting-chapter { min-height:720px; }
+    .rich-editor .assembly-inside-cover { min-height:1015px; background:#fff; }
     .rich-editor .assembly-cover { min-height:1015px; display:grid; grid-template-rows:auto 1fr auto auto; align-items:start; }
     .rich-editor .assembly-back { min-height:1015px; display:flex; flex-direction:column; justify-content:center; text-align:center; }
     .rich-editor .assembly-cover .org-name { margin:0; padding-bottom:16px; border-bottom:5px solid #f97316; color:#ea580c; font-size:1.25rem; font-weight:900; }
@@ -151,6 +163,23 @@
     .rich-editor .board-one-paper h2 { font-size:1.08rem; margin:1em 0 .35em; }
     .rich-editor .board-one-paper .source-agenda-row { padding:5px 0; }
     .rich-editor .action { color:#9a3412; background:#fff7ed; padding:7px 9px; }
+    .rich-editor .book-signature-section { margin-top:28px; padding-top:18px; border-top:2px solid #fdba74; }
+    .rich-editor .book-signature-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .rich-editor .book-signature-card { display:flex; align-items:center; gap:10px; padding:11px; border:1px solid #fed7aa; border-radius:9px; background:#fffaf5; }
+    .rich-editor .book-signature-card small { display:block; margin-top:3px; color:#64748b; }
+    .rich-editor .book-signature-preview { flex:0 0 96px; min-height:48px; display:grid; place-items:center; border:1px dashed #cbd5e1; background:#fff; color:#64748b; }
+    .rich-editor .book-signature-preview img { width:96px; height:48px; object-fit:contain; }
+    .rich-editor .book-signature-preview.is-loaded > span { display:none; }
+    .rich-editor .book-source-required { padding:18px; border:2px solid #fb923c; border-radius:10px; background:#fff7ed; }
+    .rich-editor .closing-report-snapshot .d-flex { display:flex; }
+    .rich-editor .closing-report-snapshot .justify-content-between { justify-content:space-between; }
+    .rich-editor .closing-report-snapshot .text-end { text-align:right; }
+    .rich-editor .closing-report-snapshot .text-center { text-align:center; }
+    .rich-editor .closing-report-snapshot .text-muted { color:#64748b; }
+    .rich-editor .closing-report-snapshot .text-primary { color:#1d4ed8; }
+    .rich-editor .closing-report-snapshot .text-danger { color:#b91c1c; }
+    .rich-editor .closing-report-snapshot .fw-bold { font-weight:800; }
+    .rich-editor .closing-report-snapshot .alert { padding:10px; border:1px solid #fdba74; border-radius:8px; background:#fff7ed; }
     .draft-sync { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:5px 9px; background:#eff6ff; color:#1d4ed8; font-size:.78rem; font-weight:800; }
     .toast { position:fixed; right:22px; bottom:22px; max-width:min(420px,calc(100vw - 44px)); padding:12px 16px; border-radius:11px; background:#172033; color:#fff; opacity:0; transform:translateY(12px); pointer-events:none; transition:.2s; z-index:30; }
     .toast.show { opacity:1; transform:translateY(0); }
@@ -236,6 +265,11 @@
                   <label for="meetingType">회의 종류</label>
                   <select id="meetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select>
                 </div>
+                <div class="field" id="assemblyKindField" hidden>
+                  <label for="assemblyKind">총회 구분</label>
+                  <select id="assemblyKind"><option value="REGULAR">정기총회</option><option value="EXTRAORDINARY">임시총회</option></select>
+                  <div class="help">정기총회만 전년도 감사·결산·배당·사업계획 자료를 연결합니다. 임시총회는 등록한 의안만 사용합니다.</div>
+                </div>
                 <div class="field">
                   <label for="meetingNumber">회차</label>
                   <input id="meetingNumber" placeholder="예: 2026-7회">
@@ -246,9 +280,9 @@
                   <input id="meetingTitle" placeholder="예: 2027년 제2차 정기 대의원총회">
                 </div>
                 <div class="field" id="fiscalYearField" hidden>
-                  <label for="fiscalYear">결산 대상 연도</label>
-                  <input type="number" min="1900" max="2100" id="fiscalYear" placeholder="예: 2026">
-                  <div class="help">감사보고서·결산보고서·배당안을 불러올 회계연도입니다.</div>
+                  <label for="fiscalYear">불러올 결산연도</label>
+                  <select id="fiscalYear"></select>
+                  <div class="help">기본값은 총회 개최연도의 전년도입니다. 회계관리에서 다른 연도 보고서를 승인할 때만 바꾸세요.</div>
                 </div>
               </div>
               <div class="form-grid three" style="margin-top:14px;">
@@ -299,7 +333,7 @@
             <div class="notice" id="documentModeNotice">이사회는 기존 회의자료와 시나리오 형식으로 준비합니다. 총회 자료집은 기존 HTML 순서대로 챕터를 골라 한 부분씩 수정할 수 있습니다.</div>
             <section class="assembly-source-panel" id="assemblySourcePanel" hidden>
               <div class="assembly-source-head">
-                <div><h3>총회 연동 자료</h3><p>문서함·회계·배당·감자·탈퇴 관리에서 총회에 필요한 자료를 확인합니다. 없는 조건부 안건은 자료집에서 자동으로 빠집니다.</p></div>
+                <div><h3>정기총회 연동 자료</h3><p>문서함·회계·배당·감자·탈퇴 관리에서 정기총회에 필요한 자료를 확인합니다. 없는 조건부 안건은 자료집에서 자동으로 빠집니다.</p></div>
                 <button type="button" class="btn btn-small" id="refreshAssemblySourcesButton">자료 다시 확인</button>
               </div>
               <div class="assembly-source-status" id="assemblySourceStatus"><div class="source-empty">총회 연동 자료를 확인하는 중입니다.</div></div>
@@ -315,6 +349,7 @@
               <button type="button" class="btn" id="saveDocumentButton">현재 문서 저장</button>
               <button type="button" class="btn" id="printDocumentButton">인쇄·PDF 저장</button>
             </div>
+            <div class="help" id="bookPrintHelp" style="margin:-4px 0 12px;">총회 자료집 PDF는 표지 다음에 빈 면을 넣고, 본문부터 1쪽으로 표시합니다. 인쇄 창에서 브라우저 머리글·바닥글은 끄고, 책자 제작 시 양면·긴 변 넘김 또는 인쇄소의 책자 설정을 사용하세요.</div>
             <div class="doc-tabs">
               <button type="button" class="doc-tab active" data-document="MATERIALS" id="materialsTab">📄 이사회 회의자료</button>
               <button type="button" class="doc-tab" data-document="SCENARIO">🎙️ 진행 시나리오</button>
@@ -331,7 +366,7 @@
             <div id="documentEditor" class="rich-editor" contenteditable="true" data-placeholder="회의 기본정보를 입력하면 초안이 표시됩니다."></div>
             <div id="chapterLayout" class="chapter-layout" hidden>
               <aside class="chapter-sidebar">
-                <div class="chapter-sidebar-head"><strong>총회 자료집 순서</strong><div class="help">조합 업무자료를 연결한 정기총회 초안입니다. 챕터를 고쳐 쓰거나 추가·삭제·이동할 수 있습니다.</div></div>
+                <div class="chapter-sidebar-head"><strong>총회 자료집 순서</strong><div class="help">정기총회는 조합 업무자료를 연결하고, 임시총회는 등록한 의안만 구성합니다. 챕터를 고쳐 쓰거나 추가·삭제·이동할 수 있습니다.</div></div>
                 <div id="chapterList" class="chapter-list"></div>
               </aside>
               <div class="chapter-editor-wrap">
@@ -346,6 +381,14 @@
                   <button type="button" class="btn" id="printChapterButton">현재 챕터 인쇄</button>
                   <span class="chapter-position" id="chapterPosition"></span>
                 </div>
+                <section class="pdf-attachment-panel" id="pdfAttachmentPanel">
+                  <div class="pdf-attachment-panel-head">
+                    <div><strong>이 챕터 뒤에 PDF 자료 붙이기</strong><small>자동 연동 자료가 없으면 비워 두거나, 별도로 만든 PDF를 붙일 수 있습니다. 자료집 인쇄 시 PDF의 각 쪽이 이 챕터 바로 뒤에 합쳐집니다.</small></div>
+                    <button type="button" class="btn btn-small" id="addPdfAttachmentButton">PDF 선택</button>
+                  </div>
+                  <input type="file" id="pdfAttachmentInput" accept="application/pdf,.pdf" hidden>
+                  <div class="pdf-attachment-list" id="pdfAttachmentList"></div>
+                </section>
                 <div id="chapterEditor" class="rich-editor" contenteditable="true"></div>
               </div>
             </div>
@@ -361,6 +404,7 @@
       <p>회의 종류를 고르면 기존 회의를 기준으로 다음 회차와 제목을 제안합니다. 제안값은 지금 또는 작업공간에서 언제든 수정할 수 있습니다.</p>
       <div class="form-grid">
         <div class="field"><label for="newMeetingType">회의 종류</label><select id="newMeetingType"><option value="BOARD">이사회</option><option value="GENERAL_ASSEMBLY">총회(대의원총회)</option></select></div>
+        <div class="field" id="newAssemblyKindField" hidden><label for="newAssemblyKind">총회 구분</label><select id="newAssemblyKind"><option value="REGULAR">정기총회</option><option value="EXTRAORDINARY">임시총회</option></select></div>
         <div class="field"><label for="newMeetingNumber">회차</label><input id="newMeetingNumber" placeholder="예: 2026-7회"></div>
         <div class="field full"><label for="newMeetingTitle">회의 제목</label><input id="newMeetingTitle" placeholder="예: 2026년 제7차 이사회"></div>
       </div>
@@ -368,6 +412,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.2.1"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.4.1"></script>
 </body>
 </html>

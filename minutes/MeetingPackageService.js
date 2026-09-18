@@ -1,8 +1,10 @@
 /*
-Version: v1.1.0
-Change: 2026-09-18 - Load regular-assembly source data and prepare the auditor-editable electronic audit report.
+Version: v1.3.0
+Change: 2026-09-19 - Support private PDF inserts in assembly booklets.
 */
 import { supabase } from '../shared/supabase-client.js';
+
+export const MEETING_PACKAGE_FILE_BUCKET = 'meeting-package-files';
 
 let runtimeCache = null;
 
@@ -28,7 +30,7 @@ async function listPackages() {
   const { data, error } = await scope(
     supabase
       .from('meeting_packages')
-      .select('id,meeting_type,title,meeting_number,meeting_date,location,status,published_minute_id,created_at,updated_at'),
+      .select('id,meeting_type,assembly_kind,fiscal_year,title,meeting_number,meeting_date,location,status,published_minute_id,created_at,updated_at'),
     coopId
   ).order('updated_at', { ascending: false });
   return { data: data || [], error };
@@ -49,23 +51,82 @@ async function listMeetingHistory() {
 
 async function getPackage(id) {
   const { coop_id: coopId } = await getRuntime();
-  const [packageResult, agendaResult, documentResult] = await Promise.all([
+  const [packageResult, agendaResult, documentResult, attachmentResult] = await Promise.all([
     scope(supabase.from('meeting_packages').select('*').eq('id', id), coopId).maybeSingle(),
     scope(supabase.from('meeting_package_agendas').select('*').eq('package_id', id), coopId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
     scope(supabase.from('meeting_package_documents').select('*').eq('package_id', id), coopId)
-      .order('document_type', { ascending: true })
+      .order('document_type', { ascending: true }),
+    scope(supabase.from('meeting_package_pdf_attachments').select('*').eq('package_id', id), coopId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
   ]);
-  const error = packageResult.error || agendaResult.error || documentResult.error;
+  const error = packageResult.error || agendaResult.error || documentResult.error || attachmentResult.error;
   return {
     data: error ? null : {
       package: packageResult.data || null,
       agendas: agendaResult.data || [],
-      documents: documentResult.data || []
+      documents: documentResult.data || [],
+      pdfAttachments: attachmentResult.data || []
     },
     error
   };
+}
+
+async function uploadPdfAttachment(packageId, file, payload) {
+  const runtime = await getRuntime();
+  const session = await supabase.auth.getSession();
+  const userId = session.data?.session?.user?.id || null;
+  if (!userId) return { data: null, error: new Error('로그인이 필요합니다.') };
+  if (!(file instanceof File) || (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || ''))) {
+    return { data: null, error: new Error('PDF 파일만 첨부할 수 있습니다.') };
+  }
+  if (file.size < 1 || file.size > 20 * 1024 * 1024) {
+    return { data: null, error: new Error('PDF 파일은 20MB 이하만 첨부할 수 있습니다.') };
+  }
+  const objectId = crypto.randomUUID();
+  const storagePath = `${runtime.coop_id}/${packageId}/${objectId}.pdf`;
+  const upload = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).upload(storagePath, file, {
+    contentType: 'application/pdf',
+    cacheControl: '3600',
+    upsert: false
+  });
+  if (upload.error) return { data: null, error: upload.error };
+
+  const row = withCoop({
+    package_id: packageId,
+    title: payload.title,
+    insert_after_chapter_id: payload.insert_after_chapter_id,
+    storage_path: storagePath,
+    original_filename: file.name,
+    file_size: file.size,
+    page_count: payload.page_count,
+    sort_order: payload.sort_order || 0,
+    created_by: userId
+  }, runtime.coop_id);
+  const inserted = await supabase.from('meeting_package_pdf_attachments').insert(row).select('*').single();
+  if (inserted.error) {
+    await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove([storagePath]);
+    return { data: null, error: inserted.error };
+  }
+  return inserted;
+}
+
+async function deletePdfAttachment(id) {
+  const { coop_id: coopId } = await getRuntime();
+  const lookup = await scope(
+    supabase.from('meeting_package_pdf_attachments').select('id,storage_path').eq('id', id),
+    coopId
+  ).maybeSingle();
+  if (lookup.error || !lookup.data) return { data: null, error: lookup.error || new Error('첨부 PDF를 찾을 수 없습니다.') };
+  const storageDelete = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove([lookup.data.storage_path]);
+  if (storageDelete.error) return { data: null, error: storageDelete.error };
+  return await scope(supabase.from('meeting_package_pdf_attachments').delete().eq('id', id), coopId);
+}
+
+async function createPdfAttachmentSignedUrl(storagePath, expiresIn = 1800) {
+  return await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).createSignedUrl(storagePath, expiresIn);
 }
 
 async function createPackage(payload) {
@@ -96,6 +157,16 @@ async function updatePackage(id, payload) {
 
 async function deletePackage(id) {
   const { coop_id: coopId } = await getRuntime();
+  const attachments = await scope(
+    supabase.from('meeting_package_pdf_attachments').select('storage_path').eq('package_id', id),
+    coopId
+  );
+  if (attachments.error) return { data: null, error: attachments.error };
+  const paths = (attachments.data || []).map(row => row.storage_path).filter(Boolean);
+  if (paths.length) {
+    const removed = await supabase.storage.from(MEETING_PACKAGE_FILE_BUCKET).remove(paths);
+    if (removed.error) return { data: null, error: removed.error };
+  }
   return await scope(supabase.from('meeting_packages').delete().eq('id', id), coopId);
 }
 
@@ -217,5 +288,8 @@ export const MeetingPackageService = {
   saveDocument,
   createMinuteFromPackage,
   getAssemblySources,
-  prepareAuditReport
+  prepareAuditReport,
+  uploadPdfAttachment,
+  deletePdfAttachment,
+  createPdfAttachmentSignedUrl
 };
