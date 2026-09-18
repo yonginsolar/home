@@ -6,7 +6,7 @@ Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML 
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.181';
+window.ADMIN_MEMBER_VERSION = 'v1.0.182';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8459,11 +8459,21 @@ document.getElementById('site-home-preview-mobile')?.classList.toggle('active', 
 
 async function openHomePreview() {
 try {
-collectHomeSettingsPayload();
+const previewPayload = collectHomeSettingsPayload();
 const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
+const previewLayoutJson = JSON.stringify({
+home_template: previewPayload.p_home_template,
+impact_display_mode: previewPayload.p_impact_display_mode,
+impact_regions: previewPayload.p_impact_regions,
+impact_visible: previewPayload.p_impact_visible
+});
+const previewLayoutBytes = new TextEncoder().encode(previewLayoutJson);
+let previewLayoutBinary = '';
+previewLayoutBytes.forEach((byte) => { previewLayoutBinary += String.fromCharCode(byte); });
+url.searchParams.set('home_preview_layout', btoa(previewLayoutBinary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''));
 if (g_homePreviewStorageKey) {
 try { sessionStorage.removeItem(g_homePreviewStorageKey); } catch (_) {}
 g_homePreviewStorageKey = '';

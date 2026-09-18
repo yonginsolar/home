@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.103
+Version: v1.0.104
 Change: Keep the primary cooperative's descriptive SEO title after tenant hydration.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.103 | index.html');</script>
+<script>console.log('[Version] v1.0.104 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2687,13 +2687,14 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
     }
 
     let g_homePreviewDraftApplied = false;
+    let g_homePreviewLayoutDraft = null;
 
     async function hydratePublicHomeSettings() {
         try {
             const { data, error } = await _client.rpc('get_public_home_settings');
             if (error) throw error;
             if (isHomePreviewMode && g_homePreviewDraftApplied) return;
-            applyPublicHomeSettings(data || {});
+            applyPublicHomeSettings({ ...(data || {}), ...(g_homePreviewLayoutDraft || {}) });
         } catch (error) {
             console.warn('hydratePublicHomeSettings failed:', error);
         }
@@ -2748,6 +2749,17 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
             applyPublicHomeSettings(settings);
             if (window.AOS?.refreshHard) window.AOS.refreshHard();
         };
+        const initialPreviewLayout = new URLSearchParams(window.location.search).get('home_preview_layout');
+        if (initialPreviewLayout) {
+            try {
+                const padded = initialPreviewLayout.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (initialPreviewLayout.length % 4)) % 4);
+                const binary = atob(padded);
+                const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+                g_homePreviewLayoutDraft = JSON.parse(new TextDecoder().decode(bytes));
+            } catch (error) {
+                console.warn('[home preview] layout payload failed:', error);
+            }
+        }
         const initialPreviewToken = new URLSearchParams(window.location.search).get('home_preview_token');
         if (initialPreviewToken) {
             const storageKey = `coop-home-preview-draft:${initialPreviewToken}`;
