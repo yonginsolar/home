@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.187
-Change: 2026-09-19 - Keep approval-originated official documents out of notice management.
+Version: v1.0.188
+Change: 2026-09-19 - Add a document-style rich editor for directly managed notices.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.187';
+window.ADMIN_MEMBER_VERSION = 'v1.0.188';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -236,13 +236,13 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 .home-preview-frame-shell { width:100%; max-width:1440px; min-width:320px; height:68vh; margin:0 auto; overflow:hidden; border-radius:12px; background:#fff; box-shadow:0 18px 45px rgba(15,23,42,.18); transition:max-width .2s ease; }
 .home-preview-frame-shell.is-mobile { max-width:390px; }
 .home-preview-frame { width:100%; height:100%; border:0; background:#fff; }
-.about-editor-shell { border:1px solid #cbd5e1; border-radius:12px; background:#fff; overflow:hidden; }
-.about-editor-toolbar { display:flex; flex-wrap:wrap; gap:6px; padding:9px; border-bottom:1px solid #e2e8f0; background:#f8fafc; }
-.about-editor-toolbar .btn.active { color:#fff; background:#2563eb; border-color:#2563eb; }
-.about-editor-toolbar .form-select { width:auto; min-width:112px; }
-.about-editor-surface { min-height:220px; padding:16px; color:#0f172a; line-height:1.75; }
-.about-editor-surface .ProseMirror { min-height:188px; outline:none; }
-.about-editor-surface .ProseMirror p:last-child { margin-bottom:0; }
+.about-editor-shell, .notice-editor-shell { border:1px solid #cbd5e1; border-radius:12px; background:#fff; overflow:hidden; }
+.about-editor-toolbar, .notice-editor-toolbar { display:flex; flex-wrap:wrap; gap:6px; padding:9px; border-bottom:1px solid #e2e8f0; background:#f8fafc; }
+.about-editor-toolbar .btn.active, .notice-editor-toolbar .btn.active { color:#fff; background:#2563eb; border-color:#2563eb; }
+.about-editor-toolbar .form-select, .notice-editor-toolbar .form-select { width:auto; min-width:112px; }
+.about-editor-surface, .notice-editor-surface { min-height:220px; padding:16px; color:#0f172a; line-height:1.75; }
+.about-editor-surface .ProseMirror, .notice-editor-surface .ProseMirror { min-height:188px; outline:none; }
+.about-editor-surface .ProseMirror p:last-child, .notice-editor-surface .ProseMirror p:last-child { margin-bottom:0; }
 .about-list-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
 .about-list-actions { display:flex; gap:4px; }
 .certification-logo-thumb { width:64px; height:46px; border:1px solid #e2e8f0; border-radius:8px; object-fit:contain; background:#fff; }
@@ -1739,9 +1739,6 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <h3>📢 공지사항 관리</h3>
 <button class="btn btn-primary btn-sm" onclick="openNoticeModal()"><i class="bi bi-pencil"></i> 공지 작성</button>
 </div>
-<div class="alert alert-info small py-2">
-<i class="bi bi-info-circle-fill"></i> 전자결재에서 승인된 공문은 이 목록에 표시하지 않습니다. 공문 관리에서 확인해 주세요.
-</div>
 <div class="card border-0 shadow-sm">
 <div class="table-responsive">
 <table class="table table-hover mb-0">
@@ -2666,7 +2663,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 </div>
     <div class="modal fade" id="noticeModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">공지사항 작성</h5>
@@ -2682,8 +2679,21 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                     <input type="text" id="notice-title" class="form-control">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label small">내용 (HTML 태그 사용 가능)</label>
-                    <textarea id="notice-content" class="form-control" rows="5" placeholder="내용을 입력하세요."></textarea>
+                    <label class="form-label small fw-bold">내용</label>
+                    <textarea id="notice-content" class="d-none" rows="8"></textarea>
+                    <div class="notice-editor-shell">
+                        <div class="notice-editor-toolbar" id="notice-content-toolbar">
+                            <select class="form-select form-select-sm" data-approval-editor-select="block" aria-label="문단 형식"><option value="paragraph">본문</option><option value="heading2">큰 소제목</option><option value="heading3">작은 소제목</option></select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bold" aria-label="굵게"><i class="bi bi-type-bold"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="italic" aria-label="기울임"><i class="bi bi-type-italic"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bulletList" aria-label="글머리표"><i class="bi bi-list-ul"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="orderedList" aria-label="번호 목록"><i class="bi bi-list-ol"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="link" aria-label="링크"><i class="bi bi-link-45deg"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="clean" aria-label="서식 지우기"><i class="bi bi-eraser"></i></button>
+                        </div>
+                        <div id="notice-content-editor" class="notice-editor-surface"></div>
+                    </div>
+                    <div class="form-text">문서처럼 작성하고 제목·굵게·목록·링크 서식을 사용할 수 있습니다.</div>
                 </div>
 
                 <div class="mb-3 p-3 bg-light rounded border">
@@ -6968,8 +6978,44 @@ function clearNoticeFile() {
     setNoticeFileState([], []);
 }
 
+let g_noticeEditorBridge = null;
+
+function noticeContentToEditorHtml(rawContent) {
+    const raw = String(rawContent || '').replace(/\r\n/g, '\n').trim();
+    if (!raw) return '<p></p>';
+    if (/<\/?[a-z][^>]*>/i.test(raw)) return sanitizeAboutHtml(raw);
+    return `<p>${escapeHtml(raw).replace(/\n/g, '<br>')}</p>`;
+}
+
+async function ensureNoticeRichEditor() {
+    if (!window.ApprovalRichEditor) throw new Error('편집기를 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
+    await window.ApprovalRichEditor.loadTiptapModules();
+    if (!g_noticeEditorBridge) {
+        g_noticeEditorBridge = window.ApprovalRichEditor.createTiptapBridge({
+            source: '#notice-content',
+            editor: '#notice-content-editor',
+            toolbar: '#notice-content-toolbar',
+            placeholder: '공지 내용을 입력해 주세요.',
+            buildHtmlFromSource: noticeContentToEditorHtml,
+            normalizeHtml: sanitizeAboutHtml,
+            askText: async (label, options) => window.prompt(label, options?.value || ''),
+            showMessage: (message) => myAlert(message, 'warning')
+        });
+    }
+    g_noticeEditorBridge.ensure();
+    return g_noticeEditorBridge;
+}
+
 // 1. 공지 모달 열기 (파일 정보 불러오기 추가)
 async function openNoticeModal(id) {
+    try {
+        await ensureNoticeRichEditor();
+    } catch (error) {
+        console.error('공지 편집기 로딩 실패:', error);
+        myAlert(error?.message || '공지 편집기를 불러오지 못했습니다.', 'error');
+        return;
+    }
+
     g_current_notice_id = id || null;
     document.getElementById('notice-id').value = id || '';
 
@@ -7010,6 +7056,7 @@ async function openNoticeModal(id) {
         document.getElementById('notice-file-original').value = '[]';
         document.getElementById('notice-doc-no').value = '';
     }
+    g_noticeEditorBridge.syncFromSource();
     bootstrap.Modal.getOrCreateInstance(document.getElementById('noticeModal')).show();
 }
 
@@ -7073,6 +7120,14 @@ async function saveNotice() {
     const title = document.getElementById('notice-title').value;
     if (!title) return myAlert("제목을 입력하세요.", 'warning');
 
+    try {
+        await ensureNoticeRichEditor();
+        g_noticeEditorBridge.syncToSource();
+    } catch (error) {
+        console.error('공지 편집기 동기화 실패:', error);
+        return myAlert(error?.message || '공지 내용을 확인하지 못했습니다.', 'error');
+    }
+
     showLoading(true);
 
     // --- [파일 업로드 처리 시작] ---
@@ -7133,7 +7188,7 @@ async function saveNotice() {
     const updates = {
         p_id: noticeId,
         p_title: title,
-        p_content: document.getElementById('notice-content').value,
+        p_content: sanitizeAboutHtml(document.getElementById('notice-content').value),
         p_category: document.getElementById('notice-category').value,
         p_status: document.getElementById('notice-status').value,
         p_is_popup: document.getElementById('notice-popup').checked,
