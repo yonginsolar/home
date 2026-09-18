@@ -6,7 +6,7 @@ Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML 
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.176';
+window.ADMIN_MEMBER_VERSION = 'v1.0.177';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8074,6 +8074,7 @@ let g_homeSettingsSaving = false;
 let g_homeSettingsRecord = {};
 let g_homePreviewModal = null;
 let g_homePreviewTimer = 0;
+let g_homePreviewSourceWindow = null;
 const HOME_CTA_PRESETS = new Set(['/signup.html', '#about', '#activities', '#contact', '']);
 
 function setHomeImagePreview(kind, url) {
@@ -8400,15 +8401,31 @@ return new URL(`${location.protocol}//${host}/`);
 
 async function sendHomePreviewSettings() {
 const frame = document.getElementById('site-home-preview-frame');
-if (!frame?.contentWindow || !frame.src) return;
+const targetWindow = g_homePreviewSourceWindow || frame?.contentWindow;
+if (!targetWindow || !frame?.src) return;
 try {
 const settings = await collectHomePreviewSettings();
 const targetOrigin = new URL(frame.src).origin;
-frame.contentWindow.postMessage({ type: 'coop-home-preview-settings', settings }, targetOrigin);
+targetWindow.postMessage({ type: 'coop-home-preview-settings', settings }, targetOrigin);
 } catch (error) {
 console.warn('[sendHomePreviewSettings] failed:', error);
 }
 }
+
+window.addEventListener('message', (event) => {
+if (event.data?.type !== 'coop-home-preview-ready') return;
+const frame = document.getElementById('site-home-preview-frame');
+if (!frame?.src) return;
+let targetOrigin = '';
+try {
+targetOrigin = new URL(frame.src).origin;
+} catch (_) {
+return;
+}
+if (event.origin !== targetOrigin || !event.source) return;
+g_homePreviewSourceWindow = event.source;
+window.setTimeout(sendHomePreviewSettings, 0);
+});
 
 function queueHomePreviewUpdate() {
 window.clearTimeout(g_homePreviewTimer);
@@ -8444,6 +8461,7 @@ const url = getHomePreviewUrl();
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
 if (frame) {
+g_homePreviewSourceWindow = null;
 frame.onload = () => window.setTimeout(sendHomePreviewSettings, 80);
 frame.src = url.toString();
 }
