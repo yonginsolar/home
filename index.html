@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.99
+Version: v1.0.100
 Change: Keep the primary cooperative's descriptive SEO title after tenant hydration.
 -->
 <html lang="ko">
 
 <head>
-<script>console.log('[Version] v1.0.99 | index.html');</script>
+<script>console.log('[Version] v1.0.100 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2742,15 +2742,25 @@ Change: Keep the primary cooperative's descriptive SEO title after tenant hydrat
     const isHomePreviewMode = new URLSearchParams(window.location.search).get('home_preview') === '1';
     if (isHomePreviewMode) {
         document.documentElement.dataset.homePreview = 'true';
-        window.addEventListener('message', (event) => {
-            if (event.source !== window.parent || !isTrustedHomePreviewOrigin(event.origin)) return;
-            if (event.data?.type !== 'coop-home-preview-settings') return;
-            const settings = event.data.settings;
+        const applyHomePreviewDraft = (settings) => {
             if (!settings || typeof settings !== 'object') return;
             g_homePreviewDraftApplied = true;
             applyPublicHomeSettings(settings);
             if (window.AOS?.refreshHard) window.AOS.refreshHard();
+        };
+        window.addEventListener('message', (event) => {
+            if (event.source !== window.parent || !isTrustedHomePreviewOrigin(event.origin)) return;
+            if (event.data?.type !== 'coop-home-preview-settings') return;
+            applyHomePreviewDraft(event.data.settings);
         });
+        const previewChannelId = new URLSearchParams(window.location.search).get('home_preview_channel');
+        if (previewChannelId && typeof BroadcastChannel === 'function') {
+            const previewChannel = new BroadcastChannel(`coop-home-preview-${previewChannelId}`);
+            previewChannel.addEventListener('message', (event) => {
+                if (event.data?.type === 'coop-home-preview-settings') applyHomePreviewDraft(event.data.settings);
+            });
+            previewChannel.postMessage({ type: 'coop-home-preview-ready' });
+        }
         if (window.parent !== window) {
             window.parent.postMessage({ type: 'coop-home-preview-ready' }, window.location.origin);
         }

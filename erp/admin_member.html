@@ -6,7 +6,7 @@ Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML 
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.177';
+window.ADMIN_MEMBER_VERSION = 'v1.0.178';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8075,6 +8075,7 @@ let g_homeSettingsRecord = {};
 let g_homePreviewModal = null;
 let g_homePreviewTimer = 0;
 let g_homePreviewSourceWindow = null;
+let g_homePreviewChannel = null;
 const HOME_CTA_PRESETS = new Set(['/signup.html', '#about', '#activities', '#contact', '']);
 
 function setHomeImagePreview(kind, url) {
@@ -8402,11 +8403,13 @@ return new URL(`${location.protocol}//${host}/`);
 async function sendHomePreviewSettings() {
 const frame = document.getElementById('site-home-preview-frame');
 const targetWindow = g_homePreviewSourceWindow || frame?.contentWindow;
-if (!targetWindow || !frame?.src) return;
+if ((!targetWindow && !g_homePreviewChannel) || !frame?.src) return;
 try {
 const settings = await collectHomePreviewSettings();
 const targetOrigin = new URL(frame.src).origin;
-targetWindow.postMessage({ type: 'coop-home-preview-settings', settings }, targetOrigin);
+const message = { type: 'coop-home-preview-settings', settings };
+if (g_homePreviewChannel) g_homePreviewChannel.postMessage(message);
+if (targetWindow) targetWindow.postMessage(message, targetOrigin);
 } catch (error) {
 console.warn('[sendHomePreviewSettings] failed:', error);
 }
@@ -8460,6 +8463,16 @@ const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
+if (g_homePreviewChannel) g_homePreviewChannel.close();
+g_homePreviewChannel = null;
+if (typeof BroadcastChannel === 'function') {
+const channelId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+url.searchParams.set('home_preview_channel', channelId);
+g_homePreviewChannel = new BroadcastChannel(`coop-home-preview-${channelId}`);
+g_homePreviewChannel.addEventListener('message', (event) => {
+if (event.data?.type === 'coop-home-preview-ready') window.setTimeout(sendHomePreviewSettings, 0);
+});
+}
 if (frame) {
 g_homePreviewSourceWindow = null;
 frame.onload = () => window.setTimeout(sendHomePreviewSettings, 80);
