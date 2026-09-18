@@ -1,11 +1,11 @@
 /*
-Version: v1.2.0
-Change: 2026-09-18 - Link the regular-assembly agenda to prior minutes, closing, audit, dividends and capital returns.
+Version: v1.2.1
+Change: 2026-09-18 - Display multiple auditors as separate signers in the audit report draft.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.50';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.1.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.1.0';
+import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.1.1';
 
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };

@@ -1,6 +1,6 @@
 /*
-Version: v1.1.0
-Change: 2026-09-18 - Build the regular general-meeting order from linked minutes, closing, audit, dividend, capital-return and business-plan sources.
+Version: v1.1.1
+Change: 2026-09-18 - Render every assigned auditor on a separate electronic-signature line.
 */
 
 const safe = (value) => String(value ?? '')
@@ -148,7 +148,9 @@ export function buildAuditReportDraft({ row, coopName, officials, sourceContext 
   const closing = sourceContext?.closing || {};
   const fiscalYear = Number(sourceContext?.fiscal_year || row?.fiscal_year || new Date().getFullYear() - 1);
   const auditors = (officials || []).filter((official) => String(official?.role || official?.position || '').trim() === '감사');
-  const auditNames = auditors.length ? auditors.map((official) => safe(official.name || '(성명)')).join(' · ') : '(감사 성명)';
+  const auditorRows = auditors.length
+    ? auditors.map((official) => `<p>감사　${safe(official.name || '(성명)')}　(전자서명)</p>`).join('')
+    : '<p>감사　(성명)　(전자서명)</p>';
   const stateLabel = closing.is_closed ? '확정 결산자료' : '가결산 자료';
   const netIncome = Number(closing.net_income || 0);
   return `<article class="audit-report-document">
@@ -187,7 +189,7 @@ export function buildAuditReportDraft({ row, coopName, officials, sourceContext 
     <h2>Ⅲ. 종합 의견</h2>
     <p>업무 집행 및 회계 처리가 관련 법령과 정관, 총회·이사회 의결에 따라 적정하게 이루어졌는지 검토한 결과와 개선 권고사항을 감사가 직접 작성합니다.</p>
     <p class="audit-signature-date">${dateText(row?.meeting_date || '')}</p>
-    <div class="audit-signers"><strong>${safe(coopName)}</strong><p>감사　${auditNames}　(전자서명)</p></div>
+    <div class="audit-signers"><strong>${safe(coopName)}</strong>${auditorRows}</div>
   </article>`;
 }
 
