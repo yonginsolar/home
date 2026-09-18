@@ -1,10 +1,10 @@
 /*
-Version: v1.0.1
-Change: 2026-09-18 - Reuse the proven minutes-admin session flow so ERP users are not redirected back to the main screen.
+Version: v1.0.2
+Change: 2026-09-18 - Keep ERP session compatibility and publish electronic-signature minutes atomically.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.49';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.0.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.0.1';
 
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
@@ -527,9 +527,7 @@ async function publishMinute() {
   if (!window.confirm('현재 의사록을 기존 전자서명 문서로 넘길까요? 넘긴 뒤에는 서명자 화면에서 서명이 시작됩니다.')) return;
   const { data, error } = await MeetingPackageService.createMinuteFromPackage(state.current.id, {
     title: doc.title || defaultDocumentTitle('MINUTES'),
-    content: sanitizeHtml(doc.content_html),
-    doc_type: state.current.meeting_type === 'GENERAL_ASSEMBLY' ? 'GENERAL_ASSEMBLY' : 'MINUTES',
-    signer_ids: state.current.signer_official_ids.map(Number)
+    content: sanitizeHtml(doc.content_html)
   });
   if (error) throw error;
   state.current.published_minute_id = data.id;

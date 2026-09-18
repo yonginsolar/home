@@ -1,6 +1,6 @@
 /*
-Version: v1.0.0
-Change: 2026-09-18 - Add tenant-scoped meeting package CRUD for materials, scenario and minutes drafts.
+Version: v1.0.1
+Change: 2026-09-18 - Publish a meeting-package minute through one atomic, idempotent server operation.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -162,45 +162,14 @@ async function saveDocument(packageId, documentType, payload) {
 }
 
 async function createMinuteFromPackage(packageId, payload) {
-  const runtime = await getRuntime();
-  const session = await supabase.auth.getSession();
-  const userId = session.data?.session?.user?.id || null;
-  if (!userId) return { data: null, error: new Error('로그인이 필요합니다.') };
-
-  const { data: packageRow, error: packageError } = await scope(
-    supabase.from('meeting_packages').select('id,published_minute_id').eq('id', packageId),
-    runtime.coop_id
-  ).maybeSingle();
-  if (packageError) return { data: null, error: packageError };
-  if (packageRow?.published_minute_id) {
-    return { data: { id: packageRow.published_minute_id, alreadyCreated: true }, error: null };
-  }
-
-  const { data: docNo, error: docNoError } = await supabase.rpc('get_next_official_doc_no');
-  if (docNoError) return { data: null, error: docNoError };
-  const { data: minute, error: minuteError } = await supabase
-    .from('minutes')
-    .insert(withCoop({
-      title: payload.title,
-      content: payload.content,
-      status: 'OPEN',
-      author_id: userId,
-      doc_type: payload.doc_type,
-      visibility: 'OFFICIALS',
-      requires_sign: true,
-      signer_ids: payload.signer_ids,
-      doc_no: docNo || null
-    }, runtime.coop_id))
-    .select('id,doc_no')
+  const { data, error } = await supabase
+    .rpc('publish_meeting_package_minute', {
+      p_package_id: packageId,
+      p_title: payload.title,
+      p_content: payload.content
+    })
     .single();
-  if (minuteError) return { data: null, error: minuteError };
-
-  const updateResult = await updatePackage(packageId, {
-    published_minute_id: minute.id,
-    status: 'FINAL'
-  });
-  if (updateResult.error) return { data: minute, error: updateResult.error };
-  return { data: minute, error: null };
+  return { data: data || null, error };
 }
 
 export const MeetingPackageService = {
