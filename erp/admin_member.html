@@ -6,7 +6,7 @@ Change: 2026-09-18 - Add homepage layouts and convert legacy About heading HTML 
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.180';
+window.ADMIN_MEMBER_VERSION = 'v1.0.181';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8076,6 +8076,7 @@ let g_homePreviewModal = null;
 let g_homePreviewTimer = 0;
 let g_homePreviewSourceWindow = null;
 let g_homePreviewChannel = null;
+let g_homePreviewStorageKey = '';
 const HOME_CTA_PRESETS = new Set(['/signup.html', '#about', '#activities', '#contact', '']);
 
 function setHomeImagePreview(kind, url) {
@@ -8463,6 +8464,20 @@ const frame = document.getElementById('site-home-preview-frame');
 const url = getHomePreviewUrl();
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
+if (g_homePreviewStorageKey) {
+try { sessionStorage.removeItem(g_homePreviewStorageKey); } catch (_) {}
+g_homePreviewStorageKey = '';
+}
+if (url.origin === window.location.origin) {
+try {
+const storageToken = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+g_homePreviewStorageKey = `coop-home-preview-draft:${storageToken}`;
+sessionStorage.setItem(g_homePreviewStorageKey, JSON.stringify(await collectHomePreviewSettings(false)));
+url.searchParams.set('home_preview_token', storageToken);
+} catch (error) {
+console.warn('[home preview] session draft failed:', error);
+}
+}
 if (g_homePreviewChannel) g_homePreviewChannel.close();
 g_homePreviewChannel = null;
 if (typeof BroadcastChannel === 'function') {
@@ -8472,13 +8487,6 @@ g_homePreviewChannel = new BroadcastChannel(`coop-home-preview-${channelId}`);
 g_homePreviewChannel.addEventListener('message', (event) => {
 if (event.data?.type === 'coop-home-preview-ready') window.setTimeout(sendHomePreviewSettings, 0);
 });
-} else if (!frame?.contentWindow) {
-const initialSettings = await collectHomePreviewSettings(false);
-const initialJson = JSON.stringify(initialSettings);
-const initialBytes = new TextEncoder().encode(initialJson);
-let initialBinary = '';
-initialBytes.forEach((byte) => { initialBinary += String.fromCharCode(byte); });
-url.searchParams.set('home_preview_payload', btoa(initialBinary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''));
 }
 if (frame) {
 g_homePreviewSourceWindow = null;
