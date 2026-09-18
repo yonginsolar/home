@@ -1,6 +1,6 @@
 /*
-Version: v1.1.0
-Change: 2026-09-18 - Make this a pre-meeting workspace with source-based board documents and a chapter editor for the assembly booklet.
+Version: v1.1.1
+Change: 2026-09-18 - Fully clear hidden assembly state in board mode and style chapter previews as A4 pages.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.49';
@@ -325,6 +325,7 @@ function renderChapterList() {
 function renderActiveChapter() {
   if (!state.chapters.length) {
     $('chapterTitle').value = '';
+    $('chapterEditor').className = 'rich-editor chapter-preview';
     $('chapterEditor').innerHTML = '<p>자료집 챕터가 없습니다.</p>';
     $('chapterPosition').textContent = '';
     renderChapterList();
@@ -334,6 +335,10 @@ function renderActiveChapter() {
   const chapter = state.chapters[index];
   state.activeChapterId = chapter.id;
   $('chapterTitle').value = chapter.title;
+  const chapterClasses = String(chapter.className || '')
+    .split(/\s+/)
+    .filter(name => /^chapter-[a-z0-9-]+$/i.test(name));
+  $('chapterEditor').className = ['rich-editor', 'chapter-preview', ...chapterClasses].join(' ');
   $('chapterEditor').innerHTML = sanitizeHtml(chapter.html);
   $('chapterPosition').textContent = `${index + 1} / ${state.chapters.length}`;
   $('previousChapterButton').disabled = index === 0;
@@ -369,6 +374,11 @@ function renderActiveDocument() {
   } else {
     state.chapters = [];
     state.activeChapterId = null;
+    $('chapterList').replaceChildren();
+    $('chapterTitle').value = '';
+    $('chapterEditor').className = 'rich-editor chapter-preview';
+    $('chapterEditor').replaceChildren();
+    $('chapterPosition').textContent = '';
     $('documentEditor').innerHTML = sanitizeHtml(doc.content_html || '');
   }
   state.documentDirty = false;
