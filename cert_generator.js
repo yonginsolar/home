@@ -1,6 +1,6 @@
 /*
-Version: v1.0.14
-Change: Add breathing room between the cooperative name and chairman line on contribution certificates.
+Version: v1.0.15
+Change: Keep the contribution-certificate seal safely inside the printed border.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -167,11 +167,26 @@ function drawCertSignatureBlock(doc, companyProfile, centerX, startY, options = 
         }
     );
 
+    const naturalSealX = centerX + (chairmanLayout.lastLineWidth / 2) - (sealWidth / 2) + sealCenterOffset;
+    const naturalSealY = chairmanLayout.endY - Number(options.sealLift || 14);
+    const minSealX = Number(options.minSealX);
+    const maxSealRight = Number(options.maxSealRight);
+    const minSealY = Number(options.minSealY);
+    const maxSealBottom = Number(options.maxSealBottom);
+    const sealX = Math.max(
+        Number.isFinite(minSealX) ? minSealX : -Infinity,
+        Math.min(naturalSealX, Number.isFinite(maxSealRight) ? maxSealRight - sealWidth : Infinity)
+    );
+    const sealY = Math.max(
+        Number.isFinite(minSealY) ? minSealY : -Infinity,
+        Math.min(naturalSealY, Number.isFinite(maxSealBottom) ? maxSealBottom - sealWidth : Infinity)
+    );
+
     return {
         companyLayout,
         chairmanLayout,
-        sealX: centerX + (chairmanLayout.lastLineWidth / 2) - (sealWidth / 2) + sealCenterOffset,
-        sealY: chairmanLayout.endY - Number(options.sealLift || 14)
+        sealX,
+        sealY
     };
 } // End of drawCertSignatureBlock
 
@@ -451,20 +466,24 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
         doc.text(dateStr, 105, issueDateY, { align: "center" });
 
         // [이사장 서명]
-        const signatureLayout = drawCertSignatureBlock(doc, companyProfile, 105, issueDateY + 25, {
+        const signatureLayout = drawCertSignatureBlock(doc, companyProfile, 105, issueDateY + 12, {
             maxWidth: 150,
             companyFontSize: 18,
             companyMinFontSize: 13,
             companyMaxLines: 3,
             companyLineHeight: 7,
-            gapBeforeChairman: 11,
+            gapBeforeChairman: 8,
             chairmanFontSize: 22,
             chairmanMinFontSize: 15,
             chairmanMaxLines: 2,
             chairmanLineHeight: 9,
             sealWidth: 24,
             sealCenterOffset: 0,
-            sealLift: 14
+            sealLift: 14,
+            minSealX: 15,
+            maxSealRight: 195,
+            minSealY: 15,
+            maxSealBottom: 282
         });
 
         // [직인] 이사장 텍스트의 오른쪽에 배치
