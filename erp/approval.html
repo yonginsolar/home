@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.57 | Change: 2026-09-19 - Add approval-completion inventory receipts. -->
+<!-- Version: v1.2.58 | Change: 2026-09-19 - Auto-calculate inventory purchase amount while keeping the final amount editable. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.57 | approval.html');</script>
+  <script>console.log('[Version] v1.2.58 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1067,11 +1067,17 @@
                     </div>
                     <div class="col-md-3">
                       <label class="small text-muted fw-bold" for="inventoryPurchaseQuantity">구입 수량</label>
-                      <div class="input-group"><input type="number" min="1" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseQuantity" placeholder="0"><span class="input-group-text">개</span></div>
+                      <div class="input-group"><input type="number" min="1" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseQuantity" placeholder="0" oninput="handleApprovalInventoryCostInput()"><span class="input-group-text">개</span></div>
                     </div>
                     <div class="col-md-4">
                       <label class="small text-muted fw-bold" for="inventoryPurchaseUnitCost">개당 매입가 <span class="fw-normal">(선택)</span></label>
-                      <div class="input-group"><input type="number" min="0" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseUnitCost" placeholder="0"><span class="input-group-text">원</span></div>
+                      <div class="input-group"><input type="number" min="0" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseUnitCost" placeholder="0" oninput="handleApprovalInventoryCostInput()"><span class="input-group-text">원</span></div>
+                    </div>
+                    <div class="col-12">
+                      <div class="d-flex flex-wrap align-items-center gap-2">
+                        <div class="small text-muted flex-grow-1" id="inventoryPurchaseCalculation" aria-live="polite">수량과 개당 매입가를 입력하면 기본 결재 금액을 자동으로 계산합니다.</div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary hidden" id="inventoryPurchaseApplyBaseAmount" onclick="applyApprovalInventoryBaseAmount()">계산값을 최종 금액에 적용</button>
+                      </div>
                     </div>
                     <div class="col-12"><div class="small text-muted" id="inventoryPurchaseHelp">물품이 없다면 ERP 메뉴의 `현금매출·재고`에서 먼저 등록할 수 있습니다.</div></div>
                   </div>
@@ -1106,7 +1112,7 @@
         </div>
         <div class="col-12" id="divAmount">
           <label class="small text-muted" id="amountLabel">금액 (원)</label>
-          <input type="number" class="form-control" id="appAmount" placeholder="0">
+          <input type="number" class="form-control" id="appAmount" placeholder="0" oninput="handleApprovalFinalAmountManualInput()">
         </div>
 
         <div class="col-12 hidden" id="divLeaveSection">
@@ -3238,6 +3244,8 @@ function resetApprovalComposerForm(options = {}) {
     if (inventoryPurchaseItemEl) inventoryPurchaseItemEl.value = '';
     if (inventoryPurchaseQuantityEl) inventoryPurchaseQuantityEl.value = '';
     if (inventoryPurchaseUnitCostEl) inventoryPurchaseUnitCostEl.value = '';
+    approvalInventoryFinalAmountManual = false;
+    approvalInventoryWasEnabled = false;
     handleApprovalInventoryPurchaseToggle();
     setApprovalExpenseAdjustmentMode('new', { silent: true });
     if (jeongyeolToggleEl) jeongyeolToggleEl.checked = false;
@@ -3453,6 +3461,10 @@ async function loadApprovalDraftFromServer(draftId) {
             if (inventoryPurchaseItemEl) inventoryPurchaseItemEl.value = String(fields.inventory_purchase_item_id || '').trim();
             if (inventoryPurchaseQuantityEl) inventoryPurchaseQuantityEl.value = String(fields.inventory_purchase_quantity || '').trim();
             if (inventoryPurchaseUnitCostEl) inventoryPurchaseUnitCostEl.value = String(fields.inventory_purchase_unit_cost || '').trim();
+            const restoredCalculation = getApprovalInventoryPurchaseCalculation();
+            const restoredAmount = Math.trunc(Number(amountEl?.value || 0));
+            approvalInventoryFinalAmountManual = restoredCalculation.ready && restoredAmount !== restoredCalculation.baseAmount;
+            syncApprovalInventoryPurchaseCalculation();
         }
         const payrollMonthEl = document.getElementById('payrollMonth');
         if (payrollMonthEl && String(fields.payroll_month || '').trim()) {
@@ -6243,6 +6255,58 @@ function buildApprovalPayoutAppendText(payout) {
 
 let approvalInventoryItems = [];
 let approvalInventoryItemsLoaded = false;
+let approvalInventoryFinalAmountManual = false;
+let approvalInventoryWasEnabled = false;
+
+function getApprovalInventoryPurchaseCalculation() {
+    const quantity = Math.trunc(Number(document.getElementById('inventoryPurchaseQuantity')?.value || 0));
+    const unitCostRaw = String(document.getElementById('inventoryPurchaseUnitCost')?.value || '').trim();
+    const unitCost = unitCostRaw === '' ? null : Math.trunc(Number(unitCostRaw));
+    const ready = quantity > 0 && unitCost !== null && Number.isFinite(unitCost) && unitCost >= 0;
+    return { quantity, unitCost, ready, baseAmount: ready ? quantity * unitCost : null };
+}
+
+function syncApprovalInventoryPurchaseCalculation(options = {}) {
+    const enabled = document.getElementById('inventoryPurchaseEnabled')?.checked === true;
+    const amountEl = document.getElementById('appAmount');
+    const summaryEl = document.getElementById('inventoryPurchaseCalculation');
+    const applyButton = document.getElementById('inventoryPurchaseApplyBaseAmount');
+    const calculation = getApprovalInventoryPurchaseCalculation();
+    if (!enabled || !calculation.ready) {
+        if (summaryEl) summaryEl.textContent = '수량과 개당 매입가를 입력하면 기본 결재 금액을 자동으로 계산합니다.';
+        if (applyButton) applyButton.classList.add('hidden');
+        return calculation;
+    }
+    if (amountEl && (options.forceAmount === true || !approvalInventoryFinalAmountManual)) {
+        amountEl.value = String(calculation.baseAmount);
+        approvalInventoryFinalAmountManual = false;
+    }
+    const finalAmountRaw = String(amountEl?.value || '').trim();
+    const finalAmount = finalAmountRaw === '' ? calculation.baseAmount : Math.trunc(Number(finalAmountRaw));
+    const adjustment = Number.isFinite(finalAmount) ? finalAmount - calculation.baseAmount : 0;
+    if (summaryEl) {
+        summaryEl.textContent = adjustment === 0
+            ? `자동 계산 ${formatMoney(calculation.baseAmount)}원 (수량 ${calculation.quantity.toLocaleString('ko-KR')}개 × 개당 ${formatMoney(calculation.unitCost)}원)`
+            : `자동 계산 ${formatMoney(calculation.baseAmount)}원 · 최종 결재 ${formatMoney(finalAmount)}원 · 배송비·할인 등 조정 ${adjustment > 0 ? '+' : ''}${formatMoney(adjustment)}원`;
+    }
+    if (applyButton) applyButton.classList.toggle('hidden', adjustment === 0);
+    return { ...calculation, finalAmount, adjustment };
+}
+
+function handleApprovalInventoryCostInput() {
+    syncApprovalInventoryPurchaseCalculation();
+}
+
+function handleApprovalFinalAmountManualInput() {
+    if (document.getElementById('inventoryPurchaseEnabled')?.checked !== true) return;
+    approvalInventoryFinalAmountManual = true;
+    syncApprovalInventoryPurchaseCalculation();
+}
+
+function applyApprovalInventoryBaseAmount() {
+    approvalInventoryFinalAmountManual = false;
+    syncApprovalInventoryPurchaseCalculation({ forceAmount: true });
+}
 
 async function loadApprovalInventoryItems(force = false) {
     const select = document.getElementById('inventoryPurchaseItem');
@@ -6304,7 +6368,14 @@ function handleApprovalInventoryPurchaseToggle() {
     const enabled = document.getElementById('inventoryPurchaseEnabled')?.checked === true;
     const fields = document.getElementById('inventoryPurchaseFields');
     if (fields) fields.classList.toggle('hidden', !enabled);
+    if (enabled && !approvalInventoryWasEnabled) {
+        approvalInventoryFinalAmountManual = false;
+    } else if (!enabled) {
+        approvalInventoryFinalAmountManual = false;
+    }
+    approvalInventoryWasEnabled = enabled;
     if (enabled) void loadApprovalInventoryItems(false);
+    syncApprovalInventoryPurchaseCalculation();
 }
 
 function collectApprovalInventoryPurchaseInput() {
@@ -6313,26 +6384,41 @@ function collectApprovalInventoryPurchaseInput() {
     const quantity = Math.trunc(Number(document.getElementById('inventoryPurchaseQuantity')?.value || 0));
     const unitCostRaw = String(document.getElementById('inventoryPurchaseUnitCost')?.value || '').trim();
     const unitCost = unitCostRaw === '' ? null : Math.trunc(Number(unitCostRaw));
+    const finalAmount = Math.trunc(Number(document.getElementById('appAmount')?.value || 0));
     const item = approvalInventoryItems.find((row) => String(row.id || '') === itemId);
     if (!itemId || !item) throw new Error('재고로 입고할 물품을 선택하세요.');
     if (!(quantity > 0)) throw new Error('구입 수량을 1개 이상 입력하세요.');
     if (unitCost !== null && !(unitCost >= 0)) throw new Error('개당 매입가를 확인하세요.');
+    if (!(finalAmount >= 0)) throw new Error('최종 결재 금액을 확인하세요.');
     return {
         enabled: true,
         item_id: itemId,
         item_name: String(item.name || '').trim(),
         unit: String(item.unit || '개').trim() || '개',
         quantity,
-        unit_cost: unitCost
+        unit_cost: unitCost,
+        base_amount: unitCost === null ? null : quantity * unitCost,
+        approval_amount: finalAmount
     };
 }
 
 function buildApprovalInventoryPurchaseAppendText(purchase) {
     if (!purchase?.enabled) return '';
-    const costText = Number.isFinite(Number(purchase.unit_cost)) && purchase.unit_cost !== null
+    const hasUnitCost = Number.isFinite(Number(purchase.unit_cost)) && purchase.unit_cost !== null;
+    const costText = hasUnitCost
         ? ` / 개당 매입가 ${formatMoney(purchase.unit_cost)}원`
         : '';
-    return `[재고 입고 연동]\n- 물품: ${purchase.item_name}\n- 수량: ${Number(purchase.quantity).toLocaleString('ko-KR')}${purchase.unit || '개'}${costText}\n- 결재가 최종 완료되면 재고에 자동 입고됩니다.`;
+    const amountLines = [];
+    if (hasUnitCost) {
+        const baseAmount = Number(purchase.base_amount ?? (Number(purchase.quantity || 0) * Number(purchase.unit_cost || 0)));
+        const finalAmount = Number(purchase.approval_amount ?? baseAmount);
+        amountLines.push(`- 자동 계산 금액: ${formatMoney(baseAmount)}원`);
+        if (finalAmount !== baseAmount) {
+            const adjustment = finalAmount - baseAmount;
+            amountLines.push(`- 최종 결재 금액: ${formatMoney(finalAmount)}원 (배송비·할인 등 조정 ${adjustment > 0 ? '+' : ''}${formatMoney(adjustment)}원)`);
+        }
+    }
+    return `[재고 입고 연동]\n- 물품: ${purchase.item_name}\n- 수량: ${Number(purchase.quantity).toLocaleString('ko-KR')}${purchase.unit || '개'}${costText}\n${amountLines.length ? `${amountLines.join('\n')}\n` : ''}- 결재가 최종 완료되면 재고에 자동 입고됩니다.`;
 }
 
 function buildApprovalExpenseSnapshot() {
@@ -9664,6 +9750,8 @@ function resetSalaryExpenseUi() {
     if (inventoryItem) inventoryItem.value = '';
     if (inventoryQuantity) inventoryQuantity.value = '';
     if (inventoryUnitCost) inventoryUnitCost.value = '';
+    approvalInventoryFinalAmountManual = false;
+    approvalInventoryWasEnabled = false;
     syncApprovalInventoryPurchaseVisibility();
     updateJeongyeolUi();
 } // End of resetSalaryExpenseUi

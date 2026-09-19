@@ -1,4 +1,4 @@
-/* v2.0.2 - Cash sales, inventory, receipts, and host-aware ERP access. */
+/* v2.0.3 - Auto-calculate and reconcile cash-receipt allocations. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -44,12 +44,23 @@
     if (message.includes('INSUFFICIENT_STOCK')) return '현재 재고보다 많은 수량을 출고할 수 없습니다.';
     if (message.includes('INVALID_SALE_TOTAL')) return '판매액·수납액·현금영수증 구분 합계를 다시 확인해 주세요.';
     if (message.includes('INVALID_DEPOSIT_AMOUNT')) return '입금 처리할 수 있는 현금 잔액을 초과했습니다.';
+    if (message.includes('INVALID_RECEIPT_COUNT')) return '현금영수증 발급 건수는 0건부터 판매 수량까지 입력할 수 있습니다.';
+    if (message.includes('LINKED_RECEIPT_EXCEEDS_ALLOCATION')) return '이미 발급 완료로 연결된 현금영수증보다 적게 바꿀 수 없습니다. 먼저 해당 신청을 미처리로 되돌려 주세요.';
+    if (message.includes('RECEIPT_ALLOCATION_EXCEEDED')) return '해당 매출에 남아 있는 `신청 없음` 금액보다 신청액이 큽니다.';
+    if (message.includes('RECEIPT_AMOUNT_NOT_MATCHED')) return '신청 금액과 해당 매출의 개당 판매가가 맞지 않습니다.';
+    if (message.includes('SALE_LINK_REQUIRED') || message.includes('SALE_NOT_FOUND')) return '현금영수증을 연결할 등록 매출을 선택해 주세요.';
     if (message.includes('결산에 포함')) return message;
     return '처리하지 못했습니다. 입력값과 로그인 상태를 확인하고 다시 시도해 주세요.';
   }
 
   async function rpc(action, data = {}) {
     const result = await client.rpc('festival_receipts_admin', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  async function adjustRpc(action, data = {}) {
+    const result = await client.rpc('festival_receipts_adjust', { p_action: action, p_data: data });
     if (result.error) throw new Error(result.error.message);
     return result.data;
   }
@@ -181,6 +192,65 @@
     dateInput.focus();
   }
 
+  function beginReceiptAllocationEdit(cell, sale) {
+    cell.replaceChildren();
+    const wrap = document.createElement('div');
+    wrap.className = 'inline-action';
+    const label = document.createElement('label');
+    label.className = 'small';
+    label.textContent = '현금영수증 발급 건수';
+    const countInput = document.createElement('input');
+    countInput.type = 'number';
+    countInput.min = '0';
+    countInput.max = String(Number(sale.quantity || 0));
+    countInput.step = '1';
+    countInput.value = String(Number(sale.receipt_issued_count || 0));
+    countInput.setAttribute('aria-label', '현금영수증 발급 건수 수정');
+    const preview = document.createElement('p');
+    preview.className = 'small muted multiline';
+    const updatePreview = () => {
+      const quantity = Number(sale.quantity || 0);
+      const issuedCount = Math.max(0, Math.min(quantity, Math.trunc(Number(countInput.value || 0))));
+      const issuedAmount = issuedCount * Number(sale.unit_price || 0);
+      preview.textContent = `발급 ${issuedCount.toLocaleString('ko-KR')}건 · ${money(issuedAmount)}\n신청 없음 ${(quantity - issuedCount).toLocaleString('ko-KR')}건 · ${money(Number(sale.gross_amount || 0) - issuedAmount)}`;
+    };
+    countInput.addEventListener('input', updatePreview);
+    updatePreview();
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.textContent = '구분 저장';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'secondary';
+    cancel.textContent = '취소';
+    cancel.addEventListener('click', renderSales);
+    save.addEventListener('click', async () => {
+      if (operationBusy) return;
+      const issuedCount = Math.trunc(Number(countInput.value || 0));
+      if (issuedCount < 0 || issuedCount > Number(sale.quantity || 0)) {
+        setOperationStatus('현금영수증 발급 건수를 판매 수량 안에서 입력해 주세요.', true);
+        return;
+      }
+      operationBusy = true;
+      save.disabled = cancel.disabled = true;
+      try {
+        await adjustRpc('update_sale_receipts', { sale_id: sale.id, issued_count: issuedCount });
+        setOperationStatus('현금영수증 구분과 회계전표 증빙 메모를 함께 수정했습니다.');
+        await loadInventory();
+      } catch (error) {
+        setOperationStatus(readableError(error), true);
+        renderSales();
+      } finally {
+        operationBusy = false;
+      }
+    });
+    label.append(countInput);
+    wrap.append(label, preview, save, cancel);
+    cell.append(wrap);
+    countInput.focus();
+    countInput.select();
+  }
+
   function renderSales() {
     const rows = $('salesRows');
     rows.replaceChildren();
@@ -193,8 +263,18 @@
         makeCell(sale.sale_date),
         makeCell(`${sale.event_name}\n${sale.item_name}`, 'multiline'),
         makeCell(`${Number(sale.quantity).toLocaleString('ko-KR')}개 × ${money(sale.unit_price)}\n합계 ${money(sale.gross_amount)}`, 'multiline'),
-        makeCell(`계좌 ${money(sale.bank_received)}\n현금 ${money(sale.cash_received)}`, 'multiline'),
-        makeCell(`발급 ${Number(sale.receipt_issued_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_issued_amount)}\n신청 없음 ${Number(sale.receipt_not_requested_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_not_requested_amount)}`, 'multiline'),
+        makeCell(`계좌 ${money(sale.bank_received)}\n현금 ${money(sale.cash_received)}`, 'multiline')
+      );
+      const receiptCell = makeCell(`발급 ${Number(sale.receipt_issued_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_issued_amount)}\n신청 없음 ${Number(sale.receipt_not_requested_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_not_requested_amount)}`, 'multiline');
+      const editReceipt = document.createElement('button');
+      editReceipt.type = 'button';
+      editReceipt.className = 'secondary';
+      editReceipt.textContent = '현금영수증 구분 수정';
+      editReceipt.disabled = !editable;
+      editReceipt.addEventListener('click', () => beginReceiptAllocationEdit(receiptCell, sale));
+      receiptCell.append(document.createElement('br'), editReceipt);
+      row.append(
+        receiptCell,
         makeCell(Number(sale.overpayment_amount || 0) > 0 ? `${sale.overpayment_name}\n${money(sale.overpayment_amount)} · 반환 대기` : '-', 'multiline')
       );
       const actionCell = document.createElement('td');
@@ -249,24 +329,31 @@
     return { quantity, unitPrice, gross, bank, cash, overpayment, issued, none, valid: receivedOk && receiptOk };
   }
 
-  ['saleQuantity','saleUnitPrice','saleBank','saleCash','overpaymentAmount','receiptIssuedAmount','receiptNoneAmount'].forEach((id) => {
+  function syncSaleReceiptAllocation() {
+    const quantity = intValue('saleQuantity');
+    const unitPrice = intValue('saleUnitPrice');
+    const issuedInput = $('receiptIssuedCount');
+    const enteredIssuedCount = intValue('receiptIssuedCount');
+    const issuedCount = Math.min(quantity, enteredIssuedCount);
+    issuedInput.max = String(quantity);
+    if (enteredIssuedCount !== issuedCount) issuedInput.value = String(issuedCount);
+    $('receiptIssuedAmount').value = String(issuedCount * unitPrice);
+    $('receiptNoneCount').value = String(quantity - issuedCount);
+    $('receiptNoneAmount').value = String((quantity - issuedCount) * unitPrice);
+    return updateSaleSummary();
+  }
+
+  ['saleBank','saleCash','overpaymentAmount'].forEach((id) => {
     $(id).addEventListener('input', updateSaleSummary);
   });
-  $('saleQuantity').addEventListener('input', () => {
-    const count = intValue('saleQuantity');
-    const issued = intValue('receiptIssuedCount');
-    if (issued <= count) $('receiptNoneCount').value = String(count - issued);
-  });
-  $('receiptIssuedCount').addEventListener('input', () => {
-    const count = intValue('saleQuantity');
-    const issued = intValue('receiptIssuedCount');
-    if (issued <= count) $('receiptNoneCount').value = String(count - issued);
+  ['saleQuantity','saleUnitPrice','receiptIssuedCount'].forEach((id) => {
+    $(id).addEventListener('input', syncSaleReceiptAllocation);
   });
 
   $('saleForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (operationBusy || !editable) return;
-    const summary = updateSaleSummary();
+    const summary = syncSaleReceiptAllocation();
     const overpaymentName = $('overpaymentName').value.trim();
     if (!summary.valid) return setOperationStatus('판매액·수납액·현금영수증 구분 합계를 맞춰 주세요.', true);
     if (summary.overpayment > 0 && !overpaymentName) return setOperationStatus('과오납 입금자명을 입력해 주세요.', true);
@@ -289,7 +376,7 @@
       event.currentTarget.reset();
       $('saleDate').value = kstToday();
       ['saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
-      updateSaleSummary();
+      syncSaleReceiptAllocation();
       await loadInventory();
     } catch (error) {
       setOperationStatus(readableError(error), true);
@@ -342,6 +429,21 @@
     }
   });
 
+  function receiptSaleCandidates(item) {
+    const amount = Number(item.amount || 0);
+    return (Array.isArray(inventory.sales) ? inventory.sales : []).filter((sale) => {
+      const unitPrice = Number(sale.unit_price || 0);
+      const units = unitPrice > 0 && amount % unitPrice === 0 ? amount / unitPrice : 0;
+      return units > 0
+        && Number(sale.receipt_not_requested_count || 0) >= units
+        && Number(sale.receipt_not_requested_amount || 0) >= amount;
+    });
+  }
+
+  function saleCandidateLabel(sale) {
+    return `${sale.sale_date} · ${sale.event_name} · ${sale.item_name} (${money(sale.unit_price)}/개)`;
+  }
+
   function renderReceipts() {
     const rows = $('receiptRows');
     rows.replaceChildren();
@@ -360,27 +462,76 @@
         const message = document.createElement('p');
         const yes = document.createElement('button');
         const no = document.createElement('button');
-        message.textContent = item.issued_at ? '미처리 상태로 되돌릴까요?' : '실제 현금영수증 발급을 마치셨나요?';
+        const candidates = item.issued_at ? [] : receiptSaleCandidates(item);
+        let saleSelect = null;
+        message.textContent = item.issued_at
+          ? '미처리 상태로 되돌릴까요? 연결된 매출의 현금영수증 구분도 함께 되돌아갑니다.'
+          : '실제 현금영수증 발급을 마치셨나요? 연결된 매출의 발급·미발급 금액도 함께 수정됩니다.';
+        confirmBox.append(message);
+        if (!item.issued_at && candidates.length === 1) {
+          const linked = document.createElement('p');
+          linked.className = 'small muted';
+          linked.textContent = `연결할 매출: ${saleCandidateLabel(candidates[0])}`;
+          confirmBox.append(linked);
+        } else if (!item.issued_at && candidates.length > 1) {
+          const selectLabel = document.createElement('label');
+          selectLabel.className = 'small';
+          selectLabel.textContent = '연결할 매출';
+          saleSelect = document.createElement('select');
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = '매출을 선택해 주세요';
+          saleSelect.append(placeholder);
+          candidates.forEach((sale) => {
+            const option = document.createElement('option');
+            option.value = sale.id;
+            option.textContent = saleCandidateLabel(sale);
+            saleSelect.append(option);
+          });
+          selectLabel.append(saleSelect);
+          confirmBox.append(selectLabel);
+        } else if (!item.issued_at && candidates.length === 0) {
+          const warning = document.createElement('p');
+          warning.className = 'small error';
+          warning.textContent = '신청 금액과 맞고 `신청 없음` 잔액이 남은 매출을 찾지 못했습니다. 등록된 매출을 먼저 확인해 주세요.';
+          confirmBox.append(warning);
+        }
         yes.type = no.type = 'button';
         yes.textContent = item.issued_at ? '예, 미처리로 되돌리기' : '예, 발급을 마쳤어요';
         no.textContent = '취소';
         no.className = 'secondary';
         no.addEventListener('click', () => { confirmBox.remove(); button.hidden = false; button.focus(); });
+        if (!item.issued_at && candidates.length === 0) yes.disabled = true;
         yes.addEventListener('click', async () => {
           if (receiptBusy) return;
+          const selectedSaleId = item.issued_at
+            ? null
+            : (candidates.length === 1 ? candidates[0].id : String(saleSelect?.value || '').trim());
+          if (!item.issued_at && !selectedSaleId) {
+            $('adminStatus').textContent = '현금영수증을 연결할 매출을 선택해 주세요.';
+            saleSelect?.focus();
+            return;
+          }
           receiptBusy = true;
           yes.disabled = no.disabled = true;
           try {
-            await rpc(item.issued_at ? 'mark_pending' : 'mark_issued', { id: item.id });
-            await loadReceipts();
-            $('adminStatus').textContent = '처리 상태를 저장했습니다.';
+            await adjustRpc(item.issued_at ? 'mark_pending' : 'mark_issued', {
+              id: item.id,
+              ...(selectedSaleId ? { sale_id: selectedSaleId } : {})
+            });
+            await Promise.all([loadInventory(), loadReceipts()]);
+            $('adminStatus').textContent = item.issued_at
+              ? '미처리 상태와 연결 매출의 현금영수증 구분을 함께 되돌렸습니다.'
+              : '발급 완료 상태와 연결 매출의 현금영수증 구분을 함께 저장했습니다.';
           } catch (error) {
             $('adminStatus').textContent = readableError(error);
+            no.disabled = false;
+            yes.disabled = !item.issued_at && candidates.length === 0;
           } finally {
             receiptBusy = false;
           }
         });
-        confirmBox.append(message, yes, no);
+        confirmBox.append(yes, no);
         cell.append(confirmBox);
         button.hidden = true;
         yes.focus();
@@ -465,7 +616,7 @@
   (async () => {
     $('saleDate').value = kstToday();
     $('movementDate').value = kstToday();
-    updateSaleSummary();
+    syncSaleReceiptAllocation();
     try {
       const { data, error } = await client.auth.getUser();
       if (error || !data.user) {
