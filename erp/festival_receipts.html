@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <!-- Version: v2.0.3 | Auto-calculate receipt allocation and reconcile issued requests -->
+  <!-- Version: v2.1.0 | Event print context, discounts and immediate receipt reconciliation -->
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
@@ -13,7 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
 </head>
 <body>
-<main class="festival-page admin" data-version="2.0.3">
+<main class="festival-page admin" data-version="2.1.0">
   <header>
     <span class="eyebrow">용인모두의햇빛협동조합</span>
     <h1>축제 현금매출·재고·현금영수증 관리</h1>
@@ -28,6 +28,19 @@
   <a id="loginLink" class="button" hidden>ERP 로그인</a>
 
   <section id="adminPanel" hidden>
+    <div class="card">
+      <div class="section-heading">
+        <div><h2>🗓️ 행사 관리</h2><p class="muted">행사마다 달라지는 이름·날짜·인쇄물만 여기에서 관리합니다. 재고와 전체 매출·현금영수증 신청은 아래 공통 목록에서 계속 확인합니다.</p></div>
+      </div>
+      <form id="eventForm" class="form-grid compact-form">
+        <label>행사 날짜<input type="date" id="newEventDate" required></label>
+        <label class="wide">행사명<input id="newEventName" maxlength="120" placeholder="예: 느티나무 축제 태양광 선풍기 체험" required></label>
+        <button type="submit">행사 등록</button>
+      </form>
+      <p id="eventStatus" class="status" role="status"></p>
+      <div class="table-wrap"><table><thead><tr><th>날짜</th><th>행사명</th><th>인쇄물</th></tr></thead><tbody id="eventRows"></tbody></table></div>
+    </div>
+
     <div class="card">
       <div class="section-heading">
         <div><h2>📦 재고 현황</h2><p class="muted">전자결재에서 재고 입고를 지정하면 결재 완료 시 자동으로 늘어납니다.</p></div>
@@ -57,17 +70,17 @@
 
     <div class="card">
       <h2>💵 현금매출 등록</h2>
-      <p class="muted">판매 수량과 판매가는 행사마다 다르게 입력할 수 있습니다. 계좌 수납과 현장 현금의 합계가 매출과 과오납의 합계와 맞아야 저장됩니다.</p>
+      <p class="muted">행사를 선택한 뒤 판매 수량·판매가·할인액을 입력합니다. 계좌 수납액을 적으면 나머지는 현장 현금으로 자동 계산됩니다.</p>
       <form id="saleForm" class="form-grid">
-        <label>판매일<input type="date" id="saleDate" required></label>
-        <label class="wide">행사명<input id="eventName" maxlength="120" placeholder="예: 느티나무 축제 태양광 선풍기 체험" required></label>
+        <label class="wide">행사<select id="saleEvent" required><option value="">먼저 행사를 등록해 주세요</option></select></label>
         <label>판매 물품<select id="saleItem" required></select></label>
         <label>판매 수량<input type="number" min="1" step="1" inputmode="numeric" id="saleQuantity" required></label>
         <label>개당 판매가<input type="number" min="0" step="1" inputmode="numeric" id="saleUnitPrice" required></label>
+        <label>할인액<input type="number" min="0" step="1" inputmode="numeric" id="saleDiscount" value="0" required></label>
         <label>계좌로 받은 금액<input type="number" min="0" step="1" inputmode="numeric" id="saleBank" value="0" required></label>
-        <label>현장에서 받은 현금<input type="number" min="0" step="1" inputmode="numeric" id="saleCash" value="0" required></label>
+        <label>현장에서 받은 현금 <span class="small muted">(자동)</span><input type="number" min="0" step="1" inputmode="numeric" id="saleCash" value="0" readonly></label>
         <label>현금영수증 발급 건수<input type="number" min="0" step="1" inputmode="numeric" id="receiptIssuedCount" value="0" required></label>
-        <label>현금영수증 발급 금액 <span class="small muted">(자동)</span><input type="number" min="0" step="1" inputmode="numeric" id="receiptIssuedAmount" value="0" readonly></label>
+        <label>현금영수증 발급 금액 <span class="small muted">(자동 · 필요 시 수정)</span><input type="number" min="0" step="1" inputmode="numeric" id="receiptIssuedAmount" value="0" required></label>
         <label>현금영수증 신청 없음 건수 <span class="small muted">(자동)</span><input type="number" min="0" step="1" inputmode="numeric" id="receiptNoneCount" value="0" readonly></label>
         <label>현금영수증 신청 없음 금액 <span class="small muted">(자동)</span><input type="number" min="0" step="1" inputmode="numeric" id="receiptNoneAmount" value="0" readonly></label>
         <label>더 들어온 금액(과오납)<input type="number" min="0" step="1" inputmode="numeric" id="overpaymentAmount" value="0" required></label>
@@ -91,21 +104,16 @@
     </div>
 
     <div class="card">
-      <h2>🖨️ 인쇄용 안내판</h2>
-      <div class="toolbar"><a href="../assets/festival/solar-fan-open-a4.pdf" target="_blank" rel="noopener">체험 안내</a><a href="../assets/festival/solar-fan-closed-a4.pdf" target="_blank" rel="noopener">체험 마감</a><a href="../assets/festival/solar-power-flow-a4.pdf?v=20260916-2" target="_blank" rel="noopener">태양광 발전 원리</a></div>
-    </div>
-
-    <div class="card">
       <h2 id="countTitle">현금영수증 신청 내역</h2>
       <p>은행 입금 내역을 확인한 뒤 현금영수증을 발급해 주세요. 실제 발급을 마친 건만 ‘발급 완료’로 표시합니다.</p>
       <p class="small muted">입금 자동 확인·현금영수증 자동 발급 기능은 아닙니다. 신청 정보는 신청일부터 90일 후 삭제됩니다.</p>
       <div class="toolbar"><button type="button" id="refreshReceipts" class="secondary compact">신청 새로고침</button><button type="button" id="exportCsv" class="secondary compact">신청 내역 CSV 다운로드</button></div>
       <p id="adminStatus" role="status" class="status"></p>
-      <div class="table-wrap"><table><thead><tr><th>신청 일시</th><th>입금자명</th><th>입금액</th><th>전화번호</th><th>처리</th></tr></thead><tbody id="receiptRows"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>신청 일시</th><th>행사</th><th>입금자명</th><th>입금액</th><th>전화번호</th><th>처리</th></tr></thead><tbody id="receiptRows"></tbody></table></div>
       <div class="toolbar"><button type="button" class="secondary compact" id="previous" hidden>이전 100건</button><button type="button" class="secondary compact" id="next" hidden>다음 100건</button></div>
     </div>
   </section>
 </main>
-<script src="festival_receipts.js?v=2.0.3"></script>
+<script src="festival_receipts.js?v=2.1.0"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-/* v2.0.3 - Auto-calculate and reconcile cash-receipt allocations. */
+/* v2.1.0 - Event print context, discounts and immediate receipt reconciliation. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -28,9 +28,11 @@
   let receipts = [];
   let receiptTotal = 0;
   let inventory = { items: [], sales: [], movements: [] };
+  let eventContext = { events: [], sale_links: [], receipt_links: [] };
   let editable = false;
   let operationBusy = false;
   let receiptBusy = false;
+  let receiptAmountEdited = false;
 
   function setOperationStatus(message, error = false) {
     $('operationStatus').textContent = message || '';
@@ -45,10 +47,13 @@
     if (message.includes('INVALID_SALE_TOTAL')) return '판매액·수납액·현금영수증 구분 합계를 다시 확인해 주세요.';
     if (message.includes('INVALID_DEPOSIT_AMOUNT')) return '입금 처리할 수 있는 현금 잔액을 초과했습니다.';
     if (message.includes('INVALID_RECEIPT_COUNT')) return '현금영수증 발급 건수는 0건부터 판매 수량까지 입력할 수 있습니다.';
+    if (message.includes('INVALID_RECEIPT_AMOUNT')) return '현금영수증 발급 금액을 실제 매출액 안에서 확인해 주세요.';
     if (message.includes('LINKED_RECEIPT_EXCEEDS_ALLOCATION')) return '이미 발급 완료로 연결된 현금영수증보다 적게 바꿀 수 없습니다. 먼저 해당 신청을 미처리로 되돌려 주세요.';
     if (message.includes('RECEIPT_ALLOCATION_EXCEEDED')) return '해당 매출에 남아 있는 `신청 없음` 금액보다 신청액이 큽니다.';
     if (message.includes('RECEIPT_AMOUNT_NOT_MATCHED')) return '신청 금액과 해당 매출의 개당 판매가가 맞지 않습니다.';
     if (message.includes('SALE_LINK_REQUIRED') || message.includes('SALE_NOT_FOUND')) return '현금영수증을 연결할 등록 매출을 선택해 주세요.';
+    if (message.includes('EVENT_MISMATCH')) return '현금영수증 신청 행사와 선택한 매출 행사가 다릅니다.';
+    if (message.includes('EVENT_NOT_FOUND') || message.includes('INVALID_EVENT')) return '행사명과 날짜를 확인해 주세요.';
     if (message.includes('결산에 포함')) return message;
     return '처리하지 못했습니다. 입력값과 로그인 상태를 확인하고 다시 시도해 주세요.';
   }
@@ -64,6 +69,22 @@
     if (result.error) throw new Error(result.error.message);
     return result.data;
   }
+
+  async function eventRpc(action, data = {}) {
+    const result = await client.rpc('festival_events_admin', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  async function registerSaleRpc(data = {}) {
+    const result = await client.rpc('festival_cash_sale_register_v2', { p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  const saleLink = (saleId) => (eventContext.sale_links || []).find((row) => row.sale_id === saleId) || null;
+  const receiptLink = (receiptId) => (eventContext.receipt_links || []).find((row) => row.receipt_id === receiptId) || null;
+  const eventById = (eventId) => (eventContext.events || []).find((row) => row.id === eventId) || null;
 
   function makeCell(value, className = '') {
     const cell = document.createElement('td');
@@ -87,6 +108,76 @@
     });
     if (activeItems.some((item) => item.id === previous)) select.value = previous;
     else if (activeItems.length === 1) select.value = activeItems[0].id;
+  }
+
+  function posterUrl(event, mode) {
+    const params = new URLSearchParams({
+      mode,
+      event: event.public_code,
+      name: event.event_name,
+      date: event.event_date
+    });
+    return `../festival_print.html?${params.toString()}`;
+  }
+
+  function makePosterLink(event, mode, label) {
+    const link = document.createElement('a');
+    link.className = 'button secondary compact';
+    link.href = posterUrl(event, mode);
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = label;
+    return link;
+  }
+
+  function renderEvents(preferredId = '') {
+    const events = Array.isArray(eventContext.events) ? eventContext.events : [];
+    const rows = $('eventRows');
+    rows.replaceChildren();
+    events.forEach((event) => {
+      const row = document.createElement('tr');
+      const links = document.createElement('td');
+      const toolbar = document.createElement('div');
+      toolbar.className = 'toolbar';
+      toolbar.append(
+        makePosterLink(event, 'open', '체험 안내'),
+        makePosterLink(event, 'closed', '체험 마감'),
+        makePosterLink(event, 'flow', '발전 원리')
+      );
+      links.append(toolbar);
+      row.append(makeCell(event.event_date), makeCell(event.event_name), links);
+      rows.append(row);
+    });
+    if (!events.length) {
+      const row = document.createElement('tr');
+      const cell = makeCell('등록된 행사가 없습니다. 위에서 행사명과 날짜를 먼저 등록해 주세요.');
+      cell.colSpan = 3;
+      row.append(cell);
+      rows.append(row);
+    }
+
+    const select = $('saleEvent');
+    const previous = preferredId || select.value;
+    select.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = events.length ? '행사를 선택해 주세요' : '먼저 행사를 등록해 주세요';
+    select.append(placeholder);
+    events.filter((event) => event.is_active).forEach((event) => {
+      const option = document.createElement('option');
+      option.value = event.id;
+      option.textContent = `${event.event_date} · ${event.event_name}`;
+      select.append(option);
+    });
+    if (events.some((event) => event.id === previous && event.is_active)) select.value = previous;
+    else if (events.length === 1 && events[0].is_active) select.value = events[0].id;
+  }
+
+  async function loadEventContext(preferredId = '') {
+    eventContext = await eventRpc('bootstrap');
+    renderEvents(preferredId);
+    renderSales();
+    renderReceipts();
   }
 
   function renderInventory() {
@@ -206,15 +297,33 @@
     countInput.step = '1';
     countInput.value = String(Number(sale.receipt_issued_count || 0));
     countInput.setAttribute('aria-label', '현금영수증 발급 건수 수정');
+    const amountLabel = document.createElement('label');
+    amountLabel.className = 'small';
+    amountLabel.textContent = '현금영수증 발급 금액';
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.min = '0';
+    amountInput.max = String(Number(sale.gross_amount || 0));
+    amountInput.step = '1';
+    amountInput.value = String(Number(sale.receipt_issued_amount || 0));
+    amountInput.setAttribute('aria-label', '현금영수증 발급 금액 수정');
+    amountLabel.append(amountInput);
     const preview = document.createElement('p');
     preview.className = 'small muted multiline';
     const updatePreview = () => {
       const quantity = Number(sale.quantity || 0);
       const issuedCount = Math.max(0, Math.min(quantity, Math.trunc(Number(countInput.value || 0))));
-      const issuedAmount = issuedCount * Number(sale.unit_price || 0);
+      const issuedAmount = Math.max(0, Math.min(Number(sale.gross_amount || 0), Math.trunc(Number(amountInput.value || 0))));
       preview.textContent = `발급 ${issuedCount.toLocaleString('ko-KR')}건 · ${money(issuedAmount)}\n신청 없음 ${(quantity - issuedCount).toLocaleString('ko-KR')}건 · ${money(Number(sale.gross_amount || 0) - issuedAmount)}`;
     };
-    countInput.addEventListener('input', updatePreview);
+    countInput.addEventListener('input', () => {
+      const count = Math.max(0, Math.min(Number(sale.quantity || 0), Math.trunc(Number(countInput.value || 0))));
+      amountInput.value = String(Number(sale.quantity || 0) > 0
+        ? Math.round(Number(sale.gross_amount || 0) * count / Number(sale.quantity || 0))
+        : 0);
+      updatePreview();
+    });
+    amountInput.addEventListener('input', updatePreview);
     updatePreview();
     const save = document.createElement('button');
     save.type = 'button';
@@ -227,14 +336,20 @@
     save.addEventListener('click', async () => {
       if (operationBusy) return;
       const issuedCount = Math.trunc(Number(countInput.value || 0));
+      const issuedAmount = Math.trunc(Number(amountInput.value || 0));
       if (issuedCount < 0 || issuedCount > Number(sale.quantity || 0)) {
         setOperationStatus('현금영수증 발급 건수를 판매 수량 안에서 입력해 주세요.', true);
+        return;
+      }
+      if (issuedAmount < 0 || issuedAmount > Number(sale.gross_amount || 0)) {
+        setOperationStatus('현금영수증 발급 금액을 실제 매출액 안에서 입력해 주세요.', true);
         return;
       }
       operationBusy = true;
       save.disabled = cancel.disabled = true;
       try {
-        await adjustRpc('update_sale_receipts', { sale_id: sale.id, issued_count: issuedCount });
+        const result = await adjustRpc('update_sale_receipts', { sale_id: sale.id, issued_count: issuedCount, issued_amount: issuedAmount });
+        applySaleAdjustment(result);
         setOperationStatus('현금영수증 구분과 회계전표 증빙 메모를 함께 수정했습니다.');
         await loadInventory();
       } catch (error) {
@@ -245,7 +360,7 @@
       }
     });
     label.append(countInput);
-    wrap.append(label, preview, save, cancel);
+    wrap.append(label, amountLabel, preview, save, cancel);
     cell.append(wrap);
     countInput.focus();
     countInput.select();
@@ -256,13 +371,16 @@
     rows.replaceChildren();
     const sales = Array.isArray(inventory.sales) ? inventory.sales : [];
     sales.forEach((sale) => {
+      const financial = saleLink(sale.id) || {};
+      const listAmount = Number(financial.list_amount ?? (Number(sale.quantity || 0) * Number(sale.unit_price || 0)));
+      const discountAmount = Number(financial.discount_amount || 0);
       const row = document.createElement('tr');
       const deposited = Number(sale.cash_deposited_amount || 0);
       const remaining = Math.max(0, Number(sale.cash_received || 0) - deposited);
       row.append(
         makeCell(sale.sale_date),
         makeCell(`${sale.event_name}\n${sale.item_name}`, 'multiline'),
-        makeCell(`${Number(sale.quantity).toLocaleString('ko-KR')}개 × ${money(sale.unit_price)}\n합계 ${money(sale.gross_amount)}`, 'multiline'),
+        makeCell(`${Number(sale.quantity).toLocaleString('ko-KR')}개 × ${money(sale.unit_price)}\n정가 ${money(listAmount)}${discountAmount ? `\n할인 -${money(discountAmount)}` : ''}\n매출 ${money(sale.gross_amount)}`, 'multiline'),
         makeCell(`계좌 ${money(sale.bank_received)}\n현금 ${money(sale.cash_received)}`, 'multiline')
       );
       const receiptCell = makeCell(`발급 ${Number(sale.receipt_issued_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_issued_amount)}\n신청 없음 ${Number(sale.receipt_not_requested_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_not_requested_amount)}`, 'multiline');
@@ -306,6 +424,16 @@
     }
   }
 
+  function applySaleAdjustment(result) {
+    if (!result?.sale_id) return;
+    const sale = (inventory.sales || []).find((row) => row.id === result.sale_id);
+    if (!sale) return;
+    ['receipt_issued_count','receipt_issued_amount','receipt_not_requested_count','receipt_not_requested_amount'].forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(result, key)) sale[key] = result[key];
+    });
+    renderSales();
+  }
+
   async function loadInventory() {
     inventory = await rpc('bootstrap');
     renderInventory();
@@ -316,43 +444,64 @@
   function updateSaleSummary() {
     const quantity = intValue('saleQuantity');
     const unitPrice = intValue('saleUnitPrice');
-    const gross = quantity * unitPrice;
+    const listAmount = quantity * unitPrice;
+    const discount = intValue('saleDiscount');
+    const gross = Math.max(0, listAmount - discount);
     const bank = intValue('saleBank');
     const cash = intValue('saleCash');
     const overpayment = intValue('overpaymentAmount');
     const issued = intValue('receiptIssuedAmount');
     const none = intValue('receiptNoneAmount');
-    const receivedOk = bank + cash === gross + overpayment;
+    const discountOk = discount <= listAmount;
+    const receivedOk = discountOk && bank + cash === gross + overpayment;
     const receiptOk = issued + none === gross;
-    $('saleSummary').textContent = `판매액 ${money(gross)} · 수납 ${money(bank + cash)}${overpayment ? ` (과오납 ${money(overpayment)} 포함)` : ''}\n현금영수증 구분 ${money(issued + none)} · ${receivedOk && receiptOk ? '합계가 맞습니다.' : '합계를 확인해 주세요.'}`;
+    $('saleSummary').textContent = `정가 ${money(listAmount)} · 할인 ${money(discount)} · 실제 매출 ${money(gross)}\n계좌 ${money(bank)} · 현장 현금 ${money(cash)}${overpayment ? ` · 과오납 ${money(overpayment)}` : ''}\n현금영수증 구분 ${money(issued + none)} · ${receivedOk && receiptOk ? '합계가 맞습니다.' : '합계를 확인해 주세요.'}`;
     $('saleSummary').classList.toggle('invalid', !(receivedOk && receiptOk));
-    return { quantity, unitPrice, gross, bank, cash, overpayment, issued, none, valid: receivedOk && receiptOk };
+    return { quantity, unitPrice, listAmount, discount, gross, bank, cash, overpayment, issued, none, valid: receivedOk && receiptOk };
   }
 
-  function syncSaleReceiptAllocation() {
+  function syncCashReceived() {
+    const listAmount = intValue('saleQuantity') * intValue('saleUnitPrice');
+    const discount = intValue('saleDiscount');
+    const gross = Math.max(0, listAmount - discount);
+    const totalReceived = gross + intValue('overpaymentAmount');
+    const bank = intValue('saleBank');
+    $('saleCash').value = String(Math.max(0, totalReceived - bank));
+  }
+
+  function syncSaleReceiptAllocation(forceAmount = false) {
     const quantity = intValue('saleQuantity');
-    const unitPrice = intValue('saleUnitPrice');
+    const listAmount = quantity * intValue('saleUnitPrice');
+    const gross = Math.max(0, listAmount - intValue('saleDiscount'));
     const issuedInput = $('receiptIssuedCount');
     const enteredIssuedCount = intValue('receiptIssuedCount');
     const issuedCount = Math.min(quantity, enteredIssuedCount);
     issuedInput.max = String(quantity);
     if (enteredIssuedCount !== issuedCount) issuedInput.value = String(issuedCount);
-    $('receiptIssuedAmount').value = String(issuedCount * unitPrice);
+    $('receiptIssuedAmount').max = String(gross);
+    if (forceAmount || !receiptAmountEdited) {
+      $('receiptIssuedAmount').value = String(quantity > 0 ? Math.round(gross * issuedCount / quantity) : 0);
+    } else if (intValue('receiptIssuedAmount') > gross) {
+      $('receiptIssuedAmount').value = String(gross);
+    }
     $('receiptNoneCount').value = String(quantity - issuedCount);
-    $('receiptNoneAmount').value = String((quantity - issuedCount) * unitPrice);
+    $('receiptNoneAmount').value = String(Math.max(0, gross - intValue('receiptIssuedAmount')));
     return updateSaleSummary();
   }
 
-  ['saleBank','saleCash','overpaymentAmount'].forEach((id) => {
-    $(id).addEventListener('input', updateSaleSummary);
+  ['saleBank','overpaymentAmount'].forEach((id) => {
+    $(id).addEventListener('input', () => { syncCashReceived(); syncSaleReceiptAllocation(); });
   });
-  ['saleQuantity','saleUnitPrice','receiptIssuedCount'].forEach((id) => {
-    $(id).addEventListener('input', syncSaleReceiptAllocation);
+  ['saleQuantity','saleUnitPrice','saleDiscount'].forEach((id) => {
+    $(id).addEventListener('input', () => { syncCashReceived(); syncSaleReceiptAllocation(); });
   });
+  $('receiptIssuedCount').addEventListener('input', () => { receiptAmountEdited = false; syncSaleReceiptAllocation(true); });
+  $('receiptIssuedAmount').addEventListener('input', () => { receiptAmountEdited = true; syncSaleReceiptAllocation(); });
 
   $('saleForm').addEventListener('submit', async (event) => {
     event.preventDefault();
     if (operationBusy || !editable) return;
+    syncCashReceived();
     const summary = syncSaleReceiptAllocation();
     const overpaymentName = $('overpaymentName').value.trim();
     if (!summary.valid) return setOperationStatus('판매액·수납액·현금영수증 구분 합계를 맞춰 주세요.', true);
@@ -362,10 +511,11 @@
     const button = event.submitter;
     if (button) button.disabled = true;
     try {
-      await rpc('register_sale', {
-        request_key: crypto.randomUUID(), sale_date: $('saleDate').value,
-        event_name: $('eventName').value.trim(), item_id: $('saleItem').value,
-        quantity: summary.quantity, unit_price: summary.unitPrice,
+      const selectedEventId = $('saleEvent').value;
+      if (!selectedEventId) return setOperationStatus('행사를 먼저 선택해 주세요.', true);
+      await registerSaleRpc({
+        request_key: crypto.randomUUID(), event_id: selectedEventId, item_id: $('saleItem').value,
+        quantity: summary.quantity, unit_price: summary.unitPrice, discount_amount: summary.discount,
         bank_received: summary.bank, cash_received: summary.cash,
         receipt_issued_count: intValue('receiptIssuedCount'), receipt_issued_amount: summary.issued,
         receipt_not_requested_count: intValue('receiptNoneCount'), receipt_not_requested_amount: summary.none,
@@ -374,12 +524,37 @@
       });
       setOperationStatus('매출·회계전표·재고 출고를 함께 저장했습니다.');
       event.currentTarget.reset();
-      $('saleDate').value = kstToday();
-      ['saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
+      $('saleEvent').value = selectedEventId;
+      ['saleDiscount','saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
+      receiptAmountEdited = false;
       syncSaleReceiptAllocation();
       await loadInventory();
     } catch (error) {
       setOperationStatus(readableError(error), true);
+    } finally {
+      operationBusy = false;
+      if (button) button.disabled = false;
+    }
+  });
+
+  $('eventForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (operationBusy || !editable) return;
+    operationBusy = true;
+    const button = event.submitter;
+    if (button) button.disabled = true;
+    try {
+      const result = await eventRpc('create', {
+        event_date: $('newEventDate').value,
+        event_name: $('newEventName').value.trim()
+      });
+      $('eventStatus').classList.remove('error');
+      $('eventStatus').textContent = '행사를 등록했습니다. 매출 입력과 행사별 인쇄물에서 선택할 수 있습니다.';
+      $('newEventName').value = '';
+      await loadEventContext(result?.event?.id || '');
+    } catch (error) {
+      $('eventStatus').textContent = readableError(error);
+      $('eventStatus').classList.add('error');
     } finally {
       operationBusy = false;
       if (button) button.disabled = false;
@@ -431,10 +606,17 @@
 
   function receiptSaleCandidates(item) {
     const amount = Number(item.amount || 0);
+    const link = receiptLink(item.id);
+    const eventId = link?.event_id || null;
+    const requestedQuantity = Number(link?.item_quantity || 0);
     return (Array.isArray(inventory.sales) ? inventory.sales : []).filter((sale) => {
       const unitPrice = Number(sale.unit_price || 0);
-      const units = unitPrice > 0 && amount % unitPrice === 0 ? amount / unitPrice : 0;
+      const units = requestedQuantity > 0
+        ? requestedQuantity
+        : (unitPrice > 0 && amount % unitPrice === 0 ? amount / unitPrice : 0);
+      const saleEventId = saleLink(sale.id)?.event_id || null;
       return units > 0
+        && (!eventId || saleEventId === eventId)
         && Number(sale.receipt_not_requested_count || 0) >= units
         && Number(sale.receipt_not_requested_amount || 0) >= amount;
     });
@@ -449,7 +631,15 @@
     rows.replaceChildren();
     receipts.forEach((item) => {
       const row = document.createElement('tr');
-      row.append(makeCell(dateTime(item.created_at)), makeCell(item.depositor_name), makeCell(money(item.amount)), makeCell(item.phone));
+      const link = receiptLink(item.id);
+      const linkedEvent = eventById(link?.event_id);
+      row.append(
+        makeCell(dateTime(item.created_at)),
+        makeCell(linkedEvent ? `${linkedEvent.event_date}\n${linkedEvent.event_name}` : '행사 미지정', 'multiline'),
+        makeCell(item.depositor_name),
+        makeCell(money(item.amount)),
+        makeCell(item.phone)
+      );
       const cell = document.createElement('td');
       const button = document.createElement('button');
       button.type = 'button';
@@ -515,14 +705,21 @@
           receiptBusy = true;
           yes.disabled = no.disabled = true;
           try {
-            await adjustRpc(item.issued_at ? 'mark_pending' : 'mark_issued', {
+            const wasIssued = Boolean(item.issued_at);
+            const result = await adjustRpc(wasIssued ? 'mark_pending' : 'mark_issued', {
               id: item.id,
               ...(selectedSaleId ? { sale_id: selectedSaleId } : {})
             });
-            await Promise.all([loadInventory(), loadReceipts()]);
-            $('adminStatus').textContent = item.issued_at
+            applySaleAdjustment(result);
+            item.issued_at = wasIssued ? null : new Date().toISOString();
+            renderReceipts();
+            $('adminStatus').textContent = wasIssued
               ? '미처리 상태와 연결 매출의 현금영수증 구분을 함께 되돌렸습니다.'
-              : '발급 완료 상태와 연결 매출의 현금영수증 구분을 함께 저장했습니다.';
+              : `발급 완료로 저장했습니다. 위 매출도 발급 ${Number(result?.receipt_issued_count || 0).toLocaleString('ko-KR')}건으로 바뀌었고 회계 증빙 메모도 함께 정리했습니다.`;
+            const selectedEventId = $('saleEvent').value;
+            await loadInventory();
+            await loadEventContext(selectedEventId);
+            await loadReceipts();
           } catch (error) {
             $('adminStatus').textContent = readableError(error);
             no.disabled = false;
@@ -590,7 +787,10 @@
         all.push(...data.items);
       }
       const cell = (value) => `"${String(value ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
-      const lines = [['신청일시','입금자명','입금액','전화번호','발급상태'], ...all.map((item) => [dateTime(item.created_at),item.depositor_name,item.amount,`'${item.phone}`,item.issued_at ? '발급 완료' : '미처리'])];
+      const lines = [['신청일시','행사일','행사명','입금자명','입금액','전화번호','발급상태'], ...all.map((item) => {
+        const linkedEvent = eventById(receiptLink(item.id)?.event_id);
+        return [dateTime(item.created_at),linkedEvent?.event_date || '',linkedEvent?.event_name || '',item.depositor_name,item.amount,`'${item.phone}`,item.issued_at ? '발급 완료' : '미처리'];
+      })];
       const url = URL.createObjectURL(new Blob([`\uFEFF${lines.map((row) => row.map(cell).join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -614,8 +814,9 @@
   });
 
   (async () => {
-    $('saleDate').value = kstToday();
+    $('newEventDate').value = kstToday();
     $('movementDate').value = kstToday();
+    syncCashReceived();
     syncSaleReceiptAllocation();
     try {
       const { data, error } = await client.auth.getUser();
@@ -630,9 +831,12 @@
       $('accessStatus').textContent = editable ? '' : '조회 권한으로 열었습니다. 등록과 상태 변경은 회계 등록 권한이 필요합니다.';
       $('adminPanel').hidden = false;
       $('saleForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
+      $('eventForm').querySelectorAll('input,button').forEach((element) => { element.disabled = !editable; });
       $('itemForm').querySelectorAll('input,button').forEach((element) => { element.disabled = !editable; });
       $('movementForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
-      await Promise.all([loadInventory(), reloadReceipts()]);
+      await loadInventory();
+      await loadEventContext();
+      await reloadReceipts();
     } catch (error) {
       $('accessStatus').textContent = readableError(error);
     }

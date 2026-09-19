@@ -1,8 +1,9 @@
-/* v1.0.0 - No personal data in URLs, logs or browser persistence. */
+/* v1.1.0 - Public event code only; no personal data in URLs, logs or persistence. */
 (() => {
  'use strict';
  const endpoint='https://ifdqlwxgqgsvnawmhlfc.supabase.co/functions/v1/festival-receipt';
  const publishable='sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+ const eventCode=(()=>{const match=String(globalThis.location?.search||'').match(/(?:^|[?&])event=([0-9a-f]{20})(?:&|$)/);return match?match[1]:'';})();
  const el=id=>document.getElementById(id);
  const quantity=el('quantity'), amount=el('receiptAmount'), form=el('receiptForm');
  let busy=false, amountEdited=false, lastPayload='', key='';
@@ -12,7 +13,7 @@
  el('copyAccount').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('131022855509');say('copyStatus','계좌번호를 복사했습니다.');}catch{el('manualCopy').hidden=false;el('accountText').focus();el('accountText').select();say('copyStatus','아래 계좌번호를 직접 복사해 주세요.');}});
  form.addEventListener('submit',async event=>{
   event.preventDefault();if(busy||!form.reportValidity())return;
-  const payload={name:el('depositorName').value.trim(),amount:Number(amount.value),phone:el('receiptPhone').value.trim(),consent:el('receiptConsent').checked,website:el('website').value};
+  const payload={name:el('depositorName').value.trim(),amount:Number(amount.value),quantity:Number(quantity.value),phone:el('receiptPhone').value.trim(),consent:el('receiptConsent').checked,website:el('website').value,eventCode};
   if(!/^0\d{8,10}$/.test(payload.phone.replace(/[\s-]/g,''))){say('receiptStatus','전화번호를 확인해 주세요.',true);el('receiptPhone').focus();return;}
   if(!payload.name||/[<>\x00-\x1f\x7f]/.test(payload.name)){say('receiptStatus','입금자명을 확인해 주세요.',true);return;}
   const serialized=JSON.stringify(payload);
