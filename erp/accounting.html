@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.114 | Change: 2026-09-19 - Include on-hand cash in single-entry festival sales. -->
+<!-- Version: v1.0.115 | Change: 2026-09-19 - Show on-hand cash and internal cash transfers in single-entry history. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.114 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.115 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -8857,6 +8857,8 @@ function buildSingleEntryHistory(rows) {
         let debitTotal = 0;
         let creditTotal = 0;
         let cashDelta = 0;
+        let cashDebitTotal = 0;
+        let cashCreditTotal = 0;
         let date = '';
         let desc = '';
         let operator = '';
@@ -8873,18 +8875,22 @@ function buildSingleEntryHistory(rows) {
             creditTotal += credit;
 
             if (isCashLikeAccount(account)) {
+                cashDebitTotal += debit;
+                cashCreditTotal += credit;
                 cashDelta += (debit - credit);
             }
         });
 
-        // 단식 보기는 실제 현금흐름만 표시하고 내부 재분류는 복식 원장에서 확인한다.
-        if (cashDelta === 0) return;
+        // 현금성 계정이 전혀 없는 결산·재분류만 제외한다. 현금↔통장 이동은 대체로 표시한다.
+        if (cashDebitTotal === 0 && cashCreditTotal === 0) return;
 
         let flow = '대체';
         if (cashDelta > 0) flow = '입금';
         else if (cashDelta < 0) flow = '지출';
 
-        const amount = Math.abs(cashDelta) > 0 ? Math.abs(cashDelta) : Math.max(debitTotal, creditTotal);
+        const amount = flow === '대체'
+            ? Math.max(cashDebitTotal, cashCreditTotal)
+            : Math.abs(cashDelta);
         const inAmount = cashDelta > 0 ? cashDelta : 0;
         const outAmount = cashDelta < 0 ? Math.abs(cashDelta) : 0;
         const transferAmount = flow === '대체' ? amount : 0;
