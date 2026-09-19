@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.110 | Change: 2026-09-19 - Save the exact generated closing report for general-assembly booklets. -->
+<!-- Version: v1.0.111 | Change: 2026-09-19 - Show only power plants registered for the current cooperative. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.110 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.111 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -988,7 +988,7 @@
             <option value="영업외수익">영업외수익</option>
         </select>
     <label class="small text-muted mb-1">중분류</label><select class="form-select mb-2" id="addCategorySelect"></select><div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="chkManualCat" onchange="toggleManualCat()"><label class="form-check-label small" for="chkManualCat">직접 입력</label></div><input type="text" class="form-control mb-3 hidden" id="manualCatInput" placeholder="새 중분류명 입력">
-    <label class="small text-muted mb-1">사용처</label><select class="form-select mb-3" id="addUsageSelect"><option value="전체">전체</option><option value="본사">본사</option><option value="1호기">1호기</option><option value="2호기">2호기</option></select>
+    <label class="small text-muted mb-1">사용처</label><select class="form-select mb-3" id="addUsageSelect"><option value="전체">전체</option><option value="본사">본사</option><option value="발전소">발전소</option></select>
     <label class="small text-muted mb-1">새 항목명</label><input type="text" class="form-control mb-3" id="addNewItemName" placeholder="예: 야근식대">
 <div class="mb-3">
     <label class="form-label d-block fw-bold">항목 속성 (다중 선택 가능)</label>
@@ -2029,7 +2029,7 @@ window.onload = async function() {
     });
 
     // 데이터 로드 (순서 중요: 프로젝트 -> 마스터 -> 카드 -> 대시보드)
-    await loadProjects();
+    await loadProjects(accountingRuntimeGate.runtime.coop_id);
     await Promise.all([ loadMasterData(), loadCards(), refreshDashboard() ]);
     loadPrepayExpenseAccounts();
     loadReceivableIncomeAccounts();
@@ -5305,20 +5305,45 @@ function buildCounterOptionsHtml() {
 
 // 2. 데이터 로드 함수들
 
-// [신규] 프로젝트 목록 로드 (DB 연동)
-async function loadProjects() {
-    const { data, error } = await _supabase.from('ref_projects').select('*').order('id');
+// 현재 조합에 등록된 발전소만 회계 구분으로 표시합니다.
+async function loadProjects(coopId) {
     const sel = document.getElementById("projectSelect");
-    sel.innerHTML = "";
+    if (!sel) return;
 
-    if (data && data.length > 0) {
-        data.forEach(p => sel.add(new Option(p.project_name, p.project_name)));
-    } else {
-        // 데이터가 없으면 기본값
-        sel.add(new Option("본사", "본사"));
-        sel.add(new Option("1호기", "1호기"));
-        sel.add(new Option("2호기", "2호기"));
+    const previousValue = String(sel.value || '').trim();
+    sel.innerHTML = "";
+    sel.add(new Option("본사", "본사"));
+
+    const normalizedCoopId = String(coopId || '').trim();
+    if (!normalizedCoopId) {
+        console.warn('[Accounting] 현재 조합을 확인하지 못해 본사만 표시합니다.');
+        sel.value = "본사";
+        return;
     }
+
+    const { data, error } = await _supabase
+        .from('site_power_plants')
+        .select('name, display_order, coop_id')
+        .eq('coop_id', normalizedCoopId)
+        .order('display_order', { ascending: true })
+        .order('name', { ascending: true });
+
+    if (error) {
+        console.warn('[Accounting] 발전소 목록을 불러오지 못해 본사만 표시합니다.', error.message);
+        sel.value = "본사";
+        return;
+    }
+
+    const registeredNames = new Set();
+    (Array.isArray(data) ? data : []).forEach((plant) => {
+        const name = String(plant?.name || '').trim();
+        if (!name || registeredNames.has(name)) return;
+        registeredNames.add(name);
+        sel.add(new Option(name, name));
+    });
+
+    const canRestorePrevious = Array.from(sel.options).some((option) => option.value === previousValue);
+    sel.value = canRestorePrevious ? previousValue : "본사";
 }
 
 // [수정] 마스터 데이터 로드 (SpecialType, Tax_Free, Usage 확인)
