@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.111 | Change: 2026-09-19 - Show only power plants registered for the current cooperative. -->
+<!-- Version: v1.0.112 | Change: 2026-09-19 - Give every sun-village cooperative the full accounting workflow. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.111 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.112 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -44,12 +44,6 @@
     .text-cash { color: #0d6efd; font-weight: bold; }
 
     .btn-report { width: 100%; font-weight: bold; border-radius: 10px; }
-	    .sun-village-accounting-mode { border: 1px solid #b7d7c2; border-left: 5px solid #247244; border-radius: 12px; background: #f0f8f2; padding: 13px 15px; }
-	    .sun-village-accounting-mode strong { color: #185b33; }
-	    .sun-village-accounting-mode p { margin: 4px 0 0; color: #465a4d; }
-	    html[data-theme="dark"] .sun-village-accounting-mode { background: #193425; border-color: #39734c; }
-	    html[data-theme="dark"] .sun-village-accounting-mode strong { color: #a9e9ba; }
-	    html[data-theme="dark"] .sun-village-accounting-mode p { color: #d1e3d6; }
 	    .readonly-input { background-color: #f8f9fa; cursor: pointer; }
 	    .history-mode .btn { min-width: 94px; }
         .history-plain-description { white-space: pre-line; overflow-wrap: anywhere; }
@@ -126,10 +120,6 @@
     <strong>회계관리는 PC 기준 화면입니다.</strong><br>
     모바일에서는 잔고·최근 전표 확인 정도만 권장하고, 전표 입력·자동연동 정리·결산 출력은 PC에서 처리하는 흐름으로 정리합니다.
   </div>
-  <section class="sun-village-accounting-mode mb-3 no-print" id="sunVillageAccountingMode" hidden aria-live="polite">
-    <strong id="sunVillageAccountingModeTitle">회계 처리 방식</strong>
-    <p class="small" id="sunVillageAccountingModeDescription"></p>
-  </section>
   <div class="d-flex gap-2 mb-2 no-print">
     <div class="stat-card bg-rev"><div>매출</div><div class="fw-bold" id="valRev">0</div></div>
     <div class="stat-card bg-exp"><div>비용</div><div class="fw-bold" id="valExp">0</div></div>
@@ -140,14 +130,14 @@
         <div>💰 통장 잔고 (보통예금)</div>
         <div class="text-cash fs-5" id="valCash">0</div>
     </div>
-    <div class="sub-card" id="vatSummaryCard" data-accounting-mode-min="shared" role="button" tabindex="0" onclick="openVatSummaryDetail()" onkeydown="handleVatSummaryCardKeydown(event)" style="cursor: pointer;">
+    <div class="sub-card" id="vatSummaryCard" role="button" tabindex="0" onclick="openVatSummaryDetail()" onkeydown="handleVatSummaryCardKeydown(event)" style="cursor: pointer;">
         <div id="vatCardTitle">🧾 이번 분기 부가세</div>
         <div class="text-vat fs-5" id="valVat">0</div>
         <div class="small text-muted mt-1" id="valVatHint">클릭하면 반기 누계를 확인합니다.</div>
     </div>
   </div>
 
-  <div class="input-group mb-4 no-print shadow-sm" data-accounting-mode-min="shared">
+  <div class="input-group mb-4 no-print shadow-sm">
       <select class="form-select" id="reportYearSelect" style="max-width: 120px; font-weight:bold;">
           </select>
       <button class="btn btn-outline-dark btn-report flex-fill" type="button" onclick="printReport()">
@@ -157,7 +147,7 @@
 
   <ul class="nav nav-tabs mb-4 no-print" id="accTab" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabForm">📝 전표입력</button></li>
-    <li class="nav-item" data-accounting-mode-min="shared"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPrepay">💳 선급·미수 관리</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPrepay">💳 선급·미수 관리</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 자동연동</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 최근전표</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 설명</button></li>
@@ -205,7 +195,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-2">
   <label class="small text-muted fw-bold">2. 계정 유형</label>
-          <div class="form-check form-switch m-0" data-accounting-mode-min="self">
+          <div class="form-check form-switch m-0">
     <input class="form-check-input" type="checkbox" id="advModeToggle" onchange="toggleAdvancedMode()">
     <label class="form-check-label small" for="advModeToggle">고급모드</label>
   </div>
@@ -236,7 +226,7 @@
           <div class="input-group">
             <input type="text" class="form-control readonly-input ime-kr" id="displayAccount" placeholder="선택하세요 (유형에 맞는 항목만 표시됨)" readonly onclick="openSelModal()">
             <button class="btn btn-secondary" type="button" onclick="openSelModal()">🔍</button>
-            <button class="btn btn-outline-secondary" type="button" data-accounting-mode-min="self" onclick="openAddModal()" aria-label="계정과목 추가">➕</button>
+            <button class="btn btn-outline-secondary" type="button" onclick="openAddModal()" aria-label="계정과목 추가">➕</button>
           </div>
 
           <input type="hidden" id="hiddenItem">
@@ -266,7 +256,7 @@
         <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm mt-4" id="submitBtn">저장하기</button>
       </form>
     </div>
-    <div class="tab-pane fade" id="tabPrepay" data-accounting-mode-min="shared">
+    <div class="tab-pane fade" id="tabPrepay">
       <div class="card p-3 border-start border-5 border-primary bg-light mb-3">
         <div class="d-flex justify-content-between align-items-center">
           <div>
@@ -518,7 +508,7 @@
 	               <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">실행</button>
 	             </div>
 	          </div>
-          <div class="card p-3 border-start border-5 border-success-subtle bg-white" data-accounting-mode-min="shared">
+          <div class="card p-3 border-start border-5 border-success-subtle bg-white">
              <div class="d-flex justify-content-between align-items-center">
                <div>
                  <h6 class="fw-bold mb-1">💳 체크카드 캐시백</h6>
@@ -530,7 +520,7 @@
                </div>
              </div>
           </div>
-          <div class="card p-3 border-start border-5 border-warning-subtle bg-white" data-accounting-mode-min="shared">
+          <div class="card p-3 border-start border-5 border-warning-subtle bg-white">
              <div class="d-flex justify-content-between align-items-center mb-2">
                <div>
                  <h6 class="fw-bold mb-1">🧩 전자결재 미분류 재분류</h6>
@@ -540,31 +530,31 @@
              </div>
              <div id="approvalUnclassifiedList" class="small text-muted">목록 로딩 전입니다. 새로고침을 눌러주세요.</div>
           </div>
-	          <div class="card p-3 border-start border-5 border-success bg-light" data-accounting-mode-min="shared">
+	          <div class="card p-3 border-start border-5 border-success bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💰 출자금 연동</h6><small class="text-muted">신규 입금 내역 전표 처리</small></div>
                <button class="btn btn-success btn-sm text-white" onclick="confirmSync('capital')">실행</button>
              </div>
           </div>
-          <div class="card p-3 border-start border-5 bg-light" data-accounting-mode-min="shared" style="border-color:#e91e63 !important;">
+          <div class="card p-3 border-start border-5 bg-light" style="border-color:#e91e63 !important;">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💖 기부금 연동</h6><small class="text-muted">기부금 입금 내역 전표 처리</small></div>
                <button class="btn btn-sm text-white" style="background:#e91e63;" onclick="confirmSync('donation')">실행</button>
              </div>
           </div>
-          <div class="card p-3 border-start border-5 border-primary bg-light" data-accounting-mode-min="shared">
+          <div class="card p-3 border-start border-5 border-primary bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💸 과거 배당 원장 연동</h6><small class="text-muted">기존 수기 배당 원장만 처리합니다. 새 배당 회차는 승인된 배당금 지출결의를 전자결재 연동에서 반영하세요.</small></div>
                <button class="btn btn-primary btn-sm text-white" onclick="confirmSync('dividend')">실행</button>
              </div>
           </div>
-          <div class="card p-3 border-start border-5 border-secondary bg-light" data-accounting-mode-min="self">
+          <div class="card p-3 border-start border-5 border-secondary bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">📉 감가상각 실행</h6><small class="text-muted">고정자산 대장 기준 (연 1회)</small></div>
                <button class="btn btn-secondary btn-sm text-white" onclick="confirmSync('depreciation')">실행</button>
              </div>
           </div>
-<div class="card p-3 border-start border-5 border-danger bg-light" data-accounting-mode-min="self">
+<div class="card p-3 border-start border-5 border-danger bg-light">
     <div class="d-flex justify-content-between align-items-center">
         <div>
             <h6 class="fw-bold mb-1">📅 연말결산 (손익마감)</h6>
@@ -587,7 +577,7 @@
 	      <div class="d-flex justify-content-between align-items-center mb-3">
 	          <div class="btn-group btn-group-sm history-mode" role="group">
 	              <button class="btn btn-primary" id="historySingleBtn" onclick="setHistoryView('single')">단식 보기</button>
-	              <button class="btn btn-outline-primary" id="historyDoubleBtn" data-accounting-mode-min="shared" onclick="setHistoryView('double')">복식 원장</button>
+	              <button class="btn btn-outline-primary" id="historyDoubleBtn" onclick="setHistoryView('double')">복식 원장</button>
 	          </div>
 	          <small class="text-muted" id="historyMeta"></small>
 	      </div>
@@ -1112,13 +1102,6 @@ let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
 let historyViewMode = 'single';
-let sunVillageAccountingPolicy = {
-    enabled: false,
-    accounting_operation_mode: 'self',
-    allow_reports: true,
-    allow_specialized_entries: true,
-    allow_advanced_accounting: true
-};
 let approvalUnclassifiedIndex = new Map();
 let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
@@ -1601,88 +1584,6 @@ function hasAccountingRoleFallback(permissionKey) {
     return role === 'admin' || role === 'admin_all';
 }
 
-const SUN_VILLAGE_ACCOUNTING_MODE_RANK = Object.freeze({ outsourced: 1, shared: 2, self: 3 });
-const SUN_VILLAGE_ACCOUNTING_MODE_COPY = Object.freeze({
-    outsourced: {
-        title: '🏢 회계 처리 방식 · 회계사무실 위탁',
-        description: '승인된 수입·지출과 지급 내역을 중심으로 기록합니다. 보고서·계정과목 변경·감가상각·결산 기능은 표시하지 않습니다.'
-    },
-    shared: {
-        title: '🤝 회계 처리 방식 · 공동 처리',
-        description: '조합에서 기본 장부와 보고서를 관리하고, 감가상각과 결산은 회계사무실과 나눠 처리합니다.'
-    },
-    self: {
-        title: '📚 회계 처리 방식 · 자체 회계',
-        description: '계정과목부터 감가상각과 결산까지 모든 회계 기능을 조합에서 직접 사용합니다.'
-    }
-});
-
-function sunVillageAccountingAllows(minimumMode) {
-    if (!sunVillageAccountingPolicy.enabled) return true;
-    const current = SUN_VILLAGE_ACCOUNTING_MODE_RANK[sunVillageAccountingPolicy.accounting_operation_mode] || 1;
-    const minimum = SUN_VILLAGE_ACCOUNTING_MODE_RANK[minimumMode] || 1;
-    return current >= minimum;
-}
-
-function showSunVillageAccountingRestriction(minimumMode) {
-    const current = SUN_VILLAGE_ACCOUNTING_MODE_COPY[sunVillageAccountingPolicy.accounting_operation_mode]
-        || SUN_VILLAGE_ACCOUNTING_MODE_COPY.outsourced;
-    const needed = minimumMode === 'self' ? '자체 회계' : '공동 처리 또는 자체 회계';
-    showAlert('회계 처리 방식 확인', `${current.title.replace(/^\S+\s*/, '')}에서는 이 기능을 사용하지 않습니다.\n햇빛소득마을 운영관리에서 ${needed}(으)로 변경하면 기존 자료를 유지한 채 기능이 열립니다.`);
-}
-
-function applySunVillageAccountingOperationMode() {
-    const banner = document.getElementById('sunVillageAccountingMode');
-    if (!sunVillageAccountingPolicy.enabled) {
-        if (banner) banner.hidden = true;
-        return;
-    }
-
-    const mode = SUN_VILLAGE_ACCOUNTING_MODE_RANK[sunVillageAccountingPolicy.accounting_operation_mode]
-        ? sunVillageAccountingPolicy.accounting_operation_mode
-        : 'outsourced';
-    sunVillageAccountingPolicy.accounting_operation_mode = mode;
-    document.body.dataset.sunVillageAccountingMode = mode;
-
-    const copy = SUN_VILLAGE_ACCOUNTING_MODE_COPY[mode];
-    const title = document.getElementById('sunVillageAccountingModeTitle');
-    const description = document.getElementById('sunVillageAccountingModeDescription');
-    if (title) title.textContent = copy.title;
-    if (description) description.textContent = copy.description;
-    if (banner) banner.hidden = false;
-
-    document.querySelectorAll('[data-accounting-mode-min]').forEach((element) => {
-        const allowed = sunVillageAccountingAllows(String(element.dataset.accountingModeMin || 'outsourced'));
-        element.classList.toggle('hidden', !allowed);
-        element.setAttribute('aria-hidden', allowed ? 'false' : 'true');
-    });
-
-    if (!sunVillageAccountingAllows('self')) {
-        const advancedToggle = document.getElementById('advModeToggle');
-        if (advancedToggle) advancedToggle.checked = false;
-        document.querySelectorAll('.adv-only').forEach((element) => element.classList.add('hidden'));
-    }
-    if (!sunVillageAccountingAllows('shared')) historyViewMode = 'single';
-}
-
-async function loadSunVillageAccountingOperationMode() {
-    try {
-        const { data, error } = await _supabase.rpc('sun_village_accounting_operation_context');
-        if (error) throw error;
-        if (data && typeof data === 'object') {
-            sunVillageAccountingPolicy = {
-                ...sunVillageAccountingPolicy,
-                ...data,
-                enabled: data.enabled === true
-            };
-        }
-    } catch (error) {
-        console.warn('[Accounting] 햇빛소득마을 회계 처리 방식 조회 실패:', error?.message || error);
-        sunVillageAccountingPolicy.enabled = false;
-    }
-    applySunVillageAccountingOperationMode();
-}
-
 function formatAccountingKstDate(value = new Date(), fallback = '') {
     const d = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(d.getTime())) return fallback;
@@ -1985,8 +1886,6 @@ window.onload = async function() {
         redirectUrl: 'index.html'
     });
     if (!accountingRuntimeGate.ok) return;
-
-    await loadSunVillageAccountingOperationMode();
 
     const insuranceSettingResult = await loadInsuranceAutoDebitDiscountSetting();
     if (insuranceSettingResult.error) {
@@ -5739,7 +5638,6 @@ function resolveCashbackIncomeAccount() {
 
 function openCardCashbackModal() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
-    if (!sunVillageAccountingAllows('shared')) return showSunVillageAccountingRestriction('shared');
     const incomeAccount = resolveCashbackIncomeAccount();
     if (!incomeAccount.item) {
         return showAlert('오류', '캐시백 잡이익 계정을 찾지 못했습니다. ac_master에 영업외수익/잡이익 계정을 확인하세요.');
@@ -5758,7 +5656,6 @@ function openCardCashbackModal() {
 
 async function submitCardCashback() {
     if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
-    if (!sunVillageAccountingAllows('shared')) return showSunVillageAccountingRestriction('shared');
     const fDate = String(document.getElementById('cashbackDate')?.value || '').trim();
     const amount = Math.round(Number(document.getElementById('cashbackAmount')?.value || 0));
     const cardAlias = String(document.getElementById('cashbackCardSelect')?.value || '').trim();
@@ -5883,12 +5780,6 @@ async function refreshDashboard() {
 // 4. 모달 및 UI 제어 로직
 
 function toggleAdvancedMode() {
-    if (!sunVillageAccountingAllows('self')) {
-        const toggle = document.getElementById('advModeToggle');
-        if (toggle) toggle.checked = false;
-        document.querySelectorAll('.adv-only').forEach(el => el.classList.add('hidden'));
-        return;
-    }
     const adv = document.getElementById("advModeToggle").checked;
     document.querySelectorAll(".adv-only").forEach(el => el.classList.toggle("hidden", !adv));
 
@@ -6458,7 +6349,6 @@ function getSelectedPrepayVendor() {
 }
 
 async function submitPrepayDeduction() {
-    if (!sunVillageAccountingAllows('shared')) return showSunVillageAccountingRestriction('shared');
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const vendor = getSelectedPrepayVendor();
     if (!vendor) return showAlert("오류", "거래처를 선택하거나 입력하세요.");
@@ -6519,7 +6409,6 @@ async function applyPrepayDeduction() {
 }
 
 async function submitPrepayInput() {
-    if (!sunVillageAccountingAllows('shared')) return showSunVillageAccountingRestriction('shared');
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const vendor = getSelectedPrepayVendor();
     if (!vendor) return showAlert("오류", "거래처를 선택하거나 입력하세요.");
@@ -7223,7 +7112,6 @@ function openYearModal(title, desc, defaultYear, cb) {
 }
 
 async function openClosingModal() {
-    if (!sunVillageAccountingAllows('self')) return showSunVillageAccountingRestriction('self');
     const defaultYear = new Date().getFullYear() - 1;
     document.getElementById("closingYearInput").value = defaultYear;
     document.getElementById("closingLegalInput").type = "number";
@@ -7638,12 +7526,6 @@ async function executeClosing(ctx, legal, vol, taxExpense) {
 // 6. 자동 연동 기능
 function confirmSync(type) {
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
-    if (['depreciation', 'closing', 'undo_closing'].includes(type) && !sunVillageAccountingAllows('self')) {
-        return showSunVillageAccountingRestriction('self');
-    }
-    if (!['approval', 'undo_sync_last'].includes(type) && !sunVillageAccountingAllows('shared')) {
-        return showSunVillageAccountingRestriction('shared');
-    }
     const today = formatAccountingKstDate(new Date());
     const writer = myInfo ? myInfo.emp_name : "System";
 
@@ -8875,9 +8757,6 @@ function loadHistory() {
 
 function setHistoryView(mode) {
     if (mode !== 'single' && mode !== 'double') return;
-    if (mode === 'double' && !sunVillageAccountingAllows('shared')) {
-        return showSunVillageAccountingRestriction('shared');
-    }
     historyViewMode = mode;
     updateHistoryViewButtons();
     loadHistory();
@@ -9359,7 +9238,6 @@ async function deleteTx(id, transId) {
 }
 
 function openAddModal() {
-    if (!sunVillageAccountingAllows('self')) return showSunVillageAccountingRestriction('self');
     addContext = null;
     document.getElementById("addTypeSelect").value = document.querySelector('input[name="inputType"]:checked').value;
     const type = document.getElementById("addTypeSelect").value;
@@ -9649,7 +9527,6 @@ function downloadClosingCsv() {
 }
 
 async function printReport() {
-    if (!sunVillageAccountingAllows('shared')) return showSunVillageAccountingRestriction('shared');
     const selYear = Number(document.getElementById("reportYearSelect").value);
     const currYear = new Date().getFullYear();
     const todayStr = formatAccountingKstDate(new Date());
