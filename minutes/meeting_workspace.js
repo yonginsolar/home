@@ -332,7 +332,11 @@ function hasLocalAdminHint() {
   try {
     const user = JSON.parse(localStorage.getItem('erp_user') || 'null');
     const permissions = new Set(JSON.parse(localStorage.getItem('erp_permissions') || '[]'));
-    return user?.role === 'admin' || user?.role === 'admin_all' || permissions.has('member.admin') || permissions.has('site.admin');
+    return user?.role === 'admin'
+      || user?.role === 'admin_all'
+      || permissions.has('member.admin')
+      || permissions.has('site.admin')
+      || permissions.has('minutes.manage');
   } catch (_) {
     return false;
   }

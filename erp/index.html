@@ -45,7 +45,7 @@
 </script>
   <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="/shared/auth_email_helper.js?v=1.0.0"></script>
-  <script src="erp_runtime_guard.js?v=20260910-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
   <script src="/shared/auth_broker_helper.js?v=20260909-1"></script>
   
   <style>
@@ -1752,28 +1752,8 @@ async function loadUserInfo(user) {
 async function loadPermissions(user) {
     const result = new Set();
     if (!user) return result;
-    const coopId = String(user.coop_id || '').trim();
-    const roleKey = user.role || '';
-    const posKey = user.position || '';
-    if ((!roleKey && !posKey) || !coopId) return result;
-
-    const roleKeys = [roleKey, posKey].filter(Boolean);
-    if (roleKey === 'admin_all') roleKeys.push('admin');
-    if (roleKey === 'admin') roleKeys.push('admin_all');
-
-    const { data } = await _supabase
-        .from('erp_role_permissions')
-        .select('permission_key')
-        .eq('coop_id', coopId)
-        .in('scope', ['role', 'position'])
-        .in('role_key', roleKeys)
-        .eq('is_enabled', true);
-
-    if (Array.isArray(data)) {
-        data.forEach(row => {
-            if (row.permission_key) result.add(row.permission_key);
-        });
-    }
+    const data = await window.ErpRuntimeGuard.getEffectivePermissions(_supabase);
+    data.forEach((permissionKey) => result.add(permissionKey));
     return result;
 }
 
@@ -2173,13 +2153,17 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     const canAccounting = hasPermission('accounting.view');
     const canAdmin = hasPermission('hr.admin');
     const canMemberAdmin = hasPermission('member.admin');
+    const canEducationAdmin = hasPermission('education.manage');
+    const canMinutesAdmin = hasPermission('minutes.manage');
+    const canDocumentsAdmin = hasPermission('documents.manage');
+    const canSignatureAdmin = hasPermission('signature.manage');
     const canSiteAdmin = (() => {
         const siteOnly = hasPermission('site.admin');
         if (siteOnly === null) return null;
         return siteOnly || hasPermission('member.admin') === true;
     })();
-    const canOfficialsAdmin = canMemberAdmin;
-    const canDocumentAdmin = documentsEnabled && (hasAdminRoleFallback || canMemberAdmin === true || canSiteAdmin === true);
+    const canOfficialsAdmin = canMemberAdmin === true || canSignatureAdmin === true;
+    const canDocumentAdmin = documentsEnabled && (hasAdminRoleFallback || canMemberAdmin === true || canSiteAdmin === true || canDocumentsAdmin === true);
     const canAudit = hasPermission('audit.view');
     const canPerm = hasPermission('permission.manage');
 
@@ -2264,11 +2248,11 @@ function applyMenuPermissions(user, platformCtx, runtime) {
 
     if (!educationEnabled) {
         document.getElementById('btnEducationParticipants')?.classList.add('hidden');
-    } else if (canMemberAdmin === null) {
+    } else if (canMemberAdmin === null && canEducationAdmin === null) {
         if (isAdmin) {
             document.getElementById('btnEducationParticipants')?.classList.remove('hidden');
         }
-    } else if (canMemberAdmin) {
+    } else if (canMemberAdmin === true || canEducationAdmin === true) {
         document.getElementById('btnEducationParticipants')?.classList.remove('hidden');
     }
 
@@ -2318,7 +2302,7 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     document.getElementById('btnGovernanceHub')?.classList.add('hidden');
 
     const availableGovernanceButtons = [];
-    if (minutesEnabled && (hasAdminRoleFallback || canMemberAdmin === true || canSiteAdmin === true)) {
+    if (minutesEnabled && (hasAdminRoleFallback || canMemberAdmin === true || canSiteAdmin === true || canMinutesAdmin === true)) {
         availableGovernanceButtons.push(
             document.getElementById('btnMinutesAdmin'),
             document.getElementById('btnNoticesAdmin'),

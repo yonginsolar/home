@@ -28,7 +28,7 @@
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
 <script src="print_service.js?v=20260510-1324-1"></script>
 <script src="payroll_durunuri_module.js?v=20260901-1"></script>
 <script src="leave_ledger.js?v=20260828-0335-1"></script>
@@ -1275,26 +1275,8 @@ function openAddressSearch(){new daum.Postcode({oncomplete:function(d){let a=d.u
 async function loadPermissions(user) {
     const result = new Set();
     if (!user) return result;
-    const coopId = String(user.coop_id || '').trim();
-    const roleKey = user.role || '';
-    const posKey = user.position || '';
-    if ((!roleKey && !posKey) || !coopId) return result;
-
-    const roleKeys = [roleKey, posKey].filter(Boolean);
-    if (roleKey === 'admin_all') roleKeys.push('admin');
-    if (roleKey === 'admin') roleKeys.push('admin_all');
-    const { data } = await _supabase
-        .from('erp_role_permissions')
-        .select('permission_key')
-        .eq('coop_id', coopId)
-        .in('scope', ['role', 'position'])
-        .in('role_key', roleKeys)
-        .eq('is_enabled', true);
-    if (Array.isArray(data)) {
-        data.forEach(row => {
-            if (row.permission_key) result.add(row.permission_key);
-        });
-    }
+    const data = await window.ErpRuntimeGuard.getEffectivePermissions(_supabase);
+    data.forEach((permissionKey) => result.add(permissionKey));
     return result;
 }
 async function loadCompanyInfo(){

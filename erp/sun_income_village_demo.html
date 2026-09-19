@@ -10,7 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
   <script>window.__COOP_ROUTE_APP__ = 'erp';</script>
   <script src="../shared/route_guard.js?v=20260408-1"></script>
-  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -156,22 +156,9 @@
     }
 
     async function loadSiteAdminPermission(user) {
-      const coopId = String(user?.coop_id || '').trim();
-      const roleKey = String(user?.role || '').trim();
-      const positionKey = String(user?.position || '').trim();
-      if (!coopId || (!roleKey && !positionKey)) return false;
-      const roleKeys = [roleKey, positionKey].filter(Boolean);
-      if (roleKey === 'admin') roleKeys.push('admin_all');
-      if (roleKey === 'admin_all') roleKeys.push('admin');
-      const { data, error } = await client
-        .from('erp_role_permissions')
-        .select('permission_key')
-        .eq('coop_id', coopId)
-        .in('scope', ['role', 'position'])
-        .in('role_key', roleKeys)
-        .eq('is_enabled', true);
-      if (error) throw error;
-      const permissions = new Set((Array.isArray(data) ? data : []).map((row) => String(row?.permission_key || '').trim()).filter(Boolean));
+      if (!user) return { hasSiteAdmin: false, isLegacyEmpty: false };
+      const data = await window.ErpRuntimeGuard.getEffectivePermissions(client);
+      const permissions = new Set(data);
       return {
         hasSiteAdmin: permissions.has('site.admin') || permissions.has('member.admin'),
         isLegacyEmpty: permissions.size === 0

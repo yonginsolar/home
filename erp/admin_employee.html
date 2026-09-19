@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.67
-Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
+Version: v1.0.68
+Change: 2026-09-19 - Add employee-specific ERP module access controls.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.67 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.68 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -29,7 +29,7 @@ Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -88,6 +88,11 @@ Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
     .bulk-leave-table td, .bulk-leave-table th { vertical-align: middle; }
     .bulk-leave-table tbody tr { cursor: default; }
     .bulk-leave-table tbody tr:hover { transform: none; }
+    .employee-module-row { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; padding: 14px; }
+    .employee-module-row + .employee-module-row { margin-top: 10px; }
+    .employee-module-row.module-off { background: #f8fafc; opacity: 0.72; }
+    .employee-module-title { font-weight: 700; color: #1f2937; }
+    .employee-module-state { min-width: 148px; }
     .bulk-leave-table .form-check-input { cursor: pointer; }
     @media (max-width: 991.98px) {
       .hr-page-subtitle { white-space: normal; }
@@ -154,7 +159,7 @@ Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
 <div class="modal fade" id="inviteModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">✨ 직원 신규 등록</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="alert alert-light border text-center small mb-3">🆔 사원번호는 자동 생성됩니다.</div><div id="inviteStatus" class="alert d-none small py-2 px-3 mb-3" role="status" aria-live="polite"></div><label class="small text-muted ms-1">이름</label><input type="text" id="newName" class="form-control mb-2" placeholder="홍길동"><label class="small text-muted ms-1">이메일</label><input type="email" id="newEmail" class="form-control mb-2" placeholder="user@gmail.com"><div class="row g-2 mb-2"><div class="col"><label class="small text-muted ms-1">직급</label><select id="newRank" class="form-select"></select></div><div class="col"><label class="small text-muted ms-1">권한</label><select id="newRole" class="form-select"><option value="admin_all">전체 관리자 (모든 접근)</option><option value="admin_home">홈페이지 관리자 (전자결재/마이페이지/홈페이지)</option><option value="admin_accounting">회계 관리자 (전자결재/마이페이지/회계관리)</option><option value="staff">일반 직원 (전자결재/마이페이지)</option></select></div></div><div class="row g-2 mb-2"><div class="col"><label class="small text-muted ms-1">결재 레벨</label><select id="newAuthLevel" class="form-select"></select><div class="form-text">1이 최상위, 숫자가 클수록 하위 결재선입니다.</div></div></div><div class="mb-2"><label class="small text-muted ms-1">부서</label><select id="newDeptSelect" class="form-select" onchange="syncInviteDepartmentInput()"><option value="">미지정</option></select></div><div class="mb-3 hidden" id="newDeptCustomWrap"><label class="small text-muted ms-1">직접 입력 부서명</label><input type="text" id="newDeptCustom" class="form-control" placeholder="기획팀"></div><button id="inviteSubmitBtn" class="btn btn-primary w-100 btn-rounded py-2" onclick="runInvite()">등록하기</button></div></div></div></div>
 
 <div class="modal fade" id="detailModal" tabindex="-1">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header border-0 pb-0 d-flex justify-content-between align-items-start">
         <div><h5 class="modal-title fw-bold" id="detailName"></h5><span class="text-muted small" id="detailId"></span></div>
@@ -166,6 +171,7 @@ Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
             <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabInfo">📝 정보 & 계약</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabSalary">💰 급여 관리</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabLog">📅 근태/포상</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabModuleAccess">🧭 업무 권한</a></li>
           </ul>
         </div>
         <div class="tab-content pt-2">
@@ -436,6 +442,18 @@ Change: 2026-09-01 - Apply approved Durunuri support to the same payroll month.
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
             <button class="btn btn-primary w-100 btn-rounded" onclick="saveLog()">✅ 반영하기</button>
+          </div>
+          <div class="tab-pane fade" id="tabModuleAccess">
+            <div class="alert alert-info small mb-3">
+              <strong>직원별 업무 범위</strong><br>
+              기본 권한 따름은 지금처럼 역할·직급 권한을 사용합니다. 사용은 해당 업무를 맡길 때, 사용 안 함은 메뉴와 직접 접근을 닫을 때 선택하세요.
+            </div>
+            <div id="employeeModuleAccessAdminNote" class="alert alert-warning small d-none"></div>
+            <div id="employeeModuleAccessStatus" class="small text-muted text-center py-4">업무 권한을 불러오는 중입니다.</div>
+            <div id="employeeModuleAccessList" class="d-none"></div>
+            <div class="d-grid mt-3">
+              <button type="button" id="employeeModuleAccessSaveBtn" class="btn btn-primary btn-rounded" onclick="saveEmployeeModuleAccess()" disabled>업무 권한 저장</button>
+            </div>
           </div>
         </div>
       </div>
@@ -801,6 +819,8 @@ let hasCheckedExpired = false;
 let myInfo = null;
 let permissionSet = new Set();
 let hrRuntimeProfile = 'legacy_full';
+let employeeModuleAccessSnapshot = null;
+let employeeModuleAccessSaveInFlight = false;
 let telegramApprovalLinkStatusMap = {};
 const HR_MODAL_BASE_Z_INDEX = 1050;
 let hrModalStackOrderSeed = 0;
@@ -2967,28 +2987,8 @@ function openAddressSearch() { new daum.Postcode({ oncomplete: function(data) { 
 async function loadPermissions(user) {
     const result = new Set();
     if (!user) return result;
-    const coopId = String(user.coop_id || '').trim();
-    const roleKey = user.role || '';
-    const posKey = user.position || '';
-    if ((!roleKey && !posKey) || !coopId) return result;
-
-    const roleKeys = [roleKey, posKey].filter(Boolean);
-    if (roleKey === 'admin_all') roleKeys.push('admin');
-    if (roleKey === 'admin') roleKeys.push('admin_all');
-
-    const { data } = await _supabase
-        .from('erp_role_permissions')
-        .select('permission_key')
-        .eq('coop_id', coopId)
-        .in('scope', ['role', 'position'])
-        .in('role_key', roleKeys)
-        .eq('is_enabled', true);
-
-    if (Array.isArray(data)) {
-        data.forEach(row => {
-            if (row.permission_key) result.add(row.permission_key);
-        });
-    }
+    const data = await window.ErpRuntimeGuard.getEffectivePermissions(_supabase);
+    data.forEach((permissionKey) => result.add(permissionKey));
     return result;
 }
 
@@ -4399,6 +4399,162 @@ async function saveSettings() {
         showAlert("저장 중 오류 발생: " + e.message);
     }
 }
+
+const EMPLOYEE_MODULE_DESCRIPTIONS = Object.freeze({
+    approval: '기안, 결재 처리와 승인 문서를 관리합니다.',
+    mypage: '본인 정보, 급여·근태 내역과 개인 업무를 확인합니다.',
+    accounting: '회계 장부, 전표, 결산과 현금매출을 관리합니다.',
+    hr: '직원 등록, 급여·근태와 직원별 업무 권한을 관리합니다.',
+    site_admin: '홈페이지 콘텐츠와 공개 정보를 관리합니다.',
+    member_admin: '조합원 명부, 출자금과 가입·탈퇴 업무를 관리합니다.',
+    education: '교육·행사, 참석자와 현장 운영을 관리합니다.',
+    audit: 'ERP에서 발생한 주요 변경 기록을 확인합니다.',
+    permission: '역할·직급별 상세 권한 기준을 관리합니다.',
+    minutes: '이사회·총회 자료와 회의록, 공문을 관리합니다.',
+    documents: '정관·규정과 문서함 자료를 관리합니다.',
+    signature: '전자서명 대상과 서명 진행 상태를 관리합니다.',
+    vote: '선거·투표 개설과 진행 상태를 관리합니다.'
+});
+
+function resetEmployeeModuleAccessUi(message = '업무 권한을 불러오는 중입니다.') {
+    employeeModuleAccessSnapshot = null;
+    const status = document.getElementById('employeeModuleAccessStatus');
+    const list = document.getElementById('employeeModuleAccessList');
+    const note = document.getElementById('employeeModuleAccessAdminNote');
+    const saveBtn = document.getElementById('employeeModuleAccessSaveBtn');
+    if (status) {
+        status.textContent = message;
+        status.classList.remove('d-none', 'text-danger');
+    }
+    if (list) {
+        list.innerHTML = '';
+        list.classList.add('d-none');
+    }
+    if (note) {
+        note.textContent = '';
+        note.classList.add('d-none');
+    }
+    if (saveBtn) saveBtn.disabled = true;
+} // End of resetEmployeeModuleAccessUi
+
+function getEmployeeModuleAccessSelectValue(value) {
+    if (value === true) return 'enabled';
+    if (value === false) return 'disabled';
+    return 'inherit';
+} // End of getEmployeeModuleAccessSelectValue
+
+function renderEmployeeModuleAccess(payload) {
+    const status = document.getElementById('employeeModuleAccessStatus');
+    const list = document.getElementById('employeeModuleAccessList');
+    const note = document.getElementById('employeeModuleAccessAdminNote');
+    const saveBtn = document.getElementById('employeeModuleAccessSaveBtn');
+    const modules = Array.isArray(payload?.modules) ? payload.modules : [];
+    const employee = payload?.employee && typeof payload.employee === 'object' ? payload.employee : {};
+    employeeModuleAccessSnapshot = payload || null;
+
+    if (status) status.classList.add('d-none');
+    if (!list) return;
+    list.classList.remove('d-none');
+    list.innerHTML = modules.map((module) => {
+        const moduleKey = String(module?.module_key || '').trim();
+        const moduleName = String(module?.module_name || moduleKey).trim();
+        const orgEnabled = module?.organization_enabled !== false;
+        const selectedValue = getEmployeeModuleAccessSelectValue(module?.override_enabled);
+        const description = EMPLOYEE_MODULE_DESCRIPTIONS[moduleKey] || '이 업무 모듈의 사용 여부를 직원별로 정합니다.';
+        const options = [
+            ['inherit', '기본 권한 따름'],
+            ['enabled', '사용'],
+            ['disabled', '사용 안 함']
+        ].map(([value, label]) => `<option value="${value}"${selectedValue === value ? ' selected' : ''}>${label}</option>`).join('');
+        return `
+          <div class="employee-module-row ${orgEnabled ? '' : 'module-off'}" data-module-row="${escapeHtml(moduleKey)}">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+              <div class="flex-grow-1">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  <span class="employee-module-title">${escapeHtml(moduleName)}</span>
+                  ${orgEnabled
+                    ? '<span class="badge bg-success-subtle text-success-emphasis">조합 사용 중</span>'
+                    : '<span class="badge bg-secondary">조합 전체 사용 중지</span>'}
+                </div>
+                <div class="small text-muted mt-1">${escapeHtml(description)}</div>
+              </div>
+              <select class="form-select form-select-sm employee-module-state" data-employee-module-key="${escapeHtml(moduleKey)}" aria-label="${escapeHtml(moduleName)} 직원 권한">
+                ${options}
+              </select>
+            </div>
+            ${orgEnabled ? '' : '<div class="small text-muted mt-2">조합 전체 모듈이 꺼져 있어 개인 설정과 관계없이 현재는 열리지 않습니다.</div>'}
+          </div>`;
+    }).join('') || '<div class="text-center text-muted py-4">설정할 모듈이 없습니다.</div>';
+
+    if (employee?.is_super_admin === true && note) {
+        note.textContent = '전체 관리자 계정은 장애 복구를 위해 일부 관리자 전용 작업 권한을 유지합니다. 일반 직원과 업무 담당자의 범위를 이 화면에서 설정해 주세요.';
+        note.classList.remove('d-none');
+    }
+    if (saveBtn) saveBtn.disabled = modules.length === 0;
+} // End of renderEmployeeModuleAccess
+
+async function loadEmployeeModuleAccess() {
+    const empId = String(currentEmpId || '').trim();
+    if (!empId) return;
+    resetEmployeeModuleAccessUi();
+    try {
+        const { data, error } = await _supabase.rpc('erp_admin_get_employee_module_access', { p_emp_id: empId });
+        if (error) throw error;
+        if (empId !== String(currentEmpId || '').trim()) return;
+        renderEmployeeModuleAccess(data || {});
+    } catch (error) {
+        console.error('employee module access load failed:', error);
+        const status = document.getElementById('employeeModuleAccessStatus');
+        if (status) {
+            status.textContent = '업무 권한을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+            status.classList.add('text-danger');
+        }
+    }
+} // End of loadEmployeeModuleAccess
+
+async function saveEmployeeModuleAccess() {
+    if (employeeModuleAccessSaveInFlight) return;
+    const empId = String(currentEmpId || '').trim();
+    if (!empId) return showAlert('직원 정보를 먼저 선택해 주세요.');
+    const access = {};
+    document.querySelectorAll('[data-employee-module-key]').forEach((select) => {
+        const moduleKey = String(select.dataset.employeeModuleKey || '').trim();
+        if (!moduleKey) return;
+        const value = String(select.value || 'inherit');
+        access[moduleKey] = value === 'enabled' ? true : (value === 'disabled' ? false : null);
+    });
+
+    const saveBtn = document.getElementById('employeeModuleAccessSaveBtn');
+    employeeModuleAccessSaveInFlight = true;
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '저장 중...';
+    }
+    try {
+        const { data, error } = await _supabase.rpc('erp_admin_save_employee_module_access', {
+            p_emp_id: empId,
+            p_access: access
+        });
+        if (error) throw error;
+        if (empId === String(currentEmpId || '').trim()) renderEmployeeModuleAccess(data || {});
+        showAlert('직원별 업무 권한을 저장했습니다. 해당 직원은 다음 화면 이동부터 새 설정을 적용받습니다.');
+    } catch (error) {
+        console.error('employee module access save failed:', error);
+        const message = String(error?.message || '저장하지 못했습니다.');
+        if (message.includes('CANNOT_REMOVE_OWN_HR_ACCESS')) {
+            showAlert('현재 로그인한 본인의 직원관리 권한은 이 화면에서 끌 수 없습니다. 다른 관리자 계정에서 변경해 주세요.');
+        } else {
+            showAlert('업무 권한 저장 실패: ' + message);
+        }
+    } finally {
+        employeeModuleAccessSaveInFlight = false;
+        if (saveBtn) {
+            saveBtn.disabled = !employeeModuleAccessSnapshot;
+            saveBtn.textContent = '업무 권한 저장';
+        }
+    }
+} // End of saveEmployeeModuleAccess
+
 async function openDetail(u) {
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
     currentAnnualSalary = u.base_salary || 0;
@@ -4448,7 +4604,9 @@ async function openDetail(u) {
     if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
     else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; loadSalaryData(); loadLeave(); }
     await loadDurunuriEligibilityProfile(u.emp_id);
+    resetEmployeeModuleAccessUi();
     detailModal.show();
+    void loadEmployeeModuleAccess();
 }
 
 function toggleEditMode(isEdit) { const c = document.getElementById("infoContainer"); if(isEdit) c.classList.add("is-editing"); else c.classList.remove("is-editing"); }

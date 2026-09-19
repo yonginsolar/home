@@ -42,7 +42,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.189';
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js?v=20260910-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <script src="approval_rich_editor.js?v=20260918-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
@@ -4309,42 +4309,8 @@ const getAdminMemberKstDateString = () => formatAdminMemberKstDate(new Date(), '
 async function loadAdminMemberPermissions(user) {
     const result = new Set();
     if (!user) return result;
-    let storedUser = null;
-    try {
-        storedUser = JSON.parse(localStorage.getItem('erp_user') || 'null');
-    } catch (_) {
-        storedUser = null;
-    }
-    if (!storedUser?.coop_id || (!storedUser?.role && !storedUser?.position)) {
-        try {
-            const { data: employeeRow } = await _supabase.rpc('erp_get_bound_login_employee');
-            if (employeeRow) {
-                storedUser = { ...(storedUser || {}), ...employeeRow };
-                localStorage.setItem('erp_user', JSON.stringify(storedUser));
-            }
-        } catch (_) {}
-    }
-    const coopId = String(storedUser?.coop_id || await getAdminMemberCoopId() || '').trim();
-    const roleKey = String(storedUser?.role || '').trim();
-    const posKey = String(storedUser?.position || '').trim();
-    if ((!roleKey && !posKey) || !coopId) return result;
-
-    const roleKeys = [roleKey, posKey].filter(Boolean);
-    if (roleKey === 'admin_all') roleKeys.push('admin');
-    if (roleKey === 'admin') roleKeys.push('admin_all');
-
-    const { data, error } = await _supabase
-        .from('erp_role_permissions')
-        .select('permission_key')
-        .eq('coop_id', coopId)
-        .in('scope', ['role', 'position'])
-        .in('role_key', roleKeys)
-        .eq('is_enabled', true);
-
-    if (error) throw error;
-    (data || []).forEach((row) => {
-        if (row.permission_key) result.add(row.permission_key);
-    });
+    const data = await window.ErpRuntimeGuard.getEffectivePermissions(_supabase);
+    data.forEach((permissionKey) => result.add(permissionKey));
     return result;
 }
 
@@ -5416,6 +5382,8 @@ if (permissionSet && permissionSet.size > 0) {
         hasScopedPermission = permissionSet.has('member.admin');
     } else if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin') {
         hasScopedPermission = permissionSet.has('site.admin') || permissionSet.has('member.admin');
+    } else if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
+        hasScopedPermission = permissionSet.has('documents.manage') || permissionSet.has('site.admin') || permissionSet.has('member.admin');
     } else {
         hasScopedPermission = permissionSet.has('member.admin') || permissionSet.has('site.admin');
     }
@@ -12157,7 +12125,7 @@ if (
 if (!permissionSet || permissionSet.size === 0) return cachedRoleIsAdmin;
 if (safeScope === 'member_admin') return permissionSet.has('member.admin');
 if (safeScope === 'site_admin') return permissionSet.has('site.admin') || permissionSet.has('member.admin');
-if (safeScope === 'documents_admin') return permissionSet.has('site.admin') || permissionSet.has('member.admin');
+if (safeScope === 'documents_admin') return permissionSet.has('documents.manage') || permissionSet.has('site.admin') || permissionSet.has('member.admin');
 return cachedRoleIsAdmin;
 }
 
@@ -15871,7 +15839,7 @@ window.onload = async function() {
             } else if (ADMIN_MEMBER_PAGE_SCOPE === 'site_admin') {
                 hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
             } else if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
-                hasAdminAccess = permissionSet.has('site.admin') || permissionSet.has('member.admin');
+                hasAdminAccess = permissionSet.has('documents.manage') || permissionSet.has('site.admin') || permissionSet.has('member.admin');
             } else {
                 hasAdminAccess = permissionSet.has('member.admin') || permissionSet.has('site.admin');
             }

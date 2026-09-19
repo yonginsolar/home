@@ -1,5 +1,5 @@
 window.ErpRuntimeGuard = {
-  version: '1.3.0',
+  version: '1.4.0',
   showInlineAlert: function(message) {
     const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
     try {
@@ -38,7 +38,20 @@ window.ErpRuntimeGuard = {
   getRuntime: async function(_supabase) {
     const { data, error } = await _supabase.rpc('get_my_erp_runtime');
     if (error) throw error;
-    return data || null;
+    const runtime = data || null;
+    if (runtime && Array.isArray(runtime.effective_permissions)) {
+      try {
+        localStorage.setItem('erp_permissions', JSON.stringify(runtime.effective_permissions));
+      } catch (_) {}
+    }
+    return runtime;
+  },
+  getEffectivePermissions: async function(_supabase) {
+    const { data, error } = await _supabase.rpc('erp_get_my_effective_permissions');
+    if (error) throw error;
+    return Array.isArray(data)
+      ? data.map(function(item) { return String(item || '').trim(); }).filter(Boolean)
+      : [];
   },
   getErrorStatus: function(error) {
     const value = Number(error?.status || error?.statusCode || error?.context?.status || 0);

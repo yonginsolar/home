@@ -97,7 +97,7 @@
     }
   })();
 </script>
-  <script src="erp_runtime_guard.js?v=20260804-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-signature-admin">
@@ -248,27 +248,8 @@
     async function loadPermissions(user) {
       const result = new Set();
       if (!user) return result;
-      const coopId = String(user.coop_id || '').trim();
-      const roleKey = user.role || '';
-      const posKey = user.position || '';
-      if ((!roleKey && !posKey) || !coopId) return result;
-
-      const roleKeys = [roleKey, posKey].filter(Boolean);
-      if (roleKey === 'admin_all') roleKeys.push('admin');
-      if (roleKey === 'admin') roleKeys.push('admin_all');
-
-      const { data, error } = await _supabase
-        .from('erp_role_permissions')
-        .select('permission_key')
-        .eq('coop_id', coopId)
-        .in('scope', ['role', 'position'])
-        .in('role_key', roleKeys)
-        .eq('is_enabled', true);
-
-      if (error) throw error;
-      (data || []).forEach((row) => {
-        if (row.permission_key) result.add(row.permission_key);
-      });
+      const data = await window.ErpRuntimeGuard.getEffectivePermissions(_supabase);
+      data.forEach((permissionKey) => result.add(permissionKey));
       return result;
     }
 
@@ -309,7 +290,8 @@
       if (!isModuleEnabled(currentRuntime, 'signature')) return false;
       const canMemberAdmin = hasPermission(permissionSet, 'member.admin');
       const canSiteAdmin = hasPermission(permissionSet, 'site.admin');
-      return isAdminFallbackUser() || canMemberAdmin === true || canSiteAdmin === true;
+      const canSignatureManage = hasPermission(permissionSet, 'signature.manage');
+      return isAdminFallbackUser() || canMemberAdmin === true || canSiteAdmin === true || canSignatureManage === true;
     }
 
     function categoryLabel(category) {
