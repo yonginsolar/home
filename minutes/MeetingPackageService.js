@@ -1,6 +1,6 @@
 /*
-Version: v1.3.0
-Change: 2026-09-19 - Support private PDF inserts in assembly booklets.
+Version: v1.4.0
+Change: 2026-09-19 - Persist editable regular-assembly booklet source data with each meeting package.
 */
 import { supabase } from '../shared/supabase-client.js';
 

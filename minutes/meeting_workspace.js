@@ -1,11 +1,11 @@
 /*
-Version: v1.4.1
-Change: 2026-09-19 - Separate regular/extraordinary assemblies and merge private PDF inserts into printed booklets with PDF.js 6 cleanup compatibility.
+Version: v1.5.0
+Change: 2026-09-19 - Add regular-assembly source inputs, budget validation and book-binding page normalization.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.50';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.3.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.3.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.4.0';
+import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.4.0';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -35,6 +35,82 @@ const state = {
   loading: false,
   autoDraftTimer: null
 };
+
+const REFERENCE_2026_INCOME_BUDGET = [
+  { name:'금융차입금', basis:'시설자금 대출', amount:280000000 },
+  { name:'증좌·차입', basis:'부족 사업비 조달', amount:65800000 },
+  { name:'출자금', basis:'신규 조합원 출자', amount:25000000 },
+  { name:'후원금수익', basis:'협력 사업 재원', amount:30000000 },
+  { name:'회비수익', basis:'임원 운영 지원금', amount:18000000 },
+  { name:'사업수익', basis:'발전 및 사업 수익', amount:7200000 }
+];
+
+const REFERENCE_2026_EXPENSE_BUDGET = [
+  { name:'시설구축비', basis:'태양광발전소 건립', amount:350000000 },
+  { name:'일반사업비', basis:'인허가, 설계, 감리비', amount:15000000 },
+  { name:'인건비', basis:'사무국 인건비 및 4대보험', amount:36000000 },
+  { name:'운영비', basis:'이자, 통신, 회의, 사무용품', amount:9500000 },
+  { name:'조합원 교육비', basis:'기후위기 및 에너지 교육', amount:5000000 },
+  { name:'예비비', basis:'공사비·물가 변동 대응', amount:10500000 }
+];
+
+function numberFromMoney(value) {
+  const digits = String(value ?? '').replace(/[^0-9-]/g, '');
+  const parsed = Number(digits || 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+}
+
+function displayMoney(value) {
+  const amount = numberFromMoney(value);
+  return amount ? amount.toLocaleString('ko-KR') : '';
+}
+
+function defaultAssemblyBookletData(row = state.current) {
+  const fiscalYear = Number(row?.fiscal_year || defaultFiscalYear(row));
+  const planYear = Number(String(row?.meeting_date || row?.title || '').match(/(?:19|20)\d{2}/)?.[0] || fiscalYear + 1);
+  const isReferencePeriod = fiscalYear === 2025 && planYear === 2026;
+  return {
+    business_report_intro: isReferencePeriod ? '2025년은 조합의 성공적인 출범과 조직 내실 확보를 위한 준비의 해였습니다.' : '',
+    business_report_highlights: isReferencePeriod ? [
+      '11월 14일 창립총회 개최',
+      '11월 19일 제1차 이사회 개최',
+      '12월 15일 제2차 이사회 개최',
+      '12월 17일 법인설립 등기 완료',
+      '12월 23일 사업자등록 완료',
+      '12월 26일 조합 공식 계좌 개설 완료',
+      '조합 공식 홈페이지와 운영 기반 구축',
+      '태양광 부지 확보 지원 및 용인시 관련 부서 기술 검토',
+      '경기시민발전협동조합협의회 가입을 통한 정책 협업'
+    ].join('\n') : '',
+    business_plan_goal: planYear === 2026 ? '시민과 함께 만드는 용인의 햇빛, 에너지 자립의 첫걸음' : '',
+    business_plan_details: planYear === 2026 ? [
+      '공공부지·공영주차장·유휴부지의 햇빛발전소 후보지 발굴과 인허가 추진',
+      '시민 출자와 정책자금을 활용한 발전소 건립 재원 마련',
+      '신규 조합원 확대와 기후위기·에너지전환 교육 운영',
+      '조합 운영 시스템 고도화와 지역기관·협동조합 공동사업 확대'
+    ].join('\n') : '',
+    income_budget: planYear === 2026 ? REFERENCE_2026_INCOME_BUDGET.map(row => ({ ...row })) : [],
+    expense_budget: planYear === 2026 ? REFERENCE_2026_EXPENSE_BUDGET.map(row => ({ ...row })) : [],
+    borrowing_limit: 0,
+    borrowing_rule: planYear === 2026 ? '출자금 납입 총액의 5배' : '',
+    borrowing_purpose: planYear === 2026 ? '태양광 발전소 건립에 필요한 초기 시설자금 조달' : '',
+    other_agenda_text: ''
+  };
+}
+
+function normalizedAssemblyBookletData(row = state.current) {
+  const raw = row?.assembly_booklet_data;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length) {
+    return defaultAssemblyBookletData(row);
+  }
+  const defaults = defaultAssemblyBookletData(row);
+  return {
+    ...defaults,
+    ...raw,
+    income_budget: Array.isArray(raw.income_budget) ? raw.income_budget : defaults.income_budget,
+    expense_budget: Array.isArray(raw.expense_budget) ? raw.expense_budget : defaults.expense_budget
+  };
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -122,11 +198,51 @@ async function injectPdfAttachmentPages(wrapper, attachments = state.pdfAttachme
   }
 }
 
+function createBindingBlank(position, index) {
+  const section = document.createElement('section');
+  section.className = `meeting-chapter chapter-book-blank chapter-${position}-blank`;
+  section.dataset.chapterId = `${position}-blank-${index}`;
+  section.dataset.chapterTitle = `${position === 'front' ? '표지 뒤' : '뒷표지 앞'} 여백 ${index}`;
+  section.innerHTML = `<div class="assembly-book-blank" aria-label="${escapeHtml(section.dataset.chapterTitle)}"></div>`;
+  return section;
+}
+
+function normalizeBindingSkeleton(wrapper) {
+  const cover = wrapper.querySelector('.chapter-cover');
+  const back = wrapper.querySelector('.chapter-back');
+  if (!cover || !back) return false;
+  wrapper.querySelectorAll('.chapter-inside-cover,.chapter-book-blank').forEach((node) => node.remove());
+  let frontAnchor = cover;
+  for (let index = 1; index <= 3; index += 1) {
+    const blank = createBindingBlank('front', index);
+    frontAnchor.insertAdjacentElement('afterend', blank);
+    frontAnchor = blank;
+  }
+  for (let index = 1; index <= 2; index += 1) {
+    back.insertAdjacentElement('beforebegin', createBindingBlank('rear', index));
+  }
+  return true;
+}
+
+function ensureEvenPhysicalPageCount(wrapper) {
+  const back = wrapper.querySelector('.chapter-back');
+  if (!back) return;
+  wrapper.querySelectorAll('.chapter-rear-blank[data-parity-blank="true"]').forEach((node) => node.remove());
+  const physicalPages = wrapper.querySelectorAll('.meeting-chapter').length;
+  if (physicalPages % 2 === 1) {
+    const blank = createBindingBlank('rear', 3);
+    blank.dataset.parityBlank = 'true';
+    back.insertAdjacentElement('beforebegin', blank);
+  }
+}
+
 async function preparePrintableHtml(value, attachments = state.pdfAttachments) {
   const wrapper = document.createElement('div');
   wrapper.innerHTML = sanitizeHtml(stripEphemeralSignaturePreviewUrls(value));
+  const bookMode = normalizeBindingSkeleton(wrapper);
   await hydrateSignaturePreviews(wrapper, 1800);
   await injectPdfAttachmentPages(wrapper, attachments);
+  if (bookMode) ensureEvenPhysicalPageCount(wrapper);
   return wrapper.innerHTML;
 }
 
@@ -282,6 +398,71 @@ function renderChairOptions(selectedId = null) {
   `).join('');
 }
 
+function renderBudgetRows(kind, rows) {
+  const container = $(kind === 'income' ? 'incomeBudgetRows' : 'expenseBudgetRows');
+  if (!container) return;
+  const list = Array.isArray(rows) ? rows : [];
+  container.innerHTML = list.length ? list.map((row, index) => `
+    <div class="budget-row" data-budget-kind="${kind}" data-budget-index="${index}">
+      <input data-budget-field="name" value="${escapeHtml(row?.name || '')}" placeholder="항목">
+      <input data-budget-field="basis" value="${escapeHtml(row?.basis || '')}" placeholder="산출 근거">
+      <input data-budget-field="amount" class="budget-amount" inputmode="numeric" value="${escapeHtml(displayMoney(row?.amount))}" placeholder="금액">
+      <button type="button" data-budget-remove title="이 항목 삭제">×</button>
+    </div>`).join('') : '<div class="empty">등록된 예산 항목이 없습니다.</div>';
+}
+
+function collectBudgetRows(kind) {
+  const container = $(kind === 'income' ? 'incomeBudgetRows' : 'expenseBudgetRows');
+  if (!container) return [];
+  return [...container.querySelectorAll('.budget-row')].map((row) => ({
+    name: row.querySelector('[data-budget-field="name"]')?.value.trim() || '',
+    basis: row.querySelector('[data-budget-field="basis"]')?.value.trim() || '',
+    amount: numberFromMoney(row.querySelector('[data-budget-field="amount"]')?.value)
+  })).filter((row) => row.name || row.basis || row.amount);
+}
+
+function collectAssemblyBookletData() {
+  if (!$('assemblyBookletPanel')) return state.current?.assembly_booklet_data || {};
+  return {
+    business_report_intro: $('businessReportIntro').value.trim(),
+    business_report_highlights: $('businessReportHighlights').value.trim(),
+    business_plan_goal: $('businessPlanGoal').value.trim(),
+    business_plan_details: $('businessPlanDetails').value.trim(),
+    income_budget: collectBudgetRows('income'),
+    expense_budget: collectBudgetRows('expense'),
+    borrowing_limit: numberFromMoney($('borrowingLimit').value),
+    borrowing_rule: $('borrowingRule').value.trim(),
+    borrowing_purpose: $('borrowingPurpose').value.trim(),
+    other_agenda_text: $('otherAgendaText').value.trim()
+  };
+}
+
+function updateBudgetSummary() {
+  if (!$('budgetSummary')) return;
+  const income = collectBudgetRows('income').reduce((sum, row) => sum + row.amount, 0);
+  const expense = collectBudgetRows('expense').reduce((sum, row) => sum + row.amount, 0);
+  const difference = income - expense;
+  const differenceText = difference === 0
+    ? '수입과 지출 합계가 일치합니다.'
+    : `${difference > 0 ? '수입이 지출보다' : '지출이 수입보다'} ${Math.abs(difference).toLocaleString('ko-KR')}원 많습니다.`;
+  $('budgetSummary').innerHTML = `<span>수입 ${income.toLocaleString('ko-KR')}원</span><span>지출 ${expense.toLocaleString('ko-KR')}원</span><span class="difference ${difference === 0 ? 'ok' : 'warn'}">${escapeHtml(differenceText)}</span>`;
+}
+
+function renderAssemblyBookletInputs() {
+  const data = normalizedAssemblyBookletData(state.current);
+  $('businessReportIntro').value = data.business_report_intro || '';
+  $('businessReportHighlights').value = data.business_report_highlights || '';
+  $('businessPlanGoal').value = data.business_plan_goal || '';
+  $('businessPlanDetails').value = data.business_plan_details || '';
+  $('borrowingLimit').value = displayMoney(data.borrowing_limit);
+  $('borrowingRule').value = data.borrowing_rule || '';
+  $('borrowingPurpose').value = data.borrowing_purpose || '';
+  $('otherAgendaText').value = data.other_agenda_text || '';
+  renderBudgetRows('income', data.income_budget);
+  renderBudgetRows('expense', data.expense_budget);
+  updateBudgetSummary();
+}
+
 function fillInfoForm() {
   const row = state.current;
   $('meetingType').value = row.meeting_type;
@@ -301,6 +482,7 @@ function fillInfoForm() {
   $('privateNotes').value = row.private_notes || '';
   renderFiscalYearOptions(row.fiscal_year || defaultFiscalYear(row));
   renderChairOptions(row.chair_official_id);
+  renderAssemblyBookletInputs();
   $('eligibleCountLabel').textContent = row.meeting_type === 'GENERAL_ASSEMBLY' ? '재적 대의원 수' : '재적 이사 수';
   updateDocumentModeLabels();
 }
@@ -372,16 +554,17 @@ function updateDocumentModeLabels() {
   $('assemblyKindField').hidden = !assembly;
   $('fiscalYearField').hidden = !regularAssembly;
   $('assemblySourcePanel').hidden = !regularAssembly;
+  $('assemblyBookletPanel').hidden = !regularAssembly;
   $('bookPrintHelp').hidden = !assembly;
   $('materialsTab').textContent = assembly ? '📚 총회 자료집' : '📄 이사회 회의자료';
   $('agendaModeNotice').textContent = assembly
     ? (regularAssembly
-      ? '정기총회는 전차 회의록·감사·결산·조건부 배당·조건부 출자금 반환·사업계획을 기본 순서로 자동 구성합니다. 여기에는 그 밖에 추가로 심의할 의안만 적으세요.'
+      ? '정기총회는 전차 의사록·감사·사업보고 및 결산·조건부 배당·조건부 출자금 반환·사업계획·차입금 한도·기타안건을 기본 순서로 구성합니다. 위 자료집 입력을 먼저 확인하고, 아래에는 그 밖에 추가로 심의할 의안만 적으세요.'
       : '임시총회에는 감사·결산·배당·사업계획을 자동으로 넣지 않습니다. 이번 임시총회에서 실제로 심의할 의안만 순서대로 적으세요.')
     : '보고·의결·논의할 안건을 적으면 한 장짜리 이사회 회의자료와 진행 시나리오에 반영됩니다.';
   $('documentModeNotice').textContent = assembly
     ? (regularAssembly
-      ? '정기총회 기본 순서는 전차 회의록 확인 → 감사보고서 → 결산보고서 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획 → 추가 의안입니다.'
+      ? '정기총회 기본 순서는 전차 의사록 확인 → 감사보고서 → 사업보고 및 결산 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획·예산 → 차입금 한도 → 추가 의안 → 기타안건입니다.'
       : '임시총회 자료집과 시나리오는 등록한 의안만으로 구성합니다.')
     : '기존 제6차 이사회 문서를 기준으로 한 장짜리 회의자료와 진행 시나리오를 준비합니다.';
   if (regularAssembly) renderAssemblySourceStatus();
@@ -628,6 +811,8 @@ function generatedDocumentRows() {
 }
 
 function collectPackageDraftPayload() {
+  const existingBookletData = state.current?.assembly_booklet_data || {};
+  const regularAssembly = $('meetingType').value === 'GENERAL_ASSEMBLY' && $('assemblyKind').value !== 'EXTRAORDINARY';
   return {
     meeting_type: $('meetingType').value,
     assembly_kind: $('meetingType').value === 'GENERAL_ASSEMBLY' ? $('assemblyKind').value : null,
@@ -647,7 +832,8 @@ function collectPackageDraftPayload() {
     opening_message: $('openingMessage').value.trim() || null,
     closing_message: $('closingMessage').value.trim() || null,
     document_notes: $('documentNotes').value.trim() || null,
-    private_notes: $('privateNotes').value.trim() || null
+    private_notes: $('privateNotes').value.trim() || null,
+    assembly_booklet_data: regularAssembly ? collectAssemblyBookletData() : existingBookletData
   };
 }
 
@@ -762,8 +948,14 @@ async function saveAgendas({ quiet = false } = {}) {
   const { data, error } = await MeetingPackageService.saveAgendas(state.current.id, agendas);
   if (error) throw error;
   state.agendas = data || [];
+  if (state.current.meeting_type === 'GENERAL_ASSEMBLY' && state.current.assembly_kind !== 'EXTRAORDINARY') {
+    const bookletData = collectAssemblyBookletData();
+    const update = await MeetingPackageService.updatePackage(state.current.id, { assembly_booklet_data: bookletData });
+    if (update.error) throw update.error;
+    state.current = update.data;
+  }
   renderAgendaList();
-  if (!quiet) showToast('안건을 저장했습니다.');
+  if (!quiet) showToast(state.current.meeting_type === 'GENERAL_ASSEMBLY' && state.current.assembly_kind !== 'EXTRAORDINARY' ? '안건과 자료집 입력을 저장했습니다.' : '안건을 저장했습니다.');
   return true;
 }
 
@@ -823,10 +1015,12 @@ const BOOK_PRINT_CSS = `
   @page { size:A4; margin:18mm 18mm 20mm; }
   @page cover { size:A4; margin:0; counter-reset:folio 0; @bottom-center { content:none; } }
   @page inside-cover { size:A4; margin:0; @bottom-center { content:none; } }
+  @page book-blank { size:A4; margin:0; @bottom-center { content:none; } }
   @page book { size:A4; margin:18mm 18mm 20mm; counter-increment:folio 1; @bottom-center { content:counter(folio); font-size:11pt; font-weight:700; color:#64748b; } }
   @page book:left { margin-left:18mm; margin-right:22mm; }
   @page book:right { margin-left:22mm; margin-right:18mm; }
   @page back-cover { size:A4; margin:0; @bottom-center { content:none; } }
+  @page :blank { @bottom-center { content:none; } }
   *{box-sizing:border-box}
   html,body{margin:0;color:#172033;background:#fff;font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:11pt;line-height:1.62;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   h1{font-size:23pt;line-height:1.3;margin:0 0 18pt;padding-bottom:10pt;border-bottom:3pt solid #f97316;letter-spacing:-.025em}
@@ -852,7 +1046,8 @@ const BOOK_PRINT_CSS = `
   .pdf-attachment-page-image{display:block;max-width:100%;max-height:252mm;width:auto;height:auto;object-fit:contain}
   .chapter-cover{page:cover;width:210mm;min-height:297mm;padding:26mm 22mm;break-after:page}
   .chapter-inside-cover{page:inside-cover;width:210mm;min-height:297mm;break-after:page}
-  .chapter-back{page:back-cover;width:210mm;min-height:297mm;padding:26mm 22mm;break-after:auto}
+  .chapter-book-blank{page:book-blank;width:210mm;min-height:297mm;break-after:page}
+  .chapter-back{page:back-cover;width:210mm;min-height:297mm;padding:26mm 22mm;break-before:left;page-break-before:left;break-after:auto}
   .assembly-cover{min-height:245mm;display:grid;grid-template-rows:auto 1fr auto auto;align-items:start}
   .assembly-cover .org-name{margin:0;padding-bottom:14pt;border-bottom:5pt solid #f97316;color:#ea580c;font-size:15pt;font-weight:900}
   .assembly-cover>p:nth-of-type(2){align-self:end;margin:0 0 8pt;color:#475569;font-size:14pt;font-weight:800}
@@ -860,9 +1055,11 @@ const BOOK_PRINT_CSS = `
   .assembly-cover dl{margin:110pt 0 0;padding-top:14pt;border-top:1pt solid #cbd5e1;display:grid;grid-template-columns:55pt 1fr;gap:8pt 12pt}
   .assembly-cover dt{color:#ea580c;font-weight:900}.assembly-cover dd{margin:0;font-weight:700}
   .assembly-inside-cover{width:100%;min-height:297mm;background:#fff}
+  .assembly-book-blank{width:100%;min-height:297mm;background:#fff}
   .assembly-back{min-height:245mm;display:flex;flex-direction:column;justify-content:center;text-align:center}
   .assembly-back h1{font-size:34pt;line-height:1.35;border:0}.assembly-back hr{width:42mm;border:0;border-top:3pt solid #f97316;margin:24pt auto}
   .chapter-bill>h1{color:#ea580c;font-size:18pt}.chapter-bill>h2{font-size:23pt;color:#172033;margin-top:4pt}
+  .bill-major-content{display:grid;grid-template-columns:88pt 1fr;border-top:2pt solid #fb923c;border-bottom:1pt solid #fed7aa;margin:10pt 0}.bill-major-content dt,.bill-major-content dd{margin:0;padding:10pt;border-bottom:1pt solid #fed7aa}.bill-major-content dt{font-weight:900;color:#9a3412;background:#fff7ed}.bill-major-content dd{background:#fff}.budget-balance{padding:8pt 10pt;border-radius:7pt;font-weight:800}.budget-balance.is-balanced{background:#ecfdf5;color:#047857}.budget-balance.is-unbalanced{background:#fef2f2;color:#b91c1c}
   .chapter-financial>h1,.chapter-minutes>h1,.chapter-audit>h1{border-bottom-color:#fb923c}
   .linked-minute img{max-width:100%;height:auto}
   .book-signature-section{margin-top:22pt;padding-top:14pt;border-top:2pt solid #fdba74;break-inside:avoid}
@@ -1000,6 +1197,28 @@ function addAgenda() {
   renderAgendaList();
   scheduleAutoDraftRefresh();
   document.querySelector('.agenda-card:last-child input[data-field="title"]')?.focus();
+}
+
+function addBudgetRow(kind) {
+  const rows = collectBudgetRows(kind);
+  rows.push({ name:'', basis:'', amount:0 });
+  renderBudgetRows(kind, rows);
+  updateBudgetSummary();
+  const container = $(kind === 'income' ? 'incomeBudgetRows' : 'expenseBudgetRows');
+  container.querySelector('.budget-row:last-child [data-budget-field="name"]')?.focus();
+  scheduleAutoDraftRefresh();
+}
+
+function removeBudgetRow(button) {
+  const row = button.closest('.budget-row');
+  const kind = row?.dataset.budgetKind;
+  if (!row || !kind) return;
+  const index = Number(row.dataset.budgetIndex);
+  const rows = collectBudgetRows(kind);
+  rows.splice(index, 1);
+  renderBudgetRows(kind, rows);
+  updateBudgetSummary();
+  scheduleAutoDraftRefresh();
 }
 
 function handleAgendaAction(button) {
@@ -1197,6 +1416,7 @@ function bindEvents() {
     if ($('assemblyKind').value === 'REGULAR' && !$('fiscalYear').value) renderFiscalYearOptions(defaultFiscalYear());
     state.sourceContext = null;
     updateDocumentModeLabels();
+    if ($('assemblyKind').value === 'REGULAR') renderAssemblyBookletInputs();
     renderAgendaList();
     scheduleAutoDraftRefresh();
   });
@@ -1204,6 +1424,19 @@ function bindEvents() {
   $('agendaList').addEventListener('click', event => {
     const button = event.target.closest('[data-agenda-action]');
     if (button) handleAgendaAction(button);
+  });
+  $('assemblyBookletPanel').addEventListener('click', event => {
+    const addButton = event.target.closest('[data-budget-add]');
+    if (addButton) return addBudgetRow(addButton.dataset.budgetAdd);
+    const removeButton = event.target.closest('[data-budget-remove]');
+    if (removeButton) removeBudgetRow(removeButton);
+  });
+  $('assemblyBookletPanel').addEventListener('input', event => {
+    if (event.target.matches('.budget-amount,.money-input')) {
+      const amount = numberFromMoney(event.target.value);
+      event.target.value = amount ? amount.toLocaleString('ko-KR') : '';
+    }
+    if (event.target.closest('.budget-row')) updateBudgetSummary();
   });
   $('editorBody').addEventListener('input', event => {
     if (event.target === $('documentEditor') || event.target === $('documentTitle') || event.target === $('chapterEditor') || event.target === $('chapterTitle') || event.target.closest('#documentEditor,#chapterEditor')) return;

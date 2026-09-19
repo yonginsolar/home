@@ -1,6 +1,6 @@
 /*
-Version: v1.3.0
-Change: 2026-09-19 - Leave unavailable automatic sources empty so a private PDF can be inserted instead.
+Version: v1.4.0
+Change: 2026-09-19 - Build book-ready regular-assembly materials from editable business, budget and closing sources.
 */
 
 const safe = (value) => String(value ?? '')
@@ -149,7 +149,7 @@ function previousMinuteBill(source) {
     title: '전차 총회 의사록 확인의 건',
     background: '전차 총회에서 심의·의결한 내용을 확인하고 기록의 정확성을 점검하기 위함입니다.',
     proposal: prior
-      ? `문서함의 「${prior.title || '전차 총회 의사록'}」을 전차 회의록으로 확인합니다.`
+      ? '전차 의사록을 확인합니다.'
       : '문서함에서 앞선 총회 의사록을 찾지 못했습니다. 총회 전에 전차 의사록을 확인해 연결해 주세요.',
     decision: '전차 총회 의사록을 원안대로 확인하여 승인하고자 합니다.',
     attachments: prior ? [chapter(
@@ -247,19 +247,62 @@ function auditBill({ row, coopName, officials, sourceContext }) {
   };
 }
 
-function closingBill(sourceContext) {
+function listFromLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-•·]\s*/, ''))
+    .filter(Boolean);
+}
+
+function businessReportChapter(row, sourceContext) {
+  const data = row?.assembly_booklet_data || {};
+  const year = Number(sourceContext?.fiscal_year || row?.fiscal_year || new Date().getFullYear() - 1);
+  const intro = String(data.business_report_intro || '').trim();
+  const highlights = listFromLines(data.business_report_highlights);
+  if (!intro && !highlights.length) return [];
+  return [chapter(
+    'business-report',
+    `${year}년도 주요 사업 추진 실적`,
+    `<h1>${year}년도 주요 사업 추진 실적</h1>
+      ${intro ? `<p class="chapter-lead">${blocks(intro)}</p>` : ''}
+      ${highlights.length ? `<ol class="business-report-list">${highlights.map((item) => `<li>${safe(item)}</li>`).join('')}</ol>` : ''}`,
+    'business-report'
+  )];
+}
+
+function closingBill(row, sourceContext) {
   const closing = sourceContext?.closing || {};
   const report = sourceContext?.closing_report;
   const year = Number(sourceContext?.fiscal_year || closing.fiscal_year || new Date().getFullYear() - 1);
+  const data = row?.assembly_booklet_data || {};
+  const businessIntro = String(data.business_report_intro || '').trim();
+  const businessHighlights = listFromLines(data.business_report_highlights);
+  const hasClosingSummary = Object.keys(closing).length > 0;
+  const businessText = businessIntro || businessHighlights.length
+    ? `${businessIntro}${businessIntro && businessHighlights.length ? ' ' : ''}${businessHighlights.length ? `주요 추진 실적 ${businessHighlights.length}건을 보고합니다.` : ''}`
+    : '사업보고 내용을 입력해 주세요.';
+  const closingText = hasClosingSummary
+    ? `당기순손익 ${money(closing.net_income)}, 수익 ${money(Number(closing.total_revenue || 0) + Number(closing.total_other_revenue || 0))}, 비용 ${money(closing.total_expenses)}입니다.`
+    : '회계관리의 결산자료를 연결하거나 결산보고서 PDF를 첨부해 주세요.';
+  const appropriationParts = hasClosingSummary
+    ? [
+        `법정적립금 ${money(closing.legal_reserve)}`,
+        Number(closing.voluntary_reserve || 0) ? `임의적립금 ${money(closing.voluntary_reserve)}` : '',
+        `차기이월 이익잉여금 ${money(closing.carried_forward)}`
+      ].filter(Boolean).join(', ')
+    : '결산자료가 연결되면 적립금과 차기이월액을 표시합니다.';
   return {
     key: 'closing-report',
-    title: `${year}년도 결산보고서 승인의 건`,
-    background: `${year}년도 조합의 재무상태와 운영성과를 확정하고 총회의 승인을 받기 위함입니다.`,
-    proposal: report
-      ? `회계관리에서 실제 생성·저장한 결산보고서를 그대로 불러왔습니다. ${closing.is_closed ? `당기순손익은 ${money(closing.net_income)}입니다.` : '현재 저장본은 결산 완료 전 자료이므로 총회 확정 전에 다시 생성해야 합니다.'}`
-      : '',
-    decision: `${year}년도 결산보고서를 원안대로 승인하고자 합니다.`,
-    attachments: closingReportChapters(sourceContext)
+    title: `${year}년도 사업보고 및 결산 승인의 건`,
+    background: `${year}년도 사업 추진 실적과 재무 결산 내역을 보고하고 총회의 승인을 받기 위함입니다.`,
+    proposalHtml: `<dl class="bill-major-content">
+      <dt>사업보고</dt><dd>${safe(businessText)}</dd>
+      <dt>결산개요</dt><dd>${safe(closingText)}</dd>
+      <dt>잉여금 처분</dt><dd>${safe(appropriationParts)}</dd>
+    </dl>`,
+    proposal: `사업보고: ${businessText}\n결산개요: ${closingText}\n잉여금 처분: ${appropriationParts}`,
+    decision: `${year}년도 사업보고 및 결산을 승인하고자 합니다.`,
+    attachments: [...businessReportChapter(row, sourceContext), ...closingReportChapters(sourceContext)]
   };
 }
 
@@ -294,49 +337,34 @@ function capitalReturnBill(sourceContext) {
   };
 }
 
-function businessPlanDraft(row, sourceContext) {
+function budgetRowsTable(rows, totalLabel) {
+  const list = Array.isArray(rows) ? rows : [];
+  const body = list.length
+    ? list.map((item) => `<tr><td>${safe(item?.name || '-')}</td><td>${safe(item?.basis || '-')}</td><td class="amount">${money(item?.amount)}</td></tr>`).join('')
+    : '<tr><td colspan="3">입력된 예산 항목이 없습니다.</td></tr>';
+  return `<table><thead><tr><th>항목</th><th>산출 근거</th><th>금액</th></tr></thead><tbody>${body}</tbody><tfoot><tr><th colspan="2">${safe(totalLabel)}</th><th class="amount">${money(sumAmounts(list))}</th></tr></tfoot></table>`;
+}
+
+function businessPlanDraft(row) {
   const year = Number(String(row?.meeting_date || row?.title || '').match(/(?:19|20)\d{2}/)?.[0] || new Date().getFullYear());
+  const data = row?.assembly_booklet_data || {};
+  const goal = String(data.business_plan_goal || '').trim();
+  const details = listFromLines(data.business_plan_details);
+  const income = Array.isArray(data.income_budget) ? data.income_budget : [];
+  const expense = Array.isArray(data.expense_budget) ? data.expense_budget : [];
+  const incomeTotal = sumAmounts(income);
+  const expenseTotal = sumAmounts(expense);
+  const difference = incomeTotal - expenseTotal;
   return `<h1>${year}년 사업계획 및 예산(안)</h1>
     <p class="chapter-subtitle">${safe(row?.title || '정기 대의원총회')}</p>
     <h2>Ⅰ. 사업 목표</h2>
-    <blockquote><strong>“시민과 함께 만드는 용인의 햇빛, 에너지 자립의 첫걸음”</strong></blockquote>
-    <ul>
-      <li><strong>발전소 부지 확보:</strong> 공공부지 및 공영주차장 태양광 설치 추진 (200kW 규모)</li>
-      <li><strong>조직 기반 강화:</strong> 신규 조합원 250명 모집, 조합원 교육과 참여 확대</li>
-      <li><strong>운영 내실화:</strong> 조합원 운영 시스템 고도화와 예비사회적기업 지정 추진</li>
-    </ul>
+    ${goal ? `<blockquote><strong>${blocks(goal)}</strong></blockquote>` : '<p>사업 목표를 입력해 주세요.</p>'}
     <h2>Ⅱ. 주요 사업 계획</h2>
-    <h3>1. 햇빛발전소 건립 사업</h3>
-    <table><thead><tr><th>구분</th><th>주요 내용</th></tr></thead><tbody>
-      <tr><td>후보지 발굴</td><td>용인시 공영주차장, 공공건물, 유휴부지 등 조사</td></tr>
-      <tr><td>인허가 추진</td><td>발전사업 허가 및 개발 관련 인허가 진행</td></tr>
-      <tr><td>자금 조달</td><td>시민 출자와 정책자금 활용 방안 수립</td></tr>
-    </tbody></table>
-    <h3>2. 조합원 및 지역사회 협력 사업</h3>
-    <ul><li><strong>조합원 교육:</strong> 기후위기 대응 및 에너지전환 교육 운영</li><li><strong>태양광 부지 공모:</strong> 우리 동네 태양광발전소 부지 공모 추진</li></ul>
-    <h3>3. 조직 역량 강화 및 대외 협력</h3>
-    <ul><li><strong>사회적 가치 확대:</strong> 예비사회적기업 등 조합의 공익성과 지속가능성을 높이는 인증·협력 추진</li><li><strong>지역 협력:</strong> 시민사회와 지역기관, 협동조합 간 공동사업과 교육 기회 발굴</li></ul>
+    ${details.length ? `<ol>${details.map((item) => `<li>${safe(item)}</li>`).join('')}</ol>` : '<p>주요 사업 계획을 입력해 주세요.</p>'}
     <h2>Ⅲ. ${year}년도 수지 예산(안)</h2>
-    <h3>1. 수입 예산</h3>
-    <table><thead><tr><th>항목</th><th>산출 근거</th><th>금액</th></tr></thead><tbody>
-      <tr><td>금융차입금</td><td>시설자금 대출</td><td class="amount">280,000,000</td></tr>
-      <tr><td>증좌·차입</td><td>부족 사업비 조달</td><td class="amount">65,800,000</td></tr>
-      <tr><td>출자금</td><td>신규 조합원 출자</td><td class="amount">25,000,000</td></tr>
-      <tr><td>후원금수익</td><td>협력 사업 재원</td><td class="amount">30,000,000</td></tr>
-      <tr><td>회비수익</td><td>임원 운영 지원금</td><td class="amount">18,000,000</td></tr>
-      <tr><td>사업수익</td><td>발전 및 사업 수익</td><td class="amount">7,200,000</td></tr>
-      <tr><th>수입 합계</th><td></td><th class="amount">426,000,000</th></tr>
-    </tbody></table>
-    <h3>2. 지출 예산</h3>
-    <table><thead><tr><th>항목</th><th>산출 근거</th><th>금액</th></tr></thead><tbody>
-      <tr><td>시설구축비</td><td>태양광발전소 건립</td><td class="amount">350,000,000</td></tr>
-      <tr><td>일반사업비</td><td>인허가, 설계, 감리비</td><td class="amount">15,000,000</td></tr>
-      <tr><td>인건비</td><td>사무국 인건비 및 4대보험</td><td class="amount">36,000,000</td></tr>
-      <tr><td>운영비</td><td>이자, 통신, 회의, 사무용품</td><td class="amount">9,500,000</td></tr>
-      <tr><td>조합원 교육비</td><td>기후위기 및 에너지 교육</td><td class="amount">5,000,000</td></tr>
-      <tr><td>예비비</td><td>공사비·물가 변동 대응</td><td class="amount">10,500,000</td></tr>
-      <tr><th>지출 합계</th><td></td><th class="amount">426,000,000</th></tr>
-    </tbody></table>
+    <h3>1. 수입 예산</h3>${budgetRowsTable(income, '수입 합계')}
+    <h3>2. 지출 예산</h3>${budgetRowsTable(expense, '지출 합계')}
+    <p class="budget-balance ${difference === 0 ? 'is-balanced' : 'is-unbalanced'}">${difference === 0 ? '수입과 지출 합계가 일치합니다.' : `수입·지출 합계 차액 ${money(Math.abs(difference))}을 조정해야 합니다.`}</p>
     <p>사업 규모나 재원이 크게 달라질 경우 추가경정예산안을 별도로 마련해 승인받습니다.</p>`;
 }
 
@@ -348,7 +376,36 @@ function businessPlanBill(row, sourceContext) {
     background: `${year}년도 사업 목표, 주요 사업과 수지예산을 정하고 총회의 승인을 받기 위함입니다.`,
     proposal: '기존 총회 자료집의 사업계획·예산 초안을 불러왔습니다. 목표, 사업내용, 산출근거와 금액을 현재 계획에 맞게 수정해 심의합니다.',
     decision: `${year}년도 사업계획 및 예산안을 원안대로 승인하고자 합니다.`,
-    attachments: [chapter('business-plan', `${year}년 사업계획 및 예산안`, businessPlanDraft(row, sourceContext), 'business-plan')]
+    attachments: [chapter('business-plan', `${year}년 사업계획 및 예산안`, businessPlanDraft(row), 'business-plan')]
+  };
+}
+
+function borrowingLimitBill(row) {
+  const data = row?.assembly_booklet_data || {};
+  const year = Number(String(row?.meeting_date || row?.title || '').match(/(?:19|20)\d{2}/)?.[0] || new Date().getFullYear());
+  const limit = Number(data.borrowing_limit || 0);
+  const rule = String(data.borrowing_rule || '').trim();
+  const purpose = String(data.borrowing_purpose || '').trim() || '조합 사업 추진에 필요한 자금 조달';
+  return {
+    key: 'borrowing-limit',
+    title: `${year}년도 차입금 최고한도액 결정의 건`,
+    background: `${year}년도 사업계획을 수행하는 데 필요한 차입의 최고한도를 총회에서 정하기 위함입니다.`,
+    proposal: `차입금 최고한도: ${limit > 0 ? money(limit) : (rule || '한도액 또는 산정 기준을 입력해 주세요.')}\n사용 목적: ${purpose}`,
+    decision: `${year}년도 차입금 최고한도액을 심의하여 결정하고자 합니다.`,
+    attachments: []
+  };
+}
+
+function otherAgendaBill(row) {
+  const data = row?.assembly_booklet_data || {};
+  const detail = String(data.other_agenda_text || '').trim();
+  return {
+    key: 'other-agenda',
+    title: '기타안건',
+    background: '총회에서 추가로 공유하거나 논의할 사항을 확인하기 위함입니다.',
+    proposal: detail || '총회 당일 제안되는 기타 사항을 논의합니다.',
+    decision: '제안된 기타 사항을 논의하고 필요한 경우 처리 방향을 정합니다.',
+    attachments: []
   };
 }
 
@@ -376,11 +433,13 @@ export function buildAssemblyAgendaPlan({ row, agendas, coopName, officials, sou
   return [
     previousMinuteBill(sourceContext),
     auditBill({ row, coopName, officials, sourceContext }),
-    closingBill(sourceContext),
+    closingBill(row, sourceContext),
     dividendBill(sourceContext),
     capitalReturnBill(sourceContext),
     businessPlanBill(row, sourceContext),
-    ...(agendas || []).map(additionalAgendaBill)
+    borrowingLimitBill(row),
+    ...(agendas || []).map(additionalAgendaBill),
+    otherAgendaBill(row)
   ].filter(Boolean).map((item, index) => ({ ...item, number: index + 1 }));
 }
 
@@ -401,8 +460,7 @@ function assemblyBill(item) {
   return `<h1>제${item.number}호 의안</h1>
     <h2>${safe(item.title)}</h2>
     <h3>1. 제안사유</h3><p>${blocks(item.background)}</p>
-    <h3>2. 주요내용</h3><p>${blocks(item.proposal)}</p>
-    <h3>3. 의결 주문</h3><p>${blocks(item.decision)}</p>
+    <h3>2. 주요내용</h3>${item.proposalHtml || `<p>${blocks(item.proposal)}</p>`}
     ${item.sourceAgenda?.document_notes ? `<h3>자료 메모</h3><p>${blocks(item.sourceAgenda.document_notes)}</p>` : ''}`;
 }
 
@@ -414,12 +472,16 @@ export function buildAssemblyMaterials({ row, agendas, coopName, company, offici
   const plan = buildAssemblyAgendaPlan({ row, agendas, coopName, officials, sourceContext });
   const chapters = [
     chapter('cover', '표지', `<div class="assembly-cover"><p class="org-name">${safe(coopName)}</p><p>${safe(String(row.meeting_date || '').slice(0, 4) || new Date().getFullYear())}년도</p><h1>${safe(row.title)}</h1><dl><dt>일시</dt><dd>${dateText(row.meeting_date)} ${timeText(row)}</dd><dt>장소</dt><dd>${safe(row.location || '미정')}</dd></dl></div>`, 'cover'),
-    chapter('inside-cover', '표지 안쪽 빈 면', '<div class="assembly-inside-cover" aria-label="책자 표지 안쪽 빈 면"></div>', 'inside-cover'),
+    chapter('front-blank-1', '표지 뒤 여백 1', '<div class="assembly-book-blank" aria-label="표지 뒤 여백 1"></div>', 'book-blank front-blank'),
+    chapter('front-blank-2', '표지 뒤 여백 2', '<div class="assembly-book-blank" aria-label="표지 뒤 여백 2"></div>', 'book-blank front-blank'),
+    chapter('front-blank-3', '표지 뒤 여백 3', '<div class="assembly-book-blank" aria-label="표지 뒤 여백 3"></div>', 'book-blank front-blank'),
     chapter('order', '총회 순서', assemblyOrder(row, plan), 'order'),
     ...plan.flatMap((item) => [
       chapter(`bill-${item.number}-${item.key}`, `제${item.number}호 의안 ${item.title}`, assemblyBill(item), 'bill'),
       ...(item.attachments || [])
     ]),
+    chapter('rear-blank-1', '뒷표지 앞 여백 1', '<div class="assembly-book-blank" aria-label="뒷표지 앞 여백 1"></div>', 'book-blank rear-blank'),
+    chapter('rear-blank-2', '뒷표지 앞 여백 2', '<div class="assembly-book-blank" aria-label="뒷표지 앞 여백 2"></div>', 'book-blank rear-blank'),
     chapter('back-cover', '뒷표지', `<div class="assembly-back"><h1>햇빛으로 만드는<br>우리의 내일</h1><p>함께해주신 조합원 여러분 감사합니다.</p><hr><h2>${safe(coopName)}</h2><p>${safe(company?.homepage || 'https://www.yonginsolar.kr')}</p><p>${safe(company?.address || '')}</p><p>${safe(company?.phone || '')}　${safe(company?.email || '')}</p></div>`, 'back')
   ];
   return chapters.join('');
