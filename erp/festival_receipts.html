@@ -1,18 +1,111 @@
-<!doctype html><html lang="ko"><head>
-<!-- Version: v1.0.2 | Illustrated solar flow handout -->
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer">
-<title>축제 현금영수증 신청 관리 | 용인모두의햇빛협동조합</title>
-<link rel="icon" href="../shared/sun_favicon.svg" type="image/svg+xml"><script src="../shared/theme.js?v=20260802-1"></script><link rel="stylesheet" href="../shared/festival.css?v=1.0.1">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
-</head><body><main class="festival-page admin" data-version="1.0.2">
-<header><span class="eyebrow">용인모두의햇빛협동조합</span><h1>축제 현금영수증 신청 관리</h1><p>태양광 선풍기 만들기 체험</p></header>
-<nav class="toolbar"><a class="button secondary" href="index.html">ERP 메뉴로</a><a class="button secondary" href="../festival.html" target="_blank" rel="noopener">입금 안내 페이지</a></nav>
-<p id="accessStatus" class="status" role="status">관리 권한을 확인하고 있습니다.</p>
-<a id="loginLink" class="button" hidden>ERP 로그인</a>
-<section id="adminPanel" hidden>
-<div class="card"><h2>인쇄용 안내판</h2><div class="toolbar"><a href="../assets/festival/solar-fan-open-a4.pdf" target="_blank" rel="noopener">체험 안내</a><a href="../assets/festival/solar-fan-closed-a4.pdf" target="_blank" rel="noopener">체험 마감</a><a href="../assets/festival/solar-power-flow-a4.pdf?v=20260916-2" target="_blank" rel="noopener">태양광 발전 원리</a></div></div>
-<div class="card"><h2 id="countTitle">신청 내역</h2><p>은행 입금 내역을 확인한 뒤 현금영수증을 발급해 주세요. 실제 발급을 마친 건만 ‘발급 완료’로 표시합니다.</p><p class="small muted">입금 자동 확인·현금영수증 자동 발급 기능은 아닙니다. 신청 정보는 신청일부터 90일 후 삭제됩니다.</p>
-<div class="toolbar"><button type="button" id="refresh">새로고침</button><button type="button" id="exportCsv" class="secondary">신청 내역 CSV 다운로드</button></div><p id="adminStatus" role="status" class="status"></p>
-<div class="table-wrap"><table><thead><tr><th>신청 일시</th><th>입금자명</th><th>입금액</th><th>전화번호</th><th>처리</th></tr></thead><tbody id="receiptRows"></tbody></table></div>
-<div class="toolbar"><button type="button" class="secondary" id="previous" hidden>이전 100건</button><button type="button" class="secondary" id="next" hidden>다음 100건</button></div></div>
-</section></main><script src="festival_receipts.js?v=1.0.1"></script></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <!-- Version: v2.0.0 | Cash sales, receipt requests, and inventory -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="no-referrer">
+  <title>축제 현금매출·재고 관리 | 용인모두의햇빛협동조합</title>
+  <link rel="icon" href="../shared/sun_favicon.svg" type="image/svg+xml">
+  <script src="../shared/theme.js?v=20260802-1"></script>
+  <link rel="stylesheet" href="../shared/festival.css?v=2.0.0">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+</head>
+<body>
+<main class="festival-page admin" data-version="2.0.0">
+  <header>
+    <span class="eyebrow">용인모두의햇빛협동조합</span>
+    <h1>축제 현금매출·재고 관리</h1>
+    <p>판매 기록, 현금영수증 신청, 물품 재고를 한곳에서 관리합니다.</p>
+  </header>
+  <nav class="toolbar page-nav">
+    <a class="button secondary" href="index.html">ERP 메뉴로</a>
+    <a class="button secondary" href="accounting.html">회계관리</a>
+    <a class="button secondary" href="../festival.html" target="_blank" rel="noopener">입금 안내 페이지</a>
+  </nav>
+  <p id="accessStatus" class="status" role="status">관리 권한을 확인하고 있습니다.</p>
+  <a id="loginLink" class="button" hidden>ERP 로그인</a>
+
+  <section id="adminPanel" hidden>
+    <div class="card">
+      <div class="section-heading">
+        <div><h2>📦 재고 현황</h2><p class="muted">전자결재에서 재고 입고를 지정하면 결재 완료 시 자동으로 늘어납니다.</p></div>
+        <button type="button" id="refresh" class="secondary compact">새로고침</button>
+      </div>
+      <div id="inventoryCards" class="summary-grid" aria-live="polite"></div>
+      <details class="sub-panel">
+        <summary>새 물품 등록</summary>
+        <form id="itemForm" class="form-grid compact-form">
+          <label>물품명<input id="newItemName" maxlength="100" placeholder="예: 태양광 선풍기 키트" required></label>
+          <label>단위<input id="newItemUnit" maxlength="20" value="개" required></label>
+          <button type="submit">물품 등록</button>
+        </form>
+      </details>
+      <details class="sub-panel">
+        <summary>무료 사용·불량·실사 조정 기록</summary>
+        <form id="movementForm" class="form-grid">
+          <label>날짜<input type="date" id="movementDate" required></label>
+          <label>물품<select id="movementItem" required></select></label>
+          <label>구분<select id="movementType" required><option value="event_use">무료 체험·행사 사용</option><option value="defect">불량·폐기</option><option value="adjustment_in">실사 증가</option><option value="adjustment_out">실사 감소</option></select></label>
+          <label>수량<input type="number" min="1" step="1" inputmode="numeric" id="movementQuantity" required></label>
+          <label class="wide">메모<input id="movementNote" maxlength="500" placeholder="어느 행사에서 사용했는지 또는 조정 사유"></label>
+          <button type="submit">재고 변동 저장</button>
+        </form>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>💵 현금매출 등록</h2>
+      <p class="muted">판매 수량과 판매가는 행사마다 다르게 입력할 수 있습니다. 계좌 수납과 현장 현금의 합계가 매출과 과오납의 합계와 맞아야 저장됩니다.</p>
+      <form id="saleForm" class="form-grid">
+        <label>판매일<input type="date" id="saleDate" required></label>
+        <label class="wide">행사명<input id="eventName" maxlength="120" placeholder="예: 느티나무 축제 태양광 선풍기 체험" required></label>
+        <label>판매 물품<select id="saleItem" required></select></label>
+        <label>판매 수량<input type="number" min="1" step="1" inputmode="numeric" id="saleQuantity" required></label>
+        <label>개당 판매가<input type="number" min="0" step="1" inputmode="numeric" id="saleUnitPrice" required></label>
+        <label>계좌로 받은 금액<input type="number" min="0" step="1" inputmode="numeric" id="saleBank" value="0" required></label>
+        <label>현장에서 받은 현금<input type="number" min="0" step="1" inputmode="numeric" id="saleCash" value="0" required></label>
+        <label>현금영수증 발급 건수<input type="number" min="0" step="1" inputmode="numeric" id="receiptIssuedCount" value="0" required></label>
+        <label>현금영수증 발급 금액<input type="number" min="0" step="1" inputmode="numeric" id="receiptIssuedAmount" value="0" required></label>
+        <label>현금영수증 신청 없음 건수<input type="number" min="0" step="1" inputmode="numeric" id="receiptNoneCount" value="0" required></label>
+        <label>현금영수증 신청 없음 금액<input type="number" min="0" step="1" inputmode="numeric" id="receiptNoneAmount" value="0" required></label>
+        <label>더 들어온 금액(과오납)<input type="number" min="0" step="1" inputmode="numeric" id="overpaymentAmount" value="0" required></label>
+        <label>과오납 입금자명<input id="overpaymentName" maxlength="60" placeholder="과오납이 있을 때만 입력"></label>
+        <label class="wide">메모<input id="saleNote" maxlength="500" placeholder="선택 사항"></label>
+        <div id="saleSummary" class="calculation wide" aria-live="polite"></div>
+        <button type="submit">매출·출고·회계전표 함께 저장</button>
+      </form>
+      <p id="operationStatus" class="status" role="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>📒 등록된 매출</h2>
+      <p class="small muted">현장 현금을 통장에 입금한 뒤에만 `현금 통장입금 처리`를 누르세요. 이 처리는 매출을 다시 만들지 않고 시재금을 보통예금으로 옮깁니다.</p>
+      <div class="table-wrap"><table><thead><tr><th>판매일</th><th>행사·물품</th><th>수량×판매가</th><th>수납</th><th>현금영수증</th><th>과오납</th><th>현금 입금</th></tr></thead><tbody id="salesRows"></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>🔎 최근 재고 변동</h2>
+      <div class="table-wrap"><table><thead><tr><th>날짜</th><th>물품</th><th>구분</th><th>수량</th><th>메모</th></tr></thead><tbody id="movementRows"></tbody></table></div>
+    </div>
+
+    <div class="card">
+      <h2>🖨️ 인쇄용 안내판</h2>
+      <div class="toolbar"><a href="../assets/festival/solar-fan-open-a4.pdf" target="_blank" rel="noopener">체험 안내</a><a href="../assets/festival/solar-fan-closed-a4.pdf" target="_blank" rel="noopener">체험 마감</a><a href="../assets/festival/solar-power-flow-a4.pdf?v=20260916-2" target="_blank" rel="noopener">태양광 발전 원리</a></div>
+    </div>
+
+    <div class="card">
+      <h2 id="countTitle">현금영수증 신청 내역</h2>
+      <p>은행 입금 내역을 확인한 뒤 현금영수증을 발급해 주세요. 실제 발급을 마친 건만 ‘발급 완료’로 표시합니다.</p>
+      <p class="small muted">입금 자동 확인·현금영수증 자동 발급 기능은 아닙니다. 신청 정보는 신청일부터 90일 후 삭제됩니다.</p>
+      <div class="toolbar"><button type="button" id="refreshReceipts" class="secondary compact">신청 새로고침</button><button type="button" id="exportCsv" class="secondary compact">신청 내역 CSV 다운로드</button></div>
+      <p id="adminStatus" role="status" class="status"></p>
+      <div class="table-wrap"><table><thead><tr><th>신청 일시</th><th>입금자명</th><th>입금액</th><th>전화번호</th><th>처리</th></tr></thead><tbody id="receiptRows"></tbody></table></div>
+      <div class="toolbar"><button type="button" class="secondary compact" id="previous" hidden>이전 100건</button><button type="button" class="secondary compact" id="next" hidden>다음 100건</button></div>
+    </div>
+  </section>
+</main>
+<script src="festival_receipts.js?v=2.0.0"></script>
+</body>
+</html>
