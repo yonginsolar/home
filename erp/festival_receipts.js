@@ -1,10 +1,17 @@
-/* v2.0.0 - Cash sales, cash deposits, inventory, and receipt requests. */
+/* v2.0.2 - Cash sales, inventory, receipts, and host-aware ERP access. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
   const client = window.supabase.createClient(
     'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
-    'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
+    'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',
+    {
+      global: {
+        headers: {
+          'x-erp-host': String(window.location.hostname || '').trim().toLowerCase()
+        }
+      }
+    }
   );
   const money = (value) => `${Number(value || 0).toLocaleString('ko-KR')}원`;
   const kstToday = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
