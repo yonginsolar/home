@@ -1,6 +1,6 @@
 /*
-Version: v1.5.2
-Change: 2026-09-19 - Print concise closing statements and keep two-page audit reports in even-page booklets.
+Version: v1.5.3
+Change: 2026-09-19 - Notify auditors through Telegram first and approved Kakao fallback after preparing an audit report.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.50';
@@ -909,6 +909,19 @@ async function saveInfo({ quiet = false } = {}) {
   return true;
 }
 
+async function notifyAuditReportSigners(minuteId) {
+  const safeMinuteId = String(minuteId || '').trim();
+  if (!safeMinuteId) return { ok: false, error: 'MINUTE_ID_REQUIRED' };
+  const response = await supabase.functions.invoke('signature-telegram-dm', {
+    body: {
+      minuteId: safeMinuteId,
+      signBaseUrl: new URL('/minutes/minutes_sign.html', window.location.origin).toString()
+    }
+  });
+  if (response.error) throw response.error;
+  return response.data || {};
+}
+
 async function prepareAuditReport() {
   if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
     throw new Error('감사보고서 연동은 정기총회에서만 사용합니다.');
@@ -933,8 +946,29 @@ async function prepareAuditReport() {
   await loadAssemblySources();
   refreshAutoDrafts({ render: state.currentStep === 'documents' });
   const minuteId = data?.id || state.sourceContext?.audit_report?.id;
+  let notification = null;
+  let notificationError = null;
+  if (minuteId) {
+    try {
+      notification = await notifyAuditReportSigners(minuteId);
+    } catch (error) {
+      notificationError = error;
+      console.warn('notifyAuditReportSigners failed:', error?.message || error);
+    }
+  }
   if (minuteId) window.open(`/minutes/minutes_sign.html?minuteId=${encodeURIComponent(minuteId)}`, '_blank', 'noopener');
-  showToast('감사보고서를 감사 전자검토·서명 문서로 준비했습니다.', 3600);
+  const sentCount = Number(notification?.sentCount || 0);
+  const pendingKakaoCount = Number(notification?.kakaoTemplatePendingCount || 0);
+  const failedCount = Number(notification?.failedCount || 0);
+  if (sentCount > 0) {
+    showToast(`감사보고서를 준비하고 서명 요청 ${sentCount}건을 보냈습니다.`, 4200);
+  } else if (pendingKakaoCount > 0) {
+    showToast('감사보고서를 준비했습니다. 알림톡 검수 완료 뒤 문서함에서 서명 요청을 다시 보내 주세요.', 5200);
+  } else if (notificationError || failedCount > 0) {
+    showToast('감사보고서는 준비됐지만 서명 요청 알림은 다시 보내 주세요.', 4600);
+  } else {
+    showToast('감사보고서를 감사 전자검토·서명 문서로 준비했습니다.', 3600);
+  }
 }
 
 function openAuditReport() {

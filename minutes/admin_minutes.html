@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.71
-Change: 2026-09-18 - Label linked audit reports and load the guarded audit editing service.
+Version: v1.2.72
+Change: 2026-09-19 - Report Telegram-first and Kakao fallback signature notification results without channel-specific wording.
 -->
 <html lang="ko">
 <head>
@@ -790,7 +790,7 @@ Change: 2026-09-18 - Label linked audit reports and load the guarded audit editi
 
             const data = response.data || {};
             if (Number(data?.failedCount || 0) > 0) {
-                console.warn('signature telegram dispatch partial failure:', data);
+                console.warn('signature notification dispatch partial failure:', data);
             }
             return data;
         } // End of triggerSignatureTelegramNotification
@@ -799,13 +799,15 @@ Change: 2026-09-18 - Label linked audit reports and load the guarded audit editi
             try {
                 const result = await triggerSignatureTelegramNotification(minuteId);
                 if (Number(result?.sentCount || 0) > 0) {
-                    showToast(`Telegram 리마인드 ${result.sentCount}건을 발송했습니다.`);
+                    showToast(`서명 요청 알림 ${result.sentCount}건을 발송했습니다.`);
+                } else if (Number(result?.kakaoTemplatePendingCount || 0) > 0) {
+                    showToast('알림톡 검수 완료 뒤 다시 보내 주세요.');
                 } else {
-                    showToast('발송 가능한 Telegram 리마인드 대상이 없습니다.');
+                    showToast('새로 발송할 서명 요청 대상이 없습니다.');
                 }
             } catch (error) {
                 console.warn('remindMinuteSigners failed:', error?.message || error);
-                showToast('Telegram 리마인드 발송 실패: ' + (error?.message || 'Unknown error'));
+                showToast('서명 요청 알림 발송 실패: ' + (error?.message || 'Unknown error'));
             }
         };
 
@@ -3082,13 +3084,15 @@ Change: 2026-09-18 - Label linked audit reports and load the guarded audit editi
                 try {
                     const notifyResult = await triggerSignatureTelegramNotification(minuteId);
                     if (Number(notifyResult?.sentCount || 0) > 0) {
-                        showToast(`서명자 구성이 저장되었습니다. Telegram 알림 ${notifyResult.sentCount}건을 발송했습니다.`);
+                        showToast(`서명자 구성이 저장되었습니다. 서명 요청 알림 ${notifyResult.sentCount}건을 발송했습니다.`);
+                    } else if (Number(notifyResult?.kakaoTemplatePendingCount || 0) > 0) {
+                        showToast('서명자 구성이 저장되었습니다. 알림톡 검수 완료 뒤 다시 보내 주세요.');
                     } else {
                         showToast('서명자 구성이 저장되었습니다.');
                     }
                 } catch (error) {
                     console.warn('triggerSignatureTelegramNotification after saveSignerEditor failed:', error?.message || error);
-                    showToast('서명자 구성이 저장되었습니다. Telegram 알림은 다시 시도해 주세요.');
+                    showToast('서명자 구성이 저장되었습니다. 서명 요청 알림은 다시 시도해 주세요.');
                     window.closeSignerEditor();
                     loadMinutes();
                     return;
@@ -3958,13 +3962,15 @@ Change: 2026-09-18 - Label linked audit reports and load the guarded audit editi
                     try {
                         const notifyResult = await triggerSignatureTelegramNotification(id);
                         if (Number(notifyResult?.sentCount || 0) > 0) {
-                            showToast(`서명 개시와 함께 Telegram 알림 ${notifyResult.sentCount}건을 발송했습니다.`);
+                            showToast(`서명 개시와 함께 서명 요청 알림 ${notifyResult.sentCount}건을 발송했습니다.`);
+                        } else if (Number(notifyResult?.kakaoTemplatePendingCount || 0) > 0) {
+                            showToast('서명 상태가 열렸습니다. 알림톡 검수 완료 뒤 다시 보내 주세요.');
                         } else {
                             showToast('서명 상태가 변경되었습니다.');
                         }
                     } catch (notifyError) {
                         console.warn('triggerSignatureTelegramNotification after toggleStatus failed:', notifyError?.message || notifyError);
-                        showToast('서명 상태는 변경되었지만 Telegram 알림 발송은 다시 시도해 주세요.');
+                        showToast('서명 상태는 변경되었지만 서명 요청 알림 발송은 다시 시도해 주세요.');
                         loadMinutes();
                         return;
                     }
