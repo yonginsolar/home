@@ -1,11 +1,11 @@
 /*
-Version: v1.5.3
-Change: 2026-09-19 - Notify auditors through Telegram first and approved Kakao fallback after preparing an audit report.
+Version: v1.5.5
+Change: 2026-09-19 - Apply tenant organization variables to every meeting document and scenario.
 */
 import { supabase } from '../shared/supabase-client.js';
-import { MinutesService } from './MinutesService.js?v=1.0.50';
+import { MinutesService } from './MinutesService.js?v=1.0.51';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.4.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.5.1';
+import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.5.3';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -1076,6 +1076,10 @@ const BOOK_PRINT_CSS = `
   .source-agenda-row{display:grid;grid-template-columns:95pt 1fr;gap:3pt 9pt;padding:5pt 0;border-bottom:.5pt solid #cbd5e1}
   .source-agenda-row small{grid-column:2}
   .board-one-paper h1{text-align:center;font-size:19pt}.board-one-paper h2{font-size:13pt;margin:10pt 0 4pt}.board-one-paper .source-agenda-row{padding:3pt 0}
+  .meeting-org-info{margin:14pt 0 0;padding:9pt 10pt;border:1pt solid #cbd5e1;border-radius:7pt;background:#f8fafc;text-align:left;break-inside:avoid}
+  .meeting-org-info>div{display:grid;grid-template-columns:58pt minmax(0,1fr);gap:5pt 8pt;padding:2pt 0}
+  .meeting-org-info dt,.meeting-org-info dd{font-size:11pt}.meeting-org-info dt{color:#9a3412;font-weight:900}.meeting-org-info dd{margin:0;overflow-wrap:anywhere}
+  .assembly-back .meeting-org-info{width:155mm;margin:16pt auto 0}
   .meeting-chapter{page:book;min-height:259mm;break-after:page;position:relative}
   .meeting-chapter:last-child{break-after:auto}
   .chapter-pdf-attachment{display:flex;align-items:center;justify-content:center;overflow:hidden}

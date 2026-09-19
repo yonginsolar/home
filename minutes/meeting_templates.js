@@ -1,6 +1,6 @@
 /*
-Version: v1.5.1
-Change: 2026-09-19 - Add auditor-written opinions, concise closing statements, and two-page audit booklet pagination metadata.
+Version: v1.5.3
+Change: 2026-09-19 - Use tenant organization variables throughout meeting materials and remove the optional national ceremony.
 */
 
 const safe = (value) => String(value ?? '')
@@ -62,7 +62,44 @@ function boardMeta(row) {
   </tbody></table>`;
 }
 
-export function buildBoardMaterials({ row, agendas, coopName }) {
+function firstCompanyValue(company, ...keys) {
+  for (const key of keys) {
+    const value = String(company?.[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function organizationProfile(company, coopName) {
+  const contactName = firstCompanyValue(company, 'contact_name', 'company_contact_name');
+  const phone = firstCompanyValue(company, 'contact_phone', 'company_contact_phone', 'phone');
+  const rawContact = firstCompanyValue(company, 'contact', 'company_contact');
+  const contact = rawContact || [contactName, phone].filter(Boolean).join(' · ');
+  return {
+    name: String(coopName || firstCompanyValue(company, 'company_name', 'orgName') || '협동조합').trim(),
+    address: firstCompanyValue(company, 'address', 'company_address'),
+    contact,
+    phone,
+    email: firstCompanyValue(company, 'email', 'company_email'),
+    homepage: firstCompanyValue(company, 'homepage', 'homepage_url', 'website', 'site_url')
+  };
+}
+
+function organizationInfo(company, coopName, { includeName = true } = {}) {
+  const profile = organizationProfile(company, coopName);
+  const rows = [];
+  if (includeName && profile.name) rows.push(['조합', profile.name]);
+  if (profile.address) rows.push(['주소', profile.address]);
+  if (profile.contact) rows.push(['담당', profile.contact]);
+  const contactContainsPhone = profile.phone && profile.contact.replace(/\D/g, '').includes(profile.phone.replace(/\D/g, ''));
+  if (profile.phone && !contactContainsPhone) rows.push(['전화', profile.phone]);
+  if (profile.email) rows.push(['이메일', profile.email]);
+  if (profile.homepage) rows.push(['홈페이지', profile.homepage]);
+  if (!rows.length) return '';
+  return `<dl class="meeting-org-info">${rows.map(([label, value]) => `<div><dt>${safe(label)}</dt><dd>${safe(value)}</dd></div>`).join('')}</dl>`;
+}
+
+export function buildBoardMaterials({ row, agendas, coopName, company }) {
   const groups = typeGroups(agendas);
   const groupBlock = (title, label, rows) => `
     <h2>${safe(title)}</h2>
@@ -76,6 +113,7 @@ export function buildBoardMaterials({ row, agendas, coopName }) {
     ${groupBlock('4. 기타 안건', '기타', groups.OTHER)}
     <h2>[메모]</h2>
     <p>${blocks(row.document_notes, ' ')}</p>
+    ${organizationInfo(company, coopName)}
   </article>`;
 }
 
@@ -100,12 +138,13 @@ function boardScenarioAgenda(agenda, index, facilitator) {
     <p class="speaker"><strong>의장</strong> ${decision}</p>${note}${memo}`;
 }
 
-export function buildBoardScenario({ row, agendas, chairName }) {
+export function buildBoardScenario({ row, agendas, chairName, coopName, company }) {
   const facilitator = row.facilitator_name || '사무국장';
   const body = (agendas || []).map((agenda, index) => boardScenarioAgenda(agenda, index, facilitator)).join('<hr>');
   return `<article class="board-scenario">
-    <h1>${safe(row.title)} 진행 시나리오</h1>
+    <h1>${safe(coopName)} ${safe(row.title)} 진행 시나리오</h1>
     <p class="scenario-meta"><strong>일시</strong> ${dateText(row.meeting_date)} ${timeText(row)}　<strong>장소</strong> ${safe(row.location || '미정')}　<strong>진행</strong> ${safe(chairName || '의장')}</p>
+    ${organizationInfo(company, coopName)}
     ${row.document_notes ? `<p><strong>준비 메모</strong><br>${blocks(row.document_notes)}</p>` : ''}
     <h2>개회 선언</h2>
     <p class="speaker"><strong>의장</strong> ${blocks(row.opening_message, `바쁘신 일정 중에도 참석해 주신 임원 여러분께 감사드립니다. 현재 재적 이사 ${Number(row.eligible_count || 0)}명 중 ____명이 참석하여 이사회 성원이 충족되었습니다.`)}</p>
@@ -504,7 +543,7 @@ function assemblyOrder(row, plan) {
   return `<h1>${safe(row.title)} 순서</h1>
     <p class="chapter-subtitle">${dateText(row.meeting_date)} · ${timeText(row)} · ${safe(row.location || '장소 미정')}</p>
     <h2>[제1부] 개회식</h2>
-    <ol><li>개회 선언</li><li>국민의례</li><li>이사장 인사</li><li>기념 촬영</li></ol>
+    <ol><li>개회 선언</li><li>의장 인사</li><li>기념 촬영</li></ol>
     <h2>[제2부] 본회의</h2>
     <ol><li>성원 보고 및 개회 선언</li><li>서기 및 기명날인인 선임</li><li>의사일정 확정</li><li>부의 안건 심의</li></ol>
     <ol class="bill-list">${agendaItems || '<li>안건을 입력하면 이곳에 순서대로 표시됩니다.</li>'}</ol>
@@ -526,6 +565,7 @@ function sourceAttachment(title, intro, rows = []) {
 
 export function buildAssemblyMaterials({ row, agendas, coopName, company, officials, sourceContext }) {
   const plan = buildAssemblyAgendaPlan({ row, agendas, coopName, officials, sourceContext });
+  const companyProfile = organizationProfile(company, coopName);
   const chapters = [
     chapter('cover', '표지', `<div class="assembly-cover"><p class="org-name">${safe(coopName)}</p><p>${safe(String(row.meeting_date || '').slice(0, 4) || new Date().getFullYear())}년도</p><h1>${safe(row.title)}</h1><dl><dt>일시</dt><dd>${dateText(row.meeting_date)} ${timeText(row)}</dd><dt>장소</dt><dd>${safe(row.location || '미정')}</dd></dl></div>`, 'cover'),
     chapter('front-blank-1', '표지 뒤 여백 1', '<div class="assembly-book-blank" aria-label="표지 뒤 여백 1"></div>', 'book-blank front-blank'),
@@ -538,12 +578,12 @@ export function buildAssemblyMaterials({ row, agendas, coopName, company, offici
     ]),
     chapter('rear-blank-1', '뒷표지 앞 여백 1', '<div class="assembly-book-blank" aria-label="뒷표지 앞 여백 1"></div>', 'book-blank rear-blank'),
     chapter('rear-blank-2', '뒷표지 앞 여백 2', '<div class="assembly-book-blank" aria-label="뒷표지 앞 여백 2"></div>', 'book-blank rear-blank'),
-    chapter('back-cover', '뒷표지', `<div class="assembly-back"><h1>햇빛으로 만드는<br>우리의 내일</h1><p>함께해주신 조합원 여러분 감사합니다.</p><hr><h2>${safe(coopName)}</h2><p>${safe(company?.homepage || 'https://www.yonginsolar.kr')}</p><p>${safe(company?.address || '')}</p><p>${safe(company?.phone || '')}　${safe(company?.email || '')}</p></div>`, 'back')
+    chapter('back-cover', '뒷표지', `<div class="assembly-back"><h1>햇빛으로 만드는<br>우리의 내일</h1><p>함께해주신 조합원 여러분 감사합니다.</p><hr><h2>${safe(companyProfile.name)}</h2>${organizationInfo(company, coopName, { includeName:false })}</div>`, 'back')
   ];
   return chapters.join('');
 }
 
-export function buildAssemblyScenario({ row, agendas, chairName, coopName, officials, sourceContext }) {
+export function buildAssemblyScenario({ row, agendas, chairName, coopName, company, officials, sourceContext }) {
   const facilitator = row.facilitator_name || '사무국장';
   const plan = buildAssemblyAgendaPlan({ row, agendas, coopName, officials, sourceContext });
   const agendaScripts = plan.map((item) => `
@@ -554,15 +594,15 @@ export function buildAssemblyScenario({ row, agendas, chairName, coopName, offic
     <p class="speaker"><strong>의장</strong> ${blocks(item.decision, '원안대로 승인하는 데 이의 없으십니까?')}</p>
     ${item.sourceAgenda?.scenario_notes ? `<p class="action"><strong>진행 참고</strong> ${blocks(item.sourceAgenda.scenario_notes)}</p>` : ''}`).join('');
   return `<article class="assembly-scenario">
-    <h1>${safe(row.title)} 시나리오</h1>
+    <h1>${safe(coopName)} ${safe(row.title)} 시나리오</h1>
     <p class="scenario-meta"><strong>일시</strong> ${dateText(row.meeting_date)} ${timeText(row)}　<strong>사회</strong> ${safe(facilitator)}</p>
+    ${organizationInfo(company, coopName)}
     ${row.document_notes ? `<p><strong>준비 메모</strong><br>${blocks(row.document_notes)}</p>` : ''}
     <h2>[제1부] 개회식 진행 ${safe(facilitator)}</h2>
-    <p class="speaker"><strong>사회자</strong> 시작 5분 전 안내 말씀 드립니다. 잠시 후 ${safe(coopNameFor(row, '협동조합'))} ${safe(row.title)}를 시작하겠습니다.</p>
+    <p class="speaker"><strong>사회자</strong> 시작 5분 전 안내 말씀 드립니다. 잠시 후 ${safe(coopName || coopNameFor(row, '협동조합'))} ${safe(row.title)}를 시작하겠습니다.</p>
     <h3>1. 개회 선언</h3><p class="speaker"><strong>사회자</strong> 지금부터 ${safe(row.title)} 제1부 개회식을 시작하겠습니다.</p>
-    <h3>2. 국민의례</h3><p class="speaker"><strong>사회자</strong> 모두 자리에서 일어나 앞에 있는 국기를 향해 주십시오.</p>
-    <h3>3. 이사장 인사</h3><p class="speaker"><strong>사회자</strong> ${safe(chairName || '이사장')}님의 인사 말씀을 듣겠습니다.</p>
-    <h3>4. 기념 촬영</h3><p class="speaker"><strong>사회자</strong> 본격적인 회의에 앞서 기념 촬영을 진행하겠습니다.</p>
+    <h3>2. 의장 인사</h3><p class="speaker"><strong>사회자</strong> ${safe(chairName || '의장')}님의 인사 말씀을 듣겠습니다.</p>
+    <h3>3. 기념 촬영</h3><p class="speaker"><strong>사회자</strong> 본격적인 회의에 앞서 기념 촬영을 진행하겠습니다.</p>
     <h2>[제2부] 본회의 진행 의장</h2>
     <h3>1. 성원 보고 및 개회 선언</h3><p class="speaker"><strong>${safe(facilitator)}</strong> 총 재적 대의원 ${Number(row.eligible_count || 0)}명 중 현재 참석 ____명으로 성원 여부를 보고드립니다.</p>
     <p class="speaker"><strong>의장</strong> 성원이 되었으므로 ${safe(row.title)} 본회의 개회를 선언합니다.</p>

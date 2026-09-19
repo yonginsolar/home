@@ -1,6 +1,6 @@
 /*
-Version: v1.0.50
-Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report through a guarded RPC.
+Version: v1.0.51
+Change: 2026-09-19 - Normalize tenant-scoped organization contact fields for meeting documents.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -305,7 +305,30 @@ async function getCompanyInfo() {
         const { data: logoData } = supabase.storage.from('assets').getPublicUrl(info.logo_horizontal_url);
         if (logoData?.publicUrl) info.logo_horizontal_url = logoData.publicUrl;
     }
-    return { data: info, error };
+    const firstValue = (...keys) => {
+        for (const key of keys) {
+            const value = String(info[key] || '').trim();
+            if (value) return value;
+        }
+        return '';
+    };
+    const contactName = firstValue('company_contact_name', 'contact_name');
+    const contactPhone = firstValue('company_contact_phone', 'phone');
+    const contactLabel = firstValue('company_contact') || [contactName, contactPhone].filter(Boolean).join(' · ');
+    return {
+        data: {
+            ...info,
+            company_name: firstValue('company_name', 'orgName'),
+            address: firstValue('company_address', 'address'),
+            contact_name: contactName,
+            contact_phone: contactPhone,
+            contact: contactLabel,
+            phone: contactPhone,
+            email: firstValue('company_email', 'email'),
+            homepage: firstValue('homepage', 'homepage_url', 'website', 'site_url')
+        },
+        error
+    };
 }
 
 async function listMinutesAdmin() {
