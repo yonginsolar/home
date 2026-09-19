@@ -1,11 +1,11 @@
 /*
-Version: v1.5.0
-Change: 2026-09-19 - Add regular-assembly source inputs, budget validation and book-binding page normalization.
+Version: v1.5.2
+Change: 2026-09-19 - Print concise closing statements and keep two-page audit reports in even-page booklets.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.50';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.4.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.4.0';
+import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.5.1';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -228,7 +228,9 @@ function ensureEvenPhysicalPageCount(wrapper) {
   const back = wrapper.querySelector('.chapter-back');
   if (!back) return;
   wrapper.querySelectorAll('.chapter-rear-blank[data-parity-blank="true"]').forEach((node) => node.remove());
-  const physicalPages = wrapper.querySelectorAll('.meeting-chapter').length;
+  const embeddedExtraPages = [...wrapper.querySelectorAll('[data-book-page-count]')]
+    .reduce((total, node) => total + Math.max(0, Number(node.dataset.bookPageCount || 1) - 1), 0);
+  const physicalPages = wrapper.querySelectorAll('.meeting-chapter').length + embeddedExtraPages;
   if (physicalPages % 2 === 1) {
     const blank = createBindingBlank('rear', 3);
     blank.dataset.parityBlank = 'true';
@@ -1061,6 +1063,40 @@ const BOOK_PRINT_CSS = `
   .chapter-bill>h1{color:#ea580c;font-size:18pt}.chapter-bill>h2{font-size:23pt;color:#172033;margin-top:4pt}
   .bill-major-content{display:grid;grid-template-columns:88pt 1fr;border-top:2pt solid #fb923c;border-bottom:1pt solid #fed7aa;margin:10pt 0}.bill-major-content dt,.bill-major-content dd{margin:0;padding:10pt;border-bottom:1pt solid #fed7aa}.bill-major-content dt{font-weight:900;color:#9a3412;background:#fff7ed}.bill-major-content dd{background:#fff}.budget-balance{padding:8pt 10pt;border-radius:7pt;font-weight:800}.budget-balance.is-balanced{background:#ecfdf5;color:#047857}.budget-balance.is-unbalanced{background:#fef2f2;color:#b91c1c}
   .chapter-financial>h1,.chapter-minutes>h1,.chapter-audit>h1{border-bottom-color:#fb923c}
+  .audit-report-document{color:#1e293b}
+  .audit-document-heading{text-align:center;margin-bottom:20pt;padding-bottom:14pt;border-bottom:4pt solid #f97316}
+  .audit-document-heading>span{display:inline-block;margin-bottom:6pt;color:#c2410c;font-weight:900}
+  .audit-document-heading h1{margin:0;padding:0;border:0;font-size:27pt;letter-spacing:.22em}
+  .audit-document-heading p{margin:7pt 0 0;color:#475569;font-weight:800}
+  .audit-meta-table{margin:0 0 14pt}
+  .audit-meta-table th{width:86pt;text-align:left}
+  .audit-purpose{margin:12pt 0 18pt;padding:10pt 12pt;border-left:5pt solid #fb923c;background:#fffaf5}
+  .audit-result-block{margin:10pt 0;padding:12pt 14pt;border:1pt solid #e2e8f0;border-radius:8pt;background:#f8fafc;break-inside:avoid}
+  .audit-result-block h3{margin-top:0;color:#1e293b}
+  .audit-writing-box{margin-top:10pt;padding:10pt 12pt;border:1pt solid #fdba74;border-radius:7pt;background:#fff;break-inside:avoid}
+  .audit-writing-box>strong{display:block;margin-bottom:5pt;color:#9a3412}
+  .audit-writing-box p{min-height:18pt;margin:0;white-space:pre-wrap}
+  .audit-writing-box-required{border-width:2pt;background:#fffaf5}
+  .audit-overall-opinion{font-weight:800}
+  .audit-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7pt;margin:10pt 0}
+  .audit-summary-grid>div{padding:9pt 10pt;border:1pt solid #e2e8f0;border-radius:7pt;background:#f8fafc;break-inside:avoid}
+  .audit-summary-grid span{display:block;color:#64748b}.audit-summary-grid strong{display:block;margin-top:4pt;font-variant-numeric:tabular-nums}
+  .audit-signature-date{margin-top:24pt;text-align:center}.audit-signers{width:260pt;margin-left:auto;text-align:right;break-inside:avoid}.audit-signers>strong{display:block;margin-bottom:7pt}
+  .financial-statement-page{color:#1e293b}
+  .financial-statement-heading{text-align:center;margin-bottom:20pt;padding:18pt 14pt 15pt;border-top:5pt solid #f97316;border-bottom:1pt solid #fdba74;background:#fffaf5;break-inside:avoid}
+  .financial-statement-heading>span{display:inline-block;padding:4pt 9pt;border-radius:999pt;background:#ffedd5;color:#9a3412;font-weight:900}
+  .financial-statement-heading h1{margin:9pt 0 4pt;padding:0;border:0;font-size:21pt;line-height:1.3;letter-spacing:-.035em;color:#172033;word-break:keep-all}
+  .financial-statement-heading p{margin:0;font-weight:800;color:#475569}
+  .financial-statement-heading small{display:block;margin-top:8pt;text-align:right;color:#64748b}
+  .financial-statement-section{margin:0 0 18pt;break-inside:avoid}
+  .financial-balance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11pt;align-items:start}
+  .financial-balance-grid .financial-statement-section{margin-bottom:11pt}
+  .financial-balance-grid th,.financial-balance-grid td{padding:6pt}
+  .financial-statement-section h2{display:flex;align-items:center;gap:8pt;margin:0 0 7pt;padding:7pt 10pt;border-left:5pt solid #fb923c;background:#fff7ed;color:#7c2d12}
+  .financial-statement-section table{margin:0;border:1.5pt solid #64748b}
+  .financial-statement-section th{background:#ffedd5}.financial-statement-section tbody tr:nth-child(even){background:#f8fafc}
+  .financial-statement-section tfoot th{border-top:2pt solid #fb923c;background:#fff7ed;color:#7c2d12}
+  .financial-result{margin-top:22pt;padding-top:12pt;border-top:2pt solid #fb923c}
   .linked-minute img{max-width:100%;height:auto}
   .book-signature-section{margin-top:22pt;padding-top:14pt;border-top:2pt solid #fdba74;break-inside:avoid}
   .book-signature-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9pt}

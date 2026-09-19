@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.30
-Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report and lock it when signing starts.
+Version: v1.2.31
+Change: 2026-09-19 - Require a written overall audit opinion and present the audit report as a readable print document.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report and loc
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.30 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.31 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -326,6 +326,69 @@ Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report and loc
             line-height:1.55;
         }
         .audit-edit-help.show { display:block; }
+        #detail-content .audit-report-document {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: clamp(20px, 4vw, 42px);
+            border: 1px solid #dbe3ee;
+            border-radius: 18px;
+            background: #fff;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, .07);
+        }
+        #detail-content .audit-document-heading {
+            text-align: center;
+            margin-bottom: 28px;
+            padding-bottom: 20px;
+            border-bottom: 4px solid #f97316;
+        }
+        #detail-content .audit-document-heading > span {
+            display: inline-block;
+            margin-bottom: 8px;
+            color: #c2410c;
+            font-weight: 800;
+        }
+        #detail-content .audit-document-heading h1 { margin: 0; font-size: 2rem; letter-spacing: .24em; }
+        #detail-content .audit-document-heading p { margin: 10px 0 0; color: #475569; font-weight: 700; }
+        #detail-content .audit-meta-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
+        #detail-content .audit-meta-table th,
+        #detail-content .audit-meta-table td { border: 1px solid #cbd5e1; padding: 11px 13px; vertical-align: top; }
+        #detail-content .audit-meta-table th { width: 105px; background: #fff7ed; color: #9a3412; text-align: left; }
+        #detail-content .audit-purpose { padding: 14px 16px; border-left: 5px solid #fb923c; background: #fffaf5; }
+        #detail-content .audit-report-document h2 { margin-top: 30px; padding-bottom: 8px; border-bottom: 2px solid #fed7aa; color: #9a3412; }
+        #detail-content .audit-result-block { margin: 15px 0; padding: 17px; border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; }
+        #detail-content .audit-result-block h3 { margin-top: 0; }
+        #detail-content .audit-writing-box { margin-top: 14px; padding: 14px 16px; border: 1px solid #fdba74; border-radius: 12px; background: #fff; }
+        #detail-content .audit-writing-box > strong { display: block; margin-bottom: 7px; color: #9a3412; }
+        #detail-content .audit-writing-box p { min-height: 28px; margin: 0; white-space: pre-wrap; }
+        #detail-content .audit-writing-box-required { border-width: 2px; background: #fffaf5; }
+        #detail-content .audit-overall-opinion { font-weight: 700; }
+        #detail-content .audit-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        #detail-content .audit-summary-grid > div { padding: 13px 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+        #detail-content .audit-summary-grid span { display: block; color: #64748b; font-size: .86rem; }
+        #detail-content .audit-summary-grid strong { display: block; margin-top: 5px; font-size: 1.08rem; font-variant-numeric: tabular-nums; }
+        #detail-content .audit-signature-date { margin-top: 34px; text-align: center; }
+        #detail-content .audit-signers { margin-left: auto; width: min(100%, 360px); text-align: right; }
+        #detail-content .audit-signers > strong { display: block; margin-bottom: 10px; }
+        #detail-content.audit-editing .audit-optional-opinion:empty::before {
+            content: '필요한 의견이나 보완사항이 있을 때 입력하세요.';
+            color: #94a3b8;
+            font-weight: 500;
+        }
+        #detail-content.audit-editing .audit-optional-opinion,
+        #detail-content.audit-editing .audit-overall-opinion {
+            outline: 2px dashed #fdba74;
+            outline-offset: 5px;
+            border-radius: 4px;
+        }
+        html[data-theme="dark"] #detail-content .audit-report-document,
+        html[data-theme="dark"] #detail-content .audit-writing-box { background: var(--theme-surface-alt) !important; }
+        html[data-theme="dark"] #detail-content .audit-result-block,
+        html[data-theme="dark"] #detail-content .audit-summary-grid > div,
+        html[data-theme="dark"] #detail-content .audit-purpose { background: #172235 !important; }
+        @media (max-width: 640px) {
+            #detail-content .audit-summary-grid { grid-template-columns: 1fr; }
+            #detail-content .audit-document-heading h1 { font-size: 1.55rem; letter-spacing: .12em; }
+        }
     </style>
 </head>
 <body>
@@ -357,7 +420,7 @@ Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report and loc
             </div>
             <div class="detail-meta" id="detail-meta">-</div>
             <div class="detail-content" id="detail-content"></div>
-            <div class="audit-edit-help" id="audit-edit-help">감사보고서 본문을 직접 고친 뒤 저장하세요. 첫 전자서명이 들어가면 감사보고서 내용은 더 이상 바꿀 수 없습니다.</div>
+            <div class="audit-edit-help" id="audit-edit-help">업무·회계 감사 의견은 필요한 내용이 있을 때 입력하면 되고, 비워 두면 안내 문구 없이 빈칸으로 보관됩니다. 종합 의견은 반드시 확인·작성한 뒤 저장하세요. 첫 전자서명이 들어가면 내용은 더 이상 바꿀 수 없습니다.</div>
             <div class="attachment-panel" id="attachment-panel">
                 <div class="attachment-title">첨부파일</div>
                 <div class="attachment-list" id="attachment-list"></div>
@@ -564,8 +627,8 @@ Change: 2026-09-18 - Let assigned auditors edit an unsigned audit report and loc
             const parser = new DOMParser();
             const doc = parser.parseFromString(String(html || ''), 'text/html');
             const allowedTags = new Set([
-                'A','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6',
-                'HR','I','IMG','LI','OL','P','SPAN','STRONG','TABLE','TBODY','TD',
+                'A','ARTICLE','B','BR','BLOCKQUOTE','DIV','EM','H1','H2','H3','H4','H5','H6','HEADER',
+                'HR','I','IMG','LI','OL','P','SECTION','SPAN','STRONG','TABLE','TBODY','TD',
                 'TH','THEAD','TR','U','UL'
             ]);
             const blockedTags = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
@@ -1584,6 +1647,11 @@ async function openDocumentById(id) {
                 if (previewUploaded) await removeSignaturePreviewFile(currentMinuteId, signingOfficialId, signatureId);
                 if (options.removeUploadedRawOnFailure) await removeSignatureFile(signatureUrl);
                 const msg = (error.message || '').toLowerCase();
+                if (msg.includes('audit_overall_opinion_required')) {
+                    showToast('서명 전에 감사보고서의 종합 의견을 작성해 주세요.');
+                    if (String(currentMinuteDoc?.doc_type || '').toUpperCase() === 'AUDIT_REPORT') await editAuditReport();
+                    return;
+                }
                 if (error.status === 409 || msg.includes('conflict')) {
                     forceSignedOnce = true;
                     markLocallySigned(currentMinuteId);
@@ -1627,6 +1695,27 @@ async function openDocumentById(id) {
             }
         } // End of notifySignatureCompletionIfNeeded
 
+        function normalizeAuditReportContent(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(`<div>${String(html || '')}</div>`, 'text/html');
+            doc.querySelectorAll('.audit-optional-opinion').forEach((node) => {
+                const text = String(node.textContent || '').replace(/\u00a0/g, ' ').trim();
+                if (!text) node.innerHTML = '';
+            });
+            return sanitizeHtml(doc.body.firstElementChild?.innerHTML || '');
+        }
+
+        function getAuditOverallOpinion(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(String(html || ''), 'text/html');
+            const node = doc.querySelector('.audit-overall-opinion');
+            return String(node?.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function auditOverallOpinionIsReady(html) {
+            return getAuditOverallOpinion(html).length > 0;
+        }
+
         function leaveAuditEditMode({ restore = false } = {}) {
             const editor = document.getElementById('detail-content');
             if (restore) editor.innerHTML = sanitizeHtml(auditOriginalContent || '');
@@ -1664,8 +1753,13 @@ async function openDocumentById(id) {
         async function saveAuditReport() {
             if (!auditEditing || !currentMinuteId) return;
             const editor = document.getElementById('detail-content');
-            const safeContent = sanitizeHtml(editor.innerHTML || '');
+            const safeContent = normalizeAuditReportContent(editor.innerHTML || '');
             if (!safeContent.trim()) return showToast('감사보고서 내용을 입력해 주세요.');
+            if (!auditOverallOpinionIsReady(safeContent)) {
+                showToast('종합 의견은 반드시 작성해야 합니다.');
+                editor.querySelector('.audit-overall-opinion')?.focus();
+                return;
+            }
             const { error } = await MinutesService.updateMyAuditReport(currentMinuteId, safeContent);
             if (error) {
                 showToast('감사보고서 저장 실패: ' + (error.message || '확인할 수 없는 오류'));
@@ -1692,6 +1786,13 @@ async function openDocumentById(id) {
         window.handleSign = async () => {
             if (!currentMinuteId) return;
             if (auditEditing) return showToast('감사보고서 수정 내용을 먼저 저장하거나 취소해 주세요.');
+            if (String(currentMinuteDoc?.doc_type || '').toUpperCase() === 'AUDIT_REPORT'
+                && !auditOverallOpinionIsReady(currentMinuteDoc?.content || '')) {
+                showToast('서명 전에 감사보고서의 종합 의견을 작성해 주세요.');
+                await editAuditReport();
+                document.querySelector('#detail-content .audit-overall-opinion')?.focus();
+                return;
+            }
             if (alreadySignedOnce) {
                 showToast('이미 서명 완료된 문서입니다.');
                 return;

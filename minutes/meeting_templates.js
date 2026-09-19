@@ -1,6 +1,6 @@
 /*
-Version: v1.4.0
-Change: 2026-09-19 - Build book-ready regular-assembly materials from editable business, budget and closing sources.
+Version: v1.5.1
+Change: 2026-09-19 - Add auditor-written opinions, concise closing statements, and two-page audit booklet pagination metadata.
 */
 
 const safe = (value) => String(value ?? '')
@@ -122,15 +122,48 @@ const money = (value) => `${Math.round(Number(value || 0)).toLocaleString('ko-KR
 const sumAmounts = (rows) => (Array.isArray(rows) ? rows : [])
   .reduce((total, item) => total + Number(item?.amount || 0), 0);
 
-function sourceRowsTable(rows, totalLabel = '') {
-  const list = Array.isArray(rows) ? rows : [];
+function nonZeroSourceRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((item) => Number(item?.amount || 0) !== 0);
+}
+
+function sourceRowsTable(rows, totalLabel = '', totalValue = null) {
+  const list = nonZeroSourceRows(rows);
   const body = list.length
     ? list.map((item) => `<tr><td>${safe(item?.name || '-')}</td><td class="amount">${money(item?.amount)}</td></tr>`).join('')
-    : '<tr><td colspan="2">해당 내역이 없습니다.</td></tr>';
-  const total = totalLabel
-    ? `<tfoot><tr><th>${safe(totalLabel)}</th><th class="amount">${money(sumAmounts(list))}</th></tr></tfoot>`
+    : '';
+  const resolvedTotal = totalValue === null ? sumAmounts(list) : Number(totalValue || 0);
+  const total = totalLabel && resolvedTotal !== 0
+    ? `<tfoot><tr><th>${safe(totalLabel)}</th><th class="amount">${money(resolvedTotal)}</th></tr></tfoot>`
     : '';
   return `<table><thead><tr><th>계정과목</th><th>금액</th></tr></thead><tbody>${body}</tbody>${total}</table>`;
+}
+
+function statementSection(title, rows, totalLabel, totalValue) {
+  const list = nonZeroSourceRows(rows);
+  const resolvedTotal = Number(totalValue || 0);
+  if (!list.length && resolvedTotal === 0) return '';
+  return `<section class="financial-statement-section">
+    <h2>${safe(title)}</h2>
+    ${sourceRowsTable(list, totalLabel, resolvedTotal)}
+  </section>`;
+}
+
+function closingPeriod(sourceContext) {
+  const report = sourceContext?.closing_report || {};
+  const summary = report?.report_payload?.summary || sourceContext?.closing || {};
+  return {
+    start: String(report.period_start || summary.period_start || ''),
+    end: String(report.period_end || summary.period_end || '')
+  };
+}
+
+function statementHeading(title, periodText) {
+  return `<header class="financial-statement-heading">
+    <span>결산자료</span>
+    <h1>${safe(title)}</h1>
+    <p>${safe(periodText || '결산 기준일 미기록')}</p>
+    <small>단위: 원</small>
+  </header>`;
 }
 
 function previousMinuteBill(source) {
@@ -164,47 +197,48 @@ function previousMinuteBill(source) {
 export function buildAuditReportDraft({ row, coopName, officials, sourceContext }) {
   const closing = sourceContext?.closing || {};
   const fiscalYear = Number(sourceContext?.fiscal_year || row?.fiscal_year || new Date().getFullYear() - 1);
+  const period = closingPeriod(sourceContext);
   const auditors = (officials || []).filter((official) => String(official?.role || official?.position || '').trim() === '감사');
   const auditorRows = auditors.length
     ? auditors.map((official) => `<p>감사　${safe(official.name || '(성명)')}　(전자서명)</p>`).join('')
     : '<p>감사　(성명)　(전자서명)</p>';
   const stateLabel = closing.is_closed ? '확정 결산자료' : '가결산 자료';
   const netIncome = Number(closing.net_income || 0);
-  return `<article class="audit-report-document">
-    <h1>감 사 보 고 서</h1>
-    <table><tbody>
+  return `<article class="audit-report-document" data-book-page-count="2">
+    <header class="audit-document-heading"><span>${fiscalYear}년도 정기감사</span><h1>감 사 보 고 서</h1><p>${safe(coopName)}</p></header>
+    <table class="audit-meta-table"><tbody>
       <tr><th>감사 대상</th><td>${safe(coopName)}</td></tr>
-      <tr><th>감사 기간</th><td>${fiscalYear}년 1월 1일 ~ ${fiscalYear}년 12월 31일</td></tr>
+      <tr><th>감사 기간</th><td>${period.start && period.end ? `${dateText(period.start)} ~ ${dateText(period.end)}` : `${fiscalYear}년도`}</td></tr>
       <tr><th>감사 범위</th><td>${fiscalYear}년도 회계 및 업무 집행 전반</td></tr>
       <tr><th>검토 자료</th><td>ERP 회계관리의 ${stateLabel}, 사업 집행 자료와 관련 증빙</td></tr>
     </tbody></table>
-    <p>본 감사는 협동조합기본법 및 조합 정관에 따라 위 기간의 회계 처리와 업무 집행 상황을 감사하고 그 결과를 보고하기 위해 작성합니다.</p>
+    <p class="audit-purpose">본 감사는 협동조합기본법 및 조합 정관에 따라 위 기간의 회계 처리와 업무 집행 상황을 감사하고 그 결과를 보고하기 위해 작성합니다.</p>
     <h2>Ⅰ. 감사 결과</h2>
-    <h3>1. 업무 감사</h3>
-    <ul>
-      <li>총회 및 이사회 의결사항과 사업계획에 따른 업무 집행 내역을 확인하였습니다.</li>
-      <li>조합원 명부, 출자금 관리와 주요 계약·행정 절차의 처리 내역을 확인하였습니다.</li>
-      <li>감사 확인 결과와 보완 의견을 이 문단에 직접 수정해 작성합니다.</li>
-    </ul>
-    <h3>2. 회계 감사</h3>
-    <ul>
-      <li>${fiscalYear}년도 ${stateLabel}의 자산총계는 ${money(closing.total_assets)}, 부채총계는 ${money(closing.total_liabilities)}, 자본총계는 ${money(closing.total_equity)}입니다.</li>
-      <li>매출 및 영업외수익은 ${money(Number(closing.total_revenue || 0) + Number(closing.total_other_revenue || 0))}, 비용은 ${money(closing.total_expenses)}, 당기순손익은 ${money(netIncome)}으로 확인됩니다.</li>
-      <li>통장, 전표 및 증빙과 결산자료의 일치 여부를 확인한 뒤 감사 의견을 이 문단에 직접 수정해 작성합니다.</li>
-    </ul>
-    <h2>Ⅱ. 검토한 결산자료</h2>
-    <p>${fiscalYear}년도 결산보고서의 세부 내역입니다. 감사는 아래 재무상태표와 손익계산서를 확인한 뒤 감사보고서 본문을 수정하고 전자서명합니다.</p>
-    <h3>1. 재무상태표</h3>
-    <h4>자산</h4>${sourceRowsTable(closing.assets, '자산총계')}
-    <h4>부채</h4>${sourceRowsTable(closing.liabilities, '부채총계')}
-    <h4>자본</h4>${sourceRowsTable(closing.equity, '자본총계')}
-    <h3>2. 손익계산서</h3>
-    <h4>매출</h4>${sourceRowsTable(closing.revenue, '매출 합계')}
-    <h4>영업외수익</h4>${sourceRowsTable(closing.other_revenue, '영업외수익 합계')}
-    <h4>비용</h4>${sourceRowsTable(closing.expenses, '비용 합계')}
-    <table><tbody><tr><th>당기순이익(손실)</th><td class="amount"><strong>${money(netIncome)}</strong></td></tr></tbody></table>
+    <section class="audit-result-block">
+      <h3>1. 업무 감사</h3>
+      <ul>
+        <li>총회 및 이사회 의결사항과 사업계획에 따른 업무 집행 내역을 확인하였습니다.</li>
+        <li>조합원 명부, 출자금 관리와 주요 계약·행정 절차의 처리 내역을 확인하였습니다.</li>
+      </ul>
+      <div class="audit-writing-box"><strong>업무 감사 의견</strong><p class="audit-optional-opinion"></p></div>
+    </section>
+    <section class="audit-result-block">
+      <h3>2. 회계 감사</h3>
+      <ul>
+        <li>${fiscalYear}년도 ${stateLabel}의 자산총계는 ${money(closing.total_assets)}, 부채총계는 ${money(closing.total_liabilities)}, 자본총계는 ${money(closing.total_equity)}입니다.</li>
+        <li>매출 및 영업외수익은 ${money(Number(closing.total_revenue || 0) + Number(closing.total_other_revenue || 0))}, 비용은 ${money(closing.total_expenses)}, 당기순손익은 ${money(netIncome)}으로 확인됩니다.</li>
+      </ul>
+      <div class="audit-writing-box"><strong>회계 감사 의견</strong><p class="audit-optional-opinion"></p></div>
+    </section>
+    <h2>Ⅱ. 결산 요약</h2>
+    <div class="audit-summary-grid">
+      <div><span>자산총계</span><strong>${money(closing.total_assets)}</strong></div>
+      <div><span>부채총계</span><strong>${money(closing.total_liabilities)}</strong></div>
+      <div><span>자본총계</span><strong>${money(closing.total_equity)}</strong></div>
+      <div><span>당기순손익</span><strong>${money(netIncome)}</strong></div>
+    </div>
     <h2>Ⅲ. 종합 의견</h2>
-    <p>업무 집행 및 회계 처리가 관련 법령과 정관, 총회·이사회 의결에 따라 적정하게 이루어졌는지 검토한 결과와 개선 권고사항을 감사가 직접 작성합니다.</p>
+    <div class="audit-writing-box audit-writing-box-required"><strong>종합 의견 · 필수</strong><p class="audit-overall-opinion">전반적인 업무 집행 및 회계 처리가 관련 법규와 정관에 따라 투명하고 적정하게 이루어졌음을 보고합니다.</p></div>
     <p class="audit-signature-date">${dateText(row?.meeting_date || '')}</p>
     <div class="audit-signers"><strong>${safe(coopName)}</strong>${auditorRows}</div>
   </article>`;
@@ -213,17 +247,39 @@ export function buildAuditReportDraft({ row, coopName, officials, sourceContext 
 function closingReportChapters(sourceContext) {
   const report = sourceContext?.closing_report;
   const fiscalYear = Number(sourceContext?.fiscal_year || new Date().getFullYear() - 1);
-  const sections = report?.report_payload?.sections || {};
-  const generatedAt = report?.generated_at ? dateTimeText(report.generated_at) : '';
-  if (!report || !sections.balance_sheet_html || !sections.income_statement_html) {
+  const summary = report?.report_payload?.summary || sourceContext?.closing || {};
+  const period = closingPeriod(sourceContext);
+  if (!report || !Object.keys(summary).length) {
     return [];
   }
-  const caption = `<p class="source-caption">회계관리에서 ${safe(generatedAt)} 생성·저장한 결산보고서</p>`;
+  const atClosing = period.end ? `${dateText(period.end)} 결산 기준` : `${fiscalYear}년도 결산 기준일 미기록`;
+  const duringPeriod = period.start && period.end
+    ? `${dateText(period.start)}부터 ${dateText(period.end)}까지`
+    : atClosing;
+  const assetStatement = statementSection('자산', summary.assets, '자산총계', summary.total_assets);
+  const liabilityStatement = statementSection('부채', summary.liabilities, '부채총계', summary.total_liabilities);
+  const equityStatement = statementSection('자본', summary.equity, '자본총계', summary.total_equity);
+  const balanceBody = `<div class="financial-balance-grid"><div>${assetStatement}</div><div>${liabilityStatement}${equityStatement}</div></div>`;
+  const incomeBody = [
+    statementSection('매출', summary.revenue, '매출 합계', summary.total_revenue),
+    statementSection('판매비와 관리비', summary.expenses, '비용 합계', summary.total_expenses),
+    statementSection('영업외수익', summary.other_revenue, '영업외수익 합계', summary.total_other_revenue)
+  ].filter(Boolean).join('');
+  const incomeSummary = nonZeroSourceRows([
+    { name: '영업이익(손실)', amount: summary.operating_income },
+    { name: '당기순이익(손실)', amount: summary.net_income }
+  ]);
+  const surplusBefore = Number(summary.total_appropriation || 0) + Number(summary.carried_forward || 0);
+  const surplusRows = [
+    { name: '처분 전 이익잉여금', amount: surplusBefore },
+    { name: '법정적립금', amount: summary.legal_reserve },
+    { name: '임의적립금', amount: summary.voluntary_reserve },
+    { name: '차기이월 이익잉여금', amount: summary.carried_forward }
+  ];
   return [
-    chapter('closing-tax-adjustment', `${fiscalYear}년 재무제표 및 조정명세서`, `<h1>${fiscalYear}년도 결산보고서</h1>${caption}<div class="closing-report-snapshot"><div class="rpt-title">재무제표 및 조정명세서</div>${sections.header_html || ''}${sections.tax_html || ''}</div>`, 'financial'),
-    chapter('closing-balance-sheet', `${fiscalYear}년 재무상태표`, `<h1>${fiscalYear}년 재무상태표</h1>${caption}<div class="closing-report-snapshot">${sections.balance_sheet_html || ''}</div>`, 'financial'),
-    chapter('closing-income-statement', `${fiscalYear}년 손익계산서`, `<h1>${fiscalYear}년 손익계산서</h1>${caption}<div class="closing-report-snapshot">${sections.income_statement_html || ''}</div>`, 'financial'),
-    chapter('closing-surplus-statement', `${fiscalYear}년 이익잉여금처분계산서`, `<h1>${fiscalYear}년 이익잉여금처분계산서</h1>${caption}<div class="closing-report-snapshot">${sections.surplus_html || ''}</div>`, 'financial')
+    chapter('closing-balance-sheet', `${fiscalYear}년 재무상태표`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 재무상태표`, atClosing)}${balanceBody}</div>`, 'financial'),
+    chapter('closing-income-statement', `${fiscalYear}년 손익계산서`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 손익계산서`, duringPeriod)}${incomeBody}${incomeSummary.length ? `<section class="financial-statement-section financial-result">${sourceRowsTable(incomeSummary)}</section>` : ''}</div>`, 'financial'),
+    chapter('closing-surplus-statement', `${fiscalYear}년 이익잉여금처분계산서`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 이익잉여금처분계산서`, atClosing)}<section class="financial-statement-section financial-result">${sourceRowsTable(surplusRows)}</section></div>`, 'financial')
   ];
 }
 
