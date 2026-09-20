@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.68
-Change: 2026-09-19 - Add employee-specific ERP module access controls.
+Version: v1.0.69
+Change: 2026-09-20 - Add employee-specific Telegram notification recipient controls.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.68 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.69 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -172,6 +172,7 @@ Change: 2026-09-19 - Add employee-specific ERP module access controls.
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabSalary">💰 급여 관리</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabLog">📅 근태/포상</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabModuleAccess">🧭 업무 권한</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabNotificationAccess">🔔 알림 담당</a></li>
           </ul>
         </div>
         <div class="tab-content pt-2">
@@ -453,6 +454,18 @@ Change: 2026-09-19 - Add employee-specific ERP module access controls.
             <div id="employeeModuleAccessList" class="d-none"></div>
             <div class="d-grid mt-3">
               <button type="button" id="employeeModuleAccessSaveBtn" class="btn btn-primary btn-rounded" onclick="saveEmployeeModuleAccess()" disabled>업무 권한 저장</button>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="tabNotificationAccess">
+            <div class="alert alert-info small mb-3">
+              <strong>조합별 Telegram 알림 담당</strong><br>
+              업무 화면을 사용할 권한과 알림을 받는 담당자는 서로 다르게 정할 수 있습니다. 여러 직원을 같은 알림 담당자로 지정할 수 있으며, 결재·서명처럼 특정 사람에게 직접 가는 알림은 여기서 바꾸지 않습니다.
+            </div>
+            <div id="employeeNotificationTelegramStatus" class="alert alert-warning small d-none"></div>
+            <div id="employeeNotificationStatus" class="small text-muted text-center py-4">알림 담당 설정을 불러오는 중입니다.</div>
+            <div id="employeeNotificationList" class="d-none"></div>
+            <div class="d-grid mt-3">
+              <button type="button" id="employeeNotificationSaveBtn" class="btn btn-primary btn-rounded" onclick="saveEmployeeNotificationAssignments()" disabled>알림 담당 저장</button>
             </div>
           </div>
         </div>
@@ -821,6 +834,8 @@ let permissionSet = new Set();
 let hrRuntimeProfile = 'legacy_full';
 let employeeModuleAccessSnapshot = null;
 let employeeModuleAccessSaveInFlight = false;
+let employeeNotificationSnapshot = null;
+let employeeNotificationSaveInFlight = false;
 let telegramApprovalLinkStatusMap = {};
 const HR_MODAL_BASE_Z_INDEX = 1050;
 let hrModalStackOrderSeed = 0;
@@ -4555,6 +4570,128 @@ async function saveEmployeeModuleAccess() {
     }
 } // End of saveEmployeeModuleAccess
 
+function resetEmployeeNotificationUi(message = '알림 담당 설정을 불러오는 중입니다.') {
+    employeeNotificationSnapshot = null;
+    const status = document.getElementById('employeeNotificationStatus');
+    const list = document.getElementById('employeeNotificationList');
+    const telegramStatus = document.getElementById('employeeNotificationTelegramStatus');
+    const saveBtn = document.getElementById('employeeNotificationSaveBtn');
+    if (status) {
+        status.textContent = message;
+        status.classList.remove('d-none', 'text-danger');
+    }
+    if (list) {
+        list.innerHTML = '';
+        list.classList.add('d-none');
+    }
+    if (telegramStatus) {
+        telegramStatus.textContent = '';
+        telegramStatus.classList.add('d-none');
+    }
+    if (saveBtn) saveBtn.disabled = true;
+} // End of resetEmployeeNotificationUi
+
+function renderEmployeeNotificationAssignments(payload) {
+    const status = document.getElementById('employeeNotificationStatus');
+    const list = document.getElementById('employeeNotificationList');
+    const telegramStatus = document.getElementById('employeeNotificationTelegramStatus');
+    const saveBtn = document.getElementById('employeeNotificationSaveBtn');
+    const employee = payload?.employee && typeof payload.employee === 'object' ? payload.employee : {};
+    const categories = Array.isArray(payload?.categories) ? payload.categories : [];
+    employeeNotificationSnapshot = payload || null;
+
+    if (status) status.classList.add('d-none');
+    if (telegramStatus) {
+        telegramStatus.classList.remove('d-none', 'alert-warning', 'alert-success');
+        if (employee.telegram_linked === true) {
+            telegramStatus.classList.add('alert-success');
+            telegramStatus.textContent = 'Telegram 연결됨 · 선택한 알림은 이 직원의 개인 Telegram으로 전달됩니다.';
+        } else {
+            telegramStatus.classList.add('alert-warning');
+            telegramStatus.textContent = 'Telegram 연결 필요 · 담당자로 저장할 수는 있지만, 직원이 Telegram 연결을 완료하기 전에는 실제 알림이 전달되지 않습니다.';
+        }
+    }
+    if (!list) return;
+    list.classList.remove('d-none');
+    list.innerHTML = categories.map((category) => {
+        const key = String(category?.notification_key || '').trim();
+        const name = String(category?.notification_name || key).trim();
+        const description = String(category?.description || '').trim();
+        const checked = category?.is_assigned === true ? 'checked' : '';
+        return `
+          <div class="employee-module-row" data-notification-row="${escapeHtml(key)}">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+              <div class="flex-grow-1">
+                <div class="employee-module-title">${escapeHtml(name)}</div>
+                <div class="small text-muted mt-1">${escapeHtml(description)}</div>
+              </div>
+              <div class="form-check form-switch fs-5 mb-0">
+                <input class="form-check-input" type="checkbox" data-employee-notification-key="${escapeHtml(key)}" aria-label="${escapeHtml(name)} 담당 여부" ${checked}>
+              </div>
+            </div>
+          </div>`;
+    }).join('') || '<div class="text-center text-muted py-4">설정할 관리자성 알림이 없습니다.</div>';
+    if (saveBtn) saveBtn.disabled = categories.length === 0 || employee?.is_active === false;
+} // End of renderEmployeeNotificationAssignments
+
+async function loadEmployeeNotificationAssignments() {
+    const empId = String(currentEmpId || '').trim();
+    if (!empId) return;
+    resetEmployeeNotificationUi();
+    try {
+        const { data, error } = await _supabase.rpc('erp_admin_get_employee_notification_assignments', { p_emp_id: empId });
+        if (error) throw error;
+        if (empId !== String(currentEmpId || '').trim()) return;
+        renderEmployeeNotificationAssignments(data || {});
+    } catch (error) {
+        console.error('employee notification assignments load failed:', error);
+        const status = document.getElementById('employeeNotificationStatus');
+        if (status) {
+            status.textContent = '알림 담당 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+            status.classList.add('text-danger');
+        }
+    }
+} // End of loadEmployeeNotificationAssignments
+
+async function saveEmployeeNotificationAssignments() {
+    if (employeeNotificationSaveInFlight) return;
+    const empId = String(currentEmpId || '').trim();
+    if (!empId) return showAlert('직원 정보를 먼저 선택해 주세요.');
+    const assignments = {};
+    document.querySelectorAll('[data-employee-notification-key]').forEach((input) => {
+        const key = String(input.dataset.employeeNotificationKey || '').trim();
+        if (key) assignments[key] = input.checked === true;
+    });
+
+    const saveBtn = document.getElementById('employeeNotificationSaveBtn');
+    employeeNotificationSaveInFlight = true;
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = '저장 중...';
+    }
+    try {
+        const { data, error } = await _supabase.rpc('erp_admin_save_employee_notification_assignments', {
+            p_emp_id: empId,
+            p_assignments: assignments
+        });
+        if (error) throw error;
+        if (empId === String(currentEmpId || '').trim()) renderEmployeeNotificationAssignments(data || {});
+        const linked = data?.employee?.telegram_linked === true;
+        showAlert(linked
+            ? 'Telegram 알림 담당 설정을 저장했습니다.'
+            : '알림 담당 설정을 저장했습니다. 이 직원이 Telegram 연결을 완료해야 실제 알림을 받을 수 있습니다.');
+    } catch (error) {
+        console.error('employee notification assignments save failed:', error);
+        showAlert('알림 담당 저장 실패: ' + String(error?.message || error || '저장하지 못했습니다.'));
+    } finally {
+        employeeNotificationSaveInFlight = false;
+        if (saveBtn) {
+            saveBtn.disabled = !employeeNotificationSnapshot;
+            saveBtn.textContent = '알림 담당 저장';
+        }
+    }
+} // End of saveEmployeeNotificationAssignments
+
 async function openDetail(u) {
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
     currentAnnualSalary = u.base_salary || 0;
@@ -4605,8 +4742,10 @@ async function openDetail(u) {
     else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; loadSalaryData(); loadLeave(); }
     await loadDurunuriEligibilityProfile(u.emp_id);
     resetEmployeeModuleAccessUi();
+    resetEmployeeNotificationUi();
     detailModal.show();
     void loadEmployeeModuleAccess();
+    void loadEmployeeNotificationAssignments();
 }
 
 function toggleEditMode(isEdit) { const c = document.getElementById("infoContainer"); if(isEdit) c.classList.add("is-editing"); else c.classList.remove("is-editing"); }

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.20 | Change: 2026-09-18 - Include meeting-package document production in governance module descriptions. -->
+<!-- Version: v1.1.21 | Change: 2026-09-20 - Add cooperative-specific Telegram notification recipient controls. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.1.20 | platform_admin.html');</script>
+  <script>console.log('[Version] v1.1.21 | platform_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -675,6 +675,21 @@
 
               <div class="col-12">
                 <div class="panel-card mb-0">
+                  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-2 mb-3">
+                    <div>
+                      <div class="section-title mb-1">Telegram 알림 담당자</div>
+                      <div class="form-hint">조합별·알림 종류별로 여러 직원을 지정합니다. 업무 접근권한과는 별도이며, 대표 관리자나 통합관리자에게 자동으로 보내지 않습니다.</div>
+                    </div>
+                    <div class="form-hint">Telegram 미연결 직원은 담당자로 저장할 수 있지만 연결 전에는 수신하지 못합니다.</div>
+                  </div>
+                  <div id="manageNotificationRoster" class="admin-roster">
+                    <div class="empty-box">알림 담당자 설정을 불러오는 중입니다.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <div class="panel-card mb-0">
                   <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
                     <div>
                       <div class="section-title mb-1">도메인 매핑</div>
@@ -752,6 +767,7 @@
     let selectedCoop = null;
     let selectedCoopDomainRoutes = [];
     let selectedCoopModuleAdminOptions = [];
+    let selectedCoopNotificationSettings = { categories: [], employees: [] };
     let coopRows = [];
     let platformTelegramSettings = null;
     const COOPCO_ROOT_DOMAIN = 'coopco.kr';
@@ -1505,7 +1521,9 @@
       document.getElementById('manageModuleGrid').innerHTML = '<div class="empty-box">모듈 정보를 불러오는 중입니다.</div>';
       document.getElementById('manageAdminSelect').innerHTML = '<option>불러오는 중...</option>';
       document.getElementById('manageAdminRoster').innerHTML = '<div class="empty-box">관리자 목록을 불러오는 중입니다.</div>';
+      document.getElementById('manageNotificationRoster').innerHTML = '<div class="empty-box">알림 담당자 설정을 불러오는 중입니다.</div>';
       selectedCoopModuleAdminOptions = [];
+      selectedCoopNotificationSettings = { categories: [], employees: [] };
       resetNewAdminForm();
       syncNewAdminModuleOptions();
       setManageStatus('', '');
@@ -1538,21 +1556,27 @@
       if (!selectedCoop || !selectedCoop.coop_id) return;
       if (showNotice) setManageStatus('설정 정보를 새로 불러왔습니다.', 'alert-secondary');
       try {
-        const [moduleRes, adminRes, domainRes, moduleAdminRes] = await Promise.all([
+        const [moduleRes, adminRes, domainRes, moduleAdminRes, notificationRes] = await Promise.all([
           _supabase.rpc('platform_list_coop_modules', { p_coop_id: selectedCoop.coop_id }),
           _supabase.rpc('platform_list_coop_admin_candidates', { p_coop_id: selectedCoop.coop_id }),
           _supabase.rpc('platform_list_coop_domain_routes', { p_coop_id: selectedCoop.coop_id }),
-          _supabase.rpc('platform_list_coop_module_admin_options', { p_coop_id: selectedCoop.coop_id })
+          _supabase.rpc('platform_list_coop_module_admin_options', { p_coop_id: selectedCoop.coop_id }),
+          _supabase.rpc('platform_list_coop_notification_assignments', { p_coop_id: selectedCoop.coop_id })
         ]);
 
         if (moduleRes.error) throw moduleRes.error;
         if (adminRes.error) throw adminRes.error;
         if (domainRes.error) throw domainRes.error;
         if (moduleAdminRes.error) throw moduleAdminRes.error;
+        if (notificationRes.error) throw notificationRes.error;
 
         selectedCoopModuleAdminOptions = Array.isArray(moduleAdminRes.data) ? moduleAdminRes.data : [];
+        selectedCoopNotificationSettings = notificationRes.data && typeof notificationRes.data === 'object'
+          ? notificationRes.data
+          : { categories: [], employees: [] };
         renderAdminCandidates(Array.isArray(adminRes.data) ? adminRes.data : []);
         renderAdminRoster();
+        renderNotificationRoster();
         renderModuleGrid(Array.isArray(moduleRes.data) ? moduleRes.data : []);
         renderDomainRoutes(Array.isArray(domainRes.data) ? domainRes.data : []);
       } catch (err) {
@@ -1800,6 +1824,96 @@
       if (moduleKey === 'member_admin') return '조합원 관리';
       if (moduleKey === 'site_admin') return '홈페이지 관리';
       return moduleKey || '';
+    }
+
+    function renderNotificationRoster() {
+      const wrap = document.getElementById('manageNotificationRoster');
+      if (!wrap) return;
+      const categories = Array.isArray(selectedCoopNotificationSettings?.categories)
+        ? selectedCoopNotificationSettings.categories
+        : [];
+      const employees = Array.isArray(selectedCoopNotificationSettings?.employees)
+        ? selectedCoopNotificationSettings.employees
+        : [];
+      if (!employees.length) {
+        wrap.innerHTML = '<div class="empty-box">등록된 활성 직원이 없습니다.</div>';
+        return;
+      }
+      if (!categories.length) {
+        wrap.innerHTML = '<div class="empty-box">설정할 관리자성 알림이 없습니다.</div>';
+        return;
+      }
+
+      wrap.innerHTML = employees.map((employee, employeeIndex) => {
+        const empId = String(employee?.emp_id || '').trim();
+        const assigned = new Set(Array.isArray(employee?.assigned_notifications) ? employee.assigned_notifications : []);
+        const linked = employee?.telegram_linked === true;
+        const roleLabel = employee?.role === 'admin_all'
+          ? '대표 관리자'
+          : (employee?.role === 'admin' ? '관리자' : '직원');
+        const controls = categories.map((category, categoryIndex) => {
+          const key = String(category?.notification_key || '').trim();
+          const inputId = `platformNotification-${employeeIndex}-${categoryIndex}`;
+          return `
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="${inputId}" data-platform-notification-key="${escapeHtml(key)}" ${assigned.has(key) ? 'checked' : ''}>
+              <label class="form-check-label" for="${inputId}">
+                <span class="fw-bold">${escapeHtml(category?.notification_name || key)}</span>
+                <span class="d-block form-hint">${escapeHtml(category?.description || '')}</span>
+              </label>
+            </div>`;
+        }).join('');
+        return `
+          <div class="admin-roster-item align-items-start" data-platform-notification-employee="${escapeHtml(empId)}">
+            <div class="me-md-3" style="min-width: 180px;">
+              <div class="admin-roster-name">${escapeHtml(employee?.emp_name || '이름 미등록')}</div>
+              <div class="admin-roster-meta">${escapeHtml(employee?.email || '이메일 미등록')}</div>
+              <div class="admin-roster-badges mt-2">
+                <span class="badge-soft off">${escapeHtml(roleLabel)}</span>
+                <span class="badge-soft ${linked ? '' : 'off'}">${linked ? 'Telegram 연결됨' : 'Telegram 연결 필요'}</span>
+              </div>
+            </div>
+            <div class="flex-grow-1 w-100">
+              ${controls}
+              <div class="d-flex justify-content-end mt-2">
+                <button class="btn btn-outline-primary btn-sm" type="button" id="btnSaveNotification-${employeeIndex}" onclick="savePlatformEmployeeNotifications('${escapeJsString(empId)}', ${employeeIndex})">알림 담당 저장</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    async function savePlatformEmployeeNotifications(empId, employeeIndex) {
+      if (!selectedCoop?.coop_id) return;
+      const safeEmpId = String(empId || '').trim();
+      const container = document.querySelector(`[data-platform-notification-employee="${CSS.escape(safeEmpId)}"]`);
+      if (!safeEmpId || !container) return;
+      const assignments = {};
+      container.querySelectorAll('[data-platform-notification-key]').forEach((input) => {
+        const key = String(input.dataset.platformNotificationKey || '').trim();
+        if (key) assignments[key] = input.checked === true;
+      });
+      const buttonId = `btnSaveNotification-${employeeIndex}`;
+      setManageStatus('', '');
+      setLoadingState(buttonId, true, '저장 중...');
+      try {
+        const { data, error } = await _supabase.rpc('platform_save_coop_employee_notifications', {
+          p_coop_id: selectedCoop.coop_id,
+          p_emp_id: safeEmpId,
+          p_assignments: assignments
+        });
+        if (error) throw error;
+        await loadManageModalData(false);
+        const deliveryNote = data?.telegram_linked
+          ? 'Telegram 연결 상태도 확인했습니다.'
+          : '담당자는 저장했지만 Telegram 연결 전에는 수신하지 못합니다.';
+        setManageStatus(`${data?.emp_name || '직원'}의 알림 담당 설정을 저장했습니다. ${deliveryNote}`, data?.telegram_linked ? 'alert-success' : 'alert-warning');
+      } catch (error) {
+        console.error('savePlatformEmployeeNotifications failed:', error);
+        setManageStatus(`알림 담당 저장 실패: ${String(error?.message || error || '저장하지 못했습니다.')}`, 'alert-danger');
+      } finally {
+        setLoadingState(buttonId, false, '저장 중...');
+      }
     }
 
     function renderAdminRoster() {
