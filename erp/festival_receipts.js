@@ -1,4 +1,4 @@
-/* v2.1.0 - Event print context, discounts and immediate receipt reconciliation. */
+/* v2.2.0 - Extra-payment sale reclassification and idempotent refund confirmation. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -29,6 +29,7 @@
   let receiptTotal = 0;
   let inventory = { items: [], sales: [], movements: [] };
   let eventContext = { events: [], sale_links: [], receipt_links: [] };
+  let extraPaymentContext = { items: [] };
   let editable = false;
   let operationBusy = false;
   let receiptBusy = false;
@@ -54,6 +55,9 @@
     if (message.includes('SALE_LINK_REQUIRED') || message.includes('SALE_NOT_FOUND')) return '현금영수증을 연결할 등록 매출을 선택해 주세요.';
     if (message.includes('EVENT_MISMATCH')) return '현금영수증 신청 행사와 선택한 매출 행사가 다릅니다.';
     if (message.includes('EVENT_NOT_FOUND') || message.includes('INVALID_EVENT')) return '행사명과 날짜를 확인해 주세요.';
+    if (message.includes('INVALID_REFUND_INPUT')) return '반환일과 반환 수단을 확인해 주세요.';
+    if (message.includes('EXTRA_PAYMENT_NOT_REFUNDABLE')) return '추가 매출로 정리된 입금만 반환 처리할 수 있습니다.';
+    if (message.includes('REFUND_RECORD_MISSING')) return '기존 반환 기록을 확인하지 못했습니다. 다시 처리하지 말고 관리자에게 확인해 주세요.';
     if (message.includes('결산에 포함')) return message;
     return '처리하지 못했습니다. 입력값과 로그인 상태를 확인하고 다시 시도해 주세요.';
   }
@@ -82,9 +86,16 @@
     return result.data;
   }
 
+  async function extraPaymentRpc(action, data = {}) {
+    const result = await client.rpc('festival_extra_payment_refunds_admin', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
   const saleLink = (saleId) => (eventContext.sale_links || []).find((row) => row.sale_id === saleId) || null;
   const receiptLink = (receiptId) => (eventContext.receipt_links || []).find((row) => row.receipt_id === receiptId) || null;
   const eventById = (eventId) => (eventContext.events || []).find((row) => row.id === eventId) || null;
+  const extraPaymentBySaleId = (saleId) => (extraPaymentContext.items || []).find((row) => row.sale_id === saleId) || null;
 
   function makeCell(value, className = '') {
     const cell = document.createElement('td');
@@ -366,6 +377,75 @@
     countInput.select();
   }
 
+  function beginExtraPaymentRefund(cell, sale) {
+    const amount = Number(sale.overpayment_amount || 0);
+    const supply = Math.round(amount / 1.1);
+    const vat = amount - supply;
+    cell.replaceChildren();
+    const wrap = document.createElement('div');
+    wrap.className = 'inline-action';
+    const warning = document.createElement('p');
+    warning.className = 'small';
+    warning.textContent = `실제로 ${money(amount)}을 돌려준 뒤 처리해 주세요. 매출 ${money(supply)}과 부가세 ${money(vat)}가 함께 줄고 재고는 바뀌지 않습니다.`;
+    const dateLabel = document.createElement('label');
+    dateLabel.className = 'small';
+    dateLabel.textContent = '실제 반환일';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = kstToday();
+    dateInput.setAttribute('aria-label', '실제 반환일');
+    dateLabel.append(dateInput);
+    const accountLabel = document.createElement('label');
+    accountLabel.className = 'small';
+    accountLabel.textContent = '반환 수단';
+    const accountSelect = document.createElement('select');
+    accountSelect.setAttribute('aria-label', '반환 수단');
+    [['보통예금', '계좌이체(보통예금)'], ['시재금', '현금 지급(시재금)']].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      accountSelect.append(option);
+    });
+    accountLabel.append(accountSelect);
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.textContent = '반환 완료·회계 처리';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'secondary';
+    cancel.textContent = '취소';
+    cancel.addEventListener('click', renderSales);
+    save.addEventListener('click', async () => {
+      if (operationBusy) return;
+      if (!dateInput.value) {
+        setOperationStatus('실제 반환일을 입력해 주세요.', true);
+        dateInput.focus();
+        return;
+      }
+      if (!window.confirm(`${sale.overpayment_name || '입금자'}에게 ${money(amount)}을 실제로 반환하셨나요?\n확인을 누르면 매출·부가세 반환 전표가 저장됩니다.`)) return;
+      operationBusy = true;
+      save.disabled = cancel.disabled = true;
+      try {
+        const result = await extraPaymentRpc('confirm_refund', {
+          request_key: crypto.randomUUID(),
+          sale_id: sale.id,
+          refund_date: dateInput.value,
+          refund_account: accountSelect.value
+        });
+        setOperationStatus(`${money(result.amount)} 반환을 확인했습니다. 매출 ${money(result.supply_amount)}과 부가세 ${money(result.vat_amount)}을 줄이는 회계전표를 저장했고 재고는 그대로 유지했습니다.`);
+        await loadInventory();
+      } catch (error) {
+        setOperationStatus(readableError(error), true);
+        renderSales();
+      } finally {
+        operationBusy = false;
+      }
+    });
+    wrap.append(warning, dateLabel, accountLabel, save, cancel);
+    cell.append(wrap);
+    dateInput.focus();
+  }
+
   function renderSales() {
     const rows = $('salesRows');
     rows.replaceChildren();
@@ -391,10 +471,28 @@
       editReceipt.disabled = !editable;
       editReceipt.addEventListener('click', () => beginReceiptAllocationEdit(receiptCell, sale));
       receiptCell.append(document.createElement('br'), editReceipt);
-      row.append(
-        receiptCell,
-        makeCell(Number(sale.overpayment_amount || 0) > 0 ? `${sale.overpayment_name}\n${money(sale.overpayment_amount)} · 반환 대기` : '-', 'multiline')
-      );
+      const extraPayment = extraPaymentBySaleId(sale.id);
+      const extraPaymentCell = document.createElement('td');
+      extraPaymentCell.className = 'multiline';
+      if (Number(sale.overpayment_amount || 0) <= 0) {
+        extraPaymentCell.textContent = '-';
+      } else if (sale.overpayment_status === 'refunded') {
+        extraPaymentCell.textContent = `${sale.overpayment_name}\n${money(sale.overpayment_amount)} · 반환 완료${extraPayment?.refund_date ? `\n${extraPayment.refund_date} · ${extraPayment.refund_account}` : ''}`;
+        extraPaymentCell.classList.add('success-text');
+      } else if (sale.overpayment_status === 'reclassified') {
+        const summary = document.createElement('span');
+        summary.textContent = `${sale.overpayment_name}\n${money(sale.overpayment_amount)} · 추가 매출 반영`;
+        const refundButton = document.createElement('button');
+        refundButton.type = 'button';
+        refundButton.className = 'secondary';
+        refundButton.textContent = '반환 확인';
+        refundButton.disabled = !editable;
+        refundButton.addEventListener('click', () => beginExtraPaymentRefund(extraPaymentCell, sale));
+        extraPaymentCell.append(summary, document.createElement('br'), refundButton);
+      } else {
+        extraPaymentCell.textContent = `${sale.overpayment_name}\n${money(sale.overpayment_amount)} · 별도 확인 필요`;
+      }
+      row.append(receiptCell, extraPaymentCell);
       const actionCell = document.createElement('td');
       if (Number(sale.cash_received || 0) === 0) {
         actionCell.textContent = '현금 수납 없음';
@@ -435,7 +533,10 @@
   }
 
   async function loadInventory() {
-    inventory = await rpc('bootstrap');
+    [inventory, extraPaymentContext] = await Promise.all([
+      rpc('bootstrap'),
+      extraPaymentRpc('list')
+    ]);
     renderInventory();
     renderSales();
     renderMovements();
@@ -455,7 +556,7 @@
     const discountOk = discount <= listAmount;
     const receivedOk = discountOk && bank + cash === gross + overpayment;
     const receiptOk = issued + none === gross;
-    $('saleSummary').textContent = `정가 ${money(listAmount)} · 할인 ${money(discount)} · 실제 매출 ${money(gross)}\n계좌 ${money(bank)} · 현장 현금 ${money(cash)}${overpayment ? ` · 과오납 ${money(overpayment)}` : ''}\n현금영수증 구분 ${money(issued + none)} · ${receivedOk && receiptOk ? '합계가 맞습니다.' : '합계를 확인해 주세요.'}`;
+    $('saleSummary').textContent = `정가 ${money(listAmount)} · 할인 ${money(discount)} · 실제 매출 ${money(gross)}\n계좌 ${money(bank)} · 현장 현금 ${money(cash)}${overpayment ? ` · 추가 입금 ${money(overpayment)}` : ''}\n현금영수증 구분 ${money(issued + none)} · ${receivedOk && receiptOk ? '합계가 맞습니다.' : '합계를 확인해 주세요.'}`;
     $('saleSummary').classList.toggle('invalid', !(receivedOk && receiptOk));
     return { quantity, unitPrice, listAmount, discount, gross, bank, cash, overpayment, issued, none, valid: receivedOk && receiptOk };
   }
@@ -505,8 +606,8 @@
     const summary = syncSaleReceiptAllocation();
     const overpaymentName = $('overpaymentName').value.trim();
     if (!summary.valid) return setOperationStatus('판매액·수납액·현금영수증 구분 합계를 맞춰 주세요.', true);
-    if (summary.overpayment > 0 && !overpaymentName) return setOperationStatus('과오납 입금자명을 입력해 주세요.', true);
-    if (summary.overpayment === 0 && overpaymentName) return setOperationStatus('과오납 금액이 없으면 입금자명도 비워 주세요.', true);
+    if (summary.overpayment > 0 && !overpaymentName) return setOperationStatus('추가 입금자명을 입력해 주세요.', true);
+    if (summary.overpayment === 0 && overpaymentName) return setOperationStatus('추가 입금 금액이 없으면 입금자명도 비워 주세요.', true);
     operationBusy = true;
     const button = event.submitter;
     if (button) button.disabled = true;
