@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.1 | Change: 2026-09-24 - Return signed-out visitors to ERP login. -->
+<!-- Version: v1.1.0 | Change: 2026-09-24 - Edit homepage plant details and photos in monitoring management. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.1 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.1.0 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -100,6 +100,20 @@
     .state-badge.error { color: #b42318; background: #fee2e2; }
     .plant-photo { width: 52px; height: 52px; border-radius: 12px; object-fit: cover; background: #edf2ef; }
     .plant-photo.placeholder { display: grid; place-items: center; font-size: 23px; }
+    .plant-photo-editor {
+      width: 100%;
+      min-height: 210px;
+      border: 1px dashed #b6c2ba;
+      border-radius: 16px;
+      background: #f6f8f7;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: var(--solar-muted);
+    }
+    .plant-photo-editor img { width: 100%; height: 230px; object-fit: cover; }
+    .editor-section { border-top: 1px solid var(--solar-line); padding-top: 18px; margin-top: 18px; }
+    .editor-section-title { font-size: 14px; font-weight: 900; margin-bottom: 12px; }
     .plant-name { font-weight: 900; }
     .plant-meta { color: var(--solar-muted); font-size: 12px; margin-top: 2px; }
     .live-number { font-weight: 900; white-space: nowrap; }
@@ -157,7 +171,7 @@
       <div class="data-contract">
         <div class="contract-item homepage">
           <strong>🌐 홈페이지 관리 기준정보</strong>
-          <div class="section-copy mt-1">발전소명, 주소, 사진, 설비용량, 준공일, 공개 설명</div>
+          <div class="section-copy mt-1">발전소명, 주소, 사진, 설비용량, 준공일, 공개 설명을 이 화면에서 바로 수정</div>
         </div>
         <div class="contract-item monitor">
           <strong>⚡ 모니터링 수집정보</strong>
@@ -233,6 +247,132 @@
     </section>
   </main>
 
+  <div class="modal fade" id="plantInfoModal" tabindex="-1" aria-labelledby="plantInfoModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title fs-5 fw-bold" id="plantInfoModalTitle">발전소 기본정보</h2>
+            <div class="section-copy mt-1" id="plantInfoModalSubtitle">홈페이지와 상세 화면에서 함께 사용할 정보입니다.</div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+        </div>
+        <div class="modal-body p-4">
+          <div class="alert hidden" id="plantEditorStatus" role="status" aria-live="polite"></div>
+          <div class="row g-4">
+            <div class="col-lg-4">
+              <div class="plant-photo-editor" id="plantEditorPhotoBox">
+                <span id="plantEditorPhotoPlaceholder">☀️ 사진을 등록하세요</span>
+                <img class="hidden" id="plantEditorPhotoPreview" src="" alt="발전소 사진 미리보기">
+              </div>
+              <label class="form-label fw-bold mt-3" for="plantEditorPhotoFile">현장 사진</label>
+              <input class="form-control" type="file" id="plantEditorPhotoFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif">
+              <div class="form-text">JPG·PNG·WebP·HEIC, 최대 8MB. 새 사진은 저장할 때 업로드됩니다.</div>
+              <button class="btn btn-outline-danger btn-sm mt-2" type="button" id="removePlantEditorPhoto">사진 표시 제거</button>
+            </div>
+            <div class="col-lg-8">
+              <div class="row g-3">
+                <div class="col-md-8">
+                  <label class="form-label fw-bold" for="plantEditorName">발전소명</label>
+                  <input class="form-control" id="plantEditorName" maxlength="120">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold" for="plantEditorCapacity">설비용량 (kW)</label>
+                  <input class="form-control" type="number" min="0" step="0.001" id="plantEditorCapacity">
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label fw-bold" for="plantEditorLocation">주소·설치 위치</label>
+                  <input class="form-control" id="plantEditorLocation" maxlength="300">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold" for="plantEditorArea">부지·설치 면적</label>
+                  <input class="form-control" id="plantEditorArea" maxlength="120" placeholder="예: 1,240㎡">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold" for="plantEditorCompletionDate">준공일</label>
+                  <input class="form-control" type="date" id="plantEditorCompletionDate">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold" for="plantEditorStatusSelect">운영상태</label>
+                  <select class="form-select" id="plantEditorStatusSelect">
+                    <option value="준비중">준비중</option>
+                    <option value="건설중">건설중</option>
+                    <option value="운영중">운영중</option>
+                    <option value="중단">중단</option>
+                  </select>
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label fw-bold" for="plantEditorProgress">진행률</label>
+                  <input class="form-control" type="number" min="0" max="100" step="1" id="plantEditorProgress">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label fw-bold" for="plantEditorOrder">표시순서</label>
+                  <input class="form-control" type="number" min="0" max="9999" step="1" id="plantEditorOrder">
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-bold" for="plantEditorMonitorUrl">기존 모니터 주소</label>
+                  <input class="form-control" type="url" id="plantEditorMonitorUrl" maxlength="1000" placeholder="http:// 또는 https://">
+                </div>
+                <div class="col-12">
+                  <label class="form-label fw-bold" for="plantEditorNote">공개 설명</label>
+                  <textarea class="form-control" id="plantEditorNote" rows="3" maxlength="2000" placeholder="발전소 특징, 조성 배경, 시민 참여 내용 등을 적어주세요."></textarea>
+                </div>
+              </div>
+
+              <div class="editor-section">
+                <div class="editor-section-title">사업 정보</div>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label fw-bold" for="plantEditorProjectType">사업 유형</label>
+                    <select class="form-select" id="plantEditorProjectType">
+                      <option value="direct">직접 운영 발전소</option>
+                      <option value="participation">참여 발전사업</option>
+                    </select>
+                  </div>
+                  <div class="col-md-8 participation-editor-field">
+                    <label class="form-label fw-bold" for="plantEditorOwner">사업 주체</label>
+                    <input class="form-control" id="plantEditorOwner" maxlength="120">
+                  </div>
+                  <div class="col-md-4 participation-editor-field">
+                    <label class="form-label fw-bold" for="plantEditorParticipationMethod">참여 방식</label>
+                    <select class="form-select" id="plantEditorParticipationMethod">
+                      <option value="equity">지분 참여</option>
+                      <option value="bond">채권</option>
+                      <option value="fund">펀드</option>
+                      <option value="other">기타</option>
+                    </select>
+                  </div>
+                  <div class="col-md-4 participation-editor-field">
+                    <label class="form-label fw-bold" for="plantEditorParticipationCapacity">조합 참여용량 (kW)</label>
+                    <input class="form-control" type="number" min="0" step="0.001" id="plantEditorParticipationCapacity">
+                  </div>
+                  <div class="col-md-4 participation-editor-field">
+                    <label class="form-label fw-bold" for="plantEditorParticipationShare">조합 지분율 (%)</label>
+                    <input class="form-control" type="number" min="0" max="100" step="0.001" id="plantEditorParticipationShare">
+                  </div>
+                  <div class="col-md-6 participation-editor-field">
+                    <label class="form-label fw-bold" for="plantEditorGenerationMethod">발전량 반영 기준</label>
+                    <select class="form-select" id="plantEditorGenerationMethod">
+                      <option value="excluded">통합 발전량에서 제외</option>
+                      <option value="share_percent">지분율만큼 반영</option>
+                      <option value="capacity_ratio">참여용량 비율만큼 반영</option>
+                      <option value="direct_input">별도 입력값 반영</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="me-auto section-copy">저장하면 홈페이지 발전소 현황과 이 화면에 함께 반영됩니다.</span>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button>
+          <button type="button" class="btn btn-success" id="savePlantInfoButton">기본정보 저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -249,6 +389,9 @@
     let isDirty = false;
     let isLoading = false;
     let autoRefreshTimer = null;
+    let plantInfoModal = null;
+    let editingPlantContext = null;
+    let plantPhotoPreviewObjectUrl = '';
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -298,8 +441,18 @@
       const raw = String(error?.message || error || '알 수 없는 오류');
       if (raw.includes('PLATFORM_ADMIN_REQUIRED')) return '통합관리자 권한이 필요합니다.';
       if (raw.includes('COOP_ALREADY_HAS_DASHBOARD')) return '선택한 조합에는 이미 다른 모니터가 연결되어 있습니다.';
-      if (raw.includes('SITE_POWER_PLANT_COOP_MISMATCH')) return '다른 조합의 발전소는 연결할 수 없습니다.';
+      if (raw.includes('SITE_POWER_PLANT_COOP_MISMATCH')) return '다른 조합의 발전소는 연결하거나 수정할 수 없습니다.';
       if (raw.includes('PUBLIC_URL_MUST_USE_HTTPS')) return '공개 모니터 주소는 HTTPS 주소만 사용할 수 있습니다.';
+      if (raw.includes('DASHBOARD_COOP_REQUIRED') || raw.includes('DASHBOARD_COOP_MISMATCH')) return '먼저 모니터와 ERP 조합 연결을 저장해주세요.';
+      if (raw.includes('SITE_POWER_PLANT_ALREADY_MAPPED')) return '이미 다른 모니터 발전소에 연결된 홈페이지 발전소입니다.';
+      if (raw.includes('INVALID_PLANT_NAME')) return '발전소명을 확인해주세요.';
+      if (raw.includes('INVALID_CAPACITY')) return '설비용량은 0 이상이어야 합니다.';
+      if (raw.includes('INVALID_DISPLAY_ORDER')) return '표시순서는 0부터 9,999 사이여야 합니다.';
+      if (raw.includes('INVALID_PROGRESS_RATE')) return '진행률은 0부터 100 사이여야 합니다.';
+      if (raw.includes('INVALID_IMAGE_URL')) return '사진 주소가 올바르지 않습니다.';
+      if (raw.includes('INVALID_MONITOR_URL')) return '모니터 주소는 http:// 또는 https://로 시작해야 합니다.';
+      if (raw.includes('PARTICIPATION_BASIS_REQUIRED')) return '참여 발전사업은 참여용량 또는 지분율 중 하나를 입력해주세요.';
+      if (raw.includes('INVALID_PLANT_FIELD_FORMAT')) return '숫자 또는 날짜 형식을 확인해주세요.';
       return raw;
     }
 
@@ -420,9 +573,12 @@
           <div class="col-md-6 col-xl-4">
             <div class="border rounded-4 p-3 h-100 bg-light-subtle d-flex gap-3">
               ${plant.image_url ? `<img class="plant-photo" src="${escapeHtml(plant.image_url)}" alt="">` : '<div class="plant-photo placeholder">☀️</div>'}
-              <div><div class="plant-name">${escapeHtml(plant.name || '-')}</div><div class="plant-meta">${escapeHtml(plant.location || '주소 미등록')}</div><div class="plant-meta">${escapeHtml(formatPower(plant.capacity_kw))} · 모니터 연결 전</div></div>
+              <div class="flex-grow-1"><div class="plant-name">${escapeHtml(plant.name || '-')}</div><div class="plant-meta">${escapeHtml(plant.location || '주소 미등록')}</div><div class="plant-meta">${escapeHtml(formatPower(plant.capacity_kw))} · 모니터 연결 전</div><button type="button" class="btn btn-outline-primary btn-sm mt-2 plant-info-editor" data-site-id="${escapeHtml(plant.id)}">기본정보 수정</button></div>
             </div>
           </div>`).join('')}</div>`;
+        content.querySelectorAll('.plant-info-editor').forEach((button) => button.addEventListener('click', () => {
+          openPlantInfoEditor(null, button.dataset.siteId || null);
+        }));
         return;
       }
 
@@ -442,6 +598,8 @@
         const photo = plant.homepage_image_url
           ? `<img class="plant-photo" src="${escapeHtml(plant.homepage_image_url)}" alt="">`
           : '<div class="plant-photo placeholder">☀️</div>';
+        const editorReady = Boolean(dashboard.coop_id) && String(dashboard.coop_id) === String(coopId);
+        const editorLabel = plant.site_power_plant_id ? '정보 수정' : '정보 등록';
         return `<tr>
           <td>${photo}</td>
           <td><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(location)} · ${escapeHtml(formatPower(capacity))}</div></td>
@@ -451,28 +609,35 @@
           <td class="live-number">${escapeHtml(formatEnergy(plant.today_kwh))}</td>
           <td class="live-number">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</td>
           <td style="min-width:220px"><select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select></td>
+          <td><button type="button" class="btn btn-outline-primary btn-sm plant-info-editor" data-monitor-id="${escapeHtml(plant.id)}" data-site-id="${escapeHtml(plant.site_power_plant_id || '')}" ${editorReady ? '' : 'disabled'}>${editorReady ? editorLabel : '조합 연결 후 등록'}</button></td>
         </tr>`;
       }).join('');
 
       const mobileCards = monitorPlants.map((plant) => {
         const name = plant.homepage_name || plant.full_name || plant.short_name || '-';
+        const editorReady = Boolean(dashboard.coop_id) && String(dashboard.coop_id) === String(coopId);
+        const editorLabel = plant.site_power_plant_id ? '기본정보 수정' : '기본정보 등록';
         return `<article class="mobile-plant-card">
           <div class="d-flex justify-content-between align-items-start gap-2"><div><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(plant.provider)} · ${escapeHtml(plant.homepage_location || plant.location_label || '주소 미등록')}</div></div>${stateBadge(plant)}</div>
           <div class="mobile-metrics"><div><small>현재</small><strong>${escapeHtml(formatPower(plant.current_kw))}</strong></div><div><small>오늘</small><strong>${escapeHtml(formatEnergy(plant.today_kwh))}</strong></div><div><small>누적</small><strong>${escapeHtml(formatEnergy(plant.lifetime_kwh))}</strong></div></div>
           <label class="form-label small fw-bold mb-1">홈페이지 발전소 연결</label>
           <select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select>
+          <button type="button" class="btn btn-outline-primary btn-sm w-100 mt-2 plant-info-editor" data-monitor-id="${escapeHtml(plant.id)}" data-site-id="${escapeHtml(plant.site_power_plant_id || '')}" ${editorReady ? '' : 'disabled'}>${editorReady ? editorLabel : '조합 연결 저장 후 등록'}</button>
         </article>`;
       }).join('');
 
       content.innerHTML = `
         <div class="table-responsive desktop-plant-table">
           <table class="table align-middle mb-0">
-            <thead><tr><th>사진</th><th>발전소</th><th>수집</th><th>상태</th><th>현재</th><th>오늘</th><th>누적</th><th>홈페이지 발전소 연결</th></tr></thead>
+            <thead><tr><th>사진</th><th>발전소</th><th>수집</th><th>상태</th><th>현재</th><th>오늘</th><th>누적</th><th>홈페이지 발전소 연결</th><th>기본정보</th></tr></thead>
             <tbody>${desktopRows}</tbody>
           </table>
         </div>
         <div class="mobile-plant-list">${mobileCards}</div>`;
       content.querySelectorAll('.plant-mapping-select').forEach((select) => select.addEventListener('change', markDirty));
+      content.querySelectorAll('.plant-info-editor').forEach((button) => button.addEventListener('click', () => {
+        openPlantInfoEditor(button.dataset.monitorId || null, button.dataset.siteId || null);
+      }));
     }
 
     function renderAll() {
@@ -495,6 +660,231 @@
       link.classList.toggle('disabled', !valid);
       if (valid) link.href = url;
       else link.removeAttribute('href');
+    }
+
+    function setPlantEditorStatus(message, type = 'alert-secondary') {
+      const el = document.getElementById('plantEditorStatus');
+      el.className = `alert ${type}`;
+      el.textContent = message || '';
+      el.classList.toggle('hidden', !message);
+    }
+
+    function setPlantEditorValue(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.value = value ?? '';
+    }
+
+    function setPlantEditorSelectValue(id, value, fallback) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const safeValue = String(value || fallback || '');
+      if (safeValue && ![...el.options].some((option) => option.value === safeValue)) {
+        el.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(safeValue)}">${escapeHtml(safeValue)}</option>`);
+      }
+      el.value = safeValue;
+    }
+
+    function clearPlantPhotoObjectUrl() {
+      if (!plantPhotoPreviewObjectUrl) return;
+      URL.revokeObjectURL(plantPhotoPreviewObjectUrl);
+      plantPhotoPreviewObjectUrl = '';
+    }
+
+    function showPlantEditorPhoto(url) {
+      const preview = document.getElementById('plantEditorPhotoPreview');
+      const placeholder = document.getElementById('plantEditorPhotoPlaceholder');
+      const safeUrl = String(url || '').trim();
+      preview.classList.toggle('hidden', !safeUrl);
+      placeholder.classList.toggle('hidden', Boolean(safeUrl));
+      preview.src = safeUrl;
+    }
+
+    function togglePlantParticipationFields() {
+      const isParticipation = document.getElementById('plantEditorProjectType').value === 'participation';
+      document.querySelectorAll('.participation-editor-field').forEach((el) => el.classList.toggle('hidden', !isParticipation));
+    }
+
+    function findMonitorPlant(monitorPlantId) {
+      return (monitorData?.monitor_plants || []).find((plant) => String(plant.id) === String(monitorPlantId || '')) || null;
+    }
+
+    async function openPlantInfoEditor(monitorPlantId, sitePowerPlantId) {
+      if (isDirty) {
+        setStatus('먼저 모니터 연결 설정의 변경사항을 저장해주세요.', 'alert-warning');
+        return;
+      }
+
+      const dashboard = monitorData?.dashboard || null;
+      const coopId = String(dashboard?.coop_id || monitorData?.selected?.coop_id || '').trim();
+      if (!coopId) {
+        setStatus('먼저 모니터와 ERP 조합을 연결하고 설정을 저장해주세요.', 'alert-warning');
+        return;
+      }
+
+      const monitorPlant = findMonitorPlant(monitorPlantId);
+      if (monitorPlantId && (!dashboard || String(dashboard.coop_id || '') !== coopId || !monitorPlant)) {
+        setStatus('모니터 연결 상태를 새로고침한 뒤 다시 시도해주세요.', 'alert-warning');
+        return;
+      }
+
+      setStatus('발전소 기본정보를 불러오는 중입니다.', 'alert-info');
+      let sitePlant = null;
+      try {
+        if (sitePowerPlantId) {
+          const { data, error } = await _supabase.rpc('platform_get_site_power_plant_editor', {
+            p_coop_id: coopId,
+            p_site_power_plant_id: sitePowerPlantId
+          });
+          if (error) throw error;
+          sitePlant = data || null;
+        }
+
+        editingPlantContext = {
+          coopId,
+          dashboardId: monitorPlant ? dashboard.id : null,
+          monitorPlantId: monitorPlant?.id || null,
+          sitePowerPlantId: sitePlant?.id || null,
+          imageUrl: sitePlant?.image_url || ''
+        };
+
+        clearPlantPhotoObjectUrl();
+        document.getElementById('plantEditorPhotoFile').value = '';
+        showPlantEditorPhoto(editingPlantContext.imageUrl);
+        setPlantEditorStatus('');
+        document.getElementById('plantInfoModalTitle').textContent = sitePlant ? '발전소 기본정보 수정' : '발전소 기본정보 등록';
+        document.getElementById('plantInfoModalSubtitle').textContent = monitorPlant
+          ? `${monitorPlant.short_name || monitorPlant.full_name || '모니터 발전소'} · ${monitorPlant.provider || '수집정보'}와 연결됩니다.`
+          : '홈페이지 발전소 현황의 원본 정보를 수정합니다.';
+
+        setPlantEditorValue('plantEditorName', sitePlant?.name || monitorPlant?.full_name || monitorPlant?.short_name || '');
+        setPlantEditorValue('plantEditorCapacity', sitePlant?.capacity_kw ?? monitorPlant?.capacity_kw ?? '');
+        setPlantEditorValue('plantEditorLocation', sitePlant?.location || monitorPlant?.location_label || '');
+        setPlantEditorValue('plantEditorArea', sitePlant?.area || '');
+        setPlantEditorValue('plantEditorCompletionDate', sitePlant?.completion_date || '');
+        setPlantEditorSelectValue('plantEditorStatusSelect', sitePlant?.status, '운영중');
+        setPlantEditorValue('plantEditorProgress', sitePlant?.progress_rate ?? 100);
+        setPlantEditorValue('plantEditorOrder', sitePlant?.display_order ?? monitorPlant?.display_order ?? 0);
+        setPlantEditorValue('plantEditorMonitorUrl', sitePlant?.monitor_url || '');
+        setPlantEditorValue('plantEditorNote', sitePlant?.public_note || '');
+        setPlantEditorSelectValue('plantEditorProjectType', sitePlant?.project_type, 'direct');
+        setPlantEditorSelectValue('plantEditorParticipationMethod', sitePlant?.participation_method, 'equity');
+        setPlantEditorValue('plantEditorOwner', sitePlant?.project_owner_name || '');
+        setPlantEditorValue('plantEditorParticipationCapacity', sitePlant?.participation_capacity ?? '');
+        setPlantEditorValue('plantEditorParticipationShare', sitePlant?.participation_share_percent ?? '');
+        setPlantEditorSelectValue('plantEditorGenerationMethod', sitePlant?.generation_calc_method === 'direct_full' ? 'excluded' : sitePlant?.generation_calc_method, 'excluded');
+        togglePlantParticipationFields();
+        setStatus('');
+        plantInfoModal.show();
+      } catch (error) {
+        console.error('[power-monitor-admin] plant editor load failed', error);
+        setStatus(`기본정보를 불러오지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
+      }
+    }
+
+    function nullableNumberFromInput(id) {
+      const raw = String(document.getElementById(id).value || '').trim();
+      if (!raw) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : NaN;
+    }
+
+    async function savePlantInfo() {
+      if (!editingPlantContext) return;
+      const name = String(document.getElementById('plantEditorName').value || '').trim();
+      const capacity = nullableNumberFromInput('plantEditorCapacity');
+      const participationCapacity = nullableNumberFromInput('plantEditorParticipationCapacity');
+      const participationShare = nullableNumberFromInput('plantEditorParticipationShare');
+      const projectType = document.getElementById('plantEditorProjectType').value;
+      const imageFile = document.getElementById('plantEditorPhotoFile').files?.[0] || null;
+
+      if (!name) {
+        setPlantEditorStatus('발전소명을 입력해주세요.', 'alert-warning');
+        return;
+      }
+      if (!Number.isFinite(capacity) || capacity < 0) {
+        setPlantEditorStatus('설비용량은 0 이상으로 입력해주세요.', 'alert-warning');
+        return;
+      }
+      if (imageFile && (!String(imageFile.type || '').startsWith('image/') || imageFile.size > 8 * 1024 * 1024)) {
+        setPlantEditorStatus('사진은 이미지 파일이며 8MB 이하여야 합니다.', 'alert-warning');
+        return;
+      }
+      if (projectType === 'participation') {
+        const hasCapacity = Number.isFinite(participationCapacity) && participationCapacity > 0;
+        const hasShare = Number.isFinite(participationShare) && participationShare > 0 && participationShare <= 100;
+        if (!hasCapacity && !hasShare) {
+          setPlantEditorStatus('참여 발전사업은 참여용량 또는 지분율 중 하나를 입력해주세요.', 'alert-warning');
+          return;
+        }
+      }
+
+      const saveButton = document.getElementById('savePlantInfoButton');
+      saveButton.disabled = true;
+      saveButton.textContent = '저장 중…';
+      setPlantEditorStatus('기본정보를 저장하고 있습니다.', 'alert-info');
+      let uploadedPath = '';
+      try {
+        let imageUrl = editingPlantContext.imageUrl || '';
+        if (imageFile) {
+          const extension = String(imageFile.name || '').includes('.')
+            ? String(imageFile.name).split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '')
+            : 'jpg';
+          uploadedPath = `power-monitors/${editingPlantContext.dashboardId || editingPlantContext.coopId}/${Date.now()}_${crypto.randomUUID()}.${extension || 'jpg'}`;
+          const { error: uploadError } = await _supabase.storage.from('assets').upload(uploadedPath, imageFile, {
+            cacheControl: '3600',
+            contentType: imageFile.type,
+            upsert: false
+          });
+          if (uploadError) throw uploadError;
+          imageUrl = _supabase.storage.from('assets').getPublicUrl(uploadedPath).data.publicUrl;
+        }
+
+        const payload = {
+          site_power_plant_id: editingPlantContext.sitePowerPlantId,
+          name,
+          capacity_kw: capacity,
+          status: document.getElementById('plantEditorStatusSelect').value,
+          display_order: Number(document.getElementById('plantEditorOrder').value || 0),
+          progress_rate: Number(document.getElementById('plantEditorProgress').value || 0),
+          location: String(document.getElementById('plantEditorLocation').value || '').trim() || null,
+          area: String(document.getElementById('plantEditorArea').value || '').trim() || null,
+          completion_date: document.getElementById('plantEditorCompletionDate').value || null,
+          image_url: imageUrl || null,
+          monitor_url: String(document.getElementById('plantEditorMonitorUrl').value || '').trim() || null,
+          project_type: projectType,
+          participation_method: projectType === 'participation' ? document.getElementById('plantEditorParticipationMethod').value : null,
+          project_owner_name: projectType === 'participation' ? String(document.getElementById('plantEditorOwner').value || '').trim() || null : null,
+          participation_capacity: projectType === 'participation' ? participationCapacity : null,
+          participation_share_percent: projectType === 'participation' ? participationShare : null,
+          generation_calc_method: projectType === 'participation' ? document.getElementById('plantEditorGenerationMethod').value : 'direct_full',
+          public_note: String(document.getElementById('plantEditorNote').value || '').trim() || null
+        };
+
+        const { data, error } = await _supabase.rpc('platform_upsert_power_monitor_site_plant', {
+          p_coop_id: editingPlantContext.coopId,
+          p_dashboard_id: editingPlantContext.dashboardId,
+          p_monitor_plant_id: editingPlantContext.monitorPlantId,
+          p_plant: payload
+        });
+        if (error) throw error;
+
+        plantInfoModal.hide();
+        await loadData(currentScopeKey);
+        setStatus(data?.created ? '발전소 기본정보를 등록하고 모니터에 연결했습니다.' : '발전소 기본정보를 수정했습니다.', 'alert-success');
+      } catch (error) {
+        if (uploadedPath) {
+          try {
+            await _supabase.storage.from('assets').remove([uploadedPath]);
+          } catch (_) {
+            // 저장 RPC가 실패했을 때 방금 올린 미사용 파일만 정리한다.
+          }
+        }
+        console.error('[power-monitor-admin] plant editor save failed', error);
+        setPlantEditorStatus(`저장하지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = '기본정보 저장';
+      }
     }
 
     async function loadData(scopeKey = '', silent = false) {
@@ -592,6 +982,42 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      const plantInfoModalElement = document.getElementById('plantInfoModal');
+      plantInfoModal = bootstrap.Modal.getOrCreateInstance(plantInfoModalElement);
+      document.getElementById('plantEditorProjectType').addEventListener('change', togglePlantParticipationFields);
+      document.getElementById('plantEditorPhotoFile').addEventListener('change', (event) => {
+        clearPlantPhotoObjectUrl();
+        const file = event.target.files?.[0] || null;
+        if (!file) {
+          showPlantEditorPhoto(editingPlantContext?.imageUrl || '');
+          setPlantEditorStatus('');
+          return;
+        }
+        if (!String(file.type || '').startsWith('image/') || file.size > 8 * 1024 * 1024) {
+          event.target.value = '';
+          showPlantEditorPhoto(editingPlantContext?.imageUrl || '');
+          setPlantEditorStatus('사진은 이미지 파일이며 8MB 이하여야 합니다.', 'alert-warning');
+          return;
+        }
+        plantPhotoPreviewObjectUrl = URL.createObjectURL(file);
+        showPlantEditorPhoto(plantPhotoPreviewObjectUrl);
+        setPlantEditorStatus('새 사진은 기본정보를 저장할 때 함께 반영됩니다.', 'alert-info');
+      });
+      document.getElementById('removePlantEditorPhoto').addEventListener('click', () => {
+        if (!editingPlantContext) return;
+        document.getElementById('plantEditorPhotoFile').value = '';
+        clearPlantPhotoObjectUrl();
+        editingPlantContext.imageUrl = '';
+        showPlantEditorPhoto('');
+        setPlantEditorStatus('사진 표시를 제거했습니다. 기본정보를 저장하면 반영됩니다.', 'alert-warning');
+      });
+      document.getElementById('savePlantInfoButton').addEventListener('click', savePlantInfo);
+      plantInfoModalElement.addEventListener('hidden.bs.modal', () => {
+        clearPlantPhotoObjectUrl();
+        editingPlantContext = null;
+        document.getElementById('plantEditorPhotoFile').value = '';
+        setPlantEditorStatus('');
+      });
       document.getElementById('scopeSelect').addEventListener('change', (event) => {
         if (isDirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 다른 조합으로 이동할까요?')) {
           event.target.value = currentScopeKey;
