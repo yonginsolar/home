@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<!-- Version: v1.0.0 | Change: 2026-09-23 - Add platform-wide power plant monitoring management. -->
+<html lang="ko">
+<head>
+  <script>console.log('[Version] v1.0.0 | power_monitor_admin.html');</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>발전소 모니터링 관리</title>
+  <script src="/shared/tenant_head.js?v=20260916-1"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+  <script>
+    window.__COOP_ROUTE_APP__ = 'erp';
+    (function enforceErpPathPrefix() {
+      var host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
+      if (/^erp\./.test(host)) return;
+      var path = String(window.location.pathname || '');
+      if (path === '/erp' || path === '/erp/' || path.indexOf('/erp/') === 0) return;
+      var targetPath = (path === '/' || path === '/index' || path === '/index.html')
+        ? '/erp/'
+        : '/erp' + (path.charAt(0) === '/' ? path : '/' + path);
+      var target = window.location.origin + targetPath + String(window.location.search || '') + String(window.location.hash || '');
+      if (target !== window.location.href) window.location.replace(target);
+    })();
+  </script>
+  <script src="/shared/route_guard.js?v=20260408-1"></script>
+  <script src="erp_runtime_guard.js?v=20260919-1"></script>
+  <style>
+    :root {
+      --solar-ink: #15261f;
+      --solar-green: #146c43;
+      --solar-lime: #dff5e8;
+      --solar-gold: #f6c453;
+      --solar-muted: #64748b;
+      --solar-line: rgba(21, 38, 31, 0.10);
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--solar-ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(246, 196, 83, 0.20), transparent 30%),
+        radial-gradient(circle at 92% 14%, rgba(34, 197, 94, 0.14), transparent 28%),
+        linear-gradient(180deg, #eef7f1 0%, #f7faf8 48%, #f5f7f6 100%);
+      word-break: keep-all;
+    }
+    .page-shell { width: min(1440px, calc(100% - 32px)); margin: 24px auto 48px; }
+    .hero-card, .panel-card, .metric-card {
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid var(--solar-line);
+      box-shadow: 0 18px 48px rgba(30, 64, 45, 0.08);
+    }
+    .hero-card { border-radius: 24px; padding: 24px; }
+    .panel-card { border-radius: 20px; padding: 20px; margin-top: 18px; }
+    .metric-card { border-radius: 16px; padding: 16px; height: 100%; }
+    .eyebrow { color: var(--solar-green); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+    .page-title { margin: 6px 0 8px; font-size: clamp(26px, 4vw, 38px); font-weight: 900; }
+    .subcopy { color: var(--solar-muted); margin: 0; }
+    .scope-bar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+      margin-top: 20px;
+    }
+    .metric-label { color: var(--solar-muted); font-size: 12px; font-weight: 700; }
+    .metric-value { margin-top: 6px; font-size: clamp(22px, 3vw, 30px); font-weight: 900; }
+    .metric-sub { margin-top: 3px; color: var(--solar-muted); font-size: 12px; }
+    .section-title { font-size: 18px; font-weight: 900; }
+    .section-copy { color: var(--solar-muted); font-size: 13px; }
+    .data-contract {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .contract-item { border-radius: 14px; padding: 14px; border: 1px solid var(--solar-line); }
+    .contract-item.homepage { background: #eff6ff; }
+    .contract-item.monitor { background: #ecfdf3; }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: #94a3b8; }
+    .status-dot.live { background: #22c55e; box-shadow: 0 0 0 5px rgba(34, 197, 94, .12); }
+    .status-dot.warn { background: #f59e0b; box-shadow: 0 0 0 5px rgba(245, 158, 11, .12); }
+    .status-dot.error { background: #ef4444; box-shadow: 0 0 0 5px rgba(239, 68, 68, .12); }
+    .source-chip, .state-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: #f1f5f9;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .state-badge { padding: 5px 9px; }
+    .state-badge.live { color: #087443; background: #dcfce7; }
+    .state-badge.pending { color: #9a6700; background: #fef3c7; }
+    .state-badge.error { color: #b42318; background: #fee2e2; }
+    .plant-photo { width: 52px; height: 52px; border-radius: 12px; object-fit: cover; background: #edf2ef; }
+    .plant-photo.placeholder { display: grid; place-items: center; font-size: 23px; }
+    .plant-name { font-weight: 900; }
+    .plant-meta { color: var(--solar-muted); font-size: 12px; margin-top: 2px; }
+    .live-number { font-weight: 900; white-space: nowrap; }
+    .table thead th { color: #64748b; font-size: 12px; letter-spacing: .03em; white-space: nowrap; }
+    .table td { vertical-align: middle; }
+    .empty-box { padding: 34px 20px; border: 1px dashed #b6c2ba; border-radius: 16px; color: var(--solar-muted); text-align: center; background: #fafcfb; }
+    .unlinked-note { border-left: 4px solid var(--solar-gold); background: #fff8e6; }
+    .hidden { display: none !important; }
+    .saving-shield { pointer-events: none; opacity: .64; }
+    .mobile-plant-list { display: none; }
+    @media (max-width: 767px) {
+      .page-shell { width: min(100% - 20px, 1440px); margin-top: 10px; }
+      .hero-card, .panel-card { padding: 16px; border-radius: 18px; }
+      .scope-bar, .data-contract { grid-template-columns: 1fr; }
+      .desktop-plant-table { display: none; }
+      .mobile-plant-list { display: grid; gap: 12px; }
+      .mobile-plant-card { border: 1px solid var(--solar-line); border-radius: 16px; padding: 14px; background: #fff; }
+      .mobile-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 12px 0; }
+      .mobile-metrics > div { border-radius: 10px; background: #f6f8f7; padding: 9px 7px; text-align: center; }
+      .mobile-metrics small { display: block; color: var(--solar-muted); font-size: 10px; }
+      .mobile-metrics strong { display: block; margin-top: 3px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero-card">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="eyebrow">INTEGRATED OPERATIONS</div>
+          <h1 class="page-title">발전소 모니터링 관리</h1>
+          <p class="subcopy">조합별 홈페이지 발전소 정보와 외부 수집 현황을 연결해 한곳에서 확인합니다.</p>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="location.href='index.html'">ERP 홈</button>
+      </div>
+      <div class="scope-bar">
+        <div>
+          <label class="form-label fw-bold" for="scopeSelect">관리할 조합 또는 모니터</label>
+          <select class="form-select form-select-lg" id="scopeSelect" aria-label="관리 대상 선택"></select>
+        </div>
+        <button class="btn btn-success btn-lg" type="button" id="reloadButton">새로고침</button>
+      </div>
+    </section>
+
+    <div class="alert hidden mt-3 mb-0" id="statusArea" role="status" aria-live="polite"></div>
+
+    <section class="panel-card">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+          <div class="section-title">정보를 어디서 가져오는지</div>
+          <div class="section-copy mt-1">같은 값을 두 번 입력하지 않도록 역할을 나눴습니다.</div>
+        </div>
+        <a class="btn btn-outline-primary btn-sm" href="admin_member.html?scope=site_admin&amp;tab=site&amp;sub=plants">홈페이지 발전소 현황 열기</a>
+      </div>
+      <div class="data-contract">
+        <div class="contract-item homepage">
+          <strong>🌐 홈페이지 관리 기준정보</strong>
+          <div class="section-copy mt-1">발전소명, 주소, 사진, 설비용량, 준공일, 공개 설명</div>
+        </div>
+        <div class="contract-item monitor">
+          <strong>⚡ 모니터링 수집정보</strong>
+          <div class="section-copy mt-1">수집 사이트, 현재 출력, 오늘·누적 발전량, 통신·수집 상태</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row g-3 mt-0" id="summaryGrid">
+      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">모니터 발전소</div><div class="metric-value" id="metricMonitorCount">-</div><div class="metric-sub" id="metricMappedCount">연결 -</div></div></div>
+      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">총 설비용량</div><div class="metric-value" id="metricCapacity">-</div><div class="metric-sub">모니터 기준</div></div></div>
+      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">현재 출력</div><div class="metric-value" id="metricCurrent">-</div><div class="metric-sub">최근 수집값 합계</div></div></div>
+      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">오늘 발전량</div><div class="metric-value" id="metricToday">-</div><div class="metric-sub" id="metricUpdated">최종 수집 -</div></div></div>
+    </section>
+
+    <section class="panel-card hidden" id="unlinkedNotice">
+      <div class="unlinked-note rounded-3 p-3">
+        <strong>현재 이 모니터는 ERP 조합과 아직 연결되지 않았습니다.</strong>
+        <div class="section-copy mt-1">화성 조합이 ERP에 등록되기 전에도 10개 발전소와 수집 상태는 확인할 수 있습니다. 나중에 아래 설정에서 조합을 고르면 홈페이지 발전소 정보와 연결됩니다.</div>
+      </div>
+    </section>
+
+    <section class="panel-card hidden" id="dashboardSettingsPanel">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <div class="section-title">모니터 연결 설정</div>
+          <div class="section-copy mt-1">조합 연결과 발전소 매칭은 통합관리자만 변경할 수 있습니다.</div>
+        </div>
+        <button class="btn btn-success" type="button" id="saveButton">설정 저장</button>
+      </div>
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <label class="form-label fw-bold" for="coopLinkSelect">ERP 조합 연결</label>
+          <select class="form-select" id="coopLinkSelect"></select>
+          <div class="form-text">조합을 연결해야 홈페이지 발전소를 매칭할 수 있습니다.</div>
+        </div>
+        <div class="col-md-6 col-lg-2">
+          <label class="form-label fw-bold" for="refreshSelect">화면 갱신</label>
+          <select class="form-select" id="refreshSelect">
+            <option value="180">3분</option>
+            <option value="300">5분</option>
+            <option value="600">10분</option>
+            <option value="900">15분</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-2">
+          <label class="form-label fw-bold d-block">공개 화면</label>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="publicToggle">
+            <label class="form-check-label" for="publicToggle" id="publicToggleLabel">비공개</label>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label fw-bold" for="publicUrlInput">공개 모니터 주소</label>
+          <div class="input-group">
+            <input class="form-control" type="url" id="publicUrlInput" placeholder="https://…">
+            <a class="btn btn-outline-secondary disabled" id="openMonitorLink" target="_blank" rel="noopener noreferrer">열기</a>
+          </div>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mt-3" id="sourceStateList"></div>
+    </section>
+
+    <section class="panel-card">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <div class="section-title">발전소 연결 및 실시간 현황</div>
+          <div class="section-copy mt-1" id="plantListDescription">불러오는 중입니다.</div>
+        </div>
+        <span class="state-badge" id="homepageCountBadge">홈페이지 발전소 -</span>
+      </div>
+      <div id="plantContent"><div class="empty-box">발전소 정보를 불러오는 중입니다.</div></div>
+    </section>
+  </main>
+
+  <script>
+    const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
+    const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      global: {
+        headers: {
+          'x-erp-host': window.CoopRouteGuard?.getErpRuntimeHost(window.location) || String(window.location.hostname || '').trim().toLowerCase()
+        }
+      }
+    });
+
+    let monitorData = null;
+    let currentScopeKey = '';
+    let isDirty = false;
+    let isLoading = false;
+    let autoRefreshTimer = null;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function setStatus(message, type = 'alert-secondary') {
+      const el = document.getElementById('statusArea');
+      el.className = `alert mt-3 mb-0 ${type}`;
+      el.textContent = message || '';
+      el.classList.toggle('hidden', !message);
+    }
+
+    function formatNumber(value, maximumFractionDigits = 1) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '-';
+      return number.toLocaleString('ko-KR', { maximumFractionDigits });
+    }
+
+    function formatPower(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '-';
+      if (number >= 1000) return `${formatNumber(number / 1000, 2)} MW`;
+      return `${formatNumber(number, 1)} kW`;
+    }
+
+    function formatEnergy(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '-';
+      if (number >= 1000000) return `${formatNumber(number / 1000000, 2)} GWh`;
+      if (number >= 1000) return `${formatNumber(number / 1000, 2)} MWh`;
+      return `${formatNumber(number, 1)} kWh`;
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '-';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return '-';
+      return parsed.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function errorMessage(error) {
+      const raw = String(error?.message || error || '알 수 없는 오류');
+      if (raw.includes('PLATFORM_ADMIN_REQUIRED')) return '통합관리자 권한이 필요합니다.';
+      if (raw.includes('COOP_ALREADY_HAS_DASHBOARD')) return '선택한 조합에는 이미 다른 모니터가 연결되어 있습니다.';
+      if (raw.includes('SITE_POWER_PLANT_COOP_MISMATCH')) return '다른 조합의 발전소는 연결할 수 없습니다.';
+      if (raw.includes('PUBLIC_URL_MUST_USE_HTTPS')) return '공개 모니터 주소는 HTTPS 주소만 사용할 수 있습니다.';
+      return raw;
+    }
+
+    function getSelectedCoopId() {
+      return String(document.getElementById('coopLinkSelect')?.value || '').trim();
+    }
+
+    function getAvailableHomepagePlants(coopId = getSelectedCoopId()) {
+      if (!coopId) return [];
+      return (monitorData?.available_homepage_plants || []).filter((plant) => String(plant.coop_id) === coopId);
+    }
+
+    function renderScopes() {
+      const select = document.getElementById('scopeSelect');
+      const scopes = Array.isArray(monitorData?.scopes) ? monitorData.scopes : [];
+      select.innerHTML = scopes.map((scope) => {
+        const suffix = scope.status === 'connected'
+          ? ' · 모니터 연결됨'
+          : scope.status === 'homepage_only'
+            ? ' · 홈페이지 정보만'
+            : '';
+        return `<option value="${escapeHtml(scope.key)}">${escapeHtml(scope.label + suffix)}</option>`;
+      }).join('');
+      select.value = monitorData?.selected_scope_key || currentScopeKey;
+      if (!select.value && scopes[0]) select.value = scopes[0].key;
+    }
+
+    function renderSummary() {
+      const summary = monitorData?.summary || {};
+      const monitorCount = Number(summary.monitor_plant_count || 0);
+      const mappedCount = Number(summary.mapped_plant_count || 0);
+      document.getElementById('metricMonitorCount').textContent = `${monitorCount}곳`;
+      document.getElementById('metricMappedCount').textContent = `홈페이지 정보 연결 ${mappedCount}곳`;
+      document.getElementById('metricCapacity').textContent = formatPower(summary.total_capacity_kw || 0);
+      document.getElementById('metricCurrent').textContent = formatPower(summary.current_kw || 0);
+      document.getElementById('metricToday').textContent = formatEnergy(summary.today_kwh || 0);
+      document.getElementById('metricUpdated').textContent = `최종 수집 ${formatDateTime(summary.last_fetched_at)}`;
+    }
+
+    function renderSources() {
+      const wrap = document.getElementById('sourceStateList');
+      const sources = Array.isArray(monitorData?.sources) ? monitorData.sources : [];
+      if (!sources.length) {
+        wrap.innerHTML = '<span class="section-copy">연결된 수집 사이트가 없습니다.</span>';
+        return;
+      }
+      wrap.innerHTML = sources.map((source) => {
+        const state = String(source.sync_state || 'idle');
+        const dotClass = state === 'success' ? 'live' : state === 'error' ? 'error' : 'warn';
+        const label = state === 'success' ? '정상 수집' : state === 'error' ? '오류' : state === 'partial' ? '일부 수집' : '대기';
+        return `<span class="source-chip" title="${escapeHtml(source.safe_message || '')}"><span class="status-dot ${dotClass}"></span>${escapeHtml(source.provider)} · ${label} · ${escapeHtml(formatDateTime(source.last_success_at))}</span>`;
+      }).join('');
+    }
+
+    function renderDashboardSettings() {
+      const dashboard = monitorData?.dashboard;
+      const panel = document.getElementById('dashboardSettingsPanel');
+      const notice = document.getElementById('unlinkedNotice');
+      panel.classList.toggle('hidden', !dashboard);
+      notice.classList.toggle('hidden', !dashboard || Boolean(dashboard.coop_id));
+      if (!dashboard) return;
+
+      const coopSelect = document.getElementById('coopLinkSelect');
+      const currentDashboardId = String(dashboard.id || '');
+      const coopScopes = (monitorData?.scopes || []).filter((scope) => scope.type === 'coop');
+      coopSelect.innerHTML = '<option value="">ERP 조합 미연결 상태로 유지</option>' + coopScopes.map((scope) => {
+        const occupied = scope.dashboard_id && String(scope.dashboard_id) !== currentDashboardId;
+        return `<option value="${escapeHtml(scope.coop_id)}" ${occupied ? 'disabled' : ''}>${escapeHtml(scope.label)}${occupied ? ' · 다른 모니터 사용 중' : ''}</option>`;
+      }).join('');
+      coopSelect.value = dashboard.coop_id || '';
+
+      const refresh = document.getElementById('refreshSelect');
+      const refreshValue = String(dashboard.refresh_seconds || 180);
+      if (![...refresh.options].some((option) => option.value === refreshValue)) {
+        refresh.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(refreshValue)}">${escapeHtml(refreshValue)}초</option>`);
+      }
+      refresh.value = refreshValue;
+      document.getElementById('publicToggle').checked = dashboard.is_public === true;
+      document.getElementById('publicToggleLabel').textContent = dashboard.is_public === true ? '공개' : '비공개';
+      document.getElementById('publicUrlInput').value = dashboard.public_url || '';
+      updateMonitorLink();
+      renderSources();
+    }
+
+    function stateBadge(plant) {
+      const state = String(plant.data_state || 'pending');
+      if (state === 'live' && plant.communication_state === 'normal') return '<span class="state-badge live">정상</span>';
+      if (plant.communication_state === 'offline') return '<span class="state-badge error">통신 끊김</span>';
+      return '<span class="state-badge pending">확인 필요</span>';
+    }
+
+    function homepageOptions(selectedId) {
+      const plants = getAvailableHomepagePlants();
+      return '<option value="">연결 안 함</option>' + plants.map((plant) => {
+        const capacity = Number(plant.capacity_kw);
+        const capacityLabel = Number.isFinite(capacity) ? ` · ${formatPower(capacity)}` : '';
+        return `<option value="${escapeHtml(plant.id)}" ${String(selectedId || '') === String(plant.id) ? 'selected' : ''}>${escapeHtml(plant.name || '이름 없음')}${escapeHtml(capacityLabel)}</option>`;
+      }).join('');
+    }
+
+    function renderPlantContent() {
+      const content = document.getElementById('plantContent');
+      const monitorPlants = Array.isArray(monitorData?.monitor_plants) ? monitorData.monitor_plants : [];
+      const dashboard = monitorData?.dashboard;
+      const coopId = dashboard
+        ? (getSelectedCoopId() || '')
+        : String(monitorData?.selected?.coop_id || '');
+      const homepagePlants = getAvailableHomepagePlants(coopId);
+      document.getElementById('homepageCountBadge').textContent = `홈페이지 발전소 ${homepagePlants.length}곳`;
+
+      if (!dashboard) {
+        document.getElementById('plantListDescription').textContent = '이 조합에는 모니터가 아직 연결되지 않아 홈페이지 발전소 기준정보만 표시합니다.';
+        if (!homepagePlants.length) {
+          content.innerHTML = '<div class="empty-box">등록된 홈페이지 발전소와 모니터가 없습니다.</div>';
+          return;
+        }
+        content.innerHTML = `<div class="row g-3">${homepagePlants.map((plant) => `
+          <div class="col-md-6 col-xl-4">
+            <div class="border rounded-4 p-3 h-100 bg-light-subtle d-flex gap-3">
+              ${plant.image_url ? `<img class="plant-photo" src="${escapeHtml(plant.image_url)}" alt="">` : '<div class="plant-photo placeholder">☀️</div>'}
+              <div><div class="plant-name">${escapeHtml(plant.name || '-')}</div><div class="plant-meta">${escapeHtml(plant.location || '주소 미등록')}</div><div class="plant-meta">${escapeHtml(formatPower(plant.capacity_kw))} · 모니터 연결 전</div></div>
+            </div>
+          </div>`).join('')}</div>`;
+        return;
+      }
+
+      document.getElementById('plantListDescription').textContent = coopId
+        ? '각 모니터 발전소를 홈페이지 관리의 발전소와 한 번씩 연결하세요.'
+        : '모니터 수집값은 확인할 수 있으며, ERP 조합을 선택하면 홈페이지 발전소 연결란이 활성화됩니다.';
+
+      if (!monitorPlants.length) {
+        content.innerHTML = '<div class="empty-box">이 모니터에 등록된 발전소가 없습니다.</div>';
+        return;
+      }
+
+      const desktopRows = monitorPlants.map((plant) => {
+        const name = plant.homepage_name || plant.full_name || plant.short_name || '-';
+        const location = plant.homepage_location || plant.location_label || '주소 미등록';
+        const capacity = plant.homepage_capacity_kw ?? plant.capacity_kw;
+        const photo = plant.homepage_image_url
+          ? `<img class="plant-photo" src="${escapeHtml(plant.homepage_image_url)}" alt="">`
+          : '<div class="plant-photo placeholder">☀️</div>';
+        return `<tr>
+          <td>${photo}</td>
+          <td><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(location)} · ${escapeHtml(formatPower(capacity))}</div></td>
+          <td><span class="state-badge">${escapeHtml(plant.provider)}</span></td>
+          <td>${stateBadge(plant)}</td>
+          <td class="live-number">${escapeHtml(formatPower(plant.current_kw))}</td>
+          <td class="live-number">${escapeHtml(formatEnergy(plant.today_kwh))}</td>
+          <td class="live-number">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</td>
+          <td style="min-width:220px"><select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select></td>
+        </tr>`;
+      }).join('');
+
+      const mobileCards = monitorPlants.map((plant) => {
+        const name = plant.homepage_name || plant.full_name || plant.short_name || '-';
+        return `<article class="mobile-plant-card">
+          <div class="d-flex justify-content-between align-items-start gap-2"><div><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(plant.provider)} · ${escapeHtml(plant.homepage_location || plant.location_label || '주소 미등록')}</div></div>${stateBadge(plant)}</div>
+          <div class="mobile-metrics"><div><small>현재</small><strong>${escapeHtml(formatPower(plant.current_kw))}</strong></div><div><small>오늘</small><strong>${escapeHtml(formatEnergy(plant.today_kwh))}</strong></div><div><small>누적</small><strong>${escapeHtml(formatEnergy(plant.lifetime_kwh))}</strong></div></div>
+          <label class="form-label small fw-bold mb-1">홈페이지 발전소 연결</label>
+          <select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select>
+        </article>`;
+      }).join('');
+
+      content.innerHTML = `
+        <div class="table-responsive desktop-plant-table">
+          <table class="table align-middle mb-0">
+            <thead><tr><th>사진</th><th>발전소</th><th>수집</th><th>상태</th><th>현재</th><th>오늘</th><th>누적</th><th>홈페이지 발전소 연결</th></tr></thead>
+            <tbody>${desktopRows}</tbody>
+          </table>
+        </div>
+        <div class="mobile-plant-list">${mobileCards}</div>`;
+      content.querySelectorAll('.plant-mapping-select').forEach((select) => select.addEventListener('change', markDirty));
+    }
+
+    function renderAll() {
+      renderScopes();
+      renderSummary();
+      renderDashboardSettings();
+      renderPlantContent();
+      isDirty = false;
+    }
+
+    function markDirty() {
+      isDirty = true;
+      setStatus('저장하지 않은 변경사항이 있습니다.', 'alert-warning');
+    }
+
+    function updateMonitorLink() {
+      const url = String(document.getElementById('publicUrlInput').value || '').trim();
+      const link = document.getElementById('openMonitorLink');
+      const valid = /^https:\/\//i.test(url);
+      link.classList.toggle('disabled', !valid);
+      if (valid) link.href = url;
+      else link.removeAttribute('href');
+    }
+
+    async function loadData(scopeKey = '', silent = false) {
+      if (isLoading) return;
+      isLoading = true;
+      document.body.classList.add('saving-shield');
+      if (!silent) setStatus('발전소 정보를 불러오는 중입니다.', 'alert-info');
+      try {
+        const { data, error } = await _supabase.rpc('platform_get_power_monitor_admin', {
+          p_scope_key: scopeKey || null
+        });
+        if (error) throw error;
+        monitorData = data || {};
+        currentScopeKey = monitorData.selected_scope_key || scopeKey;
+        renderAll();
+        setStatus(silent ? '3분 주기로 최신 수집값을 반영했습니다.' : '', 'alert-success');
+        if (silent) setTimeout(() => {
+          if (!isDirty && document.getElementById('statusArea').textContent.includes('3분 주기')) setStatus('');
+        }, 3500);
+      } catch (error) {
+        console.error('[power-monitor-admin] load failed', error);
+        setStatus(`불러오지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
+      } finally {
+        isLoading = false;
+        document.body.classList.remove('saving-shield');
+      }
+    }
+
+    async function saveSettings() {
+      const dashboard = monitorData?.dashboard;
+      if (!dashboard || isLoading) return;
+      const mappingById = new Map();
+      document.querySelectorAll('.plant-mapping-select').forEach((select) => {
+        const id = String(select.dataset.monitorId || '');
+        if (!mappingById.has(id) || select.offsetParent !== null) mappingById.set(id, select.value || null);
+      });
+      const mappings = (monitorData.monitor_plants || []).map((plant) => ({
+        monitor_plant_id: plant.id,
+        site_power_plant_id: mappingById.get(String(plant.id)) || null
+      }));
+
+      isLoading = true;
+      document.body.classList.add('saving-shield');
+      document.getElementById('saveButton').disabled = true;
+      setStatus('모니터 연결 설정을 저장하고 있습니다.', 'alert-info');
+      try {
+        const { data, error } = await _supabase.rpc('platform_save_power_monitor_admin', {
+          p_dashboard_id: dashboard.id,
+          p_coop_id: getSelectedCoopId() || null,
+          p_is_public: document.getElementById('publicToggle').checked,
+          p_refresh_seconds: Number(document.getElementById('refreshSelect').value || 180),
+          p_public_url: String(document.getElementById('publicUrlInput').value || '').trim() || null,
+          p_mappings: mappings
+        });
+        if (error) throw error;
+        isDirty = false;
+        isLoading = false;
+        document.body.classList.remove('saving-shield');
+        await loadData(data?.scope_key || currentScopeKey);
+        setStatus('발전소 모니터링 설정을 저장했습니다.', 'alert-success');
+      } catch (error) {
+        console.error('[power-monitor-admin] save failed', error);
+        setStatus(`저장하지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
+      } finally {
+        isLoading = false;
+        document.body.classList.remove('saving-shield');
+        document.getElementById('saveButton').disabled = false;
+      }
+    }
+
+    async function initPage() {
+      try {
+        const { data: userData, error: userError } = await _supabase.auth.getUser();
+        if (userError) throw userError;
+        if (!userData?.user) {
+          location.href = 'index.html';
+          return;
+        }
+        const { data: context, error: contextError } = await _supabase.rpc('platform_get_context');
+        if (contextError) throw contextError;
+        if (context?.is_platform_admin !== true) {
+          setStatus('통합관리자만 이 화면을 사용할 수 있습니다. ERP 홈으로 이동합니다.', 'alert-danger');
+          setTimeout(() => { location.href = 'index.html'; }, 1200);
+          return;
+        }
+        await loadData('');
+        autoRefreshTimer = setInterval(() => {
+          if (!isDirty && !document.hidden) loadData(currentScopeKey, true);
+        }, 180000);
+      } catch (error) {
+        console.error('[power-monitor-admin] init failed', error);
+        setStatus(`화면을 시작하지 못했습니다: ${errorMessage(error)}`, 'alert-danger');
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('scopeSelect').addEventListener('change', (event) => {
+        if (isDirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 다른 조합으로 이동할까요?')) {
+          event.target.value = currentScopeKey;
+          return;
+        }
+        loadData(event.target.value);
+      });
+      document.getElementById('reloadButton').addEventListener('click', () => {
+        if (isDirty && !window.confirm('저장하지 않은 변경사항을 취소하고 새로 불러올까요?')) return;
+        loadData(currentScopeKey);
+      });
+      document.getElementById('saveButton').addEventListener('click', saveSettings);
+      document.getElementById('coopLinkSelect').addEventListener('change', () => {
+        renderPlantContent();
+        markDirty();
+      });
+      document.getElementById('refreshSelect').addEventListener('change', markDirty);
+      document.getElementById('publicToggle').addEventListener('change', (event) => {
+        document.getElementById('publicToggleLabel').textContent = event.target.checked ? '공개' : '비공개';
+        markDirty();
+      });
+      document.getElementById('publicUrlInput').addEventListener('input', () => {
+        updateMonitorLink();
+        markDirty();
+      });
+      window.addEventListener('beforeunload', (event) => {
+        if (!isDirty) return;
+        event.preventDefault();
+        event.returnValue = '';
+      });
+      initPage();
+    });
+  </script>
+</body>
+</html>
