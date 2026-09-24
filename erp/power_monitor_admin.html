@@ -2,7 +2,7 @@
 <!-- Version: v1.1.0 | Change: 2026-09-24 - Edit homepage plant details and photos in monitoring management. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.1 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.2.0 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -175,14 +175,14 @@
         </div>
         <div class="contract-item monitor">
           <strong>⚡ 모니터링 수집정보</strong>
-          <div class="section-copy mt-1">수집 사이트, 현재 출력, 오늘·누적 발전량, 통신·수집 상태</div>
+          <div class="section-copy mt-1">완공 공개 여부, 수집 사이트, 현재 출력, 오늘·누적 발전량, 통신·수집 상태</div>
         </div>
       </div>
     </section>
 
     <section class="row g-3 mt-0" id="summaryGrid">
-      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">모니터 발전소</div><div class="metric-value" id="metricMonitorCount">-</div><div class="metric-sub" id="metricMappedCount">연결 -</div></div></div>
-      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">총 설비용량</div><div class="metric-value" id="metricCapacity">-</div><div class="metric-sub">모니터 기준</div></div></div>
+      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">완공 발전소</div><div class="metric-value" id="metricMonitorCount">-</div><div class="metric-sub" id="metricMappedCount">전체 -</div></div></div>
+      <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">완공 설비용량</div><div class="metric-value" id="metricCapacity">-</div><div class="metric-sub">공개 모니터 합계</div></div></div>
       <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">현재 출력</div><div class="metric-value" id="metricCurrent">-</div><div class="metric-sub">최근 수집값 합계</div></div></div>
       <div class="col-6 col-xl-3"><div class="metric-card"><div class="metric-label">오늘 발전량</div><div class="metric-value" id="metricToday">-</div><div class="metric-sub" id="metricUpdated">최종 수집 -</div></div></div>
     </section>
@@ -190,7 +190,7 @@
     <section class="panel-card hidden" id="unlinkedNotice">
       <div class="unlinked-note rounded-3 p-3">
         <strong>현재 이 모니터는 ERP 조합과 아직 연결되지 않았습니다.</strong>
-        <div class="section-copy mt-1">화성 조합이 ERP에 등록되기 전에도 10개 발전소와 수집 상태는 확인할 수 있습니다. 나중에 아래 설정에서 조합을 고르면 홈페이지 발전소 정보와 연결됩니다.</div>
+        <div class="section-copy mt-1">화성 조합이 ERP에 등록되기 전에도 10개 발전소를 관리할 수 있습니다. 완공에 체크한 발전소만 공개 화면에 표시되며, 나중에 조합을 고르면 홈페이지 발전소 정보와 연결됩니다.</div>
       </div>
     </section>
 
@@ -198,7 +198,7 @@
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
           <div class="section-title">모니터 연결 설정</div>
-          <div class="section-copy mt-1">조합 연결과 발전소 매칭은 통합관리자만 변경할 수 있습니다.</div>
+          <div class="section-copy mt-1">조합 연결, 발전소 매칭과 완공 공개 여부는 통합관리자만 변경할 수 있습니다.</div>
         </div>
         <button class="btn btn-success" type="button" id="saveButton">설정 저장</button>
       </div>
@@ -238,7 +238,7 @@
     <section class="panel-card">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
-          <div class="section-title">발전소 연결 및 실시간 현황</div>
+          <div class="section-title">발전소 연결·완공 공개 및 실시간 현황</div>
           <div class="section-copy mt-1" id="plantListDescription">불러오는 중입니다.</div>
         </div>
         <span class="state-badge" id="homepageCountBadge">홈페이지 발전소 -</span>
@@ -449,6 +449,7 @@
       if (raw.includes('INVALID_CAPACITY')) return '설비용량은 0 이상이어야 합니다.';
       if (raw.includes('INVALID_DISPLAY_ORDER')) return '표시순서는 0부터 9,999 사이여야 합니다.';
       if (raw.includes('INVALID_PROGRESS_RATE')) return '진행률은 0부터 100 사이여야 합니다.';
+      if (raw.includes('INVALID_COMPLETION_STATE')) return '완공 공개 여부를 다시 확인해주세요.';
       if (raw.includes('INVALID_IMAGE_URL')) return '사진 주소가 올바르지 않습니다.';
       if (raw.includes('INVALID_MONITOR_URL')) return '모니터 주소는 http:// 또는 https://로 시작해야 합니다.';
       if (raw.includes('PARTICIPATION_BASIS_REQUIRED')) return '참여 발전사업은 참여용량 또는 지분율 중 하나를 입력해주세요.';
@@ -483,13 +484,14 @@
     function renderSummary() {
       const summary = monitorData?.summary || {};
       const monitorCount = Number(summary.monitor_plant_count || 0);
+      const completedCount = Number(summary.completed_plant_count || 0);
       const mappedCount = Number(summary.mapped_plant_count || 0);
-      document.getElementById('metricMonitorCount').textContent = `${monitorCount}곳`;
-      document.getElementById('metricMappedCount').textContent = `홈페이지 정보 연결 ${mappedCount}곳`;
-      document.getElementById('metricCapacity').textContent = formatPower(summary.total_capacity_kw || 0);
-      document.getElementById('metricCurrent').textContent = formatPower(summary.current_kw || 0);
-      document.getElementById('metricToday').textContent = formatEnergy(summary.today_kwh || 0);
-      document.getElementById('metricUpdated').textContent = `최종 수집 ${formatDateTime(summary.last_fetched_at)}`;
+      document.getElementById('metricMonitorCount').textContent = `${completedCount}곳`;
+      document.getElementById('metricMappedCount').textContent = `전체 ${monitorCount}곳 · 홈페이지 연결 ${mappedCount}곳`;
+      document.getElementById('metricCapacity').textContent = formatPower(summary.completed_capacity_kw || 0);
+      document.getElementById('metricCurrent').textContent = formatPower(summary.completed_current_kw || 0);
+      document.getElementById('metricToday').textContent = formatEnergy(summary.completed_today_kwh || 0);
+      document.getElementById('metricUpdated').textContent = `완공 발전소 최종 수집 ${formatDateTime(summary.completed_last_fetched_at)}`;
     }
 
     function renderSources() {
@@ -539,6 +541,7 @@
 
     function stateBadge(plant) {
       const state = String(plant.data_state || 'pending');
+      if (plant.is_completed !== true) return '<span class="state-badge pending">건설 중</span>';
       if (plant.communication_state === 'offline') return '<span class="state-badge error">통신 이상</span>';
       if (state === 'live' && plant.operational_state === 'generating') return '<span class="state-badge live">발전 중</span>';
       if (state === 'live' && plant.operational_state === 'night') return '<span class="state-badge pending">발전 종료</span>';
@@ -586,8 +589,8 @@
       }
 
       document.getElementById('plantListDescription').textContent = coopId
-        ? '각 모니터 발전소를 홈페이지 관리의 발전소와 한 번씩 연결하세요.'
-        : '모니터 수집값은 확인할 수 있으며, ERP 조합을 선택하면 홈페이지 발전소 연결란이 활성화됩니다.';
+        ? '홈페이지 발전소를 연결하고, 완공된 발전소만 체크하세요. 체크된 발전소만 공개 모니터와 합계에 표시됩니다.'
+        : '수집값은 모두 확인할 수 있습니다. 완공에 체크한 발전소만 공개 모니터와 합계에 표시됩니다.';
 
       if (!monitorPlants.length) {
         content.innerHTML = '<div class="empty-box">이 모니터에 등록된 발전소가 없습니다.</div>';
@@ -608,6 +611,7 @@
           <td><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(location)} · ${escapeHtml(formatPower(capacity))}</div></td>
           <td><span class="state-badge">${escapeHtml(plant.provider)}</span></td>
           <td>${stateBadge(plant)}</td>
+          <td><div class="form-check form-switch m-0"><input class="form-check-input plant-completion-checkbox" type="checkbox" role="switch" data-monitor-id="${escapeHtml(plant.id)}" aria-label="${escapeHtml(plant.short_name || name)} 완공 공개" ${plant.is_completed === true ? 'checked' : ''}></div></td>
           <td class="live-number">${escapeHtml(formatPower(plant.current_kw))}</td>
           <td class="live-number">${escapeHtml(formatEnergy(plant.today_kwh))}</td>
           <td class="live-number">${escapeHtml(formatEnergy(plant.lifetime_kwh))}</td>
@@ -622,6 +626,7 @@
         const editorLabel = plant.site_power_plant_id ? '기본정보 수정' : '기본정보 등록';
         return `<article class="mobile-plant-card">
           <div class="d-flex justify-content-between align-items-start gap-2"><div><div class="plant-name">${escapeHtml(name)}</div><div class="plant-meta">${escapeHtml(plant.provider)} · ${escapeHtml(plant.homepage_location || plant.location_label || '주소 미등록')}</div></div>${stateBadge(plant)}</div>
+          <div class="form-check form-switch mt-3"><input class="form-check-input plant-completion-checkbox" type="checkbox" role="switch" data-monitor-id="${escapeHtml(plant.id)}" aria-label="${escapeHtml(plant.short_name || name)} 완공 공개" ${plant.is_completed === true ? 'checked' : ''}><label class="form-check-label">완공 · 공개 모니터에 표시</label></div>
           <div class="mobile-metrics"><div><small>현재</small><strong>${escapeHtml(formatPower(plant.current_kw))}</strong></div><div><small>오늘</small><strong>${escapeHtml(formatEnergy(plant.today_kwh))}</strong></div><div><small>누적</small><strong>${escapeHtml(formatEnergy(plant.lifetime_kwh))}</strong></div></div>
           <label class="form-label small fw-bold mb-1">홈페이지 발전소 연결</label>
           <select class="form-select form-select-sm plant-mapping-select" data-monitor-id="${escapeHtml(plant.id)}" ${coopId ? '' : 'disabled'}>${homepageOptions(plant.site_power_plant_id)}</select>
@@ -632,12 +637,13 @@
       content.innerHTML = `
         <div class="table-responsive desktop-plant-table">
           <table class="table align-middle mb-0">
-            <thead><tr><th>사진</th><th>발전소</th><th>수집</th><th>상태</th><th>현재</th><th>오늘</th><th>누적</th><th>홈페이지 발전소 연결</th><th>기본정보</th></tr></thead>
+            <thead><tr><th>사진</th><th>발전소</th><th>수집</th><th>상태</th><th>완공 공개</th><th>현재</th><th>오늘</th><th>누적</th><th>홈페이지 발전소 연결</th><th>기본정보</th></tr></thead>
             <tbody>${desktopRows}</tbody>
           </table>
         </div>
         <div class="mobile-plant-list">${mobileCards}</div>`;
       content.querySelectorAll('.plant-mapping-select').forEach((select) => select.addEventListener('change', markDirty));
+      content.querySelectorAll('.plant-completion-checkbox').forEach((checkbox) => checkbox.addEventListener('change', markDirty));
       content.querySelectorAll('.plant-info-editor').forEach((button) => button.addEventListener('click', () => {
         openPlantInfoEditor(button.dataset.monitorId || null, button.dataset.siteId || null);
       }));
@@ -896,7 +902,7 @@
       document.body.classList.add('saving-shield');
       if (!silent) setStatus('발전소 정보를 불러오는 중입니다.', 'alert-info');
       try {
-        const { data, error } = await _supabase.rpc('platform_get_power_monitor_admin', {
+        const { data, error } = await _supabase.rpc('platform_get_power_monitor_admin_v2', {
           p_scope_key: scopeKey || null
         });
         if (error) throw error;
@@ -920,13 +926,21 @@
       const dashboard = monitorData?.dashboard;
       if (!dashboard || isLoading) return;
       const mappingById = new Map();
+      const completionById = new Map();
       document.querySelectorAll('.plant-mapping-select').forEach((select) => {
         const id = String(select.dataset.monitorId || '');
         if (!mappingById.has(id) || select.offsetParent !== null) mappingById.set(id, select.value || null);
       });
+      document.querySelectorAll('.plant-completion-checkbox').forEach((checkbox) => {
+        const id = String(checkbox.dataset.monitorId || '');
+        if (!completionById.has(id) || checkbox.offsetParent !== null) completionById.set(id, checkbox.checked);
+      });
       const mappings = (monitorData.monitor_plants || []).map((plant) => ({
         monitor_plant_id: plant.id,
-        site_power_plant_id: mappingById.get(String(plant.id)) || null
+        site_power_plant_id: mappingById.get(String(plant.id)) || null,
+        is_completed: completionById.has(String(plant.id))
+          ? completionById.get(String(plant.id))
+          : plant.is_completed === true
       }));
 
       isLoading = true;
@@ -934,7 +948,7 @@
       document.getElementById('saveButton').disabled = true;
       setStatus('모니터 연결 설정을 저장하고 있습니다.', 'alert-info');
       try {
-        const { data, error } = await _supabase.rpc('platform_save_power_monitor_admin', {
+        const { data, error } = await _supabase.rpc('platform_save_power_monitor_admin_v2', {
           p_dashboard_id: dashboard.id,
           p_coop_id: getSelectedCoopId() || null,
           p_is_public: document.getElementById('publicToggle').checked,
