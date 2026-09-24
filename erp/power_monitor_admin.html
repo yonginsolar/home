@@ -2,7 +2,7 @@
 <!-- Version: v1.1.0 | Change: 2026-09-24 - Edit homepage plant details and photos in monitoring management. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.1.0 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.1.1 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -502,7 +502,7 @@
       wrap.innerHTML = sources.map((source) => {
         const state = String(source.sync_state || 'idle');
         const dotClass = state === 'success' ? 'live' : state === 'error' ? 'error' : 'warn';
-        const label = state === 'success' ? '정상 수집' : state === 'error' ? '오류' : state === 'partial' ? '일부 수집' : '대기';
+        const label = state === 'success' ? '수집 성공' : state === 'error' ? '오류' : state === 'partial' ? '일부 수집' : '대기';
         return `<span class="source-chip" title="${escapeHtml(source.safe_message || '')}"><span class="status-dot ${dotClass}"></span>${escapeHtml(source.provider)} · ${label} · ${escapeHtml(formatDateTime(source.last_success_at))}</span>`;
       }).join('');
     }
@@ -539,8 +539,11 @@
 
     function stateBadge(plant) {
       const state = String(plant.data_state || 'pending');
-      if (state === 'live' && plant.communication_state === 'normal') return '<span class="state-badge live">정상</span>';
-      if (plant.communication_state === 'offline') return '<span class="state-badge error">통신 끊김</span>';
+      if (plant.communication_state === 'offline') return '<span class="state-badge error">통신 이상</span>';
+      if (state === 'live' && plant.operational_state === 'generating') return '<span class="state-badge live">발전 중</span>';
+      if (state === 'live' && plant.operational_state === 'night') return '<span class="state-badge pending">발전 종료</span>';
+      if (state === 'live' && plant.operational_state === 'stopped') return '<span class="state-badge pending">발전 확인</span>';
+      if (state === 'live' && plant.communication_state === 'normal') return '<span class="state-badge live">통신 정상</span>';
       return '<span class="state-badge pending">확인 필요</span>';
     }
 
