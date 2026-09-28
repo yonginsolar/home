@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.59 | Change: 2026-09-28 - Show only available annual leave in the profile summary. -->
+<!-- Version: v1.0.60 | Change: 2026-09-28 - Open the employee's versioned employment contract history and electronic confirmation. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.59 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.60 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -244,7 +244,7 @@ body{padding:18px 14px 28px}
 </div>
 <div class="tab-pane fade" id="tabCert">
 <div class="card p-3 border mb-3"><div class="d-flex justify-content-between align-items-center"><div><h6 class="fw-bold mb-1" id="certCardTitle">📄 재직증명서</h6><small class="text-muted" id="certCardSubtitle">은행/관공서 제출용</small></div><button class="btn btn-outline-primary" id="btnCert" onclick="openCertModal()">발급 신청</button></div></div>
-<div class="card p-3 border"><div class="d-flex justify-content-between align-items-center"><div><h6 class="fw-bold mb-1">🤝 근로계약서</h6><small class="text-muted">서명 완료된 계약서</small></div><button class="btn btn-secondary" id="btnContract" onclick="viewContract()" disabled>등록된 계약서 없음</button></div></div>
+<div class="card p-3 border"><div class="d-flex justify-content-between align-items-center gap-3 flex-wrap"><div><h6 class="fw-bold mb-1">🤝 근로계약서</h6><small class="text-muted">계약 이력 확인과 전자 서명</small></div><button class="btn btn-outline-primary fw-bold" id="btnContract" onclick="viewContract()">계약서 관리</button></div></div>
 </div>
 <div class="tab-pane fade" id="tabNotice"><div class="list-group" id="noticeList"><div class="text-center p-3 text-muted">로딩 중...</div></div></div>
 </div>
@@ -340,7 +340,7 @@ if(subEl) subEl.textContent=meta.subtitle;
 const getMypageKstDateParts=(value)=>{if(!value) return {date:'',time:'',hasTime:false}; if(typeof value==='string' && !value.includes('T')) return {date:value,time:'',hasTime:false}; const d=new Date(value); if(Number.isNaN(d.getTime())) return {date:'',time:'',hasTime:false}; const date=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d); const time=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,hour:'2-digit',minute:'2-digit',hour12:false}).format(d); return {date,time,hasTime:true}};
 function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
 async function getAdjustedSalaryRowForMypage(row, ym){if(!row) return row; if(!window.PayrollDurunuriModule) return row; try{const supportMap=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym); return window.PayrollDurunuriModule.adjustSalaryRow(row,supportMap);}catch(e){console.warn('Durunuri support load failed:',e?.message||e); return row;}}
-let myInfo={},companyInfo={},currentSalaryData=null,tempEmergencyList=[],noticesData=[],leaveSnapshotState=null,contractSignedUrl='';
+let myInfo={},companyInfo={},currentSalaryData=null,tempEmergencyList=[],noticesData=[],leaveSnapshotState=null;
 let permissionSet = new Set();
 let purposeModal,leaveDetailModal,noticeDetailModal,alertModal,eventModal,calendarSubscriptionModal;
 let confirmModal;
@@ -1267,8 +1267,7 @@ document.getElementById("alertBody").textContent=m||"";
 alertModal.show();
 }
 window.viewContract=function(){
-if(!contractSignedUrl){showAlert("등록된 계약서가 없습니다.");return}
-window.open(contractSignedUrl,'_blank','noopener');
+location.href='employment_contracts.html?self=1';
 }
 function autoHyphen(t){t.value=t.value.replace(/[^0-9]/g,'').replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g,"$1-$2-$3").replace(/(\-{1,2})$/g,"")}
 function openAddressSearch(){new daum.Postcode({oncomplete:function(d){let a=d.userSelectedType==='R'?d.roadAddress:d.jibunAddress;if(d.buildingName)a+=' ('+d.buildingName+')';document.getElementById("myAddress").value=a}}).open()}
@@ -1334,27 +1333,11 @@ async function loadProfile() {
     document.getElementById("myBank").value = myInfo.bank_name || "";
     document.getElementById("myAccount").value = myInfo.account_number || "";
 
-    // 계약서 버튼 처리
     const btn = document.getElementById("btnContract");
-    contractSignedUrl='';
-    btn.disabled = true;
-    btn.className = "btn btn-secondary";
-    btn.innerText = "등록된 계약서 없음";
+    btn.disabled = false;
+    btn.className = "btn btn-outline-primary fw-bold";
+    btn.innerText = "계약서 관리";
     btn.onclick = () => window.viewContract();
-    if (myInfo.contract_url) {
-        let u = myInfo.contract_url.startsWith('http') ? myInfo.contract_url : null;
-        if (!u) {
-            const { data: d } = await _supabase.storage.from('contracts').createSignedUrl(myInfo.contract_url, 3600);
-            if (d) u = d.signedUrl;
-        }
-        if (u) {
-            contractSignedUrl = u;
-            btn.disabled = false;
-            btn.className = "btn btn-outline-primary fw-bold";
-            btn.innerText = "📄 계약서 보기";
-            btn.onclick = () => window.viewContract();
-        }
-    }
 }
 async function loadMypageOvertimeSummary(){
 try{

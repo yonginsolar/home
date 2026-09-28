@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.73
-Change: 2026-09-28 - Show only available annual leave in the employee summary.
+Version: v1.0.74
+Change: 2026-09-28 - Open versioned employment contract authoring and upload management.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.73 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.74 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -353,16 +353,10 @@ Change: 2026-09-28 - Show only available annual leave in the employee summary.
         <div class="row g-2">
           <div class="col-md-6">
             <div class="info-card" style="background: white; border: 1px solid #dee2e6;">
-              <div class="section-title mb-2">📄 근로계약서</div>
-              <div id="contractView" class="mb-2"></div>
+              <div class="section-title mb-2">📄 근로계약서 관리</div>
+              <div id="contractView" class="small text-muted mb-3">직접 작성, 변경합의서 작성 또는 외부 작성 파일 등록</div>
               <input type="hidden" id="hiddenContractUrl" value="">
-              <div class="edit-mode border-top pt-2">
-                <label class="small text-muted">파일 업데이트</label>
-                <div class="d-flex gap-2">
-                  <input type="file" id="contractFile" class="form-control form-control-sm" accept=".pdf,.jpg,.png,.jpeg">
-                  <button class="btn btn-dark btn-sm text-nowrap" style="min-width: 80px;" onclick="uploadContract()">업로드</button>
-                </div>
-              </div>
+              <button type="button" class="btn btn-outline-primary w-100 fw-bold" onclick="openEmploymentContractManager()">계약서 이력·작성 열기</button>
             </div>
           </div>
           <div class="col-md-6">
@@ -4906,8 +4900,11 @@ async function openDetail(u) {
     toggleEditMode(false);
     document.getElementById("rrnFront").value = ""; document.getElementById("rrnBack").value = "";
 
-    const viewDiv = document.getElementById("contractView"); viewDiv.innerHTML = '로딩...'; document.getElementById("hiddenContractUrl").value = u.contract_url || "";
-    if(u.contract_url) { try { const { data } = await _supabase.storage.from('contracts').createSignedUrl(u.contract_url, 3600); if (data?.signedUrl) setContractViewLink(viewDiv, data.signedUrl); else viewDiv.innerHTML = `<span class="text-danger small">실패</span>`; } catch(e) { viewDiv.innerHTML = "-"; } } else viewDiv.innerHTML = `<span class="text-muted small">미등록</span>`;
+    const viewDiv = document.getElementById("contractView");
+    document.getElementById("hiddenContractUrl").value = u.contract_url || "";
+    viewDiv.textContent = u.contract_url
+        ? '기존 등록 파일이 있습니다. 계약서 관리에서 이전 파일과 새 이력을 함께 확인할 수 있습니다.'
+        : '직접 작성, 변경합의서 작성 또는 외부 작성 파일 등록';
 
     const area = document.getElementById("btnResignArea");
     if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
@@ -4997,7 +4994,11 @@ async function saveBasicInfo() {
 }
 
 async function saveRRN() { const f = document.getElementById("rrnFront").value; const b = document.getElementById("rrnBack").value; if((f+b).length !== 13) return showAlert("13자리를 입력하세요."); const { error } = await _supabase.rpc('update_employee_rrn', { p_emp_id: currentEmpId, p_rrn: f+"-"+b }); if(error) showAlert("실패: "+error.message); else { showAlert("암호화되어 저장되었습니다."); const { data: bd } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: currentEmpId }); document.getElementById("viewBirth").innerText = bd || f; document.getElementById("rrnFront").value=""; document.getElementById("rrnBack").value=""; toggleEditMode(false); } }
-async function uploadContract() { const fileInput = document.getElementById("contractFile"); if (fileInput.files.length === 0) return showAlert("파일을 선택해주세요."); const file = fileInput.files[0]; const fileName = `${currentEmpId}_contract_${Date.now()}.${file.name.split('.').pop()}`; showLoading(); try { const { data: emp } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('contract_url')).eq('emp_id', currentEmpId).single(); if (emp?.contract_url && !emp.contract_url.startsWith('http')) await _supabase.storage.from('contracts').remove([emp.contract_url]); const { data, error } = await _supabase.storage.from('contracts').upload(fileName, file, { upsert: true }); if (error) throw error; await scopeEmployeeTenant(_supabase.from('ref_employees').update({ contract_url: data.path })).eq('emp_id', currentEmpId); hideLoading(); setTimeout(async () => { showAlert("계약서가 등록되었습니다."); const { data: signed } = await _supabase.storage.from('contracts').createSignedUrl(data.path, 3600); setContractViewLink(document.getElementById("contractView"), signed?.signedUrl || ''); document.getElementById("hiddenContractUrl").value = data.path; fileInput.value = ""; }, 500); } catch (err) { hideLoading(); setTimeout(() => showAlert("오류 발생: " + err.message), 500); } }
+function openEmploymentContractManager() {
+    if (!currentEmpId) return showAlert('직원을 먼저 선택해 주세요.');
+    sessionStorage.setItem('erp_contract_employee_id', String(currentEmpId));
+    location.href = 'employment_contracts.html';
+}
 
 async function reqDeletePermanent() {
     showConfirm("⚠️ 영구 삭제 경고", `${currentEmpName} 데이터를 모두 삭제하시겠습니까?`, async function() {
