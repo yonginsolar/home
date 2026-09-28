@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.70
-Change: 2026-09-28 - Use the official shared Korean public-holiday calendar for payroll defaults.
+Version: v1.0.71
+Change: 2026-09-28 - Assign detailed work-module access while creating an employee.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.70 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.71 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -93,10 +93,17 @@ Change: 2026-09-28 - Use the official shared Korean public-holiday calendar for 
     .employee-module-row.module-off { background: #f8fafc; opacity: 0.72; }
     .employee-module-title { font-weight: 700; color: #1f2937; }
     .employee-module-state { min-width: 148px; }
+    .invite-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .invite-module-card { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; padding: 12px; min-width: 0; }
+    .invite-module-card.module-off { background: #f8fafc; opacity: 0.72; }
+    .invite-module-card .form-select { min-width: 138px; }
     .bulk-leave-table .form-check-input { cursor: pointer; }
     @media (max-width: 991.98px) {
       .hr-page-subtitle { white-space: normal; }
       .hr-page-actions { width: 100%; justify-content: flex-start; }
+    }
+    @media (max-width: 767.98px) {
+      .invite-module-grid { grid-template-columns: 1fr; }
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
@@ -156,7 +163,71 @@ Change: 2026-09-28 - Use the official shared Korean public-holiday calendar for 
           <li class="nav-item">
             <a class="nav-link active" data-bs-toggle="tab" href="#setTax">📊 주요 요율/비과세</a></li>
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setCompany">🏢 회사 정보</a></li><li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced" onclick="loadAdvancedSettings()">⚙️ 고급 설정 (전체)</a></li></ul><div class="tab-content"><div class="tab-pane fade show active" id="setTax"><h6 class="fw-bold text-primary small border-bottom pb-1 mb-2">4대보험 총 요율 (자동 50:50 분할)</h6><div class="row g-2 mb-3"><div class="col-6"><label class="small text-muted">국민연금 총합 (%)</label><input type="number" id="set_pension_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('pension')"><div class="x-small text-secondary mt-1">인당: <span id="half_pension">0</span>%</div></div><div class="col-6"><label class="small text-muted">건강보험 총합 (%)</label><input type="number" id="set_health_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('health')"><div class="x-small text-secondary mt-1">인당: <span id="half_health">0</span>%</div></div></div><h6 class="fw-bold text-success small border-bottom pb-1 mb-2">비과세 한도 설정</h6><div class="row g-2 mb-3"><div class="col-4"><label class="small text-muted">식대비과세</label><input type="number" id="set_meal" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">차량비과세</label><input type="number" id="set_car" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">육아비과세</label><input type="number" id="set_child" class="form-control form-control-sm"></div></div></div><div class="tab-pane fade" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/*" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" min="1" step="1" placeholder="예: 100000"><div class="form-text">조합원 명부 엑셀 다운로드의 출자좌수 계산과 시청 신고용 출력에 사용됩니다.</div></div></div></div><div class="tab-pane fade" id="setAdvanced"><div class="table-responsive" style="max-height: 300px;"><table class="table table-sm adv-table align-middle"><thead class="table-light"><tr><th>항목 키</th><th style="width: 120px;">값</th><th>설명</th></tr></thead><tbody id="advSettingsBody"></tbody></table></div></div></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">설정 통합 저장</button></div></div></div></div>
-<div class="modal fade" id="inviteModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title fw-bold">✨ 직원 신규 등록</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="alert alert-light border text-center small mb-3">🆔 사원번호는 자동 생성됩니다.</div><div id="inviteStatus" class="alert d-none small py-2 px-3 mb-3" role="status" aria-live="polite"></div><label class="small text-muted ms-1">이름</label><input type="text" id="newName" class="form-control mb-2" placeholder="홍길동"><label class="small text-muted ms-1">이메일</label><input type="email" id="newEmail" class="form-control mb-2" placeholder="user@gmail.com"><div class="row g-2 mb-2"><div class="col"><label class="small text-muted ms-1">직급</label><select id="newRank" class="form-select"></select></div><div class="col"><label class="small text-muted ms-1">권한</label><select id="newRole" class="form-select"><option value="admin_all">전체 관리자 (모든 접근)</option><option value="admin_home">홈페이지 관리자 (전자결재/마이페이지/홈페이지)</option><option value="admin_accounting">회계 관리자 (전자결재/마이페이지/회계관리)</option><option value="staff">일반 직원 (전자결재/마이페이지)</option></select></div></div><div class="row g-2 mb-2"><div class="col"><label class="small text-muted ms-1">결재 레벨</label><select id="newAuthLevel" class="form-select"></select><div class="form-text">1이 최상위, 숫자가 클수록 하위 결재선입니다.</div></div></div><div class="mb-2"><label class="small text-muted ms-1">부서</label><select id="newDeptSelect" class="form-select" onchange="syncInviteDepartmentInput()"><option value="">미지정</option></select></div><div class="mb-3 hidden" id="newDeptCustomWrap"><label class="small text-muted ms-1">직접 입력 부서명</label><input type="text" id="newDeptCustom" class="form-control" placeholder="기획팀"></div><button id="inviteSubmitBtn" class="btn btn-primary w-100 btn-rounded py-2" onclick="runInvite()">등록하기</button></div></div></div></div>
+<div class="modal fade" id="inviteModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold">✨ 직원 신규 등록</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-light border text-center small mb-3">🆔 사원번호는 자동 생성됩니다.</div>
+        <div id="inviteStatus" class="alert d-none small py-2 px-3 mb-3" role="status" aria-live="polite"></div>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="small text-muted ms-1">이름</label>
+            <input type="text" id="newName" class="form-control mb-2" placeholder="홍길동">
+          </div>
+          <div class="col-md-6">
+            <label class="small text-muted ms-1">이메일</label>
+            <input type="email" id="newEmail" class="form-control mb-2" placeholder="user@gmail.com">
+          </div>
+          <div class="col-md-6">
+            <label class="small text-muted ms-1">직급</label>
+            <select id="newRank" class="form-select"></select>
+          </div>
+          <div class="col-md-6">
+            <label class="small text-muted ms-1">기본 역할</label>
+            <select id="newRole" class="form-select">
+              <option value="admin_all">전체 관리자 (모든 업무 기본 허용)</option>
+              <option value="admin_home">홈페이지 관리자 (홈페이지 업무 중심)</option>
+              <option value="admin_accounting">회계 관리자 (회계 업무 중심)</option>
+              <option value="staff">일반 직원 (개인·결재 업무 중심)</option>
+            </select>
+            <div class="form-text">아래에서 업무별로 다르게 지정하면 그 설정을 우선 적용합니다.</div>
+          </div>
+          <div class="col-md-6">
+            <label class="small text-muted ms-1">결재 레벨</label>
+            <select id="newAuthLevel" class="form-select"></select>
+            <div class="form-text">1이 최상위, 숫자가 클수록 하위 결재선입니다.</div>
+          </div>
+          <div class="col-md-6">
+            <label class="small text-muted ms-1">부서</label>
+            <select id="newDeptSelect" class="form-select" onchange="syncInviteDepartmentInput()"><option value="">미지정</option></select>
+          </div>
+          <div class="col-12 hidden" id="newDeptCustomWrap">
+            <label class="small text-muted ms-1">직접 입력 부서명</label>
+            <input type="text" id="newDeptCustom" class="form-control" placeholder="기획팀">
+          </div>
+        </div>
+
+        <div class="border rounded-3 p-3 mt-3 bg-light-subtle">
+          <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+            <div>
+              <div class="fw-bold">🧭 직원별 업무 권한</div>
+              <div class="small text-muted mt-1">기본 역할을 그대로 쓰거나, 맡길 업무만 직원별로 열고 닫을 수 있습니다.</div>
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setAllInviteModuleAccess('inherit')">모두 기본 권한</button>
+          </div>
+          <div id="inviteModuleAccessStatus" class="small text-muted py-3 text-center" role="status" aria-live="polite">업무 권한을 불러오는 중입니다.</div>
+          <div id="inviteModuleAccessList" class="invite-module-grid d-none"></div>
+        </div>
+
+        <button id="inviteSubmitBtn" class="btn btn-primary w-100 btn-rounded py-2 mt-3" onclick="runInvite()" disabled>등록하기</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="modal fade" id="detailModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -834,6 +905,8 @@ let permissionSet = new Set();
 let hrRuntimeProfile = 'legacy_full';
 let employeeModuleAccessSnapshot = null;
 let employeeModuleAccessSaveInFlight = false;
+let inviteModuleAccessCatalog = null;
+let inviteModuleAccessLoadToken = 0;
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
 let telegramApprovalLinkStatusMap = {};
@@ -2503,10 +2576,12 @@ window.onload = async function() {
     if (inviteModalEl && !inviteModalEl.dataset.inviteStatusResetBound) {
         inviteModalEl.dataset.inviteStatusResetBound = '1';
         inviteModalEl.addEventListener('hidden.bs.modal', () => {
+            inviteModuleAccessLoadToken += 1;
+            resetInviteModuleAccessUi();
             setInviteStatus('');
             const submitBtn = document.getElementById('inviteSubmitBtn');
             if (submitBtn) {
-                submitBtn.disabled = false;
+                submitBtn.disabled = true;
                 submitBtn.innerText = '등록하기';
             }
             runInvite._inFlight = false;
@@ -4027,6 +4102,108 @@ async function pullMemberOfficialValues() {
     }
 } // End of pullMemberOfficialValues
 
+function resetInviteModuleAccessUi(message = '업무 권한을 불러오는 중입니다.') {
+    inviteModuleAccessCatalog = null;
+    const status = document.getElementById('inviteModuleAccessStatus');
+    const list = document.getElementById('inviteModuleAccessList');
+    const submitBtn = document.getElementById('inviteSubmitBtn');
+    if (status) {
+        status.textContent = message;
+        status.classList.remove('d-none', 'text-danger');
+    }
+    if (list) {
+        list.innerHTML = '';
+        list.classList.add('d-none');
+    }
+    if (submitBtn) submitBtn.disabled = true;
+} // End of resetInviteModuleAccessUi
+
+function renderInviteModuleAccess(modules) {
+    const status = document.getElementById('inviteModuleAccessStatus');
+    const list = document.getElementById('inviteModuleAccessList');
+    const submitBtn = document.getElementById('inviteSubmitBtn');
+    const safeModules = Array.isArray(modules) ? modules.filter((module) => module?.module_key) : [];
+    inviteModuleAccessCatalog = safeModules.map((module) => ({
+        module_key: String(module.module_key || '').trim(),
+        module_name: String(module.module_name || module.module_key || '').trim(),
+        organization_enabled: module.organization_enabled !== false
+    }));
+
+    if (status) status.classList.add('d-none');
+    if (!list) return;
+    list.classList.remove('d-none');
+    list.innerHTML = inviteModuleAccessCatalog.map((module) => {
+        const moduleKey = module.module_key;
+        const moduleName = module.module_name;
+        const orgEnabled = module.organization_enabled;
+        const description = EMPLOYEE_MODULE_DESCRIPTIONS[moduleKey] || '이 업무 모듈의 사용 여부를 직원별로 정합니다.';
+        return `
+          <div class="invite-module-card ${orgEnabled ? '' : 'module-off'}">
+            <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+              <div class="flex-grow-1">
+                <div class="employee-module-title">${escapeHtml(moduleName)}</div>
+                <div class="small text-muted mt-1">${escapeHtml(description)}</div>
+              </div>
+              <select class="form-select form-select-sm" data-invite-module-key="${escapeHtml(moduleKey)}" aria-label="${escapeHtml(moduleName)} 신규 직원 권한" ${orgEnabled ? '' : 'disabled'}>
+                <option value="inherit" selected>기본 권한 따름</option>
+                <option value="enabled">사용</option>
+                <option value="disabled">사용 안 함</option>
+              </select>
+            </div>
+            ${orgEnabled ? '' : '<div class="small text-muted mt-2">조합 전체에서 사용하지 않는 업무입니다.</div>'}
+          </div>`;
+    }).join('') || '<div class="text-center text-muted py-3">설정할 업무 권한이 없습니다.</div>';
+    if (submitBtn) submitBtn.disabled = inviteModuleAccessCatalog.length === 0;
+} // End of renderInviteModuleAccess
+
+async function loadInviteModuleAccessCatalog() {
+    const loadToken = ++inviteModuleAccessLoadToken;
+    resetInviteModuleAccessUi();
+    try {
+        const sourceEmployee = (Array.isArray(employeeCache) ? employeeCache : []).find((employee) => isLoginRelevantEmployeeRow(employee));
+        const sourceEmpId = String(sourceEmployee?.emp_id || '').trim();
+        if (!sourceEmpId) throw new Error('권한 기준을 불러올 재직 직원이 없습니다.');
+
+        const { data, error } = await _supabase.rpc('erp_admin_get_employee_module_access', {
+            p_emp_id: sourceEmpId
+        });
+        if (error) throw error;
+        if (loadToken !== inviteModuleAccessLoadToken) return;
+        renderInviteModuleAccess(Array.isArray(data?.modules) ? data.modules : []);
+    } catch (error) {
+        if (loadToken !== inviteModuleAccessLoadToken) return;
+        console.error('invite module access catalog load failed:', error);
+        const status = document.getElementById('inviteModuleAccessStatus');
+        if (status) {
+            status.classList.remove('d-none');
+            status.classList.add('text-danger');
+            status.innerHTML = '업무 권한을 불러오지 못했습니다. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="loadInviteModuleAccessCatalog()">다시 불러오기</button>';
+        }
+    }
+} // End of loadInviteModuleAccessCatalog
+
+function setAllInviteModuleAccess(value = 'inherit') {
+    const safeValue = ['inherit', 'enabled', 'disabled'].includes(value) ? value : 'inherit';
+    document.querySelectorAll('[data-invite-module-key]').forEach((select) => {
+        if (!select.disabled) select.value = safeValue;
+    });
+} // End of setAllInviteModuleAccess
+
+function collectInviteModuleAccess() {
+    if (!Array.isArray(inviteModuleAccessCatalog) || inviteModuleAccessCatalog.length === 0) {
+        throw new Error('업무 권한을 먼저 불러와 주세요.');
+    }
+    const access = {};
+    inviteModuleAccessCatalog.forEach((module) => {
+        const moduleKey = String(module?.module_key || '').trim();
+        if (!moduleKey) return;
+        const select = document.querySelector(`[data-invite-module-key="${CSS.escape(moduleKey)}"]`);
+        const value = module?.organization_enabled === false ? 'inherit' : String(select?.value || 'inherit');
+        access[moduleKey] = value === 'enabled' ? true : (value === 'disabled' ? false : null);
+    });
+    return access;
+} // End of collectInviteModuleAccess
+
 function openInviteModal() {
     document.getElementById("newName").value = "";
     document.getElementById("newEmail").value = "";
@@ -4036,7 +4213,9 @@ function openInviteModal() {
     populateInviteDepartmentOptions('');
     document.getElementById("newDeptCustom").value = "";
     setInviteStatus('');
+    resetInviteModuleAccessUi();
     inviteModal.show();
+    void loadInviteModuleAccessCatalog();
 } // End of openInviteModal
 
 async function runInvite() {
@@ -4067,50 +4246,43 @@ async function runInvite() {
             return;
         }
 
-        let savedEmpId = null;
+        const moduleAccess = collectInviteModuleAccess();
+        const authLevel = normalizeHrAuthLevelValue(document.getElementById('newAuthLevel')?.value) ?? 9;
+        const position = String(document.getElementById('newRank')?.value || '사원').trim();
+        const role = String(document.getElementById('newRole')?.value || 'staff').trim();
+        const department = getInviteDepartmentValue();
+        const { data: created, error: createError } = await _supabase.rpc('erp_admin_create_employee_with_module_access', {
+            p_emp_name: name,
+            p_email: email,
+            p_position: position,
+            p_auth_level: authLevel,
+            p_role: role,
+            p_department: department || null,
+            p_hire_date: formatAdminEmployeeKstDate(new Date()),
+            p_access: moduleAccess
+        });
+        if (createError) throw createError;
 
-        for (let attempt = 1; attempt <= 5; attempt += 1) {
-            const { data: issuedEmpId, error: issueErr } = await _supabase.rpc('platform_generate_employee_id');
-            if (issueErr) throw issueErr;
-            const empId = String(issuedEmpId || '').trim();
-            if (!empId) throw new Error('사원번호를 생성하지 못했습니다.');
-
-            const { error } = await _supabase.from('ref_employees').insert({
-                emp_id: empId,
-                emp_name: name,
-                email: email,
-                position: String(document.getElementById("newRank").value || '사원').trim(),
-                auth_level: normalizeHrAuthLevelValue(document.getElementById('newAuthLevel')?.value) ?? 9,
-                role: document.getElementById("newRole").value,
-                department: getInviteDepartmentValue(),
-                hire_date: formatAdminEmployeeKstDate(new Date()),
-                withholding_family_count: 1,
-                withholding_child_count: 0,
-                withholding_rate: 1,
-                coop_id: getAdminEmployeeCoopId() || null
-            });
-
-            if (!error) {
-                savedEmpId = empId;
-                break;
-            }
-
-            const code = String(error.code || '');
-            const message = String(error.message || '').toLowerCase();
-            const details = String(error.details || '').toLowerCase();
-            const isEmpIdConflict = code === '23505' && (message.includes('emp_id') || details.includes('emp_id'));
-            if (!isEmpIdConflict || attempt === 5) throw error;
-        }
+        const createdEmpId = String(created?.employee?.emp_id || '').trim();
+        if (!createdEmpId) throw new Error('직원 등록 결과를 확인하지 못했습니다.');
 
         inviteModal.hide();
         await loadList();
+        showAlert(`${name} 직원의 기본정보와 업무 권한을 함께 등록했습니다.`);
     } catch (err) {
         console.error('[admin_employee] runInvite failed:', err);
-        setInviteStatus("등록 실패: " + (err?.message || '잠시 후 다시 시도해 주세요.'), 'danger');
+        const message = String(err?.message || '잠시 후 다시 시도해 주세요.');
+        if (message.includes('EMPLOYEE_EMAIL_IN_USE')) {
+            setInviteStatus('이미 같은 이메일을 사용하는 재직 직원이 있습니다.', 'danger');
+        } else if (message.includes('HR_ADMIN_REQUIRED')) {
+            setInviteStatus('직원 등록 권한을 다시 확인해 주세요.', 'danger');
+        } else {
+            setInviteStatus('등록 실패: ' + message, 'danger');
+        }
     } finally {
         runInvite._inFlight = false;
         if (submitBtn) {
-            submitBtn.disabled = false;
+            submitBtn.disabled = !Array.isArray(inviteModuleAccessCatalog) || inviteModuleAccessCatalog.length === 0;
             submitBtn.innerText = '등록하기';
         }
     }
