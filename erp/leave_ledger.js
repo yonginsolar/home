@@ -5,6 +5,7 @@
   var DEFAULT_DEDUCTIBLE_SUB_TYPES = ['연차', '반차'];
   var deductibleSubTypes = DEFAULT_DEDUCTIBLE_SUB_TYPES.slice();
   var DEFAULT_RESERVED_STATUSES = ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'];
+  var DEFAULT_PENDING_STATUSES = ['진행중'];
   var DEFAULT_APPROVAL_SELECT_COLUMNS = 'id,created_at,doc_type,title,content,amount,status,drafter_id';
   var LEAVE_REPORT_STYLE_ID = 'leave-ledger-report-style-v2';
   var LEAVE_REPORT_STYLE_TEXT = [
@@ -361,6 +362,50 @@
     return summary;
   }
 
+  function summarizePendingLeaveHolds(docs, options) {
+    var opts = options || {};
+    var todayIso = normalizeText(opts.todayIso) || getTodayKstIso();
+    var currentYear = Number(todayIso.slice(0, 4));
+    var pendingStatuses = Array.isArray(opts.pendingStatuses) && opts.pendingStatuses.length > 0
+      ? opts.pendingStatuses
+      : DEFAULT_PENDING_STATUSES;
+    var summary = {
+      todayIso: todayIso,
+      holdDays: 0,
+      holdDocs: [],
+      futureDays: 0,
+      futureDocs: [],
+      unknownDateDays: 0,
+      unknownDateDocs: []
+    };
+
+    (Array.isArray(docs) ? docs : []).forEach(function (doc) {
+      if (!isLeaveDocType(doc && doc.doc_type)) return;
+      if (!isDeductibleLeaveDoc(doc)) return;
+      if (!statusIn(doc && doc.status, pendingStatuses)) return;
+
+      getLeaveAllocationRows(doc).forEach(function (row) {
+        var amount = Math.max(0, roundLeaveDays(toNumber(row && row._leave_amount, 0)));
+        if (!(amount > 0)) return;
+        var startIso = getLeaveStartIso(row);
+        if (!startIso) {
+          summary.unknownDateDays = roundLeaveDays(summary.unknownDateDays + amount);
+          summary.unknownDateDocs.push(row);
+          return;
+        }
+        if (Number(startIso.slice(0, 4)) !== currentYear || startIso > todayIso) {
+          summary.futureDays = roundLeaveDays(summary.futureDays + amount);
+          summary.futureDocs.push(row);
+          return;
+        }
+        summary.holdDays = roundLeaveDays(summary.holdDays + amount);
+        summary.holdDocs.push(row);
+      });
+    });
+
+    return summary;
+  }
+
   function buildLeaveQuery(supabase, empId, statuses, columns, coopId) {
     // 일부 환경(ref_approval)에는 start_date 컬럼이 없어 기본 조회에서는 제외한다.
     var selectCols = columns || DEFAULT_APPROVAL_SELECT_COLUMNS;
@@ -401,6 +446,9 @@
         baseRemainDays: 0,
         effectiveRemainDays: 0,
         reservedDays: 0,
+        pendingHoldDays: 0,
+        pendingDocs: [],
+        pendingSummary: summarizePendingLeaveHolds([], options),
         summary: summarizeLeaveDocs([], options),
         docs: []
       };
@@ -410,14 +458,23 @@
     var reservedStatuses = Array.isArray(opts.reservedStatuses) && opts.reservedStatuses.length > 0
       ? opts.reservedStatuses
       : DEFAULT_RESERVED_STATUSES;
+    var pendingStatuses = Array.isArray(opts.pendingStatuses) && opts.pendingStatuses.length > 0
+      ? opts.pendingStatuses
+      : DEFAULT_PENDING_STATUSES;
 
     var rpc = await supabase.rpc('calculate_leave_days', { p_emp_id: empId });
     if (rpc.error) throw rpc.error;
 
     var baseRemainDays = roundLeaveDays(toNumber(rpc.data, 0));
-    var docs = await fetchLeaveApprovals(supabase, empId, {
-      statuses: reservedStatuses,
+    var allDocs = await fetchLeaveApprovals(supabase, empId, {
+      statuses: Array.from(new Set(reservedStatuses.concat(pendingStatuses))),
       columns: opts.columns
+    });
+    var docs = allDocs.filter(function (doc) {
+      return statusIn(doc && doc.status, reservedStatuses);
+    });
+    var pendingDocs = allDocs.filter(function (doc) {
+      return statusIn(doc && doc.status, pendingStatuses);
     });
     var summary = summarizeLeaveDocs(docs, {
       todayIso: opts.todayIso,
@@ -425,16 +482,24 @@
       reservedStatuses: reservedStatuses,
       unknownAsReserved: opts.unknownAsReserved
     });
+    var pendingSummary = summarizePendingLeaveHolds(pendingDocs, {
+      todayIso: opts.todayIso,
+      pendingStatuses: pendingStatuses
+    });
 
-    var effectiveRemainDays = Math.max(0, roundLeaveDays(baseRemainDays));
+    var effectiveRemainDays = Math.max(0, roundLeaveDays(baseRemainDays - pendingSummary.holdDays));
 
     return {
       baseRemainDays: baseRemainDays,
       effectiveRemainDays: effectiveRemainDays,
       reservedDays: summary.reservedDays,
+      pendingHoldDays: pendingSummary.holdDays,
+      pendingDocs: pendingDocs,
+      pendingSummary: pendingSummary,
       summary: summary,
       docs: docs,
-      reservedStatuses: reservedStatuses
+      reservedStatuses: reservedStatuses,
+      pendingStatuses: pendingStatuses
     };
   }
 
@@ -662,7 +727,7 @@
         + buildLeaveAdjustmentListHtml(adjustmentsByYear[key] || []) + '</div>';
       if (pendingSummary.docs.length > 0) {
         html += '<div class="leave-section"><h6>⏳ 결재 예정 내역 <span class="text-warning">' + Number(pendingSummary.days || 0) + '일 신청</span></h6>'
-          + '<div class="small text-muted mb-2">결재 진행 중인 신청이며, 승인 전에는 잔여 연차에 반영되지 않습니다.</div>'
+          + '<div class="small text-muted mb-2">결재 진행 중입니다. 휴가일이 지난 신청은 중복 사용을 막기 위해 사용 가능 연차에 임시 반영되며, 승인되면 확정 사용 내역으로 자동 이동합니다.</div>'
           + renderLeaveDocListHtml(sortLeaveRowsByDate(pendingSummary.docs), {
             formatDate: opts.formatDate,
             formatLeaveDocType: opts.formatLeaveDocType,
@@ -719,6 +784,7 @@
     setDeductibleSubTypes: setDeductibleSubTypes,
     getDeductibleSubTypes: getDeductibleSubTypes,
     DEFAULT_RESERVED_STATUSES: DEFAULT_RESERVED_STATUSES.slice(),
+    DEFAULT_PENDING_STATUSES: DEFAULT_PENDING_STATUSES.slice(),
     getTodayKstIso: getTodayKstIso,
     roundLeaveDays: roundLeaveDays,
     getLeaveSubType: getLeaveSubType,
@@ -735,6 +801,7 @@
     ensureLeaveDetailStyles: ensureLeaveDetailStyles,
     buildLeaveDetailReportHtml: buildLeaveDetailReportHtml,
     summarizeLeaveDocs: summarizeLeaveDocs,
+    summarizePendingLeaveHolds: summarizePendingLeaveHolds,
     fetchLeaveApprovals: fetchLeaveApprovals,
     getLeaveSnapshot: getLeaveSnapshot
   };

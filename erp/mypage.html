@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.57 | Change: 2026-09-28 - Use the official shared Korean public-holiday calendar. -->
+<!-- Version: v1.0.58 | Change: 2026-09-28 - Hold past leave days while approval is pending. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.57 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.58 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -31,7 +31,7 @@
   <script src="erp_runtime_guard.js?v=20260919-1"></script>
 <script src="print_service.js?v=20260510-1324-1"></script>
 <script src="payroll_durunuri_module.js?v=20260901-1"></script>
-<script src="leave_ledger.js?v=20260828-0335-1"></script>
+<script src="leave_ledger.js?v=20260928-1"></script>
   
 <style>
 body{background-color:#f0f2f5;padding:28px 20px 40px;font-family:'Malgun Gothic',sans-serif}
@@ -1900,9 +1900,15 @@ cal.render()}
 function renderLeaveBadge(snapshot){
 const remain=Math.max(0,Number(snapshot?.effectiveRemainDays??0));
 const reserved=Math.max(0,Number(snapshot?.reservedDays??0));
+const pendingHold=Math.max(0,Number(snapshot?.pendingHoldDays??0));
 document.getElementById("lvRemain").innerText=remain;
 const inlineEl=document.getElementById("lvReservedInline");
-if(inlineEl) inlineEl.textContent=reserved>0?`(예정 ${reserved}일)`:'';
+if(inlineEl){
+const notes=[];
+if(pendingHold>0)notes.push(`지난 휴가 결재 대기 ${pendingHold}일 반영`);
+if(reserved>0)notes.push(`결재완료 예정 ${reserved}일`);
+inlineEl.textContent=notes.length?`(${notes.join(' · ')})`:'';
+}
 const b=document.querySelector('.leave-badge');
 if(remain<=0){b.style.borderColor='#dc3545';b.style.color='#dc3545'}else{b.style.borderColor='#0d6efd';b.style.color='#0d6efd'}
 }
@@ -1962,7 +1968,7 @@ return Math.round((total+Math.max(0,Number(doc?.amount||doc?._leave_amount||0)))
 function buildMypagePendingLeaveSectionHtml(docs){
 const pendingDocs=getMypagePendingLeaveDocs(docs);
 const pendingDays=getMypagePendingLeaveDays(pendingDocs);
-return `<h6>⏳ 결재 예정 내역 <span class="text-warning">${Number(pendingDays||0)}일 신청</span></h6><div class="small text-muted mb-2">결재 진행 중인 신청이며, 승인 전에는 잔여 연차에 반영되지 않습니다.</div>${renderLeaveDocList(pendingDocs,'- 없음 -',{amountClass:'text-warning',amountPrefix:'',amountSuffix:'일 신청'})}`;
+return `<h6>⏳ 결재 예정 내역 <span class="text-warning">${Number(pendingDays||0)}일 신청</span></h6><div class="small text-muted mb-2">결재 진행 중입니다. 휴가일이 지난 신청은 중복 사용을 막기 위해 사용 가능 연차에 임시 반영되며, 승인되면 확정 사용 내역으로 자동 이동합니다.</div>${renderLeaveDocList(pendingDocs,'- 없음 -',{amountClass:'text-warning',amountPrefix:'',amountSuffix:'일 신청'})}`;
 }
 function insertMypagePendingLeaveSection(container,docs){
 if(!container)return;

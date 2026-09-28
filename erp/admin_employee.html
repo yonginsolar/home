@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.71
+Version: v1.0.72
 Change: 2026-09-28 - Assign detailed work-module access while creating an employee.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.71 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.72 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -37,7 +37,7 @@ Change: 2026-09-28 - Assign detailed work-module access while creating an employ
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
-  <script src="leave_ledger.js?v=20260828-0335-1"></script>
+  <script src="leave_ledger.js?v=20260928-1"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
   <style>
@@ -5880,9 +5880,15 @@ async function loadLeave() {
             currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
             const reserved = Number(snapshot?.reservedDays || 0);
+            const pendingHold = Number(snapshot?.pendingHoldDays || 0);
             document.getElementById("displayLeaveRemain").innerText = remain + "일";
             const reservedEl = document.getElementById("displayLeaveReserved");
-            if (reservedEl) reservedEl.innerText = `결재 반영 예정 ${reserved}일`;
+            if (reservedEl) {
+                const notes = [];
+                if (pendingHold > 0) notes.push(`지난 휴가 결재 대기 ${pendingHold}일 반영`);
+                if (reserved > 0) notes.push(`결재완료 예정 ${reserved}일`);
+                reservedEl.innerText = notes.length > 0 ? notes.join(' · ') : '결재 반영 예정 0일';
+            }
             return;
         }
     } catch (error) {
@@ -5959,6 +5965,7 @@ function formatAdminEmployeeLeaveDocType(docOrType) {
 } // End of formatAdminEmployeeLeaveDocType
 
 function getAdminEmployeeLeaveStatusBadgeHtml(status) {
+    if (status === '진행중') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">결재중</span>';
     if (status === '가승인') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">가승인</span>';
     if (status === '증빙확인중') return '<span class="badge bg-info text-dark ms-1" style="font-size:0.7em">증빙중</span>';
     if (status === '실물결재대기') return '<span class="badge bg-secondary ms-1" style="font-size:0.7em">실물대기</span>';
@@ -6006,7 +6013,7 @@ async function showAdminLeaveDetail() {
         if (window.LeaveLedger && typeof window.LeaveLedger.fetchLeaveApprovals === 'function') {
             leaveDocs = await window.LeaveLedger.fetchLeaveApprovals(_supabase, currentEmpId, {
                 columns: 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
-                statuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']
+                statuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료', '진행중']
             });
             summary = window.LeaveLedger.summarizeLeaveDocs(leaveDocs, {
                 reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
@@ -6014,7 +6021,7 @@ async function showAdminLeaveDetail() {
                 unknownAsReserved: false
             });
         } else {
-            const { data: leaveRows, error: leaveError } = await scopeEmployeeTenant(_supabase.from('ref_approval').select('id,created_at,doc_type,title,content,amount,status,leave_snapshot')).eq('drafter_id', currentEmpId).in('status', ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료']).ilike('doc_type', '휴가%').order('created_at', { ascending: false });
+            const { data: leaveRows, error: leaveError } = await scopeEmployeeTenant(_supabase.from('ref_approval').select('id,created_at,doc_type,title,content,amount,status,leave_snapshot')).eq('drafter_id', currentEmpId).in('status', ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료', '진행중']).ilike('doc_type', '휴가%').order('created_at', { ascending: false });
             if (leaveError) throw leaveError;
             leaveDocs = (leaveRows || []).filter((doc) => isAdminEmployeeDeductibleLeaveDoc(doc));
             summary = { reservedDocs: [], pastOrUsedDocs: leaveDocs, unknownDateDocs: [], reservedDays: 0, pastOrUsedDays: 0, unknownDateDays: 0 };
@@ -6025,6 +6032,7 @@ async function showAdminLeaveDetail() {
                 hireDate: employeeRow?.hire_date || '',
                 adjustments: adjustments || [],
                 summary,
+                pendingDocs: leaveDocs.filter((doc) => String(doc?.status || '').trim() === '진행중' && isAdminEmployeeDeductibleLeaveDoc(doc)),
                 formatDate: (value, fallback) => formatAdminEmployeeKstDate(value, fallback),
                 formatLeaveDocType: (docOrType) => formatAdminEmployeeLeaveDocType(docOrType)
             });
