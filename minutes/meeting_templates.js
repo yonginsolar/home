@@ -1,6 +1,6 @@
 /*
-Version: v1.6.0
-Change: 2026-09-28 - Improve assembly booklet readability and keep tenant organization fields dynamic.
+Version: v1.7.0
+Change: 2026-09-28 - Give audit reports and business plans a clearer document hierarchy for screen and print.
 */
 
 const safe = (value) => String(value ?? '')
@@ -252,9 +252,9 @@ export function buildAuditReportDraft({ row, coopName, officials, sourceContext 
       <tr><th>검토 자료</th><td>ERP 회계관리의 ${stateLabel}, 사업 집행 자료와 관련 증빙</td></tr>
     </tbody></table>
     <p class="audit-purpose">본 감사는 협동조합기본법 및 조합 정관에 따라 위 기간의 회계 처리와 업무 집행 상황을 감사하고 그 결과를 보고하기 위해 작성합니다.</p>
-    <h2>Ⅰ. 감사 결과</h2>
+    <h2 class="audit-section-title"><span>Ⅰ</span><strong>감사 결과</strong></h2>
     <section class="audit-result-block">
-      <h3>1. 업무 감사</h3>
+      <h3><span>1</span><strong>업무 감사</strong></h3>
       <ul>
         <li>총회 및 이사회 의결사항과 사업계획에 따른 업무 집행 내역을 확인하였습니다.</li>
         <li>조합원 명부, 출자금 관리와 주요 계약·행정 절차의 처리 내역을 확인하였습니다.</li>
@@ -262,24 +262,25 @@ export function buildAuditReportDraft({ row, coopName, officials, sourceContext 
       <div class="audit-writing-box"><strong>업무 감사 의견</strong><p class="audit-optional-opinion"></p></div>
     </section>
     <section class="audit-result-block">
-      <h3>2. 회계 감사</h3>
+      <h3><span>2</span><strong>회계 감사</strong></h3>
       <ul>
         <li>${fiscalYear}년도 ${stateLabel}의 자산총계는 ${money(closing.total_assets)}, 부채총계는 ${money(closing.total_liabilities)}, 자본총계는 ${money(closing.total_equity)}입니다.</li>
         <li>매출 및 영업외수익은 ${money(Number(closing.total_revenue || 0) + Number(closing.total_other_revenue || 0))}, 비용은 ${money(closing.total_expenses)}, 당기순손익은 ${money(netIncome)}으로 확인됩니다.</li>
       </ul>
       <div class="audit-writing-box"><strong>회계 감사 의견</strong><p class="audit-optional-opinion"></p></div>
     </section>
-    <h2>Ⅱ. 결산 요약</h2>
+    <h2 class="audit-section-title"><span>Ⅱ</span><strong>결산 요약</strong></h2>
     <div class="audit-summary-grid">
-      <div><span>자산총계</span><strong>${money(closing.total_assets)}</strong></div>
-      <div><span>부채총계</span><strong>${money(closing.total_liabilities)}</strong></div>
-      <div><span>자본총계</span><strong>${money(closing.total_equity)}</strong></div>
-      <div><span>당기순손익</span><strong>${money(netIncome)}</strong></div>
+      <div class="audit-summary-assets"><span>자산총계</span><strong>${money(closing.total_assets)}</strong></div>
+      <div class="audit-summary-liabilities"><span>부채총계</span><strong>${money(closing.total_liabilities)}</strong></div>
+      <div class="audit-summary-equity"><span>자본총계</span><strong>${money(closing.total_equity)}</strong></div>
+      <div class="audit-summary-income"><span>당기순손익</span><strong>${money(netIncome)}</strong></div>
     </div>
-    <h2>Ⅲ. 종합 의견</h2>
+    <h2 class="audit-section-title"><span>Ⅲ</span><strong>종합 의견</strong></h2>
     <div class="audit-writing-box audit-writing-box-required"><strong>종합 의견 · 필수</strong><p class="audit-overall-opinion">전반적인 업무 집행 및 회계 처리가 관련 법규와 정관에 따라 투명하고 적정하게 이루어졌음을 보고합니다.</p></div>
-    <p class="audit-signature-date">${dateText(row?.meeting_date || '')}</p>
-    <div class="audit-signers"><strong>${safe(coopName)}</strong>${auditorRows}</div>
+    <section class="audit-signature-panel"><p class="audit-signature-date">${dateText(row?.meeting_date || '')}</p>
+      <div class="audit-signers"><strong>${safe(coopName)}</strong>${auditorRows}</div>
+    </section>
   </article>`;
 }
 
@@ -437,7 +438,7 @@ function budgetRowsTable(rows, totalLabel) {
   const body = list.length
     ? list.map((item) => `<tr><td>${safe(item?.name || '-')}</td><td>${safe(item?.basis || '-')}</td><td class="amount">${money(item?.amount)}</td></tr>`).join('')
     : '<tr><td colspan="3">입력된 예산 항목이 없습니다.</td></tr>';
-  return `<table><thead><tr><th>항목</th><th>산출 근거</th><th>금액</th></tr></thead><tbody>${body}</tbody><tfoot><tr><th colspan="2">${safe(totalLabel)}</th><th class="amount">${money(sumAmounts(list))}</th></tr></tfoot></table>`;
+  return `<table class="budget-data-table"><thead><tr><th>항목</th><th>산출 근거</th><th>금액</th></tr></thead><tbody>${body}</tbody><tfoot><tr><th colspan="2">${safe(totalLabel)}</th><th class="amount">${money(sumAmounts(list))}</th></tr></tfoot></table>`;
 }
 
 function businessPlanDraft(row) {
@@ -450,17 +451,24 @@ function businessPlanDraft(row) {
   const incomeTotal = sumAmounts(income);
   const expenseTotal = sumAmounts(expense);
   const difference = incomeTotal - expenseTotal;
-  return `<h1>${year}년 사업계획 및 예산(안)</h1>
-    <p class="chapter-subtitle">${safe(row?.title || '정기 대의원총회')}</p>
-    <h2>Ⅰ. 사업 목표</h2>
-    ${goal ? `<blockquote><strong>${blocks(goal)}</strong></blockquote>` : '<p>사업 목표를 입력해 주세요.</p>'}
-    <h2>Ⅱ. 주요 사업 계획</h2>
-    ${details.length ? `<ol>${details.map((item) => `<li>${safe(item)}</li>`).join('')}</ol>` : '<p>주요 사업 계획을 입력해 주세요.</p>'}
-    <h2>Ⅲ. ${year}년도 수지 예산(안)</h2>
-    <h3>1. 수입 예산</h3>${budgetRowsTable(income, '수입 합계')}
-    <h3>2. 지출 예산</h3>${budgetRowsTable(expense, '지출 합계')}
-    ${difference === 0 ? '' : `<p class="budget-balance is-unbalanced">수입·지출 합계 차액 ${money(Math.abs(difference))}을 조정해야 합니다.</p>`}
-    <p>사업 규모나 재원이 크게 달라질 경우 추가경정예산안을 별도로 마련해 승인받습니다.</p>`;
+  return `<article class="business-plan-document">
+    <header class="business-plan-heading"><span>${year}년도 정기총회</span><h1>사업계획 및 예산(안)</h1><p>${safe(row?.title || '정기 대의원총회')}</p></header>
+    <section class="business-plan-section business-plan-goal">
+      <h2><span>Ⅰ</span><strong>사업 목표</strong></h2>
+      ${goal ? `<blockquote><strong>${blocks(goal)}</strong></blockquote>` : '<p class="business-plan-empty">사업 목표를 입력해 주세요.</p>'}
+    </section>
+    <section class="business-plan-section business-plan-projects">
+      <h2><span>Ⅱ</span><strong>주요 사업 계획</strong></h2>
+      ${details.length ? `<ol class="business-plan-list">${details.map((item) => `<li>${safe(item)}</li>`).join('')}</ol>` : '<p class="business-plan-empty">주요 사업 계획을 입력해 주세요.</p>'}
+    </section>
+    <section class="business-plan-section business-plan-budget">
+      <h2><span>Ⅲ</span><strong>${year}년도 수지 예산(안)</strong></h2>
+      <div class="budget-panel budget-income"><h3><span>1</span><strong>수입 예산</strong></h3>${budgetRowsTable(income, '수입 합계')}</div>
+      <div class="budget-panel budget-expense"><h3><span>2</span><strong>지출 예산</strong></h3>${budgetRowsTable(expense, '지출 합계')}</div>
+      ${difference === 0 ? '' : `<p class="budget-balance is-unbalanced">수입·지출 합계 차액 ${money(Math.abs(difference))}을 조정해야 합니다.</p>`}
+      <p class="business-plan-note">사업 규모나 재원이 크게 달라질 경우 추가경정예산안을 별도로 마련해 승인받습니다.</p>
+    </section>
+  </article>`;
 }
 
 function businessPlanBill(row, sourceContext) {

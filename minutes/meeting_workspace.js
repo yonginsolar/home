@@ -1,11 +1,11 @@
 /*
-Version: v1.6.0
-Change: 2026-09-28 - Lock linked source chapters and improve assembly booklet readability.
+Version: v1.7.0
+Change: 2026-09-28 - Refine audit report and business plan design for screen and print.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.51';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.4.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.6.0';
+import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.0';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -1143,25 +1143,37 @@ const BOOK_PRINT_CSS = `
   .business-report-list{list-style:none;padding:0;margin:0;counter-reset:business-item;display:grid;gap:8pt}.business-report-list li{counter-increment:business-item;position:relative;margin:0;padding:10pt 12pt 10pt 42pt;border:1pt solid #e2e8f0;border-radius:8pt;background:#f8fafc;break-inside:avoid}.business-report-list li::before{content:counter(business-item);position:absolute;left:11pt;top:9pt;width:23pt;height:23pt;display:grid;place-items:center;border-radius:50%;background:#ffedd5;color:#9a3412;font-weight:900}
   .budget-balance{padding:8pt 10pt;border-radius:7pt;font-weight:800}.budget-balance.is-unbalanced{background:#fef2f2;color:#b91c1c}
   .chapter-financial>h1,.chapter-minutes>h1,.chapter-audit>h1{border-bottom-color:#fb923c}
-  .audit-report-document{color:#1e293b}
-  .audit-document-heading{text-align:center;margin-bottom:20pt;padding-bottom:14pt;border-bottom:4pt solid #f97316}
-  .audit-document-heading>span{display:inline-block;margin-bottom:6pt;color:#c2410c;font-weight:900}
-  .audit-document-heading h1{margin:0;padding:0;border:0;font-size:27pt;letter-spacing:.22em}
-  .audit-document-heading p{margin:7pt 0 0;color:#475569;font-weight:800}
-  .audit-meta-table{margin:0 0 14pt}
-  .audit-meta-table th{width:86pt;text-align:left}
-  .audit-purpose{margin:12pt 0 18pt;padding:10pt 12pt;border-left:5pt solid #fb923c;background:#fffaf5}
-  .audit-result-block{margin:10pt 0;padding:12pt 14pt;border:1pt solid #e2e8f0;border-radius:8pt;background:#f8fafc;break-inside:avoid}
-  .audit-result-block h3{margin-top:0;color:#1e293b}
-  .audit-writing-box{margin-top:10pt;padding:10pt 12pt;border:1pt solid #fdba74;border-radius:7pt;background:#fff;break-inside:avoid}
+  .audit-report-document,.business-plan-document{color:#1e293b}
+  .audit-document-heading,.business-plan-heading{text-align:center;margin-bottom:18pt;padding:18pt 14pt 15pt;border-top:5pt solid #f97316;border-bottom:1pt solid #fdba74;background:#fffaf5;break-inside:avoid}
+  .audit-document-heading>span,.business-plan-heading>span{display:inline-block;padding:4pt 9pt;border-radius:999pt;background:#ffedd5;color:#9a3412;font-weight:900}
+  .audit-document-heading h1,.business-plan-heading h1{margin:8pt 0 4pt;padding:0;border:0;font-size:23pt;line-height:1.3;letter-spacing:-.025em;color:#172033}
+  .audit-document-heading h1{letter-spacing:.2em}
+  .audit-document-heading p,.business-plan-heading p{margin:0;color:#475569;font-weight:800}
+  .audit-meta-table{margin:0 0 14pt;border:1pt solid #cbd5e1}
+  .audit-meta-table th,.audit-meta-table td{padding:8pt 9pt}.audit-meta-table th{width:86pt;text-align:left;background:#fff7ed;color:#9a3412}
+  .audit-purpose{margin:0 0 17pt;padding:10pt 12pt;border:1pt solid #fed7aa;border-left:5pt solid #fb923c;border-radius:7pt;background:#fffaf5}
+  .audit-section-title,.business-plan-section>h2{display:flex;align-items:center;gap:8pt;margin:20pt 0 9pt;padding:0 0 7pt;border-bottom:2pt solid #fed7aa;color:#7c2d12;break-after:avoid}
+  .audit-section-title>span,.business-plan-section>h2>span{width:25pt;height:25pt;display:inline-grid;place-items:center;border-radius:7pt;background:#ea580c;color:#fff;font-weight:900}
+  .audit-result-block{margin:9pt 0;padding:0;overflow:hidden;border:1pt solid #e2e8f0;border-radius:8pt;background:#fff;break-inside:avoid}
+  .audit-result-block>h3{display:flex;align-items:center;gap:7pt;margin:0;padding:8pt 10pt;border-bottom:1pt solid #e2e8f0;background:#f8fafc;color:#334155}
+  .audit-result-block>h3>span{width:21pt;height:21pt;display:inline-grid;place-items:center;border-radius:50%;background:#ffedd5;color:#9a3412;font-weight:900}
+  .audit-result-block>ul{margin:10pt 13pt;padding-left:18pt}
+  .audit-writing-box{margin:10pt 12pt 12pt;padding:9pt 11pt;border:1pt solid #fdba74;border-radius:7pt;background:#fffaf5;break-inside:avoid}
   .audit-writing-box>strong{display:block;margin-bottom:5pt;color:#9a3412}
   .audit-writing-box p{min-height:18pt;margin:0;white-space:pre-wrap}
   .audit-writing-box-required{border-width:2pt;background:#fffaf5}
   .audit-overall-opinion{font-weight:800}
   .audit-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7pt;margin:10pt 0}
-  .audit-summary-grid>div{padding:9pt 10pt;border:1pt solid #e2e8f0;border-radius:7pt;background:#f8fafc;break-inside:avoid}
+  .audit-summary-grid>div{position:relative;overflow:hidden;padding:9pt 10pt 9pt 14pt;border:1pt solid #e2e8f0;border-radius:7pt;background:#f8fafc;break-inside:avoid}
+  .audit-summary-grid>div:before{content:'';position:absolute;inset:0 auto 0 0;width:4pt;background:#fb923c}
   .audit-summary-grid span{display:block;color:#64748b}.audit-summary-grid strong{display:block;margin-top:4pt;font-variant-numeric:tabular-nums}
-  .audit-signature-date{margin-top:24pt;text-align:center}.audit-signers{width:260pt;margin-left:auto;text-align:right;break-inside:avoid}.audit-signers>strong{display:block;margin-bottom:7pt}
+  .audit-signature-panel{margin-top:20pt;padding:13pt 15pt;border-top:2pt solid #fdba74;background:#fffaf5;break-inside:avoid}.audit-signature-date{margin:0 0 10pt;text-align:center;font-weight:800}.audit-signers{width:260pt;margin-left:auto;text-align:right;break-inside:avoid}.audit-signers>strong{display:block;margin-bottom:7pt;color:#7c2d12}
+  .business-plan-section{margin:0 0 18pt}.business-plan-goal blockquote{margin:0;padding:13pt 15pt;border:1pt solid #fdba74;border-left:6pt solid #f97316;border-radius:8pt;background:#fff7ed;color:#7c2d12;line-height:1.7;break-inside:avoid}
+  .business-plan-list{list-style:none;margin:0;padding:0;counter-reset:plan-item;display:grid;gap:7pt}.business-plan-list li{counter-increment:plan-item;position:relative;padding:10pt 11pt 10pt 40pt;border:1pt solid #e2e8f0;border-radius:8pt;background:#f8fafc;break-inside:avoid}.business-plan-list li:before{content:counter(plan-item);position:absolute;left:10pt;top:8pt;width:22pt;height:22pt;display:grid;place-items:center;border-radius:7pt;background:#ffedd5;color:#9a3412;font-weight:900}
+  .business-plan-empty{padding:10pt 12pt;border:1pt dashed #cbd5e1;border-radius:7pt;background:#f8fafc;color:#64748b}
+  .budget-panel{margin:11pt 0;overflow:hidden;border:1pt solid #cbd5e1;border-radius:8pt;background:#fff;break-inside:avoid}.budget-panel>h3{display:flex;align-items:center;gap:7pt;margin:0;padding:8pt 10pt;border-bottom:1pt solid #fed7aa;background:#fff7ed;color:#7c2d12}.budget-panel>h3>span{width:21pt;height:21pt;display:inline-grid;place-items:center;border-radius:50%;background:#ea580c;color:#fff;font-weight:900}
+  .budget-data-table{margin:0;border:0}.budget-data-table th,.budget-data-table td{padding:7pt 8pt}.budget-data-table thead th{background:#f8fafc;color:#334155}.budget-data-table tbody tr:nth-child(even){background:#f8fafc}.budget-data-table tfoot th{border-top:2pt solid #fb923c;background:#fff7ed;color:#7c2d12}
+  .business-plan-note{margin:12pt 0 0;padding:9pt 11pt;border:1pt solid #93c5fd;border-radius:7pt;background:#eff6ff;color:#1e3a8a;break-inside:avoid}
   .financial-statement-page{color:#1e293b}
   .financial-statement-heading{text-align:center;margin-bottom:20pt;padding:18pt 14pt 15pt;border-top:5pt solid #f97316;border-bottom:1pt solid #fdba74;background:#fffaf5;break-inside:avoid}
   .financial-statement-heading>span{display:inline-block;padding:4pt 9pt;border-radius:999pt;background:#ffedd5;color:#9a3412;font-weight:900}
