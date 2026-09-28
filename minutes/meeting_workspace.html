@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.7.0 | Change: 2026-09-28 - Refine audit report and business plan document design. -->
+<!-- Version: v1.8.0 | Change: 2026-09-28 - Separate audit drafting and electronic review into its own assembly step. -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.7.0 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.8.0 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
   <style>
     :root {
@@ -57,6 +57,7 @@
     .step-tab.active { background:#172033; color:#fff; border-color:#172033; }
     .step-panel { display:none; padding:20px; }
     .step-panel.active { display:block; }
+    .step-tab[hidden],.step-panel[hidden] { display:none !important; }
     .section-card { border:1px solid var(--line); border-radius:13px; padding:17px; margin-bottom:15px; background:#fff; }
     .section-card h3 { margin:0 0 14px; font-size:1.02rem; }
     .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
@@ -254,6 +255,19 @@
     .rich-editor .budget-data-table tbody tr:nth-child(even) { background:#f8fafc; }
     .rich-editor .budget-data-table tfoot th { border-top:2px solid #fb923c; background:#fff7ed; color:#7c2d12; }
     .rich-editor .business-plan-note { margin:16px 0 0; padding:12px 14px; border:1px solid #bfdbfe; border-radius:10px; background:#eff6ff; color:#1e3a8a; }
+    .audit-step-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:14px; }
+    .audit-step-head h3 { margin:0 0 5px; color:#172033; }
+    .audit-step-head p { margin:0; color:var(--muted); line-height:1.6; }
+    .audit-draft-panel { margin-top:14px; padding:18px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+    .audit-draft-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }
+    .audit-draft-state { margin-right:auto; display:inline-flex; align-items:center; min-height:32px; padding:6px 10px; border-radius:999px; background:#f1f5f9; color:#475569; font-size:.82rem; font-weight:900; }
+    .audit-draft-state.ready { background:#dbeafe; color:#1d4ed8; }
+    .audit-draft-state.signed { background:#dcfce7; color:#166534; }
+    .audit-draft-editor { min-height:520px; padding:26px; border:1px solid #cbd5e1; border-radius:12px; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,.05); }
+    .audit-draft-editor:focus { outline:3px solid #bfdbfe; border-color:#60a5fa; }
+    .audit-draft-editor.is-locked { background:#f8fafc; cursor:not-allowed; }
+    .audit-draft-empty { min-height:260px; display:grid; place-items:center; padding:30px; border:1px dashed #cbd5e1; border-radius:12px; color:#64748b; text-align:center; line-height:1.7; }
+    .audit-step-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:14px; }
     .rich-editor .source-agenda-row { display:grid; grid-template-columns:110px 1fr; gap:6px 12px; padding:8px 0; border-bottom:1px solid #e2e8f0; }
     .rich-editor .source-agenda-row small { grid-column:2; color:#64748b; }
     .rich-editor .board-one-paper h1 { text-align:center; font-size:1.65rem; }
@@ -317,6 +331,10 @@
       .rich-editor .audit-summary-grid { grid-template-columns:1fr; }
       .rich-editor .audit-document-heading h1 { font-size:1.55rem; letter-spacing:.1em; }
       .rich-editor .business-plan-heading h1 { font-size:1.55rem; }
+      .audit-step-head { flex-direction:column; }
+      .audit-draft-panel { padding:12px; }
+      .audit-draft-editor { min-height:420px; padding:16px; }
+      .audit-draft-state { width:100%; justify-content:center; }
     }
   </style>
 </head>
@@ -360,7 +378,8 @@
           <nav class="step-tabs" aria-label="회의 준비 단계">
             <button type="button" class="step-tab active" data-step="info">1. 기본정보</button>
             <button type="button" class="step-tab" data-step="agendas">2. 안건</button>
-            <button type="button" class="step-tab" data-step="documents">3. 회의 전 문서</button>
+            <button type="button" class="step-tab" data-step="audit" id="auditStepTab" hidden>3. 감사보고서</button>
+            <button type="button" class="step-tab" data-step="documents" id="documentsStepTab">3. 회의 전 문서</button>
           </nav>
 
           <section class="step-panel active" data-panel="info">
@@ -459,6 +478,29 @@
             <div class="bottom-actions"><button type="button" class="btn btn-primary" id="saveAgendasButton">안건·자료집 입력 저장</button></div>
           </section>
 
+          <section class="step-panel" data-panel="audit" id="auditStepPanel" hidden>
+            <div class="notice">결산자료를 바탕으로 감사보고서 초안을 확인하고 필요한 내용을 고친 뒤 감사에게 전자검토를 요청합니다. 감사의 전자서명이 시작되면 보고서 내용은 자동으로 잠깁니다.</div>
+            <section class="assembly-source-panel">
+              <div class="audit-step-head">
+                <div><h3>감사보고서 준비 현황</h3><p>선택한 결산연도, 결산 완료 여부, 감사 명단과 전자서명 진행 상태를 확인합니다.</p></div>
+                <button type="button" class="btn btn-small" id="refreshAuditSourcesButton">자료 다시 확인</button>
+              </div>
+              <div class="assembly-source-status" id="auditSourceStatus"><div class="source-empty">감사보고서 자료를 확인하는 중입니다.</div></div>
+            </section>
+            <section class="audit-draft-panel">
+              <div class="audit-draft-toolbar">
+                <span class="audit-draft-state" id="auditDraftState">초안 준비 전</span>
+                <button type="button" class="btn" id="resetAuditDraftButton">결산자료로 초안 만들기</button>
+                <button type="button" class="btn" id="openAuditButton" hidden>전자검토 화면 열기</button>
+              </div>
+              <div id="auditDraftEditor" class="rich-editor audit-draft-editor" contenteditable="false" aria-label="감사보고서 초안"></div>
+              <div class="help" id="auditDraftHelp" style="margin-top:10px;">결산 완료 자료가 확인되면 초안을 만들 수 있습니다.</div>
+              <div class="audit-step-actions">
+                <button type="button" class="btn btn-primary" id="requestAuditReviewButton">수정 내용으로 전자검토 요청</button>
+              </div>
+            </section>
+          </section>
+
           <section class="step-panel" data-panel="documents">
             <div class="notice" id="documentModeNotice">이사회는 기존 회의자료와 시나리오 형식으로 준비합니다. 총회 자료집은 기존 HTML 순서대로 챕터를 골라 한 부분씩 수정할 수 있습니다.</div>
             <section class="assembly-source-panel" id="assemblySourcePanel" hidden>
@@ -467,11 +509,6 @@
                 <button type="button" class="btn btn-small" id="refreshAssemblySourcesButton">자료 다시 확인</button>
               </div>
               <div class="assembly-source-status" id="assemblySourceStatus"><div class="source-empty">총회 연동 자료를 확인하는 중입니다.</div></div>
-              <div class="assembly-source-actions">
-                <button type="button" class="btn btn-primary" id="prepareAuditButton">감사보고서 작성·전자검토 요청</button>
-                <button type="button" class="btn" id="openAuditButton" hidden>감사보고서 열기</button>
-              </div>
-              <div class="help" style="margin-top:8px;">감사보고서는 결산 완료 자료를 기준으로 만들며, 감사가 직접 수정할 수 있습니다. 한 명이라도 서명하면 본문과 서명 대상은 잠겨 이후 변경할 수 없습니다.</div>
             </section>
             <div class="document-toolbar">
               <span class="draft-sync">입력 내용 자동 반영</span>
@@ -543,6 +580,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.7.0"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.8.0"></script>
 </body>
 </html>

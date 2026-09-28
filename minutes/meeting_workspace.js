@@ -1,6 +1,6 @@
 /*
-Version: v1.7.0
-Change: 2026-09-28 - Refine audit report and business plan design for screen and print.
+Version: v1.8.0
+Change: 2026-09-28 - Separate audit drafting and electronic review into its own assembly step.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.51';
@@ -30,6 +30,7 @@ const state = {
   activeDocument: 'MATERIALS',
   currentStep: 'info',
   documentDirty: false,
+  auditDraftDirty: false,
   chapters: [],
   activeChapterId: null,
   loading: false,
@@ -326,6 +327,7 @@ function setBusy(value) {
     if (button.dataset.allowWhileBusy === 'true') return;
     button.disabled = value;
   });
+  if (!value) renderAuditStep({ preserveDraft: true });
 }
 
 function hasLocalAdminHint() {
@@ -559,6 +561,9 @@ function updateDocumentModeLabels() {
   const regularAssembly = assembly && $('assemblyKind').value !== 'EXTRAORDINARY';
   $('assemblyKindField').hidden = !assembly;
   $('fiscalYearField').hidden = !regularAssembly;
+  $('auditStepTab').hidden = !regularAssembly;
+  $('auditStepPanel').hidden = !regularAssembly;
+  $('documentsStepTab').textContent = regularAssembly ? '4. 회의 전 문서' : '3. 회의 전 문서';
   $('assemblySourcePanel').hidden = !regularAssembly;
   $('assemblyBookletPanel').hidden = !regularAssembly;
   $('bookPrintHelp').hidden = !assembly;
@@ -573,7 +578,11 @@ function updateDocumentModeLabels() {
       ? '정기총회 기본 순서는 전차 의사록 확인 → 감사보고서 → 사업보고 및 결산 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획·예산 → 차입금 한도 → 추가 의안 → 기타안건입니다.'
       : '임시총회 자료집과 시나리오는 등록한 의안만으로 구성합니다.')
     : '기존 제6차 이사회 문서를 기준으로 한 장짜리 회의자료와 진행 시나리오를 준비합니다.';
-  if (regularAssembly) renderAssemblySourceStatus();
+  if (!regularAssembly && state.currentStep === 'audit') switchStep('documents');
+  if (regularAssembly) {
+    renderAssemblySourceStatus();
+    renderAuditStep({ preserveDraft: true });
+  }
 }
 
 function defaultFiscalYear(row = state.current) {
@@ -601,8 +610,6 @@ function renderAssemblySourceStatus() {
   const source = state.sourceContext;
   if (!source) {
     $('assemblySourceStatus').innerHTML = '<div class="source-empty">총회 연동 자료를 확인하는 중입니다.</div>';
-    $('prepareAuditButton').disabled = true;
-    $('openAuditButton').hidden = true;
     return;
   }
   const closing = source.closing || {};
@@ -629,21 +636,115 @@ function renderAssemblySourceStatus() {
   $('assemblySourceStatus').innerHTML = cards.map(([label, detail, ok]) => `
     <div class="source-status-card"><span class="source-status-icon ${ok ? 'ok' : 'wait'}">${ok ? '✓' : '!'}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>
   `).join('');
-  $('prepareAuditButton').disabled = !closingReport || !closing.is_closed;
-  $('prepareAuditButton').textContent = audit ? '감사보고서 초안 갱신·서명 화면 열기' : '감사보고서 작성·전자검토 요청';
+}
+
+function auditReportLocked(audit = state.sourceContext?.audit_report) {
+  return Number(audit?.signature_count || 0) > 0 || audit?.status === 'CLOSED';
+}
+
+function generatedAuditDraft(source = state.sourceContext) {
+  if (!source?.closing_report || !source?.closing?.is_closed) return '';
+  return sanitizeHtml(buildAuditReportDraft({
+    row: state.current,
+    coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
+    officials: state.officials,
+    sourceContext: source
+  }));
+}
+
+function renderAuditStep({ preserveDraft = false } = {}) {
+  const panel = $('auditStepPanel');
+  const editor = $('auditDraftEditor');
+  if (!panel || panel.hidden || !editor) return;
+  const source = state.sourceContext;
+  if (!source) {
+    $('auditSourceStatus').innerHTML = '<div class="source-empty">감사보고서 자료를 확인하는 중입니다.</div>';
+    if (!preserveDraft || !state.auditDraftDirty) {
+      editor.innerHTML = '<div class="audit-draft-empty">결산자료와 감사 명단을 확인하면 감사보고서 초안이 표시됩니다.</div>';
+      editor.classList.add('is-empty');
+    }
+    editor.contentEditable = 'false';
+    $('auditDraftState').className = 'audit-draft-state';
+    $('auditDraftState').textContent = '자료 확인 중';
+    $('resetAuditDraftButton').disabled = true;
+    $('requestAuditReviewButton').disabled = true;
+    $('openAuditButton').hidden = true;
+    return;
+  }
+
+  const closing = source.closing || {};
+  const closingReport = source.closing_report;
+  const audit = source.audit_report;
+  const auditors = state.officials
+    .filter(row => officialRole(row) === '감사')
+    .map(officialName)
+    .filter(Boolean);
+  const signedCount = Number(audit?.signature_count || 0);
+  const signerCount = Array.isArray(audit?.signer_ids) ? audit.signer_ids.length : auditors.length;
+  const closingReady = Boolean(closingReport && closing.is_closed);
+  const locked = auditReportLocked(audit);
+  const cards = [
+    [`${source.fiscal_year}년도 결산`, closingReport
+      ? (closing.is_closed ? '결산 완료 · 감사보고서 작성 가능' : '결산 완료 전 · 회계관리에서 먼저 마감 필요')
+      : '결산보고서 없음 · 회계관리에서 먼저 생성 필요', closingReady],
+    ['감사 대상', auditors.length ? `${auditors.join(', ')} · ${auditors.length}명` : '활성 감사 계정을 확인해 주세요.', auditors.length > 0],
+    ['전자검토', audit
+      ? `${audit.status === 'CLOSED' ? '서명 완료' : (signedCount > 0 ? '서명 진행 중' : '검토 문서 준비됨')} · ${signedCount}/${signerCount}명`
+      : '아직 요청하지 않음', Boolean(audit)]
+  ];
+  $('auditSourceStatus').innerHTML = cards.map(([label, detail, ok]) => `
+    <div class="source-status-card"><span class="source-status-icon ${ok ? 'ok' : 'wait'}">${ok ? '✓' : '!'}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></div></div>
+  `).join('');
+
+  if (!preserveDraft || !state.auditDraftDirty) {
+    const content = sanitizeHtml(audit?.content || generatedAuditDraft(source));
+    if (content) {
+      editor.innerHTML = content;
+      editor.classList.remove('is-empty');
+    } else {
+      editor.innerHTML = '<div class="audit-draft-empty">결산을 완료하고 결산보고서를 생성하면 이곳에서 감사보고서 초안을 작성할 수 있습니다.</div>';
+      editor.classList.add('is-empty');
+    }
+    state.auditDraftDirty = false;
+  }
+
+  editor.contentEditable = closingReady && !locked ? 'true' : 'false';
+  editor.setAttribute('aria-readonly', closingReady && !locked ? 'false' : 'true');
+  editor.classList.toggle('is-locked', locked);
+  $('resetAuditDraftButton').disabled = !closingReady || locked;
+  $('resetAuditDraftButton').textContent = audit ? '결산자료로 초안 다시 만들기' : '결산자료로 초안 만들기';
+  $('requestAuditReviewButton').disabled = !closingReady || locked || auditors.length === 0;
+  $('requestAuditReviewButton').textContent = audit ? '수정 내용 반영·전자검토 요청' : '수정 내용으로 전자검토 요청';
   $('openAuditButton').hidden = !audit?.id;
+
+  const stateBadge = $('auditDraftState');
+  stateBadge.className = `audit-draft-state ${audit?.status === 'CLOSED' ? 'signed' : (audit ? 'ready' : '')}`;
+  stateBadge.textContent = audit?.status === 'CLOSED'
+    ? '전자서명 완료'
+    : (signedCount > 0 ? `전자서명 진행 중 · ${signedCount}/${signerCount}명` : (audit ? '전자검토 문서 있음' : '전자검토 요청 전'));
+  $('auditDraftHelp').textContent = locked
+    ? '감사의 전자서명이 시작되어 보고서 내용이 잠겼습니다. 전자검토 화면에서 진행 상태를 확인할 수 있습니다.'
+    : (closingReady
+      ? '보고서 본문을 직접 고친 뒤 전자검토 요청을 누르면 현재 내용이 저장되고 감사에게 검토·서명을 요청합니다.'
+      : '회계관리에서 해당 연도 결산을 완료하고 결산보고서를 생성해 주세요.');
 }
 
 async function loadAssemblySources({ render = true } = {}) {
   if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
     state.sourceContext = null;
-    if (render) renderAssemblySourceStatus();
+    if (render) {
+      renderAssemblySourceStatus();
+      renderAuditStep({ preserveDraft: true });
+    }
     return null;
   }
   const { data, error } = await MeetingPackageService.getAssemblySources(state.current.id);
   if (error) throw error;
   state.sourceContext = data || null;
-  if (render) renderAssemblySourceStatus();
+  if (render) {
+    renderAssemblySourceStatus();
+    renderAuditStep({ preserveDraft: true });
+  }
   return state.sourceContext;
 }
 
@@ -957,7 +1058,30 @@ async function notifyAuditReportSigners(minuteId) {
   return response.data || {};
 }
 
-async function prepareAuditReport() {
+async function resetAuditDraft() {
+  if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
+    throw new Error('감사보고서 연동은 정기총회에서만 사용합니다.');
+  }
+  if (state.auditDraftDirty && !window.confirm('현재 고친 감사보고서 내용을 결산자료 기준 초안으로 다시 만들까요?')) return;
+  await saveInfo({ quiet: true });
+  const source = await loadAssemblySources();
+  if (!source?.closing_report) {
+    throw new Error(`${source?.fiscal_year || $('fiscalYear').value}년도 결산보고서를 회계관리에서 먼저 생성해 주세요.`);
+  }
+  if (!source?.closing?.is_closed) {
+    throw new Error(`${source?.fiscal_year || $('fiscalYear').value}년도 결산을 완료하고 회계관리에서 결산보고서를 다시 생성한 뒤 감사에게 보내 주세요.`);
+  }
+  if (auditReportLocked(source.audit_report)) throw new Error('감사의 전자서명이 시작되어 감사보고서를 다시 만들 수 없습니다.');
+  const content = generatedAuditDraft(source);
+  if (!content) throw new Error('감사보고서 초안을 만들 결산자료가 없습니다.');
+  $('auditDraftEditor').innerHTML = content;
+  $('auditDraftEditor').classList.remove('is-empty');
+  state.auditDraftDirty = true;
+  renderAuditStep({ preserveDraft: true });
+  showToast('결산자료로 감사보고서 초안을 만들었습니다. 내용을 확인하고 전자검토를 요청해 주세요.', 4200);
+}
+
+async function saveAuditReportForReview() {
   if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
     throw new Error('감사보고서 연동은 정기총회에서만 사용합니다.');
   }
@@ -969,18 +1093,29 @@ async function prepareAuditReport() {
   if (!source?.closing?.is_closed) {
     throw new Error(`${source?.fiscal_year || $('fiscalYear').value}년도 결산을 완료하고 회계관리에서 결산보고서를 다시 생성한 뒤 감사에게 보내 주세요.`);
   }
+  if (auditReportLocked(source.audit_report)) {
+    throw new Error('감사의 전자서명이 시작되어 감사보고서 내용을 바꿀 수 없습니다.');
+  }
+  const editor = $('auditDraftEditor');
+  const content = sanitizeHtml(editor.innerHTML);
+  if (!String(editor.textContent || '').trim()) throw new Error('감사보고서 내용을 먼저 작성해 주세요.');
   const title = `${source.fiscal_year}년도 감사보고서`;
-  const content = sanitizeHtml(buildAuditReportDraft({
-    row: state.current,
-    coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
-    officials: state.officials,
-    sourceContext: source
-  }));
   const { data, error } = await MeetingPackageService.prepareAuditReport(state.current.id, { title, content });
   if (error) throw error;
+  state.auditDraftDirty = false;
   await loadAssemblySources();
+  const savedAudit = state.sourceContext?.audit_report;
+  if (auditReportLocked(savedAudit) && sanitizeHtml(savedAudit?.content || '') !== content) {
+    throw new Error('감사의 전자서명이 시작되어 방금 수정한 내용은 저장하지 않았습니다. 전자검토 화면에서 확정 내용을 확인해 주세요.');
+  }
   refreshAutoDrafts({ render: state.currentStep === 'documents' });
-  const minuteId = data?.id || state.sourceContext?.audit_report?.id;
+  renderAuditStep();
+  return data?.id || state.sourceContext?.audit_report?.id || null;
+}
+
+async function requestAuditReview() {
+  const minuteId = await saveAuditReportForReview();
+  if (!minuteId) throw new Error('전자검토를 요청할 감사보고서를 찾지 못했습니다.');
   let notification = null;
   let notificationError = null;
   if (minuteId) {
@@ -1239,7 +1374,7 @@ async function printCurrentChapter() {
 }
 
 async function openPackage(id) {
-  if (state.documentDirty && !window.confirm('저장하지 않은 문서 수정이 있습니다. 다른 회의를 열까요?')) return;
+  if ((state.documentDirty || state.auditDraftDirty) && !window.confirm('저장하지 않은 문서 수정이 있습니다. 다른 회의를 열까요?')) return;
   setBusy(true);
   try {
     const { data, error } = await MeetingPackageService.getPackage(id);
@@ -1252,6 +1387,7 @@ async function openPackage(id) {
     state.sourceContext = null;
     state.activeDocument = 'MATERIALS';
     state.documentDirty = false;
+    state.auditDraftDirty = false;
     $('editorPlaceholder').hidden = true;
     $('editorBody').hidden = false;
     renderEditorHeader();
@@ -1260,6 +1396,7 @@ async function openPackage(id) {
     await loadAssemblySources();
     refreshAutoDrafts({ render: false });
     renderActiveDocument();
+    renderAuditStep();
     renderPackages();
   } finally {
     setBusy(false);
@@ -1302,6 +1439,7 @@ async function deletePackage() {
   state.documents.clear();
   state.pdfAttachments = [];
   state.sourceContext = null;
+  state.auditDraftDirty = false;
   $('editorBody').hidden = true;
   $('editorPlaceholder').hidden = false;
   await loadPackages();
@@ -1309,9 +1447,14 @@ async function deletePackage() {
 }
 
 function switchStep(step) {
+  if (step === 'audit' && $('auditStepTab').hidden) step = 'documents';
   state.currentStep = step;
   document.querySelectorAll('.step-tab').forEach(button => button.classList.toggle('active', button.dataset.step === step));
   document.querySelectorAll('.step-panel').forEach(panel => panel.classList.toggle('active', panel.dataset.panel === step));
+  if (step === 'audit') {
+    syncWorkingStateFromForms();
+    renderAuditStep({ preserveDraft: true });
+  }
   if (step === 'documents') {
     syncWorkingStateFromForms();
     refreshAutoDrafts();
@@ -1494,7 +1637,13 @@ function bindEvents() {
     refreshAutoDrafts({ render: state.currentStep === 'documents' });
     showToast('총회 연동 자료를 다시 확인했습니다.');
   }));
-  $('prepareAuditButton').addEventListener('click', () => runAction(prepareAuditReport));
+  $('refreshAuditSourcesButton').addEventListener('click', () => runAction(async () => {
+    await loadAssemblySources();
+    renderAuditStep({ preserveDraft: true });
+    showToast('결산자료와 감사 진행 상태를 다시 확인했습니다.');
+  }));
+  $('resetAuditDraftButton').addEventListener('click', () => runAction(resetAuditDraft));
+  $('requestAuditReviewButton').addEventListener('click', () => runAction(requestAuditReview));
   $('openAuditButton').addEventListener('click', openAuditReport);
   $('saveDocumentButton').addEventListener('click', () => runAction(saveActiveDocument));
   $('printDocumentButton').addEventListener('click', () => runAction(printActiveDocument));
@@ -1578,6 +1727,13 @@ function bindEvents() {
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
   });
   $('documentEditor').addEventListener('input', () => { state.documentDirty = true; });
+  $('auditDraftEditor').addEventListener('input', () => {
+    if (auditReportLocked()) return;
+    state.auditDraftDirty = true;
+    $('auditDraftEditor').classList.remove('is-empty');
+    $('auditDraftState').className = 'audit-draft-state';
+    $('auditDraftState').textContent = '수정 중 · 요청 전';
+  });
   $('chapterEditor').addEventListener('input', () => {
     if (!activeChapterLock().locked) state.documentDirty = true;
   });
@@ -1596,7 +1752,7 @@ function bindEvents() {
     state.documentDirty = true;
   }));
   window.addEventListener('beforeunload', event => {
-    if (!state.documentDirty) return;
+    if (!state.documentDirty && !state.auditDraftDirty) return;
     event.preventDefault();
     event.returnValue = '';
   });
