@@ -1,4 +1,4 @@
-/* Version: v1.1.0 | 2026-09-28 */
+/* Version: v1.2.0 | 2026-09-28 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -466,8 +466,8 @@ function renderFullContractEditor(terms) {
       <div class="row g-3">
         <div class="col-md-3"><label class="form-label required" for="wageBasis">임금 기준</label><select class="form-select" id="wageBasis">${wageBasisOptions}</select></div>
         <div class="col-md-3"><label class="form-label required" for="wageAmount">기준 임금액</label><div class="input-group"><input type="number" min="0" step="1" class="form-control" id="wageAmount" value="${escapeHtml(terms.wage_amount)}"><span class="input-group-text">원</span></div></div>
-        <div class="col-md-4"><label class="form-label required" for="payDay">지급일</label><input class="form-control" id="payDay" maxlength="100" value="${escapeHtml(terms.pay_day)}"></div>
-        <div class="col-md-2"><label class="form-label required" for="paymentMethod">지급 방법</label><input class="form-control" id="paymentMethod" maxlength="200" value="${escapeHtml(terms.payment_method)}"></div>
+        <div class="col-md-6"><label class="form-label required" for="payDay">지급일</label><input class="form-control" id="payDay" maxlength="100" value="${escapeHtml(terms.pay_day)}"></div>
+        <div class="col-12"><label class="form-label required" for="paymentMethod">지급 방법</label><textarea class="form-control" id="paymentMethod" rows="2" maxlength="500" placeholder="예: 매월 지급일에 근로자 본인 명의 계좌로 입금">${escapeHtml(terms.payment_method)}</textarea></div>
         <div class="col-md-3"><label class="form-label" for="monthlyBasicPay">월 기본급</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyBasicPay" value="${escapeHtml(terms.monthly_basic_pay)}"><span class="input-group-text">원</span></div></div>
         <div class="col-md-3"><label class="form-label" for="monthlyMealAllowance">월 식대</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyMealAllowance" value="${escapeHtml(terms.monthly_meal_allowance)}"><span class="input-group-text">원</span></div></div>
         <div class="col-md-3"><label class="form-label" for="monthlyPositionAllowance">월 직책수당</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyPositionAllowance" value="${escapeHtml(terms.monthly_position_allowance)}"><span class="input-group-text">원</span></div></div>
@@ -869,7 +869,7 @@ function renderPreview(contract, unsaved) {
         ${canEmployerSign ? '<button type="button" class="btn btn-primary" id="employerSignButton">사용자 측 전자 확인</button>' : ''}
         ${canEmployeeSign ? '<button type="button" class="btn btn-primary" id="employeeSignButton">내용 확인 및 전자 서명</button>' : ''}
         ${!unsaved && contract.source_type !== 'upload' ? '<button type="button" class="btn btn-outline-dark" id="downloadContractButton">PDF 다운로드</button>' : ''}
-        ${contract.source_type !== 'upload' ? '<button type="button" class="btn btn-dark" id="printContractButton">인쇄·PDF 저장</button>' : ''}
+        ${contract.source_type !== 'upload' ? '<button type="button" class="btn btn-dark" id="printContractButton">인쇄</button>' : ''}
       </div>
     </div>
     ${paper}`;
@@ -878,7 +878,7 @@ function renderPreview(contract, unsaved) {
   document.getElementById('employerSignButton')?.addEventListener('click', (event) => signContract(contract.id, 'employer', event.currentTarget));
   document.getElementById('employeeSignButton')?.addEventListener('click', (event) => signContract(contract.id, 'employee', event.currentTarget));
   document.getElementById('downloadContractButton')?.addEventListener('click', (event) => downloadContractPdf(contract, event.currentTarget));
-  document.getElementById('printContractButton')?.addEventListener('click', () => printContract(contract));
+  document.getElementById('printContractButton')?.addEventListener('click', (event) => printContract(contract, event.currentTarget));
 }
 
 function renderContractDocument(contract) {
@@ -900,14 +900,14 @@ function renderContractDocument(contract) {
     <p>${agreementIntro}</p>
     ${renderPartyInformation(terms)}
     ${body}
-    <h2>전자문서 교부</h2>
-    <p>이 전자문서는 ${escapeHtml(terms.company_name || '조합')} 및 ${escapeHtml(terms.employee_name || '근로자')}가 같은 내용을 확인할 수 있도록 보관하며, 근로자는 ERP 계약서 관리 화면에서 PDF로 내려받을 수 있습니다.</p>
+    <section class="page-break-avoid"><h2>전자문서 교부</h2>
+    <p>이 전자문서는 ${escapeHtml(terms.company_name || '조합')} 및 ${escapeHtml(terms.employee_name || '근로자')}가 같은 내용을 확인할 수 있도록 보관하며, 근로자는 ERP 계약서 관리 화면에서 PDF로 내려받을 수 있습니다.</p></section>
     <div class="text-center fw-bold my-4">${escapeHtml(formatDate(contract.effective_date))}</div>
     <div class="signature-grid">
       <div class="signature-box"><strong>사업주</strong><br>${escapeHtml(terms.company_name || '-')}<br>${escapeHtml(terms.company_address || '')}<br>${escapeHtml(terms.employer_role || '대표자')} ${escapeHtml(terms.employer_name || '-')}<hr>${employerState}</div>
       <div class="signature-box"><strong>근로자</strong><br>${escapeHtml(terms.employee_name || '-')}<br>${escapeHtml(terms.employee_address || '')}<hr>${employeeState}</div>
     </div>
-    ${contract.content_hash ? `<div class="hash-note">전자 확인 문서 식별값: ${escapeHtml(contract.content_hash)}</div>` : ''}
+    ${renderIntegrityNotice(contract)}
   </article>`;
 }
 
@@ -1040,7 +1040,7 @@ function renderLegacyContractDocument(contract) {
       <div class="signature-box"><strong>사용자</strong><br>${escapeHtml(terms.company_name || '-')}<br>${escapeHtml(terms.company_address || '')}<br>대표자 ${escapeHtml(terms.employer_name || '-')}<hr>${employerState}</div>
       <div class="signature-box"><strong>직원</strong><br>${escapeHtml(terms.employee_name || '-')}<br>${escapeHtml(terms.employee_address || '')}<hr>${employeeState}</div>
     </div>
-    ${contract.content_hash ? `<div class="hash-note">전자 확인 문서 식별값: ${escapeHtml(contract.content_hash)}</div>` : ''}
+    ${renderIntegrityNotice(contract)}
   </article>`;
 }
 
@@ -1066,42 +1066,118 @@ async function signContract(id, role, button) {
   }
 }
 
-function printContract(contract) {
-  document.getElementById('printRoot').innerHTML = renderContractDocument(contract);
-  document.getElementById('printRoot').classList.remove('hidden');
-  window.setTimeout(() => {
-    window.print();
-    window.setTimeout(() => document.getElementById('printRoot').classList.add('hidden'), 300);
-  }, 80);
+function contractOutputState(contract) {
+  if (contract.status === 'completed' && asText(contract.content_hash)) return 'COMPLETED';
+  if (contract.status === 'awaiting_signatures') return 'SIGNING';
+  return 'DRAFT';
 }
 
-async function downloadContractPdf(contract, button) {
-  if (state.busy) return;
+function contractVerificationCode(contract) {
+  const hash = asText(contract.content_hash).replace(/[^0-9a-f]/gi, '').toUpperCase();
+  return hash ? hash.slice(0, 20) : 'NOT-FINAL';
+}
+
+function renderIntegrityNotice(contract) {
+  const hash = asText(contract.content_hash);
+  if (!hash) {
+    return '<div class="integrity-note"><strong>미확정 문서 안내</strong><br>전자 확인이 완료되기 전의 초안 또는 진행 중 문서입니다. 확정 계약서는 ERP에 보관된 완료 문서와 대조해 주세요.</div>';
+  }
+  return `<div class="hash-note"><strong>위변조 확인 안내</strong><br>전자 확인 문서 식별값: ${escapeHtml(hash)}<br>인쇄물이나 PDF의 식별값이 ERP에 보관된 완료 문서와 같은지 대조해 주세요.</div>`;
+}
+
+function addPdfOutputMarks(pdf, contract) {
+  const totalPages = pdf.internal.getNumberOfPages();
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const outputState = contractOutputState(contract);
+  const verificationCode = contractVerificationCode(contract);
+  for (let page = 1; page <= totalPages; page += 1) {
+    pdf.setPage(page);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(11);
+    pdf.setTextColor(75, 85, 99);
+    pdf.text(`DOC ${verificationCode} | ${outputState}`, 12, pageHeight - 7);
+    pdf.text(`${page} / ${totalPages}`, pageWidth - 21, pageHeight - 7);
+    if (outputState !== 'COMPLETED') {
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(44);
+      pdf.setTextColor(225, 228, 233);
+      pdf.text(outputState, pageWidth / 2, pageHeight / 2, { align: 'center', angle: 42 });
+    }
+  }
+}
+
+async function buildContractPdf(contract) {
+  if (typeof window.html2pdf !== 'function') throw new Error('PDF 생성 기능을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:-100000px;top:0;width:186mm;background:#fff;z-index:-1;';
   root.innerHTML = renderContractDocument(contract);
   const paper = root.querySelector('[data-contract-document]');
-  if (!paper) return showAlert('다운로드할 계약서 내용을 만들지 못했습니다.');
+  if (!paper) throw new Error('출력할 계약서 내용을 만들지 못했습니다.');
   paper.classList.add('pdf-export-paper');
   document.body.appendChild(root);
   try {
-    if (typeof window.html2pdf !== 'function') throw new Error('PDF 생성 기능을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    button.dataset.label = button.textContent;
-    setBusy(true, button);
-    const fileName = sanitizeFileName(`${contract.title || kindLabel(contract.document_kind)}_${contract.terms?.employee_name || '근로자'}_${contract.effective_date || todayKst()}.pdf`);
-    await window.html2pdf().set({
-      margin: [12, 12, 12, 12],
-      filename: fileName,
+    const worker = window.html2pdf().set({
+      margin: [12, 12, 18, 12],
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.signature-grid'] }
-    }).from(paper).save();
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.signature-grid', '.page-break-avoid', '.hash-note', '.integrity-note'] }
+    }).from(paper).toPdf();
+    const pdf = await worker.get('pdf');
+    addPdfOutputMarks(pdf, contract);
+    return pdf;
+  } finally {
+    root.remove();
+  }
+}
+
+async function printContract(contract, button) {
+  if (state.busy) return;
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return showAlert('인쇄 창을 열 수 없습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 시도해 주세요.');
+  printWindow.document.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>계약서 인쇄 준비</title></head><body style="font-family:sans-serif;padding:32px">쪽번호와 문서 확인정보를 넣어 인쇄 문서를 준비하고 있습니다.</body></html>');
+  printWindow.document.close();
+  try {
+    button.dataset.label = button.textContent;
+    setBusy(true, button);
+    const pdf = await buildContractPdf(contract);
+    const blobUrl = URL.createObjectURL(pdf.output('blob'));
+    let printStarted = false;
+    const startPrint = () => {
+      if (printStarted || printWindow.closed) return;
+      printStarted = true;
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      }
+    };
+    printWindow.onload = () => window.setTimeout(startPrint, 350);
+    printWindow.location.replace(blobUrl);
+    window.setTimeout(startPrint, 1800);
+  } catch (error) {
+    printWindow.close();
+    console.error('[employment_contracts] print failed', error);
+    showAlert(normalizeError(error));
+  } finally {
+    setBusy(false, button);
+  }
+}
+
+async function downloadContractPdf(contract, button) {
+  if (state.busy) return;
+  try {
+    button.dataset.label = button.textContent;
+    setBusy(true, button);
+    const fileName = sanitizeFileName(`${contract.title || kindLabel(contract.document_kind)}_${contract.terms?.employee_name || '근로자'}_${contract.effective_date || todayKst()}.pdf`);
+    const pdf = await buildContractPdf(contract);
+    pdf.save(fileName);
   } catch (error) {
     console.error('[employment_contracts] pdf download failed', error);
     showAlert(normalizeError(error));
   } finally {
-    root.remove();
     setBusy(false, button);
   }
 }
