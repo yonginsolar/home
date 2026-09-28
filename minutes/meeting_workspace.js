@@ -1,11 +1,11 @@
 /*
-Version: v1.5.5
-Change: 2026-09-19 - Apply tenant organization variables to every meeting document and scenario.
+Version: v1.6.0
+Change: 2026-09-28 - Lock linked source chapters and improve assembly booklet readability.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.51';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.4.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, usesChapterEditor } from './meeting_templates.js?v=1.5.3';
+import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.6.0';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -449,9 +449,9 @@ function updateBudgetSummary() {
   const expense = collectBudgetRows('expense').reduce((sum, row) => sum + row.amount, 0);
   const difference = income - expense;
   const differenceText = difference === 0
-    ? '수입과 지출 합계가 일치합니다.'
+    ? ''
     : `${difference > 0 ? '수입이 지출보다' : '지출이 수입보다'} ${Math.abs(difference).toLocaleString('ko-KR')}원 많습니다.`;
-  $('budgetSummary').innerHTML = `<span>수입 ${income.toLocaleString('ko-KR')}원</span><span>지출 ${expense.toLocaleString('ko-KR')}원</span><span class="difference ${difference === 0 ? 'ok' : 'warn'}">${escapeHtml(differenceText)}</span>`;
+  $('budgetSummary').innerHTML = `<span>수입 ${income.toLocaleString('ko-KR')}원</span><span>지출 ${expense.toLocaleString('ko-KR')}원</span>${differenceText ? `<span class="difference warn">${escapeHtml(differenceText)}</span>` : ''}`;
 }
 
 function renderAssemblyBookletInputs() {
@@ -670,8 +670,32 @@ function activeChapterIndex() {
   return Math.max(0, state.chapters.findIndex(chapter => chapter.id === state.activeChapterId));
 }
 
+function activeChapterLock() {
+  const chapter = state.chapters[activeChapterIndex()];
+  return getAssemblyChapterEditLock(chapter?.id || '', state.sourceContext);
+}
+
+function renderChapterEditState() {
+  const lock = activeChapterLock();
+  const editor = $('chapterEditor');
+  const title = $('chapterTitle');
+  const notice = $('chapterLockNotice');
+  editor.contentEditable = lock.locked ? 'false' : 'true';
+  editor.setAttribute('aria-readonly', lock.locked ? 'true' : 'false');
+  editor.classList.toggle('is-locked', lock.locked);
+  title.readOnly = lock.locked;
+  title.setAttribute('aria-readonly', lock.locked ? 'true' : 'false');
+  notice.hidden = !lock.locked;
+  notice.textContent = lock.reason;
+  document.querySelectorAll('.rich-toolbar [data-command]').forEach((button) => {
+    button.disabled = lock.locked;
+  });
+  return lock;
+}
+
 function rememberActiveChapter() {
   if (!chapterMode() || !state.chapters.length || !$('chapterEditor')) return;
+  if (activeChapterLock().locked) return;
   const index = activeChapterIndex();
   state.chapters[index] = {
     ...state.chapters[index],
@@ -721,6 +745,8 @@ function renderActiveChapter() {
     $('chapterEditor').className = 'rich-editor chapter-preview';
     $('chapterEditor').innerHTML = '<p>자료집 챕터가 없습니다.</p>';
     $('chapterPosition').textContent = '';
+    $('chapterLockNotice').hidden = true;
+    $('chapterEditor').contentEditable = 'false';
     renderChapterList();
     renderPdfAttachmentList();
     return;
@@ -738,8 +764,10 @@ function renderActiveChapter() {
   $('chapterPosition').textContent = `${index + 1} / ${state.chapters.length}`;
   $('previousChapterButton').disabled = index === 0;
   $('nextChapterButton').disabled = index >= state.chapters.length - 1;
-  $('moveChapterUpButton').disabled = index === 0;
-  $('moveChapterDownButton').disabled = index >= state.chapters.length - 1;
+  const lock = renderChapterEditState();
+  $('moveChapterUpButton').disabled = lock.locked || index === 0;
+  $('moveChapterDownButton').disabled = lock.locked || index >= state.chapters.length - 1;
+  $('deleteChapterButton').disabled = lock.locked;
   renderChapterList();
   renderPdfAttachmentList();
 }
@@ -775,6 +803,9 @@ function renderActiveDocument() {
     $('chapterTitle').value = '';
     $('chapterEditor').className = 'rich-editor chapter-preview';
     $('chapterEditor').replaceChildren();
+    $('chapterLockNotice').hidden = true;
+    $('chapterTitle').readOnly = false;
+    document.querySelectorAll('.rich-toolbar [data-command]').forEach((button) => { button.disabled = false; });
     $('chapterPosition').textContent = '';
     renderPdfAttachmentList();
     $('documentEditor').innerHTML = sanitizeHtml(doc.content_html || '');
@@ -1062,11 +1093,11 @@ const BOOK_PRINT_CSS = `
   @page back-cover { size:A4; margin:0; @bottom-center { content:none; } }
   @page :blank { @bottom-center { content:none; } }
   *{box-sizing:border-box}
-  html,body{margin:0;color:#172033;background:#fff;font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:11pt;line-height:1.62;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{margin:0;color:#172033;background:#fff;font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;font-size:11pt;line-height:1.62;word-break:keep-all;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   h1{font-size:23pt;line-height:1.3;margin:0 0 18pt;padding-bottom:10pt;border-bottom:3pt solid #f97316;letter-spacing:-.025em}
   h2{font-size:16pt;line-height:1.4;margin:18pt 0 8pt;color:#9a3412}
   h3{font-size:12.5pt;margin:13pt 0 6pt;color:#334155}
-  h4,p,li,td,th,div,span,small{font-size:11pt}
+  h4,p,li,td,th,div,span,small{font-size:11pt}p,li,td,dd{word-break:keep-all;overflow-wrap:break-word}
   p,li{orphans:3;widows:3}
   table{width:100%;border-collapse:collapse;margin:10pt 0;break-inside:auto}
   tr{break-inside:avoid;break-after:auto}
@@ -1103,7 +1134,14 @@ const BOOK_PRINT_CSS = `
   .assembly-back{min-height:245mm;display:flex;flex-direction:column;justify-content:center;text-align:center}
   .assembly-back h1{font-size:34pt;line-height:1.35;border:0}.assembly-back hr{width:42mm;border:0;border-top:3pt solid #f97316;margin:24pt auto}
   .chapter-bill>h1{color:#ea580c;font-size:18pt}.chapter-bill>h2{font-size:23pt;color:#172033;margin-top:4pt}
-  .bill-major-content{display:grid;grid-template-columns:88pt 1fr;border-top:2pt solid #fb923c;border-bottom:1pt solid #fed7aa;margin:10pt 0}.bill-major-content dt,.bill-major-content dd{margin:0;padding:10pt;border-bottom:1pt solid #fed7aa}.bill-major-content dt{font-weight:900;color:#9a3412;background:#fff7ed}.bill-major-content dd{background:#fff}.budget-balance{padding:8pt 10pt;border-radius:7pt;font-weight:800}.budget-balance.is-balanced{background:#ecfdf5;color:#047857}.budget-balance.is-unbalanced{background:#fef2f2;color:#b91c1c}
+  .bill-content-card{margin:16pt 0;overflow:hidden;border:1pt solid #cbd5e1;border-radius:9pt;background:#fff;box-shadow:0 3pt 8pt rgba(15,23,42,.04);break-inside:avoid}
+  .bill-content-card>h3{display:flex;align-items:center;gap:7pt;margin:0;padding:9pt 11pt;border-bottom:1pt solid #fed7aa;background:#fff7ed;color:#7c2d12}
+  .bill-content-card>h3>span{width:21pt;height:21pt;display:inline-grid;place-items:center;border-radius:50%;background:#ea580c;color:#fff;font-weight:900}
+  .bill-content-body{padding:12pt 14pt}.bill-content-body>:first-child{margin-top:0}.bill-content-body>:last-child{margin-bottom:0}
+  .bill-major-content{display:grid;grid-template-columns:88pt 1fr;border:1pt solid #fed7aa;border-radius:7pt;overflow:hidden;margin:0}.bill-major-content dt,.bill-major-content dd{margin:0;padding:10pt;border-bottom:1pt solid #fed7aa}.bill-major-content dt{font-weight:900;color:#9a3412;background:#fff7ed}.bill-major-content dd{background:#fff}.bill-major-content dt:last-of-type,.bill-major-content dd:last-of-type{border-bottom:0}
+  .business-report-overview{margin:0 0 15pt;padding:14pt 16pt;border:1pt solid #fed7aa;border-left:5pt solid #f97316;border-radius:8pt;background:#fff7ed;break-inside:avoid}.business-report-overview>span{display:inline-block;margin-bottom:5pt;color:#9a3412;font-weight:900}.business-report-overview .chapter-lead{margin:0;font-weight:700;line-height:1.7}
+  .business-report-list{list-style:none;padding:0;margin:0;counter-reset:business-item;display:grid;gap:8pt}.business-report-list li{counter-increment:business-item;position:relative;margin:0;padding:10pt 12pt 10pt 42pt;border:1pt solid #e2e8f0;border-radius:8pt;background:#f8fafc;break-inside:avoid}.business-report-list li::before{content:counter(business-item);position:absolute;left:11pt;top:9pt;width:23pt;height:23pt;display:grid;place-items:center;border-radius:50%;background:#ffedd5;color:#9a3412;font-weight:900}
+  .budget-balance{padding:8pt 10pt;border-radius:7pt;font-weight:800}.budget-balance.is-unbalanced{background:#fef2f2;color:#b91c1c}
   .chapter-financial>h1,.chapter-minutes>h1,.chapter-audit>h1{border-bottom-color:#fb923c}
   .audit-report-document{color:#1e293b}
   .audit-document-heading{text-align:center;margin-bottom:20pt;padding-bottom:14pt;border-bottom:4pt solid #f97316}
@@ -1130,13 +1168,12 @@ const BOOK_PRINT_CSS = `
   .financial-statement-heading h1{margin:9pt 0 4pt;padding:0;border:0;font-size:21pt;line-height:1.3;letter-spacing:-.035em;color:#172033;word-break:keep-all}
   .financial-statement-heading p{margin:0;font-weight:800;color:#475569}
   .financial-statement-heading small{display:block;margin-top:8pt;text-align:right;color:#64748b}
-  .financial-statement-section{margin:0 0 18pt;break-inside:avoid}
+  .financial-statement-section{margin:0 0 18pt;break-inside:avoid}.financial-statement-card{overflow:hidden;border:1.5pt solid #cbd5e1;border-radius:8pt;background:#fff}
   .financial-balance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11pt;align-items:start}
   .financial-balance-grid .financial-statement-section{margin-bottom:11pt}
   .financial-balance-grid th,.financial-balance-grid td{padding:6pt}
-  .financial-statement-section h2{display:flex;align-items:center;gap:8pt;margin:0 0 7pt;padding:7pt 10pt;border-left:5pt solid #fb923c;background:#fff7ed;color:#7c2d12}
-  .financial-statement-section table{margin:0;border:1.5pt solid #64748b}
-  .financial-statement-section th{background:#ffedd5}.financial-statement-section tbody tr:nth-child(even){background:#f8fafc}
+  .financial-statement-section h2{display:flex;align-items:center;gap:8pt;margin:0;padding:8pt 10pt;border-left:5pt solid #fb923c;border-bottom:1pt solid #fdba74;background:#fff7ed;color:#7c2d12}
+  .financial-statement-section table{margin:0;border:0}.financial-data-table thead th{background:#f8fafc;color:#334155}.financial-data-table th,.financial-data-table td{padding:7pt 8pt}.financial-statement-section tbody tr:nth-child(even){background:#f8fafc}
   .financial-statement-section tfoot th{border-top:2pt solid #fb923c;background:#fff7ed;color:#7c2d12}
   .financial-result{margin-top:22pt;padding-top:12pt;border-top:2pt solid #fb923c}
   .linked-minute img{max-width:100%;height:auto}
@@ -1326,10 +1363,13 @@ function selectChapter(id) {
 
 function moveChapter(offset) {
   if (!chapterMode() || !state.chapters.length) return;
+  if (activeChapterLock().locked) return showToast('연결된 확정 자료는 순서를 바꾸거나 수정할 수 없습니다.');
   rememberActiveChapter();
   const index = activeChapterIndex();
   const target = index + offset;
   if (target < 0 || target >= state.chapters.length) return;
+  const targetLock = getAssemblyChapterEditLock(state.chapters[target]?.id || '', state.sourceContext);
+  if (targetLock.locked) return showToast('연결된 확정 자료의 앞뒤 순서는 바꿀 수 없습니다.');
   [state.chapters[index], state.chapters[target]] = [state.chapters[target], state.chapters[index]];
   state.documentDirty = true;
   renderActiveChapter();
@@ -1363,6 +1403,7 @@ function addChapter() {
 
 function deleteChapter() {
   if (!chapterMode() || !state.chapters.length) return;
+  if (activeChapterLock().locked) return showToast('연결된 확정 자료는 자료집에서 수정하거나 삭제할 수 없습니다.');
   const index = activeChapterIndex();
   const title = state.chapters[index].title;
   if (activeChapterPdfAttachments().length) {
@@ -1525,8 +1566,11 @@ function bindEvents() {
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
   });
   $('documentEditor').addEventListener('input', () => { state.documentDirty = true; });
-  $('chapterEditor').addEventListener('input', () => { state.documentDirty = true; });
+  $('chapterEditor').addEventListener('input', () => {
+    if (!activeChapterLock().locked) state.documentDirty = true;
+  });
   $('chapterTitle').addEventListener('input', () => {
+    if (activeChapterLock().locked) return;
     state.documentDirty = true;
     const index = activeChapterIndex();
     if (state.chapters[index]) state.chapters[index].title = $('chapterTitle').value;
@@ -1534,6 +1578,7 @@ function bindEvents() {
   });
   $('documentTitle').addEventListener('input', () => { state.documentDirty = true; });
   document.querySelectorAll('.rich-toolbar [data-command]').forEach(button => button.addEventListener('click', () => {
+    if (chapterMode() && activeChapterLock().locked) return showToast('이 챕터는 연결된 확정 자료이므로 수정할 수 없습니다.');
     activeRichEditor().focus();
     document.execCommand(button.dataset.command, false, button.dataset.value || null);
     state.documentDirty = true;

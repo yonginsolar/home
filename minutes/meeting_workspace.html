@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.5.5 | Change: 2026-09-19 - Apply tenant organization variables throughout meeting documents and scenarios. -->
+<!-- Version: v1.6.0 | Change: 2026-09-28 - Lock linked source chapters and improve assembly booklet readability. -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.5.5 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.6.0 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
   <style>
     :root {
@@ -16,7 +16,7 @@
     }
     * { box-sizing:border-box; }
     [hidden] { display:none !important; }
-    body { margin:0; background:var(--bg); color:var(--ink); font-family:'Pretendard','Noto Sans KR','Apple SD Gothic Neo',sans-serif; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:'Pretendard','Noto Sans KR','Apple SD Gothic Neo',sans-serif; word-break:keep-all; }
     button,input,select,textarea { font:inherit; }
     button { cursor:pointer; }
     .shell { max-width:1440px; margin:0 auto; padding:22px; }
@@ -121,7 +121,10 @@
     .doc-tab.active { background:#ffedd5; border-color:#fb923c; color:#9a3412; }
     .rich-toolbar { display:flex; flex-wrap:wrap; gap:6px; padding:9px; border:1px solid var(--line); border-bottom:0; border-radius:10px 10px 0 0; background:#f8fafc; }
     .rich-toolbar button { border:1px solid var(--line); background:#fff; border-radius:7px; padding:6px 9px; }
+    .rich-toolbar button:disabled,.chapter-actions .btn:disabled { cursor:not-allowed; opacity:.45; }
     .rich-editor { min-height:520px; border:1px solid var(--line); border-radius:0 0 10px 10px; padding:28px; background:#fff; line-height:1.72; overflow:auto; }
+    .rich-editor p,.rich-editor li,.rich-editor td,.rich-editor dd { word-break:keep-all; overflow-wrap:break-word; }
+    .rich-editor.is-locked { border-color:#cbd5e1; background:#f8fafc; cursor:default; }
     .rich-editor h1 { font-size:2rem; margin:0 0 1.1em; }
     .rich-editor h2 { font-size:1.35rem; margin:1.4em 0 .6em; }
     .rich-editor h3 { font-size:1.08rem; margin:1.1em 0 .45em; }
@@ -144,6 +147,8 @@
     .chapter-actions { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 10px; }
     .chapter-actions .btn { padding:7px 10px; font-size:.82rem; }
     .chapter-position { margin-left:auto; color:var(--muted); font-size:.82rem; align-self:center; }
+    .chapter-lock-notice { margin:0 0 10px; padding:11px 13px; border:1px solid #bfdbfe; border-radius:10px; background:#eff6ff; color:#1e3a8a; font-size:.86rem; font-weight:700; line-height:1.55; }
+    .chapter-lock-notice::before { content:'🔒'; margin-right:7px; }
     .pdf-attachment-panel { margin:0 0 12px; padding:11px; border:1px solid #bae6fd; border-radius:10px; background:#f0f9ff; }
     .pdf-attachment-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
     .pdf-attachment-panel-head strong { display:block; font-size:.88rem; }
@@ -172,6 +177,38 @@
     #chapterEditor:not(.chapter-cover):not(.chapter-back) > h1 { padding-bottom:12px; border-bottom:3px solid #f97316; }
     #chapterEditor.chapter-order ol { padding-left:1.45em; }
     #chapterEditor.chapter-bill > h2 { color:#c2410c; }
+    .rich-editor .bill-content-card { margin:18px 0; overflow:hidden; border:1px solid #e2e8f0; border-radius:13px; background:#fff; box-shadow:0 5px 16px rgba(15,23,42,.05); }
+    .rich-editor .bill-content-card > h3 { display:flex; align-items:center; gap:9px; margin:0; padding:12px 15px; border-bottom:1px solid #fed7aa; background:linear-gradient(135deg,#fff7ed,#fffbeb); color:#7c2d12; }
+    .rich-editor .bill-content-card > h3 > span { width:26px; height:26px; display:inline-grid; place-items:center; border-radius:50%; background:#ea580c; color:#fff; font-size:.82rem; }
+    .rich-editor .bill-content-body { padding:15px 17px; }
+    .rich-editor .bill-content-body > :first-child { margin-top:0; }
+    .rich-editor .bill-content-body > :last-child { margin-bottom:0; }
+    .rich-editor .bill-major-content { display:grid; grid-template-columns:120px minmax(0,1fr); margin:0; border:1px solid #fed7aa; border-radius:10px; overflow:hidden; }
+    .rich-editor .bill-major-content dt,.rich-editor .bill-major-content dd { margin:0; padding:12px 14px; border-bottom:1px solid #fed7aa; }
+    .rich-editor .bill-major-content dt { background:#fff7ed; color:#9a3412; font-weight:900; }
+    .rich-editor .bill-major-content dd { background:#fff; }
+    .rich-editor .bill-major-content dt:last-of-type,.rich-editor .bill-major-content dd:last-of-type { border-bottom:0; }
+    .rich-editor .business-report-overview { margin:0 0 18px; padding:18px 20px; border:1px solid #fed7aa; border-left:6px solid #f97316; border-radius:12px; background:linear-gradient(135deg,#fff7ed,#fff); }
+    .rich-editor .business-report-overview > span { display:inline-block; margin-bottom:7px; color:#9a3412; font-weight:900; }
+    .rich-editor .business-report-overview .chapter-lead { margin:0; font-size:1.04rem; font-weight:700; line-height:1.75; }
+    .rich-editor .business-report-list { list-style:none; padding:0; margin:0; counter-reset:business-item; display:grid; gap:10px; }
+    .rich-editor .business-report-list li { counter-increment:business-item; position:relative; margin:0; padding:13px 15px 13px 54px; border:1px solid #e2e8f0; border-radius:11px; background:#f8fafc; }
+    .rich-editor .business-report-list li::before { content:counter(business-item); position:absolute; left:14px; top:11px; width:28px; height:28px; display:grid; place-items:center; border-radius:50%; background:#ffedd5; color:#9a3412; font-weight:900; }
+    .rich-editor .financial-statement-page { color:#1e293b; }
+    .rich-editor .financial-statement-heading { margin-bottom:22px; padding:22px 18px 18px; border-top:6px solid #f97316; border-bottom:1px solid #fdba74; border-radius:0 0 14px 14px; background:linear-gradient(180deg,#fff7ed,#fff); text-align:center; }
+    .rich-editor .financial-statement-heading > span { display:inline-block; padding:5px 11px; border-radius:999px; background:#ffedd5; color:#9a3412; font-weight:900; }
+    .rich-editor .financial-statement-heading h1 { margin:9px 0 5px; padding:0; border:0; font-size:1.75rem; }
+    .rich-editor .financial-statement-heading p { margin:0; color:#475569; font-weight:800; }
+    .rich-editor .financial-statement-heading small { display:block; margin-top:8px; color:#64748b; text-align:right; }
+    .rich-editor .financial-statement-card { margin:0 0 18px; overflow:hidden; border:1px solid #cbd5e1; border-radius:12px; background:#fff; box-shadow:0 4px 14px rgba(15,23,42,.05); }
+    .rich-editor .financial-statement-card h2 { margin:0; padding:11px 14px; border-left:6px solid #fb923c; background:#fff7ed; color:#7c2d12; }
+    .rich-editor .financial-data-table { margin:0; border:0; }
+    .rich-editor .financial-data-table th,.rich-editor .financial-data-table td { padding:10px 12px; }
+    .rich-editor .financial-data-table thead th { background:#f8fafc; color:#334155; }
+    .rich-editor .financial-data-table tbody tr:nth-child(even) { background:#f8fafc; }
+    .rich-editor .financial-data-table tfoot th { border-top:2px solid #fb923c; background:#fff7ed; color:#7c2d12; }
+    .rich-editor .financial-balance-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:start; }
+    .rich-editor .financial-result { margin-top:22px; padding-top:14px; border-top:2px solid #fb923c; }
     .rich-editor .source-agenda-row { display:grid; grid-template-columns:110px 1fr; gap:6px 12px; padding:8px 0; border-bottom:1px solid #e2e8f0; }
     .rich-editor .source-agenda-row small { grid-column:2; color:#64748b; }
     .rich-editor .board-one-paper h1 { text-align:center; font-size:1.65rem; }
@@ -416,6 +453,7 @@
               </aside>
               <div class="chapter-editor-wrap">
                 <div class="field"><label for="chapterTitle">현재 챕터 제목</label><input id="chapterTitle"></div>
+                <div class="chapter-lock-notice" id="chapterLockNotice" hidden></div>
                 <div class="chapter-actions">
                   <button type="button" class="btn" id="previousChapterButton">← 이전</button>
                   <button type="button" class="btn" id="nextChapterButton">다음 →</button>
@@ -457,6 +495,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.5.5"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.6.0"></script>
 </body>
 </html>

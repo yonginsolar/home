@@ -1,6 +1,6 @@
 /*
-Version: v1.5.3
-Change: 2026-09-19 - Use tenant organization variables throughout meeting materials and remove the optional national ceremony.
+Version: v1.6.0
+Change: 2026-09-28 - Improve assembly booklet readability and keep tenant organization fields dynamic.
 */
 
 const safe = (value) => String(value ?? '')
@@ -174,14 +174,14 @@ function sourceRowsTable(rows, totalLabel = '', totalValue = null) {
   const total = totalLabel && resolvedTotal !== 0
     ? `<tfoot><tr><th>${safe(totalLabel)}</th><th class="amount">${money(resolvedTotal)}</th></tr></tfoot>`
     : '';
-  return `<table><thead><tr><th>계정과목</th><th>금액</th></tr></thead><tbody>${body}</tbody>${total}</table>`;
+  return `<table class="financial-data-table"><thead><tr><th>계정과목</th><th>금액</th></tr></thead><tbody>${body}</tbody>${total}</table>`;
 }
 
 function statementSection(title, rows, totalLabel, totalValue) {
   const list = nonZeroSourceRows(rows);
   const resolvedTotal = Number(totalValue || 0);
   if (!list.length && resolvedTotal === 0) return '';
-  return `<section class="financial-statement-section">
+  return `<section class="financial-statement-section financial-statement-card">
     <h2>${safe(title)}</h2>
     ${sourceRowsTable(list, totalLabel, resolvedTotal)}
   </section>`;
@@ -317,7 +317,7 @@ function closingReportChapters(sourceContext) {
   ];
   return [
     chapter('closing-balance-sheet', `${fiscalYear}년 재무상태표`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 재무상태표`, atClosing)}${balanceBody}</div>`, 'financial'),
-    chapter('closing-income-statement', `${fiscalYear}년 손익계산서`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 손익계산서`, duringPeriod)}${incomeBody}${incomeSummary.length ? `<section class="financial-statement-section financial-result">${sourceRowsTable(incomeSummary)}</section>` : ''}</div>`, 'financial'),
+    chapter('closing-income-statement', `${fiscalYear}년 손익계산서`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 손익계산서`, duringPeriod)}${incomeBody}${incomeSummary.length ? `<section class="financial-statement-section financial-statement-card financial-result"><h2>손익 요약</h2>${sourceRowsTable(incomeSummary)}</section>` : ''}</div>`, 'financial'),
     chapter('closing-surplus-statement', `${fiscalYear}년 이익잉여금처분계산서`, `<div class="financial-statement-page">${statementHeading(`${fiscalYear}년 이익잉여금처분계산서`, atClosing)}<section class="financial-statement-section financial-result">${sourceRowsTable(surplusRows)}</section></div>`, 'financial')
   ];
 }
@@ -359,7 +359,7 @@ function businessReportChapter(row, sourceContext) {
     'business-report',
     `${year}년도 주요 사업 추진 실적`,
     `<h1>${year}년도 주요 사업 추진 실적</h1>
-      ${intro ? `<p class="chapter-lead">${blocks(intro)}</p>` : ''}
+      ${intro ? `<section class="business-report-overview"><span>사업보고</span><p class="chapter-lead">${blocks(intro)}</p></section>` : ''}
       ${highlights.length ? `<ol class="business-report-list">${highlights.map((item) => `<li>${safe(item)}</li>`).join('')}</ol>` : ''}`,
     'business-report'
   )];
@@ -459,7 +459,7 @@ function businessPlanDraft(row) {
     <h2>Ⅲ. ${year}년도 수지 예산(안)</h2>
     <h3>1. 수입 예산</h3>${budgetRowsTable(income, '수입 합계')}
     <h3>2. 지출 예산</h3>${budgetRowsTable(expense, '지출 합계')}
-    <p class="budget-balance ${difference === 0 ? 'is-balanced' : 'is-unbalanced'}">${difference === 0 ? '수입과 지출 합계가 일치합니다.' : `수입·지출 합계 차액 ${money(Math.abs(difference))}을 조정해야 합니다.`}</p>
+    ${difference === 0 ? '' : `<p class="budget-balance is-unbalanced">수입·지출 합계 차액 ${money(Math.abs(difference))}을 조정해야 합니다.</p>`}
     <p>사업 규모나 재원이 크게 달라질 경우 추가경정예산안을 별도로 마련해 승인받습니다.</p>`;
 }
 
@@ -554,9 +554,9 @@ function assemblyOrder(row, plan) {
 function assemblyBill(item) {
   return `<h1>제${item.number}호 의안</h1>
     <h2>${safe(item.title)}</h2>
-    <h3>1. 제안사유</h3><p>${blocks(item.background)}</p>
-    <h3>2. 주요내용</h3>${item.proposalHtml || `<p>${blocks(item.proposal)}</p>`}
-    ${item.sourceAgenda?.document_notes ? `<h3>자료 메모</h3><p>${blocks(item.sourceAgenda.document_notes)}</p>` : ''}`;
+    <section class="bill-content-card bill-reason-card"><h3><span>1</span> 제안사유</h3><div class="bill-content-body"><p>${blocks(item.background)}</p></div></section>
+    <section class="bill-content-card bill-details-card"><h3><span>2</span> 주요내용</h3><div class="bill-content-body">${item.proposalHtml || `<p>${blocks(item.proposal)}</p>`}</div></section>
+    ${item.sourceAgenda?.document_notes ? `<section class="bill-content-card bill-note-card"><h3>자료 메모</h3><div class="bill-content-body"><p>${blocks(item.sourceAgenda.document_notes)}</p></div></section>` : ''}`;
 }
 
 function sourceAttachment(title, intro, rows = []) {
@@ -633,4 +633,24 @@ export function buildPreMeetingDocuments(context) {
 
 export function usesChapterEditor(meetingType, documentType) {
   return meetingType === 'GENERAL_ASSEMBLY' && documentType === 'MATERIALS';
+}
+
+export function getAssemblyChapterEditLock(chapterId, sourceContext = {}) {
+  if (chapterId === 'previous-minute-source') {
+    return {
+      locked:true,
+      reason:'문서함에서 불러온 전차 총회 의사록 원본입니다. 내용과 제목은 문서함의 확정 기록을 그대로 표시하므로 여기에서 수정할 수 없습니다.'
+    };
+  }
+  if (chapterId === 'audit-report') {
+    const audit = sourceContext?.audit_report;
+    const signed = Number(audit?.signature_count || 0) > 0 || audit?.status === 'CLOSED';
+    if (signed) {
+      return {
+        locked:true,
+        reason:'감사가 확인하고 전자서명한 감사보고서입니다. 서명 이후의 내용과 제목은 이 화면에서 수정할 수 없습니다.'
+      };
+    }
+  }
+  return { locked:false, reason:'' };
 }
