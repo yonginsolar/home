@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.69
-Change: 2026-09-20 - Add employee-specific Telegram notification recipient controls.
+Version: v1.0.70
+Change: 2026-09-28 - Use the official shared Korean public-holiday calendar for payroll defaults.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.69 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.70 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -5452,9 +5452,13 @@ async function buildAdminEmployeeSalaryWorkMetaDefaults(yearMonth) {
         return { baseWeekdays: 0, holidayDays: 0, leaveDays: 0, workDays: 0, workHours: 0 };
     }
 
-    const [holidayRes, leaveDocs] = await Promise.all([
+    const [holidayRes, officialHolidayRes, leaveDocs] = await Promise.all([
         scopeEmployeeTenant(_supabase.from('ref_calendar').select('id,start_date,end_date,recurrence,type'))
             .eq('type', 'holiday'),
+        _supabase.from('ref_public_holidays')
+            .select('id,holiday_date')
+            .gte('holiday_date', formatAdminEmployeeIsoDateFromParts(monthRange.start))
+            .lte('holiday_date', formatAdminEmployeeIsoDateFromParts(monthRange.end)),
         window.LeaveLedger.fetchLeaveApprovals(_supabase, currentEmpId, {
             statuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
             columns: 'id,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
@@ -5465,9 +5469,22 @@ async function buildAdminEmployeeSalaryWorkMetaDefaults(yearMonth) {
     if (holidayRes.error) {
         throw holidayRes.error;
     }
+    if (officialHolidayRes.error) {
+        throw officialHolidayRes.error;
+    }
+
+    const officialHolidayEntries = (Array.isArray(officialHolidayRes.data) ? officialHolidayRes.data : [])
+        .map((row) => ({
+            id: `official-${row.id}`,
+            start_date: row.holiday_date,
+            end_date: row.holiday_date,
+            recurrence: 'none',
+            type: 'holiday'
+        }));
+    const holidayEntries = [...(holidayRes.data || []), ...officialHolidayEntries];
 
     const baseWeekdays = countAdminEmployeeWeekdaysInRange(activeRange.start, activeRange.end);
-    const holidayDays = countAdminEmployeeHolidayWeekdays(holidayRes.data || [], monthRange, activeRange);
+    const holidayDays = countAdminEmployeeHolidayWeekdays(holidayEntries, monthRange, activeRange);
     const leaveDays = roundAdminEmployeeWorkMetric((Array.isArray(leaveDocs) ? leaveDocs : []).reduce((sum, doc) => {
         return sum + calculateAdminEmployeeLeaveDaysInMonth(doc, monthRange);
     }, 0));
