@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.59 | Change: 2026-09-28 - Hold past leave days while approval is pending. -->
+<!-- Version: v1.2.60 | Change: 2026-09-28 - Rename remaining annual leave to available annual leave. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.59 | approval.html');</script>
+  <script>console.log('[Version] v1.2.60 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -731,7 +731,7 @@
         <div class="col-12 hidden mb-3" id="divLeaveType">
             <label class="small text-muted fw-bold">휴가 종류</label>
             <select class="form-select" id="leaveTypeSelect" onchange="handleCategoryChange()">
-                <option value="연차">🟢 연차 (잔여 연차 차감)</option>
+                <option value="연차">🟢 연차 (사용 가능 일수 차감)</option>
                 <option value="생일반차">🎂 생일반차 (차감 X)</option>
                 <option value="생리휴가">🌸 생리휴가 (무급, 차감 X)</option>
                 <option value="경조사">💍 경조사 (증빙필수, 차감 X)</option>
@@ -1120,7 +1120,7 @@
             <div id="dateRangeArea">
                 <div class="d-flex justify-content-between mb-2">
                   <span class="fw-bold" id="dateRangeAreaTitle">📅 기간 선택</span>
-                  <span class="badge bg-primary">잔여 연차: <span id="remainDaysBadge">조회중...</span>일</span>
+                  <span class="badge bg-primary">사용 가능 연차: <span id="remainDaysBadge">조회중...</span>일</span>
                 </div>
                 <div class="input-group mb-2">
                   <input type="date" class="form-control" id="leaveStart" onchange="handleApprovalLeaveDateRangeChange()">
@@ -1132,7 +1132,7 @@
             <div id="mixedDayArea" class="hidden">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <span class="fw-bold" id="mixedDayAreaTitle">📅 연차 사용 내역</span>
-                    <span class="badge bg-primary">잔여 연차: <span id="remainDaysBadgeMixed">0</span>일</span>
+                    <span class="badge bg-primary">사용 가능 연차: <span id="remainDaysBadgeMixed">0</span>일</span>
                 </div>
                 <div class="small text-muted mb-2">기본은 시작일~종료일 범위로 계산합니다. 특별한 날짜만 다르게 처리해야 할 때 날짜별 세부 조정을 사용하세요.</div>
                 <div id="mixedLeaveRangeEditor">
@@ -1186,7 +1186,7 @@
             <div id="singleDayArea" class="hidden">
                 <div class="d-flex justify-content-between mb-2">
                     <span class="fw-bold" id="singleDayAreaTitle">📅 날짜 선택</span>
-                    <span class="badge bg-primary">잔여 연차: <span id="remainDaysBadgeSingle">0</span>일</span>
+                    <span class="badge bg-primary">사용 가능 연차: <span id="remainDaysBadgeSingle">0</span>일</span>
                 </div>
                 <div class="input-group mb-2">
                     <input type="date" class="form-control" id="singleLeaveDate" onchange="calcLeaveDays()">
@@ -1196,7 +1196,7 @@
             <div id="halfDayArea" class="hidden">
                 <div class="d-flex justify-content-between mb-2">
                     <span class="fw-bold" id="halfDayAreaTitle">📅 날짜 선택</span>
-                    <span class="badge bg-primary">잔여 연차: <span id="remainDaysBadgeHalf">0</span>일</span>
+                    <span class="badge bg-primary">사용 가능 연차: <span id="remainDaysBadgeHalf">0</span>일</span>
                 </div>
                 <div class="input-group mb-2">
                     <input type="date" class="form-control" id="halfDate" onchange="calcLeaveDays()">
@@ -1213,10 +1213,7 @@
               신청 일수: <span id="leaveDaysBadge" class="fw-bold text-dark">0일</span>
               <input type="hidden" id="leaveDaysCalc" value="0">
             </div>
-            <div class="small text-muted mt-1">
-              결재 반영 예정: <span id="reservedLeaveDaysBadge" class="fw-bold">0</span>일
-            </div>
-            <div class="text-danger small mt-1 hidden" id="leaveOverMsg">⛔ 잔여 연차가 부족합니다!</div>
+            <div class="text-danger small mt-1 hidden" id="leaveOverMsg">⛔ 사용 가능한 연차가 부족합니다!</div>
           </div>
         </div>
 
@@ -11696,12 +11693,12 @@ function isApprovalLeaveValidationBlocked(validation, requestedDays) {
 function getApprovalLeaveValidationMessage(validation) {
     const safeValidation = validation || {};
     if (safeValidation.mode === 'next_year_advance') {
-        return `⛔ 다음 연도 예상 연차가 부족합니다! (가용 ${safeValidation.availableDays}일)`;
+        return `⛔ 다음 연도 예상 연차가 부족합니다! (사용 가능 ${safeValidation.availableDays}일)`;
     }
     if (safeValidation.message) {
         return `⛔ ${safeValidation.message}`;
     }
-    return '⛔ 잔여 연차가 부족합니다!';
+    return '⛔ 사용 가능한 연차가 부족합니다!';
 }
 
 // [수정] 휴가일수 계산 (반차 0.5일 고정)
@@ -11710,7 +11707,7 @@ function calcLeaveDays() {
     const lType = getApprovalCurrentLeaveTypeLabel();
     const msg = document.getElementById("leaveOverMsg");
     const requiresLeaveValidation = isApprovalDeductibleLeaveType(leaveConfig) || isApprovalBirthdayHalfLeaveType(leaveConfig);
-    if (msg) msg.textContent = '⛔ 잔여 연차가 부족합니다!';
+    if (msg) msg.textContent = '⛔ 사용 가능한 연차가 부족합니다!';
     if (!leaveConfig) {
         document.getElementById("leaveDaysBadge").innerText = "0일";
         document.getElementById("leaveDaysCalc").value = 0;
@@ -12360,7 +12357,7 @@ async function handleDraftSubmit(e) {
         const leaveValidation = getApprovalLeaveValidationSummary(lType);
         if (isApprovalLeaveValidationBlocked(leaveValidation, days)) {
             if (leaveValidation.mode === 'next_year_advance') {
-                return showAlert(`다음 연도 예상 연차가 부족합니다.\n가용: ${leaveValidation.availableDays}일 / 요청: ${days}일`);
+                return showAlert(`다음 연도 예상 연차가 부족합니다.\n사용 가능: ${leaveValidation.availableDays}일 / 요청: ${days}일`);
             }
             return showAlert(String(leaveValidation.message || '휴가 신청 조건을 확인하세요.'));
         }
@@ -12369,9 +12366,9 @@ async function handleDraftSubmit(e) {
             const validation = getApprovalLeaveValidationSummary(lType);
             if (days > validation.availableDays) {
                 if (validation.enabled) {
-                    return showAlert(`다음 연도 예상 연차가 부족합니다.\n가용: ${validation.availableDays}일 / 요청: ${days}일`);
+                    return showAlert(`다음 연도 예상 연차가 부족합니다.\n사용 가능: ${validation.availableDays}일 / 요청: ${days}일`);
                 }
-                return showAlert("잔여 연차가 부족합니다.");
+                return showAlert("사용 가능한 연차가 부족합니다.");
             }
         }
         finalAmt = days;

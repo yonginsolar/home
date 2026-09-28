@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.72
-Change: 2026-09-28 - Assign detailed work-module access while creating an employee.
+Version: v1.0.73
+Change: 2026-09-28 - Show only available annual leave in the employee summary.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.72 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.73 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -509,7 +509,7 @@ Change: 2026-09-28 - Assign detailed work-module access while creating an employ
 </div>
 </div>
           <div class="tab-pane fade" id="tabLog">
-            <div class="card bg-light border-0 p-3 mb-3 text-center leave-summary-card-button" role="button" tabindex="0" onclick="showAdminLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdminLeaveDetail();}" title="연차 상세 리포트 보기"><small class="text-muted">현재 잔여 연차</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">0일</h3><div class="small text-muted mt-1" id="displayLeaveReserved">결재 반영 예정 0일</div><div class="small text-primary mt-2">상세 보기</div></div>
+            <div class="card bg-light border-0 p-3 mb-3 text-center leave-summary-card-button" role="button" tabindex="0" onclick="showAdminLeaveDetail()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showAdminLeaveDetail();}" title="연차 상세 리포트 보기"><small class="text-muted">사용 가능 연차</small><h3 class="fw-bold text-primary m-0" id="displayLeaveRemain">0일</h3><div class="small text-primary mt-2">상세 보기</div></div>
             <div class="mb-2"><label class="small text-muted">구분</label><select id="logType" class="form-select"><option value="지급">🎁 지급 (포상 등)</option><option value="차감">⚠️ 차감 (징계 등)</option></select></div>
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
@@ -5879,16 +5879,7 @@ async function loadLeave() {
             });
             currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
-            const reserved = Number(snapshot?.reservedDays || 0);
-            const pendingHold = Number(snapshot?.pendingHoldDays || 0);
             document.getElementById("displayLeaveRemain").innerText = remain + "일";
-            const reservedEl = document.getElementById("displayLeaveReserved");
-            if (reservedEl) {
-                const notes = [];
-                if (pendingHold > 0) notes.push(`지난 휴가 결재 대기 ${pendingHold}일 반영`);
-                if (reserved > 0) notes.push(`결재완료 예정 ${reserved}일`);
-                reservedEl.innerText = notes.length > 0 ? notes.join(' · ') : '결재 반영 예정 0일';
-            }
             return;
         }
     } catch (error) {
@@ -5903,8 +5894,6 @@ async function loadLeave() {
     }
     currentEmployeeLeaveSnapshot = { effectiveRemainDays: Number(remainDays || 0), reservedDays: 0, summary: { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [] } };
     document.getElementById("displayLeaveRemain").innerText = remainDays + "일";
-    const reservedEl = document.getElementById("displayLeaveReserved");
-    if (reservedEl) reservedEl.innerText = "결재 반영 예정 0일";
 }
 function getAdminEmployeeLeaveTypeCatalog() {
     return Array.isArray(hrLeaveTypeCatalog) && hrLeaveTypeCatalog.length > 0 ? hrLeaveTypeCatalog : getHrDefaultLeaveTypeCatalog();
