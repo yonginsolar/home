@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.8.0 | Change: 2026-09-28 - Separate audit drafting and electronic review into its own assembly step. -->
+<!-- Version: v1.9.0 | Change: 2026-09-28 - Keep verbal audit change requests as private history and support signed-report revisions. -->
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>회의 꾸러미 만들기</title>
-  <script>console.log('[Version] v1.8.0 | meeting_workspace.html');</script>
+  <script>console.log('[Version] v1.9.0 | meeting_workspace.html');</script>
   <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
   <style>
     :root {
@@ -268,6 +268,24 @@
     .audit-draft-editor.is-locked { background:#f8fafc; cursor:not-allowed; }
     .audit-draft-empty { min-height:260px; display:grid; place-items:center; padding:30px; border:1px dashed #cbd5e1; border-radius:12px; color:#64748b; text-align:center; line-height:1.7; }
     .audit-step-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:14px; }
+    .audit-change-panel { margin-top:14px; padding:18px; border:1px solid #cbd5e1; border-radius:14px; background:#f8fafc; word-break:keep-all; }
+    .audit-change-panel > h3 { margin:0 0 6px; color:#172033; }
+    .audit-change-panel > p { margin:0 0 14px; color:#64748b; line-height:1.65; }
+    .audit-change-panel details { overflow:hidden; margin-top:10px; border:1px solid #dbe3ec; border-radius:11px; background:#fff; }
+    .audit-change-panel summary { padding:13px 15px; cursor:pointer; color:#334155; font-weight:900; }
+    .audit-change-panel details[open] > summary { border-bottom:1px solid #e2e8f0; background:#f8fafc; }
+    .audit-change-form { padding:15px; }
+    .audit-change-form-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .audit-change-form-grid .full { grid-column:1/-1; }
+    .audit-change-warning { margin:12px 0 0; padding:11px 13px; border:1px solid #fdba74; border-radius:9px; background:#fff7ed; color:#9a3412; line-height:1.6; }
+    .audit-change-history { display:grid; gap:10px; padding:14px; }
+    .audit-change-item { padding:13px 14px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+    .audit-change-item-head { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-bottom:7px; }
+    .audit-change-item-head strong { color:#172033; }
+    .audit-change-chip { display:inline-flex; padding:3px 7px; border-radius:999px; background:#e2e8f0; color:#475569; font-size:.76rem; font-weight:900; }
+    .audit-change-chip.revision { background:#ffedd5; color:#9a3412; }
+    .audit-change-item p { margin:0; color:#334155; line-height:1.65; white-space:pre-wrap; }
+    .audit-change-empty { padding:22px; color:#64748b; text-align:center; }
     .rich-editor .source-agenda-row { display:grid; grid-template-columns:110px 1fr; gap:6px 12px; padding:8px 0; border-bottom:1px solid #e2e8f0; }
     .rich-editor .source-agenda-row small { grid-column:2; color:#64748b; }
     .rich-editor .board-one-paper h1 { text-align:center; font-size:1.65rem; }
@@ -335,6 +353,8 @@
       .audit-draft-panel { padding:12px; }
       .audit-draft-editor { min-height:420px; padding:16px; }
       .audit-draft-state { width:100%; justify-content:center; }
+      .audit-change-form-grid { grid-template-columns:1fr; }
+      .audit-change-form-grid .full { grid-column:auto; }
     }
   </style>
 </head>
@@ -499,6 +519,27 @@
                 <button type="button" class="btn btn-primary" id="requestAuditReviewButton">수정 내용으로 전자검토 요청</button>
               </div>
             </section>
+            <section class="audit-change-panel" id="auditChangePanel" hidden>
+              <h3>📞 전화·구두 수정 요청</h3>
+              <p>감사가 전화나 대면으로 요청한 내용을 내부 이력으로 남깁니다. 이 기록은 감사보고서 본문·총회 자료집·인쇄물·전자서명 문서에는 표시되지 않습니다.</p>
+              <details id="auditChangeFormDetails">
+                <summary>수정 요청 기록하기</summary>
+                <div class="audit-change-form">
+                  <div class="audit-change-form-grid">
+                    <div class="field"><label for="auditChangeAuditor">요청한 감사</label><select id="auditChangeAuditor"></select></div>
+                    <div class="field"><label for="auditChangeMethod">전달 방식</label><select id="auditChangeMethod"><option value="PHONE">전화</option><option value="IN_PERSON">대면</option><option value="MESSENGER">메신저</option><option value="OTHER">기타</option></select></div>
+                    <div class="field"><label for="auditChangeRequestedAt">요청 일시</label><input type="datetime-local" id="auditChangeRequestedAt"></div>
+                    <div class="field full"><label for="auditChangeSummary">수정 요청 내용</label><textarea id="auditChangeSummary" maxlength="2000" placeholder="감사가 요청한 변경 내용을 나중에 알아볼 수 있도록 적어 주세요."></textarea></div>
+                  </div>
+                  <div class="audit-change-warning" id="auditChangeWarning" hidden></div>
+                  <div class="bottom-actions"><button type="button" class="btn btn-primary" id="recordAuditChangeButton">수정 요청 기록</button></div>
+                </div>
+              </details>
+              <details id="auditChangeHistoryDetails">
+                <summary id="auditChangeHistorySummary">이전 수정 요청 0건</summary>
+                <div class="audit-change-history" id="auditChangeHistory"><div class="audit-change-empty">기록된 수정 요청이 없습니다.</div></div>
+              </details>
+            </section>
           </section>
 
           <section class="step-panel" data-panel="documents">
@@ -580,6 +621,6 @@
     </div>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script type="module" src="./meeting_workspace.js?v=1.8.0"></script>
+  <script type="module" src="./meeting_workspace.js?v=1.9.0"></script>
 </body>
 </html>

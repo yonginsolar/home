@@ -1,10 +1,10 @@
 /*
-Version: v1.8.0
-Change: 2026-09-28 - Separate audit drafting and electronic review into its own assembly step.
+Version: v1.9.0
+Change: 2026-09-28 - Store verbal audit change requests privately and create revisions after signing.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.51';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.4.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.0';
 import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.0';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
@@ -27,6 +27,7 @@ const state = {
   documents: new Map(),
   pdfAttachments: [],
   sourceContext: null,
+  auditChangeRequests: [],
   activeDocument: 'MATERIALS',
   currentStep: 'info',
   documentDirty: false,
@@ -652,6 +653,68 @@ function generatedAuditDraft(source = state.sourceContext) {
   }));
 }
 
+function activeAuditors() {
+  return state.officials.filter(row => row.status !== 'inactive' && officialRole(row) === '감사');
+}
+
+function auditChangeMethodLabel(value) {
+  return ({ PHONE:'전화', IN_PERSON:'대면', MESSENGER:'메신저', OTHER:'기타' })[value] || '기타';
+}
+
+function toDateTimeLocalValue(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function formatAuditChangeTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('ko-KR', {
+    timeZone:'Asia/Seoul', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'
+  });
+}
+
+function renderAuditChangePanel() {
+  const panel = $('auditChangePanel');
+  if (!panel) return;
+  const audit = state.sourceContext?.audit_report;
+  panel.hidden = !audit?.id;
+  if (panel.hidden) return;
+
+  const auditors = activeAuditors();
+  const auditorSelect = $('auditChangeAuditor');
+  const selectedAuditor = auditorSelect.value;
+  auditorSelect.innerHTML = auditors.length
+    ? auditors.map(row => `<option value="${escapeHtml(row.id)}">${escapeHtml(officialName(row))}</option>`).join('')
+    : '<option value="">활성 감사를 확인해 주세요</option>';
+  if (auditors.some(row => String(row.id) === selectedAuditor)) auditorSelect.value = selectedAuditor;
+  if (!$('auditChangeRequestedAt').value) $('auditChangeRequestedAt').value = toDateTimeLocalValue();
+
+  const locked = auditReportLocked(audit);
+  $('recordAuditChangeButton').disabled = auditors.length === 0;
+  $('recordAuditChangeButton').textContent = locked ? '요청 기록·개정본 만들기' : '수정 요청 기록';
+  $('auditChangeWarning').hidden = !locked;
+  $('auditChangeWarning').textContent = locked
+    ? '이미 전자서명이 시작된 보고서입니다. 기록을 저장하면 기존 서명본은 그대로 보존하고 수정할 수 있는 개정본을 새로 만듭니다. 개정본은 감사 전원의 전자서명을 다시 받아야 합니다.'
+    : '';
+
+  const rows = Array.isArray(state.auditChangeRequests) ? state.auditChangeRequests : [];
+  $('auditChangeHistorySummary').textContent = `이전 수정 요청 ${rows.length}건`;
+  $('auditChangeHistory').innerHTML = rows.length
+    ? rows.map(row => `<article class="audit-change-item">
+        <div class="audit-change-item-head">
+          <strong>${escapeHtml(row.auditor_name || `감사 명단 #${row.requested_auditor_official_id || '-'}`)}</strong>
+          <span class="audit-change-chip">${escapeHtml(auditChangeMethodLabel(row.request_method))}</span>
+          <span class="audit-change-chip">${escapeHtml(formatAuditChangeTime(row.requested_at))}</span>
+          ${row.resulting_report_minute_id ? '<span class="audit-change-chip revision">개정본 생성</span>' : ''}
+        </div>
+        <p>${escapeHtml(row.request_summary || '')}</p>
+      </article>`).join('')
+    : '<div class="audit-change-empty">기록된 수정 요청이 없습니다.</div>';
+}
+
 function renderAuditStep({ preserveDraft = false } = {}) {
   const panel = $('auditStepPanel');
   const editor = $('auditDraftEditor');
@@ -669,6 +732,7 @@ function renderAuditStep({ preserveDraft = false } = {}) {
     $('resetAuditDraftButton').disabled = true;
     $('requestAuditReviewButton').disabled = true;
     $('openAuditButton').hidden = true;
+    $('auditChangePanel').hidden = true;
     return;
   }
 
@@ -727,20 +791,27 @@ function renderAuditStep({ preserveDraft = false } = {}) {
     : (closingReady
       ? '보고서 본문을 직접 고친 뒤 전자검토 요청을 누르면 현재 내용이 저장되고 감사에게 검토·서명을 요청합니다.'
       : '회계관리에서 해당 연도 결산을 완료하고 결산보고서를 생성해 주세요.');
+  renderAuditChangePanel();
 }
 
 async function loadAssemblySources({ render = true } = {}) {
   if (!state.current || state.current.meeting_type !== 'GENERAL_ASSEMBLY' || state.current.assembly_kind === 'EXTRAORDINARY') {
     state.sourceContext = null;
+    state.auditChangeRequests = [];
     if (render) {
       renderAssemblySourceStatus();
       renderAuditStep({ preserveDraft: true });
     }
     return null;
   }
-  const { data, error } = await MeetingPackageService.getAssemblySources(state.current.id);
-  if (error) throw error;
-  state.sourceContext = data || null;
+  const [sourceResult, requestResult] = await Promise.all([
+    MeetingPackageService.getAssemblySources(state.current.id),
+    MeetingPackageService.listAuditChangeRequests(state.current.id)
+  ]);
+  if (sourceResult.error) throw sourceResult.error;
+  if (requestResult.error) throw requestResult.error;
+  state.sourceContext = sourceResult.data || null;
+  state.auditChangeRequests = requestResult.data || [];
   if (render) {
     renderAssemblySourceStatus();
     renderAuditStep({ preserveDraft: true });
@@ -1147,6 +1218,44 @@ function openAuditReport() {
   window.open(`/minutes/minutes_sign.html?minuteId=${encodeURIComponent(minuteId)}`, '_blank', 'noopener');
 }
 
+async function recordAuditChangeRequest() {
+  const audit = state.sourceContext?.audit_report;
+  if (!state.current || !audit?.id) throw new Error('전자검토 중인 감사보고서를 먼저 준비해 주세요.');
+  const auditorId = Number($('auditChangeAuditor').value || 0);
+  const method = $('auditChangeMethod').value;
+  const requestedAtValue = $('auditChangeRequestedAt').value;
+  const summary = $('auditChangeSummary').value.trim();
+  if (!auditorId) throw new Error('수정을 요청한 감사를 선택해 주세요.');
+  if (!requestedAtValue) throw new Error('수정 요청을 받은 일시를 입력해 주세요.');
+  if (!summary) throw new Error('수정 요청 내용을 입력해 주세요.');
+  const requestedAt = new Date(requestedAtValue);
+  if (Number.isNaN(requestedAt.getTime())) throw new Error('수정 요청 일시를 확인해 주세요.');
+
+  const createRevision = auditReportLocked(audit);
+  if (createRevision && !window.confirm('기존 전자서명본은 그대로 보존하고, 감사 전원이 다시 확인할 개정본을 만들까요?')) return;
+  const { data, error } = await MeetingPackageService.recordAuditChangeRequest(state.current.id, {
+    request_key: crypto.randomUUID(),
+    requested_auditor_official_id: auditorId,
+    request_method: method,
+    requested_at: requestedAt.toISOString(),
+    request_summary: summary,
+    create_revision: createRevision
+  });
+  if (error) throw error;
+
+  if (data?.revision_minute_id) state.auditDraftDirty = false;
+  await loadAssemblySources();
+  if (data?.revision_minute_id) refreshAutoDrafts({ render: state.currentStep === 'documents' });
+  $('auditChangeSummary').value = '';
+  $('auditChangeRequestedAt').value = toDateTimeLocalValue();
+  $('auditChangeFormDetails').open = false;
+  $('auditChangeHistoryDetails').open = true;
+  renderAuditStep();
+  showToast(data?.revision_minute_id
+    ? '수정 요청을 내부 이력에 저장하고 개정본을 만들었습니다. 내용을 고친 뒤 전자검토를 다시 요청해 주세요.'
+    : '수정 요청을 내부 이력에 저장했습니다. 보고서 내용을 고친 뒤 전자검토를 다시 요청할 수 있습니다.', 5200);
+}
+
 async function saveAgendas({ quiet = false } = {}) {
   if (!state.current) return false;
   const agendas = collectAgendasFromDom();
@@ -1385,6 +1494,7 @@ async function openPackage(id) {
     state.documents = new Map((data.documents || []).map(row => [row.document_type, row]));
     state.pdfAttachments = data.pdfAttachments || [];
     state.sourceContext = null;
+    state.auditChangeRequests = [];
     state.activeDocument = 'MATERIALS';
     state.documentDirty = false;
     state.auditDraftDirty = false;
@@ -1439,6 +1549,7 @@ async function deletePackage() {
   state.documents.clear();
   state.pdfAttachments = [];
   state.sourceContext = null;
+  state.auditChangeRequests = [];
   state.auditDraftDirty = false;
   $('editorBody').hidden = true;
   $('editorPlaceholder').hidden = false;
@@ -1645,6 +1756,7 @@ function bindEvents() {
   $('resetAuditDraftButton').addEventListener('click', () => runAction(resetAuditDraft));
   $('requestAuditReviewButton').addEventListener('click', () => runAction(requestAuditReview));
   $('openAuditButton').addEventListener('click', openAuditReport);
+  $('recordAuditChangeButton').addEventListener('click', () => runAction(recordAuditChangeRequest));
   $('saveDocumentButton').addEventListener('click', () => runAction(saveActiveDocument));
   $('printDocumentButton').addEventListener('click', () => runAction(printActiveDocument));
   $('printChapterButton').addEventListener('click', () => runAction(printCurrentChapter));

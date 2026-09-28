@@ -1,6 +1,6 @@
 /*
-Version: v1.4.0
-Change: 2026-09-19 - Persist editable regular-assembly booklet source data with each meeting package.
+Version: v1.5.0
+Change: 2026-09-28 - Store internal audit-report change requests and create signed-report revisions safely.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -276,6 +276,28 @@ async function prepareAuditReport(packageId, payload) {
   return { data: data || null, error };
 }
 
+async function listAuditChangeRequests(packageId) {
+  const { data, error } = await supabase.rpc('list_meeting_audit_change_requests', {
+    p_package_id: packageId
+  });
+  return { data: data || [], error };
+}
+
+async function recordAuditChangeRequest(packageId, payload) {
+  const { data, error } = await supabase
+    .rpc('record_meeting_audit_change_request', {
+      p_package_id: packageId,
+      p_request_key: payload.request_key,
+      p_requested_auditor_official_id: payload.requested_auditor_official_id,
+      p_request_method: payload.request_method,
+      p_requested_at: payload.requested_at,
+      p_request_summary: payload.request_summary,
+      p_create_revision: payload.create_revision === true
+    })
+    .single();
+  return { data: data || null, error };
+}
+
 export const MeetingPackageService = {
   getRuntime,
   listPackages,
@@ -289,6 +311,8 @@ export const MeetingPackageService = {
   createMinuteFromPackage,
   getAssemblySources,
   prepareAuditReport,
+  listAuditChangeRequests,
+  recordAuditChangeRequest,
   uploadPdfAttachment,
   deletePdfAttachment,
   createPdfAttachmentSignedUrl
