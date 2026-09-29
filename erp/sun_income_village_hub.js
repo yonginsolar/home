@@ -1,8 +1,8 @@
-/* Sun-income-village management hub v3.2.3 */
+/* Sun-income-village management hub v3.3.0 */
 (() => {
   'use strict';
 
-  const VERSION = '3.2.3';
+  const VERSION = '3.3.0';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -14,6 +14,7 @@
   const HANDOFF_MODE_PARAM = 'workspace_mode';
   let client = null;
   let context = null;
+  let managerContext = null;
   let canCreateCooperative = false;
   let loading = false;
   let openingWorkspaceId = '';
@@ -31,6 +32,9 @@
     if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
     if (raw.includes('AUTH_REQUIRED')) return '로그인이 필요합니다.';
+    if (raw.includes('VILLAGE_MANAGER_REQUIRED')) return '마을 관리자를 한 명 이상 지정해 주세요.';
+    if (raw.includes('ACTIVE_LINKED_EMPLOYEE_REQUIRED')) return 'ERP 로그인이 연결된 재직 직원만 지정할 수 있습니다.';
+    if (raw.includes('INACTIVE_VILLAGE_EMPLOYEE')) return '해당 직원의 마을 ERP 계정이 중지되어 있습니다. 직원 상태를 확인해 주세요.';
     if (raw.includes('POPUP_BLOCKED')) return '새 탭을 열지 못했습니다. 이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.';
     if (raw.includes('HANDOFF_TIMEOUT')) return '로그인 연결 시간이 초과되었습니다. 연결 상태를 확인하고 다시 시도해 주세요.';
     if (raw.includes('ACCESS')) return '이 마을조합을 관리할 권한이 없습니다. 담당자 배정 상태를 확인해 주세요.';
@@ -257,6 +261,7 @@
           ${active
             ? `<button type="button" class="button primary" data-open-workspace="${esc(row.coop_id)}">업무 화면 열기</button>`
             : '<button type="button" disabled>준비가 끝나면 열 수 있습니다</button>'}
+          <button type="button" class="button" data-manage-village="${esc(row.coop_id)}">관리자 지정</button>
         </div>
       </article>`;
   }
@@ -273,7 +278,64 @@
     $('villageList').querySelectorAll('[data-open-workspace]').forEach(button => {
       button.addEventListener('click', () => openVillageWorkspace(button.dataset.openWorkspace, button));
     });
+    $('villageList').querySelectorAll('[data-manage-village]').forEach(button => {
+      button.addEventListener('click', () => openManagerDialog(button.dataset.manageVillage));
+    });
     $('content').hidden = false;
+  }
+
+  function openManagerDialog(coopId) {
+    const row = (Array.isArray(context?.villages) ? context.villages : [])
+      .find(village => String(village?.coop_id || '') === String(coopId || ''));
+    if (!row || !managerContext) return;
+    $('managerVillageId').value = String(coopId);
+    $('managerDialogTitle').textContent = `${row.coop_name} 관리자 지정`;
+    $('managerDialogError').hidden = true;
+    const assigned = new Set((managerContext.assignments || [])
+      .filter(item => String(item.village_coop_id) === String(coopId))
+      .map(item => String(item.source_emp_id)));
+    const employees = Array.isArray(managerContext.employees) ? managerContext.employees : [];
+    $('managerCandidates').innerHTML = employees.length
+      ? employees.map(employee => {
+        const linked = employee.login_linked === true;
+        const checked = assigned.has(String(employee.emp_id));
+        return `<label class="manager-choice">
+          <input type="checkbox" value="${esc(employee.emp_id)}" ${checked ? 'checked' : ''} ${linked ? '' : 'disabled'}>
+          <span><strong>${esc(employee.emp_name)}</strong><small>${esc([employee.department, employee.position].filter(Boolean).join(' · '))}${linked ? '' : ' · ERP 로그인 연결 필요'}</small></span>
+        </label>`;
+      }).join('')
+      : '<p class="muted">지정할 수 있는 재직 직원이 없습니다.</p>';
+    $('managerDialog').showModal();
+  }
+
+  async function saveVillageManagers(event) {
+    event.preventDefault();
+    const villageId = String($('managerVillageId').value || '');
+    const selected = [...$('managerCandidates').querySelectorAll('input[type="checkbox"]:checked')]
+      .map(input => input.value);
+    const errorEl = $('managerDialogError');
+    if (!selected.length) {
+      errorEl.textContent = '마을 관리자를 한 명 이상 지정해 주세요.';
+      errorEl.hidden = false;
+      return;
+    }
+    $('managerSave').disabled = true;
+    errorEl.hidden = true;
+    try {
+      managerContext = await rpc('sun_village_set_village_managers', {
+        p_village_coop_id: villageId,
+        p_source_emp_ids: selected
+      });
+      $('managerDialog').close();
+      const village = (context?.villages || []).find(item => String(item.coop_id) === villageId);
+      setMessage(`${village?.coop_name || '마을조합'} 관리자 지정을 저장했습니다.`);
+    } catch (error) {
+      console.error(`[sun-village-hub ${VERSION}] manager save failed`, String(error?.code || 'unknown'));
+      errorEl.textContent = friendly(error);
+      errorEl.hidden = false;
+    } finally {
+      $('managerSave').disabled = false;
+    }
   }
 
   async function load() {
@@ -283,6 +345,7 @@
     setMessage('마을조합 현황을 불러오고 있습니다…');
     try {
       context = await rpc('sun_village_management_context');
+      managerContext = await rpc('sun_village_manager_context');
       try {
         canCreateCooperative = await rpc('is_platform_admin') === true;
       } catch (capabilityError) {
@@ -326,6 +389,7 @@
         p_accounting_operation_mode: 'self'
       });
       $('createDialog').close();
+      loading = false;
       await load();
       setMessage(`${name}을 추가했습니다. 준비가 끝나면 목록에서 업무 화면을 열 수 있습니다.`);
     } catch (error) {
@@ -344,6 +408,8 @@
     $('closeCreate').addEventListener('click', () => $('createDialog').close());
     $('reload').addEventListener('click', load);
     $('createForm').addEventListener('submit', createVillage);
+    $('closeManager').addEventListener('click', () => $('managerDialog').close());
+    $('managerForm').addEventListener('submit', saveVillageManagers);
     try {
       const gate = await window.ErpRuntimeGuard.requireUser(getClient(), { redirectUrl: 'index.html' });
       if (!gate.ok) return;

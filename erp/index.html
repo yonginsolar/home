@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.82 | Change: 2026-09-23 - Add platform power plant monitoring management. -->
+<!-- Version: v1.0.83 | Change: 2026-09-29 - Show sun-village management only to appointed overall managers. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.82 | index.html');</script>
+  <script>console.log('[Version] v1.0.83 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1746,6 +1746,7 @@ async function loadUserInfo(user) {
 
     await loadSharedMenuOrder(canCustomizeMenuOrder(data, platformContext));
     applyMenuPermissions(data, platformContext, coopRuntime);
+    void loadSunVillageManagementEntry();
     updateSocialLinkUi(user);
     await loadWorkspaceSwitchContext();
 
@@ -1875,6 +1876,22 @@ function applyHrMenuLabel(runtime) {
     const descEl = document.getElementById('btnAdminDesc');
     if (titleEl) titleEl.textContent = '직원 및 설정 관리';
     if (descEl) descEl.textContent = isLite ? '직원 등록, 권한, 전자결재 설정 관리' : '직원 등록, 권한, 급여·근태, 전자결재 설정 관리';
+}
+
+async function loadSunVillageManagementEntry() {
+    const button = document.getElementById('btnSunVillageDemo');
+    if (!button || retiredGraceAccess || !myInfo) return;
+    button.classList.add('hidden');
+    try {
+        const { data, error } = await _supabase.rpc('sun_village_total_manager_context');
+        if (error) throw error;
+        if (data?.enabled === true && data?.is_total_manager === true) {
+            button.classList.remove('hidden');
+            applyMenuOrder();
+        }
+    } catch (error) {
+        console.warn('Sun village menu availability unavailable:', String(error?.code || 'unknown'));
+    }
 }
 
 function getMenuButtonsContainer() {
@@ -2287,7 +2304,6 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     ) {
         document.getElementById('btnQuizAdmin')?.classList.remove('hidden');
         document.getElementById('btnProposalBuilder')?.classList.remove('hidden');
-        document.getElementById('btnSunVillageDemo')?.classList.remove('hidden');
     }
 
     if (!officialsAdminEnabled) {
