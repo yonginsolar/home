@@ -1,5 +1,5 @@
 /*
-Version: v1.7.2
+Version: v1.7.3
 Change: 2026-09-30 - Format pasted board annexes and share spoken chair lines across both scripts.
 */
 
@@ -144,6 +144,10 @@ function boardScenarioAgenda(agenda, index, facilitator, includeSecretariat) {
     : '';
   const note = includeSecretariat && agenda.scenario_notes ? `<p class="action"><strong>진행 참고</strong> ${blocks(agenda.scenario_notes)}</p>` : '';
   const memo = includeSecretariat && agenda.document_notes ? `<p class="action"><strong>안건 메모</strong> ${blocks(agenda.document_notes)}</p>` : '';
+  const legacyVotePhrase = /^원\s*(?:\(수정\)\s*)?안대로\s*가결\s*하도록\s*하겠습니다\.?$/u;
+  const voteQuestion = legacyVotePhrase.test(String(agenda.decision_draft || '').trim())
+    ? '이 안건에 대해 이의가 있으십니까?'
+    : agenda.decision_draft;
   if (agenda.agenda_kind === 'REPORT') {
     return `<h2>[보고 제${number}호: ${title}]</h2>
       <p class="speaker"><strong>의장</strong> 보고 제${number}호, 「${title}」에 대해 듣겠습니다. ${safe(facilitator)}님, 보고해 주세요.</p>
@@ -155,7 +159,7 @@ function boardScenarioAgenda(agenda, index, facilitator, includeSecretariat) {
     <p class="speaker"><strong>의장</strong> ${kind} 제${number}호, 「${title}」을 상정합니다. ${safe(facilitator)}님, 설명해 주세요.</p>
     ${report}
     <p class="speaker"><strong>의장</strong> 설명 잘 들었습니다. 질문이나 의견 있으십니까?</p>
-    ${agenda.agenda_kind === 'DECISION' ? `<p class="speaker"><strong>의장</strong> ${blocks(agenda.decision_draft, '이 안건에 대해 이의가 있으십니까?')}</p><p class="speaker"><strong>의장</strong> 이의가 없다면 본 안건은 원(수정)안대로 가결되었음을 선포합니다.</p>` : ''}${note}${memo}`;
+    ${agenda.agenda_kind === 'DECISION' ? `<p class="speaker"><strong>의장</strong> ${blocks(voteQuestion, '이 안건에 대해 이의가 있으십니까?')}</p><p class="speaker"><strong>의장</strong> 이의가 없다면 본 안건은 원(수정)안대로 가결되었음을 선포합니다.</p>` : ''}${note}${memo}`;
 }
 
 function boardScenario({ row, agendas, chairName, coopName, company }, includeSecretariat) {
