@@ -1,11 +1,11 @@
 /*
-Version: v1.9.2
-Change: 2026-09-29 - Simplify board agenda input, add PDF annexes and dual board scripts.
+Version: v1.9.3
+Change: 2026-09-30 - Insert editable text annexes into board materials and refine spoken scripts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.1';
+import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.2';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -907,17 +907,15 @@ function activePdfAttachmentAnchor() {
 
 function renderPdfAttachmentList() {
   if (!$('pdfAttachmentPanel') || !$('pdfAttachmentList')) return;
-  const available = state.activeDocument === 'MATERIALS' && Boolean(activePdfAttachmentAnchor());
+  const available = state.current?.meeting_type === 'GENERAL_ASSEMBLY'
+    && state.activeDocument === 'MATERIALS' && Boolean(activePdfAttachmentAnchor());
   $('pdfAttachmentPanel').hidden = !available;
   if (!available) {
     $('pdfAttachmentList').replaceChildren();
     return;
   }
-  const board = state.current?.meeting_type === 'BOARD';
-  $('pdfAttachmentHeading').textContent = board ? '이사회 회의자료 별첨 PDF' : '이 챕터 뒤에 PDF 자료 붙이기';
-  $('pdfAttachmentHelp').textContent = board
-    ? '긴 규정안이나 참고 자료를 붙이면 회의자료 뒤에 별첨으로 인쇄됩니다. PDF는 20MB·100쪽 이하로 준비해 주세요.'
-    : '별도로 만든 PDF를 붙이면 자료집 인쇄 시 현재 챕터 바로 뒤에 합쳐집니다.';
+  $('pdfAttachmentHeading').textContent = '이 챕터 뒤에 PDF 자료 붙이기';
+  $('pdfAttachmentHelp').textContent = '별도로 만든 PDF를 붙이면 자료집 인쇄 시 현재 챕터 바로 뒤에 합쳐집니다.';
   const rows = activeChapterPdfAttachments();
   $('pdfAttachmentList').innerHTML = rows.length
     ? rows.map(row => `<div class="pdf-attachment-row" data-pdf-attachment-id="${escapeHtml(row.id)}">
@@ -926,6 +924,26 @@ function renderPdfAttachmentList() {
         <button type="button" class="btn btn-small btn-danger" data-pdf-action="delete">삭제</button>
       </div>`).join('')
     : '<div class="pdf-attachment-empty">첨부한 PDF가 없습니다. 자동 자료가 없는 항목은 그대로 비워 두어도 됩니다.</div>';
+}
+
+function renderBoardAnnexPanel() {
+  $('boardAnnexPanel').hidden = state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS';
+}
+
+function addBoardTextAnnex() {
+  if (state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS') return;
+  const editor = $('documentEditor');
+  const title = $('boardAnnexTitle').value.trim();
+  const body = $('boardAnnexBody').value.trim();
+  const number = Math.max(0, ...[...editor.querySelectorAll('.board-text-annex')]
+    .map(section => Number(section.dataset.boardAnnexNumber) || 0)) + 1;
+  const html = buildBoardTextAnnex({ title, body, kind: $('boardAnnexKind').value, number });
+  editor.insertAdjacentHTML('beforeend', sanitizeHtml(html));
+  state.documentDirty = true;
+  $('boardAnnexTitle').value = '';
+  $('boardAnnexBody').value = '';
+  editor.querySelector('.board-text-annex:last-child')?.scrollIntoView({ block: 'nearest' });
+  showToast('별첨 본문을 회의자료에 넣었습니다. 내용을 확인한 뒤 현재 문서를 저장해 주세요.');
 }
 
 function renderActiveChapter() {
@@ -1000,6 +1018,7 @@ function renderActiveDocument() {
   }
   state.documentDirty = false;
   document.querySelectorAll('.doc-tab').forEach(button => button.classList.toggle('active', button.dataset.document === state.activeDocument));
+  renderBoardAnnexPanel();
 }
 
 function rememberActiveDocument() {
@@ -1372,6 +1391,13 @@ const BOOK_PRINT_CSS = `
   .source-agenda-row{display:grid;grid-template-columns:95pt 1fr;gap:3pt 9pt;padding:5pt 0;border-bottom:.5pt solid #cbd5e1}
   .source-agenda-row small{grid-column:2}
   .board-one-paper h1{text-align:center;font-size:19pt}.board-one-paper h2{font-size:13pt;margin:10pt 0 4pt}.board-one-paper .source-agenda-row{padding:3pt 0}
+  .board-text-annex{break-before:page;page-break-before:always;color:#172033;line-height:1.75}
+  .board-annex-heading{margin:0 0 17pt;padding:12pt 13pt;border-top:4pt solid #f97316;border-bottom:1pt solid #fdba74;background:#fff7ed;break-inside:avoid}
+  .board-annex-heading span{display:block;margin:0 0 5pt;color:#9a3412;font-weight:900}
+  .board-annex-heading h1{margin:0;padding:0;border:0;font-size:19pt;color:#172033}
+  .board-annex-body h2{margin:19pt 0 8pt;padding:0 0 5pt;border-bottom:1pt solid #fdba74;color:#9a3412;font-size:15pt;break-after:avoid}
+  .board-annex-body h3{margin:15pt 0 5pt;color:#172033;font-size:12.5pt;break-after:avoid}
+  .board-annex-body p{margin:5pt 0;font-size:11pt;line-height:1.75;orphans:3;widows:3}
   .meeting-org-info{margin:14pt 0 0;padding:9pt 10pt;border:1pt solid #cbd5e1;border-radius:7pt;background:#f8fafc;text-align:left;break-inside:avoid}
   .meeting-org-info>div{display:grid;grid-template-columns:58pt minmax(0,1fr);gap:5pt 8pt;padding:2pt 0}
   .meeting-org-info dt,.meeting-org-info dd{font-size:11pt}.meeting-org-info dt{color:#9a3412;font-weight:900}.meeting-org-info dd{margin:0;overflow-wrap:anywhere}
@@ -1784,6 +1810,7 @@ function bindEvents() {
   $('moveChapterUpButton').addEventListener('click', () => moveChapter(-1));
   $('moveChapterDownButton').addEventListener('click', () => moveChapter(1));
   $('deleteChapterButton').addEventListener('click', deleteChapter);
+  $('addBoardAnnexButton').addEventListener('click', () => runAction(addBoardTextAnnex));
   $('addPdfAttachmentButton').addEventListener('click', () => $('pdfAttachmentInput').click());
   $('pdfAttachmentInput').addEventListener('change', () => {
     const file = $('pdfAttachmentInput').files?.[0] || null;
