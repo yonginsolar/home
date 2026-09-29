@@ -37,12 +37,16 @@
     .record pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; background:var(--soft); padding:16px; border-radius:8px; }
     .document-frame { width:100%; height:min(75vh,950px); min-height:600px; border:1px solid var(--line); border-radius:8px; background:#fff; margin-top:10px; }
     .notice { background:var(--soft); border-left:4px solid var(--accent); border-radius:8px; padding:12px 16px; margin:12px 0; }
+    .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:16px 0; }
+    .summary-card { padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+    .summary-card span { display:block; color:var(--muted); font-size:1rem; }
+    .summary-card strong { display:block; margin-top:3px; font-size:1.2rem; font-variant-numeric:tabular-nums; overflow-wrap:break-word; }
     .attachment-list { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:10px; }
     .attachment-list a, .attachment-list span { display:block; padding:10px 12px; border:1px solid var(--line); border-radius:8px; overflow-wrap:break-word; }
     .attachment-list a:not([href]) { color:var(--muted); cursor:wait; }
     .pager { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:20px; }
     .pager button:disabled { opacity:.45; cursor:not-allowed; }
-    @media (max-width:650px) { main{padding:18px 12px 60px} .panel{padding:16px} .record{padding:16px} .tabs button{flex:1 1 40%} }
+    @media (max-width:650px) { main{padding:18px 12px 60px} .panel{padding:16px} .record{padding:16px} .tabs button{flex:1 1 40%} .summary-grid{grid-template-columns:1fr} }
     [hidden] { display:none !important; }
   </style>
 </head>
@@ -170,6 +174,25 @@
     parent.append(details);
   }
 
+  function addClosingSummary(parent, summary) {
+    if (!summary || typeof summary!=='object') return;
+    const fields=[
+      ['매출액',summary.total_revenue],
+      ['영업외수익',summary.total_other_revenue],
+      ['비용',summary.total_expenses],
+      ['당기손익',summary.net_income]
+    ];
+    const grid=document.createElement('div'); grid.className='summary-grid';
+    fields.forEach(([label,value]) => {
+      if (value==null) return;
+      const card=document.createElement('div'); card.className='summary-card';
+      const name=document.createElement('span'); name.textContent=label;
+      const amount=document.createElement('strong'); amount.textContent=money(value);
+      card.append(name,amount); grid.append(card);
+    });
+    parent.append(grid);
+  }
+
   function renderRecord(item) {
     const article=document.createElement('article'); article.className='record';
     if (state.section==='ledger') {
@@ -181,12 +204,16 @@
     } else if (state.section==='closing') {
       line(article,'record-title',`${item.fiscal_year}년 결산 자료`);
       line(article,'record-meta',`${date(item.period_start)} ~ ${date(item.period_end)} · ${item.report_payload?.summary?.is_closed ? '마감된 결산' : '마감 전 자료'} · 생성 ${date(item.generated_at)}`);
+      addClosingSummary(article,item.report_payload?.summary);
       line(article,'notice','증빙 검토 금액은 장부의 증빙 유형을 기준으로 자동 합산한 참고 수치입니다. 실제 증빙 누락이나 가산세 대상이라는 뜻은 아닙니다.');
       const parts=item.report_payload?.sections || {};
-      addDocument(article,[parts.header_html,parts.balance_sheet_html,parts.income_statement_html,parts.surplus_html,parts.tax_html].filter(Boolean).join('<hr>'),'결산 내용 보기');
+      addDocument(article,[parts.header_html,parts.balance_sheet_html,parts.income_statement_html,parts.surplus_html,parts.tax_html].filter(Boolean).join('<hr>'),'결산 원문 전체 보기 (0원 항목 포함)');
     } else if (state.section==='approvals') {
       line(article,'record-title',text(item.title) || '제목 없음');
-      line(article,'record-meta',`${text(item.doc_type)} · ${date(item.processed_at || item.created_at)} · ${text(item.status)}${item.amount == null ? '' : ` · ${money(item.amount)}`}`);
+      const amountLabel=text(item.doc_type).startsWith('휴가') && item.amount != null
+        ? ` · ${Number(item.amount).toLocaleString('ko-KR')}일`
+        : (item.amount == null || Number(item.amount)===0 ? '' : ` · ${money(item.amount)}`);
+      line(article,'record-meta',`${text(item.doc_type)} · ${date(item.processed_at || item.created_at)} · ${text(item.status)}${amountLabel}`);
       addDocument(article,item.content,'결재 내용 보기');
       addAttachments(article,item);
     } else if (state.section==='minutes') {
