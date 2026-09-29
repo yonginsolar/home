@@ -276,6 +276,7 @@ const patchNoteModalHTML = `
       
       <div class="modal-body p-0">
         <div id="patchWriteForm" class="bg-light p-3 border-bottom hidden">
+            <p class="small text-muted mb-2" style="word-break: keep-all;">홈페이지 방문자와 조합원이 직접 이용하는 변경만 안내해 주세요. 관리자 업무 변경은 ERP 패치노트에 기록하고, 요금·내부 작업 내용은 공개 여부를 따로 확인합니다.</p>
             <div class="row g-2 mb-2">
                 <div class="col-4">
                     <input type="text" id="pnVersion" class="form-control form-control-sm" placeholder="v1.0.0">
@@ -290,8 +291,8 @@ const patchNoteModalHTML = `
                     </div>
                 </div>
             </div>
-            <input type="text" id="pnTitle" class="form-control form-control-sm mb-2" placeholder="패치 제목 (예: 급여 연동 기능 추가)">
-            <textarea id="pnContent" class="form-control form-control-sm mb-2" rows="4" placeholder="상세 내용 (HTML 태그 사용 가능)&#13;&#10;- 기능 A 추가&#13;&#10;- 버그 B 수정"></textarea>
+            <input type="text" id="pnTitle" class="form-control form-control-sm mb-2" placeholder="예: 홈페이지에서 햇빛 퀴즈를 바로 시작할 수 있어요">
+            <textarea id="pnContent" class="form-control form-control-sm mb-2" rows="4" placeholder="누가 이용할 수 있는지, 전에는 무엇이 불편했는지, 이제 어떻게 이용하는지 적어 주세요."></textarea>
             <div class="d-grid">
                 <button type="button" id="btnSavePatchNote" class="btn btn-primary btn-sm" onclick="savePatchNote()">💾 저장 및 배포</button>
             </div>
