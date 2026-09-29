@@ -2,7 +2,7 @@
 <!-- Version: v1.0.14 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.15 | officials_signature_admin.html');</script>
+  <script>console.log('[Version] v1.0.16 | officials_signature_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -393,8 +393,8 @@
       const entries = Object.values(groups || {});
       const total = entries.length;
       const registered = entries.filter((group) => !!group?.seal_url).length;
-      const missing = Math.max(0, total - registered);
       const telegramEligible = entries.filter((group) => !group?.is_external);
+      const missing = telegramEligible.filter((group) => !group?.seal_url).length;
       const telegramLinked = telegramEligible.filter((group) => {
         const memberId = String(group?.member_id || '').trim();
         return !!(memberId && signatureTelegramStatusMap[memberId]?.linked);
@@ -421,7 +421,7 @@
         }
         if (missing === 0 && telegramMissing === 0) {
           bannerEl.className = 'alert alert-success';
-          bannerEl.innerHTML = '서명 운영 준비가 완료되었습니다. 현재 활성 임원·대의원·선관위원 모두 서명 이미지와 Telegram 수신 연결이 준비된 상태입니다.';
+          bannerEl.innerHTML = '서명 이미지와 Telegram 연결이 필요한 대상의 준비가 완료되었습니다. 비조합원 이사는 본인 인증 후 서명 링크로 참여합니다.';
         } else {
           bannerEl.className = 'alert alert-warning';
           bannerEl.innerHTML = `
@@ -457,7 +457,7 @@
       const filter = String(currentSignatureFilter || 'all').trim();
       const entries = Object.values(groups || {});
       if (filter === 'missing') {
-        return entries.filter((group) => !group?.seal_url);
+        return entries.filter((group) => !group?.is_external && !group?.seal_url);
       }
       if (filter === 'registered') {
         return entries.filter((group) => !!group?.seal_url);
@@ -635,10 +635,10 @@
           : buildSignatureTelegramStatusHtml(group.member_id);
         const sealPreview = group.seal_url
           ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-preview-key="${group.key}">보기</button>`
-          : '<span class="text-muted small">미등록</span>';
+          : `<span class="text-muted small">${group.is_external ? '서명할 때 작성' : '미등록'}</span>`;
         const sealStatus = group.seal_url
           ? '<span class="badge bg-success">등록됨</span>'
-          : '<span class="badge bg-secondary">없음</span>';
+          : `<span class="badge bg-secondary">${group.is_external ? '선택 사항' : '없음'}</span>`;
         return `
           <tr>
             <td>
