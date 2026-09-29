@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.61 | Change: 2026-09-29 - Route village approvals through operating secretary review and village chair. -->
+<!-- Version: v1.2.62 | Change: 2026-09-29 - Distinguish village review notices from final approval. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.61 | approval.html');</script>
+  <script>console.log('[Version] v1.2.62 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -8492,17 +8492,19 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
 
 function buildApprovalSubmitNotice(firstApproverName, notificationResult) {
     const safeApproverName = String(firstApproverName || '-').trim() || '-';
+    const firstRoleLabel = isSunVillageApproval() ? '첫 검토자' : '첫 결재자';
+    const requestLabel = isSunVillageApproval() ? '검토 요청' : '결재 요청';
     const result = notificationResult && typeof notificationResult === 'object' ? notificationResult : null;
     if (result?.ok && result?.telegramSent === true) {
-        return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\nTelegram 결재 요청 알림을 전송했습니다.`;
+        return `상신이 완료되었습니다.\n${firstRoleLabel}: ${safeApproverName}\nTelegram ${requestLabel} 알림을 전송했습니다.`;
     }
     if (result?.ok && result?.telegramSent === false && (result?.appNotificationSaved === true || result?.fallbackInserted === true)) {
-        return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\nTelegram 전송은 실패했고 앱 알림만 저장했습니다.`;
+        return `상신이 완료되었습니다.\n${firstRoleLabel}: ${safeApproverName}\nTelegram 전송은 실패했고 앱 알림만 저장했습니다.`;
     }
     if (result?.ok && result?.telegramSent === false && result?.fallbackInserted === false) {
-        return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\n알림 전송 상태를 확인하지 못했습니다.`;
+        return `상신이 완료되었습니다.\n${firstRoleLabel}: ${safeApproverName}\n알림 전송 상태를 확인하지 못했습니다.`;
     }
-    return `상신이 완료되었습니다.\n첫 결재자: ${safeApproverName}\n결재 요청 알림 상태를 확인해주세요.`;
+    return `상신이 완료되었습니다.\n${firstRoleLabel}: ${safeApproverName}\n${requestLabel} 알림 상태를 확인해주세요.`;
 } // End of buildApprovalSubmitNotice
 
 function normalizeApprovalUploadError(error) {
@@ -12840,7 +12842,7 @@ async function handleDraftSubmit(e) {
             jeongyeol_rule_code: jeongyeolDecision.applied ? jeongyeolDecision.ruleCode : null,
             submit_trigger: submitTrigger
         });
-        const notificationResult = await createNotification(finalApprovers[0]?.emp_id, '결재 요청', `${title} 문서가 상신되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
+        const notificationResult = await createNotification(finalApprovers[0]?.emp_id, isSunVillageApproval() ? '검토 요청' : '결재 요청', `${title} 문서가 상신되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId });
         insertedDoc._notificationResult = notificationResult;
         if (currentApprovalDraftId) {
             try {
@@ -13036,7 +13038,7 @@ async function processApprovalDoc(docId, action, reason = '') {
         console.error('시간외 근로 반영 실패:', settlementError);
         attendanceSettlementNotice = '시간외 근로 후처리는 반영하지 못했습니다. 설정을 확인해 주세요.';
     }
-    await logAudit('approval.process', docId, `${action} 처리`, {
+    await logAudit('approval.process', docId, `${action === '승인' && isSunVillageReviewUser() ? '검토' : action} 처리`, {
         status: newStatus,
         reason: reason || null,
         delegated_from_emp_id: delegatedFrom ? effectiveApproverEmpId : null,
