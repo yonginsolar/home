@@ -39,7 +39,7 @@ allowKakaoApp: true
 <script src="shared/browser_env_guard.js?v=20260421-3"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="cert_generator.js?v=20260919_01"></script>
+<script src="cert_generator.js?v=20260929_01"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 <script src="badges.js?v=20260828-1"></script>
@@ -2432,7 +2432,7 @@ oninput="autoHyphen(this)">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="footer.js?v=1.0.7"></script>
 <script src="home_patch_note.js?v=20260929-1"></script>
-<script src="notice_modal.js?v=20260323-2"></script>
+<script src="notice_modal.js?v=20260929-1"></script>
 
 <script>
 // =========================================================================
@@ -7971,7 +7971,14 @@ showLoading(false);
 return showModal('납입된 출자금이 없어 증명서를 발급할 수 없습니다.'); 
 }
 
-// [변경] 함수 이름을 issue_contribution_certificate 로 교체
+if (typeof prepareContributionCertCompanyProfile !== 'function' || typeof generateContributionCert !== 'function') {
+throw new Error('출자증서 생성기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+}
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+const companyProfile = await prepareContributionCertCompanyProfile(_supabase, { coopId });
+if (typeof getCertPretendardFontBase64 === 'function') await getCertPretendardFontBase64();
+
+// 증서 번호는 출력에 필요한 조합 정보와 직인을 확인한 뒤에만 발급한다.
 const { data: cert, error } = await _supabase.rpc('issue_contribution_certificate', { 
 p_member_id: curMem.member_id, 
 p_amount: finalTotal 
@@ -7979,10 +7986,10 @@ p_amount: finalTotal
 
 if (error) throw error;
 
-const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 await generateContributionCert(curMem, finalTotal, cert.cert_number, '', _supabase, {
 coopId,
-requireSeal: isSiteMemberPortalProfile()
+requireSeal: true,
+companyProfile
 });
 
 showLoading(false);

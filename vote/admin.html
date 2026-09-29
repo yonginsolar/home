@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.54
-Change: Fix tenant-scoped Supabase read chains and replace indefinite dashboard loading with retry guidance.
+Version: v1.0.55
+Change: 2026-09-29 - Use only the current cooperative's election seal in notice output.
 -->
 <html lang="ko">
 <head>
@@ -1209,6 +1209,17 @@ function safeUrl(value) {
     }
 
     async function resolveElectionNoticeSealUrl() {
+        if (!currentCoopId) return ELECTION_NOTICE_SEAL_FALLBACK_URL;
+        const { data: configured } = await supabase.from('ref_company_info')
+            .select('value').eq('coop_id', currentCoopId).eq('key', 'election_seal_url').maybeSingle();
+        const configuredPath = String(configured?.value || '').trim();
+        if (configuredPath) {
+            if (/^https:\/\//i.test(configuredPath)) return configuredPath;
+            const { data, error } = await supabase.storage.from('attachments').createSignedUrl(configuredPath, 3600);
+            return error ? '' : (data?.signedUrl || '');
+        }
+        const { data: coop } = await supabase.from('coops').select('coop_code').eq('id', currentCoopId).maybeSingle();
+        if (coop?.coop_code !== 'yongin-modu-sunlight') return ELECTION_NOTICE_SEAL_FALLBACK_URL;
         try {
             const { data, error } = await supabase
                 .storage

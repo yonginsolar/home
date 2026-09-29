@@ -3,7 +3,7 @@ Version: v1.9.1
 Change: 2026-09-29 - Load the shared minutes service with non-member director support.
 */
 import { supabase } from '../shared/supabase-client.js';
-import { MinutesService } from './MinutesService.js?v=1.0.52';
+import { MinutesService } from './MinutesService.js?v=1.0.53';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.0';
 import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.0';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';

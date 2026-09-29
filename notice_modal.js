@@ -1,6 +1,6 @@
 /*
-Version: v1.0.15
-Change: 2026-03-29 - Escape notice ids in modal list click handlers.
+Version: v1.0.16
+Change: 2026-09-29 - Keep official and election seals scoped to the notice's cooperative.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -240,7 +240,17 @@ Change: 2026-03-29 - Escape notice ids in modal list click handlers.
             return '';
         }
         try {
-            const { data } = await client.storage.from('attachments').createSignedUrl('Official Seal.png', 3600);
+            const companyInfo = await loadCompanyInfo();
+            const sealPath = String(companyInfo?.seal_url || '').trim();
+            if (!sealPath) {
+                sealUrlCache = '';
+                return '';
+            }
+            if (/^https:\/\//i.test(sealPath)) {
+                sealUrlCache = sealPath;
+                return sealUrlCache;
+            }
+            const { data } = await client.storage.from('attachments').createSignedUrl(sealPath, 3600);
             sealUrlCache = data?.signedUrl || '';
             return sealUrlCache;
         } catch (e) {
@@ -252,6 +262,16 @@ Change: 2026-03-29 - Escape notice ids in modal list click handlers.
     async function loadElectionSealUrl() {
         const client = getClient();
         if (!client || !client.storage) return '';
+        const coopId = await getVisibleNoticeScopeCoopId();
+        const info = await loadCompanyInfo();
+        const configuredPath = String(info?.election_seal_url || '').trim();
+        if (configuredPath) {
+            if (/^https:\/\//i.test(configuredPath)) return configuredPath;
+            const { data, error } = await client.storage.from('attachments').createSignedUrl(configuredPath, 3600);
+            return error ? '' : (data?.signedUrl || '');
+        }
+        const { data: coop } = await client.from('coops').select('coop_code').eq('id', coopId).maybeSingle();
+        if (coop?.coop_code !== 'yongin-modu-sunlight') return '';
         try {
             const { data, error } = await client.storage
                 .from('attachments')

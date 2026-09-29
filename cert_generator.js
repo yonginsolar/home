@@ -1,6 +1,6 @@
 /*
-Version: v1.0.15
-Change: Keep the contribution-certificate seal safely inside the printed border.
+Version: v1.0.16
+Change: Confirm the issuing cooperative's share unit and seal before assigning a certificate number.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -85,7 +85,7 @@ function buildCertCompanyContact(info) {
 function buildCertWrappedTextLayout(doc, text, options = {}) {
     const value = String(text == null ? '' : text).trim();
     const maxWidth = Number(options.maxWidth || 150);
-    const minFontSize = Number(options.minFontSize || 9);
+    const minFontSize = Math.max(11, Number(options.minFontSize || 11));
     let fontSize = Number(options.initialFontSize || 12);
 
     doc.setFontSize(fontSize);
@@ -279,6 +279,19 @@ async function buildCertCompanyPrintProfile(supabaseClient, options = {}) {
     return profile;
 } // End of buildCertCompanyPrintProfile
 
+async function prepareContributionCertCompanyProfile(supabaseClient, options = {}) {
+    const profile = await buildCertCompanyPrintProfile(supabaseClient, options);
+    ensureCertCompanyPrintProfile(profile, '출자증서 발급');
+    const shareUnitAmount = Number(profile.shareUnitAmount);
+    if (!Number.isSafeInteger(shareUnitAmount) || shareUnitAmount <= 0) {
+        throw new Error('출자증서 발급 전에 현재 조합의 출자 1좌 금액을 등록해주세요.');
+    }
+    if (!profile.sealDataUrl) {
+        throw new Error('출자증서 발급 전에 현재 조합의 직인을 등록하고 이미지를 확인해주세요.');
+    }
+    return profile;
+} // End of prepareContributionCertCompanyProfile
+
 function ensureCertCompanyPrintProfile(profile, contextLabel) {
     if (!trimCertCompanyValue(profile?.companyName)) {
         throw new Error(`${contextLabel} 전에 회사 정보의 법인명(조합명)을 먼저 확인해주세요.`);
@@ -300,11 +313,17 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
     }
 
     try {
-        const companyProfile = await buildCertCompanyPrintProfile(supabaseClient, {
+        const companyProfile = options.companyProfile || await prepareContributionCertCompanyProfile(supabaseClient, {
             coopId: options?.coopId,
             fallbackChairmanName: chairmanName
         });
         ensureCertCompanyPrintProfile(companyProfile, '출자증서 발급');
+        if (!Number.isSafeInteger(Number(companyProfile.shareUnitAmount)) || Number(companyProfile.shareUnitAmount) <= 0) {
+            throw new Error('출자증서 발급 전에 현재 조합의 출자 1좌 금액을 등록해주세요.');
+        }
+        if (!companyProfile.sealDataUrl) {
+            throw new Error('출자증서 발급 전에 현재 조합의 직인을 등록하고 이미지를 확인해주세요.');
+        }
 
         // -----------------------------------------------------------
         // [UPDATE] 0. 데이터 유효성 검사 (Validation)
@@ -392,8 +411,7 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             displayValue = birthStr;
         }
 
-        const configuredShareUnitAmount = Math.trunc(Number(companyProfile.shareUnitAmount || 0));
-        const shareUnitAmount = configuredShareUnitAmount > 0 ? configuredShareUnitAmount : 10000;
+        const shareUnitAmount = Number(companyProfile.shareUnitAmount);
         const shares = totalAmount / shareUnitAmount;
         const shareCountText = Number.isInteger(shares)
             ? shares.toLocaleString('ko-KR')

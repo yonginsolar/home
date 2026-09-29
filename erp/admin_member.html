@@ -48,7 +48,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.189';
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="/cert_generator.js?v=20260919_01"></script>
+<script src="/cert_generator.js?v=20260929_01"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 
@@ -5117,11 +5117,11 @@ async function ensureCertGeneratorReady() {
             const routeOrigins = window.CoopRouteGuard ? CoopRouteGuard.buildSiteOrigins(window.location) : null;
             const publicOrigin = String(routeOrigins?.publicOrigin || '').trim().replace(/\/+$/, '');
             const remoteFallback = /^https?:\/\//i.test(publicOrigin)
-                ? `${publicOrigin}/cert_generator.js?v=20260919_01`
-                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260919_01';
+                ? `${publicOrigin}/cert_generator.js?v=20260929_01`
+                : 'https://www.yonginsolar.kr/cert_generator.js?v=20260929_01';
             const candidates = [
-                '/cert_generator.js?v=20260919_01',
-                '../cert_generator.js?v=20260919_01',
+                '/cert_generator.js?v=20260929_01',
+                '../cert_generator.js?v=20260929_01',
                 remoteFallback
             ];
             for (const src of candidates) {
@@ -14064,9 +14064,15 @@ async function submitIssueDoc() {
             if (String(memberData.member_type || '').includes('단체') && !String(memberData.corp_number || '').trim()) {
                 throw new Error("단체의 '법인등록번호'가 확인되지 않습니다. 회원 정보를 수정해주세요.");
             }
-            if (typeof generateContributionCert !== 'function') {
+            if (typeof generateContributionCert !== 'function' || typeof prepareContributionCertCompanyProfile !== 'function') {
                 throw new Error('cert_generator.js 최신본이 로드되지 않았습니다. 배포/캐시를 확인해주세요.');
             }
+
+            const companyProfile = await prepareContributionCertCompanyProfile(_supabase, {
+                coopId: String(g_adminMemberRuntime?.coop_id || '').trim() || null,
+                fallbackChairmanName: chairmanName
+            });
+            if (typeof getCertPretendardFontBase64 === 'function') await getCertPretendardFontBase64();
 
             const { data: cert, error } = await _supabase.rpc('issue_contribution_certificate', {
                 p_member_id: memberData.member_id,
@@ -14077,7 +14083,8 @@ async function submitIssueDoc() {
             await generateContributionCert(memberData, amount, cert.cert_number, chairmanName, _supabase, {
                 issueDate: mode === 'cutoff' ? cutoffDate : null,
                 coopId: String(g_adminMemberRuntime?.coop_id || '').trim() || null,
-                requireSeal: isAdminMemberSiteProfile()
+                requireSeal: true,
+                companyProfile
             });
         }
 

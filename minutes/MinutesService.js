@@ -1,6 +1,6 @@
 /*
-Version: v1.0.52
-Change: 2026-09-19 - Normalize tenant-scoped organization contact fields for meeting documents.
+Version: v1.0.53
+Change: 2026-09-29 - Read the current cooperative's registered official seal for notices.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -714,7 +714,13 @@ export const MinutesService = {
     getOfficials,
     getCompanyInfo,
     async getOfficialSealUrl() {
-        const { data } = await supabase.storage.from('attachments').createSignedUrl('Official Seal.png', 3600);
+        const { data: companyInfo, error: companyError } = await getCompanyInfo();
+        if (companyError) return null;
+        const sealPath = String(companyInfo?.seal_url || '').trim();
+        if (!sealPath) return null;
+        if (/^https:\/\//i.test(sealPath)) return sealPath;
+        const { data, error } = await supabase.storage.from('attachments').createSignedUrl(sealPath, 3600);
+        if (error) return null;
         return data?.signedUrl || null;
     },
     async listOpenSignMinutes() {
