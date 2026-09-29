@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.60 | Change: 2026-09-28 - Rename remaining annual leave to available annual leave. -->
+<!-- Version: v1.2.61 | Change: 2026-09-29 - Route village approvals through operating secretary review and village chair. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.60 | approval.html');</script>
+  <script>console.log('[Version] v1.2.61 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1544,6 +1544,7 @@ let manualJeongyeolToggleTouched = false;
 let jeongyeolLockReasonLabel = '';
 let approvalRuntimeProfile = 'legacy_full';
 let approvalCompanyInfo = {};
+let approvalWorkflowContext = null;
 let approvalSecretaryJeongyeolEnabled = false;
 let approvalSecretaryAttendanceEnabled = true;
 let approvalCompanyInfoRemoteConfirmed = false;
@@ -4801,6 +4802,42 @@ function getApprovalScopedCoopId() {
     return getApprovalCoopId() || '00000000-0000-0000-0000-000000000000';
 }
 
+async function loadApprovalWorkflowContext() {
+    const { data, error } = await _supabase.rpc('erp_approval_workflow_context');
+    if (error || !data || typeof data !== 'object') {
+        console.warn('approval workflow context unavailable', error);
+        approvalWorkflowContext = null;
+        return null;
+    }
+    approvalWorkflowContext = data;
+    return data;
+}
+
+function isSunVillageApproval() {
+    return approvalWorkflowContext?.mode === 'sun_village';
+}
+
+function isMainCoopMoneyChairRequired() {
+    return approvalWorkflowContext?.money_chair_required === true;
+}
+
+function isSunVillageReviewUser() {
+    return isSunVillageApproval()
+        && String(myInfo?.emp_id || '') === String(approvalWorkflowContext?.reviewer?.emp_id || '');
+}
+
+function getApprovalPositiveActionLabel() {
+    return isSunVillageReviewUser() ? '검토' : '승인';
+}
+
+function getSunVillageApprovalNotReadyMessage() {
+    const issue = String(approvalWorkflowContext?.issue || '');
+    if (issue === 'VILLAGE_CHAIR_NOT_LINKED') return '마을 이사장의 로그인 계정을 먼저 연결해 주세요. 연결 후 문서를 상신할 수 있습니다.';
+    if (issue === 'OPERATING_SECRETARY_NOT_LINKED') return '운영협동조합 사무국장을 이 마을의 운영 담당자로 먼저 연결해 주세요.';
+    if (issue === 'REVIEWER_AND_CHAIR_MUST_DIFFER') return '운영협동조합 검토자와 마을 이사장은 서로 다른 사람이어야 합니다.';
+    return '마을 결재선이 준비되지 않았습니다. 운영 담당자와 마을 이사장 연결을 확인해 주세요.';
+}
+
 function scopeApprovalTenant(query) {
     const coopId = getApprovalCoopId();
     return query.eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000');
@@ -6749,7 +6786,13 @@ function isApprovalAttendanceJeongyeolTargetType(type) {
 
 function buildDefaultApprovalLineTemplate() {
     const currentType = getCurrentDraftMainType();
-    if (isApprovalMoneyRelatedType(currentType)) {
+    if (isSunVillageApproval()) {
+        if (approvalWorkflowContext?.ready !== true) return [];
+        const reviewer = normalizeApprovalDraftLineUser(approvalWorkflowContext.reviewer);
+        const chair = normalizeApprovalDraftLineUser(approvalWorkflowContext.chair);
+        return reviewer?.emp_id && chair?.emp_id ? [reviewer, chair] : [];
+    }
+    if (isMainCoopMoneyChairRequired() && isApprovalMoneyRelatedType(currentType)) {
         const targetUser = getApprovalLineTargetEmpInfo();
         const targetEmpId = String(targetUser?.emp_id || '').trim();
         const chairman = getChairmanApprover();
@@ -6784,7 +6827,13 @@ function applyDefaultApprovalLineTemplate(force = false) {
     if (!force && finalApprovers.length > 0 && !approvalLineTemplateAutoApplied) return false;
 
     const defaults = buildDefaultApprovalLineTemplate();
-    if (defaults.length === 0) return false;
+    if (defaults.length === 0) {
+        if (isSunVillageApproval()) {
+            finalApprovers = [];
+            renderLinePreview();
+        }
+        return false;
+    }
 
     finalApprovers = defaults;
     approvalLineTemplateAutoApplied = true;
@@ -6898,6 +6947,9 @@ function getJeongyeolAutoDecision(mainType, amountValue, options = {}) {
 }
 
 function getJeongyeolDecision(mainType, amountValue, options = {}) {
+    if (isSunVillageApproval()) {
+        return { mode: 'NONE', applied: false, ruleCode: '', ruleLabel: '', targetApprover: '' };
+    }
     if (!isApprovalAttendanceJeongyeolTargetType(mainType)) {
         return { mode: 'NONE', applied: false, ruleCode: '', ruleLabel: '', targetApprover: '' };
     }
@@ -6971,6 +7023,16 @@ function updateJeongyeolUi() {
     const hintEl = document.getElementById('jeongyeolHint');
     const toggleEl = document.getElementById('chkSecretaryJeongyeol');
     const jeongyeolCard = document.getElementById('secretaryJeongyeolPanel');
+    if (isSunVillageApproval()) {
+        if (jeongyeolCard) jeongyeolCard.classList.add('hidden');
+        if (toggleEl) { toggleEl.checked = false; toggleEl.disabled = true; }
+        manualJeongyeolSelected = false;
+        manualJeongyeolToggleTouched = false;
+        if (hintEl) hintEl.textContent = '운영협동조합 사무국장 검토 후 마을 이사장이 결재합니다.';
+        applyJeongyeolLineDecision({ mode: 'NONE', applied: false }, { showAlertOnMissing: false });
+        setApproverSelectionLock(true);
+        return;
+    }
     const mainType = getCurrentDraftMainType();
     const attendanceTargetType = isApprovalAttendanceJeongyeolTargetType(mainType);
     if (jeongyeolCard) {
@@ -7026,7 +7088,7 @@ function updateJeongyeolUi() {
     if (hintEl) {
         if (decision.applied) {
             hintEl.textContent = `적용중: ${decision.ruleLabel}`;
-        } else if (isApprovalMoneyRelatedType(mainType)) {
+        } else if (isMainCoopMoneyChairRequired() && isApprovalMoneyRelatedType(mainType)) {
             hintEl.textContent = '금액 관련 문서는 전결 대상이 아니며 이사장 결재가 필요합니다.';
         } else if (canSecretaryControlAuto && autoDecision?.ruleLabel) {
             hintEl.textContent = `자동 전결 가능: ${autoDecision.ruleLabel}`;
@@ -9157,6 +9219,7 @@ window.onload = async function() {
     applyApprovalRuntimeProfileUi();
 
     const companyInfoPromise = loadApprovalCompanyInfo();
+    const workflowContextPromise = loadApprovalWorkflowContext();
     const employeePromise = loadApprovalEmployees();
     const cardPromise = loadApprovalCards();
 
@@ -9173,8 +9236,10 @@ window.onload = async function() {
 
     const employeeData = await employeePromise;
     applyApprovalEmployeeData(employeeData);
+    await workflowContextPromise;
+    updateJeongyeolUi();
     await cardPromise;
-    if (finalApprovers.length === 0) {
+    if (finalApprovers.length === 0 || isSunVillageApproval()) {
         applyDefaultApprovalLineTemplate(true);
     } else {
         renderLinePreview();
@@ -10387,18 +10452,18 @@ function openApprovalActionModal(docId, action) {
     const submitBtn = document.getElementById('btnApprovalActionSubmit');
     const isReject = pendingApprovalAction.action === '반려';
 
-    if (titleEl) titleEl.textContent = isReject ? '문서 반려' : '문서 승인';
+    if (titleEl) titleEl.textContent = isReject ? '문서 반려' : `문서 ${getApprovalPositiveActionLabel()}`;
     if (guideEl) {
         guideEl.textContent = isReject
             ? '반려 사유를 남길 수 있습니다. 비워두고 반려할 수도 있습니다.'
-            : '승인 메모를 남길 수 있습니다. 비워두고 승인해도 됩니다.';
+            : `${getApprovalPositiveActionLabel()} 메모를 남길 수 있습니다. 비워두고 처리해도 됩니다.`;
     }
     if (reasonEl) {
         reasonEl.value = '';
-        reasonEl.placeholder = isReject ? '반려 사유를 입력하세요.' : '승인 메모를 입력하세요.';
+        reasonEl.placeholder = isReject ? '반려 사유를 입력하세요.' : `${getApprovalPositiveActionLabel()} 메모를 입력하세요.`;
     }
     if (submitBtn) {
-        submitBtn.textContent = isReject ? '반려 처리' : '승인 처리';
+        submitBtn.textContent = isReject ? '반려 처리' : `${getApprovalPositiveActionLabel()} 완료`;
         submitBtn.className = `btn ${isReject ? 'btn-danger' : 'btn-success'} btn-sm`;
         submitBtn.disabled = false;
     }
@@ -10442,11 +10507,11 @@ function syncRelViewActionArea(doc) {
             } else if (isPhysicalPending) {
                 hintText = '실물결재 대기 문서를 이 상세 화면에서 바로 전자 승인 또는 반려할 수 있습니다.';
             } else {
-                hintText = '이 문서는 현재 이 화면에서 바로 승인 또는 반려할 수 있습니다.';
+                hintText = `이 문서는 현재 이 화면에서 ${getApprovalPositiveActionLabel()} 또는 반려할 수 있습니다.`;
             }
 
             actions.push(`
-                <button type="button" class="btn btn-success btn-sm" onclick="procDoc(${Number(doc.id)}, '승인')">승인</button>
+                <button type="button" class="btn btn-success btn-sm" onclick="procDoc(${Number(doc.id)}, '승인')">${getApprovalPositiveActionLabel()}</button>
                 <button type="button" class="btn btn-danger btn-sm" onclick="procDoc(${Number(doc.id)}, '반려')">반려</button>
             `);
         }
@@ -11885,6 +11950,12 @@ function filterOutApprovalApproversFromRefs(users = [], approvers = []) {
 
 // [기능] 직원 선택 모달 (필터 적용)
 function openUserModal(type) {
+    if (type === 'approver' && isSunVillageApproval()) {
+        showAlert(approvalWorkflowContext?.ready === true
+            ? '마을 결재선은 운영협동조합 사무국장 검토 → 마을 이사장 결재로 정해져 있습니다.'
+            : getSunVillageApprovalNotReadyMessage());
+        return;
+    }
     if (type === 'approver' && jeongyeolLineLocked) {
         const fixedLabel = jeongyeolLockReasonLabel || '결재자';
         showAlert(`전결 적용 중에는 결재선이 ${formatLabelWithEuroRo(fixedLabel)} 고정됩니다.`);
@@ -12000,8 +12071,11 @@ function confirmSelection() {
 
 function renderLinePreview() {
     const el = document.getElementById("linePreview");
-    if(finalApprovers.length === 0) { el.innerText = "결재자를 추가해주세요."; return; }
-    const lineHtml = finalApprovers.map((u, i) => `<span class="line-step">${escapeHtml(u.emp_name)} ${escapeHtml(u.position)}</span>` + (i < finalApprovers.length-1 ? '<span class="line-arrow">➡</span>' : '')).join("");
+    if(finalApprovers.length === 0) {
+        el.innerText = isSunVillageApproval() ? getSunVillageApprovalNotReadyMessage() : "결재자를 추가해주세요.";
+        return;
+    }
+    const lineHtml = finalApprovers.map((u, i) => `<span class="line-step">${isSunVillageApproval() ? (i === 0 ? '검토 · ' : '결재 · ') : ''}${escapeHtml(u.emp_name)} ${escapeHtml(u.position)}</span>` + (i < finalApprovers.length-1 ? '<span class="line-arrow">➡</span>' : '')).join("");
     const fixedLabel = escapeHtml(formatLabelWithEuroRo(jeongyeolLockReasonLabel || '결재자'));
     const lockHint = jeongyeolLineLocked ? `<div class="small text-primary mt-2">전결 적용으로 결재선이 ${fixedLabel} 고정되었습니다.</div>` : '';
     el.innerHTML = `${lineHtml}${lockHint}`;
@@ -12014,6 +12088,10 @@ function renderRefPreview() {
 }
 function resetLine(type) {
     if (type === 'approver') {
+        if (isSunVillageApproval()) {
+            showAlert('마을 결재선은 이 화면에서 변경할 수 없습니다.');
+            return;
+        }
         if (jeongyeolLineLocked) {
             showAlert('전결 적용 중에는 결재선을 초기화할 수 없습니다.');
             return;
@@ -12572,8 +12650,20 @@ async function handleDraftSubmit(e) {
     jeongyeolDecision = getJeongyeolDecision(mainType, finalAmt, { drafterEmpId: drafterId });
     const jeongyeolApplyResult = applyJeongyeolLineDecision(jeongyeolDecision, { showAlertOnMissing: true });
     if (!jeongyeolApplyResult.ok) return;
+    if (!approvalWorkflowContext) return showAlert('결재 규칙을 확인하지 못했습니다. 잠시 후 새로고침해 주세요.');
+    if (isSunVillageApproval()) {
+        if (approvalWorkflowContext.ready !== true) return showAlert(getSunVillageApprovalNotReadyMessage());
+        const required = buildDefaultApprovalLineTemplate();
+        if (required.length !== 2 || finalApprovers.length !== 2
+            || finalApprovers.some((approver, index) => String(approver?.emp_id) !== String(required[index]?.emp_id))) {
+            return showAlert('마을 결재선을 다시 불러오도록 새로고침해 주세요.');
+        }
+        if (required.some((approver) => String(approver?.emp_id) === String(drafterId))) {
+            return showAlert('마을 문서는 담당자가 기안해야 합니다. 검토자나 최종 결재자는 본인 문서를 기안할 수 없습니다.');
+        }
+    }
     if (finalApprovers.length === 0) return showAlert("결재선을 지정해주세요.");
-    if (isApprovalMoneyRelatedType(mainType) && !hasChairmanInApprovalLine(finalApprovers)) {
+    if (isMainCoopMoneyChairRequired() && isApprovalMoneyRelatedType(mainType) && !hasChairmanInApprovalLine(finalApprovers)) {
         return showAlert('금액 관련 문서는 이사장 결재가 반드시 포함되어야 합니다.');
     }
     if (jeongyeolDecision.applied) {
@@ -12615,7 +12705,7 @@ async function handleDraftSubmit(e) {
 
     // 2. [자동 정렬] 결재선: 직급 역순 (하급자 -> 상급자)
     // auth_level 숫자가 큰 사람(9) -> 작은 사람(1)
-    finalApprovers.sort((a, b) => b.auth_level - a.auth_level);
+    if (!isSunVillageApproval()) finalApprovers.sort((a, b) => b.auth_level - a.auth_level);
 
     const btn = document.getElementById("btnSubmit");
     btn.disabled = true; btn.innerText = "처리 중...";
@@ -12693,6 +12783,7 @@ async function handleDraftSubmit(e) {
         emp_id: u.emp_id,
         name: u.emp_name,
         position: u.position,
+        ...(isSunVillageApproval() ? { stage: idx === 0 ? 'review' : 'final_approval' } : {}),
         status: '대기',
         comment: '',
         processed_at: null,
@@ -12813,10 +12904,10 @@ async function procDoc(docId, action) {
     await waitForModalHidden(relViewModalEl);
 
     const ok = await showConfirm(
-        safeAction === '반려' ? '이 문서를 반려하시겠습니까?' : '이 문서를 승인하시겠습니까?',
+        safeAction === '반려' ? '이 문서를 반려하시겠습니까?' : `이 문서를 ${getApprovalPositiveActionLabel()}하시겠습니까?`,
         {
-            title: safeAction === '반려' ? '문서 반려' : '문서 승인',
-            okText: safeAction === '반려' ? '반려' : '승인',
+            title: safeAction === '반려' ? '문서 반려' : `문서 ${getApprovalPositiveActionLabel()}`,
+            okText: safeAction === '반려' ? '반려' : getApprovalPositiveActionLabel(),
             okClass: safeAction === '반려' ? 'btn-danger' : 'btn-success'
         }
     );
@@ -12961,7 +13052,7 @@ async function processApprovalDoc(docId, action, reason = '') {
     } else if (newStatus === '완료') {
         notificationResults.push(await createNotification(doc.drafter_id, '결재 완료', `${doc.title} 문서가 최종 승인되었습니다.`, `approval.html?doc=${docId}`, { doc_id: docId }));
     } else if (nextUser) {
-        notificationResults.push(await createNotification(nextUser, '결재 요청', `${doc.title} 문서 결재 차례입니다.`, `approval.html?doc=${docId}`, { doc_id: docId }));
+        notificationResults.push(await createNotification(nextUser, '결재 요청', `${doc.title} 문서 ${isSunVillageReviewUser() ? '검토가 완료되어 ' : ''}결재 차례입니다.`, `approval.html?doc=${docId}`, { doc_id: docId }));
     }
     if (delegatedFrom) {
         notificationResults.push(await createNotification(
@@ -14087,7 +14178,7 @@ function renderDocs(target, list, isTodo) {
                     btnHtml = `<div class="mt-2 text-end">${delegatedBadge}${todoActions.join('')}<span class="badge bg-warning text-dark">실물결재 대기</span><div class="small text-muted mt-2">실물 서명 후 사무국장이 서명본을 첨부하면 완료됩니다.</div></div>`;
                 }
             } else {
-                btnHtml = `<div class="mt-2 text-end">${delegatedBadge}${todoActions.join('')}<button type="button" class="btn btn-sm btn-success me-1" onclick="procDoc(${doc.id},'승인')">승인</button><button type="button" class="btn btn-sm btn-danger" onclick="procDoc(${doc.id},'반려')">반려</button></div>`;
+                btnHtml = `<div class="mt-2 text-end">${delegatedBadge}${todoActions.join('')}<button type="button" class="btn btn-sm btn-success me-1" onclick="procDoc(${doc.id},'승인')">${getApprovalPositiveActionLabel()}</button><button type="button" class="btn btn-sm btn-danger" onclick="procDoc(${doc.id},'반려')">반려</button></div>`;
             }
         } else {
             const actions = [];
@@ -14400,7 +14491,7 @@ function buildPhysicalPrintHtml(doc) {
         if (!entry) return `<div class="stamp-wrap"></div>`;
         if (entry.status === '승인') {
             const dt = entry.processed_at ? formatApprovalKstDateISO(entry.processed_at) : (fallbackDate || '');
-            const label = autoLabel ? '자동승인' : '승인';
+            const label = autoLabel ? '자동승인' : (entry.stage === 'review' ? '검토' : '승인');
             return `<div class="stamp-wrap"><div class="stamp approved">${label}</div>${dt ? `<div class="stamp-date">${dt}</div>` : ''}</div>`;
         }
         if (entry.status === '반려') return `<div class="stamp-wrap"><div class="stamp rejected">반려</div></div>`;
