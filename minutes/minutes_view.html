@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-		    Version: v1.0.70
-		    Change: 2026-09-28 - Match completed audit reports to the refined meeting booklet design.
+		    Version: v1.0.71
+		    Change: 2026-09-29 - Permit assigned non-member directors to view their minutes.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.70 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.71 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -440,7 +440,7 @@
 
     <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.50';
+        import { MinutesService } from './MinutesService.js?v=1.0.52';
         import { SIGNATURE_PREVIEW_BUCKET, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -1811,7 +1811,8 @@
 
         async function init() {
             cachedSession = await MinutesService.getSession();
-            if (cachedSession) {
+            cachedDocumentBoxAccess = await MinutesService.getDocumentBoxAccess(cachedSession?.user?.id || null, cachedSession);
+            if (cachedSession && cachedDocumentBoxAccess?.member?.is_external_director !== true) {
                 const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
                     moduleKey: 'documents',
                     moduleLabel: '문서함',
@@ -1821,7 +1822,6 @@
                 if (!runtimeCheck.ok) return;
             }
             cachedIsAdmin = cachedSession ? await MinutesService.isAdmin(cachedSession.user.id, cachedSession.user.email) : false;
-            cachedDocumentBoxAccess = await MinutesService.getDocumentBoxAccess(cachedSession?.user?.id || null, cachedSession);
             await renderPublishedList();
             if (requestedDocumentId) await openDocumentById(requestedDocumentId);
             // Mark as seen on entry for the active profile (if logged in).

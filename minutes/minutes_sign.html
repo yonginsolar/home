@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.32
-Change: 2026-09-28 - Match audit review and signing to the refined meeting booklet design.
+Version: v1.2.33
+Change: 2026-09-29 - Allow verified non-member directors to sign assigned minutes.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-09-28 - Match audit review and signing to the refined meeting bookl
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.32 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.33 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -477,7 +477,7 @@ Change: 2026-09-28 - Match audit review and signing to the refined meeting bookl
 
     <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.50';
+        import { MinutesService } from './MinutesService.js?v=1.0.52';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -1010,7 +1010,7 @@ Change: 2026-09-28 - Match audit review and signing to the refined meeting bookl
             const disconnectBtn = document.getElementById('btnSignatureTelegramDisconnect');
             if (!section || !badge || !help || !meta || !connectBtn || !copyLinkBtn || !copyStartBtn || !disconnectBtn) return;
 
-            const shouldShow = myOfficialIds.length > 0 || isAdminUser;
+            const shouldShow = (myOfficialIds.length > 0 && !myOfficialRows.some(row => row?.is_external_director === true)) || isAdminUser;
             const isAdminPreviewOnly = isAdminUser && myOfficialIds.length === 0;
             section.classList.toggle('hidden', !shouldShow);
             if (!shouldShow) return;
@@ -1313,7 +1313,7 @@ Change: 2026-09-28 - Match audit review and signing to the refined meeting bookl
                 myOfficialId = official.id;
                 mySealUrl = official.seal_url || (myOfficialRows.find(row => row?.seal_url)?.seal_url || null);
             }
-            await loadSignatureTelegramLinkStatus();
+            if (!myOfficialRows.some(row => row?.is_external_director === true)) await loadSignatureTelegramLinkStatus();
             return true;
         }
 
@@ -1837,7 +1837,8 @@ async function openDocumentById(id) {
                 showToast('취소할 서명 정보를 찾지 못했습니다.');
                 return;
             }
-            const { data: deletedRows, error } = await MinutesService.deleteSignature(currentMinuteId, cancelOfficialId);
+            const isExternalDirector = myOfficialRows.some(row => Number(row?.id || 0) === cancelOfficialId && row?.is_external_director === true);
+            const { data: deletedRows, error } = await MinutesService.deleteSignature(currentMinuteId, cancelOfficialId, isExternalDirector);
             const deletedSignatureUrl = Array.isArray(deletedRows) && deletedRows.length > 0
                 ? String(deletedRows[0]?.signature_url || '').trim()
                 : '';
@@ -1863,13 +1864,15 @@ async function openDocumentById(id) {
                 await applyMinutesSignPageTitle();
                 const ok = await initSession();
                 if (!ok) return;
-                const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
-                    moduleKey: 'signature',
-                    moduleLabel: '전자서명',
-                    redirectUrl: `sign_login.html?next=${encodeURIComponent(window.location.href)}`,
-                    alertFn: (msg) => showToast(msg)
-                });
-                if (!runtimeCheck.ok) return;
+                if (!myOfficialRows.some(row => row?.is_external_director === true)) {
+                    const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
+                        moduleKey: 'signature',
+                        moduleLabel: '전자서명',
+                        redirectUrl: `sign_login.html?next=${encodeURIComponent(window.location.href)}`,
+                        alertFn: (msg) => showToast(msg)
+                    });
+                    if (!runtimeCheck.ok) return;
+                }
                 await loadSignList();
             } catch (err) {
                 console.error('minutes_sign init error:', err);

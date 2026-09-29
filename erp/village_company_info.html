@@ -1,0 +1,107 @@
+<!doctype html>
+<!-- Version: v1.0.0 -->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+  <title>마을 기본정보</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+  <script src="./erp_runtime_guard.js?v=20260919-1"></script>
+  <style>body{padding:24px;background:#f8fafc;word-break:keep-all}.page{max-width:760px;margin:auto}.form-label{font-weight:600}</style>
+</head>
+<body class="erp-unified erp-pc-workspace">
+  <main class="page">
+    <div class="d-flex justify-content-between align-items-center gap-3 mb-4">
+      <div><h1 class="h3 mb-1">마을 기본정보</h1><p class="text-muted mb-0">현재 마을의 법인·연락 정보를 관리합니다.</p></div>
+      <a href="index.html" class="btn btn-outline-secondary">ERP 메인</a>
+    </div>
+    <div id="status" class="alert alert-info" role="status">정보를 불러오는 중입니다.</div>
+    <form id="companyForm" class="card border-0 shadow-sm d-none">
+      <div class="card-body p-4">
+        <div class="mb-3"><label for="company_name" class="form-label">조합명</label><input id="company_name" class="form-control" maxlength="120" required></div>
+        <div class="mb-3"><label for="chairman_name" class="form-label">이사장명</label><input id="chairman_name" class="form-control" maxlength="80"></div>
+        <div class="mb-3"><label for="bizNum" class="form-label">사업자등록번호</label><input id="bizNum" class="form-control" maxlength="20" inputmode="numeric"></div>
+        <div class="mb-3"><label for="company_address" class="form-label">주소</label><input id="company_address" class="form-control" maxlength="300"></div>
+        <div class="mb-3"><label for="company_contact_phone" class="form-label">대표 연락처</label><input id="company_contact_phone" type="tel" class="form-control" maxlength="40"></div>
+        <div class="mb-3"><label for="company_contact_email" class="form-label">대표 이메일</label><input id="company_contact_email" type="email" class="form-control" maxlength="160"></div>
+        <button id="saveButton" type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </main>
+  <script>
+    const client = window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co', 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h', {
+      global: { headers: { 'x-erp-host': String(location.hostname || '').trim().toLowerCase() } }
+    });
+    const statusBox = document.getElementById('status');
+    const form = document.getElementById('companyForm');
+    const keys = ['company_name', 'chairman_name', 'bizNum', 'company_address', 'company_contact_phone', 'company_contact_email'];
+    let coopId = null;
+    let saving = false;
+    function showStatus(message, kind = 'info') {
+      statusBox.className = `alert alert-${kind}`;
+      statusBox.textContent = message;
+      statusBox.classList.remove('d-none');
+    }
+    async function boot() {
+      try {
+        const userGate = await window.ErpRuntimeGuard.requireUser(client, { redirectUrl: 'index.html', alertFn: showStatus });
+        if (!userGate.ok) return;
+        const [permissionResult, runtimeGate, workspaceResult, coopResult] = await Promise.all([
+          window.ErpRuntimeGuard.getEffectivePermissions(client),
+          window.ErpRuntimeGuard.enforce(client, { moduleKey: 'hr', moduleLabel: '마을 기본정보', redirectUrl: 'index.html', alertFn: showStatus }),
+          client.rpc('sun_village_workspace_context'),
+          client.rpc('get_my_coop_id')
+        ]);
+        if (!runtimeGate.ok) return;
+        if (workspaceResult.error) throw workspaceResult.error;
+        if (coopResult.error) throw coopResult.error;
+        const current = (workspaceResult.data?.workspaces || []).find(item => item?.is_current === true);
+        if (!current || current.is_management_coop !== false || !coopResult.data || String(current.coop_id) !== String(coopResult.data)) {
+          location.replace('index.html');
+          return;
+        }
+        if (!permissionResult.includes('hr.admin')) {
+          showStatus('마을 기본정보 관리 권한이 없습니다.', 'warning');
+          return;
+        }
+        coopId = String(coopResult.data);
+        const { data, error } = await client.from('ref_company_info').select('key,value').eq('coop_id', coopId).in('key', [...keys, 'orgName', 'ceoName']);
+        if (error) throw error;
+        const info = Object.fromEntries((data || []).map(row => [row.key, row.value || '']));
+        for (const key of keys) document.getElementById(key).value = info[key] || '';
+        if (!info.company_name) document.getElementById('company_name').value = info.orgName || current.coop_name || '';
+        if (!info.chairman_name) document.getElementById('chairman_name').value = info.ceoName || '';
+        form.classList.remove('d-none');
+        statusBox.classList.add('d-none');
+      } catch (error) {
+        showStatus(`기본정보를 불러오지 못했습니다: ${error?.message || '다시 시도해 주세요.'}`, 'danger');
+      }
+    }
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (saving || !coopId) return;
+      saving = true;
+      document.getElementById('saveButton').disabled = true;
+      try {
+        const values = Object.fromEntries(keys.map(key => [key, document.getElementById(key).value.trim()]));
+        if (!values.company_name) throw new Error('조합명을 입력해 주세요.');
+        const updates = keys.map(key => ({ coop_id: coopId, key, value: values[key] }));
+        updates.push({ coop_id: coopId, key: 'orgName', value: values.company_name });
+        updates.push({ coop_id: coopId, key: 'ceoName', value: values.chairman_name });
+        const { error } = await client.from('ref_company_info').upsert(updates, { onConflict: 'coop_id,key' });
+        if (error) throw error;
+        showStatus('마을 기본정보를 저장했습니다.', 'success');
+      } catch (error) {
+        showStatus(`저장하지 못했습니다: ${error?.message || '다시 시도해 주세요.'}`, 'danger');
+      } finally {
+        saving = false;
+        document.getElementById('saveButton').disabled = false;
+      }
+    });
+    boot();
+  </script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 <!-- Version: v1.0.14 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.14 | officials_signature_admin.html');</script>
+  <script>console.log('[Version] v1.0.15 | officials_signature_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -394,7 +394,8 @@
       const total = entries.length;
       const registered = entries.filter((group) => !!group?.seal_url).length;
       const missing = Math.max(0, total - registered);
-      const telegramLinked = entries.filter((group) => {
+      const telegramEligible = entries.filter((group) => !group?.is_external);
+      const telegramLinked = telegramEligible.filter((group) => {
         const memberId = String(group?.member_id || '').trim();
         return !!(memberId && signatureTelegramStatusMap[memberId]?.linked);
       }).length;
@@ -410,7 +411,7 @@
       if (telegramEl) telegramEl.textContent = String(telegramLinked);
 
       if (bannerEl) {
-        const telegramMissing = Math.max(0, total - telegramLinked);
+        const telegramMissing = Math.max(0, telegramEligible.length - telegramLinked);
         const actionButtons = [];
         if (missing > 0) {
           actionButtons.push('<button type="button" class="btn btn-sm btn-outline-primary" onclick="setSignatureFilter(\'missing\')">미등록자 보기</button>');
@@ -463,6 +464,7 @@
       }
       if (filter === 'telegram_missing') {
         return entries.filter((group) => {
+          if (group?.is_external) return false;
           const memberId = String(group?.member_id || '').trim();
           return !memberId || !signatureTelegramStatusMap[memberId]?.linked;
         });
@@ -561,7 +563,7 @@
 
       await loadSignatureTelegramStatusMap();
 
-      const memberIds = [...new Set(filtered.map((row) => row.member_id).filter(Boolean))];
+      const memberIds = [...new Set(filtered.map((row) => row.member_id).filter((id) => id && !String(id).startsWith('external:')))];
       let memberMap = {};
       if (memberIds.length > 0) {
         const { data: members } = await scopeByTenant(_supabase
@@ -587,7 +589,8 @@
             roles: new Set(),
             categories: new Set(),
             seal_url: null,
-            display_name: ''
+            display_name: '',
+            is_external: rawMemberId.startsWith('external:')
           };
           groupKeys.push(key);
         }
@@ -627,7 +630,9 @@
         if (hasElection) categoryParts.push('선거관리');
         const displayCategory = categoryParts.length ? categoryParts.join('/') : '임원';
         const roleText = escapeHtml(Array.from(group.roles).filter(Boolean).join(', ') || '-');
-        const telegramStatus = buildSignatureTelegramStatusHtml(group.member_id);
+        const telegramStatus = group.is_external
+          ? '<span class="text-muted small">서명 링크로 참여</span>'
+          : buildSignatureTelegramStatusHtml(group.member_id);
         const sealPreview = group.seal_url
           ? `<button class="btn btn-sm btn-outline-secondary" type="button" data-preview-key="${group.key}">보기</button>`
           : '<span class="text-muted small">미등록</span>';
@@ -638,7 +643,7 @@
           <tr>
             <td>
               <div class="fw-bold">${name}</div>
-              <div class="text-muted small">${escapeHtml(group.member_id || '-')}</div>
+              <div class="text-muted small">${group.is_external ? '비조합원 이사' : escapeHtml(group.member_id || '-')}</div>
             </td>
             <td>${escapeHtml(displayCategory)}</td>
             <td>${roleText}</td>

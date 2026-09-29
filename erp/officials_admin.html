@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.20 -->
+<!-- Version: v1.0.21 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.20 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.21 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -144,6 +144,7 @@
               <h2 class="h6 mb-3">작업</h2>
               <div class="d-grid gap-2">
                 <button class="btn btn-primary" type="button" onclick="openOfficialFormModal()">등록</button>
+                <button class="btn btn-outline-primary" id="externalDirectorButton" type="button" onclick="openExternalDirectorModal()">비조합원 이사 등록</button>
                 <button class="btn btn-outline-secondary" type="button" id="openMemberSearchBtn" onclick="openMemberSearchModal()">조합원 찾기</button>
                 <button class="btn btn-outline-secondary" type="button" onclick="openOfficialRoleCatalogModal()">직책 설정</button>
                 <button class="btn btn-outline-success d-none" type="button" id="importElectionWinnersBtn" onclick="openElectionImportModal()">당선자 가져오기</button>
@@ -211,6 +212,26 @@
         <div class="text-muted small">검색 결과가 여기에 표시됩니다.</div>
       </div>
     </div>
+  </div>
+
+  <div id="externalDirectorModal" class="overlay-backdrop d-none" role="dialog" aria-modal="true" aria-labelledby="externalDirectorTitle">
+    <form id="externalDirectorForm" class="overlay-panel" style="width:min(650px,100%);">
+      <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+        <div><h2 id="externalDirectorTitle" class="h5 mb-1">비조합원 이사 등록</h2><p class="helper mb-0">조합원 명부에는 추가되지 않습니다. 등록한 이메일로 본인 인증한 뒤 의사록에 서명할 수 있습니다.</p></div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="closeExternalDirectorModal()">닫기</button>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6"><label class="form-label" for="externalDirectorName">이름</label><input id="externalDirectorName" class="form-control" maxlength="80" required></div>
+        <div class="col-md-6"><label class="form-label">직책</label><div class="form-control bg-light">이사</div></div>
+        <div class="col-md-6"><label class="form-label" for="externalDirectorEmail">본인 인증 이메일</label><input id="externalDirectorEmail" type="email" class="form-control" maxlength="254" required></div>
+        <div class="col-md-6"><label class="form-label" for="externalDirectorPhone">연락처</label><input id="externalDirectorPhone" type="tel" class="form-control" maxlength="40"></div>
+        <div class="col-md-6"><label class="form-label" for="externalDirectorStart">임기 시작일</label><input id="externalDirectorStart" type="date" class="form-control" required></div>
+        <div class="col-md-6"><label class="form-label" for="externalDirectorEnd">임기 종료일</label><input id="externalDirectorEnd" type="date" class="form-control" required></div>
+        <div class="col-12"><label class="form-check-label"><input id="externalDirectorRegistered" type="checkbox" class="form-check-input me-2">등기 이사</label></div>
+      </div>
+      <div id="externalDirectorError" class="alert alert-danger d-none mt-3" role="alert"></div>
+      <div class="d-flex justify-content-end gap-2 mt-4"><button type="button" class="btn btn-outline-secondary" onclick="closeExternalDirectorModal()">취소</button><button id="externalDirectorSave" type="submit" class="btn btn-primary">등록</button></div>
+    </form>
   </div>
 
   <div id="officialFormModal" class="overlay-backdrop d-none" role="dialog" aria-modal="true" aria-labelledby="officialFormTitle">
@@ -1536,6 +1557,54 @@
       document.getElementById('officialFormModal')?.classList.add('d-none');
     }
 
+    function openExternalDirectorModal() {
+      closeOfficialFormModal();
+      closeMemberSearchModal();
+      document.getElementById('externalDirectorError')?.classList.add('d-none');
+      document.getElementById('externalDirectorModal')?.classList.remove('d-none');
+      document.getElementById('externalDirectorName')?.focus();
+    }
+
+    function closeExternalDirectorModal() {
+      document.getElementById('externalDirectorModal')?.classList.add('d-none');
+    }
+
+    document.getElementById('externalDirectorForm')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = document.getElementById('externalDirectorSave');
+      if (button.disabled) return;
+      const name = String(document.getElementById('externalDirectorName').value || '').trim();
+      const email = String(document.getElementById('externalDirectorEmail').value || '').trim();
+      const phone = String(document.getElementById('externalDirectorPhone').value || '').trim();
+      const role = '이사';
+      const start = document.getElementById('externalDirectorStart').value;
+      const end = document.getElementById('externalDirectorEnd').value;
+      const errorBox = document.getElementById('externalDirectorError');
+      if (!name || !email || !start || !end || end < start) {
+        errorBox.textContent = '이름·이메일·임기 날짜를 확인해 주세요.';
+        errorBox.classList.remove('d-none');
+        return;
+      }
+      button.disabled = true;
+      errorBox.classList.add('d-none');
+      try {
+        const { error } = await _supabase.rpc('external_director_register', {
+          p_name: name, p_email: email, p_phone: phone || null, p_role: role,
+          p_term_start: start, p_term_end: end, p_is_registered: document.getElementById('externalDirectorRegistered').checked
+        });
+        if (error) throw error;
+        document.getElementById('externalDirectorForm').reset();
+        closeExternalDirectorModal();
+        showAlert('비조합원 이사를 등록했습니다. 본인 인증 이메일로 로그인한 뒤 서명할 수 있습니다.', 'success');
+        await loadOfficials();
+      } catch (error) {
+        errorBox.textContent = error?.message || '등록하지 못했습니다.';
+        errorBox.classList.remove('d-none');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     function openOfficialRoleCatalogModal() {
       document.getElementById('officialRoleCatalogModal')?.classList.remove('d-none');
     }
@@ -1894,6 +1963,7 @@
       const hasAdminFallback = user.role === 'admin' || user.role === 'admin_all';
       const canMemberAdmin = hasPermission(permissionSet, 'member.admin');
       const canSignatureManage = hasPermission(permissionSet, 'signature.manage');
+      document.getElementById('externalDirectorButton')?.classList.toggle('d-none', !(hasAdminFallback || canMemberAdmin === true));
 
       const moduleEnabled =
         isModuleEnabled(currentRuntime, 'member_admin') ||
@@ -2260,7 +2330,7 @@
         const memberCell = rowIndex === 0
           ? `<td class="official-member-cell" rowspan="${group.rows.length}">
               <div class="fw-bold">${escapeHtml(group.displayName)}</div>
-              <div class="text-muted small">조합원 번호: ${escapeHtml(group.memberId || '-')}</div>
+              ${String(group.memberId || '').startsWith('external:') ? '' : `<div class="text-muted small">조합원 번호: ${escapeHtml(group.memberId || '-')}</div>`}
               ${identityLine ? `<div class="text-muted small">${escapeHtml(identityLine)}</div>` : ''}
             </td>`
           : '';

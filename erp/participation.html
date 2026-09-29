@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.20 | Change: 2026-08-26 - Add privacy-safe manual education attendees and verified member linking. -->
+<!-- Version: v1.3.21 | Change: 2026-09-29 - Include non-member directors in board attendance without adding member records. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.3.20 | participation.html');</script>
+  <script>console.log('[Version] v1.3.21 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1087,7 +1087,8 @@
             : null
         };
       });
-      const targetMemberIds = new Set(attendees.map(function(row) { return String(row.member_id); }));
+      const personKey = function(row) { return row.member_id ? `member:${row.member_id}` : `official:${row.official_id}`; };
+      const targetMemberIds = new Set(attendees.map(personKey));
       const additionalEntries = Array.isArray(parsed.additionalAttendeeEntries)
         ? parsed.additionalAttendeeEntries
         : (parsed.additionalAttendeeNames || []).map(function(name) { return { name, actualAttendeeName:'', displayName:name }; });
@@ -1096,14 +1097,14 @@
       }));
       const additionalParsedNames = new Set(additionalEntryMap.keys());
       const additionalOfficials = meetingOfficialsPool(eventType, parsed.startsAt, source).filter(function(official) {
-        return !targetMemberIds.has(String(official.member_uuid))
+        return !targetMemberIds.has(personKey({ member_id:official.member_uuid, official_id:official.official_id }))
           && additionalParsedNames.has(normalizePersonName(official.name));
       });
       additionalOfficials.forEach(function(official) {
         const normalized = normalizePersonName(official.name);
         const parsedEntry = additionalEntryMap.get(normalized) || null;
         matchedNames.add(normalized);
-        targetMemberIds.add(String(official.member_uuid));
+        targetMemberIds.add(personKey({ member_id:official.member_uuid, official_id:official.official_id }));
         attendees.push({
           member_id:official.member_uuid,
           official_id:official.official_id,
@@ -1952,7 +1953,7 @@
       showLoading(true, '행사 정보를 불러오는 중...');
       showAlert('pageAlert', '');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_get_event', { p_event_id:eventId });
+        const { data, error } = await _supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId });
         if (error) throw error;
         const { data:mediaData, error:mediaError } = await _supabase.rpc('participation_admin_get_event_media', { p_event_id:eventId });
         if (mediaError) throw mediaError;
@@ -2888,7 +2889,7 @@
           });
           eventId = imported.event_id || null;
         } else {
-          const { data, error } = await _supabase.rpc('participation_admin_save_event', {
+          const { data, error } = await _supabase.rpc('participation_admin_save_event_v2', {
             p_event_id:formState.eventId,
             p_request_key:formState.requestKey,
             p_event_type:values.type,
@@ -2975,7 +2976,7 @@
       if (showCover) showLoading(true, '참여 현황을 불러오는 중...');
       showAlert('pageAlert', '');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_get_dashboard');
+        const { data, error } = await _supabase.rpc('participation_admin_get_dashboard_v2');
         if (error) throw error;
         dashboardData = {
           coop_id:data?.coop_id || null,

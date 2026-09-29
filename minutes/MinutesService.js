@@ -1,5 +1,5 @@
 /*
-Version: v1.0.51
+Version: v1.0.52
 Change: 2026-09-19 - Normalize tenant-scoped organization contact fields for meeting documents.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -10,8 +10,14 @@ let cachedVisibleCoopId = undefined;
 async function getRuntimeCoopId() {
     if (cachedRuntimeCoopId) return cachedRuntimeCoopId;
     const { data, error } = await supabase.rpc('get_my_erp_runtime');
-    if (error || !data?.coop_id) return null;
-    cachedRuntimeCoopId = data.coop_id;
+    if (!error && data?.coop_id) {
+        cachedRuntimeCoopId = data.coop_id;
+        return cachedRuntimeCoopId;
+    }
+    // 비조합원 이사는 ERP 직원이 아니므로, 본인 이메일 인증으로 연결된 임원만 사용한다.
+    const { data: external, error: externalError } = await supabase.rpc('external_director_claim');
+    if (externalError || !Array.isArray(external) || !external[0]?.coop_id) return null;
+    cachedRuntimeCoopId = external[0].coop_id;
     return cachedRuntimeCoopId;
 }
 
@@ -206,10 +212,18 @@ async function getDocumentBoxAccess(uid = null, sessionOverride = null) {
     const resolvedUid = uid || user?.id || null;
     const member = await resolveMember(resolvedUid, session);
     const allOfficials = await getOfficialsByMemberId(member?.member_id);
-    const eligibleOfficials = getDocumentBoxEligibleOfficials(allOfficials);
+    let eligibleOfficials = getDocumentBoxEligibleOfficials(allOfficials);
+    let externalMember = null;
+    if (eligibleOfficials.length === 0 && resolvedUid) {
+        const { data: external, error: externalError } = await supabase.rpc('external_director_claim');
+        if (!externalError && Array.isArray(external) && external.length > 0) {
+            eligibleOfficials = getDocumentBoxEligibleOfficials(external);
+            externalMember = { id: resolvedUid, name: external[0]?.name || '', is_external_director: true };
+        }
+    }
     const admin = resolvedUid ? await isAdmin(resolvedUid, user?.email || '') : false;
     return {
-        member: member || null,
+        member: member || externalMember || null,
         isAdmin: !!admin,
         officials: eligibleOfficials,
         canAccess: !!admin || eligibleOfficials.length > 0
@@ -251,6 +265,17 @@ async function getMyOfficial(session) {
     const authMember = await resolveMember(session.user.id, session, { includeActiveProfile: false });
     const authOfficials = await getOfficialsByMemberId(authMember?.member_id);
     const authOfficial = pickPrimaryOfficial(authOfficials);
+    if (!authOfficial && !official) {
+        const { data: external, error: externalError } = await supabase.rpc('external_director_claim');
+        if (!externalError && Array.isArray(external) && external.length > 0) {
+            const primary = pickPrimaryOfficial(external);
+            return {
+                member: { id: session.user.id, name: primary?.name || '', member_id: null },
+                official: primary,
+                officials: external
+            };
+        }
+    }
     return {
         member: authMember || member || null,
         official: authOfficial || official || null,
@@ -285,8 +310,8 @@ async function getOfficials() {
         ...o,
         role: o.role || o.position || o.category || '',
         position: o.position || o.role || o.category || '',
-        name: memberMap[o.member_id]?.name || '',
-        member_type: memberMap[o.member_id]?.member_type || ''
+        name: memberMap[o.member_id]?.name || o.name || '',
+        member_type: memberMap[o.member_id]?.member_type || o.official_member_type || ''
     }));
 }
 
@@ -666,9 +691,9 @@ async function updateMyAuditReport(minuteId, content) {
     });
 }
 
-async function deleteSignature(minuteId, officialId) {
+async function deleteSignature(minuteId, officialId, isExternalDirector = false) {
     if (!minuteId || !officialId) return { error: { message: 'missing ids' } };
-    return await supabase.rpc('cancel_my_signature', {
+    return await supabase.rpc(isExternalDirector ? 'external_director_cancel_signature' : 'cancel_my_signature', {
         p_minute_id: minuteId,
         p_official_id: officialId
     });

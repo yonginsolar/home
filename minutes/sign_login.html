@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.12
-Change: 2026-09-10 - Send the current cooperative host with email OTP requests for tenant-specific Auth email branding.
+Version: v1.0.13
+Change: 2026-09-29 - Accept verified non-member director email login for assigned minutes.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.12 | sign_login.html');</script>
+    <script>console.log('[Version] v1.0.13 | sign_login.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -403,7 +403,7 @@ Change: 2026-09-10 - Send the current cooperative host with email OTP requests f
 
         async function handleLinkedSession() {
             try {
-                setLoading('조합원 프로필을 확인하고 있습니다...');
+                setLoading('서명자 정보를 확인하고 있습니다...');
                 const claimResult = await Promise.race([
                     _supabase.rpc('claim_member_profile'),
                     new Promise((resolve) => setTimeout(() => resolve({
@@ -414,6 +414,11 @@ Change: 2026-09-10 - Send the current cooperative host with email OTP requests f
                 const claimRes = claimResult?.data || null;
                 const claimErr = claimResult?.error || null;
                 if (claimErr || !claimRes?.success) {
+                    const external = await _supabase.rpc('external_director_claim');
+                    if (!external.error && Array.isArray(external.data) && external.data.length > 0) {
+                        continueToSign();
+                        return;
+                    }
                     const message = claimErr?.message || claimRes?.message || '';
                     setGlobalError('');
                     document.getElementById('linkErrorMessage').textContent = mapClaimFailureMessage(message);
