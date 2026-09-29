@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.83 | Change: 2026-09-29 - Show sun-village management only to appointed overall managers. -->
+<!-- Version: v1.0.84 | Change: 2026-09-29 - Keep platform menu out of village ERP and prevent global logout on local session recovery. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.83 | index.html');</script>
+  <script>console.log('[Version] v1.0.84 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -45,7 +45,7 @@
 </script>
   <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="/shared/auth_email_helper.js?v=1.0.0"></script>
-  <script src="erp_runtime_guard.js?v=20260919-1"></script>
+  <script src="erp_runtime_guard.js?v=20260929-2"></script>
   <script src="/shared/auth_broker_helper.js?v=20260909-1"></script>
   
   <style>
@@ -603,6 +603,9 @@ function renderWorkspaceSwitcher(context) {
     const incomingContext = context && typeof context === 'object' ? context : null;
     const allWorkspaces = Array.isArray(incomingContext?.workspaces) ? incomingContext.workspaces : [];
     const currentWorkspace = allWorkspaces.find(item => item?.is_current === true) || null;
+    if (currentWorkspace?.is_management_coop === false) {
+        document.getElementById('btnPlatform')?.classList.add('hidden');
+    }
     const villageWorkspaces = allWorkspaces.filter(item => item?.is_management_coop !== true);
     workspaceSwitchContext = incomingContext ? { ...incomingContext, workspaces: villageWorkspaces } : null;
     const wrapper = document.getElementById('workspaceSwitcher');
@@ -1524,7 +1527,7 @@ function recordMagicLinkAttempt(email, success) {
 async function signOutSilently(client = _supabase) {
     suppressSessionExpiredHandling = true;
     try {
-        if (client && client.auth) await client.auth.signOut();
+        if (client && client.auth) await client.auth.signOut({ scope: 'local' });
     } catch (e) {
         console.error('Silent sign-out failed:', e);
     } finally {

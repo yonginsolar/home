@@ -1,5 +1,5 @@
 window.ErpRuntimeGuard = {
-  version: '1.4.0',
+  version: '1.4.1',
   showInlineAlert: function(message) {
     const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
     try {
@@ -62,12 +62,15 @@ window.ErpRuntimeGuard = {
     const status = window.ErpRuntimeGuard.getErrorStatus(error);
     const code = String(error?.code || error?.name || '').trim().toUpperCase();
     const message = String(error?.message || error || '').trim().toUpperCase();
-    if (status === 401 || status === 403) return true;
+    // PostgREST maps 42501 to 403 for authenticated users (401 otherwise).
+    // A permissions failure must not be treated as an expired login.
+    if (code === '42501') return false;
     if (code === 'PGRST301' || code === 'AUTHSESSIONMISSINGERROR') return true;
-    return message.includes('JWT EXPIRED')
+    if (message.includes('JWT EXPIRED')
       || message.includes('INVALID JWT')
       || message.includes('AUTH SESSION MISSING')
-      || message.includes('REFRESH TOKEN');
+      || message.includes('REFRESH TOKEN')) return true;
+    return status === 401;
   },
   waitForRetry: function(delayMs) {
     return new Promise(function(resolve) {
@@ -296,7 +299,7 @@ window.ErpRuntimeGuard = {
       } catch (_) {}
       if (signOutOnInactive) {
         try {
-          await _supabase.auth.signOut();
+          await _supabase.auth.signOut({ scope: 'local' });
         } catch (_) {}
       }
       setTimeout(function() {
