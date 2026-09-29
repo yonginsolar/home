@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.155
-Change: Keep the contribution-certificate seal inside the printed border.
+Version: v1.0.156
+Change: Show a server-authorized read-only audit card to current auditors and the platform administrator.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.155 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.156 | membermanage.html');</script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1805,6 +1805,13 @@ NO. <span id="infoMemberId">-</span>
       <div class="quick-title"><i class="bi bi-journal-text me-1"></i>문서함</div>
       <div class="quick-desc">공개 문서 보기</div>
       <button onclick="openDocumentBox()" class="quick-btn btn btn-secondary">문서함 열기</button>
+    </div>
+  </div>
+  <div class="quick-col hidden">
+    <div id="quickAuditCard" class="quick-card quick-purple hidden">
+      <div class="quick-title"><i class="bi bi-clipboard2-check me-1"></i>감사 열람</div>
+      <div class="quick-desc">회계 장부와 확정 문서 확인</div>
+      <a href="member_audit.html" class="quick-btn btn btn-primary">감사 자료 열기</a>
     </div>
   </div>
   <div class="quick-col hidden">
@@ -7042,6 +7049,7 @@ const voteCard = document.getElementById('quickVoteCard');
 const solarCard = document.getElementById('quickSolarCard');
 const minutesSignCard = document.getElementById('quickMinutesSignCard');
 const minutesViewCard = document.getElementById('quickMinutesViewCard');
+const auditCard = document.getElementById('quickAuditCard');
 const participationCard = document.getElementById('quickParticipationCard');
 const signBadge = document.getElementById('signTodoBadge');
 const docBadge = document.getElementById('docTodoBadge');
@@ -7060,6 +7068,8 @@ const setQuickCardVisible = (cardEl, visible) => {
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 setQuickCardTodoState(minutesViewCard, docBadge, false);
 setQuickCardVisible(participationCard, !isSiteMemberPortalProfile());
+setQuickCardVisible(auditCard, false);
+void loadAuditPortalEntry(member, auditCard, setQuickCardVisible);
 if (!isSiteMemberPortalProfile()) loadParticipationCardSummary(member?.id || curMem?.id);
 
 setQuickCardButtonState(minutesSignCard, {
@@ -7133,6 +7143,22 @@ if (minutesViewCard && docBadge) {
 // 선거/태양광 노출은 기존 로직에서 제어 (카드 DOM만 여기서 초기화)
 setQuickCardVisible(voteCard, false);
 setQuickCardVisible(solarCard, false);
+}
+
+async function loadAuditPortalEntry(member, card, setVisible) {
+    if (!card || !member || isSiteMemberPortalProfile()) return;
+    const rootProfileId = getRootMemberProfileId();
+    if (rootProfileId && String(member.id) !== String(rootProfileId)) return;
+    try {
+        const coopId = await getCurrentMemberCoopId();
+        if (!coopId) return;
+        const { data, error } = await _supabase.rpc('can_view_member_audit_portal', { p_coop_id: coopId });
+        if (error) throw error;
+        if (curMem?.id === member.id) setVisible(card, data === true);
+    } catch (error) {
+        // 열람 권한 확인에 실패하면 카드를 숨긴 채 유지한다.
+        console.warn('audit portal access check failed:', error?.code || 'unavailable');
+    }
 }
 
 function getHistoryModalRecentNotice(type, displayedCount) {

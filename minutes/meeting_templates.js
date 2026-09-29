@@ -1,6 +1,6 @@
 /*
-Version: v1.7.0
-Change: 2026-09-28 - Give audit reports and business plans a clearer document hierarchy for screen and print.
+Version: v1.7.1
+Change: 2026-09-29 - Split board chair and secretariat scripts and use the final vote declaration wording.
 */
 
 const safe = (value) => String(value ?? '')
@@ -104,7 +104,7 @@ export function buildBoardMaterials({ row, agendas, coopName, company }) {
   const groupBlock = (title, label, rows) => `
     <h2>${safe(title)}</h2>
     ${rows.length ? rows.map((agenda, index) => numberedAgenda(agenda, label, index)).join('') : '<p class="empty-line">등록된 안건이 없습니다.</p>'}`;
-  return `<article class="board-one-paper">
+  return `<article class="board-one-paper" data-chapter-id="board-materials">
     <h1>${safe(coopName)} ${safe(row.title)} 회의자료</h1>
     ${boardMeta(row)}
     ${groupBlock('1. 보고 안건', '보고', groups.REPORT)}
@@ -135,14 +135,15 @@ function boardScenarioAgenda(agenda, index, facilitator) {
     <p class="speaker"><strong>의장</strong> ${kind} 제${number}호, 「${title}」을 상정합니다.</p>
     <p class="speaker"><strong>${safe(facilitator)}</strong> ${report}</p>
     <p class="speaker"><strong>의장</strong> 설명 잘 들었습니다. 질문이나 의견 있으십니까?</p>
-    <p class="speaker"><strong>의장</strong> ${decision}</p>${note}${memo}`;
+    <p class="speaker"><strong>의장</strong> ${decision}</p>
+    ${agenda.agenda_kind === 'DECISION' ? '<p class="action">가결된 경우에만 다음 문구를 사용합니다.</p><p class="speaker"><strong>의장</strong> 원(수정)안대로 가결되었음을 선포합니다.</p>' : ''}${note}${memo}`;
 }
 
 export function buildBoardScenario({ row, agendas, chairName, coopName, company }) {
   const facilitator = row.facilitator_name || '사무국장';
   const body = (agendas || []).map((agenda, index) => boardScenarioAgenda(agenda, index, facilitator)).join('<hr>');
   return `<article class="board-scenario">
-    <h1>${safe(coopName)} ${safe(row.title)} 진행 시나리오</h1>
+    <h1>${safe(coopName)} ${safe(row.title)} 사무국장용 진행 시나리오</h1>
     <p class="scenario-meta"><strong>일시</strong> ${dateText(row.meeting_date)} ${timeText(row)}　<strong>장소</strong> ${safe(row.location || '미정')}　<strong>진행</strong> ${safe(chairName || '의장')}</p>
     ${organizationInfo(company, coopName)}
     ${row.document_notes ? `<p><strong>준비 메모</strong><br>${blocks(row.document_notes)}</p>` : ''}
@@ -153,6 +154,30 @@ export function buildBoardScenario({ row, agendas, chairName, coopName, company 
     ${body || '<p>등록된 안건이 없습니다.</p>'}
     <h2>폐회 선언</h2>
     <p class="speaker"><strong>의장</strong> ${blocks(row.closing_message, '이상으로 모든 안건 처리를 마쳤습니다. 참석해 주신 여러분께 감사드리며 폐회를 선언합니다.')}</p>
+  </article>`;
+}
+
+export function buildBoardChairScenario({ row, agendas, chairName, coopName, company }) {
+  const facilitator = row.facilitator_name || '사무국장';
+  const agendaRows = (agendas || []).map((agenda, index) => {
+    const number = index + 1;
+    const title = safe(agenda.title || '안건 제목을 입력하세요');
+    const kind = agenda.agenda_kind === 'REPORT' ? '보고' : agenda.agenda_kind === 'DISCUSSION' ? '토의' : agenda.agenda_kind === 'OTHER' ? '기타' : '의결';
+    return `<h2>[${kind} 제${number}호: ${title}]</h2>
+      <p class="speaker"><strong>의장</strong> ${kind} 제${number}호, 「${title}」을 상정합니다. ${safe(facilitator)}께서 설명해 주시기 바랍니다.</p>
+      <p class="speaker"><strong>의장</strong> 설명 잘 들었습니다. 질문이나 의견 있으십니까?</p>
+      ${agenda.agenda_kind === 'DECISION' ? '<p class="speaker"><strong>의장</strong> 의결에 이의 없으십니까?</p><p class="action">가결된 경우에만 다음 문구를 사용합니다.</p><p class="speaker"><strong>의장</strong> 원(수정)안대로 가결되었음을 선포합니다.</p>' : ''}`;
+  }).join('<hr>');
+  return `<article class="board-scenario">
+    <h1>${safe(coopName)} ${safe(row.title)} 의장용 진행 시나리오</h1>
+    <p class="scenario-meta"><strong>일시</strong> ${dateText(row.meeting_date)} ${timeText(row)}　<strong>장소</strong> ${safe(row.location || '미정')}　<strong>의장</strong> ${safe(chairName || '의장')}</p>
+    ${organizationInfo(company, coopName)}
+    <h2>개회 선언</h2>
+    <p class="speaker"><strong>의장</strong> ${blocks(row.opening_message, `현재 재적 이사 ${Number(row.eligible_count || 0)}명 중 ____명이 참석하여 이사회 성원이 충족되었습니다.`)}</p>
+    <p class="speaker"><strong>의장</strong> 지금부터 ${safe(row.title)}를 개회하겠습니다.</p>
+    ${agendaRows || '<p>등록된 안건이 없습니다.</p>'}
+    <h2>폐회 선언</h2>
+    <p class="speaker"><strong>의장</strong> ${blocks(row.closing_message, '이상으로 모든 안건 처리를 마쳤습니다. 폐회를 선언합니다.')}</p>
   </article>`;
 }
 
@@ -600,6 +625,8 @@ export function buildAssemblyScenario({ row, agendas, chairName, coopName, compa
     <p class="speaker"><strong>${safe(facilitator)}</strong> ${blocks(item.sourceAgenda?.office_report || item.proposal, '자료집 내용에 따라 설명드리겠습니다.')}</p>
     <p class="speaker"><strong>의장</strong> 질문이나 의견 있으십니까?</p>
     <p class="speaker"><strong>의장</strong> ${blocks(item.decision, '원안대로 승인하는 데 이의 없으십니까?')}</p>
+    <p class="action">가결된 경우에만 다음 문구를 사용합니다.</p>
+    <p class="speaker"><strong>의장</strong> 원(수정)안대로 가결되었음을 선포합니다.</p>
     ${item.sourceAgenda?.scenario_notes ? `<p class="action"><strong>진행 참고</strong> ${blocks(item.sourceAgenda.scenario_notes)}</p>` : ''}`).join('');
   return `<article class="assembly-scenario">
     <h1>${safe(coopName)} ${safe(row.title)} 시나리오</h1>
@@ -635,7 +662,8 @@ export function buildPreMeetingDocuments(context) {
   }
   return [
     { type: 'MATERIALS', title: `${row.title} 회의자료`, content: buildBoardMaterials({ ...context, row }) },
-    { type: 'SCENARIO', title: `${row.title} 진행 시나리오`, content: buildBoardScenario({ ...context, row }) }
+    { type: 'SCENARIO', title: `${row.title} 의장용 진행 시나리오`, content: buildBoardChairScenario({ ...context, row }) },
+    { type: 'SCENARIO_SECRETARIAT', title: `${row.title} 사무국장용 진행 시나리오`, content: buildBoardScenario({ ...context, row }) }
   ];
 }
 

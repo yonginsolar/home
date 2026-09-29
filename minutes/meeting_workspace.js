@@ -1,18 +1,18 @@
 /*
-Version: v1.9.1
-Change: 2026-09-29 - Load the shared minutes service with non-member director support.
+Version: v1.9.2
+Change: 2026-09-29 - Simplify board agenda input, add PDF annexes and dual board scripts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.0';
-import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.0';
+import { buildAuditReportDraft, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.1';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
 const KIND_LABEL = { REPORT: '보고 안건', DECISION: '의결 안건', DISCUSSION: '논의 안건', OTHER: '기타 안건' };
-const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '진행 시나리오' };
+const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '의장용 진행 시나리오', SCENARIO_SECRETARIAT: '사무국장용 진행 시나리오' };
 const STATUS_LABEL = { DRAFT: '초안', READY: '회의 전 문서 준비', FINAL: '완료' };
 
 const state = {
@@ -498,6 +498,7 @@ function fillInfoForm() {
 
 function renderAgendaList() {
   const container = $('agendaList');
+  const board = state.current?.meeting_type === 'BOARD';
   if (!state.agendas.length) {
     container.innerHTML = '<div class="empty">등록된 안건이 없습니다.<br>보고·의결·논의할 안건을 추가해 주세요.</div>';
     return;
@@ -517,7 +518,8 @@ function renderAgendaList() {
         </div>
       </div>
       <div class="agenda-details">
-        <div class="field"><label>한눈에 보는 내용</label><textarea data-field="summary" placeholder="목차와 안건 요약에 사용할 짧은 설명">${escapeHtml(row.summary || '')}</textarea></div>
+        <div class="field" ${board ? 'style="grid-column:1/-1;"' : ''}><label>${board ? '짧은 안건 설명' : '한눈에 보는 내용'}</label><textarea data-field="summary" placeholder="${board ? '회의자료 초안에 넣을 핵심만 적어 주세요. 자세한 내용은 회의 전 문서에서 편집할 수 있습니다.' : '목차와 안건 요약에 사용할 짧은 설명'}">${escapeHtml(row.summary || '')}</textarea></div>
+        ${board ? '' : `
         <div class="field"><label>배경·필요성</label><textarea data-field="background" placeholder="왜 이 안건을 다루는지">${escapeHtml(row.background || '')}</textarea></div>
         <div class="field"><label>제안·보고 본문</label><textarea data-field="proposal_text" placeholder="자료집에 들어갈 핵심 내용">${escapeHtml(row.proposal_text || '')}</textarea></div>
         <div class="field"><label>사무국 설명</label><textarea data-field="office_report" placeholder="진행 시나리오의 설명 담당 문구">${escapeHtml(row.office_report || '')}</textarea></div>
@@ -529,6 +531,7 @@ function renderAgendaList() {
           <span><strong>신구조문 대비표 포함</strong><small>정관·규약·규정을 바꾸는 안건일 때만 선택하세요. 기본값은 사용하지 않음입니다.</small></span>
         </label>
         <div class="field" style="grid-column:1/-1;"><label>비공개 안건 메모</label><textarea data-field="private_notes" placeholder="확인할 일과 내부 메모. 문서에는 자동 포함되지 않습니다.">${escapeHtml(row.private_notes || '')}</textarea></div>
+        `}
       </div>
     </article>
   `).join('');
@@ -537,7 +540,7 @@ function renderAgendaList() {
 function collectAgendasFromDom() {
   return [...document.querySelectorAll('.agenda-card')].map((card, index) => {
     const row = state.agendas[index] || {};
-    const value = (name) => card.querySelector(`[data-field="${name}"]`)?.value.trim() || '';
+    const value = (name) => card.querySelector(`[data-field="${name}"]`)?.value.trim() ?? String(row[name] || '');
     return {
       ...(row.id ? { id: row.id } : {}),
       agenda_kind: value('agenda_kind') || 'DECISION',
@@ -552,13 +555,14 @@ function collectAgendasFromDom() {
       discussion_notes: row.discussion_notes || '',
       document_notes: value('document_notes'),
       private_notes: value('private_notes'),
-      requires_article_comparison: card.querySelector('[data-field="requires_article_comparison"]')?.checked === true
+      requires_article_comparison: card.querySelector('[data-field="requires_article_comparison"]')?.checked ?? row.requires_article_comparison === true
     };
   });
 }
 
 function updateDocumentModeLabels() {
   const assembly = $('meetingType').value === 'GENERAL_ASSEMBLY';
+  if (assembly && state.activeDocument === 'SCENARIO_SECRETARIAT') state.activeDocument = 'SCENARIO';
   const regularAssembly = assembly && $('assemblyKind').value !== 'EXTRAORDINARY';
   $('assemblyKindField').hidden = !assembly;
   $('fiscalYearField').hidden = !regularAssembly;
@@ -569,6 +573,8 @@ function updateDocumentModeLabels() {
   $('assemblyBookletPanel').hidden = !regularAssembly;
   $('bookPrintHelp').hidden = !assembly;
   $('materialsTab').textContent = assembly ? '📚 총회 자료집' : '📄 이사회 회의자료';
+  $('scenarioTab').textContent = assembly ? '🎙️ 총회 진행 시나리오' : '🎙️ 의장용 시나리오';
+  $('secretariatScenarioTab').hidden = assembly;
   $('agendaModeNotice').textContent = assembly
     ? (regularAssembly
       ? '정기총회는 전차 의사록·감사·사업보고 및 결산·조건부 배당·조건부 출자금 반환·사업계획·차입금 한도·기타안건을 기본 순서로 구성합니다. 위 자료집 입력을 먼저 확인하고, 아래에는 그 밖에 추가로 심의할 의안만 적으세요.'
@@ -890,17 +896,28 @@ function formatFileSize(bytes) {
 }
 
 function activeChapterPdfAttachments() {
-  return state.pdfAttachments.filter(row => row.insert_after_chapter_id === state.activeChapterId);
+  return state.pdfAttachments.filter(row => row.insert_after_chapter_id === activePdfAttachmentAnchor());
+}
+
+function activePdfAttachmentAnchor() {
+  if (chapterMode() && state.activeChapterId) return state.activeChapterId;
+  if (state.current?.meeting_type === 'BOARD' && state.activeDocument === 'MATERIALS') return 'board-materials';
+  return '';
 }
 
 function renderPdfAttachmentList() {
   if (!$('pdfAttachmentPanel') || !$('pdfAttachmentList')) return;
-  const available = chapterMode() && state.activeDocument === 'MATERIALS' && Boolean(state.activeChapterId);
+  const available = state.activeDocument === 'MATERIALS' && Boolean(activePdfAttachmentAnchor());
   $('pdfAttachmentPanel').hidden = !available;
   if (!available) {
     $('pdfAttachmentList').replaceChildren();
     return;
   }
+  const board = state.current?.meeting_type === 'BOARD';
+  $('pdfAttachmentHeading').textContent = board ? '이사회 회의자료 별첨 PDF' : '이 챕터 뒤에 PDF 자료 붙이기';
+  $('pdfAttachmentHelp').textContent = board
+    ? '긴 규정안이나 참고 자료를 붙이면 회의자료 뒤에 별첨으로 인쇄됩니다. PDF는 20MB·100쪽 이하로 준비해 주세요.'
+    : '별도로 만든 PDF를 붙이면 자료집 인쇄 시 현재 챕터 바로 뒤에 합쳐집니다.';
   const rows = activeChapterPdfAttachments();
   $('pdfAttachmentList').innerHTML = rows.length
     ? rows.map(row => `<div class="pdf-attachment-row" data-pdf-attachment-id="${escapeHtml(row.id)}">
@@ -950,7 +967,6 @@ function renderActiveDocument() {
   const useChapters = chapterMode();
   $('documentEditor').hidden = useChapters;
   $('chapterLayout').hidden = !useChapters;
-  $('pdfAttachmentPanel').hidden = !useChapters;
   if (useChapters) {
     state.chapters = parseChapters(doc.content_html || '');
     if (!state.chapters.length) {
@@ -1002,7 +1018,8 @@ function rememberActiveDocument() {
 function defaultDocumentTitle(type) {
   const title = state.current?.title || '회의';
   if (type === 'MATERIALS') return state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? `${title} 자료집` : `${title} 회의자료`;
-  return `${title} 진행 시나리오`;
+  if (type === 'SCENARIO_SECRETARIAT') return `${title} 사무국장용 진행 시나리오`;
+  return state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? `${title} 진행 시나리오` : `${title} 의장용 진행 시나리오`;
 }
 
 function generatedDocumentRows() {
@@ -1305,7 +1322,7 @@ async function generateAllDocuments() {
   renderPackages();
   showToast(state.current.meeting_type === 'GENERAL_ASSEMBLY'
     ? '총회 자료집 챕터와 진행 시나리오를 다시 만들었습니다.'
-    : '이사회 회의자료와 진행 시나리오를 다시 만들었습니다.', 3200);
+    : '이사회 회의자료와 의장용·사무국장용 시나리오를 다시 만들었습니다.', 3200);
 }
 
 async function saveActiveDocument() {
@@ -1684,7 +1701,8 @@ function deleteChapter() {
 }
 
 async function addPdfAttachment(file) {
-  if (!state.current || !chapterMode() || !state.activeChapterId) throw new Error('PDF를 붙일 챕터를 먼저 선택해 주세요.');
+  const anchor = activePdfAttachmentAnchor();
+  if (!state.current || !anchor) throw new Error('PDF를 붙일 회의자료나 챕터를 먼저 선택해 주세요.');
   if (!file) return;
   if (file.size > 20 * 1024 * 1024) throw new Error('PDF 파일은 20MB 이하만 첨부할 수 있습니다.');
   const inspected = await inspectPdfFile(file);
@@ -1693,7 +1711,7 @@ async function addPdfAttachment(file) {
   const existing = activeChapterPdfAttachments();
   const { data, error } = await MeetingPackageService.uploadPdfAttachment(state.current.id, file, {
     title,
-    insert_after_chapter_id: state.activeChapterId,
+    insert_after_chapter_id: anchor,
     page_count: inspected.pageCount,
     sort_order: existing.length ? Math.max(...existing.map(row => Number(row.sort_order || 0))) + 1 : 0
   });
@@ -1701,7 +1719,7 @@ async function addPdfAttachment(file) {
   state.pdfAttachments.push(data);
   state.pdfAttachments.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
   renderPdfAttachmentList();
-  showToast(`「${title}」 ${inspected.pageCount}쪽을 이 챕터 뒤에 붙였습니다.`);
+  showToast(`「${title}」 ${inspected.pageCount}쪽을 ${anchor === 'board-materials' ? '이사회 회의자료' : '이 챕터'} 뒤에 붙였습니다.`);
 }
 
 async function deletePdfAttachment(id) {
