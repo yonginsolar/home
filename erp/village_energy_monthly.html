@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.0.0 | 2026-09-29 -->
+<!-- Version: v1.0.1 | 2026-09-29 -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
@@ -26,6 +26,21 @@
     </div>
     <div id="status" class="alert alert-info" role="status">자료를 불러오는 중입니다.</div>
     <section id="workspace" class="d-none">
+      <div class="card mb-4"><div class="card-body p-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <h2 class="h5 mb-0">발전소</h2><button id="plantAddButton" type="button" class="btn btn-outline-primary btn-sm d-none">발전소 등록</button>
+        </div>
+        <div id="plantRows" class="d-flex flex-wrap gap-2"></div>
+        <form id="plantForm" class="d-none mt-3 border-top pt-3">
+          <div class="row g-3">
+            <div class="col-md-5"><label for="plantName" class="form-label">발전소명</label><input id="plantName" class="form-control" required minlength="2" maxlength="100"></div>
+            <div class="col-md-7"><label for="plantLocation" class="form-label">위치</label><input id="plantLocation" class="form-control" maxlength="200"></div>
+            <div class="col-md-4"><label for="plantCapacity" class="form-label">설비용량 (kW)</label><input id="plantCapacity" type="number" min="0" max="1000000" step="0.001" class="form-control"></div>
+            <div class="col-md-4"><label for="plantStatus" class="form-label">진행 상태</label><select id="plantStatus" class="form-select"><option>계획중</option><option>건설중</option><option>운영중</option></select></div>
+          </div>
+          <div class="d-flex gap-2 mt-3"><button id="plantSaveButton" type="submit" class="btn btn-primary">발전소 저장</button><button id="plantCancelButton" type="button" class="btn btn-outline-secondary">취소</button></div>
+        </form>
+      </div></div>
       <div class="card mb-4"><div class="card-body p-4">
         <h2 id="formTitle" class="h5 mb-3">월간 기록</h2>
         <form id="entryForm">
@@ -60,7 +75,10 @@
     let coopId = '';
     let currentId = '';
     let canEdit = false;
+    let canManagePlants = false;
     let saving = false;
+    let savingPlant = false;
+    let editingPlantId = '';
     let plants = [];
     let records = [];
     function message(text, kind='info') {status.className=`alert alert-${kind}`;status.textContent=text;status.classList.remove('d-none');}
@@ -72,6 +90,36 @@
       return value;
     }
     function money(value) {return value==null?'—':Number(value).toLocaleString('ko-KR');}
+    function renderPlants() {
+      const host=$('plantRows');host.replaceChildren();
+      if(!plants.length){const empty=document.createElement('span');empty.className='help';empty.textContent=canManagePlants?'등록된 발전소가 없습니다. 발전소를 먼저 등록해 주세요.':'등록된 발전소가 없습니다. 마을 기본정보 관리자에게 등록을 요청해 주세요.';host.appendChild(empty);return;}
+      plants.forEach(plant=>{
+        const item=document.createElement('div');item.className='border rounded-3 px-3 py-2';
+        const name=document.createElement('strong');name.textContent=plant.name;item.appendChild(name);
+        const detail=document.createElement('span');detail.className='help ms-2';detail.textContent=[plant.location,plant.capacity==null?'':`${money(plant.capacity)} kW`,plant.status].filter(Boolean).join(' · ');item.appendChild(detail);
+        if(canManagePlants){const edit=document.createElement('button');edit.type='button';edit.className='btn btn-link btn-sm';edit.textContent='수정';edit.addEventListener('click',()=>openPlant(plant));item.appendChild(edit);}
+        host.appendChild(item);
+      });
+    }
+    function openPlant(plant=null) {
+      editingPlantId=plant?.id||'';$('plantForm').reset();
+      $('plantName').value=plant?.name||'';$('plantLocation').value=plant?.location||'';
+      $('plantCapacity').value=plant?.capacity??'';$('plantStatus').value=['계획중','건설중','운영중'].includes(plant?.status)?plant.status:'계획중';
+      $('plantForm').classList.remove('d-none');$('plantName').focus();
+    }
+    function closePlant() {editingPlantId='';$('plantForm').reset();$('plantForm').classList.add('d-none');}
+    async function loadPlants() {
+      const {data,error}=await db.from('site_power_plants').select('id,name,location,capacity,status,coop_id').eq('coop_id',coopId).order('display_order',{ascending:true}).order('name');
+      if(error)throw error;plants=(data||[]).filter(row=>row.id&&row.name);
+      const selectedPlant=$('plantId').value,selectedFilter=$('plantFilter').value;
+      $('plantId').replaceChildren();$('plantFilter').replaceChildren();
+      const first=document.createElement('option');first.value='';first.textContent='발전소 선택';$('plantId').appendChild(first);
+      const all=document.createElement('option');all.value='';all.textContent='전체 발전소';$('plantFilter').appendChild(all);
+      plants.forEach(plant=>{const option=document.createElement('option');option.value=plant.id;option.textContent=plant.name;$('plantId').appendChild(option);$('plantFilter').appendChild(option.cloneNode(true));});
+      if(plants.some(p=>p.id===selectedPlant))$('plantId').value=selectedPlant;
+      if(plants.some(p=>p.id===selectedFilter))$('plantFilter').value=selectedFilter;
+      $('saveButton').disabled=!canEdit||!plants.length;renderPlants();
+    }
     function resetForm() {
       currentId='';$('entryForm').reset();$('formTitle').textContent='월간 기록';
       const today=new Date();$('monthStart').value=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
@@ -115,11 +163,10 @@
         if(!current||current.is_management_coop!==false||String(current.coop_id)!==String(coop.data)){location.replace('index.html');return;}
         if(!permissions.includes('accounting.view')&&!permissions.includes('accounting.edit')){message('회계 조회 권한이 없습니다.','warning');return;}
         coopId=String(coop.data);canEdit=permissions.includes('accounting.edit');
-        const {data,error}=await db.from('site_power_plants').select('id,name,coop_id').eq('coop_id',coopId).order('display_order',{ascending:true}).order('name');if(error)throw error;
-        plants=(data||[]).filter(row=>row.id&&row.name);
-        $('plantId').replaceChildren();const first=document.createElement('option');first.value='';first.textContent='발전소 선택';$('plantId').appendChild(first);
-        const options=document.createDocumentFragment();plants.forEach(plant=>{const item=document.createElement('option');item.value=plant.id;item.textContent=plant.name;options.appendChild(item);const filter=item.cloneNode(true);$('plantFilter').appendChild(filter);});$('plantId').appendChild(options);
-        if(!canEdit){$('entryForm').classList.add('d-none');}else if(!plants.length){$('saveButton').disabled=true;}
+        canManagePlants=permissions.includes('hr.admin');
+        if(canManagePlants)$('plantAddButton').classList.remove('d-none');
+        await loadPlants();
+        if(!canEdit)$('entryForm').classList.add('d-none');
         resetForm();await loadRecords();$('workspace').classList.remove('d-none');status.classList.add('d-none');
       }catch(error){message(`발전·정산 자료를 불러오지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
     }
@@ -138,6 +185,21 @@
       finally{saving=false;$('saveButton').disabled=!plants.length;}
     });
     $('newButton').addEventListener('click',resetForm);$('reloadButton').addEventListener('click',()=>loadRecords().catch(error=>message(`새로고침 실패: ${error?.message||error}`,'danger')));$('plantFilter').addEventListener('change',renderRows);
+    $('plantAddButton').addEventListener('click',()=>openPlant());
+    $('plantCancelButton').addEventListener('click',closePlant);
+    $('plantForm').addEventListener('submit',async event=>{
+      event.preventDefault();if(!canManagePlants||savingPlant)return;
+      savingPlant=true;$('plantSaveButton').disabled=true;
+      try{
+        const name=$('plantName').value.trim(),locationText=$('plantLocation').value.trim();
+        const capacityRaw=$('plantCapacity').value.trim(),capacity=capacityRaw?Number(capacityRaw):null;
+        if(name.length<2||name.length>100||locationText.length>200||
+          (capacity!==null&&(!Number.isFinite(capacity)||capacity<0||capacity>1000000)))throw new Error('발전소명·위치·설비용량을 확인해 주세요.');
+        const {error}=await db.rpc('sun_village_save_plant',{p_id:editingPlantId||null,p_name:name,p_location:locationText||null,p_capacity:capacity,p_status:$('plantStatus').value});
+        if(error)throw error;closePlant();await loadPlants();renderRows();message('발전소 기본정보를 저장했습니다.','success');
+      }catch(error){message(`발전소를 저장하지 못했습니다: ${error?.message||'다시 시도해 주세요.'}`,'danger');}
+      finally{savingPlant=false;$('plantSaveButton').disabled=false;}
+    });
     boot();
   </script>
 </body>
