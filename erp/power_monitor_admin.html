@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.0 | Change: 2026-09-24 - Edit homepage plant details and photos in monitoring management. -->
+<!-- Version: v1.3.0 | Change: 2026-09-29 - Manage private provider contacts and handover notes. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.0 | power_monitor_admin.html');</script>
+  <script>console.log('[Version] v1.3.0 | power_monitor_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -121,6 +121,10 @@
     .table td { vertical-align: middle; }
     .empty-box { padding: 34px 20px; border: 1px dashed #b6c2ba; border-radius: 16px; color: var(--solar-muted); text-align: center; background: #fafcfb; }
     .unlinked-note { border-left: 4px solid var(--solar-gold); background: #fff8e6; }
+    .vendor-contact-card { border: 1px solid var(--solar-line); border-radius: 16px; padding: 16px; background: #fafcfb; height: 100%; }
+    .vendor-contact-name { font-size: 17px; font-weight: 900; }
+    .vendor-contact-phone { font-weight: 800; overflow-wrap: anywhere; }
+    .vendor-contact-memo { white-space: pre-wrap; overflow-wrap: anywhere; background: #fff; border: 1px solid var(--solar-line); border-radius: 12px; padding: 12px; margin-top: 12px; }
     .hidden { display: none !important; }
     .saving-shield { pointer-events: none; opacity: .64; }
     .mobile-plant-list { display: none; }
@@ -233,6 +237,17 @@
         </div>
       </div>
       <div class="d-flex flex-wrap gap-2 mt-3" id="sourceStateList"></div>
+    </section>
+
+    <section class="panel-card hidden" id="vendorContactsPanel">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <div class="section-title">업체 담당자 · 인수인계 메모</div>
+          <div class="section-copy mt-1">선택한 모니터의 담당자 연락처와 업무 메모입니다. 통합관리자만 볼 수 있으며 공개 모니터에는 표시되지 않습니다.</div>
+        </div>
+        <button class="btn btn-outline-success" type="button" id="addVendorContactButton">담당자 추가</button>
+      </div>
+      <div id="vendorContactsContent"><div class="empty-box">담당자 정보를 불러오는 중입니다.</div></div>
     </section>
 
     <section class="panel-card">
@@ -373,6 +388,56 @@
     </div>
   </div>
 
+  <div class="modal fade" id="vendorContactModal" tabindex="-1" aria-labelledby="vendorContactModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5 fw-bold" id="vendorContactModalTitle">업체 담당자 추가</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+        </div>
+        <div class="modal-body p-4">
+          <form id="vendorContactForm" novalidate>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label fw-bold" for="vendorProvider">수집 사이트</label>
+                <select class="form-select" id="vendorProvider" required>
+                  <option value="nrems">NREMS</option>
+                  <option value="pveyes">PVEYES</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-bold" for="vendorCompany">업체명</label>
+                <input class="form-control" id="vendorCompany" maxlength="120" required autocomplete="organization">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-bold" for="vendorName">담당자 이름</label>
+                <input class="form-control" id="vendorName" maxlength="80" required autocomplete="name">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-bold" for="vendorTitle">직함</label>
+                <input class="form-control" id="vendorTitle" maxlength="80" autocomplete="organization-title">
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-bold" for="vendorPhone">연락처</label>
+                <input class="form-control" id="vendorPhone" type="tel" inputmode="tel" maxlength="40" required autocomplete="tel" placeholder="010-0000-0000">
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-bold" for="vendorMemo">인수인계 메모</label>
+                <textarea class="form-control" id="vendorMemo" rows="6" maxlength="5000" placeholder="연락 가능 시간, 장애 대응 절차, 업무 인수인계 사항 등"></textarea>
+                <div class="form-text">로그인 비밀번호나 인증번호는 메모에 적지 마세요.</div>
+              </div>
+            </div>
+          </form>
+          <div class="alert hidden mt-3 mb-0" id="vendorContactStatus" role="status" aria-live="polite"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">취소</button>
+          <button type="submit" form="vendorContactForm" class="btn btn-success" id="saveVendorContactButton">담당자 저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -392,6 +457,12 @@
     let plantInfoModal = null;
     let editingPlantContext = null;
     let plantPhotoPreviewObjectUrl = '';
+    let vendorContacts = [];
+    let vendorContactsError = '';
+    let vendorContactModal = null;
+    let editingVendorContactId = null;
+    let editingVendorDashboardId = null;
+    let isSavingVendorContact = false;
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -507,6 +578,161 @@
         const label = state === 'success' ? '수집 성공' : state === 'error' ? '오류' : state === 'partial' ? '일부 수집' : '대기';
         return `<span class="source-chip" title="${escapeHtml(source.safe_message || '')}"><span class="status-dot ${dotClass}"></span>${escapeHtml(source.provider)} · ${label} · ${escapeHtml(formatDateTime(source.last_success_at))}</span>`;
       }).join('');
+    }
+
+    async function loadVendorContacts(dashboardId) {
+      vendorContacts = [];
+      vendorContactsError = '';
+      if (!dashboardId) return;
+      try {
+        const { data, error } = await _supabase
+          .from('power_monitor_vendor_contacts')
+          .select('id,dashboard_id,provider_key,company_name,contact_name,job_title,phone,handover_memo,updated_at')
+          .eq('dashboard_id', dashboardId)
+          .is('deleted_at', null)
+          .order('provider_key')
+          .order('contact_name');
+        if (String(monitorData?.dashboard?.id || '') !== String(dashboardId)) return;
+        if (error) throw error;
+        vendorContacts = Array.isArray(data) ? data : [];
+      } catch (_) {
+        vendorContactsError = '담당자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
+      }
+    }
+
+    function renderVendorContacts() {
+      const dashboard = monitorData?.dashboard;
+      const panel = document.getElementById('vendorContactsPanel');
+      const content = document.getElementById('vendorContactsContent');
+      panel.classList.toggle('hidden', !dashboard);
+      if (!dashboard) return;
+      if (vendorContactsError) {
+        content.innerHTML = `<div class="alert alert-danger mb-0">${escapeHtml(vendorContactsError)}</div>`;
+        return;
+      }
+      if (!vendorContacts.length) {
+        content.innerHTML = '<div class="empty-box">등록된 업체 담당자가 없습니다. 담당자 추가를 눌러 연락처와 인수인계 메모를 남겨주세요.</div>';
+        return;
+      }
+      content.innerHTML = `<div class="row g-3">${vendorContacts.map((contact) => {
+        const provider = contact.provider_key === 'nrems' ? 'NREMS' : contact.provider_key === 'pveyes' ? 'PVEYES' : '기타';
+        const tel = String(contact.phone || '').replace(/[^0-9+]/g, '');
+        const updated = new Date(contact.updated_at);
+        const updatedLabel = Number.isNaN(updated.getTime()) ? '-' : updated.toLocaleString('ko-KR');
+        return `<div class="col-lg-6"><article class="vendor-contact-card">
+          <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+            <div><span class="state-badge mb-2">${provider}</span><div class="vendor-contact-name">${escapeHtml(contact.company_name)} · ${escapeHtml(contact.contact_name)}${contact.job_title ? ` ${escapeHtml(contact.job_title)}` : ''}</div></div>
+            <div class="d-flex gap-2"><button type="button" class="btn btn-outline-primary btn-sm vendor-contact-edit" data-contact-id="${escapeHtml(contact.id)}">수정</button><button type="button" class="btn btn-outline-danger btn-sm vendor-contact-delete" data-contact-id="${escapeHtml(contact.id)}">삭제</button></div>
+          </div>
+          <div class="mt-2"><a class="vendor-contact-phone" href="tel:${escapeHtml(tel)}">${escapeHtml(contact.phone)}</a></div>
+          ${contact.handover_memo ? `<div class="vendor-contact-memo">${escapeHtml(contact.handover_memo)}</div>` : '<div class="section-copy mt-2">인수인계 메모 없음</div>'}
+          <div class="section-copy mt-2">마지막 수정 ${escapeHtml(updatedLabel)}</div>
+        </article></div>`;
+      }).join('')}</div>`;
+      content.querySelectorAll('.vendor-contact-edit').forEach((button) => button.addEventListener('click', () => openVendorContactEditor(button.dataset.contactId)));
+      content.querySelectorAll('.vendor-contact-delete').forEach((button) => button.addEventListener('click', () => deleteVendorContact(button.dataset.contactId)));
+    }
+
+    function setVendorContactStatus(message, type = 'alert-secondary') {
+      const el = document.getElementById('vendorContactStatus');
+      el.className = `alert mt-3 mb-0 ${type}`;
+      el.textContent = message || '';
+      el.classList.toggle('hidden', !message);
+    }
+
+    function openVendorContactEditor(contactId = null) {
+      const dashboardId = String(monitorData?.dashboard?.id || '');
+      if (!dashboardId) return;
+      const contact = contactId ? vendorContacts.find((item) => String(item.id) === String(contactId)) : null;
+      if (contactId && !contact) return;
+      editingVendorContactId = contact?.id || null;
+      editingVendorDashboardId = dashboardId;
+      document.getElementById('vendorContactModalTitle').textContent = contact ? '업체 담당자 수정' : '업체 담당자 추가';
+      document.getElementById('vendorProvider').value = contact?.provider_key || 'nrems';
+      document.getElementById('vendorCompany').value = contact?.company_name || '';
+      document.getElementById('vendorName').value = contact?.contact_name || '';
+      document.getElementById('vendorTitle').value = contact?.job_title || '';
+      document.getElementById('vendorPhone').value = contact?.phone || '';
+      document.getElementById('vendorMemo').value = contact?.handover_memo || '';
+      setVendorContactStatus('');
+      vendorContactModal.show();
+    }
+
+    async function saveVendorContact(event) {
+      event.preventDefault();
+      if (isSavingVendorContact) return;
+      const dashboardId = editingVendorDashboardId;
+      if (!dashboardId || String(monitorData?.dashboard?.id || '') !== dashboardId) {
+        setVendorContactStatus('관리 대상이 변경되었습니다. 화면을 다시 불러와주세요.', 'alert-warning');
+        return;
+      }
+      const companyName = document.getElementById('vendorCompany').value.trim();
+      const contactName = document.getElementById('vendorName').value.trim();
+      const jobTitle = document.getElementById('vendorTitle').value.trim();
+      const phone = document.getElementById('vendorPhone').value.trim();
+      const handoverMemo = document.getElementById('vendorMemo').value.trim();
+      const providerKey = document.getElementById('vendorProvider').value;
+      if (!['nrems', 'pveyes'].includes(providerKey) || !companyName || !contactName || !/^[0-9+(). -]{7,40}$/.test(phone)) {
+        setVendorContactStatus('수집 사이트, 업체명, 담당자 이름과 연락처를 확인해주세요.', 'alert-warning');
+        return;
+      }
+      if (companyName.length > 120 || contactName.length > 80 || jobTitle.length > 80 || handoverMemo.length > 5000) {
+        setVendorContactStatus('입력 가능한 글자 수를 확인해주세요.', 'alert-warning');
+        return;
+      }
+      isSavingVendorContact = true;
+      const button = document.getElementById('saveVendorContactButton');
+      button.disabled = true;
+      setVendorContactStatus('담당자 정보를 저장하고 있습니다.', 'alert-info');
+      const payload = { provider_key: providerKey, company_name: companyName, contact_name: contactName, job_title: jobTitle, phone, handover_memo: handoverMemo };
+      let didSave = false;
+      try {
+        const query = editingVendorContactId
+          ? _supabase.from('power_monitor_vendor_contacts').update(payload).eq('id', editingVendorContactId).eq('dashboard_id', dashboardId).is('deleted_at', null)
+          : _supabase.from('power_monitor_vendor_contacts').insert({ ...payload, dashboard_id: dashboardId });
+        const { data, error } = await query.select('id').single();
+        if (error || !data?.id) throw new Error('CONTACT_SAVE_FAILED');
+        didSave = true;
+        vendorContactModal.hide();
+        await loadVendorContacts(dashboardId);
+        renderVendorContacts();
+        setStatus(vendorContactsError
+          ? '담당자는 저장했지만 목록을 다시 불러오지 못했습니다. 새로고침해 확인해주세요.'
+          : isDirty ? '담당자를 저장했습니다. 모니터 연결 설정의 미저장 변경사항도 확인해주세요.' : '업체 담당자 정보를 저장했습니다.',
+        vendorContactsError ? 'alert-warning' : 'alert-success');
+      } catch (_) {
+        if (didSave) setStatus('담당자는 저장했지만 목록을 확인하지 못했습니다. 새로고침해 확인해주세요.', 'alert-warning');
+        else setVendorContactStatus('저장하지 못했습니다. 입력값과 관리자 권한을 확인한 뒤 다시 시도해주세요.', 'alert-danger');
+      } finally {
+        isSavingVendorContact = false;
+        button.disabled = false;
+      }
+    }
+
+    async function deleteVendorContact(contactId) {
+      const dashboardId = String(monitorData?.dashboard?.id || '');
+      const contact = vendorContacts.find((item) => String(item.id) === String(contactId));
+      if (!dashboardId || !contact || isSavingVendorContact) return;
+      if (!window.confirm(`${contact.company_name} · ${contact.contact_name} 담당자와 인수인계 메모를 목록에서 삭제할까요?`)) return;
+      isSavingVendorContact = true;
+      let didUpdate = false;
+      try {
+        const { error } = await _supabase.from('power_monitor_vendor_contacts')
+          .update({ deleted_at: new Date().toISOString() })
+          .eq('id', contactId)
+          .eq('dashboard_id', dashboardId)
+          .is('deleted_at', null);
+        if (error) throw error;
+        didUpdate = true;
+        await loadVendorContacts(dashboardId);
+        if (vendorContactsError || vendorContacts.some((item) => String(item.id) === String(contactId))) throw new Error('CONTACT_DELETE_UNCONFIRMED');
+        renderVendorContacts();
+        setStatus(isDirty ? '담당자를 삭제했습니다. 모니터 연결 설정의 미저장 변경사항도 확인해주세요.' : '업체 담당자를 삭제했습니다.', 'alert-success');
+      } catch (_) {
+        setStatus(didUpdate ? '삭제 요청은 처리됐지만 결과를 확인하지 못했습니다. 새로고침해 확인해주세요.' : '담당자를 삭제하지 못했습니다. 잠시 후 다시 시도해주세요.', didUpdate ? 'alert-warning' : 'alert-danger');
+      } finally {
+        isSavingVendorContact = false;
+      }
     }
 
     function renderDashboardSettings() {
@@ -653,6 +879,7 @@
       renderScopes();
       renderSummary();
       renderDashboardSettings();
+      renderVendorContacts();
       renderPlantContent();
       isDirty = false;
     }
@@ -908,6 +1135,7 @@
         if (error) throw error;
         monitorData = data || {};
         currentScopeKey = monitorData.selected_scope_key || scopeKey;
+        await loadVendorContacts(String(monitorData?.dashboard?.id || ''));
         renderAll();
         setStatus(silent ? '3분 주기로 최신 수집값을 반영했습니다.' : '', 'alert-success');
         if (silent) setTimeout(() => {
@@ -1001,6 +1229,16 @@
     document.addEventListener('DOMContentLoaded', () => {
       const plantInfoModalElement = document.getElementById('plantInfoModal');
       plantInfoModal = bootstrap.Modal.getOrCreateInstance(plantInfoModalElement);
+      const vendorContactModalElement = document.getElementById('vendorContactModal');
+      vendorContactModal = bootstrap.Modal.getOrCreateInstance(vendorContactModalElement);
+      document.getElementById('addVendorContactButton').addEventListener('click', () => openVendorContactEditor());
+      document.getElementById('vendorContactForm').addEventListener('submit', saveVendorContact);
+      vendorContactModalElement.addEventListener('hidden.bs.modal', () => {
+        editingVendorContactId = null;
+        editingVendorDashboardId = null;
+        document.getElementById('vendorContactForm').reset();
+        setVendorContactStatus('');
+      });
       document.getElementById('plantEditorProjectType').addEventListener('change', togglePlantParticipationFields);
       document.getElementById('plantEditorPhotoFile').addEventListener('change', (event) => {
         clearPlantPhotoObjectUrl();
