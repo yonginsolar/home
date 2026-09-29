@@ -1,5 +1,5 @@
 /*
-Version: v1.7.3
+Version: v1.7.4
 Change: 2026-09-30 - Format pasted board annexes and share spoken chair lines across both scripts.
 */
 
@@ -164,7 +164,11 @@ function boardScenarioAgenda(agenda, index, facilitator, includeSecretariat) {
 
 function boardScenario({ row, agendas, chairName, coopName, company }, includeSecretariat) {
   const facilitator = row.facilitator_name || '사무국장';
-  const body = (agendas || []).map((agenda, index) => boardScenarioAgenda(agenda, index, facilitator, includeSecretariat)).join('<hr>');
+  const agendaCounts = { REPORT: 0, DECISION: 0, DISCUSSION: 0, OTHER: 0 };
+  const body = (agendas || []).map((agenda) => {
+    const kind = agendaCounts[agenda.agenda_kind] === undefined ? 'OTHER' : agenda.agenda_kind;
+    return boardScenarioAgenda(agenda, agendaCounts[kind]++, facilitator, includeSecretariat);
+  }).join('<hr>');
   const heading = includeSecretariat ? '사무국장용 진행 시나리오' : '의장용 진행 시나리오';
   return `<article class="board-scenario">
     <h1>${safe(coopName)} ${safe(row.title)} ${heading}</h1>
