@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.118 | Change: 2026-09-28 - Show recent journals only as a double-entry ledger. -->
+<!-- Version: v1.0.119 | Change: 2026-09-30 - Value remaining inventory at year-end closing. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.118 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.119 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -3636,6 +3636,24 @@ function appendApprovalImmediateExpenseEntries(entries, payload) {
     entries.push({ ...common, Type: '자산', Account: '보통예금', Debit: 0, Credit: amount, Evidence_Type: '금융거래' });
 } // End of appendApprovalImmediateExpenseEntries
 
+function appendApprovalInventoryPurchaseEntries(entries, payload) {
+    const common = {
+        Date: payload.date,
+        Description: payload.description,
+        Trans_ID: payload.transId,
+        Project: payload.project || '본사',
+        Operator: payload.operator
+    };
+    if (payload.acquisitionCost > 0) {
+        entries.push({ ...common, Type: '비용', Account: '행사재료비', Debit: payload.acquisitionCost, Credit: 0 });
+    }
+    if (payload.inputVat > 0) {
+        entries.push({ ...common, Type: '자산', Account: '부가세대급금', Debit: payload.inputVat, Credit: 0 });
+    }
+    const onCredit = payload.paymentMethod === 'credit_card';
+    entries.push({ ...common, Type: onCredit ? '부채' : '자산', Account: onCredit ? '미지급금' : '보통예금', Debit: 0, Credit: payload.amount, Evidence_Type: onCredit ? '내부기표' : '금융거래' });
+}
+
 function appendApprovalImmediateExpenseReversalEntries(entries, payload) {
     const amount = Math.max(0, Number(payload.amount || 0));
     if (!(amount > 0)) return;
@@ -4376,6 +4394,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
     let adjustmentDecreaseCount = 0;
     let salaryAccrualCount = 0;
     let payoutApprovalCount = 0;
+    let inventoryPurchaseCount = 0;
     const durunuriSourceMonths = new Set();
     const salaryMonthsSeen = new Set();
     const existingTransIds = options.existingTransIds instanceof Set
@@ -4593,6 +4612,27 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         const cardAlias = String(expenseSnapshot.card_alias || '').trim();
         const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
         const descBase = `${cardPrefix}${doc?.title || doc?.doc_type || '지출결의'}`;
+        const inventoryPurchase = doc?.expense_snapshot?.inventory_purchase;
+        if (inventoryPurchase?.enabled === true && inventoryPurchase.accounting_mode === 'periodic_v1') {
+            const acquisitionCost = Number(inventoryPurchase.acquisition_cost);
+            const inputVat = Number(inventoryPurchase.input_vat);
+            const quantity = Number(inventoryPurchase.quantity);
+            if (!Number.isSafeInteger(acquisitionCost) || acquisitionCost <= 0 ||
+                !Number.isSafeInteger(inputVat) || inputVat < 0 ||
+                !Number.isSafeInteger(quantity) || quantity <= 0 ||
+                acquisitionCost + inputVat !== amount || Number(inventoryPurchase.approval_amount) !== amount) {
+                blockedDocs.push({ id: doc?.id, label: descBase, reason: '재고 취득원가·매입 부가세와 결재 금액이 일치하지 않습니다.' });
+                continue;
+            }
+            plans.push({
+                kind: 'inventory_purchase', amount, acquisitionCost, inputVat,
+                paymentMethod, date: journalDate, description: `[전자결재-재고매입] ${descBase}`,
+                transId, project: '본사', operator
+            });
+            inventoryPurchaseCount += 1;
+            totalAmount += amount;
+            continue;
+        }
         if (isSalaryLikeApproval(doc)) {
             let salaryMonth = '';
             let paymentDate = journalDate;
@@ -4722,6 +4762,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         adjustmentDecreaseCount,
         salaryAccrualCount,
         payoutApprovalCount,
+        inventoryPurchaseCount,
         error: null
     };
 }
@@ -4786,6 +4827,10 @@ function appendApprovalEntriesFromPlan(entries, plan) {
     }
     if (plan.kind === 'withholding_tax') {
         appendApprovalWithholdingTaxEntries(entries, plan);
+        return;
+    }
+    if (plan.kind === 'inventory_purchase') {
+        appendApprovalInventoryPurchaseEntries(entries, plan);
         return;
     }
     if (plan.kind === 'direct_payment') {
@@ -7123,6 +7168,28 @@ async function buildClosingContext(targetYear) {
 
     const baseJournals = getClosingContextBaseRows(journals || [], targetYear);
     const closingSummary = buildExistingClosingSummary(journals || [], targetYear);
+    const inventoryResult = await _supabase.rpc('accounting_inventory_valuation', { p_year: targetYear });
+    if (inventoryResult.error) throw new Error(`재고 평가액 조회 실패: ${inventoryResult.error.message}`);
+    const inventoryValuation = inventoryResult.data || {};
+    const inventoryCost = Number(inventoryValuation.cost || 0);
+    const { data: inventoryJournalRows, error: inventoryJournalError } = await _supabase
+        .from('ac_journal')
+        .select('Debit,Credit')
+        .eq('coop_id', String(myInfo?.coop_id || '00000000-0000-0000-0000-000000000000'))
+        .eq('Account', '행사용재고자산')
+        .lte('Date', endDate);
+    if (inventoryJournalError) throw new Error(`재고자산 장부 조회 실패: ${inventoryJournalError.message}`);
+    const inventoryBookValue = (inventoryJournalRows || []).reduce((sum, row) =>
+        sum + Number(row.Debit || 0) - Number(row.Credit || 0), 0);
+    const inventoryDelta = inventoryCost - inventoryBookValue;
+    if (!Number.isSafeInteger(inventoryCost) || !Number.isSafeInteger(inventoryDelta)) {
+        throw new Error('재고 평가액이 회계 금액 범위를 벗어났습니다.');
+    }
+    if (!closingSummary.isClosed && inventoryDelta !== 0) {
+        baseJournals.push({ Type: '비용', Account: '행사재료비',
+            Debit: inventoryDelta < 0 ? -inventoryDelta : 0,
+            Credit: inventoryDelta > 0 ? inventoryDelta : 0 });
+    }
     const incomeSummary = buildClosingIncomeSummary(baseJournals);
     const balances = incomeSummary.balances;
     const preTaxNetIncome = incomeSummary.netIncome;
@@ -7144,6 +7211,9 @@ async function buildClosingContext(targetYear) {
         startDate,
         endDate,
         balances,
+        inventoryValuation,
+        inventoryBookValue,
+        inventoryDelta,
         preTaxNetIncome,
         netIncome: preTaxNetIncome - closingSummary.taxExpense,
         taxExpense: closingSummary.taxExpense,
@@ -7358,11 +7428,16 @@ async function refreshClosingContext() {
     const yearVal = Number(document.getElementById("closingYearInput").value);
     if (!yearVal) return showAlert("알림", "결산 연도를 입력하세요.");
 
-    closingContext = await buildClosingContext(yearVal);
+    try {
+        closingContext = await buildClosingContext(yearVal);
+    } catch (error) {
+        closingContext = null;
+        return showAlert('결산 확인 실패', error.message || String(error));
+    }
     const ctx = closingContext;
     document.getElementById("closingPrepaidNationalTaxInput").value = String(ctx.prepaidTaxSummary?.national || 0);
     document.getElementById("closingPrepaidLocalTaxInput").value = String(ctx.prepaidTaxSummary?.local || 0);
-    document.getElementById("closingCapitalInfo").innerText = `출자금 누적: ${ctx.capitalTotal.toLocaleString()}원 · 법정적립금 누적: ${ctx.legalBalance.toLocaleString()}원 · 3배 기준 ${ctx.thresholdMet ? '충족' : '미충족'}`;
+    document.getElementById("closingCapitalInfo").innerText = `출자금 누적: ${ctx.capitalTotal.toLocaleString()}원 · 법정적립금 누적: ${ctx.legalBalance.toLocaleString()}원 · 3배 기준 ${ctx.thresholdMet ? '충족' : '미충족'}\n남은 재고: ${Number(ctx.inventoryValuation.quantity || 0).toLocaleString()}개 · 취득원가 ${Number(ctx.inventoryValuation.cost || 0).toLocaleString()}원 · 장부 조정 ${ctx.inventoryDelta.toLocaleString()}원`;
     syncClosingFormState(true);
 }
 
@@ -7384,6 +7459,12 @@ async function runClosingFromModal() {
 
     const ctx = closingContext;
     if (ctx.isClosed) return showAlert("알림", `이미 ${ctx.year}년도 결산이 완료되어 읽기 전용으로만 확인할 수 있습니다.`);
+    if (Number(ctx.inventoryValuation.unpriced_quantity || 0) > 0) {
+        return showAlert('재고 원가 확인', `원가가 확인되지 않은 재고 ${Number(ctx.inventoryValuation.unpriced_quantity).toLocaleString()}개가 남아 있어 결산을 진행할 수 없습니다.`);
+    }
+    if (Number(ctx.inventoryValuation.pending_approval_count || 0) > 0) {
+        return showAlert('재고 매입 연동 필요', `재고 입고 결재 ${Number(ctx.inventoryValuation.pending_approval_count).toLocaleString()}건을 회계관리의 전자결재 연동에 먼저 반영해 주세요.`);
+    }
     const taxExpense = getClosingTaxExpenseValue();
     const taxCredit = getClosingTaxCreditValue();
     const prepaidNationalTax = getClosingPrepaidNationalTaxValue();
@@ -7427,8 +7508,17 @@ async function runClosingFromModal() {
         );
     }
 
-    const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부 법인세(국세): ${estimate.prepaidNationalApplied.toLocaleString()}원\n기납부 법인지방소득세: ${estimate.prepaidLocalApplied.toLocaleString()}원\n예상 국세 납부액: ${estimate.expectedNationalPayable.toLocaleString()}원\n예상 지방세 납부액: ${estimate.expectedLocalPayable.toLocaleString()}원\n예상 합계 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
+    const confirmMessage = `${ctx.year}년 결산을 진행합니다.\n남은 재고 ${Number(ctx.inventoryValuation.quantity || 0).toLocaleString()}개 · 취득원가 ${Number(ctx.inventoryValuation.cost || 0).toLocaleString()}원 · 재고자산 조정 ${ctx.inventoryDelta.toLocaleString()}원\n법인세 차감전 당기순이익: ${ctx.preTaxNetIncome.toLocaleString()}원\n추정 과세표준: ${estimate.taxBase.toLocaleString()}원\n추정 법인세(국세, 공제후): ${estimate.nationalAfterCredit.toLocaleString()}원\n추정 법인지방소득세: ${estimate.localTax.toLocaleString()}원\n세액공제/감면: ${estimate.creditApplied.toLocaleString()}원\n기납부 법인세(국세): ${estimate.prepaidNationalApplied.toLocaleString()}원\n기납부 법인지방소득세: ${estimate.prepaidLocalApplied.toLocaleString()}원\n예상 국세 납부액: ${estimate.expectedNationalPayable.toLocaleString()}원\n예상 지방세 납부액: ${estimate.expectedLocalPayable.toLocaleString()}원\n예상 합계 납부세액: ${estimate.expectedPayable.toLocaleString()}원\n반영 법인세비용: ${taxExpense.toLocaleString()}원\n법인세 차감후 당기순손익: ${ctx.netIncome.toLocaleString()}원\n법정적립: ${legal.toLocaleString()}원\n임의적립: ${vol.toLocaleString()}원`;
     const confirmAction = async () => {
+        let latest;
+        try { latest = await buildClosingContext(ctx.year); }
+        catch (error) { return showAlert('결산 확인 실패', error.message || String(error)); }
+        if (latest.isClosed || latest.inventoryDelta !== ctx.inventoryDelta ||
+            Number(latest.inventoryValuation.unpriced_quantity || 0) > 0 ||
+            Number(latest.inventoryValuation.pending_approval_count || 0) > 0 ||
+            latest.preTaxNetIncome !== ctx.preTaxNetIncome) {
+            return showAlert('결산 자료 변경', '재고 또는 회계 자료가 바뀌었습니다. 결산 화면을 다시 불러와 확인해 주세요.');
+        }
         await executeClosing(ctx, legal, vol, taxExpense);
     };
     const closingEl = document.getElementById('closingModal');
@@ -7454,6 +7544,15 @@ async function executeClosing(ctx, legal, vol, taxExpense) {
     if (dup && dup.length > 0) return showAlert("중복", `이미 ${ctx.year}년도 결산이 완료되었습니다.`);
 
     let entries = [];
+    if (ctx.inventoryDelta !== 0) {
+        const amount = Math.abs(ctx.inventoryDelta);
+        const common = { Date: ctx.endDate, Description: `[재고평가] ${ctx.year}년 말 행사 물품`,
+            Trans_ID: relatedKey, Evidence_Type: '내부기표', Project: '본사', Operator: writer };
+        entries.push({ ...common, Type: '자산', Account: '행사용재고자산',
+            Debit: ctx.inventoryDelta > 0 ? amount : 0, Credit: ctx.inventoryDelta < 0 ? amount : 0 });
+        entries.push({ ...common, Type: '비용', Account: '행사재료비',
+            Debit: ctx.inventoryDelta < 0 ? amount : 0, Credit: ctx.inventoryDelta > 0 ? amount : 0 });
+    }
     for (const [acc, info] of Object.entries(ctx.balances)) {
         const amount = Number(info?.amount || 0);
         if (!amount) continue;
@@ -7809,6 +7908,7 @@ function confirmSync(type) {
                 `- 급여 발생전표: ${previewPlanResult.salaryAccrualCount || 0}건 (귀속월 말 비용·공제·회사부담분)`,
                 `- 급여 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 국세·지방세 별도 표시`,
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
+                `- 재고 입고 매입전표: ${previewPlanResult.inventoryPurchaseCount || 0}건 (매입 부가세를 분리해 행사재료비로 기록)`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
                 `- 증액결의: ${previewPlanResult.adjustmentIncreaseCount || 0}건 (원결재 결제수단 기준 추가 전표)`,
@@ -7942,7 +8042,7 @@ function confirmSync(type) {
                     });
                 }
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
-                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 급여 발생전표 ${runPlanResult.salaryAccrualCount || 0}건\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 급여 원천세 분리전표 ${runPlanResult.withholdingTaxCount || 0}건\n- 출자금 반환·배당금 승인전표 ${runPlanResult.payoutApprovalCount || 0}건\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 급여 발생전표 ${runPlanResult.salaryAccrualCount || 0}건\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 급여 원천세 분리전표 ${runPlanResult.withholdingTaxCount || 0}건\n- 출자금 반환·배당금 승인전표 ${runPlanResult.payoutApprovalCount || 0}건\n- 재고 입고 매입전표 ${runPlanResult.inventoryPurchaseCount || 0}건\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
