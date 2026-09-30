@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.119 | Change: 2026-09-30 - Value remaining inventory at year-end closing. -->
+<!-- Version: v1.0.120 | Change: 2026-09-30 - Review inventory VAT in accounting and show assets together. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.119 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.120 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -103,6 +103,11 @@
 
     .hidden { display: none !important; }
     .ime-kr { ime-mode: active; }
+    .asset-overview-panel { background: var(--erp-surface-soft, #f8fbff); border: 1px solid var(--erp-border, #dde4ed); border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+    .asset-overview-panel h5 { font-weight: 700; margin-bottom: 12px; }
+    .asset-overview-table th, .asset-overview-table td { vertical-align: middle; word-break: keep-all; }
+    .asset-review-row { border-top: 1px solid var(--erp-border, #dde4ed); padding: 14px 0; }
+    .asset-review-row:first-child { border-top: 0; }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
 </head>
@@ -149,12 +154,48 @@
   <ul class="nav nav-tabs mb-4 no-print" id="accTab" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabForm">📝 전표입력</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPrepay">💳 선급·미수 관리</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAssets" onclick="loadAssetOverview()">📦 자산·재고</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 자동연동</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 최근전표</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 설명</button></li>
   </ul>
 
   <div class="tab-content no-print">
+
+    <div class="tab-pane fade" id="tabAssets">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h5 class="fw-bold m-0">자산·재고 현황</h5>
+        <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadAssetOverview(true)">새로고침</button>
+      </div>
+      <p class="small text-muted" id="assetOverviewStatus" role="status">탭을 열면 현재 조합의 장부와 재고를 불러옵니다.</p>
+      <div class="row g-2 mb-3" id="assetSummaryCards" aria-live="polite"></div>
+      <section class="asset-overview-panel" aria-labelledby="assetInventoryHeading">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <h5 id="assetInventoryHeading">📦 재고 물품</h5>
+          <a id="assetInventoryManageLink" class="btn btn-outline-secondary btn-sm hidden" href="festival_receipts.html?v=2.2.0">입출고·판매 관리</a>
+        </div>
+        <p class="small text-muted">수량과 원가는 실제 입출고 기준입니다. 결산 전 추정 재고액을 위 장부 자산에 중복 합산하지 않습니다.</p>
+        <div class="table-responsive"><table class="table table-sm asset-overview-table"><thead><tr><th>물품</th><th class="text-end">남은 수량</th><th class="text-end">확인된 취득원가</th></tr></thead><tbody id="assetInventoryRows"></tbody></table></div>
+      </section>
+      <section class="asset-overview-panel" aria-labelledby="assetReviewHeading">
+        <h5 id="assetReviewHeading">🧾 새 재고 매입의 회계 확인</h5>
+        <p class="small text-muted">결재에는 부가세를 포함한 지급 총액만 적습니다. 결재 완료 후 이곳에서 증빙을 보고 공제할 매입세액을 확인해야 전자결재 연동 전표에 반영됩니다.</p>
+        <div id="assetPurchaseReviewRows"></div>
+      </section>
+      <section class="asset-overview-panel" aria-labelledby="assetBookHeading">
+        <h5 id="assetBookHeading">📒 장부의 자산 계정</h5>
+        <div class="table-responsive"><table class="table table-sm asset-overview-table"><thead><tr><th>계정과목</th><th class="text-end">잔액</th></tr></thead><tbody id="assetBookRows"></tbody></table></div>
+      </section>
+      <section class="asset-overview-panel" aria-labelledby="assetFixedHeading">
+        <h5 id="assetFixedHeading">🏗️ 고정자산 대장</h5>
+        <div class="table-responsive"><table class="table table-sm asset-overview-table"><thead><tr><th>자산명</th><th>프로젝트</th><th>취득일</th><th class="text-end">등록 취득금액</th></tr></thead><tbody id="assetFixedRows"></tbody></table></div>
+      </section>
+      <section class="asset-overview-panel" aria-labelledby="assetPlantHeading">
+        <h5 id="assetPlantHeading">☀️ 등록된 발전소</h5>
+        <p class="small text-muted">사업 현황을 함께 확인하는 목록입니다. 준비 중인 발전소의 예상 가치는 장부 자산 금액에 넣지 않습니다.</p>
+        <div class="table-responsive"><table class="table table-sm asset-overview-table"><thead><tr><th>발전소</th><th>진행 상태</th><th class="text-end">설비용량</th></tr></thead><tbody id="assetPlantRows"></tbody></table></div>
+      </section>
+    </div>
 
     <div class="tab-pane fade show active" id="tabForm">
       <form id="erpForm" onsubmit="handleFormSubmit(event)">
@@ -1866,7 +1907,10 @@ window.onload = async function() {
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     try {
         const { data: festivalAccess, error: festivalAccessError } = await _supabase.rpc('festival_receipts_admin', { p_action: 'access', p_data: {} });
-        if (!festivalAccessError && festivalAccess?.allowed) document.getElementById('festivalCashSalesLink')?.classList.remove('hidden');
+        if (!festivalAccessError && festivalAccess?.allowed) {
+            document.getElementById('festivalCashSalesLink')?.classList.remove('hidden');
+            document.getElementById('assetInventoryManageLink')?.classList.remove('hidden');
+        }
     } catch (_) {
         // This workflow is only enabled for the cooperative that operates the festival sales page.
     }
@@ -3648,7 +3692,8 @@ function appendApprovalInventoryPurchaseEntries(entries, payload) {
         entries.push({ ...common, Type: '비용', Account: '행사재료비', Debit: payload.acquisitionCost, Credit: 0 });
     }
     if (payload.inputVat > 0) {
-        entries.push({ ...common, Type: '자산', Account: '부가세대급금', Debit: payload.inputVat, Credit: 0 });
+        entries.push({ ...common, Type: '자산', Account: '부가세대급금', Debit: payload.inputVat, Credit: 0,
+            Evidence_Type: payload.evidenceType || '세금계산서' });
     }
     const onCredit = payload.paymentMethod === 'credit_card';
     entries.push({ ...common, Type: onCredit ? '부채' : '자산', Account: onCredit ? '미지급금' : '보통예금', Debit: 0, Credit: payload.amount, Evidence_Type: onCredit ? '내부기표' : '금융거래' });
@@ -4395,6 +4440,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
     let salaryAccrualCount = 0;
     let payoutApprovalCount = 0;
     let inventoryPurchaseCount = 0;
+    let inventoryPurchaseCostTotal = 0;
+    let inventoryInputVatTotal = 0;
     const durunuriSourceMonths = new Set();
     const salaryMonthsSeen = new Set();
     const existingTransIds = options.existingTransIds instanceof Set
@@ -4403,6 +4450,14 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
     const existingSalaryPaymentMonths = options.existingSalaryPaymentMonths instanceof Set
         ? options.existingSalaryPaymentMonths
         : new Set(Array.isArray(options.existingSalaryPaymentMonths) ? options.existingSalaryPaymentMonths : []);
+    const inventoryReviewsById = new Map();
+    if ((docs || []).some((doc) => doc?.expense_snapshot?.inventory_purchase?.enabled === true
+            && doc.expense_snapshot.inventory_purchase.accounting_mode === 'gross_v2')) {
+        const inventoryResult = await _supabase.rpc('accounting_asset_overview');
+        if (inventoryResult.error) return { plans, blockedDocs, error: inventoryResult.error };
+        (Array.isArray(inventoryResult.data?.purchase_reviews) ? inventoryResult.data.purchase_reviews : [])
+            .forEach((row) => inventoryReviewsById.set(String(row.approval_id), row));
+    }
 
     for (const doc of (docs || [])) {
         const amount = Math.max(0, Number(doc?.amount || 0));
@@ -4613,23 +4668,32 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
         const descBase = `${cardPrefix}${doc?.title || doc?.doc_type || '지출결의'}`;
         const inventoryPurchase = doc?.expense_snapshot?.inventory_purchase;
-        if (inventoryPurchase?.enabled === true && inventoryPurchase.accounting_mode === 'periodic_v1') {
-            const acquisitionCost = Number(inventoryPurchase.acquisition_cost);
-            const inputVat = Number(inventoryPurchase.input_vat);
+        if (inventoryPurchase?.enabled === true && ['periodic_v1','gross_v2'].includes(inventoryPurchase.accounting_mode)) {
+            const needsAccountingReview = inventoryPurchase.accounting_mode === 'gross_v2';
+            const review = needsAccountingReview ? inventoryReviewsById.get(String(doc.id)) : null;
+            if (needsAccountingReview && (!review?.movement_exists || !review.reviewed_at)) {
+                blockedDocs.push({ id: doc?.id, label: descBase, reason: '자산·재고 탭에서 증빙과 공제 매입세액을 먼저 확인해 주세요.' });
+                continue;
+            }
+            const acquisitionCost = Number(needsAccountingReview ? review.acquisition_cost : inventoryPurchase.acquisition_cost);
+            const inputVat = Number(needsAccountingReview ? review.input_vat : inventoryPurchase.input_vat);
             const quantity = Number(inventoryPurchase.quantity);
             if (!Number.isSafeInteger(acquisitionCost) || acquisitionCost <= 0 ||
                 !Number.isSafeInteger(inputVat) || inputVat < 0 ||
                 !Number.isSafeInteger(quantity) || quantity <= 0 ||
                 acquisitionCost + inputVat !== amount || Number(inventoryPurchase.approval_amount) !== amount) {
-                blockedDocs.push({ id: doc?.id, label: descBase, reason: '재고 취득원가·매입 부가세와 결재 금액이 일치하지 않습니다.' });
+                blockedDocs.push({ id: doc?.id, label: descBase, reason: '재고 취득원가·회계 확인 매입세액과 결재 금액이 일치하지 않습니다.' });
                 continue;
             }
             plans.push({
                 kind: 'inventory_purchase', amount, acquisitionCost, inputVat,
+                evidenceType: needsAccountingReview ? review.evidence_type : (inputVat > 0 ? '세금계산서' : '공제하지 않음'),
                 paymentMethod, date: journalDate, description: `[전자결재-재고매입] ${descBase}`,
                 transId, project: '본사', operator
             });
             inventoryPurchaseCount += 1;
+            inventoryPurchaseCostTotal += acquisitionCost;
+            inventoryInputVatTotal += inputVat;
             totalAmount += amount;
             continue;
         }
@@ -4763,6 +4827,8 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         salaryAccrualCount,
         payoutApprovalCount,
         inventoryPurchaseCount,
+        inventoryPurchaseCostTotal,
+        inventoryInputVatTotal,
         error: null
     };
 }
@@ -5275,6 +5341,216 @@ async function loadProjects(coopId) {
 
     const canRestorePrevious = Array.from(sel.options).some((option) => option.value === previousValue);
     sel.value = canRestorePrevious ? previousValue : "본사";
+}
+
+let assetOverviewLoading = false;
+let assetOverviewPayload = null;
+
+function formatAssetWon(value) {
+    const amount = Number(value || 0);
+    return `${Number.isFinite(amount) ? amount.toLocaleString('ko-KR') : '0'}원`;
+}
+
+function putAssetTableRows(bodyId, entries, makeValues, emptyText) {
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+    body.replaceChildren();
+    if (!entries.length) {
+        const row = body.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = Number(body.closest('table')?.querySelectorAll('thead th').length || 3);
+        cell.className = 'text-muted py-3';
+        cell.textContent = emptyText;
+        return;
+    }
+    entries.forEach((entry) => {
+        const row = body.insertRow();
+        makeValues(entry).forEach((value, index) => {
+            const cell = row.insertCell();
+            if (index > 0 && (bodyId === 'assetInventoryRows' || bodyId === 'assetBookRows' || bodyId === 'assetFixedRows' && index === 3 || bodyId === 'assetPlantRows' && index === 2)) {
+                cell.classList.add('text-end');
+            }
+            cell.textContent = String(value ?? '');
+        });
+    });
+}
+
+function renderAssetPurchaseReviews(reviews) {
+    const wrap = document.getElementById('assetPurchaseReviewRows');
+    if (!wrap) return;
+    wrap.replaceChildren();
+    if (!reviews.length) {
+        const message = document.createElement('p');
+        message.className = 'text-muted mb-0';
+        message.textContent = '회계 확인을 기다리는 새 재고 매입이 없습니다.';
+        wrap.append(message);
+        return;
+    }
+    reviews.forEach((review) => {
+        const id = String(review.approval_id);
+        const row = document.createElement('div');
+        row.className = 'asset-review-row';
+        const title = document.createElement('div');
+        title.className = 'fw-bold';
+        title.textContent = `${review.title || '재고 매입'} · ${formatAssetWon(review.amount)}`;
+        const sub = document.createElement('div');
+        sub.className = 'small text-muted mb-2';
+        sub.textContent = `${review.item_name || '물품'} ${Number(review.quantity || 0).toLocaleString('ko-KR')}개`;
+        row.append(title,sub);
+        if (review.accounted) {
+            const done = document.createElement('p');
+            done.className = 'small mb-0';
+            done.textContent = `전표 반영 완료 · 공제 매입세액 ${formatAssetWon(review.input_vat)} · 재고 취득원가 ${formatAssetWon(review.acquisition_cost)}`;
+            row.append(done);
+        } else if (!review.movement_exists) {
+            const warning = document.createElement('p');
+            warning.className = 'small text-danger mb-0';
+            warning.textContent = '재고 입고 기록을 확인하지 못했습니다. 결재 상태를 확인해 주세요.';
+            row.append(warning);
+        } else {
+            const fields = document.createElement('div');
+            fields.className = 'row g-2 align-items-end';
+            const evidenceWrap = document.createElement('div');
+            evidenceWrap.className = 'col-12 col-md-4';
+            const evidenceLabel = document.createElement('label');
+            evidenceLabel.className = 'form-label small';
+            evidenceLabel.htmlFor = `assetEvidence-${id}`;
+            evidenceLabel.textContent = '증빙·공제 여부';
+            const evidence = document.createElement('select');
+            evidence.className = 'form-select form-select-sm';
+            evidence.id = evidenceLabel.htmlFor;
+            [['','선택해 주세요'],['공제하지 않음','공제하지 않음'],['세금계산서','세금계산서 확인'],['카드전표','카드전표 확인'],['현금영수증','현금영수증 확인']].forEach(([value,label]) => evidence.add(new Option(label,value)));
+            evidence.value = review.evidence_type || '';
+            evidenceWrap.append(evidenceLabel,evidence);
+            const vatWrap = document.createElement('div');
+            vatWrap.className = 'col-12 col-md-3';
+            const vatLabel = document.createElement('label');
+            vatLabel.className = 'form-label small';
+            vatLabel.htmlFor = `assetVat-${id}`;
+            vatLabel.textContent = '공제할 매입세액';
+            const vat = document.createElement('input');
+            vat.type = 'number';
+            vat.min = '0';
+            vat.step = '1';
+            vat.inputMode = 'numeric';
+            vat.className = 'form-control form-control-sm text-end';
+            vat.id = vatLabel.htmlFor;
+            vat.value = review.reviewed_at ? String(review.input_vat ?? '') : '';
+            vat.placeholder = '증빙의 금액';
+            vatWrap.append(vatLabel,vat);
+            evidence.addEventListener('change', () => {
+                if (evidence.value === '공제하지 않음') vat.value = '0';
+                else if (vat.value === '0') vat.value = '';
+                vat.readOnly = evidence.value === '공제하지 않음';
+                refreshCost();
+            });
+            vat.readOnly = evidence.value === '공제하지 않음';
+            const cost = document.createElement('div');
+            cost.className = 'col-12 col-md-3 small';
+            const refreshCost = () => {
+                const value = Number(vat.value);
+                cost.textContent = vat.value !== '' && Number.isSafeInteger(value) && value >= 0 && value < Number(review.amount)
+                    ? `재고 취득원가 ${formatAssetWon(Number(review.amount)-value)}`
+                    : '증빙을 확인한 뒤 금액을 적어 주세요.';
+            };
+            vat.addEventListener('input', refreshCost);
+            refreshCost();
+            const saveWrap = document.createElement('div');
+            saveWrap.className = 'col-12 col-md-2';
+            const save = document.createElement('button');
+            save.type = 'button';
+            save.className = 'btn btn-primary btn-sm w-100';
+            save.textContent = review.reviewed_at ? '확인값 수정' : '원가 확인 저장';
+            save.disabled = !canPerform('accounting.edit');
+            save.addEventListener('click', () => saveAssetInventoryReview(id,Number(review.amount)));
+            saveWrap.append(save);
+            fields.append(evidenceWrap,vatWrap,cost,saveWrap);
+            row.append(fields);
+            if (review.reviewed_at) {
+                const note = document.createElement('p');
+                note.className = 'small text-muted mt-2 mb-0';
+                note.textContent = '확인 완료 · 회계관리의 전자결재 연동을 실행하면 전표가 기록됩니다.';
+                row.append(note);
+            }
+        }
+        wrap.append(row);
+    });
+}
+
+function renderAssetOverview(data) {
+    const inventory = data?.inventory || {};
+    const qty = Number(inventory.quantity || 0);
+    const unpriced = Number(inventory.unpriced_quantity || 0);
+    const cards = document.getElementById('assetSummaryCards');
+    cards.replaceChildren();
+    [
+        ['장부상 자산 합계',formatAssetWon(data.book_total)],
+        ['남은 재고',`${qty.toLocaleString('ko-KR')}개`],
+        ['확인된 재고 원가',formatAssetWon(inventory.cost)],
+        ['원가 확인 필요',`${unpriced.toLocaleString('ko-KR')}개`]
+    ].forEach(([label,value]) => {
+        const col = document.createElement('div');
+        col.className = 'col-6 col-xl-3';
+        const card = document.createElement('div');
+        card.className = 'asset-overview-panel h-100 mb-0';
+        const caption = document.createElement('div');
+        caption.className = 'small text-muted';
+        caption.textContent = label;
+        const amount = document.createElement('strong');
+        amount.className = 'd-block fs-5 mt-1';
+        amount.textContent = value;
+        card.append(caption,amount);
+        col.append(card);
+        cards.append(col);
+    });
+    putAssetTableRows('assetInventoryRows',Array.isArray(inventory.items) ? inventory.items : [],
+        (row) => [row.item_name,`${Number(row.quantity || 0).toLocaleString('ko-KR')}개`,formatAssetWon(row.cost)],'남아 있는 재고가 없습니다.');
+    putAssetTableRows('assetBookRows',Array.isArray(data.accounts) ? data.accounts : [],
+        (row) => [row.account,formatAssetWon(row.balance)],'장부에 기록된 자산 계정이 없습니다.');
+    putAssetTableRows('assetFixedRows',Array.isArray(data.fixed_assets) ? data.fixed_assets : [],
+        (row) => [row.name,row.project || '-',row.date || '-',formatAssetWon(row.cost)],'고정자산 대장에 등록된 항목이 없습니다.');
+    putAssetTableRows('assetPlantRows',Array.isArray(data.plants) ? data.plants : [],
+        (row) => [row.name,row.status || '-',row.capacity == null ? '-' : `${Number(row.capacity).toLocaleString('ko-KR')}kW`],
+        '현재 조합에 등록된 발전소가 없습니다.');
+    renderAssetPurchaseReviews(Array.isArray(data.purchase_reviews) ? data.purchase_reviews : []);
+}
+
+async function loadAssetOverview() {
+    if (assetOverviewLoading) return;
+    assetOverviewLoading = true;
+    const status = document.getElementById('assetOverviewStatus');
+    if (status) status.textContent = '자산과 재고를 불러오는 중입니다.';
+    try {
+        const { data,error } = await _supabase.rpc('accounting_asset_overview');
+        if (error) throw error;
+        assetOverviewPayload = data || {};
+        renderAssetOverview(assetOverviewPayload);
+        if (status) status.textContent = `${data?.as_of || '오늘'} 기준 · 재고는 연말 결산 전까지 장부 자산과 별도로 표시합니다.`;
+    } catch (error) {
+        if (status) status.textContent = `자산 현황을 불러오지 못했습니다: ${error.message || error}`;
+    } finally {
+        assetOverviewLoading = false;
+    }
+}
+
+function saveAssetInventoryReview(approvalId,grossAmount) {
+    if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
+    const evidence = String(document.getElementById(`assetEvidence-${approvalId}`)?.value || '');
+    const rawVat = String(document.getElementById(`assetVat-${approvalId}`)?.value || '').trim();
+    const vat = Number(rawVat);
+    if (!evidence) return showAlert('증빙·공제 여부를 선택해 주세요.');
+    if (rawVat === '' || !Number.isSafeInteger(vat) || vat < 0 || vat >= grossAmount) return showAlert('증빙에 적힌 공제 매입세액을 확인해 주세요.');
+    if ((evidence === '공제하지 않음') !== (vat === 0)) return showAlert('공제 여부와 매입세액이 맞지 않습니다.');
+    showConfirm('재고 매입 원가 확인',
+        `부가세 포함 결재금액 ${formatAssetWon(grossAmount)}\n공제할 매입세액 ${formatAssetWon(vat)}\n재고 취득원가 ${formatAssetWon(grossAmount-vat)}\n증빙: ${evidence}\n이 값으로 회계 연동을 준비할까요?`,
+        async () => {
+            const { error } = await _supabase.rpc('accounting_inventory_review_purchase', {
+                p_approval_id: Number(approvalId),p_input_vat: vat,p_evidence_type: evidence
+            });
+            if (error) return showAlert('원가 확인 실패',error.message);
+            await loadAssetOverview(true);
+            showAlert('저장 완료','매입세액과 재고 취득원가를 확인했습니다. 전자결재 연동에서 전표를 반영할 수 있습니다.');
+        });
 }
 
 // [수정] 마스터 데이터 로드 (SpecialType, Tax_Free, Usage 확인)
@@ -7908,7 +8184,7 @@ function confirmSync(type) {
                 `- 급여 발생전표: ${previewPlanResult.salaryAccrualCount || 0}건 (귀속월 말 비용·공제·회사부담분)`,
                 `- 급여 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 국세·지방세 별도 표시`,
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
-                `- 재고 입고 매입전표: ${previewPlanResult.inventoryPurchaseCount || 0}건 (매입 부가세를 분리해 행사재료비로 기록)`,
+                `- 재고 입고 매입전표: ${previewPlanResult.inventoryPurchaseCount || 0}건 · 취득원가 ${(previewPlanResult.inventoryPurchaseCostTotal || 0).toLocaleString()}원 · 공제 매입세액 ${(previewPlanResult.inventoryInputVatTotal || 0).toLocaleString()}원`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
                 `- 체크카드 즉시지출전표: ${previewPlanResult.checkCardCount}건 (차)미분류비용/(대)보통예금`,
                 `- 증액결의: ${previewPlanResult.adjustmentIncreaseCount || 0}건 (원결재 결제수단 기준 추가 전표)`,
@@ -7958,6 +8234,14 @@ function confirmSync(type) {
                 if (runPlanResult.error) {
                     await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
                     return showAlert("오류", "전자결재 연동 실패: " + runPlanResult.error.message);
+                }
+                const inventoryPlanSignature = (plans) => (plans || [])
+                    .filter((plan) => plan.kind === 'inventory_purchase')
+                    .map((plan) => `${plan.transId}:${plan.amount}:${plan.acquisitionCost}:${plan.inputVat}:${plan.evidenceType}`)
+                    .sort().join('|');
+                if (inventoryPlanSignature(runPlanResult.plans) !== inventoryPlanSignature(previewPlanResult.plans)) {
+                    await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);
+                    return showAlert('재고 매입 확인값 변경', '미리보기 후 재고 원가나 매입세액이 바뀌었습니다. 전자결재 연동을 다시 열어 확인해 주세요.');
                 }
                 if (runPlanResult.plans.length === 0) {
                     await rollbackApprovalSyncWrites([], salarySupportWrite.ids, []);

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.63 | Change: 2026-09-30 - Record future inventory acquisition cost and deductible VAT. -->
+<!-- Version: v1.2.64 | Change: 2026-09-30 - Keep inventory approvals at VAT-inclusive payable; review VAT in accounting. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.63 | approval.html');</script>
+  <script>console.log('[Version] v1.2.64 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1070,13 +1070,8 @@
                       <div class="input-group"><input type="number" min="1" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseQuantity" placeholder="0" oninput="handleApprovalInventoryCostInput()"><span class="input-group-text">개</span></div>
                     </div>
                     <div class="col-md-4">
-                      <label class="small text-muted fw-bold" for="inventoryPurchaseUnitCost">개당 매입가</label>
+                      <label class="small text-muted fw-bold" for="inventoryPurchaseUnitCost">개당 매입가 (부가세 포함)</label>
                       <div class="input-group"><input type="number" min="0" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseUnitCost" placeholder="0" oninput="handleApprovalInventoryCostInput()"><span class="input-group-text">원</span></div>
-                    </div>
-                    <div class="col-md-4">
-                      <label class="small text-muted fw-bold" for="inventoryPurchaseInputVat">공제 가능한 매입 부가세</label>
-                      <div class="input-group"><input type="number" min="0" step="1" inputmode="numeric" class="form-control text-end" id="inventoryPurchaseInputVat" value="0" oninput="handleApprovalInventoryCostInput()"><span class="input-group-text">원</span></div>
-                      <div class="small text-muted">공제 대상이 아니면 0원으로 두세요.</div>
                     </div>
                     <div class="col-12">
                       <div class="d-flex flex-wrap align-items-center gap-2">
@@ -2937,7 +2932,6 @@ function collectApprovalDraftFormPayload() {
             inventory_purchase_item_id: String(document.getElementById('inventoryPurchaseItem')?.value || '').trim(),
             inventory_purchase_quantity: String(document.getElementById('inventoryPurchaseQuantity')?.value || '').trim(),
             inventory_purchase_unit_cost: String(document.getElementById('inventoryPurchaseUnitCost')?.value || '').trim(),
-            inventory_purchase_input_vat: String(document.getElementById('inventoryPurchaseInputVat')?.value || '0').trim(),
             payroll_month: String(document.getElementById('payrollMonth')?.value || '').trim(),
             withholding_filing_month: String(document.getElementById('withholdingFilingMonth')?.value || '').trim(),
             withholding_due_date: String(document.getElementById('withholdingDueDate')?.value || '').trim(),
@@ -3248,8 +3242,6 @@ function resetApprovalComposerForm(options = {}) {
     if (inventoryPurchaseItemEl) inventoryPurchaseItemEl.value = '';
     if (inventoryPurchaseQuantityEl) inventoryPurchaseQuantityEl.value = '';
     if (inventoryPurchaseUnitCostEl) inventoryPurchaseUnitCostEl.value = '';
-    const inventoryPurchaseInputVatEl = document.getElementById('inventoryPurchaseInputVat');
-    if (inventoryPurchaseInputVatEl) inventoryPurchaseInputVatEl.value = '0';
     approvalInventoryFinalAmountManual = false;
     approvalInventoryWasEnabled = false;
     handleApprovalInventoryPurchaseToggle();
@@ -3467,8 +3459,6 @@ async function loadApprovalDraftFromServer(draftId) {
             if (inventoryPurchaseItemEl) inventoryPurchaseItemEl.value = String(fields.inventory_purchase_item_id || '').trim();
             if (inventoryPurchaseQuantityEl) inventoryPurchaseQuantityEl.value = String(fields.inventory_purchase_quantity || '').trim();
             if (inventoryPurchaseUnitCostEl) inventoryPurchaseUnitCostEl.value = String(fields.inventory_purchase_unit_cost || '').trim();
-            const inventoryPurchaseInputVatEl = document.getElementById('inventoryPurchaseInputVat');
-            if (inventoryPurchaseInputVatEl) inventoryPurchaseInputVatEl.value = String(fields.inventory_purchase_input_vat || '0').trim();
             const restoredCalculation = getApprovalInventoryPurchaseCalculation();
             const restoredAmount = Math.trunc(Number(amountEl?.value || 0));
             approvalInventoryFinalAmountManual = restoredCalculation.ready && restoredAmount !== restoredCalculation.baseAmount;
@@ -6428,29 +6418,23 @@ function collectApprovalInventoryPurchaseInput() {
     const quantity = Math.trunc(Number(document.getElementById('inventoryPurchaseQuantity')?.value || 0));
     const unitCostRaw = String(document.getElementById('inventoryPurchaseUnitCost')?.value || '').trim();
     const unitCost = unitCostRaw === '' ? null : Math.trunc(Number(unitCostRaw));
-    const inputVatRaw = String(document.getElementById('inventoryPurchaseInputVat')?.value || '0').trim();
-    const inputVat = Math.trunc(Number(inputVatRaw));
     const finalAmount = Math.trunc(Number(document.getElementById('appAmount')?.value || 0));
     const item = approvalInventoryItems.find((row) => String(row.id || '') === itemId);
     if (!itemId || !item) throw new Error('재고로 입고할 물품을 선택하세요.');
     if (!(quantity > 0)) throw new Error('구입 수량을 1개 이상 입력하세요.');
     if (unitCost === null || !Number.isSafeInteger(unitCost) || unitCost < 0) throw new Error('개당 매입가를 입력하세요.');
     if (!(finalAmount >= 0)) throw new Error('최종 결재 금액을 확인하세요.');
-    if (!Number.isSafeInteger(finalAmount) || !Number.isSafeInteger(inputVat) || inputVat < 0 || inputVat >= finalAmount) {
-        throw new Error('공제 가능한 매입 부가세와 최종 결재 금액을 확인하세요.');
-    }
+    if (!Number.isSafeInteger(finalAmount) || finalAmount <= 0) throw new Error('부가세가 포함된 최종 결재 금액을 확인하세요.');
     return {
         enabled: true,
-        accounting_mode: 'periodic_v1',
+        accounting_mode: 'gross_v2',
         item_id: itemId,
         item_name: String(item.name || '').trim(),
         unit: String(item.unit || '개').trim() || '개',
         quantity,
         unit_cost: unitCost,
         base_amount: unitCost === null ? null : quantity * unitCost,
-        approval_amount: finalAmount,
-        input_vat: inputVat,
-        acquisition_cost: finalAmount - inputVat
+        approval_amount: finalAmount
     };
 }
 
@@ -6458,7 +6442,7 @@ function buildApprovalInventoryPurchaseAppendText(purchase) {
     if (!purchase?.enabled) return '';
     const hasUnitCost = Number.isFinite(Number(purchase.unit_cost)) && purchase.unit_cost !== null;
     const costText = hasUnitCost
-        ? ` / 개당 매입가 ${formatMoney(purchase.unit_cost)}원`
+        ? ` / 개당 매입가(부가세 포함) ${formatMoney(purchase.unit_cost)}원`
         : '';
     const amountLines = [];
     if (hasUnitCost) {
@@ -6470,7 +6454,7 @@ function buildApprovalInventoryPurchaseAppendText(purchase) {
             amountLines.push(`- 최종 결재 금액: ${formatMoney(finalAmount)}원 (배송비·할인 등 조정 ${adjustment > 0 ? '+' : ''}${formatMoney(adjustment)}원)`);
         }
     }
-    return `[재고 입고 연동]\n- 물품: ${purchase.item_name}\n- 수량: ${Number(purchase.quantity).toLocaleString('ko-KR')}${purchase.unit || '개'}${costText}\n${amountLines.length ? `${amountLines.join('\n')}\n` : ''}- 공제 가능한 매입 부가세: ${formatMoney(purchase.input_vat || 0)}원\n- 재고 취득원가: ${formatMoney(purchase.acquisition_cost || 0)}원\n- 결재 완료 시 재고에 입고되며, 회계관리의 전자결재 연동과 결산에 반영됩니다.`;
+    return `[재고 입고 연동]\n- 물품: ${purchase.item_name}\n- 수량: ${Number(purchase.quantity).toLocaleString('ko-KR')}${purchase.unit || '개'}${costText}\n${amountLines.length ? `${amountLines.join('\n')}\n` : ''}- 결재 완료 시 재고에 입고됩니다.`;
 }
 
 function buildApprovalExpenseSnapshot() {
@@ -9812,8 +9796,6 @@ function resetSalaryExpenseUi() {
     if (inventoryItem) inventoryItem.value = '';
     if (inventoryQuantity) inventoryQuantity.value = '';
     if (inventoryUnitCost) inventoryUnitCost.value = '';
-    const inventoryInputVat = document.getElementById('inventoryPurchaseInputVat');
-    if (inventoryInputVat) inventoryInputVat.value = '0';
     approvalInventoryFinalAmountManual = false;
     approvalInventoryWasEnabled = false;
     syncApprovalInventoryPurchaseVisibility();
