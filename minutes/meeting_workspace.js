@@ -1,6 +1,6 @@
 /*
-Version: v1.10.0
-Change: 2026-09-30 - Archive completed meetings and reuse synchronized board scripts.
+Version: v1.10.1
+Change: 2026-09-30 - Save the whole pre-meeting packet and persist board annexes on add.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
@@ -420,6 +420,7 @@ function renderEditorHeader() {
   $('editorMeta').textContent = `${typeLabel} · ${formatDateTimeShort(row)}${row?.location ? ` · ${row.location}` : ''}`;
   $('editorStatus').className = `status ${row?.status || 'DRAFT'}`;
   $('editorStatus').textContent = STATUS_LABEL[row?.status] || '초안';
+  $('completeMaterialsButton').hidden = state.currentStep !== 'documents' || row?.status === 'FINAL';
 }
 
 function renderChairOptions(selectedId = null) {
@@ -1000,7 +1001,7 @@ function currentBoardEditorHtml() {
     : html;
 }
 
-function addBoardTextAnnex() {
+async function addBoardTextAnnex() {
   if (state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS') return;
   const editor = $('documentEditor');
   const title = $('boardAnnexTitle').value.trim();
@@ -1014,7 +1015,12 @@ function addBoardTextAnnex() {
   $('boardAnnexTitle').value = '';
   $('boardAnnexBody').value = '';
   editor.querySelector('.board-text-annex:last-child')?.scrollIntoView({ block: 'nearest' });
-  showToast('별첨 본문을 회의자료에 넣었습니다. 내용을 확인한 뒤 현재 문서를 저장해 주세요.');
+  try {
+    await saveActiveDocument({ quiet: true });
+  } catch (error) {
+    throw new Error('별첨은 화면에 추가됐지만 저장되지 않았습니다. 회의 전 자료 전체 저장을 다시 눌러 주세요.', { cause: error });
+  }
+  showToast('별첨을 회의자료에 넣고 저장했습니다.');
 }
 
 function renderActiveChapter() {
@@ -1526,10 +1532,9 @@ async function generateAllDocuments() {
     : '이사회 회의자료와 두 시나리오를 다시 만들었습니다. 확인한 뒤 회의자료 완성을 눌러 주세요.', 4200);
 }
 
-async function completeMeetingMaterials() {
+async function saveWholeMeetingDraft({ quiet = false } = {}) {
   if (!state.current) return;
   if (state.current.status === 'FINAL') throw new Error('이미 의사록으로 확정된 회의입니다.');
-  if (!$('meetingDate').value) throw new Error('회의일을 입력한 뒤 회의자료를 완성해 주세요.');
   const editedType = state.activeDocument;
   const wasDirty = state.documentDirty;
   if (wasDirty) {
@@ -1545,7 +1550,7 @@ async function completeMeetingMaterials() {
     return {
       document_type: item.type,
       title: existing?.title || item.title,
-      content_html: existing?.content_html || sanitizeHtml(item.content),
+      content_html: existing?.content_html ?? sanitizeHtml(item.content),
       version: Number(existing?.version || 1),
       manually_edited: existing?.manually_edited === true,
       generated_at: existing?.generated_at || new Date().toISOString()
@@ -1554,17 +1559,24 @@ async function completeMeetingMaterials() {
   const { data, error } = await MeetingPackageService.saveDocuments(state.current.id, rows);
   if (error) throw error;
   (data || []).forEach(row => state.documents.set(row.document_type, row));
+  state.documentDirty = false;
+  if (!quiet) showToast('기본정보·안건·회의자료·시나리오를 모두 저장했습니다.');
+}
+
+async function completeMeetingMaterials() {
+  if (!state.current) return;
+  if (!$('meetingDate').value) throw new Error('회의일을 입력한 뒤 회의자료를 완성해 주세요.');
+  await saveWholeMeetingDraft({ quiet: true });
   const updated = await MeetingPackageService.updatePackage(state.current.id, { status: 'READY' });
   if (updated.error) throw updated.error;
   state.current = updated.data;
-  state.documentDirty = false;
   renderEditorHeader();
   await loadPackages();
   if (isPastPackage(state.current)) $('pastMeetings').open = true;
   showToast('회의자료를 완성했습니다. 회의일이 지나면 종료된 회의에서 볼 수 있습니다.', 3800);
 }
 
-async function saveActiveDocument() {
+async function saveActiveDocument({ quiet = false } = {}) {
   if (!state.current) return;
   const wasDirty = state.documentDirty;
   rememberActiveDocument();
@@ -1587,7 +1599,7 @@ async function saveActiveDocument() {
     if (saved.error) throw saved.error;
     (saved.data || []).forEach(item => state.documents.set(item.document_type, item));
     state.documentDirty = false;
-    showToast('의장 발언을 두 시나리오에 함께 저장했습니다.');
+    if (!quiet) showToast('의장 발언을 두 시나리오에 함께 저장했습니다.');
     return;
   }
   const { data, error } = await MeetingPackageService.saveDocument(state.current.id, state.activeDocument, {
@@ -1600,7 +1612,7 @@ async function saveActiveDocument() {
   if (error) throw error;
   state.documents.set(state.activeDocument, data);
   state.documentDirty = false;
-  showToast(`${DOC_LABEL[state.activeDocument]}을 저장했습니다.`);
+  if (!quiet) showToast(`${DOC_LABEL[state.activeDocument]}을 저장했습니다.`);
 }
 
 const BOOK_PRINT_CSS = `
@@ -1879,6 +1891,7 @@ async function deletePackage() {
 function switchStep(step) {
   if (step === 'audit' && $('auditStepTab').hidden) step = 'documents';
   state.currentStep = step;
+  $('completeMaterialsButton').hidden = step !== 'documents' || state.current?.status === 'FINAL';
   document.querySelectorAll('.step-tab').forEach(button => button.classList.toggle('active', button.dataset.step === step));
   document.querySelectorAll('.step-panel').forEach(panel => panel.classList.toggle('active', panel.dataset.panel === step));
   if (step === 'audit') {
@@ -2078,7 +2091,7 @@ function bindEvents() {
   $('requestAuditReviewButton').addEventListener('click', () => runAction(requestAuditReview));
   $('openAuditButton').addEventListener('click', openAuditReport);
   $('recordAuditChangeButton').addEventListener('click', () => runAction(recordAuditChangeRequest));
-  $('saveDocumentButton').addEventListener('click', () => runAction(saveActiveDocument));
+  $('saveDocumentButton').addEventListener('click', () => runAction(saveWholeMeetingDraft));
   $('printDocumentButton').addEventListener('click', () => runAction(printActiveDocument));
   $('printChapterButton').addEventListener('click', () => runAction(printCurrentChapter));
   $('previousChapterButton').addEventListener('click', () => stepChapter(-1));
