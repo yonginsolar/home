@@ -1,4 +1,4 @@
-/* v2.2.0 - Extra-payment sale reclassification and idempotent refund confirmation. */
+/* v2.3.0 - One sale with participant payment and organizer voucher receivable. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -30,10 +30,12 @@
   let inventory = { items: [], sales: [], movements: [] };
   let eventContext = { events: [], sale_links: [], receipt_links: [] };
   let extraPaymentContext = { items: [] };
+  let voucherContext = { items: [] };
   let editable = false;
   let operationBusy = false;
   let receiptBusy = false;
   let receiptAmountEdited = false;
+  let pendingSaleRequestKey = null;
 
   function setOperationStatus(message, error = false) {
     $('operationStatus').textContent = message || '';
@@ -48,7 +50,9 @@
     if (message.includes('INVALID_SALE_TOTAL')) return '판매액·수납액·현금영수증 구분 합계를 다시 확인해 주세요.';
     if (message.includes('INVALID_DEPOSIT_AMOUNT')) return '입금 처리할 수 있는 현금 잔액을 초과했습니다.';
     if (message.includes('INVALID_RECEIPT_COUNT')) return '현금영수증 발급 건수는 0건부터 판매 수량까지 입력할 수 있습니다.';
-    if (message.includes('INVALID_RECEIPT_AMOUNT')) return '현금영수증 발급 금액을 실제 매출액 안에서 확인해 주세요.';
+    if (message.includes('INVALID_RECEIPT_AMOUNT')) return '현금영수증 발급 금액을 참가자 직접 결제액 안에서 확인해 주세요.';
+    if (message.includes('VOUCHER_SETTLEMENT_EXCEEDS_BALANCE')) return '쿠폰 미정산액보다 큰 금액은 입금 처리할 수 없습니다.';
+    if (message.includes('INVALID_VOUCHER_SETTLEMENT')) return '쿠폰 정산 입금일과 입금액을 확인해 주세요.';
     if (message.includes('LINKED_RECEIPT_EXCEEDS_ALLOCATION')) return '이미 발급 완료로 연결된 현금영수증보다 적게 바꿀 수 없습니다. 먼저 해당 신청을 미처리로 되돌려 주세요.';
     if (message.includes('RECEIPT_ALLOCATION_EXCEEDED')) return '해당 매출에 남아 있는 `신청 없음` 금액보다 신청액이 큽니다.';
     if (message.includes('RECEIPT_AMOUNT_NOT_MATCHED')) return '신청 금액과 해당 매출의 개당 판매가가 맞지 않습니다.';
@@ -91,6 +95,15 @@
     if (result.error) throw new Error(result.error.message);
     return result.data;
   }
+
+  async function voucherRpc(action, data = {}) {
+    const result = await client.rpc('festival_voucher_sales_admin', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  const receiptBaseForSale = (sale) => Math.max(0,
+    Number(sale.gross_amount || 0) - Number(sale.voucher_amount || 0));
 
   const saleLink = (saleId) => (eventContext.sale_links || []).find((row) => row.sale_id === saleId) || null;
   const receiptLink = (receiptId) => (eventContext.receipt_links || []).find((row) => row.receipt_id === receiptId) || null;
@@ -314,7 +327,7 @@
     const amountInput = document.createElement('input');
     amountInput.type = 'number';
     amountInput.min = '0';
-    amountInput.max = String(Number(sale.gross_amount || 0));
+    amountInput.max = String(receiptBaseForSale(sale));
     amountInput.step = '1';
     amountInput.value = String(Number(sale.receipt_issued_amount || 0));
     amountInput.setAttribute('aria-label', '현금영수증 발급 금액 수정');
@@ -324,13 +337,14 @@
     const updatePreview = () => {
       const quantity = Number(sale.quantity || 0);
       const issuedCount = Math.max(0, Math.min(quantity, Math.trunc(Number(countInput.value || 0))));
-      const issuedAmount = Math.max(0, Math.min(Number(sale.gross_amount || 0), Math.trunc(Number(amountInput.value || 0))));
-      preview.textContent = `발급 ${issuedCount.toLocaleString('ko-KR')}건 · ${money(issuedAmount)}\n신청 없음 ${(quantity - issuedCount).toLocaleString('ko-KR')}건 · ${money(Number(sale.gross_amount || 0) - issuedAmount)}`;
+      const receiptBase = receiptBaseForSale(sale);
+      const issuedAmount = Math.max(0, Math.min(receiptBase, Math.trunc(Number(amountInput.value || 0))));
+      preview.textContent = `발급 ${issuedCount.toLocaleString('ko-KR')}건 · ${money(issuedAmount)}\n신청 없음 ${(quantity - issuedCount).toLocaleString('ko-KR')}건 · ${money(receiptBase - issuedAmount)}`;
     };
     countInput.addEventListener('input', () => {
       const count = Math.max(0, Math.min(Number(sale.quantity || 0), Math.trunc(Number(countInput.value || 0))));
       amountInput.value = String(Number(sale.quantity || 0) > 0
-        ? Math.round(Number(sale.gross_amount || 0) * count / Number(sale.quantity || 0))
+        ? Math.round(receiptBaseForSale(sale) * count / Number(sale.quantity || 0))
         : 0);
       updatePreview();
     });
@@ -352,8 +366,8 @@
         setOperationStatus('현금영수증 발급 건수를 판매 수량 안에서 입력해 주세요.', true);
         return;
       }
-      if (issuedAmount < 0 || issuedAmount > Number(sale.gross_amount || 0)) {
-        setOperationStatus('현금영수증 발급 금액을 실제 매출액 안에서 입력해 주세요.', true);
+      if (issuedAmount < 0 || issuedAmount > receiptBaseForSale(sale)) {
+        setOperationStatus('현금영수증 발급 금액을 참가자 직접 결제액 안에서 입력해 주세요.', true);
         return;
       }
       operationBusy = true;
@@ -451,6 +465,8 @@
     rows.replaceChildren();
     const sales = Array.isArray(inventory.sales) ? inventory.sales : [];
     sales.forEach((sale) => {
+      const voucher = (voucherContext.items || []).find((item) => item.sale_id === sale.id);
+      if (voucher) Object.assign(sale, voucher);
       const financial = saleLink(sale.id) || {};
       const listAmount = Number(financial.list_amount ?? (Number(sale.quantity || 0) * Number(sale.unit_price || 0)));
       const discountAmount = Number(financial.discount_amount || 0);
@@ -461,7 +477,7 @@
         makeCell(sale.sale_date),
         makeCell(`${sale.event_name}\n${sale.item_name}`, 'multiline'),
         makeCell(`${Number(sale.quantity).toLocaleString('ko-KR')}개 × ${money(sale.unit_price)}\n정가 ${money(listAmount)}${discountAmount ? `\n할인 -${money(discountAmount)}` : ''}\n매출 ${money(sale.gross_amount)}`, 'multiline'),
-        makeCell(`계좌 ${money(sale.bank_received)}\n현금 ${money(sale.cash_received)}`, 'multiline')
+        makeCell(`계좌 ${money(sale.bank_received)}\n현금 ${money(sale.cash_received)}${voucher ? `\n주관사 쿠폰 ${money(voucher.voucher_amount)}` : ''}`, 'multiline')
       );
       const receiptCell = makeCell(`발급 ${Number(sale.receipt_issued_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_issued_amount)}\n신청 없음 ${Number(sale.receipt_not_requested_count).toLocaleString('ko-KR')}건 · ${money(sale.receipt_not_requested_amount)}`, 'multiline');
       const editReceipt = document.createElement('button');
@@ -522,6 +538,99 @@
     }
   }
 
+  function renderVouchers() {
+    const rows = $('voucherRows');
+    rows.replaceChildren();
+    const items = Array.isArray(voucherContext.items) ? voucherContext.items : [];
+    items.forEach((item) => {
+      const row = document.createElement('tr');
+      row.append(
+        makeCell(`${item.sale_date}\n${item.event_name}`, 'multiline'),
+        makeCell(item.voucher_organizer),
+        makeCell(`${Number(item.voucher_count).toLocaleString('ko-KR')}건 × ${money(item.voucher_unit_value)}\n${money(item.voucher_amount)}`, 'multiline'),
+        makeCell(`입금 ${money(item.settled_amount)}\n미정산 ${money(item.outstanding_amount)}`, 'multiline')
+      );
+      const action = document.createElement('td');
+      if (Number(item.outstanding_amount || 0) <= 0) {
+        action.textContent = '정산 완료';
+        action.className = 'success-text';
+      } else {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = '입금 확인';
+        button.disabled = !editable;
+        button.addEventListener('click', () => beginVoucherSettlement(action, item));
+        action.append(button);
+      }
+      row.append(action);
+      rows.append(row);
+    });
+    if (!items.length) {
+      const row = document.createElement('tr');
+      const cell = makeCell('쿠폰으로 등록한 매출이 없습니다.');
+      cell.colSpan = 5;
+      row.append(cell);
+      rows.append(row);
+    }
+  }
+
+  function beginVoucherSettlement(cell, item) {
+    cell.replaceChildren();
+    const wrap = document.createElement('div');
+    wrap.className = 'inline-action';
+    const dateLabel = document.createElement('label');
+    dateLabel.textContent = '실제 입금일';
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = kstToday();
+    dateLabel.append(dateInput);
+    const amountLabel = document.createElement('label');
+    amountLabel.textContent = '입금액';
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.min = '1';
+    amountInput.max = String(item.outstanding_amount);
+    amountInput.step = '1';
+    amountInput.value = String(item.outstanding_amount);
+    amountLabel.append(amountInput);
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.textContent = '정산 입금 저장';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'secondary';
+    cancel.textContent = '취소';
+    cancel.addEventListener('click', renderVouchers);
+    const requestKey = crypto.randomUUID();
+    save.addEventListener('click', async () => {
+      if (operationBusy) return;
+      const amount = Math.trunc(Number(amountInput.value || 0));
+      if (!dateInput.value || amount <= 0 || amount > Number(item.outstanding_amount)) {
+        setOperationStatus('실제 입금일과 미정산액 이하의 입금액을 확인해 주세요.', true);
+        return;
+      }
+      if (!window.confirm(`${item.voucher_organizer}에서 ${money(amount)}을 실제로 입금했나요?\n확인을 누르면 미수금에서 보통예금으로 옮겨 기록합니다.`)) return;
+      operationBusy = true;
+      save.disabled = cancel.disabled = true;
+      try {
+        await voucherRpc('settle', {
+          request_key: requestKey, sale_id: item.sale_id,
+          settlement_date: dateInput.value, amount
+        });
+        setOperationStatus(`${money(amount)} 정산 입금을 저장했습니다. 새 매출은 만들지 않았습니다.`);
+        await loadInventory();
+      } catch (error) {
+        setOperationStatus(readableError(error), true);
+        save.disabled = cancel.disabled = false;
+      } finally {
+        operationBusy = false;
+      }
+    });
+    wrap.append(dateLabel, amountLabel, save, cancel);
+    cell.append(wrap);
+    dateInput.focus();
+  }
+
   function applySaleAdjustment(result) {
     if (!result?.sale_id) return;
     const sale = (inventory.sales || []).find((row) => row.id === result.sale_id);
@@ -533,12 +642,14 @@
   }
 
   async function loadInventory() {
-    [inventory, extraPaymentContext] = await Promise.all([
+    [inventory, extraPaymentContext, voucherContext] = await Promise.all([
       rpc('bootstrap'),
-      extraPaymentRpc('list')
+      extraPaymentRpc('list'),
+      voucherRpc('list')
     ]);
     renderInventory();
     renderSales();
+    renderVouchers();
     renderMovements();
   }
 
@@ -548,24 +659,31 @@
     const listAmount = quantity * unitPrice;
     const discount = intValue('saleDiscount');
     const gross = Math.max(0, listAmount - discount);
+    const voucherCount = intValue('voucherCount');
+    const voucherUnitValue = intValue('voucherUnitValue');
+    const voucherAmount = voucherCount * voucherUnitValue;
+    const receiptBase = Math.max(0, gross - voucherAmount);
     const bank = intValue('saleBank');
     const cash = intValue('saleCash');
     const overpayment = intValue('overpaymentAmount');
     const issued = intValue('receiptIssuedAmount');
     const none = intValue('receiptNoneAmount');
     const discountOk = discount <= listAmount;
-    const receivedOk = discountOk && bank + cash === gross + overpayment;
-    const receiptOk = issued + none === gross;
-    $('saleSummary').textContent = `정가 ${money(listAmount)} · 할인 ${money(discount)} · 실제 매출 ${money(gross)}\n계좌 ${money(bank)} · 현장 현금 ${money(cash)}${overpayment ? ` · 추가 입금 ${money(overpayment)}` : ''}\n현금영수증 구분 ${money(issued + none)} · ${receivedOk && receiptOk ? '합계가 맞습니다.' : '합계를 확인해 주세요.'}`;
+    const voucherOk = voucherCount <= quantity && voucherAmount <= gross
+      && (voucherCount === 0 || ($('voucherOrganizer').value.trim() && voucherUnitValue > 0));
+    const receivedOk = discountOk && voucherOk && bank + cash + voucherAmount === gross + overpayment;
+    const receiptOk = issued + none === receiptBase;
+    $('saleSummary').textContent = `정가 ${money(listAmount)} · 할인 ${money(discount)} · 매출 ${money(gross)}\n참가자 계좌 ${money(bank)} · 현장 현금 ${money(cash)}${voucherAmount ? ` · 주관사 쿠폰 미정산 ${money(voucherAmount)}` : ''}${overpayment ? ` · 추가 입금 ${money(overpayment)}` : ''}\n현금영수증 구분 ${money(issued + none)} (직접 결제액) · ${receivedOk && receiptOk ? '합계가 맞습니다.' : '합계를 확인해 주세요.'}`;
     $('saleSummary').classList.toggle('invalid', !(receivedOk && receiptOk));
-    return { quantity, unitPrice, listAmount, discount, gross, bank, cash, overpayment, issued, none, valid: receivedOk && receiptOk };
+    return { quantity, unitPrice, listAmount, discount, gross, bank, cash, voucherCount, voucherUnitValue, voucherAmount, overpayment, issued, none, valid: receivedOk && receiptOk };
   }
 
   function syncCashReceived() {
     const listAmount = intValue('saleQuantity') * intValue('saleUnitPrice');
     const discount = intValue('saleDiscount');
     const gross = Math.max(0, listAmount - discount);
-    const totalReceived = gross + intValue('overpaymentAmount');
+    const voucherAmount = intValue('voucherCount') * intValue('voucherUnitValue');
+    const totalReceived = Math.max(0, gross - voucherAmount) + intValue('overpaymentAmount');
     const bank = intValue('saleBank');
     $('saleCash').value = String(Math.max(0, totalReceived - bank));
   }
@@ -573,7 +691,7 @@
   function syncSaleReceiptAllocation(forceAmount = false) {
     const quantity = intValue('saleQuantity');
     const listAmount = quantity * intValue('saleUnitPrice');
-    const gross = Math.max(0, listAmount - intValue('saleDiscount'));
+    const gross = Math.max(0, listAmount - intValue('saleDiscount') - intValue('voucherCount') * intValue('voucherUnitValue'));
     const issuedInput = $('receiptIssuedCount');
     const enteredIssuedCount = intValue('receiptIssuedCount');
     const issuedCount = Math.min(quantity, enteredIssuedCount);
@@ -590,9 +708,10 @@
     return updateSaleSummary();
   }
 
-  ['saleBank','overpaymentAmount'].forEach((id) => {
+  ['saleBank','overpaymentAmount','voucherCount','voucherUnitValue'].forEach((id) => {
     $(id).addEventListener('input', () => { syncCashReceived(); syncSaleReceiptAllocation(); });
   });
+  $('voucherOrganizer').addEventListener('input', updateSaleSummary);
   ['saleQuantity','saleUnitPrice','saleDiscount'].forEach((id) => {
     $(id).addEventListener('input', () => { syncCashReceived(); syncSaleReceiptAllocation(); });
   });
@@ -605,7 +724,7 @@
     syncCashReceived();
     const summary = syncSaleReceiptAllocation();
     const overpaymentName = $('overpaymentName').value.trim();
-    if (!summary.valid) return setOperationStatus('판매액·수납액·현금영수증 구분 합계를 맞춰 주세요.', true);
+    if (!summary.valid) return setOperationStatus('판매액·쿠폰 정산액·직접 수납액·현금영수증 구분 합계를 확인해 주세요.', true);
     if (summary.overpayment > 0 && !overpaymentName) return setOperationStatus('추가 입금자명을 입력해 주세요.', true);
     if (summary.overpayment === 0 && overpaymentName) return setOperationStatus('추가 입금 금액이 없으면 입금자명도 비워 주세요.', true);
     operationBusy = true;
@@ -615,18 +734,22 @@
       const selectedEventId = $('saleEvent').value;
       if (!selectedEventId) return setOperationStatus('행사를 먼저 선택해 주세요.', true);
       await registerSaleRpc({
-        request_key: crypto.randomUUID(), event_id: selectedEventId, item_id: $('saleItem').value,
+        request_key: pendingSaleRequestKey ||= crypto.randomUUID(), event_id: selectedEventId, item_id: $('saleItem').value,
         quantity: summary.quantity, unit_price: summary.unitPrice, discount_amount: summary.discount,
         bank_received: summary.bank, cash_received: summary.cash,
+        voucher_count: summary.voucherCount, voucher_unit_value: summary.voucherCount ? summary.voucherUnitValue : 0,
+        voucher_organizer: summary.voucherCount ? $('voucherOrganizer').value.trim() : '',
         receipt_issued_count: intValue('receiptIssuedCount'), receipt_issued_amount: summary.issued,
         receipt_not_requested_count: intValue('receiptNoneCount'), receipt_not_requested_amount: summary.none,
         overpayment_amount: summary.overpayment, overpayment_name: overpaymentName,
         note: $('saleNote').value.trim()
       });
-      setOperationStatus('매출·회계전표·재고 출고를 함께 저장했습니다.');
+      pendingSaleRequestKey = null;
+      setOperationStatus('매출·회계전표·재고 출고를 함께 저장했습니다. 쿠폰 금액은 정산 입금 전까지 미수금으로 표시됩니다.');
       event.currentTarget.reset();
       $('saleEvent').value = selectedEventId;
-      ['saleDiscount','saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
+      ['saleDiscount','saleBank','saleCash','voucherCount','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
+      $('voucherUnitValue').value = '3000';
       receiptAmountEdited = false;
       syncSaleReceiptAllocation();
       await loadInventory();
