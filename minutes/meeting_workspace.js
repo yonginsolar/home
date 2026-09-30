@@ -1,10 +1,10 @@
 /*
-Version: v1.9.6
-Change: 2026-09-30 - Board memo space, screen-only annex accordion and gentler scripts.
+Version: v1.10.0
+Change: 2026-09-30 - Archive completed meetings and reuse synchronized board scripts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
-import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.0';
+import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.5';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
@@ -13,7 +13,7 @@ const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
 const KIND_LABEL = { REPORT: '보고 안건', DECISION: '의결 안건', DISCUSSION: '논의 안건', OTHER: '기타 안건' };
 const DOC_LABEL = { MATERIALS: '회의 자료', SCENARIO: '의장용 진행 시나리오', SCENARIO_SECRETARIAT: '사무국장용 진행 시나리오' };
-const STATUS_LABEL = { DRAFT: '초안', READY: '회의 전 문서 준비', FINAL: '완료' };
+const STATUS_LABEL = { DRAFT: '초안', READY: '회의자료 완성', FINAL: '완료' };
 
 const state = {
   session: null,
@@ -25,6 +25,7 @@ const state = {
   current: null,
   agendas: [],
   documents: new Map(),
+  inheritedChairStyle: null,
   pdfAttachments: [],
   sourceContext: null,
   auditChangeRequests: [],
@@ -366,19 +367,40 @@ function chairCandidates() {
   return state.officials.filter(row => row.category === 'executive' && ['이사장', '이사'].includes(officialRole(row)));
 }
 
+function todayInSeoul(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(now);
+  const part = (type) => parts.find(row => row.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function isPastPackage(row, today = todayInSeoul()) {
+  return ['READY', 'FINAL'].includes(row?.status)
+    && /^\d{4}-\d{2}-\d{2}$/.test(String(row?.meeting_date || ''))
+    && row.meeting_date < today;
+}
+
+function packageItemHtml(row) {
+  return `<button type="button" class="package-item ${state.current?.id === row.id ? 'active' : ''}" data-package-id="${escapeHtml(row.id)}">
+    <span class="status ${escapeHtml(row.status)}">${escapeHtml(STATUS_LABEL[row.status] || row.status)}</span>
+    <strong>${escapeHtml(row.title)}</strong>
+    <small>${escapeHtml(TYPE_LABEL[row.meeting_type] || row.meeting_type)} · ${escapeHtml(formatDateTimeShort(row))}${row.location ? ` · ${escapeHtml(row.location)}` : ''}</small>
+  </button>`;
+}
+
 function renderPackages() {
-  const list = $('packageList');
-  if (!state.packages.length) {
-    list.innerHTML = '<div class="empty">아직 준비 중인 회의가 없습니다.<br>새 회의 준비를 눌러 시작하세요.</div>';
-    return;
-  }
-  list.innerHTML = state.packages.map(row => `
-    <button type="button" class="package-item ${state.current?.id === row.id ? 'active' : ''}" data-package-id="${escapeHtml(row.id)}">
-      <span class="status ${escapeHtml(row.status)}">${escapeHtml(STATUS_LABEL[row.status] || row.status)}</span>
-      <strong>${escapeHtml(row.title)}</strong>
-      <small>${escapeHtml(TYPE_LABEL[row.meeting_type] || row.meeting_type)} · ${escapeHtml(formatDateTimeShort(row))}${row.location ? ` · ${escapeHtml(row.location)}` : ''}</small>
-    </button>
-  `).join('');
+  const past = state.packages.filter(row => isPastPackage(row))
+    .sort((a, b) => String(b.meeting_date).localeCompare(String(a.meeting_date))
+      || String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const preparing = state.packages.filter(row => !isPastPackage(row));
+  $('packageList').innerHTML = preparing.length
+    ? preparing.map(packageItemHtml).join('')
+    : '<div class="empty">준비 중인 회의가 없습니다.<br>새 회의 준비를 눌러 시작하세요.</div>';
+  $('pastPackageList').innerHTML = past.length
+    ? past.map(packageItemHtml).join('')
+    : '<div class="empty">종료된 회의가 없습니다.</div>';
+  $('pastMeetingCount').textContent = String(past.length);
 }
 
 async function loadPackages(selectId = null) {
@@ -584,7 +606,7 @@ function updateDocumentModeLabels() {
     ? (regularAssembly
       ? '정기총회 기본 순서는 전차 의사록 확인 → 감사보고서 → 사업보고 및 결산 → 배당·이익처분(있을 때) → 감자·탈퇴 출자금 반환(있을 때) → 사업계획·예산 → 차입금 한도 → 추가 의안 → 기타안건입니다.'
       : '임시총회 자료집과 시나리오는 등록한 의안만으로 구성합니다.')
-    : '기존 제6차 이사회 문서를 기준으로 한 장짜리 회의자료와 진행 시나리오를 준비합니다.';
+    : '한 장짜리 회의자료와 두 시나리오를 준비합니다. 지난 이사회가 있으면 의장 발언을 참고하고, 없으면 기본 문구로 시작합니다.';
   if (!regularAssembly && state.currentStep === 'audit') switchStep('documents');
   if (regularAssembly) {
     renderAssemblySourceStatus();
@@ -1093,10 +1115,112 @@ function defaultDocumentTitle(type) {
   return state.current?.meeting_type === 'GENERAL_ASSEMBLY' ? `${title} 진행 시나리오` : `${title} 의장용 진행 시나리오`;
 }
 
+function scenarioChairGroups(html) {
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = sanitizeHtml(html || '');
+  const groups = new Map();
+  for (const heading of wrapper.querySelectorAll('.board-scenario > h2')) {
+    const label = heading.textContent.trim();
+    let kind = label === '개회 선언' ? 'OPENING' : label === '폐회 선언' ? 'CLOSING' : '';
+    if (!kind) kind = /^\[보고\s/.test(label) ? 'REPORT'
+      : /^\[의결\s/.test(label) ? 'DECISION'
+      : /^\[토의\s/.test(label) ? 'DISCUSSION'
+      : /^\[기타\s/.test(label) ? 'OTHER' : '';
+    if (!kind) continue;
+    const lines = [];
+    for (let node = heading.nextElementSibling; node && node.tagName !== 'H2'; node = node.nextElementSibling) {
+      if (node.matches('p.speaker') && node.querySelector(':scope > strong')?.textContent.trim() === '의장') lines.push(node);
+    }
+    const key = kind === 'OPENING' || kind === 'CLOSING' ? kind : `${kind}:${groups.get(kind)?.length || 0}`;
+    if (kind === 'OPENING' || kind === 'CLOSING') groups.set(key, lines);
+    else groups.set(kind, [...(groups.get(kind) || []), lines]);
+  }
+  return { wrapper, groups };
+}
+
+function reusableChairStyle(html, row) {
+  const { wrapper, groups } = scenarioChairGroups(html);
+  let inherited = null;
+  try { inherited = JSON.parse(wrapper.querySelector('.board-scenario')?.getAttribute('data-inherited-chair-style') || 'null'); }
+  catch (_) { inherited = null; }
+  const entries = inherited?.entries && typeof inherited.entries === 'object' ? { ...inherited.entries } : {};
+  for (const kind of ['OPENING', 'CLOSING', 'REPORT', 'DECISION', 'DISCUSSION', 'OTHER']) {
+    const lines = kind === 'OPENING' || kind === 'CLOSING' ? groups.get(kind) : groups.get(kind)?.[0];
+    if (!lines) continue;
+    lines.forEach((line, index) => { entries[`${kind}:${index}`] = line.innerHTML; });
+  }
+  return Object.keys(entries).length ? { entries, title: row?.title || inherited?.title || '', eligibleCount: row?.eligible_count } : null;
+}
+
+function applyReusableChairStyle(html, style, row, agendas = []) {
+  if (!style?.entries) return html;
+  const { wrapper, groups } = scenarioChairGroups(html);
+  wrapper.querySelector('.board-scenario')?.setAttribute('data-inherited-chair-style', JSON.stringify(style));
+  for (const kind of ['OPENING', 'CLOSING', 'REPORT', 'DECISION', 'DISCUSSION', 'OTHER']) {
+    const sets = kind === 'OPENING' || kind === 'CLOSING' ? [groups.get(kind) || []] : groups.get(kind) || [];
+    for (const [setIndex, lines] of sets.entries()) lines.forEach((line, index) => {
+      // The introduction names a particular agenda. Always regenerate it from this meeting.
+      if (['REPORT', 'DECISION', 'DISCUSSION', 'OTHER'].includes(kind) && index === 0) return;
+      if (kind === 'DECISION' && index === 2
+        && agendas.filter(agenda => agenda.agenda_kind === 'DECISION')[setIndex]?.decision_draft?.trim()) return;
+      const previous = style.entries[`${kind}:${index}`];
+      if (!previous) return;
+      const scratch = document.createElement('p');
+      scratch.innerHTML = sanitizeHtml(previous);
+      if (scratch.querySelector(':scope > strong')?.textContent.trim() !== '의장') return;
+      if (style.title && row?.title) scratch.innerHTML = scratch.innerHTML.replaceAll(escapeHtml(style.title), escapeHtml(row.title));
+      if (kind === 'OPENING' && index === 0 && Number.isInteger(Number(row?.eligible_count))) {
+        scratch.innerHTML = scratch.innerHTML.replace(/(재적\s*이사\s*)\d+(\s*명)/g, `$1${Number(row.eligible_count)}$2`);
+      }
+      line.innerHTML = scratch.innerHTML;
+    });
+  }
+  return sanitizeHtml(wrapper.innerHTML);
+}
+
+function synchronizeChairSpeech(sourceHtml, targetHtml) {
+  const source = scenarioChairGroups(sourceHtml);
+  const target = scenarioChairGroups(targetHtml);
+  const shape = ({ wrapper }) => [...wrapper.querySelectorAll('.board-scenario > h2')].map(heading => {
+    const label = heading.textContent.trim();
+    const kind = /^\[([^\s]+)\s/.exec(label)?.[1] || label;
+    let count = 0;
+    for (let node = heading.nextElementSibling; node && node.tagName !== 'H2'; node = node.nextElementSibling) {
+      if (node.matches('p.speaker') && node.querySelector(':scope > strong')?.textContent.trim() === '의장') count++;
+    }
+    return `${kind}:${count}`;
+  });
+  if (JSON.stringify(shape(source)) !== JSON.stringify(shape(target))) {
+    throw new Error('두 시나리오의 안건 순서나 의장 발언 구조가 다릅니다. 문서를 확인한 뒤 다시 저장해 주세요.');
+  }
+  const sourceLines = [...source.wrapper.querySelectorAll('.board-scenario p.speaker')]
+    .filter(node => node.querySelector(':scope > strong')?.textContent.trim() === '의장');
+  const targetLines = [...target.wrapper.querySelectorAll('.board-scenario p.speaker')]
+    .filter(node => node.querySelector(':scope > strong')?.textContent.trim() === '의장');
+  if (!sourceLines.length || sourceLines.length !== targetLines.length) {
+    throw new Error('두 시나리오의 의장 발언 수가 달라 자동으로 맞출 수 없습니다. 안건을 확인하고 준비문서를 다시 만든 뒤 수정해 주세요.');
+  }
+  sourceLines.forEach((line, index) => { targetLines[index].innerHTML = line.innerHTML; });
+  return sanitizeHtml(target.wrapper.innerHTML);
+}
+
+function synchronizeActiveBoardScenario() {
+  if (state.current?.meeting_type !== 'BOARD' || !['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(state.activeDocument)) return;
+  const source = state.documents.get(state.activeDocument);
+  const otherType = state.activeDocument === 'SCENARIO' ? 'SCENARIO_SECRETARIAT' : 'SCENARIO';
+  const target = state.documents.get(otherType);
+  if (!source?.content_html || !target?.content_html) throw new Error('두 시나리오를 먼저 준비해 주세요.');
+  state.documents.set(otherType, {
+    ...target,
+    content_html: synchronizeChairSpeech(source.content_html, target.content_html),
+    manually_edited: true
+  });
+}
+
 function generatedDocumentRows() {
   const chair = officialById(state.current?.chair_official_id);
   const chairName = chair ? `${officialRole(chair)} ${officialName(chair)}` : '의장';
-  return buildPreMeetingDocuments({
+  const rows = buildPreMeetingDocuments({
     row: state.current,
     agendas: state.agendas,
     coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
@@ -1105,6 +1229,14 @@ function generatedDocumentRows() {
     officials: state.officials,
     sourceContext: state.sourceContext
   });
+  if (state.current?.meeting_type === 'BOARD' && state.inheritedChairStyle) {
+    rows.forEach(row => {
+      if (['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(row.type)) {
+        row.content = applyReusableChairStyle(row.content, state.inheritedChairStyle, state.current, state.agendas);
+      }
+    });
+  }
+  return rows;
 }
 
 function collectPackageDraftPayload() {
@@ -1364,6 +1496,7 @@ async function saveAgendas({ quiet = false } = {}) {
 
 async function generateAllDocuments() {
   if (!state.current) return;
+  if (state.current.status === 'FINAL') throw new Error('의사록으로 확정된 회의의 준비문서는 다시 만들 수 없습니다.');
   if (state.documentDirty) rememberActiveDocument();
   const hasManualDraft = [...state.documents.values()].some(doc => doc.manually_edited && doc.content_html);
   if (hasManualDraft && !window.confirm('직접 고친 초안이 있습니다. 공통정보와 안건으로 다시 만들면 현재 문구가 바뀝니다. 계속할까요?')) return;
@@ -1383,24 +1516,80 @@ async function generateAllDocuments() {
     if (error) throw error;
     state.documents.set(row.type, data);
   }
-  const update = await MeetingPackageService.updatePackage(state.current.id, { status: 'READY' });
-  if (update.error) throw update.error;
-  state.current = update.data;
   state.activeDocument = 'MATERIALS';
   renderEditorHeader();
   renderActiveDocument();
   await loadPackages();
   renderPackages();
   showToast(state.current.meeting_type === 'GENERAL_ASSEMBLY'
-    ? '총회 자료집 챕터와 진행 시나리오를 다시 만들었습니다.'
-    : '이사회 회의자료와 의장용·사무국장용 시나리오를 다시 만들었습니다.', 3200);
+    ? '총회 자료집과 시나리오를 다시 만들었습니다. 확인한 뒤 회의자료 완성을 눌러 주세요.'
+    : '이사회 회의자료와 두 시나리오를 다시 만들었습니다. 확인한 뒤 회의자료 완성을 눌러 주세요.', 4200);
+}
+
+async function completeMeetingMaterials() {
+  if (!state.current) return;
+  if (state.current.status === 'FINAL') throw new Error('이미 의사록으로 확정된 회의입니다.');
+  if (!$('meetingDate').value) throw new Error('회의일을 입력한 뒤 회의자료를 완성해 주세요.');
+  const editedType = state.activeDocument;
+  const wasDirty = state.documentDirty;
+  if (wasDirty) {
+    rememberActiveDocument();
+    if (['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(editedType)) synchronizeActiveBoardScenario();
+  }
+  await saveInfo({ quiet: true });
+  await saveAgendas({ quiet: true });
+  refreshAutoDrafts({ render: false });
+  const generated = generatedDocumentRows();
+  const rows = generated.map(item => {
+    const existing = state.documents.get(item.type);
+    return {
+      document_type: item.type,
+      title: existing?.title || item.title,
+      content_html: existing?.content_html || sanitizeHtml(item.content),
+      version: Number(existing?.version || 1),
+      manually_edited: existing?.manually_edited === true,
+      generated_at: existing?.generated_at || new Date().toISOString()
+    };
+  });
+  const { data, error } = await MeetingPackageService.saveDocuments(state.current.id, rows);
+  if (error) throw error;
+  (data || []).forEach(row => state.documents.set(row.document_type, row));
+  const updated = await MeetingPackageService.updatePackage(state.current.id, { status: 'READY' });
+  if (updated.error) throw updated.error;
+  state.current = updated.data;
+  state.documentDirty = false;
+  renderEditorHeader();
+  await loadPackages();
+  if (isPastPackage(state.current)) $('pastMeetings').open = true;
+  showToast('회의자료를 완성했습니다. 회의일이 지나면 종료된 회의에서 볼 수 있습니다.', 3800);
 }
 
 async function saveActiveDocument() {
   if (!state.current) return;
+  const wasDirty = state.documentDirty;
   rememberActiveDocument();
   const row = state.documents.get(state.activeDocument);
   if (!row?.content_html) throw new Error('저장할 문서 내용이 없습니다. 먼저 초안을 만들어 주세요.');
+  if (state.current.meeting_type === 'BOARD' && ['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(state.activeDocument)) {
+    if (wasDirty) synchronizeActiveBoardScenario();
+    const otherType = state.activeDocument === 'SCENARIO' ? 'SCENARIO_SECRETARIAT' : 'SCENARIO';
+    const other = state.documents.get(otherType);
+    if (!other?.content_html) throw new Error('함께 저장할 다른 시나리오가 없습니다. 준비문서를 먼저 만들어 주세요.');
+    const payloads = [row, other].map(item => ({
+      document_type: item.document_type,
+      title: item.title,
+      content_html: item.content_html,
+      version: Number(item.version || 1),
+      manually_edited: item.manually_edited === true,
+      generated_at: item.generated_at || null
+    }));
+    const saved = await MeetingPackageService.saveDocuments(state.current.id, payloads);
+    if (saved.error) throw saved.error;
+    (saved.data || []).forEach(item => state.documents.set(item.document_type, item));
+    state.documentDirty = false;
+    showToast('의장 발언을 두 시나리오에 함께 저장했습니다.');
+    return;
+  }
   const { data, error } = await MeetingPackageService.saveDocument(state.current.id, state.activeDocument, {
     title: row.title,
     content_html: row.content_html,
@@ -1588,6 +1777,9 @@ async function openPackage(id) {
     state.current = data.package;
     state.agendas = data.agendas || [];
     state.documents = new Map((data.documents || []).map(row => [row.document_type, row]));
+    state.inheritedChairStyle = data.package.meeting_type === 'BOARD'
+      ? reusableChairStyle(state.documents.get('SCENARIO')?.content_html || state.documents.get('SCENARIO_SECRETARIAT')?.content_html, data.package)
+      : null;
     state.pdfAttachments = data.pdfAttachments || [];
     state.sourceContext = null;
     state.auditChangeRequests = [];
@@ -1604,6 +1796,7 @@ async function openPackage(id) {
     renderActiveDocument();
     renderAuditStep();
     renderPackages();
+    if (isPastPackage(state.current)) $('pastMeetings').open = true;
   } finally {
     setBusy(false);
   }
@@ -1613,6 +1806,18 @@ async function createPackage() {
   const title = $('newMeetingTitle').value.trim();
   if (!title) throw new Error('회의 제목을 입력하세요.');
   const type = $('newMeetingType').value;
+  const sources = type === 'BOARD' ? state.packages.filter(row => row.meeting_type === 'BOARD' && isPastPackage(row))
+    .sort((a, b) => String(b.meeting_date).localeCompare(String(a.meeting_date))
+      || String(b.updated_at || '').localeCompare(String(a.updated_at || ''))) : [];
+  let sourceStyle = null;
+  for (const source of sources) {
+    const previous = await MeetingPackageService.getPackage(source.id);
+    if (previous.error) throw previous.error;
+    const sourceDocument = previous.data?.documents?.find(row => row.document_type === 'SCENARIO')
+      || previous.data?.documents?.find(row => row.document_type === 'SCENARIO_SECRETARIAT');
+    sourceStyle = reusableChairStyle(sourceDocument?.content_html, previous.data?.package);
+    if (sourceStyle) break;
+  }
   const candidates = currentTypeOfficials(type);
   const chair = chairCandidates().find(row => officialRole(row) === '이사장') || null;
   const { data, error } = await MeetingPackageService.createPackage({
@@ -1625,13 +1830,30 @@ async function createPackage() {
     chair_official_id: chair?.id || null
   });
   if (error) throw error;
+  if (sourceStyle) {
+    const chairName = chair ? `${officialRole(chair)} ${officialName(chair)}` : '의장';
+    const seeds = buildPreMeetingDocuments({
+      row: data, agendas: [], coopName: state.runtime?.coop_name || state.company.company_name || '협동조합',
+      company: state.company, chairName, officials: state.officials, sourceContext: null
+    }).filter(row => ['SCENARIO', 'SCENARIO_SECRETARIAT'].includes(row.type))
+      .map(row => ({
+        document_type: row.type, title: row.title,
+        content_html: applyReusableChairStyle(row.content, sourceStyle, data),
+        version: 1, manually_edited: false, generated_at: new Date().toISOString()
+      }));
+    const seeded = await MeetingPackageService.saveDocuments(data.id, seeds);
+    if (seeded.error) {
+      await loadPackages(data.id);
+      throw new Error('새 회의는 만들었지만 지난 시나리오를 불러오지 못했습니다. 중복으로 새 회의를 만들지 말고 현재 회의를 확인해 주세요.');
+    }
+  }
   $('newPackageModal').classList.remove('show');
   $('newMeetingTitle').value = '';
   $('newMeetingNumber').value = '';
   await loadPackages(data.id);
   showToast(type === 'GENERAL_ASSEMBLY'
     ? '새 총회 준비 공간과 자료집·시나리오 초안을 만들었습니다.'
-    : '새 이사회 준비 공간과 회의자료·시나리오 초안을 만들었습니다.');
+    : sourceStyle ? '지난 이사회의 의장 말투를 가져왔습니다. 새 안건과 날짜를 확인해 주세요.' : '새 이사회 준비 공간을 만들었습니다. 기본 시나리오가 적용됩니다.');
 }
 
 async function deletePackage() {
@@ -1643,6 +1865,7 @@ async function deletePackage() {
   state.current = null;
   state.agendas = [];
   state.documents.clear();
+  state.inheritedChairStyle = null;
   state.pdfAttachments = [];
   state.sourceContext = null;
   state.auditChangeRequests = [];
@@ -1840,6 +2063,7 @@ function bindEvents() {
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
   $('saveAgendasButton').addEventListener('click', () => runAction(saveAgendas));
   $('generateAllButton').addEventListener('click', () => runAction(generateAllDocuments));
+  $('completeMaterialsButton').addEventListener('click', () => runAction(completeMeetingMaterials));
   $('refreshAssemblySourcesButton').addEventListener('click', () => runAction(async () => {
     await loadAssemblySources();
     refreshAutoDrafts({ render: state.currentStep === 'documents' });
@@ -1884,9 +2108,18 @@ function bindEvents() {
     const button = event.target.closest('[data-package-id]');
     if (button) openPackage(button.dataset.packageId).catch(error => showToast(error.message));
   });
+  $('pastPackageList').addEventListener('click', event => {
+    const button = event.target.closest('[data-package-id]');
+    if (button) openPackage(button.dataset.packageId).catch(error => showToast(error.message));
+  });
   document.querySelectorAll('.step-tab').forEach(button => button.addEventListener('click', () => switchStep(button.dataset.step)));
   document.querySelectorAll('.doc-tab').forEach(button => button.addEventListener('click', () => {
+    const wasDirty = state.documentDirty;
     rememberActiveDocument();
+    if (wasDirty) {
+      try { synchronizeActiveBoardScenario(); }
+      catch (error) { showToast(error.message, 5000); return; }
+    }
     state.activeDocument = button.dataset.document;
     renderActiveDocument();
   }));
@@ -2008,6 +2241,8 @@ async function init() {
   state.company = companyResult.data || {};
   state.meetingHistory = historyResult.data || [];
   await loadPackages();
+  window.setInterval(renderPackages, 60_000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPackages(); });
 }
 
 init().catch(error => {

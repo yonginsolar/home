@@ -1,6 +1,6 @@
 /*
-Version: v1.5.0
-Change: 2026-09-28 - Store internal audit-report change requests and create signed-report revisions safely.
+Version: v1.5.1
+Change: 2026-09-30 - Save paired board scripts in one request.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -247,6 +247,23 @@ async function saveDocument(packageId, documentType, payload) {
     .single();
 }
 
+async function saveDocuments(packageId, documents) {
+  const { coop_id: coopId } = await getRuntime();
+  if (!Array.isArray(documents) || !documents.length) return { data: [], error: null };
+  const rows = documents.map(({ document_type, ...payload }) => withCoop({
+    package_id: packageId,
+    document_type,
+    title: payload.title,
+    content_html: payload.content_html,
+    version: payload.version || 1,
+    manually_edited: payload.manually_edited === true,
+    generated_at: payload.generated_at || null
+  }, coopId));
+  return await supabase.from('meeting_package_documents')
+    .upsert(rows, { onConflict: 'package_id,document_type' })
+    .select('*');
+}
+
 async function createMinuteFromPackage(packageId, payload) {
   const { data, error } = await supabase
     .rpc('publish_meeting_package_minute', {
@@ -308,6 +325,7 @@ export const MeetingPackageService = {
   deletePackage,
   saveAgendas,
   saveDocument,
+  saveDocuments,
   createMinuteFromPackage,
   getAssemblySources,
   prepareAuditReport,
