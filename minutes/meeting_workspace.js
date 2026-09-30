@@ -1,11 +1,11 @@
 /*
-Version: v1.9.5
-Change: 2026-09-30 - Insert editable text annexes into board materials and refine spoken scripts.
+Version: v1.9.6
+Change: 2026-09-30 - Board memo space, screen-only annex accordion and gentler scripts.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.0';
-import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.4';
+import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.5';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
 import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
 
@@ -930,6 +930,54 @@ function renderBoardAnnexPanel() {
   $('boardAnnexPanel').hidden = state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS';
 }
 
+function normalizeBoardMaterialsHtml(value) {
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = sanitizeHtml(value);
+  const paper = wrapper.querySelector('.board-one-paper');
+  if (!paper) return wrapper.innerHTML;
+  paper.querySelector(':scope > .meeting-org-info')?.remove();
+  const memoHeading = [...paper.querySelectorAll(':scope > h2')]
+    .find(node => node.textContent.trim().replace(/[\[\]]/g, '') === '메모');
+  if (memoHeading && !paper.querySelector(':scope > .board-memo-space')) {
+    const space = document.createElement('div');
+    space.className = 'board-memo-space';
+    space.setAttribute('aria-label', '회의 중 메모할 공간');
+    space.innerHTML = '<div class="board-memo-line"></div>'.repeat(6);
+    const following = memoHeading.nextElementSibling;
+    (following?.matches('p') ? following : memoHeading).insertAdjacentElement('afterend', space);
+  }
+  return wrapper.innerHTML;
+}
+
+function decorateBoardAnnexes({ expandLast = false } = {}) {
+  if (state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS') return;
+  const sections = [...$('documentEditor').querySelectorAll('.board-text-annex')];
+  sections.forEach((section, index) => {
+    const header = section.querySelector('.board-annex-heading');
+    if (!header || header.querySelector('.board-annex-toggle')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'board-annex-toggle';
+    button.contentEditable = 'false';
+    const expanded = expandLast && index === sections.length - 1;
+    section.classList.toggle('is-collapsed', !expanded);
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', `${header.querySelector('h1')?.textContent.trim() || '별첨'} ${expanded ? '접기' : '펼치기'}`);
+    button.textContent = expanded ? '접기' : '펼치기';
+    header.append(button);
+  });
+}
+
+function currentBoardEditorHtml() {
+  const copy = $('documentEditor').cloneNode(true);
+  copy.querySelectorAll('.board-annex-toggle').forEach(button => button.remove());
+  copy.querySelectorAll('.board-text-annex.is-collapsed').forEach(section => section.classList.remove('is-collapsed'));
+  const html = sanitizeHtml(copy.innerHTML);
+  return state.current?.meeting_type === 'BOARD' && state.activeDocument === 'MATERIALS'
+    ? normalizeBoardMaterialsHtml(html)
+    : html;
+}
+
 function addBoardTextAnnex() {
   if (state.current?.meeting_type !== 'BOARD' || state.activeDocument !== 'MATERIALS') return;
   const editor = $('documentEditor');
@@ -939,6 +987,7 @@ function addBoardTextAnnex() {
     .map(section => Number(section.dataset.boardAnnexNumber) || 0)) + 1;
   const html = buildBoardTextAnnex({ title, body, kind: $('boardAnnexKind').value, number });
   editor.insertAdjacentHTML('beforeend', sanitizeHtml(html));
+  decorateBoardAnnexes({ expandLast: true });
   state.documentDirty = true;
   $('boardAnnexTitle').value = '';
   $('boardAnnexBody').value = '';
@@ -1014,7 +1063,10 @@ function renderActiveDocument() {
     document.querySelectorAll('.rich-toolbar [data-command]').forEach((button) => { button.disabled = false; });
     $('chapterPosition').textContent = '';
     renderPdfAttachmentList();
-    $('documentEditor').innerHTML = sanitizeHtml(doc.content_html || '');
+    $('documentEditor').innerHTML = state.current?.meeting_type === 'BOARD' && state.activeDocument === 'MATERIALS'
+      ? normalizeBoardMaterialsHtml(doc.content_html || '')
+      : sanitizeHtml(doc.content_html || '');
+    decorateBoardAnnexes();
   }
   state.documentDirty = false;
   document.querySelectorAll('.doc-tab').forEach(button => button.classList.toggle('active', button.dataset.document === state.activeDocument));
@@ -1029,7 +1081,7 @@ function rememberActiveDocument() {
     ...existing,
     document_type: state.activeDocument,
     title: $('documentTitle').value.trim() || defaultDocumentTitle(state.activeDocument),
-    content_html: chapterMode() ? sanitizeHtml(composeChapters()) : sanitizeHtml($('documentEditor').innerHTML),
+    content_html: chapterMode() ? sanitizeHtml(composeChapters()) : currentBoardEditorHtml(),
     manually_edited: state.documentDirty || existing.manually_edited === true
   });
 }
@@ -1391,6 +1443,7 @@ const BOOK_PRINT_CSS = `
   .source-agenda-row{display:grid;grid-template-columns:95pt 1fr;gap:3pt 9pt;padding:5pt 0;border-bottom:.5pt solid #cbd5e1}
   .source-agenda-row small{grid-column:2}
   .board-one-paper h1{text-align:center;font-size:19pt}.board-one-paper h2{font-size:13pt;margin:10pt 0 4pt}.board-one-paper .source-agenda-row{padding:3pt 0}
+  .board-memo-space{margin-top:7pt;break-inside:avoid}.board-memo-line{height:8mm;border-bottom:1pt solid #cbd5e1}
   .board-text-annex{break-before:page;page-break-before:always;color:#172033;line-height:1.75}
   .board-annex-heading{margin:0 0 17pt;padding:12pt 13pt;border-top:4pt solid #f97316;border-bottom:1pt solid #fdba74;background:#fff7ed;break-inside:avoid}
   .board-annex-heading span{display:block;margin:0 0 5pt;color:#9a3412;font-weight:900}
@@ -1884,6 +1937,17 @@ function bindEvents() {
     if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
   });
   $('documentEditor').addEventListener('input', () => { state.documentDirty = true; });
+  $('documentEditor').addEventListener('click', event => {
+    const button = event.target.closest('.board-annex-toggle');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const section = button.closest('.board-text-annex');
+    const expanded = section.classList.toggle('is-collapsed') === false;
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', `${section.querySelector('.board-annex-heading h1')?.textContent.trim() || '별첨'} ${expanded ? '접기' : '펼치기'}`);
+    button.textContent = expanded ? '접기' : '펼치기';
+  });
   $('auditDraftEditor').addEventListener('input', () => {
     if (auditReportLocked()) return;
     state.auditDraftDirty = true;

@@ -1,6 +1,6 @@
 /*
-Version: v1.7.4
-Change: 2026-09-30 - Format pasted board annexes and share spoken chair lines across both scripts.
+Version: v1.7.5
+Change: 2026-09-30 - Give board materials note space and soften spoken chair scripts.
 */
 
 const safe = (value) => String(value ?? '')
@@ -99,7 +99,7 @@ function organizationInfo(company, coopName, { includeName = true } = {}) {
   return `<dl class="meeting-org-info">${rows.map(([label, value]) => `<div><dt>${safe(label)}</dt><dd>${safe(value)}</dd></div>`).join('')}</dl>`;
 }
 
-export function buildBoardMaterials({ row, agendas, coopName, company }) {
+export function buildBoardMaterials({ row, agendas, coopName }) {
   const groups = typeGroups(agendas);
   const groupBlock = (title, label, rows) => `
     <h2>${safe(title)}</h2>
@@ -112,8 +112,8 @@ export function buildBoardMaterials({ row, agendas, coopName, company }) {
     ${groupBlock('3. 토의 안건', '토의', groups.DISCUSSION)}
     ${groupBlock('4. 기타 안건', '기타', groups.OTHER)}
     <h2>[메모]</h2>
-    <p>${blocks(row.document_notes, ' ')}</p>
-    ${organizationInfo(company, coopName)}
+    ${row.document_notes ? `<p>${blocks(row.document_notes)}</p>` : ''}
+    <div class="board-memo-space" aria-label="회의 중 메모할 공간">${'<div class="board-memo-line"></div>'.repeat(6)}</div>
   </article>`;
 }
 
@@ -145,21 +145,28 @@ function boardScenarioAgenda(agenda, index, facilitator, includeSecretariat) {
   const note = includeSecretariat && agenda.scenario_notes ? `<p class="action"><strong>진행 참고</strong> ${blocks(agenda.scenario_notes)}</p>` : '';
   const memo = includeSecretariat && agenda.document_notes ? `<p class="action"><strong>안건 메모</strong> ${blocks(agenda.document_notes)}</p>` : '';
   const legacyVotePhrase = /^원\s*(?:\(수정\)\s*)?안대로\s*가결\s*하도록\s*하겠습니다\.?$/u;
+  const defaultVoteQuestion = '말씀 나눈 내용을 바탕으로 의결하겠습니다. 더 논의할 의견이나 이의가 있으십니까?';
   const voteQuestion = legacyVotePhrase.test(String(agenda.decision_draft || '').trim())
-    ? '이 안건에 대해 이의가 있으십니까?'
+    ? defaultVoteQuestion
     : agenda.decision_draft;
   if (agenda.agenda_kind === 'REPORT') {
     return `<h2>[보고 제${number}호: ${title}]</h2>
-      <p class="speaker"><strong>의장</strong> 보고 제${number}호, 「${title}」에 대해 듣겠습니다. ${safe(facilitator)}님, 보고해 주세요.</p>
+      <p class="speaker"><strong>의장</strong> 다음은 보고 제${number}호, 「${title}」입니다. ${safe(facilitator)}님, 준비하신 내용을 말씀해 주시겠습니까?</p>
       ${report}
-      <p class="speaker"><strong>의장</strong> 보고 내용에 대해 질문이나 의견 있으십니까?</p>${note}${memo}`;
+      <p class="speaker"><strong>의장</strong> 고맙습니다. 보고 내용에 대해 궁금한 점이나 보태실 의견이 있으면 말씀해 주세요.</p>${note}${memo}`;
   }
   const kind = agenda.agenda_kind === 'DISCUSSION' ? '토의' : agenda.agenda_kind === 'OTHER' ? '기타' : '의결';
+  const discussionLead = agenda.agenda_kind === 'DECISION'
+    ? '먼저 내용을 함께 듣고 의견을 나누겠습니다.'
+    : '이 안건에 대해서도 함께 의견을 나누겠습니다.';
+  const discussionPrompt = agenda.agenda_kind === 'DECISION'
+    ? '설명 고맙습니다. 궁금한 점이나 우려되는 부분이 있으면 편하게 말씀해 주세요. 충분히 논의한 뒤 결정하겠습니다.'
+    : '설명 고맙습니다. 어떤 방향이 좋을지 편하게 의견을 말씀해 주세요.';
   return `<h2>[${kind} 제${number}호: ${title}]</h2>
-    <p class="speaker"><strong>의장</strong> ${kind} 제${number}호, 「${title}」을 상정합니다. ${safe(facilitator)}님, 설명해 주세요.</p>
+    <p class="speaker"><strong>의장</strong> 다음은 ${kind} 제${number}호, 「${title}」입니다. ${discussionLead} ${safe(facilitator)}님, 설명 부탁드립니다.</p>
     ${report}
-    <p class="speaker"><strong>의장</strong> 설명 잘 들었습니다. 질문이나 의견 있으십니까?</p>
-    ${agenda.agenda_kind === 'DECISION' ? `<p class="speaker"><strong>의장</strong> ${blocks(voteQuestion, '이 안건에 대해 이의가 있으십니까?')}</p><p class="speaker"><strong>의장</strong> 이의가 없다면 본 안건은 원(수정)안대로 가결되었음을 선포합니다.</p>` : ''}${note}${memo}`;
+    <p class="speaker"><strong>의장</strong> ${discussionPrompt}</p>
+    ${agenda.agenda_kind === 'DECISION' ? `<p class="speaker"><strong>의장</strong> ${blocks(voteQuestion, defaultVoteQuestion)}</p><p class="speaker"><strong>의장</strong> 이의가 없다면 본 안건은 원(수정)안대로 가결되었음을 선포합니다.</p>` : ''}${note}${memo}`;
 }
 
 function boardScenario({ row, agendas, chairName, coopName, company }, includeSecretariat) {
@@ -176,12 +183,12 @@ function boardScenario({ row, agendas, chairName, coopName, company }, includeSe
     ${organizationInfo(company, coopName)}
     ${includeSecretariat && row.document_notes ? `<p class="action"><strong>준비 메모</strong> ${blocks(row.document_notes)}</p>` : ''}
     <h2>개회 선언</h2>
-    <p class="speaker"><strong>의장</strong> ${blocks(row.opening_message, `바쁘신 가운데 참석해 주셔서 감사합니다. 현재 재적 이사 ${Number(row.eligible_count || 0)}명 중 ____명이 참석해 성원이 되었습니다.`)}</p>
-    <p class="speaker"><strong>의장</strong> 지금부터 ${safe(row.title)}를 개회하겠습니다.</p>
-    <p class="speaker"><strong>의장</strong> 회의록 작성을 위해 오늘 회의를 녹음하겠습니다.</p>
+    <p class="speaker"><strong>의장</strong> ${blocks(row.opening_message, `바쁜 일정 중에 시간 내주셔서 고맙습니다. 재적 이사 ${Number(row.eligible_count || 0)}명 중 ____명이 참석하셔서 이사회 성원이 되었습니다.`)}</p>
+    <p class="speaker"><strong>의장</strong> 그럼 지금부터 ${safe(row.title)}를 시작하겠습니다.</p>
+    <p class="speaker"><strong>의장</strong> 회의 내용을 정확히 남기려고 오늘 회의를 녹음하려 합니다. 녹음 파일은 사무국에서 의사록을 작성하고 확인하는 데에만 쓰겠습니다. 혹시 의견 있으시면 말씀해 주세요.</p>
     ${body || '<p>등록된 안건이 없습니다.</p>'}
     <h2>폐회 선언</h2>
-    <p class="speaker"><strong>의장</strong> ${blocks(row.closing_message, '이상으로 모든 안건을 마쳤습니다. 참석해 주셔서 감사합니다. 폐회를 선언합니다.')}</p>
+    <p class="speaker"><strong>의장</strong> ${blocks(row.closing_message, `오늘 준비한 안건은 여기까지입니다. 혹시 마지막으로 나누실 말씀이 있으신가요? 함께 의견 나눠주셔서 고맙습니다. 이것으로 ${row.title || '이사회'}를 마치겠습니다. 폐회를 선언합니다.`)}</p>
   </article>`;
 }
 
