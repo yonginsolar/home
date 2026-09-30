@@ -202,7 +202,7 @@
 
     <div id="pageAlert" class="alert d-none" role="alert"></div>
     <div class="alert alert-info" role="note" id="participationPageGuide">
-      아직 목록이 비어 있어도 정상입니다. 모두의 인문학 QR 체크인이 들어오면 확인이 필요한 외부 참가자가 교육 상세에 표시됩니다. 조합원과 회의 참석 이력의 기본 관리는 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 합니다.
+      모두의 인문학 교육을 연결한 뒤 교육 상세의 ‘참석자 불러오기’를 누르면 출석 명단을 가져옵니다. 연결되지 않은 참석자는 비조합원으로 표시되며, 이후 ‘조합원 연결’로 확인할 수 있습니다. 조합원과 회의 참석 이력의 기본 관리는 <a class="alert-link" href="admin_member.html">조합원 관리</a>에서 합니다.
     </div>
 
     <section class="summary-grid" aria-label="참여 관리 요약">
@@ -296,7 +296,14 @@
           <div class="form-section">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
               <div class="form-section-title mb-0">참석자</div>
-              <div class="small text-muted" id="attendanceSummary">0명</div>
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="small text-muted" id="attendanceSummary">0명</div>
+                <button type="button" class="btn btn-sm btn-outline-primary d-none" id="importHumanitiesAttendeesBtn">모두의 인문학 참석자 불러오기</button>
+              </div>
+            </div>
+            <div class="form-check mb-3 d-none" id="includeHumanitiesManualWrap">
+              <input class="form-check-input" type="checkbox" id="includeHumanitiesManual">
+              <label class="form-check-label" for="includeHumanitiesManual">수기 등록 참석자에게 이름·전화번호·출석 기록을 조합 ERP에 제공하는 동의를 받았습니다</label>
             </div>
             <div class="hint-box mb-3 d-flex flex-wrap justify-content-between align-items-center gap-2" id="meetingImportHint">
               <span>의사록을 선택하면 회의 명단을 가져옵니다. PDF·과거 회의는 수기 입력을 선택할 수 있습니다.</span>
@@ -547,6 +554,7 @@
     let formState = { eventId:null, requestKey:null, attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
     let humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
     let humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
+    let humanitiesAttendeeImportRunning = false;
     let siteActivityPhotoRows = [];
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let pendingGuestLinkId = null;
@@ -1317,9 +1325,13 @@
       const emptyState = document.querySelector('[data-education-empty-state]');
       if (emptyState) {
         emptyState.textContent = activeLink
-          ? '모두의 인문학 QR에서 정보가 정확히 일치한 조합원과 위 검색으로 추가한 조합원이 표시됩니다.'
+          ? '모두의 인문학 참석자를 불러오거나 위 검색으로 조합원을 추가할 수 있습니다.'
           : '위 검색에서 정상 조합원을 참가자로 등록할 수 있습니다.';
       }
+      const importButton = document.getElementById('importHumanitiesAttendeesBtn');
+      importButton.classList.toggle('d-none', !isEducation || !activeLink || !formState.eventId);
+      importButton.disabled = humanitiesAttendeeImportRunning || formState.saving;
+      document.getElementById('includeHumanitiesManualWrap').classList.toggle('d-none', !isEducation || !activeLink || !formState.eventId);
     } // End of syncEducationMemberSearchVisibility
 
     function syncManualEducationAttendeeUi() {
@@ -1519,6 +1531,82 @@
         showAlert('humanitiesLinkAlert', error?.message || '연동 정보를 불러오지 못했습니다.', 'danger');
       }
     } // End of loadHumanitiesLink
+
+    async function refreshAttendanceOnly(eventId) {
+      const { data, error } = await _supabase.rpc('participation_admin_get_event_v2', { p_event_id:eventId });
+      if (error) throw error;
+      if (!data?.event || String(data.event.id) !== String(eventId)) throw new Error('교육 참석 명단을 다시 읽지 못했습니다.');
+      if (String(formState.eventId || '') !== String(eventId)) return;
+      formState.attendees = (data.attendees || []).map(function(row) {
+        return {
+          member_id:row.member_id,
+          official_id:row.official_id_snapshot,
+          name:row.member_name_snapshot,
+          member_number:row.member_number_snapshot,
+          member_type:row.member_type_snapshot,
+          role:row.role_snapshot,
+          is_target:row.is_target !== false,
+          attendance_status:row.attendance_status,
+          check_in_method:row.check_in_method,
+          checked_in_at:row.checked_in_at,
+          checked_in_by:row.checked_in_by || null,
+          checked_in_by_name_snapshot:row.checked_in_by_name_snapshot || '',
+          actual_attendee_name:row.actual_attendee_name || '',
+          note:row.note || '',
+          signature_required:!!row.signature_required_snapshot,
+          signature_signed_at:row.signature_signed_at || null
+        };
+      });
+      formState.guestAttendees = Array.isArray(data.guest_attendees) ? data.guest_attendees : [];
+      formState.manualAttendees = Array.isArray(data.manual_attendees) ? data.manual_attendees : [];
+      renderAttendees();
+    } // End of refreshAttendanceOnly
+
+    async function importHumanitiesAttendees() {
+      if (humanitiesAttendeeImportRunning || !formState.eventId || humanitiesLinkState.link?.status !== 'ACTIVE') return;
+      humanitiesAttendeeImportRunning = true;
+      syncEducationMemberSearchVisibility();
+      document.getElementById('saveEventBtn').disabled = true;
+      document.getElementById('deleteEventBtn').disabled = true;
+      const eventId = formState.eventId;
+      const includeManual = document.getElementById('includeHumanitiesManual').checked;
+      const totals = { imported_members:0, imported_guests:0, duplicates:0, skipped:0, failed:0 };
+      let offset = 0;
+      let total = 0;
+      let completed = false;
+      showAlert('formAlert', '모두의 인문학 참석자를 확인하고 있습니다. 창을 닫지 말아 주세요.', 'info');
+      try {
+        for (let page = 0; page < 80; page += 1) {
+          const result = await callHumanitiesIntegration('admin_reconcile_attendees', {
+            event_id:eventId, offset, include_manual:includeManual
+          });
+          ['imported_members','imported_guests','duplicates','skipped','failed'].forEach(function(key) {
+            totals[key] += Number(result[key] || 0);
+          });
+          total = Number(result.total || 0);
+          const nextOffset = Number(result.next_offset);
+          if (!Number.isInteger(nextOffset) || nextOffset < offset || nextOffset > total ||
+            (nextOffset === offset && offset < total)) throw new Error('원본 출석 목록이 중간에 바뀌었습니다. 다시 시도해 주세요.');
+          offset = nextOffset;
+          if (offset >= total) { completed = true; break; }
+        }
+        if (!completed) throw new Error('참석자가 많아 한 번에 불러오지 못했습니다. 관리자에게 확인해 주세요.');
+        await refreshAttendanceOnly(eventId);
+        await loadDashboard(false);
+        const message = `불러오기 완료: 조합원 ${totals.imported_members}명, 비조합원 ${totals.imported_guests}명, 이미 등록 ${totals.duplicates}명` +
+          (totals.skipped ? `, 확인 필요 ${totals.skipped}명` : '') + (totals.failed ? `, 실패 ${totals.failed}명` : '') +
+          (includeManual ? '' : ' · 수기 등록자는 동의 확인을 체크한 뒤 다시 불러올 수 있습니다.');
+        showAlert('formAlert', message, totals.failed || totals.skipped ? 'warning' : 'success');
+      } catch (error) {
+        try { await refreshAttendanceOnly(eventId); } catch (_) { /* 다음 새로고침에서 확인 가능 */ }
+        showAlert('formAlert', `일부 참석자는 이미 반영됐을 수 있습니다. ${error?.message || '불러오기를 완료하지 못했습니다.'}`, 'warning');
+      } finally {
+        humanitiesAttendeeImportRunning = false;
+        document.getElementById('saveEventBtn').disabled = formState.saving;
+        document.getElementById('deleteEventBtn').disabled = formState.saving;
+        syncEducationMemberSearchVisibility();
+      }
+    } // End of importHumanitiesAttendees
 
     function openHumanitiesLinkSearch() {
       humanitiesLinkState.panelOpen = true;
@@ -1910,6 +1998,7 @@
       formState = { eventId:null, requestKey:crypto.randomUUID(), attendees:[], guestAttendees:[], manualAttendees:[], manualRequestKey:null, manualRequestPayload:'', currentFiles:[], qrToken:null, saving:false };
       humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
       humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
+      document.getElementById('includeHumanitiesManual').checked = false;
       siteActivityPhotoRows = [];
       pendingGuestLinkId = null;
       pendingManualAttendeeLinkId = null;
@@ -1993,6 +2082,7 @@
         };
         humanitiesLinkState = { link:null, course:null, sourceWarning:'', candidates:[], telegramRecipients:[], loading:false, panelOpen:false, loaded:false };
         humanitiesImportState = { courses:[], loading:false, panelOpen:false, selectedCourseId:null };
+        document.getElementById('includeHumanitiesManual').checked = false;
         siteActivityPhotoRows = [];
         pendingGuestLinkId = null;
         pendingManualAttendeeLinkId = null;
@@ -2119,7 +2209,7 @@
       if (rows.length === 0 && guestRows.length === 0 && manualRows.length === 0) {
         const activeHumanitiesLink = humanitiesLinkState.link?.status === 'ACTIVE';
         const educationEmptyMessage = activeHumanitiesLink
-          ? '모두의 인문학 QR에서 정보가 정확히 일치한 조합원과 위 검색으로 추가한 조합원이 표시됩니다.'
+          ? '모두의 인문학 참석자 불러오기를 누르거나 위 검색으로 조합원을 추가해 주세요.'
           : '위 검색에서 정상 조합원을 참가자로 등록할 수 있습니다.';
         list.innerHTML = `<div class="text-center text-muted py-4" ${type === 'EDUCATION' ? 'data-education-empty-state' : ''}>${type === 'EDUCATION' ? educationEmptyMessage : '의사록을 선택하거나 참석자·배석자를 검색해 추가하세요.'}</div>`;
         return;
@@ -2180,7 +2270,7 @@
           : `이름 보관 ${escapeHtml(formatKstDateTime(row.name_expires_at))}까지`;
         return `
           <div class="attendee-row" data-guest-checkin-id="${escapeHtml(row.id)}">
-            <div class="attendee-name">${escapeHtml(row.display_name || '비조합원 참석')} <span class="badge text-bg-light border">${label}</span><div class="attendee-meta">QR 체크인${phone}<br>${escapeHtml(formatKstDateTime(row.checked_in_at))} · ${retention}</div></div>
+            <div class="attendee-name">${escapeHtml(row.display_name || '비조합원 참석')} <span class="badge text-bg-light border">${label}</span><div class="attendee-meta">출석 확인${phone}<br>${escapeHtml(formatKstDateTime(row.checked_in_at))} · ${retention}</div></div>
             <span class="badge text-bg-success justify-self-center">참석</span>
             <span class="small text-secondary text-center">${pending ? `조합원 상태 ${escapeHtml(row.claimed_member_status || '승인대기')}` : anonymous ? '개인 식별정보 없음' : '전화번호 30일 보관'}</span>
             <div class="d-flex gap-1 justify-content-end">
@@ -3052,6 +3142,7 @@
         if (event.key === 'Enter') { event.preventDefault(); searchMembers(false); }
       });
       document.getElementById('addManualAttendeeBtn').addEventListener('click', addManualEducationAttendee);
+      document.getElementById('importHumanitiesAttendeesBtn').addEventListener('click', importHumanitiesAttendees);
       document.getElementById('manualAttendeeName').addEventListener('keydown', function(event) {
         if (event.key === 'Enter') { event.preventDefault(); addManualEducationAttendee(); }
       });
