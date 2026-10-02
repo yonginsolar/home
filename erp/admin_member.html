@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.192
+Version: v1.0.193
 Change: Regional gender/age details and gender composition in age tooltips.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.192';
+window.ADMIN_MEMBER_VERSION = 'v1.0.193';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -12351,6 +12351,8 @@ if (capitalChartColumn) {
   const el = document.getElementById(id);
   if (el) el.classList.toggle('hidden', isSiteMemberProfile);
 });
+const demographicAgeHelp = document.getElementById('member-demographic-age-status');
+if (demographicAgeHelp) demographicAgeHelp.classList.toggle('hidden', isSiteMemberProfile);
 const pcWorkNote = document.getElementById('adminMemberPcWorkNote');
 if (pcWorkNote) {
   pcWorkNote.innerHTML = isSiteMemberProfile
@@ -12774,6 +12776,9 @@ function formatDashboardAgePercentage(count, total) {
 }
 
 function buildDashboardAgeTooltipLabel(context) {
+    if (isAdminMemberSiteProfile()) {
+        return formatDashboardAgePercentage(context.raw, getDashboardChartDatasetTotal(context.chart, context.datasetIndex || 0));
+    }
     return MemberDemographics.ageTooltip(context);
 }
 
@@ -12931,6 +12936,14 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
 
         // Regional and age composition are read-only server aggregates, loaded
         // independently so a failure in unrelated capital statistics cannot block them.
+        // Preserve the existing age-only chart for the site/member-only profile.
+        if (isAdminMemberSiteProfile()) {
+            const ageData = buildDashboardAgeChartData(stats.age_group || {});
+            renderChart('age', 'chart-age', 'bar', {
+                labels: ageData.labels,
+                datasets: [{ label: '조합원 수', data: ageData.data, backgroundColor: '#ffc107' }]
+            });
+        }
 
         // (4) 탈퇴 사유 (Horizontal Bar)
         const reasons = stats.exit_reasons || []; // [{reason: '...', count: 1}, ...]
