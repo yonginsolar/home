@@ -1,4 +1,4 @@
-/* v2.4.2 - Approval creates a pending purchase; inspected quantities become stock. */
+/* v2.5.0 - Track planned material income and atomically post confirmed receipts. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -37,6 +37,7 @@
   let receiptBusy = false;
   let receiptAmountEdited = false;
   let pendingSaleRequestKey = null;
+  let incomeController = null;
 
   function setOperationStatus(message, error = false) {
     $('operationStatus').textContent = message || '';
@@ -212,6 +213,7 @@
     renderEvents(preferredId);
     renderSales();
     renderReceipts();
+    incomeController?.refreshEvents();
   }
 
   function renderInventory() {
@@ -1176,6 +1178,17 @@
       await loadInventory();
       await loadEventContext();
       await reloadReceipts();
+      incomeController = window.FestivalIncome.init({
+        root: $('festivalIncomeRoot'),
+        editable,
+        getEvents: () => eventContext.events || [],
+        rpc: async (action, data) => {
+          const result = await client.rpc('festival_income_admin', { p_action: action, p_data: data });
+          if (result.error) throw new Error(result.error.message);
+          return result.data;
+        }
+      });
+      await incomeController.ready;
     } catch (error) {
       $('accessStatus').textContent = readableError(error);
     }
