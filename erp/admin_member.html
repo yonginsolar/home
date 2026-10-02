@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.193
-Change: Regional gender/age details and gender composition in age tooltips.
+Version: v1.0.194
+Change: Stable donation order with newest entries first within the same donation date.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.193';
+window.ADMIN_MEMBER_VERSION = 'v1.0.194';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -14899,17 +14899,21 @@ async function loadMemberFunds(uuid, textId, reset=false) {
 
     let donationQuery = null;
     if (!isAdminMemberSiteProfile() && hasTextId) {
-        donationQuery = _supabase
+        donationQuery = scopeAdminTenant(_supabase
             .from('coop_donations')
-            .select('*')
+            .select('*'))
             .eq('member_id', safeTextId)
-            .order('donation_date', { ascending: false });
+            .order('donation_date', { ascending: false })
+            .order('created_at', { ascending: false, nullsFirst: false })
+            .order('id', { ascending: false });
     } else if (!isAdminMemberSiteProfile() && safeUuid) {
-        donationQuery = _supabase
+        donationQuery = scopeAdminTenant(_supabase
             .from('coop_donations')
-            .select('*')
+            .select('*'))
             .eq('member_uid', safeUuid)
-            .order('donation_date', { ascending: false });
+            .order('donation_date', { ascending: false })
+            .order('created_at', { ascending: false, nullsFirst: false })
+            .order('id', { ascending: false });
     }
     const donationPromise = donationQuery || Promise.resolve({ data: [], error: null });
 
@@ -16114,12 +16118,14 @@ async function fetchGlobalDonations() {
     tbody.innerHTML = '<tr><td colspan="5" class="py-5"><div class="spinner-border text-primary"></div></td></tr>';
 
     // 1. 기부금 내역 조회
-    const { data: donations, error } = await _supabase
+    const { data: donations, error } = await scopeAdminTenant(_supabase
         .from('coop_donations')
-        .select('*')
+        .select('*'))
         .gte('donation_date', startDate)
         .lte('donation_date', endDate)
-        .order('donation_date', { ascending: false });
+        .order('donation_date', { ascending: false })
+        .order('created_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false });
 
     if (error) {
         console.error(error);
