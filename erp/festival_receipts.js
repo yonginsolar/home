@@ -1,4 +1,4 @@
-/* v2.4.0 - Approval creates a pending purchase; inspected quantities become stock. */
+/* v2.4.1 - Approval creates a pending purchase; inspected quantities become stock. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
