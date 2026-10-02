@@ -1,4 +1,4 @@
-/* v2.3.0 - One sale with participant payment and organizer voucher receivable. */
+/* v2.4.0 - Approval creates a pending purchase; inspected quantities become stock. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -31,6 +31,7 @@
   let eventContext = { events: [], sale_links: [], receipt_links: [] };
   let extraPaymentContext = { items: [] };
   let voucherContext = { items: [] };
+  let purchaseReceiptContext = { items: [] };
   let editable = false;
   let operationBusy = false;
   let receiptBusy = false;
@@ -47,6 +48,9 @@
     if (message.includes('ADMIN_REQUIRED')) return '관리 권한이 없습니다.';
     if (message.includes('EDIT_REQUIRED')) return '회계 등록 권한이 없습니다.';
     if (message.includes('INSUFFICIENT_STOCK')) return '현재 재고보다 많은 수량을 출고할 수 없습니다.';
+    if (message.includes('RECEIPT_DIFFERENCE_NOTE_REQUIRED')) return '결재 수량과 다른 이유를 검수 메모에 적어 주세요.';
+    if (message.includes('INVALID_RECEIPT_INPUT')) return '입고 수량은 0개부터 결재 수량까지, 수령일은 결재 완료일 이후부터 오늘까지 입력해 주세요.';
+    if (message.includes('RECEIPT_NOT_FOUND') || message.includes('RECEIPT_NOT_PENDING')) return '입고 대기 상태를 다시 확인해 주세요. 취소된 결재는 입고할 수 없습니다.';
     if (message.includes('INVALID_SALE_TOTAL')) return '판매액·수납액·현금영수증 구분 합계를 다시 확인해 주세요.';
     if (message.includes('INVALID_DEPOSIT_AMOUNT')) return '입금 처리할 수 있는 현금 잔액을 초과했습니다.';
     if (message.includes('INVALID_RECEIPT_COUNT')) return '현금영수증 발급 건수는 0건부터 판매 수량까지 입력할 수 있습니다.';
@@ -98,6 +102,12 @@
 
   async function voucherRpc(action, data = {}) {
     const result = await client.rpc('festival_voucher_sales_admin', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  async function purchaseReceiptRpc(action, data = {}) {
+    const result = await client.rpc('inventory_purchase_receipts_admin', { p_action: action, p_data: data });
     if (result.error) throw new Error(result.error.message);
     return result.data;
   }
@@ -223,12 +233,110 @@
       stock.textContent = `${Number(item.stock_quantity || 0).toLocaleString('ko-KR')}${item.unit}`;
       const detail = document.createElement('p');
       detail.textContent = `입고 ${Number(item.purchased_quantity || 0).toLocaleString('ko-KR')} · 판매 ${Number(item.sold_quantity || 0).toLocaleString('ko-KR')} · 행사 사용 ${Number(item.event_use_quantity || 0).toLocaleString('ko-KR')} · 불량 ${Number(item.defect_quantity || 0).toLocaleString('ko-KR')}`;
+      const pending = (purchaseReceiptContext.items || [])
+        .filter((row) => row.pending && row.item_name === item.item_name)
+        .reduce((sum, row) => sum + Number(row.expected_quantity || 0), 0);
+      if (pending > 0) detail.textContent += ` · 입고 대기 ${pending.toLocaleString('ko-KR')}${item.unit}`;
       card.append(title, stock, detail);
       cards.append(card);
     });
     const active = items.filter((item) => item.is_active);
     fillItemSelect($('saleItem'), active);
     fillItemSelect($('movementItem'), active);
+  }
+
+  function beginPurchaseInspection(card, purchase) {
+    if (operationBusy) return;
+    const oldForm = card.querySelector('form');
+    if (oldForm) { oldForm.querySelector('input')?.focus(); return; }
+    const form = document.createElement('form');
+    form.className = 'inline-action';
+    const fields = [
+      ['수령일', 'date', 'received_date', kstToday()],
+      ['검수 완료 수량', 'number', 'quantity', ''],
+      ['검수 메모', 'text', 'note', '']
+    ];
+    const inputs = {};
+    fields.forEach(([text, type, name, value]) => {
+      const label = document.createElement('label');
+      label.className = 'small';
+      label.textContent = text;
+      const input = document.createElement('input');
+      input.type = type;
+      input.name = name;
+      input.value = value;
+      input.setAttribute('aria-label', `${purchase.item_name} ${text}`);
+      if (name === 'quantity') {
+        input.min = '0'; input.max = String(purchase.expected_quantity); input.step = '1';
+        input.inputMode = 'numeric'; input.placeholder = `결재 ${purchase.expected_quantity}${purchase.unit}`;
+        input.required = true;
+      } else if (name === 'received_date') {
+        input.min = new Date(Date.parse(purchase.approved_at) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        input.max = kstToday(); input.required = true;
+      } else {
+        input.maxLength = 500; input.placeholder = '불량·누락 등';
+      }
+      inputs[name] = input;
+      label.append(input); form.append(label);
+    });
+    const save = document.createElement('button');
+    save.type = 'submit'; save.textContent = '입고 완료 확인';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.className = 'secondary'; cancel.textContent = '취소';
+    cancel.addEventListener('click', () => form.remove());
+    form.append(save, cancel);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (operationBusy) return;
+      const quantity = Number(inputs.quantity.value);
+      const note = inputs.note.value.trim();
+      if (inputs.quantity.value === '' || !Number.isSafeInteger(quantity) || quantity < 0 || quantity > Number(purchase.expected_quantity)) {
+        setOperationStatus('실제로 확인한 수량을 결재 수량 안에서 입력해 주세요.', true); return;
+      }
+      if (quantity !== Number(purchase.expected_quantity) && !note) {
+        setOperationStatus('불량·누락 등 수량 차이의 이유를 검수 메모에 적어 주세요.', true); return;
+      }
+      if (!window.confirm(`${purchase.item_name}\n결재 수량: ${purchase.expected_quantity}${purchase.unit}\n실제 입고: ${quantity}${purchase.unit}\n수령일: ${inputs.received_date.value}\n${note ? `검수 메모: ${note}\n` : ''}이 수량으로 검수를 완료할까요? 입고 대기 중인 수량은 현재고에 포함되지 않습니다.`)) return;
+      operationBusy = true; save.disabled = cancel.disabled = true;
+      try {
+        const result = await purchaseReceiptRpc('confirm', {
+          id: purchase.id, quantity, received_date: inputs.received_date.value, note
+        });
+        setOperationStatus(`${purchase.item_name} ${result.quantity}${purchase.unit}의 입고 검수를 완료했습니다.`);
+        await loadInventory();
+      } catch (error) {
+        setOperationStatus(readableError(error), true);
+      } finally {
+        operationBusy = false; save.disabled = cancel.disabled = false;
+      }
+    });
+    card.append(form); inputs.quantity.focus();
+  }
+
+  function renderPurchaseReceipts() {
+    const wrap = $('purchaseReceiptRows');
+    wrap.replaceChildren();
+    const purchases = purchaseReceiptContext.items || [];
+    if (!purchases.length) {
+      const empty = document.createElement('p'); empty.className = 'small muted';
+      empty.textContent = '입고 대기 중인 구매 결재가 없습니다.'; wrap.append(empty); return;
+    }
+    purchases.forEach((purchase) => {
+      const card = document.createElement('article'); card.className = 'summary-card';
+      const title = document.createElement('h3'); title.textContent = purchase.item_name;
+      const detail = document.createElement('p');
+      detail.textContent = `${purchase.title} · 결재 ${purchase.expected_quantity}${purchase.unit} · ${purchase.pending ? '입고 대기' : `입고 완료 ${purchase.received_quantity}${purchase.unit} (${purchase.movement_date})`}`;
+      card.append(title, detail);
+      if (purchase.pending && editable) {
+        const button = document.createElement('button'); button.type = 'button';
+        button.textContent = '입고 검수'; button.addEventListener('click', () => beginPurchaseInspection(card, purchase));
+        card.append(button);
+      } else if (purchase.receipt_note) {
+        const note = document.createElement('p'); note.className = 'small';
+        note.textContent = purchase.receipt_note; card.append(note);
+      }
+      wrap.append(card);
+    });
   }
 
   function renderMovements() {
@@ -642,12 +750,16 @@
   }
 
   async function loadInventory() {
-    [inventory, extraPaymentContext, voucherContext] = await Promise.all([
+    [inventory, extraPaymentContext, voucherContext, purchaseReceiptContext] = await Promise.all([
       rpc('bootstrap'),
       extraPaymentRpc('list'),
-      voucherRpc('list')
+      voucherRpc('list'),
+      purchaseReceiptRpc('list')
     ]);
+    const receivingIds = new Set((purchaseReceiptContext.items || []).filter((row) => row.pending || row.received_quantity === 0).map((row) => row.id));
+    inventory.movements = (inventory.movements || []).filter((row) => !receivingIds.has(row.id));
     renderInventory();
+    renderPurchaseReceipts();
     renderSales();
     renderVouchers();
     renderMovements();
