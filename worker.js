@@ -156,6 +156,24 @@ class RemoveElement{element(element){element.remove();}}
 
 export default{async fetch(request,env){
   const url=new URL(request.url),hostname=host(url.hostname),p=getProfile(hostname);
+  const aiRoute = url.pathname === '/ai/mcp' ? '/mcp/' + hostname
+    : /^\/ai\/oauth\/(register|authorize|token)$/.test(url.pathname) ? '/oauth/' + hostname + '/' + url.pathname.split('/').pop()
+    : url.pathname === '/.well-known/oauth-protected-resource/ai/mcp' ? '/.well-known/oauth-protected-resource/mcp/' + hostname
+    : url.pathname === '/.well-known/oauth-authorization-server/ai/oauth' ? '/.well-known/oauth-authorization-server/oauth/' + hostname : null;
+  if(aiRoute){
+    if(p.id==='unregistered'||p.id==='auth')return new Response('Not Found',{status:404,headers:{'Cache-Control':'no-store','X-Robots-Tag':'noindex'}});
+    const target=new URL('https://ifdqlwxgqgsvnawmhlfc.supabase.co/functions/v1/erp-ai'+aiRoute);
+    target.search=url.search;
+    const forwarded=new Headers();
+    for(const key of ['Authorization','Content-Type','Accept','Origin','MCP-Protocol-Version']){
+      const value=request.headers.get(key);if(value)forwarded.set(key,value);
+    }
+    const upstream=await fetch(target,{method:request.method,headers:forwarded,
+      body:['GET','HEAD'].includes(request.method)?undefined:request.body,redirect:'manual'});
+    const headers=new Headers(upstream.headers);headers.set('Cache-Control','no-store');headers.set('X-Robots-Tag','noindex,nofollow');
+    headers.delete('Set-Cookie');
+    return new Response(upstream.body,{status:upstream.status,headers});
+  }
   if(p.passThrough)return env.ASSETS.fetch(request);
 
   if(url.pathname==='/robots.txt')return textResponse(request,p.id==='citizen'&&isPublic(p,hostname)?CITIZEN_ROBOTS:PRIVATE_ROBOTS,'text/plain; charset=utf-8');
