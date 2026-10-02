@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <!-- Version: v2.6.0 | Event-scoped festival workspace -->
+  <!-- Version: v2.7.0 | Event settings, revenue overview and partial receiving -->
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
@@ -9,12 +9,12 @@
   <title>축제 현금매출·재고·현금영수증 관리 | 용인모두의햇빛협동조합</title>
   <link rel="icon" href="../shared/sun_favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="../shared/festival.css?v=2.0.0">
-  <link rel="stylesheet" href="festival_income.css?v=1.1.0">
-  <link rel="stylesheet" href="festival_receipts.css?v=1.0.0">
+  <link rel="stylesheet" href="festival_income.css?v=1.2.0">
+  <link rel="stylesheet" href="festival_receipts.css?v=1.1.0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
 </head>
 <body>
-<main class="festival-page admin" data-version="2.6.0">
+<main class="festival-page admin" data-version="2.7.0">
   <header>
     <span class="eyebrow">용인모두의햇빛협동조합</span>
     <h1>축제 현금매출·재고·현금영수증 관리</h1>
@@ -33,6 +33,19 @@
 
   <section id="adminPanel" hidden>
     <p id="operationStatus" class="status" role="status"></p>
+    <section class="card" id="revenueDashboard">
+      <h2>📊 전체 축제 매출</h2>
+      <form id="dashboardFilter" class="toolbar period-filter">
+        <label>조회 범위<select id="dashboardPeriod"><option value="all">누적 전체</option><option value="year">올해</option><option value="month">이번 달</option><option value="custom">기간 지정</option></select></label>
+        <label class="dashboard-date" hidden>시작일<input id="dashboardFrom" type="date"></label>
+        <label class="dashboard-date" hidden>종료일<input id="dashboardTo" type="date"></label>
+        <button type="submit" class="secondary compact">조회</button>
+      </form>
+      <div id="dashboardCards" class="summary-grid" aria-live="polite"></div>
+      <p class="small muted">체험비는 판매일 기준이며 쿠폰 정산 예정액을 포함합니다. 재료비는 실제 입금일 기준입니다. 현금을 통장에 옮긴 금액은 다시 매출로 세지 않습니다. 모든 금액은 부가세 포함입니다.</p>
+      <details class="sub-panel"><summary>축제별 매출 보기</summary><div class="table-wrap"><table><thead><tr><th>축제</th><th>재료비</th><th>체험비·추가 입금</th><th>반환</th><th>합계</th><th>유료·무료 체험</th></tr></thead><tbody id="dashboardRows"></tbody></table></div></details>
+      <p id="dashboardStatus" class="status" role="status"></p>
+    </section>
     <div class="card" id="inventoryPanel">
       <div class="section-heading">
         <div><h2>📦 재고 현황</h2><p class="muted">구매 결재가 완료되면 입고 대기로 표시됩니다. 물품을 수령한 뒤 아래에서 검수한 수량만 현재고에 반영됩니다.</p></div>
@@ -40,7 +53,7 @@
       </div>
       <div id="inventoryCards" class="summary-grid" aria-live="polite"></div>
       <h3>🚚 입고 대기·검수</h3>
-      <p class="small muted">실제로 받은 물품을 확인한 뒤 ‘입고 검수’를 눌러 주세요. 불량·누락이 있으면 사용할 수 있는 수량으로 수정하고 내용을 남길 수 있습니다.</p>
+      <p class="small muted">실제로 받은 수량만 검수해 주세요. ‘부분입고’를 선택하면 나머지는 입고 대기로 남습니다. 더 받을 물품이 없다면 최종 검수로 마무리합니다.</p>
       <div id="purchaseReceiptRows" aria-live="polite"></div>
       <details class="sub-panel">
         <summary>새 물품 등록</summary>
@@ -72,12 +85,27 @@
       <h2 id="eventPickerTitle">🗓️ 축제 선택</h2>
       <label>관리할 축제<select id="saleEvent"><option value="">행사를 선택해 주세요</option></select></label>
       <p id="eventSelectionStatus" class="status" role="status"></p>
+      <button id="editEvent" type="button" class="secondary compact" hidden>축제명·체험·인쇄 안내 수정</button>
       <div id="eventPosters" class="toolbar" hidden></div>
     </section>
 
     <section id="eventWorkspace" aria-labelledby="selectedEventTitle" hidden>
       <h2 id="selectedEventTitle" class="workspace-title">축제 현황</h2>
       <section id="festivalIncomeRoot" aria-label="받을 재료비 관리"></section>
+      <details id="eventInventory" class="card"><summary>📦 이 축제의 재고 사용</summary>
+        <div id="eventInventorySummary" class="calculation"></div>
+        <form id="eventUseForm" class="form-grid">
+          <label>사용일<input id="eventUseDate" type="date" required></label>
+          <label>물품<select id="eventUseItem" required></select></label>
+          <label>구분<select id="eventUseType"><option value="event_use">무료 체험·행사 사용</option><option value="defect">불량·폐기</option></select></label>
+          <label>사용 수량<input id="eventUseQuantity" type="number" min="1" max="100000" step="1" required></label>
+          <label class="wide">메모<input id="eventUseNote" maxlength="500"></label>
+          <p class="small muted wide">무료 체험은 사용 수량만 기록합니다. 주관사에서 받은 재료비는 위 재료비 기록에서 관리하고, 여기서 매출을 다시 만들지 않습니다.</p>
+          <button type="submit">사용 수량 저장</button>
+        </form>
+        <div class="table-wrap"><table><thead><tr><th>사용일</th><th>물품</th><th>구분</th><th>수량</th><th>메모</th></tr></thead><tbody id="eventInventoryRows"></tbody></table></div>
+        <div class="toolbar"><button id="eventInventoryPrevious" type="button" class="secondary compact" hidden>이전 100건</button><button id="eventInventoryNext" type="button" class="secondary compact" hidden>다음 100건</button></div>
+      </details>
       <div class="festival-tabs" role="tablist" aria-label="축제 업무">
         <button id="tab-sale" type="button" role="tab" aria-selected="true" aria-controls="salePanel" data-panel="salePanel">현금매출 등록</button>
         <button id="tab-sales" type="button" role="tab" aria-selected="false" aria-controls="salesPanel" data-panel="salesPanel" tabindex="-1">등록된 매출</button>
@@ -146,7 +174,25 @@
     <p id="eventStatus" class="status" role="status"></p>
   </dialog>
 </main>
-<script src="festival_income.js?v=1.1.0"></script>
-<script src="festival_receipts.js?v=2.6.0"></script>
+<dialog id="eventSettingsDialog" aria-labelledby="eventSettingsTitle">
+  <div class="section-heading"><h2 id="eventSettingsTitle">축제·입금 안내 설정</h2><button id="closeEventSettings" type="button" class="secondary compact">닫기</button></div>
+  <form id="eventSettingsForm" class="form-grid">
+    <label class="wide">축제명<input id="editEventName" maxlength="120" required></label>
+    <label>축제 날짜<input id="editEventDate" type="date" required></label>
+    <label class="check wide"><input id="eventNoCash" type="checkbox"><span>현금 매출 없음 (참가자에게 체험비를 받지 않음)</span></label>
+    <h3 class="wide">입금 안내·인쇄물</h3>
+    <label class="wide">체험 제목<input id="guideActivity" maxlength="100" required></label>
+    <label>개당 체험비<input id="guidePrice" type="number" min="0" max="1000000" step="1" required></label>
+    <label class="check"><input id="guideCoupon" type="checkbox"><span>쿠폰 사용 가능</span></label>
+    <label>쿠폰 개당 금액<input id="guideCouponValue" type="number" min="1" max="1000000" step="1" value="3000"></label>
+    <label class="check"><input id="guideShowDate" type="checkbox"><span>축제 날짜 표시</span></label>
+    <label>운영 시간 (선택)<input id="guideTime" maxlength="60" placeholder="예: 오후 1~7시"></label>
+    <label>준비 수량 (선택)<input id="guideCapacity" type="number" min="1" max="999999" step="1" placeholder="수량을 안내하지 않으면 비워 주세요"></label>
+    <button type="submit">설정 저장</button>
+  </form><p id="eventSettingsStatus" class="status" role="status"></p>
+</dialog>
+<script src="festival_income.js?v=1.2.0"></script>
+<script src="festival_workspace_tools.js?v=1.0.0"></script>
+<script src="festival_receipts.js?v=2.7.0"></script>
 </body>
 </html>

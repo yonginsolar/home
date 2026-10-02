@@ -1,4 +1,4 @@
-/* v2.6.0 — Shared inventory and paginated, event-scoped festival work. */
+/* v2.7.0 — Event settings, partial receiving and free activity inventory. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -38,6 +38,7 @@
   let receiptAmountEdited = false;
   let pendingSaleRequestKey = null;
   let incomeController = null;
+  let workspaceTools = null;
   let selectedEventId = '';
   let selectedSales = [];
   let salesOffset = 0, salesTotal = 0, vouchersOffset = 0, vouchersTotal = 0;
@@ -50,6 +51,11 @@
 
   async function recordsRpc(action, data = {}) {
     const result = await client.rpc('festival_event_records', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+  async function operationsRpc(action, data = {}) {
+    const result = await client.rpc('festival_operations_admin', {p_action: action, p_data: data});
     if (result.error) throw new Error(result.error.message);
     return result.data;
   }
@@ -68,7 +74,8 @@
     button.addEventListener('keydown', (event) => {
       if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
       event.preventDefault();
-      const available = tabButtons.filter((tab) => !tab.disabled);
+      const available = tabButtons.filter((tab) => !tab.disabled && !tab.hidden);
+      if (!available.length) return;
       const current = available.indexOf(tabButtons[index]);
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? available.length - 1
         : (current + (event.key === 'ArrowRight' ? 1 : -1) + available.length) % available.length;
@@ -88,16 +95,31 @@
     if (event?.public_code) guide.searchParams.set('event', event.public_code);
     $('paymentGuide').href = guide.href;
     const canSell = Boolean(event?.is_active);
-    $('tab-sale').disabled = !canSell;
-    $('saleForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable || !canSell; });
+    const noCash = event?.no_cash_sales === true;
+    $('editEvent').hidden = !event || !editable;
+    $('eventInventory').hidden = !event;
+    $('tab-sale').hidden = noCash;
+    $('tab-receipts').hidden = noCash && receiptTotal === 0;
+    $('tab-vouchers').hidden = noCash && vouchersTotal === 0;
+    $('tab-sales').hidden = noCash && salesTotal === 0;
+    document.querySelector('.festival-tabs').hidden = tabButtons.every(tab => tab.hidden);
+    $('tab-sale').disabled = !canSell || noCash;
+    $('saleForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable || !canSell || noCash; });
+    const activeTab = tabButtons.find(tab => tab.getAttribute('aria-selected') === 'true');
+    if (activeTab?.hidden) {
+      const nextTab=tabButtons.find(tab=>!tab.hidden&&!tab.disabled);
+      if(nextTab)showTab(nextTab.dataset.panel);
+      else tabButtons.forEach(tab=>{$(tab.dataset.panel).hidden=true;});
+    }
+    else if(activeTab&&!activeTab.disabled)showTab(activeTab.dataset.panel);
     if (!canSell && $('tab-sale').getAttribute('aria-selected') === 'true') showTab('salesPanel');
     $('eventSelectionStatus').textContent = !selectedEventId ? '축제를 선택하면 재료비와 매출·정산 내역을 확인할 수 있습니다.'
       : selectedEventId === unassigned ? '행사 정보가 없는 기존 내역입니다. 다른 축제에 자동으로 연결하지 않습니다.'
       : !canSell ? '종료한 행사의 기록을 조회합니다. 새 매출 등록은 할 수 없습니다.' : '';
   }
 
-  async function selectEvent(id) {
-    if (operationBusy || receiptBusy || incomeController?.isBusy()) {
+  async function selectEvent(id, afterSettingsSave = false) {
+    if (operationBusy || receiptBusy || incomeController?.isBusy() || (!afterSettingsSave && workspaceTools?.isBusy())) {
       $('saleEvent').value = selectedEventId;
       setOperationStatus('진행 중인 처리가 끝난 뒤 축제를 변경해 주세요.', true);
       return;
@@ -116,7 +138,12 @@
     $('adminStatus').textContent = '';
     const draft = saleDrafts.get(id);
     if (draft) saleFields.forEach((field) => { $(field).value = draft.values[field]; });
-    else fillItemSelect($('saleItem'), (inventory.items || []).filter((item) => item.is_active));
+    else {
+      fillItemSelect($('saleItem'), (inventory.items || []).filter((item) => item.is_active));
+      const guide=eventById(id)?.guide_settings;
+      if(guide){$('saleUnitPrice').value=String(guide.unit_price);$('voucherUnitValue').value=String(guide.coupon_value||3000);}
+    }
+    if(draft && !$('saleQuantity').value){const guide=eventById(id)?.guide_settings;if(guide){$('saleUnitPrice').value=String(guide.unit_price);$('voucherUnitValue').value=String(guide.coupon_value||3000);}}
     receiptAmountEdited = draft?.receiptAmountEdited || false;
     pendingSaleRequestKey = draft?.pendingSaleRequestKey || null;
     syncCashReceived(); syncSaleReceiptAllocation(); syncEventHeading();
@@ -127,7 +154,7 @@
     $('eventWorkspace').setAttribute('aria-busy', 'true');
     $('eventSelectionStatus').textContent = '선택한 축제의 내역을 불러오고 있습니다.';
     try {
-      await Promise.all([loadSales(revision), loadVouchers(revision), loadReceipts(revision), incomeController?.selectEvent()]);
+      await Promise.all([loadSales(revision), loadVouchers(revision), loadReceipts(revision), incomeController?.selectEvent(),workspaceTools?.selectEvent()]);
       if (revision === scopeRevision) syncEventHeading();
     } catch (error) {
       if (revision === scopeRevision) $('eventSelectionStatus').textContent = readableError(error);
@@ -143,7 +170,7 @@
   const eventDialog = $('eventDialog');
   $('openEventDialog').addEventListener('click', () => {
     if (!editable || operationBusy || eventDialog.open) return;
-    if (eventBusy || receiptBusy || incomeController?.isBusy()) {
+    if (eventBusy || receiptBusy || incomeController?.isBusy() || workspaceTools?.isBusy()) {
       setOperationStatus('진행 중인 처리가 끝난 뒤 행사를 등록해 주세요.', true);
       return;
     }
@@ -164,9 +191,14 @@
     const message = String(error?.message || error || '처리하지 못했습니다.');
     if (message.includes('ADMIN_REQUIRED')) return '관리 권한이 없습니다.';
     if (message.includes('EDIT_REQUIRED')) return '회계 등록 권한이 없습니다.';
-    if (message.includes('INSUFFICIENT_STOCK')) return '현재 재고보다 많은 수량을 출고할 수 없습니다.';
+    if (message.includes('EVENT_CHANGED') || message.includes('RECEIPT_CHANGED')) return '다른 화면에서 변경된 기록입니다. 새로고침한 뒤 남은 수량과 내용을 확인해 주세요.';
+    if (message.includes('REQUEST_CONFLICT')) return '이전에 보낸 요청과 내용이 다릅니다. 처리 결과를 확인한 뒤 다시 시도해 주세요.';
+    if (message.includes('INVALID_EVENT_SETTINGS')) return '축제명·체험 제목·금액·쿠폰·수량 설정을 확인해 주세요.';
+    if (message.includes('EVENT_NO_CASH_SALES')) return '체험비를 받지 않는 축제입니다. 무료 체험·행사 사용으로 수량만 기록해 주세요.';
+    if (message.includes('INVALID_PERIOD')) return '조회 시작일과 종료일을 확인해 주세요.';
+    if (message.includes('INSUFFICIENT_STOCK')) return '사용일에 확보된 재고가 부족하거나 이후 기록과 수량이 맞지 않습니다. 날짜와 수량을 확인해 주세요.';
     if (message.includes('RECEIPT_DIFFERENCE_NOTE_REQUIRED')) return '결재 수량과 다른 이유를 검수 메모에 적어 주세요.';
-    if (message.includes('INVALID_RECEIPT_INPUT')) return '입고 수량은 0개부터 결재 수량까지, 수령일은 결재 완료일 이후부터 오늘까지 입력해 주세요.';
+    if (message.includes('INVALID_RECEIPT_INPUT')) return '이번 입고 수량은 남은 수량 이내로, 수령일은 이전 검수일 이후부터 오늘까지 입력해 주세요.';
     if (message.includes('RECEIPT_NOT_FOUND') || message.includes('RECEIPT_NOT_PENDING')) return '입고 대기 상태를 다시 확인해 주세요. 취소된 결재는 입고할 수 없습니다.';
     if (message.includes('INVALID_SALE_TOTAL')) return '판매액·수납액·현금영수증 구분 합계를 다시 확인해 주세요.';
     if (message.includes('INVALID_DEPOSIT_AMOUNT')) return '입금 처리할 수 있는 현금 잔액을 초과했습니다.';
@@ -303,7 +335,7 @@
   }
 
   async function loadEventContext(preferredId = '') {
-    eventContext = await eventRpc('bootstrap');
+    eventContext = await operationsRpc('events');
     renderEvents(preferredId);
     renderSales();
     renderReceipts();
@@ -331,7 +363,7 @@
       detail.textContent = `입고 ${Number(item.purchased_quantity || 0).toLocaleString('ko-KR')} · 판매 ${Number(item.sold_quantity || 0).toLocaleString('ko-KR')} · 행사 사용 ${Number(item.event_use_quantity || 0).toLocaleString('ko-KR')} · 불량 ${Number(item.defect_quantity || 0).toLocaleString('ko-KR')}`;
       const pending = (purchaseReceiptContext.items || [])
         .filter((row) => row.pending && row.item_name === item.item_name)
-        .reduce((sum, row) => sum + Number(row.expected_quantity || 0), 0);
+        .reduce((sum, row) => sum + Number(row.remaining_quantity ?? row.expected_quantity ?? 0), 0);
       if (pending > 0) detail.textContent += ` · 입고 대기 ${pending.toLocaleString('ko-KR')}${item.unit}`;
       card.append(title, stock, detail);
       cards.append(card);
@@ -349,7 +381,7 @@
     form.className = 'inline-action';
     const fields = [
       ['수령일', 'date', 'received_date', kstToday()],
-      ['검수 완료 수량', 'number', 'quantity', ''],
+      ['이번 입고 수량', 'number', 'quantity', ''],
       ['검수 메모', 'text', 'note', '']
     ];
     const inputs = {};
@@ -363,8 +395,8 @@
       input.value = value;
       input.setAttribute('aria-label', `${purchase.item_name} ${text}`);
       if (name === 'quantity') {
-        input.min = '0'; input.max = String(purchase.expected_quantity); input.step = '1';
-        input.inputMode = 'numeric'; input.placeholder = `결재 ${purchase.expected_quantity}${purchase.unit}`;
+        input.min = '0'; input.max = String(purchase.remaining_quantity ?? purchase.expected_quantity); input.step = '1';
+        input.inputMode = 'numeric'; input.placeholder = `남은 ${purchase.remaining_quantity ?? purchase.expected_quantity}${purchase.unit}`;
         input.required = true;
       } else if (name === 'received_date') {
         const approvedAt = Date.parse(purchase.approved_at);
@@ -372,12 +404,17 @@
           ? new Date(approvedAt + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
           : purchase.movement_date || kstToday();
         input.max = kstToday(); input.required = true;
+        for(const history of purchase.inspections||[])if(history.date>input.min)input.min=history.date;
       } else {
         input.maxLength = 500; input.placeholder = '불량·누락 등';
       }
       inputs[name] = input;
       label.append(input); form.append(label);
     });
+    const partialLabel=document.createElement('label');partialLabel.className='check';
+    const partial=document.createElement('input');partial.type='checkbox';
+    partialLabel.append(partial,document.createTextNode('부분입고 (나머지는 입고 대기로 유지)'));form.append(partialLabel);
+    let inspectionRequest=null;
     const save = document.createElement('button');
     save.type = 'submit'; save.textContent = '입고 완료 확인';
     const cancel = document.createElement('button');
@@ -389,19 +426,21 @@
       if (operationBusy) return;
       const quantity = Number(inputs.quantity.value);
       const note = inputs.note.value.trim();
-      if (inputs.quantity.value === '' || !Number.isSafeInteger(quantity) || quantity < 0 || quantity > Number(purchase.expected_quantity)) {
-        setOperationStatus('실제로 확인한 수량을 결재 수량 안에서 입력해 주세요.', true); return;
+      const remaining=Number(purchase.remaining_quantity ?? purchase.expected_quantity);
+      if (inputs.quantity.value === '' || !Number.isSafeInteger(quantity) || quantity < 0 || quantity > remaining || (partial.checked && quantity===0)) {
+        setOperationStatus('이번에 실제 받은 수량을 남은 입고 수량 안에서 입력해 주세요.', true); return;
       }
-      if (quantity !== Number(purchase.expected_quantity) && !note) {
+      if (!partial.checked && quantity !== remaining && !note) {
         setOperationStatus('불량·누락 등 수량 차이의 이유를 검수 메모에 적어 주세요.', true); return;
       }
-      if (!window.confirm(`${purchase.item_name}\n결재 수량: ${purchase.expected_quantity}${purchase.unit}\n실제 입고: ${quantity}${purchase.unit}\n수령일: ${inputs.received_date.value}\n${note ? `검수 메모: ${note}\n` : ''}이 수량으로 검수를 완료할까요? 입고 대기 중인 수량은 현재고에 포함되지 않습니다.`)) return;
+      if (!window.confirm(`${purchase.item_name}\n결재 수량: ${purchase.expected_quantity}${purchase.unit}\n이번 입고: ${quantity}${purchase.unit}\n${partial.checked ? `남은 입고 대기: ${remaining-quantity}${purchase.unit}` : '최종 검수: 남은 입고 대기를 종료합니다.'}\n수령일: ${inputs.received_date.value}\n${note ? `검수 메모: ${note}\n` : ''}저장할까요?`)) return;
       operationBusy = true; save.disabled = cancel.disabled = true;
       try {
-        const result = await purchaseReceiptRpc('confirm', {
-          id: purchase.id, quantity, received_date: inputs.received_date.value, note
-        });
-        setOperationStatus(`${purchase.item_name} ${result.quantity}${purchase.unit}의 입고 검수를 완료했습니다.`);
+        const data={id:purchase.id,quantity,received_date:inputs.received_date.value,note,partial:partial.checked,expected_received:Number(purchase.received_quantity||0)};
+        const fingerprint=JSON.stringify(data);
+        if(inspectionRequest?.fingerprint!==fingerprint)inspectionRequest={fingerprint,key:crypto.randomUUID()};
+        const result = await purchaseReceiptRpc('confirm', {...data,request_key:inspectionRequest.key});
+        setOperationStatus(`${purchase.item_name} 이번 ${result.quantity}${purchase.unit} 입고 · 누적 ${result.total_received}${purchase.unit}${result.remaining_quantity ? ` · 남은 입고 대기 ${result.remaining_quantity}${purchase.unit}` : ' · 검수 완료'}`);
         await loadInventory();
       } catch (error) {
         setOperationStatus(readableError(error), true);
@@ -424,7 +463,7 @@
       const card = document.createElement('article'); card.className = 'summary-card';
       const title = document.createElement('h3'); title.textContent = purchase.item_name;
       const detail = document.createElement('p');
-      detail.textContent = `${purchase.title} · 결재 ${purchase.expected_quantity}${purchase.unit} · ${purchase.pending ? '입고 대기' : `입고 완료 ${purchase.received_quantity}${purchase.unit} (${purchase.movement_date})`}`;
+      detail.textContent = `${purchase.title} · 결재 ${purchase.expected_quantity}${purchase.unit} · 입고 ${purchase.received_quantity||0}${purchase.unit}${purchase.pending ? ` · 남은 입고 대기 ${purchase.remaining_quantity ?? purchase.expected_quantity}${purchase.unit}` : ' · 검수 완료'}`;
       card.append(title, detail);
       if (purchase.pending && editable) {
         const button = document.createElement('button'); button.type = 'button';
@@ -434,6 +473,7 @@
         const note = document.createElement('p'); note.className = 'small';
         note.textContent = purchase.receipt_note; card.append(note);
       }
+      if(purchase.inspections?.length){const history=document.createElement('details'),title=document.createElement('summary');title.textContent=`검수 기록 ${purchase.inspections.length}건`;history.append(title);purchase.inspections.forEach(h=>{const p=document.createElement('p');p.textContent=`${h.date} · ${h.quantity}${purchase.unit} · ${h.partial?'부분입고':'최종 검수'}${h.note?` · ${h.note}`:''}`;history.append(p);});card.append(history);}
       wrap.append(card);
     });
   }
@@ -860,12 +900,13 @@
       extraPaymentRpc('list'),
       purchaseReceiptRpc('list')
     ]);
-    const receivingIds = new Set((purchaseReceiptContext.items || []).filter((row) => row.pending || row.received_quantity === 0).map((row) => row.id));
+    const receivingIds = new Set((purchaseReceiptContext.items || []).filter((row) => row.received_quantity === 0).map((row) => row.id));
     inventory.movements = (inventory.movements || []).filter((row) => !receivingIds.has(row.id));
     renderInventory();
     renderPurchaseReceipts();
     renderMovements();
-    if (selectedEventId) await Promise.all([loadSales(), loadVouchers()]);
+    if (selectedEventId) await Promise.all([loadSales(), loadVouchers(),workspaceTools?.reloadInventory()]);
+    await workspaceTools?.reloadDashboard();
   }
 
   async function loadSales(revision = scopeRevision) {
@@ -960,7 +1001,7 @@
     const button = event.submitter;
     if (button) button.disabled = true;
     try {
-      if (!eventById(selectedEventId)?.is_active) return setOperationStatus('등록할 축제를 먼저 선택해 주세요.', true);
+      if (!eventById(selectedEventId)?.is_active || eventById(selectedEventId)?.no_cash_sales) return setOperationStatus('체험비를 받는 축제를 먼저 선택해 주세요.', true);
       const data = {
         event_id: selectedEventId, item_id: $('saleItem').value,
         quantity: summary.quantity, unit_price: summary.unitPrice, discount_amount: summary.discount,
@@ -1298,6 +1339,7 @@
       $('adminPanel').hidden = true;
       $('openEventDialog').disabled = true;
       if (eventDialog.open) eventDialog.close();
+      workspaceTools?.close();
       $('accessStatus').textContent = '로그아웃되었습니다. 다시 로그인해 주세요.';
     }
   });
@@ -1326,6 +1368,10 @@
       $('movementForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
       await loadInventory();
       await loadEventContext();
+      workspaceTools=window.FestivalWorkspaceTools.init({rpc:operationsRpc,getEvent:()=>eventById(selectedEventId),getItems:()=>inventory.items||[],editable,
+        isBusy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy(),
+        onChanged:async id=>{await loadEventContext(id);await selectEvent(id,true);await workspaceTools.reloadDashboard();},
+        onStockChanged:loadInventory,readable:readableError,status:setOperationStatus,today:kstToday});
       incomeController = window.FestivalIncome.init({
         root: $('festivalIncomeRoot'),
         editable,
@@ -1335,11 +1381,13 @@
           if (action === 'list') return recordsRpc('income', data);
           const result = await client.rpc('festival_income_admin', { p_action: action, p_data: data });
           if (result.error) throw new Error(result.error.message);
+          await workspaceTools.reloadDashboard();
           return result.data;
         }
       });
       await incomeController.ready;
       await selectEvent($('saleEvent').value);
+      await workspaceTools.reloadDashboard();
     } catch (error) {
       $('accessStatus').textContent = readableError(error);
     }

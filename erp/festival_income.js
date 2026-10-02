@@ -1,4 +1,4 @@
-/* v1.1.0 — Compact material fees in the selected festival workspace. */
+/* v1.2.0 — Outstanding fees only in the summary; completed fees collapse. */
 (() => {
   'use strict';
   const money = (n) => `${Number(n || 0).toLocaleString('ko-KR')}원`;
@@ -66,7 +66,7 @@
       const requestKeys = new Map();
       root.className = 'card festival-income';
       const header = node('div', undefined, 'section-heading');
-      const heading = node('div'); heading.append(node('h2', '🧾 받을 재료비'),
+      const heading = node('div'); heading.append(node('h2', '🧾 재료비'),
         node('p', '행사 주관사에서 받을 재료비를 적어 두고, 실제 입금 후 확인해 주세요. 입금 확인을 누르면 회계 전표도 함께 기록됩니다.', 'muted'));
       const refresh = button('새로고침', () => run(() => reload()), true);
       header.append(heading, refresh);
@@ -78,19 +78,13 @@
       const createForm = makePlanForm();
       createDetails.append(createForm.form);
       createDetails.hidden = !editable;
-      const toolbar = node('div', undefined, 'income-toolbar');
-      const filterLabel = node('label', '보기');
-      const filter = document.createElement('select');
-      [['all','전체'],['open','입금 기다리는 건'],['paid','입금 완료']].forEach(([value,text]) => { const option = node('option',text);option.value=value;filter.append(option); });
-      filterLabel.append(filter); toolbar.append(filterLabel);
       const list = node('div', undefined, 'income-list');
       const pageInfo = node('p', '', 'income-page-info');
       const pager = node('div', undefined, 'toolbar');
       const previous = button('이전 30건', () => run(async () => { offset=Math.max(0,offset-30);await reload(); }), true);
       const next = button('다음 30건', () => run(async () => { offset+=30;await reload(); }), true);
       pager.append(previous,next);
-      root.replaceChildren(header,summary,createDetails,toolbar,status,list,pageInfo,pager);
-      filter.addEventListener('change', () => run(async () => { offset=0;await reload(); }));
+      root.replaceChildren(header,summary,createDetails,status,list,pageInfo,pager);
 
       function setStatus(text, error=false) { status.textContent=text;status.classList.toggle('error',error); }
       function syncBusy() {
@@ -186,10 +180,10 @@
         list.replaceChildren();
         if(!items.length)list.append(node('p','해당하는 재료비 내역이 없습니다.','muted'));
         items.forEach(plan=>{
-          const card=node('article',undefined,'income-item');
           const paid=Number(plan.outstanding_amount)===0;
-          card.append(node('h3',plan.payer_name),node('span',paid?'입금 완료':Number(plan.received_amount)>0?'부분 입금':'입금 대기',`income-badge${paid?' paid':''}`),
-            node('p',`${plan.event_date} · ${plan.event_name}`,'income-meta'));
+          const card=node(paid?'details':'article',undefined,`income-item${paid?' paid-compact':''}`);
+          if(paid)card.append(node('summary',`${plan.payer_name} · ${money(plan.received_amount)} 입금 완료`));
+          else card.append(node('h3',plan.payer_name),node('span',Number(plan.received_amount)>0?'부분 입금':'입금 대기','income-badge'));
           const amounts=node('div',undefined,'income-amounts');
           [['예정 금액',plan.expected_amount],['받은 금액',plan.received_amount],['남은 금액',plan.outstanding_amount]].forEach(([label,value])=>{const cell=node('div');cell.append(node('span',label),node('strong',money(value)));amounts.append(cell);});card.append(amounts);
           const invoice=check(card,'세금계산서 발행 완료',plan.invoice_issued);invoice.dataset.readonly=String(!editable);
@@ -213,11 +207,12 @@
       async function reload() {
         const event=getSelectedEvent?.();
         if(getSelectedEvent&&!event){items=[];total=0;list.replaceChildren();summary.replaceChildren();return;}
-        const data=await rpc('list',{filter:filter.value,offset,...(event?{event_id:event.id}:{})});
+        const data=await rpc('list',{filter:'all',offset,...(event?{event_id:event.id}:{})});
         if(offset>0 && !(data.items||[]).length){offset=Math.max(0,offset-30);return reload();}
         items=data.items || [];total=Number(data.total||0);
         summary.replaceChildren();
-        [['입금 기다리는 건',`${data.summary?.open_count || 0}건`],['받을 잔액',money(data.summary?.outstanding_amount)]].forEach(([label,value])=>{const cell=node('div');cell.append(node('span',label),node('strong',value));summary.append(cell);});
+        summary.hidden=Number(data.summary?.outstanding_amount||0)===0;
+        if(!summary.hidden){const cell=node('div');cell.append(node('span','아직 받을 재료비'),node('strong',money(data.summary?.outstanding_amount)));summary.append(cell);}
         const eventId=event?.id || 'all';
         if(registrationEventId!==eventId){createDetails.open=Number(data.summary?.plan_count ?? data.total ?? 0)===0;registrationEventId=eventId;}
         createDetails.hidden=!editable || Boolean(event&&!event.is_active);
