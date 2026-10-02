@@ -161,7 +161,10 @@ window.AccountingMoney = (() => {
         const mistaken = item.kind === 'mistaken_deposit';
         if (!editor(mistaken ? '착오입금 반환 확인' : '카드 환급 확인', `<form id="moneyForm"><p>${esc(item.description)}</p><p>남은 금액: <strong>${won(item.amount-item.settled_amount)}</strong></p>${commonFields()}<label for="moneyMethod" class="form-label mt-3">처리 방법</label><select class="form-select mb-3" id="moneyMethod"><option value="bank">${mistaken ? '통장에서 반환 이체 완료' : '통장으로 환급받음'}</option>${!mistaken && item.card_path.startsWith('credit_paid_') ? '<option value="offset">다음 카드대금에서 차감 확인</option>' : ''}</select><p class="text-muted">실제 ${mistaken ? '이체 내역' : '입금 또는 대금 차감 내역'}을 확인한 뒤 저장하세요. 이 버튼이 은행 이체를 실행하지는 않습니다.</p><button class="btn btn-primary" id="moneySave">확인한 금액 기록</button></form>`)) return;
         $('moneyAmount').value = item.amount-item.settled_amount; $('moneyAmount').max = $('moneyAmount').value;
-        $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('settle', { case_id: item.id, date: $('moneyDate').value, amount: Number($('moneyAmount').value), method: $('moneyMethod').value }, '실제 통장 거래 또는 카드사 차감 내역을 확인하셨나요? 장부와 남은 금액을 함께 갱신합니다.'); };
+        const referenceWrap = document.createElement('div'); referenceWrap.className = 'mb-3';
+        referenceWrap.innerHTML = '<label for="moneySettlementReference" class="form-label">이체·환급 확인번호 또는 구분 메모 (선택)</label><input id="moneySettlementReference" class="form-control" maxlength="100" placeholder="같은 날 같은 금액을 두 번 처리한 경우 구분할 내용">';
+        $('moneyMethod').after(referenceWrap);
+        $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('settle', { case_id: item.id, date: $('moneyDate').value, amount: Number($('moneyAmount').value), method: $('moneyMethod').value, reference: $('moneySettlementReference').value.trim() }, '실제 통장 거래 또는 카드사 차감 내역을 확인하셨나요? 장부와 남은 금액을 함께 갱신합니다.'); };
     }
     function confirmSave(action, payload, text) {
         if (saving) return;
