@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.68 | Change: 2026-10-02 - Record prepaid execution dates and clarify expense payment confirmation. -->
+<!-- Version: v1.2.69 | Change: 2026-10-02 - Confirm expense execution dates and initialize previews safely after deferred loading. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.68 | approval.html');</script>
+  <script>console.log('[Version] v1.2.69 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -9182,6 +9182,7 @@ function setupAttachmentDropZone() {
 }
 
 window.onload = async function() {
+    initializeApprovalRelatedModals();
     const userModalEl = document.getElementById('userModal');
     const alertModalEl = document.getElementById('alertModal');
     const confirmModalEl = document.getElementById('confirmModal');
@@ -11504,6 +11505,7 @@ async function appendApprovalRelatedDocSection(container, doc) {
 
 async function openApprovalSubmitPreview() {
     try {
+        initializeApprovalRelatedModals();
         const previewDoc = buildApprovalSubmitPreviewData();
         currentViewingDocId = null;
         resetRelViewObjectUrls();
@@ -15029,18 +15031,23 @@ const APPROVAL_REL_SEARCH_RECENT_LIMIT = 5;
 const APPROVAL_REL_SEARCH_QUERY_LIMIT = 20;
 
 // 모달 초기화 (onload 밖에서도 호출 가능하도록)
-document.addEventListener('DOMContentLoaded', () => {
-    relSearchModal = new bootstrap.Modal(document.getElementById('relSearchModal'));
-    relViewModal = new bootstrap.Modal(document.getElementById('relViewModal'));
+function initializeApprovalRelatedModals() {
+    const relSearchModalEl = document.getElementById('relSearchModal');
     const relViewModalEl = document.getElementById('relViewModal');
-    if (relViewModalEl) {
+    if (!relSearchModalEl || !relViewModalEl) return;
+    relSearchModal = bootstrap.Modal.getOrCreateInstance(relSearchModalEl);
+    relViewModal = bootstrap.Modal.getOrCreateInstance(relViewModalEl);
+    if (relViewModalEl.dataset.relatedModalBound !== '1') {
+        relViewModalEl.dataset.relatedModalBound = '1';
         relViewModalEl.addEventListener('hidden.bs.modal', () => {
             resetRelViewObjectUrls();
             currentViewingDocId = null;
             syncRelViewActionArea(null);
         });
     }
-});
+} // End of initializeApprovalRelatedModals
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeApprovalRelatedModals, { once: true });
+else initializeApprovalRelatedModals();
 
 // 1. 검색 모달 열기
 function openRelSearch() {
