@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.122 | Change: 2026-10-02 - Switch VAT summary between half-year and quarter. -->
+<!-- Version: v1.0.123 | Change: 2026-10-02 - Linked card cancellations, refunds and guided mistaken deposits. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.122 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.123 | accounting.html');</script>
+  <link rel="stylesheet" href="accounting_money_module.css?v=20261002-1">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -165,6 +166,7 @@
 
   <ul class="nav nav-tabs mb-4 no-print" id="accTab" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabForm">📝 전표입력</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabMoney" onclick="AccountingMoney.open()">🔎 업무별 입력·카드 환급</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPrepay">💳 선급·미수 관리</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAssets" onclick="loadAssetOverview()">📦 자산·재고</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 자동연동</button></li>
@@ -173,6 +175,7 @@
   </ul>
 
   <div class="tab-content no-print">
+    <div class="tab-pane fade" id="tabMoney"><div id="accountingMoneyPanel"></div></div>
 
     <div class="tab-pane fade" id="tabAssets">
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -277,6 +280,7 @@
 
         <div class="mb-3">
           <label class="small text-muted">계정과목</label>
+          <div class="mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="openAccountingBusinessFinder()">계정 이름을 모르겠다면 업무로 찾기</button></div>
           <div class="input-group">
             <input type="text" class="form-control readonly-input ime-kr" id="displayAccount" placeholder="선택하세요 (유형에 맞는 항목만 표시됨)" readonly onclick="openSelModal()">
             <button class="btn btn-secondary" type="button" onclick="openSelModal()">🔍</button>
@@ -4522,6 +4526,11 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
             const cardPrefix = cardAlias ? `[${cardAlias}] ` : '';
             const modeLabel = adjustmentType === 'decrease' ? '감액' : '증액';
             const originalTitle = String(adjustmentState.originalDoc?.title || expenseSnapshot.original_approval_title || '원결재').trim();
+            const originalPaymentMethod = normalizeApprovalExpenseSnapshot(adjustmentState.originalDoc).payment_method;
+            if (adjustmentType === 'decrease' && ([paymentMethod, originalPaymentMethod].some(method => ['check_card', 'credit_card'].includes(method)))) {
+                blockedDocs.push({ id: doc.id, label, reason: '업무별 입력·카드 환급에서 원거래를 선택하고 이 감액 결재를 연결해 주세요. 실제 납부·환급 상태를 확인한 뒤 반영합니다.' });
+                continue;
+            }
             let kind = 'direct_payment';
             if (adjustmentType === 'decrease') {
                 kind = paymentMethod === 'credit_card' ? 'accrual_reversal' : 'direct_payment_reversal';
@@ -6137,6 +6146,35 @@ function resetAccountInput() {
     bankInterestRequestKey = '';
 }
 
+function accountBusinessKeywords(account) {
+    const name = String(account?.Item || account?.item || '');
+    const aliases = {
+        '가수금': '착오입금 잘못 들어온 돈 오입금 과오납 입금자 미확인 돌려줄 돈 반환',
+        '미수금': '받을 돈 미입금 카드 환급 대기 외상 대금',
+        '미지급금': '갚을 돈 신용카드 카드대금 납부 전 미납',
+        '선급금': '미리 지급한 돈 선지급 선결제',
+        '이자수익': '은행 통장 이자 원천징수',
+        '잡이익': '체크카드 캐시백 기타 수입',
+        '체험행사매출': '축제 체험비 참가비 판매 현금 매출',
+        '행사재료비수입': '행사 재료비 물품 재료 공급'
+    };
+    return aliases[name] || '';
+}
+function openAccountingBusinessFinder(query = '') {
+    bootstrap.Tab.getOrCreateInstance(document.querySelector('[data-bs-target="#tabMoney"]')).show();
+    AccountingMoney.open(query);
+}
+function selectAccount(acc) {
+    const specialRaw = acc.special_code || '';
+    document.getElementById('displayAccount').value = acc.Item;
+    document.getElementById('hiddenItem').value = acc.Item;
+    document.getElementById('hiddenStandard').value = acc.Standard;
+    document.getElementById('hiddenCode').value = acc.Code || acc.code || '';
+    document.getElementById('isTaxFree').value = acc.tax_free;
+    document.getElementById('specialMode').value = normalizeSpecialCode(specialRaw) || '';
+    document.getElementById('hiddenSpecialRaw').value = specialRaw;
+    updateDynamicUI(acc.Item, acc.Type, normalizeSpecialCode(specialRaw), acc.tax_free, specialRaw);
+}
 function openSelModal() {
     filterAccounts();
     selectModal.show();
@@ -6169,7 +6207,7 @@ function filterAccounts() {
 
         // 1. 계정 유형(매출/비용/자산) 및 키워드 매칭
         const typeMatch = allowedTypes.length > 0 ? allowedTypes.includes(mType) : (mType === type);
-        const keywordMatch = (mItem.includes(k) || mStandard.includes(k));
+        const keywordMatch = [mItem, mStandard, m.Note || '', accountBusinessKeywords(m)].some(value => String(value).replace(/\s/g, '').toLowerCase().includes(k.replace(/\s/g, '').toLowerCase()));
 
         // 2. [핵심] 프로젝트별 Usage 필터링 논리
         let usageMatch = false;
@@ -6181,7 +6219,8 @@ function filterAccounts() {
             usageMatch = (mUsage === "전체" || mUsage === "발전소");
         }
 
-        return typeMatch && keywordMatch && usageMatch;
+        const businessSearch = k !== '' && !selectContext && keywordMatch;
+        return (typeMatch || businessSearch) && keywordMatch && usageMatch;
     });
 
     if(filtered.length === 0) {
@@ -6198,13 +6237,25 @@ function filterAccounts() {
         const specialRaw = acc.special_code || "";
         const specialType = normalizeSpecialCode(specialRaw);
 
-        const typeBadge = allowedTypes.length > 1 ? `<span class="badge bg-light text-dark border me-1" style="font-size:0.7em;">${escapeHtml(acc.Type || '')}</span>` : '';
+        const typeBadge = `<span class="badge bg-light text-dark border me-1">${escapeHtml(acc.Type || '')}</span>`;
         const badge = (isTaxFree === true || isTaxFree === 'TRUE' || isTaxFree === '면세') ? '<span class="badge bg-secondary ms-2" style="font-size:0.7em;">면세</span>' : '';
-        const spBadge = (specialRaw) ? `<span class="badge bg-info text-dark ms-1" style="font-size:0.7em;">${specialRaw}</span>` : '';
+        const spBadge = '';
 
         d.innerHTML = `<div class="d-flex justify-content-between align-items-center"><div>${typeBadge}<span class="acc-item-name">${acc.Item}</span><span class="acc-item-std ms-1">(${acc.Standard})</span></div><div>${spBadge}${badge}</div></div>`;
 
         d.onclick = () => {
+            if (!selectContext && acc.Item === '가수금') {
+                document.getElementById('selectModal')?.addEventListener('hidden.bs.modal', () => openAccountingBusinessFinder('착오입금'), { once: true });
+                selectModal.hide();
+                return;
+            }
+            if (!selectContext && acc.Type !== document.querySelector('input[name="inputType"]:checked').value) {
+                if (['부채','자본'].includes(acc.Type) && !document.getElementById('advModeToggle').checked) {
+                    document.getElementById('advModeToggle').checked = true; toggleAdvancedMode();
+                }
+                const typeRadio = Array.from(document.querySelectorAll('input[name="inputType"]')).find(radio => radio.value === acc.Type);
+                if (typeRadio) { typeRadio.checked = true; resetAccountInput(); }
+            }
             if (selectContext && selectContext.mode === 'prepayExpense') {
                 setPrepayExpenseAccount(acc.Item);
                 selectContext = null;
@@ -7386,8 +7437,11 @@ async function submitAccounting(ctx) {
                 if(vatAmount > 0) entries.push({ Date: fDate, Type: '부채', Account: '부가세예수금', Description: `[${item}] 부가세`, Debit: 0, Credit: vatAmount, Project: project, Operator: writer, Evidence_Type: "세금계산서" });
                 entries.push({ Date: fDate, Type: '자산', Account: '보통예금', Description: finalDesc, Debit: totalAmt, Credit: 0, Project: project, Operator: writer, Evidence_Type: "금융거래" });
             } else if (type === '비용') {
-                const creditAcc = isCard ? '미지급금' : '보통예금';
-                const creditType = isCard ? '부채' : '자산';
+                const selectedCard = isCard ? (cardData || []).find(card => card.card_alias === cardName) : null;
+                if (isCard && !selectedCard) return showAlert('확인', '사용한 카드를 선택해 주세요.');
+                const isCreditCard = isCard && normalizeCardManageTypeValue(selectedCard?.card_type) === 'credit_card';
+                const creditAcc = isCreditCard ? '미지급금' : '보통예금';
+                const creditType = isCreditCard ? '부채' : '자산';
                 const credEvid = isCard ? evidenceType : "금융거래";
                 entries.push({ Date: fDate, Type: '비용', Account: item, Description: finalDesc, Debit: netAmount, Credit: 0, Project: project, Operator: writer, Evidence_Type: evidenceType });
                 if(vatAmount > 0) entries.push({ Date: fDate, Type: '자산', Account: '부가세대급금', Description: `[${item}] 부가세`, Debit: vatAmount, Credit: 0, Project: project, Operator: writer, Evidence_Type: "세금계산서" });
@@ -9629,7 +9683,7 @@ async function deleteTx(id, transId) {
     showConfirm("전표 삭제", "이 전표와 관련된 모든 분개(차/대변 전체)를 삭제하시겠습니까?", async function() {
         // Trans_ID가 같은 모든 행을 삭제
         const { error } = await _supabase.from('ac_journal').delete().eq('Trans_ID', transId);
-        if(error) showAlert("오류", "삭제 실패");
+        if(error) showAlert("오류", /LINKED_MONEY_JOURNAL_LOCKED|CARD_SOURCE_HAS_CANCELLATION/.test(error.message || '') ? '취소·환급과 연결된 전표는 삭제할 수 없습니다. 업무별 입력·카드 환급에서 처리 내역을 확인해 주세요.' : "삭제 실패");
         else {
             await logAudit('accounting.delete', transId, '전표 삭제(전체)', null);
             loadHistory();
@@ -10547,6 +10601,7 @@ async function fetchLiabilitySum() {
     showAlert("조회 성공", `[${periodLabel}] 장부상 금액을 불러왔습니다.\n실제 고지서 금액과 다르다면 '금액' 란을 수정하세요.`);
 }
 </script>
+<script src="accounting_money_module.js?v=20261002-1"></script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 </body>
 </html>
