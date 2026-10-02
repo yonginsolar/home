@@ -1,4 +1,4 @@
-/* v1.0.0 — Material-fee plans, confirmed receipts and existing-journal links. */
+/* v1.1.0 — Compact material fees in the selected festival workspace. */
 (() => {
   'use strict';
   const money = (n) => `${Number(n || 0).toLocaleString('ko-KR')}원`;
@@ -58,8 +58,10 @@
     return input;
   }
   window.FestivalIncome = {
-    init({ root, rpc, getEvents, editable }) {
+    init({ root, rpc, getEvents, getSelectedEvent, editable }) {
       let busy = false, offset = 0, total = 0, items = [];
+      let registrationEventId = null;
+      const createDrafts = new Map();
       const eventSelects = new Set();
       const requestKeys = new Map();
       root.className = 'card festival-income';
@@ -71,6 +73,7 @@
       const summary = node('div', undefined, 'income-summary');
       const status = node('p', '', 'status'); status.setAttribute('role', 'status');
       const createDetails = node('details', undefined, 'sub-panel');
+      createDetails.open = true;
       createDetails.append(node('summary', '받을 재료비 등록'));
       const createForm = makePlanForm();
       createDetails.append(createForm.form);
@@ -117,22 +120,25 @@
       }
       function makePlanForm(plan) {
         const form=node('form',undefined,'form-grid income-form');
-        const event=field(form,'행사','event_id','select','',{required:true,wide:true});
-        eventSelects.add(event);fillEvents(event,plan?.event_id);
+        const event=getSelectedEvent ? null : field(form,'행사','event_id','select','',{required:true,wide:true});
+        if(event){eventSelects.add(event);fillEvents(event,plan?.event_id);}
         field(form,'받을 곳 (주관사·정산기관)','payer_name','text',plan?.payer_name,{required:true,maxLength:120});
-        field(form,'내용','title','text',plan?.title || '행사 재료비',{required:true,maxLength:160});
         field(form,'받을 금액 (부가세 포함)','expected_amount','number',plan?.expected_amount,{required:true});
-        field(form,'입금 예정일 (선택)','due_date','date',plan?.due_date);
         field(form,'메모 (선택)','note','text',plan?.note,{maxLength:500,wide:true});
         const invoice=plan?null:check(form,'세금계산서 발행 완료',false);
         const submit=node('button',plan?'수정 저장':'받을 재료비 등록');submit.type='submit';form.append(submit);
         form.addEventListener('submit',e=>{
-          e.preventDefault();if(!editable || !form.reportValidity())return;
+          e.preventDefault();if(!editable || busy || !form.reportValidity())return;
           const data=Object.fromEntries(new FormData(form));data.expected_amount=Number(data.expected_amount);
+          if(getSelectedEvent)data.event_id=getSelectedEvent()?.id;
+          const selected=getEvents().find(item=>item.id===data.event_id);
+          if(!selected?.is_active){setStatus('재료비를 등록할 축제를 먼저 선택해 주세요.',true);return;}
+          data.title=plan?.title || `${selected.event_name} 재료비`;
+          data.due_date=plan?.due_date || null;
           if(!plan)data.invoice_issued=invoice.checked;
           run(async()=>{
             if(plan) {data.id=plan.id;data.version=plan.version;await rpc('update',data);}
-            else {await rpc('create',keyed('create',data));requestKeys.delete('create');form.reset();fillEvents(event);createDetails.open=false;}
+            else {const key=`create:${data.event_id}`;await rpc('create',keyed(key,data));requestKeys.delete(key);createDrafts.delete(data.event_id);form.reset();if(event)fillEvents(event);createDetails.open=false;}
             await reload();setStatus(plan?'예정 내역을 수정했습니다.':'받을 재료비를 등록했습니다. 실제 입금 후 입금 확인을 눌러 주세요.');
           });
         });
@@ -182,11 +188,10 @@
         items.forEach(plan=>{
           const card=node('article',undefined,'income-item');
           const paid=Number(plan.outstanding_amount)===0;
-          card.append(node('h3',plan.title),node('span',paid?'입금 완료':Number(plan.received_amount)>0?'부분 입금':'입금 대기',`income-badge${paid?' paid':''}`),
-            node('p',`${plan.event_date} · ${plan.event_name}`,'income-meta'),node('p',`받을 곳: ${plan.payer_name}`,'income-meta'));
+          card.append(node('h3',plan.payer_name),node('span',paid?'입금 완료':Number(plan.received_amount)>0?'부분 입금':'입금 대기',`income-badge${paid?' paid':''}`),
+            node('p',`${plan.event_date} · ${plan.event_name}`,'income-meta'));
           const amounts=node('div',undefined,'income-amounts');
           [['예정 금액',plan.expected_amount],['받은 금액',plan.received_amount],['남은 금액',plan.outstanding_amount]].forEach(([label,value])=>{const cell=node('div');cell.append(node('span',label),node('strong',money(value)));amounts.append(cell);});card.append(amounts);
-          if(plan.due_date)card.append(node('p',`입금 예정일: ${plan.due_date}`,!paid&&plan.due_date<today()?'income-overdue':'income-meta'));
           const invoice=check(card,'세금계산서 발행 완료',plan.invoice_issued);invoice.dataset.readonly=String(!editable);
           invoice.addEventListener('change',()=>{
             if(busy){invoice.checked=plan.invoice_issued;return;}
@@ -196,7 +201,7 @@
           if(plan.note)card.append(node('p',plan.note,'income-note'));
           if(editable){const actions=node('div',undefined,'income-actions');
             if(!paid)actions.append(button('입금 확인',()=>receiptEditor(card,plan)),button('기존 전표 연결',()=>run(()=>linkEditor(card,plan)),true));
-            actions.append(button('예정 내역 수정',()=>{const edit=makePlanForm(plan);showEditor(card,'예정 내역 수정',edit.form);},true));card.append(actions);}
+            if(!getSelectedEvent || getSelectedEvent()?.is_active)actions.append(button('예정 내역 수정',()=>{const edit=makePlanForm(plan);showEditor(card,'예정 내역 수정',edit.form);},true));card.append(actions);}
           if(plan.receipts?.length){const history=node('details',undefined,'income-history');history.append(node('summary',`입금 기록 ${plan.receipts.length}건`));const ul=node('ul');
             plan.receipts.forEach(r=>ul.append(node('li',`${r.received_date} · ${money(r.amount)} · ${r.source==='linked'?'기존 전표 연결':'회계 자동 기록'}${r.journal_exists?'':' · 회계 전표 확인 필요'}`)));history.append(ul);card.append(history);}
           list.append(card);
@@ -206,14 +211,26 @@
         syncBusy();
       }
       async function reload() {
-        const data=await rpc('list',{filter:filter.value,offset});
+        const event=getSelectedEvent?.();
+        if(getSelectedEvent&&!event){items=[];total=0;list.replaceChildren();summary.replaceChildren();return;}
+        const data=await rpc('list',{filter:filter.value,offset,...(event?{event_id:event.id}:{})});
         if(offset>0 && !(data.items||[]).length){offset=Math.max(0,offset-30);return reload();}
         items=data.items || [];total=Number(data.total||0);
         summary.replaceChildren();
-        [['입금 기다리는 건',`${data.summary?.open_count || 0}건`],['받을 잔액',money(data.summary?.outstanding_amount)],['예정일 지난 건',`${data.summary?.overdue_count || 0}건`]].forEach(([label,value])=>{const cell=node('div');cell.append(node('span',label),node('strong',value));summary.append(cell);});
+        [['입금 기다리는 건',`${data.summary?.open_count || 0}건`],['받을 잔액',money(data.summary?.outstanding_amount)]].forEach(([label,value])=>{const cell=node('div');cell.append(node('span',label),node('strong',value));summary.append(cell);});
+        const eventId=event?.id || 'all';
+        if(registrationEventId!==eventId){createDetails.open=Number(data.summary?.plan_count ?? data.total ?? 0)===0;registrationEventId=eventId;}
+        createDetails.hidden=!editable || Boolean(event&&!event.is_active);
         render();setStatus('');
       }
-      const controller={reload:()=>run(()=>reload()),refreshEvents:()=>eventSelects.forEach(select=>fillEvents(select)),ready:null};
+      const controller={reload:()=>run(()=>reload()),refreshEvents:()=>eventSelects.forEach(select=>fillEvents(select)),isBusy:()=>busy,
+        selectEvent:()=>run(async()=>{
+          if(registrationEventId)createDrafts.set(registrationEventId,Array.from(createForm.form.querySelectorAll('input,select')).map(el=>({value:el.value,checked:el.checked})));
+          offset=0;registrationEventId=null;createForm.form.reset();
+          const draft=createDrafts.get(getSelectedEvent?.()?.id);
+          if(draft)Array.from(createForm.form.querySelectorAll('input,select')).forEach((el,i)=>{el.value=draft[i].value;el.checked=draft[i].checked;});
+          await reload();
+        }),ready:null};
       controller.ready=run(async()=>{await reload();});
       // A failed initial load can be retried without rebuilding or losing drafts.
       return controller;

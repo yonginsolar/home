@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <!-- Version: v2.5.0 | Track material-fee receipts and linked accounting -->
+  <!-- Version: v2.6.0 | Event-scoped festival workspace -->
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
@@ -9,18 +9,12 @@
   <title>축제 현금매출·재고·현금영수증 관리 | 용인모두의햇빛협동조합</title>
   <link rel="icon" href="../shared/sun_favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="../shared/festival.css?v=2.0.0">
-  <link rel="stylesheet" href="festival_income.css?v=1.0.0">
-  <style>
-    .festival-page.admin{word-break:keep-all;overflow-wrap:break-word}
-    .admin .section-heading>div{min-width:0}
-    .admin .section-heading>button{width:auto;flex:none}
-    #purchaseReceiptRows>.summary-card{margin-bottom:12px}
-    @media(max-width:760px){.admin .section-heading>button{width:100%}}
-  </style>
+  <link rel="stylesheet" href="festival_income.css?v=1.1.0">
+  <link rel="stylesheet" href="festival_receipts.css?v=1.0.0">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
 </head>
 <body>
-<main class="festival-page admin" data-version="2.5.0">
+<main class="festival-page admin" data-version="2.6.0">
   <header>
     <span class="eyebrow">용인모두의햇빛협동조합</span>
     <h1>축제 현금매출·재고·현금영수증 관리</h1>
@@ -29,28 +23,17 @@
   <nav class="toolbar page-nav">
     <a class="button secondary" href="index.html">ERP 메뉴로</a>
     <a class="button secondary" href="accounting.html">회계관리</a>
-    <a class="button secondary" href="../festival.html" target="_blank" rel="noopener">입금 안내 페이지</a>
+    <div class="event-nav-actions">
+      <a id="paymentGuide" class="button secondary" href="../festival.html" target="_blank" rel="noopener">입금 안내 페이지</a>
+      <button id="openEventDialog" type="button" aria-haspopup="dialog" disabled>행사 등록</button>
+    </div>
   </nav>
   <p id="accessStatus" class="status" role="status">관리 권한을 확인하고 있습니다.</p>
   <a id="loginLink" class="button" hidden>ERP 로그인</a>
 
   <section id="adminPanel" hidden>
-    <div class="card">
-      <div class="section-heading">
-        <div><h2>🗓️ 행사 관리</h2><p class="muted">행사마다 달라지는 이름·날짜·인쇄물만 여기에서 관리합니다. 재고와 전체 매출·현금영수증 신청은 아래 공통 목록에서 계속 확인합니다.</p></div>
-      </div>
-      <form id="eventForm" class="form-grid compact-form">
-        <label>행사 날짜<input type="date" id="newEventDate" required></label>
-        <label class="wide">행사명<input id="newEventName" maxlength="120" placeholder="예: 느티나무 축제 태양광 선풍기 체험" required></label>
-        <button type="submit">행사 등록</button>
-      </form>
-      <p id="eventStatus" class="status" role="status"></p>
-      <div class="table-wrap"><table><thead><tr><th>날짜</th><th>행사명</th><th>인쇄물</th></tr></thead><tbody id="eventRows"></tbody></table></div>
-    </div>
-
-    <section id="festivalIncomeRoot" aria-label="받을 재료비 관리"></section>
-
-    <div class="card">
+    <p id="operationStatus" class="status" role="status"></p>
+    <div class="card" id="inventoryPanel">
       <div class="section-heading">
         <div><h2>📦 재고 현황</h2><p class="muted">구매 결재가 완료되면 입고 대기로 표시됩니다. 물품을 수령한 뒤 아래에서 검수한 수량만 현재고에 반영됩니다.</p></div>
         <button type="button" id="refresh" class="secondary compact">새로고침</button>
@@ -80,11 +63,31 @@
       </details>
     </div>
 
-    <div class="card">
+    <details class="card inventory-history" id="movementHistory">
+      <summary>🔎 최근 재고 변동</summary>
+      <div class="table-wrap"><table><thead><tr><th>날짜</th><th>물품</th><th>구분</th><th>수량</th><th>메모</th></tr></thead><tbody id="movementRows"></tbody></table></div>
+    </details>
+
+    <section class="card event-picker" aria-labelledby="eventPickerTitle">
+      <h2 id="eventPickerTitle">🗓️ 축제 선택</h2>
+      <label>관리할 축제<select id="saleEvent"><option value="">행사를 선택해 주세요</option></select></label>
+      <p id="eventSelectionStatus" class="status" role="status"></p>
+      <div id="eventPosters" class="toolbar" hidden></div>
+    </section>
+
+    <section id="eventWorkspace" aria-labelledby="selectedEventTitle" hidden>
+      <h2 id="selectedEventTitle" class="workspace-title">축제 현황</h2>
+      <section id="festivalIncomeRoot" aria-label="받을 재료비 관리"></section>
+      <div class="festival-tabs" role="tablist" aria-label="축제 업무">
+        <button id="tab-sale" type="button" role="tab" aria-selected="true" aria-controls="salePanel" data-panel="salePanel">현금매출 등록</button>
+        <button id="tab-sales" type="button" role="tab" aria-selected="false" aria-controls="salesPanel" data-panel="salesPanel" tabindex="-1">등록된 매출</button>
+        <button id="tab-vouchers" type="button" role="tab" aria-selected="false" aria-controls="voucherPanel" data-panel="voucherPanel" tabindex="-1">쿠폰 정산</button>
+        <button id="tab-receipts" type="button" role="tab" aria-selected="false" aria-controls="receiptsPanel" data-panel="receiptsPanel" tabindex="-1">현금영수증</button>
+      </div>
+    <div class="card" id="salePanel" role="tabpanel" aria-labelledby="tab-sale">
       <h2>💵 현금매출 등록</h2>
-      <p class="muted">행사를 선택한 뒤 판매 수량·판매가를 입력하세요. 행사 쿠폰을 받았다면 주관사에서 나중에 받을 금액도 함께 기록합니다. 계좌 수납액을 적으면 현장 현금은 자동 계산됩니다.</p>
+      <p class="muted">선택한 축제의 판매 수량·판매가를 입력하세요. 행사 쿠폰을 받았다면 주관사에서 나중에 받을 금액도 함께 기록합니다. 계좌 수납액을 적으면 현장 현금은 자동 계산됩니다.</p>
       <form id="saleForm" class="form-grid">
-        <label class="wide">행사<select id="saleEvent" required><option value="">먼저 행사를 등록해 주세요</option></select></label>
         <label>판매 물품<select id="saleItem" required></select></label>
         <label>판매 수량<input type="number" min="1" step="1" inputmode="numeric" id="saleQuantity" required></label>
         <label>개당 판매가<input type="number" min="0" step="1" inputmode="numeric" id="saleUnitPrice" required></label>
@@ -104,27 +107,25 @@
         <div id="saleSummary" class="calculation wide" aria-live="polite"></div>
         <button type="submit">매출·출고·회계전표 함께 저장</button>
       </form>
-      <p id="operationStatus" class="status" role="status"></p>
     </div>
 
-    <div class="card">
+    <div class="card" id="salesPanel" role="tabpanel" aria-labelledby="tab-sales" hidden>
       <h2>📒 등록된 매출</h2>
       <p class="small muted">현장 현금을 통장에 입금한 뒤에만 `현금 통장입금 처리`를 누르세요. 추가 입금은 판매수량과 재고에 섞지 않으며, 실제 돈을 돌려준 뒤에만 `반환 확인`을 누르세요.</p>
       <div class="table-wrap"><table><thead><tr><th>판매일</th><th>행사·물품</th><th>수량×판매가</th><th>수납</th><th>현금영수증</th><th>추가 입금·반환</th><th>현금 입금</th></tr></thead><tbody id="salesRows"></tbody></table></div>
+      <p id="salesStatus" class="status" role="status"></p>
+      <div class="toolbar"><button id="salesPrevious" type="button" class="secondary compact" hidden>이전 100건</button><button id="salesNext" type="button" class="secondary compact" hidden>다음 100건</button></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="voucherPanel" role="tabpanel" aria-labelledby="tab-vouchers" hidden>
       <h2>🎟️ 주관사 쿠폰 정산</h2>
       <p class="small muted">쿠폰은 할인이나 별도 매출이 아닙니다. 주관사가 실제로 정산금을 입금한 뒤에만 ‘입금 확인’을 누르세요. 부분 입금도 기록할 수 있습니다.</p>
       <div class="table-wrap"><table><thead><tr><th>판매일·행사</th><th>정산처</th><th>쿠폰</th><th>입금·미정산</th><th>정산 처리</th></tr></thead><tbody id="voucherRows"></tbody></table></div>
+      <p id="vouchersStatus" class="status" role="status"></p>
+      <div class="toolbar"><button id="vouchersPrevious" type="button" class="secondary compact" hidden>이전 100건</button><button id="vouchersNext" type="button" class="secondary compact" hidden>다음 100건</button></div>
     </div>
 
-    <div class="card">
-      <h2>🔎 최근 재고 변동</h2>
-      <div class="table-wrap"><table><thead><tr><th>날짜</th><th>물품</th><th>구분</th><th>수량</th><th>메모</th></tr></thead><tbody id="movementRows"></tbody></table></div>
-    </div>
-
-    <div class="card">
+    <div class="card" id="receiptsPanel" role="tabpanel" aria-labelledby="tab-receipts" hidden>
       <h2 id="countTitle">현금영수증 신청 내역</h2>
       <p>은행 입금 내역을 확인한 뒤 현금영수증을 발급해 주세요. 실제 발급을 마친 건만 ‘발급 완료’로 표시합니다.</p>
       <p class="small muted">입금 자동 확인·현금영수증 자동 발급 기능은 아닙니다. 신청 정보는 신청일부터 90일 후 삭제됩니다.</p>
@@ -133,9 +134,19 @@
       <div class="table-wrap"><table><thead><tr><th>신청 일시</th><th>행사</th><th>입금자명</th><th>입금액</th><th>전화번호</th><th>처리</th></tr></thead><tbody id="receiptRows"></tbody></table></div>
       <div class="toolbar"><button type="button" class="secondary compact" id="previous" hidden>이전 100건</button><button type="button" class="secondary compact" id="next" hidden>다음 100건</button></div>
     </div>
+    </section>
   </section>
+  <dialog id="eventDialog" aria-labelledby="eventDialogTitle">
+    <div class="section-heading"><h2 id="eventDialogTitle">🗓️ 행사 등록</h2><button id="closeEventDialog" type="button" class="secondary compact" aria-label="행사 등록 닫기">닫기</button></div>
+    <form id="eventForm" class="form-grid">
+      <label>행사 날짜<input type="date" id="newEventDate" required></label>
+      <label class="wide">행사명<input id="newEventName" maxlength="120" placeholder="예: 느티나무 축제 태양광 선풍기 체험" required></label>
+      <button type="submit">행사 등록</button>
+    </form>
+    <p id="eventStatus" class="status" role="status"></p>
+  </dialog>
 </main>
-<script src="festival_income.js?v=1.0.0"></script>
-<script src="festival_receipts.js?v=2.5.0"></script>
+<script src="festival_income.js?v=1.1.0"></script>
+<script src="festival_receipts.js?v=2.6.0"></script>
 </body>
 </html>

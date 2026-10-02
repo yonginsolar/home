@@ -1,4 +1,4 @@
-/* v2.5.0 - Track planned material income and atomically post confirmed receipts. */
+/* v2.6.0 — Shared inventory and paginated, event-scoped festival work. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -38,6 +38,122 @@
   let receiptAmountEdited = false;
   let pendingSaleRequestKey = null;
   let incomeController = null;
+  let selectedEventId = '';
+  let selectedSales = [];
+  let salesOffset = 0, salesTotal = 0, vouchersOffset = 0, vouchersTotal = 0;
+  let scopeRevision = 0, eventBusy = false;
+  const unassigned = 'unassigned';
+  const saleDrafts = new Map();
+  const saleFields = ['saleItem','saleQuantity','saleUnitPrice','saleDiscount','voucherCount','voucherUnitValue','voucherOrganizer','saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount','overpaymentName','saleNote'];
+  const tabButtons = Array.from(document.querySelectorAll('.festival-tabs [role="tab"]'));
+  const scopeData = (id = selectedEventId) => id === unassigned ? { unassigned: true } : { event_id: id };
+
+  async function recordsRpc(action, data = {}) {
+    const result = await client.rpc('festival_event_records', { p_action: action, p_data: data });
+    if (result.error) throw new Error(result.error.message);
+    return result.data;
+  }
+
+  function showTab(panelId, focus = false) {
+    tabButtons.forEach((button) => {
+      const active = button.dataset.panel === panelId;
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+      $(button.dataset.panel).hidden = !active;
+      if (active && focus) button.focus();
+    });
+  }
+  tabButtons.forEach((button, index) => {
+    button.addEventListener('click', () => showTab(button.dataset.panel));
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+      event.preventDefault();
+      const available = tabButtons.filter((tab) => !tab.disabled);
+      const current = available.indexOf(tabButtons[index]);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? available.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + available.length) % available.length;
+      showTab(available[next].dataset.panel, true);
+    });
+  });
+
+  function syncEventHeading() {
+    const event = eventById(selectedEventId);
+    $('eventWorkspace').hidden = !selectedEventId;
+    $('festivalIncomeRoot').hidden = !event;
+    $('selectedEventTitle').textContent = event ? `${event.event_name} · 축제 현황` : '행사 미지정 내역';
+    $('eventPosters').replaceChildren();
+    $('eventPosters').hidden = !event;
+    if (event) $('eventPosters').append(makePosterLink(event, 'open', '체험 안내 인쇄'), makePosterLink(event, 'closed', '체험 마감 인쇄'), makePosterLink(event, 'flow', '발전 원리 인쇄'));
+    const guide = new URL('../festival.html', location.href);
+    if (event?.public_code) guide.searchParams.set('event', event.public_code);
+    $('paymentGuide').href = guide.href;
+    const canSell = Boolean(event?.is_active);
+    $('tab-sale').disabled = !canSell;
+    $('saleForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable || !canSell; });
+    if (!canSell && $('tab-sale').getAttribute('aria-selected') === 'true') showTab('salesPanel');
+    $('eventSelectionStatus').textContent = !selectedEventId ? '축제를 선택하면 재료비와 매출·정산 내역을 확인할 수 있습니다.'
+      : selectedEventId === unassigned ? '행사 정보가 없는 기존 내역입니다. 다른 축제에 자동으로 연결하지 않습니다.'
+      : !canSell ? '종료한 행사의 기록을 조회합니다. 새 매출 등록은 할 수 없습니다.' : '';
+  }
+
+  async function selectEvent(id) {
+    if (operationBusy || receiptBusy || incomeController?.isBusy()) {
+      $('saleEvent').value = selectedEventId;
+      setOperationStatus('진행 중인 처리가 끝난 뒤 축제를 변경해 주세요.', true);
+      return;
+    }
+    if (selectedEventId) saleDrafts.set(selectedEventId, {
+      values: Object.fromEntries(saleFields.map((field) => [field, $(field).value])),
+      receiptAmountEdited, pendingSaleRequestKey
+    });
+    const previousCanSell = Boolean(eventById(selectedEventId)?.is_active);
+    selectedEventId = id;
+    const revision = ++scopeRevision;
+    salesOffset = vouchersOffset = offset = 0;
+    selectedSales = []; receipts = []; voucherContext = { items: [] };
+    salesTotal = vouchersTotal = receiptTotal = 0;
+    $('saleForm').reset();
+    $('adminStatus').textContent = '';
+    const draft = saleDrafts.get(id);
+    if (draft) saleFields.forEach((field) => { $(field).value = draft.values[field]; });
+    else fillItemSelect($('saleItem'), (inventory.items || []).filter((item) => item.is_active));
+    receiptAmountEdited = draft?.receiptAmountEdited || false;
+    pendingSaleRequestKey = draft?.pendingSaleRequestKey || null;
+    syncCashReceived(); syncSaleReceiptAllocation(); syncEventHeading();
+    if (!previousCanSell && eventById(id)?.is_active) showTab('salePanel');
+    renderSales(); renderVouchers(); renderReceipts();
+    if (!id) return;
+    eventBusy = true; $('saleEvent').disabled = true;
+    $('eventWorkspace').setAttribute('aria-busy', 'true');
+    $('eventSelectionStatus').textContent = '선택한 축제의 내역을 불러오고 있습니다.';
+    try {
+      await Promise.all([loadSales(revision), loadVouchers(revision), loadReceipts(revision), incomeController?.selectEvent()]);
+      if (revision === scopeRevision) syncEventHeading();
+    } catch (error) {
+      if (revision === scopeRevision) $('eventSelectionStatus').textContent = readableError(error);
+    } finally {
+      if (revision === scopeRevision) {
+        eventBusy = false; $('saleEvent').disabled = false;
+        $('eventWorkspace').setAttribute('aria-busy', 'false');
+      }
+    }
+  }
+  $('saleEvent').addEventListener('change', () => { void selectEvent($('saleEvent').value); });
+
+  const eventDialog = $('eventDialog');
+  $('openEventDialog').addEventListener('click', () => {
+    if (!editable || operationBusy || eventDialog.open) return;
+    if (eventBusy || receiptBusy || incomeController?.isBusy()) {
+      setOperationStatus('진행 중인 처리가 끝난 뒤 행사를 등록해 주세요.', true);
+      return;
+    }
+    $('eventStatus').textContent = '';
+    eventDialog.showModal(); document.body.classList.add('event-dialog-open');
+    $('newEventName').focus();
+  });
+  $('closeEventDialog').addEventListener('click', () => { if (!operationBusy) eventDialog.close(); });
+  eventDialog.addEventListener('cancel', (event) => { if (operationBusy) event.preventDefault(); });
+  eventDialog.addEventListener('close', () => { document.body.classList.remove('event-dialog-open'); });
 
   function setOperationStatus(message, error = false) {
     $('operationStatus').textContent = message || '';
@@ -167,45 +283,23 @@
 
   function renderEvents(preferredId = '') {
     const events = Array.isArray(eventContext.events) ? eventContext.events : [];
-    const rows = $('eventRows');
-    rows.replaceChildren();
-    events.forEach((event) => {
-      const row = document.createElement('tr');
-      const links = document.createElement('td');
-      const toolbar = document.createElement('div');
-      toolbar.className = 'toolbar';
-      toolbar.append(
-        makePosterLink(event, 'open', '체험 안내'),
-        makePosterLink(event, 'closed', '체험 마감'),
-        makePosterLink(event, 'flow', '발전 원리')
-      );
-      links.append(toolbar);
-      row.append(makeCell(event.event_date), makeCell(event.event_name), links);
-      rows.append(row);
-    });
-    if (!events.length) {
-      const row = document.createElement('tr');
-      const cell = makeCell('등록된 행사가 없습니다. 위에서 행사명과 날짜를 먼저 등록해 주세요.');
-      cell.colSpan = 3;
-      row.append(cell);
-      rows.append(row);
-    }
-
     const select = $('saleEvent');
-    const previous = preferredId || select.value;
+    const previous = preferredId || selectedEventId || select.value;
     select.replaceChildren();
     const placeholder = document.createElement('option');
     placeholder.value = '';
     placeholder.textContent = events.length ? '행사를 선택해 주세요' : '먼저 행사를 등록해 주세요';
     select.append(placeholder);
-    events.filter((event) => event.is_active).forEach((event) => {
+    events.forEach((event) => {
       const option = document.createElement('option');
       option.value = event.id;
-      option.textContent = `${event.event_date} · ${event.event_name}`;
+      option.textContent = `${event.event_date} · ${event.event_name}${event.is_active ? '' : ' (종료)'}`;
       select.append(option);
     });
-    if (events.some((event) => event.id === previous && event.is_active)) select.value = previous;
-    else if (events.length === 1 && events[0].is_active) select.value = events[0].id;
+    const legacy = document.createElement('option');
+    legacy.value = unassigned; legacy.textContent = '행사 미지정 내역'; select.append(legacy);
+    if (previous === unassigned || events.some((event) => event.id === previous)) select.value = previous;
+    else if (events.length === 1) select.value = events[0].id;
   }
 
   async function loadEventContext(preferredId = '') {
@@ -213,7 +307,7 @@
     renderEvents(preferredId);
     renderSales();
     renderReceipts();
-    incomeController?.refreshEvents();
+    syncEventHeading();
   }
 
   function renderInventory() {
@@ -576,11 +670,11 @@
   function renderSales() {
     const rows = $('salesRows');
     rows.replaceChildren();
-    const sales = Array.isArray(inventory.sales) ? inventory.sales : [];
+    const sales = selectedSales;
     sales.forEach((sale) => {
       const voucher = (voucherContext.items || []).find((item) => item.sale_id === sale.id);
       if (voucher) Object.assign(sale, voucher);
-      const financial = saleLink(sale.id) || {};
+      const financial = sale;
       const listAmount = Number(financial.list_amount ?? (Number(sale.quantity || 0) * Number(sale.unit_price || 0)));
       const discountAmount = Number(financial.discount_amount || 0);
       const row = document.createElement('tr');
@@ -649,6 +743,9 @@
       row.append(cell);
       rows.append(row);
     }
+    $('salesStatus').textContent = salesTotal ? `총 ${salesTotal.toLocaleString('ko-KR')}건 · ${(salesOffset + 1).toLocaleString('ko-KR')}–${(salesOffset + sales.length).toLocaleString('ko-KR')}건` : '';
+    $('salesPrevious').hidden = salesOffset === 0;
+    $('salesNext').hidden = salesOffset + sales.length >= salesTotal;
   }
 
   function renderVouchers() {
@@ -685,6 +782,9 @@
       row.append(cell);
       rows.append(row);
     }
+    $('vouchersStatus').textContent = vouchersTotal ? `총 ${vouchersTotal.toLocaleString('ko-KR')}건 · ${(vouchersOffset + 1).toLocaleString('ko-KR')}–${(vouchersOffset + items.length).toLocaleString('ko-KR')}건` : '';
+    $('vouchersPrevious').hidden = vouchersOffset === 0;
+    $('vouchersNext').hidden = vouchersOffset + items.length >= vouchersTotal;
   }
 
   function beginVoucherSettlement(cell, item) {
@@ -746,7 +846,7 @@
 
   function applySaleAdjustment(result) {
     if (!result?.sale_id) return;
-    const sale = (inventory.sales || []).find((row) => row.id === result.sale_id);
+    const sale = selectedSales.find((row) => row.id === result.sale_id);
     if (!sale) return;
     ['receipt_issued_count','receipt_issued_amount','receipt_not_requested_count','receipt_not_requested_amount'].forEach((key) => {
       if (Object.prototype.hasOwnProperty.call(result, key)) sale[key] = result[key];
@@ -755,19 +855,30 @@
   }
 
   async function loadInventory() {
-    [inventory, extraPaymentContext, voucherContext, purchaseReceiptContext] = await Promise.all([
+    [inventory, extraPaymentContext, purchaseReceiptContext] = await Promise.all([
       rpc('bootstrap'),
       extraPaymentRpc('list'),
-      voucherRpc('list'),
       purchaseReceiptRpc('list')
     ]);
     const receivingIds = new Set((purchaseReceiptContext.items || []).filter((row) => row.pending || row.received_quantity === 0).map((row) => row.id));
     inventory.movements = (inventory.movements || []).filter((row) => !receivingIds.has(row.id));
     renderInventory();
     renderPurchaseReceipts();
-    renderSales();
-    renderVouchers();
     renderMovements();
+    if (selectedEventId) await Promise.all([loadSales(), loadVouchers()]);
+  }
+
+  async function loadSales(revision = scopeRevision) {
+    if (!selectedEventId) return;
+    const result = await recordsRpc('sales', { ...scopeData(), offset: salesOffset });
+    if (revision !== scopeRevision) return;
+    selectedSales = result.items || []; salesTotal = Number(result.total || 0); renderSales();
+  }
+  async function loadVouchers(revision = scopeRevision) {
+    if (!selectedEventId) return;
+    const result = await recordsRpc('vouchers', { ...scopeData(), offset: vouchersOffset });
+    if (revision !== scopeRevision) return;
+    voucherContext = result; vouchersTotal = Number(result.total || 0); renderVouchers();
   }
 
   function updateSaleSummary() {
@@ -837,7 +948,8 @@
 
   $('saleForm').addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (operationBusy || !editable) return;
+    if (operationBusy || eventBusy || !editable) return;
+    const form = event.currentTarget;
     syncCashReceived();
     const summary = syncSaleReceiptAllocation();
     const overpaymentName = $('overpaymentName').value.trim();
@@ -848,10 +960,9 @@
     const button = event.submitter;
     if (button) button.disabled = true;
     try {
-      const selectedEventId = $('saleEvent').value;
-      if (!selectedEventId) return setOperationStatus('행사를 먼저 선택해 주세요.', true);
-      await registerSaleRpc({
-        request_key: pendingSaleRequestKey ||= crypto.randomUUID(), event_id: selectedEventId, item_id: $('saleItem').value,
+      if (!eventById(selectedEventId)?.is_active) return setOperationStatus('등록할 축제를 먼저 선택해 주세요.', true);
+      const data = {
+        event_id: selectedEventId, item_id: $('saleItem').value,
         quantity: summary.quantity, unit_price: summary.unitPrice, discount_amount: summary.discount,
         bank_received: summary.bank, cash_received: summary.cash,
         voucher_count: summary.voucherCount, voucher_unit_value: summary.voucherCount ? summary.voucherUnitValue : 0,
@@ -860,11 +971,14 @@
         receipt_not_requested_count: intValue('receiptNoneCount'), receipt_not_requested_amount: summary.none,
         overpayment_amount: summary.overpayment, overpayment_name: overpaymentName,
         note: $('saleNote').value.trim()
-      });
+      };
+      const fingerprint = JSON.stringify(data);
+      if (pendingSaleRequestKey?.fingerprint !== fingerprint) pendingSaleRequestKey = { fingerprint, key: crypto.randomUUID() };
+      await registerSaleRpc({ ...data, request_key: pendingSaleRequestKey.key });
       pendingSaleRequestKey = null;
       setOperationStatus('매출·회계전표·재고 출고를 함께 저장했습니다. 쿠폰 금액은 정산 입금 전까지 미수금으로 표시됩니다.');
-      event.currentTarget.reset();
-      $('saleEvent').value = selectedEventId;
+      form.reset();
+      saleDrafts.delete(selectedEventId);
       ['saleDiscount','saleBank','saleCash','voucherCount','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount'].forEach((id) => { $(id).value = '0'; });
       $('voucherUnitValue').value = '3000';
       receiptAmountEdited = false;
@@ -880,8 +994,9 @@
 
   $('eventForm').addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (operationBusy || !editable) return;
+    if (operationBusy || eventBusy || receiptBusy || incomeController?.isBusy() || !editable) return;
     operationBusy = true;
+    $('closeEventDialog').disabled = true;
     const button = event.submitter;
     if (button) button.disabled = true;
     try {
@@ -889,15 +1004,19 @@
         event_date: $('newEventDate').value,
         event_name: $('newEventName').value.trim()
       });
-      $('eventStatus').classList.remove('error');
-      $('eventStatus').textContent = '행사를 등록했습니다. 매출 입력과 행사별 인쇄물에서 선택할 수 있습니다.';
+      const id = result?.event?.id || '';
+      await loadEventContext(id);
+      operationBusy = false;
+      await selectEvent(id);
       $('newEventName').value = '';
-      await loadEventContext(result?.event?.id || '');
+      eventDialog.close();
+      setOperationStatus('행사를 등록했습니다. 선택한 축제의 재료비·매출·정산을 관리할 수 있습니다.');
     } catch (error) {
       $('eventStatus').textContent = readableError(error);
       $('eventStatus').classList.add('error');
     } finally {
       operationBusy = false;
+      $('closeEventDialog').disabled = false;
       if (button) button.disabled = false;
     }
   });
@@ -945,22 +1064,13 @@
     }
   });
 
-  function receiptSaleCandidates(item) {
-    const amount = Number(item.amount || 0);
-    const link = receiptLink(item.id);
-    const eventId = link?.event_id || null;
-    const requestedQuantity = Number(link?.item_quantity || 0);
-    return (Array.isArray(inventory.sales) ? inventory.sales : []).filter((sale) => {
-      const unitPrice = Number(sale.unit_price || 0);
-      const units = requestedQuantity > 0
-        ? requestedQuantity
-        : (unitPrice > 0 && amount % unitPrice === 0 ? amount / unitPrice : 0);
-      const saleEventId = saleLink(sale.id)?.event_id || null;
-      return units > 0
-        && (!eventId || saleEventId === eventId)
-        && Number(sale.receipt_not_requested_count || 0) >= units
-        && Number(sale.receipt_not_requested_amount || 0) >= amount;
-    });
+  async function receiptSaleCandidates(item) {
+    const all = [];
+    for (let page = 0; ; page += 100) {
+      const result = await recordsRpc('receipt_candidates', { receipt_id: item.id, offset: page });
+      all.push(...result.items);
+      if (page + result.items.length >= result.total || !result.items.length) return all;
+    }
   }
 
   function saleCandidateLabel(sale) {
@@ -972,7 +1082,7 @@
     rows.replaceChildren();
     receipts.forEach((item) => {
       const row = document.createElement('tr');
-      const link = receiptLink(item.id);
+      const link = item.event_id ? item : receiptLink(item.id);
       const linkedEvent = eventById(link?.event_id);
       row.append(
         makeCell(dateTime(item.created_at)),
@@ -987,13 +1097,19 @@
       button.className = item.issued_at ? 'secondary' : '';
       button.textContent = item.issued_at ? '발급 완료 · 되돌리기' : '발급 완료로 표시';
       button.disabled = !editable;
-      button.addEventListener('click', () => {
-        if (receiptBusy || button.hidden) return;
+      button.addEventListener('click', async () => {
+        if (receiptBusy || eventBusy || button.hidden) return;
+        const revision = scopeRevision;
+        receiptBusy = true; button.disabled = true;
+        let candidates;
+        try { candidates = item.issued_at ? [] : await receiptSaleCandidates(item); }
+        catch (error) { $('adminStatus').textContent = readableError(error); return; }
+        finally { receiptBusy = false; button.disabled = !editable; }
+        if (revision !== scopeRevision || button.hidden) return;
         const confirmBox = document.createElement('div');
         const message = document.createElement('p');
         const yes = document.createElement('button');
         const no = document.createElement('button');
-        const candidates = item.issued_at ? [] : receiptSaleCandidates(item);
         let saleSelect = null;
         message.textContent = item.issued_at
           ? '미처리 상태로 되돌릴까요? 연결된 매출의 현금영수증 구분도 함께 되돌아갑니다.'
@@ -1057,7 +1173,6 @@
             $('adminStatus').textContent = wasIssued
               ? '미처리 상태와 연결 매출의 현금영수증 구분을 함께 되돌렸습니다.'
               : `발급 완료로 저장했습니다. 위 매출도 발급 ${Number(result?.receipt_issued_count || 0).toLocaleString('ko-KR')}건으로 바뀌었고 회계 증빙 메모도 함께 정리했습니다.`;
-            const selectedEventId = $('saleEvent').value;
             await loadInventory();
             await loadEventContext(selectedEventId);
             await loadReceipts();
@@ -1081,18 +1196,20 @@
     $('countTitle').textContent = `현금영수증 신청 내역 · ${receiptTotal.toLocaleString('ko-KR')}건`;
     $('previous').hidden = offset === 0;
     $('next').hidden = offset + receipts.length >= receiptTotal;
-    if (!receipts.length) $('adminStatus').textContent = '접수된 신청이 없습니다.';
   }
 
-  async function loadReceipts() {
-    const result = await rpc('list', { offset });
+  async function loadReceipts(revision = scopeRevision) {
+    if (!selectedEventId) return;
+    const result = await recordsRpc('receipts', { ...scopeData(), offset });
+    if (revision !== scopeRevision) return;
     receipts = result.items;
     receiptTotal = result.total;
     renderReceipts();
+    if ($('adminStatus').textContent === '접수된 신청이 없습니다.') $('adminStatus').textContent = '';
   }
 
   async function reloadReceipts() {
-    if (receiptBusy) return;
+    if (receiptBusy || eventBusy) return;
     receiptBusy = true;
     $('refreshReceipts').disabled = true;
     try {
@@ -1115,27 +1232,56 @@
     finally { operationBusy = false; $('refresh').disabled = false; }
   });
   $('refreshReceipts').addEventListener('click', reloadReceipts);
-  $('previous').addEventListener('click', () => { if (!receiptBusy) { offset = Math.max(0, offset - 100); void reloadReceipts(); } });
-  $('next').addEventListener('click', () => { if (!receiptBusy) { offset += 100; void reloadReceipts(); } });
+  async function pageReceipts(direction) {
+    if (receiptBusy || eventBusy) return;
+    const previousOffset = offset;
+    offset = Math.max(0, offset + direction * 100);
+    receiptBusy = true;
+    $('previous').disabled = $('next').disabled = true;
+    try { await loadReceipts(); }
+    catch (error) { offset = previousOffset; $('adminStatus').textContent = readableError(error); }
+    finally { receiptBusy = false; $('previous').disabled = $('next').disabled = false; }
+  }
+  $('previous').addEventListener('click', () => { void pageReceipts(-1); });
+  $('next').addEventListener('click', () => { void pageReceipts(1); });
+  function pageRecords(kind, direction) {
+    if (operationBusy || receiptBusy || eventBusy) return;
+    eventBusy = true; $('saleEvent').disabled = true;
+    const previousOffset = kind === 'sales' ? salesOffset : vouchersOffset;
+    if (kind === 'sales') salesOffset = Math.max(0, salesOffset + direction * 100);
+    else vouchersOffset = Math.max(0, vouchersOffset + direction * 100);
+    (kind === 'sales' ? loadSales() : loadVouchers()).catch((error) => {
+      if (kind === 'sales') salesOffset = previousOffset;
+      else vouchersOffset = previousOffset;
+      setOperationStatus(readableError(error), true);
+    })
+      .finally(() => { eventBusy = false; $('saleEvent').disabled = false; });
+  }
+  $('salesPrevious').addEventListener('click', () => pageRecords('sales', -1));
+  $('salesNext').addEventListener('click', () => pageRecords('sales', 1));
+  $('vouchersPrevious').addEventListener('click', () => pageRecords('vouchers', -1));
+  $('vouchersNext').addEventListener('click', () => pageRecords('vouchers', 1));
   $('exportCsv').addEventListener('click', async () => {
-    if (receiptBusy) return;
+    if (receiptBusy || eventBusy || !selectedEventId) return;
     receiptBusy = true;
     $('exportCsv').disabled = true;
     try {
       const all = [];
       for (let page = 0; page < receiptTotal; page += 100) {
-        const data = await rpc('list', { offset: page });
+        const data = await recordsRpc('receipts', { ...scopeData(), offset: page });
         all.push(...data.items);
+        if (!data.items.length) break;
       }
       const cell = (value) => `"${String(value ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
       const lines = [['신청일시','행사일','행사명','입금자명','입금액','전화번호','발급상태'], ...all.map((item) => {
-        const linkedEvent = eventById(receiptLink(item.id)?.event_id);
+        const linkedEvent = eventById(item.event_id || receiptLink(item.id)?.event_id);
         return [dateTime(item.created_at),linkedEvent?.event_date || '',linkedEvent?.event_name || '',item.depositor_name,item.amount,`'${item.phone}`,item.issued_at ? '발급 완료' : '미처리'];
       })];
       const url = URL.createObjectURL(new Blob([`\uFEFF${lines.map((row) => row.map(cell).join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = '태양광선풍기_현금영수증신청.csv';
+      const name = eventById(selectedEventId)?.event_name || '행사 미지정';
+      anchor.download = `${name.replace(/[\\/:*?"<>|]/g, '_')}_현금영수증신청.csv`;
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       $('adminStatus').textContent = '다운로드한 파일에는 개인정보가 있습니다. 발급 처리 후 안전하게 삭제해 주세요.';
@@ -1150,6 +1296,8 @@
   client.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') {
       $('adminPanel').hidden = true;
+      $('openEventDialog').disabled = true;
+      if (eventDialog.open) eventDialog.close();
       $('accessStatus').textContent = '로그아웃되었습니다. 다시 로그인해 주세요.';
     }
   });
@@ -1169,6 +1317,7 @@
       }
       const access = await rpc('access');
       editable = access.editable === true;
+      $('openEventDialog').disabled = !editable;
       $('accessStatus').textContent = editable ? '' : '조회 권한으로 열었습니다. 등록과 상태 변경은 회계 등록 권한이 필요합니다.';
       $('adminPanel').hidden = false;
       $('saleForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
@@ -1177,18 +1326,20 @@
       $('movementForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
       await loadInventory();
       await loadEventContext();
-      await reloadReceipts();
       incomeController = window.FestivalIncome.init({
         root: $('festivalIncomeRoot'),
         editable,
         getEvents: () => eventContext.events || [],
+        getSelectedEvent: () => eventById(selectedEventId),
         rpc: async (action, data) => {
+          if (action === 'list') return recordsRpc('income', data);
           const result = await client.rpc('festival_income_admin', { p_action: action, p_data: data });
           if (result.error) throw new Error(result.error.message);
           return result.data;
         }
       });
       await incomeController.ready;
+      await selectEvent($('saleEvent').value);
     } catch (error) {
       $('accessStatus').textContent = readableError(error);
     }
