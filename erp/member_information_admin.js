@@ -3,6 +3,7 @@ let memberInformationSummaryRequest = 0;
 let memberInformationListRequest = 0;
 let memberInformationCursor = null;
 let memberInformationRows = [];
+let memberInformationOpeningDetail = false;
 
 async function loadMemberInformationSummary() {
   const sequence = ++memberInformationSummaryRequest;
@@ -68,13 +69,17 @@ async function loadMemberInformationList(reset = true) {
       <td><button type="button" class="btn btn-sm btn-outline-primary" data-information-member="${escapeHtml(row.id)}">정보 보완</button></td>
       </tr>`).join('');
     body.querySelectorAll('[data-information-member]').forEach(button => button.addEventListener('click', async () => {
-      if (button.disabled) return;
-      button.disabled = true;
+      if (button.disabled || memberInformationOpeningDetail) return;
+      memberInformationOpeningDetail = true;
+      body.querySelectorAll('[data-information-member]').forEach(item => { item.disabled = true; });
       try {
         await openMemberDetail(button.dataset.informationMember);
         if (g_current_member_row?.id === button.dataset.informationMember) toggleEditMode(true);
       }
-      finally { button.disabled = false; }
+      finally {
+        memberInformationOpeningDetail = false;
+        body.querySelectorAll('[data-information-member]').forEach(item => { item.disabled = false; });
+      }
     }));
   } catch (_) {
     if (sequence !== memberInformationListRequest) return;
