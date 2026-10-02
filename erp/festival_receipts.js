@@ -1,4 +1,4 @@
-/* v2.4.1 - Approval creates a pending purchase; inspected quantities become stock. */
+/* v2.4.2 - Approval creates a pending purchase; inspected quantities become stock. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -271,7 +271,10 @@
         input.inputMode = 'numeric'; input.placeholder = `결재 ${purchase.expected_quantity}${purchase.unit}`;
         input.required = true;
       } else if (name === 'received_date') {
-        input.min = new Date(Date.parse(purchase.approved_at) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const approvedAt = Date.parse(purchase.approved_at);
+        input.min = Number.isFinite(approvedAt)
+          ? new Date(approvedAt + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
+          : purchase.movement_date || kstToday();
         input.max = kstToday(); input.required = true;
       } else {
         input.maxLength = 500; input.placeholder = '불량·누락 등';
