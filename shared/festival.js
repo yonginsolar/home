@@ -1,4 +1,4 @@
-/* v1.3.0 - Explicit coupon quantity; block coupons exceeding the full price. */
+/* v1.3.1 - Explicit coupon quantity; block coupons exceeding the full price. */
 (() => {
  'use strict';
  const endpoint='https://ifdqlwxgqgsvnawmhlfc.supabase.co/functions/v1/festival-receipt';
@@ -29,7 +29,7 @@
   el('tossLink').href=payable?'supertoss://send?bankCode=048&accountNo=131022855509&amount='+payment+'&origin=link':'#';
   el('couponSummary').hidden=!couponUsed||!valid;
   el('couponSummary').textContent=valid?`체험비 ${price.toLocaleString('ko-KR')}원 − 쿠폰 ${count.toLocaleString('ko-KR')}장 (${(count*couponValue).toLocaleString('ko-KR')}원) = 입금 ${payment.toLocaleString('ko-KR')}원`:'';
-  el('paymentStatus').textContent=guideReady&&!noCash&&valid&&payment===0?'별도 입금은 없습니다. 쿠폰을 부스에 제출해 주세요.':'';
+  el('paymentStatus').textContent=guideReady&&!noCash&&valid&&payment===0?(couponUsed?'별도 입금은 없습니다. 쿠폰을 부스에 제출해 주세요.':'별도 입금은 없습니다. 체험 안내는 부스에서 확인해 주세요.') : '';
   el('receiptDetails').hidden=!payable;
   if(valid&&!amountEdited)amount.value=String(payment);
   return {valid,payment,payable};
