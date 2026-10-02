@@ -1,4 +1,4 @@
-/* v1.0.0 — no AI or ERP secret is displayed or persisted by this module. */
+/* v1.0.1 — no AI or ERP secret is displayed or persisted by this module. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -12,7 +12,7 @@
     return result.data;
   }
   window.ErpAiConnections = {
-    version: '1.0.0',
+    version: '1.0.1',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
@@ -24,6 +24,7 @@
       addressBox.append(address);
       const copy = element('button', '주소 복사', 'btn btn-outline-primary'); copy.type = 'button';
       const prompt = element('button', '연결 안내 복사', 'btn btn-outline-secondary'); prompt.type = 'button';
+      copy.disabled = true; prompt.disabled = true;
       const actions = element('div', undefined, 'ai-actions'); actions.append(copy, prompt); addressBox.append(actions);
       addressBox.append(element('p', '이 주소를 AI의 원격 MCP 연결 설정에 입력하고 OAuth로 로그인해 주세요. 로그인 후 전달할 업무 분야를 직접 선택합니다. 연결 기능과 외부 도구 지원 여부는 사용하는 AI 서비스에 따라 다릅니다.', 'ai-muted'));
       root.append(addressBox);
@@ -39,6 +40,7 @@
         try {
           const d = await rpc(client, 'list');
           address.value = 'https://' + d.host + '/ai/mcp';
+          copy.disabled = false; prompt.disabled = false;
           allowed.textContent = d.coop_name + ' · 현재 조회 가능한 분야: ' + labels(d.scopes);
           list.replaceChildren();
           if (!d.connections.length) list.append(element('p', '아직 연결된 AI가 없습니다.', 'ai-muted'));
@@ -58,7 +60,7 @@
             list.append(row);
           }
           status.textContent = '';
-        } catch (e) { status.textContent = e.message; } finally { loading = false; refresh.disabled = false; }
+        } catch (e) { status.textContent = e.message; copy.disabled = true; prompt.disabled = true; } finally { loading = false; refresh.disabled = false; }
       };
       const copyText = async (text) => { try { await navigator.clipboard.writeText(text); status.textContent = '복사했습니다.'; } catch { address.focus(); address.select(); status.textContent = '주소를 선택했습니다. 복사해 주세요.'; } };
       copy.addEventListener('click', () => copyText(address.value));
