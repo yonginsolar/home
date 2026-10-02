@@ -1,4 +1,4 @@
-/* v1.0.0 — explicit payment dates; AI never writes journals. */
+/* v1.1.0 — confirm insurance payments as well as ordinary expenses. */
 (function () {
     'use strict';
     let active = null, editing = false;
@@ -9,6 +9,7 @@
         Number(doc.amount), doc.processed_at, doc.approval_line, doc.expense_snapshot, doc.doc_type]);
     function eligible(doc) {
         const snapshot = doc.expense_snapshot || {};
+        if (window.CoopInsurancePayment.isInsurance(doc)) return snapshot.adjustment_type !== 'decrease' && !/감액/.test(String(doc.doc_type || ''));
         return !/급여|보험|원천세|출자금반환|배당금|감액/.test(String(doc.doc_type || '')) &&
             !['급여', '4대보험', '원천세', '출자금반환', '배당금'].includes(snapshot.expense_sub_type) &&
             snapshot.adjustment_type !== 'decrease' && !snapshot.payout && !snapshot.withholding_tax && !snapshot.insurance &&
@@ -50,17 +51,19 @@
         active = new Promise(resolve => {
             const ui = dialog('지출(이체)일 확인', 'expensePaymentDateModal');
             ui.body.append(el('p', 'text-muted', '실제로 지출한 건만 선택해 주세요. 날짜를 확인한 뒤 연동하며, 아직 지출하지 않은 건은 다음에 처리할 수 있습니다.'));
-            const controls = candidates.map(({ doc, approvedDate }, index) => {
+            const controls = candidates.map(({ doc, approvedDate, scheduledDate }, index) => {
                 const prepaid = doc.expense_snapshot?.execution?.prepaid === true;
+                const insurance = window.CoopInsurancePayment.isInsurance(doc);
                 const section = el('section', 'border rounded p-3 mb-3');
                 section.append(el('h6', 'fw-bold', doc.title || '지출결의'),
                     el('p', 'mb-2', `${Number(doc.amount).toLocaleString()}원${prepaid ? ' · 선지출' : ''}`));
+                if (insurance) section.append(el('p', 'small text-muted', window.CoopInsurancePayment.label(doc.expense_snapshot?.insurance)));
                 const row = el('div', 'form-check mb-2'), check = el('input', 'form-check-input');
                 check.type = 'checkbox'; check.id = `expensePaidCheck${index}`; check.checked = prepaid;
                 const checkLabel = el('label', 'form-check-label', '실제 지출을 확인했습니다.'); checkLabel.htmlFor = check.id;
                 row.append(check, checkLabel);
                 const date = el('input', 'form-control'); date.type = 'date'; date.id = `expensePaidDate${index}`;
-                date.max = today; date.value = prepaid ? String(doc.expense_snapshot.execution.date || '') : approvedDate;
+                date.max = today; date.value = prepaid ? String(doc.expense_snapshot.execution.date || '') : scheduledDate || approvedDate;
                 date.disabled = !check.checked || prepaid; date.required = !prepaid;
                 const label = el('label', 'form-label', '실제 지출(이체)일'); label.htmlFor = date.id;
                 check.addEventListener('change', () => { date.disabled = !check.checked || prepaid; });
@@ -150,5 +153,5 @@
             ui.modal.show();
         } catch (error) { editing = false; if (ui) ui.root.remove(); window.showAlert('날짜 수정 확인', error.message); }
     }
-    window.CoopPaymentDates = { version: '1.0.0', validDate, eligible, signature, validate, collect, edit };
+    window.CoopPaymentDates = { version: '1.1.0', validDate, eligible, signature, validate, collect, edit };
 })();

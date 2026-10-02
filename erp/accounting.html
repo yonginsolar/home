@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.127 | Change: 2026-10-02 - Confirm expense execution dates and audit administrator journal-date corrections. -->
+<!-- Version: v1.0.128 | Change: 2026-10-03 - Confirm insurance payment dates without forcing direct debit or day ten. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.127 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.128 | accounting.html');</script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261002-3">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -30,7 +30,8 @@
   <script src="erp_runtime_guard.js?v=20260919-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="accounting_withholding_payment.js?v=1.0.0"></script>
-  <script src="accounting_payment_dates.js?v=1.0.0"></script>
+  <script src="insurance_payment.js?v=1.0.0"></script>
+  <script src="accounting_payment_dates.js?v=1.1.0"></script>
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
@@ -4356,34 +4357,7 @@ function parseApprovalInsuranceMonthRange(doc) {
 function parseApprovalInsurancePaymentDate(doc, fallbackDate) {
     const snapshot = normalizeApprovalExpenseSnapshot(doc);
     const snapshotDueDate = String(snapshot.insurance?.due_date || '').trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(snapshotDueDate)) return snapshotDueDate;
-    const rawText = `${doc?.title || ''}\n${doc?.content || ''}`;
-    const explicitYearDate = rawText.match(/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-    if (explicitYearDate) {
-        const explicit = `${String(explicitYearDate[1]).padStart(4, '0')}-${String(Number(explicitYearDate[2])).padStart(2, '0')}-${String(Number(explicitYearDate[3])).padStart(2, '0')}`;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
-    }
-
-    const monthDay = rawText.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
-    if (monthDay) {
-        const payMonth = Number(monthDay[1]);
-        const payDay = Number(monthDay[2]);
-        if ([payMonth, payDay].every((value) => Number.isFinite(value) && value > 0)) {
-            const baseInfo = getApprovalBaseKstInfo(doc);
-            let payYear = baseInfo.year;
-            if (payMonth < (baseInfo.month - 1)) payYear += 1;
-
-            const parsed = `${String(payYear).padStart(4, '0')}-${String(payMonth).padStart(2, '0')}-${String(payDay).padStart(2, '0')}`;
-            if (/^\d{4}-\d{2}-\d{2}$/.test(parsed)) return parsed;
-        }
-    }
-
-    const insuranceRange = parseApprovalInsuranceMonthRange(doc);
-    if (insuranceRange?.endYm) {
-        const nextYm = addAccountingMonths(insuranceRange.endYm, 1);
-        const inferred = buildAccountingDateFromYmDay(nextYm, 10, '');
-        if (inferred) return inferred;
-    }
+    if (window.CoopInsurancePayment.isAuto(snapshot.insurance) && window.CoopInsurancePayment.validDate(snapshotDueDate)) return snapshotDueDate;
     return fallbackDate;
 } // End of parseApprovalInsurancePaymentDate
 
@@ -4615,7 +4589,11 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
         }
 
         if (isInsuranceApproval(doc)) {
-            const settingResult = await loadInsuranceAutoDebitDiscountSetting();
+            const insurance = normalizeApprovalExpenseSnapshot(doc).insurance;
+            const automatic = window.CoopInsurancePayment.isAuto(insurance);
+            const paymentError = insurance?.payment_mode_version === 1 ? window.CoopInsurancePayment.validate(insurance) : '';
+            if (paymentError) { blockedDocs.push({ id: doc.id, label: doc.title || '4대보험', reason: paymentError }); continue; }
+            const settingResult = automatic ? await loadInsuranceAutoDebitDiscountSetting() : { error: null };
             if (settingResult.error) {
                 const label = String(doc?.title || doc?.doc_type || `전자결재 ${doc?.id || ''}`).trim();
                 blockedDocs.push({
@@ -4628,7 +4606,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
 
             const insuranceAmounts = calculateInsurancePaymentAmounts(
                 amount,
-                insuranceAutoDebitDiscountSetting.enabled,
+                automatic && insuranceAutoDebitDiscountSetting.enabled,
                 insuranceAutoDebitDiscountSetting.amount
             );
             if (!insuranceAmounts.valid) {
@@ -4692,7 +4670,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
             plans.push({
                 kind: 'insurance',
                 amount,
-                date: parseApprovalInsurancePaymentDate(doc, journalDate),
+                date: journalDate,
                 description: buildApprovalInsuranceBaseDescription(doc),
                 transId,
                 project: '본사',
@@ -4700,7 +4678,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                 bookYesu: Number(summary.data.totalYesu || 0),
                 bookMigigeub: Number(summary.data.totalMigigeub || 0),
                 periodLabel: summary.data.periodLabel,
-                discountEnabled: insuranceAutoDebitDiscountSetting.enabled,
+                discountEnabled: automatic && insuranceAutoDebitDiscountSetting.enabled,
                 discountConfiguredAmount: insuranceAutoDebitDiscountSetting.amount,
                 discountAmount: insuranceAmounts.discountAmount,
                 cashAmount: insuranceAmounts.cashAmount,
@@ -8267,7 +8245,8 @@ function confirmSync(type) {
             const withholdingPayments = await window.CoopWithholdingPayment.collect(withholdingCandidates, today);
             if (withholdingPayments === null) return;
             const expenseCandidates = targetDocs.filter(doc => window.CoopPaymentDates.eligible(doc) && !isSalaryLikeApproval(doc))
-                .map(doc => ({ doc, approvedDate: getApprovalJournalDate(doc, today) }));
+                .map(doc => ({ doc, approvedDate: getApprovalJournalDate(doc, today),
+                    scheduledDate: isInsuranceApproval(doc) ? parseApprovalInsurancePaymentDate(doc, '') : '' }));
             const expensePayments = await window.CoopPaymentDates.collect(expenseCandidates, today);
             if (expensePayments === null) return;
 

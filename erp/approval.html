@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.70 | Change: 2026-10-03 - Keep expense execution dates and approval print tables inside A4 width. -->
+<!-- Version: v1.2.71 | Change: 2026-10-03 - Select insurance direct debit or manual payment and payment dates. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.70 | approval.html');</script>
+  <script>console.log('[Version] v1.2.71 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -32,6 +32,7 @@
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260928-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
+  <script src="insurance_payment.js?v=1.0.0"></script>
 
   <style>
     body.erp-page-approval { --erp-page-max-width: 1180px; }
@@ -844,9 +845,15 @@
                         <input type="month" class="form-control" id="insuranceBillingMonth" onchange="handleApprovalInsuranceBillingMonthChange()">
                       </div>
                       <div class="col-md-6">
-                        <label class="text-muted fw-bold mb-1">납부일</label>
-                        <div class="approval-insurance-method">자동이체 (10일 인출)</div>
-                        <input type="hidden" id="insuranceDueDate">
+                        <label class="text-muted fw-bold mb-1" for="insurancePaymentMethod">납부 방식</label>
+                        <select class="form-select" id="insurancePaymentMethod" onchange="handleApprovalInsurancePaymentMethodChange()">
+                          <option value="manual">직접 납부(지로 등)</option>
+                          <option value="auto_debit">자동이체</option>
+                        </select>
+                      </div>
+                      <div class="col-md-6 hidden" id="insuranceDueDateFields">
+                        <label class="text-muted fw-bold mb-1" for="insuranceDueDate">자동이체 날짜</label>
+                        <input type="date" class="form-control" id="insuranceDueDate" onchange="syncApprovalInsuranceExpenseTotal()">
                       </div>
                     </div>
                   </div>
@@ -2955,6 +2962,7 @@ function collectApprovalDraftFormPayload() {
             withholding_adjustment_reason: String(document.getElementById('withholdingAdjustmentReason')?.value || '').trim(),
             withholding_payment_confirmed: !!document.getElementById('withholdingPaymentConfirmed')?.checked,
             insurance_billing_month: String(document.getElementById('insuranceBillingMonth')?.value || '').trim(),
+            insurance_payment_method: String(document.getElementById('insurancePaymentMethod')?.value || 'manual'),
             insurance_due_date: String(document.getElementById('insuranceDueDate')?.value || '').trim(),
             insurance_pension: String(document.getElementById('insurancePension')?.value || '').trim(),
             insurance_health: String(document.getElementById('insuranceHealth')?.value || '').trim(),
@@ -3530,6 +3538,14 @@ async function loadApprovalDraftFromServer(draftId) {
             const element = document.getElementById(elementId);
             if (element) element.value = String(fields[fieldKey] || '').trim();
         });
+        const insuranceMethod = document.getElementById('insurancePaymentMethod');
+        if (insuranceMethod) {
+            insuranceMethod.value = fields.insurance_payment_method === 'auto_debit'
+                || (!fields.insurance_payment_method && fields.insurance_due_date) ? 'auto_debit' : 'manual';
+            insuranceMethod.dataset.initialized = '1';
+        }
+        const insuranceDate = document.getElementById('insuranceDueDate');
+        if (insuranceDate) delete insuranceDate.dataset.autoValue;
         if (String(fields.expense_sub_type || '').trim() === '4대보험') {
             syncApprovalInsuranceExpenseTotal();
         }
@@ -5369,14 +5385,31 @@ function applyApprovalInsuranceBaseNoticeCount() {
 } // End of applyApprovalInsuranceBaseNoticeCount
 
 function buildApprovalInsuranceDueDate(billingMonth) {
-    const matched = String(billingMonth || '').trim().match(/^(\d{4})-(0[1-9]|1[0-2])$/);
-    if (!matched) return '';
-    const year = Number(matched[1]);
-    const month = Number(matched[2]);
-    const dueMonth = month === 12 ? 1 : month + 1;
-    const dueYear = month === 12 ? year + 1 : year;
-    return `${dueYear}-${String(dueMonth).padStart(2, '0')}-10`;
+    return window.CoopInsurancePayment.defaultDate(billingMonth, approvalCompanyInfo.insurance_auto_debit_day);
 } // End of buildApprovalInsuranceDueDate
+
+function syncApprovalInsurancePaymentUi() {
+    const method = document.getElementById('insurancePaymentMethod');
+    const date = document.getElementById('insuranceDueDate');
+    if (!method || !date) return;
+    const automatic = method.value === 'auto_debit' && getCurrentDraftMainType() === '지출결의'
+        && document.getElementById('expenseSubType')?.value === '4대보험';
+    document.getElementById('insuranceDueDateFields')?.classList.toggle('hidden', !automatic);
+    date.required = automatic;
+    date.disabled = !automatic;
+    syncApprovalExpenseDateUi();
+} // End of syncApprovalInsurancePaymentUi
+
+function handleApprovalInsurancePaymentMethodChange() {
+    const method = document.getElementById('insurancePaymentMethod');
+    if (method) method.dataset.initialized = '1';
+    const date = document.getElementById('insuranceDueDate');
+    if (method?.value === 'auto_debit' && date && !date.value) {
+        date.value = buildApprovalInsuranceDueDate(document.getElementById('insuranceBillingMonth')?.value);
+        date.dataset.autoValue = date.value;
+    }
+    syncApprovalInsuranceExpenseTotal();
+} // End of handleApprovalInsurancePaymentMethodChange
 
 function getApprovalInsuranceComputedAmounts(insurance) {
     const premiums = insurance?.premiums || {};
@@ -5468,14 +5501,14 @@ function collectApprovalInsuranceExpenseInput() {
     const durunuriStability = parseApprovalInsuranceWon(document.getElementById('insuranceDurunuriStability')?.value);
     const pensionOffsetReceipts = parseApprovalInsuranceWon(document.getElementById('insurancePensionOffsetReceipts')?.value);
     const billingMonth = String(document.getElementById('insuranceBillingMonth')?.value || '').trim();
-    const dueDate = buildApprovalInsuranceDueDate(billingMonth);
-    const dueDateInput = document.getElementById('insuranceDueDate');
-    if (dueDateInput) dueDateInput.value = dueDate;
+    const automatic = document.getElementById('insurancePaymentMethod')?.value === 'auto_debit';
+    const dueDate = automatic ? String(document.getElementById('insuranceDueDate')?.value || '') : '';
     const insurance = {
         breakdown_version: 2,
         calculation_mode: 'gross_minus_durunuri',
-        payment_method: '자동이체',
-        payment_day: 10,
+        payment_method: automatic ? '자동이체' : '직접 납부',
+        payment_mode_version: 1,
+        payment_day: automatic && window.CoopInsurancePayment.validDate(dueDate) ? Number(dueDate.slice(-2)) : null,
         billing_month: billingMonth,
         due_date: dueDate || null,
         notice_counts: {
@@ -5514,6 +5547,8 @@ function collectApprovalInsuranceExpenseInput() {
 function validateApprovalInsuranceExpense(insurance) {
     const computed = getApprovalInsuranceComputedAmounts(insurance);
     const errors = [];
+    const paymentError = window.CoopInsurancePayment.validate(insurance);
+    if (paymentError) errors.push(paymentError);
     if (computed.pensionSupportExceeded) errors.push('국민연금의 사회보험료 지원금과 충당·수납액 합계는 연금보험료보다 클 수 없습니다.');
     if (computed.unemploymentSupportExceeded) errors.push('실업급여 지원금은 실업급여보험료보다 클 수 없습니다.');
     if (computed.stabilitySupportExceeded) errors.push('고용안정·직업능력개발 지원금은 해당 보험료보다 클 수 없습니다.');
@@ -5522,6 +5557,7 @@ function validateApprovalInsuranceExpense(insurance) {
 } // End of validateApprovalInsuranceExpense
 
 function syncApprovalInsuranceExpenseTotal() {
+    syncApprovalInsurancePaymentUi();
     const state = collectApprovalInsuranceExpenseInput();
     const validation = validateApprovalInsuranceExpense(state);
     const amountInput = document.getElementById('appAmount');
@@ -5560,7 +5596,7 @@ function syncApprovalInsuranceExpenseTotal() {
                 `<div>고용안정·직업능력개발 ${formatMoney(net.employmentStability)}원</div>`,
                 `<div>산재보험 ${formatMoney(net.industrial)}원</div>`,
                 '</div>',
-                `<div class="mt-1">고지 합계 ${formatMoney(validation.computed.grossTotal)}원 · ${supportText}자동이체 (10일 인출)</div>`
+                `<div class="mt-1">고지 합계 ${formatMoney(validation.computed.grossTotal)}원 · ${supportText}${escapeHtml(window.CoopInsurancePayment.label(state))}</div>`
             ].join('');
         }
     }
@@ -5587,6 +5623,11 @@ function syncApprovalInsuranceDefaultBody(options = {}) {
 } // End of syncApprovalInsuranceDefaultBody
 
 function handleApprovalInsuranceBillingMonthChange() {
+    const date = document.getElementById('insuranceDueDate');
+    if (date && (!date.value || date.value === date.dataset.autoValue)) {
+        date.value = buildApprovalInsuranceDueDate(document.getElementById('insuranceBillingMonth')?.value);
+        date.dataset.autoValue = date.value;
+    }
     syncApprovalInsuranceExpenseTotal();
     syncApprovalInsuranceDefaultBody();
 } // End of handleApprovalInsuranceBillingMonthChange
@@ -5603,7 +5644,10 @@ function resetApprovalInsuranceExpenseUi(clearValues = false) {
     const dueDate = document.getElementById('insuranceDueDate');
     const detailSummary = document.getElementById('insurancePaymentSummary');
     if (billingMonth) billingMonth.value = '';
-    if (dueDate) dueDate.value = '';
+    if (dueDate) { dueDate.value = ''; dueDate.required = false; dueDate.disabled = true; }
+    if (dueDate) delete dueDate.dataset.autoValue;
+    const method = document.getElementById('insurancePaymentMethod');
+    if (method) { method.value = 'manual'; delete method.dataset.initialized; }
     if (detailSummary) {
         detailSummary.classList.remove('is-invalid');
         detailSummary.textContent = '보험료를 입력하면 결재 금액이 표시됩니다.';
@@ -5623,7 +5667,7 @@ function buildApprovalInsuranceAppendText(insurance) {
     const lines = [
         '[4대보험 고지서 입력]',
         `- 귀속월: ${insurance.billing_month || '-'}`,
-        '- 납부일: 자동이체 (10일 인출)'
+        `- 납부 방식: ${window.CoopInsurancePayment.label(insurance)}`
     ];
     if (computed.isDetailedBreakdown) {
         lines.push(
@@ -5678,9 +5722,12 @@ function buildApprovalInsuranceTableModel(doc) {
         { label: '고용보험', count: null, gross: computed.gross.employmentTotal, support: computed.appliedEmploymentSupport, net: computed.net.employmentTotal },
         { label: '산재보험', count: null, gross: computed.gross.industrial, support: 0, net: computed.net.industrial }
     ];
+    const execution = doc?.expense_snapshot?.execution;
+    const prepaidLabel = !window.CoopInsurancePayment.isAuto(insurance) && execution?.prepaid === true
+        && window.CoopInsurancePayment.validDate(execution.date) ? ` · 선지출 ${execution.date}` : '';
     return {
         billingMonth: String(insurance.billing_month || '').trim(),
-        paymentLabel: '자동이체 (10일 인출)',
+        paymentLabel: window.CoopInsurancePayment.label(insurance) + prepaidLabel,
         rows: computed.isDetailedBreakdown ? detailedRows : legacyRows,
         grossTotal: computed.grossTotal,
         supportTotal: computed.appliedDeductionTotal,
@@ -6479,7 +6526,9 @@ function buildApprovalInventoryPurchaseAppendText(purchase) {
 
 function syncApprovalExpenseDateUi() {
     const general = getCurrentDraftMainType() === '지출결의'
-        && String(document.getElementById('expenseSubType')?.value || '일반') === '일반'
+        && (String(document.getElementById('expenseSubType')?.value || '일반') === '일반'
+            || (document.getElementById('expenseSubType')?.value === '4대보험'
+                && document.getElementById('insurancePaymentMethod')?.value !== 'auto_debit'))
         && getApprovalExpenseAdjustmentMode() !== 'decrease'
         && !(document.getElementById('expensePaymentMethod')?.value === 'card'
             && normalizeApprovalCardTypeValue(getSelectedApprovalCardRow()?.card_type) === 'credit_card');
@@ -6491,7 +6540,8 @@ function syncApprovalExpenseDateUi() {
 } // End of syncApprovalExpenseDateUi
 
 function collectApprovalExecutionDate(paymentMethod, expenseSubType, adjustmentType) {
-    if (expenseSubType !== '일반' || adjustmentType === 'decrease' || paymentMethod === 'credit_card') return null;
+    const manualInsurance = expenseSubType === '4대보험' && document.getElementById('insurancePaymentMethod')?.value !== 'auto_debit';
+    if ((!manualInsurance && expenseSubType !== '일반') || adjustmentType === 'decrease' || paymentMethod === 'credit_card') return null;
     if (!document.getElementById('expensePrepaid')?.checked) return { prepaid: false };
     const date = String(document.getElementById('expensePrepaidDate')?.value || '');
     const parsed = new Date(`${date}T00:00:00Z`);
@@ -9862,6 +9912,10 @@ function handleExpenseSubTypeChange() {
     syncApprovalExpenseDateUi();
     const select = document.getElementById("expenseSubType");
     const mode = select?.value || '일반';
+    if (mode !== '4대보험') {
+        const insuranceDate = document.getElementById('insuranceDueDate');
+        if (insuranceDate) { insuranceDate.required = false; insuranceDate.disabled = true; }
+    }
     const divMonth = document.getElementById("divPayrollMonth");
     const divLoad = document.getElementById("divPayrollLoad");
     const divMethod = document.getElementById("divExpensePaymentMethod");
@@ -9967,7 +10021,15 @@ function handleExpenseSubTypeChange() {
         const billingMonth = document.getElementById('insuranceBillingMonth');
         if (billingMonth && !billingMonth.value) billingMonth.value = formatApprovalKstMonth();
         const dueDate = document.getElementById('insuranceDueDate');
-        if (dueDate) dueDate.value = buildApprovalInsuranceDueDate(billingMonth?.value || '');
+        const method = document.getElementById('insurancePaymentMethod');
+        if (method && !method.dataset.initialized) {
+            method.value = approvalCompanyInfo.insurance_payment_method === 'auto_debit' ? 'auto_debit' : 'manual';
+            method.dataset.initialized = '1';
+        }
+        if (dueDate && !dueDate.value && method?.value === 'auto_debit') {
+            dueDate.value = buildApprovalInsuranceDueDate(billingMonth?.value || '');
+            dueDate.dataset.autoValue = dueDate.value;
+        }
         if (amountLabel) amountLabel.innerText = "4대보험 총 납부액 (원)";
         if (amountInput) {
             amountInput.placeholder = "보험별 금액 합계로 자동 입력";
