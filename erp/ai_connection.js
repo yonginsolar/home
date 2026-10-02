@@ -1,4 +1,4 @@
-/* v1.2.1 — client-specific onboarding and correct single-scope consent status. */
+/* v1.2.2 — guided onboarding with explicit consent and clear help-query status. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -49,7 +49,7 @@
     return result.data;
   }
   window.ErpAiConnections = {
-    version: '1.2.1',
+    version: '1.2.2',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
@@ -168,7 +168,7 @@
           if (!data.length) { logBody.append(element('p', '아직 조회 기록이 없습니다.')); return; }
           const table = element('table', undefined, 'ai-log-table'); const head = element('tr');
           for (const h of ['일시', 'AI · 작업', '결과']) head.append(element('th', h)); table.append(head);
-          for (const r of data) { const row = element('tr'); row.append(element('td', date(r.used_at)), element('td', r.name + ' · ' + (TOOLS[r.tool] || '조회')), element('td', r.result === 'OK' ? (r.row_count + '건 조회') : '접근 또는 요청 차단')); table.append(row); }
+          for (const r of data) { const row = element('tr'); row.append(element('td', date(r.used_at)), element('td', r.name + ' · ' + (TOOLS[r.tool] || '조회')), element('td', r.result === 'OK' ? (r.tool === 'erp_help' ? '안내 확인' : r.row_count + '건 조회') : '접근 또는 요청 차단')); table.append(row); }
           logBody.append(table);
         } catch (e) { logBody.replaceChildren(element('p', e.message)); }
       });
