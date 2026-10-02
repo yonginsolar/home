@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.121 | Change: 2026-10-02 - Physical stock requires receiving inspection. -->
+<!-- Version: v1.0.122 | Change: 2026-10-02 - Switch VAT summary between half-year and quarter. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.121 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.122 | accounting.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -42,6 +42,10 @@
     .sub-card { flex: 1; padding: 10px; border-radius: 10px; text-align: center; border: 1px solid #eee; background-color: #fff; }
     .text-vat { color: #d63384; font-weight: bold; }
     .text-cash { color: #0d6efd; font-weight: bold; }
+    .vat-summary-heading { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; word-break: keep-all; }
+    .vat-summary-mode { width: auto; min-width: 82px; }
+    .vat-summary-detail { display: block; width: 100%; border: 0; background: transparent; color: inherit; text-align: center; padding: 6px 0 0; word-break: keep-all; }
+    .vat-summary-detail:focus-visible { outline: 2px solid #0d6efd; outline-offset: 3px; border-radius: 6px; }
 
     .btn-report { width: 100%; font-weight: bold; border-radius: 10px; }
 	    .readonly-input { background-color: #f8f9fa; cursor: pointer; }
@@ -136,10 +140,18 @@
         <div>💰 통장 잔고 (보통예금)</div>
         <div class="text-cash fs-5" id="valCash">0</div>
     </div>
-    <div class="sub-card" id="vatSummaryCard" role="button" tabindex="0" onclick="openVatSummaryDetail()" onkeydown="handleVatSummaryCardKeydown(event)" style="cursor: pointer;">
-        <div id="vatCardTitle">🧾 이번 분기 부가세</div>
-        <div class="text-vat fs-5" id="valVat">0</div>
-        <div class="small text-muted mt-1" id="valVatHint">클릭하면 반기 누계를 확인합니다.</div>
+    <div class="sub-card" id="vatSummaryCard">
+        <div class="vat-summary-heading">
+            <div id="vatCardTitle">🧾 이번 반기 부가세</div>
+            <select class="form-select form-select-sm vat-summary-mode" id="vatPeriodMode" aria-label="부가세 조회 단위" onchange="setVatSummaryMode(this.value)">
+                <option value="half_year" selected>반기</option>
+                <option value="quarter">분기</option>
+            </select>
+        </div>
+        <button type="button" class="vat-summary-detail" id="vatSummaryDetailButton" onclick="openVatSummaryDetail()" aria-label="부가세 상세 보기">
+            <span class="text-vat fs-5 d-block" id="valVat">조회 중</span>
+            <span class="small text-muted mt-1 d-block" id="valVatHint">반기 누계를 불러옵니다.</span>
+        </button>
     </div>
   </div>
 
@@ -1134,6 +1146,7 @@ let prepayVatManual = false;
 let receivableCache = { vendors: [], balances: {}, incomeMap: {}, summary: { balance: 0, vat: 0 } };
 let receivableVatManual = false;
 let vatSummaryState = null;
+let vatSummaryMode = 'half_year';
 let accountingDashboardRefreshPromise = null;
 let accountingDashboardRefreshQueued = false;
 let selectContext = null;
@@ -2177,36 +2190,49 @@ function calculateVatSummaryForPeriod(rows, period) {
     };
 } // End of calculateVatSummaryForPeriod
 
+function setVatSummaryMode(mode) {
+    vatSummaryMode = mode === 'quarter' ? 'quarter' : 'half_year';
+    renderVatSummaryCard();
+} // End of setVatSummaryMode
+
+function renderVatSummaryCard() {
+    const modeEl = document.getElementById('vatPeriodMode');
+    if (modeEl) modeEl.value = vatSummaryMode;
+    const selected = vatSummaryMode === 'quarter' ? vatSummaryState?.quarter : vatSummaryState?.halfYear;
+    if (!selected) return;
+    const valueEl = document.getElementById('valVat');
+    const titleEl = document.getElementById('vatCardTitle');
+    const hintEl = document.getElementById('valVatHint');
+    if (valueEl) valueEl.innerText = selected.headline;
+    if (titleEl) titleEl.innerText = `🧾 이번 ${vatSummaryMode === 'quarter' ? '분기' : '반기'} 부가세 (${selected.shortLabel})`;
+    if (hintEl) hintEl.innerText = `${selected.startDate} ~ ${selected.endDate} · 자세히 보기`;
+} // End of renderVatSummaryCard
+
 function buildVatSummaryModalText() {
     if (!vatSummaryState?.quarter || !vatSummaryState?.halfYear) return '부가세 요약을 불러오지 못했습니다.';
-    const quarter = vatSummaryState.quarter;
-    const halfYear = vatSummaryState.halfYear;
+    const isQuarter = vatSummaryMode === 'quarter';
+    const selected = isQuarter ? vatSummaryState.quarter : vatSummaryState.halfYear;
+    const comparison = isQuarter ? vatSummaryState.halfYear : vatSummaryState.quarter;
     return [
-        `[이번 분기] ${quarter.title}`,
-        `- 기간: ${quarter.startDate} ~ ${quarter.endDate}`,
-        `- ${quarter.headline}`,
-        `- 부가세예수금: ${quarter.vatIn.toLocaleString()}원`,
-        `- 부가세대급금: ${quarter.vatOut.toLocaleString()}원`,
+        `[선택한 ${isQuarter ? '분기' : '반기'}] ${selected.title}`,
+        `- 기간: ${selected.startDate} ~ ${selected.endDate}`,
+        `- ${selected.headline}`,
+        `- 매출세액(부가세예수금): ${selected.vatIn.toLocaleString()}원`,
+        `- 매입세액(부가세대급금): ${selected.vatOut.toLocaleString()}원`,
         '',
-        `[홈택스 신고 기준 누계] ${halfYear.title}`,
-        `- 기간: ${halfYear.startDate} ~ ${halfYear.endDate}`,
-        `- ${halfYear.headline}`,
-        `- 부가세예수금: ${halfYear.vatIn.toLocaleString()}원`,
-        `- 부가세대급금: ${halfYear.vatOut.toLocaleString()}원`
+        `[${isQuarter ? '반기' : '분기'} 비교] ${comparison.title}`,
+        `- 기간: ${comparison.startDate} ~ ${comparison.endDate}`,
+        `- ${comparison.headline}`,
+        `- 매출세액(부가세예수금): ${comparison.vatIn.toLocaleString()}원`,
+        `- 매입세액(부가세대급금): ${comparison.vatOut.toLocaleString()}원`,
+        '',
+        '전표를 기준으로 집계한 금액이며, 실제 신고·고지 세액과 다를 수 있습니다.'
     ].join('\n');
 } // End of buildVatSummaryModalText
 
 function openVatSummaryDetail() {
     showAlert('부가세 요약', buildVatSummaryModalText());
 } // End of openVatSummaryDetail
-
-function handleVatSummaryCardKeydown(event) {
-    if (!event) return;
-    if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        openVatSummaryDetail();
-    }
-} // End of handleVatSummaryCardKeydown
 
 function generateTransId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -6058,11 +6084,7 @@ async function refreshAccountingDashboardOnce() {
     document.getElementById("valExp").innerText = Number(summary.expense || 0).toLocaleString();
     document.getElementById("valAst").innerText = Number(summary.assets || 0).toLocaleString();
     document.getElementById("valCash").innerText = Number(summary.bank_balance || 0).toLocaleString();
-    document.getElementById("valVat").innerText = quarterVatSummary.headline;
-    const vatTitleEl = document.getElementById("vatCardTitle");
-    if (vatTitleEl) vatTitleEl.innerText = `🧾 이번 분기 부가세 (${quarterVatSummary.shortLabel})`;
-    const vatHintEl = document.getElementById("valVatHint");
-    if (vatHintEl) vatHintEl.innerText = `클릭하면 ${halfYearVatSummary.shortLabel} 누계를 확인합니다.`;
+    renderVatSummaryCard();
 } // End of refreshAccountingDashboardOnce
 
 async function refreshDashboard() {
