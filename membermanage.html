@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.157
-Change: Offer the server-authorized audit card across coop profiles, including site-member modules.
+Version: v1.0.158
+Change: Show missing member information after login and provide secure contact/account completion.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.157 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.158 | membermanage.html');</script>
+<script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -52,6 +53,13 @@ allowKakaoApp: true
 <link href="style.css" rel="stylesheet">
 
 <style>
+.member-information-notice { padding: 1.1rem 1.25rem; border: 1px solid var(--bs-warning-border-subtle, #e0ba63); border-radius: 1rem; background: var(--bs-warning-bg-subtle, #fff3cd); color: var(--bs-warning-text-emphasis, #664d03); word-break: keep-all; overflow-wrap: break-word; }
+.member-information-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; padding: 1.5rem; border: 1px solid var(--bs-border-color, #dee2e6); border-radius: 1rem; background: var(--bs-body-bg, white); color: var(--bs-body-color, #212529); word-break: keep-all; }
+.member-information-dialog::backdrop { background: rgba(0, 0, 0, .5); }
+[data-bs-theme="dark"] .member-information-notice, [data-theme="dark"] .member-information-notice { background: #302b1c; color: #ffe6a3; border-color: #786134; }
+[data-bs-theme="dark"] .member-information-dialog, [data-theme="dark"] .member-information-dialog { background: #1b2634; color: #edf3f9; border-color: #465365; }
+[data-bs-theme="dark"] .member-information-dialog :is(.text-secondary,.form-text), [data-theme="dark"] .member-information-dialog :is(.text-secondary,.form-text) { color: #c5d0dd !important; }
+[data-bs-theme="dark"] .member-information-dialog .btn-outline-secondary, [data-theme="dark"] .member-information-dialog .btn-outline-secondary { color: #d3dce6; border-color: #8796a8; }
 
 /* [필수 유틸리티] 화면 제어용 (최우선 적용) */
 .hidden { display: none !important; }
@@ -1603,6 +1611,30 @@ gtag('config', 'G-TR217L7JN9');
 </div>
 
 <div id="dashboardSection" class="hidden">
+
+<section id="memberInformationNotice" class="member-information-notice mb-4" hidden aria-labelledby="memberInformationText">
+<div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-3">
+<div>
+<div id="memberInformationText" class="fw-bold"></div>
+<p id="memberInformationAccountHelp" class="mb-0 mt-2" hidden></p>
+<p id="memberInformationOfficeHelp" class="mb-0 mt-2" hidden></p>
+</div>
+<button type="button" id="memberInformationButton" class="btn btn-warning fw-bold flex-shrink-0">정보 보완</button>
+</div>
+</section>
+
+<dialog id="memberInformationDialog" class="member-information-dialog" aria-labelledby="memberInformationDialogTitle">
+<form id="memberInformationForm">
+<h3 id="memberInformationDialogTitle" class="h5 fw-bold">정보 보완</h3>
+<p id="memberInformationDialogHelp" class="text-secondary"></p>
+<div id="memberInformationFields"></div>
+<p id="memberInformationFormStatus" class="small text-danger" role="status" aria-live="polite"></p>
+<div class="d-flex justify-content-end gap-2">
+<button type="button" id="memberInformationClose" class="btn btn-outline-secondary">닫기</button>
+<button type="submit" id="memberInformationSave" class="btn btn-success fw-bold">저장</button>
+</div>
+</form>
+</dialog>
 
 <div id="birthdayBanner" onclick="fireConfetti()">
 🎉 <span id="birthdayMsgName"></span>님, 생일을 진심으로 축하합니다! (클릭하면 폭죽이 터져요!) 🎂
@@ -4217,6 +4249,17 @@ return data ? data.account_number : null;
 } catch (e) { return null; }
 }
 // [수정] 대시보드 데이터 로드 (세션 스토리지 저장 기능 추가)
+let memberInformationPortal = null;
+function refreshMemberInformation(member) {
+if (!memberInformationPortal) {
+memberInformationPortal = MemberInformation.createPortal({
+client: _supabase, getMember: () => curMem, isSiteMember: isSiteMemberPortalProfile,
+onSaved: async () => { await reloadDashboard(); }
+});
+}
+return memberInformationPortal.refresh(member);
+}
+
 async function loadDashboardData(uuid, options = {}) {
 try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
@@ -4313,6 +4356,7 @@ await loadCoopRuntimeModules();
 
 // 5. 렌더링 호출
 renderDashboard(curMem, apps, ledger, donations, points, dividends, assets, myRoles, isOfficial, officialIds, historyMeta);
+void refreshMemberInformation(curMem);
 
 // [부가 기능 로드]
 if(curMem.rrn_display) checkBirthday(curMem.rrn_display, curMem.name);
@@ -7800,6 +7844,7 @@ showModal('수정되었습니다.');
 curMem.bank_name = bank || curMem.bank_name;
 curMem.account_number = accNo || curMem.account_number;
 curMem.account_holder = holder || curMem.account_holder;
+memberInformationPortal?.invalidate(curMem);
 toggleEditMode(false);
 reloadDashboard(); 
 }

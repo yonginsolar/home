@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.189
-Change: 2026-09-19 - Keep the contribution-certificate seal inside the printed border.
+Version: v1.0.190
+Change: Gender summary and tenant-scoped member information completion dashboard.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.189';
+window.ADMIN_MEMBER_VERSION = 'v1.0.190';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -14,6 +14,8 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.189';
   });
   </script>
 <meta charset="utf-8">
+<script src="../shared/member_information.js?v=20261002-1"></script>
+<script src="member_information_admin.js?v=20261002-1"></script>
 <script src="../shared/guardian-admin.js?v=20260915-2" defer></script>
 <script src="../shared/child_direct_admin.js?v=20260916-1" defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -540,6 +542,49 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
         </div>
 
      </div>
+    <div class="row g-3 mb-4">
+        <div class="col-md-6" id="dashboard-gender-panel">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <h6 class="fw-bold">👥 성별 현황</h6>
+                    <div class="d-flex flex-wrap gap-4 mt-3" id="dashboard-gender-summary">확인 중…</div>
+                    <div class="small text-muted mt-3">현재 정조합원 중 개인 조합원 기준</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <h6 class="fw-bold">📝 정보 보완 필요 인원</h6>
+                    <div class="d-flex justify-content-between align-items-center gap-3">
+                        <strong class="fs-2" id="dashboard-information-count">확인 중…</strong>
+                        <button type="button" class="btn btn-outline-primary" onclick="showMemberInformationList()">명단 확인·보완</button>
+                    </div>
+                    <div class="small text-muted mt-2" id="dashboard-information-breakdown"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <section id="member-information-list-panel" class="card border-0 shadow-sm p-4 mb-4" hidden aria-labelledby="member-information-list-title" style="word-break:keep-all;overflow-wrap:break-word;">
+        <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+            <h5 id="member-information-list-title" class="fw-bold mb-0">정보 보완 명단</h5>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('member-information-list-panel').hidden=true">접기</button>
+        </div>
+        <form class="row g-2 mb-3" onsubmit="event.preventDefault();loadMemberInformationList(true)">
+            <div class="col-md-4"><label class="visually-hidden" for="member-information-filter">누락 항목</label>
+                <select class="form-select" id="member-information-filter" onchange="loadMemberInformationList(true)">
+                    <option value="">전체 누락 항목</option><option value="account">계좌정보</option><option value="rrn">주민등록번호</option>
+                    <option value="phone">전화번호</option><option value="address">주소</option><option value="name">이름</option>
+                    <option value="business_number">사업자·고유번호</option><option value="representative_name">대표자명</option><option value="contact_name">담당자명</option>
+                </select>
+            </div>
+            <div class="col-md-6"><label class="visually-hidden" for="member-information-search">조합원 검색</label><input type="search" class="form-control" id="member-information-search" maxlength="100" placeholder="이름 또는 조합원번호"></div>
+            <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">검색</button></div>
+        </form>
+        <div id="member-information-list-status" class="small text-muted mb-2" role="status"></div>
+        <div class="table-responsive"><table class="table align-middle"><thead><tr><th>조합원</th><th>유형</th><th>보완할 정보</th><th>보완</th></tr></thead><tbody id="member-information-list-body"></tbody></table></div>
+        <button type="button" class="btn btn-outline-secondary align-self-center" id="member-information-more" hidden onclick="loadMemberInformationList(false)">더 불러오기</button>
+    </section>
     <div class="row g-3 mb-4">
         <div class="col-lg-6" id="dashboard-capital-chart-column">
             <div class="card border-0 shadow-sm h-100">
@@ -12805,6 +12850,7 @@ function buildFallbackDashboardLocationStats(statsLocation) {
 
 // [수정] 대시보드 데이터 로드 (통계 차트 연동)
 async function loadDashboard() {
+    void loadMemberInformationSummary();
 
     // 1. [변경] 정조합원 수(status='정상')만 집계
     const { count: fullMemberCount } = await scopeAdminTenant(_supabase
@@ -14294,6 +14340,8 @@ async function saveMemberBasic() {
             showLoading(false);
             myAlert('저장되었습니다.');
             toggleEditMode(false);
+            void loadMemberInformationSummary();
+            if (!document.getElementById('member-information-list-panel').hidden) void loadMemberInformationList(true);
 
             // 3. 리스트 갱신 (딜레이 확보)
             setTimeout(() => { fetchMembers(); }, 300);
