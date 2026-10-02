@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.191
-Change: Gender summary and tenant-scoped member information completion dashboard.
+Version: v1.0.192
+Change: Regional gender/age details and gender composition in age tooltips.
 -->
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.191';
+window.ADMIN_MEMBER_VERSION = 'v1.0.192';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -16,6 +16,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.191';
 <meta charset="utf-8">
 <script src="../shared/member_information.js?v=20261002-1"></script>
 <script src="member_information_admin.js?v=20261002-2"></script>
+<script src="member_demographics.js?v=20261002-1"></script>
 <script src="../shared/guardian-admin.js?v=20260915-2" defer></script>
 <script src="../shared/child_direct_admin.js?v=20260916-1" defer></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -51,7 +52,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.191';
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="/cert_generator.js?v=20260929_01"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 
 
 <style>
@@ -602,7 +603,9 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                     👥 조합원 구성 (용인)
                 </div>
                 <div class="card-body">
-                    <canvas id="chart-location" style="max-height: 250px;"></canvas>
+                    <div style="height:250px;position:relative;"><canvas id="chart-location"></canvas></div>
+                    <p id="member-demographic-status-yongin" class="small text-body-secondary mt-3 mb-2" style="word-break:keep-all;" role="status">구성을 확인하고 있습니다…</p>
+                    <select id="member-demographic-select-yongin" class="form-select form-select-sm" aria-label="용인 지역별 구성 보기" disabled><option value="">지역별 구성 보기</option></select>
                 </div>
             </div>
         </div>
@@ -612,11 +615,22 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                     👥 조합원 구성 (경기도)
                 </div>
                 <div class="card-body">
-                    <canvas id="chart-location-gyeonggi" style="max-height: 250px;"></canvas>
+                    <div style="height:250px;position:relative;"><canvas id="chart-location-gyeonggi"></canvas></div>
+                    <p id="member-demographic-status-gyeonggi" class="small text-body-secondary mt-3 mb-2" style="word-break:keep-all;" role="status">구성을 확인하고 있습니다…</p>
+                    <select id="member-demographic-select-gyeonggi" class="form-select form-select-sm" aria-label="경기도 지역별 구성 보기" disabled><option value="">지역별 구성 보기</option></select>
                 </div>
             </div>
         </div>
     </div>
+
+    <section id="member-demographic-detail" class="card border-0 shadow-sm p-4 mb-4" hidden aria-labelledby="member-demographic-title" style="word-break:keep-all;overflow-wrap:break-word;">
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-2"><h5 id="member-demographic-title" class="fw-bold mb-0"></h5><button type="button" class="btn btn-sm btn-outline-secondary" onclick="MemberDemographics.closeDetail()">구성 상세 닫기</button></div>
+        <p id="member-demographic-meta" class="text-body-secondary"></p>
+        <div id="member-demographic-gender" class="row row-cols-1 row-cols-sm-3 g-3 mb-4"></div>
+        <h6 class="fw-bold">연령대별 성별 구성</h6>
+        <div class="table-responsive"><table class="table align-middle"><thead><tr><th>연령대</th><th>인원·비율</th><th>남성</th><th>여성</th><th>미확인</th></tr></thead><tbody id="member-demographic-ages"></tbody></table></div>
+        <p class="small text-body-secondary mb-0">성별·연령은 개인 정조합원 기준입니다.</p>
+    </section>
 
     <div class="row g-3 mb-4">
         <div class="col-md-6">
@@ -625,7 +639,8 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
                     🎂 연령대 분포
                 </div>
                 <div class="card-body">
-                    <canvas id="chart-age"></canvas>
+                    <div style="height:280px;position:relative;"><canvas id="chart-age"></canvas></div>
+                    <p id="member-demographic-age-status" class="small text-body-secondary mt-3 mb-0" style="word-break:keep-all;" role="status">개인 조합원의 연령·성별 구성을 확인하고 있습니다…</p>
                 </div>
             </div>
         </div>
@@ -12708,7 +12723,8 @@ function formatDashboardChartCountPercentage(label, count, total) {
 }
 
 function buildDashboardDoughnutLegendLabels(chart) {
-    const defaultGenerator = Chart.defaults?.plugins?.legend?.labels?.generateLabels;
+    const defaultGenerator = Chart.overrides?.[chart.config.type]?.plugins?.legend?.labels?.generateLabels
+        || Chart.defaults?.plugins?.legend?.labels?.generateLabels;
     const labels = typeof defaultGenerator === 'function' ? defaultGenerator(chart) : [];
     const total = getDashboardChartDatasetTotal(chart);
     return labels.map(function (item) {
@@ -12758,8 +12774,7 @@ function formatDashboardAgePercentage(count, total) {
 }
 
 function buildDashboardAgeTooltipLabel(context) {
-    const total = getDashboardChartDatasetTotal(context.chart, context.datasetIndex || 0);
-    return formatDashboardAgePercentage(context.raw, total);
+    return MemberDemographics.ageTooltip(context);
 }
 
 const DASHBOARD_AGE_VALUE_LABEL_PLUGIN = Object.freeze({
@@ -12851,6 +12866,7 @@ function buildFallbackDashboardLocationStats(statsLocation) {
 // [수정] 대시보드 데이터 로드 (통계 차트 연동)
 async function loadDashboard() {
     void loadMemberInformationSummary();
+    void loadMemberDemographicCharts();
 
     // 1. [변경] 정조합원 수(status='정상')만 집계
     const { count: fullMemberCount } = await scopeAdminTenant(_supabase
@@ -12913,39 +12929,8 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
             }]
         }, `📉 총 감자액(반환): ${Number(stats.capital_reduction || 0).toLocaleString()}원`);
 
-        // (2) 지역 분포 차트 (전체 ERP에서만 사용)
-        if (String(g_adminMemberRuntime?.runtime_profile || '') !== 'site_member') {
-            const locationStats = await fetchDashboardLocationStats() || buildFallbackDashboardLocationStats(stats.location || {});
-            const yonginLocationChartData = buildDashboardLocationChartData(locationStats.yongin, DASHBOARD_YONGIN_LOCATION_LABEL_ORDER);
-            renderChart('location', 'chart-location', 'doughnut', {
-                labels: yonginLocationChartData.labels,
-                datasets: [{
-                    data: yonginLocationChartData.data,
-                    backgroundColor: yonginLocationChartData.colors
-                }]
-            });
-            const gyeonggiLocationChartData = buildDashboardLocationChartData(locationStats.gyeonggi, DASHBOARD_GYEONGGI_LOCATION_LABEL_ORDER);
-            renderChart('locationGyeonggi', 'chart-location-gyeonggi', 'doughnut', {
-                labels: gyeonggiLocationChartData.labels,
-                datasets: [{
-                    data: gyeonggiLocationChartData.data,
-                    backgroundColor: gyeonggiLocationChartData.colors
-                }]
-            });
-        }
-
-        // (3) 연령대 분포 (Bar Chart)
-        // 0대와 10대는 화면에서 10대로 합치고 숫자 순서로 정렬한다.
-        const ageChartData = buildDashboardAgeChartData(stats.age_group || {});
-
-        renderChart('age', 'chart-age', 'bar', {
-            labels: ageChartData.labels,
-            datasets: [{
-                label: '조합원 수',
-                data: ageChartData.data,
-                backgroundColor: '#ffc107' // Warning Color
-            }]
-        });
+        // Regional and age composition are read-only server aggregates, loaded
+        // independently so a failure in unrelated capital statistics cannot block them.
 
         // (4) 탈퇴 사유 (Horizontal Bar)
         const reasons = stats.exit_reasons || []; // [{reason: '...', count: 1}, ...]
@@ -12965,6 +12950,14 @@ const { count: newPendingCount } = await scopeAdminTenant(_supabase
 }
 
 // [보조] 차트 렌더링 헬퍼 함수
+function loadMemberDemographicCharts() {
+    return MemberDemographics.load({
+        client: _supabase, cacheKey: String(g_adminMemberRuntime?.coop_id || ''),
+        enabled: !isAdminMemberSiteProfile(), renderChart,
+        clearCharts() { for (const key of ['location','locationGyeonggi','age']) { g_charts[key]?.destroy(); delete g_charts[key]; } }
+    });
+}
+
 function renderChart(key, canvasId, type, data, titleText = null) {
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
@@ -13004,6 +12997,16 @@ function renderChart(key, canvasId, type, data, titleText = null) {
                 ticks: { precision: 0 }
             }
         };
+    }
+    if (type === 'doughnut' && (key === 'location' || key === 'locationGyeonggi')) {
+        options.onClick = function (event, elements, chart) {
+            if (elements.length) MemberDemographics.openRegion(key === 'location' ? 'yongin' : 'gyeonggi', chart.data.labels[elements[0].index]);
+        };
+        options.onHover = function (event, elements, chart) { chart.canvas.style.cursor = elements.length ? 'pointer' : 'default'; };
+    }
+    if (type === 'doughnut' || key === 'age') {
+        options.plugins.tooltip.titleFont = { size: 14 };
+        options.plugins.tooltip.bodyFont = { size: 14 };
     }
 
     // 제목이 있으면 추가 (예: 감자액 표시용)
@@ -14341,6 +14344,7 @@ async function saveMemberBasic() {
             myAlert('저장되었습니다.');
             toggleEditMode(false);
             void loadMemberInformationSummary();
+            void loadMemberDemographicCharts();
             if (!document.getElementById('member-information-list-panel').hidden) void loadMemberInformationList(true);
 
             // 3. 리스트 갱신 (딜레이 확보)
