@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.125 | Change: 2026-10-02 - Distinguish genuine same-day partial settlements from retries. -->
+<!-- Version: v1.0.126 | Change: 2026-10-02 - Confirm actual withholding-tax payment independently of its scheduled date. -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.125 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.126 | accounting.html');</script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261002-3">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -29,6 +29,7 @@
 </script>
   <script src="erp_runtime_guard.js?v=20260919-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
+  <script src="accounting_withholding_payment.js?v=1.0.0"></script>
 
   <style>
     body.erp-page-accounting { --erp-page-max-width: 1380px; }
@@ -1138,6 +1139,7 @@ const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
 let mData=[], cardData=[];
 let selectModal, reportModal, addModal, infoModal, alertModal, confirmModal, closingModal, yearModal, durunuriModal, approvalSplitReclassModal, cashbackModal, cardManageModal;
 let myInfo = null, confirmCallback = null;
+let approvalSyncBusy = false;
 let confirmReturnModalId = null, confirmAccepted = false;
 let closingTaxExpenseManual = false;
 let bankInterestTaxManual = false;
@@ -3939,9 +3941,7 @@ async function buildAccountingWithholdingTaxState(doc) {
         if (!(nationalAmount + localAmount > 0) || nationalAmount + localAmount !== amount) {
             return { error: new Error(`결재 금액 ${amount.toLocaleString()}원과 국세·지방세 합계 ${(nationalAmount + localAmount).toLocaleString()}원이 다릅니다.`), data: null };
         }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-            return { error: new Error('원천세 실제 납부일(예정)을 확인하지 못했습니다.'), data: null };
-        }
+        // due_date is an approval's planned date, not proof of payment or an earliest sync date.
         return {
             error: null,
             data: { paymentMonth, salaryMonth, filingMonth, dueDate, nationalAmount, localAmount, legacy: false }
@@ -4568,12 +4568,19 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                 continue;
             }
             const tax = withholdingState.data;
-            if (tax.dueDate && fallbackDate < tax.dueDate) {
+            const payment = options.withholdingPayments?.get(String(doc.id));
+            const paymentError = window.CoopWithholdingPayment.validate(payment, fallbackDate);
+            if (paymentError || payment?.signature !== window.CoopWithholdingPayment.signature(doc, tax)) {
                 blockedDocs.push({
                     id: doc?.id,
                     label,
-                    reason: `원천세 실제 납부일(예정) ${tax.dueDate}부터 국세·지방세 지급전표를 연동할 수 있습니다. 그 전에 납부했다면 전자결재의 실제 납부일을 먼저 확인하세요.`
+                    reason: paymentError || '납부 확인 후 결재 내용이 바뀌었습니다. 원천세 납부 확인을 다시 진행해 주세요.'
                 });
+                continue;
+            }
+            const periodError = await window.CoopWithholdingPayment.periodError(_supabase, myInfo?.coop_id, payment.date);
+            if (periodError) {
+                blockedDocs.push({ id: doc.id, label, reason: periodError });
                 continue;
             }
             plans.push({
@@ -4584,7 +4591,7 @@ async function buildApprovalSyncPlans(docs, fallbackDate, writer, options = {}) 
                 paymentMonth: tax.paymentMonth,
                 salaryMonth: tax.salaryMonth,
                 filingMonth: tax.filingMonth,
-                date: tax.dueDate || journalDate,
+                date: payment.date,
                 description: label,
                 transId,
                 project: '본사',
@@ -8215,11 +8222,14 @@ function confirmSync(type) {
 
     // (2) 전자결재 연동
     else if (type === 'approval') {
+        if (approvalSyncBusy) return;
+        approvalSyncBusy = true;
         (async () => {
+          try {
             const coopId = String(myInfo?.coop_id || '').trim();
             const { data: approvals, error: previewError } = await _supabase
                 .from('ref_approval')
-                .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot,accounting_synced_at')
+                .select('id,coop_id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot,accounting_synced_at')
                 .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                 .in('status', ['완료', '실물결재완료'])
                 .ilike('doc_type', '%지출%')
@@ -8230,6 +8240,7 @@ function confirmSync(type) {
             const { data: existing, error: existingError } = await _supabase
                 .from('ac_journal')
                 .select('Trans_ID')
+                .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                 .like('Trans_ID', 'APR-%');
             if (existingError) return showAlert("오류", "미리보기 전표 조회 실패: " + existingError.message);
             const existingSet = new Set(existing ? existing.map((entry) => entry.Trans_ID) : []);
@@ -8237,7 +8248,16 @@ function confirmSync(type) {
             const targetDocs = previewTargetState.targetDocs;
             if (targetDocs.length === 0) return showAlert("알림", "이미 모두 연동되었습니다.");
 
+            const withholdingCandidates = [];
+            for (const doc of targetDocs.filter(isWithholdingTaxApproval)) {
+                const state = await buildAccountingWithholdingTaxState(doc);
+                if (!state.error && state.data) withholdingCandidates.push({ doc, tax: state.data });
+            }
+            const withholdingPayments = await window.CoopWithholdingPayment.collect(withholdingCandidates, today);
+            if (withholdingPayments === null) return;
+
             const previewPlanResult = await buildApprovalSyncPlans(targetDocs, today, writer, {
+                withholdingPayments,
                 existingTransIds: existingSet,
                 existingSalaryPaymentMonths: previewTargetState.existingSalaryPaymentMonths
             });
@@ -8259,6 +8279,7 @@ function confirmSync(type) {
                 `- 두루누리 직원 자동 배분: ${previewPlanResult.durunuriEmployeeCount || 0}명 (지원금 입력 문서만)`,
                 `- 급여 발생전표: ${previewPlanResult.salaryAccrualCount || 0}건 (귀속월 말 비용·공제·회사부담분)`,
                 `- 급여 원천세 납부전표: ${previewPlanResult.withholdingTaxCount || 0}건 (차)예수금 / (대)보통예금, 국세·지방세 별도 표시`,
+                ...previewPlanResult.plans.filter(plan => plan.kind === 'withholding_tax').map(plan => `  · ${plan.description}: 실제 납부일 ${plan.date}`),
                 `- 지급전표(급여/일반지출): ${previewPlanResult.paymentCount}건 (차)미지급금 또는 비용/(대)보통예금`,
                 `- 재고 입고 매입전표: ${previewPlanResult.inventoryPurchaseCount || 0}건 · 취득원가 ${(previewPlanResult.inventoryPurchaseCostTotal || 0).toLocaleString()}원 · 공제 매입세액 ${(previewPlanResult.inventoryInputVatTotal || 0).toLocaleString()}원`,
                 `- 일반 지출 발생전표: ${previewPlanResult.accrualCount}건 (차)미분류비용/(대)미지급금`,
@@ -8269,10 +8290,10 @@ function confirmSync(type) {
                 previewPlanResult.blockedDocs.length > 0 ? `- 보류 사유\n${formatApprovalSyncBlockedDocs(previewPlanResult.blockedDocs)}` : ''
             ].filter(Boolean).join('\n');
 
-            showConfirm("전자결재 연동", previewMsg, async () => {
+            await window.CoopWithholdingPayment.review(previewMsg, async () => {
                 const { data: runApprovals, error: runFetchError } = await _supabase
                     .from('ref_approval')
-                    .select('id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot,accounting_synced_at')
+                    .select('id,coop_id,doc_type,status,amount,title,content,drafter_name,created_at,processed_at,approval_line,related_doc_id,expense_snapshot,salary_ledger_snapshot,accounting_synced_at')
                     .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                     .in('status', ['완료', '실물결재완료'])
                     .ilike('doc_type', '%지출%')
@@ -8283,6 +8304,7 @@ function confirmSync(type) {
                 const { data: runExisting, error: runExistingError } = await _supabase
                     .from('ac_journal')
                     .select('Trans_ID')
+                    .eq('coop_id', coopId || '00000000-0000-0000-0000-000000000000')
                     .like('Trans_ID', 'APR-%');
                 if (runExistingError) return showAlert("오류", "기존 전표 확인 실패: " + runExistingError.message);
                 const runExistingSet = new Set(runExisting ? runExisting.map((entry) => entry.Trans_ID) : []);
@@ -8303,6 +8325,7 @@ function confirmSync(type) {
                 }
 
                 const runPlanResult = await buildApprovalSyncPlans(runTargetDocs, today, writer, {
+                    withholdingPayments,
                     existingTransIds: runExistingSet,
                     existingSalaryPaymentMonths: runTargetState.existingSalaryPaymentMonths,
                     recalculateSalaryCompanyShare: true
@@ -8407,6 +8430,11 @@ function confirmSync(type) {
                 loadHistory();
                 loadApprovalUnclassifiedQueue();
             });
+          } catch (error) {
+            showAlert('연동 확인 실패', error?.message || '전자결재 연동 내용을 확인하지 못했습니다. 다시 시도해 주세요.');
+          } finally {
+            approvalSyncBusy = false;
+          }
         })();
     }
 // (3) 출자금 연동
