@@ -1,4 +1,4 @@
-/* v1.2.0 — client-specific onboarding; explicit consent and read-only tenant boundaries remain intact. */
+/* v1.2.1 — client-specific onboarding and correct single-scope consent status. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -49,7 +49,7 @@
     return result.data;
   }
   window.ErpAiConnections = {
-    version: '1.2.0',
+    version: '1.2.1',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
@@ -209,7 +209,7 @@
         document.getElementById('aiApprove').addEventListener('click', () => finish('approve'));
         document.getElementById('aiDeny').addEventListener('click', () => finish('deny'));
         document.getElementById('aiAuthControls').hidden = false;
-        status.textContent = d.scopes.length > 1 ? '' : '현재 계정에는 AI에 전달할 업무 분야의 조회 권한이 없습니다.';
+        status.textContent = d.scopes.some((s) => s !== 'help') ? '' : '현재 계정에는 AI에 전달할 업무 분야의 조회 권한이 없습니다.';
       } catch (e) { status.textContent = e.message; }
     }
   };
