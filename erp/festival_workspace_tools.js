@@ -1,4 +1,4 @@
-/* v1.0.0 — Festival settings, aggregate revenue and dated free activity usage. */
+/* v1.1.0 — VAT-exclusive revenue, VAT-inclusive collections and festival tools. */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -63,14 +63,16 @@
       $('dashboardStatus').textContent='매출을 집계하고 있습니다.';
       try {
         const result=await rpc('dashboard',data);if(revision!==dashboardRevision)return;
+        if(result.amount_basis!=='stored_supply_v1')throw new Error('매출 집계 기준을 확인하지 못했습니다. 잠시 후 다시 조회해 주세요.');
         const s=result.summary||{};$('dashboardCards').replaceChildren();
-        [['전체 매출',s.total_amount],['재료비 입금',s.material_amount],['체험비·추가 입금',Number(s.experience_amount||0)+Number(s.extra_amount||0)],['실제 받은 금액',s.received_amount]].forEach(([label,value])=>{
-          const card=node('article',undefined,'summary-card');card.append(node('h3',label),node('strong',money(value)));$('dashboardCards').append(card);
+        [['전체 매출',s.total_supply,'부가세 제외'],['재료비 매출',s.material_supply,'부가세 제외'],['체험비·추가 입금',Number(s.experience_supply||0)+Number(s.extra_supply||0),'부가세 제외'],['실제 수납액',s.received_amount,'부가세 포함']].forEach(([label,value,basis])=>{
+          const card=node('article',undefined,'summary-card');card.append(node('h3',label),node('strong',money(value)),node('p',basis,'small muted'));$('dashboardCards').append(card);
         });
+        $('dashboardVat').textContent=`집계된 매출의 부가세: ${money(s.vat_amount)}`;
         $('dashboardRows').replaceChildren();
-        (result.items||[]).forEach(item=>{const row=node('tr');[item.event_name,money(item.material_amount),money(Number(item.experience_amount)+Number(item.extra_amount)),money(item.refund_amount),money(item.total_amount),`유료 ${count(item.sold_quantity)} · 무료 ${count(item.free_quantity)}`].forEach(text=>row.append(node('td',text)));$('dashboardRows').append(row);});
+        (result.items||[]).forEach(item=>{const row=node('tr');[item.event_name,money(item.material_supply),money(Number(item.experience_supply)+Number(item.extra_supply)),money(item.refund_supply),money(item.total_supply),`유료 ${count(item.sold_quantity)} · 무료 ${count(item.free_quantity)}`].forEach(text=>row.append(node('td',text)));$('dashboardRows').append(row);});
         if(!(result.items||[]).length){const row=node('tr'),cell=node('td','이 기간에 기록된 매출이나 무료 체험이 없습니다.');cell.colSpan=6;row.append(cell);$('dashboardRows').append(row);}
-        $('dashboardStatus').textContent=Number(s.refund_amount)?`반환한 ${money(s.refund_amount)}을 매출 합계에서 뺐습니다.`:'';
+        $('dashboardStatus').textContent=Number(s.refund_amount)?`반환한 ${money(s.refund_amount)} 중 공급가액 ${money(s.refund_supply)}을 매출 합계에서 뺐습니다.`:'';
       }catch(e){if(revision===dashboardRevision)showError('dashboardStatus',e);}
     }
     async function reloadInventory(reset=false) {
