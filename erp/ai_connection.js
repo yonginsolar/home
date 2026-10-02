@@ -1,4 +1,4 @@
-/* v1.2.2 — guided onboarding with explicit consent and clear help-query status. */
+/* v1.2.3 — read-only journal-date checks; only administrators correct records. */
 (function () {
   'use strict';
   const LABELS = { help: '사용 안내', accounting: '회계', approvals: '전자결재', documents: '문서함', inventory: '재고', events: '행사 매출', member_stats: '조합원 통계' };
@@ -37,6 +37,7 @@
   const EXAMPLES = [
     { scope: 'help', title: '🧭 처음에는 이렇게 물어보세요', detail: '연결된 업무 분야와 사용할 수 있는 기능부터 확인합니다.', prompt: '내가 연결한 ERP에서 조회할 수 있는 업무 분야와 사용 방법을 알려주고, 지금 할 수 있는 질문을 몇 가지 추천해줘.' },
     { scope: 'accounting', title: '📊 회계 자료 정리', detail: '기간별 계정 합계와 계산 기준을 표로 확인합니다.', prompt: '지난달 회계 자료를 계정별 차변·대변 합계로 표로 정리해줘. 조회 기간과 집계 기준을 먼저 알려주고, 확인이 필요한 부분은 원자료와 구분해줘.' },
+    { scope: 'accounting', title: '🗓️ 통장과 장부 날짜 점검', detail: '제공한 통장 내역과 장부를 비교해 관리자가 확인할 후보를 정리합니다.', prompt: '내가 제공한 통장 거래 내역과 내 조합의 ERP 전표를 비교해 날짜·금액이 다른 후보를 찾아줘. 통장 내역을 아직 제공하지 않았다면 먼저 요청해줘. 같은 금액만으로 거래를 확정하지 말고 적요와 상대방 등 확인 가능한 근거를 함께 비교해줘. 비용 발생일과 지급일, 신용카드 사용일과 대금 출금일, 매출 공급일과 입금일은 서로 다를 수 있으니 정상적인 차이와 수정 후보를 구분해줘. 신고·결산 기간이 달라지는 후보도 표시해줘. 현재 날짜·제안 날짜·근거·확인할 사항을 정리하되 추측으로 날짜를 정하지 마. 수정은 권한 있는 관리자가 ERP 회계관리의 전표 날짜 수정에서 직접 진행하므로 자료를 변경하거나 저장하지 마. 연결된 다른 업무가 있는 전표는 해당 업무 화면을 함께 확인하도록 안내해줘.' },
     { scope: 'approvals', title: '📋 결재 내용 찾기', detail: '제목으로 결재를 찾아 상태와 금액을 확인합니다.', prompt: '올해 제목에 "지출결의"가 들어간 결재를 찾아 제목·상태·금액을 정리해줘. 첨부가 있는 문서는 ERP에서 첨부를 확인해야 한다고 표시해줘.' },
     { scope: 'documents', title: '📚 문서 내용 요약', detail: '열람할 수 있는 문서를 찾아 주요 내용을 정리합니다.', prompt: '올해 제목에 "이사회"가 들어간 문서를 찾아 내용을 요약하고, 결정된 사항과 확인할 사항을 나눠줘. 원문에 없는 내용은 추측하지 마.' },
     { scope: 'inventory', title: '📦 재고와 입고 대기 확인', detail: '검수 완료 재고와 아직 확인하지 않은 입고 수량을 구분합니다.', prompt: '오늘 기준 제품별 검수 완료 재고와 입고 검수 대기 수량을 나눠 정리해줘. 실제 수령한 제품을 입고 완료로 처리하려면 ERP의 어느 화면에서 무엇을 확인해야 하는지도 알려줘.' },
@@ -49,7 +50,7 @@
     return result.data;
   }
   window.ErpAiConnections = {
-    version: '1.2.2',
+    version: '1.2.3',
     mount(client, root) {
       if (!root || root.dataset.aiMounted) return;
       root.dataset.aiMounted = '1'; root.classList.add('ai-panel');
