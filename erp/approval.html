@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.74 | Change: 2026-10-03 - Block active foreign HTML namespaces and redact diagnostics. -->
+<!-- Version: v1.2.75 | Change: 2026-10-03 - Reuse the existing approval line for permission requests. -->
 <html lang="ko">
 <head>
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.74 | approval.html');</script>
+  <script>console.log('[Version] v1.2.75 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -34,8 +34,8 @@
   <script src="leave_ledger.js?v=20260928-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="approval_permission_request.js?v=1.0.0"></script>
-  <style>.permission-request-mode #btnSaveApprovalDraft { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; }</style>
+  <script src="approval_permission_request.js?v=1.1.0"></script>
+  <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
     body.erp-page-approval { --erp-page-max-width: 1180px; }
@@ -1296,13 +1296,10 @@
         </div>
       </div>
 
-      <section id="permissionRequestPanel" class="hidden border rounded p-3 mb-3">
-        <h3 class="h5 fw-bold mb-3">🔑 권한 부여 요청</h3>
-        <p class="text-muted">직원에게 맡길 업무를 선택하고 결재를 요청하세요. 내가 가진 권한 안에서만 요청할 수 있습니다.</p>
-        <div class="mb-3"><label for="permissionRequestTarget" class="form-label fw-bold">권한을 받을 직원</label><select id="permissionRequestTarget" class="form-select"></select></div>
-        <fieldset class="mb-3"><legend class="fs-6 fw-bold">추가할 업무 권한</legend><div id="permissionRequestRights"></div></fieldset>
-        <div class="mb-3"><label for="permissionRequestApprover" class="form-label fw-bold">결재권자</label><select id="permissionRequestApprover" class="form-select"></select></div>
-        <div class="mb-3"><label for="permissionRequestNote" class="form-label fw-bold">업무 내용 <span class="fw-normal text-muted">(선택)</span></label><textarea id="permissionRequestNote" class="form-control" rows="3" maxlength="500" placeholder="예: 후임 직원의 회계 장부 조회 업무"></textarea></div>
+      <section id="permissionRequestPanel" class="hidden mb-3">
+        <div class="mb-3"><label for="permissionRequestTarget" class="small text-muted fw-bold">권한 받을 사람</label><select id="permissionRequestTarget" class="form-select"></select></div>
+        <fieldset class="mb-3"><legend class="small text-muted fw-bold">추가할 업무 권한</legend><div id="permissionRequestRights" class="permission-request-rights"></div></fieldset>
+        <div class="mb-3"><label for="permissionRequestNote" class="small text-muted fw-bold">업무 내용 <span class="fw-normal">(선택)</span></label><textarea id="permissionRequestNote" class="form-control" rows="3" maxlength="500" placeholder="예: 후임 담당자의 회계 장부 조회 업무"></textarea></div>
         <p id="permissionRequestHelp" class="mb-0 text-primary" role="status"></p>
       </section>
 
@@ -1520,6 +1517,7 @@ let approvalEmployeeDirectoryErrorMessage = '';
 let modalInstance, alertModalInstance, confirmModalInstance, promptModalInstance;
 let modalType = '';
 let tempSelection = [], finalApprovers = [], finalRefs = [], historyCache = [], historySearchCache = [], pendingSubmissionCache = [], todoCache = [];
+CoopPermissionRequest.bindLine({ get: () => finalApprovers, set: (line) => { finalApprovers = line; }, render: () => renderLinePreview() });
 let approvalDraftModalInstance = null;
 let approvalDraftCache = [];
 let currentApprovalDraftId = null;
@@ -3669,7 +3667,7 @@ async function loadApprovalDraftFromServer(draftId) {
 } // End of loadApprovalDraftFromServer
 
 async function saveApprovalDraft() {
-    if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 부여 요청은 직원·업무 권한·결재권자를 선택한 뒤 상신해 주세요.');
+    if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 받을 사람·업무 권한을 선택하고 기존 결재선에서 결재자를 지정한 뒤 상신해 주세요.');
     if (!canPerform('approval.submit')) return showAlert('임시저장 권한이 없습니다.');
     const saveBtn = document.getElementById('btnSaveApprovalDraft');
     if (saveBtn) {
@@ -10581,8 +10579,8 @@ function getApprovalDocProcessContext(doc) {
     const approvalLine = Array.isArray(doc?.approval_line) ? doc.approval_line : [];
     const currentApproverEmpId = String(doc?.current_approver || '').trim();
     const actorEmpId = String(myInfo?.emp_id || '').trim();
-    if (doc?.doc_type === CoopPermissionRequest.TYPE && (currentApproverEmpId !== actorEmpId || !canPerform('permission.manage') || !canPerform('approval.process'))) {
-        return { canProcess: false, reason: '지정된 권한 관리자만 승인할 수 있습니다.', approvalLine, delegatedFrom: null, idx: -1 };
+    if (doc?.doc_type === CoopPermissionRequest.TYPE && (currentApproverEmpId !== actorEmpId || !canPerform('approval.process'))) {
+        return { canProcess: false, reason: '현재 순서의 지정된 결재자만 처리할 수 있습니다.', approvalLine, delegatedFrom: null, idx: -1 };
     }
     const delegatedFrom = (currentApproverEmpId && currentApproverEmpId !== actorEmpId)
         ? delegationIncomingMap.get(currentApproverEmpId)
@@ -12198,6 +12196,7 @@ function renderUserList() {
     let targets = (Array.isArray(allUsers) ? allUsers : []).filter(u => String(u?.emp_id) !== String(myInfo?.emp_id));
 
     if (modalType === 'approver') {
+        if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) targets = targets.filter(CoopPermissionRequest.allowsApprover);
         targets = targets.filter(u => {
             const safeEmpId = String(u?.emp_id || '').trim();
             if (selectedEmpIds.has(safeEmpId)) return true;
@@ -12270,6 +12269,7 @@ function confirmSelection() {
     }
     renderLinePreview();
     renderRefPreview();
+    if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) CoopPermissionRequest.lineChanged();
     modalInstance.hide();
 }
 
@@ -13161,8 +13161,8 @@ async function processApprovalDoc(docId, action, reason = '') {
     }
     const context = getApprovalDocProcessContext(doc);
     if (doc.doc_type === CoopPermissionRequest.TYPE) {
-        if (String(doc.current_approver || '') !== String(myInfo?.emp_id || '') || !canPerform('permission.manage') || !canPerform('approval.process')) {
-            showAlert('이 요청은 지정된 권한 관리자만 승인할 수 있습니다.'); return { ok: false };
+        if (String(doc.current_approver || '') !== String(myInfo?.emp_id || '') || !canPerform('approval.process')) {
+            showAlert('이 요청은 현재 순서의 지정된 결재자만 처리할 수 있습니다.'); return { ok: false };
         }
         try {
             const result = await CoopPermissionRequest.process(_supabase, doc, action, reason, createNotification);
