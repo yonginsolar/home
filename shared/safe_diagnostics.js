@@ -1,4 +1,4 @@
-/* v1.0.0: Static operation labels and non-personal error codes only. */
+/* v1.0.1: Static operation labels and non-personal error codes only. */
 (function (global) {
   'use strict';
   function summary(value) {
@@ -17,7 +17,9 @@
     var label = typeof operation === 'string' ? operation : 'operation failed';
     var safe = summary(value);
     try {
-      if (global.console && typeof global.console[level] === 'function') global.console[level](label, safe);
+      if (global.console && typeof global.console[level] === 'function') {
+        global.console[level](label + (Object.keys(safe).length ? ' ' + JSON.stringify(safe) : ''));
+      }
     } catch (_) { /* Logging is best effort. */ }
   }
   global.CoopSafeLog = Object.freeze({
