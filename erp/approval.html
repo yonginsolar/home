@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.71 | Change: 2026-10-03 - Select insurance direct debit or manual payment and payment dates. -->
+<!-- Version: v1.2.72 | Change: 2026-10-03 - Compact prepaid input and permission-specific expense choices. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.71 | approval.html');</script>
+  <script>console.log('[Version] v1.2.72 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -40,6 +40,11 @@
     .main-container { max-width: 1180px; width: min(100%, 1180px); margin: 0 auto; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); padding: 30px; }
     .hidden { display: none !important; }
     .approval-page-header { flex-wrap: wrap; gap: 12px; }
+    .approval-expense-execution { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; word-break: keep-all; }
+    .approval-expense-execution .form-check { margin-bottom: 0; }
+    .approval-expense-date { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .approval-expense-date .form-label { margin-bottom: 0; }
+    .approval-expense-date .form-control { width: 170px; max-width: 100%; }
     .approval-leave-mixed-row {
       border: 1px solid #e5e7eb;
       border-radius: 10px;
@@ -1097,14 +1102,14 @@
           </div>
         </div>
         <div class="col-12 hidden mb-3" id="divExpenseExecution">
-          <div class="border rounded p-3">
+          <div class="approval-expense-execution">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="expensePrepaid" onchange="syncApprovalExpenseDateUi()">
-              <label class="form-check-label fw-bold" for="expensePrepaid">선지출 — 이미 지출한 건입니다</label>
+              <label class="form-check-label fw-bold" for="expensePrepaid">선지출</label>
             </div>
-            <div id="expensePrepaidDateFields" class="hidden mt-3">
+            <div id="expensePrepaidDateFields" class="approval-expense-date hidden">
               <label class="form-label" for="expensePrepaidDate">실제 지출(이체)일</label>
-              <input type="date" class="form-control" id="expensePrepaidDate">
+              <input type="date" class="form-control form-control-sm" id="expensePrepaidDate">
             </div>
           </div>
         </div>
@@ -1518,6 +1523,7 @@ let approvalBootstrapReady = false;
 let approvalRichEditorLoaderPromise = null;
 let approvalHtml2PdfLoaderPromise = null;
 let permissionSet = new Set();
+let approvalExpenseServerAccess = { privileged: false, coopAdmin: false, dividend: false };
 let pendingPhysicalDocId = null;
 let pendingPhysicalRejectDocId = null;
 let pendingCancelDocId = null;
@@ -6290,6 +6296,11 @@ async function loadApprovalPayoutCandidates(showFailure = false) {
     const expenseSubType = String(document.getElementById('expenseSubType')?.value || '').trim();
     const kind = getApprovalPayoutKind(expenseSubType);
     if (!kind) return resetApprovalPayoutState();
+    if (!canUseApprovalExpenseSubType(expenseSubType)) {
+        resetApprovalPayoutState();
+        if (showFailure) showAlert('이 지급 내역을 불러올 권한이 없습니다.');
+        return;
+    }
     approvalPayoutState = { kind, rows: [], selectedIds: new Set(), loading: true };
     renderApprovalPayoutCandidates();
     const button = document.getElementById('btnReloadPayoutCandidates');
@@ -6533,10 +6544,13 @@ function syncApprovalExpenseDateUi() {
         && !(document.getElementById('expensePaymentMethod')?.value === 'card'
             && normalizeApprovalCardTypeValue(getSelectedApprovalCardRow()?.card_type) === 'credit_card');
     const checked = !!document.getElementById('expensePrepaid')?.checked;
-    document.getElementById('divExpenseExecution')?.classList.toggle('hidden', !general);
+    const section = document.getElementById('divExpenseExecution');
+    if (section) { section.classList.toggle('hidden', !general); section.hidden = !general; }
+    const prepaid = document.getElementById('expensePrepaid');
+    if (prepaid) prepaid.disabled = !general;
     document.getElementById('expensePrepaidDateFields')?.classList.toggle('hidden', !general || !checked);
     const date = document.getElementById('expensePrepaidDate');
-    if (date) { date.required = general && checked; date.max = formatApprovalKstDateISO(new Date()); }
+    if (date) { date.disabled = !general || !checked; date.required = general && checked; date.max = formatApprovalKstDateISO(new Date()); }
 } // End of syncApprovalExpenseDateUi
 
 function collectApprovalExecutionDate(paymentMethod, expenseSubType, adjustmentType) {
@@ -6552,6 +6566,7 @@ function collectApprovalExecutionDate(paymentMethod, expenseSubType, adjustmentT
 
 function buildApprovalExpenseSnapshot() {
     const expenseSubType = String(document.getElementById('expenseSubType')?.value || '일반').trim() || '일반';
+    if (!canUseApprovalExpenseSubType(expenseSubType)) throw new Error('선택한 지출 상세를 사용할 권한이 없습니다.');
     if (expenseSubType === '급여') return null;
     if (expenseSubType === '출자금반환' || expenseSubType === '배당금') {
         return {
@@ -7587,6 +7602,7 @@ async function fetchPreviewBlob(rawRef, expiresSec = 3600) {
 }
 
 async function fetchSalaryLedgerRowsByMonth(ym) {
+    if (!canUseSalaryExpense()) return { rows: [], error: new Error('급여대장을 불러올 권한이 없습니다.') };
     if (!ym) return { rows: [], error: null };
     if (!window.PayrollDurunuriModule || typeof window.PayrollDurunuriModule.syncApprovedSupportForMonth !== 'function') {
         return { rows: [], error: new Error('두루누리 자동 연동 모듈을 불러오지 못했습니다. 화면을 새로고침한 뒤 다시 시도하세요.') };
@@ -9288,6 +9304,7 @@ window.onload = async function() {
     approvalBootstrapReady = false;
 
     const permissionsPromise = loadPermissions(myInfo);
+    const expenseAccessPromise = loadApprovalExpenseServerAccess();
     const runtimeGatePromise = window.ErpRuntimeGuard.enforce(_supabase, {
         moduleKey: 'approval',
         moduleLabel: '전자결재',
@@ -9296,12 +9313,15 @@ window.onload = async function() {
     });
     const bootstrapSummaryPromise = fetchApprovalBootstrapSummary(cachedApprovalSummary);
 
-    const [loadedPermissionSet, approvalRuntimeGate, bootstrapSummary] = await Promise.all([
+    const [loadedPermissionSet, approvalRuntimeGate, bootstrapSummary, expenseServerAccess] = await Promise.all([
         permissionsPromise,
         runtimeGatePromise,
-        bootstrapSummaryPromise
+        bootstrapSummaryPromise,
+        expenseAccessPromise
     ]);
     permissionSet = loadedPermissionSet;
+    approvalExpenseServerAccess = expenseServerAccess;
+    syncApprovalExpenseSubTypeOptions();
     localStorage.setItem('erp_permissions', JSON.stringify(Array.from(permissionSet)));
     const hasApprovalView = permissionSet.size > 0
         ? permissionSet.has('approval.view')
@@ -9733,16 +9753,49 @@ function scheduleApprovalBackgroundRefresh(initialTab) {
     });
 } // End of scheduleApprovalBackgroundRefresh
 
-function canUseSalaryExpense() {
-    const role = String(myInfo?.role || '').toLowerCase();
-    if (role === 'admin' || role === 'admin_all' || role === 'admin_accounting') return true;
-    if (permissionSet && permissionSet.size > 0) {
-        return permissionSet.has('hr.admin')
-            || permissionSet.has('accounting.manage')
-            || permissionSet.has('salary.manage')
-            || permissionSet.has('accounting.admin');
-    }
+async function loadApprovalExpenseServerAccess() {
+    // These existing helpers return only booleans, never payroll or payout records.
+    const names = ['is_erp_privileged', 'is_admin', 'is_dividend_admin'];
+    const checks = await Promise.all(names.map(async (name) => {
+        try {
+            const { data, error } = await _supabase.rpc(name);
+            if (error) return false;
+            return data === true;
+        } catch (_) { return false; }
+    }));
+    return { privileged: checks[0], coopAdmin: checks[1], dividend: checks[2] };
+} // End of loadApprovalExpenseServerAccess
+
+function canUseApprovalExpenseSubType(value) {
+    const type = String(value || '일반').trim();
+    const permissions = permissionSet instanceof Set ? permissionSet : new Set();
+    const accounting = permissions.has('accounting.edit');
+    const member = permissions.has('member.admin');
+    const access = approvalExpenseServerAccess;
+    if (type === '일반') return true;
+    // hr_salary permits all-employee reading only to ERP privileged administrators.
+    // A payroll menu must not offer a partial self-only salary ledger to other staff.
+    if (type === '급여' || type === '원천세') return access.privileged && (permissions.has('hr.admin') || accounting);
+    if (type === '4대보험') return accounting;
+    if (type === '출자금반환') return member && (access.coopAdmin || (approvalRuntimeProfile === 'site_member' && access.privileged));
+    if (type === '배당금') return access.dividend && (member || accounting);
     return false;
+} // End of canUseApprovalExpenseSubType
+
+function syncApprovalExpenseSubTypeOptions() {
+    const select = document.getElementById('expenseSubType');
+    if (!select) return;
+    const current = String(select.value || '일반');
+    Array.from(select.options).forEach((option) => {
+        const allowed = canUseApprovalExpenseSubType(option.value);
+        option.hidden = !allowed;
+        option.disabled = !allowed;
+    });
+    if (!canUseApprovalExpenseSubType(current)) select.value = '일반';
+} // End of syncApprovalExpenseSubTypeOptions
+
+function canUseSalaryExpense() {
+    return canUseApprovalExpenseSubType('급여');
 } // End of canUseSalaryExpense
 
 async function loadApprovalCards() {
@@ -9909,8 +9962,9 @@ function handlePayrollMonthChange() {
 } // End of handlePayrollMonthChange
 
 function handleExpenseSubTypeChange() {
-    syncApprovalExpenseDateUi();
     const select = document.getElementById("expenseSubType");
+    syncApprovalExpenseSubTypeOptions();
+    syncApprovalExpenseDateUi();
     const mode = select?.value || '일반';
     if (mode !== '4대보험') {
         const insuranceDate = document.getElementById('insuranceDueDate');
@@ -11107,12 +11161,9 @@ function handleCategoryChange() {
         divRel.classList.remove("hidden");
         divExpenseAdjustment.classList.remove("hidden");
         divProposalSubject.classList.remove("hidden");
-        if (canUseSalaryExpense()) {
-            divSalaryExpense.classList.remove("hidden");
-            handleExpenseSubTypeChange();
-        } else {
-            resetSalaryExpenseUi();
-        }
+        syncApprovalExpenseSubTypeOptions();
+        divSalaryExpense.classList.remove("hidden");
+        handleExpenseSubTypeChange();
         handleExpenseAdjustmentModeChange({ keepRelatedDoc: !typeChanged });
         const currentDesc = String(getApprovalEditorContent() || '').trim();
         if (
@@ -11189,6 +11240,7 @@ function handleCategoryChange() {
     setApprovalEditorForCategory(type);
     updateJeongyeolUi();
     approvalLastCategory = type;
+    syncApprovalExpenseDateUi();
 }
 
 function openAppDescPreview() {
@@ -11248,6 +11300,9 @@ function buildApprovalSubmitPreviewData() {
     }
 
     const expenseSubType = String(document.getElementById("expenseSubType")?.value || '일반').trim();
+    if (mainType === '지출결의' && !canUseApprovalExpenseSubType(expenseSubType)) {
+        throw new Error('선택한 지출 상세를 사용할 권한이 없습니다.');
+    }
     const expenseAdjustmentMode = getApprovalExpenseAdjustmentMode();
     const payrollMonth = String(document.getElementById("payrollMonth")?.value || '').trim();
     let subType = mainType;
@@ -12486,6 +12541,9 @@ async function handleDraftSubmit(e) {
         return showAlert('현재 조합에서 사용하지 않는 문서유형입니다. 설정에서 사용 여부를 확인하세요.');
     }
     const expenseSubType = document.getElementById("expenseSubType")?.value || '일반';
+    if (mainType === '지출결의' && !canUseApprovalExpenseSubType(expenseSubType)) {
+        return showAlert('선택한 지출 상세를 사용할 권한이 없습니다.');
+    }
     const expenseAdjustmentMode = getApprovalExpenseAdjustmentMode();
     const payrollMonth = document.getElementById("payrollMonth")?.value || '';
     let subType = mainType;
