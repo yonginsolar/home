@@ -1,9 +1,10 @@
-/* v1.1.0 - Standard approval line; selected rights apply after final approval. */
+/* v1.2.0 - Use the common title, editor, references and attachment workflow. */
 (function (root) {
     'use strict';
     const TYPE = '권한부여요청';
     let context = { enabled: false }, busy = false, requestKey = '', requestPayload = '';
     let lineUi = { get: () => [], set: () => {}, render: () => {} };
+    let documentUi = null, preparedDocument = null;
     const el = (id) => document.getElementById(id);
     const keys = () => Array.from(document.querySelectorAll('[data-request-permission]:checked')).map(x => x.value).sort();
     const personLabel = (person) => [person.name || '대상자', person.position || ''].filter(Boolean).join(' · ');
@@ -75,10 +76,9 @@
     function setCategory(type) {
         const active = type === TYPE;
         document.body.classList.toggle('permission-request-mode', active);
-        ['permissionRequestProxy', 'permissionRequestRef', 'permissionRequestBody', 'permissionRequestFiles']
-            .forEach(id => el(id)?.classList.toggle('hidden', active));
+        el('permissionRequestProxy')?.classList.toggle('hidden', active);
         el('permissionRequestPanel')?.classList.toggle('hidden', !active);
-        if (active) { el('divAmount')?.classList.add('hidden'); el('divProposalSubject')?.classList.add('hidden'); }
+        if (active) { el('divAmount')?.classList.add('hidden'); el('divProposalSubject')?.classList.remove('hidden'); }
         if (active && !el('permissionRequestRights')?.children.length) render();
         if (active) syncLine();
     }
@@ -94,18 +94,21 @@
         if (selected.includes('accounting.edit') && !selected.includes('accounting.view') && !(target.permissions || []).includes('accounting.view')) throw new Error('회계 등록·수정에는 회계 조회도 함께 선택해 주세요.');
         if (!line.length || line.some(person => !person) || new Set(line.map(person => person.emp_id)).size !== line.length) throw new Error('아래 결재선에서 결재자를 선택하세요.');
         if (!approver || approver.can_grant !== true || !selected.every(key => (approver.permissions || []).includes(key))) throw new Error('마지막 결재자는 선택한 업무 권한을 승인할 수 있는 권한 관리자여야 합니다.');
-        const note = String(el('permissionRequestNote').value || '').trim();
-        if (note.length > 500) throw new Error('업무 내용은 500자 이내로 입력하세요.');
-        return { target, selected, approver, line, note };
+        const document = documentUi?.collect();
+        if (!document || !document.title.trim()) throw new Error('제목을 입력하세요.');
+        if (document.title.length > 200) throw new Error('제목은 200자 이내로 입력하세요.');
+        if (!document.content.trim()) throw new Error('내용을 입력하세요.');
+        return { target, selected, approver, line, document };
     }
     function preview(drafter) {
         const data = collect();
         const labels = data.selected.map(key => context.permissions.find(row => row.key === key).label);
-        return { doc_type: TYPE, title: '권한 부여 요청 · ' + data.target.name, drafter_name: drafter?.emp_name || '', amount: 0,
+        const esc = value => String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+        return { doc_type: TYPE, title: data.document.title, drafter_name: drafter?.emp_name || '', amount: 0,
             approval_line: data.line.map(person => ({ emp_id: person.emp_id, name: person.name, position: person.position, status: '대기' })),
-            content: '권한 받을 사람: ' + data.target.name + '\n요청 권한:\n' + labels.map(label => '• ' + label).join('\n')
-                + (data.note ? '\n\n업무 내용: ' + data.note : '') + '\n\n최종 승인 후 선택한 업무 권한만 적용됩니다.',
-            ref_line: [], file_links: [] };
+            content: '<section><p><strong>권한 받을 사람:</strong> ' + esc(data.target.name) + '</p><p><strong>요청 권한</strong></p><ul>'
+                + labels.map(label => '<li>' + esc(label) + '</li>').join('') + '</ul></section>' + data.document.content,
+            ref_line: data.document.references, allowHtmlContent: true };
     }
     function errorMessage(error) {
         const message = String(error?.message || '');
@@ -118,23 +121,30 @@
     }
     async function submit(client, notify, alert, refreshed) {
         if (busy) return;
-        let payload;
+        let payload, document;
         try {
             const data = collect();
-            payload = { p_target_emp_id: data.target.emp_id, p_permission_keys: data.selected, p_approver_emp_ids: data.line.map(person => person.emp_id), p_note: data.note };
+            document = data.document;
+            payload = { p_target_emp_id: data.target.emp_id, p_permission_keys: data.selected, p_approver_emp_ids: data.line.map(person => person.emp_id),
+                p_title: document.title, p_content: document.content, p_ref_emp_ids: document.references.map(person => person.emp_id) };
         } catch (error) { alert(error.message); return; }
-        const signature = JSON.stringify(payload);
+        const signature = JSON.stringify([payload, document.attachmentSignature]);
+        if (preparedDocument && signature !== requestPayload) { alert('이전 상신 결과를 확인 중입니다. 같은 입력으로 다시 상신해 결과를 확인한 뒤 새 문서를 작성해 주세요.'); return; }
         if (!requestKey || signature !== requestPayload) { requestKey = crypto.randomUUID(); requestPayload = signature; }
         busy = true; const button = el('btnSubmit'); button.disabled = true; button.textContent = '상신 중...';
         try {
-            const { data, error } = await client.rpc('erp_submit_permission_request_line', { ...payload, p_request_key: requestKey });
+            if (!preparedDocument) preparedDocument = await documentUi.prepare();
+            const { data, error } = await client.rpc('erp_submit_permission_request_document', { ...payload, p_file_links: preparedDocument.fileRefs, p_request_key: requestKey });
+            if (error && /^[245P]/.test(String(error.code || ''))) {
+                await documentUi.rollback(preparedDocument); preparedDocument = null;
+            }
             if (error || !data?.id) throw error || new Error('NO_REQUEST');
             let notificationFailed = false;
             if (!data.replayed) {
                 try { const result = await notify(data.current_approver || data.approver_emp_id, '결재 요청', '업무 권한 부여 요청이 상신되었습니다.', 'approval.html?doc=' + data.id, { doc_id: data.id }); notificationFailed = !result?.ok; }
                 catch (_) { notificationFailed = true; }
             }
-            requestKey = ''; requestPayload = ''; el('permissionRequestNote').value = ''; lineUi.set([]); lineUi.render();
+            requestKey = ''; requestPayload = ''; preparedDocument = null; documentUi.reset();
             await load(client); render();
             try { await refreshed(); } catch (_) { /* Request is already committed; never retry a successful write. */ }
             alert('권한 부여 요청을 상신했습니다. 최종 승인 전에는 권한이 바뀌지 않습니다.' + (notificationFailed ? '\n알림 전송을 확인하지 못했습니다. 결재함에서 요청을 확인해 주세요.' : ''));
@@ -153,5 +163,5 @@
         return { ok: true, notice: (pending ? '승인했습니다. 다음 결재자에게 전달되며, 아직 업무 권한은 바뀌지 않습니다.' : action === '승인' ? '승인된 업무 권한을 적용했습니다.' : '반려되었습니다.') + (notificationFailed ? '\n결재 처리는 완료했으나 알림 전송을 확인하지 못했습니다.' : '') };
     }
     root.CoopPermissionRequest = { TYPE, load, render, setCategory, preview, submit, process, allowsApprover, lineChanged: update,
-        bindLine: (adapter) => { lineUi = adapter; }, enabled: () => context.enabled === true };
+        bindLine: (adapter) => { lineUi = adapter; }, bindDocument: (adapter) => { documentUi = adapter; }, enabled: () => context.enabled === true };
 })(window);

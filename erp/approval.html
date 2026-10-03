@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.75 | Change: 2026-10-03 - Reuse the existing approval line for permission requests. -->
+<!-- Version: v1.2.76 | Change: 2026-10-03 - Common request form, attendance summaries and meeting call notices. -->
 <html lang="ko">
 <head>
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.75 | approval.html');</script>
+  <script>console.log('[Version] v1.2.76 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -34,7 +34,8 @@
   <script src="leave_ledger.js?v=20260928-1"></script>
   <script src="approval_rich_editor.js?v=20260416-5"></script>
   <script src="insurance_payment.js?v=1.0.0"></script>
-  <script src="approval_permission_request.js?v=1.1.0"></script>
+  <script src="approval_permission_request.js?v=1.2.0"></script>
+  <script src="approval_meeting_notice.js?v=1.0.0"></script>
   <style>.permission-request-mode #btnSaveApprovalDraft, .permission-request-mode #divProxyTarget { display:none; } #permissionRequestPanel { word-break:keep-all; overflow-wrap:break-word; } .permission-request-rights { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; } @media(max-width:575.98px) { .permission-request-rights { grid-template-columns:1fr; } }</style>
 
   <style>
@@ -1116,6 +1117,18 @@
             </div>
           </div>
         </div>
+        <div class="col-12 hidden mb-3" id="divMeetingNotice">
+          <label for="noticeMeetingKind" class="small text-muted fw-bold">공문 종류</label>
+          <select class="form-select mb-2" id="noticeMeetingKind" onchange="changeApprovalMeetingNoticeKind()">
+            <option value="">일반 공문</option><option value="BOARD">이사회 소집</option><option value="GENERAL_ASSEMBLY">총회 소집</option>
+          </select>
+          <div id="noticeMeetingFields" class="hidden">
+            <div class="d-flex gap-2 mb-2"><select class="form-select" id="noticeMeetingSelect"><option value="">회의꾸러미를 선택하세요</option></select>
+              <button type="button" class="btn btn-outline-secondary text-nowrap" id="noticeMeetingLoad" onclick="changeApprovalMeetingNoticeKind()">목록 갱신</button></div>
+            <button type="button" class="btn btn-outline-primary" id="noticeMeetingApply" onclick="applyApprovalMeetingNotice()">회의 내용 불러오기</button>
+            <p id="noticeMeetingStatus" class="small text-muted mt-2 mb-0" role="status"></p>
+          </div>
+        </div>
         <div class="col-12 hidden mb-3" id="divNoticeReceiver">
           <label class="small text-muted fw-bold">수신</label>
           <input type="text" class="form-control" id="noticeReceiver" placeholder="예: 조합원 전체">
@@ -1299,7 +1312,6 @@
       <section id="permissionRequestPanel" class="hidden mb-3">
         <div class="mb-3"><label for="permissionRequestTarget" class="small text-muted fw-bold">권한 받을 사람</label><select id="permissionRequestTarget" class="form-select"></select></div>
         <fieldset class="mb-3"><legend class="small text-muted fw-bold">추가할 업무 권한</legend><div id="permissionRequestRights" class="permission-request-rights"></div></fieldset>
-        <div class="mb-3"><label for="permissionRequestNote" class="small text-muted fw-bold">업무 내용 <span class="fw-normal">(선택)</span></label><textarea id="permissionRequestNote" class="form-control" rows="3" maxlength="500" placeholder="예: 후임 담당자의 회계 장부 조회 업무"></textarea></div>
         <p id="permissionRequestHelp" class="mb-0 text-primary" role="status"></p>
       </section>
 
@@ -1518,6 +1530,22 @@ let modalInstance, alertModalInstance, confirmModalInstance, promptModalInstance
 let modalType = '';
 let tempSelection = [], finalApprovers = [], finalRefs = [], historyCache = [], historySearchCache = [], pendingSubmissionCache = [], todoCache = [];
 CoopPermissionRequest.bindLine({ get: () => finalApprovers, set: (line) => { finalApprovers = line; }, render: () => renderLinePreview() });
+CoopPermissionRequest.bindDocument({
+    collect: () => {
+        const validation = validateAttachments(document.getElementById('attachFile').files);
+        if (!validation.ok) throw new Error(validation.message);
+        return {
+            title: String(document.getElementById('proposalSubject').value || '').trim(),
+            content: renderApprovalContent(getApprovalEditorContent(), true),
+            references: finalRefs.map(person => ({ emp_id: person.emp_id, name: person.emp_name })),
+            attachmentSignature: getApprovalOrderedAttachmentDescriptors().map(item => item.kind === 'local'
+                ? [item.id, item.file.name, item.file.size, item.file.lastModified] : [item.item.rawRef])
+        };
+    },
+    prepare: () => prepareApprovalSubmitAttachments(`approval_requests/${getApprovalScopedCoopId()}/${myAuthUserId}/`),
+    rollback: prepared => deleteDraftAttachmentObjects(prepared.copiedObjects),
+    reset: () => resetApprovalComposerForm()
+});
 let approvalDraftModalInstance = null;
 let approvalDraftCache = [];
 let currentApprovalDraftId = null;
@@ -3230,6 +3258,34 @@ async function copyApprovalDraftAttachmentsForSubmit(items) {
     }
 } // End of copyApprovalDraftAttachmentsForSubmit
 
+async function prepareApprovalSubmitAttachments(prefix = '') {
+    const fileRefs = [], copiedObjects = [];
+    try {
+        for (const descriptor of getApprovalOrderedAttachmentDescriptors()) {
+            if (descriptor.kind === 'saved' && !prefix) {
+                const copied = await copyApprovalDraftAttachmentsForSubmit([descriptor.item]);
+                fileRefs.push(...copied.fileRefs); copiedObjects.push(...copied.copiedObjects); continue;
+            }
+            const displayName = descriptor.kind === 'local' ? descriptor.file.name : descriptor.item.displayName || 'attachment.pdf';
+            const finalPath = `${prefix}${crypto.randomUUID()}_${sanitizeApprovalDraftFileName(displayName)}`;
+            let result;
+            if (descriptor.kind === 'local') result = await _supabase.storage.from('attachments').upload(finalPath, descriptor.file);
+            else {
+                const ref = parseStorageObjectRef(descriptor.item.rawRef);
+                if (!ref || ref.bucket !== 'attachments') throw new Error('첨부파일을 다시 선택하세요.');
+                result = await _supabase.storage.from('attachments').copy(ref.path, finalPath);
+            }
+            if (result.error) throw result.error;
+            const rawRef = `attachments/${finalPath}?display_name=${encodeURIComponent(displayName)}`;
+            fileRefs.push(rawRef); copiedObjects.push({ rawRef });
+        }
+        return { fileRefs, copiedObjects };
+    } catch (error) {
+        try { await deleteDraftAttachmentObjects(copiedObjects); } catch (_) { /* Failed uploads are never submitted. */ }
+        throw error;
+    }
+}
+
 function resetApprovalComposerForm(options = {}) {
     const keepDraftIdentity = options.keepDraftIdentity === true;
     const skipAutoRefresh = options.skipAutoRefresh === true;
@@ -4583,7 +4639,7 @@ function isGeneralProposalDocType(docType) {
 function isApprovalHtmlEditorType(docType) {
     const safeDocType = String(docType || '').trim();
     if (!safeDocType) return false;
-    if (safeDocType === CoopPermissionRequest.TYPE) return false;
+    if (safeDocType === CoopPermissionRequest.TYPE) return true;
     const mainDocType = mapApprovalDocTypeToMainCategory(safeDocType);
     if (isApprovalBusinessTripCancelCategory(mainDocType)) return true;
     return WORKFORCE_LITE_APPROVAL_DOC_GROUPS.some((group) => (
@@ -4680,11 +4736,11 @@ function getApprovalSubjectConfig(docType) {
             return {
                 label: '출장 제목',
                 placeholder: '예: 2026년 3월 서울 협동조합 간담회 출장',
-                defaultBody: '1. 출장 목적:\n2. 상세 일정:\n3. 방문 기관/담당자:\n4. 비고:\n\n위와 같이 출장을 신청하오니 승인하여 주시기 바랍니다.',
+                defaultBody: '1. 출장 목적:\n2. 현장에서 수행할 업무 / 방문 담당자:\n3. 추가 전달사항:\n\n아래와 같이 출장을 신청하오니 승인하여 주시기 바랍니다.',
                 amountLabel: '금액 (원)',
                 amountPlaceholder: '0',
                 showAmount: false,
-                htmlHelp: '출장신청서는 제목과 본문 외에 출장 기간, 오전/오후/종일 구분, 장소를 입력하면 승인 완료 후 전사 일정에 자동 표시됩니다.'
+                htmlHelp: '위에서 입력한 출장 기간·구분·장소는 상신 본문에 자동으로 들어갑니다. 아래에는 출장 목적과 수행할 업무, 추가 전달사항만 적으세요.'
             };
         case '구매요청':
             return {
@@ -4775,10 +4831,14 @@ function buildApprovalOvertimeDefaultBody(docType) {
         '<ol>',
         '<li>업무 내용: </li>',
         '<li>수행 사유: </li>',
-        '<li>완료 예정 업무: </li>',
         '</ol>',
         '<p>위와 같이 시간외 근로를 신청하오니 승인하여 주시기 바랍니다.</p>'
     ].join('');
+}
+
+function buildApprovalAttendanceAppendText(type, snapshot) {
+    if (type === '출장신청') return `[출장 일정]\n- 기간: ${formatApprovalBusinessTripPeriodText(snapshot)}\n- 장소: ${snapshot.location}`;
+    return `[시간외 근로 정보]\n- 근무일자: ${snapshot.work_date}\n- 근무 구분: ${snapshot.work_day_kind === 'holiday' ? '휴일 근로' : '시간외 근로'}\n- 근무시간: ${snapshot.work_day_kind === 'holiday' ? '1일 전체 근무' : `${snapshot.start_time} ~ ${snapshot.end_time}`}\n- 휴게시간: ${snapshot.break_minutes}분\n- 인정시간: ${snapshot.total_hours}시간\n- 처리 방식: ${snapshot.compensation_mode === 'comp_leave' ? '보상휴가 적립' : '수당 지급'}`;
 }
 
 function isApprovalAutoGeneratedTemplateContent(content) {
@@ -4794,7 +4854,8 @@ function isApprovalAutoGeneratedTemplateContent(content) {
         if (value.includes('[급여대장 연동]')) return true;
         if (value.includes('급여 지급을 위해 지출결의를 상신합니다.')) return true;
         if (value.includes('4대보험 납부를 위해 지출결의를 상신합니다.')) return true;
-        if (value.includes('시간외 근로 신청') && value.includes('업무 내용:') && value.includes('수행 사유:') && value.includes('완료 예정 업무:')) return true;
+        if (value === '시간외 근로 신청 업무 내용: 수행 사유: 완료 예정 업무: 위와 같이 시간외 근로를 신청하오니 승인하여 주시기 바랍니다.') return true;
+        if (value === '1. 출장 목적: 2. 상세 일정: 3. 방문 기관/담당자: 4. 비고: 위와 같이 출장을 신청하오니 승인하여 주시기 바랍니다.') return true;
     }
     return false;
 }
@@ -11030,6 +11091,7 @@ function handleCategoryChange() {
     }
     syncApprovalBusinessTripModeUi(resolveApprovalDraftMainType(rawType));
     let type = resolveApprovalDraftMainType(rawType);
+    document.getElementById('divMeetingNotice').classList.toggle('hidden', type !== '공문' || !canPerform('minutes.manage'));
     const previousType = String(approvalLastCategory || '').trim();
     const typeChanged = previousType !== String(type || '').trim();
     const amtLabel = document.getElementById("amountLabel");
@@ -11136,7 +11198,7 @@ function handleCategoryChange() {
         divAmt.classList.add("hidden");
         btnAppDescPreview.classList.remove("hidden");
         appDescHtmlHelp.classList.remove("hidden");
-        appDescHtmlHelp.textContent = '시간외 근로 신청서는 일반 본문처럼 작성할 수 있습니다. 평일 공휴일은 근무 구분에서 휴일 근로로 바꿔 기록하고, 휴게시간은 법정 기준에 따라 자동 반영합니다.';
+        appDescHtmlHelp.textContent = '근무일자·시간·처리 방식은 상신 본문에 자동으로 들어갑니다. 아래에는 수행할 업무와 시간외 근로가 필요한 사유만 적으세요.';
         const workDateEl = document.getElementById('overtimeWorkDate');
         const dayTypeEl = document.getElementById('overtimeDayType');
         const startTimeEl = document.getElementById('overtimeStartTime');
@@ -11218,6 +11280,14 @@ function handleCategoryChange() {
             noticeApprovalMemoInput.value = "아래 내용으로 공문 발송 결재를 요청드립니다.";
         }
     }
+    else if (type === CoopPermissionRequest.TYPE) {
+        divProposalSubject.classList.remove('hidden');
+        divAmt.classList.add('hidden');
+        proposalSubjectLabel.textContent = '제목';
+        appDescHtmlHelp.textContent = '권한을 맡길 업무와 필요한 내용을 작성하세요. 선택한 대상자와 업무 권한은 상신 본문에 함께 표시됩니다.';
+        const currentDesc = String(getApprovalEditorContent() || '').trim();
+        if (!currentDesc || isApprovalAutoGeneratedTemplateContent(currentDesc)) setApprovalEditorContent('<p>아래와 같이 업무 권한 부여를 요청하오니 승인하여 주시기 바랍니다.</p>');
+    }
     else if (type === '일반품의') {
         void warmApprovalRichEditorAssets();
         divProposalSubject.classList.remove("hidden");
@@ -11272,6 +11342,32 @@ function handleCategoryChange() {
     CoopPermissionRequest.setCategory(type);
 }
 
+async function changeApprovalMeetingNoticeKind() {
+    const kind = document.getElementById('noticeMeetingKind').value;
+    document.getElementById('noticeMeetingFields').classList.toggle('hidden', !kind);
+    await CoopMeetingNotice.load(_supabase, getApprovalScopedCoopId(), kind);
+}
+
+async function applyApprovalMeetingNotice() {
+    const button = document.getElementById('noticeMeetingApply');
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+        const kind = document.getElementById('noticeMeetingKind').value;
+        const meetingId = document.getElementById('noticeMeetingSelect').value;
+        const coopId = getApprovalScopedCoopId();
+        const data = await CoopMeetingNotice.read(_supabase, coopId, meetingId, kind);
+        if (kind !== document.getElementById('noticeMeetingKind').value || meetingId !== document.getElementById('noticeMeetingSelect').value || coopId !== getApprovalScopedCoopId()) return;
+        if (String(getApprovalEditorContent() || '').trim() && !await showConfirm('작성 중인 본문을 선택한 회의의 소집 공문으로 바꿀까요?')) return;
+        document.getElementById('noticeSubject').value = data.title;
+        document.getElementById('noticeReceiver').value = data.receiver;
+        markApprovalTitleInputDirty('notice');
+        setApprovalEditorContent(data.content);
+        document.getElementById('noticeMeetingStatus').textContent = '일시·장소·안건 제목을 불러왔습니다. 필요한 내용을 편집한 뒤 결재선과 첨부를 확인하세요.';
+    } catch (error) { showAlert(error.message); }
+    finally { button.disabled = false; }
+}
+
 function openAppDescPreview() {
     const type = getCurrentDraftMainType();
     const rawContent = getApprovalEditorContent();
@@ -11293,7 +11389,6 @@ function openAppDescPreview() {
 }
 
 async function buildApprovalSubmitPreviewAttachments(previewDoc) {
-    if (previewDoc?.doc_type === CoopPermissionRequest.TYPE) return [];
     const attachments = [];
     getApprovalOrderedAttachmentDescriptors().forEach((descriptor) => {
         if (descriptor.kind === 'local') {
@@ -11408,6 +11503,7 @@ function buildApprovalSubmitPreviewData() {
         if (!(attendanceSnapshotPayload.total_hours > 0)) throw new Error('인정 시간을 확인하세요.');
         finalAmt = attendanceSnapshotPayload.total_hours;
         title = getApprovalResolvedTitle(mainType, `시간외근로 신청 (${attendanceSnapshotPayload.work_date} · ${attendanceSnapshotPayload.total_hours}시간)`);
+        appendDesc += `\n\n${buildApprovalAttendanceAppendText(mainType, attendanceSnapshotPayload)}`;
     } else if (mainType === '지출결의') {
         if (expenseAdjustmentMode !== 'new') {
             const adjustmentTarget = getApprovalExpenseAdjustmentSelectedDoc();
@@ -11499,7 +11595,7 @@ function buildApprovalSubmitPreviewData() {
         if (mainType === '출장신청') {
             businessTripSnapshotPayload = buildApprovalBusinessTripSnapshot();
             if (businessTripSnapshotPayload.start_date && businessTripSnapshotPayload.location) {
-                appendDesc += `\n\n[출장 일정]\n- 기간: ${formatApprovalBusinessTripPeriodText(businessTripSnapshotPayload)}\n- 장소: ${businessTripSnapshotPayload.location}`;
+                appendDesc += `\n\n${buildApprovalAttendanceAppendText(mainType, businessTripSnapshotPayload)}`;
             }
             finalAmt = 0;
         } else if (mainType === '구매요청') {
@@ -12706,6 +12802,7 @@ async function handleDraftSubmit(e) {
         if (!(attendanceSnapshotPayload.total_hours > 0)) return showAlert("인정 시간을 확인하세요.");
         finalAmt = attendanceSnapshotPayload.total_hours;
         title = getApprovalResolvedTitle(mainType, `시간외근로 신청 (${attendanceSnapshotPayload.work_date} · ${attendanceSnapshotPayload.total_hours}시간)`);
+        appendDesc += `\n\n${buildApprovalAttendanceAppendText(mainType, attendanceSnapshotPayload)}`;
     }
     else if (mainType === '지출결의') {
         if (expenseAdjustmentMode !== 'new') {
@@ -12848,7 +12945,7 @@ async function handleDraftSubmit(e) {
             if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs) || endAtMs <= startAtMs) {
                 return showAlert("출장 종료일은 시작일보다 빠를 수 없습니다.");
             }
-            appendDesc += `\n\n[출장 일정]\n- 기간: ${formatApprovalBusinessTripPeriodText(businessTripSnapshotPayload)}\n- 장소: ${businessTripSnapshotPayload.location}`;
+            appendDesc += `\n\n${buildApprovalAttendanceAppendText(mainType, businessTripSnapshotPayload)}`;
             finalAmt = 0;
         } else if (mainType === '구매요청') {
             finalAmt = Number(document.getElementById("appAmount").value || 0);
@@ -12929,22 +13026,9 @@ async function handleDraftSubmit(e) {
     const uploadRollbackItems = [];
     const isSalaryExpenseDoc = mainType === '지출결의' && expenseSubType === '급여';
     try {
-        for (const descriptor of orderedAttachments) {
-            if (descriptor.kind === 'local') {
-                const file = descriptor.file;
-                const safeName = `${crypto.randomUUID()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-                const { error } = await _supabase.storage.from('attachments').upload(safeName, file);
-                if (error) throw error;
-                const rawRef = `attachments/${safeName}?display_name=${encodeURIComponent(file.name || safeName)}`;
-                uploadedUrls.push(rawRef);
-                uploadRollbackItems.push({ rawRef });
-                continue;
-            }
-
-            const copiedAttachments = await copyApprovalDraftAttachmentsForSubmit([descriptor.item]);
-            copiedAttachments.fileRefs.forEach((rawRef) => uploadedUrls.push(rawRef));
-            copiedAttachments.copiedObjects.forEach((item) => uploadRollbackItems.push(item));
-        }
+        const uploaded = await prepareApprovalSubmitAttachments();
+        uploadedUrls.push(...uploaded.fileRefs);
+        uploadRollbackItems.push(...uploaded.copiedObjects);
 
     } catch (error) {
         try {
