@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.68 | Change: 2026-10-02 - Guide AI setup and show successful help access clearly. -->
+<!-- Version: v1.0.69 | Change: 2026-10-03 - Redact raw profile and integration diagnostic responses. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.68 | mypage.html');</script>
+<script src="../shared/safe_diagnostics.js?v=20261003-1"></script>
+  <script>console.log('[Version] v1.0.69 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -343,7 +344,7 @@ if(subEl) subEl.textContent=meta.subtitle;
 }
 const getMypageKstDateParts=(value)=>{if(!value) return {date:'',time:'',hasTime:false}; if(typeof value==='string' && !value.includes('T')) return {date:value,time:'',hasTime:false}; const d=new Date(value); if(Number.isNaN(d.getTime())) return {date:'',time:'',hasTime:false}; const date=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,year:'numeric',month:'2-digit',day:'2-digit'}).format(d); const time=new Intl.DateTimeFormat('sv-SE',{timeZone:KST_TZ_MYPAGE,hour:'2-digit',minute:'2-digit',hour12:false}).format(d); return {date,time,hasTime:true}};
 function escapeHtml(value){return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
-async function getAdjustedSalaryRowForMypage(row, ym){if(!row) return row; if(!window.PayrollDurunuriModule) return row; try{const supportMap=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym); return window.PayrollDurunuriModule.adjustSalaryRow(row,supportMap);}catch(e){console.warn('Durunuri support load failed:',e?.message||e); return row;}}
+async function getAdjustedSalaryRowForMypage(row, ym){if(!row) return row; if(!window.PayrollDurunuriModule) return row; try{const supportMap=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym); return window.PayrollDurunuriModule.adjustSalaryRow(row,supportMap);}catch(e){CoopSafeLog.warn("Durunuri support load failed:", e?.message||e); return row;}}
 let myInfo={},companyInfo={},currentSalaryData=null,tempEmergencyList=[],noticesData=[],leaveSnapshotState=null;
 let permissionSet = new Set();
 let purposeModal,leaveDetailModal,noticeDetailModal,alertModal,eventModal,calendarSubscriptionModal;
@@ -539,7 +540,7 @@ const {data,error}=await _supabase.rpc('erp_get_calendar_ics_settings');
 if(error) throw error;
 mypageCalendarIcsSettings={enabled:data?.enabled===true,feedToken:String(data?.feed_token||'').trim(),sourceCatalog:normalizeMypageCalendarSourceCatalog(data?.source_catalog)};
 }catch(error){
-console.warn('mypage calendar ICS settings load failed:',error?.message||error);
+CoopSafeLog.warn("mypage calendar ICS settings load failed:", error?.message||error);
 }
 syncMypageCalendarSettingsUi();
 }
@@ -734,7 +735,7 @@ const fresh=await fetchMypageSchemaFeaturesFromDataApi();
 writeMypageSchemaFeatureCache(fresh);
 return fresh;
 }catch(error){
-console.warn('[mypage] schema feature probe failed:',String(error?.code||error?.message||'unknown'));
+CoopSafeLog.warn("[mypage] schema feature probe failed:", String(error?.code||error?.message||'unknown'));
 return{
 leave_snapshot:false,
 business_trip_snapshot:false
@@ -859,7 +860,7 @@ applyMypageCompanyInfoState(nextInfo);
 writeMypageCompanyInfoCache(coopId,nextInfo);
 return nextInfo;
 }catch(error){
-console.warn('mypage company info refresh failed:',error?.message||error);
+CoopSafeLog.warn("mypage company info refresh failed:", error?.message||error);
 return null;
 }
 }
@@ -970,7 +971,7 @@ if(error) throw error;
 renderMypageTelegramLinkStatus(data||{});
 }catch(error){
 renderMypageTelegramLinkStatus({enabled:false,linked:false});
-console.warn('telegram link status load failed:', error?.message||error);
+CoopSafeLog.warn("telegram link status load failed:", error?.message||error);
 }
 } // End of loadMypageTelegramLinkStatus
 
@@ -1263,7 +1264,7 @@ await loadMypageCalendarIcsSettings();
 await Promise.all([loadProfile(),loadEmergencyList(),loadNotices(),calculateLeave(),loadMypageTelegramLinkStatus(),loadMypageOvertimeSummary(),loadMypageSalaryTotal()]);
 applyMypageRuntimeProfileUi();
 }catch(error){
-console.error('[mypage] boot failed:', error);
+CoopSafeLog.error("[mypage] boot failed:", error);
 showAlert(`마이페이지 초기화 중 오류가 발생했습니다.\n${error?.message || '잠시 후 다시 시도해 주세요.'}`);
 }finally{
 setMypageBootStateReady();
@@ -1371,7 +1372,7 @@ return acc;
 },{ count:0, hours:0, allowance:0, compLeaveDays:0 });
 renderMypageOvertimeSummary(summary);
 }catch(error){
-console.warn('loadMypageOvertimeSummary failed:', error?.message || error);
+CoopSafeLog.warn("loadMypageOvertimeSummary failed:", error?.message || error);
 renderMypageOvertimeSummary({ count:0, hours:0, allowance:0, compLeaveDays:0 });
 }
 }
@@ -1656,7 +1657,7 @@ const officialHolidayPromise=_supabase.from('ref_public_holidays')
 .order('holiday_date',{ascending:true})
 .order('name',{ascending:true});
 const [{data:e},{data:c},{data:officialHolidays,error:officialHolidayError}]=await Promise.all([employeePromise,calendarQuery,officialHolidayPromise]);
-if(officialHolidayError) console.error('official holiday load failed',officialHolidayError);
+if(officialHolidayError) CoopSafeLog.error("official holiday load failed", officialHolidayError);
 return {leaveDocs:Array.isArray(l)?l:[],businessTripDocs:Array.isArray(bt)?bt:[],employeeRows:Array.isArray(e)?e:[],calendarRows:Array.isArray(c)?c:[],officialHolidayRows:Array.isArray(officialHolidays)?officialHolidays:[]};
 }
 function buildMypageCalendarDisplayEvents(source,scope='erp'){
@@ -1880,7 +1881,7 @@ link.remove();
 setTimeout(()=>URL.revokeObjectURL(link.href),1000);
 showAlert("Google Calendar용 .ics 파일을 내려받았습니다.\nGoogle Calendar > 설정 > 가져오기 및 내보내기 > 가져오기에서 추가할 수 있습니다.");
 }catch(error){
-console.error('downloadGoogleCalendarIcs failed:',error);
+CoopSafeLog.error("downloadGoogleCalendarIcs failed:", error);
 showAlert(`Google Calendar 내보내기 실패: ${error?.message||'알 수 없는 오류'}`);
 }
 } // End of downloadGoogleCalendarIcs
@@ -1903,8 +1904,8 @@ leaveSnapshotState=await window.LeaveLedger.getLeaveSnapshot(_supabase,myInfo.em
 renderLeaveBadge(leaveSnapshotState);
 return;
 }
-}catch(error){console.error('calculateLeave snapshot failed:',error)}
-const{data:r,error}=await _supabase.rpc('calculate_leave_days',{p_emp_id:myInfo.emp_id});if(error){console.error(error);return}
+}catch(error){CoopSafeLog.error("calculateLeave snapshot failed:", error)}
+const{data:r,error}=await _supabase.rpc('calculate_leave_days',{p_emp_id:myInfo.emp_id});if(error){CoopSafeLog.error("[erp/mypage] operation failed", error);return}
 leaveSnapshotState={effectiveRemainDays:(r!==null?r:0),reservedDays:0,summary:{reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[]}};
 renderLeaveBadge(leaveSnapshotState);
 }
@@ -2007,7 +2008,7 @@ h+=`<div class="leave-section"><h6>ℹ️ 일자 미확인 내역</h6>${renderLe
 h+='</div>';bd.innerHTML=h;
 }
 }catch(error){
-console.error('showLeaveDetail failed:',error);
+CoopSafeLog.error("showLeaveDetail failed:", error);
 const msg=escapeHtml(error?.message||'알 수 없는 오류');
 bd.innerHTML=`<div class="text-danger small">연차 상세 조회 중 오류가 발생했습니다.<br>${msg}</div>`;
 }
@@ -2051,7 +2052,7 @@ for(const ym of months){
 try{
 supportMapByMonth[ym]=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym);
 }catch(error){
-console.warn('Durunuri support load failed:',error?.message||error);
+CoopSafeLog.warn("Durunuri support load failed:", error?.message||error);
 supportMapByMonth[ym]={};
 }
 }
@@ -2100,7 +2101,7 @@ metaEl.textContent=(firstYm&&lastYm)
 :`급여명세서 ${rows.length}건 합계`;
 if(toggleBtn) toggleBtn.disabled=false;
 }catch(error){
-console.warn('loadMypageSalaryTotal failed:',error?.message||error);
+CoopSafeLog.warn("loadMypageSalaryTotal failed:", error?.message||error);
 metaEl.textContent='총 급여 합계를 불러오지 못했습니다.';
 }
 } // End of loadMypageSalaryTotal
@@ -2267,7 +2268,7 @@ async function runCertIssue() {
     });
 
     if (error) {
-        console.error(error);
+        CoopSafeLog.error("[erp/mypage] operation failed", error);
         return showAlert("발급 중 오류 발생: " + error.message);
     }
 

@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.159
-Change: Safely preserve names and text used by member action buttons.
+Version: v1.0.160
+Change: Keep personal data and raw server responses out of diagnostics.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.159 | membermanage.html');</script>
+<script src="shared/safe_diagnostics.js?v=20261003-1"></script>
+    <script>console.log('[Version] v1.0.160 | membermanage.html');</script>
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
@@ -48,7 +49,7 @@ allowKakaoApp: true
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
-<script src="shared/auth_broker_helper.js?v=20260909-1"></script>
+<script src="shared/auth_broker_helper.js?v=20261003-1"></script>
 
 <link href="style.css" rel="stylesheet">
 
@@ -2622,12 +2623,12 @@ const { data, error } = await _supabase.rpc('list_my_dividend_history', {
 p_member_uuid: memberUuid
 });
 if (error) {
-console.warn('confirmed dividend history rpc unavailable:', detailedError?.message || error.message || error);
+CoopSafeLog.warn("confirmed dividend history rpc unavailable:", detailedError?.message || error.message || error);
 return [];
 }
 return Array.isArray(data) ? data.map(row => normalizeDividendHistoryRow(row, 'DIVIDEND_BATCH')) : [];
 } catch (e) {
-console.warn('confirmed dividend history load failed:', e);
+CoopSafeLog.warn("confirmed dividend history load failed:", e);
 return [];
 }
 }
@@ -2652,7 +2653,7 @@ function clearSupabaseAuthCache() {
 try {
 getSupabaseAuthStorageKeys().forEach(([store, key]) => store.removeItem(key));
 } catch (e) {
-console.error('Failed to clear Supabase auth cache:', e);
+CoopSafeLog.error("Failed to clear Supabase auth cache:", e);
 }
 }
 
@@ -2661,7 +2662,7 @@ suppressSessionExpiredHandling = true;
 try {
 if (client && client.auth) await client.auth.signOut();
 } catch (e) {
-console.error('Silent sign-out failed:', e);
+CoopSafeLog.error("Silent sign-out failed:", e);
 } finally {
 setTimeout(() => { suppressSessionExpiredHandling = false; }, 500);
 }
@@ -2728,7 +2729,7 @@ return '';
 }
 handleManualSession();
 } catch (e) {
-console.error("Supabase Init Error", e);
+CoopSafeLog.error("Supabase Init Error", e);
 showModal("시스템 연결 오류");
 }
 
@@ -2910,7 +2911,7 @@ const signupLink = document.getElementById('educationQrSignupLink');
 if (signupLink) signupLink.href = buildEducationQrSignupUrl();
 showEducationQrMode('choices');
 } catch (error) {
-console.error('education QR public context failed:', error?.message || error);
+CoopSafeLog.error("education QR public context failed:", error?.message || error);
 if (title) title.textContent = '교육 정보를 불러오지 못했습니다.';
 setEducationQrInlineStatus('연결 상태를 확인한 뒤 새로고침해주세요.', 'danger');
 loginArea.classList.remove('hidden');
@@ -2985,7 +2986,7 @@ partner_fallback:'1', optional_handoff:getHumanitiesOptionalToken() || null
 })), 700);
 return;
 }
-console.error('education QR quick check-in failed:', error?.message || error);
+CoopSafeLog.error("education QR quick check-in failed:", error?.message || error);
 setEducationQrInlineStatus('출석을 등록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
 } finally {
 if (button) button.disabled = false;
@@ -3019,7 +3020,7 @@ window.location.replace(humanitiesReturnUrl({
 partner_status:'success', optional_warning:humanitiesResult?.optional_info_save_failed === true ? '1' : null
 }));
 } catch (error) {
-console.error('authenticated humanities check-in failed:', error?.message || error);
+CoopSafeLog.error("authenticated humanities check-in failed:", error?.message || error);
 if (error?.fallback === true || error?.code === 'MEMBER_NOT_FOUND') {
 window.location.replace(humanitiesReturnUrl({
 partner_fallback:'1', optional_handoff:getHumanitiesOptionalToken() || null
@@ -3067,7 +3068,7 @@ consent_residence:document.getElementById('humanitiesLinkResidence')?.checked ==
 }, accessToken);
 window.location.replace(humanitiesAccountLinkReturnUrl({ coop_link_receipt:result.receipt_token }));
 } catch (error) {
-console.error('humanities account link failed:', error?.message || error);
+CoopSafeLog.error("humanities account link failed:", error?.message || error);
 if (status) status.textContent = error?.message || '계정 연동을 완료하지 못했습니다.';
 button.disabled = false;
 }
@@ -3119,7 +3120,7 @@ return;
 }
 setEducationQrInlineStatus(message || '출석을 기록하지 못했습니다. QR과 입력값을 확인해주세요.', 'danger');
 } catch (error) {
-console.error('education QR guest check-in failed:', error?.message || error);
+CoopSafeLog.error("education QR guest check-in failed:", error?.message || error);
 setEducationQrInlineStatus('출석을 기록하지 못했습니다. 잠시 후 다시 시도해주세요.', 'danger');
 } finally {
 if (button) button.disabled = false;
@@ -3190,7 +3191,7 @@ curAuth = data.session.user;
 // 4. 원래 로직 실행 (handleLoginSuccess 등 호출 필요하면 여기서 호출)
 // 하지만 보통 아래쪽 onAuthStateChange가 이걸 감지하고 알아서 실행함.
 } else {
-console.error("세션 복구 실패:", error);
+CoopSafeLog.error("세션 복구 실패:", error);
 }
 }
 }
@@ -3355,7 +3356,7 @@ handleLoginSuccess(session.user);
 return;
 }
 } catch (e) {
-console.warn('pageshow session check failed:', e);
+CoopSafeLog.warn("pageshow session check failed:", e);
 }
 resetPortalRetryState();
 showOnly('loginSection');
@@ -3544,7 +3545,7 @@ window.location.href = data.url;
 return;
 }
 } catch (e) {
-console.error('Kakao Link Error:', e);
+CoopSafeLog.error("Kakao Link Error:", e);
 showModal(translateSocialLinkError('카카오', e && e.message ? e.message : e));
 } finally {
 showLoading(false);
@@ -3589,7 +3590,7 @@ window.location.href = data.url;
 return;
 }
 } catch (e) {
-console.error('Naver Link Error:', e);
+CoopSafeLog.error("Naver Link Error:", e);
 showModal(translateSocialLinkError('네이버', e && e.message ? e.message : e));
 } finally {
 showLoading(false);
@@ -3724,7 +3725,7 @@ return dest.href;
 
 	    const { data, error } = await _supabase.rpc('grant_login_badges');
 	    if (error) {
-	      console.warn('grant_login_badges error:', error);
+	      CoopSafeLog.warn("grant_login_badges error:", error);
 	      return;
 	    }
 
@@ -3735,7 +3736,7 @@ return dest.href;
 
 	    sessionStorage.setItem(key, '1');
 	  } catch (e) {
-	    console.warn('ensureLoginBadgesGranted failed:', e);
+	    CoopSafeLog.warn("ensureLoginBadgesGranted failed:", e);
 		  }
 		}
 
@@ -3758,7 +3759,7 @@ return dest.href;
 		      p_member_uid: profileUid
 		    });
 		    if (error) {
-		      console.warn('grant_login_badges_for_profile error:', error);
+		      CoopSafeLog.warn("grant_login_badges_for_profile error:", error);
 		      return;
 		    }
 
@@ -3769,7 +3770,7 @@ return dest.href;
 
 		    sessionStorage.setItem(key, '1');
 		  } catch (e) {
-		    console.warn('ensureProfileBadgesGranted failed:', e);
+		    CoopSafeLog.warn("ensureProfileBadgesGranted failed:", e);
 		  }
 		}
 
@@ -3817,11 +3818,7 @@ return dest.href;
 			firstUuid !== safeFallbackUuid &&
 			isRecoverableProfileLoadError(error)
 			) {
-			console.warn('active profile is unavailable; falling back to root member profile:', {
-			activeProfileId: firstUuid,
-			rootProfileId: safeFallbackUuid,
-			error
-			});
+			CoopSafeLog.warn("active profile is unavailable; falling back to root member profile:", error);
 			clearStaleActiveProfile(firstUuid);
 			await loadDashboardData(safeFallbackUuid, { rethrowOnError: true });
 			return;
@@ -3892,7 +3889,7 @@ return dest.href;
 		}
 		portalBootReadyUserId = String(user?.id || '').trim();
 		} catch (error) {
-		console.error('handleLoginSuccess failed:', error);
+		CoopSafeLog.error("handleLoginSuccess failed:", error);
 		const kind = classifyPortalBootError(error);
 		if (kind === 'fatal') {
 		await recoverFromExpiredSession();
@@ -3926,7 +3923,7 @@ return dest.href;
 		}
 		await handleLoginSuccess(user);
 		} catch (error) {
-		console.error('retryPortalBoot failed:', error);
+		CoopSafeLog.error("retryPortalBoot failed:", error);
 		showPortalRetryState('조합원 정보를 다시 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
 		} finally {
 		if (retryButton) {
@@ -4161,7 +4158,7 @@ area.innerHTML = html;
 hint.classList.remove('hidden');
 area.classList.remove('hidden');
 } catch (e) {
-console.error('loadDuplicateEmailCandidates failed:', e);
+CoopSafeLog.error("loadDuplicateEmailCandidates failed:", e);
 }
 }
 
@@ -4285,7 +4282,7 @@ const { data: member, error: memErr } = await scopeMemberTenant(_supabase
 .single();
 
 	if (memErr || !member) {
-	console.error("멤버 조회 실패:", memErr);
+	CoopSafeLog.error("멤버 조회 실패:", memErr);
 	if (memErr && (memErr.code === 'PGRST301' || memErr.status === 403)) {
 	if (options && options.rethrowOnError) {
 	const authError = new Error('로그인 세션이 만료되었습니다.');
@@ -4395,7 +4392,7 @@ if (!isSiteMemberPortalProfile()) loadBoard('free', null, 20);
 	}
 
 	} catch (e) {
-console.error("Dashboard Load Error:", e);
+CoopSafeLog.error("Dashboard Load Error:", e);
 if (options && options.rethrowOnError) {
 if (e && (e.code === 'PGRST301' || e.status === 403)) {
 const authError = new Error('로그인 세션이 만료되었습니다.');
@@ -4520,7 +4517,7 @@ if (error) throw error;
 return data || {};
 })
 .catch((error) => {
-console.warn('quiz pilot entry check unavailable:', String(error?.code || error?.message || 'unknown'));
+CoopSafeLog.warn("quiz pilot entry check unavailable:", String(error?.code || error?.message || 'unknown'));
 return { allowed: false };
 });
 }
@@ -4758,7 +4755,7 @@ if (error) throw error;
 currentMemberCoopId = data || null;
 return currentMemberCoopId;
 } catch (e) {
-console.warn('getCurrentMemberCoopId failed:', e);
+CoopSafeLog.warn("getCurrentMemberCoopId failed:", e);
 return null;
 }
 }
@@ -4915,7 +4912,7 @@ writeMembermanageBrandingCache(currentMemberCoopName, coopId);
 }
 return currentMemberCoopName;
 } catch (e) {
-console.warn('loadMembermanageBranding failed:', e);
+CoopSafeLog.warn("loadMembermanageBranding failed:", e);
 return currentMemberCoopName;
 }
 }
@@ -4938,7 +4935,7 @@ window.applyFooterSiteProfile({ ...(footerSettings || {}), coop_name: coopName }
 }
 return currentMemberCoopName;
 } catch (e) {
-console.warn('hydrateMembermanagePublicBranding failed:', e);
+CoopSafeLog.warn("hydrateMembermanagePublicBranding failed:", e);
 return currentMemberCoopName;
 }
 }
@@ -5078,12 +5075,12 @@ if (!memberUuid) return [];
 try {
 const { data, error } = await _supabase.rpc('preference_list_portal_polls', { p_member_uuid: memberUuid });
 if (error) {
-console.warn('listMemberPreferencePolls failed:', error);
+CoopSafeLog.warn("listMemberPreferencePolls failed:", error);
 return [];
 }
 return Array.isArray(data) ? data : [];
 } catch (e) {
-console.warn('listMemberPreferencePolls failed:', e);
+CoopSafeLog.warn("listMemberPreferencePolls failed:", e);
 return [];
 }
 }
@@ -5349,7 +5346,7 @@ coopRuntimeProfile = String(data?.runtime_profile || '').trim();
 applyMemberPortalRuntimeUi();
 return modules;
 } catch (e) {
-console.warn('loadCoopRuntimeModules failed:', e);
+CoopSafeLog.warn("loadCoopRuntimeModules failed:", e);
 coopRuntimeModules = null;
 coopRuntimeProfile = '';
 return null;
@@ -5458,7 +5455,7 @@ listMemberPreferencePolls(memberUuid)
 
 const elections = electionRes?.error || !Array.isArray(electionRes?.data) ? [] : electionRes.data;
 if (electionRes?.error) {
-console.warn('checkElectionVisibility election load failed:', electionRes.error);
+CoopSafeLog.warn("checkElectionVisibility election load failed:", electionRes.error);
 }
 
 const now = new Date();
@@ -5969,7 +5966,7 @@ async function markDocumentBoxSeen(memberUuid = null) {
         .eq('id', targetId);
 
     if (updErr) {
-        console.warn('document_box_last_seen_at update failed:', updErr);
+        CoopSafeLog.warn("document_box_last_seen_at update failed:", updErr);
         return false;
     }
     if (curMem && String(curMem.id) === String(targetId)) {
@@ -6144,7 +6141,7 @@ desc.textContent = total > 0 ? `등록된 교육·회의 ${total}건` : '아직 
 meta.textContent = total > 0 ? `참석 ${attended}건 · 전체 ${total}건` : '';
 meta.classList.toggle('hidden', total === 0);
 } catch (error) {
-console.warn('loadParticipationCardSummary failed:', error);
+CoopSafeLog.warn("loadParticipationCardSummary failed:", error);
 desc.textContent = '회의·교육 참석 기록 확인';
 meta.classList.add('hidden');
 }
@@ -6184,7 +6181,7 @@ warningsByEvent: result?.warnings_by_event && typeof result.warnings_by_event ==
 : {}
 };
 } catch (error) {
-console.warn('linked Humanities resources unavailable:', error?.code || error?.message || error);
+CoopSafeLog.warn("linked Humanities resources unavailable:", error?.code || error?.message || error);
 return { resourcesByEvent:{}, warningsByEvent:{} };
 }
 } // End of loadMemberLinkedHumanitiesResources
@@ -6277,7 +6274,7 @@ renderParticipationHistory();
 return participationHumanitiesPayload;
 })
 .catch(function(error) {
-console.warn('ensureParticipationHumanitiesResources failed:', error?.message || error);
+CoopSafeLog.warn("ensureParticipationHumanitiesResources failed:", error?.message || error);
 return null;
 })
 .finally(function() {
@@ -6346,7 +6343,7 @@ void ensureParticipationHumanitiesResources(memberUuid);
 }
 return true;
 } catch (error) {
-console.error('loadParticipationHistoryPage failed:', error);
+CoopSafeLog.error("loadParticipationHistoryPage failed:", error);
 if (sessionVersion === participationHistorySessionVersion && participationHistoryActiveTab === safeType) {
 const list = document.getElementById('participationHistoryList');
 if (list && state.events.length === 0) {
@@ -6671,7 +6668,7 @@ signLink.href = `minutes/minutes_sign.html?id=${encodedId}`;
 signLink.hidden = data.can_open_signature !== true;
 }
 } catch (error) {
-console.error('openParticipationDocument failed:', error);
+CoopSafeLog.error("openParticipationDocument failed:", error);
 closeParticipationDocument(false);
 showModal('회의록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
 }
@@ -6712,7 +6709,7 @@ document.getElementById('participationHistoryCloseBtn')?.focus();
 try {
 await loadParticipationHistoryPage('EDUCATION');
 } catch (error) {
-console.error('openParticipationHistory failed:', error);
+CoopSafeLog.error("openParticipationHistory failed:", error);
 if (summary) summary.textContent = '조회 실패';
 if (list) list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '교육·회의 참여 이력을 불러오지 못했습니다.')}</div>`;
 }
@@ -7086,7 +7083,7 @@ return;
 clearPendingEducationQrToken();
 showModal('유효하지 않거나 새로 발급된 QR로 교체된 링크입니다.');
 } catch (error) {
-console.error('education QR check-in failed:', error);
+CoopSafeLog.error("education QR check-in failed:", error);
 showModal('교육 출석을 등록하지 못했습니다.\n연결 상태를 확인한 뒤 새로고침해 다시 시도해주세요.');
 } finally {
 pendingEducationQrCheckIn = false;
@@ -7210,7 +7207,7 @@ async function loadAuditPortalEntry(member, card, setVisible) {
         if (curMem?.id === member.id) setVisible(card, data === true);
     } catch (error) {
         // 열람 권한 확인에 실패하면 카드를 숨긴 채 유지한다.
-        console.warn('audit portal access check failed:', error?.code || 'unavailable');
+        CoopSafeLog.warn("audit portal access check failed:", error?.code || 'unavailable');
     }
 }
 
@@ -7565,7 +7562,7 @@ return;
 }
 
 notifyMemberApplicationAdmins(cancelledApplication.id, 'application_cancelled').catch((notifyError) => {
-console.warn('[member-request-alert] application cancellation admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+CoopSafeLog.warn("[member-request-alert] application cancellation admin telegram skipped:", notifyError?.message || notifyError);
 });
 
 showLoading(false);
@@ -7600,10 +7597,10 @@ applicationId: safeApplicationId
 
 if (error) throw error;
 if (data && data.ok === false && !data.skipped) {
-console.warn(`[member-request-alert] ${safeEventType} admin telegram skipped:`, data);
+CoopSafeLog.warn("[membermanage] operation failed", `[member-request-alert] ${safeEventType} admin telegram skipped:`);
 }
 } catch (error) {
-console.warn(`[member-request-alert] ${safeEventType} admin telegram skipped:`, error?.message || error, error || {});
+CoopSafeLog.warn("[membermanage] operation failed", `[member-request-alert] ${safeEventType} admin telegram skipped:`);
 }
 } // End of notifyMemberApplicationAdmins
 
@@ -7621,10 +7618,10 @@ applicationId: safeApplicationId
 
 if (error) throw error;
 if (data && data.ok === false) {
-console.warn('[extra-capital-kakao] applicant notice skipped:', data);
+CoopSafeLog.warn("[extra-capital-kakao] applicant notice skipped:", data);
 }
 } catch (error) {
-console.warn('[extra-capital-kakao] applicant notice skipped:', error?.message || error, error || {});
+CoopSafeLog.warn("[extra-capital-kakao] applicant notice skipped:", error?.message || error);
 }
 } // End of notifyExtraCapitalApplicantKakao
 
@@ -7708,12 +7705,12 @@ createdApplication = data;
 }
 
 notifyMemberApplicationAdmins(createdApplication?.id).catch((notifyError) => {
-console.warn('[member-request-alert] application admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+CoopSafeLog.warn("[member-request-alert] application admin telegram skipped:", notifyError?.message || notifyError);
 });
 
 if (type === 'extra') {
 notifyExtraCapitalApplicantKakao(createdApplication?.id).catch((notifyError) => {
-console.warn('[extra-capital-kakao] applicant notice skipped:', notifyError?.message || notifyError, notifyError || {});
+CoopSafeLog.warn("[extra-capital-kakao] applicant notice skipped:", notifyError?.message || notifyError);
 });
 }
 
@@ -7917,7 +7914,7 @@ extraCapitalDepositAccountState.data = account;
 renderExtraCapitalDepositAccount(account);
 return account;
 } catch (error) {
-console.warn('[extra-capital-account] 계좌 정보를 불러오지 못했습니다.', error?.message || error);
+CoopSafeLog.warn("[extra-capital-account] 계좌 정보를 불러오지 못했습니다.", error?.message || error);
 renderExtraCapitalDepositAccount(null);
 return null;
 } finally {
@@ -8078,7 +8075,7 @@ showLoading(false);
 reloadDashboard();
 
 } catch(e) { 
-console.error(e); 
+CoopSafeLog.error("[membermanage] operation failed", e);
 showLoading(false); 
 showModal('증명서 발급 중 오류가 발생했습니다.\n' + (e.message || '')); 
 }
@@ -8163,7 +8160,7 @@ async function startKakaoLogin() {
         if (error) throw error;
 
     } catch (e) {
-        console.error("Kakao Login Error:", e);
+        CoopSafeLog.error("Kakao Login Error:", e);
         showLoading(false);
         showModal('카카오 로그인 연결 실패:\n' + e.message);
     }
@@ -8206,7 +8203,7 @@ async function startNaverLogin() {
         if (error) throw error;
 
     } catch (e) {
-        console.error("Naver Login Error:", e);
+        CoopSafeLog.error("Naver Login Error:", e);
         showLoading(false);
         showModal('네이버 로그인 연결 실패:\n' + e.message);
     }
@@ -8521,7 +8518,7 @@ targetInfo = { name: parent ? parent.name : '알 수 없음', id: curMem.manager
 renderConnectTabUI(connArea, isConnected, targetInfo, activeIsManagedProfile);
 
 } catch (e) {
-console.error("Connection Check Error:", e);
+CoopSafeLog.error("Connection Check Error:", e);
 connArea.innerHTML = '<div class="text-center text-danger py-3">정보 확인 실패<br>다시 시도해주세요.</div>';
 }
 }
@@ -8650,7 +8647,7 @@ if (typeof loadManagedProfiles === 'function') {
 await loadManagedProfiles(rootProfileId || (curAuth ? curAuth.id : null));
 }
 } catch (refreshError) {
-console.warn('Managed profile refresh failed after disconnect:', refreshError);
+CoopSafeLog.warn("Managed profile refresh failed after disconnect:", refreshError);
 }
 } catch (error) {
 showLoading(false);
@@ -8747,7 +8744,7 @@ identity_hint: identityHint
 });
 
 if (error) {
-console.error(error);
+CoopSafeLog.error("[membermanage] operation failed", error);
 area.innerHTML = `<p class="text-center text-danger small py-3">${escapeHtml(getManagedLinkErrorMessage(error))}</p>`;
 return;
 }
@@ -8992,7 +8989,7 @@ html += `
 html += '</ul>';
 area.innerHTML = html;
 } catch (error) {
-console.error('가족/단체 목록 로드 실패:', error);
+CoopSafeLog.error("가족/단체 목록 로드 실패:", error);
 area.innerHTML = '<p class="text-danger small text-center py-3">가족/단체 목록을 불러오지 못했습니다.</p>';
 }
 } // End of loadFamilyList
@@ -9096,7 +9093,7 @@ if(category === 'notice' && !btn) {
 try {
 await fetchMemberVisibleNotices();
 } catch (e) {
-console.error("공지사항 로드 실패:", e);
+CoopSafeLog.error("공지사항 로드 실패:", e);
 showModal('공지사항 조회 실패');
 }
 if(typeof openNoticeSearchModal === 'function') openNoticeSearchModal();
@@ -9121,7 +9118,7 @@ const { data: posts, error } = await scopeMemberTenant(baseListQuery)
 .range(0, limit - 1);
 
 if(error || !posts || posts.length === 0) {
-if (error) console.error("게시판 로드 실패:", error); // 디버깅용 로그
+if (error) CoopSafeLog.error("게시판 로드 실패:", error); // 디버깅용 로그
 if(limit === 20) listArea.innerHTML = '<div class="text-center py-5 text-muted">등록된 글이 없습니다.</div>';
 return;
 }
@@ -9355,7 +9352,7 @@ return;
 
 // (1) 본인 계정 정보
 const { data: me, error: errMe } = await scopeMemberTenant(_supabase.from('coop_members').select('id, name, member_type, join_category, rrn_display, birth_date')).eq('id', rootProfileId).single();
-if(errMe) console.error("❌ 내 정보 조회 실패:", errMe);
+if(errMe) CoopSafeLog.error("❌ 내 정보 조회 실패:", errMe);
 
 // (2) 내가 관리자인 계정들 가져오기 (manager_id가 나인 경우)
 const { data: subProfiles, error: errSub } = await _supabase
@@ -9364,7 +9361,7 @@ const { data: subProfiles, error: errSub } = await _supabase
 .eq('coop_id', currentMemberCoopId || await getCurrentMemberCoopId())
 .eq('manager_id', rootProfileId); // ★ 여기가 핵심
 
-if(errSub) console.error("❌ 서브 계정 조회 에러:", errSub);
+if(errSub) CoopSafeLog.error("❌ 서브 계정 조회 에러:", errSub);
 
 // 관리할 계정이 없으면 스위처 숨김 (여기에 걸리는지 확인 필요)
 if (!subProfiles || subProfiles.length === 0) {
@@ -9461,7 +9458,7 @@ html += `
 });
 listArea.innerHTML = html;
 } catch (e) {
-console.error(e);
+CoopSafeLog.error("[membermanage] operation failed", e);
 listArea.innerHTML = '<p class="text-center text-danger small">로드 실패</p>';
 }
 }
@@ -9472,7 +9469,7 @@ const { data: requests, error } = await _supabase.rpc('get_my_pending_connects')
 
 // 2. 에러 및 데이터 체크
 if (error) {
-console.error("연결 요청 조회 실패:", error);
+CoopSafeLog.error("연결 요청 조회 실패:", error);
 return;
 }
 // requests가 null이거나 빈 배열이면 종료
@@ -9922,7 +9919,7 @@ showModal('일치하는 가입 정보를 찾을 수 없습니다.\n이름이나 
 
 } catch (e) {
 showLoading(false);
-console.error(e);
+CoopSafeLog.error("[membermanage] operation failed", e);
 showModal('오류가 발생했습니다: ' + e.message);
 }
 }
@@ -9960,7 +9957,7 @@ return;
 
 box.innerHTML = `<div class="small text-muted mb-1">승인된 뱃지</div><div>${pills}</div>`;
 } catch (e) {
-console.warn('renderPartnerBadgePreview failed:', e);
+CoopSafeLog.warn("renderPartnerBadgePreview failed:", e);
 box.innerHTML = '<span class="text-muted">뱃지 정보를 불러올 수 없습니다.</span>';
 }
 }
@@ -10025,10 +10022,10 @@ targetMemberId: safeTargetMemberId
 
 if (error) throw error;
 if (data && data.ok === false && !data.skipped) {
-console.warn('[partner-alert] admin telegram skipped:', data);
+CoopSafeLog.warn("[partner-alert] admin telegram skipped:", data);
 }
 } catch (error) {
-console.warn('[partner-alert] admin telegram skipped:', error?.message || error, error || {});
+CoopSafeLog.warn("[partner-alert] admin telegram skipped:", error?.message || error);
 }
 } // End of notifyPartnerRequestAdmins
 
@@ -10044,7 +10041,7 @@ p_error_message: getPartnerApplicationErrorMessage(error)
 });
 if (logError) throw logError;
 } catch (logError) {
-console.warn('[partner-request] client failure log skipped:', logError?.message || logError, logError || {});
+CoopSafeLog.warn("[partner-request] client failure log skipped:", logError?.message || logError);
 }
 } // End of logPartnerRequestClientFailure
 
@@ -10139,7 +10136,7 @@ showLoading(false);
 
 if(result.success) {
 notifyPartnerRequestAdmins(curMem.member_id).catch((error) => {
-console.warn('[partner-alert] admin telegram skipped:', error?.message || error, error || {});
+CoopSafeLog.warn("[partner-alert] admin telegram skipped:", error?.message || error);
 });
 showModal(result.message); // RPC에서 리턴한 메시지 출력
 loadPartnerInfo(curMem.member_id); // 화면 갱신
@@ -10149,9 +10146,9 @@ showModal('오류: ' + result.message);
 
 } catch (e) {
 showLoading(false);
-console.error(e);
+CoopSafeLog.error("[membermanage] operation failed", e);
 logPartnerRequestClientFailure(curMem.member_id, failureStage, e).catch((logError) => {
-console.warn('[partner-request] client failure log skipped:', logError?.message || logError, logError || {});
+CoopSafeLog.warn("[partner-request] client failure log skipped:", logError?.message || logError);
 });
 showModal('처리 중 오류가 발생했습니다.\n' + getPartnerApplicationErrorMessage(e));
 }
@@ -10304,7 +10301,7 @@ p_new_reason: null // 사유 수정은 UI가 복잡해지니 일단 null (기존
 if(error) throw error;
 
 notifyMemberApplicationAdmins(appId, 'application_modified').catch((notifyError) => {
-console.warn('[member-request-alert] application modification admin telegram skipped:', notifyError?.message || notifyError, notifyError || {});
+CoopSafeLog.warn("[member-request-alert] application modification admin telegram skipped:", notifyError?.message || notifyError);
 });
 
 showLoading(false);
@@ -10424,7 +10421,7 @@ setQuickCardVisible(card, false); // 닫혀있으면 숨김
 }
 
 } catch (e) {
-console.error("Solar Map Check Error:", e);
+CoopSafeLog.error("Solar Map Check Error:", e);
 setQuickCardVisible(card, false); // 에러 시 안전하게 숨김
 }
 }

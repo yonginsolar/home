@@ -1,6 +1,6 @@
 /*
-Version: v1.0.5
-Change: Allow the yonginsun.kr public and ERP hosts to return safely from the shared social-login broker.
+Version: v1.0.6
+Change: Preserve broker login behavior without printing raw authentication errors.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -163,7 +163,7 @@ Change: Allow the yonginsun.kr public and ERP hosts to return safely from the sh
                 try {
                   callback(event, session);
                 } catch (error) {
-                  console.warn('[auth-broker-helper] deferred signup auth callback failed:', error);
+                  console.warn('[auth-broker-helper] deferred signup auth callback failed');
                 }
               }, 0);
             });
@@ -171,7 +171,7 @@ Change: Allow the yonginsun.kr public and ERP hosts to return safely from the sh
           client.auth.__coopSignupAuthStateDeferrerInstalled = true;
         }
       } catch (error) {
-        console.warn('[auth-broker-helper] signup auth deferrer install failed:', error);
+        console.warn('[auth-broker-helper] signup auth deferrer install failed');
       }
 
       return client;
@@ -209,7 +209,7 @@ Change: Allow the yonginsun.kr public and ERP hosts to return safely from the sh
           result = global.resumeSignupFromCurrentSession('auth-broker-helper:' + String(reason || 'return'));
         }
       } catch (error) {
-        console.warn('[auth-broker-helper] signup social return resume failed:', error);
+        console.warn('[auth-broker-helper] signup social return resume failed');
       }
 
       if (result && typeof result.finally === 'function') {

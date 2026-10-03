@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.73 | Change: 2026-10-03 - Approval-gated selected employee permissions. -->
+<!-- Version: v1.2.74 | Change: 2026-10-03 - Block active foreign HTML namespaces and redact diagnostics. -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.2.73 | approval.html');</script>
+<script src="../shared/safe_diagnostics.js?v=20261003-1"></script>
+  <script>console.log('[Version] v1.2.74 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2768,7 +2769,7 @@ async function fetchApprovalBusinessTripCancelRequestTargetIds(relatedDocIds = [
         .eq('doc_type', buildApprovalBusinessTripCancelDocType())
         .in('related_doc_id', safeRelatedIds);
     if (error || !Array.isArray(data)) {
-        console.warn('business trip cancel request state load failed:', error);
+        CoopSafeLog.warn("business trip cancel request state load failed:", error);
         return new Set();
     }
 
@@ -2817,7 +2818,7 @@ async function refreshApprovalBusinessTripCancelCandidates(options = {}) {
         .in('status', APPROVAL_BUSINESS_TRIP_CANCELABLE_STATUSES)
         .order('created_at', { ascending: false });
     if (error || !Array.isArray(data)) {
-        console.warn('business trip cancel candidates load failed:', error);
+        CoopSafeLog.warn("business trip cancel candidates load failed:", error);
         approvalBusinessTripCancelCandidates = [];
     } else {
         const candidateBase = sortApprovalBusinessTripCancelCandidates(
@@ -3649,7 +3650,7 @@ async function loadApprovalDraftFromServer(draftId) {
             .filter(Boolean);
 
         Promise.resolve(calculateLeave()).catch((error) => {
-            console.warn('approval draft leave sync failed', error);
+            CoopSafeLog.warn("approval draft leave sync failed", error);
         });
         recalcApprovalOvertimeSummary();
         syncApprovalBusinessTripSummary();
@@ -3659,7 +3660,7 @@ async function loadApprovalDraftFromServer(draftId) {
         syncApprovalDraftStatusText();
         switchTab('draft');
     } catch (error) {
-        console.error('Approval draft restore failed:', error);
+        CoopSafeLog.error("Approval draft restore failed:", error);
         closeApprovalDraftModal({ force: true });
         showAlert('임시저장 문서를 불러오는 중 화면 구성에 실패했습니다.\n페이지를 새로고침한 뒤 다시 시도해 주세요.');
     } finally {
@@ -3742,7 +3743,7 @@ async function saveApprovalDraft() {
                 await deleteDraftAttachmentObjects(newlyUploadedAttachments);
             }
         } catch (cleanupError) {
-            console.warn('approval draft orphan cleanup failed', cleanupError);
+            CoopSafeLog.warn("approval draft orphan cleanup failed", cleanupError);
         }
         showAlert(getApprovalDraftErrorMessage(error, '임시저장에 실패했습니다.'));
     } finally {
@@ -4869,7 +4870,7 @@ function getApprovalScopedCoopId() {
 async function loadApprovalWorkflowContext() {
     const { data, error } = await _supabase.rpc('erp_approval_workflow_context');
     if (error || !data || typeof data !== 'object') {
-        console.warn('approval workflow context unavailable', error);
+        CoopSafeLog.warn("approval workflow context unavailable", error);
         approvalWorkflowContext = null;
         return null;
     }
@@ -5053,7 +5054,7 @@ async function refreshApprovalCompanyInfo(coopId) {
         applyApprovalRuntimeProfileUi();
         return nextInfo;
     } catch (error) {
-        console.warn('approval company info refresh failed', error);
+        CoopSafeLog.warn("approval company info refresh failed", error);
         return null;
     }
 } // End of refreshApprovalCompanyInfo
@@ -5106,7 +5107,7 @@ async function fetchApprovalEmployeesFromServer() {
     const { data, error } = await _supabase.rpc('erp_list_approval_employees');
     if (!error) return Array.isArray(data) ? data : [];
 
-    console.warn('approval employee rpc failed, fallbacking to direct employee query', error);
+    CoopSafeLog.warn("approval employee rpc failed, fallbacking to direct employee query", error);
     const { data: fallbackData, error: fallbackError } = await scopeApprovalTenant(
         _supabase
             .from('ref_employees')
@@ -5127,7 +5128,7 @@ async function refreshApprovalEmployees(options = {}) {
         approvalEmployeeDirectoryState = 'ready';
         return employees;
     } catch (error) {
-        console.warn('approval employee refresh failed', error);
+        CoopSafeLog.warn("approval employee refresh failed", error);
         approvalEmployeeDirectoryState = 'error';
         approvalEmployeeDirectoryErrorMessage = String(error?.message || '직원 목록을 불러오지 못했습니다.');
         return [];
@@ -7682,7 +7683,7 @@ async function fetchSalaryLedgerRowsByMonth(ym) {
             const supportMap = await window.PayrollDurunuriModule.getSupportMap(_supabase, ym);
             return { rows: window.PayrollDurunuriModule.adjustSalaryRows(rows, supportMap), error: null };
         } catch (durErr) {
-            console.warn('Durunuri support load failed:', durErr?.message || durErr);
+            CoopSafeLog.warn("Durunuri support load failed:", durErr?.message || durErr);
         }
     }
     return { rows, error: null };
@@ -7784,11 +7785,13 @@ function sanitizeApprovalHtml(rawHtml) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(`<div>${source}</div>`, 'text/html');
     const root = doc.body.firstElementChild || doc.body;
-    const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK']);
+    const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'META', 'LINK', 'BASE', 'SVG', 'MATH']);
 
     Array.from(root.querySelectorAll('*')).forEach(node => {
         const tag = node.tagName.toUpperCase();
-        if (blockedTags.has(tag)) {
+        // SVG animation can rewrite an already-validated href after insertion.
+        // Approval documents support HTML tables/images, not active foreign namespaces.
+        if (node.namespaceURI !== 'http://www.w3.org/1999/xhtml' || blockedTags.has(tag)) {
             node.remove();
             return;
         }
@@ -7918,7 +7921,7 @@ function warmApprovalRichEditorAssets() {
         })
         .catch((error) => {
             approvalRichEditorLoaderPromise = null;
-            console.warn('approval tiptap load failed', error);
+            CoopSafeLog.warn("approval tiptap load failed", error);
             return false;
         });
     return approvalRichEditorLoaderPromise;
@@ -8562,11 +8565,11 @@ async function sendTelegramApprovalNotification(payload) {
                 erpBaseUrl
         });
         if (error) {
-            console.warn('[telegram] approval notification skipped:', normalizeApprovalEdgeInvokeError(error));
+            CoopSafeLog.warn("[telegram] approval notification skipped:", normalizeApprovalEdgeInvokeError(error));
             return { telegramSent: false, notificationSaved: false };
         }
         if (payloadData?.ok === false) {
-            console.warn('[telegram] approval notification rejected:', payloadData);
+            CoopSafeLog.warn("[telegram] approval notification rejected:", payloadData);
             return {
                 telegramSent: false,
                 notificationSaved: Number(payloadData?.notification_id || 0) > 0
@@ -8577,7 +8580,7 @@ async function sendTelegramApprovalNotification(payload) {
             notificationSaved: Number(payloadData?.notification_id || 0) > 0
         };
     } catch (e) {
-        console.warn('[telegram] approval notification failed:', e);
+        CoopSafeLog.warn("[telegram] approval notification failed:", e);
         return { telegramSent: false, notificationSaved: false };
     }
 } // End of sendTelegramApprovalNotification
@@ -8619,7 +8622,7 @@ async function createNotification(targetEmpId, title, message, linkUrl, meta = n
             appNotificationSaved: true
         };
     } catch (e) {
-        console.warn('[notification] createNotification failed:', e);
+        CoopSafeLog.warn("[notification] createNotification failed:", e);
         return { ok: false, telegramSent: false, fallbackInserted: false, error: e };
     }
 } // End of createNotification
@@ -8738,14 +8741,14 @@ async function notifyApprovalUploadFailure(options = {}) {
                 docType: options.docType || null
         });
         if (error) {
-            console.warn('[approval-upload] platform alert skipped:', normalizeApprovalEdgeInvokeError(error));
+            CoopSafeLog.warn("[approval-upload] platform alert skipped:", normalizeApprovalEdgeInvokeError(error));
             return;
         }
         if (payload?.ok === false) {
-            console.warn('[approval-upload] platform alert rejected:', payload);
+            CoopSafeLog.warn("[approval-upload] platform alert rejected:", payload);
         }
     } catch (e) {
-        console.warn('[approval-upload] notify failure skipped:', e);
+        CoopSafeLog.warn("[approval-upload] notify failure skipped:", e);
     }
 } // End of notifyApprovalUploadFailure
 
@@ -9650,7 +9653,7 @@ async function fetchApprovalBootstrapSummary(fallbackSummary = null) {
         if (error) throw error;
         return normalizeApprovalBootstrapSummary(data, fallback);
     } catch (error) {
-        console.warn('approval bootstrap summary fallback', error);
+        CoopSafeLog.warn("approval bootstrap summary fallback", error);
         return fallback;
     }
 } // End of fetchApprovalBootstrapSummary
@@ -9771,7 +9774,7 @@ function scheduleApprovalBackgroundRefresh(initialTab) {
                     await ensureTodoListLoaded({ render: false, force: true });
                 }
             } catch (error) {
-                console.warn('approval background refresh failed', error);
+                CoopSafeLog.warn("approval background refresh failed", error);
             }
         }, 0);
     });
@@ -9833,7 +9836,7 @@ async function loadApprovalCards() {
         if (error) throw error;
         approvalCardData = Array.isArray(data) ? data : [];
     } catch (error) {
-        console.warn('approval card load failed', error);
+        CoopSafeLog.warn("approval card load failed", error);
         approvalCardData = [];
     }
     populateApprovalCardSelect();
@@ -10338,7 +10341,7 @@ async function calculateLeave() {
             return;
         }
     } catch (err) {
-        console.error('Leave snapshot load failed:', err);
+        CoopSafeLog.error("Leave snapshot load failed:", err);
     }
 
     // 공통 모듈 로드 실패 시 기존 RPC 값으로 폴백
@@ -11566,7 +11569,7 @@ async function loadApprovalRelatedDocById(docId) {
         .eq('id', safeDocId)
         .maybeSingle();
     if (error) {
-        console.warn('loadApprovalRelatedDocById failed:', error);
+        CoopSafeLog.warn("loadApprovalRelatedDocById failed:", error);
         return null;
     }
     return data || null;
@@ -12529,7 +12532,7 @@ async function createNoticeDraftFromApproval(doc) {
         p_source_approval_id: doc.id
     };
     const { error } = await _supabase.rpc('upsert_notice_secure', payload);
-    if (error) console.error('공지 초안 생성 실패:', error);
+    if (error) CoopSafeLog.error("공지 초안 생성 실패:", error);
 }
 
 // [수정] 상신 (대리상신, 자동정렬, 상태값 처리 포함)
@@ -13058,7 +13061,7 @@ async function handleDraftSubmit(e) {
             try {
                 await deleteApprovalDraft(currentApprovalDraftId, { skipConfirm: true, silent: true });
             } catch (cleanupError) {
-                console.warn('approval draft cleanup failed after submit', cleanupError);
+                CoopSafeLog.warn("approval draft cleanup failed after submit", cleanupError);
             }
         }
     }
@@ -13242,21 +13245,21 @@ async function processApprovalDoc(docId, action, reason = '') {
     try {
         await applyApprovalLeaveCancelSettlement(doc, newStatus, { targetDoc: leaveCancelTargetDoc });
     } catch (leaveCancelError) {
-        console.error('휴가 취소 반영 실패:', leaveCancelError);
+        CoopSafeLog.error("휴가 취소 반영 실패:", leaveCancelError);
         leaveCancelSettlementNotice = '원 휴가 문서 취소 반영은 완료하지 못했습니다. 휴가 상태를 확인해 주세요.';
     }
     let businessTripCancelSettlementNotice = '';
     try {
         await applyApprovalBusinessTripCancelSettlement(doc, newStatus, { targetDoc: businessTripCancelTargetDoc });
     } catch (businessTripCancelError) {
-        console.error('출장 취소 반영 실패:', businessTripCancelError);
+        CoopSafeLog.error("출장 취소 반영 실패:", businessTripCancelError);
         businessTripCancelSettlementNotice = '원 출장 문서 취소 반영은 완료하지 못했습니다. 출장 상태를 확인해 주세요.';
     }
     let attendanceSettlementNotice = '';
     try {
         await applyApprovalAttendanceSettlement(doc, newStatus);
     } catch (settlementError) {
-        console.error('시간외 근로 반영 실패:', settlementError);
+        CoopSafeLog.error("시간외 근로 반영 실패:", settlementError);
         attendanceSettlementNotice = '시간외 근로 후처리는 반영하지 못했습니다. 설정을 확인해 주세요.';
     }
     await logAudit('approval.process', docId, `${action === '승인' && isSunVillageReviewUser() ? '검토' : action} 처리`, {
