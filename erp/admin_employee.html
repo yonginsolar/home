@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.76
-Change: 2026-09-29 - Route village basic information away from operating-cooperative HR screens.
+Version: v1.0.77
+Change: 2026-10-03 - Review and revoke approval-granted individual permissions.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.76 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.77 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -514,7 +514,7 @@ Change: 2026-09-29 - Route village basic information away from operating-coopera
           <div class="tab-pane fade" id="tabModuleAccess">
             <div class="alert alert-info small mb-3">
               <strong>직원별 업무 범위</strong><br>
-              기본 권한 따름은 지금처럼 역할·직급 권한을 사용합니다. 사용은 해당 업무를 맡길 때, 사용 안 함은 메뉴와 직접 접근을 닫을 때 선택하세요.
+              기본 권한 따름은 역할·직급 권한을 사용합니다. 사용은 업무 전체를 맡길 때, 사용 안 함은 기본 업무 권한을 닫을 때 선택하세요. 결재로 추가한 개별 권한은 아래에서 따로 확인하고 회수할 수 있습니다.
             </div>
             <div id="employeeModuleAccessAdminNote" class="alert alert-warning small d-none"></div>
             <div id="employeeModuleAccessStatus" class="small text-muted text-center py-4">업무 권한을 불러오는 중입니다.</div>
@@ -522,6 +522,7 @@ Change: 2026-09-29 - Route village basic information away from operating-coopera
             <div class="d-grid mt-3">
               <button type="button" id="employeeModuleAccessSaveBtn" class="btn btn-primary btn-rounded" onclick="saveEmployeeModuleAccess()" disabled>업무 권한 저장</button>
             </div>
+            <section class="border-top mt-4 pt-3"><h3 class="h6 fw-bold">🔑 결재로 추가한 업무 권한</h3><div id="employeeApprovedRights" class="text-muted">직원을 선택하면 확인할 수 있습니다.</div></section>
           </div>
           <div class="tab-pane fade" id="tabSunVillageTotalManager">
             <div class="alert alert-info small mb-3">
@@ -4702,6 +4703,7 @@ async function loadEmployeeModuleAccess() {
         if (error) throw error;
         if (empId !== String(currentEmpId || '').trim()) return;
         renderEmployeeModuleAccess(data || {});
+        await loadEmployeeApprovedRights(empId);
     } catch (error) {
         console.error('employee module access load failed:', error);
         const status = document.getElementById('employeeModuleAccessStatus');
@@ -4711,6 +4713,32 @@ async function loadEmployeeModuleAccess() {
         }
     }
 } // End of loadEmployeeModuleAccess
+
+async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim()) {
+    const list = document.getElementById('employeeApprovedRights');
+    if (!list || !empId) return;
+    list.textContent = '결재 권한을 확인하는 중입니다.';
+    const { data, error } = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId });
+    if (empId !== String(currentEmpId || '').trim()) return;
+    list.replaceChildren();
+    if (error) { list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return; }
+    if (!Array.isArray(data) || !data.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return; }
+    data.forEach(right => {
+        const row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2 gap-2';
+        const label = document.createElement('span'); label.textContent = right.label;
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-outline-danger btn-sm'; button.textContent = '권한 회수';
+        button.onclick = () => showConfirm(`${right.label} 권한을 회수할까요? 기본 역할·직급에서 가진 권한은 별도로 유지됩니다.`, async () => {
+            button.disabled = true;
+            try {
+                const result = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId, p_revoke_key: right.key });
+                if (result.error) throw result.error;
+                if (empId === String(currentEmpId || '').trim()) await loadEmployeeApprovedRights(empId);
+                showAlert('결재로 추가한 권한을 회수했습니다. 기본 권한은 변경하지 않았습니다.');
+            } catch (_) { button.disabled = false; showAlert('권한을 회수하지 못했습니다. 현재 권한을 다시 확인해 주세요.'); }
+        });
+        row.append(label, button); list.append(row);
+    });
+}
 
 async function saveEmployeeModuleAccess() {
     if (employeeModuleAccessSaveInFlight) return;
