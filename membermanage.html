@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.158
-Change: Show missing member information after login and provide secure contact/account completion.
+Version: v1.0.159
+Change: Safely preserve names and text used by member action buttons.
 -->
 <html lang="ko">
 <head>
-    <script>console.log('[Version] v1.0.158 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.159 | membermanage.html');</script>
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
@@ -2702,9 +2702,18 @@ return String(value)
 function escapeJsString(value = '') {
 return String(value ?? '')
 .replace(/\\/g, '\\\\')
-.replace(/'/g, "\\'")
+.replace(/'/g, '\\u0027')
+.replace(/"/g, '\\u0022')
+.replace(/&/g, '\\u0026')
+.replace(/</g, '\\u003C')
+.replace(/>/g, '\\u003E')
+.replace(/\u2028/g, '\\u2028')
+.replace(/\u2029/g, '\\u2029')
 .replace(/\r/g, '\\r')
 .replace(/\n/g, '\\n');
+}
+function encodeInlineArgument(value) {
+return encodeURIComponent(String(value ?? '')).replace(/'/g, '%27');
 }
 function safeUrl(value = '') {
 const raw = String(value || '').trim();
@@ -8539,8 +8548,8 @@ function renderConnectTabUI(container, isConnected, targetInfo, activeIsManagedP
 if (isConnected) {
 // [Case A] 이미 연결됨: 검색창 숨김 + 해제 버튼 노출
 const safeTargetName = escapeHtml(targetInfo?.name || '알 수 없음');
-const safeTargetId = encodeURIComponent(String(targetInfo?.id || ''));
-const safeTargetNameArg = encodeURIComponent(String(targetInfo?.name || ''));
+const safeTargetId = encodeInlineArgument(targetInfo?.id || '');
+const safeTargetNameArg = encodeInlineArgument(targetInfo?.name || '');
 const msg = `현재 <b>'${safeTargetName}'</b> 님이<br>이 계정을 관리하고 있습니다.`;
 
 container.innerHTML = `
@@ -8760,9 +8769,9 @@ filteredList.forEach(m => {
 const typeBadge = m.member_type === '단체' ? '<span class="badge bg-info">단체</span>' : '<span class="badge bg-secondary">개인</span>';
 // 이메일 마스킹 (선택 사항)
 const emailDisplay = escapeHtml(m.email || '이메일 없음');
-const safeTargetId = encodeURIComponent(String(m.id || ''));
+const safeTargetId = encodeInlineArgument(m.id || '');
 const safeTargetName = escapeHtml(m.name || '');
-const safeTargetNameArg = encodeURIComponent(String(m.name || ''));
+const safeTargetNameArg = encodeInlineArgument(m.name || '');
 
 html += `
            <li class="list-group-item d-flex justify-content-between align-items-center p-2">
@@ -8959,8 +8968,8 @@ const safeName = escapeHtml(getMemberPreferredDisplayName(f) || f.name || '');
 const safeMemberId = escapeHtml(f.member_id || '승인 대기중');
 const isActiveManagedLink = f.relation_kind === 'manager';
 const actionTargetId = isActiveManagedLink ? f.manager_id_for_action : (f.managed_id || f.id);
-const safeMemberUuid = encodeURIComponent(String(actionTargetId || ''));
-const safeMemberNameArg = encodeURIComponent(String(f.name || ''));
+const safeMemberUuid = encodeInlineArgument(actionTargetId || '');
+const safeMemberNameArg = encodeInlineArgument(f.name || '');
 const relationBadge = getFamilyRelationBadgeHtml(f, profileId);
 const disconnectButton = f.can_disconnect
 ? `<button class="btn btn-outline-danger btn-sm" type="button" onclick="disconnectRelation(decodeURIComponent('${safeMemberUuid}'), ${isActiveManagedLink}, decodeURIComponent('${safeMemberNameArg}'))">

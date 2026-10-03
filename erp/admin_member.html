@@ -6,7 +6,7 @@ Change: Stable donation order with newest entries first within the same donation
 <html lang="ko">
 <head>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.194';
+window.ADMIN_MEMBER_VERSION = 'v1.0.195';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -4813,9 +4813,18 @@ function escapeHtml(value) {
 function escapeJsString(value) {
     return String(value ?? '')
         .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'")
+        .replace(/'/g, '\\u0027')
+        .replace(/"/g, '\\u0022')
+        .replace(/&/g, '\\u0026')
+        .replace(/</g, '\\u003C')
+        .replace(/>/g, '\\u003E')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029')
         .replace(/\r/g, '\\r')
         .replace(/\n/g, '\\n');
+}
+function encodeInlineArgument(value) {
+    return encodeURIComponent(String(value ?? '')).replace(/'/g, '%27');
 }
 function decodeHtmlEntities(value) {
     const textarea = document.createElement('textarea');
@@ -7574,7 +7583,7 @@ function renderMemberHistoryContent(type) {
             data.forEach(item => {
                 const amount = Number(item.amount || 0);
                 const amountClass = amount < 0 ? 'text-danger' : 'text-success';
-                const rowData = encodeURIComponent(JSON.stringify(item));
+                const rowData = encodeInlineArgument(JSON.stringify(item));
                 const notificationControl = renderCapitalNotificationHistoryControl(item);
                 html += `<tr>
                     <td data-label="날짜">${escapeHtml(formatAdminMemberKstDate(item.deposit_date))}</td>
@@ -7600,7 +7609,7 @@ function renderMemberHistoryContent(type) {
         if(data.length === 0) html += '<tr><td colspan="5" class="member-history-empty text-center py-3 text-muted">해당 기간의 기부금 내역이 없습니다.</td></tr>';
         else {
             data.forEach(item => {
-                const rowData = encodeURIComponent(JSON.stringify(item));
+                const rowData = encodeInlineArgument(JSON.stringify(item));
                 html += `<tr>
                     <td data-label="날짜">${escapeHtml(formatAdminMemberKstDate(item.donation_date))}</td>
                     <td data-label="금액" class="text-end fw-bold text-primary">${Number(item.amount || 0).toLocaleString('ko-KR')}원</td>
@@ -13212,7 +13221,7 @@ function renderMemberTable(list) {
 
     // 클릭 시 넘길 키값 (UUID 우선)
     const keyForDetail = m.member_uid || m.uid || m.id || memberId;
-    const safeKey = encodeURIComponent(String(keyForDetail || ''));
+    const safeKey = encodeInlineArgument(keyForDetail || '');
 
     return `
       <tr onclick="openMemberDetail(decodeURIComponent('${safeKey}'))" style="cursor: pointer;">
@@ -19784,8 +19793,9 @@ async function uploadOfficialSeal(groupKey) {
 
 	    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : 'png';
 	    const memberSafe = String(group.member_id || groupKey).replace(/[^a-zA-Z0-9_-]/g, '_');
-	    // Store under official_seals/<member_id>/... so storage RLS can enforce self/manager/admin visibility.
-	    const fileName = `official_seals/${memberSafe}/${Date.now()}.${ext}`;
+        const sealCoop = String(await getAdminMemberCoopId() || '').trim();
+        if (!sealCoop) { myAlert('조합 정보를 확인한 뒤 다시 시도해주세요.', 'warning'); return; }
+	    const fileName = `official_seals/${sealCoop}/${memberSafe}/${Date.now()}.${ext}`;
 
     const { error: uploadError } = await _supabase
         .storage
