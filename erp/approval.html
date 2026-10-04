@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.77 | Change: 2026-10-03 - Preserve written content while replacing empty category templates. -->
+<!-- Version: v1.2.78 | Change: 2026-10-04 - Isolate category bodies and reject stale meeting notice imports. -->
 <html lang="ko">
 <head>
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.77 | approval.html');</script>
+  <script>console.log('[Version] v1.2.78 | approval.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1123,7 +1123,7 @@
             <option value="">일반 공문</option><option value="BOARD">이사회 소집</option><option value="GENERAL_ASSEMBLY">총회 소집</option>
           </select>
           <div id="noticeMeetingFields" class="hidden">
-            <div class="d-flex gap-2 mb-2"><select class="form-select" id="noticeMeetingSelect"><option value="">회의꾸러미를 선택하세요</option></select>
+            <div class="d-flex gap-2 mb-2"><select class="form-select" id="noticeMeetingSelect" onchange="invalidateApprovalMeetingNoticeRequest()"><option value="">회의꾸러미를 선택하세요</option></select>
               <button type="button" class="btn btn-outline-secondary text-nowrap" id="noticeMeetingLoad" onclick="changeApprovalMeetingNoticeKind()">목록 갱신</button></div>
             <button type="button" class="btn btn-outline-primary" id="noticeMeetingApply" onclick="applyApprovalMeetingNotice()">회의 내용 불러오기</button>
             <p id="noticeMeetingStatus" class="small text-muted mt-2 mb-0" role="status"></p>
@@ -1621,6 +1621,9 @@ let approvalExpenseSnapshotSupported = false;
 let approvalSalaryLedgerSnapshotSupported = false;
 let approvalOvertimePolicy = null;
 let approvalLastCategory = '';
+const approvalCategoryBodyDrafts = new Map();
+let approvalCategoryBodyDraftScope = '';
+let approvalMeetingNoticeRequestSequence = 0;
 let approvalLeaveCancelCandidates = [];
 let approvalBusinessTripCancelCandidates = [];
 let approvalExpenseAdjustmentSelectedDoc = null;
@@ -3312,6 +3315,7 @@ function resetApprovalComposerForm(options = {}) {
     manualJeongyeolToggleTouched = false;
     approvalLineTemplateAutoApplied = false;
     approvalLastCategory = '';
+    resetApprovalCategoryBodyDrafts();
     approvalExpenseAdjustmentSelectedDoc = null;
 
     setApprovalRelatedDocLabel('', '');
@@ -8246,9 +8250,9 @@ function setApprovalEditorContent(rawValue) {
     else syncApprovalVisualFromSource();
 }
 
-function getApprovalEditorContent() {
+function getApprovalEditorContent(docType = getCurrentApprovalCategory()) {
     if (approvalEditorMode === 'visual') {
-        const currentCategory = getCurrentApprovalCategory();
+        const currentCategory = String(docType || '').trim();
         if (hasGeneralProposalEnhancedEditor(currentCategory)) syncApprovalSourceFromGeneralProposalRichEditor();
         else syncApprovalSourceFromVisual();
     }
@@ -11076,6 +11080,32 @@ function getApprovalResolvedTitle(mainType, generatedTitle) {
     return currentValue;
 } // End of getApprovalResolvedTitle
 
+function invalidateApprovalMeetingNoticeRequest() {
+    approvalMeetingNoticeRequestSequence += 1;
+    const button = document.getElementById('noticeMeetingApply');
+    if (button) button.disabled = false;
+}
+
+function resetApprovalCategoryBodyDrafts() {
+    approvalCategoryBodyDrafts.clear();
+    approvalCategoryBodyDraftScope = '';
+    invalidateApprovalMeetingNoticeRequest();
+}
+
+function prepareApprovalCategoryBodyChange(previousType, nextType) {
+    const scope = String(getApprovalScopedCoopId() || '').trim();
+    const scopeChanged = approvalCategoryBodyDraftScope && approvalCategoryBodyDraftScope !== scope;
+    if (scopeChanged) approvalCategoryBodyDrafts.clear();
+    approvalCategoryBodyDraftScope = scope;
+    invalidateApprovalMeetingNoticeRequest();
+    // The select already contains the new type. Read the editor belonging to the old type.
+    if (!previousType) return { hasDraft: false, body: '' };
+    if (!scopeChanged) approvalCategoryBodyDrafts.set(previousType, getApprovalEditorContent(previousType));
+    const saved = { hasDraft: approvalCategoryBodyDrafts.has(nextType), body: approvalCategoryBodyDrafts.get(nextType) || '' };
+    setApprovalEditorContent('');
+    return saved;
+}
+
 // [수정] 카테고리 변경 핸들러 (반차 UI 제어 포함)
 // [수정] 카테고리 변경 핸들러 (관련 문서 UI 제어 추가)
 function handleCategoryChange() {
@@ -11099,6 +11129,7 @@ function handleCategoryChange() {
     document.getElementById('divMeetingNotice').classList.toggle('hidden', type !== '공문' || !canPerform('minutes.manage'));
     const previousType = String(approvalLastCategory || '').trim();
     const typeChanged = previousType !== String(type || '').trim();
+    const categoryBodyDraft = typeChanged ? prepareApprovalCategoryBodyChange(previousType, type) : null;
     const amtLabel = document.getElementById("amountLabel");
     const amountInput = document.getElementById("appAmount");
     const fileHelp = document.getElementById("fileHelp");
@@ -11339,6 +11370,7 @@ function handleCategoryChange() {
     syncApprovalAttachmentHelp(type);
     syncApprovalTitleInput(type, { force: typeChanged });
     applyDefaultApprovalLineTemplate();
+    if (categoryBodyDraft?.hasDraft) setApprovalEditorContent(categoryBodyDraft.body);
     if (isApprovalHtmlEditorType(type)) void warmApprovalRichEditorAssets();
     setApprovalEditorForCategory(type);
     updateJeongyeolUi();
@@ -11348,6 +11380,7 @@ function handleCategoryChange() {
 }
 
 async function changeApprovalMeetingNoticeKind() {
+    invalidateApprovalMeetingNoticeRequest();
     const kind = document.getElementById('noticeMeetingKind').value;
     document.getElementById('noticeMeetingFields').classList.toggle('hidden', !kind);
     await CoopMeetingNotice.load(_supabase, getApprovalScopedCoopId(), kind);
@@ -11355,22 +11388,27 @@ async function changeApprovalMeetingNoticeKind() {
 
 async function applyApprovalMeetingNotice() {
     const button = document.getElementById('noticeMeetingApply');
-    if (button.disabled) return;
+    if (button.disabled || getCurrentDraftMainType() !== '공문') return;
+    const request = ++approvalMeetingNoticeRequestSequence;
+    const kind = document.getElementById('noticeMeetingKind').value;
+    const meetingId = document.getElementById('noticeMeetingSelect').value;
+    const coopId = getApprovalScopedCoopId();
+    const isCurrent = () => request === approvalMeetingNoticeRequestSequence && getCurrentDraftMainType() === '공문'
+        && kind === document.getElementById('noticeMeetingKind').value
+        && meetingId === document.getElementById('noticeMeetingSelect').value && coopId === getApprovalScopedCoopId();
     button.disabled = true;
     try {
-        const kind = document.getElementById('noticeMeetingKind').value;
-        const meetingId = document.getElementById('noticeMeetingSelect').value;
-        const coopId = getApprovalScopedCoopId();
         const data = await CoopMeetingNotice.read(_supabase, coopId, meetingId, kind);
-        if (kind !== document.getElementById('noticeMeetingKind').value || meetingId !== document.getElementById('noticeMeetingSelect').value || coopId !== getApprovalScopedCoopId()) return;
+        if (!isCurrent()) return;
         if (String(getApprovalEditorContent() || '').trim() && !await showConfirm('작성 중인 본문을 선택한 회의의 소집 공문으로 바꿀까요?')) return;
+        if (!isCurrent()) return;
         document.getElementById('noticeSubject').value = data.title;
         document.getElementById('noticeReceiver').value = data.receiver;
         markApprovalTitleInputDirty('notice');
         setApprovalEditorContent(data.content);
         document.getElementById('noticeMeetingStatus').textContent = '일시·장소·안건 제목을 불러왔습니다. 필요한 내용을 편집한 뒤 결재선과 첨부를 확인하세요.';
-    } catch (error) { showAlert(error.message); }
-    finally { button.disabled = false; }
+    } catch (error) { if (isCurrent()) showAlert(error.message); }
+    finally { if (request === approvalMeetingNoticeRequestSequence) button.disabled = false; }
 }
 
 function openAppDescPreview() {
