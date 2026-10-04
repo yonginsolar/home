@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.10
-Change: 2026-10-05 - Check participation for the current round with the server-linked voter profile.
+Version: v1.0.11
+Change: 2026-10-05 - Check current-round participation and show completion again on a completed voter's return.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-10-05 - Check participation for the current round with the server-l
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>조합원 투표소</title>
-    <script>console.log('[Version] v1.0.10 | vote.html');</script>
+    <script>console.log('[Version] v1.0.11 | vote.html');</script>
     <link rel="stylesheet" href="style.css">
    <style>
 /* =========================================
@@ -555,6 +555,12 @@ async function loadElection(election) {
 
             // [핵심] 남은 투표가 없다면 즉시 종료 (무투표/후보미등록 포함)
             if (pendingBallots.length === 0) {
+                // Completed contested/binary ballots take precedence over accompanying
+                // uncontested or empty districts, which do not require a ballot.
+                if (allBallots.some((b) => b.requiresVoting)) {
+                    showCompleteScreen();
+                    return;
+                }
                 const uncontestedCount = allBallots.filter((b) => b.ballotState === DISTRICT_VOTE_STATE.UNCONTESTED).length;
                 const noCandidateCount = allBallots.filter((b) => b.ballotState === DISTRICT_VOTE_STATE.NO_CANDIDATE).length;
                 let closeMessage = '이미 모든 투표를 완료하셨습니다.\n투표소를 종료합니다.';
