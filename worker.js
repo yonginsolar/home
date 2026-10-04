@@ -3,6 +3,7 @@ const SUN_IMAGE='/shared/sun_share.png';
 const SUN_ICON='/shared/sun_favicon.svg?v=1.0.0';
 const NOINDEX='noindex, nofollow, noarchive, nosnippet';
 const PRIVATE_ROBOTS='User-agent: *\nDisallow: /\n';
+const SECURITY_VERSION='20261004-1';
 
 const profile=(id,name,appName,description,origin,publicHosts=[],extra={})=>Object.freeze({
   id,name,appName,description,origin,publicHosts:new Set(publicHosts),...extra
@@ -154,7 +155,26 @@ function withProfileHeaders(response,p,blocked,headRequest=false,revalidate=fals
 
 class RemoveElement{element(element){element.remove();}}
 
-export default{async fetch(request,env){
+// Keep normal scripts, social popups, PDF workers and preview frames usable.
+// Public homepage previews may be embedded by the registered ERP hosts only;
+// private screens cannot be framed by another origin.
+function secureResponse(request,response){
+  const url=new URL(request.url),headers=new Headers(response.headers);
+  headers.set('X-Content-Type-Options','nosniff');
+  headers.set('X-Coop-Security-Version',SECURITY_VERSION);
+  const privatePath=noIndex(getProfile(url.hostname),url.hostname,url.pathname)||url.pathname.startsWith('/ai/');
+  headers.set('Referrer-Policy',privatePath?'no-referrer':'strict-origin-when-cross-origin');
+  if(url.protocol==='https:')headers.set('Strict-Transport-Security','max-age=86400');
+  if((headers.get('Content-Type')||'').toLowerCase().includes('text/html')){
+    const parents=privatePath?"'self'":
+      "'self' "+[...HOST_PROFILES.keys()].filter(h=>h!=='auth.coopco.kr').map(h=>'https://'+h).join(' ');
+    headers.set('Content-Security-Policy',`base-uri 'self'; object-src 'none'; frame-ancestors ${parents}`);
+    if(privatePath)headers.set('X-Frame-Options','SAMEORIGIN');
+  }
+  return new Response(request.method==='HEAD'?null:response.body,{status:response.status,statusText:response.statusText,headers});
+}
+
+async function routeRequest(request,env){
   const url=new URL(request.url),hostname=host(url.hostname),p=getProfile(hostname);
   const aiRoute = url.pathname === '/ai/mcp' ? '/mcp/' + hostname
     : /^\/ai\/oauth\/(register|authorize|token)$/.test(url.pathname) ? '/oauth/' + hostname + '/' + url.pathname.split('/').pop()
@@ -210,4 +230,8 @@ export default{async fetch(request,env){
     }}).transform(response);
   rewritten.headers.delete('etag');rewritten.headers.delete('content-length');addProfileHeaders(rewritten.headers,p,blocked);
   return rewritten;
+}
+
+export default{async fetch(request,env){
+  return secureResponse(request,await routeRequest(request,env));
 }};

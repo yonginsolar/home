@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive"><title>PIN 변경 인증 확인</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2"></script>
+<script>window.__COOP_ROUTE_APP__='erp';</script>
+<script src="/shared/route_guard.js?v=20260916-1"></script>
+<style>body{font-family:system-ui,sans-serif;background:#f8f9fa;color:#212529;padding:32px;word-break:keep-all}button{padding:12px;font-size:16px}</style>
+</head><body><h1>인증 확인</h1><p id="status" role="status">현재 계정의 인증을 확인하고 있습니다.</p>
+<button type="button" onclick="window.close()">창 닫기</button>
+<script>
+(async function(){
+  const status=document.getElementById('status');
+  try{
+    const pending=JSON.parse(sessionStorage.getItem('coop_export_pin_reauth')||'null');
+    if(!pending)throw new Error('NO_REQUEST');
+    const client=supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{
+      global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}
+    });
+    const {data:{user},error}=await client.auth.getUser();
+    if(error||user?.id!==pending.userId)throw new Error('WRONG_ACCOUNT');
+    const result=await client.rpc('member_export_confirm_pin_reset',{p_request_id:pending.requestId});
+    if(result.error)throw result.error;
+    const returnUrl=sessionStorage.getItem('coop_export_pin_return');
+    if(returnUrl){
+      const target=new URL(returnUrl);if(target.origin!==location.origin||!target.pathname.startsWith('/erp/'))throw new Error('BAD_RETURN');
+      sessionStorage.removeItem('coop_export_pin_return');location.replace(target.href);return;
+    }
+    if(window.opener&&!window.opener.closed){
+      window.opener.postMessage({type:'coop-pin-reauth',requestId:pending.requestId},location.origin);
+      status.textContent='인증을 확인했습니다. 원래 화면에서 새 PIN을 입력해 주세요.';
+      window.close();
+    }else status.textContent='인증을 확인했습니다. 원래 조합원 관리 화면으로 돌아가 주세요.';
+  }catch(_){status.textContent='현재 계정의 재인증을 확인하지 못했습니다. 원래 화면에서 PIN 재설정을 다시 눌러 주세요.';}
+})();
+</script></body></html>
