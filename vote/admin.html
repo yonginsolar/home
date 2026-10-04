@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.57
+Version: v1.0.58
 Change: 2026-10-05 - Keep participation and winner calculations within the current round.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-05 - Keep participation and winner calculations within the curre
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.57 | admin.html');</script>
+    <script>console.log('[Version] v1.0.58 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -710,7 +710,7 @@ function safeUrl(value) {
         return '';
     }
 }
-    import { AdminService } from './AdminService.js?v=20261005-1';
+    import { AdminService } from './AdminService.js?v=20261005-2';
     import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js?v=20261005-1';
 
     const KST_TZ_VOTE_ADMIN = 'Asia/Seoul';
@@ -1059,13 +1059,7 @@ function safeUrl(value) {
             )
                 .eq('election_id', currentElectionId)
                 .eq('status', 'APPROVED'),
-            scopeByTenant(
-                supabase
-                    .from('ballots')
-                    .select('district_id, candidate_id')
-            )
-                .eq('election_id', currentElectionId)
-                .eq('round', Number(currentElectionData?.current_round || 1))
+            service.getResults(currentElectionId).then(data => ({ data }))
         ]);
 
         if (districtRes.error) throw districtRes.error;
@@ -1120,7 +1114,7 @@ function safeUrl(value) {
                 if (String(ballot.district_id) !== districtId) return;
                 const candidateId = String(ballot.candidate_id || '');
                 if (!candidateId || !voteCountMap.has(candidateId)) return;
-                voteCountMap.set(candidateId, (voteCountMap.get(candidateId) || 0) + 1);
+                voteCountMap.set(candidateId, (voteCountMap.get(candidateId) || 0) + Number(ballot.vote_count || 0));
             });
 
             const ranked = districtCandidates
@@ -1155,13 +1149,7 @@ function safeUrl(value) {
 
         const memberMap = new Map();
         if (uniqueWinnerMemberUuids.length > 0) {
-            const { data: memberRows, error: memberErr } = await scopeByTenant(
-                supabase
-                    .from('coop_members')
-                    .select('id, member_id, name')
-            )
-                .in('id', uniqueWinnerMemberUuids);
-            if (memberErr) throw memberErr;
+            const memberRows = await service.getElectionMembers(currentElectionId, { ids: uniqueWinnerMemberUuids });
             (memberRows || []).forEach((memberRow) => {
                 memberMap.set(String(memberRow.id), memberRow);
             });
@@ -2195,13 +2183,14 @@ function safeUrl(value) {
             if (electionAdminError) {
                 console.error('admin is_election_admin failed:', electionAdminError);
             }
-            const hasElectionAdminAuthority = hasErpAdminFallback || electionAdminFlag === true;
+            const hasElectionAdminAuthority = !electionAdminError && electionAdminFlag === true;
 
             // 2. 내 정보 조회 (UUID -> Text ID 획득)
+            const { data: linkedMemberId } = await supabase.rpc('get_my_member_profile_id');
             let { data: member, error: memError } = await scopeByTenant(
                 supabase.from('coop_members').select('id, member_id, name, role')
             ) // UUID, TextID, 이름, 역할
-                .eq('id', session.user.id) // 내 UUID로 검색
+                .eq('id', linkedMemberId || session.user.id)
                 .single();
 
             if ((memError || !member) && hasElectionAdminAuthority) {
@@ -2223,28 +2212,11 @@ function safeUrl(value) {
             // 3. 권한 정밀 체크 (3단 논법)
             
             // [Check A] 관리자 Role 확인
-            if (member.role === 'admin' || member.role === 'super_admin' || hasElectionAdminAuthority) {
+            if (hasElectionAdminAuthority) {
                 isAuthorized = true;
                 authType = hasErpAdminFallback ? '관리자(Admin)' : '선거관리 권한';
             } 
             
-            // [Check B] 선관위 확인 (Text ID 사용)
-            // 관리자가 아니라면, coop_officials 테이블에서 내 Text ID를 찾음
-            else if (member.member_id) {
-                const { data: official } = await scopeByTenant(
-                    supabase.from('coop_officials').select('id')
-                )
-                    .eq('member_id', member.member_id) // ★ UUID가 아닌 Text ID로 비교
-                    .eq('category', 'election_comm')
-                    .eq('status', 'active') // 현직 선관위만
-                    .maybeSingle();
-
-                if (official) {
-                    isAuthorized = true;
-                    authType = '선거관리위원';
-                }
-            }
-
             // 4. 결과 처리
             if (isAuthorized) {
                 console.log(`✅ 접속 승인: ${authType}`);
@@ -2636,13 +2608,7 @@ window.loadVoterStats = async () => {
                         .select('member_no, district_id, member_uuid')
                 )
                     .eq('election_id', currentElectionId),
-                scopeByTenant(
-                    supabase
-                        .from('vote_logs')
-                        .select('member_uuid')
-                )
-                    .eq('election_id', currentElectionId)
-                    .eq('round', Number(currentElectionData?.current_round || 1))
+                service.getParticipation(currentElectionId).then(data => ({ data }))
             ]);
 
         if(voterRes.error) throw voterRes.error;
@@ -2657,18 +2623,11 @@ window.loadVoterStats = async () => {
         }
 
         // 2. 투표자 UUID Set 생성 (빠른 검색용)
-        const votedSet = new Set(logs.map(l => l.member_uuid));
+        const votedSet = new Set(logs.filter(l => l.has_voted).map(l => `${l.district_id}:${l.member_uuid}`));
 
         // 3. 조합원 상세 정보 가져오기 (이름, 전화번호)
         const memberNos = voters.map(v => v.member_no);
-        const { data: members, error: memberError } = await scopeByTenant(
-            supabase
-                .from('coop_members')
-                .select('member_id, name, phone')
-        )
-            .in('member_id', memberNos);
-
-        if(memberError) throw memberError;
+        const members = await service.getElectionMembers(currentElectionId, { memberNos });
 
         const memberMap = {};
         if(members) members.forEach(m => memberMap[m.member_id] = m);
@@ -2688,7 +2647,7 @@ window.loadVoterStats = async () => {
             const memInfo = memberMap[v.member_no] || { name: '정보없음', phone: '-' };
             
             // [핵심] 투표 여부 판별
-            const isVoted = votedSet.has(v.member_uuid);
+            const isVoted = votedSet.has(`${v.district_id}:${v.member_uuid}`);
 
             const combinedData = {
                 member_no: v.member_no,
@@ -2879,29 +2838,13 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
 
         try {
             // 1. 조합원 정보 + UUID 조회
-            const { data: member, error } = await scopeByTenant(
-                supabase
-                    .from('coop_members')
-                    .select('*')
-            )
-                .eq('member_id', memberNo)
-                .single();
-
-        if (error) throw error;
+            const [member] = await service.getElectionMembers(currentElectionId, { memberNos: [memberNo] });
+            if (!member) throw new Error('선거인 정보를 찾지 못했습니다.');
 
             // 2. [핵심] 투표 여부 확인 (vote_logs 조회)
             // member.id는 회원의 UUID입니다.
-            const { count, error: logError } = await scopeByTenant(
-                supabase
-                    .from('vote_logs')
-                    .select('*', { count: 'exact', head: true })
-            )
-                .eq('election_id', currentElectionId)
-                .eq('member_uuid', member.id);
-
-        if (logError) throw logError;
-
-        const hasVoted = count > 0; // 0보다 크면 투표한 것임
+        const participation = await service.getParticipation(currentElectionId);
+        const hasVoted = participation.some(row => row.member_uuid === member.id && row.has_voted_any);
 
         // 3. UI 렌더링
         let alertHtml = '';
@@ -2932,7 +2875,7 @@ window.openVoterInfo = async (memberNo, currentDistrictId) => {
                 <tr><td style="color:#666; width:80px;">이름</td> <td><strong>${safeName}</strong></td></tr>
                 <tr><td style="color:#666;">연락처</td> <td>${safePhone}</td></tr>
                 <tr><td style="color:#666;">주소</td> <td>${safeAddress}</td></tr>
-                <tr><td style="color:#666;">UUID</td> <td style="font-size:0.8rem; color:#999;">${safeUuid}</td></tr> </table>
+                </table>
         `;
 
         // 4. 선거구 Select 옵션 생성
@@ -2979,22 +2922,11 @@ async function updateVoterDistrict() {
         try {
             // [안전장치] 변경 전, 투표 여부를 다시 확인 (Backend Guard)
             // 1. member_no로 member_uuid 찾기
-            const { data: memData } = await scopeByTenant(
-                supabase
-                    .from('coop_members')
-                    .select('id')
-            )
-                .eq('member_id', memberNo)
-                .single();
+            const [memData] = await service.getElectionMembers(currentElectionId, { memberNos: [memberNo] });
 
         if (memData) {
-            const { count } = await scopeByTenant(
-                supabase.from('vote_logs').select('*', { count: 'exact', head: true })
-            )
-                .eq('election_id', currentElectionId)
-                .eq('member_uuid', memData.id);
-
-            if (count > 0) {
+            const participation = await service.getParticipation(currentElectionId);
+            if (participation.some(row => row.member_uuid === memData.id && row.has_voted_any)) {
                 showAlert("⛔ 오류: 이미 투표를 완료한 사용자는 수정할 수 없습니다.");
                 window.openVoterInfo(memberNo, currentDistrictId); // 모달 상태 새로고침 (잠금 처리됨)
                 return;
@@ -3480,15 +3412,7 @@ window.searchMembers = async () => {
                 showAlert("검색어를 다시 입력해주세요.");
                 return;
             }
-            const { data: members, error } = await scopeByTenant(
-                supabase
-                    .from('coop_members')
-                    .select('member_id, id, name, phone, address')
-            )
-                .or(`name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`)
-                .limit(20);
-
-            if (error) throw error;
+            const members = await service.getElectionMembers(currentElectionId, { keyword });
 
             if (!members || members.length === 0) {
                 resultArea.innerHTML = '<p style="text-align:center; color:#666;">검색 결과가 없습니다.</p>';
@@ -3897,13 +3821,8 @@ async function loadCandidates() {
                 if (c.photo_url.startsWith('http')) {
                     photoSrc = safeUrl(c.photo_url) || DEFAULT_PROFILE_IMG;
                 } else {
-                    // 경로만 있다면 서명된 URL 생성
-                    const { data: photoData } = await supabase
-                        .storage
-                        .from('candidate_photos') // 주의: 버킷명 확인 (photos vs proofs)
-                        .createSignedUrl(c.photo_url, 3600);
-                    
-                    if (photoData?.signedUrl) photoSrc = safeUrl(photoData.signedUrl) || DEFAULT_PROFILE_IMG;
+                    const { data: photoData } = supabase.storage.from('candidates').getPublicUrl(c.photo_url);
+                    if (photoData?.publicUrl) photoSrc = safeUrl(photoData.publicUrl) || DEFAULT_PROFILE_IMG;
                 }
             }
 
@@ -4617,13 +4536,7 @@ window.finalizeNomination = async () => {
                 )
                     .eq('election_id', currentElectionId)
                     .eq('status', 'APPROVED'),
-                scopeByTenant(
-                    supabase
-                        .from('ballots')
-                        .select('district_id, candidate_id, choice')
-                )
-                    .eq('election_id', currentElectionId)
-                    .eq('round', Number(currentElectionData?.current_round || 1))
+                service.getResults(currentElectionId).then(data => ({ data }))
             ]);
 
             if (distRes.error) throw distRes.error;
@@ -4669,8 +4582,8 @@ window.finalizeNomination = async () => {
                     
                     distBallots.forEach(b => {
                         if (counts[b.choice] !== undefined) { 
-                            counts[b.choice]++; 
-                            total++; 
+                            counts[b.choice] += Number(b.vote_count || 0);
+                            total += Number(b.vote_count || 0);
                         }
                     });
                     
@@ -4728,8 +4641,8 @@ window.finalizeNomination = async () => {
                     
                     distBallots.forEach(b => {
                         if (b.candidate_id && voteCounts[b.candidate_id] !== undefined) {
-                            voteCounts[b.candidate_id]++;
-                            totalVotesInDist++;
+                            voteCounts[b.candidate_id] += Number(b.vote_count || 0);
+                            totalVotesInDist += Number(b.vote_count || 0);
                         }
                     });
 
@@ -4911,13 +4824,7 @@ window.searchCandidateMember = async () => {
             resDiv.innerHTML = '<div style="padding:10px; color:#999;">검색어를 다시 입력하세요.</div>';
             return;
         }
-        const { data: members, error } = await scopeByTenant(
-            supabase.from('coop_members').select('member_id, id, name, phone, address, rrn_display, member_type, corp_number, business_number')
-        ) 
-            .or(`name.ilike.%${safeKeyword}%,phone.ilike.%${safeKeyword}%`)
-            .limit(15);
-
-        if(error) throw error;
+        const members = await service.getElectionMembers(currentElectionId, { keyword });
 
         if(!members || members.length === 0) {
             resDiv.innerHTML = '<div style="padding:10px; color:#999;">결과 없음</div>';
@@ -4932,7 +4839,7 @@ window.searchCandidateMember = async () => {
             if (registeredUuids.includes(m.id)) return;
 
             showCount++;
-            const rawBirth = m.rrn_display || "";
+            const rawBirth = m.birth_date || "";
             const memberId = m.member_id || "";
             const safeNameText = escapeHtml(m.name || '');
             const safePhoneText = escapeHtml(m.phone || '');
@@ -5045,15 +4952,19 @@ window.executeCandidateRegister = async () => {
         const proofFile = document.getElementById('new-cand-proof').files[0];
         let photoUrl = null; let proofUrl = null;
         const timestamp = Date.now();
+        const { data: uploadAuth, error: uploadAuthError } = await supabase.auth.getUser();
+        if (uploadAuthError || !uploadAuth?.user?.id) throw new Error('로그인 정보를 확인하지 못했습니다.');
+        const uploaderId = uploadAuth.user.id;
 
         if(photoFile) {
-            const { data, error: pErr } = await supabase.storage.from('candidate_photos')
-                .upload(`candidates/${currentElectionId}/${uuid}_photo_${timestamp}`, photoFile);
-            if(pErr) throw pErr; photoUrl = data.path;
+            const photoPath = `${uploaderId}/${currentElectionId}_${uuid}_photo_${timestamp}.${photoFile.name.split('.').pop()}`;
+            const { data, error: pErr } = await supabase.storage.from('candidates').upload(photoPath, photoFile);
+            if(pErr) throw pErr;
+            photoUrl = supabase.storage.from('candidates').getPublicUrl(data.path).data.publicUrl;
         }
         if(proofFile) {
             const { data, error: prErr } = await supabase.storage.from('candidate_proofs')
-                .upload(`candidates/${currentElectionId}/${uuid}_proof_${timestamp}`, proofFile);
+                .upload(`${uploaderId}/${currentElectionId}_${uuid}_proof_${timestamp}.${proofFile.name.split('.').pop()}`, proofFile);
             if(prErr) throw prErr; proofUrl = data.path;
         }
 

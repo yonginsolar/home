@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.16
-Change: 2026-03-28 - Escape district action identifiers before injecting into admin setup button handlers.
+Version: v1.0.17
+Change: 2026-10-05 - Server-verified election authority and election-scoped roster lookup.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선거 관리 대시보드</title>
-    <script>console.log('[Version] v1.0.16 | admin_setup.html');</script>
+    <script>console.log('[Version] v1.0.17 | admin_setup.html');</script>
 
 <style>
     /* [기본 변수] */
@@ -377,7 +377,7 @@ function escapeJsString(value) {
         .replace(/\r/g, '\\r')
         .replace(/\n/g, '\\n');
 }
-    import { AdminService } from './AdminService.js?v=20260826-1';
+    import { AdminService } from './AdminService.js?v=20261005-2';
     import { supabase } from './ElectionService.js';
 
     const KST_TZ_ADMIN_SETUP = 'Asia/Seoul';
@@ -421,6 +421,7 @@ function escapeJsString(value) {
     let editingDistrictId = null;
     // [전역 변수 추가]
     let allMembers = [];      // 전체 조합원 캐시
+    let allMembersElectionId = null;
     let currentVoters = [];   // 현재 선택된 선거구의 유권자
     let districtsCache = [];  // 선거구 정보 캐시 (중복 체크용)
     let selectedMemberIds = new Set(); // 왼쪽 패널 선택
@@ -610,7 +611,7 @@ function escapeJsString(value) {
             document.getElementById('step-3').style.display = 'block';
 
             // Step 3용 조합원 데이터 미리 로드 (없으면)
-            if(allMembers.length === 0) fetchAllMembers();
+            if(allMembersElectionId !== newElectionId) await fetchAllMembers();
         } else {
              document.getElementById('step-3').style.display = 'none';
         }
@@ -651,17 +652,14 @@ function escapeJsString(value) {
 
 // [Step 3] 조합원 불러오기 (정조합원 필터링 추가)
     async function fetchAllMembers() {
-        // status가 'ACTIVE'(또는 '정상')인 사람만 가져오기
-        // DB에 저장된 값이 한글 '정상'이라면 .eq('status', '정상') 으로 변경하세요.
-        const { data, error } = await scopeByTenant(
-            supabase.from('coop_members').select('id, member_id, name, phone, address, email, birth_date, member_type, corp_number, business_number')
-        )
-            .eq('status', '정상') // <--- 여기가 핵심 변경 사항입니다.
-            .order('name');
-
-        if(error) return window.showAlert('조합원 DB 로드 실패: ' + error.message);
+        const requestedElectionId = newElectionId;
+        let data;
+        try { data = await adminService.getElectionMembers(requestedElectionId); }
+        catch (error) { return window.showAlert('조합원 명부를 불러오지 못했습니다: ' + error.message); }
+        if (requestedElectionId !== newElectionId) return;
 
         allMembers = data;
+        allMembersElectionId = requestedElectionId;
         document.getElementById('total-member-count').innerText = `${data.length}명 (정조합원)`;
         renderSourceList(data);
     }
@@ -893,14 +891,15 @@ function escapeJsString(value) {
 
         // 유권자 데이터 가져오기
         const { data, error } = await scopeByTenant(
-            supabase.from('election_voters').select('*, member:coop_members(name, member_id, member_type)')
+            supabase.from('election_voters').select('*')
         )
             .eq('election_id', newElectionId)
             .eq('district_id', distId)
             .order('created_at', { ascending: false }); // 최신순
 
         if(error) console.error(error);
-        currentVoters = data || [];
+        currentVoters = (data || []).map(row => ({ ...row,
+            member: allMembers.find(member => member.id === row.member_uuid) || null }));
         document.getElementById('voter-count').innerText = `${currentVoters.length}명`;
         renderTargetList(currentVoters);
     };
@@ -1526,15 +1525,11 @@ window.resumeSetup = async (el) => {
                 const rawPermissions = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
                 storedErpPermissions = Array.isArray(rawPermissions) ? rawPermissions : [];
             } catch (_) {}
-            const hasErpAdminFallback =
-                storedErpUser?.role === 'admin' ||
-                storedErpUser?.role === 'admin_all' ||
-                storedErpPermissions.includes('member.admin');
             const { data: electionAdminFlag, error: electionAdminError } = await supabase.rpc('is_election_admin');
             if (electionAdminError) {
                 console.error('admin_setup is_election_admin failed:', electionAdminError);
             }
-            const hasElectionAdminAuthority = hasErpAdminFallback || electionAdminFlag === true;
+            const hasElectionAdminAuthority = !electionAdminError && electionAdminFlag === true;
 
             let { data: member, error: dbError } = await scopeByTenant(
                 supabase.from('coop_members').select('name, role, email')
@@ -1553,7 +1548,7 @@ window.resumeSetup = async (el) => {
             }
 
             // role이 admin이 아니면 접속 불가
-            if (member.role !== 'admin' && member.role !== 'super_admin' && !hasElectionAdminAuthority) {
+            if (!hasElectionAdminAuthority) {
                 showAlert("⛔ 선거 관리 권한이 필요합니다.");
                 goToErpVoteHub();
                 return;

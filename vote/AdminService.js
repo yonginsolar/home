@@ -1,6 +1,6 @@
 /*
-Version: v1.0.12
-Change: 2026-10-05 - Keep turnout and tally scoped to the current election round.
+Version: v1.0.13
+Change: 2026-10-05 - Election-only member lookup, participation and closed-election aggregate tally.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -124,25 +124,9 @@ export class AdminService {
     // 5. [모니터링] 실시간 투표율 집계
     // RLS 때문에 일반 유저는 못 쓰는 쿼리
     async getTurnoutStats(electionId) {
-        const coopId = await getRuntimeCoopId();
-        const round = await this.getCurrentRound(electionId);
-        const [voterResult, voteResult] = await Promise.all([
-            scopeByTenant(supabase
-                .from('election_voters')
-                .select('*', { count: 'exact', head: true }), coopId)
-                .eq('election_id', electionId),
-            scopeByTenant(supabase
-                .from('vote_logs')
-                .select('*', { count: 'exact', head: true }), coopId)
-                .eq('election_id', electionId)
-                .eq('round', round)
-        ]);
-
-        if (voterResult.error) throw voterResult.error;
-        if (voteResult.error) throw voteResult.error;
-
-        const totalVoters = voterResult.count || 0;
-        const currentVotes = voteResult.count || 0;
+        const participation = await this.getParticipation(electionId);
+        const totalVoters = participation.length;
+        const currentVotes = participation.filter(row => row.has_voted).length;
 
         return {
             total: totalVoters,
@@ -154,23 +138,31 @@ export class AdminService {
     // 6. [개표] 결과 가져오기 (관리자 전용)
     async getResults(electionId) {
         const coopId = await getRuntimeCoopId();
-        const round = await this.getCurrentRound(electionId);
-        // 실제로는 DB RPC로 집계하는 게 빠르지만, MVP에서는 JS로 계산
-        // 1. 모든 투표용지 가져오기
-        const { data: ballots, error } = await scopeByTenant(supabase
-            .from('ballots')
-            .select(`
-                district_id,
-                candidate_id,
-                choice,
-                districts(name, vote_type),
-                candidates(name)
-            `), coopId)
-            .eq('election_id', electionId)
-            .eq('round', round);
+        const [tally, districts, candidates] = await Promise.all([
+            supabase.rpc('get_election_admin_tally', { p_election_id: electionId }),
+            scopeByTenant(supabase.from('districts').select('id,name,vote_type'), coopId).eq('election_id', electionId),
+            scopeByTenant(supabase.from('candidates').select('id,name'), coopId).eq('election_id', electionId)
+        ]);
+        for (const result of [tally, districts, candidates]) if (result.error) throw result.error;
+        const districtMap = new Map((districts.data || []).map(row => [row.id, row]));
+        const candidateMap = new Map((candidates.data || []).map(row => [row.id, row]));
+        return (tally.data || []).map(row => ({ ...row, vote_count: Number(row.vote_count),
+            districts: districtMap.get(row.district_id), candidates: candidateMap.get(row.candidate_id) }));
+    }
 
+    async getParticipation(electionId) {
+        const { data, error } = await supabase.rpc('get_election_admin_participation', { p_election_id: electionId });
         if (error) throw error;
-        return ballots; // 화면에서 가공해서 그림
+        return data || [];
+    }
+
+    async getElectionMembers(electionId, options = {}) {
+        const { data, error } = await supabase.rpc('get_election_admin_members', {
+            p_election_id: electionId, p_keyword: options.keyword || null,
+            p_member_ids: options.ids || null, p_member_nos: options.memberNos || null
+        });
+        if (error) throw error;
+        return data || [];
     }
 
     async getCurrentRound(electionId) {
