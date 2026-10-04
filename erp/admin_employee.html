@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.78
-Change: 2026-10-03 - Use verified SheetJS 0.20.3 for Excel imports and exports.
+Version: v1.0.79
+Change: 2026-10-04 - Separate employee registration from permission administration.
 -->
 <html>
 <head>
-  <script>console.log('[Version] v1.0.78 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.79 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -218,7 +218,7 @@ Change: 2026-10-03 - Use verified SheetJS 0.20.3 for Excel imports and exports.
               <div class="fw-bold">🧭 직원별 업무 권한</div>
               <div class="small text-muted mt-1">기본 역할을 그대로 쓰거나, 맡길 업무만 직원별로 열고 닫을 수 있습니다.</div>
             </div>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setAllInviteModuleAccess('inherit')">모두 기본 권한</button>
+            <button type="button" id="inviteModuleResetBtn" class="btn btn-outline-secondary btn-sm" onclick="setAllInviteModuleAccess('inherit')">모두 기본 권한</button>
           </div>
           <div id="inviteModuleAccessStatus" class="small text-muted py-3 text-center" role="status" aria-live="polite">업무 권한을 불러오는 중입니다.</div>
           <div id="inviteModuleAccessList" class="invite-module-grid d-none"></div>
@@ -915,6 +915,7 @@ let hrRuntimeProfile = 'legacy_full';
 let employeeModuleAccessSnapshot = null;
 let employeeModuleAccessSaveInFlight = false;
 let inviteModuleAccessCatalog = null;
+let inviteCanManageAccess = false;
 let inviteModuleAccessLoadToken = 0;
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
@@ -4118,6 +4119,10 @@ async function pullMemberOfficialValues() {
 
 function resetInviteModuleAccessUi(message = '업무 권한을 불러오는 중입니다.') {
     inviteModuleAccessCatalog = null;
+    inviteCanManageAccess = false;
+    const roleSelect = document.getElementById('newRole');
+    if (roleSelect) { roleSelect.value = 'staff'; roleSelect.disabled = true; }
+    document.getElementById('inviteModuleResetBtn')?.classList.add('d-none');
     const status = document.getElementById('inviteModuleAccessStatus');
     const list = document.getElementById('inviteModuleAccessList');
     const submitBtn = document.getElementById('inviteSubmitBtn');
@@ -4132,19 +4137,32 @@ function resetInviteModuleAccessUi(message = '업무 권한을 불러오는 중�
     if (submitBtn) submitBtn.disabled = true;
 } // End of resetInviteModuleAccessUi
 
-function renderInviteModuleAccess(modules) {
+function renderInviteModuleAccess(modules, canManageAccess = false) {
     const status = document.getElementById('inviteModuleAccessStatus');
     const list = document.getElementById('inviteModuleAccessList');
     const submitBtn = document.getElementById('inviteSubmitBtn');
     const safeModules = Array.isArray(modules) ? modules.filter((module) => module?.module_key) : [];
+    inviteCanManageAccess = canManageAccess === true;
+    const roleSelect = document.getElementById('newRole');
+    if (roleSelect) roleSelect.disabled = !inviteCanManageAccess;
+    document.getElementById('inviteModuleResetBtn')?.classList.toggle('d-none', !inviteCanManageAccess);
     inviteModuleAccessCatalog = safeModules.map((module) => ({
         module_key: String(module.module_key || '').trim(),
         module_name: String(module.module_name || module.module_key || '').trim(),
         organization_enabled: module.organization_enabled !== false
     }));
 
-    if (status) status.classList.add('d-none');
+    if (status) {
+        status.classList.toggle('d-none', inviteCanManageAccess);
+        if (!inviteCanManageAccess) status.textContent = '일반 직원으로 등록합니다. 업무 권한은 권한 관리자가 지정할 수 있습니다.';
+    }
     if (!list) return;
+    if (!inviteCanManageAccess) {
+        list.innerHTML = '';
+        list.classList.add('d-none');
+        if (submitBtn) submitBtn.disabled = safeModules.length === 0;
+        return;
+    }
     list.classList.remove('d-none');
     list.innerHTML = inviteModuleAccessCatalog.map((module) => {
         const moduleKey = module.module_key;
@@ -4183,7 +4201,7 @@ async function loadInviteModuleAccessCatalog() {
         });
         if (error) throw error;
         if (loadToken !== inviteModuleAccessLoadToken) return;
-        renderInviteModuleAccess(Array.isArray(data?.modules) ? data.modules : []);
+        renderInviteModuleAccess(Array.isArray(data?.modules) ? data.modules : [], data?.can_manage_access === true);
     } catch (error) {
         if (loadToken !== inviteModuleAccessLoadToken) return;
         console.error('invite module access catalog load failed:', error);
@@ -4207,6 +4225,7 @@ function collectInviteModuleAccess() {
     if (!Array.isArray(inviteModuleAccessCatalog) || inviteModuleAccessCatalog.length === 0) {
         throw new Error('업무 권한을 먼저 불러와 주세요.');
     }
+    if (!inviteCanManageAccess) return {};
     const access = {};
     inviteModuleAccessCatalog.forEach((module) => {
         const moduleKey = String(module?.module_key || '').trim();
@@ -4263,7 +4282,7 @@ async function runInvite() {
         const moduleAccess = collectInviteModuleAccess();
         const authLevel = normalizeHrAuthLevelValue(document.getElementById('newAuthLevel')?.value) ?? 9;
         const position = String(document.getElementById('newRank')?.value || '사원').trim();
-        const role = String(document.getElementById('newRole')?.value || 'staff').trim();
+        const role = inviteCanManageAccess ? String(document.getElementById('newRole')?.value || 'staff').trim() : 'staff';
         const department = getInviteDepartmentValue();
         const { data: created, error: createError } = await _supabase.rpc('erp_admin_create_employee_with_module_access', {
             p_emp_name: name,
@@ -4282,12 +4301,14 @@ async function runInvite() {
 
         inviteModal.hide();
         await loadList();
-        showAlert(`${name} 직원의 기본정보와 업무 권한을 함께 등록했습니다.`);
+        showAlert(created?.access_detail?.can_manage_access === true ? `${name} 직원의 기본정보와 업무 권한을 함께 등록했습니다.` : `${name} 직원을 등록했습니다. 필요한 업무 권한은 권한 관리자에게 요청해 주세요.`);
     } catch (err) {
         console.error('[admin_employee] runInvite failed:', err);
         const message = String(err?.message || '잠시 후 다시 시도해 주세요.');
         if (message.includes('EMPLOYEE_EMAIL_IN_USE')) {
             setInviteStatus('이미 같은 이메일을 사용하는 재직 직원이 있습니다.', 'danger');
+        } else if (message.includes('PERMISSION_ADMIN_REQUIRED') || message.includes('FULL_ADMIN_REQUIRED')) {
+            setInviteStatus('선택한 역할·직급의 업무 권한은 권한 관리자가 지정해야 합니다. 관리자에게 등록을 요청해 주세요.', 'danger');
         } else if (message.includes('HR_ADMIN_REQUIRED')) {
             setInviteStatus('직원 등록 권한을 다시 확인해 주세요.', 'danger');
         } else {
@@ -4651,6 +4672,7 @@ function renderEmployeeModuleAccess(payload) {
     const saveBtn = document.getElementById('employeeModuleAccessSaveBtn');
     const modules = Array.isArray(payload?.modules) ? payload.modules : [];
     const employee = payload?.employee && typeof payload.employee === 'object' ? payload.employee : {};
+    const canManageAccess = payload?.can_manage_access === true;
     employeeModuleAccessSnapshot = payload || null;
 
     if (status) status.classList.add('d-none');
@@ -4679,7 +4701,7 @@ function renderEmployeeModuleAccess(payload) {
                 </div>
                 <div class="small text-muted mt-1">${escapeHtml(description)}</div>
               </div>
-              <select class="form-select form-select-sm employee-module-state" data-employee-module-key="${escapeHtml(moduleKey)}" aria-label="${escapeHtml(moduleName)} 직원 권한">
+              <select class="form-select form-select-sm employee-module-state" data-employee-module-key="${escapeHtml(moduleKey)}" aria-label="${escapeHtml(moduleName)} 직원 권한" ${canManageAccess ? '' : 'disabled'}>
                 ${options}
               </select>
             </div>
@@ -4687,11 +4709,17 @@ function renderEmployeeModuleAccess(payload) {
           </div>`;
     }).join('') || '<div class="text-center text-muted py-4">설정할 모듈이 없습니다.</div>';
 
-    if (employee?.is_super_admin === true && note) {
+    if (!canManageAccess && note) {
+        note.textContent = '현재 업무 권한을 확인할 수 있습니다. 변경은 권한 관리자에게 요청해 주세요.';
+        note.classList.remove('d-none');
+    } else if (employee?.is_super_admin === true && note) {
         note.textContent = '전체 관리자 계정은 장애 복구를 위해 일부 관리자 전용 작업 권한을 유지합니다. 일반 직원과 업무 담당자의 범위를 이 화면에서 설정해 주세요.';
         note.classList.remove('d-none');
     }
-    if (saveBtn) saveBtn.disabled = modules.length === 0;
+    if (saveBtn) {
+        saveBtn.disabled = !canManageAccess || modules.length === 0;
+        saveBtn.classList.toggle('d-none', !canManageAccess);
+    }
 } // End of renderEmployeeModuleAccess
 
 async function loadEmployeeModuleAccess() {
@@ -4742,6 +4770,7 @@ async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').tri
 
 async function saveEmployeeModuleAccess() {
     if (employeeModuleAccessSaveInFlight) return;
+    if (employeeModuleAccessSnapshot?.can_manage_access !== true) return showAlert('업무 권한 변경은 권한 관리자에게 요청해 주세요.');
     const empId = String(currentEmpId || '').trim();
     if (!empId) return showAlert('직원 정보를 먼저 선택해 주세요.');
     const access = {};
@@ -4769,7 +4798,9 @@ async function saveEmployeeModuleAccess() {
     } catch (error) {
         console.error('employee module access save failed:', error);
         const message = String(error?.message || '저장하지 못했습니다.');
-        if (message.includes('CANNOT_REMOVE_OWN_HR_ACCESS')) {
+        if (message.includes('PERMISSION_ADMIN_REQUIRED')) {
+            showAlert('업무 권한 변경은 권한 관리자에게 요청해 주세요.');
+        } else if (message.includes('CANNOT_REMOVE_OWN_HR_ACCESS')) {
             showAlert('현재 로그인한 본인의 직원관리 권한은 이 화면에서 끌 수 없습니다. 다른 관리자 계정에서 변경해 주세요.');
         } else {
             showAlert('업무 권한 저장 실패: ' + message);
@@ -4777,7 +4808,7 @@ async function saveEmployeeModuleAccess() {
     } finally {
         employeeModuleAccessSaveInFlight = false;
         if (saveBtn) {
-            saveBtn.disabled = !employeeModuleAccessSnapshot;
+            saveBtn.disabled = employeeModuleAccessSnapshot?.can_manage_access !== true;
             saveBtn.textContent = '업무 권한 저장';
         }
     }
