@@ -1,6 +1,6 @@
 /*
-Version: v1.0.11
-Change: Fetch turnout counts in parallel to reduce polling latency.
+Version: v1.0.12
+Change: 2026-10-05 - Keep turnout and tally scoped to the current election round.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -125,6 +125,7 @@ export class AdminService {
     // RLS 때문에 일반 유저는 못 쓰는 쿼리
     async getTurnoutStats(electionId) {
         const coopId = await getRuntimeCoopId();
+        const round = await this.getCurrentRound(electionId);
         const [voterResult, voteResult] = await Promise.all([
             scopeByTenant(supabase
                 .from('election_voters')
@@ -134,6 +135,7 @@ export class AdminService {
                 .from('vote_logs')
                 .select('*', { count: 'exact', head: true }), coopId)
                 .eq('election_id', electionId)
+                .eq('round', round)
         ]);
 
         if (voterResult.error) throw voterResult.error;
@@ -152,6 +154,7 @@ export class AdminService {
     // 6. [개표] 결과 가져오기 (관리자 전용)
     async getResults(electionId) {
         const coopId = await getRuntimeCoopId();
+        const round = await this.getCurrentRound(electionId);
         // 실제로는 DB RPC로 집계하는 게 빠르지만, MVP에서는 JS로 계산
         // 1. 모든 투표용지 가져오기
         const { data: ballots, error } = await scopeByTenant(supabase
@@ -163,10 +166,18 @@ export class AdminService {
                 districts(name, vote_type),
                 candidates(name)
             `), coopId)
-            .eq('election_id', electionId);
+            .eq('election_id', electionId)
+            .eq('round', round);
 
         if (error) throw error;
         return ballots; // 화면에서 가공해서 그림
+    }
+
+    async getCurrentRound(electionId) {
+        const election = await this.getElectionInfo(electionId);
+        const round = Number(election?.current_round || 1);
+        if (!Number.isInteger(round) || round < 1) throw new Error('현재 투표 회차를 확인하지 못했습니다.');
+        return round;
     }
 
 

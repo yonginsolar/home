@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.56
-Change: 2026-09-29 - Use only the current cooperative's election seal in notice output.
+Version: v1.0.57
+Change: 2026-10-05 - Keep participation and winner calculations within the current round.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>통합 선거 관리 시스템</title>
-    <script>console.log('[Version] v1.0.56 | admin.html');</script>
+    <script>console.log('[Version] v1.0.57 | admin.html');</script>
     <style>
         /* [수정] 박스 사이징 전역 적용 (검색창이 튀어나가는 문제 해결) */
 *, *::before, *::after {
@@ -710,8 +710,8 @@ function safeUrl(value) {
         return '';
     }
 }
-    import { AdminService } from './AdminService.js?v=20260826-1';
-    import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js';
+    import { AdminService } from './AdminService.js?v=20261005-1';
+    import { supabase, buildElectionVoteSummary, DISTRICT_VOTE_STATE } from './ElectionService.js?v=20261005-1';
 
     const KST_TZ_VOTE_ADMIN = 'Asia/Seoul';
     const formatVoteAdminKstDate = (value, fallback = '미정') => {
@@ -1065,6 +1065,7 @@ function safeUrl(value) {
                     .select('district_id, candidate_id')
             )
                 .eq('election_id', currentElectionId)
+                .eq('round', Number(currentElectionData?.current_round || 1))
         ]);
 
         if (districtRes.error) throw districtRes.error;
@@ -2641,6 +2642,7 @@ window.loadVoterStats = async () => {
                         .select('member_uuid')
                 )
                     .eq('election_id', currentElectionId)
+                    .eq('round', Number(currentElectionData?.current_round || 1))
             ]);
 
         if(voterRes.error) throw voterRes.error;
@@ -4462,7 +4464,7 @@ window.finalizeNomination = async () => {
                     `⚠️ 주의: 아직 투표 시작 시간이 아닙니다.\n` +
                     `설정된 시작 시간: ${formatVoteAdminKstDateTime(startAt)}\n` +
                     `약 ${diffMin}분 남았습니다.\n\n` +
-                    `그래도 지금 강제로 투표를 시작하시겠습니까?`
+                    `투표 진행 상태로 미리 전환하시겠습니까? 실제 투표는 설정된 시작 시각 이후에 가능합니다.`
                 );
                 
                 // 취소하면 중단
@@ -4621,6 +4623,7 @@ window.finalizeNomination = async () => {
                         .select('district_id, candidate_id, choice')
                 )
                     .eq('election_id', currentElectionId)
+                    .eq('round', Number(currentElectionData?.current_round || 1))
             ]);
 
             if (distRes.error) throw distRes.error;

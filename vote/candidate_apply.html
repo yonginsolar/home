@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.20
-Change: 2026-08-24 - Separate candidate processing consent from member-facing publication consent and record both versions.
+Version: v1.0.21
+Change: 2026-10-05 - Upload candidate attachments under the authenticated account while keeping the linked member identity.
 -->
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>후보자 등록 신청</title>
-    <script>console.log('[Version] v1.0.20 | candidate_apply.html');</script>
+    <script>console.log('[Version] v1.0.21 | candidate_apply.html');</script>
     <script src="../telegram_bot.js"></script>
     <link rel="stylesheet" href="style.css">
 <style>
@@ -638,7 +638,7 @@ Change: 2026-08-24 - Separate candidate processing consent from member-facing pu
             } catch (e) {}
             return '';
         }
-    import { ElectionService, supabase, resolveCurrentMemberProfileId } from './ElectionService.js';
+    import { ElectionService, supabase, resolveCurrentMemberProfileId } from './ElectionService.js?v=20261005-1';
 
     const service = new ElectionService();
     const CANDIDATE_PRIVACY_CONSENT_VERSION = 'candidate-privacy-2026.08.24';
@@ -1285,8 +1285,10 @@ Change: 2026-08-24 - Separate candidate processing consent from member-facing pu
             let photoUrl = null;
             let proofUrl = null;
             
-            if (photoFile) photoUrl = await service.uploadCandidatePhoto(photoFile, userId);
-            if (proofFile) proofUrl = await service.uploadProofDoc(proofFile, userId);
+            const { data: { user: uploadUser }, error: uploadAuthError } = await supabase.auth.getUser();
+            if (uploadAuthError || !uploadUser) throw new Error('로그인 후 다시 시도해주세요.');
+            if (photoFile) photoUrl = await service.uploadCandidatePhoto(photoFile, uploadUser.id);
+            if (proofFile) proofUrl = await service.uploadProofDoc(proofFile, uploadUser.id);
 
             // 4. 대표자 정보 수집 (단체인 경우)
             const repSection = document.getElementById('representative-section');

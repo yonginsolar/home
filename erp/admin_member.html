@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.198
-Change: 2026-10-04 - Keep an existing export PIN and require same-account reauthentication to reset it.
+Version: v1.0.199
+Change: 2026-10-05 - Load dashboard counts concurrently without changing member access boundaries.
 -->
 <html lang="ko">
 <head>
-<meta name="erp-security-revision" content="20261004.2">
+<meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.198';
+window.ADMIN_MEMBER_VERSION = 'v1.0.199';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -12583,9 +12583,9 @@ async function fetchMonthlyCapitalInflow(monthCount = 12) {
         const labels = buildMonthLabels(monthCount);
         const start = labels[0] + '-01';
 
-        const { data, error } = await _supabase
+        const { data, error } = await scopeAdminTenant(_supabase
             .from('ref_members')
-            .select('deposit_date, amount')
+            .select('deposit_date, amount'))
             .gte('deposit_date', start)
             .order('deposit_date', { ascending: true });
 
@@ -12913,56 +12913,50 @@ function buildFallbackDashboardLocationStats(statsLocation) {
 async function loadDashboard() {
     void loadMemberInformationSummary();
     void loadMemberDemographicCharts();
-
-    // 1. [변경] 정조합원 수(status='정상')만 집계
-    const { count: fullMemberCount } = await scopeAdminTenant(_supabase
-        .from('coop_members')
-        .select('*', { count: 'exact', head: true }))
-        .eq('status', '정상');
-
-// 2. [수정] 승인 대기 조합원 수 + 신규가입(7일) 동시 조건
-const { count: pendingCount } = await scopeAdminTenant(_supabase
-    .from('coop_members')
-    .select('*', { count: 'exact', head: true }))
-    .eq('status', '승인대기');
-const weekAgoISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-const { count: newPendingCount } = await scopeAdminTenant(_supabase
-    .from('coop_members')
-    .select('*', { count: 'exact', head: true }))
-    .eq('status', '승인대기')
-    .gte('created_at', weekAgoISO);
-
-    let totalCapital = 0;
-    const { data: capitalResult, error: capError } = await _supabase.rpc('get_total_capital_secure');
-    if (!capError) totalCapital = capitalResult || 0;
+    const statsPromise = _supabase.rpc('get_dashboard_stats');
+    const monthlyPromise = fetchMonthlyCapitalInflow(12);
+    const pendingAppPromise = fetchPendingApplicationCount();
+    const returnSummaryPromise = fetchMemberReturnSummary();
+    const weekAgoISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const countQuery = () => scopeAdminTenant(_supabase.from('coop_members')
+        .select('*', { count: 'exact', head: true }));
+    const [fullResult, pendingResult, newResult, capitalResponse] = await Promise.all([
+        countQuery().eq('status', '정상'),
+        countQuery().eq('status', '승인대기'),
+        countQuery().eq('status', '승인대기').gte('created_at', weekAgoISO),
+        _supabase.rpc('get_total_capital_secure')
+    ]);
+    const pendingCount = pendingResult.count;
+    const countText = result => result.error ? '확인 필요' : (result.count || 0) + '명';
 
     // 3. UI 업데이트
-    setText('dashboard-total-count', (fullMemberCount || 0) + '명');
-    setText('dash-capital', totalCapital.toLocaleString() + '원');
-    setText('dashboard-new-signups', (newPendingCount || 0) + '명');
+    setText('dashboard-total-count', countText(fullResult));
+    setText('dash-capital', capitalResponse.error ? '확인 필요' : Number(capitalResponse.data || 0).toLocaleString() + '원');
+    setText('dashboard-new-signups', countText(newResult));
 
     const pendingEl = document.getElementById('dashboard-pending-count');
     if (pendingEl) {
-        pendingEl.innerText = (pendingCount || 0) + '명';
+        pendingEl.innerText = countText(pendingResult);
         // 대기자가 있으면 빨간색 강조
         pendingEl.className = pendingCount > 0 ? "display-6 fw-bold mb-0 text-danger" : "display-6 fw-bold mb-0";
     }
 
     // 1. [신규] 업무 신청 대기 건수 즉시 표시 (탭 클릭 없이)
-    const pendingAppCount = await fetchPendingApplicationCount();
+    const [pendingAppCount, , statsResponse, monthly] = await Promise.all([
+        pendingAppPromise, returnSummaryPromise, statsPromise, monthlyPromise
+    ]);
     if (typeof pendingAppCount === 'number') updateAppBadges(pendingAppCount);
-    await fetchMemberReturnSummary();
 
     // 2. [신규] 통계 차트 데이터 로드
-    const { data: stats, error: statError } = await _supabase.rpc('get_dashboard_stats');
+    const { data: stats, error: statError } = statsResponse;
 
     if (statError) {
         CoopSafeLog.error("통계 로드 실패:", statError);
     } else if (stats) {
         // (1) 월별 출자금 차트 (Line Chart)
-        const monthly = await fetchMonthlyCapitalInflow(12);
-        const labels = monthly?.labels || (stats.monthly_capital || []).reverse().map(x => x.month);
-        const values = monthly?.totals || (stats.monthly_capital || []).reverse().map(x => x.total);
+        const fallbackMonthly = [...(stats.monthly_capital || [])].reverse();
+        const labels = monthly?.labels || fallbackMonthly.map(x => x.month);
+        const values = monthly?.totals || fallbackMonthly.map(x => x.total);
         renderChart('capital', 'chart-capital', 'line', {
             labels,
             datasets: [{

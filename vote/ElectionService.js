@@ -1,6 +1,6 @@
 /*
-Version: v1.0.20
-Change: 2026-04-01 - Resolve the active member profile by auth_user_id within the current host coop instead of assuming coop_members.id = auth.uid().
+Version: v1.0.21
+Change: 2026-10-05 - Use the server-linked voting identity and scope participation checks to the current round.
 */
 import { supabase } from '../shared/supabase-client.js';
 export { supabase };
@@ -165,7 +165,10 @@ export class ElectionService {
 
         this.currentUser = user;
         this.currentCoopId = await getRuntimeCoopId();
-        const resolvedProfileId = await resolveCurrentMemberProfileId(user.id, this.currentCoopId);
+        // Formal ballots belong to the authenticated member, not an active family profile.
+        // The submit RPC resolves the same identity; no client-supplied proxy voter ID.
+        const { data: resolvedProfileId, error: identityError } = await supabase.rpc('get_my_member_profile_id');
+        if (identityError) throw new Error('조합원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
         if (!resolvedProfileId) {
             throw new Error('현재 조합에서 연결된 조합원 정보를 찾을 수 없습니다.');
         }
@@ -211,9 +214,10 @@ export class ElectionService {
      * - district.is_common 컬럼을 사용하여 확실하게 정렬
      * - false(지역구) -> 앞 / true(비례/추천) -> 뒤
      */
-    async getMyBallotList(electionId) {
+    async getMyBallotList(electionId, round) {
         if (!this.memberProfile) await this.initialize();
         if (!this.currentCoopId) this.currentCoopId = await getRuntimeCoopId();
+        if (!Number.isInteger(round) || round < 1) throw new Error('현재 투표 회차를 확인하지 못했습니다. 다시 열어주세요.');
 
         // 1. 선거인 명부 조회
         const { data: voterList, error: voterError } = await scopeByTenant(supabase
@@ -231,33 +235,37 @@ export class ElectionService {
             const districtId = voter.district_id;
 
             // [중요 1] is_common 컬럼을 반드시 가져와야 정렬이 가능함
-            const { data: district } = await scopeByTenant(supabase
+            const { data: district, error: districtError } = await scopeByTenant(supabase
                 .from('districts')
                 .select('name, vote_type, quota, is_common'), this.currentCoopId) 
                 .eq('id', districtId)
                 .single();
+            if (districtError || !district) throw new Error('선거구 정보를 확인하지 못했습니다. 다시 시도해주세요.');
 
             // 후보자 목록 조회
             let candidates = [];
             if (district.vote_type === 'CANDIDATE') {
-                const { data: candData } = await scopeByTenant(supabase
+                const { data: candData, error: candidateError } = await scopeByTenant(supabase
                     .from('candidates')
                     .select('*'), this.currentCoopId)
                     .eq('election_id', electionId)
                     .eq('district_id', districtId) 
                     .eq('status', 'APPROVED')
                     .order('name', { ascending: true });
+                if (candidateError) throw new Error('후보 목록을 확인하지 못했습니다. 다시 시도해주세요.');
                 candidates = candData || [];
             }
 
             // 투표 여부 확인
-            const { data: logData } = await scopeByTenant(supabase
+            const { data: logData, error: logError } = await scopeByTenant(supabase
                 .from('vote_logs')
                 .select('id'), this.currentCoopId)
                 .eq('election_id', electionId)
                 .eq('district_id', districtId)
                 .eq('member_uuid', this.memberProfile.id)
+                .eq('round', round)
                 .maybeSingle();
+            if (logError) throw new Error('투표 참여 여부를 확인하지 못했습니다. 다시 시도해주세요.');
 
             const ballotState = classifyDistrictVoteState({
                 voteType: district.vote_type,
@@ -310,7 +318,17 @@ export class ElectionService {
 
         if (error) {
             console.error('투표 제출 에러:', error);
-            throw new Error(error.message);
+            const messages = {
+                AUTH_REQUIRED: '로그인 후 다시 시도해주세요.',
+                MEMBER_REQUIRED: '정조합원 정보를 확인해주세요.',
+                ELECTION_NOT_OPEN: '현재 투표가 진행 중인 선거가 아닙니다.',
+                VOTE_NOT_IN_PERIOD: '현재는 투표 기간이 아닙니다.',
+                VOTE_PERIOD_REQUIRED: '투표 기간이 설정되지 않았습니다. 사무국으로 문의해주세요.',
+                INVALID_ROUND: '투표 회차가 바뀌었습니다. 선거를 다시 열어주세요.',
+                NOT_ASSIGNED: '해당 선거구에 배정되지 않았습니다.',
+                ALREADY_VOTED: '이미 이번 회차의 투표를 마쳤습니다.'
+            };
+            throw new Error(messages[error.message] || '투표를 저장하지 못했습니다. 선거를 다시 열어 확인해주세요.');
         }
 
         return true;
@@ -325,6 +343,8 @@ export class ElectionService {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
         const userId = session.user.id;
+        const { data: memberId, error: memberError } = await supabase.rpc('get_my_member_profile_id');
+        if (memberError || !memberId) throw new Error('연결된 조합원 정보를 확인하지 못했습니다.');
 
         // 2. 사진 업로드 수행 (아래 uploadCandidatePhoto 함수 호출)
         let photoUrl = null;
@@ -345,7 +365,7 @@ export class ElectionService {
             .insert(withTenantPayload({
                 election_id: electionId,
                 district_id: districtId,
-                member_uuid: userId,
+                member_uuid: memberId,
                 name: name,
                 photo_url: photoUrl,     // 업로드된 이미지 URL
                 manifesto: manifesto,
