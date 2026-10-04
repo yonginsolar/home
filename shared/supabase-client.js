@@ -1,8 +1,9 @@
 /*
-Version: v1.1.1
-Change: 2026-04-01 - Respect localhost-only public_host override so local QA can emulate coop-specific domains.
+Version: v1.1.2
+Change: 2026-10-04 - Route new Storage writes through byte validation without changing tenant authentication.
 */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.2';
+import './checked_upload.js?v=20261004-1';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
@@ -35,8 +36,8 @@ const globalHeaders = {};
 const runtimeHost = getRuntimeHost();
 if (runtimeHost) globalHeaders['x-public-host'] = runtimeHost;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+export const supabase = globalThis.CoopCheckedUploads.install(createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   global: {
     headers: globalHeaders
   }
-});
+}));
