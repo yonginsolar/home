@@ -1,4 +1,4 @@
-/* Version: 1.1.1 | 2026-10-06 */
+/* Version: 1.1.2 | 2026-10-06 */
 'use strict';
 (() => {
  const db=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
@@ -70,5 +70,5 @@
  window.addEventListener('beforeunload',e=>{if(state.current&&snapshot()!==state.baseline){e.preventDefault();e.returnValue='';}});
  $('prepare').onclick=()=>{if(canLeave())void run(async()=>render(await rpc('prepare',{p_emp_id:$('employee').value,p_kind:$('kind').value})));};
  $('employee').onchange=()=>{if(!canLeave()){$('employee').value=state.current.employee.emp_id;return;}state.current=null;state.baseline='';$('workspace').innerHTML='<p class="hint">서류 준비하기를 눌러 주세요.</p>';renderList();};$('statusFilter').onchange=renderList;
- void (async()=>{try{const gate=await window.ErpRuntimeGuard.requireUser(db,{alertFn:message,redirectUrl:'index.html'});if(!gate.ok)return;const runtime=await window.ErpRuntimeGuard.enforce(db,{moduleKey:'hr',moduleLabel:'직원관리',alertFn:message,redirectUrl:'index.html'});if(!runtime.ok)return;await list();$('app').classList.remove('hidden');message('직원과 서류를 선택해 주세요.');const id=new URLSearchParams(location.search).get('document');if(id)await open(id);}catch(e){message(errorText(e),true);}})();
+ void (async()=>{try{const gate=await window.ErpRuntimeGuard.requireUser(db,{alertFn:message,redirectUrl:'index.html'});if(!gate.ok)return;const runtime=await window.ErpRuntimeGuard.enforce(db,{moduleKey:'hr',moduleLabel:'직원관리',alertFn:message,redirectUrl:'index.html'});if(!runtime.ok)return;await list();const params=new URLSearchParams(location.search),employee=params.get('employee');if(employee&&state.employees.some(e=>e.emp_id===employee)){$('employee').value=employee;renderList();}$('app').classList.remove('hidden');message('직원과 서류를 선택해 주세요.');const id=params.get('document');if(id)await open(id);}catch(e){message(errorText(e),true);}})();
 })();

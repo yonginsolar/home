@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.81
-Change: 2026-10-05 - Official onboarding and offboarding insurance documents.
+Version: v1.0.82
+Change: 2026-10-06 - Stable tab workspaces and employee insurance submission summaries.
 -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.81 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.82 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -110,6 +110,9 @@ Change: 2026-10-05 - Official onboarding and offboarding insurance documents.
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
+  <link rel="stylesheet" href="./tab_workspace.css?v=1.0.0">
+  <script src="tab_workspace.js?v=1.0.0" defer></script>
+  <script src="hr_insurance_status.js?v=1.0.0" defer></script>
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-employee">
 
@@ -246,6 +249,7 @@ Change: 2026-10-05 - Official onboarding and offboarding insurance documents.
             <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabInfo">📝 정보 & 계약</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabSalary">💰 급여 관리</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabLog">📅 근태/포상</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabInsuranceStatus">🧾 신고 서류</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabModuleAccess">🧭 업무 권한</a></li>
             <li class="nav-item" id="sunVillageTotalManagerTabNav" hidden><a class="nav-link" data-bs-toggle="tab" href="#tabSunVillageTotalManager">🌻 햇빛소득마을</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabNotificationAccess">🔔 알림 담당</a></li>
@@ -513,6 +517,10 @@ Change: 2026-10-05 - Official onboarding and offboarding insurance documents.
             <div class="mb-2"><label class="small text-muted">일수</label><input type="number" id="logValue" class="form-control" placeholder="예: 1"></div>
             <div class="mb-3"><label class="small text-muted">사유</label><input type="text" id="logReason" class="form-control" placeholder="사유를 입력하세요"></div>
             <button class="btn btn-primary w-100 btn-rounded" onclick="saveLog()">✅ 반영하기</button>
+          </div>
+          <div class="tab-pane fade" id="tabInsuranceStatus">
+            <div class="d-flex justify-content-end mb-3"><a id="employeeInsuranceManageLink" class="btn btn-outline-primary btn-sm" href="hr_insurance.html">서류 관리·출력</a></div>
+            <div id="employeeInsuranceStatus"></div>
           </div>
           <div class="tab-pane fade" id="tabModuleAccess">
             <div class="alert alert-info small mb-3">
@@ -4960,6 +4968,9 @@ async function openDetail(u) {
     currentAnnualSalary = u.base_salary || 0;
     currentEmpHireDate = u.hire_date;
     currentEmpResignDate = u.resign_date;
+    document.getElementById('employeeInsuranceStatus').textContent = '신고 서류 탭을 누르면 제출 상태를 확인할 수 있습니다.';
+    document.getElementById('employeeInsuranceManageLink').href = 'hr_insurance.html?employee=' + encodeURIComponent(u.emp_id);
+    if (document.getElementById('tabInsuranceStatus').classList.contains('active')) void loadEmployeeInsuranceStatus();
     currentPayrollTaxProfile = normalizeAdminEmployeePayrollTaxProfile(u);
     setSalaryTaxInputs(currentPayrollTaxProfile);
     setSalaryTaxAdjustmentInputs();
@@ -5018,6 +5029,12 @@ async function openDetail(u) {
     window.SunVillageTotalManagerAdmin?.load(currentEmpId);
 }
 
+async function loadEmployeeInsuranceStatus() {
+    const empId = currentEmpId;
+    if (!empId) return;
+    await window.HrInsuranceStatus.mount(_supabase, document.getElementById('employeeInsuranceStatus'), {empId, admin:true});
+}
+document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
 function toggleEditMode(isEdit) { const c = document.getElementById("infoContainer"); if(isEdit) c.classList.add("is-editing"); else c.classList.remove("is-editing"); }
 function toggleSalaryVisibility() { const el = document.getElementById("viewSalary"); el.innerText = el.innerText === "******" ? el.dataset.real : "******"; }
 
