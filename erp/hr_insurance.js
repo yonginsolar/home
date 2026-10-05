@@ -1,4 +1,4 @@
-/* Version: 1.1.0 | 2026-10-05 */
+/* Version: 1.1.1 | 2026-10-06 */
 'use strict';
 (() => {
  const db=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
@@ -50,7 +50,7 @@
   html+=`<label class="mt-2"><input id="confirmForm" type="checkbox"> ${c.kind==='unpaid_confirmation'?'대표자와 제출할 서류를 확인했습니다.':'신고 대상·날짜·보수·사유를 확인했습니다.'}</label><div class="actions"><button id="save" class="btn btn-primary" ${locked?'disabled':''}>초안 저장</button>${c.kind==='unpaid_confirmation'?'':'<button id="pdf" class="btn btn-outline-primary">PDF 저장 · 인쇄</button>'}${c.status==='draft'?'<button id="submitted" class="btn btn-outline-success">기관 제출 확인</button>':c.status==='submitted'?'<button id="completed" class="btn btn-success">처리 완료 확인</button>':''}</div><div id="pdfPreview" class="mt-4"></div>`;
   $('workspace').innerHTML=html;if(locked)$('workspace').querySelectorAll('[data-field],[data-cell],[data-add],[data-remove]').forEach(f=>f.disabled=true);
   $('save').onclick=()=>void run(save);if($('pdf'))$('pdf').onclick=()=>void run(exportPdf);if($('submitted'))$('submitted').onclick=()=>setStatus('submitted');if($('completed'))$('completed').onclick=()=>setStatus('completed');
-  $('workspace').querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const key=b.dataset.add;const rows=$(key+'Rows');if(rows.children.length>=(key==='periods'?12:4)){message('공식 서식에 들어가는 기간 수를 초과했습니다.',true);return;}rows.insertAdjacentHTML('beforeend',periodRow(key));bindRows();});bindRows();state.baseline=snapshot();renderList();message('작성할 값을 확인하고 초안을 저장해 주세요.');
+  $('workspace').querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const key=b.dataset.add;const rows=$(key+'Rows');if(rows.children.length>=(key==='periods'?12:4)){message('공식 서식에 들어가는 기간 수를 초과했습니다.',true);return;}rows.insertAdjacentHTML('beforeend',periodRow(key));bindRows();});bindRows();state.baseline=snapshot();renderList();message(locked?'제출 이력을 불러왔습니다.':c.kind==='unpaid_confirmation'?'대표자와 제출할 서류를 확인해 주세요.':'작성할 값을 확인하고 초안을 저장해 주세요.');
  }
  function bindRows(){$('workspace').querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{b.closest('tr').remove();totals();});$('workspace').querySelectorAll('[data-cell],[data-field]').forEach(f=>f.oninput=totals);totals();}
  function read(){const form={};$('workspace').querySelectorAll('[data-field]').forEach(f=>{if(f.dataset.field==='request_date')return;form[f.dataset.field]=f.type==='checkbox'?f.checked:f.type==='number'?Number(f.value||0):f.value.trim();});for(const key of ['periods','wages']){if(!$(key+'Rows'))continue;form[key]=Array.from($(key+'Rows').children).map(tr=>Object.fromEntries(Array.from(tr.querySelectorAll('[data-cell]')).map(f=>[f.dataset.cell,f.type==='number'?Number(f.value||0):f.value])));}return form;}
