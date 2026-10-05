@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.208
-Change: 2026-10-06 - Preserve homepage drafts and simplify content editing.
+Version: v1.0.209
+Change: 2026-10-06 - Recover failed homepage reads and protect unsaved content.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.208';
+window.ADMIN_MEMBER_VERSION = 'v1.0.209';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -11375,6 +11375,13 @@ myConfirm('저장하지 않은 우리 소식이 있습니다. 변경사항을 �
 g_activityAllowClose = true;
 bootstrap.Modal.getOrCreateInstance(modal).hide();
 });
+// The shared confirmation hides before running its callback. Only for this
+// prompt, wait until it is shown so an early click cannot miss that hide event.
+const confirmButtons = Array.from(confirmModal.querySelectorAll('button')).map(button => [button, button.disabled]);
+confirmButtons.forEach(([button]) => { button.disabled = true; });
+confirmModal.addEventListener('shown.bs.modal', () => {
+confirmButtons.forEach(([button, disabled]) => { button.disabled = disabled; });
+}, {once:true});
 });
 }
 
