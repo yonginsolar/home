@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.200
-Change: 2026-10-05 - Use Korean dates and years for member export defaults, retaining concurrent dashboard loading.
+Version: v1.0.201
+Change: 2026-10-05 - Load homepage sections on first entry, preserving Korean date defaults and concurrent dashboard loading.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.200';
+window.ADMIN_MEMBER_VERSION = 'v1.0.201';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -8001,6 +8001,25 @@ contact: 12
 
 let g_siteSections = [];
 let g_sectionDrafts = [];
+let g_siteInitialSectionsRequested = false;
+let g_sectionLoadPromise = null;
+
+async function loadInitialSiteSections() {
+if (g_siteInitialSectionsRequested || ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' || hasPendingSectionChanges()) return;
+const params = new URLSearchParams(window.location.search || '');
+// These links load their own active pane; do not fetch an unrelated section list.
+if (getInitialAdminMemberTab() === 'site' && ['activities', 'plants'].includes(params.get('sub'))) return;
+const activePane = document.querySelector('#tab-site .tab-content > .tab-pane.show.active');
+if (activePane?.id !== 'sub-sections') return;
+g_siteInitialSectionsRequested = true;
+try {
+if (await fetchSections() === false) g_siteInitialSectionsRequested = false;
+} catch (error) {
+g_siteInitialSectionsRequested = false;
+CoopSafeLog.error('섹션 초기 로딩 실패:', error);
+renderSectionSeedHint('섹션 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', true);
+}
+}
 
 function getSectionDisplayOrder(section) {
 const order = Number(section?.display_order);
@@ -8124,6 +8143,16 @@ btn.innerHTML = `<i class="bi bi-plus-circle me-1"></i>누락 섹션 등록 (${l
 
 // 1. 섹션 목록 불러오기
 async function fetchSections() {
+if (g_sectionLoadPromise) return g_sectionLoadPromise;
+g_sectionLoadPromise = loadSectionRows();
+try {
+return await g_sectionLoadPromise;
+} finally {
+g_sectionLoadPromise = null;
+}
+}
+
+async function loadSectionRows() {
 // DB에서 순서대로 가져옴
 const { data, error } = await scopeAdminTenant(_supabase
 .from('site_sections')
@@ -8133,7 +8162,7 @@ const { data, error } = await scopeAdminTenant(_supabase
 if (error) {
 CoopSafeLog.error("섹션 로딩 에러:", error);
 renderSectionSeedHint('섹션 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.', true);
-return;
+return false;
 }
 
 const visibleData = (Array.isArray(data) ? data : []).filter((section) => !isSiteMemberRemovedSection(section?.id));
@@ -8146,7 +8175,8 @@ if (visibleData.length === 0) {
 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3">섹션 정보가 없습니다.</td></tr>';
 renderSectionSeedButton(requiredSections);
 renderSectionSeedHint('site_sections가 비어 있어 필수 홈페이지 섹션을 표시할 수 없습니다. 먼저 누락 섹션 등록을 실행하세요.', true);
-return;
+g_siteInitialSectionsRequested = true;
+return true;
 }
 
 const sortedSections = [...visibleData].sort((a, b) => {
@@ -8168,6 +8198,8 @@ const missingIds = missingRequiredSections.map((sec) => sec.id).join(', ');
 renderSectionSeedHint(`현재 site_sections에 ${missingIds} 섹션이 없어 ON/OFF 스위치가 표시되지 않습니다. 우측 버튼으로 등록해 주세요.`, true);
 }
 renderSectionRows();
+g_siteInitialSectionsRequested = true;
+return true;
 }
 
 async function seedRequiredSections() {
@@ -12539,6 +12571,8 @@ function switchTab(tabName) {
         applyAdminMemberSiteScopeUi();
         if (ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin') {
             fetchDocs();
+        } else {
+            void loadInitialSiteSections();
         }
     }
     else if (tabName === 'funds-manage') {

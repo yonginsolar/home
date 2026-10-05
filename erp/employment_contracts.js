@@ -1,4 +1,4 @@
-/* Version: v1.2.0 | 2026-09-28 */
+/* Version: v1.2.1 | 2026-10-05 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -20,6 +20,10 @@ const state = {
   employees: [],
   employee: null,
   contracts: [],
+  contractLoadRevision: 0,
+  contractsLoading: false,
+  contractsLoaded: false,
+  contractLoadError: false,
   company: {},
   editing: null,
   amendmentBaseTerms: null,
@@ -99,6 +103,13 @@ function setBusy(next, button) {
     if (!next) delete element.dataset.contractWasDisabled;
   });
   if (button) button.textContent = next ? '처리 중...' : (button.dataset.label || button.textContent);
+  updateContractReadActions();
+}
+
+function updateContractReadActions() {
+  document.querySelectorAll('[data-new-kind], #openUploadButton').forEach((button) => {
+    button.disabled = state.busy || !state.employee || !state.contractsLoaded;
+  });
 }
 
 function normalizeError(error) {
@@ -189,19 +200,38 @@ function renderEmployeeSelect() {
 }
 
 async function loadContracts() {
-  if (!state.employee) {
-    state.contracts = [];
-    renderHistory();
-    return;
-  }
-  const { data, error } = await db.from('erp_employment_contracts')
-    .select(selectContractColumns)
-    .eq('coop_id', state.user.coop_id)
-    .eq('emp_id', state.employee.emp_id)
-    .order('version_no', { ascending: false });
-  if (error) throw error;
-  state.contracts = data || [];
+  const revision = ++state.contractLoadRevision;
+  const employeeId = state.employee?.emp_id;
+  const coopId = state.user?.coop_id;
+  const isCurrent = () => revision === state.contractLoadRevision
+    && employeeId === state.employee?.emp_id && coopId === state.user?.coop_id;
+  state.contracts = [];
+  state.contractsLoaded = false;
+  state.contractLoadError = false;
+  state.contractsLoading = Boolean(employeeId && coopId);
   renderHistory();
+  if (!state.contractsLoading) return false;
+  try {
+    const { data, error } = await db.from('erp_employment_contracts')
+      .select(selectContractColumns)
+      .eq('coop_id', coopId)
+      .eq('emp_id', employeeId)
+      .order('version_no', { ascending: false });
+    if (!isCurrent()) return false;
+    if (error) throw error;
+    state.contracts = data || [];
+    state.contractsLoaded = true;
+    return true;
+  } catch (_) {
+    if (!isCurrent()) return false;
+    state.contractLoadError = true;
+    return false;
+  } finally {
+    if (isCurrent()) {
+      state.contractsLoading = false;
+      renderHistory();
+    }
+  }
 }
 
 function kindLabel(kind) {
@@ -216,7 +246,16 @@ function renderHistory() {
   const heading = document.getElementById('historyHeading');
   const list = document.getElementById('historyList');
   const legacyWrap = document.getElementById('legacyContractWrap');
+  updateContractReadActions();
   heading.textContent = `${state.employee?.emp_name || '직원'} 계약 이력`;
+  if (state.contractsLoading || state.contractLoadError) {
+    list.innerHTML = state.contractsLoading
+      ? '<div class="small text-muted py-3" role="status">계약 이력을 불러오고 있습니다.</div>'
+      : '<div class="small text-danger py-3" role="alert">계약 이력을 불러오지 못했습니다. 새로고침 버튼으로 다시 시도해 주세요.</div>';
+    legacyWrap.classList.add('hidden');
+    legacyWrap.innerHTML = '';
+    return;
+  }
   if (!state.contracts.length) {
     list.innerHTML = '<div class="small text-muted py-3">등록된 계약 이력이 없습니다.</div>';
   } else {
@@ -360,7 +399,7 @@ function prepareTermsForEditor(source, options = {}) {
 }
 
 function openNew(kind) {
-  if (!state.admin || state.forceSelf || !state.employee) return;
+  if (state.busy || !state.contractsLoaded || !state.admin || state.forceSelf || !state.employee) return;
   const parent = kind === 'amendment'
     ? state.contracts.find((contract) => contract.status === 'completed' && contract.source_type === 'editor')
     : null;
@@ -371,6 +410,7 @@ function openNew(kind) {
   const terms = parent ? prepareTermsForEditor(parent.terms, { fromExisting: true }) : defaultTerms();
   state.editing = {
     id: null,
+    emp_id: state.employee.emp_id,
     document_kind: kind,
     title: kind === 'amendment' ? `${state.employee.emp_name} 근로조건 변경합의서` : `${state.employee.emp_name} ${kindLabel(kind)}`,
     effective_date: todayKst(),
@@ -569,14 +609,17 @@ function bindEditorEvents() {
   document.getElementById('parentContract')?.addEventListener('change', (event) => loadAmendmentParent(event.target.value));
   document.querySelectorAll('.wage-part').forEach((input) => input.addEventListener('input', updateMonthlyWageTotal));
   updateMonthlyWageTotal();
-  document.getElementById('previewDraftButton').addEventListener('click', () => {
-    try {
-      const draft = collectEditorContract();
-      renderPreview(draft, true);
-    } catch (error) { showAlert(normalizeError(error)); }
-  });
+  document.getElementById('previewDraftButton').addEventListener('click', previewDraft);
   document.getElementById('saveDraftButton').addEventListener('click', (event) => saveDraft(false, event.currentTarget));
   document.getElementById('submitDraftButton').addEventListener('click', (event) => saveDraft(true, event.currentTarget));
+}
+
+function previewDraft() {
+  try {
+    const draft = collectEditorContract();
+    state.editing = cloneJson(draft);
+    renderPreview(state.editing, true);
+  } catch (error) { showAlert(normalizeError(error)); }
 }
 
 function updateMonthlyWageTotal() {
@@ -765,6 +808,7 @@ function collectFullTerms(seed) {
 
 function collectEditorContract() {
   const base = state.editing;
+  if (!base || base.emp_id !== state.employee?.emp_id) throw new Error('계약서를 작성할 직원을 다시 선택해 주세요.');
   const amendment = base.document_kind === 'amendment';
   let terms = { ...base.terms };
   terms.company_name = requireField(terms.company_name, '조합명');
@@ -837,6 +881,7 @@ async function saveDraft(submitAfter, button) {
 }
 
 function openContract(id) {
+  if (!state.contractsLoaded) return;
   document.querySelectorAll('.history-item').forEach((element) => element.classList.toggle('active', element.dataset.contractId === id));
   const contract = state.contracts.find((item) => item.id === id);
   if (!contract) return emptyWorkspace('계약서를 찾을 수 없습니다');
@@ -1210,7 +1255,7 @@ function fileExtension(file) {
 }
 
 function openUpload() {
-  if (!state.employee) return;
+  if (state.busy || !state.contractsLoaded || !state.employee) return;
   document.getElementById('uploadTitle').value = `${state.employee.emp_name} 외부 작성 근로계약서`;
   document.getElementById('uploadKind').value = 'uploaded';
   document.getElementById('uploadEffectiveDate').value = todayKst();
@@ -1294,6 +1339,9 @@ async function boot() {
     });
     document.getElementById('employeeSelect').addEventListener('change', async (event) => {
       state.employee = state.employees.find((employee) => employee.emp_id === event.target.value) || null;
+      state.editing = null;
+      state.amendmentBaseTerms = null;
+      state.customTerms = [];
       emptyWorkspace();
       await loadContracts();
     });

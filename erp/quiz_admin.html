@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.5.2 | Change: 2026-09-01 - Use ERP site-admin access instead of the retired quiz pilot gate. -->
+<!-- Version: v1.5.3 | Change: 2026-10-05 - Keep the correct answer attached to its choice when removing options. -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
@@ -249,7 +249,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.2';
+    const VERSION = '1.5.3';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -558,7 +558,17 @@
       return Array.from($('optionEditor').querySelectorAll('.option-editor-row')).map(row=>({key:row.querySelector('.option-editor-key').textContent.trim(),label:row.querySelector('.option-label-input').value.trim()}));
     }
     function addOption() { const options=readOptions(); if(options.length>=6)return; options.push({key:optionKeyForIndex(options.length),label:''}); renderOptionEditor(options,document.querySelector('input[name="correctOption"]:checked')?.value||''); }
-    function removeOption(index) { const options=readOptions(); const selected=document.querySelector('input[name="correctOption"]:checked')?.value||''; options.splice(index,1); const normalized=options.map((o,i)=>({key:optionKeyForIndex(i),label:o.label})); const nextCorrect=options[index]?.key===selected?'':selected; renderOptionEditor(normalized,nextCorrect); }
+    function removeOption(index) {
+      const options=readOptions();
+      if(!Number.isInteger(index)||index<0||index>=options.length||options.length<=2||$('typeInput').value==='OX')return;
+      const selected=document.querySelector('input[name="correctOption"]:checked')?.value||'';
+      const correctIndex=options.findIndex(option=>option.key===selected);
+      options.splice(index,1);
+      const normalized=options.map((o,i)=>({key:optionKeyForIndex(i),label:o.label}));
+      const remainingCorrectIndex=correctIndex>index?correctIndex-1:correctIndex;
+      const nextCorrect=correctIndex<0||correctIndex===index?'':normalized[remainingCorrectIndex].key;
+      renderOptionEditor(normalized,nextCorrect);
+    }
     function handleTypeChange() { const type=$('typeInput').value; renderOptionEditor(type==='OX'?[{key:'O',label:'O'},{key:'X',label:'X'}]:[{key:'A',label:''},{key:'B',label:''},{key:'C',label:''},{key:'D',label:''}],type==='OX'?'O':''); }
 
     function collectFormPayload() {
