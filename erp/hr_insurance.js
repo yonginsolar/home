@@ -1,4 +1,4 @@
-/* Version: 1.0.1 | 2026-10-05 */
+/* Version: 1.0.2 | 2026-10-05 */
 'use strict';
 (() => {
  const db=window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co','sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',{global:{headers:{'x-erp-host':window.CoopRouteGuard?.getErpRuntimeHost(location)||location.hostname}}});
@@ -10,7 +10,7 @@
  const errorText=e=>({HR_ADMIN_REQUIRED:'인사 관리 권한이 필요합니다.',RESIGNATION_REQUIRED:'먼저 직원관리에서 퇴사 처리를 완료해 주세요. 미래 퇴사일의 서류는 해당 날짜가 지난 뒤 준비할 수 있습니다.',HIRE_DATE_REQUIRED:'직원관리에서 입사일을 입력해 주세요.',STALE_DOCUMENT:'다른 화면에서 문서가 변경되었습니다. 새로 불러온 뒤 다시 확인해 주세요.',DOCUMENT_LOCKED:'제출한 서류는 덮어쓸 수 없습니다.',DOCUMENT_NOT_FOUND:'이 조합에서 확인할 수 없는 문서입니다.',TEST_EMPLOYEE_REQUIRED:'시험 출력은 이름이 ‘시험’으로 시작하는 합성 직원에게만 사용할 수 있습니다.'}[e?.message]||'처리하지 못했습니다. 입력값과 연결 상태를 확인해 주세요.');
  function message(t,bad=false){$('message').className='alert '+(bad?'alert-danger':'alert-info');$('message').textContent=t;}
  async function rpc(action,args={}){const {data,error}=await db.rpc('erp_hr_insurance',{p_action:action,...args});if(error)throw error;return data;}
- async function run(fn){if(state.busy)return;state.busy=true;document.querySelectorAll('button').forEach(b=>{b.dataset.wasDisabled=b.disabled?'1':'0';b.disabled=true;});try{await fn();}catch(e){message(errorText(e),true);}finally{state.busy=false;document.querySelectorAll('button[data-was-disabled]').forEach(b=>{b.disabled=b.dataset.wasDisabled==='1';delete b.dataset.wasDisabled;});}}
+ async function run(fn){if(state.busy)return;state.busy=true;const controls=Array.from(document.querySelectorAll('button,input,select,textarea')).map(b=>[b,b.disabled]);controls.forEach(([b])=>{b.disabled=true;});try{await fn();}catch(e){message(errorText(e),true);}finally{state.busy=false;controls.forEach(([b,disabled])=>{if(b.isConnected)b.disabled=disabled;});}}
  const field=(key,label,type='text',value='',max=80)=>`<div><label for="f_${key}">${esc(label)}</label><input id="f_${key}" data-field="${key}" class="form-control" type="${type}" value="${esc(value)}" ${type==='number'?'min="0" max="999999999999" step="1"':`maxlength="${max}"`}></div>`;
  const check=(key,label,value=false)=>`<label class="me-3"><input type="checkbox" data-field="${key}" ${value?'checked':''}> ${esc(label)}</label>`;
  function fields(spec,data){return `<div class="field-grid">${spec.map(([key,label,type,max])=>field(key,label,type||'text',data[key]??(type==='number'?0:''),max)).join('')}</div>`;}
