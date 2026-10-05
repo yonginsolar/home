@@ -1,4 +1,4 @@
-/* Official PDF overlay only; original page size, instructions and grids retained. Version 1.0.0 */
+/* Official PDF overlay only; original page size, instructions and grids retained. Version 1.0.1 */
 'use strict';
 ((root)=>{
  const assets={acquisition:'acquisition-20251201.pdf',loss:'loss-20221026.pdf',separation:'separation-20250701.pdf'};
@@ -37,7 +37,7 @@
   // Isolate each original page's clipping/graphics state in a vector Form XObject.
   // Some official originals leave nested clipping active; appended labels would disappear.
   const source=await PDFDocument.load(original),doc=await PDFDocument.create();
-  const embedded=await doc.embedPages(source.getPages());for(const originalPage of embedded){const pg=doc.addPage([originalPage.width,originalPage.height]);pg.drawPage(originalPage);}
+  const embedded=await doc.embedPages(source.getPages());for(const originalPage of embedded){const pg=doc.addPage([originalPage.width,originalPage.height]);pg.drawPage(originalPage);pg.pushOperators(root.PDFLib.setTextRenderingMode(0));}
   doc.registerFontkit(root.fontkit);const font=await doc.embedFont(fontBytes,{subset:false});const numberFont=await doc.embedFont(root.PDFLib.StandardFonts.Helvetica);const page=doc.getPages()[0],height=page.getHeight(),d=p.case.form_data,e=p.employee;
   // Top-left points. A bounded box either fits completely or aborts; never silently clip.
   function box(text,x,top,w,h,size=8.5,align='left'){
@@ -86,5 +86,5 @@
   doc.setTitle((p.test?'시험용 ':'')+(p.case.kind==='separation'?'이직확인서':p.case.kind==='loss'?'자격상실 신고서':'자격취득 신고서'));doc.setAuthor(d.company_name);doc.setCreator('협동조합 운영시스템');doc.setSubject('공식 서식 원본에 입력값을 채운 출력본 · 기관 제출 별도');
   return doc.save();
  }
- root.HrInsurancePdf={create,validate,version:'1.0.0'};
+ root.HrInsurancePdf={create,validate,version:'1.0.1'};
 })(typeof window!=='undefined'?window:globalThis);
