@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.210
-Change: 2026-10-06 - Preserve plant photos on save failure and block stale partner forms.
+Version: v1.0.211
+Change: 2026-10-06 - Reject stale plant/FAQ edits and preserve saved news photos.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.210';
+window.ADMIN_MEMBER_VERSION = 'v1.0.211';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -7475,12 +7475,12 @@ tbody.innerHTML = '';
 if (error) {
 CoopSafeLog.error("[fetchHistory] failed:", error);
 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-danger">연혁을 불러오지 못했습니다.</td></tr>';
-return;
+return false;
 }
 const historyRows = (Array.isArray(data) ? data : []).filter((row) => row.category === 'history' || row.is_history_milestone === true);
 if (historyRows.length === 0) {
 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">등록된 연혁이 없습니다.</td></tr>';
-return;
+return true;
 }
 historyRows.forEach(h => {
 const historyId = escapeJsString(String(h.id || ''));
@@ -7502,6 +7502,7 @@ tbody.innerHTML += `<tr class="${isLinkedActivity ? 'site-history-linked-row' : 
                    <td><div class="site-history-actions">${actions}</div></td>
                </tr>`;
 });
+return true;
 }
 let globalHistoryData = {
     ledger: [],
@@ -9704,14 +9705,17 @@ reader.readAsDataURL(file);
 }
 
 // [기존 수정] 발전소 모달 열기 (기존 이미지 URL 기억하기)
+let g_plantModalOpening = false;
 async function openPlantModal(id) {
-if (g_plantSaving) return;
-document.getElementById('plant-id').value = id || '';
-document.getElementById('plant-file').value = '';
+const modal = document.getElementById('plantModal');
+if (g_plantModalOpening || g_plantSaving || modal.classList.contains('show')) return;
+g_plantModalOpening = true;
+try {
 
 if(id) {
 // 수정 모드
-const { data } = await scopeAdminTenant(_supabase.from('site_power_plants').select('*')).eq('id', id).single();
+const { data, error } = await scopeAdminTenant(_supabase.from('site_power_plants').select('*')).eq('id', id).single();
+if (error || !data) throw error || new Error('PLANT_NOT_FOUND');
 	if(data) {
 	document.getElementById('plant-project-type').value = normalizePlantProjectType(data.project_type);
 	document.getElementById('plant-name').value = data.name;
@@ -9767,8 +9771,16 @@ document.getElementById('plant-img-preview').style.display = 'none';
 	}
 	toggleProgressSlider();
 	togglePlantProjectTypeFields();
-	bootstrap.Modal.getOrCreateInstance(document.getElementById('plantModal')).show();
-	}
+document.getElementById('plant-id').value = id || '';
+document.getElementById('plant-file').value = '';
+bootstrap.Modal.getOrCreateInstance(modal).show();
+} catch (error) {
+CoopSafeLog.error('Plant detail load failed:', error);
+myAlert('발전소 정보를 불러오지 못했습니다. 잠시 후 해당 발전소의 수정을 다시 눌러주세요.', 'error');
+} finally {
+g_plantModalOpening = false;
+}
+}
 
 // Keep the record's current photo until its replacement has been saved.
 let g_plantSaving = false;
@@ -11272,14 +11284,14 @@ tbody.innerHTML = '';
 if (error) {
 CoopSafeLog.error("[fetchActivities] failed:", error);
 tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">활동 내역을 불러오지 못했습니다.</td></tr>';
-return;
+return false;
 }
 
 g_siteActivities = Array.isArray(data) ? data : [];
 
 if (g_siteActivities.length === 0) {
 tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">등록된 활동 내역이 없습니다.</td></tr>';
-return;
+return true;
 }
 
 g_siteActivities.forEach((row) => {
@@ -11308,6 +11320,7 @@ tbody.innerHTML += `<tr>
 </td>
 </tr>`;
 });
+return true;
 }
 
 let g_activityEditorBridge = null;
@@ -11499,7 +11512,10 @@ const isHistoryMilestone = document.getElementById('activity-history-milestone')
 const historyTitle = (document.getElementById('activity-history-title')?.value || '').trim();
 if (historyTitle.length > 120) return myAlert('연혁용 제목은 120자 이내로 입력하세요.', 'warning');
 const originalUrls = normalizeActivityGalleryUrls(safeParseArray(document.getElementById('activity-cover-original').value));
-let uploadedNewUrls = [];
+const isCurrent = document.getElementById('activity-visible').checked;
+const sourceEventId = getActivitySourceEventId() || null;
+let recordSaved = false;
+let saveRequested = false;
 
 isSavingActivity = true;
 updateActivitySaveLabel();
@@ -11513,12 +11529,10 @@ finalGalleryUrls.push(item.url);
 } else if (item?.kind === 'file' && item.file) {
 const uploadedUrl = await uploadFileToStorage(item.file, 'site-activities');
 if (uploadedUrl) {
-uploadedNewUrls.push(uploadedUrl);
 finalGalleryUrls.push(uploadedUrl);
 }
 } else if (item?.kind === 'participation') {
 const published = await publishActivityParticipationPhoto(item);
-if (published.created) uploadedNewUrls.push(published.url);
 finalGalleryUrls.push(published.url);
 }
 }
@@ -11526,37 +11540,47 @@ const normalizedFinalGalleryUrls = normalizeActivityGalleryUrls(finalGalleryUrls
 const finalCoverUrl = normalizedFinalGalleryUrls[0] || '';
 const finalContent = buildActivityContentWithGallery(content, normalizedFinalGalleryUrls);
 
+saveRequested = true;
 const { error } = await _supabase.rpc('site_activity_upsert_secure_v2', {
 p_id: id,
 p_title: title,
 p_date: eventDate,
 p_content: finalContent,
 p_file_url: finalCoverUrl || null,
-p_is_current: document.getElementById('activity-visible').checked,
-p_source_participation_event_id: getActivitySourceEventId() || null,
+p_is_current: isCurrent,
+p_source_participation_event_id: sourceEventId,
 p_is_history_milestone: isHistoryMilestone,
 p_history_title: isHistoryMilestone ? (historyTitle || null) : null
 });
 
 if (error) throw error;
-
-const urlsToDelete = originalUrls.filter((url) => !normalizedFinalGalleryUrls.includes(url));
-for (const url of urlsToDelete) {
-await deleteActivityPhotoIfUnreferenced(url);
-}
+recordSaved = true;
 
 g_activityDraftBaseline = getActivityDraftSnapshot();
 await closeActivityAfterSave();
 releaseActivityCoverPreviewObjectUrl();
 activityGalleryItems = [];
-await Promise.all([fetchActivities(), fetchHistory()]);
+// Only a confirmed save permits old-photo cleanup. A failed refresh must
+// never delete the new photos already referenced by the saved article.
+const urlsToDelete = originalUrls.filter((url) => !normalizedFinalGalleryUrls.includes(url));
+for (const url of urlsToDelete) await deleteActivityPhotoIfUnreferenced(url);
+const refreshed = await Promise.all([fetchActivities(), fetchHistory()]);
+if (refreshed.some((result) => result === false)) {
+myAlert('우리 소식은 저장되었습니다. 목록을 불러오지 못했으니 새로고침해 확인해주세요. 다시 저장할 필요는 없습니다.', 'warning');
+return;
+}
 myAlert('우리 소식이 저장되었습니다.');
 } catch (e) {
 CoopSafeLog.error("[saveActivity] failed:", e);
-for (const url of uploadedNewUrls) {
-await deleteOldFile(url);
+// A lost save response is not proof that the server rolled back. Preserve
+// uploaded photos on all failures instead of deleting a possibly saved photo.
+if (recordSaved) {
+myAlert('우리 소식은 저장되었습니다. 화면 갱신 중 문제가 생겼으니 새로고침해 확인해주세요. 다시 저장할 필요는 없습니다.', 'warning');
+} else if (saveRequested) {
+myAlert('저장 결과를 확인하지 못했습니다. 입력 내용과 사진은 유지했습니다. 목록을 새로고침해 저장 여부를 확인한 뒤 다시 시도해주세요.', 'warning');
+} else {
+myAlert('사진을 처리하지 못해 저장하지 않았습니다. 입력 내용은 유지했습니다: ' + (e.message || e), 'error');
 }
-myAlert('활동 내역 저장 중 오류가 발생했습니다: ' + (e.message || e), 'error');
 } finally {
 showLoading(false);
 isSavingActivity = false;
@@ -12381,12 +12405,17 @@ tbody.querySelectorAll('[data-delete-faq]').forEach((button) => {
 }
 
 // 2. 모달 열기 (등록/수정)
+let g_faqModalOpening = false;
 async function openFaqModal(id) {
-document.getElementById('faq-id').value = id || '';
+const modal = document.getElementById('faqModal');
+if (g_faqModalOpening || modal.classList.contains('show')) return;
+g_faqModalOpening = true;
+try {
 
 if (id) {
 // 수정 모드
-const { data } = await scopeAdminTenant(_supabase.from('site_faqs').select('*')).eq('id', id).single();
+const { data, error } = await scopeAdminTenant(_supabase.from('site_faqs').select('*')).eq('id', id).single();
+if (error || !data) throw error || new Error('FAQ_NOT_FOUND');
 if (data) {
 document.getElementById('faq-category').value = data.category || '기타';
 document.getElementById('faq-order').value = data.display_order;
@@ -12403,7 +12432,14 @@ document.getElementById('faq-question').value = '';
 document.getElementById('faq-answer').value = '';
 }
 
-bootstrap.Modal.getOrCreateInstance(document.getElementById('faqModal')).show();
+document.getElementById('faq-id').value = id || '';
+bootstrap.Modal.getOrCreateInstance(modal).show();
+} catch (error) {
+CoopSafeLog.error('FAQ detail load failed:', error);
+myAlert('질문과 답변을 불러오지 못했습니다. 잠시 후 해당 질문의 수정을 다시 눌러주세요.', 'error');
+} finally {
+g_faqModalOpening = false;
+}
 }
 
 // 3. 저장 함수
