@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.207
+Version: v1.0.208
 Change: 2026-10-06 - Preserve homepage drafts and simplify content editing.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-06 - Preserve homepage drafts and simplify content editing.
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.207';
+window.ADMIN_MEMBER_VERSION = 'v1.0.208';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1950,7 +1950,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <div class="tab-pane fade" id="sub-home-settings">
 <div class="site-editor-actionbar">
 <span id="site-home-save-status" class="small text-muted" role="status" aria-live="polite">설정을 불러와 주세요.</span>
-<div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-outline-primary" id="btn-preview-home-settings" onclick="openHomePreview()"><i class="bi bi-eye me-1"></i>미리보기</button><button type="button" class="btn btn-primary btn-sm px-3" id="btn-save-home-settings" onclick="saveHomeSettings()" disabled>메인 화면 저장</button></div>
+<div class="d-flex gap-2"><button type="button" class="btn btn-sm btn-outline-secondary" id="btn-retry-home-settings" onclick="fetchHomeSettings()" hidden>다시 불러오기</button><button type="button" class="btn btn-sm btn-outline-primary" id="btn-preview-home-settings" onclick="openHomePreview()"><i class="bi bi-eye me-1"></i>미리보기</button><button type="button" class="btn btn-primary btn-sm px-3" id="btn-save-home-settings" onclick="saveHomeSettings()" disabled>메인 화면 저장</button></div>
 </div>
 
 <details class="card border-0 shadow-sm mb-4 site-editor-details">
@@ -2148,7 +2148,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 </div>
 
 <div class="tab-pane fade" id="sub-about">
-<div class="site-editor-actionbar"><span id="site-about-save-status" class="small text-muted" role="status" aria-live="polite">설정을 불러와 주세요.</span><button type="button" id="btn-save-about-settings" class="btn btn-primary btn-sm px-3" onclick="saveAboutSettings()" disabled>조합 소개 저장</button></div>
+<div class="site-editor-actionbar"><span id="site-about-save-status" class="small text-muted" role="status" aria-live="polite">설정을 불러와 주세요.</span><div class="d-flex gap-2"><button type="button" id="btn-retry-about-settings" class="btn btn-sm btn-outline-secondary" onclick="fetchAboutSettings()" hidden>다시 불러오기</button><button type="button" id="btn-save-about-settings" class="btn btn-primary btn-sm px-3" onclick="saveAboutSettings()" disabled>조합 소개 저장</button></div></div>
 
 <div class="row g-3">
 <div class="col-lg-6">
@@ -8446,7 +8446,7 @@ const root = document.getElementById(rootId);
 const controller = SiteEditorDrafts.create(() => siteEditorFormSnapshot(rootId), (state) => {
 const status = document.getElementById(`site-${kind}-save-status`);
 if (status) {
-status.textContent = state.busy ? '저장 중입니다…' : state.loading ? '설정을 불러오는 중입니다…' : !state.loaded ? '설정을 불러오지 못했습니다. 탭을 다시 눌러 재시도해 주세요.' : state.dirty ? '저장하지 않은 변경사항이 있습니다.' : '저장된 내용입니다.';
+status.textContent = state.busy ? '저장 중입니다…' : state.loading ? '설정을 불러오는 중입니다…' : !state.loaded ? '설정을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.' : state.dirty ? '저장하지 않은 변경사항이 있습니다.' : '저장된 내용입니다.';
 status.classList.toggle('text-primary', state.loaded && state.dirty);
 status.classList.toggle('text-muted', !state.loaded || !state.dirty);
 }
@@ -8454,27 +8454,36 @@ const button = document.getElementById(kind === 'home' ? 'btn-save-home-settings
 if (button) button.disabled = !state.loaded || state.loading || state.busy || !state.dirty;
 const preview = kind === 'home' ? document.getElementById('btn-preview-home-settings') : null;
 if (preview) preview.disabled = !state.loaded || state.loading || state.busy;
+const retry = document.getElementById(`btn-retry-${kind}-settings`);
+if (retry) { retry.hidden = state.loaded || state.loading; retry.disabled = state.loading || state.busy; }
 if (kind === 'about') {
 const editorShell = document.getElementById('admin-about-editor')?.closest('.about-editor-shell');
-if (editorShell) editorShell.inert = state.loading && !state.loaded;
+if (editorShell) editorShell.inert = !state.loaded;
 }
-// Only lock the initial read, so a slow response cannot race with first-time typing.
-if (state.loading && !state.loaded && !g_siteEditorFieldLocks.has(kind)) {
-const fields = Array.from(root?.querySelectorAll('input,textarea,select') || []).map(el => [el, el.disabled]);
+// Keep the first-read lock after an error too. Editing an unknown blank baseline
+// would otherwise make retries unsafe and leave the form unable to save.
+if (!state.loaded && !g_siteEditorFieldLocks.has(kind)) {
+const fields = Array.from(root?.querySelectorAll('input,textarea,select,button') || [])
+.filter(el => !el.closest('.site-editor-actionbar')).map(el => [el, el.disabled]);
 g_siteEditorFieldLocks.set(kind, fields);
 fields.forEach(([el]) => { el.disabled = true; });
-} else if ((!state.loading || state.loaded) && g_siteEditorFieldLocks.has(kind)) {
+} else if (state.loaded && g_siteEditorFieldLocks.has(kind)) {
 g_siteEditorFieldLocks.get(kind).forEach(([el, disabled]) => { el.disabled = disabled; });
 g_siteEditorFieldLocks.delete(kind);
 }
 });
 g_siteEditorDrafts.set(kind, controller);
 ['input','change','click'].forEach(type => root?.addEventListener(type, () => Promise.resolve().then(() => controller.refresh())));
+controller.refresh();
 return controller;
 }
 
+// Establish the initial lock before a delayed tab handler can allow typing.
+getSiteEditorDraft('home');
+getSiteEditorDraft('about');
+
 window.addEventListener('beforeunload', (event) => {
-if (hasPendingSectionChanges() || Array.from(g_siteEditorDrafts.values()).some(draft => draft.refresh().dirty)) {
+if (hasPendingSectionChanges() || Array.from(g_siteEditorDrafts.values()).some(draft => draft.refresh().dirty) || hasUnsavedActivityChanges()) {
 event.preventDefault();
 event.returnValue = '';
 }
@@ -11177,7 +11186,7 @@ const titleEl = document.getElementById('activity-title');
 const dateEl = document.getElementById('activity-date');
 const contentEl = document.getElementById('activity-content');
 if (!String(titleEl.value || '').trim()) titleEl.value = event.title || '';
-if (!String(dateEl.value || '').trim()) dateEl.value = formatActivitySourceEventDate(event.starts_at) || getAdminMemberKstDateString();
+if (!g_activityDateUserEdited || !String(dateEl.value || '').trim()) dateEl.value = formatActivitySourceEventDate(event.starts_at) || getAdminMemberKstDateString();
 if (!String(contentEl.value || '').trim()) {
 contentEl.value = buildActivitySourceSummary(event);
 g_activityEditorBridge?.syncFromSource();
@@ -11326,6 +11335,64 @@ let g_activityEditorBridge = null;
 let g_activityModalOpening = false;
 let g_activityOriginalBody = '';
 let g_activityEditorLoadedHtml = '';
+let g_activityDateUserEdited = false;
+let g_activityDraftBaseline = '';
+let g_activityDiscardPending = false;
+let g_activityAllowClose = false;
+
+function getActivityDraftSnapshot() {
+const modal = document.getElementById('activityModal');
+const values = Array.from(modal?.querySelectorAll('input,textarea,select') || [])
+.filter(el => !el.closest('#activity-content-toolbar'))
+.map(el => [el.id, el.type === 'file' ? Array.from(el.files || []).map(file => [file.name,file.size,file.lastModified]) : el.type === 'checkbox' ? el.checked : el.value]);
+const photos = activityGalleryItems.map(item => [item.kind,item.url || '',item.fileId || '',item.file ? [item.file.name,item.file.size,item.file.lastModified] : null]);
+return JSON.stringify([values, g_activityEditorBridge?.getRootHtml() || '', photos]);
+}
+
+function hasUnsavedActivityChanges() {
+return Boolean(g_activityDraftBaseline && document.getElementById('activityModal')?.classList.contains('show') && getActivityDraftSnapshot() !== g_activityDraftBaseline);
+}
+
+function bindActivityDraftGuard() {
+const modal = document.getElementById('activityModal');
+if (!modal || modal.dataset.draftGuardBound === '1') return;
+modal.dataset.draftGuardBound = '1';
+modal.addEventListener('show.bs.modal', () => { modal.dataset.activityShown = '0'; });
+modal.addEventListener('shown.bs.modal', () => { modal.dataset.activityShown = '1'; });
+modal.addEventListener('hidden.bs.modal', () => { modal.dataset.activityShown = '0'; });
+document.getElementById('activity-date')?.addEventListener('input', () => { g_activityDateUserEdited = true; });
+document.getElementById('activity-date')?.addEventListener('change', () => { g_activityDateUserEdited = true; });
+modal.addEventListener('hide.bs.modal', event => {
+if (g_activityAllowClose) { g_activityAllowClose = false; return; }
+if (isSavingActivity) { event.preventDefault(); return; }
+if (!hasUnsavedActivityChanges()) return;
+event.preventDefault();
+if (g_activityDiscardPending) return;
+g_activityDiscardPending = true;
+const confirmModal = document.getElementById('customConfirmModal');
+confirmModal.addEventListener('hidden.bs.modal', () => { g_activityDiscardPending = false; }, {once:true});
+myConfirm('저장하지 않은 우리 소식이 있습니다. 변경사항을 버리고 닫으시겠습니까?', () => {
+g_activityAllowClose = true;
+bootstrap.Modal.getOrCreateInstance(modal).hide();
+});
+});
+}
+
+function closeActivityAfterSave() {
+const modal = document.getElementById('activityModal');
+if (!modal?.classList.contains('show')) return Promise.resolve();
+return new Promise(resolve => {
+const close = () => {
+g_activityAllowClose = true;
+modal.addEventListener('hidden.bs.modal', resolve, {once:true});
+bootstrap.Modal.getOrCreateInstance(modal).hide();
+};
+// Bootstrap ignores hide() during its opening animation. A quick successful
+// save must still close once, before the success notice opens on top.
+if (modal.dataset.activityShown === '1') close();
+else modal.addEventListener('shown.bs.modal', close, {once:true});
+});
+}
 
 async function ensureActivityRichEditor() {
 if (!window.ApprovalRichEditor) throw new Error('편집기를 불러오지 못했습니다. 다시 시도해 주세요.');
@@ -11353,6 +11420,10 @@ if (modal?.classList.contains('show')) return;
 g_activityModalOpening = true;
 try {
 await ensureActivityRichEditor();
+bindActivityDraftGuard();
+g_activityDraftBaseline = '';
+g_activityAllowClose = false;
+g_activityDateUserEdited = Boolean(id);
 document.getElementById('activity-id').value = id || '';
 document.getElementById('activity-cover-file').value = '';
 document.getElementById('activity-cover-removed').value = '0';
@@ -11409,6 +11480,7 @@ return;
 g_activityOriginalBody = document.getElementById('activity-content').value;
 g_activityEditorBridge.syncFromSource();
 g_activityEditorLoadedHtml = g_activityEditorBridge.getRootHtml();
+g_activityDraftBaseline = getActivityDraftSnapshot();
 updateActivitySaveLabel();
 bootstrap.Modal.getOrCreateInstance(modal).show();
 } catch (error) {
@@ -11487,7 +11559,8 @@ for (const url of urlsToDelete) {
 await deleteActivityPhotoIfUnreferenced(url);
 }
 
-bootstrap.Modal.getOrCreateInstance(document.getElementById('activityModal')).hide();
+g_activityDraftBaseline = getActivityDraftSnapshot();
+await closeActivityAfterSave();
 releaseActivityCoverPreviewObjectUrl();
 activityGalleryItems = [];
 await Promise.all([fetchActivities(), fetchHistory()]);
@@ -12064,7 +12137,9 @@ async function openPartnerModal(id) {
 }
 // 4. 파트너 저장
 // [3] 저장 함수 (ID 처리 + 공통 파일 함수 사용)
+let g_partnerSaving = false;
 async function savePartner() {
+if (g_partnerSaving) return;
 const name = document.getElementById('pt-name').value;
 if(!name) return myAlert('단체명을 입력하세요.', 'warning');
 const requestedStatus = document.getElementById('pt-status').value;
@@ -12076,27 +12151,12 @@ return myAlert('정상 상태의 단체 조합원만 홈페이지 공개를 승�
 let idVal = document.getElementById('pt-id').value;
 if (!idVal || idVal.trim() === '') idVal = null;
 
-showLoading(true);
-
 // 1. 파일 업로드 (공통 함수 사용으로 코드 대폭 단축)
 const fileInput = document.getElementById('pt-file');
 const originalUrl = document.getElementById('pt-img-original').value;
-let finalImgUrl = document.getElementById('pt-img-url').value;
-
-try {
-if (fileInput.files.length > 0) {
-// ★ 한글명 걱정 끝! 공통 함수 호출
-finalImgUrl = await uploadFileToStorage(fileInput.files[0], 'partners');
-if(originalUrl) await deleteOldFile(originalUrl); // 기존 파일 삭제
-} else if (originalUrl && !finalImgUrl) {
-await deleteOldFile(originalUrl); // 삭제 버튼 누른 경우
-}
-} catch (e) {
-showLoading(false);
-return myAlert('이미지 업로드 오류: ' + e.message, 'error');
-}
-
-// 2. DB 저장 (RPC 호출)
+const finalImgUrl = document.getElementById('pt-img-url').value;
+const newFile = fileInput.files[0] || null;
+// Collect first; only a confirmed database save can authorize old-file cleanup.
 const updates = {
 p_id: idVal, // NULL 또는 UUID
 p_name: name,
@@ -12109,13 +12169,22 @@ p_status: requestedStatus,
 p_badges: []
 };
 
+g_partnerSaving = true;
+showLoading(true);
+try {
+if (newFile) updates.p_logo_url = await uploadFileToStorage(newFile, 'partners');
 const { error } = await _supabase.rpc('upsert_partner_secure', updates);
-showLoading(false);
-
-if(error) myAlert('저장 실패: ' + (error.hint || error.message), 'error');
-else {
+if (error) throw error;
+// On a failed or uncertain save retain both files: the server may have committed
+// before its response was lost. Never remove the photo still used by the record.
+if (originalUrl && originalUrl !== updates.p_logo_url) await deleteOldFile(originalUrl);
 bootstrap.Modal.getInstance(document.getElementById('partnerModal')).hide();
-fetchPartners();
+await fetchPartners();
+} catch (error) {
+myAlert('저장 실패: ' + (error?.hint || error?.message || error), 'error');
+} finally {
+showLoading(false);
+g_partnerSaving = false;
 }
 }
 
