@@ -1,4 +1,4 @@
-/* Version: v1.2.1 | 2026-10-05 */
+/* Version: v1.2.2 | 2026-10-05 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -28,11 +28,17 @@ const state = {
   editing: null,
   amendmentBaseTerms: null,
   customTerms: [],
+  editorBaseline: null,
+  previewDirty: false,
+  transitionPending: false,
   busy: false
 };
 
 let alertModal;
 let uploadModal;
+let discardModal;
+let pendingContractTransition = null;
+let contractDiscardConfirmed = false;
 
 const selectContractColumns = [
   'id', 'coop_id', 'emp_id', 'document_kind', 'source_type', 'title', 'version_no',
@@ -88,6 +94,55 @@ function formatMoney(value) {
 function showAlert(message) {
   document.getElementById('alertBody').textContent = String(message || '');
   alertModal.show();
+}
+
+function contractEditorSnapshot() {
+  return JSON.stringify(Array.from(document.querySelectorAll('#workspace input, #workspace select, #workspace textarea'))
+    .map((field) => [field.id || field.getAttribute('data-custom-title') || field.getAttribute('data-custom-content') || '',
+      field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value]));
+}
+
+function hasUnsavedContractChanges() {
+  if (!state.editing || state.editorBaseline === null) return false;
+  if (document.getElementById('contractTitle')) return contractEditorSnapshot() !== state.editorBaseline;
+  return state.previewDirty;
+}
+
+function resetContractEditTracking() {
+  state.editorBaseline = null;
+  state.previewDirty = false;
+}
+
+function requestContractTransition(action) {
+  if (state.busy || state.transitionPending) return;
+  if (!hasUnsavedContractChanges()) { action(); return; }
+  state.transitionPending = true;
+  contractDiscardConfirmed = false;
+  pendingContractTransition = action;
+  discardModal.show();
+}
+
+function finishContractTransition(discard) {
+  const action = pendingContractTransition;
+  pendingContractTransition = null;
+  state.transitionPending = false;
+  if (discard && action) action();
+}
+
+function switchContractEmployee(select) {
+  const target = state.employees.find((employee) => employee.emp_id === select.value);
+  select.value = state.employee?.emp_id || '';
+  if (!target || target.emp_id === state.employee?.emp_id) return;
+  requestContractTransition(() => {
+    state.employee = target;
+    select.value = target.emp_id;
+    state.editing = null;
+    state.amendmentBaseTerms = null;
+    state.customTerms = [];
+    resetContractEditTracking();
+    emptyWorkspace();
+    void loadContracts();
+  });
 }
 
 function setBusy(next, button) {
@@ -400,6 +455,10 @@ function prepareTermsForEditor(source, options = {}) {
 
 function openNew(kind) {
   if (state.busy || !state.contractsLoaded || !state.admin || state.forceSelf || !state.employee) return;
+  requestContractTransition(() => createNewContract(kind));
+}
+
+function createNewContract(kind) {
   const parent = kind === 'amendment'
     ? state.contracts.find((contract) => contract.status === 'completed' && contract.source_type === 'editor')
     : null;
@@ -433,7 +492,7 @@ function renderParentOptions(selected) {
   ).join('');
 }
 
-function renderEditor() {
+function renderEditor(preserveBaseline = false) {
   const contract = state.editing;
   const terms = prepareTermsForEditor(contract.terms, { fromExisting: Boolean(contract.id) });
   contract.terms = terms;
@@ -463,6 +522,10 @@ function renderEditor() {
       <div class="alert alert-light border mb-0 small">전자 확인을 요청하면 문서 내용이 고정됩니다. 직원과 사용자 측 관리자가 모두 확인한 뒤 완료 문서가 됩니다. 급여대장에 쓰는 연봉 정보는 이 문서만으로 자동 변경하지 않으므로, 실제 급여가 바뀌면 직원관리의 연봉 적용일도 함께 확인해 주세요.</div>
     </div>`;
   bindEditorEvents();
+  if (!preserveBaseline) {
+    state.editorBaseline = contractEditorSnapshot();
+    state.previewDirty = false;
+  }
 }
 
 function renderFullContractEditor(terms) {
@@ -616,8 +679,10 @@ function bindEditorEvents() {
 
 function previewDraft() {
   try {
+    const dirty = hasUnsavedContractChanges();
     const draft = collectEditorContract();
     state.editing = cloneJson(draft);
+    state.previewDirty = dirty;
     renderPreview(state.editing, true);
   } catch (error) { showAlert(normalizeError(error)); }
 }
@@ -635,11 +700,18 @@ function loadAmendmentParent(id) {
     showAlert('기준 계약서를 불러오지 못했습니다. 완료된 직접 작성 계약서를 선택해 주세요.');
     return;
   }
-  state.editing.parent_contract_id = parent.id;
-  state.editing.terms = prepareTermsForEditor(parent.terms, { fromExisting: true });
-  state.amendmentBaseTerms = cloneJson(state.editing.terms);
-  state.customTerms = cloneJson(state.editing.terms.custom_terms || []);
-  renderEditor();
+  const title = document.getElementById('contractTitle').value;
+  const date = document.getElementById('effectiveDate').value;
+  document.getElementById('parentContract').value = state.editing.parent_contract_id || '';
+  requestContractTransition(() => {
+    state.editing.title = title;
+    state.editing.effective_date = date;
+    state.editing.parent_contract_id = parent.id;
+    state.editing.terms = prepareTermsForEditor(parent.terms, { fromExisting: true });
+    state.amendmentBaseTerms = cloneJson(state.editing.terms);
+    state.customTerms = cloneJson(state.editing.terms.custom_terms || []);
+    renderEditor(true);
+  });
 }
 
 function requireField(value, label) {
@@ -861,15 +933,17 @@ async function saveDraft(submitAfter, button) {
     if (error) throw error;
     const saved = Array.isArray(data) ? data[0] : data;
     state.editing = saved;
+    state.editorBaseline = contractEditorSnapshot();
+    state.previewDirty = false;
     if (submitAfter) {
       const { data: submitted, error: submitError } = await db.rpc('erp_submit_employment_contract', { p_contract_id: saved.id });
       if (submitError) throw submitError;
       await loadContracts();
-      openContract((Array.isArray(submitted) ? submitted[0] : submitted)?.id || saved.id);
+      openContract((Array.isArray(submitted) ? submitted[0] : submitted)?.id || saved.id, { afterSave: true });
       showAlert('전자 확인을 요청했습니다. 직원은 마이페이지의 계약서 관리에서 내용을 확인할 수 있습니다.');
     } else {
       await loadContracts();
-      openContract(saved.id);
+      openContract(saved.id, { afterSave: true });
       showAlert('초안을 저장했습니다.');
     }
   } catch (error) {
@@ -880,8 +954,13 @@ async function saveDraft(submitAfter, button) {
   }
 }
 
-function openContract(id) {
-  if (!state.contractsLoaded) return;
+function openContract(id, options = {}) {
+  if (!state.contractsLoaded || (state.busy && !options.afterSave)) return;
+  if (options.afterSave) { resetContractEditTracking(); showContract(id); return; }
+  requestContractTransition(() => { resetContractEditTracking(); showContract(id); });
+}
+
+function showContract(id) {
   document.querySelectorAll('.history-item').forEach((element) => element.classList.toggle('active', element.dataset.contractId === id));
   const contract = state.contracts.find((item) => item.id === id);
   if (!contract) return emptyWorkspace('계약서를 찾을 수 없습니다');
@@ -918,7 +997,7 @@ function renderPreview(contract, unsaved) {
       </div>
     </div>
     ${paper}`;
-  document.getElementById('returnEditorButton')?.addEventListener('click', renderEditor);
+  document.getElementById('returnEditorButton')?.addEventListener('click', () => renderEditor(true));
   document.getElementById('openFileButton')?.addEventListener('click', () => openStoredFile(contract.file_path));
   document.getElementById('employerSignButton')?.addEventListener('click', (event) => signContract(contract.id, 'employer', event.currentTarget));
   document.getElementById('employeeSignButton')?.addEventListener('click', (event) => signContract(contract.id, 'employee', event.currentTarget));
@@ -1101,7 +1180,7 @@ async function signContract(id, role, button) {
     const { data, error } = await db.rpc('erp_sign_employment_contract', { p_contract_id: id, p_signer_role: role });
     if (error) throw error;
     await loadContracts();
-    openContract((Array.isArray(data) ? data[0] : data)?.id || id);
+    openContract((Array.isArray(data) ? data[0] : data)?.id || id, { afterSave: true });
     showAlert('전자 확인을 기록했습니다. 양쪽 확인이 모두 끝나면 계약이 완료됩니다.');
   } catch (error) {
     console.error('[employment_contracts] sign failed', error);
@@ -1256,11 +1335,18 @@ function fileExtension(file) {
 
 function openUpload() {
   if (state.busy || !state.contractsLoaded || !state.employee) return;
+  requestContractTransition(() => {
+  if (hasUnsavedContractChanges()) {
+    resetContractEditTracking();
+    state.editing = null;
+    emptyWorkspace();
+  }
   document.getElementById('uploadTitle').value = `${state.employee.emp_name} 외부 작성 근로계약서`;
   document.getElementById('uploadKind').value = 'uploaded';
   document.getElementById('uploadEffectiveDate').value = todayKst();
   document.getElementById('uploadFile').value = '';
   uploadModal.show();
+  });
 }
 
 async function registerUpload(event) {
@@ -1300,7 +1386,7 @@ async function registerUpload(event) {
     if (error) throw error;
     uploadModal.hide();
     await loadContracts();
-    openContract((Array.isArray(data) ? data[0] : data)?.id);
+    openContract((Array.isArray(data) ? data[0] : data)?.id, { afterSave: true });
     showAlert('외부 작성 계약서를 새 이력으로 등록했습니다. 기존 계약서는 그대로 보존됩니다.');
   } catch (error) {
     if (uploaded) await db.storage.from('contracts').remove([storagePath]).catch(() => {});
@@ -1314,6 +1400,20 @@ async function registerUpload(event) {
 async function boot() {
   alertModal = new bootstrap.Modal(document.getElementById('alertModal'));
   uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+  discardModal = new bootstrap.Modal(document.getElementById('unsavedContractModal'));
+  document.getElementById('discardContractButton').addEventListener('click', () => {
+    contractDiscardConfirmed = true;
+    discardModal.hide();
+  });
+  document.getElementById('unsavedContractModal').addEventListener('hidden.bs.modal', () => {
+    finishContractTransition(contractDiscardConfirmed);
+    contractDiscardConfirmed = false;
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (!hasUnsavedContractChanges()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
   try {
     const gate = await window.ErpRuntimeGuard.requireUser(db, {
       alertFn: showAlert,
@@ -1335,16 +1435,10 @@ async function boot() {
     renderEmployeeSelect();
     await loadContracts();
     document.getElementById('backButton').addEventListener('click', () => {
-      location.href = state.admin && !state.forceSelf ? 'admin_employee.html' : 'mypage.html';
+      requestContractTransition(() => { resetContractEditTracking(); location.href = state.admin && !state.forceSelf ? 'admin_employee.html' : 'mypage.html'; });
     });
-    document.getElementById('employeeSelect').addEventListener('change', async (event) => {
-      state.employee = state.employees.find((employee) => employee.emp_id === event.target.value) || null;
-      state.editing = null;
-      state.amendmentBaseTerms = null;
-      state.customTerms = [];
-      emptyWorkspace();
-      await loadContracts();
-    });
+    document.getElementById('contractHomeButton').addEventListener('click', () => requestContractTransition(() => { resetContractEditTracking(); location.href = 'index.html'; }));
+    document.getElementById('employeeSelect').addEventListener('change', (event) => switchContractEmployee(event.target));
     document.querySelectorAll('[data-new-kind]').forEach((button) => button.addEventListener('click', () => openNew(button.dataset.newKind)));
     document.getElementById('openUploadButton').addEventListener('click', openUpload);
     document.getElementById('registerUploadButton').addEventListener('click', registerUpload);

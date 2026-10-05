@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.5.3 | Change: 2026-10-05 - Keep the correct answer attached to its choice when removing options. -->
+<!-- Version: v1.5.4 | Change: 2026-10-05 - Keep the active editor locked until saving finishes. -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
@@ -249,7 +249,7 @@
   (() => {
     'use strict';
 
-    const VERSION = '1.5.3';
+    const VERSION = '1.5.4';
     const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -262,6 +262,8 @@
     };
     const $ = (id) => document.getElementById(id);
     const questionModal = bootstrap.Modal.getOrCreateInstance($('questionModal'));
+    let allowSavedQuestionClose = false;
+    $('questionModal').addEventListener('hide.bs.modal', guardQuestionModalHide);
     const statsModal = bootstrap.Modal.getOrCreateInstance($('statsModal'));
     const deleteModal = bootstrap.Modal.getOrCreateInstance($('deleteModal'));
     const alertModal = bootstrap.Modal.getOrCreateInstance($('alertModal'));
@@ -497,6 +499,7 @@
     function findQuestion(id) { return state.questions.find(q=>String(q.id)===String(id))||null; }
 
     function openNewQuestion() {
+      if(state.saving)return;
       $('questionForm').reset();
       $('questionId').value='';
       $('questionModalTitle').textContent='새 문제 추가';
@@ -509,7 +512,7 @@
     }
 
     function openEditQuestion(q) {
-      if(!q) return;
+      if(!q || state.saving) return;
       $('questionForm').reset();
       $('questionId').value=q.id;
       $('questionModalTitle').textContent=`문제 수정${q.source_number?` · #${q.source_number}`:''}`;
@@ -599,21 +602,37 @@
       };
     }
 
+    function guardQuestionModalHide(event) {
+      if(state.saving && !allowSavedQuestionClose) event.preventDefault();
+    }
+
+    function setQuestionSaveBusy(next) {
+      state.saving=next;
+      const controls=[...$('questionModal').querySelectorAll('button,input,select,textarea'),$('addQuestionButton')];
+      controls.forEach(control=>{
+        if(next) { control.dataset.quizWasDisabled=control.disabled?'1':'0'; control.disabled=true; }
+        else { control.disabled=control.dataset.quizWasDisabled==='1'; delete control.dataset.quizWasDisabled; }
+      });
+      $('saveQuestionButton').textContent=next?'저장 중...':'저장';
+    }
+
     async function saveQuestion(event) {
       event.preventDefault();
       if(state.saving)return;
       clearFormError();
       let payload;
       try { payload=collectFormPayload(); } catch(error) { showFormError(error.message); return; }
-      state.saving=true; $('saveQuestionButton').disabled=true; $('saveQuestionButton').textContent='저장 중...';
+      setQuestionSaveBusy(true);
       try {
         const {error}=await client.rpc('quiz_admin_save_question',payload);
         if(error)throw error;
+        allowSavedQuestionClose=true;
         questionModal.hide();
+        allowSavedQuestionClose=false;
         if(state.hasSearched)await loadQuestions(state.page);
         showAlert(payload.p_question_id?'문제를 수정했습니다. 과거 답변 통계는 수정 전 문제 내용과 함께 그대로 보존됩니다.':'새 문제를 추가했습니다.','저장 완료 ☀️');
       } catch(error) { console.error(`[quiz-admin ${VERSION}] save failed`,error); showFormError(errorMessage(error,'문제를 저장하지 못했습니다.')); }
-      finally { state.saving=false; $('saveQuestionButton').disabled=false; $('saveQuestionButton').textContent='저장'; }
+      finally { allowSavedQuestionClose=false; setQuestionSaveBusy(false); }
     }
 
     function openDeleteQuestion(q) { if(!q)return; state.deleteId=q.id; $('deleteQuestionText').textContent=q.prompt||''; deleteModal.show(); }

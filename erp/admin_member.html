@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.201
+Version: v1.0.202
 Change: 2026-10-05 - Load homepage sections on first entry, preserving Korean date defaults and concurrent dashboard loading.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-05 - Load homepage sections on first entry, preserving Korean da
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.201';
+window.ADMIN_MEMBER_VERSION = 'v1.0.202';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1844,7 +1844,7 @@ body.erp-page-admin-member { --erp-page-max-width: 1440px; }
 <ul class="nav nav-tabs mb-4" id="site-content-tabs">
 
 <li class="nav-item">
-<a class="nav-link active" id="site-sections-tab-link" data-bs-toggle="tab" href="#sub-sections" onclick="setTimeout(fetchSections,100)">
+<a class="nav-link active" id="site-sections-tab-link" data-bs-toggle="tab" href="#sub-sections" onclick="void openSectionSettings()">
 섹션 설정 (ON/OFF)
 </a>
 </li>
@@ -8003,6 +8003,16 @@ let g_siteSections = [];
 let g_sectionDrafts = [];
 let g_siteInitialSectionsRequested = false;
 let g_sectionLoadPromise = null;
+let g_sectionSaving = false;
+
+async function openSectionSettings() {
+if (hasPendingSectionChanges() || g_sectionSaving) { renderSectionRows(); return; }
+try { await fetchSections(); }
+catch (error) {
+CoopSafeLog.error('섹션 로딩 실패:', error);
+renderSectionSeedHint('섹션 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', true);
+}
+}
 
 async function loadInitialSiteSections() {
 if (g_siteInitialSectionsRequested || ADMIN_MEMBER_PAGE_SCOPE === 'documents_admin' || hasPendingSectionChanges()) return;
@@ -8050,7 +8060,7 @@ function updateSectionSaveButton() {
 const btn = document.getElementById('btnSaveSectionChanges');
 if (!btn) return;
 const dirty = hasPendingSectionChanges();
-btn.disabled = !dirty;
+btn.disabled = !dirty || g_sectionSaving;
 btn.classList.toggle('btn-primary', dirty);
 btn.classList.toggle('btn-outline-secondary', !dirty);
 }
@@ -8071,7 +8081,6 @@ const sortedSections = getSortedSectionDrafts();
 tbody.innerHTML = '';
 
 sortedSections.forEach(sec => {
-const safeSectionIdText = escapeHtml(sec.id || '');
 const safeSectionIdArg = escapeJsString(sec.id || '');
 const checkedAttr = sec.is_visible ? 'checked' : '';
 const statusBadge = sec.is_visible
@@ -8084,8 +8093,8 @@ const sectionDisplayName = isAdminMemberSiteProfile() && sec.id === 'impact'
 : (sec.name || '');
 const moveControls = `
 <div class="btn-group btn-group-sm section-order-controls" role="group" aria-label="section-order">
-  <button type="button" class="btn btn-outline-secondary" ${sectionIndex <= 0 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', -1)">↑</button>
-  <button type="button" class="btn btn-outline-secondary" ${sectionIndex >= sortedSections.length - 1 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', 1)">↓</button>
+  <button type="button" class="btn btn-outline-secondary" ${g_sectionSaving || sectionIndex <= 0 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', -1)">↑</button>
+  <button type="button" class="btn btn-outline-secondary" ${g_sectionSaving || sectionIndex >= sortedSections.length - 1 ? 'disabled' : ''} onclick="moveSectionOrder('${safeSectionIdArg}', 1)">↓</button>
 </div>
 `;
 
@@ -8093,8 +8102,7 @@ tbody.innerHTML += `
                    <tr>
                        <td class="align-middle text-center">${getSectionDisplayOrder(sec)}</td>
                        <td class="align-middle text-start ps-4">
-                           <span class="fw-bold text-dark">${escapeHtml(sectionDisplayName)}</span> <br>
-                           <small class="text-muted" style="font-size:0.85em;">ID: ${safeSectionIdText}</small>
+                           <span class="fw-bold text-dark">${escapeHtml(sectionDisplayName)}</span>
                        </td>
                        <td class="align-middle text-center">${statusBadge}</td>
                        <td class="align-middle text-center">
@@ -8103,7 +8111,7 @@ tbody.innerHTML += `
                            <div class="form-check form-switch section-visibility-switch">
                                <input class="form-check-input" type="checkbox" role="switch"
                                    style="cursor: pointer;"
-                                   ${checkedAttr}
+                                   ${checkedAttr} ${g_sectionSaving ? 'disabled' : ''}
                                    onchange="toggleSection('${safeSectionIdArg}', this.checked)">
                            </div>
                            </div>
@@ -8142,9 +8150,12 @@ btn.innerHTML = `<i class="bi bi-plus-circle me-1"></i>누락 섹션 등록 (${l
 }
 
 // 1. 섹션 목록 불러오기
-async function fetchSections() {
-if (g_sectionLoadPromise) return g_sectionLoadPromise;
-g_sectionLoadPromise = loadSectionRows();
+async function fetchSections(options = {}) {
+if (g_sectionLoadPromise) {
+const result = await g_sectionLoadPromise;
+return options.replaceDrafts ? fetchSections(options) : result;
+}
+g_sectionLoadPromise = loadSectionRows(options);
 try {
 return await g_sectionLoadPromise;
 } finally {
@@ -8152,7 +8163,9 @@ g_sectionLoadPromise = null;
 }
 }
 
-async function loadSectionRows() {
+async function loadSectionRows(options = {}) {
+if (hasPendingSectionChanges() && !options.replaceDrafts) return true;
+const draftAtStart = JSON.stringify(createSectionSnapshot(g_sectionDrafts));
 // DB에서 순서대로 가져옴
 const { data, error } = await scopeAdminTenant(_supabase
 .from('site_sections')
@@ -8164,6 +8177,8 @@ CoopSafeLog.error("섹션 로딩 에러:", error);
 renderSectionSeedHint('섹션 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.', true);
 return false;
 }
+// A response begun before a local edit must not replace that edit.
+if (draftAtStart !== JSON.stringify(createSectionSnapshot(g_sectionDrafts))) return false;
 
 const visibleData = (Array.isArray(data) ? data : []).filter((section) => !isSiteMemberRemovedSection(section?.id));
 const requiredSections = getRequiredSiteSectionsForCurrentProfile();
@@ -8172,6 +8187,9 @@ tbody.innerHTML = '';
 renderSectionSeedHint('', true);
 
 if (visibleData.length === 0) {
+g_siteSections = [];
+g_sectionDrafts = [];
+updateSectionSaveButton();
 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3">섹션 정보가 없습니다.</td></tr>';
 renderSectionSeedButton(requiredSections);
 renderSectionSeedHint('site_sections가 비어 있어 필수 홈페이지 섹션을 표시할 수 없습니다. 먼저 누락 섹션 등록을 실행하세요.', true);
@@ -8203,12 +8221,19 @@ return true;
 }
 
 async function seedRequiredSections() {
+if (g_sectionSaving) return;
+if (hasPendingSectionChanges()) { myAlert('작성 중인 섹션 변경사항을 먼저 저장해 주세요.', 'warning'); return; }
+if (!g_siteInitialSectionsRequested) { myAlert('섹션 목록을 먼저 불러온 뒤 다시 시도해 주세요.', 'warning'); return; }
+const missing = getRequiredSiteSectionsForCurrentProfile().filter(section => !g_siteSections.some(row => row.id === section.id));
+if (!missing.length) return;
+g_sectionSaving = true;
+renderSectionRows();
 renderSectionSeedHint('', true);
 const btn = document.getElementById('btnSeedRequiredSections');
 if (btn) btn.disabled = true;
 
 try {
-for (const section of getRequiredSiteSectionsForCurrentProfile()) {
+for (const section of missing) {
 const { error } = await _supabase.rpc('upsert_site_section_secure', {
 p_id: section.id,
 p_name: section.name,
@@ -8223,16 +8248,19 @@ return;
 }
 
 renderSectionSeedHint('누락된 홈페이지 섹션이 등록되었습니다. 이제 ON/OFF 스위치를 사용할 수 있습니다.', false);
-await fetchSections();
+await fetchSections({ replaceDrafts: true });
 } catch (e) {
 renderSectionSeedHint('자동 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.', true);
 myAlert('누락 섹션 등록 중 오류가 발생했습니다.', 'warning');
 } finally {
+g_sectionSaving = false;
+renderSectionRows();
 if (btn) btn.disabled = false;
 }
 }
 
 async function moveSectionOrder(id, direction) {
+if (g_sectionSaving) return;
 const currentSections = getSortedSectionDrafts();
 const fromIndex = currentSections.findIndex((section) => section && section.id === id);
 const toIndex = fromIndex + Number(direction || 0);
@@ -8253,6 +8281,7 @@ renderSectionRows();
 }
 
 function toggleSection(id, isVisible) {
+if (g_sectionSaving) return;
 const target = g_sectionDrafts.find((section) => section && section.id === id);
 if (!target) return;
 target.is_visible = !!isVisible;
@@ -8260,11 +8289,12 @@ renderSectionRows();
 }
 
 async function saveSectionChanges() {
-const btn = document.getElementById('btnSaveSectionChanges');
-if (btn) btn.disabled = true;
+if (g_sectionSaving || !hasPendingSectionChanges()) return;
+g_sectionSaving = true;
+renderSectionRows();
 
 try {
-const drafts = getSortedSectionDrafts();
+const drafts = getSortedSectionDrafts().map(section => ({ ...section }));
 for (const section of drafts) {
 const { error } = await _supabase.rpc('upsert_site_section_secure', {
 p_id: section.id,
@@ -8280,12 +8310,13 @@ return;
 }
 
 renderSectionSeedHint('섹션 변경사항이 저장되었습니다.', false);
-await fetchSections();
+await fetchSections({ replaceDrafts: true });
 } catch (e) {
 myAlert('섹션 저장 중 오류가 발생했습니다.', 'warning');
 updateSectionSaveButton();
 } finally {
-if (btn) btn.disabled = false;
+g_sectionSaving = false;
+renderSectionRows();
 }
 }
 // 연혁 삭제 함수
