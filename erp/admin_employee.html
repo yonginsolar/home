@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.79
-Change: 2026-10-04 - Separate employee registration from permission administration.
+Version: v1.0.80
+Change: 2026-10-05 - Stable employee detail targets and atomic basic-info/salary history saving.
 -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.79 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.80 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -901,6 +901,12 @@ let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
 let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
+let employeeDetailRevision = 0, employeeBasicSaveInFlight = false, employeeBasicBaseline = null;
+let employeeSalaryLoadRevision = 0;
+const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
+function employeeBasicSnapshot(row) {
+    return Object.fromEntries(EMPLOYEE_BASIC_FIELDS.map(key => [key, row?.[key] ?? null]));
+}
 let currentEmpHireDate = null, currentEmpResignDate = null;
 let currentPayrollTaxProfile = { familyCount: 1, childCount: 0, withholdingRate: 1 };
 let confirmCallback = null; let currentSalaryDataForPrint = null;
@@ -2772,12 +2778,15 @@ function syncDurunuriEligibilityUi() {
 }
 
 async function loadDurunuriEligibilityProfile(empId) {
+    const revision = employeeDetailRevision;
+    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId);
     resetDurunuriEligibilityProfileUi();
     const module = getDurunuriModuleAdmin();
     const helpEl = document.getElementById('durunuriEligibilityHelp');
     if (!module || !empId) return;
     try {
         const state = await module.getEligibilityState(_supabase, empId, '');
+        if (!isCurrent()) return;
         currentDurunuriEligibility = state;
         if (!state) {
             syncDurunuriEligibilityUi();
@@ -2797,6 +2806,7 @@ async function loadDurunuriEligibilityProfile(empId) {
         if (noteEl) noteEl.value = state.note || '';
         syncDurunuriEligibilityUi();
     } catch (e) {
+        if (!isCurrent()) return;
         currentDurunuriEligibility = null;
         if (helpEl) helpEl.textContent = '두루누리 원장을 불러오지 못했습니다: ' + (e?.message || e);
     }
@@ -2858,6 +2868,7 @@ function resetDurunuriSupportState() {
 }
 
 async function loadDurunuriSupportState(month, empId) {
+    const revision = employeeDetailRevision, salaryRevision = employeeSalaryLoadRevision;
     resetDurunuriSupportState();
     const ym = String(month || '').trim();
     const eid = String(empId || '').trim();
@@ -2866,6 +2877,7 @@ async function loadDurunuriSupportState(month, empId) {
     if (!module) return;
     try {
         const supportMap = await module.getSupportMap(_supabase, ym);
+        if (revision !== employeeDetailRevision || salaryRevision !== employeeSalaryLoadRevision || eid !== String(currentEmpId)) return;
         const support = supportMap?.[eid] || null;
         currentDurunuriSupport = {
             emp_support: Math.max(0, Number(support?.emp_support || 0)),
@@ -4939,7 +4951,11 @@ async function saveEmployeeNotificationAssignments() {
 } // End of saveEmployeeNotificationAssignments
 
 async function openDetail(u) {
+    if (employeeBasicSaveInFlight || salarySaveInFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
+    const revision = ++employeeDetailRevision;
+    const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
+    employeeBasicBaseline = employeeBasicSnapshot(u);
     currentAnnualSalary = u.base_salary || 0;
     currentEmpHireDate = u.hire_date;
     currentEmpResignDate = u.resign_date;
@@ -4961,10 +4977,12 @@ async function openDetail(u) {
     updateMemberPullStatus('조합원 번호, 이메일, 이름 순으로 일치 대상을 찾아 값을 채웁니다.', 'muted');
 
     const { data: birthDate } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: u.emp_id });
+    if (!isCurrent()) return;
     document.getElementById("viewBirth").innerText = birthDate || "미등록";
 
     // [추가된 부분] 비상 연락망 조회 및 표시
     const { data: emList } = await scopeEmployeeTenant(_supabase.from('ref_emergency_contacts').select('*')).eq('emp_id', u.emp_id);
+    if (!isCurrent()) return;
     const emDiv = document.getElementById("viewEmergency");
     if(emList && emList.length > 0) {
         emDiv.innerHTML = emList.map(e => {
@@ -4990,6 +5008,7 @@ async function openDetail(u) {
     if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
     else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; loadSalaryData(); loadLeave(); }
     await loadDurunuriEligibilityProfile(u.emp_id);
+    if (!isCurrent()) return;
     resetEmployeeModuleAccessUi();
     resetEmployeeNotificationUi();
     detailModal.show();
@@ -5002,6 +5021,13 @@ function toggleEditMode(isEdit) { const c = document.getElementById("infoContain
 function toggleSalaryVisibility() { const el = document.getElementById("viewSalary"); el.innerText = el.innerText === "******" ? el.dataset.real : "******"; }
 
 async function saveBasicInfo() {
+    if (employeeBasicSaveInFlight || salarySaveInFlight || !currentEmpId || !employeeBasicBaseline) return;
+    const empId = currentEmpId;
+    const revision = employeeDetailRevision;
+    const expected = { ...employeeBasicBaseline };
+    employeeBasicSaveInFlight = true;
+    const lockedInputs = [];
+    try {
     // 1. 값 가져오기
     const name = document.getElementById("editName").value;
     const memberId = document.getElementById("editMemberId").value; // [추가됨]
@@ -5021,7 +5047,15 @@ async function saveBasicInfo() {
     const normalizedHireDate = hireDate ? hireDate : null;
     const normalizedSalaryApplyDate = date ? date : null;
 
-    const emailConflict = await findEmployeeEmailConflict(email, { excludeEmpId: currentEmpId });
+    if (!name.trim()) return showAlert('이름을 입력해 주세요.');
+    if (!Number.isSafeInteger(sal) || sal < 0) return showAlert('연봉은 0원 이상의 정수로 입력해 주세요.');
+    if (sal !== Number(expected.base_salary || 0) && !date) return showAlert('연봉 변경 적용일을 입력해 주세요.');
+    document.querySelectorAll('#detailModal input,#detailModal select,#detailModal textarea,#detailModal button').forEach(input => {
+        lockedInputs.push([input, input.disabled]);
+        input.disabled = true;
+    });
+    const emailConflict = await findEmployeeEmailConflict(email, { excludeEmpId: empId });
+    if (revision !== employeeDetailRevision || String(currentEmpId) !== String(empId)) return;
     if (emailConflict) {
         return showAlert(`이미 로그인 이메일로 사용 중인 직원이 있습니다: ${buildEmployeeLoginConflictLabel(emailConflict)}`);
     }
@@ -5041,16 +5075,20 @@ async function saveBasicInfo() {
         salary_apply_date: normalizedSalaryApplyDate
     };
 
-    // 3. DB 업데이트 시도
-    const { error } = await scopeEmployeeTenant(_supabase.from('ref_employees').update(updates)).eq('emp_id', currentEmpId);
+    // The server commits the basic fields and salary history together.
+    const { data, error } = await _supabase.rpc('erp_admin_save_employee_basic_info', {
+        p_emp_id: String(empId), p_updates: updates, p_expected: expected
+    });
 
     // [중요] 에러 발생 시 여기서 중단 (화면 업데이트 안 함)
-    if(error) return showAlert("저장 실패: " + error.message);
-
-        // 4. 연봉 이력 관리 (변경 시에만)
-        if (sal !== currentAnnualSalary && normalizedSalaryApplyDate) {
-        await _supabase.from('hr_salary_contracts').insert(withEmployeeTenantPayload({ emp_id: currentEmpId, amount: sal, apply_date: normalizedSalaryApplyDate }));
-        }
+    if(error) return showAlert(error.message?.includes('EMPLOYEE_CHANGED_RELOAD_REQUIRED')
+        ? '다른 화면에서 직원 정보가 변경되었습니다. 현재 입력을 별도로 보관한 뒤 직원을 다시 열어 확인해 주세요.'
+        : '저장 실패: ' + error.message);
+    if (!data?.employee || String(data.emp_id) !== String(empId)) throw new Error('저장 결과를 확인하지 못했습니다. 다시 확인해 주세요.');
+    if (revision !== employeeDetailRevision || String(currentEmpId) !== String(empId)) return;
+    employeeBasicBaseline = employeeBasicSnapshot(data.employee);
+    currentEmpName = name;
+    document.getElementById('detailName').innerText = name;
 
     // 5. 전역 변수 업데이트
     currentAnnualSalary = sal;
@@ -5072,6 +5110,12 @@ async function saveBasicInfo() {
     toggleEditMode(false);
     await loadList();
     showAlert("저장되었습니다.");
+    } catch (error) {
+        showAlert('저장 결과 확인 실패: ' + (error?.message || '다시 확인해 주세요.'));
+    } finally {
+        lockedInputs.forEach(([input, disabled]) => { input.disabled = disabled; });
+        employeeBasicSaveInFlight = false;
+    }
 }
 
 async function saveRRN() { const f = document.getElementById("rrnFront").value; const b = document.getElementById("rrnBack").value; if((f+b).length !== 13) return showAlert("13자리를 입력하세요."); const { error } = await _supabase.rpc('update_employee_rrn', { p_emp_id: currentEmpId, p_rrn: f+"-"+b }); if(error) showAlert("실패: "+error.message); else { showAlert("암호화되어 저장되었습니다."); const { data: bd } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: currentEmpId }); document.getElementById("viewBirth").innerText = bd || f; document.getElementById("rrnFront").value=""; document.getElementById("rrnBack").value=""; toggleEditMode(false); } }
@@ -5251,6 +5295,8 @@ function syncSalaryTaxPreview() {
 
 // [수정] 급여 데이터 로드 (삭제 버튼 제어 로직 추가)
 async function loadSalaryData() {
+    const empId = currentEmpId, revision = employeeDetailRevision, salaryRevision = ++employeeSalaryLoadRevision;
+    const isCurrent = () => revision === employeeDetailRevision && salaryRevision === employeeSalaryLoadRevision && String(empId) === String(currentEmpId);
     const month = document.getElementById("salaryMonth").value;
     const badge = document.getElementById("salaryStatusBadge");
     const alertBox = document.getElementById("salaryAlertBox");
@@ -5289,12 +5335,15 @@ async function loadSalaryData() {
     let workMetaDefaultsAvailable = true;
     try {
         workMetaDefaults = await buildAdminEmployeeSalaryWorkMetaDefaults(month);
+        if (!isCurrent()) return;
     } catch (workMetaError) {
+        if (!isCurrent()) return;
         workMetaDefaultsAvailable = false;
         console.warn('Salary work meta default load failed:', workMetaError?.message || workMetaError);
         setSalaryWorkMetaHelpText('근로일수 기본값을 계산하지 못했습니다. 직접 입력 후 저장할 수 있습니다.');
     }
-    const recentWorkDescription = await getAdminEmployeeRecentWorkDescription(currentEmpId, month);
+    const recentWorkDescription = await getAdminEmployeeRecentWorkDescription(empId, month);
+    if (!isCurrent()) return;
 
     // --- (기존 로직: 무급휴가 감지 부분은 그대로 유지) ---
     const startDate = `${month}-01`;
@@ -5304,11 +5353,12 @@ async function loadSalaryData() {
     const { data: unpaidDocs } = await _supabase.from('ref_approval')
         .select('amount, doc_type, status')
         .eq('coop_id', getAdminEmployeeScopedCoopId())
-        .eq('drafter_id', currentEmpId)
+        .eq('drafter_id', empId)
         .in('status', ['완료', '가승인'])
         .or('doc_type.ilike.%무급%,doc_type.ilike.%생리%,doc_type.ilike.%결근%')
         .gte('created_at', startDate)
         .lte('created_at', endDate);
+    if (!isCurrent()) return;
 
     if (unpaidDocs && unpaidDocs.length > 0) {
         let totalUnpaidDays = 0;
@@ -5329,9 +5379,10 @@ async function loadSalaryData() {
     const { data: saved } = await _supabase.from('hr_salary')
         .select('*')
         .eq('coop_id', getAdminEmployeeScopedCoopId())
-        .eq('emp_id', currentEmpId)
+        .eq('emp_id', empId)
         .eq('year_month', month)
         .maybeSingle();
+    if (!isCurrent()) return;
 
     if (saved) {
         // [데이터 있음] -> 수정/삭제 모드
@@ -5377,14 +5428,17 @@ async function loadSalaryData() {
         });
         setSalaryTaxAdjustmentInputs(saved);
 
-        currentSalaryDataForPrint = await getAdjustedSalaryRowWithDurunuri({
+        const adjustedSalary = await getAdjustedSalaryRowWithDurunuri({
             ...saved,
             year_month: month
         }, month);
+        if (!isCurrent()) return;
+        currentSalaryDataForPrint = adjustedSalary;
     } else {
         // [데이터 없음] -> 신규 등록 모드
         const monthlyTotal = Math.floor(currentAnnualSalary / 12);
-        const previousMeal = await getAdminEmployeePreviousMonthMeal(currentEmpId, month);
+        const previousMeal = await getAdminEmployeePreviousMonthMeal(empId, month);
+        if (!isCurrent()) return;
         document.getElementById("payTotalFixed").value = monthlyTotal;
         document.getElementById("payMeal").value = previousMeal.found ? previousMeal.amount : 0;
         document.getElementById("payCar").value = 0;
@@ -5414,7 +5468,8 @@ async function loadSalaryData() {
         setSalaryWorkMetaHelpText(buildAdminEmployeeSalaryWorkMetaSummary(workMetaDefaults));
     }
 
-    await loadDurunuriSupportState(month, currentEmpId);
+    await loadDurunuriSupportState(month, empId);
+    if (!isCurrent()) return;
 
     // 계산식 적용
     recalcSalaryComponents();
@@ -5790,7 +5845,8 @@ function saveSalary() {
     const month = String(document.getElementById("salaryMonth")?.value || '').trim();
     if (!month) return showAlert("귀속월을 선택해주세요.");
     if (!currentEmpId) return showAlert("직원을 먼저 선택해주세요.");
-    if (salarySaveInFlight) return;
+    if (salarySaveInFlight || employeeBasicSaveInFlight) return;
+    const selectedEmpId = currentEmpId, detailRevision = employeeDetailRevision;
 
     const meal = Number(document.getElementById('payMeal')?.value || 0);
     if (!Number.isFinite(meal) || meal < 0) return showAlert('식비는 0원 이상으로 입력해주세요.');
@@ -5810,7 +5866,9 @@ function saveSalary() {
         `💾 ${actionLabel} 확인`,
         `${month} ${currentEmpName || ''}\n식비: ${formatAdminEmployeeWon(meal)}\n(${mealExplanation})\n\n이 금액으로 ${actionLabel}하시겠습니까?`,
         async function() {
-            if (salarySaveInFlight) return;
+            if (salarySaveInFlight || employeeBasicSaveInFlight) return;
+            if (detailRevision !== employeeDetailRevision || String(selectedEmpId) !== String(currentEmpId)
+                || month !== String(document.getElementById('salaryMonth').value)) return showAlert('직원이나 귀속월이 변경되었습니다. 다시 확인해 주세요.');
             salarySaveInFlight = true;
             try {
                 await persistSalary();
@@ -5951,14 +6009,17 @@ async function persistSalary() {
 
 // [수정] 관리자용 연차 조회 (특정 직원 + 결재완료 예정 차감 반영)
 async function loadLeave() {
+    const empId = currentEmpId, revision = employeeDetailRevision;
+    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId);
     try {
         if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
-            const snapshot = await window.LeaveLedger.getLeaveSnapshot(_supabase, currentEmpId, {
+            const snapshot = await window.LeaveLedger.getLeaveSnapshot(_supabase, empId, {
                 columns: 'id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot',
                 reservedStatuses: ['완료', '가승인', '증빙확인중', '실물결재대기', '실물결재완료'],
                 includeToday: true,
                 unknownAsReserved: false
             });
+            if (!isCurrent()) return;
             currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
             document.getElementById("displayLeaveRemain").innerText = remain + "일";
@@ -5969,7 +6030,9 @@ async function loadLeave() {
     }
 
     // 공통 모듈 미사용/오류 시 기존 RPC로 폴백
-    const { data: remainDays, error } = await _supabase.rpc('calculate_leave_days', { p_emp_id: currentEmpId });
+    if (!isCurrent()) return;
+    const { data: remainDays, error } = await _supabase.rpc('calculate_leave_days', { p_emp_id: empId });
+    if (!isCurrent()) return;
     if (error) {
         showAlert("연차 조회 실패: " + error.message);
         return;

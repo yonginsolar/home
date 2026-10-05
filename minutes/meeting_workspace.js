@@ -1,6 +1,6 @@
 /*
-Version: v1.10.1
-Change: 2026-09-30 - Save the whole pre-meeting packet and persist board annexes on add.
+Version: v1.10.2
+Change: 2026-10-05 - Protect unsaved packet edits and offer tenant-scoped writing guidance.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
@@ -32,30 +32,15 @@ const state = {
   activeDocument: 'MATERIALS',
   currentStep: 'info',
   documentDirty: false,
+  infoDirty: false,
+  agendaDirty: false,
+  pendingDocuments: new Set(),
   auditDraftDirty: false,
   chapters: [],
   activeChapterId: null,
   loading: false,
   autoDraftTimer: null
 };
-
-const REFERENCE_2026_INCOME_BUDGET = [
-  { name:'금융차입금', basis:'시설자금 대출', amount:280000000 },
-  { name:'증좌·차입', basis:'부족 사업비 조달', amount:65800000 },
-  { name:'출자금', basis:'신규 조합원 출자', amount:25000000 },
-  { name:'후원금수익', basis:'협력 사업 재원', amount:30000000 },
-  { name:'회비수익', basis:'임원 운영 지원금', amount:18000000 },
-  { name:'사업수익', basis:'발전 및 사업 수익', amount:7200000 }
-];
-
-const REFERENCE_2026_EXPENSE_BUDGET = [
-  { name:'시설구축비', basis:'태양광발전소 건립', amount:350000000 },
-  { name:'일반사업비', basis:'인허가, 설계, 감리비', amount:15000000 },
-  { name:'인건비', basis:'사무국 인건비 및 4대보험', amount:36000000 },
-  { name:'운영비', basis:'이자, 통신, 회의, 사무용품', amount:9500000 },
-  { name:'조합원 교육비', basis:'기후위기 및 에너지 교육', amount:5000000 },
-  { name:'예비비', basis:'공사비·물가 변동 대응', amount:10500000 }
-];
 
 function numberFromMoney(value) {
   const digits = String(value ?? '').replace(/[^0-9-]/g, '');
@@ -68,39 +53,14 @@ function displayMoney(value) {
   return amount ? amount.toLocaleString('ko-KR') : '';
 }
 
-function defaultAssemblyBookletData(row = state.current) {
-  const fiscalYear = Number(row?.fiscal_year || defaultFiscalYear(row));
-  const planYear = Number(String(row?.meeting_date || row?.title || '').match(/(?:19|20)\d{2}/)?.[0] || fiscalYear + 1);
-  const isReferencePeriod = fiscalYear === 2025 && planYear === 2026;
+function defaultAssemblyBookletData() {
   return {
-    business_report_intro: isReferencePeriod ? '2025년은 조합의 성공적인 출범과 조직 내실 확보를 위한 준비의 해였습니다.' : '',
-    business_report_highlights: isReferencePeriod ? [
-      '11월 14일 창립총회 개최',
-      '11월 19일 제1차 이사회 개최',
-      '12월 15일 제2차 이사회 개최',
-      '12월 17일 법인설립 등기 완료',
-      '12월 23일 사업자등록 완료',
-      '12월 26일 조합 공식 계좌 개설 완료',
-      '조합 공식 홈페이지와 운영 기반 구축',
-      '태양광 부지 확보 지원 및 용인시 관련 부서 기술 검토',
-      '경기시민발전협동조합협의회 가입을 통한 정책 협업'
-    ].join('\n') : '',
-    business_plan_goal: planYear === 2026 ? '시민과 함께 만드는 용인의 햇빛, 에너지 자립의 첫걸음' : '',
-    business_plan_details: planYear === 2026 ? [
-      '공공부지·공영주차장·유휴부지의 햇빛발전소 후보지 발굴과 인허가 추진',
-      '시민 출자와 정책자금을 활용한 발전소 건립 재원 마련',
-      '신규 조합원 확대와 기후위기·에너지전환 교육 운영',
-      '조합 운영 시스템 고도화와 지역기관·협동조합 공동사업 확대'
-    ].join('\n') : '',
-    income_budget: planYear === 2026 ? REFERENCE_2026_INCOME_BUDGET.map(row => ({ ...row })) : [],
-    expense_budget: planYear === 2026 ? REFERENCE_2026_EXPENSE_BUDGET.map(row => ({ ...row })) : [],
-    borrowing_limit: 0,
-    borrowing_rule: planYear === 2026 ? '출자금 납입 총액의 5배' : '',
-    borrowing_purpose: planYear === 2026 ? '태양광 발전소 건립에 필요한 초기 시설자금 조달' : '',
-    other_agenda_text: ''
+    business_report_intro: '', business_report_highlights: '',
+    business_plan_goal: '', business_plan_details: '',
+    income_budget: [], expense_budget: [], borrowing_limit: 0,
+    borrowing_rule: '', borrowing_purpose: '', other_agenda_text: ''
   };
 }
-
 function normalizedAssemblyBookletData(row = state.current) {
   const raw = row?.assembly_booklet_data;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length) {
@@ -325,11 +285,33 @@ function showToast(message, duration = 2200) {
 
 function setBusy(value) {
   state.loading = value;
+  if (value) window.clearTimeout(state.autoDraftTimer);
+  $('editorBody').inert = value;
   document.querySelectorAll('button').forEach(button => {
     if (button.dataset.allowWhileBusy === 'true') return;
     button.disabled = value;
   });
-  if (!value) renderAuditStep({ preserveDraft: true });
+  if (!value) {
+    renderAuditStep({ preserveDraft: true });
+    renderBookletSourceOptions();
+    if (chapterMode()) renderChapterEditState();
+  }
+}
+
+function hasUnsavedPacketChanges() {
+  return state.infoDirty || state.agendaDirty || state.documentDirty || state.auditDraftDirty || state.pendingDocuments.size > 0;
+}
+
+function markFormDirty(target) {
+  if (target?.closest('[data-panel="info"]')) state.infoDirty = true;
+  if (target?.closest('[data-panel="agendas"]')) state.agendaDirty = true;
+}
+
+function resetPacketDirty() {
+  state.infoDirty = false;
+  state.agendaDirty = false;
+  state.documentDirty = false;
+  state.pendingDocuments.clear();
 }
 
 function hasLocalAdminHint() {
@@ -408,7 +390,7 @@ async function loadPackages(selectId = null) {
   if (error) throw error;
   state.packages = data;
   renderPackages();
-  if (selectId) await openPackage(selectId);
+  if (selectId) await openPackage(selectId, { internal: true });
 }
 
 function renderEditorHeader() {
@@ -493,6 +475,31 @@ function renderAssemblyBookletInputs() {
   renderBudgetRows('income', data.income_budget);
   renderBudgetRows('expense', data.expense_budget);
   updateBudgetSummary();
+  renderBookletSourceOptions();
+}
+
+function renderBookletSourceOptions() {
+  const select = $('bookletPreviousSource');
+  if (!select) return;
+  const rows = state.packages.filter(row => row.id !== state.current?.id && row.meeting_type === 'GENERAL_ASSEMBLY');
+  select.replaceChildren(new Option('지난 총회를 선택해 주세요', ''));
+  rows.forEach(row => select.add(new Option(row.title, row.id)));
+  $('loadPreviousBooklet').disabled = !rows.length;
+}
+
+async function loadPreviousBooklet() {
+  const id = $('bookletPreviousSource').value;
+  if (!id) throw new Error('지난 총회를 선택해 주세요.');
+  if (!state.packages.some(row => row.id === id && row.id !== state.current?.id && row.meeting_type === 'GENERAL_ASSEMBLY')) throw new Error('이 조합의 지난 총회를 선택해 주세요.');
+  const { data, error } = await MeetingPackageService.getPackage(id);
+  if (error) throw error;
+  const raw = data?.package?.assembly_booklet_data;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.keys(raw).length) throw new Error('선택한 총회에는 저장된 자료집 입력이 없습니다. 작성 예시를 참고해 직접 입력해 주세요.');
+  if (!window.confirm('사업보고·계획·예산·차입금 입력을 선택한 지난 자료로 바꿀까요? 현재 입력은 바뀝니다. 새 연도에 맞게 내용과 금액을 확인해야 합니다. 결산자료·서명 문서는 가져오지 않습니다.')) return;
+  state.current = { ...state.current, assembly_booklet_data: normalizedAssemblyBookletData(data.package) };
+  renderAssemblyBookletInputs();
+  scheduleAutoDraftRefresh('agendas');
+  showToast('지난 자료의 입력을 불러왔습니다. 사업 기간·내용·금액을 확인한 뒤 저장해 주세요.', 5000);
 }
 
 function fillInfoForm() {
@@ -1103,6 +1110,7 @@ function renderActiveDocument() {
 
 function rememberActiveDocument() {
   if (!state.current) return;
+  if (state.documentDirty) state.pendingDocuments.add(state.activeDocument);
   const existing = state.documents.get(state.activeDocument) || {};
   if (chapterMode()) rememberActiveChapter();
   state.documents.set(state.activeDocument, {
@@ -1298,9 +1306,14 @@ function refreshAutoDrafts({ force = false, render = true } = {}) {
   if (render && state.currentStep === 'documents' && !activeProtected) renderActiveDocument();
 }
 
-function scheduleAutoDraftRefresh() {
+function scheduleAutoDraftRefresh(section = 'info') {
+  if (typeof section === 'object') markFormDirty(section.target);
+  else if (section === 'agendas') state.agendaDirty = true;
+  else state.infoDirty = true;
   window.clearTimeout(state.autoDraftTimer);
+  const packageId = state.current?.id;
   state.autoDraftTimer = window.setTimeout(() => {
+    if (state.current?.id !== packageId || state.loading) return;
     syncWorkingStateFromForms();
     refreshAutoDrafts();
   }, 180);
@@ -1332,6 +1345,7 @@ async function saveInfo({ quiet = false } = {}) {
   const { data, error } = await MeetingPackageService.updatePackage(state.current.id, payload);
   if (error) throw error;
   state.current = data;
+  state.infoDirty = false;
   const index = state.packages.findIndex(row => row.id === data.id);
   if (index >= 0) state.packages[index] = { ...state.packages[index], ...data };
   renderPackages();
@@ -1497,6 +1511,7 @@ async function saveAgendas({ quiet = false } = {}) {
   }
   renderAgendaList();
   if (!quiet) showToast(state.current.meeting_type === 'GENERAL_ASSEMBLY' && state.current.assembly_kind !== 'EXTRAORDINARY' ? '안건과 자료집 입력을 저장했습니다.' : '안건을 저장했습니다.');
+  state.agendaDirty = false;
   return true;
 }
 
@@ -1523,6 +1538,7 @@ async function generateAllDocuments() {
     state.documents.set(row.type, data);
   }
   state.activeDocument = 'MATERIALS';
+  state.pendingDocuments.clear();
   renderEditorHeader();
   renderActiveDocument();
   await loadPackages();
@@ -1561,6 +1577,7 @@ async function saveWholeMeetingDraft({ quiet = false } = {}) {
   (data || []).forEach(row => state.documents.set(row.document_type, row));
   state.documentDirty = false;
   if (!quiet) showToast('기본정보·안건·회의자료·시나리오를 모두 저장했습니다.');
+  state.pendingDocuments.clear();
 }
 
 async function completeMeetingMaterials() {
@@ -1599,6 +1616,8 @@ async function saveActiveDocument({ quiet = false } = {}) {
     if (saved.error) throw saved.error;
     (saved.data || []).forEach(item => state.documents.set(item.document_type, item));
     state.documentDirty = false;
+    state.pendingDocuments.delete('SCENARIO');
+    state.pendingDocuments.delete('SCENARIO_SECRETARIAT');
     if (!quiet) showToast('의장 발언을 두 시나리오에 함께 저장했습니다.');
     return;
   }
@@ -1612,6 +1631,7 @@ async function saveActiveDocument({ quiet = false } = {}) {
   if (error) throw error;
   state.documents.set(state.activeDocument, data);
   state.documentDirty = false;
+  state.pendingDocuments.delete(state.activeDocument);
   if (!quiet) showToast(`${DOC_LABEL[state.activeDocument]}을 저장했습니다.`);
 }
 
@@ -1779,8 +1799,10 @@ async function printCurrentChapter() {
   popup.document.close();
 }
 
-async function openPackage(id) {
-  if ((state.documentDirty || state.auditDraftDirty) && !window.confirm('저장하지 않은 문서 수정이 있습니다. 다른 회의를 열까요?')) return;
+async function openPackage(id, { internal = false } = {}) {
+  if (state.loading && !internal) return;
+  if (hasUnsavedPacketChanges() && !window.confirm('저장하지 않은 회의 입력·문서 수정이 있습니다. 저장하지 않고 다른 회의를 열까요?')) return;
+  window.clearTimeout(state.autoDraftTimer);
   setBusy(true);
   try {
     const { data, error } = await MeetingPackageService.getPackage(id);
@@ -1796,7 +1818,7 @@ async function openPackage(id) {
     state.sourceContext = null;
     state.auditChangeRequests = [];
     state.activeDocument = 'MATERIALS';
-    state.documentDirty = false;
+    resetPacketDirty();
     state.auditDraftDirty = false;
     $('editorPlaceholder').hidden = true;
     $('editorBody').hidden = false;
@@ -1875,6 +1897,7 @@ async function deletePackage() {
   const { error } = await MeetingPackageService.deletePackage(state.current.id);
   if (error) throw error;
   state.current = null;
+  resetPacketDirty();
   state.agendas = [];
   state.documents.clear();
   state.inheritedChairStyle = null;
@@ -1908,7 +1931,7 @@ function addAgenda() {
   state.agendas = collectAgendasFromDom();
   state.agendas.push({ agenda_kind:'DECISION', title:'', summary:'', background:'', proposal_text:'', office_report:'', scenario_notes:'', decision_draft:'', decision_result:'', discussion_notes:'', document_notes:'', private_notes:'', requires_article_comparison:false });
   renderAgendaList();
-  scheduleAutoDraftRefresh();
+  scheduleAutoDraftRefresh('agendas');
   document.querySelector('.agenda-card:last-child input[data-field="title"]')?.focus();
 }
 
@@ -1919,7 +1942,7 @@ function addBudgetRow(kind) {
   updateBudgetSummary();
   const container = $(kind === 'income' ? 'incomeBudgetRows' : 'expenseBudgetRows');
   container.querySelector('.budget-row:last-child [data-budget-field="name"]')?.focus();
-  scheduleAutoDraftRefresh();
+  scheduleAutoDraftRefresh('agendas');
 }
 
 function removeBudgetRow(button) {
@@ -1931,7 +1954,7 @@ function removeBudgetRow(button) {
   rows.splice(index, 1);
   renderBudgetRows(kind, rows);
   updateBudgetSummary();
-  scheduleAutoDraftRefresh();
+  scheduleAutoDraftRefresh('agendas');
 }
 
 function handleAgendaAction(button) {
@@ -1949,7 +1972,7 @@ function handleAgendaAction(button) {
     [state.agendas[index + 1], state.agendas[index]] = [state.agendas[index], state.agendas[index + 1]];
   }
   renderAgendaList();
-  scheduleAutoDraftRefresh();
+  scheduleAutoDraftRefresh('agendas');
 }
 
 function selectChapter(id) {
@@ -2075,6 +2098,7 @@ function bindEvents() {
   $('deletePackageButton').addEventListener('click', () => runAction(deletePackage));
   $('saveInfoButton').addEventListener('click', () => runAction(saveInfo));
   $('saveAgendasButton').addEventListener('click', () => runAction(saveAgendas));
+  $('loadPreviousBooklet').addEventListener('click', () => runAction(loadPreviousBooklet));
   $('generateAllButton').addEventListener('click', () => runAction(generateAllDocuments));
   $('completeMaterialsButton').addEventListener('click', () => runAction(completeMeetingMaterials));
   $('refreshAssemblySourcesButton').addEventListener('click', () => runAction(async () => {
@@ -2176,11 +2200,11 @@ function bindEvents() {
   });
   $('editorBody').addEventListener('input', event => {
     if (event.target === $('documentEditor') || event.target === $('documentTitle') || event.target === $('chapterEditor') || event.target === $('chapterTitle') || event.target.closest('#documentEditor,#chapterEditor')) return;
-    if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
+    if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh(event);
   });
   $('editorBody').addEventListener('change', event => {
     if (event.target === $('documentTitle') || event.target === $('chapterTitle')) return;
-    if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh();
+    if (event.target.matches('input,select,textarea')) scheduleAutoDraftRefresh(event);
   });
   $('documentEditor').addEventListener('input', () => { state.documentDirty = true; });
   $('documentEditor').addEventListener('click', event => {
@@ -2219,7 +2243,7 @@ function bindEvents() {
     state.documentDirty = true;
   }));
   window.addEventListener('beforeunload', event => {
-    if (!state.documentDirty && !state.auditDraftDirty) return;
+    if (!hasUnsavedPacketChanges()) return;
     event.preventDefault();
     event.returnValue = '';
   });

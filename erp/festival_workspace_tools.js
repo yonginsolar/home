@@ -1,4 +1,4 @@
-/* v1.1.0 — VAT-exclusive revenue, VAT-inclusive collections and festival tools. */
+/* v1.1.1 — Keep inventory-use drafts separate for each festival. */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -7,6 +7,15 @@
   const node = (tag,text,cls) => {const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
   window.FestivalWorkspaceTools = { init({rpc,getEvent,getItems,editable,isBusy,onChanged,onStockChanged,readable,status,today}) {
     let busy=false,inventoryOffset=0,inventoryRevision=0,dashboardRevision=0,pendingUsage=null,settingsEvent=null;
+    let inventoryDraftEventId=null;
+    const inventoryDrafts=new Map();
+    const draftFields=['eventUseItem','eventUseDate','eventUseType','eventUseQuantity','eventUseNote'];
+    function rememberInventoryDraft() {
+      if(!inventoryDraftEventId)return;
+      inventoryDrafts.set(inventoryDraftEventId,{
+        values:Object.fromEntries(draftFields.map(id=>[id,$(id).value])),pendingUsage
+      });
+    }
     const dialog=$('eventSettingsDialog');
     const showError=(id,error)=>{$(id).textContent=readable(error);$(id).classList.add('error');};
     async function run(fn,id='eventSettingsStatus') {
@@ -78,6 +87,14 @@
     async function reloadInventory(reset=false) {
       if(reset)inventoryOffset=0;
       const event=getEvent(),revision=++inventoryRevision;
+      const nextId=event?.id||null;
+      if(nextId!==inventoryDraftEventId) {
+        rememberInventoryDraft();
+        inventoryDraftEventId=nextId;
+        const draft=inventoryDrafts.get(nextId);
+        draftFields.forEach(id=>{$(id).value=draft?.values[id]??(id==='eventUseDate'?today():id==='eventUseType'?'event_use':'');});
+        pendingUsage=draft?.pendingUsage||null;
+      }
       $('eventInventory').hidden=!event;if(!event)return;
       const old=$('eventUseItem').value;$('eventUseItem').replaceChildren();
       getItems().filter(i=>i.is_active).forEach(i=>{const option=node('option',`${i.item_name} · 재고 ${count(i.stock_quantity)}${i.unit}`);option.value=i.id;$('eventUseItem').append(option);});
