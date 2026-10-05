@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.209
-Change: 2026-10-06 - Recover failed homepage reads and protect unsaved content.
+Version: v1.0.210
+Change: 2026-10-06 - Preserve plant photos on save failure and block stale partner forms.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.209';
+window.ADMIN_MEMBER_VERSION = 'v1.0.210';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -9705,6 +9705,7 @@ reader.readAsDataURL(file);
 
 // [기존 수정] 발전소 모달 열기 (기존 이미지 URL 기억하기)
 async function openPlantModal(id) {
+if (g_plantSaving) return;
 document.getElementById('plant-id').value = id || '';
 document.getElementById('plant-file').value = '';
 
@@ -9769,8 +9770,10 @@ document.getElementById('plant-img-preview').style.display = 'none';
 	bootstrap.Modal.getOrCreateInstance(document.getElementById('plantModal')).show();
 	}
 
-// [기존 수정] 발전소 저장 (자동 삭제 로직 포함)
+// Keep the record's current photo until its replacement has been saved.
+let g_plantSaving = false;
 async function savePlant() {
+if (g_plantSaving) return;
 const name = String(document.getElementById('plant-name').value || '').trim();
 if (!name) { myAlert("발전소명을 입력해주세요.", 'warning'); return; }
 
@@ -9818,38 +9821,9 @@ return;
 }
 
 const fileInput = document.getElementById('plant-file');
-const originalUrl = document.getElementById('plant-img-original').value; // 원래 있던 사진
-let finalImgUrl = document.getElementById('plant-img-url').value;      // 최종 저장될 사진 주소
-
-showLoading(true);
-
-// 1. 새 파일이 업로드된 경우
-if (fileInput.files.length > 0) {
-const file = fileInput.files[0];
-const fileName = `plants/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-
-// (1) 새 파일 업로드
-const { data: uploadData, error: uploadError } = await _supabase.storage.from('assets').upload(fileName, file);
-if (uploadError) {
-showLoading(false);
-myAlert('사진 업로드 실패: ' + uploadError.message, 'error');
-return;
-}
-const { data: publicUrlData } = _supabase.storage.from('assets').getPublicUrl(fileName);
-finalImgUrl = publicUrlData.publicUrl;
-
-// (2) ★ 중요: 옛날 사진이 있었다면 삭제! (쓰레기 파일 정리)
-if (originalUrl) {
-await deleteOldFile(originalUrl);
-}
-}
-// 2. 파일은 안 올렸는데, [삭제 버튼]을 눌러서 URL이 비어버린 경우
-else if (originalUrl && !finalImgUrl) {
-// ★ 중요: 원래 사진을 삭제함
-await deleteOldFile(originalUrl);
-}
-
-// 3. DB 저장 (나머지는 기존과 동일)
+const originalUrl = document.getElementById('plant-img-original').value;
+const newFile = fileInput.files[0] || null;
+// Snapshot the whole form before the first asynchronous operation.
 const updates = {
 p_id: document.getElementById('plant-id').value || null,
 	p_name: name,
@@ -9860,7 +9834,7 @@ p_progress: progress,
 p_location: document.getElementById('plant-location').value,
 p_area: document.getElementById('plant-area').value,
 p_completion_date: document.getElementById('plant-date').value || null,
-p_image_url: finalImgUrl,
+p_image_url: document.getElementById('plant-img-url').value,
 p_monitor_url: document.getElementById('plant-url').value || null,
 p_project_type: projectType,
 p_participation_method: projectType === 'participation' ? participationMethod : null,
@@ -9871,17 +9845,22 @@ p_generation_calc_method: generationCalcMethod,
 p_public_note: projectType === 'participation' ? document.getElementById('plant-public-note').value : null
 };
 
+g_plantSaving = true;
+showLoading(true);
+try {
+if (newFile) updates.p_image_url = await uploadFileToStorage(newFile, 'plants');
 const { error } = await _supabase.rpc('upsert_plant_project_secure', updates);
+if (error) throw error;
+// A lost response may still mean the server committed. On failure keep both
+// files; only a confirmed save permits cleanup of the previous photo.
+if (originalUrl && originalUrl !== updates.p_image_url) await deleteOldFile(originalUrl);
+bootstrap.Modal.getInstance(document.getElementById('plantModal'))?.hide();
+await fetchPlants();
+} catch (error) {
+myAlert('저장 실패: ' + (error?.hint || error?.message || error), 'error');
+} finally {
 showLoading(false);
-
-if(error) {
-if(document.getElementById('commonAlertModal')) {
-document.getElementById('commonAlertText').innerText = '저장 실패: ' + error.message;
-bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
-} else myAlert('저장 실패: ' + error.message, 'error');
-} else {
-bootstrap.Modal.getInstance(document.getElementById('plantModal')).hide();
-fetchPlants();
+g_plantSaving = false;
 }
 }
 
@@ -12055,9 +12034,13 @@ async function fetchPartners() {
     }
 }
 // [수정] 파트너 모달 열기 (수정 요청 데이터 우선 로드)
+let g_partnerModalOpening = false;
 async function openPartnerModal(id) {
+    const modal = document.getElementById('partnerModal');
+    if (g_partnerModalOpening || g_partnerSaving || modal.classList.contains('show')) return;
+    g_partnerModalOpening = true;
+    try {
     await ensureBadgesReady();
-    document.getElementById('pt-id').value = id || '';
 
     // 1. 뱃지 데이터 로드
     if (!g_badges || g_badges.length === 0) {
@@ -12066,7 +12049,8 @@ async function openPartnerModal(id) {
 
     // 2. 수정 모드
     if(id) {
-        const { data } = await scopeAdminTenant(_supabase.from('site_partners').select('*')).eq('id', id).single();
+        const { data, error } = await scopeAdminTenant(_supabase.from('site_partners').select('*')).eq('id', id).single();
+        if (error || !data) throw error || new Error('PARTNER_NOT_FOUND');
 
         if(data) {
             // 수정 요청은 active 상태에서도 pending_changes에 저장되므로 요청본을 우선 로드합니다.
@@ -12139,8 +12123,15 @@ async function openPartnerModal(id) {
         handleImagePreview('pt', null);
     }
 
+    document.getElementById('pt-id').value = id || '';
     document.getElementById('pt-file').value = '';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('partnerModal')).show();
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+    } catch (error) {
+        CoopSafeLog.error('Partner detail load failed:', error);
+        myAlert('단체 정보를 불러오지 못했습니다. 잠시 후 다시 눌러주세요. 문제가 계속되면 새로고침한 뒤 다시 확인해주세요.', 'error');
+    } finally {
+        g_partnerModalOpening = false;
+    }
 }
 // 4. 파트너 저장
 // [3] 저장 함수 (ID 처리 + 공통 파일 함수 사용)
