@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.11
-Change: Use the current cooperative name in the rules header and shared footer.
+Version: v1.0.12
+Change: Clear completed rule loading states and respect public home section availability in footer links.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.11 | rules.html');</script>
+  <script>console.log('[Version] v1.0.12 | rules.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="shared/tenant_head.js?v=20260916-1"></script>
@@ -283,8 +283,11 @@ Change: Use the current cooperative name in the rules header and shared footer.
         // 모바일 메뉴 초기화
         initMobileMenu();
 
-        await loadDocuments('정관', 'articles');
-        await loadDocuments('규약', 'bylaws');
+        await Promise.all([
+            loadDocuments('정관', 'articles'),
+            loadDocuments('규약', 'bylaws'),
+            loadRulesFooterSections()
+        ]);
         
         document.getElementById('searchInput').addEventListener('input', filterContent);
         
@@ -352,14 +355,21 @@ function toggleSearch(e) {
 
     // [2026-03-15] tenant hardening: 규정집은 visible coop 문서만 조회한다.
     let __rulesVisibleCoopId = null;
+    let __rulesVisibleCoopPromise = null;
     async function getRulesVisibleCoopId() {
         if (__rulesVisibleCoopId) return __rulesVisibleCoopId;
         try {
-            const { data, error } = await _supabase.rpc('get_visible_coop_id');
-            if (error) throw error;
-            __rulesVisibleCoopId = String(data || '').trim() || null;
+            if (!__rulesVisibleCoopPromise) {
+                __rulesVisibleCoopPromise = (async () => {
+                    const { data, error } = await _supabase.rpc('get_visible_coop_id');
+                    if (error) throw error;
+                    return String(data || '').trim() || null;
+                })();
+            }
+            __rulesVisibleCoopId = await __rulesVisibleCoopPromise;
             return __rulesVisibleCoopId;
         } catch (e) {
+            __rulesVisibleCoopPromise = null;
             console.warn('getRulesVisibleCoopId failed:', e);
             return null;
         }
@@ -370,14 +380,69 @@ function toggleSearch(e) {
         return query.eq('coop_id', safeCoopId || '00000000-0000-0000-0000-000000000000');
     }
 
+    let rulesFooterSections = null;
+    window.syncPublicSectionLinks = function syncRulesFooterLinks() {
+        document.querySelectorAll('#footer a[href*="#"]').forEach(link => {
+            const sectionId = String(link.getAttribute('href') || '').split('#')[1];
+            if (!['about', 'progress', 'contact'].includes(sectionId)) return;
+            const item = link.closest('li');
+            if (!item) return;
+            const hidden = !rulesFooterSections || rulesFooterSections[sectionId] === false;
+            item.hidden = hidden;
+            item.style.display = hidden ? 'none' : '';
+        });
+    };
+
+    async function loadRulesFooterSections() {
+        try {
+            const coopId = await getRulesVisibleCoopId();
+            if (!coopId) throw new Error('PUBLIC_COOP_CONTEXT_UNAVAILABLE');
+            const [sections, plants] = await Promise.all([
+                scopeRulesVisibleTenant(_supabase.from('site_sections').select('id,is_visible'), coopId),
+                scopeRulesVisibleTenant(_supabase.from('site_power_plants').select('status'), coopId)
+            ]);
+            if (sections.error || plants.error) throw new Error('PUBLIC_SECTION_LOOKUP_FAILED');
+            rulesFooterSections = { about: true, progress: true, contact: true };
+            (sections.data || []).forEach(section => {
+                if (Object.prototype.hasOwnProperty.call(rulesFooterSections, section.id)) {
+                    rulesFooterSections[section.id] = section.is_visible !== false;
+                }
+            });
+            if (!(plants.data || []).some(plant => plant.status !== '운영중')) {
+                rulesFooterSections.progress = false;
+            }
+        } catch (error) {
+            rulesFooterSections = null;
+            console.warn('[rules] Public footer links unavailable');
+        }
+        window.syncPublicSectionLinks();
+    }
+
     // 데이터 로드 및 렌더링 (기존 로직 유지)
     async function loadDocuments(keyword, typeId) {
-        const coopId = await getRulesVisibleCoopId();
-        const { data } = await scopeRulesVisibleTenant(_supabase.from('site_documents')
-            .select('*'), coopId).eq('category', 'doc').ilike('title', `%${keyword}%`).order('event_date', {ascending: false});
+        const container = document.getElementById(`${typeId}-container`);
+        const version = document.getElementById(`${typeId}-version`);
+        const archiveBox = document.getElementById(typeId === 'articles' ? 'accordionArticles' : 'accordionBylaws');
+        let data;
+        try {
+            const coopId = await getRulesVisibleCoopId();
+            if (!coopId) throw new Error('PUBLIC_COOP_CONTEXT_UNAVAILABLE');
+            const response = await scopeRulesVisibleTenant(_supabase.from('site_documents')
+                .select('*'), coopId).eq('category', 'doc').ilike('title', `%${keyword}%`).order('event_date', {ascending: false});
+            if (response.error) throw response.error;
+            data = response.data;
+        } catch (error) {
+            version.innerText = '';
+            container.innerHTML = '<div class="text-center py-5 text-muted">문서를 불러오지 못했습니다. 잠시 후 새로고침해 주세요.</div>';
+            archiveBox.innerHTML = '';
+            console.warn('[rules] Document lookup unavailable');
+            return;
+        }
 
         if (!data || data.length === 0) {
-            document.getElementById(`${typeId}-container`).innerHTML = '<div class="text-center py-5 text-muted">등록된 문서가 없습니다.</div>';
+            version.innerText = '';
+            container.innerHTML = '<div class="text-center py-5 text-muted">등록된 문서가 없습니다.</div>';
+            archiveBox.innerHTML = '<div class="text-center text-muted small py-3">지난 개정 이력이 없습니다.</div>';
             return;
         }
 
@@ -389,7 +454,6 @@ function toggleSearch(e) {
             renderCards(currentDoc.content, `${typeId}-container`);
         }
 
-        const archiveBox = document.getElementById(typeId === 'articles' ? 'accordionArticles' : 'accordionBylaws');
         if (pastDocs.length > 0) {
             let html = '';
             pastDocs.forEach((doc, idx) => {
