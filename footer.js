@@ -1,5 +1,5 @@
 /*
-Version: v1.0.8
+Version: v1.0.10
 Change: Keep unconfigured cooperative contacts and legal links separate from the main cooperative.
 */
 // footer.js
@@ -99,7 +99,10 @@ window.applyFooterCoopName = function applyFooterCoopName(value) {
   if (!coopName) return;
   const nameEl = document.getElementById('footer-coop-name');
   const copyrightEl = document.getElementById('footer-copyright-name');
-  if (nameEl) nameEl.textContent = coopName;
+  if (nameEl) {
+    nameEl.textContent = coopName;
+    nameEl.classList.toggle('footer-wrap-name', coopName !== '용인모두의햇빛협동조합');
+  }
   if (copyrightEl) copyrightEl.textContent = coopName;
 };
 
@@ -160,6 +163,15 @@ document.addEventListener("DOMContentLoaded", function() {
     
     // 1. 푸터 HTML
     const footerHtml = `
+    <style>
+      #footer .footer-top .footer-contact h3.footer-wrap-name {
+        max-width: 100%;
+        white-space: normal;
+        word-break: keep-all;
+        overflow-wrap: break-word;
+        line-height: 1.4;
+      }
+    </style>
     <div class="footer-top">
       <div class="container">
         <div class="row">
@@ -357,6 +369,7 @@ document.addEventListener("DOMContentLoaded", function() {
     if (footerElement) {
         footerElement.innerHTML = footerHtml;
         window.applyFooterCoopName(window.__PUBLIC_SITE_COOP_NAME__);
+        window.syncPublicSectionLinks?.();
     }
 
     // (2) 모달 넣기 (body 맨 끝에 추가)
@@ -374,6 +387,12 @@ document.addEventListener("DOMContentLoaded", function() {
     const policyLinks = document.getElementById('footer-policy-links');
     if (policyLinks) policyLinks.hidden = !useMainCoopPolicy;
     if (!useMainCoopPolicy) {
+      ['footer-contact-address-row', 'footer-contact-email-row', 'footer-contact-phone-row'].forEach((id) => {
+        const row = document.getElementById(id);
+        if (row) row.hidden = true;
+      });
+      const pending = document.getElementById('footer-contact-pending');
+      if (pending) pending.hidden = false;
       document.getElementById('termsModal')?.remove();
       document.getElementById('patchNoteModal')?.remove();
     }

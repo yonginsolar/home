@@ -1,4 +1,4 @@
-const VERSION='20261006-1';
+const VERSION='20261006-2';
 const SUN_IMAGE='/shared/sun_share.png';
 const SUN_ICON='/shared/sun_favicon.svg?v=1.0.0';
 const NOINDEX='noindex, nofollow, noarchive, nosnippet';
@@ -272,6 +272,18 @@ async function routeRequest(request,env){
         'robots','description','keywords','application-name','apple-mobile-web-app-title','naver-site-verification',
         'citizen-brand-version','coop-tenant-profile','coop-tenant-name','tenant-metadata-version'
       ].includes(name))element.remove();
+    }})
+    .on('#siteBrandName, #public-hero-title, #opsContactOrgName',{element(element){
+      if(p.id==='hwaseong'||p.id==='hwaseong-erp')element.setInnerContent(p.name);
+    }})
+    .on('#public-contact-email-wrap, #public-contact-phone-wrap, #public-contact-address-wrap, #opsContactPhone, #opsContactEmail',{element(element){
+      if(p.id==='hwaseong'||p.id==='hwaseong-erp')element.setAttribute('hidden','');
+    }})
+    .on('#about-title, #about-subtitle, #about-content, #about-list',{element(element){
+      if(p.id==='hwaseong')element.setInnerContent('');
+    }})
+    .on('#about-img-src',{element(element){
+      if(p.id==='hwaseong')element.removeAttribute('src');
     }}).transform(response);
   rewritten.headers.delete('etag');rewritten.headers.delete('content-length');addProfileHeaders(rewritten.headers,p,blocked);
   return rewritten;
