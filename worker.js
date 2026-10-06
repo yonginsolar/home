@@ -1,4 +1,4 @@
-const VERSION='20260916-6';
+const VERSION='20261006-1';
 const SUN_IMAGE='/shared/sun_share.png';
 const SUN_ICON='/shared/sun_favicon.svg?v=1.0.0';
 const NOINDEX='noindex, nofollow, noarchive, nosnippet';
@@ -17,6 +17,8 @@ const PROFILES=Object.freeze({
   }),
   citizenErp:profile('citizen-erp','용인시민햇빛발전협동조합','용인시민햇빛발전협동조합 ERP','용인시민햇빛발전협동조합 업무 시스템입니다.','https://erp.yonginsun.kr',[],{imageOrigin:'https://yonginsun.kr'}),
   citizenTemporary:profile('citizen-temporary','용인시민햇빛발전협동조합','용인시민햇빛발전협동조합','용인시민햇빛발전협동조합 임시 접속 주소입니다.','https://yonginsun.kr',[],{imageOrigin:'https://yonginsun.kr'}),
+  hwaseong:profile('hwaseong','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합의 조합 소개, 활동 소식과 조합원 가입 안내를 확인하세요.','https://hcrec.kr',['hcrec.kr','www.hcrec.kr'],{imageOrigin:'https://hcrec.kr',feedOrigin:'https://hcrec.kr'}),
+  hwaseongErp:profile('hwaseong-erp','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합 ERP','화성시민재생에너지발전협동조합 업무 시스템입니다.','https://erp.hcrec.kr',[],{imageOrigin:'https://hcrec.kr'}),
   sunVillage:profile('sun-village','햇빛소득마을','햇빛소득마을 운영관리','햇빛소득마을 협동조합 운영관리 시스템입니다.','https://sunvillage-demo.coopco.kr'),
   gyeonggiEnergy:profile('gyeonggi-energy','경기에너지협동조합','경기에너지협동조합 운영관리','경기에너지협동조합 운영관리 시스템입니다.','https://ggenergy.coopco.kr'),
   auth:profile('auth','협동조합 인증','협동조합 인증','협동조합 서비스의 안전한 로그인과 인증을 처리합니다.','https://auth.coopco.kr'),
@@ -27,6 +29,7 @@ const HOST_PROFILES=new Map([
   ['yonginsolar.kr',PROFILES.main],['www.yonginsolar.kr',PROFILES.main],['erp.yonginsolar.kr',PROFILES.mainErp],
   ['yonginsun.kr',PROFILES.citizen],['www.yonginsun.kr',PROFILES.citizen],['erp.yonginsun.kr',PROFILES.citizenErp],
   ['yonginsun.coopco.kr',PROFILES.citizenTemporary],['sunvillage-demo.coopco.kr',PROFILES.sunVillage],
+  ['hcrec.kr',PROFILES.hwaseong],['www.hcrec.kr',PROFILES.hwaseong],['erp.hcrec.kr',PROFILES.hwaseongErp],
   ['ggenergy.coopco.kr',PROFILES.gyeonggiEnergy],['auth.coopco.kr',PROFILES.auth]
 ]);
 const PRIVATE_PREFIXES=['/erp','/membermanage','/auth_callback','/auth_broker','/guardian_consent','/vote','/minutes','/bak','/terms','/privacy'];
@@ -72,6 +75,34 @@ const CITIZEN_RSS=`<?xml version="1.0" encoding="UTF-8"?>
       <guid isPermaLink="true">https://yonginsun.kr/signup</guid>
       <pubDate>Wed, 16 Sep 2026 04:00:00 GMT</pubDate>
       <description><![CDATA[용인시민햇빛발전협동조합 조합원 가입 신청에 필요한 정보와 출자 참여 절차를 확인하고 온라인으로 가입을 신청할 수 있습니다.]]></description>
+    </item>
+  </channel>
+</rss>
+`;
+
+// Only this registered public cooperative gets these files; private hosts never
+// inherit another cooperative's feeds or search ownership verification.
+const HWASEONG_ROBOTS=CITIZEN_ROBOTS.replaceAll('https://yonginsun.kr','https://hcrec.kr');
+const HWASEONG_SITEMAP=CITIZEN_SITEMAP.replaceAll('https://yonginsun.kr','https://hcrec.kr');
+const HWASEONG_RSS=`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>화성시민재생에너지발전협동조합</title>
+    <link>https://hcrec.kr/</link>
+    <description>화성시민재생에너지발전협동조합의 조합 소개와 조합원 가입 안내입니다.</description>
+    <language>ko-KR</language>
+    <atom:link href="https://hcrec.kr/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>화성시민재생에너지발전협동조합 홈페이지</title>
+      <link>https://hcrec.kr/</link>
+      <guid isPermaLink="true">https://hcrec.kr/</guid>
+      <description>조합 소개와 활동 소식, 조합원 가입 안내를 확인하세요.</description>
+    </item>
+    <item>
+      <title>조합원 가입 안내</title>
+      <link>https://hcrec.kr/signup</link>
+      <guid isPermaLink="true">https://hcrec.kr/signup</guid>
+      <description>화성시민재생에너지발전협동조합의 조합원 가입 안내입니다.</description>
     </item>
   </channel>
 </rss>
@@ -176,6 +207,14 @@ function secureResponse(request,response){
 
 async function routeRequest(request,env){
   const url=new URL(request.url),hostname=host(url.hostname),p=getProfile(hostname);
+  if(hostname==='www.hcrec.kr'){
+    const target=new URL(request.url);target.hostname='hcrec.kr';target.protocol='https:';
+    return Response.redirect(target.href,308);
+  }
+  if(hostname==='erp.hcrec.kr'&&['/','/index','/index.html'].includes(url.pathname)){
+    const target=new URL(request.url);target.pathname='/erp/';target.protocol='https:';
+    return Response.redirect(target.href,307);
+  }
   const aiRoute = url.pathname === '/ai/mcp' ? '/mcp/' + hostname
     : /^\/ai\/oauth\/(register|authorize|token)$/.test(url.pathname) ? '/oauth/' + hostname + '/' + url.pathname.split('/').pop()
     : url.pathname === '/.well-known/oauth-protected-resource/ai/mcp' ? '/.well-known/oauth-protected-resource/mcp/' + hostname
@@ -195,6 +234,12 @@ async function routeRequest(request,env){
     return new Response(upstream.body,{status:upstream.status,headers});
   }
   if(p.passThrough)return env.ASSETS.fetch(request);
+
+  if(p.id==='hwaseong'&&isPublic(p,hostname)){
+    if(url.pathname==='/robots.txt')return textResponse(request,HWASEONG_ROBOTS,'text/plain; charset=utf-8');
+    if(url.pathname==='/sitemap.xml')return textResponse(request,HWASEONG_SITEMAP,'application/xml; charset=utf-8');
+    if(url.pathname==='/rss.xml'||url.pathname==='/feed.xml')return textResponse(request,HWASEONG_RSS,'application/rss+xml; charset=utf-8');
+  }
 
   if(url.pathname==='/robots.txt')return textResponse(request,p.id==='citizen'&&isPublic(p,hostname)?CITIZEN_ROBOTS:PRIVATE_ROBOTS,'text/plain; charset=utf-8');
   if(url.pathname==='/sitemap.xml')return p.id==='citizen'&&isPublic(p,hostname)

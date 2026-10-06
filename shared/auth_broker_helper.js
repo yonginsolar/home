@@ -1,6 +1,6 @@
 /*
-Version: v1.0.6
-Change: Preserve broker login behavior without printing raw authentication errors.
+Version: v1.0.7
+Change: Permit only the three registered Hwaseong cooperative login hosts.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -14,6 +14,9 @@ Change: Preserve broker login behavior without printing raw authentication error
     'yonginsun.kr': true,
     'www.yonginsun.kr': true,
     'erp.yonginsun.kr': true,
+    'hcrec.kr': true,
+    'www.hcrec.kr': true,
+    'erp.hcrec.kr': true,
     'auth.coopco.kr': true
   };
 

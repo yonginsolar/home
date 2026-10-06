@@ -1,6 +1,6 @@
 /*
-Version: v1.0.7
-Change: Show the active site/member cooperative's public capital-deposit account in the shared footer.
+Version: v1.0.8
+Change: Keep unconfigured cooperative contacts and legal links separate from the main cooperative.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -114,11 +114,13 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   const depositAccount = String(settings?.member_capital_deposit_account || '').trim();
   const depositHolder = String(settings?.member_capital_deposit_holder || '').trim();
   const isSiteMemberProfile = String(settings?.runtime_profile || '') === 'site_member';
+  const isOtherCoop = !!coopName && coopName !== '용인모두의햇빛협동조합';
+  const useTenantLegalDocs = isSiteMemberProfile || isOtherCoop;
   const policyLinks = document.getElementById('footer-policy-links');
-  window.__PUBLIC_LEGAL_DOCS_ENABLED__ = !isSiteMemberProfile;
-  window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ = !isSiteMemberProfile;
-  if (policyLinks) policyLinks.hidden = isSiteMemberProfile;
-  if (isSiteMemberProfile) {
+  window.__PUBLIC_LEGAL_DOCS_ENABLED__ = !useTenantLegalDocs;
+  window.__PUBLIC_HOME_PATCH_NOTES_ENABLED__ = !useTenantLegalDocs;
+  if (policyLinks) policyLinks.hidden = useTenantLegalDocs;
+  if (useTenantLegalDocs) {
     document.getElementById('termsModal')?.remove();
     document.getElementById('patchNoteModal')?.remove();
     window.loadFooterSiteLegalStatus();
@@ -142,7 +144,7 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
   }
   if (depositRow) depositRow.hidden = !hasDepositAccount;
 
-  if (isSiteMemberProfile) {
+  if (isSiteMemberProfile || isOtherCoop) {
     const phoneRow = document.getElementById('footer-contact-phone-row');
     const emailRow = document.getElementById('footer-contact-email-row');
     const addressRow = document.getElementById('footer-contact-address-row');

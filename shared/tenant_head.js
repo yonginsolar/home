@@ -1,6 +1,6 @@
 /*
-Version: v1.0.3
-Change: Preserve citizen-domain server-rendered metadata without legacy verification filtering.
+Version: v1.0.4
+Change: Initialize registered cooperative names from server metadata, including Hwaseong.
 */
 (function applyTenantHead(global) {
   'use strict';
@@ -13,6 +13,10 @@ Change: Preserve citizen-domain server-rendered metadata without legacy verifica
     'erp.yonginsun.kr'
   ]);
   const isCitizenTenant = citizenHosts.has(host);
+  const hwaseongHosts = new Set(['hcrec.kr', 'www.hcrec.kr', 'erp.hcrec.kr']);
+  const serverCoopName = String(document.querySelector('meta[name="coop-tenant-name"]')?.content || '').trim();
+  const activeCoopName = serverCoopName || (hwaseongHosts.has(host) ? '화성시민재생에너지발전협동조합' : (isCitizenTenant ? '용인시민햇빛발전협동조합' : ''));
+  if (activeCoopName) global.__PUBLIC_SITE_COOP_NAME__ = activeCoopName;
   const oldName = '용인모두의햇빛협동조합';
   const coopName = '용인시민햇빛발전협동조합';
 
@@ -57,6 +61,6 @@ Change: Preserve citizen-domain server-rendered metadata without legacy verifica
   global.CoopTenantHead = Object.freeze({
     host,
     isCitizenTenant,
-    coopName: isCitizenTenant ? coopName : ''
+    coopName: activeCoopName
   });
 })(window);
