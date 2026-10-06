@@ -1,5 +1,5 @@
 /*
-Version: v1.0.54
+Version: v1.0.55
 Change: 2026-10-06 - Read general notices separately from approved official documents.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -511,7 +511,7 @@ async function listCompletedNoticeApprovals() {
     const coopId = await getVisibleCoopId();
     const { data, error } = await scopeByCoop(supabase
         .from('ref_approval')
-        .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,approval_line')
+        .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,approval_line,notice_usage')
         .eq('doc_type', '공문')
         .in('status', ['완료', '실물결재완료'])
         .order('processed_at', { ascending: false, nullsFirst: false })

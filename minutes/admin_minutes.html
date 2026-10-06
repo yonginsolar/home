@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.73
-Change: 2026-09-29 - Include non-member directors in board minute signer selection.
+Version: v1.2.74
+Change: 2026-10-06 - Separate internal/external official notices, retaining explicit publication.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,8 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.73 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.74 | admin_minutes.html');</script>
+    <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
         body { margin: 0; padding: 20px; font-family: sans-serif; background: #f8fafc; }
@@ -153,6 +154,8 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             display: flex; flex-direction: column; gap: 10px;
         }
         .minute-header { display: flex; justify-content: space-between; align-items: flex-start; }
+        #tab-notices .minute-header > div { min-width: 0; }
+        #tab-notices .minute-header > div > div { flex-wrap: wrap; word-break: keep-all; overflow-wrap: break-word; }
         
         .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
         .badge-open { background: #dbeafe; color: #1e40af; }
@@ -480,7 +483,12 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
 
         <div id="tab-notices" class="tab-panel">
         <div class="card">
-            <h3 style="margin-top:0;">📢 공문(공지) 관리</h3>
+            <h3 style="margin-top:0;">📢 공문 관리</h3>
+            <div class="filter-chip-row" role="tablist" aria-label="공문 용도">
+                <button type="button" role="tab" class="filter-chip active" id="notice-tab-INTERNAL" aria-selected="true" onclick="setNoticeUsageTab('INTERNAL')">내부용</button>
+                <button type="button" role="tab" class="filter-chip" id="notice-tab-EXTERNAL" aria-selected="false" onclick="setNoticeUsageTab('EXTERNAL')">외부용</button>
+                <button type="button" role="tab" class="filter-chip" id="notice-tab-LEGACY" aria-selected="false" onclick="setNoticeUsageTab('LEGACY')" hidden>기존 공문</button>
+            </div>
             <div id="notice-list-area">로딩 중...</div>
         </div>
         </div>
@@ -549,7 +557,7 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             <div id="previewTitle" style="font-weight:bold; margin-bottom:8px;"></div>
             <div id="previewBody" style="max-height:60vh; overflow:auto; color:#374151; font-size:0.95rem;"></div>
             <div class="modal-actions">
-                <button class="btn btn-blue" onclick="printPreviewNotice()">🖨️ 출력</button>
+                <button id="noticePreviewPrint" class="btn btn-blue" onclick="printPreviewNotice()">🖨️ 출력·PDF 저장</button>
                 <button class="btn btn-gray" onclick="closePreview()">닫기</button>
             </div>
         </div>
@@ -633,7 +641,7 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
 
     <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.53';
+        import { MinutesService } from './MinutesService.js?v=1.0.55';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -697,6 +705,12 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
 
 
         let noticeItems = [];
+        let noticeUsageTab = 'INTERNAL';
+        let noticeUsageTabTouched = false;
+        let noticeListRequest = 0;
+        let noticePreviewRequest = 0;
+        let noticePrintPending = false;
+        const noticeApplyPending = new Set();
         let noticeAttachMap = {};
         let noticeChannelMap = {};
         let noticeCompanyInfo = null;
@@ -2025,14 +2039,15 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             `;
         }
 
-        function buildPrintableNoticeHtml(title, noticeHtml, footerHtml) {
+        function buildPrintableNoticeHtml(title, noticeHtml, footerHtml, filename = '') {
             const safeTitle = escapeHtml(title || '공문');
+            const safeFilename = escapeHtml(filename || title || '공문');
             const printedAtLabel = escapeHtml(formatMinutesAdminKstDateTime(new Date().toISOString()));
             return `<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>${safeTitle}</title>
+    <title>${safeFilename}</title>
     <style>
         @page { size: A4 portrait; margin: 16mm 14mm 18mm 14mm; }
         html, body { width: auto; height: auto; }
@@ -2068,6 +2083,11 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
         .print-foot-contact-split .is-right { text-align: right; }
         @media print {
             html, body { margin: 0; padding: 0; }
+            body, body * { font-size: 11pt !important; word-break: keep-all; overflow-wrap: break-word; }
+            .print-head-title { font-size: 18pt !important; }
+            .print-foot-sign, .print-foot-approval-name { font-size: 12pt !important; white-space: normal; }
+            .print-foot-approval-meta { white-space: normal; }
+            .print-head, .print-foot { break-inside: avoid; }
         }
     </style>
 </head>
@@ -2862,46 +2882,88 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
         }
 
         async function openNoticePreview(id) {
+            const request = ++noticePreviewRequest;
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
             if (!item) return;
             const approval = item.approval || {};
             const notice = item.notice || null;
-            currentPreviewNoticeState = { approval, notice };
+            currentPreviewNoticeState = null;
+            document.getElementById('noticePreviewPrint').disabled = true;
             document.getElementById('previewTitle').innerText = notice?.title || approval.title || '공문';
-            document.getElementById('previewBody').innerHTML = await buildNoticeTemplateHtml(approval, notice);
+            const html = await buildNoticeTemplateHtml(approval, notice);
+            if (request !== noticePreviewRequest) return;
+            currentPreviewNoticeState = { approval, notice };
+            document.getElementById('noticePreviewPrint').disabled = false;
+            document.getElementById('previewBody').innerHTML = html;
             document.getElementById('previewModal').classList.add('show');
         }
         window.openNoticePreview = openNoticePreview;
 
+        window.printNoticeById = async id => {
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (item) await window.printPreviewNotice(item);
+        };
+
+        window.downloadNoticeAttachments = async id => {
+            const request = ++noticePreviewRequest;
+            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (!item) return;
+            const refs = resolveNoticeFileUrls(item.approval, item.notice, true) || [];
+            const links = [];
+            for (let index = 0; index < refs.length; index++) {
+                const ref = OfficialNotice.attachment(refs[index]);
+                if (!ref) continue;
+                let url = ref.url || '';
+                let name = item.notice?.file_names?.[index] || `첨부파일 ${index + 1}`;
+                if (ref.bucket) {
+                    if (ref.name) name = ref.name;
+                    const { data, error } = await MinutesService.createSignedUrl(ref.bucket, ref.path, 900);
+                    if (!error) url = safeUrl(data?.signedUrl);
+                }
+                if (url) links.push(`<p><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" download>${escapeHtml(name)}</a></p>`);
+            }
+            if (request !== noticePreviewRequest) return;
+            if (!links.length) { showToast('첨부파일을 열 수 없습니다. 권한과 파일 상태를 확인해 주세요.'); return; }
+            currentPreviewNoticeState = null;
+            document.getElementById('noticePreviewPrint').disabled = true;
+            document.getElementById('previewTitle').textContent = '첨부파일 다운로드';
+            document.getElementById('previewBody').innerHTML = links.join('');
+            document.getElementById('previewModal').classList.add('show');
+        };
+
         window.closePreview = () => {
+            noticePreviewRequest++;
             currentPreviewNoticeState = null;
             document.getElementById('previewModal').classList.remove('show');
         };
 
-        window.printPreviewNotice = async () => {
-            const approval = currentPreviewNoticeState?.approval || null;
-            const notice = currentPreviewNoticeState?.notice || null;
+        window.printPreviewNotice = async (selectedItem = null) => {
+            if (noticePrintPending) return;
+            const state = selectedItem || currentPreviewNoticeState;
+            const approval = state?.approval || null;
+            const notice = state?.notice || null;
             if (!approval && !notice) {
                 showToast('출력할 공문을 찾지 못했습니다.');
                 return;
             }
-            const title = notice?.title || approval?.title || '공문';
-            const noticeHtml = await buildNoticeTemplateHtml(approval || {}, notice || null);
-            const footerHtml = await buildNoticePrintFooterHtml(approval || {});
-            const html = buildPrintableNoticeHtml(title, noticeHtml, footerHtml);
             const printWindow = window.open('', '_blank', 'width=960,height=900');
-            if (!printWindow) {
-                showToast('팝업이 차단되어 출력 창을 열지 못했습니다.');
-                return;
-            }
-            printWindow.document.open();
-            printWindow.document.write(html);
-            printWindow.document.close();
-            printWindow.focus();
-            await waitForPrintWindowImages(printWindow);
+            if (!printWindow) { showToast('출력 창을 열려면 브라우저의 팝업 차단을 해제해 주세요.'); return; }
+            noticePrintPending = true;
             try {
+                const title = notice?.title || approval?.title || '공문';
+                const noticeHtml = await buildNoticeTemplateHtml(approval || {}, notice || null);
+                const footerHtml = await buildNoticePrintFooterHtml(approval || {});
+                const html = buildPrintableNoticeHtml(title, noticeHtml, footerHtml, OfficialNotice.filename(approval?.doc_no, title));
+                printWindow.document.open();
+                printWindow.document.write(html);
+                printWindow.document.close();
+                printWindow.focus();
+                await waitForPrintWindowImages(printWindow);
                 printWindow.print();
-            } catch (e) {}
+            } catch (e) {
+                if (!printWindow.closed) printWindow.close();
+                showToast('공문을 출력하지 못했습니다. 다시 시도해 주세요.');
+            } finally { noticePrintPending = false; }
         };
 
         window.openMinutePreview = async (id) => {
@@ -3229,6 +3291,9 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             const state = getOrInitNoticeChannels(key, {});
             const noticeOn = !!state.notice;
             const documentOn = !!state.document;
+            const purposeError = OfficialNotice.validateChannels(approval.notice_usage, noticeOn, documentOn);
+            if (purposeError) { showToast(purposeError); return; }
+            if (noticeApplyPending.has(key)) return;
 
             if (documentOn && !getNoticeDocNo(approval, notice)) {
                 showToast('문서함 채널 게시를 위해 문서번호가 필요합니다.');
@@ -3238,6 +3303,8 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             const includeAttach = !!noticeAttachMap[key];
             const fileUrls = resolveNoticeFileUrls(approval, notice, includeAttach);
 
+            noticeApplyPending.add(key);
+            try {
             const { error: noticeError } = await syncNoticePortalChannel(approval, notice, noticeOn, fileUrls);
             if (noticeError) {
                 showToast(noticeError.message || '공지 채널 반영 실패');
@@ -3251,13 +3318,18 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             }
 
             showToast('채널 설정이 반영되었습니다.');
-            loadNotices();
+            await loadNotices();
+            } catch (error) {
+                showToast('게시 설정을 확인하지 못했습니다. 목록을 다시 확인해 주세요.');
+            } finally { noticeApplyPending.delete(key); }
         };
 
         async function loadNotices() {
+            const request = ++noticeListRequest;
             const container = document.getElementById('notice-list-area');
             if (!container) return;
             const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals();
+            if (request !== noticeListRequest) return;
             if (error) {
                 container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">조회 오류</div>';
                 return;
@@ -3268,12 +3340,17 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
             }
 
             const approvalIds = approvals.map(a => a.id).filter(Boolean);
-            const { data: notices } = await MinutesService.listNoticesByApprovalIds(approvalIds);
+            const { data: notices, error: noticesError } = await MinutesService.listNoticesByApprovalIds(approvalIds);
             const noticeMap = new Map((notices || []).map(n => [String(n.source_approval_id), n]));
             const docNos = approvals
                 .map(a => String(a.doc_no || '').trim())
                 .filter(Boolean);
-            const { data: minuteNotices } = await MinutesService.listNoticeMinutesByDocNos(docNos);
+            const { data: minuteNotices, error: minuteError } = await MinutesService.listNoticeMinutesByDocNos(docNos);
+            if (request !== noticeListRequest) return;
+            if (noticesError || minuteError) {
+                container.textContent = '게시 상태를 확인하지 못했습니다. 새로고침 후 다시 확인해 주세요.';
+                return;
+            }
             const minuteByDocNo = new Map();
             (minuteNotices || []).forEach((row) => {
                 const key = String(row.doc_no || '').trim();
@@ -3292,14 +3369,39 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
 
             noticeItems = sortedApprovals.map(a => ({
                 approval: a,
-                notice: noticeMap.get(String(a.id)) || null
+                notice: noticeMap.get(String(a.id)) || null,
+                minuteNotice: minuteByDocNo.get(String(a.doc_no || '').trim()) || null
             }));
+            if (!noticeUsageTabTouched && !noticeItems.some(item => OfficialNotice.matches(item.approval.notice_usage, 'INTERNAL'))
+                && noticeItems.some(item => OfficialNotice.matches(item.approval.notice_usage, 'LEGACY'))) noticeUsageTab = 'LEGACY';
+            renderNoticeUsageList();
+        }
 
+        window.setNoticeUsageTab = tab => {
+            if (!['INTERNAL', 'EXTERNAL', 'LEGACY'].includes(tab)) return;
+            noticeUsageTab = tab;
+            noticeUsageTabTouched = true;
+            renderNoticeUsageList();
+        };
+
+        function renderNoticeUsageList() {
+            const container = document.getElementById('notice-list-area');
+            for (const tab of ['INTERNAL', 'EXTERNAL', 'LEGACY']) {
+                const count = noticeItems.filter(item => OfficialNotice.matches(item.approval.notice_usage, tab)).length;
+                const button = document.getElementById('notice-tab-' + tab);
+                button.textContent = `${tab === 'LEGACY' ? '기존 공문' : OfficialNotice.label(tab)} (${count})`;
+                button.hidden = tab === 'LEGACY' && count === 0;
+                button.classList.toggle('active', noticeUsageTab === tab);
+                button.setAttribute('aria-selected', String(noticeUsageTab === tab));
+            }
+            const visibleItems = noticeItems.filter(item => OfficialNotice.matches(item.approval.notice_usage, noticeUsageTab));
             container.innerHTML = '';
-            for (const item of noticeItems) {
+            if (!visibleItems.length) container.textContent = '결재 완료 공문이 없습니다.';
+            for (const item of visibleItems) {
                 const approval = item.approval || {};
                 const notice = item.notice || null;
-                const attachCount = Array.isArray(approval?.file_links) ? approval.file_links.length : 0;
+                const external = OfficialNotice.normalize(approval.notice_usage) === 'EXTERNAL';
+                const attachCount = (resolveNoticeFileUrls(approval, notice, true) || []).length;
                 const existingAttach = Array.isArray(notice?.file_urls) && notice.file_urls.length > 0;
                 const hasAttach = attachCount > 0 || existingAttach;
                 const key = getNoticeApprovalKey(approval.id);
@@ -3307,7 +3409,7 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
                 noticeAttachMap[key] = checked;
 
                 const docNoRaw = getNoticeDocNo(approval, notice);
-                const minuteNotice = docNoRaw ? minuteByDocNo.get(docNoRaw) : null;
+                const minuteNotice = item.minuteNotice;
                 const isNoticePublished = notice?.status === 'published';
                 const isDocumentPublished = !!minuteNotice?.published_at;
                 const channelState = getOrInitNoticeChannels(key, {
@@ -3316,9 +3418,9 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
                     document: isDocumentPublished
                 });
                 const noticeBadgeClass = isNoticePublished ? 'badge-open' : 'badge-closed';
-                const noticeBadgeLabel = isNoticePublished ? '공지 ON' : '공지 OFF';
+                const noticeBadgeLabel = isNoticePublished ? '홈페이지 공개' : '홈페이지 미게시';
                 const boxBadgeClass = isDocumentPublished ? 'badge-open' : 'badge-closed';
-                const boxBadgeLabel = isDocumentPublished ? '문서함 ON' : '문서함 OFF';
+                const boxBadgeLabel = isDocumentPublished ? '문서함 게시' : '문서함 미게시';
                 const docNo = approval.doc_no ? `<span style="font-size:0.8rem; color:#64748b;">${escapeHtml(approval.doc_no)}</span>` : '';
                 const dateValue = approval.processed_at || approval.created_at;
                 const dateLabel = formatMinutesAdminKstDate(dateValue);
@@ -3328,21 +3430,21 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
                         <div class="minute-header">
                             <div>
                                 <div style="display:flex; align-items:center; gap:8px;">
-                                    <span class="status-badge ${noticeBadgeClass}">${noticeBadgeLabel}</span>
-                                    <span class="status-badge ${boxBadgeClass}">${boxBadgeLabel}</span>
+                                    ${external ? '<span class="status-badge badge-closed">외부용</span>' : `<span class="status-badge ${noticeBadgeClass}">${noticeBadgeLabel}</span><span class="status-badge ${boxBadgeClass}">${boxBadgeLabel}</span>`}
                                     <strong style="font-size:1.05rem;">${escapeHtml(approval.title || '공문')}</strong>
                                     ${docNo}
                                 </div>
                                 <div style="font-size:0.8rem; color:#888; margin-top:4px;">
-                                    결재완료일: ${dateLabel} | 결재상태: ${statusLabel} | 결재문서 ID: ${approval.id || '-'}
+                                    결재완료일: ${dateLabel} | 결재상태: ${statusLabel}
                                 </div>
                             </div>
                         </div>
                         <div class="btn-group">
                             <button onclick="openNoticePreview('${approval.id}')" class="btn btn-gray">내용 보기</button>
+                            ${external ? `<button onclick="printNoticeById('${approval.id}')" class="btn btn-blue">출력·PDF 저장</button><button onclick="downloadNoticeAttachments('${approval.id}')" class="btn btn-outline" ${hasAttach ? '' : 'disabled'}>첨부 다운로드 (${attachCount})</button>` : `
                             <label class="channel-toggle">
                                 <input type="checkbox" ${channelState.notice ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'notice', this.checked)">
-                                공지
+                                홈페이지 공지
                             </label>
                             <label class="channel-toggle">
                                 <input type="checkbox" ${channelState.document ? 'checked' : ''} onchange="toggleNoticeChannel('${approval.id}', 'document', this.checked)">
@@ -3352,7 +3454,7 @@ Change: 2026-09-29 - Include non-member directors in board minute signer selecti
                                 <input type="checkbox" ${checked ? 'checked' : ''} ${hasAttach ? '' : 'disabled'} onchange="toggleNoticeAttach('${approval.id}', this.checked)">
                                 첨부 포함 (${attachCount})
                             </label>
-                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">채널 적용</button>
+                            <button onclick="applyNoticeChannels('${approval.id}')" class="btn btn-blue">게시 설정 적용</button>`}
                         </div>
                     </div>
                 `;
