@@ -1,5 +1,5 @@
 window.ErpRuntimeGuard = {
-  version: '1.4.1',
+  version: '1.4.2',
   showInlineAlert: function(message) {
     const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
     try {
@@ -147,6 +147,16 @@ window.ErpRuntimeGuard = {
       return data || null;
     }, { attempts: 2, delayMs: 180 });
   },
+  redirectEndedService: async function(_supabase) {
+    try {
+      const { data, error } = await _supabase.rpc('erp_service_access_state');
+      if (!error && data?.closed === true) {
+        location.replace('service_contracts.html');
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  },
   requireUser: async function(_supabase, options) {
     const opts = options && typeof options === 'object' ? options : {};
     const alertFn = typeof opts.alertFn === 'function'
@@ -176,6 +186,7 @@ window.ErpRuntimeGuard = {
     try {
       employee = await window.ErpRuntimeGuard.getBoundEmployee(_supabase);
     } catch (error) {
+      if (await window.ErpRuntimeGuard.redirectEndedService(_supabase)) return { ok: false, reason: 'service_ended', user: null };
       console.error('ErpRuntimeGuard employee load failed:', error);
       if (window.ErpRuntimeGuard.isAuthError(error)) {
         window.ErpRuntimeGuard.redirectToLogin(opts);
@@ -276,6 +287,7 @@ window.ErpRuntimeGuard = {
         return window.ErpRuntimeGuard.getRuntime(_supabase);
       }, { attempts: 2, delayMs: 180 });
     } catch (error) {
+      if (await window.ErpRuntimeGuard.redirectEndedService(_supabase)) return { ok: false, reason: 'service_ended', runtime: null };
       console.error('ErpRuntimeGuard.getRuntime failed:', error);
       if (window.ErpRuntimeGuard.isAuthError(error)) {
         alertFn('로그인 세션이 만료되었습니다.\n다시 로그인해 주세요.');

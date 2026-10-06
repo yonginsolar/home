@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.79 | Change: 2026-10-06 - Choose official notice purpose within the existing approval form. -->
+<!-- Version: v1.2.80 | Change: 2026-10-07 - Attach the same contract final version in the common approval form. -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.79 | approval.html');</script>
+  <script>console.log('[Version] v1.2.80 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -31,7 +31,8 @@
   })();
 </script>
   <script src="/shared/route_guard.js?v=20260403-1"></script>
-  <script src="erp_runtime_guard.js?v=20260919-1"></script>
+  <script src="erp_runtime_guard.js?v=1.4.2"></script>
+  <script src="approval_service_contract.js?v=1.0.0"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260928-1"></script>
@@ -9560,6 +9561,7 @@ window.onload = async function() {
     syncApprovalDraftStatusText();
     updateFileList();
     await openApprovalDocFromLocationIfNeeded();
+    await window.ServiceContractApproval.load(_supabase);
 };
 
 async function loadPermissions(user) {
@@ -11124,6 +11126,7 @@ function prepareApprovalCategoryBodyChange(previousType, nextType) {
 // [수정] 카테고리 변경 핸들러 (반차 UI 제어 포함)
 // [수정] 카테고리 변경 핸들러 (관련 문서 UI 제어 추가)
 function handleCategoryChange() {
+    window.ServiceContractApproval?.categoryChanged(document.getElementById('appCategory')?.value);
     syncApprovalExpenseDateUi();
     const categoryEl = document.getElementById("appCategory");
     let rawType = String(categoryEl?.value || '').trim();
@@ -13154,6 +13157,7 @@ async function handleDraftSubmit(e) {
     const refData = finalRefs.map(u => ({ emp_id: u.emp_id, name: u.emp_name }));
 
     const approvalInsertPayload = {
+        ...(window.ServiceContractApproval?.snapshot() ? { service_contract_snapshot: window.ServiceContractApproval.snapshot() } : {}),
         doc_type: subType,
         title: title,
         content: savedBodyContent,
