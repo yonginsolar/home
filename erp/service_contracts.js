@@ -1,4 +1,4 @@
-/* 1.1.0 · ERP day mode only; terminated tenant's session-bound, PIN-verified data return. */
+/* 1.1.1 · ERP day mode only; tenant-bound return and confirmed legacy attachment ownership. */
 (function () {
  'use strict';
  const $=id=>document.getElementById(id), BASE='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -118,7 +118,7 @@
   try{
    await ensureGrant();const job=await returnRpc({p_action:'start'}),grouped=new Map();
    for(let p=1;p<=job.pages;p++){progress.textContent='업무자료 '+p+' / '+job.pages+' 묶음을 확인하는 중입니다.';const data=await returnRpc({p_action:'page',p_export_id:job.id,p_page:p});if(!data?.rows)throw Error('EXPORT_PAGE_MISSING');if(!grouped.has(data.label))grouped.set(data.label,[]);grouped.get(data.label).push(...data.rows);}
-   const groups=attachmentGroups(job.files),manifest={created_on:today(),coop:job.coop_name,datasets:job.manifest,notes:job.notes,attachment_archives:groups.length,files:job.files.map((f,i)=>({name:f.name,size:f.size,download_name:'첨부/'+String(i+1).padStart(4,'0')+'_'+safeName(f.name)}))};
+   const groups=attachmentGroups(job.files),manifest={created_on:today(),coop:job.coop_name,datasets:job.manifest,notes:job.notes,attachment_archives:groups.length,files:job.files.map((f,i)=>({name:f.name,size:f.size,owner:f.owner_name||job.coop_name,ownership:f.ownership_source||'조합 경로',download_name:'첨부/'+String(i+1).padStart(4,'0')+'_'+safeName(f.name)}))};
    const entries=[['반환_내역.json',new Blob([JSON.stringify(manifest,null,2)],{type:'application/json'})],['안내.txt',new Blob([job.notes.join('\n')+'\n첨부 원본은 별도 첨부 ZIP을 모두 내려받아야 합니다. 반환 내역의 파일 목록과 실제 저장한 파일을 대조해 주세요.'])]];
    for(const [label,rows] of grouped){entries.push(['업무자료/'+safeName(label)+'.json',new Blob([JSON.stringify(rows,null,2)],{type:'application/json'})]);const cols=Array.from(new Set(rows.flatMap(Object.keys))),cell=v=>'"'+String(v==null?'':typeof v==='object'?JSON.stringify(v):v).replace(/^[=+\-@\t\r]/,'\u0027$&').replaceAll('"','""')+'"';entries.push(['표/'+safeName(label)+'.csv',new Blob(['\ufeff'+[cols.map(cell).join(','),...rows.map(r=>cols.map(k=>cell(r[k])).join(','))].join('\r\n')],{type:'text/csv;charset=utf-8'})]);}
    download(await zip(entries),'자료_'+job.coop_name+'_'+today()+'.zip');grouped.clear();entries.length=0;
@@ -142,7 +142,13 @@
   finally{exporting=false;$('exportData').disabled=false;}
  }
  window.addEventListener('pagehide',()=>{returnKey=null;returnKeyUntil=0;});
+ async function ownershipSummary(){
+  const el=$('attachmentOwnership');
+  try{const s=await rpc('attachment_summary',{},null);if(!s?.assigned_legacy)return;
+   el.textContent='기존 첨부 '+money(s.assigned_legacy)+'개 · '+s.coop_name+' 소유'+(s.valid_legacy<s.assigned_legacy?' · 교체·변경된 '+money(s.assigned_legacy-s.valid_legacy)+'개는 다시 확인이 필요합니다.':'');el.hidden=false;
+  }catch{/* A status summary must not interrupt normal contract work. */}
+ }
  async function boot(){try{const {data,error}=await db.auth.getUser();if(error||!data.user){location.replace('index.html?next='+encodeURIComponent(location.href));return;}context=await rpc('context',{},null);const {data:access,error:accessError}=await db.rpc('erp_service_access_state');if(accessError)throw accessError;context.download_allowed=Boolean(access?.download_allowed);$('orgName').textContent=context.party?.name||'';if(!context.admin&&!context.platform&&!context.representative)throw Error('SERVICE_ADMIN_REQUIRED');$('workspace').hidden=false;$('newContract').hidden=!context.platform||context.closed;$('exportData').hidden=!context.download_allowed;$('newContract').onclick=()=>{$('clientCoop').replaceChildren();for(const c of context.coops.filter(x=>x.id!==context.coop_id)){const o=document.createElement('option');o.value=c.id;o.textContent=c.name;$('clientCoop').append(o);}$('newDialog').showModal();};$('cancelNew').onclick=()=>$('newDialog').close();$('newForm').onsubmit=ev=>{ev.preventDefault();task(async()=>{const co=$('clientCoop').value,parties=await rpc('new_info',{client_coop_id:co},null);const r=await rpc('create',{client_coop_id:co,title:'협동조합 운영시스템 이용계약서',terms:defaultTerms(parties),body:defaultBody()},null);$('newDialog').close();await open(r.id);message('계약 초안을 만들었습니다. 실제 계약을 체결하거나 결재를 상신한 것은 아닙니다.','success');});};$('reloadList').onclick=()=>task(reload);$('exportData').onclick=exportData;$('cancelSign').onclick=()=>$('signDialog').close();$('clearSign').onclick=clearInk;ink();$('signForm').onsubmit=ev=>{ev.preventDefault();task(async()=>{if(!hasInk){message('서명을 입력해 주세요.','warning');return;}const seal=await sealPng($('sealFile').files[0]);await rpc('sign',{digest:current.digest,consent:$('signConsent').checked,signature:$('signCanvas').toDataURL('image/png'),seal});$('signDialog').close();await open(current.id);message('소속 조합 대표자의 서명·날인을 기록했습니다.','success');});};await reload();const id=new URLSearchParams(location.search).get('contract');if(id)await open(id);message(context.closed?'계약이 종료되어 자료 다운로드만 이용할 수 있습니다.':'계약을 선택해 내용을 확인해 주세요.');}catch(e){message(errorText(e),'danger');}}
  // Pure helpers exposed only to regression fixtures; no authority or user token is exported.
- window.ServiceContractsUi={oneYearEnd,documentHtml,zip,print,attachmentGroups};void boot();
+ window.ServiceContractsUi={oneYearEnd,documentHtml,zip,print,attachmentGroups};void boot().then(()=>{if(context?.admin||context?.platform)void ownershipSummary();});
 })();
