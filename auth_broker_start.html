@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.8
-Change: Refresh the shared login broker helper for registered Hwaseong callbacks.
+Version: v1.0.9
+Change: Validate the cooperative provider and request only its approved social scopes.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.8 | auth_broker_start.html');</script>
+  <script>console.log('[Version] v1.0.9 | auth_broker_start.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -19,13 +19,13 @@ Change: Refresh the shared login broker helper for registered Hwaseong callbacks
       actionLabel: '로그인과 이메일 인증',
       recommendedBrowsers: 'Safari, Chrome, Edge 또는 웨일의 최신 버전',
       allowNaverApp: true,
-      allowNaverAppProviders: ['custom:naver', 'naver'],
+      allowNaverAppProviders: ['custom:naver', 'naver', 'custom:hcrec-naver'],
       allowKakaoApp: true,
-      allowKakaoAppProviders: ['kakao']
+      allowKakaoAppProviders: ['kakao', 'custom:hcrec-kakao']
     };
   </script>
   <script src="shared/browser_env_guard.js?v=20260421-3"></script>
-  <script src="shared/auth_broker_helper.js?v=20261006-1"></script>
+  <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
   <style>
@@ -64,7 +64,7 @@ Change: Refresh the shared login broker helper for registered Hwaseong callbacks
     }
 
     function createNonce() {
-      return 'ab_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+      return 'ab_' + crypto.randomUUID();
     }
 
     function getParams() {
@@ -113,10 +113,11 @@ Change: Refresh the shared login broker helper for registered Hwaseong callbacks
         ? window.AuthBrokerHelper.parseCallbackUrl(callback)
         : null;
 
-      if (!provider || mode !== 'login' || !callbackUrl) {
+      if (!provider || mode !== 'login' || !callbackUrl || !window.AuthBrokerHelper.isProviderAllowedForCallback(provider, callbackUrl.href)) {
         setStatus('중앙 인증 시작 정보를 확인하지 못했습니다.\n브라우저를 닫고 다시 시도해 주세요.');
         return;
       }
+      scopes = window.AuthBrokerHelper.socialScopes(provider, scopes);
 
       var state = createNonce();
       try {

@@ -1,6 +1,6 @@
 /*
-Version: v1.0.7
-Change: Permit only the three registered Hwaseong cooperative login hosts.
+Version: v1.0.8
+Change: Select cooperative-specific social providers and validate callback/provider pairs.
 */
 (function attachAuthBrokerHelper(global) {
   'use strict';
@@ -41,10 +41,49 @@ Change: Permit only the three registered Hwaseong cooperative login hosts.
     return global.__AUTH_BROKER_CONFIG__ || {};
   }
 
-  function normalizeProvider(provider) {
+  function isHwaseongHost(hostname) {
+    return ['hcrec.kr', 'www.hcrec.kr', 'erp.hcrec.kr'].indexOf(normalizeHost(hostname)) >= 0;
+  }
+
+  function normalizeProvider(provider, hostname) {
     var raw = String(provider || '').trim().toLowerCase();
+    var host = hostname === undefined ? global.location && global.location.hostname : hostname;
+    if (isHwaseongHost(host)) {
+      if (raw === 'kakao') return 'custom:hcrec-kakao';
+      if (raw === 'naver' || raw === 'custom:naver') return 'custom:hcrec-naver';
+    }
     if (raw === 'naver') return 'custom:naver';
     return raw;
+  }
+
+  function providerMatches(candidate, provider) {
+    var raw = String(candidate || '').trim().toLowerCase();
+    var expected = normalizeProvider(provider);
+    return raw === expected || (expected === 'custom:naver' && raw === 'naver');
+  }
+
+  function providerKind(provider) {
+    var raw = String(provider || '').trim().toLowerCase();
+    if (raw === 'kakao' || raw === 'custom:hcrec-kakao') return 'kakao';
+    if (raw === 'naver' || raw === 'custom:naver' || raw === 'custom:hcrec-naver') return 'naver';
+    return '';
+  }
+
+  function socialScopes(provider, legacyScopes) {
+    var selected = normalizeProvider(provider);
+    if (selected === 'custom:hcrec-kakao') return 'openid account_email';
+    if (selected === 'custom:hcrec-naver') return '';
+    return legacyScopes;
+  }
+
+  function isProviderAllowedForCallback(provider, callback) {
+    var parsed = parseCallbackUrl(callback);
+    var raw = String(provider || '').trim().toLowerCase();
+    if (!parsed || !providerKind(raw)) return false;
+    if (isHwaseongHost(parsed.hostname)) {
+      return raw === 'custom:hcrec-kakao' || raw === 'custom:hcrec-naver';
+    }
+    return raw === 'kakao' || raw === 'custom:naver';
   }
 
   function getBrokerOrigin() {
@@ -64,7 +103,9 @@ Change: Permit only the three registered Hwaseong cooperative login hosts.
     if (Array.isArray(enabledProviders)) {
       return enabledProviders.indexOf(normalized) >= 0;
     }
-    return !!enabledProviders[normalized];
+    if (Object.prototype.hasOwnProperty.call(enabledProviders, normalized)) return !!enabledProviders[normalized];
+    var legacyKey = providerKind(normalized) === 'naver' ? 'custom:naver' : providerKind(normalized);
+    return !!enabledProviders[legacyKey];
   }
 
   function isModeSupported(mode) {
@@ -111,6 +152,7 @@ Change: Permit only the three registered Hwaseong cooperative login hosts.
     if (!provider || !isProviderEnabled(provider)) return '';
     if (!isModeSupported(mode)) return '';
     if (!callbackUrl) return '';
+    if (!isProviderAllowedForCallback(provider, callbackUrl.href)) return '';
 
     startUrl = new URL('/auth_broker_start', brokerOrigin);
     startUrl.searchParams.set('provider', provider);
@@ -118,7 +160,8 @@ Change: Permit only the three registered Hwaseong cooperative login hosts.
     startUrl.searchParams.set('callback', callbackUrl.href);
 
     if (opts.app) startUrl.searchParams.set('app', String(opts.app));
-    if (opts.scopes) startUrl.searchParams.set('scopes', String(opts.scopes));
+    var scopes = socialScopes(provider, opts.scopes);
+    if (scopes) startUrl.searchParams.set('scopes', String(scopes));
     if (opts.queryParams && typeof opts.queryParams === 'object') {
       Object.keys(opts.queryParams).forEach(function (key) {
         var value = opts.queryParams[key];
@@ -247,6 +290,11 @@ Change: Permit only the three registered Hwaseong cooperative login hosts.
   global.AuthBrokerHelper = {
     getBrokerOrigin: getBrokerOrigin,
     normalizeProvider: normalizeProvider,
+    providerMatches: providerMatches,
+    providerKind: providerKind,
+    socialScopes: socialScopes,
+    isHwaseongHost: isHwaseongHost,
+    isProviderAllowedForCallback: isProviderAllowedForCallback,
     isProviderEnabled: isProviderEnabled,
     parseCallbackUrl: parseCallbackUrl,
     buildStartUrl: buildStartUrl

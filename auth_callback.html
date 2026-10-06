@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.21
-Change: Load the shared sun favicon for cooperative modules.
+Version: v1.0.22
+Change: Recognize cooperative-specific social identities without borrowing other profile fields.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.0.21 | auth_callback.html');</script>
+  <script>console.log('[Version] v1.0.22 | auth_callback.html');</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -18,6 +18,7 @@ Change: Load the shared sun favicon for cooperative modules.
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
     <script src="shared/boot_guard.js?v=20260327-1"></script>
     <script src="shared/route_guard.js?v=20260401-1"></script>
+    <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
     <style>
         body { display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f8f9fa; flex-direction: column; font-family: sans-serif; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #F7E600; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
@@ -260,14 +261,14 @@ Change: Load the shared sun favicon for cooperative modules.
         function getLinkingProviderMeta() {
             const params = new URLSearchParams(window.location.search);
             const rawProvider = String(params.get('provider') || 'kakao').trim().toLowerCase();
-            if (rawProvider === 'naver') {
+            if (AuthBrokerHelper.providerKind(rawProvider) === 'naver') {
                 return {
-                    key: 'custom:naver',
+                    key: AuthBrokerHelper.normalizeProvider('custom:naver'),
                     label: '네이버'
                 };
             }
             return {
-                key: 'kakao',
+                key: AuthBrokerHelper.normalizeProvider('kakao'),
                 label: '카카오'
             };
         }
@@ -292,6 +293,7 @@ Change: Load the shared sun favicon for cooperative modules.
         }
 
         function getBestSocialPhone(user) {
+            if (AuthBrokerHelper.isHwaseongHost(location.hostname)) return '';
             const meta = user?.user_metadata || {};
             const candidates = [
                 user?.phone,

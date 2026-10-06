@@ -1,4 +1,4 @@
-/* v1.0.0 - Reauthenticate only when resetting an existing export PIN. */
+/* v1.0.1 - Reauthenticate using the current cooperative's social provider. */
 (function(global) {
   'use strict';
   let context, pending, popup, socialUrl='', busy=false;
@@ -64,12 +64,13 @@
         const callback=new URL('auth_callback',location.href);
         const returnUrl=new URL('member_export_pin_reauth.html',location.href);
         callback.searchParams.set('next',returnUrl.href);
-        const params=info.provider==='kakao'?{prompt:'login'}:{auth_type:'reauthenticate',prompt:'login'};
+        const kind=global.AuthBrokerHelper.providerKind(info.provider);
+        const params=kind==='kakao'?{prompt:'login'}:{auth_type:'reauthenticate',prompt:'login'};
         socialUrl=global.AuthBrokerHelper.buildStartUrl({provider:info.provider,mode:'login',app:'erp',callback:callback.href,
-          scopes:info.provider==='custom:naver'?'openid profile':undefined,queryParams:params});
+          scopes:global.AuthBrokerHelper.socialScopes(info.provider,info.provider==='custom:naver'?'openid profile':undefined),queryParams:params});
         if(!socialUrl)throw new Error('PIN_LOGIN_METHOD_UNAVAILABLE');
         el('memberExportPinSocialStart').classList.remove('d-none');
-        el('memberExportPinSocialStart').textContent=(info.provider==='kakao'?'카카오':'네이버')+'로 다시 인증';
+        el('memberExportPinSocialStart').textContent=(kind==='kakao'?'카카오':'네이버')+'로 다시 인증';
         message('아래 버튼에서 현재 계정으로 다시 로그인해 주세요.');
       }
     } catch(error) { fail(error); }

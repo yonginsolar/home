@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.5
-Change: Refresh the shared login broker helper for registered Hwaseong callbacks.
+Version: v1.0.6
+Change: Validate the cooperative callback and expire stale authentication handoffs.
 -->
 <html lang="ko">
 <head>
-  <script>console.log('[Version] v1.0.5 | auth_broker_complete.html');</script>
+  <script>console.log('[Version] v1.0.6 | auth_broker_complete.html');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>인증을 마무리하고 있습니다</title>
-  <script src="shared/auth_broker_helper.js?v=20261006-1"></script>
+  <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
   <style>
     body { background:#f8fafc; min-height:100vh; margin:0; display:flex; align-items:center; justify-content:center; padding:24px; font-family:"Pretendard Variable","Pretendard",-apple-system,sans-serif; }
     .broker-card { width:100%; max-width:520px; background:#fff; border-radius:20px; box-shadow:0 16px 48px rgba(15,23,42,.12); padding:32px 28px; }
@@ -89,7 +89,8 @@ Change: Refresh the shared login broker helper for registered Hwaseong callbacks
         ? window.AuthBrokerHelper.parseCallbackUrl(callbackUrl)
         : null;
 
-      if (!parsedCallback) {
+      if (!parsedCallback || !window.AuthBrokerHelper.isProviderAllowedForCallback(payload.provider, parsedCallback.href)
+        || !Number.isFinite(payload.created_at) || Date.now() - payload.created_at > 30 * 60 * 1000 || payload.created_at > Date.now()) {
         setStatus('원래 돌아갈 주소를 확인하지 못했습니다.\n브라우저를 닫고 다시 시도해 주세요.');
         return;
       }

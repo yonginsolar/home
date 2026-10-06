@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.161
-Change: 2026-10-06 - Read notices in the document box without a second notice list.
+Version: v1.0.162
+Change: 2026-10-06 - Recognize Hwaseong-specific social login identities.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.161 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.162 | membermanage.html');</script>
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
@@ -51,7 +51,7 @@ allowKakaoApp: true
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
-<script src="shared/auth_broker_helper.js?v=20261003-1"></script>
+<script src="shared/auth_broker_helper.js?v=20261006-2"></script>
 
 <link href="style.css" rel="stylesheet">
 
@@ -3391,12 +3391,7 @@ return String(value || '').trim().toLowerCase();
 }
 
 function portalProviderMatches(candidate, providerKey) {
-const normalizedCandidate = normalizePortalProviderKey(candidate);
-const normalizedProvider = normalizePortalProviderKey(providerKey);
-if (!normalizedCandidate || !normalizedProvider) return false;
-if (normalizedCandidate === normalizedProvider) return true;
-if (normalizedProvider === 'custom:naver' && normalizedCandidate === 'naver') return true;
-return false;
+return AuthBrokerHelper.providerMatches(candidate, providerKey);
 }
 
 function hasPortalProvider(user, providerKey) {
@@ -3510,10 +3505,10 @@ localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 const redirectUrl = buildAuthCallbackUrl({ linking: 'true', next: nextTarget });
 
 const { data, error } = await _supabase.auth.linkIdentity({
-provider: 'kakao',
+provider: AuthBrokerHelper.normalizeProvider("kakao"),
 options: {
 redirectTo: redirectUrl,
-scopes: 'account_email phone_number profile_nickname'
+scopes: AuthBrokerHelper.socialScopes("kakao", "account_email phone_number profile_nickname")
 }
 });
 
@@ -3555,10 +3550,10 @@ localStorage.setItem(PUBLIC_AUTH_DEST_KEY, nextTarget);
 const redirectUrl = buildAuthCallbackUrl({ linking: 'true', provider: 'naver', next: nextTarget });
 
 const { data, error } = await _supabase.auth.linkIdentity({
-provider: 'custom:naver',
+provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
 options: {
 redirectTo: redirectUrl,
-scopes: 'openid profile'
+scopes: AuthBrokerHelper.socialScopes("custom:naver", "openid profile")
 }
 });
 
@@ -8114,11 +8109,11 @@ async function startKakaoLogin() {
 
         const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
             ? window.AuthBrokerHelper.buildStartUrl({
-                provider: 'kakao',
+                provider: AuthBrokerHelper.normalizeProvider("kakao"),
                 mode: 'login',
                 app: 'public',
                 callback: redirectUrl,
-                scopes: 'account_email phone_number profile_nickname'
+                scopes: AuthBrokerHelper.socialScopes("kakao", "account_email phone_number profile_nickname")
             })
             : '';
         if (brokerUrl) {
@@ -8128,10 +8123,10 @@ async function startKakaoLogin() {
         
         // 3. Supabase 로그인 시작
         const { data, error } = await _supabase.auth.signInWithOAuth({
-            provider: 'kakao',
+            provider: AuthBrokerHelper.normalizeProvider("kakao"),
             options: {
                 redirectTo: redirectUrl,
-                scopes: 'account_email phone_number profile_nickname',
+                scopes: AuthBrokerHelper.socialScopes("kakao", "account_email phone_number profile_nickname"),
                 queryParams: {
                     // prompt: 'login' // 필요시 주석 해제하여 매번 로그인 창 띄움
                 }
@@ -8161,11 +8156,11 @@ async function startNaverLogin() {
 
         const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
             ? window.AuthBrokerHelper.buildStartUrl({
-                provider: 'custom:naver',
+                provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
                 mode: 'login',
                 app: 'public',
                 callback: redirectUrl,
-                scopes: 'openid profile'
+                scopes: AuthBrokerHelper.socialScopes("custom:naver", "openid profile")
             })
             : '';
         if (brokerUrl) {
@@ -8174,10 +8169,10 @@ async function startNaverLogin() {
         }
 
         const { data, error } = await _supabase.auth.signInWithOAuth({
-            provider: 'custom:naver',
+            provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
             options: {
                 redirectTo: redirectUrl,
-                scopes: 'openid profile'
+                scopes: AuthBrokerHelper.socialScopes("custom:naver", "openid profile")
             }
         });
 

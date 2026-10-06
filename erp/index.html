@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.88 | Change: 2026-10-04 - Preserve OTP login and use verified employee contact matching. -->
+<!-- Version: v1.0.89 | Change: 2026-10-06 - Route Hwaseong social login to cooperative-specific providers. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.88 | index.html');</script>
+  <script>console.log('[Version] v1.0.89 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -49,7 +49,7 @@
   <script src="/shared/route_guard.js?v=20260408-1"></script>
   <script src="/shared/auth_email_helper.js?v=1.0.0"></script>
   <script src="erp_runtime_guard.js?v=20260929-2"></script>
-  <script src="/shared/auth_broker_helper.js?v=20260909-1"></script>
+  <script src="/shared/auth_broker_helper.js?v=20261006-2"></script>
   
   <style>
     body { 
@@ -888,7 +888,7 @@ function getAuthProviders(user) {
 }
 
 function hasAuthProvider(user, provider) {
-    return getAuthProviders(user).has(String(provider || '').trim());
+    return Array.from(getAuthProviders(user)).some(candidate => AuthBrokerHelper.providerMatches(candidate, provider));
 }
 
 function isSocialLoginUser(user) {
@@ -896,9 +896,7 @@ function isSocialLoginUser(user) {
 }
 
 function normalizeSocialProviderKey(provider) {
-    const normalized = String(provider || '').trim().toLowerCase();
-    if (normalized === 'naver') return 'custom:naver';
-    return normalized;
+    return AuthBrokerHelper.normalizeProvider(provider);
 }
 
 function getActiveSocialProviderKey(user) {
@@ -907,16 +905,16 @@ function getActiveSocialProviderKey(user) {
         user?.raw_app_meta_data?.provider ||
         ''
     );
-    if (primary === 'kakao' || primary === 'custom:naver') return primary;
-    if (hasAuthProvider(user, 'kakao')) return 'kakao';
-    if (hasAuthProvider(user, 'custom:naver')) return 'custom:naver';
+    if (AuthBrokerHelper.providerKind(primary) && hasAuthProvider(user, primary)) return primary;
+    if (hasAuthProvider(user, 'kakao')) return AuthBrokerHelper.normalizeProvider('kakao');
+    if (hasAuthProvider(user, 'custom:naver')) return AuthBrokerHelper.normalizeProvider('custom:naver');
     return '';
 }
 
 function getSocialProviderLabel(user) {
     const providerKey = getActiveSocialProviderKey(user);
-    if (providerKey === 'kakao') return '카카오';
-    if (providerKey === 'custom:naver') return '네이버';
+    if (AuthBrokerHelper.providerKind(providerKey) === 'kakao') return '카카오';
+    if (AuthBrokerHelper.providerKind(providerKey) === 'naver') return '네이버';
     return '소셜';
 }
 
@@ -1028,11 +1026,11 @@ async function launchNaverLogin() {
 
     const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
         ? window.AuthBrokerHelper.buildStartUrl({
-            provider: 'custom:naver',
+            provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
             mode: 'login',
             app: 'erp',
             callback: redirectUrl,
-            scopes: 'openid profile'
+            scopes: AuthBrokerHelper.socialScopes("custom:naver", "openid profile")
         })
         : '';
     if (brokerUrl) {
@@ -1043,10 +1041,10 @@ async function launchNaverLogin() {
 
     try {
         const { error } = await _supabase.auth.signInWithOAuth({
-            provider: 'custom:naver',
+            provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
             options: {
                 redirectTo: redirectUrl,
-                scopes: 'openid profile'
+                scopes: AuthBrokerHelper.socialScopes("custom:naver", "openid profile")
             }
         });
         if (error) throw error;
@@ -1083,15 +1081,15 @@ async function startKakaoLinking() {
         localStorage.setItem(ERP_AUTH_DEST_KEY, nextTarget);
         const redirectUrl = buildSocialCallbackUrl({
             linking: 'true',
-            provider: 'kakao',
+            provider: AuthBrokerHelper.normalizeProvider("kakao"),
             next: nextTarget
         });
 
         const { data, error } = await _supabase.auth.linkIdentity({
-            provider: 'kakao',
+            provider: AuthBrokerHelper.normalizeProvider("kakao"),
             options: {
                 redirectTo: redirectUrl,
-                scopes: 'account_email phone_number profile_nickname'
+                scopes: AuthBrokerHelper.socialScopes("kakao", "account_email phone_number profile_nickname")
             }
         });
         if (error) throw error;
@@ -1139,10 +1137,10 @@ async function startNaverLinking() {
         });
 
         const { data, error } = await _supabase.auth.linkIdentity({
-            provider: 'custom:naver',
+            provider: AuthBrokerHelper.normalizeProvider("custom:naver"),
             options: {
                 redirectTo: redirectUrl,
-                scopes: 'openid profile'
+                scopes: AuthBrokerHelper.socialScopes("custom:naver", "openid profile")
             }
         });
         if (error) throw error;
@@ -2579,11 +2577,11 @@ async function startKakaoLogin() {
 
     const brokerUrl = window.AuthBrokerHelper && typeof window.AuthBrokerHelper.buildStartUrl === 'function'
         ? window.AuthBrokerHelper.buildStartUrl({
-            provider: 'kakao',
+            provider: AuthBrokerHelper.normalizeProvider("kakao"),
             mode: 'login',
             app: 'erp',
             callback: redirectUrl,
-            scopes: 'account_email phone_number profile_nickname',
+            scopes: AuthBrokerHelper.socialScopes("kakao", "account_email phone_number profile_nickname"),
             queryParams: {
                 access_type: 'offline',
                 prompt: 'login'
@@ -2598,10 +2596,10 @@ async function startKakaoLogin() {
 
     try {
         const { error } = await _supabase.auth.signInWithOAuth({
-            provider: 'kakao',
+            provider: AuthBrokerHelper.normalizeProvider("kakao"),
             options: {
                 redirectTo: redirectUrl,
-                scopes: 'account_email phone_number profile_nickname',
+                scopes: AuthBrokerHelper.socialScopes("kakao", "account_email phone_number profile_nickname"),
                 queryParams: {
                     access_type: 'offline',
                     prompt: 'login'
