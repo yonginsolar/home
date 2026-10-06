@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.109
-Change: Add distinct Bootstrap-inspired tenant homepage formats while preserving the primary cooperative layout.
+Version: v1.0.110
+Change: Respect saved section visibility after asynchronous plant rendering.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.109 | index.html');</script>
+<script>console.log('[Version] v1.0.110 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -3479,6 +3479,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // [신규 기능] DB 설정에 따라 섹션과 메뉴를 끄고 켜는 함수
+    const publicHiddenSectionIds = new Set();
+
     async function manageSections() {
         let sections = null;
         try {
@@ -3495,10 +3497,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!sections) return;
 
         applyPublicSectionOrder(sections);
+        publicHiddenSectionIds.clear();
 
         sections.forEach(sec => {
             // DB에서 is_visible이 false(거짓)인 경우
             if (sec.is_visible === false) {
+                publicHiddenSectionIds.add(String(sec.id));
 
                 // 1. 본문 섹션 숨기기
                 const sectionEl = document.getElementById(sec.id);
@@ -5526,7 +5530,7 @@ function openPlantDetail(id) {
             return;
         }
 
-        section.style.display = 'block';
+        section.style.display = publicHiddenSectionIds.has('progress') ? 'none' : 'block';
 
         let cardHtml = '';
         inProgressPlants.forEach(p => {

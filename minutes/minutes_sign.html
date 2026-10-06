@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.33
-Change: 2026-09-29 - Allow verified non-member directors to sign assigned minutes.
+Version: v1.2.34
+Change: 2026-10-06 - Show authorized signature previews without changing signing permissions.
 -->
 <html lang="ko">
 <head>
@@ -9,7 +9,7 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>전자서명</title>
-    <script>console.log('[Version] v1.2.33 | minutes_sign.html');</script>
+    <script>console.log('[Version] v1.2.34 | minutes_sign.html');</script>
     <style>
         body {
             margin: 0;
@@ -326,6 +326,21 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
             line-height:1.55;
         }
         .audit-edit-help.show { display:block; }
+        .signatures-panel { margin-top:18px; padding-top:14px; border-top:1px solid #e2e8f0; }
+        .signatures-title { font-weight:700; margin-bottom:8px; }
+        .signatures-list { display:flex; flex-wrap:wrap; gap:8px; }
+        .signatures-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc; }
+        .signatures-name { font-weight:700; }
+        .signatures-status { color:#475569; font-size:.9rem; }
+        .signature-preview-shell { display:inline-flex; width:96px; height:48px; align-items:center; justify-content:center; overflow:hidden; vertical-align:middle; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+        .inline-signature-shell { margin-left:8px; }
+        .inline-signature-img, .signatures-img { display:block; width:96px; height:48px; object-fit:contain; pointer-events:none; user-select:none; -webkit-user-drag:none; }
+        .inline-signature-status { display:inline-flex; margin-left:8px; padding:3px 8px; border-radius:999px; background:#f0fdf4; color:#166534; font-size:.9rem; font-weight:700; vertical-align:middle; }
+        html[data-theme="dark"] .signatures-panel { border-color:var(--theme-border); }
+        html[data-theme="dark"] .signatures-item { background:var(--theme-surface-alt); border-color:var(--theme-border); }
+        html[data-theme="dark"] .signatures-status { color:var(--theme-muted); }
+        html[data-theme="dark"] .signature-preview-shell img { filter:invert(1) hue-rotate(180deg); }
+        @media print { .signatures-name, .signatures-status, .inline-signature-status { font-size:11pt; } }
         #detail-content .audit-report-document {
             max-width: 760px;
             margin: 0 auto;
@@ -435,6 +450,10 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
             </div>
             <div class="detail-meta" id="detail-meta">-</div>
             <div class="detail-content" id="detail-content"></div>
+            <div id="signatures-panel" class="signatures-panel" style="display:none;">
+                <div class="signatures-title">전자서명 현황</div>
+                <div id="signatures-list" class="signatures-list"></div>
+            </div>
             <div class="audit-edit-help" id="audit-edit-help">업무·회계 감사 의견은 필요한 내용이 있을 때 입력하면 되고, 비워 두면 안내 문구 없이 빈칸으로 보관됩니다. 종합 의견은 반드시 확인·작성한 뒤 저장하세요. 첫 전자서명이 들어가면 내용은 더 이상 바꿀 수 없습니다.</div>
             <div class="attachment-panel" id="attachment-panel">
                 <div class="attachment-title">첨부파일</div>
@@ -477,8 +496,9 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
 
     <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.53';
+        import { MinutesService } from './MinutesService.js?v=1.0.55';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
+        import { buildSignatureDisplay } from './signature_display.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
         const KST_TZ_MINUTES_SIGN = 'Asia/Seoul';
@@ -611,6 +631,8 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
         let confirmResolve = null;
         let currentMinuteId = null;
         let currentMinuteDoc = null;
+        let detailRequestVersion = 0;
+        let signatureDisplayVersion = 0;
         let auditEditing = false;
         let auditOriginalContent = '';
         let alreadySignedOnce = false;
@@ -1251,6 +1273,8 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
 
         function showList() {
             if (auditEditing) cancelAuditEdit();
+            detailRequestVersion++;
+            signatureDisplayVersion++;
             document.getElementById('detail-panel').classList.add('hidden');
             document.getElementById('list-panel').style.display = 'block';
             setDetailModePill(false);
@@ -1445,8 +1469,11 @@ Change: 2026-09-29 - Allow verified non-member directors to sign assigned minute
         }
 
 async function openDocumentById(id) {
+            const requestVersion = ++detailRequestVersion;
+            signatureDisplayVersion++;
             try {
                 const { data: doc } = await MinutesService.getMinuteById(id);
+                if (requestVersion !== detailRequestVersion) return;
                 if (!doc) {
                     showToast('문서를 찾을 수 없습니다.');
                     return;
@@ -1464,19 +1491,68 @@ async function openDocumentById(id) {
                 document.getElementById('detail-content').contentEditable = 'false';
                 document.getElementById('detail-content').classList.remove('audit-editing');
                 document.getElementById('audit-edit-help').classList.remove('show');
+                document.getElementById('signatures-panel').style.display = 'none';
+                document.getElementById('signatures-list').replaceChildren();
                 await renderAttachments(doc);
+                if (requestVersion !== detailRequestVersion) return;
 
                 await updateSignStatus(doc);
+                if (requestVersion !== detailRequestVersion) return;
+                await renderDocumentSignatures(doc);
+                if (requestVersion !== detailRequestVersion) return;
 
                 document.getElementById('list-panel').style.display = 'none';
                 document.getElementById('detail-panel').classList.remove('hidden');
             } catch (err) {
+                if (requestVersion !== detailRequestVersion) return;
                 console.error('minutes_sign openDocumentById error:', err);
                 showToast('문서 내용을 불러오지 못했습니다.');
             }
         }
 
+        async function renderDocumentSignatures(doc) {
+            const renderVersion = ++signatureDisplayVersion;
+            const detailVersion = detailRequestVersion;
+            const stillCurrent = () => renderVersion === signatureDisplayVersion
+                && detailVersion === detailRequestVersion && doc.id === currentMinuteId && !auditEditing;
+            if (!doc?.requires_sign || doc.doc_type === 'NOTICE' || auditEditing) return;
+            try {
+                const [officials, result] = await Promise.all([
+                    MinutesService.getOfficials(), MinutesService.listSignatureStatusesByMinuteId(doc.id)
+                ]);
+                if (!stillCurrent()) return;
+                if (result.error) throw new Error('SIGNATURE_STATUS_UNAVAILABLE');
+                const signerIds = resolveSignerIdsForDoc(doc, officials);
+                const display = await buildSignatureDisplay(sanitizeHtml(doc.content || ''), signerIds, officials,
+                    result.data || [], async signature => {
+                        const path = getSignaturePreviewPath(doc.id, signature.official_id, signature.id);
+                        if (!path) return '';
+                        const { data, error } = await MinutesService.createSignedUrl(SIGNATURE_PREVIEW_BUCKET, path, 900);
+                        return error ? '' : safeUrl(data?.signedUrl) || '';
+                    });
+                if (!stillCurrent()) return;
+                document.getElementById('detail-content').innerHTML = display.html;
+                const list = document.getElementById('signatures-list');
+                list.innerHTML = display.rows.map(row => {
+                    const name = escapeHtml(row.official?.name || row.official?.coop_members?.name || '임원');
+                    const time = row.signature?.signed_at ? new Date(row.signature.signed_at) : null;
+                    const stamp = time && !Number.isNaN(time.getTime())
+                        ? ` · ${escapeHtml(time.toLocaleString('ko-KR', { timeZone: KST_TZ_MINUTES_SIGN }))}` : '';
+                    const preview = row.previewUrl ? `<span class="signature-preview-shell"><img class="signatures-img" src="${escapeHtml(row.previewUrl)}" alt="${name} 전자서명 열람본" draggable="false"></span>` : '';
+                    return `<div class="signatures-item">${preview}<div><div class="signatures-name">${name}</div><div class="signatures-status">${row.signature ? '전자서명 완료' + stamp : '미서명'}</div></div></div>`;
+                }).join('');
+                document.getElementById('signatures-panel').style.display = display.rows.length ? 'block' : 'none';
+            } catch (_) {
+                if (stillCurrent()) {
+                    document.getElementById('signatures-panel').style.display = 'block';
+                    document.getElementById('signatures-list').textContent = '전자서명 현황을 불러오지 못했습니다. 문서를 다시 열어 주세요.';
+                }
+            }
+        }
+
         async function updateSignStatus(doc) {
+            const requestVersion = detailRequestVersion;
+            const stillCurrent = () => requestVersion === detailRequestVersion && doc?.id === currentMinuteId;
             const statusEl = document.getElementById('detail-status');
             const btn = document.getElementById('btn-sign');
             const cancelBtn = document.getElementById('btn-cancel-sign');
@@ -1510,7 +1586,8 @@ async function openDocumentById(id) {
                 return;
             }
 
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(currentMinuteId);
+            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(doc.id);
+            if (!stillCurrent()) return;
             const alreadySigned = forceSignedOnce || isLocallySigned(currentMinuteId) || hasMySignatureForDoc(signatures);
             if (alreadySigned) {
                 const mySignature = findMySignatureForDoc(signatures, doc);
@@ -1533,6 +1610,7 @@ async function openDocumentById(id) {
             }
 
             const officials = await MinutesService.getOfficials();
+            if (!stillCurrent()) return;
             const signerIds = resolveSignerIdsForDoc(doc, officials);
             const relevantIds = normalizeOfficialIds(getAllMyOfficialIdsForDocFallback(doc));
             const signingOfficialId = resolveSigningOfficialId(doc, officials);
@@ -1753,6 +1831,7 @@ async function openDocumentById(id) {
             }
             const editor = document.getElementById('detail-content');
             auditOriginalContent = editor.innerHTML;
+            signatureDisplayVersion++;
             auditEditing = true;
             editor.contentEditable = 'true';
             editor.classList.add('audit-editing');
@@ -1792,6 +1871,7 @@ async function openDocumentById(id) {
             if (!auditEditing) return;
             leaveAuditEditMode({ restore: true });
             if (currentMinuteDoc) updateSignStatus(currentMinuteDoc);
+            if (currentMinuteDoc) renderDocumentSignatures(currentMinuteDoc);
         }
 
         window.editAuditReport = editAuditReport;
@@ -1856,7 +1936,11 @@ async function openDocumentById(id) {
             clearLocallySigned(currentMinuteId);
             showToast('서명 취소가 완료되었습니다.');
             const { data: doc } = await MinutesService.getMinuteById(currentMinuteId);
-            if (doc) await updateSignStatus(doc);
+            if (doc) {
+                currentMinuteDoc = doc;
+                await updateSignStatus(doc);
+                await renderDocumentSignatures(doc);
+            }
         };
 
         async function init() {
