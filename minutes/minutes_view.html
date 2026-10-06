@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
-		    Version: v1.0.71
-		    Change: 2026-09-29 - Permit assigned non-member directors to view their minutes.
+		    Version: v1.0.72
+		    Change: 2026-10-06 - General notices share the document box, not official approval workflows.
 -->
 <html lang="ko">
 <head>
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://www.yonginsolar.kr/minutes/minutes_view">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <meta name="description" content="용인모두의햇빛협동조합의 공개 문서와 공문, 의사록을 확인하는 동적 문서함 페이지입니다.">
-    <script>console.log('[Version] v1.0.71 | minutes_view.html');</script>
+    <script>console.log('[Version] v1.0.72 | minutes_view.html');</script>
     <style>
         body {
             margin: 0;
@@ -51,6 +51,9 @@
         .detail-title { font-size: 1.4rem; font-weight: 800; color: #0f172a; }
         .detail-meta { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
         .detail-content { line-height: 1.8; color: #1f2937; }
+        .detail-content[data-document-type="ANNOUNCEMENT"] { word-break: keep-all; overflow-wrap: break-word; }
+        .detail-content[data-document-type="ANNOUNCEMENT"] img { max-width:100%; height:auto; border-radius:12px; }
+        .detail-content[data-document-type="ANNOUNCEMENT"] table { max-width:100%; border-collapse:collapse; }
         .doc-attachments { margin-top: 16px; }
         .attachments-title { font-weight: bold; margin-bottom: 6px; }
         .attachments-list { list-style: none; padding: 0; margin: 0; }
@@ -439,8 +442,9 @@
     </div>
 
     <script src="/erp/erp_runtime_guard.js?v=20260919-1"></script>
+    <script src="../shared/notice_attachments.js?v=1.0.0"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.53';
+        import { MinutesService } from './MinutesService.js?v=1.0.54';
         import { SIGNATURE_PREVIEW_BUCKET, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -466,7 +470,8 @@
             });
         };
         const getDocTypeLabel = (docType) => {
-            if (docType === 'NOTICE') return '공지';
+            if (docType === 'ANNOUNCEMENT') return '공지';
+            if (docType === 'NOTICE') return '공문';
             if (docType === 'ASSEMBLY_MATERIAL') return '총회 자료';
             if (docType === 'GENERAL_ASSEMBLY') return '의사록';
             if (docType === 'PAST_MINUTES') return '의사록';
@@ -476,6 +481,7 @@
         };
         const DOCUMENT_LIST_TABS = [
             { key: 'ALL', label: '전체' },
+            { key: 'ANNOUNCEMENTS', label: '공지' },
             { key: 'MINUTES', label: '의사록' },
             { key: 'NOTICE', label: '공문' },
             { key: 'MATERIALS', label: '총회 자료' },
@@ -489,7 +495,10 @@
 
         function safeUrl(url) {
             if (!url) return '';
-            try { return new URL(url).href; } catch (e) { return ''; }
+            try {
+                const parsed = new URL(url);
+                return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+            } catch (e) { return ''; }
         }
 
         function escapeHtml(value) {
@@ -831,6 +840,7 @@
         }
 
         async function renderAttachments(doc) {
+            const renderVersion = detailRequestVersion;
             const wrap = document.getElementById('doc-attachments');
             const list = document.getElementById('ui-attachments');
             if (!wrap || !list) return;
@@ -849,15 +859,19 @@
             }
 
             const resolved = (await Promise.all(urls.map(async (url, idx) => {
-                const resolvedUrl = await resolveAttachmentUrl(url);
+                const resolvedUrl = window.NoticeAttachments.isPrivate(url)
+                    ? await window.NoticeAttachments.resolve(supabase, url)
+                    : await resolveAttachmentUrl(url);
                 if (!resolvedUrl) return null;
                 const name = getCleanAttachmentDisplayName(names[idx]) || getAttachmentDownloadNameFromReference(url);
                 return { url: resolvedUrl, name };
             }))).filter(Boolean);
 
+            if (renderVersion !== detailRequestVersion) return;
+
             if (resolved.length === 0) {
-                wrap.style.display = 'none';
-                list.innerHTML = '';
+                wrap.style.display = 'block';
+                list.innerHTML = '<li>첨부파일을 열 수 없습니다. 로그인 상태와 열람 권한을 확인해 주세요.</li>';
                 return;
             }
 
@@ -873,7 +887,7 @@
                     <li style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         ${imagePreview}
                         <a href="${safe}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(name)} 다운로드">
-                            <button type="button">다운로드</button>
+                            <button type="button">${escapeHtml(name)} · 열기</button>
                         </a>
                     </li>
                 `;
@@ -881,10 +895,15 @@
         }
 
         let cachedSession = null;
+        let noticeOnlyMode = false;
         let cachedIsAdmin = false;
         let publishedDocsCache = [];
         let libraryDocsCache = [];
         let currentDocumentListTab = 'ALL';
+        let detailRequestVersion = 0;
+        let noticesLoadFailed = false;
+        const requestedNoticeId = new URLSearchParams(window.location.search).get('noticeId');
+        const requestedTab = new URLSearchParams(window.location.search).get('tab') || 'ALL';
         const requestedDocumentId = (() => {
             const params = new URLSearchParams(window.location.search);
             return String(params.get('minuteId') || params.get('id') || '').trim();
@@ -1035,6 +1054,7 @@
         }
 
         async function renderSignatures(doc, officials, signatures) {
+            const renderVersion = detailRequestVersion;
             const panel = document.getElementById('signatures-panel');
             const list = document.getElementById('signatures-list');
             if (!panel || !list) return;
@@ -1081,6 +1101,7 @@
                 `;
             }));
 
+            if (renderVersion !== detailRequestVersion) return;
             panel.style.display = 'block';
             list.innerHTML = cards.join('');
         }
@@ -1093,6 +1114,7 @@
         const detailContent = document.getElementById('detail-content');
 
         function showList() {
+            detailRequestVersion += 1;
             detailPanel.classList.add('hidden');
             listPanel.style.display = 'block';
             delete detailContent.dataset.documentType;
@@ -1453,7 +1475,8 @@
             title.innerText = '문서함';
             const helper = document.createElement('div');
             helper.className = 'library-helper';
-            helper.innerText = '공개된 의사록, 공문, 총회 자료, 규정을 한 곳에서 확인할 수 있습니다.';
+            helper.innerText = noticeOnlyMode ? '조합의 공지와 안내를 확인할 수 있습니다.'
+                : '공지, 의사록, 공문, 총회 자료와 규정을 한 곳에서 확인할 수 있습니다.';
             textWrap.appendChild(title);
             textWrap.appendChild(helper);
             header.appendChild(textWrap);
@@ -1465,8 +1488,10 @@
             const visibleNotices = filterDocumentsByTab(publishedDocsCache, 'NOTICE').filter((doc) => canOpenMinuteDoc(doc)).length;
             const visibleMaterials = filterDocumentsByTab(publishedDocsCache, 'MATERIALS').filter((doc) => canOpenMinuteDoc(doc)).length;
             const visibleRules = getVisibleLibraryRuleGroups().length;
+            const announcements = filterDocumentsByTab(publishedDocsCache, 'ANNOUNCEMENTS').filter(canOpenMinuteDoc).length;
             return {
-                ALL: visibleMinutes + visibleNotices + visibleMaterials,
+                ALL: visibleMinutes + visibleNotices + visibleMaterials + announcements,
+                ANNOUNCEMENTS: announcements,
                 MINUTES: visibleMinutes,
                 NOTICE: visibleNotices,
                 MATERIALS: visibleMaterials,
@@ -1480,12 +1505,13 @@
             summaryWrap.className = 'library-summary-grid';
             const cards = [
                 { key: 'ALL', label: '전체 문서', desc: '문서함에 등록된 문서' },
+                { key: 'ANNOUNCEMENTS', label: '공지', desc: '조합의 소식과 안내' },
                 { key: 'MINUTES', label: '의사록', desc: '회의록과 총회 의사록' },
                 { key: 'NOTICE', label: '공문', desc: '공개된 공문 문서' },
                 { key: 'MATERIALS', label: '총회 자료', desc: '자료집과 참고 PDF' },
                 { key: 'RULES', label: '규정', desc: '규정 문서와 정관/규약 바로가기' }
             ];
-            summaryWrap.innerHTML = cards.map((card) => `
+            summaryWrap.innerHTML = cards.filter(card => !noticeOnlyMode || card.key === 'ANNOUNCEMENTS').map((card) => `
                 <div class="library-summary-card">
                     <div class="label">${card.label}</div>
                     <div class="value">${counts[card.key] || 0}</div>
@@ -1499,7 +1525,7 @@
             const counts = getVisibleDocumentCounts();
             const tabsWrap = document.createElement('div');
             tabsWrap.className = 'list-tabs';
-            DOCUMENT_LIST_TABS.forEach((tab) => {
+            DOCUMENT_LIST_TABS.filter(tab => !noticeOnlyMode || tab.key === 'ANNOUNCEMENTS').forEach((tab) => {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = `list-tab-btn${tab.key === currentDocumentListTab ? ' active' : ''}`;
@@ -1512,12 +1538,13 @@
 
         function filterDocumentsByTab(docs, tabKey) {
             const safeTab = String(tabKey || '').toUpperCase();
+            if (safeTab === 'ANNOUNCEMENTS') return docs.filter(d => d.doc_type === 'ANNOUNCEMENT');
             if (safeTab === 'NOTICE') return docs.filter((d) => String(d?.doc_type || '') === 'NOTICE');
             if (safeTab === 'MATERIALS') return docs.filter((d) => String(d?.doc_type || '') === 'ASSEMBLY_MATERIAL');
             if (safeTab === 'MINUTES') {
                 return docs.filter((d) => {
                     const type = String(d?.doc_type || '');
-                    return type !== 'NOTICE' && type !== 'ASSEMBLY_MATERIAL';
+                    return type !== 'NOTICE' && type !== 'ASSEMBLY_MATERIAL' && type !== 'ANNOUNCEMENT';
                 });
             }
             return docs;
@@ -1528,6 +1555,19 @@
             listPanel.appendChild(buildDocumentListHeader());
             listPanel.appendChild(buildDocumentListSummary());
             listPanel.appendChild(buildDocumentListTabs());
+            if (noticesLoadFailed) {
+                const errorEl = document.createElement('div');
+                errorEl.className = 'library-helper';
+                errorEl.setAttribute('role', 'alert');
+                errorEl.textContent = '공지를 불러오지 못했습니다. ';
+                const retry = document.createElement('button');
+                retry.type = 'button';
+                retry.className = 'btn-back';
+                retry.textContent = '다시 불러오기';
+                retry.onclick = () => renderPublishedList();
+                errorEl.appendChild(retry);
+                listPanel.appendChild(errorEl);
+            }
 
             if (currentDocumentListTab === 'RULES') {
                 const visibleRuleGroups = getVisibleLibraryRuleGroups();
@@ -1664,7 +1704,8 @@
                 textWrap.appendChild(dateEl);
 
                 item.appendChild(textWrap);
-                item.addEventListener('click', () => openDocumentById(d.id));
+                item.addEventListener('click', () => d.doc_type === 'ANNOUNCEMENT'
+                    ? openPublishedNoticeById(d.notice_id) : openDocumentById(d.id));
                 listPanel.appendChild(item);
             });
         }
@@ -1678,7 +1719,9 @@
         window.setDocumentListTab = setDocumentListTab;
 
         async function openLibraryDocumentById(targetId) {
+            if (noticeOnlyMode) return;
             if (!targetId) return;
+            const requestVersion = ++detailRequestVersion;
             const summaryDoc = (Array.isArray(libraryDocsCache) ? libraryDocsCache : []).find((item) => String(item?.id) === String(targetId));
             if (!summaryDoc) {
                 showMessage('문서를 찾을 수 없거나 권한이 없습니다.');
@@ -1711,6 +1754,7 @@
             document.body.style.backgroundColor = '#f1f5f9';
 
             const { data: fullDoc, error } = await MinutesService.getLibraryDocumentById(targetId);
+            if (requestVersion !== detailRequestVersion) return;
             if (error || !fullDoc) {
                 detailContent.innerHTML = '<div style="color:#ef4444;">문서 내용을 불러오지 못했습니다.</div>';
                 return;
@@ -1730,9 +1774,39 @@
             await renderAttachments(doc);
         }
 
-        async function openDocumentById(targetId) {
+        async function openPublishedNoticeById(targetId) {
             if (!targetId) return;
+            const requestVersion = ++detailRequestVersion;
+            document.getElementById('signatures-panel').style.display = 'none';
+            document.getElementById('signatures-list').innerHTML = '';
+            document.getElementById('doc-attachments').style.display = 'none';
+            document.getElementById('ui-attachments').innerHTML = '';
+            detailContent.dataset.documentType = 'ANNOUNCEMENT';
+            detailTitle.textContent = '공지';
+            detailMeta.textContent = '';
+            detailContent.innerHTML = '<p>공지를 불러오는 중입니다…</p>';
+            listPanel.style.display = 'none';
+            detailPanel.classList.remove('hidden');
+            const { data: notice, error } = await MinutesService.getPublishedNoticeById(targetId);
+            if (requestVersion !== detailRequestVersion) return;
+            if (error || !notice) {
+                detailContent.innerHTML = '<p>공지를 찾을 수 없거나 열람 권한이 없습니다. 목록으로 돌아가 다시 확인해 주세요.</p>';
+                return;
+            }
+            detailTitle.textContent = `공지 · ${notice.title || ''}`;
+            detailMeta.textContent = `작성일: ${formatMinutesViewKstDate(notice.created_at)} · ${notice.is_members_only ? '조합원 공개' : '홈페이지에도 공개'}`;
+            const raw = String(notice.content || '');
+            detailContent.innerHTML = /<\/?[a-z][^>]*>/i.test(raw)
+                ? sanitizeHtml(raw) : `<p>${escapeHtml(raw).replace(/\r?\n/g, '<br>')}</p>`;
+            await renderAttachments(notice);
+        }
+
+        async function openDocumentById(targetId) {
+            if (noticeOnlyMode) return;
+            if (!targetId) return;
+            const requestVersion = ++detailRequestVersion;
             const { data: doc, error } = await MinutesService.getMinuteById(targetId);
+            if (requestVersion !== detailRequestVersion) return;
             if (error || !doc) {
                 showMessage('문서를 찾을 수 없거나 권한이 없습니다.');
                 return;
@@ -1755,7 +1829,9 @@
             detailMeta.textContent = `작성일: ${formatMinutesViewKstDate(doc.created_at)} · 공개: ${getMinuteVisibilityLabel(doc)}`;
 
             if (doc.doc_type === 'NOTICE') {
-                detailContent.innerHTML = await buildNoticeTemplateHtml(doc);
+                const content = await buildNoticeTemplateHtml(doc);
+                if (requestVersion !== detailRequestVersion) return;
+                detailContent.innerHTML = content;
             } else if (doc.content) {
                 detailContent.innerHTML = sanitizeHtml(doc.content || '');
             } else {
@@ -1771,9 +1847,11 @@
                     MinutesService.listSignatureStatusesByMinuteId(targetId),
                     MinutesService.getOfficials()
                 ]);
+                if (requestVersion !== detailRequestVersion) return;
                 if (doc.doc_type !== 'NOTICE' && doc.content) {
                     const sanitizedContent = sanitizeHtml(doc.content || '');
                     const inlineResult = await injectInlineSignaturePreviews(sanitizedContent, doc, officials || [], signatures || []);
+                    if (requestVersion !== detailRequestVersion) return;
                     detailContent.innerHTML = inlineResult.html || '<div style="color:#94a3b8;">내용이 없습니다.</div>';
                     await renderSignatures(doc, officials || [], signatures || []);
                 } else {
@@ -1789,23 +1867,33 @@
         }
 
         async function renderPublishedList() {
+            const requestVersion = ++detailRequestVersion;
             listPanel.style.display = 'block';
             detailPanel.classList.add('hidden');
             document.body.style.backgroundColor = '#f1f5f9';
 
-            const [{ data: docs }, { data: libraryDocs }] = await Promise.all([
-                MinutesService.listPublishedMinutes(),
-                MinutesService.listLibraryDocuments()
+            const [{ data: docs }, { data: libraryDocs }, { data: notices, error: noticesError }] = await Promise.all([
+                noticeOnlyMode ? Promise.resolve({data:[]}) : MinutesService.listPublishedMinutes(),
+                noticeOnlyMode ? Promise.resolve({data:[]}) : MinutesService.listLibraryDocuments(),
+                MinutesService.listPublishedNotices()
             ]);
+            if (requestVersion !== detailRequestVersion) return;
 
-            publishedDocsCache = Array.isArray(docs) ? docs : [];
+            noticesLoadFailed = !!noticesError;
+            const mappedNotices = (Array.isArray(notices) ? notices : []).map(notice => ({
+                ...notice, id: `notice:${notice.id}`, notice_id: notice.id, doc_type: 'ANNOUNCEMENT',
+                published_at: notice.created_at, visibility: notice.is_members_only ? 'MEMBERS' : 'PUBLIC'
+            }));
+            publishedDocsCache = [...(Array.isArray(docs) ? docs : []), ...mappedNotices]
+                .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || String(b.id).localeCompare(String(a.id)));
             libraryDocsCache = Array.isArray(libraryDocs) ? libraryDocs : [];
 
-            if (publishedDocsCache.length === 0 && libraryDocsCache.length === 0) {
+            if (!noticesLoadFailed && publishedDocsCache.length === 0 && libraryDocsCache.length === 0) {
                 showMessage('문서함에 공개된 문서가 없습니다.');
                 return;
             }
-            currentDocumentListTab = 'ALL';
+            if (!DOCUMENT_LIST_TABS.some(tab => tab.key === currentDocumentListTab)) currentDocumentListTab = 'ALL';
+            if (noticeOnlyMode) currentDocumentListTab = 'ANNOUNCEMENTS';
             renderDocumentListItems();
         }
 
@@ -1814,15 +1902,23 @@
             cachedDocumentBoxAccess = await MinutesService.getDocumentBoxAccess(cachedSession?.user?.id || null, cachedSession);
             if (cachedSession && cachedDocumentBoxAccess?.member?.is_external_director !== true) {
                 const runtimeCheck = await window.ErpRuntimeGuard.enforce(supabase, {
-                    moduleKey: 'documents',
                     moduleLabel: '문서함',
                     redirectUrl: `../membermanage.html?next=${encodeURIComponent(window.location.href)}`,
                     alertFn: (msg) => showMessage(String(msg || '접근할 수 없습니다.'))
                 });
                 if (!runtimeCheck.ok) return;
+                if (!window.ErpRuntimeGuard.isModuleEnabled(runtimeCheck.runtime, 'documents')) {
+                    if (!window.ErpRuntimeGuard.isModuleEnabled(runtimeCheck.runtime, 'site_admin')) {
+                        showMessage('현재 조합에서 문서함과 공지 기능 사용이 중지되었습니다.');
+                        return;
+                    }
+                    noticeOnlyMode = true;
+                }
             }
             cachedIsAdmin = cachedSession ? await MinutesService.isAdmin(cachedSession.user.id, cachedSession.user.email) : false;
+            currentDocumentListTab = DOCUMENT_LIST_TABS.some(tab => tab.key === requestedTab) ? requestedTab : 'ALL';
             await renderPublishedList();
+            if (requestedNoticeId) await openPublishedNoticeById(requestedNoticeId);
             if (requestedDocumentId) await openDocumentById(requestedDocumentId);
             // Mark as seen on entry for the active profile (if logged in).
             if (cachedSession || cachedIsAdmin) {

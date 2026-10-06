@@ -1,6 +1,6 @@
 /*
-Version: v1.0.53
-Change: 2026-09-29 - Read the current cooperative's registered official seal for notices.
+Version: v1.0.54
+Change: 2026-10-06 - Read general notices separately from approved official documents.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -388,6 +388,23 @@ async function getLatestPublishedMinuteAt() {
     return { data: latest, error: null };
 }
 
+async function listPublishedNotices() {
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase.from('coop_notices')
+        .select('id,title,category,status,is_members_only,created_at,updated_at')
+        .eq('status', 'published').is('source_approval_id', null)
+        .order('created_at', { ascending: false }).order('id', { ascending: false }), coopId);
+    return { data: data || [], error };
+}
+
+async function getPublishedNoticeById(id) {
+    const coopId = await getVisibleCoopId();
+    const { data, error } = await scopeByCoop(supabase.from('coop_notices')
+        .select('id,title,content,category,status,is_members_only,created_at,updated_at,file_url,file_urls,file_names')
+        .eq('id', id).eq('status', 'published').is('source_approval_id', null), coopId).maybeSingle();
+    return { data, error };
+}
+
 function inferDocumentAccessScope(title) {
     const text = String(title || '').trim();
     if (text.includes('규정')) return 'MEMBERS';
@@ -745,6 +762,8 @@ export const MinutesService = {
     },
     listMinutesAdmin,
     listPublishedMinutes,
+    listPublishedNotices,
+    getPublishedNoticeById,
     listLibraryDocuments,
     getLibraryDocumentById,
     getLatestPublishedMinuteAt,

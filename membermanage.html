@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.160
-Change: Keep personal data and raw server responses out of diagnostics.
+Version: v1.0.161
+Change: 2026-10-06 - Read notices in the document box without a second notice list.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.160 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.161 | membermanage.html');</script>
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
@@ -434,16 +434,6 @@ z-index: 9999;
 display: none; /* JS가 제어함 */
 flex-direction: column; justify-content: center; align-items: center;
 }
-
-/* [공지사항] 미니 리스트 스타일 */
-.notice-mini-item {
-padding: 8px 0;
-border-bottom: 1px solid #eee;
-font-size: 0.9rem;
-cursor: pointer;
-}
-.notice-mini-item:last-child { border-bottom: none; }
-.notice-mini-item:hover { background-color: #f8f9fa; }
 
 /* [퀵 링크] 카드 */
 .quick-links-grid {
@@ -881,8 +871,7 @@ line-height: 1.4;
 }
 #memberStatusBadge,
 .member-number-badge,
-#timelineList .badge,
-#miniNoticeList .badge {
+#timelineList .badge {
 font-size: .94rem;
 line-height: 1.4;
 padding: 5px 9px;
@@ -1838,7 +1827,7 @@ NO. <span id="infoMemberId">-</span>
     <div id="quickMinutesViewCard" class="quick-card quick-gray">
       <span id="docTodoBadge" class="quick-attention-badge hidden">!</span>
       <div class="quick-title"><i class="bi bi-journal-text me-1"></i>문서함</div>
-      <div class="quick-desc">공개 문서 보기</div>
+      <div class="quick-desc">공지·문서 보기</div>
       <button onclick="openDocumentBox()" class="quick-btn btn btn-secondary">문서함 열기</button>
     </div>
   </div>
@@ -1879,16 +1868,6 @@ NO. <span id="infoMemberId">-</span>
 </div>
 <div id="hallOfFameList" class="hof-list">
 <p class="text-muted small mb-0">랭킹을 불러오는 중...</p>
-</div>
-</div>
-
-<div class="dashboard-card mb-4 p-3" style="background-color: #f8f9fa; border:none;">
-<div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
-<h6 class="fw-bold m-0 text-secondary"><i class="bi bi-megaphone-fill me-2"></i>최근 공지</h6>
-<button class="btn btn-sm btn-link text-muted text-decoration-none" onclick="loadBoard('notice')" style="font-size:0.8rem;">전체보기</button>
-</div>
-<div id="miniNoticeList" style="min-height: 30px;">
-<p class="text-center text-muted small py-2">로딩 중...</p>
 </div>
 </div>
 
@@ -2474,7 +2453,6 @@ oninput="autoHyphen(this)">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
 <script src="footer.js?v=1.0.7"></script>
 <script src="home_patch_note.js?v=20260929-1"></script>
-<script src="notice_modal.js?v=20260929-1"></script>
 
 <script>
 // =========================================================================
@@ -2492,7 +2470,6 @@ let rootMemberProfileId = null;
 let pendingLoginOtpEmail = '';
 let currentBoardLimit = 20;
 let isBoardLoading = false;
-let g_notices_list = [];
 let suppressSessionExpiredHandling = false;
 let portalBootInProgress = false;
 let portalBootReadyUserId = '';
@@ -4372,7 +4349,6 @@ checkElectionVisibility(curMem, myRoles);
 
 checkSolarMapVisibility(myRoles);
 if (!isSiteMemberPortalProfile() && typeof loadFamilyList === 'function') loadFamilyList(uuid);
-if (typeof loadMiniNotices === 'function') loadMiniNotices();
 if (!isSiteMemberPortalProfile() && typeof checkIncomingConnects === 'function') checkIncomingConnects();
 if (!isSiteMemberPortalProfile()) loadBoard('free', null, 20);
 
@@ -5922,16 +5898,18 @@ async function hasUnreadDocumentBox(memberUuid) {
     try {
         if (!memberUuid) return false;
 
-        const { data: latestRows, error: latestErr } = await scopeMemberTenant(_supabase
+        const [minuteResult, noticeResult] = await Promise.all([!isCoopRuntimeModuleEnabled('documents') ? Promise.resolve({data:[]}) : scopeMemberTenant(_supabase
             .from('minutes')
             .select('published_at'))
             .not('published_at', 'is', null)
             .order('published_at', { ascending: false })
-            .limit(1);
-        if (latestErr || !Array.isArray(latestRows) || latestRows.length === 0) return false;
-
-        const latestAt = latestRows[0]?.published_at || null;
-        const latestTs = latestAt ? Date.parse(latestAt) : NaN;
+            .limit(1), scopeMemberTenant(_supabase.from('coop_notices')
+                .select('created_at,updated_at')).eq('status', 'published')
+                .is('source_approval_id', null).order('updated_at', { ascending: false }).limit(1)]);
+        const dates = [minuteResult.data?.[0]?.published_at,
+            noticeResult.data?.[0]?.updated_at || noticeResult.data?.[0]?.created_at]
+            .map(value => Date.parse(value)).filter(Number.isFinite);
+        const latestTs = dates.length ? Math.max(...dates) : NaN;
         if (!Number.isFinite(latestTs)) return false;
 
         let seenAt = null;
@@ -7107,6 +7085,7 @@ const signBadge = document.getElementById('signTodoBadge');
 const docBadge = document.getElementById('docTodoBadge');
 const minutesEnabled = isCoopRuntimeModuleEnabled('minutes');
 const documentsEnabled = isCoopRuntimeModuleEnabled('documents');
+const documentBoxEntryEnabled = documentsEnabled || isCoopRuntimeModuleEnabled('site_admin');
 const signatureEnabled = isCoopRuntimeModuleEnabled('signature');
 
 const setQuickCardVisible = (cardEl, visible) => {
@@ -7130,12 +7109,12 @@ buttonText: '서명하기',
 buttonClassName: 'quick-btn btn btn-primary'
 });
 setQuickCardButtonState(minutesViewCard, {
-descText: '공개 문서 보기',
+descText: '공지·문서 보기',
 buttonText: '문서함 열기',
 buttonClassName: 'quick-btn btn btn-secondary'
 });
 
-if (!isSiteMemberPortalProfile() && !documentsEnabled && isAdmin) {
+if (!isSiteMemberPortalProfile() && !documentBoxEntryEnabled && isAdmin) {
 setQuickCardVisible(minutesViewCard, true);
 setQuickCardButtonState(minutesViewCard, {
 descText: '현재 조합에서 문서함 모듈이 꺼져 있습니다.',
@@ -7156,10 +7135,10 @@ buttonClassName: 'quick-btn btn btn-outline-secondary'
 // 회의록 카드: 관리자=전체, 임원=서명+문서함, 조합원=문서함
 if (isAdmin) {
 setQuickCardVisible(minutesSignCard, shouldShowModuleEntryToMember('signature', member));
-setQuickCardVisible(minutesViewCard, shouldShowModuleEntryToMember('documents', member));
+setQuickCardVisible(minutesViewCard, documentBoxEntryEnabled || (!isSiteMemberPortalProfile() && isAdmin));
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
-        setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
+        setQuickCardTodoState(minutesViewCard, docBadge, documentBoxEntryEnabled && hasUnread);
     });
 }
 if (signatureEnabled && minutesSignCard && officialIds && officialIds.length > 0) {
@@ -7168,11 +7147,11 @@ if (signatureEnabled && minutesSignCard && officialIds && officialIds.length > 0
     });
 }
 } else if (isOfficial) {
-setQuickCardVisible(minutesViewCard, documentsEnabled);
+setQuickCardVisible(minutesViewCard, documentBoxEntryEnabled);
 setQuickCardVisible(minutesSignCard, false);
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
-        setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
+        setQuickCardTodoState(minutesViewCard, docBadge, documentBoxEntryEnabled && hasUnread);
     });
 }
 if (signatureEnabled && minutesSignCard && officialIds && officialIds.length > 0) {
@@ -7182,12 +7161,12 @@ if (signatureEnabled && minutesSignCard && officialIds && officialIds.length > 0
     });
 }
 } else {
-setQuickCardVisible(minutesViewCard, documentsEnabled);
+setQuickCardVisible(minutesViewCard, documentBoxEntryEnabled);
 setQuickCardVisible(minutesSignCard, false);
 setQuickCardTodoState(minutesSignCard, signBadge, false);
 if (minutesViewCard && docBadge) {
     hasUnreadDocumentBox(member?.id || curMem?.id).then(hasUnread => {
-        setQuickCardTodoState(minutesViewCard, docBadge, documentsEnabled && hasUnread);
+        setQuickCardTodoState(minutesViewCard, docBadge, documentBoxEntryEnabled && hasUnread);
     });
 }
 }
@@ -9067,39 +9046,15 @@ window.__memberAppLocks.submitFamily = false;
 // ==========================================
 let currentBoardCat = 'notice';
 
-async function fetchMemberVisibleNotices(limit = 200) {
-const { data, error } = await scopeMemberTenant(_supabase
-.from('coop_notices')
-.select('*'))
-.eq('status', 'published')
-.order('created_at', { ascending: false })
-.limit(limit);
-if (error) throw error;
-g_notices_list = Array.isArray(data) ? data : [];
-window.g_notices_list = g_notices_list;
-return g_notices_list;
-}
-
 // [수정 4] 게시판 로드: 없는 칼럼(status) 참조 제거로 400 에러 해결
 async function loadBoard(category, btn, limit = 20) {
+if (category === 'notice') return openDocumentBox('ANNOUNCEMENTS');
 if (limit === 20) currentBoardLimit = 20;
 
 currentBoardCat = category;
 if(btn) {
 document.querySelectorAll('.board-tab-btn').forEach(b => b.classList.remove('active'));
 btn.classList.add('active');
-}
-
-// 공지사항 로직 (기존 유지)
-if(category === 'notice' && !btn) {
-try {
-await fetchMemberVisibleNotices();
-} catch (e) {
-CoopSafeLog.error("공지사항 로드 실패:", e);
-showModal('공지사항 조회 실패');
-}
-if(typeof openNoticeSearchModal === 'function') openNoticeSearchModal();
-return;
 }
 
 const btnWrite = document.getElementById('btnWritePost');
@@ -9244,10 +9199,7 @@ window.__memberAppLocks.submitPost = false;
 // [수정] 게시글 상세 보기 함수 (공지사항 file_url 칼럼 연동 추가)
 async function viewPost(id, category) {
 if (category === 'notice') {
-if (typeof openNoticeDetail === 'function') {
-openNoticeDetail(id);
-return;
-}
+return openDocumentBox('ANNOUNCEMENTS', id);
 }
 const tableName = (category === 'notice') ? 'coop_notices' : 'coop_boards';
 
@@ -9425,44 +9377,6 @@ document.getElementById('boardViewModal').style.display = 'none';
 loadBoard(currentBoardCat); // 목록 갱신
 }
 });
-}
-// [신규] 상단 미니 공지사항 로드
-async function loadMiniNotices() {
-const listArea = document.getElementById('miniNoticeList');
-try {
-const { data: notices, error } = await scopeMemberTenant(_supabase
-.from('coop_notices')
-.select('id, title, created_at, is_members_only'))
-.eq('status', 'published')
-.order('created_at', { ascending: false })
-.limit(3); // 3개만
-
-if (error) throw error;
-
-if (!notices || notices.length === 0) {
-listArea.innerHTML = '<p class="text-center text-muted small py-3">공지사항이 없습니다.</p>';
-return;
-}
-
-let html = '';
-notices.forEach(n => {
-const date = formatMemberKstDate(n.created_at).slice(5, 10); // MM-DD
-const safeTitle = escapeHtml(n.title || '');
-const safeNoticeId = escapeJsString(n.id || '');
-const visibilityBadge = n.is_members_only
-? '<span class="badge bg-success-subtle text-success border me-2">조합원</span>'
-: '<span class="badge bg-light text-muted border me-2">전체</span>';
-html += `
-               <div class="notice-mini-item d-flex justify-content-between" onclick="openNoticeDetail('${safeNoticeId}')">
-                   <span class="text-truncate" style="max-width: 70%;">${visibilityBadge}${safeTitle}</span>
-                   <span class="text-muted small">${date}</span>
-               </div>`;
-});
-listArea.innerHTML = html;
-} catch (e) {
-CoopSafeLog.error("[membermanage] operation failed", e);
-listArea.innerHTML = '<p class="text-center text-danger small">로드 실패</p>';
-}
 }
 // [신규] 나에게 온 연결 요청 확인 및 렌더링
 async function checkIncomingConnects() {
@@ -10434,14 +10348,17 @@ function goToSolarMap() {
 window.open('map.html', '_blank', 'noopener,noreferrer');
 }
 
-async function openDocumentBox() {
-if (!isCoopRuntimeModuleEnabled('documents')) {
+async function openDocumentBox(tab = 'ALL', noticeId = null) {
+if (!isCoopRuntimeModuleEnabled('documents') && !isCoopRuntimeModuleEnabled('site_admin')) {
 showModal("현재 조합에서 문서함 모듈 사용이 중지되었습니다.");
 return;
 }
 const targetId = getPreferredDashboardProfileId();
 await markDocumentBoxSeen(targetId);
-window.location.href = 'minutes/minutes_view.html';
+const params = new URLSearchParams();
+if (tab === 'ANNOUNCEMENTS' || !isCoopRuntimeModuleEnabled('documents')) params.set('tab', 'ANNOUNCEMENTS');
+if (noticeId != null) params.set('noticeId', String(noticeId));
+window.location.href = 'minutes/minutes_view.html' + (params.size ? `?${params}` : '');
 }
 </script>
 <script src="shared/modal_layering_helper.js?v=20260326-1"></script>

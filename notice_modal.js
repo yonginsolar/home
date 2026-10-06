@@ -1,6 +1,6 @@
 /*
-Version: v1.0.16
-Change: 2026-09-29 - Keep official and election seals scoped to the notice's cooperative.
+Version: v1.0.17
+Change: 2026-10-06 - Open published notice attachments through their actual visibility permissions.
 */
 (function () {
     if (window.NoticeModal) return;
@@ -13,6 +13,7 @@ Change: 2026-09-29 - Keep official and election seals scoped to the notice's coo
     let companyInfoCache = null;
     let sealUrlCache = null;
     let visibleNoticeCoopIdPromise = null;
+    let detailVersion = 0;
     const KST_TZ_NOTICE = 'Asia/Seoul';
 
     function formatNoticeKstDate(value) {
@@ -781,9 +782,11 @@ Change: 2026-09-29 - Keep official and election seals scoped to the notice's coo
     }
 
     async function openDetail(id) {
+        const requestVersion = ++detailVersion;
         ensureModals();
         let n = cache.find(item => String(item.id) === String(id));
         if (!n) n = await fetchNoticeById(id);
+        if (requestVersion !== detailVersion) return;
         if (!n) {
             showNoticeAlert('해당 공지사항의 데이터를 찾을 수 없습니다.');
             return;
@@ -823,17 +826,18 @@ Change: 2026-09-29 - Keep official and election seals scoped to the notice's coo
             contentHtml += '<h6 class="fw-bold mb-3"><i class="bi bi-paperclip"></i> 첨부파일</h6>';
             contentHtml += '<ul class="list-unstyled bg-light p-3 rounded">';
 
-            attachUrls.forEach((url, idx) => {
-                if (typeof url !== 'string') return;
-                const safeLink = safeUrl(url);
-                if (!safeLink) return;
+            const attachments = await Promise.all(attachUrls.map(async (url, idx) => {
+                if (typeof url !== 'string') return '';
+                const safeLink = window.NoticeAttachments?.isPrivate(url)
+                    ? await window.NoticeAttachments.resolve(getClient(), url) : safeUrl(url);
+                if (!safeLink) return '<li>첨부파일을 열 수 없습니다. 잠시 후 다시 확인해 주세요.</li>';
 
                 let fileName = (attachNames[idx] || '').trim() || url.split('/').pop();
                 try { fileName = decodeURIComponent(fileName); } catch (e) {}
                 let displayName = fileName.replace(/_/g, ' ');
                 const safeDisplay = escapeHtml(displayName);
 
-                contentHtml += `
+                return `
                     <li class="mb-2">
                         <a href="${safeLink}" target="_blank" class="text-decoration-none text-dark d-flex align-items-center" rel="noopener noreferrer">
                             <i class="bi bi-file-earmark-arrow-down fs-5 text-primary me-2"></i>
@@ -841,10 +845,11 @@ Change: 2026-09-29 - Keep official and election seals scoped to the notice's coo
                         </a>
                     </li>
                 `;
-            });
-            contentHtml += '</ul>';
+            }));
+            contentHtml += attachments.join('') + '</ul>';
         }
 
+        if (requestVersion !== detailVersion) return;
         const contentEl = document.getElementById('notice-read-content');
         if (contentEl) {
             const bodyClass = preserveFixedLayout ? 'notice-content-body notice-content-body--fixed' : 'notice-content-body';

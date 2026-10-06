@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.215
-Change: 2026-10-06 - Remove unused popup controls; retain atomic notice saves.
+Version: v1.0.216
+Change: 2026-10-06 - Member-first notices and private notice attachments in the document box.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.215';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.216';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -55,6 +55,7 @@ Change: 2026-10-06 - Remove unused popup controls; retain atomic notice saves.
 <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 <script src="approval_rich_editor.js?v=20260918-1"></script>
 <script src="site_editor_drafts.js?v=1.0.0"></script>
+<script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
@@ -2830,11 +2831,11 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label small" for="notice-members-only">공개 대상</label>
-                        <select id="notice-members-only" class="form-select">
-                            <option value="false">전체 공개</option>
-                            <option value="true">조합원 공개</option>
-                        </select>
+                        <div class="form-check mt-md-4">
+                            <input id="notice-public" type="checkbox" class="form-check-input">
+                            <label class="form-check-label" for="notice-public">홈페이지에도 공개</label>
+                        </div>
+                        <div class="form-text">체크하지 않으면 조합원 문서함에만 게시됩니다.</div>
                     </div>
                 </div>
             </div>
@@ -7057,6 +7058,47 @@ function normalizeAdminHttpUrl(value) {
     return '';
 }
 
+async function uploadNoticeFileToStorage(file) {
+    const coopId = await getAdminMemberCoopId();
+    if (!coopId) throw new Error('NOTICE_COOP_REQUIRED');
+    const ext = String(file?.name || '').split('.').pop().toLowerCase();
+    if (!/^[a-z0-9]{1,10}$/.test(ext)) throw new Error('FILE_FORMAT');
+    const path = `notices/${coopId}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await _supabase.storage.from('attachments').upload(path, file);
+    if (error) throw error;
+    return `attachments/${path}`;
+}
+
+async function deleteNoticeFile(url) {
+    const ref = window.NoticeAttachments?.parse(url);
+    if (!ref) {
+        let parsed;
+        try { parsed = new URL(url); } catch (_) { return; }
+        const prefix = '/storage/v1/object/public/assets/notices/';
+        if (parsed.origin !== new URL(SUPABASE_URL).origin || !parsed.pathname.startsWith(prefix)) return;
+        const path = decodeURIComponent(parsed.pathname.slice('/storage/v1/object/public/assets/'.length));
+        const { error } = await _supabase.storage.from('assets').remove([path]);
+        if (error) throw error;
+        return;
+    }
+    const { error } = await _supabase.storage.from(ref.bucket).remove([ref.path]);
+    if (error) throw error;
+}
+
+async function ensureNoticeAttachmentPrivacy(url, name) {
+    // Old published files stay unchanged unless their notice is saved as member-only.
+    let parsed;
+    try { parsed = new URL(url); } catch (_) { return url; }
+    const prefix = '/storage/v1/object/public/assets/notices/';
+    if (parsed.origin !== new URL(SUPABASE_URL).origin || !parsed.pathname.startsWith(prefix)) return url;
+    const path = decodeURIComponent(parsed.pathname.slice('/storage/v1/object/public/assets/'.length));
+    const { data, error } = await _supabase.storage.from('assets').download(path);
+    if (error || !data) throw error || new Error('NOTICE_ATTACHMENT_UNAVAILABLE');
+    const ext = path.split('.').pop();
+    const uploadName = String(name || '').split('.').pop().toLowerCase() === ext.toLowerCase() ? name : `첨부파일.${ext}`;
+    return uploadNoticeFileToStorage(new File([data], uploadName, { type: data.type }));
+}
+
 function renderNoticeFilePreview(urls, names) {
     const preview = document.getElementById('notice-file-preview');
     const list = document.getElementById('notice-file-list');
@@ -7069,7 +7111,8 @@ function renderNoticeFilePreview(urls, names) {
     }
 
     urls.forEach((url, idx) => {
-        const safeUrl = normalizeAdminHttpUrl(url);
+        const privateRef = window.NoticeAttachments?.isPrivate(url);
+        const safeUrl = privateRef ? '#' : normalizeAdminHttpUrl(url);
         if (!safeUrl) return;
         const rawName = (Array.isArray(names) && names[idx]) ? names[idx] : deriveNoticeFileName(url);
         const item = document.createElement('li');
@@ -7080,6 +7123,7 @@ function renderNoticeFilePreview(urls, names) {
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         link.textContent = String(rawName || '-');
+        if (privateRef) window.NoticeAttachments.bindLink(link, _supabase, url, message => myAlert(message, 'warning'));
         item.appendChild(link);
         list.appendChild(item);
     });
@@ -7179,7 +7223,7 @@ async function openNoticeModal(id) {
         }
         category.value = categoryValue;
         document.getElementById('notice-status').value = data?.status || 'published';
-        document.getElementById('notice-members-only').value = data?.is_members_only ? 'true' : 'false';
+        document.getElementById('notice-public').checked = data ? !data.is_members_only : false;
         document.getElementById('notice-doc-no').value = data?.doc_no || '';
         document.getElementById('notice-file').value = '';
         document.getElementById('notice-file-removed').value = '0';
@@ -7237,13 +7281,14 @@ async function saveNotice() {
             p_doc_no: document.getElementById('notice-doc-no').value || null,
             p_file_urls: null,
             p_file_names: null,
-            p_is_members_only: document.getElementById('notice-members-only').value === 'true'
+            p_is_members_only: !document.getElementById('notice-public').checked
         };
         phase = 'upload';
+        const migratedUrls = originalUrls.filter(url => g_noticeUploadedFiles.has(url));
         for (const file of files) {
             let url = g_noticeUploadedFiles.get(file);
             if (!url) {
-                url = await uploadFileToStorage(file, 'notices');
+                url = await uploadNoticeFileToStorage(file);
                 if (!url) throw new Error('NOTICE_FILE_UPLOAD_FAILED');
                 g_noticeUploadedFiles.set(file, url);
             }
@@ -7253,6 +7298,18 @@ async function saveNotice() {
             }
             // Preserve successful uploads for a retry without uploading them twice.
             setNoticeFileState(finalUrls, finalNames);
+        }
+        if (updates.p_is_members_only) {
+            for (let idx = 0; idx < finalUrls.length; idx += 1) {
+                const previousUrl = finalUrls[idx];
+                let privateUrl = g_noticeUploadedFiles.get(previousUrl);
+                if (!privateUrl) {
+                    privateUrl = await ensureNoticeAttachmentPrivacy(previousUrl, finalNames[idx]);
+                    if (privateUrl !== previousUrl) g_noticeUploadedFiles.set(previousUrl, privateUrl);
+                }
+                if (privateUrl !== previousUrl) migratedUrls.push(previousUrl);
+                finalUrls[idx] = privateUrl;
+            }
         }
         finalUrls.forEach((url,idx) => {
             if (!finalNames[idx]) finalNames[idx] = deriveNoticeFileName(url);
@@ -7282,9 +7339,9 @@ async function saveNotice() {
         await closeSiteMutationModal('noticeModal');
         // Old attachments must survive a failed notice write. Clean only after commit.
         let cleanupFailed = false;
-        if (removeFlag) {
-            for (const url of originalUrls.filter(url => !finalUrls.includes(url))) {
-                try { await deleteOldFile(url); }
+        if (removeFlag || migratedUrls.length) {
+            for (const url of originalUrls.filter(url => !finalUrls.includes(url) && (removeFlag || migratedUrls.includes(url)))) {
+                try { await deleteNoticeFile(url); }
                 catch (error) { cleanupFailed = true; CoopSafeLog.error('Notice saved; attachment cleanup failed:', error); }
             }
         }
