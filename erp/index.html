@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.92 | Change: 2026-10-07 - Add scoped service contracts and data return. -->
+<!-- Version: v1.0.93 | Change: 2026-10-07 - Restore tenant administrator menus and scoped monitor entry. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.92 | index.html');</script>
+  <script>console.log('[Version] v1.0.93 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2164,9 +2164,13 @@ async function resetMenuOrder() {
 }
 
 function applyMenuPermissions(user, platformCtx, runtime) {
+    const menuCheck = (applyMenuPermissions.checkVersion || 0) + 1;
+    applyMenuPermissions.checkVersion = menuCheck;
+    const isCurrentMenuCheck = () => applyMenuPermissions.checkVersion === menuCheck;
+    document.getElementById('btnServiceContracts')?.classList.add('hidden');
     ['mobileDocumentsMenu', 'btnMobileDocuments', 'btnMobileSignature'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
     _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
-        if (!error && (data?.admin || data?.platform || data?.representative || data?.draft_reviewer)) {
+        if (isCurrentMenuCheck() && !retiredGraceAccess && !error && (data?.admin || data?.platform || data?.representative || data?.draft_reviewer)) {
             const menu = document.getElementById('btnServiceContracts');
             menu?.classList.remove('hidden');
             menu?.querySelector('[data-contract-review-badge]')?.remove();
@@ -2179,15 +2183,36 @@ function applyMenuPermissions(user, platformCtx, runtime) {
             }
         }
     });
-    const festivalHost = ['www.yonginsolar.kr','yonginsolar.kr','erp.yonginsolar.kr'].includes(location.hostname);
     document.getElementById('btnFestivalReceipts')?.classList.add('hidden');
-    if (festivalHost && String(runtime?.runtime_profile || 'legacy_full') === 'legacy_full' && !retiredGraceAccess) {
+    if (String(runtime?.runtime_profile || 'legacy_full') === 'legacy_full'
+        && isModuleEnabled(runtime, 'accounting') && !retiredGraceAccess) {
         _supabase.rpc('festival_receipts_admin', { p_action: 'access', p_data: {} }).then(({data,error}) => {
-            if (!error && data?.allowed && !retiredGraceAccess) {
+            if (isCurrentMenuCheck() && !error && data?.allowed && !retiredGraceAccess) {
                 document.getElementById('btnFestivalReceipts')?.classList.remove('hidden');
                 applyMenuOrder();
             }
         }).catch(() => { /* Keep the menu closed if access cannot be confirmed. */ });
+    }
+    const monitorMenu = document.getElementById('btnPowerMonitorAdmin');
+    monitorMenu?.classList.add('hidden');
+    if (monitorMenu) {
+        monitorMenu.onclick = () => { location.href = 'power_monitor_admin.html'; };
+        monitorMenu.querySelector('strong').textContent = '발전소 모니터링 관리';
+        monitorMenu.querySelector('.small').textContent = '조합별 발전소 정보 연결과 현재·오늘·누적 발전량 확인';
+    }
+    if (!platformCtx?.is_platform_admin && !retiredGraceAccess
+        && String(runtime?.runtime_profile || '') === 'legacy_full') {
+        _supabase.rpc('get_my_power_monitor_entry').then(({data, error}) => {
+            if (!isCurrentMenuCheck() || error || !data?.allowed || retiredGraceAccess || !monitorMenu) return;
+            let target;
+            try { target = new URL(data.url); } catch (_) { return; }
+            if (target.protocol !== 'https:' || target.username || target.password || target.search || target.hash) return;
+            monitorMenu.querySelector('strong').textContent = '발전소 모니터링';
+            monitorMenu.querySelector('.small').textContent = '현재·오늘·누적 발전량 확인';
+            monitorMenu.onclick = () => { location.href = target.href; };
+            monitorMenu.classList.remove('hidden');
+            applyMenuOrder();
+        }).catch(() => { /* No confirmed own-coop monitor entry: stay hidden. */ });
     }
     const isAdmin = (user.role === 'admin' || user.role === 'admin_all' || user.position === '국장');
     const isManager = user.role === 'manager' || user.position === '이사';
