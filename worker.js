@@ -1,4 +1,4 @@
-const VERSION='20261006-2';
+const VERSION='20261007-2';
 const SUN_IMAGE='/shared/sun_share.png';
 const SUN_ICON='/shared/sun_favicon.svg?v=1.0.0';
 const NOINDEX='noindex, nofollow, noarchive, nosnippet';
@@ -17,7 +17,7 @@ const PROFILES=Object.freeze({
   }),
   citizenErp:profile('citizen-erp','용인시민햇빛발전협동조합','용인시민햇빛발전협동조합 ERP','용인시민햇빛발전협동조합 업무 시스템입니다.','https://erp.yonginsun.kr',[],{imageOrigin:'https://yonginsun.kr'}),
   citizenTemporary:profile('citizen-temporary','용인시민햇빛발전협동조합','용인시민햇빛발전협동조합','용인시민햇빛발전협동조합 임시 접속 주소입니다.','https://yonginsun.kr',[],{imageOrigin:'https://yonginsun.kr'}),
-  hwaseong:profile('hwaseong','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합의 조합 소개, 활동 소식과 조합원 가입 안내를 확인하세요.','https://hcrec.kr',['hcrec.kr','www.hcrec.kr'],{imageOrigin:'https://hcrec.kr',feedOrigin:'https://hcrec.kr'}),
+  hwaseong:profile('hwaseong','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합의 조합 소개, 활동 소식과 조합원 가입 안내를 확인하세요.','https://hcrec.kr',['hcrec.kr','www.hcrec.kr'],{imageOrigin:'https://hcrec.kr',feedOrigin:'https://hcrec.kr',naver:'b775e688ea1a29e44ac01841801da14229aae609'}),
   hwaseongErp:profile('hwaseong-erp','화성시민재생에너지발전협동조합','화성시민재생에너지발전협동조합 ERP','화성시민재생에너지발전협동조합 업무 시스템입니다.','https://erp.hcrec.kr',[],{imageOrigin:'https://hcrec.kr'}),
   sunVillage:profile('sun-village','햇빛소득마을','햇빛소득마을 운영관리','햇빛소득마을 협동조합 운영관리 시스템입니다.','https://sunvillage-demo.coopco.kr'),
   gyeonggiEnergy:profile('gyeonggi-energy','경기에너지협동조합','경기에너지협동조합 운영관리','경기에너지협동조합 운영관리 시스템입니다.','https://ggenergy.coopco.kr'),
