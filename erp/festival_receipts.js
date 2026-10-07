@@ -1,4 +1,4 @@
-/* v2.7.0 — Event settings, partial receiving and free activity inventory. */
+/* v2.8.0 — Coop-owned records, payment account and public guide links. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -33,6 +33,7 @@
   let voucherContext = { items: [] };
   let purchaseReceiptContext = { items: [] };
   let editable = false;
+  let paymentGuideBase = '';
   let operationBusy = false;
   let receiptBusy = false;
   let receiptAmountEdited = false;
@@ -91,7 +92,7 @@
     $('eventPosters').replaceChildren();
     $('eventPosters').hidden = !event;
     if (event) $('eventPosters').append(makePosterLink(event, 'open', '체험 안내 인쇄'), makePosterLink(event, 'closed', '체험 마감 인쇄'), makePosterLink(event, 'flow', '발전 원리 인쇄'));
-    const guide = new URL('../festival.html', location.href);
+    const guide = new URL(paymentGuideBase || '../festival.html', location.href);
     if (event?.public_code) guide.searchParams.set('event', event.public_code);
     $('paymentGuide').href = guide.href;
     const canSell = Boolean(event?.is_active);
@@ -300,7 +301,8 @@
       name: event.event_name,
       date: event.event_date
     });
-    return `../festival_print.html?${params.toString()}`;
+    const target=new URL(paymentGuideBase?'festival_print.html':'../festival_print.html',paymentGuideBase||location.href);
+    target.search=params.toString();return target.href;
   }
 
   function makePosterLink(event, mode, label) {
@@ -1334,6 +1336,18 @@
     }
   });
 
+  $('paymentAccountForm').addEventListener('submit',async event=>{
+    event.preventDefault();if(!editable||operationBusy||!$('paymentAccountForm').reportValidity())return;
+    operationBusy=true;const button=$('paymentAccountForm').querySelector('button');button.disabled=true;
+    try{
+      const {error}=await client.rpc('festival_payment_settings_admin',{p_action:'save',p_data:{
+        bank_name:$('paymentBank').value.trim(),account_number:$('paymentAccount').value.trim(),account_holder:$('paymentHolder').value.trim()
+      }});
+      if(error)throw new Error(error.message);
+      $('paymentAccountStatus').textContent='입금 안내 계좌를 저장했습니다.';$('paymentAccountSettings').open=false;
+    }catch(error){$('paymentAccountStatus').textContent=readableError(error);}
+    finally{operationBusy=false;button.disabled=!editable;}
+  });
   client.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') {
       $('adminPanel').hidden = true;
@@ -1359,6 +1373,15 @@
       }
       const access = await rpc('access');
       editable = access.editable === true;
+      $('coopName').textContent=access.coop_name||'';
+      document.title='매출·재고·현금영수증 관리'+(access.coop_name?' | '+access.coop_name:'');
+      paymentGuideBase=access.payment_url||'';
+      const accountResult=await client.rpc('festival_payment_settings_admin',{p_action:'get',p_data:{}});
+      if(accountResult.error)throw new Error(accountResult.error.message);
+      const bank=accountResult.data||{};
+      $('paymentBank').value=bank.bank_name||'';$('paymentAccount').value=bank.account_number||'';$('paymentHolder').value=bank.account_holder||'';
+      $('paymentAccountForm').querySelectorAll('input,button').forEach(el=>{el.disabled=!editable;});
+      $('paymentAccountStatus').textContent=bank.account_number?'':'입금 안내에 사용할 계좌를 등록해 주세요.';
       $('openEventDialog').disabled = !editable;
       $('accessStatus').textContent = editable ? '' : '조회 권한으로 열었습니다. 등록과 상태 변경은 회계 등록 권한이 필요합니다.';
       $('adminPanel').hidden = false;

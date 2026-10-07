@@ -1,12 +1,12 @@
 <!doctype html>
-<!-- Version: v1.1.0 | Saved event guide, prices and coupon-aware A4 sheets -->
+<!-- Version: v1.2.0 | Tenant-scoped event branding, bank and QR on A4 sheets -->
 <html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <meta name="referrer" content="no-referrer">
-  <title>행사 인쇄물 | 용인모두의햇빛협동조합</title>
+  <title>행사 인쇄물</title>
   <link rel="icon" type="image/svg+xml" href="shared/sun_favicon.svg">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
@@ -32,18 +32,18 @@
   <p id="error" class="error" hidden></p>
 
   <article class="poster" data-mode="open">
-    <div class="coop">용인모두의햇빛협동조합</div>
+    <div class="coop"></div>
     <h1 class="title big"><span class="blue">태양광 선풍기</span><br><span class="green">만들기 체험</span></h1>
     <img class="hero" src="assets/festival/solar-fan-header.png" alt="어린이들이 태양광 선풍기를 만드는 모습">
     <div class="event-meta"><span class="date event-date"></span><span class="event-name"></span></div>
     <div class="highlight"><strong id="guideMeta"></strong><b id="guidePrice">개당 2,000원</b><p id="guideCouponInfo" class="coupon-info" hidden></p></div>
-    <div class="paybox"><div class="qr" id="paymentQr"></div><div><h2>입금 안내 QR</h2><p><b>신협</b></p><p class="account">131-022-855509</p><p>용인모두의햇빛협동조합</p><p>QR을 찍어 입금 안내를 확인하고<br>현금영수증도 신청하세요.</p></div></div>
+    <div class="paybox"><div class="qr" id="paymentQr"></div><div><h2>입금 안내 QR</h2><p><b id="printBankName"></b></p><p class="account" id="printBankAccount"></p><p id="printBankHolder"></p><p>QR을 찍어 입금 안내를 확인하고<br>현금영수증도 신청하세요.</p></div></div>
     <p class="warning">입금 전 부스에서 체험 가능 여부를 확인해 주세요.</p>
     <div class="footer">햇빛으로 만드는 우리 동네의 변화</div>
   </article>
 
   <article class="poster" data-mode="closed">
-    <div class="coop">용인모두의햇빛협동조합</div>
+    <div class="coop"></div>
     <h1 class="title big"><span class="blue">태양광 선풍기</span><br><span class="green">만들기 체험</span></h1>
     <img class="hero" src="assets/festival/solar-fan-header.png" alt="어린이들이 태양광 선풍기를 만드는 모습">
     <div class="event-meta"><span class="date event-date"></span><span class="event-name"></span></div>
@@ -53,7 +53,7 @@
   </article>
 
   <article class="poster" data-mode="flow">
-    <div class="coop">용인모두의햇빛협동조합</div>
+    <div class="coop"></div>
     <h1 class="flow-title">햇빛이 전기가 되면?</h1>
     <p class="flow-lead">햇빛으로 만든 전기가 전자기기를 움직여요!</p>
     <div class="event-meta"><span class="date event-date"></span><span class="event-name"></span></div>
@@ -68,7 +68,7 @@
     <div class="footer">햇빛으로 만드는 우리 동네의 변화</div>
   </article>
 
-  <script src="shared/festival_guide.js?v=1.0.0"></script>
+  <script src="shared/festival_guide.js?v=1.1.0"></script>
   <script>
     (()=>{
       'use strict';
@@ -82,6 +82,7 @@
       document.querySelectorAll('.poster').forEach(poster=>{poster.hidden=true;});
       window.FestivalGuide.load(eventCode).then(data=>{
         const g=data.guide;
+        document.querySelectorAll('.coop').forEach(node=>{node.textContent=data.coop_name;});
         document.querySelectorAll('.event-date').forEach(node=>{node.hidden=true;});
         document.querySelectorAll('.event-name').forEach(node=>{node.textContent=data.event_name;});
         document.querySelectorAll('.title.big').forEach(node=>{node.textContent=g.activity_name;node.classList.toggle('long-title',g.activity_name.length>35);});
@@ -93,13 +94,19 @@
         coupon.textContent=`${Number(g.coupon_value).toLocaleString('ko-KR')}원 쿠폰 사용 시 ${Number(g.unit_price-g.coupon_value).toLocaleString('ko-KR')}원 입금`;
         if(mode==='open'){
           if(data.no_cash_sales){const copy=document.querySelector('.paybox>div:last-child');copy.replaceChildren();const h=document.createElement('h2');h.textContent='체험 안내 QR';const p=document.createElement('p');p.textContent='QR을 찍어 체험 안내를 확인하세요.';copy.append(h,p);}
-          const target=`https://www.yonginsolar.kr/festival.html?event=${eventCode}`;
+          if(!data.no_cash_sales){
+            if(!data.bank?.name||!data.bank?.account||!data.bank?.holder)throw new Error('BANK_REQUIRED');
+            document.getElementById('printBankName').textContent=data.bank.name;
+            document.getElementById('printBankAccount').textContent=data.bank.account;
+            document.getElementById('printBankHolder').textContent=data.bank.holder;
+          }
+          const target=`${data.payment_url}?event=${eventCode}`;
           if(typeof window.QRCode!=='function')throw new Error('QR_UNAVAILABLE');
           new window.QRCode(document.getElementById('paymentQr'),{text:target,width:320,height:320,correctLevel:window.QRCode.CorrectLevel.M});
         }
         document.querySelector(`.poster[data-mode="${mode}"]`).hidden=false;
         document.getElementById('printButton').disabled=false;
-      }).catch(()=>{const error=document.getElementById('error');error.hidden=false;error.textContent='행사 안내를 불러오지 못했습니다. 행사 관리에서 다시 열어 주세요.';});
+      }).catch(reason=>{const error=document.getElementById('error');error.hidden=false;error.textContent=reason?.message==='BANK_REQUIRED'?'매출·재고 관리에서 행사 입금 안내 계좌를 먼저 등록해 주세요.':'행사 안내를 불러오지 못했습니다. 행사 관리에서 다시 열어 주세요.';});
       document.getElementById('printButton').addEventListener('click',()=>window.print());
     })();
   </script>
