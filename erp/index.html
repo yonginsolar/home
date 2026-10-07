@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.90 | Change: 2026-10-07 - Add scoped service contracts and data return. -->
+<!-- Version: v1.0.91 | Change: 2026-10-07 - Add scoped service contracts and data return. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.90 | index.html');</script>
+  <script>console.log('[Version] v1.0.91 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -101,8 +101,10 @@
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
+  <meta name="erp-mobile-revision" content="20261007.1">
+  <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.0">
 </head>
-<body class="erp-unified erp-menu-workspace erp-auth-screen">
+<body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
 
   <div class="main-card">
     <h3 class="fw-bold mb-4" id="erpBrandTitle">⚡ 협동조합 ERP</h3>
@@ -186,13 +188,13 @@
       </div>
       
       <div class="d-grid gap-2" id="menuButtons">
-        <button class="btn btn-white btn-menu" id="btnApproval" onclick="location.href='approval.html'">
+        <button class="btn btn-white btn-menu" id="btnApproval" data-mobile-task="approval" onclick="location.href='approval.html'">
           📝 <strong>전자결재</strong>
           <span class="menu-attention-badge hidden" id="approvalTaskBadge" aria-live="polite"></span>
           <span class="d-block small text-muted">휴가·품의·공문 기안과 승인/반려</span>
         </button>
 
-        <button class="btn btn-white btn-menu" id="btnMypage" onclick="location.href='mypage.html'">
+        <button class="btn btn-white btn-menu" id="btnMypage" data-mobile-task="mypage" onclick="location.href='mypage.html'">
           👤 <strong>마이페이지</strong>
           <span class="d-block small text-muted">내 문서, 급여명세, 연차 확인</span>
         </button>
@@ -216,7 +218,7 @@
           <span class="d-block small text-muted" id="btnAdminDesc">직원 등록, 권한, 급여·근태, 전자결재 설정 관리</span>
         </button>
 
-        <button class="btn btn-white btn-menu hidden" id="btnMemberAdmin" onclick="location.href='admin_member.html?scope=member_admin&amp;tab=dashboard'">
+        <button class="btn btn-white btn-menu hidden" id="btnMemberAdmin" data-mobile-task="member" onclick="location.href='admin_member.html?scope=member_admin&amp;tab=dashboard'">
             👥 <strong>조합원 관리</strong>
             <span class="menu-attention-badge hidden" id="memberAdminTaskBadge" aria-live="polite"></span>
             <span class="d-block small text-muted">조합원 명부, 신청 처리, 입금 매칭</span>
@@ -237,7 +239,7 @@
             <span class="d-block small text-muted">공지, 사이트 컨텐츠, FAQ 운영</span>
         </button>
 
-        <button class="btn btn-white btn-menu hidden" id="btnPowerMonitorAdmin" onclick="location.href='power_monitor_admin.html'">
+        <button class="btn btn-white btn-menu hidden" id="btnPowerMonitorAdmin" data-mobile-task="monitor" onclick="location.href='power_monitor_admin.html'">
             ⚡ <strong>발전소 모니터링 관리</strong>
             <span class="d-block small text-muted">조합별 발전소 정보 연결과 현재·오늘·누적 발전량 확인</span>
         </button>
@@ -247,7 +249,7 @@
             <span class="d-block small text-muted">문제·정답·해설과 선택지별 응답 통계 관리</span>
         </button>
 
-        <button class="btn btn-white btn-menu hidden" id="btnFestivalReceipts" onclick="location.href='festival_receipts.html?v=2.2.0'">
+        <button class="btn btn-white btn-menu hidden" id="btnFestivalReceipts" data-mobile-task="festival" onclick="location.href='festival_receipts.html?v=2.7.3'">
             🧾 <strong>현금매출·재고·영수증</strong>
             <span class="d-block small text-muted">축제 체험비, 현금영수증 신청·발급, 물품 입고·판매·불량 재고 관리</span>
         </button>
@@ -313,6 +315,10 @@
         </button>
       </div>
 
+      <div id="mobileDocumentsMenu" class="hidden erp-mobile-only">
+        <button type="button" class="btn btn-white btn-menu hidden" id="btnMobileDocuments" onclick="openMinutesRoute('documents')">📂 <strong>문서함</strong><span class="d-block small text-muted">공지·정관·회의자료와 첨부 확인</span></button>
+        <button type="button" class="btn btn-outline-primary hidden" id="btnMobileSignature" onclick="openMinutesRoute('signature')">전자서명 요청 확인</button>
+      </div>
       <button class="btn btn-link text-secondary btn-sm mt-4" onclick="logout()">로그아웃</button>
     </div>
   </div>
@@ -2163,6 +2169,7 @@ async function resetMenuOrder() {
 }
 
 function applyMenuPermissions(user, platformCtx, runtime) {
+    ['mobileDocumentsMenu', 'btnMobileDocuments', 'btnMobileSignature'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
     _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
         if (!error && (data?.admin || data?.platform || data?.representative)) document.getElementById('btnServiceContracts')?.classList.remove('hidden');
     });
@@ -2369,6 +2376,14 @@ function applyMenuPermissions(user, platformCtx, runtime) {
     }
     if (signatureEnabled) {
         availableGovernanceButtons.push(document.getElementById('btnSignature'));
+    }
+
+    // Same module availability as the existing document/signature routes above.
+    // The route and server still enforce the viewer's actual document/signature access.
+    if (documentsEnabled || signatureEnabled) {
+        document.getElementById('mobileDocumentsMenu')?.classList.remove('hidden');
+        if (documentsEnabled) document.getElementById('btnMobileDocuments')?.classList.remove('hidden');
+        if (signatureEnabled) document.getElementById('btnMobileSignature')?.classList.remove('hidden');
     }
 
     if (availableGovernanceButtons.length > 1 || canDocumentAdmin) {
