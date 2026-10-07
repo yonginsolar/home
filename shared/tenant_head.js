@@ -1,6 +1,6 @@
 /*
-Version: v1.0.4
-Change: Initialize registered cooperative names from server metadata, including Hwaseong.
+Version: v1.0.5
+Change: Withhold shared homepage sections until the current cooperative's settings are ready.
 */
 (function applyTenantHead(global) {
   'use strict';
@@ -18,6 +18,10 @@ Change: Initialize registered cooperative names from server metadata, including 
   const activeCoopName = serverCoopName || (hwaseongHosts.has(host) ? '화성시민재생에너지발전협동조합' : (isCitizenTenant ? '용인시민햇빛발전협동조합' : ''));
   if (activeCoopName) global.__PUBLIC_SITE_COOP_NAME__ = activeCoopName;
   const oldName = '용인모두의햇빛협동조합';
+  const publicHome = ['/', '/index.html'].includes(global.location.pathname);
+  if (publicHome && activeCoopName && activeCoopName !== oldName) {
+    document.documentElement.dataset.publicTenantPending = 'true';
+  }
   const coopName = '용인시민햇빛발전협동조합';
 
   function replaceLegacyText(value) {

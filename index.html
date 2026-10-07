@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.114
-Change: Connect Hwaseong homepage generation and plants to its existing public monitor.
+Version: v1.0.115
+Change: Apply tenant section settings before exposing shared homepage sections.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.114 | index.html');</script>
+<script>console.log('[Version] v1.0.115 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -71,7 +71,7 @@ Change: Connect Hwaseong homepage generation and plants to its existing public m
  <meta name="naver-site-verification" content="c77e379c45e97b7b91363bfd3e720b9e194ced4c" />
 
 
-  <script src="shared/tenant_head.js?v=20261006-1"></script>
+  <script src="shared/tenant_head.js?v=20261007-5"></script>
 
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" />
 
@@ -84,6 +84,11 @@ Change: Connect Hwaseong homepage generation and plants to its existing public m
 
   <link href="style.css?v=20260917-4" rel="stylesheet">
   <style>
+    html[data-public-tenant-pending] #main > section,
+    html[data-public-tenant-pending] #navbar li:has(a[href^="#"]),
+    html[data-public-tenant-pending] #footer li:has(a[href*="#"]) {
+      display: none !important;
+    }
     .hero-cert-badge {
       display: inline-flex;
       align-items: center;
@@ -2811,10 +2816,16 @@ Change: Connect Hwaseong homepage generation and plants to its existing public m
         try {
             const { data, error } = await _client.rpc('get_public_home_settings');
             if (error) throw error;
-            if (isHomePreviewMode && g_homePreviewDraftApplied) return;
+            if (isHomePreviewMode && g_homePreviewDraftApplied) return true;
+            if (document.documentElement.hasAttribute('data-public-tenant-pending')
+                && normalizePublicCoopName(data?.coop_name) !== normalizePublicCoopName(window.CoopTenantHead?.coopName)) {
+                throw new Error('PUBLIC_SITE_SETTINGS_SCOPE_MISMATCH');
+            }
             applyPublicHomeSettings({ ...(data || {}), ...(g_homePreviewLayoutDraft || {}) });
+            return Boolean(data);
         } catch (error) {
             console.warn('hydratePublicHomeSettings failed:', error);
+            return false;
         }
     }
 
@@ -3457,11 +3468,12 @@ Change: Connect Hwaseong homepage generation and plants to its existing public m
     // 페이지 로드 완료 시 실행
 document.addEventListener('DOMContentLoaded', async () => {
     await hydratePublicBranding();
-    await hydratePublicHomeSettings();
+    const homeSettingsReady = await hydratePublicHomeSettings();
     bindHomeAuthState();
     refreshHomeAuthUi();
     // 1. 섹션 관리는 먼저 실행 (화면 레이아웃 잡기)
-    await manageSections();
+    const homeSectionsReady = await manageSections();
+    finishPublicTenantBoot(homeSettingsReady, homeSectionsReady);
     AOS.refresh();
 
     // 2. 데이터 로드: 병렬 처리 (동시에 출발!)
@@ -3515,6 +3527,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     window.syncPublicSectionLinks = syncPublicSectionLinks;
 
+    function finishPublicTenantBoot(settingsReady, sectionsReady) {
+        if (!document.documentElement.hasAttribute('data-public-tenant-pending')) return;
+        // A failed read must not expose another cooperative's default sections.
+        if (!settingsReady || !sectionsReady) {
+            document.querySelectorAll('#main > section').forEach(section => {
+                section.style.display = 'none';
+                publicHiddenSectionIds.add(section.id);
+            });
+            return;
+        }
+        document.documentElement.removeAttribute('data-public-tenant-pending');
+        syncPublicSectionLinks();
+    }
+
     async function manageSections() {
         let sections = null;
         try {
@@ -3525,10 +3551,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             }, 'site_sections');
             sections = response?.data || null;
         } catch (error) {
-            return;
+            return false;
         }
 
-        if (!sections) return;
+        if (!sections || (document.documentElement.hasAttribute('data-public-tenant-pending') && !sections.length)) return false;
 
         applyPublicSectionOrder(sections);
         publicHiddenSectionIds.clear();
@@ -3547,6 +3573,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
         syncPublicSectionLinks();
+        return true;
     }
 
     // [1] 통계 데이터
