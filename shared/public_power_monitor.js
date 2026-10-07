@@ -1,4 +1,4 @@
-/* v1.0.0 — Public-only homepage adapter. Never reads monitor administration tables. */
+/* v1.0.1 — Public-only homepage adapter. Never reads monitor administration tables. */
 (function (global) {
   'use strict';
 
