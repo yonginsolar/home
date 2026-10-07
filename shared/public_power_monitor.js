@@ -1,4 +1,4 @@
-/* v1.0.1 — Public-only homepage adapter. Never reads monitor administration tables. */
+/* v1.0.2 — Public-only homepage adapter. Never reads monitor administration tables. */
 (function (global) {
   'use strict';
 
@@ -116,7 +116,7 @@
         sum(plants.map(p => metric(p, 'lifetime_kwh'))), plants.length]);
       const updated = timeLabel(data.last_updated);
       if (stamp) stamp.textContent = updated ? `${updated} 기준` : '발전량 수집 대기 중';
-      const delayed = plants.some(p => !p.fetched_at || !['live', 'stale'].includes(p.data_state)
+      const delayed = plants.some(p => !p.fetched_at || p.data_state !== 'live'
         || !Number.isFinite(Date.parse(p.fetched_at)) || now - Date.parse(p.fetched_at) > 600000);
       statusMessage.textContent = delayed ? '일부 발전소의 최신 자료를 기다리고 있습니다.' : '';
       const fragment = doc.createDocumentFragment();
