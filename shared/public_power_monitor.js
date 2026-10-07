@@ -1,4 +1,4 @@
-/* v1.0.2 — Public-only homepage adapter. Never reads monitor administration tables. */
+/* v1.0.3 — Public-only homepage adapter. Never reads monitor administration tables. */
 (function (global) {
   'use strict';
 
@@ -9,7 +9,7 @@
     coopName: '화성시민재생에너지발전협동조합',
     hosts: Object.freeze(['hcrec.kr', 'www.hcrec.kr']),
     slug: 'hwaseong-renewable-energy',
-    url: 'https://minho-kim.github.io/hwaseong-solar-monitor/'
+    url: 'https://monitor.hcrec.kr/'
   });
   const doc = global.document;
   const numberFormat = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 1 });
