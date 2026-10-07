@@ -1,6 +1,6 @@
 /*
-Version: v1.0.10
-Change: Keep unconfigured cooperative contacts and legal links separate from the main cooperative.
+Version: v1.0.11
+Change: Link explicitly registered tenant terms while preserving existing main-cooperative policies.
 */
 // footer.js
 if (typeof window !== 'undefined' && typeof window.showAlert !== 'function') {
@@ -58,6 +58,7 @@ window.loadFooterSiteLegalStatus = async function loadFooterSiteLegalStatus() {
   const termsRow = document.getElementById('footer-terms-row');
   const privacyRow = document.getElementById('footer-privacy-row');
   const patchRow = document.getElementById('footer-patch-row');
+  const mainPolicy=['yonginsolar.kr','www.yonginsolar.kr','localhost','127.0.0.1'].includes(window.location.hostname)||window.location.protocol==='file:';
   try {
     const client = window.CoopRouteGuard?.createSupabaseClient
       ? window.CoopRouteGuard.createSupabaseClient(
@@ -74,23 +75,23 @@ window.loadFooterSiteLegalStatus = async function loadFooterSiteLegalStatus() {
     const hasTerms = data?.terms === true;
     const hasPrivacy = data?.privacy === true;
     const termsLink = termsRow?.querySelector('a');
-    if (termsLink) {
+    if (termsLink && (hasTerms||!mainPolicy)) {
       termsLink.href = 'terms.html';
       termsLink.removeAttribute('data-bs-toggle');
       termsLink.removeAttribute('data-bs-target');
     }
-    if (termsRow) termsRow.hidden = !hasTerms;
-    if (privacyRow) privacyRow.hidden = !hasPrivacy;
-    if (patchRow) patchRow.hidden = true;
-    if (policyLinks) policyLinks.hidden = !(hasTerms || hasPrivacy);
-    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = hasTerms || hasPrivacy;
+    if (termsRow) termsRow.hidden = !mainPolicy&&!hasTerms;
+    if (privacyRow) privacyRow.hidden = !mainPolicy&&!hasPrivacy;
+    if (patchRow) patchRow.hidden = !mainPolicy;
+    if (policyLinks) policyLinks.hidden = !(mainPolicy||hasTerms||hasPrivacy);
+    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = mainPolicy||hasTerms||hasPrivacy;
   } catch (error) {
     console.warn('[footer] tenant legal status lookup failed:', error);
-    if (termsRow) termsRow.hidden = true;
-    if (privacyRow) privacyRow.hidden = true;
-    if (patchRow) patchRow.hidden = true;
-    if (policyLinks) policyLinks.hidden = true;
-    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = false;
+    if (termsRow) termsRow.hidden = !mainPolicy;
+    if (privacyRow) privacyRow.hidden = !mainPolicy;
+    if (patchRow) patchRow.hidden = !mainPolicy;
+    if (policyLinks) policyLinks.hidden = !mainPolicy;
+    window.__PUBLIC_LEGAL_DOCS_ENABLED__ = mainPolicy;
   }
 };
 
@@ -128,6 +129,7 @@ window.applyFooterSiteProfile = function applyFooterSiteProfile(settings) {
     document.getElementById('patchNoteModal')?.remove();
     window.loadFooterSiteLegalStatus();
   }
+  else window.loadFooterSiteLegalStatus();
   if (coopName) window.applyFooterCoopName(coopName);
 
   const phoneSuffix = [contactRole, contactName].filter(Boolean).join(' ');

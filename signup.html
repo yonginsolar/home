@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.51
-Change: 2026-10-06 - Route Hwaseong signup through its own social providers.
+Version: v1.0.52
+Change: 2026-10-07 - Use registered tenant signup purpose and privacy consent.
 -->
 <html lang="ko"> 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.0.51 | signup.html');</script>
+  <script>console.log('[Version] v1.0.52 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -515,7 +515,7 @@ const needed=main && age!==null && age>=14 && age<19;
 document.getElementById('guardianSignupFields').hidden=!needed;
 ['signupGuardianName','signupGuardianPhone'].forEach(id=>document.getElementById(id).required=needed);
 const ageBlocked=personal && age!==null && (main?age<14:age<19);
-document.getElementById('btnSubmit').disabled=joinSubmitInFlight || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
+document.getElementById('btnSubmit').disabled=joinSubmitInFlight || signupLegalDocuments?.ready!==true || ageBlocked || [...signupValidationErrors].some(id=>id!=='rrnMsg' || personal);
 return needed;
 }
 const DEFAULT_SIGNUP_COOP_CODE = 'yongin-modu-sunlight';
@@ -572,6 +572,21 @@ return signupAuthInitialStateReady;
 let signupTenant = null;
 let signupPublicSettings = null;
 let signupPublicSettingsPromise = null;
+let signupLegalDocuments = null;
+let signupPrivacyConsentVersion = 'signup-privacy-2026.08.24';
+
+async function loadSignupLegalDocuments() {
+const {data,error}=await _supabase.rpc('get_public_signup_documents',{p_coop_code:signupTenant.coop_code});
+if(error)throw error;
+signupLegalDocuments=data;
+signupPrivacyConsentVersion=data?.version||'';
+let notice=document.getElementById('signup-legal-pending');
+if(!notice){notice=document.createElement('div');notice.id='signup-legal-pending';notice.className='alert alert-warning small';notice.setAttribute('role','status');document.getElementById('btnSubmit').before(notice);}
+notice.hidden=data?.ready===true;
+notice.textContent='가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.';
+if(data?.ready!==true){termsData.purpose.content='';termsData.privacy.content='';}
+refreshGuardianFields();
+}
 
 function isDeferredSignupProfile() {
 const runtimeHost = String(getSignupPublicRuntimeHost?.() || window.location.hostname || '').toLowerCase();
@@ -604,6 +619,7 @@ const contextResolved = Array.isArray(contextData) ? contextData[0] : contextDat
 if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
 signupTenant = contextResolved;
 await loadSignupPublicSettings();
+await loadSignupLegalDocuments();
 applySignupTenantBranding();
 return contextResolved;
 }
@@ -620,6 +636,7 @@ throw error || contextError || new Error('SIGNUP_COOP_NOT_FOUND');
 
 signupTenant = resolved;
 await loadSignupPublicSettings();
+await loadSignupLegalDocuments();
 applySignupTenantBranding();
 return resolved;
 });
@@ -755,6 +772,9 @@ termsData[key].content = termsData[key].content.replaceAll('용인모두의햇�
 });
 if (isDeferredSignupProfile()) {
 termsData.privacy.content = termsData.privacy.content.replace('\n3. 선택 항목: 추천인, 선택한 간편로그인 식별정보', '\n3. 선택 항목: 추천인');
+}
+for(const key of ['purpose','privacy']) {
+if(signupLegalDocuments?.[key]?.content)termsData[key].content=String(signupLegalDocuments[key].content);
 }
 }
 
@@ -1060,7 +1080,6 @@ async function handleManualSession() {
     return false;
 }
 // [2] 약관 데이터
-const SIGNUP_PRIVACY_CONSENT_VERSION = 'signup-privacy-2026.08.24';
 const SIGNUP_RRN_NOTICE_VERSION = 'signup-rrn-2026.08.24';
 const termsData = {
 privacy: { 
@@ -1108,9 +1127,12 @@ currentTermType = null; // 초기화
 }
 
 function openTermSheet(type) {
+if(['privacy','purpose'].includes(type)&&signupLegalDocuments?.ready!==true)return openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);
 currentTermType = type; // privacy, purpose, risk 중 하나
 document.getElementById('termTitle').innerText = termsData[type].title;
-document.getElementById('termContent').innerHTML = termsData[type].content.replace(/\n/g, '<br>');
+const content=termsData[type].content;
+if(type==='purpose'&&!signupLegalDocuments?.purpose?.content)document.getElementById('termContent').innerHTML=content.replace(/\n/g,'<br>');
+else document.getElementById('termContent').textContent=content;
 openSheet('sheet-terms');
 }
 
@@ -1982,6 +2004,8 @@ openResultModal('가입 대상을 확인할 수 없습니다.', true);
 return;
 }
 
+if(signupLegalDocuments?.ready!==true){openResultModal('가입 안내를 준비하고 있습니다. 조합 담당자에게 문의해 주세요.',true);return;}
+
 if (joinSubmitInFlight) {
 openResultModal(
 "이미 저장 처리 중입니다.\n잠시 후 다시 시도해 주세요.",
@@ -2384,7 +2408,7 @@ const signupArguments = {
   p_contact_name: insertData.contact_name,
   p_contact_position: insertData.contact_position,
   p_is_agreed: insertData.is_agreed,
-  p_privacy_consent_version: SIGNUP_PRIVACY_CONSENT_VERSION,
+  p_privacy_consent_version: signupPrivacyConsentVersion,
   p_rrn_notice_confirmed: userType === '개인' ? document.getElementById('agreeRrn').checked : false,
   p_rrn_notice_version: userType === '개인' ? SIGNUP_RRN_NOTICE_VERSION : null,
   p_education_qr_token: educationQrToken || null,
@@ -2400,6 +2424,12 @@ const { data: signupResult, error } = await _supabase.rpc(needsGuardian?'create_
 const createdMemberUuid = signupResult?.member_id || null;
 const educationSignupResult = signupResult?.education || null;
 let finalInsertError = error;
+if(error?.message==='PRIVACY_CONSENT_VERSION_INVALID') {
+document.getElementById('agree1').checked=false;document.getElementById('agree2').checked=false;
+try {await loadSignupLegalDocuments();applyTenantTerms();openResultModal('가입 동의 내용이 변경되었습니다. 내용을 다시 확인하고 동의해 주세요.',true);}
+catch(_){signupLegalDocuments=null;openResultModal('변경된 가입 안내를 불러오지 못했습니다. 입력 내용은 그대로 있으니 다시 시도해 주세요.',true);}
+return;
+}
 
 if (error) {
 const code = String(error.code || '');

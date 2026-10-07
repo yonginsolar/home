@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.219
-Change: 2026-10-06 - Member-first notices and private notice attachments in the document box.
+Version: v1.0.220
+Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly registered documents.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.219';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.220';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -1867,7 +1867,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <a class="nav-link" data-bs-toggle="tab" href="#sub-home-settings" onclick="setTimeout(fetchHomeSettings,100)">메인 화면</a>
 </li>
 <li class="nav-item hidden" id="site-legal-nav-item">
-<a class="nav-link" data-bs-toggle="tab" href="#sub-legal" onclick="setTimeout(fetchSiteLegalDocuments,100)">이용약관·개인정보</a>
+<a class="nav-link" data-bs-toggle="tab" href="#sub-legal" onclick="setTimeout(fetchSiteLegalDocuments,100)">가입 안내·약관</a>
 </li>
 <li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-about" onclick="fetchAboutSettings()">조합 소개</a>
@@ -2106,47 +2106,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 </div></div>
 </div>
 
-<div class="tab-pane fade" id="sub-legal">
-<div class="alert alert-info small">
-<i class="bi bi-info-circle-fill"></i> 작성 중에는 비공개로 저장할 수 있습니다. 시행일과 확정 내용이 준비된 문서만 공개할 수 있고, 공개된 문서만 홈페이지 아래쪽에 나타납니다.
-</div>
-<div class="row g-4">
-<div class="col-xl-6">
-<div class="card border-0 shadow-sm h-100">
-<div class="card-body d-flex flex-column">
-<h5 class="fw-bold mb-3">📄 서비스 이용약관</h5>
-<label class="form-label small fw-bold" for="site-legal-terms-effective-date">시행일</label>
-<input type="date" class="form-control mb-3" id="site-legal-terms-effective-date">
-<label class="form-label small fw-bold" for="site-legal-terms-content">약관 내용</label>
-<textarea class="form-control flex-grow-1" id="site-legal-terms-content" rows="20" maxlength="100000" placeholder="확정한 이용약관 전문을 입력해 주세요."></textarea>
-<div class="form-check form-switch mt-3">
-<input class="form-check-input" type="checkbox" id="site-legal-terms-published">
-<label class="form-check-label fw-bold" for="site-legal-terms-published">홈페이지에 공개</label>
-</div>
-<div class="small text-muted mt-2" id="site-legal-terms-status">저장된 문서가 없습니다.</div>
-</div>
-<div class="card-footer bg-white text-end"><button type="button" class="btn btn-primary" id="site-legal-terms-save" onclick="saveSiteLegalDocument('terms')">이용약관 저장</button></div>
-</div>
-</div>
-<div class="col-xl-6">
-<div class="card border-0 shadow-sm h-100">
-<div class="card-body d-flex flex-column">
-<h5 class="fw-bold mb-3">🛡️ 개인정보 처리방침</h5>
-<label class="form-label small fw-bold" for="site-legal-privacy-effective-date">시행일</label>
-<input type="date" class="form-control mb-3" id="site-legal-privacy-effective-date">
-<label class="form-label small fw-bold" for="site-legal-privacy-content">처리방침 내용</label>
-<textarea class="form-control flex-grow-1" id="site-legal-privacy-content" rows="20" maxlength="100000" placeholder="확정한 개인정보 처리방침 전문을 입력해 주세요."></textarea>
-<div class="form-check form-switch mt-3">
-<input class="form-check-input" type="checkbox" id="site-legal-privacy-published">
-<label class="form-check-label fw-bold" for="site-legal-privacy-published">홈페이지에 공개</label>
-</div>
-<div class="small text-muted mt-2" id="site-legal-privacy-status">저장된 문서가 없습니다.</div>
-</div>
-<div class="card-footer bg-white text-end"><button type="button" class="btn btn-primary" id="site-legal-privacy-save" onclick="saveSiteLegalDocument('privacy')">개인정보 처리방침 저장</button></div>
-</div>
-</div>
-</div>
-</div>
+<div class="tab-pane fade" id="sub-legal"></div>
 
 <div class="tab-pane fade" id="sub-about">
 <div class="site-editor-actionbar"><span id="site-about-save-status" class="small text-muted" role="status" aria-live="polite">설정을 불러와 주세요.</span><div class="d-flex gap-2"><button type="button" id="btn-retry-about-settings" class="btn btn-sm btn-outline-secondary" onclick="fetchAboutSettings()" hidden>다시 불러오기</button><button type="button" id="btn-save-about-settings" class="btn btn-primary btn-sm px-3" onclick="saveAboutSettings()" disabled>조합 소개 저장</button></div></div>
@@ -8980,67 +8940,6 @@ myAlert('미리보기를 열 수 없습니다: ' + (error?.message || error), 'w
 }
 }
 
-function setSiteLegalDocumentForm(documentType, value) {
-const safeType = documentType === 'privacy' ? 'privacy' : 'terms';
-const doc = value && typeof value === 'object' ? value : {};
-const content = document.getElementById(`site-legal-${safeType}-content`);
-const effectiveDate = document.getElementById(`site-legal-${safeType}-effective-date`);
-const published = document.getElementById(`site-legal-${safeType}-published`);
-const status = document.getElementById(`site-legal-${safeType}-status`);
-if (content) content.value = String(doc.content || '');
-if (effectiveDate) effectiveDate.value = String(doc.effective_date || '');
-if (published) published.checked = doc.is_published === true;
-if (status) {
-const updatedText = doc.updated_at ? ` · 마지막 저장 ${formatAdminMemberKstDateTime(doc.updated_at)}` : '';
-status.textContent = doc.is_published === true ? `홈페이지 공개 중${updatedText}` : (doc.updated_at ? `비공개로 저장됨${updatedText}` : '저장된 문서가 없습니다.');
-status.classList.toggle('text-success', doc.is_published === true);
-}
-} // End of setSiteLegalDocumentForm
-
-async function fetchSiteLegalDocuments() {
-if (!isAdminMemberSiteProfile()) return;
-try {
-const { data, error } = await _supabase.rpc('get_my_site_legal_documents');
-if (error) throw error;
-setSiteLegalDocumentForm('terms', data?.terms || {});
-setSiteLegalDocumentForm('privacy', data?.privacy || {});
-} catch (error) {
-CoopSafeLog.error("[fetchSiteLegalDocuments] failed:", error);
-myAlert('이용약관과 개인정보 처리방침을 불러오지 못했습니다: ' + (error?.message || error), 'warning');
-}
-} // End of fetchSiteLegalDocuments
-
-async function saveSiteLegalDocument(documentType) {
-if (!isAdminMemberSiteProfile()) return;
-const safeType = documentType === 'privacy' ? 'privacy' : 'terms';
-const content = String(document.getElementById(`site-legal-${safeType}-content`)?.value || '');
-const effectiveDate = String(document.getElementById(`site-legal-${safeType}-effective-date`)?.value || '').trim();
-const isPublished = document.getElementById(`site-legal-${safeType}-published`)?.checked === true;
-const button = document.getElementById(`site-legal-${safeType}-save`);
-if (isPublished && (!effectiveDate || content.trim().length < 100)) {
-return myAlert('홈페이지에 공개하려면 시행일과 100자 이상의 확정 내용을 입력해 주세요.', 'warning');
-}
-if (button) button.disabled = true;
-showLoading(true);
-try {
-const { data, error } = await _supabase.rpc('upsert_site_legal_document', {
-p_document_type: safeType,
-p_content: content,
-p_effective_date: effectiveDate || null,
-p_is_published: isPublished
-});
-if (error) throw error;
-setSiteLegalDocumentForm(safeType, data || {});
-myAlert(`${safeType === 'terms' ? '이용약관' : '개인정보 처리방침'}을 ${isPublished ? '저장하고 공개했습니다.' : '비공개로 저장했습니다.'}`, 'success');
-} catch (error) {
-CoopSafeLog.error("[saveSiteLegalDocument] failed:", error);
-myAlert('공개 문서 저장 실패: ' + (error?.message || error), 'error');
-} finally {
-showLoading(false);
-if (button) button.disabled = false;
-}
-} // End of saveSiteLegalDocument
-
 let g_aboutSettingsSaving = false;
 let g_aboutOriginalImageUrl = '';
 let g_aboutPreviewObjectUrl = '';
@@ -12790,12 +12689,12 @@ el.classList.toggle('hidden', !enabled);
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
 ['site-badges-nav-item', !isSiteMemberProfile],
-['site-legal-nav-item', isSiteMemberProfile],
+['site-legal-nav-item', siteAdminEnabled],
 ['partnerInnerTabs', !isSiteMemberProfile],
 ['site-org-settings-button', isSiteMemberProfile && siteAdminEnabled],
 ['sub-external-news', !isSiteMemberProfile],
 ['sub-badges', !isSiteMemberProfile],
-['sub-legal', isSiteMemberProfile],
+['sub-legal', siteAdminEnabled],
 ['partner-request-log-pane', !isSiteMemberProfile]
 ].forEach(([id, enabled]) => {
 const el = document.getElementById(id);
@@ -20331,5 +20230,7 @@ async function uploadOfficialSeal(groupKey) {
 
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
+<script src="site_legal_samples.js?v=20261007-1"></script>
+<script src="site_legal_editor.js?v=20261007-1"></script>
 </body>
 </html>
