@@ -1,8 +1,8 @@
-/* Sun-income-village management hub v3.3.0 */
+/* Sun-income-village management hub v3.4.0 */
 (() => {
   'use strict';
 
-  const VERSION = '3.3.0';
+  const VERSION = '3.4.0';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -18,6 +18,7 @@
   let canCreateCooperative = false;
   let loading = false;
   let openingWorkspaceId = '';
+  let pendingCreate = null;
 
   function setMessage(text, isError = false) {
     const el = $('message');
@@ -32,6 +33,8 @@
     if (raw.includes('COOP_NAME_REQUIRED')) return '마을조합 이름을 두 글자 이상 입력해 주세요.';
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
     if (raw.includes('AUTH_REQUIRED')) return '로그인이 필요합니다.';
+    if (raw.includes('VILLAGE_FEE_CHANGED')) return '이용요금이나 기간이 바뀌었습니다. 마을 추가를 다시 눌러 최신 내용을 확인해 주세요.';
+    if (raw.includes('VILLAGE_CREATE_REQUEST_CHANGED')) return '확인한 입력 내용과 다릅니다. 마을 추가를 다시 눌러 확인해 주세요.';
     if (raw.includes('VILLAGE_MANAGER_REQUIRED')) return '마을 관리자를 한 명 이상 지정해 주세요.';
     if (raw.includes('ACTIVE_LINKED_EMPLOYEE_REQUIRED')) return 'ERP 로그인이 연결된 재직 직원만 지정할 수 있습니다.';
     if (raw.includes('INACTIVE_VILLAGE_EMPLOYEE')) return '해당 직원의 마을 ERP 계정이 중지되어 있습니다. 직원 상태를 확인해 주세요.';
@@ -43,20 +46,7 @@
   }
 
   function initTheme() {
-    let saved = 'auto';
-    try { saved = localStorage.getItem('coop-color-theme') || 'auto'; } catch (_) {}
-    if (![...$('theme').options].some(option => option.value === saved)) saved = 'auto';
-    $('theme').value = saved;
-    const apply = () => {
-      const mode = $('theme').value;
-      document.documentElement.dataset.theme = mode === 'auto'
-        ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-        : mode;
-      try { localStorage.setItem('coop-color-theme', mode); } catch (_) {}
-    };
-    $('theme').addEventListener('change', apply);
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', apply);
-    apply();
+    document.documentElement.dataset.theme = 'light';
   }
 
   function getClient() {
@@ -347,7 +337,7 @@
       context = await rpc('sun_village_management_context');
       managerContext = await rpc('sun_village_manager_context');
       try {
-        canCreateCooperative = await rpc('is_platform_admin') === true;
+        canCreateCooperative = (await rpc('sun_village_creation_fee_quote'))?.can_create === true;
       } catch (capabilityError) {
         canCreateCooperative = false;
         console.warn(`[sun-village-hub ${VERSION}] create capability unavailable`, capabilityError);
@@ -375,30 +365,54 @@
     if (loading) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const name = String(values.coop_name || '').trim();
-    if (!confirm(`${name}을 추가할까요?\n\n다른 조합의 자료와 섞이지 않도록 별도로 준비됩니다.`)) return;
     loading = true;
     $('createSubmit').disabled = true;
     $('createError').hidden = true;
     try {
-      await rpc('sun_village_create_cooperative_v2', {
-        p_coop_name: name,
-        p_address: String(values.address || '').trim(),
-        p_biz_num: String(values.biz_num || '').trim() || null,
-        p_plant_capacity_kw: String(values.plant_capacity_kw || '').trim() === '' ? null : Number(values.plant_capacity_kw),
-        // 기존 서버 함수의 인수는 호환성을 위해 유지하지만 화면 기능은 모든 마을에 전체 제공됩니다.
-        p_accounting_operation_mode: 'self'
+      const quote = await rpc('sun_village_creation_fee_quote');
+      pendingCreate = {values, name, quote};
+      $('feeSummary').innerHTML = quote.configured
+        ? `<strong>${esc(name)}</strong><p>마을당 연간 이용료: ${number(quote.annual_supply)}원 · 부가세 별도</p><p>${esc(quote.charge_start)} ~ ${esc(quote.charge_end)} · ${number(quote.days)}일 / ${number(quote.annual_days)}일</p><strong>해당 기간 예상 청구액: ${number(Number(quote.supply)+Number(quote.vat))}원 · 부가세 포함</strong>${quote.days===0?'<p>현재 요금 적용기간이 끝났습니다. 이후 이용요금은 별도 협의합니다.</p>':''}`
+        : `<strong>${esc(name)}</strong><p>마을당 이용요금은 별도 협의합니다. 요금 확정 후 청구서를 확인해 주세요.</p>`;
+      $('feeError').hidden = true;
+      $('feeDialog').showModal();
+    } catch (error) {
+      $('createError').textContent = friendly(error);
+      $('createError').hidden = false;
+    } finally {
+      loading = false;
+      $('createSubmit').disabled = false;
+    }
+  }
+
+  async function confirmVillageFee() {
+    if (!pendingCreate || loading) return;
+    loading = true;
+    $('confirmFee').disabled = true;
+    $('cancelFee').disabled = true;
+    const {values,name,quote} = pendingCreate;
+    try {
+      const result = await rpc('sun_village_create_with_fee_notice', {
+        p_coop_name:name,p_address:String(values.address||'').trim(),
+        p_biz_num:String(values.biz_num||'').trim()||null,
+        p_plant_capacity_kw:String(values.plant_capacity_kw||'').trim()===''?null:Number(values.plant_capacity_kw),
+        p_fee_quote:quote.quote,p_acknowledged:true,p_request_id:quote.request_id
       });
+      if (!result?.fee_notice_recorded) throw new Error('CREATE_RESULT_INVALID');
+      pendingCreate = null;
+      $('feeDialog').close();
       $('createDialog').close();
       loading = false;
       await load();
       setMessage(`${name}을 추가했습니다. 준비가 끝나면 목록에서 업무 화면을 열 수 있습니다.`);
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] create failed`, error);
-      $('createError').textContent = friendly(error);
-      $('createError').hidden = false;
+      $('feeError').textContent = friendly(error);
+      $('feeError').hidden = false;
     } finally {
       loading = false;
-      $('createSubmit').disabled = false;
+      $('confirmFee').disabled = false;
+      $('cancelFee').disabled = false;
     }
   }
 
@@ -408,6 +422,9 @@
     $('closeCreate').addEventListener('click', () => $('createDialog').close());
     $('reload').addEventListener('click', load);
     $('createForm').addEventListener('submit', createVillage);
+    $('cancelFee').onclick = () => { if (!loading) {pendingCreate=null;$('feeDialog').close();} };
+    $('feeDialog').addEventListener('cancel',event=>{if(loading)event.preventDefault();else pendingCreate=null;});
+    $('confirmFee').onclick = confirmVillageFee;
     $('closeManager').addEventListener('click', () => $('managerDialog').close());
     $('managerForm').addEventListener('submit', saveVillageManagers);
     try {

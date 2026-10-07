@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.24 | Change: 2026-10-07 - Add service contract and termination management entry. -->
+<!-- Version: v1.1.25 | Change: 2026-10-07 - Village creation notices and billing entry. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
@@ -416,6 +416,7 @@
     </section>
 
     <div id="statusArea" class="alert alert-secondary hidden"></div>
+    <a id="villageBillingNotice" class="alert alert-info d-block hidden" href="service_contracts.html?view=billing"></a>
 
     <section class="panel-card bootstrap-panel hidden" id="bootstrapPanel">
       <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
@@ -1293,6 +1294,11 @@
         setStatus('현재 계정을 첫 통합 관리자로 등록했습니다.', 'alert-success');
         await loadPlatformContext();
         await loadCoopList();
+        try {
+          const {data,error}=await _supabase.rpc('erp_village_billing',{p_action:'context'});
+          const notice=document.getElementById('villageBillingNotice');
+          if(!error&&data?.provider){notice.textContent=data.unread_count>0?`새 마을 등록 ${Number(data.unread_count)}건 · 확인 및 청구서 관리`:'마을 이용요금·청구서 관리';notice.classList.remove('hidden');}
+        } catch (_) { /* A billing summary must not interrupt platform administration. */ }
       } catch (err) {
         console.error('claimPlatformAdmin failed:', err);
         setStatus(`통합 관리자 등록 실패: ${err.message}`, 'alert-danger');

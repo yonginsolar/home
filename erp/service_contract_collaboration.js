@@ -1,4 +1,4 @@
-/* 1.0.0 · Counterpart proposals, immutable editions and on-demand comparisons. */
+/* 1.1.0 · Contract and addendum proposals, including village fee conditions. */
 (function(){
  'use strict';
  const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -12,6 +12,9 @@
   add('계약 제목',before.title,after.title);
   const labels={start:'유료 서비스 개시일',end:'유료 이용 종료일',annual_supply:'연간 이용료 · 부가세 별도',free_start:'무료 제공 시작일',free_end:'무료 제공 종료일',setup:'초기 설정비·범위',special:'별도 합의',privacy_finalized:'위탁 별지 확인'};
   for(const [key,label] of Object.entries(labels)){const show=v=>key==='annual_supply'?Number(v||0).toLocaleString('ko-KR')+'원':key==='privacy_finalized'?(v?'확인':'미확인'):v;add(label,show(before.terms?.[key]),show(after.terms?.[key]));}
+  add('햇빛소득마을 이용',before.terms?.village_enabled?'이용':'미포함',after.terms?.village_enabled?'이용':'미포함');
+  add('마을당 연간 이용료 · 부가세 별도',before.terms?.village_annual_supply,after.terms?.village_annual_supply);
+  add('변경 적용일',before.terms?.change_effective_on,after.terms?.change_effective_on);
   for(const [party,label] of [['provider','제공자'],['client','이용자']])for(const [key,name] of Object.entries({name:'조합명',representative:'대표자',business_number:'사업자번호',address:'주소',contact:'담당자',phone:'전화번호',email:'이메일'}))add(label+' · '+name,get(before,'terms.'+party+'.'+key),get(after,'terms.'+party+'.'+key));
   if(before.body!==after.body){
    const a=String(before.body||'').split(/\n\s*\n/),b=String(after.body||'').split(/\n\s*\n/);
@@ -35,9 +38,12 @@
  function closeEditor(){if(sending)return;if(dirty()&&!confirm('작성 중인 수정안을 버릴까요?'))return;$('proposalDialog').close();editorBase=null;editorBaseline='';}
  function openEditor(r){editorBase=structuredClone(r);editorProposal=r.pending_proposal?.id||null;const s=r.pending_proposal?.snapshot||r,t=s.terms;
   $('proposalEditor').innerHTML=`<p>제${Number(r.revision)}판을 기준으로 수정합니다.</p><div class="service-field-grid">${field('proposalTitle','계약 제목',s.title,'text','required maxlength="200"')}${field('proposalAnnual','연간 이용료 · 부가세 별도',t.annual_supply,'number','required min="0" max="100000000" step="1"')}${field('proposalStart','유료 서비스 개시일',t.start,'date','required')}${field('proposalEnd','유료 이용 종료일',t.end,'date','required')}${field('proposalFree','무료 제공 시작일',t.free_start,'date','max="2026-12-31"')}${field('proposalSetup','초기 설정비·범위',t.setup,'text','maxlength="1000"')}</div><label for="proposalSpecial" class="form-label mt-3">별도 합의</label><textarea id="proposalSpecial" class="form-control" rows="3" maxlength="2000">${esc(t.special)}</textarea><label for="proposalBody" class="form-label mt-3">계약 본문·개인정보 처리 위탁 별지</label><textarea id="proposalBody" class="form-control service-body-editor" required minlength="100" maxlength="180000">${esc(s.body)}</textarea><label for="proposalNote" class="form-label mt-3">수정 이유·전달할 내용 · 선택</label><textarea id="proposalNote" class="form-control" rows="3" maxlength="5000">${esc(r.pending_proposal?.note||'')}</textarea>`;
+  $('proposalEditor').insertAdjacentHTML('afterbegin',`<section class="service-section"><label class="form-check"><input type="checkbox" id="proposalVillageEnabled" class="form-check-input" ${t.village_enabled?'checked':''}><span class="form-check-label">햇빛소득마을 이용</span></label><div class="mt-3">${field('proposalVillageFee','마을당 연간 이용료 · 부가세 별도',t.village_annual_supply||0,'number','min="0" max="100000000" step="1"')}</div>${r.amendment?field('proposalEffective','변경 적용일',t.change_effective_on,'date',`required min="${t.start}" max="${t.end}"`):''}</section>`);
+  if(r.amendment){$('proposalStart').readOnly=true;$('proposalEnd').readOnly=true;}
+  const toggle=()=>{$('proposalVillageFee').parentElement.hidden=!$('proposalVillageEnabled').checked;$('proposalVillageFee').required=$('proposalVillageEnabled').checked;};$('proposalVillageEnabled').onchange=toggle;toggle();
   $('proposalError').textContent='';$('proposalDialog').showModal();editorBaseline=editorState();$('proposalTitle').focus();
  }
- function editorSnapshot(){const t=structuredClone(editorBase.pending_proposal?.snapshot?.terms||editorBase.terms);t.start=$('proposalStart').value;t.end=$('proposalEnd').value;t.annual_supply=Number($('proposalAnnual').value);t.free_start=$('proposalFree').value||null;t.free_end=t.free_start?'2026-12-31':null;t.setup=$('proposalSetup').value;t.special=$('proposalSpecial').value;return {title:$('proposalTitle').value.trim(),terms:t,body:$('proposalBody').value};}
+ function editorSnapshot(){const t=structuredClone(editorBase.pending_proposal?.snapshot?.terms||editorBase.terms);t.start=$('proposalStart').value;t.end=$('proposalEnd').value;t.annual_supply=Number($('proposalAnnual').value);t.free_start=$('proposalFree').value||null;t.free_end=t.free_start?'2026-12-31':null;t.setup=$('proposalSetup').value;t.special=$('proposalSpecial').value;t.village_enabled=$('proposalVillageEnabled').checked;t.village_annual_supply=t.village_enabled?Number($('proposalVillageFee').value):0;if(editorBase.amendment)t.change_effective_on=$('proposalEffective').value;return {title:$('proposalTitle').value.trim(),terms:t,body:$('proposalBody').value};}
  async function compareProposal(id){const data=await api.rpc('proposal_get',{proposal_id:id},record.id);showComparison(data.before,data.after,'제'+data.proposal.base_revision+'판','수정안 '+data.proposal.proposal_no);}
  function showComparison(before,after,left,right){$('comparisonTitle').textContent=left+' → '+right;$('comparisonBody').innerHTML=comparison(before,after,left,right);$('comparisonDialog').showModal();}
  function bind(r,callbacks){record=r;api=callbacks;
