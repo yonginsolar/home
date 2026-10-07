@@ -175,7 +175,13 @@
           if (response.error) throw new Error('PUBLIC_MONITOR_READ_FAILED');
           const data = response.data;
           if (!data || data.slug !== HCREC.slug || data.coop_name !== HCREC.coopName || !Array.isArray(data.plants)
-            || data.plants.some(p => !p || typeof p !== 'object')) throw new Error('PUBLIC_MONITOR_RESPONSE_INVALID');
+            || data.plants.some(p => !p || typeof p !== 'object')) {
+            // A successful empty response can mean publication was withdrawn.
+            // Do not keep a formerly public snapshot after that response.
+            hasData = false;
+            lastLoaded = 0;
+            throw new Error('PUBLIC_MONITOR_RESPONSE_INVALID');
+          }
           interval = Math.max(180, Math.min(3600, Number(data.refresh_seconds) || 180)) * 1000;
           render(data);
           lastLoaded = Date.now();
