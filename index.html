@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.112
-Change: Keep new cooperative homepage branding and unconfigured contacts tenant-specific.
+Version: v1.0.113
+Change: Connect Hwaseong homepage generation and plants to its existing public monitor.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.111 | index.html');</script>
+<script>console.log('[Version] v1.0.113 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1753,6 +1753,7 @@ Change: Keep new cooperative homepage branding and unconfigured contacts tenant-
   <script src="shared/theme.js?v=20260802-1"></script>
   <script src="shared/partner_logo_theme.js?v=20260917-2"></script>
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
+  <link href="shared/public_power_monitor.css?v=20261007-1" rel="stylesheet">
 </head>
 
 <body>
@@ -1947,7 +1948,7 @@ Change: Keep new cooperative homepage branding and unconfigured contacts tenant-
           <div class="col-lg-3 col-md-6 d-md-flex align-items-md-stretch">
             <div class="count-box">
               <i class="bi bi-sun" style="color: #ffc107;"></i> <span id="power-stat-latest-day-kwh">0</span>
-              <p><strong>최근 발전일 발전량</strong> (kWh)</p>
+              <p><strong id="power-stat-day-label">최근 발전일 발전량</strong> (kWh)</p>
             </div>
           </div>
 
@@ -2418,6 +2419,7 @@ Change: Keep new cooperative homepage branding and unconfigured contacts tenant-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
   <script src="shared/route_guard.js?v=20260401-1"></script>
+  <script src="shared/public_power_monitor.js?v=20261007-1"></script>
  <script src="home_patch_note.js?v=20260929-1"></script>
   <script>
 
@@ -4157,7 +4159,20 @@ function renderPublicPowerStats(stats) {
 	        : '발전량 입력 대기 중';
 	    }
 
+let g_public_home_monitor = null;
+async function getPublicHomeMonitor() {
+      if (g_public_home_monitor) return g_public_home_monitor;
+      const context = await getPublicSiteContext();
+      if (g_public_home_monitor) return g_public_home_monitor;
+      g_public_home_monitor = window.CoopPublicPowerMonitor?.create({
+        context, hostname: window.location.hostname, client: _client
+      }) || null;
+      return g_public_home_monitor;
+    }
+
 async function fetchPowerGenerationStats() {
+      const monitor = await getPublicHomeMonitor();
+      if (monitor) { await monitor.refresh(); return; }
       const { data, error } = await _client.rpc('get_public_power_generation_stats');
       if (error) {
         console.warn('fetchPowerGenerationStats failed:', error);
@@ -5241,6 +5256,8 @@ function openNoticeDetail(id) {
 
 	// 1. 발전소 데이터 로드 및 분배
 	async function fetchPlants() {
+    const monitor = await getPublicHomeMonitor();
+    if (monitor) { await monitor.refresh(); return; }
     let data = null;
     try {
         const response = await executePublicReadWithRetry(async function () {
