@@ -115,7 +115,7 @@
         if (/TARGET_RANK|RANK_UNAVAILABLE/.test(message)) return '본인보다 상위 직급에는 권한 부여를 요청할 수 없습니다. 직급 설정과 대상자를 확인해 주세요.';
         if (/TARGET_CHANGED|OUTSIDE_OWN_ACCESS|EMPLOYEE_UNAVAILABLE/.test(message)) return '직원 정보나 업무 권한이 변경되었습니다. 현재 권한을 확인하고 다시 요청해 주세요.';
         if (/SEPARATE_APPROVER|APPROVER_ACCESS_REQUIRED|ACCESS_DENIED/.test(message)) return '요청·승인 권한을 확인할 수 없습니다. 다른 결재권자가 필요한지 확인해 주세요.';
-        if (/40001|40P01|RETRY_CONFLICT|deadlock/.test(message)) return '다른 권한 변경이 함께 진행되었습니다. 화면을 새로고침한 뒤 다시 확인해 주세요.';
+        if (error?.code === 'PT409' || /40001|40P01|RETRY_CONFLICT|deadlock/.test(message)) return '다른 권한 변경이 함께 진행되었습니다. 화면을 새로고침한 뒤 다시 확인해 주세요.';
         if (/ALREADY_GRANTED/.test(message)) return '해당 직원에게 이미 부여된 권한입니다.';
         return '권한 요청을 처리하지 못했습니다. 현재 직원 정보와 선택한 권한을 확인해 주세요.';
     }

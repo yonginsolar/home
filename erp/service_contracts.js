@@ -1,4 +1,4 @@
-/* 1.6.0 · Contract/invoice workflow, termination quote and gated data return. */
+/* 1.6.1 · Unpaid correction workflow and floor-won refund quote. */
 (function () {
  'use strict';
  const $=id=>document.getElementById(id), BASE='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -98,7 +98,7 @@
  async function updateEndingQuote(r){const target=$('endingQuote'),serial=++endQuoteSerial;try{const q=await rpc('end_preview',{mode:'request',paid_supply:Number($('paidSupply')?.value||0)},r.id);if(serial!==endQuoteSerial||current?.id!==r.id||!target.isConnected)return;target.innerHTML=endQuoteHtml(q);if(q.from_invoices&&$('paidSupply')){$('paidSupply').value=q.paid_supply;$('paidSupply').readOnly=true;}}catch(err){if(serial===endQuoteSerial&&target.isConnected)target.textContent=errorText(err);}}
  async function updateDialogQuote(){const serial=++endQuoteSerial,id=current.id;$('endDialogError').textContent='';try{const q=await rpc('end_preview',{mode:endMode,effective_on:$('endDialogDate').value},id);if(serial===endQuoteSerial&&$('endDialog').open&&current?.id===id)$('endDialogQuote').innerHTML=endQuoteHtml(q);}catch(err){if(serial===endQuoteSerial)$('endDialogError').textContent=errorText(err);}}
  function showEndDialog(mode){endMode=mode;const t=current.terms,date=$('endDialogDate');$('endDialogTitle').textContent=mode==='expiry'?'계약기간 만료로 종료':'중도 해지 요청';date.previousElementSibling.textContent='이용 중지일';const end=new Date(t.end+'T00:00:00Z');end.setUTCDate(end.getUTCDate()+1);date.value=mode==='expiry'?end.toISOString().slice(0,10):today();date.readOnly=mode==='expiry';date.min=mode==='expiry'?'':today();$('endDialogReason').value=mode==='expiry'?'계약기간 만료':current.ending?.reason||'';$('endDialogInfo').textContent=mode==='expiry'?t.end+'까지 이용한 뒤 종료합니다.':'선택한 날부터 이용을 중지하는 것으로 미사용 기간을 계산합니다.';$('endDialogQuote').textContent='환급 예상액을 계산하는 중입니다.';$('endDialog').showModal();void updateDialogQuote();}
- Object.assign(errors,{SERVICE_END_QUOTE_CHANGED:'납부 내역이 변경되었습니다. 환급 예상액을 다시 확인해 주세요.',SERVICE_ACCOUNTING_PERMISSION_REQUIRED:'회계 수정 권한이 필요합니다.',SERVICE_INVALID_ENDING:'이용 중지일과 종료 사유를 확인해 주세요.',SERVICE_REFUND_TAX_CORRECTION_REQUIRED:'수정세금계산서 발행 여부를 확인해 주세요.',SERVICE_UNPAID_TAX_INVOICE_REVIEW:'미입금 청구서에 발행한 세금계산서가 있습니다. 미사용 기간의 청구·세금계산서를 정리한 뒤 종료를 확정해 주세요.'});
+ Object.assign(errors,{SERVICE_END_QUOTE_CHANGED:'납부 내역이 변경되었습니다. 환급 예상액을 다시 확인해 주세요.',SERVICE_ACCOUNTING_PERMISSION_REQUIRED:'회계 수정 권한이 필요합니다.',SERVICE_INVALID_ENDING:'이용 중지일과 종료 사유를 확인해 주세요.',SERVICE_REFUND_TAX_CORRECTION_REQUIRED:'수정세금계산서 발행 여부를 확인해 주세요.',SERVICE_UNPAID_TAX_INVOICE_REVIEW:'미입금 청구서에 발행한 세금계산서가 있습니다. ‘청구서 확인’에서 해당 청구서의 ‘세금계산서 정정·청구 취소’를 처리한 뒤 계약 종료를 확정해 주세요.'});
  errors.SERVICE_CONFIRM_ON_END_DATE='종료 예정일이 되거나 지난 뒤 종료를 확정해 주세요.';
  errors.SERVICE_ENDED_READ_ONLY='종료된 조합은 계약·청구서 확인과 허용된 자료 다운로드만 이용할 수 있습니다.';
  function clearInk(){const cv=$('signCanvas');cv.getContext('2d').clearRect(0,0,cv.width,cv.height);hasInk=false;}
