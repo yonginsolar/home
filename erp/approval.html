@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.82 | Change: 2026-10-07 - Attach the same contract final version in the common approval form. -->
+<!-- Version: v1.2.83 | Change: 2026-10-07 - Compact mobile body with on-demand formatting; same shared approval flow. -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.82 | approval.html');</script>
+  <script>console.log('[Version] v1.2.83 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -604,6 +604,16 @@
       color: #94a3b8;
       pointer-events: none;
     }
+    #btnApprovalMobileFormatting { display: none; }
+    @media screen and (max-width: 991.98px) {
+      #btnApprovalMobileFormatting { display: inline-flex; align-items: center; }
+      #permissionRequestBody > .d-flex { gap: 8px; align-items: flex-start !important; }
+      #permissionRequestBody > .d-flex > .d-flex { flex-wrap: wrap; }
+      body.approval-mobile-compact :is(#appDescEditorControls,#btnAppDescPreview,#appDescHtmlHelp) { display: none !important; }
+      body.approval-mobile-compact #appDescVisual { min-height: 140px; font-size: 16px; }
+      #generalProposalRichEditor .approval-tiptap-content { min-height: 220px; font-size: 16px; }
+      #appDesc { min-height: 220px; height: 220px; }
+    }
     .history-filter-btn.active {
       background: #0d6efd;
       color: #fff;
@@ -648,7 +658,7 @@
     }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
-  <meta name="erp-mobile-revision" content="20261007.2">
+  <meta name="erp-mobile-revision" content="20261007.3">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
 </head>
 <body class="erp-unified erp-hybrid-workspace erp-page-approval" data-erp-mobile-task="approval">
@@ -1361,6 +1371,7 @@
         <div class="d-flex justify-content-between align-items-center mb-1">
           <label class="small text-muted fw-bold m-0">내용</label>
           <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnApprovalMobileFormatting" aria-expanded="false" aria-controls="appDescEditorControls" onclick="toggleApprovalMobileFormatting()">서식 도구</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openApprovalTemplatePicker()">📂 지난 양식 불러오기</button>
             <button type="button" class="btn btn-sm btn-outline-secondary hidden" id="btnAppDescPreview" onclick="openAppDescPreview()">👁️ HTML 미리보기</button>
           </div>
@@ -1417,7 +1428,7 @@
             </div>
             <div id="generalProposalRichEditor"></div>
           </div>
-          <div id="appDescVisual" class="approval-visual-editor" contenteditable="true" data-placeholder="여기에 내용을 입력하세요."></div>
+          <div id="appDescVisual" class="approval-visual-editor" contenteditable="true" role="textbox" aria-label="내용" aria-multiline="true" data-placeholder="여기에 내용을 입력하세요."></div>
         </div>
         <div id="app-desc-panel-html" class="approval-editor-panel active">
           <textarea class="form-control large-textarea" id="appDesc" placeholder="내용을 상세히 입력하세요." rows="20"></textarea>
@@ -1590,6 +1601,11 @@ let delegationModalInstance = null;
 let approvalTemplateCandidates = [];
 let approvalTemplateSelectedId = '';
 let approvalEditorMode = 'html';
+const approvalMobileEditorMedia = window.matchMedia('(max-width: 991.98px)');
+let approvalMobileCompact = approvalMobileEditorMedia.matches;
+let approvalMobileAdvanced = false;
+let approvalCompactSurfaceHtml = '';
+let approvalMobileEditorListenerBound = false;
 let approvalDraftRestoreEditorModeHint = '';
 let approvalRichEditor = null;
 let generalProposalTiptap = null;
@@ -7979,6 +7995,8 @@ function loadApprovalExternalScript(src, marker) {
 }
 
 function warmApprovalRichEditorAssets() {
+    // Mobile starts with the native editing surface; no Tiptap import until requested.
+    if (isApprovalCompactEditorMode()) return Promise.resolve(false);
     const currentCategory = getCurrentApprovalCategory();
     if (window.ApprovalRichEditor?.isTiptapReady?.()) {
         if (isApprovalHtmlEditorType(currentCategory)) {
@@ -7993,7 +8011,7 @@ function warmApprovalRichEditorAssets() {
         .then(() => {
             if (!window.ApprovalRichEditor?.isTiptapReady?.()) throw new Error('APPROVAL_TIPTAP_UNAVAILABLE');
             const loadedCategory = getCurrentApprovalCategory();
-            if (isApprovalHtmlEditorType(loadedCategory)) {
+            if (!isApprovalCompactEditorMode() && isApprovalHtmlEditorType(loadedCategory)) {
                 ensureGeneralProposalRichEditor();
                 syncApprovalVisualSurface(loadedCategory);
                 if (approvalEditorMode === 'visual') window.switchApprovalEditorTab('visual');
@@ -8025,7 +8043,7 @@ async function ensureApprovalHtml2PdfReady() {
 }
 
 function hasGeneralProposalEnhancedEditor(docType) {
-    return isApprovalHtmlEditorType(docType)
+    return !isApprovalCompactEditorMode() && isApprovalHtmlEditorType(docType)
         && window.ApprovalRichEditor?.isTiptapReady?.()
         && !!window.ApprovalRichEditor?.createTiptapBridge;
 }
@@ -8241,12 +8259,15 @@ function syncApprovalVisualFromSource() {
     const visual = getApprovalVisualEditor();
     if (!source || !visual) return;
     visual.innerHTML = renderApprovalContent(source.value, true);
+    approvalCompactSurfaceHtml = visual.innerHTML;
 }
 
 function syncApprovalSourceFromVisual() {
     const source = getApprovalHtmlEditor();
     const visual = getApprovalVisualEditor();
     if (!source || !visual) return;
+    // Reading/previewing an untouched imported document must not rewrite its HTML.
+    if (isApprovalCompactEditorMode() && visual.innerHTML === approvalCompactSurfaceHtml) return;
     source.value = normalizeApprovalVisualHtml(visual.innerHTML);
 }
 
@@ -8255,7 +8276,7 @@ function setApprovalEditorContent(rawValue) {
     if (!source) return;
     source.value = String(rawValue || '');
     const currentCategory = getCurrentApprovalCategory();
-    if (approvalDraftRestoreEditorModeHint === 'html' && isApprovalHtmlEditorType(currentCategory)) {
+    if (!isApprovalCompactEditorMode() && approvalDraftRestoreEditorModeHint === 'html' && isApprovalHtmlEditorType(currentCategory)) {
         approvalEditorMode = 'html';
         return;
     }
@@ -8344,7 +8365,7 @@ window.switchApprovalEditorTab = (mode = 'visual') => {
     const htmlPanel = document.getElementById('app-desc-panel-html');
     if (!visualBtn || !htmlBtn || !visualPanel || !htmlPanel) return;
 
-    const isVisual = mode !== 'html';
+    const isVisual = isApprovalCompactEditorMode() || mode !== 'html';
     const currentCategory = getCurrentApprovalCategory();
     if (isVisual) {
         if (hasGeneralProposalEnhancedEditor(currentCategory)) syncGeneralProposalRichEditorFromSource();
@@ -8371,6 +8392,22 @@ function setApprovalEditorForCategory(docType) {
     const visualPanel = document.getElementById('app-desc-panel-visual');
     const htmlPanel = document.getElementById('app-desc-panel-html');
     if (!controls || !visualPanel || !htmlPanel) return;
+
+    syncApprovalMobileEditorButton();
+    if (isApprovalCompactEditorMode()) {
+        controls.classList.add('hidden');
+        getGeneralProposalRichEditorWrap()?.classList.add('hidden');
+        const visual = getApprovalVisualEditor();
+        if (visual) {
+            visual.classList.remove('hidden');
+            visual.dataset.placeholder = getApprovalRichEditorPlaceholder(docType);
+        }
+        syncApprovalVisualFromSource();
+        approvalEditorMode = 'visual';
+        visualPanel.classList.add('active');
+        htmlPanel.classList.remove('active');
+        return;
+    }
 
     const supportsHtmlEditor = isApprovalHtmlEditorType(docType);
     const useGeneralProposalEditor = hasGeneralProposalEnhancedEditor(docType);
@@ -8428,9 +8465,59 @@ function initializeApprovalEditor() {
     });
 
     syncApprovalVisualFromSource();
+    syncApprovalMobileEditorButton();
+    if (!approvalMobileEditorListenerBound) {
+        approvalMobileEditorListenerBound = true;
+        approvalMobileEditorMedia.addEventListener('change', handleApprovalEditorViewportChange);
+    }
     scheduleApprovalIdleTask(() => {
         void warmApprovalRichEditorAssets();
     });
+}
+
+function isApprovalCompactEditorMode() {
+    return approvalMobileCompact;
+}
+
+function syncApprovalMobileEditorButton() {
+    document.body.classList.toggle('approval-mobile-compact', isApprovalCompactEditorMode());
+    const button = document.getElementById('btnApprovalMobileFormatting');
+    if (!button) return;
+    button.textContent = approvalMobileAdvanced ? '서식 도구 닫기' : '서식 도구';
+    button.setAttribute('aria-expanded', String(approvalMobileAdvanced));
+}
+
+function handleApprovalEditorViewportChange(event) {
+    // Flush the previous surface before changing which editor owns the content.
+    getApprovalEditorContent();
+    approvalMobileCompact = event.matches && !approvalMobileAdvanced;
+    setApprovalEditorForCategory(getCurrentApprovalCategory());
+    if (!approvalMobileCompact) void warmApprovalRichEditorAssets();
+}
+
+async function toggleApprovalMobileFormatting() {
+    if (!approvalMobileEditorMedia.matches) return;
+    const button = document.getElementById('btnApprovalMobileFormatting');
+    if (button?.disabled) return;
+    getApprovalEditorContent();
+    approvalMobileAdvanced = !approvalMobileAdvanced;
+    approvalMobileCompact = !approvalMobileAdvanced;
+    setApprovalEditorForCategory(getCurrentApprovalCategory());
+    if (!approvalMobileAdvanced) return;
+    if (button) button.disabled = true;
+    try {
+        const ready = await warmApprovalRichEditorAssets();
+        if (!ready && approvalMobileEditorMedia.matches && approvalMobileAdvanced) {
+            // A failed download leaves the native surface and current content usable.
+            getApprovalEditorContent();
+            approvalMobileAdvanced = false;
+            approvalMobileCompact = true;
+            setApprovalEditorForCategory(getCurrentApprovalCategory());
+            showAlert('서식 도구를 불러오지 못했습니다. 입력한 내용은 유지됩니다. 잠시 후 다시 눌러 주세요.');
+        }
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
 
 function mapApprovalDocTypeToMainCategory(docType) {
