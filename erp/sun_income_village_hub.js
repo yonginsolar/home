@@ -1,8 +1,8 @@
-/* Sun-income-village management hub v3.4.0 */
+/* Sun-income-village management hub v3.4.1 */
 (() => {
   'use strict';
 
-  const VERSION = '3.4.0';
+  const VERSION = '3.4.1';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -34,6 +34,7 @@
     if (raw.includes('INVALID_CAPACITY')) return '발전소 설비용량은 0 이상으로 입력해 주세요.';
     if (raw.includes('AUTH_REQUIRED')) return '로그인이 필요합니다.';
     if (raw.includes('VILLAGE_FEE_CHANGED')) return '이용요금이나 기간이 바뀌었습니다. 마을 추가를 다시 눌러 최신 내용을 확인해 주세요.';
+    if (raw.includes('SERVICE_VILLAGE_NOT_INCLUDED')) return '계약기간 중 햇빛소득마을 이용이 포함되지 않은 기간이 있습니다. 담당자에게 이용 조건을 확인해 주세요.';
     if (raw.includes('VILLAGE_CREATE_REQUEST_CHANGED')) return '확인한 입력 내용과 다릅니다. 마을 추가를 다시 눌러 확인해 주세요.';
     if (raw.includes('VILLAGE_MANAGER_REQUIRED')) return '마을 관리자를 한 명 이상 지정해 주세요.';
     if (raw.includes('ACTIVE_LINKED_EMPLOYEE_REQUIRED')) return 'ERP 로그인이 연결된 재직 직원만 지정할 수 있습니다.';
@@ -372,7 +373,7 @@
       const quote = await rpc('sun_village_creation_fee_quote');
       pendingCreate = {values, name, quote};
       $('feeSummary').innerHTML = quote.configured
-        ? `<strong>${esc(name)}</strong><p>마을당 연간 이용료: ${number(quote.annual_supply)}원 · 부가세 별도</p><p>${esc(quote.charge_start)} ~ ${esc(quote.charge_end)} · ${number(quote.days)}일 / ${number(quote.annual_days)}일</p><strong>해당 기간 예상 청구액: ${number(Number(quote.supply)+Number(quote.vat))}원 · 부가세 포함</strong>${quote.days===0?'<p>현재 요금 적용기간이 끝났습니다. 이후 이용요금은 별도 협의합니다.</p>':''}`
+        ? `<strong>${esc(name)}</strong><p>마을당 연간 이용료: ${number(quote.annual_supply)}원 · 부가세 별도</p><p>${esc(quote.charge_start)} ~ ${esc(quote.charge_end)} · ${number(quote.days)}일 / ${number(quote.annual_days)}일</p>${Array.isArray(quote.segments)&&quote.segments.length>1?`<details><summary>기간별 이용료</summary>${quote.segments.map(s=>`<p>${esc(s.start)} ~ ${esc(s.end)}<br>연간 단가 ${number(s.annual_supply)}원 · 해당 기간 ${number(s.supply)}원 (부가세 별도)</p>`).join('')}</details>`:''}<strong>해당 기간 예상 청구액: ${number(Number(quote.supply)+Number(quote.vat))}원 · 부가세 포함</strong>${quote.days===0?'<p>현재 요금 적용기간이 끝났습니다. 이후 이용요금은 별도 협의합니다.</p>':''}`
         : `<strong>${esc(name)}</strong><p>마을당 이용요금은 별도 협의합니다. 요금 확정 후 청구서를 확인해 주세요.</p>`;
       $('feeError').hidden = true;
       $('feeDialog').showModal();
