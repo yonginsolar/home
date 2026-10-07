@@ -2166,7 +2166,18 @@ async function resetMenuOrder() {
 function applyMenuPermissions(user, platformCtx, runtime) {
     ['mobileDocumentsMenu', 'btnMobileDocuments', 'btnMobileSignature'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
     _supabase.rpc('erp_service_contract', { p_action: 'context' }).then(({ data, error }) => {
-        if (!error && (data?.admin || data?.platform || data?.representative)) document.getElementById('btnServiceContracts')?.classList.remove('hidden');
+        if (!error && (data?.admin || data?.platform || data?.representative || data?.draft_reviewer)) {
+            const menu = document.getElementById('btnServiceContracts');
+            menu?.classList.remove('hidden');
+            menu?.querySelector('[data-contract-review-badge]')?.remove();
+            if (menu && Number(data.pending_draft_reviews) > 0) {
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-warning text-dark';
+                badge.dataset.contractReviewBadge = 'true';
+                badge.textContent = '검토 대기 ' + Number(data.pending_draft_reviews) + '건';
+                menu.append(badge);
+            }
+        }
     });
     const festivalHost = ['www.yonginsolar.kr','yonginsolar.kr','erp.yonginsolar.kr'].includes(location.hostname);
     document.getElementById('btnFestivalReceipts')?.classList.add('hidden');
