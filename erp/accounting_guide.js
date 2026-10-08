@@ -1,4 +1,4 @@
-/* Accounting guide v1.0.1. Read-only; the existing authenticated client and RLS apply. */
+/* Accounting guide v1.0.2. Read-only; the existing authenticated client and RLS apply. */
 (function (host) {
     'use strict';
     const completed = ['완료', '실물결재완료'];
@@ -162,11 +162,17 @@
     function mount({root, client, coopId}) {
         if (!root || root.dataset.mounted === '1') return;
         root.dataset.mounted='1';
-        root.innerHTML = `<div class="ag-heading"><h3>신고·결산 따라 하기</h3><span>공식 메뉴 확인: 2026-10-08</span></div><div class="ag-topics" role="group" aria-label="회계 안내 선택"><button type="button" data-topic="withholding" aria-pressed="true">원천세 신고·납부</button><button type="button" data-topic="vat" aria-pressed="false">부가세·카드 매입</button><button type="button" data-topic="closing" aria-pressed="false">연말결산</button></div><div id="agSteps"></div>`;
+        root.innerHTML = `<div class="ag-heading"><h3>신고·결산 따라 하기</h3><span>공식 메뉴 확인: 2026-10-08</span></div><div class="ag-topics" role="group" aria-label="회계 안내 선택"><button type="button" data-topic="withholding" aria-pressed="true">원천세 신고·납부</button><button type="button" data-topic="vat" aria-pressed="false">부가세·카드 매입</button><button type="button" data-topic="closing" aria-pressed="false">연말결산</button><button type="button" data-topic="smarta" aria-pressed="false">법인세 신고(Smart A)</button></div><div id="agSteps"></div>`;
         let generation = 0;
         const draw = topic => {
             generation++;
             root.querySelectorAll('[data-topic]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.topic===topic)));
+            if(topic==='smarta') {
+                const target=root.querySelector('#agSteps');
+                if(host.CoopSmartaGuide)host.CoopSmartaGuide.mount({root:target,client,coopId});
+                else target.textContent='신고 안내를 불러오지 못했습니다. 새로고침 후 다시 열어 주세요.';
+                return;
+            }
             root.querySelector('#agSteps').innerHTML = steps[topic].map(([title,html],i)=>`<details class="ag-step"${i===0?' open':''}><summary><span class="ag-number">${i+1}</span>${title}</summary><div class="ag-step-body">${html}</div></details>`).join('') + `<p class="ag-sources">공식 확인: ${link(nts+'/nts/cm/cntnts/cntntsView.do?cntntsId=7701&mi=2289','원천징수')} · ${link('https://d.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7693&mi=2401','부가가치세')} · ${link('https://g.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7799&mi=2475','카드 매입 공제')} · ${link('https://g.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7975&mi=6549','법인세')}</p>`;
             if (topic !== 'withholding') return;
             const input=root.querySelector('#agPaymentMonth'), btn=root.querySelector('#agLoad'), out=root.querySelector('#agResult');
