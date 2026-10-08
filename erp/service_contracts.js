@@ -1,4 +1,4 @@
-/* 1.6.2 · Preserve confirmed drafts across follow-up read failures. */
+/* 1.6.3 · Read only explicitly shared counterpart editions; clear denied views. */
 (function () {
  'use strict';
  const $=id=>document.getElementById(id), BASE='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -28,7 +28,8 @@
  function defaultBody(){return window.ServiceContractTemplate.filter(x=>!x.text.startsWith('계약 체결일')&&!x.text.includes('양측은 본문 및 확정된')&&!/^(초기 설정 ·|기존 자료 이전 ·|그 밖의 합의 ·|제11조 별도 합의)/.test(x.text)).map(x=>x.text).join('\n\n');}
  async function reload(){const rows=await rpc('list',{},null);$('contractList').replaceChildren();if(!rows.length){$('contractList').textContent='등록된 계약이 없습니다.';return;}
   for(const r of rows){const b=document.createElement('button');b.type='button';b.className='service-contract-link';b.setAttribute('aria-current',String(current?.id===r.id));b.innerHTML=`<strong>${esc(r.client_name)}</strong><span class="service-state">${r.is_amendment?"변경합의서 · ":""}${esc(stateNames[r.state])}</span>${r.draft_review_pending?'<span class="service-review-badge">내 검토 대기</span>':''}<small class="d-block mt-2">${esc(r.start)} ~ ${esc(r.end)} · 제${Number(r.revision)}판</small>`;b.onclick=()=>task(()=>open(r.id));$('contractList').append(b);}}
- async function open(id,{discard=false}={}){if(!discard&&!allowDiscard())return false;const record=await rpc('get',{},id);current=record;savedDraftReloadRequired=false;render();await reload();return true;}
+ function clearDeniedContract(){current=null;editBaseline='';savedDraftReloadRequired=false;preferredReviewer=null;reviewerLinkRows=[];reviewerLinkContract=null;$('detail').replaceChildren();$('printRoot').replaceChildren();for(const id of ['signDialog','reviewDialog','reviewerLinkDialog','proposalDialog','comparisonDialog','draftHistoryDialog','resolutionDialog','endDialog']){const dialog=$(id);if(dialog?.open)dialog.close();}for(const id of ['proposalEditor','comparisonBody','draftHistoryRows','proposalHistoryRows'])$(id)?.replaceChildren();}
+ async function open(id,{discard=false}={}){if(!discard&&!allowDiscard())return false;let record;try{record=await rpc('get',{},id);}catch(err){if(/SERVICE_(ACCESS_DENIED|ADMIN_REQUIRED|AUTH_REQUIRED)/.test(String(err?.message||'')))clearDeniedContract();throw err;}current=record;savedDraftReloadRequired=false;render();await reload();return true;}
  function input(id,label,value,type='text',extra=''){return `<div><label for="${id}" class="form-label">${esc(label)}</label><input id="${id}" class="form-control" type="${type}" value="${esc(value)}" ${extra}></div>`;}
  const employeeContact=e=>[e.name,e.position].filter(Boolean).join(' ');
  function clientContactOptions(value){const contacts=[...new Set([value,...(current.reviewers||[]).map(employeeContact)].filter(Boolean))];return `<option value="">담당자를 선택해 주세요.</option>`+contacts.map(contact=>`<option value="${esc(contact)}"${contact===value?' selected':''}>${esc(contact)}</option>`).join('');}
