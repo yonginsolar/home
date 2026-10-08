@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.226
+Version: v1.0.227
 Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly registered documents.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.226';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.227';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -17,8 +17,8 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
   </script>
 <meta charset="utf-8">
 <script src="../shared/member_information.js?v=20261002-1"></script>
-<script src="../shared/member_capital.js?v=20261008-1"></script>
-<script src="member_capital_settings.js?v=20261008-2"></script>
+<script src="../shared/member_capital.js?v=20261008-3"></script>
+<script src="member_capital_settings.js?v=20261008-3"></script>
 <script src="member_information_admin.js?v=20261002-2"></script>
 <script src="member_demographics.js?v=20261002-1"></script>
 <script src="../shared/guardian-admin.js?v=20260915-2" defer></script>
@@ -890,7 +890,8 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                     </div>
                     <div class="col-6" id="proxy-amount-field">
                         <label class="form-label small fw-bold">금액</label>
-                        <input type="number" id="proxy-amount" class="form-control" placeholder="0">
+                        <input type="number" id="proxy-amount" class="form-control" inputmode="numeric" aria-describedby="proxy-capital-guidance" disabled>
+                        <div id="proxy-capital-guidance" class="form-text" role="status">출자 기준을 불러오는 중입니다.</div>
                     </div>
                 </div>
                 <div class="alert alert-info small py-2 d-none" id="proxy-withdraw-note">
@@ -902,7 +903,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-success w-100 fw-bold" onclick="submitProxyData()">접수 등록</button>
+                <button class="btn btn-success w-100 fw-bold" id="proxy-submit" onclick="submitProxyData()" disabled>접수 등록</button>
             </div>
         </div>
     </div>
@@ -5263,6 +5264,7 @@ let g_member_import_request_key = null;
 let g_member_page = 0;
 let g_member_page_size = 25;
 let g_member_total_count = 0;
+let g_member_fetch_revision = 0;
 const ADMIN_MEMBER_SELECT_COLUMNS = [
     'id',
     'member_id',
@@ -13487,6 +13489,7 @@ function changeMemberPageSize(value) {
 
 // [수정] 조합원 검색/목록 로드: 서버 페이지네이션 + 전체 결과 기준 정렬
 async function fetchMembers() {
+    const requestRevision = ++g_member_fetch_revision;
     // ✅ DOM 요소 단축 선택자
     const $ = (id) => document.getElementById(id);
 
@@ -13502,6 +13505,8 @@ async function fetchMembers() {
     const status = statusEl ? statusEl.value : 'all';
     const type = typeEl ? typeEl.value : 'all';
     const sort = sortEl ? sortEl.value : 'name'; // 정렬 기준 (기본 이름순)
+    const page = g_member_page;
+    const pageSize = g_member_page_size;
 
     try {
         if (typeof showLoading === 'function') showLoading(true);
@@ -13511,9 +13516,10 @@ async function fetchMembers() {
             p_status: status === 'all' ? null : status,
             p_member_type: type === 'all' ? null : type,
             p_sort: sort,
-            p_page: g_member_page,
-            p_page_size: g_member_page_size
+            p_page: page,
+            p_page_size: pageSize
         });
+        if (requestRevision !== g_member_fetch_revision) return;
         if (error) throw error;
 
         const list = Array.isArray(data?.rows) ? data.rows : [];
@@ -13539,13 +13545,14 @@ async function fetchMembers() {
         renderMemberPagination();
 
     } catch (err) {
+        if (requestRevision !== g_member_fetch_revision) return;
         CoopSafeLog.error("[erp/admin_member] operation failed", err);
         // Alert 대신 모달 사용 권장 (기존 myAlert 함수가 있다면)
         if (typeof myAlert === 'function') {
             myAlert('데이터를 불러오지 못했습니다: ' + (err?.message || err), 'error');
         }
     } finally {
-        if (typeof showLoading === 'function') showLoading(false);
+        if (requestRevision === g_member_fetch_revision && typeof showLoading === 'function') showLoading(false);
     }
 }
 
@@ -19979,7 +19986,33 @@ function updateAppBadges(pendingCountOverride = null) {
 // [신규 기능] 대리 접수 (Proxy)
 // ================================================================
 
-function openProxyModal() {
+let g_proxy_capital_rules = null;
+let g_proxy_capital_revision = 0;
+let g_proxy_capital_error = false;
+let g_proxy_submit_busy = false;
+
+async function loadProxyCapitalRules() {
+    const requestRevision = ++g_proxy_capital_revision;
+    g_proxy_capital_error = false;
+    try {
+        const rules = await window.CoopMemberCapital.load(_supabase, true);
+        if (requestRevision !== g_proxy_capital_revision) return null;
+        g_proxy_capital_rules = rules;
+        syncProxyApplicationFields();
+        return rules;
+    } catch (error) {
+        if (requestRevision !== g_proxy_capital_revision) return null;
+        g_proxy_capital_rules = null;
+        g_proxy_capital_error = true;
+        syncProxyApplicationFields();
+        throw error;
+    }
+}
+
+async function openProxyModal() {
+    if (g_proxy_submit_busy) return;
+    g_proxy_capital_rules = null;
+    g_proxy_capital_error = false;
     document.getElementById('proxy-keyword').value = '';
     document.getElementById('proxy-member-name').value = '';
     document.getElementById('proxy-member-uid').value = '';
@@ -19989,6 +20022,11 @@ function openProxyModal() {
     document.getElementById('proxy-reason').value = '';
     syncProxyApplicationFields();
     new bootstrap.Modal(document.getElementById('proxyModal')).show();
+    try { await loadProxyCapitalRules(); }
+    catch (_) {
+        const hint = document.getElementById('proxy-capital-guidance');
+        if (hint) hint.textContent = '출자 기준을 불러오지 못했습니다. 창을 닫고 다시 열어주세요.';
+    }
 }
 
 function syncProxyApplicationFields() {
@@ -20001,8 +20039,20 @@ function syncProxyApplicationFields() {
     const isWithdrawal = typeEl.value === 'withdraw';
     amountFieldEl.classList.toggle('d-none', isWithdrawal);
     withdrawNoteEl.classList.toggle('d-none', !isWithdrawal);
-    amountEl.disabled = isWithdrawal;
+    amountEl.disabled = isWithdrawal || !g_proxy_capital_rules || g_proxy_submit_busy;
     if (isWithdrawal) amountEl.value = '';
+    const submitButton = document.getElementById('proxy-submit');
+    if (submitButton) submitButton.disabled = g_proxy_submit_busy || (!isWithdrawal && !g_proxy_capital_rules);
+    const guidance = document.getElementById('proxy-capital-guidance');
+    if (g_proxy_capital_rules) {
+        window.CoopMemberCapital.applyInput(amountEl, g_proxy_capital_rules, false);
+        if (guidance) guidance.textContent = `${g_proxy_capital_rules.unit.toLocaleString()}원 단위로 입력해주세요.`
+            + (typeEl.value === 'reduction' ? ` 감자 후 출자금은 최소 ${g_proxy_capital_rules.minimum.toLocaleString()}원 이상이어야 합니다.` : '');
+    } else if (guidance) {
+        guidance.textContent = g_proxy_capital_error
+            ? '출자 기준을 불러오지 못했습니다. 창을 닫고 다시 열어주세요.'
+            : '출자 기준을 불러오는 중입니다.';
+    }
 } // End of syncProxyApplicationFields
 
 // 멤버 검색
@@ -20031,6 +20081,7 @@ async function searchProxyMember() {
 
 // 대리 등록 실행
 async function submitProxyData() {
+    if (g_proxy_submit_busy) return;
     const uid = document.getElementById('proxy-member-uid').value;
     const mid = document.getElementById('proxy-member-id').value; // 텍스트 ID
     const nameStr = document.getElementById('proxy-member-name').value.split(' (')[0]; // 이름만 추출
@@ -20043,10 +20094,20 @@ async function submitProxyData() {
     if (type !== 'withdraw' && amount <= 0) return myAlert("금액을 입력해주세요.", 'warning');
     if (!reason) return myAlert("비고란에 접수 사유(전화 등)를 입력해주세요.", 'warning');
 
+    g_proxy_submit_busy = true;
+    syncProxyApplicationFields();
     showLoading(true);
-
-    // 직접 Insert (Pending 상태로)
-    const { error } = await _supabase.from('coop_applications').insert(await withAdminTenantPayload({
+    let rules = null;
+    try {
+      if (type !== 'withdraw') {
+        rules = await loadProxyCapitalRules();
+        if (!rules) return;
+        if (!window.CoopMemberCapital.valid(amount, rules, false)) {
+          return myAlert(`금액은 ${rules.unit.toLocaleString()}원 이상, ${rules.unit.toLocaleString()}원 단위의 정수로 입력해주세요.`, 'warning');
+        }
+      }
+      // 기존 서버 권한·현재 조합·좌단위·감자 잔액 검사를 그대로 사용한다.
+      const { error } = await _supabase.from('coop_applications').insert(await withAdminTenantPayload({
         member_uid: uid,
         member_id: mid,
         name: nameStr,
@@ -20054,16 +20115,31 @@ async function submitProxyData() {
         amount: amount,
         reason: '[대리접수] ' + reason,
         status: 'pending'
-    }));
+      }));
 
-    showLoading(false);
-
-    if (error) {
-        myAlert("등록 실패: " + error.message, 'error');
-    } else {
+      if (error) {
+        if (error.message === 'CAPITAL_AMOUNT_INVALID' && rules) {
+          myAlert(`금액은 ${rules.unit.toLocaleString()}원 단위로 입력해주세요. 출자 기준이 변경되었다면 창을 다시 열어 확인해주세요.`, 'warning');
+        } else if (error.message === 'CAPITAL_MINIMUM_BALANCE_REQUIRED' && rules) {
+          myAlert(`감자 후 출자금은 최소 ${rules.minimum.toLocaleString()}원 이상 남아 있어야 합니다. 전액 반환을 원하시면 탈퇴 신청을 선택해주세요.`, 'warning');
+        } else if (error.code === '42501') {
+          myAlert('이 조합의 신청을 접수할 권한이 없습니다.', 'error');
+        } else {
+          myAlert('접수하지 못했습니다. 입력 내용을 확인하고 다시 시도해주세요.', 'error');
+        }
+      } else {
         myAlert("접수되었습니다.\n목록에서 확인 후 승인 처리해주세요.");
         bootstrap.Modal.getInstance(document.getElementById('proxyModal')).hide();
         fetchApplications();
+      }
+    } catch (_) {
+      myAlert(rules || type === 'withdraw'
+        ? '접수 결과를 확인하지 못했습니다. 업무 신청 목록을 확인한 뒤 다시 시도해주세요.'
+        : '출자 기준을 불러오지 못했습니다. 창을 다시 열어 확인해주세요.', 'error');
+    } finally {
+      g_proxy_submit_busy = false;
+      showLoading(false);
+      syncProxyApplicationFields();
     }
 }
 

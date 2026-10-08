@@ -1,4 +1,4 @@
-/* v1.0.1 — Capital settings in member management, with server-owned permissions. */
+/* v1.0.2 — Confirmed save results update displays without a follow-up RPC. */
 (function (global) {
   'use strict';
   let revision = '', busy = false, returnModal = null;
@@ -70,17 +70,20 @@
     busy = true;
     const button = document.getElementById('member-capital-save');
     button.disabled = true;
+    let saved = false;
     try {
       const { data, error } = await client().rpc('save_member_capital_rules', { p_minimum: minimum, p_unit: unit, p_expected_revision: revision });
       if (error) throw error;
-      revision = data.revision;
-      await global.refreshMemberCapitalDisplays();
+      saved = true;
+      const rules = global.CoopMemberCapital.remember(client(), data);
+      revision = rules.revision;
+      syncDisplays(rules);
       global.bootstrap.Modal.getOrCreateInstance(document.getElementById('memberCapitalSettingsModal')).hide();
       notice('출자 기준을 저장했습니다.', 'success');
     } catch (error) {
-      notice(error?.message === 'CAPITAL_SETTINGS_CHANGED'
+      notice(saved ? '출자 기준은 저장되었습니다. 설정을 다시 열어 표시된 금액을 확인해주세요.' : error?.message === 'CAPITAL_SETTINGS_CHANGED'
         ? '다른 관리자가 출자 기준을 변경했습니다. 설정을 다시 열어 확인해주세요.'
-        : '출자 기준을 저장하지 못했습니다. 권한과 입력값을 확인해주세요.');
+        : '출자 기준을 저장하지 못했습니다. 권한과 입력값을 확인해주세요.', saved ? 'warning' : 'error');
     } finally { busy = false; button.disabled = false; }
   };
 })(window);

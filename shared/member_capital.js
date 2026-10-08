@@ -1,4 +1,4 @@
-/* v1.0.0 — Host-scoped capital settings; never infer another cooperative's rules. */
+/* v1.0.1 — Host-scoped capital settings; adopt confirmed saves without a second read. */
 (function (global) {
   'use strict';
   const requests = new WeakMap();
@@ -12,12 +12,19 @@
     if (force) requests.delete(client);
     if (!requests.has(client)) {
       const request = client.rpc('get_member_capital_rules').then(({ data, error }) => {
+        if (requests.has(client) && requests.get(client) !== request) return requests.get(client);
         if (error) throw error;
         return normalize(data);
-      }).catch(error => { requests.delete(client); throw error; });
+      }).catch(error => { if (requests.get(client) === request) requests.delete(client); throw error; });
       requests.set(client, request);
     }
     return requests.get(client);
+  }
+  function remember(client, value) {
+    if (!client?.rpc) throw new Error('CAPITAL_SETTINGS_UNAVAILABLE');
+    const rules = normalize(value);
+    requests.set(client, Promise.resolve(rules));
+    return rules;
   }
   const valid = (value, rules, initial = true) => Number.isSafeInteger(Number(value))
     && Number(value) >= (initial ? rules.minimum : rules.unit) && Number(value) % rules.unit === 0;
@@ -28,5 +35,5 @@
     input.step = String(rules.unit);
     input.placeholder = initial ? `최소 ${rules.minimum.toLocaleString()}원` : `${rules.unit.toLocaleString()}원 단위`;
   }
-  global.CoopMemberCapital = Object.freeze({ normalize, load, valid, guidance, applyInput });
+  global.CoopMemberCapital = Object.freeze({ normalize, load, remember, valid, guidance, applyInput });
 })(window);
