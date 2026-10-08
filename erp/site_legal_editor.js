@@ -1,4 +1,4 @@
-/* v1.1.0 - Tenant sample context and required privacy contacts. */
+/* v1.1.1 - Bind legacy privacy contact blocks to editable contact fields. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -6,11 +6,27 @@
   let loaded = false, loading = false, context = null;
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
   const el = (kind, suffix) => document.getElementById(`site-legal-${kind}-${suffix}`);
-  function values(kind) { const v={content:el(kind,'content').value,effective_date:el(kind,'effective-date').value};if(kind==='privacy')v.contact_details=Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value.trim()]));return v; }
+  function privacyTemplate(content) {
+    // Recognize the existing structured contact block, not arbitrary names in legal prose.
+    // This only prepares an editable draft; no registered document is changed here.
+    const gap='\\r?\\n(?:[ \\t]*\\r?\\n)*',line='([^\\r\\n]+)';
+    const block=new RegExp('^(개인정보처리자[ \\t]*'+gap+')'+line+'('+gap+'이사장[ \\t]+)'+line+'('+gap+'주소[ \\t]*'+gap+')'+line+'('+gap+'개인정보 보호책임자[ \\t]*[·ㆍ][ \\t]*권리행사 접수[ \\t]*'+gap+')'+line+'('+gap+')'+line+'('+gap+')'+line+'(?=\\r?\\n|$)','gm');
+    const references=[];
+    let result=String(content).replace(block,(match,a,org,b,representative,c,address,d,officer,e,phone,f,email)=>{
+      const p=phone.trim(),m=email.trim();
+      if(!(p==='{{전화번호}}'||(/^[+0-9() .-]+$/.test(p)&&/^\d{8,15}$/.test(p.replace(/\D/g,''))))||!(m==='{{이메일}}'||/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(m)))return match;
+      if(!officer.includes('{{')&&p!=='{{전화번호}}')references.push([officer.trim(),p]);
+      return a+'{{조합명}}'+b+'{{대표자}}'+c+'{{주소}}'+d+'{{직책}} {{담당자}}'+e+'{{전화번호}}'+f+'{{이메일}}';
+    });
+    const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    for(const [officer,phone] of references)result=result.replace(new RegExp(escape(officer)+'[ \\t]*\\([ \\t]*'+escape(phone)+'[ \\t]*\\)','g'),'{{직책}} {{담당자}}({{전화번호}})');
+    return result;
+  }
+  function values(kind) { const v={content:kind==='privacy'?privacyTemplate(el(kind,'content').value):el(kind,'content').value,effective_date:el(kind,'effective-date').value};if(kind==='privacy')v.contact_details=Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value.trim()]));return v; }
   function renderText(content,kind) {
     const cfg=kind==='privacy'?{...context,...values(kind).contact_details}:context||{};
     const keys={'조합명':'coop_name','대표자':'representative','주소':'address','담당자':'officer_name','직책':'officer_title','전화번호':'officer_phone','이메일':'officer_email'};
-    return String(content).replace(/\{\{([^}]+)\}\}/g,(token,label)=>String(cfg?.[keys[label]]||token));
+    return (kind==='privacy'?privacyTemplate(content):String(content)).replace(/\{\{([^}]+)\}\}/g,(token,label)=>String(cfg?.[keys[label]]||token));
   }
   function dirty(kind) { const s=state.get(kind);return !!s && JSON.stringify(values(kind))!==s.baseline; }
   function permitted() { return hasAdminMemberScopePermission('site_admin') && isAdminMemberRuntimeModuleEnabled('site_admin'); }
@@ -23,7 +39,7 @@
   }
   function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button,input,textarea')) b.disabled=!enabled; }
   function setForm(kind, doc={}) {
-    el(kind,'content').value=String(doc.content||'');el(kind,'effective-date').value=String(doc.effective_date||'');
+    el(kind,'content').value=kind==='privacy'?privacyTemplate(doc.content||''):String(doc.content||'');el(kind,'effective-date').value=String(doc.effective_date||'');
     if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).value=String(doc.contact_details?.[key]??(key==='representative'||key==='address'?context?.[key]:'')??'');
     state.set(kind,{doc,baseline:JSON.stringify(values(kind)),busy:false});
     el(kind,'published-view').hidden=!doc.is_published;
