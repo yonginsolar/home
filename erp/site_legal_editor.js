@@ -9,7 +9,7 @@
   function privacyTemplate(content) {
     // Recognize the existing structured contact block, not arbitrary names in legal prose.
     // This only prepares an editable draft; no registered document is changed here.
-    const gap='\\r?\\n(?:[ \\t]*\\r?\\n)*',line='([^\\r\\n]+)';
+    const gap='\\r?\\n(?:[ \\t]*\\r?\\n)*',line='([^\\s\\r\\n][^\\r\\n]*)';
     const block=new RegExp('^(개인정보처리자[ \\t]*'+gap+')'+line+'('+gap+'이사장[ \\t]+)'+line+'('+gap+'주소[ \\t]*'+gap+')'+line+'('+gap+'개인정보 보호책임자[ \\t]*[·ㆍ][ \\t]*권리행사 접수[ \\t]*'+gap+')'+line+'('+gap+')'+line+'('+gap+')'+line+'(?=\\r?\\n|$)','gm');
     const references=[];
     let result=String(content).replace(block,(match,a,org,b,representative,c,address,d,officer,e,phone,f,email)=>{
