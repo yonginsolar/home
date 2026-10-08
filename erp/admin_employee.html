@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.86
-Change: 2026-10-06 - Stable tab workspaces and employee insurance submission summaries.
+Version: v1.0.87
+Change: 2026-10-08 - Confirm settings writes and discard stale employee settings responses.
 -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.86 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.87 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -905,6 +905,7 @@ function getRoleBadge(roleKey) {
 }
 
 let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
+let companySettingsSaveInFlight = false;
 let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
@@ -934,6 +935,23 @@ let inviteCanManageAccess = false;
 let inviteModuleAccessLoadToken = 0;
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
+const employeeDetailReadTokens = { modules: 0, approvedRights: 0, notifications: 0 };
+function beginEmployeeDetailRead(kind) {
+    const empId = String(currentEmpId || '').trim();
+    const revision = employeeDetailRevision;
+    const token = ++employeeDetailReadTokens[kind];
+    return { empId, isCurrent: () => !!empId && empId === String(currentEmpId || '').trim()
+        && revision === employeeDetailRevision && token === employeeDetailReadTokens[kind] };
+}
+function cancelEmployeeDetailReads() {
+    employeeDetailRevision += 1;
+    Object.keys(employeeDetailReadTokens).forEach(key => { employeeDetailReadTokens[key] += 1; });
+    employeeModuleAccessSnapshot = employeeNotificationSnapshot = null;
+    ['employeeModuleAccessSaveBtn', 'employeeNotificationSaveBtn'].forEach(id => {
+        const button = document.getElementById(id);
+        if (button) button.disabled = true;
+    });
+}
 let telegramApprovalLinkStatusMap = {};
 const HR_MODAL_BASE_Z_INDEX = 1050;
 let hrModalStackOrderSeed = 0;
@@ -2598,6 +2616,13 @@ window.onload = async function() {
         bindHrModalStacking(el);
     });
     const inviteModalEl = document.getElementById('inviteModal');
+    document.getElementById('detailModal').addEventListener('hide.bs.modal', event => {
+        if (employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight) return event.preventDefault();
+        cancelEmployeeDetailReads();
+    });
+    document.getElementById('settingsModal').addEventListener('hide.bs.modal', event => {
+        if (companySettingsSaveInFlight) event.preventDefault();
+    });
     if (inviteModalEl && !inviteModalEl.dataset.inviteStatusResetBound) {
         inviteModalEl.dataset.inviteStatusResetBound = '1';
         inviteModalEl.addEventListener('hidden.bs.modal', () => {
@@ -3927,10 +3952,10 @@ async function loadList() {
     }
 }
 
-async function loadCompanyInfo() {
-    companyInfo = {};
+async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) {
     const coopId = String(myInfo?.coop_id || '').trim();
     if (!coopId) {
+        companyInfo = {};
         companyInfo.chairman_name = '';
         companyInfo._seal_storage_path = '';
         companyInfo._seal_preview_url = '';
@@ -3940,7 +3965,9 @@ async function loadCompanyInfo() {
         return;
     }
 
-    const { data } = await _supabase.from('ref_company_info').select('*').eq('coop_id', coopId);
+    const { data, error } = await _supabase.from('ref_company_info').select('*').eq('coop_id', coopId);
+    if (error) { if (throwOnError) throw error; return; }
+    companyInfo = {};
     if (data) data.forEach((r) => { companyInfo[r.key] = r.value; });
     companyInfo.chairman_name = resolveAdminEmployeeChairmanName(companyInfo);
 
@@ -3965,8 +3992,10 @@ async function loadCompanyInfo() {
         }
     }
 
-    syncCompanySealSettingsUi();
-    syncHrStructureSettingsUi();
+    if (refreshUi) {
+        syncCompanySealSettingsUi();
+        syncHrStructureSettingsUi();
+    }
 } // End of loadCompanyInfo
 async function loadAdvancedSettings() { const tbody = document.getElementById("advSettingsBody"); tbody.innerHTML = '<tr><td colspan="3">로딩...</td></tr>'; const coopId = String(myInfo?.coop_id || '').trim(); if (!coopId) { advancedSettingsRaw = []; tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">조합 정보를 확인할 수 없습니다.</td></tr>'; return; } const { data } = await _supabase.from('ref_settings').select('*').eq('coop_id', coopId).order('category'); if(data) { advancedSettingsRaw = data; tbody.innerHTML = data.map((r, i) => `<tr><td><small class="text-muted">${escapeHtml(r.item_key)}</small></td><td><input type="number" step="0.00001" value="${escapeHtml(r.item_value)}" id="adv_val_${i}"></td><td><small>${escapeHtml(r.description||'-')}</small></td></tr>`).join(""); } }
 
@@ -4345,6 +4374,7 @@ async function runInvite() {
 } // End of runInvite
 // 1. 설정 모달 열기 (연도 초기화 로직 추가)
 function openSettings() {
+    if (companySettingsSaveInFlight) return;
     // 1. 연도 Select 박스 초기화 (올해 ~ 2년 전까지)
     const yearSel = document.getElementById("settingTargetYear");
     yearSel.innerHTML = "";
@@ -4365,7 +4395,7 @@ function openSettings() {
 }
 
 // 2. 설정 값 불러오기 (테이블 이원화 적용)
-async function loadSettings() {
+async function loadSettings({ throwOnError = false } = {}) {
     const selYear = Number(document.getElementById("settingTargetYear").value);
     const currentYear = new Date().getFullYear();
 
@@ -4391,7 +4421,7 @@ async function loadSettings() {
         error = res.error;
     }
 
-    if (error) return showAlert("설정 로드 실패: " + error.message);
+    if (error) { if (throwOnError) throw error; return showAlert("설정 로드 실패: " + error.message); }
 
     // 데이터 매핑
     settings = {};
@@ -4443,6 +4473,13 @@ async function loadSettings() {
 
 // 3. 설정 값 저장하기 (테이블 이원화 적용)
 async function saveSettings() {
+    if (companySettingsSaveInFlight) return;
+    companySettingsSaveInFlight = true;
+    const controls = [...document.querySelectorAll('#settingsModal button, #settingsModal input, #settingsModal select, #settingsModal textarea')]
+        .map(element => ({ element, id: element.id, disabled: element.disabled, value: element.value, checked: element.checked }));
+    controls.forEach(({element}) => { element.disabled = true; });
+    let savesConfirmed = false;
+    let confirmedSteps = 0;
     try {
         const selYear = Number(document.getElementById("settingTargetYear").value);
         const currentYear = new Date().getFullYear();
@@ -4527,6 +4564,7 @@ async function saveSettings() {
 
             if (error) throw error;
         }
+        if (updates.length > 0) confirmedSteps += 1;
 
         // 3. 회사 정보 저장 (공통)
         const org = document.getElementById("set_orgName").value;
@@ -4604,7 +4642,9 @@ async function saveSettings() {
                 value: JSON.stringify(leaveTypeCatalog)
             });
         }
-        await _supabase.from('ref_company_info').upsert(cUpdates, { onConflict: 'coop_id,key' });
+        const { error: companySaveError } = await _supabase.from('ref_company_info').upsert(cUpdates, { onConflict: 'coop_id,key' });
+        if (companySaveError) throw companySaveError;
+        confirmedSteps += 1;
 
         const { error: telegramSettingsError } = await _supabase.rpc('erp_upsert_telegram_approval_settings', {
             p_enabled: telegramApprovalConfig.enabled,
@@ -4612,6 +4652,7 @@ async function saveSettings() {
             p_bot_token: null
         });
         if (telegramSettingsError) throw telegramSettingsError;
+        confirmedSteps += 1;
 
         const { data: calendarSettingsData, error: calendarSettingsError } = await _supabase.rpc('erp_upsert_calendar_ics_settings', {
             p_enabled: calendarSettingsConfig.enabled,
@@ -4619,6 +4660,7 @@ async function saveSettings() {
             p_regenerate_token: false
         });
         if (calendarSettingsError) throw calendarSettingsError;
+        savesConfirmed = true;
         companyInfo['calendar_ics_enabled'] = calendarSettingsData?.enabled === true ? 'true' : 'false';
         companyInfo['calendar_ics_source_catalog_json'] = JSON.stringify(normalizeHrCalendarSourceCatalog(calendarSettingsData?.source_catalog));
         calendarIcsSettings = {
@@ -4628,8 +4670,9 @@ async function saveSettings() {
         };
 
         // 마무리
-        await loadSettings(); // 화면 갱신
-        await loadCompanyInfo();
+        await loadCompanyInfo({ throwOnError: true, refreshUi: false });
+        await loadSettings({ throwOnError: true }); // 저장 실패와 후속 조회 실패를 구분
+        companySettingsSaveInFlight = false;
         settingsModal.hide();
         if (isHrWorkforceLiteProfile()) {
             showAlert("저장되었습니다.");
@@ -4638,7 +4681,24 @@ async function saveSettings() {
         }
 
     } catch (e) {
-        showAlert("저장 중 오류 발생: " + e.message);
+        controls.forEach(({element, id, value, checked}) => {
+            const current = id ? document.getElementById(id) : element;
+            if (!current?.isConnected || current.tagName === 'BUTTON' || current.type === 'file') return;
+            current.value = value;
+            if (typeof checked === 'boolean') current.checked = checked;
+        });
+        if (savesConfirmed) {
+            showAlert('설정은 저장되었습니다. 최신 화면을 불러오지 못했습니다. 입력 내용은 유지됩니다. 창을 닫고 다시 열어 확인해 주세요.');
+        } else {
+            showAlert((confirmedSteps > 0 ? '일부 설정은 저장되었지만 나머지는 완료하지 못했습니다. ' : '설정을 저장하지 못했습니다. ')
+                + '입력 내용은 유지됩니다. ' + String(e?.message || '잠시 후 다시 시도해 주세요.'));
+        }
+    } finally {
+        companySettingsSaveInFlight = false;
+        controls.forEach(({element, id, disabled}) => {
+            const current = id ? document.getElementById(id) : element;
+            if (current?.isConnected) current.disabled = disabled;
+        });
     }
 }
 
@@ -4677,6 +4737,8 @@ function resetEmployeeModuleAccessUi(message = '업무 권한을 불러오는 �
         note.classList.add('d-none');
     }
     if (saveBtn) saveBtn.disabled = true;
+    const rights = document.getElementById('employeeApprovedRights');
+    if (rights) rights.textContent = '결재 권한을 확인하는 중입니다.';
 } // End of resetEmployeeModuleAccessUi
 
 function getEmployeeModuleAccessSelectValue(value) {
@@ -4743,17 +4805,19 @@ function renderEmployeeModuleAccess(payload) {
 } // End of renderEmployeeModuleAccess
 
 async function loadEmployeeModuleAccess() {
-    const empId = String(currentEmpId || '').trim();
+    if (employeeModuleAccessSaveInFlight) return;
+    const { empId, isCurrent } = beginEmployeeDetailRead('modules');
     if (!empId) return;
+    employeeDetailReadTokens.approvedRights += 1;
     resetEmployeeModuleAccessUi();
     try {
         const { data, error } = await _supabase.rpc('erp_admin_get_employee_module_access', { p_emp_id: empId });
+        if (!isCurrent()) return;
         if (error) throw error;
-        if (empId !== String(currentEmpId || '').trim()) return;
         renderEmployeeModuleAccess(data || {});
         await loadEmployeeApprovedRights(empId);
     } catch (error) {
-        console.error('employee module access load failed:', error);
+        if (!isCurrent()) return;
         const status = document.getElementById('employeeModuleAccessStatus');
         if (status) {
             status.textContent = '업무 권한을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -4764,10 +4828,13 @@ async function loadEmployeeModuleAccess() {
 
 async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim()) {
     const list = document.getElementById('employeeApprovedRights');
-    if (!list || !empId) return;
+    if (!list || !empId || empId !== String(currentEmpId || '').trim()) return;
+    const { isCurrent } = beginEmployeeDetailRead('approvedRights');
     list.textContent = '결재 권한을 확인하는 중입니다.';
-    const { data, error } = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId });
-    if (empId !== String(currentEmpId || '').trim()) return;
+    let data, error;
+    try { ({data, error} = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId })); }
+    catch (_) { if (isCurrent()) list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return; }
+    if (!isCurrent()) return;
     list.replaceChildren();
     if (error) { list.textContent = '결재로 추가한 권한을 확인하지 못했습니다.'; return; }
     if (!Array.isArray(data) || !data.length) { list.textContent = '결재로 추가한 권한이 없습니다.'; return; }
@@ -4775,15 +4842,17 @@ async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').tri
         const row = document.createElement('div'); row.className = 'd-flex align-items-center justify-content-between border rounded p-2 mb-2 gap-2';
         const label = document.createElement('span'); label.textContent = right.label;
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-outline-danger btn-sm'; button.textContent = '권한 회수';
-        button.onclick = () => showConfirm(`${right.label} 권한을 회수할까요? 기본 역할·직급에서 가진 권한은 별도로 유지됩니다.`, async () => {
+        button.onclick = () => { if (!isCurrent()) return; showConfirm(`${right.label} 권한을 회수할까요? 기본 역할·직급에서 가진 권한은 별도로 유지됩니다.`, async () => {
+            if (!isCurrent()) return;
             button.disabled = true;
             try {
                 const result = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId, p_revoke_key: right.key });
                 if (result.error) throw result.error;
-                if (empId === String(currentEmpId || '').trim()) await loadEmployeeApprovedRights(empId);
+                if (!isCurrent()) return;
+                await loadEmployeeApprovedRights(empId);
                 showAlert('결재로 추가한 권한을 회수했습니다. 기본 권한은 변경하지 않았습니다.');
-            } catch (_) { button.disabled = false; showAlert('권한을 회수하지 못했습니다. 현재 권한을 다시 확인해 주세요.'); }
-        });
+            } catch (_) { if (!isCurrent()) return; button.disabled = false; showAlert('권한을 회수하지 못했습니다. 현재 권한을 다시 확인해 주세요.'); }
+        }); };
         row.append(label, button); list.append(row);
     });
 }
@@ -4802,6 +4871,9 @@ async function saveEmployeeModuleAccess() {
     });
 
     const saveBtn = document.getElementById('employeeModuleAccessSaveBtn');
+    const { isCurrent } = beginEmployeeDetailRead('modules');
+    const controls = [...document.querySelectorAll('[data-employee-module-key]')].map(element => ({element, disabled:element.disabled}));
+    controls.forEach(({element}) => {element.disabled = true;});
     employeeModuleAccessSaveInFlight = true;
     if (saveBtn) {
         saveBtn.disabled = true;
@@ -4813,9 +4885,11 @@ async function saveEmployeeModuleAccess() {
             p_access: access
         });
         if (error) throw error;
-        if (empId === String(currentEmpId || '').trim()) renderEmployeeModuleAccess(data || {});
+        if (!isCurrent()) return;
+        renderEmployeeModuleAccess(data || {});
         showAlert('직원별 업무 권한을 저장했습니다. 해당 직원은 다음 화면 이동부터 새 설정을 적용받습니다.');
     } catch (error) {
+        if (!isCurrent()) return;
         console.error('employee module access save failed:', error);
         const message = String(error?.message || '저장하지 못했습니다.');
         if (message.includes('PERMISSION_ADMIN_REQUIRED')) {
@@ -4827,8 +4901,9 @@ async function saveEmployeeModuleAccess() {
         }
     } finally {
         employeeModuleAccessSaveInFlight = false;
-        if (saveBtn) {
-            saveBtn.disabled = employeeModuleAccessSnapshot?.can_manage_access !== true;
+        controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
+        if (saveBtn && isCurrent()) {
+            saveBtn.disabled = employeeModuleAccessSnapshot?.can_manage_access !== true || !employeeModuleAccessSnapshot?.modules?.length;
             saveBtn.textContent = '업무 권한 저장';
         }
     }
@@ -4899,16 +4974,17 @@ function renderEmployeeNotificationAssignments(payload) {
 } // End of renderEmployeeNotificationAssignments
 
 async function loadEmployeeNotificationAssignments() {
-    const empId = String(currentEmpId || '').trim();
+    if (employeeNotificationSaveInFlight) return;
+    const { empId, isCurrent } = beginEmployeeDetailRead('notifications');
     if (!empId) return;
     resetEmployeeNotificationUi();
     try {
         const { data, error } = await _supabase.rpc('erp_admin_get_employee_notification_assignments', { p_emp_id: empId });
+        if (!isCurrent()) return;
         if (error) throw error;
-        if (empId !== String(currentEmpId || '').trim()) return;
         renderEmployeeNotificationAssignments(data || {});
     } catch (error) {
-        console.error('employee notification assignments load failed:', error);
+        if (!isCurrent()) return;
         const status = document.getElementById('employeeNotificationStatus');
         if (status) {
             status.textContent = '알림 담당 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -4919,6 +4995,8 @@ async function loadEmployeeNotificationAssignments() {
 
 async function saveEmployeeNotificationAssignments() {
     if (employeeNotificationSaveInFlight) return;
+    if (!employeeNotificationSnapshot || employeeNotificationSnapshot.employee?.is_active === false
+        || !employeeNotificationSnapshot.categories?.length) return;
     const empId = String(currentEmpId || '').trim();
     if (!empId) return showAlert('직원 정보를 먼저 선택해 주세요.');
     const assignments = {};
@@ -4928,6 +5006,9 @@ async function saveEmployeeNotificationAssignments() {
     });
 
     const saveBtn = document.getElementById('employeeNotificationSaveBtn');
+    const { isCurrent } = beginEmployeeDetailRead('notifications');
+    const controls = [...document.querySelectorAll('[data-employee-notification-key]')].map(element => ({element, disabled:element.disabled}));
+    controls.forEach(({element}) => {element.disabled = true;});
     employeeNotificationSaveInFlight = true;
     if (saveBtn) {
         saveBtn.disabled = true;
@@ -4939,28 +5020,34 @@ async function saveEmployeeNotificationAssignments() {
             p_assignments: assignments
         });
         if (error) throw error;
-        if (empId === String(currentEmpId || '').trim()) renderEmployeeNotificationAssignments(data || {});
+        if (!isCurrent()) return;
+        renderEmployeeNotificationAssignments(data || {});
         const linked = data?.employee?.telegram_linked === true;
         showAlert(linked
             ? 'Telegram 알림 담당 설정을 저장했습니다.'
             : '알림 담당 설정을 저장했습니다. 이 직원이 Telegram 연결을 완료해야 실제 알림을 받을 수 있습니다.');
     } catch (error) {
+        if (!isCurrent()) return;
         console.error('employee notification assignments save failed:', error);
         showAlert('알림 담당 저장 실패: ' + String(error?.message || error || '저장하지 못했습니다.'));
     } finally {
         employeeNotificationSaveInFlight = false;
-        if (saveBtn) {
-            saveBtn.disabled = !employeeNotificationSnapshot;
+        controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
+        if (saveBtn && isCurrent()) {
+            saveBtn.disabled = !employeeNotificationSnapshot || employeeNotificationSnapshot.employee?.is_active === false
+                || !employeeNotificationSnapshot.categories?.length;
             saveBtn.textContent = '알림 담당 저장';
         }
     }
 } // End of saveEmployeeNotificationAssignments
 
 async function openDetail(u) {
-    if (employeeBasicSaveInFlight || salarySaveInFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
+    if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
     const revision = ++employeeDetailRevision;
     const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
+    resetEmployeeModuleAccessUi();
+    resetEmployeeNotificationUi();
     employeeBasicBaseline = employeeBasicSnapshot(u);
     currentAnnualSalary = u.base_salary || 0;
     currentEmpHireDate = u.hire_date;

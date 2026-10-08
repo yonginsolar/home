@@ -1,9 +1,9 @@
-/* v1.1.1 - Bind legacy privacy contact blocks to editable contact fields. */
+/* v1.1.2 - Serialize legal editing, confirmation, saving and reloading. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
   const state = new Map();
-  let loaded = false, loading = false, context = null;
+  let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
   const el = (kind, suffix) => document.getElementById(`site-legal-${kind}-${suffix}`);
   function privacyTemplate(content) {
@@ -33,11 +33,20 @@
   function confirmAction(message) {
     return new Promise(resolve=>{
       const modal=document.getElementById('customConfirmModal');let accepted=false;
-      myConfirm(message,()=>{accepted=true;resolve(true);});
       modal.addEventListener('hidden.bs.modal',()=>setTimeout(()=>{if(!accepted)resolve(false);},0),{once:true});
+      myConfirm(message,()=>{accepted=true;resolve(true);});
     });
   }
   function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button,input,textarea')) b.disabled=!enabled; }
+  function syncEnabled() {
+    for(const kind of Object.keys(labels))setEnabled(kind,loaded&&!loading&&!actionInFlight&&permitted());
+    if(retryButton)retryButton.disabled=loading||actionInFlight;
+  }
+  function beginAction() {
+    if(!loaded||loading||actionInFlight||!permitted())return false;
+    actionInFlight=true;syncEnabled();return true;
+  }
+  function endAction() { actionInFlight=false;syncEnabled(); }
   function setForm(kind, doc={}) {
     el(kind,'content').value=kind==='privacy'?privacyTemplate(doc.content||''):String(doc.content||'');el(kind,'effective-date').value=String(doc.effective_date||'');
     if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).value=String(doc.contact_details?.[key]??(key==='representative'||key==='address'?context?.[key]:'')??'');
@@ -79,30 +88,33 @@
     }
   }
   async function fetchDocuments() {
-    if(loading||!permitted())return;
+    if(loading||actionInFlight||!permitted())return;
     if(loaded) return; // Tab changes must not overwrite an edited draft.
-    loading=true;for(const kind of Object.keys(labels))setEnabled(kind,false);
+    loading=true;syncEnabled();
     try {
       const [docsResult,ctxResult]=await Promise.all([_supabase.rpc('get_my_site_legal_documents'),_supabase.rpc('get_my_site_legal_context')]);
       if(docsResult.error||ctxResult.error||!ctxResult.data?.coop_name)throw Error('LEGAL_READ_FAILED');
       context=ctxResult.data;el('privacy','processor').value=context.coop_name;const data=docsResult.data;
-      for(const kind of Object.keys(labels)){setForm(kind,data?.[kind]);setEnabled(kind,true);}loaded=true;
+      for(const kind of Object.keys(labels))setForm(kind,data?.[kind]);loaded=true;
     } catch(error) {
       for(const kind of Object.keys(labels))el(kind,'status').textContent='문서를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
       myAlert('가입·약관 문서를 불러오지 못했습니다.','warning');
-    } finally {loading=false;}
+    } finally {loading=false;syncEnabled();}
   }
   async function loadSample(kind) {
-    if(!loaded||state.get(kind)?.busy)return;
-    if(el(kind,'content').value.trim() && !(await confirmAction('현재 편집 내용 대신 샘플을 불러올까요? 저장·등록된 문서는 바뀌지 않습니다.')))return;
-    const sample=window.CoopSiteLegalSamples?.[kind];if(!sample)return myAlert('샘플을 불러오지 못했습니다. 새로고침해 주세요.','warning');
-    // Only organization fields are automatic. Never copy a staff member's private contact details.
-    el(kind,'content').value=sample.replace(/\{\{(조합명|대표자|주소)\}\}/g,(token,label)=>kind==='privacy'&&label!=='조합명'?token:String(context?.[{'조합명':'coop_name','대표자':'representative','주소':'address'}[label]]||token));
-    if(kind==='privacy')for(const key of ['representative','address'])el(kind,key).value=String(context?.[key]||'');
-    el(kind,'effective-date').value='';updateStatus(kind);
+    if(!beginAction())return;
+    try {
+      if(el(kind,'content').value.trim() && !(await confirmAction('현재 편집 내용 대신 샘플을 불러올까요? 저장·등록된 문서는 바뀌지 않습니다.')))return;
+      if(!permitted())return;
+      const sample=window.CoopSiteLegalSamples?.[kind];if(!sample)return myAlert('샘플을 불러오지 못했습니다. 새로고침해 주세요.','warning');
+      // Only organization fields are automatic. Never copy a staff member's private contact details.
+      el(kind,'content').value=sample.replace(/\{\{(조합명|대표자|주소)\}\}/g,(token,label)=>kind==='privacy'&&label!=='조합명'?token:String(context?.[{'조합명':'coop_name','대표자':'representative','주소':'address'}[label]]||token));
+      if(kind==='privacy')for(const key of ['representative','address'])el(kind,key).value=String(context?.[key]||'');
+      el(kind,'effective-date').value='';updateStatus(kind);
+    } finally {endAction();}
   }
   async function save(kind, action) {
-    const s=state.get(kind);if(!loaded||!s||s.busy||!permitted())return;
+    const s=state.get(kind);if(!loaded||loading||actionInFlight||!s||s.busy||!permitted())return;
     const input=values(kind),publish=action==='publish';
     const rendered=renderText(input.content,kind);
     if(publish&&kind==='privacy'){
@@ -113,17 +125,27 @@
       if(Object.entries(ctx).some(([key,v])=>key==='officer_phone'?!rendered.replace(/\D/g,'').includes(v.replace(/\D/g,'')):!rendered.includes(v)))return myAlert('담당자 정보와 처리방침 본문의 내용이 일치하지 않습니다. 본문과 등록 전 미리보기를 확인해 주세요.','warning');
     }
     if(publish && (!input.effective_date || rendered.trim().length<(kind==='signup_purpose'?20:100) || /\{\{[^}]+\}\}/.test(rendered)))return myAlert('시행일과 내용을 입력하고, {{ }}로 표시된 샘플 항목을 실제 내용으로 바꿔 주세요.','warning');
-    if((publish||action==='unpublish')&&!(await confirmAction(action==='unpublish'?'등록을 해제할까요? 해당 문구가 더 이상 공개되지 않습니다.':`${labels[kind]}을 등록하고 적용할까요?`)))return;
-    s.busy=true;setEnabled(kind,false);
+    if(!beginAction())return;
+    s.busy=true;
     try {
+      if((publish||action==='unpublish')&&!(await confirmAction(action==='unpublish'?'등록을 해제할까요? 해당 문구가 더 이상 공개되지 않습니다.':`${labels[kind]}을 등록하고 적용할까요?`)))return;
+      if(!permitted())return;
       const request=action==='unpublish' ? _supabase.rpc('unpublish_site_legal_document',{p_document_type:kind,p_expected_revision:s.doc.revision||0}) : _supabase.rpc('save_site_legal_document_v2',{p_document_type:kind,p_content:input.content,p_effective_date:input.effective_date||null,p_publish:publish,p_expected_revision:s.doc.revision||0,p_contact_details:input.contact_details||null});
       const {data,error}=await request;if(error)throw error;
       setForm(kind,data);myAlert(action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
     } catch(error) {const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};myAlert(messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.','warning');}
-    finally {state.get(kind).busy=false;setEnabled(kind,true);}
+    finally {state.get(kind).busy=false;endAction();}
   }
   window.fetchSiteLegalDocuments=fetchDocuments;
-  window.addEventListener('beforeunload',event=>{if([...state.keys()].some(dirty)){event.preventDefault();event.returnValue='';}});
-  function start(){render();const root=document.getElementById('sub-legal');if(!root)return;const retry=document.createElement('button');retry.type='button';retry.className='btn btn-sm btn-outline-secondary mb-3';retry.textContent='다시 불러오기';retry.onclick=async()=>{if([...state.keys()].some(dirty)&&!(await confirmAction('저장하지 않은 수정을 버리고 다시 불러올까요?')))return;loaded=false;await fetchDocuments();};root.prepend(retry);}
+  window.addEventListener('beforeunload',event=>{if(actionInFlight||[...state.keys()].some(dirty)){event.preventDefault();event.returnValue='';}});
+  function start(){render();const root=document.getElementById('sub-legal');if(!root)return;retryButton=document.createElement('button');retryButton.type='button';retryButton.className='btn btn-sm btn-outline-secondary mb-3';retryButton.textContent='다시 불러오기';retryButton.onclick=async()=>{
+    if(loading||actionInFlight||!permitted())return;
+    actionInFlight=true;syncEnabled();
+    let confirmed=false;
+    try {confirmed=![...state.keys()].some(dirty)||await confirmAction('저장하지 않은 수정을 버리고 다시 불러올까요?');}
+    finally {endAction();}
+    if(!confirmed)return;
+    loaded=false;await fetchDocuments();
+  };root.prepend(retryButton);syncEnabled();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();
