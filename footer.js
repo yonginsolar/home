@@ -1,5 +1,5 @@
 /*
-Version: v1.0.11
+Version: v1.0.12
 Change: Link explicitly registered tenant terms while preserving existing main-cooperative policies.
 */
 // footer.js
@@ -60,16 +60,18 @@ window.loadFooterSiteLegalStatus = async function loadFooterSiteLegalStatus() {
   const patchRow = document.getElementById('footer-patch-row');
   const mainPolicy=['yonginsolar.kr','www.yonginsolar.kr','localhost','127.0.0.1'].includes(window.location.hostname)||window.location.protocol==='file:';
   try {
-    const client = window.CoopRouteGuard?.createSupabaseClient
+    const client = window._client || window._supabase || window.__footerReadClient || (window.__footerReadClient = window.CoopRouteGuard?.createSupabaseClient
       ? window.CoopRouteGuard.createSupabaseClient(
           window.supabase,
           'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
-          'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
+          'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',
+          { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'coop-footer-public-read' } }
         )
       : window.supabase.createClient(
           'https://ifdqlwxgqgsvnawmhlfc.supabase.co',
-          'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h'
-        );
+          'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h',
+          { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'coop-footer-public-read' } }
+        ));
     const { data, error } = await client.rpc('get_public_site_legal_status');
     if (error) throw error;
     const hasTerms = data?.terms === true;

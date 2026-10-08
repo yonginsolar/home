@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Version: v1.1.0 -->
+<!-- Version: v1.1.1 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
@@ -12,6 +12,9 @@
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
+<script src="../shared/member_capital.js?v=20261008-1"></script>
+<script src="member_capital_settings.js?v=20261008-1"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
   <script src="./erp_runtime_guard.js?v=20260919-1"></script>
   <style>
     body{padding:24px;background:#f8fafc;word-break:keep-all}
@@ -44,7 +47,7 @@
         <div class="section-rule"></div>
         <h2 class="section-title">출자 및 납입 안내</h2>
         <div class="row g-3">
-          <div class="col-md-6"><label for="member_export_share_unit_amount" class="form-label">출자 1좌 금액</label><div class="input-group"><input id="member_export_share_unit_amount" type="number" inputmode="numeric" min="1" max="1000000000" step="1" class="form-control"><span class="input-group-text">원</span></div><div class="form-text">출자증서·명부의 출자좌수 계산에 사용합니다.</div></div>
+          <div class="col-md-6"><label for="member_export_share_unit_amount" class="form-label">출자 1좌 금액</label><div class="input-group"><input id="member_export_share_unit_amount" type="number" class="form-control" readonly><span class="input-group-text">원</span></div><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div>
           <div class="col-md-6"><label class="form-label">현재 출자좌수</label><div id="shareSummary" class="form-control bg-light" role="status">조회 중</div><div class="form-text">납입이 확인된 조합원의 출자금으로 계산합니다.</div></div>
           <div class="col-md-4"><label for="member_capital_deposit_bank" class="form-label">출자금 납입 은행</label><input id="member_capital_deposit_bank" class="form-control" maxlength="80"></div>
           <div class="col-md-4"><label for="member_capital_deposit_account" class="form-label">출자금 납입 계좌</label><input id="member_capital_deposit_account" class="form-control" maxlength="100"></div>
@@ -64,6 +67,7 @@
     const client = window.supabase.createClient('https://ifdqlwxgqgsvnawmhlfc.supabase.co', 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h', {
       global: { headers: { 'x-erp-host': String(location.hostname || '').trim().toLowerCase() } }
     });
+    window._client = client;
     const statusBox = document.getElementById('status');
     const form = document.getElementById('companyForm');
     const keys = [
@@ -229,6 +233,7 @@
         if (!info.company_contact_email) document.getElementById('company_contact_email').value = info.company_email || '';
         imagePaths = { seal_url: info.seal_url || '', logo_horizontal_url: info.logo_horizontal_url || '' };
         await refreshStoredPreviews();
+        await refreshMemberCapitalDisplays();
         await loadShareSummary();
         form.classList.remove('d-none');
         statusBox.classList.add('d-none');
@@ -250,7 +255,7 @@
         }
         const newSealPath = await uploadImageIfSelected('sealFile', 'company-seals', 1200);
         const newLogoPath = await uploadImageIfSelected('logoFile', 'coop-branding', 1600);
-        const updates = keys.map(key => ({ coop_id: coopId, key, value: values[key] }));
+        const updates = keys.filter(key => key !== 'member_export_share_unit_amount').map(key => ({ coop_id: coopId, key, value: values[key] }));
         updates.push({ coop_id: coopId, key: 'orgName', value: values.company_name });
         updates.push({ coop_id: coopId, key: 'ceoName', value: values.chairman_name });
         updates.push({ coop_id: coopId, key: 'address', value: values.company_address });
@@ -281,7 +286,9 @@
     });
     document.getElementById('sealFile').addEventListener('change', () => previewSelectedFile('sealFile', 'sealPreview', '등록된 직인이 없습니다.'));
     document.getElementById('logoFile').addEventListener('change', () => previewSelectedFile('logoFile', 'logoPreview', '등록된 로고가 없습니다.'));
-    document.getElementById('member_export_share_unit_amount').addEventListener('input', renderShareSummary);
+    document.addEventListener('hidden.bs.modal', event => {
+      if (event.target?.id === 'memberCapitalSettingsModal') renderShareSummary();
+    });
     boot();
   </script>
 </body>

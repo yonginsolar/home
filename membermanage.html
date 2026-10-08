@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.162
+Version: v1.0.163
 Change: 2026-10-06 - Recognize Hwaseong-specific social login identities.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.162 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.163 | membermanage.html');</script>
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
@@ -43,13 +43,14 @@ allowKakaoApp: true
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="cert_generator.js?v=20260929_01"></script>
+<script src="cert_generator.js?v=20261008_01"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
 <script src="badges.js?v=20260828-1"></script>
 <script src="telegram_bot.js"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260401-1"></script>
+<script src="shared/member_capital.js?v=20261008-1"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
 
@@ -1594,7 +1595,7 @@ gtag('config', 'G-TR217L7JN9');
 <h6 class="fw-bold mb-2"><i class="bi bi-arrow-repeat me-1"></i>재가입 신청</h6>
 <p class="small text-muted">이전 출자금 환급이 끝난 뒤 새 출자 약정으로 다시 가입할 수 있습니다. 과거 조합원 기간과 새 가입 기간은 별도로 보관됩니다.</p>
 <label class="form-label small fw-bold" for="formerRejoinAmount">새 출자 약정금</label>
-<input class="form-control mb-2" type="number" id="formerRejoinAmount" min="100000" step="10000" value="100000">
+<input class="form-control mb-2" type="number" id="formerRejoinAmount">
 <label class="form-label small fw-bold" for="formerRejoinReason">메모 (선택)</label>
 <textarea class="form-control mb-3" id="formerRejoinReason" rows="2" placeholder="재가입 신청과 함께 전할 내용이 있으면 적어주세요."></textarea>
 <button type="button" class="btn btn-success w-100 fw-bold" onclick="submitFormerMemberRejoin()">재가입 신청</button>
@@ -1918,15 +1919,15 @@ NO. <span id="infoMemberId">-</span>
 </button>
 </div>
 <div class="mb-3">
-<label class="form-label small">약정 금액 (1만원 단위)</label>
-<input type="number" id="exAmount" class="form-control" placeholder="금액 입력" step="10000">
+<label class="form-label small">약정 금액</label>
+<input type="number" id="exAmount" class="form-control" placeholder="금액 입력">
 </div>
 <button class="btn btn-success w-100 fw-bold" onclick="submitApplication('extra')">신청하기</button>
 </div>
 
 <div id="tabReduction" class="hidden">
 <h6 class="fw-bold mb-3">감자 신청</h6>
-<div class="alert alert-warning small py-2"><i class="bi bi-exclamation-triangle me-1"></i> 최소 10만원 이상의 출자금은 유지해야 합니다.</div>
+<div class="alert alert-warning small py-2" id="capitalReductionHint"></div>
 <div class="mb-3">
 <label class="form-label small">환급 요청액</label>
 <input type="number" id="redAmount" class="form-control" placeholder="금액 입력">
@@ -2227,8 +2228,8 @@ oninput="autoHyphen(this)"> </div>
 
 <div class="mb-2">
 <label class="small text-muted fw-bold">초기 출자금 (필수)</label>
-<input type="number" id="newFamCapital" class="form-control form-control-sm" placeholder="최소 100,000원" step="10000">
-<div class="form-text x-small text-secondary">최소 10만원 이상, 1만원 단위로 입력해주세요.</div>
+<input type="number" id="newFamCapital" class="form-control form-control-sm">
+<div class="form-text x-small text-secondary" id="childCapitalHint"></div>
 </div>
 
 <div class="p-2 bg-light rounded border mb-3">
@@ -2451,7 +2452,7 @@ oninput="autoHyphen(this)">
 <img src="//t1.daumcdn.net/postcode/resource/images/close.png" id="btnCloseLayer" style="cursor:pointer;position:absolute;right:-3px;top:-3px;z-index:1" onclick="closeDaumPostcode()" alt="닫기 버튼">
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
-<script src="footer.js?v=1.0.7"></script>
+<script src="footer.js?v=1.0.12"></script>
 <script src="home_patch_note.js?v=20260929-1"></script>
 
 <script>
@@ -4851,6 +4852,7 @@ setProfileDetailsExpanded(next);
 }
 
 async function loadMembermanageBranding() {
+try { await loadMemberCapitalRules(); } catch (_) { /* Relevant actions retry and fail closed. */ }
 const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 if (!coopId) return currentMemberCoopName;
 const tenantCachedName = readMembermanageBrandingCache(coopId);
@@ -4911,6 +4913,19 @@ return currentMemberCoopName;
 CoopSafeLog.warn("hydrateMembermanagePublicBranding failed:", e);
 return currentMemberCoopName;
 }
+}
+
+async function loadMemberCapitalRules() {
+const rules = await CoopMemberCapital.load(_supabase, true);
+document.getElementById('childCapitalHint').textContent = CoopMemberCapital.guidance(rules);
+document.getElementById('capitalReductionHint').textContent = `최소 ${rules.minimum.toLocaleString()}원 이상의 출자금은 유지해야 합니다.`;
+CoopMemberCapital.applyInput(document.getElementById('newFamCapital'), rules);
+CoopMemberCapital.applyInput(document.getElementById('formerRejoinAmount'), rules);
+CoopMemberCapital.applyInput(document.getElementById('exAmount'), rules, false);
+CoopMemberCapital.applyInput(document.getElementById('redAmount'), rules, false);
+const rejoin = document.getElementById('formerRejoinAmount');
+if (rejoin && !rejoin.value) rejoin.value = rejoin.min;
+return rules;
 }
 
 function applyMembermanageBranding() {
@@ -7604,15 +7619,20 @@ CoopSafeLog.warn("[extra-capital-kakao] applicant notice skipped:", error?.messa
 async function submitApplication(type) {
 let amount = 0, reason = '';
 const totalCap = Number(curMem.total_capital || 0);
+let rules;
+if (type === 'extra' || type === 'reduction') {
+try { rules = await loadMemberCapitalRules(); }
+catch (_) { return showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); }
+}
 
 if(type === 'extra') {
 amount = Number(document.getElementById('exAmount').value);
-if(amount < 10000) return showModal('1만원 이상 입력해주세요.');
+if(!CoopMemberCapital.valid(amount, rules, false)) return showModal(`${rules.unit.toLocaleString()}원 단위로 입력해주세요.`);
 } 
 else if(type === 'reduction') {
 amount = Number(document.getElementById('redAmount').value);
-if(amount <= 0) return showModal('금액을 입력해주세요.');
-if(totalCap - amount < 100000) return showModal(`잔액 10만원 이상 유지해야 합니다.
+if(!CoopMemberCapital.valid(amount, rules, false)) return showModal(`${rules.unit.toLocaleString()}원 단위로 입력해주세요.`);
+if(totalCap - amount < rules.minimum) return showModal(`잔액 ${rules.minimum.toLocaleString()}원 이상 유지해야 합니다.
 (현재: ${totalCap.toLocaleString()}원)`);
 if(!document.getElementById('checkRedAgree').checked) return showModal('안내 사항에 동의해주세요.');
 } 
@@ -7954,7 +7974,7 @@ setTimeout(() => bankInput.focus({ preventScroll: true }), 350);
 }
 
 // [수정] 탭 전환 (감자 한도·탈퇴 환급계좌 확인 포함)
-function toggleTab(type, btn) {
+async function toggleTab(type, btn) {
 if (type === 'partner' && isSiteMemberPortalProfile()) return;
 if (type === 'partner' && !isCoopRuntimeModuleEnabled('site_admin')) {
 showModal('현재 조합에서 홈페이지 관리 모듈 사용이 중지되었습니다.');
@@ -7984,8 +8004,11 @@ syncWithdrawRefundAccountUi();
 }
 
 if(type === 'reduction') {
+let rules;
+try { rules = await loadMemberCapitalRules(); }
+catch (_) { showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); return; }
 const total = Number(curMem.total_capital || 0);
-const limit = total - 100000;
+const limit = Math.floor((total - rules.minimum) / rules.unit) * rules.unit;
 const display = document.getElementById('redLimitDisplay');
 const input = document.getElementById('redAmount');
 
@@ -8654,7 +8677,7 @@ btns[1].classList.add('active');
 }
 
 // [수정] 1차 검증 및 동의서 모달 호출
-function submitNewChild() {
+async function submitNewChild() {
 // 1. 입력값 가져오기
 const name = document.getElementById('newFamName').value;
 const rrn1 = document.getElementById('newFamRrn1').value;
@@ -8682,13 +8705,11 @@ if (!isMinor(rrn1, rrn2)) {
 return showModal('가족(자녀) 신규 등록은\n미성년자만 가능합니다.');
 }
 
-// 4. [검증] 출자금 (10만원 이상 & 1만원 단위)
-if (capital < 100000) {
-return showModal('초기 출자금은 최소 100,000원 이상이어야 합니다.');
-}
-if (capital % 10000 !== 0) {
-return showModal('출자금은 1만원 단위로 입력해주세요.');
-}
+// Same cooperative-specific rules as self-registration.
+let rules;
+try { rules = await loadMemberCapitalRules(); }
+catch (_) { return showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); }
+if (!CoopMemberCapital.valid(capital, rules)) return showModal(CoopMemberCapital.guidance(rules));
 
 // 5. 동의서 모달 띄우기 (데이터 전달)
 openConsentModal({
@@ -9559,8 +9580,11 @@ showOnly('formerMemberSection');
 async function submitFormerMemberRejoin() {
 const amount = Number(document.getElementById('formerRejoinAmount')?.value || 0);
 const reason = String(document.getElementById('formerRejoinReason')?.value || '').trim();
-if (amount < 100000 || amount % 10000 !== 0) {
-showModal('새 출자 약정금은 10만원 이상, 1만원 단위로 입력해주세요.');
+let rules;
+try { rules = await loadMemberCapitalRules(); }
+catch (_) { return showModal('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); }
+if (!CoopMemberCapital.valid(amount, rules)) {
+showModal(CoopMemberCapital.guidance(rules));
 return;
 }
 

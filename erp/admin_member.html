@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.223
+Version: v1.0.224
 Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly registered documents.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.223';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.224';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -17,6 +17,8 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
   </script>
 <meta charset="utf-8">
 <script src="../shared/member_information.js?v=20261002-1"></script>
+<script src="../shared/member_capital.js?v=20261008-1"></script>
+<script src="member_capital_settings.js?v=20261008-1"></script>
 <script src="member_information_admin.js?v=20261002-2"></script>
 <script src="member_demographics.js?v=20261002-1"></script>
 <script src="../shared/guardian-admin.js?v=20260915-2" defer></script>
@@ -59,7 +61,7 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="/cert_generator.js?v=20260929_01"></script>
+<script src="/cert_generator.js?v=20261008_01"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
 
 
@@ -906,10 +908,19 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
     </div>
 </div>
 
+<div class="modal fade" id="memberCapitalSettingsModal" tabindex="-1" aria-labelledby="memberCapitalSettingsTitle" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="memberCapitalSettingsTitle">출자 기준 설정</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div>
+    <div class="modal-body"><div class="mb-3"><label class="form-label" for="member-capital-minimum">최소 출자금</label><div class="input-group"><input class="form-control" type="number" id="member-capital-minimum" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div></div>
+      <div><label class="form-label" for="member-capital-unit">출자 1좌 금액</label><div class="input-group"><input class="form-control" type="number" id="member-capital-unit" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div></div>
+    </div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">취소</button><button class="btn btn-primary" id="member-capital-save" onclick="saveMemberCapitalSettings()">저장</button></div>
+  </div></div>
+</div>
 <div class="tab-pane fade" id="tab-members">
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <h3 class="fw-bold m-0" style="font-family:'GmarketSans';">조합원 명부</h3>
         <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-dark hidden" id="member-capital-settings-button" onclick="openMemberCapitalSettings()">출자 기준 설정</button>
             <button class="btn btn-sm btn-outline-dark hidden" id="member-certificate-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button>
             <button class="btn btn-sm btn-primary" onclick="openCreateMemberModal()">+ 조합원 등록</button>
         </div>
@@ -1031,8 +1042,8 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
             </div>
             <div class="col-md-6">
               <label class="form-label small fw-bold" for="member-certificate-share-unit">출자 1좌 금액</label>
-              <div class="input-group"><input type="number" class="form-control" id="member-certificate-share-unit" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div>
-              <div class="form-text">출자증서의 출자좌수 계산에 사용합니다.</div>
+              <div class="input-group"><input type="number" class="form-control" id="member-certificate-share-unit" readonly><span class="input-group-text">원</span></div>
+              <button class="btn btn-link btn-sm px-0" type="button" onclick="openMemberCapitalSettings()">출자 기준 설정</button>
             </div>
             <div class="col-12">
               <label class="form-label small fw-bold" for="member-certificate-seal-file">조합 직인</label>
@@ -2538,10 +2549,10 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <div class="col-md-6">
 <label class="form-label small fw-bold">출자 1좌 금액</label>
 <div class="input-group input-group-sm">
-<input type="number" id="memberExportShareUnitAmount" class="form-control" min="1" step="1" placeholder="예: 100000">
-<button class="btn btn-outline-secondary" type="button" onclick="saveMemberExportShareUnitSetting()">저장</button>
+<input type="number" id="memberExportShareUnitAmount" class="form-control" readonly>
+<button class="btn btn-outline-secondary" type="button" onclick="openMemberCapitalSettings()">출자 기준 설정</button>
 </div>
-<div class="form-text">엑셀 다운로드 계산용 설정입니다. 관리 화면 표에는 표시하지 않습니다.</div>
+<div class="form-text">조합의 출자 기준으로 출자좌수를 계산합니다.</div>
 </div>
 </div>
 <div class="mt-3" id="pwdArea" style="display:none;">
@@ -4685,7 +4696,7 @@ async function openMemberCertificateSettingsModal() {
         if (error) throw error;
         const config = data && typeof data === 'object' ? data : {};
         chairmanInput.value = String(config.chairman_name || config.ceoName || '');
-        shareUnitInput.value = String(config.member_export_share_unit_amount || '');
+        await refreshMemberCapitalDisplays();
         document.getElementById('member-org-address').value = String(config.company_address || '');
         document.getElementById('member-org-contact').value = String(config.company_contact || '');
         document.getElementById('member-org-email').value = String(config.company_email || '');
@@ -5823,9 +5834,7 @@ async function loadMemberExportModalSettings() {
         );
         if (shareError) throw shareError;
         const configMap = new Map((companyConfigs || []).map((row) => [String(row.key || '').trim(), row.value]));
-        if (shareUnitInput && configMap.get(MEMBER_EXPORT_SHARE_UNIT_KEY)) {
-            shareUnitInput.value = String(configMap.get(MEMBER_EXPORT_SHARE_UNIT_KEY));
-        }
+        await refreshMemberCapitalDisplays();
         g_memberExportOrgName = String(configMap.get('company_name') || configMap.get('orgName') || '').trim();
     } catch (error) {
         CoopSafeLog.warn("member export share unit load failed:", error);
@@ -5842,27 +5851,6 @@ async function loadMemberExportModalSettings() {
     }
     syncExcelOptionState();
 } // End of loadMemberExportModalSettings
-
-async function saveMemberExportShareUnitSetting(options = {}) {
-    const silent = !!options.silent;
-    const input = document.getElementById('memberExportShareUnitAmount');
-    const normalized = normalizeMemberExportShareUnitAmount(input?.value);
-    if (!normalized) {
-        if (!silent) myAlert('출자 1좌 금액을 정확히 입력해주세요.', 'warning');
-        return false;
-    }
-    try {
-        const payload = await withAdminTenantPayload({ key: MEMBER_EXPORT_SHARE_UNIT_KEY, value: String(normalized) });
-        const { error } = await _supabase.from('ref_company_info').upsert(payload, { onConflict: 'coop_id,key' });
-        if (error) throw error;
-        if (input) input.value = String(normalized);
-        if (!silent) myAlert('출자 1좌 금액 설정이 저장되었습니다.');
-        return true;
-    } catch (error) {
-        if (!silent) myAlert('출자 1좌 금액 저장 실패: ' + error.message, 'error');
-        return false;
-    }
-} // End of saveMemberExportShareUnitSetting
 
 async function saveMemberExportSecurePin() {
     const input = document.getElementById('memberExportSecurePin');
@@ -6658,7 +6646,9 @@ myConfirm(`총 ${g_member_import_rows.length}건 중 ${validRows.length}건을 �
 async function downloadExcel() {
     const type = getSelectedExcelOption();
     const cutoffDate = getMemberExportCutoffDate();
-    const shareUnitAmount = normalizeMemberExportShareUnitAmount(document.getElementById('memberExportShareUnitAmount')?.value);
+    let shareUnitAmount;
+    try { shareUnitAmount = (await refreshMemberCapitalDisplays()).unit; }
+    catch (_) { return myAlert('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.', 'error'); }
     const coopName = String(g_memberExportOrgName || '').trim();
     let dataToExport = [];
     let fileName = "조합원명부_일반.xlsx";
@@ -6672,8 +6662,6 @@ async function downloadExcel() {
         return myAlert('출자 1좌 금액을 입력해주세요.', 'warning');
     }
 
-    const shareUnitSaved = await saveMemberExportShareUnitSetting({ silent: true });
-    if (!shareUnitSaved) return;
 
     showLoading(true);
     let snapshotMap = {};
@@ -12669,6 +12657,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-dashboard', dashboardEnabled],
 ['memberAdminCategory', memberAdminEnabled],
 ['nav-members', memberAdminEnabled],
+['member-capital-settings-button', memberAdminEnabled],
 ['nav-org-settings', isSiteMemberProfile && memberAdminEnabled],
 ['nav-meeting-participation', meetingParticipationEnabled],
 ['nav-funds-manage', memberAdminEnabled && !isSiteMemberProfile],

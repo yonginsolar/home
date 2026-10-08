@@ -1,5 +1,5 @@
 /*
-Version: v1.0.16
+Version: v1.0.17
 Change: Confirm the issuing cooperative's share unit and seal before assigning a certificate number.
 */
 
@@ -262,7 +262,7 @@ async function buildCertCompanyPrintProfile(supabaseClient, options = {}) {
         bizNum: trimCertCompanyValue(info?.bizNum),
         logoPath: trimCertCompanyValue(info?.logo_horizontal_url),
         sealPath: trimCertCompanyValue(info?.seal_url),
-        shareUnitAmount: Number(info?.member_export_share_unit_amount || 0),
+        shareUnitAmount: Number(info?.member_export_share_unit_amount || 10000),
         logoDataUrl: '',
         logoRatio: 0,
         sealDataUrl: ''

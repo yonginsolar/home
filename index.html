@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.115
+Version: v1.0.116
 Change: Apply tenant section settings before exposing shared homepage sections.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: Apply tenant section settings before exposing shared homepage sections.
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.115 | index.html');</script>
+<script>console.log('[Version] v1.0.116 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2417,7 +2417,7 @@ Change: Apply tenant section settings before exposing shared homepage sections.
 
 
 
-  <script src="footer.js?v=1.0.10"></script>
+  <script src="footer.js?v=1.0.12"></script>
  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/aos@2.3.1/dist/aos.js" integrity="sha384-wziAfh6b/qT+3LrqebF9WeK4+J5sehS6FA10J1t3a866kJ/fvU5UwofWnQyzLtwu" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@srexi/purecounterjs@1.5.0/dist/purecounter_vanilla.js" integrity="sha384-v4ucdM+yXOiQCffr1eJAjJPUVaeCw/Zz4vIGVaqWKBQ+KKkG+QujWt9vHnLa7N3Y" crossorigin="anonymous"></script>
@@ -6186,7 +6186,7 @@ function openPlantDetail(id) {
         return new URL('membermanage.html', window.location.href).href;
     }
 
-    function setHomeAuthUiState(isLoggedIn) {
+    function setHomeAuthUiState(isLoggedIn, membershipState = 'none') {
         const authLink = document.getElementById('homeAuthLink');
         const signupLink = document.getElementById('homeSignupLink');
         const memberUrl = getHomeMembermanageUrl();
@@ -6199,19 +6199,28 @@ function openPlantDetail(id) {
         }
 
         if (signupLink) {
-            signupLink.textContent = isLoggedIn ? '내 정보 보기' : '조합원 가입';
-            signupLink.href = isLoggedIn ? memberUrl : 'signup.html';
-            signupLink.setAttribute('aria-label', isLoggedIn ? '내 정보 보기' : '조합원 가입');
+            const hasProfile = isLoggedIn && ['active', 'pending', 'former'].includes(membershipState);
+            const label = membershipState === 'pending' ? '가입 신청 확인' : membershipState === 'former' ? '내 신청 보기' : '내 정보 보기';
+            signupLink.textContent = hasProfile ? label : '조합원 가입';
+            signupLink.href = hasProfile ? memberUrl : 'signup.html';
+            signupLink.setAttribute('aria-label', signupLink.textContent);
         }
     }
 
+    let homeAuthUiRevision = 0;
     async function refreshHomeAuthUi() {
+        const revision = ++homeAuthUiRevision;
         try {
             const { data: { session } } = await _client.auth.getSession();
+            if (revision !== homeAuthUiRevision) return;
             setHomeAuthUiState(!!session);
+            if (!session) return;
+            const { data, error } = await _client.rpc('get_my_public_membership_state');
+            if (error) throw error;
+            if (revision === homeAuthUiRevision) setHomeAuthUiState(true, data);
         } catch (error) {
             console.warn('refreshHomeAuthUi failed:', error);
-            setHomeAuthUiState(false);
+            // A failed membership lookup must not turn authentication into membership.
         }
     }
 
@@ -6220,7 +6229,10 @@ function openPlantDetail(id) {
         bindHomeAuthState.bound = true;
         if (!_client?.auth || typeof _client.auth.onAuthStateChange !== 'function') return;
         _client.auth.onAuthStateChange((_event, session) => {
+            ++homeAuthUiRevision;
             setHomeAuthUiState(!!session);
+            // Defer RPCs until outside Supabase Auth's callback lock.
+            if (session) setTimeout(() => { void refreshHomeAuthUi(); }, 0);
         });
     }
 

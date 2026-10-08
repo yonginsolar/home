@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.52
+Version: v1.0.53
 Change: 2026-10-07 - Use registered tenant signup purpose and privacy consent.
 -->
 <html lang="ko"> 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.0.52 | signup.html');</script>
+  <script>console.log('[Version] v1.0.53 | signup.html');</script>
   <script src="shared/minor-signup.js?v=20260914-1"></script>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
@@ -57,6 +57,7 @@ allowKakaoApp: true
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="shared/boot_guard.js?v=20260327-1"></script>
 <script src="shared/route_guard.js?v=20260421-1"></script>
+<script src="shared/member_capital.js?v=20261008-1"></script>
 <script src="shared/auth_email_helper.js?v=1.0.0"></script>
 <script src="shared/auth_broker_helper.js?v=20261006-2"></script>
 <style>
@@ -345,8 +346,8 @@ onblur="checkPhoneDuplicateServer()">
 </div>
 
 <div class="col-12">
-<label class="form-label fw-bold small">출자금 약정 (10만원 이상)</label>
-<input type="number" id="money" class="form-control" placeholder="숫자만 입력" min="100000" step="10000" oninput="updateMoneyHint(); clearFieldWarning(this)" required>
+<label class="form-label fw-bold small" id="signupCapitalLabel">출자금 약정</label>
+<input type="number" id="money" class="form-control" placeholder="출자 기준 확인 중" disabled oninput="updateMoneyHint(); clearFieldWarning(this)" required>
 <div id="moneyHint" class="small mt-1" style="color:#666;"></div>
 </div>
 
@@ -501,6 +502,15 @@ const _supabase = window.CoopRouteGuard?.createSupabaseClient
 ? window.CoopRouteGuard.createSupabaseClient(supabase, SUPABASE_URL, SUPABASE_KEY)
 : supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let joinSubmitInFlight = false;
+let signupCapitalRules = null;
+async function loadSignupCapitalRules() {
+signupCapitalRules = await CoopMemberCapital.load(_supabase, true);
+const input = document.getElementById('money');
+CoopMemberCapital.applyInput(input, signupCapitalRules);
+input.disabled = false;
+document.getElementById('signupCapitalLabel').textContent = `출자금 약정 (${signupCapitalRules.minimum.toLocaleString()}원 이상)`;
+updateMoneyHint();
+}
 let guardianSubmissionId = crypto.randomUUID();
 try { guardianSubmissionId=sessionStorage.getItem('guardian-signup-request-v1')||guardianSubmissionId;sessionStorage.setItem('guardian-signup-request-v1',guardianSubmissionId); } catch(_) {}
 const signupValidationErrors = new Set();
@@ -618,6 +628,7 @@ const { data: contextData, error: contextError } = await _supabase.rpc('get_publ
 const contextResolved = Array.isArray(contextData) ? contextData[0] : contextData;
 if (!contextError && contextResolved?.coop_id && contextResolved?.coop_name) {
 signupTenant = contextResolved;
+await loadSignupCapitalRules();
 await loadSignupPublicSettings();
 await loadSignupLegalDocuments();
 applySignupTenantBranding();
@@ -635,6 +646,7 @@ throw error || contextError || new Error('SIGNUP_COOP_NOT_FOUND');
 }
 
 signupTenant = resolved;
+await loadSignupCapitalRules();
 await loadSignupPublicSettings();
 await loadSignupLegalDocuments();
 applySignupTenantBranding();
@@ -1301,15 +1313,15 @@ document.getElementById('orgNo').value = "";
 }
 }
 
-// [수정] 출자금 10만원 체크 복구
 function updateMoneyHint() {
 var v = document.getElementById('money').value;
 var hint = document.getElementById('moneyHint');
-if(v >= 100000 && v % 10000 === 0) {
-hint.textContent = parseInt(v).toLocaleString() + '원 (' + (v/10000) + '구좌)';
+if (!signupCapitalRules) { hint.textContent = '출자 기준을 불러오는 중입니다.'; return; }
+if(CoopMemberCapital.valid(v, signupCapitalRules)) {
+hint.textContent = Number(v).toLocaleString() + '원 (' + (v/signupCapitalRules.unit).toLocaleString() + '좌)';
 hint.style.color = "green";
 } else {
-hint.textContent = '10만원 이상, 1만원 단위로 입력해주세요';
+hint.textContent = CoopMemberCapital.guidance(signupCapitalRules);
 hint.style.color = "red";
 }
 }
@@ -2326,10 +2338,10 @@ return;
 
 // 출자금 최종 값 확인
 const moneyVal = document.getElementById('money').value;
-if (moneyVal < 100000) {
+if (!signupCapitalRules || !CoopMemberCapital.valid(moneyVal, signupCapitalRules)) {
 setError(document.getElementById('money'));
 openResultModal(
-"❌ 출자금 금액을 확인해 주세요.\n최소 100,000원 이상 입력해야 합니다.",
+signupCapitalRules ? CoopMemberCapital.guidance(signupCapitalRules) : '출자 기준을 확인하지 못했습니다. 다시 시도해주세요.',
 true
 );
 return;
