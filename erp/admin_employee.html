@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.87
-Change: 2026-10-08 - Confirm settings writes and discard stale employee settings responses.
+Version: v1.0.88
+Change: 2026-10-08 - Annual common baselines, tenant settings and payroll snapshots.
 -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.87 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.88 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -45,6 +45,7 @@ Change: 2026-10-08 - Confirm settings writes and discard stale employee settings
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
   <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 
+<script src="annual_settings.js?v=20261008-1"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -54,6 +55,10 @@ Change: 2026-10-08 - Confirm settings writes and discard stale employee settings
     .table-hover tbody tr:hover { background-color: #f8f9fa; transform: scale(1.002); }
     .nav-tabs .nav-link { color: #666; cursor: pointer; border:none; padding: 12px 20px; font-weight: 600; }
     .nav-tabs .nav-link.active { font-weight: bold; color: #0d6efd; border-bottom: 3px solid #0d6efd; background: transparent; }
+    #settingsModal { word-break: keep-all; overflow-wrap: break-word; color-scheme: light; }
+    #settingTab .nav-item { flex: 1 1 0; }
+    #settingTab .nav-link { height: 100%; text-align: center; padding: 12px 8px; }
+    #annualYearTabs .btn { flex-basis: 0; min-height: 42px; }
     .modal-content { border-radius: 16px; border: none; box-shadow: 0 15px 50px rgba(0,0,0,0.1); }
     .form-control, .form-select { border-radius: 8px; padding: 10px; font-size: 0.95rem; }
     .d-none { display: none !important; }
@@ -159,15 +164,21 @@ Change: 2026-10-08 - Confirm settings writes and discard stale employee settings
         <h5 class="modal-title fw-bold">⚙️ 시스템 통합 설정</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div><div class="modal-body">
-        <div class="d-flex justify-content-end align-items-center mb-3 bg-light p-2 rounded" id="settingTargetYearRow">
-    <label class="small fw-bold me-2">설정 기준 연도:</label>
-    <select id="settingTargetYear" class="form-select form-select-sm w-auto fw-bold text-primary" onchange="loadSettings()">
-        </select>
-</div>
+        <div id="settingTargetYearRow" class="mb-3">
+          <div id="annualSettingsNav"><div id="annualYearTabs" class="d-flex gap-2 mb-2"></div></div>
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <label class="small" for="settingTargetYear">다른 연도</label><select id="settingTargetYear" data-annual-nav class="form-select form-select-sm w-auto"></select>
+            <strong id="annualYearLabel" class="small"></strong>
+            <label class="small ms-auto" for="annualPeriod">적용 시작</label><select id="annualPeriod" data-annual-nav class="form-select form-select-sm w-auto"></select>
+            <span class="d-flex gap-1"><select id="annualMonth" data-annual-nav aria-label="새 적용 월" class="form-select form-select-sm w-auto"></select><button id="annualAddPeriod" data-annual-nav type="button" class="btn btn-outline-secondary btn-sm">기간 추가</button></span>
+            <button id="annualPastEdit" data-annual-nav type="button" class="btn btn-outline-secondary btn-sm" hidden>과거 기준 수정</button>
+          </div><div id="annualSettingsStatus" class="small mt-2" role="status" aria-live="polite"></div>
+        </div>
         <ul class="nav nav-tabs mb-3" id="settingTab" role="tablist">
-          <li class="nav-item">
-            <a class="nav-link active" data-bs-toggle="tab" href="#setTax">📊 주요 요율/비과세</a></li>
-          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setCompany">🏢 회사 정보</a></li><li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced" onclick="loadAdvancedSettings()">⚙️ 고급 설정 (전체)</a></li></ul><div class="tab-content"><div class="tab-pane fade show active" id="setTax"><h6 class="fw-bold text-primary small border-bottom pb-1 mb-2">4대보험 총 요율 (자동 50:50 분할)</h6><div class="row g-2 mb-3"><div class="col-6"><label class="small text-muted">국민연금 총합 (%)</label><input type="number" id="set_pension_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('pension')"><div class="x-small text-secondary mt-1">인당: <span id="half_pension">0</span>%</div></div><div class="col-6"><label class="small text-muted">건강보험 총합 (%)</label><input type="number" id="set_health_total" class="form-control form-control-sm" step="0.01" oninput="calcHalf('health')"><div class="x-small text-secondary mt-1">인당: <span id="half_health">0</span>%</div></div></div><h6 class="fw-bold text-success small border-bottom pb-1 mb-2">비과세 한도 설정</h6><div class="row g-2 mb-3"><div class="col-4"><label class="small text-muted">식대비과세</label><input type="number" id="set_meal" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">차량비과세</label><input type="number" id="set_car" class="form-control form-control-sm"></div><div class="col-4"><label class="small text-muted">육아비과세</label><input type="number" id="set_child" class="form-control form-control-sm"></div></div></div><div class="tab-pane fade" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/*" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" readonly><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div></div></div><div class="tab-pane fade" id="setAdvanced"><div class="table-responsive" style="max-height: 300px;"><table class="table table-sm adv-table align-middle"><thead class="table-light"><tr><th>항목 키</th><th style="width: 120px;">값</th><th>설명</th></tr></thead><tbody id="advSettingsBody"></tbody></table></div></div></div></div><div class="modal-footer p-2 border-0"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">설정 통합 저장</button></div></div></div></div>
+          <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#setTax">📊 공통 기준</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setCompany">🏢 회사 정보</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced">⚙️ 조합별 설정</a></li>
+        </ul><div class="tab-content"><div class="tab-pane fade show active" id="setTax"><div class="d-flex justify-content-between mb-3"><h6 class="fw-bold mb-0">4대보험 공통 요율</h6><span id="annualCommonState" class="badge text-bg-light border"></span></div><div id="annualCommonFields"></div></div><div class="tab-pane fade" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/*" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" readonly><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div></div></div><div class="tab-pane fade" id="setAdvanced"><div id="annualTenantFields"></div></div></div></div><div class="modal-footer p-2 border-0" id="companySettingsFooter" hidden><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">회사 설정 저장</button></div></div></div></div>
 <div class="modal fade" id="inviteModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
@@ -3997,10 +4008,6 @@ async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) 
         syncHrStructureSettingsUi();
     }
 } // End of loadCompanyInfo
-async function loadAdvancedSettings() { const tbody = document.getElementById("advSettingsBody"); tbody.innerHTML = '<tr><td colspan="3">로딩...</td></tr>'; const coopId = String(myInfo?.coop_id || '').trim(); if (!coopId) { advancedSettingsRaw = []; tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">조합 정보를 확인할 수 없습니다.</td></tr>'; return; } const { data } = await _supabase.from('ref_settings').select('*').eq('coop_id', coopId).order('category'); if(data) { advancedSettingsRaw = data; tbody.innerHTML = data.map((r, i) => `<tr><td><small class="text-muted">${escapeHtml(r.item_key)}</small></td><td><input type="number" step="0.00001" value="${escapeHtml(r.item_value)}" id="adv_val_${i}"></td><td><small>${escapeHtml(r.description||'-')}</small></td></tr>`).join(""); } }
-
-function calcHalf(type) { document.getElementById(`half_${type}`).innerText = (Number(document.getElementById(`set_${type}_total`).value)/2).toFixed(3); }
-
 function buildHrAuthLevelOptionsHtml(selectedValue) {
     const normalizedSelected = normalizeHrAuthLevelValue(selectedValue);
     return HR_AUTH_LEVEL_OPTIONS.map((item) => {
@@ -4373,88 +4380,35 @@ async function runInvite() {
     }
 } // End of runInvite
 // 1. 설정 모달 열기 (연도 초기화 로직 추가)
-function openSettings() {
-    if (companySettingsSaveInFlight) return;
-    // 1. 연도 Select 박스 초기화 (올해 ~ 2년 전까지)
-    const yearSel = document.getElementById("settingTargetYear");
-    yearSel.innerHTML = "";
-    const currentYear = new Date().getFullYear();
-
-    // 올해, 작년, 재작년 옵션 생성
-    for (let y = currentYear; y >= currentYear - 2; y--) {
-        const opt = document.createElement("option");
-        opt.value = y;
-        opt.text = y + "년 기준";
-        if (y === currentYear) opt.selected = true; // 기본값: 올해
-        yearSel.add(opt);
+function initAnnualSettings() {
+    window.ERPAnnualSettings.init({
+        rpc: args => _supabase.rpc('erp_annual_settings', args),
+        confirm: text => new Promise(resolve => { showConfirm(text, () => resolve(true)); const modal = document.getElementById('confirmModal'); if (modal) modal.addEventListener('hidden.bs.modal', () => resolve(false), { once: true }); }),
+        close: () => settingsModal.hide()
+    });
+    if (!document.getElementById('settingTab').dataset.annualBound) {
+        document.getElementById('settingTab').dataset.annualBound = 'true';
+        document.getElementById('settingTab').addEventListener('shown.bs.tab', event => {
+            const annual = ['#setTax','#setAdvanced'].includes(event.target.getAttribute('href'));
+            document.getElementById('settingTargetYearRow').hidden = !annual;
+            document.getElementById('companySettingsFooter').hidden = annual;
+        });
     }
-
-    // 2. 데이터 로드 트리거
+}
+function openSettings() {
+    if (companySettingsSaveInFlight || window.ERPAnnualSettings.isBusy()) return;
+    initAnnualSettings();
+    const tab = document.querySelector('#settingTab .nav-link.active');
+    const annual = ['#setTax','#setAdvanced'].includes(tab?.getAttribute('href'));
+    document.getElementById('settingTargetYearRow').hidden = !annual;
+    document.getElementById('companySettingsFooter').hidden = annual;
     settingsModal.show();
     loadSettings();
 }
-
-// 2. 설정 값 불러오기 (테이블 이원화 적용)
 async function loadSettings({ throwOnError = false } = {}) {
-    const selYear = Number(document.getElementById("settingTargetYear").value);
-    const currentYear = new Date().getFullYear();
-
-    // UI 초기화
-    document.getElementById("advSettingsBody").innerHTML = '<tr><td colspan="3" class="text-center">로딩 중...</td></tr>';
-
-    let data, error;
-
-    // [핵심] 연도에 따라 조회 테이블 분기
-    if (selYear < currentYear) {
-        // 과거 데이터 (History 테이블)
-        const res = await _supabase
-            .from('ref_settings_history')
-            .select('*')
-            .eq('coop_id', getAdminEmployeeScopedCoopId())
-            .eq('target_year', selYear);
-        data = res.data;
-        error = res.error;
-    } else {
-        // 현재/미래 데이터 (원본 테이블)
-        const res = await scopeEmployeeTenant(_supabase.from('ref_settings').select('*'));
-        data = res.data;
-        error = res.error;
-    }
-
-    if (error) { if (throwOnError) throw error; return showAlert("설정 로드 실패: " + error.message); }
-
-    // 데이터 매핑
-    settings = {};
-    if (data) {
-        data.forEach(r => { settings[r.item_key] = r.item_value; });
-        advancedSettingsRaw = data; // 고급 설정용 원본 데이터 저장
-    }
-
-    // UI 바인딩 (값이 없으면 0 처리)
-    // 4대보험 요율은 퍼센트(%) 단위 변환을 위해 * 200 (emp+biz 합계)
-    document.getElementById("set_pension_total").value = ((settings['pension_rate_emp'] || 0) * 200).toFixed(2);
-    document.getElementById("set_health_total").value = ((settings['health_rate_emp'] || 0) * 200).toFixed(2);
-    calcHalf('pension');
-    calcHalf('health');
-
-    document.getElementById("set_meal").value = settings['limit_meal'] || 0;
-    document.getElementById("set_car").value = settings['limit_car'] || 0;
-    document.getElementById("set_child").value = settings['limit_child'] || 0;
-
-    // 고급 설정 탭 리스트 렌더링
-    const tbody = document.getElementById("advSettingsBody");
-    if (data && data.length > 0) {
-        tbody.innerHTML = data.map((r, i) => `
-            <tr>
-                <td><small class="text-muted">${escapeHtml(r.item_key)}</small></td>
-                <td><input type="number" step="0.00001" value="${escapeHtml(r.item_value)}" id="adv_val_${i}" class="form-control form-control-sm"></td>
-                <td><small>${escapeHtml(r.description || '-')}</small></td>
-            </tr>
-        `).join("");
-    } else {
-        tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">${selYear}년도 데이터가 없습니다.<br>저장 버튼을 누르면 기본값으로 생성됩니다.</td></tr>`;
-    }
-
+    initAnnualSettings();
+    try { await window.ERPAnnualSettings.load(window.ERPAnnualSettings.currentYear()); }
+    catch (error) { if (throwOnError) throw error; showAlert(window.ERPAnnualSettings.errorMessage(error)); }
     // 회사 정보는 연도와 무관하게 공통 관리 (원본 그대로 로드)
     // *회사 정보는 보통 매년 바뀌지 않으므로 ref_company_info 하나만 씁니다.
     document.getElementById("set_orgName").value = resolveAdminEmployeeCompanyName(companyInfo);
@@ -4471,9 +4425,11 @@ async function loadSettings({ throwOnError = false } = {}) {
     syncHrStructureSettingsUi();
 }
 
-// 3. 설정 값 저장하기 (테이블 이원화 적용)
+// 회사 정보·캘린더·알림·결재 설정 저장 (연도별 기준은 별도 저장)
 async function saveSettings() {
     if (companySettingsSaveInFlight) return;
+    if (window.ERPAnnualSettings?.isBusy()) return;
+    if (window.ERPAnnualSettings?.isDirty()) return showAlert('공통 기준 또는 조합별 설정의 변경 내용을 먼저 저장해 주세요.');
     companySettingsSaveInFlight = true;
     const controls = [...document.querySelectorAll('#settingsModal button, #settingsModal input, #settingsModal select, #settingsModal textarea')]
         .map(element => ({ element, id: element.id, disabled: element.disabled, value: element.value, checked: element.checked }));
@@ -4481,90 +4437,13 @@ async function saveSettings() {
     let savesConfirmed = false;
     let confirmedSteps = 0;
     try {
-        const selYear = Number(document.getElementById("settingTargetYear").value);
-        const currentYear = new Date().getFullYear();
-        const updates = [];
         const coopId = myInfo?.coop_id || null;
-        const advancedSettingsMap = new Map((Array.isArray(advancedSettingsRaw) ? advancedSettingsRaw : []).map((row) => [String(row?.item_key || '').trim(), row]));
         const telegramApprovalConfig = collectTelegramApprovalSettingsFromUi();
         const approvalLineConfig = collectApprovalLineSettingsFromUi();
         const calendarSettingsConfig = collectCalendarSettingsFromUi();
         const lunchTimeSettings = validateHrWorkLunchTimeSettings(getHrWorkLunchTimeSettingsFromUi());
 
         if (!coopId) throw new Error("조합 정보가 없어 저장할 수 없습니다. 다시 로그인해 주세요.");
-
-        // UI 값 읽기
-        const isAdvanced = !isHrWorkforceLiteProfile()
-            && document.getElementById("setAdvanced").classList.contains("active");
-
-        if (isAdvanced && advancedSettingsRaw.length > 0) {
-            // 고급 설정 탭인 경우
-            advancedSettingsRaw.forEach((r, i) => {
-                const val = document.getElementById(`adv_val_${i}`).value;
-                updates.push({
-                    item_key: r.item_key,
-                    item_value: Number(val),
-                    category: resolveRefSettingCategory(r.item_key, advancedSettingsMap),
-                    description: r.description || null
-                });
-            });
-        } else if (!isHrWorkforceLiteProfile()) {
-            // 일반 설정 탭인 경우 (요율 계산)
-            const pen = Number(document.getElementById("set_pension_total").value) / 200;
-            const hlt = Number(document.getElementById("set_health_total").value) / 200;
-
-            // 필수 항목들 패키징
-            updates.push(
-                { item_key: 'pension_rate_emp', item_value: pen, category: resolveRefSettingCategory('pension_rate_emp', advancedSettingsMap) },
-                { item_key: 'pension_rate_biz', item_value: pen, category: resolveRefSettingCategory('pension_rate_biz', advancedSettingsMap) },
-                { item_key: 'health_rate_emp', item_value: hlt, category: resolveRefSettingCategory('health_rate_emp', advancedSettingsMap) },
-                { item_key: 'health_rate_biz', item_value: hlt, category: resolveRefSettingCategory('health_rate_biz', advancedSettingsMap) },
-                { item_key: 'limit_meal', item_value: Number(document.getElementById("set_meal").value), category: resolveRefSettingCategory('limit_meal', advancedSettingsMap) },
-                { item_key: 'limit_car', item_value: Number(document.getElementById("set_car").value), category: resolveRefSettingCategory('limit_car', advancedSettingsMap) },
-                { item_key: 'limit_child', item_value: Number(document.getElementById("set_child").value), category: resolveRefSettingCategory('limit_child', advancedSettingsMap) }
-            );
-        }
-
-        const missingCategoryUpdate = updates.find((item) => !String(item?.category || '').trim());
-        if (missingCategoryUpdate) {
-            throw new Error(`설정 카테고리를 확인할 수 없습니다: ${missingCategoryUpdate.item_key}`);
-        }
-
-        // [핵심] 저장할 테이블 분기 처리
-        if (updates.length > 0 && selYear < currentYear) {
-            // 1. 과거 데이터 저장 (History 테이블)
-
-            // History 테이블은 'target_year' 칼럼이 필수입니다.
-            const historyUpdates = updates.map(u => ({
-                ...u,
-                coop_id: coopId,
-                target_year: selYear, // 연도 명시
-                updated_at: new Date()
-            }));
-
-            // unique 제약조건(coop_id + target_year + item_key)에 따라 Upsert
-            const { error } = await _supabase
-                .from('ref_settings_history')
-                .upsert(historyUpdates, { onConflict: 'coop_id,target_year,item_key' });
-
-            if (error) throw error;
-
-        } else if (updates.length > 0) {
-            // 2. 현재 데이터 저장 (Original 테이블)
-            const settingsUpdates = updates.map(u => ({
-                ...u,
-                coop_id: coopId,
-                target_year: currentYear
-            }));
-
-            // Original 테이블은 item_key만 있으면 됨
-            const { error } = await _supabase
-                .from('ref_settings')
-                .upsert(settingsUpdates, { onConflict: 'coop_id,item_key' });
-
-            if (error) throw error;
-        }
-        if (updates.length > 0) confirmedSteps += 1;
 
         // 3. 회사 정보 저장 (공통)
         const org = document.getElementById("set_orgName").value;
@@ -4674,11 +4553,7 @@ async function saveSettings() {
         await loadSettings({ throwOnError: true }); // 저장 실패와 후속 조회 실패를 구분
         companySettingsSaveInFlight = false;
         settingsModal.hide();
-        if (isHrWorkforceLiteProfile()) {
-            showAlert("저장되었습니다.");
-        } else {
-            showAlert(`${selYear}년도 설정이 저장되었습니다.`);
-        }
+        showAlert("저장되었습니다.");
 
     } catch (e) {
         controls.forEach(({element, id, value, checked}) => {
@@ -5988,10 +5863,11 @@ async function persistSalary() {
 
     // [핵심 변경] 귀속월에서 연도 추출 -> 해당 연도 요율 가져오기
     const targetYear = month.split('-')[0]; // "2025" 추출
-    const rates = await getTaxRates(targetYear); // DB에서 조회
-
-    // rates가 없으면(null) 기존 전역변수 settings(현재값)를 백업으로 사용 (안전장치)
-    const rule = rates || settings;
+    let rule;
+    try {
+        rule = await getTaxRates(targetYear, month);
+        if (!['employ_rate_biz','worker_comp_rate'].every(key => Number.isFinite(rule[key]))) throw new Error('사업주 고용보험·산재보험 요율을 조합별 설정에서 등록해 주세요.');
+    } catch (error) { return showAlert(window.ERPAnnualSettings.errorMessage(error)); }
 
     // 1. 지급액 가져오기
     const p_basic = Number(document.getElementById("payBasic").value);
@@ -6009,10 +5885,10 @@ async function persistSalary() {
 
     const p_total = p_basic + p_meal + p_car + p_child + p_bonus;
 
-    // 2. 비과세 한도 적용 (DB값 사용, 없으면 하드코딩 값)
-    const limit_meal = rule['limit_meal'] || 200000;
-    const limit_car = rule['limit_car'] || 200000;
-    const limit_child = rule['limit_child'] || 200000;
+    // 2. 해당 귀속월에 등록된 비과세 한도 적용
+    const limit_meal = rule['limit_meal'];
+    const limit_car = rule['limit_car'];
+    const limit_child = rule['limit_child'];
 
     const tf_meal = Math.min(p_meal, limit_meal);
     const tf_car = Math.min(p_car, limit_car);
@@ -6022,11 +5898,11 @@ async function persistSalary() {
     const tax_base = Math.max(0, p_total - (tf_meal + tf_car + tf_child));
 
     // 3. 4대보험 계산 (DB 요율 적용)
-    // rule['key'] || 0.045 -> DB에 값이 있으면 쓰고, 없으면 기본값 사용
-    const pen = Math.floor(tax_base * (rule['pension_rate_emp'] || 0.0475));
-    const hlt = Math.floor((tax_base * (rule['health_rate_emp'] || 0.03595))/10)*10;
-    const care = Math.floor((hlt * (rule['care_rate_ratio'] || 0.1314))/10)*10;
-    const emp = Math.floor(tax_base * (rule['employ_rate_emp'] || 0.009));
+    // 미등록 연도는 앞에서 차단하며, 명시적으로 등록된 0도 그대로 적용한다.
+    const pen = Math.floor(tax_base * (rule['pension_rate_emp']));
+    const hlt = Math.floor((tax_base * (rule['health_rate_emp']))/10)*10;
+    const care = Math.floor((hlt * (rule['care_rate_ratio']))/10)*10;
+    const emp = Math.floor(tax_base * (rule['employ_rate_emp']));
 
     // 4. 소득세 계산 (국세청 간이세액표 + 직원별 설정 + 정산 환급)
     const taxProfile = getSalaryTaxInputProfile();
@@ -6038,7 +5914,7 @@ async function persistSalary() {
         return showAlert(error?.message || '근로소득 간이세액표 계산에 실패했습니다.');
     }
     const inc = Math.round(Number(taxCalc.incomeTax || 0));
-    const loc = Math.round(Number(taxCalc.localTax || 0));
+    const loc = Math.floor((inc * Number(rule['local_tax_rate_ratio'])) / 10) * 10;
     const payrollTaxAdjustmentTotal = Math.max(0, taxAdjustment.income) + Math.max(0, taxAdjustment.local);
     const deductionTotal = pen + hlt + care + emp + inc + loc - payrollTaxAdjustmentTotal;
 
@@ -7089,51 +6965,13 @@ function calculateIncomeTax(monthlyIncome, profile = {}) {
 } // End of calculateIncomeTax
 
   // [신규] 연도별 요율 조회 함수 (테이블 이원화 대응)
-async function getTaxRates(year) {
-    const currentYear = new Date().getFullYear();
-    const targetYear = Number(year) || currentYear;
-
-    let data, error;
-
-    // 1. 과거 데이터인지 확인 (올해보다 작으면 히스토리 테이블 조회)
-    if (targetYear < currentYear) {
-        const response = await _supabase
-            .from('ref_settings_history')
-            .select('item_key, item_value')
-            .eq('coop_id', getAdminEmployeeScopedCoopId())
-            .eq('target_year', targetYear);
-        data = response.data;
-        error = response.error;
-    }
-    // 2. 현재 또는 미래 데이터라면 (원본 테이블 조회)
-    else {
-        const response = await scopeEmployeeTenant(
-            _supabase
-                .from('ref_settings')
-                .select('item_key, item_value')
-        );
-        data = response.data;
-        error = response.error;
-    }
-
-    if (error) {
-        console.error("DB 조회 오류:", error);
-        return null;
-    }
-
-    if (!data || data.length === 0) {
-        // 데이터가 없으면 알림을 띄우지 않고 null 반환 (기본값 사용 유도)
-        return null;
-    }
-
-    // 객체로 변환 { pension_rate_emp: 0.045, ... }
-    const rates = {};
-    data.forEach(row => {
-        rates[row.item_key] = row.item_value;
-    });
-
-    return rates;
+async function getTaxRates(year, month = String(year) + '-01') {
+    const { data, error } = await _supabase.rpc('erp_annual_settings', { p_action: 'resolve', p_year: Number(year), p_effective_on: month + '-01' });
+    if (error) throw error;
+    if (!data?.values) throw new Error('급여에 적용할 기준을 확인할 수 없습니다.');
+    return data.values;
 }
+
 </script>
 </body>
 </html>
