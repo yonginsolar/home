@@ -1,7 +1,7 @@
-/* v1.0.0 — Capital settings in member management, with server-owned permissions. */
+/* v1.0.1 — Capital settings in member management, with server-owned permissions. */
 (function (global) {
   'use strict';
-  let revision = '', busy = false;
+  let revision = '', busy = false, returnModal = null;
   function client() { return global._client || global._supabase || (typeof _supabase !== 'undefined' ? _supabase : null); }
   function notice(message, kind) {
     if (global.myAlert) global.myAlert(message, kind || 'error');
@@ -37,6 +37,24 @@
       revision = rules.revision;
       document.getElementById('member-capital-minimum').value = String(rules.minimum);
       document.getElementById('member-capital-unit').value = String(rules.unit);
+      if (!modal.dataset.capitalReturnBound) {
+        modal.addEventListener('hidden.bs.modal', () => {
+          const parent = returnModal;
+          returnModal = null;
+          if (parent?.isConnected) global.bootstrap.Modal.getOrCreateInstance(parent).show();
+        });
+        modal.dataset.capitalReturnBound = '1';
+      }
+      const parent = document.activeElement?.closest?.('.modal.show')
+        || Array.from(document.querySelectorAll('.modal.show')).filter(el => el !== modal).pop();
+      if (parent && parent !== modal) {
+        returnModal = parent;
+        if (parent.contains(document.activeElement)) document.activeElement.blur();
+        await new Promise(resolve => {
+          parent.addEventListener('hidden.bs.modal', resolve, { once: true });
+          global.bootstrap.Modal.getOrCreateInstance(parent).hide();
+        });
+      }
       global.applyAdminMemberModalLayer?.(modal);
       global.bootstrap.Modal.getOrCreateInstance(modal).show();
     } catch (_) { notice('출자 기준을 불러오지 못했습니다. 다시 시도해주세요.'); }
