@@ -1,11 +1,17 @@
-/* v1.0.0 - Tenant legal drafts, explicit registration and admin-only samples. */
+/* v1.1.0 - Tenant sample context and required privacy contacts. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
   const state = new Map();
-  let loaded = false, loading = false;
+  let loaded = false, loading = false, context = null;
+  const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
   const el = (kind, suffix) => document.getElementById(`site-legal-${kind}-${suffix}`);
-  function values(kind) { return {content:el(kind,'content').value,effective_date:el(kind,'effective-date').value}; }
+  function values(kind) { const v={content:el(kind,'content').value,effective_date:el(kind,'effective-date').value};if(kind==='privacy')v.contact_details=Object.fromEntries(Object.keys(contacts).map(k=>[k,el(kind,k).value.trim()]));return v; }
+  function renderText(content,kind) {
+    const cfg=kind==='privacy'?{...context,...values(kind).contact_details}:context||{};
+    const keys={'조합명':'coop_name','대표자':'representative','주소':'address','담당자':'officer_name','직책':'officer_title','전화번호':'officer_phone','이메일':'officer_email'};
+    return String(content).replace(/\{\{([^}]+)\}\}/g,(token,label)=>String(cfg?.[keys[label]]||token));
+  }
   function dirty(kind) { const s=state.get(kind);return !!s && JSON.stringify(values(kind))!==s.baseline; }
   function permitted() { return hasAdminMemberScopePermission('site_admin') && isAdminMemberRuntimeModuleEnabled('site_admin'); }
   function confirmAction(message) {
@@ -15,9 +21,10 @@
       modal.addEventListener('hidden.bs.modal',()=>setTimeout(()=>{if(!accepted)resolve(false);},0),{once:true});
     });
   }
-  function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button')) b.disabled=!enabled;el(kind,'content').disabled=!enabled;el(kind,'effective-date').disabled=!enabled; }
+  function setEnabled(kind, enabled) { for(const b of el(kind,'card').querySelectorAll('button,input,textarea')) b.disabled=!enabled; }
   function setForm(kind, doc={}) {
     el(kind,'content').value=String(doc.content||'');el(kind,'effective-date').value=String(doc.effective_date||'');
+    if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).value=String(doc.contact_details?.[key]??(key==='representative'||key==='address'?context?.[key]:'')??'');
     state.set(kind,{doc,baseline:JSON.stringify(values(kind)),busy:false});
     el(kind,'published-view').hidden=!doc.is_published;
     el(kind,'published-text').textContent=String(doc.published_content||'');
@@ -31,6 +38,7 @@
     if(s.doc.has_unpublished_changes)text+=' · 수정 초안 있음';
     if(dirty(kind))text+=' · 저장하지 않은 수정 있음';
     el(kind,'status').textContent=text;el(kind,'status').className='small mt-2 '+(s.doc.is_published?'text-success':'text-muted');
+    el(kind,'preview-text').textContent=renderText(el(kind,'content').value,kind);
   }
   function render() {
     const root=document.getElementById('sub-legal');if(!root)return;
@@ -41,13 +49,16 @@
       const column=document.createElement('div');column.className='col-xl-6';
       column.innerHTML=`<div class="card border-0 shadow-sm h-100" id="site-legal-${kind}-card"><div class="card-body">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"><h5 class="fw-bold mb-0">${label}</h5><button type="button" class="btn btn-sm btn-outline-secondary" data-legal-action="sample">샘플 불러오기</button></div>
+        ${kind==='privacy'?`<fieldset class="border rounded p-3 mb-3"><legend class="float-none w-auto px-1 fs-6 fw-bold">개인정보 담당자 정보</legend><label class="form-label small fw-bold" for="site-legal-privacy-processor">개인정보처리자</label><input id="site-legal-privacy-processor" class="form-control mb-3" readonly><div class="row g-3">${Object.entries(contacts).map(([key,label])=>`<div class="${key==='address'?'col-12':'col-md-6'}"><label class="form-label small fw-bold" for="site-legal-privacy-${key}">${label} <span class="text-danger">*</span></label><input class="form-control" id="site-legal-privacy-${key}" type="${key==='officer_email'?'email':key==='officer_phone'?'tel':'text'}" maxlength="${key==='address'?300:key==='officer_email'?254:100}" required></div>`).join('')}</div><p class="small text-muted mt-3 mb-0">보호책임자가 개인정보 문의와 권리행사 요청을 받습니다. 담당자 정보는 아래 미리보기에서 확인해 주세요.</p></fieldset>`:''}
         <label class="form-label small fw-bold" for="site-legal-${kind}-effective-date">시행일</label><input type="date" class="form-control mb-3" id="site-legal-${kind}-effective-date">
         <label class="form-label small fw-bold" for="site-legal-${kind}-content">내용</label><textarea class="form-control" style="word-break:keep-all" id="site-legal-${kind}-content" rows="14" maxlength="100000"></textarea>
         <div id="site-legal-${kind}-status" class="small mt-2" role="status">불러오는 중</div>
+        <details class="mt-3"><summary>등록 전 미리보기</summary><div class="mt-2 border rounded p-3" style="white-space:pre-wrap;word-break:keep-all;overflow-wrap:break-word" id="site-legal-${kind}-preview-text"></div></details>
         <details class="mt-3" id="site-legal-${kind}-published-view" hidden><summary>현재 적용 중인 내용</summary><div class="mt-2 border rounded p-3" style="white-space:pre-wrap;word-break:keep-all;overflow-wrap:break-word" id="site-legal-${kind}-published-text"></div></details>
         </div><div class="card-footer bg-white d-flex flex-wrap gap-2 justify-content-end"><button type="button" class="btn btn-sm btn-outline-danger me-auto" id="site-legal-${kind}-unpublish" data-legal-action="unpublish" hidden>등록 해제</button><button type="button" class="btn btn-outline-primary" data-legal-action="draft">초안 저장</button><button type="button" class="btn btn-primary" data-legal-action="publish">등록·적용</button></div></div>`;
       grid.append(column);setEnabled(kind,false);
       el(kind,'content').addEventListener('input',()=>updateStatus(kind));el(kind,'effective-date').addEventListener('change',()=>updateStatus(kind));
+      if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).addEventListener('input',()=>updateStatus(kind));
       column.addEventListener('click',event=>{const b=event.target.closest('[data-legal-action]');if(!b||b.disabled)return;const action=b.dataset.legalAction;if(action==='sample')loadSample(kind);else save(kind,action);});
     }
   }
@@ -56,7 +67,9 @@
     if(loaded) return; // Tab changes must not overwrite an edited draft.
     loading=true;for(const kind of Object.keys(labels))setEnabled(kind,false);
     try {
-      const {data,error}=await _supabase.rpc('get_my_site_legal_documents');if(error)throw error;
+      const [docsResult,ctxResult]=await Promise.all([_supabase.rpc('get_my_site_legal_documents'),_supabase.rpc('get_my_site_legal_context')]);
+      if(docsResult.error||ctxResult.error||!ctxResult.data?.coop_name)throw Error('LEGAL_READ_FAILED');
+      context=ctxResult.data;el('privacy','processor').value=context.coop_name;const data=docsResult.data;
       for(const kind of Object.keys(labels)){setForm(kind,data?.[kind]);setEnabled(kind,true);}loaded=true;
     } catch(error) {
       for(const kind of Object.keys(labels))el(kind,'status').textContent='문서를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
@@ -67,20 +80,30 @@
     if(!loaded||state.get(kind)?.busy)return;
     if(el(kind,'content').value.trim() && !(await confirmAction('현재 편집 내용 대신 샘플을 불러올까요? 저장·등록된 문서는 바뀌지 않습니다.')))return;
     const sample=window.CoopSiteLegalSamples?.[kind];if(!sample)return myAlert('샘플을 불러오지 못했습니다. 새로고침해 주세요.','warning');
-    el(kind,'content').value=sample.replaceAll('{{조합명}}',String(g_adminMemberRuntime?.coop_name||'{{조합명}}'));
+    // Only organization fields are automatic. Never copy a staff member's private contact details.
+    el(kind,'content').value=sample.replace(/\{\{(조합명|대표자|주소)\}\}/g,(token,label)=>kind==='privacy'&&label!=='조합명'?token:String(context?.[{'조합명':'coop_name','대표자':'representative','주소':'address'}[label]]||token));
+    if(kind==='privacy')for(const key of ['representative','address'])el(kind,key).value=String(context?.[key]||'');
     el(kind,'effective-date').value='';updateStatus(kind);
   }
   async function save(kind, action) {
     const s=state.get(kind);if(!loaded||!s||s.busy||!permitted())return;
     const input=values(kind),publish=action==='publish';
-    if(publish && (!input.effective_date || input.content.trim().length<(kind==='signup_purpose'?20:100) || /\{\{[^}]+\}\}/.test(input.content)))return myAlert('시행일과 내용을 입력하고, {{ }}로 표시된 샘플 항목을 실제 내용으로 바꿔 주세요.','warning');
+    const rendered=renderText(input.content,kind);
+    if(publish&&kind==='privacy'){
+      for(const [key,label] of Object.entries(contacts))if(!input.contact_details[key]){el(kind,key).focus();return myAlert(`${label}을 입력해 주세요.`,'warning');}
+      if(!/^[+0-9() .-]+$/.test(input.contact_details.officer_phone)||!/^\d{8,15}$/.test(input.contact_details.officer_phone.replace(/\D/g,'')))return myAlert('전화번호를 확인해 주세요.','warning');
+      if(!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(input.contact_details.officer_email))return myAlert('이메일 주소를 확인해 주세요.','warning');
+      const ctx={coop_name:context.coop_name,...input.contact_details};
+      if(Object.entries(ctx).some(([key,v])=>key==='officer_phone'?!rendered.replace(/\D/g,'').includes(v.replace(/\D/g,'')):!rendered.includes(v)))return myAlert('담당자 정보와 처리방침 본문의 내용이 일치하지 않습니다. 본문과 등록 전 미리보기를 확인해 주세요.','warning');
+    }
+    if(publish && (!input.effective_date || rendered.trim().length<(kind==='signup_purpose'?20:100) || /\{\{[^}]+\}\}/.test(rendered)))return myAlert('시행일과 내용을 입력하고, {{ }}로 표시된 샘플 항목을 실제 내용으로 바꿔 주세요.','warning');
     if((publish||action==='unpublish')&&!(await confirmAction(action==='unpublish'?'등록을 해제할까요? 해당 문구가 더 이상 공개되지 않습니다.':`${labels[kind]}을 등록하고 적용할까요?`)))return;
     s.busy=true;setEnabled(kind,false);
     try {
-      const request=action==='unpublish' ? _supabase.rpc('unpublish_site_legal_document',{p_document_type:kind,p_expected_revision:s.doc.revision||0}) : _supabase.rpc('save_site_legal_document',{p_document_type:kind,p_content:input.content,p_effective_date:input.effective_date||null,p_publish:publish,p_expected_revision:s.doc.revision||0});
+      const request=action==='unpublish' ? _supabase.rpc('unpublish_site_legal_document',{p_document_type:kind,p_expected_revision:s.doc.revision||0}) : _supabase.rpc('save_site_legal_document_v2',{p_document_type:kind,p_content:input.content,p_effective_date:input.effective_date||null,p_publish:publish,p_expected_revision:s.doc.revision||0,p_contact_details:input.contact_details||null});
       const {data,error}=await request;if(error)throw error;
       setForm(kind,data);myAlert(action==='unpublish'?'등록을 해제했습니다.':publish?'등록하고 적용했습니다.':'초안을 저장했습니다.','success');
-    } catch(error) {myAlert(error?.message==='LEGAL_DOCUMENT_CHANGED'?'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.':'저장하지 못했습니다. 입력 내용은 유지됩니다.','warning');}
+    } catch(error) {const messages={LEGAL_DOCUMENT_CHANGED:'다른 사람이 수정했습니다. 편집 내용을 따로 보관한 뒤 다시 불러와 주세요.',LEGAL_CONTACT_REQUIRED:'이사장·주소와 개인정보 보호책임자의 성명·직책·전화번호·이메일을 모두 입력해 주세요.',LEGAL_CONTACT_INVALID:'개인정보 담당자 정보의 입력 형식을 확인해 주세요.',LEGAL_CONTACT_NOT_IN_CONTENT:'담당자 정보가 처리방침 본문에 반영되지 않았습니다. 본문과 등록 전 미리보기를 확인해 주세요.',LEGAL_DOCUMENT_NOT_READY:'시행일·내용과 아직 채우지 않은 샘플 항목을 확인해 주세요.'};myAlert(messages[error?.message]||'저장하지 못했습니다. 입력 내용은 유지됩니다.','warning');}
     finally {state.get(kind).busy=false;setEnabled(kind,true);}
   }
   window.fetchSiteLegalDocuments=fetchDocuments;
