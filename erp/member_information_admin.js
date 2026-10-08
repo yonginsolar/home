@@ -17,8 +17,12 @@ async function loadMemberInformationSummary() {
     if (sequence !== memberInformationSummaryRequest) return;
     document.getElementById('dashboard-information-count').textContent = `${Number(data.needs_completion || 0).toLocaleString()}명`;
     const fields = data.field_counts || {};
-    document.getElementById('dashboard-information-breakdown').textContent =
-      `계좌정보 ${Number(data.account_incomplete || 0).toLocaleString()}명 · 주민등록번호 ${Number(fields.rrn || 0).toLocaleString()}명 · 전화번호 ${Number(fields.phone || 0).toLocaleString()}명 · 주소 ${Number(fields.address || 0).toLocaleString()}명`;
+    const breakdown = [['계좌정보', data.account_incomplete], ['주민등록번호', fields.rrn], ['전화번호', fields.phone], ['주소', fields.address]];
+    for (const [field, label] of Object.entries({ name: '이름', business_number: '사업자·고유번호', representative_name: '대표자명', contact_name: '담당자명' })) {
+      if (Number(fields[field] || 0) > 0) breakdown.push([label, fields[field]]);
+    }
+    document.getElementById('dashboard-information-breakdown').textContent = breakdown
+      .map(([label, count]) => `${label} ${Number(count || 0).toLocaleString()}명`).join(' · ');
     const total = Number(data.individual_count || 0);
     document.getElementById('dashboard-gender-summary').innerHTML = ['남성', '여성', '미확인'].map(label => {
       const count = Number(data.gender?.[label] || 0);

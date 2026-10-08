@@ -1,4 +1,4 @@
-/* 1.6.1 · Unpaid correction workflow and floor-won refund quote. */
+/* 1.6.2 · Preserve confirmed drafts across follow-up read failures. */
 (function () {
  'use strict';
  const $=id=>document.getElementById(id), BASE='https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -7,6 +7,7 @@
  const db=window.supabase.createClient(BASE,KEY,{global:{headers:{'x-erp-host':host}}});
  let context=null,current=null,busy=false,exporting=false,hasInk=false,draw=false,returnKey=null,returnKeyUntil=0,pinPromise=null,editBaseline='';
  let reviewerLinkRows=[],reviewerLinkContract=null,preferredReviewer=null;
+ let savedDraftReloadRequired=false;
  let endMode='termination',endQuoteSerial=0;
  const stateNames={draft:'초안',review:'내부 결재·서명 준비',signed:'체결 완료',ended:'계약 종료'};
  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -27,7 +28,7 @@
  function defaultBody(){return window.ServiceContractTemplate.filter(x=>!x.text.startsWith('계약 체결일')&&!x.text.includes('양측은 본문 및 확정된')&&!/^(초기 설정 ·|기존 자료 이전 ·|그 밖의 합의 ·|제11조 별도 합의)/.test(x.text)).map(x=>x.text).join('\n\n');}
  async function reload(){const rows=await rpc('list',{},null);$('contractList').replaceChildren();if(!rows.length){$('contractList').textContent='등록된 계약이 없습니다.';return;}
   for(const r of rows){const b=document.createElement('button');b.type='button';b.className='service-contract-link';b.setAttribute('aria-current',String(current?.id===r.id));b.innerHTML=`<strong>${esc(r.client_name)}</strong><span class="service-state">${r.is_amendment?"변경합의서 · ":""}${esc(stateNames[r.state])}</span>${r.draft_review_pending?'<span class="service-review-badge">내 검토 대기</span>':''}<small class="d-block mt-2">${esc(r.start)} ~ ${esc(r.end)} · 제${Number(r.revision)}판</small>`;b.onclick=()=>task(()=>open(r.id));$('contractList').append(b);}}
- async function open(id,{discard=false}={}){if(!discard&&!allowDiscard())return false;const record=await rpc('get',{},id);current=record;render();await reload();return true;}
+ async function open(id,{discard=false}={}){if(!discard&&!allowDiscard())return false;const record=await rpc('get',{},id);current=record;savedDraftReloadRequired=false;render();await reload();return true;}
  function input(id,label,value,type='text',extra=''){return `<div><label for="${id}" class="form-label">${esc(label)}</label><input id="${id}" class="form-control" type="${type}" value="${esc(value)}" ${extra}></div>`;}
  const employeeContact=e=>[e.name,e.position].filter(Boolean).join(' ');
  function clientContactOptions(value){const contacts=[...new Set([value,...(current.reviewers||[]).map(employeeContact)].filter(Boolean))];return `<option value="">담당자를 선택해 주세요.</option>`+contacts.map(contact=>`<option value="${esc(contact)}"${contact===value?' selected':''}>${esc(contact)}</option>`).join('');}
@@ -69,7 +70,29 @@
  Object.assign(errors,{SERVICE_INVALID_VILLAGE_TERMS:'햇빛소득마을 이용 여부와 마을당 요금을 확인해 주세요.',SERVICE_INVALID_AMENDMENT_PERIOD:'원계약 기간 안에서 변경 적용일을 선택해 주세요. 이용기간 연장은 새 계약으로 작성합니다.',SERVICE_AMENDMENT_ALREADY_OPEN:'작성 중인 변경합의서가 있습니다. 연결된 변경합의서를 확인해 주세요.',SERVICE_AMENDMENT_STALE_BASE:'최근 체결한 변경합의서에서 새 변경합의서를 만들어 주세요.',SERVICE_AMENDMENT_PERIOD_ENDED:'이용기간이 끝났습니다. 새 계약을 작성해 주세요.',SERVICE_AMENDMENT_USE_ORIGINAL:'계약 종료는 원계약에서 처리해 주세요.'});
  function readTerms(){const t=structuredClone(current.terms);for(const k of ['provider','client'])for(const f of ['business_number','address','contact','phone','email'])t[k][f]=$(k+'_'+f).value.trim();t.start=$('periodStart').value;t.end=$('periodEnd').value;t.annual_supply=Number($('annualSupply').value);t.free_start=$('freeStart').value||null;t.free_end=t.free_start?'2026-12-31':null;t.setup=$('setup').value;t.special=$('special').value;t.privacy_finalized=$('privacyFinalized').checked;t.village_enabled=$('villageEnabled').checked;t.village_annual_supply=t.village_enabled?Number($('villageContractFee').value):0;if(current.amendment)t.change_effective_on=$('changeEffective').value;return t;}
  function useProposal(s){if(!editable())return;const t=s.terms;for(const [id,value] of Object.entries({contractTitle:s.title,contractBody:s.body,annualSupply:t.annual_supply,periodStart:t.start,periodEnd:t.end,freeStart:t.free_start,setup:t.setup,special:t.special}))$(id).value=value??'';$('privacyFinalized').checked=Boolean(t.privacy_finalized);$('villageEnabled').checked=Boolean(t.village_enabled);$('villageContractFee').value=t.village_annual_supply||0;if($('changeEffective'))$('changeEffective').value=t.change_effective_on||'';toggleVillage();for(const k of ['provider','client'])for(const f of ['business_number','address','contact','phone','email'])$(k+'_'+f).value=t[k]?.[f]||'';updateDraftStatus();$('contractBody').focus();}
- async function save(){const form=$('editForm');if(!form?.reportValidity())return false;if(!unsaved())return true;const id=current.id,payload={revision:current.revision,title:$('contractTitle').value.trim(),terms:readTerms(),body:$('contractBody').value},controls=Array.from(form.querySelectorAll('input,textarea,select'));controls.forEach(x=>x.disabled=true);try{await rpc('save',payload,id);await open(id,{discard:true});message('초안을 저장했습니다.','success');return true;}finally{controls.forEach(x=>x.disabled=false);}}
+ function showSavedDraftReloadWarning(id){
+  message('초안은 저장되었습니다. 최신 화면을 불러오지 못했습니다.','warning');
+  const retry=document.createElement('button');retry.type='button';retry.className='btn btn-sm btn-outline-secondary ms-2';retry.textContent='다시 불러오기';
+  retry.onclick=()=>task(async()=>{if(current?.id!==id)return;if(await open(id))message('저장된 계약을 불러왔습니다.','success');});
+  $('message').append(retry);
+ }
+ async function save(){
+  const form=$('editForm');if(!form?.reportValidity())return false;
+  if(savedDraftReloadRequired){showSavedDraftReloadWarning(current.id);return false;}
+  if(!unsaved())return true;
+  const id=current.id,payload={revision:current.revision,title:$('contractTitle').value.trim(),terms:readTerms(),body:$('contractBody').value},controls=Array.from(form.querySelectorAll('input,textarea,select')),disabled=controls.map(x=>x.disabled);
+  controls.forEach(x=>x.disabled=true);
+  try{
+   const saved=await rpc('save',payload,id);
+   const confirmedRevision=Number(saved?.revision);
+   const usable=saved?.id===id&&Number.isSafeInteger(confirmedRevision)&&confirmedRevision>Number(payload.revision);
+   if(usable){current={...current,...saved,title:saved.title??payload.title,terms:saved.terms??payload.terms,body:saved.body??payload.body};editBaseline=draftSnapshot();updateDraftStatus();}
+   else savedDraftReloadRequired=true;
+   try{await open(id,{discard:true});}
+   catch(_){showSavedDraftReloadWarning(id);return !savedDraftReloadRequired;}
+   message('초안을 저장했습니다.','success');return true;
+  }finally{controls.forEach((x,i)=>{if(x.isConnected)x.disabled=disabled[i];});}
+ }
  Object.assign(errors,{SERVICE_DRAFT_REVIEW_REQUIRED:'현재 초안을 상대 담당자가 검토 완료한 뒤 최종본을 확정할 수 있습니다.',SERVICE_INVALID_REVIEWER:'상대 조합에서 ERP 계정이 연결된 현직 담당자를 선택해 주세요.',SERVICE_REVIEW_RESPONSE_DENIED:'현재 검토 요청을 받은 담당자만 회신할 수 있습니다. 새로 불러와 요청 상태를 확인해 주세요.',SERVICE_INVALID_REVIEW_RESPONSE:'수정 요청 내용을 입력해 주세요.',SERVICE_REVIEW_ALREADY_PENDING:'이 담당자에게 같은 초안의 검토를 이미 요청했습니다.',SERVICE_INVALID_REVIEW_NOTE:'전달할 내용은 5,000자 이내로 입력해 주세요.'});
  const reviewNames={pending:'검토 대기',completed:'검토 완료',changes_requested:'수정 요청'};
  const reviewDate=s=>s?new Date(s).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'';

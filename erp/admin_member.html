@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.228
+Version: v1.0.229
 Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly registered documents.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.228';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.229';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -19,7 +19,7 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
 <script src="../shared/member_information.js?v=20261002-1"></script>
 <script src="../shared/member_capital.js?v=20261008-3"></script>
 <script src="member_capital_settings.js?v=20261008-3"></script>
-<script src="member_information_admin.js?v=20261002-2"></script>
+<script src="member_information_admin.js?v=20261008-3"></script>
 <script src="member_demographics.js?v=20261002-1"></script>
 <script src="../shared/guardian-admin.js?v=20260915-2" defer></script>
 <script src="../shared/child_direct_admin.js?v=20260916-1" defer></script>
@@ -873,9 +873,11 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                 <div class="mb-3">
                     <label class="form-label small fw-bold">신청자 검색</label>
                     <div class="input-group">
-                        <input type="text" id="proxy-keyword" class="form-control" placeholder="이름 또는 번호" onkeyup="if(event.key=='Enter') searchProxyMember()">
-                        <button class="btn btn-secondary" onclick="searchProxyMember()">검색</button>
+                        <input type="text" id="proxy-keyword" class="form-control" placeholder="이름 또는 번호" oninput="resetProxyMemberSearch()" onkeyup="if(event.key=='Enter') searchProxyMember()">
+                        <button type="button" id="proxy-search" class="btn btn-secondary" onclick="searchProxyMember()">검색</button>
                     </div>
+                    <div id="proxy-search-status" class="form-text" role="status" aria-live="polite"></div>
+                    <div id="proxy-search-results" class="list-group mt-2" aria-label="신청자 검색 결과" style="max-height: 15rem; overflow-y: auto; word-break: keep-all; overflow-wrap: break-word;"></div>
                     <input type="text" id="proxy-member-name" class="form-control mt-2 bg-light text-primary fw-bold" readonly placeholder="검색해주세요.">
                     <input type="hidden" id="proxy-member-uid"> <input type="hidden" id="proxy-member-id">  </div>
 
@@ -7769,6 +7771,12 @@ function openFundEditorFromHistory(type, rowDataStr) {
 } // End of openFundEditorFromHistory
 
 function openHistoryModal(type) {
+    const statusKey = { point: 'points', dividend: 'dividends' }[type] || String(type || '');
+    const status = g_member_fund_status[statusKey];
+    if (status && status !== 'ready') {
+        myAlert(status === 'loading' ? '내역을 불러오는 중입니다.' : '내역을 불러오지 못했습니다. 다시 조회해 주세요.', 'warning');
+        return;
+    }
     const modalEl = ensureMemberHistoryModal();
     const filterEl = document.getElementById('memberHistoryFilter');
     const fromEl = document.getElementById('memberHistoryDateFrom');
@@ -13720,6 +13728,42 @@ function renderEmptyState() {
 
 let g_current_member_id = null; // 현재 보고 있는 조합원 UUID
 let g_current_member_row = null; // 현재 상세 모달의 조합원 원본 데이터
+let g_member_detail_revision = 0;
+let g_member_detail_loading = false;
+const g_member_detail_requests = {};
+const g_member_fund_status = {};
+
+function beginMemberDetailRead(section, memberId = g_current_member_id) {
+    const target = String(memberId || '');
+    if (target !== String(g_current_member_id || '')) {
+        return { section, request: null, revision: g_member_detail_revision, memberId: target };
+    }
+    const request = (g_member_detail_requests[section] || 0) + 1;
+    g_member_detail_requests[section] = request;
+    return { section, request, revision: g_member_detail_revision, memberId: target };
+}
+
+function isCurrentMemberDetailRead(read) {
+    return read.request !== null && read.revision === g_member_detail_revision
+        && read.request === g_member_detail_requests[read.section]
+        && read.memberId === String(g_current_member_id || '');
+}
+
+function setMemberDetailReadBusy(busy) {
+    const modal = document.getElementById('memberDetailModal');
+    if (!modal) return;
+    modal.setAttribute('aria-busy', String(busy));
+    modal.querySelectorAll('.modal-body,.modal-footer').forEach(el => { el.inert = busy; });
+}
+
+document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', () => {
+    ++g_member_detail_revision;
+    setMemberDetailReadBusy(false);
+    if (g_member_detail_loading) {
+        g_member_detail_loading = false;
+        if (typeof showLoading === 'function') showLoading(false);
+    }
+});
 
 function normalizeAdminMemberRow(row, totalCapital) {
     if (!row) return null;
@@ -14042,16 +14086,18 @@ async function loadAdminMemberParticipationHistory(forceReload = false) {
     const summary = document.getElementById('md-participation-summary');
     if (!memberUuid || !list || !summary) return;
     if (!forceReload && String(adminMemberParticipationLoadedFor) === String(memberUuid)) return;
+    const read = beginMemberDetailRead('participation', memberUuid);
     summary.textContent = '불러오는 중...';
     list.innerHTML = '<div class="text-center text-muted py-5"><span class="spinner-border spinner-border-sm me-2"></span>불러오는 중...</div>';
     try {
         const { data, error } = await _supabase.rpc('participation_admin_get_member_history', { p_member_uuid:memberUuid });
         if (error) throw error;
-        if (String(g_current_member_id) !== String(memberUuid)) return;
+        if (!isCurrentMemberDetailRead(read)) return;
         adminMemberParticipationLoadedFor = memberUuid;
         adminMemberParticipationData = data || { events:[] };
         renderAdminMemberParticipationHistory(adminMemberParticipationData);
     } catch (error) {
+        if (!isCurrentMemberDetailRead(read)) return;
         CoopSafeLog.error("loadAdminMemberParticipationHistory failed:", error);
         summary.textContent = '조회 실패';
         list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '교육·회의 참여 이력을 불러오지 못했습니다.')}</div>`;
@@ -14125,6 +14171,7 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
     const list = document.getElementById('md-participation-list');
     const summary = document.getElementById('md-participation-summary');
     if (!memberUuid || !list || !summary) return;
+    const read = beginMemberDetailRead('participation', memberUuid);
     if (!forceReload && String(adminMemberQuizLoadedFor) === String(memberUuid)) {
         renderAdminMemberQuizHistory(adminMemberQuizData);
         return;
@@ -14134,11 +14181,12 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
     try {
         const { data, error } = await _supabase.rpc('quiz_admin_get_member_detail', { p_member_id:memberUuid });
         if (error) throw error;
-        if (String(g_current_member_id) !== String(memberUuid)) return;
+        if (!isCurrentMemberDetailRead(read)) return;
         adminMemberQuizLoadedFor = memberUuid;
         adminMemberQuizData = data || { attempts:[] };
         renderAdminMemberQuizHistory(adminMemberQuizData);
     } catch (error) {
+        if (!isCurrentMemberDetailRead(read)) return;
         CoopSafeLog.error("loadAdminMemberQuizHistory failed:", error);
         summary.textContent = '퀴즈 참여 기록 조회 실패';
         list.innerHTML = `<div class="text-center text-danger py-5">${escapeHtml(error?.message || '퀴즈 참여 기록을 불러오지 못했습니다.')}</div>`;
@@ -14146,19 +14194,25 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
 } // End of loadAdminMemberQuizHistory
 
 async function openMemberDetail(id) {
+    const requestRevision = ++g_member_detail_revision;
+    setMemberDetailReadBusy(true);
+    try {
     // 1. 데이터 매칭
     let m = findCachedAdminMember(id);
 
     if (!m) {
         try {
+            g_member_detail_loading = true;
             if (typeof showLoading === 'function') showLoading(true);
             m = await fetchAdminMemberDetailRow(id);
+            if (requestRevision !== g_member_detail_revision) return;
             if (m) m = upsertCachedAdminMember(m);
         } catch (err) {
+            if (requestRevision !== g_member_detail_revision) return;
             const message = err?.message || err;
             return myAlert("데이터를 불러오지 못했습니다: " + message, 'error');
         } finally {
-            if (typeof showLoading === 'function') showLoading(false);
+            if (requestRevision === g_member_detail_revision && typeof showLoading === 'function') showLoading(false);
         }
     }
 
@@ -14166,6 +14220,31 @@ async function openMemberDetail(id) {
 
     const memberUid = m.id || m.member_uid || m.uid || null;
     if (!memberUid) return myAlert("조합원 UUID를 찾을 수 없습니다.", 'error');
+
+    const typeStr = m.member_type || m.type || '개인';
+    const isGroup = String(typeStr).includes('단체');
+    let accountManagerLabel = '-';
+    let myBadgeCodes = [];
+    if (isGroup) {
+        accountManagerLabel = await resolveMemberAccountManagerLabel(m);
+        if (requestRevision !== g_member_detail_revision) return;
+    }
+    if (!isAdminMemberSiteProfile()) {
+        await ensureBadgesReady();
+        if (requestRevision !== g_member_detail_revision) return;
+        if (!g_badges || g_badges.length === 0) {
+            const badges = await Badges.getAll(_supabase);
+            if (requestRevision !== g_member_detail_revision) return;
+            g_badges = badges;
+        }
+        const { data: myRows, error: badgeError } = await _supabase
+            .from('coop_member_badges').select('badge_id').eq('member_uid', memberUid);
+        if (requestRevision !== g_member_detail_revision) return;
+        if (myRows && !badgeError) {
+            myBadgeCodes = myRows.map(row => g_badges.find(b => b.id == row.badge_id)?.code)
+                .filter(code => code != null);
+        }
+    }
 
     g_current_member_id = memberUid;
     g_current_member_row = m;
@@ -14191,7 +14270,6 @@ async function openMemberDetail(id) {
     document.getElementById('md-title').innerText = `${getAdminMemberDisplayName(m) || m.name} 님 상세`;
     document.getElementById('md-id-text').innerText = m.member_id || 'ID없음';
 
-    let typeStr = m.member_type || m.type || '개인';
     document.getElementById('md-type-badge').innerText = typeStr;
 
     // 폼 값 채우기
@@ -14202,8 +14280,9 @@ async function openMemberDetail(id) {
     document.getElementById('md-email').value = m.email || '';
     document.getElementById('md-email-original').value = m.email || '';
     document.getElementById('md-status').value = m.status || '승인대기';
-    void window.GuardianAdmin?.load(_supabase,memberUid,()=>g_current_member_id);
-    void window.ChildDirectAdmin?.load(_supabase,{...m,id:memberUid},()=>g_current_member_id);
+    const currentTarget = () => requestRevision === g_member_detail_revision ? g_current_member_id : null;
+    void window.GuardianAdmin?.load(_supabase,memberUid,currentTarget);
+    void window.ChildDirectAdmin?.load(_supabase,{...m,id:memberUid},currentTarget);
     document.getElementById('md-type').value = typeStr;
     document.getElementById('md-addr').value = m.address || '';
     document.getElementById('md-addr-detail').value = '';
@@ -14213,14 +14292,13 @@ async function openMemberDetail(id) {
     document.getElementById('md-bank-account').value = m.account_number || '';
 
     // 3. 개인/단체 구분 표시 및 단체 대표·담당자 정보
-    const isGroup = String(typeStr).includes('단체');
     syncMemberDetailTypeLayout();
 
     if (isGroup) {
         document.getElementById('md-representative-name').value = m.representative_name || '';
         document.getElementById('md-contact-name').value = m.contact_name || '';
         document.getElementById('md-contact-position').value = m.contact_position || '';
-        document.getElementById('md-account-manager').textContent = await resolveMemberAccountManagerLabel(m);
+        document.getElementById('md-account-manager').textContent = accountManagerLabel;
         document.getElementById('md-corp-num').value = m.corp_number || '';
         document.getElementById('md-biz-num').value = m.business_number || '';
         document.getElementById('md-rrn-view').innerText = '-';
@@ -14256,24 +14334,6 @@ async function openMemberDetail(id) {
     document.getElementById('md-sns-status').innerHTML = snsHtml || '<span class="text-muted small">SNS 미연동</span>';
 
     if (!isAdminMemberSiteProfile()) {
-        await ensureBadgesReady();
-        if (!g_badges || g_badges.length === 0) {
-            g_badges = await Badges.getAll(_supabase);
-        }
-
-        const { data: myRows, error: badgeError } = await _supabase
-            .from('coop_member_badges')
-            .select('badge_id')
-            .eq('member_uid', memberUid);
-
-        let myBadgeCodes = [];
-        if (myRows && !badgeError) {
-            myBadgeCodes = myRows.map(row => {
-                const match = g_badges.find(b => b.id == row.badge_id);
-                return match ? match.code : null;
-            }).filter(code => code !== null);
-        }
-
         Badges.renderCheckboxes('member-badge-checkboxes', g_badges, myBadgeCodes);
         markAutoManagedBadgeControls();
     } else {
@@ -14298,6 +14358,20 @@ async function openMemberDetail(id) {
         applyAdminMemberModalLayer(detailModalEl);
         if (!detailModalEl.classList.contains('show')) {
             detailModal.show();
+        }
+    }
+    } catch (error) {
+        if (requestRevision === g_member_detail_revision) {
+            CoopSafeLog.error('[openMemberDetail] load failed', error);
+            myAlert('조합원 정보를 불러오지 못했습니다. 다시 열어주세요.', 'error');
+        }
+    } finally {
+        if (requestRevision === g_member_detail_revision) {
+            setMemberDetailReadBusy(false);
+            if (g_member_detail_loading) {
+                g_member_detail_loading = false;
+                if (typeof showLoading === 'function') showLoading(false);
+            }
         }
     }
 }
@@ -14780,6 +14854,8 @@ async function saveMemberBasic() {
 async function loadConsultLogs(uuid) { // uuid는 유지(호출부 호환), 내부는 textId 사용
   const listEl = document.getElementById('md-consult-list');
   if (!listEl) return;
+  const read = beginMemberDetailRead('consult', uuid || g_current_member_id);
+  if (!isCurrentMemberDetailRead(read)) return;
 
   const textId = document.getElementById('md-id-text').innerText;
 
@@ -14790,9 +14866,10 @@ async function loadConsultLogs(uuid) { // uuid는 유지(호출부 호환), 내�
 
   listEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
 
-  const { data, error } = await _supabase.rpc('get_member_consultations', {
+  const { data, error } = await Promise.resolve().then(() => _supabase.rpc('get_member_consultations', {
     p_member_id: textId
-  });
+  })).catch(error => ({ data: null, error }));
+  if (!isCurrentMemberDetailRead(read)) return;
 
   listEl.innerHTML = '';
 
@@ -14899,6 +14976,9 @@ function getManagedFamilyRelationBadge(relationKind, member) {
 async function loadMemberFamily(parentId) {
     const tbody = document.getElementById('md-family-list');
     if (!tbody) return;
+    const read = beginMemberDetailRead('family', parentId);
+    if (!isCurrentMemberDetailRead(read)) return;
+    try {
 
     // 1. 로딩 표시
     tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></td></tr>';
@@ -14911,6 +14991,7 @@ async function loadMemberFamily(parentId) {
         .select('id, manager_id')
         .eq('id', parentId))
         .maybeSingle();
+    if (!isCurrentMemberDetailRead(read)) return;
 
     if (currentError) {
         CoopSafeLog.error("현재 조합원 가족 연결 기준 로드 실패:", currentError);
@@ -14923,6 +15004,7 @@ async function loadMemberFamily(parentId) {
         .select(familySelect))
         .eq('manager_id', parentId)
         .order('join_date', { ascending: false });
+    if (!isCurrentMemberDetailRead(read)) return;
 
     if (childError) {
         CoopSafeLog.error("가족 목록 로드 실패:", childError);
@@ -14937,6 +15019,7 @@ async function loadMemberFamily(parentId) {
             .select(familySelect)
             .eq('id', currentMember.manager_id))
             .maybeSingle();
+        if (!isCurrentMemberDetailRead(read)) return;
 
         if (parentError) {
             CoopSafeLog.error("보호자/관리자 연결 로드 실패:", parentError);
@@ -15004,6 +15087,11 @@ async function loadMemberFamily(parentId) {
             </tr>
         `;
     });
+    } catch (error) {
+        if (!isCurrentMemberDetailRead(read)) return;
+        CoopSafeLog.error('[loadMemberFamily] load failed', error);
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-3">가족·단체 정보를 불러오지 못했습니다.</td></tr>';
+    }
 }
 
 function getManagedLinkErrorMessage(error) {
@@ -15134,6 +15222,34 @@ function openFundEditor(type, rowDataStr) {
     new bootstrap.Modal(modalEl).show();
 }
 
+function setMemberFundReadState(type, state, label = '') {
+    const prefix = { ledger: 'capital', donation: 'donation', points: 'point', dividends: 'dividend' }[type];
+    if (!prefix) return;
+    g_member_fund_status[type] = state;
+    const total = document.getElementById(`md-${prefix}-total`);
+    const meta = document.getElementById(`md-${prefix}-meta`);
+    if (state !== 'ready' && total) total.innerText = '—';
+    if (!meta) return;
+    const actions = meta.closest('.fund-summary-card')?.querySelector('.fund-summary-actions');
+    actions?.querySelector('[data-member-fund-retry]')?.remove();
+    meta.replaceChildren(document.createTextNode(label || (state === 'ready' ? '' : state === 'loading' ? '불러오는 중…' : '조회 실패')));
+    if (state === 'error' && actions) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-outline-secondary ms-2';
+        button.textContent = '다시 조회';
+        button.dataset.memberFundRetry = type;
+        button.onclick = retryMemberFunds;
+        actions.append(button);
+    }
+}
+
+function retryMemberFunds() {
+    const member = g_current_member_row;
+    if (!member || String(member.id || member.member_uid || member.uid || '') !== String(g_current_member_id || '')) return;
+    return loadMemberFunds(g_current_member_id, member.member_id, true);
+}
+
 function resetMemberFundsSummaryCards() {
     globalHistoryData = {
         ledger: [],
@@ -15142,23 +15258,7 @@ function resetMemberFundsSummaryCards() {
         dividends: []
     };
 
-    const pointTotalEl = document.getElementById('md-point-total');
-    const pointMetaEl = document.getElementById('md-point-meta');
-    const dividendTotalEl = document.getElementById('md-dividend-total');
-    const dividendMetaEl = document.getElementById('md-dividend-meta');
-    const capitalTotalEl = document.getElementById('md-capital-total');
-    const donationTotalEl = document.getElementById('md-donation-total');
-    const capitalMetaEl = document.getElementById('md-capital-meta');
-    const donationMetaEl = document.getElementById('md-donation-meta');
-
-    if (capitalTotalEl) capitalTotalEl.innerText = '0 원';
-    if (donationTotalEl) donationTotalEl.innerText = '0 원';
-    if (capitalMetaEl) capitalMetaEl.innerText = '등록된 내역 없음';
-    if (donationMetaEl) donationMetaEl.innerText = '등록된 내역 없음';
-    if (pointTotalEl) pointTotalEl.innerText = '0 원';
-    if (pointMetaEl) pointMetaEl.innerText = '이용실적 보상 원장 기준';
-    if (dividendTotalEl) dividendTotalEl.innerText = '0 원';
-    if (dividendMetaEl) dividendMetaEl.innerText = '미지급 세후금액 기준';
+    ['ledger', 'donation', 'points', 'dividends'].forEach(type => setMemberFundReadState(type, 'loading'));
 } // End of resetMemberFundsSummaryCards
 
 function isFinalizedDividendBatchStatus(status) {
@@ -15166,6 +15266,9 @@ function isFinalizedDividendBatchStatus(status) {
 } // End of isFinalizedDividendBatchStatus
 
 async function loadMemberRewardAndDividendSummary(uuid, textId) {
+    const read = beginMemberDetailRead('rewards', uuid);
+    if (!isCurrentMemberDetailRead(read)) return;
+    try {
     const pointTotalEl = document.getElementById('md-point-total');
     const pointMetaEl = document.getElementById('md-point-meta');
     const dividendTotalEl = document.getElementById('md-dividend-total');
@@ -15181,17 +15284,22 @@ async function loadMemberRewardAndDividendSummary(uuid, textId) {
             .eq('member_id', textId)
             .order('created_at', { ascending: false })
             .limit(500);
+        if (!isCurrentMemberDetailRead(read)) return;
 
         if (pointError) {
             CoopSafeLog.warn("조합원 이용실적 보상 원장 로드 실패:", pointError);
-            if (pointMetaEl) pointMetaEl.innerText = '조회 실패';
+            globalHistoryData.points = [];
+            setMemberFundReadState('points', 'error', '이용실적 조회 실패');
         } else {
+            setMemberFundReadState('points', 'ready');
             globalHistoryData.points = Array.isArray(points) ? points : [];
             const pointTotal = globalHistoryData.points.reduce((sum, row) => sum + normalizeDividendExportNumber(row.change_amount), 0);
             if (pointTotalEl) pointTotalEl.innerText = `${Math.trunc(pointTotal).toLocaleString('ko-KR')} 원`;
             if (pointMetaEl) pointMetaEl.innerText = `${globalHistoryData.points.length.toLocaleString('ko-KR')}건 기준`;
         }
     } else if (pointMetaEl) {
+        setMemberFundReadState('points', 'ready');
+        if (pointTotalEl) pointTotalEl.innerText = '0 원';
         pointMetaEl.innerText = '조합원 번호 없음';
     }
 
@@ -15202,10 +15310,12 @@ async function loadMemberRewardAndDividendSummary(uuid, textId) {
             .eq('member_uuid', uuid)
             .order('created_at', { ascending: false })
             .limit(200);
+        if (!isCurrentMemberDetailRead(read)) return;
 
         if (dividendError) {
             CoopSafeLog.warn("조합원 확정 배당 내역 로드 실패:", dividendError);
-            if (dividendMetaEl) dividendMetaEl.innerText = '조회 실패';
+            globalHistoryData.dividends = [];
+            setMemberFundReadState('dividends', 'error', '배당금 조회 실패');
             return;
         }
 
@@ -15218,9 +15328,13 @@ async function loadMemberRewardAndDividendSummary(uuid, textId) {
                 .from('coop_dividend_batches')
                 .select('id,fiscal_year,title,status,payment_due_date,period_start,period_end'))
                 .in('id', batchIds);
+            if (!isCurrentMemberDetailRead(read)) return;
 
             if (batchError) {
                 CoopSafeLog.warn("조합원 배당 회차 메타 로드 실패:", batchError);
+                globalHistoryData.dividends = [];
+                setMemberFundReadState('dividends', 'error', '배당금 조회 실패');
+                return;
             } else {
                 (batches || []).forEach((batch) => batchMap.set(String(batch.id), batch));
             }
@@ -15247,6 +15361,7 @@ async function loadMemberRewardAndDividendSummary(uuid, textId) {
         });
         const unpaidTotal = unpaidRows.reduce((sum, item) => sum + normalizeDividendExportNumber(item.net_amount), 0);
 
+        setMemberFundReadState('dividends', 'ready');
         if (dividendTotalEl) dividendTotalEl.innerText = `${Math.trunc(unpaidTotal).toLocaleString('ko-KR')} 원`;
         if (dividendMetaEl) {
             dividendMetaEl.innerText = globalHistoryData.dividends.length > 0
@@ -15254,7 +15369,17 @@ async function loadMemberRewardAndDividendSummary(uuid, textId) {
                 : '확정 배당 내역 없음';
         }
     } else if (dividendMetaEl) {
-        dividendMetaEl.innerText = '조합원 UUID 없음';
+        setMemberFundReadState('dividends', 'error', '조합원 정보 확인 필요');
+    }
+    } catch (error) {
+        if (!isCurrentMemberDetailRead(read)) return;
+        CoopSafeLog.error('[loadMemberRewardAndDividendSummary] load failed', error);
+        ['points', 'dividends'].forEach(type => {
+            if (g_member_fund_status[type] === 'loading') {
+                globalHistoryData[type] = [];
+                setMemberFundReadState(type, 'error');
+            }
+        });
     }
 } // End of loadMemberRewardAndDividendSummary
 
@@ -15268,6 +15393,7 @@ function calculateMemberFundTotal(rows) {
 function updateMemberFundSummary(type, rows) {
     const safeRows = Array.isArray(rows) ? rows : [];
     const capital = type === 'capital';
+    setMemberFundReadState(capital ? 'ledger' : 'donation', 'ready');
     const totalEl = document.getElementById(capital ? 'md-capital-total' : 'md-donation-total');
     const metaEl = document.getElementById(capital ? 'md-capital-meta' : 'md-donation-meta');
     const dateKey = capital ? 'deposit_date' : 'donation_date';
@@ -15287,18 +15413,25 @@ function updateMemberFundSummary(type, rows) {
 
 // 조합원 자금 요약과 상세 모달이 같은 조회 결과를 재사용한다.
 async function loadMemberFunds(uuid, textId, reset=false) {
+    const read = beginMemberDetailRead('funds', uuid);
+    if (!isCurrentMemberDetailRead(read)) return;
     if (reset) resetMemberFundsSummaryCards();
+    else {
+        ['ledger', 'donation', 'points', 'dividends'].forEach(type => setMemberFundReadState(type, 'loading'));
+    }
+    g_member_detail_requests.rewards = (g_member_detail_requests.rewards || 0) + 1;
 
     const safeTextId = String(textId || '').trim();
     const hasTextId = !!safeTextId && !['ID없음', '-'].includes(safeTextId);
     const safeUuid = String(uuid || '').trim();
 
-    const capitalPromise = fetchAdminMemberCapitalRows(safeTextId);
+    const readFailure = error => ({ data: null, error });
+    const capitalPromise = Promise.resolve().then(() => fetchAdminMemberCapitalRows(safeTextId)).catch(readFailure);
 
     const capitalNotificationPromise = hasTextId && !isAdminMemberSiteProfile()
-        ? _supabase.rpc('admin_list_member_capital_notification_status', {
+        ? Promise.resolve().then(() => _supabase.rpc('admin_list_member_capital_notification_status', {
             p_member_text_id: safeTextId
-        })
+        })).catch(readFailure)
         : Promise.resolve({ data: [], error: null });
 
     let donationQuery = null;
@@ -15319,13 +15452,14 @@ async function loadMemberFunds(uuid, textId, reset=false) {
             .order('created_at', { ascending: false, nullsFirst: false })
             .order('id', { ascending: false });
     }
-    const donationPromise = donationQuery || Promise.resolve({ data: [], error: null });
+    const donationPromise = Promise.resolve(donationQuery || { data: [], error: null }).catch(readFailure);
 
     const [capitalResult, donationResult, capitalNotificationResult] = await Promise.all([
         capitalPromise,
         donationPromise,
         capitalNotificationPromise
     ]);
+    if (!isCurrentMemberDetailRead(read)) return;
     if (capitalResult.error) CoopSafeLog.error("출자금 로드 실패:", capitalResult.error);
     if (donationResult.error) CoopSafeLog.error("기부금 로드 실패:", donationResult.error);
     if (capitalNotificationResult.error) CoopSafeLog.error("출자금 알림 상태 로드 실패:", capitalNotificationResult.error);
@@ -15348,17 +15482,14 @@ async function loadMemberFunds(uuid, textId, reset=false) {
         };
     });
     globalHistoryData.donations = Array.isArray(donationResult.data) ? donationResult.data : [];
-    updateMemberFundSummary('capital', globalHistoryData.ledger);
-    if (!isAdminMemberSiteProfile()) updateMemberFundSummary('donation', globalHistoryData.donations);
-
     if (capitalResult.error) {
-        const metaEl = document.getElementById('md-capital-meta');
-        if (metaEl) metaEl.innerText = '출자금 조회 실패';
-    }
+        globalHistoryData.ledger = [];
+        setMemberFundReadState('ledger', 'error', '출자금 조회 실패');
+    } else updateMemberFundSummary('capital', globalHistoryData.ledger);
     if (donationResult.error) {
-        const metaEl = document.getElementById('md-donation-meta');
-        if (metaEl) metaEl.innerText = '기부금 조회 실패';
-    }
+        globalHistoryData.donations = [];
+        setMemberFundReadState('donation', 'error', '자산수증이익 조회 실패');
+    } else if (!isAdminMemberSiteProfile()) updateMemberFundSummary('donation', globalHistoryData.donations);
 
     if (!isAdminMemberSiteProfile()) await loadMemberRewardAndDividendSummary(uuid, textId);
 } // End of loadMemberFunds
@@ -19990,6 +20121,46 @@ let g_proxy_capital_rules = null;
 let g_proxy_capital_revision = 0;
 let g_proxy_capital_error = false;
 let g_proxy_submit_busy = false;
+let g_proxy_search_revision = 0;
+let g_proxy_search_pending = false;
+let g_proxy_selected_member = null;
+
+function resetProxyMemberSearch() {
+    ++g_proxy_search_revision;
+    g_proxy_search_pending = false;
+    g_proxy_selected_member = null;
+    ['proxy-member-name', 'proxy-member-uid', 'proxy-member-id'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('proxy-search-results')?.replaceChildren();
+    const status = document.getElementById('proxy-search-status');
+    if (status) status.textContent = '';
+    syncProxyApplicationFields();
+}
+
+document.getElementById('proxyModal')?.addEventListener('hide.bs.modal', () => {
+    resetProxyMemberSearch();
+    ++g_proxy_capital_revision;
+});
+
+function selectProxyMember(member, keyword, revision) {
+    if (g_proxy_submit_busy || g_proxy_search_pending || revision !== g_proxy_search_revision
+        || document.getElementById('proxy-keyword').value.trim() !== keyword) return;
+    g_proxy_selected_member = { ...member, keyword };
+    document.getElementById('proxy-member-name').value = `${member.name || '이름 미입력'}${member.member_id ? ` (${member.member_id})` : ''}`;
+    document.getElementById('proxy-member-uid').value = member.id;
+    document.getElementById('proxy-member-id').value = member.member_id || '';
+    document.getElementById('proxy-search-status').textContent = '신청자를 선택했습니다.';
+    document.querySelectorAll('#proxy-search-results button').forEach(button => {
+        button.classList.toggle('active', button.dataset.memberId === String(member.id));
+        button.setAttribute('aria-pressed', String(button.dataset.memberId === String(member.id)));
+    });
+    syncProxyApplicationFields();
+}
+
+function hasSelectedProxyMember() {
+    return !g_proxy_search_pending && !!g_proxy_selected_member
+        && g_proxy_selected_member.keyword === document.getElementById('proxy-keyword').value.trim()
+        && String(g_proxy_selected_member.id) === document.getElementById('proxy-member-uid').value;
+}
 
 async function loadProxyCapitalRules() {
     const requestRevision = ++g_proxy_capital_revision;
@@ -20020,7 +20191,7 @@ async function openProxyModal() {
     document.getElementById('proxy-type').value = 'extra';
     document.getElementById('proxy-amount').value = '';
     document.getElementById('proxy-reason').value = '';
-    syncProxyApplicationFields();
+    resetProxyMemberSearch();
     new bootstrap.Modal(document.getElementById('proxyModal')).show();
     try { await loadProxyCapitalRules(); }
     catch (_) {
@@ -20042,7 +20213,12 @@ function syncProxyApplicationFields() {
     amountEl.disabled = isWithdrawal || !g_proxy_capital_rules || g_proxy_submit_busy;
     if (isWithdrawal) amountEl.value = '';
     const submitButton = document.getElementById('proxy-submit');
-    if (submitButton) submitButton.disabled = g_proxy_submit_busy || (!isWithdrawal && !g_proxy_capital_rules);
+    if (submitButton) submitButton.disabled = g_proxy_submit_busy || !hasSelectedProxyMember() || (!isWithdrawal && !g_proxy_capital_rules);
+    ['proxy-keyword', 'proxy-search', 'proxy-type', 'proxy-reason'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = g_proxy_submit_busy;
+    });
+    document.querySelectorAll('#proxy-search-results button').forEach(button => { button.disabled = g_proxy_submit_busy; });
     const guidance = document.getElementById('proxy-capital-guidance');
     if (g_proxy_capital_rules) {
         window.CoopMemberCapital.applyInput(amountEl, g_proxy_capital_rules, false);
@@ -20057,25 +20233,49 @@ function syncProxyApplicationFields() {
 
 // 멤버 검색
 async function searchProxyMember() {
+    if (g_proxy_submit_busy) return;
     const key = document.getElementById('proxy-keyword').value.trim();
+    resetProxyMemberSearch();
     if(key.length < 2) return myAlert("검색어를 2글자 이상 입력하세요.", 'warning');
     const safeKey = sanitizeOrKeyword(key);
     if (!safeKey) return myAlert("검색어를 다시 입력하세요.", 'warning');
 
+    const revision = g_proxy_search_revision;
+    g_proxy_search_pending = true;
+    const status = document.getElementById('proxy-search-status');
+    const results = document.getElementById('proxy-search-results');
+    status.textContent = '검색 중…';
+    try {
     const { data, error } = await scopeAdminTenant(_supabase
         .from('coop_members')
         .select('id, name, member_id'))
         .or(`name.eq.${safeKey},member_id.eq.${safeKey},phone.eq.${safeKey}`)
-        .limit(1);
-
-    if (data && data.length > 0) {
-        const m = data[0];
-        document.getElementById('proxy-member-name').value = `${m.name} (${m.member_id})`;
-        document.getElementById('proxy-member-uid').value = m.id;
-        document.getElementById('proxy-member-id').value = m.member_id;
-    } else {
-        document.getElementById('proxy-member-name').value = "검색 결과 없음";
-        document.getElementById('proxy-member-uid').value = "";
+        .order('name', { ascending: true })
+        .order('member_id', { ascending: true })
+        .limit(21);
+    if (revision !== g_proxy_search_revision || document.getElementById('proxy-keyword').value.trim() !== key) return;
+    if (error) throw error;
+    const members = Array.isArray(data) ? data.filter(member => member.id) : [];
+    status.textContent = members.length > 20 ? '결과가 많습니다. 조합원 번호나 전화번호로 다시 검색해 주세요.'
+        : members.length ? '신청할 사람을 선택해 주세요.' : '검색 결과가 없습니다. 이름 또는 번호를 확인해 주세요.';
+    members.slice(0, 20).forEach(member => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'list-group-item list-group-item-action';
+        button.dataset.memberId = String(member.id);
+        button.textContent = `${member.name || '이름 미입력'} · ${member.member_id || '조합원 번호 미등록'}`;
+        button.setAttribute('aria-pressed', 'false');
+        button.onclick = () => selectProxyMember(member, key, revision);
+        results.append(button);
+    });
+    } catch (_) {
+        if (revision !== g_proxy_search_revision || document.getElementById('proxy-keyword').value.trim() !== key) return;
+        status.textContent = '검색하지 못했습니다. 다시 검색해 주세요.';
+    } finally {
+        if (revision === g_proxy_search_revision) {
+            g_proxy_search_pending = false;
+            syncProxyApplicationFields();
+        }
     }
 }
 
@@ -20090,7 +20290,7 @@ async function submitProxyData() {
     const amount = type === 'withdraw' ? 0 : Number(rawAmount || 0);
     const reason = document.getElementById('proxy-reason').value;
 
-    if (!uid) return myAlert("신청자를 먼저 검색해주세요.", 'warning');
+    if (!uid || !hasSelectedProxyMember()) return myAlert("검색 결과에서 신청자를 선택해주세요.", 'warning');
     if (type !== 'withdraw' && amount <= 0) return myAlert("금액을 입력해주세요.", 'warning');
     if (!reason) return myAlert("비고란에 접수 사유(전화 등)를 입력해주세요.", 'warning');
 
