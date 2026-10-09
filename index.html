@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.116
-Change: Apply tenant section settings before exposing shared homepage sections.
+Version: v1.0.117
+Change: Opt-in homepage structures and independently selected commercial-free fonts.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.116 | index.html');</script>
+<script>console.log('[Version] v1.0.117 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1759,6 +1759,8 @@ Change: Apply tenant section settings before exposing shared homepage sections.
   <script src="shared/partner_logo_theme.js?v=20260917-2"></script>
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
+  <script src="shared/home_design.js?v=20261009-1"></script>
+  <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
 
 <body>
@@ -2561,6 +2563,7 @@ Change: Apply tenant section settings before exposing shared homepage sections.
     let g_public_site_context = null;
     let g_public_site_context_promise = null;
     let g_public_home_settings = null;
+    let g_publicSectionsForLayout = null;
     window.__PUBLIC_SITE_COOP_NAME__ = window.CoopTenantHead?.coopName || '용인모두의햇빛협동조합';
     const PUBLIC_READ_RETRY_DELAYS_MS = Object.freeze([0, 350, 1000]);
 
@@ -2690,6 +2693,9 @@ Change: Apply tenant section settings before exposing shared homepage sections.
         document.body.classList.add(`home-template-${homeTemplate}`);
         window.__PUBLIC_HOME_TEMPLATE__ = homeTemplate;
         window.__PUBLIC_SITE_MEMBER_PROFILE__ = isSiteMemberProfile;
+        document.body.classList.toggle('home-layout-designed', CoopHomeDesign.normalizeLayout(settings.home_layout_mode) === 'designed');
+        CoopHomeDesign.applyFonts(document.body, settings.home_title_font, settings.home_body_font);
+        if (Array.isArray(g_publicSectionsForLayout)) applyPublicSectionOrder(g_publicSectionsForLayout);
 
         const impact = document.getElementById('impact');
         const impactKicker = document.querySelector('#public-impact-kicker span');
@@ -3104,6 +3110,7 @@ Change: Apply tenant section settings before exposing shared homepage sections.
     }
 
     function applyPublicSectionOrder(sections = []) {
+        g_publicSectionsForLayout = sections;
         const orderMap = new Map();
         Object.entries(HOME_SECTION_DEFAULT_ORDER).forEach(([id, order]) => orderMap.set(id, order));
         sections.forEach((sec) => {
@@ -3111,6 +3118,9 @@ Change: Apply tenant section settings before exposing shared homepage sections.
             if (!id) return;
             orderMap.set(id, getHomeSectionOrderValue(sec));
         });
+        if (CoopHomeDesign.normalizeLayout(g_public_home_settings?.home_layout_mode) === 'designed') {
+            (CoopHomeDesign.orders[g_public_home_settings?.home_template] || []).forEach((id, index) => orderMap.set(id, index + 1));
+        }
 
         const mainEl = document.getElementById('main');
         if (mainEl) {

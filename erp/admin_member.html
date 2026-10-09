@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.230
-Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly registered documents.
+Version: v1.0.231
+Change: 2026-10-09 - Homepage structures and title/body font selection with live preview.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.230';
+  window.ADMIN_MEMBER_VERSION = 'v1.0.231';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -57,6 +57,7 @@ Change: 2026-10-07 - Separate tenant signup and legal drafts from explicitly reg
 <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 <script src="approval_rich_editor.js?v=20260918-1"></script>
 <script src="site_editor_drafts.js?v=1.0.0"></script>
+<script src="../shared/home_design.js?v=20261009-1"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -376,6 +377,9 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
   .member-history-filter .btn { min-height:38px; }
   .admin-member-quiz-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
+.home-font-sample { word-break:keep-all; overflow-wrap:break-word; }
+.home-font-sample p { font-family:var(--home-body-font); font-size:16px; line-height:1.8; }
+.home-font-sample-title { font-family:var(--home-title-font); font-size:clamp(23px,3vw,30px); line-height:1.5; font-weight:700; }
 </style>
 <style>
 #tab-site { word-break:keep-all; overflow-wrap:break-word; }
@@ -1972,41 +1976,56 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 </div>
 
 <details class="card border-0 shadow-sm mb-4 site-editor-details">
-<summary class="fw-bold p-3">🎨 홈페이지 형식 선택</summary>
+<summary class="fw-bold p-3">🎨 홈페이지 구성 선택</summary>
 <div class="card-body pt-0">
-<p class="text-muted small mb-3">같은 내용과 사진을 유지하면서 홈페이지의 표현 방식만 바꿉니다. 저장하기 전까지 공개 화면에는 반영되지 않습니다.</p>
-<div class="home-template-grid" role="radiogroup" aria-label="홈페이지 형식 선택">
+<p class="text-muted small mb-3">내용과 사진은 유지하고 첫 화면과 섹션 배치를 선택합니다. 미리보기로 확인한 뒤 저장해 주세요.</p>
+<div class="home-template-grid" role="radiogroup" aria-label="홈페이지 구성 선택" onchange="selectHomeTemplate()">
 <label class="home-template-card">
 <input class="form-check-input" type="radio" name="site-home-template" value="community">
 <span class="home-template-preview community" aria-hidden="true"><span class="home-template-preview-copy">지역이 함께 만드는 햇빛</span></span>
 <span class="home-template-title">시민참여형</span>
-<span class="home-template-description d-block">조합원·출자금과 지역 참여 현황을 풍부하게 보여줍니다.</span>
+<span class="home-template-description d-block">가운데 정렬 배너 다음에 참여 현황과 발전 사업을 보여줍니다.</span>
 </label>
 <label class="home-template-card">
 <input class="form-check-input" type="radio" name="site-home-template" value="simple">
 <span class="home-template-preview simple" aria-hidden="true"><span class="home-template-preview-copy">큰 사진과 핵심 메시지</span></span>
 <span class="home-template-title">모던 카드형</span>
-<span class="home-template-description d-block">큰 사진과 선명한 버튼, 핵심 숫자를 시원하게 보여줍니다.</span>
+<span class="home-template-description d-block">글과 사진을 좌우로 나눈 배너, 소개 카드와 핵심 현황을 보여줍니다.</span>
 </label>
 <label class="home-template-card">
 <input class="form-check-input" type="radio" name="site-home-template" value="brand">
 <span class="home-template-preview brand" aria-hidden="true"><span class="home-template-preview-copy">신뢰받는 협동조합</span></span>
 <span class="home-template-title">신뢰 브랜드형</span>
-<span class="home-template-description d-block">짙은 색과 유리 카드 표현으로 조합의 철학·공식 인증·전문성을 앞세웁니다.</span>
+<span class="home-template-description d-block">조합 소개와 공식 인증, 함께하는 단체와 사업 실적을 앞에 배치합니다.</span>
 </label>
 <label class="home-template-card">
 <input class="form-check-input" type="radio" name="site-home-template" value="editorial">
 <span class="home-template-preview editorial" aria-hidden="true"><span class="home-template-preview-copy">우리의 활동과 이야기</span></span>
 <span class="home-template-title">소식 중심형</span>
-<span class="home-template-description d-block">조합 소개와 활동 소식을 차분한 잡지처럼 보여줍니다.</span>
+<span class="home-template-description d-block">소식을 첫 섹션에 두고 대표 소식과 다른 소식을 잡지처럼 배열합니다.</span>
 </label>
 <label class="home-template-card">
 <input class="form-check-input" type="radio" name="site-home-template" value="campaign">
 <span class="home-template-preview campaign" aria-hidden="true"><span class="home-template-preview-copy">지금 함께해 주세요</span></span>
 <span class="home-template-title">참여 캠페인형</span>
-<span class="home-template-description d-block">밝은 색과 큰 참여 버튼을 사용해 조합원 모집이나 시민 캠페인을 적극적으로 알립니다.</span>
+<span class="home-template-description d-block">포스터형 배너와 큰 참여 버튼, 참여 현황과 활동 소식을 앞세웁니다.</span>
 </label>
 </div>
+<div class="mt-3"><label class="form-label fw-bold" for="site-home-layout-mode">섹션 배치</label><select class="form-select" id="site-home-layout-mode" onchange="queueHomePreviewUpdate()"><option value="existing">현재 배치 유지</option><option value="designed">선택한 구성의 권장 배치</option></select><div class="form-text">권장 배치는 표시 중인 섹션의 순서만 바꿉니다. 숨긴 섹션은 그대로 숨기며 기존 순서 설정도 보존합니다.</div></div>
+</div>
+</details>
+
+<details class="card border-0 shadow-sm mb-4 site-editor-details" id="site-home-font-settings">
+<summary class="fw-bold p-3">🔤 홈페이지 글꼴</summary>
+<div class="card-body pt-0">
+<div class="row g-3">
+<div class="col-md-8"><label class="form-label fw-bold" for="site-home-font-pair">추천 조합</label><select class="form-select" id="site-home-font-pair" onchange="selectHomeFontPair()"><option value="custom">직접 선택</option><option value="legacy">기존 글꼴 유지</option><option value="clean">깔끔한 기본형 · Pretendard</option><option value="trust">단정한 신뢰형 · Noto Sans KR</option><option value="warm">따뜻한 소식형 · 고운바탕 + Pretendard</option><option value="editorial">차분한 잡지형 · Noto Serif KR + Noto Sans KR</option><option value="participation">힘 있는 참여형 · Gmarket Sans + Pretendard</option><option value="campaign">또렷한 캠페인형 · 도현 + 나눔고딕</option></select></div>
+<div class="col-md-4 d-flex align-items-end"><button type="button" class="btn btn-outline-primary w-100" onclick="recommendHomeFonts()">구성에 맞는 글꼴 선택</button></div>
+<div class="col-md-6"><label class="form-label fw-bold" for="site-home-title-font">제목 글꼴</label><select class="form-select" id="site-home-title-font" onchange="updateHomeFontSelection()"><option value="legacy">기존 제목 글꼴</option></select></div>
+<div class="col-md-6"><label class="form-label fw-bold" for="site-home-body-font">본문 글꼴</label><select class="form-select" id="site-home-body-font" onchange="updateHomeFontSelection()"><option value="legacy">기존 본문 글꼴</option></select></div>
+</div>
+<div class="home-font-sample mt-3 p-4 border rounded-3 bg-light" id="site-home-font-sample"><div class="home-font-sample-title">함께 만드는 우리의 내일</div><p class="mb-0 mt-2">한 사람의 참여가 지역의 변화를 만듭니다. 조합의 소식과 활동을 만나보세요.</p></div>
+<div class="form-text mt-2">상업용 홈페이지에 무료로 사용할 수 있는 글꼴입니다. 제목과 본문을 각각 선택할 수 있으며 ERP 글꼴은 바뀌지 않습니다.</div>
 </div>
 </details>
 
@@ -8626,7 +8645,51 @@ if (editor) editor.hidden = mode !== 'regions';
 queueHomePreviewUpdate();
 }
 
+function initializeHomeFontOptions() {
+['title','body'].forEach(kind => {
+const select = document.getElementById(`site-home-${kind}-font`);
+if (!select || select.options.length > 1) return;
+CoopHomeDesign.fonts.forEach(font => {
+const option = document.createElement('option');
+option.value = font.id;
+option.textContent = `${font.label} · ${font.kind}`;
+select.appendChild(option);
+});
+});
+}
+
+function updateHomeFontSelection() {
+const title = document.getElementById('site-home-title-font')?.value || 'legacy';
+const body = document.getElementById('site-home-body-font')?.value || 'legacy';
+const matching = Object.entries(CoopHomeDesign.pairs).find(([, pair]) => pair.title === title && pair.body === body);
+document.getElementById('site-home-font-pair').value = title === 'legacy' && body === 'legacy' ? 'legacy' : matching?.[0] || 'custom';
+const sample = document.getElementById('site-home-font-sample');
+if (sample) CoopHomeDesign.applyFonts(sample, title, body);
+queueHomePreviewUpdate();
+}
+
+function selectHomeFontPair() {
+const value = document.getElementById('site-home-font-pair').value;
+const pair = value === 'legacy' ? { title:'legacy', body:'legacy' } : CoopHomeDesign.pairs[value];
+if (!pair) return;
+document.getElementById('site-home-title-font').value = pair.title;
+document.getElementById('site-home-body-font').value = pair.body;
+updateHomeFontSelection();
+}
+
+function recommendHomeFonts() {
+const template = document.querySelector('input[name="site-home-template"]:checked')?.value || 'simple';
+document.getElementById('site-home-font-pair').value = { community:'clean', simple:'clean', brand:'trust', editorial:'editorial', campaign:'participation' }[template];
+selectHomeFontPair();
+}
+
+function selectHomeTemplate() {
+document.getElementById('site-home-layout-mode').value = 'designed';
+queueHomePreviewUpdate();
+}
+
 function setHomeSettingsForm(settings) {
+initializeHomeFontOptions();
 g_homeSettingsRecord = settings && typeof settings === 'object' ? { ...settings } : {};
 const template = ['community', 'simple', 'brand', 'editorial', 'campaign'].includes(String(settings?.home_template || ''))
 ? String(settings.home_template)
@@ -8635,6 +8698,9 @@ document.querySelectorAll('input[name="site-home-template"]').forEach((input) =>
 input.checked = input.value === template;
 });
 const valueMap = {
+'site-home-layout-mode': CoopHomeDesign.normalizeLayout(settings?.home_layout_mode),
+'site-home-title-font': CoopHomeDesign.normalizeFont(settings?.home_title_font),
+'site-home-body-font': CoopHomeDesign.normalizeFont(settings?.home_body_font),
 'site-home-hero-title': settings?.hero_title,
 'site-home-hero-highlight': settings?.hero_highlight,
 'site-home-hero-subtitle': settings?.hero_subtitle,
@@ -8679,6 +8745,7 @@ if (fileInput) fileInput.value = '';
 setHomeImagePreview(kind, document.getElementById(`site-home-${kind}-image-url`)?.value || '');
 });
 updateHomeOverlayLabel();
+updateHomeFontSelection();
 }
 
 async function fetchHomeSettings() {
@@ -8707,6 +8774,10 @@ const regions = readHomeImpactRegions();
 if (mode === 'regions' && regions.length === 0) throw new Error('지역별 현황을 사용하려면 지역을 하나 이상 입력해 주세요.');
 if (new Set(regions.map((item) => item.toLocaleLowerCase('ko-KR'))).size !== regions.length) throw new Error('같은 지역을 두 번 등록할 수 없습니다.');
 return {
+p_home_layout_mode: read('site-home-layout-mode') || 'existing',
+p_home_title_font: read('site-home-title-font') || 'legacy',
+p_home_body_font: read('site-home-body-font') || 'legacy',
+p_expected_updated_at: g_homeSettingsRecord?.updated_at || null,
 p_home_template: String(document.querySelector('input[name="site-home-template"]:checked')?.value || 'simple'),
 p_hero_title: read('site-home-hero-title'),
 p_hero_highlight: read('site-home-hero-highlight'),
@@ -8759,7 +8830,7 @@ document.getElementById(`site-home-${kind}-image-url`).value = uploadedUrl;
 }
 
 const payload = collectHomeSettingsPayload();
-const { data, error } = await _supabase.rpc('upsert_site_home_settings_v3', payload);
+const { data, error } = await _supabase.rpc('upsert_site_home_settings_v4', payload);
 if (error) throw error;
 setHomeSettingsForm(data || payload);
 draft.accept();
@@ -8791,6 +8862,9 @@ async function collectHomePreviewSettings(includeLocalFiles = true) {
 const payload = collectHomeSettingsPayload();
 const settings = {
 ...g_homeSettingsRecord,
+home_layout_mode: payload.p_home_layout_mode,
+home_title_font: payload.p_home_title_font,
+home_body_font: payload.p_home_body_font,
 home_template: payload.p_home_template,
 hero_title: payload.p_hero_title,
 hero_highlight: payload.p_hero_highlight,
@@ -8899,6 +8973,9 @@ url.hash = previewSections[sectionId] || 'hero';
 url.searchParams.set('home_preview', '1');
 url.searchParams.set('v', ADMIN_MEMBER_VERSION);
 const previewLayoutJson = JSON.stringify({
+home_layout_mode: previewPayload.p_home_layout_mode,
+home_title_font: previewPayload.p_home_title_font,
+home_body_font: previewPayload.p_home_body_font,
 home_template: previewPayload.p_home_template,
 impact_display_mode: previewPayload.p_impact_display_mode,
 impact_regions: previewPayload.p_impact_regions,
