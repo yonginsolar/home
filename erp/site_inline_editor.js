@@ -40,16 +40,19 @@
   let resolve;const promise=new Promise(r=>resolve=r),timer=setTimeout(()=>{flushWait=null;resolve(false);},2000);
   flushWait={resolve,promise,timer};send({type:'coop-home-inline-flush'});return promise;
  }
- function closeDialog(){for(const [input,marker] of moved){marker.replaceWith(input);}moved=[];if(dialog?.open)dialog.close();}
+ function closeDialog(){for(const [input,marker] of moved){delete input.dataset.inlineOriginalRoot;marker.replaceWith(input);}moved=[];if(dialog?.open)dialog.close();}
  function controls(title,ids){
   if(!permitted())return;closeDialog();
   const first=ids.map(([id])=>document.getElementById(id)).find(input=>input&&!input.disabled);
   const form=first?.closest('#sub-home-settings,#sub-about');if(!form)return;
-  if(!dialog){dialog=document.createElement('dialog');dialog.className='home-element-dialog';dialog.setAttribute('aria-labelledby','home-element-dialog-title');dialog.addEventListener('close',closeDialog);dialog.addEventListener('cancel',e=>{e.preventDefault();closeDialog();});}
-  // Keep the actual controls inside their original draft scope and listeners.
-  form.append(dialog);
+  if(!dialog){dialog=document.createElement('dialog');dialog.className='home-element-dialog';dialog.setAttribute('aria-labelledby','home-element-dialog-title');dialog.addEventListener('close',closeDialog);dialog.addEventListener('cancel',e=>{e.preventDefault();closeDialog();});
+   for(const type of ['input','change'])dialog.addEventListener(type,event=>{const rootId=event.target.dataset.inlineOriginalRoot;if(rootId)getSiteEditorDraft(rootId==='sub-about'?'about':'home').refresh();queueHomePreviewUpdate();});
+  }
+  // Native dialogs still disappear inside a display:none inspector. Retain each
+  // field's logical draft scope while presenting it outside that hidden ancestor.
+  document.body.append(dialog);
   dialog.replaceChildren();const heading=document.createElement('h2');heading.id='home-element-dialog-title';heading.textContent=title;dialog.append(heading);
-  for(const [id,label] of ids){const input=document.getElementById(id);if(!input||input.disabled)continue;const marker=document.createComment('inline field return');input.before(marker);moved.push([input,marker]);const lab=document.createElement('label');lab.htmlFor=id;lab.className='form-label';lab.textContent=label;dialog.append(lab,input);}
+  for(const [id,label] of ids){const input=document.getElementById(id);if(!input||input.disabled)continue;const marker=document.createComment('inline field return');input.before(marker);input.dataset.inlineOriginalRoot=form.id;moved.push([input,marker]);const lab=document.createElement('label');lab.htmlFor=id;lab.className='form-label';lab.textContent=label;dialog.append(lab,input);}
   if(!moved.length)return;const done=document.createElement('button');done.type='button';done.className='btn btn-primary mt-3';done.textContent='확인';done.onclick=closeDialog;dialog.append(done);dialog.showModal();
  }
  function elementControls(area,kind){
