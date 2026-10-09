@@ -7,9 +7,10 @@
  const histories=new Map();let requestSequence=0,refreshSignature='',refreshNodes=[];
  function send(message){if(origin)root.parent.postMessage(message,origin);}
  function trusted(event){if(event.source!==root.parent)return false;try{const u=new URL(event.origin);return u.protocol===location.protocol&&u.port===location.port&&u.hostname.replace(/^(www|erp)\./,'')===location.hostname.replace(/^(www|erp)\./,'');}catch(_){return false;}}
- function fieldValue(){return active?.kind==='rich'?(root.CoopTextStyles?.sourceHtml(active.node)??active.node.innerHTML):root.CoopTextStyles?root.CoopTextStyles.read(active.node).value:(active?.node.innerText??active?.node.textContent??'');}
+ function readPlain(){const node=active.node.cloneNode(true);node.querySelectorAll('[data-inline-caret]').forEach(n=>n.remove());return root.CoopTextStyles.read(node);}
+ function fieldValue(){return active?.kind==='rich'?(root.CoopTextStyles?.sourceHtml(active.node)??active.node.innerHTML):root.CoopTextStyles?readPlain().value:(active?.node.innerText??active?.node.textContent??'');}
  function announce(text){status.textContent=text;status.hidden=!text;}
- function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}if(active.kind==='plain'&&root.CoopTextStyles)active.styles=root.CoopTextStyles.read(active.node).runs;root.CoopTextStyles?.adapt(active.node);active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,...(active.kind==='plain'&&root.CoopTextStyles?{styles:active.styles}:{}),requestId:active.latestRequest});return true;}
+ function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}if(active.kind==='plain'&&root.CoopTextStyles)active.styles=readPlain().runs;root.CoopTextStyles?.adapt(active.node);active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,...(active.kind==='plain'&&root.CoopTextStyles?{styles:active.styles}:{}),requestId:active.latestRequest});return true;}
  function bookmark(){
   if(!active)return null;const sel=root.getSelection();const range=sel.rangeCount&&active.node.contains(sel.anchorNode)?sel.getRangeAt(0):selectionRange;if(!range)return null;
   if(!active.node.contains(range.startContainer)||!active.node.contains(range.endContainer))return null;
@@ -34,7 +35,7 @@
   if(item.changed&&(cancel?!transmit(item.initial,true):fieldValue().length>item.maxLength||(fieldValue()!==item.renderedLast&&!transmit())))return false;
   if(fields[item.key]){fields[item.key].value=item.last;fields[item.key].styles=item.styles;}
   histories.set(item.key,{value:item.last,highlight:item.highlight,styles:item.styles,undo:item.undo,redo:item.redo});
-  root.CoopTextStyles?.adapt(item.node);item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
+  item.node.querySelectorAll('[data-inline-caret]').forEach(n=>n.remove());root.CoopTextStyles?.adapt(item.node);item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
   // An echoed preview may predate the last keystroke. Request a fresh snapshot
   // after the final field message instead of applying that stale echo on blur.
   pending=null;root.resetHomePreviewField?.(item.key);send({type:'coop-home-preview-ready'});return true;
@@ -46,7 +47,7 @@
   if(config.kind==='rich')node.innerHTML=root.sanitizeHtml(String(config.value||''));else if(root.CoopTextStyles)root.CoopTextStyles.paint(node,config.value,styles);else node.textContent=config.value;
   if(key==='heroTitle'&&!root.CoopTextStyles)paintHero(config.value);
   root.CoopTextStyles?.adapt(node);
-  node.hidden=false;node.removeAttribute('hidden');node.classList.add('home-inline-active');node.classList.toggle('home-inline-plain',config.kind==='plain');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus({preventScroll:true});
+  node.hidden=false;node.removeAttribute('hidden');if(key==='aboutList')node.style.removeProperty('display');node.classList.add('home-inline-active');node.classList.toggle('home-inline-plain',config.kind==='plain');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus({preventScroll:true});
   const range=document.createRange();range.selectNodeContents(node);range.collapse(false);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);showToolbar();return true;
  }
  function pointToolbar(rect){toolbar.style.left=Math.max(8,Math.min(innerWidth-toolbar.offsetWidth-8,rect.left))+'px';toolbar.style.top=Math.max(8,rect.top-toolbar.offsetHeight-10)+'px';}
@@ -91,7 +92,7 @@
   if(!selectionRange||selectionRange.collapsed||!active.node.contains(selectionRange.commonAncestorContainer)){announce('서식을 적용할 글자를 선택해 주세요.');return;}
   if(active.kind==='plain'&&root.CoopTextStyles){
    const mark=bookmark(),value=fieldValue(),kind=name==='clearHighlight'?'highlight':name;if(!['bold','italic','underline','highlight','color'].includes(kind))return;
-   remember();active.styles=root.CoopTextStyles.format(value,root.CoopTextStyles.read(active.node).runs,mark.start,mark.end,kind,name==='clearHighlight'?false:['color','highlight'].includes(kind)?color||toolbar.querySelector(`[data-color-kind="${kind}"]`).value:true);
+   remember();active.styles=root.CoopTextStyles.format(value,readPlain().runs,mark.start,mark.end,kind,name==='clearHighlight'?false:['color','highlight'].includes(kind)?color||toolbar.querySelector(`[data-color-kind="${kind}"]`).value:true);
    root.CoopTextStyles.paint(active.node,value,active.styles);reselect(mark);if(active.key==='heroTitle'&&active.highlight){active.highlight='';sendHighlight();}transmit();showToolbar();return;
   }
   if(active.key==='heroTitle'){
@@ -131,7 +132,7 @@
   for(const area of new Set(['hero','about','impact','contact','activities',...sections.map(row=>row.id)])){
    const section=document.getElementById(area);if(!section)continue;
    let actions=section.querySelector(':scope > .home-inline-section-actions');if(!actions){actions=document.createElement('div');actions.className='home-inline-section-actions';section.append(actions);}actions.replaceChildren();
-   for(const [kind,label] of [...(['hero','about','impact'].includes(area)?[['image','사진']]:[]),...(['hero','impact'].includes(area)?[['button','버튼']]:[]),['section','영역']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.inlineControl=kind;b.dataset.inlineArea=area;actions.append(b);}
+   for(const [kind,label] of [...(['hero','about','impact'].includes(area)?[['image','사진']]:[]),...(['hero','impact'].includes(area)?[['button','버튼']]:[]),...(area==='about'&&fields.aboutList&&!fields.aboutList.value.trim()?[['list','목록 추가']]:[]),['section','영역']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.inlineControl=kind;b.dataset.inlineArea=area;actions.append(b);}
   }
   if(requested&&fields[requested]){const key=requested;requested='';begin(key,document.querySelector(targets[key]));}
  }
@@ -152,7 +153,7 @@
  });
  document.addEventListener('click',event=>{
   if(!origin)return;
-  const control=event.target.closest('[data-inline-control]');if(control){event.preventDefault();event.stopImmediatePropagation();const area=control.dataset.inlineArea;if(control.dataset.inlineControl==='section')sectionControls(area);else{finish();send({type:'coop-home-inline-control',area,kind:control.dataset.inlineControl});}return;}
+  const control=event.target.closest('[data-inline-control]');if(control){event.preventDefault();event.stopImmediatePropagation();const area=control.dataset.inlineArea;if(control.dataset.inlineControl==='section')sectionControls(area);else if(control.dataset.inlineControl==='list'&&area==='about')begin('aboutList',document.querySelector(targets.aboutList));else{finish();send({type:'coop-home-inline-control',area,kind:control.dataset.inlineControl});}return;}
   // Let each toolbar button receive its own click before stopping bubbling.
   if(event.target.closest('.home-inline-toolbar,.home-inline-section-menu'))return;
   let node=event.target.closest('[data-inline-field]');
@@ -166,7 +167,7 @@
  document.addEventListener('scroll',()=>{if(active)showToolbar();},true);
  document.addEventListener('contextmenu',event=>{if(active?.node.contains(event.target)){event.preventDefault();showToolbar();}});
  document.addEventListener('keydown',event=>{
-  if(active?.kind==='plain'&&event.key==='Enter'&&root.CoopTextStyles){event.preventDefault();const sel=root.getSelection();if(sel.rangeCount&&active.node.contains(sel.anchorNode)){remember();const range=sel.getRangeAt(0);range.deleteContents();const n=document.createTextNode('\n');range.insertNode(n);range.setStartAfter(n);range.collapse(true);sel.removeAllRanges();sel.addRange(range);transmit();}return;}
+  if(active?.kind==='plain'&&event.key==='Enter'&&root.CoopTextStyles){event.preventDefault();const sel=root.getSelection();if(sel.rangeCount&&active.node.contains(sel.anchorNode)){remember();const range=sel.getRangeAt(0);range.deleteContents();const n=document.createTextNode('\n');range.insertNode(n);active.node.querySelectorAll('[data-inline-caret]').forEach(b=>b.remove());if(fieldValue().endsWith('\n')){const caret=document.createElement('br');caret.dataset.inlineCaret='';active.node.append(caret);}range.setStart(n,n.length);range.collapse(true);sel.removeAllRanges();sel.addRange(range);transmit();}return;}
   if(!origin)return;if(event.key==='Escape'){if(active){event.preventDefault();finish(true);}sectionMenu.hidden=true;}
   if(event.key==='Enter'&&!active&&event.target.dataset.inlineField){event.preventDefault();begin(event.target.dataset.inlineField,event.target);}
   if(active&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();command(event.shiftKey?'redo':'undo');}

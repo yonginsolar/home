@@ -46,7 +46,6 @@
   history.last=input.value;history.values.set(signature(value),input.value);history.values.set(signature(input.value),input.value);while(history.values.size>203)history.values.delete([...history.values.keys()][1]);
   if(key==='aboutContent')g_aboutEditorBridge?.syncFromSource();
   if(key==='activityContent')g_activityEditorBridge?.syncFromSource();
-  if(key==='aboutList')renderAboutListEditor(parseAboutListItems(input.value));
   input.dispatchEvent(new Event('input',{bubbles:true}));
   if(cfg[0]==='about')getSiteEditorDraft('about').refresh();
   queueHomePreviewUpdate();return true;

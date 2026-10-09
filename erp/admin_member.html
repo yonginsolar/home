@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.252
+Version: v1.0.253
 Change: 2026-10-09 - Stable homepage editing, legacy list restoration and safe seal replacement.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-09 - Stable homepage editing, legacy list restoration and safe s
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.252';
+window.ADMIN_MEMBER_VERSION = 'v1.0.253';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -62,7 +62,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.252';
 <link rel="stylesheet" href="home_visual_editor.css?v=20261009-13">
 <script src="home_visual_editor.js?v=20261009-13"></script>
 <script src="../shared/site_text_styles.js?v=20261009-17"></script>
-<script src="site_inline_editor.js?v=20261009-15"></script>
+<script src="site_inline_editor.js?v=20261010-1"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -263,8 +263,6 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 .about-editor-surface, .notice-editor-surface { min-height:220px; padding:16px; color:#0f172a; line-height:1.75; }
 .about-editor-surface .ProseMirror, .notice-editor-surface .ProseMirror { min-height:188px; outline:none; }
 .about-editor-surface .ProseMirror p:last-child, .notice-editor-surface .ProseMirror p:last-child { margin-bottom:0; }
-.about-list-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
-.about-list-actions { display:flex; gap:4px; }
 .certification-logo-thumb { width:64px; height:46px; border:1px solid #e2e8f0; border-radius:8px; object-fit:contain; background:#fff; }
 .certification-empty { padding:32px 16px; text-align:center; color:#64748b; }
 @media (max-width: 991.98px) { .home-template-grid, .home-impact-mode-grid { grid-template-columns:1fr; } .home-impact-mode-card.is-custom { grid-column:auto; } }
@@ -2133,7 +2131,8 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 
 <div class="card border-0 shadow-sm mb-4"><div class="card-body">
 <h5 class="fw-bold mb-3">🌞 메인 배너 세부 설정</h5>
-<div class="mb-3"><label class="form-label fw-bold" for="site-home-hero-highlight">강조할 문구</label><input type="text" class="form-control" id="site-home-hero-highlight" maxlength="60"><div class="form-text">제목 안에 있는 문구를 입력하면 해당 부분에 강조색을 적용합니다.</div></div>
+<!-- Retain the stored legacy highlight for existing rendering and inline undo. -->
+<input type="hidden" id="site-home-hero-highlight" maxlength="60">
 <div class="row g-3">
 <div class="col-md-6"><label class="form-label fw-bold" for="site-home-hero-image-position">사진 기준 위치</label><select class="form-select" id="site-home-hero-image-position"><option value="center">가운데</option><option value="top">위</option><option value="bottom">아래</option><option value="left">왼쪽</option><option value="right">오른쪽</option></select></div>
 <div class="col-md-6"><label class="form-label fw-bold" for="site-home-hero-text-align">문자 정렬</label><select class="form-select" id="site-home-hero-text-align"><option value="center">가운데</option><option value="left">왼쪽</option><option value="right">오른쪽</option></select></div>
@@ -2212,12 +2211,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <div id="admin-about-editor" class="about-editor-surface"></div>
 </div>
 </div>
-<div class="mb-2">
-<div class="d-flex justify-content-between align-items-center mb-2"><label class="form-label small fw-bold mb-0">주요 내용</label><button type="button" class="btn btn-sm btn-outline-primary" onclick="addAboutListItem()"><i class="bi bi-plus-lg"></i> 항목 추가</button></div>
 <textarea id="admin-about-list" class="d-none" rows="4"></textarea>
-<div id="admin-about-list-editor" class="d-grid gap-2"></div>
-<div class="form-text text-muted">항목을 추가하고 화살표로 순서를 바꿀 수 있습니다.</div>
-</div>
 <div class="mb-3">
 <label class="form-label small fw-bold" for="admin-about-img-file">소개 이미지</label>
 <input type="file" id="admin-about-img-file" class="form-control" accept="image/*" onchange="previewAboutImageFile()">
@@ -9272,97 +9266,6 @@ if (!raw) return [];
 return raw.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
 
-function syncAboutListSource() {
-const values = Array.from(document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]'))
-.map((input) => String(input.value || '').trim()).filter(Boolean);
-const source = document.getElementById('admin-about-list');
-if (source) {
-const previous=source.value,next=values.join('\n');
-const editable=CoopTextStyles.editableList(previous,CoopSiteInlineHost.readStyles('about').aboutList);
-if(previous!==editable.value&&editable.value===next){const styles=CoopSiteInlineHost.readStyles('about');if(editable.runs.length)styles.aboutList=editable.runs;else delete styles.aboutList;CoopSiteInlineHost.setStyles('about',styles);}
-// Merely saving the list must not remove formatting because blank lines or
-// surrounding spaces are normalized by the existing per-item editor.
-if(previous!==next&&parseAboutListItems(previous).join('\n')===next){
-const saved=CoopSiteInlineHost.readStyles('about'),runs=CoopTextStyles.normalize(previous,saved.aboutList),out=[];let offset=0;
-for(const line of previous.split('\n')){if(line.trim()){if(out.length)out.push({text:'\n'});let at=0;const part=[];for(const r of runs){const lo=Math.max(offset,at),hi=Math.min(offset+line.length,at+r.text.length);if(hi>lo)part.push({...r,text:r.text.slice(lo-at,hi-at)});at+=r.text.length;}const trimmed=CoopTextStyles.trim(line,part);out.push(...(trimmed.length?trimmed:[{text:line.trim()}]));}offset+=line.length+1;}
-if(runs.length){saved.aboutList=out;CoopSiteInlineHost.setStyles('about',saved);}
-}
-source.value = next;
-}
-queueTotalPreviewUpdate();
-}
-
-function renderAboutListEditor(items) {
-const container = document.getElementById('admin-about-list-editor');
-if (!container) return;
-container.replaceChildren();
-const values = Array.isArray(items) ? items : [];
-if (values.length === 0) {
-const empty = document.createElement('div');
-empty.className = 'border rounded bg-light text-muted small p-3 text-center';
-empty.textContent = '등록된 주요 내용이 없습니다. 필요한 경우 항목을 추가해 주세요.';
-container.appendChild(empty);
-return;
-}
-values.forEach((value, index) => {
-const row = document.createElement('div');
-row.className = 'about-list-row';
-const input = document.createElement('input');
-input.type = 'text';
-input.className = 'form-control';
-input.value = value;
-input.dataset.aboutListItem = '1';
-input.maxLength = 240;
-input.addEventListener('input', syncAboutListSource);
-const actions = document.createElement('div');
-actions.className = 'about-list-actions';
-[
-['위로', 'bi-arrow-up', () => moveAboutListItem(index, -1)],
-['아래로', 'bi-arrow-down', () => moveAboutListItem(index, 1)],
-['삭제', 'bi-trash', () => removeAboutListItem(index)]
-].forEach(([label, icon, handler]) => {
-const button = document.createElement('button');
-button.type = 'button';
-button.className = label === '삭제' ? 'btn btn-sm btn-outline-danger' : 'btn btn-sm btn-outline-secondary';
-button.setAttribute('aria-label', label);
-button.innerHTML = `<i class="bi ${icon}"></i>`;
-button.addEventListener('click', handler);
-actions.appendChild(button);
-});
-row.append(input, actions);
-container.appendChild(row);
-});
-}
-
-function getAboutListEditorValues() {
-return Array.from(document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]')).map((input) => String(input.value || '').trim());
-}
-
-function addAboutListItem() {
-const values = getAboutListEditorValues();
-values.push('');
-renderAboutListEditor(values);
-const inputs = document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]');
-inputs[inputs.length - 1]?.focus();
-syncAboutListSource();
-}
-
-function moveAboutListItem(index, direction) {
-const values = getAboutListEditorValues();
-const target = index + direction;
-if (target < 0 || target >= values.length) return;
-[values[index], values[target]] = [values[target], values[index]];
-renderAboutListEditor(values);
-syncAboutListSource();
-}
-
-function removeAboutListItem(index) {
-const values = getAboutListEditorValues();
-values.splice(index, 1);
-renderAboutListEditor(values);
-syncAboutListSource();
-}
-
 function revokeAboutPreviewObjectUrl() {
 if (!g_aboutPreviewObjectUrl) return;
 URL.revokeObjectURL(g_aboutPreviewObjectUrl);
@@ -9453,7 +9356,6 @@ imgEl.value = row.image_url || '';
 g_aboutOriginalImageUrl = imgEl.value;
 setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
 g_aboutEditorBridge.syncFromSource();
-renderAboutListEditor(parseAboutListItems(listEl.value));
 if (typeof updateTotalPreview === 'function') updateTotalPreview();
 });
 queueHomePreviewUpdate(); // Publish editable field availability after the asynchronous baseline is accepted.
@@ -9536,7 +9438,6 @@ showLoading(true);
 try {
 await ensureAboutRichEditor();
 g_aboutEditorBridge.syncToSource();
-syncAboutListSource();
 if (file && !file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
 if (file && file.size > 10 * 1024 * 1024) throw new Error('사진은 10MB 이하로 올려 주세요.');
 
