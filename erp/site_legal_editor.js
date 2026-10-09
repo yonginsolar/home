@@ -1,9 +1,10 @@
-/* v1.1.2 - Serialize legal editing, confirmation, saving and reloading. */
+/* v1.1.3 - Reuse legal drafts in the visual editor without publishing them. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
   const state = new Map();
   let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
+  let selectedKind='signup_purpose',previewMode='draft';
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
   const el = (kind, suffix) => document.getElementById(`site-legal-${kind}-${suffix}`);
   function privacyTemplate(content) {
@@ -64,6 +65,30 @@
     if(dirty(kind))text+=' · 저장하지 않은 수정 있음';
     el(kind,'status').textContent=text;el(kind,'status').className='small mt-2 '+(s.doc.is_published?'text-success':'text-muted');
     el(kind,'preview-text').textContent=renderText(el(kind,'content').value,kind);
+    refreshPreview();
+  }
+  function refreshPreview(){
+    const target=document.getElementById('site-home-legal-preview');if(!target)return;
+    const doc=state.get(selectedKind)?.doc;
+    target.replaceChildren();
+    const heading=document.createElement('h2');heading.textContent=labels[selectedKind];
+    const modes=document.createElement('div');modes.className='d-flex gap-2 mb-3';
+    for(const [mode,label] of [['draft','등록 전 미리보기'],['published','현재 적용 중']]){
+      const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.textContent=label;button.setAttribute('aria-pressed',String(previewMode===mode));button.onclick=()=>{previewMode=mode;refreshPreview();};modes.append(button);
+    }
+    const date=document.createElement('p');date.className='small text-muted';
+    const effective=previewMode==='published'?doc?.published_effective_date:el(selectedKind,'effective-date')?.value;
+    date.textContent=effective?`시행일 ${effective}`:'';
+    const article=document.createElement('article');
+    article.textContent=!loaded?'문서를 불러오는 중입니다.':previewMode==='published'?(doc?.is_published?String(doc.published_content||''):'등록된 내용이 없습니다.'):renderText(el(selectedKind,'content')?.value||'',selectedKind);
+    target.append(heading,modes,date,article);
+  }
+  function selectKind(kind){
+    if(!Object.hasOwn(labels,kind))return false;
+    selectedKind=kind;
+    const picker=document.getElementById('site-legal-kind-picker');if(picker)picker.value=kind;
+    for(const [key] of Object.entries(labels))el(key,'card')?.parentElement.toggleAttribute('hidden',key!==kind);
+    refreshPreview();return true;
   }
   function render() {
     const root=document.getElementById('sub-legal');if(!root)return;
@@ -86,6 +111,12 @@
       if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).addEventListener('input',()=>updateStatus(kind));
       column.addEventListener('click',event=>{const b=event.target.closest('[data-legal-action]');if(!b||b.disabled)return;const action=b.dataset.legalAction;if(action==='sample')loadSample(kind);else save(kind,action);});
     }
+    if(document.getElementById('site-home-legal-preview')){
+      const label=document.createElement('label');label.className='form-label fw-bold';label.htmlFor='site-legal-kind-picker';label.textContent='편집할 문서';
+      const picker=document.createElement('select');picker.id=label.htmlFor;picker.className='form-select mb-3';
+      for(const [kind,text] of Object.entries(labels)){const option=document.createElement('option');option.value=kind;option.textContent=text;picker.append(option);}
+      picker.onchange=()=>selectKind(picker.value);grid.before(label,picker);selectKind(selectedKind);
+    }
   }
   async function fetchDocuments() {
     if(loading||actionInFlight||!permitted())return;
@@ -99,7 +130,7 @@
     } catch(error) {
       for(const kind of Object.keys(labels))el(kind,'status').textContent='문서를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.';
       myAlert('가입·약관 문서를 불러오지 못했습니다.','warning');
-    } finally {loading=false;syncEnabled();}
+    } finally {loading=false;syncEnabled();refreshPreview();}
   }
   async function loadSample(kind) {
     if(!beginAction())return;
@@ -137,6 +168,7 @@
     finally {state.get(kind).busy=false;endAction();}
   }
   window.fetchSiteLegalDocuments=fetchDocuments;
+  window.CoopSiteLegalEditor=Object.freeze({select:selectKind,refreshPreview});
   window.addEventListener('beforeunload',event=>{if(actionInFlight||[...state.keys()].some(dirty)){event.preventDefault();event.returnValue='';}});
   function start(){render();const root=document.getElementById('sub-legal');if(!root)return;retryButton=document.createElement('button');retryButton.type='button';retryButton.className='btn btn-sm btn-outline-secondary mb-3';retryButton.textContent='다시 불러오기';retryButton.onclick=async()=>{
     if(loading||actionInFlight||!permitted())return;

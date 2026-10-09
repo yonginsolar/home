@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.237
+Version: v1.0.238
 Change: 2026-10-09 - Sidebar menu ordering and current shared workspace revision.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-09 - Sidebar menu ordering and current shared workspace revision
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.237';
+window.ADMIN_MEMBER_VERSION = 'v1.0.238';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -58,8 +58,8 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.237';
 <script src="approval_rich_editor.js?v=20260918-1"></script>
 <script src="site_editor_drafts.js?v=1.0.0"></script>
 <script src="../shared/home_design.js?v=20261009-3"></script>
-<link rel="stylesheet" href="home_visual_editor.css?v=20261009-1">
-<script src="home_visual_editor.js?v=20261009-3"></script>
+<link rel="stylesheet" href="home_visual_editor.css?v=20261009-4">
+<script src="home_visual_editor.js?v=20261009-4"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -8213,6 +8213,7 @@ return `
 }).join('') || '<tr><td colspan="5" class="text-center py-3">등록된 표시 영역이 없습니다.</td></tr>';
 
 updateSectionSaveButton();
+queueHomePreviewUpdate();
 }
 
 function renderSectionSeedHint(message = '', isWarning = true) {
@@ -8322,6 +8323,7 @@ renderSectionSeedHint(`${missingNames} 섹션이 아직 등록되지 않았습�
 }
 renderSectionRows();
 g_siteInitialSectionsRequested = true;
+if (ADMIN_MEMBER_PAGE_SCOPE !== 'documents_admin') void fetchHomeSettings();
 return true;
 }
 
@@ -8389,6 +8391,12 @@ if (fromIndex < 0 || toIndex < 0 || toIndex >= currentSections.length) return;
 const [moved] = currentSections.splice(fromIndex, 1);
 currentSections.splice(toIndex, 0, moved);
 g_sectionDrafts = currentSections.map((section, index) => ({ ...section, display_order: index + 1 }));
+// Manual order must not be masked by a template's recommended layout.
+const layout = document.getElementById('site-home-layout-mode');
+if (layout && getSiteEditorDraft('home').refresh().loaded && layout.value === 'designed') {
+layout.value = 'existing';
+layout.dispatchEvent(new Event('change', { bubbles:true }));
+}
 renderSectionRows();
 }
 
@@ -8397,6 +8405,7 @@ if (g_sectionSaving) return;
 const target = g_sectionDrafts.find((section) => section && section.id === id);
 if (!target) return;
 target.is_visible = !!isVisible;
+if (id === 'impact') g_homePreviewImpactSource = 'sections';
 renderSectionRows();
 }
 
@@ -8464,7 +8473,7 @@ fetchHistory(); // 목록 갱신
 // [기능 6] About(소개) 관리
 // ================================================================
 function getSiteSectionEditorTarget(sectionId) {
-const targets = { hero:'sub-home-settings', impact:'sub-home-settings', contact:'sub-home-settings', about:'sub-about', progress:'sub-plants', portfolio:'sub-plants', status:'sub-generation', activities:'sub-activities', partners:'sub-partners', faq:'sub-faqs' };
+const targets = { hero:'sub-home-settings', impact:'sub-home-settings', contact:'sub-home-settings', about:'sub-about', progress:'sub-plants', portfolio:'sub-plants', status:'sub-generation', activities:'sub-activities', partners:'sub-partners', history:'sub-history', faq:'sub-faqs' };
 const target = targets[sectionId];
 if (!target) return '';
 const link = document.querySelector(`#site-content-tabs a[href="#${target}"]`);
@@ -8475,7 +8484,7 @@ function openSiteSectionEditor(sectionId) {
 const target = getSiteSectionEditorTarget(sectionId);
 if (!target || !canAccessAdminMemberTab('site')) return;
 // Click the same tab as normal navigation, preserving its existing loading and scope checks.
-document.querySelector(`#site-content-tabs a[href="#${target}"]`)?.click();
+if (!CoopHomeVisualEditor.select(sectionId)) document.querySelector(`#site-content-tabs a[href="#${target}"]`)?.click();
 }
 
 const g_siteEditorDrafts = new Map();
@@ -8503,6 +8512,10 @@ status.classList.toggle('text-muted', !state.loaded || !state.dirty);
 }
 const button = document.getElementById(kind === 'home' ? 'btn-save-home-settings' : 'btn-save-about-settings');
 if (button) button.disabled = !state.loaded || state.loading || state.busy || !state.dirty;
+if (kind === 'home') {
+const pending = document.getElementById('site-home-pending-save');
+if (pending) { pending.hidden = !state.dirty; pending.disabled = !state.loaded || state.loading || state.busy; }
+}
 const preview = kind === 'home' ? document.getElementById('btn-preview-home-settings') : null;
 if (preview) preview.disabled = !state.loaded || state.loading || state.busy;
 const retry = document.getElementById(`btn-retry-${kind}-settings`);
@@ -8548,6 +8561,9 @@ let g_homePreviewTimer = 0;
 let g_homePreviewSourceWindow = null;
 let g_homePreviewChannel = null;
 let g_homePreviewStorageKey = '';
+let g_homePreviewRevision = 0;
+let g_homePreviewImpactSource = 'sections';
+const g_homePreviewFiles = new WeakMap();
 let g_homeVisualStarted = false;
 const HOME_CTA_PRESETS = new Set(['/signup.html', '#about', '#activities', '#contact', '']);
 
@@ -8831,7 +8847,7 @@ return data || {};
 }, data => { setHomeSettingsForm(data); bindHomePreviewInputs(); });
 if (!g_homeVisualStarted && getSiteEditorDraft('home').refresh().loaded) {
 g_homeVisualStarted = true;
-window.setTimeout(() => openHomePreview(), 0);
+window.setTimeout(() => openHomePreview('hero', { preserveArea:true }), 0);
 }
 } catch (error) {
 CoopSafeLog.error("[fetchHomeSettings] failed:", error);
@@ -8939,12 +8955,53 @@ draft.setBusy(false);
 }
 
 function readHomePreviewFile(file) {
-return new Promise((resolve, reject) => {
+if (g_homePreviewFiles.has(file)) return g_homePreviewFiles.get(file);
+const promise = new Promise((resolve, reject) => {
 const reader = new FileReader();
 reader.onload = () => resolve(String(reader.result || ''));
-reader.onerror = () => reject(new Error('미리보기 사진을 읽지 못했습니다.'));
+reader.onerror = () => { g_homePreviewFiles.delete(file); reject(new Error('미리보기 사진을 읽지 못했습니다.')); };
 reader.readAsDataURL(file);
 });
+g_homePreviewFiles.set(file, promise);
+return promise;
+}
+
+async function collectSitePreviewDraft(includeLocalFiles = true) {
+const result = {};
+if (g_siteInitialSectionsRequested) result.sections = getSortedSectionDrafts().map(row => ({ id:row.id, is_visible:row.is_visible, display_order:row.display_order }));
+if (g_homePreviewImpactSource === 'home') {
+const impact = result.sections?.find(row => row.id === 'impact');
+if (impact) impact.is_visible = document.getElementById('site-home-impact-visible')?.checked !== false;
+}
+if (getSiteEditorDraft('about').refresh().loaded) {
+result.about = {
+title:document.getElementById('admin-about-title').value,
+subtitle:document.getElementById('admin-about-subtitle').value,
+content:sanitizeAboutHtml(document.getElementById('admin-about-content').value),
+list_items:document.getElementById('admin-about-list').value,
+image_url:document.getElementById('admin-about-img').value
+};
+const file = document.getElementById('admin-about-img-file')?.files?.[0];
+if (includeLocalFiles && file) result.about.image_url = await readHomePreviewFile(file);
+}
+if (g_siteCertificationsLoaded) {
+result.certifications = g_siteCertifications.map(row => ({ ...row }));
+const read = id => String(document.getElementById(id)?.value || '').trim();
+const name = read('site-certification-name');
+if (name) {
+const item = { id:read('site-certification-id') || 'preview-new', name, issuer:read('site-certification-issuer'), certificate_no:read('site-certification-number'), issued_on:read('site-certification-issued-on'), valid_until:read('site-certification-valid-until'), image_url:read('site-certification-image-url'), public_url:normalizeAdminHttpUrl(read('site-certification-public-url')), display_order:Number(read('site-certification-order') || 100), is_visible:document.getElementById('site-certification-visible').checked, is_featured:document.getElementById('site-certification-featured').checked };
+const file = document.getElementById('site-certification-image-file')?.files?.[0];
+if (includeLocalFiles && file) item.image_url = await readHomePreviewFile(file);
+result.certifications = result.certifications.filter(row => String(row.id) !== item.id).concat(item);
+}
+result.certifications = result.certifications.filter(row => row.is_visible).sort((a,b) => a.display_order-b.display_order);
+}
+if (document.getElementById('activityModal')?.classList.contains('show')) {
+const cover = activityGalleryItems[0];
+result.activity = { id:document.getElementById('activity-id').value || 'preview-new', title:document.getElementById('activity-title').value, event_date:document.getElementById('activity-date').value, content:sanitizeAboutHtml(document.getElementById('activity-content').value), file_url:cover?.url || cover?.previewUrl || '', is_current:document.getElementById('activity-visible').checked };
+if (includeLocalFiles && cover?.file) result.activity.file_url = await readHomePreviewFile(cover.file);
+}
+return result;
 }
 
 async function collectHomePreviewSettings(includeLocalFiles = true) {
@@ -8985,6 +9042,7 @@ if (includeLocalFiles) for (const kind of ['hero', 'impact']) {
 const file = document.getElementById(`site-home-${kind}-image-file`)?.files?.[0] || null;
 if (file) settings[`${kind}_image_url`] = await readHomePreviewFile(file);
 }
+settings.site_preview = await collectSitePreviewDraft(includeLocalFiles);
 return settings;
 }
 
@@ -9000,7 +9058,9 @@ const frame = document.getElementById('site-home-preview-frame');
 const targetWindow = g_homePreviewSourceWindow || frame?.contentWindow;
 if ((!targetWindow && !g_homePreviewChannel) || !frame?.src) return;
 try {
+const revision = g_homePreviewRevision;
 const settings = await collectHomePreviewSettings();
+if (revision !== g_homePreviewRevision) return;
 const targetOrigin = new URL(frame.src).origin;
 const message = { type: 'coop-home-preview-settings', settings };
 if (g_homePreviewChannel) g_homePreviewChannel.postMessage(message);
@@ -9026,12 +9086,13 @@ window.setTimeout(sendHomePreviewSettings, 0);
 });
 
 function queueHomePreviewUpdate() {
+g_homePreviewRevision++;
 window.clearTimeout(g_homePreviewTimer);
 g_homePreviewTimer = window.setTimeout(sendHomePreviewSettings, 180);
 }
 
 function bindHomePreviewInputs() {
-const pane = document.getElementById('sub-home-settings');
+const pane = document.getElementById('site-home-visual-workspace') || document.getElementById('sub-home-settings');
 if (!pane || pane.dataset.previewBound === 'true') return;
 pane.dataset.previewBound = 'true';
 pane.addEventListener('input', (event) => {
@@ -9040,6 +9101,7 @@ queueHomePreviewUpdate();
 });
 pane.addEventListener('change', (event) => {
 if (event.target.closest('#site-home-preview-modal')) return;
+if (event.target.id === 'site-home-impact-visible') g_homePreviewImpactSource = 'home';
 queueHomePreviewUpdate();
 });
 }
@@ -9051,12 +9113,11 @@ document.getElementById('site-home-preview-desktop')?.classList.toggle('active',
 document.getElementById('site-home-preview-mobile')?.classList.toggle('active', isMobile);
 }
 
-async function openHomePreview(sectionId = 'hero') {
+async function openHomePreview(sectionId = 'hero', options = {}) {
 try {
-if (!document.getElementById('sub-home-settings')?.classList.contains('active')) document.querySelector('#site-content-tabs a[href="#sub-home-settings"]')?.click();
+if (!options.preserveArea) CoopHomeVisualEditor.select(sectionId);
 const existingFrame = document.getElementById('site-home-preview-frame');
 if (existingFrame?.getAttribute('src')) {
-if (['hero','impact','contact'].includes(sectionId)) CoopHomeVisualEditor.select(sectionId);
 await sendHomePreviewSettings();
 existingFrame.contentWindow?.postMessage({type:'coop-home-preview-navigate',area:sectionId},new URL(existingFrame.src).origin);
 return;
@@ -9091,7 +9152,9 @@ if (url.origin === window.location.origin) {
 try {
 const storageToken = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 g_homePreviewStorageKey = `coop-home-preview-draft:${storageToken}`;
-sessionStorage.setItem(g_homePreviewStorageKey, JSON.stringify(await collectHomePreviewSettings(false)));
+const initialHomeDraft = await collectHomePreviewSettings(false);
+delete initialHomeDraft.site_preview; // Content/legal/news drafts stay in the live iframe message channel only.
+sessionStorage.setItem(g_homePreviewStorageKey, JSON.stringify(initialHomeDraft));
 url.searchParams.set('home_preview_token', storageToken);
 } catch (error) {
 CoopSafeLog.warn("[home preview] session draft failed:", error);
@@ -9109,10 +9172,14 @@ if (event.data?.type === 'coop-home-preview-ready') window.setTimeout(sendHomePr
 }
 if (frame) {
 g_homePreviewSourceWindow = null;
-frame.onload = () => window.setTimeout(sendHomePreviewSettings, 80);
+frame.onload = () => window.setTimeout(async () => {
+await sendHomePreviewSettings();
+const area = window.CoopHomeVisualEditor?.current() || sectionId;
+frame.contentWindow?.postMessage({type:'coop-home-preview-navigate',area},url.origin);
+}, 80);
 frame.src = url.toString();
 }
-CoopHomeVisualEditor.select(['hero','impact','contact'].includes(sectionId) ? sectionId : 'hero', false);
+if (!options.preserveArea) CoopHomeVisualEditor.select(sectionId, false);
 } catch (error) {
 myAlert('미리보기를 열 수 없습니다: ' + (error?.message || error), 'warning');
 }
@@ -9390,6 +9457,7 @@ myAlert('조합 소개를 불러오지 못했습니다: ' + (error?.message || e
 let totalPreviewUpdateTimer = null;
 
 function queueTotalPreviewUpdate() {
+queueHomePreviewUpdate();
 if (totalPreviewUpdateTimer) {
 window.clearTimeout(totalPreviewUpdateTimer);
 }
@@ -9505,6 +9573,7 @@ draft.setBusy(false);
 }
 
 let g_siteCertifications = [];
+let g_siteCertificationsLoaded = false;
 let g_siteCertificationSaving = false;
 
 function formatCertificationDate(value) {
@@ -9532,6 +9601,7 @@ const status = document.getElementById('site-certification-image-status');
 if (status) status.textContent = '선택 사항이며 10MB 이하 이미지를 사용합니다.';
 const imageUrl = document.getElementById('site-certification-image-url');
 if (imageUrl) delete imageUrl.dataset.originalUrl;
+queueHomePreviewUpdate();
 }
 
 function clearSiteCertificationImage() {
@@ -9541,6 +9611,7 @@ if (file) file.value = '';
 if (url) url.value = '';
 const status = document.getElementById('site-certification-image-status');
 if (status) status.textContent = '이미지를 사용하지 않도록 선택했습니다. 저장하면 반영됩니다.';
+queueHomePreviewUpdate();
 }
 
 function editSiteCertification(id) {
@@ -9569,6 +9640,7 @@ if (title) title.textContent = '✏️ 인증·지정 수정';
 const status = document.getElementById('site-certification-image-status');
 if (status) status.textContent = item.image_url ? '현재 등록된 이미지가 있습니다.' : '등록된 이미지가 없습니다.';
 document.getElementById('site-certification-name')?.focus();
+queueHomePreviewUpdate();
 }
 
 function renderSiteCertifications() {
@@ -9630,7 +9702,9 @@ try {
 const { data, error } = await _supabase.rpc('get_my_site_certifications');
 if (error) throw error;
 g_siteCertifications = Array.isArray(data) ? data : [];
+g_siteCertificationsLoaded = true;
 renderSiteCertifications();
+queueHomePreviewUpdate();
 } catch (error) {
 CoopSafeLog.error("[fetchSiteCertifications] failed:", error);
 myAlert('공식 인증·지정 정보를 불러오지 못했습니다: ' + (error?.message || error), 'warning');
@@ -11106,6 +11180,7 @@ document.getElementById('activity-cover-removed').value = activityGalleryItems.l
 }
 
 function renderActivityCoverPreview() {
+queueHomePreviewUpdate();
 const gridEl = document.getElementById('activity-gallery-preview');
 const placeholderEl = document.getElementById('activity-cover-placeholder');
 if (!gridEl || !placeholderEl) return;
@@ -11521,6 +11596,11 @@ askText:async (label, options) => window.prompt(label, options?.value || ''),
 showMessage:message => myAlert(message, 'warning')
 });
 g_activityEditorBridge.ensure();
+const editor = g_activityEditorBridge.getEditor();
+if (editor && !document.getElementById('activity-content-editor').dataset.homePreviewBound) {
+document.getElementById('activity-content-editor').dataset.homePreviewBound = 'true';
+editor.on('update', queueHomePreviewUpdate);
+}
 return g_activityEditorBridge;
 }
 
@@ -20676,6 +20756,6 @@ async function uploadOfficialSeal(groupKey) {
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 <script src="site_legal_samples.js?v=20261008-1"></script>
-<script src="site_legal_editor.js?v=20261008-4"></script>
+<script src="site_legal_editor.js?v=20261009-4"></script>
 </body>
 </html>

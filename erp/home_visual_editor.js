@@ -2,22 +2,43 @@
 (function(root){
   'use strict';
   let mounted=false, selected='hero';
-  const labels={hero:'메인 배너',impact:'참여 안내',contact:'연락처',design:'구성',fonts:'글꼴'};
+  const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',badges:'뱃지 관리',documents:'문서 관리'};
+  const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',badges:'sub-badges',documents:'sub-docs'};
+  const homeAreas=new Set(['hero','impact','contact','design','fonts']);
+  function available(area){
+    const link=document.querySelector(`#site-content-tabs a[href="#${panes[area]||'sub-home-settings'}"]`);
+    // Scope rules hide individual nav items. The whole ERP is hidden during Auth
+    // boot, which must not erase the menu choices before initialization finishes.
+    return !!link && !link.classList.contains('hidden') && !link.parentElement.classList.contains('hidden') && !link.hidden && !link.parentElement.hidden;
+  }
   function select(area, navigate=true){
-    if(!Object.hasOwn(labels,area)) return false;
+    if(area==='portfolio') area='progress';
+    if(!Object.hasOwn(labels,area)||!available(area)) return false;
+    if(typeof canAccessAdminMemberTab==='function'&&!canAccessAdminMemberTab('site'))return false;
     selected=area;
-    document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==area);
+    document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==(homeAreas.has(area)?area:'hero'));
     document.querySelectorAll('[data-home-select-area]').forEach(node=>node.setAttribute('aria-pressed',String(node.dataset.homeSelectArea===area)));
-    if(navigate && ['hero','impact','contact'].includes(area)) {
+    const picker=document.getElementById('site-home-area-picker');if(picker)picker.value=area;
+    const link=document.querySelector(`#site-content-tabs a[href="#${panes[area]||'sub-home-settings'}"]`);
+    if(!link.classList.contains('active'))link.click();
+    document.getElementById('site-home-visual-workspace')?.classList.toggle('is-content-edit',!homeAreas.has(area));
+    const legal=area==='legal';
+    document.getElementById('site-home-preview-shell').hidden=legal;
+    document.getElementById('site-home-legal-preview').hidden=!legal;
+    if(legal)window.CoopSiteLegalEditor?.refreshPreview();
+    if(navigate && !legal) {
       const frame=document.getElementById('site-home-preview-frame');
       if(frame?.src) frame.contentWindow?.postMessage({type:'coop-home-preview-select',area},new URL(frame.src).origin);
     }
+    // Existing tab handlers own loading and saving. Preview only reads their drafts.
+    if(navigate && typeof queueHomePreviewUpdate==='function')queueHomePreviewUpdate();
     return true;
   }
   function mount(){
     if(mounted) return;
     const pane=document.getElementById('sub-home-settings');
     if(!pane) return;
+    if(new URLSearchParams(location.search).get('scope')==='documents_admin')return;
     const basic=document.getElementById('site-home-basic-panel'), advanced=document.getElementById('site-home-advanced-panel');
     const areas={hero:[],impact:[],contact:[],design:[],fonts:[]};
     for(const container of [basic,advanced]) for(const card of [...container.children]) {
@@ -25,21 +46,51 @@
       areas[area].push(card);
     }
     const toolbar=document.createElement('div'); toolbar.className='home-visual-toolbar';
-    for(const [area,label] of Object.entries(labels)) {
+    const pickerLabel=document.createElement('label');pickerLabel.className='visually-hidden';pickerLabel.htmlFor='site-home-area-picker';pickerLabel.textContent='편집할 영역';
+    const picker=document.createElement('select');picker.id='site-home-area-picker';picker.className='form-select home-visual-area-picker';picker.onchange=()=>select(picker.value);
+    for(const [area,label] of Object.entries(labels)) {const option=document.createElement('option');option.value=area;option.textContent=label;picker.append(option);}
+    toolbar.append(pickerLabel,picker);
+    for(const area of ['hero','impact','about','certifications','activities','sections','legal','contact','design','fonts']) {
       const button=document.createElement('button'); button.type='button'; button.className='btn btn-sm btn-outline-secondary';
-      button.textContent=label; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); toolbar.append(button);
+      button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); toolbar.append(button);
     }
     const devices=document.querySelector('.home-preview-device-group'); if(devices) { devices.classList.add('ms-auto'); toolbar.append(devices); }
-    const workspace=document.createElement('div'); workspace.className='home-visual-workspace';
+    const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=()=>saveHomeSettings();toolbar.append(pending);
+    const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
     const stage=document.createElement('div'); stage.className='home-visual-stage';
     stage.append(document.getElementById('site-home-preview-shell'));
+    const legalPreview=document.createElement('div');legalPreview.id='site-home-legal-preview';legalPreview.className='home-visual-legal-preview';legalPreview.hidden=true;stage.append(legalPreview);
     const inspector=document.createElement('div'); inspector.className='home-visual-inspector';
+    const homeFields=document.createElement('div');homeFields.className='home-visual-home-fields';
     for(const [area,cards] of Object.entries(areas)) {
       const group=document.createElement('div'); group.dataset.homeInspectorArea=area;
       for(const card of cards) { if(card.tagName==='DETAILS') card.open=card.id==='site-home-template-settings'; group.append(card); }
-      inspector.append(group);
+      homeFields.append(group);
     }
-    workspace.append(stage,inspector); pane.append(toolbar,workspace);
+    pane.append(homeFields);
+    const tabs=document.getElementById('site-content-tabs');
+    const tabContent=pane.parentElement;
+    tabContent.before(toolbar,workspace);inspector.append(tabContent);workspace.append(stage,inspector);
+    // Keep the original tab nodes and Bootstrap handlers as the single navigation path.
+    tabs.classList.add('home-visual-original-tabs');
+    const activityModal=document.getElementById('activityModal');
+    if(activityModal){
+      activityModal.dataset.bsBackdrop='false';activityModal.dataset.bsFocus='false';
+      document.getElementById('sub-activities').append(activityModal);
+      for(const event of ['shown.bs.modal','hidden.bs.modal'])activityModal.addEventListener(event,()=>{inspector.scrollTop=0;queueHomePreviewUpdate();});
+    }
+    tabs.addEventListener('shown.bs.tab',event=>{
+      const id=event.target.getAttribute('href')?.slice(1);
+      const area=Object.keys(panes).find(key=>panes[key]===id)||(id==='sub-home-settings'?(homeAreas.has(selected)?selected:'hero'):'');
+      if(area&&area!==selected)select(area);
+    });
+    const syncChoices=()=>{
+      for(const option of picker.options)option.hidden=!available(option.value);
+      for(const button of toolbar.querySelectorAll('[data-home-select-area]'))button.hidden=!available(button.dataset.homeSelectArea);
+      const documentsOnly=new URLSearchParams(location.search).get('scope')==='documents_admin';
+      toolbar.hidden=documentsOnly;workspace.classList.toggle('is-documents-only',documentsOnly);
+    };
+    new MutationObserver(syncChoices).observe(tabs,{subtree:true,attributes:true,attributeFilter:['class','hidden']});syncChoices();
     basic.hidden=true; advanced.hidden=true;
     document.getElementById('site-home-preview-modal')?.remove();
     document.getElementById('site-home-font-sample-advanced')?.remove();
@@ -68,7 +119,13 @@
     const notice=document.createElement('div'); notice.id='site-home-external-rights'; notice.className='form-text mt-3';
     notice.innerHTML='<p>외부 글꼴은 등록하는 조합이 웹사이트 사용·임베딩 허용 여부를 확인하고 필요한 이용 권한을 확보해야 합니다. 방문자의 브라우저가 해당 글꼴 제공처에 접속합니다.</p><label class="form-check-label"><input type="checkbox" class="form-check-input me-2" id="site-home-external-rights-confirmed">이 글꼴의 웹사이트 사용 권한과 이용 조건을 확인했습니다.</label><p class="mt-2 mb-0">지원 주소: Google Fonts 파일 CDN, jsDelivr, cdnjs의 .woff2·.woff 파일</p>';
     fontCard.append(notice);
-    mounted=true;select(selected,false); updateExternalUi();
+    mounted=true;updateExternalUi();
+    // Do not change the active tab or run a data read while taking initial baselines.
+    document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!=='hero');
+    document.addEventListener('DOMContentLoaded',()=>{
+      const active=tabs.querySelector('a.active');
+      const area=Object.keys(panes).find(key=>`#${panes[key]}`===active?.getAttribute('href'))||'hero';select(area,false);
+    },{once:true});
   }
   function updateExternalUi(){
     let external=false;
@@ -96,7 +153,11 @@
   window.addEventListener('message',event=>{
     const frame=document.getElementById('site-home-preview-frame');
     if(!frame?.src || event.source!==frame.contentWindow || event.origin!==new URL(frame.src).origin) return;
-    if(event.data?.type==='coop-home-preview-area') select(event.data.area,false);
+    if(event.data?.type==='coop-home-preview-area') {
+      if(!select(event.data.area,false))return;
+      if(event.data.area==='activities' && typeof event.data.itemId==='string' && typeof openActivityModal==='function')void openActivityModal(event.data.itemId);
+      if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
+    }
   });
-  root.CoopHomeVisualEditor=Object.freeze({mount,select,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({mount,select,current:()=>selected,readExternal,setExternal,updateExternalUi});
 })(window);

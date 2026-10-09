@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.120
+Version: v1.0.121
 Change: Explicitly cleared homepage descriptions disappear from preview and public pages.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: Explicitly cleared homepage descriptions disappear from preview and publ
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.120 | index.html');</script>
+<script>console.log('[Version] v1.0.121 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1760,7 +1760,7 @@ Change: Explicitly cleared homepage descriptions disappear from preview and publ
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
-  <script src="shared/home_preview_editor.js?v=20261009-2" defer></script>
+  <script src="shared/home_preview_editor.js?v=20261009-4" defer></script>
   <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
 
@@ -2875,6 +2875,7 @@ Change: Explicitly cleared homepage descriptions disappear from preview and publ
         try {
             const incoming = new URL(origin);
             if (incoming.protocol !== window.location.protocol) return false;
+            if (incoming.port !== window.location.port) return false;
             return normalizePreviewHostname(incoming.hostname) === normalizePreviewHostname(window.location.hostname);
         } catch (_) {
             return false;
@@ -2888,6 +2889,7 @@ Change: Explicitly cleared homepage descriptions disappear from preview and publ
             if (!settings || typeof settings !== 'object') return;
             g_homePreviewDraftApplied = true;
             applyPublicHomeSettings(settings);
+            window.CoopSitePreview?.apply(settings.site_preview);
             if (window.AOS?.refreshHard) window.AOS.refreshHard();
         };
         const initialPreviewLayout = new URLSearchParams(window.location.search).get('home_preview_layout');
@@ -3018,7 +3020,7 @@ Change: Explicitly cleared homepage descriptions disappear from preview and publ
         try {
             const { data, error } = await _client.rpc('get_public_site_certifications');
             if (error) throw error;
-            renderPublicCertifications(data || []);
+            renderPublicCertifications(window.CoopSitePreview?.get('certifications') || data || []);
         } catch (error) {
             console.warn('fetchPublicCertifications failed:', error);
         }
@@ -3570,6 +3572,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (!sections || (document.documentElement.hasAttribute('data-public-tenant-pending') && !sections.length)) return false;
 
+        sections = window.CoopSitePreview?.get('sections') || sections;
         applyPublicSectionOrder(sections);
         publicHiddenSectionIds.clear();
 
@@ -3587,6 +3590,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
         syncPublicSectionLinks();
+        window.CoopSitePreview?.refresh();
         return true;
     }
 
@@ -4645,6 +4649,7 @@ function syncActivityLoadMoreCard(container) {
 function renderActivityCards(items, options = {}) {
     const container = document.getElementById('activities-container');
     if (!container) return;
+    items = window.CoopSitePreview?.activityRows(items) || items;
     setupActivityScrollTrack(container);
     const previousScrollLeft = options.preserveScroll ? container.scrollLeft : 0;
 
@@ -4658,6 +4663,7 @@ function renderActivityCards(items, options = {}) {
             </div>
           </div>
         `;
+        window.CoopSitePreview?.finishActivities(container);
         return;
     }
 
@@ -4666,6 +4672,7 @@ function renderActivityCards(items, options = {}) {
     if (options.preserveScroll) {
         container.scrollLeft = previousScrollLeft;
     }
+    window.CoopSitePreview?.finishActivities(container);
 }
 
 function appendActivityCards(items, startIndex = 0) {
@@ -5905,7 +5912,7 @@ function openPlantDetail(id) {
     async function fetchAbout() {
         const { data, error } = await (await scopePublicTenant(_client.from('site_about').select('*').limit(1)));
         if (error) return;
-        const row = Array.isArray(data) ? data[0] : data;
+        const row = window.CoopSitePreview?.get('about') || (Array.isArray(data) ? data[0] : data);
         if (!row) {
             if (g_public_site_context?.coop_name && g_public_site_context.coop_name !== '용인모두의햇빛협동조합') {
                 // Unconfigured cooperatives must not borrow the main cooperative's introduction or photograph.
@@ -5915,12 +5922,17 @@ function openPlantDetail(id) {
             }
             return;
         }
-        const defaultData = row;
+        renderPublicAbout(row);
+    }
+
+    function renderPublicAbout(defaultData) {
 
         // 1. 이미지
         const imgEl = document.getElementById('about-img-src');
         if(imgEl) {
-            imgEl.src = defaultData.image_url || '';
+            if (defaultData.image_url) imgEl.src = defaultData.image_url;
+            else imgEl.removeAttribute('src');
+            imgEl.hidden = !defaultData.image_url;
             imgEl.style.display = defaultData.image_url ? 'block' : 'none';
         }
 
