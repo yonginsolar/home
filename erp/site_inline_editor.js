@@ -10,6 +10,7 @@
   activityTitle:['activities','activity-title','plain',300],activityContent:['activities','activity-content','rich',100000]
  });
  let dialog,moved=[],flushWait=null,lastRejected=false;
+ const historyValues=new Map();
  function permitted(){return typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site');}
  function ready(key){
   const cfg=fields[key],input=cfg&&document.getElementById(cfg[1]);if(!input||input.disabled||!permitted())return false;
@@ -20,11 +21,17 @@
  function collect(){
   const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key))result[key]={value:document.getElementById(cfg[1]).value,kind:cfg[2],maxLength:cfg[3]};return result;
  }
- function update(key,value){
+ function update(key,value,restore=false){
   if(!Object.hasOwn(fields,key)||!ready(key)||typeof value!=='string')return false;
   const cfg=fields[key],input=document.getElementById(cfg[1]);
   const limit=input.maxLength>0?Math.min(input.maxLength,cfg[3]):cfg[3];if(value.length>limit)return false;
-  input.value=cfg[2]==='rich'?sanitizeAboutHtml(value):value;
+  let history=historyValues.get(key);
+  if(!history||history.input!==input||history.last!==input.value){history={input,last:input.value,values:new Set([input.value])};historyValues.set(key,history);}
+  // Restore only a value previously present in this exact field. Arbitrary
+  // incoming HTML still follows normal sanitization, then secure save validation.
+  if(restore&&!history.values.has(value))return false;
+  input.value=restore?value:cfg[2]==='rich'?sanitizeAboutHtml(value):value;
+  history.last=input.value;history.values.add(input.value);if(history.values.size>102)history.values.delete([...history.values][1]);
   if(key==='aboutContent')g_aboutEditorBridge?.syncFromSource();
   if(key==='activityContent')g_activityEditorBridge?.syncFromSource();
   if(key==='aboutList')renderAboutListEditor(parseAboutListItems(input.value));
@@ -93,7 +100,7 @@
   const f=frame();if(!f?.src||event.source!==f.contentWindow||event.origin!==new URL(f.src).origin)return;
   const data=event.data;if(!data||!permitted())return;
   if(data.type==='coop-home-inline-edit'){
-   const accepted=update(data.field,data.value);lastRejected=!accepted;send({type:'coop-home-inline-result',field:data.field,accepted});
+   const accepted=update(data.field,data.value,data.restore===true);lastRejected=!accepted;send({type:'coop-home-inline-result',field:data.field,accepted});
   }else if(data.type==='coop-home-inline-control')elementControls(data.area,data.kind);
   else if(data.type==='coop-home-inline-section')sectionAction(data.area,data.action);
   else if(data.type==='coop-home-inline-flushed'&&flushWait){clearTimeout(flushWait.timer);flushWait.resolve(data.ok===true&&!lastRejected);flushWait=null;}
