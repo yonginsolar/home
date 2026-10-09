@@ -185,18 +185,18 @@
         })
       ];
       // Opt-in for homepage content only. Existing approval forms keep their schema.
-      if (options.siteColors === true && modules.Mark) extensions.push(modules.Mark.create({
-        name: 'siteTextColor',
-        addAttributes() {
+      if (options.siteColors === true && modules.Mark) {
+        // Separate marks preserve nested foreground/background styles together.
+        for (const [name,css] of [['siteTextColor','color'],['siteBackgroundColor','background-color']]) {
           const safe = value => /^(#[a-f0-9]{3,8}|rgba?\([0-9.,%\s]+\))$/i.test(String(value || '').trim()) ? String(value).trim() : null;
-          return Object.fromEntries([['color','color'],['backgroundColor','background-color']].map(([name,css]) => [name,{
-            default:null,parseHTML:element=>safe(element.style.getPropertyValue(css)),
-            renderHTML:attributes=>safe(attributes[name]) ? {style:`${css}:${safe(attributes[name])}`} : {}
-          }]));
-        },
-        parseHTML() { return [{tag:'span',getAttrs:element=>(element.style.color||element.style.backgroundColor)?null:false}]; },
-        renderHTML({HTMLAttributes}) { return ['span',HTMLAttributes,0]; }
-      }));
+          extensions.push(modules.Mark.create({
+            name,
+            addAttributes() { return {value:{default:null,parseHTML:element=>safe(element.style.getPropertyValue(css)),renderHTML:attributes=>safe(attributes.value)?{style:`${css}:${safe(attributes.value)}`}:{}}}; },
+            parseHTML() { return [{tag:'span',getAttrs:element=>safe(element.style.getPropertyValue(css))?null:false}]; },
+            renderHTML({HTMLAttributes}) { return ['span',HTMLAttributes,0]; }
+          }));
+        }
+      }
       return extensions;
     }
 
