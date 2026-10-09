@@ -29,6 +29,8 @@
     const container=document.getElementById('activities-container');
     if(container && (draft.activity || document.getElementById('home-preview-activity-article')) && typeof renderActivityCards==='function')renderActivityCards(g_activity_list);
     window.AOS?.refreshHard?.();
+    // The rendered order also includes the selected template's layout overrides.
+    if(parentOrigin)window.parent.postMessage({type:'coop-home-preview-order',ids:[...document.querySelectorAll('main > section[id]')].map(node=>node.id)},parentOrigin);
   }
   function finishActivities(container){
     if(container){

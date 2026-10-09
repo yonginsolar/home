@@ -1,17 +1,19 @@
 /* Actual homepage preview + the existing inputs, draft controller and secure save path. */
 (function(root){
   'use strict';
-  let mounted=false, selected='hero', sectionRows=[];
+  let mounted=false, selected='hero', sectionRows=[], previewOrder=[];
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
   const utilities=['sections','legal','design','fonts','documents'];
-  function syncOrder(rows){
+  function syncOrder(rows, renderedIds){
     if(Array.isArray(rows))sectionRows=rows;
-    const order=new Map([...sectionRows].sort((a,b)=>a.display_order-b.display_order).map((row,i)=>[row.id,i]));
+    if(Array.isArray(renderedIds))previewOrder=renderedIds.filter(id=>typeof id==='string'&&/^[a-z-]{1,40}$/.test(id)).slice(0,40);
+    const order=new Map(sectionRows.map(row=>[row.id,Number(row.display_order)||999]));
+    previewOrder.forEach((id,i)=>order.set(id,i));
     const fallback=['hero','about','certifications','impact','progress','status','activities','external-news','partners','history','faq','contact'];
     const anchor=area=>area==='certifications'?'about':area==='external-news'?'activities':area==='progress'?(order.has('progress')?'progress':'portfolio'):area;
-    const areas=[...fallback].sort((a,b)=>(a==='hero'?-1:b==='hero'?1:(order.get(anchor(a))??100)-(order.get(anchor(b))??100))||fallback.indexOf(a)-fallback.indexOf(b)).concat(utilities);
+    const areas=[...fallback].sort((a,b)=>(a===b?0:a==='hero'?-1:b==='hero'?1:(order.get(anchor(a))??100)-(order.get(anchor(b))??100))||fallback.indexOf(a)-fallback.indexOf(b)).concat(utilities);
     const picker=document.getElementById('site-home-area-picker'),strip=document.getElementById('site-home-area-strip');
     for(const area of areas){
       const option=picker?.querySelector(`option[value="${area}"]`),button=strip?.querySelector(`[data-home-select-area="${area}"]`);
@@ -169,6 +171,7 @@
   window.addEventListener('message',event=>{
     const frame=document.getElementById('site-home-preview-frame');
     if(!frame?.src || event.source!==frame.contentWindow || event.origin!==new URL(frame.src).origin) return;
+    if(event.data?.type==='coop-home-preview-order')syncOrder(null,event.data.ids);
     if(event.data?.type==='coop-home-preview-area') {
       if(!select(event.data.area,false))return;
       if(event.data.area==='activities' && typeof event.data.itemId==='string' && typeof openActivityModal==='function')void openActivityModal(event.data.itemId);
