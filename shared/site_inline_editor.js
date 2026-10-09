@@ -4,12 +4,12 @@
  if(new URLSearchParams(location.search).get('home_preview')!=='1'||root.parent===root)return;
  const targets={heroTitle:'#public-hero-title',heroSubtitle:'#public-hero-subtitle',heroButton:'#public-hero-cta',impactTitle:'#public-impact-title',impactDescription:'#public-impact-description',impactKicker:'#public-impact-kicker span',impactButton:'#public-impact-cta',aboutTitle:'#about-title',aboutSubtitle:'#about-subtitle',aboutContent:'#about-content',aboutList:'#about-list',contactPhone:'#public-contact-phone',contactEmail:'#public-contact-email',contactAddress:'#public-contact-address',activityTitle:'#home-preview-activity-article h3',activityContent:'#home-preview-activity-body'};
  let origin='',fields={},sections=[],active=null,pending=null,selectionRange=null,toolbar,sectionMenu,status,requested='';
- const histories=new Map();
+ const histories=new Map();let requestSequence=0;
  function send(message){if(origin)root.parent.postMessage(message,origin);}
  function trusted(event){if(event.source!==root.parent)return false;try{const u=new URL(event.origin);return u.protocol===location.protocol&&u.port===location.port&&u.hostname.replace(/^(www|erp)\./,'')===location.hostname.replace(/^(www|erp)\./,'');}catch(_){return false;}}
  function fieldValue(){return active?.kind==='rich'?active.node.innerHTML:(active?.node.innerText??active?.node.textContent??'');}
  function announce(text){status.textContent=text;status.hidden=!text;}
- function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}send({type:'coop-home-inline-edit',field:active.key,value,restore});active.last=value;active.renderedLast=fieldValue();return true;}
+ function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,requestId:active.latestRequest});return true;}
  function bookmark(){
   if(!active)return null;const sel=root.getSelection();const range=sel.rangeCount&&active.node.contains(sel.anchorNode)?sel.getRangeAt(0):selectionRange;if(!range)return null;
   if(!active.node.contains(range.startContainer)||!active.node.contains(range.endContainer))return null;
@@ -112,6 +112,7 @@
   if(data?.type==='coop-home-preview-select'||data?.type==='coop-home-preview-navigate')finish();
   if(data?.type==='coop-home-inline-flush'){send({type:'coop-home-inline-flushed',ok:finish()});}
   if(data?.type==='coop-home-inline-result'&&data.accepted===false){announce('이 내용은 지금 수정할 수 없습니다. 설정과 입력 길이를 확인해 주세요.');}
+  if(data?.type==='coop-home-inline-result'&&data.accepted===true){announce('');if(active?.key===data.field&&active.latestRequest===data.requestId&&typeof data.value==='string'){active.last=data.value;active.renderedLast=fieldValue();if(fields[data.field])fields[data.field].value=data.value;}}
  });
  document.addEventListener('click',event=>{
   if(!origin)return;
