@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.233
-Change: 2026-10-09 - Basic and advanced homepage settings with one shared draft and save.
+Version: v1.0.234
+Change: 2026-10-09 - Preview-centered homepage editing and validated external fonts.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-  window.ADMIN_MEMBER_VERSION = 'v1.0.233';
+window.ADMIN_MEMBER_VERSION = 'v1.0.234';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -57,7 +57,9 @@ Change: 2026-10-09 - Basic and advanced homepage settings with one shared draft 
 <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 <script src="approval_rich_editor.js?v=20260918-1"></script>
 <script src="site_editor_drafts.js?v=1.0.0"></script>
-<script src="../shared/home_design.js?v=20261009-1"></script>
+<script src="../shared/home_design.js?v=20261009-2"></script>
+<link rel="stylesheet" href="home_visual_editor.css?v=20261009-1">
+<script src="home_visual_editor.js?v=20261009-1"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -2032,7 +2034,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <div class="col-md-4 d-flex align-items-end"><button type="button" class="btn btn-outline-primary w-100" onclick="recommendHomeFonts()">구성에 맞는 글꼴 선택</button></div>
 </div>
 <div class="home-font-sample mt-3 p-4 border rounded-3 bg-light" id="site-home-font-sample"><div class="home-font-sample-title">함께 만드는 우리의 내일</div><p class="mb-0 mt-2">한 사람의 참여가 지역의 변화를 만듭니다. 조합의 소식과 활동을 만나보세요.</p></div>
-<div class="form-text mt-2">상업용 홈페이지에 무료로 사용할 수 있는 글꼴입니다.</div>
+<div class="form-text mt-2">기본 제공 글꼴은 상업용 홈페이지에 무료로 사용할 수 있습니다.</div>
 </div>
 </details>
 
@@ -8549,6 +8551,7 @@ let g_homePreviewTimer = 0;
 let g_homePreviewSourceWindow = null;
 let g_homePreviewChannel = null;
 let g_homePreviewStorageKey = '';
+let g_homeVisualStarted = false;
 const HOME_CTA_PRESETS = new Set(['/signup.html', '#about', '#activities', '#contact', '']);
 
 function setHomeImagePreview(kind, url) {
@@ -8677,6 +8680,7 @@ queueHomePreviewUpdate();
 
 function setHomeSettingsMode(mode) {
 if (!['basic', 'advanced'].includes(mode)) return false;
+if (window.CoopHomeVisualEditor) return CoopHomeVisualEditor.select(mode === 'advanced' ? 'design' : 'hero');
 for (const name of ['basic', 'advanced']) {
 const selected = name === mode;
 const panel = document.getElementById(`site-home-${name}-panel`);
@@ -8715,17 +8719,20 @@ option.value = font.id;
 option.textContent = `${font.label} · ${font.kind}`;
 select.appendChild(option);
 });
+const external = document.createElement('option');
+external.value = 'external'; external.textContent = '외부 글꼴 연결'; select.appendChild(external);
 });
 }
 
 function updateHomeFontSelection() {
+CoopHomeVisualEditor.updateExternalUi();
 const title = document.getElementById('site-home-title-font')?.value || 'legacy';
 const body = document.getElementById('site-home-body-font')?.value || 'legacy';
 const matching = Object.entries(CoopHomeDesign.pairs).find(([, pair]) => pair.title === title && pair.body === body);
 document.getElementById('site-home-font-pair').value = title === 'legacy' && body === 'legacy' ? 'legacy' : matching?.[0] || 'custom';
 for (const id of ['site-home-font-sample', 'site-home-font-sample-advanced']) {
 const sample = document.getElementById(id);
-if (sample) CoopHomeDesign.applyFonts(sample, title, body);
+if (sample) CoopHomeDesign.applyFonts(sample, title, body, CoopHomeVisualEditor.readExternal(false));
 }
 queueHomePreviewUpdate();
 }
@@ -8813,16 +8820,22 @@ if (fileInput) fileInput.value = '';
 setHomeImagePreview(kind, document.getElementById(`site-home-${kind}-image-url`)?.value || '');
 });
 updateHomeOverlayLabel();
+CoopHomeVisualEditor.setExternal(settings);
 updateHomeFontSelection();
 }
 
 async function fetchHomeSettings() {
 try {
+CoopHomeVisualEditor.mount();
 await getSiteEditorDraft('home').load(async () => {
 const { data, error } = await _supabase.rpc('get_my_home_settings');
 if (error) throw error;
 return data || {};
 }, data => { setHomeSettingsForm(data); bindHomePreviewInputs(); });
+if (!g_homeVisualStarted && getSiteEditorDraft('home').refresh().loaded) {
+g_homeVisualStarted = true;
+window.setTimeout(() => openHomePreview(), 0);
+}
 } catch (error) {
 CoopSafeLog.error("[fetchHomeSettings] failed:", error);
 myAlert('메인 화면 설정을 불러오지 못했습니다: ' + (error?.message || error), 'warning');
@@ -8851,6 +8864,8 @@ return {
 p_home_layout_mode: read('site-home-layout-mode') || 'existing',
 p_home_title_font: read('site-home-title-font') || 'legacy',
 p_home_body_font: read('site-home-body-font') || 'legacy',
+p_home_external_fonts: CoopHomeVisualEditor.readExternal(),
+p_external_font_rights_confirmed: document.getElementById('site-home-external-rights-confirmed')?.checked === true,
 p_expected_updated_at: g_homeSettingsRecord?.updated_at || null,
 p_home_template: String(document.querySelector('input[name="site-home-template"]:checked')?.value || 'simple'),
 p_hero_title: read('site-home-hero-title'),
@@ -8892,6 +8907,8 @@ if (button) button.disabled = true;
 showLoading(true);
 try {
 const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
+const validatedBeforeUpload = collectHomeSettingsPayload();
+if (Object.keys(validatedBeforeUpload.p_home_external_fonts).length && !validatedBeforeUpload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
 for (const kind of ['hero', 'impact']) {
 const fileInput = document.getElementById(`site-home-${kind}-image-file`);
 const file = fileInput?.files?.[0] || null;
@@ -8904,7 +8921,8 @@ document.getElementById(`site-home-${kind}-image-url`).value = uploadedUrl;
 }
 
 const payload = collectHomeSettingsPayload();
-const { data, error } = await _supabase.rpc('upsert_site_home_settings_v4', payload);
+if (Object.keys(payload.p_home_external_fonts).length && !payload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
+const { data, error } = await _supabase.rpc('upsert_site_home_settings_v5', payload);
 if (error) throw error;
 setHomeSettingsForm(data || payload);
 draft.accept();
@@ -8939,6 +8957,7 @@ const settings = {
 home_layout_mode: payload.p_home_layout_mode,
 home_title_font: payload.p_home_title_font,
 home_body_font: payload.p_home_body_font,
+home_external_fonts: payload.p_home_external_fonts,
 home_template: payload.p_home_template,
 hero_title: payload.p_hero_title,
 hero_highlight: payload.p_hero_highlight,
@@ -9004,7 +9023,7 @@ targetOrigin = new URL(frame.src).origin;
 } catch (_) {
 return;
 }
-if (event.origin !== targetOrigin || !event.source) return;
+if (event.origin !== targetOrigin || event.source !== frame.contentWindow) return;
 g_homePreviewSourceWindow = event.source;
 window.setTimeout(sendHomePreviewSettings, 0);
 });
@@ -9037,6 +9056,12 @@ document.getElementById('site-home-preview-mobile')?.classList.toggle('active', 
 
 async function openHomePreview(sectionId = 'hero') {
 try {
+const existingFrame = document.getElementById('site-home-preview-frame');
+if (existingFrame?.getAttribute('src')) {
+CoopHomeVisualEditor.select(['hero','impact','contact'].includes(sectionId) ? sectionId : 'hero');
+await sendHomePreviewSettings();
+return;
+}
 await fetchHomeSettings();
 if (!getSiteEditorDraft('home').refresh().loaded) throw new Error('메인 화면 설정을 먼저 불러와 주세요.');
 const previewPayload = collectHomeSettingsPayload();
@@ -9088,8 +9113,7 @@ g_homePreviewSourceWindow = null;
 frame.onload = () => window.setTimeout(sendHomePreviewSettings, 80);
 frame.src = url.toString();
 }
-g_homePreviewModal = g_homePreviewModal || bootstrap.Modal.getOrCreateInstance(document.getElementById('site-home-preview-modal'));
-g_homePreviewModal.show();
+CoopHomeVisualEditor.select(['hero','impact','contact'].includes(sectionId) ? sectionId : 'hero', false);
 } catch (error) {
 myAlert('미리보기를 열 수 없습니다: ' + (error?.message || error), 'warning');
 }

@@ -31,7 +31,29 @@
     campaign:['impact','activities','progress','status','about','partners','portfolio','documents','history','calculator','ops-system','game-hall','faq','contact']
   });
   const byId = new Map(fonts.map(font => [font.id, font]));
-  function normalizeFont(value) { return byId.has(value) ? value : 'legacy'; }
+  function normalizeFont(value) { return value === 'external' || byId.has(value) ? value : 'legacy'; }
+  const externalHosts = new Set(['fonts.gstatic.com','cdn.jsdelivr.net','fastly.jsdelivr.net','cdnjs.cloudflare.com']);
+  const externalFaces = new Map();
+  let externalSequence = 0;
+  function validateExternalFont(config) {
+    if (!config || typeof config.label !== 'string' || !config.label.trim() || config.label.length > 80) throw new Error('외부 글꼴 이름을 입력해 주세요.');
+    let url;
+    try { url = new URL(config.url); } catch (_) { throw new Error('웹폰트 파일 주소를 확인해 주세요.'); }
+    if (url.protocol !== 'https:' || !externalHosts.has(url.hostname) || url.port || url.username || url.password || url.search || url.hash || !/^\/[A-Za-z0-9_./@%+~-]+\.(woff2|woff)$/.test(url.pathname) || /%(2f|5c|00|0a|0d)/i.test(url.pathname) || url.href.length > 800) throw new Error('지원하는 글꼴 CDN의 HTTPS .woff2 또는 .woff 파일 주소를 입력해 주세요.');
+    return { label:config.label.trim(), url:url.href };
+  }
+  function loadExternalFont(config) {
+    const safe = validateExternalFont(config);
+    if (!externalFaces.has(safe.url)) {
+      const name = `CoopExternal${++externalSequence}`;
+      const face = new FontFace(name, `url(${JSON.stringify(safe.url)})`, { display:'swap' });
+      const loading = Promise.race([face.load(), new Promise((_,reject)=>setTimeout(()=>reject(new Error('글꼴 연결 시간이 초과되었습니다.')),10000))])
+        .then(loaded => { document.fonts.add(loaded); return name; })
+        .catch(error => { externalFaces.delete(safe.url); throw error; });
+      externalFaces.set(safe.url, loading);
+    }
+    return externalFaces.get(safe.url);
+  }
   function normalizeLayout(value) { return value === 'designed' ? 'designed' : 'existing'; }
   function family(value, title = false) {
     const font = byId.get(value);
@@ -39,7 +61,7 @@
     return `"${font.family}", ${font.kind === '명조' ? 'serif' : 'sans-serif'}`;
   }
   function ensureFonts(values) {
-    const active = new Set(values.map(normalizeFont).filter(value => value !== 'legacy'));
+    const active = new Set(values.map(normalizeFont).filter(value => value !== 'legacy' && value !== 'external'));
     for (const id of active) {
       if (document.querySelector(`link[data-home-font="${id}"]`)) continue;
       const link = document.createElement('link');
@@ -54,7 +76,7 @@
       if (!active.has(link.dataset.homeFont)) link.remove();
     });
   }
-  function applyFonts(target, titleValue, bodyValue) {
+  function applyFonts(target, titleValue, bodyValue, external = {}) {
     const title = normalizeFont(titleValue), body = normalizeFont(bodyValue);
     ensureFonts([title, body]);
     target.classList.toggle('home-title-font-custom', title !== 'legacy');
@@ -63,6 +85,15 @@
     target.style.setProperty('--home-body-font', family(body));
     target.dataset.homeTitleFont = title;
     target.dataset.homeBodyFont = body;
+    const revision = String((Number(target.dataset.fontRevision) || 0) + 1);
+    target.dataset.fontRevision = revision;
+    for (const [kind, value] of [['title',title],['body',body]]) if (value === 'external' && external[kind]) {
+      try {
+        loadExternalFont(external[kind]).then(name => {
+          if (target.dataset.fontRevision === revision) target.style.setProperty(`--home-${kind}-font`, `"${name}", sans-serif`);
+        }).catch(() => {}); // Keep the readable built-in fallback; never block the page.
+      } catch (_) {}
+    }
   }
-  root.CoopHomeDesign = Object.freeze({ fonts, pairs, orders, normalizeFont, normalizeLayout, family, applyFonts });
+  root.CoopHomeDesign = Object.freeze({ fonts, pairs, orders, normalizeFont, normalizeLayout, family, applyFonts, validateExternalFont, loadExternalFont });
 })(window);
