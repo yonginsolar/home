@@ -74,17 +74,25 @@
   }
   adapt(node);
  }
- function read(node){
-  const rows=[];function walk(n,attrs){
+ function read(node,splitLists=false){
+  const rows=[],groups=[];
+  const boundary=()=>{if(rows.length)groups.push(rows.splice(0));};
+  function walk(n,attrs){
    if(n.nodeType===3){if(n.data)rows.push({text:n.data,...attrs});return;}
    if(n.nodeType!==1)return;if(n.tagName==='BR'){rows.push({text:'\n',...attrs});return;}
+   const listBoundary=splitLists&&['UL','OL','LI'].includes(n.tagName);if(listBoundary)boundary();
    const a={...attrs},s=n.style;
    if(['STRONG','B'].includes(n.tagName)||s.fontWeight==='700'||s.fontWeight==='bold')a.bold=true;
    if(['EM','I'].includes(n.tagName)||s.fontStyle==='italic')a.italic=true;
    if(n.tagName==='U'||s.textDecoration.includes('underline'))a.underline=true;
    for(const [k,p] of [['color','color'],['highlight','backgroundColor']]){const v=s[p];if(v){const rgb=v.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);const hex=rgb?'#'+rgb.slice(1).map(x=>Number(x).toString(16).padStart(2,'0')).join(''):v;if(color(hex))a[k]=hex.toLowerCase();}}
    for(const child of n.childNodes)walk(child,a);
+   if(listBoundary)boundary();
   }for(const child of node.childNodes)walk(child,{});
+  if(splitLists){
+   boundary();
+   for(const group of groups){const value=group.map(r=>r.text).join(''),text=value.trim();if(!text)continue;if(rows.length)rows.push({text:'\n'});const clean=trim(value,group);rows.push(...(clean.length?clean:[{text}]));}
+  }
   const merged=[];for(const r of rows){const last=merged.at(-1);if(last&&keys.every(k=>last[k]===r[k]))last.text+=r.text;else merged.push(r);}
   const value=merged.map(r=>r.text).join('');return {value,runs:normalize(value,merged)};
  }
@@ -105,7 +113,11 @@
   const template=document.createElement('template');template.innerHTML=raw;
   template.content.querySelectorAll('script,style,iframe,object,embed,svg,math').forEach(n=>n.remove());
   const lines=[];for(const li of template.content.querySelectorAll('li')){
-   const part=read(li),text=part.value.trim();if(!text)continue;
+   // Traverse only outer items. Inner items split the same traversal so child
+   // text is read once, in DOM order, including a parent's trailing text.
+   if(li.parentElement?.closest('li'))continue;
+   const container=document.createElement('span');container.append(li.cloneNode(true));
+   const part=read(container,true),text=part.value.trim();if(!text)continue;
    if(lines.length)lines.push({text:'\n'});lines.push(...(trim(part.value,part.runs).length?trim(part.value,part.runs):[{text}]));
   }
   const text=lines.map(r=>r.text).join('');return {value:text,runs:normalize(text,runs).length?normalize(text,runs):normalize(text,lines)};
