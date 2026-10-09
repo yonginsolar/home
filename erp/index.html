@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.94 | Change: 2026-10-07 - Tenant-scoped sales and inventory workspace. -->
+<!-- Version: v1.0.95 | Change: 2026-10-09 - Shared sidebar order and alphabetical defaults. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.94 | index.html');</script>
+  <script>console.log('[Version] v1.0.95 | index.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -104,8 +104,8 @@
   <meta name="erp-mobile-revision" content="20261007.2">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <meta name="erp-workspace-revision" content="20261009.2">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261009-2">
-  <script src="/erp/workspace_nav.js?v=20261009-2" defer></script>
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261009-3">
+  <script src="/erp/workspace_nav.js?v=20261009-3" defer></script>
 </head>
 <body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
 
@@ -340,7 +340,7 @@
           <div class="d-grid gap-2" id="menuOrderList"></div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline-secondary btn-sm" id="btnResetMenuOrder" type="button" onclick="resetMenuOrder()">기본 순서로</button>
+          <button class="btn btn-outline-secondary btn-sm" id="btnResetMenuOrder" type="button" onclick="resetMenuOrder()">가나다순으로</button>
           <button class="btn btn-primary btn-sm" type="button" data-bs-dismiss="modal">닫기</button>
         </div>
       </div>
@@ -1930,7 +1930,8 @@ function getMenuButtonsContainer() {
 }
 
 function getDefaultMenuOrder() {
-    return ERP_MENU_BUTTON_ORDER_IDS.slice();
+    return window.ErpWorkspace?.defaultOrder(ERP_MENU_BUTTON_ORDER_IDS, getMenuButtonLabel)
+        || ERP_MENU_BUTTON_ORDER_IDS.slice().sort((a,b)=>getMenuButtonLabel(a).localeCompare(getMenuButtonLabel(b),'ko-KR'));
 }
 
 function getMenuOrderStorageKey() {
@@ -2023,6 +2024,7 @@ async function saveSharedMenuOrder(order, { quiet = false, onlyIfMissing = false
             ? data.menu_order
             : (Array.isArray(data) ? data : normalized);
         cacheMenuOrder(savedOrder);
+        window.ErpWorkspace?.syncOrder(savedOrder,myInfo?.coop_id);
         menuOrderLoadedFromServer = true;
         applyMenuOrder();
         const changed = data?.changed !== false;
@@ -2059,16 +2061,6 @@ async function loadSharedMenuOrder(canCustomize) {
         }
 
         const defaultOrder = getDefaultMenuOrder();
-        if (menuOrderCanCustomize && !isSameMenuOrder(legacyOrder, defaultOrder)) {
-            const migrated = await saveSharedMenuOrder(legacyOrder, { quiet: true, onlyIfMissing: true });
-            if (migrated.ok) {
-                if (migrated.changed && isSameMenuOrder(readMenuOrder(), legacyOrder)) {
-                    setMenuOrderStatus('이 컴퓨터의 기존 순서를 조합 공용 순서로 옮겼습니다.', 'success');
-                }
-                return;
-            }
-        }
-
         cacheMenuOrder(defaultOrder);
         menuOrderLoadedFromServer = true;
         setMenuOrderStatus('아직 저장된 공용 순서가 없어 기본 순서를 사용합니다.', 'muted');
@@ -2165,6 +2157,11 @@ function openMenuOrderModal() {
 async function resetMenuOrder() {
     await saveSharedMenuOrder(getDefaultMenuOrder());
 }
+
+window.addEventListener('erp-menu-order-saved',event=>{
+    if(!myInfo || event.detail?.coopId!==myInfo.coop_id || !Array.isArray(event.detail.order))return;
+    cacheMenuOrder(event.detail.order);applyMenuOrder();renderMenuOrderList();
+});
 
 function applyMenuPermissions(user, platformCtx, runtime) {
     const menuCheck = (applyMenuPermissions.checkVersion || 0) + 1;

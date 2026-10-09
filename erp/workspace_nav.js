@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.0.1 — read-only navigation; no business-data cache or writes. */
+/* ERP workspace navigation v1.1.0 — shared menu preferences; business permissions unchanged. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261009.2';
+  const VERSION = '20261009.3';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -20,7 +20,12 @@
     ['btnAudit', '감사 로그', 'audit_logs.html', 'audit', ['audit.view'], '◷'],
     ['btnPerm', '권한 관리', 'permissions.html', 'permission', ['permission.manage'], '⚿']
   ];
-  let state = null, generation = 0, panel, list, brand, toggle, backdrop, returnFocus;
+  const extraLabels = {btnServiceContracts:'이용계약·청구서',btnFestivalReceipts:'매출·재고 관리',btnPowerMonitorAdmin:'발전소 모니터링',btnPlatform:'조합 생성·운영 제어',btnSunVillageDemo:'햇빛소득마을',btnVillageEnergy:'발전·정산 현황'};
+  const labels = new Map([...catalog.map(item=>[item[0],item[1]]),...Object.entries(extraLabels)]);
+  const compare = (a,b) => a.localeCompare(b,'ko-KR') || (a<b?-1:a>b?1:0);
+  const cleanOrder = order => [...new Set((Array.isArray(order)?order:[]).filter(id=>typeof id==='string' && /^btn[A-Za-z0-9_-]{1,80}$/.test(id)))];
+  function defaultOrder(ids, fallback = id=>id) { return [...ids].sort((a,b)=>compare(labels.get(a)||fallback(a),labels.get(b)||fallback(b)) || compare(a,b)); }
+  let state = null, generation = 0, panel, list, brand, toggle, backdrop, returnFocus, orderButton, orderDialog, orderDraft, orderBusy=false;
   let connections = new WeakMap();
   const authBound = new WeakSet();
   const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop() || 'index';
@@ -84,10 +89,77 @@
     brand.textContent = state.runtime.coop_name || '협동조합 ERP';
     const ordered = [...state.items].sort((a, b) => {
       const rank = id => { const n = state.order.indexOf(id); return n < 0 ? 1000 : n; };
-      return rank(a[0]) - rank(b[0]);
+      return rank(a[0]) - rank(b[0]) || compare(a[1],b[1]) || compare(a[0],b[0]);
     });
     list.replaceChildren(link(['home', '전체 메뉴', 'index.html', '', [], '⌂', true]), ...ordered.map(link));
     if (isIndex) list.firstElementChild.setAttribute('aria-current', 'page');
+    orderButton.hidden = !(state.canOrder && state.orderLoaded && state.items.length > 1);
+  }
+
+  function fullOrder() {
+    return cleanOrder([...state.order,...defaultOrder([...labels.keys()]),...state.items.map(item=>item[0])]);
+  }
+  function syncOrder(order, coopId) {
+    if(!state || state.runtime.coop_id!==coopId || !Array.isArray(order)) return false;
+    state.order=cleanOrder(order);render();return true;
+  }
+  function closeOrder() { if(orderBusy)return; orderDialog?.close();orderDraft=null;orderButton?.focus(); }
+  function renderOrder() {
+    const rows=orderDialog.querySelector('.erp-order-list'); rows.replaceChildren();
+    const visible=new Map(state.items.map(item=>[item[0],item[1]]));
+    const ids=orderDraft.filter(id=>visible.has(id));
+    const move=(id,target)=>{
+      if(orderBusy || !visible.has(id) || !visible.has(target))return;
+      const next=ids.slice(),from=next.indexOf(id),to=next.indexOf(target);
+      next.splice(from,1);next.splice(to,0,id);
+      let index=0;orderDraft=orderDraft.map(item=>visible.has(item)?next[index++]:item);
+      renderOrder();orderDialog.querySelector('.erp-order-status').textContent='저장하지 않은 변경사항이 있습니다.';
+    };
+    ids.forEach((id,index)=>{
+      const row=document.createElement('div');row.className='erp-order-row';row.draggable=!orderBusy;
+      const name=document.createElement('strong');name.textContent=visible.get(id);
+      const actions=document.createElement('span');actions.className='erp-order-arrows';
+      for(const [step,symbol,word] of [[-1,'↑','위로'],[1,'↓','아래로']]) {
+        const button=document.createElement('button');button.type='button';button.textContent=symbol;
+        button.setAttribute('aria-label',`${visible.get(id)} ${word} 이동`);
+        button.disabled=orderBusy || index+step<0 || index+step>=ids.length;
+        button.onclick=()=>move(id,ids[index+step]);actions.append(button);
+      }
+      row.append(name,actions);rows.append(row);
+      row.addEventListener('dragstart',event=>{if(orderBusy)return event.preventDefault();event.dataTransfer.setData('text/plain',id);});
+      row.addEventListener('dragover',event=>{if(!orderBusy)event.preventDefault();});
+      row.addEventListener('drop',event=>{event.preventDefault();move(event.dataTransfer.getData('text/plain'),id);});
+    });
+    orderDialog.querySelectorAll('.erp-order-actions button,.erp-order-close').forEach(button=>button.disabled=orderBusy);
+  }
+  function openOrder() {
+    if(!state?.canOrder || !state.orderLoaded || orderBusy)return;
+    if(!orderDialog) {
+      orderDialog=document.createElement('dialog');orderDialog.className='erp-order-dialog';orderDialog.setAttribute('aria-labelledby','erp-order-title');
+      orderDialog.innerHTML='<div class="erp-order-heading"><h2 id="erp-order-title">메뉴 순서</h2><button type="button" class="erp-order-close" aria-label="메뉴 순서 닫기">×</button></div><p>저장한 순서는 현재 조합의 메뉴와 사이드바에 함께 적용됩니다.</p><div class="erp-order-status" role="status"></div><div class="erp-order-list"></div><div class="erp-order-actions"><button type="button" data-action="reset">가나다순으로</button><button type="button" data-action="cancel">취소</button><button type="button" data-action="save">저장</button></div>';
+      document.body.append(orderDialog);
+      orderDialog.querySelector('.erp-order-close').onclick=closeOrder;
+      orderDialog.querySelector('[data-action="cancel"]').onclick=closeOrder;
+      orderDialog.addEventListener('cancel',event=>{event.preventDefault();closeOrder();});
+      orderDialog.querySelector('[data-action="reset"]').onclick=()=>{orderDraft=defaultOrder(fullOrder());renderOrder();orderDialog.querySelector('.erp-order-status').textContent='저장하면 가나다순으로 적용됩니다.';};
+      orderDialog.querySelector('[data-action="save"]').onclick=async()=>{
+        if(orderBusy || !state?.canOrder)return;
+        const ticket=generation,coopId=state.runtime.coop_id,client=state.client;
+        orderBusy=true;renderOrder();orderDialog.querySelector('.erp-order-status').textContent='저장 중입니다…';
+        try {
+          const {data,error}=await client.rpc('erp_save_menu_order',{p_menu_order:orderDraft.slice(),p_only_if_missing:false});
+          if(error)throw error;
+          const saved=Array.isArray(data?.menu_order)?data.menu_order:Array.isArray(data)?data:null;
+          if(!saved)throw new Error('INVALID_ORDER_RESPONSE');
+          if(ticket!==generation || state?.runtime.coop_id!==coopId)return;
+          syncOrder(saved,coopId);orderDraft=fullOrder();
+          window.dispatchEvent(new CustomEvent('erp-menu-order-saved',{detail:{coopId,order:saved}}));
+          orderDialog.querySelector('.erp-order-status').textContent='저장되었습니다.';
+        } catch(_) { if(ticket===generation && state)orderDialog.querySelector('.erp-order-status').textContent='저장하지 못했습니다. 변경한 순서는 남아 있습니다. 다시 시도해 주세요.'; }
+        finally {orderBusy=false;if(ticket===generation && state && orderDraft)renderOrder();}
+      };
+    }
+    orderDraft=fullOrder();orderDialog.querySelector('.erp-order-status').textContent='';renderOrder();orderDialog.showModal();
   }
 
   function setDrawer(open) {
@@ -126,8 +198,9 @@
     });
     const head = document.createElement('div'); head.className = 'erp-workspace-heading'; head.append(heading, collapse);
     list = document.createElement('nav'); list.className = 'erp-workspace-menu'; list.setAttribute('aria-label', '업무 선택');
+    orderButton=document.createElement('button');orderButton.type='button';orderButton.className='erp-workspace-order-button';orderButton.textContent='↕ 메뉴 순서';orderButton.hidden=true;orderButton.onclick=openOrder;
     const footer = document.createElement('div'); footer.className = 'erp-workspace-footer';
-    panel.append(head, list, footer);
+    panel.append(head, list, orderButton, footer);
     const mobile = document.createElement('div'); mobile.className = 'erp-workspace-mobile-bar';
     toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = '☰';
     toggle.setAttribute('aria-label', '업무 메뉴 열기'); toggle.setAttribute('aria-controls', panel.id); toggle.setAttribute('aria-expanded', 'false');
@@ -166,15 +239,15 @@
     render();
   }
 
-  async function read(client, name, args) {
+  async function read(client, name, args, result=false) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
     try {
       const request = client.rpc(name, args);
       const { data, error } = await (request.abortSignal ? request.abortSignal(controller.signal) : request);
-      return error ? null : data;
+      return result ? {ok:!error,data:error?null:data} : error ? null : data;
     }
-    catch (_) { return null; } // Never expose unconfirmed capabilities or interrupt the current task.
+    catch (_) { return result ? {ok:false,data:null} : null; } // Never expose unconfirmed capabilities or interrupt the current task.
     finally { clearTimeout(timer); }
   }
 
@@ -188,7 +261,7 @@
   async function hydrate(client, runtime) {
     const ticket = ++generation;
     if (!runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) { clear(); return; }
-    state = { runtime, items: allowedItems(runtime), order: [] };
+    state = { runtime, client, items: allowedItems(runtime), order: [],orderLoaded:false,canOrder:false };
     if (document.readyState === 'loading') await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
     if (ticket !== generation) return;
     mount(); render();
@@ -196,7 +269,7 @@
     const full = runtime.runtime_profile === 'legacy_full';
     const set = permissions(runtime);
     const [order, platform, service, festival, monitor, villages] = await Promise.all([
-      read(client, 'erp_get_menu_order'),
+      read(client, 'erp_get_menu_order',undefined,true),
       read(client, 'platform_get_context'),
       read(client, 'erp_service_contract', { p_action: 'context' }),
       full && enabled(runtime, 'accounting') && set.has('accounting.view') ? read(client, 'festival_receipts_admin', { p_action: 'access', p_data: {} }) : null,
@@ -204,7 +277,8 @@
       !narrow ? read(client, 'sun_village_total_manager_context') : null
     ]);
     if (ticket !== generation) return;
-    if (Array.isArray(order)) state.order = order.filter(id => typeof id === 'string');
+    state.orderLoaded=order.ok;state.order=cleanOrder(order.data);
+    state.canOrder=platform?.is_platform_admin===true || set.has('member.admin') || set.has('site.admin');
     if (service && (service.admin || service.platform || service.representative || service.draft_reviewer)) {
       state.items.push(['btnServiceContracts', '이용계약·청구서', 'service_contracts.html', '', [], '▢']);
     }
@@ -224,6 +298,7 @@
 
   function clear() {
     generation += 1; state = null; connections = new WeakMap();
+    orderDialog?.close();orderDraft=null;
     if (list) list.replaceChildren();
     if (brand) brand.textContent = '협동조합 ERP';
     document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open');
@@ -249,7 +324,7 @@
     return promise;
   }
 
-  window.ErpWorkspace = { version: VERSION, connect, clear };
+  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder };
   window.addEventListener('erp-workspace-runtime', event => { void connect(event.detail.client, event.detail.runtime); });
   // Used only by classic-script ERP pages with an already configured tenant-aware client.
   window.addEventListener('load', () => {
