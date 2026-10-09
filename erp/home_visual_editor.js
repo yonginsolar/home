@@ -2,8 +2,8 @@
 (function(root){
   'use strict';
   let mounted=false, selected='hero';
-  const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',badges:'뱃지 관리',documents:'문서 관리'};
-  const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',badges:'sub-badges',documents:'sub-docs'};
+  const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
+  const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
   function available(area){
     const link=document.querySelector(`#site-content-tabs a[href="#${panes[area]||'sub-home-settings'}"]`);
@@ -55,7 +55,7 @@
       button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); toolbar.append(button);
     }
     const devices=document.querySelector('.home-preview-device-group'); if(devices) { devices.classList.add('ms-auto'); toolbar.append(devices); }
-    const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=()=>saveHomeSettings();toolbar.append(pending);
+    const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=async()=>{if(await (window.CoopSiteInlineHost?.flush()??Promise.resolve(true)))saveHomeSettings();else myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');};toolbar.append(pending);
     const workspace=document.createElement('div'); workspace.id='site-home-visual-workspace';workspace.className='home-visual-workspace';
     const stage=document.createElement('div'); stage.className='home-visual-stage';
     stage.append(document.getElementById('site-home-preview-shell'));
@@ -120,6 +120,7 @@
     notice.innerHTML='<p>외부 글꼴은 등록하는 조합이 웹사이트 사용·임베딩 허용 여부를 확인하고 필요한 이용 권한을 확보해야 합니다. 방문자의 브라우저가 해당 글꼴 제공처에 접속합니다.</p><label class="form-check-label"><input type="checkbox" class="form-check-input me-2" id="site-home-external-rights-confirmed">이 글꼴의 웹사이트 사용 권한과 이용 조건을 확인했습니다.</label><p class="mt-2 mb-0">지원 주소: Google Fonts 파일 CDN, jsDelivr, cdnjs의 .woff2·.woff 파일</p>';
     fontCard.append(notice);
     mounted=true;updateExternalUi();
+    window.CoopSiteInlineHost?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!=='hero');
     document.addEventListener('DOMContentLoaded',()=>{

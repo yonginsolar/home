@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.238
-Change: 2026-10-09 - Persistent homepage preview with original content and legal editors.
+Version: v1.0.239
+Change: 2026-10-09 - Direct homepage editing and member badge tab.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.238';
+window.ADMIN_MEMBER_VERSION = 'v1.0.239';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -55,11 +55,12 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.238';
 </script>
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
 <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
-<script src="approval_rich_editor.js?v=20260918-1"></script>
+<script src="approval_rich_editor.js?v=20261009-5"></script>
 <script src="site_editor_drafts.js?v=1.0.0"></script>
 <script src="../shared/home_design.js?v=20261009-3"></script>
-<link rel="stylesheet" href="home_visual_editor.css?v=20261009-4">
-<script src="home_visual_editor.js?v=20261009-4"></script>
+<link rel="stylesheet" href="home_visual_editor.css?v=20261009-5">
+<script src="home_visual_editor.js?v=20261009-5"></script>
+<script src="site_inline_editor.js?v=20261009-5"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -456,6 +457,9 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 
 <a class="nav-link" onclick="switchTab('members')" id="nav-members" style="cursor:pointer;">
 <i class="bi bi-people-fill"></i> 조합원 명부
+</a>
+<a class="nav-link hidden" onclick="switchTab('badges')" id="nav-badges" style="cursor:pointer;">
+<i class="bi bi-award"></i> 뱃지 관리
 </a>
 <a class="nav-link hidden" onclick="openMemberCertificateSettingsModal()" id="nav-org-settings" style="cursor:pointer;">
 <i class="bi bi-building-gear"></i> 조합 기본 설정
@@ -1876,6 +1880,15 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 </div>
 </div>
 
+<div class="tab-pane fade" id="tab-badges">
+<h3 class="fw-bold mb-4">🏅 뱃지 관리</h3>
+<div class="d-flex justify-content-end mb-2"><button class="btn btn-sm btn-outline-primary" onclick="openBadgeModal()">+ 새 뱃지 만들기</button></div>
+<div id="badge-list-status" class="small text-warning mb-2" role="status"></div>
+<div class="table-responsive"><table class="table table-bordered bg-white text-center align-middle">
+<thead class="table-light"><tr><th width="60">순서</th><th width="60">아이콘</th><th>이름 / 설명</th><th width="100">코드</th><th width="100">색상</th><th width="120">관리</th></tr></thead>
+<tbody id="badgeListBody"></tbody></table></div>
+</div>
+
 <div class="tab-pane fade" id="tab-site">
 <div class="content-header"><h3 id="site-content-title">🖥️ 홈페이지 관리</h3><button type="button" class="btn btn-sm btn-outline-dark hidden" id="site-org-settings-button" onclick="openMemberCertificateSettingsModal()">🏢 조합 기본 설정</button></div>
 <div class="alert alert-light border small py-2 px-3 hidden" id="site-documents-moved-note">
@@ -1943,11 +1956,6 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <li class="nav-item">
 <a class="nav-link" data-bs-toggle="tab" href="#sub-faqs" onclick="setTimeout(fetchFaqs,100)">
 ❓ 자주 묻는 질문
-</a>
-</li>
-<li class="nav-item" id="site-badges-nav-item">
-<a class="nav-link" data-bs-toggle="tab" href="#sub-badges" onclick="setTimeout(fetchBadges,100)">
-🏅 뱃지 관리
 </a>
 </li>
 
@@ -2485,29 +2493,6 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <div class="small text-muted text-end" id="partnerRequestLogSummary"></div>
 </div>
 </div>
-</div>
-
-<div class="tab-pane fade" id="sub-badges">
-<div class="d-flex justify-content-end mb-2">
-<button class="btn btn-sm btn-outline-primary" onclick="openBadgeModal()">+ 새 뱃지 만들기</button>
-</div>
-<div id="badge-list-status" class="small text-warning mb-2" role="status"></div>
-<div class="alert alert-light border small">
-<i class="bi bi-info-circle"></i> 이곳에서 만든 뱃지는 '협력 단체'나 '조합원'에게 부여할 수 있습니다.
-</div>
-<table class="table table-bordered bg-white text-center align-middle">
-<thead class="table-light">
-<tr>
-<th width="60">순서</th>
-<th width="60">아이콘</th>
-<th>이름 / 설명</th>
-<th width="100">코드</th>
-<th width="100">색상</th>
-<th width="120">관리</th>
-</tr>
-</thead>
-<tbody id="badgeListBody"></tbody>
-</table>
 </div>
 
 <div class="tab-pane fade" id="sub-faqs">
@@ -4410,7 +4395,7 @@ const ADMIN_MEMBER_PAGE_SCOPE = (() => {
   }
 })();
 const ADMIN_MEMBER_TABS = Object.freeze({
-    member_admin: ['members', 'funds-manage', 'applications', 'deposit'],
+    member_admin: ['members', 'badges', 'funds-manage', 'applications', 'deposit'],
     site_admin: ['notices', 'site'],
     documents_admin: ['site']
 });
@@ -8494,6 +8479,7 @@ function siteEditorFormSnapshot(rootId) {
 const root = document.getElementById(rootId);
 return JSON.stringify(Array.from(root?.querySelectorAll('input, textarea, select') || [])
 .filter(el => !el.closest('.about-editor-toolbar'))
+.sort((a, b) => String(a.id || a.name || '').localeCompare(String(b.id || b.name || '')))
 .map(el => [el.id || el.name || '', el.type || el.tagName, el.type === 'file'
 ? Array.from(el.files || []).map(file => [file.name, file.size, file.lastModified, file.type])
 : (el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value)]));
@@ -9043,6 +9029,7 @@ const file = document.getElementById(`site-home-${kind}-image-file`)?.files?.[0]
 if (file) settings[`${kind}_image_url`] = await readHomePreviewFile(file);
 }
 settings.site_preview = await collectSitePreviewDraft(includeLocalFiles);
+settings.inline_fields = window.CoopSiteInlineHost?.collect() || {};
 return settings;
 }
 
@@ -9191,17 +9178,27 @@ let g_aboutPreviewObjectUrl = '';
 let g_aboutEditorBridge = null;
 
 function sanitizeAboutHtml(rawHtml) {
-const allowedTags = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'A']);
+const allowedTags = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'SPAN', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'A']);
 const doc = new DOMParser().parseFromString(`<div>${String(rawHtml || '')}</div>`, 'text/html');
 const root = doc.body.firstElementChild;
 if (!root) return '';
 Array.from(root.querySelectorAll('*')).forEach((node) => {
 if (!allowedTags.has(node.tagName)) {
+if (['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','SVG','MATH'].includes(node.tagName)) { node.remove(); return; }
 node.replaceWith(...Array.from(node.childNodes));
 return;
 }
 Array.from(node.attributes).forEach((attr) => {
 const name = attr.name.toLowerCase();
+if (node.tagName === 'SPAN' && name === 'style') {
+const safe = [];
+for (const property of ['color','background-color']) {
+const value = node.style.getPropertyValue(property).trim();
+if (/^(#[a-f0-9]{3,8}|rgba?\([0-9.,%\s]+\))$/i.test(value)) safe.push(`${property}:${value}`);
+}
+if (safe.length) node.setAttribute('style', safe.join(';')); else node.removeAttribute('style');
+return;
+}
 if (node.tagName === 'A' && name === 'href') {
 const href = String(attr.value || '').trim();
 if (!/^(https?:\/\/|mailto:|tel:|#|\/)/i.test(href)) node.removeAttribute(attr.name);
@@ -9241,6 +9238,7 @@ g_aboutEditorBridge = window.ApprovalRichEditor.createTiptapBridge({
 source: '#admin-about-content',
 editor: '#admin-about-editor',
 toolbar: '#admin-about-toolbar',
+siteColors: true,
 placeholder: '조합을 소개하는 글을 입력해 주세요.',
 normalizeHtml: sanitizeAboutHtml,
 askText: async (label, options) => window.prompt(label, options?.value || ''),
@@ -11590,6 +11588,7 @@ if (!window.ApprovalRichEditor) throw new Error('편집기를 불러오지 못�
 await window.ApprovalRichEditor.loadTiptapModules();
 if (!g_activityEditorBridge) g_activityEditorBridge = window.ApprovalRichEditor.createTiptapBridge({
 source:'#activity-content', editor:'#activity-content-editor', toolbar:'#activity-content-toolbar',
+siteColors:true,
 placeholder:'우리 소식에 올릴 내용을 작성하세요.',
 buildHtmlFromSource:noticeContentToEditorHtml, normalizeHtml:sanitizeAboutHtml,
 askText:async (label, options) => window.prompt(label, options?.value || ''),
@@ -12860,9 +12859,15 @@ if (safeScope === 'documents_admin') return permissionSet.has('documents.manage'
 return cachedRoleIsAdmin;
 }
 
+function hasAdminMemberBadgePermission() {
+return !isAdminMemberSiteProfile() && isAdminMemberRuntimeModuleEnabled('site_admin')
+    && (permissionSet?.size ? permissionSet.has('site.admin') : hasAdminMemberScopePermission('site_admin'));
+}
+
 function canAccessAdminMemberTab(tabName) {
 const safeTab = String(tabName || '').trim();
 if (!safeTab) return true;
+if (safeTab === 'badges' && !hasAdminMemberBadgePermission()) return false;
 const knownTabs = new Set(['dashboard', ...ADMIN_MEMBER_TABS.member_admin, ...ADMIN_MEMBER_TABS.site_admin]);
 if (!knownTabs.has(safeTab)) return false;
 if (isAdminMemberSiteProfile() && safeTab === 'funds-manage') return false;
@@ -12927,6 +12932,7 @@ const dashboardEnabled = ADMIN_MEMBER_PAGE_SCOPE !== 'site_admin' && ADMIN_MEMBE
 ['nav-dashboard', dashboardEnabled],
 ['memberAdminCategory', memberAdminEnabled],
 ['nav-members', memberAdminEnabled],
+['nav-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['member-capital-settings-button', memberAdminEnabled],
 ['nav-org-settings', isSiteMemberProfile && memberAdminEnabled],
 ['nav-meeting-participation', meetingParticipationEnabled],
@@ -12947,12 +12953,11 @@ el.classList.toggle('hidden', !enabled);
 });
 [
 ['site-external-news-nav-item', !isSiteMemberProfile],
-['site-badges-nav-item', !isSiteMemberProfile],
 ['site-legal-nav-item', siteAdminEnabled],
 ['partnerInnerTabs', !isSiteMemberProfile],
 ['site-org-settings-button', isSiteMemberProfile && siteAdminEnabled],
 ['sub-external-news', !isSiteMemberProfile],
-['sub-badges', !isSiteMemberProfile],
+['tab-badges', memberAdminEnabled && hasAdminMemberBadgePermission()],
 ['sub-legal', siteAdminEnabled],
 ['partner-request-log-pane', !isSiteMemberProfile]
 ].forEach(([id, enabled]) => {
@@ -13027,7 +13032,7 @@ const demographicAgeHelp = document.getElementById('member-demographic-age-statu
 if (demographicAgeHelp) demographicAgeHelp.classList.toggle('hidden', isSiteMemberProfile);
 if (isSiteMemberProfile) {
 const activeSitePane = document.querySelector('#tab-site .tab-content > .tab-pane.show.active');
-if (activeSitePane && ['sub-external-news', 'sub-badges'].includes(activeSitePane.id)) {
+if (activeSitePane && activeSitePane.id === 'sub-external-news') {
 selectAdminMemberSiteSubTab('sub-sections');
 }
 }
@@ -13159,6 +13164,9 @@ function switchTab(tabName) {
     }
     else if (tabName === 'notices') {
         fetchNotices();
+    }
+    else if (tabName === 'badges') {
+        void fetchBadges();
     }
     else if (tabName === 'site') {
         applyAdminMemberSiteScopeUi();
@@ -20756,6 +20764,6 @@ async function uploadOfficialSeal(groupKey) {
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 <script src="site_legal_samples.js?v=20261008-1"></script>
-<script src="site_legal_editor.js?v=20261009-4"></script>
+<script src="site_legal_editor.js?v=20261009-5"></script>
 </body>
 </html>

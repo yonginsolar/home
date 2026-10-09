@@ -1,4 +1,4 @@
-/* v1.1.3 - Reuse legal drafts in the visual editor without publishing them. */
+/* v1.1.4 - Edit the draft document in place; registered text stays read-only. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -70,6 +70,8 @@
   function refreshPreview(){
     const target=document.getElementById('site-home-legal-preview');if(!target)return;
     const doc=state.get(selectedKind)?.doc;
+    const active=target.querySelector('article[contenteditable="plaintext-only"]');
+    if(active&&document.activeElement===active)return;
     target.replaceChildren();
     const heading=document.createElement('h2');heading.textContent=labels[selectedKind];
     const modes=document.createElement('div');modes.className='d-flex gap-2 mb-3';
@@ -81,6 +83,14 @@
     date.textContent=effective?`시행일 ${effective}`:'';
     const article=document.createElement('article');
     article.textContent=!loaded?'문서를 불러오는 중입니다.':previewMode==='published'?(doc?.is_published?String(doc.published_content||''):'등록된 내용이 없습니다.'):renderText(el(selectedKind,'content')?.value||'',selectedKind);
+    if(loaded&&previewMode==='draft'&&permitted()&&!actionInFlight&&!loading){
+      article.setAttribute('tabindex','0');article.setAttribute('aria-label','문서 초안 수정');
+      article.onclick=()=>{if(article.hasAttribute('contenteditable'))return;article.textContent=el(selectedKind,'content').value;article.setAttribute('contenteditable','plaintext-only');article.focus();};
+      article.onkeydown=event=>{if(event.key==='Enter'&&!article.hasAttribute('contenteditable')){event.preventDefault();article.click();}};
+      article.oninput=()=>{const input=el(selectedKind,'content'),value=article.innerText??article.textContent;if(value.length>input.maxLength){article.textContent=input.value;myAlert('입력할 수 있는 길이를 초과했습니다.','warning');return;}input.value=value;updateStatus(selectedKind);};
+      article.onblur=()=>{article.removeAttribute('contenteditable');refreshPreview();};
+      article.onpaste=event=>{event.preventDefault();const selection=window.getSelection();if(!selection.rangeCount)return;const range=selection.getRangeAt(0);if(!article.contains(range.commonAncestorContainer))return;range.deleteContents();const node=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);article.dispatchEvent(new Event('input'));};
+    }
     target.append(heading,modes,date,article);
   }
   function selectKind(kind){

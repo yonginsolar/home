@@ -11,6 +11,7 @@
     try{const parsed=new URL(url,location.href);return ['https:','http:'].includes(parsed.protocol)?parsed.href:'';}catch(_){return '';}
   }
   function refresh(){
+    if(window.CoopSiteInline?.isEditing('about')||window.CoopSiteInline?.isEditing('activities'))return;
     if(Array.isArray(draft.sections)){
       applyPublicSectionOrder(draft.sections);
       for(const row of draft.sections){
@@ -38,7 +39,7 @@
         article.dataset.activityId=draft.activity.id;
         const title=document.createElement('h3');title.textContent=String(draft.activity.title||'');
         const date=document.createElement('p');date.textContent=[draft.activity.event_date,draft.activity.is_current?'':'비공개'].filter(Boolean).join(' · ');
-        const content=document.createElement('div');content.innerHTML=sanitizeHtml(String(draft.activity.content||''));
+        const content=document.createElement('div');content.id='home-preview-activity-body';content.innerHTML=sanitizeHtml(String(draft.activity.content||''));
         article.append(title,date);
         const url=imageUrl(draft.activity.file_url);
         if(url){const img=document.createElement('img');img.src=url;img.alt='';img.style.cssText='max-width:100%;max-height:320px;object-fit:contain;margin-bottom:20px';article.append(img);}

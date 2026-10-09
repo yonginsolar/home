@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.121
+Version: v1.0.122
 Change: 2026-10-09 - Live draft preview for content, certifications, news and section layout.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.121 | index.html');</script>
+<script>console.log('[Version] v1.0.122 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1760,7 +1760,8 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
-  <script src="shared/home_preview_editor.js?v=20261009-4" defer></script>
+  <script src="shared/site_inline_editor.js?v=20261009-5" defer></script>
+  <script src="shared/home_preview_editor.js?v=20261009-5" defer></script>
   <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
 
@@ -2885,11 +2886,13 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
     const isHomePreviewMode = new URLSearchParams(window.location.search).get('home_preview') === '1';
     if (isHomePreviewMode) {
         document.documentElement.dataset.homePreview = 'true';
-        const applyHomePreviewDraft = (settings) => {
+        const applyHomePreviewDraft = window.applyHomePreviewDraft = (settings) => {
             if (!settings || typeof settings !== 'object') return;
+            if (window.CoopSiteInline?.defer(settings)) return;
             g_homePreviewDraftApplied = true;
             applyPublicHomeSettings(settings);
             window.CoopSitePreview?.apply(settings.site_preview);
+            window.CoopSiteInline?.refresh(settings.inline_fields, settings.site_preview?.sections);
             if (window.AOS?.refreshHard) window.AOS.refreshHard();
         };
         const initialPreviewLayout = new URLSearchParams(window.location.search).get('home_preview_layout');
@@ -4647,6 +4650,7 @@ function syncActivityLoadMoreCard(container) {
 }
 
 function renderActivityCards(items, options = {}) {
+    if (window.CoopSiteInline?.isEditing('activities')) return;
     const container = document.getElementById('activities-container');
     if (!container) return;
     items = window.CoopSitePreview?.activityRows(items) || items;
@@ -5926,6 +5930,7 @@ function openPlantDetail(id) {
     }
 
     function renderPublicAbout(defaultData) {
+        if (window.CoopSiteInline?.isEditing('about')) return;
 
         // 1. 이미지
         const imgEl = document.getElementById('about-img-src');

@@ -46,6 +46,7 @@
     ]) => {
       const loaded = {
         Editor: core.Editor,
+        Mark: core.Mark,
         StarterKit: pickModuleExport(starterKit, 'StarterKit'),
         TextAlign: pickModuleExport(textAlign, 'TextAlign'),
         TableKit: pickModuleExport(table, 'TableKit')
@@ -159,7 +160,7 @@
 
     function buildExtensions() {
       const modules = tiptapModules;
-      return [
+      const extensions = [
         modules.StarterKit.configure({
           dropcursor: false,
           gapcursor: false,
@@ -183,6 +184,20 @@
           }
         })
       ];
+      // Opt-in for homepage content only. Existing approval forms keep their schema.
+      if (options.siteColors === true && modules.Mark) extensions.push(modules.Mark.create({
+        name: 'siteTextColor',
+        addAttributes() {
+          const safe = value => /^(#[a-f0-9]{3,8}|rgba?\([0-9.,%\s]+\))$/i.test(String(value || '').trim()) ? String(value).trim() : null;
+          return Object.fromEntries([['color','color'],['backgroundColor','background-color']].map(([name,css]) => [name,{
+            default:null,parseHTML:element=>safe(element.style.getPropertyValue(css)),
+            renderHTML:attributes=>safe(attributes[name]) ? {style:`${css}:${safe(attributes[name])}`} : {}
+          }]));
+        },
+        parseHTML() { return [{tag:'span',getAttrs:element=>(element.style.color||element.style.backgroundColor)?null:false}]; },
+        renderHTML({HTMLAttributes}) { return ['span',HTMLAttributes,0]; }
+      }));
+      return extensions;
     }
 
     function updateToolbarState() {
