@@ -1434,6 +1434,7 @@ async function boot() {
     await Promise.all([loadCompany(), loadEmployees()]);
     renderEmployeeSelect();
     await loadContracts();
+    document.getElementById('backButton').textContent = state.admin && !state.forceSelf ? '직원관리로' : '마이페이지로';
     document.getElementById('backButton').addEventListener('click', () => {
       requestContractTransition(() => { resetContractEditTracking(); location.href = state.admin && !state.forceSelf ? 'admin_employee.html' : 'mypage.html'; });
     });

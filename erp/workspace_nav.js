@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.0.0 — read-only navigation; no business-data cache or writes. */
+/* ERP workspace navigation v1.0.1 — read-only navigation; no business-data cache or writes. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261009.1';
+  const VERSION = '20261009.2';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -158,7 +158,7 @@
       if (!document.body.classList.contains('erp-workspace-drawer-open')) return;
       if (event.key === 'Escape') { event.preventDefault(); setDrawer(false); }
       if (event.key !== 'Tab') return;
-      const focusables = [...panel.querySelectorAll('a,button')].filter(el => el.getClientRects().length);
+      const focusables = [...panel.querySelectorAll('a[href],button,[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
       const first = focusables[0], last = focusables.at(-1);
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
