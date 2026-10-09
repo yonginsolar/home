@@ -2,13 +2,13 @@
 (function(root){
   'use strict';
   let mounted=false, selected='hero';
-  const labels={hero:'메인 배너',impact:'참여 안내',contact:'연락처',design:'구성·글꼴'};
+  const labels={hero:'메인 배너',impact:'참여 안내',contact:'연락처',design:'구성',fonts:'글꼴'};
   function select(area, navigate=true){
     if(!labels[area]) return false;
     selected=area;
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==area);
     document.querySelectorAll('[data-home-select-area]').forEach(node=>node.setAttribute('aria-pressed',String(node.dataset.homeSelectArea===area)));
-    if(navigate && area!=='design') {
+    if(navigate && ['hero','impact','contact'].includes(area)) {
       const frame=document.getElementById('site-home-preview-frame');
       if(frame?.src) frame.contentWindow?.postMessage({type:'coop-home-preview-select',area},new URL(frame.src).origin);
     }
@@ -19,9 +19,9 @@
     const pane=document.getElementById('sub-home-settings');
     if(!pane) return;
     const basic=document.getElementById('site-home-basic-panel'), advanced=document.getElementById('site-home-advanced-panel');
-    const areas={hero:[],impact:[],contact:[],design:[]};
+    const areas={hero:[],impact:[],contact:[],design:[],fonts:[]};
     for(const container of [basic,advanced]) for(const card of [...container.children]) {
-      const area=card.querySelector('[id^="site-home-hero-"]')?'hero':card.querySelector('[id^="site-home-impact-"]')?'impact':card.querySelector('[id^="site-home-contact-"]')?'contact':'design';
+      const area=card.querySelector('[id^="site-home-hero-"]')?'hero':card.querySelector('[id^="site-home-impact-"]')?'impact':card.querySelector('[id^="site-home-contact-"]')?'contact':card.id==='site-home-font-settings'||card.querySelector('#site-home-title-font')?'fonts':'design';
       areas[area].push(card);
     }
     const toolbar=document.createElement('div'); toolbar.className='home-visual-toolbar';
@@ -36,12 +36,13 @@
     const inspector=document.createElement('div'); inspector.className='home-visual-inspector';
     for(const [area,cards] of Object.entries(areas)) {
       const group=document.createElement('div'); group.dataset.homeInspectorArea=area;
-      for(const card of cards) { if(card.tagName==='DETAILS') card.open=true; group.append(card); }
+      for(const card of cards) { if(card.tagName==='DETAILS') card.open=card.id==='site-home-template-settings'; group.append(card); }
       inspector.append(group);
     }
     workspace.append(stage,inspector); pane.append(toolbar,workspace);
     basic.hidden=true; advanced.hidden=true;
     document.getElementById('site-home-preview-modal')?.remove();
+    document.getElementById('site-home-font-sample-advanced')?.remove();
     const fontCard=document.getElementById('site-home-title-font').closest('.card-body');
     for(const kind of ['title','body']) {
       const box=document.createElement('div'); box.className='home-external-font'; box.id=`site-home-${kind}-external`;
