@@ -96,7 +96,7 @@
   function selectKind(kind){
     if(!Object.hasOwn(labels,kind))return false;
     selectedKind=kind;
-    const picker=document.getElementById('site-legal-kind-picker');if(picker)picker.value=kind;
+    for(const tab of document.querySelectorAll('[data-legal-document]')){const active=tab.dataset.legalDocument===kind;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
     for(const [key] of Object.entries(labels))el(key,'card')?.parentElement.toggleAttribute('hidden',key!==kind);
     refreshPreview();return true;
   }
@@ -106,7 +106,7 @@
     const note=document.createElement('p');note.className='small text-muted';note.textContent='샘플을 수정해 초안으로 저장한 뒤, 내용을 확인하고 등록·적용해 주세요. 초안 저장은 현재 적용 중인 문구를 바꾸지 않습니다.';root.append(note);
     const grid=document.createElement('div');grid.className='row g-4';root.append(grid);
     for(const [kind,label] of Object.entries(labels)) {
-      const column=document.createElement('div');column.className='col-xl-6';
+      const column=document.createElement('div');column.className='col-12';
       column.innerHTML=`<div class="card border-0 shadow-sm h-100" id="site-legal-${kind}-card"><div class="card-body">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"><h5 class="fw-bold mb-0">${label}</h5><button type="button" class="btn btn-sm btn-outline-secondary" data-legal-action="sample">샘플 불러오기</button></div>
         ${kind==='privacy'?`<fieldset class="border rounded p-3 mb-3"><legend class="float-none w-auto px-1 fs-6 fw-bold">개인정보 담당자 정보</legend><label class="form-label small fw-bold" for="site-legal-privacy-processor">개인정보처리자</label><input id="site-legal-privacy-processor" class="form-control mb-3" readonly><div class="row g-3">${Object.entries(contacts).map(([key,label])=>`<div class="${key==='address'?'col-12':'col-md-6'}"><label class="form-label small fw-bold" for="site-legal-privacy-${key}">${label} <span class="text-danger">*</span></label><input class="form-control" id="site-legal-privacy-${key}" type="${key==='officer_email'?'email':key==='officer_phone'?'tel':'text'}" maxlength="${key==='address'?300:key==='officer_email'?254:100}" required></div>`).join('')}</div><p class="small text-muted mt-3 mb-0">보호책임자가 개인정보 문의와 권리행사 요청을 받습니다. 담당자 정보는 아래 미리보기에서 확인해 주세요.</p></fieldset>`:''}
@@ -122,10 +122,10 @@
       column.addEventListener('click',event=>{const b=event.target.closest('[data-legal-action]');if(!b||b.disabled)return;const action=b.dataset.legalAction;if(action==='sample')loadSample(kind);else save(kind,action);});
     }
     if(document.getElementById('site-home-legal-preview')){
-      const label=document.createElement('label');label.className='form-label fw-bold';label.htmlFor='site-legal-kind-picker';label.textContent='편집할 문서';
-      const picker=document.createElement('select');picker.id=label.htmlFor;picker.className='form-select mb-3';
-      for(const [kind,text] of Object.entries(labels)){const option=document.createElement('option');option.value=kind;option.textContent=text;picker.append(option);}
-      picker.onchange=()=>selectKind(picker.value);grid.before(label,picker);selectKind(selectedKind);
+      document.getElementById('site-legal-document-tabs')?.remove();
+      const tabs=document.createElement('div');tabs.id='site-legal-document-tabs';tabs.className='site-legal-document-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','가입 안내와 약관 문서');tabs.hidden=window.CoopHomeVisualEditor?.current()!=='legal';
+      for(const [kind,text] of Object.entries(labels)){const tab=document.createElement('button');tab.type='button';tab.id=`site-legal-tab-${kind}`;tab.dataset.legalDocument=kind;tab.textContent=text;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',`site-legal-${kind}-card`);tab.onclick=()=>selectKind(kind);tab.onkeydown=event=>{const list=[...tabs.children],i=list.indexOf(tab);let next;if(event.key==='ArrowRight')next=(i+1)%list.length;else if(event.key==='ArrowLeft')next=(i+list.length-1)%list.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=list.length-1;else return;event.preventDefault();list[next].click();list[next].focus({preventScroll:true});};tabs.append(tab);el(kind,'card').setAttribute('role','tabpanel');el(kind,'card').setAttribute('aria-labelledby',tab.id);}
+      document.getElementById('site-home-visual-workspace').before(tabs);selectKind(selectedKind);
     }
   }
   async function fetchDocuments() {

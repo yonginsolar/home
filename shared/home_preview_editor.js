@@ -39,7 +39,7 @@
       if(draft.activity){
         const article=document.createElement('article');article.id='home-preview-activity-article';article.className='activity-detail-content home-preview-article';
         article.dataset.activityId=draft.activity.id;
-        const title=document.createElement('h3');title.textContent=String(draft.activity.title||'');
+        const title=document.createElement('h3');CoopTextStyles.paint(title,String(draft.activity.title||''),draft.activity.text_styles?.activityTitle);
         const date=document.createElement('p');date.textContent=[draft.activity.event_date,draft.activity.is_current?'':'비공개'].filter(Boolean).join(' · ');
         const content=document.createElement('div');content.id='home-preview-activity-body';content.innerHTML=sanitizeHtml(String(draft.activity.content||''));
         article.append(title,date);

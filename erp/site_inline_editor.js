@@ -11,6 +11,14 @@
  });
  let dialog,moved=[],flushWait=null,lastRejected=false;
  const historyValues=new Map();
+ function styleInput(group){
+  const id=`site-text-styles-${group}`;let input=document.getElementById(id);
+  if(!input){input=document.createElement('input');input.type='hidden';input.id=id;input.value='{}';document.getElementById(group==='about'?'sub-about':group==='activities'?'activityModal':'sub-home-settings')?.append(input);}return input;
+ }
+ function styleGroup(key){return fields[key][0]==='about'?'about':fields[key][0]==='activities'?'activities':'home';}
+ function storedStyles(group){try{return JSON.parse(styleInput(group).value)||{};}catch(_){return {};}}
+ function setStyles(group,styles){styleInput(group).value=JSON.stringify(styles&&typeof styles==='object'?styles:{});}
+ function readStyles(group,trim=false){const saved=storedStyles(group),out={};for(const [key,cfg] of Object.entries(fields)){if(styleGroup(key)!==group||cfg[2]!=='plain'||key==='heroHighlight')continue;const value=document.getElementById(cfg[1])?.value||'';const rows=trim&&key!=='aboutList'?root.CoopTextStyles?.trim(value,saved[key]):root.CoopTextStyles?.normalize(value,saved[key]);if(rows?.length)out[key]=rows;}return out;}
  function permitted(){return typeof canAccessAdminMemberTab==='function'&&canAccessAdminMemberTab('site');}
  function ready(key){
   const cfg=fields[key],input=cfg&&document.getElementById(cfg[1]);if(!input||input.disabled||!permitted())return false;
@@ -19,19 +27,22 @@
   return document.getElementById('activityModal')?.classList.contains('show')&&!isSavingActivity&&!g_activityModalOpening;
  }
  function collect(){
-  const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key))result[key]={value:document.getElementById(cfg[1]).value,kind:cfg[2],maxLength:cfg[3]};return result;
+  const result={};for(const [key,cfg] of Object.entries(fields))if(ready(key))result[key]={value:document.getElementById(cfg[1]).value,kind:cfg[2],maxLength:cfg[3],styles:readStyles(styleGroup(key))[key]||[]};return result;
  }
- function update(key,value,restore=false){
+ function update(key,value,restore=false,styles){
   if(!Object.hasOwn(fields,key)||!ready(key)||typeof value!=='string')return false;
   const cfg=fields[key],input=document.getElementById(cfg[1]);
   const limit=input.maxLength>0?Math.min(input.maxLength,cfg[3]):cfg[3];if(value.length>limit)return false;
   let history=historyValues.get(key);
-  if(!history||history.input!==input||history.last!==input.value){history={input,last:input.value,values:new Map([[input.value,input.value]])};historyValues.set(key,history);}
+  const group=styleGroup(key),saved=readStyles(group)[key]||[],signature=v=>JSON.stringify([v,styles===undefined?saved:styles]);
+  if(!history||history.input!==input||history.last!==input.value){history={input,last:input.value,values:new Map([[JSON.stringify([input.value,saved]),input.value]])};historyValues.set(key,history);}
   // Restore only a value previously present in this exact field. Arbitrary
   // incoming HTML still follows normal sanitization, then secure save validation.
-  if(restore&&!history.values.has(value))return false;
-  input.value=restore?history.values.get(value):cfg[2]==='rich'?sanitizeAboutHtml(value):value;
-  history.last=input.value;if(!history.values.has(value))history.values.set(value,input.value);if(!history.values.has(input.value))history.values.set(input.value,input.value);while(history.values.size>203)history.values.delete([...history.values.keys()][1]);
+  if(styles!==undefined&&(cfg[2]!=='plain'||!Array.isArray(styles)||JSON.stringify(styles)!==JSON.stringify(root.CoopTextStyles?.normalize(value,styles))))return false;
+  if(restore&&!history.values.has(signature(value)))return false;
+  input.value=restore?history.values.get(signature(value)):cfg[2]==='rich'?sanitizeAboutHtml(value):value;
+  if(styles!==undefined){const map=storedStyles(group);if(styles.length)map[key]=styles;else delete map[key];setStyles(group,map);}
+  history.last=input.value;history.values.set(signature(value),input.value);history.values.set(signature(input.value),input.value);while(history.values.size>203)history.values.delete([...history.values.keys()][1]);
   if(key==='aboutContent')g_aboutEditorBridge?.syncFromSource();
   if(key==='activityContent')g_activityEditorBridge?.syncFromSource();
   if(key==='aboutList')renderAboutListEditor(parseAboutListItems(input.value));
@@ -86,6 +97,7 @@
   return buttons;
  }
  function mount(){
+  for(const group of ['home','about','activities'])styleInput(group);
   const workspace=document.getElementById('site-home-visual-workspace'),toolbar=document.querySelector('.home-visual-toolbar');if(!workspace||!toolbar||document.getElementById('home-inline-settings-toggle'))return;
   const toggle=document.createElement('button');toggle.id='home-inline-settings-toggle';toggle.type='button';toggle.className='btn btn-sm btn-outline-secondary';toggle.textContent='세부 설정';toggle.setAttribute('aria-expanded','false');toggle.onclick=()=>{const open=workspace.classList.toggle('show-settings');toggle.setAttribute('aria-expanded',String(open));};toolbar.append(toggle);
   const actions=document.createElement('div');actions.className='home-inline-save-actions';toolbar.append(actions);
@@ -100,10 +112,10 @@
   const f=frame();if(!f?.src||event.source!==f.contentWindow||event.origin!==new URL(f.src).origin)return;
   const data=event.data;if(!data||!permitted())return;
   if(data.type==='coop-home-inline-edit'){
-   const accepted=update(data.field,data.value,data.restore===true);lastRejected=!accepted;send({type:'coop-home-inline-result',field:data.field,accepted,requestId:data.requestId,value:accepted?document.getElementById(fields[data.field][1]).value:undefined});
+   const accepted=update(data.field,data.value,data.restore===true,data.styles);lastRejected=!accepted;send({type:'coop-home-inline-result',field:data.field,accepted,requestId:data.requestId,value:accepted?document.getElementById(fields[data.field][1]).value:undefined,styles:accepted?readStyles(styleGroup(data.field))[data.field]||[]:undefined});
   }else if(data.type==='coop-home-inline-control')elementControls(data.area,data.kind);
   else if(data.type==='coop-home-inline-section')sectionAction(data.area,data.action);
   else if(data.type==='coop-home-inline-flushed'&&flushWait){clearTimeout(flushWait.timer);flushWait.resolve(data.ok===true&&!lastRejected);flushWait=null;}
  });
- root.CoopSiteInlineHost=Object.freeze({collect,update,mount,closeDialog,flush});
+ root.CoopSiteInlineHost=Object.freeze({collect,update,mount,closeDialog,flush,setStyles,readStyles});
 })(window);

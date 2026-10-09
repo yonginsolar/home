@@ -2,14 +2,14 @@
 (function(root){
  'use strict';
  if(new URLSearchParams(location.search).get('home_preview')!=='1'||root.parent===root)return;
- const targets={heroTitle:'#public-hero-title',heroSubtitle:'#public-hero-subtitle',heroButton:'#public-hero-cta',impactTitle:'#public-impact-title',impactDescription:'#public-impact-description',impactKicker:'#public-impact-kicker span',impactButton:'#public-impact-cta',aboutTitle:'#about-title',aboutSubtitle:'#about-subtitle',aboutContent:'#about-content',aboutList:'#about-list',contactPhone:'#public-contact-phone',contactEmail:'#public-contact-email',contactAddress:'#public-contact-address',activityTitle:'#home-preview-activity-article h3',activityContent:'#home-preview-activity-body'};
+ const targets={heroTitle:'#public-hero-title',heroSubtitle:'#public-hero-subtitle',heroButton:'#public-hero-cta',impactTitle:'#public-impact-title',impactDescription:'#public-impact-description',impactKicker:'#public-impact-kicker span',impactButton:'#public-impact-cta span',aboutTitle:'#about-title',aboutSubtitle:'#about-subtitle',aboutContent:'#about-content',aboutList:'#about-list',contactPhone:'#public-contact-phone',contactEmail:'#public-contact-email',contactAddress:'#public-contact-address',activityTitle:'#home-preview-activity-article h3',activityContent:'#home-preview-activity-body'};
  let origin='',fields={},sections=[],active=null,pending=null,selectionRange=null,toolbar,sectionMenu,status,requested='';
  const histories=new Map();let requestSequence=0;
  function send(message){if(origin)root.parent.postMessage(message,origin);}
  function trusted(event){if(event.source!==root.parent)return false;try{const u=new URL(event.origin);return u.protocol===location.protocol&&u.port===location.port&&u.hostname.replace(/^(www|erp)\./,'')===location.hostname.replace(/^(www|erp)\./,'');}catch(_){return false;}}
- function fieldValue(){return active?.kind==='rich'?active.node.innerHTML:(active?.node.innerText??active?.node.textContent??'');}
+ function fieldValue(){return active?.kind==='rich'?active.node.innerHTML:root.CoopTextStyles?root.CoopTextStyles.read(active.node).value:(active?.node.innerText??active?.node.textContent??'');}
  function announce(text){status.textContent=text;status.hidden=!text;}
- function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,requestId:active.latestRequest});return true;}
+ function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}if(active.kind==='plain'&&root.CoopTextStyles)active.styles=root.CoopTextStyles.read(active.node).runs;active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,...(active.kind==='plain'&&root.CoopTextStyles?{styles:active.styles}:{}),requestId:active.latestRequest});return true;}
  function bookmark(){
   if(!active)return null;const sel=root.getSelection();const range=sel.rangeCount&&active.node.contains(sel.anchorNode)?sel.getRangeAt(0):selectionRange;if(!range)return null;
   if(!active.node.contains(range.startContainer)||!active.node.contains(range.endContainer))return null;
@@ -22,7 +22,7 @@
   const point=offset=>{offset=Math.max(0,Math.min(total,offset));const item=nodes.find(x=>offset<=x.end);return item?[item.node,offset-item.start]:[active.node,0];};
   const start=point(mark.start),end=point(mark.end),range=document.createRange();range.setStart(...start);range.setEnd(...end);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);selectionRange=range.cloneRange();
  }
- function snapshot(previous=false){return {value:active.last,highlight:active.highlight,selection:previous?(active.beforeSelection||bookmark()):bookmark()};}
+ function snapshot(previous=false){return {value:active.last,highlight:active.highlight,styles:active.styles,selection:previous?(active.beforeSelection||bookmark()):bookmark()};}
  function paintHero(value){
   const mark=bookmark();active.node.replaceChildren();const at=active.highlight?value.indexOf(active.highlight):-1;
   if(at<0)active.node.textContent=value;else{active.node.append(document.createTextNode(value.slice(0,at)));const span=document.createElement('span');span.textContent=active.highlight;active.node.append(span,document.createTextNode(value.slice(at+active.highlight.length)));}reselect(mark);
@@ -30,10 +30,10 @@
  function sendHighlight(){if(fields.heroHighlight)fields.heroHighlight.value=active.highlight;send({type:'coop-home-inline-edit',field:'heroHighlight',value:active.highlight});}
  function finish(cancel=false){
   if(!active)return true;const item=active;
-  if(cancel){if(item.kind==='rich')item.node.innerHTML=root.sanitizeHtml(item.initial);else item.node.textContent=item.initial;if(item.key==='heroTitle'){item.highlight=item.initialHighlight;paintHero(item.initial);sendHighlight();}}
+  if(cancel){if(item.kind==='rich')item.node.innerHTML=root.sanitizeHtml(item.initial);else if(root.CoopTextStyles)root.CoopTextStyles.paint(item.node,item.initial,item.initialStyles);else item.node.textContent=item.initial;if(item.key==='heroTitle'){item.highlight=item.initialHighlight;if(!root.CoopTextStyles)paintHero(item.initial);sendHighlight();}}
   if(item.changed&&(cancel?!transmit(item.initial,true):fieldValue().length>item.maxLength||(fieldValue()!==item.renderedLast&&!transmit())))return false;
-  if(fields[item.key])fields[item.key].value=item.last;
-  histories.set(item.key,{value:item.last,highlight:item.highlight,undo:item.undo,redo:item.redo});
+  if(fields[item.key]){fields[item.key].value=item.last;fields[item.key].styles=item.styles;}
+  histories.set(item.key,{value:item.last,highlight:item.highlight,styles:item.styles,undo:item.undo,redo:item.redo});
   item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
   // An echoed preview may predate the last keystroke. Request a fresh snapshot
   // after the final field message instead of applying that stale echo on blur.
@@ -41,33 +41,39 @@
  }
  function begin(key,node){
   const config=fields[key];if(!config||!node)return false;if(active?.node===node)return true;if(!finish())return false;
-  const highlight=key==='heroTitle'?String(fields.heroHighlight?.value||''):'',history=histories.get(key),reuse=history?.value===config.value&&history.highlight===highlight;
-  active={...config,key,node,initial:config.value,last:config.value,highlight,initialHighlight:highlight,undo:reuse?history.undo:[],redo:reuse?history.redo:[],changed:false};
-  if(config.kind==='rich')node.innerHTML=root.sanitizeHtml(String(config.value||''));else node.textContent=config.value;
-  if(key==='heroTitle')paintHero(config.value);
-  node.hidden=false;node.removeAttribute('hidden');node.classList.add('home-inline-active');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus();
+  const highlight=key==='heroTitle'?String(fields.heroHighlight?.value||''):'',history=histories.get(key),styles=config.styles||[],reuse=history?.value===config.value&&history.highlight===highlight&&JSON.stringify(history.styles||[])===JSON.stringify(styles);
+  active={...config,key,node,initial:config.value,last:config.value,styles,initialStyles:styles,highlight,initialHighlight:highlight,undo:reuse?history.undo:[],redo:reuse?history.redo:[],changed:false};
+  if(config.kind==='rich')node.innerHTML=root.sanitizeHtml(String(config.value||''));else if(root.CoopTextStyles)root.CoopTextStyles.paint(node,config.value,styles);else node.textContent=config.value;
+  if(key==='heroTitle'&&!root.CoopTextStyles)paintHero(config.value);
+  node.hidden=false;node.removeAttribute('hidden');node.classList.add('home-inline-active');node.classList.toggle('home-inline-plain',config.kind==='plain');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus({preventScroll:true});
   const range=document.createRange();range.selectNodeContents(node);range.collapse(false);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);showToolbar();return true;
  }
  function pointToolbar(rect){toolbar.style.left=Math.max(8,Math.min(innerWidth-toolbar.offsetWidth-8,rect.left))+'px';toolbar.style.top=Math.max(8,rect.top-toolbar.offsetHeight-10)+'px';}
  function showToolbar(){
   if(!active)return;toolbar.hidden=false;const rich=active.kind==='rich',hero=active.key==='heroTitle';
-  for(const button of toolbar.querySelectorAll('[data-command]'))button.hidden=!['done','undo','redo'].includes(button.dataset.command)&&!(rich&&button.dataset.command!=='clearHighlight'||hero&&['highlight','clearHighlight'].includes(button.dataset.command));
-  for(const control of toolbar.querySelectorAll('select'))control.hidden=!rich;
+  for(const button of toolbar.querySelectorAll('[data-command]'))button.hidden=!['done','undo','redo'].includes(button.dataset.command)&&!(root.CoopTextStyles&&['bold','italic','underline','highlight','color','clearHighlight'].includes(button.dataset.command)||rich&&button.dataset.command!=='clearHighlight'||hero&&['highlight','clearHighlight'].includes(button.dataset.command));
+  for(const control of toolbar.querySelectorAll('select'))control.hidden=!rich&&!root.CoopTextStyles;
   toolbar.querySelector('[data-command="undo"]').disabled=!active.undo.length;toolbar.querySelector('[data-command="redo"]').disabled=!active.redo.length;
   const sel=root.getSelection();if(sel.rangeCount&&active.node.contains(sel.anchorNode)&&active.node.contains(sel.focusNode)){selectionRange=sel.getRangeAt(0).cloneRange();pointToolbar(!sel.isCollapsed?(selectionRange.getBoundingClientRect?.()||active.node.getBoundingClientRect()):active.node.getBoundingClientRect());}else pointToolbar(active.node.getBoundingClientRect());
  }
  function remember(previous=false){if(!active)return;active.changed=true;active.undo.push(snapshot(previous));if(active.undo.length>100)active.undo.shift();active.redo=[];active.beforeSelection=null;}
- function restore(state){active.changed=true;active.highlight=state.highlight;if(active.kind==='rich')active.node.innerHTML=root.sanitizeHtml(state.value);else if(active.key==='heroTitle'){paintHero(state.value);sendHighlight();}else active.node.textContent=state.value;active.node.focus();reselect(state.selection);transmit(state.value,true);showToolbar();}
+ function restore(state){active.changed=true;active.highlight=state.highlight;if(active.kind==='rich')active.node.innerHTML=root.sanitizeHtml(state.value);else if(root.CoopTextStyles){active.styles=state.styles||[];root.CoopTextStyles.paint(active.node,state.value,active.styles);if(active.key==='heroTitle')sendHighlight();}else if(active.key==='heroTitle'){paintHero(state.value);sendHighlight();}else active.node.textContent=state.value;active.node.focus({preventScroll:true});reselect(state.selection);transmit(state.value,true);showToolbar();}
  function command(name,color){
   if(!active)return;if(name==='done'){finish();return;}
   if(name==='undo'||name==='redo'){const from=name==='undo'?active.undo:active.redo,to=name==='undo'?active.redo:active.undo;if(from.length){to.push(snapshot());restore(from.pop());}return;}
-  if(name==='clearHighlight'&&active.key==='heroTitle'){if(active.highlight){remember();active.highlight='';paintHero(fieldValue());sendHighlight();showToolbar();}return;}
+  if(name==='clearHighlight'&&active.key==='heroTitle'&&!root.CoopTextStyles){if(active.highlight){remember();active.highlight='';paintHero(fieldValue());sendHighlight();showToolbar();}return;}
   if(!selectionRange||selectionRange.collapsed||!active.node.contains(selectionRange.commonAncestorContainer)){announce('서식을 적용할 글자를 선택해 주세요.');return;}
+  if(active.kind==='plain'&&root.CoopTextStyles){
+   const mark=bookmark(),value=fieldValue(),kind=name==='clearHighlight'?'highlight':name;if(!['bold','italic','underline','highlight','color'].includes(kind))return;
+   remember();active.styles=root.CoopTextStyles.format(value,root.CoopTextStyles.read(active.node).runs,mark.start,mark.end,kind,name==='clearHighlight'?false:['color','highlight'].includes(kind)?color||toolbar.querySelector(`[data-color-kind="${kind}"]`).value:true);
+   root.CoopTextStyles.paint(active.node,value,active.styles);reselect(mark);if(active.key==='heroTitle'&&active.highlight){active.highlight='';sendHighlight();}transmit();showToolbar();return;
+  }
   if(active.key==='heroTitle'){
    const text=selectionRange.toString();if(text.length>60){announce('강조할 문구는 60자 이내로 선택해 주세요.');return;}
    if(text===active.highlight)return;remember();active.highlight=text;paintHero(fieldValue());transmit();sendHighlight();showToolbar();return;
   }
   if(active.kind!=='rich')return;
+  if(name==='clearHighlight'){remember();const fragment=selectionRange.extractContents();for(const n of fragment.querySelectorAll('[style]'))n.style.removeProperty('background-color');const wrapper=document.createElement('span');wrapper.append(fragment);selectionRange.insertNode(wrapper);const range=document.createRange();range.selectNodeContents(wrapper);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);selectionRange=range;transmit();showToolbar();return;}
   let tag={bold:'strong',italic:'em',underline:'u',highlight:'span',color:'span',link:'a'}[name];if(!tag)return;
   const wrapper=document.createElement(tag);
   if(name==='highlight')wrapper.style.backgroundColor=color||toolbar.querySelector('[data-color-kind="highlight"]').value;
@@ -130,6 +136,7 @@
  document.addEventListener('scroll',()=>{if(active)showToolbar();},true);
  document.addEventListener('contextmenu',event=>{if(active?.node.contains(event.target)){event.preventDefault();showToolbar();}});
  document.addEventListener('keydown',event=>{
+  if(active?.kind==='plain'&&event.key==='Enter'&&root.CoopTextStyles){event.preventDefault();const sel=root.getSelection();if(sel.rangeCount&&active.node.contains(sel.anchorNode)){remember();const range=sel.getRangeAt(0);range.deleteContents();const n=document.createTextNode('\n');range.insertNode(n);range.setStartAfter(n);range.collapse(true);sel.removeAllRanges();sel.addRange(range);transmit();}return;}
   if(!origin)return;if(event.key==='Escape'){if(active){event.preventDefault();finish(true);}sectionMenu.hidden=true;}
   if(event.key==='Enter'&&!active&&event.target.dataset.inlineField){event.preventDefault();begin(event.target.dataset.inlineField,event.target);}
   if(active&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();command(event.shiftKey?'redo':'undo');}
@@ -138,4 +145,5 @@
  document.addEventListener('drop',event=>{if(active?.node.contains(event.target))event.preventDefault();});
  root.CoopSiteInline=Object.freeze({defer(settings){if(!active)return false;pending=settings;return true;},refresh,finish,isEditing(area){return !!active&&active.key.toLowerCase().startsWith(area==='activities'?'activity':area);}});
  const style=document.createElement('style');style.textContent='.home-inline-editable{cursor:text!important}.home-inline-editable:hover{outline:2px dashed #22c55e;outline-offset:5px}.home-inline-active{outline:2px solid #22c55e!important;min-height:1.5em;white-space:pre-wrap}.home-inline-toolbar,.home-inline-section-menu{position:fixed;z-index:100000;display:flex;flex-wrap:wrap;gap:4px;max-width:calc(100vw - 16px);padding:8px;background:#fff;color:#18322b;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 8px 30px #0003;font:14px/1.5 Pretendard,sans-serif;word-break:keep-all}.home-inline-toolbar button,.home-inline-section-menu button,.home-inline-section-actions button{background:#fff;color:#18322b;border:1px solid #d3ded9;border-radius:6px;padding:6px 10px;font:inherit}.home-inline-section-actions{position:absolute;right:16px;top:16px;z-index:1000;display:flex;gap:5px;font:14px/1.5 Pretendard,sans-serif}section:has(>.home-inline-section-actions){position:relative}.home-inline-status{position:fixed;bottom:12px;left:12px;z-index:100001;background:#fff;color:#9f1239;padding:12px;border:1px solid #fda4af;border-radius:8px}.home-inline-toolbar[hidden],.home-inline-section-menu[hidden],.home-inline-status[hidden]{display:none!important}';document.head.append(style);
+ const compactStyle=document.createElement('style');compactStyle.textContent='.home-inline-toolbar{width:fit-content;max-width:min(680px,calc(100vw - 16px));align-items:center}.home-inline-toolbar select{display:inline-block;width:auto!important;min-width:100px!important;max-width:150px;margin:0!important;padding:5px 24px 5px 8px!important;font:inherit;height:34px}.home-inline-toolbar [hidden]{display:none!important}.home-inline-active:not(.home-inline-plain){white-space:normal}';document.head.append(compactStyle);
 })(window);

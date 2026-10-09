@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.127
+Version: v1.0.128
 Change: 2026-10-09 - Live draft preview for content, certifications, news and section layout.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.127 | index.html');</script>
+<script>console.log('[Version] v1.0.128 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1760,8 +1760,9 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
-<script src="shared/site_inline_editor.js?v=20261009-11" defer></script>
-<script src="shared/home_preview_editor.js?v=20261009-11" defer></script>
+<script src="shared/site_text_styles.js?v=20261009-13" defer></script>
+<script src="shared/site_inline_editor.js?v=20261009-13" defer></script>
+<script src="shared/home_preview_editor.js?v=20261009-13" defer></script>
   <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
 
@@ -2686,6 +2687,9 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
             if (heroUrl) heroCta.href = heroUrl;
             heroCta.hidden = !(heroLabel && heroUrl);
         }
+        if(settings.text_styles?.heroTitle?.length)CoopTextStyles.paint(heroTitle,String(settings.hero_title||''),settings.text_styles.heroTitle);
+        CoopTextStyles.paint(heroSubtitle,String(settings.hero_subtitle??''),settings.text_styles?.heroSubtitle);
+        if(settings.hero_cta_label)CoopTextStyles.paint(heroCta,String(settings.hero_cta_label),settings.text_styles?.heroButton);
 
         const isSiteMemberProfile = String(settings.runtime_profile || '') === 'site_member';
         const homeTemplate = ['community', 'simple', 'brand', 'editorial', 'campaign'].includes(String(settings.home_template || ''))
@@ -2755,6 +2759,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
             if (impactUrl) impactCta.href = impactUrl;
             impactCta.hidden = !(impactLabel && impactUrl);
         }
+        for(const [node,key,value] of [[impactKicker,'impactKicker',settings.impact_kicker],[impactTitle,'impactTitle',settings.impact_title],[impactDescription,'impactDescription',settings.impact_description],[impactCta?.querySelector('span'),'impactButton',settings.impact_cta_label]])if(value!=null)CoopTextStyles.paint(node,String(value),settings.text_styles?.[key]);
 
         if (isSiteMemberProfile) {
             ['calculator', 'ops-system', 'game-hall'].forEach((sectionId) => {
@@ -2781,6 +2786,8 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
             document.getElementById('public-contact-phone').textContent = suffix ? `${contactPhone} (${suffix})` : contactPhone;
         }
         if (contactAddress) document.getElementById('public-contact-address').textContent = contactAddress;
+        for(const [id,key,value] of [['public-contact-email','contactEmail',contactEmail],['public-contact-address','contactAddress',contactAddress]])if(value)CoopTextStyles.paint(document.getElementById(id),value,settings.text_styles?.[key]);
+        if(contactPhone){const n=document.getElementById('public-contact-phone'),suffix=[contactRole,contactName].filter(Boolean).join(' ');CoopTextStyles.paint(n,contactPhone,settings.text_styles?.contactPhone);if(suffix)n.append(document.createTextNode(` (${suffix})`));}
         if (isSiteMemberProfile || isOtherCoop) {
             if (emailWrap) emailWrap.hidden = !contactEmail;
             if (phoneWrap) phoneWrap.hidden = !contactPhone;
@@ -4616,7 +4623,7 @@ function buildActivityCardSlideHtml(item, index = 0) {
           <div class="activity-card-media">${mediaHtml}</div>
           <div class="activity-card-body">
             <div class="activity-card-date"><i class="bi bi-calendar-event"></i>${dateText}</div>
-            <h3 class="activity-card-title">${titleText}</h3>
+            <h3 class="activity-card-title">${CoopTextStyles.html(item.title || '활동 내역',item.text_styles?.activityTitle)}</h3>
             <p class="activity-card-summary">${summaryText}</p>
             <button type="button" class="activity-card-link" onclick="return handleActivityCardAction(event, '${escapeHtml(encodedId)}')">자세히 보기 <i class="bi bi-arrow-right"></i></button>
           </div>
@@ -4695,7 +4702,7 @@ function appendActivityCards(items, startIndex = 0) {
 
 async function fetchActivityPage(offset = 0) {
     const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
-        .select('id, title, content, event_date, file_url, is_current, access_scope, updated_at')
+        .select('id, title, text_styles, content, event_date, file_url, is_current, access_scope, updated_at')
         .eq('category', 'activity')
         .eq('is_current', true)
         .eq('access_scope', 'PUBLIC')
@@ -4764,7 +4771,7 @@ async function resolveActivityDetailItem(id) {
     if (cached) return cached;
 
     const { data, error } = await (await scopePublicTenant(_client.from('site_documents')
-        .select('id, title, content, event_date, file_url, is_current, access_scope, updated_at')
+        .select('id, title, text_styles, content, event_date, file_url, is_current, access_scope, updated_at')
         .eq('id', safeId)
         .eq('category', 'activity')
         .eq('is_current', true)
@@ -5102,6 +5109,7 @@ async function openActivityDetail(id, triggerEl = null) {
     const modalEl = document.getElementById('activityDetailModal');
 
     if (titleEl) titleEl.textContent = item.title || '활동 내역';
+    CoopTextStyles.paint(titleEl,item.title || '활동 내역',item.text_styles?.activityTitle);
     if (dateEl) dateEl.textContent = formatKoreanDate(item.event_date || item.updated_at) || '';
     if (contentEl) contentEl.innerHTML = normalizeActivityContentHtml(item.content);
 
@@ -5966,9 +5974,11 @@ function openPlantDetail(id) {
 
         const titleEl = document.getElementById('about-title');
         setAboutPlainText(titleEl, defaultData.title || '');
+        if(defaultData.text_styles?.aboutTitle?.length)CoopTextStyles.paint(titleEl,defaultData.title||'',defaultData.text_styles.aboutTitle);
 
         const subEl = document.getElementById('about-subtitle');
         setAboutPlainText(subEl, defaultData.subtitle || '');
+        if(defaultData.text_styles?.aboutSubtitle?.length)CoopTextStyles.paint(subEl,defaultData.subtitle||'',defaultData.text_styles.aboutSubtitle);
 
         const contentEl = document.getElementById('about-content');
         if(contentEl) contentEl.innerHTML = sanitizeHtml(defaultData.content || '');
@@ -5992,11 +6002,15 @@ function openPlantDetail(id) {
                     // 줄바꿈 입력 시 -> ★ 핵심 2: 아이콘(<i>) 없이 깔끔하게 글자만 넣음
                     let html = '';
                     const items = defaultData.list_items.split('\n');
+                    let itemOffset=0;
                     items.forEach(item => {
                         if(item.trim()) {
                             // <li> 안에 그냥 텍스트만 넣음 (점도 없고 아이콘도 없음)
-                            html += `<li class="mb-2">${sanitizeHtml(item.trim())}</li>`;
+                            const source=CoopTextStyles.normalize(defaultData.list_items,defaultData.text_styles?.aboutList);let offset=0;const runs=[];
+                            for(const run of source){const lo=Math.max(itemOffset,offset),hi=Math.min(itemOffset+item.length,offset+run.text.length);if(hi>lo)runs.push({...run,text:run.text.slice(lo-offset,hi-offset)});offset+=run.text.length;}
+                            html += `<li class="mb-2">${source.length?CoopTextStyles.html(item.trim(),CoopTextStyles.trim(item,runs)):sanitizeHtml(item.trim())}</li>`;
                         }
+                        itemOffset+=item.length+1;
                     });
                     listEl.innerHTML = html;
                 }

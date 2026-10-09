@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.246
+Version: v1.0.247
 Change: 2026-10-09 - Direct homepage editing and member badge tab.
 -->
 <html lang="ko">
@@ -8,7 +8,7 @@ Change: 2026-10-09 - Direct homepage editing and member badge tab.
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.246';
+window.ADMIN_MEMBER_VERSION = 'v1.0.247';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -58,9 +58,10 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.246';
 <script src="approval_rich_editor.js?v=20261009-8"></script>
 <script src="site_editor_drafts.js?v=1.0.0"></script>
 <script src="../shared/home_design.js?v=20261009-3"></script>
-<link rel="stylesheet" href="home_visual_editor.css?v=20261009-12">
-<script src="home_visual_editor.js?v=20261009-12"></script>
-<script src="site_inline_editor.js?v=20261009-12"></script>
+<link rel="stylesheet" href="home_visual_editor.css?v=20261009-13">
+<script src="home_visual_editor.js?v=20261009-13"></script>
+<script src="../shared/site_text_styles.js?v=20261009-13"></script>
+<script src="site_inline_editor.js?v=20261009-13"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -8764,6 +8765,7 @@ queueHomePreviewUpdate();
 }
 
 function setHomeSettingsForm(settings) {
+CoopSiteInlineHost.setStyles('home',settings?.text_styles || {});
 initializeHomeFontOptions();
 g_homeSettingsRecord = settings && typeof settings === 'object' ? { ...settings } : {};
 const template = ['community', 'simple', 'brand', 'editorial', 'campaign'].includes(String(settings?.home_template || ''))
@@ -8922,7 +8924,7 @@ document.getElementById(`site-home-${kind}-image-url`).value = uploadedUrl;
 
 const payload = collectHomeSettingsPayload();
 if (Object.keys(payload.p_home_external_fonts).length && !payload.p_external_font_rights_confirmed) throw new Error('외부 글꼴의 사용 권한과 이용 조건을 확인해 주세요.');
-const { data, error } = await _supabase.rpc('upsert_site_home_settings_v5', payload);
+const { data, error } = await _supabase.rpc('upsert_site_home_settings_v6', {p_settings:payload,p_text_styles:CoopSiteInlineHost.readStyles('home',true)});
 if (error) throw error;
 setHomeSettingsForm(data || payload);
 draft.accept();
@@ -8967,6 +8969,7 @@ title:document.getElementById('admin-about-title').value,
 subtitle:document.getElementById('admin-about-subtitle').value,
 content:sanitizeAboutHtml(document.getElementById('admin-about-content').value),
 list_items:document.getElementById('admin-about-list').value,
+text_styles:CoopSiteInlineHost.readStyles('about'),
 image_url:document.getElementById('admin-about-img').value
 };
 const file = document.getElementById('admin-about-img-file')?.files?.[0];
@@ -8986,7 +8989,7 @@ result.certifications = result.certifications.filter(row => row.is_visible).sort
 }
 if (document.getElementById('activityModal')?.classList.contains('show')) {
 const cover = activityGalleryItems[0];
-result.activity = { id:document.getElementById('activity-id').value || 'preview-new', title:document.getElementById('activity-title').value, event_date:document.getElementById('activity-date').value, content:sanitizeAboutHtml(document.getElementById('activity-content').value), file_url:cover?.url || cover?.previewUrl || '', is_current:document.getElementById('activity-visible').checked };
+result.activity = { id:document.getElementById('activity-id').value || 'preview-new', title:document.getElementById('activity-title').value, text_styles:CoopSiteInlineHost.readStyles('activities'), event_date:document.getElementById('activity-date').value, content:sanitizeAboutHtml(document.getElementById('activity-content').value), file_url:cover?.url || cover?.previewUrl || '', is_current:document.getElementById('activity-visible').checked };
 if (includeLocalFiles && cover?.file) result.activity.file_url = await readHomePreviewFile(cover.file);
 }
 return result;
@@ -9000,6 +9003,7 @@ home_layout_mode: payload.p_home_layout_mode,
 home_title_font: payload.p_home_title_font,
 home_body_font: payload.p_home_body_font,
 home_external_fonts: payload.p_home_external_fonts,
+text_styles:CoopSiteInlineHost.readStyles('home',true),
 home_template: payload.p_home_template,
 hero_title: payload.p_hero_title,
 hero_highlight: payload.p_hero_highlight,
@@ -9276,7 +9280,17 @@ function syncAboutListSource() {
 const values = Array.from(document.querySelectorAll('#admin-about-list-editor input[data-about-list-item]'))
 .map((input) => String(input.value || '').trim()).filter(Boolean);
 const source = document.getElementById('admin-about-list');
-if (source) source.value = values.join('\n');
+if (source) {
+const previous=source.value,next=values.join('\n');
+// Merely saving the list must not remove formatting because blank lines or
+// surrounding spaces are normalized by the existing per-item editor.
+if(previous!==next&&parseAboutListItems(previous).join('\n')===next){
+const saved=CoopSiteInlineHost.readStyles('about'),runs=CoopTextStyles.normalize(previous,saved.aboutList),out=[];let offset=0;
+for(const line of previous.split('\n')){if(line.trim()){if(out.length)out.push({text:'\n'});let at=0;const part=[];for(const r of runs){const lo=Math.max(offset,at),hi=Math.min(offset+line.length,at+r.text.length);if(hi>lo)part.push({...r,text:r.text.slice(lo-at,hi-at)});at+=r.text.length;}const trimmed=CoopTextStyles.trim(line,part);out.push(...(trimmed.length?trimmed:[{text:line.trim()}]));}offset+=line.length+1;}
+if(runs.length){saved.aboutList=out;CoopSiteInlineHost.setStyles('about',saved);}
+}
+source.value = next;
+}
 queueTotalPreviewUpdate();
 }
 
@@ -9433,6 +9447,7 @@ if (!titleEl || !subtitleEl || !contentEl || !listEl || !imgEl) return;
 revokeAboutPreviewObjectUrl();
 if (fileEl) fileEl.value = '';
 titleEl.value = aboutHtmlToEditableText(row.title || '');
+CoopSiteInlineHost.setStyles('about',row.text_styles || {});
 subtitleEl.value = aboutHtmlToEditableText(row.subtitle || '');
 contentEl.value = row.content || '';
 listEl.value = row.list_items || '';
@@ -9538,9 +9553,10 @@ p_title: String(document.getElementById('admin-about-title').value || '').replac
 p_subtitle: String(document.getElementById('admin-about-subtitle').value || '').replace(/\r\n/g, '\n').trim(),
 p_content: sanitizeAboutHtml(document.getElementById('admin-about-content').value),
 p_list_items: document.getElementById('admin-about-list').value,
-p_image_url: String(imageUrlInput?.value || '').trim()
+p_image_url: String(imageUrlInput?.value || '').trim(),
+p_text_styles:CoopSiteInlineHost.readStyles('about',true)
 };
-const { error } = await _supabase.rpc('upsert_about_secure', updates);
+const { error } = await _supabase.rpc('upsert_about_with_text_styles', updates);
 if (error) throw error;
 
 const savedImageUrl = updates.p_image_url;
@@ -11628,6 +11644,7 @@ document.getElementById('activity-cover-file').value = '';
 document.getElementById('activity-cover-removed').value = '0';
 document.getElementById('activity-cover-original').value = '';
 document.getElementById('activity-title').value = '';
+CoopSiteInlineHost.setStyles('activities',{});
 document.getElementById('activity-date').value = getAdminMemberKstDateString();
 document.getElementById('activity-content').value = '';
 document.getElementById('activity-visible').checked = true;
@@ -11653,6 +11670,7 @@ return;
 if (data) {
 const parsedActivity = parseActivityContentWithGallery(data.content || '', data.file_url || '');
 document.getElementById('activity-title').value = data.title || '';
+CoopSiteInlineHost.setStyles('activities',data.text_styles || {});
 document.getElementById('activity-date').value = data.event_date || getAdminMemberKstDateString();
 document.getElementById('activity-content').value = parsedActivity.body || '';
 document.getElementById('activity-visible').checked = data.is_current !== false;
@@ -11741,7 +11759,7 @@ const finalCoverUrl = normalizedFinalGalleryUrls[0] || '';
 const finalContent = buildActivityContentWithGallery(content, normalizedFinalGalleryUrls);
 
 saveRequested = true;
-const { error } = await _supabase.rpc('site_activity_upsert_secure_v2', {
+const { error } = await _supabase.rpc('site_activity_upsert_with_text_styles', {
 p_id: id,
 p_title: title,
 p_date: eventDate,
@@ -11750,7 +11768,8 @@ p_file_url: finalCoverUrl || null,
 p_is_current: isCurrent,
 p_source_participation_event_id: sourceEventId,
 p_is_history_milestone: isHistoryMilestone,
-p_history_title: isHistoryMilestone ? (historyTitle || null) : null
+p_history_title: isHistoryMilestone ? (historyTitle || null) : null,
+p_text_styles:CoopSiteInlineHost.readStyles('activities',true)
 });
 
 if (error) throw error;
@@ -20768,6 +20787,6 @@ async function uploadOfficialSeal(groupKey) {
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 <script src="site_legal_samples.js?v=20261008-1"></script>
-<script src="site_legal_editor.js?v=20261009-8"></script>
+<script src="site_legal_editor.js?v=20261009-13"></script>
 </body>
 </html>

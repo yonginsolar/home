@@ -40,6 +40,7 @@
     if(!link.classList.contains('active'))link.click();
     document.getElementById('site-home-visual-workspace')?.classList.toggle('is-content-edit',!homeAreas.has(area));
     const legal=area==='legal';
+    const legalTabs=document.getElementById('site-legal-document-tabs');if(legalTabs)legalTabs.hidden=!legal;
     document.getElementById('site-home-preview-shell').hidden=legal;
     document.getElementById('site-home-legal-preview').hidden=!legal;
     if(legal)window.CoopSiteLegalEditor?.refreshPreview();
