@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.135
-Change: 2026-10-10 - Keep empty introduction fields editable in the preview.
+Version: v1.0.136
+Change: 2026-10-10 - Wait for preview helpers before replaying the latest draft.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.135 | index.html');</script>
+<script>console.log('[Version] v1.0.136 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -2898,6 +2898,7 @@ Change: 2026-10-10 - Keep empty introduction fields editable in the preview.
     if (isHomePreviewMode) {
         document.documentElement.dataset.homePreview = 'true';
         let homePreviewHomeSignature = '', homePreviewInlineSignature = '';
+        let homePreviewPendingDraft = null;
         window.resetHomePreviewField = (field) => {
             homePreviewInlineSignature = '';
             if (String(field).startsWith('about')) window.CoopSitePreview?.invalidate('about');
@@ -2906,6 +2907,12 @@ Change: 2026-10-10 - Keep empty introduction fields editable in the preview.
         };
         const applyHomePreviewDraft = window.applyHomePreviewDraft = (settings) => {
             if (!settings || typeof settings !== 'object') return;
+            // Parent snapshots can arrive while deferred editor scripts are still loading.
+            // Keep the latest snapshot and replay after their ordered initialization.
+            if (document.readyState === 'loading' && (!window.CoopTextStyles || !window.CoopSitePreview || (window.parent !== window && !window.CoopSiteInline))) {
+                homePreviewPendingDraft = settings;
+                return;
+            }
             if (window.CoopSiteInline?.defer(settings)) return;
             g_homePreviewDraftApplied = true;
             const { site_preview, inline_fields, ...home } = settings;
@@ -2920,6 +2927,11 @@ Change: 2026-10-10 - Keep empty introduction fields editable in the preview.
                 homePreviewInlineSignature = inlineSignature;
             }
         };
+        document.addEventListener('DOMContentLoaded', () => {
+            const pending = homePreviewPendingDraft;
+            homePreviewPendingDraft = null;
+            if (pending) applyHomePreviewDraft(pending);
+        }, { once: true });
         const initialPreviewLayout = new URLSearchParams(window.location.search).get('home_preview_layout');
         if (initialPreviewLayout) {
             try {
