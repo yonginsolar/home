@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.134 | Change: 2026-10-08 - NTS Smart A filing guide and read-only closing report references. -->
+<!-- Version: v1.0.135 | Change: 2026-10-10 - Remove retired single-entry recent-history code; keep double-entry flow. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.134 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.135 | accounting.html');</script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="accounting_smarta_guide.js?v=1.0.0"></script>
   <script src="accounting_guide.js?v=1.0.2"></script>
@@ -1167,7 +1167,6 @@ let accountingDashboardRefreshQueued = false;
 let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
-let historyViewMode = 'double';
 let approvalUnclassifiedIndex = new Map();
 let approvalSplitReclassState = null;
 let durunuriSupportRowsCache = [];
@@ -9218,7 +9217,6 @@ function confirmSync(type) {
 function loadHistory() {
     const el = document.getElementById("historyList");
     const metaEl = document.getElementById("historyMeta");
-    updateHistoryViewButtons();
     el.innerHTML = "로딩 중...";
     if (metaEl) metaEl.textContent = '';
     // 복식 원장은 원시 분개를 거래별로 묶은 뒤 최근 20건을 보여주므로 충분한 행을 먼저 읽는다.
@@ -9233,28 +9231,8 @@ function loadHistory() {
                 el.innerHTML = `<div class="list-group-item text-danger small">조회 실패: ${escapeHtml(error.message)}</div>`;
                 return;
             }
-            if (historyViewMode === 'single') {
-                renderHistorySingle(data || []);
-            } else {
-                renderHistoryDouble(data || []);
-            }
+            renderHistoryDouble(data || []);
         });
-}
-
-function setHistoryView(mode) {
-    if (mode !== 'single' && mode !== 'double') return;
-    historyViewMode = mode;
-    updateHistoryViewButtons();
-    loadHistory();
-}
-
-function updateHistoryViewButtons() {
-    const singleBtn = document.getElementById("historySingleBtn");
-    const doubleBtn = document.getElementById("historyDoubleBtn");
-    if (!singleBtn || !doubleBtn) return;
-    const singleOn = historyViewMode === 'single';
-    singleBtn.className = `btn btn-sm ${singleOn ? 'btn-primary' : 'btn-outline-primary'}`;
-    doubleBtn.className = `btn btn-sm ${singleOn ? 'btn-outline-primary' : 'btn-primary'}`;
 }
 
 function isCashLikeAccount(accountName) {
@@ -9297,167 +9275,11 @@ function cleanHistoryDescription(value) {
     return cleanTagPrefix(accountingHistoryToPlainText(value));
 }
 
-function inferCashbookLabel(description, flow) {
-    const raw = accountingHistoryToPlainText(description);
-    if (!raw) {
-        return flow === '입금' ? '입금' : (flow === '지출' ? '지출' : '대체');
-    }
-    if (raw.includes('[기부금]')) return '기부금 입금';
-    if (raw.includes('[출자]')) return '출자금 입금';
-    if (raw.includes('[배당]')) return '배당금 지급';
-    if (raw.includes('[축제 현금매출]')) return '축제 현금매출';
-    if (raw.includes('[현금 통장입금]')) return '현금 통장입금';
-    if (raw.includes('[전자결재]')) return flow === '지출' ? '전자결재 지출' : '전자결재';
-    if (raw.includes('[손익마감]') || raw.includes('[이익처분]')) return '결산 대체';
-    if (raw.includes('감가상각')) return '감가상각 반영';
-    const cleaned = cleanTagPrefix(raw);
-    if (cleaned) return cleaned;
-    return flow === '입금' ? '입금' : (flow === '지출' ? '지출' : '대체');
-}
-
-function buildSingleEntryHistory(rows) {
-    const grouped = new Map();
-    rows.forEach((row, index) => {
-        const transId = row && row.Trans_ID ? String(row.Trans_ID).trim() : '';
-        const key = transId ? `T:${transId}` : `I:${row.id || index}`;
-        if (!grouped.has(key)) {
-            grouped.set(key, {
-                id: row.id || '',
-                transId,
-                rows: [],
-                sortIndex: index
-            });
-        }
-        grouped.get(key).rows.push(row);
-    });
-
-    const list = [];
-    grouped.forEach((group) => {
-        let debitTotal = 0;
-        let creditTotal = 0;
-        let cashDelta = 0;
-        let cashDebitTotal = 0;
-        let cashCreditTotal = 0;
-        let date = '';
-        let desc = '';
-        let operator = '';
-
-        group.rows.forEach((entry) => {
-            const debit = Number(entry.Debit || 0);
-            const credit = Number(entry.Credit || 0);
-            const account = String(entry.Account || '').trim();
-            if (!date && entry.Date) date = String(entry.Date);
-            if (!desc && entry.Description) desc = String(entry.Description);
-            if (!operator && entry.Operator) operator = String(entry.Operator);
-
-            debitTotal += debit;
-            creditTotal += credit;
-
-            if (isCashLikeAccount(account)) {
-                cashDebitTotal += debit;
-                cashCreditTotal += credit;
-                cashDelta += (debit - credit);
-            }
-        });
-
-        // 현금성 계정이 전혀 없는 결산·재분류만 제외한다. 현금↔통장 이동은 대체로 표시한다.
-        if (cashDebitTotal === 0 && cashCreditTotal === 0) return;
-
-        let flow = '대체';
-        if (cashDelta > 0) flow = '입금';
-        else if (cashDelta < 0) flow = '지출';
-
-        const amount = flow === '대체'
-            ? Math.max(cashDebitTotal, cashCreditTotal)
-            : Math.abs(cashDelta);
-        const inAmount = cashDelta > 0 ? cashDelta : 0;
-        const outAmount = cashDelta < 0 ? Math.abs(cashDelta) : 0;
-        const transferAmount = flow === '대체' ? amount : 0;
-        const label = group.transId && group.transId.startsWith('APR-')
-            ? (flow === '지출' ? '전자결재 지출' : '전자결재')
-            : inferCashbookLabel(desc, flow);
-        list.push({
-            id: group.id,
-            transId: group.transId,
-            date,
-            desc: desc || '',
-            label,
-            operator: operator || '작성자 미상',
-            flow,
-            amount,
-            inAmount,
-            outAmount,
-            transferAmount,
-            sortIndex: group.sortIndex
-        });
-    });
-
-    list.sort((a, b) => {
-        const ad = a.date || '';
-        const bd = b.date || '';
-        if (ad === bd) return a.sortIndex - b.sortIndex;
-        return ad < bd ? 1 : -1;
-    });
-    return list;
-}
-
 function deleteTxByButton(buttonEl) {
     if (!buttonEl) return;
     const id = buttonEl.getAttribute('data-id') || '';
     const transId = buttonEl.getAttribute('data-trans-id') || '';
     deleteTx(id, transId);
-}
-
-function renderHistorySingle(rows) {
-    const el = document.getElementById("historyList");
-    const metaEl = document.getElementById("historyMeta");
-    const items = buildSingleEntryHistory(rows).slice(0, 20);
-    el.innerHTML = "";
-    if (items.length === 0) {
-        el.innerHTML = `<div class="list-group-item text-muted small">표시할 전표가 없습니다.</div>`;
-        if (metaEl) metaEl.textContent = '단식 0건';
-        return;
-    }
-
-    items.forEach((item) => {
-        const dateText = escapeHtml(item.date || '-');
-        const approvalDocId = parseApprovalDocIdFromTransId(item.transId);
-        const labelText = buildApprovalDocTitleButtonHtml(
-            item.label || '(항목 없음)',
-            approvalDocId,
-            'btn btn-link p-0 text-start fw-bold text-decoration-none align-baseline'
-        );
-        const descText = escapeHtml(cleanHistoryDescription(item.desc || ''));
-        const operatorText = escapeHtml(item.operator);
-        const transText = item.transId ? ` · ${escapeHtml(item.transId)}` : '';
-        const inAmountText = item.inAmount > 0 ? `${Number(item.inAmount).toLocaleString()}원` : '-';
-        const outAmountText = item.outAmount > 0 ? `${Number(item.outAmount).toLocaleString()}원` : '-';
-        const transferAmountText = item.transferAmount > 0 ? `${Number(item.transferAmount).toLocaleString()}원` : '-';
-        const idAttr = escapeHtml(item.id || '');
-        const transAttr = escapeHtml(item.transId || '');
-
-        el.innerHTML += `
-            <div class="list-group-item">
-                <div class="d-flex justify-content-between align-items-start gap-2">
-                    <div class="flex-grow-1">
-                        <div class="fw-bold mb-1">${labelText}</div>
-                        <div class="small text-muted">${dateText} · ${operatorText}${transText}</div>
-                        ${descText ? `<div class="small text-muted mt-1 history-plain-description">${descText}</div>` : ''}
-                    </div>
-                    <div class="text-end">
-                        <div class="small text-primary">들어옴: <b>${inAmountText}</b></div>
-                        <div class="small text-danger">나감: <b>${outAmountText}</b></div>
-                        <div class="small text-secondary">대체: <b>${transferAmountText}</b></div>
-                        <button class="btn btn-sm btn-outline-danger mt-1" data-id="${idAttr}" data-trans-id="${transAttr}" onclick="deleteTxByButton(this)">삭제</button>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    const totalIn = items.reduce((sum, item) => sum + Number(item.inAmount || 0), 0);
-    const totalOut = items.reduce((sum, item) => sum + Number(item.outAmount || 0), 0);
-    const totalTransfer = items.reduce((sum, item) => sum + Number(item.transferAmount || 0), 0);
-    if (metaEl) metaEl.textContent = `단식 ${items.length}건 · 들어옴 ${totalIn.toLocaleString()}원 · 나감 ${totalOut.toLocaleString()}원 · 대체 ${totalTransfer.toLocaleString()}원`;
 }
 
 function buildDoubleEntryHistory(rows) {

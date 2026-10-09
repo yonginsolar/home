@@ -44,7 +44,6 @@
   input.value=restore?history.values.get(signature(value)):cfg[2]==='rich'?sanitizeAboutHtml(value):value;
   if(styles!==undefined){const map=storedStyles(group);if(styles.length)map[key]=styles;else delete map[key];setStyles(group,map);}
   history.last=input.value;history.values.set(signature(value),input.value);history.values.set(signature(input.value),input.value);while(history.values.size>203)history.values.delete([...history.values.keys()][1]);
-  if(key==='aboutContent')g_aboutEditorBridge?.syncFromSource();
   if(key==='activityContent')g_activityEditorBridge?.syncFromSource();
   input.dispatchEvent(new Event('input',{bubbles:true}));
   if(cfg[0]==='about')getSiteEditorDraft('about').refresh();

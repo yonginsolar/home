@@ -1,4 +1,4 @@
-/* v1.1.4 - Edit the draft document in place; registered text stays read-only. */
+/* v1.1.5 - Keep one central draft/published preview. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -52,8 +52,6 @@
     el(kind,'content').value=kind==='privacy'?privacyTemplate(doc.content||''):String(doc.content||'');el(kind,'effective-date').value=String(doc.effective_date||'');
     if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).value=String(doc.contact_details?.[key]??(key==='representative'||key==='address'?context?.[key]:'')??'');
     state.set(kind,{doc,baseline:JSON.stringify(values(kind)),busy:false});
-    el(kind,'published-view').hidden=!doc.is_published;
-    el(kind,'published-text').textContent=String(doc.published_content||'');
     el(kind,'unpublish').hidden=!doc.is_published;
     updateStatus(kind);
   }
@@ -64,7 +62,6 @@
     if(s.doc.has_unpublished_changes)text+=' · 수정 초안 있음';
     if(dirty(kind))text+=' · 저장하지 않은 수정 있음';
     el(kind,'status').textContent=text;el(kind,'status').className='small mt-2 '+(s.doc.is_published?'text-success':'text-muted');
-    el(kind,'preview-text').textContent=renderText(el(kind,'content').value,kind);
     refreshPreview();
   }
   function refreshPreview(){
@@ -109,12 +106,10 @@
       const column=document.createElement('div');column.className='col-12';
       column.innerHTML=`<div class="card border-0 shadow-sm h-100" id="site-legal-${kind}-card"><div class="card-body">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"><h5 class="fw-bold mb-0">${label}</h5><button type="button" class="btn btn-sm btn-outline-secondary" data-legal-action="sample">샘플 불러오기</button></div>
-        ${kind==='privacy'?`<fieldset class="border rounded p-3 mb-3"><legend class="float-none w-auto px-1 fs-6 fw-bold">개인정보 담당자 정보</legend><label class="form-label small fw-bold" for="site-legal-privacy-processor">개인정보처리자</label><input id="site-legal-privacy-processor" class="form-control mb-3" readonly><div class="row g-3">${Object.entries(contacts).map(([key,label])=>`<div class="${key==='address'?'col-12':'col-md-6'}"><label class="form-label small fw-bold" for="site-legal-privacy-${key}">${label} <span class="text-danger">*</span></label><input class="form-control" id="site-legal-privacy-${key}" type="${key==='officer_email'?'email':key==='officer_phone'?'tel':'text'}" maxlength="${key==='address'?300:key==='officer_email'?254:100}" required></div>`).join('')}</div><p class="small text-muted mt-3 mb-0">보호책임자가 개인정보 문의와 권리행사 요청을 받습니다. 담당자 정보는 아래 미리보기에서 확인해 주세요.</p></fieldset>`:''}
+        ${kind==='privacy'?`<fieldset class="border rounded p-3 mb-3"><legend class="float-none w-auto px-1 fs-6 fw-bold">개인정보 담당자 정보</legend><label class="form-label small fw-bold" for="site-legal-privacy-processor">개인정보처리자</label><input id="site-legal-privacy-processor" class="form-control mb-3" readonly><div class="row g-3">${Object.entries(contacts).map(([key,label])=>`<div class="${key==='address'?'col-12':'col-md-6'}"><label class="form-label small fw-bold" for="site-legal-privacy-${key}">${label} <span class="text-danger">*</span></label><input class="form-control" id="site-legal-privacy-${key}" type="${key==='officer_email'?'email':key==='officer_phone'?'tel':'text'}" maxlength="${key==='address'?300:key==='officer_email'?254:100}" required></div>`).join('')}</div><p class="small text-muted mt-3 mb-0">보호책임자가 개인정보 문의와 권리행사 요청을 받습니다. 담당자 정보는 미리보기에서 확인해 주세요.</p></fieldset>`:''}
         <label class="form-label small fw-bold" for="site-legal-${kind}-effective-date">시행일</label><input type="date" class="form-control mb-3" id="site-legal-${kind}-effective-date">
         <label class="form-label small fw-bold" for="site-legal-${kind}-content">내용</label><textarea class="form-control" style="word-break:keep-all" id="site-legal-${kind}-content" rows="14" maxlength="100000"></textarea>
         <div id="site-legal-${kind}-status" class="small mt-2" role="status">불러오는 중</div>
-        <details class="mt-3"><summary>등록 전 미리보기</summary><div class="mt-2 border rounded p-3" style="white-space:pre-wrap;word-break:keep-all;overflow-wrap:break-word" id="site-legal-${kind}-preview-text"></div></details>
-        <details class="mt-3" id="site-legal-${kind}-published-view" hidden><summary>현재 적용 중인 내용</summary><div class="mt-2 border rounded p-3" style="white-space:pre-wrap;word-break:keep-all;overflow-wrap:break-word" id="site-legal-${kind}-published-text"></div></details>
         </div><div class="card-footer bg-white d-flex flex-wrap gap-2 justify-content-end"><button type="button" class="btn btn-sm btn-outline-danger me-auto" id="site-legal-${kind}-unpublish" data-legal-action="unpublish" hidden>등록 해제</button><button type="button" class="btn btn-outline-primary" data-legal-action="draft">초안 저장</button><button type="button" class="btn btn-primary" data-legal-action="publish">등록·적용</button></div></div>`;
       grid.append(column);setEnabled(kind,false);
       el(kind,'content').addEventListener('input',()=>updateStatus(kind));el(kind,'effective-date').addEventListener('change',()=>updateStatus(kind));

@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.253
-Change: 2026-10-09 - Stable homepage editing, legacy list restoration and safe seal replacement.
+Version: v1.0.254
+Change: 2026-10-10 - Consolidate introduction editing and legal previews without changing save paths.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.253';
+window.ADMIN_MEMBER_VERSION = 'v1.0.254';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -62,7 +62,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.253';
 <link rel="stylesheet" href="home_visual_editor.css?v=20261009-13">
 <script src="home_visual_editor.js?v=20261009-13"></script>
 <script src="../shared/site_text_styles.js?v=20261009-17"></script>
-<script src="site_inline_editor.js?v=20261010-1"></script>
+<script src="site_inline_editor.js?v=20261010-2"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -2186,31 +2186,10 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 
 <div class="row g-3">
 <div class="col-lg-6">
-<div class="mb-2">
-<label class="form-label small fw-bold">제목</label>
-<textarea id="admin-about-title" class="form-control" rows="2" maxlength="180" oninput="queueTotalPreviewUpdate()"></textarea>
-<div class="form-text">줄을 바꾸면 홈페이지 제목에도 같은 위치에서 줄이 바뀝니다. HTML 코드는 입력하지 않아도 됩니다.</div>
-</div>
-<div class="mb-2">
-<label class="form-label small fw-bold">부제목</label>
-<input type="text" id="admin-about-subtitle" class="form-control" oninput="queueTotalPreviewUpdate()">
-</div>
-<div class="mb-2">
-<label class="form-label small fw-bold">본문</label>
+<!-- Preview editing uses these original draft/save fields. -->
+<textarea id="admin-about-title" class="d-none" maxlength="180"></textarea>
+<input type="hidden" id="admin-about-subtitle">
 <textarea id="admin-about-content" class="d-none" rows="6"></textarea>
-<div class="about-editor-shell">
-<div class="about-editor-toolbar" id="admin-about-toolbar">
-<select class="form-select form-select-sm" data-approval-editor-select="block" aria-label="문단 형식"><option value="paragraph">본문</option><option value="heading2">큰 소제목</option><option value="heading3">작은 소제목</option></select>
-<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bold" aria-label="굵게"><i class="bi bi-type-bold"></i></button>
-<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="italic" aria-label="기울임"><i class="bi bi-type-italic"></i></button>
-<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="bulletList" aria-label="글머리표"><i class="bi bi-list-ul"></i></button>
-<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="orderedList" aria-label="번호 목록"><i class="bi bi-list-ol"></i></button>
-<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="link" aria-label="링크"><i class="bi bi-link-45deg"></i></button>
-<button type="button" class="btn btn-sm btn-outline-secondary" data-approval-editor-command="clean" aria-label="서식 지우기"><i class="bi bi-eraser"></i></button>
-</div>
-<div id="admin-about-editor" class="about-editor-surface"></div>
-</div>
-</div>
 <textarea id="admin-about-list" class="d-none" rows="4"></textarea>
 <div class="mb-3">
 <label class="form-label small fw-bold" for="admin-about-img-file">소개 이미지</label>
@@ -8500,10 +8479,6 @@ const preview = kind === 'home' ? document.getElementById('btn-preview-home-sett
 if (preview) preview.disabled = !state.loaded || state.loading || state.busy;
 const retry = document.getElementById(`btn-retry-${kind}-settings`);
 if (retry) { retry.hidden = state.loaded || state.loading; retry.disabled = state.loading || state.busy; }
-if (kind === 'about') {
-const editorShell = document.getElementById('admin-about-editor')?.closest('.about-editor-shell');
-if (editorShell) editorShell.inert = !state.loaded;
-}
 // Keep the first-read lock after an error too. Editing an unknown blank baseline
 // would otherwise make retries unsafe and leave the form unable to save.
 if (!state.loaded && !g_siteEditorFieldLocks.has(kind)) {
@@ -9176,7 +9151,6 @@ myAlert('미리보기를 열 수 없습니다: ' + (error?.message || error), 'w
 let g_aboutSettingsSaving = false;
 let g_aboutOriginalImageUrl = '';
 let g_aboutPreviewObjectUrl = '';
-let g_aboutEditorBridge = null;
 
 function sanitizeAboutHtml(rawHtml) {
 const allowedTags = new Set(['P', 'BR', 'STRONG', 'B', 'EM', 'I', 'U', 'SPAN', 'H2', 'H3', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'A']);
@@ -9229,35 +9203,6 @@ return String(root.textContent || '')
 .replace(/\n[ \t]+/g, '\n')
 .replace(/\n{3,}/g, '\n\n')
 .trim();
-}
-
-async function ensureAboutRichEditor() {
-if (!window.ApprovalRichEditor) throw new Error('편집기를 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
-await window.ApprovalRichEditor.loadTiptapModules();
-if (!g_aboutEditorBridge) {
-g_aboutEditorBridge = window.ApprovalRichEditor.createTiptapBridge({
-source: '#admin-about-content',
-editor: '#admin-about-editor',
-toolbar: '#admin-about-toolbar',
-siteColors: true,
-placeholder: '조합을 소개하는 글을 입력해 주세요.',
-normalizeHtml: sanitizeAboutHtml,
-askText: async (label, options) => window.prompt(label, options?.value || ''),
-showMessage: (message) => myAlert(message, 'warning')
-});
-const surface = document.getElementById('admin-about-editor');
-if (surface && !surface.dataset.previewBound) {
-surface.dataset.previewBound = '1';
-surface.addEventListener('input', queueTotalPreviewUpdate);
-}
-}
-g_aboutEditorBridge.ensure();
-const editor = g_aboutEditorBridge.getEditor();
-if (editor && !document.getElementById('admin-about-editor')?.dataset.draftBound) {
-document.getElementById('admin-about-editor').dataset.draftBound = '1';
-editor.on('update', () => { queueTotalPreviewUpdate(); getSiteEditorDraft('about').refresh(); });
-}
-return g_aboutEditorBridge;
 }
 
 function parseAboutListItems(rawValue) {
@@ -9333,7 +9278,6 @@ CoopSafeLog.warn("[deleteManagedAboutImage] cleanup failed:", error);
 async function fetchAboutSettings() {
 try {
 await getSiteEditorDraft('about').load(async () => {
-await ensureAboutRichEditor();
 const { data, error } = await scopeAdminTenant(_supabase.from('site_about').select('*')).limit(1);
 if(error) throw error;
 return (Array.isArray(data) ? data[0] : data) || {};
@@ -9355,7 +9299,6 @@ listEl.value = row.list_items || '';
 imgEl.value = row.image_url || '';
 g_aboutOriginalImageUrl = imgEl.value;
 setAboutImageStatus(g_aboutOriginalImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
-g_aboutEditorBridge.syncFromSource();
 if (typeof updateTotalPreview === 'function') updateTotalPreview();
 });
 queueHomePreviewUpdate(); // Publish editable field availability after the asynchronous baseline is accepted.
@@ -9436,8 +9379,6 @@ let aboutSaveConfirmed = false;
 if (saveButton) saveButton.disabled = true;
 showLoading(true);
 try {
-await ensureAboutRichEditor();
-g_aboutEditorBridge.syncToSource();
 if (file && !file.type.startsWith('image/')) throw new Error('이미지 파일만 올릴 수 있습니다.');
 if (file && file.size > 10 * 1024 * 1024) throw new Error('사진은 10MB 이하로 올려 주세요.');
 
@@ -9472,7 +9413,6 @@ revokeAboutPreviewObjectUrl();
 document.getElementById('admin-about-title').value = updates.p_title;
 document.getElementById('admin-about-subtitle').value = updates.p_subtitle;
 document.getElementById('admin-about-content').value = updates.p_content;
-g_aboutEditorBridge.syncFromSource();
 setAboutImageStatus(savedImageUrl ? '현재 홈페이지에서 사용 중인 사진입니다.' : '저장된 사진이 없습니다.');
 updateTotalPreview();
 draft.accept();
@@ -20685,6 +20625,6 @@ async function uploadOfficialSeal(groupKey) {
 </script>
 <script src="../shared/modal_layering_helper.js?v=20260326-1"></script>
 <script src="site_legal_samples.js?v=20261008-1"></script>
-<script src="site_legal_editor.js?v=20261009-13"></script>
+<script src="site_legal_editor.js?v=20261010-2"></script>
 </body>
 </html>

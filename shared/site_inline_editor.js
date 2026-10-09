@@ -47,7 +47,7 @@
   if(config.kind==='rich')node.innerHTML=root.sanitizeHtml(String(config.value||''));else if(root.CoopTextStyles)root.CoopTextStyles.paint(node,config.value,styles);else node.textContent=config.value;
   if(key==='heroTitle'&&!root.CoopTextStyles)paintHero(config.value);
   root.CoopTextStyles?.adapt(node);
-  node.hidden=false;node.removeAttribute('hidden');if(key==='aboutList')node.style.removeProperty('display');node.classList.add('home-inline-active');node.classList.toggle('home-inline-plain',config.kind==='plain');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus({preventScroll:true});
+  node.hidden=false;node.removeAttribute('hidden');if(key.startsWith('about'))node.style.removeProperty('display');node.classList.add('home-inline-active');node.classList.toggle('home-inline-plain',config.kind==='plain');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus({preventScroll:true});
   const range=document.createRange();range.selectNodeContents(node);range.collapse(false);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);showToolbar();return true;
  }
  function pointToolbar(rect){toolbar.style.left=Math.max(8,Math.min(innerWidth-toolbar.offsetWidth-8,rect.left))+'px';toolbar.style.top=Math.max(8,rect.top-toolbar.offsetHeight-10)+'px';}
@@ -132,7 +132,8 @@
   for(const area of new Set(['hero','about','impact','contact','activities',...sections.map(row=>row.id)])){
    const section=document.getElementById(area);if(!section)continue;
    let actions=section.querySelector(':scope > .home-inline-section-actions');if(!actions){actions=document.createElement('div');actions.className='home-inline-section-actions';section.append(actions);}actions.replaceChildren();
-   for(const [kind,label] of [...(['hero','about','impact'].includes(area)?[['image','사진']]:[]),...(['hero','impact'].includes(area)?[['button','버튼']]:[]),...(area==='about'&&fields.aboutList&&!fields.aboutList.value.trim()?[['list','목록 추가']]:[]),['section','영역']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.inlineControl=kind;b.dataset.inlineArea=area;actions.append(b);}
+   const aboutFields=area==='about'?[['aboutTitle','제목 추가'],['aboutSubtitle','부제목 추가'],['aboutContent','본문 추가']].filter(([key])=>fields[key]&&!String(key==='aboutContent'?document.querySelector(targets[key])?.textContent||'':fields[key].value||'').trim()):[];
+   for(const [kind,label] of [...(['hero','about','impact'].includes(area)?[['image','사진']]:[]),...(['hero','impact'].includes(area)?[['button','버튼']]:[]),...aboutFields,...(area==='about'&&fields.aboutList&&!fields.aboutList.value.trim()?[['list','목록 추가']]:[]),['section','영역']]){const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.inlineControl=kind;b.dataset.inlineArea=area;actions.append(b);}
   }
   if(requested&&fields[requested]){const key=requested;requested='';begin(key,document.querySelector(targets[key]));}
  }
@@ -153,7 +154,7 @@
  });
  document.addEventListener('click',event=>{
   if(!origin)return;
-  const control=event.target.closest('[data-inline-control]');if(control){event.preventDefault();event.stopImmediatePropagation();const area=control.dataset.inlineArea;if(control.dataset.inlineControl==='section')sectionControls(area);else if(control.dataset.inlineControl==='list'&&area==='about')begin('aboutList',document.querySelector(targets.aboutList));else{finish();send({type:'coop-home-inline-control',area,kind:control.dataset.inlineControl});}return;}
+  const control=event.target.closest('[data-inline-control]');if(control){event.preventDefault();event.stopImmediatePropagation();const area=control.dataset.inlineArea,kind=control.dataset.inlineControl;if(kind==='section')sectionControls(area);else if(kind==='list'&&area==='about')begin('aboutList',document.querySelector(targets.aboutList));else if(area==='about'&&['aboutTitle','aboutSubtitle','aboutContent'].includes(kind))begin(kind,document.querySelector(targets[kind]));else{finish();send({type:'coop-home-inline-control',area,kind});}return;}
   // Let each toolbar button receive its own click before stopping bubbling.
   if(event.target.closest('.home-inline-toolbar,.home-inline-section-menu'))return;
   let node=event.target.closest('[data-inline-field]');
