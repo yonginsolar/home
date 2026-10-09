@@ -4,7 +4,7 @@
   let mounted=false, selected='hero';
   const labels={hero:'메인 배너',impact:'참여 안내',contact:'연락처',design:'구성',fonts:'글꼴'};
   function select(area, navigate=true){
-    if(!labels[area]) return false;
+    if(!Object.hasOwn(labels,area)) return false;
     selected=area;
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==area);
     document.querySelectorAll('[data-home-select-area]').forEach(node=>node.setAttribute('aria-pressed',String(node.dataset.homeSelectArea===area)));
