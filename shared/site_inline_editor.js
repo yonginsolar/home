@@ -4,7 +4,7 @@
  if(new URLSearchParams(location.search).get('home_preview')!=='1'||root.parent===root)return;
  const targets={heroTitle:'#public-hero-title',heroSubtitle:'#public-hero-subtitle',heroButton:'#public-hero-cta',impactTitle:'#public-impact-title',impactDescription:'#public-impact-description',impactKicker:'#public-impact-kicker span',impactButton:'#public-impact-cta span',aboutTitle:'#about-title',aboutSubtitle:'#about-subtitle',aboutContent:'#about-content',aboutList:'#about-list',contactPhone:'#public-contact-phone',contactEmail:'#public-contact-email',contactAddress:'#public-contact-address',activityTitle:'#home-preview-activity-article h3',activityContent:'#home-preview-activity-body'};
  let origin='',fields={},sections=[],active=null,pending=null,selectionRange=null,toolbar,sectionMenu,status,requested='';
- const histories=new Map();let requestSequence=0;
+ const histories=new Map();let requestSequence=0,refreshSignature='',refreshNodes=[];
  function send(message){if(origin)root.parent.postMessage(message,origin);}
  function trusted(event){if(event.source!==root.parent)return false;try{const u=new URL(event.origin);return u.protocol===location.protocol&&u.port===location.port&&u.hostname.replace(/^(www|erp)\./,'')===location.hostname.replace(/^(www|erp)\./,'');}catch(_){return false;}}
  function fieldValue(){return active?.kind==='rich'?(root.CoopTextStyles?.sourceHtml(active.node)??active.node.innerHTML):root.CoopTextStyles?root.CoopTextStyles.read(active.node).value:(active?.node.innerText??active?.node.textContent??'');}
@@ -121,8 +121,12 @@
   status=document.createElement('div');status.className='home-inline-status';status.setAttribute('role','status');status.hidden=true;
   sectionMenu=document.createElement('div');sectionMenu.className='home-inline-section-menu';sectionMenu.hidden=true;root.document.body.append(toolbar,sectionMenu,status);
  }
- function refresh(config,rows){
+ function refresh(config,rows,force=false){
   ui();fields=config&&typeof config==='object'?config:{};sections=Array.isArray(rows)?rows:[];
+  const signature=JSON.stringify([fields,sections]),nodes=Object.entries(targets).map(([,selector])=>document.querySelector(selector));
+  const intact=Object.entries(targets).every(([key],i)=>!nodes[i]||nodes[i].classList.contains('home-inline-editable')===Object.hasOwn(fields,key));
+  if(!force&&!requested&&signature===refreshSignature&&intact&&nodes.length===refreshNodes.length&&nodes.every((node,i)=>node===refreshNodes[i]))return;
+  refreshSignature=signature;refreshNodes=nodes;
   for(const [key,selector] of Object.entries(targets)){const node=document.querySelector(selector);if(!node)continue;node.classList.toggle('home-inline-editable',Object.hasOwn(fields,key));if(Object.hasOwn(fields,key)){node.dataset.inlineField=key;node.setAttribute('tabindex','0');node.setAttribute('aria-label',key==='heroTitle'?'메인 제목 수정':key==='aboutContent'?'조합 소개 본문 수정':'내용 수정');}else{delete node.dataset.inlineField;node.removeAttribute('contenteditable');}}
   for(const area of new Set(['hero','about','impact','contact','activities',...sections.map(row=>row.id)])){
    const section=document.getElementById(area);if(!section)continue;
