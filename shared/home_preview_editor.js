@@ -4,15 +4,20 @@
   if(new URLSearchParams(location.search).get('home_preview')!=='1'||window.parent===window) return;
   const areas=['hero','about','impact','progress','portfolio','status','activities','partners','history','faq','contact','documents','calculator','ops-system','game-hall'];
   let parentOrigin='',draft={};
+  const rendered = {};
   function imageUrl(value){
     const url=String(value||'');
     if(!url.trim())return '';
     if(/^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(url))return url;
     try{const parsed=new URL(url,location.href);return ['https:','http:'].includes(parsed.protocol)?parsed.href:'';}catch(_){return '';}
   }
-  function refresh(){
-    if(window.CoopSiteInline?.isEditing('about')||window.CoopSiteInline?.isEditing('activities'))return;
-    if(Array.isArray(draft.sections)){
+  function refresh(force=true){
+    if(window.CoopSiteInline?.isEditing('about')||window.CoopSiteInline?.isEditing('activities'))return false;
+    let updated=false;
+    const changed=(key,value)=>{const signature=JSON.stringify(value);if(!force&&rendered[key]===signature)return false;rendered[key]=signature;return true;};
+    const layout=[draft.sections,typeof g_public_home_settings==='undefined'?null:[g_public_home_settings?.home_layout_mode,g_public_home_settings?.home_template]];
+    if(Array.isArray(draft.sections)&&changed('sections',layout)){
+      updated=true;
       applyPublicSectionOrder(draft.sections);
       for(const row of draft.sections){
         if(!areas.includes(row?.id)||typeof row.is_visible!=='boolean')continue;
@@ -24,13 +29,13 @@
       }
       window.syncPublicSectionLinks?.();
     }
-    if(draft.about && typeof renderPublicAbout==='function')renderPublicAbout({...draft.about,image_url:imageUrl(draft.about.image_url)});
-    if(Array.isArray(draft.certifications) && typeof renderPublicCertifications==='function')renderPublicCertifications(draft.certifications.map(row=>({...row,image_url:imageUrl(row.image_url)})));
+    if(draft.about && typeof renderPublicAbout==='function' && changed('about',draft.about)){renderPublicAbout({...draft.about,image_url:imageUrl(draft.about.image_url)});updated=true;}
+    if(Array.isArray(draft.certifications) && typeof renderPublicCertifications==='function' && changed('certifications',draft.certifications)){renderPublicCertifications(draft.certifications.map(row=>({...row,image_url:imageUrl(row.image_url)})));updated=true;}
     const container=document.getElementById('activities-container');
-    if(container && (draft.activity || document.getElementById('home-preview-activity-article')) && typeof renderActivityCards==='function')renderActivityCards(g_activity_list);
-    window.AOS?.refreshHard?.();
+    if(container && (draft.activity || document.getElementById('home-preview-activity-article')) && typeof renderActivityCards==='function' && changed('activity',draft.activity)){renderActivityCards(g_activity_list);updated=true;}
     // The rendered order also includes the selected template's layout overrides.
-    if(parentOrigin)window.parent.postMessage({type:'coop-home-preview-order',ids:[...document.querySelectorAll('main > section[id]')].map(node=>node.id)},parentOrigin);
+    if(updated&&parentOrigin)window.parent.postMessage({type:'coop-home-preview-order',ids:[...document.querySelectorAll('main > section[id]')].map(node=>node.id)},parentOrigin);
+    return updated;
   }
   function finishActivities(container){
     if(container){
@@ -57,7 +62,7 @@
     document.getElementById(target)?.scrollIntoView({block:'start'});
   }
   window.CoopSitePreview=Object.freeze({
-    get:key=>draft[key],apply(value){draft=value&&typeof value==='object'?value:{};refresh();},refresh,finishActivities,
+    get:key=>draft[key],apply(value){draft=value&&typeof value==='object'?value:{};return refresh(false);},refresh,finishActivities,invalidate(key){delete rendered[key];},
     activityRows(rows){
       if(!draft.activity)return rows;
       const filtered=(Array.isArray(rows)?rows:[]).filter(row=>String(row.id)!==draft.activity.id);

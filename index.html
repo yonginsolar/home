@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.129
-Change: 2026-10-09 - Live draft preview for content, certifications, news and section layout.
+Version: v1.0.130
+Change: 2026-10-09 - Changed-only draft rendering and stable inline formatting.
 -->
 <html lang="ko">
 
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-<script>console.log('[Version] v1.0.129 | index.html');</script>
+<script>console.log('[Version] v1.0.130 | index.html');</script>
 <script>
   (function logPrimaryCoopBannerOnly() {
     const host = String(window.location.hostname || '').trim().toLowerCase().replace(/\.$/, '');
@@ -1760,9 +1760,9 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
   <link href="shared/theme.css?v=20260917-2" rel="stylesheet">
   <link href="shared/public_power_monitor.css?v=20261007-2" rel="stylesheet">
   <script src="shared/home_design.js?v=20261009-3"></script>
-<script src="shared/site_text_styles.js?v=20261009-14" defer></script>
-<script src="shared/site_inline_editor.js?v=20261009-14" defer></script>
-<script src="shared/home_preview_editor.js?v=20261009-14" defer></script>
+<script src="shared/site_text_styles.js?v=20261009-15" defer></script>
+<script src="shared/site_inline_editor.js?v=20261009-15" defer></script>
+<script src="shared/home_preview_editor.js?v=20261009-15" defer></script>
   <link rel="stylesheet" href="shared/home_design.css?v=20261009-1">
 </head>
 
@@ -2656,7 +2656,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
         appendText(safeTitle.slice(matchIndex + safeHighlight.length));
     }
 
-    function applyPublicHomeSettings(settings) {
+    function applyPublicHomeSettings(settings, { reorder = true } = {}) {
         if (!settings || typeof settings !== 'object') return;
         g_public_home_settings = settings;
         const hero = document.getElementById('hero');
@@ -2701,7 +2701,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
         window.__PUBLIC_SITE_MEMBER_PROFILE__ = isSiteMemberProfile;
         document.body.classList.toggle('home-layout-designed', CoopHomeDesign.normalizeLayout(settings.home_layout_mode) === 'designed');
         CoopHomeDesign.applyFonts(document.body, settings.home_title_font, settings.home_body_font, settings.home_external_fonts || {});
-        if (Array.isArray(g_publicSectionsForLayout)) applyPublicSectionOrder(g_publicSectionsForLayout);
+        if (reorder && Array.isArray(g_publicSectionsForLayout)) applyPublicSectionOrder(g_publicSectionsForLayout);
 
         const impact = document.getElementById('impact');
         const impactKicker = document.querySelector('#public-impact-kicker span');
@@ -2893,14 +2893,28 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
     const isHomePreviewMode = new URLSearchParams(window.location.search).get('home_preview') === '1';
     if (isHomePreviewMode) {
         document.documentElement.dataset.homePreview = 'true';
+        let homePreviewHomeSignature = '', homePreviewInlineSignature = '';
+        window.resetHomePreviewField = (field) => {
+            homePreviewInlineSignature = '';
+            if (String(field).startsWith('about')) window.CoopSitePreview?.invalidate('about');
+            else if (String(field).startsWith('activity')) window.CoopSitePreview?.invalidate('activity');
+            else homePreviewHomeSignature = '';
+        };
         const applyHomePreviewDraft = window.applyHomePreviewDraft = (settings) => {
             if (!settings || typeof settings !== 'object') return;
             if (window.CoopSiteInline?.defer(settings)) return;
             g_homePreviewDraftApplied = true;
-            applyPublicHomeSettings(settings);
-            window.CoopSitePreview?.apply(settings.site_preview);
-            window.CoopSiteInline?.refresh(settings.inline_fields, settings.site_preview?.sections);
-            if (window.AOS?.refreshHard) window.AOS.refreshHard();
+            const { site_preview, inline_fields, ...home } = settings;
+            const homeSignature = JSON.stringify(home), inlineSignature = JSON.stringify([inline_fields, site_preview?.sections]);
+            if (homeSignature !== homePreviewHomeSignature) {
+                applyPublicHomeSettings(settings, { reorder: !Array.isArray(site_preview?.sections) });
+                homePreviewHomeSignature = homeSignature;
+            }
+            const previewUpdated = window.CoopSitePreview?.apply(settings.site_preview);
+            if (previewUpdated || inlineSignature !== homePreviewInlineSignature) {
+                window.CoopSiteInline?.refresh(settings.inline_fields, settings.site_preview?.sections);
+                homePreviewInlineSignature = inlineSignature;
+            }
         };
         const initialPreviewLayout = new URLSearchParams(window.location.search).get('home_preview_layout');
         if (initialPreviewLayout) {
@@ -3139,6 +3153,12 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
         }
 
         const mainEl = document.getElementById('main');
+        const placeChanged = (parent, ordered, filtered = false) => {
+            ordered.forEach((el, index) => {
+                const current = filtered ? Array.from(parent.children).filter(n => n.id) : Array.from(parent.children);
+                if (current[index] !== el) parent.insertBefore(el, current[index] || null);
+            });
+        };
         if (mainEl) {
             const children = Array.from(mainEl.children).filter((el) => el && el.id);
             const decorated = children.map((el, index) => ({
@@ -3146,9 +3166,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
                 index,
                 order: orderMap.has(el.id) ? orderMap.get(el.id) : 9999
             }));
-            decorated
-                .sort((a, b) => (a.order - b.order) || (a.index - b.index))
-                .forEach(({ el }) => mainEl.appendChild(el));
+            placeChanged(mainEl, decorated.sort((a, b) => (a.order - b.order) || (a.index - b.index)).map(({ el }) => el), true);
         }
 
         const navList = document.querySelector('#navbar ul');
@@ -3164,9 +3182,7 @@ Change: 2026-10-09 - Live draft preview for content, certifications, news and se
                     targetId
                 };
             });
-            navItems
-                .sort((a, b) => (a.order - b.order) || (a.index - b.index))
-                .forEach(({ li }) => navList.appendChild(li));
+            placeChanged(navList, navItems.sort((a, b) => (a.order - b.order) || (a.index - b.index)).map(({ li }) => li));
         }
     }
 

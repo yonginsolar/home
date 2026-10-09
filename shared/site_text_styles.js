@@ -98,8 +98,20 @@
   }return normalize(value,out);
  }
  function trim(value,runs){const text=String(value??''),start=text.length-text.trimStart().length,end=text.trimEnd().length;let at=0;const result=[];for(const r of normalize(text,runs)){const lo=Math.max(start,at),hi=Math.min(end,at+r.text.length);if(hi>lo)result.push({...r,text:r.text.slice(lo-at,hi-at)});at+=r.text.length;}return normalize(text.trim(),result);}
+ // Legacy lists stay unchanged in the original field until an actual edit/save.
+ // An inert template extracts visible text and supported formatting, not markup.
+ function editableList(value,runs){
+  const raw=String(value??'');if(!/<li[\s>]/i.test(raw))return {value:raw,runs:normalize(raw,runs)};
+  const template=document.createElement('template');template.innerHTML=raw;
+  template.content.querySelectorAll('script,style,iframe,object,embed,svg,math').forEach(n=>n.remove());
+  const lines=[];for(const li of template.content.querySelectorAll('li')){
+   const part=read(li),text=part.value.trim();if(!text)continue;
+   if(lines.length)lines.push({text:'\n'});lines.push(...(trim(part.value,part.runs).length?trim(part.value,part.runs):[{text}]));
+  }
+  const text=lines.map(r=>r.text).join('');return {value:text,runs:normalize(text,runs).length?normalize(text,runs):normalize(text,lines)};
+ }
  function html(value,runs){const n=document.createElement('span');paint(n,value,runs);return n.innerHTML;}
- root.CoopTextStyles=Object.freeze({normalize,paint,read,format,trim,html,adapt,adaptPublic,sourceHtml,nightStyle});
+ root.CoopTextStyles=Object.freeze({normalize,paint,read,format,trim,editableList,html,adapt,adaptPublic,sourceHtml,nightStyle});
  root.addEventListener('coop-theme-change',adaptPublic);
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',adaptPublic,{once:true});else adaptPublic();
 })(window);

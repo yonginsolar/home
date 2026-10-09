@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.248
-Change: 2026-10-09 - Direct homepage editing and member badge tab.
+Version: v1.0.249
+Change: 2026-10-09 - Stable homepage editing, legacy list restoration and safe seal replacement.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.248';
+window.ADMIN_MEMBER_VERSION = 'v1.0.249';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -33,6 +33,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.248';
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
+<script src="../shared/company_seal_upload.js?v=20261009-15"></script>
 <script src="/shared/auth_email_helper.js?v=1.0.0"></script>
 <script>window.__AUTH_BROKER_CONFIG__={origin:'https://auth.coopco.kr',enabledProviders:{kakao:true,'custom:naver':true},supportedModes:['login']};</script>
 <script src="/shared/auth_broker_helper.js?v=20261006-2"></script>
@@ -60,8 +61,8 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.248';
 <script src="../shared/home_design.js?v=20261009-3"></script>
 <link rel="stylesheet" href="home_visual_editor.css?v=20261009-13">
 <script src="home_visual_editor.js?v=20261009-13"></script>
-<script src="../shared/site_text_styles.js?v=20261009-14"></script>
-<script src="site_inline_editor.js?v=20261009-13"></script>
+<script src="../shared/site_text_styles.js?v=20261009-15"></script>
+<script src="site_inline_editor.js?v=20261009-15"></script>
 <script src="../shared/notice_attachments.js?v=1.0.0"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="/badges.js?v=20260331_01"></script>
@@ -4798,18 +4799,13 @@ async function saveMemberCertificateSettings() {
     if (saveButton) saveButton.disabled = true;
     showLoading(true);
     let newlyUploadedLogoUrl = '';
+    let orgSettingsSaved = false;
     const previousLogoUrl = memberOrgOriginalLogoUrl;
     try {
         let sealPath = memberCertificateSealStoragePath;
         if (sealFile) {
             const uploadFile = await convertMemberCertificateSealToPng(sealFile);
-            sealPath = `${MEMBER_CERTIFICATE_SEAL_PREFIX}/${coopId}/company_seal`;
-            const { error: uploadError } = await _supabase.storage.from('attachments').upload(sealPath, uploadFile, {
-                upsert: true,
-                contentType: 'image/png',
-                cacheControl: '3600'
-            });
-            if (uploadError) throw uploadError;
+            sealPath = await CoopCompanySealUpload.upload(_supabase, coopId, uploadFile, sealFile);
         }
 
         let logoUrl = memberOrgLogoUrl;
@@ -4833,6 +4829,7 @@ async function saveMemberCertificateSettings() {
             p_deposit_holder: read('member-org-deposit-holder')
         });
         if (saveError) throw saveError;
+        orgSettingsSaved = true;
 
         memberCertificateSealStoragePath = sealPath;
         memberOrgLogoUrl = logoUrl;
@@ -4849,8 +4846,9 @@ async function saveMemberCertificateSettings() {
         if (modal) modal.hide();
         myAlert('조합 공식 정보, 출자증서와 입금 안내 설정을 저장했습니다.', 'success');
     } catch (error) {
-        if (newlyUploadedLogoUrl) await deleteOldFile(newlyUploadedLogoUrl);
-        myAlert('조합 기본 설정 저장 실패: ' + (error?.message || error), 'error');
+        // A lost RPC reply is not proof of rollback. Keep newly uploaded files
+        // rather than deleting a seal/logo that the server may have accepted.
+        myAlert(orgSettingsSaved ? '설정은 저장되었습니다. 화면을 다시 열어 확인해 주세요.' : '조합 기본 설정 저장 실패: ' + (error?.message || error), orgSettingsSaved ? 'warning' : 'error');
     } finally {
         showLoading(false);
         if (saveButton) saveButton.disabled = false;
@@ -9056,8 +9054,10 @@ const settings = await collectHomePreviewSettings();
 if (revision !== g_homePreviewRevision) return;
 const targetOrigin = new URL(frame.src).origin;
 const message = { type: 'coop-home-preview-settings', settings };
-if (g_homePreviewChannel) g_homePreviewChannel.postMessage(message);
+// The iframe is the authoritative peer. Broadcast is only a fallback, not a
+// second copy of every keystroke and settings update.
 if (targetWindow) targetWindow.postMessage(message, targetOrigin);
+else if (g_homePreviewChannel) g_homePreviewChannel.postMessage(message);
 } catch (error) {
 CoopSafeLog.warn("[sendHomePreviewSettings] failed:", error);
 }
@@ -9282,6 +9282,8 @@ const values = Array.from(document.querySelectorAll('#admin-about-list-editor in
 const source = document.getElementById('admin-about-list');
 if (source) {
 const previous=source.value,next=values.join('\n');
+const editable=CoopTextStyles.editableList(previous,CoopSiteInlineHost.readStyles('about').aboutList);
+if(previous!==editable.value&&editable.value===next){const styles=CoopSiteInlineHost.readStyles('about');if(editable.runs.length)styles.aboutList=editable.runs;else delete styles.aboutList;CoopSiteInlineHost.setStyles('about',styles);}
 // Merely saving the list must not remove formatting because blank lines or
 // surrounding spaces are normalized by the existing per-item editor.
 if(previous!==next&&parseAboutListItems(previous).join('\n')===next){
@@ -9532,6 +9534,7 @@ const imageUrlInput = document.getElementById('admin-about-img');
 const file = fileInput?.files?.[0] || null;
 const previousImageUrl = g_aboutOriginalImageUrl;
 let newlyUploadedImageUrl = '';
+let aboutSaveConfirmed = false;
 if (saveButton) saveButton.disabled = true;
 showLoading(true);
 try {
@@ -9558,6 +9561,7 @@ p_text_styles:CoopSiteInlineHost.readStyles('about',true)
 };
 const { error } = await _supabase.rpc('upsert_about_with_text_styles', updates);
 if (error) throw error;
+aboutSaveConfirmed = true;
 
 const savedImageUrl = updates.p_image_url;
 g_aboutOriginalImageUrl = savedImageUrl;
@@ -9576,12 +9580,9 @@ setAboutImageStatus(savedImageUrl ? '현재 홈페이지에서 사용 중인 사
 updateTotalPreview();
 draft.accept();
 } catch (error) {
-if (newlyUploadedImageUrl) {
-const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
-await deleteManagedAboutImage(newlyUploadedImageUrl, coopId);
-if (imageUrlInput?.value === newlyUploadedImageUrl) imageUrlInput.value = previousImageUrl;
-}
-document.getElementById('commonAlertText').innerText = '저장 실패: ' + (error?.message || error);
+// Do not remove the new photo when a response is lost or a post-save UI refresh
+// fails. It may already be referenced by the committed introduction.
+document.getElementById('commonAlertText').innerText = aboutSaveConfirmed ? '조합 소개는 저장되었습니다. 화면을 다시 열어 확인해 주세요.' : '저장 실패: ' + (error?.message || error);
 bootstrap.Modal.getOrCreateInstance(document.getElementById('commonAlertModal')).show();
 } finally {
 showLoading(false);

@@ -37,7 +37,7 @@
   root.CoopTextStyles?.adapt(item.node);item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
   // An echoed preview may predate the last keystroke. Request a fresh snapshot
   // after the final field message instead of applying that stale echo on blur.
-  pending=null;send({type:'coop-home-preview-ready'});return true;
+  pending=null;root.resetHomePreviewField?.(item.key);send({type:'coop-home-preview-ready'});return true;
  }
  function begin(key,node){
   const config=fields[key];if(!config||!node)return false;if(active?.node===node)return true;if(!finish())return false;
@@ -59,6 +59,31 @@
  }
  function remember(previous=false){if(!active)return;active.changed=true;active.undo.push(snapshot(previous));if(active.undo.length>100)active.undo.shift();active.redo=[];active.beforeSelection=null;}
  function restore(state){active.changed=true;active.highlight=state.highlight;if(active.kind==='rich')active.node.innerHTML=root.sanitizeHtml(state.value);else if(root.CoopTextStyles){active.styles=state.styles||[];root.CoopTextStyles.paint(active.node,state.value,active.styles);if(active.key==='heroTitle')sendHighlight();}else if(active.key==='heroTitle'){paintHero(state.value);sendHighlight();}else active.node.textContent=state.value;active.node.focus({preventScroll:true});reselect(state.selection);transmit(state.value,true);showToolbar();}
+ function clearRichHighlight(){
+  const mark=bookmark();if(!mark||mark.start===mark.end)return;
+  const walker=document.createTreeWalker(active.node,root.NodeFilter.SHOW_TEXT),items=[],removed=new Set();let node,at=0;
+  while((node=walker.nextNode())){
+   const ancestors=[];for(let p=node.parentElement;p&&p!==active.node;p=p.parentElement)if(p.style.backgroundColor)ancestors.push(p);
+   const item={node,start:at,end:at+node.length,ancestors,color:ancestors[0]?.style.backgroundColor};items.push(item);at=item.end;
+   if(item.end>mark.start&&item.start<mark.end)ancestors.forEach(p=>removed.add(p));
+  }
+  if(!removed.size)return;
+  remember();for(const p of removed){p.style.removeProperty('background-color');if(!p.getAttribute('style'))p.removeAttribute('style');}
+  // Lift only the removed background onto unselected text. This preserves
+  // paragraphs, links and every other format without a transparent child that
+  // would still show its ancestor's background.
+  for(const item of items){
+   if(!item.color||!item.ancestors.some(p=>removed.has(p)))continue;
+   const text=item.node.data,out=document.createDocumentFragment();
+   const lo=Math.max(0,Math.min(text.length,mark.start-item.start)),hi=Math.max(lo,Math.min(text.length,mark.end-item.start));
+   for(const [start,end,highlight] of [[0,lo,true],[lo,hi,false],[hi,text.length,true]]){
+    if(end<=start)continue;const part=document.createTextNode(text.slice(start,end));
+    if(highlight){const span=document.createElement('span');span.style.backgroundColor=item.color;span.append(part);out.append(span);}else out.append(part);
+   }
+   item.node.replaceWith(out);
+  }
+  reselect(mark);transmit();showToolbar();
+ }
  function command(name,color){
   if(!active)return;if(name==='done'){finish();return;}
   if(name==='undo'||name==='redo'){const from=name==='undo'?active.undo:active.redo,to=name==='undo'?active.redo:active.undo;if(from.length){to.push(snapshot());restore(from.pop());}return;}
@@ -74,7 +99,7 @@
    if(text===active.highlight)return;remember();active.highlight=text;paintHero(fieldValue());transmit();sendHighlight();showToolbar();return;
   }
   if(active.kind!=='rich')return;
-  if(name==='clearHighlight'){remember();const fragment=selectionRange.extractContents();for(const n of fragment.querySelectorAll('[style]'))n.style.removeProperty('background-color');const wrapper=document.createElement('span');wrapper.append(fragment);selectionRange.insertNode(wrapper);const range=document.createRange();range.selectNodeContents(wrapper);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);selectionRange=range;transmit();showToolbar();return;}
+  if(name==='clearHighlight'){clearRichHighlight();return;}
   let tag={bold:'strong',italic:'em',underline:'u',highlight:'span',color:'span',link:'a'}[name];if(!tag)return;
   const wrapper=document.createElement(tag);
   if(name==='highlight')wrapper.style.backgroundColor=color||toolbar.querySelector('[data-color-kind="highlight"]').value;
