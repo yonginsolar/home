@@ -49,7 +49,10 @@
       const face = new FontFace(name, `url(${JSON.stringify(safe.url)})`, { display:'swap' });
       const loading = Promise.race([face.load(), new Promise((_,reject)=>setTimeout(()=>reject(new Error('글꼴 연결 시간이 초과되었습니다.')),10000))])
         .then(loaded => { document.fonts.add(loaded); return name; })
-        .catch(error => { externalFaces.delete(safe.url); throw error; });
+        .catch(error => {
+          externalFaces.delete(safe.url);
+          throw new Error(error.message === '글꼴 연결 시간이 초과되었습니다.' ? error.message : '글꼴을 불러오지 못했습니다. 파일 주소와 외부 연결 허용 설정을 확인해 주세요.');
+        });
       externalFaces.set(safe.url, loading);
     }
     return externalFaces.get(safe.url);
