@@ -8,6 +8,7 @@
     if(url.protocol!==location.protocol || url.hostname.replace(/^(www|erp)\./,'')!==location.hostname.replace(/^(www|erp)\./,''))return;
     if(event.data?.type==='coop-home-preview-settings') {parentOrigin=event.origin;document.documentElement.dataset.homeVisualEdit='true';}
     if(event.data?.type==='coop-home-preview-select' && parentOrigin===event.origin && ['hero','impact','contact'].includes(event.data.area)) document.getElementById(event.data.area)?.scrollIntoView({block:'start'});
+    if(event.data?.type==='coop-home-preview-navigate' && parentOrigin===event.origin && ['hero','about','impact','progress','portfolio','status','activities','partners','faq','contact','documents','calculator','ops-system','game-hall'].includes(event.data.area)) document.getElementById(event.data.area)?.scrollIntoView({block:'start'});
   });
   document.addEventListener('click',event=>{
     if(!parentOrigin)return;
