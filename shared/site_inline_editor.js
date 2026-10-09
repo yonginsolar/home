@@ -7,9 +7,9 @@
  const histories=new Map();let requestSequence=0;
  function send(message){if(origin)root.parent.postMessage(message,origin);}
  function trusted(event){if(event.source!==root.parent)return false;try{const u=new URL(event.origin);return u.protocol===location.protocol&&u.port===location.port&&u.hostname.replace(/^(www|erp)\./,'')===location.hostname.replace(/^(www|erp)\./,'');}catch(_){return false;}}
- function fieldValue(){return active?.kind==='rich'?active.node.innerHTML:root.CoopTextStyles?root.CoopTextStyles.read(active.node).value:(active?.node.innerText??active?.node.textContent??'');}
+ function fieldValue(){return active?.kind==='rich'?(root.CoopTextStyles?.sourceHtml(active.node)??active.node.innerHTML):root.CoopTextStyles?root.CoopTextStyles.read(active.node).value:(active?.node.innerText??active?.node.textContent??'');}
  function announce(text){status.textContent=text;status.hidden=!text;}
- function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}if(active.kind==='plain'&&root.CoopTextStyles)active.styles=root.CoopTextStyles.read(active.node).runs;active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,...(active.kind==='plain'&&root.CoopTextStyles?{styles:active.styles}:{}),requestId:active.latestRequest});return true;}
+ function transmit(value=fieldValue(),restore=false){if(!active)return true;if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}if(active.kind==='plain'&&root.CoopTextStyles)active.styles=root.CoopTextStyles.read(active.node).runs;root.CoopTextStyles?.adapt(active.node);active.last=value;active.renderedLast=fieldValue();active.latestRequest=++requestSequence;send({type:'coop-home-inline-edit',field:active.key,value,restore,...(active.kind==='plain'&&root.CoopTextStyles?{styles:active.styles}:{}),requestId:active.latestRequest});return true;}
  function bookmark(){
   if(!active)return null;const sel=root.getSelection();const range=sel.rangeCount&&active.node.contains(sel.anchorNode)?sel.getRangeAt(0):selectionRange;if(!range)return null;
   if(!active.node.contains(range.startContainer)||!active.node.contains(range.endContainer))return null;
@@ -34,7 +34,7 @@
   if(item.changed&&(cancel?!transmit(item.initial,true):fieldValue().length>item.maxLength||(fieldValue()!==item.renderedLast&&!transmit())))return false;
   if(fields[item.key]){fields[item.key].value=item.last;fields[item.key].styles=item.styles;}
   histories.set(item.key,{value:item.last,highlight:item.highlight,styles:item.styles,undo:item.undo,redo:item.redo});
-  item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
+  root.CoopTextStyles?.adapt(item.node);item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
   // An echoed preview may predate the last keystroke. Request a fresh snapshot
   // after the final field message instead of applying that stale echo on blur.
   pending=null;send({type:'coop-home-preview-ready'});return true;
@@ -45,6 +45,7 @@
   active={...config,key,node,initial:config.value,last:config.value,styles,initialStyles:styles,highlight,initialHighlight:highlight,undo:reuse?history.undo:[],redo:reuse?history.redo:[],changed:false};
   if(config.kind==='rich')node.innerHTML=root.sanitizeHtml(String(config.value||''));else if(root.CoopTextStyles)root.CoopTextStyles.paint(node,config.value,styles);else node.textContent=config.value;
   if(key==='heroTitle'&&!root.CoopTextStyles)paintHero(config.value);
+  root.CoopTextStyles?.adapt(node);
   node.hidden=false;node.removeAttribute('hidden');node.classList.add('home-inline-active');node.classList.toggle('home-inline-plain',config.kind==='plain');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus({preventScroll:true});
   const range=document.createRange();range.selectNodeContents(node);range.collapse(false);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);showToolbar();return true;
  }

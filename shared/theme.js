@@ -6,8 +6,9 @@
   const script = document.currentScript;
   const showToggle = script?.dataset.themeToggle !== 'off';
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+  const editorPreview = new URLSearchParams(window.location.search).get('home_preview') === '1' && window.parent !== window;
   let toggleControl = null;
-  let selectedMode = readStoredTheme() || 'auto';
+  let selectedMode = editorPreview ? 'light' : readStoredTheme() || 'auto';
 
   const routePath = window.location.pathname
     .replace(/^\/+/, '')
@@ -27,6 +28,7 @@
   }
 
   function writeStoredTheme(value) {
+    if (editorPreview) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, value);
     } catch (_) {
@@ -35,6 +37,7 @@
   }
 
   function clearStoredTheme() {
+    if (editorPreview) return;
     try {
       window.localStorage.removeItem(STORAGE_KEY);
     } catch (_) {
@@ -133,6 +136,7 @@
   }
 
   window.addEventListener('storage', function (event) {
+    if (editorPreview) return;
     if (event.key !== STORAGE_KEY) return;
     if (event.newValue === 'light' || event.newValue === 'dark') {
       selectedMode = event.newValue;

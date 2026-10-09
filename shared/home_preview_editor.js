@@ -46,6 +46,7 @@
         const url=imageUrl(draft.activity.file_url);
         if(url){const img=document.createElement('img');img.src=url;img.alt='';img.style.cssText='max-width:100%;max-height:320px;object-fit:contain;margin-bottom:20px';article.append(img);}
         article.append(content);container.after(article);
+        CoopTextStyles.adapt(article);
         if(previousId!==draft.activity.id)article.scrollIntoView?.({block:'start'});
       }
     }
