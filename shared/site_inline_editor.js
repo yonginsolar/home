@@ -11,8 +11,8 @@
  function transmit(){if(!active)return true;const value=fieldValue();if(value.length>active.maxLength){announce('입력할 수 있는 길이를 초과했습니다.');return false;}send({type:'coop-home-inline-edit',field:active.key,value});active.last=value;return true;}
  function finish(cancel=false){
   if(!active)return true;const item=active;
-  if(cancel){if(item.kind==='rich')item.node.innerHTML=item.initial;else item.node.textContent=item.initial;}
-  if(!transmit())return false;
+  if(cancel){if(item.kind==='rich')item.node.innerHTML=root.sanitizeHtml(item.initial);else item.node.textContent=item.initial;}
+  if(item.changed&&!transmit())return false;
   if(fields[item.key])fields[item.key].value=item.last;
   item.node.removeAttribute('contenteditable');item.node.classList.remove('home-inline-active');active=null;selectionRange=null;toolbar.hidden=true;announce('');
   // An echoed preview may predate the last keystroke. Request a fresh snapshot
@@ -21,7 +21,7 @@
  }
  function begin(key,node){
   const config=fields[key];if(!config||!node)return false;if(active?.node===node)return true;if(!finish())return false;
-  active={...config,key,node,initial:config.value,last:config.value,undo:[],redo:[]};
+  active={...config,key,node,initial:config.value,last:config.value,undo:[],redo:[],changed:false};
   if(config.kind==='rich')node.innerHTML=root.sanitizeHtml(String(config.value||''));else node.textContent=config.value;
   node.hidden=false;node.removeAttribute('hidden');node.classList.add('home-inline-active');node.setAttribute('contenteditable',config.kind==='rich'?'true':'plaintext-only');node.focus();
   const range=document.createRange();range.selectNodeContents(node);range.collapse(false);const sel=root.getSelection();sel.removeAllRanges();sel.addRange(range);showToolbar();return true;
@@ -33,7 +33,7 @@
   toolbar.querySelector('select').hidden=!rich;
   const sel=root.getSelection();if(sel.rangeCount&&active.node.contains(sel.anchorNode)&&active.node.contains(sel.focusNode)&&!sel.isCollapsed){selectionRange=sel.getRangeAt(0).cloneRange();pointToolbar(selectionRange.getBoundingClientRect?.()||active.node.getBoundingClientRect());}else pointToolbar(active.node.getBoundingClientRect());
  }
- function remember(){if(!active)return;active.undo.push(active.last);if(active.undo.length>100)active.undo.shift();active.redo=[];}
+ function remember(){if(!active)return;active.changed=true;active.undo.push(active.last);if(active.undo.length>100)active.undo.shift();active.redo=[];}
  function restore(value){if(active.kind==='rich')active.node.innerHTML=root.sanitizeHtml(value);else active.node.textContent=value;selectionRange=null;transmit();showToolbar();}
  function command(name,color='#166534'){
   if(!active)return;if(name==='done'){finish();return;}
