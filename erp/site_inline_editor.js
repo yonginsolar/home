@@ -87,7 +87,7 @@
    for(const source of sources){const button=document.createElement('button');button.type='button';button.className='btn btn-sm '+(source.dataset.legalAction==='draft'?'btn-outline-primary':'btn-primary');button.textContent=source.textContent.trim();button.disabled=source.disabled;button.onclick=async()=>{button.disabled=true;if(!(await flush())){myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');signature='';sync();return;}if(permitted()&&!source.disabled)source.click();signature='';sync();};actions.append(button);}
    if(!['hero','impact','about','activities','contact','legal'].includes(area))workspace.classList.add('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
   }
-  new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class']});document.getElementById('site-home-area-picker').addEventListener('change',()=>{workspace.classList.remove('show-settings');sync();});toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){workspace.classList.remove('show-settings');signature='';sync();}});sync();
+  new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
  root.addEventListener('message',event=>{
   const f=frame();if(!f?.src||event.source!==f.contentWindow||event.origin!==new URL(f.src).origin)return;

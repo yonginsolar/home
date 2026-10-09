@@ -1,10 +1,25 @@
 /* Actual homepage preview + the existing inputs, draft controller and secure save path. */
 (function(root){
   'use strict';
-  let mounted=false, selected='hero';
+  let mounted=false, selected='hero', sectionRows=[];
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
+  const utilities=['sections','legal','design','fonts','documents'];
+  function syncOrder(rows){
+    if(Array.isArray(rows))sectionRows=rows;
+    const order=new Map([...sectionRows].sort((a,b)=>a.display_order-b.display_order).map((row,i)=>[row.id,i]));
+    const fallback=['hero','about','certifications','impact','progress','status','activities','external-news','partners','history','faq','contact'];
+    const anchor=area=>area==='certifications'?'about':area==='external-news'?'activities':area==='progress'?(order.has('progress')?'progress':'portfolio'):area;
+    const areas=[...fallback].sort((a,b)=>(a==='hero'?-1:b==='hero'?1:(order.get(anchor(a))??100)-(order.get(anchor(b))??100))||fallback.indexOf(a)-fallback.indexOf(b)).concat(utilities);
+    const picker=document.getElementById('site-home-area-picker'),strip=document.getElementById('site-home-area-strip');
+    for(const area of areas){
+      const option=picker?.querySelector(`option[value="${area}"]`),button=strip?.querySelector(`[data-home-select-area="${area}"]`);
+      if(option){option.hidden=!available(area);picker.append(option);}
+      if(button){button.hidden=!available(area);strip.append(button);}
+    }
+    if(picker)picker.value=selected;
+  }
   function available(area){
     const link=document.querySelector(`#site-content-tabs a[href="#${panes[area]||'sub-home-settings'}"]`);
     // Scope rules hide individual nav items. The whole ERP is hidden during Auth
@@ -50,9 +65,10 @@
     const picker=document.createElement('select');picker.id='site-home-area-picker';picker.className='form-select home-visual-area-picker';picker.onchange=()=>select(picker.value);
     for(const [area,label] of Object.entries(labels)) {const option=document.createElement('option');option.value=area;option.textContent=label;picker.append(option);}
     toolbar.append(pickerLabel,picker);
-    for(const area of ['hero','impact','about','certifications','activities','sections','legal','contact','design','fonts']) {
+    const strip=document.createElement('div');strip.id='site-home-area-strip';strip.className='home-visual-area-strip';strip.setAttribute('aria-label','홈페이지 영역');toolbar.append(strip);
+    for(const area of Object.keys(labels)) {
       const button=document.createElement('button'); button.type='button'; button.className='btn btn-sm btn-outline-secondary';
-      button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); toolbar.append(button);
+      button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); strip.append(button);
     }
     const devices=document.querySelector('.home-preview-device-group'); if(devices) { devices.classList.add('ms-auto'); toolbar.append(devices); }
     const pending=document.createElement('button');pending.type='button';pending.className='btn btn-sm btn-primary';pending.id='site-home-pending-save';pending.hidden=true;pending.textContent='메인 화면 변경 저장';pending.onclick=async()=>{if(await (window.CoopSiteInlineHost?.flush()??Promise.resolve(true)))saveHomeSettings();else myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');};toolbar.append(pending);
@@ -85,8 +101,7 @@
       if(area&&area!==selected)select(area);
     });
     const syncChoices=()=>{
-      for(const option of picker.options)option.hidden=!available(option.value);
-      for(const button of toolbar.querySelectorAll('[data-home-select-area]'))button.hidden=!available(button.dataset.homeSelectArea);
+      syncOrder();
       const documentsOnly=new URLSearchParams(location.search).get('scope')==='documents_admin';
       toolbar.hidden=documentsOnly;workspace.classList.toggle('is-documents-only',documentsOnly);
     };
@@ -160,5 +175,5 @@
       if(event.data.area==='legal')window.CoopSiteLegalEditor?.select(event.data.legalKind);
     }
   });
-  root.CoopHomeVisualEditor=Object.freeze({mount,select,current:()=>selected,readExternal,setExternal,updateExternalUi});
+  root.CoopHomeVisualEditor=Object.freeze({mount,select,syncOrder,current:()=>selected,readExternal,setExternal,updateExternalUi});
 })(window);
