@@ -1372,6 +1372,7 @@
         return;
       }
       const access = await rpc('access');
+      void window.ErpWorkspace?.connect(client);
       editable = access.editable === true;
       $('coopName').textContent=access.coop_name||'';
       document.title='매출·재고·현금영수증 관리'+(access.coop_name?' | '+access.coop_name:'');

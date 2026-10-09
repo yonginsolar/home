@@ -431,6 +431,7 @@
     try {
       const gate = await window.ErpRuntimeGuard.requireUser(getClient(), { redirectUrl: 'index.html' });
       if (!gate.ok) return;
+      void window.ErpWorkspace?.connect(getClient());
       await load();
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] boot failed`, error);

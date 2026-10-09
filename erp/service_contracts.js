@@ -228,7 +228,7 @@
  }
  async function boot(){try{
   const {data,error}=await db.auth.getUser();if(error||!data.user){location.replace('index.html?next='+encodeURIComponent(location.href));return;}
-  context=await rpc('context',{},null);const {data:access,error:accessError}=await db.rpc('erp_service_access_state');if(accessError)throw accessError;
+  context=await rpc('context',{},null);void window.ErpWorkspace?.connect(db);const {data:access,error:accessError}=await db.rpc('erp_service_access_state');if(accessError)throw accessError;
   context.download_allowed=Boolean(access?.download_allowed);$('orgName').textContent=context.party?.name||'';
   if(!context.admin&&!context.platform&&!context.representative&&!context.draft_reviewer)throw Error('SERVICE_ADMIN_REQUIRED');
   $('workspace').hidden=false;$('newContract').hidden=!context.platform||context.closed;$('exportData').hidden=!context.download_allowed;

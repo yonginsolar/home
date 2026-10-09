@@ -1,5 +1,5 @@
 window.ErpRuntimeGuard = {
-  version: '1.4.2',
+  version: '1.4.3',
   showInlineAlert: function(message) {
     const text = String(message || '확인이 필요합니다.').trim() || '확인이 필요합니다.';
     try {
@@ -39,6 +39,8 @@ window.ErpRuntimeGuard = {
     const { data, error } = await _supabase.rpc('get_my_erp_runtime');
     if (error) throw error;
     const runtime = data || null;
+    // The layout reuses this server-owned answer; business/auth checks below are unchanged.
+    if (window.ErpWorkspace) void window.ErpWorkspace.connect(_supabase, runtime);
     if (runtime && Array.isArray(runtime.effective_permissions)) {
       try {
         localStorage.setItem('erp_permissions', JSON.stringify(runtime.effective_permissions));
