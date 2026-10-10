@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.24 -->
+<!-- Version: v1.0.25 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.24 | officials_admin.html');</script>
+  <script>console.log('[Version] v1.0.25 | officials_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -459,6 +459,9 @@
     let memberSearchEnabled = true;
     let voteImportEnabled = false;
     let currentUser = null;
+    let officialDataAuthorized = false;
+    let memberSearchSeq = 0;
+    let memberSearchRequest = null;
     let importableElections = [];
     let currentElectionImportPreview = null;
     let importRoleWasManuallyEdited = false;
@@ -1547,10 +1550,13 @@
       }
       closeOfficialFormModal();
       document.getElementById('memberSearchModal')?.classList.remove('d-none');
+      void searchMembers(true);
       setTimeout(() => document.getElementById('memberSearchKeyword')?.focus(), 0);
     }
 
     function closeMemberSearchModal() {
+      memberSearchSeq++;
+      memberSearchRequest = null;
       document.getElementById('memberSearchModal')?.classList.add('d-none');
     }
 
@@ -1989,17 +1995,31 @@
       return true;
     }
 
-    async function searchMembers(silent = false) {
+    function searchMembers(silent = false) {
       clearAlert();
       if (!memberSearchEnabled) {
         if (!silent) showAlert('조합원 관리 모듈이 연결되지 않아 검색을 사용할 수 없습니다.', 'warning');
         return;
       }
+      if (!officialDataAuthorized || !currentUser || !currentCoopId
+          || document.getElementById('memberSearchModal')?.classList.contains('d-none') || window.frameElement?.hidden) return;
       const keyword = sanitizeKeyword(document.getElementById('memberSearchKeyword')?.value || '');
+      const owner = currentUser, coopId = currentCoopId;
+      if (memberSearchRequest?.owner === owner && memberSearchRequest.coopId === coopId && memberSearchRequest.keyword === keyword) return memberSearchRequest.promise;
+      const seq = ++memberSearchSeq;
+      const isCurrent = () => officialDataAuthorized && owner === currentUser && coopId === currentCoopId && seq === memberSearchSeq
+        && !document.getElementById('memberSearchModal')?.classList.contains('d-none') && !window.frameElement?.hidden;
+      const request = { owner, coopId, keyword, promise:null };
+      request.promise = loadOfficialMemberSearch(keyword, isCurrent).finally(() => { if (memberSearchRequest === request) memberSearchRequest = null; });
+      memberSearchRequest = request;
+      return request.promise;
+    }
+
+    async function loadOfficialMemberSearch(keyword, isCurrent) {
       const resultsEl = document.getElementById('memberSearchResults');
       if (!resultsEl) return;
       resultsEl.innerHTML = '<div class="text-muted small">검색 중...</div>';
-
+      try {
       let query = scopeByTenant(_supabase
         .from('coop_members')
         .select('id, member_id, name, member_type, status, birth_date, phone, email, address, corp_number, business_number')
@@ -2011,6 +2031,7 @@
       }
 
       const { data, error } = await query;
+      if (!isCurrent()) return;
       if (error) {
         resultsEl.innerHTML = '<div class="text-danger small">조합원 검색 중 오류가 발생했습니다.</div>';
         showAlert('조합원 검색 실패: ' + error.message, 'danger');
@@ -2037,12 +2058,16 @@
 
       resultsEl.querySelectorAll('button[data-member-id]').forEach((btn, idx) => {
         btn.addEventListener('click', () => {
+          if (!isCurrent()) return;
           selectedMember = rows[idx];
           updateSelectedMemberBox();
           closeMemberSearchModal();
           openOfficialFormModal();
         });
       });
+      } catch (_) {
+        if (isCurrent()) resultsEl.innerHTML = '<div class="text-danger small">조합원 검색 중 오류가 발생했습니다. 다시 검색해 주세요.</div>';
+      }
     }
 
     async function getNextTermCount(memberId, role) {
@@ -2494,9 +2519,10 @@
     async function init() {
       const ok = await ensureAccess();
       if (!ok) return;
+      officialDataAuthorized = true;
       await loadOfficialRoleCatalog();
       resetOfficialForm();
-      await Promise.all([memberSearchEnabled ? searchMembers(true) : Promise.resolve(), loadOfficials()]);
+      await loadOfficials();
       window.ErpWorkspaceResume.register({modules:['member_admin','signature'],refresh:loadOfficials});
     }
 

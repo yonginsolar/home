@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.140 | Change: 2026-10-10 - Defer accounting guides and inactive queue reads. -->
+<!-- Version: v1.0.141 | Change: 2026-10-11 - Load insurance settings only for the selected workflow. -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.140 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.141 | accounting.html');</script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="workflow_assets.js?v=20261010-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261002-3">
@@ -1184,6 +1184,7 @@ let vatSummaryState = null;
 let vatSummaryMode = 'half_year';
 let accountingDashboardRefreshPromise = null;
 let accountingDashboardRefreshQueued = false;
+let accountingDataAuthorized = false;
 let selectContext = null;
 let addContext = null;
 let permissionSet = new Set();
@@ -1200,6 +1201,8 @@ let insuranceAutoDebitDiscountSetting = {
     enabled: false,
     amount: INSURANCE_AUTO_DEBIT_DEFAULT_AMOUNT,
     loaded: false,
+    owner: null,
+    coopId: '',
     loadingPromise: null,
     saving: false
 };
@@ -1292,19 +1295,25 @@ function calculateInsurancePaymentAmounts(grossAmount, enabled, configuredDiscou
 }
 
 async function loadInsuranceAutoDebitDiscountSetting(options = {}) {
-    if (insuranceAutoDebitDiscountSetting.loaded && options.force !== true) {
-        return { error: null, setting: insuranceAutoDebitDiscountSetting };
-    }
-    if (insuranceAutoDebitDiscountSetting.loadingPromise) {
-        return insuranceAutoDebitDiscountSetting.loadingPromise;
-    }
-
-    const coopId = String(myInfo?.coop_id || '').trim();
-    if (!coopId) {
+    const owner = myInfo;
+    const coopId = String(owner?.coop_id || '').trim();
+    if (!accountingDataAuthorized || !owner || !coopId) {
         return { error: new Error('조합 정보를 확인할 수 없습니다.'), setting: insuranceAutoDebitDiscountSetting };
     }
-
-    insuranceAutoDebitDiscountSetting.loadingPromise = (async function fetchInsuranceAutoDebitSetting() {
+    const isCurrent = () => accountingDataAuthorized && myInfo === owner && coopId === String(myInfo?.coop_id || '').trim();
+    if (insuranceAutoDebitDiscountSetting.loaded && insuranceAutoDebitDiscountSetting.owner === owner
+        && insuranceAutoDebitDiscountSetting.coopId === coopId && options.force !== true) {
+        return { error: null, setting: insuranceAutoDebitDiscountSetting };
+    }
+    if (insuranceAutoDebitDiscountSetting.loadingPromise && insuranceAutoDebitDiscountSetting.owner === owner
+        && insuranceAutoDebitDiscountSetting.coopId === coopId) {
+        return insuranceAutoDebitDiscountSetting.loadingPromise;
+    }
+    insuranceAutoDebitDiscountSetting.loaded = false;
+    insuranceAutoDebitDiscountSetting.owner = owner;
+    insuranceAutoDebitDiscountSetting.coopId = coopId;
+    const request = (async function fetchInsuranceAutoDebitSetting() {
+      try {
         const { data, error } = await _supabase
             .from('ref_company_info')
             .select('key,value')
@@ -1312,6 +1321,7 @@ async function loadInsuranceAutoDebitDiscountSetting(options = {}) {
             .in('key', [INSURANCE_AUTO_DEBIT_ENABLED_KEY, INSURANCE_AUTO_DEBIT_AMOUNT_KEY]);
 
         if (error) return { error, setting: insuranceAutoDebitDiscountSetting };
+        if (!isCurrent()) return { error: new Error('ACCOUNTING_CONTEXT_CHANGED'), setting: insuranceAutoDebitDiscountSetting };
 
         const settingMap = {};
         (data || []).forEach(function mapInsuranceSetting(row) {
@@ -1326,13 +1336,32 @@ async function loadInsuranceAutoDebitDiscountSetting(options = {}) {
         );
         insuranceAutoDebitDiscountSetting.loaded = true;
         return { error: null, setting: insuranceAutoDebitDiscountSetting };
+      } catch (error) {
+        return { error, setting: insuranceAutoDebitDiscountSetting };
+      }
     })();
+    insuranceAutoDebitDiscountSetting.loadingPromise = request;
 
     try {
-        return await insuranceAutoDebitDiscountSetting.loadingPromise;
+        return await request;
     } finally {
-        insuranceAutoDebitDiscountSetting.loadingPromise = null;
+        if (insuranceAutoDebitDiscountSetting.loadingPromise === request) insuranceAutoDebitDiscountSetting.loadingPromise = null;
     }
+}
+
+async function initializeInsuranceSpecialMode() {
+    const owner = myInfo, coopId = String(myInfo?.coop_id || '').trim();
+    const toggle = document.getElementById('insuranceAutoDebitDiscountToggle');
+    const isCurrent = () => accountingDataAuthorized && owner === myInfo && coopId === String(myInfo?.coop_id || '').trim()
+        && document.getElementById('specialMode')?.value === 'insurance'
+        && document.getElementById('insuranceAutoDebitDiscountToggle') === toggle && !window.frameElement?.hidden;
+    if (!toggle || !isCurrent()) return;
+    syncInsuranceAutoDebitDiscountUI();
+    const result = await loadInsuranceAutoDebitDiscountSetting();
+    if (!isCurrent()) return;
+    const retry = document.getElementById('insuranceSettingRetry');
+    if (retry) retry.hidden = !result.error;
+    syncInsuranceAutoDebitDiscountUI(result.error ? '설정을 불러오지 못했습니다. 다시 조회해 주세요.' : '', !!result.error);
 }
 
 function syncInsuranceAutoDebitDiscountUI(statusMessage, isError) {
@@ -1341,6 +1370,17 @@ function syncInsuranceAutoDebitDiscountUI(statusMessage, isError) {
     const netEl = document.getElementById('insuranceAutoDebitCashAmount');
     const hintEl = document.getElementById('insuranceAutoDebitAmountHint');
     const grossEl = document.getElementById('inputAmount');
+    if (!insuranceAutoDebitDiscountSetting.loaded || insuranceAutoDebitDiscountSetting.owner !== myInfo
+        || insuranceAutoDebitDiscountSetting.coopId !== String(myInfo?.coop_id || '').trim()) {
+        if (toggleEl) toggleEl.disabled = true;
+        if (netEl) netEl.value = '';
+        if (hintEl) hintEl.textContent = '';
+        if (statusEl) {
+            statusEl.className = isError ? 'x-small text-danger' : 'x-small text-muted';
+            statusEl.textContent = statusMessage || '설정 상태를 확인하는 중입니다.';
+        }
+        return;
+    }
 
     if (toggleEl) {
         toggleEl.checked = insuranceAutoDebitDiscountSetting.enabled === true;
@@ -1376,6 +1416,11 @@ function syncInsuranceAutoDebitDiscountUI(statusMessage, isError) {
 }
 
 async function saveInsuranceAutoDebitDiscountSetting(enabled) {
+    if (!insuranceAutoDebitDiscountSetting.loaded || insuranceAutoDebitDiscountSetting.owner !== myInfo
+        || insuranceAutoDebitDiscountSetting.coopId !== String(myInfo?.coop_id || '').trim()) {
+        await initializeInsuranceSpecialMode();
+        return;
+    }
     if (!canPerform('accounting.edit')) {
         syncInsuranceAutoDebitDiscountUI('회계 등록·수정 권한이 있어야 설정을 변경할 수 있습니다.', true);
         return;
@@ -1980,12 +2025,8 @@ window.onload = async function() {
         redirectUrl: 'index.html'
     });
     if (!accountingRuntimeGate.ok) return;
+    accountingDataAuthorized = true;
     document.querySelector('[data-bs-target="#tabGuide"]').addEventListener('shown.bs.tab', mountAccountingGuide);
-
-    const insuranceSettingResult = await loadInsuranceAutoDebitDiscountSetting();
-    if (insuranceSettingResult.error) {
-        console.warn('[Accounting] 4대보험 자동이체 감액 설정 조회 실패:', insuranceSettingResult.error.message);
-    }
 
     const today = new Date();
     const todayKst = formatAccountingKstDate(today);
@@ -2023,9 +2064,8 @@ window.onload = async function() {
         refreshDashboard();
     });
 
-    // 데이터 로드 (순서 중요: 프로젝트 -> 마스터 -> 카드 -> 대시보드)
-    await loadProjects(accountingRuntimeGate.runtime.coop_id);
-    await Promise.all([ loadMasterData(), loadCards(), refreshDashboard() ]);
+    // Independent reads needed for the visible entry form; keep the complete summary RPC.
+    await Promise.all([ loadProjects(accountingRuntimeGate.runtime.coop_id), loadMasterData(), loadCards(), refreshDashboard() ]);
     loadPrepayExpenseAccounts();
     loadReceivableIncomeAccounts();
     renderPrepayVendorSelect();
@@ -6472,16 +6512,17 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
 
                 <div class="border rounded bg-white p-2 mb-2">
                     <div class="form-check form-switch mb-1">
-                        <input class="form-check-input" type="checkbox" id="insuranceAutoDebitDiscountToggle" onchange="saveInsuranceAutoDebitDiscountSetting(this.checked)">
+                        <input class="form-check-input" type="checkbox" id="insuranceAutoDebitDiscountToggle" disabled onchange="saveInsuranceAutoDebitDiscountSetting(this.checked)">
                         <label class="form-check-label small fw-bold" for="insuranceAutoDebitDiscountToggle">4대보험 자동이체 감액 적용</label>
                     </div>
                     <div class="x-small text-muted mb-2">고용보험 250원 + 산재보험 250원, 매회 총 500원을 감액합니다.</div>
                     <div class="d-flex justify-content-between align-items-center">
                         <span class="small">예상 실제 통장 출금액</span>
-                        <input data-number-group type="number" class="form-control form-control-sm bg-light fw-bold text-end" id="insuranceAutoDebitCashAmount" value="0" readonly style="max-width:160px;">
+                        <input data-number-group type="number" class="form-control form-control-sm bg-light fw-bold text-end" id="insuranceAutoDebitCashAmount" value="" readonly style="max-width:160px;">
                     </div>
                     <div class="x-small text-muted mt-1" id="insuranceAutoDebitAmountHint">고지·결재 금액을 입력하면 실출금액을 계산합니다.</div>
                     <div class="x-small text-muted mt-1" id="insuranceAutoDebitDiscountStatus">설정 상태를 확인하는 중입니다.</div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="insuranceSettingRetry" onclick="initializeInsuranceSpecialMode()">다시 조회</button>
                 </div>
 
                 <input type="hidden" id="hiddenBookVal" value="0">
@@ -6493,9 +6534,9 @@ function updateDynamicUI(accName, accType, specialCode, isTaxFree, specialRaw) {
 
         // 부가세 체크 해제 및 비활성, 카드입력 숨김
         vatCheck.checked = false; vatCheck.disabled = true; cardDiv.style.display = "none";
-        setTimeout(function initializeInsuranceSpecialMode() {
+        setTimeout(function prepareInsuranceSpecialMode() {
             refreshInsurancePendingSummary();
-            syncInsuranceAutoDebitDiscountUI();
+            void initializeInsuranceSpecialMode();
         }, 0);
     }
     else if (specialCode === "loan_pay") { // 대출상환
