@@ -1,4 +1,4 @@
-/* v1.1.7 - Show signup placement images without entering the authenticated signup route. */
+/* v1.1.8 - Preview signup placement images in a shared modal. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -6,6 +6,7 @@
   const state = new Map();
   let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
   let selectedKind='signup_purpose',previewMode='draft';
+  let signupImageOpener=null;
   const contacts = {representative:'이사장 이름',address:'조합 주소',officer_name:'개인정보 보호책임자 성명',officer_title:'직책',officer_phone:'전화번호',officer_email:'이메일'};
   const el = (kind, suffix) => document.getElementById(`site-legal-${kind}-${suffix}`);
   function privacyTemplate(content) {
@@ -65,12 +66,31 @@
     el(kind,'status').textContent=text;el(kind,'status').className='small mt-2 '+(s.doc.is_published?'text-success':'text-muted');
     refreshPreview();
   }
+  function showSignupImage(kind,opener){
+    if(kind!=='signup_purpose'&&kind!=='signup_privacy')return;
+    const Modal=window.bootstrap?.Modal;
+    if(!Modal)return myAlert('화면을 열지 못했습니다. 잠시 후 다시 눌러 주세요.','warning');
+    let modal=document.getElementById('site-legal-signup-image-modal');
+    if(!modal){
+      modal=document.createElement('div');modal.id='site-legal-signup-image-modal';modal.className='modal';modal.tabIndex=-1;modal.setAttribute('aria-labelledby','site-legal-signup-image-title');modal.setAttribute('aria-hidden','true');
+      modal.innerHTML='<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="site-legal-signup-image-title"></h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><img id="site-legal-signup-image" width="800" height="681" decoding="async"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button></div></div></div>';
+      modal.addEventListener('hidden.bs.modal',()=>{
+        const target=signupImageOpener?.isConnected?signupImageOpener:document.querySelector('[data-legal-signup-image]');signupImageOpener=null;
+        if(target?.getClientRects().length)target.focus({preventScroll:true});
+      });
+      document.body.append(modal);
+    }
+    signupImageOpener=opener;
+    modal.querySelector('h2').textContent=`가입 화면 · ${labels[kind]}`;
+    const image=modal.querySelector('img');image.src=new URL(`../assets/ui/signup-${kind==='signup_purpose'?'purpose':'privacy'}-location.jpg?v=20261010-1`,document.baseURI).href;
+    image.alt=`조합원 가입 화면 하단의 ${labels[kind]} 표시 위치`;
+    Modal.getOrCreateInstance(modal,{keyboard:true,backdrop:true,focus:true}).show(opener);
+  }
   function refreshPreview(){
     const target=document.getElementById('site-home-legal-preview');if(!target)return;
     const doc=state.get(selectedKind)?.doc;
     const active=target.querySelector('article[contenteditable="plaintext-only"]');
     if(active&&document.activeElement===active)return;
-    const imageOpen=target.querySelector('.site-legal-placement-image')?.open===true;
     target.replaceChildren();
     const placement=document.createElement('div');placement.className='site-legal-placement';
     const locationTitle=document.createElement('strong');locationTitle.textContent='표시 위치';
@@ -78,11 +98,8 @@
     const entry=document.createElement('div');entry.className='site-legal-placement-entry';entry.textContent=locations[selectedKind][1];
     placement.append(locationTitle,route,entry);
     if(selectedKind==='signup_purpose'||selectedKind==='signup_privacy'){
-      const details=document.createElement('details');details.className='site-legal-placement-image';details.open=imageOpen;
-      const summary=document.createElement('summary');summary.className='btn btn-sm btn-outline-secondary mt-2';summary.textContent='가입 화면 보기';
-      const image=document.createElement('img');image.src=new URL(`../assets/ui/signup-${selectedKind==='signup_purpose'?'purpose':'privacy'}-location.jpg?v=20261010-1`,document.baseURI).href;
-      image.alt=`조합원 가입 화면 하단의 ${labels[selectedKind]} 표시 위치`;image.width=800;image.height=681;image.loading='lazy';image.decoding='async';
-      details.append(summary,image);placement.append(details);
+      const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary mt-2';button.textContent='가입 화면 보기';button.setAttribute('data-legal-signup-image',selectedKind);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','site-legal-signup-image-modal');
+      button.onclick=()=>showSignupImage(selectedKind,button);placement.append(button);
     }else{
       try{const base=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(base&&base.protocol==='https:'&&!base.username&&!base.password){const url=new URL(locations[selectedKind][2],base.origin+'/');const link=document.createElement('a');link.className='btn btn-sm btn-outline-secondary mt-2';link.textContent='실제 화면 보기 ↗';link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';placement.append(link);}}catch(_){}
     }

@@ -25,7 +25,7 @@
         Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
         Object.freeze({src: new URL('site_inline_editor.js?v=20261010-3', document.baseURI).href, integrity: 'sha384-P4vouZfwr+qtHzdHll3+71NqTLaxbyz5rW/tTZSYVf4z49D/+/xaCQDhUPW7BXTa', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
         Object.freeze({src: new URL('home_visual_editor.js?v=20261010-5', document.baseURI).href, integrity: 'sha384-oGxufjZ/O/BlhmzIqADgjZ3aUOBQTX+6BEdNLXhfMIWu2dKonsmfcR30+eqmAiPh', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
-        Object.freeze({src: new URL('site_legal_editor.js?v=20261010-5', document.baseURI).href, integrity: 'sha384-phvaoBoBoifEmayv0gl0W/fkJItPowiWwdpQ/pT6EGu5bz8bTUOoMGxikiILVcIa', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
+        Object.freeze({src: new URL('site_legal_editor.js?v=20261010-6', document.baseURI).href, integrity: 'sha384-xMvV6OBb3zFW+p4ufeMCwcEPNwMkhGxNMewbBE4vfrJrhllBCQuFm2qTgdWonFyw', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
     ]);
     const pending = new Map();
     function ready() { return root.XLSX?.version === '0.20.3' && typeof root.XLSX?.read === 'function' && typeof root.XLSX?.writeFile === 'function'; }
