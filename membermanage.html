@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.164
-Change: 2026-10-06 - Recognize Hwaseong-specific social login identities.
+Version: v1.0.165
+Change: 2026-10-10 - Preview the issued contribution certificate before print or PDF save.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="shared/safe_diagnostics.js?v=20261003-2"></script>
-    <script>console.log('[Version] v1.0.164 | membermanage.html');</script>
+    <script>console.log('[Version] v1.0.165 | membermanage.html');</script>
+<meta name="contribution-certificate-revision" content="20261010.1">
 <script src="shared/member_information.js?v=20261002-1"></script>
 <script src="shared/child_direct_consent.js?v=20260915-1"></script>
 <meta charset="utf-8">
@@ -43,7 +44,8 @@ allowKakaoApp: true
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="cert_generator.js?v=20261008_01"></script>
+<script src="cert_generator.js?v=20261010_01"></script>
+<script src="shared/contribution_cert_preview.js?v=20261010-1"></script>
 <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-xgNdoEQu0JeBEAN3/f7mrS+EPOsrmARCvhS7PEpk7QI2wvo4YOF3xY3EjQGKHAY9" crossorigin="anonymous"></script>
 <script src="badges.js?v=20260828-1"></script>
@@ -2005,9 +2007,9 @@ NO. <span id="infoMemberId">-</span>
 
 <div id="tabCert" class="hidden text-center py-3">
 <h6 class="fw-bold" id="memberContributionCertificateTitle">출자 증명서</h6>
-<p class="small text-muted">현재 납입된 출자금을 기준으로<br>PDF 증명서를 생성합니다.</p>
-<button class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert()">
-<i class="bi bi-download me-2"></i>다운로드
+<p class="small text-muted">현재 납입된 출자금을 기준으로 발급합니다.</p>
+<button id="memberContributionCertificateView" class="btn btn-outline-success w-100 fw-bold" onclick="downloadCert()">
+<i class="bi bi-file-earmark-text me-2"></i>증명서 보기
 </button>
 </div>
 </div>
@@ -2638,6 +2640,7 @@ CoopSafeLog.error("Failed to clear Supabase auth cache:", e);
 }
 
 async function signOutSilently(client = _supabase) {
+window.ContributionCertPreview?.clear();
 suppressSessionExpiredHandling = true;
 try {
 if (client && client.auth) await client.auth.signOut();
@@ -3278,6 +3281,7 @@ await initializeEducationQrEntry();
 
 // 3. 인증 상태 변경 감지
 _supabase.auth.onAuthStateChange(async (event, session) => {
+if (!session || (curAuth?.id && curAuth.id !== session.user?.id)) window.ContributionCertPreview?.clear();
 // 로딩바 끄기 (결정 났음)
 if (typeof showLoading === 'function') showLoading(false);
 
@@ -4242,6 +4246,7 @@ return memberInformationPortal.refresh(member);
 }
 
 async function loadDashboardData(uuid, options = {}) {
+if (curMem?.id && String(curMem.id) !== String(uuid)) window.ContributionCertPreview?.clear();
 try {
 // [핵심 변경] 현재 로드하는 프로필 ID를 브라우저에 기억시킴 (새로고침 대비)
 sessionStorage.setItem('lastActiveProfile', uuid);
@@ -8031,52 +8036,67 @@ showModal(`최대 ${limit.toLocaleString()}원까지만 가능합니다.`); // a
 }
 }
 
-// [수정] 증명서 다운로드 (스마트 새로고침 적용 - 혹시라도 상태 갱신 필요 시)
+// One issuance is shared by preview, printing and saving; no automatic dashboard reload.
 // [2026-03-15] tenant hardening: 발급기관 정보는 현재 조합(ref_company_info.coop_id)에서만 읽는다.
+let contributionCertificateBusy = false;
 async function downloadCert() {
-if(!curMem) return;
-showLoading(true, '증서 발급 중...');
-
+if (!curMem || !curAuth || contributionCertificateBusy) return;
+if (!window.ContributionCertPreview) return showModal('증명서 미리보기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
+contributionCertificateBusy = true;
+let preview;
 try {
-const { data: pay } = await scopeMemberTenant(_supabase.from('ref_members').select('amount')).eq('member_id', curMem.member_id);
+const member = { ...curMem };
+const authId = curAuth.id;
+const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
+const sameContext = () => curAuth?.id === authId && curMem?.id === member.id && currentMemberCoopId === coopId;
+const authorize = async () => {
+const { data, error } = await _supabase.auth.getUser();
+if (!error && data?.user?.id !== authId) window.ContributionCertPreview.clear();
+if (error || data?.user?.id !== authId || !sameContext()) throw new Error('로그인 정보가 변경되었습니다. 다시 로그인해 주세요.');
+};
+preview = window.ContributionCertPreview.start({ isCurrent: sameContext, authorize });
+await authorize();
+if (!preview.isCurrent()) return;
+const { data: pay, error: ledgerError } = await scopeMemberTenant(_supabase.from('ref_members').select('amount')).eq('member_id', member.member_id);
+if (ledgerError) throw ledgerError;
 const ledgerTotal = pay ? pay.reduce((a,c)=>a+Number(c.amount),0) : 0;
-const finalTotal = Math.max(ledgerTotal, Number(curMem.total_capital || 0));
+const finalTotal = Math.max(ledgerTotal, Number(member.total_capital || 0));
 
 if(finalTotal === 0) { 
-showLoading(false); 
-return showModal('납입된 출자금이 없어 증명서를 발급할 수 없습니다.'); 
+return preview.fail('납입된 출자금이 없어 증명서를 발급할 수 없습니다.');
 }
 
 if (typeof prepareContributionCertCompanyProfile !== 'function' || typeof generateContributionCert !== 'function') {
 throw new Error('출자증서 생성기를 불러오지 못했습니다. 화면을 새로고침해 주세요.');
 }
-const coopId = currentMemberCoopId || await getCurrentMemberCoopId();
 const companyProfile = await prepareContributionCertCompanyProfile(_supabase, { coopId });
 if (typeof getCertPretendardFontBase64 === 'function') await getCertPretendardFontBase64();
+await authorize();
+if (!preview.isCurrent()) return;
 
 // 증서 번호는 출력에 필요한 조합 정보와 직인을 확인한 뒤에만 발급한다.
 const { data: cert, error } = await _supabase.rpc('issue_contribution_certificate', { 
-p_member_id: curMem.member_id, 
+p_member_id: member.member_id,
 p_amount: finalTotal 
 });
 
 if (error) throw error;
-
-await generateContributionCert(curMem, finalTotal, cert.cert_number, '', _supabase, {
+if (!cert?.cert_number) throw new Error('증서번호를 확인하지 못했습니다.');
+await authorize();
+if (!preview.isCurrent()) return;
+const documentResult = await generateContributionCert(member, finalTotal, cert.cert_number, '', _supabase, {
 coopId,
 requireSeal: true,
-companyProfile
+companyProfile,
+output: 'preview'
 });
-
-showLoading(false);
-
-// ★ 필요하다면 스마트 새로고침 (보통 다운로드는 화면 갱신 불필요하지만, 만약 발급 이력을 보여준다면 필요)
-reloadDashboard();
-
+await preview.present(documentResult);
 } catch(e) { 
 CoopSafeLog.error("[membermanage] operation failed", e);
-showLoading(false); 
-showModal('증명서 발급 중 오류가 발생했습니다.\n' + (e.message || '')); 
+if (preview) preview.fail('증명서 발급 중 오류가 발생했습니다.\n' + (e.message || ''));
+else showModal('증명서를 준비하지 못했습니다. 다시 시도해 주세요.');
+} finally {
+contributionCertificateBusy = false;
 }
 }
 

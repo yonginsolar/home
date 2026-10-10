@@ -1,6 +1,6 @@
 /*
-Version: v1.0.17
-Change: Confirm the issuing cooperative's share unit and seal before assigning a certificate number.
+Version: v1.0.18
+Change: Return the same issued PDF for member preview, printing and saving without automatic download.
 */
 
 var showAlert = (typeof window !== 'undefined' && window.showAlert) || function(message) {
@@ -509,8 +509,10 @@ async function generateContributionCert(memberData, totalAmount, certNumber, cha
             doc.addImage(sealDataUrl, 'PNG', signatureLayout.sealX, signatureLayout.sealY, 24, 24);
         }
 
-        // 파일 저장
-        doc.save(`${memberData.name}_출자증서.pdf`);
+        const fileName = `${String(memberData.name || '조합원').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')}_출자증서.pdf`;
+        if (options.output === 'preview') return { doc, fileName };
+        // Existing administrator issuance keeps its original download flow.
+        doc.save(fileName);
 
     } catch (e) {
         console.error(e);
