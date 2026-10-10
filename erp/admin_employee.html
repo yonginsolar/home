@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.90
-Change: 2026-10-09 - Stage company seals after validation and retain registered files on save failure.
+Version: v1.0.91
+Change: 2026-10-10 - Company-first settings and basic employee registration; preserve permissions.
 -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.90 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.91 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -124,6 +124,9 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
   <meta name="erp-workspace-revision" content="20261009.2">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261009-3">
   <script src="/erp/workspace_nav.js?v=20261009-3" defer></script>
+  <meta name="erp-workflow-revision" content="20261010.1">
+  <link rel="stylesheet" href="workflow_ease.css?v=20261010-1">
+  <script src="workflow_ease.js?v=20261010-1" defer></script>
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-employee">
 
@@ -142,11 +145,11 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
     <div class="hr-page-actions">
       <button class="btn btn-light btn-sm btn-rounded" onclick="location.href='index.html'" data-erp-home-link>🏠 홈</button>
       <button class="btn btn-outline-secondary btn-sm btn-rounded" onclick="openOrgChartModal()">🏢 조직도</button>
-      <button class="btn btn-outline-secondary btn-sm btn-rounded" onclick="openSettings()">⚙️ 설정</button>
       <button class="btn btn-outline-dark btn-sm btn-rounded" onclick="openLedgerModal()">📊 급여대장</button>
       <button class="btn btn-outline-primary btn-sm btn-rounded" onclick="location.href='hr_insurance.html'">🧾 입사·퇴사 신고</button>
       <button class="btn btn-outline-primary btn-sm btn-rounded" onclick="openStatsDashboard()">📈 통계</button>
       <button class="btn btn-primary btn-sm btn-rounded shadow-sm" onclick="openInviteModal()">✨ 신규등록</button>
+      <div class="workflow-action-group"><button class="btn btn-outline-secondary btn-sm btn-rounded" onclick="openSettings()">⚙️ 조합 설정</button></div>
     </div>
   </div>
   <div class="hr-toolbar">
@@ -165,10 +168,10 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
       <div class="modal-header border-0 pb-0">
-        <h5 class="modal-title fw-bold">⚙️ 시스템 통합 설정</h5>
+        <h5 class="modal-title fw-bold">⚙️ 조합 설정</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div><div class="modal-body">
-        <div id="settingTargetYearRow" class="mb-3">
+        <div id="settingTargetYearRow" class="mb-3" hidden>
           <div id="annualSettingsNav"><div id="annualYearTabs" class="d-flex gap-2 mb-2"></div></div>
           <div class="d-flex flex-wrap gap-2 align-items-center">
             <label class="small" for="settingTargetYear">다른 연도</label><select id="settingTargetYear" data-annual-nav class="form-select form-select-sm w-auto"></select>
@@ -179,10 +182,10 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
           </div><div id="annualSettingsStatus" class="small mt-2" role="status" aria-live="polite"></div>
         </div>
         <ul class="nav nav-tabs mb-3" id="settingTab" role="tablist">
-          <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#setTax">📊 공통 기준</a></li>
-          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setCompany">🏢 회사 정보</a></li>
+          <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#setCompany">🏢 조합 기본정보</a></li>
+          <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setTax">📊 공통 기준</a></li>
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced">⚙️ 조합별 설정</a></li>
-        </ul><div class="tab-content"><div class="tab-pane fade show active" id="setTax"><div class="d-flex justify-content-between mb-3"><h6 class="fw-bold mb-0">4대보험 공통 요율</h6><span id="annualCommonState" class="badge text-bg-light border"></span></div><div id="annualCommonFields"></div></div><div class="tab-pane fade" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" readonly><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div></div></div><div class="tab-pane fade" id="setAdvanced"><div id="annualTenantFields"></div></div></div></div><div class="modal-footer p-2 border-0" id="companySettingsFooter" hidden><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">회사 설정 저장</button></div></div></div></div>
+        </ul><div class="tab-content"><div class="tab-pane fade" id="setTax"><div class="d-flex justify-content-between mb-3"><h6 class="fw-bold mb-0">4대보험 공통 요율</h6><span id="annualCommonState" class="badge text-bg-light border"></span></div><div id="annualCommonFields"></div></div><div class="tab-pane fade show active" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" readonly><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div></div></div><div class="tab-pane fade" id="setAdvanced"><div id="annualTenantFields"></div></div></div></div><div class="modal-footer p-2 border-0" id="companySettingsFooter"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">조합 설정 저장</button></div></div></div></div>
 <div class="modal fade" id="inviteModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
@@ -191,7 +194,6 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <div class="alert alert-light border text-center small mb-3">🆔 사원번호는 자동 생성됩니다.</div>
         <div id="inviteStatus" class="alert d-none small py-2 px-3 mb-3" role="status" aria-live="polite"></div>
         <div class="row g-2">
           <div class="col-md-6">
@@ -207,6 +209,18 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
             <select id="newRank" class="form-select"></select>
           </div>
           <div class="col-md-6">
+            <label class="small text-muted ms-1">부서</label>
+            <select id="newDeptSelect" class="form-select" onchange="syncInviteDepartmentInput()"><option value="">미지정</option></select>
+          </div>
+          <div class="col-12 hidden" id="newDeptCustomWrap">
+            <label class="small text-muted ms-1">직접 입력 부서명</label>
+            <input type="text" id="newDeptCustom" class="form-control" placeholder="기획팀">
+          </div>
+        </div>
+        <details id="invitePermissionDetails" class="workflow-disclosure mt-3">
+          <summary>역할·결재 순서·업무 권한</summary>
+          <div class="workflow-permission-body row g-2">
+          <div class="col-md-6">
             <label class="small text-muted ms-1">기본 역할</label>
             <select id="newRole" class="form-select">
               <option value="admin_all">전체 관리자 (모든 업무 기본 허용)</option>
@@ -221,14 +235,6 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
             <select id="newAuthLevel" class="form-select"></select>
             <div class="form-text">1이 최상위, 숫자가 클수록 하위 결재선입니다.</div>
           </div>
-          <div class="col-md-6">
-            <label class="small text-muted ms-1">부서</label>
-            <select id="newDeptSelect" class="form-select" onchange="syncInviteDepartmentInput()"><option value="">미지정</option></select>
-          </div>
-          <div class="col-12 hidden" id="newDeptCustomWrap">
-            <label class="small text-muted ms-1">직접 입력 부서명</label>
-            <input type="text" id="newDeptCustom" class="form-control" placeholder="기획팀">
-          </div>
         </div>
 
         <div class="border rounded-3 p-3 mt-3 bg-light-subtle">
@@ -242,6 +248,7 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
           <div id="inviteModuleAccessStatus" class="small text-muted py-3 text-center" role="status" aria-live="polite">업무 권한을 불러오는 중입니다.</div>
           <div id="inviteModuleAccessList" class="invite-module-grid d-none"></div>
         </div>
+        </details>
 
         <button id="inviteSubmitBtn" class="btn btn-primary w-100 btn-rounded py-2 mt-3" onclick="runInvite()" disabled>등록하기</button>
       </div>
@@ -274,7 +281,7 @@ Change: 2026-10-09 - Stage company seals after validation and retain registered 
     <div class="d-flex justify-content-end mb-2">
       <button class="btn btn-sm btn-outline-primary view-mode" onclick="toggleEditMode(true)">✏️ 정보 수정</button>
       <button class="btn btn-sm btn-secondary edit-mode me-2" onclick="toggleEditMode(false)">취소</button>
-      <button class="btn btn-sm btn-primary edit-mode" onclick="saveBasicInfo()">저장 완료</button>
+      <button class="btn btn-sm btn-primary edit-mode" onclick="saveBasicInfo()">직원 정보 저장</button>
     </div>
     <div class="row g-3">
       <div class="col-12">

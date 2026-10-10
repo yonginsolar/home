@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.135 | Change: 2026-10-10 - Remove retired single-entry recent-history code; keep double-entry flow. -->
+<!-- Version: v1.0.136 | Change: 2026-10-10 - Business finder, entry review and grouped accounting work. -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.135 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.136 | accounting.html');</script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
   <script src="accounting_smarta_guide.js?v=1.0.0"></script>
   <script src="accounting_guide.js?v=1.0.2"></script>
@@ -128,6 +128,9 @@
   <meta name="erp-workspace-revision" content="20261009.2">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261009-3">
   <script src="/erp/workspace_nav.js?v=20261009-3" defer></script>
+  <meta name="erp-workflow-revision" content="20261010.1">
+  <link rel="stylesheet" href="workflow_ease.css?v=20261010-1">
+  <script src="workflow_ease.js?v=20261010-1" defer></script>
 </head>
 <body class="erp-unified erp-pc-workspace erp-page-accounting">
 
@@ -165,22 +168,25 @@
     </div>
   </div>
 
-  <div class="input-group mb-4 no-print shadow-sm">
+  <details class="workflow-disclosure no-print">
+    <summary>결산 보고서</summary>
+  <div class="input-group no-print shadow-sm">
       <select class="form-select" id="reportYearSelect" style="max-width: 120px; font-weight:bold;">
           </select>
       <button class="btn btn-outline-dark btn-report flex-fill" type="button" onclick="printReport()">
           🖨️ 결산 보고서 생성
       </button>
   </div>
+  </details>
 
   <ul class="nav nav-tabs mb-4 no-print" id="accTab" role="tablist">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabForm">📝 전표입력</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabMoney" onclick="AccountingMoney.open()">🔎 업무별 입력·카드 환급</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabPrepay">💳 선급·미수 관리</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAssets" onclick="loadAssetOverview()">📦 자산·재고</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 자동연동</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 최근전표</button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 설명</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSync" onclick="loadApprovalUnclassifiedQueue()">🔄 결재·입금 연동</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabHistory" onclick="loadHistory()">🕒 장부 조회</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGuide">ℹ️ 신고·결산 안내</button></li>
   </ul>
 
   <div class="tab-content no-print">
@@ -223,6 +229,13 @@
 
     <div class="tab-pane fade show active" id="tabForm">
       <form id="erpForm" onsubmit="handleFormSubmit(event)">
+        <div class="workflow-entry">
+          <label for="accountingBusinessSearch">업무로 찾기</label>
+          <div class="input-group">
+            <input id="accountingBusinessSearch" class="form-control" type="search" placeholder="예: 통장 이자, 착오입금, 카드 취소">
+            <button type="button" class="btn btn-primary" onclick="openAccountingBusinessFinder(document.getElementById('accountingBusinessSearch').value.trim())">찾기</button>
+          </div>
+        </div>
 
         <div class="row mb-3">
           <div class="col-6">
@@ -289,7 +302,6 @@
 
         <div class="mb-3">
           <label class="small text-muted">계정과목</label>
-          <div class="mb-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="openAccountingBusinessFinder()">계정 이름을 모르겠다면 업무로 찾기</button></div>
           <div class="input-group">
             <input type="text" class="form-control readonly-input ime-kr" id="displayAccount" placeholder="선택하세요 (유형에 맞는 항목만 표시됨)" readonly onclick="openSelModal()">
             <button class="btn btn-secondary" type="button" onclick="openSelModal()">🔍</button>
@@ -320,7 +332,7 @@
            <div class="ms-auto"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="vatCheck" checked><label class="form-check-label small" for="vatCheck">부가세포함</label></div></div>
         </div>
 
-        <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm mt-4" id="submitBtn">저장하기</button>
+        <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm mt-4" id="submitBtn">확인 후 저장</button>
       </form>
     </div>
     <div class="tab-pane fade" id="tabPrepay">
@@ -560,6 +572,16 @@
 
     <div class="tab-pane fade" id="tabSync">
       <div class="d-grid gap-3">
+          <div id="accountingSyncReview" class="workflow-sync-review" role="status" hidden></div>
+          <div class="card p-3 border-start border-5 border-warning-subtle bg-white">
+             <div class="d-flex justify-content-between align-items-center mb-2">
+               <div><h6 class="fw-bold mb-1">계정과목 확인 필요</h6><small class="text-muted">연동된 지출 중 계정과목을 정하지 않은 내역</small></div>
+               <button class="btn btn-outline-secondary btn-sm" onclick="loadApprovalUnclassifiedQueue()">새로고침</button>
+             </div>
+             <div id="approvalUnclassifiedList" class="small text-muted">조회 중...</div>
+          </div>
+          <details class="workflow-disclosure mb-0">
+            <summary>연동 취소</summary>
           <div class="card p-3 border-start border-5 border-dark bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div>
@@ -569,10 +591,11 @@
                <button class="btn btn-outline-dark btn-sm" onclick="confirmSync('undo_sync_last')">직전 취소</button>
              </div>
           </div>
+          </details>
 	          <div class="card p-3 border-start border-5 border-warning bg-light">
 	             <div class="d-flex justify-content-between align-items-center">
 	               <div><h6 class="fw-bold mb-1">📝 전자결재 연동</h6><small class="text-muted">승인된 지출결의를 회계에 반영합니다. 급여는 귀속월 말 비용과 실제 지급일 출금을 나누어 기록합니다.</small></div>
-	               <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">실행</button>
+               <button class="btn btn-warning btn-sm text-white" onclick="confirmSync('approval')">지출일·연동 내용 확인</button>
 	             </div>
 	          </div>
           <div class="card p-3 border-start border-5 border-success-subtle bg-white">
@@ -587,16 +610,6 @@
                </div>
              </div>
           </div>
-          <div class="card p-3 border-start border-5 border-warning-subtle bg-white">
-             <div class="d-flex justify-content-between align-items-center mb-2">
-               <div>
-                 <h6 class="fw-bold mb-1">🧩 전자결재 미분류 재분류</h6>
-                 <small class="text-muted">자동연동으로 생성된 `(차)미분류비용` 건을 비용 또는 자산 계정으로 대체분개합니다.</small>
-               </div>
-               <button class="btn btn-outline-secondary btn-sm" onclick="loadApprovalUnclassifiedQueue()">새로고침</button>
-             </div>
-             <div id="approvalUnclassifiedList" class="small text-muted">목록 로딩 전입니다. 새로고침을 눌러주세요.</div>
-          </div>
 	          <div class="card p-3 border-start border-5 border-success bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💰 출자금 연동</h6><small class="text-muted">신규 입금 내역 전표 처리</small></div>
@@ -609,6 +622,9 @@
                <button class="btn btn-sm text-white" style="background:#e91e63;" onclick="confirmSync('donation')">실행</button>
              </div>
           </div>
+          <details class="workflow-disclosure mb-0">
+            <summary>연말결산·과거자료 처리</summary>
+            <div class="d-grid gap-3">
           <div class="card p-3 border-start border-5 border-primary bg-light">
              <div class="d-flex justify-content-between align-items-center">
                <div><h6 class="fw-bold mb-1">💸 과거 배당 원장 연동</h6><small class="text-muted">기존 수기 배당 원장만 처리합니다. 새 배당 회차는 승인된 배당금 지출결의를 전자결재 연동에서 반영하세요.</small></div>
@@ -633,6 +649,8 @@
         </div>
     </div>
 </div>
+            </div>
+          </details>
       </div>
     </div>
 
@@ -7274,6 +7292,7 @@ async function submitBankInterestAccounting(ctx) {
 
 async function handleFormSubmit(e) {
     e.preventDefault();
+    if (handleFormSubmit._reviewBusy) return;
     if (!canPerform('accounting.edit')) return showAlert("수정 권한이 없습니다.");
     const item = document.getElementById("hiddenItem").value;
     if(!item) return showAlert("오류", "계정과목을 선택하세요.");
@@ -7293,11 +7312,24 @@ async function handleFormSubmit(e) {
 
     const ctx = { item, fDate, project, type, settleMode, desc, totalAmt, useVAT, evidenceType, specialCode, isCard, cardName, payerName };
     const dateWarning = getDateGuardMessage(fDate);
-    if (dateWarning) {
-        showConfirm("날짜 확인", dateWarning, async () => { await submitAccounting(ctx); });
-        return;
-    }
-    await submitAccounting(ctx);
+    const message = window.ERPWorkflowEase.buildEntryReview(ctx, {
+        amountLabel: document.getElementById('inputAmountLabel').textContent,
+        taxFree: document.getElementById('isTaxFree').value,
+        warning: dateWarning
+    });
+    handleFormSubmit._reviewBusy = true;
+    const root = document.getElementById('confirmModal');
+    let accepted = false;
+    const cancelled = () => { if (!accepted && !confirmAccepted) handleFormSubmit._reviewBusy = false; };
+    root.addEventListener('hidden.bs.modal', cancelled, { once: true });
+    showConfirm('전표 확인', message, async () => {
+        if (accepted) return;
+        accepted = true;
+        try {
+            if (!canPerform('accounting.edit')) return showAlert('수정 권한이 없습니다.');
+            await submitAccounting(ctx);
+        } finally { handleFormSubmit._reviewBusy = false; }
+    });
 }
 
 async function submitAccounting(ctx) {
@@ -8224,6 +8256,7 @@ function confirmSync(type) {
     // (2) 전자결재 연동
     else if (type === 'approval') {
         if (approvalSyncBusy) return;
+        document.getElementById('accountingSyncReview').hidden = true;
         approvalSyncBusy = true;
         (async () => {
           try {
@@ -8269,6 +8302,7 @@ function confirmSync(type) {
                 existingSalaryPaymentMonths: previewTargetState.existingSalaryPaymentMonths
             });
             if (previewPlanResult.error) return showAlert("오류", "전자결재 연동 미리보기 실패: " + previewPlanResult.error.message);
+            window.ERPWorkflowEase.publishSyncReview(previewPlanResult);
             if (previewPlanResult.plans.length === 0) {
                 const blockedDetail = formatApprovalSyncBlockedDocs(previewPlanResult.blockedDocs);
                 return showAlert("알림", `지금 연동할 수 있는 문서가 없습니다.\n- 보류: ${previewPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
@@ -8436,6 +8470,7 @@ function confirmSync(type) {
                 }
                 const blockedDetail = formatApprovalSyncBlockedDocs(runPlanResult.blockedDocs);
                 showAlert("완료", `${runPlanResult.plans.length}건 연동 성공\n- 급여 발생전표 ${runPlanResult.salaryAccrualCount || 0}건\n- 4대보험 납부전표 ${runPlanResult.insuranceCount}건\n- 4대보험 자동이체 감액 ${runPlanResult.insuranceDiscountTotal.toLocaleString()}원\n- 두루누리 직원 자동 배분 ${durunuriWrite.employeeCount}명\n- 급여 원천세 분리전표 ${runPlanResult.withholdingTaxCount || 0}건\n- 출자금 반환·배당금 승인전표 ${runPlanResult.payoutApprovalCount || 0}건\n- 재고 입고 매입전표 ${runPlanResult.inventoryPurchaseCount || 0}건\n- 지급전표 ${runPlanResult.paymentCount}건\n- 일반 발생전표 ${runPlanResult.accrualCount}건\n- 체크카드 즉시지출전표 ${runPlanResult.checkCardCount}건\n- 증액결의 ${runPlanResult.adjustmentIncreaseCount || 0}건\n- 감액결의 ${runPlanResult.adjustmentDecreaseCount || 0}건\n- 보류 ${runPlanResult.blockedDocs.length}건${blockedDetail ? `\n${blockedDetail}` : ''}`);
+                window.ERPWorkflowEase.publishSyncReview({ plans: [], blockedDocs: runPlanResult.blockedDocs, done: true });
                 refreshDashboard();
                 loadHistory();
                 loadApprovalUnclassifiedQueue();

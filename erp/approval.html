@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.83 | Change: 2026-10-07 - Compact mobile body with on-demand formatting; same shared approval flow. -->
+<!-- Version: v1.2.84 | Change: 2026-10-10 - Quick forms and draft status; preserve shared approval flow. -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.83 | approval.html');</script>
+  <script>console.log('[Version] v1.2.84 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -663,6 +663,9 @@
   <meta name="erp-workspace-revision" content="20261009.2">
   <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261009-3">
   <script src="/erp/workspace_nav.js?v=20261009-3" defer></script>
+  <meta name="erp-workflow-revision" content="20261010.1">
+  <link rel="stylesheet" href="workflow_ease.css?v=20261010-1">
+  <script src="workflow_ease.js?v=20261010-1" defer></script>
 </head>
 <body class="erp-unified erp-hybrid-workspace erp-page-approval" data-erp-mobile-task="approval">
 
@@ -695,7 +698,7 @@
     <form id="draftForm" onsubmit="handleDraftSubmit(event)">
 
       <div class="approval-draft-status">
-        <div class="meta" id="approvalDraftStatusText">서버 임시저장을 사용하지 않는 새 문서입니다.</div>
+        <div class="meta workflow-status" id="approvalDraftStatusText" role="status" aria-live="polite">작성 중 · 아직 임시저장하지 않음</div>
         <div class="actions">
           <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetApprovalComposerWithConfirm()">📝 새 문서</button>
           <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveApprovalDraft" onclick="saveApprovalDraft()">💾 임시저장</button>
@@ -703,12 +706,15 @@
         </div>
       </div>
 
+      <details id="approvalProxyOptions" class="workflow-disclosure">
+        <summary>대리 상신</summary>
       <div class="d-flex justify-content-end mb-2" id="permissionRequestProxy">
         <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" id="chkProxy" onchange="toggleProxyMode()">
             <label class="form-check-label small fw-bold text-primary" for="chkProxy">🔄 대리 상신 모드</label>
         </div>
       </div>
+      </details>
 
       <div class="mb-3 hidden" id="divProxyTarget">
         <label class="small text-muted fw-bold">기안 대상자 (하급자)</label>
@@ -737,6 +743,7 @@
       <div class="row mb-3">
         <div class="col-12 mb-3">
           <label class="small text-muted fw-bold">결재 구분</label>
+          <div id="approvalQuickTypes" class="workflow-quick-types" role="group" aria-label="자주 쓰는 양식"></div>
           <select class="form-select" id="appCategory" onchange="handleCategoryChange()">
             <optgroup label="회계/지출">
                 <option value="일반품의">📄 일반품의서</option>
@@ -1337,8 +1344,8 @@
         <p id="permissionRequestHelp" class="mb-0 text-primary" role="status"></p>
       </section>
 
-      <div class="mb-3 hidden" id="secretaryJeongyeolPanel">
-        <label class="small text-muted fw-bold">전결 설정</label>
+      <details class="workflow-disclosure hidden" id="secretaryJeongyeolPanel">
+        <summary>전결 설정</summary>
         <div class="card p-3 border-0 bg-light mb-2">
           <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" id="chkSecretaryJeongyeol" onchange="handleJeongyeolToggleChanged()">
@@ -1346,7 +1353,7 @@
           </div>
           <div class="small text-muted mt-2" id="jeongyeolHint">자동 전결 규정을 확인하는 중입니다.</div>
         </div>
-      </div>
+      </details>
 
       <div class="mb-3" id="permissionRequestLine">
         <label class="small text-muted fw-bold">결재선 (필수)</label>
@@ -1572,6 +1579,7 @@ CoopPermissionRequest.bindDocument({
 let approvalDraftModalInstance = null;
 let approvalDraftCache = [];
 let currentApprovalDraftId = null;
+let approvalDraftSavedState = '', approvalDraftSaving = false, approvalDraftLastSaveFailed = false;
 let currentApprovalDraftUpdatedAt = '';
 let approvalDraftAttachmentRefs = [];
 let approvalAttachmentOrder = [];
@@ -3098,17 +3106,30 @@ function isApprovalComposerDirty() {
     });
 } // End of isApprovalComposerDirty
 
+function getApprovalDraftStatusState(payload = collectApprovalDraftFormPayload()) {
+    return JSON.stringify([payload, approvalDraftAttachmentRefs.map(item => item.rawRef || item.raw_ref || '')]);
+}
+function rememberApprovalDraftStatusState(payload = collectApprovalDraftFormPayload()) {
+    approvalDraftSavedState = getApprovalDraftStatusState(payload);
+    approvalDraftLastSaveFailed = false;
+}
 function syncApprovalDraftStatusText() {
     const statusEl = document.getElementById('approvalDraftStatusText');
     if (!statusEl) return;
+    if (approvalDraftSaving) {
+        statusEl.dataset.state = 'saving'; statusEl.textContent = '임시저장 중…'; return;
+    }
+    if (approvalDraftLastSaveFailed) {
+        statusEl.dataset.state = 'error'; statusEl.textContent = '임시저장 실패 · 작성 내용은 화면에 남아 있음'; return;
+    }
     if (currentApprovalDraftId) {
-        const title = getApprovalDraftSummaryTitle();
-        const attachmentCount = approvalDraftAttachmentRefs.length;
-        const attachmentText = attachmentCount > 0 ? ` / 저장 첨부 ${attachmentCount}건` : '';
-        statusEl.innerHTML = `<strong>${escapeHtml(title || '임시문서')}</strong> 임시저장 불러옴 · 마지막 저장 ${escapeHtml(formatApprovalDraftSavedAt(currentApprovalDraftUpdatedAt))}${attachmentText ? escapeHtml(attachmentText) : ''}`;
+        const dirty = !approvalDraftSavedState || approvalDraftSavedState !== getApprovalDraftStatusState() || Array.from(document.getElementById('attachFile')?.files || []).length > 0;
+        statusEl.dataset.state = dirty ? 'dirty' : 'saved';
+        statusEl.textContent = `${dirty ? '저장하지 않은 변경 있음' : '임시저장됨'} · 마지막 저장 ${formatApprovalDraftSavedAt(currentApprovalDraftUpdatedAt)}`;
         return;
     }
-    statusEl.textContent = '서버 임시저장을 사용하지 않는 새 문서입니다.';
+    statusEl.dataset.state = 'dirty';
+    statusEl.textContent = '작성 중 · 아직 임시저장하지 않음';
 } // End of syncApprovalDraftStatusText
 
 function getApprovalDraftErrorMessage(error, fallback = '임시저장 처리 중 오류가 발생했습니다.') {
@@ -3215,6 +3236,7 @@ async function persistApprovalDraftRecord(draftId, payload, attachmentItems) {
     approvalDraftAttachmentRefs = (Array.isArray(savedDraft.attachment_links) ? savedDraft.attachment_links : normalizedAttachments)
         .map((item) => normalizeApprovalDraftAttachmentItem(item))
         .filter(Boolean);
+    rememberApprovalDraftStatusState(payload);
     syncApprovalDraftStatusText();
     return savedDraft;
 } // End of persistApprovalDraftRecord
@@ -3389,6 +3411,7 @@ function resetApprovalComposerForm(options = {}) {
     if (!skipAutoRefresh) calculateLeave();
     normalizeApprovalInitialComposerTitle();
     updateFileList();
+    approvalDraftSavedState = ''; approvalDraftLastSaveFailed = false;
     syncApprovalDraftStatusText();
 } // End of resetApprovalComposerForm
 
@@ -3746,6 +3769,7 @@ async function loadApprovalDraftFromServer(draftId) {
         updateJeongyeolUi();
         renderLinePreview();
         updateFileList();
+        rememberApprovalDraftStatusState();
         syncApprovalDraftStatusText();
         switchTab('draft');
     } catch (error) {
@@ -3758,8 +3782,11 @@ async function loadApprovalDraftFromServer(draftId) {
 } // End of loadApprovalDraftFromServer
 
 async function saveApprovalDraft() {
+    if (approvalDraftSaving) return;
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 받을 사람·업무 권한을 선택하고 기존 결재선에서 결재자를 지정한 뒤 상신해 주세요.');
     if (!canPerform('approval.submit')) return showAlert('임시저장 권한이 없습니다.');
+    approvalDraftSaving = true; approvalDraftLastSaveFailed = false;
+    syncApprovalDraftStatusText();
     const saveBtn = document.getElementById('btnSaveApprovalDraft');
     if (saveBtn) {
         saveBtn.disabled = true;
@@ -3773,6 +3800,7 @@ async function saveApprovalDraft() {
     let newlyUploadedAttachments = [];
     const validation = validateAttachments(pendingFiles);
     if (!validation.ok) {
+        approvalDraftSaving = false; syncApprovalDraftStatusText();
         if (saveBtn) {
             saveBtn.disabled = false;
             saveBtn.textContent = '💾 임시저장';
@@ -3827,6 +3855,7 @@ async function saveApprovalDraft() {
         renderApprovalDraftList();
         showAlert(`임시저장되었습니다.\n제목: ${getApprovalDraftSummaryTitle(payload)}`);
     } catch (error) {
+        approvalDraftLastSaveFailed = true;
         try {
             if (newlyUploadedAttachments.length > 0) {
                 await deleteDraftAttachmentObjects(newlyUploadedAttachments);
@@ -3836,6 +3865,7 @@ async function saveApprovalDraft() {
         }
         showAlert(getApprovalDraftErrorMessage(error, '임시저장에 실패했습니다.'));
     } finally {
+        approvalDraftSaving = false;
         if (saveBtn) {
             saveBtn.disabled = false;
             saveBtn.textContent = '💾 임시저장';
