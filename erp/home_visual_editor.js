@@ -143,10 +143,12 @@
     window.CoopSiteInlineHost?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!=='hero');
-    document.addEventListener('DOMContentLoaded',()=>{
+    const syncInitialSelection=()=>{
       const active=tabs.querySelector('a.active');
       const area=Object.keys(panes).find(key=>`#${panes[key]}`===active?.getAttribute('href'))||'hero';select(area,false);
-    },{once:true});
+    };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',syncInitialSelection,{once:true});
+    else queueMicrotask(syncInitialSelection); // Let the host take draft baselines before late initialization.
   }
   function updateExternalUi(){
     let external=false;

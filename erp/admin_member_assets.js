@@ -17,6 +17,16 @@
         src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
         integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
     });
+    const siteAssets = Object.freeze([
+        Object.freeze({src: new URL('site_editor_drafts.js?v=1.0.0', document.baseURI).href, integrity: 'sha384-EbfUPXazsNn8Ls1+1MosAAoCgvtGnTkzJFr3y/guzmHIS3qZ7rEDd1Vy/AsQU09P', ready: () => typeof root.SiteEditorDrafts?.create === 'function'}),
+        Object.freeze({src: new URL('../shared/home_design.js?v=20261009-3', document.baseURI).href, integrity: 'sha384-w7le8YvS38GKPdQQ6A4Jjp/+Xlqoda5IEU97x+Gwj8gdTOdOh+iXxZuW2ZeO9uDp', ready: () => typeof root.CoopHomeDesign?.normalizeLayout === 'function'}),
+        Object.freeze({src: new URL('../shared/site_text_styles.js?v=20261009-17', document.baseURI).href, integrity: 'sha384-QjRL2pjNqVnMgC37LaVoPTXaST81Wrogi/v6nRwDo/zzz0mCX6+YZNAAz6ORU2MH', ready: () => typeof root.CoopTextStyles?.normalize === 'function'}),
+        Object.freeze({src: new URL('admin_member_site.js?v=20261010-3', document.baseURI).href, integrity: 'sha384-rKtE8C5EtrT/FPWzWbIHPIlEIe6xN1mGUDfREwqqfHkaq1lFgIiQ6f94fPXuCnOh', ready: () => root.AdminMemberSite?.version === '20261010-3'}),
+        Object.freeze({src: new URL('site_legal_samples.js?v=20261008-1', document.baseURI).href, integrity: 'sha384-8En93aFZlH8BEdzebQ4j4kJzZycfI/wI+t+wVTm3KyhVwDb/9SHzDV9cBcC3s2oq', ready: () => !!root.CoopSiteLegalSamples}),
+        Object.freeze({src: new URL('site_inline_editor.js?v=20261010-3', document.baseURI).href, integrity: 'sha384-P4vouZfwr+qtHzdHll3+71NqTLaxbyz5rW/tTZSYVf4z49D/+/xaCQDhUPW7BXTa', ready: () => typeof root.CoopSiteInlineHost?.mount === 'function'}),
+        Object.freeze({src: new URL('home_visual_editor.js?v=20261010-4', document.baseURI).href, integrity: 'sha384-IvXbApy6nCLVcUJp+q76I2JhpC2sok9F0wVFLqzYf9tw8vjZclI8KW7bti6Frvh2', ready: () => typeof root.CoopHomeVisualEditor?.mount === 'function'}),
+        Object.freeze({src: new URL('site_legal_editor.js?v=20261010-2', document.baseURI).href, integrity: 'sha384-qMHU6KUXf0OKSrxU0A0jzSV6z5aOM545ke+ql+EaGiSiI6NiaxUy0ED2SlrkhBEa', ready: () => typeof root.CoopSiteLegalEditor?.refreshPreview === 'function'})
+    ]);
     const pending = new Map();
     function ready() { return root.XLSX?.version === '0.20.3' && typeof root.XLSX?.read === 'function' && typeof root.XLSX?.writeFile === 'function'; }
     function ensureAsset(key, asset, isReady) {
@@ -55,6 +65,12 @@
         ]);
         return root.AdminMemberDashboard;
     }
+    async function ensureSite() {
+        // Definitions may arrive together; visual adapters require the shared helpers first.
+        await Promise.all(siteAssets.slice(0, 5).map((asset, index) => ensureAsset('SITE_' + index, asset, asset.ready)));
+        await Promise.all(siteAssets.slice(5).map((asset, index) => ensureAsset('SITE_' + (index + 5), asset, asset.ready)));
+        return root.AdminMemberSite;
+    }
     function showBootFailure() {
         const gate = document.getElementById('admin-boot-gate');
         const card = document.getElementById('adminBootCard');
@@ -77,5 +93,5 @@
             card.appendChild(retry);
         }
     }
-    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensurePdf, ensureDashboard, showBootFailure });
+    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensurePdf, ensureDashboard, ensureSite, showBootFailure });
 })(window);
