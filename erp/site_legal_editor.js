@@ -81,7 +81,7 @@
       const details=document.createElement('details');details.className='site-legal-placement-image';details.open=imageOpen;
       const summary=document.createElement('summary');summary.className='btn btn-sm btn-outline-secondary mt-2';summary.textContent='가입 화면 보기';
       const image=document.createElement('img');image.src=new URL(`../assets/ui/signup-${selectedKind==='signup_purpose'?'purpose':'privacy'}-location.jpg?v=20261010-1`,document.baseURI).href;
-      image.alt=`조합원 가입 화면 하단의 ${labels[selectedKind]} 동의 항목 위치`;image.width=800;image.height=681;image.loading='lazy';image.decoding='async';
+      image.alt=`조합원 가입 화면 하단의 ${labels[selectedKind]} 표시 위치`;image.width=800;image.height=681;image.loading='lazy';image.decoding='async';
       details.append(summary,image);placement.append(details);
     }else{
       try{const base=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(base&&base.protocol==='https:'&&!base.username&&!base.password){const url=new URL(locations[selectedKind][2],base.origin+'/');const link=document.createElement('a');link.className='btn btn-sm btn-outline-secondary mt-2';link.textContent='실제 화면 보기 ↗';link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';placement.append(link);}}catch(_){}
