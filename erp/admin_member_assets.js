@@ -5,12 +5,24 @@
         src: new URL('../shared/vendor/xlsx-0.20.3.full.min.js', document.baseURI).href,
         integrity: 'sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT'
     });
-    let pending = null;
+    const chart = Object.freeze({
+        src: 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js',
+        integrity: 'sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ'
+    });
+    const dashboard = Object.freeze({
+        src: new URL('admin_member_dashboard.js?v=20261010-2', document.baseURI).href,
+        integrity: 'sha384-FO+mN8KjMwfwu0gWefgvdg3S0jVvttsJCXEuXTFAPYz5lbGwF1D0fTkcpHVy/3H6'
+    });
+    const pdf = Object.freeze({
+        src: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+        integrity: 'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'
+    });
+    const pending = new Map();
     function ready() { return root.XLSX?.version === '0.20.3' && typeof root.XLSX?.read === 'function' && typeof root.XLSX?.writeFile === 'function'; }
-    function ensureSpreadsheet() {
-        if (ready()) return Promise.resolve();
-        if (pending) return pending;
-        pending = new Promise((resolve, reject) => {
+    function ensureAsset(key, asset, isReady) {
+        if (isReady()) return Promise.resolve();
+        if (pending.has(key)) return pending.get(key);
+        const request = new Promise((resolve, reject) => {
             const script = document.createElement('script');
             let finished = false;
             const settle = (error) => {
@@ -20,16 +32,28 @@
                 script.onload = script.onerror = null;
                 if (error) { script.remove(); reject(error); } else resolve();
             };
-            const timer = root.setTimeout(() => settle(new Error('SPREADSHEET_LOAD_TIMEOUT')), 20000);
-            script.src = spreadsheet.src;
-            script.integrity = spreadsheet.integrity;
+            const timer = root.setTimeout(() => settle(new Error(key + '_LOAD_TIMEOUT')), 20000);
+            script.src = asset.src;
+            script.integrity = asset.integrity;
             script.crossOrigin = 'anonymous';
             script.async = true;
-            script.onload = () => settle(ready() ? null : new Error('SPREADSHEET_VERSION_MISMATCH'));
-            script.onerror = () => settle(new Error('SPREADSHEET_LOAD_FAILED'));
+            script.onload = () => settle(isReady() ? null : new Error(key + '_VERSION_MISMATCH'));
+            script.onerror = () => settle(new Error(key + '_LOAD_FAILED'));
             document.head.appendChild(script);
-        }).catch(error => { pending = null; throw error; });
-        return pending;
+        }).catch(error => { pending.delete(key); throw error; });
+        pending.set(key, request);
+        return request;
+    }
+    function ensureSpreadsheet() { return ensureAsset('SPREADSHEET', spreadsheet, ready); }
+    function ensurePdf() {
+        return ensureAsset('PDF', pdf, () => root.jspdf?.jsPDF?.version === '2.5.1');
+    }
+    async function ensureDashboard() {
+        await Promise.all([
+            ensureAsset('CHART', chart, () => root.Chart?.version === '4.5.1'),
+            ensureAsset('DASHBOARD', dashboard, () => typeof root.AdminMemberDashboard?.load === 'function')
+        ]);
+        return root.AdminMemberDashboard;
     }
     function showBootFailure() {
         const gate = document.getElementById('admin-boot-gate');
@@ -53,5 +77,5 @@
             card.appendChild(retry);
         }
     }
-    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, showBootFailure });
+    root.AdminMemberAssets = Object.freeze({ ensureSpreadsheet, ensurePdf, ensureDashboard, showBootFailure });
 })(window);
