@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.2.2 — lock every print path; checkpoint completed input only. */
+/* Persistent ERP workspace v1.2.3 — invalidate pending rechecks when history changes. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -274,7 +274,9 @@
   window.addEventListener('popstate', () => {
     const next = view();
     if (!next) return home();
-    if (next === current || next === requested) return;
+    // Back may return to the visible-before-loading route. It must cancel the
+    // pending destination too, and recheck the restored task before revealing it.
+    if (next === requested || (next === current && !requested)) return;
     if (!canLeave()) { history.pushState({erpWorkspace:true}, '', routes.address(current)); return; }
     load(next);
   });
@@ -342,5 +344,5 @@
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261010.12'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261010.13'};
 })();

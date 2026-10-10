@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.97
-Change: 2026-10-10 - Checkpoint saved or explicitly closed basic-info edits only.
+Version: v1.0.98
+Change: 2026-10-10 - Separate basic/RRN/support completion scopes; preserve independent drafts.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-11"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.97 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.98 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -2642,7 +2642,8 @@ window.onload = async function() {
     });
     const inviteModalEl = document.getElementById('inviteModal');
     document.getElementById('detailModal').addEventListener('hide.bs.modal', event => {
-        if (employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight) return event.preventDefault();
+        if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
+            || employeeNotificationSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight) return event.preventDefault();
         cancelEmployeeDetailReads();
     });
     document.getElementById('settingsModal').addEventListener('hide.bs.modal', event => {
@@ -2732,7 +2733,10 @@ window.onload = async function() {
     syncHrStructureSettingsUi();
     syncHrModalStack();
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:loadList,
-        busy:() => companySettingsSaveInFlight || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight});
+        busy:() => companySettingsSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
+            || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
+            || (typeof saveRRN === 'function' && saveRRN._inFlight)
+            || (typeof saveDurunuriEligibilityProfile === 'function' && saveDurunuriEligibilityProfile._inFlight)});
     } catch (error) {
         console.error('[admin_employee] boot failed:', error);
         showAlert('직원관리 초기화 중 오류가 발생했습니다.\n' + (error?.message || '잠시 후 다시 시도해 주세요.'));
@@ -2835,20 +2839,20 @@ function syncDurunuriEligibilityUi() {
     }
 }
 
-async function loadDurunuriEligibilityProfile(empId) {
+async function loadDurunuriEligibilityProfile(empId, { preserveInput = false } = {}) {
     const revision = employeeDetailRevision;
     const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId);
-    resetDurunuriEligibilityProfileUi();
+    if (!preserveInput) resetDurunuriEligibilityProfileUi();
     const module = getDurunuriModuleAdmin();
     const helpEl = document.getElementById('durunuriEligibilityHelp');
-    if (!module || !empId) return;
+    if (!module || !empId) return false;
     try {
         const state = await module.getEligibilityState(_supabase, empId, '');
-        if (!isCurrent()) return;
+        if (!isCurrent()) return false;
         currentDurunuriEligibility = state;
         if (!state) {
             syncDurunuriEligibilityUi();
-            return;
+            return !preserveInput;
         }
         const enabledEl = document.getElementById('durunuriEligibilityEnabled');
         const monthsEl = document.getElementById('durunuriConfirmedMonths');
@@ -2863,14 +2867,17 @@ async function loadDurunuriEligibilityProfile(empId) {
             : '기타';
         if (noteEl) noteEl.value = state.note || '';
         syncDurunuriEligibilityUi();
+        return true;
     } catch (e) {
         if (!isCurrent()) return;
         currentDurunuriEligibility = null;
         if (helpEl) helpEl.textContent = '두루누리 원장을 불러오지 못했습니다: ' + (e?.message || e);
+        return false;
     }
 }
 
 async function saveDurunuriEligibilityProfile() {
+    if (saveDurunuriEligibilityProfile._inFlight || employeeBasicSaveInFlight || salarySaveInFlight || saveRRN._inFlight) return;
     const module = getDurunuriModuleAdmin();
     if (!module) return showAlert('두루누리 모듈을 불러오지 못했습니다.');
     if (!currentEmpId) return showAlert('직원 정보를 확인할 수 없습니다.');
@@ -2885,12 +2892,18 @@ async function saveDurunuriEligibilityProfile() {
     if (enabled && !/^\d{4}-\d{2}$/.test(confirmedThroughMonth)) {
         return showAlert('지원 대상자는 확인 기준월을 입력해야 합니다.');
     }
+    const empId = currentEmpId, revision = employeeDetailRevision;
+    const isCurrent = () => String(currentEmpId) === String(empId) && revision === employeeDetailRevision;
+    const controls = Array.from(document.querySelectorAll('#durunuriEligibilityCardWrap input,#durunuriEligibilityCardWrap select,#durunuriEligibilityCardWrap textarea'))
+        .map(element => ({element, disabled:element.disabled}));
+    saveDurunuriEligibilityProfile._inFlight = true;
+    controls.forEach(({element}) => {element.disabled = true;});
     const saveBtn = document.getElementById('btnSaveDurunuriEligibility');
     if (saveBtn) saveBtn.disabled = true;
     try {
         await module.saveEligibilityProfile(_supabase, {
             coop_id: myInfo?.coop_id || null,
-            emp_id: currentEmpId,
+            emp_id: empId,
             is_enabled: enabled,
             confirmed_supported_months: confirmedMonths,
             confirmed_through_month: confirmedThroughMonth || null,
@@ -2898,6 +2911,7 @@ async function saveDurunuriEligibilityProfile() {
             note,
             verified_by_emp_id: myInfo?.emp_id || null
         });
+        if (!isCurrent()) return;
         await logHrAudit(
             'hr.durunuri.eligibility_update',
             `${currentEmpName || currentEmpId} 두루누리 지원 설정 변경`,
@@ -2908,11 +2922,16 @@ async function saveDurunuriEligibilityProfile() {
                 verification_method: verificationMethod
             }
         );
-        await loadDurunuriEligibilityProfile(currentEmpId);
+        const loaded = await loadDurunuriEligibilityProfile(empId, { preserveInput: true });
+        if (!isCurrent()) return;
+        if (!loaded) return showAlert('두루누리 설정은 저장했지만 저장 결과를 다시 불러오지 못했습니다. 입력은 유지했으니 다시 확인해 주세요.');
+        window.ErpWorkspaceResume?.checkpoint(document.getElementById('durunuriEligibilityCardWrap'));
         showAlert('두루누리 지원 설정을 저장했습니다.');
     } catch (e) {
         showAlert('두루누리 설정 저장 실패: ' + (e?.message || e));
     } finally {
+        saveDurunuriEligibilityProfile._inFlight = false;
+        controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
         if (saveBtn) saveBtn.disabled = false;
     }
 }
@@ -4920,7 +4939,8 @@ async function saveEmployeeNotificationAssignments() {
 } // End of saveEmployeeNotificationAssignments
 
 async function openDetail(u) {
-    if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
+    if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
+        || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
     const revision = ++employeeDetailRevision;
     const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
@@ -4997,18 +5017,25 @@ async function loadEmployeeInsuranceStatus() {
     await window.HrInsuranceStatus.mount(_supabase, document.getElementById('employeeInsuranceStatus'), {empId, admin:true});
 }
 document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
-function toggleEditMode(isEdit) {
+function toggleEditMode(isEdit, completedScope = 'edit') {
     const c = document.getElementById("infoContainer");
     if (isEdit) c.classList.add("is-editing");
     else {
-        c.classList.remove("is-editing");
-        window.ErpWorkspaceResume?.checkpoint(c);
+        // Basic information, RRN and support eligibility have separate saves.
+        // Explicit cancel/close discards the edit-mode fields, never support settings.
+        const ids = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
+            'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate'];
+        if (completedScope === 'edit') ids.push('rrnFront','rrnBack');
+        ids.forEach(id => window.ErpWorkspaceResume?.checkpoint(document.getElementById(id)));
+        const pendingRrn = ['rrnFront','rrnBack'].some(id => !!document.getElementById(id)?.value);
+        c.classList.toggle('is-editing', completedScope === 'basic' && pendingRrn);
     }
 }
 function toggleSalaryVisibility() { const el = document.getElementById("viewSalary"); el.innerText = el.innerText === "******" ? el.dataset.real : "******"; }
 
 async function saveBasicInfo() {
-    if (employeeBasicSaveInFlight || salarySaveInFlight || !currentEmpId || !employeeBasicBaseline) return;
+    if (employeeBasicSaveInFlight || salarySaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight
+        || !currentEmpId || !employeeBasicBaseline) return;
     const empId = currentEmpId;
     const revision = employeeDetailRevision;
     const expected = { ...employeeBasicBaseline };
@@ -5094,7 +5121,7 @@ async function saveBasicInfo() {
     document.getElementById("viewSalary").dataset.real = sal.toLocaleString() + " 원";
     document.getElementById("viewSalaryDate").innerText = normalizedSalaryApplyDate || "-";
 
-    toggleEditMode(false);
+    toggleEditMode(false, 'basic');
     await loadList();
     showAlert("저장되었습니다.");
     } catch (error) {
@@ -5105,7 +5132,35 @@ async function saveBasicInfo() {
     }
 }
 
-async function saveRRN() { const f = document.getElementById("rrnFront").value; const b = document.getElementById("rrnBack").value; if((f+b).length !== 13) return showAlert("13자리를 입력하세요."); const { error } = await _supabase.rpc('update_employee_rrn', { p_emp_id: currentEmpId, p_rrn: f+"-"+b }); if(error) showAlert("실패: "+error.message); else { showAlert("암호화되어 저장되었습니다."); const { data: bd } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: currentEmpId }); document.getElementById("viewBirth").innerText = bd || f; document.getElementById("rrnFront").value=""; document.getElementById("rrnBack").value=""; toggleEditMode(false); } }
+async function saveRRN() {
+    if (saveRRN._inFlight || employeeBasicSaveInFlight || salarySaveInFlight || saveDurunuriEligibilityProfile._inFlight || !currentEmpId) return;
+    const front = document.getElementById('rrnFront'), back = document.getElementById('rrnBack');
+    const f = front.value, b = back.value;
+    if ((f + b).length !== 13) return showAlert('13자리를 입력하세요.');
+    const empId = currentEmpId, revision = employeeDetailRevision;
+    const isCurrent = () => String(currentEmpId) === String(empId) && revision === employeeDetailRevision;
+    const controls = Array.from(front.closest('.edit-mode').querySelectorAll('input,button'))
+        .map(element => ({element, disabled:element.disabled}));
+    saveRRN._inFlight = true;
+    controls.forEach(({element}) => {element.disabled = true;});
+    try {
+        const { error } = await _supabase.rpc('update_employee_rrn', { p_emp_id: empId, p_rrn: f + '-' + b });
+        if (!isCurrent()) return;
+        if (error) return showAlert('실패: ' + error.message);
+        front.value = ''; back.value = '';
+        [front, back].forEach(element => window.ErpWorkspaceResume?.checkpoint(element));
+        // Keep other unsaved basic/support edits visible and protected.
+        const { data: bd, error: birthError } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: empId });
+        if (!isCurrent()) return;
+        if (!birthError) document.getElementById('viewBirth').innerText = bd || f;
+        showAlert('암호화되어 저장되었습니다.');
+    } catch (error) {
+        if (isCurrent()) showAlert('저장 결과 확인 실패: ' + (error?.message || '다시 확인해 주세요.'));
+    } finally {
+        saveRRN._inFlight = false;
+        controls.forEach(({element, disabled}) => {if (element.isConnected) element.disabled = disabled;});
+    }
+}
 function openEmploymentContractManager() {
     if (!currentEmpId) return showAlert('직원을 먼저 선택해 주세요.');
     sessionStorage.setItem('erp_contract_employee_id', String(currentEmpId));
