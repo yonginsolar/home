@@ -1,8 +1,8 @@
-/* Version: v1.6.4 | 2026-09-17 | Let users explicitly migrate incompatible legacy copy to the latest template. */
+/* Version: v1.6.5 | 2026-10-10 | Grouped numeric inputs keep canonical draft values. */
 (() => {
   'use strict';
 
-  const VERSION = '1.6.4';
+  const VERSION = '1.6.5';
   const REQUEST_TIMEOUT_MS = 12000;
   const TEMPLATE_URL = 'proposal_template_parking.html?v=1.2.4';
   const DRAFT_KEY = 'yonginsolar.erp.proposal-builder.v1';
@@ -160,7 +160,7 @@
   }
 
   function numberValue(id) {
-    const value = Number(document.getElementById(id)?.value);
+    const value = Number(ERPNumberInput.raw(document.getElementById(id)?.value));
     return Number.isFinite(value) ? value : 0;
   }
 
@@ -1063,7 +1063,7 @@
   }
 
   function normalizeExistingZero() {
-    if (document.getElementById('existingInstallationKnown').checked && el.existingKw.value.trim() !== '' && Number(el.existingKw.value) === 0) {
+    if (document.getElementById('existingInstallationKnown').checked && el.existingKw.value.trim() !== '' && Number(ERPNumberInput.raw(el.existingKw.value)) === 0) {
       el.hasExistingInstallation.checked = false;
       document.getElementById('existingInstallationStatus').value = 'none';
       el.existingKw.required = false;
@@ -1080,7 +1080,7 @@
     if (!known) el.hasExistingInstallation.checked = false;
     document.getElementById('mandatoryKw').disabled = noMandatory || !document.getElementById('mandatoryKnown').checked;
     const hasExisting = Boolean(el.hasExistingInstallation.checked);
-    const currentValue = Number(el.existingKw.value);
+    const currentValue = Number(ERPNumberInput.raw(el.existingKw.value));
     if (!hasExisting) {
       if (Number.isFinite(currentValue) && currentValue > 0) state.lastExistingKw = currentValue;
       el.existingKw.value = known ? '0' : '';
@@ -1225,7 +1225,7 @@
     DRAFT_FIELDS.forEach((id) => {
       const input = document.getElementById(id);
       if (!input) return;
-      draft[id] = input.type === 'checkbox' ? input.checked : input.value;
+      draft[id] = input.type === 'checkbox' ? input.checked : input.hasAttribute('data-number-group') ? ERPNumberInput.raw(input.value) : input.value;
     });
     try {
       localStorage.setItem(state.draftKey, JSON.stringify({ ...draft, useSamplePhoto: state.useSamplePhoto }));
@@ -1253,7 +1253,7 @@
   function collectFields() {
     return Object.fromEntries(DRAFT_FIELDS.map((id) => {
       const input = document.getElementById(id);
-      return [id, input.type === 'checkbox' ? input.checked : input.value];
+      return [id, input.type === 'checkbox' ? input.checked : input.hasAttribute('data-number-group') ? ERPNumberInput.raw(input.value) : input.value];
     }));
   }
 
@@ -1473,7 +1473,7 @@
     state.loadedCopyEdits = copyEdits; state.manualDirty = false; state.editMode = false;
     state.formPending = false;
     state.copyRestoreMismatch = false;
-    state.lastExistingKw = Number(snapshot.fields.existingKw) || 0;
+    state.lastExistingKw = Number(ERPNumberInput.raw(snapshot.fields.existingKw)) || 0;
     setFields(snapshot.fields);
     el.siteImage.value = '';
     el.siteImageName.textContent = photo ? state.photoName || '저장한 대상지 사진' : state.useSamplePhoto ? '남사읍 예시 위성사진 사용 중' : '대상지 사진 미등록';

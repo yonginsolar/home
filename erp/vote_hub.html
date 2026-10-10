@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.10 -->
+<!-- Version: v1.0.11 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.10 | vote_hub.html');</script>
+  <script>console.log('[Version] v1.0.11 | vote_hub.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -41,9 +41,9 @@
     .helper { color:#6b7280; font-size:.92rem; }
   </style>
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
-  <meta name="erp-workspace-revision" content="20261009.2">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-4">
-  <script src="/erp/workspace_nav.js?v=20261010-4" defer></script>
+  <meta name="erp-workspace-revision" content="20261010.5">
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-5">
+  <script src="/erp/workspace_nav.js?v=20261010-5" defer></script>
 </head>
 <body class="erp-unified">
   <div class="wrap">
@@ -56,37 +56,37 @@
         <button class="btn btn-outline-secondary btn-sm" onclick="location.href='index.html'" data-erp-home-link>ERP 메인</button>
       </div>
 
-      <button type="button" class="menu-card d-none" id="cardVoteCreate" onclick="openVoteTarget('create')">
+      <button type="button" class="menu-card d-none" id="cardVoteCreate" data-workspace-submenu onclick="openVoteTarget('create')">
         <strong>선거 생성</strong>
         <span>새 선거를 만들고 기본 정보, 선거구, 유권자 배정을 시작</span>
       </button>
 
-      <button type="button" class="menu-card d-none" id="cardVoteSetup" onclick="openVoteTarget('setup')">
+      <button type="button" class="menu-card d-none" id="cardVoteSetup" data-workspace-submenu onclick="openVoteTarget('setup')">
         <strong>선거 설정</strong>
         <span>기존 선거의 설정을 이어서 수정하고 선거구/명부를 정리</span>
       </button>
 
-      <button type="button" class="menu-card d-none" id="cardVoteAdmin" onclick="openVoteTarget('admin')">
+      <button type="button" class="menu-card d-none" id="cardVoteAdmin" data-workspace-submenu onclick="openVoteTarget('admin')">
         <strong>선거 관리</strong>
         <span>후보 승인, 개표, 결과 확인과 운영 관리</span>
       </button>
 
-      <button type="button" class="menu-card d-none" id="cardCandidateApply" onclick="openVoteTarget('candidate')">
+      <button type="button" class="menu-card d-none" id="cardCandidateApply" data-workspace-submenu onclick="openVoteTarget('candidate')">
         <strong>후보자 등록</strong>
         <span>후보자 본인 또는 대표자가 등록 신청 화면으로 이동</span>
       </button>
 
-      <button type="button" class="menu-card d-none" id="cardVotePortal" onclick="openVoteTarget('portal')">
+      <button type="button" class="menu-card d-none" id="cardVotePortal" data-workspace-submenu onclick="openVoteTarget('portal')">
         <strong>조합원 포털</strong>
         <span>선거와 선호도 투표를 한 화면에서 확인</span>
       </button>
 
-      <button type="button" class="menu-card d-none" id="cardPrefPollCreate" onclick="openVoteTarget('prefCreate')">
+      <button type="button" class="menu-card d-none" id="cardPrefPollCreate" data-workspace-submenu onclick="openVoteTarget('prefCreate')">
         <strong>선호도 투표 생성</strong>
         <span>발전소 이름, 행사 일정, 우선 사업 같은 의견 수렴 투표를 만듭니다.</span>
       </button>
 
-      <button type="button" class="menu-card d-none" id="cardPrefPollAdmin" onclick="openVoteTarget('prefAdmin')">
+      <button type="button" class="menu-card d-none" id="cardPrefPollAdmin" data-workspace-submenu onclick="openVoteTarget('prefAdmin')">
         <strong>선호도 투표 관리</strong>
         <span>공개, 종료, 참여 현황과 종료 후 관리자 결과를 확인합니다.</span>
       </button>
@@ -107,20 +107,6 @@
         }
       }
     });
-
-    function readStoredPermissions() {
-      try {
-        const raw = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
-        return new Set(Array.isArray(raw) ? raw : []);
-      } catch (_) {
-        return new Set();
-      }
-    }
-
-    function hasPermission(set, key) {
-      if (!set || set.size === 0) return null;
-      return set.has(key);
-    }
 
     function isModuleEnabled(runtime, moduleKey) {
       const modules = runtime && typeof runtime.modules === 'object' ? runtime.modules : null;
@@ -213,11 +199,7 @@
         return;
       }
 
-      const permissionSet = readStoredPermissions();
-      const hasAdminRoleFallback = (user.role === 'admin' || user.role === 'admin_all');
-      const memberAdminPermission = hasPermission(permissionSet, 'member.admin') === true;
-      const voteManagePermission = hasPermission(permissionSet, 'vote.manage') === true;
-      const canOperateElection = hasAdminRoleFallback || memberAdminPermission || voteManagePermission || await isElectionAdmin();
+      const canOperateElection = runtime?.runtime_profile !== 'site_member' && await isElectionAdmin();
       const hasElection = await hasElectionRecords(runtime?.coop_id);
       const visibleCards = ['cardVotePortal', 'cardCandidateApply'];
       if (canOperateElection) {

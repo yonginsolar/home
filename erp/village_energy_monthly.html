@@ -20,9 +20,10 @@
     .table-wrap{overflow-x:auto}.table{min-width:760px}.help{color:#64748b;font-size:.9rem}
     @media(max-width:640px){body{padding:12px}.card-body{padding:18px!important}}
   </style>
-  <meta name="erp-workspace-revision" content="20261009.2">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-4">
-  <script src="/erp/workspace_nav.js?v=20261010-4" defer></script>
+  <meta name="erp-workspace-revision" content="20261010.5">
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-5">
+  <script src="/erp/workspace_nav.js?v=20261010-5" defer></script>
+  <script src="/erp/number_input.js?v=20261010-1"></script>
 </head>
 <body class="erp-unified erp-pc-workspace">
   <main class="page">
@@ -41,7 +42,7 @@
           <div class="row g-3">
             <div class="col-md-5"><label for="plantName" class="form-label">발전소명</label><input id="plantName" class="form-control" required minlength="2" maxlength="100"></div>
             <div class="col-md-7"><label for="plantLocation" class="form-label">위치</label><input id="plantLocation" class="form-control" maxlength="200"></div>
-            <div class="col-md-4"><label for="plantCapacity" class="form-label">설비용량 (kW)</label><input id="plantCapacity" type="number" min="0" max="1000000" step="0.001" class="form-control"></div>
+            <div class="col-md-4"><label for="plantCapacity" class="form-label">설비용량 (kW)</label><input data-number-group id="plantCapacity" type="number" min="0" max="1000000" step="0.001" class="form-control"></div>
             <div class="col-md-4"><label for="plantStatus" class="form-label">진행 상태</label><select id="plantStatus" class="form-select"><option>준비중</option><option>공사중</option><option>운영중</option></select></div>
           </div>
           <div class="d-flex gap-2 mt-3"><button id="plantSaveButton" type="submit" class="btn btn-primary">발전소 저장</button><button id="plantCancelButton" type="button" class="btn btn-outline-secondary">취소</button></div>
@@ -53,10 +54,10 @@
           <div class="row g-3">
             <div class="col-md-5"><label for="plantId" class="form-label">발전소</label><select id="plantId" class="form-select" required></select></div>
             <div class="col-md-3"><label for="monthStart" class="form-label">기준월</label><input id="monthStart" type="month" class="form-control" required></div>
-            <div class="col-md-4"><label for="generationKwh" class="form-label">발전량 (kWh)</label><input id="generationKwh" type="number" min="0" step="0.001" inputmode="decimal" class="form-control"></div>
-            <div class="col-md-4"><label for="smpAmount" class="form-label">SMP 정산액 (원)</label><input id="smpAmount" type="number" step="1" inputmode="numeric" class="form-control"></div>
-            <div class="col-md-4"><label for="recAmount" class="form-label">REC 정산액 (원)</label><input id="recAmount" type="number" step="1" inputmode="numeric" class="form-control"></div>
-            <div class="col-md-4"><label for="otherAmount" class="form-label">기타 전력판매액 (원)</label><input id="otherAmount" type="number" step="1" inputmode="numeric" class="form-control"></div>
+            <div class="col-md-4"><label for="generationKwh" class="form-label">발전량 (kWh)</label><input data-number-group id="generationKwh" type="number" min="0" step="0.001" inputmode="decimal" class="form-control"></div>
+            <div class="col-md-4"><label for="smpAmount" class="form-label">SMP 정산액 (원)</label><input data-number-group id="smpAmount" type="number" step="1" inputmode="numeric" class="form-control"></div>
+            <div class="col-md-4"><label for="recAmount" class="form-label">REC 정산액 (원)</label><input data-number-group id="recAmount" type="number" step="1" inputmode="numeric" class="form-control"></div>
+            <div class="col-md-4"><label for="otherAmount" class="form-label">기타 전력판매액 (원)</label><input data-number-group id="otherAmount" type="number" step="1" inputmode="numeric" class="form-control"></div>
             <div class="col-12"><label for="note" class="form-label">정산·가동 메모</label><textarea id="note" class="form-control" rows="2" maxlength="2000" placeholder="정산서 기준이나 고장·가동중단 사항 등"></textarea></div>
             <div class="col-12"><label class="form-check"><input id="settlementConfirmed" class="form-check-input" type="checkbox"><span class="form-check-label">정산서를 확인했습니다</span></label></div>
           </div>
@@ -89,7 +90,7 @@
     let records = [];
     function message(text, kind='info') {status.className=`alert alert-${kind}`;status.textContent=text;status.classList.remove('d-none');}
     function emptyToNumber(id, decimal=false) {
-      const raw=$(id).value.trim();
+      const raw=ERPNumberInput.raw($(id).value).trim();
       if (!raw) return null;
       const value=Number(raw);
       if (!Number.isFinite(value) || (decimal ? value<0 : !Number.isSafeInteger(value))) throw new Error(`${$(id).closest('div').querySelector('label')?.textContent||'금액'}을 확인해 주세요.`);
@@ -198,7 +199,7 @@
       savingPlant=true;$('plantSaveButton').disabled=true;
       try{
         const name=$('plantName').value.trim(),locationText=$('plantLocation').value.trim();
-        const capacityRaw=$('plantCapacity').value.trim(),capacity=capacityRaw?Number(capacityRaw):null;
+        const capacityRaw=ERPNumberInput.raw($('plantCapacity').value).trim(),capacity=capacityRaw?Number(capacityRaw):null;
         if(name.length<2||name.length>100||locationText.length>200||
           (capacity!==null&&(!Number.isFinite(capacity)||capacity<0||capacity>1000000)))throw new Error('발전소명·위치·설비용량을 확인해 주세요.');
         const {error}=await db.rpc('sun_village_save_plant',{p_id:editingPlantId||null,p_name:name,p_location:locationText||null,p_capacity:capacity,p_status:$('plantStatus').value});

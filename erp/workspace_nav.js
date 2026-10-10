@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.2.0 — mirror existing local navigation; business permissions unchanged. */
+/* ERP workspace navigation v1.3.0 — collapsible local navigation and server-confirmed election entry. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261010.4';
+  const VERSION = '20261010.5';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -20,7 +20,7 @@
     ['btnAudit', '감사 로그', 'audit_logs.html', 'audit', ['audit.view'], '◷'],
     ['btnPerm', '권한 관리', 'permissions.html', 'permission', ['permission.manage'], '⚿']
   ];
-  const extraLabels = {btnServiceContracts:'이용계약·청구서',btnFestivalReceipts:'매출·재고 관리',btnPowerMonitorAdmin:'발전소 모니터링',btnPlatform:'조합 생성·운영 제어',btnSunVillageDemo:'햇빛소득마을',btnVillageEnergy:'발전·정산 현황'};
+  const extraLabels = {btnVoteHub:'선거·투표 관리',btnServiceContracts:'이용계약·청구서',btnFestivalReceipts:'매출·재고 관리',btnPowerMonitorAdmin:'발전소 모니터링',btnPlatform:'조합 생성·운영 제어',btnSunVillageDemo:'햇빛소득마을',btnVillageEnergy:'발전·정산 현황'};
   const labels = new Map([...catalog.map(item=>[item[0],item[1]]),...Object.entries(extraLabels)]);
   const compare = (a,b) => a.localeCompare(b,'ko-KR') || (a<b?-1:a>b?1:0);
   const cleanOrder = order => [...new Set((Array.isArray(order)?order:[]).filter(id=>typeof id==='string' && /^btn[A-Za-z0-9_-]{1,80}$/.test(id)))];
@@ -30,6 +30,8 @@
   const authBound = new WeakSet();
   const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
   let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
+  let closedSubmenus = new Set();
+  try { closedSubmenus = new Set(cleanOrder(JSON.parse(localStorage.getItem('erp_workspace_submenus_v1') || '[]'))); } catch (_) {}
   const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop() || 'index';
   const params = new URLSearchParams(location.search);
   const isIndex = path === 'index' || path === 'erp';
@@ -51,6 +53,7 @@
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
     if (leaf === 'participation') return path === leaf && (params.get('view') || 'education') === 'education';
+    if (leaf === 'vote_hub') return path === leaf || /\/vote\/(?:admin|admin_setup|poll_admin|poll_setup)(?:\.html)?\/?$/.test(location.pathname);
     return path === leaf;
   }
 
@@ -98,6 +101,7 @@
     });
     list.replaceChildren(link(['home', '전체 메뉴', 'index.html', '', [], '⌂', true]), ...ordered.map(link));
     if (isIndex) list.firstElementChild.setAttribute('aria-current', 'page');
+    document.body.classList.toggle('erp-workspace-election', state.items.some(item => item[0] === 'btnVoteHub'));
     orderButton.hidden = !(state.canOrder && state.orderLoaded && state.items.length > 1);
     syncSubmenu();
   }
@@ -125,15 +129,28 @@
     localNavigationRoots = [...document.querySelectorAll(localRoots)].filter(root => !root.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar'));
     const sources = [...new Set(localNavigationRoots.flatMap(root => root.matches('[data-workspace-submenu]') ? [root]
       : [...root.querySelectorAll('button,a.nav-link,[role="tab"]')]))]
-      .filter(node => localVisible(node) && localLabel(node) && !node.closest('.erp-workspace-footer'));
+      .filter(node => localVisible(node) && localLabel(node) && !node.closest('.erp-workspace-footer')
+        && !(node.id === 'nav-vote-hub' && state?.items.some(item => item[0] === 'btnVoteHub')));
     if (!owner || !sources.length) {
       submenu?.remove(); submenu = null; submenuOwner = null; submenuRows = []; return;
     }
     // Preserve mirror nodes/focus during ordinary page rendering. Never clone original IDs or handlers.
     if (!submenu || submenuOwner !== owner || sources.length !== submenuRows.length || sources.some((node,i) => node !== submenuRows[i]?.source)) {
-      submenu?.remove(); submenu = document.createElement('div'); submenu.className = 'erp-workspace-submenu';
+      if (submenu && submenuOwner) {
+        if (submenu.open) closedSubmenus.delete(submenuOwner.dataset.menuId); else closedSubmenus.add(submenuOwner.dataset.menuId);
+      }
+      submenu?.remove(); submenu = document.createElement('details'); submenu.className = 'erp-workspace-submenu';
       submenu.setAttribute('role', 'group'); submenu.setAttribute('aria-label', `${owner.title} 세부 메뉴`);
       submenu.dataset.mobile = owner.dataset.mobile; submenuOwner = owner;
+      submenu.open = !closedSubmenus.has(owner.dataset.menuId);
+      const details = submenu, summary = document.createElement('summary');
+      summary.className = 'erp-workspace-submenu-toggle'; summary.textContent = '세부 메뉴';
+      details.append(summary);
+      details.addEventListener('toggle', () => {
+        if (!state || submenu !== details) return;
+        if (details.open) closedSubmenus.delete(owner.dataset.menuId); else closedSubmenus.add(owner.dataset.menuId);
+        try { localStorage.setItem('erp_workspace_submenus_v1', JSON.stringify([...closedSubmenus])); } catch (_) {}
+      });
       submenuRows = sources.map(source => {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'erp-workspace-sublink';
         button.addEventListener('click', () => {
@@ -308,7 +325,7 @@
       if (!document.body.classList.contains('erp-workspace-drawer-open')) return;
       if (event.key === 'Escape') { event.preventDefault(); setDrawer(false); }
       if (event.key !== 'Tab') return;
-      const focusables = [...panel.querySelectorAll('a[href],button,[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
+      const focusables = [...panel.querySelectorAll('a[href],button,summary,[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
       const first = focusables[0], last = focusables.at(-1);
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -345,17 +362,19 @@
     const narrow = runtime.runtime_profile === 'site_member';
     const full = runtime.runtime_profile === 'legacy_full';
     const set = permissions(runtime);
-    const [order, platform, service, festival, monitor, villages] = await Promise.all([
+    const [order, platform, service, festival, monitor, villages, election] = await Promise.all([
       read(client, 'erp_get_menu_order',undefined,true),
       read(client, 'platform_get_context'),
       read(client, 'erp_service_contract', { p_action: 'context' }),
       full && enabled(runtime, 'accounting') && set.has('accounting.view') ? read(client, 'festival_receipts_admin', { p_action: 'access', p_data: {} }) : null,
       full ? read(client, 'get_my_power_monitor_entry') : null,
-      !narrow ? read(client, 'sun_village_total_manager_context') : null
+      !narrow ? read(client, 'sun_village_total_manager_context') : null,
+      !narrow && enabled(runtime, 'vote') ? read(client, 'is_election_admin') : null
     ]);
     if (ticket !== generation) return;
     state.orderLoaded=order.ok;state.order=cleanOrder(order.data);
     state.canOrder=platform?.is_platform_admin===true || set.has('member.admin') || set.has('site.admin');
+    if (election === true) state.items.push(['btnVoteHub', '선거·투표 관리', 'vote_hub.html', '', [], '☑']);
     if (service && (service.admin || service.platform || service.representative || service.draft_reviewer)) {
       state.items.push(['btnServiceContracts', '이용계약·청구서', 'service_contracts.html', '', [], '▢']);
     }
@@ -380,7 +399,7 @@
     if (submenuFrame != null) cancelAnimationFrame(submenuFrame);
     submenuFrame = null; submenu = null; submenuOwner = null; submenuRows = []; localNavigationRoots = [];
     if (brand) brand.textContent = '협동조합 ERP';
-    document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open');
+    document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open', 'erp-workspace-election');
     if (backdrop) backdrop.hidden = true;
     if (panel) panel.hidden = true;
   }

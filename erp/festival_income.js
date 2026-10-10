@@ -45,7 +45,7 @@
     input.value = value ?? '';
     if (options.required) input.required = true;
     if (options.maxLength) input.maxLength = options.maxLength;
-    if (type === 'number') { input.min = options.min ?? 1; input.max = options.max ?? 100000000000; input.step = '1'; input.inputMode = 'numeric'; }
+    if (type === 'number') { input.dataset.numberGroup = ''; input.min = options.min ?? 1; input.max = options.max ?? 100000000000; input.step = '1'; input.inputMode = 'numeric'; }
     label.append(input);
     form.append(label);
     return input;
@@ -123,7 +123,7 @@
         const submit=node('button',plan?'수정 저장':'받을 재료비 등록');submit.type='submit';form.append(submit);
         form.addEventListener('submit',e=>{
           e.preventDefault();if(!editable || busy || !form.reportValidity())return;
-          const data=Object.fromEntries(new FormData(form));data.expected_amount=Number(data.expected_amount);
+          const data=Object.fromEntries(new FormData(form));data.expected_amount=Number(ERPNumberInput.raw(data.expected_amount));
           if(getSelectedEvent)data.event_id=getSelectedEvent()?.id;
           const selected=getEvents().find(item=>item.id===data.event_id);
           if(!selected?.is_active){setStatus('재료비를 등록할 축제를 먼저 선택해 주세요.',true);return;}
@@ -150,7 +150,7 @@
         const submit=node('button','입금 확인·회계 기록');submit.type='submit';form.append(submit);
         form.addEventListener('submit',e=>{
           e.preventDefault();if(!editable || !form.reportValidity() || busy)return;
-          const data={id:plan.id,version:plan.version,received_date:date.value,amount:Number(amount.value)};
+          const data={id:plan.id,version:plan.version,received_date:date.value,amount:Number(ERPNumberInput.raw(amount.value))};
           if(!confirm(`${plan.payer_name}에서 ${money(data.amount)}을 실제로 받으셨나요?\n입금 확인과 회계 전표를 함께 저장합니다. 이미 회계에 입력했다면 취소하고 ‘기존 전표 연결’을 이용해 주세요.`))return;
           run(async()=>{await rpc('receive',keyed(`receive:${plan.id}`,data));requestKeys.delete(`receive:${plan.id}`);await reload();setStatus('입금 확인과 회계 전표 저장을 완료했습니다.');});
         });

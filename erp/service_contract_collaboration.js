@@ -1,4 +1,4 @@
-/* 1.1.0 · Contract and addendum proposals, including village fee conditions. */
+/* 1.1.1 · Contract and addendum proposals, including grouped fee inputs. */
 (function(){
  'use strict';
  const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -6,7 +6,7 @@
  const names={pending:'확인 대기',accepted:'반영 완료',rejected:'미반영',superseded:'이후 수정안으로 대체'};
  const sources={existing:'기존 저장본',created:'초안 작성',review:'검토 요청본',final:'결재용 최종본',saved:'초안 저장',proposal:'상대 수정안 반영',reopened:'수정본 만들기'};
  let api=null,record=null,editorBase=null,editorProposal=null,editorBaseline='',sending=false;
- const field=(id,label,value,type='text',extra='')=>`<div><label for="${id}" class="form-label">${esc(label)}</label><input id="${id}" class="form-control" type="${type}" value="${esc(value)}" ${extra}></div>`;
+ const field=(id,label,value,type='text',extra='')=>`<div><label for="${id}" class="form-label">${esc(label)}</label><input id="${id}" class="form-control" type="${type}" ${type==='number'?'data-number-group':''} value="${esc(value)}" ${extra}></div>`;
  function rows(before,after){
   const changes=[],get=(obj,path)=>path.split('.').reduce((v,k)=>v?.[k],obj),add=(label,a,b)=>{if(JSON.stringify(a??null)!==JSON.stringify(b??null))changes.push({label,before:String(a??''),after:String(b??'')});};
   add('계약 제목',before.title,after.title);
@@ -41,9 +41,10 @@
   $('proposalEditor').insertAdjacentHTML('afterbegin',`<section class="service-section"><label class="form-check"><input type="checkbox" id="proposalVillageEnabled" class="form-check-input" ${t.village_enabled?'checked':''}><span class="form-check-label">햇빛소득마을 이용</span></label><div class="mt-3">${field('proposalVillageFee','마을당 연간 이용료 · 부가세 별도',t.village_annual_supply||0,'number','min="0" max="100000000" step="1"')}</div>${r.amendment?field('proposalEffective','변경 적용일',t.change_effective_on,'date',`required min="${t.start}" max="${t.end}"`):''}</section>`);
   if(r.amendment){$('proposalStart').readOnly=true;$('proposalEnd').readOnly=true;}
   const toggle=()=>{$('proposalVillageFee').parentElement.hidden=!$('proposalVillageEnabled').checked;$('proposalVillageFee').required=$('proposalVillageEnabled').checked;};$('proposalVillageEnabled').onchange=toggle;toggle();
+  ERPNumberInput.refresh($('proposalEditor'));
   $('proposalError').textContent='';$('proposalDialog').showModal();editorBaseline=editorState();$('proposalTitle').focus();
  }
- function editorSnapshot(){const t=structuredClone(editorBase.pending_proposal?.snapshot?.terms||editorBase.terms);t.start=$('proposalStart').value;t.end=$('proposalEnd').value;t.annual_supply=Number($('proposalAnnual').value);t.free_start=$('proposalFree').value||null;t.free_end=t.free_start?'2026-12-31':null;t.setup=$('proposalSetup').value;t.special=$('proposalSpecial').value;t.village_enabled=$('proposalVillageEnabled').checked;t.village_annual_supply=t.village_enabled?Number($('proposalVillageFee').value):0;if(editorBase.amendment)t.change_effective_on=$('proposalEffective').value;return {title:$('proposalTitle').value.trim(),terms:t,body:$('proposalBody').value};}
+ function editorSnapshot(){const t=structuredClone(editorBase.pending_proposal?.snapshot?.terms||editorBase.terms);t.start=$('proposalStart').value;t.end=$('proposalEnd').value;t.annual_supply=Number(ERPNumberInput.raw($('proposalAnnual').value));t.free_start=$('proposalFree').value||null;t.free_end=t.free_start?'2026-12-31':null;t.setup=$('proposalSetup').value;t.special=$('proposalSpecial').value;t.village_enabled=$('proposalVillageEnabled').checked;t.village_annual_supply=t.village_enabled?Number(ERPNumberInput.raw($('proposalVillageFee').value)):0;if(editorBase.amendment)t.change_effective_on=$('proposalEffective').value;return {title:$('proposalTitle').value.trim(),terms:t,body:$('proposalBody').value};}
  async function compareProposal(id){const data=await api.rpc('proposal_get',{proposal_id:id},record.id);showComparison(data.before,data.after,'제'+data.proposal.base_revision+'판','수정안 '+data.proposal.proposal_no);}
  function showComparison(before,after,left,right){$('comparisonTitle').textContent=left+' → '+right;$('comparisonBody').innerHTML=comparison(before,after,left,right);$('comparisonDialog').showModal();}
  function bind(r,callbacks){record=r;api=callbacks;

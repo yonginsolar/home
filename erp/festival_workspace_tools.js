@@ -1,4 +1,4 @@
-/* v1.1.1 — Keep inventory-use drafts separate for each festival. */
+/* v1.1.2 — Keep grouped inventory-use drafts separate for each festival. */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -51,8 +51,8 @@
       e.preventDefault();if(!editable||!settingsEvent||!e.currentTarget.reportValidity())return;
       const noCash=$('eventNoCash').checked;
       const data={event_id:settingsEvent.id,version:settingsEvent.version,event_name:$('editEventName').value.trim(),event_date:$('editEventDate').value,no_cash_sales:noCash,
-        guide_settings:{activity_name:$('guideActivity').value.trim(),unit_price:noCash?0:Number($('guidePrice').value),coupon_enabled:!noCash&&$('guideCoupon').checked,
-          coupon_value:Number($('guideCouponValue').value||3000),show_date:$('guideShowDate').checked,time_text:$('guideTime').value.trim(),capacity:$('guideCapacity').value?Number($('guideCapacity').value):null}};
+        guide_settings:{activity_name:$('guideActivity').value.trim(),unit_price:noCash?0:Number(ERPNumberInput.raw($('guidePrice').value)),coupon_enabled:!noCash&&$('guideCoupon').checked,
+          coupon_value:Number(ERPNumberInput.raw($('guideCouponValue').value||3000)),show_date:$('guideShowDate').checked,time_text:$('guideTime').value.trim(),capacity:$('guideCapacity').value?Number(ERPNumberInput.raw($('guideCapacity').value)):null}};
       if(data.guide_settings.coupon_enabled&&data.guide_settings.coupon_value>data.guide_settings.unit_price){$('eventSettingsStatus').textContent='쿠폰 금액은 체험비보다 클 수 없습니다.';return;}
       run(async()=>{await rpc('update_event',data);dialog.close();await onChanged(settingsEvent.id);status('축제명과 체험·인쇄 안내를 저장했습니다. 기존 거래 날짜와 회계 전표는 변경하지 않았습니다.');});
     });
@@ -117,7 +117,7 @@
     $('eventInventoryNext').addEventListener('click',()=>{inventoryOffset+=100;void reloadInventory();});
     $('eventUseForm').addEventListener('submit',e=>{
       e.preventDefault();const event=getEvent();if(!editable||!event||busy||isBusy()||!e.currentTarget.reportValidity())return;
-      const data={event_id:event.id,item_id:$('eventUseItem').value,movement_date:$('eventUseDate').value,movement_type:$('eventUseType').value,quantity:Number($('eventUseQuantity').value),note:$('eventUseNote').value.trim()};
+      const data={event_id:event.id,item_id:$('eventUseItem').value,movement_date:$('eventUseDate').value,movement_type:$('eventUseType').value,quantity:Number(ERPNumberInput.raw($('eventUseQuantity').value)),note:$('eventUseNote').value.trim()};
       const fingerprint=JSON.stringify(data);if(pendingUsage?.fingerprint!==fingerprint)pendingUsage={fingerprint,key:crypto.randomUUID()};
       if(!confirm(`${event.event_name}\n${data.quantity}개를 사용한 기록을 저장할까요? 재고가 줄어들고 매출 전표는 만들지 않습니다.`))return;
       run(async()=>{await rpc('movement',{...data,request_key:pendingUsage.key});pendingUsage=null;$('eventUseQuantity').value='';$('eventUseNote').value='';await onStockChanged();status('이 축제의 사용 수량과 재고를 저장했습니다. 매출을 추가로 만들지 않았습니다.');},'operationStatus');

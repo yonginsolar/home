@@ -23,7 +23,7 @@
     let modal = document.getElementById('memberCapitalSettingsModal');
     if (modal) return modal;
     const wrapper = document.createElement('div');
-    wrapper.innerHTML = '<div class="modal fade" id="memberCapitalSettingsModal" tabindex="-1" aria-labelledby="memberCapitalSettingsTitle" aria-hidden="true"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="memberCapitalSettingsTitle">출자 기준 설정</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label" for="member-capital-minimum">최소 출자금</label><div class="input-group"><input class="form-control" type="number" id="member-capital-minimum" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div></div><div><label class="form-label" for="member-capital-unit">출자 1좌 금액</label><div class="input-group"><input class="form-control" type="number" id="member-capital-unit" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div></div></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">취소</button><button class="btn btn-primary" id="member-capital-save" onclick="saveMemberCapitalSettings()">저장</button></div></div></div></div>';
+    wrapper.innerHTML = '<div class="modal fade" id="memberCapitalSettingsModal" tabindex="-1" aria-labelledby="memberCapitalSettingsTitle" aria-hidden="true"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="memberCapitalSettingsTitle">출자 기준 설정</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label" for="member-capital-minimum">최소 출자금</label><div class="input-group"><input class="form-control" type="number" data-number-group id="member-capital-minimum" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div></div><div><label class="form-label" for="member-capital-unit">출자 1좌 금액</label><div class="input-group"><input class="form-control" type="number" data-number-group id="member-capital-unit" min="1" step="1" inputmode="numeric"><span class="input-group-text">원</span></div></div></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">취소</button><button class="btn btn-primary" id="member-capital-save" onclick="saveMemberCapitalSettings()">저장</button></div></div></div></div>';
     modal = wrapper.firstElementChild;
     document.body.appendChild(modal);
     return modal;
@@ -31,6 +31,7 @@
   global.openMemberCapitalSettings = async function () {
     const modal = ensureModal();
     if (!modal || busy) return;
+    global.ERPNumberInput?.refresh(modal);
     busy = true;
     try {
       const rules = await global.CoopMemberCapital.load(client(), true);
@@ -62,8 +63,8 @@
   };
   global.saveMemberCapitalSettings = async function () {
     if (busy) return;
-    const minimum = Number(document.getElementById('member-capital-minimum').value);
-    const unit = Number(document.getElementById('member-capital-unit').value);
+    const minimum = Number(String(document.getElementById('member-capital-minimum').value).replace(/,/g, ''));
+    const unit = Number(String(document.getElementById('member-capital-unit').value).replace(/,/g, ''));
     if (![minimum, unit].every(value => Number.isSafeInteger(value) && value > 0 && value <= 1000000000)) {
       return notice('최소 출자금과 1좌 금액을 1원 이상 정수로 입력해주세요.', 'warning');
     }

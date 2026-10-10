@@ -99,7 +99,7 @@ function showAlert(message) {
 function contractEditorSnapshot() {
   return JSON.stringify(Array.from(document.querySelectorAll('#workspace input, #workspace select, #workspace textarea'))
     .map((field) => [field.id || field.getAttribute('data-custom-title') || field.getAttribute('data-custom-content') || '',
-      field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value]));
+      field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.hasAttribute('data-number-group') ? ERPNumberInput.raw(field.value) : field.value]));
 }
 
 function hasUnsavedContractChanges() {
@@ -568,13 +568,13 @@ function renderFullContractEditor(terms) {
       <h3 class="section-title">임금</h3>
       <div class="row g-3">
         <div class="col-md-3"><label class="form-label required" for="wageBasis">임금 기준</label><select class="form-select" id="wageBasis">${wageBasisOptions}</select></div>
-        <div class="col-md-3"><label class="form-label required" for="wageAmount">기준 임금액</label><div class="input-group"><input type="number" min="0" step="1" class="form-control" id="wageAmount" value="${escapeHtml(terms.wage_amount)}"><span class="input-group-text">원</span></div></div>
+        <div class="col-md-3"><label class="form-label required" for="wageAmount">기준 임금액</label><div class="input-group"><input data-number-group type="number" min="0" step="1" class="form-control" id="wageAmount" value="${escapeHtml(terms.wage_amount)}"><span class="input-group-text">원</span></div></div>
         <div class="col-md-6"><label class="form-label required" for="payDay">지급일</label><input class="form-control" id="payDay" maxlength="100" value="${escapeHtml(terms.pay_day)}"></div>
         <div class="col-12"><label class="form-label required" for="paymentMethod">지급 방법</label><textarea class="form-control" id="paymentMethod" rows="2" maxlength="500" placeholder="예: 매월 지급일에 근로자 본인 명의 계좌로 입금">${escapeHtml(terms.payment_method)}</textarea></div>
-        <div class="col-md-3"><label class="form-label" for="monthlyBasicPay">월 기본급</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyBasicPay" value="${escapeHtml(terms.monthly_basic_pay)}"><span class="input-group-text">원</span></div></div>
-        <div class="col-md-3"><label class="form-label" for="monthlyMealAllowance">월 식대</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyMealAllowance" value="${escapeHtml(terms.monthly_meal_allowance)}"><span class="input-group-text">원</span></div></div>
-        <div class="col-md-3"><label class="form-label" for="monthlyPositionAllowance">월 직책수당</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyPositionAllowance" value="${escapeHtml(terms.monthly_position_allowance)}"><span class="input-group-text">원</span></div></div>
-        <div class="col-md-3"><label class="form-label" for="monthlyOtherFixedAllowance">월 기타 고정수당</label><div class="input-group"><input type="number" min="0" step="1" class="form-control wage-part" id="monthlyOtherFixedAllowance" value="${escapeHtml(terms.monthly_other_fixed_allowance)}"><span class="input-group-text">원</span></div></div>
+        <div class="col-md-3"><label class="form-label" for="monthlyBasicPay">월 기본급</label><div class="input-group"><input data-number-group type="number" min="0" step="1" class="form-control wage-part" id="monthlyBasicPay" value="${escapeHtml(terms.monthly_basic_pay)}"><span class="input-group-text">원</span></div></div>
+        <div class="col-md-3"><label class="form-label" for="monthlyMealAllowance">월 식대</label><div class="input-group"><input data-number-group type="number" min="0" step="1" class="form-control wage-part" id="monthlyMealAllowance" value="${escapeHtml(terms.monthly_meal_allowance)}"><span class="input-group-text">원</span></div></div>
+        <div class="col-md-3"><label class="form-label" for="monthlyPositionAllowance">월 직책수당</label><div class="input-group"><input data-number-group type="number" min="0" step="1" class="form-control wage-part" id="monthlyPositionAllowance" value="${escapeHtml(terms.monthly_position_allowance)}"><span class="input-group-text">원</span></div></div>
+        <div class="col-md-3"><label class="form-label" for="monthlyOtherFixedAllowance">월 기타 고정수당</label><div class="input-group"><input data-number-group type="number" min="0" step="1" class="form-control wage-part" id="monthlyOtherFixedAllowance" value="${escapeHtml(terms.monthly_other_fixed_allowance)}"><span class="input-group-text">원</span></div></div>
         <div class="col-12"><div class="readonly-box">월 고정 지급액 합계 <strong id="monthlyWageTotal">0원</strong></div></div>
         <div class="col-12"><label class="form-label required" for="wageCalculationTerms">임금 구성·계산 기준</label><textarea class="form-control" id="wageCalculationTerms" rows="2" maxlength="1500">${escapeHtml(terms.wage_calculation_terms)}</textarea></div>
       </div>
@@ -720,7 +720,7 @@ function requireField(value, label) {
 }
 
 function numberValue(id) {
-  const value = Number(document.getElementById(id)?.value || 0);
+  const value = Number(ERPNumberInput.raw(document.getElementById(id)?.value || 0));
   return Number.isFinite(value) ? value : 0;
 }
 

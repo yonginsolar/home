@@ -103,9 +103,9 @@
   <link rel="stylesheet" href="./erp_theme.css?v=1.1.1">
   <meta name="erp-mobile-revision" content="20261007.2">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
-  <meta name="erp-workspace-revision" content="20261009.2">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-4">
-  <script src="/erp/workspace_nav.js?v=20261010-4" defer></script>
+  <meta name="erp-workspace-revision" content="20261010.5">
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-5">
+  <script src="/erp/workspace_nav.js?v=20261010-5" defer></script>
 </head>
 <body class="erp-unified erp-menu-workspace erp-auth-screen" data-erp-mobile-task="menu">
 
@@ -265,6 +265,11 @@
         <button class="btn btn-white btn-menu hidden" id="btnOfficialsAdmin" onclick="location.href='officials_admin.html'">
             🖋️ <strong>임원·대의원·선관위원 관리</strong>
             <span class="d-block small text-muted">조합원 연동, 직책·임기 관리, 전자서명·선거 공통 원천</span>
+        </button>
+
+        <button class="btn btn-white btn-menu hidden" id="btnVoteHub" onclick="location.href='vote_hub.html'">
+          ☑️ <strong>선거·투표 관리</strong>
+          <span class="d-block small text-muted">선거 설정, 후보자·유권자 관리와 선호도 투표</span>
         </button>
 
         <button class="btn btn-white btn-menu hidden" id="btnGovernanceHub" onclick="location.href='governance.html'">
@@ -2184,6 +2189,14 @@ function applyMenuPermissions(user, platformCtx, runtime) {
         }
     });
     document.getElementById('btnFestivalReceipts')?.classList.add('hidden');
+    document.getElementById('btnVoteHub')?.classList.add('hidden');
+    if (runtime?.runtime_profile !== 'site_member' && isModuleEnabled(runtime, 'vote') && !retiredGraceAccess) {
+        _supabase.rpc('is_election_admin').then(({data,error}) => {
+            if (!isCurrentMenuCheck() || error || data !== true || retiredGraceAccess) return;
+            document.getElementById('btnVoteHub')?.classList.remove('hidden');
+            applyMenuOrder();
+        }).catch(() => { /* No confirmed election authority: keep the independent menu closed. */ });
+    }
     if (String(runtime?.runtime_profile || 'legacy_full') === 'legacy_full'
         && isModuleEnabled(runtime, 'accounting') && !retiredGraceAccess) {
         _supabase.rpc('festival_receipts_admin', { p_action: 'access', p_data: {} }).then(({data,error}) => {
@@ -2477,6 +2490,7 @@ const ERP_MENU_BUTTON_ORDER_IDS = [
     'btnSunVillageDemo',
     'btnOfficialsAdmin',
     'btnGovernanceHub',
+    'btnVoteHub',
     'btnMinutesAdmin',
     'btnNoticesAdmin',
     'btnMaterialsAdmin',

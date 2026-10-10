@@ -1,4 +1,4 @@
-/* v2.8.0 — Coop-owned records, payment account and public guide links. */
+/* v2.8.1 — Grouped sales, inspection and settlement amount inputs. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -19,7 +19,7 @@
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false
   }).format(new Date(value));
-  const intValue = (id) => Math.max(0, Math.trunc(Number($(id)?.value || 0)));
+  const intValue = (id) => Math.max(0, Math.trunc(Number(ERPNumberInput.raw($(id)?.value || 0))));
   const movementLabels = {
     purchase: '구매 입고', sale: '판매 출고', event_use: '무료 체험·행사 사용',
     defect: '불량·폐기', adjustment_in: '실사 증가', adjustment_out: '실사 감소'
@@ -397,7 +397,7 @@
       input.value = value;
       input.setAttribute('aria-label', `${purchase.item_name} ${text}`);
       if (name === 'quantity') {
-        input.min = '0'; input.max = String(purchase.remaining_quantity ?? purchase.expected_quantity); input.step = '1';
+        input.dataset.numberGroup = ''; input.min = '0'; input.max = String(purchase.remaining_quantity ?? purchase.expected_quantity); input.step = '1';
         input.inputMode = 'numeric'; input.placeholder = `남은 ${purchase.remaining_quantity ?? purchase.expected_quantity}${purchase.unit}`;
         input.required = true;
       } else if (name === 'received_date') {
@@ -426,7 +426,7 @@
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (operationBusy) return;
-      const quantity = Number(inputs.quantity.value);
+      const quantity = Number(ERPNumberInput.raw(inputs.quantity.value));
       const note = inputs.note.value.trim();
       const remaining=Number(purchase.remaining_quantity ?? purchase.expected_quantity);
       if (inputs.quantity.value === '' || !Number.isSafeInteger(quantity) || quantity < 0 || quantity > remaining || (partial.checked && quantity===0)) {
@@ -515,7 +515,7 @@
     dateInput.value = kstToday();
     dateInput.setAttribute('aria-label', '통장 입금일');
     const amountInput = document.createElement('input');
-    amountInput.type = 'number';
+    amountInput.type = 'number'; amountInput.dataset.numberGroup = '';
     amountInput.min = '1';
     amountInput.max = String(remaining);
     amountInput.step = '1';
@@ -531,7 +531,7 @@
     cancel.addEventListener('click', renderSales);
     save.addEventListener('click', async () => {
       if (operationBusy) return;
-      const amount = Math.trunc(Number(amountInput.value || 0));
+      const amount = Math.trunc(Number(ERPNumberInput.raw(amountInput.value || 0)));
       if (!dateInput.value || amount <= 0 || amount > remaining) {
         setOperationStatus(`통장 입금액은 1원부터 ${money(remaining)}까지 입력할 수 있습니다.`, true);
         return;
@@ -564,7 +564,7 @@
     label.className = 'small';
     label.textContent = '현금영수증 발급 건수';
     const countInput = document.createElement('input');
-    countInput.type = 'number';
+    countInput.type = 'number'; countInput.dataset.numberGroup = '';
     countInput.min = '0';
     countInput.max = String(Number(sale.quantity || 0));
     countInput.step = '1';
@@ -574,7 +574,7 @@
     amountLabel.className = 'small';
     amountLabel.textContent = '현금영수증 발급 금액';
     const amountInput = document.createElement('input');
-    amountInput.type = 'number';
+    amountInput.type = 'number'; amountInput.dataset.numberGroup = '';
     amountInput.min = '0';
     amountInput.max = String(receiptBaseForSale(sale));
     amountInput.step = '1';
@@ -585,13 +585,13 @@
     preview.className = 'small muted multiline';
     const updatePreview = () => {
       const quantity = Number(sale.quantity || 0);
-      const issuedCount = Math.max(0, Math.min(quantity, Math.trunc(Number(countInput.value || 0))));
+      const issuedCount = Math.max(0, Math.min(quantity, Math.trunc(Number(ERPNumberInput.raw(countInput.value || 0)))));
       const receiptBase = receiptBaseForSale(sale);
-      const issuedAmount = Math.max(0, Math.min(receiptBase, Math.trunc(Number(amountInput.value || 0))));
+      const issuedAmount = Math.max(0, Math.min(receiptBase, Math.trunc(Number(ERPNumberInput.raw(amountInput.value || 0)))));
       preview.textContent = `발급 ${issuedCount.toLocaleString('ko-KR')}건 · ${money(issuedAmount)}\n신청 없음 ${(quantity - issuedCount).toLocaleString('ko-KR')}건 · ${money(receiptBase - issuedAmount)}`;
     };
     countInput.addEventListener('input', () => {
-      const count = Math.max(0, Math.min(Number(sale.quantity || 0), Math.trunc(Number(countInput.value || 0))));
+      const count = Math.max(0, Math.min(Number(sale.quantity || 0), Math.trunc(Number(ERPNumberInput.raw(countInput.value || 0)))));
       amountInput.value = String(Number(sale.quantity || 0) > 0
         ? Math.round(receiptBaseForSale(sale) * count / Number(sale.quantity || 0))
         : 0);
@@ -609,8 +609,8 @@
     cancel.addEventListener('click', renderSales);
     save.addEventListener('click', async () => {
       if (operationBusy) return;
-      const issuedCount = Math.trunc(Number(countInput.value || 0));
-      const issuedAmount = Math.trunc(Number(amountInput.value || 0));
+      const issuedCount = Math.trunc(Number(ERPNumberInput.raw(countInput.value || 0)));
+      const issuedAmount = Math.trunc(Number(ERPNumberInput.raw(amountInput.value || 0)));
       if (issuedCount < 0 || issuedCount > Number(sale.quantity || 0)) {
         setOperationStatus('현금영수증 발급 건수를 판매 수량 안에서 입력해 주세요.', true);
         return;
@@ -842,7 +842,7 @@
     const amountLabel = document.createElement('label');
     amountLabel.textContent = '입금액';
     const amountInput = document.createElement('input');
-    amountInput.type = 'number';
+    amountInput.type = 'number'; amountInput.dataset.numberGroup = '';
     amountInput.min = '1';
     amountInput.max = String(item.outstanding_amount);
     amountInput.step = '1';
@@ -859,7 +859,7 @@
     const requestKey = crypto.randomUUID();
     save.addEventListener('click', async () => {
       if (operationBusy) return;
-      const amount = Math.trunc(Number(amountInput.value || 0));
+      const amount = Math.trunc(Number(ERPNumberInput.raw(amountInput.value || 0)));
       if (!dateInput.value || amount <= 0 || amount > Number(item.outstanding_amount)) {
         setOperationStatus('실제 입금일과 미정산액 이하의 입금액을 확인해 주세요.', true);
         return;
