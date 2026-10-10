@@ -5,7 +5,7 @@ Change: 2026-10-10 - Format member fund inputs and put related page links after 
 -->
 <html lang="ko">
 <head>
-  <script src="/erp/workspace_boot.js?v=20261010-7"></script>
+  <script src="/erp/workspace_boot.js?v=20261010-8"></script>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
@@ -408,9 +408,9 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
   <meta name="erp-mobile-revision" content="20261007.2">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <script src="./mobile_tasks.js?v=1.0.0" defer></script>
-  <meta name="erp-workspace-revision" content="20261010.7">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-7">
-  <script src="/erp/workspace_nav.js?v=20261010-7" defer></script>
+  <meta name="erp-workspace-revision" content="20261010.8">
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-8">
+  <script src="/erp/workspace_nav.js?v=20261010-8" defer></script>
 </head>
 
 <body class="erp-unified erp-pc-workspace erp-page-admin-member" data-erp-mobile-task="member">
@@ -16676,6 +16676,23 @@ window.onload = async function() {
     }
     await openAdminMemberActivityDeepLink();
     await openAdminMemberSiteSubDeepLink();
+
+    if (ADMIN_MEMBER_PAGE_SCOPE === 'member_admin') {
+        window.ErpWorkspaceTask = {ready:true, refresh:async function(options = {}) {
+            const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'member_admin',moduleLabel:'조합원 관리',redirectUrl:'index.html'});
+            if (!gate.ok) throw new Error('ERP_TASK_ACCESS_DENIED');
+            // Do not repopulate an open member editor or overwrite unfinished input.
+            if (options.dirty || document.querySelector('.modal.show,dialog[open]')) {
+                await fetchMemberReturnSummary(); return;
+            }
+            const pane = document.querySelector('.main-content > .tab-pane.active')?.id;
+            if (pane === 'tab-dashboard') await loadDashboard();
+            else if (pane === 'tab-members' && g_member_fetch_revision > 0) await fetchMembers();
+            else if (pane === 'tab-applications') await fetchApplications();
+            else if (pane === 'tab-funds-manage' && document.getElementById('sub-tab-donations')?.classList.contains('active')) await fetchGlobalDonations();
+            else await fetchMemberReturnSummary();
+        }};
+    }
 
 };
 

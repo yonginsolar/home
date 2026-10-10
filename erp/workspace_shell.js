@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.0.2 — canonical task loads, guarded navigation, no operational writes. */
+/* Persistent ERP workspace v1.1.0 — bounded in-memory task reuse; fresh server gates before resume. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -6,17 +6,19 @@
   const error = document.getElementById('erpWorkspaceError');
   const routes = window.ErpWorkspaceRoute;
   let current = '', requested = '', client, ready = false, leaving = false, timer, slowTimer;
-  let dirtyFields = new Map();
+  let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
+  const retained = new Map(), attached = new WeakSet();
+  const RETAIN_LIMIT = 3;
   const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
   const home = target => {
     const next = new URL('/erp/', location.origin);
     if (target) next.searchParams.set('next', new URL(target, location.origin).href);
     location.replace(next.href);
   };
-  function changed() {
-    if (!frame.contentWindow || !current || requested) return false;
+  function changed(entry = activeEntry) {
+    if (!entry?.frame.contentWindow || !entry.route) return false;
     try {
-      const child = frame.contentWindow;
+      const child = entry.frame.contentWindow;
       const event = new child.Event('beforeunload', {cancelable:true});
       child.dispatchEvent(event);
       if (event.defaultPrevented) return true;
@@ -25,8 +27,8 @@
       if (draftStatus === 'saving' || draftStatus === 'error') return true;
       if (draftStatus === 'dirty' && typeof child.hasMeaningfulApprovalDraftContentForReplacement === 'function'
         && child.hasMeaningfulApprovalDraftContentForReplacement()) return true;
-      for (const [node, original] of dirtyFields) {
-        if (!node.isConnected || !node.getClientRects().length) continue;
+      for (const [node, original] of entry.fields) {
+        if (!node.isConnected || (!entry.frame.hidden && !node.getClientRects().length)) continue;
         // The composer already compares its current payload with the last successful save.
         // Keep the generic guard for other open dialogs, not for a saved composer.
         if (draftStatus === 'saved' && node.closest('#draftForm')) continue;
@@ -40,7 +42,56 @@
       : node.type === 'file' ? node.files.length : node.isContentEditable ? node.innerHTML : node.value;
   }
   function canLeave() {
-    return leaving || !changed() || window.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 이동할까요?');
+    return leaving || canRetain(activeEntry) || !changed() || window.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 이동할까요?');
+  }
+  function eligible(entry) {
+    if (!entry?.route) return false;
+    const url = new URL(entry.route, location.origin);
+    return url.pathname === '/erp/approval.html'
+      || (url.pathname === '/erp/admin_member.html' && url.searchParams.get('scope') === 'member_admin');
+  }
+  function task(entry) { try { return entry.frame.contentWindow.ErpWorkspaceTask; } catch (_) { return null; } }
+  function canRetain(entry) {
+    const adapter = task(entry);
+    if (!eligible(entry) || adapter?.ready !== true || typeof adapter.refresh !== 'function') return false;
+    if (retained.has(entry.route) || retained.size < RETAIN_LIMIT) return true;
+    return [...retained.values()].some(item => item !== entry && !changed(item));
+  }
+  function removeEntry(entry) {
+    if (!entry) return;
+    if (retained.get(entry.route) === entry) retained.delete(entry.route);
+    entry.frame.remove(); entry.fields.clear();
+  }
+  function purge() {
+    transition += 1;
+    for (const entry of new Set([...retained.values(), activeEntry])) removeEntry(entry);
+    retained.clear(); window.ErpWorkspace.detachDocument();
+  }
+  function park() {
+    window.ErpWorkspace.detachDocument();
+    if (canRetain(activeEntry)) {
+      if (!retained.has(activeEntry.route) && retained.size >= RETAIN_LIMIT) {
+        const victim = [...retained.values()].find(item => item !== activeEntry && !changed(item));
+        removeEntry(victim);
+      }
+      retained.delete(activeEntry.route); retained.set(activeEntry.route, activeEntry);
+      activeEntry.frame.hidden = true; activeEntry.frame.removeAttribute('id');
+    } else removeEntry(activeEntry);
+  }
+  function stable(value) {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])]));
+    return value;
+  }
+  function runtimeKey(runtime) {
+    return JSON.stringify(stable({...runtime,effective_permissions:runtime.effective_permissions.slice().sort()}));
+  }
+  async function serverAccess() {
+    const [identity, access] = await Promise.all([client.auth.getUser(), client.rpc('get_my_erp_runtime')]);
+    if (identity.error || access.error) throw new Error('ERP_ACCESS_UNAVAILABLE');
+    const id = identity.data?.user?.id, runtime = access.data;
+    if (!id || !runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return null;
+    return {id,runtime,key:runtimeKey(runtime)};
   }
   function loading() {
     error.hidden = true;
@@ -48,9 +99,39 @@
     slowTimer = setTimeout(() => { status.textContent = '화면을 불러오고 있습니다…'; status.hidden = false; }, 300);
     timer = setTimeout(() => { status.hidden = true; error.hidden = false; }, 25000);
   }
-  function load(target) {
-    requested = target; loading();
-    window.ErpWorkspace.detachDocument();
+  function load(target, force = false) {
+    const previous = activeEntry;
+    const cached = force ? null : retained.get(target);
+    if (force && retained.has(target) && !changed(retained.get(target))) removeEntry(retained.get(target));
+    park(); requested = target; loading();
+    const ticket = ++transition;
+    if (cached?.frame.isConnected) {
+      activeEntry = cached; frame = cached.frame; frame.id = 'erpWorkspaceFrame';
+      // Never expose a held page using an old permission answer. A failed check leaves it locked.
+      void (async () => {
+        try {
+          const access = await serverAccess();
+          if (ticket !== transition) return;
+          if (!access || access.id !== userId) { purge(); ready=false; leaving=true; home(target); return; }
+          if (access.key !== accessKey) {
+            purge(); accessKey=access.key;
+            const resetTicket=transition;
+            window.ErpWorkspace.clear(); await window.ErpWorkspace.connect(client,access.runtime);
+            if (!ready || resetTicket!==transition) return;
+            activeEntry={frame:document.createElement('iframe'),route:'',fields:new Map()};
+            document.getElementById('erpWorkspaceContent').append(activeEntry.frame); frame=activeEntry.frame;
+            load(target,true); return;
+          }
+          await task(cached).refresh({runtime:access.runtime,dirty:changed(cached)});
+          if (ticket !== transition) return;
+          frame.hidden=false; syncFrame();
+        } catch (_) {
+          if (ticket !== transition) return;
+          status.hidden=true; error.hidden=false;
+        }
+      })();
+      return;
+    }
     // Only replace the task browsing context after its own unsaved guard has been checked.
     // Removing the old context avoids a second native prompt and nested history entry;
     // the outer sidebar, focus, scroll and layout are untouched.
@@ -59,9 +140,12 @@
     // Cloudflare Pages redirects *.html to extensionless paths. Go directly to the same resource.
     // Query/hash and the allowlisted route remain unchanged; no task or permission data is cached.
     taskUrl.pathname = taskUrl.pathname.replace(/\.html$/, '');
-    nextFrame.id = frame.id; nextFrame.title = frame.title; nextFrame.src = taskUrl.href;
-    nextFrame.addEventListener('load', frameLoaded);
-    frame.replaceWith(nextFrame); frame = nextFrame;
+    nextFrame.id = 'erpWorkspaceFrame'; nextFrame.className='erp-workspace-task';
+    nextFrame.title = previous.frame.title; nextFrame.src = taskUrl.href;
+    activeEntry={frame:nextFrame,route:target,fields:new Map()};
+    const entry=activeEntry;
+    nextFrame.addEventListener('load',()=>frameLoaded(entry));
+    document.getElementById('erpWorkspaceContent').append(nextFrame); frame=nextFrame;
   }
   function navigate(value) {
     let target;
@@ -71,22 +155,26 @@
     const isHome = /^\/erp\/?$|^\/erp\/index(?:\.html)?\/?$/.test(target.pathname);
     if (!next && !isHome) return false;
     if (next && (next === requested || (next === current && !requested))) return true;
-    if (!ready || !canLeave()) return true;
+    if (!ready) return true;
     if (isHome) {
-      frame.remove();
+      if ([activeEntry,...retained.values()].some(entry=>changed(entry))
+        && !window.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 전체 메뉴로 이동할까요?')) return true;
+      purge();
       leaving = true; location.assign(target.href); return true;
     }
+    if (!canLeave()) return true;
     history.pushState({erpWorkspace:true}, '', routes.address(next));
     load(next); window.ErpWorkspace.closeDrawer(); return true;
   }
-  function attachDocument(doc) {
-    dirtyFields = new Map();
+  function attachDocument(doc, entry = activeEntry) {
+    if (attached.has(doc)) return;
+    attached.add(doc); entry.fields = new Map();
     const remember = event => {
       const node = event.target;
       if (!event.isTrusted || !node?.matches?.('input,textarea,select,[contenteditable="true"]')) return;
       // Modal/form edits get a conservative fallback where the task has no native unsaved guard.
       if (!node.closest('form,.modal,dialog') && !node.isContentEditable) return;
-      if (!dirtyFields.has(node)) dirtyFields.set(node, fieldValue(node));
+      if (!entry.fields.has(node)) entry.fields.set(node, fieldValue(node));
     };
     for (const name of ['focusin','beforeinput','pointerdown']) doc.addEventListener(name, remember, true);
     doc.addEventListener('click', event => {
@@ -97,10 +185,10 @@
     }, true);
     doc.addEventListener('keydown', event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
-        event.preventDefault(); frame.contentWindow.print();
+        event.preventDefault(); entry.frame.contentWindow.print();
       }
     });
-    frame.contentWindow.addEventListener('hashchange', () => syncFrame());
+    entry.frame.contentWindow.addEventListener('hashchange', () => { if (entry===activeEntry) syncFrame(); });
   }
   function syncFrame() {
     try {
@@ -110,11 +198,12 @@
       if (!next) {
         // Authentication, OAuth callbacks, public screens and cooperative switches leave the shell.
         const target = new URL(href);
-        if (target.origin === location.origin) { leaving = true; location.replace(target.href); }
+        if (target.origin === location.origin) { leaving = true; purge(); location.replace(target.href); }
         else { status.hidden = true; error.hidden = false; }
         return;
       }
-      current = next; requested = '';
+      if (retained.get(activeEntry.route)===activeEntry && activeEntry.route!==next) retained.delete(activeEntry.route);
+      activeEntry.route = next; current = next; requested = '';
       history.replaceState({erpWorkspace:true}, '', routes.address(next));
       document.title = child.document.title;
       frame.title = child.document.title || 'ERP 업무 화면';
@@ -122,12 +211,12 @@
       status.hidden = true; error.hidden = true; clearTimeout(timer); clearTimeout(slowTimer);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  function frameLoaded() {
+  function frameLoaded(entry = activeEntry) {
     if (!ready) return;
+    if (entry !== activeEntry) { removeEntry(entry); return; }
     syncFrame();
-    try { attachDocument(frame.contentDocument); } catch (_) {}
+    try { attachDocument(frame.contentDocument, entry); } catch (_) {}
   }
-  frame.addEventListener('load', frameLoaded);
   document.addEventListener('click', event => {
     const anchor = event.target.closest?.('a.erp-workspace-link');
     if (!anchor || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -141,7 +230,7 @@
     load(next);
   });
   window.addEventListener('beforeunload', event => {
-    if (!leaving && !requested && changed()) { event.preventDefault(); event.returnValue = ''; }
+    if (!leaving && ([activeEntry,...retained.values()].some(entry=>changed(entry)))) { event.preventDefault(); event.returnValue = ''; }
   });
   window.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p' && current) {
@@ -190,20 +279,18 @@
     const target = view();
     if (!target) return home();
     try {
-      // Independent server reads overlap, but neither a task nor its menu is opened until both pass.
-      const [identity, access] = await Promise.all([client.auth.getUser(), client.rpc('get_my_erp_runtime')]);
-      const {data, error:authError} = identity;
-      if (authError || !data?.user) return home(target);
-      const {data:runtime,error:runtimeError} = access;
-      if (runtimeError) throw runtimeError;
-      if (!runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return home(target);
+      const access = await serverAccess();
+      if (!access) return home(target);
+      const runtime=access.runtime; userId=access.id; accessKey=access.key;
       void window.ErpWorkspace.connect(client, runtime);
       ready = true;
-      client.auth.onAuthStateChange(event => {
-        if (event === 'SIGNED_OUT') { ready = false; leaving = true; frame.remove(); home(target); }
+      client.auth.onAuthStateChange((event,session) => {
+        if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id!==userId)) {
+          ready=false; leaving=true; purge(); home(target);
+        }
       });
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, version:'20261010.7'};
+  window.ErpWorkspaceShell = {start, navigate, version:'20261010.8'};
 })();

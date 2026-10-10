@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.5.0 — active task link toggles its original tab controls. */
+/* ERP workspace navigation v1.5.1 — original task controls remain connected on memory resume. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261010.7';
+  const VERSION = '20261010.8';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -210,10 +210,10 @@
   }
 
   function prepareLocalDocument(doc, footer) {
-    const sidebar = doc.querySelector('#main-system > .sidebar'), content = doc.querySelector('#main-system > .main-content');
+    const sidebar = doc.querySelector('#main-system .sidebar'), content = doc.querySelector('#main-system > .main-content');
     if (sidebar && content) {
       sidebar.classList.add('erp-local-navigation');
-      const actions = sidebar.querySelector('.sidebar-menu > div:last-child');
+      const actions = sidebar.querySelector('.sidebar-menu > div:last-child') || doc.querySelector('.erp-workspace-embedded-actions');
       if (actions?.querySelector('[onclick*="logout"]')) {
         if (doc === document) footer.append(actions);
         else {
@@ -226,10 +226,13 @@
           }
         }
       }
-      content.prepend(sidebar);
+      if (sidebar.parentElement !== content) content.prepend(sidebar);
       sidebar.querySelectorAll('.sidebar-menu > a:not([href])').forEach(anchor => {
         anchor.setAttribute('role', 'button'); anchor.tabIndex = 0;
-        anchor.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); anchor.click(); } });
+        if (!anchor.dataset.erpWorkspaceKeyboard) {
+          anchor.dataset.erpWorkspaceKeyboard='1';
+          anchor.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); anchor.click(); } });
+        }
       });
     }
     doc.querySelectorAll('.nav-tabs').forEach(nav => { if (!nav.closest('.modal')) nav.classList.add('erp-workspace-tabs'); });
