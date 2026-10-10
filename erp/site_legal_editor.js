@@ -1,4 +1,4 @@
-/* v1.1.6 - Dedicated legal tab with document-local actions and display locations. */
+/* v1.1.7 - Show signup placement images without entering the authenticated signup route. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
@@ -70,13 +70,22 @@
     const doc=state.get(selectedKind)?.doc;
     const active=target.querySelector('article[contenteditable="plaintext-only"]');
     if(active&&document.activeElement===active)return;
+    const imageOpen=target.querySelector('.site-legal-placement-image')?.open===true;
     target.replaceChildren();
     const placement=document.createElement('div');placement.className='site-legal-placement';
     const locationTitle=document.createElement('strong');locationTitle.textContent='표시 위치';
     const route=document.createElement('div');route.textContent=locations[selectedKind][0];
     const entry=document.createElement('div');entry.className='site-legal-placement-entry';entry.textContent=locations[selectedKind][1];
     placement.append(locationTitle,route,entry);
-    try{const base=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(base&&base.protocol==='https:'&&!base.username&&!base.password){const url=new URL(locations[selectedKind][2],base.origin+'/');const link=document.createElement('a');link.className='btn btn-sm btn-outline-secondary mt-2';link.textContent='실제 화면 보기 ↗';link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';placement.append(link);}}catch(_){}
+    if(selectedKind==='signup_purpose'||selectedKind==='signup_privacy'){
+      const details=document.createElement('details');details.className='site-legal-placement-image';details.open=imageOpen;
+      const summary=document.createElement('summary');summary.className='btn btn-sm btn-outline-secondary mt-2';summary.textContent='가입 화면 보기';
+      const image=document.createElement('img');image.src=new URL(`../assets/ui/signup-${selectedKind==='signup_purpose'?'purpose':'privacy'}-location.jpg?v=20261010-1`,document.baseURI).href;
+      image.alt=`조합원 가입 화면 하단의 ${labels[selectedKind]} 동의 항목 위치`;image.width=800;image.height=681;image.loading='lazy';image.decoding='async';
+      details.append(summary,image);placement.append(details);
+    }else{
+      try{const base=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(base&&base.protocol==='https:'&&!base.username&&!base.password){const url=new URL(locations[selectedKind][2],base.origin+'/');const link=document.createElement('a');link.className='btn btn-sm btn-outline-secondary mt-2';link.textContent='실제 화면 보기 ↗';link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';placement.append(link);}}catch(_){}
+    }
     const heading=document.createElement('h2');heading.textContent=labels[selectedKind];
     const modes=document.createElement('div');modes.className='d-flex gap-2 mb-3';
     for(const [mode,label] of [['draft','등록 전 미리보기'],['published','현재 적용 중']]){
