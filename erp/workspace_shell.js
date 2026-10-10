@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.0.1 — same-origin isolated tasks, guarded navigation, no operational writes. */
+/* Persistent ERP workspace v1.0.2 — canonical task loads, guarded navigation, no operational writes. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -55,7 +55,11 @@
     // Removing the old context avoids a second native prompt and nested history entry;
     // the outer sidebar, focus, scroll and layout are untouched.
     const nextFrame = document.createElement('iframe');
-    nextFrame.id = frame.id; nextFrame.title = frame.title; nextFrame.src = new URL(target, location.origin).href;
+    const taskUrl = new URL(target, location.origin);
+    // Cloudflare Pages redirects *.html to extensionless paths. Go directly to the same resource.
+    // Query/hash and the allowlisted route remain unchanged; no task or permission data is cached.
+    taskUrl.pathname = taskUrl.pathname.replace(/\.html$/, '');
+    nextFrame.id = frame.id; nextFrame.title = frame.title; nextFrame.src = taskUrl.href;
     nextFrame.addEventListener('load', frameLoaded);
     frame.replaceWith(nextFrame); frame = nextFrame;
   }
@@ -66,12 +70,12 @@
     const next = routes.route(target.href);
     const isHome = /^\/erp\/?$|^\/erp\/index(?:\.html)?\/?$/.test(target.pathname);
     if (!next && !isHome) return false;
+    if (next && (next === requested || (next === current && !requested))) return true;
     if (!ready || !canLeave()) return true;
     if (isHome) {
       frame.remove();
       leaving = true; location.assign(target.href); return true;
     }
-    if (next === requested || (next === current && !requested)) return true;
     history.pushState({erpWorkspace:true}, '', routes.address(next));
     load(next); window.ErpWorkspace.closeDrawer(); return true;
   }
@@ -186,9 +190,11 @@
     const target = view();
     if (!target) return home();
     try {
-      const {data, error:authError} = await client.auth.getUser();
+      // Independent server reads overlap, but neither a task nor its menu is opened until both pass.
+      const [identity, access] = await Promise.all([client.auth.getUser(), client.rpc('get_my_erp_runtime')]);
+      const {data, error:authError} = identity;
       if (authError || !data?.user) return home(target);
-      const {data:runtime,error:runtimeError} = await client.rpc('get_my_erp_runtime');
+      const {data:runtime,error:runtimeError} = access;
       if (runtimeError) throw runtimeError;
       if (!runtime?.coop_id || runtime.is_active === false || !Array.isArray(runtime.effective_permissions)) return home(target);
       void window.ErpWorkspace.connect(client, runtime);
@@ -199,5 +205,5 @@
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, version:'20261010.6'};
+  window.ErpWorkspaceShell = {start, navigate, version:'20261010.7'};
 })();

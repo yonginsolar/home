@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.4.0 — persistent rail with original task tab controls. */
+/* ERP workspace navigation v1.5.0 — active task link toggles its original tab controls. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261010.6';
+  const VERSION = '20261010.7';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -30,8 +30,9 @@
   const authBound = new WeakSet();
   const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
   let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
-  let closedSubmenus = new Set();
-  try { closedSubmenus = new Set(cleanOrder(JSON.parse(localStorage.getItem('erp_workspace_submenus_v1') || '[]'))); } catch (_) {}
+  // Layout only: new task groups start folded; permissions always come from the server.
+  let openSubmenus = new Set();
+  try { openSubmenus = new Set(cleanOrder(JSON.parse(localStorage.getItem('erp_workspace_open_submenus_v2') || '[]'))); } catch (_) {}
   let pageUrl = new URL(location.href), taskDocument = document, localObserver, observedDocument, localClick;
   let path = pageUrl.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop() || 'index';
   let params = new URLSearchParams(pageUrl.search);
@@ -124,6 +125,27 @@
   }
   function localDisabled(node) { return node.disabled || node.matches('.disabled,[aria-disabled="true"]') || !!node.closest('.nav-item.disabled'); }
   function localSelected(node) { return node.classList.contains('active') || node.getAttribute('aria-selected') === 'true'; }
+  function clearSubmenu() {
+    if (submenuOwner) {
+      submenuOwner.removeAttribute('aria-expanded'); submenuOwner.removeAttribute('aria-controls');
+      delete submenuOwner.dataset.hasSubmenu;
+    }
+    submenu?.remove(); submenu = null; submenuOwner = null; submenuRows = [];
+  }
+  function setSubmenuOpen(open) {
+    if (!submenu || !submenuOwner) return false;
+    submenu.hidden = !open; submenuOwner.setAttribute('aria-expanded', String(open));
+    if (open) openSubmenus.add(submenuOwner.dataset.menuId); else openSubmenus.delete(submenuOwner.dataset.menuId);
+    try { localStorage.setItem('erp_workspace_open_submenus_v2', JSON.stringify([...openSubmenus])); } catch (_) {}
+    return true;
+  }
+  function toggleCurrentMenu(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const owner = event.target.closest?.('a.erp-workspace-link.active');
+    if (!owner || owner !== submenuOwner || !submenu) return;
+    event.preventDefault(); event.stopPropagation();
+    setSubmenuOpen(submenu.hidden); // Disclosure never navigates, confirms discard or reloads a task.
+  }
   function syncSubmenu() {
     submenuFrame = null;
     const owner = state && list?.querySelector('.erp-workspace-link.active');
@@ -133,25 +155,17 @@
       .filter(node => localVisible(node) && localLabel(node) && !node.closest('.erp-workspace-footer')
         && !(node.id === 'nav-vote-hub' && state?.items.some(item => item[0] === 'btnVoteHub')));
     if (!owner || !sources.length) {
-      submenu?.remove(); submenu = null; submenuOwner = null; submenuRows = []; return;
+      clearSubmenu(); return;
     }
     // Preserve mirror nodes/focus during ordinary page rendering. Never clone original IDs or handlers.
     if (!submenu || submenuOwner !== owner || sources.length !== submenuRows.length || sources.some((node,i) => node !== submenuRows[i]?.source)) {
-      if (submenu && submenuOwner) {
-        if (submenu.open) closedSubmenus.delete(submenuOwner.dataset.menuId); else closedSubmenus.add(submenuOwner.dataset.menuId);
-      }
-      submenu?.remove(); submenu = document.createElement('details'); submenu.className = 'erp-workspace-submenu';
+      clearSubmenu(); submenu = document.createElement('div'); submenu.className = 'erp-workspace-submenu';
       submenu.setAttribute('role', 'group'); submenu.setAttribute('aria-label', `${owner.title} 세부 메뉴`);
       submenu.dataset.mobile = owner.dataset.mobile; submenuOwner = owner;
-      submenu.open = !closedSubmenus.has(owner.dataset.menuId);
-      const details = submenu, summary = document.createElement('summary');
-      summary.className = 'erp-workspace-submenu-toggle'; summary.textContent = '세부 메뉴';
-      details.append(summary);
-      details.addEventListener('toggle', () => {
-        if (!state || submenu !== details) return;
-        if (details.open) closedSubmenus.delete(owner.dataset.menuId); else closedSubmenus.add(owner.dataset.menuId);
-        try { localStorage.setItem('erp_workspace_submenus_v1', JSON.stringify([...closedSubmenus])); } catch (_) {}
-      });
+      submenu.id = 'erpWorkspaceSubmenu'; owner.dataset.hasSubmenu = 'true';
+      owner.setAttribute('aria-controls', submenu.id);
+      submenu.hidden = !openSubmenus.has(owner.dataset.menuId);
+      owner.setAttribute('aria-expanded', String(!submenu.hidden));
       submenuRows = sources.map(source => {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'erp-workspace-sublink';
         button.addEventListener('click', () => {
@@ -239,7 +253,7 @@
   function detachDocument() {
     localObserver?.disconnect();
     if (observedDocument && localClick) observedDocument.removeEventListener('click',localClick);
-    submenu?.remove(); submenu=null; submenuOwner=null; submenuRows=[]; localNavigationRoots=[];
+    clearSubmenu(); localNavigationRoots=[];
     panel?.querySelector('.erp-workspace-footer').replaceChildren(); taskDocument=document;
   }
 
@@ -346,6 +360,14 @@
     });
     const head = document.createElement('div'); head.className = 'erp-workspace-heading'; head.append(heading, collapse);
     list = document.createElement('nav'); list.className = 'erp-workspace-menu'; list.setAttribute('aria-label', '업무 선택');
+    list.addEventListener('click', toggleCurrentMenu);
+    list.addEventListener('keydown', event => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.target !== submenuOwner) return;
+      if (event.key === ' ') { event.preventDefault(); submenuOwner.click(); }
+      else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+        event.preventDefault(); setSubmenuOpen(event.key === 'ArrowRight');
+      }
+    });
     orderButton=document.createElement('button');orderButton.type='button';orderButton.className='erp-workspace-order-button';orderButton.textContent='↕ 메뉴 순서';orderButton.hidden=true;orderButton.onclick=openOrder;
     const footer = document.createElement('div'); footer.className = 'erp-workspace-footer';
     panel.append(head, list, orderButton, footer);
@@ -440,7 +462,7 @@
     orderDialog?.close();orderDraft=null;
     if (list) list.replaceChildren();
     if (submenuFrame != null) cancelAnimationFrame(submenuFrame);
-    submenuFrame = null; submenu = null; submenuOwner = null; submenuRows = []; localNavigationRoots = [];
+    submenuFrame = null; clearSubmenu(); localNavigationRoots = [];
     if (brand) brand.textContent = '협동조합 ERP';
     document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open', 'erp-workspace-election');
     if (backdrop) backdrop.hidden = true;

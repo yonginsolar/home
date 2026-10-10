@@ -1,4 +1,4 @@
-/* ERP persistent workspace boot v1.0.0. Navigation only; no credentials or permission cache. */
+/* ERP persistent workspace boot v1.0.1. Canonical Pages URLs; no credentials or permission cache. */
 (() => {
   'use strict';
   const pages = new Set(['approval','mypage','accounting','admin_employee','admin_member','participation_analytics',
@@ -19,7 +19,7 @@
     } catch (_) { return null; }
   }
   function address(view) {
-    const target = new URL('/erp/workspace.html', location.origin);
+    const target = new URL('/erp/workspace', location.origin);
     target.searchParams.set('view', view);
     return target.href;
   }
