@@ -205,7 +205,7 @@ window.AccountingMoney = (() => {
                 }
                 $('moneyCases').append(row);
             });
-            $('moneyStatus').textContent = cases.length ? `${cases.length}건 표시` : '이 화면에서 등록한 내역이 아직 없습니다. 기존 전표는 최근전표에서 확인할 수 있습니다.';
+            $('moneyStatus').textContent = cases.length ? `${cases.length}건 표시` : '이 화면에서 등록한 내역이 아직 없습니다. 기존 전표는 장부 조회에서 확인할 수 있습니다.';
             $('moneyMore').hidden = (data.items || []).length < 30;
         } catch (error) { if (seq === listSeq) $('moneyStatus').textContent = errorText(error); }
     }
