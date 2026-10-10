@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.98
-Change: 2026-10-10 - Separate basic/RRN/support completion scopes; preserve independent drafts.
+Version: v1.0.99
+Change: 2026-10-10 - Guard unsaved detail close and retain employee-specific contract navigation.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-11"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.98 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.99 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -934,6 +934,65 @@ let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
 let employeeDetailRevision = 0, employeeBasicSaveInFlight = false, employeeBasicBaseline = null;
+const EMPLOYEE_DETAIL_DRAFT_IDS = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
+    'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate',
+    'rrnFront','rrnBack','durunuriEligibilityEnabled','durunuriConfirmedMonths','durunuriConfirmedThroughMonth',
+    'durunuriVerificationMethod','durunuriEligibilityNote'];
+const employeeDetailDraftBaseline = new Map();
+let employeeDetailDiscardPending = false, employeeDetailDiscardAllowed = false;
+function employeeDetailDraftValue(element) {
+    if (element.type === 'checkbox') return element.checked;
+    return element.hasAttribute('data-number-group') ? ERPNumberInput.raw(element.value) : element.value;
+}
+function checkpointEmployeeDetailDraft(root) {
+    if (!root) return;
+    EMPLOYEE_DETAIL_DRAFT_IDS.forEach(id => {
+        const element = document.getElementById(id);
+        if (element && (root === element || root.contains(element))) {
+            employeeDetailDraftBaseline.set(id, employeeDetailDraftValue(element));
+        }
+    });
+    window.ErpWorkspaceResume?.checkpoint(root);
+}
+function hasUnsavedEmployeeDetail() {
+    return [...employeeDetailDraftBaseline].some(([id, value]) => {
+        const element = document.getElementById(id);
+        return element && employeeDetailDraftValue(element) !== value;
+    });
+}
+function isEmployeeDetailSaving() {
+    return employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
+        || employeeNotificationSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight;
+}
+function requestEmployeeDetailDiscard(action) {
+    if (employeeDetailDiscardPending || isEmployeeDetailSaving()) return;
+    if (!hasUnsavedEmployeeDetail()) { action(); return; }
+    employeeDetailDiscardPending = true;
+    const empId = currentEmpId, revision = employeeDetailRevision;
+    document.getElementById('confirmModal').addEventListener('hidden.bs.modal', () => {
+        employeeDetailDiscardPending = false;
+    }, { once: true });
+    showConfirm('저장하지 않은 변경사항을 버릴까요?', () => {
+        if (empId !== currentEmpId || revision !== employeeDetailRevision || isEmployeeDetailSaving()) return;
+        checkpointEmployeeDetailDraft(document.getElementById('infoContainer'));
+        action();
+    });
+}
+function guardEmployeeDetailClose(event) {
+    if (isEmployeeDetailSaving()) return event.preventDefault();
+    if (!employeeDetailDiscardAllowed && hasUnsavedEmployeeDetail()) {
+        event.preventDefault();
+        requestEmployeeDetailDiscard(() => {
+            employeeDetailDiscardAllowed = true;
+            try { detailModal.hide(); } finally { employeeDetailDiscardAllowed = false; }
+        });
+        return;
+    }
+    cancelEmployeeDetailReads();
+}
+window.addEventListener('beforeunload', event => {
+    if (hasUnsavedEmployeeDetail()) { event.preventDefault(); event.returnValue = ''; }
+});
 let employeeSalaryLoadRevision = 0;
 const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
 function employeeBasicSnapshot(row) {
@@ -2641,11 +2700,7 @@ window.onload = async function() {
         bindHrModalStacking(el);
     });
     const inviteModalEl = document.getElementById('inviteModal');
-    document.getElementById('detailModal').addEventListener('hide.bs.modal', event => {
-        if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight
-            || employeeNotificationSaveInFlight || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight) return event.preventDefault();
-        cancelEmployeeDetailReads();
-    });
+    document.getElementById('detailModal').addEventListener('hide.bs.modal', guardEmployeeDetailClose);
     document.getElementById('settingsModal').addEventListener('hide.bs.modal', event => {
         if (companySettingsSaveInFlight) event.preventDefault();
     });
@@ -2925,7 +2980,7 @@ async function saveDurunuriEligibilityProfile() {
         const loaded = await loadDurunuriEligibilityProfile(empId, { preserveInput: true });
         if (!isCurrent()) return;
         if (!loaded) return showAlert('두루누리 설정은 저장했지만 저장 결과를 다시 불러오지 못했습니다. 입력은 유지했으니 다시 확인해 주세요.');
-        window.ErpWorkspaceResume?.checkpoint(document.getElementById('durunuriEligibilityCardWrap'));
+        checkpointEmployeeDetailDraft(document.getElementById('durunuriEligibilityCardWrap'));
         showAlert('두루누리 지원 설정을 저장했습니다.');
     } catch (e) {
         showAlert('두루누리 설정 저장 실패: ' + (e?.message || e));
@@ -4941,6 +4996,11 @@ async function saveEmployeeNotificationAssignments() {
 async function openDetail(u) {
     if (employeeBasicSaveInFlight || salarySaveInFlight || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
         || saveRRN._inFlight || saveDurunuriEligibilityProfile._inFlight) return showAlert('저장 중입니다. 완료된 뒤 다른 직원을 선택해 주세요.');
+    if (hasUnsavedEmployeeDetail()) {
+        requestEmployeeDetailDiscard(() => { void openDetail(u); });
+        return;
+    }
+    employeeDetailDraftBaseline.clear();
     const revision = ++employeeDetailRevision;
     const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
@@ -5005,6 +5065,7 @@ async function openDetail(u) {
     if (!isCurrent()) return;
     resetEmployeeModuleAccessUi();
     resetEmployeeNotificationUi();
+    checkpointEmployeeDetailDraft(document.getElementById('infoContainer'));
     detailModal.show();
     void loadEmployeeModuleAccess();
     void loadEmployeeNotificationAssignments();
@@ -5026,7 +5087,7 @@ function toggleEditMode(isEdit, completedScope = 'edit') {
         const ids = ['editName','editMemberId','editPhone','editEmail','editPosition','editAuthLevel',
             'editDeptSelect','editDeptCustom','editAddress','editAddressDetail','editHireDate','editSalary','salaryApplyDate'];
         if (completedScope === 'edit') ids.push('rrnFront','rrnBack');
-        ids.forEach(id => window.ErpWorkspaceResume?.checkpoint(document.getElementById(id)));
+        ids.forEach(id => checkpointEmployeeDetailDraft(document.getElementById(id)));
         const pendingRrn = ['rrnFront','rrnBack'].some(id => !!document.getElementById(id)?.value);
         c.classList.toggle('is-editing', completedScope === 'basic' && pendingRrn);
     }
@@ -5148,7 +5209,7 @@ async function saveRRN() {
         if (!isCurrent()) return;
         if (error) return showAlert('실패: ' + error.message);
         front.value = ''; back.value = '';
-        [front, back].forEach(element => window.ErpWorkspaceResume?.checkpoint(element));
+        [front, back].forEach(element => checkpointEmployeeDetailDraft(element));
         // Keep other unsaved basic/support edits visible and protected.
         const { data: bd, error: birthError } = await _supabase.rpc('get_emp_birthdate', { p_emp_id: empId });
         if (!isCurrent()) return;
@@ -5163,8 +5224,17 @@ async function saveRRN() {
 }
 function openEmploymentContractManager() {
     if (!currentEmpId) return showAlert('직원을 먼저 선택해 주세요.');
+    if (isEmployeeDetailSaving()) return showAlert('저장 중입니다. 완료된 뒤 이동해 주세요.');
     sessionStorage.setItem('erp_contract_employee_id', String(currentEmpId));
-    location.href = 'employment_contracts.html';
+    const targetUrl = new URL('employment_contracts.html', location.href);
+    targetUrl.searchParams.set('employee', String(currentEmpId));
+    const target = targetUrl.href;
+    try {
+        if (window.parent !== window && window.parent.ErpWorkspaceShell?.navigate(target)) return;
+    } catch (_) {
+        return showAlert('계약서 화면으로 이동하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    requestEmployeeDetailDiscard(() => { location.href = target; });
 }
 
 async function reqDeletePermanent() {

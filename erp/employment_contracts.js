@@ -1,4 +1,4 @@
-/* Version: v1.2.2 | 2026-10-05 */
+/* Version: v1.2.3 | 2026-10-10 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -122,6 +122,19 @@ function requestContractTransition(action) {
   discardModal.show();
 }
 
+function returnToContractOwner() {
+  if (state.busy || state.transitionPending) return;
+  const target = new URL(state.admin && !state.forceSelf ? 'admin_employee.html' : 'mypage.html', location.href).href;
+  try {
+    // The workspace owns retained drafts and revalidates access before revealing them.
+    if (window.parent !== window && window.parent.ErpWorkspaceShell?.navigate(target)) return;
+  } catch (_) {
+    showAlert('이전 화면으로 이동하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    return;
+  }
+  requestContractTransition(() => { resetContractEditTracking(); location.href = target; });
+}
+
 function finishContractTransition(discard) {
   const action = pendingContractTransition;
   pendingContractTransition = null;
@@ -130,9 +143,18 @@ function finishContractTransition(discard) {
 }
 
 function switchContractEmployee(select) {
+  if (state.busy || state.transitionPending) { select.value = state.employee?.emp_id || ''; return; }
   const target = state.employees.find((employee) => employee.emp_id === select.value);
   select.value = state.employee?.emp_id || '';
   if (!target || target.emp_id === state.employee?.emp_id) return;
+  const targetUrl = new URL(location.href);
+  targetUrl.searchParams.set('employee', target.emp_id);
+  try {
+    if (window.parent !== window && window.parent.ErpWorkspaceShell?.navigate(targetUrl.href)) return;
+  } catch (_) {
+    showAlert('직원 계약서 화면으로 이동하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    return;
+  }
   requestContractTransition(() => {
     state.employee = target;
     select.value = target.emp_id;
@@ -140,6 +162,7 @@ function switchContractEmployee(select) {
     state.amendmentBaseTerms = null;
     state.customTerms = [];
     resetContractEditTracking();
+    history.replaceState(history.state, '', targetUrl.href);
     emptyWorkspace();
     void loadContracts();
   });
@@ -235,9 +258,12 @@ async function loadEmployees() {
     .order('emp_name', { ascending: true });
   if (error) throw error;
   state.employees = data || [];
-  const requested = sessionStorage.getItem('erp_contract_employee_id');
+  const routeEmployee = new URLSearchParams(location.search).get('employee');
+  const requested = routeEmployee || sessionStorage.getItem('erp_contract_employee_id');
   sessionStorage.removeItem('erp_contract_employee_id');
-  state.employee = state.employees.find((employee) => employee.emp_id === requested) || state.employees[0] || null;
+  const selected = state.employees.find((employee) => employee.emp_id === requested);
+  if (routeEmployee && !selected) throw new Error('선택한 직원을 찾을 수 없거나 조회 권한이 없습니다.');
+  state.employee = selected || state.employees[0] || null;
 }
 
 function renderEmployeeSelect() {
@@ -1435,9 +1461,7 @@ async function boot() {
     renderEmployeeSelect();
     await loadContracts();
     document.getElementById('backButton').textContent = state.admin && !state.forceSelf ? '직원관리로' : '마이페이지로';
-    document.getElementById('backButton').addEventListener('click', () => {
-      requestContractTransition(() => { resetContractEditTracking(); location.href = state.admin && !state.forceSelf ? 'admin_employee.html' : 'mypage.html'; });
-    });
+    document.getElementById('backButton').addEventListener('click', returnToContractOwner);
     document.getElementById('contractHomeButton').addEventListener('click', () => requestContractTransition(() => { resetContractEditTracking(); location.href = 'index.html'; }));
     document.getElementById('employeeSelect').addEventListener('change', (event) => switchContractEmployee(event.target));
     document.querySelectorAll('[data-new-kind]').forEach((button) => button.addEventListener('click', () => openNew(button.dataset.newKind)));
