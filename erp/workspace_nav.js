@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.1.0 — shared menu preferences; business permissions unchanged. */
+/* ERP workspace navigation v1.2.0 — mirror existing local navigation; business permissions unchanged. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261009.3';
+  const VERSION = '20261010.4';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -28,6 +28,8 @@
   let state = null, generation = 0, panel, list, brand, toggle, backdrop, returnFocus, orderButton, orderDialog, orderDraft, orderBusy=false;
   let connections = new WeakMap();
   const authBound = new WeakSet();
+  const localRoots = '.erp-local-navigation .sidebar-menu,.nav-tabs,.nav-pills,[role="tablist"],.step-tabs,.doc-tabs,.tabs,.sub-tabs,[data-workspace-submenu]';
+  let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
   const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop() || 'index';
   const params = new URLSearchParams(location.search);
   const isIndex = path === 'index' || path === 'erp';
@@ -45,7 +47,10 @@
       return path === leaf && scope === target.searchParams.get('scope');
     }
     if (leaf === 'admin_employee') return ['admin_employee', 'hr_insurance', 'employment_contracts', 'village_company_info'].includes(path);
-    if (leaf === 'governance') return ['governance', 'meeting_workspace', 'admin_minutes', 'officials_signature_admin'].includes(path);
+    if (leaf === 'governance') return ['governance', 'meeting_workspace', 'admin_minutes', 'officials_signature_admin'].includes(path)
+      || (path === 'admin_member' && params.get('scope') === 'documents_admin')
+      || (path === 'participation' && params.get('view') === 'meeting');
+    if (leaf === 'participation') return path === leaf && (params.get('view') || 'education') === 'education';
     return path === leaf;
   }
 
@@ -94,6 +99,77 @@
     list.replaceChildren(link(['home', '전체 메뉴', 'index.html', '', [], '⌂', true]), ...ordered.map(link));
     if (isIndex) list.firstElementChild.setAttribute('aria-current', 'page');
     orderButton.hidden = !(state.canOrder && state.orderLoaded && state.items.length > 1);
+    syncSubmenu();
+  }
+
+  function localVisible(node) {
+    if (!node?.isConnected || node.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar,[data-erp-home-link]')) return false;
+    for (let parent = node; parent && parent !== document.body; parent = parent.parentElement) {
+      if (parent.hidden || parent.matches('.hidden,.d-none') || getComputedStyle(parent).display === 'none'
+        || getComputedStyle(parent).visibility === 'hidden') return false;
+      if (parent.matches('.tab-pane,.tab-panel,.step-panel,.sub-panel') && !parent.classList.contains('active')) return false;
+    }
+    return true;
+  }
+  function localLabel(node) {
+    if (node.matches('[data-workspace-submenu]') && node.querySelector('strong')) return node.querySelector('strong').textContent.trim();
+    const copy = node.cloneNode(true);
+    copy.querySelectorAll('.badge,i,svg,.sidebar-return-meta,.visually-hidden').forEach(el => el.remove());
+    return copy.textContent.replace(/\s+/g, ' ').trim();
+  }
+  function localDisabled(node) { return node.disabled || node.matches('.disabled,[aria-disabled="true"]') || !!node.closest('.nav-item.disabled'); }
+  function localSelected(node) { return node.classList.contains('active') || node.getAttribute('aria-selected') === 'true'; }
+  function syncSubmenu() {
+    submenuFrame = null;
+    const owner = state && list?.querySelector('.erp-workspace-link.active');
+    localNavigationRoots = [...document.querySelectorAll(localRoots)].filter(root => !root.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar'));
+    const sources = [...new Set(localNavigationRoots.flatMap(root => root.matches('[data-workspace-submenu]') ? [root]
+      : [...root.querySelectorAll('button,a.nav-link,[role="tab"]')]))]
+      .filter(node => localVisible(node) && localLabel(node) && !node.closest('.erp-workspace-footer'));
+    if (!owner || !sources.length) {
+      submenu?.remove(); submenu = null; submenuOwner = null; submenuRows = []; return;
+    }
+    // Preserve mirror nodes/focus during ordinary page rendering. Never clone original IDs or handlers.
+    if (!submenu || submenuOwner !== owner || sources.length !== submenuRows.length || sources.some((node,i) => node !== submenuRows[i]?.source)) {
+      submenu?.remove(); submenu = document.createElement('div'); submenu.className = 'erp-workspace-submenu';
+      submenu.setAttribute('role', 'group'); submenu.setAttribute('aria-label', `${owner.title} 세부 메뉴`);
+      submenu.dataset.mobile = owner.dataset.mobile; submenuOwner = owner;
+      submenuRows = sources.map(source => {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'erp-workspace-sublink';
+        button.addEventListener('click', () => {
+          // Recheck the original control at activation, including permission-dependent visibility.
+          if (!state || !localVisible(source) || localDisabled(source)) return scheduleSubmenu();
+          source.click(); scheduleSubmenu();
+        });
+        submenu.append(button); return {source,button};
+      });
+      owner.after(submenu);
+    }
+    submenuRows.forEach(({source,button}) => {
+      const label = localLabel(source), selected = localSelected(source), disabled = !!localDisabled(source);
+      if (button.textContent !== label) button.textContent = label;
+      button.disabled = disabled; button.classList.toggle('active', selected);
+      if (selected) button.setAttribute('aria-current', 'true'); else button.removeAttribute('aria-current');
+    });
+  }
+  function scheduleSubmenu() {
+    if (!state || submenuFrame != null) return;
+    submenuFrame = requestAnimationFrame(syncSubmenu);
+  }
+  function observeLocalNavigation() {
+    new MutationObserver(records => {
+      if (!state) return;
+      const relevant = records.some(record => {
+        const node = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+        if (!node || node.closest('#erpWorkspaceSidebar,.erp-order-dialog')) return false;
+        if (localNavigationRoots.some(root => root === node || root.contains(node) || node.contains(root))) return true;
+        return record.type === 'childList' && [...record.addedNodes].some(child => child.nodeType === 1
+          && (child.matches(localRoots) || child.querySelector(localRoots)));
+      });
+      if (relevant) scheduleSubmenu();
+    }).observe(document.body, {subtree:true,childList:true,characterData:true,attributes:true,
+      attributeFilter:['class','style','hidden','disabled','aria-selected','aria-disabled']});
+    document.addEventListener('click', event => { if (event.target.closest?.(localRoots)) scheduleSubmenu(); });
   }
 
   function fullOrder() {
@@ -227,6 +303,7 @@
     const media = matchMedia('(max-width: 991.98px)');
     const resize = () => { setDrawer(false); panel.inert = media.matches; };
     media.addEventListener('change', resize); resize();
+    observeLocalNavigation();
     document.addEventListener('keydown', event => {
       if (!document.body.classList.contains('erp-workspace-drawer-open')) return;
       if (event.key === 'Escape') { event.preventDefault(); setDrawer(false); }
@@ -300,6 +377,8 @@
     generation += 1; state = null; connections = new WeakMap();
     orderDialog?.close();orderDraft=null;
     if (list) list.replaceChildren();
+    if (submenuFrame != null) cancelAnimationFrame(submenuFrame);
+    submenuFrame = null; submenu = null; submenuOwner = null; submenuRows = []; localNavigationRoots = [];
     if (brand) brand.textContent = '협동조합 ERP';
     document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open');
     if (backdrop) backdrop.hidden = true;

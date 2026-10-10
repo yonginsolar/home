@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.255
-Change: 2026-10-10 - Consolidate introduction editing and legal previews without changing save paths.
+Version: v1.0.256
+Change: 2026-10-10 - Format member fund inputs and put related page links after local tabs.
 -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261005.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.255';
+window.ADMIN_MEMBER_VERSION = 'v1.0.256';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -18,6 +18,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.255';
 <meta charset="utf-8">
 <script src="../shared/member_information.js?v=20261002-1"></script>
 <script src="../shared/member_capital.js?v=20261008-3"></script>
+<script src="number_input.js?v=20261010-1" defer></script>
 <script src="member_capital_settings.js?v=20261008-3"></script>
 <script src="member_information_admin.js?v=20261008-3"></script>
 <script src="member_demographics.js?v=20261002-1"></script>
@@ -407,8 +408,8 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
   <script src="./mobile_tasks.js?v=1.0.0" defer></script>
   <meta name="erp-workspace-revision" content="20261009.2">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261009-3">
-  <script src="/erp/workspace_nav.js?v=20261009-3" defer></script>
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-4">
+  <script src="/erp/workspace_nav.js?v=20261010-4" defer></script>
 </head>
 
 <body class="erp-unified erp-pc-workspace erp-page-admin-member" data-erp-mobile-task="member">
@@ -464,9 +465,6 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <a class="nav-link hidden" onclick="openMemberCertificateSettingsModal()" id="nav-org-settings" style="cursor:pointer;">
 <i class="bi bi-building-gear"></i> 조합 기본 설정
 </a>
-<a class="nav-link" onclick="location.href='participation?view=meeting'" id="nav-meeting-participation" style="cursor:pointer;">
-<i class="bi bi-calendar2-check-fill"></i> 이사회·총회 참석 관리
-</a>
 <a class="nav-link" onclick="switchTab('funds-manage')" id="nav-funds-manage" style="cursor:pointer;">
     <i class="bi bi-piggy-bank-fill"></i> 자금 및 이용고 배당 관리
 </a>
@@ -485,21 +483,25 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 <a class="nav-link" onclick="switchTab('deposit')" id="nav-deposit" style="cursor:pointer;">
 <i class="bi bi-cash-coin"></i> 입금 매칭
 </a>
-<a class="nav-link" href="vote_hub.html" id="nav-vote-hub" style="cursor:pointer;">
-<i class="bi bi-check2-square"></i> 선거관리
-</a>
 
 <div class="menu-category" id="siteOpsCategory">운영 관리</div>
 <a class="nav-link" onclick="switchTab('notices')" id="nav-notices" style="cursor:pointer;">
 <i class="bi bi-megaphone"></i> 공지사항 관리
 </a>
-<a class="nav-link" onclick="location.href='admin_member.html?scope=documents_admin&tab=site'" id="nav-documents-admin" style="cursor:pointer;">
-<i class="bi bi-folder2-open"></i> 규정·정관 관리
-</a>
 
 <div class="menu-category" id="siteAdminCategory">홈페이지 관리</div>
 <a class="nav-link" onclick="switchTab('site')" id="nav-site" style="cursor:pointer;">
 <i class="bi bi-window-sidebar"></i> 홈페이지 내용·화면
+</a>
+
+<a class="nav-link" onclick="location.href='participation?view=meeting'" id="nav-meeting-participation" data-related-page style="cursor:pointer;">
+<i class="bi bi-calendar2-check-fill"></i> 이사회·총회 참석 관리
+</a>
+<a class="nav-link" href="vote_hub.html" id="nav-vote-hub" data-related-page style="cursor:pointer;">
+<i class="bi bi-check2-square"></i> 선거관리
+</a>
+<a class="nav-link" onclick="location.href='admin_member.html?scope=documents_admin&tab=site'" id="nav-documents-admin" data-related-page style="cursor:pointer;">
+<i class="bi bi-folder2-open"></i> 규정·정관 관리
 </a>
 
 <div class="mt-4 pt-4 border-top border-secondary">
@@ -1165,11 +1167,12 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                             <th>이름 (조합원번호)</th>
                             <th class="text-end">금액</th>
                             <th>유형</th>
-                            <th>비고(메모)</th>
+                            <th>전표 상태</th>
+                            <th>메모</th>
                         </tr>
                     </thead>
                     <tbody id="donationGlobalBody">
-                        <tr><td colspan="5" class="py-5 text-muted">조회 기간을 선택하고 검색해주세요.</td></tr>
+                        <tr><td colspan="6" class="py-5 text-muted">조회 기간을 선택하고 검색해주세요.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1748,7 +1751,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                         </div>
                         <div class="mb-3">
                             <label class="small fw-bold text-muted">금액</label>
-                            <input type="number" id="dn-amount" class="form-control form-control-sm" placeholder="숫자만 입력">
+                            <input type="number" id="dn-amount" class="form-control form-control-sm" min="1" step="1" data-number-group placeholder="금액 입력">
                             <div class="form-text x-small text-end">단위: 원</div>
                         </div>
                         <div class="mb-3">
@@ -1761,7 +1764,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
                             </select>
                         </div>
                         <div class="mb-3">
-                            <label class="small fw-bold text-muted">비고</label>
+                            <label class="small fw-bold text-muted">메모</label>
                             <input type="text" id="dn-note" class="form-control form-control-sm" placeholder="예: 운영기금 후원">
                         </div>
                         <button class="btn btn-primary w-100 btn-sm" onclick="submitDonationGrant()">등록하기</button>
@@ -3990,7 +3993,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
 
         <div class="mb-2">
           <label class="form-label small fw-bold text-muted">금액</label>
-          <input type="number" id="fund-amount" class="form-control form-control-sm" placeholder="숫자만 입력">
+          <input type="number" id="fund-amount" class="form-control form-control-sm" min="1" step="1" data-number-group placeholder="금액 입력">
         </div>
 
         <div class="mb-2" id="fund-method-group" style="display:none;">
@@ -4008,8 +4011,12 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
           <input type="text" id="fund-depositor" class="form-control form-control-sm">
         </div>
 
+        <div class="mb-2" id="fund-journal-status-wrap" hidden>
+          <label class="form-label small fw-bold text-muted">전표 상태</label>
+          <div id="fund-journal-status"></div>
+        </div>
         <div class="mb-3">
-          <label class="form-label small fw-bold text-muted">비고 (메모)</label>
+          <label class="form-label small fw-bold text-muted">메모</label>
           <input type="text" id="fund-note" class="form-control form-control-sm">
         </div>
 
@@ -7662,19 +7669,21 @@ function renderMemberHistoryContent(type) {
 
     } else if(type === 'donation') {
         title = '기부금 납부 내역';
-        html += '<tr class="table-primary"><th>날짜</th><th class="text-end">금액</th><th>입금 방식</th><th>비고</th><th class="text-end">관리</th></tr></thead><tbody>';
+        html += '<tr class="table-primary"><th>날짜</th><th class="text-end">금액</th><th>입금 방식</th><th>전표 상태</th><th>메모</th><th class="text-end">관리</th></tr></thead><tbody>';
         const data = getFilteredMemberHistoryRows(type);
         total = calculateMemberFundTotal(data);
 
-        if(data.length === 0) html += '<tr><td colspan="5" class="member-history-empty text-center py-3 text-muted">해당 기간의 기부금 내역이 없습니다.</td></tr>';
+        if(data.length === 0) html += '<tr><td colspan="6" class="member-history-empty text-center py-3 text-muted">해당 기간의 기부금 내역이 없습니다.</td></tr>';
         else {
             data.forEach(item => {
                 const rowData = encodeInlineArgument(JSON.stringify(item));
+                const noteParts = getDonationNoteParts(item.note);
                 html += `<tr>
                     <td data-label="날짜">${escapeHtml(formatAdminMemberKstDate(item.donation_date))}</td>
                     <td data-label="금액" class="text-end fw-bold text-primary">${Number(item.amount || 0).toLocaleString('ko-KR')}원</td>
                     <td data-label="입금 방식">${escapeHtml(getFundPaymentMethodLabel(item.payment_method || item.type))}</td>
-                    <td data-label="비고" class="member-history-note" title="${escapeHtml(item.note || '')}">${escapeHtml(item.note || '-')}</td>
+                    <td data-label="전표 상태">${renderDonationJournalStatus(noteParts.completed)}</td>
+                    <td data-label="메모" class="member-history-note" title="${escapeHtml(noteParts.memo)}">${escapeHtml(noteParts.memo || '-')}</td>
                     <td data-label="관리" class="text-end"><button class="btn btn-sm btn-light border" type="button" onclick="openFundEditorFromHistory('donation','${rowData}')">수정</button></td>
                 </tr>`;
             });
@@ -15288,6 +15297,19 @@ function confirmDisconnectManagedMember(managedId, managedName, memberType, mana
 // ================================================================
 
 // [수정] 에디터 모달 열기 (삭제 버튼 제어 로직 추가)
+let g_fundDonationJournalCompleted = false;
+let g_fundDonationOriginalNote = '', g_fundDonationInitialMemo = '';
+function getDonationNoteParts(note) {
+    const rawNote = String(note || '');
+    return { completed: rawNote.includes('[전표완료]'), memo: rawNote.replace(/\[전표완료\]/g, '').trim() };
+}
+
+function renderDonationJournalStatus(completed) {
+    return completed
+        ? '<span class="badge bg-success bg-opacity-10 text-success border">전표 완료</span>'
+        : '<span class="badge bg-light text-muted border">미처리</span>';
+}
+
 function openFundEditor(type, rowDataStr) {
     const modalEl = document.getElementById('fundEditorModal');
     const titleEl = document.getElementById('fund-modal-title');
@@ -15305,6 +15327,11 @@ function openFundEditor(type, rowDataStr) {
         : getAdminMemberKstDateString();
     document.getElementById('fund-amount').value = '';
     document.getElementById('fund-note').value = '';
+    g_fundDonationJournalCompleted = false;
+    g_fundDonationOriginalNote = ''; g_fundDonationInitialMemo = '';
+    const journalWrap = document.getElementById('fund-journal-status-wrap');
+    journalWrap.hidden = type === 'capital';
+    document.getElementById('fund-journal-status').innerHTML = renderDonationJournalStatus(false);
     document.getElementById('fund-depositor').value = '';
 
     // UI 분기 (출자금 vs 기부금)
@@ -15316,7 +15343,7 @@ function openFundEditor(type, rowDataStr) {
 
         if (!rowDataStr) document.getElementById('fund-depositor').value = document.getElementById('md-name').value;
     } else {
-        titleEl.innerText = '🎁 기부금 내역';
+        titleEl.innerText = '🎁 자산수증이익 내역';
         titleEl.className = 'modal-title fw-bold text-primary';
         document.getElementById('fund-method-group').style.display = 'block';
         document.getElementById('fund-depositor-group').style.display = 'none';
@@ -15332,6 +15359,15 @@ function openFundEditor(type, rowDataStr) {
             document.getElementById('fund-date').value = data.deposit_date || data.donation_date;
             document.getElementById('fund-amount').value = data.amount;
             document.getElementById('fund-note').value = data.note || '';
+
+            if (type !== 'capital') {
+                const noteParts = getDonationNoteParts(data.note);
+                g_fundDonationJournalCompleted = noteParts.completed;
+                g_fundDonationOriginalNote = String(data.note || '');
+                g_fundDonationInitialMemo = noteParts.memo;
+                document.getElementById('fund-note').value = noteParts.memo;
+                document.getElementById('fund-journal-status').innerHTML = renderDonationJournalStatus(noteParts.completed);
+            }
 
             if(type === 'capital') document.getElementById('fund-depositor').value = data.depositor || '';
             else document.getElementById('fund-method').value = data.payment_method || 'transfer';
@@ -16144,13 +16180,19 @@ async function saveFundData() {
     let idVal = document.getElementById('fund-edit-id').value;
     if (!idVal || idVal.trim() === '') idVal = null;
 
-    const amount = document.getElementById('fund-amount').value;
+    const amount = Number(ERPNumberInput.raw(document.getElementById('fund-amount').value));
     const date = document.getElementById('fund-date').value;
-    const note = document.getElementById('fund-note').value;
+    const memo = document.getElementById('fund-note').value;
+    // Preserve the existing accounting marker; editing a memo never removes posting state.
+    const note = type !== 'capital' && memo === g_fundDonationInitialMemo
+        ? g_fundDonationOriginalNote
+        : type !== 'capital' && g_fundDonationJournalCompleted && !memo.includes('[전표완료]')
+            ? (memo ? `${memo} [전표완료]` : '[전표완료]')
+            : memo;
     const isNewCapital = type === 'capital' && idVal === null;
 
     // 유효성 검사
-    if (!amount || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
+    if (!Number.isSafeInteger(amount) || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
     if (!date) return myAlert('날짜를 선택해주세요.', 'warning');
 
     // 현재 상세 모달에 띄워진 조합원 정보 가져오기
@@ -16777,7 +16819,7 @@ async function fetchGlobalDonations() {
     const endDate = document.getElementById('don-date-end').value;
     const tbody = document.getElementById('donationGlobalBody');
 
-    tbody.innerHTML = '<tr><td colspan="5" class="py-5"><div class="spinner-border text-primary"></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="py-5"><div class="spinner-border text-primary"></div></td></tr>';
 
     // 1. 기부금 내역 조회
     const { data: donations, error } = await scopeAdminTenant(_supabase
@@ -16791,12 +16833,12 @@ async function fetchGlobalDonations() {
 
     if (error) {
         CoopSafeLog.error("[erp/admin_member] operation failed", error);
-        tbody.innerHTML = `<tr><td colspan="5" class="text-danger py-4">데이터 로드 실패: ${escapeHtml(error.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-danger py-4">데이터 로드 실패: ${escapeHtml(error.message)}</td></tr>`;
         return;
     }
 
     if (!donations || donations.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-muted py-5">해당 기간의 자산수증(기부) 내역이 없습니다.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted py-5">해당 기간의 자산수증(기부) 내역이 없습니다.</td></tr>';
         document.getElementById('don-total-sum').innerText = '0';
         return;
     }
@@ -16835,6 +16877,7 @@ async function fetchGlobalDonations() {
         // ★ 수정됨: member_id로 맵에서 이름 찾기
         // 맵에 없으면(탈퇴/삭제 등) 그냥 '미확인' 대신 빈 문자열 처리하거나 원본 표시
         const name = memberMap[d.member_id] || '미확인';
+        const noteParts = getDonationNoteParts(d.note);
 
         tbody.innerHTML += `
             <tr>
@@ -16845,7 +16888,8 @@ async function fetchGlobalDonations() {
                 </td>
                 <td class="fw-bold text-end pe-4">${Number(d.amount).toLocaleString()}</td>
                 <td>${methodBadge}</td>
-                <td class="text-start text-muted small">${escapeHtml(d.note || '-')}</td>
+                <td>${renderDonationJournalStatus(noteParts.completed)}</td>
+                <td class="text-start text-muted small">${escapeHtml(noteParts.memo || '-')}</td>
             </tr>
         `;
     });
@@ -18712,13 +18756,13 @@ function openDonationModal() {
 async function submitDonationGrant() {
     const memberId = document.getElementById('dn-member-id').value.trim();
     const memberName = document.getElementById('dn-member-name').value.trim();
-    const amount = Number(document.getElementById('dn-amount').value);
+    const amount = Number(ERPNumberInput.raw(document.getElementById('dn-amount').value));
     const donationDate = document.getElementById('dn-date').value;
     const method = normalizeDonationMethod(document.getElementById('dn-method').value);
     const note = document.getElementById('dn-note').value.trim();
 
     if (!memberId) return myAlert('대상 조합원을 선택해주세요.', 'warning');
-    if (!Number.isFinite(amount) || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
+    if (!Number.isSafeInteger(amount) || amount <= 0) return myAlert('정확한 금액을 입력해주세요.', 'warning');
     if (!donationDate) return myAlert('기부일을 선택해주세요.', 'warning');
 
     const memberLabel = memberName ? `[${memberId}] ${memberName}` : `[${memberId}]`;
