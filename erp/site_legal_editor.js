@@ -1,7 +1,8 @@
-/* v1.1.5 - Keep one central draft/published preview. */
+/* v1.1.6 - Dedicated legal tab with document-local actions and display locations. */
 (function () {
   'use strict';
   const labels = {signup_purpose:'조합 설립목적',signup_privacy:'가입 개인정보 수집·이용 동의',terms:'서비스 이용약관',privacy:'개인정보 처리방침'};
+  const locations={signup_purpose:['조합원 가입 → 설립목적 동의','[필수] 조합의 설립목적에 동의하고 의무를 다하겠습니다.','signup'],signup_privacy:['조합원 가입 → 개인정보 동의','[필수] 개인정보 수집·이용에 동의합니다.','signup'],terms:['홈페이지 하단 → 이용약관','이용약관','terms.html'],privacy:['홈페이지 하단 → 개인정보 처리방침','개인정보 처리방침','privacy.html']};
   const state = new Map();
   let loaded = false, loading = false, context = null, actionInFlight = false, retryButton = null;
   let selectedKind='signup_purpose',previewMode='draft';
@@ -70,6 +71,12 @@
     const active=target.querySelector('article[contenteditable="plaintext-only"]');
     if(active&&document.activeElement===active)return;
     target.replaceChildren();
+    const placement=document.createElement('div');placement.className='site-legal-placement';
+    const locationTitle=document.createElement('strong');locationTitle.textContent='표시 위치';
+    const route=document.createElement('div');route.textContent=locations[selectedKind][0];
+    const entry=document.createElement('div');entry.className='site-legal-placement-entry';entry.textContent=locations[selectedKind][1];
+    placement.append(locationTitle,route,entry);
+    try{const base=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(base&&base.protocol==='https:'&&!base.username&&!base.password){const url=new URL(locations[selectedKind][2],base.origin+'/');const link=document.createElement('a');link.className='btn btn-sm btn-outline-secondary mt-2';link.textContent='실제 화면 보기 ↗';link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';placement.append(link);}}catch(_){}
     const heading=document.createElement('h2');heading.textContent=labels[selectedKind];
     const modes=document.createElement('div');modes.className='d-flex gap-2 mb-3';
     for(const [mode,label] of [['draft','등록 전 미리보기'],['published','현재 적용 중']]){
@@ -88,7 +95,7 @@
       article.onblur=()=>{article.removeAttribute('contenteditable');refreshPreview();};
       article.onpaste=event=>{event.preventDefault();const selection=window.getSelection();if(!selection.rangeCount)return;const range=selection.getRangeAt(0);if(!article.contains(range.commonAncestorContainer))return;range.deleteContents();const node=document.createTextNode(event.clipboardData?.getData('text/plain')||'');range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);article.dispatchEvent(new Event('input'));};
     }
-    target.append(heading,modes,date,article);
+    target.append(placement,heading,modes,date,article);
   }
   function selectKind(kind){
     if(!Object.hasOwn(labels,kind))return false;
@@ -100,24 +107,27 @@
   function render() {
     const root=document.getElementById('sub-legal');if(!root)return;
     root.replaceChildren();
-    const note=document.createElement('p');note.className='small text-muted';note.textContent='샘플을 수정해 초안으로 저장한 뒤, 내용을 확인하고 등록·적용해 주세요. 초안 저장은 현재 적용 중인 문구를 바꾸지 않습니다.';root.append(note);
     const grid=document.createElement('div');grid.className='row g-4';root.append(grid);
     for(const [kind,label] of Object.entries(labels)) {
       const column=document.createElement('div');column.className='col-12';
       column.innerHTML=`<div class="card border-0 shadow-sm h-100" id="site-legal-${kind}-card"><div class="card-body">
+        <div class="site-legal-actions"><button type="button" class="btn btn-outline-primary" data-legal-action="draft">초안 저장</button><button type="button" class="btn btn-primary" data-legal-action="publish">등록·적용</button></div>
+        <div id="site-legal-${kind}-status" class="small mt-2" role="status">불러오는 중</div>
+        <p class="small text-muted mt-2 mb-3">초안 저장은 현재 적용 중인 내용을 바꾸지 않습니다.</p>
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3"><h5 class="fw-bold mb-0">${label}</h5><button type="button" class="btn btn-sm btn-outline-secondary" data-legal-action="sample">샘플 불러오기</button></div>
         ${kind==='privacy'?`<fieldset class="border rounded p-3 mb-3"><legend class="float-none w-auto px-1 fs-6 fw-bold">개인정보 담당자 정보</legend><label class="form-label small fw-bold" for="site-legal-privacy-processor">개인정보처리자</label><input id="site-legal-privacy-processor" class="form-control mb-3" readonly><div class="row g-3">${Object.entries(contacts).map(([key,label])=>`<div class="${key==='address'?'col-12':'col-md-6'}"><label class="form-label small fw-bold" for="site-legal-privacy-${key}">${label} <span class="text-danger">*</span></label><input class="form-control" id="site-legal-privacy-${key}" type="${key==='officer_email'?'email':key==='officer_phone'?'tel':'text'}" maxlength="${key==='address'?300:key==='officer_email'?254:100}" required></div>`).join('')}</div><p class="small text-muted mt-3 mb-0">보호책임자가 개인정보 문의와 권리행사 요청을 받습니다. 담당자 정보는 미리보기에서 확인해 주세요.</p></fieldset>`:''}
         <label class="form-label small fw-bold" for="site-legal-${kind}-effective-date">시행일</label><input type="date" class="form-control mb-3" id="site-legal-${kind}-effective-date">
         <label class="form-label small fw-bold" for="site-legal-${kind}-content">내용</label><textarea class="form-control" style="word-break:keep-all" id="site-legal-${kind}-content" rows="14" maxlength="100000"></textarea>
-        <div id="site-legal-${kind}-status" class="small mt-2" role="status">불러오는 중</div>
-        </div><div class="card-footer bg-white d-flex flex-wrap gap-2 justify-content-end"><button type="button" class="btn btn-sm btn-outline-danger me-auto" id="site-legal-${kind}-unpublish" data-legal-action="unpublish" hidden>등록 해제</button><button type="button" class="btn btn-outline-primary" data-legal-action="draft">초안 저장</button><button type="button" class="btn btn-primary" data-legal-action="publish">등록·적용</button></div></div>`;
+        </div><div class="card-footer bg-white"><button type="button" class="btn btn-sm btn-outline-danger" id="site-legal-${kind}-unpublish" data-legal-action="unpublish" hidden>등록 해제</button></div></div>`;
       grid.append(column);setEnabled(kind,false);
       el(kind,'content').addEventListener('input',()=>updateStatus(kind));el(kind,'effective-date').addEventListener('change',()=>updateStatus(kind));
       if(kind==='privacy')for(const key of Object.keys(contacts))el(kind,key).addEventListener('input',()=>updateStatus(kind));
       column.addEventListener('click',event=>{const b=event.target.closest('[data-legal-action]');if(!b||b.disabled)return;const action=b.dataset.legalAction;if(action==='sample')loadSample(kind);else save(kind,action);});
     }
-    if(document.getElementById('site-home-legal-preview')){
-      document.getElementById('site-legal-document-tabs')?.remove();
+    mountTabs();
+  }
+  function mountTabs(){
+    if(el('privacy','card')&&document.getElementById('site-home-legal-preview')&&!document.getElementById('site-legal-document-tabs')){
       const tabs=document.createElement('div');tabs.id='site-legal-document-tabs';tabs.className='site-legal-document-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','가입 안내와 약관 문서');tabs.hidden=window.CoopHomeVisualEditor?.current()!=='legal';
       for(const [kind,text] of Object.entries(labels)){const tab=document.createElement('button');tab.type='button';tab.id=`site-legal-tab-${kind}`;tab.dataset.legalDocument=kind;tab.textContent=text;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',`site-legal-${kind}-card`);tab.onclick=()=>selectKind(kind);tab.onkeydown=event=>{const list=[...tabs.children],i=list.indexOf(tab);let next;if(event.key==='ArrowRight')next=(i+1)%list.length;else if(event.key==='ArrowLeft')next=(i+list.length-1)%list.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=list.length-1;else return;event.preventDefault();list[next].click();list[next].focus({preventScroll:true});};tabs.append(tab);el(kind,'card').setAttribute('role','tabpanel');el(kind,'card').setAttribute('aria-labelledby',tab.id);}
       document.getElementById('site-home-visual-workspace').before(tabs);selectKind(selectedKind);
@@ -173,7 +183,7 @@
     finally {state.get(kind).busy=false;endAction();}
   }
   window.fetchSiteLegalDocuments=fetchDocuments;
-  window.CoopSiteLegalEditor=Object.freeze({select:selectKind,refreshPreview});
+  window.CoopSiteLegalEditor=Object.freeze({select:selectKind,refreshPreview,mount:mountTabs});
   window.addEventListener('beforeunload',event=>{if(actionInFlight||[...state.keys()].some(dirty)){event.preventDefault();event.returnValue='';}});
   function start(){render();const root=document.getElementById('sub-legal');if(!root)return;retryButton=document.createElement('button');retryButton.type='button';retryButton.className='btn btn-sm btn-outline-secondary mb-3';retryButton.textContent='다시 불러오기';retryButton.onclick=async()=>{
     if(loading||actionInFlight||!permitted())return;

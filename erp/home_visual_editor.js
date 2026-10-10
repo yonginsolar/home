@@ -1,7 +1,7 @@
 /* Actual homepage preview + the existing inputs, draft controller and secure save path. */
 (function(root){
   'use strict';
-  let mounted=false, selected='hero', sectionRows=[], previewOrder=[];
+  let mounted=false, selected='hero', lastHomeArea='hero', sectionRows=[], previewOrder=[];
   const labels={hero:'메인 배너',impact:'참여 안내',about:'조합 소개',certifications:'공식 인증·지정',activities:'우리 소식',sections:'표시 영역·순서',legal:'가입 안내·약관',contact:'연락처',design:'구성',fonts:'글꼴',progress:'발전소 현황',status:'발전량 현황',partners:'함께하는 단체',history:'연혁',faq:'자주 묻는 질문','external-news':'외부 소식',documents:'문서 관리'};
   const panes={sections:'sub-sections',about:'sub-about',certifications:'sub-certifications',activities:'sub-activities',legal:'sub-legal',progress:'sub-plants',status:'sub-generation',partners:'sub-partners',history:'sub-history',faq:'sub-faqs','external-news':'sub-external-news',documents:'sub-docs'};
   const homeAreas=new Set(['hero','impact','contact','design','fonts']);
@@ -17,10 +17,11 @@
     const picker=document.getElementById('site-home-area-picker'),strip=document.getElementById('site-home-area-strip');
     for(const area of areas){
       const option=picker?.querySelector(`option[value="${area}"]`),button=strip?.querySelector(`[data-home-select-area="${area}"]`);
-      if(option){option.hidden=!available(area);picker.append(option);}
+      if(option){option.hidden=area==='legal'||!available(area);picker.append(option);}
       if(button){button.hidden=!available(area);strip.append(button);}
     }
     if(picker)picker.value=selected;
+    const legalTab=document.getElementById('site-home-mode-legal');if(legalTab)legalTab.hidden=!available('legal');
   }
   function available(area){
     const link=document.querySelector(`#site-content-tabs a[href="#${panes[area]||'sub-home-settings'}"]`);
@@ -33,6 +34,7 @@
     if(!Object.hasOwn(labels,area)||!available(area)) return false;
     if(typeof canAccessAdminMemberTab==='function'&&!canAccessAdminMemberTab('site'))return false;
     selected=area;
+    if(area!=='legal')lastHomeArea=area;
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!==(homeAreas.has(area)?area:'hero'));
     document.querySelectorAll('[data-home-select-area]').forEach(node=>node.setAttribute('aria-pressed',String(node.dataset.homeSelectArea===area)));
     const picker=document.getElementById('site-home-area-picker');if(picker)picker.value=area;
@@ -40,6 +42,9 @@
     if(!link.classList.contains('active'))link.click();
     document.getElementById('site-home-visual-workspace')?.classList.toggle('is-content-edit',!homeAreas.has(area));
     const legal=area==='legal';
+    document.querySelector('.home-visual-toolbar').hidden=legal;
+    document.getElementById('site-home-visual-workspace').classList.toggle('is-legal-edit',legal);
+    for(const mode of document.querySelectorAll('[data-home-mode]')){const active=(mode.dataset.homeMode==='legal')===legal;mode.setAttribute('aria-selected',String(active));mode.tabIndex=active?0:-1;}
     const legalTabs=document.getElementById('site-legal-document-tabs');if(legalTabs)legalTabs.hidden=!legal;
     document.getElementById('site-home-preview-shell').hidden=legal;
     document.getElementById('site-home-legal-preview').hidden=!legal;
@@ -91,7 +96,12 @@
     pane.append(homeFields);
     const tabs=document.getElementById('site-content-tabs');
     const tabContent=pane.parentElement;
-    tabContent.before(toolbar,workspace);inspector.append(tabContent);workspace.append(stage,inspector);
+    const modes=document.createElement('div');modes.id='site-home-mode-tabs';modes.className='site-home-mode-tabs';modes.setAttribute('role','tablist');modes.setAttribute('aria-label','홈페이지 관리 업무');
+    for(const [mode,label] of [['edit','홈페이지 편집'],['legal','가입 안내·약관']]){
+      const button=document.createElement('button');button.type='button';button.id=`site-home-mode-${mode}`;button.dataset.homeMode=mode;button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls','site-home-visual-workspace');button.onclick=()=>select(mode==='legal'?'legal':lastHomeArea);
+      button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const list=[...modes.children].filter(x=>!x.hidden);const next=event.key==='Home'?0:event.key==='End'?list.length-1:(list.indexOf(button)+1)%list.length;list[next]?.click();list[next]?.focus({preventScroll:true});};modes.append(button);
+    }
+    tabContent.before(modes,toolbar,workspace);inspector.append(tabContent);workspace.append(stage,inspector);
     // Keep the original tab nodes and Bootstrap handlers as the single navigation path.
     tabs.classList.add('home-visual-original-tabs');
     const activityModal=document.getElementById('activityModal');
@@ -108,7 +118,7 @@
     const syncChoices=()=>{
       syncOrder();
       const documentsOnly=new URLSearchParams(location.search).get('scope')==='documents_admin';
-      toolbar.hidden=documentsOnly;workspace.classList.toggle('is-documents-only',documentsOnly);
+      modes.hidden=documentsOnly;toolbar.hidden=documentsOnly||selected==='legal';workspace.classList.toggle('is-documents-only',documentsOnly);
     };
     new MutationObserver(syncChoices).observe(tabs,{subtree:true,attributes:true,attributeFilter:['class','hidden']});syncChoices();
     basic.hidden=true; advanced.hidden=true;
@@ -140,6 +150,7 @@
     notice.innerHTML='<p>외부 글꼴은 등록하는 조합이 웹사이트 사용·임베딩 허용 여부를 확인하고 필요한 이용 권한을 확보해야 합니다. 방문자의 브라우저가 해당 글꼴 제공처에 접속합니다.</p><label class="form-check-label"><input type="checkbox" class="form-check-input me-2" id="site-home-external-rights-confirmed">이 글꼴의 웹사이트 사용 권한과 이용 조건을 확인했습니다.</label><p class="mt-2 mb-0">지원 주소: Google Fonts 파일 CDN, jsDelivr, cdnjs의 .woff2·.woff 파일</p>';
     fontCard.append(notice);
     mounted=true;updateExternalUi();
+    window.CoopSiteLegalEditor?.mount(); // Legal definitions can arrive before this lazy workspace mounts.
     window.CoopSiteInlineHost?.mount();
     // Do not change the active tab or run a data read while taking initial baselines.
     document.querySelectorAll('[data-home-inspector-area]').forEach(node=>node.hidden=node.dataset.homeInspectorArea!=='hero');
