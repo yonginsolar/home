@@ -97,10 +97,10 @@ window.AccountingMoney = (() => {
         $('moneyClose').onclick = () => { if (!saving) area.hidden = true; };
         area.scrollIntoView({ block: 'start', behavior: 'smooth' }); return true;
     }
-    const commonFields = () => `<div class="row g-3"><div class="col-md-6"><label for="moneyDate" class="form-label">실제 처리일</label><input id="moneyDate" type="date" class="form-control" value="${formatAccountingKstDate()}" max="${formatAccountingKstDate()}" required></div><div class="col-md-6"><label for="moneyAmount" class="form-label">금액</label><input id="moneyAmount" type="number" class="form-control" min="1" step="1" required></div></div>`;
+    const commonFields = () => `<div class="row g-3"><div class="col-md-6"><label for="moneyDate" class="form-label">실제 처리일</label><input id="moneyDate" type="date" class="form-control" value="${formatAccountingKstDate()}" max="${formatAccountingKstDate()}" required></div><div class="col-md-6"><label for="moneyAmount" class="form-label">금액</label><input id="moneyAmount" type="number" data-number-group class="form-control" min="1" step="1" required></div></div>`;
     function openReceive() {
         if (!editor('착오입금 등록', `<form id="moneyForm">${commonFields()}<label for="moneyDescription" class="form-label mt-3">입금자명과 확인 내용</label><input id="moneyDescription" class="form-control" maxlength="300" placeholder="예: 홍길동 착오입금" required><p class="text-muted mt-3">통장에 실제 들어온 돈만 등록합니다. 보통예금 증가와 가수금 증가가 함께 기록됩니다. 아직 입금 이유를 모르는 돈도 이곳에 기록하고, 매출로 잡지 않습니다.</p><button class="btn btn-primary" id="moneySave">확인 후 장부에 등록</button></form>`)) return;
-        $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('receive', { date: $('moneyDate').value, amount: Number($('moneyAmount').value), description: $('moneyDescription').value.trim(), project: $('projectSelect').value || '본사' }, '실제 통장 입금 내역을 확인하셨나요? 이 금액을 가수금으로 기록합니다.'); };
+        $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('receive', { date: $('moneyDate').value, amount: Number(ERPNumberInput.raw($('moneyAmount').value)), description: $('moneyDescription').value.trim(), project: $('projectSelect').value || '본사' }, '실제 통장 입금 내역을 확인하셨나요? 이 금액을 가수금으로 기록합니다.'); };
     }
     async function openCancel() {
         selected = null;
@@ -126,10 +126,10 @@ window.AccountingMoney = (() => {
         area.innerHTML = `<form id="moneyForm"><div class="alert alert-info"><strong>${esc(source.description)}</strong><div>원거래 ${won(source.amount)} · 남은 취소 가능액 ${won(source.remaining)}</div><div>${source.parts.map(p => `${esc(p.account)} ${won(p.amount)}`).join(' / ')}</div></div>${commonFields()}<label for="moneyAdjustment" class="form-label mt-3">관련 감액 결재</label><select id="moneyAdjustment" class="form-select"><option value="">연결하지 않음</option>${(source.adjustments || []).map(a => `<option value="${esc(a.id)}">${esc(a.title)} · ${won(a.amount)}</option>`).join('')}</select><div class="row g-3 mt-1"><div class="col-md-5"><label for="moneyCard" class="form-label">사용한 카드</label><select id="moneyCard" class="form-select" required><option value="">카드 선택</option>${(moneyCards || cardData || []).map(c => `<option value="${esc(c.card_alias)}">${esc(c.card_alias)} (${c.card_type === 'check_card' ? '체크' : '신용'})</option>`).join('')}</select></div><div class="col-md-7"><label for="moneyPath" class="form-label">납부·환급 상태</label><select id="moneyPath" class="form-select" required></select></div></div><div id="moneyPathHint" class="text-muted my-3"></div><div class="form-check mb-3" id="moneyPaidCheck" hidden><input id="moneyPaymentConfirmed" type="checkbox" class="form-check-input"><label class="form-check-label" for="moneyPaymentConfirmed">이 원거래의 카드대금을 실제 납부한 것을 확인했습니다.</label></div><label for="moneyDescription" class="form-label">취소 내용</label><input id="moneyDescription" class="form-control" maxlength="300" required value="${esc(source.description)}"><p class="text-muted mt-3">부가세 추천값은 참고용입니다. 취소 증빙의 실제 공제 매입세액을 확인해 주세요.</p><button class="btn btn-primary" id="moneySave">확인 후 취소 기록</button></form>`;
         $('moneyAmount').max = source.remaining; $('moneyAmount').value = source.remaining;
         const vatWrap = document.createElement('div'); vatWrap.className = 'mt-3';
-        vatWrap.innerHTML = '<label for="moneyVat" class="form-label">취소 증빙의 공제 매입세액</label><input id="moneyVat" type="number" class="form-control" min="0" step="1" required><div class="form-text">원거래에서 공제한 세액만 되돌립니다. 부분 취소는 비례 계산한 추천값을 증빙에 맞게 수정할 수 있습니다.</div>';
+        vatWrap.innerHTML = '<label for="moneyVat" class="form-label">취소 증빙의 공제 매입세액</label><input id="moneyVat" type="number" data-number-group class="form-control" min="0" step="1" required><div class="form-text">원거래에서 공제한 세액만 되돌립니다. 부분 취소는 비례 계산한 추천값을 증빙에 맞게 수정할 수 있습니다.</div>';
         $('moneyAmount').closest('.row').after(vatWrap);
         const vatLeft = source.remaining_vat ?? source.parts.filter(p => p.account === '부가세대급금').reduce((sum,p) => sum+p.amount,0);
-        const suggestVat = () => { $('moneyVat').max = Math.min(vatLeft, Number($('moneyAmount').value)); $('moneyVat').value = Math.floor(vatLeft*Number($('moneyAmount').value)/source.remaining); };
+        const suggestVat = () => { $('moneyVat').max = Math.min(vatLeft, Number(ERPNumberInput.raw($('moneyAmount').value))); $('moneyVat').value = Math.floor(vatLeft*Number(ERPNumberInput.raw($('moneyAmount').value))/source.remaining); };
         $('moneyAmount').addEventListener('input', suggestVat); suggestVat();
         const referenceWrap = document.createElement('div'); referenceWrap.className = 'mt-3';
         referenceWrap.innerHTML = '<label for="moneyReference" class="form-label">카드사 취소 확인번호 또는 구분 메모 (선택)</label><input id="moneyReference" class="form-control" maxlength="100" placeholder="같은 날 같은 금액을 두 번 취소한 경우 구분할 내용">';
@@ -142,7 +142,7 @@ window.AccountingMoney = (() => {
         updatePaths();
         $('moneyForm').onsubmit = event => {
             event.preventDefault();
-            confirmSave('cancel', { original_trans_id: selected.trans_id, date: $('moneyDate').value, amount: Number($('moneyAmount').value), vat_amount: Number($('moneyVat').value), description: $('moneyDescription').value.trim(), card_alias: $('moneyCard').value, card_path: $('moneyPath').value, payment_confirmed: $('moneyPaymentConfirmed').checked, approval_id: $('moneyAdjustment').value || null, reference: $('moneyReference').value.trim() }, '원거래와 취소 증빙을 확인하셨나요? 선택한 납부·환급 상태로 장부에 기록합니다.');
+            confirmSave('cancel', { original_trans_id: selected.trans_id, date: $('moneyDate').value, amount: Number(ERPNumberInput.raw($('moneyAmount').value)), vat_amount: Number(ERPNumberInput.raw($('moneyVat').value)), description: $('moneyDescription').value.trim(), card_alias: $('moneyCard').value, card_path: $('moneyPath').value, payment_confirmed: $('moneyPaymentConfirmed').checked, approval_id: $('moneyAdjustment').value || null, reference: $('moneyReference').value.trim() }, '원거래와 취소 증빙을 확인하셨나요? 선택한 납부·환급 상태로 장부에 기록합니다.');
         };
         area.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
@@ -160,11 +160,11 @@ window.AccountingMoney = (() => {
     function openSettlement(item) {
         const mistaken = item.kind === 'mistaken_deposit';
         if (!editor(mistaken ? '착오입금 반환 확인' : '카드 환급 확인', `<form id="moneyForm"><p>${esc(item.description)}</p><p>남은 금액: <strong>${won(item.amount-item.settled_amount)}</strong></p>${commonFields()}<label for="moneyMethod" class="form-label mt-3">처리 방법</label><select class="form-select mb-3" id="moneyMethod"><option value="bank">${mistaken ? '통장에서 반환 이체 완료' : '통장으로 환급받음'}</option>${!mistaken && item.card_path.startsWith('credit_paid_') ? '<option value="offset">다음 카드대금에서 차감 확인</option>' : ''}</select><p class="text-muted">실제 ${mistaken ? '이체 내역' : '입금 또는 대금 차감 내역'}을 확인한 뒤 저장하세요. 이 버튼이 은행 이체를 실행하지는 않습니다.</p><button class="btn btn-primary" id="moneySave">확인한 금액 기록</button></form>`)) return;
-        $('moneyAmount').value = item.amount-item.settled_amount; $('moneyAmount').max = $('moneyAmount').value;
+        $('moneyAmount').value = item.amount-item.settled_amount; $('moneyAmount').max = ERPNumberInput.raw($('moneyAmount').value);
         const referenceWrap = document.createElement('div'); referenceWrap.className = 'mb-3';
         referenceWrap.innerHTML = '<label for="moneySettlementReference" class="form-label">이체·환급 확인번호 또는 구분 메모 (선택)</label><input id="moneySettlementReference" class="form-control" maxlength="100" placeholder="같은 날 같은 금액을 두 번 처리한 경우 구분할 내용">';
         $('moneyMethod').after(referenceWrap);
-        $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('settle', { case_id: item.id, date: $('moneyDate').value, amount: Number($('moneyAmount').value), method: $('moneyMethod').value, reference: $('moneySettlementReference').value.trim() }, '실제 통장 거래 또는 카드사 차감 내역을 확인하셨나요? 장부와 남은 금액을 함께 갱신합니다.'); };
+        $('moneyForm').onsubmit = event => { event.preventDefault(); confirmSave('settle', { case_id: item.id, date: $('moneyDate').value, amount: Number(ERPNumberInput.raw($('moneyAmount').value)), method: $('moneyMethod').value, reference: $('moneySettlementReference').value.trim() }, '실제 통장 거래 또는 카드사 차감 내역을 확인하셨나요? 장부와 남은 금액을 함께 갱신합니다.'); };
     }
     function confirmSave(action, payload, text) {
         if (saving) return;

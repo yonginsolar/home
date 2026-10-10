@@ -9,7 +9,7 @@
  function message(error){return ({SETTINGS_ACCESS_DENIED:'이 설정을 조회하거나 수정할 권한이 없습니다.',COMMON_SETTINGS_READ_ONLY:'공통 기준은 조회만 가능합니다.',SETTINGS_STALE_VERSION:'다른 관리자가 먼저 저장했습니다. 입력 내용은 유지됩니다. 다시 불러온 뒤 확인해 주세요.',SETTINGS_SOURCE_REQUIRED:'적용 근거를 입력해 주세요.',SETTINGS_PAYROLL_VALUES_REQUIRED:'보험 요율·비과세 한도·지방소득세 기준을 모두 입력해 주세요.',SETTINGS_YEAR_NOT_REGISTERED:'해당 연도의 공통 기준이 아직 등록되지 않았습니다.',SETTINGS_EMPLOYER_RATES_REQUIRED:'사업주 고용보험·산재보험 요율을 조합별 설정에 입력해 주세요.'})[error?.message]||error?.message||'설정을 불러오지 못했습니다.';}
  const status=(text,error=false)=>{const el=document.getElementById('annualSettingsStatus');if(el){el.textContent=text;el.className='small mt-2 '+(error?'text-danger':'text-secondary');}};
  function inputs(){return [...document.querySelectorAll('[data-annual-value],#annualSource')];}
- function fingerprint(){return JSON.stringify(inputs().map(el=>[el.id,el.value]));}
+ function fingerprint(){return JSON.stringify(inputs().map(el=>[el.id,el.hasAttribute('data-number-group')?ERPNumberInput.raw(el.value):el.value]));}
  function dirty(){return snapshot!==null&&fingerprint()!==baseline;}
  async function confirmDiscard(){return !dirty()||await api.confirm('저장하지 않은 설정이 있습니다. 변경 내용을 버리고 이동할까요?');}
  function lock(){document.querySelectorAll('[data-annual-nav],[data-annual-action]').forEach(el=>el.disabled=busy);inputs().forEach(el=>el.disabled=busy||el.dataset.canEdit!=='true'||(year<currentYear()&&!pastEdit));}
@@ -20,7 +20,7 @@
   document.getElementById('annualPastEdit').hidden=year>=currentYear()||pastEdit||!(snapshot?.can_edit_common||snapshot?.can_edit_tenant);
  }
  function fields(scope,keys,values){const catalog=snapshot.catalog[scope];return keys.map(key=>{const spec=catalog[key],value=values[key],can=scope==='common'?snapshot.can_edit_common:snapshot.can_edit_tenant;const display=value==null?'':spec.unit==='%'?Number((value*100).toFixed(6)):value;
-  return `<div class="col-12 col-sm-6"><label class="form-label small mb-1" for="annual-${scope}-${escape(key)}">${escape(spec.label)} <span class="text-secondary">(${escape(spec.unit)})</span></label><input class="form-control form-control-sm" type="number" min="${spec.min||0}" max="${spec.max*(spec.unit==='%'?100:1)}" step="${spec.unit==='%'?'0.0001':spec.unit==='원'||spec.unit==='일'||spec.unit==='개월'?'1':'0.01'}" id="annual-${scope}-${escape(key)}" data-annual-value="${escape(key)}" data-scope="${scope}" data-unit="${escape(spec.unit)}" data-can-edit="${can}" value="${escape(display)}"></div>`;
+  return `<div class="col-12 col-sm-6"><label class="form-label small mb-1" for="annual-${scope}-${escape(key)}">${escape(spec.label)} <span class="text-secondary">(${escape(spec.unit)})</span></label><input class="form-control form-control-sm" type="number" ${spec.unit==='원'?'data-number-group':''} min="${spec.min||0}" max="${spec.max*(spec.unit==='%'?100:1)}" step="${spec.unit==='%'?'0.0001':spec.unit==='원'||spec.unit==='일'||spec.unit==='개월'?'1':'0.01'}" id="annual-${scope}-${escape(key)}" data-annual-value="${escape(key)}" data-scope="${scope}" data-unit="${escape(spec.unit)}" data-can-edit="${can}" value="${escape(display)}"></div>`;
  }).join('');}
  function render(){years();const common=snapshot.common,tenant=snapshot.tenant,commonValues=common?.values_json||snapshot.common_template||{},tenantValues=tenant?.values_json||snapshot.tenant_template||{};
   const ready=common?.status==='published';document.getElementById('annualCommonState').textContent=ready?(period>today()?'등록됨 · 적용 예정':'등록됨'):'미등록 · 초안';
@@ -29,13 +29,13 @@
   document.getElementById('annualPeriod').innerHTML=[...new Set([`${year}-01-01`,period,...snapshot.periods])].sort().map(d=>`<option value="${d}" ${d===period?'selected':''}>${d.slice(5,7)}월부터</option>`).join('');
   document.getElementById('annualAddPeriod').hidden=!(snapshot.can_edit_common||snapshot.can_edit_tenant);
   document.getElementById('annualMonth').value=period.slice(5,7);
-  baseline=fingerprint();lock();status('');
+  ERPNumberInput.refresh(root);ERPNumberInput.refresh(tenantRoot);baseline=fingerprint();lock();status('');
  }
  async function load(targetYear=year,targetPeriod=`${targetYear}-01-01`){const token=++sequence;busy=true;lock();status('설정을 불러오는 중입니다.');try{const {data,error}=await api.rpc({p_action:'get',p_year:targetYear,p_effective_on:targetPeriod});if(token!==sequence)return;if(error)throw error;
    year=targetYear;period=targetPeriod;snapshot=data;pastEdit=false;busy=false;render();
   }catch(error){if(token!==sequence)return;busy=false;snapshot=null;baseline='';root.innerHTML='';tenantRoot.innerHTML='';lock();status(message(error),true);throw error;}}
  async function navigate(nextYear,nextPeriod){if(busy||!await confirmDiscard()){years();document.getElementById('annualPeriod').value=period;return;}return load(Number(nextYear),nextPeriod);}
- function collect(scope){const values={};document.querySelectorAll(`[data-annual-value][data-scope="${scope}"]`).forEach(el=>{if(el.value==='')return;const number=Number(el.value);if(!el.checkValidity()||!Number.isFinite(number))throw Error('입력한 값의 범위를 확인해 주세요.');values[el.dataset.annualValue]=el.dataset.unit==='%'?Number((number/100).toFixed(8)):number;});return values;}
+ function collect(scope){const values={};document.querySelectorAll(`[data-annual-value][data-scope="${scope}"]`).forEach(el=>{if(el.value==='')return;const number=Number(ERPNumberInput.raw(el.value));if(!el.checkValidity()||!Number.isFinite(number))throw Error('입력한 값의 범위를 확인해 주세요.');values[el.dataset.annualValue]=el.dataset.unit==='%'?Number((number/100).toFixed(8)):number;});return values;}
  async function save(kind){if(busy||!snapshot)return;if(year<currentYear()&&!pastEdit)return status('과거 기준 수정 버튼을 먼저 눌러 주세요.',true);
   const scope=kind==='tenant'?'tenant':'common';if(!snapshot[scope==='common'?'can_edit_common':'can_edit_tenant'])return;
   let values;try{values=collect(scope);}catch(error){return status(message(error),true);}

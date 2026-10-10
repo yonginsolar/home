@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.92
+Version: v1.0.93
 Change: 2026-10-10 - Company-first settings and basic employee registration; preserve permissions.
 -->
 <html>
 <head>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.92 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.93 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -15,6 +15,7 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
+<script src="number_input.js?v=20261010-1"></script>
 <script src="../shared/company_seal_upload.js?v=20261009-17"></script>
 <script src="../shared/member_capital.js?v=20261008-3"></script>
 <script src="member_capital_settings.js?v=20261008-3"></script>
@@ -46,7 +47,7 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
   <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 
-<script src="annual_settings.js?v=20261008-1"></script>
+<script src="annual_settings.js?v=20261010-1"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -185,7 +186,7 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
           <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#setCompany">🏢 조합 기본정보</a></li>
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setTax">📊 공통 기준</a></li>
           <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#setAdvanced">⚙️ 조합별 설정</a></li>
-        </ul><div class="tab-content"><div class="tab-pane fade" id="setTax"><div class="d-flex justify-content-between mb-3"><h6 class="fw-bold mb-0">4대보험 공통 요율</h6><span id="annualCommonState" class="badge text-bg-light border"></span></div><div id="annualCommonFields"></div></div><div class="tab-pane fade show active" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" readonly><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div></div></div><div class="tab-pane fade" id="setAdvanced"><div id="annualTenantFields"></div></div></div></div><div class="modal-footer p-2 border-0" id="companySettingsFooter"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">조합 설정 저장</button></div></div></div></div>
+        </ul><div class="tab-content"><div class="tab-pane fade" id="setTax"><div class="d-flex justify-content-between mb-3"><h6 class="fw-bold mb-0">4대보험 공통 요율</h6><span id="annualCommonState" class="badge text-bg-light border"></span></div><div id="annualCommonFields"></div></div><div class="tab-pane fade show active" id="setCompany"><div class="row g-2"><div class="col-12"><label class="small text-muted">법인명(조합명)</label><input type="text" id="set_orgName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">이사장명(이사장)</label><input type="text" id="set_ceoName" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">사업자등록번호</label><input type="text" id="set_bizNum" class="form-control form-control-sm"></div><div class="col-12"><label class="small text-muted">회사 주소</label><input type="text" id="set_address" class="form-control form-control-sm"></div><div class="col-6"><label class="small text-muted">점심시간 시작</label><input type="time" id="set_workLunchStartTime" class="form-control form-control-sm" step="60"></div><div class="col-6"><label class="small text-muted">점심시간 종료</label><input type="time" id="set_workLunchEndTime" class="form-control form-control-sm" step="60"></div><div class="col-12"><div class="form-text">조합 공통 점심시간입니다. 이후 시간차 신청 구간과 겹치는 시간은 연차 차감에서 제외합니다.</div></div><div class="col-12"><label class="small text-muted">회사 직인</label><input type="hidden" id="set_sealPath"><input type="file" id="set_sealFile" class="form-control form-control-sm" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif" onchange="handleCompanySealFileChange()"><div class="d-flex justify-content-end mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetCompanySealSelection()">선택 취소</button></div><div class="form-text">설정 저장 시 재직·경력증명서와 급여 출력에 자동 반영됩니다. 새 파일을 선택하지 않으면 현재 직인을 유지합니다.</div><div id="set_sealPreviewWrap" class="mt-2 p-2 border rounded text-center bg-light hidden"><img id="set_sealPreviewImg" src="" alt="회사 직인 미리보기" style="max-height: 96px; max-width: 100%; object-fit: contain;"><div id="set_sealPreviewMeta" class="small text-muted mt-2"></div></div><div id="set_sealEmpty" class="form-text text-muted">등록된 회사 직인이 없습니다.</div></div><div class="col-12"><label class="small text-muted">출자 1좌 금액</label><input data-number-group type="number" id="set_memberShareUnitAmount" class="form-control form-control-sm" readonly><button type="button" class="btn btn-link btn-sm px-0" onclick="openMemberCapitalSettings()">출자 기준 설정</button></div></div></div><div class="tab-pane fade" id="setAdvanced"><div id="annualTenantFields"></div></div></div></div><div class="modal-footer p-2 border-0" id="companySettingsFooter"><button class="btn btn-primary w-100 btn-rounded" onclick="saveSettings()">조합 설정 저장</button></div></div></div></div>
 <div class="modal fade" id="inviteModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
@@ -329,7 +330,7 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
         <div class="info-card">
           <div class="section-title">💰 연봉 계약</div>
           <div class="view-mode"><label class="small text-muted">현재 연봉</label><div class="d-flex align-items-center gap-2"><span class="fs-5 fw-bold" id="viewSalary">******</span><i class="bi bi-eye text-primary cursor-pointer" onclick="toggleSalaryVisibility()"></i></div><div class="mt-2"><label class="small text-muted">적용 시작일: </label><span class="fw-bold" id="viewSalaryDate">-</span></div></div>
-          <div class="edit-mode"><div class="mb-2"><label class="small text-muted">연봉 총액 (원)</label><input type="number" id="editSalary" class="form-control fw-bold"></div><div class="mb-2"><label class="small text-muted">적용 시작일</label><input type="date" id="salaryApplyDate" class="form-control"></div></div>
+          <div class="edit-mode"><div class="mb-2"><label class="small text-muted">연봉 총액 (원)</label><input data-number-group type="number" id="editSalary" class="form-control fw-bold"></div><div class="mb-2"><label class="small text-muted">적용 시작일</label><input type="date" id="salaryApplyDate" class="form-control"></div></div>
         </div>
       </div>
 
@@ -421,7 +422,7 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
     <div class="row g-2 align-items-end">
       <div class="col-12">
         <label class="small fw-bold text-primary">💰 월 지급 총액 (연봉 ÷ 12)</label>
-        <input type="number" id="payTotalFixed" class="form-control fw-bold fs-5 bg-white" oninput="recalcSalaryComponents()">
+        <input data-number-group type="number" id="payTotalFixed" class="form-control fw-bold fs-5 bg-white" oninput="recalcSalaryComponents()">
         <div class="form-text x-small">이 금액을 기준으로 기본급과 수당을 나눕니다.</div>
       </div>
     </div>
@@ -451,11 +452,11 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
       </div>
       <div class="col-md-6">
         <label class="small text-muted">정산 환급 소득세</label>
-        <input type="number" id="payrollTaxAdjustmentIncome" class="form-control" min="0" step="10" value="0" oninput="syncSalaryTaxPreview()">
+        <input data-number-group type="number" id="payrollTaxAdjustmentIncome" class="form-control" min="0" step="10" value="0" oninput="syncSalaryTaxPreview()">
       </div>
       <div class="col-md-6">
         <label class="small text-muted">정산 환급 지방소득세</label>
-        <input type="number" id="payrollTaxAdjustmentLocal" class="form-control" min="0" step="10" value="0" oninput="syncSalaryTaxPreview()">
+        <input data-number-group type="number" id="payrollTaxAdjustmentLocal" class="form-control" min="0" step="10" value="0" oninput="syncSalaryTaxPreview()">
       </div>
       <div class="col-12">
         <input type="text" id="payrollTaxAdjustmentNote" class="form-control" placeholder="정산 메모 예: 1~3월 원천세 과다징수분 4월 급여 반영">
@@ -493,34 +494,34 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
   <div class="row g-2">
     <div class="col-4">
       <label class="small text-muted">식대 (비과세)</label>
-      <input type="number" id="payMeal" class="form-control" value="0" min="0" oninput="handleSalaryMealInput()">
+      <input data-number-group type="number" id="payMeal" class="form-control" value="0" min="0" oninput="handleSalaryMealInput()">
       <div class="form-text x-small" id="salaryMealCarryHelp">직전 달 급여를 확인하면 식비를 자동으로 불러옵니다.</div>
     </div>
     <div class="col-4">
       <label class="small text-muted">차량유지비</label>
-      <input type="number" id="payCar" class="form-control" value="0" oninput="recalcSalaryComponents()">
+      <input data-number-group type="number" id="payCar" class="form-control" value="0" oninput="recalcSalaryComponents()">
     </div>
     <div class="col-4">
       <label class="small text-muted">육아수당</label>
-      <input type="number" id="payChild" class="form-control" value="0" oninput="recalcSalaryComponents()">
+      <input data-number-group type="number" id="payChild" class="form-control" value="0" oninput="recalcSalaryComponents()">
     </div>
     <div class="col-6">
       <label class="small text-muted">기본급 (자동계산)</label>
-      <input type="number" id="payBasic" class="form-control bg-light" readonly>
+      <input data-number-group type="number" id="payBasic" class="form-control bg-light" readonly>
     </div>
     <div class="col-6">
       <label class="small text-muted">상여/성과급 (별도)</label>
-      <input type="number" id="payBonus" class="form-control" value="0" oninput="recalcSalaryComponents()">
+      <input data-number-group type="number" id="payBonus" class="form-control" value="0" oninput="recalcSalaryComponents()">
     </div>
   </div>
   <div class="row g-2 mt-1">
     <div class="col-6">
       <label class="small text-muted">두루누리 근로자 지원분 (같은 귀속월 반영)</label>
-      <input type="number" id="durunuriEmpSupport" class="form-control bg-light text-primary fw-bold" value="0" readonly>
+      <input data-number-group type="number" id="durunuriEmpSupport" class="form-control bg-light text-primary fw-bold" value="0" readonly>
     </div>
     <div class="col-6">
       <label class="small text-muted">두루누리 사업주 지원분 (같은 귀속월 반영)</label>
-      <input type="number" id="durunuriBizSupport" class="form-control bg-light text-primary fw-bold" value="0" readonly>
+      <input data-number-group type="number" id="durunuriBizSupport" class="form-control bg-light text-primary fw-bold" value="0" readonly>
     </div>
     <div class="col-12">
       <div class="form-text">완료된 같은 귀속월 4대보험 결재의 지원금이 해당 월 급여 계산·급여대장·회계 연동에 자동 반영됩니다.</div>
@@ -2810,7 +2811,7 @@ function syncDurunuriEligibilityUi() {
     const monthsEl = document.getElementById('durunuriConfirmedMonths');
     const summaryEl = document.getElementById('durunuriEligibilitySummary');
     const helpEl = document.getElementById('durunuriEligibilityHelp');
-    const confirmed = Math.min(36, Math.max(0, Math.round(Number(monthsEl?.value || 0))));
+    const confirmed = Math.min(36, Math.max(0, Math.round(Number(ERPNumberInput.raw(monthsEl?.value) || 0))));
     const tracked = Math.max(0, Number(currentDurunuriEligibility?.tracked_supported_months || 0));
     const used = Math.min(36, confirmed + tracked);
     const remaining = Math.max(0, 36 - used);
@@ -5004,7 +5005,7 @@ async function saveBasicInfo() {
     if(detail) fullAddress += " " + detail;
 
     const hireDate = document.getElementById("editHireDate").value;
-    const sal = Number(document.getElementById("editSalary").value);
+    const sal = Number(ERPNumberInput.raw(document.getElementById("editSalary").value));
     const date = document.getElementById("salaryApplyDate").value;
     const position = String(document.getElementById("editPosition")?.value || '').trim();
     const authLevel = normalizeHrAuthLevelValue(document.getElementById('editAuthLevel')?.value);
@@ -5209,18 +5210,18 @@ function setSalaryTaxAdjustmentInputs(source = {}) {
 
 function getSalaryTaxAdjustmentInput() {
     return {
-        income: normalizePayrollTaxAdjustmentValue(document.getElementById('payrollTaxAdjustmentIncome')?.value),
-        local: normalizePayrollTaxAdjustmentValue(document.getElementById('payrollTaxAdjustmentLocal')?.value),
+        income: normalizePayrollTaxAdjustmentValue(ERPNumberInput.raw(document.getElementById('payrollTaxAdjustmentIncome')?.value)),
+        local: normalizePayrollTaxAdjustmentValue(ERPNumberInput.raw(document.getElementById('payrollTaxAdjustmentLocal')?.value)),
         note: String(document.getElementById('payrollTaxAdjustmentNote')?.value || '').trim()
     };
 } // End of getSalaryTaxAdjustmentInput
 
 function calculateAdminEmployeeSalaryTaxBaseFromInputs(rule = settings) {
-    const fixedTotal = Number(document.getElementById("payTotalFixed")?.value) || 0;
-    const bonus = Number(document.getElementById("payBonus")?.value) || 0;
-    const meal = Number(document.getElementById("payMeal")?.value) || 0;
-    const car = Number(document.getElementById("payCar")?.value) || 0;
-    const child = Number(document.getElementById("payChild")?.value) || 0;
+    const fixedTotal = Number(ERPNumberInput.raw(document.getElementById("payTotalFixed")?.value)) || 0;
+    const bonus = Number(ERPNumberInput.raw(document.getElementById("payBonus")?.value)) || 0;
+    const meal = Number(ERPNumberInput.raw(document.getElementById("payMeal")?.value)) || 0;
+    const car = Number(ERPNumberInput.raw(document.getElementById("payCar")?.value)) || 0;
+    const child = Number(ERPNumberInput.raw(document.getElementById("payChild")?.value)) || 0;
     const limitMeal = Number(rule?.limit_meal || 200000);
     const limitCar = Number(rule?.limit_car || 200000);
     const limitChild = Number(rule?.limit_child || 200000);
@@ -5468,8 +5469,8 @@ async function deleteSalary() {
 }
 
 function recalcSalaryComponents() {
-    const total = Number(document.getElementById("payTotalFixed").value) || 0;
-    const meal = Number(document.getElementById("payMeal").value) || 0; const car = Number(document.getElementById("payCar").value) || 0; const child = Number(document.getElementById("payChild").value) || 0;
+    const total = Number(ERPNumberInput.raw(document.getElementById("payTotalFixed").value)) || 0;
+    const meal = Number(ERPNumberInput.raw(document.getElementById("payMeal").value)) || 0; const car = Number(ERPNumberInput.raw(document.getElementById("payCar").value)) || 0; const child = Number(ERPNumberInput.raw(document.getElementById("payChild").value)) || 0;
     const basic = total - (meal + car + child);
     document.getElementById("payBasic").value = basic > 0 ? basic : 0;
     syncSalaryTaxPreview();
@@ -5813,7 +5814,7 @@ function saveSalary() {
     if (salarySaveInFlight || employeeBasicSaveInFlight) return;
     const selectedEmpId = currentEmpId, detailRevision = employeeDetailRevision;
 
-    const meal = Number(document.getElementById('payMeal')?.value || 0);
+    const meal = Number(ERPNumberInput.raw(document.getElementById('payMeal')?.value) || 0);
     if (!Number.isFinite(meal) || meal < 0) return showAlert('식비는 0원 이상으로 입력해주세요.');
 
     const state = salaryMealCarryForward;
@@ -5858,11 +5859,11 @@ async function persistSalary() {
     } catch (error) { return showAlert(window.ERPAnnualSettings.errorMessage(error)); }
 
     // 1. 지급액 가져오기
-    const p_basic = Number(document.getElementById("payBasic").value);
-    const p_meal = Number(document.getElementById("payMeal").value);
-    const p_car = Number(document.getElementById("payCar").value);
-    const p_child = Number(document.getElementById("payChild").value);
-    const p_bonus = Number(document.getElementById("payBonus").value);
+    const p_basic = Number(ERPNumberInput.raw(document.getElementById("payBasic").value));
+    const p_meal = Number(ERPNumberInput.raw(document.getElementById("payMeal").value));
+    const p_car = Number(ERPNumberInput.raw(document.getElementById("payCar").value));
+    const p_child = Number(ERPNumberInput.raw(document.getElementById("payChild").value));
+    const p_bonus = Number(ERPNumberInput.raw(document.getElementById("payBonus").value));
     const workDescription = String(document.getElementById("workDescription").value || '').trim();
     const workDays = roundAdminEmployeeWorkMetric(document.getElementById("workDays").value);
     const workHours = roundAdminEmployeeWorkMetric(document.getElementById("workHours").value);
@@ -6959,6 +6960,7 @@ async function getTaxRates(year, month = String(year) + '-01') {
     if (!data?.values) throw new Error('급여에 적용할 기준을 확인할 수 없습니다.');
     return data.values;
 }
+
 
 </script>
 </body>
