@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.85 | Change: 2026-10-10 - Quick forms and draft status; retain handwritten category titles. -->
+<!-- Version: v1.2.86 | Change: 2026-10-10 - Quick forms, preserved titles and precise draft save results. -->
 <html lang="ko">
 <head>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.85 | approval.html');</script>
+  <script>console.log('[Version] v1.2.86 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1579,7 +1579,7 @@ CoopPermissionRequest.bindDocument({
 let approvalDraftModalInstance = null;
 let approvalDraftCache = [];
 let currentApprovalDraftId = null;
-let approvalDraftSavedState = '', approvalDraftSaving = false, approvalDraftLastSaveFailed = false;
+let approvalDraftSavedState = '', approvalDraftSaving = false, approvalDraftLastSaveFailed = false, approvalDraftSaveUncertain = false;
 let currentApprovalDraftUpdatedAt = '';
 let approvalDraftAttachmentRefs = [];
 let approvalAttachmentOrder = [];
@@ -3112,12 +3112,16 @@ function getApprovalDraftStatusState(payload = collectApprovalDraftFormPayload()
 function rememberApprovalDraftStatusState(payload = collectApprovalDraftFormPayload()) {
     approvalDraftSavedState = getApprovalDraftStatusState(payload);
     approvalDraftLastSaveFailed = false;
+    approvalDraftSaveUncertain = false;
 }
 function syncApprovalDraftStatusText() {
     const statusEl = document.getElementById('approvalDraftStatusText');
     if (!statusEl) return;
     if (approvalDraftSaving) {
         statusEl.dataset.state = 'saving'; statusEl.textContent = '임시저장 중…'; return;
+    }
+    if (approvalDraftSaveUncertain) {
+        statusEl.dataset.state = 'error'; statusEl.textContent = '저장 결과 확인 필요 · 임시저장함을 확인해 주세요'; return;
     }
     if (approvalDraftLastSaveFailed) {
         statusEl.dataset.state = 'error'; statusEl.textContent = '임시저장 실패 · 작성 내용은 화면에 남아 있음'; return;
@@ -3411,7 +3415,7 @@ function resetApprovalComposerForm(options = {}) {
     if (!skipAutoRefresh) calculateLeave();
     normalizeApprovalInitialComposerTitle();
     updateFileList();
-    approvalDraftSavedState = ''; approvalDraftLastSaveFailed = false;
+    approvalDraftSavedState = ''; approvalDraftLastSaveFailed = false; approvalDraftSaveUncertain = false;
     syncApprovalDraftStatusText();
 } // End of resetApprovalComposerForm
 
@@ -3785,7 +3789,7 @@ async function saveApprovalDraft() {
     if (approvalDraftSaving) return;
     if (getCurrentDraftMainType() === CoopPermissionRequest.TYPE) return showAlert('권한 받을 사람·업무 권한을 선택하고 기존 결재선에서 결재자를 지정한 뒤 상신해 주세요.');
     if (!canPerform('approval.submit')) return showAlert('임시저장 권한이 없습니다.');
-    approvalDraftSaving = true; approvalDraftLastSaveFailed = false;
+    approvalDraftSaving = true; approvalDraftLastSaveFailed = false; approvalDraftSaveUncertain = false;
     syncApprovalDraftStatusText();
     const saveBtn = document.getElementById('btnSaveApprovalDraft');
     if (saveBtn) {
@@ -3798,6 +3802,7 @@ async function saveApprovalDraft() {
         .filter((descriptor) => descriptor.kind === 'local')
         .map((descriptor) => descriptor.file);
     let newlyUploadedAttachments = [];
+    let initialSaveStarted = false, finalSaveStarted = false, finalSaveCompleted = false;
     const validation = validateAttachments(pendingFiles);
     if (!validation.ok) {
         approvalDraftSaving = false; syncApprovalDraftStatusText();
@@ -3827,6 +3832,7 @@ async function saveApprovalDraft() {
         let payload = collectApprovalDraftFormPayload();
 
         if (!draftId) {
+            initialSaveStarted = true;
             await persistApprovalDraftRecord(null, payload, mergedAttachments);
             draftId = Number(currentApprovalDraftId || 0) || null;
         }
@@ -3847,7 +3853,9 @@ async function saveApprovalDraft() {
         }
 
         payload = collectApprovalDraftFormPayload();
+        finalSaveStarted = true;
         await persistApprovalDraftRecord(draftId, payload, mergedAttachments);
+        finalSaveCompleted = true;
         clearApprovalDraftLocalFiles();
         resetApprovalAttachmentOrder();
         updateFileList();
@@ -3855,15 +3863,16 @@ async function saveApprovalDraft() {
         renderApprovalDraftList();
         showAlert(`임시저장되었습니다.\n제목: ${getApprovalDraftSummaryTitle(payload)}`);
     } catch (error) {
-        approvalDraftLastSaveFailed = true;
-        try {
-            if (newlyUploadedAttachments.length > 0) {
-                await deleteDraftAttachmentObjects(newlyUploadedAttachments);
-            }
-        } catch (cleanupError) {
-            CoopSafeLog.warn("approval draft orphan cleanup failed", cleanupError);
+        if (finalSaveCompleted) {
+            showAlert('임시저장은 완료됐지만 저장함 목록을 새로 불러오지 못했습니다. 저장함에서 다시 확인해 주세요.');
+        } else if (finalSaveStarted || (initialSaveStarted && !currentApprovalDraftId)) {
+            // A lost acknowledgement is not proof of a failed write. Preserve possible saved attachments.
+            approvalDraftSaveUncertain = true;
+            showAlert('임시저장의 처리 결과를 확인하지 못했습니다. 작성 내용과 첨부는 유지했습니다. 다시 저장하기 전에 임시저장함을 확인해 주세요.');
+        } else {
+            approvalDraftLastSaveFailed = true;
+            showAlert(getApprovalDraftErrorMessage(error, '임시저장에 실패했습니다.'));
         }
-        showAlert(getApprovalDraftErrorMessage(error, '임시저장에 실패했습니다.'));
     } finally {
         approvalDraftSaving = false;
         if (saveBtn) {
