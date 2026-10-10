@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.2.1 — query controls retain context without suppressing fresh reads. */
+/* Persistent ERP workspace v1.2.2 — lock every print path; checkpoint completed input only. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -9,6 +9,8 @@
   let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
   const retained = new Map(), attached = new WeakSet();
   const RETAIN_LIMIT = 6;
+  let printableEntry = null;
+  document.documentElement.setAttribute('data-erp-print-locked', '');
   const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
   const home = target => {
     const next = new URL('/erp/', location.origin);
@@ -44,6 +46,38 @@
     return node.type === 'checkbox' || node.type === 'radio' ? node.checked
       : node.type === 'file' ? node.files.length : node.isContentEditable ? node.innerHTML : node.value;
   }
+  // Called only by an editor's successful save or explicit discard. Never rebase other drafts.
+  function checkpoint(root) {
+    if (!root?.ownerDocument) return false;
+    const entry = [...new Set([activeEntry,...retained.values()])]
+      .find(item => item.frame.isConnected && item.frame.contentDocument === root.ownerDocument);
+    if (!entry) return false;
+    for (const node of entry.fields.keys()) {
+      if (node === root || root.contains(node)) entry.fields.delete(node);
+    }
+    return true;
+  }
+  function activePrintState(entry = activeEntry) {
+    return ready && !leaving && !requested && entry === activeEntry && entry === printableEntry
+      && entry.frame === frame && frame.isConnected && !frame.hidden && current === entry.route;
+  }
+  function canPrint(entry = activeEntry) {
+    try {
+      return activePrintState(entry) && routes.route(frame.contentWindow.location.href) === current;
+    } catch (_) { return false; }
+  }
+  function setPrintLock(entry, locked) {
+    try { entry.frame.contentDocument?.documentElement.toggleAttribute('data-erp-print-locked', locked); } catch (_) {}
+  }
+  function lockPrint() {
+    printableEntry = null;
+    document.documentElement.setAttribute('data-erp-print-locked', '');
+    restorePrint();
+    for (const entry of new Set([activeEntry,...retained.values()])) setPrintLock(entry,true);
+  }
+  function printTask(entry = activeEntry) {
+    if (canPrint(entry)) entry.frame.contentWindow.print();
+  }
   function canLeave() {
     return leaving || canRetain(activeEntry) || !changed() || window.confirm('저장하지 않은 내용이 있습니다. 저장하지 않고 이동할까요?');
   }
@@ -64,11 +98,13 @@
     entry.frame.remove(); entry.fields.clear();
   }
   function purge() {
+    lockPrint();
     transition += 1;
     for (const entry of new Set([...retained.values(), activeEntry])) removeEntry(entry);
     retained.clear(); window.ErpWorkspace.detachDocument();
   }
   function park() {
+    lockPrint();
     window.ErpWorkspace.detachDocument();
     if (canRetain(activeEntry)) {
       if (!retained.has(activeEntry.route) && retained.size >= RETAIN_LIMIT) {
@@ -125,7 +161,7 @@
           }
           await task(cached).refresh({runtime:access.runtime,dirty:changed(cached)});
           if (ticket !== transition) return;
-          frame.hidden=false; syncFrame();
+          frame.hidden=false; syncFrame(); attachDocument(frame.contentDocument,cached);
         } catch (failure) {
           if (ticket !== transition) return;
           if (failure?.message === 'ERP_TASK_ACCESS_DENIED') {
@@ -189,10 +225,15 @@
     }, true);
     doc.addEventListener('keydown', event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
-        event.preventDefault(); entry.frame.contentWindow.print();
+        event.preventDefault(); printTask(entry);
       }
     });
-    entry.frame.contentWindow.addEventListener('hashchange', () => { if (entry===activeEntry) syncFrame(); });
+    // Native menu/programmatic child printing must obey the same gate as keyboard printing.
+    const printGuard = doc.createElement('style');
+    printGuard.textContent = '@media print{html[data-erp-print-locked] body{display:none!important}}';
+    doc.head.append(printGuard);
+    entry.frame.contentWindow.addEventListener('beforeprint', () => setPrintLock(entry,!canPrint(entry)));
+    entry.frame.contentWindow.addEventListener('hashchange', () => { if (activePrintState(entry)) syncFrame(); });
   }
   function syncFrame() {
     try {
@@ -203,21 +244,25 @@
         // Authentication, OAuth callbacks, public screens and cooperative switches leave the shell.
         const target = new URL(href);
         if (target.origin === location.origin) { leaving = true; purge(); location.replace(target.href); }
-        else { status.hidden = true; error.hidden = false; }
+        else { lockPrint(); status.hidden = true; error.hidden = false; }
         return;
       }
       if (retained.get(activeEntry.route)===activeEntry && activeEntry.route!==next) retained.delete(activeEntry.route);
       activeEntry.route = next; current = next; requested = '';
+      printableEntry = activeEntry;
+      document.documentElement.removeAttribute('data-erp-print-locked');
+      setPrintLock(activeEntry,false);
       history.replaceState({erpWorkspace:true}, '', routes.address(next));
       document.title = child.document.title;
       frame.title = child.document.title || 'ERP 업무 화면';
       window.ErpWorkspace.setDocument(child.document, href);
       status.hidden = true; error.hidden = true; clearTimeout(timer); clearTimeout(slowTimer);
-    } catch (_) { status.hidden = true; error.hidden = false; }
+    } catch (_) { lockPrint(); status.hidden = true; error.hidden = false; }
   }
   function frameLoaded(entry = activeEntry) {
     if (!ready) return;
     if (entry !== activeEntry) { removeEntry(entry); return; }
+    if (entry.frame.hidden) return;
     syncFrame();
     try { attachDocument(frame.contentDocument, entry); } catch (_) {}
   }
@@ -237,8 +282,8 @@
     if (!leaving && ([activeEntry,...retained.values()].some(entry=>changed(entry)))) { event.preventDefault(); event.returnValue = ''; }
   });
   window.addEventListener('keydown', event => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p' && current) {
-      event.preventDefault(); frame.contentWindow.print();
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+      event.preventDefault(); printTask();
     }
   });
   // Browser-menu print needs a paginated document, not a clipped screen-height iframe.
@@ -249,7 +294,8 @@
     if (printClasses !== undefined) { document.body.className = printClasses; printClasses = undefined; }
   }
   window.addEventListener('beforeprint', () => {
-    if (!current || printCopy) return;
+    if (!canPrint()) { lockPrint(); return; }
+    if (printCopy) return;
     const doc = frame.contentDocument;
     printClasses = document.body.className;
     document.body.className = doc.body.className + ' erp-shell-printing';
@@ -296,5 +342,5 @@
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, version:'20261010.9'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261010.12'};
 })();

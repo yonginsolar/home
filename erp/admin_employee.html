@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.96
-Change: 2026-10-10 - Defer Excel and charts; preserve permissions and input.
+Version: v1.0.97
+Change: 2026-10-10 - Checkpoint saved or explicitly closed basic-info edits only.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
-  <script src="/erp/workspace_resume.js?v=20261010-9"></script>
+  <script src="/erp/workspace_resume.js?v=20261010-11"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.96 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.97 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -1039,6 +1039,7 @@ function bindHrModalStacking(modalEl) {
         if (active && modalEl.contains(active) && typeof active.blur === 'function') active.blur();
     });
     modalEl.addEventListener('hidden.bs.modal', () => {
+        if (modalEl.id === 'detailModal') toggleEditMode(false);
         modalEl.style.zIndex = '';
         delete modalEl.dataset.hrModalStackOrder;
         scheduleSync();
@@ -4996,7 +4997,14 @@ async function loadEmployeeInsuranceStatus() {
     await window.HrInsuranceStatus.mount(_supabase, document.getElementById('employeeInsuranceStatus'), {empId, admin:true});
 }
 document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
-function toggleEditMode(isEdit) { const c = document.getElementById("infoContainer"); if(isEdit) c.classList.add("is-editing"); else c.classList.remove("is-editing"); }
+function toggleEditMode(isEdit) {
+    const c = document.getElementById("infoContainer");
+    if (isEdit) c.classList.add("is-editing");
+    else {
+        c.classList.remove("is-editing");
+        window.ErpWorkspaceResume?.checkpoint(c);
+    }
+}
 function toggleSalaryVisibility() { const el = document.getElementById("viewSalary"); el.innerText = el.innerText === "******" ? el.dataset.real : "******"; }
 
 async function saveBasicInfo() {

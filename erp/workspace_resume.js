@@ -1,4 +1,4 @@
-/* ERP task resume v1.0.0: register only after original initialization succeeds. */
+/* ERP task resume v1.0.1: keep authorization checks; checkpoint explicitly completed editors. */
 (() => {
   'use strict';
   function register(options = {}) {
@@ -21,5 +21,9 @@
       await pending;
     }};
   }
-  window.ErpWorkspaceResume = {register};
+  function checkpoint(root) {
+    if (!root || root.ownerDocument !== document || window.parent === window) return false;
+    try { return window.parent.ErpWorkspaceShell?.checkpoint(root) === true; } catch (_) { return false; }
+  }
+  window.ErpWorkspaceResume = {register,checkpoint};
 })();
