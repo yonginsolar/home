@@ -1,14 +1,13 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.139 | Change: 2026-10-10 - Business finder, entry review and grouped accounting work. -->
+<!-- Version: v1.0.140 | Change: 2026-10-10 - Defer accounting guides and inactive queue reads. -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.139 | accounting.html');</script>
+  <script>console.log('[Version] v1.0.140 | accounting.html');</script>
   <link rel="stylesheet" href="accounting_guide.css?v=1.0.1">
-  <script src="accounting_smarta_guide.js?v=1.0.0"></script>
-  <script src="accounting_guide.js?v=1.0.2"></script>
+  <script src="workflow_assets.js?v=20261010-1"></script>
   <link rel="stylesheet" href="accounting_money_module.css?v=20261002-3">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1981,11 +1980,7 @@ window.onload = async function() {
         redirectUrl: 'index.html'
     });
     if (!accountingRuntimeGate.ok) return;
-    window.CoopAccountingGuide?.mount({
-        root: document.getElementById('accountingGuide'),
-        client: _supabase,
-        coopId: String(myInfo?.coop_id || '').trim()
-    });
+    document.querySelector('[data-bs-target="#tabGuide"]').addEventListener('shown.bs.tab', mountAccountingGuide);
 
     const insuranceSettingResult = await loadInsuranceAutoDebitDiscountSetting();
     if (insuranceSettingResult.error) {
@@ -2038,7 +2033,8 @@ window.onload = async function() {
     onReceivableIncomeTypeChange();
     toggleAdvancedMode();
     renderAutoSyncUndoInfo();
-    loadApprovalUnclassifiedQueue();
+    if (document.getElementById('tabSync')?.classList.contains('active')) await loadApprovalUnclassifiedQueue();
+    if (document.getElementById('tabGuide')?.classList.contains('active')) await mountAccountingGuide();
     window.ErpWorkspaceResume.register({modules:['accounting'], refresh:async () => {
         const pane = document.querySelector('.tab-content > .tab-pane.active')?.id;
         if (pane === 'tabHistory') await loadHistory();
@@ -2047,6 +2043,31 @@ window.onload = async function() {
         else if (pane === 'tabForm' || !pane) await refreshDashboard();
     }});
 };
+
+let accountingGuideLoading = null;
+async function mountAccountingGuide() {
+    const root = document.getElementById('accountingGuide');
+    if (!root || root.dataset.mounted === '1') return;
+    if (accountingGuideLoading) return accountingGuideLoading;
+    const owner = myInfo, coopId = String(myInfo?.coop_id || '').trim();
+    const isCurrent = () => owner === myInfo && coopId === String(myInfo?.coop_id || '').trim()
+        && document.getElementById('tabGuide')?.classList.contains('active') && !window.frameElement?.hidden;
+    root.textContent = '안내를 불러오는 중입니다.';
+    accountingGuideLoading = (async () => {
+        try {
+            await Promise.all([window.ErpWorkflowAssets.load('accountingGuide'), window.ErpWorkflowAssets.load('smartaGuide')]);
+            if (!isCurrent()) return;
+            window.CoopAccountingGuide.mount({root, client:_supabase, coopId});
+        } catch (_) {
+            if (!isCurrent()) return;
+            root.textContent = '안내를 불러오지 못했습니다. ';
+            const retry = document.createElement('button');
+            retry.type = 'button'; retry.className = 'btn btn-outline-secondary'; retry.textContent = '다시 불러오기';
+            retry.onclick = mountAccountingGuide; root.appendChild(retry);
+        }
+    })().finally(() => { accountingGuideLoading = null; });
+    return accountingGuideLoading;
+}
 
 // Helper
 function escapeHtml(value) {

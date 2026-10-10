@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.94
-Change: 2026-10-10 - Company-first settings and basic employee registration; preserve permissions.
+Version: v1.0.95
+Change: 2026-10-10 - Defer Excel and charts; preserve permissions and input.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.94 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.95 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -40,14 +40,13 @@ Change: 2026-10-10 - Company-first settings and basic employee registration; pre
   <script src="erp_runtime_guard.js?v=20261009-1"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
   <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+  <script src="workflow_assets.js?v=20261010-1"></script>
   <script src="print_service.js?v=20260510-1324-1"></script>
   <script src="payroll_tax_table.js?v=20260508-1"></script>
   <script src="payroll_durunuri_module.js?v=20260901-1"></script>
   <script src="salary_ledger_module.js?v=20260508-1249-1"></script>
   <script src="leave_ledger.js?v=20260928-1"></script>
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
-  <script src="../shared/vendor/xlsx-0.20.3.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 
 <script src="annual_settings.js?v=20261010-1"></script>
   <style>
@@ -2725,8 +2724,7 @@ window.onload = async function() {
     hrRuntimeProfile = String(hrRuntimeGate.runtime?.runtime_profile || 'legacy_full');
     applyHrRuntimeProfileUi();
 
-    await loadList();
-    await loadCompanyInfo();
+    await Promise.all([loadList(), loadCompanyInfo()]);
     await loadSettings();
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
@@ -3369,6 +3367,8 @@ function openPayrollImportModal() {
     payrollImportModal?.show();
 } // End of openPayrollImportModal
 
+let payrollImportFileSequence = 0;
+
 function resetPayrollImportMappingToAuto() {
     if (!payrollImportState || !Array.isArray(payrollImportState.headers) || payrollImportState.headers.length === 0) return;
     payrollImportState.mapping = autoMatchPayrollImportHeaders(payrollImportState.headers);
@@ -3665,6 +3665,11 @@ function renderPayrollImportPreview() {
 
 async function handlePayrollImportFileChange(input) {
     const file = input?.files?.[0];
+    const request = ++payrollImportFileSequence;
+    const owner = myInfo;
+    const isCurrent = () => request === payrollImportFileSequence && myInfo === owner
+        && input?.files?.[0] === file && !document.getElementById('hrPageShell')?.classList.contains('hidden')
+        && !window.frameElement?.hidden;
     resetPayrollImportValidationUi();
     const mappingWrap = document.getElementById('payrollImportMappingWrap');
     const mappingBody = document.getElementById('payrollImportMappingBody');
@@ -3674,13 +3679,17 @@ async function handlePayrollImportFileChange(input) {
         setPayrollImportStatus('엑셀 파일을 선택해 주세요.', '저장된 매핑이 있으면 자동으로 재사용하고, 처음 보는 양식이면 헤더를 기준으로 자동매칭을 시도합니다.', '');
         return;
     }
-    if (typeof XLSX === 'undefined') {
-        input.value = '';
-        return showAlert('엑셀 업로드 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
+    try {
+        await window.ErpWorkflowAssets.load('spreadsheet');
+    } catch (_) {
+        if (isCurrent()) showAlert('엑셀 도구를 불러오지 못했습니다. 파일을 다시 선택해 주세요. 입력한 내용은 유지됩니다.');
+        return;
     }
+    if (!isCurrent()) return;
 
     const reader = new FileReader();
     reader.onload = function onloadExcel(event) {
+        if (!isCurrent()) return;
         try {
             const data = new Uint8Array(event.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
@@ -6705,14 +6714,23 @@ async function printLedger() {
 
 let statsModalInstance;
 let charts = {}; // 차트 객체들을 담아둘 변수 (중복 생성 방지용)
+let statsDashboardInFlight = null;
 
 // 1. 대시보드 열기 및 데이터 로드 메인 함수
 async function openStatsDashboard() {
     if(!statsModalInstance) statsModalInstance = new bootstrap.Modal(document.getElementById('statsModal'));
     statsModalInstance.show();
+    if (statsDashboardInFlight) return statsDashboardInFlight;
 
     // 로딩 표시 (간략히)
     document.getElementById("valAvgTime").innerText = "계산 중...";
+    const owner = myInfo;
+    const isCurrent = () => myInfo === owner && document.getElementById('statsModal')?.classList.contains('show')
+        && !document.getElementById('hrPageShell')?.classList.contains('hidden') && !window.frameElement?.hidden;
+    statsDashboardInFlight = (async () => {
+    try {
+    await window.ErpWorkflowAssets.load('chart');
+    if (!isCurrent()) return;
 
     // [데이터 확보] 전자결재(지출 포함) & 급여대장 동시에 조회 (병렬 처리)
     // 최근 1년치 데이터만 조회하여 성능 최적화
@@ -6724,6 +6742,7 @@ async function openStatsDashboard() {
         scopeEmployeeTenant(_supabase.from('ref_approval').select('*')).gte('created_at', dateStr).order('created_at', {ascending: true}),
         scopeEmployeeTenant(_supabase.from('hr_salary').select('*')).gte('created_at', dateStr).order('year_month', {ascending: true})
     ]);
+    if (!isCurrent()) return;
 
     if(approvalRes.error || salaryRes.error) return showAlert("데이터 로드 실패");
 
@@ -6734,6 +6753,11 @@ async function openStatsDashboard() {
     renderEfficiencyStats(appList);
     renderRejectionStats(appList);
     renderFinanceStats(appList, salaryList);
+    } catch (_) {
+        if (isCurrent()) { document.getElementById('valAvgTime').innerText = '-'; showAlert('통계를 불러오지 못했습니다. 창을 닫고 다시 열어 주세요.'); }
+    }
+    })().finally(() => { statsDashboardInFlight = null; });
+    return statsDashboardInFlight;
 }
 
 // ---------------------------------------------------------
