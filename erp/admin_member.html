@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.258
-Change: 2026-10-10 - Format member fund inputs and put related page links after local tabs.
+Version: v1.0.259
+Change: 2026-10-10 - Preview administrator contribution certificates before print or PDF save.
 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261005.1">
+<meta name="admin-contribution-certificate-revision" content="20261010.1">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
 <script>
-window.ADMIN_MEMBER_VERSION = 'v1.0.258';
+window.ADMIN_MEMBER_VERSION = 'v1.0.259';
   console.log('[Version] ' + window.ADMIN_MEMBER_VERSION + ' | admin_member.html');
   document.addEventListener('DOMContentLoaded', function () {
     var badge = document.getElementById('appVersionBadge');
@@ -71,6 +72,7 @@ window.ADMIN_MEMBER_VERSION = 'v1.0.258';
 <script src="/badges.js?v=20260331_01"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
 <script src="/cert_generator.js?v=20261010_01"></script>
+<script src="/shared/contribution_cert_preview.js?v=20261010-1"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
 
 
@@ -3970,7 +3972,7 @@ body.erp-unified .sidebar-header h5 { color: #fff; }
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
-        <button class="btn btn-primary btn-sm" onclick="submitIssueDoc()">발급</button>
+        <button id="issue-doc-submit" class="btn btn-primary btn-sm" onclick="submitIssueDoc()">미리보기</button>
       </div>
     </div>
   </div>
@@ -5044,6 +5046,7 @@ function getAdminMemberModalZIndex(modalEl, index) {
 } // End of getAdminMemberModalZIndex
 
 function focusTopAdminMemberModal() {
+    if (document.querySelector('.contribution-cert-preview[open]')) return;
     const openModals = getOpenAdminMemberModals();
     const topModal = openModals[openModals.length - 1];
     if (!topModal || !topModal.classList.contains('show') || topModal.contains(document.activeElement)) return;
@@ -5088,6 +5091,7 @@ function stopAdminMemberModalEscape(event) {
 
 function handleAdminMemberModalEscape(event) {
     if (event.key !== 'Escape' || event.isComposing) return;
+    if (document.querySelector('.contribution-cert-preview[open]')) return;
 
     const openModals = getOpenAdminMemberModals();
     if (adminMemberModalCloseInProgress && openModals.length > 0) {
@@ -7972,7 +7976,7 @@ async function saveSiteHistory() {
 
 // 유틸리티
 function showLoading(show) { document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none'; }
-function logout() { _supabase.auth.signOut().then(() => location.href='index.html'); }
+function logout() { window.ContributionCertPreview?.clear(); _supabase.auth.signOut().then(() => location.href='index.html'); }
 // [수정] 탭 전환 함수 (대시보드 로직 추가)
 
 // ================================================================
@@ -13894,6 +13898,7 @@ function setMemberDetailReadBusy(busy) {
 }
 
 document.getElementById('memberDetailModal')?.addEventListener('hide.bs.modal', () => {
+    window.ContributionCertPreview?.clear();
     ++g_member_detail_revision;
     setMemberDetailReadBusy(false);
     if (g_member_detail_loading) {
@@ -14331,6 +14336,7 @@ async function loadAdminMemberQuizHistory(forceReload = false) {
 } // End of loadAdminMemberQuizHistory
 
 async function openMemberDetail(id) {
+    window.ContributionCertPreview?.clear();
     const requestRevision = ++g_member_detail_revision;
     setMemberDetailReadBusy(true);
     try {
@@ -14535,6 +14541,8 @@ function syncIssueDocAmountMode() {
     if (!modeEl || !amountEl || !dateEl || !typeEl) return;
 
     const isDonation = typeEl.value === 'donation';
+    const submitEl = document.getElementById('issue-doc-submit');
+    if (submitEl) submitEl.textContent = isDonation ? '발급' : '미리보기';
     const manual = modeEl.value === 'manual';
     amountEl.disabled = !manual;
     dateEl.disabled = manual || isDonation;
@@ -14660,7 +14668,43 @@ function buildDonationReceiptNumber(memberRow) {
     return `DON-${y}${m}${d}-${key}`;
 }
 
+let adminIssueDocBusy = false;
+let adminCertificateAuthId = '';
+
+function bindAdminCertificateContext(authId) {
+    adminCertificateAuthId = String(authId || '');
+    _supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT' || (session?.user?.id && session.user.id !== adminCertificateAuthId)) {
+            adminCertificateAuthId = '';
+            window.ContributionCertPreview?.clear();
+        }
+    });
+    // A parked workspace retains editor input, not an open personal certificate.
+    const frame = window.frameElement;
+    if (frame) {
+        const observer = new MutationObserver(() => {
+            if (frame.hidden) window.ContributionCertPreview?.clear();
+        });
+        observer.observe(frame, { attributes: true, attributeFilter: ['hidden'] });
+        window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+    }
+}
+
+async function hideIssueDocForPreview() {
+    const modalEl = document.getElementById('issueDocModal');
+    if (!modalEl?.classList.contains('show')) return;
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (!modal) return;
+    await new Promise(resolve => {
+        modalEl.addEventListener('hidden.bs.modal', resolve, { once: true });
+        const hide = () => { moveFocusOutsideModal(modalEl); modal.hide(); };
+        if (modalEl.dataset.adminMemberModalOpening === '1') modalEl.addEventListener('shown.bs.modal', hide, { once: true });
+        else hide();
+    });
+}
+
 async function submitIssueDoc() {
+    if (adminIssueDocBusy) return;
     const typeEl = document.getElementById('issue-doc-type');
     const modeEl = document.getElementById('issue-amount-mode');
     const dateEl = document.getElementById('issue-cutoff-date');
@@ -14679,10 +14723,48 @@ async function submitIssueDoc() {
     const manualAmount = ERPNumberInput.raw(amountEl.value);
     const periodFrom = rangeFromEl.value;
     const periodTo = rangeToEl.value;
+    const memberData = { ...g_current_member_row, id: g_current_member_id };
+    const coopId = String(g_adminMemberRuntime?.coop_id || '').trim();
+    const authId = adminCertificateAuthId;
+    const revision = g_member_detail_revision;
+    const current = () => String(g_current_member_id) === String(memberData.id)
+        && g_current_member_row?.member_id === memberData.member_id
+        && g_member_detail_revision === revision
+        && String(g_adminMemberRuntime?.coop_id || '').trim() === coopId
+        && adminCertificateAuthId === authId
+        && (!window.frameElement || !window.frameElement.hidden);
+    let preview;
+    const authorize = async () => {
+        const [identity, access] = await Promise.all([
+            _supabase.auth.getUser(), _supabase.rpc('get_my_erp_runtime')
+        ]);
+        if (identity.error || access.error) throw new Error('로그인과 발급 권한을 확인하지 못했습니다. 다시 시도해 주세요.');
+        const runtime = access.data;
+        const allowed = runtime?.coop_id === coopId && runtime.is_active !== false
+            && window.ErpRuntimeGuard.isModuleEnabled(runtime, 'member_admin')
+            && window.ErpRuntimeGuard.isModuleAssigned(runtime, 'member_admin')
+            && (runtime.effective_permissions?.includes('member.admin')
+                || (runtime.runtime_profile === 'site_member' && runtime.module_access?.member_admin === true));
+        if (!authId || identity.data?.user?.id !== authId || !current() || !allowed) {
+            window.ContributionCertPreview?.clear();
+            throw Object.assign(new Error('로그인 계정, 조합 또는 발급 권한이 변경되었습니다. 다시 열어주세요.'), {code:'CERTIFICATE_CONTEXT_CHANGED'});
+        }
+    };
+    adminIssueDocBusy = true;
+    const submitEl = document.getElementById('issue-doc-submit');
+    if (submitEl) submitEl.disabled = true;
 
-    showLoading(true, '발급 자료 준비 중...');
+    if (docType === 'donation') showLoading(true, '발급 자료 준비 중...');
 
     try {
+        if (docType !== 'donation') {
+            if (!window.ContributionCertPreview) throw new Error('증명서 미리보기를 준비하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+            await hideIssueDocForPreview();
+            if (!current()) return;
+            preview = window.ContributionCertPreview.start({ isCurrent: current, authorize });
+            await authorize();
+            if (!preview.isCurrent()) return;
+        }
         if (typeof window.jspdf === 'undefined') {
             throw new Error('PDF 라이브러리(jsPDF) 로드에 실패했습니다. 네트워크/차단 설정을 확인해주세요.');
         }
@@ -14692,20 +14774,17 @@ async function submitIssueDoc() {
             mode,
             cutoffDate,
             manualAmount,
-            g_current_member_row,
+            memberData,
             periodFrom,
             periodTo
         );
+        if (preview && !preview.isCurrent()) return;
         if (!amount || amount <= 0) {
             throw new Error(docType === 'donation'
                 ? '기준 조건에 해당하는 기부금이 없어 발급할 수 없습니다.'
                 : '기준 조건에 해당하는 출자금이 없어 발급할 수 없습니다.');
         }
 
-        const memberData = {
-            ...g_current_member_row,
-            id: g_current_member_id
-        };
         const chairmanName = await fetchChairmanName();
         if (isAdminMemberSiteProfile() && (!chairmanName || chairmanName === '이사장')) {
             throw new Error('출자증서 발급 전에 출자증서 설정에서 이사장 성명을 등록해주세요.');
@@ -14746,23 +14825,33 @@ async function submitIssueDoc() {
             }
 
             const companyProfile = await prepareContributionCertCompanyProfile(_supabase, {
-                coopId: String(g_adminMemberRuntime?.coop_id || '').trim() || null,
+                coopId,
                 fallbackChairmanName: chairmanName
             });
             if (typeof getCertPretendardFontBase64 === 'function') await getCertPretendardFontBase64();
+            if (!preview.isCurrent()) return;
+            await authorize();
+            if (!preview.isCurrent()) return;
 
             const { data: cert, error } = await _supabase.rpc('issue_contribution_certificate', {
                 p_member_id: memberData.member_id,
                 p_amount: amount
             });
             if (error) throw error;
+            if (!preview.isCurrent()) return;
+            if (!cert?.cert_number) throw new Error('증명서 발급 번호를 확인하지 못했습니다. 다시 시도해 주세요.');
 
-            await generateContributionCert(memberData, amount, cert.cert_number, chairmanName, _supabase, {
+            const result = await generateContributionCert(memberData, amount, cert.cert_number, chairmanName, _supabase, {
+                output: 'preview',
                 issueDate: mode === 'cutoff' ? cutoffDate : null,
-                coopId: String(g_adminMemberRuntime?.coop_id || '').trim() || null,
+                coopId,
                 requireSeal: true,
                 companyProfile
             });
+            await authorize();
+            if (!preview.isCurrent()) return;
+            await preview.present(result);
+            return;
         }
 
         showLoading(false);
@@ -14776,11 +14865,19 @@ async function submitIssueDoc() {
     } catch (e) {
         showLoading(false);
         CoopSafeLog.error("[erp/admin_member] operation failed", e);
+        if (preview) {
+            if (preview.isCurrent()) preview.fail('증명서 준비 실패: ' + (e?.message || '다시 시도해 주세요.'));
+            else if (e?.code === 'CERTIFICATE_CONTEXT_CHANGED') myAlert(e.message, 'warning');
+            return;
+        }
         const issueModalEl = document.getElementById('issueDocModal');
         moveFocusOutsideModal(issueModalEl);
         const issueModal = bootstrap.Modal.getInstance(issueModalEl);
         if (issueModal) issueModal.hide();
         myAlert('문서 발급 실패: ' + (e?.message || e), 'error');
+    } finally {
+        adminIssueDocBusy = false;
+        if (submitEl) submitEl.disabled = false;
     }
 }
 
@@ -16654,6 +16751,7 @@ window.onload = async function() {
         return;
     }
     applyAdminMemberRuntimeUi(memberRuntimeGate.runtime);
+    bindAdminCertificateContext(user?.id);
     window.MemberExportPinUI?.init({client:_supabase,alert:myAlert});
 
     // 2. 사이드바 메뉴 활성화 (현재 URL 기반)
