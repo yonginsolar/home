@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.3.0 — collapsible local navigation and server-confirmed election entry. */
+/* ERP workspace navigation v1.4.0 — persistent rail with original task tab controls. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261010.5';
+  const VERSION = '20261010.6';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -32,8 +32,9 @@
   let submenu, submenuOwner, submenuRows = [], localNavigationRoots = [], submenuFrame;
   let closedSubmenus = new Set();
   try { closedSubmenus = new Set(cleanOrder(JSON.parse(localStorage.getItem('erp_workspace_submenus_v1') || '[]'))); } catch (_) {}
-  const path = location.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop() || 'index';
-  const params = new URLSearchParams(location.search);
+  let pageUrl = new URL(location.href), taskDocument = document, localObserver, observedDocument, localClick;
+  let path = pageUrl.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop() || 'index';
+  let params = new URLSearchParams(pageUrl.search);
   const isIndex = path === 'index' || path === 'erp';
   const base = '/erp/';
   const url = route => new URL(route, new URL(base, location.origin)).href;
@@ -53,7 +54,7 @@
       || (path === 'admin_member' && params.get('scope') === 'documents_admin')
       || (path === 'participation' && params.get('view') === 'meeting');
     if (leaf === 'participation') return path === leaf && (params.get('view') || 'education') === 'education';
-    if (leaf === 'vote_hub') return path === leaf || /\/vote\/(?:admin|admin_setup|poll_admin|poll_setup)(?:\.html)?\/?$/.test(location.pathname);
+    if (leaf === 'vote_hub') return path === leaf || /\/vote\/(?:admin|admin_setup|poll_admin|poll_setup)(?:\.html)?\/?$/.test(pageUrl.pathname);
     return path === leaf;
   }
 
@@ -108,9 +109,9 @@
 
   function localVisible(node) {
     if (!node?.isConnected || node.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar,[data-erp-home-link]')) return false;
-    for (let parent = node; parent && parent !== document.body; parent = parent.parentElement) {
-      if (parent.hidden || parent.matches('.hidden,.d-none') || getComputedStyle(parent).display === 'none'
-        || getComputedStyle(parent).visibility === 'hidden') return false;
+    for (let parent = node; parent && parent !== node.ownerDocument.body; parent = parent.parentElement) {
+      if (parent.hidden || parent.matches('.hidden,.d-none') || node.ownerDocument.defaultView.getComputedStyle(parent).display === 'none'
+        || node.ownerDocument.defaultView.getComputedStyle(parent).visibility === 'hidden') return false;
       if (parent.matches('.tab-pane,.tab-panel,.step-panel,.sub-panel') && !parent.classList.contains('active')) return false;
     }
     return true;
@@ -126,7 +127,7 @@
   function syncSubmenu() {
     submenuFrame = null;
     const owner = state && list?.querySelector('.erp-workspace-link.active');
-    localNavigationRoots = [...document.querySelectorAll(localRoots)].filter(root => !root.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar'));
+    localNavigationRoots = [...taskDocument.querySelectorAll(localRoots)].filter(root => !root.closest('.modal,dialog,#rptTab,#erpWorkspaceSidebar'));
     const sources = [...new Set(localNavigationRoots.flatMap(root => root.matches('[data-workspace-submenu]') ? [root]
       : [...root.querySelectorAll('button,a.nav-link,[role="tab"]')]))]
       .filter(node => localVisible(node) && localLabel(node) && !node.closest('.erp-workspace-footer')
@@ -174,7 +175,10 @@
     submenuFrame = requestAnimationFrame(syncSubmenu);
   }
   function observeLocalNavigation() {
-    new MutationObserver(records => {
+    localObserver?.disconnect();
+    if (observedDocument && localClick) observedDocument.removeEventListener('click', localClick);
+    observedDocument = taskDocument;
+    localObserver = new MutationObserver(records => {
       if (!state) return;
       const relevant = records.some(record => {
         const node = record.target.nodeType === 1 ? record.target : record.target.parentElement;
@@ -184,9 +188,59 @@
           && (child.matches(localRoots) || child.querySelector(localRoots)));
       });
       if (relevant) scheduleSubmenu();
-    }).observe(document.body, {subtree:true,childList:true,characterData:true,attributes:true,
+    });
+    localObserver.observe(taskDocument.body, {subtree:true,childList:true,characterData:true,attributes:true,
       attributeFilter:['class','style','hidden','disabled','aria-selected','aria-disabled']});
-    document.addEventListener('click', event => { if (event.target.closest?.(localRoots)) scheduleSubmenu(); });
+    localClick = event => { if (event.target.closest?.(localRoots)) scheduleSubmenu(); };
+    taskDocument.addEventListener('click', localClick);
+  }
+
+  function prepareLocalDocument(doc, footer) {
+    const sidebar = doc.querySelector('#main-system > .sidebar'), content = doc.querySelector('#main-system > .main-content');
+    if (sidebar && content) {
+      sidebar.classList.add('erp-local-navigation');
+      const actions = sidebar.querySelector('.sidebar-menu > div:last-child');
+      if (actions?.querySelector('[onclick*="logout"]')) {
+        if (doc === document) footer.append(actions);
+        else {
+          // Keep inline handlers in their original window. The outer footer activates that exact control.
+          actions.classList.add('erp-workspace-embedded-actions'); doc.body.append(actions);
+          for (const original of actions.querySelectorAll('button,a')) {
+            if (original.hasAttribute('data-erp-home-link')) continue;
+            const proxy = document.createElement('button'); proxy.type = 'button'; proxy.className = 'nav-link';
+            proxy.textContent = original.textContent.trim(); proxy.onclick = () => original.click(); footer.append(proxy);
+          }
+        }
+      }
+      content.prepend(sidebar);
+      sidebar.querySelectorAll('.sidebar-menu > a:not([href])').forEach(anchor => {
+        anchor.setAttribute('role', 'button'); anchor.tabIndex = 0;
+        anchor.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); anchor.click(); } });
+      });
+    }
+    doc.querySelectorAll('.nav-tabs').forEach(nav => { if (!nav.closest('.modal')) nav.classList.add('erp-workspace-tabs'); });
+  }
+
+  function setDocument(doc, href) {
+    if (!state || !panel || !doc?.body || doc.defaultView.location.origin !== location.origin) return false;
+    taskDocument = doc; pageUrl = new URL(href); params = new URLSearchParams(pageUrl.search);
+    path = pageUrl.pathname.replace(/\.html$/, '').replace(/\/$/, '').split('/').pop();
+    doc.body.classList.add('erp-workspace', 'erp-workspace-embedded'); doc.body.dataset.erpWorkspaceRevision = VERSION;
+    doc.body.classList.toggle('erp-workspace-election', state.items.some(item => item[0] === 'btnVoteHub'));
+    const footer = panel.querySelector('.erp-workspace-footer'); footer.replaceChildren();
+    prepareLocalDocument(doc, footer);
+    list.querySelectorAll('.erp-workspace-link').forEach(anchor => {
+      const selected = active(anchor.href); anchor.classList.toggle('active', selected);
+      if (selected) anchor.setAttribute('aria-current','page'); else anchor.removeAttribute('aria-current');
+    });
+    document.querySelector('.erp-workspace-mobile-bar strong').textContent = doc.title.split('|')[0].trim();
+    observeLocalNavigation(); syncSubmenu(); return true;
+  }
+  function detachDocument() {
+    localObserver?.disconnect();
+    if (observedDocument && localClick) observedDocument.removeEventListener('click',localClick);
+    submenu?.remove(); submenu=null; submenuOwner=null; submenuRows=[]; localNavigationRoots=[];
+    panel?.querySelector('.erp-workspace-footer').replaceChildren(); taskDocument=document;
   }
 
   function fullOrder() {
@@ -269,6 +323,7 @@
     if (panel) {
       panel.hidden = false;
       document.body.classList.add('erp-workspace');
+      observeLocalNavigation();
       return;
     }
     document.body.classList.add('erp-workspace');
@@ -302,19 +357,7 @@
     backdrop = document.createElement('button'); backdrop.type = 'button'; backdrop.className = 'erp-workspace-backdrop';
     backdrop.hidden = true; backdrop.setAttribute('aria-label', '업무 메뉴 닫기'); backdrop.addEventListener('click', () => setDrawer(false));
     document.body.prepend(mobile, backdrop, panel);
-    const sidebar = document.querySelector('#main-system > .sidebar');
-    const content = document.querySelector('#main-system > .main-content');
-    if (sidebar && content) {
-      sidebar.classList.add('erp-local-navigation');
-      const actions = sidebar.querySelector('.sidebar-menu > div:last-child');
-      if (actions?.querySelector('[onclick*="logout"]')) footer.append(actions);
-      content.prepend(sidebar); // Keep IDs, handlers, panes and legacy .sidebar-menu selectors intact.
-      sidebar.querySelectorAll('.sidebar-menu > a:not([href])').forEach(anchor => {
-        anchor.setAttribute('role', 'button'); anchor.tabIndex = 0;
-        anchor.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); anchor.click(); } });
-      });
-    }
-    document.querySelectorAll('.nav-tabs').forEach(nav => { if (!nav.closest('.modal')) nav.classList.add('erp-workspace-tabs'); });
+    prepareLocalDocument(document, footer); // Preserve IDs, handlers, panes and selectors.
     // Approval form and its existing navigation appearance are intentionally unchanged.
     try { if (!matchMedia('(max-width: 991.98px)').matches && localStorage.getItem('erp_workspace_collapsed_v1') === '1') collapse.click(); } catch (_) {}
     const media = matchMedia('(max-width: 991.98px)');
@@ -402,9 +445,11 @@
     document.body?.classList.remove('erp-workspace', 'erp-workspace-drawer-open', 'erp-workspace-election');
     if (backdrop) backdrop.hidden = true;
     if (panel) panel.hidden = true;
+    localObserver?.disconnect();
   }
 
   function connect(client, runtime) {
+    if (isIndex) return Promise.resolve(); // The ERP landing page uses its existing menu cards, not a sidebar.
     if (!client?.rpc) return Promise.resolve();
     if (!authBound.has(client) && client.auth?.onAuthStateChange) {
       authBound.add(client);
@@ -422,7 +467,7 @@
     return promise;
   }
 
-  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder };
+  window.ErpWorkspace = { version: VERSION, connect, clear, defaultOrder, syncOrder, setDocument, detachDocument, closeDrawer:()=>setDrawer(false) };
   window.addEventListener('erp-workspace-runtime', event => { void connect(event.detail.client, event.detail.runtime); });
   // Used only by classic-script ERP pages with an already configured tenant-aware client.
   window.addEventListener('load', () => {
