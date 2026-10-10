@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.95
+Version: v1.0.96
 Change: 2026-10-10 - Defer Excel and charts; preserve permissions and input.
 -->
 <html>
@@ -8,7 +8,7 @@ Change: 2026-10-10 - Defer Excel and charts; preserve permissions and input.
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.95 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.96 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -6715,17 +6715,23 @@ async function printLedger() {
 let statsModalInstance;
 let charts = {}; // 차트 객체들을 담아둘 변수 (중복 생성 방지용)
 let statsDashboardInFlight = null;
+let statsDashboardOpen = false;
 
 // 1. 대시보드 열기 및 데이터 로드 메인 함수
 async function openStatsDashboard() {
-    if(!statsModalInstance) statsModalInstance = new bootstrap.Modal(document.getElementById('statsModal'));
+    if(!statsModalInstance) {
+        const modal = document.getElementById('statsModal');
+        statsModalInstance = new bootstrap.Modal(modal);
+        modal.addEventListener('hide.bs.modal', () => { statsDashboardOpen = false; });
+    }
+    statsDashboardOpen = true;
     statsModalInstance.show();
     if (statsDashboardInFlight) return statsDashboardInFlight;
 
     // 로딩 표시 (간략히)
     document.getElementById("valAvgTime").innerText = "계산 중...";
     const owner = myInfo;
-    const isCurrent = () => myInfo === owner && document.getElementById('statsModal')?.classList.contains('show')
+    const isCurrent = () => myInfo === owner && statsDashboardOpen
         && !document.getElementById('hrPageShell')?.classList.contains('hidden') && !window.frameElement?.hidden;
     statsDashboardInFlight = (async () => {
     try {
