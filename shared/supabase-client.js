@@ -1,6 +1,6 @@
 /*
-Version: v1.1.2
-Change: 2026-10-04 - Route new Storage writes through byte validation without changing tenant authentication.
+Version: v1.1.3
+Change: 2026-10-10 - Bind ERP workspace requests to their registered domain; preserve public headers and Auth defaults.
 */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.2';
 import './checked_upload.js?v=20261004-1';
@@ -35,6 +35,12 @@ function getRuntimeHost() {
 const globalHeaders = {};
 const runtimeHost = getRuntimeHost();
 if (runtimeHost) globalHeaders['x-public-host'] = runtimeHost;
+// The ERP shell uses this same client. Domain-gated ERP RPCs require their own
+// host header; the server still validates Auth, current cooperative and rights.
+// Public pages keep their original request contract.
+if (runtimeHost && typeof window !== 'undefined' && window.__COOP_ROUTE_APP__ === 'erp') {
+  globalHeaders['x-erp-host'] = runtimeHost;
+}
 
 export const supabase = globalThis.CoopCheckedUploads.install(createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   global: {
