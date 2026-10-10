@@ -433,6 +433,10 @@
       if (!gate.ok) return;
       void window.ErpWorkspace?.connect(getClient());
       await load();
+      window.ErpWorkspaceResume.register({busy:()=>loading,authorize:async runtime=>{
+        const next=await rpc('sun_village_management_context');
+        return Boolean(next?.managing_coop_id)&&String(next.managing_coop_id)===String(runtime.coop_id);
+      },refresh:load});
     } catch (error) {
       console.error(`[sun-village-hub ${VERSION}] boot failed`, error);
       setMessage(friendly(error), true);

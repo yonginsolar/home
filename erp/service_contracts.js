@@ -245,6 +245,12 @@
   $('endDialogForm').onsubmit=ev=>{ev.preventDefault();if(busy)return;const id=current.id,payload={mode:endMode,effective_on:$('endDialogDate').value,reason:$('endDialogReason').value};task(async()=>{$('endDialogForm').querySelector('button[type=submit]').disabled=true;try{await rpc('end_request',payload,id);$('endDialog').close();await open(id);message('종료 요청을 저장했습니다. 종료일 도래와 제공자 확인 후 이용이 중지됩니다.','success');}finally{$('endDialogForm').querySelector('button[type=submit]').disabled=false;}});};
   message('계약을 선택해 내용을 확인해 주세요.');
   if(context.admin||context.platform)void window.VillageBilling?.init(db);
+  window.ErpWorkspaceResume.register({busy:()=>busy||exporting,authorize:async()=>{
+    const next=await rpc('context',{},null);
+    if(!(next.admin||next.platform||next.representative||next.draft_reviewer))return false;
+    if(current)await rpc('get',{},current.id);
+    return true;
+  },refresh:reload});
  }catch(e){message(errorText(e),'danger');}}
  // Pure helpers exposed only to regression fixtures; no authority or user token is exported.
  window.ServiceContractsUi={oneYearEnd,documentHtml,zip,print,attachmentGroups};void boot().then(()=>{if(context?.download_allowed)void ownershipSummary();});

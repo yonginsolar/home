@@ -1447,6 +1447,7 @@ async function boot() {
     document.getElementById('loadingScreen').classList.add('hidden');
     document.getElementById('appShell').classList.remove('hidden');
     if (!state.contracts.length) emptyWorkspace(state.admin && !state.forceSelf ? '새 계약서를 작성하거나 외부 계약서를 등록해 주세요' : '확인할 근로계약서가 없습니다');
+    window.ErpWorkspaceResume.register({modules:[moduleKey],busy:()=>state.busy,refresh:loadContracts});
   } catch (error) {
     console.error('[employment_contracts] boot failed', error);
     showAlert(`근로계약서 화면을 준비하지 못했습니다.\n${normalizeError(error)}`);

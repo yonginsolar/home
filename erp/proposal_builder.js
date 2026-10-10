@@ -1921,6 +1921,8 @@
         isDirty: () => state.manualDirty || Boolean(state.siteImageDataUrl), fields: DRAFT_FIELDS });
       await state.library.ready;
       if (!hadDraft && !state.library.hadSavedSession && !state.library.hadLocalDraft) void refreshCoopStats();
+      // The proposal itself is an editor: never replace its text, image or geometry on return.
+      window.ErpWorkspaceResume.register({modules:['site_admin'],refresh:async()=>{}});
     } catch (error) {
       console.error(`[proposal-builder ${VERSION}] boot failed`, error);
       if (error?.code === 'PROPOSAL_BUILDER_REQUEST_TIMEOUT') {

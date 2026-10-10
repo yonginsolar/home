@@ -5,7 +5,8 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 -->
 <html lang="ko">
 <head>
-  <script src="/erp/workspace_boot.js?v=20261010-8"></script>
+  <script src="/erp/workspace_boot.js?v=20261010-9"></script>
+  <script src="/erp/workspace_resume.js?v=20261010-9"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -292,9 +293,9 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         }
         .channel-toggle input { margin: 0; }
     </style>
-  <meta name="erp-workspace-revision" content="20261010.8">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-8">
-  <script src="/erp/workspace_nav.js?v=20261010-8" defer></script>
+  <meta name="erp-workspace-revision" content="20261010.9">
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
+  <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
 </head>
 <body>
 
@@ -3624,6 +3625,15 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
             // 3. 기본 탭 로드
             switchTab(ADMIN_MINUTES_SCOPE || 'minutes');
+            window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
+                return runtime.effective_permissions.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
+                    || await MinutesService.isAdmin(session.user.id,session.user.email);
+            },refresh:async()=>{
+                const pane=document.querySelector('.tab-panel.active')?.id;
+                if(pane==='tab-notices')await loadNotices();
+                else if(pane==='tab-materials')await loadAssemblyMaterials();
+                else await loadMinutes();
+            }});
         }
 
         async function loadMinutes() {

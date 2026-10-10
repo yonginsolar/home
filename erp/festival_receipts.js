@@ -1412,6 +1412,9 @@
       await incomeController.ready;
       await selectEvent($('saleEvent').value);
       await workspaceTools.reloadDashboard();
+      window.ErpWorkspaceResume.register({busy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy(),
+        authorize:async()=>{const access=await rpc('access');return access.allowed===true&&access.editable===editable;},
+        refresh:async()=>{await Promise.all([loadSales(),loadVouchers(),loadReceipts()]);await workspaceTools.reloadDashboard();}});
     } catch (error) {
       $('accessStatus').textContent = readableError(error);
     }

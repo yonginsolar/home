@@ -2278,6 +2278,11 @@ async function init() {
   state.company = companyResult.data || {};
   state.meetingHistory = historyResult.data || [];
   await loadPackages();
+  window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
+    const perms=runtime.effective_permissions||[];
+    return perms.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
+      || await MinutesService.isAdmin(state.session.user.id,state.session.user.email);
+  },refresh:loadPackages});
   window.setInterval(renderPackages, 60_000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPackages(); });
 }

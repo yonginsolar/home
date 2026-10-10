@@ -2,7 +2,8 @@
 <!-- Version: v1.3.2 | Change: 2026-09-29 - Manage private provider contacts and handover notes. -->
 <html lang="ko">
 <head>
-  <script src="/erp/workspace_boot.js?v=20261010-8"></script>
+  <script src="/erp/workspace_boot.js?v=20261010-9"></script>
+  <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
   <script>console.log('[Version] v1.3.2 | power_monitor_admin.html');</script>
@@ -147,9 +148,9 @@
   </style>
   <meta name="erp-mobile-revision" content="20261007.2">
   <link rel="stylesheet" href="./mobile_tasks.css?v=1.0.1">
-  <meta name="erp-workspace-revision" content="20261010.8">
-  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-8">
-  <script src="/erp/workspace_nav.js?v=20261010-8" defer></script>
+  <meta name="erp-workspace-revision" content="20261010.9">
+  <link rel="stylesheet" href="/erp/workspace_nav.css?v=20261010-9">
+  <script src="/erp/workspace_nav.js?v=20261010-9" defer></script>
   <script src="/erp/number_input.js?v=20261010-1"></script>
 </head>
 <body data-erp-mobile-task="monitor">
@@ -1226,8 +1227,13 @@
           return;
         }
         await loadData('');
+        window.ErpWorkspaceResume.register({authorize:async()=>{
+          const result=await _supabase.rpc('platform_get_context');
+          if(result.error)throw result.error;
+          return result.data?.is_platform_admin===true;
+        },busy:()=>isDirty,refresh:()=>loadData(currentScopeKey,true)});
         autoRefreshTimer = setInterval(() => {
-          if (!isDirty && !document.hidden) loadData(currentScopeKey, true);
+          if (!isDirty && !document.hidden && !window.frameElement?.hidden) loadData(currentScopeKey, true);
         }, 180000);
       } catch (error) {
         console.error('[power-monitor-admin] init failed', error);

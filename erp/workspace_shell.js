@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.1.0 — bounded in-memory task reuse; fresh server gates before resume. */
+/* Persistent ERP workspace v1.2.0 — all initialized tasks; fresh server gates before resume. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -8,7 +8,7 @@
   let current = '', requested = '', client, ready = false, leaving = false, timer, slowTimer;
   let activeEntry = {frame, route:'', fields:new Map()}, accessKey = '', userId = '', transition = 0;
   const retained = new Map(), attached = new WeakSet();
-  const RETAIN_LIMIT = 3;
+  const RETAIN_LIMIT = 6;
   const view = () => routes.route(new URLSearchParams(location.search).get('view') || '');
   const home = target => {
     const next = new URL('/erp/', location.origin);
@@ -34,7 +34,7 @@
         if (draftStatus === 'saved' && node.closest('#draftForm')) continue;
         if (fieldValue(node) !== original) return true;
       }
-    } catch (_) { return false; }
+    } catch (_) { return true; }
     return false;
   }
   function fieldValue(node) {
@@ -46,9 +46,7 @@
   }
   function eligible(entry) {
     if (!entry?.route) return false;
-    const url = new URL(entry.route, location.origin);
-    return url.pathname === '/erp/approval.html'
-      || (url.pathname === '/erp/admin_member.html' && url.searchParams.get('scope') === 'member_admin');
+    return routes.route(entry.route) === entry.route;
   }
   function task(entry) { try { return entry.frame.contentWindow.ErpWorkspaceTask; } catch (_) { return null; } }
   function canRetain(entry) {
@@ -125,8 +123,11 @@
           await task(cached).refresh({runtime:access.runtime,dirty:changed(cached)});
           if (ticket !== transition) return;
           frame.hidden=false; syncFrame();
-        } catch (_) {
+        } catch (failure) {
           if (ticket !== transition) return;
+          if (failure?.message === 'ERP_TASK_ACCESS_DENIED') {
+            purge(); ready=false; leaving=true; home(target); return;
+          }
           status.hidden=true; error.hidden=false;
         }
       })();
@@ -172,8 +173,8 @@
     const remember = event => {
       const node = event.target;
       if (!event.isTrusted || !node?.matches?.('input,textarea,select,[contenteditable="true"]')) return;
-      // Modal/form edits get a conservative fallback where the task has no native unsaved guard.
-      if (!node.closest('form,.modal,dialog') && !node.isContentEditable) return;
+      // Also protect editors built without a form wrapper (proposals, meeting text, website fields).
+      if (node.disabled || node.readOnly || node.type === 'hidden') return;
       if (!entry.fields.has(node)) entry.fields.set(node, fieldValue(node));
     };
     for (const name of ['focusin','beforeinput','pointerdown']) doc.addEventListener(name, remember, true);
@@ -292,5 +293,5 @@
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, version:'20261010.8'};
+  window.ErpWorkspaceShell = {start, navigate, version:'20261010.9'};
 })();
