@@ -1,11 +1,11 @@
-/* v1.1.2 — Keep grouped inventory-use drafts separate for each festival. */
+/* v1.2.0 — Refresh scoped stock summaries without replacing newer edits. */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
   const money = value => `${Number(value || 0).toLocaleString('ko-KR')}원`;
   const count = value => Number(value || 0).toLocaleString('ko-KR');
   const node = (tag,text,cls) => {const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
-  window.FestivalWorkspaceTools = { init({rpc,getEvent,getItems,editable,isBusy,onChanged,onStockChanged,readable,status,today}) {
+  window.FestivalWorkspaceTools = { init({rpc,getEvent,getItems,editable,isBusy,onChanged,onStockChanged,readable,status,today,beginRead=()=>()=>true}) {
     let busy=false,inventoryOffset=0,inventoryRevision=0,dashboardRevision=0,pendingUsage=null,settingsEvent=null;
     let inventoryDraftEventId=null;
     const inventoryDrafts=new Map();
@@ -66,12 +66,12 @@
     }
     $('dashboardPeriod').addEventListener('change',()=>{document.querySelectorAll('.dashboard-date').forEach(e=>{e.hidden=$('dashboardPeriod').value!=='custom';});});
     $('dashboardFilter').addEventListener('submit',e=>{e.preventDefault();void reloadDashboard();});
-    async function reloadDashboard() {
-      const revision=++dashboardRevision,data=dates();
+    async function reloadDashboard({strict=false}={}) {
+      const revision=++dashboardRevision,data=dates(),isCurrent=beginRead();
       if(data.from&&data.to&&data.from>data.to){$('dashboardStatus').textContent='시작일이 종료일보다 늦습니다.';return;}
       $('dashboardStatus').textContent='매출을 집계하고 있습니다.';
       try {
-        const result=await rpc('dashboard',data);if(revision!==dashboardRevision)return;
+        const result=await rpc('dashboard',data);if(revision!==dashboardRevision||!isCurrent())return;
         if(result.amount_basis!=='stored_supply_v1')throw new Error('매출 집계 기준을 확인하지 못했습니다. 잠시 후 다시 조회해 주세요.');
         const s=result.summary||{};$('dashboardCards').replaceChildren();
         [['전체 매출',s.total_supply,'부가세 제외'],['재료비 매출',s.material_supply,'부가세 제외'],['체험비·추가 입금',Number(s.experience_supply||0)+Number(s.extra_supply||0),'부가세 제외'],['실제 수납액',s.received_amount,'부가세 포함']].forEach(([label,value,basis])=>{
@@ -82,11 +82,16 @@
         (result.items||[]).forEach(item=>{const row=node('tr');[item.event_name,money(item.material_supply),money(Number(item.experience_supply)+Number(item.extra_supply)),money(item.refund_supply),money(item.total_supply),`유료 ${count(item.sold_quantity)} · 무료 ${count(item.free_quantity)}`].forEach(text=>row.append(node('td',text)));$('dashboardRows').append(row);});
         if(!(result.items||[]).length){const row=node('tr'),cell=node('td','이 기간에 기록된 매출이나 무료 체험이 없습니다.');cell.colSpan=6;row.append(cell);$('dashboardRows').append(row);}
         $('dashboardStatus').textContent=Number(s.refund_amount)?`반환한 ${money(s.refund_amount)} 중 공급가액 ${money(s.refund_supply)}을 매출 합계에서 뺐습니다.`:'';
-      }catch(e){if(revision===dashboardRevision)showError('dashboardStatus',e);}
+      }catch(e){if(revision===dashboardRevision&&isCurrent()){if(strict)throw e;showError('dashboardStatus',e);}}
     }
-    async function reloadInventory(reset=false) {
+    function refreshItems() {
+      const old=$('eventUseItem').value;$('eventUseItem').replaceChildren();
+      getItems().filter(i=>i.is_active).forEach(i=>{const option=node('option',`${i.item_name} · 재고 ${count(i.stock_quantity)}${i.unit}`);option.value=i.id;$('eventUseItem').append(option);});
+      if([...$('eventUseItem').options].some(o=>o.value===old))$('eventUseItem').value=old;
+    }
+    async function reloadInventory(reset=false,{strict=false}={}) {
       if(reset)inventoryOffset=0;
-      const event=getEvent(),revision=++inventoryRevision;
+      const event=getEvent(),revision=++inventoryRevision,isCurrent=beginRead();
       const nextId=event?.id||null;
       if(nextId!==inventoryDraftEventId) {
         rememberInventoryDraft();
@@ -96,14 +101,12 @@
         pendingUsage=draft?.pendingUsage||null;
       }
       $('eventInventory').hidden=!event;if(!event)return;
-      const old=$('eventUseItem').value;$('eventUseItem').replaceChildren();
-      getItems().filter(i=>i.is_active).forEach(i=>{const option=node('option',`${i.item_name} · 재고 ${count(i.stock_quantity)}${i.unit}`);option.value=i.id;$('eventUseItem').append(option);});
-      if([...$('eventUseItem').options].some(o=>o.value===old))$('eventUseItem').value=old;
+      refreshItems();
       $('eventUseDate').value=$('eventUseDate').value||today();$('eventUseDate').max=today();
       $('eventUseForm').hidden=!editable||!event.is_active;
       if(event.no_cash_sales)$('eventInventory').open=true;
       try {
-        const result=await rpc('inventory',{event_id:event.id,offset:inventoryOffset});if(revision!==inventoryRevision||getEvent()?.id!==event.id)return;
+        const result=await rpc('inventory',{event_id:event.id,offset:inventoryOffset});if(revision!==inventoryRevision||getEvent()?.id!==event.id||!isCurrent())return;
         const s=result.summary||{};
         $('eventInventorySummary').textContent=`유료 체험 ${count(s.sold_quantity)}개 · 무료 체험·행사 사용 ${count(s.free_quantity)}개 · 불량·폐기 ${count(s.defect_quantity)}개`;
         $('eventInventoryRows').replaceChildren();
@@ -111,7 +114,7 @@
         (result.items||[]).forEach(m=>{const row=node('tr');[m.movement_date,m.item_name,labels[m.movement_type]||'재고 조정',`${count(Math.abs(m.quantity_delta))}${m.unit}`,m.note||''].forEach(text=>row.append(node('td',text)));$('eventInventoryRows').append(row);});
         if(!(result.items||[]).length){const row=node('tr'),cell=node('td','이 축제의 재고 사용 기록이 없습니다.');cell.colSpan=5;row.append(cell);$('eventInventoryRows').append(row);}
         $('eventInventoryPrevious').hidden=inventoryOffset===0;$('eventInventoryNext').hidden=inventoryOffset+100>=Number(result.total||0);
-      }catch(e){if(revision===inventoryRevision)status(readable(e),true);}
+      }catch(e){if(revision===inventoryRevision&&isCurrent()){if(strict)throw e;status(readable(e),true);}}
     }
     $('eventInventoryPrevious').addEventListener('click',()=>{inventoryOffset=Math.max(0,inventoryOffset-100);void reloadInventory();});
     $('eventInventoryNext').addEventListener('click',()=>{inventoryOffset+=100;void reloadInventory();});
@@ -122,6 +125,6 @@
       if(!confirm(`${event.event_name}\n${data.quantity}개를 사용한 기록을 저장할까요? 재고가 줄어들고 매출 전표는 만들지 않습니다.`))return;
       run(async()=>{await rpc('movement',{...data,request_key:pendingUsage.key});pendingUsage=null;$('eventUseQuantity').value='';$('eventUseNote').value='';await onStockChanged();status('이 축제의 사용 수량과 재고를 저장했습니다. 매출을 추가로 만들지 않았습니다.');},'operationStatus');
     });
-    return {isBusy:()=>busy,reloadDashboard,reloadInventory,selectEvent:()=>reloadInventory(true),close:()=>{if(dialog.open&&!busy)dialog.close();}};
+    return {isBusy:()=>busy,reloadDashboard,reloadInventory,refreshItems,selectEvent:()=>reloadInventory(true),close:()=>{if(dialog.open&&!busy)dialog.close();}};
   }};
 })();

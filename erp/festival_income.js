@@ -1,4 +1,4 @@
-/* v1.2.0 — Outstanding fees only in the summary; completed fees collapse. */
+/* v1.3.0 — Preserve drafts and discard stale scoped reads on resume. */
 (() => {
   'use strict';
   const money = (n) => `${Number(n || 0).toLocaleString('ko-KR')}원`;
@@ -58,8 +58,9 @@
     return input;
   }
   window.FestivalIncome = {
-    init({ root, rpc, getEvents, getSelectedEvent, editable }) {
+    init({ root, rpc, getEvents, getSelectedEvent, editable, beginRead = () => () => true }) {
       let busy = false, offset = 0, total = 0, items = [];
+      let loadRevision = 0;
       let registrationEventId = null;
       const createDrafts = new Map();
       const eventSelects = new Set();
@@ -204,11 +205,14 @@
         previous.hidden=offset===0;next.hidden=offset+30>=total;
         syncBusy();
       }
-      async function reload() {
+      async function reload({ preserveEdits = false } = {}) {
+        const revision = ++loadRevision, isCurrent = beginRead();
         const event=getSelectedEvent?.();
         if(getSelectedEvent&&!event){items=[];total=0;list.replaceChildren();summary.replaceChildren();return;}
         const data=await rpc('list',{filter:'all',offset,...(event?{event_id:event.id}:{})});
-        if(offset>0 && !(data.items||[]).length){offset=Math.max(0,offset-30);return reload();}
+        if (revision !== loadRevision || !isCurrent() || (getSelectedEvent && getSelectedEvent()?.id !== event?.id)
+          || (preserveEdits && list.querySelector('.income-editor'))) return;
+        if(offset>0 && !(data.items||[]).length){offset=Math.max(0,offset-30);return reload({preserveEdits});}
         items=data.items || [];total=Number(data.total||0);
         summary.replaceChildren();
         summary.hidden=Number(data.summary?.outstanding_amount||0)===0;
@@ -218,7 +222,7 @@
         createDetails.hidden=!editable || Boolean(event&&!event.is_active);
         render();setStatus('');
       }
-      const controller={reload:()=>run(()=>reload()),refreshEvents:()=>eventSelects.forEach(select=>fillEvents(select)),isBusy:()=>busy,
+      const controller={reload:()=>run(()=>reload()),refresh:()=>reload({preserveEdits:true}),refreshEvents:()=>eventSelects.forEach(select=>fillEvents(select)),isBusy:()=>busy,
         selectEvent:()=>run(async()=>{
           if(registrationEventId)createDrafts.set(registrationEventId,Array.from(createForm.form.querySelectorAll('input,select')).map(el=>({value:el.value,checked:el.checked})));
           offset=0;registrationEventId=null;createForm.form.reset();

@@ -1,13 +1,40 @@
 /*
-Version: v1.10.2
-Change: 2026-10-05 - Protect unsaved packet edits and offer tenant-scoped writing guidance.
+Version: v1.10.4
+Change: 2026-10-10 - Load PDF tools on demand and parallelize authorized initial reads.
 */
 import { supabase } from '../shared/supabase-client.js';
 import { MinutesService } from './MinutesService.js?v=1.0.53';
 import { MeetingPackageService } from './MeetingPackageService.js?v=1.5.1';
 import { buildAuditReportDraft, buildBoardTextAnnex, buildPreMeetingDocuments, getAssemblyChapterEditLock, usesChapterEditor } from './meeting_templates.js?v=1.7.5';
 import { SIGNATURE_PREVIEW_BUCKET } from './signature_preview.js?v=1.0.0';
-import { inspectPdfFile, renderPdfUrlToImages } from '../shared/pdf-page-renderer.js?v=1.0.1';
+
+let pdfRendererRequest = null;
+let pdfRendererAttempt = 0;
+let pdfIdentityRevision = 0;
+function getPdfRenderer() {
+  if (!pdfRendererRequest) {
+    // A browser caches failed module imports. Retry only this same-origin tool
+    // with a new attempt URL; successful imports remain shared in memory.
+    const request = pdfRendererAttempt
+      ? import(`../shared/pdf-page-renderer.js?v=1.0.1&retry=${pdfRendererAttempt}`)
+      : import('../shared/pdf-page-renderer.js?v=1.0.1');
+    pdfRendererRequest = request.catch(error => {
+      pdfRendererAttempt++;
+      pdfRendererRequest = null;
+      throw error;
+    });
+  }
+  return pdfRendererRequest;
+}
+
+function pdfActionStillCurrent(owner, anchor) {
+  return state.session?.user?.id === owner.userId && state.runtime?.coop_id === owner.coopId
+    && state.current?.id === owner.packageId && pdfIdentityRevision === owner.identity && !window.frameElement?.hidden
+    && (anchor === undefined || activePdfAttachmentAnchor() === anchor);
+}
+function pdfActionOwner() {
+  return { userId: state.session?.user?.id, coopId: state.runtime?.coop_id, packageId: state.current?.id, identity: pdfIdentityRevision };
+}
 
 const $ = (id) => document.getElementById(id);
 const TYPE_LABEL = { BOARD: '이사회', GENERAL_ASSEMBLY: '대의원총회' };
@@ -132,6 +159,10 @@ async function hydrateSignaturePreviews(root, expiresIn = 900) {
 
 async function injectPdfAttachmentPages(wrapper, attachments = state.pdfAttachments) {
   const rows = Array.isArray(attachments) ? attachments : [];
+  if (!rows.length) return;
+  const owner = pdfActionOwner();
+  const { renderPdfUrlToImages } = await getPdfRenderer();
+  if (!pdfActionStillCurrent(owner)) throw new Error('현재 회의 화면에서 다시 인쇄해 주세요.');
   const insertionPoints = new Map();
   for (const attachment of rows) {
     const chapterId = String(attachment.insert_after_chapter_id || '');
@@ -143,6 +174,7 @@ async function injectPdfAttachmentPages(wrapper, attachments = state.pdfAttachme
     const images = await renderPdfUrlToImages(signed.data.signedUrl, {
       onProgress: (page, total) => showToast(`「${attachment.title}」 ${page}/${total}쪽을 인쇄용으로 준비하고 있습니다.`)
     });
+    if (!pdfActionStillCurrent(owner)) throw new Error('현재 회의 화면에서 다시 인쇄해 주세요.');
     let insertionPoint = anchor;
     images.forEach((image, index) => {
       const section = document.createElement('section');
@@ -1779,7 +1811,11 @@ async function printActiveDocument() {
   if (!popup) return showToast('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해 주세요.');
   popup.opener = null;
   const title = escapeHtml(row.title || defaultDocumentTitle(state.activeDocument));
-  const printableHtml = await preparePrintableHtml(row.content_html);
+  const owner = pdfActionOwner();
+  let printableHtml;
+  try { printableHtml = await preparePrintableHtml(row.content_html); }
+  catch (error) { popup.close(); throw error; }
+  if (popup.closed || !pdfActionStillCurrent(owner)) { popup.close(); return; }
   popup.document.open();
   popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><style>${BOOK_PRINT_CSS}</style></head><body>${printableHtml}${printLoadScript()}</body></html>`);
   popup.document.close();
@@ -1793,7 +1829,11 @@ async function printCurrentChapter() {
   if (!popup) return showToast('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해 주세요.');
   popup.opener = null;
   const chapterAttachments = state.pdfAttachments.filter(row => row.insert_after_chapter_id === chapter.id);
-  const printableHtml = await preparePrintableHtml(`<section class="${escapeHtml(chapter.className || 'meeting-chapter')}" data-chapter-id="${escapeHtml(chapter.id)}">${chapter.html}</section>`, chapterAttachments);
+  const owner = pdfActionOwner();
+  let printableHtml;
+  try { printableHtml = await preparePrintableHtml(`<section class="${escapeHtml(chapter.className || 'meeting-chapter')}" data-chapter-id="${escapeHtml(chapter.id)}">${chapter.html}</section>`, chapterAttachments); }
+  catch (error) { popup.close(); throw error; }
+  if (popup.closed || !pdfActionStillCurrent(owner)) { popup.close(); return; }
   popup.document.open();
   popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(chapter.title)}</title><style>${BOOK_PRINT_CSS}</style></head><body>${printableHtml}${printLoadScript()}</body></html>`);
   popup.document.close();
@@ -2043,8 +2083,13 @@ async function addPdfAttachment(file) {
   if (!state.current || !anchor) throw new Error('PDF를 붙일 회의자료나 챕터를 먼저 선택해 주세요.');
   if (!file) return;
   if (file.size > 20 * 1024 * 1024) throw new Error('PDF 파일은 20MB 이하만 첨부할 수 있습니다.');
+  const owner = pdfActionOwner();
+  const { inspectPdfFile } = await getPdfRenderer();
+  if (!pdfActionStillCurrent(owner, anchor)) return;
   const inspected = await inspectPdfFile(file);
+  if (!pdfActionStillCurrent(owner, anchor)) return;
   if (state.documentDirty) await saveActiveDocument();
+  if (!pdfActionStillCurrent(owner, anchor)) return;
   const title = String(file.name || '첨부 자료').replace(/\.pdf$/i, '').trim() || '첨부 자료';
   const existing = activeChapterPdfAttachments();
   const { data, error } = await MeetingPackageService.uploadPdfAttachment(state.current.id, file, {
@@ -2054,6 +2099,7 @@ async function addPdfAttachment(file) {
     sort_order: existing.length ? Math.max(...existing.map(row => Number(row.sort_order || 0))) + 1 : 0
   });
   if (error) throw error;
+  if (!pdfActionStillCurrent(owner, anchor)) return;
   state.pdfAttachments.push(data);
   state.pdfAttachments.sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
   renderPdfAttachmentList();
@@ -2251,6 +2297,9 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || (session?.user?.id && state.session?.user?.id && session.user.id !== state.session.user.id)) pdfIdentityRevision++;
+  });
   state.session = await MinutesService.getSession();
   if (!state.session) {
     showToast('로그인이 필요합니다.');
@@ -2268,17 +2317,24 @@ async function init() {
     window.setTimeout(() => { location.href = '/erp/'; }, 1000);
     return;
   }
-  const [officials, companyResult, historyResult] = await Promise.all([
+  // Resolve the existing service scope once before its two independent list reads.
+  // This is not a replacement for the entry or workspace-resume permission gates.
+  const packageRuntime = await MeetingPackageService.getRuntime();
+  if (packageRuntime.coop_id !== state.runtime.coop_id) throw new Error('현재 조합을 다시 확인해 주세요.');
+  const [officials, companyResult, historyResult, packageResult] = await Promise.all([
     MinutesService.getOfficials(),
     MinutesService.getCompanyInfo(),
-    MeetingPackageService.listMeetingHistory()
+    MeetingPackageService.listMeetingHistory(),
+    MeetingPackageService.listPackages()
   ]);
   if (historyResult.error) throw historyResult.error;
+  if (packageResult.error) throw packageResult.error;
   state.officials = officials || [];
   state.company = companyResult.data || {};
   state.meetingHistory = historyResult.data || [];
-  await loadPackages();
-  window.ErpWorkspaceResume.register({modules:['minutes'],authorize:async runtime=>{
+  state.packages = packageResult.data || [];
+  renderPackages();
+  window.ErpWorkspaceResume.register({modules:['minutes'],busy:()=>state.loading||hasUnsavedPacketChanges(),authorize:async runtime=>{
     const perms=runtime.effective_permissions||[];
     return perms.some(key=>['minutes.manage','member.admin','site.admin'].includes(key))
       || await MinutesService.isAdmin(state.session.user.id,state.session.user.email);

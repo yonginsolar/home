@@ -1,4 +1,4 @@
-/* v2.8.1 — Grouped sales, inspection and settlement amount inputs. */
+/* v2.9.0 — Scoped tab reads and fresh, input-preserving workspace resume. */
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -44,11 +44,46 @@
   let selectedSales = [];
   let salesOffset = 0, salesTotal = 0, vouchersOffset = 0, vouchersTotal = 0;
   let scopeRevision = 0, eventBusy = false;
+  let inputRevision = 0, identityRevision = 0, taskUserId = '', tabsReady = false;
+  const loadedPanels = new Set(), pendingPanels = new Map();
   const unassigned = 'unassigned';
   const saleDrafts = new Map();
   const saleFields = ['saleItem','saleQuantity','saleUnitPrice','saleDiscount','voucherCount','voucherUnitValue','voucherOrganizer','saleBank','saleCash','receiptIssuedCount','receiptIssuedAmount','receiptNoneCount','receiptNoneAmount','overpaymentAmount','overpaymentName','saleNote'];
   const tabButtons = Array.from(document.querySelectorAll('.festival-tabs [role="tab"]'));
   const scopeData = (id = selectedEventId) => id === unassigned ? { unassigned: true } : { event_id: id };
+  const panelKind = { salesPanel:'sales', voucherPanel:'vouchers', receiptsPanel:'receipts' };
+  document.addEventListener('input', () => { inputRevision++; }, true);
+  document.addEventListener('change', () => { inputRevision++; }, true);
+  function beginRead() {
+    const scope = scopeRevision, identity = identityRevision, input = inputRevision;
+    return () => scope === scopeRevision && identity === identityRevision && input === inputRevision;
+  }
+  function hasInlineEditor() {
+    return Boolean(document.querySelector('.inline-action,.income-editor'));
+  }
+  async function ensurePanel(panelId, force = false) {
+    const kind = panelKind[panelId];
+    if (!selectedEventId || !kind) return;
+    const key = `${scopeRevision}:${kind}:${kind === 'sales' ? salesOffset : kind === 'vouchers' ? vouchersOffset : offset}`;
+    if (!force && loadedPanels.has(key)) return;
+    if (!pendingPanels.has(key)) {
+      const revision = scopeRevision;
+      const loader = kind === 'sales' ? loadSales : kind === 'vouchers' ? loadVouchers : loadReceipts;
+      const panel = $(panelId);
+      panel.setAttribute('aria-busy', 'true');
+      const request = loader(revision).then(applied => {
+        if (applied && revision === scopeRevision) loadedPanels.add(key);
+      }).finally(() => {
+        if (pendingPanels.get(key) === request) pendingPanels.delete(key);
+        if (revision === scopeRevision) panel.setAttribute('aria-busy', 'false');
+      });
+      pendingPanels.set(key, request);
+    }
+    await pendingPanels.get(key);
+  }
+  function activePanelId() {
+    return tabButtons.find(tab => tab.getAttribute('aria-selected') === 'true')?.dataset.panel;
+  }
 
   async function recordsRpc(action, data = {}) {
     const result = await client.rpc('festival_event_records', { p_action: action, p_data: data });
@@ -69,6 +104,7 @@
       $(button.dataset.panel).hidden = !active;
       if (active && focus) button.focus();
     });
+    if (tabsReady && !eventBusy) void ensurePanel(panelId).catch(error => setOperationStatus(readableError(error), true));
   }
   tabButtons.forEach((button, index) => {
     button.addEventListener('click', () => showTab(button.dataset.panel));
@@ -132,6 +168,8 @@
     const previousCanSell = Boolean(eventById(selectedEventId)?.is_active);
     selectedEventId = id;
     const revision = ++scopeRevision;
+    loadedPanels.clear();
+    eventBusy = Boolean(id); $('saleEvent').disabled = eventBusy;
     salesOffset = vouchersOffset = offset = 0;
     selectedSales = []; receipts = []; voucherContext = { items: [] };
     salesTotal = vouchersTotal = receiptTotal = 0;
@@ -150,13 +188,16 @@
     syncCashReceived(); syncSaleReceiptAllocation(); syncEventHeading();
     if (!previousCanSell && eventById(id)?.is_active) showTab('salePanel');
     renderSales(); renderVouchers(); renderReceipts();
-    if (!id) return;
+    if (!id) { $('eventWorkspace').setAttribute('aria-busy', 'false'); return; }
     eventBusy = true; $('saleEvent').disabled = true;
     $('eventWorkspace').setAttribute('aria-busy', 'true');
     $('eventSelectionStatus').textContent = '선택한 축제의 내역을 불러오고 있습니다.';
     try {
-      await Promise.all([loadSales(revision), loadVouchers(revision), loadReceipts(revision), incomeController?.selectEvent(),workspaceTools?.selectEvent()]);
+      const panels = eventById(id)?.no_cash_sales
+        ? ['salesPanel','voucherPanel','receiptsPanel'] : [activePanelId()];
+      await Promise.all([...panels.map(panel => ensurePanel(panel)), incomeController?.selectEvent(),workspaceTools?.selectEvent()]);
       if (revision === scopeRevision) syncEventHeading();
+      if (revision === scopeRevision) await ensurePanel(activePanelId());
     } catch (error) {
       if (revision === scopeRevision) $('eventSelectionStatus').textContent = readableError(error);
     } finally {
@@ -896,32 +937,46 @@
     renderSales();
   }
 
-  async function loadInventory() {
-    [inventory, extraPaymentContext, purchaseReceiptContext] = await Promise.all([
+  async function loadInventoryBase(preserveEdits = false) {
+    const identity = identityRevision;
+    const isCurrent = beginRead();
+    const [nextInventory, nextExtraPayments, nextPurchases] = await Promise.all([
       rpc('bootstrap'),
       extraPaymentRpc('list'),
       purchaseReceiptRpc('list')
     ]);
+    if (identity !== identityRevision || (preserveEdits && (!isCurrent() || hasInlineEditor()))) return;
+    inventory = nextInventory; extraPaymentContext = nextExtraPayments; purchaseReceiptContext = nextPurchases;
     const receivingIds = new Set((purchaseReceiptContext.items || []).filter((row) => row.received_quantity === 0).map((row) => row.id));
     inventory.movements = (inventory.movements || []).filter((row) => !receivingIds.has(row.id));
     renderInventory();
     renderPurchaseReceipts();
     renderMovements();
+    workspaceTools?.refreshItems();
+  }
+
+  async function loadInventory() {
+    loadedPanels.clear();
+    await loadInventoryBase();
     if (selectedEventId) await Promise.all([loadSales(), loadVouchers(),workspaceTools?.reloadInventory()]);
     await workspaceTools?.reloadDashboard();
   }
 
   async function loadSales(revision = scopeRevision) {
     if (!selectedEventId) return;
+    const isCurrent = beginRead();
     const result = await recordsRpc('sales', { ...scopeData(), offset: salesOffset });
-    if (revision !== scopeRevision) return;
+    if (revision !== scopeRevision || !isCurrent()) return false;
     selectedSales = result.items || []; salesTotal = Number(result.total || 0); renderSales();
+    return true;
   }
   async function loadVouchers(revision = scopeRevision) {
     if (!selectedEventId) return;
+    const isCurrent = beginRead();
     const result = await recordsRpc('vouchers', { ...scopeData(), offset: vouchersOffset });
-    if (revision !== scopeRevision) return;
+    if (revision !== scopeRevision || !isCurrent()) return false;
     voucherContext = result; vouchersTotal = Number(result.total || 0); renderVouchers();
+    return true;
   }
 
   function updateSaleSummary() {
@@ -1243,12 +1298,14 @@
 
   async function loadReceipts(revision = scopeRevision) {
     if (!selectedEventId) return;
+    const isCurrent = beginRead();
     const result = await recordsRpc('receipts', { ...scopeData(), offset });
-    if (revision !== scopeRevision) return;
+    if (revision !== scopeRevision || !isCurrent()) return false;
     receipts = result.items;
     receiptTotal = result.total;
     renderReceipts();
     if ($('adminStatus').textContent === '접수된 신청이 없습니다.') $('adminStatus').textContent = '';
+    return true;
   }
 
   async function reloadReceipts() {
@@ -1348,8 +1405,9 @@
     }catch(error){$('paymentAccountStatus').textContent=readableError(error);}
     finally{operationBusy=false;button.disabled=!editable;}
   });
-  client.auth.onAuthStateChange((event) => {
-    if (event === 'SIGNED_OUT') {
+  client.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || (session?.user?.id && taskUserId && session.user.id !== taskUserId)) {
+      identityRevision++; scopeRevision++; tabsReady = false; loadedPanels.clear();
       $('adminPanel').hidden = true;
       $('openEventDialog').disabled = true;
       if (eventDialog.open) eventDialog.close();
@@ -1371,13 +1429,19 @@
         $('loginLink').hidden = false;
         return;
       }
+      taskUserId = data.user.id;
+      const initialIdentity = identityRevision;
       const access = await rpc('access');
       void window.ErpWorkspace?.connect(client);
       editable = access.editable === true;
       $('coopName').textContent=access.coop_name||'';
       document.title='매출·재고·현금영수증 관리'+(access.coop_name?' | '+access.coop_name:'');
       paymentGuideBase=access.payment_url||'';
-      const accountResult=await client.rpc('festival_payment_settings_admin',{p_action:'get',p_data:{}});
+      const [accountResult] = await Promise.all([
+        client.rpc('festival_payment_settings_admin',{p_action:'get',p_data:{}}),
+        loadInventoryBase(), loadEventContext()
+      ]);
+      if (initialIdentity !== identityRevision) return;
       if(accountResult.error)throw new Error(accountResult.error.message);
       const bank=accountResult.data||{};
       $('paymentBank').value=bank.bank_name||'';$('paymentAccount').value=bank.account_number||'';$('paymentHolder').value=bank.account_holder||'';
@@ -1390,15 +1454,15 @@
       $('eventForm').querySelectorAll('input,button').forEach((element) => { element.disabled = !editable; });
       $('itemForm').querySelectorAll('input,button').forEach((element) => { element.disabled = !editable; });
       $('movementForm').querySelectorAll('input,select,button').forEach((element) => { element.disabled = !editable; });
-      await loadInventory();
-      await loadEventContext();
       workspaceTools=window.FestivalWorkspaceTools.init({rpc:operationsRpc,getEvent:()=>eventById(selectedEventId),getItems:()=>inventory.items||[],editable,
+        beginRead,
         isBusy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy(),
         onChanged:async id=>{await loadEventContext(id);await selectEvent(id,true);await workspaceTools.reloadDashboard();},
         onStockChanged:loadInventory,readable:readableError,status:setOperationStatus,today:kstToday});
       incomeController = window.FestivalIncome.init({
         root: $('festivalIncomeRoot'),
         editable,
+        beginRead,
         getEvents: () => eventContext.events || [],
         getSelectedEvent: () => eventById(selectedEventId),
         rpc: async (action, data) => {
@@ -1410,11 +1474,19 @@
         }
       });
       await incomeController.ready;
-      await selectEvent($('saleEvent').value);
-      await workspaceTools.reloadDashboard();
-      window.ErpWorkspaceResume.register({busy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy(),
+      tabsReady = true;
+      await Promise.all([selectEvent($('saleEvent').value), workspaceTools.reloadDashboard()]);
+      window.ErpWorkspaceResume.register({busy:()=>operationBusy||eventBusy||receiptBusy||incomeController?.isBusy()||workspaceTools?.isBusy()||hasInlineEditor(),
         authorize:async()=>{const access=await rpc('access');return access.allowed===true&&access.editable===editable;},
-        refresh:async()=>{await Promise.all([loadSales(),loadVouchers(),loadReceipts()]);await workspaceTools.reloadDashboard();}});
+        refresh:async()=>{
+          loadedPanels.clear();
+          await Promise.all([
+            loadInventoryBase(true), incomeController.refresh(), workspaceTools.reloadInventory(false,{strict:true}),
+            workspaceTools.reloadDashboard({strict:true}), ensurePanel(activePanelId(),true),
+            ...(eventById(selectedEventId)?.no_cash_sales ? ['salesPanel','voucherPanel','receiptsPanel'].map(panel=>ensurePanel(panel,true)) : [])
+          ]);
+          syncEventHeading();
+        }});
     } catch (error) {
       $('accessStatus').textContent = readableError(error);
     }
