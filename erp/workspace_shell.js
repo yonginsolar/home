@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.0.0 — same-origin isolated tasks, guarded navigation, no operational writes. */
+/* Persistent ERP workspace v1.0.1 — same-origin isolated tasks, guarded navigation, no operational writes. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -27,6 +27,9 @@
         && child.hasMeaningfulApprovalDraftContentForReplacement()) return true;
       for (const [node, original] of dirtyFields) {
         if (!node.isConnected || !node.getClientRects().length) continue;
+        // The composer already compares its current payload with the last successful save.
+        // Keep the generic guard for other open dialogs, not for a saved composer.
+        if (draftStatus === 'saved' && node.closest('#draftForm')) continue;
         if (fieldValue(node) !== original) return true;
       }
     } catch (_) { return false; }
