@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.99
+Version: v1.0.100
 Change: 2026-10-10 - Guard unsaved detail close and retain employee-specific contract navigation.
 -->
 <html>
@@ -8,7 +8,7 @@ Change: 2026-10-10 - Guard unsaved detail close and retain employee-specific con
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-11"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.99 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.100 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -930,6 +930,7 @@ function getRoleBadge(roleKey) {
 
 let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
 let companySettingsSaveInFlight = false;
+let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null;
 let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
@@ -2461,7 +2462,7 @@ function collectCalendarSettingsFromUi() {
     };
 } // End of collectCalendarSettingsFromUi
 
-async function loadCalendarIcsSettings() {
+async function loadCalendarIcsSettings({ throwOnError = false, isCurrent = () => true } = {}) {
     const fallbackSourceCatalog = normalizeHrCalendarSourceCatalog(companyInfo['calendar_ics_source_catalog_json']);
     calendarIcsSettings = {
         enabled: parseAdminEmployeeBoolean(companyInfo['calendar_ics_enabled'], false),
@@ -2470,6 +2471,7 @@ async function loadCalendarIcsSettings() {
     };
     try {
         const { data, error } = await _supabase.rpc('erp_get_calendar_ics_settings');
+        if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
         if (error) throw error;
         calendarIcsSettings = {
             enabled: data?.enabled === true,
@@ -2477,6 +2479,7 @@ async function loadCalendarIcsSettings() {
             sourceCatalog: normalizeHrCalendarSourceCatalog(data?.source_catalog)
         };
     } catch (error) {
+        if (throwOnError || !isCurrent()) throw error;
         console.warn('calendar ICS settings load failed:', error?.message || error);
     }
     syncCalendarSettingsUi();
@@ -2782,7 +2785,8 @@ window.onload = async function() {
     applyHrRuntimeProfileUi();
 
     await Promise.all([loadList(), loadCompanyInfo()]);
-    await loadSettings();
+    hrSettingsAuthorized = true;
+    await loadSettings({ loadAuxiliary: false });
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
@@ -4455,7 +4459,13 @@ async function runInvite() {
 // 1. 설정 모달 열기 (연도 초기화 로직 추가)
 function initAnnualSettings() {
     window.ERPAnnualSettings.init({
-        rpc: args => _supabase.rpc('erp_annual_settings', args),
+        rpc: async args => {
+            const owner = getHrSettingsOwner();
+            if (!isHrSettingsContextCurrent(owner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+            const result = await _supabase.rpc('erp_annual_settings', args);
+            if (!isHrSettingsContextCurrent(owner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+            return result;
+        },
         confirm: text => new Promise(resolve => { showConfirm(text, () => resolve(true)); const modal = document.getElementById('confirmModal'); if (modal) modal.addEventListener('hidden.bs.modal', () => resolve(false), { once: true }); }),
         close: () => settingsModal.hide()
     });
@@ -4468,20 +4478,56 @@ function initAnnualSettings() {
         });
     }
 }
-function openSettings() {
-    if (companySettingsSaveInFlight || window.ERPAnnualSettings.isBusy()) return;
+function getHrSettingsOwner() {
+    return hrSettingsAuthorized && myInfo?.coop_id
+        ? `${String(myInfo.id || myInfo.emp_id || '')}|${String(myInfo.coop_id)}` : '';
+}
+function isHrSettingsContextCurrent(owner) {
+    return !!owner && owner === getHrSettingsOwner() && !window.frameElement?.hidden;
+}
+function showHrSettingsModal() {
     initAnnualSettings();
     const tab = document.querySelector('#settingTab .nav-link.active');
     const annual = ['#setTax','#setAdvanced'].includes(tab?.getAttribute('href'));
     document.getElementById('settingTargetYearRow').hidden = !annual;
     document.getElementById('companySettingsFooter').hidden = annual;
     settingsModal.show();
-    loadSettings();
 }
-async function loadSettings({ throwOnError = false } = {}) {
+function openSettings() {
+    const owner = getHrSettingsOwner();
+    if (!isHrSettingsContextCurrent(owner) || companySettingsSaveInFlight) return;
+    if (hrSettingsOpenPromise) return hrSettingsOpenPromise;
+    if (window.ERPAnnualSettings.isBusy()) return;
+    if (hrSettingsReadyOwner === owner) { showHrSettingsModal(); return Promise.resolve(); }
+    const buttons = [...document.querySelectorAll('[onclick="openSettings()"]')];
+    const previous = buttons.map(button => ({button, disabled:button.disabled, text:button.textContent}));
+    previous.forEach(({button}) => { button.disabled = true; button.textContent = '불러오는 중…'; });
+    const pending = (async () => {
+        try {
+            await loadSettings({ throwOnError:true, isCurrent:() => isHrSettingsContextCurrent(owner) });
+            if (!isHrSettingsContextCurrent(owner)) return;
+            hrSettingsReadyOwner = owner;
+            // Do not interrupt another dialog opened while the settings were loading.
+            if (!document.querySelector('.modal.show, dialog[open]')) showHrSettingsModal();
+        } catch (error) {
+            if (isHrSettingsContextCurrent(owner)) showAlert('설정을 불러오지 못했습니다. 다시 열어 주세요.');
+        } finally {
+            previous.forEach(({button,disabled,text}) => { button.disabled = disabled; button.textContent = text; });
+            if (hrSettingsOpenPromise === pending) hrSettingsOpenPromise = null;
+        }
+    })();
+    hrSettingsOpenPromise = pending;
+    return pending;
+}
+async function loadSettings({ throwOnError = false, loadAuxiliary = true, isCurrent = () => true } = {}) {
     initAnnualSettings();
-    try { await window.ERPAnnualSettings.load(window.ERPAnnualSettings.currentYear()); }
-    catch (error) { if (throwOnError) throw error; showAlert(window.ERPAnnualSettings.errorMessage(error)); }
+    if (loadAuxiliary) {
+        try { await window.ERPAnnualSettings.load(window.ERPAnnualSettings.currentYear()); }
+        catch (error) { if (throwOnError) throw error; showAlert(window.ERPAnnualSettings.errorMessage(error)); }
+        if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+        await loadCalendarIcsSettings({ throwOnError, isCurrent });
+    }
+    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     // 회사 정보는 연도와 무관하게 공통 관리 (원본 그대로 로드)
     // *회사 정보는 보통 매년 바뀌지 않으므로 ref_company_info 하나만 씁니다.
     document.getElementById("set_orgName").value = resolveAdminEmployeeCompanyName(companyInfo);
@@ -4491,8 +4537,8 @@ async function loadSettings({ throwOnError = false } = {}) {
     document.getElementById("set_workLunchStartTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_START_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.start);
     document.getElementById("set_workLunchEndTime").value = normalizeHrTimeOfDay(companyInfo[HR_WORK_LUNCH_END_TIME_KEY], HR_DEFAULT_WORK_LUNCH_TIME.end);
     await refreshMemberCapitalDisplays();
+    if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     syncCompanySealSettingsUi();
-    await loadCalendarIcsSettings();
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
@@ -4501,6 +4547,7 @@ async function loadSettings({ throwOnError = false } = {}) {
 // 회사 정보·캘린더·알림·결재 설정 저장 (연도별 기준은 별도 저장)
 async function saveSettings() {
     if (companySettingsSaveInFlight) return;
+    if (!hrSettingsAuthorized || hrSettingsReadyOwner !== getHrSettingsOwner()) return showAlert('설정을 다시 열어 확인해 주세요.');
     if (window.ERPAnnualSettings?.isBusy()) return;
     if (window.ERPAnnualSettings?.isDirty()) return showAlert('공통 기준 또는 조합별 설정의 변경 내용을 먼저 저장해 주세요.');
     companySettingsSaveInFlight = true;
@@ -4640,6 +4687,7 @@ async function saveSettings() {
             if (typeof checked === 'boolean') current.checked = checked;
         });
         if (savesConfirmed) {
+            hrSettingsReadyOwner = '';
             showAlert('설정은 저장되었습니다. 최신 화면을 불러오지 못했습니다. 입력 내용은 유지됩니다. 창을 닫고 다시 열어 확인해 주세요.');
         } else {
             showAlert((confirmedSteps > 0 ? '일부 설정은 저장되었지만 나머지는 완료하지 못했습니다. ' : '설정을 저장하지 못했습니다. ')

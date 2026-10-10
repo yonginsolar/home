@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.2.89 | Change: 2026-10-10 - Defer print templates and meeting notice tools. -->
+<!-- Version: v1.2.90 | Change: 2026-10-11 - Load document lists only when opened. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.2.89 | approval.html');</script>
+  <script>console.log('[Version] v1.2.90 | approval.html');</script>
   <script src="../shared/official_notice.js?v=1.0.0"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1591,6 +1591,7 @@ const approvalAttachmentLocalIds = new WeakMap();
 let myAuthUserId = '';
 let activeApprovalTab = 'draft';
 let approvalDataLoadedAt = { todo: 0, history: 0 };
+const approvalListRequests = new Map();
 let approvalBootstrapSummary = null;
 let approvalBootstrapReady = false;
 let approvalRichEditorLoaderPromise = null;
@@ -9661,7 +9662,7 @@ window.onload = async function() {
         const summary = await _supabase.rpc('erp_get_approval_bootstrap_summary');
         if (summary.error) throw new Error('ERP_TASK_REFRESH_FAILED');
         applyApprovalBootstrapSummary(summary.data);
-        await loadApprovalTabData(activeApprovalTab, {force:true,render:true});
+        await loadApprovalTabData(activeApprovalTab, {force:true,render:true,allowHidden:true});
     }};
 };
 
@@ -9898,6 +9899,7 @@ function getApprovalInitialTab(preferredTab = '') {
 } // End of getApprovalInitialTab
 
 async function ensureTodoListLoaded(options = {}) {
+    if (!getApprovalListContext(options)() || !canProcessApprovals()) return null;
     const shouldRender = options?.render !== false;
     const force = options?.force === true;
     if (!force && hasFreshApprovalData('todo')) {
@@ -9908,13 +9910,11 @@ async function ensureTodoListLoaded(options = {}) {
         }
         return todoCache;
     }
-    const list = await loadTodoList({ render: shouldRender });
-    markApprovalDataLoaded('todo');
-    writeApprovalSummaryCache({ todo_count: Array.isArray(list) ? list.length : 0 });
-    return list;
+    return shareApprovalListRequest('todo', () => loadTodoList(options));
 } // End of ensureTodoListLoaded
 
 async function ensureHistoryListLoaded(options = {}) {
+    if (!getApprovalListContext(options)()) return null;
     const shouldRender = options?.render !== false;
     const force = options?.force === true;
     if (!force && hasFreshApprovalData('history')) {
@@ -9927,14 +9927,28 @@ async function ensureHistoryListLoaded(options = {}) {
             historyCache
         };
     }
-    const result = await loadHistoryList({ render: shouldRender });
-    markApprovalDataLoaded('history');
-    writeApprovalSummaryCache({
-        pending_count: Array.isArray(pendingSubmissionCache) ? pendingSubmissionCache.length : 0,
-        history_count: Array.isArray(historyCache) ? historyCache.length : 0
-    });
-    return result;
+    return shareApprovalListRequest('history', () => loadHistoryList(options));
 } // End of ensureHistoryListLoaded
+
+function getApprovalListContext(options = {}) {
+    const owner = myInfo, coopId = String(myInfo?.coop_id || '').trim();
+    return () => approvalBootstrapReady && !!coopId && owner === myInfo
+        && coopId === String(myInfo?.coop_id || '').trim()
+        && (options.allowHidden === true || !window.frameElement?.hidden);
+}
+
+function shareApprovalListRequest(kind, read) {
+    if (!approvalBootstrapReady || !myInfo?.coop_id) return Promise.resolve(null);
+    const coopId = String(myInfo.coop_id).trim();
+    const current = approvalListRequests.get(kind);
+    if (current?.owner === myInfo && current.coopId === coopId) return current.promise;
+    const request = {owner:myInfo, coopId, promise:null};
+    request.promise = Promise.resolve().then(read).finally(() => {
+        if (approvalListRequests.get(kind) === request) approvalListRequests.delete(kind);
+    });
+    approvalListRequests.set(kind, request);
+    return request.promise;
+}
 
 async function loadApprovalTabData(tab, options = {}) {
     if (tab === 'todo') {
@@ -9947,18 +9961,15 @@ async function loadApprovalTabData(tab, options = {}) {
 } // End of loadApprovalTabData
 
 function scheduleApprovalBackgroundRefresh(initialTab) {
+    const isCurrent = getApprovalListContext();
     window.requestAnimationFrame(() => {
         window.setTimeout(async () => {
             try {
+                if (!isCurrent()) return;
                 if ((delegationIncoming.length === 0 || delegationOutgoing === null) && !delegationRpcUnavailable) {
                     await loadDelegationContext({ refreshTodo: false });
                 }
-                if (initialTab !== 'pending' && initialTab !== 'history') {
-                    await ensureHistoryListLoaded({ render: false, force: true });
-                }
-                if (initialTab !== 'todo') {
-                    await ensureTodoListLoaded({ render: false, force: true });
-                }
+                // Delegation banner belongs to this screen; unopened document lists do not.
             } catch (error) {
                 CoopSafeLog.warn("approval background refresh failed", error);
             }
@@ -14100,12 +14111,15 @@ async function applyApprovalAttendanceSettlement(doc, newStatus) {
 }
 
 async function loadTodoList(options = {}) {
+    const isCurrent = getApprovalListContext(options);
+    if (!isCurrent()) return null;
     const el = document.getElementById("todoList");
     const shouldRender = options?.render !== false;
     if (el && shouldRender) el.innerHTML = 'loading...';
     if (!canPerform('approval.process') && delegatedApproverEmpIds.length === 0) {
         await loadDelegationContext({ refreshTodo: false });
     }
+    if (!isCurrent()) return null;
     const approverIds = Array.from(new Set(
         [String(myInfo?.emp_id || ''), ...delegatedApproverEmpIds]
             .map((v) => String(v || '').trim())
@@ -14131,6 +14145,12 @@ async function loadTodoList(options = {}) {
             .eq('status', '실물결재대기')
             .order('created_at', {ascending: false})
     ]);
+    if (!isCurrent()) return null;
+    if (approvalRes.error || physicalRes.error) {
+        approvalDataLoadedAt.todo = 0;
+        if (el && shouldRender) el.textContent = '불러오지 못했습니다. 결재 대기함을 다시 눌러 주세요.';
+        return null;
+    }
     const todoMap = new Map();
     (Array.isArray(approvalRes.data) ? approvalRes.data : []).forEach((doc) => {
         todoMap.set(String(doc.id), decorateTodoDelegation(doc));
@@ -14369,6 +14389,8 @@ async function runHistorySearch(keyword, options = {}) {
 }
 
 async function loadHistoryList(options = {}) {
+    const isCurrent = getApprovalListContext(options);
+    if (!isCurrent()) return null;
     const shouldRender = options?.render !== false;
     if (shouldRender) setHistoryListLoading('loading...');
     const keyword = getHistorySearchKeyword();
@@ -14378,6 +14400,7 @@ async function loadHistoryList(options = {}) {
             fetchPendingSubmissionDocs(),
             fetchHistoryArchiveDocs({ recentSinceIso })
         ]);
+        if (!isCurrent()) return null;
         pendingSubmissionCache = pendingDocs;
         historyCache = recentHistoryDocs;
         markApprovalDataLoaded('history');
@@ -14386,6 +14409,8 @@ async function loadHistoryList(options = {}) {
             history_count: recentHistoryDocs.length
         });
     } catch (error) {
+        if (!isCurrent()) return null;
+        approvalDataLoadedAt.history = 0;
         if (shouldRender) setHistoryListLoading('불러오기 실패');
         showAlert("문서 보관함 조회 실패: " + (error?.message || error));
         return { pendingSubmissionCache, historyCache };
