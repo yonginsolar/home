@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.73 | Change: 2026-10-10 - Load calendar tools only on demand. -->
+<!-- Version: v1.0.74 | Change: 2026-10-11 - Load only the data needed by the open tab. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.0.73 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.74 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -218,21 +218,22 @@ body{padding:18px 14px 28px}
 <div>
 <div class="salary-total-label">현재까지 받은 총 급여 보기</div>
 <div class="small text-muted" id="salaryTotalMeta">급여명세서 합계를 불러오고 있습니다.</div>
+<button type="button" class="btn btn-sm btn-outline-secondary hidden mt-2" id="salaryTotalRetry" onclick="ensureMypageSection('salary')">다시 불러오기</button>
 </div>
-<button type="button" class="salary-total-toggle" id="salaryTotalToggle" aria-controls="salaryTotalGross salaryTotalDed salaryTotalNet" aria-pressed="false" onclick="toggleMypageSalaryTotalReveal()">보기</button>
+<button type="button" class="salary-total-toggle" id="salaryTotalToggle" aria-controls="salaryTotalGross salaryTotalDed salaryTotalNet" aria-pressed="false" onclick="toggleMypageSalaryTotalReveal()" disabled>보기</button>
 </div>
 <div class="salary-total-metrics" aria-label="누적 급여 합계">
 <div class="salary-total-metric salary-total-metric--gross">
 <span class="salary-total-metric-label">지급총액 (공제 전)</span>
-<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalGross" tabindex="0">0</span><span class="salary-total-unit">원</span></div>
+<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalGross" tabindex="0">—</span><span class="salary-total-unit">원</span></div>
 </div>
 <div class="salary-total-metric salary-total-metric--ded">
 <span class="salary-total-metric-label">공제총액</span>
-<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalDed" tabindex="0">0</span><span class="salary-total-unit">원</span></div>
+<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalDed" tabindex="0">—</span><span class="salary-total-unit">원</span></div>
 </div>
 <div class="salary-total-metric salary-total-metric--net">
 <span class="salary-total-metric-label">실수령액 (공제 후)</span>
-<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalNet" tabindex="0">0</span><span class="salary-total-unit">원</span></div>
+<div class="salary-total-metric-value"><span class="salary-blur salary-total-value" id="salaryTotalNet" tabindex="0">—</span><span class="salary-total-unit">원</span></div>
 </div>
 </div>
 </div>
@@ -372,6 +373,35 @@ let mypageLeaveTypeCatalog=null;
 let mypageLeaveSnapshotSupported=false;
 let mypageBusinessTripSnapshotSupported=false;
 let mypageCalendarIcsSettings={enabled:false,feedToken:'',sourceCatalog:null};
+let mypageDataAuthorized=false;
+let mypageRefreshing=false;
+const mypageSectionLoads=new Map();
+function getMypageDataOwner(){return `${String(myInfo?.coop_id||'')}|${String(myInfo?.emp_id||'')}`;}
+function isMypageDataVisible(){return !document.getElementById('mypagePageShell')?.classList.contains('hidden')&&(!window.frameElement?.hidden||mypageRefreshing);}
+function ensureMypageSection(key){
+if(!mypageDataAuthorized||!isMypageDataVisible()) return Promise.resolve(false);
+const loaders={salary:loadMypageSalaryTotal,notices:loadNotices,calendarSettings:loadMypageCalendarIcsSettings,telegram:loadMypageTelegramLinkStatus,overtime:loadMypageOvertimeSummary};
+const loader=loaders[key];
+if(!loader) return Promise.resolve(false);
+const owner=getMypageDataOwner();
+const previous=mypageSectionLoads.get(key);
+if(previous?.owner===owner){if(previous.pending)return previous.pending;if(previous.loaded)return Promise.resolve(true);}
+const state={owner,loaded:false,pending:null};
+const isCurrent=()=>mypageDataAuthorized&&owner===getMypageDataOwner()&&mypageSectionLoads.get(key)===state&&isMypageDataVisible();
+mypageSectionLoads.set(key,state);
+state.pending=Promise.resolve().then(()=>isCurrent()?loader(isCurrent):false).then(result=>{
+state.loaded=result!==false&&isCurrent();
+return state.loaded;
+}).catch(()=>false).finally(()=>{state.pending=null;});
+return state.pending;
+}
+function loadMypageVisibleSections(){
+const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
+if(pane==='tabSalary')return ensureMypageSection('salary');
+if(pane==='tabNotice')return ensureMypageSection('notices');
+if(pane==='tabInfo')return Promise.all([ensureMypageSection('telegram'),ensureMypageSection('overtime')]);
+return Promise.resolve();
+}
 let lastAlertFocusTarget=null;
 const MYPAGE_LEAVE_TYPE_CONFIG_KEY='approval_leave_type_catalog_json';
 const MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT='id,created_at,doc_type,title,content,amount,status,drafter_id,leave_snapshot';
@@ -479,8 +509,10 @@ const buttonEl=document.getElementById('btnOpenMypageCalendarSettings');
 if(!buttonEl) return;
 buttonEl.classList.toggle('hidden',!canManageMypageCalendarSettings());
 }
-function openMypageCalendarSubscriptionModal(){
+async function openMypageCalendarSubscriptionModal(){
 if(!canManageMypageCalendarSettings()) return;
+if(!await ensureMypageSection('calendarSettings')) return showAlert('구독 설정을 불러오지 못했습니다. 다시 열어 주세요.');
+if(!canManageMypageCalendarSettings()||!isMypageDataVisible())return;
 ensureMypageCalendarSettingsFields();
 syncMypageCalendarSettingsUi();
 if(!calendarSubscriptionModal){
@@ -544,19 +576,20 @@ enabled:!!document.getElementById('mypage_calendar_ics_enabled')?.checked,
 sourceCatalog
 };
 }
-async function loadMypageCalendarIcsSettings(){
+async function loadMypageCalendarIcsSettings(isCurrent=()=>true){
 syncMypageCalendarSettingsCardVisibility();
-if(!canManageMypageCalendarSettings()) return;
-const fallbackCatalog=normalizeMypageCalendarSourceCatalog(companyInfo[MYPAGE_CALENDAR_SOURCE_CONFIG_KEY]);
-mypageCalendarIcsSettings={enabled:String(companyInfo['calendar_ics_enabled']||'').trim().toLowerCase()==='true',feedToken:'',sourceCatalog:fallbackCatalog};
+if(!canManageMypageCalendarSettings()) return false;
 try{
 const {data,error}=await _supabase.rpc('erp_get_calendar_ics_settings');
 if(error) throw error;
+if(!isCurrent())return false;
 mypageCalendarIcsSettings={enabled:data?.enabled===true,feedToken:String(data?.feed_token||'').trim(),sourceCatalog:normalizeMypageCalendarSourceCatalog(data?.source_catalog)};
 }catch(error){
 CoopSafeLog.warn("mypage calendar ICS settings load failed:", error?.message||error);
+return false;
 }
 syncMypageCalendarSettingsUi();
+return true;
 }
 async function copyMypageCalendarIcsFeedUrl(){
 const feedUrl=getMypageCalendarIcsFeedUrl(mypageCalendarIcsSettings.feedToken);
@@ -900,7 +933,7 @@ if(!tabInfo||document.getElementById('mypageOvertimeSummarySection')) return;
 const section=document.createElement('div');
 section.id='mypageOvertimeSummarySection';
 section.className='mt-4 pt-3 border-top';
-section.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-3"><h6 class="fw-bold m-0">⏱️ 이번 달 시간외 근로</h6><span class="small text-muted" id="mypageOvertimeSummaryMonth">${formatMypageKstMonth()}</span></div><div class="overtime-summary-card"><div class="row g-2"><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">승인 시간</div><div class="value" id="mypageOvertimeHours">0시간</div></div></div><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">수당 지급 기록</div><div class="value text-primary" id="mypageOvertimeAllowance">0시간</div></div></div><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">보상휴가 적립 기록</div><div class="value text-success" id="mypageOvertimeCompLeave">0시간</div></div></div></div><div class="small text-muted mt-2" id="mypageOvertimeSummaryHelp">승인 완료된 시간외 근로 문서를 기준으로 요약합니다.</div></div>`;
+section.innerHTML=`<div class="d-flex justify-content-between align-items-center mb-3"><h6 class="fw-bold m-0">⏱️ 이번 달 시간외 근로</h6><span class="small text-muted" id="mypageOvertimeSummaryMonth">${formatMypageKstMonth()}</span></div><div class="overtime-summary-card"><div class="row g-2"><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">승인 시간</div><div class="value" id="mypageOvertimeHours">—</div></div></div><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">수당 지급 기록</div><div class="value text-primary" id="mypageOvertimeAllowance">—</div></div></div><div class="col-md-4"><div class="overtime-summary-metric"><div class="label">보상휴가 적립 기록</div><div class="value text-success" id="mypageOvertimeCompLeave">—</div></div></div></div><div class="small text-muted mt-2" id="mypageOvertimeSummaryHelp">불러오는 중...</div></div>`;
 const emergencySection=tabInfo.querySelector('.mt-5.pt-3.border-top');
 if(emergencySection&&emergencySection.parentNode){
 emergencySection.parentNode.insertBefore(section, emergencySection);
@@ -977,15 +1010,20 @@ testBtn.classList.add('hidden');
 disconnectBtn.classList.add('hidden');
 } // End of renderMypageTelegramLinkStatus
 
-async function loadMypageTelegramLinkStatus(){
+async function loadMypageTelegramLinkStatus(isCurrent=()=>true){
 ensureTelegramConnectUi();
 try{
 const {data,error}=await _supabase.rpc('erp_get_telegram_link_status');
 if(error) throw error;
+if(!isCurrent())return false;
 renderMypageTelegramLinkStatus(data||{});
+return true;
 }catch(error){
-renderMypageTelegramLinkStatus({enabled:false,linked:false});
+if(!isCurrent())return false;
+document.getElementById('telegramConnectStatusBadge').textContent='확인 실패';
+document.getElementById('telegramConnectHelpText').innerHTML='연결 상태를 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ensureMypageSection(\'telegram\')">다시 불러오기</button>';
 CoopSafeLog.warn("telegram link status load failed:", error?.message||error);
+return false;
 }
 } // End of loadMypageTelegramLinkStatus
 
@@ -1268,26 +1306,38 @@ const mypageRuntimeGate = await window.ErpRuntimeGuard.enforce(_supabase, {
     redirectUrl: 'index.html'
 });
 if (!mypageRuntimeGate.ok) return;
+mypageDataAuthorized=true;
 mypageRuntimeProfile=String(mypageRuntimeGate.runtime?.runtime_profile||'legacy_full');
 applyMypageRuntimeProfileUi();
 document.getElementById("salaryMonth").value=formatMypageKstMonth();
 document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',function(e){renderCalendar()});
 document.getElementById('tab-ai-btn').addEventListener('shown.bs.tab',function(){window.ErpAiConnections.mount(_supabase,document.getElementById('aiConnectionsRoot'));});
 document.getElementById('tab-insurance-btn').addEventListener('shown.bs.tab',function(){void window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));});
-await loadCompanyInfo();
-await loadMypageCalendarIcsSettings();
-await Promise.all([loadProfile(),loadEmergencyList(),loadNotices(),calculateLeave(),loadMypageTelegramLinkStatus(),loadMypageOvertimeSummary(),loadMypageSalaryTotal()]);
+document.getElementById('myTab').addEventListener('shown.bs.tab',()=>{void loadMypageVisibleSections();});
+const companyReady=loadCompanyInfo();
+await Promise.all([loadProfile(),loadEmergencyList(),companyReady.then(()=>calculateLeave())]);
 applyMypageRuntimeProfileUi();
+setMypageBootStateReady();
+void loadMypageVisibleSections();
 window.ErpWorkspaceResume.register({modules:['mypage'],refresh:async()=>{
+// The host has just rechecked real Auth/runtime and keeps this frame hidden until refresh completes.
+mypageRefreshing=true;
+try{
+mypageSectionLoads.clear();
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
 if(pane==='tabInsuranceStatus')await window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));
-else await calculateLeave();
+else{
+await calculateLeave();
+if(pane==='tabCalendar')await renderCalendar();
+else await loadMypageVisibleSections();
+}
+}finally{mypageRefreshing=false;}
 }});
 }catch(error){
 CoopSafeLog.error("[mypage] boot failed:", error);
 showAlert(`마이페이지 초기화 중 오류가 발생했습니다.\n${error?.message || '잠시 후 다시 시도해 주세요.'}`);
 }finally{
-setMypageBootStateReady();
+if(mypageDataAuthorized)setMypageBootStateReady();
 }
 };
 function showAlert(m){
@@ -1370,7 +1420,7 @@ async function loadProfile() {
     btn.innerText = "계약서 관리";
     btn.onclick = () => window.viewContract();
 }
-async function loadMypageOvertimeSummary(){
+async function loadMypageOvertimeSummary(isCurrent=()=>true){
 try{
 ensureMypageOvertimeSummarySection();
 const currentMonth=formatMypageKstMonth();
@@ -1379,6 +1429,7 @@ let query=_supabase.from('ref_approval').select('id, doc_type, created_at, statu
 if(coopId) query=query.eq('coop_id', coopId);
 const { data, error } = await query;
 if(error) throw error;
+if(!isCurrent())return false;
 const summary=(data||[]).reduce((acc, doc) => {
 const snapshot = typeof doc?.attendance_snapshot === 'string' ? (() => { try { return JSON.parse(doc.attendance_snapshot); } catch (_) { return null; } })() : doc?.attendance_snapshot;
 if(!snapshot || typeof snapshot !== 'object') return acc;
@@ -1391,9 +1442,12 @@ else acc.allowance = Math.round((acc.allowance + Math.max(0, Number(snapshot.tot
 return acc;
 },{ count:0, hours:0, allowance:0, compLeaveDays:0 });
 renderMypageOvertimeSummary(summary);
+return true;
 }catch(error){
+if(!isCurrent())return false;
 CoopSafeLog.warn("loadMypageOvertimeSummary failed:", error?.message || error);
-renderMypageOvertimeSummary({ count:0, hours:0, allowance:0, compLeaveDays:0 });
+document.getElementById('mypageOvertimeSummaryHelp').innerHTML='시간외 근로 요약을 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ensureMypageSection(\'overtime\')">다시 불러오기</button>';
+return false;
 }
 }
 function toggleEditMode(e){const f=document.querySelectorAll('.readonly-field');f.forEach(x=>{if(e){x.classList.remove('readonly-field');x.classList.add('editable-field');x.readOnly=false}else{x.classList.add('readonly-field');x.classList.remove('editable-field');x.readOnly=true}});document.getElementById("btnEditInfo").classList.toggle('hidden',e);document.getElementById("btnCancelInfo").classList.toggle('hidden',!e);document.getElementById("btnSaveInfo").classList.toggle('hidden',!e);document.getElementById("btnAddrSearch").classList.toggle('hidden',!e);document.getElementById("btnAddEm").classList.toggle('hidden',!e);if(!e){loadProfile();loadEmergencyList()}}
@@ -1907,8 +1961,7 @@ let mypageCalendarInstance=null, mypageCalendarSequence=0;
 async function renderCalendar(){
 const request=++mypageCalendarSequence, owner=myInfo;
 const isCurrent=()=>request===mypageCalendarSequence&&owner===myInfo
-&&!document.getElementById('mypagePageShell')?.classList.contains('hidden')
-&&document.getElementById('tabCalendar')?.classList.contains('active')&&!window.frameElement?.hidden;
+&&isMypageDataVisible()&&document.getElementById('tabCalendar')?.classList.contains('active');
 try{
 await window.ErpWorkflowAssets.load('calendar');
 if(!isCurrent())return;
@@ -2073,33 +2126,38 @@ toggleBtn.textContent=nextState?'가리기':'보기';
 toggleBtn.setAttribute('aria-pressed',nextState?'true':'false');
 }
 } // End of toggleMypageSalaryTotalReveal
-async function buildMypageAdjustedSalaryRows(rows){
+async function buildMypageAdjustedSalaryRows(rows,isCurrent=()=>true){
 if(!Array.isArray(rows)||rows.length===0) return [];
 if(!window.PayrollDurunuriModule) return rows;
 const months=Array.from(new Set(rows.map(function(row){return String(row?.year_month||'').trim()}).filter(Boolean)));
 const supportMapByMonth={};
-for(const ym of months){
+let nextMonth=0,loadError=null;
+await Promise.all(Array.from({length:Math.min(4,months.length)},async()=>{
+while(nextMonth<months.length&&!loadError&&isCurrent()){
+const ym=months[nextMonth++];
 try{
 supportMapByMonth[ym]=await window.PayrollDurunuriModule.getSupportMap(_supabase,ym);
-}catch(error){
-CoopSafeLog.warn("Durunuri support load failed:", error?.message||error);
-supportMapByMonth[ym]={};
+}catch(error){loadError=error;}
 }
-}
+}));
+if(loadError)throw loadError;
+if(!isCurrent())return [];
 return rows.map(function(row){
 const ym=String(row?.year_month||'').trim();
 return window.PayrollDurunuriModule.adjustSalaryRow({...row},supportMapByMonth[ym]||{});
 });
 } // End of buildMypageAdjustedSalaryRows
-async function loadMypageSalaryTotal(){
+async function loadMypageSalaryTotal(isCurrent=()=>true){
 const grossEl=document.getElementById('salaryTotalGross');
 const dedEl=document.getElementById('salaryTotalDed');
 const netEl=document.getElementById('salaryTotalNet');
 const metaEl=document.getElementById('salaryTotalMeta');
 const toggleBtn=document.getElementById('salaryTotalToggle');
+const retryBtn=document.getElementById('salaryTotalRetry');
 const valueEls=[grossEl,dedEl,netEl].filter(Boolean);
 if(valueEls.length!==3||!metaEl) return;
-valueEls.forEach(function(valueEl){valueEl.textContent='0';valueEl.classList.remove('is-revealed')});
+valueEls.forEach(function(valueEl){valueEl.textContent='—';valueEl.classList.remove('is-revealed')});
+retryBtn?.classList.add('hidden');
 metaEl.textContent='급여명세서 합계를 불러오고 있습니다.';
 if(toggleBtn){
 toggleBtn.textContent='보기';
@@ -2109,12 +2167,15 @@ toggleBtn.disabled=true;
 try{
 const {data,error}=await scopeMypageEmployee(_supabase.from('hr_salary').select(MYPAGE_SALARY_TOTAL_SELECT_COLUMNS)).eq('emp_id',myInfo.emp_id).order('year_month',{ascending:true});
 if(error) throw error;
+if(!isCurrent())return false;
 const rows=Array.isArray(data)?data:[];
 if(rows.length===0){
 metaEl.textContent='아직 저장된 급여명세서가 없습니다.';
-return;
+valueEls.forEach(valueEl=>{valueEl.textContent='0';});
+return true;
 }
-const adjustedRows=await buildMypageAdjustedSalaryRows(rows);
+const adjustedRows=await buildMypageAdjustedSalaryRows(rows,isCurrent);
+if(!isCurrent())return false;
 const totals=adjustedRows.reduce(function(acc,row){
 acc.gross+=Math.round(parseMypageAmount(row?.pay_total));
 acc.ded+=Math.round(parseMypageAmount(row?.ded_total));
@@ -2130,9 +2191,13 @@ metaEl.textContent=(firstYm&&lastYm)
 ?`${firstYm} ~ ${lastYm} 급여명세서 ${rows.length}건 합계`
 :`급여명세서 ${rows.length}건 합계`;
 if(toggleBtn) toggleBtn.disabled=false;
+return true;
 }catch(error){
+if(!isCurrent())return false;
 CoopSafeLog.warn("loadMypageSalaryTotal failed:", error?.message||error);
 metaEl.textContent='총 급여 합계를 불러오지 못했습니다.';
+retryBtn?.classList.remove('hidden');
+return false;
 }
 } // End of loadMypageSalaryTotal
 async function searchSalary(){
@@ -2231,9 +2296,14 @@ return '기타조정';
 
   function toggleEtcInput(){const v=document.getElementById("certPurposeSelect").value,e=document.getElementById("certPurposeEtc");if(v==='기타'){e.classList.remove('hidden');e.focus()}else{e.classList.add('hidden')}}
 function openCertModal(){purposeModal.show()}
-async function loadNotices(){
-  const{data}=await _supabase.from('ref_notice').select('*').order('created_at',{ascending:false}).limit(5);
+async function loadNotices(isCurrent=()=>true){
+  const{data,error}=await _supabase.from('ref_notice').select('*').order('created_at',{ascending:false}).limit(5);
+  if(!isCurrent())return false;
   const listEl=document.getElementById("noticeList");
+  if(error){
+    listEl.innerHTML='<div class="text-center p-3 text-muted">공지사항을 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ensureMypageSection(\'notices\')">다시 불러오기</button></div>';
+    return false;
+  }
   if(data&&data.length){
     listEl.innerHTML=data.map((n,i)=>{
       const safeTitle=escapeHtml(n.title);
@@ -2244,6 +2314,7 @@ async function loadNotices(){
     listEl.innerHTML='<div class="text-center p-3 text-muted">공지사항 없음</div>';
   }
   noticesData=data;
+  return true;
 }
 function viewNotice(i){const n=noticesData[i];document.getElementById("noticeModalTitle").innerText=n.title;document.getElementById("noticeModalDate").innerText=formatMypageKstDate(n.created_at);document.getElementById("noticeModalWriter").innerText=n.writer||"관리자";document.getElementById("noticeModalContent").innerText=n.content;const l=document.getElementById("noticeFileLink"),a=document.getElementById("noticeFileArea");if(n.file_url){a.classList.remove("hidden");l.href=n.file_url}else a.classList.add("hidden");noticeDetailModal.show()}
 // [추가] 범용 확인 모달 열기 함수
