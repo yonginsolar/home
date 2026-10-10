@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.2.0 — all initialized tasks; fresh server gates before resume. */
+/* Persistent ERP workspace v1.2.1 — query controls retain context without suppressing fresh reads. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -29,6 +29,9 @@
         && child.hasMeaningfulApprovalDraftContentForReplacement()) return true;
       for (const [node, original] of entry.fields) {
         if (!node.isConnected || (!entry.frame.hidden && !node.getClientRects().length)) continue;
+        // Explicitly marked read-only filters are context, not business edits.
+        // Unmarked inputs and the task's own unsaved guard remain protected.
+        if (node.hasAttribute('data-erp-query-control')) continue;
         // The composer already compares its current payload with the last successful save.
         // Keep the generic guard for other open dialogs, not for a saved composer.
         if (draftStatus === 'saved' && node.closest('#draftForm')) continue;
@@ -174,7 +177,7 @@
       const node = event.target;
       if (!event.isTrusted || !node?.matches?.('input,textarea,select,[contenteditable="true"]')) return;
       // Also protect editors built without a form wrapper (proposals, meeting text, website fields).
-      if (node.disabled || node.readOnly || node.type === 'hidden') return;
+      if (node.disabled || node.readOnly || node.type === 'hidden' || node.hasAttribute('data-erp-query-control')) return;
       if (!entry.fields.has(node)) entry.fields.set(node, fieldValue(node));
     };
     for (const name of ['focusin','beforeinput','pointerdown']) doc.addEventListener(name, remember, true);
