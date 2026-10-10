@@ -64,11 +64,13 @@
       areas[area].push(card);
     }
     const toolbar=document.createElement('div'); toolbar.className='home-visual-toolbar';
-    const pickerLabel=document.createElement('label');pickerLabel.className='visually-hidden';pickerLabel.htmlFor='site-home-area-picker';pickerLabel.textContent='편집할 영역';
+    const pickerLabel=document.createElement('label');pickerLabel.className='home-visual-area-label';pickerLabel.htmlFor='site-home-area-picker';pickerLabel.textContent='편집할 영역';
     const picker=document.createElement('select');picker.id='site-home-area-picker';picker.className='form-select home-visual-area-picker';picker.onchange=()=>select(picker.value);
     for(const [area,label] of Object.entries(labels)) {const option=document.createElement('option');option.value=area;option.textContent=label;picker.append(option);}
     toolbar.append(pickerLabel,picker);
-    const strip=document.createElement('div');strip.id='site-home-area-strip';strip.className='home-visual-area-strip';strip.setAttribute('aria-label','홈페이지 영역');toolbar.append(strip);
+    // Retain the original ordering/selection nodes for existing adapters, but
+    // expose only the labelled picker as the user's area navigation.
+    const strip=document.createElement('div');strip.id='site-home-area-strip';strip.className='home-visual-area-strip';strip.hidden=true;strip.setAttribute('aria-hidden','true');toolbar.append(strip);
     for(const area of Object.keys(labels)) {
       const button=document.createElement('button'); button.type='button'; button.className='btn btn-sm btn-outline-secondary';
       button.textContent=labels[area]; button.dataset.homeSelectArea=area; button.onclick=()=>select(area); strip.append(button);

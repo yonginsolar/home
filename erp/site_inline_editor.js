@@ -88,8 +88,11 @@
  }
  function saveButtons(area){
   const selectors={hero:'#btn-save-home-settings',impact:'#btn-save-home-settings',contact:'#btn-save-home-settings',design:'#btn-save-home-settings',fonts:'#btn-save-home-settings',about:'#btn-save-about-settings',sections:'#btnSaveSectionChanges',certifications:'#site-certification-save',activities:'#btn-save-site-activity'};
-  if(area==='legal')return [...document.querySelectorAll('#sub-legal .row > :not([hidden]) [data-legal-action="draft"],#sub-legal .row > :not([hidden]) [data-legal-action="publish"]')];
-  const buttons=[...document.querySelectorAll(selectors[area]||'#nonexistent-inline-save')];
+  const buttons=area==='legal'?[...document.querySelectorAll('#sub-legal .row > :not([hidden]) [data-legal-action="draft"],#sub-legal .row > :not([hidden]) [data-legal-action="publish"]')]:[...document.querySelectorAll(selectors[area]||'#nonexistent-inline-save')];
+  // A home draft may remain pending after switching to About or another area.
+  // Keep its original save available in this same action zone, not a second bar.
+  const pending=document.getElementById('site-home-pending-save'),homeSave=document.getElementById('btn-save-home-settings');
+  if(pending&&!pending.hidden&&homeSave&&!buttons.includes(homeSave))buttons.push(homeSave);
   if(area!=='sections'&&typeof hasPendingSectionChanges==='function'&&hasPendingSectionChanges()){
    const sectionSave=document.getElementById('btnSaveSectionChanges');if(sectionSave)buttons.push(sectionSave);
   }
@@ -100,12 +103,41 @@
   const workspace=document.getElementById('site-home-visual-workspace'),toolbar=document.querySelector('.home-visual-toolbar');if(!workspace||!toolbar||document.getElementById('home-inline-settings-toggle'))return;
   const toggle=document.createElement('button');toggle.id='home-inline-settings-toggle';toggle.type='button';toggle.className='btn btn-sm btn-outline-secondary';toggle.textContent='세부 설정';toggle.setAttribute('aria-expanded','false');toggle.onclick=()=>{const open=workspace.classList.toggle('show-settings');toggle.setAttribute('aria-expanded',String(open));};toolbar.append(toggle);
   const actions=document.createElement('div');actions.className='home-inline-save-actions';toolbar.append(actions);
-  let signature='';function sync(){
-   const area=CoopHomeVisualEditor.current(),sources=saveButtons(area),next=area+'|'+sources.map(x=>[x.id,x.disabled,x.textContent]).join('|');if(next===signature)return;signature=next;actions.replaceChildren();
-   for(const source of sources){const button=document.createElement('button');button.type='button';button.className='btn btn-sm '+(source.dataset.legalAction==='draft'?'btn-outline-primary':'btn-primary');button.textContent=source.textContent.trim();button.disabled=source.disabled;button.onclick=async()=>{button.disabled=true;if(!(await flush())){myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');signature='';sync();return;}if(permitted()&&!source.disabled)source.click();signature='';sync();};actions.append(button);}
+  const zone=document.createElement('div');zone.className='home-inline-save-zone';toolbar.append(zone);
+  const status=document.createElement('span');status.id='home-inline-save-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');zone.append(status,actions);
+  const publicLink=document.createElement('a');publicLink.className='btn btn-sm btn-outline-secondary';publicLink.id='home-inline-public-link';publicLink.textContent='홈페이지 보기 ↗';publicLink.target='_blank';publicLink.rel='noopener noreferrer';publicLink.hidden=true;toolbar.insertBefore(publicLink,zone);
+  workspace.classList.add('has-unified-save');
+  let signature='',flushing=false;const phases=new Map();
+  function saveStatus(area){
+   const kind=['hero','impact','contact','design','fonts'].includes(area)?'home':area==='about'?'about':'';
+   if(kind){
+    const text=document.getElementById(`site-${kind}-save-status`)?.textContent||'';
+    const phase=/저장 중/.test(text)?'busy':/불러오지 못/.test(text)?'error':/불러오는 중|불러와 주세요/.test(text)||!text?'loading':/저장하지 않은/.test(text)?'dirty':'idle';
+    const prior=phases.get(kind);const saved=phase==='idle'&&(prior?.phase==='busy'||prior?.saved===true);phases.set(kind,{phase,saved});
+    return {phase,text:phase==='idle'?(saved?'홈페이지에 반영되었습니다.':'변경사항 없음'):phase==='dirty'?'저장하지 않은 변경사항':text||'설정을 불러오는 중입니다…'};
+   }
+   if(area==='legal'){const card=[...document.querySelectorAll('#sub-legal [id$="-card"]')].find(n=>!n.parentElement.hidden);return {phase:'legal',text:card?.querySelector('[role="status"]')?.textContent||'문서를 불러오는 중입니다…'};}
+   if(area==='sections')return {phase:typeof g_sectionSaving!=='undefined'&&g_sectionSaving?'busy':typeof hasPendingSectionChanges==='function'&&hasPendingSectionChanges()?'dirty':'idle',text:typeof g_sectionSaving!=='undefined'&&g_sectionSaving?'저장 중입니다…':typeof hasPendingSectionChanges==='function'&&hasPendingSectionChanges()?'저장하지 않은 변경사항':'변경사항 없음'};
+   return {phase:'other',text:''};
+  }
+  function sync(){
+   const area=CoopHomeVisualEditor.current(),sources=saveButtons(area),state=saveStatus(area),allowed=permitted();
+   const next=JSON.stringify([area,allowed,flushing,state,sources.map(x=>[x.id,x.disabled,x.hidden,x.textContent]),document.getElementById(`btn-retry-${area==='about'?'about':'home'}-settings`)?.hidden]);
+   if(next===signature)return;signature=next;actions.replaceChildren();
+   status.textContent=!allowed?'편집 권한이 없습니다.':flushing?'편집 내용을 확인하는 중입니다…':state.text;status.dataset.phase=state.phase;status.hidden=!status.textContent;
+   for(const source of sources){
+    source.classList.add('home-inline-source-save');
+    const button=document.createElement('button');button.type='button';button.className='btn btn-sm '+(source.dataset.legalAction==='draft'?'btn-outline-primary':'btn-primary');
+    button.textContent=source.id==='btn-save-home-settings'?(['hero','impact','contact','design','fonts'].includes(area)?'변경사항 저장':'메인 화면 변경 저장'):source.id==='btnSaveSectionChanges'?'표시 영역·순서 저장':source.textContent.trim();button.disabled=source.disabled||!allowed||flushing;
+    button.onclick=async()=>{if(flushing||!permitted()||source.disabled)return;flushing=true;sync();try{if(!(await flush())){myAlert('편집 내용을 확인하지 못했습니다. 다시 저장해 주세요.','warning');return;}if(permitted()&&!source.disabled)source.click();}finally{flushing=false;signature='';sync();}};actions.append(button);
+   }
+   const retry=document.getElementById(`btn-retry-${area==='about'?'about':'home'}-settings`);
+   if(['hero','impact','contact','design','fonts','about'].includes(area)&&retry&&!retry.hidden){const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline-secondary';button.textContent='다시 불러오기';button.disabled=retry.disabled||!allowed;button.onclick=()=>{if(permitted()&&!retry.disabled)retry.click();};actions.append(button);}
+   publicLink.hidden=true;publicLink.removeAttribute('href');
+   try{const url=typeof getHomePreviewUrl==='function'?getHomePreviewUrl():null;if(url&&url.protocol==='https:'&&!url.username&&!url.password){url.search='';url.hash='';publicLink.href=url.href;publicLink.hidden=false;}}catch(_){}
    if(!['hero','impact','about','activities','contact','legal'].includes(area))workspace.classList.add('show-settings');toggle.setAttribute('aria-expanded',String(workspace.classList.contains('show-settings')));
   }
-  new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
+  new MutationObserver(sync).observe(workspace,{subtree:true,attributes:true,childList:true,characterData:true,attributeFilter:['disabled','hidden','class','src']});document.getElementById('site-home-area-picker').addEventListener('change',sync);toolbar.addEventListener('click',event=>{if(event.target.closest('[data-home-select-area]')){signature='';sync();}});sync();
  }
  root.addEventListener('message',event=>{
   const f=frame();if(!f?.src||event.source!==f.contentWindow||event.origin!==new URL(f.src).origin)return;
