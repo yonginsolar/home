@@ -1,5 +1,5 @@
 /*
-Version: v1.0.55
+Version: v1.0.56
 Change: 2026-10-06 - Read general notices separately from approved official documents.
 */
 import { supabase } from '../shared/supabase-client.js';
@@ -356,8 +356,22 @@ async function getCompanyInfo() {
     };
 }
 
-async function listMinutesAdmin() {
+async function listMinutesAdmin(options = {}) {
     const coopId = await getVisibleCoopId();
+    if (options.metadataOnly) {
+        const columns='id,title,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids';
+        const rows=[];
+        // Metadata pages preserve complete counts without downloading every document body.
+        for(let offset=0;;offset+=500){
+            let query=scopeByCoop(supabase.from('minutes').select(columns),coopId);
+            if(options.docType==='ASSEMBLY_MATERIAL')query=query.eq('doc_type','ASSEMBLY_MATERIAL');
+            else if(options.docType==='MINUTES')query=query.or('doc_type.is.null,and(doc_type.neq.NOTICE,doc_type.neq.ASSEMBLY_MATERIAL)');
+            const {data,error}=await query.order('created_at',{ascending:false}).order('id',{ascending:false}).range(offset,offset+499);
+            if(error)return {data:[],error};
+            rows.push(...(data||[]));
+            if((data||[]).length<500)return {data:rows,error:null};
+        }
+    }
     const { data, error } = await scopeByCoop(supabase
         .from('minutes')
         .select('id,title,content,created_at,status,doc_type,requires_sign,published_at,visibility,doc_no,receiver,via,file_urls,signer_ids')

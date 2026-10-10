@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '3.4.1';
+  const VERSION = '3.4.2';
   const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_lkVhLJDe8WmOPzsWOMkKdg_pjVwVS-h';
   const $ = id => document.getElementById(id);
@@ -15,6 +15,8 @@
   let client = null;
   let context = null;
   let managerContext = null;
+  let managerPending = null;
+  let managerRequest = 0;
   let canCreateCooperative = false;
   let loading = false;
   let openingWorkspaceId = '';
@@ -275,7 +277,18 @@
     $('content').hidden = false;
   }
 
-  function openManagerDialog(coopId) {
+  async function openManagerDialog(coopId) {
+    const owner=context,request=++managerRequest;
+    try{
+      if(!managerContext){
+        if(managerPending?.owner!==owner){
+          const pending={owner,promise:null};managerPending=pending;
+          pending.promise=rpc('sun_village_manager_context').then(result=>{if(context===owner&&managerPending===pending)managerContext=result;return result;}).finally(()=>{if(managerPending===pending)managerPending=null;});
+        }
+        await managerPending.promise;
+      }
+      if(request!==managerRequest||context!==owner||window.frameElement?.hidden)return;
+    }catch(error){if(request===managerRequest&&context===owner&&!window.frameElement?.hidden)setMessage(friendly(error),true);return;}
     const row = (Array.isArray(context?.villages) ? context.villages : [])
       .find(village => String(village?.coop_id || '') === String(coopId || ''));
     if (!row || !managerContext) return;
@@ -336,7 +349,9 @@
     setMessage('마을조합 현황을 불러오고 있습니다…');
     try {
       context = await rpc('sun_village_management_context');
-      managerContext = await rpc('sun_village_manager_context');
+      managerContext=null;
+      managerPending=null;
+      ++managerRequest;
       try {
         canCreateCooperative = (await rpc('sun_village_creation_fee_quote'))?.can_create === true;
       } catch (capabilityError) {

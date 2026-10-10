@@ -1,4 +1,4 @@
-/* Persistent ERP workspace v1.2.3 — invalidate pending rechecks when history changes. */
+/* Persistent ERP workspace v1.2.4 — track edits, not focus or read-only query changes. */
 (() => {
   'use strict';
   let frame = document.getElementById('erpWorkspaceFrame');
@@ -43,6 +43,7 @@
     return false;
   }
   function fieldValue(node) {
+    if(node.hasAttribute('data-number-group'))return String(node.value||'').replace(/,/g,'');
     return node.type === 'checkbox' || node.type === 'radio' ? node.checked
       : node.type === 'file' ? node.files.length : node.isContentEditable ? node.innerHTML : node.value;
   }
@@ -209,14 +210,29 @@
   function attachDocument(doc, entry = activeEntry) {
     if (attached.has(doc)) return;
     attached.add(doc); entry.fields = new Map();
-    const remember = event => {
+    const baselines = new WeakMap();
+    const editable = event => {
       const node = event.target;
-      if (!event.isTrusted || !node?.matches?.('input,textarea,select,[contenteditable="true"]')) return;
+      if (!event.isTrusted || !node?.matches?.('input,textarea,select,[contenteditable="true"]')) return null;
       // Also protect editors built without a form wrapper (proposals, meeting text, website fields).
-      if (node.disabled || node.readOnly || node.type === 'hidden' || node.hasAttribute('data-erp-query-control')) return;
-      if (!entry.fields.has(node)) entry.fields.set(node, fieldValue(node));
+      if (node.disabled || node.readOnly || node.type === 'hidden' || node.hasAttribute('data-erp-query-control') || node.type === 'search') return null;
+      return node;
+    };
+    const remember = event => {
+      const node = editable(event);
+      if (!node || entry.fields.has(node)) return;
+      // Merely focusing a field must not turn later initialization into a user edit.
+      baselines.set(node, fieldValue(node));
+      // Formatting toolbar commands can modify an existing rich-text selection.
+      if (node.isContentEditable) entry.fields.set(node, fieldValue(node));
+    };
+    const edited = event => {
+      const node = editable(event);
+      if (!node || entry.fields.has(node)) return;
+      if (baselines.has(node)) entry.fields.set(node, baselines.get(node));
     };
     for (const name of ['focusin','beforeinput','pointerdown']) doc.addEventListener(name, remember, true);
+    for (const name of ['input','change']) doc.addEventListener(name, edited, true);
     doc.addEventListener('click', event => {
       if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const anchor = event.target.closest?.('a[href]');
@@ -344,5 +360,5 @@
       load(target);
     } catch (_) { status.hidden = true; error.hidden = false; }
   }
-  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261010.13'};
+  window.ErpWorkspaceShell = {start, navigate, checkpoint, version:'20261011.14'};
 })();

@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.74 | Change: 2026-10-11 - Load only the data needed by the open tab. -->
+<!-- Version: v1.0.75 | Change: 2026-10-11 - Show profile before auxiliary data; load print settings on demand. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 <script src="../shared/safe_diagnostics.js?v=20261003-2"></script>
-  <script>console.log('[Version] v1.0.74 | mypage.html');</script>
+  <script>console.log('[Version] v1.0.75 | mypage.html');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -14,7 +14,6 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
 <script src="workflow_assets.js?v=20261010-1"></script>
-<script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.2" integrity="sha384-B2duOBIryCXbX4eDE4BdJwtNkQMRQde3o6IsjfPW28E6aH1CYE96hHeZRG3zY56O" crossorigin="anonymous"></script>
 <script src="/shared/checked_upload.js?v=20261004-1"></script>
 <script>
@@ -172,7 +171,7 @@ body{padding:18px 14px 28px}
 <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
 <h6 class="fw-bold m-0">📝 기본 정보 수정</h6>
 <div>
-<button class="btn btn-sm btn-outline-primary" id="btnEditInfo" onclick="toggleEditMode(true)">✏️ 수정하기</button>
+<button class="btn btn-sm btn-outline-primary" id="btnEditInfo" onclick="toggleEditMode(true)" disabled>✏️ 수정하기</button>
 <button class="btn btn-sm btn-secondary hidden" id="btnCancelInfo" onclick="toggleEditMode(false)">취소</button>
 <button class="btn btn-sm btn-primary hidden" id="btnSaveInfo" onclick="updateInfo()">💾 저장 완료</button>
 </div>
@@ -208,7 +207,7 @@ body{padding:18px 14px 28px}
 <div class="tab-pane fade" id="tabSalary">
 <div class="d-flex justify-content-between align-items-center mb-3">
 <div class="input-group" style="max-width: 250px;">
-<input type="month" class="form-control" id="salaryMonth">
+<input type="month" class="form-control" id="salaryMonth" data-erp-query-control>
 <button class="btn btn-primary" onclick="searchSalary()">조회</button>
 </div>
 <button class="btn btn-sm btn-dark hidden" id="btnPrintSalary" onclick="printSalaryPopup()">🖨️ 인쇄하기</button>
@@ -375,12 +374,15 @@ let mypageBusinessTripSnapshotSupported=false;
 let mypageCalendarIcsSettings={enabled:false,feedToken:'',sourceCatalog:null};
 let mypageDataAuthorized=false;
 let mypageRefreshing=false;
+let mypageProfileBaseline='',mypageProfileRestoring=false;
+function mypageProfileValues(){return JSON.stringify({fields:['myMemberId','myPhone','myEmail','myAddress','myBank','myAccount'].map(id=>document.getElementById(id)?.value||''),contacts:tempEmergencyList});}
+window.addEventListener('beforeunload',event=>{if(mypageProfileRestoring||(!document.getElementById('btnSaveInfo')?.classList.contains('hidden')&&mypageProfileBaseline&&mypageProfileValues()!==mypageProfileBaseline)){event.preventDefault();event.returnValue='';}});
 const mypageSectionLoads=new Map();
 function getMypageDataOwner(){return `${String(myInfo?.coop_id||'')}|${String(myInfo?.emp_id||'')}`;}
 function isMypageDataVisible(){return !document.getElementById('mypagePageShell')?.classList.contains('hidden')&&(!window.frameElement?.hidden||mypageRefreshing);}
 function ensureMypageSection(key){
 if(!mypageDataAuthorized||!isMypageDataVisible()) return Promise.resolve(false);
-const loaders={salary:loadMypageSalaryTotal,notices:loadNotices,calendarSettings:loadMypageCalendarIcsSettings,telegram:loadMypageTelegramLinkStatus,overtime:loadMypageOvertimeSummary};
+const loaders={salary:loadMypageSalaryTotal,notices:loadNotices,calendarSettings:loadMypageCalendarIcsSettings,telegram:loadMypageTelegramLinkStatus,overtime:loadMypageOvertimeSummary,emergency:loadEmergencyList,leave:calculateLeave,company:loadCompanyInfo};
 const loader=loaders[key];
 if(!loader) return Promise.resolve(false);
 const owner=getMypageDataOwner();
@@ -399,7 +401,7 @@ function loadMypageVisibleSections(){
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
 if(pane==='tabSalary')return ensureMypageSection('salary');
 if(pane==='tabNotice')return ensureMypageSection('notices');
-if(pane==='tabInfo')return Promise.all([ensureMypageSection('telegram'),ensureMypageSection('overtime')]);
+if(pane==='tabInfo')return Promise.all([ensureMypageSection('emergency'),ensureMypageSection('leave'),ensureMypageSection('telegram'),ensureMypageSection('overtime')]);
 return Promise.resolve();
 }
 let lastAlertFocusTarget=null;
@@ -887,10 +889,11 @@ companyInfo={...(infoMap||{})};
 syncMypageLeaveTypeRuntime();
 companyInfo.chairman=resolveMypageChairmanName(companyInfo);
 }
-async function refreshMypageCompanyInfo(coopId){
+async function refreshMypageCompanyInfo(coopId,isCurrent=()=>true){
 try{
 const {data,error}=await _supabase.from('ref_company_info').select('key,value').eq('coop_id',coopId);
 if(error) throw error;
+if(!isCurrent())return null;
 const nextInfo={};
 (data||[]).forEach(row=>{nextInfo[row.key]=row.value;});
 if(nextInfo.logo_horizontal_url&&!String(nextInfo.logo_horizontal_url).startsWith('http')){
@@ -905,6 +908,7 @@ const {data:d}=await _supabase.storage.from('attachments').createSignedUrl(sealP
 if(d?.signedUrl) nextInfo.seal_url=d.signedUrl;
 }
 }
+if(!isCurrent())return null;
 applyMypageCompanyInfoState(nextInfo);
 writeMypageCompanyInfoCache(coopId,nextInfo);
 return nextInfo;
@@ -1269,7 +1273,7 @@ const shellEl=document.getElementById('mypagePageShell');
 if(loadingEl) loadingEl.classList.add('hidden');
 if(shellEl) shellEl.classList.remove('hidden');
 }
-window.onload=async function(){
+document.addEventListener('DOMContentLoaded',async function(){
 try{
 purposeModal=new bootstrap.Modal(document.getElementById('certPurposeModal'));
 leaveDetailModal=new bootstrap.Modal(document.getElementById('leaveDetailModal'));
@@ -1316,8 +1320,9 @@ document.getElementById('tab-calendar-btn').addEventListener('shown.bs.tab',func
 document.getElementById('tab-ai-btn').addEventListener('shown.bs.tab',function(){window.ErpAiConnections.mount(_supabase,document.getElementById('aiConnectionsRoot'));});
 document.getElementById('tab-insurance-btn').addEventListener('shown.bs.tab',function(){void window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));});
 document.getElementById('myTab').addEventListener('shown.bs.tab',()=>{void loadMypageVisibleSections();});
-const companyReady=loadCompanyInfo();
-await Promise.all([loadProfile(),loadEmergencyList(),companyReady.then(()=>calculateLeave())]);
+await loadProfile();
+document.querySelectorAll('.readonly-field').forEach(node=>{node.readOnly=true;});
+document.getElementById('lvRemain').textContent='…';
 applyMypageRuntimeProfileUi();
 setMypageBootStateReady();
 void loadMypageVisibleSections();
@@ -1329,7 +1334,6 @@ mypageSectionLoads.clear();
 const pane=document.querySelector('.tab-content > .tab-pane.active')?.id;
 if(pane==='tabInsuranceStatus')await window.HrInsuranceStatus.mount(_supabase,document.getElementById('myInsuranceStatus'));
 else{
-await calculateLeave();
 if(pane==='tabCalendar')await renderCalendar();
 else await loadMypageVisibleSections();
 }
@@ -1341,7 +1345,7 @@ showAlert(`마이페이지 초기화 중 오류가 발생했습니다.\n${error?
 }finally{
 if(mypageDataAuthorized)setMypageBootStateReady();
 }
-};
+});
 function showAlert(m){
 const alertModalEl=document.getElementById('alertModal');
 const active=document.activeElement;
@@ -1353,7 +1357,17 @@ window.viewContract=function(){
 location.href='employment_contracts.html?self=1';
 }
 function autoHyphen(t){t.value=t.value.replace(/[^0-9]/g,'').replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g,"$1-$2-$3").replace(/(\-{1,2})$/g,"")}
-function openAddressSearch(){new daum.Postcode({oncomplete:function(d){let a=d.userSelectedType==='R'?d.roadAddress:d.jibunAddress;if(d.buildingName)a+=' ('+d.buildingName+')';document.getElementById("myAddress").value=a}}).open()}
+let mypagePostcodePending;
+async function openAddressSearch(){
+try{
+if(!window.daum?.Postcode){
+if(!mypagePostcodePending)mypagePostcodePending=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';script.onload=()=>window.daum?.Postcode?resolve():reject(new Error('POSTCODE_UNAVAILABLE'));script.onerror=()=>{script.remove();reject(new Error('POSTCODE_UNAVAILABLE'));};document.head.append(script);}).catch(error=>{mypagePostcodePending=null;throw error;});
+await mypagePostcodePending;
+}
+if(!isMypageDataVisible()||document.getElementById('btnSaveInfo').classList.contains('hidden'))return;
+new daum.Postcode({oncomplete:function(d){let a=d.userSelectedType==='R'?d.roadAddress:d.jibunAddress;if(d.buildingName)a+=' ('+d.buildingName+')';document.getElementById('myAddress').value=a;}}).open();
+}catch{if(isMypageDataVisible())showAlert('주소 검색을 불러오지 못했습니다. 다시 시도해 주세요.');}
+}
 async function loadPermissions(user) {
     const result = new Set();
     if (!user) return result;
@@ -1361,23 +1375,24 @@ async function loadPermissions(user) {
     data.forEach((permissionKey) => result.add(permissionKey));
     return result;
 }
-async function loadCompanyInfo(){
+async function loadCompanyInfo(isCurrent=()=>true){
 const schemaFeaturePromise=loadMypageSchemaFeatures();
 const coopId=String(myInfo?.coop_id||'').trim();
 const cachedCompanyInfo=readMypageCompanyInfoCache(coopId);
+if(!isCurrent())return false;
 if(!coopId){
+const features=await schemaFeaturePromise;
+if(!isCurrent())return false;
 applyMypageCompanyInfoState({});
-applyMypageSchemaFeatureState(await schemaFeaturePromise);
-return;
+applyMypageSchemaFeatureState(features);
+return true;
 }
 if(cachedCompanyInfo) applyMypageCompanyInfoState(cachedCompanyInfo);
 else applyMypageCompanyInfoState({});
-applyMypageSchemaFeatureState(await schemaFeaturePromise);
-if(cachedCompanyInfo){
-void refreshMypageCompanyInfo(coopId);
-return;
-}
-await refreshMypageCompanyInfo(coopId);
+const features=await schemaFeaturePromise;
+if(!isCurrent())return false;
+applyMypageSchemaFeatureState(features);
+return !!(await refreshMypageCompanyInfo(coopId,isCurrent));
 }
 function getMypageCoopId(){
 return String(myInfo?.coop_id||'').trim();
@@ -1393,7 +1408,8 @@ if(!coopId) return payload;
 return { ...payload, coop_id: coopId };
 }
 async function loadProfile() {
-    const { data } = await scopeMypageEmployee(_supabase.from('ref_employees').select('*')).eq('emp_id', myInfo.emp_id).single();
+    const { data, error } = await scopeMypageEmployee(_supabase.from('ref_employees').select('*')).eq('emp_id', myInfo.emp_id).single();
+    if(error||!data)throw error||new Error('PROFILE_UNAVAILABLE');
     if (data) {
         myInfo = data;
         localStorage.setItem('erp_user', JSON.stringify(data));
@@ -1452,7 +1468,20 @@ document.getElementById('mypageOvertimeSummaryHelp').innerHTML='시간외 근로
 return false;
 }
 }
-function toggleEditMode(e){const f=document.querySelectorAll('.readonly-field');f.forEach(x=>{if(e){x.classList.remove('readonly-field');x.classList.add('editable-field');x.readOnly=false}else{x.classList.add('readonly-field');x.classList.remove('editable-field');x.readOnly=true}});document.getElementById("btnEditInfo").classList.toggle('hidden',e);document.getElementById("btnCancelInfo").classList.toggle('hidden',!e);document.getElementById("btnSaveInfo").classList.toggle('hidden',!e);document.getElementById("btnAddrSearch").classList.toggle('hidden',!e);document.getElementById("btnAddEm").classList.toggle('hidden',!e);if(!e){loadProfile();loadEmergencyList()}}
+async function toggleEditMode(e){
+if(e&&mypageProfileRestoring)return;
+if(e)mypageProfileBaseline=mypageProfileValues();
+const fields=document.querySelectorAll('.readonly-field,.editable-field');
+fields.forEach(node=>{node.classList.toggle('readonly-field',!e);node.classList.toggle('editable-field',e);node.readOnly=!e;});
+document.getElementById('btnEditInfo').classList.toggle('hidden',e);
+for(const id of ['btnCancelInfo','btnSaveInfo','btnAddrSearch','btnAddEm'])document.getElementById(id).classList.toggle('hidden',!e);
+if(!e){
+mypageProfileRestoring=true;document.getElementById('btnEditInfo').disabled=true;
+try{const results=await Promise.all([loadProfile(),loadEmergencyList()]);if(results[1]!==false){mypageProfileBaseline='';window.ErpWorkspaceResume?.checkpoint(document.getElementById('tabInfo'));document.getElementById('btnEditInfo').disabled=false;}}
+catch{showAlert('정보를 다시 불러오지 못했습니다. 다시 시도해 주세요.');}
+finally{mypageProfileRestoring=false;}
+}
+}
 async function updateInfo() {
     openConfirmModal("정보를 저장하시겠습니까?", async function() {
         const mid = document.getElementById("myMemberId").value; // [추가]
@@ -1489,7 +1518,10 @@ async function updateInfo() {
         toggleEditMode(false);
     });
 }
-async function loadEmergencyList(){const{data}=await scopeMypageEmployee(_supabase.from('ref_emergency_contacts').select('*')).eq('emp_id',myInfo.emp_id).order('id');tempEmergencyList=data||[];renderEmergencyTable()}
+async function loadEmergencyList(isCurrent=()=>true){
+try{const{data,error}=await scopeMypageEmployee(_supabase.from('ref_emergency_contacts').select('*')).eq('emp_id',myInfo.emp_id).order('id');if(error)throw error;if(!isCurrent())return false;tempEmergencyList=data||[];renderEmergencyTable();if(!mypageProfileRestoring)document.getElementById('btnEditInfo').disabled=false;return true;}
+catch{if(isCurrent()){document.getElementById('btnEditInfo').disabled=true;document.getElementById('emergencyListBody').innerHTML='<tr><td colspan="4">비상 연락망을 불러오지 못했습니다. <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ensureMypageSection(\'emergency\')">다시 불러오기</button></td></tr>';}return false;}
+}
 function renderEmergencyTable(){
 const b=document.getElementById("emergencyListBody");
 const isEditing=!document.getElementById("btnSaveInfo").classList.contains('hidden');
@@ -1710,6 +1742,7 @@ if(!Number.isFinite(startMs)||!Number.isFinite(endMs)||endMs<=startMs) return nu
 return{title,start:startValue,end:endValue,color:(doc?.drafter_id===myInfo.emp_id?'#fd7e14':'#f59f00'),allDay:false,extendedProps:{origin:{title,start_date:startValue,end_date:endValue,type:'business_trip',visibility:'company',cal_memo:memoLines.join('\n')}}};
 }
 async function loadMypageCalendarSourceData(scope='erp'){
+if(!await ensureMypageSection('company'))throw new Error('회사 설정을 불러오지 못했습니다. 다시 시도해 주세요.');
 const safeScope=scope==='google_ics'?'google_ics':'erp';
 const coopId=String(myInfo?.coop_id||'').trim();
 const leaveStatuses=safeScope==='google_ics'?['완료','실물결재완료']:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'];
@@ -1982,17 +2015,23 @@ document.getElementById("lvRemain").innerText=remain;
 const b=document.querySelector('.leave-badge');
 if(remain<=0){b.style.borderColor='#dc3545';b.style.color='#dc3545'}else{b.style.borderColor='#0d6efd';b.style.color='#0d6efd'}
 }
-async function calculateLeave(){
+async function calculateLeave(isCurrent=()=>true){
 try{
+const features=await loadMypageSchemaFeatures();
+if(!isCurrent())return false;
+applyMypageSchemaFeatureState(features);
 if(window.LeaveLedger&&typeof window.LeaveLedger.getLeaveSnapshot==='function'){
-leaveSnapshotState=await window.LeaveLedger.getLeaveSnapshot(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,reservedStatuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'],includeToday:true,unknownAsReserved:false});
+const snapshot=await window.LeaveLedger.getLeaveSnapshot(_supabase,myInfo.emp_id,{columns:mypageLeaveSnapshotSupported?MYPAGE_LEAVE_SELECT_COLUMNS_WITH_SNAPSHOT:undefined,reservedStatuses:['완료','가승인','증빙확인중','실물결재대기','실물결재완료'],includeToday:true,unknownAsReserved:false});
+if(!isCurrent())return false;
+leaveSnapshotState=snapshot;
 renderLeaveBadge(leaveSnapshotState);
-return;
+return true;
 }
-}catch(error){CoopSafeLog.error("calculateLeave snapshot failed:", error)}
-const{data:r,error}=await _supabase.rpc('calculate_leave_days',{p_emp_id:myInfo.emp_id});if(error){CoopSafeLog.error("[erp/mypage] operation failed", error);return}
-leaveSnapshotState={effectiveRemainDays:(r!==null?r:0),reservedDays:0,summary:{reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[]}};
+const{data:r,error}=await _supabase.rpc('calculate_leave_days',{p_emp_id:myInfo.emp_id});if(error||r===null)throw error||new Error('LEAVE_UNAVAILABLE');if(!isCurrent())return false;
+leaveSnapshotState={effectiveRemainDays:r,reservedDays:0,summary:{reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[]}};
 renderLeaveBadge(leaveSnapshotState);
+return true;
+}catch(error){if(isCurrent()){CoopSafeLog.error('calculateLeave snapshot failed:',error);document.getElementById('lvRemain').textContent='—';}return false;}
 }
 function getLeaveStatusBadgeHtml(status){
 if(status==='진행중') return '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em">결재중</span>';
@@ -2056,6 +2095,7 @@ async function showLeaveDetail(){
 const el=document.getElementById('leaveDetailModal'),bd=el.querySelector('.modal-body');if(!el)return;
 bd.innerHTML='<div class="text-center py-3"><div class="spinner-border text-primary" role="status"></div></div>';leaveDetailModal.show();
 try{
+if(!await ensureMypageSection('company'))throw new Error('회사 설정을 불러오지 못했습니다. 다시 시도해 주세요.');
 const{data:em}=await scopeMypageEmployee(_supabase.from('ref_employees').select('hire_date')).eq('emp_id',myInfo.emp_id).single();
 const{data:al}=await scopeMypageEmployee(_supabase.from('hr_leave_adj').select('*')).eq('emp_id',myInfo.emp_id).order('created_at',{ascending:false});
 let leaveDocs=[],summary={reservedDocs:[],pastOrUsedDocs:[],unknownDateDocs:[],reservedDays:0,pastOrUsedDays:0,unknownDateDays:0};
@@ -2335,6 +2375,9 @@ function executeConfirmAction() {
 }
 // [최종 수정] 재직증명서 발급 (DB 함수 사용으로 중복 방지)
 async function runCertIssue() {
+    if(!await ensureMypageSection('company')){showAlert('회사 설정을 불러오지 못했습니다. 다시 시도해 주세요.');return;}
+    const preparedProfile=buildMypageCompanyPrintProfile();
+    try{ensureMypageCompanyPrintProfile(preparedProfile,getMypageCertificateMeta().type);}catch(error){showAlert(error.message);return;}
     // 1. 용도 확인
     const s = document.getElementById("certPurposeSelect").value;
     const e = document.getElementById("certPurposeEtc").value;

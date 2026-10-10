@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.22 | Change: 2026-09-29 - Include non-member directors in board attendance without adding member records. -->
+<!-- Version: v1.3.23 | Change: 2026-10-11 - Load branding when education print is requested. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.22 | participation.html');</script>
+  <script>console.log('[Version] v1.3.23 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -564,6 +564,7 @@
     let humanitiesAttendeeImportRunning = false;
     let siteActivityPhotoRows = [];
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
+    let participationBrandingPending=null;
     let pendingGuestLinkId = null;
     let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
@@ -799,8 +800,13 @@
     async function loadParticipationBranding(coopId) {
       const safeCoopId = String(coopId || '').trim();
       if (!safeCoopId) return;
-      if (participationBranding.loaded && participationBranding.coopId === safeCoopId) return;
-      participationBranding = { coopId:safeCoopId, companyName:'협동조합', logoUrl:'', loaded:false };
+      if (participationBranding.loaded && participationBranding.coopId === safeCoopId) return true;
+      if(participationBrandingPending?.coopId===safeCoopId)return participationBrandingPending.promise;
+      const state={coopId:safeCoopId, companyName:'협동조합', logoUrl:'', loaded:false};
+      participationBranding=state;
+      const request={coopId:safeCoopId,promise:null};
+      participationBrandingPending=request;
+      request.promise=(async()=>{
       try {
         const { data, error } = await _supabase
           .from('ref_company_info')
@@ -813,14 +819,20 @@
           if (key) acc[key] = String(row?.value || '').trim();
           return acc;
         }, {});
-        participationBranding.companyName = info.company_name || info.orgName || '협동조합';
-        participationBranding.logoUrl = resolveParticipationLogoUrl(info.logo_horizontal_url);
-      } catch (error) {
-        console.warn('[participation-branding] 조합 인쇄 정보를 불러오지 못했습니다.', error?.message || error);
-      } finally {
-        participationBranding.loaded = true;
+        if(participationBranding!==state||dashboardData.coop_id!==safeCoopId||window.frameElement?.hidden)return false;
+        state.companyName = info.company_name || info.orgName || '협동조합';
+        state.logoUrl = resolveParticipationLogoUrl(info.logo_horizontal_url);
+        state.loaded=true;
         syncParticipationPrintBranding();
+        return true;
+      } catch (error) {
+        console.warn('[participation-branding] 조합 인쇄 정보를 불러오지 못했습니다.', String(error?.code||'unknown'));
+        return false;
+      } finally {
+        if(participationBrandingPending===request)participationBrandingPending=null;
       }
+      })();
+      return request.promise;
     } // End of loadParticipationBranding
 
     function showLoading(show, message) {
@@ -1878,11 +1890,14 @@
       }).join('');
     } // End of renderEducationPrintRoster
 
-    function printEducationRoster() {
+    async function printEducationRoster() {
       if (document.getElementById('eventType').value !== 'EDUCATION' || !formState.eventId) {
         showAlert('formAlert', '저장된 교육의 참석부만 출력할 수 있습니다.', 'warning');
         return;
       }
+      const eventId=formState.eventId;
+      if(!await loadParticipationBranding(dashboardData.coop_id)){if(!window.frameElement?.hidden)showAlert('formAlert','조합 인쇄 정보를 불러오지 못했습니다. 다시 시도해 주세요.','warning');return;}
+      if(eventId!==formState.eventId||window.frameElement?.hidden)return;
       syncParticipationPrintBranding();
       renderEducationPrintRoster();
       document.body.classList.remove('print-with-roster');
@@ -1891,8 +1906,8 @@
       window.requestAnimationFrame(function() { window.print(); });
     } // End of printEducationRoster
 
-    function printEducationQr(includeRoster = false) {
-      const link = educationQrLink(formState.qrToken);
+    async function printEducationQr(includeRoster = false) {
+      const qrToken=formState.qrToken, link = educationQrLink(qrToken);
       if (document.getElementById('eventType').value !== 'EDUCATION' || !formState.eventId || !link) {
         showAlert('formAlert', '저장된 교육의 출석 QR만 인쇄할 수 있습니다.', 'warning');
         return;
@@ -1902,6 +1917,9 @@
         return;
       }
 
+      const eventId=formState.eventId;
+      if(!await loadParticipationBranding(dashboardData.coop_id)){if(!window.frameElement?.hidden)showAlert('formAlert','조합 인쇄 정보를 불러오지 못했습니다. 다시 시도해 주세요.','warning');return;}
+      if(eventId!==formState.eventId||qrToken!==formState.qrToken||window.frameElement?.hidden)return;
       const printSheet = document.getElementById('educationQrPrintSheet');
       const printCode = document.getElementById('educationQrPrintCode');
       document.getElementById('educationQrPrintTitle').textContent = String(document.getElementById('eventTitle').value || '').trim() || '교육';
@@ -3081,7 +3099,6 @@
           sources:Array.isArray(data?.sources) ? data.sources : [],
           officials:Array.isArray(data?.officials) ? data.officials : []
         };
-        await loadParticipationBranding(dashboardData.coop_id);
         renderSummary();
         renderEvents();
       } catch (error) {

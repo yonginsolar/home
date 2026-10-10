@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.75
+Version: v1.2.76
 Change: 2026-10-06 - Separate internal/external official notices, retaining explicit publication.
 -->
 <html lang="ko">
@@ -11,7 +11,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.75 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.76 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -448,7 +448,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             </div>
             <div id="signature-preview-backfill-status" class="text-muted" style="display:none; margin:-4px 0 12px; line-height:1.6;"></div>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-                <input type="text" id="minutes-search" class="form-control" placeholder="제목/문서번호/유형 검색">
+                <input data-erp-query-control type="text" id="minutes-search" class="form-control" placeholder="제목/문서번호/유형 검색">
                 <button class="btn btn-gray" onclick="loadMinutes()">검색</button>
             </div>
             <div class="filter-chip-row">
@@ -534,7 +534,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         <div class="card">
             <h3 style="margin-top:0;">📂 총회 자료 목록</h3>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-                <input type="text" id="materials-search" class="form-control" placeholder="제목/문서번호 검색">
+                <input data-erp-query-control type="text" id="materials-search" class="form-control" placeholder="제목/문서번호 검색">
                 <button class="btn btn-gray" onclick="loadAssemblyMaterials()">검색</button>
             </div>
             <div class="list-scroll">
@@ -646,7 +646,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
     <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.55';
+        import { MinutesService } from './MinutesService.js?v=1.0.56';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -735,6 +735,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             targetType: 'MINUTES',
             candidates: []
         };
+        let templatePickerRequest = 0;
         const ADMIN_MINUTES_SCOPE = (() => {
             const raw = new URLSearchParams(window.location.search).get('scope');
             if (raw === 'minutes' || raw === 'notices' || raw === 'materials') return raw;
@@ -923,7 +924,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 return;
             }
             let minute = minutesCache?.get(id);
-            if (!minute) {
+            if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
                 const { data, error } = await MinutesService.getMinuteById(id);
                 if (error || !data) {
                     showToast('의사록 정보를 불러오지 못했습니다.');
@@ -1354,7 +1355,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             const priority = getTemplateTypePriority(targetType);
             const scoreByType = new Map(priority.map((type, idx) => [type, idx]));
             const docs = (Array.isArray(rawDocs) ? rawDocs : [])
-                .filter(doc => String(doc?.content || '').trim())
+                .filter(doc => !Object.prototype.hasOwnProperty.call(doc,'content') || String(doc?.content || '').trim())
                 .map(doc => ({
                     doc,
                     score: scoreByType.has(doc.doc_type) ? scoreByType.get(doc.doc_type) : 99
@@ -1395,11 +1396,23 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             }).join('');
         }
 
-        window.selectMinuteTemplate = (id) => {
-            const found = (templatePickerState.candidates || []).find(doc => String(doc.id) === String(id));
+        window.selectMinuteTemplate = async (id) => {
+            const request = ++templatePickerRequest, picker = templatePickerState;
+            const contentBefore = getMinuteEditorContent();
+            const titleBefore = document.getElementById('in-title')?.value || '';
+            const typeBefore = document.getElementById('in-doc-type')?.value || 'MINUTES';
+            let found = (templatePickerState.candidates || []).find(doc => String(doc.id) === String(id));
             if (!found) {
                 showToast('선택한 양식을 찾지 못했습니다.');
                 return;
+            }
+            if(!Object.prototype.hasOwnProperty.call(found,'content')){
+                const {data,error}=await MinutesService.getMinuteById(id);
+                if(request!==templatePickerRequest||picker!==templatePickerState)return;
+                if(error||!data){showToast('양식을 불러오지 못했습니다. 다시 시도해 주세요.');return;}
+                if(!document.getElementById('templatePickerModal')?.classList.contains('show'))return;
+                if(getMinuteEditorContent()!==contentBefore||document.getElementById('in-title')?.value!==titleBefore||(document.getElementById('in-doc-type')?.value||'MINUTES')!==typeBefore){showToast('작성 중인 내용은 유지했습니다. 양식을 적용하려면 다시 선택해 주세요.');return;}
+                found=data;
             }
             setMinuteEditorContent(found.content || '');
             const titleEl = document.getElementById('in-title');
@@ -1409,6 +1422,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         };
 
         window.closeTemplatePicker = () => {
+            templatePickerRequest++;
             document.getElementById('templatePickerModal')?.classList.remove('show');
         };
 
@@ -2973,7 +2987,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
         window.openMinutePreview = async (id) => {
             let minute = minutesCache?.get(id);
-            if (!minute) {
+            if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
                 const { data, error } = await MinutesService.getMinuteById(id);
                 if (error || !data) {
                     showToast('의사록 정보를 불러오지 못했습니다.');
@@ -3008,7 +3022,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         };
         window.printMinute = async (id) => {
             let minute = minutesCache?.get(id);
-            if (!minute) {
+            if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
                 const { data, error } = await MinutesService.getMinuteById(id);
                 if (error || !data) {
                     showToast('의사록 정보를 불러오지 못했습니다.');
@@ -3650,7 +3664,8 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 if (completedEl) completedEl.textContent = String(completed);
             };
 
-            const { data: minutes } = await MinutesService.listMinutesAdmin();
+            const { data: minutes, error: listError } = await MinutesService.listMinutesAdmin({metadataOnly:true,docType:'MINUTES'});
+            if(listError){container.innerHTML='<div style="text-align:center; padding:20px;">의사록 목록을 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.</div>';return;}
             const searchValue = (document.getElementById('minutes-search')?.value || '').trim().toLowerCase();
             minutesCache = new Map((minutes || []).map(m => [m.id, m]));
             const minuteDocs = (minutes || []).filter((m) => {
@@ -3833,7 +3848,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             const container = document.getElementById('materials-list-area');
             if (!container) return;
 
-            const { data: minutes, error } = await MinutesService.listMinutesAdmin();
+            const { data: minutes, error } = await MinutesService.listMinutesAdmin({metadataOnly:true,docType:'ASSEMBLY_MATERIAL'});
             if (error) {
                 container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">총회 자료를 불러오지 못했습니다.</div>';
                 return;
