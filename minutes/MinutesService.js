@@ -1,6 +1,6 @@
 /*
-Version: v1.0.56
-Change: 2026-10-06 - Read general notices separately from approved official documents.
+Version: v1.0.57
+Change: 2026-10-11 - Read official notice metadata first and selected approved content on demand.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -521,16 +521,26 @@ async function listApprovalNoticeDrafts() {
     return { data: data || [], error };
 }
 
-async function listCompletedNoticeApprovals() {
+async function listCompletedNoticeApprovals({ metadataOnly = false, approvalId = null } = {}) {
     const coopId = await getVisibleCoopId();
-    const { data, error } = await scopeByCoop(supabase
+    const columns = 'id,title,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,notice_usage'
+        + (metadataOnly ? '' : ',content,approval_line');
+    const rows = [];
+    for (let offset = 0; ; offset += 500) {
+    let query = scopeByCoop(supabase
         .from('ref_approval')
-        .select('id,title,content,created_at,processed_at,status,doc_type,doc_no,receiver,via,file_links,drafter_id,drafter_name,approval_line,notice_usage')
+        .select(columns)
         .eq('doc_type', '공문')
         .in('status', ['완료', '실물결재완료'])
         .order('processed_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false }), coopId);
-    return { data: data || [], error };
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false }), coopId);
+    if (approvalId) query = query.eq('id', approvalId);
+    const { data, error } = await query.range(offset, offset + 499);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < 500) return { data: rows, error: null };
+    }
 }
 
 async function getEmployeePositionByEmpId(empId) {
@@ -546,14 +556,35 @@ async function getEmployeePositionByEmpId(empId) {
     return { data: row?.position || null, error };
 }
 
-async function listNoticesByApprovalIds(ids) {
+async function listNoticesByApprovalIds(ids, { metadataOnly = false } = {}) {
     if (!ids || ids.length === 0) return { data: [], error: null };
     const coopId = await getVisibleCoopId();
-    const { data, error } = await scopeByCoop(supabase
-        .from('coop_notices')
-        .select('id,title,content,created_at,status,category,is_popup,file_url,file_urls,file_names,doc_no,source_approval_id')
-        .in('source_approval_id', ids), coopId);
-    return { data: data || [], error };
+    const rows = [];
+    const keys = Array.from(new Set(ids.filter(Boolean)));
+    for (let offset = 0; offset < keys.length; offset += 100) {
+        for (let start = 0; ; start += 500) {
+            const { data, error } = await scopeByCoop(supabase
+                .from('coop_notices')
+                .select('id,title,created_at,status,category,is_popup,file_url,file_urls,file_names,doc_no,source_approval_id' + (metadataOnly ? '' : ',content'))
+                .in('source_approval_id', keys.slice(offset, offset + 100))
+                .order('id').range(start, start + 499), coopId);
+            if (error) return { data: [], error };
+            rows.push(...(data || []));
+            if (!data || data.length < 500) break;
+        }
+    }
+    return { data: rows, error: null };
+}
+
+async function getNoticeDetails(approvalId) {
+    if (!approvalId) return { data: null, error: { message: '공문을 선택해 주세요.' } };
+    const { data: approvals, error } = await listCompletedNoticeApprovals({ approvalId });
+    if (error) return { data: null, error };
+    const approval = approvals?.[0];
+    if (!approval) return { data: null, error: { message: '완료된 공문을 찾을 수 없거나 조회 권한이 없습니다.' } };
+    const { data: notices, error: noticeError } = await listNoticesByApprovalIds([approvalId]);
+    if (noticeError) return { data: null, error: noticeError };
+    return { data: { approval, notice: notices?.[0] || null }, error: null };
 }
 
 async function listNoticeMinutesByDocNos(docNos) {
@@ -784,6 +815,7 @@ export const MinutesService = {
     markDocumentBoxSeen,
     listApprovalNoticeDrafts,
     listCompletedNoticeApprovals,
+    getNoticeDetails,
     getEmployeePositionByEmpId,
     listNoticesByApprovalIds,
     listNoticeMinutesByDocNos,

@@ -1,4 +1,4 @@
-/* Version: v1.2.3 | 2026-10-10 */
+/* Version: v1.2.4 | 2026-10-11 */
 'use strict';
 
 const SUPABASE_URL = 'https://ifdqlwxgqgsvnawmhlfc.supabase.co';
@@ -21,6 +21,7 @@ const state = {
   employee: null,
   contracts: [],
   contractLoadRevision: 0,
+  detailRevision: 0,
   contractsLoading: false,
   contractsLoaded: false,
   contractLoadError: false,
@@ -46,6 +47,58 @@ const selectContractColumns = [
   'content_hash', 'employer_signed_at', 'employer_signer_name', 'employee_signed_at',
   'employee_signer_name', 'completed_at', 'created_at', 'updated_at'
 ].join(',');
+const contractHistoryColumns = 'id,coop_id,emp_id,document_kind,source_type,title,version_no,parent_contract_id,status,effective_date,file_path,created_at,updated_at';
+const employeeListColumns = 'emp_id,emp_name,display_emp_no,contract_url,coop_id,is_active,resign_date';
+const contractCompanyKeys = ['company_name','orgName','chairman_name','ceoName','company_address','address','bizNum','business_number','company_contact','company_contact_phone','company_email','email'];
+const contractDetailReads = new Map();
+
+function contractReadOwner() {
+  const revision = ++state.detailRevision;
+  const employeeId = state.employee?.emp_id;
+  const coopId = state.user?.coop_id;
+  const draft = contractEditorSnapshot();
+  const editing = state.editing;
+  return { employeeId, coopId, isCurrent: () => revision === state.detailRevision
+    && employeeId === state.employee?.emp_id && coopId === state.user?.coop_id
+    && editing === state.editing && draft === contractEditorSnapshot() };
+}
+
+function coalesceContractRead(key, read) {
+  if (contractDetailReads.has(key)) return contractDetailReads.get(key);
+  const promise = Promise.resolve().then(read).finally(() => contractDetailReads.delete(key));
+  contractDetailReads.set(key, promise);
+  return promise;
+}
+
+async function readContractDetail(id, owner) {
+  return coalesceContractRead(`contract:${owner.coopId}:${owner.employeeId}:${id}`, async () => {
+    const { data, error } = await db.from('erp_employment_contracts').select(selectContractColumns)
+      .eq('coop_id', owner.coopId).eq('emp_id', owner.employeeId).eq('id', id).single();
+    if (error || !data) throw error || new Error('계약서를 찾을 수 없거나 조회 권한이 없습니다.');
+    return data;
+  });
+}
+
+async function loadContractDefaults(owner) {
+  const [company, employee] = await Promise.all([
+    coalesceContractRead(`company:${owner.coopId}`, async () => {
+      const { data, error } = await db.from('ref_company_info').select('key,value').eq('coop_id', owner.coopId).in('key', contractCompanyKeys);
+      if (error) throw error;
+      return Object.fromEntries((data || []).map(row => [row.key, row.value]));
+    }),
+    coalesceContractRead(`employee:${owner.coopId}:${owner.employeeId}`, async () => {
+      const { data, error } = await db.from('ref_employees')
+        .select('emp_id,emp_name,position,department,address,email,hire_date,base_salary,coop_id')
+        .eq('coop_id', owner.coopId).eq('emp_id', owner.employeeId).single();
+      if (error || !data) throw error || new Error('직원 정보를 불러오지 못했습니다.');
+      return data;
+    })
+  ]);
+  if (!owner.isCurrent()) return false;
+  state.company = company;
+  Object.assign(state.employee, employee);
+  return true;
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -156,6 +209,7 @@ function switchContractEmployee(select) {
     return;
   }
   requestContractTransition(() => {
+    state.detailRevision++;
     state.employee = target;
     select.value = target.emp_id;
     state.editing = null;
@@ -229,19 +283,10 @@ function companyValue(...keys) {
   return '';
 }
 
-async function loadCompany() {
-  state.company = {};
-  const coopId = asText(state.user?.coop_id);
-  if (!coopId) return;
-  const { data, error } = await db.from('ref_company_info').select('key,value').eq('coop_id', coopId);
-  if (error) throw error;
-  (data || []).forEach((row) => { state.company[row.key] = row.value; });
-}
-
 async function loadEmployees() {
   if (!state.admin || state.forceSelf) {
     const { data, error } = await db.from('ref_employees')
-      .select('emp_id,emp_name,display_emp_no,position,department,address,email,hire_date,base_salary,contract_url,coop_id,is_active,resign_date')
+      .select(employeeListColumns)
       .eq('emp_id', state.user.emp_id)
       .eq('coop_id', state.user.coop_id)
       .maybeSingle();
@@ -252,7 +297,7 @@ async function loadEmployees() {
   }
 
   const { data, error } = await db.from('ref_employees')
-    .select('emp_id,emp_name,display_emp_no,position,department,address,email,hire_date,base_salary,contract_url,coop_id,is_active,resign_date')
+    .select(employeeListColumns)
     .eq('coop_id', state.user.coop_id)
     .order('is_active', { ascending: false })
     .order('emp_name', { ascending: true });
@@ -293,14 +338,20 @@ async function loadContracts() {
   renderHistory();
   if (!state.contractsLoading) return false;
   try {
+    const rows = [];
+    for (let offset = 0; ; offset += 500) {
     const { data, error } = await db.from('erp_employment_contracts')
-      .select(selectContractColumns)
+      .select(contractHistoryColumns)
       .eq('coop_id', coopId)
       .eq('emp_id', employeeId)
-      .order('version_no', { ascending: false });
+      .order('version_no', { ascending: false }).order('id', { ascending: false })
+      .range(offset, offset + 499);
     if (!isCurrent()) return false;
     if (error) throw error;
-    state.contracts = data || [];
+    rows.push(...(data || []));
+    if (!data || data.length < 500) break;
+    }
+    state.contracts = rows;
     state.contractsLoaded = true;
     return true;
   } catch (_) {
@@ -484,14 +535,20 @@ function openNew(kind) {
   requestContractTransition(() => createNewContract(kind));
 }
 
-function createNewContract(kind) {
-  const parent = kind === 'amendment'
+async function createNewContract(kind) {
+  const owner = contractReadOwner();
+  let parent = kind === 'amendment'
     ? state.contracts.find((contract) => contract.status === 'completed' && contract.source_type === 'editor')
     : null;
   if (kind === 'amendment' && !parent) {
     showAlert('변경합의서를 작성하려면 먼저 완료된 직접 작성 계약서가 필요합니다. 외부 계약서만 있다면 통합 계약서 재작성으로 근로조건을 먼저 등록해 주세요.');
     return;
   }
+  try {
+    if (!await loadContractDefaults(owner)) return;
+    if (parent) parent = await readContractDetail(parent.id, owner);
+    if (!owner.isCurrent()) return;
+    if (parent && (parent.status !== 'completed' || parent.source_type !== 'editor')) throw new Error('기준 계약서 상태가 변경되었습니다. 이력을 다시 확인해 주세요.');
   const terms = parent ? prepareTermsForEditor(parent.terms, { fromExisting: true }) : defaultTerms();
   state.editing = {
     id: null,
@@ -505,6 +562,7 @@ function createNewContract(kind) {
   state.amendmentBaseTerms = parent ? cloneJson(terms) : null;
   state.customTerms = cloneJson(terms.custom_terms || []);
   renderEditor();
+  } catch (error) { if (owner.isCurrent()) showAlert(normalizeError(error)); }
 }
 
 function inputValue(id) {
@@ -729,14 +787,20 @@ function loadAmendmentParent(id) {
   const title = document.getElementById('contractTitle').value;
   const date = document.getElementById('effectiveDate').value;
   document.getElementById('parentContract').value = state.editing.parent_contract_id || '';
-  requestContractTransition(() => {
+  requestContractTransition(async () => {
+    const owner = contractReadOwner();
+    try {
+    const current = await readContractDetail(parent.id, owner);
+    if (!owner.isCurrent()) return;
+    if (current.status !== 'completed' || current.source_type !== 'editor') throw new Error('기준 계약서 상태가 변경되었습니다.');
     state.editing.title = title;
     state.editing.effective_date = date;
     state.editing.parent_contract_id = parent.id;
-    state.editing.terms = prepareTermsForEditor(parent.terms, { fromExisting: true });
+    state.editing.terms = prepareTermsForEditor(current.terms, { fromExisting: true });
     state.amendmentBaseTerms = cloneJson(state.editing.terms);
     state.customTerms = cloneJson(state.editing.terms.custom_terms || []);
     renderEditor(true);
+    } catch (error) { if (owner.isCurrent()) showAlert(normalizeError(error)); }
   });
 }
 
@@ -986,21 +1050,26 @@ function openContract(id, options = {}) {
   requestContractTransition(() => { resetContractEditTracking(); showContract(id); });
 }
 
-function showContract(id) {
+async function showContract(id) {
+  const owner = contractReadOwner();
+  try {
+  if (!await loadContractDefaults(owner)) return;
+  const contract = await readContractDetail(id, owner);
+  let parent = contract.document_kind === 'amendment' && contract.parent_contract_id
+    ? await readContractDetail(contract.parent_contract_id, owner) : null;
+  if (!owner.isCurrent()) return;
+  if (parent && (parent.status !== 'completed' || parent.source_type !== 'editor')) parent = null;
   document.querySelectorAll('.history-item').forEach((element) => element.classList.toggle('active', element.dataset.contractId === id));
-  const contract = state.contracts.find((item) => item.id === id);
   if (!contract) return emptyWorkspace('계약서를 찾을 수 없습니다');
   if (contract.status === 'draft' && state.admin && !state.forceSelf) {
     state.editing = cloneJson(contract);
-    const parent = contract.document_kind === 'amendment'
-      ? state.contracts.find((item) => item.id === contract.parent_contract_id && item.status === 'completed' && item.source_type === 'editor')
-      : null;
     state.amendmentBaseTerms = parent ? prepareTermsForEditor(parent.terms, { fromExisting: true }) : null;
     state.customTerms = cloneJson(contract.terms?.custom_terms || []);
     renderEditor();
     return;
   }
   renderPreview(contract, false);
+  } catch (error) { if (owner.isCurrent()) showAlert(normalizeError(error)); }
 }
 
 function renderPreview(contract, unsaved) {
@@ -1362,6 +1431,7 @@ function fileExtension(file) {
 function openUpload() {
   if (state.busy || !state.contractsLoaded || !state.employee) return;
   requestContractTransition(() => {
+  state.detailRevision++;
   if (hasUnsavedContractChanges()) {
     resetContractEditTracking();
     state.editing = null;
@@ -1457,7 +1527,7 @@ async function boot() {
       redirectUrl: 'index.html'
     });
     if (!runtime.ok) return;
-    await Promise.all([loadCompany(), loadEmployees()]);
+    await loadEmployees();
     renderEmployeeSelect();
     await loadContracts();
     document.getElementById('backButton').textContent = state.admin && !state.forceSelf ? '직원관리로' : '마이페이지로';

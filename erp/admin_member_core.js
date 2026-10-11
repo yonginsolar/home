@@ -9620,6 +9620,64 @@ function getDividendManageSelectedBatch() {
     return g_dividend_batch_state.batches.find((batch) => String(batch.id) === String(selectedId)) || null;
 } // End of getDividendManageSelectedBatch
 
+let g_dividend_calculation_settings = null;
+let g_dividend_settings_request = 0;
+let g_dividend_settings_saving = false;
+let g_dividend_settings_baseline = null;
+
+function dividendMethodLabel(method) {
+    return ({ MONTH_END_SHARES: '월말 출자잔액의 월 좌수 합계', MONTH_END_BALANCE: '월말 출자잔액 합계', DAILY_BALANCE: '입금일별 보유일수' })[method] || '산출 방법 미등록';
+}
+
+async function loadDividendCalculationSettings(preserveDraft = false) {
+    const request = ++g_dividend_settings_request;
+    const methodEl = document.getElementById('dividendCalculationMethod');
+    const ruleEl = document.getElementById('dividendCalculationRule');
+    const before = JSON.stringify([methodEl?.value, ruleEl?.value]);
+    const { data, error } = await _supabase.rpc('dividend_calculation_settings');
+    if (request !== g_dividend_settings_request) return;
+    const status = document.getElementById('dividendCalculationSettingStatus');
+    if (error) { if (status) status.innerText = '산출 방법을 불러오지 못했습니다. 배당 회차 탭을 다시 열어 주세요.'; return; }
+    g_dividend_calculation_settings = data;
+    if (!preserveDraft && (g_dividend_settings_baseline === null || before === g_dividend_settings_baseline)
+        && before === JSON.stringify([methodEl?.value, ruleEl?.value])) {
+        if (methodEl) methodEl.value = data?.method || '';
+        if (ruleEl) ruleEl.value = data?.rule_basis || '';
+        g_dividend_settings_baseline = JSON.stringify([methodEl?.value, ruleEl?.value]);
+    }
+    if (status) status.innerText = data?.configured
+        ? `${dividendMethodLabel(data.method)} · 출자 1좌 ${formatDividendExportMoney(data.unit)}`
+        : '이 조합의 규약에 맞는 산출 방법을 선택하고 저장해 주세요.';
+    const help = document.getElementById('dividendCapitalMethodHelp');
+    if (help) help.innerText = data?.method === 'MONTH_END_SHARES'
+        ? '매월 말 출자잔액을 1좌 금액으로 나누고 소수점 이하를 버린 월 좌수를 합산합니다.'
+        : data?.method === 'MONTH_END_BALANCE' ? '매월 말 출자잔액을 합산하여 계산합니다.'
+        : data?.method === 'DAILY_BALANCE' ? '입금일별 보유일수를 연도별 실제 일수로 나누어 계산합니다.' : '산출 방법을 먼저 등록해 주세요.';
+}
+
+async function saveDividendCalculationSettings() {
+    if (g_dividend_settings_saving) return;
+    if (!g_dividend_calculation_settings) { await loadDividendCalculationSettings(); return; }
+    const method = getDividendBatchFormValue('dividendCalculationMethod');
+    const rule = getDividendBatchFormValue('dividendCalculationRule');
+    if (!method || !rule) return myAlert('산출 방법과 규약 근거를 입력해 주세요.', 'warning');
+    g_dividend_settings_saving = true;
+    try {
+        const { data, error } = await _supabase.rpc('dividend_calculation_settings', {
+            p_method: method, p_rule_basis: rule, p_expected_revision: g_dividend_calculation_settings.revision
+        });
+        if (error) throw error;
+        g_dividend_calculation_settings = data;
+        g_dividend_settings_baseline = JSON.stringify([method, rule]);
+        document.getElementById('dividendCalculationSettingStatus').innerText = `${dividendMethodLabel(data.method)} 저장됨 · 출자 1좌 ${formatDividendExportMoney(data.unit)}`;
+        await refreshDividendCapitalPoolPreview();
+    } catch (error) {
+        if (error.code === 'PT409') await loadDividendCalculationSettings(true);
+        myAlert('산출 방법 저장 실패: ' + error.message, 'error');
+    }
+    finally { g_dividend_settings_saving = false; }
+}
+
 function getDividendBatchFormValue(id) {
     return String(document.getElementById(id)?.value || '').trim();
 } // End of getDividendBatchFormValue
@@ -9633,10 +9691,7 @@ function calculateDividendCapitalPoolFromRate(capitalAnnualRateBasisTotal, capit
     const basisTotal = normalizeDividendExportNumber(capitalAnnualRateBasisTotal);
     const rate = normalizeDividendExportNumber(capitalRatePercent);
     if (basisTotal <= 0 || rate <= 0) return 0;
-    // 출자금 배당 요율은 연 요율이다. DB helper는 각 입금 원장을 달력 연도별로
-    // 나누고 해당 연도의 실제 일수(평년 365일, 윤년 366일)로 일할 계산한다.
-    // 첫 배당처럼 여러 해가 포함되어도 각 연도분을 합산한 기준액을 사용해야
-    // 선택 기간이 길어졌다는 이유로 예상 배당액이 오히려 줄어들지 않는다.
+    // The server provides the annual-rate basis for the cooperative's saved method.
     return Math.trunc(basisTotal * (rate / 100));
 } // End of calculateDividendCapitalPoolFromRate
 
@@ -9650,24 +9705,16 @@ async function fetchDividendCapitalBasisSummary(capitalStart, capitalEnd) {
     const coopId = await getAdminMemberCoopId();
     if (!coopId) throw new Error('현재 조합을 확인할 수 없습니다.');
 
-    const { data, error } = await _supabase.rpc('dividend_get_capital_annual_rate_basis_rows', {
+    const { data, error } = await _supabase.rpc('dividend_capital_basis_summary', {
         p_coop_id: coopId,
         p_basis_start: safeCapitalStart,
-        p_basis_end: safeCapitalEnd,
-        p_statuses: DIVIDEND_CAPITAL_STATUSES
+        p_basis_end: safeCapitalEnd
     });
 
     if (error) throw error;
 
-    const rows = Array.isArray(data) ? data : [];
-    return rows.reduce((summary, row) => {
-        summary.memberCount += 1;
-        summary.paidTotal += normalizeDividendExportNumber(row.paid_amount);
-        summary.weightedTotal += normalizeDividendExportNumber(row.weighted_amount_days);
-        summary.averageTotal += normalizeDividendExportNumber(row.average_amount);
-        summary.annualRateBasisTotal += normalizeDividendExportNumber(row.annual_rate_basis_amount);
-        return summary;
-    }, { paidTotal: 0, weightedTotal: 0, averageTotal: 0, annualRateBasisTotal: 0, memberCount: 0 });
+    if (!data || !data.method) throw new Error('배당 산출 기준을 확인하지 못했습니다.');
+    return data;
 } // End of fetchDividendCapitalBasisSummary
 
 async function refreshDividendCapitalPoolPreview() {
@@ -9698,7 +9745,7 @@ async function refreshDividendCapitalPoolPreview() {
         if (token !== g_dividend_capital_preview_token) return;
         const capitalPool = calculateDividendCapitalPoolFromRate(capitalBasis.annualRateBasisTotal, rate);
         previewEl.innerText = formatDividendExportMoney(capitalPool);
-        basisEl.innerText = `연환산 출자금 ${formatDividendExportMoney(capitalBasis.annualRateBasisTotal)} × 연 ${rate}% · 대상 ${capitalBasis.memberCount.toLocaleString('ko-KR')}명`;
+        basisEl.innerText = `${dividendMethodLabel(capitalBasis.method)} · 연 요율 적용 기준액 ${formatDividendExportMoney(capitalBasis.annualRateBasisTotal)} × 연 ${rate}% · 대상 ${Number(capitalBasis.memberCount).toLocaleString('ko-KR')}명`;
     } catch (error) {
         if (token !== g_dividend_capital_preview_token) return;
         CoopSafeLog.warn("출자금 배당 재원 미리보기 실패:", error);
@@ -9738,7 +9785,7 @@ function resetDividendBatchCreateForm() {
 function renderDividendBatchSelectedPanel(batch) {
     document.getElementById('dividendBatchSelectedTitle').innerText = batch?.title || '선택된 회차 없음';
     document.getElementById('dividendBatchSelectedMeta').innerText = batch
-        ? `${batch.fiscal_year}년 · ${formatDividendExportDateValue(batch.period_start)} ~ ${formatDividendExportDateValue(batch.period_end)}`
+        ? `${batch.fiscal_year}년 · ${formatDividendExportDateValue(batch.period_start)} ~ ${formatDividendExportDateValue(batch.period_end)} · ${batch.capital_calculation_method ? dividendMethodLabel(batch.capital_calculation_method) + (batch.capital_share_unit_snapshot ? ' (1좌 ' + formatDividendExportMoney(batch.capital_share_unit_snapshot) + ')' : '') : '기존 회차 산출 기준'}`
         : '회차를 선택하면 총회 승인과 확정을 진행할 수 있습니다.';
     document.getElementById('dividendBatchSelectedStatus').innerText = batch?.status || '-';
 
@@ -9974,6 +10021,7 @@ async function initializeDividendBatchTab() {
         g_dividend_batch_state.initialized = true;
         resetDividendBatchCreateForm();
     }
+    if (!g_dividend_calculation_settings) await loadDividendCalculationSettings();
     await fetchDividendGeneralAssemblyMinutes(false);
     await fetchDividendManageBatches(false);
 } // End of initializeDividendBatchTab
@@ -9986,7 +10034,7 @@ async function fetchDividendManageBatches(showToast = false) {
 
     const { data: batches, error } = await scopeAdminTenant(_supabase
         .from('coop_dividend_batches')
-        .select('id,fiscal_year,title,period_start,period_end,is_first_dividend,capital_basis_start,capital_basis_end,usage_basis_start,usage_basis_end,capital_dividend_pool,usage_dividend_pool,total_gross_amount,income_tax_rate,local_income_tax_rate,status,minutes_doc_id,general_meeting_date,general_meeting_agenda,general_meeting_resolution_result,payment_due_date,account_change_deadline,payment_accounts_locked_at,created_at,updated_at'))
+        .select('id,fiscal_year,title,period_start,period_end,is_first_dividend,capital_basis_start,capital_basis_end,usage_basis_start,usage_basis_end,capital_dividend_pool,usage_dividend_pool,total_gross_amount,income_tax_rate,local_income_tax_rate,status,minutes_doc_id,general_meeting_date,general_meeting_agenda,general_meeting_resolution_result,payment_due_date,account_change_deadline,payment_accounts_locked_at,capital_calculation_method,capital_share_unit_snapshot,created_at,updated_at'))
         .order('fiscal_year', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(100);
@@ -10087,6 +10135,8 @@ async function createDividendBatch() {
         usage_basis_start: usageStart,
         usage_basis_end: usageEnd,
         capital_dividend_pool: Math.trunc(capitalPool),
+        capital_annual_rate_percent: capitalRate,
+        capital_settings_revision: capitalBasis.settingsRevision,
         usage_dividend_pool: 0,
         income_tax_rate: incomeTaxRate,
         local_income_tax_rate: localIncomeTaxRate,
@@ -10094,7 +10144,7 @@ async function createDividendBatch() {
     };
     if (coopId) payload.coop_id = coopId;
 
-    myConfirm(`${title} 회차를 생성하시겠습니까?\n\n출자금 배당 요율: 연 ${capitalRate}%\n연환산 출자금: ${formatDividendExportMoney(capitalBasis.annualRateBasisTotal)}\n예상 출자금 배당 총액: ${formatDividendExportMoney(capitalPool)}\n이용고 배당은 수동 지급 원장을 불러와 계산합니다.`, async () => {
+    myConfirm(`${title} 회차를 생성하시겠습니까?\n\n산출 방법: ${dividendMethodLabel(capitalBasis.method)}\n출자금 배당 요율: 연 ${capitalRate}%\n연 요율 적용 기준액: ${formatDividendExportMoney(capitalBasis.annualRateBasisTotal)}\n예상 출자금 배당 총액: ${formatDividendExportMoney(capitalPool)}\n이용고 배당은 수동 지급 원장을 불러와 계산합니다.`, async () => {
         showLoading(true);
         const { data, error } = await _supabase
             .from('coop_dividend_batches')

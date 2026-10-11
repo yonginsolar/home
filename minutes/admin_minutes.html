@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.2.76
+Version: v1.2.77
 Change: 2026-10-06 - Separate internal/external official notices, retaining explicit publication.
 -->
 <html lang="ko">
@@ -11,7 +11,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>회의·문서 관리자 대시보드</title>
-    <script>console.log('[Version] v1.2.76 | admin_minutes.html');</script>
+    <script>console.log('[Version] v1.2.77 | admin_minutes.html');</script>
     <script src="../shared/official_notice.js?v=1.0.0"></script>
     <style>
         :root { --admin-bg: #fffbeb; --primary: #2563eb; }
@@ -646,7 +646,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
     <script src="/erp/erp_runtime_guard.js?v=20261009-1"></script>
     <script type="module">
-        import { MinutesService } from './MinutesService.js?v=1.0.56';
+        import { MinutesService } from './MinutesService.js?v=1.0.57';
         import { SIGNATURE_PREVIEW_BUCKET, createSignaturePreviewBlob, getSignaturePreviewPath } from './signature_preview.js?v=1.0.0';
         import { supabase } from '../shared/supabase-client.js';
 
@@ -867,11 +867,42 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         } // End of createOfficialMinuteWithDocNoRetry
 
         let editTargetId = null;
+        let noticeEditRequest = 0;
         let minuteEditTargetId = null;
+        let minuteEditRequest = 0;
+        let minutePreviewRequest = 0;
+        let minuteEditBaseline = '';
+        let minuteEditSaving = false;
 
-        function openNoticeEdit(id) {
-            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
-            if (!item) return;
+        function minuteEditSnapshot() {
+            return JSON.stringify([
+                document.getElementById('minute-edit-title')?.value || '',
+                document.getElementById('minute-edit-content')?.value || ''
+            ]);
+        }
+
+        async function allowMinuteEditTransition() {
+            if (minuteEditSaving) return false;
+            syncMinuteEditSourceFromVisual();
+            return !minuteEditTargetId || minuteEditSnapshot() === minuteEditBaseline
+                || await showConfirm('저장하지 않은 의사록 수정 내용이 있습니다. 이 내용을 버릴까요?');
+        }
+
+        async function readNoticeDetails(id) {
+            const { data, error } = await MinutesService.getNoticeDetails(id);
+            if (error || !data) throw new Error(error?.message || '공문 내용을 불러오지 못했습니다.');
+            return data;
+        }
+
+        async function openNoticeEdit(id) {
+            const request = ++noticeEditRequest;
+            const baseline = JSON.stringify([document.getElementById('edit-title').value, document.getElementById('edit-content').value]);
+            let item;
+            try { item = await readNoticeDetails(id); }
+            catch (error) { if (request === noticeEditRequest) showToast(error.message); return; }
+            if (request !== noticeEditRequest || baseline !== JSON.stringify([document.getElementById('edit-title').value, document.getElementById('edit-content').value])) return;
+            const listed = noticeItems.find(n => String(n.approval?.id) === String(id));
+            if (listed) Object.assign(listed, item);
             const approval = item.approval || {};
             const notice = item.notice || null;
             editTargetId = id;
@@ -882,6 +913,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         window.openNoticeEdit = openNoticeEdit;
 
         window.closeEdit = () => {
+            noticeEditRequest++;
             document.getElementById('editModal').classList.remove('show');
             editTargetId = null;
         };
@@ -919,13 +951,19 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         };
 
         window.openMinuteEdit = async (id, allow = true) => {
+            if (minuteEditSaving) return;
+            const request = ++minuteEditRequest;
             if (!allow) {
                 showToast('이미 서명이 시작된 문서는 수정할 수 없습니다.');
                 return;
             }
+            if (!await allowMinuteEditTransition() || request !== minuteEditRequest) return;
+            const snapshot = minuteEditSnapshot();
+            const isCurrent = () => request === minuteEditRequest && snapshot === minuteEditSnapshot();
             let minute = minutesCache?.get(id);
             if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
                 const { data, error } = await MinutesService.getMinuteById(id);
+                if (!isCurrent()) return;
                 if (error || !data) {
                     showToast('의사록 정보를 불러오지 못했습니다.');
                     return;
@@ -934,7 +972,9 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 minutesCache.set(id, minute);
             }
 
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(id);
+            const { data: signatures, error: signatureError } = await MinutesService.listSignaturesByMinuteId(id);
+            if (!isCurrent()) return;
+            if (signatureError) { showToast('서명 상태를 확인하지 못했습니다. 다시 시도해 주세요.'); return; }
             if (Array.isArray(signatures) && signatures.length > 0) {
                 showToast('이미 서명이 시작된 문서는 수정할 수 없습니다.');
                 await loadMinutes();
@@ -946,10 +986,13 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             document.getElementById('minute-edit-content').value = minute.content || '';
             initializeMinuteEditEditor();
             syncMinuteEditVisualFromSource();
+            minuteEditBaseline = minuteEditSnapshot();
             document.getElementById('minuteEditModal').classList.add('show');
         };
 
-        window.closeMinuteEdit = () => {
+        window.closeMinuteEdit = async (discard = false) => {
+            const request = ++minuteEditRequest;
+            if (minuteEditSaving || (!discard && !await allowMinuteEditTransition()) || request !== minuteEditRequest) return;
             document.getElementById('minuteEditModal').classList.remove('show');
             const titleEl = document.getElementById('minute-edit-title');
             const sourceEl = document.getElementById('minute-edit-content');
@@ -958,10 +1001,12 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             if (sourceEl) sourceEl.value = '';
             if (visualEl) visualEl.innerHTML = '';
             minuteEditTargetId = null;
+            minuteEditBaseline = '';
         };
 
         window.saveMinuteEdit = async () => {
-            if (!minuteEditTargetId) return;
+            if (!minuteEditTargetId || minuteEditSaving) return;
+            const targetId = minuteEditTargetId;
             syncMinuteEditSourceFromVisual();
             const title = (document.getElementById('minute-edit-title')?.value || '').trim();
             const rawContent = document.getElementById('minute-edit-content')?.value || '';
@@ -975,23 +1020,32 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
                 return;
             }
 
-            const { data: signatures } = await MinutesService.listSignaturesByMinuteId(minuteEditTargetId);
+            minuteEditSaving = true;
+            try {
+            const { data: signatures, error: signatureError } = await MinutesService.listSignaturesByMinuteId(targetId);
+            if (signatureError) { showToast('서명 상태를 확인하지 못했습니다. 다시 시도해 주세요.'); return; }
             if (Array.isArray(signatures) && signatures.length > 0) {
                 showToast('이미 서명이 시작된 문서는 수정할 수 없습니다.');
-                closeMinuteEdit();
                 await loadMinutes();
                 return;
             }
 
-            const { error } = await MinutesService.updateMinute(minuteEditTargetId, { title, content });
+            const { error } = await MinutesService.updateMinute(targetId, { title, content });
             if (error) {
                 showToast(error.message || '문구 수정 실패');
                 return;
             }
 
             showToast('문구가 수정되었습니다.');
-            closeMinuteEdit();
+            // An edit made while the save was in flight remains an unsaved draft.
+            minuteEditBaseline = JSON.stringify([title, rawContent]);
+            if (minuteEditSnapshot() === minuteEditBaseline) {
+                minuteEditSaving = false;
+                await closeMinuteEdit(true);
+            }
             await loadMinutes();
+            } catch (_) { showToast('의사록을 저장하지 못했습니다. 입력 내용은 유지됩니다.'); }
+            finally { minuteEditSaving = false; }
         };
 
         function openAttachPicker(id) {
@@ -2902,8 +2956,10 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
 
         async function openNoticePreview(id) {
             const request = ++noticePreviewRequest;
-            const item = noticeItems.find(n => String(n.approval?.id) === String(id));
-            if (!item) return;
+            let item;
+            try { item = await readNoticeDetails(id); }
+            catch (error) { if (request === noticePreviewRequest) showToast(error.message); return; }
+            if (request !== noticePreviewRequest) return;
             const approval = item.approval || {};
             const notice = item.notice || null;
             currentPreviewNoticeState = null;
@@ -2959,8 +3015,8 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         window.printPreviewNotice = async (selectedItem = null) => {
             if (noticePrintPending) return;
             const state = selectedItem || currentPreviewNoticeState;
-            const approval = state?.approval || null;
-            const notice = state?.notice || null;
+            let approval = state?.approval || null;
+            let notice = state?.notice || null;
             if (!approval && !notice) {
                 showToast('출력할 공문을 찾지 못했습니다.');
                 return;
@@ -2969,6 +3025,9 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             if (!printWindow) { showToast('출력 창을 열려면 브라우저의 팝업 차단을 해제해 주세요.'); return; }
             noticePrintPending = true;
             try {
+                const current = await readNoticeDetails(approval.id);
+                approval = current.approval;
+                notice = current.notice;
                 const title = notice?.title || approval?.title || '공문';
                 const noticeHtml = await buildNoticeTemplateHtml(approval || {}, notice || null);
                 const footerHtml = await buildNoticePrintFooterHtml(approval || {});
@@ -2986,9 +3045,11 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         };
 
         window.openMinutePreview = async (id) => {
+            const request = ++minutePreviewRequest;
             let minute = minutesCache?.get(id);
             if (!minute || !Object.prototype.hasOwnProperty.call(minute,'content')) {
                 const { data, error } = await MinutesService.getMinuteById(id);
+                if (request !== minutePreviewRequest) return;
                 if (error || !data) {
                     showToast('의사록 정보를 불러오지 못했습니다.');
                     return;
@@ -3011,6 +3072,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             const inlineBodyHtml = normalized ? await injectInlineSignatureImages(safeBodyHtml, minute, signatures || []) : safeBodyHtml;
             const certificationHtml = buildMinuteCertificationPreviewHtml(minute, signatures || []);
             const signatureHtml = await buildMinuteSignaturePreviewHtml(minute, signatures || []);
+            if (request !== minutePreviewRequest) return;
             document.getElementById('minutePreviewTitle').innerText = minute.title || '의사록';
             document.getElementById('minutePreviewMeta').innerText = `${getDocTypeLabel(minute.doc_type)} | ${formatMinutesAdminKstDate(minute.created_at)}`;
             document.getElementById('minutePreviewBody').innerHTML = `
@@ -3049,6 +3111,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             } catch (e) {}
         };
         window.closeMinutePreview = () => {
+            minutePreviewRequest++;
             document.getElementById('minutePreviewModal').classList.remove('show');
         };
 
@@ -3304,8 +3367,8 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
         window.applyNoticeChannels = async (id) => {
             const item = noticeItems.find(n => String(n.approval?.id) === String(id));
             if (!item) return;
-            const approval = item.approval || {};
-            const notice = item.notice || null;
+            let approval = item.approval || {};
+            let notice = item.notice || null;
             const key = getNoticeApprovalKey(approval.id);
             const state = getOrInitNoticeChannels(key, {});
             const noticeOn = !!state.notice;
@@ -3320,10 +3383,14 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             }
 
             const includeAttach = !!noticeAttachMap[key];
-            const fileUrls = resolveNoticeFileUrls(approval, notice, includeAttach);
-
             noticeApplyPending.add(key);
             try {
+            const current = await readNoticeDetails(id);
+            approval = current.approval;
+            notice = current.notice;
+            const currentPurposeError = OfficialNotice.validateChannels(approval.notice_usage, noticeOn, documentOn);
+            if (currentPurposeError) { showToast(currentPurposeError); return; }
+            const fileUrls = resolveNoticeFileUrls(approval, notice, includeAttach);
             const { error: noticeError } = await syncNoticePortalChannel(approval, notice, noticeOn, fileUrls);
             if (noticeError) {
                 showToast(noticeError.message || '공지 채널 반영 실패');
@@ -3347,7 +3414,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             const request = ++noticeListRequest;
             const container = document.getElementById('notice-list-area');
             if (!container) return;
-            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals();
+            const { data: approvals, error } = await MinutesService.listCompletedNoticeApprovals({ metadataOnly: true });
             if (request !== noticeListRequest) return;
             if (error) {
                 container.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">조회 오류</div>';
@@ -3359,7 +3426,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             }
 
             const approvalIds = approvals.map(a => a.id).filter(Boolean);
-            const { data: notices, error: noticesError } = await MinutesService.listNoticesByApprovalIds(approvalIds);
+            const { data: notices, error: noticesError } = await MinutesService.listNoticesByApprovalIds(approvalIds, { metadataOnly: true });
             const noticeMap = new Map((notices || []).map(n => [String(n.source_approval_id), n]));
             const docNos = approvals
                 .map(a => String(a.doc_no || '').trim())
@@ -3609,6 +3676,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             }
 
             // 2. 전체 현직 임원 목록 미리 로드 (분모 계산용)
+            if (ADMIN_MINUTES_SCOPE !== 'notices') {
             allOfficials = await MinutesService.getOfficials();
             renderSignerOptions(allOfficials, document.getElementById('in-doc-type')?.value || 'MINUTES');
             setStructuredMinuteDateDefaults();
@@ -3618,6 +3686,7 @@ Change: 2026-10-06 - Separate internal/external official notices, retaining expl
             });
             initializeMinuteEditor();
             initializeMinuteEditModalClose();
+            }
             applyAdminMinutesScopeUi();
 
             // 문서 유형 변경 시 서명 체크 기본값 조정
