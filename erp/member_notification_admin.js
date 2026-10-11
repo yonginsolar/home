@@ -66,7 +66,7 @@
  }
  function renderSettings(){
   const ownChannel=events.find(x=>x.channel_name)?.channel_name;
-  $('notification-content').innerHTML='<div class="notification-channel border rounded p-3 mb-3"><strong>카카오 채널</strong><span class="ms-2">'+esc(ownChannel||'연결되지 않음')+'</span><span class="ms-3 text-secondary">문자 대체발송: 꺼짐</span><p class="mt-2 mb-0 notification-routing">텔레그램 연결 시 먼저 발송합니다. 일시적인 실패는 한 번 재시도하며, 연결되지 않은 경우에만 아래 설정에 따라 카톡을 발송합니다. 접수 여부가 불확실하면 중복 발송을 막기 위해 재전송을 멈추고 결과를 확인합니다.</p></div>'+
+  $('notification-content').innerHTML='<div class="notification-channel border rounded p-3 mb-3"><strong>카카오 채널</strong><span class="ms-2">'+esc(ownChannel||'연결되지 않음')+'</span><span class="ms-3 text-secondary">문자 대체발송: 꺼짐</span><p class="mt-2 mb-0 notification-routing">텔레그램 연결 시 먼저 발송합니다. 일시적인 실패는 한 번 재시도하며, 연결되지 않은 경우에만 아래 설정에 따라 카톡을 발송합니다. 접수 여부가 불확실하면 중복 발송을 막기 위해 재전송을 멈추고 결과를 확인합니다. 법정대리인 동의 요청·접수는 카톡으로 발송합니다. 검수·연동 대기 알림은 아직 발송하지 않습니다.</p></div>'+
    '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>알림</th><th>카톡 사용</th><th>설정 상태</th><th>문구</th><th>저장</th></tr></thead><tbody>'+events.map(e=>{
     const draft=drafts.get(e.event_key),value=draft?draft.value:e.requested_enabled,locked=!ctx.can_edit||!e.ready;
     return '<tr><td>'+esc(e.label)+'</td><td><label class="form-check form-switch"><input type="checkbox" class="form-check-input" data-erp-query-control data-notification-setting="'+esc(e.event_key)+'" aria-label="'+esc(e.label)+' 카톡 사용" '+(value?'checked ':'')+(locked?'disabled':'')+'></label></td>'+
@@ -124,7 +124,8 @@
    const data=result.data;
    const render=()=>{
     const channel=dialog.dataset.channel,text=data[channel];
-    $('notification-message-state').textContent=channel==='kakao'?({review_pending:'검수 중인 문안',not_connected:'이 조합의 카카오 채널이 연결되지 않았습니다.',not_configured:'템플릿 설정이 필요합니다.',not_sendable:'사용 가능한 승인 템플릿을 확인할 수 없습니다.',approved:'연결된 승인 문안'}[data.source]||''):'';
+    $('notification-message-state').textContent=channel==='kakao'?({review_pending:'검수 중인 문안',not_connected:'이 조합의 카카오 채널이 연결되지 않았습니다.',not_configured:'템플릿 설정이 필요합니다.',not_sendable:'사용 가능한 승인 템플릿을 확인할 수 없습니다.',approved:'연결된 승인 문안'}[data.source]||''):
+     (data.source==='review_pending'||['guardian_request','guardian_complete'].includes(key)?'연동 준비 문안':'');
     $('notification-message-body').textContent=text||'이 알림은 해당 채널로 발송하지 않습니다.';
     dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.classList.toggle('active',b.dataset.previewChannel===channel);b.setAttribute('aria-selected',String(b.dataset.previewChannel===channel));});
    };
