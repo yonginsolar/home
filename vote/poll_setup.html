@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.1
-Change: 2026-05-16 - Add preference poll create/edit page for admin users.
+Version: v1.0.2
+Change: 2026-10-11 - Preserve held poll drafts and use the existing server preference authority.
 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
-  <script src="/erp/workspace_resume.js?v=20261010-9"></script>
+  <script src="/erp/workspace_resume.js?v=20261011-1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표 설정</title>
-    <script>console.log('[Version] v1.0.1 | poll_setup.html');</script>
+    <script>console.log('[Version] v1.0.2 | poll_setup.html');</script>
     <style>
         :root {
             --bg: #f4f7fb;
@@ -220,9 +220,9 @@ Change: 2026-05-16 - Add preference poll create/edit page for admin users.
 <body>
 <div class="page">
     <div class="topbar">
-        <button class="btn ghost" type="button" onclick="location.href='../erp/vote_hub.html'">← 선거관리 허브</button>
+        <button class="btn ghost" type="button" onclick="ErpWorkspaceResume.navigate('../erp/vote_hub.html')">← 선거관리 허브</button>
         <div class="topbar-actions">
-            <button class="btn" type="button" onclick="location.href='poll_admin.html'">선호도 투표 관리</button>
+            <button class="btn" type="button" onclick="ErpWorkspaceResume.navigate('poll_admin.html')">선호도 투표 관리</button>
             <button class="btn" type="button" id="btnPortalPreview">조합원 포털 보기</button>
         </div>
     </div>
@@ -322,7 +322,7 @@ Change: 2026-05-16 - Add preference poll create/edit page for admin users.
 </div>
 
 <script type="module">
-    import { PreferencePollService, derivePreferencePollPhase, supabase } from './PreferencePollService.js';
+    import { PreferencePollService, derivePreferencePollPhase, supabase } from './PreferencePollService.js?v=20261011-2';
 
     const service = new PreferencePollService();
     const urlParams = new URLSearchParams(window.location.search || '');
@@ -512,7 +512,13 @@ Change: 2026-05-16 - Add preference poll create/edit page for admin users.
 
     async function loadPoll() {
         if (!currentPollId) return;
-        const { poll, options } = await service.getAdminPoll(currentPollId);
+        const inputSnapshot = JSON.stringify(readFormPayload());
+        const owner = await service.initializeAdminContext();
+        if (!owner?.canAdmin) throw new Error('ERP_TASK_ACCESS_DENIED');
+        const { poll, options } = await service.getAdminPoll(currentPollId, { includeRewardPolicy: false });
+        const access = await service.initializeAdminContext();
+        if (!access?.canAdmin || access.user.id !== owner.user.id || access.coopId !== owner.coopId
+            || window.frameElement?.hidden || inputSnapshot !== JSON.stringify(readFormPayload())) return;
         if (!poll) {
             showAlert('투표 없음', '선택한 선호도 투표를 찾지 못했습니다.');
             return;
@@ -614,7 +620,7 @@ Change: 2026-05-16 - Add preference poll create/edit page for admin users.
         });
         await loadPoll();
         window.ErpWorkspaceResume.register({modules:['vote'],authorize:async()=>{
-            const result=await supabase.rpc('is_election_admin');if(result.error)throw result.error;return result.data===true;
+            return service.canAdmin();
         },refresh:async()=>{}});
     }
 

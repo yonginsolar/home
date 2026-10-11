@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.2
-Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
+Version: v1.0.3
+Change: 2026-10-11 - Restore held poll drafts and guard stale selection responses with server authority.
 -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
-  <script src="/erp/workspace_resume.js?v=20261010-9"></script>
+  <script src="/erp/workspace_resume.js?v=20261011-1"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
     <title>선호도 투표 관리</title>
-    <script>console.log('[Version] v1.0.2 | poll_admin.html');</script>
+    <script>console.log('[Version] v1.0.3 | poll_admin.html');</script>
     <style>
         :root {
             --bg: #f5f7fb;
@@ -95,9 +95,9 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
 <body>
 <div class="page">
     <div class="topbar">
-        <button class="btn" type="button" onclick="location.href='../erp/vote_hub.html'">← 선거관리 허브</button>
+        <button class="btn" type="button" onclick="ErpWorkspaceResume.navigate('../erp/vote_hub.html')">← 선거관리 허브</button>
         <div class="topbar-actions">
-            <button class="btn primary" type="button" onclick="location.href='poll_setup.html'">+ 새 선호도 투표</button>
+            <button class="btn primary" type="button" onclick="ErpWorkspaceResume.navigate('poll_setup.html')">+ 새 선호도 투표</button>
             <button class="btn" type="button" onclick="location.href='index.html?portal=1'">조합원 포털 보기</button>
         </div>
     </div>
@@ -147,7 +147,7 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
 </div>
 
 <script type="module">
-    import { PreferencePollService, derivePreferencePollPhase, supabase } from './PreferencePollService.js';
+    import { PreferencePollService, derivePreferencePollPhase, supabase } from './PreferencePollService.js?v=20261011-2';
 
     const service = new PreferencePollService();
     const pollListEl = document.getElementById('pollList');
@@ -170,6 +170,20 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
 
     let pollRows = [];
     let selectedPollId = '';
+    let pollReadRevision = 0, pollDetailPending = null, pollOperationBusy = false, pollResumePreparing = false;
+    let pollListRevision = 0;
+
+    function isPollViewVisible() {
+        return !window.frameElement?.hidden || pollResumePreparing;
+    }
+
+    function setPollActionsDisabled(disabled) {
+        [btnEditPollEl, btnPublishPollEl, btnClosePollEl].forEach(button => { button.disabled = disabled; });
+    }
+
+    function samePollAccess(access, owner) {
+        return access?.canAdmin === true && access.user?.id === owner?.user?.id && access.coopId === owner?.coopId;
+    }
 
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -261,18 +275,21 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
 
         pollListEl.querySelectorAll('[data-poll-id]').forEach((card) => {
             card.addEventListener('click', () => {
+                if (pollOperationBusy) return;
                 selectedPollId = String(card.dataset.pollId || '');
                 renderPollList();
-                renderSelectedPoll().catch((error) => {
-                    console.error('renderSelectedPoll failed:', error);
-                    showInlineMessage(resultWrapEl, error.message || '결과를 불러오지 못했습니다.');
-                });
+                void renderSelectedPoll();
             });
         });
     }
 
-    async function renderSelectedPoll() {
+    async function renderSelectedPoll({ force = false } = {}) {
+        const pollId = String(selectedPollId || '');
+        if (!force && pollDetailPending?.id === pollId) return pollDetailPending.promise;
+        const revision = ++pollReadRevision;
+        const isCurrent = () => revision === pollReadRevision && pollId === String(selectedPollId || '') && isPollViewVisible();
         if (!selectedPollId) {
+            setPollActionsDisabled(true);
             detailPanelEl.style.display = 'none';
             detailEmptyEl.style.display = 'block';
             return;
@@ -280,43 +297,75 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
 
         detailPanelEl.style.display = 'block';
         detailEmptyEl.style.display = 'none';
-
-        const { poll, options } = await service.getAdminPoll(selectedPollId);
+        setPollActionsDisabled(true);
+        detailTitleEl.textContent = '투표 정보를 불러오는 중입니다.';
+        detailMetaEl.textContent = detailPhaseEl.textContent = '';
+        summaryTotalEl.textContent = summarySubmittedEl.textContent = summaryPendingEl.textContent = '-';
+        resultWrapEl.textContent = '';
+        const request = { id: pollId, promise: null };
+        request.promise = (async () => {
+        try {
+        const owner = await service.initializeAdminContext();
+        if (!isCurrent()) return;
+        if (!owner?.canAdmin) throw new Error('ERP_TASK_ACCESS_DENIED');
+        const { poll, options } = await service.getAdminPoll(pollId, { includeRewardPolicy: false });
+        if (!isCurrent()) return;
         if (!poll) {
             showInlineMessage(resultWrapEl, '투표 정보를 찾을 수 없습니다.');
             return;
         }
         const phase = derivePreferencePollPhase(poll);
+        const result = ['CLOSED', 'SETTLED'].includes(phase) ? await service.getAdminResults(pollId) : null;
+        if (!isCurrent()) return;
+        const access = await service.initializeAdminContext();
+        if (!isCurrent()) return;
+        if (!samePollAccess(access, owner)) throw new Error('ERP_TASK_ACCESS_DENIED');
         detailTitleEl.textContent = poll.title || '무제 투표';
         detailMetaEl.innerHTML = `기간 ${escapeHtml(formatKst(poll.start_at))} ~ ${escapeHtml(formatKst(poll.end_at))}<br>옵션 ${options.length}개 / 최소 ${poll.min_choices}개 / 최대 ${poll.max_choices}개`;
         detailPhaseEl.textContent = phase;
         detailPhaseEl.className = `phase-badge ${getPhaseBadgeClass(phase)}`;
 
-        btnEditPollEl.onclick = () => { location.href = `poll_setup.html?id=${encodeURIComponent(poll.id)}`; };
+        btnEditPollEl.onclick = () => {
+            if (isCurrent() && !pollOperationBusy) ErpWorkspaceResume.navigate(`poll_setup.html?id=${encodeURIComponent(poll.id)}`);
+        };
         btnPublishPollEl.onclick = async () => {
+            if (!isCurrent() || pollOperationBusy) return;
             const ok = await showConfirm('대상자 확정 후 공개', '현재 조합의 정상 조합원 전체를 대상으로 공개하시겠습니까?');
-            if (!ok) return;
+            if (!ok || !isCurrent() || pollOperationBusy) return;
+            pollOperationBusy = true;
+            setPollActionsDisabled(true);
             try {
+                if (!samePollAccess(await service.initializeAdminContext(), owner) || !isCurrent()) throw new Error('ERP_TASK_ACCESS_DENIED');
                 await service.publishPoll(poll.id);
+                if (!isCurrent()) return;
                 await refresh();
                 selectedPollId = poll.id;
                 renderPollList();
-                await renderSelectedPoll();
             } catch (error) {
-                showAlert('공개 실패', error.message || '공개에 실패했습니다.');
+                if (isCurrent()) showAlert('공개 실패', error.message || '공개에 실패했습니다.');
+            } finally {
+                pollOperationBusy = false;
+                if (isPollViewVisible() && selectedPollId === poll.id) await renderSelectedPoll({ force: true });
             }
         };
         btnClosePollEl.onclick = async () => {
+            if (!isCurrent() || pollOperationBusy) return;
             const ok = await showConfirm('투표 강제 종료', '이 투표를 지금 종료할까요?');
-            if (!ok) return;
+            if (!ok || !isCurrent() || pollOperationBusy) return;
+            pollOperationBusy = true;
+            setPollActionsDisabled(true);
             try {
+                if (!samePollAccess(await service.initializeAdminContext(), owner) || !isCurrent()) throw new Error('ERP_TASK_ACCESS_DENIED');
                 await service.closePoll(poll.id);
+                if (!isCurrent()) return;
                 await refresh();
                 selectedPollId = poll.id;
                 renderPollList();
-                await renderSelectedPoll();
             } catch (error) {
-                showAlert('종료 실패', error.message || '종료에 실패했습니다.');
+                if (isCurrent()) showAlert('종료 실패', error.message || '종료에 실패했습니다.');
+            } finally {
+                pollOperationBusy = false;
+                if (isPollViewVisible() && selectedPollId === poll.id) await renderSelectedPoll({ force: true });
             }
         };
 
@@ -331,7 +380,6 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
             return;
         }
 
-        const result = await service.getAdminResults(poll.id);
         summaryTotalEl.textContent = Number(result?.total_voters || 0).toLocaleString('ko-KR');
         summarySubmittedEl.textContent = Number(result?.submitted_members || 0).toLocaleString('ko-KR');
         summaryPendingEl.textContent = Number(result?.pending_members || 0).toLocaleString('ko-KR');
@@ -371,10 +419,33 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
                 </tbody>
             </table>
         `;
+        } catch (error) {
+            if (!isCurrent()) return;
+            setPollActionsDisabled(true);
+            detailTitleEl.textContent = '투표 정보를 불러오지 못했습니다.';
+            showInlineMessage(resultWrapEl, error.message === 'ERP_TASK_ACCESS_DENIED' ? '접근 권한을 다시 확인해 주세요.' : '잠시 후 다시 시도해 주세요.');
+            const retry = document.createElement('button');
+            retry.type = 'button'; retry.className = 'btn'; retry.textContent = '다시 조회';
+            retry.onclick = () => { if (isCurrent()) void renderSelectedPoll(); };
+            resultWrapEl.append(retry);
+        } finally {
+            if (pollDetailPending === request) pollDetailPending = null;
+            if (isCurrent() && detailMetaEl.innerHTML && !pollOperationBusy) setPollActionsDisabled(false);
+        }
+        })();
+        pollDetailPending = request;
+        return request.promise;
     }
 
     async function refresh() {
-        pollRows = await service.listAdminPolls();
+        const revision = ++pollListRevision;
+        const owner = await service.initializeAdminContext();
+        if (!owner?.canAdmin) throw new Error('ERP_TASK_ACCESS_DENIED');
+        const rows = await service.listAdminPolls();
+        const access = await service.initializeAdminContext();
+        if (revision !== pollListRevision || !isPollViewVisible()) return;
+        if (!samePollAccess(access, owner)) throw new Error('ERP_TASK_ACCESS_DENIED');
+        pollRows = rows;
     }
 
     async function boot() {
@@ -397,9 +468,11 @@ Change: 2026-05-16 - Replace native alert/confirm usage with shared modal flow.
         renderPollList();
         await renderSelectedPoll();
         window.ErpWorkspaceResume.register({modules:['vote'],authorize:async()=>{
-            const result=await supabase.rpc('is_election_admin');if(result.error)throw result.error;return result.data===true;
-        },refresh:async()=>{
-            await refresh();renderPollList();await renderSelectedPoll();
+            return service.canAdmin();
+        },busy:()=>pollOperationBusy || modalBackdropEl.style.display === 'flex',refresh:async()=>{
+            pollResumePreparing = true;
+            try { await refresh();renderPollList();await renderSelectedPoll({ force: true }); }
+            finally { pollResumePreparing = false; }
         }});
     }
 

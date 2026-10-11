@@ -1,6 +1,6 @@
 /*
-Version: v1.0.1
-Change: 2026-05-16 - Fix preference poll admin save flow for tenant-scoped insert/upsert writes.
+Version: v1.0.2
+Change: 2026-10-11 - Use fresh server poll authority and explicitly defer unused reward reads.
 */
 import { supabase, resolveCurrentMemberProfileId } from './ElectionService.js';
 export { supabase };
@@ -80,27 +80,6 @@ async function getAuthUser() {
     return user || null;
 }
 
-async function hasAdminFallbackViaRpc() {
-    try {
-        const { data, error } = await supabase.rpc('is_election_admin');
-        if (error) return false;
-        return data === true;
-    } catch (_) {
-        return false;
-    }
-}
-
-function hasStoredErpFallback() {
-    try {
-        const user = JSON.parse(localStorage.getItem('erp_user') || 'null');
-        const permissionList = JSON.parse(localStorage.getItem('erp_permissions') || '[]');
-        const permissionSet = new Set(Array.isArray(permissionList) ? permissionList : []);
-        return !!(user && (user.role === 'admin' || user.role === 'admin_all' || permissionSet.has('member.admin')));
-    } catch (_) {
-        return false;
-    }
-}
-
 export class PreferencePollService {
     constructor() {
         this.currentUser = null;
@@ -122,21 +101,33 @@ export class PreferencePollService {
     }
 
     async canAdmin() {
-        this.currentUser = this.currentUser || await getAuthUser();
-        if (!this.currentUser) return false;
-        return (await hasAdminFallbackViaRpc()) || hasStoredErpFallback();
+        const context = await this.initializeAdminContext();
+        return context?.canAdmin === true;
     }
 
     async initializeAdminContext() {
-        this.currentUser = await getAuthUser();
-        if (!this.currentUser) return null;
-        this.currentCoopId = await getRuntimeCoopId();
-        if (!this.currentCoopId) return null;
-        const canAdmin = await this.canAdmin();
+        const user = await getAuthUser();
+        if (!user) {
+            this.currentUser = this.currentCoopId = null;
+            return null;
+        }
+        const [coop, authority] = await Promise.all([
+            supabase.rpc('get_my_coop_id'),
+            supabase.rpc('is_preference_poll_admin')
+        ]);
+        if (coop.error) throw coop.error;
+        if (authority.error) throw authority.error;
+        const currentUser = await getAuthUser();
+        if (!coop.data || !currentUser || currentUser.id !== user.id) {
+            this.currentUser = this.currentCoopId = null;
+            return null;
+        }
+        this.currentUser = currentUser;
+        this.currentCoopId = coop.data;
         return {
-            user: this.currentUser,
-            coopId: this.currentCoopId,
-            canAdmin
+            user: currentUser,
+            coopId: coop.data,
+            canAdmin: authority.data === true
         };
     }
 
@@ -179,7 +170,7 @@ export class PreferencePollService {
         return Array.isArray(data) ? data : [];
     }
 
-    async getAdminPoll(pollId) {
+    async getAdminPoll(pollId, { includeRewardPolicy = true } = {}) {
         if (!this.currentCoopId) this.currentCoopId = await getRuntimeCoopId();
         const [pollRes, optionRes, rewardRes] = await Promise.all([
             scopeByTenant(supabase.from('preference_polls').select('*'), this.currentCoopId)
@@ -188,10 +179,10 @@ export class PreferencePollService {
             scopeByTenant(supabase.from('preference_poll_options').select('*'), this.currentCoopId)
                 .eq('poll_id', pollId)
                 .order('sort_order', { ascending: true }),
-            scopeByTenant(supabase.from('vote_reward_policies').select('*'), this.currentCoopId)
+            includeRewardPolicy ? scopeByTenant(supabase.from('vote_reward_policies').select('*'), this.currentCoopId)
                 .eq('source_kind', 'PREFERENCE_POLL')
                 .eq('source_id', pollId)
-                .maybeSingle()
+                .maybeSingle() : Promise.resolve({ data: null, error: null })
         ]);
         if (pollRes.error) throw pollRes.error;
         if (optionRes.error) throw optionRes.error;

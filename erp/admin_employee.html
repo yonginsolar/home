@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.101
-Change: 2026-10-10 - Guard unsaved detail close and retain employee-specific contract navigation.
+Version: v1.0.102
+Change: 2026-10-11 - Load visible detail tabs on demand while preserving edits and server authority.
 -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.101 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.102 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -415,7 +415,7 @@ Change: 2026-10-10 - Guard unsaved detail close and retain employee-specific con
 
   <div class="d-flex align-items-center mb-3">
     <label class="me-2 fw-bold small">귀속월</label>
-    <input type="month" id="salaryMonth" class="form-control form-control-sm w-auto me-2" onchange="loadSalaryData()">
+    <input type="month" id="salaryMonth" class="form-control form-control-sm w-auto me-2" onchange="ensureEmployeeDetailTab('tabSalary', {force:true})">
     <button class="btn btn-sm btn-outline-dark" onclick="printSalaryAdmin()">🖨️ 명세서 인쇄</button>
   </div>
 
@@ -1010,6 +1010,7 @@ let salarySaveInFlight = false;
 let alertModal, confirmModal, settingsModal, inviteModal, detailModal, adminCertModal, loadingModal, ledgerModal, resignModal, orgChartModal, payrollImportModal, adminLeaveDetailModal, bulkLeaveModal;
 let hasCheckedExpired = false;
 let myInfo = null;
+let hrAuthorizedUserId = '';
 let permissionSet = new Set();
 let hrRuntimeProfile = 'legacy_full';
 let employeeModuleAccessSnapshot = null;
@@ -1020,15 +1021,101 @@ let inviteModuleAccessLoadToken = 0;
 let employeeNotificationSnapshot = null;
 let employeeNotificationSaveInFlight = false;
 const employeeDetailReadTokens = { modules: 0, approvedRights: 0, notifications: 0 };
-function beginEmployeeDetailRead(kind) {
+function beginEmployeeDetailRead(kind, {requireVisible = false} = {}) {
     const empId = String(currentEmpId || '').trim();
     const revision = employeeDetailRevision;
     const token = ++employeeDetailReadTokens[kind];
+    const owner = getHrSettingsOwner();
+    const tab = kind === 'notifications' ? 'tabNotificationAccess' : 'tabModuleAccess';
     return { empId, isCurrent: () => !!empId && empId === String(currentEmpId || '').trim()
-        && revision === employeeDetailRevision && token === employeeDetailReadTokens[kind] };
+        && revision === employeeDetailRevision && token === employeeDetailReadTokens[kind]
+        && owner === getHrSettingsOwner() && (!requireVisible || isEmployeeDetailTabVisible(tab)) };
+}
+const employeeDetailTabLoads = new Map();
+const employeeDetailTabVisibility = new Map();
+function isEmployeeDetailTabVisible(tabId) {
+    return !window.frameElement?.hidden && document.getElementById('detailModal')?.classList.contains('show')
+        && document.getElementById(tabId)?.classList.contains('active');
+}
+function setEmployeeDetailTabState(tabId, state) {
+    const pane = document.getElementById(tabId);
+    if (!pane) return;
+    let status = pane.querySelector('[data-detail-demand-status]');
+    if (!status) {
+        status = document.createElement('div');
+        status.dataset.detailDemandStatus = '1'; status.className = 'text-center text-muted py-4';
+        pane.prepend(status);
+    }
+    if (!employeeDetailTabVisibility.has(tabId)) employeeDetailTabVisibility.set(tabId, new Map());
+    const visibility = employeeDetailTabVisibility.get(tabId);
+    for (const child of pane.children) {
+        if (child === status) continue;
+        if (!visibility.has(child)) visibility.set(child, child.hidden);
+        child.hidden = state === 'ready' ? visibility.get(child) : true;
+    }
+    status.hidden = state === 'ready';
+    status.replaceChildren();
+    if (state !== 'ready') status.textContent = state === 'error' ? '자료를 불러오지 못했습니다.' : '자료를 불러오는 중입니다.';
+    if (state === 'error') {
+        const retry = document.createElement('button'); retry.type = 'button';
+        retry.className = 'btn btn-sm btn-outline-primary ms-2'; retry.textContent = '다시 조회';
+        retry.onclick = () => { void ensureEmployeeDetailTab(tabId, {force:true}); };
+        status.append(retry);
+    }
+}
+async function verifyEmployeeDetailTabAccess(owner) {
+    if (!owner || owner !== getHrSettingsOwner()) throw new Error('ERP_TASK_ACCESS_DENIED');
+    const identity = await _supabase.auth.getUser();
+    if (identity.error) throw identity.error;
+    const userId = identity.data?.user?.id;
+    const expectedUserId = hrAuthorizedUserId;
+    if (!userId || String(userId) !== expectedUserId) throw new Error('ERP_TASK_ACCESS_DENIED');
+    const access = await _supabase.rpc('get_my_erp_runtime');
+    if (access.error) throw access.error;
+    const runtime = access.data;
+    if (owner !== getHrSettingsOwner() || !runtime?.coop_id || String(runtime.coop_id) !== String(myInfo.coop_id)
+        || runtime.is_active === false || !runtime.effective_permissions?.includes('hr.admin')
+        || !ErpRuntimeGuard.isModuleEnabled(runtime, 'hr') || !ErpRuntimeGuard.isModuleAssigned(runtime, 'hr')) {
+        throw new Error('ERP_TASK_ACCESS_DENIED');
+    }
+}
+function ensureEmployeeDetailTab(tabId, {force = false} = {}) {
+    const loaders = {tabSalary:loadSalaryData,tabLog:loadLeave,tabModuleAccess:loadEmployeeModuleAccess,tabNotificationAccess:loadEmployeeNotificationAssignments};
+    if (!loaders[tabId] || !isEmployeeDetailTabVisible(tabId) || isEmployeeDetailSaving()) return Promise.resolve();
+    const owner = getHrSettingsOwner(), empId = String(currentEmpId || ''), revision = employeeDetailRevision;
+    if (!owner || !empId) return Promise.resolve();
+    const month = tabId === 'tabSalary' ? document.getElementById('salaryMonth').value : '';
+    const key = `${owner}|${empId}|${revision}|${tabId}|${month}`;
+    let entry = employeeDetailTabLoads.get(key);
+    if (entry?.pending) return entry.pending;
+    const wasReady = entry?.ready === true && !force;
+    if (!entry) { entry = {ready:false,pending:null}; employeeDetailTabLoads.set(key, entry); }
+    const isCurrent = () => owner === getHrSettingsOwner() && empId === String(currentEmpId || '')
+        && revision === employeeDetailRevision && isEmployeeDetailTabVisible(tabId)
+        && (tabId !== 'tabSalary' || month === document.getElementById('salaryMonth').value);
+    if (!wasReady) setEmployeeDetailTabState(tabId, 'loading');
+    entry.pending = (async () => {
+        try {
+            await verifyEmployeeDetailTabAccess(owner);
+            if (!isCurrent()) return;
+            if (wasReady) return;
+            const loaded = await loaders[tabId]();
+            if (!isCurrent()) return;
+            await verifyEmployeeDetailTabAccess(owner);
+            if (!isCurrent()) return;
+            if (loaded !== true) throw new Error('EMPLOYEE_DETAIL_READ_INCOMPLETE');
+            entry.ready = true;
+            setEmployeeDetailTabState(tabId, 'ready');
+            window.ErpWorkspaceResume?.checkpoint(document.getElementById(tabId));
+        } catch (_) {
+            if (isCurrent()) { entry.ready = false; setEmployeeDetailTabState(tabId, 'error'); }
+        } finally { entry.pending = null; }
+    })();
+    return entry.pending;
 }
 function cancelEmployeeDetailReads() {
     employeeDetailRevision += 1;
+    employeeDetailTabLoads.clear();
     Object.keys(employeeDetailReadTokens).forEach(key => { employeeDetailReadTokens[key] += 1; });
     employeeModuleAccessSnapshot = employeeNotificationSnapshot = null;
     ['employeeModuleAccessSaveBtn', 'employeeNotificationSaveBtn'].forEach(id => {
@@ -2761,6 +2848,7 @@ window.onload = async function() {
     });
     if (!hrUserGate.ok) return;
     myInfo = hrUserGate.user;
+    hrAuthorizedUserId = String(hrUserGate.authUser?.id || '');
     const villageWorkspace = await _supabase.rpc('sun_village_workspace_context');
     if (!villageWorkspace.error && villageWorkspace.data?.workspaces?.some(item => item?.is_current === true && item?.is_management_coop === false)) {
         location.replace('village_company_info.html');
@@ -4806,7 +4894,7 @@ function renderEmployeeModuleAccess(payload) {
 
 async function loadEmployeeModuleAccess() {
     if (employeeModuleAccessSaveInFlight) return;
-    const { empId, isCurrent } = beginEmployeeDetailRead('modules');
+    const { empId, isCurrent } = beginEmployeeDetailRead('modules', {requireVisible:true});
     if (!empId) return;
     employeeDetailReadTokens.approvedRights += 1;
     resetEmployeeModuleAccessUi();
@@ -4816,6 +4904,7 @@ async function loadEmployeeModuleAccess() {
         if (error) throw error;
         renderEmployeeModuleAccess(data || {});
         await loadEmployeeApprovedRights(empId);
+        return isCurrent();
     } catch (error) {
         if (!isCurrent()) return;
         const status = document.getElementById('employeeModuleAccessStatus');
@@ -4823,13 +4912,14 @@ async function loadEmployeeModuleAccess() {
             status.textContent = '업무 권한을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
             status.classList.add('text-danger');
         }
+        return false;
     }
 } // End of loadEmployeeModuleAccess
 
 async function loadEmployeeApprovedRights(empId = String(currentEmpId || '').trim()) {
     const list = document.getElementById('employeeApprovedRights');
     if (!list || !empId || empId !== String(currentEmpId || '').trim()) return;
-    const { isCurrent } = beginEmployeeDetailRead('approvedRights');
+    const { isCurrent } = beginEmployeeDetailRead('approvedRights', {requireVisible:true});
     list.textContent = '결재 권한을 확인하는 중입니다.';
     let data, error;
     try { ({data, error} = await _supabase.rpc('erp_admin_approved_permissions', { p_emp_id: empId })); }
@@ -4975,7 +5065,7 @@ function renderEmployeeNotificationAssignments(payload) {
 
 async function loadEmployeeNotificationAssignments() {
     if (employeeNotificationSaveInFlight) return;
-    const { empId, isCurrent } = beginEmployeeDetailRead('notifications');
+    const { empId, isCurrent } = beginEmployeeDetailRead('notifications', {requireVisible:true});
     if (!empId) return;
     resetEmployeeNotificationUi();
     try {
@@ -4983,6 +5073,7 @@ async function loadEmployeeNotificationAssignments() {
         if (!isCurrent()) return;
         if (error) throw error;
         renderEmployeeNotificationAssignments(data || {});
+        return true;
     } catch (error) {
         if (!isCurrent()) return;
         const status = document.getElementById('employeeNotificationStatus');
@@ -4990,6 +5081,7 @@ async function loadEmployeeNotificationAssignments() {
             status.textContent = '알림 담당 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
             status.classList.add('text-danger');
         }
+        return false;
     }
 } // End of loadEmployeeNotificationAssignments
 
@@ -5052,6 +5144,8 @@ async function openDetail(u) {
     const revision = ++employeeDetailRevision;
     const isCurrent = () => revision === employeeDetailRevision && String(currentEmpId) === String(u.emp_id);
     currentEmpId = u.emp_id; currentEmpDisplayNo = getEmployeeDisplayNoValue(u); currentEmpName = u.emp_name;
+    employeeDetailTabLoads.clear();
+    ['tabSalary','tabLog','tabModuleAccess','tabNotificationAccess'].forEach(tabId => setEmployeeDetailTabState(tabId, 'loading'));
     resetEmployeeModuleAccessUi();
     resetEmployeeNotificationUi();
     employeeBasicBaseline = employeeBasicSnapshot(u);
@@ -5108,15 +5202,14 @@ async function openDetail(u) {
 
     const area = document.getElementById("btnResignArea");
     if(u.resign_date) area.innerHTML = `<button class="btn btn-sm btn-warning" onclick="cancelResign()">↩️ 퇴사 취소</button><button class="btn btn-sm btn-danger ms-2" onclick="reqDeletePermanent()">🗑️ 삭제</button>`;
-    else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; loadSalaryData(); loadLeave(); }
+    else { area.innerHTML = `<button class="btn btn-sm btn-outline-danger" onclick="doResign()">⛔ 퇴사 처리</button>`; }
     await loadDurunuriEligibilityProfile(u.emp_id);
     if (!isCurrent()) return;
     resetEmployeeModuleAccessUi();
     resetEmployeeNotificationUi();
     checkpointEmployeeDetailDraft(document.getElementById('infoContainer'));
     detailModal.show();
-    void loadEmployeeModuleAccess();
-    void loadEmployeeNotificationAssignments();
+    void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
     window.SunVillageTotalManagerAdmin?.load(currentEmpId);
 }
 
@@ -5126,6 +5219,12 @@ async function loadEmployeeInsuranceStatus() {
     await window.HrInsuranceStatus.mount(_supabase, document.getElementById('employeeInsuranceStatus'), {empId, admin:true});
 }
 document.querySelector('#empTab [href="#tabInsuranceStatus"]').addEventListener('shown.bs.tab', loadEmployeeInsuranceStatus);
+document.getElementById('empTab').addEventListener('shown.bs.tab', event => {
+    void ensureEmployeeDetailTab(event.target.getAttribute('href')?.slice(1));
+});
+document.getElementById('detailModal').addEventListener('shown.bs.modal', () => {
+    void ensureEmployeeDetailTab(document.querySelector('#empTab .nav-link.active')?.getAttribute('href')?.slice(1));
+});
 function toggleEditMode(isEdit, completedScope = 'edit') {
     const c = document.getElementById("infoContainer");
     if (isEdit) c.classList.add("is-editing");
@@ -5456,7 +5555,9 @@ function syncSalaryTaxPreview() {
 // [수정] 급여 데이터 로드 (삭제 버튼 제어 로직 추가)
 async function loadSalaryData() {
     const empId = currentEmpId, revision = employeeDetailRevision, salaryRevision = ++employeeSalaryLoadRevision;
-    const isCurrent = () => revision === employeeDetailRevision && salaryRevision === employeeSalaryLoadRevision && String(empId) === String(currentEmpId);
+    const owner = getHrSettingsOwner();
+    const isCurrent = () => revision === employeeDetailRevision && salaryRevision === employeeSalaryLoadRevision && String(empId) === String(currentEmpId)
+        && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabSalary');
     const month = document.getElementById("salaryMonth").value;
     const badge = document.getElementById("salaryStatusBadge");
     const alertBox = document.getElementById("salaryAlertBox");
@@ -5510,7 +5611,7 @@ async function loadSalaryData() {
     const [y, m] = month.split('-').map(Number);
     const lastDay = new Date(y, m, 0).getDate();
     const endDate = `${month}-${String(lastDay).padStart(2, '0')}`;
-    const { data: unpaidDocs } = await _supabase.from('ref_approval')
+    const { data: unpaidDocs, error: unpaidError } = await _supabase.from('ref_approval')
         .select('amount, doc_type, status')
         .eq('coop_id', getAdminEmployeeScopedCoopId())
         .eq('drafter_id', empId)
@@ -5519,6 +5620,7 @@ async function loadSalaryData() {
         .gte('created_at', startDate)
         .lte('created_at', endDate);
     if (!isCurrent()) return;
+    if (unpaidError) { setEmployeeDetailTabState('tabSalary', 'error'); return false; }
 
     if (unpaidDocs && unpaidDocs.length > 0) {
         let totalUnpaidDays = 0;
@@ -5536,13 +5638,14 @@ async function loadSalaryData() {
     // -----------------------------------------------------
 
     // [로직] 기존 저장된 급여 내역 불러오기
-    const { data: saved } = await _supabase.from('hr_salary')
+    const { data: saved, error: salaryError } = await _supabase.from('hr_salary')
         .select('*')
         .eq('coop_id', getAdminEmployeeScopedCoopId())
         .eq('emp_id', empId)
         .eq('year_month', month)
         .maybeSingle();
     if (!isCurrent()) return;
+    if (salaryError && salaryError.code !== 'PGRST116') { setEmployeeDetailTabState('tabSalary', 'error'); return false; }
 
     if (saved) {
         // [데이터 있음] -> 수정/삭제 모드
@@ -5633,6 +5736,7 @@ async function loadSalaryData() {
 
     // 계산식 적용
     recalcSalaryComponents();
+    return true;
 }
 
 // [신규] 급여 삭제 함수
@@ -6171,7 +6275,9 @@ async function persistSalary() {
 // [수정] 관리자용 연차 조회 (특정 직원 + 결재완료 예정 차감 반영)
 async function loadLeave() {
     const empId = currentEmpId, revision = employeeDetailRevision;
-    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId);
+    const owner = getHrSettingsOwner();
+    const isCurrent = () => revision === employeeDetailRevision && String(empId) === String(currentEmpId)
+        && owner === getHrSettingsOwner() && isEmployeeDetailTabVisible('tabLog');
     try {
         if (window.LeaveLedger && typeof window.LeaveLedger.getLeaveSnapshot === 'function') {
             const snapshot = await window.LeaveLedger.getLeaveSnapshot(_supabase, empId, {
@@ -6184,7 +6290,7 @@ async function loadLeave() {
             currentEmployeeLeaveSnapshot = snapshot;
             const remain = Number(snapshot?.effectiveRemainDays || 0);
             document.getElementById("displayLeaveRemain").innerText = remain + "일";
-            return;
+            return true;
         }
     } catch (error) {
         console.error(error);
@@ -6200,6 +6306,7 @@ async function loadLeave() {
     }
     currentEmployeeLeaveSnapshot = { effectiveRemainDays: Number(remainDays || 0), reservedDays: 0, summary: { reservedDocs: [], pastOrUsedDocs: [], unknownDateDocs: [] } };
     document.getElementById("displayLeaveRemain").innerText = remainDays + "일";
+    return true;
 }
 function getAdminEmployeeLeaveTypeCatalog() {
     return Array.isArray(hrLeaveTypeCatalog) && hrLeaveTypeCatalog.length > 0 ? hrLeaveTypeCatalog : getHrDefaultLeaveTypeCatalog();
