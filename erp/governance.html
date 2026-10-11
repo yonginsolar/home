@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.0.17 | Change: 2026-09-18 - Add the assembly/board meeting package builder. -->
+<!-- Version: v1.0.18 | Change: 2026-10-11 - Reuse retained meeting screens when opening governance cards. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.0.17 | governance.html');</script>
+  <script>console.log('[Version] v1.0.18 | governance.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -65,7 +65,7 @@
         <span>기본정보와 안건 한 번 입력으로 총회·이사회 자료, 시나리오, 의사록 초안 만들기</span>
       </button>
 
-      <button type="button" class="menu-card d-none" data-workspace-submenu id="cardMeetingAttendance" onclick="location.href='participation?view=meeting'">
+      <button type="button" class="menu-card d-none" data-workspace-submenu id="cardMeetingAttendance" onclick="openGovernancePage('participation?view=meeting')">
         <strong>회의 출석 관리</strong>
         <span>이사회·대의원 총회 참석·배석과 정족수 현황 관리</span>
       </button>
@@ -75,7 +75,7 @@
         <span>공개 문서와 자료집 열람</span>
       </button>
 
-      <button type="button" class="menu-card d-none" data-workspace-submenu id="cardDocumentAdmin" onclick="location.href='admin_member.html?scope=documents_admin&tab=site'">
+      <button type="button" class="menu-card d-none" data-workspace-submenu id="cardDocumentAdmin" onclick="openGovernancePage('admin_member.html?scope=documents_admin&tab=site')">
         <strong>규정·정관 관리</strong>
         <span>정관, 규약, 규정 원본과 개정 이력 관리</span>
       </button>
@@ -85,7 +85,7 @@
         <span>임원·대의원 서명 요청 확인</span>
       </button>
 
-      <button type="button" class="menu-card d-none" data-workspace-submenu id="cardSignatureAdmin" onclick="location.href='officials_signature_admin.html'">
+      <button type="button" class="menu-card d-none" data-workspace-submenu id="cardSignatureAdmin" onclick="openGovernancePage('officials_signature_admin.html')">
         <strong>서명자 준비</strong>
         <span>서명 이미지 등록과 Telegram 연결 상태 확인</span>
       </button>
@@ -153,6 +153,27 @@
       return getMinutesRouteTarget(safeKey);
     }
 
+    function openGovernancePage(value) {
+      const target = new URL(value, window.location.href);
+      let shell = null;
+      try {
+        if (window.parent !== window) shell = window.parent.ErpWorkspaceShell;
+      } catch (_) {
+        // A standalone or cross-origin parent retains the original navigation.
+      }
+      if (typeof shell?.navigate === 'function') {
+        try {
+          // The existing shell owns route allowlisting, draft retention and access rechecks.
+          // A consumed/cancelled move must not fall through to a destructive child reload.
+          if (shell.navigate(target.href)) return;
+        } catch (_) {
+          window.alert('화면을 열지 못했습니다. 다시 시도해 주세요.');
+          return;
+        }
+      }
+      window.location.href = target.href;
+    }
+
     async function openMinutesRoute(routeKey) {
       const buttonByRoute = {
         integrated_admin: 'cardMinutesAdmin',
@@ -168,7 +189,7 @@
 
       try {
         const targetUrl = await buildMinutesRouteUrl(routeKey);
-        window.location.href = targetUrl;
+        openGovernancePage(targetUrl);
       } catch (error) {
         console.error('governance minutes route failed:', routeKey, error);
         location.href = `index.html?next=${encodeURIComponent(window.location.href)}`;
