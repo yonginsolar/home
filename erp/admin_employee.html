@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.105
+Version: v1.0.106
 Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain existing state and authority.
 -->
 <html>
@@ -8,7 +8,7 @@ Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain e
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.105 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.106 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -49,7 +49,7 @@ Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain e
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
 
 <script src="annual_settings.js?v=20261011-2"></script>
-<script src="coop_settings_view.js?v=20261011-2"></script>
+<script src="coop_settings_view.js?v=20261011-3"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -933,6 +933,10 @@ function getRoleBadge(roleKey) {
 let settings = {}; let companyInfo = {}; let advancedSettingsRaw = [];
 let companySettingsSaveInFlight = false;
 let hrSettingsAuthorized = false, hrSettingsReadyOwner = '', hrSettingsOpenPromise = null, hrSettingsResumeReadOwner = '';
+const hrSettingsAuxLoaded = new Set();
+const hrSettingsAuxPending = new Map();
+let hrSettingsReadRetryRequired = false;
+let hrSettingsReadRetryPromise = null;
 let companySealPreviewObjectUrl = '';
 const COMPANY_SEAL_STORAGE_PREFIX = 'company-seals';
 let currentEmpId = null, currentEmpDisplayNo = null, currentEmpName = null, currentAnnualSalary = 0;
@@ -1687,12 +1691,12 @@ function buildHrPositionOptionsHtml(selectedValue = '') {
         return `<option value="${escapeHtml(item.name)}"${isSelected}>${escapeHtml(item.name)}</option>`;
     });
     if (selected && !catalog.some((item) => item.name === selected)) {
-        options.push(`<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)} (현재값)</option>`);
+        options.push(`<option value="${escapeHtml(selected)}" selected>기존 지정 결재자 (현재값)</option>`);
     }
     return options.join('');
 }
 
-function renderHrPositionCatalogRows() {
+function renderHrPositionCatalogRows(preserveOrder = false) {
     const listEl = document.getElementById('hrPositionCatalogList');
     if (!listEl) return;
     listEl.innerHTML = '';
@@ -1700,7 +1704,7 @@ function renderHrPositionCatalogRows() {
         listEl.innerHTML = '<div class="small text-muted border rounded p-3 text-center">등록된 직급이 없습니다. 아래 버튼으로 추가하세요.</div>';
         return;
     }
-    hrPositionCatalog = sortHrPositionCatalog(hrPositionCatalog);
+    if (!preserveOrder) hrPositionCatalog = sortHrPositionCatalog(hrPositionCatalog);
     hrPositionCatalog.forEach((item, index) => {
         const row = document.createElement('div');
         row.className = 'position-row';
@@ -1708,7 +1712,7 @@ function renderHrPositionCatalogRows() {
           <div class="row g-2 align-items-end">
             <div class="col-md-3">
               <label class="small text-muted fw-bold mb-1">랭크</label>
-              <input type="number" min="1" step="1" class="form-control form-control-sm position-rank" value="${escapeHtml(String(normalizeHrPositionRank(item.rank, (index + 1) * 10)))}" placeholder="작을수록 상위">
+              <input type="number" min="1" step="1" class="form-control form-control-sm position-rank" value="${escapeHtml(String(preserveOrder ? item.rank ?? '' : normalizeHrPositionRank(item.rank, (index + 1) * 10)))}" placeholder="작을수록 상위">
             </div>
             <div class="col-md-6">
               <label class="small text-muted fw-bold mb-1">직급명</label>
@@ -1730,27 +1734,30 @@ function renderHrPositionCatalogRows() {
 }
 
 function addHrPositionRow() {
-    hrPositionCatalog = Array.isArray(hrPositionCatalog) ? hrPositionCatalog.slice() : [];
+    hrPositionCatalog = readHrPositionDraftRows();
     const nextRank = hrPositionCatalog.length > 0
         ? Math.max(...hrPositionCatalog.map((item, index) => normalizeHrPositionRank(item?.rank, (index + 1) * 10))) + 10
         : 10;
     hrPositionCatalog.push({ name: '', enabled: true, rank: nextRank });
-    renderHrPositionCatalogRows();
+    renderHrPositionCatalogRows(true);
 }
 
 function removeHrPositionRow(index) {
-    if (!Array.isArray(hrPositionCatalog)) return;
+    hrPositionCatalog = readHrPositionDraftRows();
     hrPositionCatalog = hrPositionCatalog.filter((_, currentIndex) => currentIndex !== Number(index));
-    renderHrPositionCatalogRows();
+    renderHrPositionCatalogRows(true);
 }
 
-function collectHrPositionCatalogFromUi() {
+function readHrPositionDraftRows() {
     const rows = Array.from(document.querySelectorAll('#hrPositionCatalogList .position-row'));
-    return sanitizeHrPositionCatalog(rows.map((row) => ({
+    return rows.map((row) => ({
         name: row.querySelector('.position-name')?.value || '',
         enabled: !!row.querySelector('.position-enabled')?.checked,
         rank: row.querySelector('.position-rank')?.value || ''
-    })));
+    }));
+}
+function collectHrPositionCatalogFromUi() {
+    return sanitizeHrPositionCatalog(readHrPositionDraftRows());
 }
 
 function renderHrDepartmentCatalogRows() {
@@ -1795,25 +1802,28 @@ function renderHrDepartmentCatalogRows() {
 }
 
 function addHrDepartmentRow() {
-    hrDepartmentCatalog = Array.isArray(hrDepartmentCatalog) ? hrDepartmentCatalog.slice() : [];
+    hrDepartmentCatalog = readHrDepartmentDraftRows();
     hrDepartmentCatalog.push({ id: '', name: '', parent_id: '', enabled: true });
     renderHrDepartmentCatalogRows();
 }
 
 function removeHrDepartmentRow(index) {
-    if (!Array.isArray(hrDepartmentCatalog)) return;
+    hrDepartmentCatalog = readHrDepartmentDraftRows();
     hrDepartmentCatalog = hrDepartmentCatalog.filter((_, currentIndex) => currentIndex !== Number(index));
     renderHrDepartmentCatalogRows();
 }
 
-function collectHrDepartmentCatalogFromUi() {
+function readHrDepartmentDraftRows() {
     const rows = Array.from(document.querySelectorAll('#hrDepartmentCatalogList .dept-row'));
-    return sanitizeHrDepartmentCatalog(rows.map(row => ({
+    return rows.map(row => ({
         id: row.querySelector('.dept-id')?.value || '',
         name: row.querySelector('.dept-name')?.value || '',
         parent_id: row.querySelector('.dept-parent')?.value || '',
         enabled: !!row.querySelector('.dept-enabled')?.checked
-    })));
+    }));
+}
+function collectHrDepartmentCatalogFromUi() {
+    return sanitizeHrDepartmentCatalog(readHrDepartmentDraftRows());
 }
 
 function parseHrOvertimePolicy(rawValue) {
@@ -2095,8 +2105,15 @@ function openOrgChartModal() {
 }
 
 async function saveHrStructureSettingsOnly(scope = 'all') {
+    if (companySettingsSaveInFlight) return;
+    if (hrSettingsAuxPending.size || hrSettingsReadRetryPromise) return showAlert('설정을 불러오는 중입니다. 완료 후 저장해 주세요.');
     const coopId = String(myInfo?.coop_id || '').trim();
     if (!coopId) return showAlert('조합 정보를 확인할 수 없습니다.');
+    const owner = getHrSettingsOwner();
+    if (!isHrSettingsContextCurrent(owner) || hrSettingsReadyOwner !== owner || hrSettingsReadRetryRequired) return showAlert('설정 다시 불러오기로 확인해 주세요.');
+    companySettingsSaveInFlight = true;
+    const controls = [...document.querySelectorAll('#settingsModal input,#settingsModal select,#settingsModal button')].map(element => ({element,disabled:element.disabled}));
+    controls.forEach(({element}) => { element.disabled = true; });
     try {
         const safeScope = String(scope || 'all').trim();
         const departmentCatalog = collectHrDepartmentCatalogFromUi();
@@ -2118,10 +2135,23 @@ async function saveHrStructureSettingsOnly(scope = 'all') {
         if (updates.length === 0) return;
         const { error } = await _supabase.from('ref_company_info').upsert(updates, { onConflict: 'coop_id,key' });
         if (error) throw error;
+        if (!isHrSettingsContextCurrent(owner)) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
         if (safeScope === 'departments' || safeScope === 'all') companyInfo[HR_DEPARTMENT_CATALOG_KEY] = JSON.stringify(departmentCatalog);
         if (safeScope === 'positions' || safeScope === 'all') companyInfo[HR_POSITION_CATALOG_KEY] = JSON.stringify(positionCatalog);
         if (safeScope === 'policy' || safeScope === 'all') companyInfo[HR_OVERTIME_POLICY_KEY] = JSON.stringify(overtimePolicy);
-        syncHrStructureSettingsUi();
+        // Do not redraw other subsections or checkpoint their unsaved drafts.
+        if (safeScope === 'departments' || safeScope === 'all') {
+            hrDepartmentCatalog = departmentCatalog;
+            renderHrDepartmentCatalogRows();
+        }
+        if (safeScope === 'positions' || safeScope === 'all') {
+            hrPositionCatalog = positionCatalog;
+            renderHrPositionCatalogRows();
+            populateInvitePositionOptions();
+            populateDetailPositionOptions();
+        }
+        const sections = {departments:'#hrDepartmentCatalogList',positions:'#hrPositionCatalogList',policy:'#set_overtime_default_mode',all:'#hrStructureSettingsCard'};
+        window.ERPEmployeeSettingsView.checkpointSection(sections[safeScope]);
         if ((safeScope === 'departments' || safeScope === 'all') && document.getElementById('orgChartModal')?.classList.contains('show')) {
             await renderOrgChart();
         }
@@ -2134,6 +2164,9 @@ async function saveHrStructureSettingsOnly(scope = 'all') {
         showAlert(`${labelMap[safeScope] || '설정'}이 저장되었습니다.`);
     } catch (error) {
         showAlert('저장 실패: ' + error.message);
+    } finally {
+        companySettingsSaveInFlight = false;
+        controls.forEach(({element,disabled}) => { if (element.isConnected) element.disabled = disabled; });
     }
 }
 
@@ -2447,6 +2480,7 @@ function ensureCalendarSettingsFields() {
         tabContent.appendChild(pane);
     }
 
+    if (pane.querySelector('#calendarSettingsPanel')) return;
     pane.innerHTML = `
       <div class="row g-3" id="calendarSettingsPanel">
         <div class="col-12">
@@ -2695,6 +2729,7 @@ function syncSecretaryJeongyeolFieldState() {
 }
 
 function applyHrRuntimeProfileUi() {
+    const previousTab = document.querySelector('#settingTab .nav-link.active')?.getAttribute('href');
     ensureWorkforceLiteSettingsFields();
     ensureTelegramApprovalSettingsFields();
     ensureCalendarSettingsFields();
@@ -2740,21 +2775,17 @@ function applyHrRuntimeProfileUi() {
     }
     if (durunuriEligibilityCardWrap) durunuriEligibilityCardWrap.classList.toggle('d-none', isLite);
 
-    if (isLite) {
-        if (taxPane) taxPane.classList.remove('show', 'active');
-        if (advancedPane) advancedPane.classList.remove('show', 'active');
-        if (companyPane) companyPane.classList.add('show', 'active');
-        if (taxTabLink) taxTabLink.classList.remove('active');
-        if (advancedTabLink) advancedTabLink.classList.remove('active');
-        if (companyTabLink) companyTabLink.classList.add('active');
-        if (approvalPane) approvalPane.classList.remove('show', 'active');
-        if (approvalTabLink) approvalTabLink.classList.remove('active');
-    } else {
-        if (approvalPane) approvalPane.classList.remove('show', 'active');
-        if (approvalTabLink) approvalTabLink.classList.remove('active');
-    }
-
-    syncHrProfileCompanySettingsUi();
+    const selected = previousTab && !(isLite && ['#setTax','#setAdvanced'].includes(previousTab)) ? previousTab : '#setCompany';
+    document.querySelectorAll('#settingTab .nav-link').forEach(link => {
+        const active = link.getAttribute('href') === selected;
+        link.classList.toggle('active', active);
+        link.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('#settingsModal .tab-content > .tab-pane').forEach(pane => {
+        const active = '#' + pane.id === selected;
+        pane.classList.toggle('active', active);
+        pane.classList.toggle('show', active);
+    });
     const enabledToggle = document.getElementById('set_secretary_jeongyeol_enabled');
     if (enabledToggle && !enabledToggle.dataset.boundChange) {
         enabledToggle.dataset.boundChange = '1';
@@ -2875,9 +2906,9 @@ window.onload = async function() {
     hrRuntimeProfile = String(hrRuntimeGate.runtime?.runtime_profile || 'legacy_full');
     applyHrRuntimeProfileUi();
 
-    await Promise.all([window.ERPEmployeeSettingsView.isPage ? loadCoopSettingsEmployees() : loadList(), loadCompanyInfo({throwOnError:window.ERPEmployeeSettingsView.isPage})]);
     hrSettingsAuthorized = true;
-    await loadSettings({ loadAuxiliary: window.ERPEmployeeSettingsView.isPage, throwOnError: window.ERPEmployeeSettingsView.isPage });
+    await Promise.all([window.ERPEmployeeSettingsView.isPage ? loadCoopSettingsEmployees() : loadList(), loadCompanyInfo({throwOnError:true})]);
+    await loadSettings({ loadAuxiliary: false, throwOnError: true });
     applyHrRuntimeProfileUi();
     syncHrProfileCompanySettingsUi();
     syncHrStructureSettingsUi();
@@ -2897,6 +2928,10 @@ window.onload = async function() {
     } catch (error) {
         console.error('[admin_employee] boot failed:', error);
         showAlert((window.ERPEmployeeSettingsView.isPage ? '조합 설정' : '직원 관리') + ' 초기화 중 오류가 발생했습니다.\n' + (error?.message || '잠시 후 다시 시도해 주세요.'));
+        if (hrSettingsAuthorized && window.ERPEmployeeSettingsView.isPage) {
+            settingsModal.show();
+            showHrSettingsReadRetry('설정을 불러오지 못했습니다. 다시 불러와 주세요.');
+        }
     } finally {
         setHrBootStateReady();
     }
@@ -4102,9 +4137,10 @@ async function findEmployeeEmailConflict(email, options = {}) {
 
 async function loadCoopSettingsEmployees() {
     // Only the current coop's basic approver choices, not payroll/identity/contact data or Telegram status.
-    const {data, error} = await scopeEmployeeTenant(_supabase.from('ref_employees')
-        .select('emp_id,emp_name,display_emp_no,position,department,auth_level,resign_date')).is('resign_date', null);
+    const owner = getHrSettingsOwner();
+    const {data, error} = await _supabase.rpc('erp_hr_list_employees', {p_choices_only:true});
     if (error) throw error;
+    if (!owner || owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     employeeCache = Array.isArray(data) ? data : [];
 }
 async function loadList() {
@@ -4119,7 +4155,9 @@ async function loadList() {
             const isCurrent = () => isHrSettingsReadContextCurrent(owner);
             await Promise.all([loadCoopSettingsEmployees(), loadCompanyInfo({throwOnError:true, refreshUi:false})]);
             if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
-            await loadSettings({throwOnError:true, isCurrent, annualSelection:window.ERPAnnualSettings.selection()});
+            await loadSettings({throwOnError:true, loadAuxiliary:false, isCurrent});
+            hrSettingsAuxLoaded.clear();
+            await loadHrSettingsTab(document.querySelector('#settingTab .nav-link.active')?.getAttribute('href'), {isCurrent});
             hrSettingsReadyOwner = owner;
             window.ERPEmployeeSettingsView.checkpoint();
         } finally {
@@ -4129,11 +4167,13 @@ async function loadList() {
     }
     const tbody = document.getElementById("empListBody");
     tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4">로딩 중...</td></tr>';
-    const { data: list, error } = await scopeEmployeeTenant(_supabase.from('ref_employees').select('*'));
+    const owner = getHrSettingsOwner();
+    const { data: list, error } = await _supabase.rpc('erp_hr_list_employees', {p_choices_only:false});
     if (error || !list) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center">데이터 없음</td></tr>';
-        return;
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">직원 목록을 불러오지 못했습니다. <button class="btn btn-outline-primary btn-sm" onclick="loadList().catch(() => {})">다시 불러오기</button></td></tr>';
+        throw error || new Error('EMPLOYEE_LIST_UNAVAILABLE');
     }
+    if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     await loadTelegramApprovalLinkStatusMap();
     employeeCache = Array.isArray(list) ? list.slice().sort(compareEmployeesByDisplayNo) : [];
     tbody.innerHTML = "";
@@ -4166,6 +4206,7 @@ async function loadList() {
 
 async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) {
     const coopId = String(myInfo?.coop_id || '').trim();
+    const owner = getHrSettingsOwner();
     if (!coopId) {
         companyInfo = {};
         companyInfo.chairman_name = '';
@@ -4178,6 +4219,7 @@ async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) 
     }
 
     const { data, error } = await _supabase.from('ref_company_info').select('*').eq('coop_id', coopId);
+    if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
     if (error) { if (throwOnError) throw error; return; }
     companyInfo = {};
     if (data) data.forEach((r) => { companyInfo[r.key] = r.value; });
@@ -4197,6 +4239,7 @@ async function loadCompanyInfo({ throwOnError = false, refreshUi = true } = {}) 
             : companyInfo._seal_storage_path;
         if (sealPath) {
             const { data: sealData } = await _supabase.storage.from('attachments').createSignedUrl(sealPath, 3600);
+            if (owner !== getHrSettingsOwner()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
             if (sealData?.signedUrl) {
                 companyInfo.seal_url = sealData.signedUrl;
                 companyInfo._seal_preview_url = sealData.signedUrl;
@@ -4600,6 +4643,7 @@ function initAnnualSettings() {
             const annual = ['#setTax','#setAdvanced'].includes(event.target.getAttribute('href'));
             document.getElementById('settingTargetYearRow').hidden = !annual;
             document.getElementById('companySettingsFooter').hidden = annual;
+            loadHrSettingsTab(event.target.getAttribute('href')).catch(() => {});
         });
     }
 }
@@ -4622,6 +4666,110 @@ function showHrSettingsModal() {
     document.getElementById('settingTargetYearRow').hidden = !annual;
     document.getElementById('companySettingsFooter').hidden = annual;
     settingsModal.show();
+    loadHrSettingsTab(tab?.getAttribute('href')).catch(() => {});
+}
+function showHrSettingsReadRetry(message) {
+    hrSettingsReadRetryRequired = true;
+    let panel = document.getElementById('hrSettingsReadRetry');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'hrSettingsReadRetry';
+        panel.className = 'alert alert-warning d-flex align-items-center gap-3 flex-wrap';
+        panel.innerHTML = '<span class="flex-grow-1"></span><button type="button" class="btn btn-outline-primary btn-sm" onclick="retryHrSettingsRead()">설정 다시 불러오기</button>';
+        document.querySelector('#settingsModal .coop-settings-body, #settingsModal .modal-body').prepend(panel);
+    }
+    panel.querySelector('span').textContent = message;
+    panel.hidden = false;
+}
+async function retryHrSettingsRead() {
+    const owner = getHrSettingsOwner();
+    if (!isHrSettingsContextCurrent(owner) || companySettingsSaveInFlight) return;
+    if (hrSettingsReadRetryPromise) return hrSettingsReadRetryPromise;
+    if (hrSettingsAuxPending.size) return;
+    const view = window.ERPEmployeeSettingsView;
+    const draft = view.capture();
+    const dirty = view.isDirty();
+    const controls = [...document.querySelectorAll('#settingsModal input,#settingsModal select,#settingsModal textarea,#settingsModal button')].map(element=>({element,disabled:element.disabled}));
+    controls.forEach(({element})=>{element.disabled=true;});
+    const pending = (async () => {
+        const button = document.querySelector('#hrSettingsReadRetry button');
+        if (button) button.disabled = true;
+        try {
+            // Run the original live runtime gate, not a cached browser permission flag.
+            const gate = await window.ErpRuntimeGuard.enforce(_supabase, {moduleKey:'hr',moduleLabel:'조합 설정',alertFn:showAlert,redirectUrl:'index.html'});
+            if (!gate.ok || !isHrSettingsContextCurrent(owner)) return;
+            await Promise.all([loadCoopSettingsEmployees(),loadCompanyInfo({throwOnError:true,refreshUi:false})]);
+            await loadSettings({throwOnError:true,loadAuxiliary:false,isCurrent:() => isHrSettingsContextCurrent(owner)});
+            if (!isHrSettingsContextCurrent(owner)) return;
+            hrSettingsReadyOwner = owner;
+            hrSettingsReadRetryRequired = false;
+            view.checkpoint();
+            if (dirty) view.restore(draft);
+            document.getElementById('hrSettingsReadRetry').hidden = true;
+        } catch (error) {
+            view.restore(draft);
+            showHrSettingsReadRetry('설정을 불러오지 못했습니다. 입력 내용은 유지됩니다. 다시 시도해 주세요.');
+        } finally {
+            controls.forEach(({element,disabled})=>{if(element.isConnected)element.disabled=disabled;});
+            if (button) button.disabled = false;
+            if (hrSettingsReadRetryPromise === pending) hrSettingsReadRetryPromise = null;
+        }
+    })();
+    hrSettingsReadRetryPromise = pending;
+    return pending;
+}
+function loadHrSettingsTab(href, {isCurrent = null} = {}) {
+    const kind = ['#setTax','#setAdvanced'].includes(href) ? 'annual' : href === '#setCalendar' ? 'calendar' : '';
+    const owner = getHrSettingsOwner();
+    if (!kind || !owner || hrSettingsReadyOwner !== owner || hrSettingsReadRetryRequired) return Promise.resolve();
+    const current = isCurrent || (() => isHrSettingsContextCurrent(owner));
+    if (!current()) return Promise.resolve();
+    const key = owner + '|' + kind;
+    if (hrSettingsAuxLoaded.has(key)) return Promise.resolve();
+    if (hrSettingsAuxPending.has(key)) return hrSettingsAuxPending.get(key);
+    const pane = document.getElementById(kind === 'annual' ? 'settingTargetYearRow' : 'setCalendar');
+    let status = document.getElementById('hrSettingsTabStatus-' + kind);
+    if (!status) {
+        status = document.createElement('div');
+        status.id = 'hrSettingsTabStatus-' + kind;
+        status.className = 'alert alert-light border mb-3';
+        pane.prepend(status);
+    }
+    status.hidden = false;
+    status.textContent = '불러오는 중입니다.';
+    const controls = kind === 'calendar' ? [...pane.querySelectorAll('input,select,button')].filter(element=>!element.closest('[id^="hrSettingsTabStatus-"]')).map(element => {
+        if (element.dataset.hrReadDisabled === undefined) element.dataset.hrReadDisabled = String(element.disabled);
+        return {element,disabled:element.dataset.hrReadDisabled==='true'};
+    }) : [];
+    controls.forEach(({element}) => {element.disabled=true;});
+    const pending = (async () => {
+        try {
+            if (kind === 'annual') {
+                const selected = window.ERPAnnualSettings.selection();
+                await window.ERPAnnualSettings.load(selected.year, selected.period);
+            } else await loadCalendarIcsSettings({throwOnError:true,isCurrent:current});
+            if (!current()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+            hrSettingsAuxLoaded.add(key);
+            if (kind === 'calendar') window.ERPEmployeeSettingsView.checkpointSection('#setCalendar');
+            status.hidden = true;
+        } catch (error) {
+            if (current()) {
+                status.textContent = '불러오지 못했습니다. ';
+                const retry = document.createElement('button');
+                retry.type='button';retry.className='btn btn-outline-primary btn-sm';retry.textContent='다시 불러오기';
+                retry.onclick=() => loadHrSettingsTab(href,{isCurrent:current});status.append(retry);
+            }
+        } finally {
+            // A failed calendar read must not enable blank values for editing/saving.
+            if (hrSettingsAuxLoaded.has(key)) {
+                controls.forEach(({element,disabled})=>{element.disabled=disabled;delete element.dataset.hrReadDisabled;});
+                if (kind === 'calendar') syncCalendarIcsActionState();
+            }
+            hrSettingsAuxPending.delete(key);
+        }
+    })();
+    hrSettingsAuxPending.set(key,pending);
+    return pending;
 }
 function openSettings() {
     const owner = getHrSettingsOwner();
@@ -4649,7 +4797,7 @@ function openSettings() {
     hrSettingsOpenPromise = pending;
     return pending;
 }
-async function loadSettings({ throwOnError = false, loadAuxiliary = true, isCurrent = () => true, annualSelection = null } = {}) {
+async function loadSettings({ throwOnError = false, loadAuxiliary = false, isCurrent = () => true, annualSelection = null } = {}) {
     initAnnualSettings();
     if (loadAuxiliary) {
         try { await window.ERPAnnualSettings.load(annualSelection?.year ?? window.ERPAnnualSettings.currentYear(), annualSelection?.period); }
@@ -4677,7 +4825,8 @@ async function loadSettings({ throwOnError = false, loadAuxiliary = true, isCurr
 // 회사 정보·캘린더·알림·결재 설정 저장 (연도별 기준은 별도 저장)
 async function saveSettings() {
     if (companySettingsSaveInFlight) return;
-    if (!hrSettingsAuthorized || hrSettingsReadyOwner !== getHrSettingsOwner()) return showAlert('설정을 다시 열어 확인해 주세요.');
+    if (hrSettingsAuxPending.size || hrSettingsReadRetryPromise) return showAlert('설정을 불러오는 중입니다. 완료 후 저장해 주세요.');
+    if (!isHrSettingsContextCurrent(getHrSettingsOwner()) || hrSettingsReadyOwner !== getHrSettingsOwner() || hrSettingsReadRetryRequired) return showAlert('설정 다시 불러오기로 확인해 주세요.');
     if (window.ERPAnnualSettings?.isBusy()) return;
     if (window.ERPAnnualSettings?.isDirty()) return showAlert('공통 기준 또는 조합별 설정의 변경 내용을 먼저 저장해 주세요.');
     companySettingsSaveInFlight = true;
@@ -4786,13 +4935,13 @@ async function saveSettings() {
         if (telegramSettingsError) throw telegramSettingsError;
         confirmedSteps += 1;
 
+        if (hrSettingsAuxLoaded.has(getHrSettingsOwner() + '|calendar')) {
         const { data: calendarSettingsData, error: calendarSettingsError } = await _supabase.rpc('erp_upsert_calendar_ics_settings', {
             p_enabled: calendarSettingsConfig.enabled,
             p_source_catalog: calendarSettingsConfig.sourceCatalog,
             p_regenerate_token: false
         });
         if (calendarSettingsError) throw calendarSettingsError;
-        savesConfirmed = true;
         companyInfo['calendar_ics_enabled'] = calendarSettingsData?.enabled === true ? 'true' : 'false';
         companyInfo['calendar_ics_source_catalog_json'] = JSON.stringify(normalizeHrCalendarSourceCatalog(calendarSettingsData?.source_catalog));
         calendarIcsSettings = {
@@ -4800,6 +4949,8 @@ async function saveSettings() {
             feedToken: String(calendarSettingsData?.feed_token || '').trim(),
             sourceCatalog: normalizeHrCalendarSourceCatalog(calendarSettingsData?.source_catalog)
         };
+        }
+        savesConfirmed = true;
 
         // 마무리
         await loadCompanyInfo({ throwOnError: true, refreshUi: false });
@@ -4819,8 +4970,8 @@ async function saveSettings() {
             if (typeof checked === 'boolean') current.checked = checked;
         });
         if (savesConfirmed) {
-            hrSettingsReadyOwner = '';
-            showAlert('설정은 저장되었습니다. 최신 화면을 불러오지 못했습니다. 입력 내용은 유지됩니다. 창을 닫고 다시 열어 확인해 주세요.');
+            showHrSettingsReadRetry('설정은 저장되었습니다. 최신 화면을 다시 불러와 확인해 주세요. 입력 내용은 유지됩니다.');
+            showAlert('설정은 저장되었습니다. 최신 화면을 불러오지 못했습니다. 설정 다시 불러오기로 확인해 주세요.');
         } else {
             showAlert((confirmedSteps > 0 ? '일부 설정은 저장되었지만 나머지는 완료하지 못했습니다. ' : '설정을 저장하지 못했습니다. ')
                 + '입력 내용은 유지됩니다. ' + String(e?.message || '잠시 후 다시 시도해 주세요.'));
