@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Version: v1.0.103
+Version: v1.0.104
 Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain existing state and authority.
 -->
 <html>
@@ -8,7 +8,7 @@ Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain e
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261011-1"></script>
 <meta name="erp-security-revision" content="20261004.2">
-  <script>console.log('[Version] v1.0.103 | admin_employee.html');</script>
+  <script>console.log('[Version] v1.0.104 | admin_employee.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -49,7 +49,7 @@ Change: 2026-10-11 - Separate cooperative settings from employee tasks; retain e
   <script src="sun_village_total_manager_admin.js?v=20260929-1" defer></script>
 
 <script src="annual_settings.js?v=20261011-2"></script>
-<script src="coop_settings_view.js?v=20261011-1"></script>
+<script src="coop_settings_view.js?v=20261011-2"></script>
   <style>
     body.erp-page-employee { --erp-page-max-width: 1360px; }
     body { background-color: #f0f2f5; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; padding: 20px; }
@@ -994,7 +994,7 @@ function guardEmployeeDetailClose(event) {
     cancelEmployeeDetailReads();
 }
 window.addEventListener('beforeunload', event => {
-    if (hasUnsavedEmployeeDetail() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
+    if (hasUnsavedEmployeeDetail() || window.ERPEmployeeSettingsView?.isDirty() || window.ERPAnnualSettings?.isDirty() || window.ERPAnnualSettings?.isBusy()) { event.preventDefault(); event.returnValue = ''; }
 });
 let employeeSalaryLoadRevision = 0;
 const EMPLOYEE_BASIC_FIELDS = ['emp_name','member_id','phone','email','position','auth_level','department','address','hire_date','base_salary','salary_apply_date'];
@@ -2885,10 +2885,12 @@ window.onload = async function() {
     if (window.ERPEmployeeSettingsView.isPage) {
         hrSettingsReadyOwner = getHrSettingsOwner();
         showHrSettingsModal();
+        window.ERPEmployeeSettingsView.checkpoint();
     }
     window.ErpWorkspaceResume.register({modules:['hr'], refresh:loadList,
         busy:() => companySettingsSaveInFlight || employeeBasicSaveInFlight || salarySaveInFlight
             || window.ERPAnnualSettings?.isBusy()
+            || window.ERPEmployeeSettingsView?.isDirty()
             || employeeModuleAccessSaveInFlight || employeeNotificationSaveInFlight
             || (typeof saveRRN === 'function' && saveRRN._inFlight)
             || (typeof saveDurunuriEligibilityProfile === 'function' && saveDurunuriEligibilityProfile._inFlight)});
@@ -4109,6 +4111,7 @@ async function loadList() {
     if (window.ERPEmployeeSettingsView?.isPage) {
         const owner = getHrSettingsOwner();
         if (!owner) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
+        if (window.ERPEmployeeSettingsView.isDirty() || window.ERPAnnualSettings?.isDirty()) return;
         // The workspace rechecks Auth/runtime before refreshing a still-hidden retained page.
         // Permit only these reads while hidden; editing and saves keep their original gates.
         hrSettingsResumeReadOwner = owner;
@@ -4118,6 +4121,7 @@ async function loadList() {
             if (!isCurrent()) throw new Error('HR_SETTINGS_CONTEXT_CHANGED');
             await loadSettings({throwOnError:true, isCurrent, annualSelection:window.ERPAnnualSettings.selection()});
             hrSettingsReadyOwner = owner;
+            window.ERPEmployeeSettingsView.checkpoint();
         } finally {
             if (hrSettingsResumeReadOwner === owner) hrSettingsResumeReadOwner = '';
         }
@@ -4800,6 +4804,7 @@ async function saveSettings() {
         // 마무리
         await loadCompanyInfo({ throwOnError: true, refreshUi: false });
         await loadSettings({ throwOnError: true }); // 저장 실패와 후속 조회 실패를 구분
+        window.ERPEmployeeSettingsView?.checkpoint();
         window.ErpWorkspaceResume?.checkpoint(document.getElementById('settingsModal'));
         companySettingsSaveInFlight = false;
         settingsModal.hide();
