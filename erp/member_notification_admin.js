@@ -1,4 +1,4 @@
-/* Member notification administration v1.0.1. Read on demand; no tokens or local persistence. */
+/* Member notification administration v1.0.2. Read on demand; no tokens or local persistence. */
 (() => {
  'use strict';
  let client,owner='',generation=0,tab='summary',ctx,events=[],detailRevision=0;
@@ -7,7 +7,7 @@
  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const num=value=>Number(value||0).toLocaleString('ko-KR');
  const date=value=>value?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'—';
- const stateLabel={linked:'연결됨',pending:'연결 대기',unlinked:'미연결',inactive:'비활성',
+ const stateLabel={linked:'연결됨',pending:'연결 안됨 · 연결 대기',unlinked:'연결 안됨',inactive:'연결 안됨 · 비활성',
   accepted:'발송 접수',delivered:'수신 완료',sent:'발송 접수',failed:'실패',unknown:'결과 확인 필요',
   sending:'처리 중',processing:'처리 중',queued:'대기',skipped:'발송 안 함',deferred:'보류',legacy_unconfirmed:'기존 기록 · 결과 미확인'};
  const errorText=e=>/PT409|SETTINGS_CHANGED/.test(String(e?.message||''))?'다른 담당자가 설정을 변경했습니다. 새로 확인한 뒤 다시 저장해 주세요.':
@@ -21,7 +21,7 @@
  function mount(){
   const root=$('tab-notifications');if(!root||root.dataset.mounted)return;root.dataset.mounted='1';
   root.innerHTML='<div class="d-flex align-items-center justify-content-between gap-3 mb-3"><h3 class="fw-bold mb-0">알림 관리</h3><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-refresh>새로 확인</button></div>'+
-   '<div class="notification-tabs nav nav-pills mb-3" role="tablist">'+[['summary','현황'],['connections','텔레그램 연결'],['history','발송 내역'],['settings','카톡 사용 설정']].map(([k,t])=>'<button type="button" role="tab" class="nav-link" data-notification-tab="'+k+'">'+t+'</button>').join('')+'</div>'+
+   '<div class="notification-tabs nav nav-pills mb-3" role="tablist">'+[['summary','현황'],['connections','텔레그램 연결'],['history','발송 내역'],['settings','메시지 설정']].map(([k,t])=>'<button type="button" role="tab" class="nav-link" data-notification-tab="'+k+'">'+t+'</button>').join('')+'</div>'+
    '<div id="notification-period" class="d-flex flex-wrap align-items-end gap-2 mb-3"><label>시작일<input class="form-control" data-erp-query-control type="date" id="notification-start"></label><label>종료일<input class="form-control" data-erp-query-control type="date" id="notification-end"></label><button type="button" class="btn btn-outline-primary" data-notification-refresh>조회</button></div>'+
    '<div id="notification-status" role="status" class="mb-3"></div><div id="notification-content"></div>';
   const today=new Date(),end=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(today);
@@ -66,7 +66,7 @@
  }
  function renderSettings(){
   const ownChannel=events.find(x=>x.channel_name)?.channel_name;
-  $('notification-content').innerHTML='<div class="notification-channel border rounded p-3 mb-3"><strong>카카오 채널</strong><span class="ms-2">'+esc(ownChannel||'연결되지 않음')+'</span><span class="ms-3 text-secondary">문자 대체발송: 꺼짐</span></div>'+
+  $('notification-content').innerHTML='<div class="notification-channel border rounded p-3 mb-3"><strong>카카오 채널</strong><span class="ms-2">'+esc(ownChannel||'연결되지 않음')+'</span><span class="ms-3 text-secondary">문자 대체발송: 꺼짐</span><p class="mt-2 mb-0 notification-routing">텔레그램 연결 시 먼저 발송합니다. 일시적인 실패는 한 번 재시도하며, 연결되지 않은 경우에만 아래 설정에 따라 카톡을 발송합니다. 접수 여부가 불확실하면 중복 발송을 막기 위해 재전송을 멈추고 결과를 확인합니다.</p></div>'+
    '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>알림</th><th>카톡 사용</th><th>설정 상태</th><th>문구</th><th>저장</th></tr></thead><tbody>'+events.map(e=>{
     const draft=drafts.get(e.event_key),value=draft?draft.value:e.requested_enabled,locked=!ctx.can_edit||!e.ready;
     return '<tr><td>'+esc(e.label)+'</td><td><label class="form-check form-switch"><input type="checkbox" class="form-check-input" data-erp-query-control data-notification-setting="'+esc(e.event_key)+'" aria-label="'+esc(e.label)+' 카톡 사용" '+(value?'checked ':'')+(locked?'disabled':'')+'></label></td>'+
@@ -97,25 +97,25 @@
  }
  async function loadList(offset){
   const current=capture('list'),mode=tab;if(!['history','connections'].includes(mode))return;
-  const content=$('notification-content'),search=$('notification-search')?.value||'',channel=$('notification-channel-filter')?.value||'',status=$('notification-result-filter')?.value||'';
+  const content=$('notification-content'),search=$('notification-search')?.value||'',channel=$('notification-channel-filter')?.value||'',status=$('notification-result-filter')?.value||'',connectionState=$('notification-connection-filter')?.value||'';
   $('notification-status').textContent='조회 중…';
   try{
-   const result=await rpc(mode,{...range(),offset,search,channel,status});if(!current()||tab!==mode)return;ctx=result;
+   const result=await rpc(mode,{...range(),offset,search,channel,status,...(mode==='connections'?{connection_state:connectionState}:{})});if(!current()||tab!==mode)return;ctx=result;
    const all=mode==='history'?(result.history||[]):(result.rows||[]),more=all.length>25,rows=all.slice(0,25);
    content.innerHTML='<form id="notification-search-form" class="d-flex flex-wrap gap-2 mb-3"><input class="form-control notification-search" id="notification-search" data-erp-query-control placeholder="이름 검색" aria-label="이름 검색">'+
-    (mode==='history'?'<select class="form-select notification-filter" id="notification-channel-filter" data-erp-query-control aria-label="발송 채널"><option value="">전체 채널</option><option value="telegram">텔레그램</option><option value="kakao">카톡</option></select><select class="form-select notification-filter" id="notification-result-filter" data-erp-query-control aria-label="발송 결과"><option value="">전체 결과</option>'+['accepted','failed','unknown','skipped','queued','legacy_unconfirmed'].map(k=>'<option value="'+k+'">'+stateLabel[k]+'</option>').join('')+'</select>':'')+
+    (mode==='history'?'<select class="form-select notification-filter" id="notification-channel-filter" data-erp-query-control aria-label="발송 채널"><option value="">전체 채널</option><option value="telegram">텔레그램</option><option value="kakao">카톡</option></select><select class="form-select notification-filter" id="notification-result-filter" data-erp-query-control aria-label="발송 결과"><option value="">전체 결과</option>'+['accepted','failed','unknown','skipped','queued','legacy_unconfirmed'].map(k=>'<option value="'+k+'">'+stateLabel[k]+'</option>').join('')+'</select>':'<select class="form-select notification-filter" id="notification-connection-filter" data-erp-query-control aria-label="텔레그램 연결 상태"><option value="">전체 연결 상태</option><option value="linked">연결됨</option><option value="unlinked">연결 안됨</option></select>')+
     '<button class="btn btn-outline-primary" type="submit">검색</button></form>'+
     (rows.length?'<div class="table-responsive"><table class="table align-middle"><thead><tr>'+ (mode==='connections'?'<th>조합원</th><th>연결 상태</th><th>연결일</th>':'<th>시간</th><th>대상자</th><th>알림</th><th>채널</th><th>결과</th>')+'</tr></thead><tbody>'+rows.map(r=>mode==='connections'?'<tr><td><button type="button" class="btn btn-link p-0" data-notification-member="'+esc(r.member_uid)+'">'+esc(r.name)+'</button><span class="small text-secondary ms-2">'+esc(r.member_number)+'</span></td><td>'+esc(stateLabel[r.state]||'확인 필요')+'</td><td>'+esc(date(r.linked_at))+'</td></tr>':
      '<tr><td>'+esc(date(r.at))+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.event)+'</td><td>'+(r.channel==='telegram'?'텔레그램':'카톡')+'</td><td>'+esc(stateLabel[r.status]||'확인 필요')+(r.error_code?'<div class="small text-secondary">'+esc(r.error_code)+'</div>':'')+'</td></tr>').join('')+'</tbody></table></div>':'<div class="border rounded p-4 text-secondary">조회된 내역이 없습니다.</div>')+
     '<div class="d-flex justify-content-end gap-2 mt-2"><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-offset="'+Math.max(0,offset-25)+'" '+(!offset?'disabled':'')+'>이전</button><button type="button" class="btn btn-outline-secondary btn-sm" data-notification-offset="'+(offset+25)+'" '+(!more?'disabled':'')+'>다음</button></div>';
-   $('notification-search').value=search;if(mode==='history'){$('notification-channel-filter').value=channel;$('notification-result-filter').value=status;}
+   $('notification-search').value=search;if(mode==='history'){$('notification-channel-filter').value=channel;$('notification-result-filter').value=status;}else $('notification-connection-filter').value=connectionState;
    $('notification-search-form').addEventListener('submit',e=>{e.preventDefault();void loadList(0);});
    $('notification-status').textContent='';
   }catch(e){if(current()){$('notification-status').textContent=errorText(e);content.replaceChildren();}}
  }
  async function preview(key){
   let dialog=$('notification-message-dialog');
-  if(!dialog){dialog=document.createElement('dialog');dialog.id='notification-message-dialog';dialog.className='notification-message-dialog';dialog.innerHTML='<div class="d-flex justify-content-between align-items-center mb-3"><h4 class="mb-0">알림 문구</h4><button type="button" class="btn-close" aria-label="닫기"></button></div><div class="nav nav-pills mb-3"><button type="button" class="nav-link active" data-preview-channel="telegram">텔레그램</button><button type="button" class="nav-link" data-preview-channel="kakao">카톡</button></div><p id="notification-message-state" role="status"></p><pre id="notification-message-body"></pre>';document.body.append(dialog);dialog.querySelector('.btn-close').onclick=()=>dialog.close();}
+  if(!dialog){dialog=document.createElement('dialog');dialog.id='notification-message-dialog';dialog.className='notification-message-dialog';dialog.setAttribute('aria-labelledby','notification-message-title');dialog.innerHTML='<div class="d-flex justify-content-between align-items-center mb-3"><h4 class="mb-0" id="notification-message-title">알림 문구</h4><button type="button" class="btn-close" aria-label="닫기"></button></div><div class="nav nav-pills mb-3" role="tablist"><button type="button" role="tab" class="nav-link active" data-preview-channel="telegram">텔레그램</button><button type="button" role="tab" class="nav-link" data-preview-channel="kakao">카톡</button></div><p id="notification-message-state" role="status"></p><pre id="notification-message-body" tabindex="0"></pre>';document.body.append(dialog);dialog.querySelector('.btn-close').onclick=()=>dialog.close();}
   const current=capture('preview');dialog.dataset.channel='telegram';dialog.showModal();$('notification-message-state').textContent='조회 중…';$('notification-message-body').textContent='';
   dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.onclick=null;b.disabled=true;b.classList.toggle('active',b.dataset.previewChannel==='telegram');});
   try{
@@ -126,7 +126,7 @@
     const channel=dialog.dataset.channel,text=data[channel];
     $('notification-message-state').textContent=channel==='kakao'?({review_pending:'검수 중인 문안',not_connected:'이 조합의 카카오 채널이 연결되지 않았습니다.',not_configured:'템플릿 설정이 필요합니다.',not_sendable:'사용 가능한 승인 템플릿을 확인할 수 없습니다.',approved:'연결된 승인 문안'}[data.source]||''):'';
     $('notification-message-body').textContent=text||'이 알림은 해당 채널로 발송하지 않습니다.';
-    dialog.querySelectorAll('[data-preview-channel]').forEach(b=>b.classList.toggle('active',b.dataset.previewChannel===channel));
+    dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.classList.toggle('active',b.dataset.previewChannel===channel);b.setAttribute('aria-selected',String(b.dataset.previewChannel===channel));});
    };
    dialog.querySelectorAll('[data-preview-channel]').forEach(b=>{b.disabled=false;b.onclick=()=>{dialog.dataset.channel=b.dataset.previewChannel;render();};});render();
   }catch(e){if(current()&&dialog.open)$('notification-message-state').textContent=errorText(e);}
