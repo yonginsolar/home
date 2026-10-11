@@ -1,9 +1,9 @@
-/* ERP workspace navigation v1.5.2 — separate settings entry with the existing HR boundary. */
+/* ERP workspace navigation v1.5.3 — separate settings; preserve the village basic-info entry. */
 (() => {
   'use strict';
   // Embedded task panels keep their parent workspace navigation rather than nesting a second rail.
   if (window.top !== window.self) return;
-  const VERSION = '20261011.15';
+  const VERSION = '20261011.16';
   const catalog = [
     ['btnApproval', '전자결재', 'approval.html', 'approval', ['approval.view'], '✍', true],
     ['btnMypage', '마이페이지', 'mypage.html', 'mypage', ['mypage.view'], '◎', true],
@@ -435,16 +435,25 @@
     const narrow = runtime.runtime_profile === 'site_member';
     const full = runtime.runtime_profile === 'legacy_full';
     const set = permissions(runtime);
-    const [order, platform, service, festival, monitor, villages, election] = await Promise.all([
+    const [order, platform, service, festival, monitor, villages, election, workspace] = await Promise.all([
       read(client, 'erp_get_menu_order',undefined,true),
       read(client, 'platform_get_context'),
       read(client, 'erp_service_contract', { p_action: 'context' }),
       full && enabled(runtime, 'accounting') && set.has('accounting.view') ? read(client, 'festival_receipts_admin', { p_action: 'access', p_data: {} }) : null,
       full ? read(client, 'get_my_power_monitor_entry') : null,
       !narrow ? read(client, 'sun_village_total_manager_context') : null,
-      !narrow && enabled(runtime, 'vote') ? read(client, 'is_election_admin') : null
+      !narrow && enabled(runtime, 'vote') ? read(client, 'is_election_admin') : null,
+      state.items.some(item => item[0] === 'btnAdmin') ? read(client, 'sun_village_workspace_context') : null
     ]);
     if (ticket !== generation) return;
+    const currentVillage = workspace?.current_coop_id === runtime.coop_id
+      && workspace.workspaces?.some(item => item.is_current === true
+        && item.coop_id === runtime.coop_id && item.is_management_coop === false);
+    if (currentVillage) {
+      // Only relabel the already-authorized HR entry. Do not add staff or settings rights.
+      state.items = state.items.filter(item => item[0] !== 'btnCoopSettings').map(item =>
+        item[0] === 'btnAdmin' ? [item[0], '마을 기본정보', 'village_company_info.html', ...item.slice(3)] : item);
+    }
     state.orderLoaded=order.ok;state.order=cleanOrder(order.data);
     state.canOrder=platform?.is_platform_admin===true || set.has('member.admin') || set.has('site.admin');
     if (election === true) state.items.push(['btnVoteHub', '선거·투표 관리', 'vote_hub.html', '', [], '☑']);
