@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.3.23 | Change: 2026-10-11 - Load branding when education print is requested. -->
+<!-- Version: v1.3.24 | Change: 2026-10-11 - Load participation lists before meeting source details. -->
 <html lang="ko">
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.3.23 | participation.html');</script>
+  <script>console.log('[Version] v1.3.24 | participation.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -565,6 +565,12 @@
     let siteActivityPhotoRows = [];
     let participationBranding = { coopId:null, companyName:'협동조합', logoUrl:'', loaded:false };
     let participationBrandingPending=null;
+    let participationReadOwner = { userId:null, coopId:null, revision:0 };
+    let meetingContextPending = null;
+    let meetingContextReady = false;
+    let meetingContextRevision = 0;
+    let eventOpenRevision = 0;
+    let sourceReadRevision = 0;
     let pendingGuestLinkId = null;
     let pendingManualAttendeeLinkId = null;
     let eventModalInstance = null;
@@ -2058,12 +2064,51 @@
       setEventTypeUi(PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'BOARD');
     } // End of resetEventForm
 
-    function openNewEvent() {
-      resetEventForm();
-      eventModalInstance.show();
+    function participationReadStillCurrent(owner) {
+      return owner.userId === participationReadOwner.userId && owner.coopId === participationReadOwner.coopId
+        && owner.revision === participationReadOwner.revision && !window.frameElement?.hidden;
+    }
+
+    async function ensureMeetingContext() {
+      if (meetingContextReady) return;
+      if (!meetingContextPending) {
+        const owner = { ...participationReadOwner };
+        const revision = meetingContextRevision;
+        const request = (async function() {
+          const { data, error } = await _supabase.rpc('participation_admin_get_form_context');
+          if (error) throw error;
+          if (!participationReadStillCurrent(owner) || revision !== meetingContextRevision) throw new Error('현재 화면에서 다시 불러와 주세요.');
+          if (data?.coop_id !== owner.coopId) throw new Error('현재 조합을 다시 확인해 주세요.');
+          dashboardData.sources = Array.isArray(data.sources) ? data.sources : [];
+          dashboardData.officials = Array.isArray(data.officials) ? data.officials : [];
+          meetingContextReady = true;
+        })();
+        meetingContextPending = request;
+        request.finally(function() { if (meetingContextPending === request) meetingContextPending = null; }).catch(function() {});
+      }
+      await meetingContextPending;
+    }
+
+    async function openNewEvent() {
+      const revision = ++eventOpenRevision;
+      try {
+        if (!PARTICIPATION_EDUCATION_VIEW) {
+          showLoading(true, '회의 정보를 불러오는 중...');
+          await ensureMeetingContext();
+        }
+        if (revision !== eventOpenRevision || window.frameElement?.hidden) return;
+        resetEventForm();
+        eventModalInstance.show();
+      } catch (error) {
+        showAlert('pageAlert', error?.message || '회의 정보를 불러오지 못했습니다.');
+      } finally {
+        if (revision === eventOpenRevision) showLoading(false);
+      }
     } // End of openNewEvent
 
     async function openEditEvent(eventId) {
+      const revision = ++eventOpenRevision;
+      const owner = { ...participationReadOwner };
       showLoading(true, '행사 정보를 불러오는 중...');
       showAlert('pageAlert', '');
       try {
@@ -2073,6 +2118,8 @@
         if (mediaError) throw mediaError;
         const event = data?.event || null;
         if (!event) throw new Error('행사 정보를 찾을 수 없습니다.');
+        if (event.event_type !== 'EDUCATION') await ensureMeetingContext();
+        if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
         revokeNewPhotoPreviewUrls();
         formState = {
           eventId:event.id,
@@ -2135,16 +2182,25 @@
         setEventTypeUi(event.event_type);
         renderSourceOptions(event.event_type, event.source_minute_id || 'MANUAL');
         await Promise.all([renderCurrentFiles(), loadHumanitiesLink(false), loadSiteActivityPhotoCandidates()]);
+        if (revision !== eventOpenRevision || !participationReadStillCurrent(owner)) return;
         eventModalInstance.show();
       } catch (error) {
         showAlert('pageAlert', error?.message || '행사 정보를 불러오지 못했습니다.');
       } finally {
-        showLoading(false);
+        if (revision === eventOpenRevision) showLoading(false);
       }
     } // End of openEditEvent
 
-    function handleSourceMinuteChange() {
+    function meetingSourceInputSnapshot() {
+      return JSON.stringify(['eventTitle','eventStartsAt','eventEndsAt','eventLocation'].map(function(id) {
+        return document.getElementById(id).value;
+      }).concat([JSON.stringify(formState.attendees)]));
+    }
+
+    async function handleSourceMinuteChange() {
+      const revision = ++sourceReadRevision;
       const sourceId = document.getElementById('sourceMinute').value;
+      document.getElementById('saveEventBtn').disabled = formState.saving;
       if (!sourceId) {
         formState.attendees = [];
         renderAttendees();
@@ -2157,7 +2213,35 @@
         return;
       }
       const type = document.getElementById('eventType').value;
-      const source = (dashboardData.sources || []).find(function(row) { return String(row.id) === String(sourceId); });
+      const owner = { ...participationReadOwner };
+      const form = formState;
+      const snapshot = meetingSourceInputSnapshot();
+      let source;
+      const saveButton = document.getElementById('saveEventBtn');
+      saveButton.disabled = true;
+      try {
+        const { data, error } = await _supabase.rpc('participation_admin_get_source_minute', { p_minute_id:sourceId });
+        if (error) throw error;
+        if (!participationReadStillCurrent(owner) || form !== formState || revision !== sourceReadRevision
+          || document.getElementById('sourceMinute').value !== sourceId || document.getElementById('eventType').value !== type
+          || !document.getElementById('eventModal').classList.contains('show')) return;
+        if (data?.coop_id !== owner.coopId) throw new Error('현재 조합을 다시 확인해 주세요.');
+        source = data.source;
+        if (source?.id !== sourceId) throw new Error('의사록을 다시 선택해 주세요.');
+        dashboardData.sources = dashboardData.sources.map(row => String(row.id) === sourceId ? source : row);
+        if (snapshot !== meetingSourceInputSnapshot()) {
+          showAlert('formAlert', '입력 중인 내용을 유지했습니다. 의사록 내용을 적용하려면 다시 선택해 주세요.', 'info');
+          return;
+        }
+      } catch (error) {
+        if (revision === sourceReadRevision && form === formState) {
+          document.getElementById('sourceMinute').value = '';
+          showAlert('formAlert', error?.message || '의사록을 불러오지 못했습니다.');
+        }
+        return;
+      } finally {
+        if (revision === sourceReadRevision) saveButton.disabled = formState.saving;
+      }
       if (!source) return;
       const parsed = parseMinuteContent(source, type);
       document.getElementById('eventTitle').value = source.title || '';
@@ -3091,13 +3175,19 @@
       if (showCover) showLoading(true, '참여 현황을 불러오는 중...');
       showAlert('pageAlert', '');
       try {
-        const { data, error } = await _supabase.rpc('participation_admin_get_dashboard_v2');
+        const owner = { ...participationReadOwner };
+        const { data, error } = await _supabase.rpc('participation_admin_list_events');
         if (error) throw error;
+        if (!participationReadStillCurrent(owner)) return;
+        if (data?.coop_id !== owner.coopId) throw new Error('현재 조합을 다시 확인해 주세요.');
+        meetingContextRevision++;
+        meetingContextPending = null;
+        meetingContextReady = false;
         dashboardData = {
           coop_id:data?.coop_id || null,
           events:Array.isArray(data?.events) ? data.events : [],
-          sources:Array.isArray(data?.sources) ? data.sources : [],
-          officials:Array.isArray(data?.officials) ? data.officials : []
+          sources:[],
+          officials:[]
         };
         renderSummary();
         renderEvents();
@@ -3145,11 +3235,18 @@
       document.getElementById('eventTypeFilter').addEventListener('change', renderEvents);
       document.getElementById('eventSearch').addEventListener('input', renderEvents);
       document.getElementById('eventType').addEventListener('change', function(event) {
+        sourceReadRevision++;
+        document.getElementById('saveEventBtn').disabled = formState.saving;
         formState.attendees = [];
         showAlert('formAlert', '');
         setEventTypeUi(event.target.value);
       });
       document.getElementById('sourceMinute').addEventListener('change', handleSourceMinuteChange);
+      document.getElementById('eventModal').addEventListener('hidden.bs.modal', function() {
+        eventOpenRevision++;
+        sourceReadRevision++;
+        document.getElementById('saveEventBtn').disabled = formState.saving;
+      });
       document.getElementById('meetingRosterBtn').addEventListener('click', loadMeetingRosterFromDate);
       document.getElementById('eventStartsAt').addEventListener('input', function() {
         syncEventDateRange();
@@ -3228,6 +3325,17 @@
         redirectUrl:'index.html'
       });
       if (!guard.ok) return;
+      participationReadOwner = { userId:session.user.id, coopId:guard.runtime.coop_id, revision:participationReadOwner.revision + 1 };
+      _supabase.auth.onAuthStateChange(function(event, nextSession) {
+        if (event === 'SIGNED_OUT' || (nextSession?.user?.id && nextSession.user.id !== participationReadOwner.userId)) {
+          participationReadOwner = { userId:null, coopId:null, revision:participationReadOwner.revision + 1 };
+          meetingContextRevision++;
+          meetingContextReady = false;
+          meetingContextPending = null;
+          eventOpenRevision++;
+          sourceReadRevision++;
+        }
+      });
       document.getElementById('eventTypeFilter').value = PARTICIPATION_EDUCATION_VIEW ? 'EDUCATION' : 'ALL';
       await loadDashboard(true);
       window.ErpWorkspaceResume.register({modules:[PARTICIPATION_EDUCATION_VIEW?'education':'minutes'],refresh:()=>loadDashboard(false)});

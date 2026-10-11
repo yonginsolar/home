@@ -1,6 +1,6 @@
 /*
-Version: v1.0.57
-Change: 2026-10-11 - Read official notice metadata first and selected approved content on demand.
+Version: v1.0.58
+Change: 2026-10-11 - Allow deferred meeting defaults to distinguish failed reads from an empty roster.
 */
 import { supabase } from '../shared/supabase-client.js';
 
@@ -283,7 +283,7 @@ async function getMyOfficial(session) {
     };
 }
 
-async function getOfficials() {
+async function getOfficials({ strict = false } = {}) {
     const coopId = await getVisibleCoopId();
     let data = null;
     let error = null;
@@ -292,16 +292,18 @@ async function getOfficials() {
         .from('coop_officials')
         .select('*'), coopId));
 
+    if (error && strict) throw error;
     if (error || !data) return [];
 
     const filtered = data.filter(o => !('status' in o) || o.status === 'active');
     const memberIds = filtered.map(o => o.member_id).filter(Boolean);
     const memberMap = {};
     if (memberIds.length > 0) {
-        const { data: members } = await scopeByCoop(supabase
+        const { data: members, error: memberError } = await scopeByCoop(supabase
             .from('coop_members')
             .select('member_id, name, member_type')
             .in('member_id', memberIds), coopId);
+        if (memberError && strict) throw memberError;
         if (Array.isArray(members)) {
             members.forEach(m => { memberMap[m.member_id] = m; });
         }

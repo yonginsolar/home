@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<!-- Version: v1.1.26 | Change: 2026-10-07 - Village creation notices and billing entry. -->
+<!-- Version: v1.1.27 | Change: 2026-10-11 - Keep the coop list independent of Telegram settings. -->
 <html>
 <head>
   <script src="/erp/workspace_boot.js?v=20261010-9"></script>
   <script src="/erp/workspace_resume.js?v=20261010-9"></script>
 <meta name="erp-security-revision" content="20261004.2">
 
-  <script>console.log('[Version] v1.1.24 | platform_admin.html');</script>
+  <script>console.log('[Version] v1.1.27 | platform_admin.html');</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
@@ -528,6 +528,7 @@
           <div class="small text-muted" id="platformTelegramWebhookHint">봇 연결 상태를 확인하는 중입니다.</div>
         </div>
         <div class="col-12 d-flex gap-2 justify-content-end">
+          <button class="btn btn-outline-secondary" type="button" id="btnReloadPlatformTelegram" onclick="reloadPlatformTelegramSettings()">다시 불러오기</button>
           <button class="btn btn-primary" type="button" id="btnSavePlatformTelegram" onclick="savePlatformTelegramSettings()">저장 및 동기화</button>
         </div>
       </div>
@@ -769,6 +770,8 @@
     let selectedCoopNotificationSettings = { categories: [], employees: [] };
     let coopRows = [];
     let platformTelegramSettings = null;
+    let platformTelegramReadPending = null;
+    let platformReadRevision = 0;
     const COOPCO_ROOT_DOMAIN = 'coopco.kr';
     const PLATFORM_PRICING_CATALOG = Object.freeze({
       planName: '협동조합 운영 시스템',
@@ -1105,12 +1108,52 @@
     } // End of syncPlatformTelegramSettingsUi
 
     async function loadPlatformTelegramSettings() {
-      const { data, error } = await _supabase.rpc('platform_get_telegram_bot_settings');
-      if (error) throw error;
-      platformTelegramSettings = data || {};
-      syncPlatformTelegramSettingsUi();
-      return platformTelegramSettings;
+      if (!platformTelegramReadPending) {
+        const owner = currentUser?.id;
+        const revision = platformReadRevision;
+        const enabled = document.getElementById('platformTelegramEnabledToggle');
+        const token = document.getElementById('platformTelegramBotTokenInput');
+        const before = { enabled:enabled.checked, token:token.value, storedEnabled:platformTelegramSettings?.enabled };
+        const request = (async function() {
+          const { data, error } = await _supabase.rpc('platform_get_telegram_bot_settings');
+          if (error) throw error;
+          if (currentUser?.id !== owner || revision !== platformReadRevision || platformContext?.is_platform_admin !== true
+            || window.frameElement?.hidden) throw new Error('현재 화면에서 다시 불러와 주세요.');
+          const typed = { enabled:enabled.checked, token:token.value };
+          platformTelegramSettings = data || {};
+          syncPlatformTelegramSettingsUi();
+          if (typed.enabled !== before.enabled || typed.token !== before.token || before.token
+            || (typeof before.storedEnabled === 'boolean' && before.enabled !== before.storedEnabled)) {
+            enabled.checked = typed.enabled;
+            token.value = typed.token;
+          }
+          return platformTelegramSettings;
+        })();
+        platformTelegramReadPending = request;
+        request.finally(function() { if (platformTelegramReadPending === request) platformTelegramReadPending = null; }).catch(function() {});
+      }
+      return platformTelegramReadPending;
     } // End of loadPlatformTelegramSettings
+
+    async function reloadPlatformTelegramSettings() {
+      const owner = currentUser?.id;
+      const revision = platformReadRevision;
+      const button = document.getElementById('btnReloadPlatformTelegram');
+      const save = document.getElementById('btnSavePlatformTelegram');
+      button.disabled = true;
+      save.disabled = true;
+      try {
+        await loadPlatformTelegramSettings();
+        if (owner !== currentUser?.id || revision !== platformReadRevision || window.frameElement?.hidden) return;
+        save.disabled = false;
+      } catch (_) {
+        if (owner !== currentUser?.id || revision !== platformReadRevision || window.frameElement?.hidden) return;
+        document.getElementById('platformTelegramTokenHint').textContent = '설정을 불러오지 못했습니다. 다시 불러와 주세요.';
+        document.getElementById('platformTelegramWebhookHint').textContent = '';
+      } finally {
+        if (owner === currentUser?.id && revision === platformReadRevision) button.disabled = false;
+      }
+    }
 
     function collectPlatformTelegramSettingsFromUi() {
       return {
@@ -2155,7 +2198,8 @@
           return;
         }
         if (platformContext.bootstrap_mode === true && platformContext.claimed_by_me !== true) return;
-        await loadPlatformTelegramSettings();
+        // Telegram settings do not gate the independent, already-authorized coop list.
+        void reloadPlatformTelegramSettings();
         await loadCoopList();
         window.ErpWorkspaceResume.register({authorize:async()=>{
           const result=await _supabase.rpc('platform_get_context');
@@ -2169,6 +2213,12 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+      _supabase.auth.onAuthStateChange(function(event, session) {
+        if (event === 'SIGNED_OUT' || (session?.user?.id && currentUser?.id && session.user.id !== currentUser.id)) {
+          platformReadRevision++;
+          platformTelegramReadPending = null;
+        }
+      });
       const modalEl = document.getElementById('coopManageModal');
       if (modalEl) coopManageModal = new bootstrap.Modal(modalEl);
       renderPricingPanel();
